@@ -12,3 +12,4 @@ feat: add position/heading HUD (bottom-left), updates each frame.
 feat: add K hotkey to instantly download a screenshot of the current view.
 feat: add fullscreen toggle button to action bar (enter/exit fullscreen).
 feat: add live connection indicator (peers count and average ping) to HUD, initialized from app.js after scene setup.
+- feat: Add Settings toggle to switch renderer pixel ratio (Performance mode 1x vs device), persisted via cookie.

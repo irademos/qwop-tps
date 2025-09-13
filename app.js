@@ -23,6 +23,7 @@ import { initScreenshotHotkey } from "./ui/screenshotHotkey.js";
 import { createFullscreenButton } from "./ui/fullscreenButton.js";
 import { createConnectionIndicator } from "./ui/connectionIndicator.js";
 import { createPauseUI } from "./ui/pauseUI.js";
+import { createResolutionToggle } from "./ui/resolutionToggle.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -85,12 +86,14 @@ async function main() {
   };
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const initialPixelRatio = getCookie("renderPerfMode") === "true" ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+  renderer.setPixelRatio(initialPixelRatio);
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
   createScreenshotButton(renderer);
   initScreenshotHotkey(renderer);
   createFullscreenButton(renderer.domElement);
+  createResolutionToggle({ renderer });
 
   const perf = createPerfOverlay();
   initControlsHelp();
