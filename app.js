@@ -24,6 +24,7 @@ import { createFullscreenButton } from "./ui/fullscreenButton.js";
 import { createConnectionIndicator } from "./ui/connectionIndicator.js";
 import { createPauseUI } from "./ui/pauseUI.js";
 import { createResolutionToggle } from "./ui/resolutionToggle.js";
+import { createHealthHUD } from "./ui/healthHUD.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -163,9 +164,13 @@ async function main() {
   window.monsterHealth = 100;
 
   const healthFill = document.getElementById('health-fill');
+  const healthHUD = createHealthHUD();
   function updateHealthUI() {
     if (healthFill) {
       healthFill.style.width = `${window.localHealth}%`;
+    }
+    if (healthHUD && typeof healthHUD.update === 'function') {
+      healthHUD.update(window.localHealth);
     }
   }
   updateHealthUI();
