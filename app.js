@@ -25,6 +25,7 @@ import { createConnectionIndicator } from "./ui/connectionIndicator.js";
 import { createPauseUI } from "./ui/pauseUI.js";
 import { createResolutionToggle } from "./ui/resolutionToggle.js";
 import { createHealthHUD } from "./ui/healthHUD.js";
+import { createMinimap } from "./ui/minimap.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -110,6 +111,7 @@ async function main() {
   const compass = createCompassHUD();
   const posHUD = createPositionHUD();
   const connIndicator = createConnectionIndicator();
+  const minimap = createMinimap();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
@@ -749,6 +751,9 @@ async function main() {
     const headingDeg = (THREE.MathUtils.radToDeg(headingRad) + 360) % 360;
     if (compass && typeof compass.setHeading === 'function') {
       compass.setHeading(headingDeg);
+    }
+    if (minimap && typeof minimap.update === 'function') {
+      minimap.update({ playerModel, otherPlayers, monster, headingDeg });
     }
 
     if (posHUD && typeof posHUD.update === 'function') {
