@@ -26,6 +26,7 @@ import { createPauseUI } from "./ui/pauseUI.js";
 import { createResolutionToggle } from "./ui/resolutionToggle.js";
 import { createHealthHUD } from "./ui/healthHUD.js";
 import { createMinimap } from "./ui/minimap.js";
+import { createFovControl } from "./ui/fovControl.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -107,6 +108,9 @@ async function main() {
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+
+  // In-game FOV control in Settings overlay
+  createFovControl({ camera });
 
   const compass = createCompassHUD();
   const posHUD = createPositionHUD();
