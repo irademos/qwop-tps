@@ -1,3 +1,4 @@
+feat: add Pause/Resume UI button with overlay; freezes physics/animation and resumes cleanly.
 feat: improve rendering quality and responsiveness (setPixelRatio + window resize handling).
 feat: add live ping display in Settings overlay with periodic RTT measurement between peers.
 feat: add in-game FPS overlay (bottom-right) for immediate performance visibility.

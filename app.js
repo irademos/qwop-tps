@@ -22,6 +22,7 @@ import { createPositionHUD } from "./ui/positionHUD.js";
 import { initScreenshotHotkey } from "./ui/screenshotHotkey.js";
 import { createFullscreenButton } from "./ui/fullscreenButton.js";
 import { createConnectionIndicator } from "./ui/connectionIndicator.js";
+import { createPauseUI } from "./ui/pauseUI.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -34,6 +35,7 @@ const FIXED_DT = 1 / 60;
 
 async function main() {
   document.body.addEventListener('touchstart', () => {}, { once: true });
+  let paused = false;
 
   let playerName = getCookie("playerName");
   if (!playerName) {
@@ -180,6 +182,13 @@ async function main() {
     audioManager
   });
   window.playerControls = playerControls;
+
+  const pauseUI = createPauseUI({
+    onToggle: (p) => {
+      paused = p;
+      if (playerControls) playerControls.enabled = !p;
+    }
+  });
 
   // --- RAPIER HELPERS ---
   function spawnBlock({
@@ -606,6 +615,11 @@ async function main() {
   function animate() {
     requestAnimationFrame(animate);
     const _noop = perf && typeof perf.onFrame === 'function' ? perf.onFrame() : undefined;
+
+    if (paused) {
+      renderer.render(scene, camera);
+      return;
+    }
 
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
