@@ -19,3 +19,4 @@ feat: add live connection indicator (peers count and average ping) to HUD, initi
 - feat: add in-game FOV slider in Settings overlay; persisted to cookie and updates camera live.
 - feat: add scoped in-game toast notifications (welcome banner) initialized from app.js after scene setup.
 feat: add on-screen HUD version badge (top-left) showing app version.
+feat: add click-driven confetti bursts (tap/click to spawn colorful falling pieces), initialized in app.js.

@@ -29,6 +29,7 @@ import { createMinimap } from "./ui/minimap.js";
 import { createFovControl } from "./ui/fovControl.js";
 import { createToastManager } from "./ui/toast.js";
 import { createClickRipple } from "./effects/clickRipple.js";
+import { createConfettiEffect } from "./effects/confettiBurst.js";
 import { createVersionBadge } from "./ui/versionBadge.js";
 import { APP_VERSION } from "./version.js";
 
@@ -118,6 +119,8 @@ async function main() {
 
   // Click ripple effect on ground
   const clickRipple = createClickRipple({ scene, renderer, camera });
+  // Click confetti bursts
+  const confetti = createConfettiEffect({ scene, renderer, camera });
 
   // Toasts (welcome banner)
   const toasts = createToastManager();
@@ -707,6 +710,9 @@ async function main() {
     const delta = mixerClock.getDelta();
     if (clickRipple && typeof clickRipple.update === 'function') {
       clickRipple.update(delta);
+    }
+    if (confetti && typeof confetti.update === 'function') {
+      confetti.update(delta);
     }
 
     Object.values(otherPlayers).forEach(p => {
