@@ -36,6 +36,7 @@ import { createDamageFlash } from "./ui/damageFlash.js";
 import { createSessionTimer } from "./ui/sessionTimer.js";
 import { APP_VERSION } from "./version.js";
 import { createPhotoMode } from "./ui/photoMode.js";
+import { createShareLocationButton } from "./ui/shareLocationButton.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -622,6 +623,7 @@ async function main() {
   const characterSelect = document.getElementById('character-select');
   const toggleBtn = document.getElementById("toggle-console");
   const consoleDiv = document.getElementById("console-log");
+  createShareLocationButton({ playerModel, camera });
 
   async function populateCharacterSelect() {
     try {
