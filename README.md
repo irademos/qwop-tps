@@ -25,3 +25,4 @@ feat: add click-driven confetti bursts (tap/click to spawn colorful falling piec
 feat: add in-game Session Timer HUD (bottom-right) that pauses with the game.
 feat: ESC key toggles Pause overlay (and toast), pausing controls and session timer.
 feat: add "Copy Position" button in Settings to copy current coordinates to clipboard.
+feat: add in-game Quick Actions bar (Box spawn + Burst toggle).

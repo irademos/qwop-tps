@@ -38,6 +38,7 @@ import { APP_VERSION } from "./version.js";
 import { createPhotoMode } from "./ui/photoMode.js";
 import { createShareLocationButton } from "./ui/shareLocationButton.js";
 import { createRendererInfoBadge } from "./ui/rendererInfoBadge.js";
+import { createQuickActionsBar } from "./ui/quickActionsBar.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -292,6 +293,7 @@ async function main() {
 
   // Little “machine gun” for fun
   let burstInterval = null;
+  let quickActions = null;
   function startBurst() {
     if (burstInterval) return;
     burstInterval = setInterval(() => shootBlockFromPlayer(22), 120);
@@ -309,10 +311,17 @@ async function main() {
       shootBlockFromPlayer(); // tap B to fire one block
       console.log("b key pressed");
     }
-    if (e.code === 'KeyN') startBurst();          // hold N to start burst
+    if (e.code === 'KeyN') { startBurst(); if (typeof quickActions?.setBurstActive === 'function') quickActions.setBurstActive(true); }          // hold N to start burst
   });
   window.addEventListener('keyup', (e) => {
-    if (e.code === 'KeyN') stopBurst();
+    if (e.code === 'KeyN') { stopBurst(); if (typeof quickActions?.setBurstActive === 'function') quickActions.setBurstActive(false); }
+  });
+
+  // Quick Actions UI: spawn box and toggle burst
+  quickActions = createQuickActionsBar({
+    onSpawn: () => shootBlockFromPlayer(),
+    onBurstStart: () => startBurst(),
+    onBurstStop: () => stopBurst()
   });
 
   // ESC toggles Pause/Resume
