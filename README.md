@@ -1,3 +1,4 @@
+feat: add renderer info badge overlay showing GPU and draw call/triangle counts.
 feat: auto-pause gameplay on tab blur/hidden with a small on-screen badge indicator.
 feat: add ground click ripple visual effect (click/tap to see expanding ring)
 feat: add Pause/Resume UI button with overlay; freezes physics/animation and resumes cleanly.

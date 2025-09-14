@@ -37,6 +37,7 @@ import { createSessionTimer } from "./ui/sessionTimer.js";
 import { APP_VERSION } from "./version.js";
 import { createPhotoMode } from "./ui/photoMode.js";
 import { createShareLocationButton } from "./ui/shareLocationButton.js";
+import { createRendererInfoBadge } from "./ui/rendererInfoBadge.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -107,6 +108,7 @@ async function main() {
   initScreenshotHotkey(renderer);
   createFullscreenButton(renderer.domElement);
   createResolutionToggle({ renderer });
+  const rendererInfo = createRendererInfoBadge({ renderer });
 
   const perf = createPerfOverlay();
   initControlsHelp();
