@@ -29,6 +29,8 @@ import { createMinimap } from "./ui/minimap.js";
 import { createFovControl } from "./ui/fovControl.js";
 import { createToastManager } from "./ui/toast.js";
 import { createClickRipple } from "./effects/clickRipple.js";
+import { createVersionBadge } from "./ui/versionBadge.js";
+import { APP_VERSION } from "./version.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -125,6 +127,7 @@ async function main() {
   const posHUD = createPositionHUD();
   const connIndicator = createConnectionIndicator();
   const minimap = createMinimap();
+  const versionBadge = createVersionBadge({ version: APP_VERSION, position: "top-left" });
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
