@@ -22,3 +22,4 @@ feat: add live connection indicator (peers count and average ping) to HUD, initi
 feat: add on-screen HUD version badge (top-left) showing app version.
 feat: add click-driven confetti bursts (tap/click to spawn colorful falling pieces), initialized in app.js.
 feat: add in-game Session Timer HUD (bottom-right) that pauses with the game.
+feat: ESC key toggles Pause overlay (and toast), pausing controls and session timer.

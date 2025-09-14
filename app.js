@@ -312,6 +312,25 @@ async function main() {
     if (e.code === 'KeyN') stopBurst();
   });
 
+  // ESC toggles Pause/Resume
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape') {
+      e.preventDefault();
+      const next = !paused;
+      if (pauseUI && typeof pauseUI.setPaused === 'function') {
+        pauseUI.setPaused(next);
+      } else {
+        // Fallback: ensure controls/timer state tracks pause
+        paused = next;
+        if (playerControls) playerControls.enabled = !next;
+        if (sessionTimer && typeof sessionTimer.setPaused === 'function') sessionTimer.setPaused(next);
+      }
+      if (toasts && typeof toasts.show === 'function') {
+        toasts.show(next ? 'Paused' : 'Resumed');
+      }
+    }
+  });
+
   // Expose for console testing
   window.spawnBlock = spawnBlock;
   window.shootBlockFromPlayer = shootBlockFromPlayer;
