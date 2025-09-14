@@ -31,6 +31,7 @@ import { createToastManager } from "./ui/toast.js";
 import { createClickRipple } from "./effects/clickRipple.js";
 import { createConfettiEffect } from "./effects/confettiBurst.js";
 import { createVersionBadge } from "./ui/versionBadge.js";
+import { createDamageFlash } from "./ui/damageFlash.js";
 import { APP_VERSION } from "./version.js";
 
 const clock = new THREE.Clock();
@@ -131,6 +132,7 @@ async function main() {
   const connIndicator = createConnectionIndicator();
   const minimap = createMinimap();
   const versionBadge = createVersionBadge({ version: APP_VERSION, position: "top-left" });
+  const damageFlash = createDamageFlash();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
@@ -196,6 +198,7 @@ async function main() {
   }
   updateHealthUI();
 
+  let prevHealth = window.localHealth;
   let playerDead = false;
 
   const projectiles = [];
@@ -693,6 +696,12 @@ async function main() {
     playerControls.update();
 
     updateHealthUI();
+    if (window.localHealth < prevHealth) {
+      const diff = prevHealth - window.localHealth;
+      const strength = Math.min(1, 0.2 + diff / 30);
+      if (damageFlash && typeof damageFlash.trigger === 'function') damageFlash.trigger(strength);
+    }
+    prevHealth = window.localHealth;
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
       playerControls.enabled = false;
@@ -710,6 +719,9 @@ async function main() {
     const delta = mixerClock.getDelta();
     if (clickRipple && typeof clickRipple.update === 'function') {
       clickRipple.update(delta);
+    }
+    if (damageFlash && typeof damageFlash.update === 'function') {
+      damageFlash.update(delta);
     }
     if (confetti && typeof confetti.update === 'function') {
       confetti.update(delta);
