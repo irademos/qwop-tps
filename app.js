@@ -39,6 +39,7 @@ import { createPhotoMode } from "./ui/photoMode.js";
 import { createShareLocationButton } from "./ui/shareLocationButton.js";
 import { createRendererInfoBadge } from "./ui/rendererInfoBadge.js";
 import { createQuickActionsBar } from "./ui/quickActionsBar.js";
+import { createTitleStatus } from "./ui/titleStatus.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -142,6 +143,7 @@ async function main() {
   const damageFlash = createDamageFlash();
   const sessionTimer = createSessionTimer();
   const photoMode = createPhotoMode();
+  const titleStatus = createTitleStatus({ playerName, version: APP_VERSION });
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
@@ -463,13 +465,17 @@ async function main() {
   const peerPings = {};
   const pendingPings = new Map();
   function updatePingUIValue() {
-    if (!pingDisplay) return;
     const vals = Object.values(peerPings);
     const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
-    pingDisplay.textContent = avg ?? '-';
+    if (pingDisplay) pingDisplay.textContent = avg ?? '-';
+
+    const peers = Object.keys(multiplayer.connections || {}).length;
+
     if (connIndicator && typeof connIndicator.setStatus === 'function') {
-      const peers = Object.keys(multiplayer.connections || {}).length;
       connIndicator.setStatus({ peers, avgPing: avg });
+    }
+    if (titleStatus && typeof titleStatus.setStatus === 'function') {
+      titleStatus.setStatus({ peers, avgPing: avg });
     }
   }
   function pingPeers() {
