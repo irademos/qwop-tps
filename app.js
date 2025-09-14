@@ -33,6 +33,7 @@ import { createClickRipple } from "./effects/clickRipple.js";
 import { createConfettiEffect } from "./effects/confettiBurst.js";
 import { createVersionBadge } from "./ui/versionBadge.js";
 import { createDamageFlash } from "./ui/damageFlash.js";
+import { createSessionTimer } from "./ui/sessionTimer.js";
 import { APP_VERSION } from "./version.js";
 
 const clock = new THREE.Clock();
@@ -134,6 +135,7 @@ async function main() {
   const minimap = createMinimap();
   const versionBadge = createVersionBadge({ version: APP_VERSION, position: "top-left" });
   const damageFlash = createDamageFlash();
+  const sessionTimer = createSessionTimer();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
@@ -220,12 +222,14 @@ async function main() {
     onToggle: (p) => {
       paused = p;
       if (playerControls) playerControls.enabled = !p;
+      if (sessionTimer && typeof sessionTimer.setPaused === 'function') sessionTimer.setPaused(p);
     }
   });
   const autoPause = createAutoPauseManager({
     onPauseChange: (p) => {
       paused = p;
       if (playerControls) playerControls.enabled = !p;
+      if (sessionTimer && typeof sessionTimer.setPaused === 'function') sessionTimer.setPaused(p);
     }
   });
 

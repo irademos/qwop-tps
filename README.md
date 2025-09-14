@@ -21,3 +21,4 @@ feat: add live connection indicator (peers count and average ping) to HUD, initi
 - feat: add scoped in-game toast notifications (welcome banner) initialized from app.js after scene setup.
 feat: add on-screen HUD version badge (top-left) showing app version.
 feat: add click-driven confetti bursts (tap/click to spawn colorful falling pieces), initialized in app.js.
+feat: add in-game Session Timer HUD (bottom-right) that pauses with the game.
