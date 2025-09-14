@@ -35,6 +35,7 @@ import { createVersionBadge } from "./ui/versionBadge.js";
 import { createDamageFlash } from "./ui/damageFlash.js";
 import { createSessionTimer } from "./ui/sessionTimer.js";
 import { APP_VERSION } from "./version.js";
+import { createPhotoMode } from "./ui/photoMode.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -136,6 +137,7 @@ async function main() {
   const versionBadge = createVersionBadge({ version: APP_VERSION, position: "top-left" });
   const damageFlash = createDamageFlash();
   const sessionTimer = createSessionTimer();
+  const photoMode = createPhotoMode();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);

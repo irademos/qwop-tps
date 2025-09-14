@@ -1,0 +1,1 @@
+- feat: Add Photo Mode (press H or tap 📷) to hide HUD for clean screenshots.
