@@ -23,6 +23,7 @@ import { initScreenshotHotkey } from "./ui/screenshotHotkey.js";
 import { createFullscreenButton } from "./ui/fullscreenButton.js";
 import { createConnectionIndicator } from "./ui/connectionIndicator.js";
 import { createPauseUI } from "./ui/pauseUI.js";
+import { createAutoPauseManager } from "./ui/autoPauseManager.js";
 import { createResolutionToggle } from "./ui/resolutionToggle.js";
 import { createHealthHUD } from "./ui/healthHUD.js";
 import { createMinimap } from "./ui/minimap.js";
@@ -217,6 +218,12 @@ async function main() {
 
   const pauseUI = createPauseUI({
     onToggle: (p) => {
+      paused = p;
+      if (playerControls) playerControls.enabled = !p;
+    }
+  });
+  const autoPause = createAutoPauseManager({
+    onPauseChange: (p) => {
       paused = p;
       if (playerControls) playerControls.enabled = !p;
     }
