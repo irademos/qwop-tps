@@ -28,6 +28,7 @@ import { createHealthHUD } from "./ui/healthHUD.js";
 import { createMinimap } from "./ui/minimap.js";
 import { createFovControl } from "./ui/fovControl.js";
 import { createToastManager } from "./ui/toast.js";
+import { createClickRipple } from "./effects/clickRipple.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -112,6 +113,9 @@ async function main() {
 
   // In-game FOV control in Settings overlay
   createFovControl({ camera });
+
+  // Click ripple effect on ground
+  const clickRipple = createClickRipple({ scene, renderer, camera });
 
   // Toasts (welcome banner)
   const toasts = createToastManager();
@@ -698,6 +702,9 @@ async function main() {
     }
 
     const delta = mixerClock.getDelta();
+    if (clickRipple && typeof clickRipple.update === 'function') {
+      clickRipple.update(delta);
+    }
 
     Object.values(otherPlayers).forEach(p => {
       p.model.userData.mixer?.update(delta);
