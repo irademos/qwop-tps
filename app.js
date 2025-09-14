@@ -27,6 +27,7 @@ import { createResolutionToggle } from "./ui/resolutionToggle.js";
 import { createHealthHUD } from "./ui/healthHUD.js";
 import { createMinimap } from "./ui/minimap.js";
 import { createFovControl } from "./ui/fovControl.js";
+import { createToastManager } from "./ui/toast.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -111,6 +112,10 @@ async function main() {
 
   // In-game FOV control in Settings overlay
   createFovControl({ camera });
+
+  // Toasts (welcome banner)
+  const toasts = createToastManager();
+  toasts.show(`Welcome, ${playerName}!`);
 
   const compass = createCompassHUD();
   const posHUD = createPositionHUD();

@@ -16,3 +16,4 @@ feat: add live connection indicator (peers count and average ping) to HUD, initi
 - feat: add in-game Health HUD percentage label with low-health pulse.
 - feat: add in-game minimap overlay displaying player, peers, and monster.
 - feat: add in-game FOV slider in Settings overlay; persisted to cookie and updates camera live.
+- feat: add scoped in-game toast notifications (welcome banner) initialized from app.js after scene setup.
