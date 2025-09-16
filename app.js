@@ -200,6 +200,40 @@ async function main() {
   window.playerModel = playerModel;
   audioManager.playBGS('Forest Day/Forest Day.ogg');
 
+  // Ambient sounds (lazy-loaded): birdsong toggle in Actions sheet.
+  // This is initialized exactly once after the scene & playerModel are ready.
+  let ambientController = null;
+  (async () => {
+    try {
+      const mod = await import('./ui/ambientSounds.js');
+      ambientController = mod.createAmbientSounds(audioManager);
+
+      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
+      if (sheetInner) {
+        const ambientBtn = document.createElement('button');
+        ambientBtn.id = 'ambient-toggle';
+        ambientBtn.className = 'ai-actions__item';
+        ambientBtn.textContent = 'Ambient';
+        ambientBtn.setAttribute('aria-pressed', 'false');
+        ambientBtn.addEventListener('click', () => {
+          const next = !(ambientBtn.getAttribute('aria-pressed') === 'true');
+          ambientBtn.setAttribute('aria-pressed', String(next));
+          ambientBtn.textContent = next ? 'Ambient: On' : 'Ambient';
+          try {
+            if (ambientController && typeof ambientController.setActive === 'function') {
+              ambientController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Ambient toggle failed', err);
+          }
+        });
+        sheetInner.appendChild(ambientBtn);
+      }
+    } catch (e) {
+      console.error('Failed to load ambient sounds module', e);
+    }
+  })();
+
   // Companion spirit (lazy-loaded). Creates a small hovering orb that follows the player.
   // This is dynamically imported so the main bundle stays small and the feature initializes
   // exactly once after the scene & playerModel are ready.
