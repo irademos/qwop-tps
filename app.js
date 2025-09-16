@@ -42,6 +42,7 @@ import { createQuickActionsBar } from "./ui/quickActionsBar.js";
 import { createTitleStatus } from "./ui/titleStatus.js";
 import { createRainEffect } from "./effects/rain.js";
 import { createHeadingArrow } from "./helpers/headingArrow.js";
+import { initActionsMenu } from "./ui/actionsMenu.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -331,18 +332,46 @@ async function main() {
     onBurstStop: () => stopBurst()
   });
 
-  // Rain toggle button
-  const rainBtn = document.getElementById('rain-toggle');
-  if (rainBtn) {
-    let active = false;
-    const updateLabel = () => { rainBtn.textContent = active ? "⛅" : "🌧️"; };
-    updateLabel();
-    rainBtn.addEventListener('click', () => {
-      active = !active;
-      rain.setActive(active);
-      updateLabel();
-    });
-  }
+  // Actions menu (single visible action on mobile; expands to sheet/menu)
+  const actionsMenu = initActionsMenu({
+    getInitialStates: () => ({ micActive, rainActive: false }),
+    onToggleVoice: async () => {
+      // Toggle microphone streaming
+      if (!micActive) {
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          multiplayer.startVoice(localStream);
+          micActive = true;
+        } catch (err) {
+          console.error("Microphone access denied:", err);
+        }
+      } else {
+        if (localStream) {
+          multiplayer.stopVoice();
+          localStream.getTracks().forEach(track => track.stop());
+          localStream = null;
+        }
+        micActive = false;
+      }
+      return micActive;
+    },
+    onStartTalk: () => {
+      // Push-to-talk start (speech is initialized later; this function will be called after init)
+      if (typeof speech !== 'undefined' && speech && typeof speech.start === 'function') {
+        speech.start();
+      }
+    },
+    onStopTalk: () => {
+      if (typeof speech !== 'undefined' && speech && typeof speech.stop === 'function') {
+        speech.stop();
+      }
+    },
+    onToggleRain: (next) => {
+      // Enable/disable rain effect; returns the active state
+      rain.setActive(!!next);
+      return !!next;
+    }
+  });
 
   // ESC toggles Pause/Resume
   window.addEventListener('keydown', (e) => {
@@ -450,29 +479,7 @@ async function main() {
     fire: () => playerControls.triggerFire(),
     shoot: () => playerControls.triggerFire()
   });
-  const talkButton = document.getElementById('talk-button');
-  if (talkButton) {
-    let talking = false;
-    const startTalking = (e) => {
-      e.preventDefault();
-      if (!talking) {
-        talking = true;
-        speech.start();
-      }
-    };
-    const stopTalking = (e) => {
-      if (talking) {
-        if (e) e.preventDefault();
-        talking = false;
-        speech.stop();
-      }
-    };
-    talkButton.addEventListener('mousedown', startTalking);
-    talkButton.addEventListener('touchstart', startTalking);
-    window.addEventListener('mouseup', stopTalking);
-    window.addEventListener('touchend', stopTalking);
-    window.addEventListener('touchcancel', stopTalking);
-  }
+  // Talk/push-to-talk is handled via the unified Actions menu (actions-button / actions-sheet)
 
   const otherPlayers = {};
   // Expose remote players map for global access (e.g., controls)
@@ -628,28 +635,6 @@ async function main() {
 
   let localStream = null;
   let micActive = false;
-  const voiceButton = document.getElementById('voice-button');
-
-  voiceButton.addEventListener('click', async () => {
-    if (!micActive) {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        multiplayer.startVoice(localStream);
-        micActive = true;
-        voiceButton.textContent = "Mute";
-      } catch (err) {
-        console.error("Microphone access denied:", err);
-      }
-    } else {
-      if (localStream) {
-        multiplayer.stopVoice();
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-      }
-      micActive = false;
-      voiceButton.textContent = "Unmute";
-    }
-  });
 
   const settingsBtn = document.getElementById('settings-button');
   const overlay = document.getElementById('settings-overlay');
