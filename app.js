@@ -204,6 +204,7 @@ async function main() {
   // This is dynamically imported so the main bundle stays small and the feature initializes
   // exactly once after the scene & playerModel are ready.
   let companionController = null;
+  let birdController = null;
   (async () => {
     try {
       const mod = await import('./ai/companionSpirit.js');

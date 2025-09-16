@@ -1,3 +1,4 @@
+feat: add small lazy-loaded forest bird NPC (toggleable from Actions)
 fix: implement companionSpirit module (ai/companionSpirit.js) — lightweight orb follows player; toggleable from Actions
 feat: add companion spirit (lazy-loaded) — small hovering orb companion toggle in Actions menu
 chore: add one-line changelog — feat: unified mobile-first Actions menu (voice, talk, rain)
