@@ -73,6 +73,18 @@ jobs:
               - Import and initialize the new changes exactly once in the entry after the app/scene is ready.
               - Scope UI styles via class names; avoid global selector collisions.
               - Fix all import paths; ensure build passes.
+
+            UX GUARDRAILS (mobile first)
+              - Do NOT add more than **1 visible action button on screens ≤ 768px**.
+              - Do NOT add more than **3 visible action buttons on desktop**.
+              - Use a single floating “Actions” button (or ⋯) that opens a small menu/sheet for additional actions.
+              - Prefer toggles/menus/panels over new persistent buttons.
+              - Reuse an existing `#action-buttons` / `.action-bar` container if present.
+              - Place options in the "Settings" when relevant
+            SCALABILITY HINTS (apply when relevant)
+              - Code-split heavy modules via dynamic import(); lazy-load large assets.
+              - Extract new systems into small modules; avoid global state; document with JSDoc.
+              - Keep diffs small; if risky, downscope to a safer improvement.
             Deliverables:
               - Working, wired change (visible/verifiable immediately).
               - One-line README changelog.
