@@ -28,3 +28,4 @@ feat: add "Copy Position" button in Settings to copy current coordinates to clip
 feat: add in-game Quick Actions bar (Box spawn + Burst toggle).
 feat: dynamic browser title shows player name, peers, and live ping.
 feat: add Rain weather toggle (🌧️) with GPU-friendly line particles.
+feat: add ground-facing heading arrow indicator under the player to show facing direction.

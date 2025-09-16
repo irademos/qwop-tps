@@ -41,6 +41,7 @@ import { createRendererInfoBadge } from "./ui/rendererInfoBadge.js";
 import { createQuickActionsBar } from "./ui/quickActionsBar.js";
 import { createTitleStatus } from "./ui/titleStatus.js";
 import { createRainEffect } from "./effects/rain.js";
+import { createHeadingArrow } from "./helpers/headingArrow.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -193,6 +194,8 @@ async function main() {
   const playerModel = player.model;
   scene.add(playerModel);
   document.body.appendChild(player.nameLabel);
+  const headingArrow = createHeadingArrow(THREE);
+  scene.add(headingArrow.group);
   window.playerModel = playerModel;
   audioManager.playBGS('Forest Day/Forest Day.ogg');
 
@@ -760,6 +763,7 @@ async function main() {
     }
 
     playerControls.update();
+    headingArrow.update(playerModel);
 
     updateHealthUI();
     if (window.localHealth < prevHealth) {
