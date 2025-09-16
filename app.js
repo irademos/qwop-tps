@@ -321,6 +321,42 @@ async function main() {
     }
   })();
 
+  // Fireflies ambient effect (lazy-loaded). Adds a subtle swarm of fireflies
+  // that follow the player at night. Lazy-loaded to keep main bundle small.
+  let firefliesController = null;
+  (async () => {
+    try {
+      const firefliesModPromise = import('./effects/fireflies.js');
+      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
+      if (sheetInner) {
+        const fireBtn = document.createElement('button');
+        fireBtn.id = 'fireflies-toggle';
+        fireBtn.className = 'ai-actions__item';
+        fireBtn.textContent = 'Fireflies';
+        fireBtn.setAttribute('aria-pressed', 'false');
+        fireBtn.addEventListener('click', async () => {
+          const next = !(fireBtn.getAttribute('aria-pressed') === 'true');
+          fireBtn.setAttribute('aria-pressed', String(next));
+          fireBtn.textContent = next ? 'Fireflies: On' : 'Fireflies';
+          try {
+            if (!firefliesController) {
+              const mod = await firefliesModPromise;
+              firefliesController = mod.createFireflies(THREE, { scene, playerModel, audioManager });
+            }
+            if (firefliesController && typeof firefliesController.setActive === 'function') {
+              firefliesController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize fireflies module', err);
+          }
+        });
+        sheetInner.appendChild(fireBtn);
+      }
+    } catch (e) {
+      console.error('Failed to setup fireflies module', e);
+    }
+  })();
+
   window.localHealth = 100;
   window.monsterHealth = 100;
 
