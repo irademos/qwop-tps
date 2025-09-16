@@ -51,7 +51,7 @@ jobs:
         with:
           api_key_env_name: OPENAI_API_KEY
           api_key_env_value: ${{ secrets.OPENAI_API_KEY }}
-          model: gpt-5
+          model: gpt-5-mini
           branch: main
           aider_args: >
             --yes
@@ -92,8 +92,10 @@ jobs:
 
             Examples of acceptable changes:
               - World elements (buildings, towns, forests, lakes, weather).
-              - Computer-controlled characters, props, simple interactions.
+              - Computer-controlled characters, props, simple interactions, animals.
               - Animations or sound effects wired into the running scene.
+              - Story elements (NPC dialogue, captions, campaign tasks)
+              - Weapons, power-ups, coins, stats, clothing, potions
             "
 
       # Build & sanity checks
