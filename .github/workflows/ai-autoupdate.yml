@@ -2,23 +2,52 @@ name: ai-autoupdate
 on:
   schedule: [{ cron: "*/60 * * * *" }] # hourly; tune as needed
   workflow_dispatch:
+
 permissions:
   contents: write
-  pull-requests: write
+
 jobs:
   update-main:
     runs-on: ubuntu-latest
+    # uncomment if your OPENAI_API_KEY is stored in an environment
+    # environment: production
+
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0, ref: main }
-      - name: Set up Node (for your threejs build checks later)
-        uses: actions/setup-node@v4
+
+      # Small jitter to reduce rate spikes/contention
+      - name: Jitter
+        run: sleep $(( RANDOM % 120 ))
+
+      - uses: actions/setup-node@v4
         with: { node-version: "20" }
 
-      # Aider-in-a-box; will edit files in-place
+      # Detect the app entry so Aider can wire features without prompting
+      - name: Detect entry files
+        id: detect
+        run: |
+          set -e
+          ENTRY_FROM_HTML=""
+          if [ -f index.html ]; then
+            ENTRY_FROM_HTML=$(grep -Eo "<script[^>]+type=['\"]module['\"][^>]+src=['\"][^'\"]+" index.html \
+              | sed -E "s/.*src=['\"]([^'\"]+).*/\1/" | head -1 || true)
+          fi
+          ENTRY_FROM_PKG=""
+          if [ -z "$ENTRY_FROM_HTML" ] && [ -f package.json ]; then
+            ENTRY_FROM_PKG=$(node -e 'try{let p=require("./package.json");console.log(p.main||p.module||"")}catch(e){process.exit(0)}' || true)
+          fi
+          ENTRY="${ENTRY_FROM_HTML:-$ENTRY_FROM_PKG}"
+          # sensible fallback for your repo
+          if [ -z "$ENTRY" ]; then
+            if [ -f app.js ]; then ENTRY="app.js"; else ENTRY=""; fi
+          fi
+          echo "ENTRY=$ENTRY" >> $GITHUB_ENV
+          echo "ENTRY=$ENTRY"
+
       - name: Run Aider (AI maintainer)
         uses: mirrajabi/aider-github-action@v1.1.0
-        timeout-minutes: 12
+        timeout-minutes: 15
         with:
           api_key_env_name: OPENAI_API_KEY
           api_key_env_value: ${{ secrets.OPENAI_API_KEY }}
@@ -28,31 +57,35 @@ jobs:
             --yes
             --no-gitignore
             --map-tokens 4096
+            {{ steps.detect.outputs.unused }}
+            {{ github.sha }}
+            --file index.html
+            --file ${{ env.ENTRY }}
+            --file README.md
             --message "
             You are an autonomous maintainer for a Three.js multiplayer fantasy web game.
-            Each run ships changes that work immediately.
-            Some examples of changes: develop world elements (buildings, towns, forrests, lakes, weather, etc.) for a fantasy open world, create new computer-controlled characters,
-            add vehicles, weapons or props, incorporate new animations for characters or sound effects, etc.
-        
-            Detect entry in this order:
-              1) index.html <script type='module' src='...'>
-              2) package.json main/module/scripts hints
-              3) app.js file that sets up renderer/scene/animate
-        
+            Each run ships production-ready changes that are immediately visible or verifiable.
+
+            Detect entry is already provided via files passed in (index.html and ${ENTRY:-app.js}).
             Rules:
               - Create/modify files as needed; never ask to 'add' files.
               - Export from new modules; no top-level side effects on import.
-              - Import and initialize the new change exactly once in the detected entry after the app/scene is ready.
+              - Import and initialize the new change exactly once in the entry after the app/scene is ready.
               - Scope UI styles via class names; avoid global selector collisions.
               - Fix all import paths; ensure build passes.
-              - If risky, downscope to a safer fix.
+              - If risky, downscope to a safer fix (bug, small UI, perf).
             Deliverables:
-              - Working, wired changes (visible/verifiable immediately).
+              - Working, wired change (visible/verifiable immediately).
               - One-line README changelog.
               - Commit message: feat:/fix: concise.
+
+            Examples of acceptable changes:
+              - World elements (buildings, towns, forests, lakes, weather).
+              - Computer-controlled characters, props, simple interactions.
+              - Animations or sound effects wired into the running scene.
             "
 
-      # Optional: quick sanity checks before commit
+      # Build & sanity checks
       - name: Install deps & check build
         run: |
           npm ci || npm i
@@ -60,7 +93,23 @@ jobs:
           npm test --if-present
           npm run build --if-present
 
+      # Auto-revert if the AI made a new commit and build failed
+      - name: Auto-revert last commit if broken
+        if: failure()
+        run: |
+          set -e
+          CHANGES=$(git log -1 --pretty=%B || true)
+          # Only revert if HEAD was created in this job (there will be a new commit message)
+          if echo "$CHANGES" | grep -Eiq '^(feat|fix|AI: incremental updates)'; then
+            git config user.name "ai-bot"
+            git config user.email "ai-bot@users.noreply.github.com"
+            git revert --no-edit HEAD
+            git push origin HEAD:main
+          fi
+
+      # Optional: push any non-Aider edits staged by this job (usually none, since Aider commits itself)
       - name: Commit & push to main if changed
+        if: success()
         run: |
           git config user.name "ai-bot"
           git config user.email "ai-bot@users.noreply.github.com"
