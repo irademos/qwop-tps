@@ -70,10 +70,9 @@ jobs:
             Rules:
               - Create/modify files as needed; never ask to 'add' files.
               - Export from new modules; no top-level side effects on import.
-              - Import and initialize the new change exactly once in the entry after the app/scene is ready.
+              - Import and initialize the new changes exactly once in the entry after the app/scene is ready.
               - Scope UI styles via class names; avoid global selector collisions.
               - Fix all import paths; ensure build passes.
-              - If risky, downscope to a safer fix (bug, small UI, perf).
             Deliverables:
               - Working, wired change (visible/verifiable immediately).
               - One-line README changelog.
