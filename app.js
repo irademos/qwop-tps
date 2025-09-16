@@ -200,6 +200,38 @@ async function main() {
   window.playerModel = playerModel;
   audioManager.playBGS('Forest Day/Forest Day.ogg');
 
+  // Companion spirit (lazy-loaded). Creates a small hovering orb that follows the player.
+  // This is dynamically imported so the main bundle stays small and the feature initializes
+  // exactly once after the scene & playerModel are ready.
+  let companionController = null;
+  (async () => {
+    try {
+      const mod = await import('./ai/companionSpirit.js');
+      companionController = mod.createCompanionSpirit(THREE, { scene, playerModel, audioManager });
+
+      // Insert a toggle into the existing Actions sheet (keeps mobile UX guardrails).
+      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
+      if (sheetInner) {
+        const btn = document.createElement('button');
+        btn.id = 'spirit-toggle';
+        btn.className = 'ai-actions__item';
+        btn.textContent = 'Companion';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.addEventListener('click', () => {
+          const next = !(btn.getAttribute('aria-pressed') === 'true');
+          btn.setAttribute('aria-pressed', String(next));
+          btn.textContent = next ? 'Companion: On' : 'Companion';
+          if (companionController && typeof companionController.setActive === 'function') {
+            companionController.setActive(next);
+          }
+        });
+        sheetInner.appendChild(btn);
+      }
+    } catch (e) {
+      console.error('Failed to load companion module', e);
+    }
+  })();
+
   window.localHealth = 100;
   window.monsterHealth = 100;
 
@@ -783,6 +815,10 @@ async function main() {
     }
     if (rain && typeof rain.update === 'function') {
       rain.update(delta);
+    }
+    // Update companion (if loaded)
+    if (typeof companionController !== 'undefined' && companionController && typeof companionController.update === 'function') {
+      companionController.update(delta);
     }
 
     Object.values(otherPlayers).forEach(p => {

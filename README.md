@@ -1,3 +1,4 @@
+feat: add companion spirit (lazy-loaded) — small hovering orb companion toggle in Actions menu
 chore: add one-line changelog — feat: unified mobile-first Actions menu (voice, talk, rain)
 
 feat: add renderer info badge overlay showing GPU and draw call/triangle counts.
