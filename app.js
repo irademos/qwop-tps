@@ -210,23 +210,51 @@ async function main() {
       const mod = await import('./ai/companionSpirit.js');
       companionController = mod.createCompanionSpirit(THREE, { scene, playerModel, audioManager });
 
-      // Insert a toggle into the existing Actions sheet (keeps mobile UX guardrails).
+      // Prepare lazy import for the forest bird module (only fetched when user toggles)
+      const birdModPromise = import('./ai/forestBird.js');
+
+      // Insert toggles into the existing Actions sheet (keeps mobile UX guardrails).
       const sheetInner = document.querySelector('.ai-actions__sheet-inner');
       if (sheetInner) {
-        const btn = document.createElement('button');
-        btn.id = 'spirit-toggle';
-        btn.className = 'ai-actions__item';
-        btn.textContent = 'Companion';
-        btn.setAttribute('aria-pressed', 'false');
-        btn.addEventListener('click', () => {
-          const next = !(btn.getAttribute('aria-pressed') === 'true');
-          btn.setAttribute('aria-pressed', String(next));
-          btn.textContent = next ? 'Companion: On' : 'Companion';
+        // Companion toggle (keeps existing UX)
+        const spiritBtn = document.createElement('button');
+        spiritBtn.id = 'spirit-toggle';
+        spiritBtn.className = 'ai-actions__item';
+        spiritBtn.textContent = 'Companion';
+        spiritBtn.setAttribute('aria-pressed', 'false');
+        spiritBtn.addEventListener('click', () => {
+          const next = !(spiritBtn.getAttribute('aria-pressed') === 'true');
+          spiritBtn.setAttribute('aria-pressed', String(next));
+          spiritBtn.textContent = next ? 'Companion: On' : 'Companion';
           if (companionController && typeof companionController.setActive === 'function') {
             companionController.setActive(next);
           }
         });
-        sheetInner.appendChild(btn);
+        sheetInner.appendChild(spiritBtn);
+
+        // Bird toggle (lazy-load implementation when first toggled)
+        const birdBtn = document.createElement('button');
+        birdBtn.id = 'bird-toggle';
+        birdBtn.className = 'ai-actions__item';
+        birdBtn.textContent = 'Bird';
+        birdBtn.setAttribute('aria-pressed', 'false');
+        birdBtn.addEventListener('click', async () => {
+          const next = !(birdBtn.getAttribute('aria-pressed') === 'true');
+          birdBtn.setAttribute('aria-pressed', String(next));
+          birdBtn.textContent = next ? 'Bird: On' : 'Bird';
+          try {
+            if (!birdController) {
+              const birdMod = await birdModPromise;
+              birdController = birdMod.createForestBird(THREE, { scene, playerModel, audioManager });
+            }
+            if (birdController && typeof birdController.setActive === 'function') {
+              birdController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize bird module', err);
+          }
+        });
+        sheetInner.appendChild(birdBtn);
       }
     } catch (e) {
       console.error('Failed to load companion module', e);
