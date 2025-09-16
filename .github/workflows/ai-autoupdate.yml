@@ -29,8 +29,10 @@ jobs:
             --no-gitignore
             --map-tokens 4096
             --message "
-            You are an autonomous maintainer for a Three.js multiplayer fantasy web app.
-            Each run ships ONE production-ready change that works immediately.
+            You are an autonomous maintainer for a Three.js multiplayer fantasy web game.
+            Each run ships changes that work immediately.
+            Some examples of changes: develop world elements (buildings, towns, forrests, lakes, weather, etc.) for a fantasy open world, create new computer-controlled characters,
+            add vehicles, weapons or props, incorporate new animations for characters or sound effects, etc.
         
             Detect entry in this order:
               1) index.html <script type='module' src='...'>
