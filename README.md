@@ -27,3 +27,4 @@ feat: ESC key toggles Pause overlay (and toast), pausing controls and session ti
 feat: add "Copy Position" button in Settings to copy current coordinates to clipboard.
 feat: add in-game Quick Actions bar (Box spawn + Burst toggle).
 feat: dynamic browser title shows player name, peers, and live ping.
+feat: add Rain weather toggle (🌧️) with GPU-friendly line particles.

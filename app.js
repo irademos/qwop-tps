@@ -40,6 +40,7 @@ import { createShareLocationButton } from "./ui/shareLocationButton.js";
 import { createRendererInfoBadge } from "./ui/rendererInfoBadge.js";
 import { createQuickActionsBar } from "./ui/quickActionsBar.js";
 import { createTitleStatus } from "./ui/titleStatus.js";
+import { createRainEffect } from "./effects/rain.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -130,6 +131,7 @@ async function main() {
   const clickRipple = createClickRipple({ scene, renderer, camera });
   // Click confetti bursts
   const confetti = createConfettiEffect({ scene, renderer, camera });
+  const rain = createRainEffect({ scene, renderer, camera });
 
   // Toasts (welcome banner)
   const toasts = createToastManager();
@@ -325,6 +327,19 @@ async function main() {
     onBurstStart: () => startBurst(),
     onBurstStop: () => stopBurst()
   });
+
+  // Rain toggle button
+  const rainBtn = document.getElementById('rain-toggle');
+  if (rainBtn) {
+    let active = false;
+    const updateLabel = () => { rainBtn.textContent = active ? "⛅" : "🌧️"; };
+    updateLabel();
+    rainBtn.addEventListener('click', () => {
+      active = !active;
+      rain.setActive(active);
+      updateLabel();
+    });
+  }
 
   // ESC toggles Pause/Resume
   window.addEventListener('keydown', (e) => {
@@ -776,6 +791,9 @@ async function main() {
     }
     if (confetti && typeof confetti.update === 'function') {
       confetti.update(delta);
+    }
+    if (rain && typeof rain.update === 'function') {
+      rain.update(delta);
     }
 
     Object.values(otherPlayers).forEach(p => {
