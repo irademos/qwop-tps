@@ -240,6 +240,7 @@ async function main() {
   let companionController = null;
   let birdController = null;
   let butterfliesController = null;
+  let lanternController = null;
   (async () => {
     try {
       const mod = await import('./ai/companionSpirit.js');
@@ -248,6 +249,7 @@ async function main() {
       // Prepare lazy imports (only fetched when the user toggles the feature)
       const birdModPromise = import('./ai/forestBird.js');
       const butterfliesModPromise = import('./effects/butterflies.js');
+      const lanternModPromise = import('./features/floatingLantern.js');
 
       // Insert toggles into the existing Actions sheet (keeps mobile UX guardrails).
       const sheetInner = document.querySelector('.ai-actions__sheet-inner');
@@ -315,6 +317,30 @@ async function main() {
           }
         });
         sheetInner.appendChild(butterfliesBtn);
+
+        // Floating Lantern toggle (lazy-loaded small light that follows player)
+        const lanternBtn = document.createElement('button');
+        lanternBtn.id = 'lantern-toggle';
+        lanternBtn.className = 'ai-actions__item';
+        lanternBtn.textContent = 'Lantern';
+        lanternBtn.setAttribute('aria-pressed', 'false');
+        lanternBtn.addEventListener('click', async () => {
+          const next = !(lanternBtn.getAttribute('aria-pressed') === 'true');
+          lanternBtn.setAttribute('aria-pressed', String(next));
+          lanternBtn.textContent = next ? 'Lantern: On' : 'Lantern';
+          try {
+            if (!lanternController) {
+              const lanternMod = await lanternModPromise;
+              lanternController = lanternMod.createFloatingLantern(THREE, { scene, playerModel, audioManager });
+            }
+            if (lanternController && typeof lanternController.setActive === 'function') {
+              lanternController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize lantern module', err);
+          }
+        });
+        sheetInner.appendChild(lanternBtn);
       }
     } catch (e) {
       console.error('Failed to load companion module', e);
@@ -944,6 +970,10 @@ async function main() {
     // Update companion (if loaded)
     if (typeof companionController !== 'undefined' && companionController && typeof companionController.update === 'function') {
       companionController.update(delta);
+    }
+    // Update lantern (if loaded)
+    if (typeof lanternController !== 'undefined' && lanternController && typeof lanternController.update === 'function') {
+      lanternController.update(delta);
     }
 
     Object.values(otherPlayers).forEach(p => {

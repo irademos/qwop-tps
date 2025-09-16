@@ -1,3 +1,4 @@
+feat: add lazy-loadable floating lantern ambient effect (toggleable from Actions)
 feat: add lazy-loadable fireflies ambient effect (toggleable from Actions)
 feat: add ambient birdsong toggle (lazy-loaded, Actions)
 feat: add butterfly swarm ambient effect (toggleable from Actions)
