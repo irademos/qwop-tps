@@ -205,13 +205,15 @@ async function main() {
   // exactly once after the scene & playerModel are ready.
   let companionController = null;
   let birdController = null;
+  let butterfliesController = null;
   (async () => {
     try {
       const mod = await import('./ai/companionSpirit.js');
       companionController = mod.createCompanionSpirit(THREE, { scene, playerModel, audioManager });
 
-      // Prepare lazy import for the forest bird module (only fetched when user toggles)
+      // Prepare lazy imports (only fetched when the user toggles the feature)
       const birdModPromise = import('./ai/forestBird.js');
+      const butterfliesModPromise = import('./effects/butterflies.js');
 
       // Insert toggles into the existing Actions sheet (keeps mobile UX guardrails).
       const sheetInner = document.querySelector('.ai-actions__sheet-inner');
@@ -255,6 +257,30 @@ async function main() {
           }
         });
         sheetInner.appendChild(birdBtn);
+
+        // Butterflies toggle (lazy-load implementation; lightweight ambient effect)
+        const butterfliesBtn = document.createElement('button');
+        butterfliesBtn.id = 'butterflies-toggle';
+        butterfliesBtn.className = 'ai-actions__item';
+        butterfliesBtn.textContent = 'Butterflies';
+        butterfliesBtn.setAttribute('aria-pressed', 'false');
+        butterfliesBtn.addEventListener('click', async () => {
+          const next = !(butterfliesBtn.getAttribute('aria-pressed') === 'true');
+          butterfliesBtn.setAttribute('aria-pressed', String(next));
+          butterfliesBtn.textContent = next ? 'Butterflies: On' : 'Butterflies';
+          try {
+            if (!butterfliesController) {
+              const butterfliesMod = await butterfliesModPromise;
+              butterfliesController = butterfliesMod.createButterflies(THREE, { scene, playerModel, audioManager });
+            }
+            if (butterfliesController && typeof butterfliesController.setActive === 'function') {
+              butterfliesController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize butterflies module', err);
+          }
+        });
+        sheetInner.appendChild(butterfliesBtn);
       }
     } catch (e) {
       console.error('Failed to load companion module', e);
