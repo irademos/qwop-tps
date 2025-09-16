@@ -2,115 +2,150 @@
  * ai/companionSpirit.js
  *
  * Lightweight companion "spirit" orb that follows the player.
- * - No top-level side-effects on import.
- * - Small, GPU-friendly geometry and material.
- * - Exposes createCompanionSpirit(THREE, { scene, playerModel, audioManager })
+ * - Exported factory: createCompanionSpirit(THREE, { scene, playerModel, audioManager })
+ * - No top-level side-effects on import. All scene work happens when factory is called.
  *
- * Usage:
- *   const companion = createCompanionSpirit(THREE, { scene, playerModel, audioManager });
- *   companion.setActive(true);
- *   // each frame: companion.update(delta);
- *   companion.destroy(); // when cleaning up
+ * The controller returned implements:
+ *  - setActive(Boolean)        // toggle visible/active
+ *  - update(deltaSeconds)      // called each frame to animate / follow player
+ *  - dispose()                 // cleanup (remove from scene, dispose geometries/materials)
+ *
+ * Design notes:
+ *  - Small, inexpensive THREE.Mesh (sphere) + small PointLight.
+ *  - Smooth follow using lerp; small bob and orbit offset for visual interest.
+ *  - Plays optional audioManager.playSFX if provided on activation.
  */
 
+/**
+ * Create a companion spirit controller.
+ * @param {typeof import('three')} THREE
+ * @param {{ scene: import('three').Scene, playerModel: import('three').Object3D, audioManager?: any }} opts
+ */
 export function createCompanionSpirit(THREE, { scene, playerModel, audioManager } = {}) {
-  if (!THREE) {
-    throw new Error('THREE is required by createCompanionSpirit');
-  }
+  if (!THREE) throw new Error('THREE is required');
+  if (!scene) throw new Error('scene is required');
+  if (!playerModel) throw new Error('playerModel is required');
 
-  let group = null;
-  let orb = null;
-  let glow = null;
+  // Visuals
+  const geom = new THREE.SphereGeometry(0.14, 16, 12);
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x88ccff,
+    emissive: 0x66ddff,
+    emissiveIntensity: 0.9,
+    roughness: 0.3,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false
+  });
+  const orb = new THREE.Mesh(geom, mat);
+  orb.castShadow = false;
+  orb.receiveShadow = false;
+
+  // Gentle glow: small PointLight parented to orb
+  const light = new THREE.PointLight(0x66ddff, 0.6, 3.5, 2);
+  light.castShadow = false;
+  orb.add(light);
+
+  // Group so we can offset/orbit easily
+  const group = new THREE.Group();
+  group.add(orb);
+
+  // Start hidden until activated
+  group.visible = false;
+  scene.add(group);
+
+  // Internal state
   let active = false;
   let time = 0;
+  const followPos = new THREE.Vector3();
+  const targetPos = new THREE.Vector3();
+  const velocity = new THREE.Vector3();
 
-  function create() {
-    group = new THREE.Group();
-    // Simple emissive orb
-    const geom = new THREE.SphereGeometry(0.12, 12, 12);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x88eeff,
-      emissive: 0x66bbff,
-      emissiveIntensity: 1.2,
-      roughness: 0.6,
-      metalness: 0.0
-    });
-    orb = new THREE.Mesh(geom, mat);
-    orb.castShadow = false;
-    orb.receiveShadow = false;
-    group.add(orb);
+  // Parameters (tweakable)
+  const lerpFactor = 0.12; // smoothness of following
+  const followHeight = 1.6;
+  const orbitRadius = 0.5;
+  const bobAmplitude = 0.06;
+  const bobSpeed = 2.0;
 
-    // subtle larger transparent glow mesh
-    const glowGeom = new THREE.SphereGeometry(0.26, 8, 8);
-    const glowMat = new THREE.MeshBasicMaterial({
-      color: 0x88eeff,
-      transparent: true,
-      opacity: 0.18,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending
-    });
-    glow = new THREE.Mesh(glowGeom, glowMat);
-    group.add(glow);
-
-    group.userData.isCompanion = true;
-    return group;
+  // Try to play a subtle sound when toggled on
+  function tryPlayToggleSound() {
+    try {
+      audioManager?.playSFX?.('ui/toggle-on.ogg', 0.6);
+    } catch (e) {
+      // ignore missing assets
+    }
   }
 
   function setActive(next) {
-    const should = !!next;
-    if (should === active) return;
-    active = should;
+    const want = !!next;
+    if (want === active) return active;
+    active = want;
+    group.visible = active;
     if (active) {
-      if (!group) create();
-      scene.add(group);
-      // Place immediately near player
-      update(0);
+      // position immediately near player to avoid pop
+      const p = playerModel.position;
+      group.position.set(p.x, p.y + followHeight, p.z - orbitRadius);
+      time = 0;
+      tryPlayToggleSound();
     } else {
-      if (group) {
-        scene.remove(group);
-      }
+      try {
+        audioManager?.playSFX?.('ui/toggle-off.ogg', 0.4);
+      } catch (e) {}
     }
+    return active;
   }
 
-  function update(dt) {
-    if (!active || !group || !playerModel) return;
-    time += dt;
-    // hover offset in front-right of player
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(playerModel.quaternion).normalize();
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(playerModel.quaternion).normalize();
-    const base = playerModel.position.clone().add(new THREE.Vector3(0, 1.6, 0));
-    const orbitRadius = 0.6;
-    const x = Math.sin(time * 1.2) * orbitRadius;
-    const z = Math.cos(time * 1.2) * (orbitRadius * 0.6);
-    const bob = Math.sin(time * 3.0) * 0.08;
-    const pos = base.clone().add(right.multiplyScalar(x)).add(forward.multiplyScalar(z));
-    pos.y += bob;
-    group.position.lerp(pos, Math.min(1, dt * 8));
-    group.rotation.y = time * 0.6;
-    if (orb) orb.rotation.x = time * 1.1;
+  /**
+   * Per-frame update. Should be driven from app's animation loop.
+   * @param {number} deltaSeconds
+   */
+  function update(deltaSeconds) {
+    if (!active) return;
+    time += deltaSeconds;
 
-    // subtle pulse
-    const scale = 1 + Math.sin(time * 4.0) * 0.03;
-    group.scale.setScalar(scale);
+    // Target orbits slightly to the right of facing direction, so it's visible
+    // Compute a small orbit offset using time
+    const orbitAngle = time * 1.2;
+    const ox = Math.cos(orbitAngle) * orbitRadius;
+    const oz = Math.sin(orbitAngle) * orbitRadius * 0.45;
+
+    // Target: a point offset from playerModel.position
+    targetPos.copy(playerModel.position);
+    targetPos.y += followHeight + Math.sin(time * bobSpeed) * bobAmplitude;
+    // Apply offset in local camera/player space - simple world offset on X/Z
+    targetPos.x += ox;
+    targetPos.z += oz;
+
+    // Smoothly lerp group.position -> targetPos
+    followPos.lerpVectors(group.position, targetPos, lerpFactor);
+    group.position.copy(followPos);
+
+    // Subtle orientation: face the player
+    const lookAt = playerModel.position.clone();
+    group.lookAt(lookAt);
+
+    // Gentle pulsing emissive intensity
+    const pulse = 0.85 + Math.sin(time * 3.0) * 0.12;
+    mat.emissiveIntensity = Math.max(0.4, pulse);
+
+    // Slight scale breathing
+    const s = 1 + Math.sin(time * 2.5) * 0.04;
+    orb.scale.setScalar(s);
   }
 
-  function destroy() {
-    if (group) {
-      scene.remove(group);
-    }
-    if (orb && orb.geometry) orb.geometry.dispose();
-    if (orb && orb.material) orb.material.dispose();
-    if (glow && glow.geometry) glow.geometry.dispose();
-    if (glow && glow.material) glow.material.dispose();
-    group = null;
-    orb = null;
-    glow = null;
-    active = false;
+  function dispose() {
+    // remove from scene and dispose
+    if (group.parent) group.parent.remove(group);
+    geom.dispose?.();
+    mat.dispose?.();
+    // detach light (no dispose required)
   }
 
   return {
     setActive,
     update,
-    destroy
+    dispose
   };
 }
