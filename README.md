@@ -1,1 +1,1 @@
-feat: add butterflies ambient toggle (lazy-loaded)
+feat: add companion spirit ambient toggle (lazy-loaded)

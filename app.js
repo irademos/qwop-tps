@@ -271,6 +271,58 @@ async function main() {
     }
   })();
 
+  // Companion Spirit (lazy-loaded) - small glowing orb that gently follows the player.
+  // - Lazy-loaded to avoid increasing initial bundle size.
+  // - Toggle exposed in Settings (mobile-first guardrails: no extra persistent buttons).
+  let companionSpiritController = null;
+  (async function initCompanionSpirit() {
+    try {
+      const modPromise = import('./features/companionSpirit.js');
+      const settingsPanel = document.getElementById('settings-panel');
+      if (settingsPanel) {
+        const row = document.createElement('div');
+        row.className = 'ai-settings__row';
+
+        const label = document.createElement('label');
+        label.textContent = 'Companion Spirit';
+        label.htmlFor = 'companion-toggle';
+        label.style.marginRight = '8px';
+
+        const btn = document.createElement('button');
+        btn.id = 'companion-toggle';
+        btn.className = 'ai-settings__toggle';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.textContent = 'Off';
+        btn.addEventListener('click', async () => {
+          const next = !(btn.getAttribute('aria-pressed') === 'true');
+          btn.setAttribute('aria-pressed', String(next));
+          btn.textContent = next ? 'On' : 'Off';
+          try {
+            if (!companionSpiritController && next) {
+              const mod = await modPromise;
+              companionSpiritController = mod.createCompanionSpirit(THREE, { scene, playerModel, audioManager });
+            }
+            if (companionSpiritController && typeof companionSpiritController.setActive === 'function') {
+              companionSpiritController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Failed to toggle companion spirit', err);
+          }
+        });
+
+        row.appendChild(label);
+        row.appendChild(btn);
+
+        // Insert before the HR divider when possible so settings stay grouped
+        const hr = settingsPanel.querySelector('hr');
+        if (hr) settingsPanel.insertBefore(row, hr);
+        else settingsPanel.appendChild(row);
+      }
+    } catch (err) {
+      console.error('Failed to init companion spirit', err);
+    }
+  })();
+
   // Ambient sounds (lazy-loaded): birdsong toggle in Actions sheet.
   // This is initialized exactly once after the scene & playerModel are ready.
   let ambientController = null;
@@ -1106,6 +1158,10 @@ async function main() {
     // Update companion (if loaded)
     if (typeof companionController !== 'undefined' && companionController && typeof companionController.update === 'function') {
       companionController.update(delta);
+    }
+    // Update companion spirit (if loaded)
+    if (typeof companionSpiritController !== 'undefined' && companionSpiritController && typeof companionSpiritController.update === 'function') {
+      companionSpiritController.update(delta);
     }
     // Update ready beacon (if loaded)
     if (typeof readyBeaconController !== 'undefined' && readyBeaconController && typeof readyBeaconController.update === 'function') {
