@@ -342,6 +342,32 @@ async function main() {
           }
         });
         sheetInner.appendChild(lanternBtn);
+
+        // Guide Star ambient waypoint (lazy-loaded). A lightweight pulsing orb that
+        // follows slightly ahead of the player; toggleable from the Actions sheet.
+        const guideStarModPromise = import('./features/guideStar.js');
+        const guideBtn = document.createElement('button');
+        guideBtn.id = 'guide-toggle';
+        guideBtn.className = 'ai-actions__item';
+        guideBtn.textContent = 'Guide';
+        guideBtn.setAttribute('aria-pressed', 'false');
+        guideBtn.addEventListener('click', async () => {
+          const next = !(guideBtn.getAttribute('aria-pressed') === 'true');
+          guideBtn.setAttribute('aria-pressed', String(next));
+          guideBtn.textContent = next ? 'Guide: On' : 'Guide';
+          try {
+            if (!guideStarController) {
+              const mod = await guideStarModPromise;
+              guideStarController = mod.createGuideStar(THREE, { scene, playerModel });
+            }
+            if (guideStarController && typeof guideStarController.setActive === 'function') {
+              guideStarController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize guide star module', err);
+          }
+        });
+        sheetInner.appendChild(guideBtn);
       }
     } catch (e) {
       console.error('Failed to load companion module', e);
