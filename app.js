@@ -613,11 +613,13 @@ async function main() {
     onBurstStop: () => stopBurst()
   });
 
+  let localStream = null;
+  let micActive = false;
+
   // Actions menu (single visible action on mobile; expands to sheet/menu)
   const actionsMenu = initActionsMenu({
     getInitialStates: () => ({ micActive, rainActive: false }),
     onToggleVoice: async () => {
-      // Toggle microphone streaming
       if (!micActive) {
         try {
           localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -625,30 +627,25 @@ async function main() {
           micActive = true;
         } catch (err) {
           console.error("Microphone access denied:", err);
+          micActive = false;           // keep UI in sync if permission fails
         }
       } else {
         if (localStream) {
           multiplayer.stopVoice();
-          localStream.getTracks().forEach(track => track.stop());
+          localStream.getTracks().forEach(t => t.stop());
           localStream = null;
         }
         micActive = false;
       }
-      return micActive;
+      return micActive;                 // lets the menu reflect the new state
     },
     onStartTalk: () => {
-      // Push-to-talk start (speech is initialized later; this function will be called after init)
-      if (typeof speech !== 'undefined' && speech && typeof speech.start === 'function') {
-        speech.start();
-      }
+      if (typeof speech !== 'undefined' && speech?.start) speech.start();
     },
     onStopTalk: () => {
-      if (typeof speech !== 'undefined' && speech && typeof speech.stop === 'function') {
-        speech.stop();
-      }
+      if (typeof speech !== 'undefined' && speech?.stop) speech.stop();
     },
     onToggleRain: (next) => {
-      // Enable/disable rain effect; returns the active state
       rain.setActive(!!next);
       return !!next;
     }
@@ -914,8 +911,7 @@ async function main() {
     }
   }
 
-  let localStream = null;
-  let micActive = false;
+  
 
   const settingsBtn = document.getElementById('settings-button');
   const overlay = document.getElementById('settings-overlay');
