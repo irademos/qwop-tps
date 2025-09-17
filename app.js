@@ -200,6 +200,20 @@ async function main() {
   window.playerModel = playerModel;
   audioManager.playBGS('Forest Day/Forest Day.ogg');
 
+  // Dialogue system (lazy-loaded) - adds an NPC that speaks and offers choices (no buttons)
+  (async () => {
+    try {
+      const mod = await import('./features/dialogueSystem.js');
+      dialogueController = mod.initDialogueSystem(THREE, { scene, playerModel, toasts, audioManager });
+      if (dialogueController && typeof dialogueController.setActive === 'function') {
+        dialogueController.setActive(true);
+      }
+      window.dialogueController = dialogueController;
+    } catch (err) {
+      console.error('Failed to init dialogue system', err);
+    }
+  })();
+
   // Bird NPC (lazy-loaded) - small bird that circles the player (no UI)
   let birdController = null;
   (async function initBirdNPC() {
@@ -391,6 +405,7 @@ async function main() {
   let companionController = null;
   let scoreHUD = null;
   let playerScore = 0;
+  let dialogueController = null;
   (async () => {
     try {
       const firefliesModPromise = import('./effects/fireflies.js');
@@ -1184,6 +1199,10 @@ async function main() {
     // Update bird NPC (if loaded)
     if (typeof birdController !== 'undefined' && birdController && typeof birdController.update === 'function') {
       birdController.update(delta);
+    }
+    // Update dialogue system (if loaded)
+    if (typeof dialogueController !== 'undefined' && dialogueController && typeof dialogueController.update === 'function') {
+      dialogueController.update(delta);
     }
     // Update lantern (if loaded)
     if (typeof lanternController !== 'undefined' && lanternController && typeof lanternController.update === 'function') {
