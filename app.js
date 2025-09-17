@@ -314,6 +314,7 @@ async function main() {
   let lanternController = null;
   let guideStarController = null;
   let campfireController = null;
+  let deerController = null;
   (async () => {
     try {
       const mod = await import('./ai/companionSpirit.js');
@@ -467,6 +468,31 @@ async function main() {
           }
         });
         sheetInner.appendChild(guideBtn);
+
+        // Deer toggle (lazy-loaded ambient creature)
+        const deerBtn = document.createElement('button');
+        deerBtn.id = 'deer-toggle';
+        deerBtn.className = 'ai-actions__item';
+        deerBtn.textContent = 'Deer';
+        deerBtn.setAttribute('aria-pressed', 'false');
+        deerBtn.addEventListener('click', async () => {
+          const next = !(deerBtn.getAttribute('aria-pressed') === 'true');
+          deerBtn.setAttribute('aria-pressed', String(next));
+          deerBtn.textContent = next ? 'Deer: On' : 'Deer';
+          try {
+            if (!deerController) {
+              const mod = await import('./features/wanderingDeer.js');
+              deerController = mod.createWanderingDeer(THREE, { scene, playerModel, audioManager });
+            }
+            if (deerController && typeof deerController.setActive === 'function') {
+              deerController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize deer module', err);
+          }
+        });
+        sheetInner.appendChild(deerBtn);
+      }
       }
     } catch (e) {
       console.error('Failed to load companion module', e);

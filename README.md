@@ -1,1 +1,1 @@
-feat: add lazy-loaded campfire ambient effect (Actions sheet)
+feat: add lazy-loaded wandering deer ambient creature (Actions sheet)
