@@ -216,6 +216,61 @@ async function main() {
     }
   })();
 
+  // Pulsing Beacon (lightweight visual aid)
+  // - Lazy-loaded to keep main bundle small.
+  // - Configured from the Settings panel (not the main Actions button) to respect mobile UX guardrails.
+  let pulsingOrbController = null;
+  (async function initPulsingOrb() {
+    try {
+      const mod = await import('./effects/pulsingOrb.js');
+      pulsingOrbController = mod.createPulsingOrb(THREE, { scene, playerModel });
+      // Default off until user enables from Settings.
+      if (pulsingOrbController && typeof pulsingOrbController.setActive === 'function') {
+        pulsingOrbController.setActive(false);
+      }
+
+      // Add a Settings toggle (keeps mobile UX clean — Settings overlay is already present)
+      const settingsPanel = document.getElementById('settings-panel');
+      if (settingsPanel) {
+        const row = document.createElement('div');
+        row.className = 'ai-settings__row';
+
+        const label = document.createElement('label');
+        label.textContent = 'Pulsing Beacon';
+        label.htmlFor = 'pulsing-toggle';
+        label.style.marginRight = '8px';
+
+        const btn = document.createElement('button');
+        btn.id = 'pulsing-toggle';
+        btn.className = 'ai-settings__toggle';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.textContent = 'Off';
+        btn.addEventListener('click', () => {
+          const next = !(btn.getAttribute('aria-pressed') === 'true');
+          btn.setAttribute('aria-pressed', String(next));
+          btn.textContent = next ? 'On' : 'Off';
+          try {
+            if (pulsingOrbController && typeof pulsingOrbController.setActive === 'function') {
+              pulsingOrbController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Failed to toggle pulsing beacon', err);
+          }
+        });
+
+        row.appendChild(label);
+        row.appendChild(btn);
+
+        // Insert before the HR divider when possible so settings stay grouped
+        const hr = settingsPanel.querySelector('hr');
+        if (hr) settingsPanel.insertBefore(row, hr);
+        else settingsPanel.appendChild(row);
+      }
+    } catch (err) {
+      console.error('Failed to load pulsing orb module', err);
+    }
+  })();
+
   // Ambient sounds (lazy-loaded): birdsong toggle in Actions sheet.
   // This is initialized exactly once after the scene & playerModel are ready.
   let ambientController = null;
