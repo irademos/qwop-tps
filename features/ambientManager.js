@@ -115,7 +115,7 @@ export function initAmbientManager({ THREE, scene, playerModel, audioManager, to
       lanternBtn.textContent = next ? 'Lantern: On' : 'Lantern';
       try {
         const ctrl = await ensureController('lantern', async () => {
-          const m = await import('../features/floatingLantern.js');
+          const m = await import('./floatingLantern.js');
           return m.createFloatingLantern(THREE, { scene, playerModel, audioManager });
         });
         ctrl?.setActive?.(next);
@@ -151,7 +151,7 @@ export function initAmbientManager({ THREE, scene, playerModel, audioManager, to
       guideBtn.textContent = next ? 'Guide: On' : 'Guide';
       try {
         const ctrl = await ensureController('guide', async () => {
-          const m = await import('../features/guideStar.js');
+          const m = await import('./guideStar.js');
           return m.createGuideStar(THREE, { scene, playerModel });
         });
         ctrl?.setActive?.(next);
@@ -169,7 +169,7 @@ export function initAmbientManager({ THREE, scene, playerModel, audioManager, to
       deerBtn.textContent = next ? 'Deer: On' : 'Deer';
       try {
         const ctrl = await ensureController('deer', async () => {
-          const m = await import('../features/wanderingDeer.client.js');
+          const m = await import('./wanderingDeer.client.js');
           return m.createWanderingDeer(THREE, { scene, playerModel, audioManager });
         });
         ctrl?.setActive?.(next);
@@ -185,7 +185,7 @@ export function initAmbientManager({ THREE, scene, playerModel, audioManager, to
       try {
         if (!promises.deer) {
           promises.deer = (async () => {
-            const m = await import('../features/wanderingDeer.client.js');
+            const m = await import('./wanderingDeer.client.js');
             const ctrl = m.createWanderingDeer(THREE, { scene, playerModel, audioManager });
             // Keep inactive by default
             ctrl?.setActive?.(false);
