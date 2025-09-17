@@ -200,6 +200,20 @@ async function main() {
   window.playerModel = playerModel;
   audioManager.playBGS('Forest Day/Forest Day.ogg');
 
+  // Bird NPC (lazy-loaded) - small bird that circles the player (no UI)
+  let birdController = null;
+  (async function initBirdNPC() {
+    try {
+      const mod = await import('./features/birdNPC.js');
+      birdController = mod.createBirdNPC(THREE, { scene, playerModel, audioManager });
+      if (birdController && typeof birdController.setActive === 'function') {
+        birdController.setActive(true);
+      }
+    } catch (err) {
+      console.error('Failed to init bird NPC', err);
+    }
+  })();
+
   // Ready beacon controller (declared early so the lazy-loader can assign to it)
   let readyBeaconController = null;
 
@@ -1166,6 +1180,10 @@ async function main() {
     // Update ready beacon (if loaded)
     if (typeof readyBeaconController !== 'undefined' && readyBeaconController && typeof readyBeaconController.update === 'function') {
       readyBeaconController.update(delta);
+    }
+    // Update bird NPC (if loaded)
+    if (typeof birdController !== 'undefined' && birdController && typeof birdController.update === 'function') {
+      birdController.update(delta);
     }
     // Update lantern (if loaded)
     if (typeof lanternController !== 'undefined' && lanternController && typeof lanternController.update === 'function') {

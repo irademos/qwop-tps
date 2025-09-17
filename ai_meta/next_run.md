@@ -1,0 +1,3 @@
+- [x] Add bird NPC that circles the player (features/birdNPC.js)
+- [ ] Add NPC dialogue system (simple captions & choices)
+- [ ] Day/night ambient sound transitions
