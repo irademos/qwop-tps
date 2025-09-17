@@ -328,6 +328,25 @@ async function main() {
       // Also prepare campfire (lazy) and guide star imports
       const campfireModPromise = import('./effects/campfire.js');
       const guideStarModPromise = import('./features/guideStar.js');
+      // Preload wandering deer module once (initialized but inactive).
+      // Module is lazy-fetched to keep main bundle small, then the controller is created
+      // but left inactive until the user enables it from the Actions sheet.
+      const deerModPromise = import('./features/wanderingDeer.js');
+      deerModPromise.then(mod => {
+        try {
+          if (!deerController) {
+            deerController = mod.createWanderingDeer(THREE, { scene, playerModel, audioManager });
+            // Keep inactive by default; activated via Actions toggle.
+            if (deerController && typeof deerController.setActive === 'function') {
+              deerController.setActive(false);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to initialize wandering deer controller', err);
+        }
+      }).catch(err => {
+        console.error('Failed to preload wandering deer module', err);
+      });
 
       // Insert toggles into the existing Actions sheet (keeps mobile UX guardrails).
       const sheetInner = document.querySelector('.ai-actions__sheet-inner');
@@ -481,7 +500,8 @@ async function main() {
           deerBtn.textContent = next ? 'Deer: On' : 'Deer';
           try {
             if (!deerController) {
-              const mod = await import('./features/wanderingDeer.js');
+              // Use the preloaded promise (ensures module was imported exactly once)
+              const mod = await deerModPromise;
               deerController = mod.createWanderingDeer(THREE, { scene, playerModel, audioManager });
             }
             if (deerController && typeof deerController.setActive === 'function') {

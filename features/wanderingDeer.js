@@ -43,7 +43,7 @@ export function createWanderingDeer(THREE, { scene, playerModel, audioManager } 
   const startOffset = new THREE.Vector3(2 + Math.random() * 2, 0, 0);
   group.position.copy(playerModel.position).add(startOffset);
 
-  let active = true;
+  let active = false;
   let angle = Math.random() * Math.PI * 2;
   const radius = 3 + Math.random() * 2;
   const speed = 0.3 + Math.random() * 0.4;
@@ -83,8 +83,6 @@ export function createWanderingDeer(THREE, { scene, playerModel, audioManager } 
     hornMat.dispose?.();
   }
 
-  // Add to scene by default (feature is toggled from Actions)
-  scene.add(group);
 
   return { setActive, update, dispose };
 }
