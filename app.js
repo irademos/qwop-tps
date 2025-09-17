@@ -407,6 +407,43 @@ async function main() {
     }
   })();
 
+  // Wandering deer ambient (lazy-loaded). Toggleable from Actions sheet.
+  (async () => {
+    try {
+      const deerModPromise = import('./features/wanderingDeer.js');
+      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
+      let deerController = null;
+      if (sheetInner) {
+        const deerBtn = document.createElement('button');
+        deerBtn.id = 'deer-toggle';
+        deerBtn.className = 'ai-actions__item';
+        deerBtn.textContent = 'Deer';
+        deerBtn.setAttribute('aria-pressed', 'false');
+        deerBtn.addEventListener('click', async () => {
+          const next = !(deerBtn.getAttribute('aria-pressed') === 'true');
+          deerBtn.setAttribute('aria-pressed', String(next));
+          deerBtn.textContent = next ? 'Deer: On' : 'Deer';
+          try {
+            if (next) {
+              if (!deerController) {
+                const mod = await deerModPromise;
+                deerController = mod.createWanderingDeer(THREE, { scene, playerModel, audioManager });
+              }
+              if (deerController && typeof deerController.setActive === 'function') deerController.setActive(true);
+            } else {
+              if (deerController && typeof deerController.setActive === 'function') deerController.setActive(false);
+            }
+          } catch (err) {
+            console.error('Failed to load or init wandering deer module', err);
+          }
+        });
+        sheetInner.appendChild(deerBtn);
+      }
+    } catch (e) {
+      console.error('Failed to setup wandering deer module', e);
+    }
+  })();
+
   window.localHealth = 100;
   window.monsterHealth = 100;
 
