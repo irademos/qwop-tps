@@ -198,7 +198,26 @@ async function main() {
   const headingArrow = createHeadingArrow(THREE);
   scene.add(headingArrow.group);
   window.playerModel = playerModel;
-  audioManager.playBGS('Forest Day/Forest Day.ogg');
+  // Initialize day/night ambient sound transitions (lazy module).
+  // This replaces a single static BGS call with a managed day/night cycle.
+  (async () => {
+    try {
+      const mod = await import('./audio/dayNightAmbient.js');
+      const dayNight = mod.initDayNightAmbient(audioManager, {
+        dayTrack: 'Forest Day/Forest Day.ogg',
+        nightTrack: 'Forest Night/Forest Night.ogg',
+        dayDuration: 90,
+        nightDuration: 60,
+        crossfade: 3
+      });
+      // Expose for debugging/console control if needed
+      window.dayNightAmbient = dayNight;
+    } catch (err) {
+      console.error('Failed to init day/night ambient sounds', err);
+      // Fallback: try to play a single daytime track to keep audio present
+      try { audioManager.playBGS('Forest Day/Forest Day.ogg'); } catch (e) {}
+    }
+  })();
 
   // Dialogue system (lazy-loaded) - adds an NPC that speaks and offers choices (no buttons)
   (async () => {
