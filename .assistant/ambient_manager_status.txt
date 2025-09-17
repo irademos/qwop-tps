@@ -1,0 +1,11 @@
+No additional files need to be added right now.
+
+- app.js already dynamically imports and initializes ./features/ambientManager.js after the scene and playerModel are ready.
+- The ambient manager inserts toggles into the existing .ai-actions__sheet-inner (so it respects the single Actions button UX).
+- The features/ directory file you added is sufficient; no other files must be added to wire this change.
+
+If you'd like any of the following, please add the target file(s) to the chat:
+- Request edits to app.js (already present) — e.g. change where initAmbientManager is called or pass different options.
+- Ask me to switch deer imports to the client-specific module (features/wanderingDeer.client.js) — add that file if you want me to modify the manager to prefer that variant.
+
+Tell me which edits you want next, or confirm and I'll make any requested changes.
