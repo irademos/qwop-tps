@@ -377,6 +377,9 @@ async function main() {
   // Fireflies ambient effect (lazy-loaded). Adds a subtle swarm of fireflies
   // that follow the player at night. Lazy-loaded to keep main bundle small.
   let firefliesController = null;
+  let coinController = null;
+  let scoreHUD = null;
+  let playerScore = 0;
   (async () => {
     try {
       const firefliesModPromise = import('./effects/fireflies.js');
@@ -407,6 +410,56 @@ async function main() {
       }
     } catch (e) {
       console.error('Failed to setup fireflies module', e);
+    }
+  })();
+
+  // Coin collectible ambient effect (lazy-loaded). Toggleable from Actions sheet.
+  (async () => {
+    try {
+      const coinModPromise = import('./features/coinEffect.js');
+      const scoreHUDPromise = import('./ui/scoreHUD.js');
+      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
+      if (sheetInner) {
+        const coinBtn = document.createElement('button');
+        coinBtn.id = 'coin-toggle';
+        coinBtn.className = 'ai-actions__item';
+        coinBtn.textContent = 'Coin';
+        coinBtn.setAttribute('aria-pressed', 'false');
+        coinBtn.addEventListener('click', async () => {
+          const next = !(coinBtn.getAttribute('aria-pressed') === 'true');
+          coinBtn.setAttribute('aria-pressed', String(next));
+          coinBtn.textContent = next ? 'Coin: On' : 'Coin';
+          try {
+            if (next) {
+              if (!scoreHUD) {
+                const hud = await scoreHUDPromise;
+                scoreHUD = hud.createScoreHUD();
+                scoreHUD.update(playerScore);
+              }
+              if (!coinController) {
+                const mod = await coinModPromise;
+                coinController = mod.createCoinEffect(THREE, {
+                  scene,
+                  playerModel,
+                  audioManager,
+                  onCollect: () => {
+                    playerScore += 1;
+                    if (scoreHUD && typeof scoreHUD.update === 'function') scoreHUD.update(playerScore);
+                  }
+                });
+              }
+              if (coinController && typeof coinController.setActive === 'function') coinController.setActive(true);
+            } else {
+              if (coinController && typeof coinController.setActive === 'function') coinController.setActive(false);
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize coin module', err);
+          }
+        });
+        sheetInner.appendChild(coinBtn);
+      }
+    } catch (e) {
+      console.error('Failed to setup coin module', e);
     }
   })();
 
@@ -1005,6 +1058,10 @@ async function main() {
     // Update guide star (if loaded)
     if (typeof guideStarController !== 'undefined' && guideStarController && typeof guideStarController.update === 'function') {
       guideStarController.update(delta);
+    }
+    // Update coin collectible (if loaded)
+    if (typeof coinController !== 'undefined' && coinController && typeof coinController.update === 'function') {
+      coinController.update(delta);
     }
 
     Object.values(otherPlayers).forEach(p => {
