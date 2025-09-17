@@ -358,6 +358,48 @@ async function main() {
     }
   })();
 
+  // Butterflies ambient (lazy-loaded). Lightweight, decorative butterflies that
+  // flutter gently around the player. Lazy-loaded to keep the main bundle small.
+  (async () => {
+    try {
+      const butterfliesModPromise = import('./features/butterflies.js');
+      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
+      let butterfliesController = null;
+      if (sheetInner) {
+        const btn = document.createElement('button');
+        btn.id = 'butterflies-toggle';
+        btn.className = 'ai-actions__item';
+        btn.textContent = 'Butterflies';
+        btn.setAttribute('aria-pressed', 'false');
+        btn.addEventListener('click', async () => {
+          const next = !(btn.getAttribute('aria-pressed') === 'true');
+          btn.setAttribute('aria-pressed', String(next));
+          btn.textContent = next ? 'Butterflies: On' : 'Butterflies';
+          try {
+            if (next) {
+              if (!butterfliesController) {
+                const mod = await butterfliesModPromise;
+                butterfliesController = mod.createButterflies(THREE, { scene, playerModel, audioManager });
+              }
+              if (butterfliesController && typeof butterfliesController.setActive === 'function') {
+                butterfliesController.setActive(true);
+              }
+            } else {
+              if (butterfliesController && typeof butterfliesController.setActive === 'function') {
+                butterfliesController.setActive(false);
+              }
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize butterflies module', err);
+          }
+        });
+        sheetInner.appendChild(btn);
+      }
+    } catch (e) {
+      console.error('Failed to setup butterflies module', e);
+    }
+  })();
+
   // Coin collectible ambient effect (lazy-loaded). Toggleable from Actions sheet.
   (async () => {
     try {
