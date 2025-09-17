@@ -340,6 +340,13 @@ async function main() {
             if (deerController && typeof deerController.setActive === 'function') {
               deerController.setActive(false);
             }
+            // Notify the player that the ambient deer were preloaded and can be enabled from Actions
+            try {
+              toasts?.show?.('Wandering deer preloaded — enable in Actions');
+            } catch (e) {
+              // Non-fatal: toasts may not be available in some test environments
+              console.log('Wandering deer preloaded');
+            }
           }
         } catch (err) {
           console.error('Failed to initialize wandering deer controller', err);
