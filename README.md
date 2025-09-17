@@ -1,1 +1,1 @@
-feat: add companion orb ambient toggle (lazy-loaded)
+feat: add butterflies ambient toggle (lazy-loaded)
