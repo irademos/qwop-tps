@@ -1,225 +1,143 @@
 /**
  * features/ambientManager.js
  *
- * Small central manager to lazily initialize ambient/ambient-creature modules (companion, bird, butterflies,
- * lantern, campfire, guide star, wandering deer). Exports initAmbientManager which performs no side-effects
- * on import — it must be called to wire UI and initialize.
+ * Minimal ambient manager: lazy-loads small ambient systems (wandering deer, butterflies)
+ * and exposes a simple programmatic API. No DOM mutation occurs here — initialization
+ * must be performed once by the entry (app.js). Designed to be safe for import and
+ * for code-splitting via dynamic import().
  *
- * Design:
- *  - Lazy-import heavy modules only when toggled (or preload deer once).
- *  - Insert toggles into the existing .ai-actions__sheet-inner container.
- *  - Respect mobile-first UX: single Actions button exists in the page; we only add toggles to that sheet.
- *
- * Returns an object { controllers, preload, teardown } where controllers is a map of named controllers (if created).
+ * NOTE: app.js already dynamically imports and initializes this module. No other files
+ * need to be added for this change.
  */
 
+/**
+ * @param {Object} opts
+ * @param {any} opts.THREE
+ * @param {THREE.Scene} opts.scene
+ * @param {THREE.Object3D} opts.playerModel
+ * @param {Object} opts.audioManager
+ * @param {Object} [opts.toasts]
+ */
 export function initAmbientManager({ THREE, scene, playerModel, audioManager, toasts } = {}) {
   if (!THREE) throw new Error('THREE is required');
   if (!scene) throw new Error('scene is required');
   if (!playerModel) throw new Error('playerModel is required');
 
+  let active = false;
   const controllers = Object.create(null);
-  // Promises for first-time imports (ensures modules fetched at most once)
-  const promises = {
-    companion: null,
-    bird: null,
-    butterflies: null,
-    lantern: null,
-    campfire: null,
-    guide: null,
-    deer: null
+  const loaders = Object.create(null);
+
+  // Lazily import and construct the wandering deer controller (keeps client bundle small)
+  loaders.deer = async function loadDeer() {
+    if (controllers.deer) return controllers.deer;
+    try {
+      // Import the non-UI wandering deer (server/client module)
+      const mod = await import('./wanderingDeer.js');
+      if (typeof mod.createWanderingDeer === 'function') {
+        controllers.deer = mod.createWanderingDeer(THREE, { scene, playerModel, audioManager });
+        if (typeof controllers.deer.setActive === 'function') controllers.deer.setActive(active);
+      } else {
+        console.warn('wanderingDeer.js did not export createWanderingDeer');
+      }
+    } catch (err) {
+      console.error('Failed loading wandering deer', err);
+      toasts?.show?.('Failed to load wandering deer');
+    }
+    return controllers.deer;
   };
 
-  // Helper to create a consistent action button inside the sheet
-  function makeToggleButton(id, label) {
-    const btn = document.createElement('button');
-    btn.id = id;
-    btn.className = 'ai-actions__item';
-    btn.textContent = label;
-    btn.setAttribute('aria-pressed', 'false');
-    return btn;
+  // Lazily import butterflies
+  loaders.butterflies = async function loadButterflies() {
+    if (controllers.butterflies) return controllers.butterflies;
+    try {
+      const mod = await import('../effects/butterflies.js');
+      if (typeof mod.createButterflies === 'function') {
+        controllers.butterflies = mod.createButterflies(THREE, { scene, playerModel, audioManager });
+        if (typeof controllers.butterflies.setActive === 'function') controllers.butterflies.setActive(active);
+      } else {
+        console.warn('effects/butterflies.js did not export createButterflies');
+      }
+    } catch (err) {
+      console.error('Failed loading butterflies', err);
+      toasts?.show?.('Failed to load butterflies');
+    }
+    return controllers.butterflies;
+  };
+
+  async function activateControllers() {
+    // Ensure core ambient controllers are loaded (non-blocking where possible)
+    await Promise.allSettled([
+      loaders.deer(),
+      loaders.butterflies()
+    ]);
+
+    Object.values(controllers).forEach(ctrl => {
+      try {
+        if (ctrl && typeof ctrl.setActive === 'function') ctrl.setActive(true);
+      } catch (err) {
+        console.warn('Failed to activate ambient controller', err);
+      }
+    });
+    toasts?.show?.('Ambient enabled');
   }
 
-  // Safe setter helper
-  async function ensureController(name, factoryPromise) {
-    if (controllers[name]) return controllers[name];
-    if (!promises[name]) promises[name] = factoryPromise();
-    const c = await promises[name];
-    controllers[name] = c;
-    return c;
+  function deactivateControllers() {
+    Object.entries(controllers).forEach(([name, ctrl]) => {
+      try {
+        if (ctrl && typeof ctrl.setActive === 'function') ctrl.setActive(false);
+      } catch (err) {
+        console.warn(`Failed to deactivate ${name}`, err);
+      }
+    });
+    toasts?.show?.('Ambient disabled');
   }
 
-  // Wire UI toggles under existing sheet
-  const sheetInner = document.querySelector('.ai-actions__sheet-inner');
+  /**
+   * Set global ambient active state. When enabling we lazy-load controllers.
+   * @param {boolean} next
+   */
+  async function setActive(next) {
+    next = !!next;
+    if (next === active) return;
+    active = next;
+    if (active) {
+      await activateControllers();
+    } else {
+      deactivateControllers();
+    }
+  }
 
-  if (sheetInner) {
-    // Companion
-    const spiritBtn = makeToggleButton('spirit-toggle', 'Companion');
-    spiritBtn.addEventListener('click', async () => {
-      const next = !(spiritBtn.getAttribute('aria-pressed') === 'true');
-      spiritBtn.setAttribute('aria-pressed', String(next));
-      spiritBtn.textContent = next ? 'Companion: On' : 'Companion';
-      try {
-        const ctrl = await ensureController('companion', async () => {
-          const m = await import('../ai/companionSpirit.js');
-          return m.createCompanionSpirit(THREE, { scene, playerModel, audioManager });
-        });
-        ctrl?.setActive?.(next);
-      } catch (err) {
-        console.error('Companion toggle failed', err);
-      }
-    });
-    sheetInner.appendChild(spiritBtn);
+  async function toggle() {
+    await setActive(!active);
+    return active;
+  }
 
-    // Bird
-    const birdBtn = makeToggleButton('bird-toggle', 'Bird');
-    birdBtn.addEventListener('click', async () => {
-      const next = !(birdBtn.getAttribute('aria-pressed') === 'true');
-      birdBtn.setAttribute('aria-pressed', String(next));
-      birdBtn.textContent = next ? 'Bird: On' : 'Bird';
+  async function dispose() {
+    // Fully tear down controllers that expose dispose()
+    Object.entries(controllers).forEach(([name, ctrl]) => {
       try {
-        const ctrl = await ensureController('bird', async () => {
-          const m = await import('../ai/forestBird.js');
-          return m.createForestBird(THREE, { scene, playerModel, audioManager });
-        });
-        ctrl?.setActive?.(next);
-      } catch (err) {
-        console.error('Bird toggle failed', err);
-      }
-    });
-    sheetInner.appendChild(birdBtn);
-
-    // Butterflies
-    const butterfliesBtn = makeToggleButton('butterflies-toggle', 'Butterflies');
-    butterfliesBtn.addEventListener('click', async () => {
-      const next = !(butterfliesBtn.getAttribute('aria-pressed') === 'true');
-      butterfliesBtn.setAttribute('aria-pressed', String(next));
-      butterfliesBtn.textContent = next ? 'Butterflies: On' : 'Butterflies';
-      try {
-        const ctrl = await ensureController('butterflies', async () => {
-          const m = await import('../effects/butterflies.js');
-          return m.createButterflies(THREE, { scene, playerModel, audioManager });
-        });
-        ctrl?.setActive?.(next);
-      } catch (err) {
-        console.error('Butterflies toggle failed', err);
-      }
-    });
-    sheetInner.appendChild(butterfliesBtn);
-
-    // Lantern
-    const lanternBtn = makeToggleButton('lantern-toggle', 'Lantern');
-    lanternBtn.addEventListener('click', async () => {
-      const next = !(lanternBtn.getAttribute('aria-pressed') === 'true');
-      lanternBtn.setAttribute('aria-pressed', String(next));
-      lanternBtn.textContent = next ? 'Lantern: On' : 'Lantern';
-      try {
-        const ctrl = await ensureController('lantern', async () => {
-          const m = await import('./floatingLantern.js');
-          return m.createFloatingLantern(THREE, { scene, playerModel, audioManager });
-        });
-        ctrl?.setActive?.(next);
-      } catch (err) {
-        console.error('Lantern toggle failed', err);
-      }
-    });
-    sheetInner.appendChild(lanternBtn);
-
-    // Campfire
-    const campfireBtn = makeToggleButton('campfire-toggle', 'Campfire');
-    campfireBtn.addEventListener('click', async () => {
-      const next = !(campfireBtn.getAttribute('aria-pressed') === 'true');
-      campfireBtn.setAttribute('aria-pressed', String(next));
-      campfireBtn.textContent = next ? 'Campfire: On' : 'Campfire';
-      try {
-        const ctrl = await ensureController('campfire', async () => {
-          const m = await import('../effects/campfire.js');
-          return m.createCampfire(THREE, { scene, playerModel, audioManager });
-        });
-        ctrl?.setActive?.(next);
-      } catch (err) {
-        console.error('Campfire toggle failed', err);
-      }
-    });
-    sheetInner.appendChild(campfireBtn);
-
-    // Guide Star
-    const guideBtn = makeToggleButton('guide-toggle', 'Guide');
-    guideBtn.addEventListener('click', async () => {
-      const next = !(guideBtn.getAttribute('aria-pressed') === 'true');
-      guideBtn.setAttribute('aria-pressed', String(next));
-      guideBtn.textContent = next ? 'Guide: On' : 'Guide';
-      try {
-        const ctrl = await ensureController('guide', async () => {
-          const m = await import('./guideStar.js');
-          return m.createGuideStar(THREE, { scene, playerModel });
-        });
-        ctrl?.setActive?.(next);
-      } catch (err) {
-        console.error('Guide toggle failed', err);
-      }
-    });
-    sheetInner.appendChild(guideBtn);
-
-    // Deer (ambient creature) — preload once but keep inactive until toggled
-    const deerBtn = makeToggleButton('deer-toggle', 'Deer');
-    deerBtn.addEventListener('click', async () => {
-      const next = !(deerBtn.getAttribute('aria-pressed') === 'true');
-      deerBtn.setAttribute('aria-pressed', String(next));
-      deerBtn.textContent = next ? 'Deer: On' : 'Deer';
-      try {
-        const ctrl = await ensureController('deer', async () => {
-          const m = await import('./wanderingDeer.client.js');
-          return m.createWanderingDeer(THREE, { scene, playerModel, audioManager });
-        });
-        ctrl?.setActive?.(next);
-      } catch (err) {
-        console.error('Deer toggle failed', err);
-      }
-    });
-    sheetInner.appendChild(deerBtn);
-
-    // Preload deer module in background to keep the first toggle snappy (non-blocking)
-    // Any errors are non-fatal.
-    (async () => {
-      try {
-        if (!promises.deer) {
-          promises.deer = (async () => {
-            const m = await import('./wanderingDeer.client.js');
-            const ctrl = m.createWanderingDeer(THREE, { scene, playerModel, audioManager });
-            // Keep inactive by default
-            ctrl?.setActive?.(false);
-            controllers.deer = ctrl;
-            try {
-              toasts?.show?.('Wandering deer preloaded — enable in Actions');
-            } catch (e) {
-              // noop
-            }
-            return ctrl;
-          })();
+        if (ctrl && typeof ctrl.setActive === 'function') {
+          try { ctrl.setActive(false); } catch (e) { /* ignore */ }
+        }
+        if (ctrl && typeof ctrl.dispose === 'function') {
+          try { ctrl.dispose(); } catch (e) { /* ignore */ }
         }
       } catch (err) {
-        console.error('Failed to preload wandering deer module', err);
-      }
-    })();
-  }
-
-  function teardown() {
-    // Attempt to dispose controllers if they expose dispose()
-    Object.values(controllers).forEach(c => {
-      try {
-        c?.setActive?.(false);
-        if (typeof c.dispose === 'function') c.dispose();
-      } catch (e) {
-        console.warn('Error tearing down ambient controller', e);
+        console.warn('Error disposing ambient controller', err);
+      } finally {
+        delete controllers[name];
       }
     });
+    active = false;
   }
 
   return {
-    controllers,
-    _promises: promises,
-    preload: (name) => promises[name] || null,
-    teardown
+    isActive: () => active,
+    setActive,
+    toggle,
+    dispose,
+    // internal helpers for testing/inspection (not required to be used)
+    _controllers: controllers,
+    _loaders: loaders
   };
 }
