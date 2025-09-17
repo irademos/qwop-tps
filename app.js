@@ -241,6 +241,7 @@ async function main() {
   let birdController = null;
   let butterfliesController = null;
   let lanternController = null;
+  let guideStarController = null;
   (async () => {
     try {
       const mod = await import('./ai/companionSpirit.js');
@@ -974,6 +975,10 @@ async function main() {
     // Update lantern (if loaded)
     if (typeof lanternController !== 'undefined' && lanternController && typeof lanternController.update === 'function') {
       lanternController.update(delta);
+    }
+    // Update guide star (if loaded)
+    if (typeof guideStarController !== 'undefined' && guideStarController && typeof guideStarController.update === 'function') {
+      guideStarController.update(delta);
     }
 
     Object.values(otherPlayers).forEach(p => {
