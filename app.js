@@ -200,6 +200,19 @@ async function main() {
   window.playerModel = playerModel;
   audioManager.playBGS('Forest Day/Forest Day.ogg');
 
+  // Ready beacon: small pulsing orb that follows the player (lazy-loaded, initialized once)
+  (async () => {
+    try {
+      const mod = await import('./effects/readyBeacon.js');
+      readyBeaconController = mod.createReadyBeacon(THREE, { scene, playerModel });
+      if (readyBeaconController && typeof readyBeaconController.setActive === 'function') {
+        readyBeaconController.setActive(true);
+      }
+    } catch (err) {
+      console.error('Failed to load ready beacon', err);
+    }
+  })();
+
   // Ambient sounds (lazy-loaded): birdsong toggle in Actions sheet.
   // This is initialized exactly once after the scene & playerModel are ready.
   let ambientController = null;
@@ -242,6 +255,7 @@ async function main() {
   let butterfliesController = null;
   let lanternController = null;
   let guideStarController = null;
+  let readyBeaconController = null;
   (async () => {
     try {
       const mod = await import('./ai/companionSpirit.js');
@@ -1050,6 +1064,10 @@ async function main() {
     // Update companion (if loaded)
     if (typeof companionController !== 'undefined' && companionController && typeof companionController.update === 'function') {
       companionController.update(delta);
+    }
+    // Update ready beacon (if loaded)
+    if (typeof readyBeaconController !== 'undefined' && readyBeaconController && typeof readyBeaconController.update === 'function') {
+      readyBeaconController.update(delta);
     }
     // Update lantern (if loaded)
     if (typeof lanternController !== 'undefined' && lanternController && typeof lanternController.update === 'function') {
