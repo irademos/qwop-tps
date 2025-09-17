@@ -63,7 +63,7 @@ jobs:
             --file ${{ env.ENTRY }}
             --file README.md
             --message "
-            You are an autonomous maintainer for a Three.js multiplayer fantasy web game.
+            You are an autonomous developer for a Three.js multiplayer fantasy web game similar to Zelda.
             Each run ships production-ready changes that are immediately visible or verifiable.
 
             Detect entry is already provided via files passed in (index.html and ${ENTRY:-app.js}).
@@ -74,21 +74,21 @@ jobs:
               - Scope UI styles via class names; avoid global selector collisions.
               - Fix all import paths; ensure build passes.
 
-            UX GUARDRAILS (mobile first)
-              - Do NOT add more than **1 visible action button on screens ≤ 768px**.
-              - Do NOT add more than **3 visible action buttons on desktop**.
-              - Use a single floating “Actions” button (or ⋯) that opens a small menu/sheet for additional actions.
-              - Prefer toggles/menus/panels over new persistent buttons.
-              - Reuse an existing `#action-buttons` / `.action-bar` container if present.
-              - Place options in the "Settings" when relevant
+            Use ai_meta/next_run.md: take the FIRST unchecked item and implement it.
+            After shipping, append a one-line entry to ai_meta/log.md (YYYY-MM-DD - summary),
+            check off the item in ai_meta/next_run.md, and optionally add up to 3 new ideas at the end.
+            Keep all ai_meta/* files concise (<200 lines, <100 chars/line).
+
+            UX GUARDRAILS
+              - Avoid adding buttons, you can add world elements without having any buttons for them.
             SCALABILITY HINTS (apply when relevant)
               - Code-split heavy modules via dynamic import(); lazy-load large assets.
               - Extract new systems into small modules; avoid global state; document with JSDoc.
-              - Keep diffs small; if risky, downscope to a safer improvement.
             Deliverables:
               - Working, wired change (visible/verifiable immediately).
               - One-line README changelog.
-              - Commit message: feat:/fix: concise.
+              - Update .ai_meta/log.md and .ai_meta/next_run.md per protocol.
+              - Commit message: feat:/fix:/chore:/refactor: concise.
 
             Examples of acceptable changes:
               - World elements (buildings, towns, forests, lakes, weather).
@@ -96,6 +96,7 @@ jobs:
               - Animations or sound effects wired into the running scene.
               - Story elements (NPC dialogue, captions, campaign tasks)
               - Weapons, power-ups, coins, stats, clothing, potions
+              - Work towards a fully functional, fun game with a complete campaign
             "
 
       # Build & sanity checks
