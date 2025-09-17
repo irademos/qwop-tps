@@ -493,7 +493,6 @@ async function main() {
         });
         sheetInner.appendChild(deerBtn);
       }
-      }
     } catch (e) {
       console.error('Failed to load companion module', e);
     }
