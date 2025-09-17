@@ -200,6 +200,9 @@ async function main() {
   window.playerModel = playerModel;
   audioManager.playBGS('Forest Day/Forest Day.ogg');
 
+  // Ready beacon controller (declared early so the lazy-loader can assign to it)
+  let readyBeaconController = null;
+
   // Ready beacon: small pulsing orb that follows the player (lazy-loaded, initialized once)
   (async () => {
     try {
@@ -255,7 +258,6 @@ async function main() {
   let butterfliesController = null;
   let lanternController = null;
   let guideStarController = null;
-  let readyBeaconController = null;
   (async () => {
     try {
       const mod = await import('./ai/companionSpirit.js');

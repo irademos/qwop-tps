@@ -1,1 +1,1 @@
-feat: add ready beacon pulsing orb that follows player (lazy-loaded)
+fix: initialize ready beacon controller before lazy-load to avoid runtime error
