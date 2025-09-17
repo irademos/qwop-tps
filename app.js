@@ -331,7 +331,7 @@ async function main() {
       // Preload wandering deer module once (initialized but inactive).
       // Module is lazy-fetched to keep main bundle small, then the controller is created
       // but left inactive until the user enables it from the Actions sheet.
-      const deerModPromise = import('./features/wanderingDeer.js');
+      const deerModPromise = import('./features/wanderingDeer.client.js');
       deerModPromise.then(mod => {
         try {
           if (!deerController) {

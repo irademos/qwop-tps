@@ -1,1 +1,1 @@
-feat: add wandering deer ambient creature (preloaded, toggleable via Actions)
+feat: add lightweight wandering deer ambient creature (lazy-loaded, toggleable)
