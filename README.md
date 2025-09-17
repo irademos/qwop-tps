@@ -1,1 +1,1 @@
-feat: add lazy-loaded pulsing beacon toggle in Settings
+feat: add lazy-loaded campfire ambient effect (Actions sheet)

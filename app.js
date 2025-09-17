@@ -313,6 +313,7 @@ async function main() {
   let butterfliesController = null;
   let lanternController = null;
   let guideStarController = null;
+  let campfireController = null;
   (async () => {
     try {
       const mod = await import('./ai/companionSpirit.js');
@@ -322,6 +323,10 @@ async function main() {
       const birdModPromise = import('./ai/forestBird.js');
       const butterfliesModPromise = import('./effects/butterflies.js');
       const lanternModPromise = import('./features/floatingLantern.js');
+
+      // Also prepare campfire (lazy) and guide star imports
+      const campfireModPromise = import('./effects/campfire.js');
+      const guideStarModPromise = import('./features/guideStar.js');
 
       // Insert toggles into the existing Actions sheet (keeps mobile UX guardrails).
       const sheetInner = document.querySelector('.ai-actions__sheet-inner');
@@ -414,9 +419,32 @@ async function main() {
         });
         sheetInner.appendChild(lanternBtn);
 
+        // Campfire toggle (lazy-loaded ambient campfire near player)
+        const campfireBtn = document.createElement('button');
+        campfireBtn.id = 'campfire-toggle';
+        campfireBtn.className = 'ai-actions__item';
+        campfireBtn.textContent = 'Campfire';
+        campfireBtn.setAttribute('aria-pressed', 'false');
+        campfireBtn.addEventListener('click', async () => {
+          const next = !(campfireBtn.getAttribute('aria-pressed') === 'true');
+          campfireBtn.setAttribute('aria-pressed', String(next));
+          campfireBtn.textContent = next ? 'Campfire: On' : 'Campfire';
+          try {
+            if (!campfireController) {
+              const campfireMod = await campfireModPromise;
+              campfireController = campfireMod.createCampfire(THREE, { scene, playerModel, audioManager });
+            }
+            if (campfireController && typeof campfireController.setActive === 'function') {
+              campfireController.setActive(next);
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize campfire module', err);
+          }
+        });
+        sheetInner.appendChild(campfireBtn);
+
         // Guide Star ambient waypoint (lazy-loaded). A lightweight pulsing orb that
         // follows slightly ahead of the player; toggleable from the Actions sheet.
-        const guideStarModPromise = import('./features/guideStar.js');
         const guideBtn = document.createElement('button');
         guideBtn.id = 'guide-toggle';
         guideBtn.className = 'ai-actions__item';
