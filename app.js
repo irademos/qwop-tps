@@ -322,6 +322,7 @@ async function main() {
   // that follow the player at night. Lazy-loaded to keep main bundle small.
   let firefliesController = null;
   let coinController = null;
+  let companionController = null;
   let scoreHUD = null;
   let playerScore = 0;
   (async () => {
@@ -441,6 +442,42 @@ async function main() {
       }
     } catch (e) {
       console.error('Failed to setup wandering deer module', e);
+    }
+  })();
+
+  // Companion orb ambient (lazy-loaded). Toggleable from Actions sheet.
+  (async () => {
+    try {
+      const companionModPromise = import('./features/companionOrb.js');
+      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
+      if (sheetInner) {
+        const compBtn = document.createElement('button');
+        compBtn.id = 'companion-toggle';
+        compBtn.className = 'ai-actions__item';
+        compBtn.textContent = 'Companion';
+        compBtn.setAttribute('aria-pressed', 'false');
+        compBtn.addEventListener('click', async () => {
+          const next = !(compBtn.getAttribute('aria-pressed') === 'true');
+          compBtn.setAttribute('aria-pressed', String(next));
+          compBtn.textContent = next ? 'Companion: On' : 'Companion';
+          try {
+            if (next) {
+              if (!companionController) {
+                const mod = await companionModPromise;
+                companionController = mod.createCompanionOrb(THREE, { scene, playerModel, audioManager });
+              }
+              if (companionController && typeof companionController.setActive === 'function') companionController.setActive(true);
+            } else {
+              if (companionController && typeof companionController.setActive === 'function') companionController.setActive(false);
+            }
+          } catch (err) {
+            console.error('Failed to load or initialize companion module', err);
+          }
+        });
+        sheetInner.appendChild(compBtn);
+      }
+    } catch (e) {
+      console.error('Failed to setup companion module', e);
     }
   })();
 

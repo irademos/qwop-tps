@@ -1,1 +1,1 @@
-feat: add wandering deer ambient toggle (lazy-loaded) in Actions sheet
+feat: add companion orb ambient toggle (lazy-loaded)
