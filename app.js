@@ -195,7 +195,23 @@ async function main() {
   scene.add(dirLight);
   createDayNightToggle({ scene, ambientLight, dirLight });
 
-
+  // Adaptive dusk/dawn lighting presets (lazy-loaded, no UI)
+  (async () => {
+    try {
+      const mod = await import('./features/duskDawnLighting.js');
+      // Initialize with defaults that match the audio controller's durations.
+      const duskCtrl = mod.initDuskDawnLighting(THREE, {
+        ambientLight,
+        dirLight,
+        scene,
+        options: { dayDuration: 90, nightDuration: 60, crossfade: 3 }
+      });
+      // Expose for debugging if needed
+      window.duskDawnLighting = duskCtrl;
+    } catch (err) {
+      console.error('Failed to init dusk/dawn lighting', err);
+    }
+  })();
 
   // --- RAPIER INIT ---
   await RAPIER.init();
