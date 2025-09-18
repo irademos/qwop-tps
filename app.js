@@ -623,6 +623,19 @@ async function main() {
     }
   })();
 
+  // Simple Quest system (lazy-loaded)
+  let simpleQuestController = null;
+  (async function initSimpleQuestModule() {
+    try {
+      const mod = await import('./features/simpleQuest.js');
+      simpleQuestController = mod.initSimpleQuest(THREE, { scene, playerModel, audioManager, toasts });
+      // Expose for debugging/console control if needed
+      window.simpleQuestController = simpleQuestController;
+    } catch (err) {
+      console.error('Failed to init simple quest module', err);
+    }
+  })();
+
   window.localHealth = 100;
   window.monsterHealth = 100;
 
@@ -1234,6 +1247,11 @@ async function main() {
     // Update coin collectible (if loaded)
     if (typeof coinController !== 'undefined' && coinController && typeof coinController.update === 'function') {
       coinController.update(delta);
+    }
+
+    // Update simple quest controller (if loaded)
+    if (typeof simpleQuestController !== 'undefined' && simpleQuestController && typeof simpleQuestController.update === 'function') {
+      simpleQuestController.update(delta);
     }
 
     Object.values(otherPlayers).forEach(p => {
