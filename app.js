@@ -253,6 +253,18 @@ async function main() {
   scene.add(headingArrow.group);
   window.playerModel = playerModel;
 
+  // Player Housing Showcase (lazy-loaded) - small house near player, no UI buttons.
+  (async function initPlayerHousing() {
+    try {
+      const mod = await import('./features/playerHousing.js');
+      const housing = mod.initPlayerHousing(THREE, { scene, playerModel, audioManager, toasts });
+      window.playerHousing = housing;
+      if (housing && typeof housing.setActive === 'function') housing.setActive(true);
+    } catch (err) {
+      console.error('Failed to init player housing', err);
+    }
+  })();
+
   // Community Festival Leaderboard (lazy-loaded module)
   (async () => {
     try {
@@ -1438,6 +1450,10 @@ async function main() {
     // Update dialogue system (if loaded)
     if (typeof dialogueController !== 'undefined' && dialogueController && typeof dialogueController.update === 'function') {
       dialogueController.update(delta);
+    }
+    // Update player housing showcase (if loaded)
+    if (typeof playerHousing !== 'undefined' && playerHousing && typeof playerHousing.update === 'function') {
+      playerHousing.update(delta);
     }
     // Update lantern (if loaded)
     if (typeof lanternController !== 'undefined' && lanternController && typeof lanternController.update === 'function') {

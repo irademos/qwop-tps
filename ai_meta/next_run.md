@@ -15,8 +15,10 @@ New ideas:
 - [x] Event-driven music stingers for boss / quest moments
 - [x] Community festival leaderboard
 - [x] Seasonal mini-games leaderboard
-- [ ] Player housing showcase
+- [x] Player housing showcase
 - [x] Adaptive dusk/dawn lighting presets
+- [ ] Player housing customization
+- [ ] Furniture placement demo
 
 More ideas:
 - [ ] Multiplayer mini-game matches
