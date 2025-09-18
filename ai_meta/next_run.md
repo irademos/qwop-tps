@@ -4,8 +4,12 @@
 - [x] Add NPC simple quests (fetch & return)
 
 - [x] Add seasonal ambient variations (spring/summer/winter)
-- [ ] Weather-linked music intensity (storm, calm)
+- [x] Weather-linked music intensity (storm, calm)
 - [ ] Small companion NPC with contextual tips
 
 - [ ] Seasonal festival events (decor & themed sfx)
 - [ ] Leaf-pile interactions (player can kick/collect leaves)
+
+New ideas:
+- Dynamic wind audio + leaf particle intensity
+- Event-driven music stingers for boss / quest moments
