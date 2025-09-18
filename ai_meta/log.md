@@ -7,3 +7,4 @@
 2025-09-18 - add small companion NPC with contextual tips
 2025-09-18 - add seasonal festival events (decor & themed sfx)
 2025-09-18 - add leaf-pile interactions (collect & kick)
+2025-09-18 - add adaptive dusk/dawn lighting presets
