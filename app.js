@@ -139,6 +139,7 @@ async function main() {
   // - Lazy-loads the controller to avoid increasing initial bundle size.
   // - Patches rain.setActive so toggling rain adjusts music intensity automatically.
   let weatherMusicController = null;
+  let dayNightAmbient = null;
   (async () => {
     try {
       const mod = await import('./features/weatherMusic.js');
@@ -307,6 +308,8 @@ async function main() {
       });
       // Expose for debugging/console control if needed
       window.dayNightAmbient = dayNight;
+      dayNightAmbient = dayNight;
+      try { dayNightAmbient.setActive(true); } catch (e) {}
     } catch (err) {
       console.error('Failed to init day/night ambient sounds', err);
       // Fallback: try to play a single daytime track to keep audio present
@@ -1325,6 +1328,9 @@ async function main() {
     }
     if (weatherMusicController && typeof weatherMusicController.update === 'function') {
       weatherMusicController.update(delta);
+    }
+    if (typeof dayNightAmbient !== 'undefined' && dayNightAmbient && typeof dayNightAmbient.update === 'function') {
+      dayNightAmbient.update(delta);
     }
     // Update companion (if loaded)
     if (typeof companionController !== 'undefined' && companionController && typeof companionController.update === 'function') {
