@@ -1,1 +1,1 @@
-feat: leaderboard: add community festival leaderboard (in-world 3D billboard)
+feat: seasonal mini-games leaderboard (in-world 3D board)

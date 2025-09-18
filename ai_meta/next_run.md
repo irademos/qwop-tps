@@ -14,6 +14,10 @@ New ideas:
 - [x] Dynamic wind audio + leaf particle intensity
 - [x] Event-driven music stingers for boss / quest moments
 - [x] Community festival leaderboard
-- [ ] Seasonal mini-games leaderboard
+- [x] Seasonal mini-games leaderboard
 - [ ] Player housing showcase
 - [x] Adaptive dusk/dawn lighting presets
+
+More ideas:
+- [ ] Multiplayer mini-game matches
+- [ ] Daily seasonal challenges

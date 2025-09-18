@@ -294,6 +294,18 @@ async function main() {
     }
   })();
 
+  // Seasonal Mini-Games Leaderboard (lazy-loaded): small in-world 3D board showing current mini-game and top scores.
+  (async () => {
+    try {
+      const mod = await import('./features/seasonalMinigameLeaderboard.js');
+      const miniBoard = mod.initSeasonalMinigameLeaderboard(THREE, { scene, playerModel, camera });
+      window.seasonalMiniLeaderboard = miniBoard;
+      if (miniBoard && typeof miniBoard.setActive === 'function') miniBoard.setActive(true);
+    } catch (err) {
+      console.error('Failed to init seasonal mini-games leaderboard', err);
+    }
+  })();
+
   // Leaf-piles ambient/collectible (lazy-loaded, initialized once)
   (async function initLeafPiles() {
     try {

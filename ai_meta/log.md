@@ -12,3 +12,4 @@
 2025-09-18 - add dynamic wind audio + leaf particle intensity
 2025-09-18 - add day/night HUD indicator
 2025-09-18 - add community festival leaderboard
+2025-09-18 - add seasonal mini-games leaderboard (in-world 3D board)
