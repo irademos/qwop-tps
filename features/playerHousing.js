@@ -131,3 +131,4 @@ export function initPlayerHousing(THREE, { scene, playerModel, audioManager, toa
     setActive,
     dispose
   };
+}
