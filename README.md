@@ -1,1 +1,1 @@
-feat: ambient: add dynamic wind + leaf particle intensity
+feat: ambient: add day/night HUD indicator

@@ -325,6 +325,17 @@ async function main() {
       window.dayNightAmbient = dayNight;
       dayNightAmbient = dayNight;
       try { dayNightAmbient.setActive(true); } catch (e) {}
+
+      // Initialize a small HUD indicator (no buttons) that shows Day/Night.
+      // Lazy-load to keep initial bundle small.
+      try {
+        const mod2 = await import('./features/dayNightIndicator.js');
+        const hud = mod2.initDayNightIndicator(dayNight, { parent: document.body });
+        window.dayNightHUD = hud;
+      } catch (e) {
+        console.error('Failed to init day/night HUD', e);
+      }
+
     } catch (err) {
       console.error('Failed to init day/night ambient sounds', err);
       // Fallback: try to play a single daytime track to keep audio present
