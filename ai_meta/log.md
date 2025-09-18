@@ -11,3 +11,4 @@
 2025-09-18 - add day/night ambient sound transitions
 2025-09-18 - add dynamic wind audio + leaf particle intensity
 2025-09-18 - add day/night HUD indicator
+2025-09-18 - add community festival leaderboard

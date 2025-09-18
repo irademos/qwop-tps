@@ -253,6 +253,47 @@ async function main() {
   scene.add(headingArrow.group);
   window.playerModel = playerModel;
 
+  // Community Festival Leaderboard (lazy-loaded module)
+  (async () => {
+    try {
+      const mod = await import('./features/leaderboard.js');
+      const leaderboard = mod.initLeaderboard(THREE, { scene, camera, playerModel });
+      window.leaderboard = leaderboard;
+      if (leaderboard && typeof leaderboard.setActive === 'function') leaderboard.setActive(true);
+
+      // Optionally seed with live scores from localStorage if present
+      try {
+        const raw = localStorage.getItem('festival_scores');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) leaderboard.updateScores(parsed);
+        }
+      } catch (e) {}
+
+      // Periodically rotate fake scores to keep the board lively for demos
+      setInterval(() => {
+        try {
+          if (!leaderboard || typeof leaderboard.updateScores !== 'function') return;
+          // Slightly shuffle scores (demo/demo)
+          const cur = [
+            { name: 'Aria', score: 1320 },
+            { name: 'Borin', score: 1185 },
+            { name: 'Cel', score: 1043 },
+            { name: 'Doro', score: 978 },
+            { name: 'Em', score: 921 },
+            { name: 'Fenn', score: 870 }
+          ];
+          // random tweak
+          cur.forEach(s => { s.score = s.score + (Math.floor(Math.random()*41)-20); });
+          cur.sort((a,b) => b.score - a.score);
+          leaderboard.updateScores(cur);
+        } catch (e) {}
+      }, 7000);
+    } catch (err) {
+      console.error('Failed to init leaderboard', err);
+    }
+  })();
+
   // Leaf-piles ambient/collectible (lazy-loaded, initialized once)
   (async function initLeafPiles() {
     try {

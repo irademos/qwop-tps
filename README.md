@@ -1,1 +1,1 @@
-feat: ambient: add day/night HUD indicator
+feat: leaderboard: add community festival leaderboard (in-world 3D billboard)
