@@ -265,6 +265,23 @@ async function main() {
     }
   })();
 
+  // Player Housing Customization (lazy-loaded) - lightweight customization tools for the player's house.
+  // Initialization is done exactly once after the housing module is created.
+  (async function initPlayerHousingCustomization() {
+    try {
+      const mod = await import('./features/playerHousingCustomization.js');
+      const custom = mod.initPlayerHousingCustomization(THREE, {
+        scene,
+        playerModel,
+        playerHousing: window.playerHousing
+      });
+      window.playerHousingCustomization = custom;
+      if (custom && typeof custom.setActive === 'function') custom.setActive(true);
+    } catch (err) {
+      console.error('Failed to init player housing customization', err);
+    }
+  })();
+
   // Community Festival Leaderboard (lazy-loaded module)
   (async () => {
     try {
