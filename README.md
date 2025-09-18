@@ -1,1 +1,1 @@
-feat: add player housing customization
+feat: add furniture placement demo

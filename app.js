@@ -282,6 +282,21 @@ async function main() {
     }
   })();
 
+  // Furniture placement demo (lazy-loaded, preview & place with keys: P toggle, L cycle, F place, R rotate)
+  (async () => {
+    try {
+      const mod = await import('./features/furniturePlacement.js');
+      const fp = mod.initFurniturePlacement(THREE, { scene, playerModel, toasts });
+      window.furniturePlacement = fp;
+      if (fp && typeof fp.setActive === 'function') {
+        // Enable preview by default so it's immediately visible for verification.
+        fp.setActive(true);
+      }
+    } catch (err) {
+      console.error('Failed to init furniture placement demo', err);
+    }
+  })();
+
   // Community Festival Leaderboard (lazy-loaded module)
   (async () => {
     try {

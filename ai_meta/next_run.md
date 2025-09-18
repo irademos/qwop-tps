@@ -18,10 +18,11 @@ New ideas:
 - [x] Player housing showcase
 - [x] Adaptive dusk/dawn lighting presets
 - [x] Player housing customization
-- [ ] Furniture placement demo
+- [x] Furniture placement demo
 
 More ideas:
 - [ ] Player housing customization: save/load presets
 - [ ] In-world furniture placement preview
 - [ ] Multiplayer mini-game matches
 - [ ] Daily seasonal challenges
+- [ ] Furniture placement: save/load presets

@@ -15,3 +15,4 @@
 2025-09-18 - add seasonal mini-games leaderboard (in-world 3D board)
 2025-09-18 - add player housing showcase
 2025-09-18 - add player housing customization (color + roof variants; H/K to cycle)
+2025-09-18 - add furniture placement demo (preview & place with keys P/L/F/R)
