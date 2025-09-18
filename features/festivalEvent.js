@@ -157,3 +157,4 @@ export function initFestivalEvent(THREE, { scene, playerModel, audioManager } = 
     update,
     dispose
   };
+}
