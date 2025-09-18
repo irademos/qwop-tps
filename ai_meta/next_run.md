@@ -11,7 +11,7 @@
 - [x] Leaf-pile interactions (player can kick/collect leaves)
 
 New ideas:
-- Dynamic wind audio + leaf particle intensity
+- [x] Dynamic wind audio + leaf particle intensity
 - Event-driven music stingers for boss / quest moments
 - Community festival leaderboard
 - [x] Adaptive dusk/dawn lighting presets

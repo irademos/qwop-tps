@@ -267,6 +267,21 @@ async function main() {
     }
   })();
 
+  // Dynamic wind + leaf particle intensity (lazy-loaded ambient)
+  (async function initDynamicWind() {
+    try {
+      const mod = await import('./features/dynamicWind.js');
+      const wind = mod.initDynamicWind(THREE, { scene, playerModel, audioManager, options: { count: 140 } });
+      if (wind && typeof wind.setActive === 'function') {
+        // Default enabled so effect is visible immediately but can be disabled programmatically.
+        wind.setActive(true);
+      }
+      window.dynamicWind = wind;
+    } catch (err) {
+      console.error('Failed to init dynamic wind', err);
+    }
+  })();
+
   // Initialize seasonal festival event (decor + themed SFX).
   // Lazy-load the module and create it exactly once after the scene and playerModel are available.
   (async function initFestival() {
