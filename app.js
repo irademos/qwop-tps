@@ -236,6 +236,20 @@ async function main() {
   scene.add(headingArrow.group);
   window.playerModel = playerModel;
 
+  // Initialize seasonal festival event (decor + themed SFX).
+  // Lazy-load the module and create it exactly once after the scene and playerModel are available.
+  (async function initFestival() {
+    try {
+      const mod = await import('./features/festivalEvent.js');
+      const festival = mod.initFestivalEvent(THREE, { scene, playerModel, audioManager });
+      if (festival && typeof festival.setActive === 'function') festival.setActive(true);
+      // Expose for debugging; animate() will call festivalEvent.update if present.
+      window.festivalEvent = festival;
+    } catch (err) {
+      console.error('Failed to init festival event', err);
+    }
+  })();
+
   // Small companion NPC (lazy-loaded): a tiny orbiting helper that follows the player
   // and occasionally displays contextual tips via the toasts manager.
   (async function initCompanionNPC() {
@@ -1293,6 +1307,10 @@ async function main() {
     // Update seasonal ambient (if loaded)
     if (typeof seasonalAmbient !== 'undefined' && seasonalAmbient && typeof seasonalAmbient.update === 'function') {
       seasonalAmbient.update(delta);
+    }
+    // Update festival event (if loaded)
+    if (typeof festivalEvent !== 'undefined' && festivalEvent && typeof festivalEvent.update === 'function') {
+      festivalEvent.update(delta);
     }
     // Update ready beacon (if loaded)
     if (typeof readyBeaconController !== 'undefined' && readyBeaconController && typeof readyBeaconController.update === 'function') {

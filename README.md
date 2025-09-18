@@ -1,1 +1,1 @@
-feat: add small companion NPC with contextual tips
+feat: add seasonal festival event (decor & themed sfx)
