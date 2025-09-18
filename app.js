@@ -235,6 +235,20 @@ async function main() {
   const headingArrow = createHeadingArrow(THREE);
   scene.add(headingArrow.group);
   window.playerModel = playerModel;
+
+  // Small companion NPC (lazy-loaded): a tiny orbiting helper that follows the player
+  // and occasionally displays contextual tips via the toasts manager.
+  (async function initCompanionNPC() {
+    try {
+      const mod = await import('./features/companionNPC.js');
+      const companion = mod.createCompanionNPC(THREE, { scene, playerModel, audioManager, toasts });
+      if (companion && typeof companion.setActive === 'function') companion.setActive(true);
+      window.companionNPC = companion;
+    } catch (err) {
+      console.error('Failed to init companion NPC', err);
+    }
+  })();
+
   // Initialize day/night ambient sound transitions (lazy module).
   // This replaces a single static BGS call with a managed day/night cycle.
   (async () => {

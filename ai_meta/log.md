@@ -4,3 +4,4 @@
 2025-09-18 - add NPC simple quest (fetch & return)
 2025-09-18 - add seasonal ambient variations (spring/summer/winter)
 2025-09-18 - add weather-linked music intensity (storm/calm)
+2025-09-18 - add small companion NPC with contextual tips

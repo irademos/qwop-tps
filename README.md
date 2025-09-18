@@ -1,1 +1,1 @@
-feat: add weather-linked music intensity (storm/calm)
+feat: add small companion NPC with contextual tips
