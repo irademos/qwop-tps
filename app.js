@@ -236,6 +236,20 @@ async function main() {
   scene.add(headingArrow.group);
   window.playerModel = playerModel;
 
+  // Leaf-piles ambient/collectible (lazy-loaded, initialized once)
+  (async function initLeafPiles() {
+    try {
+      const mod = await import('./features/leafPiles.js');
+      const leafController = mod.createLeafPiles(THREE, { scene, playerModel, audioManager, toasts });
+      if (leafController && typeof leafController.setActive === 'function') {
+        leafController.setActive(true);
+      }
+      window.leafPilesController = leafController;
+    } catch (err) {
+      console.error('Failed to init leaf piles', err);
+    }
+  })();
+
   // Initialize seasonal festival event (decor + themed SFX).
   // Lazy-load the module and create it exactly once after the scene and playerModel are available.
   (async function initFestival() {

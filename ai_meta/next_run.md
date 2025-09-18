@@ -8,7 +8,7 @@
 - [x] Small companion NPC with contextual tips
 
 - [x] Seasonal festival events (decor & themed sfx)
-- [ ] Leaf-pile interactions (player can kick/collect leaves)
+- [x] Leaf-pile interactions (player can kick/collect leaves)
 
 New ideas:
 - Dynamic wind audio + leaf particle intensity

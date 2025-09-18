@@ -1,1 +1,1 @@
-feat: add seasonal festival event (decor & themed sfx)
+feat: add leaf-pile interactions (collect & kick)
