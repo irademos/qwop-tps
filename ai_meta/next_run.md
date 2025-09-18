@@ -17,9 +17,11 @@ New ideas:
 - [x] Seasonal mini-games leaderboard
 - [x] Player housing showcase
 - [x] Adaptive dusk/dawn lighting presets
-- [ ] Player housing customization
+- [x] Player housing customization
 - [ ] Furniture placement demo
 
 More ideas:
+- [ ] Player housing customization: save/load presets
+- [ ] In-world furniture placement preview
 - [ ] Multiplayer mini-game matches
 - [ ] Daily seasonal challenges
