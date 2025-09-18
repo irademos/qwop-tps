@@ -1,2 +1,1 @@
-feat: add NPC simple quest (fetch & return)
-feat: add seasonal ambient variations (spring/summer/winter)
+feat: add weather-linked music intensity (storm/calm)

@@ -135,6 +135,43 @@ async function main() {
   const confetti = createConfettiEffect({ scene, renderer, camera });
   const rain = createRainEffect({ scene, renderer, camera });
 
+  // Weather-linked music intensity (calm <-> storm)
+  // - Lazy-loads the controller to avoid increasing initial bundle size.
+  // - Patches rain.setActive so toggling rain adjusts music intensity automatically.
+  let weatherMusicController = null;
+  (async () => {
+    try {
+      const mod = await import('./features/weatherMusic.js');
+      weatherMusicController = mod.initWeatherMusic(audioManager, {
+        calmTrack: 'Ambient/Calm.ogg',
+        stormTrack: 'Ambient/Storm.ogg',
+        crossfade: 1.8,
+        baseVolume: 0.75
+      });
+
+      // Monkey-patch rain.setActive so UI-driven rain toggles also update music.
+      if (rain && typeof rain.setActive === 'function') {
+        const orig = rain.setActive.bind(rain);
+        rain.setActive = (on) => {
+          try { orig(on); } catch (e) { try { orig(on); } catch (e2) {} }
+          try {
+            if (weatherMusicController && typeof weatherMusicController.setStormIntensity === 'function') {
+              weatherMusicController.setStormIntensity(on ? 1 : 0);
+            }
+          } catch (e) {}
+        };
+      }
+
+      // Start the audio controller (attempt to play will be tolerated if blocked).
+      try {
+        weatherMusicController.setStormIntensity(0);
+        weatherMusicController.setActive(true);
+      } catch (e) {}
+    } catch (err) {
+      console.error('Failed to init weather music', err);
+    }
+  })();
+
   // Toasts (welcome banner)
   const toasts = createToastManager();
   toasts.show(`Welcome, ${playerName}!`);
@@ -1227,6 +1264,9 @@ async function main() {
     }
     if (rain && typeof rain.update === 'function') {
       rain.update(delta);
+    }
+    if (weatherMusicController && typeof weatherMusicController.update === 'function') {
+      weatherMusicController.update(delta);
     }
     // Update companion (if loaded)
     if (typeof companionController !== 'undefined' && companionController && typeof companionController.update === 'function') {
