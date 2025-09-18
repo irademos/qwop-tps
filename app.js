@@ -370,6 +370,18 @@ async function main() {
     }
   })();
 
+  // Seasonal ambient variations (lazy-loaded) - spring / summer / winter visual + subtle sounds.
+  (async () => {
+    try {
+      const mod = await import('./features/seasonalAmbient.js');
+      const seasonal = mod.initSeasonalAmbient(THREE, { scene, playerModel, audioManager });
+      // Expose for debugging/console control if needed
+      window.seasonalAmbient = seasonal;
+    } catch (err) {
+      console.error('Failed to init seasonal ambient', err);
+    }
+  })();
+
   // Ambient sounds (lazy-loaded): birdsong toggle in Actions sheet.
   // This is initialized exactly once after the scene & playerModel are ready.
   let ambientController = null;
@@ -1223,6 +1235,10 @@ async function main() {
     // Update companion spirit (if loaded)
     if (typeof companionSpiritController !== 'undefined' && companionSpiritController && typeof companionSpiritController.update === 'function') {
       companionSpiritController.update(delta);
+    }
+    // Update seasonal ambient (if loaded)
+    if (typeof seasonalAmbient !== 'undefined' && seasonalAmbient && typeof seasonalAmbient.update === 'function') {
+      seasonalAmbient.update(delta);
     }
     // Update ready beacon (if loaded)
     if (typeof readyBeaconController !== 'undefined' && readyBeaconController && typeof readyBeaconController.update === 'function') {

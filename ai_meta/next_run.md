@@ -3,6 +3,9 @@
 - [x] Day/night ambient sound transitions
 - [x] Add NPC simple quests (fetch & return)
 
-- [ ] Add seasonal ambient variations (spring/summer/winter)
+- [x] Add seasonal ambient variations (spring/summer/winter)
 - [ ] Weather-linked music intensity (storm, calm)
 - [ ] Small companion NPC with contextual tips
+
+- [ ] Seasonal festival events (decor & themed sfx)
+- [ ] Leaf-pile interactions (player can kick/collect leaves)
