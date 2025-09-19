@@ -1,1 +1,1 @@
-feat: add furniture rotation snap hotkey modes
+feat: add snap-to-surface furniture placement for sloped terrain

@@ -29,8 +29,6 @@ More ideas:
 - [x] Visual snapping grid for furniture
 - [x] Furniture rotation incremental snapping
 - [x] Snap-to-surface for sloped terrain
-- [x] Furniture rotation snap hotkey modes
+- [ ] Furniture rotation snap hotkey modes
 - [ ] Snap-to-surface: automatic ground-falloff blending (low-priority)
 - [ ] Snap-to-surface: per-model override for snap behavior (low-priority)
-- [ ] Furniture rotation: contextual HUD hint (low-priority)
-- [ ] Furniture placement: per-model rotation presets (low-priority)
