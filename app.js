@@ -357,6 +357,24 @@ async function main() {
           console.error('Failed to init snap-to-surface', err);
         }
 
+        // Automatic ground-falloff blending (augment snap-to-surface behavior)
+        try {
+          const falloffMod = await import('./features/snapToSurfaceFalloff.js');
+          const falloff = falloffMod.initSnapToSurfaceFalloff(THREE, {
+            furniturePreview: preview,
+            scene,
+            maxSlopeDeg: 45,
+            maxFalloff: 1.2,
+            sampleRadius: 0.6,
+            sampleCount: 7
+          });
+          // Expose for debugging
+          window.furnitureSnapToSurfaceFalloff = falloff;
+          if (falloff && typeof falloff.setActive === 'function') falloff.setActive(true);
+        } catch (err) {
+          console.error('Failed to init snap-to-surface falloff', err);
+        }
+
         // Initialize furniture presets (save/load) once preview is available.
         try {
           const presetsMod = await import('./features/furniturePresets.js');

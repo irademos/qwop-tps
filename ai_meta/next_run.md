@@ -30,6 +30,7 @@ More ideas:
 - [x] Furniture rotation incremental snapping
 - [x] Snap-to-surface for sloped terrain
 - [x] Furniture rotation snap hotkey modes
-- [ ] Snap-to-surface: automatic ground-falloff blending (low-priority)
+- [x] Snap-to-surface: automatic ground-falloff blending (low-priority)
 - [ ] Snap-to-surface: per-model override for snap behavior (low-priority)
 - [ ] Rotation hotkeys: visual HUD hint (low-priority)
+- [ ] Auto-align furniture to nearby supports (pillars/rails) (low-priority)
