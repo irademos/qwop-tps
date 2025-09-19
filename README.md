@@ -1,1 +1,1 @@
-feat: add daily seasonal challenges
+feat: add furniture placement save/load presets

@@ -25,6 +25,6 @@ More ideas:
 - [x] In-world furniture placement preview
 - [x] Multiplayer mini-game matches
 - [x] Daily seasonal challenges
-- [ ] Furniture placement: save/load presets
+- [x] Furniture placement: save/load presets
 - [ ] Visual snapping grid for furniture
 - [ ] Furniture rotation incremental snapping

@@ -307,6 +307,43 @@ async function main() {
         // Wire into outer scope controller variable (declared below); safe to assign.
         try { furniturePreviewController = preview; } catch (e) { /* best-effort */ }
         if (preview && typeof preview.setActive === 'function') preview.setActive(true);
+
+        // Initialize furniture presets (save/load) once preview is available.
+        try {
+          const presetsMod = await import('./features/furniturePresets.js');
+          const presets = presetsMod.initFurniturePresets({ furniturePlacement: fp, furniturePreview: preview, toasts });
+          window.furniturePresets = presets;
+
+          // Quick keyboard helpers (no UI buttons per UX guardrails):
+          // - U : save current preview/preset
+          // - I : load most recently saved preset
+          const _fpKeyHandler = (e) => {
+            if (e.code === 'KeyU') { // Save
+              try {
+                const name = presets.save();
+                toasts?.show?.(`Saved furniture preset: ${name}`);
+              } catch (err) {
+                console.error('Preset save failed', err);
+                toasts?.show?.('Preset save failed');
+              }
+            } else if (e.code === 'KeyI') { // Load last
+              try {
+                const loaded = presets.loadLast();
+                if (loaded) {
+                  toasts?.show?.(`Loaded furniture preset: ${loaded}`);
+                } else {
+                  toasts?.show?.('No furniture presets saved');
+                }
+              } catch (err) {
+                console.error('Preset load failed', err);
+                toasts?.show?.('Preset load failed');
+              }
+            }
+          };
+          window.addEventListener('keydown', _fpKeyHandler);
+        } catch (err) {
+          console.error('Failed to init furniture presets', err);
+        }
       } catch (e) {
         console.error('Failed to init furniture placement preview', e);
       }
