@@ -320,6 +320,17 @@ async function main() {
         try { furniturePreviewController = preview; } catch (e) { /* best-effort */ }
         if (preview && typeof preview.setActive === 'function') preview.setActive(true);
 
+        // Initialize rotation snapping helper exactly once (lazy, small module)
+        try {
+          const snapMod = await import('./features/furnitureRotationSnapping.js');
+          const snapController = snapMod.initFurnitureRotationSnapping(THREE, { furniturePreview: preview, snapAngle: 15 });
+          // Expose for debugging; API: setActive(boolean), snapToNearest(), rotateBy(deg)
+          window.furnitureRotationSnapping = snapController;
+          if (snapController && typeof snapController.setActive === 'function') snapController.setActive(true);
+        } catch (err) {
+          console.error('Failed to init furniture rotation snapping', err);
+        }
+
         // Initialize furniture presets (save/load) once preview is available.
         try {
           const presetsMod = await import('./features/furniturePresets.js');
