@@ -93,7 +93,7 @@ export function initFurniturePlacementPreview(THREE, { scene, playerModel, furni
       // auto-cleanup after some time so demo remains light-weight
       setTimeout(() => {
         try { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); } catch (e) {}
-      }, 30_000);
+      }, 30000);
     } catch (e) {
       // final fallback: do nothing
     }
