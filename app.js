@@ -487,6 +487,24 @@ async function main() {
     }
   })();
 
+  // Multiplayer mini-game matches (lazy-loaded) - lightweight demo of matches
+  // - Lazy-loaded and created exactly once after scene/player are available.
+  let minigameController = null;
+  (async function initMultiplayerMinigames() {
+    try {
+      const mod = await import('./features/multiplayerMinigameMatches.js');
+      minigameController = mod.initMultiplayerMinigames(THREE, { scene, playerModel, multiplayer, toasts });
+      if (minigameController && typeof minigameController.setActive === 'function') {
+        // Enable by default so it's immediately visible for verification.
+        minigameController.setActive(true);
+      }
+      // Expose for debugging if needed
+      window.minigameController = minigameController;
+    } catch (err) {
+      console.error('Failed to init multiplayer mini-game matches', err);
+    }
+  })();
+
   // Ready beacon controller (declared early so the lazy-loader can assign to it)
   let readyBeaconController = null;
 
@@ -1502,6 +1520,10 @@ async function main() {
     // Update bird NPC (if loaded)
     if (typeof birdController !== 'undefined' && birdController && typeof birdController.update === 'function') {
       birdController.update(delta);
+    }
+    // Update minigame controller (if loaded)
+    if (typeof minigameController !== 'undefined' && minigameController && typeof minigameController.update === 'function') {
+      minigameController.update(delta);
     }
     // Update dialogue system (if loaded)
     if (typeof dialogueController !== 'undefined' && dialogueController && typeof dialogueController.update === 'function') {

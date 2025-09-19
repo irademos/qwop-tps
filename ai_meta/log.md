@@ -18,3 +18,4 @@
 2025-09-18 - add furniture placement demo (preview & place with keys P/L/F/R)
 2025-09-19 - add player housing customization presets (save/load)
 2025-09-19 - add in-world furniture placement preview
+2025-09-19 - add multiplayer mini-game matches
