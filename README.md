@@ -1,1 +1,1 @@
-feat: add furniture snapping grid
+feat: add furniture rotation incremental snapping

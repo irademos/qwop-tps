@@ -27,5 +27,6 @@ More ideas:
 - [x] Daily seasonal challenges
 - [x] Furniture placement: save/load presets
 - [x] Visual snapping grid for furniture
-- [ ] Furniture rotation incremental snapping
+- [x] Furniture rotation incremental snapping
 - [ ] Snap-to-surface for sloped terrain
+- [ ] Furniture rotation snap hotkey modes
