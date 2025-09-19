@@ -412,6 +412,19 @@ async function main() {
     }
   })();
 
+  // Daily seasonal challenges (lazy-loaded) - small world markers that offer a daily objective.
+  (async function initDailySeasonalChallenges() {
+    try {
+      const mod = await import('./features/dailySeasonalChallenges.js');
+      const dc = mod.initDailySeasonalChallenges(THREE, { scene, playerModel, toasts, audioManager });
+      window.dailyChallenges = dc;
+      if (dc && typeof dc.setActive === 'function') dc.setActive(true);
+      // Update loop wiring: animate() already calls controllers named on window; this exposes a reference.
+    } catch (err) {
+      console.error('Failed to init daily seasonal challenges', err);
+    }
+  })();
+
   // Small companion NPC (lazy-loaded): a tiny orbiting helper that follows the player
   // and occasionally displays contextual tips via the toasts manager.
   (async function initCompanionNPC() {

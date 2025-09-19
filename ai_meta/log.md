@@ -19,3 +19,4 @@
 2025-09-19 - add player housing customization presets (save/load)
 2025-09-19 - add in-world furniture placement preview
 2025-09-19 - add multiplayer mini-game matches
+2025-09-19 - add daily seasonal challenges
