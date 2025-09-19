@@ -21,3 +21,4 @@
 2025-09-19 - add multiplayer mini-game matches
 2025-09-19 - add daily seasonal challenges
 2025-09-19 - add furniture placement save/load presets
+2025-09-19 - add visual snapping grid for furniture

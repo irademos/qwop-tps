@@ -26,5 +26,6 @@ More ideas:
 - [x] Multiplayer mini-game matches
 - [x] Daily seasonal challenges
 - [x] Furniture placement: save/load presets
-- [ ] Visual snapping grid for furniture
+- [x] Visual snapping grid for furniture
 - [ ] Furniture rotation incremental snapping
+- [ ] Snap-to-surface for sloped terrain

@@ -1,1 +1,1 @@
-feat: add furniture placement save/load presets
+feat: add furniture snapping grid

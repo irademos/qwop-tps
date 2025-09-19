@@ -252,7 +252,19 @@ async function main() {
   const headingArrow = createHeadingArrow(THREE);
   scene.add(headingArrow.group);
   window.playerModel = playerModel;
-
+  
+  // Initialize furniture snapping grid (visual aid only; no UI buttons)
+  (async function initFurnitureSnapping() {
+    try {
+      const mod = await import('./features/furnitureSnapping.js');
+      const snap = mod.initFurnitureSnapping(THREE, { scene, playerModel });
+      window.furnitureSnapping = snap;
+      if (snap && typeof snap.setActive === 'function') snap.setActive(true);
+    } catch (err) {
+      console.error('Failed to init furniture snapping', err);
+    }
+  })();
+  
   // Player Housing Showcase (lazy-loaded) - small house near player, no UI buttons.
   (async function initPlayerHousing() {
     try {
