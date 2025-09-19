@@ -327,6 +327,17 @@ async function main() {
           // Expose for debugging; API: setActive(boolean), snapToNearest(), rotateBy(deg)
           window.furnitureRotationSnapping = snapController;
           if (snapController && typeof snapController.setActive === 'function') snapController.setActive(true);
+
+          // Init rotation snap hotkeys (lazy module) once snapping controller exists.
+          try {
+            const hotkeysMod = await import('./features/furnitureRotationHotkeys.js');
+            const hotkeys = hotkeysMod.initFurnitureRotationHotkeys({ snapController, toasts });
+            // Expose for debugging/cleanup
+            window.furnitureRotationHotkeys = hotkeys;
+            if (hotkeys && typeof hotkeys.setActive === 'function') hotkeys.setActive(true);
+          } catch (e) {
+            console.error('Failed to init furniture rotation hotkeys', e);
+          }
         } catch (err) {
           console.error('Failed to init furniture rotation snapping', err);
         }
