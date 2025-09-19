@@ -23,3 +23,4 @@
 2025-09-19 - add furniture placement save/load presets
 2025-09-19 - add visual snapping grid for furniture
 2025-09-19 - add furniture rotation incremental snapping
+2025-09-19 - add snap-to-surface furniture placement for sloped terrain

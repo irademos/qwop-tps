@@ -1,1 +1,1 @@
-feat: add furniture rotation incremental snapping
+feat: add snap-to-surface furniture placement for sloped terrain

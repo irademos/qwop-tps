@@ -331,6 +331,21 @@ async function main() {
           console.error('Failed to init furniture rotation snapping', err);
         }
 
+        // Initialize snap-to-surface helper (lazy, small module)
+        try {
+          const surfaceMod = await import('./features/snapToSurface.js');
+          const surfaceSnap = surfaceMod.initSnapToSurface(THREE, {
+            furniturePreview: preview,
+            scene,
+            maxSlopeDeg: 45
+          });
+          // Expose for debugging; API: setActive(boolean), snapNow(), destroy()
+          window.furnitureSnapToSurface = surfaceSnap;
+          if (surfaceSnap && typeof surfaceSnap.setActive === 'function') surfaceSnap.setActive(true);
+        } catch (err) {
+          console.error('Failed to init snap-to-surface', err);
+        }
+
         // Initialize furniture presets (save/load) once preview is available.
         try {
           const presetsMod = await import('./features/furniturePresets.js');
