@@ -26,3 +26,4 @@
 2025-09-19 - add snap-to-surface furniture placement for sloped terrain
 2025-09-19 - add furniture rotation snap hotkey modes
 2025-09-19 - implement furniture rotation snap hotkey modes (keys: [, ], K)
+2025-09-19 - add snap-to-surface automatic ground-falloff blending
