@@ -292,6 +292,25 @@ async function main() {
         // Enable preview by default so it's immediately visible for verification.
         fp.setActive(true);
       }
+
+      // Also lazy-load the lightweight placement preview controller.
+      try {
+        const previewMod = await import('./features/furniturePlacementPreview.js');
+        // The preview shows a translucent "ghost" of the current furniture in-world
+        // and forwards user place commands to the main furniturePlacement module when available.
+        const preview = previewMod.initFurniturePlacementPreview(THREE, {
+          scene,
+          playerModel,
+          furniturePlacement: fp
+        });
+        window.furniturePlacementPreview = preview;
+        // Wire into outer scope controller variable (declared below); safe to assign.
+        try { furniturePreviewController = preview; } catch (e) { /* best-effort */ }
+        if (preview && typeof preview.setActive === 'function') preview.setActive(true);
+      } catch (e) {
+        console.error('Failed to init furniture placement preview', e);
+      }
+
     } catch (err) {
       console.error('Failed to init furniture placement demo', err);
     }
@@ -655,6 +674,7 @@ async function main() {
   let firefliesController = null;
   let coinController = null;
   let companionController = null;
+  let furniturePreviewController = null;
   let scoreHUD = null;
   let playerScore = 0;
   let dialogueController = null;
@@ -1462,6 +1482,10 @@ async function main() {
     // Update companion spirit (if loaded)
     if (typeof companionSpiritController !== 'undefined' && companionSpiritController && typeof companionSpiritController.update === 'function') {
       companionSpiritController.update(delta);
+    }
+    // Update furniture placement preview (if loaded)
+    if (typeof furniturePreviewController !== 'undefined' && furniturePreviewController && typeof furniturePreviewController.update === 'function') {
+      furniturePreviewController.update(delta);
     }
     // Update seasonal ambient (if loaded)
     if (typeof seasonalAmbient !== 'undefined' && seasonalAmbient && typeof seasonalAmbient.update === 'function') {
