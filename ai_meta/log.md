@@ -24,3 +24,4 @@
 2025-09-19 - add visual snapping grid for furniture
 2025-09-19 - add furniture rotation incremental snapping
 2025-09-19 - add snap-to-surface furniture placement for sloped terrain
+2025-09-19 - add furniture rotation snap hotkey modes
