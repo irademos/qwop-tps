@@ -1,0 +1,6 @@
+No additional files required.
+- app.js already lazy-loads ./features/furnitureRotationHotkeys.js when the furniture placement preview initializes.
+- Ensure features/furnitureRotationHotkeys.js contains the hotkey controller (rotate with [ and ], cycle with K).
+- No other edits are strictly necessary for the feature to be active at runtime.
+
+If you want me to also apply the ai_meta and README updates (log entry, next_run checked, changelog), tell me and I will make those SEARCH/REPLACE edits now.
