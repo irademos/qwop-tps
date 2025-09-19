@@ -23,7 +23,7 @@ New ideas:
 More ideas:
 - [x] Player housing customization: save/load presets
 - [x] In-world furniture placement preview
-- [ ] Multiplayer mini-game matches
+- [x] Multiplayer mini-game matches
 - [ ] Daily seasonal challenges
 - [ ] Furniture placement: save/load presets
 - [ ] Visual snapping grid for furniture
