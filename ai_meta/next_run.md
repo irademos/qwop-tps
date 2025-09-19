@@ -21,7 +21,7 @@ New ideas:
 - [x] Furniture placement demo
 
 More ideas:
-- [ ] Player housing customization: save/load presets
+- [x] Player housing customization: save/load presets
 - [ ] In-world furniture placement preview
 - [ ] Multiplayer mini-game matches
 - [ ] Daily seasonal challenges
