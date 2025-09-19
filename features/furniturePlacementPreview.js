@@ -127,3 +127,4 @@ export function initFurniturePlacementPreview(THREE, { scene, playerModel, furni
   }
 
   return { setActive, update, dispose };
+}
