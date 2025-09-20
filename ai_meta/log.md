@@ -38,3 +38,4 @@
 2025-09-20 - add per-player snap angle preference (localStorage)
 2025-09-20 - add visual editor for per-model anchor offsets
 2025-09-20 - add remote preset share (sync furniture presets across peers)
+2025-09-20 - add lightweight anchor baking tool
