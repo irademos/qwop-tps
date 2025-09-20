@@ -1,1 +1,1 @@
-feat: add lightweight anchor baking tool (auto-bakes anchors for furniture on startup)
+feat: persist furniture snap angle per-peer on server (broadcast + local fallback)

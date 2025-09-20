@@ -43,6 +43,7 @@ import { createTitleStatus } from "./ui/titleStatus.js";
 import { createRainEffect } from "./effects/rain.js";
 import { createHeadingArrow } from "./helpers/headingArrow.js";
 import { initActionsMenu } from "./ui/actionsMenu.js";
+import { initSnapAnglePersistence } from "./features/snapAngleServer.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -1609,6 +1610,21 @@ async function main() {
 
   function handleIncomingData(peerId, data) {
     console.log('📡 Incoming data:', data);
+    // Snap angle update from peers (persist per-peer)
+    if (data && data.type === 'snapAngleUpdate') {
+      try {
+        const raw = localStorage.getItem('snap_angles_v1') || '{}';
+        const map = JSON.parse(raw);
+        map[peerId] = { angle: data.angle, ts: data.ts || Date.now() };
+        localStorage.setItem('snap_angles_v1', JSON.stringify(map));
+        // If a snap controller is present and supports peer angles, forward it
+        try {
+          if (window.furnitureRotationSnapping && typeof window.furnitureRotationSnapping.setPeerAngle === 'function') {
+            window.furnitureRotationSnapping.setPeerAngle(peerId, data.angle);
+          }
+        } catch (e) {}
+      } catch (e) {}
+    }
     // --- Ping/Pong handling for latency measurement ---
     if (data && data.type === 'ping' && data.to === multiplayer.getId()) {
       multiplayer.send({ type: 'pong', from: multiplayer.getId(), to: data.from, nonce: data.nonce, ts: data.ts });
@@ -2038,6 +2054,7 @@ async function main() {
     renderer.render(scene, camera);
   }
 
+  try { initSnapAnglePersistence(multiplayer); } catch (e) {}
   animate();
 }
 
