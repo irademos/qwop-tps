@@ -32,3 +32,4 @@
 2025-09-20 - add rotation hotkey accessibility TTS hint
 2025-09-20 - add auto-align furniture to nearby supports (pillars/rails)
 2025-09-20 - add visual indicator for furniture snap angle HUD
+2025-09-20 - add visual indicator for furniture snap angle HUD
