@@ -1,1 +1,1 @@
-feat: add one-click preset accept flow for remote shares
+feat: add floating lantern ambient effect (visual ambient, no UI)

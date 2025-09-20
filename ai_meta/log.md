@@ -42,3 +42,4 @@
 2025-09-20 - persist snap angle per-peer on server (broadcast & local fallback)
 2025-09-20 - add per-player default preset sync via query param
 2025-09-20 - add one-click preset accept flow for remote shares
+2025-09-20 - add floating lantern ambient effect

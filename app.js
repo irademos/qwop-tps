@@ -803,6 +803,18 @@ async function main() {
     }
   })();
 
+  // Floating lantern ambient (lazy-loaded) - gentle lanterns that drift quietly around the player.
+  (async function initFloatingLanterns() {
+    try {
+      const mod = await import('./features/floatingLanterns.js');
+      const lanterns = mod.initFloatingLanterns(THREE, { scene, playerModel, audioManager });
+      window.floatingLanterns = lanterns;
+      if (lanterns && typeof lanterns.setActive === 'function') lanterns.setActive(true);
+    } catch (err) {
+      console.error('Failed to init floating lanterns', err);
+    }
+  })();
+
   // Daily seasonal challenges (lazy-loaded) - small world markers that offer a daily objective.
   (async function initDailySeasonalChallenges() {
     try {
