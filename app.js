@@ -366,6 +366,37 @@ async function main() {
               console.error('Failed to init auto-align supports', e);
             }
           })();
+
+          // Smart support-detection (semantic tags)
+          // - Lazy-loads a small helper that scans scene objects for semantic tags
+          //   like "support", "pillar", "rail" and highlights nearby supports
+          //   in the world relative to the furniture preview position.
+          // - No UI buttons are added; visuals are world-space markers only.
+          (async () => {
+            try {
+              const sdMod = await import('./features/supportDetection.js');
+              const supportDetector = sdMod.initSupportDetection(THREE, {
+                scene,
+                furniturePreview: preview,
+                maxDist: 1.5
+              });
+              window.supportDetector = supportDetector;
+              if (supportDetector && typeof supportDetector.setActive === 'function') supportDetector.setActive(true);
+
+              // Best-effort: call supportDetector.update from preview.update each frame
+              try {
+                const origPreviewUpdate2 = preview.update?.bind(preview);
+                preview.update = function(delta) {
+                  if (typeof origPreviewUpdate2 === 'function') origPreviewUpdate2(delta);
+                  try { supportDetector.update(delta); } catch (e) {}
+                };
+              } catch (e) {
+                // ignore
+              }
+            } catch (e) {
+              console.error('Failed to init support detection', e);
+            }
+          })();
         }
 
         // Initialize rotation snapping helper exactly once (lazy, small module)

@@ -1,1 +1,1 @@
-feat: visual indicator for furniture snap angle HUD
+feat: smart support-detection via semantic tags
