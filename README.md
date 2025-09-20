@@ -1,1 +1,1 @@
-feat: add per-player default preset sync via query param
+feat: add one-click preset accept flow for remote shares

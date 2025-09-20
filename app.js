@@ -641,6 +641,19 @@ async function main() {
           const presets = presetsMod.initFurniturePresets({ furniturePlacement: fp, furniturePreview: preview, toasts });
           window.furniturePresets = presets;
 
+          // One-click preset accept flow: lazy-load small accept UI (keyboard-driven).
+          try {
+            const acceptMod = await import('./features/oneClickPresetAccept.js');
+            try {
+              const acceptCtrl = acceptMod.initOneClickPresetAccept({ furniturePresets: presets, toasts, timeout: 12000 });
+              window.oneClickPresetAccept = acceptCtrl;
+            } catch (e) {
+              console.error('Failed to init one-click preset accept flow', e);
+            }
+          } catch (e) {
+            console.error('Failed to import one-click preset accept module', e);
+          }
+
           // Remote preset sharing: lazy-load small helper that broadcasts saved presets to peers.
           try {
             const remoteMod = await import('./features/remotePresetShare.js');
@@ -1709,9 +1722,14 @@ async function main() {
           store[data.name] = { payload: data.payload, meta: { from: data.from || 'peer', ts: incomingTs } };
           localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
           try {
-            if (window.furniturePresets && typeof window.furniturePresets.load === 'function') {
-              // Apply received preset into preview for quick verification
-              window.furniturePresets.load(data.name);
+            // Notify one-click accept controller instead of auto-applying.
+            if (window.oneClickPresetAccept && typeof window.oneClickPresetAccept.notify === 'function') {
+              window.oneClickPresetAccept.notify({ name: data.name, from: data.from || 'peer' });
+            } else {
+              // Fallback: apply immediately and show notice.
+              if (window.furniturePresets && typeof window.furniturePresets.load === 'function') {
+                window.furniturePresets.load(data.name);
+              }
             }
           } catch (e) {}
           try { toasts?.show?.(`Received remote preset: ${data.name}`); } catch (e) {}
