@@ -367,6 +367,21 @@ async function main() {
             }
           })();
 
+          // Per-model anchor presets (lazy, small module) - allows per-model anchor offsets for heavy furniture.
+          try {
+            const anchorsMod = await import('./features/perModelAnchors.js');
+            const anchors = anchorsMod.initPerModelAnchors(THREE, { scene, furniturePlacement: fp, furniturePreview: preview });
+            window.perModelAnchors = anchors;
+            if (anchors && typeof anchors.setActive === 'function') anchors.setActive(true);
+
+            // Example preset applied non-invasively: many demos include a "chair"
+            try {
+              anchors.setPreset('chair', { positionOffset: [0, -0.12, 0], rotationOffsetDeg: 0, description: 'Chair heavy anchor' });
+            } catch (e) {}
+          } catch (e) {
+            console.error('Failed to init per-model anchors', e);
+          }
+
           // Smart support-detection (semantic tags)
           // - Lazy-loads a small helper that scans scene objects for semantic tags
           //   like "support", "pillar", "rail" and highlights nearby supports

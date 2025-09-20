@@ -1,1 +1,1 @@
-feat: smart support-detection via semantic tags
+feat: add per-model anchor presets for heavy furniture
