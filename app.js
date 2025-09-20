@@ -807,9 +807,10 @@ async function main() {
   (async function initFloatingLanterns() {
     try {
       const mod = await import('./features/floatingLanterns.js');
-      const lanterns = mod.initFloatingLanterns(THREE, { scene, playerModel, audioManager });
-      window.floatingLanterns = lanterns;
-      if (lanterns && typeof lanterns.setActive === 'function') lanterns.setActive(true);
+      // assign to shared controller variable so animate() can update it
+      lanternController = mod.initFloatingLanterns(THREE, { scene, playerModel, audioManager });
+      window.floatingLanterns = lanternController;
+      if (lanternController && typeof lanternController.setActive === 'function') lanternController.setActive(true);
     } catch (err) {
       console.error('Failed to init floating lanterns', err);
     }
@@ -1108,6 +1109,8 @@ async function main() {
   let firefliesController = null;
   let coinController = null;
   let companionController = null;
+  // controller for floating lanterns (initialized lazily below)
+  let lanternController = null;
   let furniturePreviewController = null;
   let scoreHUD = null;
   let playerScore = 0;
