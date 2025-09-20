@@ -1,1 +1,1 @@
-feat: add rotation hotkeys HUD hint
+feat: add rotation hotkeys HUD hint; accessibility TTS hint

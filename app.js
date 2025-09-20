@@ -367,6 +367,16 @@ async function main() {
             } catch (errHint) {
               console.error('Failed to init rotation hotkey HUD hint', errHint);
             }
+
+            // Accessibility: rotation hotkey TTS (lazy-loaded, initialized once)
+            try {
+              const ttsMod = await import('./features/rotationHotkeyTTS.js');
+              const tts = ttsMod.initRotationHotkeyTTS({ toasts });
+              window.rotationHotkeyTTS = tts;
+              if (tts && typeof tts.setActive === 'function') tts.setActive(true);
+            } catch (errTTS) {
+              console.error('Failed to init rotation hotkey TTS', errTTS);
+            }
           } catch (errHot) {
             console.error('Failed to init furniture rotation hotkeys', errHot);
           }
