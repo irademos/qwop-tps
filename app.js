@@ -355,6 +355,18 @@ async function main() {
             const hotkeys = hotkeysMod.initFurnitureRotationHotkeys({ snapController, toasts });
             window.furnitureRotationHotkeys = hotkeys;
             if (hotkeys && typeof hotkeys.setActive === 'function') hotkeys.setActive(true);
+
+            // Also initialize a lightweight HUD hint for rotation hotkeys.
+            // This shows a transient, non-interactive visual cue when the user
+            // presses [, ], or K. It's lazy-loaded and safe if it fails.
+            try {
+              const hintMod = await import('./features/rotationHotkeyHint.js');
+              const hint = hintMod.initRotationHotkeyHint({ toasts });
+              window.rotationHotkeyHint = hint;
+              if (hint && typeof hint.setActive === 'function') hint.setActive(true);
+            } catch (errHint) {
+              console.error('Failed to init rotation hotkey HUD hint', errHint);
+            }
           } catch (errHot) {
             console.error('Failed to init furniture rotation hotkeys', errHot);
           }

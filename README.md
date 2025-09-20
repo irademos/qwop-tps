@@ -1,1 +1,1 @@
-feat: add per-model snap-to-surface overrides
+feat: add rotation hotkeys HUD hint
