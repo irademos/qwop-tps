@@ -36,5 +36,5 @@ More ideas:
 - [ ] Auto-align furniture to nearby supports (pillars/rails) (low-priority)
 
 New ideas:
-- [ ] Rotation hint accessibility: speak hint via TTS (low-priority)
+- [x] Rotation hint accessibility: speak hint via TTS (low-priority)
 - [ ] Visual indicator for furniture snap angle in HUD (low-priority)
