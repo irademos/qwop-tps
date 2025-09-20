@@ -50,3 +50,5 @@ New ideas:
 + - [x] Persist snap angle per-peer on server (optional)
 + - [x] Per-player default preset sync via query param (low-priority)
 + - [x] One-click preset accept flow for remote shares (low-priority)
++ - [x] Add floating lantern ambient effect (features/floatingLanterns.js)
++ - [ ] Festival-timed lantern release (new idea)
