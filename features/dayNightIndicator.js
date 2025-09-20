@@ -7,6 +7,9 @@
  *
  * The indicator polls the provided controller (or window.dayNightAmbient) for a
  * `.current` string ("day" | "night") and updates a compact, scoped DOM badge.
+ *
+ * NOTE: No additional files are required — app.js already imports and initializes
+ * the day/night ambient controller (audio/dayNightAmbient.js) and this HUD.
  */
 
 /**
