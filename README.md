@@ -1,1 +1,1 @@
-feat: snap-to-surface automatic ground-falloff blending
+feat: add per-model snap-to-surface overrides

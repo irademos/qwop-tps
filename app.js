@@ -318,7 +318,28 @@ async function main() {
         window.furniturePlacementPreview = preview;
         // Wire into outer scope controller variable (declared below); safe to assign.
         try { furniturePreviewController = preview; } catch (e) { /* best-effort */ }
-        if (preview && typeof preview.setActive === 'function') preview.setActive(true);
+        if (preview && typeof preview.setActive === 'function') {
+          preview.setActive(true);
+          // Initialize model-specific snap overrides (lazy, lightweight).
+          // This augments snap-to-surface behaviour with per-model offsets and
+          // optional rotation snap hints. No UI buttons are added.
+          (async () => {
+            try {
+              const mod = await import('./features/snapToSurfaceModelOverrides.js');
+              const overrides = mod.initSnapToSurfaceModelOverrides(THREE, { scene, furniturePreview: preview });
+              window.modelSnapOverrides = overrides;
+              if (overrides && typeof overrides.setActive === 'function') overrides.setActive(true);
+              // Example override (non-invasive): many furniture demos include a "chair".
+              // This is only a demonstration and can be changed at runtime via the
+              // returned API (window.modelSnapOverrides.setOverride).
+              try {
+                overrides.setOverride('chair', { positionOffset: 0.12, rotationSnapDeg: 15 });
+              } catch (e) {}
+            } catch (e) {
+              console.error('Failed to init model snap overrides', e);
+            }
+          })();
+        }
 
         // Initialize rotation snapping helper exactly once (lazy, small module)
         try {

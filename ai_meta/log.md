@@ -27,3 +27,4 @@
 2025-09-19 - add furniture rotation snap hotkey modes
 2025-09-19 - implement furniture rotation snap hotkey modes (keys: [, ], K)
 2025-09-19 - add snap-to-surface automatic ground-falloff blending
+2025-09-20 - add per-model snap-to-surface override system
