@@ -40,3 +40,4 @@
 2025-09-20 - add remote preset share (sync furniture presets across peers)
 2025-09-20 - add lightweight anchor baking tool
 2025-09-20 - persist snap angle per-peer on server (broadcast & local fallback)
+2025-09-20 - add per-player default preset sync via query param

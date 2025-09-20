@@ -2054,6 +2054,18 @@ async function main() {
     renderer.render(scene, camera);
   }
 
+  (async () => {
+    try {
+      const mod = await import('./features/defaultPresetFromQuery.js');
+      try {
+        mod.initDefaultPresetFromQuery({ multiplayer, toasts, playerName });
+      } catch (e) {
+        console.error('defaultPresetFromQuery init failed', e);
+      }
+    } catch (e) {
+      console.error('Failed to import defaultPresetFromQuery', e);
+    }
+  })();
   try { initSnapAnglePersistence(multiplayer); } catch (e) {}
   animate();
 }

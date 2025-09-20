@@ -1,1 +1,1 @@
-feat: persist furniture snap angle per-peer on server (broadcast + local fallback)
+feat: add per-player default preset sync via query param
