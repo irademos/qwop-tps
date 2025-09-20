@@ -808,6 +808,8 @@ async function main() {
     try {
       const mod = await import('./features/floatingLanterns.js');
       const lanterns = mod.initFloatingLanterns(THREE, { scene, playerModel, audioManager });
+      // wire into animate() update checks (lanternController is declared above)
+      lanternController = lanterns;
       window.floatingLanterns = lanterns;
       if (lanterns && typeof lanterns.setActive === 'function') lanterns.setActive(true);
     } catch (err) {
@@ -1108,6 +1110,7 @@ async function main() {
   let firefliesController = null;
   let coinController = null;
   let companionController = null;
+  let lanternController = null;
   let furniturePreviewController = null;
   let scoreHUD = null;
   let playerScore = 0;

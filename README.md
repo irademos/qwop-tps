@@ -1,1 +1,1 @@
-feat: add floating lantern ambient effect (visual ambient, no UI)
+feat: add festival-timed lantern release (floating lanterns release on festival date)
