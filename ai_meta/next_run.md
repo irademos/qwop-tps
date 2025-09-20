@@ -38,6 +38,10 @@ More ideas:
 New ideas:
 - [x] Rotation hint accessibility: speak hint via TTS (low-priority)
 - [x] Visual indicator for furniture snap angle HUD (low-priority)
-- [ ] Smart support-detection via semantic tags (low-priority)
+- [x] Smart support-detection via semantic tags (low-priority)
 - [ ] Per-model anchor presets for heavy furniture (low-priority)
 - [ ] Snap angle per-player preference (low-priority)
+
+New ideas:
+- [ ] Visual editor for per-model anchor offsets (low-priority)
+- [ ] Remote preset share (sync furniture presets across peers)
