@@ -47,6 +47,6 @@ New ideas:
 - [x] Remote preset share (sync furniture presets across peers)
 - [x] Lightweight anchor baking tool (low-priority)
 + ideas:
-+ - [ ] Persist snap angle per-peer on server (optional)
++ - [x] Persist snap angle per-peer on server (optional)
 + - [ ] Per-player default preset sync via query param (low-priority)
 + - [ ] One-click preset accept flow for remote shares (low-priority)
