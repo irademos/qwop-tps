@@ -1,1 +1,1 @@
-feat: add rotation hotkeys HUD hint; accessibility TTS hint
+feat: auto-align furniture to nearby supports (pillars/rails)

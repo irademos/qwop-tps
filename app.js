@@ -339,6 +339,33 @@ async function main() {
               console.error('Failed to init model snap overrides', e);
             }
           })();
+
+          // Auto-align furniture preview to nearby supports (pillars / rails).
+          // Lazy-load small module once preview is available. No UI added.
+          (async () => {
+            try {
+              const mod = await import('./features/autoAlignSupports.js');
+              const autoAlign = mod.initAutoAlignSupports(THREE, { scene, furniturePreview: preview, maxDist: 1.5 });
+              window.autoAlignSupports = autoAlign;
+              if (autoAlign && typeof autoAlign.setActive === 'function') autoAlign.setActive(true);
+
+              // Hook into world update loop: many controllers in this app are updated
+              // from the global animate() by calling their update(delta) if present.
+              // furniturePreview already has its own update; autoAlign supports
+              // being called once-per-frame safely. Attach a best-effort updater.
+              try {
+                const origPreviewUpdate = preview.update?.bind(preview);
+                preview.update = function(delta) {
+                  if (typeof origPreviewUpdate === 'function') origPreviewUpdate(delta);
+                  try { autoAlign.update(); } catch (e) {}
+                };
+              } catch (e) {
+                // fallback: nothing to do
+              }
+            } catch (e) {
+              console.error('Failed to init auto-align supports', e);
+            }
+          })();
         }
 
         // Initialize rotation snapping helper exactly once (lazy, small module)

@@ -3,7 +3,7 @@
 2025-09-17 - add day/night ambient sound transitions
 2025-09-18 - add NPC simple quest (fetch & return)
 2025-09-18 - add seasonal ambient variations (spring/summer/winter)
-2025-09-18 - add weather-linked music intensity (storm/calm)
+2025-09-18 - add weather-linked music intensity (storm, calm)
 2025-09-18 - add small companion NPC with contextual tips
 2025-09-18 - add seasonal festival events (decor & themed sfx)
 2025-09-18 - add leaf-pile interactions (collect & kick)
@@ -30,3 +30,4 @@
 2025-09-20 - add per-model snap-to-surface override system
 2025-09-20 - add rotation hotkeys HUD hint
 2025-09-20 - add rotation hotkey accessibility TTS hint
+2025-09-20 - add auto-align furniture to nearby supports (pillars/rails)
