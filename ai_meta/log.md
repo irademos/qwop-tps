@@ -43,3 +43,4 @@
 2025-09-20 - add per-player default preset sync via query param
 2025-09-20 - add one-click preset accept flow for remote shares
 2025-09-20 - add floating lantern ambient effect
+2025-09-20 - add festival-timed lantern release (one-time release on festival date)
