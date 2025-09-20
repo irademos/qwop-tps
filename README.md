@@ -1,1 +1,1 @@
-feat: add visual editor for per-model anchor offsets
+feat: add remote preset share for furniture presets

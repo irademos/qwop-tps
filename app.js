@@ -624,6 +624,20 @@ async function main() {
           const presets = presetsMod.initFurniturePresets({ furniturePlacement: fp, furniturePreview: preview, toasts });
           window.furniturePresets = presets;
 
+          // Remote preset sharing: lazy-load small helper that broadcasts saved presets to peers.
+          try {
+            const remoteMod = await import('./features/remotePresetShare.js');
+            try {
+              // initRemotePresetShare wraps presets.save and uses multiplayer to send payloads
+              const remote = remoteMod.initRemotePresetShare({ presets, multiplayer, toasts });
+              window.remotePresetShare = remote;
+            } catch (e) {
+              console.error('Failed to init remote preset share (init failed)', e);
+            }
+          } catch (e) {
+            console.error('Failed to init remote preset share (import failed)', e);
+          }
+
           // Quick keyboard helpers (no UI buttons per UX guardrails):
           // - U : save current preview/preset
           // - I : load most recently saved preset
@@ -1647,6 +1661,31 @@ async function main() {
         const vals = Object.values(peerPings);
         const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
         connIndicator.setStatus({ peers, avgPing: avg });
+      }
+    }
+
+    // Remote preset share from peers
+    if (data && data.type === 'presetShare' && data.name && data.payload) {
+      try {
+        const STORAGE_KEY = 'ai_furniture_presets_v1';
+        const raw = localStorage.getItem(STORAGE_KEY);
+        let store = raw ? JSON.parse(raw) : {};
+        // Merge if missing or incoming is newer (best-effort using meta.ts)
+        const incomingTs = data.meta?.ts || Date.now();
+        const localTs = (store[data.name]?.meta?.ts) || 0;
+        if (!store[data.name] || incomingTs > localTs) {
+          store[data.name] = { payload: data.payload, meta: { from: data.from || 'peer', ts: incomingTs } };
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+          try {
+            if (window.furniturePresets && typeof window.furniturePresets.load === 'function') {
+              // Apply received preset into preview for quick verification
+              window.furniturePresets.load(data.name);
+            }
+          } catch (e) {}
+          try { toasts?.show?.(`Received remote preset: ${data.name}`); } catch (e) {}
+        }
+      } catch (e) {
+        console.error('Failed to apply remote preset', e);
       }
     }
 
