@@ -192,3 +192,4 @@ export function initPerModelAnchors(THREE, { scene = null, furniturePlacement = 
     applyPresetToGroup,
     destroy
   };
+}
