@@ -1,1 +1,1 @@
-feat: add per-model anchor presets for heavy furniture
+feat: add per-player snap-angle preference for furniture rotation

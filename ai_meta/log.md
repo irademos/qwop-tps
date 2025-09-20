@@ -35,3 +35,4 @@
 2025-09-20 - add visual indicator for furniture snap angle HUD
 2025-09-20 - add smart support-detection via semantic tags
 2025-09-20 - add per-model anchor presets for heavy furniture
+2025-09-20 - add per-player snap angle preference (localStorage)

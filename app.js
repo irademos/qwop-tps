@@ -422,6 +422,16 @@ async function main() {
           window.furnitureRotationSnapping = snapController;
           if (snapController && typeof snapController.setActive === 'function') snapController.setActive(true);
 
+          // Per-player snap-angle preference
+          try {
+            const prefMod = await import('./features/snapAnglePreference.js');
+            const snapPref = prefMod.initSnapAnglePreference({ snapController, toasts });
+            window.snapAnglePreference = snapPref;
+            if (snapPref && typeof snapPref.setActive === 'function') snapPref.setActive(true);
+          } catch (err) {
+            console.error('Failed to init snap angle preference', err);
+          }
+
           // Lightweight HUD: show current furniture rotation snap angle (no buttons).
           // Loaded lazily and initialized once; attempts to keep in sync by wrapping
           // common controller methods if available.

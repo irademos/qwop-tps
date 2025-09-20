@@ -40,9 +40,12 @@ New ideas:
 - [x] Visual indicator for furniture snap angle HUD (low-priority)
 - [x] Smart support-detection via semantic tags (low-priority)
 - [x] Per-model anchor presets for heavy furniture (low-priority)
-- [ ] Snap angle per-player preference (low-priority)
+- [x] Snap angle per-player preference (low-priority)
 
 New ideas:
 - [ ] Visual editor for per-model anchor offsets (low-priority)
 - [ ] Remote preset share (sync furniture presets across peers)
 - [ ] Lightweight anchor baking tool (low-priority)
++ ideas:
++ - [ ] Persist snap angle per-peer on server (optional)
++ - [ ] Per-player default preset sync via query param (low-priority)
