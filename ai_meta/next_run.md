@@ -33,8 +33,10 @@ More ideas:
 - [x] Snap-to-surface: automatic ground-falloff blending (low-priority)
 - [x] Snap-to-surface: per-model override for snap behavior (low-priority)
 - [x] Rotation hotkeys: visual HUD hint (low-priority)
-- [ ] Auto-align furniture to nearby supports (pillars/rails) (low-priority)
+- [x] Auto-align furniture to nearby supports (pillars/rails) (low-priority)
 
 New ideas:
 - [x] Rotation hint accessibility: speak hint via TTS (low-priority)
 - [ ] Visual indicator for furniture snap angle in HUD (low-priority)
+- [ ] Smart support-detection via semantic tags (low-priority)
+- [ ] Per-model anchor presets for heavy furniture (low-priority)
