@@ -45,7 +45,8 @@ New ideas:
 New ideas:
 - [x] Visual editor for per-model anchor offsets (low-priority)
 - [x] Remote preset share (sync furniture presets across peers)
-- [ ] Lightweight anchor baking tool (low-priority)
+- [x] Lightweight anchor baking tool (low-priority)
 + ideas:
 + - [ ] Persist snap angle per-peer on server (optional)
 + - [ ] Per-player default preset sync via query param (low-priority)
++ - [ ] One-click preset accept flow for remote shares (low-priority)

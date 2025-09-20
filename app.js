@@ -308,6 +308,22 @@ async function main() {
     }
   })();
 
+  // Lightweight Anchor Baker (runs once automatically; no UI)
+  (async () => {
+    try {
+      const mod = await import('./features/anchorBaker.js');
+      const baker = mod.initAnchorBaker(THREE, { scene, playerModel, toasts });
+      window.anchorBaker = baker;
+      try {
+        await baker.bakeAll();
+      } catch (e) {
+        console.error('Anchor baking failed', e);
+      }
+    } catch (e) {
+      console.error('Failed to init anchor baker', e);
+    }
+  })();
+
   // Furniture placement demo (lazy-loaded, preview & place with keys: P toggle, L cycle, F place, R rotate)
   (async () => {
     try {
