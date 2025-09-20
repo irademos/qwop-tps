@@ -49,4 +49,4 @@ New ideas:
 + ideas:
 + - [x] Persist snap angle per-peer on server (optional)
 + - [x] Per-player default preset sync via query param (low-priority)
-+ - [ ] One-click preset accept flow for remote shares (low-priority)
++ - [x] One-click preset accept flow for remote shares (low-priority)
