@@ -220,3 +220,4 @@ export function initSnapToSurfaceModelOverrides(THREE, { scene, furniturePreview
     destroy,
     getOverrides: () => new Map(overrides)
   };
+}
