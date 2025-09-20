@@ -43,7 +43,7 @@ New ideas:
 - [x] Snap angle per-player preference (low-priority)
 
 New ideas:
-- [ ] Visual editor for per-model anchor offsets (low-priority)
+- [x] Visual editor for per-model anchor offsets (low-priority)
 - [ ] Remote preset share (sync furniture presets across peers)
 - [ ] Lightweight anchor baking tool (low-priority)
 + ideas:
