@@ -294,6 +294,20 @@ async function main() {
     }
   })();
 
+  // Per-model Anchor Editor (visual editor for anchor offsets).
+  // - Lazy-loaded and initialized exactly once after scene/playerModel/renderer are available.
+  // - No on-screen buttons: select a model by clicking it in the world and use keyboard arrows/PageUp/PageDown to nudge.
+  (async () => {
+    try {
+      const mod = await import('./features/anchorEditor.js');
+      const editor = mod.initAnchorEditor(THREE, { scene, camera, renderer });
+      window.anchorEditor = editor;
+      if (editor && typeof editor.setActive === 'function') editor.setActive(true);
+    } catch (e) {
+      console.error('Failed to init anchor editor', e);
+    }
+  })();
+
   // Furniture placement demo (lazy-loaded, preview & place with keys: P toggle, L cycle, F place, R rotate)
   (async () => {
     try {

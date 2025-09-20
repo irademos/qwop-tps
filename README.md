@@ -1,1 +1,1 @@
-feat: add per-player snap-angle preference for furniture rotation
+feat: add visual editor for per-model anchor offsets
