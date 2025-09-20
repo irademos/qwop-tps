@@ -1,1 +1,1 @@
-feat: auto-align furniture to nearby supports (pillars/rails)
+feat: visual indicator for furniture snap angle HUD

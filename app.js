@@ -376,6 +376,58 @@ async function main() {
           window.furnitureRotationSnapping = snapController;
           if (snapController && typeof snapController.setActive === 'function') snapController.setActive(true);
 
+          // Lightweight HUD: show current furniture rotation snap angle (no buttons).
+          // Loaded lazily and initialized once; attempts to keep in sync by wrapping
+          // common controller methods if available.
+          try {
+            const hudMod = await import('./features/furnitureSnapHUD.js');
+            const snapHUD = hudMod.initFurnitureSnapHUD({ initialAngle: snapController?.snapAngle ?? 15 });
+            window.furnitureSnapHUD = snapHUD;
+            if (snapHUD && typeof snapHUD.setActive === 'function') snapHUD.setActive(true);
+
+            // Best-effort sync: if controller exposes rotateBy / snapToNearest, wrap them
+            // so the HUD updates after rotation changes. Preserve original behavior.
+            try {
+              if (snapController) {
+                // update HUD from explicit property if available
+                if (typeof snapController.snapAngle === 'number') {
+                  snapHUD.setAngle(snapController.snapAngle);
+                }
+                // wrap rotateBy
+                if (typeof snapController.rotateBy === 'function') {
+                  const _origRotateBy = snapController.rotateBy.bind(snapController);
+                  snapController.rotateBy = (deg) => {
+                    const res = _origRotateBy(deg);
+                    try { snapHUD.setAngle(snapController.snapAngle ?? snapController.currentSnapAngle ?? snapController._snapAngle ?? 15); } catch (e) {}
+                    return res;
+                  };
+                }
+                // wrap snapToNearest
+                if (typeof snapController.snapToNearest === 'function') {
+                  const _origSnapToNearest = snapController.snapToNearest.bind(snapController);
+                  snapController.snapToNearest = (...args) => {
+                    const res = _origSnapToNearest(...args);
+                    try { snapHUD.setAngle(snapController.snapAngle ?? snapController.currentSnapAngle ?? snapController._snapAngle ?? 15); } catch (e) {}
+                    return res;
+                  };
+                }
+                // Ensure HUD follows active state
+                if (typeof snapController.setActive === 'function') {
+                  const _origSetActive = snapController.setActive.bind(snapController);
+                  snapController.setActive = (v) => {
+                    const r = _origSetActive(v);
+                    try { snapHUD.setActive(Boolean(v)); } catch (e) {}
+                    return r;
+                  };
+                }
+              }
+            } catch (e) {
+              console.error('Failed to wrap snap controller for HUD sync', e);
+            }
+          } catch (e) {
+            console.error('Failed to init furniture snap HUD', e);
+          }
+
           // Initialize rotation snap hotkeys (lazy, small module) — no buttons per UX guardrails.
           try {
             const hotkeysMod = await import('./features/furnitureRotationHotkeys.js');
