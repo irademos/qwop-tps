@@ -1,1 +1,1 @@
-feat: add timed lantern release minigame (press G to release floating lanterns)
+feat: ship timed lantern release minigame (press G to release floating lanterns)
