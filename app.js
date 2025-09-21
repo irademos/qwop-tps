@@ -254,6 +254,18 @@ async function main() {
   scene.add(headingArrow.group);
   window.playerModel = playerModel;
   
+  // Campfire: lazy-load campfire prop and create one near the player (no buttons)
+  (async function initCampfire() {
+    try {
+      const mod = await import('./features/campfire.js');
+      const camp = mod.createCampfire(THREE, { scene, playerModel });
+      window.campfire = camp;
+      if (camp && typeof camp.setActive === 'function') camp.setActive(true);
+    } catch (err) {
+      console.error('Failed to init campfire', err);
+    }
+  })();
+
   // Initialize furniture snapping grid (visual aid only; no UI buttons)
   (async function initFurnitureSnapping() {
     try {
