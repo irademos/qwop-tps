@@ -3,6 +3,13 @@
  * - No top-level side-effects.
  * - Exported factory returns controller with update(dt), setActive(bool), dispose().
  *
+ * @param {object} THREE - three.js namespace (required)
+ * @param {object} opts.scene - THREE.Scene instance (required)
+ * @param {object} opts.playerModel - player model object (required)
+ * @param {object} [opts.audioManager] - optional audio manager
+ * @param {object} [opts.options] - runtime options (radius, speed, etc)
+ * @returns {{update: function, setActive: function, setRadius: function, setSpeed: function, dispose: function, group: THREE.Group}}
+ *
  * Usage:
  *   const bird = createBirdNPC(THREE, { scene, playerModel, audioManager, options });
  *   bird.setActive(true);
