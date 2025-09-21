@@ -51,6 +51,8 @@ export function initDynamicWind(THREE, { scene, playerModel, audioManager, optio
   let active = false;
   const lastPlayerPos = playerModel.position.clone();
   let time = 0;
+  // 0..1 measure of wind intensity (smoothed). Read via getIntensity().
+  let _intensity = 0;
 
   /**
    * Toggle visibility / activity of wind effect
@@ -77,12 +79,18 @@ export function initDynamicWind(THREE, { scene, playerModel, audioManager, optio
     const posAttr = geo.getAttribute('position');
     const p = posAttr.array;
 
+    // accumulate a simple measure of particle motion to help compute intensity
+    let sumVel = 0;
+
     for (let i = 0; i < COUNT; i++) {
       const ix = i * 3;
       // simple oscillation + random jitter + player-induced gusts
       velocities[ix] += Math.sin(time * 1.2 + i) * 0.0006 + (Math.random() - 0.5) * 0.0006 + dx * 0.002;
       velocities[ix + 1] += Math.cos(time * 0.9 + i) * 0.0003 - 0.00025 + (Math.random() - 0.5) * 0.0002;
       velocities[ix + 2] += Math.cos(time * 1.05 + i) * 0.0005 + dz * 0.002;
+
+      // accumulate horizontal velocity magnitude for intensity calculation
+      sumVel += Math.hypot(velocities[ix], velocities[ix + 2]);
 
       p[ix] += velocities[ix] * (1 + moveStrength * 0.9);
       p[ix + 1] += velocities[ix + 1];
@@ -106,6 +114,20 @@ export function initDynamicWind(THREE, { scene, playerModel, audioManager, optio
 
     // subtle visual feedback: strengthen opacity when player is moving
     mat.opacity = Math.max(0.18, 0.45 + moveStrength * 0.45);
+
+    // Compute a 0..1 intensity combining player motion and particle motion.
+    // - avg particle velocity is normalized against an empirical max (~0.02)
+    // - moveStrength already normalized 0..1
+    try {
+      const avgVel = sumVel / Math.max(1, COUNT);
+      const velStrength = Math.min(1, avgVel / 0.02);
+      const combined = Math.min(1, Math.max(moveStrength, velStrength));
+      // smooth the intensity to avoid rapid jumps
+      _intensity = _intensity * 0.92 + combined * 0.08;
+    } catch (e) {
+      // ignore any numeric issues
+      _intensity = Math.max(0, Math.min(1, moveStrength));
+    }
   }
 
   function dispose() {
@@ -114,5 +136,11 @@ export function initDynamicWind(THREE, { scene, playerModel, audioManager, optio
     mat.dispose && mat.dispose();
   }
 
-  return { setActive, update, dispose };
+  // Expose getIntensity so other ambient controllers (e.g. floating lanterns)
+  // can read current wind intensity in a safe, read-only way.
+  function getIntensity() {
+    return Math.max(0, Math.min(1, _intensity));
+  }
+
+  return { setActive, update, dispose, getIntensity };
 }
