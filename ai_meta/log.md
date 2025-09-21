@@ -46,4 +46,3 @@
 2025-09-20 - add festival-timed lantern release (one-time release on festival date)
 2025-09-21 - add timed lantern release minigame
 2025-09-21 - ship timed lantern release minigame (press G to release lanterns)
-2025-09-21 - lantern wishes shown as toasts on lantern release
