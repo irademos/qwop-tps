@@ -53,7 +53,7 @@ New ideas:
 - [x] Festival-timed lantern release (new idea)
 - [x] Timed lantern release minigame (player ignites + release) - shipped 2025-09-21
 + ideas:
-+ - consider: lanterns carry small randomized wishes (toast messages)
++ - [x] consider: lanterns carry small randomized wishes (toast messages)
 + - consider: leaderboard for release distance
 + - consider: particle trail for lanterns
 + - consider: lantern glow responds to wind intensity

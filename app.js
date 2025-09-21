@@ -828,6 +828,18 @@ async function main() {
         // Default enabled so feature is visible immediately.
         lanternMinigameController.setActive(true);
       }
+
+      // Lantern wishes: show a small randomized wish as a toast when a lantern is released.
+      // This is lazy-loaded and initialized exactly once after the lantern minigame controller exists.
+      try {
+        const wishesMod = await import('./features/lanternWishes.js');
+        const wishesCtrl = wishesMod.initLanternWishes({ toasts, lanternMinigameController });
+        window.lanternWishesController = wishesCtrl;
+        if (wishesCtrl && typeof wishesCtrl.setActive === 'function') wishesCtrl.setActive(true);
+      } catch (e) {
+        console.error('Failed to init lantern wishes', e);
+      }
+
     } catch (err) {
       console.error('Failed to init lantern minigame', err);
     }
