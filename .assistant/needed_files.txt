@@ -1,0 +1,16 @@
+Recommended next steps / files you may want to add to the chat:
+
+1) (Not required) assets/audio/ambient/bird_chirp.ogg
+   - Optional audio asset for the bird chirp used by the bird NPC.
+   - If you don't add it, the bird will still function (audio call is best-effort).
+
+2) (Optional edits I can make if you add them)
+   - ai_meta/log.md
+   - ai_meta/next_run.md
+   - README.md
+   - github.sha
+   If you want me to mark the bird task done in the meta files and update the README/github.sha, please add the above files to the chat and I'll produce SEARCH/REPLACE edits.
+
+Notes:
+- No changes are strictly required to app.js: it already lazy-loads ./features/birdNPC.js and wires the controller into the main animate loop.
+- If you want the chirp audio to be verified immediately, add the audio file path above.
