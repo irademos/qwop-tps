@@ -905,6 +905,22 @@ async function main() {
         console.error('Failed to init lantern wishes', e);
       }
 
+      // Lantern particle trails: visual trailing line behind released lanterns.
+      // - Lazy-loaded and non-blocking; will attempt to hook into the minigame controller.
+      // - No UI added (UX guardrails).
+      try {
+        const trailMod = await import('./features/lanternTrail.js');
+        try {
+          const trailCtrl = trailMod.initLanternTrail(THREE, { scene, lanternMinigameController, playerModel });
+          window.lanternTrailController = trailCtrl;
+          if (trailCtrl && typeof trailCtrl.setActive === 'function') trailCtrl.setActive(true);
+        } catch (e) {
+          console.error('Failed to initialize lantern trail controller', e);
+        }
+      } catch (e) {
+        console.error('Failed to import lantern trail module', e);
+      }
+
     } catch (err) {
       console.error('Failed to init lantern minigame', err);
     }
@@ -2098,6 +2114,10 @@ async function main() {
     // Update lantern minigame (if loaded)
     if (typeof lanternMinigameController !== 'undefined' && lanternMinigameController && typeof lanternMinigameController.update === 'function') {
       lanternMinigameController.update(delta);
+    }
+    // Update lantern particle trails (if loaded)
+    if (typeof lanternTrailController !== 'undefined' && lanternTrailController && typeof lanternTrailController.update === 'function') {
+      lanternTrailController.update(delta);
     }
     // Update guide star (if loaded)
     if (typeof guideStarController !== 'undefined' && guideStarController && typeof guideStarController.update === 'function') {
