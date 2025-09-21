@@ -817,6 +817,22 @@ async function main() {
     }
   })();
 
+  // Timed Lantern Release Minigame (lazy-loaded).
+  // - Light-weight; no UI buttons. Press "G" to release a lantern near the player.
+  (async function initLanternMinigame() {
+    try {
+      const mod = await import('./features/lanternMinigame.js');
+      lanternMinigameController = mod.initLanternMinigame(THREE, { scene, playerModel, audioManager, toasts });
+      window.lanternMinigameController = lanternMinigameController;
+      if (lanternMinigameController && typeof lanternMinigameController.setActive === 'function') {
+        // Default enabled so feature is visible immediately.
+        lanternMinigameController.setActive(true);
+      }
+    } catch (err) {
+      console.error('Failed to init lantern minigame', err);
+    }
+  })();
+
   // Daily seasonal challenges (lazy-loaded) - small world markers that offer a daily objective.
   (async function initDailySeasonalChallenges() {
     try {
@@ -1111,6 +1127,7 @@ async function main() {
   let coinController = null;
   let companionController = null;
   let lanternController = null;
+  let lanternMinigameController = null;
   let furniturePreviewController = null;
   let scoreHUD = null;
   let playerScore = 0;

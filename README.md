@@ -1,1 +1,1 @@
-feat: add festival-timed lantern release (floating lanterns release on festival date)
+feat: add timed lantern release minigame (press G to release floating lanterns)

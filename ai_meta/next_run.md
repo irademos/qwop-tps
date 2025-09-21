@@ -51,6 +51,8 @@ New ideas:
 - [x] One-click preset accept flow for remote shares (low-priority)
 - [x] Add floating lantern ambient effect (features/floatingLanterns.js)
 - [x] Festival-timed lantern release (new idea)
+- [x] Timed lantern release minigame (player ignites + release)
 + ideas:
-+ - consider: timed lantern release minigame (player ignites + release)
 + - consider: lanterns carry small randomized wishes (toast messages)
++ - consider: leaderboard for release distance
++ - consider: particle trail for lanterns
