@@ -49,7 +49,7 @@ export function initLanternMinigame(THREE, { scene, playerModel, audioManager, t
     return mesh;
   }
 
-  function spawnIdle lanternAt(offset = new THREE.Vector3(0.8, 1.6, 0.4)) {
+  function spawnIdleLanternAt(offset = new THREE.Vector3(0.8, 1.6, 0.4)) {
     const mesh = makeLanternMesh();
     mesh.userData.state = 'idle';
     // place relative to player
@@ -67,7 +67,7 @@ export function initLanternMinigame(THREE, { scene, playerModel, audioManager, t
   }
 
   // Create an initial visible idle lantern near the player
-  let idleSpawn = spawnIdle lanternAt();
+  let idleSpawn = spawnIdleLanternAt();
 
   function releaseLantern(obj) {
     if (!obj || obj.state !== 'idle') return false;
@@ -85,7 +85,7 @@ export function initLanternMinigame(THREE, { scene, playerModel, audioManager, t
     } catch (e) {}
 
     // spawn a new idle lantern so player can release repeatedly
-    idleSpawn = spawnIdle lanternAt(new THREE.Vector3(0.9, 1.6, -0.2));
+    idleSpawn = spawnIdleLanternAt(new THREE.Vector3(0.9, 1.6, -0.2));
     return true;
   }
 
