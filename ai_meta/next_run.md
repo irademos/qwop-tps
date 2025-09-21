@@ -57,3 +57,4 @@ New ideas:
 + - consider: leaderboard for release distance
 + - consider: particle trail for lanterns
 + - consider: lantern glow responds to wind intensity
++ - [x] verify bird NPC present (features/birdNPC.js)
