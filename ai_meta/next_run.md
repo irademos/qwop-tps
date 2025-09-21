@@ -2,7 +2,7 @@
 - [x] Add NPC dialogue system (simple captions & choices)
 - [x] add campfire prop near player (features/campfire.js)
 - [x] consider: add campfire interaction to cook items
-- [ ] consider: add campfire ambient sound loop
+- [x] consider: add campfire ambient sound loop
 - [x] Day/night ambient sound transitions
 - [x] Add NPC simple quests (fetch & return)
 

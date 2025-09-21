@@ -49,3 +49,4 @@
 2025-09-21 - add bird NPC that circles player (features/birdNPC.js)
 2025-09-21 - add campfire prop with light & smoke near player
 2025-09-21 - add campfire interaction to cook items
+2025-09-21 - add campfire ambient sound loop
