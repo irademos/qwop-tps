@@ -2018,6 +2018,10 @@ async function main() {
     if (typeof lanternController !== 'undefined' && lanternController && typeof lanternController.update === 'function') {
       lanternController.update(delta);
     }
+    // Update lantern minigame (if loaded)
+    if (typeof lanternMinigameController !== 'undefined' && lanternMinigameController && typeof lanternMinigameController.update === 'function') {
+      lanternMinigameController.update(delta);
+    }
     // Update guide star (if loaded)
     if (typeof guideStarController !== 'undefined' && guideStarController && typeof guideStarController.update === 'function') {
       guideStarController.update(delta);
