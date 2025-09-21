@@ -1,0 +1,11 @@
+No other files need to be added.
+
+I inspected the repo: app.js already lazy-loads ./features/floatingLanterns.js and initializes the controller
+(see the initFloatingLanterns() async block that assigns lanternController and calls setActive(true)).
+So with features/floatingLanterns.js present, nothing else is required to make lanterns appear.
+
+If you'd like the next feature (festival-timed lantern release), we should add a small module that
+listens for the festival date/time or a game-state trigger and animates a one-time "release" (e.g. fade out
+and gently ascend) for each lantern. Tell me if you want me to implement that next.
+
+To verify locally, run a static server and open index.html in a browser.
