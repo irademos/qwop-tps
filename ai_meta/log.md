@@ -47,3 +47,4 @@
 2025-09-21 - add timed lantern release minigame
 2025-09-21 - ship timed lantern release minigame (press G to release lanterns)
 2025-09-21 - add bird NPC that circles player (features/birdNPC.js)
+2025-09-21 - add campfire prop with light & smoke near player
