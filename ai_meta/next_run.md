@@ -57,7 +57,7 @@ New ideas:
 - [x] Timed lantern release minigame (player ignites + release) - shipped 2025-09-21
 + ideas:
 + - [x] consider: lanterns carry small randomized wishes (toast messages)
-+ - consider: leaderboard for release distance
-+ - consider: particle trail for lanterns
-+ - consider: lantern glow responds to wind intensity
++ - [x] consider: leaderboard for release distance
++ - [ ] consider: particle trail for lanterns
++ - [ ] consider: lantern glow responds to wind intensity
 + - [x] verify bird NPC present (features/birdNPC.js)
