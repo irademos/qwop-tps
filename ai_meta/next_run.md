@@ -1,7 +1,7 @@
 - [x] Add bird NPC that circles the player (features/birdNPC.js)
 - [x] Add NPC dialogue system (simple captions & choices)
 - [x] add campfire prop near player (features/campfire.js)
-- [ ] consider: add campfire interaction to cook items
+- [x] consider: add campfire interaction to cook items
 - [ ] consider: add campfire ambient sound loop
 - [x] Day/night ambient sound transitions
 - [x] Add NPC simple quests (fetch & return)

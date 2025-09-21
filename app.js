@@ -266,6 +266,44 @@ async function main() {
     }
   })();
 
+  // Campfire Cooking: lightweight interaction that allows the player to cook raw items
+  // - Initialized once after the campfire controller exists.
+  // - No UI buttons added; player presses "C" when near the campfire to cook.
+  (async function initCampfireCooking() {
+    try {
+      const mod = await import('./features/campfireCooking.js');
+
+      // Wait briefly for campfire to be created by the earlier lazy loader.
+      const waitForCampfire = () => new Promise((resolve) => {
+        if (window.campfire) return resolve(window.campfire);
+        const timeout = setInterval(() => {
+          if (window.campfire) {
+            clearInterval(timeout);
+            resolve(window.campfire);
+          }
+        }, 100);
+        // Fallback resolve after 2s (feature will still operate using player's position)
+        setTimeout(() => {
+          clearInterval(timeout);
+          resolve(window.campfire);
+        }, 2000);
+      });
+
+      const camp = await waitForCampfire();
+      const cookCtrl = mod.initCampfireCooking(THREE, {
+        scene,
+        playerModel,
+        campfire: camp,
+        toasts,
+        audioManager
+      });
+      window.campfireCooking = cookCtrl;
+      if (cookCtrl && typeof cookCtrl.setActive === 'function') cookCtrl.setActive(true);
+    } catch (err) {
+      console.error('Failed to init campfire cooking', err);
+    }
+  })();
+
   // Initialize furniture snapping grid (visual aid only; no UI buttons)
   (async function initFurnitureSnapping() {
     try {

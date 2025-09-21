@@ -1,1 +1,1 @@
-feat: add campfire prop with light & smoke near player
+feat: add campfire interaction to cook items
