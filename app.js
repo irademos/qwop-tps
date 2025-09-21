@@ -261,6 +261,21 @@ async function main() {
       const camp = mod.createCampfire(THREE, { scene, playerModel });
       window.campfire = camp;
       if (camp && typeof camp.setActive === 'function') camp.setActive(true);
+
+      // Start lightweight campfire ambient sound loop (lazy-load audio controller)
+      try {
+        const ambientMod = await import('./audio/campfireAmbient.js');
+        const campAmbient = ambientMod.initCampfireAmbient(audioManager, {
+          campfire: camp,
+          src: 'Ambient/Campfire.ogg',
+          volume: 0.55
+        });
+        window.campfireAmbient = campAmbient;
+        // Enable ambient when camp is active (best-effort)
+        try { campAmbient.setActive(true); } catch (e) {}
+      } catch (e) {
+        console.error('Failed to init campfire ambient', e);
+      }
     } catch (err) {
       console.error('Failed to init campfire', err);
     }
