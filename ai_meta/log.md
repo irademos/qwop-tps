@@ -52,3 +52,4 @@
 2025-09-21 - add campfire ambient sound loop
 2025-09-21 - add campfire cooking interaction (C to cook when near campfire)
 2025-09-21 - add particle trail for lanterns
+2025-09-22 - make lantern glow respond to wind intensity

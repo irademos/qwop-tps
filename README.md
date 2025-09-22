@@ -1,1 +1,1 @@
-feat: add lantern particle trail
+feat: lantern glow responds to wind intensity

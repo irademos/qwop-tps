@@ -877,6 +877,25 @@ async function main() {
       lanternController = lanterns;
       window.floatingLanterns = lanterns;
       if (lanterns && typeof lanterns.setActive === 'function') lanterns.setActive(true);
+
+      // Best-effort: link lantern glow to dynamic wind intensity if a wind controller exists.
+      // This lazy-loads a tiny adapter that attaches point-lights to lantern meshes and
+      // modulates their intensity per wind strength. No UI is added.
+      try {
+        const linkMod = await import('./features/lanternWindLink.js');
+        const linkCtrl = linkMod.initLanternWindLink(THREE, {
+          scene,
+          lanternController: lanterns,
+          // prefer runtime dynamicWind if available; adapter will probe window.dynamicWind as fallback
+          dynamicWind: typeof dynamicWind !== 'undefined' ? dynamicWind : window.dynamicWind,
+          playerModel
+        });
+        window.lanternWindLink = linkCtrl;
+        if (linkCtrl && typeof linkCtrl.setActive === 'function') linkCtrl.setActive(true);
+      } catch (e) {
+        console.error('Failed to init lantern-wind link', e);
+      }
+
     } catch (err) {
       console.error('Failed to init floating lanterns', err);
     }

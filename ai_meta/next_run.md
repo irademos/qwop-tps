@@ -59,7 +59,9 @@ New ideas:
 + - [x] consider: lanterns carry small randomized wishes (toast messages)
 + - [x] consider: leaderboard for release distance
 + - [x] consider: particle trail for lanterns
-+ - [ ] consider: lantern glow responds to wind intensity
++ - [x] consider: lantern glow responds to wind intensity
 + - [x] verify bird NPC present (features/birdNPC.js)
 + - [ ] consider: lantern particle light puddles
 + - [ ] consider: lantern wind torque
++ - [ ] consider: lantern glow casts soft shadows
++ - [ ] consider: lantern color varies by player mood
