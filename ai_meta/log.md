@@ -55,3 +55,4 @@
 2025-09-22 - make lantern glow respond to wind intensity
 2025-09-22 - add lantern wind torque to rotate lanterns with wind
 2025-09-22 - add lantern soft shadow sprites
+2025-09-22 - lantern color varies by player mood
