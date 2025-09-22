@@ -1,1 +1,1 @@
-feat: lantern particle light puddles; lantern soft shadow sprites; lantern color by player mood
+feat: bird NPC that circles player with intermittent chirp SFX

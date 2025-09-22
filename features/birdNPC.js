@@ -72,6 +72,19 @@ export function createBirdNPC(THREE, { scene, playerModel, audioManager, options
   let speed = opts.speed;
   let active = true;
   let flapPhase = Math.random() * Math.PI * 2;
+  let _chirpTimer = 1 + Math.random() * 3;
+
+  function _tryPlayChirp() {
+    try {
+      if (!audioManager || typeof audioManager.playSFX !== 'function') return;
+      // small chance to avoid spamming - play short chirp asset if available
+      if (Math.random() < 0.6) {
+        audioManager.playSFX('ambient/bird_chirp.ogg', 0.5);
+      }
+    } catch (e) {
+      // ignore missing assets or playback errors
+    }
+  }
 
   /**
    * update bird position each frame
@@ -98,6 +111,13 @@ export function createBirdNPC(THREE, { scene, playerModel, audioManager, options
     leftWing.rotation.z = Math.PI / 8 + flap;
     rightWing.rotation.z = -Math.PI / 8 - flap;
     body.scale.y = 0.98 + Math.abs(Math.sin(flapPhase)) * 0.04;
+
+    // occasional chirp SFX (best-effort; tolerant of autoplay/security)
+    _chirpTimer -= dt;
+    if (_chirpTimer <= 0) {
+      _tryPlayChirp();
+      _chirpTimer = 2 + Math.random() * 4;
+    }
   }
 
   function setActive(v) {
