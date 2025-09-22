@@ -109,18 +109,18 @@ export function initLanternMoodColor(THREE, {
   let lastTime = performance.now();
 
   function loop() {
-    if (!running) return;
-    const now = performance.now();
-    const dt = Math.min(0.05, (now - lastTime) / 1000);
-    lastTime = now;
-    try {
-      ensureTracked();
-      applyColors(dt);
-    } catch (e) {
-      // swallow non-fatal errors
-      console.error('lanternMoodColor loop error', e);
-    }
-    rafId = requestAnimationFrame(loop);
+    // if (!running) return;
+    // const now = performance.now();
+    // const dt = Math.min(0.05, (now - lastTime) / 1000);
+    // lastTime = now;
+    // try {
+    //   ensureTracked();
+    //   applyColors(dt);
+    // } catch (e) {
+    //   // swallow non-fatal errors
+    //   console.error('lanternMoodColor loop error', e);
+    // }
+    // rafId = requestAnimationFrame(loop);
   }
 
   function start() {

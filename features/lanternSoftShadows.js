@@ -13,6 +13,8 @@
  * No top-level side-effects on import.
  */
 
+import { NoToneMapping } from "three";
+
 export function initLanternSoftShadows(THREE, {
   scene,
   floatingLanterns = null,
@@ -205,7 +207,10 @@ function makeShadowTexture(size = 256) {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
 
-  const texture = new window.THREE?.CanvasTexture ? new window.THREE.CanvasTexture(cvs) : null;
+  let texture = null;
+  if (window.THREE) {
+    texture = new window.THREE.CanvasTexture ? new window.THREE.CanvasTexture(cvs) : null;
+  }
   // If THREE isn't globally available, create a plain Image texture consumer will handle
   if (texture) texture.needsUpdate = true;
   return texture || new window.Image();
