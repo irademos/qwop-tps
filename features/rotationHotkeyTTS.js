@@ -74,3 +74,4 @@ export function initRotationHotkeyTTS({ toasts } = {}) {
     setActive,
     destroy
   };
+}
