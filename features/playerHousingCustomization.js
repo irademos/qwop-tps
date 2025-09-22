@@ -214,238 +214,238 @@ export function initPlayerHousingCustomization(THREE, { scene, playerModel, play
 //     }
 //   }
 
-  function _saveToStorage() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
-    } catch (e) {
-      // ignore quota errors
-      console.warn("Failed to save housing presets", e);
-    }
-  }
+//   function _saveToStorage() {
+//     try {
+//       localStorage.setItem(STORAGE_KEY, JSON.stringify(presets));
+//     } catch (e) {
+//       // ignore quota errors
+//       console.warn("Failed to save housing presets", e);
+//     }
+//   }
 
-  function _defaultPresets() {
-    return [
-      { name: "Cottage (Red Roof)", color: 0xa05030, roof: "tile", scale: 1.0 },
-      { name: "Garden (Green)", color: 0x4caf50, roof: "shingle", scale: 1.0 },
-      { name: "Snow Cabin", color: 0xe0e8f0, roof: "snow", scale: 0.95 }
-    ];
-  }
+//   function _defaultPresets() {
+//     return [
+//       { name: "Cottage (Red Roof)", color: 0xa05030, roof: "tile", scale: 1.0 },
+//       { name: "Garden (Green)", color: 0x4caf50, roof: "shingle", scale: 1.0 },
+//       { name: "Snow Cabin", color: 0xe0e8f0, roof: "snow", scale: 0.95 }
+//     ];
+//   }
 
-  function listPresets() {
-    return presets.map(p => p.name);
-  }
+//   function listPresets() {
+//     return presets.map(p => p.name);
+//   }
 
-  function _getMeshes(root) {
-    if (!root || !root.traverse) return [];
-    const out = [];
-    root.traverse((n) => {
-      if (n.isMesh) out.push(n);
-    });
-    return out;
-  }
+//   function _getMeshes(root) {
+//     if (!root || !root.traverse) return [];
+//     const out = [];
+//     root.traverse((n) => {
+//       if (n.isMesh) out.push(n);
+//     });
+//     return out;
+//   }
 
-  function _setMeshColor(mesh, hex) {
-    if (!mesh || !mesh.material) return;
-    const apply = (mat) => {
-      if (mat && mat.color) {
-        mat.color.setHex(hex);
-      }
-      if (mat && mat.emissive) {
-        // small emissive tint for visibility
-        const emissive = (hex & 0xffffff) >> 2;
-        mat.emissive.setHex(Math.min(0xffffff, emissive));
-      }
-      if (typeof mat.needsUpdate !== "undefined") mat.needsUpdate = true;
-    };
-    if (Array.isArray(mesh.material)) {
-      mesh.material.forEach(apply);
-    } else {
-      apply(mesh.material);
-    }
-  }
+//   function _setMeshColor(mesh, hex) {
+//     if (!mesh || !mesh.material) return;
+//     const apply = (mat) => {
+//       if (mat && mat.color) {
+//         mat.color.setHex(hex);
+//       }
+//       if (mat && mat.emissive) {
+//         // small emissive tint for visibility
+//         const emissive = (hex & 0xffffff) >> 2;
+//         mat.emissive.setHex(Math.min(0xffffff, emissive));
+//       }
+//       if (typeof mat.needsUpdate !== "undefined") mat.needsUpdate = true;
+//     };
+//     if (Array.isArray(mesh.material)) {
+//       mesh.material.forEach(apply);
+//     } else {
+//       apply(mesh.material);
+//     }
+//   }
 
-  function applyPreset(preset) {
-    if (!preset) return;
-    // If there's a housing controller API, prefer that (non-breaking)
-    try {
-      if (playerHousing && typeof playerHousing.applyCustomization === "function") {
-        playerHousing.applyCustomization(preset);
-        if (toasts && typeof toasts.show === "function") toasts.show(`Applied preset: ${preset.name}`);
-        return;
-      }
-      // Try setColor / setRoof style APIs
-      if (playerHousing && typeof playerHousing.setColor === "function") {
-        try { playerHousing.setColor(preset.color); } catch (e) {}
-      }
-      if (playerHousing && typeof playerHousing.setRoofVariant === "function" && preset.roof) {
-        try { playerHousing.setRoofVariant(preset.roof); } catch (e) {}
-      }
+//   function applyPreset(preset) {
+//     if (!preset) return;
+//     // If there's a housing controller API, prefer that (non-breaking)
+//     try {
+//       if (playerHousing && typeof playerHousing.applyCustomization === "function") {
+//         playerHousing.applyCustomization(preset);
+//         if (toasts && typeof toasts.show === "function") toasts.show(`Applied preset: ${preset.name}`);
+//         return;
+//       }
+//       // Try setColor / setRoof style APIs
+//       if (playerHousing && typeof playerHousing.setColor === "function") {
+//         try { playerHousing.setColor(preset.color); } catch (e) {}
+//       }
+//       if (playerHousing && typeof playerHousing.setRoofVariant === "function" && preset.roof) {
+//         try { playerHousing.setRoofVariant(preset.roof); } catch (e) {}
+//       }
 
-      // If housing exposes a root Three.js Group, mutate visible mesh materials
-      const root = playerHousing && (playerHousing.root || playerHousing.group || playerHousing.object) ? (playerHousing.root || playerHousing.group || playerHousing.object) : null;
-      if (root) {
-        const meshes = _getMeshes(root);
-        meshes.forEach(m => _setMeshColor(m, preset.color));
-        // Apply a simple roof-variant visual: toggle children whose name includes "roof"
-        if (preset.roof) {
-          root.traverse(n => {
-            if (!n.isMesh) return;
-            const nm = (n.name || "").toLowerCase();
-            if (nm.includes("roof")) {
-              // store original visibility in userData for future toggles
-              n.userData.__lastVariant = preset.roof;
-              // subtle transform to indicate variant (small scale tweak)
-              n.scale.setScalar(preset.roof === "snow" ? 1.03 : 1.0);
-            }
-          });
-        }
-        // scale tweak
-        if (typeof preset.scale === "number") {
-          root.scale.setScalar(preset.scale);
-        }
-        if (toasts && typeof toasts.show === "function") toasts.show(`Applied preset: ${preset.name}`);
-        return;
-      }
+//       // If housing exposes a root Three.js Group, mutate visible mesh materials
+//       const root = playerHousing && (playerHousing.root || playerHousing.group || playerHousing.object) ? (playerHousing.root || playerHousing.group || playerHousing.object) : null;
+//       if (root) {
+//         const meshes = _getMeshes(root);
+//         meshes.forEach(m => _setMeshColor(m, preset.color));
+//         // Apply a simple roof-variant visual: toggle children whose name includes "roof"
+//         if (preset.roof) {
+//           root.traverse(n => {
+//             if (!n.isMesh) return;
+//             const nm = (n.name || "").toLowerCase();
+//             if (nm.includes("roof")) {
+//               // store original visibility in userData for future toggles
+//               n.userData.__lastVariant = preset.roof;
+//               // subtle transform to indicate variant (small scale tweak)
+//               n.scale.setScalar(preset.roof === "snow" ? 1.03 : 1.0);
+//             }
+//           });
+//         }
+//         // scale tweak
+//         if (typeof preset.scale === "number") {
+//           root.scale.setScalar(preset.scale);
+//         }
+//         if (toasts && typeof toasts.show === "function") toasts.show(`Applied preset: ${preset.name}`);
+//         return;
+//       }
 
-      // If no housing available yet, remember to apply later
-      pendingApply = preset;
-      console.info("Player housing not present yet; preset will be applied when available.");
-    } catch (e) {
-      console.error("applyPreset error", e);
-    }
-  }
+//       // If no housing available yet, remember to apply later
+//       pendingApply = preset;
+//       console.info("Player housing not present yet; preset will be applied when available.");
+//     } catch (e) {
+//       console.error("applyPreset error", e);
+//     }
+//   }
 
-  function savePreset(name) {
-    const label = name && String(name).trim() ? String(name).trim() : `Preset ${presets.length + 1}`;
-    // Capture current visual state if possible
-    const sample = { name: label, color: 0xcccccc, roof: "tile", scale: 1.0 };
-    try {
-      if (playerHousing && typeof playerHousing.getCurrentCustomization === "function") {
-        const cur = playerHousing.getCurrentCustomization();
-        if (cur && typeof cur === "object") {
-          Object.assign(sample, cur);
-        }
-      } else {
-        const root = playerHousing && (playerHousing.root || playerHousing.group || playerHousing.object) ? (playerHousing.root || playerHousing.group || playerHousing.object) : null;
-        if (root) {
-          // pick first mesh color as representative
-          const meshes = _getMeshes(root);
-          for (const m of meshes) {
-            const mat = Array.isArray(m.material) ? m.material[0] : m.material;
-            if (mat && mat.color && typeof mat.color.getHex === "function") {
-              sample.color = mat.color.getHex();
-              break;
-            }
-          }
-          sample.scale = (typeof root.scale?.x === "number") ? root.scale.x : sample.scale;
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-    presets.push(sample);
-    _saveToStorage();
-    return sample;
-  }
+//   function savePreset(name) {
+//     const label = name && String(name).trim() ? String(name).trim() : `Preset ${presets.length + 1}`;
+//     // Capture current visual state if possible
+//     const sample = { name: label, color: 0xcccccc, roof: "tile", scale: 1.0 };
+//     try {
+//       if (playerHousing && typeof playerHousing.getCurrentCustomization === "function") {
+//         const cur = playerHousing.getCurrentCustomization();
+//         if (cur && typeof cur === "object") {
+//           Object.assign(sample, cur);
+//         }
+//       } else {
+//         const root = playerHousing && (playerHousing.root || playerHousing.group || playerHousing.object) ? (playerHousing.root || playerHousing.group || playerHousing.object) : null;
+//         if (root) {
+//           // pick first mesh color as representative
+//           const meshes = _getMeshes(root);
+//           for (const m of meshes) {
+//             const mat = Array.isArray(m.material) ? m.material[0] : m.material;
+//             if (mat && mat.color && typeof mat.color.getHex === "function") {
+//               sample.color = mat.color.getHex();
+//               break;
+//             }
+//           }
+//           sample.scale = (typeof root.scale?.x === "number") ? root.scale.x : sample.scale;
+//         }
+//       }
+//     } catch (e) {
+//       // ignore
+//     }
+//     presets.push(sample);
+//     _saveToStorage();
+//     return sample;
+//   }
 
-  function loadPresetByName(name) {
-    const p = presets.find(x => x.name === name) || presets[0] || null;
-    if (p) {
-      currentIndex = presets.indexOf(p);
-      applyPreset(p);
-    }
-    return p;
-  }
+//   function loadPresetByName(name) {
+//     const p = presets.find(x => x.name === name) || presets[0] || null;
+//     if (p) {
+//       currentIndex = presets.indexOf(p);
+//       applyPreset(p);
+//     }
+//     return p;
+//   }
 
-  function cycleNext() {
-    if (!presets.length) return;
-    currentIndex = (currentIndex + 1) % presets.length;
-    applyPreset(presets[currentIndex]);
-  }
+//   function cycleNext() {
+//     if (!presets.length) return;
+//     currentIndex = (currentIndex + 1) % presets.length;
+//     applyPreset(presets[currentIndex]);
+//   }
 
-  function cyclePrev() {
-    if (!presets.length) return;
-    currentIndex = (currentIndex - 1 + presets.length) % presets.length;
-    applyPreset(presets[currentIndex]);
-  }
+//   function cyclePrev() {
+//     if (!presets.length) return;
+//     currentIndex = (currentIndex - 1 + presets.length) % presets.length;
+//     applyPreset(presets[currentIndex]);
+//   }
 
-  function _ensurePresets() {
-    const stored = _loadFromStorage();
-    if (stored && Array.isArray(stored) && stored.length) {
-      presets = stored;
-    } else {
-      presets = _defaultPresets();
-      _saveToStorage();
-    }
-  }
+//   function _ensurePresets() {
+//     const stored = _loadFromStorage();
+//     if (stored && Array.isArray(stored) && stored.length) {
+//       presets = stored;
+//     } else {
+//       presets = _defaultPresets();
+//       _saveToStorage();
+//     }
+//   }
 
-  function _pollForHousing() {
-    if (playerHousing) {
-      if (pendingApply) {
-        applyPreset(pendingApply);
-        pendingApply = null;
-      }
-      return;
-    }
-    if (window && window.playerHousing) {
-      playerHousing = window.playerHousing;
-      if (pendingApply) {
-        applyPreset(pendingApply);
-        pendingApply = null;
-      }
-    }
-  }
+//   function _pollForHousing() {
+//     if (playerHousing) {
+//       if (pendingApply) {
+//         applyPreset(pendingApply);
+//         pendingApply = null;
+//       }
+//       return;
+//     }
+//     if (window && window.playerHousing) {
+//       playerHousing = window.playerHousing;
+//       if (pendingApply) {
+//         applyPreset(pendingApply);
+//         pendingApply = null;
+//       }
+//     }
+//   }
 
-  function _onKey(e) {
-    if (!active) return;
-    if (e.code === "KeyH") {
-      if (e.shiftKey) cyclePrev(); else cycleNext();
-    }
-    if (e.code === "KeyS" && e.shiftKey) {
-      // Shift+S saves a quick preset (no UI)
-      const p = savePreset(`Saved ${new Date().toISOString().slice(11,19)}`);
-      if (toasts && typeof toasts.show === "function") toasts.show(`Saved preset: ${p.name}`);
-      console.info("Saved housing preset", p);
-    }
-  }
+//   function _onKey(e) {
+//     if (!active) return;
+//     if (e.code === "KeyH") {
+//       if (e.shiftKey) cyclePrev(); else cycleNext();
+//     }
+//     if (e.code === "KeyS" && e.shiftKey) {
+//       // Shift+S saves a quick preset (no UI)
+//       const p = savePreset(`Saved ${new Date().toISOString().slice(11,19)}`);
+//       if (toasts && typeof toasts.show === "function") toasts.show(`Saved preset: ${p.name}`);
+//       console.info("Saved housing preset", p);
+//     }
+//   }
 
-  function setPlayerHousing(ph) {
-    playerHousing = ph;
-    if (pendingApply) {
-      applyPreset(pendingApply);
-      pendingApply = null;
-    }
-  }
+//   function setPlayerHousing(ph) {
+//     playerHousing = ph;
+//     if (pendingApply) {
+//       applyPreset(pendingApply);
+//       pendingApply = null;
+//     }
+//   }
 
-  function setActive(on = true) {
-    active = !!on;
-    if (active) {
-      _ensurePresets();
-      // Try to apply first preset immediately for visible verification
-      if (presets.length) {
-        applyPreset(presets[0]);
-        currentIndex = 0;
-      }
-      // start polling for window.playerHousing if not provided
-      pollInterval = setInterval(_pollForHousing, 600);
-      window.addEventListener("keydown", _onKey);
-    } else {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-      }
-      window.removeEventListener("keydown", _onKey);
-    }
-  }
+//   function setActive(on = true) {
+//     active = !!on;
+//     if (active) {
+//       _ensurePresets();
+//       // Try to apply first preset immediately for visible verification
+//       if (presets.length) {
+//         applyPreset(presets[0]);
+//         currentIndex = 0;
+//       }
+//       // start polling for window.playerHousing if not provided
+//       pollInterval = setInterval(_pollForHousing, 600);
+//       window.addEventListener("keydown", _onKey);
+//     } else {
+//       if (pollInterval) {
+//         clearInterval(pollInterval);
+//         pollInterval = null;
+//       }
+//       window.removeEventListener("keydown", _onKey);
+//     }
+//   }
 
-  // Public API
-  return {
-    setActive,
-    savePreset,
-    loadPresetByName,
-    listPresets,
-    applyPreset,
-    setPlayerHousing,
-    getPresets: () => presets.slice(),
-  };
-}
+//   // Public API
+//   return {
+//     setActive,
+//     savePreset,
+//     loadPresetByName,
+//     listPresets,
+//     applyPreset,
+//     setPlayerHousing,
+//     getPresets: () => presets.slice(),
+//   };
+// }
