@@ -62,6 +62,6 @@ New ideas:
 + - [x] consider: lantern glow responds to wind intensity
 + - [x] verify bird NPC present (features/birdNPC.js)
 + - [x] consider: lantern particle light puddles
-+ - [ ] consider: lantern wind torque
++ - [x] consider: lantern wind torque
 + - [ ] consider: lantern glow casts soft shadows
 + - [ ] consider: lantern color varies by player mood

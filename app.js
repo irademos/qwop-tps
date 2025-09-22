@@ -901,6 +901,23 @@ async function main() {
     }
   })();
 
+  // Lantern wind torque (lazy-loaded) - applies torque to floating/released lanterns based on wind.
+  (async function initLanternWindTorque() {
+    try {
+      const mod = await import('./features/lanternWindTorque.js');
+      const ctrl = mod.initLanternWindTorque(THREE, {
+        scene,
+        floatingLanterns: lanternController || window.floatingLanterns,
+        lanternMinigameController: lanternMinigameController || window.lanternMinigameController,
+        dynamicWind: typeof dynamicWind !== 'undefined' ? dynamicWind : window.dynamicWind
+      });
+      window.lanternWindTorque = ctrl;
+      if (ctrl && typeof ctrl.setActive === 'function') ctrl.setActive(true);
+    } catch (e) {
+      console.error('Failed to init lantern wind torque', e);
+    }
+  })();
+
   // Timed Lantern Release Minigame (lazy-loaded).
   // - Light-weight; no UI buttons. Press "G" to release a lantern near the player.
   (async function initLanternMinigame() {
