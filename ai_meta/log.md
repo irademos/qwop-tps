@@ -56,3 +56,4 @@
 2025-09-22 - add lantern wind torque to rotate lanterns with wind
 2025-09-22 - add lantern soft shadow sprites
 2025-09-22 - add intermittent bird chirp SFX to bird NPC (features/birdNPC.js)
+2025-09-22 - add lantern wishes toast for lantern releases
