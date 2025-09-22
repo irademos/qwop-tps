@@ -44,7 +44,11 @@ export function initLanternWindLink(THREE, { scene, lanternController = null, dy
   function findLanternMeshes() {
     // Defensive traversal: look for names that imply lanterns (common naming in project).
     scene.traverse((obj) => {
-      if (!obj || !obj.name || attached.has(obj)) return;
+      if (!obj || attached.has(obj)) return;
+      // Skip any lights we've already attached (or other light sources) to avoid
+      // creating light->light chains which can explode the scene graph depth.
+      if (obj.isLight || obj.type === 'PointLight' || obj.name === '__lantern_wind_light') return;
+      if (!obj.name) return;
       const name = String(obj.name || '').toLowerCase();
       if (name.includes('lantern') || name.includes('floating-lantern') || name.includes('lantern-') || name.includes('paperlantern')) {
         try {
