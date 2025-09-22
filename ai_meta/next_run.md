@@ -55,15 +55,9 @@ New ideas:
 - [x] Add floating lantern ambient effect (features/floatingLanterns.js)
 - [x] Festival-timed lantern release (new idea)
 - [x] Timed lantern release minigame (player ignites + release) - shipped 2025-09-21
-+ ideas:
-+ - [x] consider: lanterns carry small randomized wishes (toast messages)
-+ - [x] consider: leaderboard for release distance
-+ - [x] consider: particle trail for lanterns
-+ - [x] consider: lantern glow responds to wind intensity
-+ - [x] verify bird NPC present (features/birdNPC.js)
-+ - [x] consider: lantern particle light puddles
-+ - [x] consider: lantern wind torque
-+ - [x] consider: lantern glow casts soft shadows
-+ - [x] [x] consider: lantern color varies by player mood
-+ - [x] consider: subtle occlusion blobs under lanterns (perf-friendly)
-+ - [x] consider: debug view for lantern anchors
+
+- [x] add bird NPC chirp SFX (features/birdNPC.js)
+
+New ideas:
+- [ ] add small butterfly ambient (features/butterflies.js)
+- [ ] add NPC that sits by campfire and offers cooking tips
