@@ -901,6 +901,25 @@ async function main() {
     }
   })();
 
+  // Lantern color by mood (lazy-loaded) - vary lantern colors based on player's mood (health)
+  (async function initLanternMoodColor() {
+    try {
+      const mod = await import('./features/lanternMoodColor.js');
+      const ctrl = mod.initLanternMoodColor(THREE, {
+        scene,
+        playerModel,
+        getMood: () => {
+          const h = typeof window.localHealth === 'number' ? window.localHealth : 100;
+          return Math.max(0, Math.min(1, h / 100));
+        }
+      });
+      window.lanternMoodColor = ctrl;
+      if (ctrl && typeof ctrl.setActive === 'function') ctrl.setActive(true);
+    } catch (e) {
+      console.error('Failed to init lantern mood color', e);
+    }
+  })();
+
   // Soft shadow sprites for floating lanterns (lazy, cheap)
   (async function initLanternSoftShadows() {
     try {

@@ -64,6 +64,6 @@ New ideas:
 + - [x] consider: lantern particle light puddles
 + - [x] consider: lantern wind torque
 + - [x] consider: lantern glow casts soft shadows
-+ - [ ] consider: lantern color varies by player mood
-+ - [ ] consider: subtle occlusion blobs under lanterns (perf-friendly)
-+ - [ ] consider: debug view for lantern anchors
++ - [x] [x] consider: lantern color varies by player mood
++ - [x] consider: subtle occlusion blobs under lanterns (perf-friendly)
++ - [x] consider: debug view for lantern anchors
