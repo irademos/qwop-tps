@@ -945,6 +945,28 @@ async function main() {
     }
   })();
 
+  // Lantern light puddles (lazy-loaded) - soft ground-lit puddles under released lanterns (no UI)
+  (async function initLanternLightPuddles() {
+    try {
+      const mod = await import('./features/lanternLightPuddles.js');
+      try {
+        lanternLightPuddlesController = mod.initLanternLightPuddles(THREE, {
+          scene,
+          lanternController: lanternMinigameController,
+          dynamicWind: typeof dynamicWind !== 'undefined' ? dynamicWind : window.dynamicWind
+        });
+        window.lanternLightPuddlesController = lanternLightPuddlesController;
+        if (lanternLightPuddlesController && typeof lanternLightPuddlesController.setActive === 'function') {
+          lanternLightPuddlesController.setActive(true);
+        }
+      } catch (e) {
+        console.error('Failed to init lantern light puddles controller', e);
+      }
+    } catch (err) {
+      console.error('Failed to import lantern light puddles module', err);
+    }
+  })();
+
   // Daily seasonal challenges (lazy-loaded) - small world markers that offer a daily objective.
   (async function initDailySeasonalChallenges() {
     try {
@@ -1240,6 +1262,7 @@ async function main() {
   let companionController = null;
   let lanternController = null;
   let lanternMinigameController = null;
+  let lanternLightPuddlesController = null;
   let furniturePreviewController = null;
   let scoreHUD = null;
   let playerScore = 0;
@@ -2137,6 +2160,10 @@ async function main() {
     // Update lantern particle trails (if loaded)
     if (typeof lanternTrailController !== 'undefined' && lanternTrailController && typeof lanternTrailController.update === 'function') {
       lanternTrailController.update(delta);
+    }
+    // Update lantern light puddles (if loaded)
+    if (typeof lanternLightPuddlesController !== 'undefined' && lanternLightPuddlesController && typeof lanternLightPuddlesController.update === 'function') {
+      lanternLightPuddlesController.update(delta);
     }
     // Update guide star (if loaded)
     if (typeof guideStarController !== 'undefined' && guideStarController && typeof guideStarController.update === 'function') {

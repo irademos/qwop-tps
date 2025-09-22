@@ -1,1 +1,1 @@
-feat: lantern glow responds to wind intensity
+feat: lantern particle light puddles
