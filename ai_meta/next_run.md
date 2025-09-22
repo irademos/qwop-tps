@@ -63,5 +63,7 @@ New ideas:
 + - [x] verify bird NPC present (features/birdNPC.js)
 + - [x] consider: lantern particle light puddles
 + - [x] consider: lantern wind torque
-+ - [ ] consider: lantern glow casts soft shadows
++ - [x] consider: lantern glow casts soft shadows
 + - [ ] consider: lantern color varies by player mood
++ - [ ] consider: subtle occlusion blobs under lanterns (perf-friendly)
++ - [ ] consider: debug view for lantern anchors

@@ -54,3 +54,4 @@
 2025-09-21 - add particle trail for lanterns
 2025-09-22 - make lantern glow respond to wind intensity
 2025-09-22 - add lantern wind torque to rotate lanterns with wind
+2025-09-22 - add lantern soft shadow sprites

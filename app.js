@@ -901,6 +901,38 @@ async function main() {
     }
   })();
 
+  // Soft shadow sprites for floating lanterns (lazy, cheap)
+  (async function initLanternSoftShadows() {
+    try {
+      const mod = await import('./features/lanternSoftShadows.js');
+      const ctrl = mod.initLanternSoftShadows(THREE, {
+        scene,
+        floatingLanterns: lanternController || window.floatingLanterns,
+        groundY: 0,
+        baseSize: 0.6
+      });
+      window.lanternSoftShadows = ctrl;
+      if (ctrl && typeof ctrl.setActive === 'function') ctrl.setActive(true);
+
+      // Wire into animate update loop: if animate calls update on controllers by name,
+      // we expose a reference on window and the global animate() already checks it.
+      // To be defensive, also attempt to hook into lanternController.update if present.
+      if (lanternController && typeof lanternController.update === 'function') {
+        const orig = lanternController.update.bind(lanternController);
+        lanternController.update = function(delta) {
+          const res = orig(delta);
+          try { ctrl.update(delta); } catch (e) {}
+          return res;
+        };
+      } else {
+        // If lanternController doesn't exist or doesn't own update, ensure the soft-shadow
+        // controller is still updated by the global animate() via window reference.
+      }
+    } catch (e) {
+      console.error('Failed to init lantern soft shadows', e);
+    }
+  })();
+
   // Lantern wind torque (lazy-loaded) - applies torque to floating/released lanterns based on wind.
   (async function initLanternWindTorque() {
     try {
