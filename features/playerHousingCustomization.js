@@ -194,25 +194,25 @@ export function initPlayerHousingCustomization(THREE, { scene, playerModel, play
  * Presets are stored in localStorage under "playerHousingPresets_v1".
  */
 
-export function initPlayerHousingCustomization(THREE, { scene, playerModel, playerHousing, toasts } = {}) {
-  const STORAGE_KEY = "playerHousingPresets_v1";
-  let active = false;
-  let presets = [];
-  let currentIndex = 0;
-  let pollInterval = null;
-  let pendingApply = null;
+// export function initPlayerHousingCustomization(THREE, { scene, playerModel, playerHousing, toasts } = {}) {
+//   const STORAGE_KEY = "playerHousingPresets_v1";
+//   let active = false;
+//   let presets = [];
+//   let currentIndex = 0;
+//   let pollInterval = null;
+//   let pendingApply = null;
 
-  function _loadFromStorage() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed;
-      return null;
-    } catch (e) {
-      return null;
-    }
-  }
+//   function _loadFromStorage() {
+//     try {
+//       const raw = localStorage.getItem(STORAGE_KEY);
+//       if (!raw) return null;
+//       const parsed = JSON.parse(raw);
+//       if (Array.isArray(parsed) && parsed.length) return parsed;
+//       return null;
+//     } catch (e) {
+//       return null;
+//     }
+//   }
 
   function _saveToStorage() {
     try {
