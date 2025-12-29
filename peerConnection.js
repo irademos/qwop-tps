@@ -16,6 +16,11 @@ export class Multiplayer {
     this.isHost = false;
     this.currentHostId = null;
     this.onHostChange = null;
+    this.onConnectionError = null;
+    this.onPingUpdate = null;
+    this.lastPingMs = null;
+    this.lastPingAt = null;
+    this.lastError = null;
     
     this.initPeer(); // Start async setup
   }
@@ -139,38 +144,6 @@ export class Multiplayer {
 
     this.peer.on('connection', conn => {
       this.setupConnection(conn);
-
-      // Add to connected players list
-      const list = document.getElementById('connected-players-list');
-      const item = document.createElement('li');
-      item.id = `peer-${conn.peer}`;
-
-
-      // Wait for name to come through "presence"
-      item.textContent = `Connected to (waiting...)`;
-      if (!this.connections[conn.peer]) {
-        this.connections[conn.peer] = {};
-      }
-      this.connections[conn.peer].listItem = item;
-      list.appendChild(item);
-
-      // Setup basic ping test
-      const pingStart = Date.now();
-      conn.send({ type: "ping" });
-
-      conn.on('data', data => {
-        if (data.type === "pong") {
-          const rtt = Date.now() - pingStart;
-          document.getElementById("ping-display").textContent = rtt;
-        }
-      });
-
-      // Reply to ping
-      conn.on('data', data => {
-        if (data.type === "ping") {
-          conn.send({ type: "pong" });
-        }
-      });
     });
 
     this.peer.on('call', call => {
@@ -185,18 +158,11 @@ export class Multiplayer {
           this.voiceAudios[call.peer].audio.pause();
           delete this.voiceAudios[call.peer];
         }
-
-        delete this.connections[conn.peer];
-        const item = document.getElementById(`peer-${conn.peer}`);
-        if (item) item.remove();
       });
 
-      conn.on('error', err => {
+      call.on('error', err => {
         console.error('Peer error:', err);
-        const errList = document.getElementById('connection-errors-list');
-        const item = document.createElement('li');
-        item.textContent = `❌ ${conn.peer || 'Unknown peer'}: ${err.message}`;
-        errList.appendChild(item);
+        this.recordError(err);
       });
 
     });
@@ -214,7 +180,23 @@ export class Multiplayer {
   setupConnection(conn) {
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
-      conn.on('data', data => this.onPeerData(conn.peer, data));
+      conn.on('data', data => {
+        if (data?.type === 'ping') {
+          conn.send({ type: 'pong', ts: data.ts || Date.now() });
+          return;
+        }
+        if (data?.type === 'pong') {
+          const sentAt = data.ts || this.pendingPings?.[conn.peer];
+          if (sentAt) {
+            const rtt = Date.now() - sentAt;
+            this.lastPingMs = rtt;
+            this.lastPingAt = Date.now();
+            this.onPingUpdate?.(rtt);
+          }
+          return;
+        }
+        this.onPeerData(conn.peer, data);
+      });
   
       // Attempt to access the internal peer connection
       try {
@@ -242,14 +224,18 @@ export class Multiplayer {
       } catch (err) {
         console.warn(`Could not access RTCPeerConnection for peer ${conn.peer}`, err);
       }
+
+      this.startPingLoop(conn);
     });
   
     conn.on('close', () => {
+      this.stopPingLoop(conn.peer);
       delete this.connections[conn.peer];
     });
   
     conn.on('error', err => {
       console.error('Peer error:', err);
+      this.recordError(err);
     });
   }
 
@@ -345,5 +331,64 @@ export class Multiplayer {
     } catch (err) {
       console.warn(`Failed to send direct message to ${peerId}:`, err);
     }
+  }
+
+  recordError(err) {
+    const message = err?.message || String(err || 'Unknown error');
+    this.lastError = {
+      message,
+      timestamp: Date.now()
+    };
+    if (typeof this.onConnectionError === 'function') {
+      this.onConnectionError(this.lastError);
+    }
+  }
+
+  startPingLoop(conn) {
+    if (!conn || !conn.peer) return;
+    if (!this.pendingPings) {
+      this.pendingPings = {};
+    }
+    this.stopPingLoop(conn.peer);
+    const intervalId = setInterval(() => {
+      if (!conn.open) return;
+      const ts = Date.now();
+      this.pendingPings[conn.peer] = ts;
+      conn.send({ type: 'ping', ts });
+    }, 8000);
+    conn.pingIntervalId = intervalId;
+  }
+
+  stopPingLoop(peerId) {
+    const conn = this.connections?.[peerId];
+    if (conn?.pingIntervalId) {
+      clearInterval(conn.pingIntervalId);
+      conn.pingIntervalId = null;
+    }
+    if (this.pendingPings?.[peerId]) {
+      delete this.pendingPings[peerId];
+    }
+  }
+
+  reconnect() {
+    if (this.peer?.disconnected) {
+      try {
+        this.peer.reconnect();
+      } catch (err) {
+        this.recordError(err);
+      }
+      return;
+    }
+    if (this.peer?.destroyed) {
+      this.recordError(new Error('Peer connection was destroyed.'));
+      return;
+    }
+    Object.keys(this.connections).forEach(peerId => {
+      try {
+        this.connectToPeer(peerId);
+      } catch (err) {
+        this.recordError(err);
+      }
+    });
   }
 }

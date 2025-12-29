@@ -27,6 +27,7 @@ import { createLocationTracker } from './location.js';
 import { fetchOSMFeatures } from './osmClient.js';
 import { createMapRenderer } from './mapRender.js';
 import { createBuildingsRenderer } from './buildingsRender.js';
+import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './settingsPanel.js';
 
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
 
@@ -43,13 +44,16 @@ const FIXED_DT = 1 / 60;
 async function main() {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
-  let playerName = getCookie("playerName");
+  let playerName = localStorage.getItem('playerName') || getCookie("playerName");
   if (!playerName) {
     playerName = prompt("Enter your name") || `Player${Math.floor(Math.random() * 1000)}`;
-    setCookie("playerName", playerName);
   }
+  setCookie("playerName", playerName);
+  localStorage.setItem('playerName', playerName);
 
-  let characterModel = getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
+  let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
+  setCookie("characterModel", characterModel);
+  localStorage.setItem('characterModel', characterModel);
 
   let multiplayer = null;
   let playerControls = null;
@@ -248,18 +252,6 @@ async function main() {
         }
       }
 
-      if (!multiplayer.connections[remoteId]) {
-        multiplayer.connections[remoteId] = {};
-      }
-      const conn = multiplayer.connections[remoteId];
-      if (!conn.listItem) {
-        const list = document.getElementById('connected-players-list');
-        const item = document.createElement('li');
-        item.id = `peer-${remoteId}`;
-        conn.listItem = item;
-        list.appendChild(item);
-      }
-      conn.listItem.textContent = `Connected to ${data.name}`;
       return;
     }
 
@@ -836,8 +828,13 @@ async function main() {
     let geojson;
     try {
       geojson = await fetchOSMFeatures(location.lat, location.lon, MAP_RADIUS_METERS);
+      debugState.lastOsmFetchAt = Date.now();
     } catch (error) {
       console.warn('OSM fetch failed:', error);
+      debugState.lastError = {
+        message: error?.message || 'OSM fetch failed',
+        timestamp: Date.now()
+      };
       mapFetchInFlight = false;
       return;
     }
@@ -849,18 +846,60 @@ async function main() {
       lastMapFetchAt = now;
     } catch (error) {
       console.warn('OSM render failed:', error);
+      debugState.lastError = {
+        message: error?.message || 'OSM render failed',
+        timestamp: Date.now()
+      };
     } finally {
       mapFetchInFlight = false;
     }
   };
 
+  const locationState = {
+    state: 'requesting',
+    accuracyMeters: null,
+    lat: null,
+    lon: null,
+    heading: null,
+    speed: null,
+    timestamp: null,
+    message: null,
+    permissionDenied: false
+  };
+
+  const debugState = {
+    lastError: null,
+    lastOsmFetchAt: null
+  };
+
   const locationTracker = createLocationTracker({
     onUpdate: (location) => {
       window.latestLocation = location;
+      locationState.state = 'found';
+      locationState.lat = location.lat;
+      locationState.lon = location.lon;
+      locationState.accuracyMeters = location.accuracyMeters;
+      locationState.heading = location.heading;
+      locationState.speed = location.speed;
+      locationState.timestamp = location.timestamp;
+      locationState.message = null;
+      locationState.permissionDenied = false;
       requestMapUpdate(location);
     },
     onError: (error, message) => {
       console.warn('Location error:', message, error);
+      locationState.state = 'error';
+      locationState.message = message;
+      locationState.permissionDenied = error?.code === error?.PERMISSION_DENIED;
+      debugState.lastError = { message, timestamp: Date.now() };
+    },
+    onStatus: (status) => {
+      locationState.state = status.state;
+      locationState.message = status.message || null;
+      locationState.accuracyMeters = status.accuracy ?? locationState.accuracyMeters;
+      if (status.state === 'requesting' || status.state === 'found') {
+        locationState.permissionDenied = false;
+      }
     }
   });
   locationTracker.start();
@@ -877,11 +916,6 @@ async function main() {
   spawnAmmoPickup(new THREE.Vector3(2, 0, -3));
 
   const levelBuilder = new LevelBuilder({ scene, camera, renderer });
-  const builderBtn = document.getElementById('level-builder-button');
-  builderBtn?.addEventListener('click', () => {
-    levelBuilder.toggle();
-    playerControls.enabled = !levelBuilder.active;
-  });
 
   // Wave spawn timing (less frequent) and constant push during pass
   let nextWaveIn = 10 + Math.random() * 6; // seconds
@@ -1117,14 +1151,6 @@ async function main() {
     }
   });
 
-  const settingsBtn = document.getElementById('settings-button');
-  const overlay = document.getElementById('settings-overlay');
-  const nameInput = document.getElementById('name-input');
-  const saveBtn = document.getElementById('save-settings');
-  const characterSelect = document.getElementById('character-select');
-  const toggleBtn = document.getElementById("toggle-console");
-  const consoleDiv = document.getElementById("console-log");
-
   function swapPlayerCharacter(newModelPath) {
     if (!newModelPath || newModelPath === characterModel) {
       return;
@@ -1166,69 +1192,111 @@ async function main() {
     playerControls?.setPlayerModel(playerModel);
   }
 
-  async function populateCharacterSelect() {
-    try {
-      const characters = ['andy', 'chris', 'gemhorn_monster', 'old_man', 'wizard', 'rainbow_troll', 'alien_bumpy_bump', 'swamp_guy'];
-      characters.forEach(name => {
-        const option = document.createElement('option');
-        option.value = `/models/${name}.fbx`;
-        option.textContent = name;
-        characterSelect.appendChild(option);
-        console.log(option.value);
-      });
-      characterSelect.value = characterModel;
-    } catch (e) {
-      console.error('Failed to load character list', e);
-    }
-  }
-  populateCharacterSelect();
+  const settingsBtn = document.getElementById('settings-button');
+  const characterOptions = ['andy', 'chris', 'gemhorn_monster', 'old_man', 'wizard', 'rainbow_troll', 'alien_bumpy_bump', 'swamp_guy'].map(name => ({
+    label: name,
+    value: `/models/${name}.fbx`
+  }));
 
-  settingsBtn.addEventListener('click', () => {
-    nameInput.value = playerName;
-    characterSelect.value = characterModel;
-    overlay.style.display = 'flex';
-  });
+  multiplayer.onConnectionError = (error) => {
+    debugState.lastError = error;
+  };
 
-  saveBtn.addEventListener('click', () => {
-    const trimmedName = nameInput.value.trim();
-    if (trimmedName) {
-      playerName = trimmedName;
+  const appState = {
+    getPlayerName: () => playerName,
+    setPlayerName: (name) => {
+      if (!name) return;
+      playerName = name;
       if (player?.nameLabel) {
         player.nameLabel.innerText = playerName;
       }
-    }
-    setCookie("playerName", playerName);
-
-    const selectedModel = characterSelect.value;
-    if (selectedModel && selectedModel !== characterModel) {
-      characterModel = selectedModel;
+      setCookie("playerName", playerName);
+      localStorage.setItem('playerName', playerName);
+      if (multiplayer) {
+        multiplayer.playerName = playerName;
+      }
+    },
+    getCharacterModel: () => characterModel,
+    setCharacterModel: (modelPath) => {
+      if (!modelPath || modelPath === characterModel) return;
+      characterModel = modelPath;
       swapPlayerCharacter(characterModel);
-    }
-    setCookie("characterModel", characterModel);
+      setCookie("characterModel", characterModel);
+      localStorage.setItem('characterModel', characterModel);
+    },
+    getCharacterOptions: () => characterOptions,
+    getConnectedPlayers: () => {
+      const players = [];
+      const playerPos = playerModel?.position;
+      const connections = multiplayer?.connections || {};
+      Object.keys(connections).forEach((id) => {
+        const other = otherPlayers[id];
+        const distance = other?.model && playerPos ? playerPos.distanceTo(other.model.position) : null;
+        players.push({
+          id,
+          name: other?.name || `Player ${id.slice(0, 4)}`,
+          distance
+        });
+      });
+      return players;
+    },
+    getConnectionStatus: () => {
+      if (!multiplayer?.peer) return 'Connecting';
+      if (multiplayer.peer.destroyed) return 'Disconnected';
+      if (multiplayer.peer.disconnected) return 'Disconnected';
+      if (multiplayer.peer.open) return 'Connected';
+      return 'Connecting';
+    },
+    getLastPing: () => multiplayer?.lastPingMs,
+    getLastOsmFetch: () => debugState.lastOsmFetchAt,
+    getLastError: () => {
+      const networkError = multiplayer?.lastError;
+      const generalError = debugState.lastError;
+      if (!networkError) return generalError;
+      if (!generalError) return networkError;
+      return (networkError.timestamp || 0) >= (generalError.timestamp || 0) ? networkError : generalError;
+    },
+    getAppVersion: () => import.meta.env?.VITE_APP_VERSION || import.meta.env?.VITE_GIT_COMMIT || 'unknown'
+  };
 
-    overlay.style.display = 'none';
+  const locationAdapter = {
+    getState: () => ({ ...locationState }),
+    retry: () => locationTracker.retry()
+  };
+
+  initSettingsPanel({
+    appState,
+    multiplayer,
+    location: locationAdapter,
+    player
   });
 
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.style.display = 'none';
+  settingsBtn.addEventListener('click', () => {
+    openSettings();
   });
 
-  toggleBtn.addEventListener("click", () => {
-    const visible = consoleDiv.style.display === "block";
-    consoleDiv.style.display = visible ? "none" : "block";
-    toggleBtn.textContent = visible ? "Show Console" : "Hide Console";
-  });
+  setInterval(() => {
+    updateSettingsUI();
+  }, 1000);
 
+  const consoleDiv = document.getElementById("console-log");
   (function() {
     const originalLog = console.log;
     console.log = function(...args) {
       originalLog(...args);
+      if (!consoleDiv) return;
       const msg = document.createElement("div");
       msg.textContent = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(" ");
       consoleDiv.appendChild(msg);
       consoleDiv.scrollTop = consoleDiv.scrollHeight;
     };
   })();
+
+  const builderBtn = document.getElementById('level-builder-button');
+  builderBtn?.addEventListener('click', () => {
+    levelBuilder.toggle();
+    playerControls.enabled = !levelBuilder.active;
+  });
 
   function animate() {
     requestAnimationFrame(animate);

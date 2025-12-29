@@ -10,66 +10,41 @@ const WATCH_OPTIONS = {
   timeout: 20000
 };
 
-const STATUS_STYLES = {
-  container: [
-    'position: fixed',
-    'left: 50%',
-    'bottom: 20px',
-    'transform: translateX(-50%)',
-    'background: rgba(0, 0, 0, 0.7)',
-    'color: #fff',
-    'padding: 10px 14px',
-    'border-radius: 8px',
-    'font-family: "Press Start 2P", monospace',
-    'font-size: 10px',
-    'line-height: 1.4',
-    'z-index: 9999',
-    'max-width: 90vw',
-    'text-align: center',
-    'display: none'
-  ].join(';'),
-  button: [
-    'margin-top: 6px',
-    'padding: 6px 10px',
-    'font-family: "Press Start 2P", monospace',
-    'font-size: 9px',
-    'background: #1f8bff',
-    'color: #fff',
-    'border: none',
-    'border-radius: 6px',
-    'cursor: pointer'
-  ].join(';')
-};
-
 function createStatusElement() {
   const element = document.createElement('div');
-  element.id = 'location-status';
-  element.setAttribute('style', STATUS_STYLES.container);
+  element.id = 'location-banner';
+  element.className = 'location-banner';
 
   const statusLine = document.createElement('div');
-  const accuracyLine = document.createElement('div');
-  const retryButton = document.createElement('button');
-  retryButton.type = 'button';
-  retryButton.textContent = 'Retry';
-  retryButton.setAttribute('style', STATUS_STYLES.button);
-
   element.appendChild(statusLine);
-  element.appendChild(accuracyLine);
-  element.appendChild(retryButton);
   document.body.appendChild(element);
+
+  let hideTimer = null;
 
   return {
     setStatus({ state, message, accuracy }) {
-      statusLine.textContent = `Status: ${state}${message ? ` (${message})` : ''}`;
-      if (typeof accuracy === 'number') {
-        accuracyLine.textContent = `Accuracy: ${Math.round(accuracy)}m`;
-      } else {
-        accuracyLine.textContent = 'Accuracy: --';
+      if (hideTimer) {
+        clearTimeout(hideTimer);
+        hideTimer = null;
       }
-      element.style.display = 'block';
-    },
-    onRetry(handler) {
-      retryButton.addEventListener('click', handler);
+      if (state === 'requesting') {
+        statusLine.textContent = 'Requesting location…';
+      } else if (state === 'found') {
+        const accuracyText = typeof accuracy === 'number' ? ` (±${Math.round(accuracy)}m)` : '';
+        statusLine.textContent = `Location found${accuracyText}`;
+      } else if (state === 'error') {
+        statusLine.textContent = message ? `Location error: ${message}` : 'Location error';
+      } else {
+        statusLine.textContent = message || 'Location status updated.';
+      }
+      element.classList.add('is-visible');
+      element.classList.remove('is-hidden');
+
+      if (state === 'found') {
+        hideTimer = setTimeout(() => {
+          element.classList.add('is-hidden');
+        }, 1700);
+      }
     },
     element
   };
@@ -94,6 +69,7 @@ function getErrorMessage(error) {
 export function createLocationTracker({
   onUpdate,
   onError,
+  onStatus,
   throttleMs = 1000
 } = {}) {
   let watchId = null;
@@ -120,6 +96,7 @@ export function createLocationTracker({
       timestamp
     };
     status.setStatus({ state: 'found', accuracy: coords.accuracy });
+    onStatus?.({ state: 'found', accuracy: coords.accuracy, timestamp });
     onUpdate?.(lastUpdate);
   };
 
@@ -148,6 +125,7 @@ export function createLocationTracker({
   const handleInitialError = (error) => {
     const message = getErrorMessage(error);
     status.setStatus({ state: 'error', message, accuracy: lastUpdate?.accuracyMeters });
+    onStatus?.({ state: 'error', message, accuracy: lastUpdate?.accuracyMeters });
     if (error?.code === error.PERMISSION_DENIED) {
       onError?.(error, message);
       return;
@@ -172,6 +150,7 @@ export function createLocationTracker({
 
   const getInitialFix = () => {
     status.setStatus({ state: 'requesting', accuracy: lastUpdate?.accuracyMeters });
+    onStatus?.({ state: 'requesting', accuracy: lastUpdate?.accuracyMeters });
     navigator.geolocation.getCurrentPosition(
       handleInitialSuccess,
       handleInitialError,
@@ -182,6 +161,7 @@ export function createLocationTracker({
   const start = () => {
     if (!navigator.geolocation) {
       status.setStatus({ state: 'error', message: 'Geolocation is not supported in this browser.' });
+      onStatus?.({ state: 'error', message: 'Geolocation is not supported in this browser.' });
       return false;
     }
     getInitialFix();
@@ -193,18 +173,19 @@ export function createLocationTracker({
     stopWatch();
   };
 
-  status.onRetry(() => {
+  const retry = () => {
     retryCount = 0;
     clearRetryTimer();
     stopWatch();
     if (navigator.geolocation) {
       getInitialFix();
     }
-  });
+  };
 
   return {
     start,
     stop,
+    retry,
     getLastUpdate: () => lastUpdate,
     statusElement: status.element
   };
