@@ -195,14 +195,14 @@ export function createMapRenderer({
     }
   }
 
-  function updateHighways(geojson) {
+  function updateHighways(geojson, boundsOverride) {
     const lines = collectHighwayLines(geojson);
     if (lines.length === 0) {
       clearUnused(0);
       return;
     }
 
-    const bounds = computeBounds(lines);
+    const bounds = boundsOverride ?? computeBounds(lines);
     if (!bounds) {
       clearUnused(0);
       return;

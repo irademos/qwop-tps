@@ -26,6 +26,7 @@ import { getSpawnPosition } from './spawnUtils.js';
 import { createLocationTracker } from './location.js';
 import { fetchOSMFeatures } from './osmClient.js';
 import { createMapRenderer } from './mapRender.js';
+import { createBuildingsRenderer } from './buildingsRender.js';
 
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
 
@@ -435,7 +436,9 @@ async function main() {
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   const mapRenderer = createMapRenderer({ scene, renderer });
+  const buildingsRenderer = createBuildingsRenderer({ scene, camera });
   window.mapRenderer = mapRenderer;
+  window.buildingsRenderer = buildingsRenderer;
 
   const handleResize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -713,6 +716,48 @@ async function main() {
     return Math.hypot(dx, dz);
   };
 
+  const computeGeojsonBounds = (geojson) => {
+    let minLon = Infinity;
+    let maxLon = -Infinity;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let count = 0;
+
+    const updateBounds = (coord) => {
+      if (!coord || coord.length < 2) return;
+      const [lon, lat] = coord;
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+      minLon = Math.min(minLon, lon);
+      maxLon = Math.max(maxLon, lon);
+      minLat = Math.min(minLat, lat);
+      maxLat = Math.max(maxLat, lat);
+      count += 1;
+    };
+
+    for (const feature of geojson?.features ?? []) {
+      const geometry = feature?.geometry;
+      if (!geometry) continue;
+      if (geometry.type === "LineString") {
+        geometry.coordinates.forEach(updateBounds);
+      } else if (geometry.type === "MultiLineString") {
+        geometry.coordinates.flat().forEach(updateBounds);
+      } else if (geometry.type === "Polygon") {
+        geometry.coordinates.flat().forEach(updateBounds);
+      } else if (geometry.type === "MultiPolygon") {
+        geometry.coordinates.flat(2).forEach(updateBounds);
+      }
+    }
+
+    if (!Number.isFinite(minLon) || count === 0) {
+      return null;
+    }
+
+    return {
+      centerLon: (minLon + maxLon) / 2,
+      centerLat: (minLat + maxLat) / 2
+    };
+  };
+
   const requestMapUpdate = async (location) => {
     if (!location || mapFetchInFlight) return;
     const now = performance.now();
@@ -725,7 +770,9 @@ async function main() {
     mapFetchInFlight = true;
     try {
       const geojson = await fetchOSMFeatures(location.lat, location.lon, MAP_RADIUS_METERS);
-      mapRenderer.updateHighways(geojson);
+      const bounds = computeGeojsonBounds(geojson);
+      mapRenderer.updateHighways(geojson, bounds);
+      buildingsRenderer.updateBuildings(geojson, bounds);
       lastMapLocation = location;
       lastMapFetchAt = now;
     } catch (error) {
