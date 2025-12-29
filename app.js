@@ -3,60 +3,25 @@ import * as THREE from "three";
 import { PlayerCharacter } from "./characters/PlayerCharacter.js";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { createOrcVoice } from "./orcVoice.js";
-import { createClouds } from "./worldGeneration.js";
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls.js';
 import { getCookie, setCookie } from './utils.js';
 import { spawnProjectile, updateProjectiles } from './projectiles.js';
 import { updateMeleeAttacks } from './melee.js';
-import { initSpeechCommands } from './speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { createPerfOverlay } from "./ui/perfOverlay.js";
-import { initControlsHelp } from "./ui/controlsHelp.js";
-import { createGroundGrid } from "./helpers/groundGrid.js";
-import { createScreenshotButton } from "./ui/screenshotButton.js";
-import { createDayNightToggle } from "./ui/dayNightToggle.js";
-import { createCompassHUD } from "./ui/compassHUD.js";
-import { createPositionHUD } from "./ui/positionHUD.js";
-import { initScreenshotHotkey } from "./ui/screenshotHotkey.js";
-import { createFullscreenButton } from "./ui/fullscreenButton.js";
-import { createConnectionIndicator } from "./ui/connectionIndicator.js";
-import { createPauseUI } from "./ui/pauseUI.js";
-import { createAutoPauseManager } from "./ui/autoPauseManager.js";
-import { createResolutionToggle } from "./ui/resolutionToggle.js";
 import { createHealthHUD } from "./ui/healthHUD.js";
-import { createMinimap } from "./ui/minimap.js";
-import { createFovControl } from "./ui/fovControl.js";
-import { createToastManager } from "./ui/toast.js";
-import { createClickRipple } from "./effects/clickRipple.js";
-import { createConfettiEffect } from "./effects/confettiBurst.js";
-import { createVersionBadge } from "./ui/versionBadge.js";
-import { createDamageFlash } from "./ui/damageFlash.js";
-import { createSessionTimer } from "./ui/sessionTimer.js";
-import { APP_VERSION } from "./version.js";
-import { createPhotoMode } from "./ui/photoMode.js";
-import { createShareLocationButton } from "./ui/shareLocationButton.js";
-import { createRendererInfoBadge } from "./ui/rendererInfoBadge.js";
-import { createQuickActionsBar } from "./ui/quickActionsBar.js";
-import { createTitleStatus } from "./ui/titleStatus.js";
-import { createRainEffect } from "./effects/rain.js";
-import { createHeadingArrow } from "./helpers/headingArrow.js";
-import { initActionsMenu } from "./ui/actionsMenu.js";
-import { initSnapAnglePersistence } from "./features/snapAngleServer.js";
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
 
-// --- Rapier demo state ---
 let rapierWorld;
-const rbToMesh = new Map(); // RigidBody -> THREE.Mesh
+const rbToMesh = new Map();
 let physicsAccumulator = 0;
 const FIXED_DT = 1 / 60;
 
 async function main() {
   document.body.addEventListener('touchstart', () => {}, { once: true });
-  let paused = false;
 
   let playerName = getCookie("playerName");
   if (!playerName) {
@@ -66,162 +31,44 @@ async function main() {
 
   let characterModel = getCookie("characterModel") || "/models/old_man.fbx";
 
-  const multiplayer = new Multiplayer(playerName, handleIncomingData);
+  let multiplayer;
   const audioManager = new AudioManager();
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87CEEB);
 
-  createClouds(scene);
-  createGroundGrid(THREE, scene);
+  const groundGeo = new THREE.PlaneGeometry(200, 200);
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x4e6b3a });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.receiveShadow = true;
+  ground.userData.isTerrain = true;
+  scene.add(ground);
 
-  let monster = null;
-  loadMonsterModel(scene, data => {
-    monster = data.model;
-    // Expose monster globally for interactions like grabbing
-    window.monster = monster;
-    monster.userData.mixer = data.mixer;
-    monster.userData.actions = data.actions;
-    monster.userData.currentAction = "Idle";
-    monster.userData.direction = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-    monster.userData.speed = 0.025;
-    monster.userData.lastDirectionChange = Date.now();
-    monster.userData.mode = "friendly"; // default behavior
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+  scene.add(ambientLight);
 
-    const orcPhrases = [
-      "Uggghh",
-      "Ooo Goo",
-      "grrreeeoookkk egggh uh uh",
-      "errrga ooogah"
-    ];
-    monster.userData.voice = createOrcVoice(orcPhrases);
-    if (rapierWorld) attachMonsterPhysics(monster);
-  });
-
-  // Allow mode switching from console or other scripts
-  window.setMonsterMode = mode => {
-    if (monster && (mode === "friendly" || mode === "enemy")) {
-      monster.userData.mode = mode;
-    }
-  };
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+  dirLight.position.set(5, 10, 5);
+  scene.add(dirLight);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-  const initialPixelRatio = getCookie("renderPerfMode") === "true" ? 1 : Math.min(window.devicePixelRatio || 1, 2);
-  renderer.setPixelRatio(initialPixelRatio);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
-  createScreenshotButton(renderer);
-  initScreenshotHotkey(renderer);
-  createFullscreenButton(renderer.domElement);
-  createResolutionToggle({ renderer });
-  const rendererInfo = createRendererInfoBadge({ renderer });
-
-  const perf = createPerfOverlay();
-  initControlsHelp();
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-  // Keep renderer responsive and crisp on resize/rotation
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // In-game FOV control in Settings overlay
-  createFovControl({ camera });
-
-  // Click ripple effect on ground
-  const clickRipple = createClickRipple({ scene, renderer, camera });
-  // Click confetti bursts
-  const confetti = createConfettiEffect({ scene, renderer, camera });
-  const rain = createRainEffect({ scene, renderer, camera });
-
-  // Weather-linked music intensity (calm <-> storm)
-  // - Lazy-loads the controller to avoid increasing initial bundle size.
-  // - Patches rain.setActive so toggling rain adjusts music intensity automatically.
-  let weatherMusicController = null;
-  let dayNightAmbient = null;
-  (async () => {
-    try {
-      const mod = await import('./features/weatherMusic.js');
-      weatherMusicController = mod.initWeatherMusic(audioManager, {
-        calmTrack: 'Ambient/Calm.ogg',
-        stormTrack: 'Ambient/Storm.ogg',
-        crossfade: 1.8,
-        baseVolume: 0.75
-      });
-
-      // Monkey-patch rain.setActive so UI-driven rain toggles also update music.
-      if (rain && typeof rain.setActive === 'function') {
-        const orig = rain.setActive.bind(rain);
-        rain.setActive = (on) => {
-          try { orig(on); } catch (e) { try { orig(on); } catch (e2) {} }
-          try {
-            if (weatherMusicController && typeof weatherMusicController.setStormIntensity === 'function') {
-              weatherMusicController.setStormIntensity(on ? 1 : 0);
-            }
-          } catch (e) {}
-        };
-      }
-
-      // Start the audio controller (attempt to play will be tolerated if blocked).
-      try {
-        weatherMusicController.setStormIntensity(0);
-        weatherMusicController.setActive(true);
-      } catch (e) {}
-    } catch (err) {
-      console.error('Failed to init weather music', err);
-    }
-  })();
-
-  // Toasts (welcome banner)
-  const toasts = createToastManager();
-  toasts.show(`Welcome, ${playerName}!`);
-
-  const compass = createCompassHUD();
-  const posHUD = createPositionHUD();
-  const connIndicator = createConnectionIndicator();
-  const minimap = createMinimap();
-  const versionBadge = createVersionBadge({ version: APP_VERSION, position: "top-left" });
-  const damageFlash = createDamageFlash();
-  const sessionTimer = createSessionTimer();
-  const photoMode = createPhotoMode();
-  const titleStatus = createTitleStatus({ playerName, version: APP_VERSION });
-
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-  scene.add(ambientLight);
-
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-  dirLight.position.set(5, 10, 5);
-  dirLight.castShadow = true;
-  scene.add(dirLight);
-  createDayNightToggle({ scene, ambientLight, dirLight });
-
-  // Adaptive dusk/dawn lighting presets (lazy-loaded, no UI)
-  (async () => {
-    try {
-      const mod = await import('./features/duskDawnLighting.js');
-      // Initialize with defaults that match the audio controller's durations.
-      const duskCtrl = mod.initDuskDawnLighting(THREE, {
-        ambientLight,
-        dirLight,
-        scene,
-        options: { dayDuration: 90, nightDuration: 60, crossfade: 3 }
-      });
-      // Expose for debugging if needed
-      window.duskDawnLighting = duskCtrl;
-    } catch (err) {
-      console.error('Failed to init dusk/dawn lighting', err);
-    }
-  })();
-
-  // --- RAPIER INIT ---
   await RAPIER.init();
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   window.rapierWorld = rapierWorld;
   window.rbToMesh = rbToMesh;
 
-  // Ground collider
   {
     const groundRb = rapierWorld.createRigidBody(
       RAPIER.RigidBodyDesc.fixed().setTranslation(0, -1, 0)
@@ -244,1307 +91,32 @@ async function main() {
     rbToMesh.set(rb, mon);
   }
 
-  if (monster) attachMonsterPhysics(monster);
+  let monster = null;
+  loadMonsterModel(scene, data => {
+    monster = data.model;
+    window.monster = monster;
+    monster.userData.mixer = data.mixer;
+    monster.userData.actions = data.actions;
+    monster.userData.currentAction = "Idle";
+    monster.userData.direction = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+    monster.userData.speed = 0.025;
+    monster.userData.lastDirectionChange = Date.now();
+    monster.userData.mode = "friendly";
+
+    const orcPhrases = [
+      "Uggghh",
+      "Ooo Goo",
+      "grrreeeoookkk egggh uh uh",
+      "errrga ooogah"
+    ];
+    monster.userData.voice = createOrcVoice(orcPhrases);
+    if (rapierWorld) attachMonsterPhysics(monster);
+  });
 
   const player = new PlayerCharacter(playerName, characterModel);
   const playerModel = player.model;
   scene.add(playerModel);
   document.body.appendChild(player.nameLabel);
-  const headingArrow = createHeadingArrow(THREE);
-  scene.add(headingArrow.group);
-  window.playerModel = playerModel;
-  
-  // Campfire: lazy-load campfire prop and create one near the player (no buttons)
-  (async function initCampfire() {
-    try {
-      const mod = await import('./features/campfire.js');
-      const camp = mod.createCampfire(THREE, { scene, playerModel });
-      window.campfire = camp;
-      if (camp && typeof camp.setActive === 'function') camp.setActive(true);
-
-      // Start lightweight campfire ambient sound loop (lazy-load audio controller)
-      try {
-        const ambientMod = await import('./audio/campfireAmbient.js');
-        const campAmbient = ambientMod.initCampfireAmbient(audioManager, {
-          campfire: camp,
-          src: 'Ambient/Campfire.ogg',
-          volume: 0.55
-        });
-        window.campfireAmbient = campAmbient;
-        // Enable ambient when camp is active (best-effort)
-        try { campAmbient.setActive(true); } catch (e) {}
-      } catch (e) {
-        console.error('Failed to init campfire ambient', e);
-      }
-    } catch (err) {
-      console.error('Failed to init campfire', err);
-    }
-  })();
-
-  // Campfire Cooking: lightweight interaction that allows the player to cook raw items
-  // - Initialized once after the campfire controller exists.
-  // - No UI buttons added; player presses "C" when near the campfire to cook.
-  (async function initCampfireCooking() {
-    try {
-      const mod = await import('./features/campfireCooking.js');
-
-      // Wait briefly for campfire to be created by the earlier lazy loader.
-      const waitForCampfire = () => new Promise((resolve) => {
-        if (window.campfire) return resolve(window.campfire);
-        const timeout = setInterval(() => {
-          if (window.campfire) {
-            clearInterval(timeout);
-            resolve(window.campfire);
-          }
-        }, 100);
-        // Fallback resolve after 2s (feature will still operate using player's position)
-        setTimeout(() => {
-          clearInterval(timeout);
-          resolve(window.campfire);
-        }, 2000);
-      });
-
-      const camp = await waitForCampfire();
-      const cookCtrl = mod.initCampfireCooking(THREE, {
-        scene,
-        playerModel,
-        campfire: camp,
-        toasts,
-        audioManager
-      });
-      window.campfireCooking = cookCtrl;
-      if (cookCtrl && typeof cookCtrl.setActive === 'function') cookCtrl.setActive(true);
-    } catch (err) {
-      console.error('Failed to init campfire cooking', err);
-    }
-  })();
-
-  // Initialize furniture snapping grid (visual aid only; no UI buttons)
-  (async function initFurnitureSnapping() {
-    try {
-      const mod = await import('./features/furnitureSnapping.js');
-      const snap = mod.initFurnitureSnapping(THREE, { scene, playerModel });
-      window.furnitureSnapping = snap;
-      if (snap && typeof snap.setActive === 'function') snap.setActive(true);
-    } catch (err) {
-      console.error('Failed to init furniture snapping', err);
-    }
-  })();
-  
-  // Player Housing Showcase (lazy-loaded) - small house near player, no UI buttons.
-  (async function initPlayerHousing() {
-    try {
-      const mod = await import('./features/playerHousing.js');
-      const housing = mod.initPlayerHousing(THREE, { scene, playerModel, audioManager, toasts });
-      window.playerHousing = housing;
-      if (housing && typeof housing.setActive === 'function') housing.setActive(true);
-    } catch (err) {
-      console.error('Failed to init player housing', err);
-    }
-  })();
-
-  // Player Housing Customization (lazy-loaded) - lightweight customization tools for the player's house.
-  // Initialization is done exactly once after the housing module is created.
-  (async function initPlayerHousingCustomization() {
-    try {
-      const mod = await import('./features/playerHousingCustomization.js');
-      const custom = mod.initPlayerHousingCustomization(THREE, {
-        scene,
-        playerModel,
-        playerHousing: window.playerHousing
-      });
-      window.playerHousingCustomization = custom;
-      if (custom && typeof custom.setActive === 'function') custom.setActive(true);
-    } catch (err) {
-      console.error('Failed to init player housing customization', err);
-    }
-  })();
-
-  // Per-model Anchor Editor (visual editor for anchor offsets).
-  // - Lazy-loaded and initialized exactly once after scene/playerModel/renderer are available.
-  // - No on-screen buttons: select a model by clicking it in the world and use keyboard arrows/PageUp/PageDown to nudge.
-  (async () => {
-    try {
-      const mod = await import('./features/anchorEditor.js');
-      const editor = mod.initAnchorEditor(THREE, { scene, camera, renderer });
-      window.anchorEditor = editor;
-      if (editor && typeof editor.setActive === 'function') editor.setActive(true);
-    } catch (e) {
-      console.error('Failed to init anchor editor', e);
-    }
-  })();
-
-  // Lightweight Anchor Baker (runs once automatically; no UI)
-  (async () => {
-    try {
-      const mod = await import('./features/anchorBaker.js');
-      const baker = mod.initAnchorBaker(THREE, { scene, playerModel, toasts });
-      window.anchorBaker = baker;
-      try {
-        await baker.bakeAll();
-      } catch (e) {
-        console.error('Anchor baking failed', e);
-      }
-    } catch (e) {
-      console.error('Failed to init anchor baker', e);
-    }
-  })();
-
-  // Furniture placement demo (lazy-loaded, preview & place with keys: P toggle, L cycle, F place, R rotate)
-  (async () => {
-    try {
-      const mod = await import('./features/furniturePlacement.js');
-      const fp = mod.initFurniturePlacement(THREE, { scene, playerModel, toasts });
-      window.furniturePlacement = fp;
-      if (fp && typeof fp.setActive === 'function') {
-        // Enable preview by default so it's immediately visible for verification.
-        fp.setActive(true);
-      }
-
-      // Also lazy-load the lightweight placement preview controller.
-      try {
-        const previewMod = await import('./features/furniturePlacementPreview.js');
-        // The preview shows a translucent "ghost" of the current furniture in-world
-        // and forwards user place commands to the main furniturePlacement module when available.
-        const preview = previewMod.initFurniturePlacementPreview(THREE, {
-          scene,
-          playerModel,
-          furniturePlacement: fp
-        });
-        window.furniturePlacementPreview = preview;
-        // Wire into outer scope controller variable (declared below); safe to assign.
-        try { furniturePreviewController = preview; } catch (e) { /* best-effort */ }
-        if (preview && typeof preview.setActive === 'function') {
-          preview.setActive(true);
-          // Initialize model-specific snap overrides (lazy, lightweight).
-          // This augments snap-to-surface behaviour with per-model offsets and
-          // optional rotation snap hints. No UI buttons are added.
-          (async () => {
-            try {
-              const mod = await import('./features/snapToSurfaceModelOverrides.js');
-              const overrides = mod.initSnapToSurfaceModelOverrides(THREE, { scene, furniturePreview: preview });
-              window.modelSnapOverrides = overrides;
-              if (overrides && typeof overrides.setActive === 'function') overrides.setActive(true);
-              // Example override (non-invasive): many furniture demos include a "chair".
-              // This is only a demonstration and can be changed at runtime via the
-              // returned API (window.modelSnapOverrides.setOverride).
-              try {
-                overrides.setOverride('chair', { positionOffset: 0.12, rotationSnapDeg: 15 });
-              } catch (e) {}
-            } catch (e) {
-              console.error('Failed to init model snap overrides', e);
-            }
-          })();
-
-          // Auto-align furniture preview to nearby supports (pillars / rails).
-          // Lazy-load small module once preview is available. No UI added.
-          (async () => {
-            try {
-              const mod = await import('./features/autoAlignSupports.js');
-              const autoAlign = mod.initAutoAlignSupports(THREE, { scene, furniturePreview: preview, maxDist: 1.5 });
-              window.autoAlignSupports = autoAlign;
-              if (autoAlign && typeof autoAlign.setActive === 'function') autoAlign.setActive(true);
-
-              // Hook into world update loop: many controllers in this app are updated
-              // from the global animate() by calling their update(delta) if present.
-              // furniturePreview already has its own update; autoAlign supports
-              // being called once-per-frame safely. Attach a best-effort updater.
-              try {
-                const origPreviewUpdate = preview.update?.bind(preview);
-                preview.update = function(delta) {
-                  if (typeof origPreviewUpdate === 'function') origPreviewUpdate(delta);
-                  try { autoAlign.update(); } catch (e) {}
-                };
-              } catch (e) {
-                // fallback: nothing to do
-              }
-            } catch (e) {
-              console.error('Failed to init auto-align supports', e);
-            }
-          })();
-
-          // Per-model anchor presets (lazy, small module) - allows per-model anchor offsets for heavy furniture.
-          try {
-            const anchorsMod = await import('./features/perModelAnchors.js');
-            const anchors = anchorsMod.initPerModelAnchors(THREE, { scene, furniturePlacement: fp, furniturePreview: preview });
-            window.perModelAnchors = anchors;
-            if (anchors && typeof anchors.setActive === 'function') anchors.setActive(true);
-
-            // Example preset applied non-invasively: many demos include a "chair"
-            try {
-              anchors.setPreset('chair', { positionOffset: [0, -0.12, 0], rotationOffsetDeg: 0, description: 'Chair heavy anchor' });
-            } catch (e) {}
-          } catch (e) {
-            console.error('Failed to init per-model anchors', e);
-          }
-
-          // Smart support-detection (semantic tags)
-          // - Lazy-loads a small helper that scans scene objects for semantic tags
-          //   like "support", "pillar", "rail" and highlights nearby supports
-          //   in the world relative to the furniture preview position.
-          // - No UI buttons are added; visuals are world-space markers only.
-          (async () => {
-            try {
-              const sdMod = await import('./features/supportDetection.js');
-              const supportDetector = sdMod.initSupportDetection(THREE, {
-                scene,
-                furniturePreview: preview,
-                maxDist: 1.5
-              });
-              window.supportDetector = supportDetector;
-              if (supportDetector && typeof supportDetector.setActive === 'function') supportDetector.setActive(true);
-
-              // Best-effort: call supportDetector.update from preview.update each frame
-              try {
-                const origPreviewUpdate2 = preview.update?.bind(preview);
-                preview.update = function(delta) {
-                  if (typeof origPreviewUpdate2 === 'function') origPreviewUpdate2(delta);
-                  try { supportDetector.update(delta); } catch (e) {}
-                };
-              } catch (e) {
-                // ignore
-              }
-            } catch (e) {
-              console.error('Failed to init support detection', e);
-            }
-          })();
-        }
-
-        // Initialize rotation snapping helper exactly once (lazy, small module)
-        try {
-          const snapMod = await import('./features/furnitureRotationSnapping.js');
-          const snapController = snapMod.initFurnitureRotationSnapping(THREE, { furniturePreview: preview, snapAngle: 15 });
-          // Expose for debugging; API: setActive(boolean), snapToNearest(), rotateBy(deg)
-          window.furnitureRotationSnapping = snapController;
-          if (snapController && typeof snapController.setActive === 'function') snapController.setActive(true);
-
-          // Per-player snap-angle preference
-          try {
-            const prefMod = await import('./features/snapAnglePreference.js');
-            const snapPref = prefMod.initSnapAnglePreference({ snapController, toasts });
-            window.snapAnglePreference = snapPref;
-            if (snapPref && typeof snapPref.setActive === 'function') snapPref.setActive(true);
-          } catch (err) {
-            console.error('Failed to init snap angle preference', err);
-          }
-
-          // Lightweight HUD: show current furniture rotation snap angle (no buttons).
-          // Loaded lazily and initialized once; attempts to keep in sync by wrapping
-          // common controller methods if available.
-          try {
-            const hudMod = await import('./features/furnitureSnapHUD.js');
-            const snapHUD = hudMod.initFurnitureSnapHUD({ initialAngle: snapController?.snapAngle ?? 15 });
-            window.furnitureSnapHUD = snapHUD;
-            if (snapHUD && typeof snapHUD.setActive === 'function') snapHUD.setActive(true);
-
-            // Best-effort sync: if controller exposes rotateBy / snapToNearest, wrap them
-            // so the HUD updates after rotation changes. Preserve original behavior.
-            try {
-              if (snapController) {
-                // update HUD from explicit property if available
-                if (typeof snapController.snapAngle === 'number') {
-                  snapHUD.setAngle(snapController.snapAngle);
-                }
-                // wrap rotateBy
-                if (typeof snapController.rotateBy === 'function') {
-                  const _origRotateBy = snapController.rotateBy.bind(snapController);
-                  snapController.rotateBy = (deg) => {
-                    const res = _origRotateBy(deg);
-                    try { snapHUD.setAngle(snapController.snapAngle ?? snapController.currentSnapAngle ?? snapController._snapAngle ?? 15); } catch (e) {}
-                    return res;
-                  };
-                }
-                // wrap snapToNearest
-                if (typeof snapController.snapToNearest === 'function') {
-                  const _origSnapToNearest = snapController.snapToNearest.bind(snapController);
-                  snapController.snapToNearest = (...args) => {
-                    const res = _origSnapToNearest(...args);
-                    try { snapHUD.setAngle(snapController.snapAngle ?? snapController.currentSnapAngle ?? snapController._snapAngle ?? 15); } catch (e) {}
-                    return res;
-                  };
-                }
-                // Ensure HUD follows active state
-                if (typeof snapController.setActive === 'function') {
-                  const _origSetActive = snapController.setActive.bind(snapController);
-                  snapController.setActive = (v) => {
-                    const r = _origSetActive(v);
-                    try { snapHUD.setActive(Boolean(v)); } catch (e) {}
-                    return r;
-                  };
-                }
-              }
-            } catch (e) {
-              console.error('Failed to wrap snap controller for HUD sync', e);
-            }
-          } catch (e) {
-            console.error('Failed to init furniture snap HUD', e);
-          }
-
-          // Lightweight snap-angle HUD: visual indicator that shows current snap angle.
-          // Created lazily and kept in sync with the snap controller when available.
-          try {
-            const angleMod = await import('./features/furnitureSnapAngleHUD.js');
-            const angleHUD = angleMod.initFurnitureSnapAngleHUD({ initialAngle: snapController?.snapAngle ?? 15 });
-            window.furnitureSnapAngleHUD = angleHUD;
-            if (angleHUD && typeof angleHUD.setActive === 'function') angleHUD.setActive(true);
-
-            // Sync angle updates with the existing snapController and snapHUD (best-effort).
-            try {
-              if (snapController) {
-                // seed initial value
-                try { angleHUD.setAngle(snapController.snapAngle ?? snapController.currentSnapAngle ?? snapController._snapAngle ?? 15); } catch (e) {}
-
-                // wrap rotateBy to update HUD
-                if (typeof snapController.rotateBy === 'function') {
-                  const _origRotateBy2 = snapController.rotateBy.bind(snapController);
-                  snapController.rotateBy = (deg) => {
-                    const res = _origRotateBy2(deg);
-                    try { angleHUD.setAngle(snapController.snapAngle ?? snapController.currentSnapAngle ?? snapController._snapAngle ?? 15); } catch (e) {}
-                    return res;
-                  };
-                }
-
-                // wrap snapToNearest to update HUD
-                if (typeof snapController.snapToNearest === 'function') {
-                  const _origSnapToNearest2 = snapController.snapToNearest.bind(snapController);
-                  snapController.snapToNearest = (...args) => {
-                    const res = _origSnapToNearest2(...args);
-                    try { angleHUD.setAngle(snapController.snapAngle ?? snapController.currentSnapAngle ?? snapController._snapAngle ?? 15); } catch (e) {}
-                    return res;
-                  };
-                }
-
-                // ensure showing/hiding follows controller active state
-                if (typeof snapController.setActive === 'function') {
-                  const _origSetActive2 = snapController.setActive.bind(snapController);
-                  snapController.setActive = (v) => {
-                    const r = _origSetActive2(v);
-                    try { angleHUD.setActive(Boolean(v)); } catch (e) {}
-                    return r;
-                  };
-                }
-              }
-            } catch (e) {
-              console.error('Failed to wire snap controller to snap-angle HUD', e);
-            }
-          } catch (e) {
-            console.error('Failed to init furniture snap angle HUD', e);
-          }
-
-          // Initialize rotation snap hotkeys (lazy, small module) — no buttons per UX guardrails.
-          try {
-            const hotkeysMod = await import('./features/furnitureRotationHotkeys.js');
-            const hotkeys = hotkeysMod.initFurnitureRotationHotkeys({ snapController, toasts });
-            window.furnitureRotationHotkeys = hotkeys;
-            if (hotkeys && typeof hotkeys.setActive === 'function') hotkeys.setActive(true);
-
-            // Also initialize a lightweight HUD hint for rotation hotkeys.
-            // This shows a transient, non-interactive visual cue when the user
-            // presses [, ], or K. It's lazy-loaded and safe if it fails.
-            try {
-              const hintMod = await import('./features/rotationHotkeyHint.js');
-              const hint = hintMod.initRotationHotkeyHint({ toasts });
-              window.rotationHotkeyHint = hint;
-              if (hint && typeof hint.setActive === 'function') hint.setActive(true);
-            } catch (errHint) {
-              console.error('Failed to init rotation hotkey HUD hint', errHint);
-            }
-
-            // Accessibility: rotation hotkey TTS (lazy-loaded, initialized once)
-            try {
-              const ttsMod = await import('./features/rotationHotkeyTTS.js');
-              const tts = ttsMod.initRotationHotkeyTTS({ toasts });
-              window.rotationHotkeyTTS = tts;
-              if (tts && typeof tts.setActive === 'function') tts.setActive(true);
-            } catch (errTTS) {
-              console.error('Failed to init rotation hotkey TTS', errTTS);
-            }
-          } catch (errHot) {
-            console.error('Failed to init furniture rotation hotkeys', errHot);
-          }
-
-        } catch (err) {
-          console.error('Failed to init furniture rotation snapping', err);
-        }
-
-        // Initialize snap-to-surface helper (lazy, small module)
-        try {
-          const surfaceMod = await import('./features/snapToSurface.js');
-          const surfaceSnap = surfaceMod.initSnapToSurface(THREE, {
-            furniturePreview: preview,
-            scene,
-            maxSlopeDeg: 45
-          });
-          // Expose for debugging; API: setActive(boolean), snapNow(), destroy()
-          window.furnitureSnapToSurface = surfaceSnap;
-          if (surfaceSnap && typeof surfaceSnap.setActive === 'function') surfaceSnap.setActive(true);
-        } catch (err) {
-          console.error('Failed to init snap-to-surface', err);
-        }
-
-        // Automatic ground-falloff blending (augment snap-to-surface behavior)
-        try {
-          const falloffMod = await import('./features/snapToSurfaceFalloff.js');
-          const falloff = falloffMod.initSnapToSurfaceFalloff(THREE, {
-            furniturePreview: preview,
-            scene,
-            maxSlopeDeg: 45,
-            maxFalloff: 1.2,
-            sampleRadius: 0.6,
-            sampleCount: 7
-          });
-          // Expose for debugging
-          window.furnitureSnapToSurfaceFalloff = falloff;
-          if (falloff && typeof falloff.setActive === 'function') falloff.setActive(true);
-        } catch (err) {
-          console.error('Failed to init snap-to-surface falloff', err);
-        }
-
-        // Initialize furniture presets (save/load) once preview is available.
-        try {
-          const presetsMod = await import('./features/furniturePresets.js');
-          const presets = presetsMod.initFurniturePresets({ furniturePlacement: fp, furniturePreview: preview, toasts });
-          window.furniturePresets = presets;
-
-          // One-click preset accept flow: lazy-load small accept UI (keyboard-driven).
-          try {
-            const acceptMod = await import('./features/oneClickPresetAccept.js');
-            try {
-              const acceptCtrl = acceptMod.initOneClickPresetAccept({ furniturePresets: presets, toasts, timeout: 12000 });
-              window.oneClickPresetAccept = acceptCtrl;
-            } catch (e) {
-              console.error('Failed to init one-click preset accept flow', e);
-            }
-          } catch (e) {
-            console.error('Failed to import one-click preset accept module', e);
-          }
-
-          // Remote preset sharing: lazy-load small helper that broadcasts saved presets to peers.
-          try {
-            const remoteMod = await import('./features/remotePresetShare.js');
-            try {
-              // initRemotePresetShare wraps presets.save and uses multiplayer to send payloads
-              const remote = remoteMod.initRemotePresetShare({ presets, multiplayer, toasts });
-              window.remotePresetShare = remote;
-            } catch (e) {
-              console.error('Failed to init remote preset share (init failed)', e);
-            }
-          } catch (e) {
-            console.error('Failed to init remote preset share (import failed)', e);
-          }
-
-          // Quick keyboard helpers (no UI buttons per UX guardrails):
-          // - U : save current preview/preset
-          // - I : load most recently saved preset
-          const _fpKeyHandler = (e) => {
-            if (e.code === 'KeyU') { // Save
-              try {
-                const name = presets.save();
-                toasts?.show?.(`Saved furniture preset: ${name}`);
-              } catch (err) {
-                console.error('Preset save failed', err);
-                toasts?.show?.('Preset save failed');
-              }
-            } else if (e.code === 'KeyI') { // Load last
-              try {
-                const loaded = presets.loadLast();
-                if (loaded) {
-                  toasts?.show?.(`Loaded furniture preset: ${loaded}`);
-                } else {
-                  toasts?.show?.('No furniture presets saved');
-                }
-              } catch (err) {
-                console.error('Preset load failed', err);
-                toasts?.show?.('Preset load failed');
-              }
-            }
-          };
-          window.addEventListener('keydown', _fpKeyHandler);
-        } catch (err) {
-          console.error('Failed to init furniture presets', err);
-        }
-      } catch (e) {
-        console.error('Failed to init furniture placement preview', e);
-      }
-
-    } catch (err) {
-      console.error('Failed to init furniture placement demo', err);
-    }
-  })();
-
-  // Community Festival Leaderboard (lazy-loaded module)
-  (async () => {
-    try {
-      const mod = await import('./features/leaderboard.js');
-      const leaderboard = mod.initLeaderboard(THREE, { scene, camera, playerModel });
-      window.leaderboard = leaderboard;
-      if (leaderboard && typeof leaderboard.setActive === 'function') leaderboard.setActive(true);
-
-      // Optionally seed with live scores from localStorage if present
-      try {
-        const raw = localStorage.getItem('festival_scores');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) leaderboard.updateScores(parsed);
-        }
-      } catch (e) {}
-
-      // Periodically rotate fake scores to keep the board lively for demos
-      setInterval(() => {
-        try {
-          if (!leaderboard || typeof leaderboard.updateScores !== 'function') return;
-          // Slightly shuffle scores (demo/demo)
-          const cur = [
-            { name: 'Aria', score: 1320 },
-            { name: 'Borin', score: 1185 },
-            { name: 'Cel', score: 1043 },
-            { name: 'Doro', score: 978 },
-            { name: 'Em', score: 921 },
-            { name: 'Fenn', score: 870 }
-          ];
-          // random tweak
-          cur.forEach(s => { s.score = s.score + (Math.floor(Math.random()*41)-20); });
-          cur.sort((a,b) => b.score - a.score);
-          leaderboard.updateScores(cur);
-        } catch (e) {}
-      }, 7000);
-    } catch (err) {
-      console.error('Failed to init leaderboard', err);
-    }
-  })();
-
-  // Seasonal Mini-Games Leaderboard (lazy-loaded): small in-world 3D board showing current mini-game and top scores.
-  (async () => {
-    try {
-      const mod = await import('./features/seasonalMinigameLeaderboard.js');
-      const miniBoard = mod.initSeasonalMinigameLeaderboard(THREE, { scene, playerModel, camera });
-      window.seasonalMiniLeaderboard = miniBoard;
-      if (miniBoard && typeof miniBoard.setActive === 'function') miniBoard.setActive(true);
-    } catch (err) {
-      console.error('Failed to init seasonal mini-games leaderboard', err);
-    }
-  })();
-
-  // Leaf-piles ambient/collectible (lazy-loaded, initialized once)
-  (async function initLeafPiles() {
-    try {
-      const mod = await import('./features/leafPiles.js');
-      const leafController = mod.createLeafPiles(THREE, { scene, playerModel, audioManager, toasts });
-      if (leafController && typeof leafController.setActive === 'function') {
-        leafController.setActive(true);
-      }
-      window.leafPilesController = leafController;
-    } catch (err) {
-      console.error('Failed to init leaf piles', err);
-    }
-  })();
-
-  // Dynamic wind + leaf particle intensity (lazy-loaded ambient)
-  (async function initDynamicWind() {
-    try {
-      const mod = await import('./features/dynamicWind.js');
-      const wind = mod.initDynamicWind(THREE, { scene, playerModel, audioManager, options: { count: 140 } });
-      if (wind && typeof wind.setActive === 'function') {
-        // Default enabled so effect is visible immediately but can be disabled programmatically.
-        wind.setActive(true);
-      }
-      window.dynamicWind = wind;
-    } catch (err) {
-      console.error('Failed to init dynamic wind', err);
-    }
-  })();
-
-  // Initialize seasonal festival event (decor + themed SFX).
-  // Lazy-load the module and create it exactly once after the scene and playerModel are available.
-  (async function initFestival() {
-    try {
-      const mod = await import('./features/festivalEvent.js');
-      const festival = mod.initFestivalEvent(THREE, { scene, playerModel, audioManager });
-      if (festival && typeof festival.setActive === 'function') festival.setActive(true);
-      // Expose for debugging; animate() will call festivalEvent.update if present.
-      window.festivalEvent = festival;
-    } catch (err) {
-      console.error('Failed to init festival event', err);
-    }
-  })();
-
-  // Floating lantern ambient (lazy-loaded) - gentle lanterns that drift quietly around the player.
-  (async function initFloatingLanterns() {
-    try {
-      const mod = await import('./features/floatingLanterns.js');
-      const lanterns = mod.initFloatingLanterns(THREE, { scene, playerModel, audioManager });
-      // wire into animate() update checks (lanternController is declared above)
-      lanternController = lanterns;
-      window.floatingLanterns = lanterns;
-      if (lanterns && typeof lanterns.setActive === 'function') lanterns.setActive(true);
-
-      // Best-effort: link lantern glow to dynamic wind intensity if a wind controller exists.
-      // This lazy-loads a tiny adapter that attaches point-lights to lantern meshes and
-      // modulates their intensity per wind strength. No UI is added.
-      try {
-        const linkMod = await import('./features/lanternWindLink.js');
-        const linkCtrl = linkMod.initLanternWindLink(THREE, {
-          scene,
-          lanternController: lanterns,
-          // prefer runtime dynamicWind if available; adapter will probe window.dynamicWind as fallback
-          dynamicWind: typeof dynamicWind !== 'undefined' ? dynamicWind : window.dynamicWind,
-          playerModel
-        });
-        window.lanternWindLink = linkCtrl;
-        if (linkCtrl && typeof linkCtrl.setActive === 'function') linkCtrl.setActive(true);
-      } catch (e) {
-        console.error('Failed to init lantern-wind link', e);
-      }
-
-    } catch (err) {
-      console.error('Failed to init floating lanterns', err);
-    }
-  })();
-
-  // Lantern color by mood (lazy-loaded) - vary lantern colors based on player's mood (health)
-  (async function initLanternMoodColor() {
-    try {
-      const mod = await import('./features/lanternMoodColor.js');
-      const ctrl = mod.initLanternMoodColor(THREE, {
-        scene,
-        playerModel,
-        getMood: () => {
-          const h = typeof window.localHealth === 'number' ? window.localHealth : 100;
-          return Math.max(0, Math.min(1, h / 100));
-        }
-      });
-      window.lanternMoodColor = ctrl;
-      if (ctrl && typeof ctrl.setActive === 'function') ctrl.setActive(true);
-    } catch (e) {
-      console.error('Failed to init lantern mood color', e);
-    }
-  })();
-
-  // Soft shadow sprites for floating lanterns (lazy, cheap)
-  (async function initLanternSoftShadows() {
-    try {
-      const mod = await import('./features/lanternSoftShadows.js');
-      const ctrl = mod.initLanternSoftShadows(THREE, {
-        scene,
-        floatingLanterns: lanternController || window.floatingLanterns,
-        groundY: 0,
-        baseSize: 0.6
-      });
-      window.lanternSoftShadows = ctrl;
-      if (ctrl && typeof ctrl.setActive === 'function') ctrl.setActive(true);
-
-      // Wire into animate update loop: if animate calls update on controllers by name,
-      // we expose a reference on window and the global animate() already checks it.
-      // To be defensive, also attempt to hook into lanternController.update if present.
-      if (lanternController && typeof lanternController.update === 'function') {
-        const orig = lanternController.update.bind(lanternController);
-        lanternController.update = function(delta) {
-          const res = orig(delta);
-          try { ctrl.update(delta); } catch (e) {}
-          return res;
-        };
-      } else {
-        // If lanternController doesn't exist or doesn't own update, ensure the soft-shadow
-        // controller is still updated by the global animate() via window reference.
-      }
-    } catch (e) {
-      console.error('Failed to init lantern soft shadows', e);
-    }
-  })();
-
-  // Lantern wind torque (lazy-loaded) - applies torque to floating/released lanterns based on wind.
-  (async function initLanternWindTorque() {
-    try {
-      const mod = await import('./features/lanternWindTorque.js');
-      const ctrl = mod.initLanternWindTorque(THREE, {
-        scene,
-        floatingLanterns: lanternController || window.floatingLanterns,
-        lanternMinigameController: lanternMinigameController || window.lanternMinigameController,
-        dynamicWind: typeof dynamicWind !== 'undefined' ? dynamicWind : window.dynamicWind
-      });
-      window.lanternWindTorque = ctrl;
-      if (ctrl && typeof ctrl.setActive === 'function') ctrl.setActive(true);
-    } catch (e) {
-      console.error('Failed to init lantern wind torque', e);
-    }
-  })();
-
-  // Timed Lantern Release Minigame (lazy-loaded).
-  // - Light-weight; no UI buttons. Press "G" to release a lantern near the player.
-  (async function initLanternMinigame() {
-    try {
-      const mod = await import('./features/lanternMinigame.js');
-      lanternMinigameController = mod.initLanternMinigame(THREE, { scene, playerModel, audioManager, toasts });
-      window.lanternMinigameController = lanternMinigameController;
-      if (lanternMinigameController && typeof lanternMinigameController.setActive === 'function') {
-        // Default enabled so feature is visible immediately.
-        lanternMinigameController.setActive(true);
-      }
-
-      // Lantern wishes: show a small randomized wish as a toast when a lantern is released.
-      // This is lazy-loaded and initialized exactly once after the lantern minigame controller exists.
-      try {
-        const wishesMod = await import('./features/lanternWishes.js');
-        const wishesCtrl = wishesMod.initLanternWishes({ toasts, lanternMinigameController });
-        window.lanternWishesController = wishesCtrl;
-        if (wishesCtrl && typeof wishesCtrl.setActive === 'function') wishesCtrl.setActive(true);
-      } catch (e) {
-        console.error('Failed to init lantern wishes', e);
-      }
-
-      // Lantern particle trails: visual trailing line behind released lanterns.
-      // - Lazy-loaded and non-blocking; will attempt to hook into the minigame controller.
-      // - No UI added (UX guardrails).
-      try {
-        const trailMod = await import('./features/lanternTrail.js');
-        try {
-          const trailCtrl = trailMod.initLanternTrail(THREE, { scene, lanternMinigameController, playerModel });
-          window.lanternTrailController = trailCtrl;
-          if (trailCtrl && typeof trailCtrl.setActive === 'function') trailCtrl.setActive(true);
-        } catch (e) {
-          console.error('Failed to initialize lantern trail controller', e);
-        }
-      } catch (e) {
-        console.error('Failed to import lantern trail module', e);
-      }
-
-    } catch (err) {
-      console.error('Failed to init lantern minigame', err);
-    }
-  })();
-
-  // Lantern light puddles (lazy-loaded) - soft ground-lit puddles under released lanterns (no UI)
-  (async function initLanternLightPuddles() {
-    try {
-      const mod = await import('./features/lanternLightPuddles.js');
-      try {
-        lanternLightPuddlesController = mod.initLanternLightPuddles(THREE, {
-          scene,
-          lanternController: lanternMinigameController,
-          dynamicWind: typeof dynamicWind !== 'undefined' ? dynamicWind : window.dynamicWind
-        });
-        window.lanternLightPuddlesController = lanternLightPuddlesController;
-        if (lanternLightPuddlesController && typeof lanternLightPuddlesController.setActive === 'function') {
-          lanternLightPuddlesController.setActive(true);
-        }
-      } catch (e) {
-        console.error('Failed to init lantern light puddles controller', e);
-      }
-    } catch (err) {
-      console.error('Failed to import lantern light puddles module', err);
-    }
-  })();
-
-  // Daily seasonal challenges (lazy-loaded) - small world markers that offer a daily objective.
-  (async function initDailySeasonalChallenges() {
-    try {
-      const mod = await import('./features/dailySeasonalChallenges.js');
-      const dc = mod.initDailySeasonalChallenges(THREE, { scene, playerModel, toasts, audioManager });
-      window.dailyChallenges = dc;
-      if (dc && typeof dc.setActive === 'function') dc.setActive(true);
-      // Update loop wiring: animate() already calls controllers named on window; this exposes a reference.
-    } catch (err) {
-      console.error('Failed to init daily seasonal challenges', err);
-    }
-  })();
-
-  // Small companion NPC (lazy-loaded): a tiny orbiting helper that follows the player
-  // and occasionally displays contextual tips via the toasts manager.
-  (async function initCompanionNPC() {
-    try {
-      const mod = await import('./features/companionNPC.js');
-      const companion = mod.createCompanionNPC(THREE, { scene, playerModel, audioManager, toasts });
-      if (companion && typeof companion.setActive === 'function') companion.setActive(true);
-      window.companionNPC = companion;
-    } catch (err) {
-      console.error('Failed to init companion NPC', err);
-    }
-  })();
-
-  // Initialize day/night ambient sound transitions (lazy module).
-  // This replaces a single static BGS call with a managed day/night cycle.
-  (async () => {
-    try {
-      const mod = await import('./audio/dayNightAmbient.js');
-      const dayNight = mod.initDayNightAmbient(audioManager, {
-        dayTrack: 'Forest Day/Forest Day.ogg',
-        nightTrack: 'Forest Night/Forest Night.ogg',
-        dayDuration: 90,
-        nightDuration: 60,
-        crossfade: 3
-      });
-      // Expose for debugging/console control if needed
-      window.dayNightAmbient = dayNight;
-      dayNightAmbient = dayNight;
-      try { dayNightAmbient.setActive(true); } catch (e) {}
-
-      // Initialize a small HUD indicator (no buttons) that shows Day/Night.
-      // Lazy-load to keep initial bundle small.
-      try {
-        const mod2 = await import('./features/dayNightIndicator.js');
-        const hud = mod2.initDayNightIndicator(dayNight, { parent: document.body });
-        window.dayNightHUD = hud;
-      } catch (e) {
-        console.error('Failed to init day/night HUD', e);
-      }
-
-    } catch (err) {
-      console.error('Failed to init day/night ambient sounds', err);
-      // Fallback: try to play a single daytime track to keep audio present
-      try { audioManager.playBGS('Forest Day/Forest Day.ogg'); } catch (e) {}
-    }
-  })();
-
-  // Dialogue system (lazy-loaded) - adds an NPC that speaks and offers choices (no buttons)
-  (async () => {
-    try {
-      const mod = await import('./features/dialogueSystem.js');
-      dialogueController = mod.initDialogueSystem(THREE, { scene, playerModel, toasts, audioManager });
-      if (dialogueController && typeof dialogueController.setActive === 'function') {
-        dialogueController.setActive(true);
-      }
-      window.dialogueController = dialogueController;
-    } catch (err) {
-      console.error('Failed to init dialogue system', err);
-    }
-  })();
-
-  // Bird NPC (lazy-loaded) - small bird that circles the player (no UI)
-  let birdController = null;
-  (async function initBirdNPC() {
-    try {
-      const mod = await import('./features/birdNPC.js');
-      birdController = mod.createBirdNPC(THREE, { scene, playerModel, audioManager });
-      if (birdController && typeof birdController.setActive === 'function') {
-        birdController.setActive(true);
-      }
-    } catch (err) {
-      console.error('Failed to init bird NPC', err);
-    }
-  })();
-
-  // Multiplayer mini-game matches (lazy-loaded) - lightweight demo of matches
-  // - Lazy-loaded and created exactly once after scene/player are available.
-  let minigameController = null;
-  (async function initMultiplayerMinigames() {
-    try {
-      const mod = await import('./features/multiplayerMinigameMatches.js');
-      minigameController = mod.initMultiplayerMinigames(THREE, { scene, playerModel, multiplayer, toasts });
-      if (minigameController && typeof minigameController.setActive === 'function') {
-        // Enable by default so it's immediately visible for verification.
-        minigameController.setActive(true);
-      }
-      // Expose for debugging if needed
-      window.minigameController = minigameController;
-    } catch (err) {
-      console.error('Failed to init multiplayer mini-game matches', err);
-    }
-  })();
-
-  // Ready beacon controller (declared early so the lazy-loader can assign to it)
-  let readyBeaconController = null;
-
-  // Ready beacon: small pulsing orb that follows the player (lazy-loaded, initialized once)
-  (async () => {
-    try {
-      const mod = await import('./effects/readyBeacon.js');
-      readyBeaconController = mod.createReadyBeacon(THREE, { scene, playerModel });
-      if (readyBeaconController && typeof readyBeaconController.setActive === 'function') {
-        readyBeaconController.setActive(true);
-      }
-    } catch (err) {
-      console.error('Failed to load ready beacon', err);
-    }
-  })();
-
-  // Pulsing Beacon (lightweight visual aid)
-  // - Lazy-loaded to keep main bundle small.
-  // - Configured from the Settings panel (not the main Actions button) to respect mobile UX guardrails.
-  let pulsingOrbController = null;
-  (async function initPulsingOrb() {
-    try {
-      const mod = await import('./effects/pulsingOrb.js');
-      pulsingOrbController = mod.createPulsingOrb(THREE, { scene, playerModel });
-      // Default off until user enables from Settings.
-      if (pulsingOrbController && typeof pulsingOrbController.setActive === 'function') {
-        pulsingOrbController.setActive(false);
-      }
-
-      // Add a Settings toggle (keeps mobile UX clean — Settings overlay is already present)
-      const settingsPanel = document.getElementById('settings-panel');
-      if (settingsPanel) {
-        const row = document.createElement('div');
-        row.className = 'ai-settings__row';
-
-        const label = document.createElement('label');
-        label.textContent = 'Pulsing Beacon';
-        label.htmlFor = 'pulsing-toggle';
-        label.style.marginRight = '8px';
-
-        const btn = document.createElement('button');
-        btn.id = 'pulsing-toggle';
-        btn.className = 'ai-settings__toggle';
-        btn.setAttribute('aria-pressed', 'false');
-        btn.textContent = 'Off';
-        btn.addEventListener('click', () => {
-          const next = !(btn.getAttribute('aria-pressed') === 'true');
-          btn.setAttribute('aria-pressed', String(next));
-          btn.textContent = next ? 'On' : 'Off';
-          try {
-            if (pulsingOrbController && typeof pulsingOrbController.setActive === 'function') {
-              pulsingOrbController.setActive(next);
-            }
-          } catch (err) {
-            console.error('Failed to toggle pulsing beacon', err);
-          }
-        });
-
-        row.appendChild(label);
-        row.appendChild(btn);
-
-        // Insert before the HR divider when possible so settings stay grouped
-        const hr = settingsPanel.querySelector('hr');
-        if (hr) settingsPanel.insertBefore(row, hr);
-        else settingsPanel.appendChild(row);
-      }
-    } catch (err) {
-      console.error('Failed to load pulsing orb module', err);
-    }
-  })();
-
-  // Companion Spirit (lazy-loaded) - small glowing orb that gently follows the player.
-  // - Lazy-loaded to avoid increasing initial bundle size.
-  // - Toggle exposed in Settings (mobile-first guardrails: no extra persistent buttons).
-  let companionSpiritController = null;
-  (async function initCompanionSpirit() {
-    try {
-      const modPromise = import('./features/companionSpirit.js');
-      const settingsPanel = document.getElementById('settings-panel');
-      if (settingsPanel) {
-        const row = document.createElement('div');
-        row.className = 'ai-settings__row';
-
-        const label = document.createElement('label');
-        label.textContent = 'Companion Spirit';
-        label.htmlFor = 'companion-toggle';
-        label.style.marginRight = '8px';
-
-        const btn = document.createElement('button');
-        btn.id = 'companion-toggle';
-        btn.className = 'ai-settings__toggle';
-        btn.setAttribute('aria-pressed', 'false');
-        btn.textContent = 'Off';
-        btn.addEventListener('click', async () => {
-          const next = !(btn.getAttribute('aria-pressed') === 'true');
-          btn.setAttribute('aria-pressed', String(next));
-          btn.textContent = next ? 'On' : 'Off';
-          try {
-            if (!companionSpiritController && next) {
-              const mod = await modPromise;
-              companionSpiritController = mod.createCompanionSpirit(THREE, { scene, playerModel, audioManager });
-            }
-            if (companionSpiritController && typeof companionSpiritController.setActive === 'function') {
-              companionSpiritController.setActive(next);
-            }
-          } catch (err) {
-            console.error('Failed to toggle companion spirit', err);
-          }
-        });
-
-        row.appendChild(label);
-        row.appendChild(btn);
-
-        // Insert before the HR divider when possible so settings stay grouped
-        const hr = settingsPanel.querySelector('hr');
-        if (hr) settingsPanel.insertBefore(row, hr);
-        else settingsPanel.appendChild(row);
-      }
-    } catch (err) {
-      console.error('Failed to init companion spirit', err);
-    }
-  })();
-
-  // Seasonal ambient variations (lazy-loaded) - spring / summer / winter visual + subtle sounds.
-  (async () => {
-    try {
-      const mod = await import('./features/seasonalAmbient.js');
-      const seasonal = mod.initSeasonalAmbient(THREE, { scene, playerModel, audioManager });
-      // Expose for debugging/console control if needed
-      window.seasonalAmbient = seasonal;
-    } catch (err) {
-      console.error('Failed to init seasonal ambient', err);
-    }
-  })();
-
-  // Ambient sounds (lazy-loaded): birdsong toggle in Actions sheet.
-  // This is initialized exactly once after the scene & playerModel are ready.
-  let ambientController = null;
-  (async () => {
-    try {
-      const mod = await import('./ui/ambientSounds.js');
-      ambientController = mod.createAmbientSounds(audioManager);
-
-      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
-      if (sheetInner) {
-        const ambientBtn = document.createElement('button');
-        ambientBtn.id = 'ambient-toggle';
-        ambientBtn.className = 'ai-actions__item';
-        ambientBtn.textContent = 'Ambient';
-        ambientBtn.setAttribute('aria-pressed', 'false');
-        ambientBtn.addEventListener('click', () => {
-          const next = !(ambientBtn.getAttribute('aria-pressed') === 'true');
-          ambientBtn.setAttribute('aria-pressed', String(next));
-          ambientBtn.textContent = next ? 'Ambient: On' : 'Ambient';
-          try {
-            if (ambientController && typeof ambientController.setActive === 'function') {
-              ambientController.setActive(next);
-            }
-          } catch (err) {
-            console.error('Ambient toggle failed', err);
-          }
-        });
-        sheetInner.appendChild(ambientBtn);
-      }
-    } catch (e) {
-      console.error('Failed to load ambient sounds module', e);
-    }
-  })();
-
-  // Ambient manager (lazy-loaded): unify ambient and toggleable effects (companion, birds, butterflies, lantern, campfire, guide, deer).
-  // This centralizes lazy-imports and ensures modules are created exactly once.
-  (async () => {
-    try {
-      const mod = await import('./features/ambientManager.js');
-      const ambient = mod.initAmbientManager({ THREE, scene, playerModel, audioManager, toasts });
-      // Expose for debugging/console control if needed
-      window.ambientManager = ambient;
-    } catch (e) {
-      console.error('Failed to init ambient manager', e);
-    }
-  })();
-
-  // Fireflies ambient effect (lazy-loaded). Adds a subtle swarm of fireflies
-  // that follow the player at night. Lazy-loaded to keep main bundle small.
-  let firefliesController = null;
-  let coinController = null;
-  let companionController = null;
-  let lanternController = null;
-  let lanternMinigameController = null;
-  let lanternLightPuddlesController = null;
-  let furniturePreviewController = null;
-  let scoreHUD = null;
-  let playerScore = 0;
-  let dialogueController = null;
-  (async () => {
-    try {
-      const firefliesModPromise = import('./effects/fireflies.js');
-      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
-      if (sheetInner) {
-        const fireBtn = document.createElement('button');
-        fireBtn.id = 'fireflies-toggle';
-        fireBtn.className = 'ai-actions__item';
-        fireBtn.textContent = 'Fireflies';
-        fireBtn.setAttribute('aria-pressed', 'false');
-        fireBtn.addEventListener('click', async () => {
-          const next = !(fireBtn.getAttribute('aria-pressed') === 'true');
-          fireBtn.setAttribute('aria-pressed', String(next));
-          fireBtn.textContent = next ? 'Fireflies: On' : 'Fireflies';
-          try {
-            if (!firefliesController) {
-              const mod = await firefliesModPromise;
-              firefliesController = mod.createFireflies(THREE, { scene, playerModel, audioManager });
-            }
-            if (firefliesController && typeof firefliesController.setActive === 'function') {
-              firefliesController.setActive(next);
-            }
-          } catch (err) {
-            console.error('Failed to load or initialize fireflies module', err);
-          }
-        });
-        sheetInner.appendChild(fireBtn);
-      }
-    } catch (e) {
-      console.error('Failed to setup fireflies module', e);
-    }
-  })();
-
-  // Butterflies ambient (lazy-loaded). Lightweight, decorative butterflies that
-  // flutter gently around the player. Lazy-loaded to keep the main bundle small.
-  (async () => {
-    try {
-      const butterfliesModPromise = import('./features/butterflies.js');
-      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
-      let butterfliesController = null;
-      if (sheetInner) {
-        const btn = document.createElement('button');
-        btn.id = 'butterflies-toggle';
-        btn.className = 'ai-actions__item';
-        btn.textContent = 'Butterflies';
-        btn.setAttribute('aria-pressed', 'false');
-        btn.addEventListener('click', async () => {
-          const next = !(btn.getAttribute('aria-pressed') === 'true');
-          btn.setAttribute('aria-pressed', String(next));
-          btn.textContent = next ? 'Butterflies: On' : 'Butterflies';
-          try {
-            if (next) {
-              if (!butterfliesController) {
-                const mod = await butterfliesModPromise;
-                butterfliesController = mod.createButterflies(THREE, { scene, playerModel, audioManager });
-              }
-              if (butterfliesController && typeof butterfliesController.setActive === 'function') {
-                butterfliesController.setActive(true);
-              }
-            } else {
-              if (butterfliesController && typeof butterfliesController.setActive === 'function') {
-                butterfliesController.setActive(false);
-              }
-            }
-          } catch (err) {
-            console.error('Failed to load or initialize butterflies module', err);
-          }
-        });
-        sheetInner.appendChild(btn);
-      }
-    } catch (e) {
-      console.error('Failed to setup butterflies module', e);
-    }
-  })();
-
-  // Coin collectible ambient effect (lazy-loaded). Toggleable from Actions sheet.
-  (async () => {
-    try {
-      const coinModPromise = import('./features/coinEffect.js');
-      const scoreHUDPromise = import('./ui/scoreHUD.js');
-      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
-      if (sheetInner) {
-        const coinBtn = document.createElement('button');
-        coinBtn.id = 'coin-toggle';
-        coinBtn.className = 'ai-actions__item';
-        coinBtn.textContent = 'Coin';
-        coinBtn.setAttribute('aria-pressed', 'false');
-        coinBtn.addEventListener('click', async () => {
-          const next = !(coinBtn.getAttribute('aria-pressed') === 'true');
-          coinBtn.setAttribute('aria-pressed', String(next));
-          coinBtn.textContent = next ? 'Coin: On' : 'Coin';
-          try {
-            if (next) {
-              if (!scoreHUD) {
-                const hud = await scoreHUDPromise;
-                scoreHUD = hud.createScoreHUD();
-                scoreHUD.update(playerScore);
-              }
-              if (!coinController) {
-                const mod = await coinModPromise;
-                coinController = mod.createCoinEffect(THREE, {
-                  scene,
-                  playerModel,
-                  audioManager,
-                  onCollect: () => {
-                    playerScore += 1;
-                    if (scoreHUD && typeof scoreHUD.update === 'function') scoreHUD.update(playerScore);
-                  }
-                });
-              }
-              if (coinController && typeof coinController.setActive === 'function') coinController.setActive(true);
-            } else {
-              if (coinController && typeof coinController.setActive === 'function') coinController.setActive(false);
-            }
-          } catch (err) {
-            console.error('Failed to load or initialize coin module', err);
-          }
-        });
-        sheetInner.appendChild(coinBtn);
-      }
-    } catch (e) {
-      console.error('Failed to setup coin module', e);
-    }
-  })();
-
-  // Wandering deer ambient (lazy-loaded). Toggleable from Actions sheet.
-  (async () => {
-    try {
-      const deerModPromise = import('./features/wanderingDeer.js');
-      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
-      let deerController = null;
-      if (sheetInner) {
-        const deerBtn = document.createElement('button');
-        deerBtn.id = 'deer-toggle';
-        deerBtn.className = 'ai-actions__item';
-        deerBtn.textContent = 'Deer';
-        deerBtn.setAttribute('aria-pressed', 'false');
-        deerBtn.addEventListener('click', async () => {
-          const next = !(deerBtn.getAttribute('aria-pressed') === 'true');
-          deerBtn.setAttribute('aria-pressed', String(next));
-          deerBtn.textContent = next ? 'Deer: On' : 'Deer';
-          try {
-            if (next) {
-              if (!deerController) {
-                const mod = await deerModPromise;
-                deerController = mod.createWanderingDeer(THREE, { scene, playerModel, audioManager });
-              }
-              if (deerController && typeof deerController.setActive === 'function') deerController.setActive(true);
-            } else {
-              if (deerController && typeof deerController.setActive === 'function') deerController.setActive(false);
-            }
-          } catch (err) {
-            console.error('Failed to load or init wandering deer module', err);
-          }
-        });
-        sheetInner.appendChild(deerBtn);
-      }
-    } catch (e) {
-      console.error('Failed to setup wandering deer module', e);
-    }
-  })();
-
-  // Companion orb ambient (lazy-loaded). Toggleable from Actions sheet.
-  (async () => {
-    try {
-      const companionModPromise = import('./features/companionOrb.js');
-      const sheetInner = document.querySelector('.ai-actions__sheet-inner');
-      if (sheetInner) {
-        const compBtn = document.createElement('button');
-        compBtn.id = 'companion-toggle';
-        compBtn.className = 'ai-actions__item';
-        compBtn.textContent = 'Companion';
-        compBtn.setAttribute('aria-pressed', 'false');
-        compBtn.addEventListener('click', async () => {
-          const next = !(compBtn.getAttribute('aria-pressed') === 'true');
-          compBtn.setAttribute('aria-pressed', String(next));
-          compBtn.textContent = next ? 'Companion: On' : 'Companion';
-          try {
-            if (next) {
-              if (!companionController) {
-                const mod = await companionModPromise;
-                companionController = mod.createCompanionOrb(THREE, { scene, playerModel, audioManager });
-              }
-              if (companionController && typeof companionController.setActive === 'function') companionController.setActive(true);
-            } else {
-              if (companionController && typeof companionController.setActive === 'function') companionController.setActive(false);
-            }
-          } catch (err) {
-            console.error('Failed to load or initialize companion module', err);
-          }
-        });
-        sheetInner.appendChild(compBtn);
-      }
-    } catch (e) {
-      console.error('Failed to setup companion module', e);
-    }
-  })();
-
-  // Simple Quest system (lazy-loaded)
-  let simpleQuestController = null;
-  (async function initSimpleQuestModule() {
-    try {
-      const mod = await import('./features/simpleQuest.js');
-      simpleQuestController = mod.initSimpleQuest(THREE, { scene, playerModel, audioManager, toasts });
-      // Expose for debugging/console control if needed
-      window.simpleQuestController = simpleQuestController;
-    } catch (err) {
-      console.error('Failed to init simple quest module', err);
-    }
-  })();
 
   window.localHealth = 100;
   window.monsterHealth = 100;
@@ -1561,7 +133,6 @@ async function main() {
   }
   updateHealthUI();
 
-  let prevHealth = window.localHealth;
   let playerDead = false;
 
   const projectiles = [];
@@ -1571,321 +142,19 @@ async function main() {
     camera,
     playerModel,
     renderer,
-    multiplayer,
+    multiplayer: null,
     spawnProjectile,
     projectiles,
     audioManager
   });
   window.playerControls = playerControls;
 
-  const pauseUI = createPauseUI({
-    onToggle: (p) => {
-      paused = p;
-      if (playerControls) playerControls.enabled = !p;
-      if (sessionTimer && typeof sessionTimer.setPaused === 'function') sessionTimer.setPaused(p);
-    }
-  });
-  const autoPause = createAutoPauseManager({
-    onPauseChange: (p) => {
-      paused = p;
-      if (playerControls) playerControls.enabled = !p;
-      if (sessionTimer && typeof sessionTimer.setPaused === 'function') sessionTimer.setPaused(p);
-    }
-  });
-
-  // --- RAPIER HELPERS ---
-  function spawnBlock({
-    pos = new THREE.Vector3(0, 5, 0),
-    half = new THREE.Vector3(0.25, 0.25, 0.25),
-    linvel = new THREE.Vector3(),
-    angvel = new THREE.Vector3(Math.random(), Math.random(), Math.random()),
-    color = 0x66ccff,
-  } = {}) {
-    // Three mesh
-    const geom = new THREE.BoxGeometry(half.x * 2, half.y * 2, half.z * 2);
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.0 });
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.position.copy(pos);
-    scene.add(mesh);
-
-    // Rapier body + collider
-    const rbDesc = RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(pos.x, pos.y, pos.z)
-      .setLinearDamping(0.02)
-      .setAngularDamping(0.02);
-    const rb = rapierWorld.createRigidBody(rbDesc);
-
-    // Give it a fun impulse/velocity
-    rb.setLinvel({ x: linvel.x, y: linvel.y, z: linvel.z }, true);
-    rb.setAngvel({ x: angvel.x, y: angvel.y, z: angvel.z }, true);
-
-    const colDesc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
-      .setRestitution(0.2)
-      .setFriction(0.6);
-    rapierWorld.createCollider(colDesc, rb);
-
-    rbToMesh.set(rb, mesh);
-    return rb;
-  }
-
-  function shootBlockFromPlayer(speed = 18) {
-    const origin = playerModel.position.clone().add(new THREE.Vector3(0, 0, 0));
-
-    // forward from camera so it goes where you're looking
-    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-    const linvel = dir.multiplyScalar(speed);
-
-    spawnBlock({
-      pos: origin.add(dir.clone().multiplyScalar(1.2)),
-      linvel,
-      color: 0xff8855,
-      half: new THREE.Vector3(0.3, 0.3, 0.3),
-    });
-  }
-
-  // Little “machine gun” for fun
-  let burstInterval = null;
-  let quickActions = null;
-  function startBurst() {
-    if (burstInterval) return;
-    burstInterval = setInterval(() => shootBlockFromPlayer(22), 120);
-  }
-  function stopBurst() {
-    if (!burstInterval) return;
-    clearInterval(burstInterval);
-    burstInterval = null;
-  }
-
-  // Keyboard shortcuts
-  window.addEventListener('keydown', (e) => {
-    
-    if (e.code === 'KeyB') {
-      shootBlockFromPlayer(); // tap B to fire one block
-      console.log("b key pressed");
-    }
-    if (e.code === 'KeyN') { startBurst(); if (typeof quickActions?.setBurstActive === 'function') quickActions.setBurstActive(true); }          // hold N to start burst
-  });
-  window.addEventListener('keyup', (e) => {
-    if (e.code === 'KeyN') { stopBurst(); if (typeof quickActions?.setBurstActive === 'function') quickActions.setBurstActive(false); }
-  });
-
-  // Quick Actions UI: spawn box and toggle burst
-  quickActions = createQuickActionsBar({
-    onSpawn: () => shootBlockFromPlayer(),
-    onBurstStart: () => startBurst(),
-    onBurstStop: () => stopBurst()
-  });
-
-  let localStream = null;
-  let micActive = false;
-
-  // Actions menu (single visible action on mobile; expands to sheet/menu)
-  const actionsMenu = initActionsMenu({
-    getInitialStates: () => ({ micActive, rainActive: false }),
-    onToggleVoice: async () => {
-      if (!micActive) {
-        try {
-          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          multiplayer.startVoice(localStream);
-          micActive = true;
-        } catch (err) {
-          console.error("Microphone access denied:", err);
-          micActive = false;           // keep UI in sync if permission fails
-        }
-      } else {
-        if (localStream) {
-          multiplayer.stopVoice();
-          localStream.getTracks().forEach(t => t.stop());
-          localStream = null;
-        }
-        micActive = false;
-      }
-      return micActive;                 // lets the menu reflect the new state
-    },
-    onStartTalk: () => {
-      if (typeof speech !== 'undefined' && speech?.start) speech.start();
-    },
-    onStopTalk: () => {
-      if (typeof speech !== 'undefined' && speech?.stop) speech.stop();
-    },
-    onToggleRain: (next) => {
-      rain.setActive(!!next);
-      return !!next;
-    }
-  });
-
-  // ESC toggles Pause/Resume
-  window.addEventListener('keydown', (e) => {
-    if (e.code === 'Escape') {
-      e.preventDefault();
-      const next = !paused;
-      if (pauseUI && typeof pauseUI.setPaused === 'function') {
-        pauseUI.setPaused(next);
-      } else {
-        // Fallback: ensure controls/timer state tracks pause
-        paused = next;
-        if (playerControls) playerControls.enabled = !next;
-        if (sessionTimer && typeof sessionTimer.setPaused === 'function') sessionTimer.setPaused(next);
-      }
-      if (toasts && typeof toasts.show === 'function') {
-        toasts.show(next ? 'Paused' : 'Resumed');
-      }
-    }
-  });
-
-  // Expose for console testing
-  window.spawnBlock = spawnBlock;
-  window.shootBlockFromPlayer = shootBlockFromPlayer;
-
-
-
-  // Game Over UI elements
-  const gameOverOverlay = document.getElementById('game-over-overlay');
-  const gameOverMessage = document.getElementById('game-over-message');
-  const continueSection = document.getElementById('continue-section');
-  const countdownEl = document.getElementById('countdown');
-  const yesBtn = document.getElementById('continue-yes');
-  const noBtn = document.getElementById('continue-no');
-
-  function showGameOver() {
-    gameOverOverlay.classList.remove('hidden');
-    continueSection.classList.add('hidden');
-    gameOverMessage.style.opacity = 0;
-    gameOverMessage.classList.remove('hidden');
-    setTimeout(() => {
-      gameOverMessage.style.opacity = 1;
-      setTimeout(() => {
-        gameOverMessage.style.opacity = 0;
-        setTimeout(() => {
-          gameOverMessage.classList.add('hidden');
-          showContinue();
-        }, 1000);
-      }, 1500);
-    }, 50);
-  }
-
-  function showContinue() {
-    continueSection.classList.remove('hidden');
-    let countdown = 9;
-    countdownEl.textContent = countdown;
-    const interval = setInterval(() => {
-      countdown--;
-      countdownEl.textContent = countdown;
-      if (countdown <= 0) {
-        clearInterval(interval);
-        hideGameOver();
-      }
-    }, 1000);
-
-    yesBtn.onclick = () => {
-      clearInterval(interval);
-      respawnPlayer();
-      hideGameOver();
-    };
-
-    noBtn.onclick = () => {
-      clearInterval(interval);
-      hideGameOver();
-    };
-  }
-
-  function hideGameOver() {
-    gameOverOverlay.classList.add('hidden');
-  }
-
-  function respawnPlayer() {
-    window.localHealth = 100;
-    updateHealthUI();
-    const newX = (Math.random() * 10) - 5;
-    const newZ = (Math.random() * 10) - 5;
-    const newY = 0.5;
-    playerModel.position.set(newX, newY, newZ);
-    playerControls.playerX = newX;
-    playerControls.playerY = newY;
-    playerControls.playerZ = newZ;
-    playerControls.lastPosition.set(newX, newY, newZ);
-    playerControls.velocity.set(0, 0, 0);
-    playerControls.enabled = true;
-    playerDead = false;
-    const actions = playerModel.userData.actions;
-    const current = playerModel.userData.currentAction;
-    actions?.[current]?.fadeOut(0.2);
-    actions?.idle?.reset().fadeIn(0.2).play();
-    playerModel.userData.currentAction = 'idle';
-  }
-
-  // Initialize speech commands for voice-controlled actions
-  const speech = initSpeechCommands({
-    jump: () => playerControls.triggerJump(),
-    fire: () => playerControls.triggerFire(),
-    shoot: () => playerControls.triggerFire()
-  });
-  // Talk/push-to-talk is handled via the unified Actions menu (actions-button / actions-sheet)
-
   const otherPlayers = {};
-  // Expose remote players map for global access (e.g., controls)
   window.otherPlayers = otherPlayers;
 
-  // --- Latency (Ping) tracking shown in Settings overlay ---
-  const pingDisplay = document.getElementById('ping-display');
-  const peerPings = {};
-  const pendingPings = new Map();
-  function updatePingUIValue() {
-    const vals = Object.values(peerPings);
-    const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
-    if (pingDisplay) pingDisplay.textContent = avg ?? '-';
-
-    const peers = Object.keys(multiplayer.connections || {}).length;
-
-    if (connIndicator && typeof connIndicator.setStatus === 'function') {
-      connIndicator.setStatus({ peers, avgPing: avg });
-    }
-    if (titleStatus && typeof titleStatus.setStatus === 'function') {
-      titleStatus.setStatus({ peers, avgPing: avg });
-    }
-  }
-  function pingPeers() {
-    const myId = multiplayer.getId();
-    Object.keys(otherPlayers).forEach((peerId) => {
-      const nonce = Math.random().toString(36).slice(2);
-      pendingPings.set(peerId, { nonce, start: performance.now() });
-      multiplayer.send({ type: 'ping', from: myId, to: peerId, nonce, ts: Date.now() });
-    });
-  }
-  setInterval(pingPeers, 2000);
-
   function handleIncomingData(peerId, data) {
-    console.log('📡 Incoming data:', data);
-    // Snap angle update from peers (persist per-peer)
-    if (data && data.type === 'snapAngleUpdate') {
-      try {
-        const raw = localStorage.getItem('snap_angles_v1') || '{}';
-        const map = JSON.parse(raw);
-        map[peerId] = { angle: data.angle, ts: data.ts || Date.now() };
-        localStorage.setItem('snap_angles_v1', JSON.stringify(map));
-        // If a snap controller is present and supports peer angles, forward it
-        try {
-          if (window.furnitureRotationSnapping && typeof window.furnitureRotationSnapping.setPeerAngle === 'function') {
-            window.furnitureRotationSnapping.setPeerAngle(peerId, data.angle);
-          }
-        } catch (e) {}
-      } catch (e) {}
-    }
-    // --- Ping/Pong handling for latency measurement ---
-    if (data && data.type === 'ping' && data.to === multiplayer.getId()) {
-      multiplayer.send({ type: 'pong', from: multiplayer.getId(), to: data.from, nonce: data.nonce, ts: data.ts });
-    }
-    if (data && data.type === 'pong' && data.to === multiplayer.getId()) {
-      const pending = pendingPings.get(peerId);
-      if (pending && pending.nonce === data.nonce) {
-        const rtt = Math.round(performance.now() - pending.start);
-        peerPings[peerId] = rtt;
-        pendingPings.delete(peerId);
-        updatePingUIValue();
-      }
-    }
+    if (!data) return;
+
     if (data.type === "presence") {
       if (!otherPlayers[data.id]) {
         const other = new PlayerCharacter(data.name);
@@ -1896,11 +165,8 @@ async function main() {
 
       const player = otherPlayers[data.id];
       player.name = data.name;
-      // Update remote player position and rotation
       player.model.position.x = data.x;
       player.model.position.z = data.z;
-
-      // Adjust vertical placement against local terrain height
       const terrainY = 0;
       const targetY = Math.max(data.y ?? terrainY, terrainY);
       player.model.position.y = targetY;
@@ -1908,69 +174,12 @@ async function main() {
       player.model.up.set(0, 1, 0);
       player.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), data.rotation);
 
-      // Sync animation state if provided
       const actions = player.model.userData.actions;
       const current = player.model.userData.currentAction;
       if (actions && data.action && current !== data.action) {
         actions[current]?.fadeOut(0.2);
         actions[data.action]?.reset().fadeIn(0.2).play();
         player.model.userData.currentAction = data.action;
-        if (['mutantPunch','hurricaneKick','mmaKick'].includes(data.action)) {
-          player.model.userData.attack = {
-            name: data.action,
-            start: Date.now(),
-            hasHit: false
-          };
-        }
-      }
-
-      if (!multiplayer.connections[peerId]) {
-        multiplayer.connections[peerId] = {};
-      }
-      const conn = multiplayer.connections[peerId];
-      if (!conn.listItem) {
-        const list = document.getElementById('connected-players-list');
-        const item = document.createElement('li');
-        item.id = `peer-${peerId}`;
-        conn.listItem = item;
-        list.appendChild(item);
-      }
-      conn.listItem.textContent = `Connected to ${data.name}`;
-      if (connIndicator && typeof connIndicator.setStatus === 'function') {
-        const peers = Object.keys(multiplayer.connections || {}).length;
-        const vals = Object.values(peerPings);
-        const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
-        connIndicator.setStatus({ peers, avgPing: avg });
-      }
-    }
-
-    // Remote preset share from peers
-    if (data && data.type === 'presetShare' && data.name && data.payload) {
-      try {
-        const STORAGE_KEY = 'ai_furniture_presets_v1';
-        const raw = localStorage.getItem(STORAGE_KEY);
-        let store = raw ? JSON.parse(raw) : {};
-        // Merge if missing or incoming is newer (best-effort using meta.ts)
-        const incomingTs = data.meta?.ts || Date.now();
-        const localTs = (store[data.name]?.meta?.ts) || 0;
-        if (!store[data.name] || incomingTs > localTs) {
-          store[data.name] = { payload: data.payload, meta: { from: data.from || 'peer', ts: incomingTs } };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-          try {
-            // Notify one-click accept controller instead of auto-applying.
-            if (window.oneClickPresetAccept && typeof window.oneClickPresetAccept.notify === 'function') {
-              window.oneClickPresetAccept.notify({ name: data.name, from: data.from || 'peer' });
-            } else {
-              // Fallback: apply immediately and show notice.
-              if (window.furniturePresets && typeof window.furniturePresets.load === 'function') {
-                window.furniturePresets.load(data.name);
-              }
-            }
-          } catch (e) {}
-          try { toasts?.show?.(`Received remote preset: ${data.name}`); } catch (e) {}
-        }
-      } catch (e) {
-        console.error('Failed to apply remote preset', e);
       }
     }
 
@@ -1998,7 +207,7 @@ async function main() {
     }
 
     if (data.type === 'grab') {
-      if (data.target === multiplayer.getId()) {
+      if (data.target === multiplayer?.getId()) {
         playerControls.setGrabbed(data.active, data.from);
       } else {
         const targetPlayer = otherPlayers[data.target];
@@ -2010,7 +219,7 @@ async function main() {
 
     if (data.type === 'grabMove') {
       const pos = new THREE.Vector3(...data.position);
-      if (data.target === multiplayer.getId()) {
+      if (data.target === multiplayer?.getId()) {
         playerControls.updateGrabbedPosition(data.position);
       } else {
         const targetPlayer = otherPlayers[data.target];
@@ -2021,88 +230,58 @@ async function main() {
     }
   }
 
-  
+  multiplayer = new Multiplayer(playerName, handleIncomingData);
+  playerControls.multiplayer = multiplayer;
 
-  const settingsBtn = document.getElementById('settings-button');
-  const overlay = document.getElementById('settings-overlay');
-  const nameInput = document.getElementById('name-input');
-  const saveBtn = document.getElementById('save-settings');
-  const characterSelect = document.getElementById('character-select');
-  const toggleBtn = document.getElementById("toggle-console");
-  const consoleDiv = document.getElementById("console-log");
-  createShareLocationButton({ playerModel, camera });
-
-  async function populateCharacterSelect() {
-    try {
-      const characters = ['andy', 'chris', 'gemhorn_monster', 'old_man'];
-      characters.forEach(name => {
-        const option = document.createElement('option');
-        option.value = `/models/${name}.fbx`;
-        option.textContent = name;
-        characterSelect.appendChild(option);
-        console.log(option.value);
-      });
-      characterSelect.value = characterModel;
-    } catch (e) {
-      console.error('Failed to load character list', e);
-    }
+  function respawnPlayer() {
+    window.localHealth = 100;
+    updateHealthUI();
+    const newX = (Math.random() * 10) - 5;
+    const newZ = (Math.random() * 10) - 5;
+    const newY = 0.5;
+    playerModel.position.set(newX, newY, newZ);
+    playerControls.playerX = newX;
+    playerControls.playerY = newY;
+    playerControls.playerZ = newZ;
+    playerControls.lastPosition.set(newX, newY, newZ);
+    playerControls.velocity.set(0, 0, 0);
+    playerControls.enabled = true;
+    playerDead = false;
+    const actions = playerModel.userData.actions;
+    const current = playerModel.userData.currentAction;
+    actions?.[current]?.fadeOut(0.2);
+    actions?.idle?.reset().fadeIn(0.2).play();
+    playerModel.userData.currentAction = 'idle';
   }
-  populateCharacterSelect();
 
-  settingsBtn.addEventListener('click', () => {
-    nameInput.value = playerName;
-    characterSelect.value = characterModel;
-    overlay.style.display = 'flex';
-  });
-
-  saveBtn.addEventListener('click', () => {
-    playerName = nameInput.value.trim() || playerName;
-    setCookie("playerName", playerName);
-    characterModel = characterSelect.value;
-    setCookie("characterModel", characterModel);
-    overlay.style.display = 'none';
-    window.location.reload();
-  });
-
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.style.display = 'none';
-  });
-
-  toggleBtn.addEventListener("click", () => {
-    const visible = consoleDiv.style.display === "block";
-    consoleDiv.style.display = visible ? "none" : "block";
-    toggleBtn.textContent = visible ? "Show Console" : "Hide Console";
-  });
-
-  (function() {
-    const originalLog = console.log;
-    console.log = function(...args) {
-      originalLog(...args);
-      const msg = document.createElement("div");
-      msg.textContent = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(" ");
-      consoleDiv.appendChild(msg);
-      consoleDiv.scrollTop = consoleDiv.scrollHeight;
-    };
-  })();
+  function updateNameLabel(model, nameLabel) {
+    const pos = model.position.clone().add(new THREE.Vector3(0, 2, 0));
+    pos.project(camera);
+    if (pos.z < 0 || pos.z > 1) {
+      nameLabel.style.display = "none";
+      return;
+    }
+    const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
+    const cameraDist = camera.position.distanceTo(model.position);
+    const scale = Math.max(0.5, 1.5 - cameraDist / 30);
+    const opacity = Math.max(0, 1 - cameraDist / 40);
+    nameLabel.style.display = "block";
+    nameLabel.style.left = `${x}px`;
+    nameLabel.style.top = `${y}px`;
+    nameLabel.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    nameLabel.style.opacity = opacity.toFixed(2);
+  }
 
   function animate() {
     requestAnimationFrame(animate);
-    const _noop = perf && typeof perf.onFrame === 'function' ? perf.onFrame() : undefined;
 
-    if (paused) {
-      renderer.render(scene, camera);
-      return;
-    }
-
-    // --- RAPIER FIXED-STEP & SYNC ---
-    // Accumulate variable rAF time into fixed physics steps
     physicsAccumulator += clock.getDelta();
     while (physicsAccumulator >= FIXED_DT) {
       rapierWorld.step();
       physicsAccumulator -= FIXED_DT;
     }
 
-    // Sync Rapier bodies -> Three meshes
     for (const [rb, mesh] of rbToMesh.entries()) {
       const t = rb.translation();
       const r = rb.rotation();
@@ -2124,7 +303,6 @@ async function main() {
         }
       }
 
-      // Simple cleanup: remove if it falls far below the world
       if (mesh.position.y < -50) {
         scene.remove(mesh);
         mesh.geometry.dispose();
@@ -2135,15 +313,8 @@ async function main() {
     }
 
     playerControls.update();
-    headingArrow.update(playerModel);
 
     updateHealthUI();
-    if (window.localHealth < prevHealth) {
-      const diff = prevHealth - window.localHealth;
-      const strength = Math.min(1, 0.2 + diff / 30);
-      if (damageFlash && typeof damageFlash.trigger === 'function') damageFlash.trigger(strength);
-    }
-    prevHealth = window.localHealth;
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
       playerControls.enabled = false;
@@ -2155,140 +326,14 @@ async function main() {
         die.reset().fadeIn(0.2).play();
         playerModel.userData.currentAction = 'die';
       }
-      showGameOver();
+      setTimeout(respawnPlayer, 1500);
     }
 
     const delta = mixerClock.getDelta();
-    if (clickRipple && typeof clickRipple.update === 'function') {
-      clickRipple.update(delta);
-    }
-    if (damageFlash && typeof damageFlash.update === 'function') {
-      damageFlash.update(delta);
-    }
-    if (confetti && typeof confetti.update === 'function') {
-      confetti.update(delta);
-    }
-    if (rain && typeof rain.update === 'function') {
-      rain.update(delta);
-    }
-    if (weatherMusicController && typeof weatherMusicController.update === 'function') {
-      weatherMusicController.update(delta);
-    }
-    if (typeof dayNightAmbient !== 'undefined' && dayNightAmbient && typeof dayNightAmbient.update === 'function') {
-      dayNightAmbient.update(delta);
-    }
-    // Update companion (if loaded)
-    if (typeof companionController !== 'undefined' && companionController && typeof companionController.update === 'function') {
-      companionController.update(delta);
-    }
-    // Update companion spirit (if loaded)
-    if (typeof companionSpiritController !== 'undefined' && companionSpiritController && typeof companionSpiritController.update === 'function') {
-      companionSpiritController.update(delta);
-    }
-    // Update furniture placement preview (if loaded)
-    if (typeof furniturePreviewController !== 'undefined' && furniturePreviewController && typeof furniturePreviewController.update === 'function') {
-      furniturePreviewController.update(delta);
-    }
-    // Update seasonal ambient (if loaded)
-    if (typeof seasonalAmbient !== 'undefined' && seasonalAmbient && typeof seasonalAmbient.update === 'function') {
-      seasonalAmbient.update(delta);
-    }
-    // Update festival event (if loaded)
-    if (typeof festivalEvent !== 'undefined' && festivalEvent && typeof festivalEvent.update === 'function') {
-      festivalEvent.update(delta);
-    }
-    // Update ready beacon (if loaded)
-    if (typeof readyBeaconController !== 'undefined' && readyBeaconController && typeof readyBeaconController.update === 'function') {
-      readyBeaconController.update(delta);
-    }
-    // Update bird NPC (if loaded)
-    if (typeof birdController !== 'undefined' && birdController && typeof birdController.update === 'function') {
-      birdController.update(delta);
-    }
-    // Update minigame controller (if loaded)
-    if (typeof minigameController !== 'undefined' && minigameController && typeof minigameController.update === 'function') {
-      minigameController.update(delta);
-    }
-    // Update dialogue system (if loaded)
-    if (typeof dialogueController !== 'undefined' && dialogueController && typeof dialogueController.update === 'function') {
-      dialogueController.update(delta);
-    }
-    // Update player housing showcase (if loaded)
-    if (typeof playerHousing !== 'undefined' && playerHousing && typeof playerHousing.update === 'function') {
-      playerHousing.update(delta);
-    }
-    // Update lantern (if loaded)
-    if (typeof lanternController !== 'undefined' && lanternController && typeof lanternController.update === 'function') {
-      lanternController.update(delta);
-    }
-    // Update lantern minigame (if loaded)
-    if (typeof lanternMinigameController !== 'undefined' && lanternMinigameController && typeof lanternMinigameController.update === 'function') {
-      lanternMinigameController.update(delta);
-    }
-    // Update lantern particle trails (if loaded)
-    if (typeof lanternTrailController !== 'undefined' && lanternTrailController && typeof lanternTrailController.update === 'function') {
-      lanternTrailController.update(delta);
-    }
-    // Update lantern light puddles (if loaded)
-    if (typeof lanternLightPuddlesController !== 'undefined' && lanternLightPuddlesController && typeof lanternLightPuddlesController.update === 'function') {
-      lanternLightPuddlesController.update(delta);
-    }
-    // Update guide star (if loaded)
-    if (typeof guideStarController !== 'undefined' && guideStarController && typeof guideStarController.update === 'function') {
-      guideStarController.update(delta);
-    }
-    // Update coin collectible (if loaded)
-    if (typeof coinController !== 'undefined' && coinController && typeof coinController.update === 'function') {
-      coinController.update(delta);
-    }
-
-    // Update simple quest controller (if loaded)
-    if (typeof simpleQuestController !== 'undefined' && simpleQuestController && typeof simpleQuestController.update === 'function') {
-      simpleQuestController.update(delta);
-    }
-
+    playerModel.userData.mixer?.update(delta);
+    monster?.userData?.mixer?.update(delta);
     Object.values(otherPlayers).forEach(p => {
       p.model.userData.mixer?.update(delta);
-    });
-
-    multiplayer.send({
-      type: "presence",
-      id: multiplayer.getId(),
-      name: playerName,
-      x: playerModel.position.x,
-      y: playerModel.position.y,
-      z: playerModel.position.z,
-      rotation: playerModel.rotation.y,
-      action: playerModel.userData.currentAction
-    });
-
-    Object.entries(multiplayer.voiceAudios || {}).forEach(([peerId, { audio }]) => {
-      const peerModel = otherPlayers[peerId]?.model;
-      if (!peerModel || !peerModel.position) return;
-      const dist = playerModel.position.distanceTo(peerModel.position);
-      const maxDist = 30;
-      const rawVolume = 1 - dist / maxDist;
-      const volume = Math.max(0, rawVolume * rawVolume);
-      audio.volume = volume;
-    });
-
-    Object.entries(otherPlayers).forEach(([id, { model, nameLabel }]) => {
-      const pos = model.position.clone().add(new THREE.Vector3(0, 2, 0));
-      pos.project(camera);
-      if (pos.z < 0 || pos.z > 1) {
-        nameLabel.style.display = "none";
-        return;
-      }
-      const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
-      const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
-      const cameraDist = camera.position.distanceTo(model.position);
-      const scale = Math.max(0.5, 1.5 - cameraDist / 30);
-      const opacity = Math.max(0, 1 - cameraDist / 40);
-      nameLabel.style.display = "block";
-      nameLabel.style.left = `${x}px`;
-      nameLabel.style.top = `${y}px`;
-      nameLabel.style.transform = `translate(-50%, -50%) scale(${scale})`;
-      nameLabel.style.opacity = opacity.toFixed(2);
     });
 
     updateProjectiles({
@@ -2303,35 +348,25 @@ async function main() {
 
     updateMeleeAttacks({ playerModel, otherPlayers, monster, audioManager });
 
-    const viewDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const headingRad = Math.atan2(viewDir.x, viewDir.z);
-    const headingDeg = (THREE.MathUtils.radToDeg(headingRad) + 360) % 360;
-    if (compass && typeof compass.setHeading === 'function') {
-      compass.setHeading(headingDeg);
-    }
-    if (minimap && typeof minimap.update === 'function') {
-      minimap.update({ playerModel, otherPlayers, monster, headingDeg });
-    }
+    multiplayer.send({
+      type: "presence",
+      id: multiplayer.getId(),
+      name: playerName,
+      x: playerModel.position.x,
+      y: playerModel.position.y,
+      z: playerModel.position.z,
+      rotation: playerModel.rotation.y,
+      action: playerModel.userData.currentAction
+    });
 
-    if (posHUD && typeof posHUD.update === 'function') {
-      posHUD.update(playerModel.position, headingDeg);
-    }
+    updateNameLabel(playerModel, player.nameLabel);
+    Object.values(otherPlayers).forEach(({ model, nameLabel }) => {
+      updateNameLabel(model, nameLabel);
+    });
+
     renderer.render(scene, camera);
   }
 
-  (async () => {
-    try {
-      const mod = await import('./features/defaultPresetFromQuery.js');
-      try {
-        mod.initDefaultPresetFromQuery({ multiplayer, toasts, playerName });
-      } catch (e) {
-        console.error('defaultPresetFromQuery init failed', e);
-      }
-    } catch (e) {
-      console.error('Failed to import defaultPresetFromQuery', e);
-    }
-  })();
-  try { initSnapAnglePersistence(multiplayer); } catch (e) {}
   animate();
 }
 
