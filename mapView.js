@@ -17,7 +17,7 @@ const state = {
   previousCamera: null,
   hiddenObjects: [],
   transition: null,
-  mapUp: new THREE.Vector3(0, 0, -1),
+  mapUp: new THREE.Vector3(0, 0, 1),
   tempObject: new THREE.Object3D(),
   tempPos: new THREE.Vector3(),
   tempQuat: new THREE.Quaternion(),
