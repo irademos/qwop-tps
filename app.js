@@ -27,6 +27,7 @@ import { createLocationTracker } from './location.js';
 import { fetchOSMFeatures } from './osmClient.js';
 import { createMapRenderer } from './mapRender.js';
 import { createBuildingsRenderer } from './buildingsRender.js';
+import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './mapView.js';
 
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
 
@@ -181,6 +182,7 @@ async function main() {
         }
 
         const other = new PlayerCharacter(data.name, desiredModel);
+        other.model.userData.hideInMapView = true;
         scene.add(other.model);
         document.body.appendChild(other.nameLabel);
         otherPlayers[remoteId] = {
@@ -423,6 +425,7 @@ async function main() {
     monster = data.model;
     // Expose monster globally for interactions like grabbing
     window.monster = monster;
+    monster.userData.hideInMapView = true;
     monster.userData.mixer = data.mixer;
     monster.userData.actions = data.actions;
     monster.userData.currentAction = "Idle";
@@ -552,6 +555,9 @@ async function main() {
   spaceship = new Spaceship(scene, rapierWorld, rbToMesh);
   await spaceship.load();
   window.spaceship = spaceship;
+  if (spaceship.mesh) {
+    spaceship.mesh.userData.hideInMapView = true;
+  }
   registerNetworkedEntity('spaceship', {
     getState: () => {
       if (!spaceship?.body) return null;
@@ -589,6 +595,9 @@ async function main() {
   surfboard = new Surfboard(scene);
   await surfboard.load();
   window.surfboard = surfboard;
+  if (surfboard.mesh) {
+    surfboard.mesh.userData.hideInMapView = true;
+  }
   registerNetworkedEntity('surfboard', {
     getState: () => {
       if (!surfboard?.mesh) return null;
@@ -623,6 +632,9 @@ async function main() {
   rowBoat = new RowBoat(scene);
   await rowBoat.load();
   window.rowBoat = rowBoat;
+  if (rowBoat.mesh) {
+    rowBoat.mesh.userData.hideInMapView = true;
+  }
   registerNetworkedEntity('rowboat', {
     getState: () => {
       if (!rowBoat?.mesh) return null;
@@ -661,6 +673,9 @@ async function main() {
   iceGun = new IceGun(scene);
   await iceGun.load();
   window.iceGun = iceGun;
+  if (iceGun.mesh) {
+    iceGun.mesh.userData.hideInMapView = true;
+  }
   registerNetworkedEntity('icegun', {
     getState: () => {
       if (!iceGun?.mesh) return null;
@@ -708,6 +723,7 @@ async function main() {
 
   let player = new PlayerCharacter(playerName, characterModel);
   let playerModel = player.model;
+  playerModel.userData.hideInMapView = true;
   scene.add(playerModel);
   document.body.appendChild(player.nameLabel);
   window.playerModel = playerModel;
@@ -764,6 +780,40 @@ async function main() {
     audioManager
   });
   window.playerControls = playerControls;
+
+  initMapView({ camera, scene, player: playerModel });
+
+  let mapViewEnabled = false;
+  const mapControls = document.createElement('div');
+  mapControls.className = 'map-controls';
+  const mapToggleButton = document.createElement('button');
+  mapToggleButton.className = 'map-control-button map-toggle-button';
+  mapToggleButton.textContent = 'Map';
+  const zoomInButton = document.createElement('button');
+  zoomInButton.className = 'map-control-button map-zoom-button';
+  zoomInButton.textContent = '+';
+  const zoomOutButton = document.createElement('button');
+  zoomOutButton.className = 'map-control-button map-zoom-button';
+  zoomOutButton.textContent = '–';
+  mapControls.appendChild(mapToggleButton);
+  mapControls.appendChild(zoomInButton);
+  mapControls.appendChild(zoomOutButton);
+  document.body.appendChild(mapControls);
+
+  mapToggleButton.addEventListener('click', () => {
+    mapViewEnabled = !mapViewEnabled;
+    setMapViewEnabled(mapViewEnabled);
+    playerControls.enabled = !mapViewEnabled;
+    mapToggleButton.classList.toggle('active', mapViewEnabled);
+    mapControls.classList.toggle('map-enabled', mapViewEnabled);
+  });
+
+  zoomInButton.addEventListener('click', () => {
+    zoomIn();
+  });
+  zoomOutButton.addEventListener('click', () => {
+    zoomOut();
+  });
 
   const MAP_RADIUS_METERS = 600;
   const MAP_REFRESH_INTERVAL_MS = 30000;
@@ -1142,6 +1192,7 @@ async function main() {
 
     const newPlayer = new PlayerCharacter(playerName, newModelPath);
     const newModel = newPlayer.model;
+    newModel.userData.hideInMapView = true;
     newModel.position.copy(currentPosition);
     newModel.rotation.copy(currentRotation);
     newModel.up.copy(currentUp);
@@ -1164,6 +1215,7 @@ async function main() {
     playerModel = newModel;
     window.playerModel = playerModel;
     playerControls?.setPlayerModel(playerModel);
+    initMapView({ camera, scene, player: playerModel });
   }
 
   async function populateCharacterSelect() {
@@ -1278,7 +1330,10 @@ async function main() {
 
 
 
-    playerControls.update();
+    if (!mapViewEnabled) {
+      playerControls.update();
+    }
+    updateMapView(frameDelta);
 
     const pickupTime = performance.now() * 0.002;
     for (let i = ammoPickups.length - 1; i >= 0; i--) {
