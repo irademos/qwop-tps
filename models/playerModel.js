@@ -172,12 +172,12 @@ export function createPlayerModel(
                     side: mat.side ?? THREE.FrontSide,
                     vertexColors: !!mat.vertexColors,
                     alphaMap: mat.alphaMap || null,
-                    skinning: obj.isSkinnedMesh === true, // keep skinning for skinned meshes
                   };
 
                   // dispose AFTER replacement to avoid disposing a material that might
                   // still be referenced during traversal in some engines
                   const newMat = new THREE.MeshBasicMaterial(basicParams);
+                  if (obj.isSkinnedMesh === true) newMat.skinning = true;
                   if (typeof mat.dispose === 'function') {
                     // dispose old material on next tick to be extra safe
                     queueMicrotask(() => mat.dispose());
@@ -350,4 +350,3 @@ export function createPlayerModel(
 
   return { model: playerGroup, nameLabel: label };
 }
-
