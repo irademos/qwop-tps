@@ -1,4 +1,5 @@
 {
   "scale": 0.5,
-  "yOffset": 0
+  "yOffset": 0,
+  "animationSpeed": 1.75
 }

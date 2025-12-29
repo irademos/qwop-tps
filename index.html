@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Fully AI Game</title>
+  <title>Minimalist 3D Multiplayer Movement</title>
   <link rel="stylesheet" href="styles.css">
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="icon" href="data:,">
@@ -15,8 +15,69 @@
   <div id="game-container">
     <div class="crosshair"></div>
   </div>
+  <div id="interaction-tooltip" class="interaction-tooltip"></div>
   <div id="health-bar"><div id="health-fill"></div></div>
-  <div id="action-buttons"></div>
+  <div id="ammo-display" class="inactive">
+    <span id="ammo-icon">❄️</span>
+    <span id="ammo-count">0</span>
+  </div>
+  <div id="action-buttons">
+    <button id="mobile-action-toggle" class="action-button mobile-only" aria-expanded="false" aria-label="Toggle actions">⋯</button>
+    <button id="voice-button" class="action-button mobile-action">Unmute</button>
+    <button id="talk-button" class="action-button mobile-action">🎤</button>
+  </div>
+  
+  <!-- Settings Button -->
+  <div id="settings-button">⚙️</div>
+
+  <!-- Settings Overlay -->
+  <div id="settings-overlay">
+    <div id="settings-panel">
+      <label for="name-input">Name:</label>
+      <input type="text" id="name-input" />
+      <label for="character-select">Character:</label>
+      <select id="character-select"></select>
+      <button id="save-settings">Save</button>
+
+      <button id="toggle-console">Show Console</button>
+
+      <div id="console-log" style="display: none; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.7); color: #0f0; padding: 10px; font-family: monospace; font-size: 12px; margin-top: 10px;"></div>
+
+      <hr />
+
+      <h3>Connected Players</h3>
+      <ul id="connected-players-list"></ul>
+
+      <h3>Connection Issues</h3>
+      <ul id="connection-errors-list"></ul>
+
+      <h3>Ping (ms)</h3>
+      <div id="ping-display">-</div>
+
+      <button id="level-builder-button">Level Builder</button>
+    </div>
+  </div>
+
+  <!-- Game Over Overlay -->
+  <div id="game-over-overlay" class="hidden">
+    <div id="game-over-message">GAME OVER</div>
+    <div id="continue-section" class="hidden">
+      <div>CONTINUE?</div>
+      <div id="countdown">9</div>
+      <div>
+        <span id="continue-yes" class="continue-option">YES</span>
+        <span id="continue-no" class="continue-option">NO</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="level-builder-sidebar" class="hidden"></div>
+  <div id="level-builder-controls" class="hidden">
+    <button data-mode="translate">⇄</button>
+    <button data-mode="rotate">⟳</button>
+    <button data-mode="scale">⤢</button>
+  </div>
+
   <script src="app.js" type="module"></script>
 </body>
 </html>

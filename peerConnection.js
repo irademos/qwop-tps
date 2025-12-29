@@ -14,6 +14,8 @@ export class Multiplayer {
     this.onPeerData = onPeerData;
     this.playerName = playerName;
     this.isHost = false;
+    this.currentHostId = null;
+    this.onHostChange = null;
     
     this.initPeer(); // Start async setup
   }
@@ -104,10 +106,24 @@ export class Multiplayer {
 
         // The latest joined player becomes the host
         const hostPeerId = validPeerIds[0];
+        const previousHostId = this.currentHostId;
+        this.currentHostId = hostPeerId;
         this.isHost = (hostPeerId === this.id);
 
         if (this.isHost) {
           console.log("👑 I am the host player");
+        }
+
+        if (previousHostId !== hostPeerId && typeof this.onHostChange === 'function') {
+          try {
+            this.onHostChange({
+              previousHostId,
+              newHostId: hostPeerId,
+              isCurrentHost: this.isHost
+            });
+          } catch (err) {
+            console.warn('Host change callback failed:', err);
+          }
         }
 
         // Connect to any valid peers we haven't yet connected to
@@ -300,5 +316,34 @@ export class Multiplayer {
 
   getId() {
     return this.id;
+  }
+
+  getHostId() {
+    return this.currentHostId;
+  }
+
+  sendTo(peerId, data) {
+    if (!peerId || peerId === this.id) return;
+    const existing = this.connections[peerId];
+    if (existing && typeof existing.send === 'function') {
+      if (existing.open) {
+        existing.send(data);
+        return;
+      }
+      if (typeof existing.once === 'function') {
+        existing.once('open', () => existing.send(data));
+        return;
+      }
+    }
+
+    try {
+      const conn = this.peer.connect(peerId);
+      this.setupConnection(conn);
+      if (typeof conn.once === 'function') {
+        conn.once('open', () => conn.send(data));
+      }
+    } catch (err) {
+      console.warn(`Failed to send direct message to ${peerId}:`, err);
+    }
   }
 }

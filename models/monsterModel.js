@@ -19,12 +19,21 @@ export function loadMonsterModel(scene, callback) {
           model.position.y += config.yOffset ?? 0;
           scene.add(model);
 
+          const defaultAnimationSpeed = config.animationSpeed ?? 1.6;
+          const perAnimationSpeeds = config.animationSpeeds ?? {};
+
           const mixer = new THREE.AnimationMixer(model);
           const actions = {};
           gltf.animations.forEach((clip) => {
             const name = clip.name.replace("CharacterArmature|", "");
-            actions[name] = mixer.clipAction(clip);
+            const action = mixer.clipAction(clip);
+            const timeScale = perAnimationSpeeds[name] ?? defaultAnimationSpeed;
+            action.setEffectiveTimeScale(timeScale);
+            actions[name] = action;
           });
+
+          model.userData.defaultAnimationSpeed = defaultAnimationSpeed;
+          model.userData.animationSpeeds = perAnimationSpeeds;
 
           callback({ model, mixer, actions });
         },

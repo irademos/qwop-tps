@@ -2,14 +2,15 @@ import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 import { updateMonster, switchMonsterAnimation } from './characters/MonsterCharacter.js';
 
-export function spawnProjectile(scene, projectiles, position, direction) {
+export function spawnProjectile(scene, projectiles, position, direction, shooterId) {
   const size = 0.5;
   const half = size / 2;
   const geometry = new THREE.BoxGeometry(size, size, size);
   const color = new THREE.Color(Math.random(), Math.random(), Math.random());
   const material = new THREE.MeshStandardMaterial({ color });
   const box = new THREE.Mesh(geometry, material);
-  box.position.copy(position.clone().add(direction.clone().normalize().multiplyScalar(1.2)));
+  const spawnPosition = position.clone();
+  box.position.copy(spawnPosition);
   const groundY = half;
   if (box.position.y < groundY) {
     box.position.y = groundY;
@@ -31,6 +32,7 @@ export function spawnProjectile(scene, projectiles, position, direction) {
   box.userData.velocity = vel.clone();
   box.userData.lifetime = 4000;
   box.userData.spawnTime = Date.now();
+  box.userData.shooterId = shooterId;
   scene.add(box);
   projectiles.push(box);
 }
@@ -42,8 +44,9 @@ export function updateProjectiles({
   playerModel,
   multiplayer,
   monster,
-  clock
+  delta
 }) {
+  const localId = multiplayer?.getId?.();
   const removeProjectile = (index) => {
     const p = projectiles[index];
     const body = p.userData.rb;
@@ -88,6 +91,7 @@ export function updateProjectiles({
     let removed = false;
 
     for (const [id, { model }] of Object.entries(otherPlayers)) {
+      if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
       if (age < 80) continue;
       const projBox = new THREE.Box3().setFromObject(proj);
       const playerBox = new THREE.Box3().setFromObject(model);
@@ -124,7 +128,7 @@ export function updateProjectiles({
 
     const projBox = new THREE.Box3().setFromObject(proj);
     const localBox = new THREE.Box3().setFromObject(playerModel);
-    if (projBox.intersectsBox(localBox) && age >= 80) {
+    if (projBox.intersectsBox(localBox) && age >= 80 && proj.userData.shooterId !== localId) {
       console.log(`💥 You were hit`);
       removeProjectile(i);
       removed = true;
@@ -172,13 +176,7 @@ export function updateProjectiles({
   }
 
   if (multiplayer?.isHost && monster) {
-    updateMonster(monster, clock, playerModel, otherPlayers); // pass in new args
-    multiplayer.send({
-      type: "monster",
-      x: monster.position.x,
-      y: monster.position.y,
-      z: monster.position.z
-    });
+    updateMonster(monster, delta, playerModel, otherPlayers);
   }
 
 }

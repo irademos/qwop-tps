@@ -86,7 +86,7 @@ enable_cell_fracture()
 
 
 # --- EDIT ME ---
-PROJECT_ROOT = r"C:\Users\chris-dev\OneDrive - YAMAHA MOTOR CO., LTD\Documents\Visual Studio\project1\game_fully_ai"   # your Vite project root
+PROJECT_ROOT = r"C:\Users\chris-dev\OneDrive - YAMAHA MOTOR CO., LTD\Documents\Visual Studio\project1\multiplayer_game"   # your Vite project root
 ASSET_OUT_DIR    = os.path.join(PROJECT_ROOT, "public/assets/props")
 AREA_JSON_PATH    = os.path.join(PROJECT_ROOT, "public/areas/demo/demo_area.json")
 # --------------

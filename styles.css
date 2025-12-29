@@ -6,11 +6,11 @@ body {
   overflow: hidden;
   font-family: Arial, sans-serif;
   user-select: none;
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  -ms-user-select: none;
+  -webkit-user-select: none; /* Safari */
+  -moz-user-select: none; /* Firefox */
+  -ms-user-select: none; /* IE/Edge */
   touch-action: manipulation;
-  -webkit-touch-callout: none;
+  -webkit-touch-callout: none; /* iOS Safari */
 }
 
 #game-container {
@@ -19,6 +19,44 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
+}
+
+.interaction-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  transform: translateX(-50%);
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 12px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  pointer-events: none;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  white-space: nowrap;
+  z-index: 900;
+}
+
+.interaction-tooltip.visible {
+  opacity: 1;
+}
+
+.instructions {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 20px;
+  border-radius: 8px;
+  font-size: 18px;
+  color: #fff;
+  z-index: 100;
+  max-width: 400px;
+  text-align: center;
 }
 
 .crosshair {
@@ -30,7 +68,7 @@ body {
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 1000;
-  display: none;
+  display: none; /* Hide crosshair for third-person view */
 }
 
 .crosshair::before,
@@ -110,7 +148,23 @@ body {
   cursor: pointer;
 }
 
-.name-label {
+.mobile-only {
+  display: none;
+}
+
+#camera-controls {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  background-color: rgba(0, 0, 0, 0.3);
+  color: white;
+  padding: 5px;
+  border-radius: 5px;
+  font-size: 12px;
+  z-index: 100;
+}
+
+.player-name {
   position: absolute;
   font-size: 14px;
   color: white;
@@ -121,6 +175,79 @@ body {
   white-space: nowrap;
   transform: translate(-50%, -100%);
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.chat-message {
+  position: absolute;
+  font-size: 14px;
+  color: white;
+  background-color: rgba(0, 0, 0, 0.6);
+  padding: 4px 8px;
+  border-radius: 8px;
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transform: translate(-50%, -100%);
+  margin-top: -25px;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+#chat-input-container {
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  max-width: 500px;
+  background-color: rgba(0, 0, 0, 0.7);
+  border-radius: 8px;
+  padding: 10px;
+  display: none;
+  z-index: 2000;
+}
+
+#chat-input {
+  width: 100%;
+  padding: 8px;
+  border-radius: 4px;
+  border: none;
+  background-color: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 16px;
+}
+
+#chat-button {
+  position: fixed;
+  bottom: 50px;
+  right: 50px;
+  background-color: rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  text-align: center;
+  line-height: 60px;
+  font-weight: bold;
+  color: #333;
+  z-index: 1000;
+  touch-action: none;
+  cursor: pointer;
+}
+
+#close-chat {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 20px;
+  height: 20px;
+  background-color: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  text-align: center;
+  line-height: 20px;
+  font-weight: bold;
+  color: #333;
+  cursor: pointer;
 }
 
 #health-bar {
@@ -140,6 +267,207 @@ body {
   width: 100%;
 }
 
+#ammo-display {
+  position: absolute;
+  top: 40px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid #000;
+  border-radius: 6px;
+  color: #fff;
+  font-family: 'Press Start 2P', sans-serif;
+  font-size: 12px;
+  z-index: 1000;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#ammo-icon {
+  font-size: 16px;
+}
+
+#ammo-display.inactive {
+  opacity: 0.4;
+  transform: scale(0.95);
+}
+
+#ammo-display.empty {
+  color: #ff9b9b;
+}
+
+#voice-button {
+}
+
+#voice-button.active {
+  background-color: rgba(255, 0, 0, 0.5);
+}
+
+#chat-ui {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  display: flex;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 8px;
+  border-radius: 6px;
+  z-index: 10;
+}
+
+#chat-ui input,
+#chat-ui button {
+  font-size: 14px;
+  padding: 6px;
+}
+
+.audio-indicator {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  background-color: rgba(0, 255, 0, 0.5);
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translate(-50%, -150%);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.mobile-btn {
+  position: absolute;
+  bottom: 80px;
+  right: 20px;
+  z-index: 10;
+  padding: 12px 20px;
+  font-size: 16px;
+  background-color: #ff4e4e;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  opacity: 0.8;
+}
+
+#settings-button {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  font-size: 24px;
+  cursor: pointer;
+  z-index: 1000;
+}
+
+#settings-overlay {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+#settings-panel {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+#settings-panel input,
+#settings-panel select {
+  margin-top: 8px;
+  margin-bottom: 12px;
+  padding: 4px;
+  width: 200px;
+}
+
+#level-builder-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 10px;
+  overflow-y: auto;
+  z-index: 1500;
+}
+
+#level-builder-sidebar.hidden {
+  display: none;
+}
+
+#level-builder-sidebar button,
+#level-builder-sidebar select,
+#level-builder-sidebar input {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+
+
+
+@media (pointer: coarse) {
+  #action-buttons {
+    bottom: 16px;
+    left: 16px;
+    gap: 6px;
+  }
+
+  #action-buttons .action-button {
+    width: 52px;
+    height: 52px;
+    font-size: 14px;
+  }
+
+  #action-buttons .mobile-action {
+    display: none;
+  }
+
+  #action-buttons.mobile-expanded .mobile-action {
+    display: flex;
+  }
+
+  #mobile-action-toggle {
+    display: flex;
+    font-size: 24px;
+    padding-bottom: 4px;
+  }
+
+  #mobile-action-toggle[aria-expanded="true"] {
+    background-color: rgba(255, 255, 255, 0.7);
+  }
+
+  .mobile-only {
+    display: flex;
+  }
+
+  #joystick-container {
+    width: 120px;
+    height: 120px;
+    bottom: 16px;
+    right: 16px;
+  }
+
+  #jump-button {
+    width: 70px;
+    height: 70px;
+    line-height: 70px;
+    font-size: 14px;
+    bottom: 140px;
+    right: 16px;
+  }
+
+  .interaction-tooltip.visible {
+    pointer-events: auto;
+    cursor: pointer;
+  }
+}
+
 @media (pointer: coarse) and (max-width: 768px),
        (pointer: coarse) and (max-height: 768px) {
   #joystick-container {
@@ -148,6 +476,10 @@ body {
 
   #jump-button {
     display: block;
+  }
+
+  .instructions {
+    display: none !important;
   }
 }
 
@@ -170,4 +502,40 @@ body {
     bottom: 20px;
     flex-direction: column;
   }
+}
+
+#game-over-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: red;
+  font-family: 'Press Start 2P', monospace;
+  text-align: center;
+  z-index: 2000;
+}
+
+#game-over-message {
+  font-size: 48px;
+  opacity: 0;
+  transition: opacity 1s;
+}
+
+#continue-section {
+  font-size: 24px;
+  margin-top: 20px;
+}
+
+.continue-option {
+  margin: 0 20px;
+  cursor: pointer;
+}
+
+.hidden {
+  display: none;
 }

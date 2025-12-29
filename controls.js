@@ -1,11 +1,16 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
+import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from './water.js';
+import { MOON_RADIUS } from "./worldGeneration.js";
+import { getSpawnPosition } from './spawnUtils.js';
 
 // Movement constants
 const SPEED = 5;
+const SWIM_SPEED = 2;
 const JUMP_FORCE = 5;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
+const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
 
 export class PlayerControls {
   constructor({ scene, camera, playerModel, renderer, multiplayer, spawnProjectile, projectiles, audioManager }) {
@@ -33,6 +38,13 @@ export class PlayerControls {
     this.grabberId = null;
     this.externalGrabPos = null;
 
+    this.vehicle = null;
+
+    this.isInWater = false;
+    this.waterDepth = 0;
+
+    this.parachute = null;
+
     // Player state
     this.canJump = true;
     this.keysPressed = new Set();
@@ -53,10 +65,10 @@ export class PlayerControls {
     this.moveRight = 0;
     
     // Initial player position
-    // const initialPos = { x: 0, y: 0.5, z: 0 };
-    this.playerX = (Math.random() * 10) - 5;
-    this.playerZ = (Math.random() * 10) - 5;
-    this.playerY = 0.5;
+    const spawn = getSpawnPosition();
+    this.playerX = spawn.x;
+    this.playerY = spawn.y;
+    this.playerZ = spawn.z;
 
     
     // Set initial player model position if it exists
@@ -91,10 +103,51 @@ export class PlayerControls {
 
     // Setup event listeners
     this.setupEventListeners();
-    
+
     this.enabled = true; // Add enabled flag for chat input
+
+    this.interactionPromptEl = document.getElementById('interaction-tooltip');
+
+    if (this.isMobile && this.interactionPromptEl) {
+      const activateInteraction = (event) => {
+        if (!this.interactionPromptEl.classList.contains('visible')) return;
+        event.preventDefault();
+        this.handleInteractionAction();
+      };
+      this.interactionPromptEl.addEventListener('touchstart', activateInteraction, { passive: false });
+      this.interactionPromptEl.addEventListener('click', activateInteraction);
+    }
+
+    this.ammo = 10;
+    this.maxAmmo = 30;
+    this.ammoContainerEl = document.getElementById('ammo-display');
+    this.ammoCountEl = document.getElementById('ammo-count');
+    this.lastAmmoValue = null;
+    this.lastAmmoEmpty = null;
+    this.lastHasGun = null;
+    this.updateAmmoUI(window.iceGun?.holder === this);
   }
-  
+
+  setPlayerModel(newModel) {
+    if (this.parachute && this.playerModel && this.parachute.parent === this.playerModel) {
+      this.playerModel.remove(this.parachute);
+    }
+
+    this.playerModel = newModel;
+
+    if (this.parachute && this.playerModel) {
+      this.playerModel.add(this.parachute);
+    }
+
+    if (this.playerModel) {
+      if (this.body && typeof this.body.translation === 'function') {
+        const t = this.body.translation();
+        this.playerModel.position.set(t.x, t.y, t.z);
+      }
+      this.lastPosition.copy(this.playerModel.position);
+    }
+  }
+
   initializeControls() {
     if (this.isMobile) {
       this.initializeMobileControls();
@@ -123,7 +176,7 @@ export class PlayerControls {
     
     // Jump button event listeners
     document.getElementById('jump-button').addEventListener('touchstart', (event) => {
-      if (!this.enabled) return;
+      if (!this.enabled || this.isInWater) return;
       this.jumpButtonPressed = true;
       if (this.canJump && this.body) {
         this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
@@ -133,7 +186,7 @@ export class PlayerControls {
     });
 
     document.getElementById('jump-button').addEventListener('touchend', (event) => {
-      if (!this.enabled) return;
+      if (!this.enabled || this.isInWater) return;
       this.jumpButtonPressed = false;
       event.preventDefault();
     });
@@ -144,7 +197,7 @@ export class PlayerControls {
       mode: 'static',
       position: { left: '50%', top: '50%' },
       color: 'rgba(255, 255, 255, 0.5)',
-      size: 120
+      size: 100
     });
     
     this.joystick.on('move', (evt, data) => {
@@ -208,42 +261,51 @@ export class PlayerControls {
     // Action buttons container
     const actionContainer = document.getElementById('action-buttons');
 
+    const toggleButton = document.getElementById('mobile-action-toggle');
+    if (actionContainer && toggleButton) {
+      const setExpanded = (expanded) => {
+        actionContainer.classList.toggle('mobile-expanded', expanded);
+        toggleButton.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        toggleButton.textContent = expanded ? '✕' : '⋯';
+      };
+
+      setExpanded(false);
+
+      const handleToggle = (event) => {
+        event.preventDefault();
+        const nextState = !actionContainer.classList.contains('mobile-expanded');
+        setExpanded(nextState);
+      };
+
+      toggleButton.addEventListener('touchstart', handleToggle, { passive: false });
+      toggleButton.addEventListener('click', handleToggle);
+    }
+
     // Fire button
     if (!document.getElementById('fire-button')) {
       const newFireButton = document.createElement('button');
       newFireButton.id = 'fire-button';
-      newFireButton.className = 'action-button';
+      newFireButton.className = 'action-button mobile-action';
       newFireButton.innerText = 'FIRE';
       actionContainer.appendChild(newFireButton);
     }
 
     document.getElementById('fire-button').addEventListener('touchstart', (event) => {
       if (!this.enabled) return;
-      const position = this.playerModel.position.clone().add(new THREE.Vector3(0, 0.7, 0));
-      const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion);
-
-      this.multiplayer.send({
-        type: 'projectile',
-        id: this.multiplayer.getId(),
-        position: position.toArray(),
-        direction: direction.toArray()
-      });
-
-      this.playAction('projectile');
-      this.spawnProjectile(this.scene, this.projectiles, position, direction);
-
-      event.preventDefault();
+      if (this.attemptFireProjectile()) {
+        event.preventDefault();
+      }
     });
 
     // Kick button
     if (!document.getElementById('kick-button')) {
       const kickButton = document.createElement('button');
       kickButton.id = 'kick-button';
-      kickButton.className = 'action-button';
+      kickButton.className = 'action-button mobile-action';
       kickButton.innerText = 'KICK';
       actionContainer.appendChild(kickButton);
       kickButton.addEventListener('touchstart', (event) => {
-        if (!this.enabled) return;
+        if (!this.enabled || this.isInWater) return;
         this.playAction('mmaKick');
         event.preventDefault();
       });
@@ -253,11 +315,11 @@ export class PlayerControls {
     if (!document.getElementById('punch-button')) {
       const punchButton = document.createElement('button');
       punchButton.id = 'punch-button';
-      punchButton.className = 'action-button';
+      punchButton.className = 'action-button mobile-action';
       punchButton.innerText = 'PUNCH';
       actionContainer.appendChild(punchButton);
       punchButton.addEventListener('touchstart', (event) => {
-        if (!this.enabled) return;
+        if (!this.enabled || this.isInWater) return;
         this.playAction('mutantPunch');
         event.preventDefault();
       });
@@ -271,7 +333,46 @@ export class PlayerControls {
       const key = e.key.toLowerCase();
       this.keysPressed.add(key);
 
+      if (this.vehicle) {
+        if (key === 'x') {
+          this.vehicle.dismount();
+          return;
+        }
+
+        const boatControls = this.vehicle.type === 'rowboat' ||
+          (this.vehicle.type === 'surfboard' && this.vehicle.usesBoatControls?.());
+
+        if (boatControls) {
+          if (e.repeat) return;
+          if (key === 'z') {
+            this.vehicle.paddleLeft?.();
+            return;
+          } else if (key === 'c') {
+            this.vehicle.paddleRight?.();
+            return;
+          }
+          if (this.vehicle.type === 'rowboat') {
+            return;
+          }
+        }
+
+        if (this.vehicle.type !== 'surfboard') {
+          return;
+        }
+
+      }
+
+      if (key === 'x') {
+        this.handleInteractionAction();
+        return;
+      }
+
       if (e.key === " ") {
+        if (this.parachute) {
+          this.removeParachute();
+          return;
+        }
+        if (this.isInWater) return;
         if (this.canJump && this.body) {
           this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
           this.canJump = false;
@@ -282,14 +383,17 @@ export class PlayerControls {
           this.playAction('hurricaneKick');
         }
       } else if (key === 'e') {
+        if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
+        if (this.isInWater) return;
         if (this.isMoving) {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.5);
         }
         this.playAction('mutantPunch');
         this.audioManager?.playAttack();
       } else if (key === 'r') {
+        if (this.isInWater) return;
         if (this.isMoving) {
-          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.5);
+          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(1.4);
           this.playAction('runningKick');
           this.audioManager?.playAttack();
         } else {
@@ -321,19 +425,28 @@ export class PlayerControls {
     this.domElement.addEventListener("click", (event) => {
       // Don't fire if chat or settings are open
       if (!this.enabled || this.isMobile) return;
-
-        const position = this.playerModel.position.clone().add(new THREE.Vector3(0, 0.7, 0));
-        const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion);
-
-        this.multiplayer.send({
-          type: 'projectile',
-          id: this.multiplayer.getId(),
-          position: position.toArray(),
-          direction: direction.toArray()
-        });
-        this.playAction('projectile');
-        this.spawnProjectile(this.scene, this.projectiles, position, direction);
+      this.attemptFireProjectile();
     });
+  }
+
+  handleInteractionAction() {
+    if (!this.enabled) return;
+
+    if (this.vehicle) {
+      this.vehicle.dismount?.();
+      return;
+    }
+
+    const iceGun = window.iceGun;
+    if (iceGun?.holder === this) {
+      iceGun.tryPickup?.(this);
+      return;
+    }
+
+    window.spaceship?.tryMount(this);
+    window.surfboard?.tryMount(this);
+    window.rowBoat?.tryMount(this);
+    iceGun?.tryPickup?.(this);
   }
 
   playAction(actionName) {
@@ -365,23 +478,6 @@ export class PlayerControls {
       };
     }
 
-    if (actionName === "runningKick") {
-      action.paused = true;
-      const pivot = this.playerModel.userData.pivot;
-      if (pivot) {
-        this.runningKickOriginalY = pivot.rotation.y;
-        pivot.rotation.y -= Math.PI / 2;
-      }
-      this.runningKickTimer = setTimeout(() => {
-        action.stop();
-        if (pivot) {
-          pivot.rotation.y = this.runningKickOriginalY;
-        }
-        this.currentSpecialAction = null;
-      }, 1000);
-      return;
-    }
-
     const mixer = this.playerModel.userData.mixer;
     const onFinished = (e) => {
       if (e.action === action) {
@@ -411,11 +507,33 @@ export class PlayerControls {
   processMovement() {
     if (!this.enabled) return;
 
+    if (this.vehicle && this.vehicle.type === 'spaceship') {
+      const yaw = (this.keysPressed.has("a") ? 1 : 0) + (this.keysPressed.has("d") ? -1 : 0);
+      const thrust = this.keysPressed.has(" ");
+      const pitch = thrust ? (this.keysPressed.has("w") ? 1 : 0) + (this.keysPressed.has("s") ? -1 : 0) : 0;
+      this.vehicle.applyInput({ thrust, yaw, pitch });
+      this.isMoving = thrust;
+      return;
+    }
+
+    if (this.vehicle) {
+      const boatControls = this.vehicle.type === 'rowboat' ||
+        (this.vehicle.type === 'surfboard' && this.vehicle.usesBoatControls?.());
+      if (boatControls) {
+        this.isMoving = false;
+        this.vehicle.alignOccupant?.();
+        return;
+      }
+    }
+
     if (!this.body) return;
     const t = this.body.translation();
     const vel = this.body.linvel();
 
+    this.waterDepth = getWaterDepth(t.x, t.z);
     const surfaceY = 0;
+    const floatTargetY = surfaceY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
+    this.isInWater = this.waterDepth > SWIM_DEPTH_THRESHOLD && t.y < floatTargetY;
 
     if (this.isGrabbed) {
       // Freeze movement and follow externally provided position
@@ -432,6 +550,8 @@ export class PlayerControls {
       return;
     }
 
+    const terrainY = getTerrainHeight(t.x, t.z);
+    let groundY = terrainY;
     const world = window.rapierWorld;
     if (world) {
       const ray = new RAPIER.Ray({ x: t.x, y: t.y, z: t.z }, { x: 0, y: -1, z: 0 });
@@ -439,17 +559,32 @@ export class PlayerControls {
       if (hit) {
         const hitDist = hit.toi ?? hit.timeOfImpact;
         const hitY = t.y - hitDist;
+        if (hitY > groundY) groundY = hitY;
       }
     }
-    const groundExpectedY = PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
-    const grounded = t.y <= groundExpectedY + 0.05;
-    if (grounded) {
+    const groundExpectedY = groundY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
+    const grounded = !this.isInWater && t.y <= groundExpectedY + 0.05;
+    if (grounded && !this.isInWater) {
       this.canJump = true;
       this.hasDoubleJumped = false;
     } else {
       this.canJump = false;
     }
-    if (t.y < groundExpectedY) {
+    if (this.isInWater) {
+      if (this.keysPressed.has(" ")) {
+        const newY = t.y - 0.2;
+        this.body.setTranslation({ x: t.x, y: newY, z: t.z }, true);
+        this.body.setLinvel({ x: vel.x, y: -1, z: vel.z }, true);
+        t.y = newY;
+      } else if (t.y < floatTargetY) {
+        const newY = t.y + (floatTargetY - t.y) * 0.1;
+        this.body.setTranslation({ x: t.x, y: newY, z: t.z }, true);
+        if (vel.y < 0) {
+          this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
+        }
+        t.y = newY;
+      }
+    } else if (t.y < groundExpectedY) {
       this.body.setTranslation({ x: t.x, y: groundExpectedY, z: t.z }, true);
       if (vel.y < 0) {
         this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
@@ -510,42 +645,81 @@ export class PlayerControls {
         this.playerModel.userData.currentAction = 'idle';
       }
     } else {
-      const speed = SPEED;
+      const speed = this.isInWater ? SWIM_SPEED : SPEED;
       this.body.setLinvel({ x: movement.x * speed, y: vel.y, z: movement.z * speed }, true);
       }
     const newX = t.x;
     const newY = t.y;
     const newZ = t.z;
+    const sink = this.isInWater ? newY - surfaceY : 0;
     const isMovingNow = movement.length() > 0;
     this.isMoving = isMovingNow;
     if (isMovingNow && this.canJump) {
       this.audioManager?.playFootstep();
     }
     if (this.playerModel) {
-      const displayY = newY;
+      let displayY = newY - sink;
+      if (this.isInWater && !isMovingNow && !this.vehicle) {
+        displayY -= FLOAT_IDLE_DISPLAY_OFFSET;
+      }
       this.playerModel.position.set(newX, displayY, newZ);
-      // Determine the yaw based on movement, preserving the last
-      // direction when the player stops. Only the yaw component is
-      // applied so releasing movement keys doesn't reset the model to
-      // its default orientation.
       let yawAngle = this.playerModel.rotation.y;
       if (movement.length() > 0) {
         yawAngle = Math.atan2(movement.x, movement.z);
+        // this.playerModel.rotation.y = yawAngle;
       }
-      // Apply yaw rotation without overwriting other axes and avoid
-      // resetting the quaternion, which previously caused a 180° flip
-      // when movement keys were released.
-      this.playerModel.rotation.set(0, yawAngle, 0);
 
-      this.playerModel.up.set(0, 1, 0);
-      this.camera.up.set(0, 1, 0);
-      
+      const moon = window.moon;
+      if (moon) {
+        const playerPos = this.playerModel.position;
+        const moonPos = moon.position;
+        const dist = playerPos.distanceTo(moonPos);
+        if (dist < MOON_RADIUS * 2) {
+          const up = new THREE.Vector3().subVectors(playerPos, moonPos).normalize();
+          this.playerModel.up.copy(up);
+          let forward;
+          if (movement.length() > 0) {
+            forward = movement.clone().normalize();
+          } else {
+            forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion);
+          }
+          forward.projectOnPlane(up).normalize();
+          const target = playerPos.clone().add(forward);
+          this.playerModel.lookAt(target);
+          this.camera.up.copy(up);
+        } else {
+          this.playerModel.rotation.set(0, yawAngle, 0);
+          this.playerModel.up.set(0, 1, 0);
+          this.camera.up.set(0, 1, 0);
+        }
+      } else {
+        this.playerModel.rotation.set(0, yawAngle, 0);
+        this.playerModel.up.set(0, 1, 0);
+        this.camera.up.set(0, 1, 0);
+      }
       const actions = this.playerModel.userData.actions;
       if (actions && !this.isKnocked && !this.currentSpecialAction) {
         let actionName;
-        actionName = 'idle';
-        if (!this.canJump) actionName = 'jump';
-        else if (isMovingNow) actionName = 'run';
+        if (this.vehicle && this.vehicle.type === 'surfboard') {
+          if (this.isInWater) {
+            actionName = isMovingNow ? 'swim' : 'sit';
+            if (this.vehicle.standing) {
+              actionName = 'idle';
+            }
+          } else {
+            actionName = 'idle';
+            if (!this.canJump) actionName = 'jump';
+            else if (isMovingNow) actionName = 'run';
+          }
+        } else {
+          if (this.isInWater) {
+            actionName = isMovingNow ? 'swim' : 'float';
+          } else {
+            actionName = 'idle';
+            if (!this.canJump) actionName = 'jump';
+            else if (isMovingNow) actionName = 'run';
+          }
+        }
         const current = this.playerModel.userData.currentAction;
         if (actionName && current !== actionName) {
           actions[current]?.fadeOut(0.2);
@@ -596,8 +770,18 @@ export class PlayerControls {
 
     let orbitCenter;
     let offset;
-    orbitCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
-    offset = this.cameraOffset;
+    if (this.vehicle && this.vehicle.mesh && this.vehicle.type !== 'surfboard') {
+      const size = this.vehicle.boundingSize;
+      const centerOffset = this.vehicle.boundingCenterOffset || new THREE.Vector3();
+      orbitCenter = this.vehicle.mesh.position.clone().add(centerOffset);
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const fov = THREE.MathUtils.degToRad(this.camera.fov);
+      const distance = (maxDim * 0.5) / Math.tan(fov / 2) + maxDim * 0.5;
+      offset = new THREE.Vector3(0, maxDim * 0.5, distance);
+    } else {
+      orbitCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
+      offset = this.cameraOffset;
+    }
     const rotatedOffset = new THREE.Vector3(
       offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
       offset.y + 5 * Math.sin(this.pitch),
@@ -628,6 +812,68 @@ export class PlayerControls {
       if (this.controls) {
         this.controls.update();
       }
+
+      this.updateInteractionPrompt();
+
+      const hasGun = window.iceGun?.holder === this;
+      if (hasGun !== this.lastHasGun) {
+        this.updateAmmoUI(hasGun);
+      }
+  }
+
+  updateInteractionPrompt() {
+    if (!this.interactionPromptEl || !this.playerModel) return;
+
+    let promptText = '';
+    let visible = false;
+
+    if (this.vehicle) {
+      const type = this.vehicle.type;
+      if (type === 'spaceship') {
+        promptText = "'x' exit spaceship";
+      } else if (type === 'rowboat') {
+        promptText = "'x' exit rowboat";
+      } else if (type === 'surfboard') {
+        promptText = "'x' exit surfboard";
+      }
+      visible = !!promptText;
+    } else {
+      const iceGun = window.iceGun;
+      if (iceGun?.holder === this) {
+        promptText = "'x' drop gun";
+        visible = true;
+      } else {
+        const playerPos = this.playerModel.position;
+        let closestDist = Infinity;
+
+        const consider = (object, maxDistance, message) => {
+          if (!object) return;
+          const target = object.mesh || object;
+          if (!target || !target.position) return;
+          if (object.occupant) return;
+          if (object.holder) return;
+          const dist = playerPos.distanceTo(target.position);
+          if (dist <= maxDistance && dist < closestDist) {
+            closestDist = dist;
+            promptText = message;
+            visible = true;
+          }
+        };
+
+        consider(window.spaceship, 10, "'x' enter spaceship");
+        consider(window.rowBoat, 4, "'x' enter rowboat");
+        consider(window.surfboard, 3, "'x' enter surfboard");
+        consider(window.iceGun, 3, "'x' pick up gun");
+      }
+    }
+
+    if (visible) {
+      this.interactionPromptEl.textContent = promptText;
+      this.interactionPromptEl.classList.add('visible');
+    } else {
+      this.interactionPromptEl.classList.remove('visible');
+      this.interactionPromptEl.textContent = '';
+    }
   }
   
   getCamera() {
@@ -656,8 +902,28 @@ export class PlayerControls {
    */
   triggerFire() {
     if (!this.enabled) return;
-    const position = this.playerModel.position.clone().add(new THREE.Vector3(0, 0.7, 0));
-    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion);
+    this.attemptFireProjectile();
+  }
+
+  canFireProjectile() {
+    const iceGun = window.iceGun;
+    return !!iceGun && iceGun.holder === this && this.ammo > 0 && this.playerModel;
+  }
+
+  consumeAmmo() {
+    if (this.ammo <= 0) return false;
+    this.ammo -= 1;
+    this.updateAmmoUI(window.iceGun?.holder === this);
+    return true;
+  }
+
+  attemptFireProjectile() {
+    if (!this.canFireProjectile()) return false;
+
+    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
+    const position = this.getProjectileSpawnPosition(direction);
+
+    this.consumeAmmo();
 
     this.multiplayer.send({
       type: 'projectile',
@@ -667,7 +933,63 @@ export class PlayerControls {
     });
 
     this.playAction('projectile');
-    this.spawnProjectile(this.scene, this.projectiles, position, direction);
+    this.spawnProjectile(
+      this.scene,
+      this.projectiles,
+      position,
+      direction,
+      this.multiplayer.getId()
+    );
+    return true;
+  }
+
+  getProjectileSpawnPosition(direction) {
+    const offsetDistance = 0.6;
+    const normalizedDirection = direction.clone().normalize();
+    const iceGun = window.iceGun;
+
+    if (iceGun?.mesh) {
+      const gunPosition = new THREE.Vector3();
+      iceGun.mesh.getWorldPosition(gunPosition);
+      return gunPosition.add(normalizedDirection.clone().multiplyScalar(offsetDistance));
+    }
+
+    return this.playerModel.position
+      .clone()
+      .add(new THREE.Vector3(0, 0.7, 0))
+      .add(normalizedDirection.clone().multiplyScalar(offsetDistance));
+  }
+
+  addAmmo(amount) {
+    if (typeof amount !== 'number' || amount <= 0) return;
+    const normalized = Math.floor(amount);
+    if (normalized <= 0) return;
+    const nextAmmo = Math.min(this.maxAmmo, this.ammo + normalized);
+    if (nextAmmo !== this.ammo) {
+      this.ammo = nextAmmo;
+      this.updateAmmoUI(window.iceGun?.holder === this);
+    }
+  }
+
+  updateAmmoUI(hasGun = window.iceGun?.holder === this) {
+    if (this.ammoCountEl && this.lastAmmoValue !== this.ammo) {
+      this.ammoCountEl.textContent = `${this.ammo}`;
+      this.lastAmmoValue = this.ammo;
+    }
+
+    if (this.ammoContainerEl) {
+      if (this.lastHasGun !== hasGun) {
+        this.ammoContainerEl.classList.toggle('inactive', !hasGun);
+      }
+
+      const isEmpty = this.ammo === 0;
+      if (this.lastAmmoEmpty !== isEmpty) {
+        this.ammoContainerEl.classList.toggle('empty', isEmpty);
+        this.lastAmmoEmpty = isEmpty;
+      }
+    }
+
+    this.lastHasGun = hasGun;
   }
 
   updateGrabbedTarget() {
@@ -749,6 +1071,24 @@ export class PlayerControls {
 
   updateGrabbedPosition(pos) {
     this.externalGrabPos = new THREE.Vector3(...pos);
+  }
+
+  deployParachute() {
+    if (!this.playerModel || this.parachute) return;
+    const geom = new THREE.SphereGeometry(1.5, 16, 8, 0, Math.PI * 2, Math.PI/2, Math.PI / 2);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xff0000, side: THREE.DoubleSide });
+    const chute = new THREE.Mesh(geom, mat);
+    chute.rotation.x = Math.PI;
+    chute.position.set(0, 3, 0);
+    this.playerModel.add(chute);
+    this.parachute = chute;
+  }
+
+  removeParachute() {
+    if (this.parachute) {
+      this.parachute.parent.remove(this.parachute);
+      this.parachute = null;
+    }
   }
 
   setupPointerLock() {
