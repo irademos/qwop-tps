@@ -23,6 +23,7 @@ import { IceGun } from './iceGun.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { applyGlobalGravity } from "./gravity.js";
 import { getSpawnPosition } from './spawnUtils.js';
+import { createLocationTracker } from './location.js';
 
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
 
@@ -682,6 +683,24 @@ async function main() {
     audioManager
   });
   window.playerControls = playerControls;
+
+  const locationTracker = createLocationTracker({
+    onUpdate: (location) => {
+      window.latestLocation = location;
+    },
+    onError: (error, message) => {
+      console.warn('Location error:', message, error);
+    }
+  });
+  locationTracker.start();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      locationTracker.stop();
+    } else {
+      locationTracker.start();
+    }
+  });
+  window.addEventListener('beforeunload', () => locationTracker.stop());
 
   spawnAmmoPickup(new THREE.Vector3(-4, 0, 4));
   spawnAmmoPickup(new THREE.Vector3(2, 0, -3));
