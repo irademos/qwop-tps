@@ -337,6 +337,26 @@ async function main() {
   const startOverlay = document.getElementById('start-overlay');
   let hasStartedAudio = false;
 
+  const focusGameCanvas = () => {
+    const canvas = document.querySelector('#game-container canvas');
+    if (canvas) {
+      canvas.tabIndex = 0;
+      canvas.focus();
+    } else {
+      document.body?.focus?.();
+    }
+  };
+
+  const hideStartOverlay = () => {
+    if (!startOverlay) return;
+    startOverlay.setAttribute('aria-hidden', 'true');
+    startOverlay.removeAttribute('tabindex');
+    startOverlay.classList.add('hidden');
+    startOverlay.style.display = 'none';
+    startOverlay.blur();
+    focusGameCanvas();
+  };
+
   const resumeAudioContext = async () => {
     const context = THREE.AudioContext?.getContext?.();
     if (context?.state === 'suspended') {
@@ -348,24 +368,37 @@ async function main() {
     }
   };
 
-  const startAudioOnce = async () => {
+  const startAudioAndGameOnce = async () => {
     if (hasStartedAudio) return;
     hasStartedAudio = true;
-    startOverlay?.classList.add('hidden');
-    startOverlay?.setAttribute('aria-hidden', 'true');
+    removeStartOverlayListeners();
+    hideStartOverlay();
     await resumeAudioContext();
     audioManager.playBGS('Forest Day/Forest Day.ogg');
   };
 
+  const handleStartOverlayClick = () => {
+    startAudioAndGameOnce();
+  };
+
+  const handleStartOverlayKeydown = event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      startAudioAndGameOnce();
+    }
+  };
+
+  const removeStartOverlayListeners = () => {
+    if (!startOverlay) return;
+    startOverlay.removeEventListener('click', handleStartOverlayClick);
+    startOverlay.removeEventListener('keydown', handleStartOverlayKeydown);
+  };
+
   if (startOverlay) {
-    startOverlay.addEventListener('pointerdown', startAudioOnce, { once: true });
-    startOverlay.addEventListener('click', startAudioOnce, { once: true });
-    startOverlay.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        startAudioOnce();
-      }
-    });
+    startOverlay.setAttribute('aria-hidden', 'false');
+    startOverlay.tabIndex = 0;
+    startOverlay.addEventListener('click', handleStartOverlayClick);
+    startOverlay.addEventListener('keydown', handleStartOverlayKeydown);
   }
 
   const scene = new THREE.Scene();
