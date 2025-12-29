@@ -800,15 +800,22 @@ async function main() {
       }
     }
     mapFetchInFlight = true;
+    let geojson;
     try {
-      const geojson = await fetchOSMFeatures(location.lat, location.lon, MAP_RADIUS_METERS);
+      geojson = await fetchOSMFeatures(location.lat, location.lon, MAP_RADIUS_METERS);
+    } catch (error) {
+      console.warn('OSM fetch failed:', error);
+      mapFetchInFlight = false;
+      return;
+    }
+    try {
       const bounds = computeGeojsonBounds(geojson);
       mapRenderer.updateHighways(geojson, bounds);
       buildingsRenderer.updateBuildings(geojson, bounds);
       lastMapLocation = location;
       lastMapFetchAt = now;
     } catch (error) {
-      console.warn('OSM fetch failed:', error);
+      console.warn('OSM render failed:', error);
     } finally {
       mapFetchInFlight = false;
     }

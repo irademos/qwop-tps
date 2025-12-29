@@ -138,7 +138,6 @@ export function createMapRenderer({
       const geometry = new LineGeometry();
       const material = getLineMaterial(width);
       const line = new Line2(geometry, material);
-      line.computeLineDistances();
       line.userData.isWideLine = true;
       return line;
     }
@@ -173,16 +172,24 @@ export function createMapRenderer({
   }
 
   function updateLineGeometry(line, positions) {
+    if (!line?.geometry) return;
     if (line.userData.isWideLine) {
+      if (!line.geometry.setPositions) return;
       line.geometry.setPositions(positions);
-      line.computeLineDistances();
+      const positionCount = line.geometry?.attributes?.position?.count ?? 0;
+      if (positionCount > 0 && typeof line.computeLineDistances === "function") {
+        line.computeLineDistances();
+      }
     } else {
+      if (!line.geometry.setFromPoints) return;
       const points = [];
       for (let i = 0; i < positions.length; i += 3) {
         points.push(new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]));
       }
       line.geometry.setFromPoints(points);
-      line.geometry.computeBoundingSphere();
+      if (line.geometry?.attributes?.position?.count > 0) {
+        line.geometry.computeBoundingSphere();
+      }
     }
   }
 
@@ -217,7 +224,9 @@ export function createMapRenderer({
       const positions = [];
       for (const coord of line.coords) {
         if (!coord || coord.length < 2) continue;
-        const local = toLocalMeters(coord, bounds, lonScale);
+        const [lon, lat] = coord;
+        if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+        const local = toLocalMeters([lon, lat], bounds, lonScale);
         positions.push(local.x, elevation, local.z);
       }
       if (positions.length < 6) continue;
@@ -226,6 +235,10 @@ export function createMapRenderer({
       activeIndex += 1;
     }
 
+    if (activeIndex === 0) {
+      clearUnused(0);
+      return;
+    }
     clearUnused(activeIndex);
   }
 
