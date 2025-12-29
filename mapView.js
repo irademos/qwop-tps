@@ -17,7 +17,7 @@ const state = {
   previousCamera: null,
   hiddenObjects: [],
   transition: null,
-  mapUp: new THREE.Vector3(0, 0, 1),
+  mapUp: new THREE.Vector3(0,0,-1),
   tempObject: new THREE.Object3D(),
   tempPos: new THREE.Vector3(),
   tempQuat: new THREE.Quaternion(),
@@ -77,21 +77,29 @@ function ensurePlayerIcon() {
 
 function getMapPose() {
   if (!state.player) return null;
-  state.tempPos.set(
-    state.player.position.x,
-    state.player.position.y + state.mapZoomHeight,
-    state.player.position.z
-  );
+
+  const x = state.player.position.x;
+  const z = state.player.position.z;
+  const y = state.player.position.y + state.mapZoomHeight;
+
+  state.tempPos.set(x, y, z);
+
+  // Look straight down
   state.tempObject.position.copy(state.tempPos);
-  state.tempObject.up.copy(state.mapUp);
-  state.tempObject.lookAt(state.player.position);
+  state.tempObject.up.set(0, 0, 1);      // choose (0,0,1) or (0,0,-1) for north-up
+  state.tempObject.lookAt(x, state.player.position.y, z);
+
+  // Force "down" direction (avoid roll)
+  state.tempObject.rotation.x = -Math.PI / 2; // straight down
+  // Optional: if you want north-up, add a yaw here:
+  // state.tempObject.rotation.z = 0; // keep stable
+
   state.tempObject.updateMatrixWorld(true);
   state.tempQuat.copy(state.tempObject.quaternion);
-  return {
-    position: state.tempPos,
-    quaternion: state.tempQuat
-  };
+
+  return { position: state.tempPos, quaternion: state.tempQuat };
 }
+
 
 function startTransition(mode) {
   const from = {
