@@ -1,7 +1,13 @@
-const DEFAULT_OPTIONS = {
+const INITIAL_FIX_OPTIONS = {
+  enableHighAccuracy: false,
+  maximumAge: 60000,
+  timeout: 15000
+};
+
+const WATCH_OPTIONS = {
   enableHighAccuracy: true,
-  maximumAge: 0,
-  timeout: 10000
+  maximumAge: 5000,
+  timeout: 20000
 };
 
 const STATUS_STYLES = {
@@ -21,6 +27,17 @@ const STATUS_STYLES = {
     'max-width: 90vw',
     'text-align: center',
     'display: none'
+  ].join(';'),
+  button: [
+    'margin-top: 6px',
+    'padding: 6px 10px',
+    'font-family: "Press Start 2P", monospace',
+    'font-size: 9px',
+    'background: #1f8bff',
+    'color: #fff',
+    'border: none',
+    'border-radius: 6px',
+    'cursor: pointer'
   ].join(';')
 };
 
@@ -28,16 +45,31 @@ function createStatusElement() {
   const element = document.createElement('div');
   element.id = 'location-status';
   element.setAttribute('style', STATUS_STYLES.container);
+
+  const statusLine = document.createElement('div');
+  const accuracyLine = document.createElement('div');
+  const retryButton = document.createElement('button');
+  retryButton.type = 'button';
+  retryButton.textContent = 'Retry';
+  retryButton.setAttribute('style', STATUS_STYLES.button);
+
+  element.appendChild(statusLine);
+  element.appendChild(accuracyLine);
+  element.appendChild(retryButton);
   document.body.appendChild(element);
 
   return {
-    show(message) {
-      element.textContent = message;
+    setStatus({ state, message, accuracy }) {
+      statusLine.textContent = `Status: ${state}${message ? ` (${message})` : ''}`;
+      if (typeof accuracy === 'number') {
+        accuracyLine.textContent = `Accuracy: ${Math.round(accuracy)}m`;
+      } else {
+        accuracyLine.textContent = 'Accuracy: --';
+      }
       element.style.display = 'block';
     },
-    clear() {
-      element.textContent = '';
-      element.style.display = 'none';
+    onRetry(handler) {
+      retryButton.addEventListener('click', handler);
     },
     element
   };
@@ -49,7 +81,7 @@ function getErrorMessage(error) {
   }
   switch (error.code) {
     case error.PERMISSION_DENIED:
-      return 'Location permission denied. Enable it in your browser settings.';
+      return 'Enable Location in browser settings and reload.';
     case error.POSITION_UNAVAILABLE:
       return 'Location unavailable. Check your signal and try again.';
     case error.TIMEOUT:
@@ -62,14 +94,16 @@ function getErrorMessage(error) {
 export function createLocationTracker({
   onUpdate,
   onError,
-  throttleMs = 1000,
-  options = DEFAULT_OPTIONS
+  throttleMs = 1000
 } = {}) {
   let watchId = null;
   let lastEmit = 0;
   let lastUpdate = null;
-  let requestedPermission = false;
+  let retryCount = 0;
+  let retryTimer = null;
   const status = createStatusElement();
+  const maxRetries = 3;
+  const retryDelayMs = 2000;
 
   const emitUpdate = (position) => {
     const now = performance.now();
@@ -85,38 +119,88 @@ export function createLocationTracker({
       speed: coords.speed,
       timestamp
     };
-    status.clear();
+    status.setStatus({ state: 'found', accuracy: coords.accuracy });
     onUpdate?.(lastUpdate);
   };
 
-  const handleError = (error) => {
-    const message = getErrorMessage(error);
-    status.show(message);
-    onError?.(error, message);
-  };
-
-  const requestPermission = () => {
-    if (requestedPermission) return;
-    requestedPermission = true;
-    navigator.geolocation.getCurrentPosition(emitUpdate, handleError, options);
-  };
-
-  const start = () => {
-    if (!navigator.geolocation) {
-      status.show('Geolocation is not supported in this browser.');
-      return false;
-    }
-    requestPermission();
-    if (watchId !== null) return true;
-    watchId = navigator.geolocation.watchPosition(emitUpdate, handleError, options);
-    return true;
-  };
-
-  const stop = () => {
+  const stopWatch = () => {
     if (watchId === null) return;
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
   };
+
+  const clearRetryTimer = () => {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  };
+
+  const scheduleRetry = () => {
+    if (retryCount >= maxRetries) return;
+    retryCount += 1;
+    clearRetryTimer();
+    retryTimer = setTimeout(() => {
+      getInitialFix();
+    }, retryDelayMs);
+  };
+
+  const handleInitialError = (error) => {
+    const message = getErrorMessage(error);
+    status.setStatus({ state: 'error', message, accuracy: lastUpdate?.accuracyMeters });
+    if (error?.code === error.PERMISSION_DENIED) {
+      onError?.(error, message);
+      return;
+    }
+    if (error?.code === error.TIMEOUT || error?.code === error.POSITION_UNAVAILABLE) {
+      scheduleRetry();
+    }
+    onError?.(error, message);
+  };
+
+  const startWatch = () => {
+    if (watchId !== null) return;
+    watchId = navigator.geolocation.watchPosition(emitUpdate, handleInitialError, WATCH_OPTIONS);
+  };
+
+  const handleInitialSuccess = (position) => {
+    retryCount = 0;
+    clearRetryTimer();
+    emitUpdate(position);
+    startWatch();
+  };
+
+  const getInitialFix = () => {
+    status.setStatus({ state: 'requesting', accuracy: lastUpdate?.accuracyMeters });
+    navigator.geolocation.getCurrentPosition(
+      handleInitialSuccess,
+      handleInitialError,
+      INITIAL_FIX_OPTIONS
+    );
+  };
+
+  const start = () => {
+    if (!navigator.geolocation) {
+      status.setStatus({ state: 'error', message: 'Geolocation is not supported in this browser.' });
+      return false;
+    }
+    getInitialFix();
+    return true;
+  };
+
+  const stop = () => {
+    clearRetryTimer();
+    stopWatch();
+  };
+
+  status.onRetry(() => {
+    retryCount = 0;
+    clearRetryTimer();
+    stopWatch();
+    if (navigator.geolocation) {
+      getInitialFix();
+    }
+  });
 
   return {
     start,
