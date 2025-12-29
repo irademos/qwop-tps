@@ -334,6 +334,39 @@ async function main() {
     }
   };
   const audioManager = new AudioManager();
+  const startOverlay = document.getElementById('start-overlay');
+  let hasStartedAudio = false;
+
+  const resumeAudioContext = async () => {
+    const context = THREE.AudioContext?.getContext?.();
+    if (context?.state === 'suspended') {
+      try {
+        await context.resume();
+      } catch (err) {
+        console.warn('AudioContext resume failed', err);
+      }
+    }
+  };
+
+  const startAudioOnce = async () => {
+    if (hasStartedAudio) return;
+    hasStartedAudio = true;
+    startOverlay?.classList.add('hidden');
+    startOverlay?.setAttribute('aria-hidden', 'true');
+    await resumeAudioContext();
+    audioManager.playBGS('Forest Day/Forest Day.ogg');
+  };
+
+  if (startOverlay) {
+    startOverlay.addEventListener('pointerdown', startAudioOnce, { once: true });
+    startOverlay.addEventListener('click', startAudioOnce, { once: true });
+    startOverlay.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        startAudioOnce();
+      }
+    });
+  }
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87CEEB);
@@ -645,7 +678,6 @@ async function main() {
   scene.add(playerModel);
   document.body.appendChild(player.nameLabel);
   window.playerModel = playerModel;
-  audioManager.playBGS('Forest Day/Forest Day.ogg');
 
   window.localHealth = 100;
   window.monsterHealth = 100;
