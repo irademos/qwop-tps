@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { BufferGeometryUtils } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+// import { BufferGeometryUtils } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const DEFAULT_HEIGHT = 10;
@@ -212,7 +213,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     disposeGeometry(flatMesh);
 
     if (extrudedGeometries.length > 0) {
-      const merged = BufferGeometryUtils.mergeGeometries(extrudedGeometries, false);
+      const merged = mergeGeometries(extrudedGeometries, false);
       merged.computeBoundingSphere();
       extrudedMesh.geometry = merged;
       extrudedMesh.visible = true;
@@ -222,7 +223,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     }
 
     if (flatGeometries.length > 0) {
-      const merged = BufferGeometryUtils.mergeGeometries(flatGeometries, false);
+      const merged = mergeGeometries(flatGeometries, false);
       merged.computeBoundingSphere();
       flatMesh.geometry = merged;
       flatMesh.visible = true;
