@@ -24,6 +24,8 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { applyGlobalGravity } from "./gravity.js";
 import { getSpawnPosition } from './spawnUtils.js';
 import { createLocationTracker } from './location.js';
+import { fetchOSMFeatures } from './osmClient.js';
+import { createMapRenderer } from './mapRender.js';
 
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
 
@@ -432,6 +434,17 @@ async function main() {
   document.getElementById('game-container').appendChild(renderer.domElement);
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const mapRenderer = createMapRenderer({ scene, renderer });
+  window.mapRenderer = mapRenderer;
+
+  const handleResize = () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    mapRenderer.setResolution(window.innerWidth, window.innerHeight);
+  };
+  window.addEventListener('resize', handleResize);
+  handleResize();
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
@@ -684,9 +697,48 @@ async function main() {
   });
   window.playerControls = playerControls;
 
+  const MAP_RADIUS_METERS = 600;
+  const MAP_REFRESH_INTERVAL_MS = 30000;
+  const MAP_REFRESH_DISTANCE_METERS = 150;
+  let mapFetchInFlight = false;
+  let lastMapLocation = null;
+  let lastMapFetchAt = 0;
+
+  const metersPerDegreeLat = 111_132.92;
+  const metersPerDegreeLon = (lat) => 111_412.84 * Math.cos((lat * Math.PI) / 180);
+  const estimateDistanceMeters = (a, b) => {
+    const avgLat = (a.lat + b.lat) / 2;
+    const dx = (a.lon - b.lon) * metersPerDegreeLon(avgLat);
+    const dz = (a.lat - b.lat) * metersPerDegreeLat;
+    return Math.hypot(dx, dz);
+  };
+
+  const requestMapUpdate = async (location) => {
+    if (!location || mapFetchInFlight) return;
+    const now = performance.now();
+    if (lastMapLocation) {
+      const distance = estimateDistanceMeters(lastMapLocation, location);
+      if (distance < MAP_REFRESH_DISTANCE_METERS && now - lastMapFetchAt < MAP_REFRESH_INTERVAL_MS) {
+        return;
+      }
+    }
+    mapFetchInFlight = true;
+    try {
+      const geojson = await fetchOSMFeatures(location.lat, location.lon, MAP_RADIUS_METERS);
+      mapRenderer.updateHighways(geojson);
+      lastMapLocation = location;
+      lastMapFetchAt = now;
+    } catch (error) {
+      console.warn('OSM fetch failed:', error);
+    } finally {
+      mapFetchInFlight = false;
+    }
+  };
+
   const locationTracker = createLocationTracker({
     onUpdate: (location) => {
       window.latestLocation = location;
+      requestMapUpdate(location);
     },
     onError: (error, message) => {
       console.warn('Location error:', message, error);
