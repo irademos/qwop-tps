@@ -23,6 +23,7 @@ import { fetchOSMFeatures } from './osmClient.js';
 import { createMapRenderer } from './mapRender.js';
 import { createBuildingsRenderer } from './buildingsRender.js';
 import { createTileCache } from './tileCache.js';
+import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './settingsPanel.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './mapView.js';
 
@@ -666,6 +667,7 @@ async function main() {
   const TILE_SIZE_METERS = 300;
   const TILE_EVICT_RADIUS = 2;
   const TILE_FETCH_RADIUS_METERS = TILE_SIZE_METERS * Math.SQRT2 * 0.5;
+  const TILE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
   const tileCache = createTileCache({
     tileSizeMeters: TILE_SIZE_METERS,
     evictRadiusTiles: TILE_EVICT_RADIUS
@@ -792,6 +794,12 @@ async function main() {
     buildingsRenderer.updateBuildings(combined, bounds);
   };
 
+  window.clearTileCache = () => {
+    tileCache.cache.clear();
+    clearCache().catch((error) => console.warn('Failed to clear persistent tile cache:', error));
+    rebuildMapFromCache();
+  };
+
   const requestMapUpdate = async (location) => {
     if (!location) return;
     const localMeters = tileCache.getLocalMeters(location);
@@ -811,6 +819,19 @@ async function main() {
 
     if (tileCache.hasTile(tileKey) || mapFetchInFlight.has(tileKey)) {
       return;
+    }
+
+    const cachedTile = await getCachedTile(tileKey);
+    if (cachedTile?.geojson) {
+      tileCache.setTile(tile, {
+        geojson: cachedTile.geojson,
+        meshes: { highways: null, buildings: null },
+        fetchedAt: cachedTile.fetchedAt
+      });
+      rebuildMapFromCache();
+      if (Date.now() - cachedTile.fetchedAt < TILE_CACHE_MAX_AGE_MS) {
+        return;
+      }
     }
 
     const tileCenter = tileCache.getTileCenterLocation(tile);
@@ -836,6 +857,9 @@ async function main() {
         geojson,
         meshes: { highways: null, buildings: null },
         fetchedAt: Date.now()
+      });
+      setCachedTile(tileKey, geojson).catch((error) => {
+        console.warn('Failed to persist tile cache:', error);
       });
       rebuildMapFromCache();
     } catch (error) {
