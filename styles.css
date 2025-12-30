@@ -164,6 +164,59 @@ body {
   z-index: 100;
 }
 
+.map-controls {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1100;
+  pointer-events: auto;
+}
+
+.map-zoom-button {
+  display: none;
+}
+
+.map-controls.map-enabled .map-zoom-button {
+  display: inline-flex;
+}
+
+.map-control-button {
+  width: 56px;
+  height: 44px;
+  background-color: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+}
+
+.map-control-button:hover {
+  background-color: rgba(0, 0, 0, 0.7);
+  transform: translateY(-1px);
+}
+
+.map-control-button:active {
+  transform: translateY(0);
+}
+
+.map-toggle-button {
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.map-control-button.active {
+  background-color: rgba(79, 209, 255, 0.85);
+  color: #062637;
+  border-color: rgba(79, 209, 255, 0.9);
+}
+
 .player-name {
   position: absolute;
   font-size: 14px;
