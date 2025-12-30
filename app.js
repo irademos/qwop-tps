@@ -4,24 +4,19 @@ import { PlayerCharacter } from "./characters/PlayerCharacter.js";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { switchMonsterAnimation } from "./characters/MonsterCharacter.js";
 import { createOrcVoice } from "./orcVoice.js";
-import { createClouds, generateIsland, createMoon, MOON_RADIUS } from "./worldGeneration.js";
-import { initWaves, spawnOceanWave, updateWaves, getWaveForceAt, getTerrainHeight } from './water.js';
+import { createClouds } from "./worldGeneration.js";
+// import { getTerrainHeight } from './water.js';
+const getTerrainHeight = () => 0;
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls.js';
 import { getCookie, setCookie } from './utils.js';
 import { spawnProjectile, updateProjectiles } from './projectiles.js';
 import { updateMeleeAttacks } from './melee.js';
-import { LevelLoader } from './levelLoader.js';
 import { BreakManager } from './breakManager.js';
 import { initSpeechCommands } from './speechCommands.js';
-import { LevelBuilder } from './levelBuilderMode.js';
 import { AudioManager } from './audioManager.js';
-import { Spaceship } from './spaceship.js';
-import { Surfboard } from './surfboard.js';
-import { RowBoat } from './rowboat.js';
 import { IceGun } from './iceGun.js';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { applyGlobalGravity } from "./gravity.js";
 import { getSpawnPosition } from './spawnUtils.js';
 import { createLocationTracker } from './location.js';
 import { fetchOSMFeatures } from './osmClient.js';
@@ -216,27 +211,9 @@ async function main() {
       player.model.position.y = hasAuthoritativeY ? data.y : terrainY;
 
       player.model.rotation.y = data.rotation;
-      const moon = window.moon;
-      if (moon) {
-        const moonPos = moon.position;
-        const playerPos = player.model.position;
-        const dist = playerPos.distanceTo(moonPos);
-        if (dist < MOON_RADIUS * 2) {
-          const up = new THREE.Vector3().subVectors(playerPos, moonPos).normalize();
-          player.model.up.copy(up);
-          const forward = new THREE.Vector3(Math.sin(data.rotation), 0, Math.cos(data.rotation))
-            .projectOnPlane(up)
-            .normalize();
-          const target = playerPos.clone().add(forward);
-          player.model.lookAt(target);
-        } else {
-          player.model.up.set(0, 1, 0);
-          player.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), data.rotation);
-        }
-      } else {
-        player.model.up.set(0, 1, 0);
-        player.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), data.rotation);
-      }
+      
+      player.model.up.set(0, 1, 0);
+      player.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), data.rotation);
 
       // Sync animation state if provided
       const actions = player.model.userData.actions;
@@ -276,7 +253,7 @@ async function main() {
       return;
     }
 
-    if (data.type === 'spaceship' || data.type === 'monster') {
+    if (data.type === 'monster') {
       // Legacy messages handled by networked system; ignore to avoid conflicts.
       return;
     }
@@ -400,15 +377,9 @@ async function main() {
 
   createClouds(scene);
 
-  let spaceship;
-  let surfboard;
-  let rowBoat;
   let iceGun;
 
-  // Load additional level data (destructible props, etc.)
   const breakManager = new BreakManager(scene);
-  const levelLoader = new LevelLoader(scene, { breakManager });
-  // await levelLoader.loadManifest('/areas/demo/demo_area.json');
   // Expose to window for debugging
   window.breakManager = breakManager;
 
@@ -538,129 +509,7 @@ async function main() {
     );
   }
 
-  generateIsland(scene);
-  initWaves(scene);
   // Prime with an initial distant wave
-  spawnOceanWave();
-  createMoon(scene, rapierWorld, rbToMesh);
-
-  spaceship = new Spaceship(scene, rapierWorld, rbToMesh);
-  await spaceship.load();
-  window.spaceship = spaceship;
-  if (spaceship.mesh) {
-    spaceship.mesh.userData.hideInMapView = true;
-  }
-  registerNetworkedEntity('spaceship', {
-    getState: () => {
-      if (!spaceship?.body) return null;
-      const t = spaceship.body.translation();
-      const r = spaceship.body.rotation();
-      if (!t || !r) return null;
-      return {
-        position: [t.x, t.y, t.z],
-        rotation: [r.x, r.y, r.z, r.w],
-        thrusting: !!spaceship.thrusting
-      };
-    },
-    applyState: state => {
-      if (!state || !spaceship) return;
-      const [px, py, pz] = state.position || [];
-      const [rx, ry, rz, rw] = state.rotation || [];
-      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-        spaceship.mesh?.position.set(px, py, pz);
-        spaceship.body?.setTranslation({ x: px, y: py, z: pz }, true);
-      }
-      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
-        spaceship.mesh?.quaternion.set(rx, ry, rz, rw);
-        spaceship.body?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
-      }
-      if (typeof state.thrusting === 'boolean') {
-        spaceship.thrusting = state.thrusting;
-        if (spaceship.thrusterGroup) {
-          spaceship.thrusterGroup.visible = state.thrusting;
-        }
-      }
-    },
-    isLocallyControlled: () => spaceship?.occupant === playerControls
-  });
-
-  surfboard = new Surfboard(scene);
-  await surfboard.load();
-  window.surfboard = surfboard;
-  if (surfboard.mesh) {
-    surfboard.mesh.userData.hideInMapView = true;
-  }
-  registerNetworkedEntity('surfboard', {
-    getState: () => {
-      if (!surfboard?.mesh) return null;
-      const pos = surfboard.mesh.position;
-      const q = surfboard.mesh.quaternion;
-      return {
-        position: [pos.x, pos.y, pos.z],
-        rotation: [q.x, q.y, q.z, q.w],
-        standing: !!surfboard.standing
-      };
-    },
-    applyState: state => {
-      if (!surfboard?.mesh || !state) return;
-      const [px, py, pz] = state.position || [];
-      const [rx, ry, rz, rw] = state.rotation || [];
-      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-        surfboard.mesh.position.set(px, py, pz);
-      }
-      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
-        surfboard.mesh.quaternion.set(rx, ry, rz, rw);
-      }
-      if (typeof state.standing === 'boolean') {
-        surfboard.standing = state.standing;
-      }
-      if (surfboard.mesh) {
-        surfboard.mesh.userData.lastNetworkUpdate = performance.now();
-      }
-    },
-    isLocallyControlled: () => surfboard?.occupant === playerControls
-  });
-
-  rowBoat = new RowBoat(scene);
-  await rowBoat.load();
-  window.rowBoat = rowBoat;
-  if (rowBoat.mesh) {
-    rowBoat.mesh.userData.hideInMapView = true;
-  }
-  registerNetworkedEntity('rowboat', {
-    getState: () => {
-      if (!rowBoat?.mesh) return null;
-      const pos = rowBoat.mesh.position;
-      return {
-        position: [pos.x, pos.y, pos.z],
-        rotationY: rowBoat.mesh.rotation.y,
-        velocity: [rowBoat.velocity.x, rowBoat.velocity.y, rowBoat.velocity.z],
-        angularVelocity: rowBoat.angularVelocity,
-        oarState: rowBoat.oarState
-      };
-    },
-    applyState: state => {
-      if (!rowBoat?.mesh || !state) return;
-      const [px, py, pz] = state.position || [];
-      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-        rowBoat.mesh.position.set(px, py, pz);
-      }
-      if (Number.isFinite(state.rotationY)) {
-        rowBoat.mesh.rotation.y = state.rotationY;
-      }
-      const [vx, vy, vz] = state.velocity || [];
-      if (Number.isFinite(vx) && Number.isFinite(vy) && Number.isFinite(vz)) {
-        rowBoat.velocity.set(vx, vy, vz);
-      }
-      if (Number.isFinite(state.angularVelocity)) {
-        rowBoat.angularVelocity = state.angularVelocity;
-      }
-      if (state.oarState && rowBoat.oarState !== state.oarState) {
-        rowBoat.setOarState(state.oarState, { immediate: true });
-      }
-    },
-    isLocallyControlled: () => rowBoat?.occupant === playerControls
-  });
 
   iceGun = new IceGun(scene);
   await iceGun.load();
@@ -964,26 +813,6 @@ async function main() {
 
   spawnAmmoPickup(new THREE.Vector3(-4, 0, 4));
   spawnAmmoPickup(new THREE.Vector3(2, 0, -3));
-
-  const levelBuilder = new LevelBuilder({ scene, camera, renderer });
-
-  // Wave spawn timing (less frequent) and constant push during pass
-  let nextWaveIn = 10 + Math.random() * 6; // seconds
-  function scheduleNextWave() {
-    nextWaveIn = 10 + Math.random() * 6; // 10–16s between waves
-  }
-
-  function applyWaveForces() {
-    if (playerControls.body && playerControls.isInWater) {
-      const t = playerControls.body.translation();
-      const f = getWaveForceAt(t.x, t.z);
-      if (f.x !== 0 || f.z !== 0) {
-        playerControls.body.applyImpulse({ x: f.x, y: 0, z: f.z }, true);
-      }
-    }
-
-  }
-
 
   // --- RAPIER HELPERS ---
   function spawnBlock({
@@ -1344,12 +1173,6 @@ async function main() {
     };
   })();
 
-  const builderBtn = document.getElementById('level-builder-button');
-  builderBtn?.addEventListener('click', () => {
-    levelBuilder.toggle();
-    playerControls.enabled = !levelBuilder.active;
-  });
-
   function animate() {
     requestAnimationFrame(animate);
 
@@ -1358,8 +1181,7 @@ async function main() {
     const frameDelta = clock.getDelta();
     physicsAccumulator += frameDelta;
     while (physicsAccumulator >= FIXED_DT) {
-      applyGlobalGravity(rapierWorld, window.moon);
-      applyWaveForces();
+      // applyGlobalGravity(rapierWorld, window.moon);
       rapierWorld.step();
       physicsAccumulator -= FIXED_DT;
     }
@@ -1425,9 +1247,7 @@ async function main() {
       }
     }
 
-    surfboard.update();
     iceGun?.update();
-    spaceship?.update();
 
     const now = performance.now();
     const localStates = collectLocalControlStates();
@@ -1467,19 +1287,10 @@ async function main() {
     }
 
     const mixerDelta = mixerClock.getDelta();
-    // Update visible waves and spawn new ones less frequently
-    updateWaves(mixerDelta);
-    nextWaveIn -= mixerDelta;
-    if (nextWaveIn <= 0) {
-      spawnOceanWave();
-      scheduleNextWave();
-    }
 
     Object.values(otherPlayers).forEach(p => {
       p.model.userData.mixer?.update(mixerDelta);
     });
-
-    rowBoat.update();
 
     multiplayer.send({
       type: "presence",
@@ -1535,8 +1346,6 @@ async function main() {
     updateMeleeAttacks({ playerModel, otherPlayers, monster, audioManager });
 
     breakManager.update();
-
-    levelBuilder.update();
 
     renderer.render(scene, camera);
   }

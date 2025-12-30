@@ -80,14 +80,46 @@ export function createLocationTracker({
   const status = createStatusElement();
   const maxRetries = 3;
   const retryDelayMs = 2000;
+  const GOOD_ACCURACY_M = 50;          // treat <= 50m as "good"
+  const MAX_WORSE_MULTIPLIER = 4;      // ignore fixes that are >4x worse than the best
+  const MAX_WORSE_ABS_M = 500;         // ...or worse than 500m (absolute guard)
+  const HOLD_GOOD_MS = 240_000;         // how long we "trust" the best fix before relaxing
+
+  let bestAccepted = null;             // best fix we’ve accepted so far
+  let bestAcceptedAt = 0;
+
+  const shouldAccept = (next) => {
+    const acc = next.accuracyMeters;
+
+    // If we've never accepted anything, accept whatever we get.
+    if (!bestAccepted) return true;
+
+    const now = performance.now();
+
+    // If our best fix is old, relax and accept (helps recovery if GPS goes weird).
+    if (now - bestAcceptedAt > HOLD_GOOD_MS) return true;
+
+    // Always accept if it’s good accuracy (locks back onto GPS quickly).
+    if (typeof acc === 'number' && acc <= GOOD_ACCURACY_M) return true;
+
+    // If we already have a good fix, reject big accuracy regressions.
+    const haveGood = bestAccepted.accuracyMeters <= GOOD_ACCURACY_M;
+    if (haveGood) {
+      const tooWorseAbs = acc > MAX_WORSE_ABS_M;
+      const tooWorseRel = acc > bestAccepted.accuracyMeters * MAX_WORSE_MULTIPLIER;
+      if (tooWorseAbs || tooWorseRel) return false;
+    }
+
+    // Otherwise accept if it's not significantly worse than current best.
+    return acc <= Math.max(bestAccepted.accuracyMeters * MAX_WORSE_MULTIPLIER, MAX_WORSE_ABS_M);
+  };
 
   const emitUpdate = (position) => {
     const now = performance.now();
     if (now - lastEmit < throttleMs) return;
 
-    lastEmit = now;
     const { coords, timestamp } = position;
-    lastUpdate = {
+    const nextUpdate = {
       lat: coords.latitude,
       lon: coords.longitude,
       accuracyMeters: coords.accuracy,
@@ -95,10 +127,27 @@ export function createLocationTracker({
       speed: coords.speed,
       timestamp
     };
+
+    // Always update banner/status, but only publish “accepted” fixes.
     status.setStatus({ state: 'found', accuracy: coords.accuracy });
     onStatus?.({ state: 'found', accuracy: coords.accuracy, timestamp });
+
+    if (!shouldAccept(nextUpdate)) {
+      return; // ignore this flip-back
+    }
+
+    lastEmit = now;
+    lastUpdate = nextUpdate;
+
+    // Track best accepted fix (by accuracy)
+    if (!bestAccepted || nextUpdate.accuracyMeters < bestAccepted.accuracyMeters) {
+      bestAccepted = nextUpdate;
+    }
+    bestAcceptedAt = now;
+
     onUpdate?.(lastUpdate);
   };
+
 
   const stopWatch = () => {
     if (watchId === null) return;

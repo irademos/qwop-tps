@@ -511,6 +511,17 @@ body {
   gap: 12px;
 }
 
+.settings-tabpanel {
+  display: none;
+}
+.settings-tabpanel[hidden] {
+  display: none;
+}
+.settings-tabpanel:not([hidden]) {
+  display: flex;
+}
+
+
 .settings-field {
   display: flex;
   flex-direction: column;

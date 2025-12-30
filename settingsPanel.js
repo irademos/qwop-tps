@@ -660,6 +660,8 @@ export function initSettingsPanel({ appState, multiplayer, location, player } = 
   setActiveTab(storedTab && elements.tabs[storedTab] ? storedTab : 'character');
 
   bindEvents();
+  const savedTab = localStorage.getItem(TAB_KEY) || 'character';
+  setActiveTab(savedTab);
   loadPreviewModel(context.appState?.getCharacterModel?.());
   updateUI();
 }
