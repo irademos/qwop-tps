@@ -18,7 +18,7 @@ import { AudioManager } from './audioManager.js';
 import { IceGun } from './iceGun.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
-import { createLocationTracker } from './location.js';
+import { createLocationProvider } from './location.js';
 import { fetchOSMFeatures } from './osmClient.js';
 import { createMapRenderer } from './mapRender.js';
 import { createBuildingsRenderer } from './buildingsRender.js';
@@ -878,6 +878,7 @@ async function main() {
     accuracyMeters: null,
     lat: null,
     lon: null,
+    source: null,
     originLat: worldOrigin?.lat ?? null,
     originLon: worldOrigin?.lon ?? null,
     playerX: null,
@@ -895,7 +896,7 @@ async function main() {
     lastOsmFetchAt: null
   };
 
-  const locationTracker = createLocationTracker({
+  const locationProvider = createLocationProvider({
     onUpdate: (location) => {
       window.latestLocation = location;
       if (!worldOrigin && Number.isFinite(location.accuracyMeters) && location.accuracyMeters <= 50) {
@@ -906,6 +907,7 @@ async function main() {
       locationState.lat = location.lat;
       locationState.lon = location.lon;
       locationState.accuracyMeters = location.accuracyMeters;
+      locationState.source = location.source || null;
       locationState.originLat = worldOrigin?.lat ?? null;
       locationState.originLon = worldOrigin?.lon ?? null;
       locationState.heading = location.heading;
@@ -937,20 +939,23 @@ async function main() {
       locationState.state = status.state;
       locationState.message = status.message || null;
       locationState.accuracyMeters = status.accuracy ?? locationState.accuracyMeters;
+      if (status.source) {
+        locationState.source = status.source;
+      }
       if (status.state === 'requesting' || status.state === 'found') {
         locationState.permissionDenied = false;
       }
     }
   });
-  locationTracker.start();
+  locationProvider.start();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-      locationTracker.stop();
+      locationProvider.stop();
     } else {
-      locationTracker.start();
+      locationProvider.start();
     }
   });
-  window.addEventListener('beforeunload', () => locationTracker.stop());
+  window.addEventListener('beforeunload', () => locationProvider.stop());
 
   spawnAmmoPickup(new THREE.Vector3(-4, 0, 4));
   spawnAmmoPickup(new THREE.Vector3(2, 0, -3));
@@ -1292,7 +1297,12 @@ async function main() {
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
-    retry: () => locationTracker.retry()
+    retry: () => locationProvider.retry(),
+    getDebugState: () => locationProvider.getDebugState(),
+    setDebugEnabled: (enabled) => locationProvider.setDebugEnabled(enabled),
+    setDebugLocation: (coords) => locationProvider.setDebugLocation(coords),
+    setDebugAccuracy: (accuracyMeters) => locationProvider.setDebugAccuracy(accuracyMeters),
+    stepDebugLocation: (delta) => locationProvider.stepDebugLocation(delta)
   };
 
   initSettingsPanel({
