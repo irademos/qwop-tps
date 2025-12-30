@@ -40,9 +40,26 @@ let physicsAccumulator = 0;
 const FIXED_DT = 1 / 60;
 const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
 const METERS_PER_DEGREE_LAT = 111_132.92;
+const PLAYER_VISIBILITY_RADIUS_M = 200;
+const PRESENCE_STALE_MS = 5000;
+const PRESENCE_SEND_MS = 150;
+const PRESENCE_SWEEP_MS = 250;
+const REMOTE_LERP_ALPHA = 0.15;
+const REMOTE_TELEPORT_THRESHOLD_M = 25;
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
+}
+
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return null;
+  const toRad = value => (value * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 async function main() {
@@ -71,6 +88,32 @@ async function main() {
 
   const otherPlayers = {};
   window.otherPlayers = otherPlayers;
+  const remotePresenceMeta = {};
+  let lastPresenceSend = 0;
+  let lastPresenceSweep = 0;
+
+  const logNet = (...args) => {
+    if (window.DEBUG_NET) {
+      console.log('[net]', ...args);
+    }
+  };
+
+  const removeRemotePlayer = (remoteId, reason = 'unknown') => {
+    const existing = otherPlayers[remoteId];
+    if (existing) {
+      if (existing.model && existing.model.parent) {
+        existing.model.parent.remove(existing.model);
+      }
+      if (existing.nameLabel && existing.nameLabel.parentNode) {
+        existing.nameLabel.parentNode.removeChild(existing.nameLabel);
+      }
+      delete otherPlayers[remoteId];
+    }
+    if (remotePresenceMeta[remoteId]) {
+      delete remotePresenceMeta[remoteId];
+    }
+    logNet('despawn', remoteId, reason);
+  };
 
   function cloneState(state) {
     return state ? JSON.parse(JSON.stringify(state)) : state;
@@ -176,6 +219,39 @@ async function main() {
     if (data.type === 'presence') {
       const remoteId = data.id || peerId;
       const desiredModel = data.model || DEFAULT_CHARACTER_MODEL;
+      const now = performance.now();
+      if (!remotePresenceMeta[remoteId]) {
+        remotePresenceMeta[remoteId] = { lastSeenMs: now, lastLat: null, lastLon: null };
+      } else {
+        remotePresenceMeta[remoteId].lastSeenMs = now;
+      }
+
+      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
+        remotePresenceMeta[remoteId].lastLat = data.lat;
+        remotePresenceMeta[remoteId].lastLon = data.lon;
+      }
+
+      const localFix = getLatestLocationFix();
+      const mapOrigin = getLocalMapOrigin();
+      if (!localFix || !mapOrigin) {
+        const existing = otherPlayers[remoteId];
+        if (existing?.model) {
+          existing.model.visible = false;
+        }
+        if (existing?.nameLabel) {
+          existing.nameLabel.style.display = 'none';
+        }
+        return;
+      }
+
+      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
+        const dist = distanceMeters(localFix.lat, localFix.lon, data.lat, data.lon);
+        remotePresenceMeta[remoteId].lastDistance = dist;
+        if (dist != null && dist > PLAYER_VISIBILITY_RADIUS_M) {
+          removeRemotePlayer(remoteId, 'out-of-range');
+          return;
+        }
+      }
 
       const existing = otherPlayers[remoteId];
       if (!existing || existing.modelPath !== desiredModel) {
@@ -197,8 +273,12 @@ async function main() {
           nameLabel: other.nameLabel,
           name: data.name,
           health: existing?.health ?? 100,
-          modelPath: desiredModel
+          modelPath: desiredModel,
+          targetPos: new THREE.Vector3(),
+          targetQuat: new THREE.Quaternion(),
+          targetRotY: 0
         };
+        logNet('spawn', remoteId, data.name);
       }
 
       const player = otherPlayers[remoteId];
@@ -207,21 +287,48 @@ async function main() {
       if (player.nameLabel) {
         player.nameLabel.innerText = data.name;
       }
-      // Update remote player position and rotation
-      player.model.position.x = data.x;
-      player.model.position.z = data.z;
 
-      // Adjust vertical placement against local terrain height
-      const terrainY = (Number.isFinite(data.x) && Number.isFinite(data.z))
-        ? getTerrainHeight(data.x, data.z)
-        : 0;
+      let targetX = null;
+      let targetZ = null;
+      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
+        const local = geoToLocalMeters(data.lat, data.lon, mapOrigin);
+        if (local) {
+          targetX = local.x;
+          targetZ = local.z;
+        }
+      } else if (Number.isFinite(data.x) && Number.isFinite(data.z)) {
+        targetX = data.x;
+        targetZ = data.z;
+      }
+
+      if (targetX == null || targetZ == null) {
+        return;
+      }
+
+      const terrainY = getTerrainHeight(targetX, targetZ);
       const hasAuthoritativeY = Number.isFinite(data.y);
-      player.model.position.y = hasAuthoritativeY ? data.y : terrainY;
+      const targetY = hasAuthoritativeY ? data.y : terrainY;
 
-      player.model.rotation.y = data.rotation;
-      
-      player.model.up.set(0, 1, 0);
-      player.model.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), data.rotation);
+      if (!player.targetPos) {
+        player.targetPos = new THREE.Vector3(targetX, targetY, targetZ);
+      } else {
+        player.targetPos.set(targetX, targetY, targetZ);
+      }
+
+      const targetRotY = Number.isFinite(data.rotation)
+        ? data.rotation
+        : Number.isFinite(data.heading)
+          ? THREE.MathUtils.degToRad(data.heading)
+          : player.model.rotation.y;
+      player.targetRotY = targetRotY;
+      if (!player.targetQuat) {
+        player.targetQuat = new THREE.Quaternion();
+      }
+      player.targetQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetRotY);
+
+      if (!player.model.visible) {
+        player.model.visible = true;
+      }
 
       // Sync animation state if provided
       const actions = player.model.userData.actions;
@@ -675,6 +782,7 @@ async function main() {
   const mapFetchInFlight = new Set();
   let activeTileKey = null;
   let worldOrigin = null;
+  let currentRenderOrigin = null;
 
   const loadWorldOrigin = () => {
     try {
@@ -694,12 +802,14 @@ async function main() {
     worldOrigin = { lat: origin.lat, lon: origin.lon };
     localStorage.setItem(WORLD_ORIGIN_STORAGE_KEY, JSON.stringify(worldOrigin));
     tileCache.setOrigin(worldOrigin);
+    currentRenderOrigin = { centerLat: origin.lat, centerLon: origin.lon };
   };
 
   const resetWorldOrigin = () => {
     worldOrigin = null;
     localStorage.removeItem(WORLD_ORIGIN_STORAGE_KEY);
     tileCache.setOrigin(null);
+    currentRenderOrigin = null;
   };
 
   const computePlayerMeters = (location) => {
@@ -710,6 +820,30 @@ async function main() {
       x: (location.lon - worldOrigin.lon) * lonScale,
       z: -(location.lat - worldOrigin.lat) * METERS_PER_DEGREE_LAT
     };
+  };
+
+  const getLocalMapOrigin = () => {
+    if (worldOrigin) {
+      return { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
+    }
+    return currentRenderOrigin;
+  };
+
+  const geoToLocalMeters = (lat, lon, origin) => {
+    if (!origin || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const lonScale = metersPerDegreeLon(origin.centerLat);
+    return {
+      x: (lon - origin.centerLon) * lonScale,
+      z: -(lat - origin.centerLat) * METERS_PER_DEGREE_LAT
+    };
+  };
+
+  const getLatestLocationFix = () => {
+    const latest = window.latestLocation;
+    if (!latest || !Number.isFinite(latest.lat) || !Number.isFinite(latest.lon)) {
+      return null;
+    }
+    return latest;
   };
 
   const applyPlayerMeters = (playerMeters) => {
@@ -790,6 +924,9 @@ async function main() {
       }
     }
     const bounds = getRenderOrigin(combined);
+    if (bounds) {
+      currentRenderOrigin = bounds;
+    }
     mapRenderer.updateHighways(combined, bounds);
     buildingsRenderer.updateBuildings(combined, bounds);
   };
@@ -1255,10 +1392,17 @@ async function main() {
     getConnectedPlayers: () => {
       const players = [];
       const playerPos = playerModel?.position;
+      const localFix = getLatestLocationFix();
       const connections = multiplayer?.connections || {};
       Object.keys(connections).forEach((id) => {
         const other = otherPlayers[id];
-        const distance = other?.model && playerPos ? playerPos.distanceTo(other.model.position) : null;
+        let distance = remotePresenceMeta[id]?.lastDistance ?? null;
+        if (distance == null && localFix && Number.isFinite(remotePresenceMeta[id]?.lastLat) && Number.isFinite(remotePresenceMeta[id]?.lastLon)) {
+          distance = distanceMeters(localFix.lat, localFix.lon, remotePresenceMeta[id].lastLat, remotePresenceMeta[id].lastLon);
+        }
+        if (distance == null && other?.model && playerPos) {
+          distance = playerPos.distanceTo(other.model.position);
+        }
         players.push({
           id,
           name: other?.name || `Player ${id.slice(0, 4)}`,
@@ -1452,17 +1596,84 @@ async function main() {
       p.model.userData.mixer?.update(mixerDelta);
     });
 
-    multiplayer.send({
-      type: "presence",
-      id: multiplayer.getId(),
-      name: playerName,
-      model: characterModel,
-      x: playerModel.position.x,
-      y: playerModel.position.y,
-      z: playerModel.position.z,
-      rotation: playerModel.rotation.y,
-      action: playerModel.userData.currentAction
+    if (now - lastPresenceSweep >= PRESENCE_SWEEP_MS) {
+      lastPresenceSweep = now;
+      const localFix = getLatestLocationFix();
+      const mapOrigin = getLocalMapOrigin();
+      Object.entries(remotePresenceMeta).forEach(([remoteId, meta]) => {
+        if (!meta) return;
+        if (now - meta.lastSeenMs > PRESENCE_STALE_MS) {
+          removeRemotePlayer(remoteId, 'stale');
+          return;
+        }
+        const player = otherPlayers[remoteId];
+        if (!localFix || !mapOrigin) {
+          if (player?.model) {
+            player.model.visible = false;
+          }
+          if (player?.nameLabel) {
+            player.nameLabel.style.display = 'none';
+          }
+          return;
+        }
+        let dist = null;
+        if (Number.isFinite(meta.lastLat) && Number.isFinite(meta.lastLon)) {
+          dist = distanceMeters(localFix.lat, localFix.lon, meta.lastLat, meta.lastLon);
+        } else if (player?.model && playerModel) {
+          dist = playerModel.position.distanceTo(player.model.position);
+        }
+        meta.lastDistance = dist;
+        logNet('distance', remoteId, dist);
+        if (dist != null && dist > PLAYER_VISIBILITY_RADIUS_M) {
+          removeRemotePlayer(remoteId, 'out-of-range');
+        } else if (player?.model) {
+          player.model.visible = true;
+        }
+      });
+    }
+
+    Object.values(otherPlayers).forEach(player => {
+      if (!player?.targetPos || !player?.targetQuat) return;
+      const currentPos = player.model.position;
+      const distance = currentPos.distanceTo(player.targetPos);
+      if (distance > REMOTE_TELEPORT_THRESHOLD_M) {
+        currentPos.copy(player.targetPos);
+      } else {
+        currentPos.lerp(player.targetPos, REMOTE_LERP_ALPHA);
+      }
+      player.model.quaternion.slerp(player.targetQuat, REMOTE_LERP_ALPHA);
     });
+
+    if (now - lastPresenceSend >= PRESENCE_SEND_MS) {
+      const localFix = getLatestLocationFix();
+      const mapOrigin = getLocalMapOrigin();
+      const payload = {
+        type: "presence",
+        id: multiplayer.getId(),
+        name: playerName,
+        model: characterModel,
+        x: playerModel.position.x,
+        y: playerModel.position.y,
+        z: playerModel.position.z,
+        rotation: playerModel.rotation.y,
+        action: playerModel.userData.currentAction
+      };
+      if (localFix) {
+        payload.lat = localFix.lat;
+        payload.lon = localFix.lon;
+        if (Number.isFinite(localFix.heading)) {
+          payload.heading = localFix.heading;
+        }
+      }
+      if (mapOrigin) {
+        payload.worldAnchor = {
+          centerLat: mapOrigin.centerLat,
+          centerLon: mapOrigin.centerLon
+        };
+      }
+      multiplayer.send(payload);
+      lastPresenceSend = now;
+    }
 
     Object.entries(multiplayer.voiceAudios || {}).forEach(([peerId, { audio }]) => {
       const peerModel = otherPlayers[peerId]?.model;
@@ -1475,6 +1686,10 @@ async function main() {
     });
 
     Object.entries(otherPlayers).forEach(([id, { model, nameLabel }]) => {
+      if (!model.visible) {
+        nameLabel.style.display = "none";
+        return;
+      }
       const pos = model.position.clone().add(new THREE.Vector3(0, 2, 0));
       pos.project(camera);
       if (pos.z < 0 || pos.z > 1) {
