@@ -840,6 +840,15 @@ async function main() {
     };
   };
 
+  const localMetersToGeo = (x, z, origin) => {
+    if (!origin || !Number.isFinite(x) || !Number.isFinite(z)) return null;
+    const lonScale = metersPerDegreeLon(origin.centerLat);
+    return {
+      lat: origin.centerLat - z / METERS_PER_DEGREE_LAT,
+      lon: origin.centerLon + x / lonScale
+    };
+  };
+
   const getLatestLocationFix = () => {
     const latest = window.latestLocation;
     if (!latest || !Number.isFinite(latest.lat) || !Number.isFinite(latest.lon)) {
@@ -1666,12 +1675,18 @@ async function main() {
         rotation: playerModel.rotation.y,
         action: playerModel.userData.currentAction
       };
-      if (localFix) {
+      const derivedGeo = mapOrigin
+        ? localMetersToGeo(playerModel.position.x, playerModel.position.z, mapOrigin)
+        : null;
+      if (derivedGeo) {
+        payload.lat = derivedGeo.lat;
+        payload.lon = derivedGeo.lon;
+      } else if (localFix) {
         payload.lat = localFix.lat;
         payload.lon = localFix.lon;
-        if (Number.isFinite(localFix.heading)) {
-          payload.heading = localFix.heading;
-        }
+      }
+      if (Number.isFinite(localFix?.heading)) {
+        payload.heading = localFix.heading;
       }
       if (mapOrigin) {
         payload.worldAnchor = {
