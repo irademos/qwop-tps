@@ -54,6 +54,11 @@ function formatCoordinate(value) {
   return value.toFixed(6);
 }
 
+function formatMeters(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  return value.toFixed(2);
+}
+
 function buildHeader() {
   const header = createElement('div', 'settings-header');
   const backButton = createElement('button', 'settings-back', 'Back');
@@ -230,17 +235,47 @@ function buildDeveloperPanel() {
   copyDebugButton.type = 'button';
   copyDebugButton.dataset.action = 'copy-debug';
 
+  const resetOriginButton = createElement('button', 'settings-button', 'Reset Origin');
+  resetOriginButton.type = 'button';
+  resetOriginButton.dataset.action = 'reset-origin';
+
   const levelBuilderButton = createElement('button', 'settings-button', 'Level Builder');
   levelBuilderButton.type = 'button';
   levelBuilderButton.id = 'level-builder-button';
+
+  const originSection = createElement('div', 'settings-section');
+  const originRows = [
+    ['Origin', 'debug-origin'],
+    ['Current', 'debug-current'],
+    ['Player (x,z)', 'debug-player'],
+    ['Tile', 'debug-tile']
+  ];
+  originRows.forEach(([label, field]) => {
+    const row = createElement('div', 'settings-row');
+    row.innerHTML = `<span>${label}</span><span data-field="${field}">—</span>`;
+    originSection.appendChild(row);
+  });
 
   const consoleLog = createElement('div', 'settings-console');
   consoleLog.id = 'console-log';
   consoleLog.style.display = 'none';
 
-  panelEl.append(consoleButton, copyDebugButton, levelBuilderButton, consoleLog);
+  panelEl.append(
+    consoleButton,
+    copyDebugButton,
+    resetOriginButton,
+    levelBuilderButton,
+    originSection,
+    consoleLog
+  );
   elements.consoleButton = consoleButton;
   elements.consoleLog = consoleLog;
+  elements.debugFields = {
+    origin: originSection.querySelector('[data-field="debug-origin"]'),
+    current: originSection.querySelector('[data-field="debug-current"]'),
+    player: originSection.querySelector('[data-field="debug-player"]'),
+    tile: originSection.querySelector('[data-field="debug-tile"]')
+  };
 
   return panelEl;
 }
@@ -337,6 +372,8 @@ function handleAction(target) {
   } else if (action === 'copy-debug') {
     const info = collectDebugInfo();
     navigator.clipboard?.writeText?.(info);
+  } else if (action === 'reset-origin') {
+    context.appState?.resetWorldOrigin?.();
   }
 }
 
@@ -496,6 +533,10 @@ function collectDebugInfo() {
   const lastError = context.appState?.getLastError?.();
   const version = context.appState?.getAppVersion?.() ?? 'unknown';
   const viewport = `${window.innerWidth}x${window.innerHeight}`;
+  const originText = `${formatCoordinate(locationState.originLat)}, ${formatCoordinate(locationState.originLon)}`;
+  const currentText = `${formatCoordinate(locationState.lat)}, ${formatCoordinate(locationState.lon)}`;
+  const playerText = `${formatMeters(locationState.playerX)}, ${formatMeters(locationState.playerZ)}`;
+  const tileText = locationState.tile ? `${locationState.tile.x},${locationState.tile.y}` : '—';
   const info = [
     `version: ${version}`,
     `userAgent: ${navigator.userAgent}`,
@@ -503,6 +544,10 @@ function collectDebugInfo() {
     `connectionStatus: ${connectionStatus}`,
     `lastPing: ${typeof lastPing === 'number' ? `${lastPing} ms` : 'N/A'}`,
     `locationStatus: ${locationState.state || 'unknown'}`,
+    `origin: ${originText}`,
+    `current: ${currentText}`,
+    `playerXZ: ${playerText}`,
+    `tile: ${tileText}`,
     `lastOsmFetch: ${lastOsmFetch ? formatTimestamp(lastOsmFetch) : '—'}`,
     `lastError: ${lastError ? `${lastError.message} @ ${formatTimestamp(lastError.timestamp)}` : '—'}`
   ];
@@ -616,6 +661,18 @@ export function updateUI() {
     } else {
       elements.locationFields.guidance.textContent = state.message || '';
     }
+  }
+
+  if (elements.debugFields && context.location?.getState) {
+    const state = context.location.getState();
+    const originText = `${formatCoordinate(state.originLat)}, ${formatCoordinate(state.originLon)}`;
+    const currentText = `${formatCoordinate(state.lat)}, ${formatCoordinate(state.lon)}`;
+    const playerText = `${formatMeters(state.playerX)}, ${formatMeters(state.playerZ)}`;
+    const tileText = state.tile ? `${state.tile.x}, ${state.tile.y}` : '—';
+    elements.debugFields.origin.textContent = originText;
+    elements.debugFields.current.textContent = currentText;
+    elements.debugFields.player.textContent = playerText;
+    elements.debugFields.tile.textContent = tileText;
   }
 }
 
