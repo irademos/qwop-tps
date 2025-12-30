@@ -563,6 +563,11 @@ body {
   font-size: 12px;
 }
 
+.settings-row.is-debug {
+  color: #b00020;
+  font-weight: 700;
+}
+
 .settings-section-title {
   margin: 8px 0 2px;
   font-size: 12px;
@@ -595,6 +600,28 @@ body {
   font-family: monospace;
   font-size: 11px;
   border-radius: 8px;
+}
+
+.settings-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.settings-debug-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-debug-step .settings-input {
+  max-width: 120px;
+}
+
+.settings-debug-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
 }
 
 .character-preview {

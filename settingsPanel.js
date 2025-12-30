@@ -182,6 +182,7 @@ function buildLocationPanel() {
 
   const rows = [
     ['Status', 'location-status'],
+    ['Source', 'location-source'],
     ['Accuracy', 'location-accuracy'],
     ['Latitude', 'location-lat'],
     ['Longitude', 'location-lon'],
@@ -194,6 +195,9 @@ function buildLocationPanel() {
     const row = createElement('div', 'settings-row');
     row.innerHTML = `<span>${label}</span><span data-field="${field}">—</span>`;
     panelEl.appendChild(row);
+    if (field === 'location-source') {
+      elements.locationSourceRow = row;
+    }
   });
 
   const guidance = createElement('div', 'settings-muted');
@@ -208,6 +212,7 @@ function buildLocationPanel() {
 
   elements.locationFields = {
     status: panelEl.querySelector('[data-field="location-status"]'),
+    source: panelEl.querySelector('[data-field="location-source"]'),
     accuracy: panelEl.querySelector('[data-field="location-accuracy"]'),
     lat: panelEl.querySelector('[data-field="location-lat"]'),
     lon: panelEl.querySelector('[data-field="location-lon"]'),
@@ -243,6 +248,85 @@ function buildDeveloperPanel() {
   levelBuilderButton.type = 'button';
   levelBuilderButton.id = 'level-builder-button';
 
+  const debugLocationTitle = createElement('h3', 'settings-section-title', 'Debug Location');
+
+  const debugToggleRow = createElement('div', 'settings-row');
+  const debugToggleLabel = createElement('label', 'settings-label', 'Enable Debug Location');
+  debugToggleLabel.setAttribute('for', 'debug-location-toggle');
+  const debugToggle = createElement('input', 'settings-checkbox');
+  debugToggle.type = 'checkbox';
+  debugToggle.id = 'debug-location-toggle';
+  debugToggleRow.append(debugToggleLabel, debugToggle);
+
+  const debugLocationGrid = createElement('div', 'settings-debug-grid');
+  const debugLatGroup = createElement('div', 'settings-field');
+  const debugLatLabel = createElement('label', 'settings-label', 'Latitude');
+  debugLatLabel.setAttribute('for', 'debug-location-lat');
+  const debugLatInput = createElement('input', 'settings-input');
+  debugLatInput.id = 'debug-location-lat';
+  debugLatInput.type = 'number';
+  debugLatInput.step = '0.000001';
+  debugLatInput.inputMode = 'decimal';
+  debugLatGroup.append(debugLatLabel, debugLatInput);
+
+  const debugLonGroup = createElement('div', 'settings-field');
+  const debugLonLabel = createElement('label', 'settings-label', 'Longitude');
+  debugLonLabel.setAttribute('for', 'debug-location-lon');
+  const debugLonInput = createElement('input', 'settings-input');
+  debugLonInput.id = 'debug-location-lon';
+  debugLonInput.type = 'number';
+  debugLonInput.step = '0.000001';
+  debugLonInput.inputMode = 'decimal';
+  debugLonGroup.append(debugLonLabel, debugLonInput);
+
+  const debugAccuracyGroup = createElement('div', 'settings-field');
+  const debugAccuracyLabel = createElement('label', 'settings-label', 'Accuracy (m)');
+  debugAccuracyLabel.setAttribute('for', 'debug-location-accuracy');
+  const debugAccuracyInput = createElement('input', 'settings-input');
+  debugAccuracyInput.id = 'debug-location-accuracy';
+  debugAccuracyInput.type = 'number';
+  debugAccuracyInput.step = '0.5';
+  debugAccuracyInput.min = '0.5';
+  debugAccuracyInput.inputMode = 'decimal';
+  debugAccuracyGroup.append(debugAccuracyLabel, debugAccuracyInput);
+
+  debugLocationGrid.append(debugLatGroup, debugLonGroup, debugAccuracyGroup);
+
+  const debugApplyButton = createElement('button', 'settings-button', 'Apply Debug Location');
+  debugApplyButton.type = 'button';
+  debugApplyButton.dataset.action = 'apply-debug-location';
+
+  const debugStepRow = createElement('div', 'settings-debug-step');
+  const debugStepLabel = createElement('label', 'settings-label', 'Step (m)');
+  debugStepLabel.setAttribute('for', 'debug-location-step');
+  const debugStepInput = createElement('input', 'settings-input');
+  debugStepInput.id = 'debug-location-step';
+  debugStepInput.type = 'number';
+  debugStepInput.step = '1';
+  debugStepInput.min = '1';
+  debugStepInput.value = '5';
+  debugStepInput.inputMode = 'decimal';
+  debugStepRow.append(debugStepLabel, debugStepInput);
+
+  const debugStepButtons = createElement('div', 'settings-debug-buttons');
+  const stepNorthButton = createElement('button', 'settings-button', 'Step North');
+  stepNorthButton.type = 'button';
+  stepNorthButton.dataset.action = 'step-debug';
+  stepNorthButton.dataset.direction = 'north';
+  const stepSouthButton = createElement('button', 'settings-button', 'Step South');
+  stepSouthButton.type = 'button';
+  stepSouthButton.dataset.action = 'step-debug';
+  stepSouthButton.dataset.direction = 'south';
+  const stepEastButton = createElement('button', 'settings-button', 'Step East');
+  stepEastButton.type = 'button';
+  stepEastButton.dataset.action = 'step-debug';
+  stepEastButton.dataset.direction = 'east';
+  const stepWestButton = createElement('button', 'settings-button', 'Step West');
+  stepWestButton.type = 'button';
+  stepWestButton.dataset.action = 'step-debug';
+  stepWestButton.dataset.direction = 'west';
+  debugStepButtons.append(stepNorthButton, stepSouthButton, stepEastButton, stepWestButton);
+
   const originSection = createElement('div', 'settings-section');
   const originRows = [
     ['Origin', 'debug-origin'],
@@ -264,12 +348,25 @@ function buildDeveloperPanel() {
     consoleButton,
     copyDebugButton,
     resetOriginButton,
+    debugLocationTitle,
+    debugToggleRow,
+    debugLocationGrid,
+    debugApplyButton,
+    debugStepRow,
+    debugStepButtons,
     levelBuilderButton,
     originSection,
     consoleLog
   );
   elements.consoleButton = consoleButton;
   elements.consoleLog = consoleLog;
+  elements.debugLocationFields = {
+    toggle: debugToggle,
+    lat: debugLatInput,
+    lon: debugLonInput,
+    accuracy: debugAccuracyInput,
+    step: debugStepInput
+  };
   elements.debugFields = {
     origin: originSection.querySelector('[data-field="debug-origin"]'),
     current: originSection.querySelector('[data-field="debug-current"]'),
@@ -374,6 +471,21 @@ function handleAction(target) {
     navigator.clipboard?.writeText?.(info);
   } else if (action === 'reset-origin') {
     context.appState?.resetWorldOrigin?.();
+  } else if (action === 'apply-debug-location') {
+    const lat = parseFloat(elements.debugLocationFields?.lat?.value);
+    const lon = parseFloat(elements.debugLocationFields?.lon?.value);
+    context.location?.setDebugLocation?.({ lat, lon });
+  } else if (action === 'step-debug') {
+    const stepValue = parseFloat(elements.debugLocationFields?.step?.value);
+    const stepMeters = Number.isFinite(stepValue) ? stepValue : 0;
+    const direction = target.dataset.direction;
+    if (!stepMeters || !direction) return;
+    const delta = { northMeters: 0, eastMeters: 0 };
+    if (direction === 'north') delta.northMeters = stepMeters;
+    if (direction === 'south') delta.northMeters = -stepMeters;
+    if (direction === 'east') delta.eastMeters = stepMeters;
+    if (direction === 'west') delta.eastMeters = -stepMeters;
+    context.location?.stepDebugLocation?.(delta);
   }
 }
 
@@ -414,6 +526,20 @@ function bindEvents() {
     context.appState?.setCharacterModel?.(value);
     loadPreviewModel(value);
   });
+
+  if (elements.debugLocationFields?.toggle) {
+    elements.debugLocationFields.toggle.addEventListener('change', (event) => {
+      context.location?.setDebugEnabled?.(event.target.checked);
+      updateUI();
+    });
+  }
+
+  if (elements.debugLocationFields?.accuracy) {
+    elements.debugLocationFields.accuracy.addEventListener('change', (event) => {
+      const value = parseFloat(event.target.value);
+      context.location?.setDebugAccuracy?.(value);
+    });
+  }
 
   window.addEventListener('resize', () => {
     refreshLayout();
@@ -644,6 +770,13 @@ export function updateUI() {
   if (elements.locationFields && context.location?.getState) {
     const state = context.location.getState();
     elements.locationFields.status.textContent = state.state ? state.state : '—';
+    if (elements.locationFields.source) {
+      const sourceLabel = state.source === 'debug' ? 'DEBUG' : state.source === 'gps' ? 'GPS' : '—';
+      elements.locationFields.source.textContent = sourceLabel;
+      if (elements.locationSourceRow) {
+        elements.locationSourceRow.classList.toggle('is-debug', state.source === 'debug');
+      }
+    }
     elements.locationFields.accuracy.textContent = typeof state.accuracyMeters === 'number'
       ? `±${Math.round(state.accuracyMeters)} m`
       : '—';
@@ -673,6 +806,37 @@ export function updateUI() {
     elements.debugFields.current.textContent = currentText;
     elements.debugFields.player.textContent = playerText;
     elements.debugFields.tile.textContent = tileText;
+  }
+
+  if (elements.debugLocationFields && context.location?.getDebugState) {
+    const debugState = context.location.getDebugState();
+    if (elements.debugLocationFields.toggle) {
+      elements.debugLocationFields.toggle.checked = Boolean(debugState.enabled);
+    }
+    if (elements.debugLocationFields.lat) {
+      const latInput = elements.debugLocationFields.lat;
+      if (document.activeElement !== latInput) {
+        latInput.value = Number.isFinite(debugState.lat)
+          ? debugState.lat.toFixed(6)
+          : '';
+      }
+    }
+    if (elements.debugLocationFields.lon) {
+      const lonInput = elements.debugLocationFields.lon;
+      if (document.activeElement !== lonInput) {
+        lonInput.value = Number.isFinite(debugState.lon)
+          ? debugState.lon.toFixed(6)
+          : '';
+      }
+    }
+    if (elements.debugLocationFields.accuracy) {
+      const accuracyInput = elements.debugLocationFields.accuracy;
+      if (document.activeElement !== accuracyInput) {
+        accuracyInput.value = Number.isFinite(debugState.accuracyMeters)
+          ? debugState.accuracyMeters.toFixed(1)
+          : '';
+      }
+    }
   }
 }
 

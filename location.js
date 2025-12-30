@@ -10,6 +10,10 @@ const WATCH_OPTIONS = {
   timeout: 20000
 };
 
+const METERS_PER_DEGREE_LAT = 111_132.92;
+const DEBUG_STORAGE_KEY = 'debugLocationState';
+const DEFAULT_DEBUG_ACCURACY_METERS = 8;
+
 function createStatusElement() {
   const element = document.createElement('div');
   element.id = 'location-banner';
@@ -63,6 +67,50 @@ function getErrorMessage(error) {
       return 'Location request timed out. Try again soon.';
     default:
       return error.message || 'Unable to read your location.';
+  }
+}
+
+function metersPerDegreeLon(latDeg) {
+  return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
+}
+
+function loadDebugState() {
+  if (typeof localStorage === 'undefined') {
+    return {};
+  }
+  try {
+    const raw = localStorage.getItem(DEBUG_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (error) {
+    console.warn('Failed to load debug location state:', error);
+    return {};
+  }
+}
+
+function sanitizeDebugState(raw = {}) {
+  const lat = Number.isFinite(raw.lat) ? raw.lat : null;
+  const lon = Number.isFinite(raw.lon) ? raw.lon : null;
+  const accuracyMeters = Number.isFinite(raw.accuracyMeters)
+    ? Math.max(0.5, raw.accuracyMeters)
+    : DEFAULT_DEBUG_ACCURACY_METERS;
+  return {
+    enabled: Boolean(raw.enabled),
+    lat,
+    lon,
+    accuracyMeters,
+    heading: Number.isFinite(raw.heading) ? raw.heading : null,
+    speed: Number.isFinite(raw.speed) ? raw.speed : null
+  };
+}
+
+function persistDebugState(state) {
+  if (typeof localStorage === 'undefined') {
+    return;
+  }
+  try {
+    localStorage.setItem(DEBUG_STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn('Failed to persist debug location state:', error);
   }
 }
 
@@ -237,5 +285,161 @@ export function createLocationTracker({
     retry,
     getLastUpdate: () => lastUpdate,
     statusElement: status.element
+  };
+}
+
+export function createLocationProvider({
+  onUpdate,
+  onError,
+  onStatus,
+  throttleMs = 1000
+} = {}) {
+  let started = false;
+  let debugInterval = null;
+  let currentLocation = null;
+  let debugState = sanitizeDebugState(loadDebugState());
+
+  const gpsTracker = createLocationTracker({
+    onUpdate: (location) => {
+      const next = { ...location, source: 'gps' };
+      currentLocation = next;
+      onUpdate?.(next);
+    },
+    onError: (error, message) => {
+      onError?.(error, message);
+    },
+    onStatus: (status) => {
+      onStatus?.({ ...status, source: 'gps' });
+    },
+    throttleMs
+  });
+
+  const emitDebugUpdate = () => {
+    if (!debugState.enabled) return;
+    if (!Number.isFinite(debugState.lat) || !Number.isFinite(debugState.lon)) return;
+    const timestamp = Date.now();
+    const next = {
+      lat: debugState.lat,
+      lon: debugState.lon,
+      accuracyMeters: debugState.accuracyMeters,
+      heading: debugState.heading,
+      speed: debugState.speed,
+      timestamp,
+      source: 'debug'
+    };
+    currentLocation = next;
+    onUpdate?.(next);
+    onStatus?.({ state: 'found', accuracy: next.accuracyMeters, timestamp, source: 'debug' });
+  };
+
+  const ensureDebugLocation = () => {
+    if (Number.isFinite(debugState.lat) && Number.isFinite(debugState.lon)) {
+      return;
+    }
+    const fallback = gpsTracker.getLastUpdate() || currentLocation;
+    if (fallback && Number.isFinite(fallback.lat) && Number.isFinite(fallback.lon)) {
+      debugState = { ...debugState, lat: fallback.lat, lon: fallback.lon };
+      persistDebugState(debugState);
+    }
+  };
+
+  const startDebugLoop = () => {
+    if (debugInterval) return;
+    ensureDebugLocation();
+    emitDebugUpdate();
+    debugInterval = setInterval(emitDebugUpdate, throttleMs);
+  };
+
+  const stopDebugLoop = () => {
+    if (!debugInterval) return;
+    clearInterval(debugInterval);
+    debugInterval = null;
+  };
+
+  const setDebugEnabled = (enabled) => {
+    const nextEnabled = Boolean(enabled);
+    if (debugState.enabled === nextEnabled) return;
+    debugState = { ...debugState, enabled: nextEnabled };
+    persistDebugState(debugState);
+    if (nextEnabled) {
+      gpsTracker.stop();
+      if (started) {
+        startDebugLoop();
+      }
+    } else {
+      stopDebugLoop();
+      if (started) {
+        gpsTracker.start();
+      }
+    }
+  };
+
+  const setDebugLocation = ({ lat, lon } = {}) => {
+    const nextLat = Number.isFinite(lat) ? lat : debugState.lat;
+    const nextLon = Number.isFinite(lon) ? lon : debugState.lon;
+    debugState = { ...debugState, lat: nextLat, lon: nextLon };
+    persistDebugState(debugState);
+    if (debugState.enabled && started) {
+      emitDebugUpdate();
+    }
+  };
+
+  const setDebugAccuracy = (accuracyMeters) => {
+    if (!Number.isFinite(accuracyMeters)) return;
+    debugState = {
+      ...debugState,
+      accuracyMeters: Math.max(0.5, accuracyMeters)
+    };
+    persistDebugState(debugState);
+    if (debugState.enabled && started) {
+      emitDebugUpdate();
+    }
+  };
+
+  const stepDebugLocation = ({ northMeters = 0, eastMeters = 0 } = {}) => {
+    ensureDebugLocation();
+    if (!Number.isFinite(debugState.lat) || !Number.isFinite(debugState.lon)) return;
+    const latScale = METERS_PER_DEGREE_LAT;
+    const lonScale = metersPerDegreeLon(debugState.lat);
+    const nextLat = debugState.lat + northMeters / latScale;
+    const nextLon = debugState.lon + eastMeters / lonScale;
+    debugState = { ...debugState, lat: nextLat, lon: nextLon };
+    persistDebugState(debugState);
+    if (debugState.enabled && started) {
+      emitDebugUpdate();
+    }
+  };
+
+  const start = () => {
+    started = true;
+    if (debugState.enabled) {
+      gpsTracker.stop();
+      startDebugLoop();
+      return true;
+    }
+    return gpsTracker.start();
+  };
+
+  const stop = () => {
+    started = false;
+    stopDebugLoop();
+    gpsTracker.stop();
+  };
+
+  const retry = () => {
+    if (debugState.enabled) return;
+    gpsTracker.retry();
+  };
+
+  return {
+    start,
+    stop,
+    retry,
+    getCurrentLocation: () => currentLocation,
+    getDebugState: () => ({ ...debugState }),
+    setDebugEnabled,
+    setDebugLocation,
+    setDebugAccuracy,
+    stepDebugLocation
   };
 }
