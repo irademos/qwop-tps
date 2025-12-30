@@ -26,6 +26,7 @@ import { createTileCache } from './tileCache.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './settingsPanel.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './mapView.js';
+import { loadOrCreateWithPin, saveStatsThrottled } from './playerProfile.js';
 
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
 
@@ -66,9 +67,26 @@ async function main() {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
   let playerName = localStorage.getItem('playerName') || getCookie("playerName");
-  if (!playerName) {
-    playerName = prompt("Enter your name") || `Player${Math.floor(Math.random() * 1000)}`;
+  let profileResult = null;
+  while (!profileResult) {
+    if (!playerName) {
+      playerName = prompt("Enter your name") || `Player${Math.floor(Math.random() * 1000)}`;
+    }
+    const trimmedName = playerName.trim();
+    if (!trimmedName) {
+      playerName = null;
+      continue;
+    }
+    const result = await loadOrCreateWithPin(trimmedName);
+    if (result?.canceled) {
+      playerName = null;
+      continue;
+    }
+    profileResult = result;
+    playerName = result.profile?.name || trimmedName;
   }
+  const { nameKey: profileNameKey, profile: playerProfile } = profileResult;
+
   setCookie("playerName", playerName);
   localStorage.setItem('playerName', playerName);
 
@@ -686,16 +704,91 @@ async function main() {
   let didInitialGpsSnap = false;
 
 
-  window.localHealth = 100;
+  const statsState = {
+    health: playerProfile.stats.health,
+    hunger: playerProfile.stats.hunger,
+    energy: playerProfile.stats.energy,
+    strength: playerProfile.stats.strength,
+    agility: playerProfile.stats.agility,
+    smarts: playerProfile.stats.smarts,
+    charm: playerProfile.stats.charm,
+    luck: playerProfile.stats.luck
+  };
+
   window.monsterHealth = 100;
 
   const healthFill = document.getElementById('health-fill');
+  const hungerFill = document.getElementById('hunger-fill');
+  const energyFill = document.getElementById('energy-fill');
+
   function updateHealthUI() {
     if (healthFill) {
-      healthFill.style.width = `${window.localHealth}%`;
+      healthFill.style.width = `${statsState.health}%`;
     }
   }
+
+  function updateHungerUI() {
+    if (hungerFill) {
+      hungerFill.style.width = `${statsState.hunger}%`;
+    }
+  }
+
+  function updateEnergyUI() {
+    if (energyFill) {
+      energyFill.style.width = `${statsState.energy}%`;
+    }
+  }
+
+  const clampStat = (key, value) => {
+    if (['health', 'hunger', 'energy'].includes(key)) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return 0;
+      }
+      return Math.max(0, Math.min(100, num));
+    }
+    return value;
+  };
+
+  function setStat(key, value, { skipSave = false } = {}) {
+    statsState[key] = clampStat(key, value);
+    if (key === 'health') {
+      updateHealthUI();
+    }
+    if (key === 'hunger') {
+      updateHungerUI();
+    }
+    if (key === 'energy') {
+      updateEnergyUI();
+    }
+    if (!skipSave) {
+      saveStatsThrottled(profileNameKey, statsState);
+    }
+  }
+
+  window.setStat = setStat;
+
+  Object.defineProperty(window, 'localHealth', {
+    configurable: true,
+    get: () => statsState.health,
+    set: value => setStat('health', value)
+  });
+
+  Object.defineProperty(window, 'hunger', {
+    configurable: true,
+    get: () => statsState.hunger,
+    set: value => setStat('hunger', value)
+  });
+
+  Object.defineProperty(window, 'energy', {
+    configurable: true,
+    get: () => statsState.energy,
+    set: value => setStat('energy', value)
+  });
+
   updateHealthUI();
+  updateHungerUI();
+  updateEnergyUI();
 
   let playerDead = false;
 
@@ -1252,8 +1345,7 @@ async function main() {
   }
 
   function respawnPlayer() {
-    window.localHealth = 100;
-    updateHealthUI();
+    setStat('health', 100);
     const spawn = getSpawnPosition();
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
