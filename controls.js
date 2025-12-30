@@ -45,6 +45,12 @@ export class PlayerControls {
 
     this.parachute = null;
 
+    this.geoCenterLatLon = null;
+    this.geoBoundsCenterXZ = null;
+    this.geoBoundsShiftMeters = { x: 0, z: 0 };
+    this.geoBoundHalfSizeM = 60;
+    this.geoEdgeEpsM = 0.75;
+
     // Player state
     this.canJump = true;
     this.keysPressed = new Set();
@@ -648,11 +654,54 @@ export class PlayerControls {
       const speed = this.isInWater ? SWIM_SPEED : SPEED;
       this.body.setLinvel({ x: movement.x * speed, y: vel.y, z: movement.z * speed }, true);
       }
-    const newX = t.x;
+    let newX = t.x;
     const newY = t.y;
-    const newZ = t.z;
+    let newZ = t.z;
     const sink = this.isInWater ? newY - surfaceY : 0;
-    const isMovingNow = movement.length() > 0;
+    let pushedByGeo = false;
+    if (this.geoBoundsCenterXZ) {
+      const shiftX = this.geoBoundsShiftMeters?.x ?? 0;
+      const shiftZ = this.geoBoundsShiftMeters?.z ?? 0;
+      const prevCenterX = this.geoBoundsCenterXZ.x - shiftX;
+      const prevCenterZ = this.geoBoundsCenterXZ.z - shiftZ;
+      const halfSize = this.geoBoundHalfSizeM;
+      const edgeEps = this.geoEdgeEpsM;
+      let adjustedX = newX;
+      let adjustedZ = newZ;
+
+      if (shiftX > 0 && newX >= prevCenterX + halfSize - edgeEps) {
+        adjustedX += shiftX;
+        pushedByGeo = Math.abs(shiftX) > 0.001;
+      } else if (shiftX < 0 && newX <= prevCenterX - halfSize + edgeEps) {
+        adjustedX += shiftX;
+        pushedByGeo = Math.abs(shiftX) > 0.001;
+      }
+
+      if (shiftZ > 0 && newZ >= prevCenterZ + halfSize - edgeEps) {
+        adjustedZ += shiftZ;
+        pushedByGeo = pushedByGeo || Math.abs(shiftZ) > 0.001;
+      } else if (shiftZ < 0 && newZ <= prevCenterZ - halfSize + edgeEps) {
+        adjustedZ += shiftZ;
+        pushedByGeo = pushedByGeo || Math.abs(shiftZ) > 0.001;
+      }
+
+      const minX = this.geoBoundsCenterXZ.x - halfSize;
+      const maxX = this.geoBoundsCenterXZ.x + halfSize;
+      const minZ = this.geoBoundsCenterXZ.z - halfSize;
+      const maxZ = this.geoBoundsCenterXZ.z + halfSize;
+      adjustedX = Math.min(maxX, Math.max(minX, adjustedX));
+      adjustedZ = Math.min(maxZ, Math.max(minZ, adjustedZ));
+
+      if (adjustedX !== newX || adjustedZ !== newZ) {
+        this.body.setTranslation({ x: adjustedX, y: newY, z: adjustedZ }, true);
+        newX = adjustedX;
+        newZ = adjustedZ;
+      }
+
+      this.geoBoundsShiftMeters.x = 0;
+      this.geoBoundsShiftMeters.z = 0;
+    }
+    const isMovingNow = movement.length() > 0 || pushedByGeo;
     this.isMoving = isMovingNow;
     if (isMovingNow && this.canJump) {
       this.audioManager?.playFootstep();
@@ -874,6 +923,37 @@ export class PlayerControls {
       this.interactionPromptEl.classList.remove('visible');
       this.interactionPromptEl.textContent = '';
     }
+  }
+
+  setGeoCenter({ lat, lon }) {
+    if (typeof lat !== 'number' || typeof lon !== 'number') return;
+    if (!this.geoCenterLatLon) {
+      const currentPos = this.body?.translation?.() ?? this.playerModel?.position ?? { x: this.playerX, z: this.playerZ };
+      this.geoCenterLatLon = { lat, lon };
+      this.geoBoundsCenterXZ = new THREE.Vector3(currentPos.x, 0, currentPos.z);
+      this.geoBoundsShiftMeters = { x: 0, z: 0 };
+      return;
+    }
+
+    const prevLat = this.geoCenterLatLon.lat;
+    const prevLon = this.geoCenterLatLon.lon;
+    const deltaLat = lat - prevLat;
+    const deltaLon = lon - prevLon;
+    const latRadians = lat * Math.PI / 180;
+    const metersPerDegreeLon = 111320 * Math.cos(latRadians);
+    const metersPerDegreeLat = 110540;
+    const dxMeters = deltaLon * metersPerDegreeLon;
+    const dzMeters = deltaLat * metersPerDegreeLat;
+
+    this.geoCenterLatLon = { lat, lon };
+    if (!this.geoBoundsCenterXZ) {
+      const currentPos = this.body?.translation?.() ?? this.playerModel?.position ?? { x: this.playerX, z: this.playerZ };
+      this.geoBoundsCenterXZ = new THREE.Vector3(currentPos.x, 0, currentPos.z);
+    }
+    this.geoBoundsCenterXZ.x += dxMeters;
+    this.geoBoundsCenterXZ.z += dzMeters;
+    this.geoBoundsShiftMeters.x += dxMeters;
+    this.geoBoundsShiftMeters.z += dzMeters;
   }
   
   getCamera() {
