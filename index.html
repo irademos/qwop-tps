@@ -7,6 +7,40 @@
   <link rel="stylesheet" href="styles.css">
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="icon" href="data:,">
+  <style>
+    #hunger-bar,
+    #energy-bar {
+      position: absolute;
+      left: 170px;
+      width: 150px;
+      height: 16px;
+      background: #555;
+      border: 2px solid #000;
+      z-index: 1000;
+    }
+
+    #hunger-bar {
+      top: 10px;
+    }
+
+    #energy-bar {
+      top: 34px;
+    }
+
+    #hunger-fill,
+    #energy-fill {
+      height: 100%;
+      width: 100%;
+    }
+
+    #hunger-fill {
+      background: #f4c542;
+    }
+
+    #energy-fill {
+      background: #3fa9f5;
+    }
+  </style>
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js"></script>
@@ -20,6 +54,8 @@
   </div>
   <div id="interaction-tooltip" class="interaction-tooltip"></div>
   <div id="health-bar"><div id="health-fill"></div></div>
+  <div id="hunger-bar"><div id="hunger-fill"></div></div>
+  <div id="energy-bar"><div id="energy-fill"></div></div>
   <div id="ammo-display" class="inactive">
     <span id="ammo-icon">❄️</span>
     <span id="ammo-count">0</span>
