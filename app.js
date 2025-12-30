@@ -37,6 +37,12 @@ let rapierWorld;
 const rbToMesh = new Map(); // RigidBody -> THREE.Mesh
 let physicsAccumulator = 0;
 const FIXED_DT = 1 / 60;
+const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
+const METERS_PER_DEGREE_LAT = 111_132.92;
+
+function metersPerDegreeLon(latDeg) {
+  return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
+}
 
 async function main() {
   document.body.addEventListener('touchstart', () => {}, { once: true });
@@ -666,6 +672,61 @@ async function main() {
   });
   const mapFetchInFlight = new Set();
   let activeTileKey = null;
+  let worldOrigin = null;
+
+  const loadWorldOrigin = () => {
+    try {
+      const stored = localStorage.getItem(WORLD_ORIGIN_STORAGE_KEY);
+      if (!stored) return null;
+      const parsed = JSON.parse(stored);
+      if (!Number.isFinite(parsed?.lat) || !Number.isFinite(parsed?.lon)) return null;
+      return { lat: parsed.lat, lon: parsed.lon };
+    } catch (error) {
+      console.warn('Failed to parse stored world origin:', error);
+      return null;
+    }
+  };
+
+  const setWorldOrigin = (origin) => {
+    if (!origin || !Number.isFinite(origin.lat) || !Number.isFinite(origin.lon)) return;
+    worldOrigin = { lat: origin.lat, lon: origin.lon };
+    localStorage.setItem(WORLD_ORIGIN_STORAGE_KEY, JSON.stringify(worldOrigin));
+    tileCache.setOrigin(worldOrigin);
+  };
+
+  const resetWorldOrigin = () => {
+    worldOrigin = null;
+    localStorage.removeItem(WORLD_ORIGIN_STORAGE_KEY);
+    tileCache.setOrigin(null);
+  };
+
+  const computePlayerMeters = (location) => {
+    if (!worldOrigin || !location) return null;
+    if (!Number.isFinite(location.lat) || !Number.isFinite(location.lon)) return null;
+    const lonScale = metersPerDegreeLon(worldOrigin.lat);
+    return {
+      x: (location.lon - worldOrigin.lon) * lonScale,
+      z: -(location.lat - worldOrigin.lat) * METERS_PER_DEGREE_LAT
+    };
+  };
+
+  const applyPlayerMeters = (playerMeters) => {
+    if (!playerMeters || !playerModel || !playerControls) return;
+    const nextY = playerModel.position.y;
+    playerModel.position.set(playerMeters.x, nextY, playerMeters.z);
+    playerControls.playerX = playerMeters.x;
+    playerControls.playerY = nextY;
+    playerControls.playerZ = playerMeters.z;
+    playerControls.lastPosition.set(playerMeters.x, nextY, playerMeters.z);
+    if (playerControls.body) {
+      playerControls.body.setTranslation({ x: playerMeters.x, y: nextY, z: playerMeters.z }, true);
+    }
+  };
+
+  worldOrigin = loadWorldOrigin();
+  if (worldOrigin) {
+    tileCache.setOrigin(worldOrigin);
+  }
 
   const computeGeojsonBounds = (geojson) => {
     let minLon = Infinity;
@@ -709,6 +770,13 @@ async function main() {
     };
   };
 
+  const getRenderOrigin = (geojson) => {
+    if (worldOrigin) {
+      return { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
+    }
+    return computeGeojsonBounds(geojson);
+  };
+
   const rebuildMapFromCache = () => {
     const combined = {
       type: 'FeatureCollection',
@@ -719,7 +787,7 @@ async function main() {
         combined.features.push(...entry.geojson.features);
       }
     }
-    const bounds = computeGeojsonBounds(combined);
+    const bounds = getRenderOrigin(combined);
     mapRenderer.updateHighways(combined, bounds);
     buildingsRenderer.updateBuildings(combined, bounds);
   };
@@ -786,6 +854,11 @@ async function main() {
     accuracyMeters: null,
     lat: null,
     lon: null,
+    originLat: worldOrigin?.lat ?? null,
+    originLon: worldOrigin?.lon ?? null,
+    playerX: null,
+    playerZ: null,
+    tile: null,
     heading: null,
     speed: null,
     timestamp: null,
@@ -801,15 +874,32 @@ async function main() {
   const locationTracker = createLocationTracker({
     onUpdate: (location) => {
       window.latestLocation = location;
+      if (!worldOrigin && Number.isFinite(location.accuracyMeters) && location.accuracyMeters <= 50) {
+        setWorldOrigin({ lat: location.lat, lon: location.lon });
+        rebuildMapFromCache();
+      }
       locationState.state = 'found';
       locationState.lat = location.lat;
       locationState.lon = location.lon;
       locationState.accuracyMeters = location.accuracyMeters;
+      locationState.originLat = worldOrigin?.lat ?? null;
+      locationState.originLon = worldOrigin?.lon ?? null;
       locationState.heading = location.heading;
       locationState.speed = location.speed;
       locationState.timestamp = location.timestamp;
       locationState.message = null;
       locationState.permissionDenied = false;
+      const playerMeters = computePlayerMeters(location);
+      if (playerMeters) {
+        locationState.playerX = playerMeters.x;
+        locationState.playerZ = playerMeters.z;
+        applyPlayerMeters(playerMeters);
+      } else {
+        locationState.playerX = null;
+        locationState.playerZ = null;
+      }
+      const localMeters = tileCache.getLocalMeters(location);
+      locationState.tile = tileCache.getTileCoords(localMeters);
       requestMapUpdate(location);
     },
     onError: (error, message) => {
@@ -1164,7 +1254,16 @@ async function main() {
       if (!generalError) return networkError;
       return (networkError.timestamp || 0) >= (generalError.timestamp || 0) ? networkError : generalError;
     },
-    getAppVersion: () => import.meta.env?.VITE_APP_VERSION || import.meta.env?.VITE_GIT_COMMIT || 'unknown'
+    getAppVersion: () => import.meta.env?.VITE_APP_VERSION || import.meta.env?.VITE_GIT_COMMIT || 'unknown',
+    resetWorldOrigin: () => {
+      resetWorldOrigin();
+      locationState.originLat = null;
+      locationState.originLon = null;
+      locationState.playerX = null;
+      locationState.playerZ = null;
+      locationState.tile = null;
+      rebuildMapFromCache();
+    }
   };
 
   const locationAdapter = {

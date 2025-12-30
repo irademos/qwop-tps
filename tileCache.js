@@ -11,6 +11,17 @@ export function createTileCache({
   const cache = new Map();
   let origin = null;
 
+  const setOrigin = (nextOrigin) => {
+    if (!nextOrigin || !Number.isFinite(nextOrigin.lat) || !Number.isFinite(nextOrigin.lon)) {
+      origin = null;
+      return origin;
+    }
+    origin = { lat: nextOrigin.lat, lon: nextOrigin.lon };
+    return origin;
+  };
+
+  const getOrigin = () => origin;
+
   const ensureOrigin = (location) => {
     if (!origin && location && Number.isFinite(location.lat) && Number.isFinite(location.lon)) {
       origin = { lat: location.lat, lon: location.lon };
@@ -84,6 +95,8 @@ export function createTileCache({
     tileSizeMeters,
     evictRadiusTiles,
     cache,
+    setOrigin,
+    getOrigin,
     ensureOrigin,
     getLocalMeters,
     getTileCoords,
