@@ -16,6 +16,7 @@ const DEFAULT_STATS = {
 
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
+const pendingMetaByName = new Map();
 const pendingTimersByName = new Map();
 
 export function normalizeNameKey(name) {
@@ -41,6 +42,7 @@ function buildProfile(name) {
   return {
     name,
     stats: { ...DEFAULT_STATS },
+    lastStatUpdateAt: now,
     createdAt: now,
     updatedAt: now
   };
@@ -154,9 +156,20 @@ export async function loadOrCreateWithPin(playerName) {
 
     const mergedStats = mergeStats(profile.stats);
     const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
-    if (statsMissing) {
-      await update(profileRef, { stats: mergedStats, updatedAt: Date.now() });
-      profile.stats = mergedStats;
+    const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
+    if (statsMissing || !hasLastStatUpdateAt) {
+      const updatePayload = { updatedAt: Date.now() };
+      if (statsMissing) {
+        updatePayload.stats = mergedStats;
+        profile.stats = mergedStats;
+      } else {
+        profile.stats = mergedStats;
+      }
+      if (!hasLastStatUpdateAt) {
+        updatePayload.lastStatUpdateAt = Date.now();
+        profile.lastStatUpdateAt = updatePayload.lastStatUpdateAt;
+      }
+      await update(profileRef, updatePayload);
     } else {
       profile.stats = mergedStats;
     }
@@ -169,23 +182,32 @@ export async function loadOrCreateWithPin(playerName) {
 async function flushStats(nameKey) {
   pendingTimersByName.delete(nameKey);
   const stats = pendingStatsByName.get(nameKey);
+  const meta = pendingMetaByName.get(nameKey) || {};
   if (!stats) {
     return;
   }
   pendingStatsByName.delete(nameKey);
+  pendingMetaByName.delete(nameKey);
   lastWriteByName.set(nameKey, Date.now());
   try {
-    await update(ref(db, `profiles/${nameKey}`), {
+    const payload = {
       stats,
       updatedAt: Date.now()
-    });
+    };
+    if (Number.isFinite(meta.lastStatUpdateAt)) {
+      payload.lastStatUpdateAt = meta.lastStatUpdateAt;
+    }
+    await update(ref(db, `profiles/${nameKey}`), payload);
   } catch (error) {
     console.error('Failed to save stats for', nameKey, error);
   }
 }
 
-export function saveStatsThrottled(nameKey, stats) {
+export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt) {
   pendingStatsByName.set(nameKey, { ...stats });
+  if (Number.isFinite(lastStatUpdateAt)) {
+    pendingMetaByName.set(nameKey, { lastStatUpdateAt });
+  }
   const now = Date.now();
   const lastWrite = lastWriteByName.get(nameKey) ?? 0;
   const delay = Math.max(0, 1000 - (now - lastWrite));
