@@ -1,7 +1,8 @@
+import { overpassRequestQueue } from "./requestQueue.js";
+
 const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_MAX_RETRIES = 3;
-const DEFAULT_BACKOFF_MS = 500;
+const DEFAULT_STALE_DISTANCE_METERS = 1500;
 
 const HIGHWAY_TAGS = [
   "footway",
@@ -35,10 +36,6 @@ function buildOverpassQuery(lat, lon, radiusMeters) {
     ">;",
     "out skel qt;",
   ].join("\n");
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeRing(coords) {
@@ -160,41 +157,22 @@ function overpassToGeoJSON(data) {
   };
 }
 
-async function fetchWithRetry(url, options = {}, maxRetries = DEFAULT_MAX_RETRIES) {
-  let attempt = 0;
-  let lastError;
+async function performOverpassRequest(body) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
-  while (attempt < maxRetries) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`Overpass request failed: ${response.status} ${response.statusText}`);
-      }
-
-      return response;
-    } catch (error) {
-      clearTimeout(timeoutId);
-      lastError = error;
-      attempt += 1;
-      if (attempt >= maxRetries) {
-        break;
-      }
-      await sleep(DEFAULT_BACKOFF_MS * 2 ** (attempt - 1));
-    }
+  try {
+    return await fetch(OVERPASS_ENDPOINT, {
+      method: "POST",
+      body,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  throw lastError;
 }
 
-export async function fetchOSMFeatures(lat, lon, radiusMeters) {
+export async function fetchOSMFeatures(lat, lon, radiusMeters, options = {}) {
   if (typeof lat !== "number" || typeof lon !== "number" || typeof radiusMeters !== "number") {
     throw new TypeError("fetchOSMFeatures expects numeric lat, lon, and radiusMeters values.");
   }
@@ -202,9 +180,15 @@ export async function fetchOSMFeatures(lat, lon, radiusMeters) {
   const query = buildOverpassQuery(lat, lon, radiusMeters);
   const body = new URLSearchParams({ data: query });
 
-  const response = await fetchWithRetry(OVERPASS_ENDPOINT, {
-    method: "POST",
-    body,
+  const staleDistanceMeters = Number.isFinite(options.staleDistanceMeters)
+    ? options.staleDistanceMeters
+    : DEFAULT_STALE_DISTANCE_METERS;
+
+  const response = await overpassRequestQueue.enqueue({
+    lat,
+    lon,
+    staleDistanceMeters,
+    requestFn: () => performOverpassRequest(body),
   });
 
   const data = await response.json();
