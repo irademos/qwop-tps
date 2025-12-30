@@ -90,6 +90,16 @@ async function main() {
   setCookie("playerName", playerName);
   localStorage.setItem('playerName', playerName);
 
+  const FOOD_HUNGER_GAIN = 25;
+  const FOOD_ENERGY_GAIN = 15;
+  const HUNGER_DECAY_PER_HOUR = 6;
+  const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
+  const PICKUP_RADIUS = 1.2;
+  const MAX_FOOD_PICKUPS = 12;
+  const FOOD_SPAWN_MIN_RADIUS = 8;
+  const FOOD_SPAWN_MAX_RADIUS = 25;
+  const FOOD_SPAWN_INTERVAL_RANGE = [10, 20];
+
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
   setCookie("characterModel", characterModel);
   localStorage.setItem('characterModel', characterModel);
@@ -704,6 +714,26 @@ async function main() {
   let didInitialGpsSnap = false;
 
 
+  function applyOfflineHungerDecay(profile) {
+    const now = Date.now();
+    const lastUpdate = Number.isFinite(profile?.lastStatUpdateAt) ? profile.lastStatUpdateAt : now;
+    const elapsedSeconds = Math.max(0, (now - lastUpdate) / 1000);
+    const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
+    const currentHunger = Number.isFinite(profile?.stats?.hunger) ? profile.stats.hunger : 0;
+    const nextHunger = Math.max(0, Math.min(100, currentHunger - hungerDecay));
+    const updatedStats = { ...profile.stats, hunger: nextHunger };
+    const changed = nextHunger !== currentHunger || !Number.isFinite(profile?.lastStatUpdateAt);
+    return {
+      stats: updatedStats,
+      lastStatUpdateAt: now,
+      changed
+    };
+  }
+
+  const offlineDecay = applyOfflineHungerDecay(playerProfile);
+  playerProfile.stats = offlineDecay.stats;
+  let lastStatUpdateAt = offlineDecay.lastStatUpdateAt;
+
   const statsState = {
     health: playerProfile.stats.health,
     hunger: playerProfile.stats.hunger,
@@ -762,7 +792,10 @@ async function main() {
       updateEnergyUI();
     }
     if (!skipSave) {
-      saveStatsThrottled(profileNameKey, statsState);
+      if (key === 'hunger' || key === 'energy') {
+        lastStatUpdateAt = Date.now();
+      }
+      saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     }
   }
 
@@ -790,11 +823,16 @@ async function main() {
   updateHungerUI();
   updateEnergyUI();
 
+  if (offlineDecay.changed) {
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+
   let playerDead = false;
 
   const projectiles = [];
   const ammoPickups = [];
   const AMMO_PICKUP_AMOUNT = 5;
+  const foodPickups = [];
 
   function spawnAmmoPickup(position) {
     const spawnPos = position.clone();
@@ -819,6 +857,42 @@ async function main() {
     ammoPickups.push(pickup);
     return pickup;
   }
+
+  function spawnFoodPickup(position) {
+    const spawnPos = position.clone();
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    spawnPos.y = terrainHeight + 0.6;
+
+    const geometry = new THREE.IcosahedronGeometry(0.25, 0);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xc7a77a,
+      emissive: 0x2a1a0a,
+      emissiveIntensity: 0.2,
+      metalness: 0.05,
+      roughness: 0.8
+    });
+
+    const pickup = new THREE.Mesh(geometry, material);
+    pickup.position.copy(spawnPos);
+    pickup.castShadow = true;
+    pickup.userData.baseY = spawnPos.y;
+    pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.type = 'food';
+    scene.add(pickup);
+    foodPickups.push(pickup);
+    return pickup;
+  }
+
+  function applyFoodPickupEffects() {
+    setStat('hunger', statsState.hunger + FOOD_HUNGER_GAIN, { skipSave: true });
+    setStat('energy', statsState.energy + FOOD_ENERGY_GAIN, { skipSave: true });
+    lastStatUpdateAt = Date.now();
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+
+  let lastFoodSpawnAt = performance.now();
+  let nextFoodSpawnDelay = THREE.MathUtils.randFloat(...FOOD_SPAWN_INTERVAL_RANGE) * 1000;
+  let statDecayAccumulator = 0;
 
   playerControls = new PlayerControls({
     scene,
@@ -1638,6 +1712,54 @@ async function main() {
     }
     updateMapView(frameDelta);
 
+    const now = performance.now();
+    statDecayAccumulator += frameDelta;
+    if (statDecayAccumulator >= 1) {
+      const elapsedSeconds = statDecayAccumulator;
+      statDecayAccumulator = 0;
+      let statsChanged = false;
+
+      if (statsState.hunger > 0) {
+        const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
+        if (hungerDecay > 0) {
+          setStat('hunger', statsState.hunger - hungerDecay, { skipSave: true });
+          statsChanged = true;
+        }
+      }
+
+      const isMoving = playerControls?.isMoving;
+      if (isMoving && statsState.energy > 0) {
+        const energyDecay = ENERGY_DECAY_PER_SECOND_WHILE_MOVING * elapsedSeconds;
+        if (energyDecay > 0) {
+          setStat('energy', statsState.energy - energyDecay, { skipSave: true });
+          statsChanged = true;
+        }
+      }
+
+      if (statsChanged) {
+        lastStatUpdateAt = Date.now();
+        saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+      }
+    }
+
+    if (now - lastFoodSpawnAt >= nextFoodSpawnDelay) {
+      lastFoodSpawnAt = now;
+      nextFoodSpawnDelay = THREE.MathUtils.randFloat(...FOOD_SPAWN_INTERVAL_RANGE) * 1000;
+      if (foodPickups.length < MAX_FOOD_PICKUPS) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = THREE.MathUtils.randFloat(FOOD_SPAWN_MIN_RADIUS, FOOD_SPAWN_MAX_RADIUS);
+        const spawnPos = new THREE.Vector3(
+          playerModel.position.x + Math.cos(angle) * radius,
+          0,
+          playerModel.position.z + Math.sin(angle) * radius
+        );
+        const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+        if (Number.isFinite(terrainHeight)) {
+          spawnFoodPickup(spawnPos);
+        }
+      }
+    }
+
     const pickupTime = performance.now() * 0.002;
     for (let i = ammoPickups.length - 1; i >= 0; i--) {
       const pickup = ammoPickups[i];
@@ -1660,9 +1782,28 @@ async function main() {
       }
     }
 
-    iceGun?.update();
+    for (let i = foodPickups.length - 1; i >= 0; i--) {
+      const pickup = foodPickups[i];
+      if (!pickup) continue;
 
-    const now = performance.now();
+      if (pickup.userData.baseY === undefined) {
+        pickup.userData.baseY = pickup.position.y;
+      }
+
+      pickup.rotation.y += 0.03;
+      const phase = pickup.userData.phase ?? 0;
+      pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+      if (playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+        applyFoodPickupEffects();
+        scene.remove(pickup);
+        pickup.geometry?.dispose();
+        pickup.material?.dispose();
+        foodPickups.splice(i, 1);
+      }
+    }
+
+    iceGun?.update();
     const localStates = collectLocalControlStates();
 
     if (multiplayer.isHost) {
