@@ -6,7 +6,39 @@ const METERS_PER_DEGREE_LAT = 111_132.92;
 const DEFAULT_HEIGHT = 10;
 const LEVEL_HEIGHT = 3;
 const EXTRUDE_DISTANCE = 250;
-const BASE_ELEVATION = 0.05;
+const BASE_ELEVATION = -1.75;
+
+// --- building texture ---
+const textureLoader = new THREE.TextureLoader();
+
+function loadTex(url, { srgb = false, repeat = 2 } = {}) {
+  const tex = textureLoader.load(url);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  if (srgb && tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const repeat_val = 0.05;
+
+const buildingBase = loadTex(
+  "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_diff_4k.jpg",
+  { srgb: true, repeat: repeat_val }
+);
+
+// Optional maps (use if you have them)
+const buildingNormal = loadTex(
+  "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_nor_gl_4k.jpg",
+  { repeat: repeat_val }
+);
+const buildingRough = loadTex(
+  "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_rough_4k.jpg",
+  { repeat: repeat_val }
+);
+const buildingAO = loadTex(
+  "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_ao_4k.jpg",
+  { repeat: repeat_val }
+);
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -137,10 +169,14 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   scene?.add(group);
 
   const extrudedMaterial = new THREE.MeshStandardMaterial({
-    color: 0xb0b0b0,
-    roughness: 0.8,
-    metalness: 0.1
+    map: buildingBase,
+    normalMap: buildingNormal,
+    roughnessMap: buildingRough,
+    roughness: 1.0,
+    metalness: 0.0,
+    aoMap: buildingAO, // if you enable AO, see uv2 note below
   });
+
   const flatMaterial = new THREE.MeshStandardMaterial({
     color: 0x9b9b9b,
     roughness: 0.95,
@@ -215,6 +251,10 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     if (extrudedGeometries.length > 0) {
       const merged = mergeGeometries(extrudedGeometries, false);
       merged.computeBoundingSphere();
+      if (merged.attributes.uv && !merged.attributes.uv2) {
+        merged.setAttribute("uv2", merged.attributes.uv);
+      }
+
       extrudedMesh.geometry = merged;
       extrudedMesh.visible = true;
     } else {
@@ -225,6 +265,10 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     if (flatGeometries.length > 0) {
       const merged = mergeGeometries(flatGeometries, false);
       merged.computeBoundingSphere();
+      if (merged.attributes.uv && !merged.attributes.uv2) {
+        merged.setAttribute("uv2", merged.attributes.uv);
+      }
+
       flatMesh.geometry = merged;
       flatMesh.visible = true;
     } else {
