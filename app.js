@@ -22,6 +22,7 @@ import { createLocationTracker } from './location.js';
 import { fetchOSMFeatures } from './osmClient.js';
 import { createMapRenderer } from './mapRender.js';
 import { createBuildingsRenderer } from './buildingsRender.js';
+import { createTileCache } from './tileCache.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './settingsPanel.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './mapView.js';
 
@@ -656,21 +657,15 @@ async function main() {
     zoomOut();
   });
 
-  const MAP_RADIUS_METERS = 600;
-  const MAP_REFRESH_INTERVAL_MS = 30000;
-  const MAP_REFRESH_DISTANCE_METERS = 150;
-  let mapFetchInFlight = false;
-  let lastMapLocation = null;
-  let lastMapFetchAt = 0;
-
-  const metersPerDegreeLat = 111_132.92;
-  const metersPerDegreeLon = (lat) => 111_412.84 * Math.cos((lat * Math.PI) / 180);
-  const estimateDistanceMeters = (a, b) => {
-    const avgLat = (a.lat + b.lat) / 2;
-    const dx = (a.lon - b.lon) * metersPerDegreeLon(avgLat);
-    const dz = (a.lat - b.lat) * metersPerDegreeLat;
-    return Math.hypot(dx, dz);
-  };
+  const TILE_SIZE_METERS = 300;
+  const TILE_EVICT_RADIUS = 2;
+  const TILE_FETCH_RADIUS_METERS = TILE_SIZE_METERS * Math.SQRT2 * 0.5;
+  const tileCache = createTileCache({
+    tileSizeMeters: TILE_SIZE_METERS,
+    evictRadiusTiles: TILE_EVICT_RADIUS
+  });
+  const mapFetchInFlight = new Set();
+  let activeTileKey = null;
 
   const computeGeojsonBounds = (geojson) => {
     let minLon = Infinity;
@@ -714,19 +709,49 @@ async function main() {
     };
   };
 
-  const requestMapUpdate = async (location) => {
-    if (!location || mapFetchInFlight) return;
-    const now = performance.now();
-    if (lastMapLocation) {
-      const distance = estimateDistanceMeters(lastMapLocation, location);
-      if (distance < MAP_REFRESH_DISTANCE_METERS && now - lastMapFetchAt < MAP_REFRESH_INTERVAL_MS) {
-        return;
+  const rebuildMapFromCache = () => {
+    const combined = {
+      type: 'FeatureCollection',
+      features: []
+    };
+    for (const entry of tileCache.cache.values()) {
+      if (entry.geojson?.features?.length) {
+        combined.features.push(...entry.geojson.features);
       }
     }
-    mapFetchInFlight = true;
+    const bounds = computeGeojsonBounds(combined);
+    mapRenderer.updateHighways(combined, bounds);
+    buildingsRenderer.updateBuildings(combined, bounds);
+  };
+
+  const requestMapUpdate = async (location) => {
+    if (!location) return;
+    const localMeters = tileCache.getLocalMeters(location);
+    const tile = tileCache.getTileCoords(localMeters);
+    if (!tile) return;
+
+    const tileKey = tileCache.getTileKey(tile);
+    if (tileKey === activeTileKey && (tileCache.hasTile(tileKey) || mapFetchInFlight.has(tileKey))) {
+      return;
+    }
+    activeTileKey = tileKey;
+
+    const evicted = tileCache.evictTiles(tile);
+    if (evicted) {
+      rebuildMapFromCache();
+    }
+
+    if (tileCache.hasTile(tileKey) || mapFetchInFlight.has(tileKey)) {
+      return;
+    }
+
+    const tileCenter = tileCache.getTileCenterLocation(tile);
+    if (!tileCenter) return;
+
+    mapFetchInFlight.add(tileKey);
     let geojson;
     try {
-      geojson = await fetchOSMFeatures(location.lat, location.lon, MAP_RADIUS_METERS);
+      geojson = await fetchOSMFeatures(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS);
       debugState.lastOsmFetchAt = Date.now();
     } catch (error) {
       console.warn('OSM fetch failed:', error);
@@ -734,15 +759,17 @@ async function main() {
         message: error?.message || 'OSM fetch failed',
         timestamp: Date.now()
       };
-      mapFetchInFlight = false;
+      mapFetchInFlight.delete(tileKey);
       return;
     }
+
     try {
-      const bounds = computeGeojsonBounds(geojson);
-      mapRenderer.updateHighways(geojson, bounds);
-      buildingsRenderer.updateBuildings(geojson, bounds);
-      lastMapLocation = location;
-      lastMapFetchAt = now;
+      tileCache.setTile(tile, {
+        geojson,
+        meshes: { highways: null, buildings: null },
+        fetchedAt: Date.now()
+      });
+      rebuildMapFromCache();
     } catch (error) {
       console.warn('OSM render failed:', error);
       debugState.lastError = {
@@ -750,7 +777,7 @@ async function main() {
         timestamp: Date.now()
       };
     } finally {
-      mapFetchInFlight = false;
+      mapFetchInFlight.delete(tileKey);
     }
   };
 
