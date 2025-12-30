@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 
 const TAB_KEY = 'settings:lastTab';
-const DEV_MODE_KEY = 'settings:developerMode';
 
 const TABS = [
   { id: 'character', label: 'Character' },
@@ -17,6 +16,8 @@ let context = {};
 let elements = {};
 let activeTab = 'character';
 let lastFocusedElement = null;
+let isMobileView = false;
+let isListView = false;
 let previewState = {
   active: false,
   renderer: null,
@@ -53,16 +54,12 @@ function formatCoordinate(value) {
   return value.toFixed(6);
 }
 
-function getDeveloperModeEnabled() {
-  return localStorage.getItem(DEV_MODE_KEY) === 'true';
-}
-
-function setDeveloperModeEnabled(enabled) {
-  localStorage.setItem(DEV_MODE_KEY, enabled ? 'true' : 'false');
-}
-
 function buildHeader() {
   const header = createElement('div', 'settings-header');
+  const backButton = createElement('button', 'settings-back', 'Back');
+  backButton.type = 'button';
+  backButton.dataset.action = 'back';
+  backButton.setAttribute('aria-label', 'Back to settings list');
   const title = createElement('h2', 'settings-title', 'Settings');
   title.id = 'settings-title';
   title.tabIndex = 0;
@@ -70,7 +67,8 @@ function buildHeader() {
   closeButton.type = 'button';
   closeButton.setAttribute('aria-label', 'Close settings');
   closeButton.dataset.action = 'close';
-  header.append(title, closeButton);
+  header.append(backButton, title, closeButton);
+  elements.backButton = backButton;
   elements.title = title;
   elements.closeButton = closeButton;
   return header;
@@ -224,14 +222,6 @@ function buildDeveloperPanel() {
   panelEl.setAttribute('role', 'tabpanel');
   panelEl.setAttribute('aria-labelledby', 'tab-developer');
 
-  const devToggleRow = createElement('div', 'settings-field');
-  const devToggleLabel = createElement('label', 'settings-label', 'Developer Mode');
-  devToggleLabel.setAttribute('for', 'developer-mode-toggle');
-  const devToggle = createElement('input', 'settings-checkbox');
-  devToggle.id = 'developer-mode-toggle';
-  devToggle.type = 'checkbox';
-  devToggleRow.append(devToggleLabel, devToggle);
-
   const consoleButton = createElement('button', 'settings-button', 'Show Console');
   consoleButton.type = 'button';
   consoleButton.dataset.action = 'toggle-console';
@@ -248,9 +238,7 @@ function buildDeveloperPanel() {
   consoleLog.id = 'console-log';
   consoleLog.style.display = 'none';
 
-  panelEl.append(devToggleRow, consoleButton, copyDebugButton, levelBuilderButton, consoleLog);
-
-  elements.devToggle = devToggle;
+  panelEl.append(consoleButton, copyDebugButton, levelBuilderButton, consoleLog);
   elements.consoleButton = consoleButton;
   elements.consoleLog = consoleLog;
 
@@ -273,20 +261,6 @@ function buildPanels() {
   return body;
 }
 
-function updateTabVisibility() {
-  const devEnabled = getDeveloperModeEnabled();
-  const devTab = elements.tabs?.developer;
-  const devPanel = elements.panels?.developer;
-  if (!devTab || !devPanel) return;
-  devTab.style.display = devEnabled ? '' : 'none';
-  devPanel.style.display = devEnabled ? '' : 'none';
-  elements.devToggle.checked = devEnabled;
-
-  if (!devEnabled && activeTab === 'developer') {
-    setTab('character');
-  }
-}
-
 function setActiveTab(tabId) {
   const newTab = elements.tabs?.[tabId];
   const newPanel = elements.panels?.[tabId];
@@ -305,6 +279,10 @@ function setActiveTab(tabId) {
     panelEl.hidden = !isActive;
   });
 
+  if (isMobileView) {
+    setListView(false);
+  }
+
   if (tabId === 'character') {
     startPreview();
   } else {
@@ -317,7 +295,12 @@ function openOverlay() {
   lastFocusedElement = document.activeElement;
   overlay.style.display = 'flex';
   overlay.setAttribute('aria-hidden', 'false');
-  panel?.focus?.();
+  refreshLayout();
+  if (isMobileView) {
+    setListView(true);
+  } else {
+    panel?.focus?.();
+  }
   if (activeTab === 'character') {
     startPreview();
   }
@@ -339,6 +322,10 @@ function handleAction(target) {
   if (!action) return;
   if (action === 'close') {
     closeOverlay();
+  } else if (action === 'back') {
+    if (isMobileView) {
+      setListView(true);
+    }
   } else if (action === 'reconnect') {
     context.multiplayer?.reconnect?.();
   } else if (action === 'location-retry') {
@@ -372,29 +359,6 @@ function bindEvents() {
     }
   });
 
-  let longPressTimer = null;
-  const startLongPress = () => {
-    longPressTimer = window.setTimeout(() => {
-      const enabled = !getDeveloperModeEnabled();
-      setDeveloperModeEnabled(enabled);
-      updateTabVisibility();
-    }, 650);
-  };
-
-  const cancelLongPress = () => {
-    if (longPressTimer) {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-    }
-  };
-
-  elements.title.addEventListener('touchstart', startLongPress, { passive: true });
-  elements.title.addEventListener('touchend', cancelLongPress);
-  elements.title.addEventListener('touchcancel', cancelLongPress);
-  elements.title.addEventListener('mousedown', startLongPress);
-  elements.title.addEventListener('mouseup', cancelLongPress);
-  elements.title.addEventListener('mouseleave', cancelLongPress);
-
   elements.nameInput.addEventListener('input', (event) => {
     const value = event.target.value.trim();
     if (value) {
@@ -414,9 +378,8 @@ function bindEvents() {
     loadPreviewModel(value);
   });
 
-  elements.devToggle.addEventListener('change', (event) => {
-    setDeveloperModeEnabled(event.target.checked);
-    updateTabVisibility();
+  window.addEventListener('resize', () => {
+    refreshLayout();
   });
 }
 
@@ -557,6 +520,35 @@ function updateCharacterOptions() {
   });
 }
 
+function refreshLayout() {
+  if (!panel) return;
+  isMobileView = window.matchMedia('(max-width: 720px)').matches;
+  panel.classList.toggle('is-mobile', isMobileView);
+  panel.classList.toggle('is-desktop', !isMobileView);
+  if (!isMobileView) {
+    setListView(false);
+    if (elements.backButton) {
+      elements.backButton.style.display = 'none';
+    }
+  } else if (elements.backButton && isListView) {
+    elements.backButton.style.display = 'none';
+  }
+}
+
+function setListView(enabled) {
+  isListView = enabled;
+  panel.classList.toggle('show-tab-list', enabled);
+  panel.classList.toggle('show-tab-panel', !enabled);
+  if (elements.backButton) {
+    elements.backButton.style.display = enabled ? 'none' : 'inline-flex';
+  }
+  if (enabled) {
+    stopPreview();
+  } else if (activeTab === 'character') {
+    startPreview();
+  }
+}
+
 export function updateUI() {
   if (!panel) return;
   if (elements.nameInput && context.appState?.getPlayerName) {
@@ -650,6 +642,7 @@ export function initSettingsPanel({ appState, multiplayer, location, player } = 
   overlay.setAttribute('aria-hidden', 'true');
   panel.innerHTML = '';
   panel.classList.add('settings-shell');
+  panel.classList.add('show-tab-panel');
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-labelledby', 'settings-title');
@@ -661,7 +654,7 @@ export function initSettingsPanel({ appState, multiplayer, location, player } = 
   panel.append(header, tabs, body);
 
   updateCharacterOptions();
-  updateTabVisibility();
+  refreshLayout();
 
   const storedTab = localStorage.getItem(TAB_KEY);
   setActiveTab(storedTab && elements.tabs[storedTab] ? storedTab : 'character');

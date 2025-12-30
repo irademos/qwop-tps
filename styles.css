@@ -391,12 +391,23 @@ body {
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid #e6e6e6;
+  gap: 12px;
 }
 
 .settings-title {
   font-size: 16px;
   margin: 0;
   font-family: 'Press Start 2P', monospace;
+  flex: 1;
+  text-align: center;
+}
+
+.settings-back {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  display: none;
 }
 
 .settings-close {
@@ -587,8 +598,50 @@ body {
     max-height: 85vh;
   }
 
+  .settings-shell.is-mobile .settings-tabs {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .settings-shell.is-mobile .settings-tab {
+    width: 100%;
+    text-align: left;
+  }
+
+  .settings-shell.is-mobile.show-tab-list .settings-body {
+    display: none;
+  }
+
+  .settings-shell.is-mobile.show-tab-panel .settings-tabs {
+    display: none;
+  }
+
   .settings-body {
     padding-bottom: 24px;
+  }
+}
+
+@media (min-width: 721px) {
+  .settings-shell.is-desktop {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .settings-shell.is-desktop .settings-header {
+    grid-column: 1 / -1;
+  }
+
+  .settings-shell.is-desktop .settings-tabs {
+    flex-direction: column;
+    border-bottom: none;
+    border-right: 1px solid #eee;
+    overflow: visible;
+    padding: 16px 12px;
+  }
+
+  .settings-shell.is-desktop .settings-body {
+    padding: 16px 20px;
   }
 }
 
