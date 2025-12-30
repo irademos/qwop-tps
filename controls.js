@@ -48,7 +48,7 @@ export class PlayerControls {
     this.geoCenterLatLon = null;
     this.geoBoundsCenterXZ = null;
     this.geoBoundsShiftMeters = { x: 0, z: 0 };
-    this.geoBoundHalfSizeM = 60;
+    this.geoBoundHalfSizeM = 8;
     this.geoEdgeEpsM = 0.75;
 
     // Player state
@@ -654,53 +654,67 @@ export class PlayerControls {
       const speed = this.isInWater ? SWIM_SPEED : SPEED;
       this.body.setLinvel({ x: movement.x * speed, y: vel.y, z: movement.z * speed }, true);
       }
-    let newX = t.x;
-    const newY = t.y;
-    let newZ = t.z;
+      
+    let { x: newX, y: newY, z: newZ } = this.body.translation();
+
     const sink = this.isInWater ? newY - surfaceY : 0;
+
     let pushedByGeo = false;
+    let clampedByGeo = false;
+
     if (this.geoBoundsCenterXZ) {
+      const halfSize = this.geoBoundHalfSizeM;
+
       const shiftX = this.geoBoundsShiftMeters?.x ?? 0;
       const shiftZ = this.geoBoundsShiftMeters?.z ?? 0;
+
       const prevCenterX = this.geoBoundsCenterXZ.x - shiftX;
       const prevCenterZ = this.geoBoundsCenterXZ.z - shiftZ;
-      const halfSize = this.geoBoundHalfSizeM;
+
       const edgeEps = this.geoEdgeEpsM;
-      let adjustedX = newX;
-      let adjustedZ = newZ;
 
-      if (shiftX > 0 && newX >= prevCenterX + halfSize - edgeEps) {
-        adjustedX += shiftX;
-        pushedByGeo = Math.abs(shiftX) > 0.001;
-      } else if (shiftX < 0 && newX <= prevCenterX - halfSize + edgeEps) {
-        adjustedX += shiftX;
-        pushedByGeo = Math.abs(shiftX) > 0.001;
-      }
+      let targetX = newX;
+      let targetZ = newZ;
 
-      if (shiftZ > 0 && newZ >= prevCenterZ + halfSize - edgeEps) {
-        adjustedZ += shiftZ;
-        pushedByGeo = pushedByGeo || Math.abs(shiftZ) > 0.001;
-      } else if (shiftZ < 0 && newZ <= prevCenterZ - halfSize + edgeEps) {
-        adjustedZ += shiftZ;
-        pushedByGeo = pushedByGeo || Math.abs(shiftZ) > 0.001;
-      }
+      // "Conveyor" push only if player was near the OLD edge
+      if (shiftX > 0 && newX >= prevCenterX + halfSize - edgeEps) { targetX += shiftX; pushedByGeo = true; }
+      else if (shiftX < 0 && newX <= prevCenterX - halfSize + edgeEps) { targetX += shiftX; pushedByGeo = true; }
+
+      if (shiftZ > 0 && newZ >= prevCenterZ + halfSize - edgeEps) { targetZ += shiftZ; pushedByGeo = true; }
+      else if (shiftZ < 0 && newZ <= prevCenterZ - halfSize + edgeEps) { targetZ += shiftZ; pushedByGeo = true; }
 
       const minX = this.geoBoundsCenterXZ.x - halfSize;
       const maxX = this.geoBoundsCenterXZ.x + halfSize;
       const minZ = this.geoBoundsCenterXZ.z - halfSize;
       const maxZ = this.geoBoundsCenterXZ.z + halfSize;
-      adjustedX = Math.min(maxX, Math.max(minX, adjustedX));
-      adjustedZ = Math.min(maxZ, Math.max(minZ, adjustedZ));
 
-      if (adjustedX !== newX || adjustedZ !== newZ) {
-        this.body.setTranslation({ x: adjustedX, y: newY, z: adjustedZ }, true);
-        newX = adjustedX;
-        newZ = adjustedZ;
+      const clampedX = Math.min(maxX, Math.max(minX, targetX));
+      const clampedZ = Math.min(maxZ, Math.max(minZ, targetZ));
+
+      clampedByGeo = (clampedX !== targetX) || (clampedZ !== targetZ);
+
+      if (clampedByGeo || clampedX !== newX || clampedZ !== newZ) {
+        // Cancel velocity into the wall (otherwise you'll "fight" the clamp forever)
+        const v = this.body.linvel();
+        let vx = v.x, vz = v.z;
+
+        if (clampedX <= minX + 1e-6 && vx < 0) vx = 0;
+        if (clampedX >= maxX - 1e-6 && vx > 0) vx = 0;
+        if (clampedZ <= minZ + 1e-6 && vz < 0) vz = 0;
+        if (clampedZ >= maxZ - 1e-6 && vz > 0) vz = 0;
+
+        this.body.setLinvel({ x: vx, y: v.y, z: vz }, true);
+        this.body.setTranslation({ x: clampedX, y: newY, z: clampedZ }, true);
+
+        newX = clampedX;
+        newZ = clampedZ;
       }
 
       this.geoBoundsShiftMeters.x = 0;
       this.geoBoundsShiftMeters.z = 0;
     }
+
+
     const isMovingNow = movement.length() > 0 || pushedByGeo;
     this.isMoving = isMovingNow;
     if (isMovingNow && this.canJump) {

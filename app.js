@@ -683,6 +683,8 @@ async function main() {
   scene.add(playerModel);
   document.body.appendChild(player.nameLabel);
   window.playerModel = playerModel;
+  let didInitialGpsSnap = false;
+
 
   window.localHealth = 100;
   window.monsterHealth = 100;
@@ -1036,6 +1038,7 @@ async function main() {
   const locationProvider = createLocationProvider({
     onUpdate: (location) => {
       window.latestLocation = location;
+      playerControls?.setGeoCenter({ lat: location.lat, lon: location.lon });
       if (!worldOrigin && Number.isFinite(location.accuracyMeters) && location.accuracyMeters <= 50) {
         setWorldOrigin({ lat: location.lat, lon: location.lon });
         rebuildMapFromCache();
@@ -1056,11 +1059,16 @@ async function main() {
       if (playerMeters) {
         locationState.playerX = playerMeters.x;
         locationState.playerZ = playerMeters.z;
-        applyPlayerMeters(playerMeters);
+
+        if (!didInitialGpsSnap) {
+          applyPlayerMeters(playerMeters);
+          didInitialGpsSnap = true;
+        }
       } else {
         locationState.playerX = null;
         locationState.playerZ = null;
       }
+
       const localMeters = tileCache.getLocalMeters(location);
       locationState.tile = tileCache.getTileCoords(localMeters);
       requestMapUpdate(location);
