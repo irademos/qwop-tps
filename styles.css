@@ -602,6 +602,87 @@ body {
   color: #666;
 }
 
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 10px;
+}
+
+.inventory-empty {
+  text-align: center;
+  padding: 16px;
+  border: 1px dashed #d6d6d6;
+  border-radius: 10px;
+}
+
+.inventory-tile {
+  position: relative;
+  border: 1px solid #d6d6d6;
+  background: #fafafa;
+  border-radius: 12px;
+  aspect-ratio: 1 / 1;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.inventory-tile:hover,
+.inventory-tile:focus-visible {
+  border-color: #1f8bff;
+  box-shadow: 0 0 0 2px rgba(31, 139, 255, 0.2);
+  outline: none;
+}
+
+.inventory-tile.is-selected {
+  border-color: #1f8bff;
+  background: #f2f7ff;
+  box-shadow: 0 0 0 2px rgba(31, 139, 255, 0.35);
+}
+
+.inventory-icon-wrapper {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inventory-icon {
+  width: 70%;
+  height: 70%;
+  object-fit: contain;
+}
+
+.inventory-icon-fallback {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.inventory-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: #1f8bff;
+  color: #fff;
+  border-radius: 999px;
+  font-size: 10px;
+  padding: 2px 6px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.inventory-details {
+  border: 1px solid #e6e6e6;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #f8f8f8;
+  font-size: 11px;
+  color: #333;
+}
+
 .settings-console {
   max-height: 150px;
   overflow-y: auto;
@@ -723,6 +804,10 @@ body {
 
   .settings-body {
     padding-bottom: 24px;
+  }
+
+  .inventory-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

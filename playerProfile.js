@@ -15,9 +15,11 @@ const DEFAULT_STATS = {
   charm: 5,
   luck: 5
 };
+const DEFAULT_INVENTORY = {};
 
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
+const pendingInventoryByName = new Map();
 const pendingMetaByName = new Map();
 const pendingTimersByName = new Map();
 
@@ -52,6 +54,7 @@ function buildProfile(name) {
   return {
     name,
     stats: { ...DEFAULT_STATS },
+    inventory: { ...DEFAULT_INVENTORY },
     lastStatUpdateAt: now,
     createdAt: now,
     updatedAt: now
@@ -73,15 +76,23 @@ async function loadProfileForName(profileRef, trimmedName) {
   }
 
   const mergedStats = mergeStats(profile.stats);
+  const mergedInventory = profile.inventory ? { ...profile.inventory } : { ...DEFAULT_INVENTORY };
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
-  if (statsMissing || !hasLastStatUpdateAt) {
+  const inventoryMissing = profile.inventory == null;
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
       profile.stats = mergedStats;
     } else {
       profile.stats = mergedStats;
+    }
+    if (inventoryMissing) {
+      updatePayload.inventory = mergedInventory;
+      profile.inventory = mergedInventory;
+    } else {
+      profile.inventory = mergedInventory;
     }
     if (!hasLastStatUpdateAt) {
       updatePayload.lastStatUpdateAt = Date.now();
@@ -90,6 +101,7 @@ async function loadProfileForName(profileRef, trimmedName) {
     await update(profileRef, updatePayload);
   } else {
     profile.stats = mergedStats;
+    profile.inventory = mergedInventory;
   }
 
   console.log('✅ Loaded profile for', trimmedName);
@@ -207,18 +219,25 @@ export async function loadOrCreateWithPin(playerName) {
 async function flushStats(nameKey) {
   pendingTimersByName.delete(nameKey);
   const stats = pendingStatsByName.get(nameKey);
+  const inventory = pendingInventoryByName.get(nameKey);
   const meta = pendingMetaByName.get(nameKey) || {};
-  if (!stats) {
+  if (!stats && !inventory) {
     return;
   }
   pendingStatsByName.delete(nameKey);
+  pendingInventoryByName.delete(nameKey);
   pendingMetaByName.delete(nameKey);
   lastWriteByName.set(nameKey, Date.now());
   try {
     const payload = {
-      stats,
       updatedAt: Date.now()
     };
+    if (stats) {
+      payload.stats = stats;
+    }
+    if (inventory) {
+      payload.inventory = inventory;
+    }
     if (Number.isFinite(meta.lastStatUpdateAt)) {
       payload.lastStatUpdateAt = meta.lastStatUpdateAt;
     }
@@ -228,8 +247,13 @@ async function flushStats(nameKey) {
   }
 }
 
-export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt) {
-  pendingStatsByName.set(nameKey, { ...stats });
+export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt, inventory) {
+  if (stats) {
+    pendingStatsByName.set(nameKey, { ...stats });
+  }
+  if (inventory) {
+    pendingInventoryByName.set(nameKey, { ...inventory });
+  }
   if (Number.isFinite(lastStatUpdateAt)) {
     pendingMetaByName.set(nameKey, { lastStatUpdateAt });
   }
