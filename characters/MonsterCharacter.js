@@ -158,7 +158,7 @@ export class MonsterCharacter extends CharacterBase {
 
     this.update(delta);
 
-    if (this.model.userData.currentAction === ATTACK_NAME && this.attackStartTime) {
+    if (this.attackStartTime) {
       const elapsed = now - this.attackStartTime;
       if (!this.attackHasHit && elapsed >= MONSTER_ATTACK.hitTime && elapsed <= MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
         for (const player of allPlayers) {

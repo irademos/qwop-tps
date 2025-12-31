@@ -543,7 +543,9 @@ async function main() {
 
   let monsters = [];
   window.monsters = monsters;
-  const monsterSlotIds = Array.from({ length: MAX_MONSTERS }, (_, index) => `monster-${index}`);
+  const monsterSlotIds = ["monster:0", "monster:1"];
+  const spawningSlots = new Set();
+  const respawnTimers = new Map();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -726,34 +728,54 @@ async function main() {
   };
 
   const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null) => {
+    if (spawningSlots.has(slotId)) return;
+    spawningSlots.add(slotId);
     loadMonsterModel(modelPath, data => {
-      const monster = new MonsterCharacter(data);
-      monster.id = slotId;
-      monster.modelPath = modelPath;
-      monster.model.userData.hideInMapView = true;
-      monster.setMode("friendly");
-      monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
-      monster.lastDirectionChange = Date.now();
-      monster.resetHealth();
-      monster.respawnAt = null;
-      monster.respawnInFlight = false;
+      try {
+        const monster = new MonsterCharacter(data);
+        monster.id = slotId;
+        monster.modelPath = modelPath;
+        monster.model.userData.hideInMapView = true;
+        monster.setMode("friendly");
+        monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
+        monster.lastDirectionChange = Date.now();
+        monster.resetHealth();
 
-      const monsterSpawn = getMonsterSpawnPosition();
-      monster.setPosition(monsterSpawn.x, monsterSpawn.y, monsterSpawn.z);
+        const monsterSpawn = getMonsterSpawnPosition();
+        monster.setPosition(monsterSpawn.x, monsterSpawn.y, monsterSpawn.z);
 
-      cleanupMonster(oldMonster);
-      scene.add(monster.model);
-      if (rapierWorld) {
-        attachMonsterPhysics(monster);
+        cleanupMonster(oldMonster);
+        scene.add(monster.model);
+        if (rapierWorld) {
+          attachMonsterPhysics(monster);
+        }
+        setMonsterForSlot(slotId, monster);
+      } finally {
+        spawningSlots.delete(slotId);
       }
-      setMonsterForSlot(slotId, monster);
     });
   };
 
   const ensureMonsters = () => {
+    const seenSlots = new Set();
+    monsters = monsters.filter((monster) => {
+      if (!monster) return false;
+      if (!monsterSlotIds.includes(monster.id)) {
+        cleanupMonster(monster);
+        return false;
+      }
+      if (seenSlots.has(monster.id)) {
+        cleanupMonster(monster);
+        return false;
+      }
+      seenSlots.add(monster.id);
+      return true;
+    });
+    window.monsters = monsters;
+
     monsterSlotIds.forEach((slotId) => {
       const existing = monsters.find(entry => entry.id === slotId);
-      if (!existing) {
+      if (!existing && !spawningSlots.has(slotId) && !respawnTimers.has(slotId)) {
         spawnMonsterInSlot(slotId, getRandomMonsterModel());
       }
     });
@@ -800,6 +822,12 @@ async function main() {
         if (typeof state.health === 'number') {
           monster.health = state.health;
           monster.model.userData.health = state.health;
+        }
+        if (state.mode === 'dead' && state.health <= 0) {
+          cleanupMonster(monster);
+          monsters = monsters.filter(entry => entry.id !== slotId);
+          window.monsters = monsters;
+          return;
         }
         if (state.action && monster.model.userData.currentAction !== state.action) {
           const fade = state.action === 'Weapon' ? 0.1 : 0.2;
@@ -2121,20 +2149,25 @@ async function main() {
       p.model.userData.mixer?.update(mixerDelta);
     });
 
-    if (multiplayer?.isHost) {
+    const isHost = !multiplayer || multiplayer.isHost;
+    if (isHost) {
       ensureMonsters();
       const nowMs = Date.now();
       monsters.forEach(monster => {
         if (!monster) return;
         if (monster.isDead) {
-          if (!monster.respawnAt) {
-            monster.respawnAt = nowMs + THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
+          const slotId = monster.id;
+          if (!respawnTimers.has(slotId)) {
+            cleanupMonster(monster);
+            monsters = monsters.filter(entry => entry.id !== slotId);
+            window.monsters = monsters;
+            const delay = THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
+            const timer = setTimeout(() => {
+              respawnTimers.delete(slotId);
+              spawnMonsterInSlot(slotId, getRandomMonsterModel());
+            }, delay);
+            respawnTimers.set(slotId, timer);
           }
-          if (monster.respawnAt <= nowMs && !monster.respawnInFlight) {
-            monster.respawnInFlight = true;
-            spawnMonsterInSlot(monster.id, getRandomMonsterModel(), monster);
-          }
-          monster.update(mixerDelta);
           return;
         }
         monster.updateAI(mixerDelta, playerModel, otherPlayers);
