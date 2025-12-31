@@ -91,6 +91,8 @@ async function main() {
   setCookie("playerName", playerName);
   localStorage.setItem('playerName', playerName);
 
+  let updatePlayerInfoUI = () => {};
+
   const FOOD_HUNGER_GAIN = 25;
   const FOOD_ENERGY_GAIN = 15;
   const HUNGER_DECAY_PER_HOUR = 6;
@@ -755,12 +757,25 @@ async function main() {
     health: playerProfile.stats.health,
     hunger: playerProfile.stats.hunger,
     energy: playerProfile.stats.energy,
+    level: playerProfile.stats.level,
     strength: playerProfile.stats.strength,
     agility: playerProfile.stats.agility,
     smarts: playerProfile.stats.smarts,
     charm: playerProfile.stats.charm,
     luck: playerProfile.stats.luck
   };
+  const playerNameDisplay = document.getElementById('player-name-display');
+  const playerLevelDisplay = document.getElementById('player-level');
+  updatePlayerInfoUI = () => {
+    if (playerNameDisplay) {
+      playerNameDisplay.textContent = playerName;
+    }
+    if (playerLevelDisplay) {
+      const levelValue = Number.isFinite(statsState.level) ? statsState.level : 1;
+      playerLevelDisplay.textContent = levelValue;
+    }
+  };
+  updatePlayerInfoUI();
   const inventoryCatalog = {
     iceGun: {
       name: 'Ice Gun',
@@ -901,6 +916,13 @@ async function main() {
       }
       return Math.max(0, Math.min(100, num));
     }
+    if (key === 'level') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return 1;
+      }
+      return Math.max(1, Math.round(num));
+    }
     return value;
   };
 
@@ -915,6 +937,9 @@ async function main() {
     if (key === 'energy') {
       updateEnergyUI();
       updateControlAvailability();
+    }
+    if (key === 'level') {
+      updatePlayerInfoUI();
     }
     if (!skipSave) {
       if (key === 'hunger' || key === 'energy') {
@@ -1718,6 +1743,7 @@ async function main() {
       if (player?.nameLabel) {
         player.nameLabel.innerText = playerName;
       }
+      updatePlayerInfoUI();
       setCookie("playerName", playerName);
       localStorage.setItem('playerName', playerName);
       if (multiplayer) {
