@@ -151,7 +151,10 @@ export function updateProjectiles({
         const monsterBox = new THREE.Box3().setFromObject(monster.model);
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           console.log(`💥 Monster was hit`);
-          monster.applyDamage(10);
+          const killed = monster.applyDamage(10);
+          if (killed && proj.userData.shooterId === localId) {
+            window.onMonsterKill?.();
+          }
           removeProjectile(i);
           removed = true;
           break;

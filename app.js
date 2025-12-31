@@ -874,6 +874,8 @@ async function main() {
   };
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
+  const levelPopup = document.getElementById('level-popup');
+  let levelPopupTimer = null;
   updatePlayerInfoUI = () => {
     if (playerNameDisplay) {
       playerNameDisplay.textContent = playerName;
@@ -884,6 +886,18 @@ async function main() {
     }
   };
   updatePlayerInfoUI();
+  const showLevelPopup = level => {
+    if (!levelPopup) return;
+    levelPopup.textContent = `You've reached level ${level}!`;
+    levelPopup.classList.add('visible');
+    if (levelPopupTimer) {
+      clearTimeout(levelPopupTimer);
+    }
+    levelPopupTimer = setTimeout(() => {
+      levelPopup.classList.remove('visible');
+      levelPopupTimer = null;
+    }, 2200);
+  };
   const inventoryCatalog = {
     iceGun: {
       name: 'Ice Gun',
@@ -1056,6 +1070,18 @@ async function main() {
   }
 
   window.setStat = setStat;
+  const adjustLevel = delta => {
+    const currentLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
+    const nextLevel = clampStat('level', currentLevel + delta);
+    if (nextLevel === currentLevel) {
+      return;
+    }
+    setStat('level', nextLevel);
+    showLevelPopup(nextLevel);
+  };
+
+  window.onMonsterKill = () => adjustLevel(1);
+  window.onPlayerDeath = () => adjustLevel(-1);
 
   Object.defineProperty(window, 'localHealth', {
     configurable: true,
@@ -2158,6 +2184,7 @@ async function main() {
     updateHealthUI();
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
+      window.onPlayerDeath?.();
       updateControlAvailability();
       const actions = playerModel.userData.actions;
       const current = playerModel.userData.currentAction;
