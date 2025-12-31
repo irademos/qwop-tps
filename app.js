@@ -101,6 +101,9 @@ async function main() {
   const FOOD_SPAWN_MIN_RADIUS = 8;
   const FOOD_SPAWN_MAX_RADIUS = 25;
   const FOOD_SPAWN_INTERVAL_RANGE = [10, 20];
+  const ICE_GUN_SPAWN_MIN_RADIUS = 20;
+  const ICE_GUN_SPAWN_MAX_RADIUS = 60;
+  const ICE_GUN_SPAWN_INTERVAL_RANGE = [60, 120];
 
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
   setCookie("characterModel", characterModel);
@@ -672,6 +675,7 @@ async function main() {
   };
   if (iceGun.mesh) {
     iceGun.mesh.userData.hideInMapView = true;
+    iceGun.mesh.visible = false;
   }
   registerNetworkedEntity('icegun', {
     getState: () => {
@@ -1008,9 +1012,37 @@ async function main() {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
 
+  function spawnIceGunPickup(position) {
+    if (!iceGun?.mesh) return;
+    const spawnPos = position.clone();
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (!Number.isFinite(terrainHeight)) return;
+    spawnPos.y = terrainHeight + 0.5;
+    iceGun.mesh.position.copy(spawnPos);
+    iceGun.mesh.quaternion.set(0, 0, 0, 1);
+    iceGun.mesh.visible = true;
+    iceGun.holder = null;
+  }
+
   let lastFoodSpawnAt = performance.now();
   let nextFoodSpawnDelay = THREE.MathUtils.randFloat(...FOOD_SPAWN_INTERVAL_RANGE) * 1000;
+  let lastIceGunSpawnAt = performance.now();
+  let nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
   let statDecayAccumulator = 0;
+
+  const isHost = !multiplayer || multiplayer.isHost;
+  if (isHost && !inventoryState.iceGun?.count && iceGun?.mesh && !iceGun.holder) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = THREE.MathUtils.randFloat(ICE_GUN_SPAWN_MIN_RADIUS, ICE_GUN_SPAWN_MAX_RADIUS);
+    const spawnPos = new THREE.Vector3(
+      playerModel.position.x + Math.cos(angle) * radius,
+      0,
+      playerModel.position.z + Math.sin(angle) * radius
+    );
+    spawnIceGunPickup(spawnPos);
+    lastIceGunSpawnAt = performance.now();
+    nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
+  }
 
   playerControls = new PlayerControls({
     scene,
@@ -1904,6 +1936,24 @@ async function main() {
         if (Number.isFinite(terrainHeight)) {
           spawnFoodPickup(spawnPos);
         }
+      }
+    }
+
+    if (now - lastIceGunSpawnAt >= nextIceGunSpawnDelay) {
+      lastIceGunSpawnAt = now;
+      nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
+      const isHost = !multiplayer || multiplayer.isHost;
+      const hasIceGun = (inventoryState?.iceGun?.count || 0) > 0;
+      const canSpawn = isHost && iceGun?.mesh && !iceGun.holder && !hasIceGun && !iceGun.mesh.visible;
+      if (canSpawn) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = THREE.MathUtils.randFloat(ICE_GUN_SPAWN_MIN_RADIUS, ICE_GUN_SPAWN_MAX_RADIUS);
+        const spawnPos = new THREE.Vector3(
+          playerModel.position.x + Math.cos(angle) * radius,
+          0,
+          playerModel.position.z + Math.sin(angle) * radius
+        );
+        spawnIceGunPickup(spawnPos);
       }
     }
 
