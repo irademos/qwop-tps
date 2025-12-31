@@ -21,6 +21,7 @@ import { getSpawnPosition } from './spawnUtils.js';
 import { createLocationProvider } from './location.js';
 import { fetchOSMFeatures } from './osmClient.js';
 import { createMapRenderer } from './mapRender.js';
+import { createMapGround } from './mapGround.js';
 import { createBuildingsRenderer } from './buildingsRender.js';
 import { createTileCache } from './tileCache.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
@@ -610,16 +611,17 @@ async function main() {
   document.getElementById('game-container').appendChild(renderer.domElement);
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-  const mapRenderer = createMapRenderer({ scene, renderer });
+  const mapRenderer = createMapRenderer({ scene });
   const buildingsRenderer = createBuildingsRenderer({ scene, camera });
+  const mapGround = createMapGround({ scene });
   window.mapRenderer = mapRenderer;
   window.buildingsRenderer = buildingsRenderer;
+  window.mapGround = mapGround;
 
   const handleResize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    mapRenderer.setResolution(window.innerWidth, window.innerHeight);
   };
   window.addEventListener('resize', handleResize);
   handleResize();
@@ -1091,6 +1093,30 @@ async function main() {
     return computeGeojsonBounds(geojson);
   };
 
+  const getTileCacheDimensions = () => {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const entry of tileCache.cache.values()) {
+      const tile = entry.tile;
+      if (!tile) continue;
+      minX = Math.min(minX, tile.x);
+      maxX = Math.max(maxX, tile.x);
+      minY = Math.min(minY, tile.y);
+      maxY = Math.max(maxY, tile.y);
+    }
+    if (!Number.isFinite(minX)) {
+      return null;
+    }
+    const widthTiles = maxX - minX + 1;
+    const heightTiles = maxY - minY + 1;
+    return {
+      widthMeters: widthTiles * tileCache.tileSizeMeters,
+      heightMeters: heightTiles * tileCache.tileSizeMeters
+    };
+  };
+
   const rebuildMapFromCache = () => {
     const combined = {
       type: 'FeatureCollection',
@@ -1107,6 +1133,7 @@ async function main() {
     }
     mapRenderer.updateHighways(combined, bounds);
     buildingsRenderer.updateBuildings(combined, bounds);
+    mapGround.update(bounds, getTileCacheDimensions() ?? undefined);
   };
 
   window.clearTileCache = () => {

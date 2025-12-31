@@ -1,7 +1,5 @@
 import * as THREE from "three";
-import { Line2 } from "three/examples/jsm/lines/Line2.js";
-import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
-import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 const ROAD_WIDTHS = {
   footway: 0.4,
@@ -21,9 +19,25 @@ const ROAD_WIDTHS = {
 };
 
 const DEFAULT_WIDTH = 1.0;
-const DEFAULT_COLOR = 0x2f2f2f;
-const DEFAULT_ELEVATION = 0.05;
+const DEFAULT_ELEVATION = 0.02;
 const METERS_PER_DEGREE_LAT = 111_132.92;
+const ROAD_REPEAT_METERS = 6;
+
+const textureLoader = new THREE.TextureLoader();
+
+function loadRoadTexture(url) {
+  const texture = textureLoader.load(url);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  if (texture.colorSpace !== undefined) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+  return texture;
+}
+
+const roadTexture = loadRoadTexture(
+  "/assets/textures/sandy_gravel_02_4k.blend/textures/sandy_gravel_02_diff_4k.jpg"
+);
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -82,21 +96,6 @@ function toLocalMeters(coord, origin, lonScale) {
   };
 }
 
-function makeLineMaterial(width, color) {
-  return new LineMaterial({
-    color,
-    linewidth: width,
-    worldUnits: true
-  });
-}
-
-function makeFallbackMaterial(width, color) {
-  return new THREE.LineBasicMaterial({
-    color,
-    linewidth: width
-  });
-}
-
 function resolveLineWidth(highway) {
   if (typeof highway !== "string") return DEFAULT_WIDTH;
   return ROAD_WIDTHS[highway] ?? DEFAULT_WIDTH;
@@ -104,176 +103,108 @@ function resolveLineWidth(highway) {
 
 export function createMapRenderer({
   scene,
-  renderer,
-  color = DEFAULT_COLOR,
   elevation = DEFAULT_ELEVATION
 } = {}) {
   const group = new THREE.Group();
   group.name = "osm-highways";
   scene?.add(group);
 
-  const pool = [];
-  const lineMaterials = new Map();
-  const fallbackMaterials = new Map();
-  const resolution = new THREE.Vector2(1, 1);
+  const roadMaterial = new THREE.MeshStandardMaterial({
+    map: roadTexture,
+    roughness: 0.9,
+    metalness: 0.0
+  });
 
-  const useWideLines = Boolean(Line2 && LineGeometry && LineMaterial);
+  const roadMesh = new THREE.Mesh(new THREE.BufferGeometry(), roadMaterial);
+  roadMesh.name = "osm-road-mesh";
+  roadMesh.receiveShadow = true;
+  group.add(roadMesh);
 
-  function getLineMaterial(width) {
-    if (!lineMaterials.has(width)) {
-      lineMaterials.set(width, makeLineMaterial(width, color));
-    }
-    return lineMaterials.get(width);
-  }
-
-  function getFallbackMaterial(width) {
-    if (!fallbackMaterials.has(width)) {
-      fallbackMaterials.set(width, makeFallbackMaterial(width, color));
-    }
-    return fallbackMaterials.get(width);
-  }
-
-  function createLine(width) {
-    if (useWideLines) {
-      const geometry = new LineGeometry();
-      const material = getLineMaterial(width);
-      const line = new Line2(geometry, material);
-      line.userData.isWideLine = true;
-      return line;
-    }
-    const geometry = new THREE.BufferGeometry();
-    const material = getFallbackMaterial(width);
-    const line = new THREE.Line(geometry, material);
-    line.userData.isWideLine = false;
-    return line;
-  }
-
-  function ensureLine(index, width) {
-    let line = pool[index];
-    if (!line) {
-      line = createLine(width);
-      pool[index] = line;
-      group.add(line);
-    }
-    line.visible = true;
-    const isWide = line.userData.isWideLine;
-    if (isWide) {
-      const material = getLineMaterial(width);
-      if (line.material !== material) {
-        line.material = material;
-      }
-    } else {
-      const material = getFallbackMaterial(width);
-      if (line.material !== material) {
-        line.material = material;
-      }
-    }
-    return line;
-  }
-
-  function updateLineGeometry(line, positions) {
-    if (!line?.geometry) return;
-    if (line.userData.isWideLine) {
-      if (!line.geometry.setPositions) return;
-      line.geometry.setPositions(positions);
-      const positionCount = line.geometry?.attributes?.position?.count ?? 0;
-      if (positionCount > 0 && typeof line.computeLineDistances === "function") {
-        line.computeLineDistances();
-      }
-    } else {
-      if (!line.geometry.setFromPoints) return;
-      const points = [];
-      for (let i = 0; i < positions.length; i += 3) {
-        points.push(new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]));
-      }
-      line.geometry.setFromPoints(points);
-      if (line.geometry?.attributes?.position?.count > 0) {
-        line.geometry.computeBoundingSphere();
-      }
+  function disposeGeometry(mesh) {
+    if (mesh.geometry) {
+      mesh.geometry.dispose();
     }
   }
 
-  function clearUnused(fromIndex) {
-    for (let i = fromIndex; i < pool.length; i += 1) {
-      const line = pool[i];
-      if (line) {
-        line.visible = false;
-      }
+  function applySegmentUVs(geometry, length, width) {
+    const uScale = Math.max(length / ROAD_REPEAT_METERS, 1);
+    const vScale = Math.max(width / ROAD_REPEAT_METERS, 1);
+    const uv = geometry.attributes.uv;
+    for (let i = 0; i < uv.count; i += 1) {
+      uv.setXY(i, uv.getX(i) * uScale, uv.getY(i) * vScale);
     }
   }
 
   function updateHighways(geojson, boundsOverride) {
     const lines = collectHighwayLines(geojson);
     if (lines.length === 0) {
-      clearUnused(0);
+      roadMesh.visible = false;
       return;
     }
 
     const bounds = boundsOverride ?? computeBounds(lines);
     if (!bounds) {
-      clearUnused(0);
+      roadMesh.visible = false;
       return;
     }
 
     const lonScale = metersPerDegreeLon(bounds.centerLat);
+    const segmentGeometries = [];
 
-    let activeIndex = 0;
     for (const line of lines) {
-      if (!line.coords || line.coords.length < 2) continue;
+      const coords = line.coords ?? [];
+      if (coords.length < 2) continue;
       const width = resolveLineWidth(line.highway);
-      const positions = [];
-      for (const coord of line.coords) {
-        if (!coord || coord.length < 2) continue;
-        const [lon, lat] = coord;
-        if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-        const local = toLocalMeters([lon, lat], bounds, lonScale);
-        positions.push(local.x, elevation, local.z);
+      for (let i = 0; i < coords.length - 1; i += 1) {
+        const start = coords[i];
+        const end = coords[i + 1];
+        if (!start || !end || start.length < 2 || end.length < 2) continue;
+        const startLocal = toLocalMeters(start, bounds, lonScale);
+        const endLocal = toLocalMeters(end, bounds, lonScale);
+        const dx = endLocal.x - startLocal.x;
+        const dz = endLocal.z - startLocal.z;
+        const length = Math.hypot(dx, dz);
+        if (!Number.isFinite(length) || length <= 0.001) continue;
+        const angle = Math.atan2(dz, dx);
+        const midX = (startLocal.x + endLocal.x) * 0.5;
+        const midZ = (startLocal.z + endLocal.z) * 0.5;
+        const geometry = new THREE.PlaneGeometry(length, width, 1, 1);
+        applySegmentUVs(geometry, length, width);
+        geometry.rotateX(-Math.PI / 2);
+        geometry.rotateY(angle);
+        geometry.translate(midX, elevation, midZ);
+        segmentGeometries.push(geometry);
       }
-      if (positions.length < 6) continue;
-      const lineMesh = ensureLine(activeIndex, width);
-      updateLineGeometry(lineMesh, positions);
-      activeIndex += 1;
     }
 
-    if (activeIndex === 0) {
-      clearUnused(0);
-      return;
-    }
-    clearUnused(activeIndex);
-  }
+    disposeGeometry(roadMesh);
 
-  function setResolution(width, height) {
-    resolution.set(width, height);
-    if (!useWideLines) return;
-    for (const material of lineMaterials.values()) {
-      material.resolution.set(width, height);
+    if (segmentGeometries.length > 0) {
+      const merged = mergeGeometries(segmentGeometries, false);
+      merged.computeBoundingSphere();
+      roadMesh.geometry = merged;
+      roadMesh.visible = true;
+    } else {
+      roadMesh.geometry = new THREE.BufferGeometry();
+      roadMesh.visible = false;
+    }
+
+    for (const geometry of segmentGeometries) {
+      geometry.dispose();
     }
   }
 
   function dispose() {
-    for (const line of pool) {
-      line?.geometry?.dispose?.();
-    }
-    for (const material of lineMaterials.values()) {
-      material.dispose();
-    }
-    for (const material of fallbackMaterials.values()) {
-      material.dispose();
-    }
+    disposeGeometry(roadMesh);
+    roadMaterial.dispose();
+    roadTexture.dispose();
     group.clear();
     scene?.remove(group);
-  }
-
-  if (renderer) {
-    const size = new THREE.Vector2();
-    renderer.getSize(size);
-    setResolution(size.x, size.y);
   }
 
   return {
     group,
     updateHighways,
-    setResolution,
     dispose
   };
 }
