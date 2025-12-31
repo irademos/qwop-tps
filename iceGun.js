@@ -92,6 +92,9 @@ export class IceGun {
       this.mesh.quaternion.copy(player.quaternion);
     }
     this.holder = null;
+    if (this.mesh.parent !== this.scene) {
+      this.scene.add(this.mesh);
+    }
     this.mesh.visible = true;
     if (typeof this.onDrop === 'function') {
       this.onDrop(previousHolder, { removeFromInventory });
