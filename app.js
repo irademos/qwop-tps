@@ -14,6 +14,7 @@ import { BreakManager } from './breakManager.js';
 import { initSpeechCommands } from './speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import { IceGun } from './iceGun.js';
+import { AutumnSword } from './autumnSword.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
 import { createLocationProvider } from './location.js';
@@ -116,6 +117,9 @@ async function main() {
   const ICE_GUN_SPAWN_MIN_RADIUS = 20;
   const ICE_GUN_SPAWN_MAX_RADIUS = 60;
   const ICE_GUN_SPAWN_INTERVAL_RANGE = [60, 120];
+  const AUTUMN_SWORD_SPAWN_MIN_RADIUS = 20;
+  const AUTUMN_SWORD_SPAWN_MAX_RADIUS = 60;
+  const AUTUMN_SWORD_SPAWN_INTERVAL_RANGE = [60, 120];
 
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
   setCookie("characterModel", characterModel);
@@ -538,6 +542,7 @@ async function main() {
   createClouds(scene);
 
   let iceGun;
+  let autumnSword;
 
   const breakManager = new BreakManager(scene);
   // Expose to window for debugging
@@ -598,18 +603,58 @@ async function main() {
 
   // Prime with an initial distant wave
 
+  const setPlayerWeaponType = (controls, weaponType) => {
+    if (!controls?.playerModel) return;
+    controls.playerModel.userData.equippedWeaponType = weaponType || null;
+  };
+
+  const clearPlayerWeaponType = (controls, weaponType) => {
+    if (!controls?.playerModel) return;
+    if (!weaponType || controls.playerModel.userData.equippedWeaponType === weaponType) {
+      controls.playerModel.userData.equippedWeaponType = null;
+    }
+  };
+
+  const updateRemoteWeaponType = (weapon, holderId, previousHolderId) => {
+    const localId = multiplayer?.getId?.();
+    if (previousHolderId && previousHolderId !== localId) {
+      const previousHolder = otherPlayers[previousHolderId];
+      if (previousHolder?.model?.userData?.equippedWeaponType === weapon.type) {
+        previousHolder.model.userData.equippedWeaponType = null;
+      }
+    }
+    if (holderId && holderId !== localId) {
+      const nextHolder = otherPlayers[holderId];
+      if (nextHolder?.model) {
+        nextHolder.model.userData.equippedWeaponType = weapon.type;
+      }
+    }
+  };
+
+  const dropOtherWeapons = (activeWeapon) => {
+    [iceGun, autumnSword].forEach(weapon => {
+      if (!weapon || weapon === activeWeapon) return;
+      if (weapon.holder === playerControls) {
+        weapon.drop({ removeFromInventory: true });
+      }
+    });
+  };
+
   iceGun = new IceGun(scene);
   await iceGun.load();
   window.iceGun = iceGun;
   iceGun.onPickup = (holder) => {
     if (holder !== playerControls) return;
+    dropOtherWeapons(iceGun);
     addToInventory('iceGun', 1);
+    setPlayerWeaponType(holder, iceGun.type);
   };
   iceGun.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
     if (shouldRemoveFromInventory) {
       removeFromInventory('iceGun', 1);
     }
+    clearPlayerWeaponType(holder, iceGun.type);
     playerControls?.updateAmmoUI?.(false);
   };
   if (iceGun.mesh) {
@@ -637,13 +682,70 @@ async function main() {
       if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
         iceGun.mesh.quaternion.set(rx, ry, rz, rw);
       }
+      const previousHolderId = iceGun.remoteHolderId ?? null;
       iceGun.remoteHolderId = state.holderId ?? null;
+      updateRemoteWeaponType(iceGun, iceGun.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && iceGun.holder === playerControls) {
         iceGun.holder = null;
+        clearPlayerWeaponType(playerControls, iceGun.type);
       }
     },
     isLocallyControlled: () => iceGun?.holder === playerControls
   });
+
+  autumnSword = new AutumnSword(scene);
+  await autumnSword.load();
+  window.autumnSword = autumnSword;
+  autumnSword.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    dropOtherWeapons(autumnSword);
+    addToInventory('autumnSword', 1);
+    setPlayerWeaponType(holder, autumnSword.type);
+  };
+  autumnSword.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('autumnSword', 1);
+    }
+    clearPlayerWeaponType(holder, autumnSword.type);
+  };
+  if (autumnSword.mesh) {
+    autumnSword.mesh.userData.hideInMapView = true;
+    autumnSword.mesh.visible = false;
+  }
+  registerNetworkedEntity('autumnsword', {
+    getState: () => {
+      if (!autumnSword?.mesh) return null;
+      const pos = autumnSword.mesh.position;
+      const q = autumnSword.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: autumnSword.holder === playerControls ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!autumnSword?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        autumnSword.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        autumnSword.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = autumnSword.remoteHolderId ?? null;
+      autumnSword.remoteHolderId = state.holderId ?? null;
+      updateRemoteWeaponType(autumnSword, autumnSword.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && autumnSword.holder === playerControls) {
+        autumnSword.holder = null;
+        clearPlayerWeaponType(playerControls, autumnSword.type);
+      }
+    },
+    isLocallyControlled: () => autumnSword?.holder === playerControls
+  });
+
+  window.weapons = { iceGun, autumnSword };
 
   function attachMonsterPhysics(monster) {
     const model = monster.model;
@@ -902,6 +1004,10 @@ async function main() {
     iceGun: {
       name: 'Ice Gun',
       icon: '/assets/ui/items/icegun.png'
+    },
+    autumnSword: {
+      name: 'Autumn Sword',
+      icon: ''
     }
   };
   const inventoryState = { ...(playerProfile.inventory || {}) };
@@ -966,11 +1072,16 @@ async function main() {
     if (itemId === 'iceGun') {
       return iceGun?.holder === playerControls;
     }
+    if (itemId === 'autumnSword') {
+      return autumnSword?.holder === playerControls;
+    }
     return false;
   }
 
   function getEquippedInventoryItemId() {
-    return isInventoryItemEquipped('iceGun') ? 'iceGun' : null;
+    if (isInventoryItemEquipped('iceGun')) return 'iceGun';
+    if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
+    return null;
   }
 
   function equipInventoryItem(itemId) {
@@ -980,7 +1091,19 @@ async function main() {
       if (iceGun.remoteHolderId && iceGun.remoteHolderId !== multiplayer?.getId?.()) return;
       iceGun.mesh.visible = true;
       iceGun.holder = playerControls;
+      dropOtherWeapons(iceGun);
+      setPlayerWeaponType(playerControls, iceGun.type);
       playerControls.updateAmmoUI?.(true);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'autumnSword') {
+      if (!autumnSword?.mesh || !playerControls) return;
+      if (autumnSword.remoteHolderId && autumnSword.remoteHolderId !== multiplayer?.getId?.()) return;
+      autumnSword.mesh.visible = true;
+      autumnSword.holder = playerControls;
+      dropOtherWeapons(autumnSword);
+      setPlayerWeaponType(playerControls, autumnSword.type);
       updateSettingsUI();
     }
   }
@@ -993,7 +1116,19 @@ async function main() {
         iceGun.mesh.visible = false;
       }
       removeFromInventory('iceGun', 1);
+      clearPlayerWeaponType(playerControls, iceGun.type);
       playerControls?.updateAmmoUI?.(false);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'autumnSword') {
+      if (autumnSword?.holder !== playerControls) return;
+      autumnSword.holder = null;
+      if (autumnSword.mesh) {
+        autumnSword.mesh.visible = false;
+      }
+      removeFromInventory('autumnSword', 1);
+      clearPlayerWeaponType(playerControls, autumnSword.type);
       updateSettingsUI();
     }
   }
@@ -1182,10 +1317,24 @@ async function main() {
     iceGun.holder = null;
   }
 
+  function spawnAutumnSwordPickup(position) {
+    if (!autumnSword?.mesh) return;
+    const spawnPos = position.clone();
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (!Number.isFinite(terrainHeight)) return;
+    spawnPos.y = terrainHeight + 0.5;
+    autumnSword.mesh.position.copy(spawnPos);
+    autumnSword.mesh.quaternion.set(0, 0, 0, 1);
+    autumnSword.mesh.visible = true;
+    autumnSword.holder = null;
+  }
+
   let lastFoodSpawnAt = performance.now();
   let nextFoodSpawnDelay = THREE.MathUtils.randFloat(...FOOD_SPAWN_INTERVAL_RANGE) * 1000;
   let lastIceGunSpawnAt = performance.now();
   let nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
+  let lastAutumnSwordSpawnAt = performance.now();
+  let nextAutumnSwordSpawnDelay = THREE.MathUtils.randFloat(...AUTUMN_SWORD_SPAWN_INTERVAL_RANGE) * 1000;
   let statDecayAccumulator = 0;
 
   const isHost = !multiplayer || multiplayer.isHost;
@@ -1200,6 +1349,18 @@ async function main() {
     spawnIceGunPickup(spawnPos);
     lastIceGunSpawnAt = performance.now();
     nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
+  }
+  if (isHost && !inventoryState.autumnSword?.count && autumnSword?.mesh && !autumnSword.holder) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = THREE.MathUtils.randFloat(AUTUMN_SWORD_SPAWN_MIN_RADIUS, AUTUMN_SWORD_SPAWN_MAX_RADIUS);
+    const spawnPos = new THREE.Vector3(
+      playerModel.position.x + Math.cos(angle) * radius,
+      0,
+      playerModel.position.z + Math.sin(angle) * radius
+    );
+    spawnAutumnSwordPickup(spawnPos);
+    lastAutumnSwordSpawnAt = performance.now();
+    nextAutumnSwordSpawnDelay = THREE.MathUtils.randFloat(...AUTUMN_SWORD_SPAWN_INTERVAL_RANGE) * 1000;
   }
 
   playerControls = new PlayerControls({
@@ -2116,6 +2277,24 @@ async function main() {
       }
     }
 
+    if (now - lastAutumnSwordSpawnAt >= nextAutumnSwordSpawnDelay) {
+      lastAutumnSwordSpawnAt = now;
+      nextAutumnSwordSpawnDelay = THREE.MathUtils.randFloat(...AUTUMN_SWORD_SPAWN_INTERVAL_RANGE) * 1000;
+      const isHost = !multiplayer || multiplayer.isHost;
+      const hasSword = (inventoryState?.autumnSword?.count || 0) > 0;
+      const canSpawn = isHost && autumnSword?.mesh && !autumnSword.holder && !hasSword && !autumnSword.mesh.visible;
+      if (canSpawn) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = THREE.MathUtils.randFloat(AUTUMN_SWORD_SPAWN_MIN_RADIUS, AUTUMN_SWORD_SPAWN_MAX_RADIUS);
+        const spawnPos = new THREE.Vector3(
+          playerModel.position.x + Math.cos(angle) * radius,
+          0,
+          playerModel.position.z + Math.sin(angle) * radius
+        );
+        spawnAutumnSwordPickup(spawnPos);
+      }
+    }
+
     const pickupTime = performance.now() * 0.002;
     for (let i = ammoPickups.length - 1; i >= 0; i--) {
       const pickup = ammoPickups[i];
@@ -2160,6 +2339,7 @@ async function main() {
     }
 
     iceGun?.update();
+    autumnSword?.update();
     const localStates = collectLocalControlStates();
 
     if (multiplayer.isHost) {

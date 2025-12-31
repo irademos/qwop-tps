@@ -522,7 +522,8 @@ function renderInventory() {
   const entries = Object.entries(inventory);
   const equippedItemId = context.appState?.getEquippedInventoryItemId?.() || null;
   const fallbackIcons = {
-    iceGun: '❄️'
+    iceGun: '❄️',
+    autumnSword: '🗡️'
   };
 
   elements.inventoryGrid.innerHTML = '';

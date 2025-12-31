@@ -131,7 +131,7 @@ export class PlayerControls {
     this.lastAmmoValue = null;
     this.lastAmmoEmpty = null;
     this.lastHasGun = null;
-    this.updateAmmoUI(window.iceGun?.holder === this);
+    this.updateAmmoUI(!!this.getEquippedGun());
   }
 
   setPlayerModel(newModel) {
@@ -443,16 +443,20 @@ export class PlayerControls {
       return;
     }
 
-    const iceGun = window.iceGun;
-    if (iceGun?.holder === this) {
-      iceGun.tryPickup?.(this);
+    const equippedWeapon = this.getEquippedWeapon();
+    if (equippedWeapon) {
+      equippedWeapon.tryPickup?.(this);
       return;
     }
 
     window.spaceship?.tryMount(this);
     window.surfboard?.tryMount(this);
     window.rowBoat?.tryMount(this);
-    iceGun?.tryPickup?.(this);
+    for (const weapon of this.getWeapons()) {
+      if (!weapon) continue;
+      weapon.tryPickup?.(this);
+      if (weapon.holder === this) break;
+    }
   }
 
   playAction(actionName) {
@@ -477,8 +481,11 @@ export class PlayerControls {
     this.currentSpecialAction = actionName;
 
     if (["mutantPunch", "hurricaneKick", "mmaKick", "runningKick"].includes(actionName)) {
+      const attackName = actionName === 'mutantPunch' && this.getEquippedSword()
+        ? 'swordSlash'
+        : actionName;
       this.playerModel.userData.attack = {
-        name: actionName,
+        name: attackName,
         start: Date.now(),
         hasHit: false,
       };
@@ -878,10 +885,26 @@ export class PlayerControls {
 
       this.updateInteractionPrompt();
 
-      const hasGun = window.iceGun?.holder === this;
+      const hasGun = !!this.getEquippedGun();
       if (hasGun !== this.lastHasGun) {
         this.updateAmmoUI(hasGun);
       }
+  }
+
+  getWeapons() {
+    return Object.values(window.weapons || {}).filter(Boolean);
+  }
+
+  getEquippedWeapon() {
+    return this.getWeapons().find(weapon => weapon.holder === this) || null;
+  }
+
+  getEquippedGun() {
+    return this.getWeapons().find(weapon => weapon.holder === this && weapon.type === 'gun') || null;
+  }
+
+  getEquippedSword() {
+    return this.getWeapons().find(weapon => weapon.holder === this && weapon.type === 'sword') || null;
   }
 
   updateInteractionPrompt() {
@@ -901,9 +924,14 @@ export class PlayerControls {
       }
       visible = !!promptText;
     } else {
-      const iceGun = window.iceGun;
-      if (iceGun?.holder === this) {
-        promptText = "'x' drop gun";
+      const equippedWeapon = this.getEquippedWeapon();
+      if (equippedWeapon) {
+        const weaponLabel = equippedWeapon.type === 'sword'
+          ? 'sword'
+          : equippedWeapon.type === 'gun'
+            ? 'gun'
+            : 'weapon';
+        promptText = `'x' drop ${weaponLabel}`;
         visible = true;
       } else {
         const playerPos = this.playerModel.position;
@@ -926,7 +954,15 @@ export class PlayerControls {
         consider(window.spaceship, 10, "'x' enter spaceship");
         consider(window.rowBoat, 4, "'x' enter rowboat");
         consider(window.surfboard, 3, "'x' enter surfboard");
-        consider(window.iceGun, 3, "'x' pick up gun");
+        this.getWeapons().forEach(weapon => {
+          if (!weapon) return;
+          const weaponLabel = weapon.type === 'sword'
+            ? 'sword'
+            : weapon.type === 'gun'
+              ? 'gun'
+              : 'weapon';
+          consider(weapon, 3, `'x' pick up ${weaponLabel}`);
+        });
       }
     }
 
@@ -1000,14 +1036,14 @@ export class PlayerControls {
   }
 
   canFireProjectile() {
-    const iceGun = window.iceGun;
-    return !!iceGun && iceGun.holder === this && this.ammo > 0 && this.playerModel;
+    const gun = this.getEquippedGun();
+    return !!gun && this.ammo > 0 && this.playerModel;
   }
 
   consumeAmmo() {
     if (this.ammo <= 0) return false;
     this.ammo -= 1;
-    this.updateAmmoUI(window.iceGun?.holder === this);
+    this.updateAmmoUI(!!this.getEquippedGun());
     return true;
   }
 
@@ -1040,11 +1076,11 @@ export class PlayerControls {
   getProjectileSpawnPosition(direction) {
     const offsetDistance = 0.6;
     const normalizedDirection = direction.clone().normalize();
-    const iceGun = window.iceGun;
+    const gun = this.getEquippedGun();
 
-    if (iceGun?.mesh) {
+    if (gun?.mesh) {
       const gunPosition = new THREE.Vector3();
-      iceGun.mesh.getWorldPosition(gunPosition);
+      gun.mesh.getWorldPosition(gunPosition);
       return gunPosition.add(normalizedDirection.clone().multiplyScalar(offsetDistance));
     }
 
@@ -1061,11 +1097,11 @@ export class PlayerControls {
     const nextAmmo = Math.min(this.maxAmmo, this.ammo + normalized);
     if (nextAmmo !== this.ammo) {
       this.ammo = nextAmmo;
-      this.updateAmmoUI(window.iceGun?.holder === this);
+      this.updateAmmoUI(!!this.getEquippedGun());
     }
   }
 
-  updateAmmoUI(hasGun = window.iceGun?.holder === this) {
+  updateAmmoUI(hasGun = !!this.getEquippedGun()) {
     if (this.ammoCountEl && this.lastAmmoValue !== this.ammo) {
       this.ammoCountEl.textContent = `${this.ammo}`;
       this.lastAmmoValue = this.ammo;

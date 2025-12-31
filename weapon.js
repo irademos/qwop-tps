@@ -1,0 +1,170 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { getTerrainHeight } from './water.js';
+
+const DEFAULT_POSITION = new THREE.Vector3(-6, 0, 5);
+const DEFAULT_PICKUP_RADIUS = 3;
+
+export class Weapon {
+  constructor(scene, options = {}) {
+    this.scene = scene;
+    this.mesh = null;
+    this.holder = null;
+    this.type = options.type || 'weapon';
+    this.itemId = options.itemId || this.type;
+    this.modelUrl = options.modelUrl || '';
+    this.onPickup = null;
+    this.onDrop = null;
+    this._holdOffset = options.holdOffset || new THREE.Vector3(-0.05, 0.15, 0.08);
+    this._holdRotation = options.holdRotation || new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
+    this._holdQuaternion = new THREE.Quaternion().setFromEuler(this._holdRotation);
+    this._handBones = new WeakMap();
+    this._tempPosition = new THREE.Vector3();
+    this._tempQuaternion = new THREE.Quaternion();
+    this._tempOffset = new THREE.Vector3();
+    this._defaultPosition = options.defaultPosition || DEFAULT_POSITION;
+    this._pickupRadius = Number.isFinite(options.pickupRadius)
+      ? options.pickupRadius
+      : DEFAULT_PICKUP_RADIUS;
+    this._scale = Number.isFinite(options.scale) ? options.scale : 0.001;
+    this._fallbackSize = options.fallbackSize || new THREE.Vector3(0.6, 0.2, 0.8);
+    this._fallbackColor = options.fallbackColor || 0x99ccff;
+  }
+
+  async load(position = this._defaultPosition) {
+    const loader = new GLTFLoader();
+    try {
+      const gltf = await loader.loadAsync(this.modelUrl);
+      this.mesh = gltf.scene;
+    } catch (error) {
+      console.warn(`Failed to load ${this.itemId} model, using placeholder box.`, error);
+      const geometry = new THREE.BoxGeometry(
+        this._fallbackSize.x,
+        this._fallbackSize.y,
+        this._fallbackSize.z
+      );
+      const material = new THREE.MeshStandardMaterial({ color: this._fallbackColor });
+      this.mesh = new THREE.Mesh(geometry, material);
+    }
+
+    if (!this.mesh) return;
+
+    const targetPos = position.clone();
+    const terrainHeight = getTerrainHeight(targetPos.x, targetPos.z);
+    targetPos.y = terrainHeight + 0.5;
+
+    this.mesh.traverse(child => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        const materials = Array.isArray(child.material)
+          ? child.material
+          : [child.material];
+        materials.forEach(material => {
+          if (!material) return;
+          material.depthWrite = true;
+          material.depthTest = true;
+        });
+      }
+    });
+
+    this.mesh.position.copy(targetPos);
+    this.mesh.scale.setScalar(this._scale);
+    this.scene.add(this.mesh);
+  }
+
+  tryPickup(playerControls) {
+    if (!this.mesh || !playerControls?.playerModel) return;
+    if (!this.mesh.visible) return;
+    if (this.holder === playerControls) {
+      this.drop();
+      return;
+    }
+    if (this.holder) return;
+    const distance = playerControls.playerModel.position.distanceTo(this.mesh.position);
+    if (distance > this._pickupRadius) return;
+
+    this.holder = playerControls;
+    if (typeof this.onPickup === 'function') {
+      this.onPickup(playerControls);
+    }
+    if (window.DEBUG_PICKUPS) {
+      console.log(`Player picked up ${this.itemId}`);
+    }
+  }
+
+  drop({ removeFromInventory = true } = {}) {
+    if (!this.holder || !this.mesh) return;
+    const previousHolder = this.holder;
+    const player = previousHolder.playerModel;
+    if (player) {
+      const dropPosition = player.position.clone();
+      const terrainHeight = getTerrainHeight(dropPosition.x, dropPosition.z);
+      dropPosition.y = terrainHeight + 0.5;
+      this.mesh.position.copy(dropPosition);
+      this.mesh.quaternion.copy(player.quaternion);
+    }
+    this.holder = null;
+    this.mesh.visible = true;
+    if (typeof this.onDrop === 'function') {
+      this.onDrop(previousHolder, { removeFromInventory });
+    }
+  }
+
+  update() {
+    if (!this.mesh) return;
+    if (!this.holder || !this.holder.playerModel) return;
+
+    const player = this.holder.playerModel;
+    const handBone = this._getHandBone(player);
+
+    if (handBone) {
+      handBone.updateWorldMatrix(true, false);
+      handBone.getWorldPosition(this._tempPosition);
+      handBone.getWorldQuaternion(this._tempQuaternion);
+
+      this.mesh.position.copy(this._tempPosition);
+      this._tempOffset.copy(this._holdOffset).applyQuaternion(this._tempQuaternion);
+      this.mesh.position.add(this._tempOffset);
+
+      this.mesh.quaternion.copy(this._tempQuaternion).multiply(this._holdQuaternion);
+      return;
+    }
+
+    const quaternion = player.quaternion;
+    this._tempOffset.copy(this._holdOffset).applyQuaternion(quaternion);
+    this.mesh.position.copy(player.position).add(this._tempOffset);
+    this.mesh.quaternion.copy(quaternion).multiply(this._holdQuaternion);
+  }
+
+  _getHandBone(playerModel) {
+    if (!playerModel) return null;
+
+    if (this._handBones.has(playerModel)) {
+      return this._handBones.get(playerModel);
+    }
+
+    const root = playerModel.userData?.pivot ?? playerModel;
+    let handBone = null;
+
+    root.traverse(child => {
+      if (handBone || !child.isBone || !child.name) return;
+      const name = child.name.toLowerCase();
+      if (name.includes('righthand')) {
+        handBone = child;
+      }
+    });
+
+    if (!handBone) {
+      root.traverse(child => {
+        if (handBone || !child.isBone || !child.name) return;
+        if (child.name.toLowerCase().includes('hand')) {
+          handBone = child;
+        }
+      });
+    }
+
+    this._handBones.set(playerModel, handBone || null);
+    return handBone || null;
+  }
+}

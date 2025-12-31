@@ -2,6 +2,7 @@ import * as THREE from 'three';
 
 export const ATTACKS = {
   mutantPunch: { damage: 10, range: 1.5, hitTime: 300, hitWindow: 300 },
+  swordSlash: { damage: 18, range: 1.7, hitTime: 300, hitWindow: 300 },
   hurricaneKick: { damage: 15, range: 2.0, hitTime: 400, hitWindow: 400 },
   mmaKick: { damage: 12, range: 1.7, hitTime: 350, hitWindow: 300 }
 };
@@ -17,7 +18,10 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioM
   for (const attacker of players) {
     const info = attacker.model.userData.attack;
     if (!info) continue;
-    const cfg = ATTACKS[info.name];
+    const attackName = info.name === 'mutantPunch' && attacker.model.userData?.equippedWeaponType === 'sword'
+      ? 'swordSlash'
+      : info.name;
+    const cfg = ATTACKS[attackName];
     if (!cfg) continue;
     const elapsed = now - info.start;
     if (elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow && !info.hasHit) {
