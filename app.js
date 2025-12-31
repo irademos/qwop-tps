@@ -23,6 +23,7 @@ import { fetchOSMFeatures } from './osmClient.js';
 import { createMapRenderer } from './mapRender.js';
 import { createBuildingsRenderer } from './buildingsRender.js';
 import { createTileCache } from './tileCache.js';
+import { createGroundTiles } from './groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './settingsPanel.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './mapView.js';
@@ -1023,6 +1024,12 @@ async function main() {
     tileSizeMeters: TILE_SIZE_METERS,
     evictRadiusTiles: TILE_EVICT_RADIUS
   });
+  const groundTiles = createGroundTiles({
+    scene,
+    renderer,
+    tileSizeMeters: TILE_SIZE_METERS
+  });
+  window.groundTiles = groundTiles.tiles;
   const mapFetchInFlight = new Set();
   let activeTileKey = null;
   let worldOrigin = null;
@@ -1186,6 +1193,7 @@ async function main() {
 
   window.clearTileCache = () => {
     tileCache.cache.clear();
+    groundTiles.clear();
     clearCache().catch((error) => console.warn('Failed to clear persistent tile cache:', error));
     rebuildMapFromCache();
   };
@@ -1202,8 +1210,9 @@ async function main() {
     }
     activeTileKey = tileKey;
 
-    const evicted = tileCache.evictTiles(tile);
-    if (evicted) {
+    const evictedKeys = tileCache.evictTiles(tile);
+    if (evictedKeys.length) {
+      evictedKeys.forEach((key) => groundTiles.removeTile(key));
       rebuildMapFromCache();
     }
 
@@ -1218,6 +1227,7 @@ async function main() {
         meshes: { highways: null, buildings: null },
         fetchedAt: cachedTile.fetchedAt
       });
+      groundTiles.ensureTile(tile, tileKey);
       rebuildMapFromCache();
       if (Date.now() - cachedTile.fetchedAt < TILE_CACHE_MAX_AGE_MS) {
         return;
@@ -1248,6 +1258,7 @@ async function main() {
         meshes: { highways: null, buildings: null },
         fetchedAt: Date.now()
       });
+      groundTiles.ensureTile(tile, tileKey);
       setCachedTile(tileKey, geojson).catch((error) => {
         console.warn('Failed to persist tile cache:', error);
       });
