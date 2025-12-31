@@ -10,9 +10,10 @@ export class AudioManager {
       'SFX/Footsteps/Dirt/Dirt Walk 5.ogg'
     ];
     this.attacks = [
-      'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg',
-      'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 2.ogg',
-      'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 3.ogg'
+      '/SFX/Chopping and Mining/chop 3.ogg',
+      '/SFX/Chopping and Mining/mine 3.ogg',
+      '/SFX/Chopping and Mining/mine 5.ogg',
+      '/SFX/Chopping and Mining/Spell Impact 3.ogg'
     ];
   }
 
