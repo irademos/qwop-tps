@@ -7,6 +7,16 @@ export const ATTACKS = {
   mmaKick: { damage: 12, range: 1.7, hitTime: 350, hitWindow: 300 }
 };
 
+function getStrengthDamage(attackerId, baseDamage) {
+  if (attackerId === 'local' && typeof window.getPlayerStrength === 'function') {
+    const strength = window.getPlayerStrength();
+    if (Number.isFinite(strength)) {
+      return Math.max(0, baseDamage + strength);
+    }
+  }
+  return baseDamage;
+}
+
 export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioManager, multiplayer }) {
   const now = Date.now();
   const isHost = !multiplayer || multiplayer.isHost;
@@ -26,13 +36,14 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioM
     const elapsed = now - info.start;
     if (elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow && !info.hasHit) {
       let hit = false;
+      const attackDamage = getStrengthDamage(attacker.id, cfg.damage);
       for (const target of players) {
         if (target === attacker) continue;
         const dist = attacker.model.position.distanceTo(target.model.position);
         if (dist <= cfg.range) {
           hit = true;
           if (target.id === 'local') {
-            window.localHealth = Math.max(0, window.localHealth - cfg.damage);
+            window.localHealth = Math.max(0, window.localHealth - attackDamage);
             if (window.playerControls) {
               const dir = new THREE.Vector3().subVectors(target.model.position, attacker.model.position).normalize();
               const impulse = dir.multiplyScalar(0.15);
@@ -41,7 +52,7 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioM
           } else {
             const tp = otherPlayers[target.id];
             if (tp) {
-              tp.health = Math.max(0, (tp.health || 100) - cfg.damage);
+              tp.health = Math.max(0, (tp.health || 100) - attackDamage);
             }
           }
         }
@@ -53,7 +64,7 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioM
           const dist = attacker.model.position.distanceTo(monster.model.position);
           if (dist <= cfg.range) {
             hit = true;
-            const killed = monster.applyDamage(cfg.damage);
+            const killed = monster.applyDamage(attackDamage);
             if (killed && attacker.id === 'local') {
               window.onMonsterKill?.();
             }
@@ -67,13 +78,13 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioM
           const dist = attacker.model.position.distanceTo(center);
           if (dist <= cfg.range) {
             hit = true;
-            const dir = new THREE.Vector3()
-              .subVectors(center, attacker.model.position)
-              .normalize();
-            const impulse = dir.multiplyScalar(2);
-            window.breakManager.onHit(id, cfg.damage, impulse);
-            const remaining = window.breakManager.registry.get(id)?.health ?? 0;
-            console.log(`🪓 ${id} health: ${remaining}`);
+          const dir = new THREE.Vector3()
+            .subVectors(center, attacker.model.position)
+            .normalize();
+          const impulse = dir.multiplyScalar(2);
+          window.breakManager.onHit(id, attackDamage, impulse);
+          const remaining = window.breakManager.registry.get(id)?.health ?? 0;
+          console.log(`🪓 ${id} health: ${remaining}`);
 
           }
         }

@@ -46,6 +46,15 @@ export function updateProjectiles({
 }) {
   const localId = multiplayer?.getId?.();
   const isHost = !multiplayer || multiplayer.isHost;
+  const getStrengthDamage = baseDamage => {
+    if (typeof window.getPlayerStrength === 'function') {
+      const strength = window.getPlayerStrength();
+      if (Number.isFinite(strength)) {
+        return Math.max(0, baseDamage + strength);
+      }
+    }
+    return baseDamage;
+  };
   const removeProjectile = (index) => {
     const p = projectiles[index];
     const body = p.userData.rb;
@@ -97,7 +106,8 @@ export function updateProjectiles({
       if (projBox.intersectsBox(playerBox)) {
         const player = otherPlayers[id];
         if (player) {
-          player.health = Math.max(0, (player.health || 100) - 10);
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
+          player.health = Math.max(0, (player.health || 100) - damage);
           console.log(`💥 Hit player: ${id}, Health: ${player.health}`);
         }
         removeProjectile(i);
@@ -133,7 +143,8 @@ export function updateProjectiles({
       removed = true;
 
       if (typeof window.localHealth === 'number') {
-        window.localHealth = Math.max(0, window.localHealth - 10);
+        const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
+        window.localHealth = Math.max(0, window.localHealth - damage);
         console.log(`❤️ Your Health: ${window.localHealth}`);
       }
 
@@ -151,7 +162,8 @@ export function updateProjectiles({
         const monsterBox = new THREE.Box3().setFromObject(monster.model);
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           console.log(`💥 Monster was hit`);
-          const killed = monster.applyDamage(10);
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
+          const killed = monster.applyDamage(damage);
           if (killed && proj.userData.shooterId === localId) {
             window.onMonsterKill?.();
           }
