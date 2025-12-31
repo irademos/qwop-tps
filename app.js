@@ -105,14 +105,17 @@ async function main() {
 
   const FOOD_HUNGER_GAIN = 25;
   const FOOD_ENERGY_GAIN = 15;
+  const HEALTH_PICKUP_GAIN = 20;
   const HUNGER_DECAY_PER_HOUR = 6;
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
   const PICKUP_RADIUS = 1.2;
   const MAX_FOOD_PICKUPS = 12;
+  const MAX_HEALTH_PICKUPS = 8;
   const FOOD_SPAWN_MIN_RADIUS = 8;
   const FOOD_SPAWN_MAX_RADIUS = 25;
   const FOOD_SPAWN_INTERVAL_RANGE = [10, 20];
+  const HEALTH_SPAWN_INTERVAL_RANGE = [14, 26];
   const ICE_GUN_SPAWN_MIN_RADIUS = 20;
   const ICE_GUN_SPAWN_MAX_RADIUS = 60;
   const ICE_GUN_SPAWN_INTERVAL_RANGE = [60, 120];
@@ -1113,6 +1116,7 @@ async function main() {
   const ammoPickups = [];
   const AMMO_PICKUP_AMOUNT = 5;
   const foodPickups = [];
+  const healthPickups = [];
 
   function spawnAmmoPickup(position) {
     const spawnPos = position.clone();
@@ -1163,9 +1167,40 @@ async function main() {
     return pickup;
   }
 
+  function spawnHealthPickup(position) {
+    const spawnPos = position.clone();
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    spawnPos.y = terrainHeight + 0.6;
+
+    const geometry = new THREE.IcosahedronGeometry(0.25, 0);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xff5a5a,
+      emissive: 0x5a1111,
+      emissiveIntensity: 0.4,
+      metalness: 0.05,
+      roughness: 0.7
+    });
+
+    const pickup = new THREE.Mesh(geometry, material);
+    pickup.position.copy(spawnPos);
+    pickup.castShadow = true;
+    pickup.userData.baseY = spawnPos.y;
+    pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.type = 'health';
+    scene.add(pickup);
+    healthPickups.push(pickup);
+    return pickup;
+  }
+
   function applyFoodPickupEffects() {
     setStat('hunger', statsState.hunger + FOOD_HUNGER_GAIN, { skipSave: true });
     setStat('energy', statsState.energy + FOOD_ENERGY_GAIN, { skipSave: true });
+    lastStatUpdateAt = Date.now();
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+
+  function applyHealthPickupEffects() {
+    setStat('health', statsState.health + HEALTH_PICKUP_GAIN, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
@@ -1184,6 +1219,8 @@ async function main() {
 
   let lastFoodSpawnAt = performance.now();
   let nextFoodSpawnDelay = THREE.MathUtils.randFloat(...FOOD_SPAWN_INTERVAL_RANGE) * 1000;
+  let lastHealthSpawnAt = performance.now();
+  let nextHealthSpawnDelay = THREE.MathUtils.randFloat(...HEALTH_SPAWN_INTERVAL_RANGE) * 1000;
   let lastIceGunSpawnAt = performance.now();
   let nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
   let statDecayAccumulator = 0;
@@ -2098,6 +2135,24 @@ async function main() {
       }
     }
 
+    if (now - lastHealthSpawnAt >= nextHealthSpawnDelay) {
+      lastHealthSpawnAt = now;
+      nextHealthSpawnDelay = THREE.MathUtils.randFloat(...HEALTH_SPAWN_INTERVAL_RANGE) * 1000;
+      if (healthPickups.length < MAX_HEALTH_PICKUPS) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = THREE.MathUtils.randFloat(FOOD_SPAWN_MIN_RADIUS, FOOD_SPAWN_MAX_RADIUS);
+        const spawnPos = new THREE.Vector3(
+          playerModel.position.x + Math.cos(angle) * radius,
+          0,
+          playerModel.position.z + Math.sin(angle) * radius
+        );
+        const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+        if (Number.isFinite(terrainHeight)) {
+          spawnHealthPickup(spawnPos);
+        }
+      }
+    }
+
     if (now - lastIceGunSpawnAt >= nextIceGunSpawnDelay) {
       lastIceGunSpawnAt = now;
       nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
@@ -2156,6 +2211,27 @@ async function main() {
         pickup.geometry?.dispose();
         pickup.material?.dispose();
         foodPickups.splice(i, 1);
+      }
+    }
+
+    for (let i = healthPickups.length - 1; i >= 0; i--) {
+      const pickup = healthPickups[i];
+      if (!pickup) continue;
+
+      if (pickup.userData.baseY === undefined) {
+        pickup.userData.baseY = pickup.position.y;
+      }
+
+      pickup.rotation.y += 0.03;
+      const phase = pickup.userData.phase ?? 0;
+      pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+      if (playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+        applyHealthPickupEffects();
+        scene.remove(pickup);
+        pickup.geometry?.dispose();
+        pickup.material?.dispose();
+        healthPickups.splice(i, 1);
       }
     }
 
