@@ -640,9 +640,32 @@ async function main() {
     });
   };
 
+  const createWeaponMarker = (color = 0xffd400) => {
+    const geometry = new THREE.ConeGeometry(0.25, 0.5, 4);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const marker = new THREE.Mesh(geometry, material);
+    marker.rotation.x = Math.PI;
+    marker.castShadow = false;
+    marker.receiveShadow = false;
+    marker.visible = false;
+    scene.add(marker);
+    return marker;
+  };
+
+  const updateWeaponMarker = (weapon, marker, rotationSpeed, offsetY = 1.2) => {
+    if (!weapon?.mesh || !marker) return;
+    const shouldShow = weapon.mesh.visible && !weapon.holder;
+    marker.visible = shouldShow;
+    if (!shouldShow) return;
+    marker.position.copy(weapon.mesh.position);
+    marker.position.y += offsetY;
+    marker.rotation.y += rotationSpeed;
+  };
+
   iceGun = new IceGun(scene);
   await iceGun.load();
   window.iceGun = iceGun;
+  const iceGunMarker = createWeaponMarker(0xffd400);
   iceGun.onPickup = (holder) => {
     if (holder !== playerControls) return;
     dropOtherWeapons(iceGun);
@@ -696,6 +719,7 @@ async function main() {
   autumnSword = new AutumnSword(scene);
   await autumnSword.load();
   window.autumnSword = autumnSword;
+  const autumnSwordMarker = createWeaponMarker(0xffd400);
   autumnSword.onPickup = (holder) => {
     if (holder !== playerControls) return;
     dropOtherWeapons(autumnSword);
@@ -2340,6 +2364,8 @@ async function main() {
 
     iceGun?.update();
     autumnSword?.update();
+    updateWeaponMarker(iceGun, iceGunMarker, 0.03);
+    updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
     const localStates = collectLocalControlStates();
 
     if (multiplayer.isHost) {
