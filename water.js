@@ -30,7 +30,7 @@ export function registerIsland({ center, radius, surfaceRadius = radius, getHeig
 }
 
 export function getTerrainHeight(x, z) {
-  let height = SEA_FLOOR_Y;
+  let height = 0; //SEA_FLOOR_Y;
   for (const island of islandAreas) {
     const dx = x - island.center.x;
     const dz = z - island.center.z;
