@@ -1,29 +1,34 @@
 import * as THREE from "three";
-import { Line2 } from "three/examples/jsm/lines/Line2.js";
-import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
-import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
-
-const ROAD_WIDTHS = {
-  footway: 0.4,
-  path: 0.5,
-  cycleway: 0.6,
-  steps: 0.35,
-  track: 0.7,
-  service: 0.9,
-  residential: 1.2,
-  living_street: 1.1,
-  unclassified: 1.1,
-  tertiary: 1.5,
-  secondary: 2.0,
-  primary: 2.6,
-  trunk: 3.0,
-  motorway: 3.4
-};
-
-const DEFAULT_WIDTH = 1.0;
-const DEFAULT_COLOR = 0x2f2f2f;
+const ROAD_WIDTH_METERS = 1.2;
 const DEFAULT_ELEVATION = 0.05;
 const METERS_PER_DEGREE_LAT = 111_132.92;
+const ROAD_TEXTURE_METERS = 3.5;
+const GROUND_TEXTURE_METERS = 8.0;
+
+const textureLoader = new THREE.TextureLoader();
+
+function loadTex(url, { srgb = false, repeat = 1 } = {}) {
+  const tex = textureLoader.load(url);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  if (srgb && tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+const groundBase = loadTex(
+  "/assets/textures/forrest_ground_01_4k.blend/textures/forrest_ground_01_diff_4k.jpg",
+  { srgb: true }
+);
+
+const groundRough = loadTex(
+  "/assets/textures/forrest_ground_01_4k.blend/textures/forrest_ground_01_rough_4k.jpg"
+);
+
+const roadBase = loadTex(
+  "/assets/textures/sandy_gravel_02_4k.blend/textures/sandy_gravel_02_diff_4k.jpg",
+  { srgb: true }
+);
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -69,6 +74,56 @@ function computeBounds(lines) {
     return null;
   }
   return {
+    minLon,
+    maxLon,
+    minLat,
+    maxLat,
+    centerLon: (minLon + maxLon) / 2,
+    centerLat: (minLat + maxLat) / 2
+  };
+}
+
+function computeGeojsonBounds(geojson) {
+  let minLon = Infinity;
+  let maxLon = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  let count = 0;
+
+  const updateBounds = (coord) => {
+    if (!coord || coord.length < 2) return;
+    const [lon, lat] = coord;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+    minLon = Math.min(minLon, lon);
+    maxLon = Math.max(maxLon, lon);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+    count += 1;
+  };
+
+  for (const feature of geojson?.features ?? []) {
+    const geometry = feature?.geometry;
+    if (!geometry) continue;
+    if (geometry.type === "LineString") {
+      geometry.coordinates.forEach(updateBounds);
+    } else if (geometry.type === "MultiLineString") {
+      geometry.coordinates.flat().forEach(updateBounds);
+    } else if (geometry.type === "Polygon") {
+      geometry.coordinates.flat().forEach(updateBounds);
+    } else if (geometry.type === "MultiPolygon") {
+      geometry.coordinates.flat(2).forEach(updateBounds);
+    }
+  }
+
+  if (!Number.isFinite(minLon) || count === 0) {
+    return null;
+  }
+
+  return {
+    minLon,
+    maxLon,
+    minLat,
+    maxLat,
     centerLon: (minLon + maxLon) / 2,
     centerLat: (minLat + maxLat) / 2
   };
@@ -82,184 +137,181 @@ function toLocalMeters(coord, origin, lonScale) {
   };
 }
 
-function makeLineMaterial(width, color) {
-  return new LineMaterial({
-    color,
-    linewidth: width,
-    worldUnits: true
-  });
-}
-
-function makeFallbackMaterial(width, color) {
-  return new THREE.LineBasicMaterial({
-    color,
-    linewidth: width
-  });
-}
-
-function resolveLineWidth(highway) {
-  if (typeof highway !== "string") return DEFAULT_WIDTH;
-  return ROAD_WIDTHS[highway] ?? DEFAULT_WIDTH;
-}
-
 export function createMapRenderer({
   scene,
   renderer,
-  color = DEFAULT_COLOR,
   elevation = DEFAULT_ELEVATION
 } = {}) {
   const group = new THREE.Group();
-  group.name = "osm-highways";
+  group.name = "osm-map";
   scene?.add(group);
 
-  const pool = [];
-  const lineMaterials = new Map();
-  const fallbackMaterials = new Map();
+  const groundMaterial = new THREE.MeshStandardMaterial({
+    map: groundBase,
+    roughnessMap: groundRough,
+    roughness: 1.0,
+    metalness: 0.0
+  });
+  const groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), groundMaterial);
+  groundMesh.receiveShadow = true;
+  groundMesh.rotation.x = -Math.PI / 2;
+  group.add(groundMesh);
+
+  const roadMaterial = new THREE.MeshStandardMaterial({
+    map: roadBase,
+    roughness: 0.9,
+    metalness: 0.0
+  });
+  const roadMesh = new THREE.Mesh(new THREE.BufferGeometry(), roadMaterial);
+  roadMesh.receiveShadow = true;
+  group.add(roadMesh);
+
   const resolution = new THREE.Vector2(1, 1);
 
-  const useWideLines = Boolean(Line2 && LineGeometry && LineMaterial);
+  function buildRoadGeometry(lines, origin, lonScale) {
+    const positions = [];
+    const uvs = [];
+    const halfWidth = ROAD_WIDTH_METERS * 0.5;
 
-  function getLineMaterial(width) {
-    if (!lineMaterials.has(width)) {
-      lineMaterials.set(width, makeLineMaterial(width, color));
-    }
-    return lineMaterials.get(width);
-  }
-
-  function getFallbackMaterial(width) {
-    if (!fallbackMaterials.has(width)) {
-      fallbackMaterials.set(width, makeFallbackMaterial(width, color));
-    }
-    return fallbackMaterials.get(width);
-  }
-
-  function createLine(width) {
-    if (useWideLines) {
-      const geometry = new LineGeometry();
-      const material = getLineMaterial(width);
-      const line = new Line2(geometry, material);
-      line.userData.isWideLine = true;
-      return line;
-    }
-    const geometry = new THREE.BufferGeometry();
-    const material = getFallbackMaterial(width);
-    const line = new THREE.Line(geometry, material);
-    line.userData.isWideLine = false;
-    return line;
-  }
-
-  function ensureLine(index, width) {
-    let line = pool[index];
-    if (!line) {
-      line = createLine(width);
-      pool[index] = line;
-      group.add(line);
-    }
-    line.visible = true;
-    const isWide = line.userData.isWideLine;
-    if (isWide) {
-      const material = getLineMaterial(width);
-      if (line.material !== material) {
-        line.material = material;
-      }
-    } else {
-      const material = getFallbackMaterial(width);
-      if (line.material !== material) {
-        line.material = material;
-      }
-    }
-    return line;
-  }
-
-  function updateLineGeometry(line, positions) {
-    if (!line?.geometry) return;
-    if (line.userData.isWideLine) {
-      if (!line.geometry.setPositions) return;
-      line.geometry.setPositions(positions);
-      const positionCount = line.geometry?.attributes?.position?.count ?? 0;
-      if (positionCount > 0 && typeof line.computeLineDistances === "function") {
-        line.computeLineDistances();
-      }
-    } else {
-      if (!line.geometry.setFromPoints) return;
-      const points = [];
-      for (let i = 0; i < positions.length; i += 3) {
-        points.push(new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]));
-      }
-      line.geometry.setFromPoints(points);
-      if (line.geometry?.attributes?.position?.count > 0) {
-        line.geometry.computeBoundingSphere();
-      }
-    }
-  }
-
-  function clearUnused(fromIndex) {
-    for (let i = fromIndex; i < pool.length; i += 1) {
-      const line = pool[i];
-      if (line) {
-        line.visible = false;
-      }
-    }
-  }
-
-  function updateHighways(geojson, boundsOverride) {
-    const lines = collectHighwayLines(geojson);
-    if (lines.length === 0) {
-      clearUnused(0);
-      return;
-    }
-
-    const bounds = boundsOverride ?? computeBounds(lines);
-    if (!bounds) {
-      clearUnused(0);
-      return;
-    }
-
-    const lonScale = metersPerDegreeLon(bounds.centerLat);
-
-    let activeIndex = 0;
     for (const line of lines) {
       if (!line.coords || line.coords.length < 2) continue;
-      const width = resolveLineWidth(line.highway);
-      const positions = [];
+      let prevLocal = null;
+      let vCoord = 0;
+
       for (const coord of line.coords) {
         if (!coord || coord.length < 2) continue;
         const [lon, lat] = coord;
         if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-        const local = toLocalMeters([lon, lat], bounds, lonScale);
-        positions.push(local.x, elevation, local.z);
+        const local = toLocalMeters([lon, lat], origin, lonScale);
+        if (!prevLocal) {
+          prevLocal = local;
+          continue;
+        }
+
+        const dx = local.x - prevLocal.x;
+        const dz = local.z - prevLocal.z;
+        const length = Math.hypot(dx, dz);
+        if (length === 0) {
+          prevLocal = local;
+          continue;
+        }
+
+        const nx = -dz / length;
+        const nz = dx / length;
+        const vNext = vCoord + length / ROAD_TEXTURE_METERS;
+
+        const v0x = prevLocal.x + nx * halfWidth;
+        const v0z = prevLocal.z + nz * halfWidth;
+        const v1x = prevLocal.x - nx * halfWidth;
+        const v1z = prevLocal.z - nz * halfWidth;
+        const v2x = local.x + nx * halfWidth;
+        const v2z = local.z + nz * halfWidth;
+        const v3x = local.x - nx * halfWidth;
+        const v3z = local.z - nz * halfWidth;
+
+        positions.push(
+          v0x,
+          elevation,
+          v0z,
+          v1x,
+          elevation,
+          v1z,
+          v2x,
+          elevation,
+          v2z,
+          v2x,
+          elevation,
+          v2z,
+          v1x,
+          elevation,
+          v1z,
+          v3x,
+          elevation,
+          v3z
+        );
+
+        uvs.push(
+          0,
+          vCoord,
+          1,
+          vCoord,
+          0,
+          vNext,
+          0,
+          vNext,
+          1,
+          vCoord,
+          1,
+          vNext
+        );
+
+        vCoord = vNext;
+        prevLocal = local;
       }
-      if (positions.length < 6) continue;
-      const lineMesh = ensureLine(activeIndex, width);
-      updateLineGeometry(lineMesh, positions);
-      activeIndex += 1;
     }
 
-    if (activeIndex === 0) {
-      clearUnused(0);
+    const geometry = new THREE.BufferGeometry();
+    if (positions.length === 0) {
+      return geometry;
+    }
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+    geometry.computeVertexNormals();
+    geometry.computeBoundingSphere();
+    return geometry;
+  }
+
+  function updateHighways(geojson, boundsOverride) {
+    const lines = collectHighwayLines(geojson);
+    const fallbackBounds = lines.length > 0 ? computeBounds(lines) : null;
+    const computedBounds = computeGeojsonBounds(geojson) ?? fallbackBounds;
+    const bounds = boundsOverride ?? computedBounds;
+    if (!bounds) {
+      roadMesh.visible = false;
+      groundMesh.visible = false;
       return;
     }
-    clearUnused(activeIndex);
+
+    roadMesh.visible = true;
+    groundMesh.visible = true;
+
+    const lonScale = metersPerDegreeLon(bounds.centerLat);
+    const roadGeometry = buildRoadGeometry(lines, bounds, lonScale);
+    roadMesh.geometry.dispose();
+    roadMesh.geometry = roadGeometry;
+
+    if (computedBounds) {
+      const minLocal = toLocalMeters([computedBounds.minLon, computedBounds.minLat], bounds, lonScale);
+      const maxLocal = toLocalMeters([computedBounds.maxLon, computedBounds.maxLat], bounds, lonScale);
+      const minX = Math.min(minLocal.x, maxLocal.x);
+      const maxX = Math.max(minLocal.x, maxLocal.x);
+      const minZ = Math.min(minLocal.z, maxLocal.z);
+      const maxZ = Math.max(minLocal.z, maxLocal.z);
+      const width = Math.max(1, maxX - minX);
+      const height = Math.max(1, maxZ - minZ);
+      const centerX = (minX + maxX) / 2;
+      const centerZ = (minZ + maxZ) / 2;
+
+      const geometry = new THREE.PlaneGeometry(width, height);
+      const repeatX = width / GROUND_TEXTURE_METERS;
+      const repeatY = height / GROUND_TEXTURE_METERS;
+      groundBase.repeat.set(repeatX, repeatY);
+      groundRough.repeat.set(repeatX, repeatY);
+      groundMesh.geometry.dispose();
+      groundMesh.geometry = geometry;
+      groundMesh.position.set(centerX, elevation - 0.02, centerZ);
+    }
   }
 
   function setResolution(width, height) {
     resolution.set(width, height);
-    if (!useWideLines) return;
-    for (const material of lineMaterials.values()) {
-      material.resolution.set(width, height);
-    }
   }
 
   function dispose() {
-    for (const line of pool) {
-      line?.geometry?.dispose?.();
-    }
-    for (const material of lineMaterials.values()) {
-      material.dispose();
-    }
-    for (const material of fallbackMaterials.values()) {
-      material.dispose();
-    }
+    roadMesh.geometry.dispose();
+    groundMesh.geometry.dispose();
+    roadMaterial.dispose();
+    groundMaterial.dispose();
     group.clear();
     scene?.remove(group);
   }

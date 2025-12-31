@@ -1087,6 +1087,10 @@ async function main() {
     }
 
     return {
+      minLon,
+      maxLon,
+      minLat,
+      maxLat,
       centerLon: (minLon + maxLon) / 2,
       centerLat: (minLat + maxLat) / 2
     };
