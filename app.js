@@ -658,6 +658,10 @@ async function main() {
   iceGun = new IceGun(scene);
   await iceGun.load();
   window.iceGun = iceGun;
+  iceGun.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    addToInventory('iceGun', 1);
+  };
   if (iceGun.mesh) {
     iceGun.mesh.userData.hideInMapView = true;
   }
@@ -745,6 +749,69 @@ async function main() {
     charm: playerProfile.stats.charm,
     luck: playerProfile.stats.luck
   };
+  const inventoryCatalog = {
+    iceGun: {
+      name: 'Ice Gun',
+      icon: '/assets/ui/items/icegun.png'
+    }
+  };
+  const inventoryState = { ...(playerProfile.inventory || {}) };
+  let inventoryDirty = false;
+  Object.entries(inventoryState).forEach(([itemId, entry]) => {
+    const itemConfig = inventoryCatalog[itemId];
+    if (!itemConfig) return;
+    const nextEntry = { ...entry };
+    if (!nextEntry.name) {
+      nextEntry.name = itemConfig.name;
+      inventoryDirty = true;
+    }
+    if (!nextEntry.icon) {
+      nextEntry.icon = itemConfig.icon;
+      inventoryDirty = true;
+    }
+    inventoryState[itemId] = nextEntry;
+  });
+  if (inventoryDirty) {
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
+  }
+
+  function getInventory() {
+    return inventoryState;
+  }
+
+  function addToInventory(itemId, amount = 1) {
+    if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
+    const itemConfig = inventoryCatalog[itemId] || {};
+    const current = inventoryState[itemId];
+    const nextCount = (current?.count || 0) + amount;
+    inventoryState[itemId] = {
+      count: nextCount,
+      icon: current?.icon || itemConfig.icon || '',
+      name: current?.name || itemConfig.name || itemId
+    };
+    if (window.DEBUG_INVENTORY) {
+      console.log('[inventory] added', itemId, amount, inventoryState[itemId]);
+    }
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
+    updateSettingsUI();
+  }
+
+  function removeFromInventory(itemId, amount = 1) {
+    if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
+    const current = inventoryState[itemId];
+    if (!current) return;
+    const nextCount = current.count - amount;
+    if (nextCount > 0) {
+      inventoryState[itemId] = { ...current, count: nextCount };
+    } else {
+      delete inventoryState[itemId];
+    }
+    if (window.DEBUG_INVENTORY) {
+      console.log('[inventory] removed', itemId, amount, inventoryState[itemId]);
+    }
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
+    updateSettingsUI();
+  }
 
   let mapViewEnabled = false;
   let playerDead = false;
@@ -1580,6 +1647,9 @@ async function main() {
       localStorage.setItem('characterModel', characterModel);
     },
     getCharacterOptions: () => characterOptions,
+    getInventory: () => getInventory(),
+    addToInventory: (itemId, amount) => addToInventory(itemId, amount),
+    removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
     getConnectedPlayers: () => {
       const players = [];
       const playerPos = playerModel?.position;
@@ -1629,6 +1699,10 @@ async function main() {
       rebuildMapFromCache();
     }
   };
+
+  window.getInventory = getInventory;
+  window.addToInventory = addToInventory;
+  window.removeFromInventory = removeFromInventory;
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),

@@ -5,6 +5,7 @@ const TAB_KEY = 'settings:lastTab';
 
 const TABS = [
   { id: 'character', label: 'Character' },
+  { id: 'inventory', label: 'Inventory' },
   { id: 'multiplayer', label: 'Multiplayer' },
   { id: 'location', label: 'Location' },
   { id: 'developer', label: 'Developer' }
@@ -18,6 +19,7 @@ let activeTab = 'character';
 let lastFocusedElement = null;
 let isMobileView = false;
 let isListView = false;
+let selectedInventoryId = null;
 let previewState = {
   active: false,
   renderer: null,
@@ -169,6 +171,29 @@ function buildMultiplayerPanel() {
   elements.ping = pingRow.querySelector('[data-field="ping"]');
   elements.playersList = playersList;
   elements.connectionError = errorText;
+
+  return panelEl;
+}
+
+function buildInventoryPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-inventory';
+  panelEl.dataset.panel = 'inventory';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-inventory');
+
+  const grid = createElement('div', 'inventory-grid');
+  const emptyState = createElement('div', 'settings-muted');
+  emptyState.classList.add('inventory-empty');
+  emptyState.textContent = 'Empty';
+  const details = createElement('div', 'inventory-details');
+  details.textContent = 'Select an item to see details.';
+
+  panelEl.append(grid, emptyState, details);
+
+  elements.inventoryGrid = grid;
+  elements.inventoryEmpty = emptyState;
+  elements.inventoryDetails = details;
 
   return panelEl;
 }
@@ -380,12 +405,14 @@ function buildDeveloperPanel() {
 function buildPanels() {
   const body = createElement('div', 'settings-body');
   const characterPanel = buildCharacterPanel();
+  const inventoryPanel = buildInventoryPanel();
   const multiplayerPanel = buildMultiplayerPanel();
   const locationPanel = buildLocationPanel();
   const developerPanel = buildDeveloperPanel();
-  body.append(characterPanel, multiplayerPanel, locationPanel, developerPanel);
+  body.append(characterPanel, inventoryPanel, multiplayerPanel, locationPanel, developerPanel);
   elements.panels = {
     character: characterPanel,
+    inventory: inventoryPanel,
     multiplayer: multiplayerPanel,
     location: locationPanel,
     developer: developerPanel
@@ -489,6 +516,69 @@ function handleAction(target) {
   }
 }
 
+function renderInventory() {
+  if (!elements.inventoryGrid) return;
+  const inventory = context.appState?.getInventory?.() || {};
+  const entries = Object.entries(inventory);
+  const fallbackIcons = {
+    iceGun: '❄️'
+  };
+
+  elements.inventoryGrid.innerHTML = '';
+  if (!entries.length) {
+    elements.inventoryEmpty.style.display = 'block';
+    elements.inventoryDetails.textContent = 'Inventory is empty.';
+    selectedInventoryId = null;
+    return;
+  }
+
+  elements.inventoryEmpty.style.display = 'none';
+  if (!selectedInventoryId || !inventory[selectedInventoryId]) {
+    selectedInventoryId = entries[0][0];
+  }
+
+  entries.forEach(([itemId, item]) => {
+    const button = createElement('button', 'inventory-tile');
+    button.type = 'button';
+    button.dataset.inventoryId = itemId;
+    button.setAttribute('aria-selected', itemId === selectedInventoryId ? 'true' : 'false');
+    button.classList.toggle('is-selected', itemId === selectedInventoryId);
+
+    const iconWrapper = createElement('div', 'inventory-icon-wrapper');
+    if (item.icon) {
+      const img = document.createElement('img');
+      img.className = 'inventory-icon';
+      img.alt = item.name || itemId;
+      img.loading = 'lazy';
+      img.src = item.icon;
+      img.addEventListener('error', () => {
+        img.remove();
+        const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcons[itemId] || '🎒');
+        iconWrapper.appendChild(fallback);
+      }, { once: true });
+      iconWrapper.appendChild(img);
+    } else {
+      const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcons[itemId] || '🎒');
+      iconWrapper.appendChild(fallback);
+    }
+
+    button.appendChild(iconWrapper);
+
+    if (item.count && item.count > 1) {
+      const badge = createElement('span', 'inventory-badge', `${item.count}`);
+      button.appendChild(badge);
+    }
+
+    elements.inventoryGrid.appendChild(button);
+  });
+
+  const selectedItem = inventory[selectedInventoryId];
+  if (selectedItem) {
+    const countText = selectedItem.count ? ` • Qty ${selectedItem.count}` : '';
+    elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${countText}`;
+  }
+}
+
 function bindEvents() {
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) {
@@ -499,6 +589,11 @@ function bindEvents() {
   panel.addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (!button) return;
+    if (button.dataset.inventoryId) {
+      selectedInventoryId = button.dataset.inventoryId;
+      renderInventory();
+      return;
+    }
     if (button.dataset.tab) {
       setTab(button.dataset.tab);
       return;
@@ -838,6 +933,8 @@ export function updateUI() {
       }
     }
   }
+
+  renderInventory();
 }
 
 export function setTab(tabId) {
