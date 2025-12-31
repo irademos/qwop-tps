@@ -43,7 +43,7 @@ export function updateProjectiles({
   otherPlayers,
   playerModel,
   multiplayer,
-  monster,
+  monsters,
   delta
 }) {
   const localId = multiplayer?.getId?.();
@@ -146,37 +146,42 @@ export function updateProjectiles({
 
     if (removed) continue;
 
-    if (monster) {
-      const monsterBox = new THREE.Box3().setFromObject(monster);
-      if (projBox.intersectsBox(monsterBox) && age >= 80) {
-        console.log(`💥 Monster was hit`);
-        monster.userData.mode = "enemy";
-        removeProjectile(i);
-        removed = true;
+    if (Array.isArray(monsters)) {
+      for (const monster of monsters) {
+        if (!monster) continue;
+        const monsterBox = new THREE.Box3().setFromObject(monster);
+        if (projBox.intersectsBox(monsterBox) && age >= 80) {
+          console.log(`💥 Monster was hit`);
+          monster.userData.mode = "enemy";
+          removeProjectile(i);
+          removed = true;
 
-        if (typeof window.monsterHealth === 'number') {
-          window.monsterHealth = Math.max(0, window.monsterHealth - 10);
-          console.log(`👹 Monster Health: ${window.monsterHealth}`);
+          monster.userData.health = Math.max(0, (monster.userData.health ?? 100) - 10);
+          console.log(`👹 Monster Health: ${monster.userData.health}`);
 
-          if (window.monsterHealth > 0 && !monster.userData.hitReacting) {
+          if (monster.userData.health > 0 && !monster.userData.hitReacting) {
             console.log("🎯 Triggering HitReact");
-            switchMonsterAnimation(monster, "Death");
+            const hitReactAction = monster.userData.actions?.HitReact ? "HitReact" : "Death";
+            switchMonsterAnimation(monster, hitReactAction);
 
             monster.userData.hitReacting = true;
 
-            // Set duration to match your HitReact animation lengthd
             setTimeout(() => {
               monster.userData.hitReacting = false;
-            }, 100); // Adjust timing based on actual animation duration
+            }, 100);
           }
-
+          break;
         }
       }
     }
   }
 
-  if (multiplayer?.isHost && monster) {
-    updateMonster(monster, delta, playerModel, otherPlayers);
+  if (multiplayer?.isHost && Array.isArray(monsters)) {
+    monsters.forEach((monster) => {
+      if (monster) {
+        updateMonster(monster, delta, playerModel, otherPlayers);
+      }
+    });
   }
 
 }

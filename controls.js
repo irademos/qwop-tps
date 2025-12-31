@@ -1119,8 +1119,9 @@ export class PlayerControls {
       }
     }
 
-    const mon = window.monster;
-    if (mon) {
+    const monsters = window.monsters || [];
+    for (const mon of monsters) {
+      if (!mon) continue;
       const dist = playerPos.distanceTo(mon.position);
       if (dist < minDist) {
         closest = { type: 'monster', model: mon };

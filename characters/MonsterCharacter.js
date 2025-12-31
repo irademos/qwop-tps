@@ -35,7 +35,8 @@ export function updateMonster(monster, deltaTime, playerModel, otherPlayers) {
   const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
 
   // 🧠 Handle monster death state
-  if (window.monsterHealth <= 0) {
+  const currentHealth = Number.isFinite(data.health) ? data.health : 100;
+  if (currentHealth <= 0) {
     if (!data.isDead) {
       data.isDead = true;
       switchMonsterAnimation(monster, "Death");
@@ -55,26 +56,6 @@ export function updateMonster(monster, deltaTime, playerModel, otherPlayers) {
     return;
   }
 
-  // 🕊️ Friendly mode: wander around without attacking players
-  if (data.mode === "friendly") {
-    // Change direction every few seconds to simulate wandering
-    if (now - data.lastDirectionChange > 2000) {
-      data.direction = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-      data.lastDirectionChange = now;
-    }
-
-    const vel = body.linvel();
-    const wanderSpeed = data.wanderSpeed ?? data.speed ?? 0.025;
-    const movement = data.direction.clone().multiplyScalar(wanderSpeed);
-    body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
-    const angle = Math.atan2(data.direction.x, data.direction.z);
-    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-    body.setRotation(rot, true);
-    switchMonsterAnimation(monster, "Walk");
-    if (data.mixer) data.mixer.update(delta);
-    return;
-  }
-
   const allPlayers = [
     { id: 'local', model: playerModel },
     ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p.model }))
@@ -91,6 +72,34 @@ export function updateMonster(monster, deltaTime, playerModel, otherPlayers) {
     }
   }
 
+  const aggroRadius = data.aggroRadius ?? 12;
+  const attackRange = data.attackRange ?? 1.0;
+
+  // 🕊️ Friendly mode: wander around without attacking players
+  if (data.mode === "friendly") {
+    if (closestPlayer && closestDistance < aggroRadius) {
+      data.mode = "enemy";
+      data.aggroStart = now;
+    } else {
+      // Change direction every few seconds to simulate wandering
+      if (now - data.lastDirectionChange > 2000) {
+        data.direction = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+        data.lastDirectionChange = now;
+      }
+
+      const vel = body.linvel();
+      const wanderSpeed = data.wanderSpeed ?? data.speed ?? 0.025;
+      const movement = data.direction.clone().multiplyScalar(wanderSpeed);
+      body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
+      const angle = Math.atan2(data.direction.x, data.direction.z);
+      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+      body.setRotation(rot, true);
+      switchMonsterAnimation(monster, "Walk");
+      if (data.mixer) data.mixer.update(delta);
+      return;
+    }
+  }
+
   if (!closestPlayer) {
     switchMonsterAnimation(monster, "Idle");
     return;
@@ -98,7 +107,20 @@ export function updateMonster(monster, deltaTime, playerModel, otherPlayers) {
 
   const targetPos = closestPlayer.model.position.clone();
   const distance = monster.position.distanceTo(targetPos);
-  const isInAttackRange = distance < 1.0;
+  const isInAttackRange = distance < attackRange;
+
+  if (distance > aggroRadius * 1.5) {
+    if (!data.aggroLostAt) {
+      data.aggroLostAt = now;
+    } else if (now - data.aggroLostAt > 4000) {
+      data.mode = "friendly";
+      data.aggroLostAt = null;
+      switchMonsterAnimation(monster, "Walk");
+      return;
+    }
+  } else {
+    data.aggroLostAt = null;
+  }
 
   if (!isInAttackRange && (!data.lastAttackTime || now - data.lastAttackTime > 2000)) {
     const direction = targetPos.sub(monster.position).normalize();
