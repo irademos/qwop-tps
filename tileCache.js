@@ -78,17 +78,17 @@ export function createTileCache({
   };
 
   const evictTiles = (centerTile) => {
-    let evicted = false;
+    const evictedKeys = [];
     for (const [key, entry] of cache.entries()) {
       const tile = entry.tile;
       const dx = Math.abs(tile.x - centerTile.x);
       const dy = Math.abs(tile.y - centerTile.y);
       if (Math.max(dx, dy) > evictRadiusTiles) {
         cache.delete(key);
-        evicted = true;
+        evictedKeys.push(key);
       }
     }
-    return evicted;
+    return evictedKeys;
   };
 
   return {
