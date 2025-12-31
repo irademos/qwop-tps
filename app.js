@@ -944,6 +944,27 @@ async function main() {
   const TILE_EVICT_RADIUS = 2;
   const TILE_FETCH_RADIUS_METERS = TILE_SIZE_METERS * Math.SQRT2 * 0.5;
   const TILE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+  const groundTileGroup = new THREE.Group();
+  groundTileGroup.name = 'tile-ground';
+  scene.add(groundTileGroup);
+  const groundTileMeshes = new Map();
+  const groundTextureLoader = new THREE.TextureLoader();
+  const groundTexture = groundTextureLoader.load(
+    '/assets/textures/forrest_ground_01_4k.blend/textures/forrest_ground_01_diff_4k.jpg'
+  );
+  groundTexture.wrapS = THREE.RepeatWrapping;
+  groundTexture.wrapT = THREE.RepeatWrapping;
+  groundTexture.repeat.set(TILE_SIZE_METERS / 12, TILE_SIZE_METERS / 12);
+  if (groundTexture.colorSpace !== undefined) {
+    groundTexture.colorSpace = THREE.SRGBColorSpace;
+  }
+  const groundMaterial = new THREE.MeshStandardMaterial({
+    map: groundTexture,
+    roughness: 0.9,
+    metalness: 0.05
+  });
+  const GROUND_TILE_ELEVATION = -0.02;
   const tileCache = createTileCache({
     tileSizeMeters: TILE_SIZE_METERS,
     evictRadiusTiles: TILE_EVICT_RADIUS
@@ -1005,6 +1026,50 @@ async function main() {
       x: (lon - origin.centerLon) * lonScale,
       z: -(lat - origin.centerLat) * METERS_PER_DEGREE_LAT
     };
+  };
+
+  const createGroundTileMesh = () => {
+    const geometry = new THREE.PlaneGeometry(TILE_SIZE_METERS, TILE_SIZE_METERS, 1, 1);
+    geometry.rotateX(-Math.PI / 2);
+    const mesh = new THREE.Mesh(geometry, groundMaterial);
+    mesh.receiveShadow = true;
+    return mesh;
+  };
+
+  const syncGroundTiles = (bounds) => {
+    if (!bounds) {
+      for (const mesh of groundTileMeshes.values()) {
+        groundTileGroup.remove(mesh);
+        mesh.geometry.dispose();
+      }
+      groundTileMeshes.clear();
+      return;
+    }
+
+    const activeKeys = new Set();
+    for (const entry of tileCache.cache.values()) {
+      const tileKey = tileCache.getTileKey(entry.tile);
+      activeKeys.add(tileKey);
+      let mesh = groundTileMeshes.get(tileKey);
+      if (!mesh) {
+        mesh = createGroundTileMesh();
+        groundTileMeshes.set(tileKey, mesh);
+        groundTileGroup.add(mesh);
+      }
+
+      const tileCenter = tileCache.getTileCenterLocation(entry.tile);
+      if (!tileCenter) continue;
+      const local = geoToLocalMeters(tileCenter.lat, tileCenter.lon, bounds);
+      if (!local) continue;
+      mesh.position.set(local.x, GROUND_TILE_ELEVATION, local.z);
+    }
+
+    for (const [key, mesh] of groundTileMeshes.entries()) {
+      if (activeKeys.has(key)) continue;
+      groundTileGroup.remove(mesh);
+      mesh.geometry.dispose();
+      groundTileMeshes.delete(key);
+    }
   };
 
   const localMetersToGeo = (x, z, origin) => {
@@ -1107,6 +1172,7 @@ async function main() {
     }
     mapRenderer.updateHighways(combined, bounds);
     buildingsRenderer.updateBuildings(combined, bounds);
+    syncGroundTiles(bounds);
   };
 
   window.clearTileCache = () => {
