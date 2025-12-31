@@ -1,14 +1,14 @@
 import * as THREE from 'three';
-import { switchMonsterAnimation } from './characters/MonsterCharacter.js';
 
-const ATTACKS = {
+export const ATTACKS = {
   mutantPunch: { damage: 10, range: 1.5, hitTime: 300, hitWindow: 300 },
   hurricaneKick: { damage: 15, range: 2.0, hitTime: 400, hitWindow: 400 },
   mmaKick: { damage: 12, range: 1.7, hitTime: 350, hitWindow: 300 }
 };
 
-export function updateMeleeAttacks({ playerModel, otherPlayers, monster, audioManager }) {
+export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioManager, multiplayer }) {
   const now = Date.now();
+  const isHost = !multiplayer || multiplayer.isHost;
   const players = [
     { id: 'local', model: playerModel },
     ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p.model }))
@@ -43,17 +43,13 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monster, audioMa
         }
       }
 
-      if (monster) {
-        const dist = attacker.model.position.distanceTo(monster.position);
-        if (dist <= cfg.range) {
-          hit = true;
-          window.monsterHealth = Math.max(0, window.monsterHealth - cfg.damage);
-          if (window.monsterHealth > 0 && !monster.userData.hitReacting) {
-            switchMonsterAnimation(monster, "Death");
-            monster.userData.hitReacting = true;
-            setTimeout(() => {
-              monster.userData.hitReacting = false;
-            }, 100);
+      if (isHost && Array.isArray(monsters)) {
+        for (const monster of monsters) {
+          if (!monster) continue;
+          const dist = attacker.model.position.distanceTo(monster.model.position);
+          if (dist <= cfg.range) {
+            hit = true;
+            monster.applyDamage(cfg.damage);
           }
         }
       }

@@ -1,169 +1,189 @@
 import * as THREE from "three";
+import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
+import { ATTACKS } from "../melee.js";
 
-export function switchMonsterAnimation(monster, newName) {
-  const { actions, currentAction } = monster.userData;
-  if (newName === currentAction || !actions[newName]) return;
+const AGGRO_RADIUS = 12;
+const WANDER_CHANGE_MS = 2000;
+const ATTACK_NAME = 'Weapon';
+const MOVE_FADE = 0.2;
+const ATTACK_FADE = 0.1;
+const DEFAULT_HEALTH = 100;
+const MONSTER_ATTACK = ATTACKS.mutantPunch;
 
-  const nextAction = actions[newName];
-  const animationSpeeds = monster.userData.animationSpeeds || {};
-  const defaultAnimationSpeed = monster.userData.defaultAnimationSpeed ?? 1;
-  const nextTimeScale = animationSpeeds[newName] ?? defaultAnimationSpeed;
-  nextAction.setEffectiveTimeScale(nextTimeScale);
-  nextAction.reset();
-
-  // Stop looping for death animation
-  if (newName === "Death" || newName === "HitReact") {
-    nextAction.setLoop(THREE.LoopOnce);
-    nextAction.clampWhenFinished = true;
-  } else {
-    nextAction.setLoop(THREE.LoopRepeat);
-    nextAction.clampWhenFinished = false;
+export class MonsterCharacter extends CharacterBase {
+  constructor({ model, mixer, actions }) {
+    super(model);
+    this.mixer = mixer;
+    this.actions = actions;
+    this.currentAction = "Idle";
+    this.model.userData.currentAction = "Idle";
+    this.model.userData.actions = actions;
+    this.model.userData.mixer = mixer;
+    this.model.userData.mode = "friendly";
+    this.model.userData.direction = new THREE.Vector3();
+    this.model.userData.health = DEFAULT_HEALTH;
+    this.health = DEFAULT_HEALTH;
+    this.isDead = false;
+    this.lastDirectionChange = Date.now();
+    this.lastAttackTime = 0;
+    this.attackStartTime = null;
+    this.attackHasHit = false;
   }
 
-  actions[currentAction]?.fadeOut(0.3);
-  nextAction.fadeIn(0.3).play();
-  monster.userData.currentAction = newName;
-}
-
-
-export function updateMonster(monster, deltaTime, playerModel, otherPlayers) {
-  const now = Date.now();
-  const data = monster.userData;
-  const body = data.rb;
-  if (!body) return;
-
-  const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
-
-  // 🧠 Handle monster death state
-  if (window.monsterHealth <= 0) {
-    if (!data.isDead) {
-      data.isDead = true;
-      switchMonsterAnimation(monster, "Death");
-    }
-
-    // Continue updating the mixer so animation plays
-    if (data.mixer) data.mixer.update(delta);
-
-    return; // ⛔ Stop further behavior logic (walking, attacking, etc.)
+  get body() {
+    return this.model.userData.rb;
   }
 
-  // Early return if reacting to a hit
-  if (monster.userData.hitReacting) {
-    if (monster.userData.mixer) {
-      monster.userData.mixer.update(delta);
-    }
-    return;
+  setMode(mode) {
+    if (!mode) return;
+    this.model.userData.mode = mode;
   }
 
-  // 🕊️ Friendly mode: wander around without attacking players
-  if (data.mode === "friendly") {
-    // Change direction every few seconds to simulate wandering
-    if (now - data.lastDirectionChange > 2000) {
-      data.direction = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-      data.lastDirectionChange = now;
-    }
-
-    const vel = body.linvel();
-    const wanderSpeed = data.wanderSpeed ?? data.speed ?? 0.025;
-    const movement = data.direction.clone().multiplyScalar(wanderSpeed);
-    body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
-    const angle = Math.atan2(data.direction.x, data.direction.z);
-    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-    body.setRotation(rot, true);
-    switchMonsterAnimation(monster, "Walk");
-    if (data.mixer) data.mixer.update(delta);
-    return;
+  setDirection(vec) {
+    this.model.userData.direction.copy(vec);
   }
 
-  const allPlayers = [
-    { id: 'local', model: playerModel },
-    ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p.model }))
-  ];
-
-  let closestPlayer = null;
-  let closestDistance = Infinity;
-
-  for (const player of allPlayers) {
-    const dist = monster.position.distanceTo(player.model.position);
-    if (dist < closestDistance) {
-      closestDistance = dist;
-      closestPlayer = player;
+  applyDamage(amount) {
+    if (this.isDead) return;
+    this.health = Math.max(0, this.health - amount);
+    this.model.userData.health = this.health;
+    if (this.health <= 0) {
+      this.markDead();
     }
   }
 
-  if (!closestPlayer) {
-    switchMonsterAnimation(monster, "Idle");
-    return;
+  markDead() {
+    if (this.isDead) return;
+    this.isDead = true;
+    this.model.userData.mode = "dead";
+    this.playAnimation("Death", MOVE_FADE);
+    const body = this.body;
+    if (body) {
+      const vel = body.linvel();
+      body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+    }
   }
 
-  const targetPos = closestPlayer.model.position.clone();
-  const distance = monster.position.distanceTo(targetPos);
-  const isInAttackRange = distance < 1.0;
+  resetHealth() {
+    this.health = DEFAULT_HEALTH;
+    this.model.userData.health = DEFAULT_HEALTH;
+    this.isDead = false;
+  }
 
-  if (!isInAttackRange && (!data.lastAttackTime || now - data.lastAttackTime > 2000)) {
-    const direction = targetPos.sub(monster.position).normalize();
-    data.direction.copy(direction);
-    const chaseSpeed = data.chaseSpeed ?? (data.speed ?? 0.025) * 3;
-    const movement = data.direction.clone().multiplyScalar(chaseSpeed);
-    const vel = body.linvel();
-    body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
-    const angle = Math.atan2(data.direction.x, data.direction.z);
-    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-    body.setRotation(rot, true);
-    switchMonsterAnimation(monster, "Walk");
-  } else {
-    const vel = body.linvel();
-    body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
-    if (!data.lastAttackTime || now - data.lastAttackTime > 2000) {
-      switchMonsterAnimation(monster, "Weapon");
-      data.lastAttackTime = now;
-      data.attackStartTime = now;
-      data.attackHasHit = false;
-      console.log(`👹 Monster attacked ${closestPlayer.id}`);
+  updateAI(deltaTime, playerModel, otherPlayers) {
+    const now = Date.now();
+    const body = this.body;
+    if (!body) return;
 
-      if (window.playerModel?.position) {
-        const playerDist = monster.position.distanceTo(window.playerModel.position);
-        const maxHearingDistance = 20;
-        const volume = Math.max(0, 1 - playerDist / maxHearingDistance);
-        monster.userData.voice?.speakRandom(volume);
+    const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
+    if (this.isDead) {
+      this.update(delta);
+      return;
+    }
+
+    const allPlayers = [
+      { id: 'local', model: playerModel },
+      ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p.model }))
+    ];
+
+    let closestPlayer = null;
+    let closestDistance = Infinity;
+
+    for (const player of allPlayers) {
+      const dist = this.model.position.distanceTo(player.model.position);
+      if (dist < closestDistance) {
+        closestDistance = dist;
+        closestPlayer = player;
       }
     }
-  }
 
-  if (data.mixer) {
-    data.mixer.update(delta);
-  }
+    if (!closestPlayer) {
+      this.playAnimation("Idle", MOVE_FADE);
+      this.update(delta);
+      return;
+    }
 
-  if (monster.userData.currentAction === "Weapon" && data.attackStartTime) {
-    const elapsed = now - data.attackStartTime;
-    const hitTime = 500;
-    if (!data.attackHasHit && elapsed >= hitTime) {
-      for (const player of allPlayers) {
-        const dist = monster.position.distanceTo(player.model.position);
-        if (dist < 3.2) {
-          if (player.id === 'local' && !window.playerControls.isKnocked) {
-            window.localHealth = Math.max(0, window.localHealth - 10);
-            if (window.playerControls) {
-              const impulse = monster.userData.direction.clone().multiplyScalar(0.17);
-              window.playerControls.applyKnockback(impulse);
-            }
-            console.log(`👹 Monster attacks you! Distance: ${dist.toFixed(2)} | Health: ${window.localHealth.toFixed(1)}`);
-          } else if (player.id !== 'local') {
-            const op = otherPlayers[player.id];
-            if (op) {
-              op.health = Math.max(0, (op.health || 100) - 10);
-              console.log(`👹 Monster attacks ${player.id} | Health: ${op.health}`);
+    if (this.model.userData.mode === "friendly" && closestDistance < AGGRO_RADIUS) {
+      this.model.userData.mode = "enemy";
+    }
+
+    if (this.model.userData.mode === "friendly") {
+      if (now - this.lastDirectionChange > WANDER_CHANGE_MS) {
+        this.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
+        this.lastDirectionChange = now;
+      }
+      const movement = this.model.userData.direction.clone().multiplyScalar(CHARACTER_MOVEMENT.walkSpeed);
+      const vel = body.linvel();
+      body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
+      const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
+      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+      body.setRotation(rot, true);
+      this.playAnimation("Walk", MOVE_FADE);
+      this.update(delta);
+      return;
+    }
+
+    const targetPos = closestPlayer.model.position.clone();
+    const distance = this.model.position.distanceTo(targetPos);
+    const attackRange = MONSTER_ATTACK.range;
+    const canAttack = !this.attackStartTime && (now - this.lastAttackTime >= MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow);
+
+    if (distance > attackRange) {
+      const direction = targetPos.sub(this.model.position).normalize();
+      this.setDirection(direction);
+      const movement = this.model.userData.direction.clone().multiplyScalar(CHARACTER_MOVEMENT.runSpeed);
+      const vel = body.linvel();
+      body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
+      const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
+      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+      body.setRotation(rot, true);
+      this.playAnimation("Run", MOVE_FADE);
+    } else {
+      const vel = body.linvel();
+      body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      const faceDir = targetPos.sub(this.model.position).normalize();
+      this.setDirection(faceDir);
+      const angle = Math.atan2(faceDir.x, faceDir.z);
+      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+      body.setRotation(rot, true);
+      if (canAttack) {
+        this.playAnimation(ATTACK_NAME, ATTACK_FADE);
+        this.lastAttackTime = now;
+        this.attackStartTime = now;
+        this.attackHasHit = false;
+      } else {
+        this.playAnimation("Idle", MOVE_FADE);
+      }
+    }
+
+    this.update(delta);
+
+    if (this.model.userData.currentAction === ATTACK_NAME && this.attackStartTime) {
+      const elapsed = now - this.attackStartTime;
+      if (!this.attackHasHit && elapsed >= MONSTER_ATTACK.hitTime && elapsed <= MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
+        for (const player of allPlayers) {
+          const dist = this.model.position.distanceTo(player.model.position);
+          if (dist <= attackRange) {
+            if (player.id === 'local' && !window.playerControls?.isKnocked) {
+              window.localHealth = Math.max(0, window.localHealth - MONSTER_ATTACK.damage);
+              if (window.playerControls) {
+                const impulse = this.model.userData.direction.clone().multiplyScalar(0.15);
+                window.playerControls.applyKnockback(impulse);
+              }
+            } else if (player.id !== 'local') {
+              const op = otherPlayers[player.id];
+              if (op) {
+                op.health = Math.max(0, (op.health || 100) - MONSTER_ATTACK.damage);
+              }
             }
           }
         }
+        this.attackHasHit = true;
       }
-      data.attackHasHit = true;
-    }
-    if (elapsed > hitTime + 500) {
-      data.attackStartTime = null;
-      data.attackHasHit = false;
+      if (elapsed > MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
+        this.attackStartTime = null;
+        this.attackHasHit = false;
+      }
     }
   }
 }
-
-// Death, Duck, HitReact, Idle, Jump, Jump_Idle, Jump_Land, No, Punch, Run, Walk, Wave, Weapon, Yes

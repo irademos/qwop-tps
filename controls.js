@@ -3,9 +3,9 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from './water.js';
 import { MOON_RADIUS } from "./worldGeneration.js";
 import { getSpawnPosition } from './spawnUtils.js';
+import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 
 // Movement constants
-const SPEED = 5;
 const SWIM_SPEED = 2;
 const JUMP_FORCE = 5;
 const PLAYER_RADIUS = 0.3;
@@ -651,7 +651,7 @@ export class PlayerControls {
         this.playerModel.userData.currentAction = 'idle';
       }
     } else {
-      const speed = this.isInWater ? SWIM_SPEED : SPEED;
+      const speed = this.isInWater ? SWIM_SPEED : CHARACTER_MOVEMENT.runSpeed;
       this.body.setLinvel({ x: movement.x * speed, y: vel.y, z: movement.z * speed }, true);
       }
       
@@ -817,7 +817,7 @@ export class PlayerControls {
       document.addEventListener('keyup', (e) => this.keys.delete(e.key));
     }
 
-    const rotateSpeed = 0.03;
+    const rotateSpeed = CHARACTER_MOVEMENT.turnRate;
     if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
     if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
 
@@ -1119,11 +1119,13 @@ export class PlayerControls {
       }
     }
 
-    const mon = window.monster;
-    if (mon) {
-      const dist = playerPos.distanceTo(mon.position);
+    const monsterList = window.monsters || [];
+    for (const mon of monsterList) {
+      const model = mon?.model || mon;
+      if (!model) continue;
+      const dist = playerPos.distanceTo(model.position);
       if (dist < minDist) {
-        closest = { type: 'monster', model: mon };
+        closest = { type: 'monster', model };
         minDist = dist;
       }
     }
