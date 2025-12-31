@@ -1,7 +1,7 @@
 // app.js
 import * as THREE from "three";
 import { PlayerCharacter } from "./characters/PlayerCharacter.js";
-import { loadMonsterModel } from "./models/monsterModel.js";
+import { loadRandomMonsterModel } from "./models/monsterModel.js";
 import { switchMonsterAnimation } from "./characters/MonsterCharacter.js";
 import { createOrcVoice } from "./orcVoice.js";
 import { createClouds } from "./worldGeneration.js";
@@ -169,6 +169,12 @@ async function main() {
       pendingEntityStates.delete(id);
       entry.applyState?.(pending);
     }
+  }
+
+  function deregisterNetworkedEntity(id) {
+    networkedEntities.delete(id);
+    pendingEntityStates.delete(id);
+    authoritativeEntityStates.delete(id);
   }
 
   function updateAuthoritativeState(id, state, sourceId) {
@@ -531,83 +537,23 @@ async function main() {
   // Expose to window for debugging
   window.breakManager = breakManager;
 
-  let monster = null;
-  loadMonsterModel(scene, data => {
-    monster = data.model;
-    // Expose monster globally for interactions like grabbing
-    window.monster = monster;
-    monster.userData.hideInMapView = true;
-    monster.userData.mixer = data.mixer;
-    monster.userData.actions = data.actions;
-    monster.userData.currentAction = "Idle";
-    monster.userData.direction = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-    // Tune monster movement speeds so it doesn't feel stuck in slow motion.
-    // "wanderSpeed" is used while the monster roams around in friendly mode,
-    // while "chaseSpeed" is used when it targets players in enemy mode.
-    monster.userData.wanderSpeed = 0.04;
-    monster.userData.chaseSpeed = 0.14;
-    monster.userData.lastDirectionChange = Date.now();
-    monster.userData.mode = "friendly"; // default behavior
-
-    const monsterSpawn = getSpawnPosition({ heightOffset: 0.5 });
-    monster.position.set(monsterSpawn.x, monsterSpawn.y, monsterSpawn.z);
-    monster.userData.spawnPoint = monsterSpawn;
-    if (monster.userData.rb) {
-      monster.userData.rb.setTranslation({ x: monsterSpawn.x, y: monsterSpawn.y, z: monsterSpawn.z }, true);
-    }
-
-    const orcPhrases = [
-      "Uggghh",
-      "Ooo Goo",
-      "grrreeeoookkk egggh uh uh",
-      "errrga ooogah"
-    ];
-    monster.userData.voice = createOrcVoice(orcPhrases);
-    if (rapierWorld) attachMonsterPhysics(monster);
-    registerNetworkedEntity('monster', {
-      getState: () => {
-        if (!monster) return null;
-        const pos = monster.position;
-        const q = monster.quaternion;
-        return {
-          position: [pos.x, pos.y, pos.z],
-          rotation: [q.x, q.y, q.z, q.w],
-          mode: monster.userData.mode,
-          action: monster.userData.currentAction,
-          health: typeof window.monsterHealth === 'number' ? window.monsterHealth : undefined
-        };
-      },
-      applyState: state => {
-        if (!monster || !state) return;
-        const [px, py, pz] = state.position || [];
-        const [rx, ry, rz, rw] = state.rotation || [];
-        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-          monster.position.set(px, py, pz);
-          monster.userData.rb?.setTranslation({ x: px, y: py, z: pz }, true);
-        }
-        if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
-          monster.quaternion.set(rx, ry, rz, rw);
-          monster.userData.rb?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
-        }
-        if (typeof state.mode === 'string') {
-          monster.userData.mode = state.mode;
-        }
-        if (typeof state.health === 'number') {
-          window.monsterHealth = state.health;
-        }
-        if (state.action && monster.userData.currentAction !== state.action && monster.userData.actions) {
-          switchMonsterAnimation(monster, state.action);
-        }
-      },
-      isLocallyControlled: () => multiplayer?.isHost && !!monster
-    });
-  });
+  const MONSTER_COUNT = 2;
+  const MONSTER_SPAWN_MIN = 20;
+  const MONSTER_SPAWN_MAX = 120;
+  const MONSTER_BOUNDS = 190;
+  const MONSTER_DESPAWN_DISTANCE = 220;
+  const MONSTER_RESPAWN_COOLDOWN = 2000;
+  const monsters = [];
+  window.monsters = monsters;
+  let lastMonsterSpawnAt = 0;
+  let monsterSpawnIndex = 0;
 
   // Allow mode switching from console or other scripts
   window.setMonsterMode = mode => {
-    if (monster && (mode === "friendly" || mode === "enemy")) {
-      monster.userData.mode = mode;
-    }
+    if (!['friendly', 'enemy'].includes(mode)) return;
+    monsters.forEach(mon => {
+      mon.userData.mode = mode;
+    });
   };
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -718,9 +664,128 @@ async function main() {
     rbToMesh.set(rb, mon);
   }
 
-  if (monster) attachMonsterPhysics(monster);
+  const getMonsterSpawnPosition = () => {
+    const center = playerModel?.position ?? new THREE.Vector3(0, 0, 0);
+    const spawn = getSpawnPosition({
+      heightOffset: 0.5,
+      radius: MONSTER_SPAWN_MAX,
+      minRadius: MONSTER_SPAWN_MIN,
+      center
+    });
+    spawn.x = THREE.MathUtils.clamp(spawn.x, -MONSTER_BOUNDS, MONSTER_BOUNDS);
+    spawn.z = THREE.MathUtils.clamp(spawn.z, -MONSTER_BOUNDS, MONSTER_BOUNDS);
+    return spawn;
+  };
 
+  const monsterVoiceLines = [
+    "Uggghh",
+    "Ooo Goo",
+    "grrreeeoookkk egggh uh uh",
+    "errrga ooogah"
+  ];
 
+  function configureMonster(monster, data, index) {
+    monster.userData.entityId = `monster:${index}`;
+    monster.userData.hideInMapView = true;
+    monster.userData.mixer = data.mixer;
+    monster.userData.actions = data.actions;
+    monster.userData.currentAction = data.actions?.Idle ? "Idle" : null;
+    monster.userData.direction = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
+    monster.userData.wanderSpeed = 0.07;
+    monster.userData.chaseSpeed = 0.22;
+    monster.userData.lastDirectionChange = Date.now();
+    monster.userData.mode = "friendly";
+    monster.userData.aggroRadius = 12;
+    monster.userData.attackRange = 1.0;
+    monster.userData.health = 100;
+
+    const monsterSpawn = getMonsterSpawnPosition();
+    monster.position.set(monsterSpawn.x, monsterSpawn.y, monsterSpawn.z);
+    monster.userData.spawnPoint = monsterSpawn;
+    if (monster.userData.rb) {
+      monster.userData.rb.setTranslation({ x: monsterSpawn.x, y: monsterSpawn.y, z: monsterSpawn.z }, true);
+    }
+
+    monster.userData.voice = createOrcVoice(monsterVoiceLines);
+
+    if (rapierWorld) attachMonsterPhysics(monster);
+
+    registerNetworkedEntity(monster.userData.entityId, {
+      getState: () => {
+        const pos = monster.position;
+        const q = monster.quaternion;
+        return {
+          position: [pos.x, pos.y, pos.z],
+          rotation: [q.x, q.y, q.z, q.w],
+          mode: monster.userData.mode,
+          action: monster.userData.currentAction,
+          health: monster.userData.health
+        };
+      },
+      applyState: state => {
+        if (!state) return;
+        const [px, py, pz] = state.position || [];
+        const [rx, ry, rz, rw] = state.rotation || [];
+        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+          monster.position.set(px, py, pz);
+          monster.userData.rb?.setTranslation({ x: px, y: py, z: pz }, true);
+        }
+        if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+          monster.quaternion.set(rx, ry, rz, rw);
+          monster.userData.rb?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
+        }
+        if (typeof state.mode === 'string') {
+          monster.userData.mode = state.mode;
+        }
+        if (typeof state.health === 'number') {
+          monster.userData.health = state.health;
+        }
+        if (state.action && monster.userData.currentAction !== state.action && monster.userData.actions) {
+          switchMonsterAnimation(monster, state.action);
+        }
+      },
+      isLocallyControlled: () => multiplayer?.isHost && monsters.includes(monster)
+    });
+  }
+
+  function spawnMonsters() {
+    if (monsters.length >= MONSTER_COUNT) return;
+    const now = Date.now();
+    if (now - lastMonsterSpawnAt < MONSTER_RESPAWN_COOLDOWN) return;
+    lastMonsterSpawnAt = now;
+    const spawnCount = MONSTER_COUNT - monsters.length;
+    for (let i = 0; i < spawnCount; i += 1) {
+      loadRandomMonsterModel(scene, data => {
+        const monster = data.model;
+        monsters.push(monster);
+        const spawnId = monsterSpawnIndex;
+        monsterSpawnIndex += 1;
+        configureMonster(monster, data, spawnId);
+      });
+    }
+  }
+
+  function removeMonster(monster) {
+    if (!monster) return;
+    const index = monsters.indexOf(monster);
+    if (index >= 0) {
+      monsters.splice(index, 1);
+    }
+    const entityId = monster.userData?.entityId;
+    if (entityId) {
+      deregisterNetworkedEntity(entityId);
+    }
+    const body = monster.userData?.rb;
+    if (body && rapierWorld?.getRigidBody(body.handle)) {
+      rapierWorld.removeRigidBody(body);
+      rbToMesh.delete(body);
+    }
+    if (monster.parent) {
+      monster.parent.remove(monster);
+    } else {
+      scene.remove(monster);
+    }
+  }
 
   let player = new PlayerCharacter(playerName, characterModel);
   let playerModel = player.model;
@@ -729,6 +794,8 @@ async function main() {
   document.body.appendChild(player.nameLabel);
   window.playerModel = playerModel;
   let didInitialGpsSnap = false;
+
+  spawnMonsters();
 
 
   function applyOfflineHungerDecay(profile) {
@@ -867,8 +934,6 @@ async function main() {
     const energyDepleted = statsState.energy <= 0;
     playerControls.enabled = !mapViewEnabled && !playerDead && !energyDepleted;
   };
-
-  window.monsterHealth = 100;
 
   const healthFill = document.getElementById('health-fill');
   const hungerFill = document.getElementById('hunger-fill');
@@ -2161,17 +2226,30 @@ async function main() {
       nameLabel.style.opacity = opacity.toFixed(2);
     });
 
+    if (playerModel?.position) {
+      for (let i = monsters.length - 1; i >= 0; i -= 1) {
+        const monster = monsters[i];
+        if (!monster) continue;
+        const dist = monster.position.distanceTo(playerModel.position);
+        if (dist > MONSTER_DESPAWN_DISTANCE) {
+          removeMonster(monster);
+        }
+      }
+    }
+
+    spawnMonsters();
+
     updateProjectiles({
       scene,
       projectiles,
       playerModel,
       otherPlayers,
       multiplayer,
-      monster,
+      monsters,
       delta: frameDelta
     });
 
-    updateMeleeAttacks({ playerModel, otherPlayers, monster, audioManager });
+    updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioManager });
 
     breakManager.update();
 

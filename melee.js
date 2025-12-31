@@ -7,7 +7,7 @@ const ATTACKS = {
   mmaKick: { damage: 12, range: 1.7, hitTime: 350, hitWindow: 300 }
 };
 
-export function updateMeleeAttacks({ playerModel, otherPlayers, monster, audioManager }) {
+export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioManager }) {
   const now = Date.now();
   const players = [
     { id: 'local', model: playerModel },
@@ -43,17 +43,21 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monster, audioMa
         }
       }
 
-      if (monster) {
-        const dist = attacker.model.position.distanceTo(monster.position);
-        if (dist <= cfg.range) {
-          hit = true;
-          window.monsterHealth = Math.max(0, window.monsterHealth - cfg.damage);
-          if (window.monsterHealth > 0 && !monster.userData.hitReacting) {
-            switchMonsterAnimation(monster, "Death");
-            monster.userData.hitReacting = true;
-            setTimeout(() => {
-              monster.userData.hitReacting = false;
-            }, 100);
+      if (Array.isArray(monsters)) {
+        for (const monster of monsters) {
+          if (!monster) continue;
+          const dist = attacker.model.position.distanceTo(monster.position);
+          if (dist <= cfg.range) {
+            hit = true;
+            monster.userData.health = Math.max(0, (monster.userData.health ?? 100) - cfg.damage);
+            if (monster.userData.health > 0 && !monster.userData.hitReacting) {
+              const hitReactAction = monster.userData.actions?.HitReact ? "HitReact" : "Death";
+              switchMonsterAnimation(monster, hitReactAction);
+              monster.userData.hitReacting = true;
+              setTimeout(() => {
+                monster.userData.hitReacting = false;
+              }, 100);
+            }
           }
         }
       }
