@@ -1,7 +1,9 @@
 import { ref, get, set, update, runTransaction } from 'firebase/database';
 import { db } from './firebase-init.js';
+import { getCookie, setCookie } from './utils.js';
 
 const SALT = 'prototype-salt-v1';
+const PIN_COOKIE_PREFIX = 'playerPinHash_';
 
 const DEFAULT_STATS = {
   health: 100,
@@ -37,6 +39,14 @@ function isValidPin(pin) {
   return /^\d{4,6}$/.test(pin);
 }
 
+function pinCookieName(nameKey) {
+  return `${PIN_COOKIE_PREFIX}${nameKey}`;
+}
+
+function rememberPinHash(nameKey, pinHash) {
+  setCookie(pinCookieName(nameKey), pinHash);
+}
+
 function buildProfile(name) {
   const now = Date.now();
   return {
@@ -50,6 +60,40 @@ function buildProfile(name) {
 
 function mergeStats(stats) {
   return { ...DEFAULT_STATS, ...(stats || {}) };
+}
+
+async function loadProfileForName(profileRef, trimmedName) {
+  const profileSnap = await get(profileRef);
+  let profile = profileSnap.val();
+  if (!profile) {
+    profile = buildProfile(trimmedName);
+    await set(profileRef, profile);
+    console.log('✅ Created missing profile for', trimmedName);
+    return profile;
+  }
+
+  const mergedStats = mergeStats(profile.stats);
+  const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
+  const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
+  if (statsMissing || !hasLastStatUpdateAt) {
+    const updatePayload = { updatedAt: Date.now() };
+    if (statsMissing) {
+      updatePayload.stats = mergedStats;
+      profile.stats = mergedStats;
+    } else {
+      profile.stats = mergedStats;
+    }
+    if (!hasLastStatUpdateAt) {
+      updatePayload.lastStatUpdateAt = Date.now();
+      profile.lastStatUpdateAt = updatePayload.lastStatUpdateAt;
+    }
+    await update(profileRef, updatePayload);
+  } else {
+    profile.stats = mergedStats;
+  }
+
+  console.log('✅ Loaded profile for', trimmedName);
+  return profile;
 }
 
 async function promptForNewPin(name) {
@@ -120,9 +164,18 @@ export async function loadOrCreateWithPin(playerName) {
     if (transactionResult.committed) {
       const profile = buildProfile(trimmedName);
       await set(profileRef, profile);
+      rememberPinHash(nameKey, pinHash);
       console.log('✅ Created new profile for', trimmedName);
       return { nameKey, profile };
     }
+  }
+
+  const claim = claimSnap.val();
+  const storedPinHash = getCookie(pinCookieName(nameKey));
+  if (storedPinHash && claim?.pinHash === storedPinHash) {
+    await update(claimRef, { updatedAt: Date.now() });
+    const profile = await loadProfileForName(profileRef, trimmedName);
+    return { nameKey, profile };
   }
 
   while (true) {
@@ -132,12 +185,12 @@ export async function loadOrCreateWithPin(playerName) {
     }
     const pinHash = await hashPin(nameKey, pin);
     const latestClaimSnap = await get(claimRef);
-    const claim = latestClaimSnap.val();
-    if (!claim?.pinHash) {
+    const latestClaim = latestClaimSnap.val();
+    if (!latestClaim?.pinHash) {
       console.warn('⚠️ Name claim missing for', trimmedName);
     }
 
-    if (claim?.pinHash !== pinHash) {
+    if (latestClaim?.pinHash !== pinHash) {
       console.warn('❌ Incorrect PIN for', trimmedName);
       alert('Incorrect PIN. Try again.');
       continue;
@@ -145,36 +198,8 @@ export async function loadOrCreateWithPin(playerName) {
 
     await update(claimRef, { updatedAt: Date.now() });
 
-    const profileSnap = await get(profileRef);
-    let profile = profileSnap.val();
-    if (!profile) {
-      profile = buildProfile(trimmedName);
-      await set(profileRef, profile);
-      console.log('✅ Created missing profile for', trimmedName);
-      return { nameKey, profile };
-    }
-
-    const mergedStats = mergeStats(profile.stats);
-    const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
-    const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
-    if (statsMissing || !hasLastStatUpdateAt) {
-      const updatePayload = { updatedAt: Date.now() };
-      if (statsMissing) {
-        updatePayload.stats = mergedStats;
-        profile.stats = mergedStats;
-      } else {
-        profile.stats = mergedStats;
-      }
-      if (!hasLastStatUpdateAt) {
-        updatePayload.lastStatUpdateAt = Date.now();
-        profile.lastStatUpdateAt = updatePayload.lastStatUpdateAt;
-      }
-      await update(profileRef, updatePayload);
-    } else {
-      profile.stats = mergedStats;
-    }
-
-    console.log('✅ Loaded profile for', trimmedName);
+    rememberPinHash(nameKey, pinHash);
+    const profile = await loadProfileForName(profileRef, trimmedName);
     return { nameKey, profile };
   }
 }
