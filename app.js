@@ -611,7 +611,7 @@ async function main() {
   document.getElementById('game-container').appendChild(renderer.domElement);
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-  const mapRenderer = createMapRenderer({ scene, renderer });
+  const mapRenderer = createMapRenderer({ scene });
   const buildingsRenderer = createBuildingsRenderer({ scene, camera });
   window.mapRenderer = mapRenderer;
   window.buildingsRenderer = buildingsRenderer;
@@ -620,7 +620,6 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
-    mapRenderer.setResolution(window.innerWidth, window.innerHeight);
   };
   window.addEventListener('resize', handleResize);
   handleResize();
@@ -956,6 +955,7 @@ async function main() {
     tileSizeMeters: TILE_SIZE_METERS,
     evictRadiusTiles: TILE_EVICT_RADIUS
   });
+  mapRenderer.setTileSize(TILE_SIZE_METERS);
   const mapFetchInFlight = new Set();
   let activeTileKey = null;
   let worldOrigin = null;
@@ -1104,9 +1104,13 @@ async function main() {
       type: 'FeatureCollection',
       features: []
     };
+    const tiles = [];
     for (const entry of tileCache.cache.values()) {
       if (entry.geojson?.features?.length) {
         combined.features.push(...entry.geojson.features);
+      }
+      if (entry.tile) {
+        tiles.push(entry.tile);
       }
     }
     const bounds = getRenderOrigin(combined);
@@ -1115,6 +1119,7 @@ async function main() {
     }
     mapRenderer.updateHighways(combined, bounds);
     buildingsRenderer.updateBuildings(combined, bounds);
+    mapRenderer.updateGroundTiles(tiles);
   };
 
   window.clearTileCache = () => {
