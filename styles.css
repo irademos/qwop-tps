@@ -413,14 +413,25 @@ body {
 
 #settings-overlay {
   position: fixed;
-  top: 0; left: 0;
+  inset: 0;
   width: 100vw;
+
+  /* fallback + modern mobile viewport units */
   height: 100vh;
+  height: 100svh;
+  height: 100dvh;
+
   background-color: rgba(0, 0, 0, 0.6);
   display: none;
   justify-content: center;
   align-items: center;
   z-index: 999;
+
+  /* let content scroll if needed (small screens / keyboard) */
+  overflow-y: auto;
+
+  /* safe area */
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
 
 #settings-panel {
@@ -679,14 +690,17 @@ body {
 
 @media (max-width: 720px) {
   #settings-overlay {
-    align-items: flex-end;
+    align-items: flex-start;
+    
+    margin-top: 18%;
   }
 
   .settings-shell {
     width: 100%;
     max-width: none;
+    /* ensure it never exceeds visible viewport */
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     border-radius: 16px 16px 0 0;
-    max-height: 85vh;
   }
 
   .settings-shell.is-mobile .settings-tabs {
