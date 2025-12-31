@@ -12,6 +12,7 @@ export class IceGun {
     this.holder = null;
     this.type = 'iceGun';
     this.onPickup = null;
+    this.onDrop = null;
     this._holdOffset = new THREE.Vector3(-0.05, 0.15, 0.08);
     this._holdRotation = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
     this._holdQuaternion = new THREE.Quaternion().setFromEuler(this._holdRotation);
@@ -78,9 +79,10 @@ export class IceGun {
     }
   }
 
-  drop() {
+  drop({ removeFromInventory = true } = {}) {
     if (!this.holder || !this.mesh) return;
-    const player = this.holder.playerModel;
+    const previousHolder = this.holder;
+    const player = previousHolder.playerModel;
     if (player) {
       const dropPosition = player.position.clone();
       const terrainHeight = getTerrainHeight(dropPosition.x, dropPosition.z);
@@ -89,6 +91,10 @@ export class IceGun {
       this.mesh.quaternion.copy(player.quaternion);
     }
     this.holder = null;
+    this.mesh.visible = true;
+    if (typeof this.onDrop === 'function') {
+      this.onDrop(previousHolder, { removeFromInventory });
+    }
   }
 
   update() {

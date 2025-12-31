@@ -520,6 +520,7 @@ function renderInventory() {
   if (!elements.inventoryGrid) return;
   const inventory = context.appState?.getInventory?.() || {};
   const entries = Object.entries(inventory);
+  const equippedItemId = context.appState?.getEquippedInventoryItemId?.() || null;
   const fallbackIcons = {
     iceGun: '❄️'
   };
@@ -543,6 +544,7 @@ function renderInventory() {
     button.dataset.inventoryId = itemId;
     button.setAttribute('aria-selected', itemId === selectedInventoryId ? 'true' : 'false');
     button.classList.toggle('is-selected', itemId === selectedInventoryId);
+    button.classList.toggle('is-equipped', itemId === equippedItemId);
 
     const iconWrapper = createElement('div', 'inventory-icon-wrapper');
     if (item.icon) {
@@ -574,8 +576,9 @@ function renderInventory() {
 
   const selectedItem = inventory[selectedInventoryId];
   if (selectedItem) {
+    const equippedText = selectedInventoryId === equippedItemId ? ' • Equipped' : '';
     const countText = selectedItem.count ? ` • Qty ${selectedItem.count}` : '';
-    elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${countText}`;
+    elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${equippedText}${countText}`;
   }
 }
 
@@ -591,6 +594,12 @@ function bindEvents() {
     if (!button) return;
     if (button.dataset.inventoryId) {
       selectedInventoryId = button.dataset.inventoryId;
+      const isEquipped = context.appState?.isInventoryItemEquipped?.(selectedInventoryId);
+      if (isEquipped) {
+        context.appState?.unequipInventoryItem?.(selectedInventoryId);
+      } else {
+        context.appState?.equipInventoryItem?.(selectedInventoryId);
+      }
       renderInventory();
       return;
     }
