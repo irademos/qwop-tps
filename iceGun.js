@@ -62,6 +62,7 @@ export class IceGun {
 
   tryPickup(playerControls) {
     if (!this.mesh || !playerControls?.playerModel) return;
+    if (!this.mesh.visible) return;
     if (this.holder === playerControls) {
       this.drop();
       return;

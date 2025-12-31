@@ -666,9 +666,9 @@ async function main() {
     if (holder !== playerControls) return;
     addToInventory('iceGun', 1);
   };
-  iceGun.onDrop = (holder, { removeFromInventory } = {}) => {
+  iceGun.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
-    if (removeFromInventory) {
+    if (shouldRemoveFromInventory) {
       removeFromInventory('iceGun', 1);
     }
     playerControls?.updateAmmoUI?.(false);
@@ -855,6 +855,7 @@ async function main() {
       if (iceGun.mesh) {
         iceGun.mesh.visible = false;
       }
+      removeFromInventory('iceGun', 1);
       playerControls?.updateAmmoUI?.(false);
       updateSettingsUI();
     }
