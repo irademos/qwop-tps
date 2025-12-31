@@ -9,6 +9,7 @@ const DEFAULT_STATS = {
   health: 100,
   hunger: 100,
   energy: 100,
+  level: 1,
   strength: 5,
   agility: 5,
   smarts: 5,
