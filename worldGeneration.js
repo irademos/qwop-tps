@@ -122,7 +122,7 @@ const USE_SEAFLOOR_TEXTURE = false;
 
 const isPowerOfTwo = (value) => value && (value & (value - 1)) === 0;
 
-function loadIslandTexture(key, url, repeat = 4) {
+function loadIslandTexture(key, url, repeat = 4, isColorTexture = true) {
   const cacheKey = TEXTURE_DOWNSCALE_POWER
     ? `${key}-down-${TEXTURE_DOWNSCALE_POWER}`
     : key;
@@ -160,7 +160,9 @@ function loadIslandTexture(key, url, repeat = 4) {
   texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(repeat, repeat);
   if (texture.colorSpace !== undefined) {
-    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.colorSpace = isColorTexture
+      ? THREE.SRGBColorSpace
+      : THREE.NoColorSpace;
   }
   textureCache.set(cacheKey, texture);
   return texture;
@@ -182,6 +184,19 @@ const groundMaterial = new THREE.MeshStandardMaterial({
     "/assets/textures/forrest_ground_01_4k.blend/textures/forrest_ground_01_diff_4k.jpg",
     4
   ),
+  roughnessMap: loadIslandTexture(
+    "ground-roughness",
+    "/assets/textures/forrest_ground_01_4k.blend/textures/forrest_ground_01_rough_4k.jpg",
+    4,
+    false
+  ),
+  displacementMap: loadIslandTexture(
+    "ground-displacement",
+    "/assets/textures/forrest_ground_01_4k.blend/textures/forrest_ground_01_disp_4k.png",
+    4,
+    false
+  ),
+  displacementScale: 0.2,
   roughness: 0.85,
   metalness: 0.05,
 });
