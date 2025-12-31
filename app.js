@@ -2,11 +2,9 @@
 import * as THREE from "three";
 import { PlayerCharacter } from "./characters/PlayerCharacter.js";
 import { loadMonsterModel } from "./models/monsterModel.js";
-import { switchMonsterAnimation } from "./characters/MonsterCharacter.js";
-import { createOrcVoice } from "./orcVoice.js";
+import { MonsterCharacter } from "./characters/MonsterCharacter.js";
 import { createClouds } from "./worldGeneration.js";
-// import { getTerrainHeight } from './water.js';
-const getTerrainHeight = () => 0;
+import { getTerrainHeight } from './water.js';
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls.js';
 import { getCookie, setCookie } from './utils.js';
@@ -30,6 +28,18 @@ import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOu
 import { loadOrCreateWithPin, saveStatsThrottled } from './playerProfile.js';
 
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
+const MAX_MONSTERS = 2;
+const MONSTER_MODELS = [
+  "/models/rainbow_troll.fbx",
+  "/models/swamp_guy.fbx",
+  "/models/wizard.fbx",
+  "/models/gemhorn_monster.fbx",
+  "/models/alien_bumpy_bump.fbx"
+];
+const MONSTER_SPAWN_MIN_RADIUS = 25;
+const MONSTER_SPAWN_MAX_RADIUS = 80;
+const MONSTER_RESPAWN_DELAY_RANGE_MS = [3000, 5000];
+const MONSTER_SPAWN_ATTEMPTS = 12;
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -533,84 +543,11 @@ async function main() {
   // Expose to window for debugging
   window.breakManager = breakManager;
 
-  let monster = null;
-  loadMonsterModel(scene, data => {
-    monster = data.model;
-    // Expose monster globally for interactions like grabbing
-    window.monster = monster;
-    monster.userData.hideInMapView = true;
-    monster.userData.mixer = data.mixer;
-    monster.userData.actions = data.actions;
-    monster.userData.currentAction = "Idle";
-    monster.userData.direction = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-    // Tune monster movement speeds so it doesn't feel stuck in slow motion.
-    // "wanderSpeed" is used while the monster roams around in friendly mode,
-    // while "chaseSpeed" is used when it targets players in enemy mode.
-    monster.userData.wanderSpeed = 0.04;
-    monster.userData.chaseSpeed = 0.14;
-    monster.userData.lastDirectionChange = Date.now();
-    monster.userData.mode = "friendly"; // default behavior
-
-    const monsterSpawn = getSpawnPosition({ heightOffset: 0.5 });
-    monster.position.set(monsterSpawn.x, monsterSpawn.y, monsterSpawn.z);
-    monster.userData.spawnPoint = monsterSpawn;
-    if (monster.userData.rb) {
-      monster.userData.rb.setTranslation({ x: monsterSpawn.x, y: monsterSpawn.y, z: monsterSpawn.z }, true);
-    }
-
-    const orcPhrases = [
-      "Uggghh",
-      "Ooo Goo",
-      "grrreeeoookkk egggh uh uh",
-      "errrga ooogah"
-    ];
-    monster.userData.voice = createOrcVoice(orcPhrases);
-    if (rapierWorld) attachMonsterPhysics(monster);
-    registerNetworkedEntity('monster', {
-      getState: () => {
-        if (!monster) return null;
-        const pos = monster.position;
-        const q = monster.quaternion;
-        return {
-          position: [pos.x, pos.y, pos.z],
-          rotation: [q.x, q.y, q.z, q.w],
-          mode: monster.userData.mode,
-          action: monster.userData.currentAction,
-          health: typeof window.monsterHealth === 'number' ? window.monsterHealth : undefined
-        };
-      },
-      applyState: state => {
-        if (!monster || !state) return;
-        const [px, py, pz] = state.position || [];
-        const [rx, ry, rz, rw] = state.rotation || [];
-        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-          monster.position.set(px, py, pz);
-          monster.userData.rb?.setTranslation({ x: px, y: py, z: pz }, true);
-        }
-        if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
-          monster.quaternion.set(rx, ry, rz, rw);
-          monster.userData.rb?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
-        }
-        if (typeof state.mode === 'string') {
-          monster.userData.mode = state.mode;
-        }
-        if (typeof state.health === 'number') {
-          window.monsterHealth = state.health;
-        }
-        if (state.action && monster.userData.currentAction !== state.action && monster.userData.actions) {
-          switchMonsterAnimation(monster, state.action);
-        }
-      },
-      isLocallyControlled: () => multiplayer?.isHost && !!monster
-    });
-  });
-
-  // Allow mode switching from console or other scripts
-  window.setMonsterMode = mode => {
-    if (monster && (mode === "friendly" || mode === "enemy")) {
-      monster.userData.mode = mode;
-    }
-  };
+  let monsters = [];
+  window.monsters = monsters;
+  const monsterSlotIds = ["monster:0", "monster:1"];
+  const spawningSlots = new Set();
+  const respawnTimers = new Map();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -708,19 +645,18 @@ async function main() {
     isLocallyControlled: () => iceGun?.holder === playerControls
   });
 
-  function attachMonsterPhysics(mon) {
+  function attachMonsterPhysics(monster) {
+    const model = monster.model;
     const rbDesc = RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(mon.position.x, mon.position.y, mon.position.z)
+      .setTranslation(model.position.x, model.position.y, model.position.z)
       .setLinearDamping(0.5)
       .setAngularDamping(0.5);
     const rb = rapierWorld.createRigidBody(rbDesc);
     const colDesc = RAPIER.ColliderDesc.capsule(0.6, 0.3);
     rapierWorld.createCollider(colDesc, rb);
-    mon.userData.rb = rb;
-    rbToMesh.set(rb, mon);
+    model.userData.rb = rb;
+    rbToMesh.set(rb, model);
   }
-
-  if (monster) attachMonsterPhysics(monster);
 
 
 
@@ -731,6 +667,178 @@ async function main() {
   document.body.appendChild(player.nameLabel);
   window.playerModel = playerModel;
   let didInitialGpsSnap = false;
+
+  const getRandomMonsterModel = () => {
+    const index = Math.floor(Math.random() * MONSTER_MODELS.length);
+    return MONSTER_MODELS[index];
+  };
+
+  const isSpawnBlockedByBuildings = (position) => {
+    const buildingsGroup = buildingsRenderer?.group;
+    if (!buildingsGroup) return false;
+    const rayOrigin = new THREE.Vector3(position.x, position.y + 50, position.z);
+    const raycaster = new THREE.Raycaster(rayOrigin, new THREE.Vector3(0, -1, 0));
+    const intersections = raycaster.intersectObjects(buildingsGroup.children, true);
+    if (intersections.length === 0) return false;
+    return intersections[0].point.y > position.y + 0.1;
+  };
+
+  const getMonsterSpawnPosition = () => {
+    for (let attempt = 0; attempt < MONSTER_SPAWN_ATTEMPTS; attempt += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = THREE.MathUtils.randFloat(MONSTER_SPAWN_MIN_RADIUS, MONSTER_SPAWN_MAX_RADIUS);
+      const spawnPos = new THREE.Vector3(
+        playerModel.position.x + Math.cos(angle) * radius,
+        0,
+        playerModel.position.z + Math.sin(angle) * radius
+      );
+      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+      spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : 0.5;
+      if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
+        continue;
+      }
+      if (isSpawnBlockedByBuildings(spawnPos)) {
+        continue;
+      }
+      return spawnPos;
+    }
+    const fallback = playerModel.position.clone();
+    fallback.x += MONSTER_SPAWN_MIN_RADIUS;
+    fallback.y = getTerrainHeight(fallback.x, fallback.z) + 0.5;
+    return fallback;
+  };
+
+  const cleanupMonster = (monster) => {
+    if (!monster) return;
+    if (monster.model?.parent) {
+      monster.model.parent.remove(monster.model);
+    }
+    const body = monster.body;
+    if (body && rapierWorld?.getRigidBody(body.handle)) {
+      rbToMesh.delete(body);
+      rapierWorld.removeRigidBody(body);
+    }
+  };
+
+  const setMonsterForSlot = (slotId, monster) => {
+    const existingIndex = monsters.findIndex(entry => entry.id === slotId);
+    if (existingIndex >= 0) {
+      monsters[existingIndex] = monster;
+    } else {
+      monsters.push(monster);
+    }
+  };
+
+  const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null) => {
+    if (spawningSlots.has(slotId)) return;
+    spawningSlots.add(slotId);
+    loadMonsterModel(modelPath, data => {
+      try {
+        const monster = new MonsterCharacter(data);
+        monster.id = slotId;
+        monster.modelPath = modelPath;
+        monster.model.userData.hideInMapView = true;
+        monster.setMode("friendly");
+        monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
+        monster.lastDirectionChange = Date.now();
+        monster.resetHealth();
+
+        const monsterSpawn = getMonsterSpawnPosition();
+        monster.setPosition(monsterSpawn.x, monsterSpawn.y, monsterSpawn.z);
+
+        cleanupMonster(oldMonster);
+        scene.add(monster.model);
+        if (rapierWorld) {
+          attachMonsterPhysics(monster);
+        }
+        setMonsterForSlot(slotId, monster);
+      } finally {
+        spawningSlots.delete(slotId);
+      }
+    });
+  };
+
+  const ensureMonsters = () => {
+    const seenSlots = new Set();
+    monsters = monsters.filter((monster) => {
+      if (!monster) return false;
+      if (!monsterSlotIds.includes(monster.id)) {
+        cleanupMonster(monster);
+        return false;
+      }
+      if (seenSlots.has(monster.id)) {
+        cleanupMonster(monster);
+        return false;
+      }
+      seenSlots.add(monster.id);
+      return true;
+    });
+    window.monsters = monsters;
+
+    monsterSlotIds.forEach((slotId) => {
+      const existing = monsters.find(entry => entry.id === slotId);
+      if (!existing && !spawningSlots.has(slotId) && !respawnTimers.has(slotId)) {
+        spawnMonsterInSlot(slotId, getRandomMonsterModel());
+      }
+    });
+  };
+
+  monsterSlotIds.forEach((slotId) => {
+    registerNetworkedEntity(slotId, {
+      getState: () => {
+        const monster = monsters.find(entry => entry.id === slotId);
+        if (!monster) return null;
+        const pos = monster.model.position;
+        const q = monster.model.quaternion;
+        return {
+          position: [pos.x, pos.y, pos.z],
+          rotation: [q.x, q.y, q.z, q.w],
+          mode: monster.model.userData.mode,
+          action: monster.model.userData.currentAction,
+          health: monster.model.userData.health,
+          modelPath: monster.modelPath
+        };
+      },
+      applyState: state => {
+        if (!state) return;
+        const [px, py, pz] = state.position || [];
+        const [rx, ry, rz, rw] = state.rotation || [];
+        const current = monsters.find(entry => entry.id === slotId);
+        if (state.modelPath && (!current || current.modelPath !== state.modelPath)) {
+          spawnMonsterInSlot(slotId, state.modelPath, current);
+        }
+        const monster = monsters.find(entry => entry.id === slotId);
+        if (!monster) return;
+        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+          monster.model.position.set(px, py, pz);
+          monster.body?.setTranslation({ x: px, y: py, z: pz }, true);
+        }
+        if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+          monster.model.quaternion.set(rx, ry, rz, rw);
+          monster.body?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
+        }
+        if (typeof state.mode === 'string') {
+          monster.model.userData.mode = state.mode;
+          monster.isDead = state.mode === 'dead';
+        }
+        if (typeof state.health === 'number') {
+          monster.health = state.health;
+          monster.model.userData.health = state.health;
+        }
+        if (state.mode === 'dead' && state.health <= 0) {
+          cleanupMonster(monster);
+          monsters = monsters.filter(entry => entry.id !== slotId);
+          window.monsters = monsters;
+          return;
+        }
+        if (state.action && monster.model.userData.currentAction !== state.action) {
+          const fade = state.action === 'Weapon' ? 0.1 : 0.2;
+          monster.playAnimation(state.action, fade);
+        }
+      },
+      isLocallyControlled: () => multiplayer?.isHost && monsters.some(entry => entry.id === slotId)
+    });
+  });
 
 
   function applyOfflineHungerDecay(profile) {
@@ -883,8 +991,6 @@ async function main() {
     const energyDepleted = statsState.energy <= 0;
     playerControls.enabled = !mapViewEnabled && !playerDead && !energyDepleted;
   };
-
-  window.monsterHealth = 100;
 
   const healthFill = document.getElementById('health-fill');
   const hungerFill = document.getElementById('hunger-fill');
@@ -2070,6 +2176,35 @@ async function main() {
       p.model.userData.mixer?.update(mixerDelta);
     });
 
+    const isHost = !multiplayer || multiplayer.isHost;
+    if (isHost) {
+      ensureMonsters();
+      const nowMs = Date.now();
+      monsters.forEach(monster => {
+        if (!monster) return;
+        if (monster.isDead) {
+          const slotId = monster.id;
+          if (!respawnTimers.has(slotId)) {
+            cleanupMonster(monster);
+            monsters = monsters.filter(entry => entry.id !== slotId);
+            window.monsters = monsters;
+            const delay = THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
+            const timer = setTimeout(() => {
+              respawnTimers.delete(slotId);
+              spawnMonsterInSlot(slotId, getRandomMonsterModel());
+            }, delay);
+            respawnTimers.set(slotId, timer);
+          }
+          return;
+        }
+        monster.updateAI(mixerDelta, playerModel, otherPlayers);
+      });
+    } else {
+      monsters.forEach(monster => {
+        monster?.update(mixerDelta);
+      });
+    }
+
     if (now - lastPresenceSweep >= PRESENCE_SWEEP_MS) {
       lastPresenceSweep = now;
       const localFix = getLatestLocationFix();
@@ -2194,11 +2329,10 @@ async function main() {
       playerModel,
       otherPlayers,
       multiplayer,
-      monster,
-      delta: frameDelta
+      monsters
     });
 
-    updateMeleeAttacks({ playerModel, otherPlayers, monster, audioManager });
+    updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioManager, multiplayer });
 
     breakManager.update();
 

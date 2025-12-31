@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
-import { updateMonster, switchMonsterAnimation } from './characters/MonsterCharacter.js';
 
 export function spawnProjectile(scene, projectiles, position, direction, shooterId) {
   const size = 0.5;
@@ -43,10 +42,10 @@ export function updateProjectiles({
   otherPlayers,
   playerModel,
   multiplayer,
-  monster,
-  delta
+  monsters
 }) {
   const localId = multiplayer?.getId?.();
+  const isHost = !multiplayer || multiplayer.isHost;
   const removeProjectile = (index) => {
     const p = projectiles[index];
     const body = p.userData.rb;
@@ -146,37 +145,18 @@ export function updateProjectiles({
 
     if (removed) continue;
 
-    if (monster) {
-      const monsterBox = new THREE.Box3().setFromObject(monster);
-      if (projBox.intersectsBox(monsterBox) && age >= 80) {
-        console.log(`💥 Monster was hit`);
-        monster.userData.mode = "enemy";
-        removeProjectile(i);
-        removed = true;
-
-        if (typeof window.monsterHealth === 'number') {
-          window.monsterHealth = Math.max(0, window.monsterHealth - 10);
-          console.log(`👹 Monster Health: ${window.monsterHealth}`);
-
-          if (window.monsterHealth > 0 && !monster.userData.hitReacting) {
-            console.log("🎯 Triggering HitReact");
-            switchMonsterAnimation(monster, "Death");
-
-            monster.userData.hitReacting = true;
-
-            // Set duration to match your HitReact animation lengthd
-            setTimeout(() => {
-              monster.userData.hitReacting = false;
-            }, 100); // Adjust timing based on actual animation duration
-          }
-
+    if (isHost && Array.isArray(monsters)) {
+      for (const monster of monsters) {
+        if (!monster) continue;
+        const monsterBox = new THREE.Box3().setFromObject(monster.model);
+        if (projBox.intersectsBox(monsterBox) && age >= 80) {
+          console.log(`💥 Monster was hit`);
+          monster.applyDamage(10);
+          removeProjectile(i);
+          removed = true;
+          break;
         }
       }
     }
   }
-
-  if (multiplayer?.isHost && monster) {
-    updateMonster(monster, delta, playerModel, otherPlayers);
-  }
-
 }

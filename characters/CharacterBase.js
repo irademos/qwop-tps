@@ -1,6 +1,12 @@
 // /characters/CharacterBase.js
 import * as THREE from "three";
 
+export const CHARACTER_MOVEMENT = {
+  walkSpeed: 5,
+  runSpeed: 5,
+  turnRate: 0.03
+};
+
 export class CharacterBase {
   constructor(model) {
     this.model = model;
@@ -23,10 +29,14 @@ export class CharacterBase {
     if (this.mixer) this.mixer.update(delta);
   }
 
-  playAnimation(name) {
+  playAnimation(name, fadeDuration = 0.2) {
+    if (!name) return;
     if (this.currentAction === name || !this.actions[name]) return;
-    this.actions[this.currentAction]?.fadeOut(0.3);
-    this.actions[name].reset().fadeIn(0.3).play();
+    this.actions[this.currentAction]?.fadeOut(fadeDuration);
+    this.actions[name].reset().fadeIn(fadeDuration).play();
     this.currentAction = name;
+    if (this.model?.userData) {
+      this.model.userData.currentAction = name;
+    }
   }
 }
