@@ -94,6 +94,7 @@ async function main() {
   const FOOD_ENERGY_GAIN = 15;
   const HUNGER_DECAY_PER_HOUR = 6;
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
+  const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
   const PICKUP_RADIUS = 1.2;
   const MAX_FOOD_PICKUPS = 12;
   const FOOD_SPAWN_MIN_RADIUS = 8;
@@ -745,6 +746,14 @@ async function main() {
     luck: playerProfile.stats.luck
   };
 
+  let mapViewEnabled = false;
+  let playerDead = false;
+  const updateControlAvailability = () => {
+    if (!playerControls) return;
+    const energyDepleted = statsState.energy <= 0;
+    playerControls.enabled = !mapViewEnabled && !playerDead && !energyDepleted;
+  };
+
   window.monsterHealth = 100;
 
   const healthFill = document.getElementById('health-fill');
@@ -790,6 +799,7 @@ async function main() {
     }
     if (key === 'energy') {
       updateEnergyUI();
+      updateControlAvailability();
     }
     if (!skipSave) {
       if (key === 'hunger' || key === 'energy') {
@@ -826,8 +836,6 @@ async function main() {
   if (offlineDecay.changed) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
-
-  let playerDead = false;
 
   const projectiles = [];
   const ammoPickups = [];
@@ -905,10 +913,10 @@ async function main() {
     audioManager
   });
   window.playerControls = playerControls;
+  updateControlAvailability();
 
   initMapView({ camera, scene, player: playerModel });
 
-  let mapViewEnabled = false;
   const mapControls = document.createElement('div');
   mapControls.className = 'map-controls';
   const mapToggleButton = document.createElement('button');
@@ -928,7 +936,7 @@ async function main() {
   mapToggleButton.addEventListener('click', () => {
     mapViewEnabled = !mapViewEnabled;
     setMapViewEnabled(mapViewEnabled);
-    playerControls.enabled = !mapViewEnabled;
+    updateControlAvailability();
     mapToggleButton.classList.toggle('active', mapViewEnabled);
     mapControls.classList.toggle('map-enabled', mapViewEnabled);
   });
@@ -1432,8 +1440,8 @@ async function main() {
       playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
     playerControls.velocity.set(0, 0, 0);
-    playerControls.enabled = true;
     playerDead = false;
+    updateControlAvailability();
     const actions = playerModel.userData.actions;
     const current = playerModel.userData.currentAction;
     actions?.[current]?.fadeOut(0.2);
@@ -1736,6 +1744,14 @@ async function main() {
         }
       }
 
+      if (statsState.hunger <= 0 && statsState.health > 0) {
+        const healthDecay = HUNGER_HEALTH_DECAY_PER_SECOND * elapsedSeconds;
+        if (healthDecay > 0) {
+          setStat('health', statsState.health - healthDecay, { skipSave: true });
+          statsChanged = true;
+        }
+      }
+
       if (statsChanged) {
         lastStatUpdateAt = Date.now();
         saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -1828,7 +1844,7 @@ async function main() {
     updateHealthUI();
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
-      playerControls.enabled = false;
+      updateControlAvailability();
       const actions = playerModel.userData.actions;
       const current = playerModel.userData.currentAction;
       const die = actions?.die;
