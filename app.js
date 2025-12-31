@@ -662,6 +662,13 @@ async function main() {
     if (holder !== playerControls) return;
     addToInventory('iceGun', 1);
   };
+  iceGun.onDrop = (holder, { removeFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    if (removeFromInventory) {
+      removeFromInventory('iceGun', 1);
+    }
+    playerControls?.updateAmmoUI?.(false);
+  };
   if (iceGun.mesh) {
     iceGun.mesh.userData.hideInMapView = true;
   }
@@ -811,6 +818,41 @@ async function main() {
     }
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
     updateSettingsUI();
+  }
+
+  function isInventoryItemEquipped(itemId) {
+    if (itemId === 'iceGun') {
+      return iceGun?.holder === playerControls;
+    }
+    return false;
+  }
+
+  function getEquippedInventoryItemId() {
+    return isInventoryItemEquipped('iceGun') ? 'iceGun' : null;
+  }
+
+  function equipInventoryItem(itemId) {
+    if (!itemId || !inventoryState[itemId]) return;
+    if (itemId === 'iceGun') {
+      if (!iceGun?.mesh || !playerControls) return;
+      if (iceGun.remoteHolderId && iceGun.remoteHolderId !== multiplayer?.getId?.()) return;
+      iceGun.mesh.visible = true;
+      iceGun.holder = playerControls;
+      playerControls.updateAmmoUI?.(true);
+      updateSettingsUI();
+    }
+  }
+
+  function unequipInventoryItem(itemId) {
+    if (itemId === 'iceGun') {
+      if (iceGun?.holder !== playerControls) return;
+      iceGun.holder = null;
+      if (iceGun.mesh) {
+        iceGun.mesh.visible = false;
+      }
+      playerControls?.updateAmmoUI?.(false);
+      updateSettingsUI();
+    }
   }
 
   let mapViewEnabled = false;
@@ -1648,6 +1690,10 @@ async function main() {
     },
     getCharacterOptions: () => characterOptions,
     getInventory: () => getInventory(),
+    getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
+    isInventoryItemEquipped: (itemId) => isInventoryItemEquipped(itemId),
+    equipInventoryItem: (itemId) => equipInventoryItem(itemId),
+    unequipInventoryItem: (itemId) => unequipInventoryItem(itemId),
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
     getConnectedPlayers: () => {
