@@ -373,6 +373,32 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
+#level-popup {
+  position: fixed;
+  top: 18%;
+  left: 50%;
+  transform: translate(-50%, -20%) scale(0.96);
+  padding: 12px 18px;
+  border: 3px solid #000;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-family: 'Press Start 2P', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  text-align: center;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.8);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1200;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#level-popup.visible {
+  opacity: 1;
+  transform: translate(-50%, -20%) scale(1);
+}
+
 #ammo-icon {
   font-size: 16px;
 }

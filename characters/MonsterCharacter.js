@@ -49,7 +49,9 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.health = this.health;
     if (this.health <= 0) {
       this.markDead();
+      return true;
     }
+    return false;
   }
 
   markDead() {

@@ -49,7 +49,10 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioM
           const dist = attacker.model.position.distanceTo(monster.model.position);
           if (dist <= cfg.range) {
             hit = true;
-            monster.applyDamage(cfg.damage);
+            const killed = monster.applyDamage(cfg.damage);
+            if (killed && attacker.id === 'local') {
+              window.onMonsterKill?.();
+            }
           }
         }
       }
