@@ -875,6 +875,7 @@ async function main() {
     charm: playerProfile.stats.charm,
     luck: playerProfile.stats.luck
   };
+  const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'energy', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
   const levelPopup = document.getElementById('level-popup');
@@ -1073,13 +1074,29 @@ async function main() {
   }
 
   window.setStat = setStat;
+  window.getPlayerStrength = () => (Number.isFinite(statsState.strength) ? statsState.strength : 0);
+  const applyLevelBonus = delta => {
+    if (!Number.isFinite(delta) || delta === 0) {
+      return;
+    }
+    const adjustment = delta * 2;
+    for (const key of STAT_KEYS_FOR_LEVEL) {
+      const current = Number.isFinite(statsState[key]) ? statsState[key] : 0;
+      const nextValue = key === 'health' || key === 'hunger' || key === 'energy'
+        ? clampStat(key, current + adjustment)
+        : current + adjustment;
+      setStat(key, nextValue, { skipSave: true });
+    }
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  };
   const adjustLevel = delta => {
     const currentLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
     const nextLevel = clampStat('level', currentLevel + delta);
     if (nextLevel === currentLevel) {
       return;
     }
-    setStat('level', nextLevel);
+    setStat('level', nextLevel, { skipSave: true });
+    applyLevelBonus(nextLevel - currentLevel);
     showLevelPopup(nextLevel);
   };
 
