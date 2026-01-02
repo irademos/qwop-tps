@@ -1402,10 +1402,9 @@ async function main() {
     while (remaining > 0) {
       const amount = Math.min(AMMO_PICKUP_AMOUNT, remaining);
       remaining -= amount;
-      const angle = Math.random() * Math.PI * 2;
-      const distance = Math.random() * radius;
-      const x = center.x + Math.cos(angle) * distance;
-      const z = center.z + Math.sin(angle) * distance;
+      const angle = (index / Math.max(1, Math.ceil(totalAmmo / AMMO_PICKUP_AMOUNT))) * Math.PI * 2;
+      const x = center.x + Math.cos(angle) * radius;
+      const z = center.z + Math.sin(angle) * radius;
       drops.push({
         id: createDropId(index),
         position: [x, center.y, z],
@@ -1414,6 +1413,20 @@ async function main() {
       index += 1;
     }
     return drops;
+  };
+
+  const createRingPositions = (center, count, radius = 1.6) => {
+    const positions = [];
+    if (!center || !Number.isFinite(count) || count <= 0) return positions;
+    for (let index = 0; index < count; index += 1) {
+      const angle = (index / count) * Math.PI * 2;
+      positions.push(new THREE.Vector3(
+        center.x + Math.cos(angle) * radius,
+        center.y,
+        center.z + Math.sin(angle) * radius
+      ));
+    }
+    return positions;
   };
 
   const clearInventoryState = () => {
@@ -1428,9 +1441,11 @@ async function main() {
   const dropInventoryOnDeath = () => {
     if (!playerModel) return;
     const deathPosition = playerModel.position.clone();
-    const ammoCount = Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
-      ? inventoryState.iceGun[ICE_AMMO_KEY]
-      : 0;
+    const ammoCount = Number.isFinite(playerControls?.ammo)
+      ? playerControls.ammo
+      : (Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+        ? inventoryState.iceGun[ICE_AMMO_KEY]
+        : 0);
     const ammoDrops = createAmmoDrops(deathPosition, ammoCount);
     ammoDrops.forEach(drop => {
       addDroppedAmmoPickup({
@@ -1443,22 +1458,20 @@ async function main() {
       multiplayer.send({ type: 'inventoryDrop', drops: ammoDrops });
     }
 
-    if ((inventoryState.iceGun?.count || 0) > 0) {
-      if (iceGun?.holder === playerControls) {
-        iceGun.drop({ removeFromInventory: false });
-      } else {
-        spawnIceGunPickup(deathPosition);
+    const weaponDrops = [];
+    if ((inventoryState.iceGun?.count || 0) > 0) weaponDrops.push('iceGun');
+    if ((inventoryState.autumnSword?.count || 0) > 0) weaponDrops.push('autumnSword');
+    const weaponPositions = createRingPositions(deathPosition, weaponDrops.length, 2.2);
+    weaponDrops.forEach((weaponId, index) => {
+      const position = weaponPositions[index] || deathPosition;
+      if (weaponId === 'iceGun') {
+        spawnIceGunPickup(position);
+      } else if (weaponId === 'autumnSword') {
+        spawnAutumnSwordPickup(position);
       }
-    }
+    });
 
-    if ((inventoryState.autumnSword?.count || 0) > 0) {
-      if (autumnSword?.holder === playerControls) {
-        autumnSword.drop({ removeFromInventory: false });
-      } else {
-        spawnAutumnSwordPickup(deathPosition);
-      }
-    }
-
+    playerControls?.setAmmo?.(0);
     clearInventoryState();
   };
 
@@ -1674,6 +1687,7 @@ async function main() {
     pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.noFloat = true;
     pickup.userData.isDropped = true;
     pickup.userData.dropId = dropId;
     pickup.userData.amount = amount;
@@ -2947,7 +2961,7 @@ async function main() {
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
-        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < 1.2) {
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
           const amount = Number.isFinite(pickup.userData.amount)
             ? pickup.userData.amount
             : AMMO_PICKUP_AMOUNT;
@@ -2965,11 +2979,13 @@ async function main() {
           pickup.userData.baseY = pickup.position.y;
         }
 
-        pickup.rotation.y += 0.03;
-        const phase = pickup.userData.phase ?? 0;
-        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        if (!pickup.userData.noFloat) {
+          pickup.rotation.y += 0.03;
+          const phase = pickup.userData.phase ?? 0;
+          pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        }
 
-        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < 1.2) {
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
           const amount = Number.isFinite(entry.amount)
             ? entry.amount
             : (Number.isFinite(pickup.userData.amount) ? pickup.userData.amount : AMMO_PICKUP_AMOUNT);
@@ -2994,7 +3010,7 @@ async function main() {
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
-        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
           applyFoodPickupEffects();
           disposePickup(pickup);
           foodPickups.splice(i, 1);
@@ -3013,7 +3029,7 @@ async function main() {
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
-        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
           applyHealthPickupEffects();
           disposePickup(pickup);
           healthPickups.splice(i, 1);
