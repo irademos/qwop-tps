@@ -10,6 +10,18 @@ const TABS = [
   { id: 'location', label: 'Location' },
   { id: 'developer', label: 'Developer' }
 ];
+const CHARACTER_STATS = [
+  { key: 'level', label: 'Level' },
+  { key: 'health', label: 'Health' },
+  { key: 'hunger', label: 'Hunger' },
+  { key: 'energy', label: 'Energy' },
+  { key: 'strength', label: 'Strength' },
+  { key: 'agility', label: 'Agility' },
+  { key: 'smarts', label: 'Smarts' },
+  { key: 'charm', label: 'Charm' },
+  { key: 'luck', label: 'Luck' }
+];
+const PERCENT_STATS = new Set(['health', 'hunger', 'energy']);
 
 let overlay;
 let panel;
@@ -59,6 +71,17 @@ function formatCoordinate(value) {
 function formatMeters(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—';
   return value.toFixed(2);
+}
+
+function formatStatValue(key, value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  if (PERCENT_STATS.has(key)) {
+    return `${Math.round(value)}%`;
+  }
+  if (key === 'level') {
+    return `${Math.max(1, Math.round(value))}`;
+  }
+  return `${Math.round(value)}`;
 }
 
 function buildHeader() {
@@ -130,7 +153,20 @@ function buildCharacterPanel() {
   const previewFallback = createElement('div', 'character-preview-fallback', 'Preview unavailable');
   previewWrapper.append(previewCanvas, previewFallback);
 
-  panelEl.append(nameGroup, characterGroup, previewWrapper);
+  const statsTitle = createElement('h3', 'settings-section-title', 'Stats');
+  const statsGrid = createElement('div', 'settings-stats-grid');
+  elements.characterStatFields = {};
+  CHARACTER_STATS.forEach(({ key, label }) => {
+    const statRow = createElement('div', 'settings-stat');
+    const statLabel = createElement('span', 'settings-stat-label', label);
+    const statValue = createElement('span', 'settings-stat-value', '—');
+    statValue.dataset.field = `stat-${key}`;
+    statRow.append(statLabel, statValue);
+    statsGrid.appendChild(statRow);
+    elements.characterStatFields[key] = statValue;
+  });
+
+  panelEl.append(nameGroup, characterGroup, previewWrapper, statsTitle, statsGrid);
 
   elements.nameInput = nameInput;
   elements.characterSelect = characterSelect;
@@ -841,6 +877,12 @@ export function updateUI() {
         loadPreviewModel(model);
       }
     }
+  }
+  if (elements.characterStatFields && context.appState?.getPlayerStats) {
+    const stats = context.appState.getPlayerStats() || {};
+    Object.entries(elements.characterStatFields).forEach(([key, node]) => {
+      node.textContent = formatStatValue(key, stats[key]);
+    });
   }
 
   if (elements.connectionStatus) {

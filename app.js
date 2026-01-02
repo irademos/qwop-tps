@@ -2129,6 +2129,7 @@ async function main() {
       setCookie("characterModel", characterModel);
       localStorage.setItem('characterModel', characterModel);
     },
+    getPlayerStats: () => ({ ...statsState }),
     getCharacterOptions: () => characterOptions,
     getInventory: () => getInventory(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
