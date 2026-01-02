@@ -123,12 +123,12 @@ async function main() {
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
   const PICKUP_RADIUS = 1.2;
-  const MAX_FOOD_PICKUPS = 12;
-  const MAX_HEALTH_PICKUPS = 8;
-  const TILE_STOCK_FOOD_COUNT = 6;
-  const TILE_STOCK_HEALTH_COUNT = 4;
-  const TILE_STOCK_WEAPON_COUNT = 1;
-  const TILE_STOCK_COOLDOWN_MS = 20 * 60 * 1000;
+  const MAX_FOOD_PICKUPS = 80;
+  const MAX_HEALTH_PICKUPS = 30;
+  const TILE_STOCK_FOOD_COUNT = 500;
+  const TILE_STOCK_HEALTH_COUNT = 500;
+  const TILE_STOCK_WEAPON_COUNT = 100;
+  const TILE_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
   const TILE_STOCK_STORAGE_KEY = 'tile-stock-history-v1';
 
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
@@ -947,6 +947,12 @@ async function main() {
       getState: () => {
         const monster = monsters.find(entry => entry.id === slotId);
         if (!monster) return null;
+        try {
+          if (!monster.model) return null;
+        }
+        catch {
+          return null;
+        }
         const pos = monster.model.position;
         const q = monster.model.quaternion;
         return {
@@ -1367,8 +1373,15 @@ async function main() {
     }
   };
 
+  const asVec3 = (p) => (
+    p?.isVector3 ? p.clone()
+    : p && Number.isFinite(p.x) && Number.isFinite(p.z) ? new THREE.Vector3(p.x, p.y ?? 0, p.z)
+    : null
+  );
+
   function spawnAmmoPickup(position) {
-    const spawnPos = position.clone();
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
 
@@ -1393,7 +1406,8 @@ async function main() {
   }
 
   function spawnFoodPickup(position) {
-    const spawnPos = position.clone();
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
 
@@ -1419,7 +1433,8 @@ async function main() {
   }
 
   function spawnHealthPickup(position) {
-    const spawnPos = position.clone();
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
 
@@ -1459,9 +1474,12 @@ async function main() {
 
   function spawnIceGunPickup(position) {
     if (!iceGun?.mesh) return;
-    const spawnPos = position.clone();
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     if (!Number.isFinite(terrainHeight)) return;
+
     spawnPos.y = terrainHeight + 0.5;
     iceGun.mesh.position.copy(spawnPos);
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
@@ -1471,9 +1489,12 @@ async function main() {
 
   function spawnAutumnSwordPickup(position) {
     if (!autumnSword?.mesh) return;
-    const spawnPos = position.clone();
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     if (!Number.isFinite(terrainHeight)) return;
+
     spawnPos.y = terrainHeight + 0.5;
     autumnSword.mesh.position.copy(spawnPos);
     autumnSword.mesh.quaternion.set(0, 0, 0, 1);
@@ -1578,13 +1599,19 @@ async function main() {
     if (!tile || !worldOrigin) return null;
     const center = tileCache.getTileCenterLocation(tile);
     if (!center) return null;
+
     const lonScale = metersPerDegreeLon(center.lat);
     const offsetX = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
     const offsetZ = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
     const lat = center.lat + offsetZ / METERS_PER_DEGREE_LAT;
     const lon = center.lon + offsetX / lonScale;
-    return computePlayerMeters({ lat, lon });
+
+    const meters = computePlayerMeters({ lat, lon });
+    if (!meters) return null;
+
+    return new THREE.Vector3(meters.x, 0, meters.z);
   };
+
 
   const spawnScatteredPickups = ({ tile, count, maxTotal, spawnFn }) => {
     let spawned = 0;
