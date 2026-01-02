@@ -1116,6 +1116,7 @@ export class PlayerControls {
     if (this.ammoContainerEl) {
       if (this.lastHasGun !== hasGun) {
         this.ammoContainerEl.classList.toggle('inactive', !hasGun);
+        this.ammoContainerEl.classList.toggle('hidden', !hasGun);
       }
 
       const isEmpty = this.ammo === 0;

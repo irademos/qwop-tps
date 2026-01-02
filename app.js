@@ -1187,7 +1187,9 @@ async function main() {
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
   const levelPopup = document.getElementById('level-popup');
+  const ammoPopup = document.getElementById('ammo-popup');
   let levelPopupTimer = null;
+  let ammoPopupTimer = null;
   updatePlayerInfoUI = () => {
     if (playerNameDisplay) {
       playerNameDisplay.textContent = playerName;
@@ -1209,6 +1211,19 @@ async function main() {
       levelPopup.classList.remove('visible');
       levelPopupTimer = null;
     }, 2200);
+  };
+  const showAmmoPopup = ammoCount => {
+    if (!ammoPopup) return;
+    const displayCount = Number.isFinite(ammoCount) ? Math.max(0, Math.floor(ammoCount)) : 0;
+    ammoPopup.textContent = `Ice ammo: ${displayCount}`;
+    ammoPopup.classList.add('visible');
+    if (ammoPopupTimer) {
+      clearTimeout(ammoPopupTimer);
+    }
+    ammoPopupTimer = setTimeout(() => {
+      ammoPopup.classList.remove('visible');
+      ammoPopupTimer = null;
+    }, 1600);
   };
   const ICE_AMMO_KEY = 'ice ammo';
   const DEFAULT_ICE_AMMO = 10;
@@ -2966,6 +2981,7 @@ async function main() {
             ? pickup.userData.amount
             : AMMO_PICKUP_AMOUNT;
           playerControls.addAmmo(amount);
+          showAmmoPopup(playerControls.ammo);
           disposePickup(pickup);
           ammoPickups.splice(i, 1);
         }
@@ -2990,6 +3006,7 @@ async function main() {
             ? entry.amount
             : (Number.isFinite(pickup.userData.amount) ? pickup.userData.amount : AMMO_PICKUP_AMOUNT);
           playerControls.addAmmo(amount);
+          showAmmoPopup(playerControls.ammo);
           removeDroppedAmmoPickup(id);
           if (multiplayer && !multiplayer.isHost) {
             pendingDropRemovals.add(id);
