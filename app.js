@@ -1280,10 +1280,9 @@ async function main() {
     while (remaining > 0) {
       const amount = Math.min(AMMO_PICKUP_AMOUNT, remaining);
       remaining -= amount;
-      const angle = Math.random() * Math.PI * 2;
-      const distance = Math.random() * radius;
-      const x = center.x + Math.cos(angle) * distance;
-      const z = center.z + Math.sin(angle) * distance;
+      const angle = (index / Math.max(1, Math.ceil(totalAmmo / AMMO_PICKUP_AMOUNT))) * Math.PI * 2;
+      const x = center.x + Math.cos(angle) * radius;
+      const z = center.z + Math.sin(angle) * radius;
       drops.push({
         id: createDropId(index),
         position: [x, center.y, z],
@@ -1292,6 +1291,20 @@ async function main() {
       index += 1;
     }
     return drops;
+  };
+
+  const createRingPositions = (center, count, radius = 1.6) => {
+    const positions = [];
+    if (!center || !Number.isFinite(count) || count <= 0) return positions;
+    for (let index = 0; index < count; index += 1) {
+      const angle = (index / count) * Math.PI * 2;
+      positions.push(new THREE.Vector3(
+        center.x + Math.cos(angle) * radius,
+        center.y,
+        center.z + Math.sin(angle) * radius
+      ));
+    }
+    return positions;
   };
 
   const clearInventoryState = () => {
@@ -1323,21 +1336,18 @@ async function main() {
       multiplayer.send({ type: 'inventoryDrop', drops: ammoDrops });
     }
 
-    if ((inventoryState.iceGun?.count || 0) > 0) {
-      if (iceGun?.holder === playerControls) {
-        iceGun.drop({ removeFromInventory: false });
-      } else {
-        spawnIceGunPickup(deathPosition);
+    const weaponDrops = [];
+    if ((inventoryState.iceGun?.count || 0) > 0) weaponDrops.push('iceGun');
+    if ((inventoryState.autumnSword?.count || 0) > 0) weaponDrops.push('autumnSword');
+    const weaponPositions = createRingPositions(deathPosition, weaponDrops.length, 2.2);
+    weaponDrops.forEach((weaponId, index) => {
+      const position = weaponPositions[index] || deathPosition;
+      if (weaponId === 'iceGun') {
+        spawnIceGunPickup(position);
+      } else if (weaponId === 'autumnSword') {
+        spawnAutumnSwordPickup(position);
       }
-    }
-
-    if ((inventoryState.autumnSword?.count || 0) > 0) {
-      if (autumnSword?.holder === playerControls) {
-        autumnSword.drop({ removeFromInventory: false });
-      } else {
-        spawnAutumnSwordPickup(deathPosition);
-      }
-    }
+    });
 
     playerControls?.setAmmo?.(0);
     clearInventoryState();
