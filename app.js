@@ -125,16 +125,11 @@ async function main() {
   const PICKUP_RADIUS = 1.2;
   const MAX_FOOD_PICKUPS = 12;
   const MAX_HEALTH_PICKUPS = 8;
-  const FOOD_SPAWN_MIN_RADIUS = 8;
-  const FOOD_SPAWN_MAX_RADIUS = 25;
-  const FOOD_SPAWN_INTERVAL_RANGE = [10, 20];
-  const HEALTH_SPAWN_INTERVAL_RANGE = [14, 26];
-  const ICE_GUN_SPAWN_MIN_RADIUS = 20;
-  const ICE_GUN_SPAWN_MAX_RADIUS = 60;
-  const ICE_GUN_SPAWN_INTERVAL_RANGE = [60, 120];
-  const AUTUMN_SWORD_SPAWN_MIN_RADIUS = 20;
-  const AUTUMN_SWORD_SPAWN_MAX_RADIUS = 60;
-  const AUTUMN_SWORD_SPAWN_INTERVAL_RANGE = [60, 120];
+  const TILE_STOCK_FOOD_COUNT = 6;
+  const TILE_STOCK_HEALTH_COUNT = 4;
+  const TILE_STOCK_WEAPON_COUNT = 1;
+  const TILE_STOCK_COOLDOWN_MS = 20 * 60 * 1000;
+  const TILE_STOCK_STORAGE_KEY = 'tile-stock-history-v1';
 
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
   setCookie("characterModel", characterModel);
@@ -1486,41 +1481,7 @@ async function main() {
     autumnSword.holder = null;
   }
 
-  let lastFoodSpawnAt = performance.now();
-  let nextFoodSpawnDelay = THREE.MathUtils.randFloat(...FOOD_SPAWN_INTERVAL_RANGE) * 1000;
-  let lastHealthSpawnAt = performance.now();
-  let nextHealthSpawnDelay = THREE.MathUtils.randFloat(...HEALTH_SPAWN_INTERVAL_RANGE) * 1000;
-  let lastIceGunSpawnAt = performance.now();
-  let nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
-  let lastAutumnSwordSpawnAt = performance.now();
-  let nextAutumnSwordSpawnDelay = THREE.MathUtils.randFloat(...AUTUMN_SWORD_SPAWN_INTERVAL_RANGE) * 1000;
   let statDecayAccumulator = 0;
-
-  const isHost = !multiplayer || multiplayer.isHost;
-  if (isHost && !inventoryState.iceGun?.count && iceGun?.mesh && !iceGun.holder) {
-    const angle = Math.random() * Math.PI * 2;
-    const radius = THREE.MathUtils.randFloat(ICE_GUN_SPAWN_MIN_RADIUS, ICE_GUN_SPAWN_MAX_RADIUS);
-    const spawnPos = new THREE.Vector3(
-      playerModel.position.x + Math.cos(angle) * radius,
-      0,
-      playerModel.position.z + Math.sin(angle) * radius
-    );
-    spawnIceGunPickup(spawnPos);
-    lastIceGunSpawnAt = performance.now();
-    nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
-  }
-  if (isHost && !inventoryState.autumnSword?.count && autumnSword?.mesh && !autumnSword.holder) {
-    const angle = Math.random() * Math.PI * 2;
-    const radius = THREE.MathUtils.randFloat(AUTUMN_SWORD_SPAWN_MIN_RADIUS, AUTUMN_SWORD_SPAWN_MAX_RADIUS);
-    const spawnPos = new THREE.Vector3(
-      playerModel.position.x + Math.cos(angle) * radius,
-      0,
-      playerModel.position.z + Math.sin(angle) * radius
-    );
-    spawnAutumnSwordPickup(spawnPos);
-    lastAutumnSwordSpawnAt = performance.now();
-    nextAutumnSwordSpawnDelay = THREE.MathUtils.randFloat(...AUTUMN_SWORD_SPAWN_INTERVAL_RANGE) * 1000;
-  }
 
   playerControls = new PlayerControls({
     scene,
@@ -1585,6 +1546,116 @@ async function main() {
     tileSizeMeters: TILE_SIZE_METERS
   });
   window.groundTiles = groundTiles.tiles;
+  const tileStockHistory = new Map();
+  const loadTileStockHistory = () => {
+    try {
+      const stored = localStorage.getItem(TILE_STOCK_STORAGE_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      Object.entries(parsed).forEach(([key, value]) => {
+        if (Number.isFinite(value)) {
+          tileStockHistory.set(key, value);
+        }
+      });
+    } catch (error) {
+      console.warn('Failed to load tile stock history:', error);
+    }
+  };
+
+  const saveTileStockHistory = () => {
+    try {
+      const payload = {};
+      tileStockHistory.forEach((value, key) => {
+        payload[key] = value;
+      });
+      localStorage.setItem(TILE_STOCK_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.warn('Failed to persist tile stock history:', error);
+    }
+  };
+
+  const getRandomTileSpawnPosition = (tile) => {
+    if (!tile || !worldOrigin) return null;
+    const center = tileCache.getTileCenterLocation(tile);
+    if (!center) return null;
+    const lonScale = metersPerDegreeLon(center.lat);
+    const offsetX = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
+    const offsetZ = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
+    const lat = center.lat + offsetZ / METERS_PER_DEGREE_LAT;
+    const lon = center.lon + offsetX / lonScale;
+    return computePlayerMeters({ lat, lon });
+  };
+
+  const spawnScatteredPickups = ({ tile, count, maxTotal, spawnFn }) => {
+    let spawned = 0;
+    let attempts = 0;
+    const maxAttempts = count * 6;
+    while (spawned < count && attempts < maxAttempts && maxTotal()) {
+      attempts += 1;
+      const spawnPos = getRandomTileSpawnPosition(tile);
+      if (!spawnPos) continue;
+      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+      if (!Number.isFinite(terrainHeight)) continue;
+      spawnFn(spawnPos);
+      spawned += 1;
+    }
+    return spawned;
+  };
+
+  const stockTilePickups = (tile) => {
+    if (!tile) return;
+    const tileKey = tileCache.getTileKey(tile);
+    const now = Date.now();
+    const lastStocked = tileStockHistory.get(tileKey);
+    if (Number.isFinite(lastStocked) && now - lastStocked < TILE_STOCK_COOLDOWN_MS) {
+      return;
+    }
+
+    const spawnedFood = spawnScatteredPickups({
+      tile,
+      count: TILE_STOCK_FOOD_COUNT,
+      maxTotal: () => foodPickups.length < MAX_FOOD_PICKUPS,
+      spawnFn: spawnFoodPickup
+    });
+
+    const spawnedHealth = spawnScatteredPickups({
+      tile,
+      count: TILE_STOCK_HEALTH_COUNT,
+      maxTotal: () => healthPickups.length < MAX_HEALTH_PICKUPS,
+      spawnFn: spawnHealthPickup
+    });
+
+    const isHost = !multiplayer || multiplayer.isHost;
+    let spawnedWeapons = 0;
+    if (isHost && TILE_STOCK_WEAPON_COUNT > 0) {
+      const hasIceGun = (inventoryState?.iceGun?.count || 0) > 0;
+      const canSpawnIceGun = iceGun?.mesh && !iceGun.holder && !hasIceGun && !iceGun.mesh.visible;
+      if (canSpawnIceGun) {
+        const spawnPos = getRandomTileSpawnPosition(tile);
+        if (spawnPos) {
+          spawnIceGunPickup(spawnPos);
+          spawnedWeapons += 1;
+        }
+      }
+
+      const hasSword = (inventoryState?.autumnSword?.count || 0) > 0;
+      const canSpawnSword = autumnSword?.mesh && !autumnSword.holder && !hasSword && !autumnSword.mesh.visible;
+      if (spawnedWeapons < TILE_STOCK_WEAPON_COUNT && canSpawnSword) {
+        const spawnPos = getRandomTileSpawnPosition(tile);
+        if (spawnPos) {
+          spawnAutumnSwordPickup(spawnPos);
+          spawnedWeapons += 1;
+        }
+      }
+    }
+
+    if (spawnedFood || spawnedHealth || spawnedWeapons || lastStocked == null) {
+      tileStockHistory.set(tileKey, now);
+      saveTileStockHistory();
+    }
+  };
+
+  loadTileStockHistory();
   let activeGroundTileKey = null;
   const getGroundTileCoords = (position) => {
     if (!position) return null;
@@ -1940,6 +2011,7 @@ async function main() {
       const localMeters = tileCache.getLocalMeters(location);
       locationState.tile = tileCache.getTileCoords(localMeters);
       requestMapUpdate(location);
+      stockTilePickups(locationState.tile);
     },
     onError: (error, message) => {
       console.warn('Location error:', message, error);
@@ -2468,78 +2540,6 @@ async function main() {
       if (statsChanged) {
         lastStatUpdateAt = Date.now();
         saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
-      }
-    }
-
-    if (!PERF.disablePickups && now - lastFoodSpawnAt >= nextFoodSpawnDelay) {
-      lastFoodSpawnAt = now;
-      nextFoodSpawnDelay = THREE.MathUtils.randFloat(...FOOD_SPAWN_INTERVAL_RANGE) * 1000;
-      if (foodPickups.length < MAX_FOOD_PICKUPS) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = THREE.MathUtils.randFloat(FOOD_SPAWN_MIN_RADIUS, FOOD_SPAWN_MAX_RADIUS);
-        const spawnPos = new THREE.Vector3(
-          playerModel.position.x + Math.cos(angle) * radius,
-          0,
-          playerModel.position.z + Math.sin(angle) * radius
-        );
-        const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-        if (Number.isFinite(terrainHeight)) {
-          spawnFoodPickup(spawnPos);
-        }
-      }
-    }
-
-    if (!PERF.disablePickups && now - lastHealthSpawnAt >= nextHealthSpawnDelay) {
-      lastHealthSpawnAt = now;
-      nextHealthSpawnDelay = THREE.MathUtils.randFloat(...HEALTH_SPAWN_INTERVAL_RANGE) * 1000;
-      if (healthPickups.length < MAX_HEALTH_PICKUPS) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = THREE.MathUtils.randFloat(FOOD_SPAWN_MIN_RADIUS, FOOD_SPAWN_MAX_RADIUS);
-        const spawnPos = new THREE.Vector3(
-          playerModel.position.x + Math.cos(angle) * radius,
-          0,
-          playerModel.position.z + Math.sin(angle) * radius
-        );
-        const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-        if (Number.isFinite(terrainHeight)) {
-          spawnHealthPickup(spawnPos);
-        }
-      }
-    }
-
-    if (now - lastIceGunSpawnAt >= nextIceGunSpawnDelay) {
-      lastIceGunSpawnAt = now;
-      nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
-      const isHost = !multiplayer || multiplayer.isHost;
-      const hasIceGun = (inventoryState?.iceGun?.count || 0) > 0;
-      const canSpawn = isHost && iceGun?.mesh && !iceGun.holder && !hasIceGun && !iceGun.mesh.visible;
-      if (canSpawn) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = THREE.MathUtils.randFloat(ICE_GUN_SPAWN_MIN_RADIUS, ICE_GUN_SPAWN_MAX_RADIUS);
-        const spawnPos = new THREE.Vector3(
-          playerModel.position.x + Math.cos(angle) * radius,
-          0,
-          playerModel.position.z + Math.sin(angle) * radius
-        );
-        spawnIceGunPickup(spawnPos);
-      }
-    }
-
-    if (now - lastAutumnSwordSpawnAt >= nextAutumnSwordSpawnDelay) {
-      lastAutumnSwordSpawnAt = now;
-      nextAutumnSwordSpawnDelay = THREE.MathUtils.randFloat(...AUTUMN_SWORD_SPAWN_INTERVAL_RANGE) * 1000;
-      const isHost = !multiplayer || multiplayer.isHost;
-      const hasSword = (inventoryState?.autumnSword?.count || 0) > 0;
-      const canSpawn = isHost && autumnSword?.mesh && !autumnSword.holder && !hasSword && !autumnSword.mesh.visible;
-      if (canSpawn) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = THREE.MathUtils.randFloat(AUTUMN_SWORD_SPAWN_MIN_RADIUS, AUTUMN_SWORD_SPAWN_MAX_RADIUS);
-        const spawnPos = new THREE.Vector3(
-          playerModel.position.x + Math.cos(angle) * radius,
-          0,
-          playerModel.position.z + Math.sin(angle) * radius
-        );
-        spawnAutumnSwordPickup(spawnPos);
       }
     }
 
