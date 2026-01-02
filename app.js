@@ -1306,9 +1306,11 @@ async function main() {
   const dropInventoryOnDeath = () => {
     if (!playerModel) return;
     const deathPosition = playerModel.position.clone();
-    const ammoCount = Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
-      ? inventoryState.iceGun[ICE_AMMO_KEY]
-      : 0;
+    const ammoCount = Number.isFinite(playerControls?.ammo)
+      ? playerControls.ammo
+      : (Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+        ? inventoryState.iceGun[ICE_AMMO_KEY]
+        : 0);
     const ammoDrops = createAmmoDrops(deathPosition, ammoCount);
     ammoDrops.forEach(drop => {
       addDroppedAmmoPickup({
@@ -1338,6 +1340,7 @@ async function main() {
     }
 
     clearInventoryState();
+    playerControls?.setAmmo?.(0);
   };
 
   function updateHealthUI() {
