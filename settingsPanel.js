@@ -555,7 +555,7 @@ function handleAction(target) {
 function renderInventory() {
   if (!elements.inventoryGrid) return;
   const inventory = context.appState?.getInventory?.() || {};
-  const entries = Object.entries(inventory);
+  const entries = Object.entries(inventory).filter(([, item]) => (item?.count || 0) > 0);
   const equippedItemId = context.appState?.getEquippedInventoryItemId?.() || null;
   const fallbackIcons = {
     iceGun: '❄️',
@@ -608,6 +608,12 @@ function renderInventory() {
       button.appendChild(badge);
     }
 
+    if (itemId === 'iceGun') {
+      const ammoCount = Number.isFinite(item?.['ice ammo']) ? item['ice ammo'] : 0;
+      const ammoLabel = createElement('span', 'inventory-ammo', `Ice ammo: ${ammoCount}`);
+      button.appendChild(ammoLabel);
+    }
+
     elements.inventoryGrid.appendChild(button);
   });
 
@@ -615,7 +621,10 @@ function renderInventory() {
   if (selectedItem) {
     const equippedText = selectedInventoryId === equippedItemId ? ' • Equipped' : '';
     const countText = selectedItem.count ? ` • Qty ${selectedItem.count}` : '';
-    elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${equippedText}${countText}`;
+    const ammoText = selectedInventoryId === 'iceGun'
+      ? ` • Ice ammo ${Number.isFinite(selectedItem?.['ice ammo']) ? selectedItem['ice ammo'] : 0}`
+      : '';
+    elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${equippedText}${countText}${ammoText}`;
   }
 }
 

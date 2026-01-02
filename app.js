@@ -1063,6 +1063,8 @@ async function main() {
       levelPopupTimer = null;
     }, 2200);
   };
+  const ICE_AMMO_KEY = 'ice ammo';
+  const DEFAULT_ICE_AMMO = 10;
   const inventoryCatalog = {
     iceGun: {
       name: 'Ice Gun',
@@ -1089,6 +1091,16 @@ async function main() {
     }
     inventoryState[itemId] = nextEntry;
   });
+  if (!Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])) {
+    const iceGunEntry = inventoryState.iceGun || {};
+    inventoryState.iceGun = {
+      ...iceGunEntry,
+      [ICE_AMMO_KEY]: DEFAULT_ICE_AMMO,
+      icon: iceGunEntry.icon || inventoryCatalog.iceGun.icon,
+      name: iceGunEntry.name || inventoryCatalog.iceGun.name
+    };
+    inventoryDirty = true;
+  }
   if (inventoryDirty) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
   }
@@ -1097,12 +1109,27 @@ async function main() {
     return inventoryState;
   }
 
+  function setIceAmmoCount(amount) {
+    if (!Number.isFinite(amount)) return;
+    const normalized = Math.max(0, Math.floor(amount));
+    const current = inventoryState.iceGun || {};
+    inventoryState.iceGun = {
+      ...current,
+      [ICE_AMMO_KEY]: normalized,
+      icon: current.icon || inventoryCatalog.iceGun.icon,
+      name: current.name || inventoryCatalog.iceGun.name
+    };
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
+    updateSettingsUI();
+  }
+
   function addToInventory(itemId, amount = 1) {
     if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
     const itemConfig = inventoryCatalog[itemId] || {};
     const current = inventoryState[itemId];
     const nextCount = (current?.count || 0) + amount;
     inventoryState[itemId] = {
+      ...current,
       count: nextCount,
       icon: current?.icon || itemConfig.icon || '',
       name: current?.name || itemConfig.name || itemId
@@ -1122,7 +1149,12 @@ async function main() {
     if (nextCount > 0) {
       inventoryState[itemId] = { ...current, count: nextCount };
     } else {
-      delete inventoryState[itemId];
+      if (itemId === 'iceGun' && Number.isFinite(current?.[ICE_AMMO_KEY])) {
+        const { count, ...rest } = current;
+        inventoryState[itemId] = rest;
+      } else {
+        delete inventoryState[itemId];
+      }
     }
     if (window.DEBUG_INVENTORY) {
       console.log('[inventory] removed', itemId, amount, inventoryState[itemId]);
@@ -1498,7 +1530,9 @@ async function main() {
     multiplayer,
     spawnProjectile: spawnProjectileWithPerfFlags,
     projectiles,
-    audioManager
+    audioManager,
+    initialAmmo: inventoryState.iceGun?.[ICE_AMMO_KEY],
+    onAmmoChange: setIceAmmoCount
   });
   window.playerControls = playerControls;
   updateControlAvailability();
