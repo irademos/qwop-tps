@@ -285,6 +285,16 @@ async function main() {
 
       const localFix = getLatestLocationFix();
       const mapOrigin = getLocalMapOrigin();
+      
+      // Adopt remote world anchor if we don't have one yet
+      if (!getLocalMapOrigin() && data.worldAnchor?.centerLat && data.worldAnchor?.centerLon) {
+        setWorldOrigin({
+          lat: data.worldAnchor.centerLat,
+          lon: data.worldAnchor.centerLon
+        });
+        rebuildMapFromCache();
+      }
+
       if (!localFix || !mapOrigin) {
         const existing = otherPlayers[remoteId];
         if (existing?.model) {
