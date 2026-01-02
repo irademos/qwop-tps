@@ -26,7 +26,8 @@ export class CharacterBase {
   }
 
   update(delta) {
-    if (this.mixer) this.mixer.update(delta);
+    if (!this.mixer || !Number.isFinite(delta) || delta <= 0) return;
+    this.mixer.update(delta);
   }
 
   playAnimation(name, fadeDuration = 0.2) {
