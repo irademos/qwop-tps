@@ -444,6 +444,26 @@ async function main() {
       return;
     }
 
+    if (data.type === 'inventoryDrop' && multiplayer?.isHost) {
+      const drops = Array.isArray(data.drops) ? data.drops : [];
+      drops.forEach(drop => {
+        if (!drop?.id || !Array.isArray(drop.position)) return;
+        addDroppedAmmoPickup({
+          id: drop.id,
+          position: new THREE.Vector3(...drop.position),
+          amount: drop.amount
+        });
+      });
+      return;
+    }
+
+    if (data.type === 'dropPickup' && multiplayer?.isHost) {
+      if (data.dropId) {
+        removeDroppedAmmoPickup(data.dropId);
+      }
+      return;
+    }
+
     if (data.type === 'grab') {
       if (data.target === multiplayer.getId()) {
         playerControls?.setGrabbed(data.active, data.from);
@@ -1245,6 +1265,81 @@ async function main() {
   const hungerFill = document.getElementById('hunger-fill');
   const energyFill = document.getElementById('energy-fill');
 
+  const createDropId = (index = 0) => {
+    const owner = multiplayer?.getId?.() || 'local';
+    const randomSeed = Math.floor(Math.random() * 10000);
+    return `${owner}-${Date.now()}-${index}-${randomSeed}`;
+  };
+
+  const createAmmoDrops = (center, totalAmmo) => {
+    const drops = [];
+    if (!center || !Number.isFinite(totalAmmo) || totalAmmo <= 0) return drops;
+    const radius = 1.6;
+    let remaining = totalAmmo;
+    let index = 0;
+    while (remaining > 0) {
+      const amount = Math.min(AMMO_PICKUP_AMOUNT, remaining);
+      remaining -= amount;
+      const angle = Math.random() * Math.PI * 2;
+      const distance = Math.random() * radius;
+      const x = center.x + Math.cos(angle) * distance;
+      const z = center.z + Math.sin(angle) * distance;
+      drops.push({
+        id: createDropId(index),
+        position: [x, center.y, z],
+        amount
+      });
+      index += 1;
+    }
+    return drops;
+  };
+
+  const clearInventoryState = () => {
+    Object.keys(inventoryState).forEach(key => {
+      delete inventoryState[key];
+    });
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
+    updateSettingsUI();
+    playerControls?.updateAmmoUI?.(false);
+  };
+
+  const dropInventoryOnDeath = () => {
+    if (!playerModel) return;
+    const deathPosition = playerModel.position.clone();
+    const ammoCount = Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+      ? inventoryState.iceGun[ICE_AMMO_KEY]
+      : 0;
+    const ammoDrops = createAmmoDrops(deathPosition, ammoCount);
+    ammoDrops.forEach(drop => {
+      addDroppedAmmoPickup({
+        id: drop.id,
+        position: new THREE.Vector3(...drop.position),
+        amount: drop.amount
+      });
+    });
+    if (ammoDrops.length > 0 && multiplayer && !multiplayer.isHost) {
+      multiplayer.send({ type: 'inventoryDrop', drops: ammoDrops });
+    }
+
+    if ((inventoryState.iceGun?.count || 0) > 0) {
+      if (iceGun?.holder === playerControls) {
+        iceGun.drop({ removeFromInventory: false });
+      } else {
+        spawnIceGunPickup(deathPosition);
+      }
+    }
+
+    if ((inventoryState.autumnSword?.count || 0) > 0) {
+      if (autumnSword?.holder === playerControls) {
+        autumnSword.drop({ removeFromInventory: false });
+      } else {
+        spawnAutumnSwordPickup(deathPosition);
+      }
+    }
+
+    clearInventoryState();
+  };
+
   function updateHealthUI() {
     if (healthFill) {
       healthFill.style.width = `${statsState.health}%`;
@@ -1386,6 +1481,8 @@ async function main() {
 
   const projectiles = [];
   const ammoPickups = [];
+  const droppedAmmoPickups = new Map();
+  const pendingDropRemovals = new Set();
   const AMMO_PICKUP_AMOUNT = 5;
   const foodPickups = [];
   const healthPickups = [];
@@ -1430,6 +1527,84 @@ async function main() {
     scene.add(pickup);
     ammoPickups.push(pickup);
     return pickup;
+  }
+
+  function spawnDroppedAmmoPickup(position, amount, dropId) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    spawnPos.y = terrainHeight + 0.6;
+
+    const geometry = new THREE.IcosahedronGeometry(0.25, 0);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x7fd0ff,
+      emissive: 0x225577,
+      emissiveIntensity: 0.4,
+      metalness: 0.1,
+      roughness: 0.4,
+    });
+
+    const pickup = new THREE.Mesh(geometry, material);
+    pickup.position.copy(spawnPos);
+    pickup.castShadow = true;
+    pickup.userData.skipTerrainCorrection = true;
+    pickup.userData.baseY = spawnPos.y;
+    pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.isDropped = true;
+    pickup.userData.dropId = dropId;
+    pickup.userData.amount = amount;
+    scene.add(pickup);
+    return pickup;
+  }
+
+  function addDroppedAmmoPickup({ id, position, amount }) {
+    if (!id || !position || droppedAmmoPickups.has(id)) return;
+    const pickup = spawnDroppedAmmoPickup(position, amount, id);
+    if (!pickup) return;
+    droppedAmmoPickups.set(id, { mesh: pickup, amount });
+  }
+
+  function removeDroppedAmmoPickup(id) {
+    const entry = droppedAmmoPickups.get(id);
+    if (!entry) return;
+    disposePickup(entry.mesh);
+    droppedAmmoPickups.delete(id);
+  }
+
+  function syncDroppedAmmoState(stateDrops = []) {
+    const seen = new Set();
+    stateDrops.forEach(drop => {
+      if (!drop?.id || !Array.isArray(drop.position)) return;
+      if (pendingDropRemovals.has(drop.id)) return;
+      seen.add(drop.id);
+      if (!droppedAmmoPickups.has(drop.id)) {
+        addDroppedAmmoPickup({
+          id: drop.id,
+          position: new THREE.Vector3(...drop.position),
+          amount: drop.amount
+        });
+      } else {
+        const entry = droppedAmmoPickups.get(drop.id);
+        const mesh = entry?.mesh;
+        const [x, y, z] = drop.position;
+        if (mesh && Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+          mesh.position.set(x, y, z);
+          mesh.userData.baseY = y;
+        }
+      }
+    });
+
+    Array.from(droppedAmmoPickups.keys()).forEach(id => {
+      if (!seen.has(id)) {
+        removeDroppedAmmoPickup(id);
+      }
+    });
+
+    Array.from(pendingDropRemovals).forEach(id => {
+      if (!seen.has(id)) {
+        pendingDropRemovals.delete(id);
+      }
+    });
   }
 
   function spawnFoodPickup(position) {
@@ -1528,6 +1703,28 @@ async function main() {
     autumnSword.mesh.visible = true;
     autumnSword.holder = null;
   }
+
+  registerNetworkedEntity('droppedAmmo', {
+    getState: () => {
+      const drops = Array.from(droppedAmmoPickups.entries()).map(([id, entry]) => {
+        const mesh = entry?.mesh;
+        if (!mesh) return null;
+        const pos = mesh.position;
+        return {
+          id,
+          position: [pos.x, pos.y, pos.z],
+          amount: entry.amount ?? mesh.userData.amount
+        };
+      }).filter(Boolean);
+      return { drops };
+    },
+    applyState: state => {
+      if (!state) return;
+      const drops = Array.isArray(state.drops) ? state.drops : [];
+      syncDroppedAmmoState(drops);
+    },
+    isLocallyControlled: () => multiplayer?.isHost
+  });
 
   let statDecayAccumulator = 0;
 
@@ -2589,6 +2786,11 @@ async function main() {
         disposePickup(pickup);
         ammoPickups.splice(i, 1);
       }
+      droppedAmmoPickups.forEach((entry, id) => {
+        if (!entry?.mesh) return;
+        disposePickup(entry.mesh);
+        droppedAmmoPickups.delete(id);
+      });
       for (let i = foodPickups.length - 1; i >= 0; i--) {
         const pickup = foodPickups[i];
         if (!pickup) continue;
@@ -2615,11 +2817,39 @@ async function main() {
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
         if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < 1.2) {
-          playerControls.addAmmo(AMMO_PICKUP_AMOUNT);
+          const amount = Number.isFinite(pickup.userData.amount)
+            ? pickup.userData.amount
+            : AMMO_PICKUP_AMOUNT;
+          playerControls.addAmmo(amount);
           disposePickup(pickup);
           ammoPickups.splice(i, 1);
         }
       }
+
+      droppedAmmoPickups.forEach((entry, id) => {
+        const pickup = entry?.mesh;
+        if (!pickup) return;
+
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        pickup.rotation.y += 0.03;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < 1.2) {
+          const amount = Number.isFinite(entry.amount)
+            ? entry.amount
+            : (Number.isFinite(pickup.userData.amount) ? pickup.userData.amount : AMMO_PICKUP_AMOUNT);
+          playerControls.addAmmo(amount);
+          removeDroppedAmmoPickup(id);
+          if (multiplayer && !multiplayer.isHost) {
+            pendingDropRemovals.add(id);
+            multiplayer.send({ type: 'dropPickup', dropId: id });
+          }
+        }
+      });
 
       for (let i = foodPickups.length - 1; i >= 0; i--) {
         const pickup = foodPickups[i];
@@ -2688,6 +2918,7 @@ async function main() {
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
       window.onPlayerDeath?.();
+      dropInventoryOnDeath();
       updateControlAvailability();
       const actions = playerModel.userData.actions;
       const current = playerModel.userData.currentAction;
