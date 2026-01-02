@@ -1038,7 +1038,8 @@ async function main() {
     agility: playerProfile.stats.agility,
     smarts: playerProfile.stats.smarts,
     charm: playerProfile.stats.charm,
-    luck: playerProfile.stats.luck
+    luck: playerProfile.stats.luck,
+    levelKills: playerProfile.stats.levelKills
   };
   const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'energy', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
@@ -1277,6 +1278,13 @@ async function main() {
       }
       return Math.max(1, Math.round(num));
     }
+    if (key === 'levelKills') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return 0;
+      }
+      return Math.max(0, Math.floor(num));
+    }
     return value;
   };
 
@@ -1330,9 +1338,25 @@ async function main() {
     showLevelPopup(nextLevel);
   };
 
-  window.onMonsterKill = () => adjustLevel(1);
-  window.onPlayerKill = () => adjustLevel(1);
-  window.onPlayerDeath = () => adjustLevel(-1);
+  const getKillsRequiredForNextLevel = level => Math.max(1, level);
+  const registerKillProgress = () => {
+    const currentLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
+    const currentKills = Number.isFinite(statsState.levelKills) ? statsState.levelKills : 0;
+    const nextKills = clampStat('levelKills', currentKills + 1);
+    if (nextKills >= getKillsRequiredForNextLevel(currentLevel)) {
+      setStat('levelKills', 0, { skipSave: true });
+      adjustLevel(1);
+      return;
+    }
+    setStat('levelKills', nextKills);
+  };
+
+  window.onMonsterKill = () => registerKillProgress();
+  window.onPlayerKill = () => registerKillProgress();
+  window.onPlayerDeath = () => {
+    setStat('levelKills', 0, { skipSave: true });
+    adjustLevel(-1);
+  };
 
   Object.defineProperty(window, 'localHealth', {
     configurable: true,
