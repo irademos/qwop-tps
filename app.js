@@ -1260,6 +1260,7 @@ async function main() {
   };
 
   window.onMonsterKill = () => adjustLevel(1);
+  window.onPlayerKill = () => adjustLevel(1);
   window.onPlayerDeath = () => adjustLevel(-1);
 
   Object.defineProperty(window, 'localHealth', {

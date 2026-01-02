@@ -52,7 +52,17 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioM
           } else {
             const tp = otherPlayers[target.id];
             if (tp) {
-              tp.health = Math.max(0, (tp.health || 100) - attackDamage);
+              const previousHealth = tp.health || 100;
+              const nextHealth = Math.max(0, previousHealth - attackDamage);
+              tp.health = nextHealth;
+              if (nextHealth <= 0 && previousHealth > 0) {
+                tp.isDead = true;
+                if (attacker.id === 'local') {
+                  window.onPlayerKill?.(target.id);
+                }
+              } else if (nextHealth > 0 && tp.isDead) {
+                tp.isDead = false;
+              }
             }
           }
         }
