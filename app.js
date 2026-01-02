@@ -130,8 +130,8 @@ async function main() {
   const TILE_STOCK_FOOD_COUNT = 500;
   const TILE_STOCK_HEALTH_COUNT = 500;
   const TILE_STOCK_WEAPON_COUNT = 100;
-  const TILE_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
-  const TILE_STOCK_STORAGE_KEY = 'tile-stock-history-v1';
+  const PICKUP_SPAWN_RADIUS = 225;
+  const PICKUP_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
 
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
   setCookie("characterModel", characterModel);
@@ -1381,7 +1381,7 @@ async function main() {
     : null
   );
 
-  function spawnAmmoPickup(position, tileKey = null) {
+  function spawnAmmoPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
@@ -1402,13 +1402,12 @@ async function main() {
     pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
-    pickup.userData.tileKey = tileKey;
     scene.add(pickup);
     ammoPickups.push(pickup);
     return pickup;
   }
 
-  function spawnFoodPickup(position, tileKey = null) {
+  function spawnFoodPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
@@ -1430,13 +1429,12 @@ async function main() {
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
     pickup.userData.type = 'food';
-    pickup.userData.tileKey = tileKey;
     scene.add(pickup);
     foodPickups.push(pickup);
     return pickup;
   }
 
-  function spawnHealthPickup(position, tileKey = null) {
+  function spawnHealthPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
@@ -1458,7 +1456,6 @@ async function main() {
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
     pickup.userData.type = 'health';
-    pickup.userData.tileKey = tileKey;
     scene.add(pickup);
     healthPickups.push(pickup);
     return pickup;
@@ -1477,7 +1474,7 @@ async function main() {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
 
-  function spawnIceGunPickup(position, tileKey = null) {
+  function spawnIceGunPickup(position) {
     if (!iceGun?.mesh) return;
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
@@ -1489,11 +1486,10 @@ async function main() {
     iceGun.mesh.position.copy(spawnPos);
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
     iceGun.mesh.visible = true;
-    iceGun.mesh.userData.spawnTileKey = tileKey;
     iceGun.holder = null;
   }
 
-  function spawnAutumnSwordPickup(position, tileKey = null) {
+  function spawnAutumnSwordPickup(position) {
     if (!autumnSword?.mesh) return;
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
@@ -1505,7 +1501,6 @@ async function main() {
     autumnSword.mesh.position.copy(spawnPos);
     autumnSword.mesh.quaternion.set(0, 0, 0, 1);
     autumnSword.mesh.visible = true;
-    autumnSword.mesh.userData.spawnTileKey = tileKey;
     autumnSword.holder = null;
   }
 
@@ -1574,197 +1569,30 @@ async function main() {
     tileSizeMeters: TILE_SIZE_METERS
   });
   window.groundTiles = groundTiles.tiles;
-  const tileStockHistory = new Map();
-  const loadTileStockHistory = () => {
-    try {
-      const stored = localStorage.getItem(TILE_STOCK_STORAGE_KEY);
-      if (!stored) return;
-      const parsed = JSON.parse(stored);
-      Object.entries(parsed).forEach(([key, value]) => {
-        if (Number.isFinite(value)) {
-          tileStockHistory.set(key, value);
-        }
-      });
-    } catch (error) {
-      console.warn('Failed to load tile stock history:', error);
-    }
-  };
-
-  const saveTileStockHistory = () => {
-    try {
-      const payload = {};
-      tileStockHistory.forEach((value, key) => {
-        payload[key] = value;
-      });
-      localStorage.setItem(TILE_STOCK_STORAGE_KEY, JSON.stringify(payload));
-    } catch (error) {
-      console.warn('Failed to persist tile stock history:', error);
-    }
-  };
-
-  const roadSpawnCache = new Map();
-  const getPickupTileBounds = (tile) => {
-    const center = getPickupTileCenter(tile);
+  const getRandomPickupPosition = (center) => {
     if (!center) return null;
-    const halfSize = TILE_SIZE_METERS * 0.5;
-    return {
-      minX: center.x - halfSize,
-      maxX: center.x + halfSize,
-      minZ: center.z - halfSize,
-      maxZ: center.z + halfSize
-    };
-  };
-  const segmentIntersectsBounds = (start, end, bounds) => {
-    if (!start || !end || !bounds) return false;
-    const minX = Math.min(start.x, end.x);
-    const maxX = Math.max(start.x, end.x);
-    const minZ = Math.min(start.z, end.z);
-    const maxZ = Math.max(start.z, end.z);
-    return !(
-      maxX < bounds.minX ||
-      minX > bounds.maxX ||
-      maxZ < bounds.minZ ||
-      minZ > bounds.maxZ
-    );
-  };
-  const getRoadSegmentsForTile = (tile) => {
-    if (!tile) return [];
-    const tileKey = tileCache.getTileKey(tile);
-    const entry = tileCache.getEntry(tileKey);
-    if (!entry?.geojson) return [];
-    const cached = roadSpawnCache.get(tileKey);
-    if (cached && cached.fetchedAt === entry.fetchedAt) {
-      return cached.segments;
-    }
-    const origin = getLocalMapOrigin();
-    if (!origin) return [];
-    const bounds = getPickupTileBounds(tile);
-    if (!bounds) return [];
-    const segments = [];
-    for (const feature of entry.geojson.features ?? []) {
-      if (!feature?.properties?.highway) continue;
-      const geometry = feature.geometry;
-      if (!geometry) continue;
-      const lines = geometry.type === 'LineString'
-        ? [geometry.coordinates]
-        : geometry.type === 'MultiLineString'
-          ? geometry.coordinates
-          : [];
-      for (const line of lines) {
-        if (!Array.isArray(line) || line.length < 2) continue;
-        let prev = null;
-        for (const coord of line) {
-          if (!coord || coord.length < 2) {
-            prev = null;
-            continue;
-          }
-          const local = geoToLocalMeters(coord[1], coord[0], origin);
-          if (local && prev && segmentIntersectsBounds(prev, local, bounds)) {
-            segments.push({ start: prev, end: local });
-          }
-          prev = local;
-        }
-      }
-    }
-    roadSpawnCache.set(tileKey, { fetchedAt: entry.fetchedAt, segments });
-    return segments;
-  };
-  const getRandomRoadSpawnPosition = (tile, segments) => {
-    const roadSegments = segments ?? getRoadSegmentsForTile(tile);
-    if (!roadSegments.length) return null;
-    const segment = roadSegments[Math.floor(Math.random() * roadSegments.length)];
-    if (!segment) return null;
-    const t = Math.random();
-    const x = segment.start.x + (segment.end.x - segment.start.x) * t;
-    const z = segment.start.z + (segment.end.z - segment.start.z) * t;
+    const radius = PICKUP_SPAWN_RADIUS * Math.sqrt(Math.random());
+    const angle = Math.random() * Math.PI * 2;
+    const x = center.x + Math.cos(angle) * radius;
+    const z = center.z + Math.sin(angle) * radius;
     return new THREE.Vector3(x, 0, z);
   };
-  const spawnScatteredPickups = ({ tile, count, maxTotal, spawnFn, roadSegments }) => {
+  const spawnScatteredPickups = ({ center, count, maxTotal, spawnFn }) => {
     let spawned = 0;
     let attempts = 0;
     const maxAttempts = count * 6;
-    const tileKey = `${tile.x},${tile.y}`;
     while (spawned < count && attempts < maxAttempts && maxTotal()) {
       attempts += 1;
-      const spawnPos = getRandomRoadSpawnPosition(tile, roadSegments);
+      const spawnPos = getRandomPickupPosition(center);
       if (!spawnPos) continue;
       const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
       if (!Number.isFinite(terrainHeight)) continue;
-      spawnFn(spawnPos, tileKey);
+      spawnFn(spawnPos);
       spawned += 1;
     }
     return spawned;
   };
-
-  const stockTilePickups = (tile) => {
-    if (!tile) return;
-    const tileKey = tileCache.getTileKey(tile);
-    const now = Date.now();
-    const lastStocked = tileStockHistory.get(tileKey);
-    if (Number.isFinite(lastStocked) && now - lastStocked < TILE_STOCK_COOLDOWN_MS) {
-      return;
-    }
-
-    const roadSegments = getRoadSegmentsForTile(tile);
-    if (!roadSegments.length) {
-      return;
-    }
-
-    const spawnedAmmo = spawnScatteredPickups({
-      tile,
-      count: TILE_STOCK_AMMO_COUNT,
-      maxTotal: () => ammoPickups.length < MAX_AMMO_PICKUPS,
-      spawnFn: spawnAmmoPickup,
-      roadSegments
-    });
-
-    const spawnedFood = spawnScatteredPickups({
-      tile,
-      count: TILE_STOCK_FOOD_COUNT,
-      maxTotal: () => foodPickups.length < MAX_FOOD_PICKUPS,
-      spawnFn: spawnFoodPickup,
-      roadSegments
-    });
-
-    const spawnedHealth = spawnScatteredPickups({
-      tile,
-      count: TILE_STOCK_HEALTH_COUNT,
-      maxTotal: () => healthPickups.length < MAX_HEALTH_PICKUPS,
-      spawnFn: spawnHealthPickup,
-      roadSegments
-    });
-
-    const isHost = !multiplayer || multiplayer.isHost;
-    let spawnedWeapons = 0;
-    if (isHost && TILE_STOCK_WEAPON_COUNT > 0) {
-      const hasIceGun = (inventoryState?.iceGun?.count || 0) > 0;
-      const canSpawnIceGun = iceGun?.mesh && !iceGun.holder && !hasIceGun && !iceGun.mesh.visible;
-      if (canSpawnIceGun) {
-        const spawnPos = getRandomRoadSpawnPosition(tile, roadSegments);
-        if (spawnPos) {
-          spawnIceGunPickup(spawnPos, tileKey);
-          spawnedWeapons += 1;
-        }
-      }
-
-      const hasSword = (inventoryState?.autumnSword?.count || 0) > 0;
-      const canSpawnSword = autumnSword?.mesh && !autumnSword.holder && !hasSword && !autumnSword.mesh.visible;
-      if (spawnedWeapons < TILE_STOCK_WEAPON_COUNT && canSpawnSword) {
-        const spawnPos = getRandomRoadSpawnPosition(tile, roadSegments);
-        if (spawnPos) {
-          spawnAutumnSwordPickup(spawnPos, tileKey);
-          spawnedWeapons += 1;
-        }
-      }
-    }
-
-    if (spawnedAmmo || spawnedFood || spawnedHealth || spawnedWeapons || lastStocked == null) {
-      tileStockHistory.set(tileKey, now);
-      saveTileStockHistory();
-    }
-  };
-
-  loadTileStockHistory();
+  let lastPickupStockAt = 0;
   let activeGroundTileKey = null;
   const getGroundTileCoords = (position) => {
     if (!position) return null;
@@ -1773,21 +1601,6 @@ async function main() {
       y: Math.floor(-position.z / TILE_SIZE_METERS)
     };
   };
-  const getPickupTileCoords = (position) => {
-    if (!position) return null;
-    return {
-      x: Math.round(position.x / TILE_SIZE_METERS),
-      y: Math.round(-position.z / TILE_SIZE_METERS)
-    };
-  };
-  const getPickupTileCenter = (tile) => {
-    if (!tile) return null;
-    return {
-      x: tile.x * TILE_SIZE_METERS,
-      z: -tile.y * TILE_SIZE_METERS
-    };
-  };
-
   const updateGroundTiles = (position) => {
     const centerTile = getGroundTileCoords(position);
     if (!centerTile) return;
@@ -1814,57 +1627,78 @@ async function main() {
       }
     }
   };
-  const PICKUP_TILE_RADIUS = Math.max(1, Math.floor(GROUND_TILE_RADIUS / 2));
-  let activePickupTileKey = null;
   const disposePickup = (pickup) => {
     scene.remove(pickup);
     pickup.geometry?.dispose();
     pickup.material?.dispose();
   };
-  const removePickupOutsideKeys = (pickups, desiredKeys) => {
+  const removePickupOutsideRadius = (pickups, center, radius) => {
     for (let i = pickups.length - 1; i >= 0; i--) {
       const pickup = pickups[i];
       if (!pickup) continue;
-      const tileKey = pickup.userData.tileKey;
-      if (!tileKey || !desiredKeys.has(tileKey)) {
+      if (center.distanceTo(pickup.position) > radius) {
         disposePickup(pickup);
         pickups.splice(i, 1);
       }
     }
   };
   const updatePickupTiles = (position) => {
-    const centerTile = getPickupTileCoords(position);
-    if (!centerTile) return;
-    const centerKey = `${centerTile.x},${centerTile.y}`;
-    activePickupTileKey = centerKey;
-    const desiredKeys = new Set();
-    for (let dx = -PICKUP_TILE_RADIUS; dx <= PICKUP_TILE_RADIUS; dx += 1) {
-      for (let dy = -PICKUP_TILE_RADIUS; dy <= PICKUP_TILE_RADIUS; dy += 1) {
-        const tile = {
-          x: centerTile.x + dx,
-          y: centerTile.y + dy
-        };
-        desiredKeys.add(`${tile.x},${tile.y}`);
-        stockTilePickups(tile);
-      }
-    }
+    if (!position) return;
+    const center = position.clone();
+    removePickupOutsideRadius(ammoPickups, center, PICKUP_SPAWN_RADIUS);
+    removePickupOutsideRadius(foodPickups, center, PICKUP_SPAWN_RADIUS);
+    removePickupOutsideRadius(healthPickups, center, PICKUP_SPAWN_RADIUS);
 
-    removePickupOutsideKeys(ammoPickups, desiredKeys);
-    removePickupOutsideKeys(foodPickups, desiredKeys);
-    removePickupOutsideKeys(healthPickups, desiredKeys);
-    for (const key of Array.from(roadSpawnCache.keys())) {
-      if (!desiredKeys.has(key)) {
-        roadSpawnCache.delete(key);
+    const now = Date.now();
+    if (now - lastPickupStockAt < PICKUP_STOCK_COOLDOWN_MS) {
+      return;
+    }
+    lastPickupStockAt = now;
+
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_AMMO_COUNT,
+      maxTotal: () => ammoPickups.length < MAX_AMMO_PICKUPS,
+      spawnFn: spawnAmmoPickup
+    });
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_FOOD_COUNT,
+      maxTotal: () => foodPickups.length < MAX_FOOD_PICKUPS,
+      spawnFn: spawnFoodPickup
+    });
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_HEALTH_COUNT,
+      maxTotal: () => healthPickups.length < MAX_HEALTH_PICKUPS,
+      spawnFn: spawnHealthPickup
+    });
+
+    const isHost = !multiplayer || multiplayer.isHost;
+    if (isHost && TILE_STOCK_WEAPON_COUNT > 0) {
+      const hasIceGun = (inventoryState?.iceGun?.count || 0) > 0;
+      const canSpawnIceGun = iceGun?.mesh && !iceGun.holder && !hasIceGun && !iceGun.mesh.visible;
+      if (canSpawnIceGun) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnIceGunPickup(spawnPos);
+        }
+      }
+
+      const hasSword = (inventoryState?.autumnSword?.count || 0) > 0;
+      const canSpawnSword = autumnSword?.mesh && !autumnSword.holder && !hasSword && !autumnSword.mesh.visible;
+      if (canSpawnSword) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnAutumnSwordPickup(spawnPos);
+        }
       }
     }
 
     [iceGun, autumnSword].forEach((weapon) => {
       if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
-      const tile = getPickupTileCoords(weapon.mesh.position);
-      const key = tile ? `${tile.x},${tile.y}` : null;
-      if (!key || !desiredKeys.has(key)) {
+      if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
         weapon.mesh.visible = false;
-        weapon.mesh.userData.spawnTileKey = null;
       }
     });
   };
