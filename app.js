@@ -1339,8 +1339,8 @@ async function main() {
       }
     }
 
-    clearInventoryState();
     playerControls?.setAmmo?.(0);
+    clearInventoryState();
   };
 
   function updateHealthUI() {
@@ -1553,6 +1553,7 @@ async function main() {
     pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.noFloat = true;
     pickup.userData.isDropped = true;
     pickup.userData.dropId = dropId;
     pickup.userData.amount = amount;
@@ -2819,7 +2820,7 @@ async function main() {
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
-        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < 1.2) {
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
           const amount = Number.isFinite(pickup.userData.amount)
             ? pickup.userData.amount
             : AMMO_PICKUP_AMOUNT;
@@ -2837,11 +2838,13 @@ async function main() {
           pickup.userData.baseY = pickup.position.y;
         }
 
-        pickup.rotation.y += 0.03;
-        const phase = pickup.userData.phase ?? 0;
-        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        if (!pickup.userData.noFloat) {
+          pickup.rotation.y += 0.03;
+          const phase = pickup.userData.phase ?? 0;
+          pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        }
 
-        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < 1.2) {
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
           const amount = Number.isFinite(entry.amount)
             ? entry.amount
             : (Number.isFinite(pickup.userData.amount) ? pickup.userData.amount : AMMO_PICKUP_AMOUNT);
@@ -2866,7 +2869,7 @@ async function main() {
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
-        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
           applyFoodPickupEffects();
           disposePickup(pickup);
           foodPickups.splice(i, 1);
@@ -2885,7 +2888,7 @@ async function main() {
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
-        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
           applyHealthPickupEffects();
           disposePickup(pickup);
           healthPickups.splice(i, 1);
