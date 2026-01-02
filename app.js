@@ -42,6 +42,18 @@ const MONSTER_SPAWN_MAX_RADIUS = 80;
 const MONSTER_RESPAWN_DELAY_RANGE_MS = [3000, 5000];
 const MONSTER_SPAWN_ATTEMPTS = 12;
 
+const PERF = {
+  throttleAI: true,
+  throttlePickups: true,
+  throttleUI: true,
+  disableMonsters: false,
+  disablePickups: false,
+  disableMapUpdates: false
+};
+
+window.PERF = PERF;
+window.DEBUG_CONSOLE = false;
+
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
 
@@ -414,7 +426,7 @@ async function main() {
     if (data.type === 'projectile') {
       const position = new THREE.Vector3(...data.position);
       const direction = new THREE.Vector3(...data.direction);
-      spawnProjectile(scene, projectiles, position, direction, data.id);
+      spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
 
       const shooter = otherPlayers[data.id];
       if (shooter) {
@@ -849,6 +861,7 @@ async function main() {
 
   const cleanupMonster = (monster) => {
     if (!monster) return;
+    monster.model?.userData?.mixer?.stopAllAction?.();
     if (monster.model?.parent) {
       monster.model.parent.remove(monster.model);
     }
@@ -857,6 +870,8 @@ async function main() {
       rbToMesh.delete(body);
       rapierWorld.removeRigidBody(body);
     }
+    monster.model = null;
+    monster.body = null;
   };
 
   const setMonsterForSlot = (slotId, monster) => {
@@ -869,6 +884,7 @@ async function main() {
   };
 
   const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null) => {
+    if (PERF.disableMonsters) return;
     if (spawningSlots.has(slotId)) return;
     spawningSlots.add(slotId);
     loadMonsterModel(modelPath, data => {
@@ -880,6 +896,7 @@ async function main() {
         monster.setMode("friendly");
         monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         monster.lastDirectionChange = Date.now();
+        monster.lastAIUpdateMs = 0;
         monster.resetHealth();
 
         const monsterSpawn = getMonsterSpawnPosition();
@@ -898,6 +915,14 @@ async function main() {
   };
 
   const ensureMonsters = () => {
+    if (PERF.disableMonsters) {
+      monsters.forEach(monster => cleanupMonster(monster));
+      monsters = [];
+      window.monsters = monsters;
+      respawnTimers.forEach((timer) => clearTimeout(timer));
+      respawnTimers.clear();
+      return;
+    }
     const seenSlots = new Set();
     monsters = monsters.filter((monster) => {
       if (!monster) return false;
@@ -1304,6 +1329,16 @@ async function main() {
   const AMMO_PICKUP_AMOUNT = 5;
   const foodPickups = [];
   const healthPickups = [];
+  const PICKUP_CHECK_INTERVAL_MS = 250;
+  let lastPickupCheckMs = 0;
+
+  const spawnProjectileWithPerfFlags = (...args) => {
+    spawnProjectile(...args);
+    const latest = projectiles[projectiles.length - 1];
+    if (latest) {
+      latest.userData.skipTerrainCorrection = true;
+    }
+  };
 
   function spawnAmmoPickup(position) {
     const spawnPos = position.clone();
@@ -1322,6 +1357,7 @@ async function main() {
     const pickup = new THREE.Mesh(geometry, material);
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
+    pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
     scene.add(pickup);
@@ -1346,6 +1382,7 @@ async function main() {
     const pickup = new THREE.Mesh(geometry, material);
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
+    pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
     pickup.userData.type = 'food';
@@ -1371,6 +1408,7 @@ async function main() {
     const pickup = new THREE.Mesh(geometry, material);
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
+    pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
     pickup.userData.type = 'health';
@@ -1458,7 +1496,7 @@ async function main() {
     playerModel,
     renderer,
     multiplayer,
-    spawnProjectile,
+    spawnProjectile: spawnProjectileWithPerfFlags,
     projectiles,
     audioManager
   });
@@ -1516,6 +1554,15 @@ async function main() {
   let activeTileKey = null;
   let worldOrigin = null;
   let currentRenderOrigin = null;
+  const debugPerf = {
+    monsters: 0,
+    ammoPickups: 0,
+    foodPickups: 0,
+    healthPickups: 0,
+    tileCacheSize: 0
+  };
+  window.debugPerf = debugPerf;
+  let lastPerfUpdateMs = 0;
 
   const loadWorldOrigin = () => {
     try {
@@ -1681,7 +1728,13 @@ async function main() {
   };
 
   const requestMapUpdate = async (location) => {
-    if (!location) return;
+    if (!location || PERF.disableMapUpdates) return;
+    let needsMapRebuild = false;
+    const flushMapRebuild = () => {
+      if (!needsMapRebuild) return;
+      rebuildMapFromCache();
+      needsMapRebuild = false;
+    };
     const localMeters = tileCache.getLocalMeters(location);
     const tile = tileCache.getTileCoords(localMeters);
     if (!tile) return;
@@ -1695,10 +1748,11 @@ async function main() {
     const evictedKeys = tileCache.evictTiles(tile);
     if (evictedKeys.length) {
       evictedKeys.forEach((key) => groundTiles.removeTile(key));
-      rebuildMapFromCache();
+      needsMapRebuild = true;
     }
 
     if (tileCache.hasTile(tileKey) || mapFetchInFlight.has(tileKey)) {
+      flushMapRebuild();
       return;
     }
 
@@ -1710,7 +1764,8 @@ async function main() {
         fetchedAt: cachedTile.fetchedAt
       });
       groundTiles.ensureTile(tile, tileKey);
-      rebuildMapFromCache();
+      needsMapRebuild = true;
+      flushMapRebuild();
       if (Date.now() - cachedTile.fetchedAt < TILE_CACHE_MAX_AGE_MS) {
         return;
       }
@@ -1741,10 +1796,11 @@ async function main() {
         fetchedAt: Date.now()
       });
       groundTiles.ensureTile(tile, tileKey);
+      needsMapRebuild = true;
       setCachedTile(tileKey, geojson).catch((error) => {
         console.warn('Failed to persist tile cache:', error);
       });
-      rebuildMapFromCache();
+      flushMapRebuild();
     } catch (error) {
       console.warn('OSM render failed:', error);
       debugState.lastError = {
@@ -1752,6 +1808,7 @@ async function main() {
         timestamp: Date.now()
       };
     } finally {
+      flushMapRebuild();
       mapFetchInFlight.delete(tileKey);
     }
   };
@@ -1863,6 +1920,7 @@ async function main() {
     const mesh = new THREE.Mesh(geom, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    mesh.userData.skipTerrainCorrection = true;
     mesh.position.copy(pos);
     scene.add(mesh);
 
@@ -2229,17 +2287,19 @@ async function main() {
   }, 1000);
 
   const consoleDiv = document.getElementById("console-log");
-  (function() {
-    const originalLog = console.log;
-    console.log = function(...args) {
-      originalLog(...args);
-      if (!consoleDiv) return;
-      const msg = document.createElement("div");
-      msg.textContent = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(" ");
-      consoleDiv.appendChild(msg);
-      consoleDiv.scrollTop = consoleDiv.scrollHeight;
-    };
-  })();
+  if (window.DEBUG_CONSOLE === true) {
+    (function() {
+      const originalLog = console.log;
+      console.log = function(...args) {
+        originalLog(...args);
+        if (!consoleDiv) return;
+        const msg = document.createElement("div");
+        msg.textContent = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(" ");
+        consoleDiv.appendChild(msg);
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+      };
+    })();
+  }
 
   function animate() {
     requestAnimationFrame(animate);
@@ -2261,7 +2321,7 @@ async function main() {
       mesh.position.set(t.x, t.y, t.z);
       mesh.quaternion.set(r.x, r.y, r.z, r.w);
 
-      if (!mesh.userData?.isTerrain) {
+      if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection) {
         mesh.updateMatrixWorld();
         const bbox = new THREE.Box3().setFromObject(mesh);
         const terrainY = getTerrainHeight(mesh.position.x, mesh.position.z);
@@ -2294,6 +2354,14 @@ async function main() {
     updateMapView(frameDelta);
 
     const now = performance.now();
+    if (now - lastPerfUpdateMs >= 1000) {
+      debugPerf.monsters = monsters.length;
+      debugPerf.ammoPickups = ammoPickups.length;
+      debugPerf.foodPickups = foodPickups.length;
+      debugPerf.healthPickups = healthPickups.length;
+      debugPerf.tileCacheSize = tileCache.cache.size;
+      lastPerfUpdateMs = now;
+    }
     statDecayAccumulator += frameDelta;
     if (statDecayAccumulator >= 1) {
       const elapsedSeconds = statDecayAccumulator;
@@ -2331,7 +2399,7 @@ async function main() {
       }
     }
 
-    if (now - lastFoodSpawnAt >= nextFoodSpawnDelay) {
+    if (!PERF.disablePickups && now - lastFoodSpawnAt >= nextFoodSpawnDelay) {
       lastFoodSpawnAt = now;
       nextFoodSpawnDelay = THREE.MathUtils.randFloat(...FOOD_SPAWN_INTERVAL_RANGE) * 1000;
       if (foodPickups.length < MAX_FOOD_PICKUPS) {
@@ -2349,7 +2417,7 @@ async function main() {
       }
     }
 
-    if (now - lastHealthSpawnAt >= nextHealthSpawnDelay) {
+    if (!PERF.disablePickups && now - lastHealthSpawnAt >= nextHealthSpawnDelay) {
       lastHealthSpawnAt = now;
       nextHealthSpawnDelay = THREE.MathUtils.randFloat(...HEALTH_SPAWN_INTERVAL_RANGE) * 1000;
       if (healthPickups.length < MAX_HEALTH_PICKUPS) {
@@ -2404,66 +2472,92 @@ async function main() {
     }
 
     const pickupTime = performance.now() * 0.002;
-    for (let i = ammoPickups.length - 1; i >= 0; i--) {
-      const pickup = ammoPickups[i];
-      if (!pickup) continue;
+    const shouldCheckPickups = !PERF.throttlePickups || now - lastPickupCheckMs >= PICKUP_CHECK_INTERVAL_MS;
+    if (shouldCheckPickups) {
+      lastPickupCheckMs = now;
+    }
 
-      if (pickup.userData.baseY === undefined) {
-        pickup.userData.baseY = pickup.position.y;
-      }
+    const disposePickup = (pickup) => {
+      scene.remove(pickup);
+      pickup.geometry?.dispose();
+      pickup.material?.dispose();
+    };
 
-      pickup.rotation.y += 0.03;
-      const phase = pickup.userData.phase ?? 0;
-      pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
-
-      if (playerModel.position.distanceTo(pickup.position) < 1.2) {
-        playerControls.addAmmo(AMMO_PICKUP_AMOUNT);
-        scene.remove(pickup);
-        pickup.geometry?.dispose();
-        pickup.material?.dispose();
+    if (PERF.disablePickups) {
+      for (let i = ammoPickups.length - 1; i >= 0; i--) {
+        const pickup = ammoPickups[i];
+        if (!pickup) continue;
+        disposePickup(pickup);
         ammoPickups.splice(i, 1);
       }
-    }
-
-    for (let i = foodPickups.length - 1; i >= 0; i--) {
-      const pickup = foodPickups[i];
-      if (!pickup) continue;
-
-      if (pickup.userData.baseY === undefined) {
-        pickup.userData.baseY = pickup.position.y;
-      }
-
-      pickup.rotation.y += 0.03;
-      const phase = pickup.userData.phase ?? 0;
-      pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
-
-      if (playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
-        applyFoodPickupEffects();
-        scene.remove(pickup);
-        pickup.geometry?.dispose();
-        pickup.material?.dispose();
+      for (let i = foodPickups.length - 1; i >= 0; i--) {
+        const pickup = foodPickups[i];
+        if (!pickup) continue;
+        disposePickup(pickup);
         foodPickups.splice(i, 1);
       }
-    }
+      for (let i = healthPickups.length - 1; i >= 0; i--) {
+        const pickup = healthPickups[i];
+        if (!pickup) continue;
+        disposePickup(pickup);
+        healthPickups.splice(i, 1);
+      }
+    } else {
+      for (let i = ammoPickups.length - 1; i >= 0; i--) {
+        const pickup = ammoPickups[i];
+        if (!pickup) continue;
 
-    for (let i = healthPickups.length - 1; i >= 0; i--) {
-      const pickup = healthPickups[i];
-      if (!pickup) continue;
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
 
-      if (pickup.userData.baseY === undefined) {
-        pickup.userData.baseY = pickup.position.y;
+        pickup.rotation.y += 0.03;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < 1.2) {
+          playerControls.addAmmo(AMMO_PICKUP_AMOUNT);
+          disposePickup(pickup);
+          ammoPickups.splice(i, 1);
+        }
       }
 
-      pickup.rotation.y += 0.03;
-      const phase = pickup.userData.phase ?? 0;
-      pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+      for (let i = foodPickups.length - 1; i >= 0; i--) {
+        const pickup = foodPickups[i];
+        if (!pickup) continue;
 
-      if (playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
-        applyHealthPickupEffects();
-        scene.remove(pickup);
-        pickup.geometry?.dispose();
-        pickup.material?.dispose();
-        healthPickups.splice(i, 1);
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        pickup.rotation.y += 0.03;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+          applyFoodPickupEffects();
+          disposePickup(pickup);
+          foodPickups.splice(i, 1);
+        }
+      }
+
+      for (let i = healthPickups.length - 1; i >= 0; i--) {
+        const pickup = healthPickups[i];
+        if (!pickup) continue;
+
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        pickup.rotation.y += 0.03;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+        if (shouldCheckPickups && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+          applyHealthPickupEffects();
+          disposePickup(pickup);
+          healthPickups.splice(i, 1);
+        }
       }
     }
 
@@ -2492,7 +2586,6 @@ async function main() {
       lastControlSend = now;
     }
 
-    updateHealthUI();
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
       window.onPlayerDeath?.();
@@ -2535,7 +2628,15 @@ async function main() {
           }
           return;
         }
-        monster.updateAI(mixerDelta, playerModel, otherPlayers);
+        if (PERF.throttleAI) {
+          const lastUpdate = monster.lastAIUpdateMs ?? 0;
+          if (nowMs - lastUpdate > 150) {
+            monster.lastAIUpdateMs = nowMs;
+            monster.updateAI(mixerDelta, playerModel, otherPlayers);
+          }
+        } else {
+          monster.updateAI(mixerDelta, playerModel, otherPlayers);
+        }
       });
     } else {
       monsters.forEach(monster => {
