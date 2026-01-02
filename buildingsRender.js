@@ -188,6 +188,8 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   extrudedMesh.castShadow = true;
   extrudedMesh.receiveShadow = true;
   flatMesh.receiveShadow = true;
+  extrudedMesh.userData.isBuildingSolid = true;
+  flatMesh.userData.isBuildingSurface = true;
 
   group.add(extrudedMesh);
   group.add(flatMesh);
@@ -296,6 +298,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   return {
     group,
     updateBuildings,
+    getCollisionMesh: () => (extrudedMesh.visible ? extrudedMesh : null),
     dispose
   };
 }

@@ -846,14 +846,132 @@ async function main() {
     return MONSTER_MODELS[index];
   };
 
-  const isSpawnBlockedByBuildings = (position) => {
+  const BUILDING_RAYCAST_HEIGHT = 200;
+  const BUILDING_LIFT_EPSILON = 0.05;
+  const buildingRaycaster = new THREE.Raycaster();
+  const buildingRayDirection = new THREE.Vector3(0, -1, 0);
+
+  const getBuildingIntersection = (position) => {
     const buildingsGroup = buildingsRenderer?.group;
-    if (!buildingsGroup) return false;
-    const rayOrigin = new THREE.Vector3(position.x, position.y + 50, position.z);
-    const raycaster = new THREE.Raycaster(rayOrigin, new THREE.Vector3(0, -1, 0));
-    const intersections = raycaster.intersectObjects(buildingsGroup.children, true);
-    if (intersections.length === 0) return false;
-    return intersections[0].point.y > position.y + 0.1;
+    if (!buildingsGroup) return null;
+    const terrainY = getTerrainHeight(position.x, position.z) ?? position.y;
+    const rayOrigin = new THREE.Vector3(
+      position.x,
+      Math.max(position.y, terrainY) + BUILDING_RAYCAST_HEIGHT,
+      position.z
+    );
+    buildingRaycaster.set(rayOrigin, buildingRayDirection);
+    const intersections = buildingRaycaster.intersectObjects(buildingsGroup.children, true);
+    for (const intersection of intersections) {
+      if (intersection.object?.userData?.isBuildingSolid) {
+        return intersection;
+      }
+    }
+    return null;
+  };
+
+  const liftPositionToBuildingTop = (position, heightOffset = 0.6) => {
+    const intersection = getBuildingIntersection(position);
+    if (!intersection) return false;
+    const targetY = intersection.point.y + heightOffset;
+    if (targetY <= position.y + BUILDING_LIFT_EPSILON) return false;
+    position.y = targetY;
+    return true;
+  };
+
+  const liftMeshToBuildingTop = (mesh, heightOffset = 0.6) => {
+    if (!mesh) return false;
+    const lifted = liftPositionToBuildingTop(mesh.position, heightOffset);
+    if (lifted) {
+      mesh.userData.baseY = mesh.position.y;
+    }
+    return lifted;
+  };
+
+  const liftMonsterToBuildingTop = (monster, heightOffset = 0.5) => {
+    if (!monster?.model) return false;
+    const lifted = liftPositionToBuildingTop(monster.model.position, heightOffset);
+    if (lifted) {
+      const body = monster.body;
+      if (body) {
+        body.setTranslation(
+          { x: monster.model.position.x, y: monster.model.position.y, z: monster.model.position.z },
+          true
+        );
+      }
+    }
+    return lifted;
+  };
+
+  const liftPlayerToBuildingTop = (heightOffset = 0.6) => {
+    if (!playerModel) return false;
+    const lifted = liftPositionToBuildingTop(playerModel.position, heightOffset);
+    if (lifted && playerControls?.body) {
+      playerControls.body.setTranslation(
+        { x: playerModel.position.x, y: playerModel.position.y, z: playerModel.position.z },
+        true
+      );
+      playerControls.playerX = playerModel.position.x;
+      playerControls.playerY = playerModel.position.y;
+      playerControls.playerZ = playerModel.position.z;
+      playerControls.lastPosition.copy(playerModel.position);
+    }
+    return lifted;
+  };
+
+  const liftPickupsToBuildingTop = () => {
+    ammoPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
+    droppedAmmoPickups.forEach(entry => liftMeshToBuildingTop(entry?.mesh, 0.6));
+    foodPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
+    healthPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
+    if (!iceGun?.holder) {
+      liftMeshToBuildingTop(iceGun?.mesh, 0.5);
+    }
+    if (!autumnSword?.holder) {
+      liftMeshToBuildingTop(autumnSword?.mesh, 0.5);
+    }
+  };
+
+  const liftEntitiesToBuildingTop = () => {
+    liftPlayerToBuildingTop(0.6);
+    monsters.forEach(monster => liftMonsterToBuildingTop(monster, 0.5));
+    Object.values(otherPlayers).forEach(entry => {
+      if (!entry?.model) return;
+      liftPositionToBuildingTop(entry.model.position, 0.6);
+    });
+    liftPickupsToBuildingTop();
+  };
+
+  let buildingColliderBody = null;
+  const rebuildBuildingColliders = () => {
+    if (!rapierWorld) return;
+    if (buildingColliderBody && rapierWorld.getRigidBody(buildingColliderBody.handle)) {
+      rapierWorld.removeRigidBody(buildingColliderBody);
+      buildingColliderBody = null;
+    }
+    const collisionMesh = buildingsRenderer?.getCollisionMesh?.();
+    const geometry = collisionMesh?.geometry;
+    if (!collisionMesh || !geometry?.attributes?.position || geometry.attributes.position.count === 0) {
+      return;
+    }
+    const positions = geometry.attributes.position.array;
+    const vertices = new Float32Array(positions);
+    let indices;
+    if (geometry.index?.array?.length) {
+      indices = new Uint32Array(geometry.index.array);
+    } else {
+      const count = geometry.attributes.position.count;
+      indices = new Uint32Array(count);
+      for (let i = 0; i < count; i += 1) {
+        indices[i] = i;
+      }
+    }
+    const rbDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0);
+    buildingColliderBody = rapierWorld.createRigidBody(rbDesc);
+    const colDesc = RAPIER.ColliderDesc.trimesh(vertices, indices)
+      .setRestitution(0)
+      .setFriction(1);
+    rapierWorld.createCollider(colDesc, buildingColliderBody);
   };
 
   const getMonsterSpawnPosition = () => {
@@ -870,9 +988,7 @@ async function main() {
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
       }
-      if (isSpawnBlockedByBuildings(spawnPos)) {
-        continue;
-      }
+      liftPositionToBuildingTop(spawnPos, 0.5);
       return spawnPos;
     }
     const fallback = playerModel.position.clone();
@@ -1514,6 +1630,7 @@ async function main() {
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
+    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -1540,6 +1657,7 @@ async function main() {
     if (!spawnPos) return null;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
+    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -1618,6 +1736,7 @@ async function main() {
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
+    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -1645,6 +1764,7 @@ async function main() {
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
+    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -1689,6 +1809,7 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.5;
+    liftPositionToBuildingTop(spawnPos, 0.5);
     iceGun.mesh.position.copy(spawnPos);
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
     iceGun.mesh.visible = true;
@@ -1704,6 +1825,7 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.5;
+    liftPositionToBuildingTop(spawnPos, 0.5);
     autumnSword.mesh.position.copy(spawnPos);
     autumnSword.mesh.quaternion.set(0, 0, 0, 1);
     autumnSword.mesh.visible = true;
@@ -2098,6 +2220,8 @@ async function main() {
     }
     mapRenderer.updateHighways(combined, bounds);
     buildingsRenderer.updateBuildings(combined, bounds);
+    rebuildBuildingColliders();
+    liftEntitiesToBuildingTop();
   };
 
   window.clearTileCache = () => {
@@ -2426,6 +2550,7 @@ async function main() {
     setStat('health', 100);
     setStat('energy', 100);
     const spawn = getSpawnPosition();
+    liftPositionToBuildingTop(spawn, 0.6);
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
     playerControls.playerY = spawn.y;
