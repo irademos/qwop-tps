@@ -14,7 +14,8 @@ const DEFAULT_STATS = {
   agility: 5,
   smarts: 5,
   charm: 5,
-  luck: 5
+  luck: 5,
+  levelKills: 0
 };
 const DEFAULT_INVENTORY = {};
 
