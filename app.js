@@ -56,6 +56,10 @@ window.DEBUG_CONSOLE = false;
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
+const REMOTE_ANIM_FPS = 8;
+const REMOTE_ANIM_INTERVAL = 1 / REMOTE_ANIM_FPS;
+const MONSTER_ANIM_FPS = 8;
+const MONSTER_ANIM_INTERVAL = 1 / MONSTER_ANIM_FPS;
 
 
 // --- Rapier demo state ---
@@ -67,7 +71,7 @@ const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
 const PRESENCE_STALE_MS = 5000;
-const PRESENCE_SEND_MS = 150;
+const PRESENCE_SEND_MS = 250;
 const PRESENCE_SWEEP_MS = 250;
 const REMOTE_LERP_ALPHA = 0.15;
 const REMOTE_TELEPORT_THRESHOLD_M = 25;
@@ -144,14 +148,16 @@ async function main() {
   const authoritativeEntityStates = new Map();
   let lastEntityBroadcast = 0;
   let lastControlSend = 0;
-  const ENTITY_BROADCAST_INTERVAL = 120;
-  const CONTROL_SEND_INTERVAL = 80;
+  const ENTITY_BROADCAST_INTERVAL = 200;
+  const CONTROL_SEND_INTERVAL = 140;
 
   const otherPlayers = {};
   window.otherPlayers = otherPlayers;
   const remotePresenceMeta = {};
   let lastPresenceSend = 0;
   let lastPresenceSweep = 0;
+  let remoteAnimAccumulator = 0;
+  let monsterAnimAccumulator = 0;
 
   const logNet = (...args) => {
     if (window.DEBUG_NET) {
@@ -2932,10 +2938,19 @@ async function main() {
     }
 
     const mixerDelta = mixerClock.getDelta();
-
-    Object.values(otherPlayers).forEach(p => {
-      p.model?.userData?.mixer?.update(mixerDelta);
-    });
+    remoteAnimAccumulator += mixerDelta;
+    monsterAnimAccumulator += mixerDelta;
+    const remoteAnimDelta = remoteAnimAccumulator >= REMOTE_ANIM_INTERVAL ? remoteAnimAccumulator : 0;
+    const monsterAnimDelta = monsterAnimAccumulator >= MONSTER_ANIM_INTERVAL ? monsterAnimAccumulator : 0;
+    if (remoteAnimDelta > 0) {
+      remoteAnimAccumulator = 0;
+      Object.values(otherPlayers).forEach(p => {
+        p.model?.userData?.mixer?.update(remoteAnimDelta);
+      });
+    }
+    if (monsterAnimDelta > 0) {
+      monsterAnimAccumulator = 0;
+    }
 
     const isHost = !multiplayer || multiplayer.isHost;
     if (isHost) {
@@ -2962,15 +2977,15 @@ async function main() {
           const lastUpdate = monster.lastAIUpdateMs ?? 0;
           if (nowMs - lastUpdate > 150) {
             monster.lastAIUpdateMs = nowMs;
-            monster.updateAI(mixerDelta, playerModel, otherPlayers);
+            monster.updateAI(monsterAnimDelta, playerModel, otherPlayers);
           }
         } else {
-          monster.updateAI(mixerDelta, playerModel, otherPlayers);
+          monster.updateAI(monsterAnimDelta, playerModel, otherPlayers);
         }
       });
     } else {
       monsters.forEach(monster => {
-        monster?.model && monster.update(mixerDelta);
+        monster?.model && monster.update(monsterAnimDelta);
       });
     }
 
