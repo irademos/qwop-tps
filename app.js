@@ -866,8 +866,10 @@ async function main() {
       rbToMesh.delete(body);
       rapierWorld.removeRigidBody(body);
     }
+    if (monster.model?.userData?.rb) {
+      monster.model.userData.rb = null;
+    }
     monster.model = null;
-    monster.body = null;
   };
 
   const setMonsterForSlot = (slotId, monster) => {
