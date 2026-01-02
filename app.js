@@ -2097,8 +2097,8 @@ async function main() {
 
     yesBtn.onclick = () => {
       clearInterval(interval);
-      respawnPlayer();
       hideGameOver();
+      respawnPlayer();
     };
 
     noBtn.onclick = () => {
@@ -2109,10 +2109,14 @@ async function main() {
 
   function hideGameOver() {
     gameOverOverlay.classList.add('hidden');
+    continueSection.classList.add('hidden');
+    gameOverMessage.classList.add('hidden');
+    gameOverMessage.style.opacity = 0;
   }
 
   function respawnPlayer() {
     setStat('health', 100);
+    setStat('energy', 100);
     const spawn = getSpawnPosition();
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
@@ -2124,7 +2128,6 @@ async function main() {
       playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
-    playerControls.velocity.set(0, 0, 0);
     playerDead = false;
     updateControlAvailability();
     const actions = playerModel.userData.actions;
