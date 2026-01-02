@@ -640,6 +640,31 @@ body {
   font-weight: 700;
 }
 
+.settings-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px 12px;
+}
+
+.settings-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #e6e6e6;
+  background: #f8f8f8;
+  font-size: 12px;
+}
+
+.settings-stat-label {
+  font-weight: 600;
+}
+
+.settings-stat-value {
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-section-title {
   margin: 8px 0 2px;
   font-size: 12px;
