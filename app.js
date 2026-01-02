@@ -2061,7 +2061,6 @@ async function main() {
       playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
-    playerControls.velocity.set(0, 0, 0);
     playerDead = false;
     updateControlAvailability();
     const actions = playerModel.userData.actions;
