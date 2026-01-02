@@ -2049,6 +2049,7 @@ async function main() {
 
   function respawnPlayer() {
     setStat('health', 100);
+    setStat('energy', 100);
     const spawn = getSpawnPosition();
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
