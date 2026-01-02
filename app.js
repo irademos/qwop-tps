@@ -1691,8 +1691,8 @@ async function main() {
   const getPickupTileCoords = (position) => {
     if (!position) return null;
     return {
-      x: Math.floor(position.x / TILE_SIZE_METERS + 0.5),
-      y: Math.floor(-position.z / TILE_SIZE_METERS + 0.5)
+      x: Math.round(position.x / TILE_SIZE_METERS),
+      y: Math.round(-position.z / TILE_SIZE_METERS)
     };
   };
   const getPickupTileCenter = (tile) => {
