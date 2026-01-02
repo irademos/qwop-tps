@@ -1538,6 +1538,7 @@ async function main() {
 
   const TILE_SIZE_METERS = 300;
   const TILE_EVICT_RADIUS = 2;
+  const GROUND_TILE_RADIUS = 2;
   const TILE_FETCH_RADIUS_METERS = TILE_SIZE_METERS * Math.SQRT2 * 0.5;
   const TILE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
   const tileCache = createTileCache({
@@ -1550,6 +1551,41 @@ async function main() {
     tileSizeMeters: TILE_SIZE_METERS
   });
   window.groundTiles = groundTiles.tiles;
+  let activeGroundTileKey = null;
+  const getGroundTileCoords = (position) => {
+    if (!position) return null;
+    return {
+      x: Math.floor(position.x / TILE_SIZE_METERS),
+      y: Math.floor(-position.z / TILE_SIZE_METERS)
+    };
+  };
+
+  const updateGroundTiles = (position) => {
+    const centerTile = getGroundTileCoords(position);
+    if (!centerTile) return;
+    const centerKey = `${centerTile.x},${centerTile.y}`;
+    if (centerKey === activeGroundTileKey && groundTiles.tiles.size > 0) {
+      return;
+    }
+    activeGroundTileKey = centerKey;
+    const desiredKeys = new Set();
+    for (let dx = -GROUND_TILE_RADIUS; dx <= GROUND_TILE_RADIUS; dx += 1) {
+      for (let dy = -GROUND_TILE_RADIUS; dy <= GROUND_TILE_RADIUS; dy += 1) {
+        const tile = {
+          x: centerTile.x + dx,
+          y: centerTile.y + dy
+        };
+        const key = `${tile.x},${tile.y}`;
+        desiredKeys.add(key);
+        groundTiles.ensureTile(tile, key);
+      }
+    }
+    for (const key of Array.from(groundTiles.tiles.keys())) {
+      if (!desiredKeys.has(key)) {
+        groundTiles.removeTile(key);
+      }
+    }
+  };
   const mapFetchInFlight = new Set();
   let activeTileKey = null;
   let worldOrigin = null;
@@ -1747,7 +1783,6 @@ async function main() {
 
     const evictedKeys = tileCache.evictTiles(tile);
     if (evictedKeys.length) {
-      evictedKeys.forEach((key) => groundTiles.removeTile(key));
       needsMapRebuild = true;
     }
 
@@ -1763,7 +1798,6 @@ async function main() {
         meshes: { highways: null, buildings: null },
         fetchedAt: cachedTile.fetchedAt
       });
-      groundTiles.ensureTile(tile, tileKey);
       needsMapRebuild = true;
       flushMapRebuild();
       if (Date.now() - cachedTile.fetchedAt < TILE_CACHE_MAX_AGE_MS) {
@@ -1795,7 +1829,6 @@ async function main() {
         meshes: { highways: null, buildings: null },
         fetchedAt: Date.now()
       });
-      groundTiles.ensureTile(tile, tileKey);
       needsMapRebuild = true;
       setCachedTile(tileKey, geojson).catch((error) => {
         console.warn('Failed to persist tile cache:', error);
@@ -2347,6 +2380,8 @@ async function main() {
     }
 
 
+
+    updateGroundTiles(playerModel?.position);
 
     if (!mapViewEnabled) {
       playerControls.update();
