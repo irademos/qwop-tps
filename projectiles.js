@@ -107,7 +107,17 @@ export function updateProjectiles({
         const player = otherPlayers[id];
         if (player) {
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
-          player.health = Math.max(0, (player.health || 100) - damage);
+          const previousHealth = player.health || 100;
+          const nextHealth = Math.max(0, previousHealth - damage);
+          player.health = nextHealth;
+          if (nextHealth <= 0 && previousHealth > 0) {
+            player.isDead = true;
+            if (proj.userData.shooterId === localId) {
+              window.onPlayerKill?.(id);
+            }
+          } else if (nextHealth > 0 && player.isDead) {
+            player.isDead = false;
+          }
           console.log(`💥 Hit player: ${id}, Health: ${player.health}`);
         }
         removeProjectile(i);
