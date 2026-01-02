@@ -123,13 +123,15 @@ async function main() {
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
   const PICKUP_RADIUS = 1.2;
+  const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 30;
+  const TILE_STOCK_AMMO_COUNT = 400;
   const TILE_STOCK_FOOD_COUNT = 500;
   const TILE_STOCK_HEALTH_COUNT = 500;
   const TILE_STOCK_WEAPON_COUNT = 100;
-  const TILE_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
-  const TILE_STOCK_STORAGE_KEY = 'tile-stock-history-v1';
+  const PICKUP_SPAWN_RADIUS = 225;
+  const PICKUP_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
 
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
   setCookie("characterModel", characterModel);
@@ -1566,59 +1568,21 @@ async function main() {
     tileSizeMeters: TILE_SIZE_METERS
   });
   window.groundTiles = groundTiles.tiles;
-  const tileStockHistory = new Map();
-  const loadTileStockHistory = () => {
-    try {
-      const stored = localStorage.getItem(TILE_STOCK_STORAGE_KEY);
-      if (!stored) return;
-      const parsed = JSON.parse(stored);
-      Object.entries(parsed).forEach(([key, value]) => {
-        if (Number.isFinite(value)) {
-          tileStockHistory.set(key, value);
-        }
-      });
-    } catch (error) {
-      console.warn('Failed to load tile stock history:', error);
-    }
-  };
-
-  const saveTileStockHistory = () => {
-    try {
-      const payload = {};
-      tileStockHistory.forEach((value, key) => {
-        payload[key] = value;
-      });
-      localStorage.setItem(TILE_STOCK_STORAGE_KEY, JSON.stringify(payload));
-    } catch (error) {
-      console.warn('Failed to persist tile stock history:', error);
-    }
-  };
-
-  const getRandomTileSpawnPosition = (tile) => {
-    if (!tile || !worldOrigin) return null;
-    const center = tileCache.getTileCenterLocation(tile);
+  const getRandomPickupPosition = (center) => {
     if (!center) return null;
-
-    const lonScale = metersPerDegreeLon(center.lat);
-    const offsetX = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
-    const offsetZ = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
-    const lat = center.lat + offsetZ / METERS_PER_DEGREE_LAT;
-    const lon = center.lon + offsetX / lonScale;
-
-    const meters = computePlayerMeters({ lat, lon });
-    if (!meters) return null;
-
-    return new THREE.Vector3(meters.x, 0, meters.z);
+    const radius = PICKUP_SPAWN_RADIUS * Math.sqrt(Math.random());
+    const angle = Math.random() * Math.PI * 2;
+    const x = center.x + Math.cos(angle) * radius;
+    const z = center.z + Math.sin(angle) * radius;
+    return new THREE.Vector3(x, 0, z);
   };
-
-
-  const spawnScatteredPickups = ({ tile, count, maxTotal, spawnFn }) => {
+  const spawnScatteredPickups = ({ center, count, maxTotal, spawnFn }) => {
     let spawned = 0;
     let attempts = 0;
     const maxAttempts = count * 6;
     while (spawned < count && attempts < maxAttempts && maxTotal()) {
       attempts += 1;
-      const spawnPos = getRandomTileSpawnPosition(tile);
+      const spawnPos = getRandomPickupPosition(center);
       if (!spawnPos) continue;
       const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
       if (!Number.isFinite(terrainHeight)) continue;
@@ -1627,61 +1591,7 @@ async function main() {
     }
     return spawned;
   };
-
-  const stockTilePickups = (tile) => {
-    if (!tile) return;
-    const tileKey = tileCache.getTileKey(tile);
-    const now = Date.now();
-    const lastStocked = tileStockHistory.get(tileKey);
-    if (Number.isFinite(lastStocked) && now - lastStocked < TILE_STOCK_COOLDOWN_MS) {
-      return;
-    }
-
-    const spawnedFood = spawnScatteredPickups({
-      tile,
-      count: TILE_STOCK_FOOD_COUNT,
-      maxTotal: () => foodPickups.length < MAX_FOOD_PICKUPS,
-      spawnFn: spawnFoodPickup
-    });
-
-    const spawnedHealth = spawnScatteredPickups({
-      tile,
-      count: TILE_STOCK_HEALTH_COUNT,
-      maxTotal: () => healthPickups.length < MAX_HEALTH_PICKUPS,
-      spawnFn: spawnHealthPickup
-    });
-
-    const isHost = !multiplayer || multiplayer.isHost;
-    let spawnedWeapons = 0;
-    if (isHost && TILE_STOCK_WEAPON_COUNT > 0) {
-      const hasIceGun = (inventoryState?.iceGun?.count || 0) > 0;
-      const canSpawnIceGun = iceGun?.mesh && !iceGun.holder && !hasIceGun && !iceGun.mesh.visible;
-      if (canSpawnIceGun) {
-        const spawnPos = getRandomTileSpawnPosition(tile);
-        if (spawnPos) {
-          spawnIceGunPickup(spawnPos);
-          spawnedWeapons += 1;
-        }
-      }
-
-      const hasSword = (inventoryState?.autumnSword?.count || 0) > 0;
-      const canSpawnSword = autumnSword?.mesh && !autumnSword.holder && !hasSword && !autumnSword.mesh.visible;
-      if (spawnedWeapons < TILE_STOCK_WEAPON_COUNT && canSpawnSword) {
-        const spawnPos = getRandomTileSpawnPosition(tile);
-        if (spawnPos) {
-          spawnAutumnSwordPickup(spawnPos);
-          spawnedWeapons += 1;
-        }
-      }
-    }
-
-    if (spawnedFood || spawnedHealth || spawnedWeapons || lastStocked == null) {
-      tileStockHistory.set(tileKey, now);
-      saveTileStockHistory();
-    }
-  };
-
-  loadTileStockHistory();
+  let lastPickupStockAt = 0;
   let activeGroundTileKey = null;
   const getGroundTileCoords = (position) => {
     if (!position) return null;
@@ -1690,7 +1600,6 @@ async function main() {
       y: Math.floor(-position.z / TILE_SIZE_METERS)
     };
   };
-
   const updateGroundTiles = (position) => {
     const centerTile = getGroundTileCoords(position);
     if (!centerTile) return;
@@ -1716,6 +1625,81 @@ async function main() {
         groundTiles.removeTile(key);
       }
     }
+  };
+  const disposePickup = (pickup) => {
+    scene.remove(pickup);
+    pickup.geometry?.dispose();
+    pickup.material?.dispose();
+  };
+  const removePickupOutsideRadius = (pickups, center, radius) => {
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      const pickup = pickups[i];
+      if (!pickup) continue;
+      if (center.distanceTo(pickup.position) > radius) {
+        disposePickup(pickup);
+        pickups.splice(i, 1);
+      }
+    }
+  };
+  const updatePickupTiles = (position) => {
+    if (!position) return;
+    const center = position.clone();
+    removePickupOutsideRadius(ammoPickups, center, PICKUP_SPAWN_RADIUS);
+    removePickupOutsideRadius(foodPickups, center, PICKUP_SPAWN_RADIUS);
+    removePickupOutsideRadius(healthPickups, center, PICKUP_SPAWN_RADIUS);
+
+    const now = Date.now();
+    if (now - lastPickupStockAt < PICKUP_STOCK_COOLDOWN_MS) {
+      return;
+    }
+    lastPickupStockAt = now;
+
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_AMMO_COUNT,
+      maxTotal: () => ammoPickups.length < MAX_AMMO_PICKUPS,
+      spawnFn: spawnAmmoPickup
+    });
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_FOOD_COUNT,
+      maxTotal: () => foodPickups.length < MAX_FOOD_PICKUPS,
+      spawnFn: spawnFoodPickup
+    });
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_HEALTH_COUNT,
+      maxTotal: () => healthPickups.length < MAX_HEALTH_PICKUPS,
+      spawnFn: spawnHealthPickup
+    });
+
+    const isHost = !multiplayer || multiplayer.isHost;
+    if (isHost && TILE_STOCK_WEAPON_COUNT > 0) {
+      const hasIceGun = (inventoryState?.iceGun?.count || 0) > 0;
+      const canSpawnIceGun = iceGun?.mesh && !iceGun.holder && !hasIceGun && !iceGun.mesh.visible;
+      if (canSpawnIceGun) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnIceGunPickup(spawnPos);
+        }
+      }
+
+      const hasSword = (inventoryState?.autumnSword?.count || 0) > 0;
+      const canSpawnSword = autumnSword?.mesh && !autumnSword.holder && !hasSword && !autumnSword.mesh.visible;
+      if (canSpawnSword) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnAutumnSwordPickup(spawnPos);
+        }
+      }
+    }
+
+    [iceGun, autumnSword].forEach((weapon) => {
+      if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
+      if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
+        weapon.mesh.visible = false;
+      }
+    });
   };
   const mapFetchInFlight = new Set();
   let activeTileKey = null;
@@ -2037,7 +2021,7 @@ async function main() {
       const localMeters = tileCache.getLocalMeters(location);
       locationState.tile = tileCache.getTileCoords(localMeters);
       requestMapUpdate(location);
-      stockTilePickups(locationState.tile);
+      updatePickupTiles(playerModel?.position);
     },
     onError: (error, message) => {
       console.warn('Location error:', message, error);
@@ -2067,9 +2051,6 @@ async function main() {
     }
   });
   window.addEventListener('beforeunload', () => locationProvider.stop());
-
-  spawnAmmoPickup(new THREE.Vector3(-4, 0, 4));
-  spawnAmmoPickup(new THREE.Vector3(2, 0, -3));
 
   // --- RAPIER HELPERS ---
   function spawnBlock({
@@ -2516,6 +2497,7 @@ async function main() {
 
 
     updateGroundTiles(playerModel?.position);
+    updatePickupTiles(playerModel?.position);
 
     if (!mapViewEnabled) {
       playerControls.update();
@@ -2573,12 +2555,6 @@ async function main() {
     if (shouldCheckPickups) {
       lastPickupCheckMs = now;
     }
-
-    const disposePickup = (pickup) => {
-      scene.remove(pickup);
-      pickup.geometry?.dispose();
-      pickup.material?.dispose();
-    };
 
     if (PERF.disablePickups) {
       for (let i = ammoPickups.length - 1; i >= 0; i--) {
