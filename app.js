@@ -810,7 +810,6 @@ async function main() {
   let playerModel = player.model;
   playerModel.userData.hideInMapView = true;
   scene.add(playerModel);
-  document.body.appendChild(player.nameLabel);
   window.playerModel = playerModel;
   let didInitialGpsSnap = false;
 
@@ -2314,7 +2313,6 @@ async function main() {
     newModel.up.copy(currentUp);
 
     scene.add(newModel);
-    document.body.appendChild(newPlayer.nameLabel);
 
     if (playerControls?.parachute) {
       newModel.add(playerControls.parachute);
