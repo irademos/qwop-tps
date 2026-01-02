@@ -178,7 +178,6 @@ export async function fetchOSMFeatures(lat, lon, radiusMeters, options = {}) {
   }
 
   const query = buildOverpassQuery(lat, lon, radiusMeters);
-  const body = new URLSearchParams({ data: query });
 
   const staleDistanceMeters = Number.isFinite(options.staleDistanceMeters)
     ? options.staleDistanceMeters
@@ -188,7 +187,7 @@ export async function fetchOSMFeatures(lat, lon, radiusMeters, options = {}) {
     lat,
     lon,
     staleDistanceMeters,
-    requestFn: () => performOverpassRequest(body),
+    requestFn: () => performOverpassRequest(new URLSearchParams({ data: query })),
   });
 
   const data = await response.json();
