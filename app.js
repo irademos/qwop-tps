@@ -1602,16 +1602,6 @@ async function main() {
     }
   };
 
-  const getRandomTileSpawnPosition = (tile) => {
-    if (!tile) return null;
-    const offsetX = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
-    const offsetZ = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
-    const x = (tile.x + 0.5) * TILE_SIZE_METERS + offsetX;
-    const z = -(tile.y + 0.5) * TILE_SIZE_METERS + offsetZ;
-    return new THREE.Vector3(x, 0, z);
-  };
-
-
   const spawnScatteredPickups = ({ tile, count, maxTotal, spawnFn }) => {
     let spawned = 0;
     let attempts = 0;
@@ -1698,6 +1688,30 @@ async function main() {
       y: Math.floor(-position.z / TILE_SIZE_METERS)
     };
   };
+  const getPickupTileCoords = (position) => {
+    if (!position) return null;
+    return {
+      x: Math.floor(position.x / TILE_SIZE_METERS + 0.5),
+      y: Math.floor(-position.z / TILE_SIZE_METERS + 0.5)
+    };
+  };
+  const getPickupTileCenter = (tile) => {
+    if (!tile) return null;
+    return {
+      x: tile.x * TILE_SIZE_METERS,
+      z: -tile.y * TILE_SIZE_METERS
+    };
+  };
+  const getRandomTileSpawnPosition = (tile) => {
+    if (!tile) return null;
+    const center = getPickupTileCenter(tile);
+    if (!center) return null;
+    const offsetX = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
+    const offsetZ = THREE.MathUtils.randFloatSpread(TILE_SIZE_METERS * 0.85);
+    const x = center.x + offsetX;
+    const z = center.z + offsetZ;
+    return new THREE.Vector3(x, 0, z);
+  };
 
   const updateGroundTiles = (position) => {
     const centerTile = getGroundTileCoords(position);
@@ -1744,12 +1758,9 @@ async function main() {
     }
   };
   const updatePickupTiles = (position) => {
-    const centerTile = getGroundTileCoords(position);
+    const centerTile = getPickupTileCoords(position);
     if (!centerTile) return;
     const centerKey = `${centerTile.x},${centerTile.y}`;
-    if (centerKey === activePickupTileKey && (ammoPickups.length || foodPickups.length || healthPickups.length)) {
-      return;
-    }
     activePickupTileKey = centerKey;
     const desiredKeys = new Set();
     for (let dx = -PICKUP_TILE_RADIUS; dx <= PICKUP_TILE_RADIUS; dx += 1) {
@@ -1769,7 +1780,7 @@ async function main() {
 
     [iceGun, autumnSword].forEach((weapon) => {
       if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
-      const tile = getGroundTileCoords(weapon.mesh.position);
+      const tile = getPickupTileCoords(weapon.mesh.position);
       const key = tile ? `${tile.x},${tile.y}` : null;
       if (!key || !desiredKeys.has(key)) {
         weapon.mesh.visible = false;
@@ -2097,6 +2108,7 @@ async function main() {
       const localMeters = tileCache.getLocalMeters(location);
       locationState.tile = tileCache.getTileCoords(localMeters);
       requestMapUpdate(location);
+      updatePickupTiles(playerModel?.position);
     },
     onError: (error, message) => {
       console.warn('Location error:', message, error);
