@@ -770,6 +770,19 @@ body {
   text-align: center;
 }
 
+.inventory-ammo {
+  position: absolute;
+  bottom: 6px;
+  left: 6px;
+  right: 6px;
+  font-size: 10px;
+  color: #35506d;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  padding: 2px 4px;
+}
+
 .inventory-details {
   border: 1px solid #e6e6e6;
   border-radius: 10px;

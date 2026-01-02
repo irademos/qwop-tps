@@ -13,7 +13,7 @@ const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
 
 export class PlayerControls {
-  constructor({ scene, camera, playerModel, renderer, multiplayer, spawnProjectile, projectiles, audioManager }) {
+  constructor({ scene, camera, playerModel, renderer, multiplayer, spawnProjectile, projectiles, audioManager, initialAmmo, onAmmoChange }) {
     this.yaw = 0;
     this.pitch = 0;
     this.pointerLocked = false;
@@ -124,7 +124,8 @@ export class PlayerControls {
       this.interactionPromptEl.addEventListener('click', activateInteraction);
     }
 
-    this.ammo = 10;
+    this.onAmmoChange = typeof onAmmoChange === 'function' ? onAmmoChange : null;
+    this.ammo = Number.isFinite(initialAmmo) ? Math.max(0, Math.floor(initialAmmo)) : 10;
     this.maxAmmo = 30;
     this.ammoContainerEl = document.getElementById('ammo-display');
     this.ammoCountEl = document.getElementById('ammo-count');
@@ -132,6 +133,7 @@ export class PlayerControls {
     this.lastAmmoEmpty = null;
     this.lastHasGun = null;
     this.updateAmmoUI(!!this.getEquippedGun());
+    this.onAmmoChange?.(this.ammo);
   }
 
   setPlayerModel(newModel) {
@@ -1042,8 +1044,7 @@ export class PlayerControls {
 
   consumeAmmo() {
     if (this.ammo <= 0) return false;
-    this.ammo -= 1;
-    this.updateAmmoUI(!!this.getEquippedGun());
+    this.setAmmo(this.ammo - 1);
     return true;
   }
 
@@ -1095,10 +1096,15 @@ export class PlayerControls {
     const normalized = Math.floor(amount);
     if (normalized <= 0) return;
     const nextAmmo = Math.min(this.maxAmmo, this.ammo + normalized);
-    if (nextAmmo !== this.ammo) {
-      this.ammo = nextAmmo;
-      this.updateAmmoUI(!!this.getEquippedGun());
-    }
+    this.setAmmo(nextAmmo);
+  }
+
+  setAmmo(value) {
+    const nextAmmo = Math.max(0, Math.floor(value));
+    if (nextAmmo === this.ammo) return;
+    this.ammo = nextAmmo;
+    this.updateAmmoUI(!!this.getEquippedGun());
+    this.onAmmoChange?.(this.ammo);
   }
 
   updateAmmoUI(hasGun = !!this.getEquippedGun()) {
