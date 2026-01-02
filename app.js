@@ -233,7 +233,7 @@ async function main() {
   }
 
   function handleIncomingData(peerId, data) {
-    console.log('📡 Incoming data:', data);
+    // console.log('📡 Incoming data:', data);
 
     if (data.type === 'entityControl') {
       if (multiplayer?.isHost && data.id && data.state && data.sourceId) {
