@@ -405,6 +405,48 @@ function buildDeveloperPanel() {
   consoleLog.id = 'console-log';
   consoleLog.style.display = 'none';
 
+  const perfTitle = createElement('h3', 'settings-section-title', 'Performance');
+  const perfOverlayRow = createElement('div', 'settings-row');
+  const perfOverlayLabel = createElement('label', 'settings-label', 'Show Perf Overlay');
+  perfOverlayLabel.setAttribute('for', 'perf-overlay-toggle');
+  const perfOverlayToggle = createElement('input', 'settings-checkbox');
+  perfOverlayToggle.type = 'checkbox';
+  perfOverlayToggle.id = 'perf-overlay-toggle';
+  perfOverlayRow.append(perfOverlayLabel, perfOverlayToggle);
+
+  const perfModeRow = createElement('div', 'settings-row');
+  const perfModeLabel = createElement('label', 'settings-label', 'Perf Mode');
+  perfModeLabel.setAttribute('for', 'perf-mode-toggle');
+  const perfModeToggle = createElement('input', 'settings-checkbox');
+  perfModeToggle.type = 'checkbox';
+  perfModeToggle.id = 'perf-mode-toggle';
+  perfModeRow.append(perfModeLabel, perfModeToggle);
+
+  const isolateTitle = createElement('h3', 'settings-section-title', 'Isolate');
+  const disableMonstersRow = createElement('div', 'settings-row');
+  const disableMonstersLabel = createElement('label', 'settings-label', 'Disable Monsters');
+  disableMonstersLabel.setAttribute('for', 'disable-monsters-toggle');
+  const disableMonstersToggle = createElement('input', 'settings-checkbox');
+  disableMonstersToggle.type = 'checkbox';
+  disableMonstersToggle.id = 'disable-monsters-toggle';
+  disableMonstersRow.append(disableMonstersLabel, disableMonstersToggle);
+
+  const disablePickupsRow = createElement('div', 'settings-row');
+  const disablePickupsLabel = createElement('label', 'settings-label', 'Disable Pickups');
+  disablePickupsLabel.setAttribute('for', 'disable-pickups-toggle');
+  const disablePickupsToggle = createElement('input', 'settings-checkbox');
+  disablePickupsToggle.type = 'checkbox';
+  disablePickupsToggle.id = 'disable-pickups-toggle';
+  disablePickupsRow.append(disablePickupsLabel, disablePickupsToggle);
+
+  const disableTilesRow = createElement('div', 'settings-row');
+  const disableTilesLabel = createElement('label', 'settings-label', 'Freeze Tile Loading');
+  disableTilesLabel.setAttribute('for', 'disable-tiles-toggle');
+  const disableTilesToggle = createElement('input', 'settings-checkbox');
+  disableTilesToggle.type = 'checkbox';
+  disableTilesToggle.id = 'disable-tiles-toggle';
+  disableTilesRow.append(disableTilesLabel, disableTilesToggle);
+
   panelEl.append(
     consoleButton,
     copyDebugButton,
@@ -417,6 +459,13 @@ function buildDeveloperPanel() {
     debugStepButtons,
     levelBuilderButton,
     originSection,
+    perfTitle,
+    perfOverlayRow,
+    perfModeRow,
+    isolateTitle,
+    disableMonstersRow,
+    disablePickupsRow,
+    disableTilesRow,
     consoleLog
   );
   elements.consoleButton = consoleButton;
@@ -433,6 +482,13 @@ function buildDeveloperPanel() {
     current: originSection.querySelector('[data-field="debug-current"]'),
     player: originSection.querySelector('[data-field="debug-player"]'),
     tile: originSection.querySelector('[data-field="debug-tile"]')
+  };
+  elements.developerToggles = {
+    perfOverlay: perfOverlayToggle,
+    perfMode: perfModeToggle,
+    disableMonsters: disableMonstersToggle,
+    disablePickups: disablePickupsToggle,
+    disableTiles: disableTilesToggle
   };
 
   return panelEl;
@@ -679,6 +735,36 @@ function bindEvents() {
     elements.debugLocationFields.accuracy.addEventListener('change', (event) => {
       const value = parseFloat(event.target.value);
       context.location?.setDebugAccuracy?.(value);
+    });
+  }
+
+  if (elements.developerToggles?.perfOverlay) {
+    elements.developerToggles.perfOverlay.addEventListener('change', (event) => {
+      context.appState?.setPerfOverlayEnabled?.(event.target.checked);
+    });
+  }
+
+  if (elements.developerToggles?.perfMode) {
+    elements.developerToggles.perfMode.addEventListener('change', (event) => {
+      context.appState?.setPerfModeEnabled?.(event.target.checked);
+    });
+  }
+
+  if (elements.developerToggles?.disableMonsters) {
+    elements.developerToggles.disableMonsters.addEventListener('change', (event) => {
+      context.appState?.setDisableMonsters?.(event.target.checked);
+    });
+  }
+
+  if (elements.developerToggles?.disablePickups) {
+    elements.developerToggles.disablePickups.addEventListener('change', (event) => {
+      context.appState?.setDisablePickups?.(event.target.checked);
+    });
+  }
+
+  if (elements.developerToggles?.disableTiles) {
+    elements.developerToggles.disableTiles.addEventListener('change', (event) => {
+      context.appState?.setDisableTileLoading?.(event.target.checked);
     });
   }
 
@@ -983,6 +1069,24 @@ export function updateUI() {
           ? debugState.accuracyMeters.toFixed(1)
           : '';
       }
+    }
+  }
+
+  if (elements.developerToggles && context.appState) {
+    if (elements.developerToggles.perfOverlay) {
+      elements.developerToggles.perfOverlay.checked = Boolean(context.appState.getPerfOverlayEnabled?.());
+    }
+    if (elements.developerToggles.perfMode) {
+      elements.developerToggles.perfMode.checked = Boolean(context.appState.getPerfModeEnabled?.());
+    }
+    if (elements.developerToggles.disableMonsters) {
+      elements.developerToggles.disableMonsters.checked = Boolean(context.appState.getDisableMonsters?.());
+    }
+    if (elements.developerToggles.disablePickups) {
+      elements.developerToggles.disablePickups.checked = Boolean(context.appState.getDisablePickups?.());
+    }
+    if (elements.developerToggles.disableTiles) {
+      elements.developerToggles.disableTiles.checked = Boolean(context.appState.getDisableTileLoading?.());
     }
   }
 

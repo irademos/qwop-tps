@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { markSharedMaterial, markSharedTexture } from "./utils.js";
 // import { BufferGeometryUtils } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
@@ -12,7 +13,7 @@ const BASE_ELEVATION = 0.0;
 const textureLoader = new THREE.TextureLoader();
 
 function loadTex(url, { srgb = false, repeat = 2 } = {}) {
-  const tex = textureLoader.load(url);
+  const tex = markSharedTexture(textureLoader.load(url));
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(repeat, repeat);
@@ -168,20 +169,20 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   group.name = "osm-buildings";
   scene?.add(group);
 
-  const extrudedMaterial = new THREE.MeshStandardMaterial({
+  const extrudedMaterial = markSharedMaterial(new THREE.MeshStandardMaterial({
     map: buildingBase,
     normalMap: buildingNormal,
     roughnessMap: buildingRough,
     roughness: 1.0,
     metalness: 0.0
     // aoMap: buildingAO, // if you enable AO, see uv2 note below
-  });
+  }));
 
-  const flatMaterial = new THREE.MeshStandardMaterial({
+  const flatMaterial = markSharedMaterial(new THREE.MeshStandardMaterial({
     color: 0x9b9b9b,
     roughness: 0.95,
     metalness: 0.0
-  });
+  }));
 
   const extrudedMesh = new THREE.Mesh(new THREE.BufferGeometry(), extrudedMaterial);
   const flatMesh = new THREE.Mesh(new THREE.BufferGeometry(), flatMaterial);

@@ -72,13 +72,17 @@ export class MonsterCharacter extends CharacterBase {
     this.isDead = false;
   }
 
-  updateAI(deltaTime, playerModel, otherPlayers) {
+  updateAI(deltaTime, playerModel, otherPlayers, { skipThink = false } = {}) {
     const now = Date.now();
     const body = this.body;
     if (!body) return;
 
     const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
     if (this.isDead) {
+      this.update(delta);
+      return;
+    }
+    if (skipThink) {
       this.update(delta);
       return;
     }

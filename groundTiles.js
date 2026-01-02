@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { markSharedMaterial, markSharedTexture } from "./utils.js";
 
 export const GROUND_TEX_REPEAT_PER_TILE = 6;
 const GROUND_TEXTURE_URL =
@@ -13,7 +14,7 @@ export function createGroundTiles({
 } = {}) {
   const tiles = new Map();
 
-  const texture = new THREE.TextureLoader().load(textureUrl);
+  const texture = markSharedTexture(new THREE.TextureLoader().load(textureUrl));
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
   const repeatScale = (tileSizeMeters / 300) * GROUND_TEX_REPEAT_PER_TILE;
@@ -25,7 +26,7 @@ export function createGroundTiles({
     texture.colorSpace = THREE.SRGBColorSpace;
   }
 
-  const material = new THREE.MeshStandardMaterial({ map: texture });
+  const material = markSharedMaterial(new THREE.MeshStandardMaterial({ map: texture }));
 
   const createGroundMesh = (tile) => {
     const geometry = new THREE.PlaneGeometry(tileSizeMeters, tileSizeMeters);

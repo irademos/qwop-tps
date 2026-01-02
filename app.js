@@ -7,7 +7,7 @@ import { createClouds } from "./worldGeneration.js";
 import { getTerrainHeight } from './water.js';
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls.js';
-import { getCookie, setCookie } from './utils.js';
+import { disposeObject3D, getCookie, setCookie } from './utils.js';
 import { spawnProjectile, updateProjectiles } from './projectiles.js';
 import { updateMeleeAttacks } from './melee.js';
 import { BreakManager } from './breakManager.js';
@@ -30,6 +30,7 @@ import { loadOrCreateWithPin, saveStatsThrottled } from './playerProfile.js';
 
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
 const MAX_MONSTERS = 2;
+const MAX_MONSTERS_PER_TILE = 1;
 const MONSTER_MODELS = [
   "/models/rainbow_troll.fbx",
   "/models/swamp_guy.fbx",
@@ -41,6 +42,8 @@ const MONSTER_SPAWN_MIN_RADIUS = 25;
 const MONSTER_SPAWN_MAX_RADIUS = 80;
 const MONSTER_RESPAWN_DELAY_RANGE_MS = [3000, 5000];
 const MONSTER_SPAWN_ATTEMPTS = 12;
+const MONSTER_DESPAWN_DISTANCE = 260;
+const PICKUP_DESPAWN_DISTANCE = 220;
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -127,6 +130,21 @@ async function main() {
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
   setCookie("characterModel", characterModel);
   localStorage.setItem('characterModel', characterModel);
+
+  const PERF_SETTINGS_KEY = 'dev:perfSettings';
+  const perfSettings = {
+    overlayEnabled: false,
+    perfMode: false,
+    disableMonsters: false,
+    disablePickups: false,
+    disableTileLoading: false
+  };
+  try {
+    const storedPerf = JSON.parse(localStorage.getItem(PERF_SETTINGS_KEY) || '{}');
+    Object.assign(perfSettings, storedPerf);
+  } catch (error) {
+    console.warn('Failed to load perf settings:', error);
+  }
 
   let multiplayer = null;
   let playerControls = null;
@@ -675,6 +693,78 @@ async function main() {
     marker.rotation.y += rotationSpeed;
   };
 
+  const perfOverlay = document.createElement('div');
+  perfOverlay.id = 'perf-overlay';
+  perfOverlay.style.position = 'fixed';
+  perfOverlay.style.top = '10px';
+  perfOverlay.style.left = '10px';
+  perfOverlay.style.padding = '8px 10px';
+  perfOverlay.style.background = 'rgba(0, 0, 0, 0.65)';
+  perfOverlay.style.color = '#fff';
+  perfOverlay.style.fontFamily = 'monospace';
+  perfOverlay.style.fontSize = '12px';
+  perfOverlay.style.lineHeight = '1.4';
+  perfOverlay.style.whiteSpace = 'pre';
+  perfOverlay.style.zIndex = '1000';
+  perfOverlay.style.pointerEvents = 'none';
+  perfOverlay.style.display = perfSettings.overlayEnabled ? 'block' : 'none';
+  document.body.appendChild(perfOverlay);
+
+  const debugPerf = {
+    fps: 0,
+    frameMs: 0,
+    info: {},
+    counts: {},
+    heap: null
+  };
+  window.debugPerf = debugPerf;
+
+  const savePerfSettings = () => {
+    localStorage.setItem(PERF_SETTINGS_KEY, JSON.stringify(perfSettings));
+  };
+
+  const setPerfOverlayEnabled = (enabled) => {
+    perfSettings.overlayEnabled = Boolean(enabled);
+    perfOverlay.style.display = perfSettings.overlayEnabled ? 'block' : 'none';
+    savePerfSettings();
+  };
+
+  const setPerfModeEnabled = (enabled) => {
+    perfSettings.perfMode = Boolean(enabled);
+    savePerfSettings();
+    applyPerfModeSettings();
+  };
+
+  const setDisableMonsters = (enabled) => {
+    perfSettings.disableMonsters = Boolean(enabled);
+    savePerfSettings();
+    if (perfSettings.disableMonsters) {
+      respawnTimers.forEach((timer) => clearTimeout(timer));
+      respawnTimers.clear();
+      monsters.forEach((monster) => cleanupMonster(monster, { dispose: true }));
+      monsters = [];
+      window.monsters = monsters;
+    }
+  };
+
+  const setDisablePickups = (enabled) => {
+    perfSettings.disablePickups = Boolean(enabled);
+    savePerfSettings();
+    if (perfSettings.disablePickups) {
+      clearPickups();
+      [iceGun, autumnSword].forEach((weapon) => {
+        if (weapon?.mesh && !weapon.holder) {
+          weapon.mesh.visible = false;
+        }
+      });
+    }
+  };
+
+  const setDisableTileLoading = (enabled) => {
+    perfSettings.disableTileLoading = Boolean(enabled);
+    savePerfSettings();
+  };
+
   iceGun = new IceGun(scene);
   await iceGun.load();
   window.iceGun = iceGun;
@@ -783,6 +873,7 @@ async function main() {
   });
 
   window.weapons = { iceGun, autumnSword };
+  applyPerfModeSettings();
 
   function attachMonsterPhysics(monster) {
     const model = monster.model;
@@ -810,6 +901,18 @@ async function main() {
   const getRandomMonsterModel = () => {
     const index = Math.floor(Math.random() * MONSTER_MODELS.length);
     return MONSTER_MODELS[index];
+  };
+
+  const scheduleMonsterRespawn = (slotId, delayOverride) => {
+    if (respawnTimers.has(slotId)) return;
+    const delay = delayOverride ?? THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
+    const timer = setTimeout(() => {
+      respawnTimers.delete(slotId);
+      if (!perfSettings.disableMonsters) {
+        spawnMonsterInSlot(slotId, getRandomMonsterModel());
+      }
+    }, delay);
+    respawnTimers.set(slotId, timer);
   };
 
   const isSpawnBlockedByBuildings = (position) => {
@@ -847,7 +950,22 @@ async function main() {
     return fallback;
   };
 
-  const cleanupMonster = (monster) => {
+  const canSpawnMonsterAt = (spawnPos) => {
+    if (!spawnPos) return false;
+    if (monsters.filter(entry => entry && !entry.isDead).length >= MAX_MONSTERS) {
+      return false;
+    }
+    const tileKey = getTileKeyForPosition(spawnPos);
+    if (!tileKey) return true;
+    const tileCount = monsters.filter((monster) => {
+      if (!monster || monster.isDead) return false;
+      const key = getTileKeyForPosition(monster.model.position);
+      return key === tileKey;
+    }).length;
+    return tileCount < MAX_MONSTERS_PER_TILE;
+  };
+
+  const cleanupMonster = (monster, { dispose = false } = {}) => {
     if (!monster) return;
     if (monster.model?.parent) {
       monster.model.parent.remove(monster.model);
@@ -856,6 +974,11 @@ async function main() {
     if (body && rapierWorld?.getRigidBody(body.handle)) {
       rbToMesh.delete(body);
       rapierWorld.removeRigidBody(body);
+    }
+    if (dispose) {
+      monster.mixer?.stopAllAction?.();
+      monster.mixer?.uncacheRoot?.(monster.model);
+      disposeObject3D(monster.model, { disposeTextures: true });
     }
   };
 
@@ -869,23 +992,34 @@ async function main() {
   };
 
   const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null) => {
+    if (perfSettings.disableMonsters) return;
     if (spawningSlots.has(slotId)) return;
     spawningSlots.add(slotId);
+    const monsterSpawn = getMonsterSpawnPosition();
+    if (!canSpawnMonsterAt(monsterSpawn)) {
+      spawningSlots.delete(slotId);
+      scheduleMonsterRespawn(slotId);
+      return;
+    }
     loadMonsterModel(modelPath, data => {
       try {
         const monster = new MonsterCharacter(data);
         monster.id = slotId;
         monster.modelPath = modelPath;
         monster.model.userData.hideInMapView = true;
+        monster.model.traverse((child) => {
+          if (!child.isMesh) return;
+          child.castShadow = false;
+          child.receiveShadow = false;
+          child.frustumCulled = true;
+        });
         monster.setMode("friendly");
         monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         monster.lastDirectionChange = Date.now();
         monster.resetHealth();
-
-        const monsterSpawn = getMonsterSpawnPosition();
         monster.setPosition(monsterSpawn.x, monsterSpawn.y, monsterSpawn.z);
 
-        cleanupMonster(oldMonster);
+        cleanupMonster(oldMonster, { dispose: true });
         scene.add(monster.model);
         if (rapierWorld) {
           attachMonsterPhysics(monster);
@@ -902,11 +1036,11 @@ async function main() {
     monsters = monsters.filter((monster) => {
       if (!monster) return false;
       if (!monsterSlotIds.includes(monster.id)) {
-        cleanupMonster(monster);
+        cleanupMonster(monster, { dispose: true });
         return false;
       }
       if (seenSlots.has(monster.id)) {
-        cleanupMonster(monster);
+        cleanupMonster(monster, { dispose: true });
         return false;
       }
       seenSlots.add(monster.id);
@@ -940,6 +1074,7 @@ async function main() {
       },
       applyState: state => {
         if (!state) return;
+        if (perfSettings.disableMonsters) return;
         const [px, py, pz] = state.position || [];
         const [rx, ry, rz, rw] = state.rotation || [];
         const current = monsters.find(entry => entry.id === slotId);
@@ -965,7 +1100,7 @@ async function main() {
           monster.model.userData.health = state.health;
         }
         if (state.mode === 'dead' && state.health <= 0) {
-          cleanupMonster(monster);
+          cleanupMonster(monster, { dispose: true });
           monsters = monsters.filter(entry => entry.id !== slotId);
           window.monsters = monsters;
           return;
@@ -1301,14 +1436,23 @@ async function main() {
 
   const projectiles = [];
   const ammoPickups = [];
+  const MAX_AMMO_PICKUPS = 8;
   const AMMO_PICKUP_AMOUNT = 5;
   const foodPickups = [];
   const healthPickups = [];
+  const MAX_PICKUPS_PER_TILE = 4;
+  const pickupTileCounts = new Map();
 
   function spawnAmmoPickup(position) {
+    if (perfSettings.disablePickups) return null;
+    if (ammoPickups.length >= MAX_AMMO_PICKUPS) return null;
     const spawnPos = position.clone();
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
+    const tileKey = getTileKeyForPosition(spawnPos);
+    if (!canSpawnPickupInTile(tileKey)) {
+      return null;
+    }
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -1321,18 +1465,28 @@ async function main() {
 
     const pickup = new THREE.Mesh(geometry, material);
     pickup.position.copy(spawnPos);
-    pickup.castShadow = true;
+    pickup.castShadow = !perfSettings.perfMode;
+    pickup.receiveShadow = false;
+    pickup.frustumCulled = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.tileKey = tileKey;
     scene.add(pickup);
     ammoPickups.push(pickup);
+    trackPickupTile(tileKey, 1);
     return pickup;
   }
 
   function spawnFoodPickup(position) {
+    if (perfSettings.disablePickups) return null;
+    if (foodPickups.length >= MAX_FOOD_PICKUPS) return null;
     const spawnPos = position.clone();
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
+    const tileKey = getTileKeyForPosition(spawnPos);
+    if (!canSpawnPickupInTile(tileKey)) {
+      return null;
+    }
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -1345,19 +1499,29 @@ async function main() {
 
     const pickup = new THREE.Mesh(geometry, material);
     pickup.position.copy(spawnPos);
-    pickup.castShadow = true;
+    pickup.castShadow = !perfSettings.perfMode;
+    pickup.receiveShadow = false;
+    pickup.frustumCulled = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
     pickup.userData.type = 'food';
+    pickup.userData.tileKey = tileKey;
     scene.add(pickup);
     foodPickups.push(pickup);
+    trackPickupTile(tileKey, 1);
     return pickup;
   }
 
   function spawnHealthPickup(position) {
+    if (perfSettings.disablePickups) return null;
+    if (healthPickups.length >= MAX_HEALTH_PICKUPS) return null;
     const spawnPos = position.clone();
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
+    const tileKey = getTileKeyForPosition(spawnPos);
+    if (!canSpawnPickupInTile(tileKey)) {
+      return null;
+    }
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -1370,12 +1534,16 @@ async function main() {
 
     const pickup = new THREE.Mesh(geometry, material);
     pickup.position.copy(spawnPos);
-    pickup.castShadow = true;
+    pickup.castShadow = !perfSettings.perfMode;
+    pickup.receiveShadow = false;
+    pickup.frustumCulled = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
     pickup.userData.type = 'health';
+    pickup.userData.tileKey = tileKey;
     scene.add(pickup);
     healthPickups.push(pickup);
+    trackPickupTile(tileKey, 1);
     return pickup;
   }
 
@@ -1390,6 +1558,158 @@ async function main() {
     setStat('health', statsState.health + HEALTH_PICKUP_GAIN, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+
+  function getTileKeyForPosition(position) {
+    if (!position) return null;
+    if (!Number.isFinite(position.x) || !Number.isFinite(position.z)) return null;
+    const tileSize = TILE_SIZE_METERS || 300;
+    const tile = {
+      x: Math.floor(position.x / tileSize),
+      y: Math.floor(-position.z / tileSize)
+    };
+    return `${tile.x},${tile.y}`;
+  }
+
+  function trackPickupTile(tileKey, delta) {
+    if (!tileKey) return;
+    const next = (pickupTileCounts.get(tileKey) || 0) + delta;
+    if (next <= 0) {
+      pickupTileCounts.delete(tileKey);
+    } else {
+      pickupTileCounts.set(tileKey, next);
+    }
+  }
+
+  function canSpawnPickupInTile(tileKey) {
+    if (tileKey) {
+      const tileCount = pickupTileCounts.get(tileKey) || 0;
+      if (tileCount >= MAX_PICKUPS_PER_TILE) return false;
+    }
+    return true;
+  }
+
+  function cleanupPickup(pickup) {
+    if (!pickup) return;
+    if (pickup.parent) {
+      pickup.parent.remove(pickup);
+    }
+    const tileKey = pickup.userData?.tileKey;
+    if (tileKey) {
+      trackPickupTile(tileKey, -1);
+    }
+    disposeObject3D(pickup, { disposeTextures: true });
+  }
+
+  function clearPickups() {
+    for (let i = ammoPickups.length - 1; i >= 0; i -= 1) {
+      cleanupPickup(ammoPickups[i]);
+      ammoPickups.splice(i, 1);
+    }
+    for (let i = foodPickups.length - 1; i >= 0; i -= 1) {
+      cleanupPickup(foodPickups[i]);
+      foodPickups.splice(i, 1);
+    }
+    for (let i = healthPickups.length - 1; i >= 0; i -= 1) {
+      cleanupPickup(healthPickups[i]);
+      healthPickups.splice(i, 1);
+    }
+  }
+
+  function cleanupEntitiesInTiles(evictedKeys) {
+    if (!evictedKeys?.length) return;
+    const keySet = new Set(evictedKeys);
+    for (let i = ammoPickups.length - 1; i >= 0; i -= 1) {
+      const pickup = ammoPickups[i];
+      if (pickup?.userData?.tileKey && keySet.has(pickup.userData.tileKey)) {
+        cleanupPickup(pickup);
+        ammoPickups.splice(i, 1);
+      }
+    }
+    for (let i = foodPickups.length - 1; i >= 0; i -= 1) {
+      const pickup = foodPickups[i];
+      if (pickup?.userData?.tileKey && keySet.has(pickup.userData.tileKey)) {
+        cleanupPickup(pickup);
+        foodPickups.splice(i, 1);
+      }
+    }
+    for (let i = healthPickups.length - 1; i >= 0; i -= 1) {
+      const pickup = healthPickups[i];
+      if (pickup?.userData?.tileKey && keySet.has(pickup.userData.tileKey)) {
+        cleanupPickup(pickup);
+        healthPickups.splice(i, 1);
+      }
+    }
+    monsters = monsters.filter((monster) => {
+      if (!monster?.model) return false;
+      const tileKey = getTileKeyForPosition(monster.model.position);
+      if (tileKey && keySet.has(tileKey)) {
+        cleanupMonster(monster, { dispose: true });
+        return false;
+      }
+      return true;
+    });
+    window.monsters = monsters;
+  }
+
+  function applyPerfModeSettings() {
+    const disableShadows = perfSettings.perfMode;
+    monsters.forEach((monster) => {
+      monster?.model?.traverse?.((child) => {
+        if (!child.isMesh) return;
+        if (!child.userData.shadowDefaults) {
+          child.userData.shadowDefaults = {
+            castShadow: child.castShadow,
+            receiveShadow: child.receiveShadow
+          };
+        }
+        if (disableShadows) {
+          child.castShadow = false;
+          child.receiveShadow = false;
+        } else {
+          child.castShadow = child.userData.shadowDefaults.castShadow;
+          child.receiveShadow = child.userData.shadowDefaults.receiveShadow;
+        }
+        child.frustumCulled = true;
+      });
+    });
+    [...ammoPickups, ...foodPickups, ...healthPickups].forEach((pickup) => {
+      if (!pickup) return;
+      if (!pickup.userData.shadowDefaults) {
+        pickup.userData.shadowDefaults = {
+          castShadow: pickup.castShadow,
+          receiveShadow: pickup.receiveShadow
+        };
+      }
+      if (disableShadows) {
+        pickup.castShadow = false;
+        pickup.receiveShadow = false;
+      } else {
+        pickup.castShadow = pickup.userData.shadowDefaults.castShadow;
+        pickup.receiveShadow = pickup.userData.shadowDefaults.receiveShadow;
+      }
+      pickup.frustumCulled = true;
+    });
+    [iceGun?.mesh, autumnSword?.mesh].forEach((mesh) => {
+      if (!mesh) return;
+      mesh.traverse?.((child) => {
+        if (!child.isMesh) return;
+        if (!child.userData.shadowDefaults) {
+          child.userData.shadowDefaults = {
+            castShadow: child.castShadow,
+            receiveShadow: child.receiveShadow
+          };
+        }
+        if (disableShadows) {
+          child.castShadow = false;
+          child.receiveShadow = false;
+        } else {
+          child.castShadow = child.userData.shadowDefaults.castShadow;
+          child.receiveShadow = child.userData.shadowDefaults.receiveShadow;
+        }
+        child.frustumCulled = true;
+      });
+    });
   }
 
   function spawnIceGunPickup(position) {
@@ -1425,9 +1745,16 @@ async function main() {
   let lastAutumnSwordSpawnAt = performance.now();
   let nextAutumnSwordSpawnDelay = THREE.MathUtils.randFloat(...AUTUMN_SWORD_SPAWN_INTERVAL_RANGE) * 1000;
   let statDecayAccumulator = 0;
+  let aiAccumulator = 0;
+  let pickupCheckAccumulator = 0;
+  let perfOverlayAccumulator = 0;
+  let smoothedFps = 0;
+  const PERF_AI_INTERVAL = 0.18;
+  const PERF_PICKUP_INTERVAL = 0.25;
+  const PERF_OVERLAY_INTERVAL = 0.25;
 
   const isHost = !multiplayer || multiplayer.isHost;
-  if (isHost && !inventoryState.iceGun?.count && iceGun?.mesh && !iceGun.holder) {
+  if (isHost && !perfSettings.disablePickups && !inventoryState.iceGun?.count && iceGun?.mesh && !iceGun.holder) {
     const angle = Math.random() * Math.PI * 2;
     const radius = THREE.MathUtils.randFloat(ICE_GUN_SPAWN_MIN_RADIUS, ICE_GUN_SPAWN_MAX_RADIUS);
     const spawnPos = new THREE.Vector3(
@@ -1439,7 +1766,7 @@ async function main() {
     lastIceGunSpawnAt = performance.now();
     nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
   }
-  if (isHost && !inventoryState.autumnSword?.count && autumnSword?.mesh && !autumnSword.holder) {
+  if (isHost && !perfSettings.disablePickups && !inventoryState.autumnSword?.count && autumnSword?.mesh && !autumnSword.holder) {
     const angle = Math.random() * Math.PI * 2;
     const radius = THREE.MathUtils.randFloat(AUTUMN_SWORD_SPAWN_MIN_RADIUS, AUTUMN_SWORD_SPAWN_MAX_RADIUS);
     const spawnPos = new THREE.Vector3(
@@ -1682,6 +2009,7 @@ async function main() {
 
   const requestMapUpdate = async (location) => {
     if (!location) return;
+    if (perfSettings.disableTileLoading) return;
     const localMeters = tileCache.getLocalMeters(location);
     const tile = tileCache.getTileCoords(localMeters);
     if (!tile) return;
@@ -1695,6 +2023,7 @@ async function main() {
     const evictedKeys = tileCache.evictTiles(tile);
     if (evictedKeys.length) {
       evictedKeys.forEach((key) => groundTiles.removeTile(key));
+      cleanupEntitiesInTiles(evictedKeys);
       rebuildMapFromCache();
     }
 
@@ -2188,6 +2517,16 @@ async function main() {
       return (networkError.timestamp || 0) >= (generalError.timestamp || 0) ? networkError : generalError;
     },
     getAppVersion: () => import.meta.env?.VITE_APP_VERSION || import.meta.env?.VITE_GIT_COMMIT || 'unknown',
+    getPerfOverlayEnabled: () => perfSettings.overlayEnabled,
+    setPerfOverlayEnabled: (enabled) => setPerfOverlayEnabled(enabled),
+    getPerfModeEnabled: () => perfSettings.perfMode,
+    setPerfModeEnabled: (enabled) => setPerfModeEnabled(enabled),
+    getDisableMonsters: () => perfSettings.disableMonsters,
+    setDisableMonsters: (enabled) => setDisableMonsters(enabled),
+    getDisablePickups: () => perfSettings.disablePickups,
+    setDisablePickups: (enabled) => setDisablePickups(enabled),
+    getDisableTileLoading: () => perfSettings.disableTileLoading,
+    setDisableTileLoading: (enabled) => setDisableTileLoading(enabled),
     resetWorldOrigin: () => {
       resetWorldOrigin();
       locationState.originLat = null;
@@ -2247,6 +2586,17 @@ async function main() {
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
     const frameDelta = clock.getDelta();
+    const frameDeltaMs = frameDelta * 1000;
+    const instantFps = frameDelta > 0 ? 1 / frameDelta : 0;
+    smoothedFps = smoothedFps ? smoothedFps * 0.9 + instantFps * 0.1 : instantFps;
+    aiAccumulator += frameDelta;
+    pickupCheckAccumulator += frameDelta;
+    perfOverlayAccumulator += frameDelta;
+    const shouldThinkAI = !perfSettings.perfMode || aiAccumulator >= PERF_AI_INTERVAL;
+    const shouldCheckPickups = !perfSettings.perfMode || pickupCheckAccumulator >= PERF_PICKUP_INTERVAL;
+    if (shouldThinkAI) aiAccumulator = 0;
+    if (shouldCheckPickups) pickupCheckAccumulator = 0;
+
     physicsAccumulator += frameDelta;
     while (physicsAccumulator >= FIXED_DT) {
       // applyGlobalGravity(rapierWorld, window.moon);
@@ -2331,43 +2681,39 @@ async function main() {
       }
     }
 
-    if (now - lastFoodSpawnAt >= nextFoodSpawnDelay) {
+    if (!perfSettings.disablePickups && now - lastFoodSpawnAt >= nextFoodSpawnDelay) {
       lastFoodSpawnAt = now;
       nextFoodSpawnDelay = THREE.MathUtils.randFloat(...FOOD_SPAWN_INTERVAL_RANGE) * 1000;
-      if (foodPickups.length < MAX_FOOD_PICKUPS) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = THREE.MathUtils.randFloat(FOOD_SPAWN_MIN_RADIUS, FOOD_SPAWN_MAX_RADIUS);
-        const spawnPos = new THREE.Vector3(
-          playerModel.position.x + Math.cos(angle) * radius,
-          0,
-          playerModel.position.z + Math.sin(angle) * radius
-        );
-        const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-        if (Number.isFinite(terrainHeight)) {
-          spawnFoodPickup(spawnPos);
-        }
+      const angle = Math.random() * Math.PI * 2;
+      const radius = THREE.MathUtils.randFloat(FOOD_SPAWN_MIN_RADIUS, FOOD_SPAWN_MAX_RADIUS);
+      const spawnPos = new THREE.Vector3(
+        playerModel.position.x + Math.cos(angle) * radius,
+        0,
+        playerModel.position.z + Math.sin(angle) * radius
+      );
+      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+      if (Number.isFinite(terrainHeight)) {
+        spawnFoodPickup(spawnPos);
       }
     }
 
-    if (now - lastHealthSpawnAt >= nextHealthSpawnDelay) {
+    if (!perfSettings.disablePickups && now - lastHealthSpawnAt >= nextHealthSpawnDelay) {
       lastHealthSpawnAt = now;
       nextHealthSpawnDelay = THREE.MathUtils.randFloat(...HEALTH_SPAWN_INTERVAL_RANGE) * 1000;
-      if (healthPickups.length < MAX_HEALTH_PICKUPS) {
-        const angle = Math.random() * Math.PI * 2;
-        const radius = THREE.MathUtils.randFloat(FOOD_SPAWN_MIN_RADIUS, FOOD_SPAWN_MAX_RADIUS);
-        const spawnPos = new THREE.Vector3(
-          playerModel.position.x + Math.cos(angle) * radius,
-          0,
-          playerModel.position.z + Math.sin(angle) * radius
-        );
-        const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-        if (Number.isFinite(terrainHeight)) {
-          spawnHealthPickup(spawnPos);
-        }
+      const angle = Math.random() * Math.PI * 2;
+      const radius = THREE.MathUtils.randFloat(FOOD_SPAWN_MIN_RADIUS, FOOD_SPAWN_MAX_RADIUS);
+      const spawnPos = new THREE.Vector3(
+        playerModel.position.x + Math.cos(angle) * radius,
+        0,
+        playerModel.position.z + Math.sin(angle) * radius
+      );
+      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+      if (Number.isFinite(terrainHeight)) {
+        spawnHealthPickup(spawnPos);
       }
     }
 
-    if (now - lastIceGunSpawnAt >= nextIceGunSpawnDelay) {
+    if (!perfSettings.disablePickups && now - lastIceGunSpawnAt >= nextIceGunSpawnDelay) {
       lastIceGunSpawnAt = now;
       nextIceGunSpawnDelay = THREE.MathUtils.randFloat(...ICE_GUN_SPAWN_INTERVAL_RANGE) * 1000;
       const isHost = !multiplayer || multiplayer.isHost;
@@ -2385,7 +2731,7 @@ async function main() {
       }
     }
 
-    if (now - lastAutumnSwordSpawnAt >= nextAutumnSwordSpawnDelay) {
+    if (!perfSettings.disablePickups && now - lastAutumnSwordSpawnAt >= nextAutumnSwordSpawnDelay) {
       lastAutumnSwordSpawnAt = now;
       nextAutumnSwordSpawnDelay = THREE.MathUtils.randFloat(...AUTUMN_SWORD_SPAWN_INTERVAL_RANGE) * 1000;
       const isHost = !multiplayer || multiplayer.isHost;
@@ -2403,67 +2749,81 @@ async function main() {
       }
     }
 
-    const pickupTime = performance.now() * 0.002;
-    for (let i = ammoPickups.length - 1; i >= 0; i--) {
-      const pickup = ammoPickups[i];
-      if (!pickup) continue;
+    if (!perfSettings.disablePickups) {
+      const pickupTime = performance.now() * 0.002;
+      for (let i = ammoPickups.length - 1; i >= 0; i--) {
+        const pickup = ammoPickups[i];
+        if (!pickup) continue;
 
-      if (pickup.userData.baseY === undefined) {
-        pickup.userData.baseY = pickup.position.y;
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        pickup.rotation.y += 0.03;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+        if (shouldCheckPickups) {
+          const distance = playerModel.position.distanceTo(pickup.position);
+          if (distance < 1.2) {
+            playerControls.addAmmo(AMMO_PICKUP_AMOUNT);
+            cleanupPickup(pickup);
+            ammoPickups.splice(i, 1);
+          } else if (distance > PICKUP_DESPAWN_DISTANCE) {
+            cleanupPickup(pickup);
+            ammoPickups.splice(i, 1);
+          }
+        }
       }
 
-      pickup.rotation.y += 0.03;
-      const phase = pickup.userData.phase ?? 0;
-      pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+      for (let i = foodPickups.length - 1; i >= 0; i--) {
+        const pickup = foodPickups[i];
+        if (!pickup) continue;
 
-      if (playerModel.position.distanceTo(pickup.position) < 1.2) {
-        playerControls.addAmmo(AMMO_PICKUP_AMOUNT);
-        scene.remove(pickup);
-        pickup.geometry?.dispose();
-        pickup.material?.dispose();
-        ammoPickups.splice(i, 1);
-      }
-    }
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
 
-    for (let i = foodPickups.length - 1; i >= 0; i--) {
-      const pickup = foodPickups[i];
-      if (!pickup) continue;
+        pickup.rotation.y += 0.03;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
-      if (pickup.userData.baseY === undefined) {
-        pickup.userData.baseY = pickup.position.y;
-      }
-
-      pickup.rotation.y += 0.03;
-      const phase = pickup.userData.phase ?? 0;
-      pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
-
-      if (playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
-        applyFoodPickupEffects();
-        scene.remove(pickup);
-        pickup.geometry?.dispose();
-        pickup.material?.dispose();
-        foodPickups.splice(i, 1);
-      }
-    }
-
-    for (let i = healthPickups.length - 1; i >= 0; i--) {
-      const pickup = healthPickups[i];
-      if (!pickup) continue;
-
-      if (pickup.userData.baseY === undefined) {
-        pickup.userData.baseY = pickup.position.y;
+        if (shouldCheckPickups) {
+          const distance = playerModel.position.distanceTo(pickup.position);
+          if (distance < PICKUP_RADIUS) {
+            applyFoodPickupEffects();
+            cleanupPickup(pickup);
+            foodPickups.splice(i, 1);
+          } else if (distance > PICKUP_DESPAWN_DISTANCE) {
+            cleanupPickup(pickup);
+            foodPickups.splice(i, 1);
+          }
+        }
       }
 
-      pickup.rotation.y += 0.03;
-      const phase = pickup.userData.phase ?? 0;
-      pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+      for (let i = healthPickups.length - 1; i >= 0; i--) {
+        const pickup = healthPickups[i];
+        if (!pickup) continue;
 
-      if (playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
-        applyHealthPickupEffects();
-        scene.remove(pickup);
-        pickup.geometry?.dispose();
-        pickup.material?.dispose();
-        healthPickups.splice(i, 1);
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        pickup.rotation.y += 0.03;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+        if (shouldCheckPickups) {
+          const distance = playerModel.position.distanceTo(pickup.position);
+          if (distance < PICKUP_RADIUS) {
+            applyHealthPickupEffects();
+            cleanupPickup(pickup);
+            healthPickups.splice(i, 1);
+          } else if (distance > PICKUP_DESPAWN_DISTANCE) {
+            cleanupPickup(pickup);
+            healthPickups.splice(i, 1);
+          }
+        }
       }
     }
 
@@ -2492,7 +2852,6 @@ async function main() {
       lastControlSend = now;
     }
 
-    updateHealthUI();
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
       window.onPlayerDeath?.();
@@ -2515,29 +2874,29 @@ async function main() {
     });
 
     const isHost = !multiplayer || multiplayer.isHost;
-    if (isHost) {
+    if (isHost && !perfSettings.disableMonsters) {
       ensureMonsters();
-      const nowMs = Date.now();
       monsters.forEach(monster => {
         if (!monster) return;
-        if (monster.isDead) {
-          const slotId = monster.id;
-          if (!respawnTimers.has(slotId)) {
-            cleanupMonster(monster);
-            monsters = monsters.filter(entry => entry.id !== slotId);
-            window.monsters = monsters;
-            const delay = THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
-            const timer = setTimeout(() => {
-              respawnTimers.delete(slotId);
-              spawnMonsterInSlot(slotId, getRandomMonsterModel());
-            }, delay);
-            respawnTimers.set(slotId, timer);
-          }
+        const slotId = monster.id;
+        const distance = playerModel.position.distanceTo(monster.model.position);
+        if (distance > MONSTER_DESPAWN_DISTANCE) {
+          cleanupMonster(monster, { dispose: true });
+          monsters = monsters.filter(entry => entry.id !== slotId);
+          window.monsters = monsters;
+          scheduleMonsterRespawn(slotId);
           return;
         }
-        monster.updateAI(mixerDelta, playerModel, otherPlayers);
+        if (monster.isDead) {
+          cleanupMonster(monster, { dispose: true });
+          monsters = monsters.filter(entry => entry.id !== slotId);
+          window.monsters = monsters;
+          scheduleMonsterRespawn(slotId);
+          return;
+        }
+        monster.updateAI(mixerDelta, playerModel, otherPlayers, { skipThink: !shouldThinkAI });
       });
-    } else {
+    } else if (!perfSettings.disableMonsters) {
       monsters.forEach(monster => {
         monster?.update(mixerDelta);
       });
@@ -2673,6 +3032,51 @@ async function main() {
     updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioManager, multiplayer });
 
     breakManager.update();
+
+    if ((perfSettings.overlayEnabled || window.DEBUG_PERF) && perfOverlayAccumulator >= PERF_OVERLAY_INTERVAL) {
+      perfOverlayAccumulator = 0;
+      const info = renderer.info || {};
+      const memory = info.memory || {};
+      const render = info.render || {};
+      const monstersCount = monsters.filter(monster => monster && !monster.isDead).length;
+      const pickupsCount = ammoPickups.length + foodPickups.length + healthPickups.length;
+      const weaponsInWorld = [iceGun, autumnSword].filter(weapon => weapon?.mesh?.visible && !weapon.holder).length;
+      const activeTiles = groundTiles.tiles?.size ?? 0;
+      const otherPlayersCount = Object.keys(otherPlayers).length;
+      const heapBytes = performance?.memory?.usedJSHeapSize;
+      const heapMb = Number.isFinite(heapBytes) ? heapBytes / (1024 * 1024) : null;
+
+      debugPerf.fps = smoothedFps;
+      debugPerf.frameMs = frameDeltaMs;
+      debugPerf.info = {
+        geometries: memory.geometries ?? 0,
+        textures: memory.textures ?? 0,
+        calls: render.calls ?? 0,
+        triangles: render.triangles ?? 0
+      };
+      debugPerf.counts = {
+        monsters: monstersCount,
+        pickups: pickupsCount,
+        weapons: weaponsInWorld,
+        tiles: activeTiles,
+        otherPlayers: otherPlayersCount
+      };
+      debugPerf.heap = heapMb;
+
+      if (perfSettings.overlayEnabled) {
+        const lines = [
+          `FPS ${smoothedFps.toFixed(1)} | ${frameDeltaMs.toFixed(1)} ms`,
+          `Geo ${debugPerf.info.geometries} Tex ${debugPerf.info.textures}`,
+          `Calls ${debugPerf.info.calls} Tris ${debugPerf.info.triangles}`,
+          `Monsters ${monstersCount} Pickups ${pickupsCount} Weapons ${weaponsInWorld}`,
+          `Tiles ${activeTiles} Others ${otherPlayersCount}`
+        ];
+        if (heapMb != null) {
+          lines.push(`Heap ${heapMb.toFixed(1)} MB`);
+        }
+        perfOverlay.textContent = lines.join('\n');
+      }
+    }
 
     renderer.render(scene, camera);
   }
