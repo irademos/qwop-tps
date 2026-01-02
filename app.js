@@ -2030,8 +2030,8 @@ async function main() {
 
     yesBtn.onclick = () => {
       clearInterval(interval);
-      respawnPlayer();
       hideGameOver();
+      respawnPlayer();
     };
 
     noBtn.onclick = () => {
@@ -2042,6 +2042,9 @@ async function main() {
 
   function hideGameOver() {
     gameOverOverlay.classList.add('hidden');
+    continueSection.classList.add('hidden');
+    gameOverMessage.classList.add('hidden');
+    gameOverMessage.style.opacity = 0;
   }
 
   function respawnPlayer() {
