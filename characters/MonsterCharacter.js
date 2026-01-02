@@ -31,7 +31,7 @@ export class MonsterCharacter extends CharacterBase {
   }
 
   get body() {
-    return this.model.userData.rb;
+    return this.model?.userData?.rb ?? null;
   }
 
   setMode(mode) {
@@ -74,6 +74,7 @@ export class MonsterCharacter extends CharacterBase {
 
   updateAI(deltaTime, playerModel, otherPlayers) {
     const now = Date.now();
+    if (!this.model) return;
     const body = this.body;
     if (!body) return;
 
@@ -86,7 +87,7 @@ export class MonsterCharacter extends CharacterBase {
     const allPlayers = [
       { id: 'local', model: playerModel },
       ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p.model }))
-    ];
+    ].filter(entry => entry.model);
 
     let closestPlayer = null;
     let closestDistance = Infinity;

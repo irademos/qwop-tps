@@ -972,7 +972,7 @@ async function main() {
           spawnMonsterInSlot(slotId, state.modelPath, current);
         }
         const monster = monsters.find(entry => entry.id === slotId);
-        if (!monster) return;
+        if (!monster?.model) return;
         if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
           monster.model.position.set(px, py, pz);
           monster.body?.setTranslation({ x: px, y: py, z: pz }, true);
@@ -2701,7 +2701,7 @@ async function main() {
     const mixerDelta = mixerClock.getDelta();
 
     Object.values(otherPlayers).forEach(p => {
-      p.model.userData.mixer?.update(mixerDelta);
+      p.model?.userData?.mixer?.update(mixerDelta);
     });
 
     const isHost = !multiplayer || multiplayer.isHost;
@@ -2709,7 +2709,7 @@ async function main() {
       ensureMonsters();
       const nowMs = Date.now();
       monsters.forEach(monster => {
-        if (!monster) return;
+        if (!monster || !monster.model) return;
         if (monster.isDead) {
           const slotId = monster.id;
           if (!respawnTimers.has(slotId)) {
@@ -2737,7 +2737,7 @@ async function main() {
       });
     } else {
       monsters.forEach(monster => {
-        monster?.update(mixerDelta);
+        monster?.model && monster.update(mixerDelta);
       });
     }
 
