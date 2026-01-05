@@ -261,15 +261,34 @@ async function main() {
 
   function handleIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
+    // Network authority expectations:
+    // - entityControl: client -> host (peerId must match data.sourceId).
+    // - entityStates: host -> clients.
+    // - entitySnapshot: previous host -> new host during handoff.
+    // - entityStateRequest: host handoff request (peerId must match data.requesterId).
+    // - presence/projectile/grab/grabMove: sender is peerId; any embedded ids must match.
+    // - inventoryDrop/dropPickup: client -> host.
+    const hostId = multiplayer?.currentHostId;
+    const isFromHost = hostId && peerId === hostId;
+    const isFromClient = !hostId || peerId !== hostId;
 
     if (data.type === 'entityControl') {
-      if (multiplayer?.isHost && data.id && data.state && data.sourceId) {
+      if (!multiplayer?.isHost || !isFromClient) {
+        return;
+      }
+      if (data.sourceId && data.sourceId !== peerId) {
+        return;
+      }
+      if (data.id && data.state && data.sourceId) {
         updateAuthoritativeState(data.id, data.state, data.sourceId);
       }
       return;
     }
 
     if (data.type === 'entityStates' && data.states) {
+      if (!isFromHost) {
+        return;
+      }
       Object.entries(data.states).forEach(([id, entry]) => {
         if (!entry) return;
         const { sourceId, ...state } = entry;
@@ -297,6 +316,9 @@ async function main() {
     }
 
     if (data.type === 'entityStateRequest' && data.requesterId && data.previousHostId === multiplayer?.getId?.()) {
+      if (data.requesterId !== peerId) {
+        return;
+      }
       const snapshot = serializeAuthoritativeStates();
       if (Object.keys(snapshot).length > 0) {
         multiplayer.sendTo(data.requesterId, { type: 'entitySnapshot', states: snapshot });
@@ -305,7 +327,10 @@ async function main() {
     }
 
     if (data.type === 'presence') {
-      const remoteId = data.id || peerId;
+      if (data.id && data.id !== peerId) {
+        return;
+      }
+      const remoteId = peerId;
       const desiredModel = data.model || DEFAULT_CHARACTER_MODEL;
       const now = performance.now();
       if (!remotePresenceMeta[remoteId]) {
@@ -448,11 +473,15 @@ async function main() {
     }
 
     if (data.type === 'projectile') {
+      if (data.id && data.id !== peerId) {
+        return;
+      }
+      const shooterId = peerId;
       const position = new THREE.Vector3(...data.position);
       const direction = new THREE.Vector3(...data.direction);
-      spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      spawnProjectileWithPerfFlags(scene, projectiles, position, direction, shooterId);
 
-      const shooter = otherPlayers[data.id];
+      const shooter = otherPlayers[shooterId];
       if (shooter) {
         const actions = shooter.model.userData.actions;
         const current = shooter.model.userData.currentAction;
@@ -472,6 +501,9 @@ async function main() {
     }
 
     if (data.type === 'inventoryDrop' && multiplayer?.isHost) {
+      if (!isFromClient) {
+        return;
+      }
       const drops = Array.isArray(data.drops) ? data.drops : [];
       drops.forEach(drop => {
         if (!drop?.id || !Array.isArray(drop.position)) return;
@@ -485,6 +517,9 @@ async function main() {
     }
 
     if (data.type === 'dropPickup' && multiplayer?.isHost) {
+      if (!isFromClient) {
+        return;
+      }
       if (data.dropId) {
         removeDroppedAmmoPickup(data.dropId);
       }
@@ -492,8 +527,12 @@ async function main() {
     }
 
     if (data.type === 'grab') {
+      if (data.from && data.from !== peerId) {
+        return;
+      }
+      const senderId = peerId;
       if (data.target === multiplayer.getId()) {
-        playerControls?.setGrabbed(data.active, data.from);
+        playerControls?.setGrabbed(data.active, senderId);
       } else {
         const targetPlayer = otherPlayers[data.target];
         if (targetPlayer) {
@@ -504,8 +543,15 @@ async function main() {
     }
 
     if (data.type === 'grabMove') {
+      if (data.from && data.from !== peerId) {
+        return;
+      }
+      const senderId = peerId;
       const pos = new THREE.Vector3(...data.position);
       if (data.target === multiplayer.getId()) {
+        if (playerControls?.grabberId && playerControls.grabberId !== senderId) {
+          return;
+        }
         playerControls?.updateGrabbedPosition(data.position);
       } else {
         const targetPlayer = otherPlayers[data.target];
