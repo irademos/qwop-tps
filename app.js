@@ -261,15 +261,112 @@ async function main() {
 
   function handleIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
+    const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
+    const isFiniteNumber = value => Number.isFinite(value);
+    const isVector3Array = value => Array.isArray(value)
+      && value.length === 3
+      && value.every(isFiniteNumber);
+
+    const logInvalidPayload = (typeLabel, payload) => {
+      console.warn(`[net] Dropping invalid ${typeLabel} payload`, payload);
+    };
+
+    const isPresenceMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'presence') return false;
+      if (typeof payload.name !== 'string' || typeof payload.model !== 'string') return false;
+      if (payload.id != null && typeof payload.id !== 'string') return false;
+      if (payload.action != null && typeof payload.action !== 'string') return false;
+      const numberFields = ['lat', 'lon', 'x', 'y', 'z', 'rotation', 'heading'];
+      if (numberFields.some(field => payload[field] != null && !isFiniteNumber(payload[field]))) return false;
+      if (payload.worldAnchor != null) {
+        if (!isObject(payload.worldAnchor)) return false;
+        const { centerLat, centerLon } = payload.worldAnchor;
+        if (centerLat != null && !isFiniteNumber(centerLat)) return false;
+        if (centerLon != null && !isFiniteNumber(centerLon)) return false;
+      }
+      return true;
+    };
+
+    const isEntityControlMessage = payload => isObject(payload)
+      && payload.type === 'entityControl'
+      && typeof payload.id === 'string'
+      && typeof payload.sourceId === 'string'
+      && isObject(payload.state);
+
+    const isEntityStatesMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'entityStates' || !isObject(payload.states)) return false;
+      return Object.entries(payload.states).every(([, entry]) => {
+        if (!isObject(entry)) return false;
+        return entry.sourceId == null || typeof entry.sourceId === 'string';
+      });
+    };
+
+    const isEntitySnapshotMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'entitySnapshot' || !isObject(payload.states)) return false;
+      return Object.entries(payload.states).every(([, entry]) => {
+        if (!isObject(entry)) return false;
+        return entry.sourceId == null || typeof entry.sourceId === 'string';
+      });
+    };
+
+    const isEntityStateRequestMessage = payload => isObject(payload)
+      && payload.type === 'entityStateRequest'
+      && typeof payload.requesterId === 'string'
+      && typeof payload.previousHostId === 'string';
+
+    const isProjectileMessage = payload => isObject(payload)
+      && payload.type === 'projectile'
+      && typeof payload.id === 'string'
+      && isVector3Array(payload.position)
+      && isVector3Array(payload.direction);
+
+    const isInventoryDropMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'inventoryDrop' || !Array.isArray(payload.drops)) return false;
+      return payload.drops.every(drop => {
+        if (!isObject(drop)) return false;
+        if (typeof drop.id !== 'string') return false;
+        if (!isVector3Array(drop.position)) return false;
+        if (drop.amount != null && !isFiniteNumber(drop.amount)) return false;
+        return true;
+      });
+    };
+
+    const isDropPickupMessage = payload => isObject(payload)
+      && payload.type === 'dropPickup'
+      && typeof payload.dropId === 'string';
+
+    const isGrabMessage = payload => isObject(payload)
+      && payload.type === 'grab'
+      && typeof payload.target === 'string'
+      && typeof payload.active === 'boolean'
+      && (payload.from == null || typeof payload.from === 'string');
+
+    const isGrabMoveMessage = payload => isObject(payload)
+      && payload.type === 'grabMove'
+      && typeof payload.target === 'string'
+      && isVector3Array(payload.position);
+
+    if (!isObject(data)) {
+      logInvalidPayload('payload', data);
+      return;
+    }
 
     if (data.type === 'entityControl') {
+      if (!isEntityControlMessage(data)) {
+        logInvalidPayload('entityControl', data);
+        return;
+      }
       if (multiplayer?.isHost && data.id && data.state && data.sourceId) {
         updateAuthoritativeState(data.id, data.state, data.sourceId);
       }
       return;
     }
 
-    if (data.type === 'entityStates' && data.states) {
+    if (data.type === 'entityStates') {
+      if (!isEntityStatesMessage(data)) {
+        logInvalidPayload('entityStates', data);
+        return;
+      }
       Object.entries(data.states).forEach(([id, entry]) => {
         if (!entry) return;
         const { sourceId, ...state } = entry;
@@ -285,7 +382,11 @@ async function main() {
       return;
     }
 
-    if (data.type === 'entitySnapshot' && data.states && multiplayer?.isHost) {
+    if (data.type === 'entitySnapshot' && multiplayer?.isHost) {
+      if (!isEntitySnapshotMessage(data)) {
+        logInvalidPayload('entitySnapshot', data);
+        return;
+      }
       authoritativeEntityStates.clear();
       Object.entries(data.states).forEach(([id, entry]) => {
         if (!entry) return;
@@ -296,7 +397,14 @@ async function main() {
       return;
     }
 
-    if (data.type === 'entityStateRequest' && data.requesterId && data.previousHostId === multiplayer?.getId?.()) {
+    if (data.type === 'entityStateRequest') {
+      if (!isEntityStateRequestMessage(data)) {
+        logInvalidPayload('entityStateRequest', data);
+        return;
+      }
+      if (data.previousHostId !== multiplayer?.getId?.()) {
+        return;
+      }
       const snapshot = serializeAuthoritativeStates();
       if (Object.keys(snapshot).length > 0) {
         multiplayer.sendTo(data.requesterId, { type: 'entitySnapshot', states: snapshot });
@@ -305,6 +413,10 @@ async function main() {
     }
 
     if (data.type === 'presence') {
+      if (!isPresenceMessage(data)) {
+        logInvalidPayload('presence', data);
+        return;
+      }
       const remoteId = data.id || peerId;
       const desiredModel = data.model || DEFAULT_CHARACTER_MODEL;
       const now = performance.now();
@@ -448,6 +560,10 @@ async function main() {
     }
 
     if (data.type === 'projectile') {
+      if (!isProjectileMessage(data)) {
+        logInvalidPayload('projectile', data);
+        return;
+      }
       const position = new THREE.Vector3(...data.position);
       const direction = new THREE.Vector3(...data.direction);
       spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
@@ -472,6 +588,10 @@ async function main() {
     }
 
     if (data.type === 'inventoryDrop' && multiplayer?.isHost) {
+      if (!isInventoryDropMessage(data)) {
+        logInvalidPayload('inventoryDrop', data);
+        return;
+      }
       const drops = Array.isArray(data.drops) ? data.drops : [];
       drops.forEach(drop => {
         if (!drop?.id || !Array.isArray(drop.position)) return;
@@ -485,6 +605,10 @@ async function main() {
     }
 
     if (data.type === 'dropPickup' && multiplayer?.isHost) {
+      if (!isDropPickupMessage(data)) {
+        logInvalidPayload('dropPickup', data);
+        return;
+      }
       if (data.dropId) {
         removeDroppedAmmoPickup(data.dropId);
       }
@@ -492,6 +616,10 @@ async function main() {
     }
 
     if (data.type === 'grab') {
+      if (!isGrabMessage(data)) {
+        logInvalidPayload('grab', data);
+        return;
+      }
       if (data.target === multiplayer.getId()) {
         playerControls?.setGrabbed(data.active, data.from);
       } else {
@@ -504,6 +632,10 @@ async function main() {
     }
 
     if (data.type === 'grabMove') {
+      if (!isGrabMoveMessage(data)) {
+        logInvalidPayload('grabMove', data);
+        return;
+      }
       const pos = new THREE.Vector3(...data.position);
       if (data.target === multiplayer.getId()) {
         playerControls?.updateGrabbedPosition(data.position);

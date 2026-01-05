@@ -8,6 +8,20 @@ import {
   onDisconnect
 } from 'firebase/database';
 
+const VALID_MESSAGE_TYPES = new Set([
+  'presence',
+  'entityControl',
+  'entityStates',
+  'entitySnapshot',
+  'entityStateRequest',
+  'projectile',
+  'monster',
+  'inventoryDrop',
+  'dropPickup',
+  'grab',
+  'grabMove'
+]);
+
 export class Multiplayer {
   constructor(playerName, onPeerData) {
     this.connections = {};
@@ -181,6 +195,11 @@ export class Multiplayer {
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
       conn.on('data', data => {
+        const isObjectPayload = data && typeof data === 'object' && !Array.isArray(data);
+        if (!isObjectPayload) {
+          console.warn('Dropping non-object peer payload', data);
+          return;
+        }
         if (data?.type === 'ping') {
           conn.send({ type: 'pong', ts: data.ts || Date.now() });
           return;
@@ -193,6 +212,10 @@ export class Multiplayer {
             this.lastPingAt = Date.now();
             this.onPingUpdate?.(rtt);
           }
+          return;
+        }
+        if (typeof data.type !== 'string' || !VALID_MESSAGE_TYPES.has(data.type)) {
+          console.warn('Dropping unknown peer payload type', data);
           return;
         }
         this.onPeerData(conn.peer, data);
