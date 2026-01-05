@@ -21,6 +21,11 @@ export class Multiplayer {
     this.lastPingMs = null;
     this.lastPingAt = null;
     this.lastError = null;
+
+    this.resetDiagnosticsWindow();
+    this.diagnosticsIntervalId = setInterval(() => {
+      this.logDiagnosticsSummary();
+    }, 10000);
     
     this.initPeer(); // Start async setup
   }
@@ -181,8 +186,9 @@ export class Multiplayer {
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
       conn.on('data', data => {
+        this.recordReceived(data);
         if (data?.type === 'ping') {
-          conn.send({ type: 'pong', ts: data.ts || Date.now() });
+          this.sendOnConnection(conn, { type: 'pong', ts: data.ts || Date.now() });
           return;
         }
         if (data?.type === 'pong') {
@@ -290,9 +296,9 @@ export class Multiplayer {
     Object.values(this.connections).forEach(conn => {
       if (conn && typeof conn.send === 'function') {
         if (conn.open) {
-          conn.send(data);
+          this.sendOnConnection(conn, data);
         } else if (typeof conn.once === 'function') {
-          conn.once('open', () => conn.send(data));
+          conn.once('open', () => this.sendOnConnection(conn, data));
         } else {
           console.warn("Invalid connection object", conn);
         }
@@ -313,11 +319,11 @@ export class Multiplayer {
     const existing = this.connections[peerId];
     if (existing && typeof existing.send === 'function') {
       if (existing.open) {
-        existing.send(data);
+        this.sendOnConnection(existing, data);
         return;
       }
       if (typeof existing.once === 'function') {
-        existing.once('open', () => existing.send(data));
+        existing.once('open', () => this.sendOnConnection(existing, data));
         return;
       }
     }
@@ -326,7 +332,7 @@ export class Multiplayer {
       const conn = this.peer.connect(peerId);
       this.setupConnection(conn);
       if (typeof conn.once === 'function') {
-        conn.once('open', () => conn.send(data));
+        conn.once('open', () => this.sendOnConnection(conn, data));
       }
     } catch (err) {
       console.warn(`Failed to send direct message to ${peerId}:`, err);
@@ -354,7 +360,7 @@ export class Multiplayer {
       if (!conn.open) return;
       const ts = Date.now();
       this.pendingPings[conn.peer] = ts;
-      conn.send({ type: 'ping', ts });
+      this.sendOnConnection(conn, { type: 'ping', ts });
     }, 8000);
     conn.pingIntervalId = intervalId;
   }
@@ -390,5 +396,90 @@ export class Multiplayer {
         this.recordError(err);
       }
     });
+  }
+
+  resetDiagnosticsWindow() {
+    this.diagnostics = {
+      windowStartedAt: Date.now(),
+      sentCount: 0,
+      sentBytes: 0,
+      receivedCount: 0,
+      receivedBytes: 0,
+      sentByType: {},
+      receivedByType: {}
+    };
+  }
+
+  getDataType(data) {
+    return data?.type || 'unknown';
+  }
+
+  getDataSize(data) {
+    if (data == null) return 0;
+    if (data instanceof ArrayBuffer) {
+      return data.byteLength;
+    }
+    if (ArrayBuffer.isView?.(data)) {
+      return data.byteLength || 0;
+    }
+    if (typeof data === 'string') {
+      return new TextEncoder().encode(data).length;
+    }
+    try {
+      return new TextEncoder().encode(JSON.stringify(data)).length;
+    } catch (err) {
+      console.warn('Unable to serialize data for diagnostics size', err);
+      return 0;
+    }
+  }
+
+  recordSent(data) {
+    const bytes = this.getDataSize(data);
+    const type = this.getDataType(data);
+    this.diagnostics.sentCount += 1;
+    this.diagnostics.sentBytes += bytes;
+    if (!this.diagnostics.sentByType[type]) {
+      this.diagnostics.sentByType[type] = { count: 0, bytes: 0 };
+    }
+    this.diagnostics.sentByType[type].count += 1;
+    this.diagnostics.sentByType[type].bytes += bytes;
+  }
+
+  recordReceived(data) {
+    const bytes = this.getDataSize(data);
+    const type = this.getDataType(data);
+    this.diagnostics.receivedCount += 1;
+    this.diagnostics.receivedBytes += bytes;
+    if (!this.diagnostics.receivedByType[type]) {
+      this.diagnostics.receivedByType[type] = { count: 0, bytes: 0 };
+    }
+    this.diagnostics.receivedByType[type].count += 1;
+    this.diagnostics.receivedByType[type].bytes += bytes;
+  }
+
+  sendOnConnection(conn, data) {
+    conn.send(data);
+    this.recordSent(data);
+  }
+
+  formatTypeSummary(byType) {
+    const entries = Object.entries(byType);
+    if (entries.length === 0) return 'none';
+    const top = entries
+      .sort(([, a], [, b]) => b.bytes - a.bytes)
+      .slice(0, 3)
+      .map(([type, stats]) => `${type}:${stats.count}/${stats.bytes}b`);
+    return top.join(', ');
+  }
+
+  logDiagnosticsSummary() {
+    const elapsedMs = Date.now() - this.diagnostics.windowStartedAt;
+    console.log('📊 Multiplayer diagnostics (last window):');
+    console.log(`⏱️ Window: ${(elapsedMs / 1000).toFixed(1)}s`);
+    console.log(`⬆️ Sent: ${this.diagnostics.sentCount} msgs / ${this.diagnostics.sentBytes} bytes`);
+    console.log(`⬇️ Received: ${this.diagnostics.receivedCount} msgs / ${this.diagnostics.receivedBytes} bytes`);
+    console.log(`⬆️ Sent types: ${this.formatTypeSummary(this.diagnostics.sentByType)}`);
+    console.log(`⬇️ Received types: ${this.formatTypeSummary(this.diagnostics.receivedByType)}`);
+    this.resetDiagnosticsWindow();
   }
 }
