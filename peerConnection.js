@@ -123,8 +123,9 @@ export class Multiplayer {
         console.log("My ID:", this.id);
         console.log("Valid Peers (more recent first):", validPeerIds);
 
-        // The latest joined player becomes the host
-        const hostPeerId = validPeerIds[0];
+        // Keep existing host if still connected; otherwise pick the most recent join.
+        const currentHostStillValid = this.currentHostId && validPeerIds.includes(this.currentHostId);
+        const hostPeerId = currentHostStillValid ? this.currentHostId : validPeerIds[0];
         const previousHostId = this.currentHostId;
         this.currentHostId = hostPeerId;
         this.isHost = (hostPeerId === this.id);
