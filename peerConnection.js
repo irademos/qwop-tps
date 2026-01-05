@@ -286,13 +286,25 @@ export class Multiplayer {
     this.voiceAudios[peerId] = { audio, stream };
   }
 
+  sendWithMetrics(conn, data) {
+    let payload = data;
+    if (!payload || typeof payload !== 'object') {
+      payload = { payload };
+    }
+    if (!payload.type) {
+      console.warn('Outgoing multiplayer message missing type; defaulting to "unknown".', payload);
+      payload = { ...payload, type: 'unknown' };
+    }
+    conn.send(payload);
+  }
+
   send(data) {
     Object.values(this.connections).forEach(conn => {
       if (conn && typeof conn.send === 'function') {
         if (conn.open) {
-          conn.send(data);
+          this.sendWithMetrics(conn, data);
         } else if (typeof conn.once === 'function') {
-          conn.once('open', () => conn.send(data));
+          conn.once('open', () => this.sendWithMetrics(conn, data));
         } else {
           console.warn("Invalid connection object", conn);
         }
@@ -313,11 +325,11 @@ export class Multiplayer {
     const existing = this.connections[peerId];
     if (existing && typeof existing.send === 'function') {
       if (existing.open) {
-        existing.send(data);
+        this.sendWithMetrics(existing, data);
         return;
       }
       if (typeof existing.once === 'function') {
-        existing.once('open', () => existing.send(data));
+        existing.once('open', () => this.sendWithMetrics(existing, data));
         return;
       }
     }
@@ -326,7 +338,7 @@ export class Multiplayer {
       const conn = this.peer.connect(peerId);
       this.setupConnection(conn);
       if (typeof conn.once === 'function') {
-        conn.once('open', () => conn.send(data));
+        conn.once('open', () => this.sendWithMetrics(conn, data));
       }
     } catch (err) {
       console.warn(`Failed to send direct message to ${peerId}:`, err);
