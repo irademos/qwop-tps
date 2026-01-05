@@ -5,7 +5,8 @@ import {
   remove,
   onValue,
   get,
-  onDisconnect
+  onDisconnect,
+  serverTimestamp
 } from 'firebase/database';
 
 export class Multiplayer {
@@ -77,7 +78,7 @@ export class Multiplayer {
       await set(peerRef, {
         name: this.playerName,
         roomId: assignedRoom,
-        timestamp: Date.now()
+        timestamp: serverTimestamp()
       });
 
       // Setup server-side disconnection cleanup
@@ -101,9 +102,18 @@ export class Multiplayer {
         // Filter for only currently active peer IDs
         const validPeerIds = allPeerIds.filter(pid => activePeers[pid]);
 
+        const getPeerTimestamp = peerId => {
+          const timestamp = activePeers[peerId]?.timestamp;
+          return typeof timestamp === 'number' ? timestamp : 0;
+        };
+
         // Sort by join timestamp so the most recent becomes host
         validPeerIds.sort((a, b) => {
-          return activePeers[b]?.timestamp - activePeers[a]?.timestamp;
+          const timestampDiff = getPeerTimestamp(b) - getPeerTimestamp(a);
+          if (timestampDiff !== 0) {
+            return timestampDiff;
+          }
+          return a.localeCompare(b);
         });
 
         console.log("My ID:", this.id);
@@ -117,6 +127,10 @@ export class Multiplayer {
 
         if (this.isHost) {
           console.log("👑 I am the host player");
+        }
+
+        if (previousHostId !== hostPeerId) {
+          console.log("Resolved host ID:", hostPeerId);
         }
 
         if (previousHostId !== hostPeerId && typeof this.onHostChange === 'function') {
