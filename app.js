@@ -766,6 +766,7 @@ async function main() {
   const spawningSlots = new Set();
   const respawnTimers = new Map();
   const monsterSlotModels = new Map();
+  let warnedNoHostMonsters = false;
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -3314,6 +3315,7 @@ async function main() {
 
     const isHost = !multiplayer || multiplayer.isHost;
     if (isHost) {
+      warnedNoHostMonsters = false;
       ensureMonsters();
       const nowMs = Date.now();
       monsters.forEach(monster => {
@@ -3345,6 +3347,13 @@ async function main() {
         }
       });
     } else {
+      if (!warnedNoHostMonsters && monsters.length === 0) {
+        console.log('[monster]', 'no-host-monsters', {
+          hostId: multiplayer?.currentHostId ?? null,
+          localId: multiplayer?.getId?.() ?? null
+        });
+        warnedNoHostMonsters = true;
+      }
       monsters.forEach(monster => {
         monster?.model && monster.update(monsterAnimDelta);
       });
