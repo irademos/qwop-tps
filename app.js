@@ -1165,6 +1165,11 @@ async function main() {
     monster.model = null;
   };
 
+  const removeMonsterState = (slotId) => {
+    if (!slotId) return;
+    authoritativeEntityStates.delete(slotId);
+  };
+
   const setMonsterForSlot = (slotId, monster) => {
     const existingIndex = monsters.findIndex(entry => entry.id === slotId);
     if (existingIndex >= 0) {
@@ -1210,6 +1215,7 @@ async function main() {
       monsters.forEach(monster => cleanupMonster(monster));
       monsters = [];
       window.monsters = monsters;
+      monsterSlotIds.forEach(slotId => removeMonsterState(slotId));
       respawnTimers.forEach((timer) => clearTimeout(timer));
       respawnTimers.clear();
       return;
@@ -1265,6 +1271,14 @@ async function main() {
         const [px, py, pz] = state.position || [];
         const [rx, ry, rz, rw] = state.rotation || [];
         const current = monsters.find(entry => entry.id === slotId);
+        if (state.mode === 'dead' && state.health <= 0) {
+          if (current) {
+            cleanupMonster(current);
+            monsters = monsters.filter(entry => entry.id !== slotId);
+            window.monsters = monsters;
+          }
+          return;
+        }
         if (state.modelPath && (!current || current.modelPath !== state.modelPath)) {
           spawnMonsterInSlot(slotId, state.modelPath, current);
         }
@@ -1285,12 +1299,6 @@ async function main() {
         if (typeof state.health === 'number') {
           monster.health = state.health;
           monster.model.userData.health = state.health;
-        }
-        if (state.mode === 'dead' && state.health <= 0) {
-          cleanupMonster(monster);
-          monsters = monsters.filter(entry => entry.id !== slotId);
-          window.monsters = monsters;
-          return;
         }
         if (state.action && monster.model.userData.currentAction !== state.action) {
           const fade = state.action === 'Weapon' ? 0.1 : 0.2;
@@ -3276,6 +3284,7 @@ async function main() {
             cleanupMonster(monster);
             monsters = monsters.filter(entry => entry.id !== slotId);
             window.monsters = monsters;
+            removeMonsterState(slotId);
             const delay = THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
             const timer = setTimeout(() => {
               respawnTimers.delete(slotId);
