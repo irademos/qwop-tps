@@ -143,6 +143,14 @@ async function main() {
 
   let multiplayer = null;
   let playerControls = null;
+  let scene = null;
+  let mapRenderer = null;
+  let buildingsRenderer = null;
+  let tileCache = null;
+  let worldOrigin = null;
+  let currentRenderOrigin = null;
+  let activeTileKey = null;
+  let pendingMapRebuild = false;
   const networkedEntities = new Map();
   const pendingEntityStates = new Map();
   const authoritativeEntityStates = new Map();
@@ -150,6 +158,15 @@ async function main() {
   let lastControlSend = 0;
   const ENTITY_BROADCAST_INTERVAL = 200;
   const CONTROL_SEND_INTERVAL = 140;
+  const projectiles = [];
+  const ammoPickups = [];
+  const droppedAmmoPickups = new Map();
+  const pendingDropRemovals = new Set();
+  const AMMO_PICKUP_AMOUNT = 5;
+  const foodPickups = [];
+  const healthPickups = [];
+  const PICKUP_CHECK_INTERVAL_MS = 250;
+  let lastPickupCheckMs = 0;
 
   const otherPlayers = {};
   window.otherPlayers = otherPlayers;
@@ -158,6 +175,10 @@ async function main() {
   let lastPresenceSweep = 0;
   let remoteAnimAccumulator = 0;
   let monsterAnimAccumulator = 0;
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87CEEB);
+  createClouds(scene);
 
   const logNet = (...args) => {
     if (window.DEBUG_NET) {
@@ -584,11 +605,6 @@ async function main() {
     startOverlay.addEventListener('keydown', handleStartOverlayKeydown);
   }
 
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87CEEB);
-
-  createClouds(scene);
-
   let iceGun;
   let autumnSword;
 
@@ -607,10 +623,13 @@ async function main() {
   document.getElementById('game-container').appendChild(renderer.domElement);
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-  const mapRenderer = createMapRenderer({ scene, renderer });
-  const buildingsRenderer = createBuildingsRenderer({ scene, camera });
+  mapRenderer = createMapRenderer({ scene, renderer });
+  buildingsRenderer = createBuildingsRenderer({ scene, camera });
   window.mapRenderer = mapRenderer;
   window.buildingsRenderer = buildingsRenderer;
+  if (pendingMapRebuild) {
+    rebuildMapFromCache();
+  }
 
   const handleResize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1629,23 +1648,13 @@ async function main() {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
 
-  const projectiles = [];
-  const ammoPickups = [];
-  const droppedAmmoPickups = new Map();
-  const pendingDropRemovals = new Set();
-  const AMMO_PICKUP_AMOUNT = 5;
-  const foodPickups = [];
-  const healthPickups = [];
-  const PICKUP_CHECK_INTERVAL_MS = 250;
-  let lastPickupCheckMs = 0;
-
-  const spawnProjectileWithPerfFlags = (...args) => {
+  function spawnProjectileWithPerfFlags(...args) {
     spawnProjectile(...args);
     const latest = projectiles[projectiles.length - 1];
     if (latest) {
       latest.userData.skipTerrainCorrection = true;
     }
-  };
+  }
 
   const asVec3 = (p) => (
     p?.isVector3 ? p.clone()
@@ -1938,10 +1947,13 @@ async function main() {
   const GROUND_TILE_RADIUS = 2;
   const TILE_FETCH_RADIUS_METERS = TILE_SIZE_METERS * Math.SQRT2 * 0.5;
   const TILE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-  const tileCache = createTileCache({
+  tileCache = createTileCache({
     tileSizeMeters: TILE_SIZE_METERS,
     evictRadiusTiles: TILE_EVICT_RADIUS
   });
+  if (pendingMapRebuild) {
+    rebuildMapFromCache();
+  }
   const groundTiles = createGroundTiles({
     scene,
     renderer,
@@ -2082,9 +2094,6 @@ async function main() {
     });
   };
   const mapFetchInFlight = new Set();
-  let activeTileKey = null;
-  let worldOrigin = null;
-  let currentRenderOrigin = null;
   const debugPerf = {
     monsters: 0,
     ammoPickups: 0,
@@ -2095,7 +2104,7 @@ async function main() {
   window.debugPerf = debugPerf;
   let lastPerfUpdateMs = 0;
 
-  const loadWorldOrigin = () => {
+  function loadWorldOrigin() {
     try {
       const stored = localStorage.getItem(WORLD_ORIGIN_STORAGE_KEY);
       if (!stored) return null;
@@ -2106,22 +2115,30 @@ async function main() {
       console.warn('Failed to parse stored world origin:', error);
       return null;
     }
-  };
+  }
 
-  const setWorldOrigin = (origin) => {
+  function setWorldOrigin(origin) {
     if (!origin || !Number.isFinite(origin.lat) || !Number.isFinite(origin.lon)) return;
     worldOrigin = { lat: origin.lat, lon: origin.lon };
     localStorage.setItem(WORLD_ORIGIN_STORAGE_KEY, JSON.stringify(worldOrigin));
-    tileCache.setOrigin(worldOrigin);
+    if (tileCache) {
+      tileCache.setOrigin(worldOrigin);
+    } else {
+      pendingMapRebuild = true;
+    }
     currentRenderOrigin = { centerLat: origin.lat, centerLon: origin.lon };
-  };
+  }
 
-  const resetWorldOrigin = () => {
+  function resetWorldOrigin() {
     worldOrigin = null;
     localStorage.removeItem(WORLD_ORIGIN_STORAGE_KEY);
-    tileCache.setOrigin(null);
+    if (tileCache) {
+      tileCache.setOrigin(null);
+    } else {
+      pendingMapRebuild = true;
+    }
     currentRenderOrigin = null;
-  };
+  }
 
   const computePlayerMeters = (location) => {
     if (!worldOrigin || !location) return null;
@@ -2133,12 +2150,12 @@ async function main() {
     };
   };
 
-  const getLocalMapOrigin = () => {
+  function getLocalMapOrigin() {
     if (worldOrigin) {
       return { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
     }
     return currentRenderOrigin;
-  };
+  }
 
   const geoToLocalMeters = (lat, lon, origin) => {
     if (!origin || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
@@ -2158,13 +2175,13 @@ async function main() {
     };
   };
 
-  const getLatestLocationFix = () => {
+  function getLatestLocationFix() {
     const latest = window.latestLocation;
     if (!latest || !Number.isFinite(latest.lat) || !Number.isFinite(latest.lon)) {
       return null;
     }
     return latest;
-  };
+  }
 
   const applyPlayerMeters = (playerMeters) => {
     if (!playerMeters || !playerModel || !playerControls) return;
@@ -2233,7 +2250,12 @@ async function main() {
     return computeGeojsonBounds(geojson);
   };
 
-  const rebuildMapFromCache = () => {
+  function rebuildMapFromCache() {
+    if (!tileCache || !mapRenderer || !buildingsRenderer) {
+      pendingMapRebuild = true;
+      return;
+    }
+    pendingMapRebuild = false;
     const combined = {
       type: 'FeatureCollection',
       features: []
@@ -2251,7 +2273,7 @@ async function main() {
     buildingsRenderer.updateBuildings(combined, bounds);
     rebuildBuildingColliders();
     liftEntitiesToBuildingTop();
-  };
+  }
 
   window.clearTileCache = () => {
     tileCache.cache.clear();
