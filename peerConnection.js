@@ -5,7 +5,8 @@ import {
   remove,
   onValue,
   get,
-  onDisconnect
+  onDisconnect,
+  serverTimestamp
 } from 'firebase/database';
 
 const VALID_MESSAGE_TYPES = new Set([
@@ -91,7 +92,7 @@ export class Multiplayer {
       await set(peerRef, {
         name: this.playerName,
         roomId: assignedRoom,
-        timestamp: Date.now()
+        timestamp: serverTimestamp()
       });
 
       // Setup server-side disconnection cleanup
@@ -117,7 +118,9 @@ export class Multiplayer {
 
         // Sort by join timestamp so the most recent becomes host
         validPeerIds.sort((a, b) => {
-          return activePeers[b]?.timestamp - activePeers[a]?.timestamp;
+          const bTimestamp = Number(activePeers[b]?.timestamp) || 0;
+          const aTimestamp = Number(activePeers[a]?.timestamp) || 0;
+          return bTimestamp - aTimestamp;
         });
 
         console.log("My ID:", this.id);
