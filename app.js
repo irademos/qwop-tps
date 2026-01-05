@@ -259,6 +259,14 @@ async function main() {
     return result;
   }
 
+  /*
+   * Network authority expectations:
+   * - presence/projectile/grab/grabMove: sender is the peerId; mismatched payload IDs are ignored.
+   * - entityControl: non-host clients send to the host; sourceId must match peerId.
+   * - entityStates/entitySnapshot: host broadcasts authoritative states; snapshot is sent during host handoff.
+   * - entityStateRequest: new host requests snapshot from previous host; requesterId must match peerId.
+   * - inventoryDrop/dropPickup: non-host clients request host-side pickup changes.
+   */
   function handleIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
     const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -269,6 +277,9 @@ async function main() {
 
     const logInvalidPayload = (typeLabel, payload) => {
       console.warn(`[net] Dropping invalid ${typeLabel} payload`, payload);
+    };
+    const logInvalidAuthority = (typeLabel, payload) => {
+      console.warn(`[net] Dropping unauthorized ${typeLabel} payload`, payload);
     };
 
     const isPresenceMessage = payload => {
@@ -356,7 +367,19 @@ async function main() {
         logInvalidPayload('entityControl', data);
         return;
       }
-      if (multiplayer?.isHost && data.id && data.state && data.sourceId) {
+      if (!multiplayer?.isHost) {
+        logInvalidAuthority('entityControl', { peerId });
+        return;
+      }
+      if (data.sourceId !== peerId) {
+        logInvalidAuthority('entityControl', { peerId, sourceId: data.sourceId });
+        return;
+      }
+      if (multiplayer?.getId?.() === peerId) {
+        logInvalidAuthority('entityControl', { peerId, sourceId: data.sourceId });
+        return;
+      }
+      if (data.id && data.state && data.sourceId) {
         updateAuthoritativeState(data.id, data.state, data.sourceId);
       }
       return;
@@ -402,6 +425,10 @@ async function main() {
         logInvalidPayload('entityStateRequest', data);
         return;
       }
+      if (data.requesterId !== peerId) {
+        logInvalidAuthority('entityStateRequest', { peerId, requesterId: data.requesterId });
+        return;
+      }
       if (data.previousHostId !== multiplayer?.getId?.()) {
         return;
       }
@@ -417,7 +444,11 @@ async function main() {
         logInvalidPayload('presence', data);
         return;
       }
-      const remoteId = data.id || peerId;
+      if (data.id && data.id !== peerId) {
+        logInvalidAuthority('presence', { peerId, id: data.id });
+        return;
+      }
+      const remoteId = peerId;
       const desiredModel = data.model || DEFAULT_CHARACTER_MODEL;
       const now = performance.now();
       if (!remotePresenceMeta[remoteId]) {
@@ -564,11 +595,16 @@ async function main() {
         logInvalidPayload('projectile', data);
         return;
       }
+      if (data.id !== peerId) {
+        logInvalidAuthority('projectile', { peerId, id: data.id });
+        return;
+      }
+      const senderId = peerId;
       const position = new THREE.Vector3(...data.position);
       const direction = new THREE.Vector3(...data.direction);
-      spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      spawnProjectileWithPerfFlags(scene, projectiles, position, direction, senderId);
 
-      const shooter = otherPlayers[data.id];
+      const shooter = otherPlayers[senderId];
       if (shooter) {
         const actions = shooter.model.userData.actions;
         const current = shooter.model.userData.currentAction;
@@ -587,9 +623,17 @@ async function main() {
       return;
     }
 
-    if (data.type === 'inventoryDrop' && multiplayer?.isHost) {
+    if (data.type === 'inventoryDrop') {
+      if (!multiplayer?.isHost) {
+        logInvalidAuthority('inventoryDrop', { peerId });
+        return;
+      }
       if (!isInventoryDropMessage(data)) {
         logInvalidPayload('inventoryDrop', data);
+        return;
+      }
+      if (multiplayer?.getId?.() === peerId) {
+        logInvalidAuthority('inventoryDrop', { peerId });
         return;
       }
       const drops = Array.isArray(data.drops) ? data.drops : [];
@@ -604,9 +648,17 @@ async function main() {
       return;
     }
 
-    if (data.type === 'dropPickup' && multiplayer?.isHost) {
+    if (data.type === 'dropPickup') {
+      if (!multiplayer?.isHost) {
+        logInvalidAuthority('dropPickup', { peerId });
+        return;
+      }
       if (!isDropPickupMessage(data)) {
         logInvalidPayload('dropPickup', data);
+        return;
+      }
+      if (multiplayer?.getId?.() === peerId) {
+        logInvalidAuthority('dropPickup', { peerId });
         return;
       }
       if (data.dropId) {
@@ -620,8 +672,13 @@ async function main() {
         logInvalidPayload('grab', data);
         return;
       }
+      if (data.from && data.from !== peerId) {
+        logInvalidAuthority('grab', { peerId, from: data.from });
+        return;
+      }
+      const senderId = peerId;
       if (data.target === multiplayer.getId()) {
-        playerControls?.setGrabbed(data.active, data.from);
+        playerControls?.setGrabbed(data.active, senderId);
       } else {
         const targetPlayer = otherPlayers[data.target];
         if (targetPlayer) {
@@ -634,6 +691,10 @@ async function main() {
     if (data.type === 'grabMove') {
       if (!isGrabMoveMessage(data)) {
         logInvalidPayload('grabMove', data);
+        return;
+      }
+      if (data.from && data.from !== peerId) {
+        logInvalidAuthority('grabMove', { peerId, from: data.from });
         return;
       }
       const pos = new THREE.Vector3(...data.position);
