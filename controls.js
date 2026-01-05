@@ -1114,8 +1114,8 @@ export class PlayerControls {
     }
 
     if (this.ammoContainerEl) {
+      // Hide completely unless a gun is equipped
       if (this.lastHasGun !== hasGun) {
-        this.ammoContainerEl.classList.toggle('inactive', !hasGun);
         this.ammoContainerEl.classList.toggle('hidden', !hasGun);
       }
 
