@@ -651,6 +651,11 @@ async function main() {
 
   multiplayer = new Multiplayer(playerName, handleIncomingData);
   multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
+    console.log('[multiplayer]', 'host-change', {
+      previousHostId,
+      newHostId,
+      isCurrentHost
+    });
     if (previousHostId && previousHostId === multiplayer.getId() && previousHostId !== newHostId) {
       const snapshot = serializeAuthoritativeStates();
       if (newHostId) {
@@ -749,6 +754,7 @@ async function main() {
   const monsterSlotIds = ["monster:0", "monster:1"];
   const spawningSlots = new Set();
   const respawnTimers = new Map();
+  const monsterSlotModels = new Map();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -997,6 +1003,15 @@ async function main() {
     return MONSTER_MODELS[index];
   };
 
+  const getMonsterModelForSlot = (slotId) => {
+    if (!slotId) return getRandomMonsterModel();
+    const existing = monsterSlotModels.get(slotId);
+    if (existing) return existing;
+    const selected = getRandomMonsterModel();
+    monsterSlotModels.set(slotId, selected);
+    return selected;
+  };
+
   const BUILDING_RAYCAST_HEIGHT = 200;
   const BUILDING_LIFT_EPSILON = 0.05;
   const buildingRaycaster = new THREE.Raycaster();
@@ -1179,9 +1194,13 @@ async function main() {
     }
   };
 
-  const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null) => {
+  const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null, reason = 'unknown') => {
     if (PERF.disableMonsters) return;
     if (spawningSlots.has(slotId)) return;
+    if (modelPath) {
+      monsterSlotModels.set(slotId, modelPath);
+    }
+    console.log('[monster]', 'spawn', { slotId, modelPath, reason, isHost: multiplayer?.isHost });
     spawningSlots.add(slotId);
     loadMonsterModel(modelPath, data => {
       try {
@@ -1239,7 +1258,7 @@ async function main() {
     monsterSlotIds.forEach((slotId) => {
       const existing = monsters.find(entry => entry.id === slotId);
       if (!existing && !spawningSlots.has(slotId) && !respawnTimers.has(slotId)) {
-        spawnMonsterInSlot(slotId, getRandomMonsterModel());
+        spawnMonsterInSlot(slotId, getMonsterModelForSlot(slotId), null, 'ensure');
       }
     });
   };
@@ -1279,8 +1298,18 @@ async function main() {
           }
           return;
         }
+        if (state.modelPath) {
+          monsterSlotModels.set(slotId, state.modelPath);
+        }
         if (state.modelPath && (!current || current.modelPath !== state.modelPath)) {
-          spawnMonsterInSlot(slotId, state.modelPath, current);
+          if (current?.modelPath && current.modelPath !== state.modelPath) {
+            console.log('[monster]', 'model-change', {
+              slotId,
+              from: current.modelPath,
+              to: state.modelPath
+            });
+          }
+          spawnMonsterInSlot(slotId, state.modelPath, current, 'state');
         }
         const monster = monsters.find(entry => entry.id === slotId);
         if (!monster?.model) return;
@@ -3288,7 +3317,7 @@ async function main() {
             const delay = THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
             const timer = setTimeout(() => {
               respawnTimers.delete(slotId);
-              spawnMonsterInSlot(slotId, getRandomMonsterModel());
+              spawnMonsterInSlot(slotId, getMonsterModelForSlot(slotId), null, 'respawn');
             }, delay);
             respawnTimers.set(slotId, timer);
           }
