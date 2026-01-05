@@ -370,6 +370,17 @@ async function main() {
       Object.entries(data.states).forEach(([id, entry]) => {
         if (!entry) return;
         const { sourceId, ...state } = entry;
+        if (id.startsWith('monster:') && state.modelPath) {
+          const previousModel = monsterSlotModels.get(id) ?? null;
+          if (previousModel && previousModel !== state.modelPath) {
+            console.log('[monster]', 'state-update', {
+              slotId: id,
+              from: previousModel,
+              to: state.modelPath,
+              sourceId
+            });
+          }
+        }
         if (sourceId && sourceId === multiplayer?.getId?.()) {
           const localEntry = networkedEntities.get(id);
           if (localEntry?.isLocallyControlled?.()) {

@@ -116,17 +116,13 @@ export class Multiplayer {
         // Filter for only currently active peer IDs
         const validPeerIds = allPeerIds.filter(pid => activePeers[pid]);
 
-        // Sort by join timestamp so the most recent becomes host
-        validPeerIds.sort((a, b) => {
-          const bTimestamp = Number(activePeers[b]?.timestamp) || 0;
-          const aTimestamp = Number(activePeers[a]?.timestamp) || 0;
-          return bTimestamp - aTimestamp;
-        });
+        // Deterministic host selection: lowest peer id wins.
+        validPeerIds.sort((a, b) => a.localeCompare(b));
 
         console.log("My ID:", this.id);
         console.log("Valid Peers (more recent first):", validPeerIds);
 
-        // Keep existing host if still connected; otherwise pick the most recent join.
+        // Keep existing host if still connected; otherwise pick the deterministic lowest id.
         const currentHostStillValid = this.currentHostId && validPeerIds.includes(this.currentHostId);
         const hostPeerId = currentHostStillValid ? this.currentHostId : validPeerIds[0];
         const previousHostId = this.currentHostId;
