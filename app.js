@@ -509,18 +509,7 @@ async function main() {
         rebuildMapFromCache();
       }
 
-      if (!localFix || !mapOrigin) {
-        const existing = otherPlayers[remoteId];
-        if (existing?.model) {
-          existing.model.visible = false;
-        }
-        if (existing?.nameLabel) {
-          existing.nameLabel.style.display = 'none';
-        }
-        return;
-      }
-
-      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
+      if (localFix && mapOrigin && Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
         const dist = distanceMeters(localFix.lat, localFix.lon, data.lat, data.lon);
         remotePresenceMeta[remoteId].lastDistance = dist;
         if (dist != null && dist > PLAYER_VISIBILITY_RADIUS_M) {
