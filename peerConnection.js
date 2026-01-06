@@ -26,6 +26,8 @@ const VALID_MESSAGE_TYPES = new Set([
 export class Multiplayer {
   constructor(playerName, onPeerData) {
     this.connections = {};
+    this.pendingConnections = new Set();
+    this.failedConnectionAt = new Map();
     this.onPeerData = onPeerData;
     this.playerName = playerName;
     this.isHost = false;
@@ -149,9 +151,8 @@ export class Multiplayer {
 
         // Connect to any valid peers we haven't yet connected to
         for (const peerId of validPeerIds) {
-          if (peerId !== this.id && !this.connections[peerId]) {
+          if (peerId !== this.id && !this.connections[peerId] && this.shouldAttemptConnection(peerId)) {
             this.connectToPeer(peerId);
-            console.log("Connected to peer:", peerId);
           }
         }
       });
@@ -197,6 +198,9 @@ export class Multiplayer {
   }
 
   connectToPeer(peerId) {
+    if (this.pendingConnections.has(peerId)) {
+      return;
+    }
     if (!this.peer || this.peer.destroyed) {
       console.warn('Peer connection not ready for', peerId);
       return;
@@ -204,18 +208,27 @@ export class Multiplayer {
     const conn = this.peer.connect(peerId);
     if (!conn) {
       console.warn('Failed to create peer connection for', peerId);
+      this.failedConnectionAt.set(peerId, Date.now());
       return;
     }
+    this.pendingConnections.add(peerId);
     this.setupConnection(conn);
   }
 
   setupConnection(conn) {
     if (!conn || typeof conn.on !== 'function') {
       console.warn('Invalid peer connection', conn);
+      if (conn?.peer) {
+        this.pendingConnections.delete(conn.peer);
+        this.failedConnectionAt.set(conn.peer, Date.now());
+      }
       return;
     }
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
+      this.pendingConnections.delete(conn.peer);
+      this.failedConnectionAt.delete(conn.peer);
+      console.log("Connected to peer:", conn.peer);
       conn.on('data', data => {
         const isObjectPayload = data && typeof data === 'object' && !Array.isArray(data);
         if (!isObjectPayload) {
@@ -276,12 +289,25 @@ export class Multiplayer {
     conn.on('close', () => {
       this.stopPingLoop(conn.peer);
       delete this.connections[conn.peer];
+      this.pendingConnections.delete(conn.peer);
     });
   
     conn.on('error', err => {
       console.error('Peer error:', err);
       this.recordError(err);
+      if (conn?.peer) {
+        this.pendingConnections.delete(conn.peer);
+        this.failedConnectionAt.set(conn.peer, Date.now());
+      }
     });
+  }
+
+  shouldAttemptConnection(peerId) {
+    if (!peerId) return false;
+    if (this.pendingConnections.has(peerId)) return false;
+    const lastFailedAt = this.failedConnectionAt.get(peerId) || 0;
+    const now = Date.now();
+    return now - lastFailedAt > 5000;
   }
 
   startVoice(stream) {
