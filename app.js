@@ -573,12 +573,13 @@ async function main() {
       let targetX = null;
       let targetZ = null;
       if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
-        const local = geoToLocalMeters(data.lat, data.lon, mapOrigin);
+        const local = mapOrigin ? geoToLocalMeters(data.lat, data.lon, mapOrigin) : null;
         if (local) {
           targetX = local.x;
           targetZ = local.z;
         }
-      } else if (Number.isFinite(data.x) && Number.isFinite(data.z)) {
+      }
+      if (targetX == null && targetZ == null && Number.isFinite(data.x) && Number.isFinite(data.z)) {
         targetX = data.x;
         targetZ = data.z;
       }
