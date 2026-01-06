@@ -3511,10 +3511,10 @@ async function main() {
         const player = otherPlayers[remoteId];
         if (!localFix || !mapOrigin) {
           if (player?.model) {
-            player.model.visible = false;
+            player.model.visible = true;
           }
           if (player?.nameLabel) {
-            player.nameLabel.style.display = 'none';
+            player.nameLabel.style.display = 'block';
           }
           return;
         }
