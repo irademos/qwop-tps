@@ -387,6 +387,16 @@ async function main() {
       && (payload.sourcePlayerId == null || typeof payload.sourcePlayerId === 'string')
       && (payload.at == null || isFiniteNumber(payload.at));
 
+    const worldAnchorMatchesLocal = (anchor) => {
+      if (!anchor) return false;
+      const mapOrigin = getLocalMapOrigin();
+      if (!mapOrigin) return false;
+      const { centerLat, centerLon } = anchor;
+      if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) return false;
+      const dist = distanceMeters(mapOrigin.centerLat, mapOrigin.centerLon, centerLat, centerLon);
+      return dist != null && dist <= 50;
+    };
+
     if (!isObject(data)) {
       logInvalidPayload('payload', data);
       return;
@@ -496,6 +506,12 @@ async function main() {
         remotePresenceMeta[remoteId].lastLat = data.lat;
         remotePresenceMeta[remoteId].lastLon = data.lon;
       }
+      if (data.worldAnchor?.centerLat && data.worldAnchor?.centerLon) {
+        remotePresenceMeta[remoteId].worldAnchor = {
+          centerLat: data.worldAnchor.centerLat,
+          centerLon: data.worldAnchor.centerLon
+        };
+      }
 
       const localFix = getLatestLocationFix();
       const mapOrigin = getLocalMapOrigin();
@@ -509,7 +525,8 @@ async function main() {
         rebuildMapFromCache();
       }
 
-      if (localFix && mapOrigin && Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
+      if (localFix && mapOrigin && Number.isFinite(data.lat) && Number.isFinite(data.lon)
+        && worldAnchorMatchesLocal(data.worldAnchor)) {
         const dist = distanceMeters(localFix.lat, localFix.lon, data.lat, data.lon);
         remotePresenceMeta[remoteId].lastDistance = dist;
         if (dist != null && dist > PLAYER_VISIBILITY_RADIUS_M) {
@@ -3510,6 +3527,15 @@ async function main() {
         }
         const player = otherPlayers[remoteId];
         if (!localFix || !mapOrigin) {
+          if (player?.model) {
+            player.model.visible = true;
+          }
+          if (player?.nameLabel) {
+            player.nameLabel.style.display = 'block';
+          }
+          return;
+        }
+        if (!worldAnchorMatchesLocal(meta.worldAnchor)) {
           if (player?.model) {
             player.model.visible = true;
           }
