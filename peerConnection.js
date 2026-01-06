@@ -197,11 +197,23 @@ export class Multiplayer {
   }
 
   connectToPeer(peerId) {
+    if (!this.peer || this.peer.destroyed) {
+      console.warn('Peer connection not ready for', peerId);
+      return;
+    }
     const conn = this.peer.connect(peerId);
+    if (!conn) {
+      console.warn('Failed to create peer connection for', peerId);
+      return;
+    }
     this.setupConnection(conn);
   }
 
   setupConnection(conn) {
+    if (!conn || typeof conn.on !== 'function') {
+      console.warn('Invalid peer connection', conn);
+      return;
+    }
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
       conn.on('data', data => {
