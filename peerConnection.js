@@ -16,6 +16,7 @@ const VALID_MESSAGE_TYPES = new Set([
   'entityStateRequest',
   'projectile',
   'monster',
+  'attackMonster',
   'inventoryDrop',
   'dropPickup',
   'grab',
@@ -83,6 +84,7 @@ export class Multiplayer {
       }
 
       const roomRef = ref(db, `rooms/${assignedRoom}/${id}`);
+      this.roomId = assignedRoom;
       await remove(roomRef);
       await set(roomRef, true);
 
@@ -153,6 +155,14 @@ export class Multiplayer {
           }
         }
       });
+
+      if (typeof this.onReady === 'function') {
+        try {
+          this.onReady({ roomId: assignedRoom, peerId: id });
+        } catch (err) {
+          console.warn('onReady callback failed:', err);
+        }
+      }
 
     });
 

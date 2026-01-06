@@ -17,7 +17,15 @@ function getStrengthDamage(attackerId, baseDamage) {
   return baseDamage;
 }
 
-export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioManager, multiplayer }) {
+export function updateMeleeAttacks({
+  playerModel,
+  otherPlayers,
+  monsters,
+  audioManager,
+  multiplayer,
+  sendMonsterAttack,
+  onMonsterHit
+}) {
   const now = Date.now();
   const isHost = !multiplayer || multiplayer.isHost;
   const players = [
@@ -75,9 +83,24 @@ export function updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioM
           if (dist <= cfg.range) {
             hit = true;
             const killed = monster.applyDamage(attackDamage);
+            onMonsterHit?.(monster, { damage: attackDamage, killed, sourceId: attacker.id });
             if (killed && attacker.id === 'local') {
               window.onMonsterKill?.();
             }
+          }
+        }
+      } else if (!isHost && Array.isArray(monsters)) {
+        for (const monster of monsters) {
+          if (!monster) continue;
+          const dist = attacker.model.position.distanceTo(monster.model.position);
+          if (dist <= cfg.range) {
+            hit = true;
+            sendMonsterAttack?.({
+              monsterId: monster.id,
+              damage: attackDamage,
+              sourcePlayerId: attacker.id,
+              at: Date.now()
+            });
           }
         }
       }

@@ -42,7 +42,9 @@ export function updateProjectiles({
   otherPlayers,
   playerModel,
   multiplayer,
-  monsters
+  monsters,
+  sendMonsterAttack,
+  onMonsterHit
 }) {
   const localId = multiplayer?.getId?.();
   const isHost = !multiplayer || multiplayer.isHost;
@@ -174,9 +176,27 @@ export function updateProjectiles({
           console.log(`💥 Monster was hit`);
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
           const killed = monster.applyDamage(damage);
+          onMonsterHit?.(monster, { damage, killed, sourceId: proj.userData.shooterId });
           if (killed && proj.userData.shooterId === localId) {
             window.onMonsterKill?.();
           }
+          removeProjectile(i);
+          removed = true;
+          break;
+        }
+      }
+    } else if (!isHost && Array.isArray(monsters)) {
+      for (const monster of monsters) {
+        if (!monster) continue;
+        const monsterBox = new THREE.Box3().setFromObject(monster.model);
+        if (projBox.intersectsBox(monsterBox) && age >= 80) {
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
+          sendMonsterAttack?.({
+            monsterId: monster.id,
+            damage,
+            sourcePlayerId: proj.userData.shooterId || localId,
+            at: Date.now()
+          });
           removeProjectile(i);
           removed = true;
           break;
