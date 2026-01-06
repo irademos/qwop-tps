@@ -32,6 +32,8 @@ export class Multiplayer {
     this.playerName = playerName;
     this.isHost = false;
     this.currentHostId = null;
+    this.lastHostLogId = null;
+    this.lastPeerLogKey = '';
     this.onHostChange = null;
     this.onConnectionError = null;
     this.onPingUpdate = null;
@@ -124,8 +126,12 @@ export class Multiplayer {
           return activePeers[b]?.timestamp - activePeers[a]?.timestamp;
         });
 
-        console.log("My ID:", this.id);
-        console.log("Valid Peers (more recent first):", validPeerIds);
+        const peerLogKey = `${this.id}|${validPeerIds.join(',')}`;
+        if (peerLogKey !== this.lastPeerLogKey) {
+          console.log("My ID:", this.id);
+          console.log("Valid Peers (more recent first):", validPeerIds);
+          this.lastPeerLogKey = peerLogKey;
+        }
 
         // The latest joined player becomes the host
         const hostPeerId = validPeerIds[0];
@@ -133,8 +139,9 @@ export class Multiplayer {
         this.currentHostId = hostPeerId;
         this.isHost = (hostPeerId === this.id);
 
-        if (this.isHost) {
+        if (this.isHost && this.lastHostLogId !== this.id) {
           console.log("👑 I am the host player");
+          this.lastHostLogId = this.id;
         }
 
         if (previousHostId !== hostPeerId && typeof this.onHostChange === 'function') {
