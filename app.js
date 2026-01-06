@@ -293,6 +293,16 @@ async function main() {
     return result;
   }
 
+  const worldAnchorMatchesLocal = (anchor) => {
+    if (!anchor) return false;
+    const mapOrigin = getLocalMapOrigin();
+    if (!mapOrigin) return false;
+    const { centerLat, centerLon } = anchor;
+    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) return false;
+    const dist = distanceMeters(mapOrigin.centerLat, mapOrigin.centerLon, centerLat, centerLon);
+    return dist != null && dist <= 50;
+  };
+
   function handleIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
     const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -386,16 +396,6 @@ async function main() {
       && isFiniteNumber(payload.damage)
       && (payload.sourcePlayerId == null || typeof payload.sourcePlayerId === 'string')
       && (payload.at == null || isFiniteNumber(payload.at));
-
-    const worldAnchorMatchesLocal = (anchor) => {
-      if (!anchor) return false;
-      const mapOrigin = getLocalMapOrigin();
-      if (!mapOrigin) return false;
-      const { centerLat, centerLon } = anchor;
-      if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) return false;
-      const dist = distanceMeters(mapOrigin.centerLat, mapOrigin.centerLon, centerLat, centerLon);
-      return dist != null && dist <= 50;
-    };
 
     if (!isObject(data)) {
       logInvalidPayload('payload', data);
