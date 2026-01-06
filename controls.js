@@ -804,7 +804,6 @@ export class PlayerControls {
         this.controls.target.copy(newTarget);
       }
       if (this.multiplayer && (Math.abs(this.lastPosition.x - newX) > 0.01 || Math.abs(this.lastPosition.y - displayY) > 0.01 || Math.abs(this.lastPosition.z - newZ) > 0.01 || this.isMoving !== this.wasMoving)) {
-        this.multiplayer.send({ x: newX, y: displayY, z: newZ, rotation: yawAngle, moving: this.isMoving, action: this.playerModel.userData.currentAction });
         this.lastPosition.set(newX, displayY, newZ);
         this.wasMoving = this.isMoving;
       }

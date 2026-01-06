@@ -23,6 +23,8 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.direction = new THREE.Vector3();
     this.model.userData.health = DEFAULT_HEALTH;
     this.health = DEFAULT_HEALTH;
+    this.type = null;
+    this.version = 0;
     this.isDead = false;
     this.lastDirectionChange = Date.now();
     this.lastAttackTime = 0;
@@ -70,6 +72,29 @@ export class MonsterCharacter extends CharacterBase {
     this.health = DEFAULT_HEALTH;
     this.model.userData.health = DEFAULT_HEALTH;
     this.isDead = false;
+  }
+
+  applyPersistedState(data = {}) {
+    const incomingVersion = Number.isFinite(data.version) ? data.version : null;
+    if (incomingVersion != null && Number.isFinite(this.version) && incomingVersion < this.version) {
+      return false;
+    }
+    if (incomingVersion != null) {
+      this.version = incomingVersion;
+    }
+    if (Number.isFinite(data.hp)) {
+      this.health = data.hp;
+      this.model.userData.health = data.hp;
+    }
+    const aliveFlag = data.alive;
+    if (aliveFlag === false || (Number.isFinite(data.hp) && data.hp <= 0)) {
+      this.markDead();
+    } else if (aliveFlag === true && this.isDead) {
+      this.isDead = false;
+      this.model.userData.mode = "friendly";
+      this.playAnimation("Idle", MOVE_FADE);
+    }
+    return true;
   }
 
   updateAI(deltaTime, playerModel, otherPlayers) {

@@ -16,6 +16,7 @@ const VALID_MESSAGE_TYPES = new Set([
   'entityStateRequest',
   'projectile',
   'monster',
+  'attackMonster',
   'inventoryDrop',
   'dropPickup',
   'grab',
@@ -25,10 +26,15 @@ const VALID_MESSAGE_TYPES = new Set([
 export class Multiplayer {
   constructor(playerName, onPeerData) {
     this.connections = {};
+    this.pendingConnections = new Set();
+    this.failedConnectionAt = new Map();
     this.onPeerData = onPeerData;
     this.playerName = playerName;
     this.isHost = false;
     this.currentHostId = null;
+    this.lastHostLogId = null;
+    this.lastPeerLogKey = '';
+    this.lastPeerLogAt = 0;
     this.onHostChange = null;
     this.onConnectionError = null;
     this.onPingUpdate = null;
@@ -83,6 +89,7 @@ export class Multiplayer {
       }
 
       const roomRef = ref(db, `rooms/${assignedRoom}/${id}`);
+      this.roomId = assignedRoom;
       await remove(roomRef);
       await set(roomRef, true);
 
@@ -120,8 +127,14 @@ export class Multiplayer {
           return activePeers[b]?.timestamp - activePeers[a]?.timestamp;
         });
 
-        console.log("My ID:", this.id);
-        console.log("Valid Peers (more recent first):", validPeerIds);
+        const peerLogKey = `${this.id}|${validPeerIds.join(',')}`;
+        const nowMs = Date.now();
+        if (peerLogKey !== this.lastPeerLogKey || nowMs - this.lastPeerLogAt > 10000) {
+          console.log("My ID:", this.id);
+          console.log("Valid Peers (more recent first):", validPeerIds);
+          this.lastPeerLogKey = peerLogKey;
+          this.lastPeerLogAt = nowMs;
+        }
 
         // The latest joined player becomes the host
         const hostPeerId = validPeerIds[0];
@@ -129,8 +142,9 @@ export class Multiplayer {
         this.currentHostId = hostPeerId;
         this.isHost = (hostPeerId === this.id);
 
-        if (this.isHost) {
+        if (this.isHost && this.lastHostLogId !== this.id) {
           console.log("👑 I am the host player");
+          this.lastHostLogId = this.id;
         }
 
         if (previousHostId !== hostPeerId && typeof this.onHostChange === 'function') {
@@ -147,12 +161,19 @@ export class Multiplayer {
 
         // Connect to any valid peers we haven't yet connected to
         for (const peerId of validPeerIds) {
-          if (peerId !== this.id && !this.connections[peerId]) {
+          if (peerId !== this.id && !this.connections[peerId] && this.shouldAttemptConnection(peerId)) {
             this.connectToPeer(peerId);
-            console.log("Connected to peer:", peerId);
           }
         }
       });
+
+      if (typeof this.onReady === 'function') {
+        try {
+          this.onReady({ roomId: assignedRoom, peerId: id });
+        } catch (err) {
+          console.warn('onReady callback failed:', err);
+        }
+      }
 
     });
 
@@ -187,13 +208,37 @@ export class Multiplayer {
   }
 
   connectToPeer(peerId) {
+    if (this.pendingConnections.has(peerId)) {
+      return;
+    }
+    if (!this.peer || this.peer.destroyed) {
+      console.warn('Peer connection not ready for', peerId);
+      return;
+    }
     const conn = this.peer.connect(peerId);
+    if (!conn) {
+      console.warn('Failed to create peer connection for', peerId);
+      this.failedConnectionAt.set(peerId, Date.now());
+      return;
+    }
+    this.pendingConnections.add(peerId);
     this.setupConnection(conn);
   }
 
   setupConnection(conn) {
+    if (!conn || typeof conn.on !== 'function') {
+      console.warn('Invalid peer connection', conn);
+      if (conn?.peer) {
+        this.pendingConnections.delete(conn.peer);
+        this.failedConnectionAt.set(conn.peer, Date.now());
+      }
+      return;
+    }
     conn.on('open', () => {
       this.connections[conn.peer] = conn;
+      this.pendingConnections.delete(conn.peer);
+      this.failedConnectionAt.delete(conn.peer);
+      console.log("Connected to peer:", conn.peer);
       conn.on('data', data => {
         const isObjectPayload = data && typeof data === 'object' && !Array.isArray(data);
         if (!isObjectPayload) {
@@ -254,12 +299,25 @@ export class Multiplayer {
     conn.on('close', () => {
       this.stopPingLoop(conn.peer);
       delete this.connections[conn.peer];
+      this.pendingConnections.delete(conn.peer);
     });
   
     conn.on('error', err => {
       console.error('Peer error:', err);
       this.recordError(err);
+      if (conn?.peer) {
+        this.pendingConnections.delete(conn.peer);
+        this.failedConnectionAt.set(conn.peer, Date.now());
+      }
     });
+  }
+
+  shouldAttemptConnection(peerId) {
+    if (!peerId) return false;
+    if (this.pendingConnections.has(peerId)) return false;
+    const lastFailedAt = this.failedConnectionAt.get(peerId) || 0;
+    const now = Date.now();
+    return now - lastFailedAt > 5000;
   }
 
   startVoice(stream) {

@@ -27,6 +27,15 @@ import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './settingsPanel.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './mapView.js';
 import { loadOrCreateWithPin, saveStatsThrottled } from './playerProfile.js';
+import {
+  initMonsterPersistence,
+  loadMonstersSnapshot,
+  subscribeMonsterUpdates,
+  ensureMonsterRecord,
+  persistMonsterHp,
+  persistMonsterState,
+  setMonsterPersistenceHost
+} from './monsterPersistence.js';
 
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
 const MAX_MONSTERS = 2;
@@ -142,6 +151,7 @@ async function main() {
   localStorage.setItem('characterModel', characterModel);
 
   let multiplayer = null;
+  let isHost = false;
   let playerControls = null;
   let scene = null;
   let mapRenderer = null;
@@ -184,6 +194,30 @@ async function main() {
     if (window.DEBUG_NET) {
       console.log('[net]', ...args);
     }
+  };
+
+  const logMonsterPersist = (...args) => {
+    if (window.DEBUG_MONSTER_PERSIST) {
+      console.log('[monsterPersist]', ...args);
+    }
+  };
+
+  const sendMonsterAttackIntent = ({ monsterId, damage, sourcePlayerId, at }) => {
+    if (!multiplayer || multiplayer.isHost) return;
+    const hostId = multiplayer.getHostId?.();
+    if (!hostId || !monsterId || !Number.isFinite(damage)) return;
+    multiplayer.sendTo(hostId, {
+      type: 'attackMonster',
+      monsterId,
+      damage,
+      sourcePlayerId: sourcePlayerId ?? multiplayer.getId?.(),
+      at: at ?? Date.now()
+    });
+  };
+
+  const handleMonsterDamage = (monster) => {
+    if (!multiplayer?.isHost || !monster) return;
+    persistMonsterHp(monster);
   };
 
   const removeRemotePlayer = (remoteId, reason = 'unknown') => {
@@ -258,6 +292,16 @@ async function main() {
     });
     return result;
   }
+
+  const worldAnchorMatchesLocal = (anchor) => {
+    if (!anchor) return false;
+    const mapOrigin = getLocalMapOrigin();
+    if (!mapOrigin) return false;
+    const { centerLat, centerLon } = anchor;
+    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) return false;
+    const dist = distanceMeters(mapOrigin.centerLat, mapOrigin.centerLon, centerLat, centerLon);
+    return dist != null && dist <= 50;
+  };
 
   function handleIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
@@ -346,6 +390,13 @@ async function main() {
       && typeof payload.target === 'string'
       && isVector3Array(payload.position);
 
+    const isAttackMonsterMessage = payload => isObject(payload)
+      && payload.type === 'attackMonster'
+      && typeof payload.monsterId === 'string'
+      && isFiniteNumber(payload.damage)
+      && (payload.sourcePlayerId == null || typeof payload.sourcePlayerId === 'string')
+      && (payload.at == null || isFiniteNumber(payload.at));
+
     if (!isObject(data)) {
       logInvalidPayload('payload', data);
       return;
@@ -412,6 +463,31 @@ async function main() {
       return;
     }
 
+    if (data.type === 'attackMonster') {
+      if (!isAttackMonsterMessage(data)) {
+        logInvalidPayload('attackMonster', data);
+        return;
+      }
+      if (!multiplayer?.isHost) return;
+      const monsterId = data.monsterId;
+      const monster = monsters.find(entry => entry.id === monsterId);
+      if (!monster) return;
+      const sourceId = data.sourcePlayerId || peerId;
+      const nowMs = Date.now();
+      const eventAt = Number.isFinite(data.at) ? data.at : nowMs;
+      const key = `${sourceId}:${monsterId}`;
+      const lastHitAt = recentMonsterHits.get(key) || 0;
+      if (eventAt - lastHitAt < 250) return;
+      recentMonsterHits.set(key, eventAt);
+      logMonsterPersist('attack intent', { monsterId, damage: data.damage, sourceId });
+      const killed = monster.applyDamage(data.damage);
+      persistMonsterHp(monster);
+      if (killed && sourceId === multiplayer.getId()) {
+        window.onMonsterKill?.();
+      }
+      return;
+    }
+
     if (data.type === 'presence') {
       if (!isPresenceMessage(data)) {
         logInvalidPayload('presence', data);
@@ -430,6 +506,12 @@ async function main() {
         remotePresenceMeta[remoteId].lastLat = data.lat;
         remotePresenceMeta[remoteId].lastLon = data.lon;
       }
+      if (data.worldAnchor?.centerLat && data.worldAnchor?.centerLon) {
+        remotePresenceMeta[remoteId].worldAnchor = {
+          centerLat: data.worldAnchor.centerLat,
+          centerLon: data.worldAnchor.centerLon
+        };
+      }
 
       const localFix = getLatestLocationFix();
       const mapOrigin = getLocalMapOrigin();
@@ -443,18 +525,8 @@ async function main() {
         rebuildMapFromCache();
       }
 
-      if (!localFix || !mapOrigin) {
-        const existing = otherPlayers[remoteId];
-        if (existing?.model) {
-          existing.model.visible = false;
-        }
-        if (existing?.nameLabel) {
-          existing.nameLabel.style.display = 'none';
-        }
-        return;
-      }
-
-      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
+      if (localFix && mapOrigin && Number.isFinite(data.lat) && Number.isFinite(data.lon)
+        && worldAnchorMatchesLocal(data.worldAnchor)) {
         const dist = distanceMeters(localFix.lat, localFix.lon, data.lat, data.lon);
         remotePresenceMeta[remoteId].lastDistance = dist;
         if (dist != null && dist > PLAYER_VISIBILITY_RADIUS_M) {
@@ -501,12 +573,13 @@ async function main() {
       let targetX = null;
       let targetZ = null;
       if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
-        const local = geoToLocalMeters(data.lat, data.lon, mapOrigin);
+        const local = mapOrigin ? geoToLocalMeters(data.lat, data.lon, mapOrigin) : null;
         if (local) {
           targetX = local.x;
           targetZ = local.z;
         }
-      } else if (Number.isFinite(data.x) && Number.isFinite(data.z)) {
+      }
+      if (targetX == null && targetZ == null && Number.isFinite(data.x) && Number.isFinite(data.z)) {
         targetX = data.x;
         targetZ = data.z;
       }
@@ -651,6 +724,9 @@ async function main() {
 
   multiplayer = new Multiplayer(playerName, handleIncomingData);
   multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
+    isHost = !!isCurrentHost;
+    setMonsterPersistenceHost(isHost);
+    logMonsterPersist('isHost', isHost);
     if (previousHostId && previousHostId === multiplayer.getId() && previousHostId !== newHostId) {
       const snapshot = serializeAuthoritativeStates();
       if (newHostId) {
@@ -667,6 +743,47 @@ async function main() {
           previousHostId
         });
       }
+    }
+  };
+  multiplayer.onReady = async ({ roomId }) => {
+    if (!roomId) {
+      monstersSeeded = true;
+      return;
+    }
+    initMonsterPersistence({
+      roomId,
+      isHost: multiplayer.isHost,
+      debug: window.DEBUG_MONSTER_PERSIST
+    });
+    isHost = !!multiplayer.isHost;
+    setMonsterPersistenceHost(isHost);
+    logMonsterPersist('isHost', isHost);
+    monstersSeeded = false;
+    try {
+      const snapshot = await loadMonstersSnapshot();
+      const snapshotEntries = Object.entries(snapshot || {});
+      snapshotEntries.forEach(([id, record]) => {
+        applyMonsterRecord(record, id, { applyTransform: true });
+      });
+      monsterSnapshotLoaded = true;
+      monstersSeeded = true;
+      if (unsubscribeMonsterUpdates) {
+        unsubscribeMonsterUpdates();
+      }
+      unsubscribeMonsterUpdates = subscribeMonsterUpdates(records => {
+        Object.entries(records || {}).forEach(([id, record]) => {
+          if (!record) return;
+          if (!monsters.find(entry => entry.id === (record.id || id))) {
+            applyMonsterRecord(record, id, { applyTransform: true });
+          } else {
+            applyMonsterRecord(record, id, { applyTransform: false });
+          }
+        });
+      });
+    } catch (err) {
+      console.warn('Failed to load monster snapshot', err);
+      monsterSnapshotLoaded = true;
+      monstersSeeded = true;
     }
   };
   const audioManager = new AudioManager();
@@ -749,6 +866,10 @@ async function main() {
   const monsterSlotIds = ["monster:0", "monster:1"];
   const spawningSlots = new Set();
   const respawnTimers = new Map();
+  let monstersSeeded = false;
+  let monsterSnapshotLoaded = false;
+  let unsubscribeMonsterUpdates = null;
+  const recentMonsterHits = new Map();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1174,7 +1295,7 @@ async function main() {
     }
   };
 
-  const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null) => {
+  const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null, options = {}) => {
     if (PERF.disableMonsters) return;
     if (spawningSlots.has(slotId)) return;
     spawningSlots.add(slotId);
@@ -1183,6 +1304,10 @@ async function main() {
         const monster = new MonsterCharacter(data);
         monster.id = slotId;
         monster.modelPath = modelPath;
+        monster.type = options.type ?? modelPath;
+        if (Number.isFinite(options.version)) {
+          monster.version = options.version;
+        }
         monster.model.userData.hideInMapView = true;
         monster.setMode("friendly");
         monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
@@ -1190,18 +1315,87 @@ async function main() {
         monster.lastAIUpdateMs = 0;
         monster.resetHealth();
 
-        const monsterSpawn = getMonsterSpawnPosition();
-        monster.setPosition(monsterSpawn.x, monsterSpawn.y, monsterSpawn.z);
+        if (Number.isFinite(options.health)) {
+          monster.health = options.health;
+          monster.model.userData.health = options.health;
+        }
+        if (options.alive === false || (Number.isFinite(options.health) && options.health <= 0)) {
+          monster.markDead();
+        }
+
+        const spawnPos = options.position
+          && Number.isFinite(options.position.x)
+          && Number.isFinite(options.position.y)
+          && Number.isFinite(options.position.z)
+          ? options.position
+          : getMonsterSpawnPosition();
+        monster.setPosition(spawnPos.x, spawnPos.y, spawnPos.z);
 
         cleanupMonster(oldMonster);
         scene.add(monster.model);
         if (rapierWorld) {
           attachMonsterPhysics(monster);
         }
+        if (options.rotation
+          && Number.isFinite(options.rotation.x)
+          && Number.isFinite(options.rotation.y)
+          && Number.isFinite(options.rotation.z)
+          && Number.isFinite(options.rotation.w)) {
+          monster.model.quaternion.set(options.rotation.x, options.rotation.y, options.rotation.z, options.rotation.w);
+          monster.body?.setRotation(options.rotation, true);
+        }
         setMonsterForSlot(slotId, monster);
+        if (isHost && monsterSnapshotLoaded && !options.skipPersist) {
+          ensureMonsterRecord(monster);
+        }
       } finally {
         spawningSlots.delete(slotId);
       }
+    });
+  };
+
+  const applyMonsterRecord = (record, recordId, { applyTransform = false } = {}) => {
+    if (!record) return;
+    const slotId = record.id || recordId;
+    if (!slotId) return;
+    const incomingVersion = Number.isFinite(record.version) ? record.version : null;
+    const existing = monsters.find(entry => entry.id === slotId);
+    const existingVersion = Number.isFinite(existing?.version) ? existing.version : -Infinity;
+    if (incomingVersion != null && incomingVersion < existingVersion) {
+      return;
+    }
+    const modelPath = record.type || record.modelPath || existing?.modelPath;
+    if (!modelPath) return;
+    const needsSpawn = !existing || existing.modelPath !== modelPath;
+    const rotation = applyTransform ? record.rot : null;
+    const position = applyTransform ? record.pos : null;
+    if (needsSpawn) {
+      if (!existing || (incomingVersion != null && incomingVersion > existingVersion)) {
+        spawnMonsterInSlot(slotId, modelPath, existing, {
+          position,
+          rotation,
+          health: record.hp,
+          alive: record.alive,
+          version: incomingVersion,
+          type: record.type,
+          skipPersist: true
+        });
+      }
+      return;
+    }
+    if (!existing?.model) return;
+    if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
+      existing.model.position.set(position.x, position.y, position.z);
+      existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+    }
+    if (rotation && Number.isFinite(rotation.x) && Number.isFinite(rotation.y) && Number.isFinite(rotation.z) && Number.isFinite(rotation.w)) {
+      existing.model.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+      existing.body?.setRotation(rotation, true);
+    }
+    existing.applyPersistedState?.({
+      hp: record.hp,
+      alive: record.alive,
+      version: incomingVersion
     });
   };
 
@@ -1257,7 +1451,8 @@ async function main() {
           mode: monster.model.userData.mode,
           action: monster.model.userData.currentAction,
           health: monster.model.userData.health,
-          modelPath: monster.modelPath
+          modelPath: monster.modelPath,
+          version: monster.version
         };
       },
       applyState: state => {
@@ -1265,8 +1460,20 @@ async function main() {
         const [px, py, pz] = state.position || [];
         const [rx, ry, rz, rw] = state.rotation || [];
         const current = monsters.find(entry => entry.id === slotId);
+        const currentVersion = Number.isFinite(current?.version) ? current.version : -Infinity;
+        const incomingVersion = Number.isFinite(state.version) ? state.version : null;
+        if (incomingVersion != null && incomingVersion < currentVersion) {
+          return;
+        }
         if (state.modelPath && (!current || current.modelPath !== state.modelPath)) {
-          spawnMonsterInSlot(slotId, state.modelPath, current);
+          if (!current || (incomingVersion != null && incomingVersion > currentVersion)) {
+            spawnMonsterInSlot(slotId, state.modelPath, current, {
+              version: incomingVersion,
+              type: state.modelPath,
+              skipPersist: true
+            });
+          }
+          return;
         }
         const monster = monsters.find(entry => entry.id === slotId);
         if (!monster?.model) return;
@@ -1280,12 +1487,17 @@ async function main() {
         }
         if (typeof state.mode === 'string') {
           monster.model.userData.mode = state.mode;
-          monster.isDead = state.mode === 'dead';
         }
         if (typeof state.health === 'number') {
           monster.health = state.health;
           monster.model.userData.health = state.health;
         }
+        const aliveFlag = typeof state.mode === 'string' ? state.mode !== 'dead' : undefined;
+        monster.applyPersistedState?.({
+          hp: state.health,
+          alive: aliveFlag,
+          version: incomingVersion
+        });
         if (state.mode === 'dead' && state.health <= 0) {
           cleanupMonster(monster);
           monsters = monsters.filter(entry => entry.id !== slotId);
@@ -3264,37 +3476,40 @@ async function main() {
       monsterAnimAccumulator = 0;
     }
 
-    const isHost = !multiplayer || multiplayer.isHost;
-    if (isHost) {
-      ensureMonsters();
-      const nowMs = Date.now();
-      monsters.forEach(monster => {
-        if (!monster || !monster.model) return;
-        if (monster.isDead) {
-          const slotId = monster.id;
-          if (!respawnTimers.has(slotId)) {
-            cleanupMonster(monster);
-            monsters = monsters.filter(entry => entry.id !== slotId);
-            window.monsters = monsters;
-            const delay = THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
-            const timer = setTimeout(() => {
-              respawnTimers.delete(slotId);
-              spawnMonsterInSlot(slotId, getRandomMonsterModel());
-            }, delay);
-            respawnTimers.set(slotId, timer);
+    const isHostNow = !multiplayer || multiplayer.isHost;
+    if (isHostNow) {
+      if (monstersSeeded) {
+        ensureMonsters();
+        const nowMs = Date.now();
+        monsters.forEach(monster => {
+          if (!monster || !monster.model) return;
+          if (monster.isDead) {
+            const slotId = monster.id;
+            if (!respawnTimers.has(slotId)) {
+              cleanupMonster(monster);
+              monsters = monsters.filter(entry => entry.id !== slotId);
+              window.monsters = monsters;
+              const delay = THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
+              const timer = setTimeout(() => {
+                respawnTimers.delete(slotId);
+                spawnMonsterInSlot(slotId, getRandomMonsterModel());
+              }, delay);
+              respawnTimers.set(slotId, timer);
+            }
+            return;
           }
-          return;
-        }
-        if (PERF.throttleAI) {
-          const lastUpdate = monster.lastAIUpdateMs ?? 0;
-          if (nowMs - lastUpdate > 150) {
-            monster.lastAIUpdateMs = nowMs;
+          if (PERF.throttleAI) {
+            const lastUpdate = monster.lastAIUpdateMs ?? 0;
+            if (nowMs - lastUpdate > 150) {
+              monster.lastAIUpdateMs = nowMs;
+              monster.updateAI(monsterAnimDelta, playerModel, otherPlayers);
+            }
+          } else {
             monster.updateAI(monsterAnimDelta, playerModel, otherPlayers);
           }
-        } else {
-          monster.updateAI(monsterAnimDelta, playerModel, otherPlayers);
-        }
-      });
+          persistMonsterState(monster);
+        });
+      }
     } else {
       monsters.forEach(monster => {
         monster?.model && monster.update(monsterAnimDelta);
@@ -3314,10 +3529,19 @@ async function main() {
         const player = otherPlayers[remoteId];
         if (!localFix || !mapOrigin) {
           if (player?.model) {
-            player.model.visible = false;
+            player.model.visible = true;
           }
           if (player?.nameLabel) {
-            player.nameLabel.style.display = 'none';
+            player.nameLabel.style.display = 'block';
+          }
+          return;
+        }
+        if (!worldAnchorMatchesLocal(meta.worldAnchor)) {
+          if (player?.model) {
+            player.model.visible = true;
+          }
+          if (player?.nameLabel) {
+            player.nameLabel.style.display = 'block';
           }
           return;
         }
@@ -3425,10 +3649,20 @@ async function main() {
       playerModel,
       otherPlayers,
       multiplayer,
-      monsters
+      monsters,
+      sendMonsterAttack: sendMonsterAttackIntent,
+      onMonsterHit: handleMonsterDamage
     });
 
-    updateMeleeAttacks({ playerModel, otherPlayers, monsters, audioManager, multiplayer });
+    updateMeleeAttacks({
+      playerModel,
+      otherPlayers,
+      monsters,
+      audioManager,
+      multiplayer,
+      sendMonsterAttack: sendMonsterAttackIntent,
+      onMonsterHit: handleMonsterDamage
+    });
 
     breakManager.update();
 
