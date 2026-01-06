@@ -2943,6 +2943,7 @@ async function main() {
 
   function respawnPlayer() {
     setStat('health', 100);
+    setStat('hunger', 100);
     setStat('energy', 100);
     const spawn = getSpawnPosition();
     liftPositionToBuildingTop(spawn, 0.6);
