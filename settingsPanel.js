@@ -12,9 +12,6 @@ const TABS = [
 ];
 const CHARACTER_STATS = [
   { key: 'level', label: 'Level' },
-  { key: 'health', label: 'Health' },
-  { key: 'hunger', label: 'Hunger' },
-  { key: 'energy', label: 'Energy' },
   { key: 'strength', label: 'Strength' },
   { key: 'agility', label: 'Agility' },
   { key: 'smarts', label: 'Smarts' },
