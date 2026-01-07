@@ -11,6 +11,8 @@ const JUMP_FORCE = 5;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
+const CLIMB_SPEED = 1.6;
+const CLIMB_SNAP_DISTANCE = 0.6;
 
 export class PlayerControls {
   constructor({ scene, camera, playerModel, renderer, multiplayer, spawnProjectile, projectiles, audioManager, initialAmmo, onAmmoChange }) {
@@ -37,6 +39,8 @@ export class PlayerControls {
     this.isGrabbed = false;
     this.grabberId = null;
     this.externalGrabPos = null;
+    this.isClimbing = false;
+    this.activeClimbArea = null;
 
     this.vehicle = null;
 
@@ -69,6 +73,7 @@ export class PlayerControls {
     this.jumpButtonPressed = false;
     this.moveForward = 0;
     this.moveRight = 0;
+    this.deltaSeconds = 0;
     
     // Initial player position
     const spawn = getSpawnPosition();
@@ -519,6 +524,95 @@ export class PlayerControls {
     }
   }
 
+  getClimbInput(moveDirection, cameraDirection) {
+    if (this.isMobile) {
+      if (this.joystickForce > 0.1 && moveDirection.length() > 0) {
+        const forwardDot = moveDirection.dot(cameraDirection);
+        if (forwardDot > 0.25) return 1;
+        if (forwardDot < -0.25) return -1;
+      }
+      return 0;
+    }
+    if (this.keysPressed.has("w")) return 1;
+    if (this.keysPressed.has("s")) return -1;
+    return 0;
+  }
+
+  findClimbableArea(position) {
+    const areas = window.climbableAreas || [];
+    if (!areas.length) return null;
+    let closest = null;
+    let closestDist = Infinity;
+    for (const area of areas) {
+      if (!area?.box) continue;
+      const padded = area.box.clone().expandByScalar(CLIMB_SNAP_DISTANCE);
+      if (!padded.containsPoint(position)) continue;
+      const dist = area.center?.distanceTo(position) ?? 0;
+      if (dist < closestDist) {
+        closest = area;
+        closestDist = dist;
+      }
+    }
+    return closest;
+  }
+
+  startClimbing(area) {
+    this.isClimbing = true;
+    this.activeClimbArea = area;
+    this.canJump = false;
+  }
+
+  stopClimbing() {
+    if (!this.isClimbing) return;
+    const actions = this.playerModel?.userData?.actions;
+    if (actions?.climb) {
+      actions.climb.paused = false;
+      actions.climb.timeScale = 1;
+    }
+    this.isClimbing = false;
+    this.activeClimbArea = null;
+  }
+
+  updateClimbing({ area, climbInput, position, velocity, groundExpectedY }) {
+    const actions = this.playerModel?.userData?.actions;
+    if (actions?.climb) {
+      const current = this.playerModel.userData.currentAction;
+      if (current !== 'climb') {
+        actions[current]?.fadeOut(0.1);
+        actions.climb.reset().fadeIn(0.1).play();
+        this.playerModel.userData.currentAction = 'climb';
+      }
+      if (climbInput !== 0) {
+        actions.climb.paused = false;
+        actions.climb.timeScale = climbInput > 0 ? 1 : -1;
+        const clipDuration = actions.climb.getClip()?.duration ?? 0;
+        if (climbInput < 0 && actions.climb.time <= 0.05 && clipDuration) {
+          actions.climb.time = clipDuration;
+        }
+      } else {
+        actions.climb.paused = true;
+      }
+    }
+
+    const delta = this.deltaSeconds || 0.016;
+    const direction = climbInput === 0 ? 0 : climbInput > 0 ? 1 : -1;
+    let newY = position.y + direction * CLIMB_SPEED * delta;
+    const minY = Math.max(groundExpectedY, area.minY ?? groundExpectedY);
+    const maxY = area.maxY ?? position.y;
+    if (direction > 0 && newY >= maxY) {
+      newY = maxY;
+    } else if (direction < 0 && newY <= minY) {
+      newY = minY;
+    }
+
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setTranslation({ x: position.x, y: newY, z: position.z }, true);
+
+    if (direction < 0 && newY <= minY + 0.01) {
+      this.stopClimbing();
+    }
+  }
+
   processMovement() {
     if (!this.enabled) return;
 
@@ -608,6 +702,7 @@ export class PlayerControls {
     }
     const moveDirection = new THREE.Vector3(0, 0, 0);
     const movementLocked = ['mutantPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
+    const position = new THREE.Vector3(t.x, t.y, t.z);
     if (!movementLocked) {
       if (this.isMobile) {
         if (this.joystickForce > 0.1) {
@@ -650,6 +745,26 @@ export class PlayerControls {
     } else if (movement.length() > 0) {
       this.lastMoveDirection.copy(movement);
     }
+    if (this.isClimbing) {
+      movement.set(0, 0, 0);
+    }
+
+    const climbInput = this.getClimbInput(moveDirection, cameraDirection);
+    const climbArea = this.findClimbableArea(position);
+    if (this.isClimbing || (climbArea && climbInput !== 0)) {
+      if (!climbArea) {
+        this.stopClimbing();
+      } else {
+        if (!this.isClimbing) this.startClimbing(climbArea);
+        this.updateClimbing({
+          area: climbArea,
+          climbInput,
+          position,
+          velocity: vel,
+          groundExpectedY
+        });
+      }
+    }
     if (this.isKnocked) {
       if (Math.hypot(vel.x, vel.y, vel.z) < 0.05) {
         this.isKnocked = false;
@@ -659,7 +774,7 @@ export class PlayerControls {
         actions?.idle?.reset().fadeIn(0.2).play();
         this.playerModel.userData.currentAction = 'idle';
       }
-    } else {
+    } else if (!this.isClimbing) {
       const speed = this.isInWater ? SWIM_SPEED : CHARACTER_MOVEMENT.runSpeed;
       this.body.setLinvel({ x: movement.x * speed, y: vel.y, z: movement.z * speed }, true);
       }
@@ -770,7 +885,7 @@ export class PlayerControls {
         this.camera.up.set(0, 1, 0);
       }
       const actions = this.playerModel.userData.actions;
-      if (actions && !this.isKnocked && !this.currentSpecialAction) {
+      if (actions && !this.isKnocked && !this.currentSpecialAction && !this.isClimbing) {
         let actionName;
         if (this.vehicle && this.vehicle.type === 'surfboard') {
           if (this.isInWater) {
@@ -867,6 +982,7 @@ export class PlayerControls {
       const delta = (now - this.lastUpdate) / 1000;
       this.lastUpdate = now;
       this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
+      this.deltaSeconds = delta;
 
       if (this.playerModel && this.playerModel.userData.mixer) {
         this.playerModel.userData.mixer.update(delta);

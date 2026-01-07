@@ -245,7 +245,8 @@ export function createPlayerModel(
             die: 'Dying.fbx',
             float: 'Floating.fbx',
             swim: 'Swimming.fbx',
-            sit: 'Sitting Rubbing Arm.fbx'
+            sit: 'Sitting Rubbing Arm.fbx',
+            climb: 'Climbing Up Wall.fbx'
           };
 
           const promises = Object.entries(animationFiles).map(([name, file]) => {
@@ -264,6 +265,9 @@ export function createPlayerModel(
                   ) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
+                  }
+                  if (name === 'climb') {
+                    action.loop = THREE.LoopRepeat;
                   }
                   actions[name] = action;
                   resolve();

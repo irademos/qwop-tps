@@ -1,6 +1,7 @@
 import * as THREE from "three";
 // import { BufferGeometryUtils } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import ClipperLib from "clipper-lib";
 import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 
@@ -17,6 +18,9 @@ const WALL_THICKNESS = 0.5;
 const CUT_DEPTH = WALL_THICKNESS + 0.35; // clear wall reliably
 const FLOOR_THICKNESS = 0.05;
 const ROOF_THICKNESS = 0.05;
+const LADDER_WIDTH = 1.0;
+const LADDER_DEPTH = 0.8;
+const LADDER_OFFSET = 0.08;
 
 // --- building texture ---
 const textureLoader = new THREE.TextureLoader();
@@ -387,6 +391,65 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   return cutters;
 }
 
+function buildLadderPlacement(bbox, disabledSide) {
+  if (!bbox || !disabledSide) return null;
+  const min = bbox.min;
+  const max = bbox.max;
+  const midX = (min.x + max.x) * 0.5;
+  const midZ = (min.z + max.z) * 0.5;
+  const bottomY = min.y;
+  const topY = max.y;
+
+  let position;
+  let rotationY = 0;
+  let climbBox;
+
+  switch (disabledSide) {
+    case "+Z":
+      position = new THREE.Vector3(midX, bottomY, max.z + LADDER_OFFSET);
+      rotationY = Math.PI;
+      climbBox = new THREE.Box3(
+        new THREE.Vector3(midX - LADDER_WIDTH * 0.5, bottomY, max.z),
+        new THREE.Vector3(midX + LADDER_WIDTH * 0.5, topY, max.z + LADDER_DEPTH)
+      );
+      break;
+    case "-Z":
+      position = new THREE.Vector3(midX, bottomY, min.z - LADDER_OFFSET);
+      rotationY = 0;
+      climbBox = new THREE.Box3(
+        new THREE.Vector3(midX - LADDER_WIDTH * 0.5, bottomY, min.z - LADDER_DEPTH),
+        new THREE.Vector3(midX + LADDER_WIDTH * 0.5, topY, min.z)
+      );
+      break;
+    case "+X":
+      position = new THREE.Vector3(max.x + LADDER_OFFSET, bottomY, midZ);
+      rotationY = -Math.PI / 2;
+      climbBox = new THREE.Box3(
+        new THREE.Vector3(max.x, bottomY, midZ - LADDER_WIDTH * 0.5),
+        new THREE.Vector3(max.x + LADDER_DEPTH, topY, midZ + LADDER_WIDTH * 0.5)
+      );
+      break;
+    case "-X":
+      position = new THREE.Vector3(min.x - LADDER_OFFSET, bottomY, midZ);
+      rotationY = Math.PI / 2;
+      climbBox = new THREE.Box3(
+        new THREE.Vector3(min.x - LADDER_DEPTH, bottomY, midZ - LADDER_WIDTH * 0.5),
+        new THREE.Vector3(min.x, topY, midZ + LADDER_WIDTH * 0.5)
+      );
+      break;
+    default:
+      return null;
+  }
+
+  return {
+    position,
+    rotationY,
+    climbBox,
+    bottomY,
+    topY
+  };
+}
+
 export function createBuildingsRenderer({ scene, camera } = {}) {
   const group = new THREE.Group();
   group.name = "osm-buildings";
@@ -420,8 +483,73 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   group.add(flatMesh);         // render
   group.add(collisionGroup);   // collision only
 
+  const ladderGroup = new THREE.Group();
+  ladderGroup.name = "building-ladders";
+  group.add(ladderGroup);
+
+  const ladderLoader = new GLTFLoader();
+  let ladderTemplate = null;
+  let ladderLoadPromise = null;
+  let ladderVersion = 0;
+
+  const climbableAreas = [];
+
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
+  }
+
+  function ensureLadderTemplate() {
+    if (ladderTemplate || ladderLoadPromise) return ladderLoadPromise;
+    ladderLoadPromise = ladderLoader.loadAsync('/assets/props/ladder.glb')
+      .then((gltf) => {
+        ladderTemplate = gltf.scene || gltf.scenes?.[0] || null;
+        if (ladderTemplate) {
+          ladderTemplate.traverse((node) => {
+            if (node.isMesh) {
+              node.castShadow = false;
+              node.receiveShadow = false;
+            }
+          });
+        }
+        return ladderTemplate;
+      })
+      .catch((err) => {
+        console.error('Failed to load ladder model:', err);
+        ladderTemplate = null;
+        return null;
+      });
+    return ladderLoadPromise;
+  }
+
+  function setLadders(placements) {
+    ladderVersion += 1;
+    const currentVersion = ladderVersion;
+    ladderGroup.clear();
+    climbableAreas.length = 0;
+    if (!placements.length) {
+      window.climbableAreas = [];
+      return;
+    }
+    ensureLadderTemplate()?.then((template) => {
+      if (!template || currentVersion !== ladderVersion) return;
+      ladderGroup.clear();
+      for (const placement of placements) {
+        const ladder = template.clone(true);
+        ladder.position.copy(placement.position);
+        ladder.rotation.y = placement.rotationY;
+        ladderGroup.add(ladder);
+      }
+    });
+    for (const placement of placements) {
+      const center = placement.climbBox.getCenter(new THREE.Vector3());
+      climbableAreas.push({
+        box: placement.climbBox,
+        center,
+        minY: placement.bottomY,
+        maxY: placement.topY
+      });
+    }
+    window.climbableAreas = climbableAreas;
   }
 
   function updateBuildings(geojson, boundsOverride) {
@@ -430,6 +558,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     if (polygons.length === 0) {
       extrudedMesh.visible = false;
       flatMesh.visible = false;
+      setLadders([]);
       return;
     }
 
@@ -437,6 +566,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     if (!bounds) {
       extrudedMesh.visible = false;
       flatMesh.visible = false;
+      setLadders([]);
       return;
     }
 
@@ -445,6 +575,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
     const flatGeometries = [];
     const extrudedResults = [];
+    const ladderPlacements = [];
 
     for (const polygon of polygons) {
       const shape = makeShape(polygon.rings, bounds, lonScale);
@@ -488,6 +619,9 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
           for (const g of cutters) g.dispose();
         }
 
+        const ladderPlacement = buildLadderPlacement(geom.boundingBox, disabledSide);
+        if (ladderPlacement) ladderPlacements.push(ladderPlacement);
+
         extrudedResults.push(geom);
       } else {
         const geom = new THREE.ShapeGeometry(shape);
@@ -528,6 +662,8 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
       flatMesh.geometry = new THREE.BufferGeometry();
       flatMesh.visible = false;
     }
+
+    setLadders(ladderPlacements);
   }
 
   function dispose() {
