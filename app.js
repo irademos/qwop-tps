@@ -1217,34 +1217,67 @@ async function main() {
   let buildingColliderBody = null;
   const rebuildBuildingColliders = () => {
     if (!rapierWorld) return;
+
     if (buildingColliderBody && rapierWorld.getRigidBody(buildingColliderBody.handle)) {
       rapierWorld.removeRigidBody(buildingColliderBody);
       buildingColliderBody = null;
     }
-    const collisionMesh = buildingsRenderer?.getCollisionMesh?.();
-    const geometry = collisionMesh?.geometry;
-    if (!collisionMesh || !geometry?.attributes?.position || geometry.attributes.position.count === 0) {
-      return;
-    }
-    const positions = geometry.attributes.position.array;
-    const vertices = new Float32Array(positions);
-    let indices;
-    if (geometry.index?.array?.length) {
-      indices = new Uint32Array(geometry.index.array);
-    } else {
-      const count = geometry.attributes.position.count;
-      indices = new Uint32Array(count);
-      for (let i = 0; i < count; i += 1) {
-        indices[i] = i;
+
+    const meshes = buildingsRenderer?.getCollisionMeshes?.() ?? [];
+    if (!meshes.length) return;
+
+    // ensure transforms are current
+    for (const m of meshes) m.updateMatrixWorld(true);
+
+    const allVerts = [];
+    const allIndices = [];
+    let vertOffset = 0;
+    const tmpV = new THREE.Vector3();
+
+    for (const obj of meshes) {
+      if (!obj?.isMesh) continue;
+      const geom = obj.geometry;
+      const posAttr = geom?.attributes?.position;
+      if (!posAttr || posAttr.count === 0) continue;
+
+      // verts
+      for (let i = 0; i < posAttr.count; i++) {
+        tmpV.fromBufferAttribute(posAttr, i).applyMatrix4(obj.matrixWorld);
+        allVerts.push(tmpV.x, tmpV.y, tmpV.z);
       }
+
+      // indices
+      const indexAttr = geom.index;
+      if (indexAttr?.array?.length) {
+        const idx = indexAttr.array;
+        for (let i = 0; i < idx.length; i++) allIndices.push(vertOffset + idx[i]);
+      } else {
+        if (posAttr.count % 3 !== 0) continue; // not triangles
+        for (let i = 0; i < posAttr.count; i += 3) {
+          allIndices.push(vertOffset + i, vertOffset + i + 1, vertOffset + i + 2);
+        }
+      }
+
+      vertOffset += posAttr.count;
     }
+
+    if (allVerts.length === 0 || allIndices.length === 0) return;
+
+    const vertices = new Float32Array(allVerts);
+    const indices = new Uint32Array(allIndices);
+
     const rbDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0);
     buildingColliderBody = rapierWorld.createRigidBody(rbDesc);
+
     const colDesc = RAPIER.ColliderDesc.trimesh(vertices, indices)
       .setRestitution(0)
       .setFriction(1);
-    rapierWorld.createCollider(colDesc, buildingColliderBody);
+
+    const collider = rapierWorld.createCollider(colDesc, buildingColliderBody);
+    console.log('building collider created', String(collider.handle), 'verts', vertices.length / 3, 'idx', indices.length);
   };
+
+
 
   const getMonsterSpawnPosition = () => {
     for (let attempt = 0; attempt < MONSTER_SPAWN_ATTEMPTS; attempt += 1) {

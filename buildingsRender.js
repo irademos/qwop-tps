@@ -1,12 +1,109 @@
 import * as THREE from "three";
 // import { BufferGeometryUtils } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import ClipperLib from "clipper-lib";
+import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const DEFAULT_HEIGHT = 10;
 const LEVEL_HEIGHT = 3;
 const EXTRUDE_DISTANCE = 250;
 const BASE_ELEVATION = 0.0;
+
+const CLIPPER_SCALE = 10000;
+
+// Shell params
+const WALL_THICKNESS = 0.5;
+const CUT_DEPTH = WALL_THICKNESS + 0.35; // clear wall reliably
+const FLOOR_THICKNESS = 0.05;
+const ROOF_THICKNESS = 0.05;
+
+// Add these near your other constants
+const RAMP_SIDE = "+Z";          // "+Z" | "-Z" | "+X" | "-X"
+const RAMP_WIDTH = 1.4;          // how far it sticks out from the wall
+const RAMP_LENGTH = 8.0;         // along-the-wall length
+const RAMP_HEIGHT_FRACTION = 1;  // 1 = to roof, 0.5 = half height
+const RAMP_CLEARANCE = 0.02;     // tiny gap to avoid z-fighting
+const EXTRUDE_DISTANCE_RAMP = 80; // only build ramps for nearby buildings
+const RAMP_THICKNESS = 0.18;   // vertical thickness of the ramp mesh
+const RAMP_INSET_ENDS = 0.2;   // keep slightly inside corners
+
+
+
+
+const rampMaterial = new THREE.MeshStandardMaterial({
+  color: 0x777777,
+  roughness: 0.95,
+  metalness: 0.0
+});
+
+// helper: build a ramp that hugs a wall (parallel to wall plane)
+function buildRampForBBox(bbox, roofY) {
+  const min = bbox.min, max = bbox.max;
+
+  const midX = (min.x + max.x) * 0.5;
+  const midZ = (min.z + max.z) * 0.5;
+
+  const roofTargetY = Math.max(BASE_ELEVATION + 0.5, roofY * RAMP_HEIGHT_FRACTION);
+  const rise = Math.max(0.5, roofTargetY - BASE_ELEVATION);
+
+  let lengthAlongWall = 1;
+  let widthOutFromWall = RAMP_WIDTH;
+
+  let geo, mesh;
+
+  if (RAMP_SIDE === "+Z" || RAMP_SIDE === "-Z") {
+    // along X from corner to corner
+    lengthAlongWall = Math.max(1, (max.x - min.x) - RAMP_INSET_ENDS * 2);
+
+    // thin long strip: (lengthAlongWall, thickness, width)
+    geo = new THREE.BoxGeometry(lengthAlongWall, RAMP_THICKNESS, widthOutFromWall);
+    mesh = new THREE.Mesh(geo, rampMaterial);
+
+    // place outside the wall
+    const zWall = (RAMP_SIDE === "+Z") ? max.z : min.z;
+    const zOut = (RAMP_SIDE === "+Z")
+      ? zWall + (widthOutFromWall * 0.5 + RAMP_CLEARANCE)
+      : zWall - (widthOutFromWall * 0.5 + RAMP_CLEARANCE);
+
+    // put it starting at ground, then rotate about its center
+    mesh.position.set(midX, BASE_ELEVATION + RAMP_THICKNESS * 0.5, zOut);
+
+    // slope ALONG X (corner-to-corner)
+    const tilt = Math.atan2(rise, lengthAlongWall);
+    mesh.rotation.z = -tilt;
+
+    // after rotation, its "high" end will lift; keep it from going below ground
+    mesh.position.y = BASE_ELEVATION + (RAMP_THICKNESS * 0.5) + 0.02;
+  } else {
+    // along Z from corner to corner
+    lengthAlongWall = Math.max(1, (max.z - min.z) - RAMP_INSET_ENDS * 2);
+
+    geo = new THREE.BoxGeometry(widthOutFromWall, RAMP_THICKNESS, lengthAlongWall);
+    mesh = new THREE.Mesh(geo, rampMaterial);
+
+    const xWall = (RAMP_SIDE === "+X") ? max.x : min.x;
+    const xOut = (RAMP_SIDE === "+X")
+      ? xWall + (widthOutFromWall * 0.5 + RAMP_CLEARANCE)
+      : xWall - (widthOutFromWall * 0.5 + RAMP_CLEARANCE);
+
+    mesh.position.set(xOut, BASE_ELEVATION + RAMP_THICKNESS * 0.5, midZ);
+
+    // slope along Z
+    const tilt = Math.atan2(rise, lengthAlongWall);
+    mesh.rotation.x = (RAMP_SIDE === "+X") ? tilt : -tilt;
+
+    mesh.position.y = BASE_ELEVATION + (RAMP_THICKNESS * 0.5) + 0.02;
+  }
+
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.userData.isRamp = true;
+  return mesh;
+}
+
+
+
 
 // --- building texture ---
 const textureLoader = new THREE.TextureLoader();
@@ -26,7 +123,6 @@ const buildingBase = loadTex(
   { srgb: true, repeat: repeat_val }
 );
 
-// Optional maps (use if you have them)
 const buildingNormal = loadTex(
   "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_nor_gl_4k.jpg",
   { repeat: repeat_val }
@@ -35,10 +131,6 @@ const buildingRough = loadTex(
   "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_rough_4k.jpg",
   { repeat: repeat_val }
 );
-// const buildingAO = loadTex(
-//   "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_ao_4k.jpg",
-//   { repeat: repeat_val }
-// );
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -91,9 +183,7 @@ function computeBoundsFromPolygons(polygons) {
     }
   }
 
-  if (!Number.isFinite(minLon) || count === 0) {
-    return null;
-  }
+  if (!Number.isFinite(minLon) || count === 0) return null;
 
   return {
     centerLon: (minLon + maxLon) / 2,
@@ -105,9 +195,7 @@ function normalizeRing(ring) {
   if (!ring || ring.length === 0) return [];
   const first = ring[0];
   const last = ring[ring.length - 1];
-  if (first[0] === last[0] && first[1] === last[1]) {
-    return ring.slice(0, -1);
-  }
+  if (first[0] === last[0] && first[1] === last[1]) return ring.slice(0, -1);
   return ring;
 }
 
@@ -126,6 +214,7 @@ function makeShape(rings, origin, lonScale) {
   if (!rings || rings.length === 0) return null;
   const outerPoints = ringToPoints(rings[0], origin, lonScale);
   if (outerPoints.length < 3) return null;
+
   const shape = new THREE.Shape(outerPoints);
   for (let i = 1; i < rings.length; i += 1) {
     const holePoints = ringToPoints(rings[i], origin, lonScale);
@@ -150,17 +239,222 @@ function estimateCentroid(points) {
 function resolveHeight(properties = {}) {
   if (properties.height != null) {
     const parsed = parseFloat(properties.height);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
+    if (Number.isFinite(parsed)) return parsed;
   }
   if (properties["building:levels"] != null) {
     const parsed = parseFloat(properties["building:levels"]);
-    if (Number.isFinite(parsed)) {
-      return parsed * LEVEL_HEIGHT;
-    }
+    if (Number.isFinite(parsed)) return parsed * LEVEL_HEIGHT;
   }
   return DEFAULT_HEIGHT;
+}
+
+// ----------------------
+// Clipper helpers (2D inset)
+// ----------------------
+function v2ToClipperPath(points) {
+  return points.map(p => ({
+    X: Math.round(p.x * CLIPPER_SCALE),
+    Y: Math.round(p.y * CLIPPER_SCALE)
+  }));
+}
+
+function clipperPathToV2(path) {
+  return path.map(p => new THREE.Vector2(p.X / CLIPPER_SCALE, p.Y / CLIPPER_SCALE));
+}
+
+// IMPORTANT: use shape.getPoints() (outer) and ensure no duplicate last point for Clipper
+function insetShapeOuterRing(shape2D, insetMeters) {
+  const outer = shape2D.getPoints();
+  if (!outer || outer.length < 3) return null;
+
+  const subj = [v2ToClipperPath(outer)];
+  const co = new ClipperLib.ClipperOffset(2, 0.25 * CLIPPER_SCALE);
+  co.AddPaths(subj, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+
+  const solution = new ClipperLib.Paths();
+  co.Execute(solution, -insetMeters * CLIPPER_SCALE);
+
+  if (!solution || solution.length === 0) return null;
+
+  // choose largest polygon
+  let best = solution[0];
+  let bestArea = Math.abs(ClipperLib.Clipper.Area(best));
+  for (let i = 1; i < solution.length; i++) {
+    const a = Math.abs(ClipperLib.Clipper.Area(solution[i]));
+    if (a > bestArea) {
+      best = solution[i];
+      bestArea = a;
+    }
+  }
+
+  const pts = clipperPathToV2(best);
+  if (pts.length < 3) return null;
+
+  return new THREE.Shape(pts);
+}
+
+// ----------------------
+// CSG helpers
+// ----------------------
+function csgSubtractGeom(baseGeom, cutterGeoms) {
+  if (!cutterGeoms?.length) return baseGeom;
+
+  const mergedCutters = mergeGeometries(cutterGeoms, false);
+  const evaluator = new Evaluator();
+
+  const a = new Brush(baseGeom);
+  const b = new Brush(mergedCutters);
+
+  const result = evaluator.evaluate(a, b, SUBTRACTION);
+
+  mergedCutters.dispose();
+  baseGeom.dispose();
+  return result.geometry;
+}
+
+function hollowExtrudedGeometry(outerGeom, originalShape2D, {
+  wall = WALL_THICKNESS,
+  floor = FLOOR_THICKNESS,
+  roof = ROOF_THICKNESS
+} = {}) {
+  // outerGeom MUST have bbox
+  if (!outerGeom.boundingBox) outerGeom.computeBoundingBox();
+
+  const innerShape = insetShapeOuterRing(originalShape2D, wall);
+  if (!innerShape) return outerGeom; // too small to inset
+
+  // height axis after rotateX(-pi/2) is Y; bbox already reflects that
+  const fullH = outerGeom.boundingBox.max.y - outerGeom.boundingBox.min.y;
+  const innerH = Math.max(0.1, fullH - floor - roof);
+
+  const innerGeom = new THREE.ExtrudeGeometry(innerShape, { depth: innerH, bevelEnabled: false });
+  innerGeom.rotateX(-Math.PI / 2);
+  innerGeom.translate(0, BASE_ELEVATION + floor, 0);
+  innerGeom.computeBoundingBox();
+
+  // outer - inner
+  return csgSubtractGeom(outerGeom, [innerGeom]);
+}
+
+// Modify buildWindowDoorCuttersFromBBox to accept a "disabledSide" and skip that wall
+function buildWindowDoorCuttersFromBBox(bbox, {
+  windowW = 1.0,
+  windowH = 1.0,
+  windowBottom = 1.2,
+  windowSpacing = 2.2,
+  doorW = 1.4,
+  doorH = 2.2,
+  inset = 0.02,
+  disabledSide = null // "+Z" | "-Z" | "+X" | "-X"
+} = {}) {
+  const cutters = [];
+  const min = bbox.min, max = bbox.max;
+  const sizeX = max.x - min.x;
+  const sizeZ = max.z - min.z;
+
+  if (sizeX < windowW * 1.5 || sizeZ < windowW * 1.5) return cutters;
+
+  const yWindowCenter = windowBottom + windowH * 0.5;
+  const yDoorCenter = doorH * 0.5;
+  // --- door exclusion zones (prevents windows overlapping doors) ---
+  const doorTop = doorH;
+
+  // center of the bbox footprint
+  const midX = (min.x + max.x) * 0.5;
+  const midZ = (min.z + max.z) * 0.5;
+
+  // padding around door opening so nearby windows don't clip
+  const doorClearance = 0.35;
+
+  // for ±Z walls, door spans X
+  const doorMinX = midX - doorW * 0.5 - doorClearance;
+  const doorMaxX = midX + doorW * 0.5 + doorClearance;
+
+  // for ±X walls, door spans Z (use doorW as its horizontal span)
+  const doorMinZ = midZ - doorW * 0.5 - doorClearance;
+  const doorMaxZ = midZ + doorW * 0.5 + doorClearance;
+
+
+  function addWindowsOnZWall(zWall, sideTag) {
+    if (disabledSide === sideTag) return;
+
+    const usable = sizeX - windowW * 1.2;
+    const count = Math.max(1, Math.floor(usable / windowSpacing));
+    for (let i = 0; i < count; i++) {
+      const t = (count === 1) ? 0.5 : (i + 1) / (count + 1);
+      const x = min.x + t * sizeX;
+
+      // Skip windows that would overlap the door area on ±Z walls
+      const overlapsDoorZone = (x >= doorMinX && x <= doorMaxX) && (windowBottom < doorTop);
+      if (overlapsDoorZone) continue;
+
+      if (x < min.x + 1.0 || x > max.x - 1.0) continue;
+
+      const g = new THREE.BoxGeometry(windowW, windowH, CUT_DEPTH);
+      const zCenter = zWall + (zWall === max.z ? -(CUT_DEPTH * 0.5 - inset) : (CUT_DEPTH * 0.5 - inset));
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(x, yWindowCenter, zCenter));
+      cutters.push(g);
+    }
+  }
+
+  function addWindowsOnXWall(xWall, sideTag) {
+    if (disabledSide === sideTag) return;
+
+    const usable = sizeZ - windowW * 1.2;
+    const count = Math.max(1, Math.floor(usable / windowSpacing));
+    for (let i = 0; i < count; i++) {
+      const t = (count === 1) ? 0.5 : (i + 1) / (count + 1);
+      const z = min.z + t * sizeZ;
+
+      // Skip windows that would overlap the door area on ±X walls
+      const overlapsDoorZone = (z >= doorMinZ && z <= doorMaxZ) && (windowBottom < doorTop);
+      if (overlapsDoorZone) continue;
+
+      if (z < min.z + 1.0 || z > max.z - 1.0) continue;
+
+      const g = new THREE.BoxGeometry(CUT_DEPTH, windowH, windowW);
+      const xCenter = xWall + (xWall === max.x ? -(CUT_DEPTH * 0.5 - inset) : (CUT_DEPTH * 0.5 - inset));
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(xCenter, yWindowCenter, z));
+      cutters.push(g);
+    }
+  }
+
+  addWindowsOnZWall(max.z, "+Z");
+  addWindowsOnZWall(min.z, "-Z");
+  addWindowsOnXWall(max.x, "+X");
+  addWindowsOnXWall(min.x, "-X");
+
+  // Doors (skip disabled side)
+  if (disabledSide !== "+Z") {
+    const g = new THREE.BoxGeometry(doorW, doorH, CUT_DEPTH);
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+      (min.x + max.x) * 0.5, yDoorCenter, max.z - (CUT_DEPTH * 0.5 - inset)
+    ));
+    cutters.push(g);
+  }
+  if (disabledSide !== "-Z") {
+    const g = new THREE.BoxGeometry(doorW, doorH, CUT_DEPTH);
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+      (min.x + max.x) * 0.5, yDoorCenter, min.z + (CUT_DEPTH * 0.5 - inset)
+    ));
+    cutters.push(g);
+  }
+  if (disabledSide !== "+X") {
+    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorW);
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+      max.x - (CUT_DEPTH * 0.5 - inset), yDoorCenter, (min.z + max.z) * 0.5
+    ));
+    cutters.push(g);
+  }
+  if (disabledSide !== "-X") {
+    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorW);
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+      min.x + (CUT_DEPTH * 0.5 - inset), yDoorCenter, (min.z + max.z) * 0.5
+    ));
+    cutters.push(g);
+  }
+
+  return cutters;
 }
 
 export function createBuildingsRenderer({ scene, camera } = {}) {
@@ -168,39 +462,46 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   group.name = "osm-buildings";
   scene?.add(group);
 
+  const rampsGroup = new THREE.Group();
+  rampsGroup.name = "building-ramps";
+
   const extrudedMaterial = new THREE.MeshStandardMaterial({
     map: buildingBase,
     normalMap: buildingNormal,
     roughnessMap: buildingRough,
     roughness: 1.0,
-    metalness: 0.0
-    // aoMap: buildingAO, // if you enable AO, see uv2 note below
+    metalness: 0.0,
   });
 
-  const flatMaterial = new THREE.MeshStandardMaterial({
-    color: 0x9b9b9b,
-    roughness: 0.95,
-    metalness: 0.0
-  });
+  extrudedMaterial.needsUpdate = true;
+
+  const flatMaterial = new THREE.MeshStandardMaterial({ /* ... */ });
 
   const extrudedMesh = new THREE.Mesh(new THREE.BufferGeometry(), extrudedMaterial);
   const flatMesh = new THREE.Mesh(new THREE.BufferGeometry(), flatMaterial);
-  extrudedMesh.castShadow = true;
-  extrudedMesh.receiveShadow = true;
-  flatMesh.receiveShadow = true;
-  extrudedMesh.userData.isBuildingSolid = true;
-  flatMesh.userData.isBuildingSurface = true;
 
-  group.add(extrudedMesh);
-  group.add(flatMesh);
+  const extrudedColliderMesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+  extrudedColliderMesh.visible = false;
+  extrudedColliderMesh.name = "extruded-collider";
+
+  // Collision root owns the solid meshes + ramps
+  const collisionGroup = new THREE.Group();
+  collisionGroup.name = "building-collision";
+  collisionGroup.add(rampsGroup);
+  collisionGroup.add(extrudedColliderMesh);
+
+  group.add(extrudedMesh);     // render
+  group.add(flatMesh);         // render
+  group.add(collisionGroup);   // collision only
+
 
   function disposeGeometry(mesh) {
-    if (mesh.geometry) {
-      mesh.geometry.dispose();
-    }
+    if (mesh.geometry) mesh.geometry.dispose();
   }
 
   function updateBuildings(geojson, boundsOverride) {
+    rampsGroup.clear(); // regenerate ramps for current view (or add caching later)
+
     const polygons = collectBuildingPolygons(geojson);
     if (polygons.length === 0) {
       extrudedMesh.visible = false;
@@ -218,8 +519,8 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     const lonScale = metersPerDegreeLon(bounds.centerLat);
     const cameraPos = camera?.position ?? new THREE.Vector3();
 
-    const extrudedGeometries = [];
     const flatGeometries = [];
+    const extrudedResults = [];
 
     for (const polygon of polygons) {
       const shape = makeShape(polygon.rings, bounds, lonScale);
@@ -232,63 +533,91 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
       const height = resolveHeight(polygon.properties);
 
       if (distance <= EXTRUDE_DISTANCE) {
-        const geometry = new THREE.ExtrudeGeometry(shape, {
-          depth: height,
-          bevelEnabled: false
+        // 1) Outer solid
+        let geom = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+        geom.rotateX(-Math.PI / 2);
+        geom.translate(0, BASE_ELEVATION, 0);
+        geom.computeBoundingBox();
+
+        // compute roof height from bbox (after rotate/translate)
+        const roofY = geom.boundingBox.max.y;
+
+        // Add a ramp only if very near
+        if (distance <= EXTRUDE_DISTANCE_RAMP) {
+          const ramp = buildRampForBBox(geom.boundingBox, roofY);
+          rampsGroup.add(ramp);
+        }
+
+        // 2) Hollow it (shell)
+        geom = hollowExtrudedGeometry(geom, shape, {
+          wall: WALL_THICKNESS,
+          floor: FLOOR_THICKNESS,
+          roof: ROOF_THICKNESS
         });
-        geometry.rotateX(-Math.PI / 2);
-        geometry.translate(0, BASE_ELEVATION, 0);
-        extrudedGeometries.push(geometry);
+        if (!geom.boundingBox) geom.computeBoundingBox();
+
+        // Cut windows/doors, but disable the ramp side so no openings there
+        const cutters = buildWindowDoorCuttersFromBBox(geom.boundingBox, {
+          windowW: 1.0,
+          windowH: 1.0,
+          windowBottom: 1.3,
+          windowSpacing: 2.4,
+          doorW: 1.5,
+          doorH: 2.3,
+          disabledSide: (distance <= EXTRUDE_DISTANCE_RAMP) ? RAMP_SIDE : null
+        });
+
+        if (cutters.length) {
+          geom = csgSubtractGeom(geom, cutters);
+          for (const g of cutters) g.dispose();
+        }
+
+        extrudedResults.push(geom);
       } else {
-        const geometry = new THREE.ShapeGeometry(shape);
-        geometry.rotateX(-Math.PI / 2);
-        geometry.translate(0, BASE_ELEVATION, 0);
-        flatGeometries.push(geometry);
+        const geom = new THREE.ShapeGeometry(shape);
+        geom.rotateX(-Math.PI / 2);
+        geom.translate(0, BASE_ELEVATION, 0);
+        flatGeometries.push(geom);
       }
     }
 
     disposeGeometry(extrudedMesh);
     disposeGeometry(flatMesh);
 
-    if (extrudedGeometries.length > 0) {
-      const merged = mergeGeometries(extrudedGeometries, false);
+    if (extrudedResults.length > 0) {
+      const merged = mergeGeometries(extrudedResults, false);
       merged.computeBoundingSphere();
-      // if (merged.attributes.uv && !merged.attributes.uv2) {
-      //   merged.setAttribute("uv2", merged.attributes.uv);
-      // }
 
-      extrudedMesh.geometry = merged;
+      extrudedMesh.geometry = merged;               // render
+      extrudedColliderMesh.geometry = merged.clone(); // collision (clone to avoid shared dispose issues)
+
       extrudedMesh.visible = true;
+      extrudedColliderMesh.visible = false;
+
+      for (const g of extrudedResults) g.dispose();
     } else {
       extrudedMesh.geometry = new THREE.BufferGeometry();
+      extrudedColliderMesh.geometry = new THREE.BufferGeometry();
       extrudedMesh.visible = false;
     }
+
 
     if (flatGeometries.length > 0) {
       const merged = mergeGeometries(flatGeometries, false);
       merged.computeBoundingSphere();
-      // if (merged.attributes.uv && !merged.attributes.uv2) {
-      //   merged.setAttribute("uv2", merged.attributes.uv);
-      // }
-
       flatMesh.geometry = merged;
       flatMesh.visible = true;
+      for (const g of flatGeometries) g.dispose();
     } else {
       flatMesh.geometry = new THREE.BufferGeometry();
       flatMesh.visible = false;
-    }
-
-    for (const geometry of extrudedGeometries) {
-      geometry.dispose();
-    }
-    for (const geometry of flatGeometries) {
-      geometry.dispose();
     }
   }
 
   function dispose() {
     disposeGeometry(extrudedMesh);
     disposeGeometry(flatMesh);
+    disposeGeometry(extrudedColliderMesh);
     extrudedMaterial.dispose();
     flatMaterial.dispose();
     group.clear();
@@ -298,7 +627,13 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   return {
     group,
     updateBuildings,
-    getCollisionMesh: () => (extrudedMesh.visible ? extrudedMesh : null),
+    getCollisionMesh: () => collisionGroup,
+    getCollisionMeshes: () => {
+      const meshes = [];
+      if (extrudedColliderMesh.geometry?.attributes?.position?.count) meshes.push(extrudedColliderMesh);
+      for (const child of rampsGroup.children) meshes.push(child);
+      return meshes;
+    },
     dispose
   };
 }

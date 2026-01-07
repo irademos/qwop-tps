@@ -26,10 +26,12 @@
     "@dimforge/rapier3d": "^0.18.2",
     "@dimforge/rapier3d-compat": "^0.18.2",
     "canvas": "^3.2.0",
+    "clipper-lib": "^6.4.2",
     "firebase": "^11.6.1",
     "fs-extra": "^11.3.1",
     "jsdom": "^26.1.0",
     "three": "^0.176.0",
+    "three-bvh-csg": "^0.0.17",
     "three-stdlib": "^2.36.0"
   }
 }
