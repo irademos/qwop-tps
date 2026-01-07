@@ -9,7 +9,7 @@ const DEFAULT_HEIGHT = 10;
 const LEVEL_HEIGHT = 3;
 const EXTRUDE_DISTANCE = 250;
 const BASE_ELEVATION = 0.0;
-
+const DISABLED_OPENINGS_SIDE = "+Z"; // "+Z" | "-Z" | "+X" | "-X" | null
 const CLIPPER_SCALE = 10000;
 
 // Shell params
@@ -18,95 +18,25 @@ const CUT_DEPTH = WALL_THICKNESS + 0.35; // clear wall reliably
 const FLOOR_THICKNESS = 0.05;
 const ROOF_THICKNESS = 0.05;
 
-// Add these near your other constants
-const RAMP_SIDE = "+Z";          // "+Z" | "-Z" | "+X" | "-X"
-const RAMP_WIDTH = 1.4;          // how far it sticks out from the wall
-const RAMP_LENGTH = 8.0;         // along-the-wall length
-const RAMP_HEIGHT_FRACTION = 1;  // 1 = to roof, 0.5 = half height
-const RAMP_CLEARANCE = 0.02;     // tiny gap to avoid z-fighting
-const EXTRUDE_DISTANCE_RAMP = 80; // only build ramps for nearby buildings
-const RAMP_THICKNESS = 0.18;   // vertical thickness of the ramp mesh
-const RAMP_INSET_ENDS = 0.2;   // keep slightly inside corners
-
-
-
-
-const rampMaterial = new THREE.MeshStandardMaterial({
-  color: 0x777777,
-  roughness: 0.95,
-  metalness: 0.0
-});
-
-// helper: build a ramp that hugs a wall (parallel to wall plane)
-function buildRampForBBox(bbox, roofY) {
-  const min = bbox.min, max = bbox.max;
-
-  const midX = (min.x + max.x) * 0.5;
-  const midZ = (min.z + max.z) * 0.5;
-
-  const roofTargetY = Math.max(BASE_ELEVATION + 0.5, roofY * RAMP_HEIGHT_FRACTION);
-  const rise = Math.max(0.5, roofTargetY - BASE_ELEVATION);
-
-  let lengthAlongWall = 1;
-  let widthOutFromWall = RAMP_WIDTH;
-
-  let geo, mesh;
-
-  if (RAMP_SIDE === "+Z" || RAMP_SIDE === "-Z") {
-    // along X from corner to corner
-    lengthAlongWall = Math.max(1, (max.x - min.x) - RAMP_INSET_ENDS * 2);
-
-    // thin long strip: (lengthAlongWall, thickness, width)
-    geo = new THREE.BoxGeometry(lengthAlongWall, RAMP_THICKNESS, widthOutFromWall);
-    mesh = new THREE.Mesh(geo, rampMaterial);
-
-    // place outside the wall
-    const zWall = (RAMP_SIDE === "+Z") ? max.z : min.z;
-    const zOut = (RAMP_SIDE === "+Z")
-      ? zWall + (widthOutFromWall * 0.5 + RAMP_CLEARANCE)
-      : zWall - (widthOutFromWall * 0.5 + RAMP_CLEARANCE);
-
-    // put it starting at ground, then rotate about its center
-    mesh.position.set(midX, BASE_ELEVATION + RAMP_THICKNESS * 0.5, zOut);
-
-    // slope ALONG X (corner-to-corner)
-    const tilt = Math.atan2(rise, lengthAlongWall);
-    mesh.rotation.z = -tilt;
-
-    // after rotation, its "high" end will lift; keep it from going below ground
-    mesh.position.y = BASE_ELEVATION + (RAMP_THICKNESS * 0.5) + 0.02;
-  } else {
-    // along Z from corner to corner
-    lengthAlongWall = Math.max(1, (max.z - min.z) - RAMP_INSET_ENDS * 2);
-
-    geo = new THREE.BoxGeometry(widthOutFromWall, RAMP_THICKNESS, lengthAlongWall);
-    mesh = new THREE.Mesh(geo, rampMaterial);
-
-    const xWall = (RAMP_SIDE === "+X") ? max.x : min.x;
-    const xOut = (RAMP_SIDE === "+X")
-      ? xWall + (widthOutFromWall * 0.5 + RAMP_CLEARANCE)
-      : xWall - (widthOutFromWall * 0.5 + RAMP_CLEARANCE);
-
-    mesh.position.set(xOut, BASE_ELEVATION + RAMP_THICKNESS * 0.5, midZ);
-
-    // slope along Z
-    const tilt = Math.atan2(rise, lengthAlongWall);
-    mesh.rotation.x = (RAMP_SIDE === "+X") ? tilt : -tilt;
-
-    mesh.position.y = BASE_ELEVATION + (RAMP_THICKNESS * 0.5) + 0.02;
-  }
-
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-  mesh.userData.isRamp = true;
-  return mesh;
-}
-
-
-
-
 // --- building texture ---
 const textureLoader = new THREE.TextureLoader();
+
+const SIDES = ["+Z", "-Z", "+X", "-X"];
+
+// quick per-building “random” (stable-ish) based on footprint + height
+function pickDisabledSide(polygon, height) {
+  const ring = polygon?.rings?.[0] ?? [];
+  if (!ring.length) return SIDES[(Math.random() * SIDES.length) | 0];
+
+  // hash a few points + height
+  let h = (height * 1000) | 0;
+  for (let i = 0; i < ring.length; i += Math.max(1, (ring.length / 6) | 0)) {
+    const [lon, lat] = ring[i];
+    h = (h * 1664525 + ((lon * 1e6) | 0) + ((lat * 1e6) | 0) + 1013904223) | 0;
+  }
+  const idx = (h >>> 0) % SIDES.length;
+  return SIDES[idx];
+}
 
 function loadTex(url, { srgb = false, repeat = 2 } = {}) {
   const tex = textureLoader.load(url);
@@ -462,9 +392,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   group.name = "osm-buildings";
   scene?.add(group);
 
-  const rampsGroup = new THREE.Group();
-  rampsGroup.name = "building-ramps";
-
   const extrudedMaterial = new THREE.MeshStandardMaterial({
     map: buildingBase,
     normalMap: buildingNormal,
@@ -484,23 +411,20 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   extrudedColliderMesh.visible = false;
   extrudedColliderMesh.name = "extruded-collider";
 
-  // Collision root owns the solid meshes + ramps
+  // Collision root owns the solid meshes
   const collisionGroup = new THREE.Group();
   collisionGroup.name = "building-collision";
-  collisionGroup.add(rampsGroup);
   collisionGroup.add(extrudedColliderMesh);
 
   group.add(extrudedMesh);     // render
   group.add(flatMesh);         // render
   group.add(collisionGroup);   // collision only
 
-
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
   }
 
   function updateBuildings(geojson, boundsOverride) {
-    rampsGroup.clear(); // regenerate ramps for current view (or add caching later)
 
     const polygons = collectBuildingPolygons(geojson);
     if (polygons.length === 0) {
@@ -539,15 +463,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
         geom.translate(0, BASE_ELEVATION, 0);
         geom.computeBoundingBox();
 
-        // compute roof height from bbox (after rotate/translate)
-        const roofY = geom.boundingBox.max.y;
-
-        // Add a ramp only if very near
-        if (distance <= EXTRUDE_DISTANCE_RAMP) {
-          const ramp = buildRampForBBox(geom.boundingBox, roofY);
-          rampsGroup.add(ramp);
-        }
-
         // 2) Hollow it (shell)
         geom = hollowExtrudedGeometry(geom, shape, {
           wall: WALL_THICKNESS,
@@ -556,7 +471,8 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
         });
         if (!geom.boundingBox) geom.computeBoundingBox();
 
-        // Cut windows/doors, but disable the ramp side so no openings there
+        const disabledSide = pickDisabledSide(polygon, height);
+
         const cutters = buildWindowDoorCuttersFromBBox(geom.boundingBox, {
           windowW: 1.0,
           windowH: 1.0,
@@ -564,7 +480,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
           windowSpacing: 2.4,
           doorW: 1.5,
           doorH: 2.3,
-          disabledSide: (distance <= EXTRUDE_DISTANCE_RAMP) ? RAMP_SIDE : null
+          disabledSide
         });
 
         if (cutters.length) {
@@ -631,7 +547,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     getCollisionMeshes: () => {
       const meshes = [];
       if (extrudedColliderMesh.geometry?.attributes?.position?.count) meshes.push(extrudedColliderMesh);
-      for (const child of rampsGroup.children) meshes.push(child);
       return meshes;
     },
     dispose
