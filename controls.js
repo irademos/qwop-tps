@@ -191,6 +191,10 @@ export class PlayerControls {
     document.getElementById('jump-button').addEventListener('touchstart', (event) => {
       if (!this.enabled || this.isInWater) return;
       this.jumpButtonPressed = true;
+      if (this.isClimbing) {
+        this.stopClimbing();
+        this.canJump = true;
+      }
       if (this.canJump && this.body) {
         this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
         this.canJump = false;
@@ -386,6 +390,11 @@ export class PlayerControls {
           return;
         }
         if (this.isInWater) return;
+        if (this.isClimbing) {
+          this.stopClimbing();
+          this.canJump = true;
+          this.hasDoubleJumped = false;
+        }
         if (this.canJump && this.body) {
           this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
           this.canJump = false;
@@ -533,8 +542,8 @@ export class PlayerControls {
       }
       return 0;
     }
-    if (this.keysPressed.has("w")) return 1;
-    if (this.keysPressed.has("s")) return -1;
+    if (this.keysPressed.has("arrowup")) return 1;
+    if (this.keysPressed.has("arrowdown")) return -1;
     return 0;
   }
 
@@ -545,8 +554,14 @@ export class PlayerControls {
     let closestDist = Infinity;
     for (const area of areas) {
       if (!area?.box) continue;
-      const padded = area.box.clone().expandByScalar(CLIMB_SNAP_DISTANCE);
-      if (!padded.containsPoint(position)) continue;
+      if (area.localBox && area.inverseMatrix) {
+        const localPos = position.clone().applyMatrix4(area.inverseMatrix);
+        const padded = area.localBox.clone().expandByScalar(CLIMB_SNAP_DISTANCE);
+        if (!padded.containsPoint(localPos)) continue;
+      } else {
+        const padded = area.box.clone().expandByScalar(CLIMB_SNAP_DISTANCE);
+        if (!padded.containsPoint(position)) continue;
+      }
       const dist = area.center?.distanceTo(position) ?? 0;
       if (dist < closestDist) {
         closest = area;
@@ -554,6 +569,29 @@ export class PlayerControls {
       }
     }
     return closest;
+  }
+
+  getClosestPointOnClimbArea(position, area) {
+    if (area?.localBox && area.inverseMatrix && area.matrixWorld) {
+      const localPos = position.clone().applyMatrix4(area.inverseMatrix);
+      const clamped = localPos.clone();
+      clamped.x = THREE.MathUtils.clamp(clamped.x, area.localBox.min.x, area.localBox.max.x);
+      clamped.y = THREE.MathUtils.clamp(clamped.y, area.localBox.min.y, area.localBox.max.y);
+      clamped.z = THREE.MathUtils.clamp(clamped.z, area.localBox.min.z, area.localBox.max.z);
+      return clamped.applyMatrix4(area.matrixWorld);
+    }
+    return area?.box?.clampPoint(position.clone(), new THREE.Vector3()) ?? position.clone();
+  }
+
+  isMovingTowardClimbArea(position, area, movement, cameraDirection) {
+    const approachDir = movement.length() > 0
+      ? movement.clone().normalize()
+      : cameraDirection.clone().normalize();
+    const closestPoint = this.getClosestPointOnClimbArea(position, area);
+    const toArea = closestPoint.sub(position);
+    if (toArea.lengthSq() === 0) return true;
+    toArea.normalize();
+    return approachDir.dot(toArea) > 0.2;
   }
 
   startClimbing(area) {
@@ -596,19 +634,62 @@ export class PlayerControls {
 
     const delta = this.deltaSeconds || 0.016;
     const direction = climbInput === 0 ? 0 : climbInput > 0 ? 1 : -1;
-    let newY = position.y + direction * CLIMB_SPEED * delta;
-    const minY = Math.max(groundExpectedY, area.minY ?? groundExpectedY);
-    const maxY = area.maxY ?? position.y;
-    if (direction > 0 && newY >= maxY) {
-      newY = maxY;
-    } else if (direction < 0 && newY <= minY) {
-      newY = minY;
+    if (!area?.localBox || !area?.inverseMatrix || !area?.matrixWorld) {
+      let newY = position.y + direction * CLIMB_SPEED * delta;
+      const minY = Math.max(groundExpectedY, area.minY ?? groundExpectedY);
+      const maxY = area.maxY ?? position.y;
+      if (direction > 0 && newY >= maxY) {
+        newY = maxY;
+      } else if (direction < 0 && newY <= minY) {
+        newY = minY;
+      }
+
+      this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      this.body.setTranslation({ x: position.x, y: newY, z: position.z }, true);
+
+      if ((direction < 0 && newY <= minY + 0.01) || newY >= maxY - 0.01) {
+        this.stopClimbing();
+      }
+      return;
     }
 
-    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    this.body.setTranslation({ x: position.x, y: newY, z: position.z }, true);
+    const localPos = position.clone().applyMatrix4(area.inverseMatrix);
+    const scaledGroundY = Number.isFinite(area.scaleY) && Number.isFinite(area.positionY)
+      ? (groundExpectedY - area.positionY) / area.scaleY
+      : area.localBox.min.y;
+    const minYLocal = Math.max(area.localBox.min.y, scaledGroundY);
+    const maxYLocal = area.localBox.max.y;
+    let newLocalY = localPos.y + direction * CLIMB_SPEED * delta;
+    if (direction > 0 && newLocalY >= maxYLocal) {
+      newLocalY = maxYLocal;
+    } else if (direction < 0 && newLocalY <= minYLocal) {
+      newLocalY = minYLocal;
+    }
 
-    if (direction < 0 && newY <= minY + 0.01) {
+    localPos.y = newLocalY;
+
+    const withinX = localPos.x >= area.localBox.min.x && localPos.x <= area.localBox.max.x;
+    const withinZ = localPos.z >= area.localBox.min.z && localPos.z <= area.localBox.max.z;
+    if (withinX && withinZ) {
+      const distToMinX = Math.abs(localPos.x - area.localBox.min.x);
+      const distToMaxX = Math.abs(area.localBox.max.x - localPos.x);
+      const distToMinZ = Math.abs(localPos.z - area.localBox.min.z);
+      const distToMaxZ = Math.abs(area.localBox.max.z - localPos.z);
+      const minDist = Math.min(distToMinX, distToMaxX, distToMinZ, distToMaxZ);
+      if (minDist === distToMinX) localPos.x = area.localBox.min.x;
+      else if (minDist === distToMaxX) localPos.x = area.localBox.max.x;
+      else if (minDist === distToMinZ) localPos.z = area.localBox.min.z;
+      else localPos.z = area.localBox.max.z;
+    } else {
+      localPos.x = THREE.MathUtils.clamp(localPos.x, area.localBox.min.x, area.localBox.max.x);
+      localPos.z = THREE.MathUtils.clamp(localPos.z, area.localBox.min.z, area.localBox.max.z);
+    }
+
+    const worldPos = localPos.clone().applyMatrix4(area.matrixWorld);
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setTranslation({ x: worldPos.x, y: worldPos.y, z: worldPos.z }, true);
+
+    if ((direction < 0 && newLocalY <= minYLocal + 0.01) || newLocalY >= maxYLocal - 0.01) {
       this.stopClimbing();
     }
   }
@@ -750,8 +831,8 @@ export class PlayerControls {
     }
 
     const climbInput = this.getClimbInput(moveDirection, cameraDirection);
-    const climbArea = this.findClimbableArea(position);
-    if (this.isClimbing || (climbArea && climbInput !== 0)) {
+    const climbArea = this.isClimbing ? this.activeClimbArea : this.findClimbableArea(position);
+    if (this.isClimbing || (climbArea && climbInput > 0 && this.isMovingTowardClimbArea(position, climbArea, movement, cameraDirection))) {
       if (!climbArea) {
         this.stopClimbing();
       } else {

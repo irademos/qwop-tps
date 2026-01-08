@@ -569,7 +569,9 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     // Scale so height becomes 1 meter
     root.scale.setScalar(1 / height);
     root.updateMatrixWorld(true);
-    
+
+    root.userData.localBox = new THREE.Box3().setFromObject(root);
+
     root.userData.forward = (size.z <= size.x)
     ? new THREE.Vector3(0, 0, 1)   // forward +Z
     : new THREE.Vector3(1, 0, 0);  // forward +X
@@ -646,21 +648,35 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
         ladderGroup.add(ladder);
 
+        ladder.updateMatrixWorld(true);
+
+        const ladderBox = new THREE.Box3().setFromObject(ladder);
+        const localBox = template.userData.localBox
+          ? template.userData.localBox.clone()
+          : new THREE.Box3().setFromObject(ladder);
+        if (template.userData.localBox) {
+          localBox.min.multiplyScalar(LADDER_HEIGHT_M);
+          localBox.max.multiplyScalar(LADDER_HEIGHT_M);
+        }
+        const center = ladderBox.getCenter(new THREE.Vector3());
+        const inverseMatrix = ladder.matrixWorld.clone().invert();
+        climbableAreas.push({
+          box: ladderBox,
+          center,
+          minY: ladderBox.min.y,
+          maxY: ladderBox.max.y,
+          localBox,
+          matrixWorld: ladder.matrixWorld.clone(),
+          inverseMatrix,
+          scaleY: ladder.scale.y,
+          positionY: ladder.position.y
+        });
+
       }
     }).catch((err => {
       console.error("Error in ladder loading/placement:", err);
     })
     );
-
-    for (const p of placements) {
-      const center = p.climbBox.getCenter(new THREE.Vector3());
-      climbableAreas.push({
-        box: p.climbBox,
-        center,
-        minY: p.bottomY,
-        maxY: p.topY
-      });
-    }
   }
 
 
