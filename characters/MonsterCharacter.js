@@ -17,6 +17,11 @@ const STRAFE_SPEED = 1.1;
 const STRAFE_OSCILLATION = 0.004;
 const ATTACK_LUNGE_DURATION_MS = 280;
 const ATTACK_LUNGE_SPEED = CHARACTER_MOVEMENT.runSpeed + 0.75;
+const HEALTH_BAR_WIDTH = 128;
+const HEALTH_BAR_HEIGHT = 14;
+const HEALTH_BAR_DISPLAY_MS = 1800;
+const HEALTH_BAR_OFFSET_Y = 2.2;
+const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -43,6 +48,8 @@ export class MonsterCharacter extends CharacterBase {
     this.knockbackEndTime = 0;
     this.attackDirection = new THREE.Vector3();
     this.attackLungeEndTime = 0;
+    this.healthBar = this.createHealthBar();
+    this.healthBarVisibleUntil = 0;
   }
 
   get body() {
@@ -62,6 +69,7 @@ export class MonsterCharacter extends CharacterBase {
     if (this.isDead) return;
     this.health = Math.max(0, this.health - amount);
     this.model.userData.health = this.health;
+    this.showHealthBar();
     if (this.health <= 0) {
       this.markDead();
       return true;
@@ -109,8 +117,12 @@ export class MonsterCharacter extends CharacterBase {
       this.version = incomingVersion;
     }
     if (Number.isFinite(data.hp)) {
+      const previousHealth = this.health;
       this.health = data.hp;
       this.model.userData.health = data.hp;
+      if (data.hp < previousHealth) {
+        this.showHealthBar();
+      }
     }
     const aliveFlag = data.alive;
     if (aliveFlag === false || (Number.isFinite(data.hp) && data.hp <= 0)) {
@@ -272,6 +284,65 @@ export class MonsterCharacter extends CharacterBase {
         this.attackStartTime = null;
         this.attackHasHit = false;
       }
+    }
+  }
+
+  update(delta) {
+    super.update(delta);
+    this.updateHealthBarVisibility();
+  }
+
+  createHealthBar() {
+    const canvas = document.createElement('canvas');
+    canvas.width = HEALTH_BAR_WIDTH;
+    canvas.height = HEALTH_BAR_HEIGHT;
+    const context = canvas.getContext('2d');
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(0, HEALTH_BAR_OFFSET_Y, 0);
+    sprite.scale.copy(HEALTH_BAR_SCALE);
+    sprite.visible = false;
+    sprite.userData.canvas = canvas;
+    sprite.userData.context = context;
+    sprite.userData.texture = texture;
+    this.updateHealthBarTexture();
+    this.model.add(sprite);
+    return sprite;
+  }
+
+  updateHealthBarTexture() {
+    if (!this.healthBar) return;
+    const context = this.healthBar.userData.context;
+    if (!context) return;
+    const canvas = this.healthBar.userData.canvas;
+    const clampedHealth = Math.max(0, Math.min(DEFAULT_HEALTH, this.health));
+    const pct = clampedHealth / DEFAULT_HEALTH;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(60, 60, 60, 0.8)';
+    context.fillRect(2, 2, canvas.width - 4, canvas.height - 4);
+    context.fillStyle = 'rgba(214, 53, 60, 0.9)';
+    context.fillRect(4, 4, (canvas.width - 8) * pct, canvas.height - 8);
+    this.healthBar.userData.texture.needsUpdate = true;
+  }
+
+  showHealthBar() {
+    if (!this.healthBar) return;
+    this.updateHealthBarTexture();
+    this.healthBar.visible = true;
+    this.healthBarVisibleUntil = Date.now() + HEALTH_BAR_DISPLAY_MS;
+  }
+
+  updateHealthBarVisibility() {
+    if (!this.healthBar) return;
+    if (this.healthBar.visible && Date.now() > this.healthBarVisibleUntil) {
+      this.healthBar.visible = false;
     }
   }
 }
