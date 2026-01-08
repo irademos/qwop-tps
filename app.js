@@ -3496,6 +3496,18 @@ async function main() {
     }
 
     const mixerDelta = mixerClock.getDelta();
+    monsterAnimAccumulator += mixerDelta;
+
+    if (monsterAnimAccumulator >= MONSTER_ANIM_INTERVAL) {
+      const d = monsterAnimAccumulator;
+      monsterAnimAccumulator = 0;
+
+      for (const monster of monsters) {
+        const mm = monster?.model?.userData?.mixer;
+        if (mm) mm.update(d);
+      }
+    }
+
     remoteAnimAccumulator += mixerDelta;
     monsterAnimAccumulator += mixerDelta;
     const remoteAnimDelta = remoteAnimAccumulator >= REMOTE_ANIM_INTERVAL ? remoteAnimAccumulator : 0;

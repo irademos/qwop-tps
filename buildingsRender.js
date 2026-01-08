@@ -10,7 +10,6 @@ const DEFAULT_HEIGHT = 10;
 const LEVEL_HEIGHT = 3;
 const EXTRUDE_DISTANCE = 250;
 const BASE_ELEVATION = 0.0;
-const DISABLED_OPENINGS_SIDE = "+Z"; // "+Z" | "-Z" | "+X" | "-X" | null
 const CLIPPER_SCALE = 10000;
 
 // Shell params
@@ -18,14 +17,57 @@ const WALL_THICKNESS = 0.5;
 const CUT_DEPTH = WALL_THICKNESS + 0.35; // clear wall reliably
 const FLOOR_THICKNESS = 0.05;
 const ROOF_THICKNESS = 0.05;
-const LADDER_WIDTH = 1.0;
-const LADDER_DEPTH = 0.8;
-const LADDER_OFFSET = 0.08;
+const LADDER_WIDTH = 3.0;
+const LADDER_DEPTH = 3.5;
+const LADDER_OFFSET = 1.8;
 
 // --- building texture ---
 const textureLoader = new THREE.TextureLoader();
 
 const SIDES = ["+Z", "-Z", "+X", "-X"];
+
+function buildLadderPlacementFromShape(shape2D, bounds, lonScale, bottomY, topY) {
+  const pts2 = shape2D.getPoints(); // Vector2 in (x, -z) space from your ringToPoints()
+  if (pts2.length < 2) return null;
+
+  // pick a stable edge: longest edge
+  let bestI = 0;
+  let bestLen = -Infinity;
+  for (let i = 0; i < pts2.length; i++) {
+    const a = pts2[i];
+    const b = pts2[(i + 1) % pts2.length];
+    const len = a.distanceTo(b);
+    if (len > bestLen) { bestLen = len; bestI = i; }
+  }
+
+  const a = pts2[bestI];
+  const b = pts2[(bestI + 1) % pts2.length];
+
+  // convert Vector2 (x, y) to world (x, z) where z = -y
+  const ax = a.x, az = -a.y;
+  const bx = b.x, bz = -b.y;
+
+  const midX = (ax + bx) * 0.5;
+  const midZ = (az + bz) * 0.5;
+
+  const edgeDir = new THREE.Vector3(bx - ax, 0, bz - az).normalize();
+
+  // outward normal (pick one; you might flip based on winding)
+  const outward = new THREE.Vector3(-edgeDir.z, 0, edgeDir.x).normalize();
+
+  // ladder should face the wall: rotation so its forward points -outward
+  const rotationY = Math.atan2(-outward.x, -outward.z) - Math.PI / 2;
+
+  const position = new THREE.Vector3(midX, bottomY, midZ).addScaledVector(outward, LADDER_OFFSET);
+
+  const climbBox = new THREE.Box3(
+    new THREE.Vector3(position.x - LADDER_WIDTH * 0.5, bottomY, position.z - LADDER_DEPTH * 0.5),
+    new THREE.Vector3(position.x + LADDER_WIDTH * 0.5, topY, position.z + LADDER_DEPTH * 0.5)
+  );
+
+  return { position, rotationY, climbBox, bottomY, topY };
+}
+
 
 // quick per-building “random” (stable-ish) based on footprint + height
 function pickDisabledSide(polygon, height) {
@@ -243,6 +285,11 @@ function csgSubtractGeom(baseGeom, cutterGeoms) {
 
   mergedCutters.dispose();
   baseGeom.dispose();
+
+  // ✅ ensure bbox/sphere exist on the returned geometry
+  result.geometry.computeBoundingBox();
+  result.geometry.computeBoundingSphere();
+
   return result.geometry;
 }
 
@@ -450,7 +497,46 @@ function buildLadderPlacement(bbox, disabledSide) {
   };
 }
 
+// let ladderRoot = null;
+
 export function createBuildingsRenderer({ scene, camera } = {}) {
+  const ladderLoader = new GLTFLoader();
+  // if (!ladderRoot) {
+  //   // const loader = new GLTFLoader();
+  //   ladderLoader.load('/assets/props/ladder.glb', (gltf) => {
+  //     ladderRoot = gltf.scene;
+  //     ladderRoot.name = 'LADDER_DEBUG';
+  //     scene.add(ladderRoot);
+
+  //     // put it 5m in front of camera
+  //     const camDir = new THREE.Vector3();
+  //     camera.getWorldDirection(camDir);
+  //     ladderRoot.position.copy(camera.position).add(camDir.multiplyScalar(5));
+  //     ladderRoot.position.y -= 1;
+
+  //     ladderRoot.scale.setScalar(0.1);
+  //     ladderRoot.updateMatrixWorld(true);
+
+  //     // count meshes + force visible materials
+  //     let meshCount = 0;
+  //     ladderRoot.traverse(o => {
+  //       if (o.isMesh) {
+  //         meshCount++;
+  //         o.material = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
+  //         o.frustumCulled = false;
+  //         o.visible = true;
+  //       }
+  //     });
+
+  //     console.log('[ladder meshes]', meshCount);
+
+  //     const box = new THREE.Box3().setFromObject(ladderRoot);
+  //     scene.add(new THREE.Box3Helper(box, 0xffff00));
+  //     scene.add(new THREE.AxesHelper(2));
+  //     console.log('[ladder bbox size]', box.getSize(new THREE.Vector3()));
+  //   });
+  // }
+
   const group = new THREE.Group();
   group.name = "osm-buildings";
   scene?.add(group);
@@ -487,7 +573,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   ladderGroup.name = "building-ladders";
   group.add(ladderGroup);
 
-  const ladderLoader = new GLTFLoader();
+  
   let ladderTemplate = null;
   let ladderLoadPromise = null;
   let ladderVersion = 0;
@@ -498,59 +584,142 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     if (mesh.geometry) mesh.geometry.dispose();
   }
 
+  function normalizeLadderTemplate(sceneRoot) {
+    // clone so we never mutate the original gltf scene graph
+    const root = sceneRoot.clone(true);
+    root.updateMatrixWorld(true);
+
+    // compute bbox in its current local space
+    const box = new THREE.Box3().setFromObject(root);
+    const size = box.getSize(new THREE.Vector3());
+
+
+    // guard
+    const height = Math.max(1e-6, size.y);
+
+    // Move bottom-center to origin (0,0,0)
+    const centerX = (box.min.x + box.max.x) * 0.5;
+    const centerZ = (box.min.z + box.max.z) * 0.5;
+    const bottomY  = box.min.y;
+
+    root.position.set(-centerX, -bottomY, -centerZ);
+    root.updateMatrixWorld(true);
+
+    // Scale so height becomes 1 meter
+    root.scale.setScalar(1 / height);
+    // root.scale.setScalar(0.4);
+    root.updateMatrixWorld(true);
+    
+    root.userData.forward = (size.z <= size.x)
+    ? new THREE.Vector3(0, 0, 1)   // forward +Z
+    : new THREE.Vector3(1, 0, 0);  // forward +X
+
+    // Make sure it renders and doesn’t get culled (debug friendly)
+    root.traverse(n => {
+      if (n.isMesh) {
+        n.frustumCulled = false;
+        n.castShadow = false;
+        n.receiveShadow = false;
+        // IMPORTANT: do NOT replace the material (keeps original look)
+        if (n.material) n.material.side = THREE.DoubleSide;
+        n.visible = true;
+      }
+    });
+
+    // optional: log final normalized size
+    const box2 = new THREE.Box3().setFromObject(root);
+    console.log("✅ ladder normalized size(m):", box2.getSize(new THREE.Vector3()));
+
+    return root;
+  }
+
   function ensureLadderTemplate() {
     if (ladderTemplate || ladderLoadPromise) return ladderLoadPromise;
+
     ladderLoadPromise = ladderLoader.loadAsync('/assets/props/ladder.glb')
       .then((gltf) => {
-        ladderTemplate = gltf.scene || gltf.scenes?.[0] || null;
-        if (ladderTemplate) {
-          ladderTemplate.traverse((node) => {
-            if (node.isMesh) {
-              node.castShadow = false;
-              node.receiveShadow = false;
-            }
-          });
-        }
+        const raw = gltf.scene || gltf.scenes?.[0];
+        if (!raw) return null;
+
+        ladderTemplate = normalizeLadderTemplate(raw);
         return ladderTemplate;
       })
       .catch((err) => {
-        console.error('Failed to load ladder model:', err);
+        console.error("Failed to load ladder model:", err);
         ladderTemplate = null;
         return null;
       });
+
     return ladderLoadPromise;
   }
+
 
   function setLadders(placements) {
     ladderVersion += 1;
     const currentVersion = ladderVersion;
+
+    console.log('[setLadders] placements:', placements.length, 'ver:', currentVersion);
+
     ladderGroup.clear();
+
     climbableAreas.length = 0;
-    if (!placements.length) {
-      window.climbableAreas = [];
-      return;
-    }
-    ensureLadderTemplate()?.then((template) => {
-      if (!template || currentVersion !== ladderVersion) return;
+    window.climbableAreas = climbableAreas;
+
+    if (!placements.length) return;
+
+    ensureLadderTemplate().then((template) => {
+      console.log('[ensureLadderTemplate resolved]', !!template, 'cur:', currentVersion, 'latest:', ladderVersion);
+
+      if (!template) return;
+
+      // TEMP: disable this while debugging
+      // if (currentVersion !== ladderVersion) return;
+
       ladderGroup.clear();
-      for (const placement of placements) {
+
+      for (const p of placements) {
         const ladder = template.clone(true);
-        ladder.position.copy(placement.position);
-        ladder.rotation.y = placement.rotationY;
+
+        // Choose real-world ladder height in meters
+        const LADDER_HEIGHT_M = Math.max(2.5, (p.topY - p.bottomY) * 0.95);
+        ladder.scale.multiplyScalar(LADDER_HEIGHT_M); // template is 1m tall
+
+        ladder.position.copy(p.position);
+        ladder.rotation.y = p.rotationY;
+
+        // Slight outward nudge so it doesn't clip the wall
+        const forwardLocal = template.userData.forward || new THREE.Vector3(0,0,1);
+        const outward = forwardLocal.clone().applyAxisAngle(new THREE.Vector3(0,1,0), p.rotationY).normalize();
+        ladder.position.addScaledVector(outward, LADDER_OFFSET + 0.03);
+
         ladderGroup.add(ladder);
+        ladder.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(ladder);
+        const sz = bb.getSize(new THREE.Vector3());
+        console.log('[ladder placed]', {
+          pos: ladder.position.toArray(),
+          rotY: ladder.rotation.y,
+          size: sz.toArray()
+        });
+        ladderGroup.add(new THREE.Box3Helper(bb, 0xff00ff));
+
       }
-    });
-    for (const placement of placements) {
-      const center = placement.climbBox.getCenter(new THREE.Vector3());
+    }).catch((err => {
+      console.error("Error in ladder loading/placement:", err);
+    })
+    );
+
+    for (const p of placements) {
+      const center = p.climbBox.getCenter(new THREE.Vector3());
       climbableAreas.push({
-        box: placement.climbBox,
+        box: p.climbBox,
         center,
-        minY: placement.bottomY,
-        maxY: placement.topY
+        minY: p.bottomY,
+        maxY: p.topY
       });
     }
-    window.climbableAreas = climbableAreas;
   }
+
 
   function updateBuildings(geojson, boundsOverride) {
 
@@ -616,11 +785,23 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
         if (cutters.length) {
           geom = csgSubtractGeom(geom, cutters);
+          // ✅ IMPORTANT: CSG returns geometry w/ no bbox
+          geom.computeBoundingBox();
           for (const g of cutters) g.dispose();
         }
 
-        const ladderPlacement = buildLadderPlacement(geom.boundingBox, disabledSide);
-        if (ladderPlacement) ladderPlacements.push(ladderPlacement);
+        const ladderPlacement = buildLadderPlacementFromShape(
+          shape, bounds, lonScale,
+          geom.boundingBox.min.y,
+          geom.boundingBox.max.y
+        );
+
+        if (ladderPlacement) {
+          ladderPlacements.push(ladderPlacement);
+        } else {
+          console.warn('[no ladderPlacement]', { disabledSide, bbox: geom.boundingBox });
+        }
+
 
         extrudedResults.push(geom);
       } else {

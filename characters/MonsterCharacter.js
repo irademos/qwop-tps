@@ -159,7 +159,7 @@ export class MonsterCharacter extends CharacterBase {
     if (distance > attackRange) {
       const direction = targetPos.sub(this.model.position).normalize();
       this.setDirection(direction);
-      const movement = this.model.userData.direction.clone().multiplyScalar(CHARACTER_MOVEMENT.runSpeed);
+      const movement = this.model.userData.direction.clone().multiplyScalar(CHARACTER_MOVEMENT.runSpeed - 1.5);
       const vel = body.linvel();
       body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
       const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);

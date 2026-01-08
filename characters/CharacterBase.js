@@ -2,7 +2,7 @@
 import * as THREE from "three";
 
 export const CHARACTER_MOVEMENT = {
-  walkSpeed: 5,
+  walkSpeed: 2,
   runSpeed: 5,
   turnRate: 0.03
 };
