@@ -10,6 +10,13 @@ const MOVE_FADE = 0.2;
 const ATTACK_FADE = 0.1;
 const DEFAULT_HEALTH = 100;
 const MONSTER_ATTACK = ATTACKS.mutantPunch;
+const ATTACK_COOLDOWN_RANGE_MS = [2000, 5000];
+const STANDOFF_DISTANCE = 2.5;
+const STANDOFF_BUFFER = 0.35;
+const STRAFE_SPEED = 1.1;
+const STRAFE_OSCILLATION = 0.004;
+const ATTACK_LUNGE_DURATION_MS = 280;
+const ATTACK_LUNGE_SPEED = CHARACTER_MOVEMENT.runSpeed + 0.75;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -29,10 +36,13 @@ export class MonsterCharacter extends CharacterBase {
     this.isDead = false;
     this.lastDirectionChange = Date.now();
     this.lastAttackTime = 0;
+    this.nextAttackTime = 0;
     this.attackStartTime = null;
     this.attackHasHit = false;
     this.isKnocked = false;
     this.knockbackEndTime = 0;
+    this.attackDirection = new THREE.Vector3();
+    this.attackLungeEndTime = 0;
   }
 
   get body() {
@@ -178,9 +188,20 @@ export class MonsterCharacter extends CharacterBase {
     const targetPos = closestPlayer.model.position.clone();
     const distance = this.model.position.distanceTo(targetPos);
     const attackRange = MONSTER_ATTACK.range;
-    const canAttack = !this.attackStartTime && (now - this.lastAttackTime >= MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow);
+    const canAttack = !this.attackStartTime && now >= this.nextAttackTime;
 
-    if (distance > attackRange) {
+    if (this.attackStartTime) {
+      const vel = body.linvel();
+      if (now < this.attackLungeEndTime) {
+        const movement = this.attackDirection.clone().multiplyScalar(ATTACK_LUNGE_SPEED);
+        body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
+      } else {
+        body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      }
+      const angle = Math.atan2(this.attackDirection.x, this.attackDirection.z);
+      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+      body.setRotation(rot, true);
+    } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
       const direction = targetPos.sub(this.model.position).normalize();
       this.setDirection(direction);
       const movement = this.model.userData.direction.clone().multiplyScalar(CHARACTER_MOVEMENT.runSpeed - 1.5);
@@ -191,20 +212,33 @@ export class MonsterCharacter extends CharacterBase {
       body.setRotation(rot, true);
       this.playAnimation("Run", MOVE_FADE);
     } else {
-      const vel = body.linvel();
-      body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
       const faceDir = targetPos.sub(this.model.position).normalize();
       this.setDirection(faceDir);
+      const strafeDir = new THREE.Vector3(-faceDir.z, 0, faceDir.x);
+      const strafeOffset = Math.sin(now * STRAFE_OSCILLATION) * STRAFE_SPEED;
+      let forwardSpeed = 0;
+      if (distance < STANDOFF_DISTANCE - STANDOFF_BUFFER) {
+        forwardSpeed = -CHARACTER_MOVEMENT.walkSpeed;
+      } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
+        forwardSpeed = CHARACTER_MOVEMENT.walkSpeed;
+      }
+      const movement = faceDir.clone().multiplyScalar(forwardSpeed).add(strafeDir.multiplyScalar(strafeOffset));
+      const vel = body.linvel();
+      body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
       const angle = Math.atan2(faceDir.x, faceDir.z);
       const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
       body.setRotation(rot, true);
-      if (canAttack) {
+      if (canAttack && distance <= STANDOFF_DISTANCE + 0.5) {
+        this.attackDirection.copy(faceDir);
+        this.setDirection(this.attackDirection);
         this.playAnimation(ATTACK_NAME, ATTACK_FADE);
         this.lastAttackTime = now;
         this.attackStartTime = now;
         this.attackHasHit = false;
+        this.attackLungeEndTime = now + ATTACK_LUNGE_DURATION_MS;
+        this.nextAttackTime = now + THREE.MathUtils.randInt(...ATTACK_COOLDOWN_RANGE_MS);
       } else {
-        this.playAnimation("Idle", MOVE_FADE);
+        this.playAnimation("Walk", MOVE_FADE);
       }
     }
 
