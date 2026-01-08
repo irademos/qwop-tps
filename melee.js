@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 
 export const ATTACKS = {
-  mutantPunch: { damage: 10, range: 1.5, hitTime: 300, hitWindow: 300 },
-  swordSlash: { damage: 18, range: 1.7, hitTime: 300, hitWindow: 300 },
-  hurricaneKick: { damage: 15, range: 2.0, hitTime: 400, hitWindow: 400 },
-  mmaKick: { damage: 12, range: 1.7, hitTime: 350, hitWindow: 300 }
+  mutantPunch: { damage: 10, range: 1.5, hitTime: 300, hitWindow: 300, knockbackStrength: 2 },
+  swordSlash: { damage: 18, range: 1.7, hitTime: 300, hitWindow: 300, knockbackStrength: 3 },
+  hurricaneKick: { damage: 15, range: 2.0, hitTime: 400, hitWindow: 400, knockbackStrength: 5 },
+  mmaKick: { damage: 12, range: 1.7, hitTime: 350, hitWindow: 300, knockbackStrength: 4 }
 };
 
 function getStrengthDamage(attackerId, baseDamage) {
@@ -54,8 +54,7 @@ export function updateMeleeAttacks({
             window.localHealth = Math.max(0, window.localHealth - attackDamage);
             if (window.playerControls) {
               const dir = new THREE.Vector3().subVectors(target.model.position, attacker.model.position).normalize();
-              const impulse = dir.multiplyScalar(0.15);
-              window.playerControls.applyKnockback(impulse);
+              window.playerControls.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
             }
           } else {
             const tp = otherPlayers[target.id];
@@ -83,6 +82,12 @@ export function updateMeleeAttacks({
           if (dist <= cfg.range) {
             hit = true;
             const killed = monster.applyDamage(attackDamage);
+            if (!killed) {
+              const dir = new THREE.Vector3()
+                .subVectors(monster.model.position, attacker.model.position)
+                .normalize();
+              monster.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
+            }
             onMonsterHit?.(monster, { damage: attackDamage, killed, sourceId: attacker.id });
             if (killed && attacker.id === 'local') {
               window.onMonsterKill?.();

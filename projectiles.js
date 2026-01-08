@@ -161,8 +161,7 @@ export function updateProjectiles({
       }
 
       if (window.playerControls) {
-        const impulse = vel.clone().multiplyScalar(5);
-        window.playerControls.applyKnockback(impulse);
+        window.playerControls.applyKnockback({ direction: vel, strength: 3 });
       }
     }
 
@@ -176,6 +175,10 @@ export function updateProjectiles({
           console.log(`💥 Monster was hit`);
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
           const killed = monster.applyDamage(damage);
+          if (!killed) {
+            const direction = vel.clone();
+            monster.applyKnockback({ direction, strength: 3 });
+          }
           onMonsterHit?.(monster, { damage, killed, sourceId: proj.userData.shooterId });
           if (killed && proj.userData.shooterId === localId) {
             window.onMonsterKill?.();
