@@ -497,46 +497,8 @@ function buildLadderPlacement(bbox, disabledSide) {
   };
 }
 
-// let ladderRoot = null;
-
 export function createBuildingsRenderer({ scene, camera } = {}) {
   const ladderLoader = new GLTFLoader();
-  // if (!ladderRoot) {
-  //   // const loader = new GLTFLoader();
-  //   ladderLoader.load('/assets/props/ladder.glb', (gltf) => {
-  //     ladderRoot = gltf.scene;
-  //     ladderRoot.name = 'LADDER_DEBUG';
-  //     scene.add(ladderRoot);
-
-  //     // put it 5m in front of camera
-  //     const camDir = new THREE.Vector3();
-  //     camera.getWorldDirection(camDir);
-  //     ladderRoot.position.copy(camera.position).add(camDir.multiplyScalar(5));
-  //     ladderRoot.position.y -= 1;
-
-  //     ladderRoot.scale.setScalar(0.1);
-  //     ladderRoot.updateMatrixWorld(true);
-
-  //     // count meshes + force visible materials
-  //     let meshCount = 0;
-  //     ladderRoot.traverse(o => {
-  //       if (o.isMesh) {
-  //         meshCount++;
-  //         o.material = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide });
-  //         o.frustumCulled = false;
-  //         o.visible = true;
-  //       }
-  //     });
-
-  //     console.log('[ladder meshes]', meshCount);
-
-  //     const box = new THREE.Box3().setFromObject(ladderRoot);
-  //     scene.add(new THREE.Box3Helper(box, 0xffff00));
-  //     scene.add(new THREE.AxesHelper(2));
-  //     console.log('[ladder bbox size]', box.getSize(new THREE.Vector3()));
-  //   });
-  // }
-
   const group = new THREE.Group();
   group.name = "osm-buildings";
   scene?.add(group);
@@ -593,7 +555,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     const box = new THREE.Box3().setFromObject(root);
     const size = box.getSize(new THREE.Vector3());
 
-
     // guard
     const height = Math.max(1e-6, size.y);
 
@@ -607,7 +568,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
     // Scale so height becomes 1 meter
     root.scale.setScalar(1 / height);
-    // root.scale.setScalar(0.4);
     root.updateMatrixWorld(true);
     
     root.userData.forward = (size.z <= size.x)
@@ -625,10 +585,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
         n.visible = true;
       }
     });
-
-    // optional: log final normalized size
-    const box2 = new THREE.Box3().setFromObject(root);
-    console.log("✅ ladder normalized size(m):", box2.getSize(new THREE.Vector3()));
 
     return root;
   }
@@ -653,12 +609,9 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     return ladderLoadPromise;
   }
 
-
   function setLadders(placements) {
     ladderVersion += 1;
     const currentVersion = ladderVersion;
-
-    console.log('[setLadders] placements:', placements.length, 'ver:', currentVersion);
 
     ladderGroup.clear();
 
@@ -668,7 +621,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     if (!placements.length) return;
 
     ensureLadderTemplate().then((template) => {
-      console.log('[ensureLadderTemplate resolved]', !!template, 'cur:', currentVersion, 'latest:', ladderVersion);
 
       if (!template) return;
 
@@ -693,15 +645,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
         ladder.position.addScaledVector(outward, LADDER_OFFSET + 0.03);
 
         ladderGroup.add(ladder);
-        ladder.updateMatrixWorld(true);
-        const bb = new THREE.Box3().setFromObject(ladder);
-        const sz = bb.getSize(new THREE.Vector3());
-        console.log('[ladder placed]', {
-          pos: ladder.position.toArray(),
-          rotY: ladder.rotation.y,
-          size: sz.toArray()
-        });
-        ladderGroup.add(new THREE.Box3Helper(bb, 0xff00ff));
 
       }
     }).catch((err => {
@@ -785,7 +728,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
         if (cutters.length) {
           geom = csgSubtractGeom(geom, cutters);
-          // ✅ IMPORTANT: CSG returns geometry w/ no bbox
           geom.computeBoundingBox();
           for (const g of cutters) g.dispose();
         }
