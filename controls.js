@@ -4,6 +4,7 @@ import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from './water.j
 import { MOON_RADIUS } from "./worldGeneration.js";
 import { getSpawnPosition } from './spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
+import { getKnockbackImpulse } from "./knockback.js";
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -33,6 +34,7 @@ export class PlayerControls {
     this.audioManager = audioManager;
     this.isKnocked = false;
     this.knockbackRestYaw = 0;
+    this.knockbackEndTime = 0;
     this.slideMomentum = new THREE.Vector3();
     this.lastMoveDirection = new THREE.Vector3();
     this.grabbedTarget = null;
@@ -508,11 +510,15 @@ export class PlayerControls {
     mixer.addEventListener("finished", onFinished);
   }
 
-  applyKnockback(impulse) {
+  applyKnockback({ direction, strength } = {}) {
+    if (!direction || !this.playerModel) return;
+    const { impulse, profile } = getKnockbackImpulse(direction, strength);
     if (this.body) {
       this.body.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
     }
     this.isKnocked = true;
+    const now = Date.now();
+    this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + profile.recoveryMs);
     this.knockbackRestYaw = this.playerModel.rotation.y;
     const actions = this.playerModel.userData.actions;
     const current = this.playerModel.userData.currentAction;
@@ -766,7 +772,7 @@ export class PlayerControls {
       }
     }
     if (this.isKnocked) {
-      if (Math.hypot(vel.x, vel.y, vel.z) < 0.05) {
+      if (Date.now() >= this.knockbackEndTime) {
         this.isKnocked = false;
         this.playerModel.rotation.set(0, this.knockbackRestYaw || this.playerModel.rotation.y, 0);
         const actions = this.playerModel.userData.actions;

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { ATTACKS } from "../melee.js";
+import { getKnockbackImpulse } from "../knockback.js";
 
 const AGGRO_RADIUS = 12;
 const WANDER_CHANGE_MS = 2000;
@@ -38,6 +39,8 @@ export class MonsterCharacter extends CharacterBase {
     this.nextAttackTime = 0;
     this.attackStartTime = null;
     this.attackHasHit = false;
+    this.isKnocked = false;
+    this.knockbackEndTime = 0;
     this.attackDirection = new THREE.Vector3();
     this.attackLungeEndTime = 0;
   }
@@ -84,6 +87,19 @@ export class MonsterCharacter extends CharacterBase {
     this.isDead = false;
   }
 
+  applyKnockback({ direction, strength } = {}) {
+    if (!direction) return;
+    const body = this.body;
+    if (!body) return;
+    const { impulse, profile } = getKnockbackImpulse(direction, strength);
+    body.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
+    const now = Date.now();
+    this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + profile.recoveryMs);
+    this.isKnocked = true;
+    this.attackStartTime = null;
+    this.attackHasHit = false;
+  }
+
   applyPersistedState(data = {}) {
     const incomingVersion = Number.isFinite(data.version) ? data.version : null;
     if (incomingVersion != null && Number.isFinite(this.version) && incomingVersion < this.version) {
@@ -117,6 +133,14 @@ export class MonsterCharacter extends CharacterBase {
     if (this.isDead) {
       this.update(delta);
       return;
+    }
+    if (this.isKnocked) {
+      if (now >= this.knockbackEndTime) {
+        this.isKnocked = false;
+      } else {
+        this.update(delta);
+        return;
+      }
     }
 
     const allPlayers = [
@@ -229,8 +253,10 @@ export class MonsterCharacter extends CharacterBase {
             if (player.id === 'local' && !window.playerControls?.isKnocked) {
               window.localHealth = Math.max(0, window.localHealth - MONSTER_ATTACK.damage);
               if (window.playerControls) {
-                const impulse = this.model.userData.direction.clone().multiplyScalar(0.15);
-                window.playerControls.applyKnockback(impulse);
+                window.playerControls.applyKnockback({
+                  direction: this.model.userData.direction.clone(),
+                  strength: MONSTER_ATTACK.knockbackStrength
+                });
               }
             } else if (player.id !== 'local') {
               const op = otherPlayers[player.id];
