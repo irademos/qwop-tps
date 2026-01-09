@@ -42,6 +42,7 @@ function buildMonsterPayload(monster, { includeTransform = false } = {}) {
     id: monster.id,
     type: monster.modelPath || monster.type || 'unknown',
     hp: Number.isFinite(monster.health) ? monster.health : 0,
+    level: Number.isFinite(monster.level) ? monster.level : 1,
     alive: !monster.isDead,
     updatedAt: Date.now(),
     version: bumpVersion(monster)

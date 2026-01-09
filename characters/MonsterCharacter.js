@@ -16,12 +16,13 @@ const STANDOFF_BUFFER = 0.35;
 const STRAFE_SPEED = 1.1;
 const STRAFE_OSCILLATION = 0.004;
 const ATTACK_LUNGE_DURATION_MS = 280;
-const ATTACK_LUNGE_SPEED = CHARACTER_MOVEMENT.runSpeed + 0.75;
 const HEALTH_BAR_WIDTH = 128;
 const HEALTH_BAR_HEIGHT = 14;
 const HEALTH_BAR_DISPLAY_MS = 1800;
 const HEALTH_BAR_OFFSET_Y = 2.2;
 const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
+const LEVEL_SIZE_STEP = 0.5;
+const LEVEL_SPEED_STEP = 0.08;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -34,8 +35,14 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.mixer = mixer;
     this.model.userData.mode = "friendly";
     this.model.userData.direction = new THREE.Vector3();
+    this.baseScale = this.model.scale.clone();
     this.model.userData.health = DEFAULT_HEALTH;
     this.health = DEFAULT_HEALTH;
+    this.maxHealth = DEFAULT_HEALTH;
+    this.level = 1;
+    this.sizeScale = 1;
+    this.speedMultiplier = 1;
+    this.attackDamage = MONSTER_ATTACK.damage;
     this.type = null;
     this.version = 0;
     this.isDead = false;
@@ -50,6 +57,7 @@ export class MonsterCharacter extends CharacterBase {
     this.attackLungeEndTime = 0;
     this.healthBar = this.createHealthBar();
     this.healthBarVisibleUntil = 0;
+    this.setLevel(1, { preserveHealth: false });
   }
 
   get body() {
@@ -90,9 +98,36 @@ export class MonsterCharacter extends CharacterBase {
   }
 
   resetHealth() {
-    this.health = DEFAULT_HEALTH;
-    this.model.userData.health = DEFAULT_HEALTH;
+    this.health = this.maxHealth;
+    this.model.userData.health = this.maxHealth;
     this.isDead = false;
+  }
+
+  setLevel(level, { preserveHealth = true } = {}) {
+    const nextLevel = Math.max(1, Math.round(level || 1));
+    this.level = nextLevel;
+    this.model.userData.level = nextLevel;
+    this.sizeScale = 1 + LEVEL_SIZE_STEP * (nextLevel - 1);
+    this.speedMultiplier = Math.max(0.6, 1 - LEVEL_SPEED_STEP * (nextLevel - 1));
+    this.attackDamage = MONSTER_ATTACK.damage * this.sizeScale;
+    this.maxHealth = DEFAULT_HEALTH * this.sizeScale;
+    this.model.userData.maxHealth = this.maxHealth;
+    if (this.model?.scale) {
+      this.model.scale.set(
+        this.baseScale.x * this.sizeScale,
+        this.baseScale.y * this.sizeScale,
+        this.baseScale.z * this.sizeScale
+      );
+    }
+    this.updateHealthBarScale();
+    if (!preserveHealth) {
+      this.health = this.maxHealth;
+      this.model.userData.health = this.maxHealth;
+    } else if (this.health > this.maxHealth) {
+      this.health = this.maxHealth;
+      this.model.userData.health = this.maxHealth;
+    }
+    this.updateHealthBarTexture();
   }
 
   applyKnockback({ direction, strength } = {}) {
@@ -115,6 +150,9 @@ export class MonsterCharacter extends CharacterBase {
     }
     if (incomingVersion != null) {
       this.version = incomingVersion;
+    }
+    if (Number.isFinite(data.level)) {
+      this.setLevel(data.level, { preserveHealth: true });
     }
     if (Number.isFinite(data.hp)) {
       const previousHealth = this.health;
@@ -186,7 +224,9 @@ export class MonsterCharacter extends CharacterBase {
         this.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         this.lastDirectionChange = now;
       }
-      const movement = this.model.userData.direction.clone().multiplyScalar(CHARACTER_MOVEMENT.walkSpeed);
+      const movement = this.model.userData.direction
+        .clone()
+        .multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier);
       const vel = body.linvel();
       body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
       const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
@@ -201,11 +241,15 @@ export class MonsterCharacter extends CharacterBase {
     const distance = this.model.position.distanceTo(targetPos);
     const attackRange = MONSTER_ATTACK.range;
     const canAttack = !this.attackStartTime && now >= this.nextAttackTime;
+    const runSpeed = (CHARACTER_MOVEMENT.runSpeed - 1.5) * this.speedMultiplier;
+    const walkSpeed = CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier;
 
     if (this.attackStartTime) {
       const vel = body.linvel();
       if (now < this.attackLungeEndTime) {
-        const movement = this.attackDirection.clone().multiplyScalar(ATTACK_LUNGE_SPEED);
+        const movement = this.attackDirection
+          .clone()
+          .multiplyScalar((CHARACTER_MOVEMENT.runSpeed + 0.75) * this.speedMultiplier);
         body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
       } else {
         body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
@@ -216,7 +260,7 @@ export class MonsterCharacter extends CharacterBase {
     } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
       const direction = targetPos.sub(this.model.position).normalize();
       this.setDirection(direction);
-      const movement = this.model.userData.direction.clone().multiplyScalar(CHARACTER_MOVEMENT.runSpeed - 1.5);
+      const movement = this.model.userData.direction.clone().multiplyScalar(runSpeed);
       const vel = body.linvel();
       body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
       const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
@@ -227,12 +271,12 @@ export class MonsterCharacter extends CharacterBase {
       const faceDir = targetPos.sub(this.model.position).normalize();
       this.setDirection(faceDir);
       const strafeDir = new THREE.Vector3(-faceDir.z, 0, faceDir.x);
-      const strafeOffset = Math.sin(now * STRAFE_OSCILLATION) * STRAFE_SPEED;
+      const strafeOffset = Math.sin(now * STRAFE_OSCILLATION) * STRAFE_SPEED * this.speedMultiplier;
       let forwardSpeed = 0;
       if (distance < STANDOFF_DISTANCE - STANDOFF_BUFFER) {
-        forwardSpeed = -CHARACTER_MOVEMENT.walkSpeed;
+        forwardSpeed = -walkSpeed;
       } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
-        forwardSpeed = CHARACTER_MOVEMENT.walkSpeed;
+        forwardSpeed = walkSpeed;
       }
       const movement = faceDir.clone().multiplyScalar(forwardSpeed).add(strafeDir.multiplyScalar(strafeOffset));
       const vel = body.linvel();
@@ -263,7 +307,7 @@ export class MonsterCharacter extends CharacterBase {
           const dist = this.model.position.distanceTo(player.model.position);
           if (dist <= attackRange) {
             if (player.id === 'local' && !window.playerControls?.isKnocked) {
-              window.localHealth = Math.max(0, window.localHealth - MONSTER_ATTACK.damage);
+              window.localHealth = Math.max(0, window.localHealth - this.attackDamage);
               if (window.playerControls) {
                 window.playerControls.applyKnockback({
                   direction: this.model.userData.direction.clone(),
@@ -273,7 +317,7 @@ export class MonsterCharacter extends CharacterBase {
             } else if (player.id !== 'local') {
               const op = otherPlayers[player.id];
               if (op) {
-                op.health = Math.max(0, (op.health || 100) - MONSTER_ATTACK.damage);
+                op.health = Math.max(0, (op.health || 100) - this.attackDamage);
               }
             }
           }
@@ -310,6 +354,8 @@ export class MonsterCharacter extends CharacterBase {
     sprite.userData.canvas = canvas;
     sprite.userData.context = context;
     sprite.userData.texture = texture;
+    sprite.userData.baseScale = HEALTH_BAR_SCALE.clone();
+    sprite.userData.baseOffset = HEALTH_BAR_OFFSET_Y;
     this.updateHealthBarTexture();
     this.model.add(sprite);
     return sprite;
@@ -320,8 +366,9 @@ export class MonsterCharacter extends CharacterBase {
     const context = this.healthBar.userData.context;
     if (!context) return;
     const canvas = this.healthBar.userData.canvas;
-    const clampedHealth = Math.max(0, Math.min(DEFAULT_HEALTH, this.health));
-    const pct = clampedHealth / DEFAULT_HEALTH;
+    const maxHealth = this.maxHealth || DEFAULT_HEALTH;
+    const clampedHealth = Math.max(0, Math.min(maxHealth, this.health));
+    const pct = maxHealth > 0 ? clampedHealth / maxHealth : 0;
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = 'rgba(0, 0, 0, 0.6)';
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -337,6 +384,15 @@ export class MonsterCharacter extends CharacterBase {
     this.updateHealthBarTexture();
     this.healthBar.visible = true;
     this.healthBarVisibleUntil = Date.now() + HEALTH_BAR_DISPLAY_MS;
+  }
+
+  updateHealthBarScale() {
+    if (!this.healthBar) return;
+    const scale = this.sizeScale || 1;
+    const baseScale = this.healthBar.userData.baseScale || HEALTH_BAR_SCALE;
+    const baseOffset = this.healthBar.userData.baseOffset ?? HEALTH_BAR_OFFSET_Y;
+    this.healthBar.position.set(0, baseOffset * scale, 0);
+    this.healthBar.scale.set(baseScale.x * scale, baseScale.y * scale, baseScale.z);
   }
 
   updateHealthBarVisibility() {

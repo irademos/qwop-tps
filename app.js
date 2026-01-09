@@ -50,6 +50,12 @@ const MONSTER_SPAWN_MIN_RADIUS = 25;
 const MONSTER_SPAWN_MAX_RADIUS = 80;
 const MONSTER_RESPAWN_DELAY_RANGE_MS = [3000, 5000];
 const MONSTER_SPAWN_ATTEMPTS = 12;
+const MONSTER_LEVEL_WEIGHTS = [
+  { level: 1, weight: 0.55 },
+  { level: 2, weight: 0.25 },
+  { level: 3, weight: 0.15 },
+  { level: 4, weight: 0.05 }
+];
 
 const PERF = {
   throttleAI: true,
@@ -1093,12 +1099,13 @@ async function main() {
 
   function attachMonsterPhysics(monster) {
     const model = monster.model;
+    const scale = monster.sizeScale || 1;
     const rbDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(model.position.x, model.position.y, model.position.z)
       .setLinearDamping(0.5)
       .setAngularDamping(0.5);
     const rb = rapierWorld.createRigidBody(rbDesc);
-    const colDesc = RAPIER.ColliderDesc.capsule(0.6, 0.3);
+    const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
     rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
     rbToMesh.set(rb, model);
@@ -1116,6 +1123,18 @@ async function main() {
   const getRandomMonsterModel = () => {
     const index = Math.floor(Math.random() * MONSTER_MODELS.length);
     return MONSTER_MODELS[index];
+  };
+
+  const getRandomMonsterLevel = () => {
+    const totalWeight = MONSTER_LEVEL_WEIGHTS.reduce((sum, entry) => sum + entry.weight, 0);
+    let pick = Math.random() * totalWeight;
+    for (const entry of MONSTER_LEVEL_WEIGHTS) {
+      pick -= entry.weight;
+      if (pick <= 0) {
+        return entry.level;
+      }
+    }
+    return MONSTER_LEVEL_WEIGHTS[0]?.level ?? 1;
   };
 
   const BUILDING_RAYCAST_HEIGHT = 200;
@@ -1346,6 +1365,8 @@ async function main() {
         monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         monster.lastDirectionChange = Date.now();
         monster.lastAIUpdateMs = 0;
+        const level = Number.isFinite(options.level) ? options.level : getRandomMonsterLevel();
+        monster.setLevel(level, { preserveHealth: false });
         monster.resetHealth();
 
         if (Number.isFinite(options.health)) {
@@ -1409,6 +1430,7 @@ async function main() {
           rotation,
           health: record.hp,
           alive: record.alive,
+          level: record.level,
           version: incomingVersion,
           type: record.type,
           skipPersist: true
@@ -1417,6 +1439,9 @@ async function main() {
       return;
     }
     if (!existing?.model) return;
+    if (Number.isFinite(record.level)) {
+      existing.setLevel(record.level, { preserveHealth: true });
+    }
     if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
       existing.model.position.set(position.x, position.y, position.z);
       existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
@@ -1428,6 +1453,7 @@ async function main() {
     existing.applyPersistedState?.({
       hp: record.hp,
       alive: record.alive,
+      level: record.level,
       version: incomingVersion
     });
   };
@@ -1484,6 +1510,7 @@ async function main() {
           mode: monster.model.userData.mode,
           action: monster.model.userData.currentAction,
           health: monster.model.userData.health,
+          level: monster.level,
           modelPath: monster.modelPath,
           version: monster.version
         };
@@ -1501,6 +1528,7 @@ async function main() {
         if (state.modelPath && (!current || current.modelPath !== state.modelPath)) {
           if (!current || (incomingVersion != null && incomingVersion > currentVersion)) {
             spawnMonsterInSlot(slotId, state.modelPath, current, {
+              level: state.level,
               version: incomingVersion,
               type: state.modelPath,
               skipPersist: true
@@ -1510,6 +1538,9 @@ async function main() {
         }
         const monster = monsters.find(entry => entry.id === slotId);
         if (!monster?.model) return;
+        if (Number.isFinite(state.level)) {
+          monster.setLevel(state.level, { preserveHealth: true });
+        }
         if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
           monster.model.position.set(px, py, pz);
           monster.body?.setTranslation({ x: px, y: py, z: pz }, true);
@@ -1529,6 +1560,7 @@ async function main() {
         monster.applyPersistedState?.({
           hp: state.health,
           alive: aliveFlag,
+          level: state.level,
           version: incomingVersion
         });
         if (state.mode === 'dead' && state.health <= 0) {
