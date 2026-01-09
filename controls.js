@@ -798,6 +798,10 @@ export class PlayerControls {
     } else {
       movement.copy(moveDirection);
     }
+    const hasPlayerInput = moveDirection.length() > 0;
+    if (hasPlayerInput && this.gpsMoveTarget) {
+      this.clearGpsMoveTarget();
+    }
     if (movementLocked) {
       movement.copy(this.slideMomentum);
       this.slideMomentum.multiplyScalar(0.99);
@@ -902,6 +906,9 @@ export class PlayerControls {
 
       this.geoBoundsShiftMeters.x = 0;
       this.geoBoundsShiftMeters.z = 0;
+    }
+    if (clampedByGeo && this.gpsMoveTarget) {
+      this.clearGpsMoveTarget();
     }
 
 
