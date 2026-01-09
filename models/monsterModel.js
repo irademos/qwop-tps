@@ -100,6 +100,7 @@ export function loadMonsterModel(modelPath, callback) {
           pivot.add(model);
           monsterGroup.add(pivot);
           monsterGroup.userData.pivot = pivot;
+          monsterGroup.userData.modelRoot = model;
 
           const mixer = new THREE.AnimationMixer(model);
           const actions = {};
@@ -146,7 +147,7 @@ export function loadMonsterModel(modelPath, callback) {
             monsterGroup.userData.currentAction = 'Idle';
             monsterGroup.userData.mixer = mixer;
             monsterGroup.userData.actions = actions;
-            callback({ model: monsterGroup, mixer, actions });
+            callback({ model: monsterGroup, mixer, actions, pivot, modelRoot: model });
           });
         },
         undefined,
