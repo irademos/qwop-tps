@@ -14,6 +14,57 @@ const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
 const CLIMB_SPEED = 1.6;
 const CLIMB_SNAP_DISTANCE = 0.6;
+const FRIENDLY_INTERACT_RANGE = 6;
+const FRIENDLY_DIALOGUE_POOL = [
+  {
+    blocks: [
+      "Hey friend! It's nice to see another traveler out here.",
+      "If you get lost, just follow the glowing towers. They always lead somewhere safe."
+    ],
+    responses: [
+      {
+        label: "Any survival tips?",
+        reply: "Stay light on your feet and keep an eye on the waterline."
+      },
+      {
+        label: "Heard any rumors?",
+        reply: "People say a sky ship drifts near the old ridge every dusk."
+      }
+    ]
+  },
+  {
+    blocks: [
+      "You're closer than the wind. I like that.",
+      "I'm keeping watch while I dance away the boredom."
+    ],
+    responses: [
+      {
+        label: "Need company?",
+        reply: "Just a quick hello keeps me smiling."
+      },
+      {
+        label: "Anything to trade?",
+        reply: "Not yet, but come back later and I might have something shiny."
+      }
+    ]
+  },
+  {
+    blocks: [
+      "The forest is calmer today. Perfect for a wander.",
+      "If you hear splashing, it's probably just the fish playing."
+    ],
+    responses: [
+      {
+        label: "Thanks for the heads-up.",
+        reply: "Anytime. Stay curious!"
+      },
+      {
+        label: "I'll keep moving.",
+        reply: "Safe travels, friend."
+      }
+    ]
+  }
+];
 
 export class PlayerControls {
   constructor({ scene, camera, playerModel, renderer, multiplayer, spawnProjectile, projectiles, audioManager, initialAmmo, onAmmoChange }) {
@@ -123,6 +174,16 @@ export class PlayerControls {
     this.enabled = true; // Add enabled flag for chat input
 
     this.interactionPromptEl = document.getElementById('interaction-tooltip');
+    this.friendlyInteractButton = document.getElementById('friendly-interact');
+    this.friendlyDialogueEl = document.getElementById('friendly-dialogue');
+    this.friendlyDialogueTextEl = this.friendlyDialogueEl?.querySelector('.friendly-dialogue-text') || null;
+    this.friendlyDialogueOptionsEl = this.friendlyDialogueEl?.querySelector('.friendly-dialogue-options') || null;
+    this.activeFriendly = null;
+    this.isInteracting = false;
+    this.activeDialogue = null;
+    this.dialogueIndex = 0;
+    this.awaitingResponse = false;
+    this.awaitingExit = false;
 
     if (this.isMobile && this.interactionPromptEl) {
       const activateInteraction = (event) => {
@@ -132,6 +193,16 @@ export class PlayerControls {
       };
       this.interactionPromptEl.addEventListener('touchstart', activateInteraction, { passive: false });
       this.interactionPromptEl.addEventListener('click', activateInteraction);
+    }
+
+    if (this.friendlyInteractButton) {
+      const activateFriendly = (event) => {
+        if (this.friendlyInteractButton.classList.contains('hidden')) return;
+        event.preventDefault();
+        this.handleInteractionAction();
+      };
+      this.friendlyInteractButton.addEventListener('click', activateFriendly);
+      this.friendlyInteractButton.addEventListener('touchstart', activateFriendly, { passive: false });
     }
 
     this.onAmmoChange = typeof onAmmoChange === 'function' ? onAmmoChange : null;
@@ -464,6 +535,17 @@ export class PlayerControls {
   handleInteractionAction() {
     if (!this.enabled) return;
 
+    if (this.isInteracting) {
+      this.advanceFriendlyDialogue();
+      return;
+    }
+
+    const nearbyFriendly = this.getClosestFriendly(FRIENDLY_INTERACT_RANGE);
+    if (nearbyFriendly?.friendly) {
+      this.startFriendlyInteraction(nearbyFriendly.friendly);
+      return;
+    }
+
     if (this.vehicle) {
       this.vehicle.dismount?.();
       return;
@@ -483,6 +565,126 @@ export class PlayerControls {
       weapon.tryPickup?.(this);
       if (weapon.holder === this) break;
     }
+  }
+
+  getClosestFriendly(maxDistance) {
+    if (!this.playerModel) return null;
+    const friendlies = Array.isArray(window.friendlies) ? window.friendlies : [];
+    let closest = null;
+    let closestDistance = Infinity;
+    friendlies.forEach((friendly) => {
+      if (!friendly?.model || friendly.isDead) return;
+      const dist = this.playerModel.position.distanceTo(friendly.model.position);
+      if (dist <= maxDistance && dist < closestDistance) {
+        closestDistance = dist;
+        closest = friendly;
+      }
+    });
+    return closest ? { friendly: closest, distance: closestDistance } : null;
+  }
+
+  isFriendlyWithinRange(friendly, range) {
+    if (!friendly?.model || !this.playerModel) return false;
+    return this.playerModel.position.distanceTo(friendly.model.position) <= range;
+  }
+
+  startFriendlyInteraction(friendly) {
+    if (!friendly) return;
+    const choice = FRIENDLY_DIALOGUE_POOL[Math.floor(Math.random() * FRIENDLY_DIALOGUE_POOL.length)];
+    this.isInteracting = true;
+    this.activeFriendly = friendly;
+    this.activeDialogue = choice;
+    this.dialogueIndex = 0;
+    this.awaitingResponse = false;
+    this.awaitingExit = false;
+    this.renderFriendlyDialogue();
+    this.updateFriendlyInteractionUI();
+  }
+
+  advanceFriendlyDialogue() {
+    if (!this.isInteracting) return;
+    if (this.awaitingExit) {
+      this.endFriendlyInteraction();
+      return;
+    }
+    if (this.awaitingResponse || !this.activeDialogue) return;
+    const blocks = this.activeDialogue.blocks || [];
+    if (this.dialogueIndex < blocks.length - 1) {
+      this.dialogueIndex += 1;
+      this.renderFriendlyDialogue();
+      return;
+    }
+    this.awaitingResponse = true;
+    this.renderFriendlyDialogue();
+  }
+
+  endFriendlyInteraction() {
+    this.isInteracting = false;
+    this.activeFriendly = null;
+    this.activeDialogue = null;
+    this.dialogueIndex = 0;
+    this.awaitingResponse = false;
+    this.awaitingExit = false;
+    if (this.friendlyDialogueEl) {
+      this.friendlyDialogueEl.classList.add('hidden');
+    }
+    this.updateFriendlyInteractionUI();
+  }
+
+  renderFriendlyDialogue() {
+    if (!this.friendlyDialogueTextEl || !this.friendlyDialogueOptionsEl || !this.activeDialogue) return;
+    const blocks = this.activeDialogue.blocks || [];
+    const message = blocks[this.dialogueIndex] || '';
+    this.friendlyDialogueTextEl.textContent = message;
+    this.friendlyDialogueOptionsEl.innerHTML = '';
+
+    if (this.awaitingResponse) {
+      const responses = this.activeDialogue.responses || [];
+      responses.forEach((option) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = option.label;
+        button.addEventListener('click', () => {
+          this.friendlyDialogueOptionsEl.innerHTML = '';
+          this.friendlyDialogueTextEl.textContent = option.reply;
+          this.awaitingResponse = false;
+          this.awaitingExit = true;
+          this.updateFriendlyInteractionUI();
+        });
+        this.friendlyDialogueOptionsEl.appendChild(button);
+      });
+    }
+  }
+
+  updateFriendlyInteractionUI() {
+    if (!this.friendlyInteractButton) return;
+
+    if (this.isInteracting) {
+      if (this.activeFriendly && !this.isFriendlyWithinRange(this.activeFriendly, FRIENDLY_INTERACT_RANGE * 1.6)) {
+        this.endFriendlyInteraction();
+        return;
+      }
+      this.friendlyInteractButton.classList.remove('hidden');
+      this.friendlyInteractButton.disabled = this.awaitingResponse;
+      this.friendlyInteractButton.textContent = this.awaitingResponse
+        ? 'Choose Reply'
+        : this.awaitingExit
+          ? 'Close'
+          : 'Next';
+      this.friendlyDialogueEl?.classList.remove('hidden');
+      return;
+    }
+
+    const nearby = this.getClosestFriendly(FRIENDLY_INTERACT_RANGE);
+    if (nearby?.friendly) {
+      this.friendlyInteractButton.classList.remove('hidden');
+      this.friendlyInteractButton.disabled = false;
+      this.friendlyInteractButton.textContent = this.isMobile ? 'Talk' : 'Interact';
+      return;
+    }
+
+    this.friendlyInteractButton.classList.add('hidden');
+    this.friendlyDialogueEl?.classList.add('hidden');
   }
 
   playAction(actionName) {
@@ -1087,6 +1289,7 @@ export class PlayerControls {
         this.controls.update();
       }
 
+      this.updateFriendlyInteractionUI();
       this.updateInteractionPrompt();
 
       const hasGun = !!this.getEquippedGun();

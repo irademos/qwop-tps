@@ -7,6 +7,10 @@ const LEVEL_HEALTH_STEP = 0.5;
 const WANDER_CHANGE_MS = 2400;
 const MOVE_FADE = 0.2;
 const IDLE_SPEED_MULTIPLIER = 0.35;
+const DANCE_MIN_INTERVAL_MS = 3200;
+const DANCE_MAX_INTERVAL_MS = 7200;
+const DANCE_MIN_DURATION_MS = 1800;
+const DANCE_MAX_DURATION_MS = 3200;
 
 export class FriendlyCharacter extends MonsterCharacter {
   constructor(data) {
@@ -14,6 +18,11 @@ export class FriendlyCharacter extends MonsterCharacter {
     this.homePosition = new THREE.Vector3();
     this.wanderRadius = 6;
     this.noticeRadius = 10;
+    this.engageRadius = 5;
+    this.disengageRadius = 8;
+    this.isEngaged = false;
+    this.nextDanceAt = 0;
+    this.danceUntil = 0;
     this.lastDirectionChange = Date.now();
     this.model.userData.mode = "friendly";
     this.speedMultiplier = 1;
@@ -38,6 +47,24 @@ export class FriendlyCharacter extends MonsterCharacter {
     if (Number.isFinite(radius)) {
       this.noticeRadius = Math.max(0, radius);
     }
+  }
+
+  setEngageRadius(radius) {
+    if (Number.isFinite(radius)) {
+      this.engageRadius = Math.max(0, radius);
+    }
+  }
+
+  setDisengageRadius(radius) {
+    if (Number.isFinite(radius)) {
+      this.disengageRadius = Math.max(0, radius);
+    }
+  }
+
+  scheduleNextDance(now) {
+    const interval = DANCE_MIN_INTERVAL_MS
+      + Math.random() * (DANCE_MAX_INTERVAL_MS - DANCE_MIN_INTERVAL_MS);
+    this.nextDanceAt = now + interval;
   }
 
   setLevel(level, { preserveHealth = true } = {}) {
@@ -97,7 +124,24 @@ export class FriendlyCharacter extends MonsterCharacter {
       }
     }
 
-    if (closestPlayer && closestDistance <= this.noticeRadius) {
+    if (closestPlayer) {
+      if (this.isEngaged) {
+        if (closestDistance > this.disengageRadius) {
+          this.isEngaged = false;
+          this.model.userData.mode = "friendly";
+        }
+      } else if (closestDistance <= this.engageRadius) {
+        this.isEngaged = true;
+        this.model.userData.mode = "engaged";
+        this.danceUntil = 0;
+        this.scheduleNextDance(now);
+      }
+    } else if (this.isEngaged) {
+      this.isEngaged = false;
+      this.model.userData.mode = "friendly";
+    }
+
+    if (this.isEngaged && closestPlayer) {
       const targetPos = closestPlayer.model.position.clone();
       const faceDir = targetPos.sub(this.model.position).normalize();
       this.setDirection(faceDir);
@@ -106,7 +150,20 @@ export class FriendlyCharacter extends MonsterCharacter {
       const angle = Math.atan2(faceDir.x, faceDir.z);
       const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
       body.setRotation(rot, true);
-      this.playAnimation("Idle", MOVE_FADE);
+
+      if (now >= this.danceUntil && now >= this.nextDanceAt) {
+        const duration = DANCE_MIN_DURATION_MS
+          + Math.random() * (DANCE_MAX_DURATION_MS - DANCE_MIN_DURATION_MS);
+        this.danceUntil = now + duration;
+        this.scheduleNextDance(this.danceUntil);
+      }
+
+      if (now < this.danceUntil) {
+        this.playAnimation("TwistDance", MOVE_FADE);
+      } else {
+        this.playAnimation("Idle", MOVE_FADE);
+      }
+
       this.update(delta);
       return;
     }
