@@ -2550,6 +2550,10 @@ async function main() {
     currentRenderOrigin = null;
   }
 
+  const GPS_SNAP_DISTANCE_METERS = 20;
+  const GPS_TARGET_EPSILON_METERS = 0.35;
+  const GPS_PATH_EPSILON_METERS = 0.05;
+
   const computePlayerMeters = (location) => {
     if (!worldOrigin || !location) return null;
     if (!Number.isFinite(location.lat) || !Number.isFinite(location.lon)) return null;
@@ -2558,6 +2562,33 @@ async function main() {
       x: (location.lon - worldOrigin.lon) * lonScale,
       z: -(location.lat - worldOrigin.lat) * METERS_PER_DEGREE_LAT
     };
+  };
+
+  const isGpsPathBlocked = (from, to) => {
+    if (!rapierWorld || !playerControls?.body) return false;
+    if (!Number.isFinite(from?.x) || !Number.isFinite(from?.z)) return false;
+    if (!Number.isFinite(to?.x) || !Number.isFinite(to?.z)) return false;
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    const distance = Math.hypot(dx, dz);
+    if (!Number.isFinite(distance) || distance <= GPS_TARGET_EPSILON_METERS) return false;
+    const direction = new THREE.Vector3(dx / distance, 0, dz / distance);
+    const ray = new RAPIER.Ray(
+      { x: from.x, y: from.y ?? playerModel?.position?.y ?? 0, z: from.z },
+      { x: direction.x, y: direction.y, z: direction.z }
+    );
+    const hit = rapierWorld.castRay(
+      ray,
+      distance,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      playerControls.body
+    );
+    if (!hit) return false;
+    const hitDistance = hit.toi ?? hit.timeOfImpact ?? distance;
+    return hitDistance < distance - GPS_PATH_EPSILON_METERS;
   };
 
   function getLocalMapOrigin() {
@@ -2826,6 +2857,38 @@ async function main() {
         if (!didInitialGpsSnap) {
           applyPlayerMeters(playerMeters);
           didInitialGpsSnap = true;
+        } else if (playerControls && playerModel) {
+          const currentPos = playerControls.body?.translation?.() ?? playerModel.position;
+          if (currentPos && Number.isFinite(currentPos.x) && Number.isFinite(currentPos.z)) {
+            const dx = playerMeters.x - currentPos.x;
+            const dz = playerMeters.z - currentPos.z;
+            const distance = Math.hypot(dx, dz);
+            if (distance > GPS_SNAP_DISTANCE_METERS) {
+              playerControls.clearGpsMoveTarget?.();
+              applyPlayerMeters(playerMeters);
+            } else if (distance > GPS_TARGET_EPSILON_METERS) {
+              const blocked = isGpsPathBlocked(
+                currentPos,
+                {
+                  x: playerMeters.x,
+                  y: currentPos.y ?? playerModel.position.y,
+                  z: playerMeters.z
+                }
+              );
+              if (blocked) {
+                playerControls.clearGpsMoveTarget?.();
+                applyPlayerMeters(playerMeters);
+              } else {
+                playerControls.setGpsMoveTarget?.({
+                  x: playerMeters.x,
+                  y: currentPos.y ?? playerModel.position.y,
+                  z: playerMeters.z
+                });
+              }
+            } else {
+              playerControls.clearGpsMoveTarget?.();
+            }
+          }
         }
       } else {
         locationState.playerX = null;

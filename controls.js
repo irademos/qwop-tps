@@ -56,6 +56,8 @@ export class PlayerControls {
     this.geoBoundsShiftMeters = { x: 0, z: 0 };
     this.geoBoundHalfSizeM = 8;
     this.geoEdgeEpsM = 0.75;
+    this.gpsMoveTarget = null;
+    this.gpsMoveEpsilon = 0.35;
 
     // Player state
     this.canJump = true;
@@ -796,6 +798,10 @@ export class PlayerControls {
     } else {
       movement.copy(moveDirection);
     }
+    const hasPlayerInput = moveDirection.length() > 0;
+    if (hasPlayerInput && this.gpsMoveTarget) {
+      this.clearGpsMoveTarget();
+    }
     if (movementLocked) {
       movement.copy(this.slideMomentum);
       this.slideMomentum.multiplyScalar(0.99);
@@ -824,6 +830,11 @@ export class PlayerControls {
         });
       }
     }
+    const gpsMove = this.getGpsMoveDirection(position);
+    if (gpsMove && !movementLocked && !this.isClimbing && !this.isKnocked) {
+      movement.copy(gpsMove.direction);
+      this.lastMoveDirection.copy(movement);
+    }
     if (this.isKnocked) {
       if (Date.now() >= this.knockbackEndTime) {
         this.isKnocked = false;
@@ -844,8 +855,14 @@ export class PlayerControls {
 
     let pushedByGeo = false;
     let clampedByGeo = false;
+    const gpsMoveActive = !!this.gpsMoveTarget;
 
-    if (this.geoBoundsCenterXZ) {
+    if (gpsMoveActive && this.geoBoundsShiftMeters) {
+      this.geoBoundsShiftMeters.x = 0;
+      this.geoBoundsShiftMeters.z = 0;
+    }
+
+    if (this.geoBoundsCenterXZ && !gpsMoveActive) {
       const halfSize = this.geoBoundHalfSizeM;
 
       const shiftX = this.geoBoundsShiftMeters?.x ?? 0;
@@ -895,6 +912,9 @@ export class PlayerControls {
 
       this.geoBoundsShiftMeters.x = 0;
       this.geoBoundsShiftMeters.z = 0;
+    }
+    if (clampedByGeo && this.gpsMoveTarget) {
+      this.clearGpsMoveTarget();
     }
 
 
@@ -1180,6 +1200,31 @@ export class PlayerControls {
     this.geoBoundsCenterXZ.z += dzMeters;
     this.geoBoundsShiftMeters.x += dxMeters;
     this.geoBoundsShiftMeters.z += dzMeters;
+  }
+
+  setGpsMoveTarget(target) {
+    if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.z)) return;
+    const nextY = Number.isFinite(target.y) ? target.y : this.playerY ?? 0;
+    if (!this.gpsMoveTarget) {
+      this.gpsMoveTarget = new THREE.Vector3();
+    }
+    this.gpsMoveTarget.set(target.x, nextY, target.z);
+  }
+
+  clearGpsMoveTarget() {
+    this.gpsMoveTarget = null;
+  }
+
+  getGpsMoveDirection(position) {
+    if (!this.gpsMoveTarget || !position) return null;
+    const dx = this.gpsMoveTarget.x - position.x;
+    const dz = this.gpsMoveTarget.z - position.z;
+    const distance = Math.hypot(dx, dz);
+    if (!Number.isFinite(distance) || distance <= this.gpsMoveEpsilon) {
+      this.gpsMoveTarget = null;
+      return null;
+    }
+    return { direction: new THREE.Vector3(dx / distance, 0, dz / distance), distance };
   }
   
   getCamera() {
