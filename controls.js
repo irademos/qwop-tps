@@ -193,7 +193,12 @@ export class PlayerControls {
     document.getElementById('jump-button').addEventListener('touchstart', (event) => {
       if (!this.enabled || this.isInWater) return;
       this.jumpButtonPressed = true;
-      if (this.canJump && this.body) {
+      if (this.isClimbing && this.body) {
+        this.stopClimbing();
+        this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
+        this.canJump = false;
+        this.hasDoubleJumped = false;
+      } else if (this.canJump && this.body) {
         this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
         this.canJump = false;
       }
@@ -388,7 +393,12 @@ export class PlayerControls {
           return;
         }
         if (this.isInWater) return;
-        if (this.canJump && this.body) {
+        if (this.isClimbing && this.body) {
+          this.stopClimbing();
+          this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
+          this.canJump = false;
+          this.hasDoubleJumped = false;
+        } else if (this.canJump && this.body) {
           this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
           this.canJump = false;
           this.hasDoubleJumped = false;
@@ -544,15 +554,31 @@ export class PlayerControls {
     return 0;
   }
 
+  getClimbLocalPosition(area, position) {
+    if (!area?.center) return null;
+    const local = position.clone().sub(area.center);
+    local.applyAxisAngle(new THREE.Vector3(0, 1, 0), -(area.rotationY ?? 0));
+    return local;
+  }
+
   findClimbableArea(position) {
     const areas = window.climbableAreas || [];
     if (!areas.length) return null;
     let closest = null;
     let closestDist = Infinity;
     for (const area of areas) {
-      if (!area?.box) continue;
-      const padded = area.box.clone().expandByScalar(CLIMB_SNAP_DISTANCE);
-      if (!padded.containsPoint(position)) continue;
+      if (!area?.center) continue;
+      const local = this.getClimbLocalPosition(area, position);
+      if (!local) continue;
+      const halfWidth = area.halfWidth ?? 0;
+      const halfDepth = area.halfDepth ?? 0;
+      const halfHeight = area.halfHeight ?? 0;
+      const withinWidth = Math.abs(local.x) <= halfWidth + CLIMB_SNAP_DISTANCE;
+      const withinHeight = local.y >= -halfHeight - CLIMB_SNAP_DISTANCE && local.y <= halfHeight + CLIMB_SNAP_DISTANCE;
+      const minDepth = halfDepth - CLIMB_SNAP_DISTANCE;
+      const maxDepth = halfDepth + CLIMB_SNAP_DISTANCE + PLAYER_RADIUS;
+      const withinDepth = local.z >= minDepth && local.z <= maxDepth;
+      if (!withinWidth || !withinHeight || !withinDepth) continue;
       const dist = area.center?.distanceTo(position) ?? 0;
       if (dist < closestDist) {
         closest = area;
@@ -577,6 +603,24 @@ export class PlayerControls {
     }
     this.isClimbing = false;
     this.activeClimbArea = null;
+  }
+
+  isMovingTowardClimbArea(area, movement) {
+    if (!area?.normal) return false;
+    if (!movement || movement.length() === 0) return false;
+    const moveDir = movement.clone().normalize();
+    return moveDir.dot(area.normal) < -0.2;
+  }
+
+  getClimbSnapPosition(area, position) {
+    const local = this.getClimbLocalPosition(area, position);
+    if (!local) return position.clone();
+    const maxX = Math.max(0.01, (area.halfWidth ?? 0) - PLAYER_RADIUS * 0.5);
+    const clampedX = THREE.MathUtils.clamp(local.x, -maxX, maxX);
+    local.x = clampedX;
+    local.z = (area.halfDepth ?? 0) + PLAYER_RADIUS * 0.1;
+    local.applyAxisAngle(new THREE.Vector3(0, 1, 0), area.rotationY ?? 0);
+    return local.add(area.center);
   }
 
   updateClimbing({ area, climbInput, position, velocity, groundExpectedY }) {
@@ -605,16 +649,24 @@ export class PlayerControls {
     let newY = position.y + direction * CLIMB_SPEED * delta;
     const minY = Math.max(groundExpectedY, area.minY ?? groundExpectedY);
     const maxY = area.maxY ?? position.y;
+    if (position.y > maxY + 0.05) {
+      this.stopClimbing();
+      return;
+    }
     if (direction > 0 && newY >= maxY) {
       newY = maxY;
     } else if (direction < 0 && newY <= minY) {
       newY = minY;
     }
 
+    const snapped = this.getClimbSnapPosition(area, position);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    this.body.setTranslation({ x: position.x, y: newY, z: position.z }, true);
+    this.body.setTranslation({ x: snapped.x, y: newY, z: snapped.z }, true);
 
     if (direction < 0 && newY <= minY + 0.01) {
+      this.stopClimbing();
+    }
+    if (direction > 0 && newY >= maxY - 0.01) {
       this.stopClimbing();
     }
   }
@@ -757,7 +809,8 @@ export class PlayerControls {
 
     const climbInput = this.getClimbInput(moveDirection, cameraDirection);
     const climbArea = this.findClimbableArea(position);
-    if (this.isClimbing || (climbArea && climbInput !== 0)) {
+    const shouldStartClimb = !this.isClimbing && climbArea && climbInput > 0 && this.isMovingTowardClimbArea(climbArea, movement);
+    if (this.isClimbing || shouldStartClimb) {
       if (!climbArea) {
         this.stopClimbing();
       } else {

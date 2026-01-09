@@ -1295,6 +1295,7 @@ async function main() {
     const collider = rapierWorld.createCollider(colDesc, buildingColliderBody);
     console.log('building collider created', String(collider.handle), 'verts', vertices.length / 3, 'idx', indices.length);
   };
+  window.rebuildBuildingColliders = rebuildBuildingColliders;
 
 
 

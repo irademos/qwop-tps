@@ -65,7 +65,7 @@ function buildLadderPlacementFromShape(shape2D, bounds, lonScale, bottomY, topY)
     new THREE.Vector3(position.x + LADDER_WIDTH * 0.5, topY, position.z + LADDER_DEPTH * 0.5)
   );
 
-  return { position, rotationY, climbBox, bottomY, topY };
+  return { position, rotationY, climbBox, bottomY, topY, outward };
 }
 
 
@@ -450,11 +450,13 @@ function buildLadderPlacement(bbox, disabledSide) {
   let position;
   let rotationY = 0;
   let climbBox;
+  let outward;
 
   switch (disabledSide) {
     case "+Z":
       position = new THREE.Vector3(midX, bottomY, max.z + LADDER_OFFSET);
       rotationY = Math.PI;
+      outward = new THREE.Vector3(0, 0, 1);
       climbBox = new THREE.Box3(
         new THREE.Vector3(midX - LADDER_WIDTH * 0.5, bottomY, max.z),
         new THREE.Vector3(midX + LADDER_WIDTH * 0.5, topY, max.z + LADDER_DEPTH)
@@ -463,6 +465,7 @@ function buildLadderPlacement(bbox, disabledSide) {
     case "-Z":
       position = new THREE.Vector3(midX, bottomY, min.z - LADDER_OFFSET);
       rotationY = 0;
+      outward = new THREE.Vector3(0, 0, -1);
       climbBox = new THREE.Box3(
         new THREE.Vector3(midX - LADDER_WIDTH * 0.5, bottomY, min.z - LADDER_DEPTH),
         new THREE.Vector3(midX + LADDER_WIDTH * 0.5, topY, min.z)
@@ -471,6 +474,7 @@ function buildLadderPlacement(bbox, disabledSide) {
     case "+X":
       position = new THREE.Vector3(max.x + LADDER_OFFSET, bottomY, midZ);
       rotationY = -Math.PI / 2;
+      outward = new THREE.Vector3(1, 0, 0);
       climbBox = new THREE.Box3(
         new THREE.Vector3(max.x, bottomY, midZ - LADDER_WIDTH * 0.5),
         new THREE.Vector3(max.x + LADDER_DEPTH, topY, midZ + LADDER_WIDTH * 0.5)
@@ -479,6 +483,7 @@ function buildLadderPlacement(bbox, disabledSide) {
     case "-X":
       position = new THREE.Vector3(min.x - LADDER_OFFSET, bottomY, midZ);
       rotationY = Math.PI / 2;
+      outward = new THREE.Vector3(-1, 0, 0);
       climbBox = new THREE.Box3(
         new THREE.Vector3(min.x - LADDER_DEPTH, bottomY, midZ - LADDER_WIDTH * 0.5),
         new THREE.Vector3(min.x, topY, midZ + LADDER_WIDTH * 0.5)
@@ -493,7 +498,8 @@ function buildLadderPlacement(bbox, disabledSide) {
     rotationY,
     climbBox,
     bottomY,
-    topY
+    topY,
+    outward
   };
 }
 
@@ -527,6 +533,10 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   collisionGroup.name = "building-collision";
   collisionGroup.add(extrudedColliderMesh);
 
+  const ladderColliderGroup = new THREE.Group();
+  ladderColliderGroup.name = "ladder-collision";
+  collisionGroup.add(ladderColliderGroup);
+
   group.add(extrudedMesh);     // render
   group.add(flatMesh);         // render
   group.add(collisionGroup);   // collision only
@@ -541,6 +551,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   let ladderVersion = 0;
 
   const climbableAreas = [];
+  const ladderColliders = [];
 
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
@@ -570,6 +581,9 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     root.scale.setScalar(1 / height);
     root.updateMatrixWorld(true);
     
+    const normalizedBox = new THREE.Box3().setFromObject(root);
+    root.userData.bounds = normalizedBox;
+    root.userData.size = normalizedBox.getSize(new THREE.Vector3());
     root.userData.forward = (size.z <= size.x)
     ? new THREE.Vector3(0, 0, 1)   // forward +Z
     : new THREE.Vector3(1, 0, 0);  // forward +X
@@ -614,6 +628,8 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     const currentVersion = ladderVersion;
 
     ladderGroup.clear();
+    ladderColliderGroup.clear();
+    ladderColliders.length = 0;
 
     climbableAreas.length = 0;
     window.climbableAreas = climbableAreas;
@@ -623,11 +639,13 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     ensureLadderTemplate().then((template) => {
 
       if (!template) return;
-
       // TEMP: disable this while debugging
       // if (currentVersion !== ladderVersion) return;
 
       ladderGroup.clear();
+      ladderColliderGroup.clear();
+      ladderColliders.length = 0;
+      climbableAreas.length = 0;
 
       for (const p of placements) {
         const ladder = template.clone(true);
@@ -646,21 +664,37 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
         ladderGroup.add(ladder);
 
+        ladder.updateMatrixWorld(true);
+        const ladderBounds = new THREE.Box3().setFromObject(ladder);
+        const center = ladderBounds.getCenter(new THREE.Vector3());
+        const scaledSize = ladderBounds.getSize(new THREE.Vector3());
+        const minY = ladderBounds.min.y;
+        const maxY = ladderBounds.max.y;
+
+        const colliderGeom = new THREE.BoxGeometry(scaledSize.x, scaledSize.y, scaledSize.z);
+        const colliderMesh = new THREE.Mesh(colliderGeom, new THREE.MeshBasicMaterial({ visible: false }));
+        colliderMesh.position.copy(center);
+        colliderMesh.rotation.y = p.rotationY;
+        ladderColliderGroup.add(colliderMesh);
+        ladderColliders.push(colliderMesh);
+
+        climbableAreas.push({
+          center,
+          rotationY: p.rotationY,
+          halfWidth: scaledSize.x * 0.5,
+          halfDepth: scaledSize.z * 0.5,
+          halfHeight: scaledSize.y * 0.5,
+          minY,
+          maxY,
+          normal: outward.clone()
+        });
+
       }
+      window.rebuildBuildingColliders?.();
     }).catch((err => {
       console.error("Error in ladder loading/placement:", err);
     })
     );
-
-    for (const p of placements) {
-      const center = p.climbBox.getCenter(new THREE.Vector3());
-      climbableAreas.push({
-        box: p.climbBox,
-        center,
-        minY: p.bottomY,
-        maxY: p.topY
-      });
-    }
   }
 
 
@@ -806,6 +840,9 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     getCollisionMeshes: () => {
       const meshes = [];
       if (extrudedColliderMesh.geometry?.attributes?.position?.count) meshes.push(extrudedColliderMesh);
+      for (const ladderCollider of ladderColliders) {
+        if (ladderCollider.geometry?.attributes?.position?.count) meshes.push(ladderCollider);
+      }
       return meshes;
     },
     dispose
