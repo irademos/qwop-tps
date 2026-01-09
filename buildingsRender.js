@@ -639,10 +639,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     ensureLadderTemplate().then((template) => {
 
       if (!template) return;
-      const templateBounds = template.userData.bounds;
-      const templateSize = template.userData.size;
-      if (!templateBounds || !templateSize) return;
-
       // TEMP: disable this while debugging
       // if (currentVersion !== ladderVersion) return;
 
@@ -668,12 +664,12 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
         ladderGroup.add(ladder);
 
-        const localCenter = templateBounds.getCenter(new THREE.Vector3()).multiplyScalar(LADDER_HEIGHT_M);
-        localCenter.applyAxisAngle(new THREE.Vector3(0, 1, 0), p.rotationY);
-        const center = ladder.position.clone().add(localCenter);
-        const scaledSize = templateSize.clone().multiplyScalar(LADDER_HEIGHT_M);
-        const minY = center.y - scaledSize.y * 0.5;
-        const maxY = center.y + scaledSize.y * 0.5;
+        ladder.updateMatrixWorld(true);
+        const ladderBounds = new THREE.Box3().setFromObject(ladder);
+        const center = ladderBounds.getCenter(new THREE.Vector3());
+        const scaledSize = ladderBounds.getSize(new THREE.Vector3());
+        const minY = ladderBounds.min.y;
+        const maxY = ladderBounds.max.y;
 
         const colliderGeom = new THREE.BoxGeometry(scaledSize.x, scaledSize.y, scaledSize.z);
         const colliderMesh = new THREE.Mesh(colliderGeom, new THREE.MeshBasicMaterial({ visible: false }));
