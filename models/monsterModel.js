@@ -101,6 +101,10 @@ export function loadMonsterModel(modelPath, callback) {
           monsterGroup.add(pivot);
           monsterGroup.userData.pivot = pivot;
           monsterGroup.userData.modelRoot = model;
+          monsterGroup.userData.offsets = {
+            yOffset: config.yOffset ?? 0,
+            zOffset: config.zOffset ?? 0
+          };
 
           const mixer = new THREE.AnimationMixer(model);
           const actions = {};

@@ -120,6 +120,25 @@ export class MonsterCharacter extends CharacterBase {
         this.baseScale.z * this.sizeScale
       );
     }
+    const pivot = this.model?.userData?.pivot ?? this.pivot;
+    const modelRoot = this.model?.userData?.modelRoot ?? pivot;
+    if (pivot && modelRoot) {
+      const offsets = this.model?.userData?.offsets ?? {};
+      const yOffset = offsets.yOffset ?? 0;
+      const zOffset = offsets.zOffset ?? 0;
+      pivot.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(modelRoot);
+      const center = box.getCenter(new THREE.Vector3());
+      const localMinY = box.min.y - pivot.position.y;
+      const localCenterX = center.x - pivot.position.x;
+      const localCenterZ = center.z - pivot.position.z;
+      pivot.position.set(
+        -localCenterX,
+        -localMinY + yOffset,
+        -localCenterZ - zOffset
+      );
+      pivot.updateMatrixWorld(true);
+    }
     this.updateHealthBarScale();
     if (!preserveHealth) {
       this.health = this.maxHealth;
