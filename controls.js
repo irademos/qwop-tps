@@ -855,8 +855,14 @@ export class PlayerControls {
 
     let pushedByGeo = false;
     let clampedByGeo = false;
+    const gpsMoveActive = !!this.gpsMoveTarget;
 
-    if (this.geoBoundsCenterXZ) {
+    if (gpsMoveActive && this.geoBoundsShiftMeters) {
+      this.geoBoundsShiftMeters.x = 0;
+      this.geoBoundsShiftMeters.z = 0;
+    }
+
+    if (this.geoBoundsCenterXZ && !gpsMoveActive) {
       const halfSize = this.geoBoundHalfSizeM;
 
       const shiftX = this.geoBoundsShiftMeters?.x ?? 0;
