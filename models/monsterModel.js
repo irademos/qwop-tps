@@ -7,7 +7,8 @@ const animationFiles = {
   Walk: 'Old Man Walk.fbx',
   Run: 'Drunk Run Forward.fbx',
   Weapon: 'Mutant Punch.fbx',
-  Death: 'Dying.fbx'
+  Death: 'Dying.fbx',
+  TwistDance: 'Twist Dance.fbx'
 };
 
 const missingAnimationLogs = new Set();
