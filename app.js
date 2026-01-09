@@ -2548,6 +2548,8 @@ async function main() {
       pendingMapRebuild = true;
     }
     currentRenderOrigin = null;
+    didInitialGpsSnap = false;
+    window.clearTileCache?.();
   }
 
   const GPS_SNAP_DISTANCE_METERS = 20;
