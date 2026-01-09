@@ -86,6 +86,9 @@ export function loadMonsterModel(modelPath, callback) {
             if (o.material?.skinning === true) o.material.skinning = true;
           });
 
+          model.updateMatrixWorld(true);
+          const originalBox = new THREE.Box3().setFromObject(model);
+
           const scale = config.scale ?? 1;
           model.scale.set(scale, scale, scale);
 
@@ -100,6 +103,11 @@ export function loadMonsterModel(modelPath, callback) {
           pivot.add(model);
           monsterGroup.add(pivot);
           monsterGroup.userData.pivot = pivot;
+          monsterGroup.userData.originalBox = originalBox.clone();
+          monsterGroup.userData.configOffsets = {
+            yOffset: config.yOffset ?? 0,
+            zOffset: config.zOffset ?? 0
+          };
 
           const mixer = new THREE.AnimationMixer(model);
           const actions = {};

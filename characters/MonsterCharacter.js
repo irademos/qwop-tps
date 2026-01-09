@@ -119,6 +119,14 @@ export class MonsterCharacter extends CharacterBase {
         this.baseScale.z * this.sizeScale
       );
     }
+    const pivot = this.model?.userData?.pivot;
+    const originalBox = this.model?.userData?.originalBox;
+    if (pivot && originalBox) {
+      const offsets = this.model.userData.configOffsets ?? {};
+      const yOffset = offsets.yOffset ?? 0;
+      const scaledMinY = originalBox.min.y * (this.baseScale?.y ?? 1) * this.sizeScale;
+      pivot.position.y = yOffset - scaledMinY;
+    }
     this.updateHealthBarScale();
     if (!preserveHealth) {
       this.health = this.maxHealth;
