@@ -67,6 +67,7 @@ export class PlayerControls {
     this.currentSpecialAction = null;
     this.runningKickTimer = null;
     this.runningKickOriginalY = 0;
+    this.energyDepleted = false;
     
     // Mobile control variables
     this.joystick = null;
@@ -143,6 +144,10 @@ export class PlayerControls {
     this.lastHasGun = null;
     this.updateAmmoUI(!!this.getEquippedGun());
     this.onAmmoChange?.(this.ammo);
+  }
+
+  setEnergyDepleted(value) {
+    this.energyDepleted = Boolean(value);
   }
 
   setPlayerModel(newModel) {
@@ -845,7 +850,9 @@ export class PlayerControls {
         this.playerModel.userData.currentAction = 'idle';
       }
     } else if (!this.isClimbing) {
-      const speed = this.isInWater ? SWIM_SPEED : CHARACTER_MOVEMENT.runSpeed;
+      const speed = this.isInWater
+        ? SWIM_SPEED
+        : (this.energyDepleted ? CHARACTER_MOVEMENT.walkSpeed : CHARACTER_MOVEMENT.runSpeed);
       this.body.setLinvel({ x: movement.x * speed, y: vel.y, z: movement.z * speed }, true);
       }
       
@@ -966,6 +973,7 @@ export class PlayerControls {
       const actions = this.playerModel.userData.actions;
       if (actions && !this.isKnocked && !this.currentSpecialAction && !this.isClimbing) {
         let actionName;
+        const moveAction = this.energyDepleted ? 'walk' : 'run';
         if (this.vehicle && this.vehicle.type === 'surfboard') {
           if (this.isInWater) {
             actionName = isMovingNow ? 'swim' : 'sit';
@@ -975,7 +983,7 @@ export class PlayerControls {
           } else {
             actionName = 'idle';
             if (!this.canJump) actionName = 'jump';
-            else if (isMovingNow) actionName = 'run';
+            else if (isMovingNow) actionName = moveAction;
           }
         } else {
           if (this.isInWater) {
@@ -983,7 +991,7 @@ export class PlayerControls {
           } else {
             actionName = 'idle';
             if (!this.canJump) actionName = 'jump';
-            else if (isMovingNow) actionName = 'run';
+            else if (isMovingNow) actionName = moveAction;
           }
         }
         const current = this.playerModel.userData.currentAction;
