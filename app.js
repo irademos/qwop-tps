@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { PlayerCharacter } from "./characters/PlayerCharacter.js";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { MonsterCharacter } from "./characters/MonsterCharacter.js";
+import { createFriendlyNpcManager } from "./friendlyNpcManager.js";
 import { createClouds } from "./worldGeneration.js";
 import { getTerrainHeight } from './water.js';
 import { Multiplayer } from './peerConnection.js';
@@ -159,6 +160,7 @@ async function main() {
   let multiplayer = null;
   let isHost = false;
   let playerControls = null;
+  let friendlyNpcManager = null;
   let scene = null;
   let mapRenderer = null;
   let buildingsRenderer = null;
@@ -732,6 +734,7 @@ async function main() {
   multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
     isHost = !!isCurrentHost;
     setMonsterPersistenceHost(isHost);
+    friendlyNpcManager?.setHost(isHost);
     logMonsterPersist('isHost', isHost);
     if (previousHostId && previousHostId === multiplayer.getId() && previousHostId !== newHostId) {
       const snapshot = serializeAuthoritativeStates();
@@ -754,6 +757,7 @@ async function main() {
   multiplayer.onReady = async ({ roomId }) => {
     if (!roomId) {
       monstersSeeded = true;
+      friendlyNpcManager?.onRoomReady({ roomId: null, isHost: multiplayer.isHost });
       return;
     }
     initMonsterPersistence({
@@ -765,6 +769,7 @@ async function main() {
     setMonsterPersistenceHost(isHost);
     logMonsterPersist('isHost', isHost);
     monstersSeeded = false;
+    friendlyNpcManager?.onRoomReady({ roomId, isHost: multiplayer.isHost });
     try {
       const snapshot = await loadMonstersSnapshot();
       const snapshotEntries = Object.entries(snapshot || {});
@@ -1111,6 +1116,14 @@ async function main() {
     rbToMesh.set(rb, model);
   }
 
+  const detachNpcPhysics = (npc) => {
+    const body = npc?.body;
+    if (body && rapierWorld?.getRigidBody(body.handle)) {
+      rbToMesh.delete(body);
+      rapierWorld.removeRigidBody(body);
+    }
+  };
+
 
 
   let player = new PlayerCharacter(playerName, characterModel);
@@ -1193,6 +1206,21 @@ async function main() {
     }
     return lifted;
   };
+
+  friendlyNpcManager = createFriendlyNpcManager({
+    scene,
+    playerModel,
+    otherPlayers,
+    attachPhysics: attachMonsterPhysics,
+    detachPhysics: detachNpcPhysics,
+    getTerrainHeight,
+    liftPositionToBuildingTop,
+    isHost,
+    debug: window.DEBUG_FRIENDLY_PERSIST
+  });
+  if (multiplayer?.roomId) {
+    friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
+  }
 
   const liftPlayerToBuildingTop = (heightOffset = 0.6) => {
     if (!playerModel) return false;
@@ -3662,6 +3690,8 @@ async function main() {
         monster?.model && monster.update(monsterAnimDelta);
       });
     }
+
+    friendlyNpcManager?.update({ delta: monsterAnimDelta, isHost: isHostNow });
 
     if (now - lastPresenceSweep >= PRESENCE_SWEEP_MS) {
       lastPresenceSweep = now;
