@@ -65,7 +65,7 @@ function buildLadderPlacementFromShape(shape2D, bounds, lonScale, bottomY, topY)
     new THREE.Vector3(position.x + LADDER_WIDTH * 0.5, topY, position.z + LADDER_DEPTH * 0.5)
   );
 
-  return { position, rotationY, climbBox, bottomY, topY };
+  return { position, rotationY, climbBox, bottomY, topY, outward };
 }
 
 
@@ -450,11 +450,13 @@ function buildLadderPlacement(bbox, disabledSide) {
   let position;
   let rotationY = 0;
   let climbBox;
+  let outward;
 
   switch (disabledSide) {
     case "+Z":
       position = new THREE.Vector3(midX, bottomY, max.z + LADDER_OFFSET);
       rotationY = Math.PI;
+      outward = new THREE.Vector3(0, 0, 1);
       climbBox = new THREE.Box3(
         new THREE.Vector3(midX - LADDER_WIDTH * 0.5, bottomY, max.z),
         new THREE.Vector3(midX + LADDER_WIDTH * 0.5, topY, max.z + LADDER_DEPTH)
@@ -463,6 +465,7 @@ function buildLadderPlacement(bbox, disabledSide) {
     case "-Z":
       position = new THREE.Vector3(midX, bottomY, min.z - LADDER_OFFSET);
       rotationY = 0;
+      outward = new THREE.Vector3(0, 0, -1);
       climbBox = new THREE.Box3(
         new THREE.Vector3(midX - LADDER_WIDTH * 0.5, bottomY, min.z - LADDER_DEPTH),
         new THREE.Vector3(midX + LADDER_WIDTH * 0.5, topY, min.z)
@@ -471,6 +474,7 @@ function buildLadderPlacement(bbox, disabledSide) {
     case "+X":
       position = new THREE.Vector3(max.x + LADDER_OFFSET, bottomY, midZ);
       rotationY = -Math.PI / 2;
+      outward = new THREE.Vector3(1, 0, 0);
       climbBox = new THREE.Box3(
         new THREE.Vector3(max.x, bottomY, midZ - LADDER_WIDTH * 0.5),
         new THREE.Vector3(max.x + LADDER_DEPTH, topY, midZ + LADDER_WIDTH * 0.5)
@@ -479,6 +483,7 @@ function buildLadderPlacement(bbox, disabledSide) {
     case "-X":
       position = new THREE.Vector3(min.x - LADDER_OFFSET, bottomY, midZ);
       rotationY = Math.PI / 2;
+      outward = new THREE.Vector3(-1, 0, 0);
       climbBox = new THREE.Box3(
         new THREE.Vector3(min.x - LADDER_DEPTH, bottomY, midZ - LADDER_WIDTH * 0.5),
         new THREE.Vector3(min.x, topY, midZ + LADDER_WIDTH * 0.5)
@@ -493,7 +498,8 @@ function buildLadderPlacement(bbox, disabledSide) {
     rotationY,
     climbBox,
     bottomY,
-    topY
+    topY,
+    outward
   };
 }
 
@@ -527,6 +533,10 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   collisionGroup.name = "building-collision";
   collisionGroup.add(extrudedColliderMesh);
 
+  const ladderColliderGroup = new THREE.Group();
+  ladderColliderGroup.name = "ladder-collision";
+  collisionGroup.add(ladderColliderGroup);
+
   group.add(extrudedMesh);     // render
   group.add(flatMesh);         // render
   group.add(collisionGroup);   // collision only
@@ -541,6 +551,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   let ladderVersion = 0;
 
   const climbableAreas = [];
+  const ladderColliders = [];
 
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
@@ -614,11 +625,41 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     const currentVersion = ladderVersion;
 
     ladderGroup.clear();
+    ladderColliderGroup.clear();
+    ladderColliders.length = 0;
 
     climbableAreas.length = 0;
     window.climbableAreas = climbableAreas;
 
     if (!placements.length) return;
+
+    for (const p of placements) {
+      const outward = (p.outward || new THREE.Vector3(0, 0, 1)).clone().normalize();
+      const colliderHeight = Math.max(2.5, (p.topY - p.bottomY) * 0.95);
+      const colliderGeom = new THREE.BoxGeometry(LADDER_WIDTH, colliderHeight, LADDER_DEPTH);
+      const colliderMesh = new THREE.Mesh(colliderGeom, new THREE.MeshBasicMaterial({ visible: false }));
+      const colliderPosition = p.position.clone().addScaledVector(outward, LADDER_OFFSET + 0.03);
+      colliderMesh.position.set(
+        colliderPosition.x,
+        p.bottomY + colliderHeight * 0.5,
+        colliderPosition.z
+      );
+      colliderMesh.rotation.y = p.rotationY;
+      ladderColliderGroup.add(colliderMesh);
+      ladderColliders.push(colliderMesh);
+
+      const center = colliderMesh.position.clone();
+      climbableAreas.push({
+        center,
+        rotationY: p.rotationY,
+        halfWidth: LADDER_WIDTH * 0.5,
+        halfDepth: LADDER_DEPTH * 0.5,
+        halfHeight: colliderHeight * 0.5,
+        minY: p.bottomY,
+        maxY: p.bottomY + colliderHeight,
+        normal: outward.clone()
+      });
+    }
 
     ensureLadderTemplate().then((template) => {
 
@@ -651,16 +692,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
       console.error("Error in ladder loading/placement:", err);
     })
     );
-
-    for (const p of placements) {
-      const center = p.climbBox.getCenter(new THREE.Vector3());
-      climbableAreas.push({
-        box: p.climbBox,
-        center,
-        minY: p.bottomY,
-        maxY: p.topY
-      });
-    }
   }
 
 
@@ -806,6 +837,9 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     getCollisionMeshes: () => {
       const meshes = [];
       if (extrudedColliderMesh.geometry?.attributes?.position?.count) meshes.push(extrudedColliderMesh);
+      for (const ladderCollider of ladderColliders) {
+        if (ladderCollider.geometry?.attributes?.position?.count) meshes.push(ladderCollider);
+      }
       return meshes;
     },
     dispose
