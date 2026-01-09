@@ -3338,6 +3338,12 @@ async function main() {
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
     const frameDelta = clock.getDelta();
+    if (mapViewEnabled && playerControls?.body && playerModel) {
+      const { x, y, z } = playerModel.position;
+      playerControls.body.setTranslation({ x, y, z }, true);
+      playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
     physicsAccumulator += frameDelta;
     while (physicsAccumulator >= FIXED_DT) {
       // applyGlobalGravity(rapierWorld, window.moon);
