@@ -543,8 +543,8 @@ export class PlayerControls {
       }
       return 0;
     }
-    if (this.keysPressed.has("w") || this.keysPressed.has("arrowup")) return 1;
-    if (this.keysPressed.has("s") || this.keysPressed.has("arrowdown")) return -1;
+    if (this.keysPressed.has("w")) return 1;
+    if (this.keysPressed.has("s")) return -1;
     return 0;
   }
 
@@ -769,8 +769,8 @@ export class PlayerControls {
           moveDirection.addScaledVector(cameraRight, dx * this.joystickForce);
         }
       } else {
-        if (this.keysPressed.has("w") || this.keysPressed.has("arrowup")) moveDirection.z = 1;
-        if (this.keysPressed.has("s") || this.keysPressed.has("arrowdown")) moveDirection.z = -1;
+        if (this.keysPressed.has("w")) moveDirection.z = 1;
+        if (this.keysPressed.has("s")) moveDirection.z = -1;
         if (this.keysPressed.has("a")) moveDirection.x = 1;
         if (this.keysPressed.has("d")) moveDirection.x = -1;
       }

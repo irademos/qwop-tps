@@ -668,22 +668,19 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
         ladderGroup.add(ladder);
 
-        const colliderRoot = template.clone(true);
-        colliderRoot.scale.multiplyScalar(LADDER_HEIGHT_M);
-        colliderRoot.position.copy(ladder.position);
-        colliderRoot.rotation.y = p.rotationY;
-        colliderRoot.visible = false;
-        ladderColliderGroup.add(colliderRoot);
-        colliderRoot.traverse((node) => {
-          if (node.isMesh) ladderColliders.push(node);
-        });
-
         const localCenter = templateBounds.getCenter(new THREE.Vector3()).multiplyScalar(LADDER_HEIGHT_M);
         localCenter.applyAxisAngle(new THREE.Vector3(0, 1, 0), p.rotationY);
         const center = ladder.position.clone().add(localCenter);
         const scaledSize = templateSize.clone().multiplyScalar(LADDER_HEIGHT_M);
         const minY = center.y - scaledSize.y * 0.5;
         const maxY = center.y + scaledSize.y * 0.5;
+
+        const colliderGeom = new THREE.BoxGeometry(scaledSize.x, scaledSize.y, scaledSize.z);
+        const colliderMesh = new THREE.Mesh(colliderGeom, new THREE.MeshBasicMaterial({ visible: false }));
+        colliderMesh.position.copy(center);
+        colliderMesh.rotation.y = p.rotationY;
+        ladderColliderGroup.add(colliderMesh);
+        ladderColliders.push(colliderMesh);
 
         climbableAreas.push({
           center,
