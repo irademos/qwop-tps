@@ -581,6 +581,9 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     root.scale.setScalar(1 / height);
     root.updateMatrixWorld(true);
     
+    const normalizedBox = new THREE.Box3().setFromObject(root);
+    root.userData.bounds = normalizedBox;
+    root.userData.size = normalizedBox.getSize(new THREE.Vector3());
     root.userData.forward = (size.z <= size.x)
     ? new THREE.Vector3(0, 0, 1)   // forward +Z
     : new THREE.Vector3(1, 0, 0);  // forward +X
@@ -633,42 +636,20 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
     if (!placements.length) return;
 
-    for (const p of placements) {
-      const outward = (p.outward || new THREE.Vector3(0, 0, 1)).clone().normalize();
-      const colliderHeight = Math.max(2.5, (p.topY - p.bottomY) * 0.95);
-      const colliderGeom = new THREE.BoxGeometry(LADDER_WIDTH, colliderHeight, LADDER_DEPTH);
-      const colliderMesh = new THREE.Mesh(colliderGeom, new THREE.MeshBasicMaterial({ visible: false }));
-      const colliderPosition = p.position.clone().addScaledVector(outward, LADDER_OFFSET + 0.03);
-      colliderMesh.position.set(
-        colliderPosition.x,
-        p.bottomY + colliderHeight * 0.5,
-        colliderPosition.z
-      );
-      colliderMesh.rotation.y = p.rotationY;
-      ladderColliderGroup.add(colliderMesh);
-      ladderColliders.push(colliderMesh);
-
-      const center = colliderMesh.position.clone();
-      climbableAreas.push({
-        center,
-        rotationY: p.rotationY,
-        halfWidth: LADDER_WIDTH * 0.5,
-        halfDepth: LADDER_DEPTH * 0.5,
-        halfHeight: colliderHeight * 0.5,
-        minY: p.bottomY,
-        maxY: p.bottomY + colliderHeight,
-        normal: outward.clone()
-      });
-    }
-
     ensureLadderTemplate().then((template) => {
 
       if (!template) return;
+      const templateBounds = template.userData.bounds;
+      const templateSize = template.userData.size;
+      if (!templateBounds || !templateSize) return;
 
       // TEMP: disable this while debugging
       // if (currentVersion !== ladderVersion) return;
 
       ladderGroup.clear();
+      ladderColliderGroup.clear();
+      ladderColliders.length = 0;
+      climbableAreas.length = 0;
 
       for (const p of placements) {
         const ladder = template.clone(true);
@@ -686,6 +667,34 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
         ladder.position.addScaledVector(outward, LADDER_OFFSET + 0.03);
 
         ladderGroup.add(ladder);
+
+        const colliderRoot = template.clone(true);
+        colliderRoot.scale.multiplyScalar(LADDER_HEIGHT_M);
+        colliderRoot.position.copy(ladder.position);
+        colliderRoot.rotation.y = p.rotationY;
+        colliderRoot.visible = false;
+        ladderColliderGroup.add(colliderRoot);
+        colliderRoot.traverse((node) => {
+          if (node.isMesh) ladderColliders.push(node);
+        });
+
+        const localCenter = templateBounds.getCenter(new THREE.Vector3()).multiplyScalar(LADDER_HEIGHT_M);
+        localCenter.applyAxisAngle(new THREE.Vector3(0, 1, 0), p.rotationY);
+        const center = ladder.position.clone().add(localCenter);
+        const scaledSize = templateSize.clone().multiplyScalar(LADDER_HEIGHT_M);
+        const minY = center.y - scaledSize.y * 0.5;
+        const maxY = center.y + scaledSize.y * 0.5;
+
+        climbableAreas.push({
+          center,
+          rotationY: p.rotationY,
+          halfWidth: scaledSize.x * 0.5,
+          halfDepth: scaledSize.z * 0.5,
+          halfHeight: scaledSize.y * 0.5,
+          minY,
+          maxY,
+          normal: outward.clone()
+        });
 
       }
     }).catch((err => {
