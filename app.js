@@ -2854,7 +2854,11 @@ async function main() {
         locationState.playerX = playerMeters.x;
         locationState.playerZ = playerMeters.z;
 
-        if (!didInitialGpsSnap) {
+        if (mapViewEnabled) {
+          applyPlayerMeters(playerMeters);
+          didInitialGpsSnap = true;
+          playerControls?.clearGpsMoveTarget?.();
+        } else if (!didInitialGpsSnap) {
           applyPlayerMeters(playerMeters);
           didInitialGpsSnap = true;
         } else if (playerControls && playerModel) {
