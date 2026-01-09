@@ -4,6 +4,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import ClipperLib from "clipper-lib";
 import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
+import { clearClimbableSensors, registerClimbableSensor } from "./climbables.js";
 
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const DEFAULT_HEIGHT = 10;
@@ -550,7 +551,6 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   let ladderLoadPromise = null;
   let ladderVersion = 0;
 
-  const climbableAreas = [];
   const ladderColliders = [];
 
   function disposeGeometry(mesh) {
@@ -631,8 +631,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     ladderColliderGroup.clear();
     ladderColliders.length = 0;
 
-    climbableAreas.length = 0;
-    window.climbableAreas = climbableAreas;
+    clearClimbableSensors();
 
     if (!placements.length) return;
 
@@ -645,7 +644,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
       ladderGroup.clear();
       ladderColliderGroup.clear();
       ladderColliders.length = 0;
-      climbableAreas.length = 0;
+      clearClimbableSensors();
 
       for (const p of placements) {
         const ladder = template.clone(true);
@@ -678,15 +677,13 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
         ladderColliderGroup.add(colliderMesh);
         ladderColliders.push(colliderMesh);
 
-        climbableAreas.push({
+        registerClimbableSensor({
           center,
-          rotationY: p.rotationY,
-          halfWidth: scaledSize.x * 0.5,
-          halfDepth: scaledSize.z * 0.5,
-          halfHeight: scaledSize.y * 0.5,
+          halfExtents: new THREE.Vector3(scaledSize.x * 0.5, scaledSize.y * 0.5, scaledSize.z * 0.5),
+          normal: outward.clone(),
           minY,
           maxY,
-          normal: outward.clone()
+          type: "ladder"
         });
 
       }

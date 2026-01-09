@@ -5,6 +5,7 @@ import { MOON_RADIUS } from "./worldGeneration.js";
 import { getSpawnPosition } from './spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import { getKnockbackImpulse } from "./knockback.js";
+import { getNearestClimbable } from "./climbables.js";
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -13,7 +14,10 @@ const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
 const CLIMB_SPEED = 1.6;
-const CLIMB_SNAP_DISTANCE = 0.6;
+const CLIMB_STRAFE_SPEED = 1.2;
+const CLIMB_SNAP_DISTANCE = 0.8;
+const CLIMB_PLANE_OFFSET = 0.35;
+const CLIMB_LOST_GRACE_MS = 200;
 
 export class PlayerControls {
   constructor({ scene, camera, playerModel, renderer, multiplayer, spawnProjectile, projectiles, audioManager, initialAmmo, onAmmoChange }) {
@@ -42,7 +46,9 @@ export class PlayerControls {
     this.grabberId = null;
     this.externalGrabPos = null;
     this.isClimbing = false;
-    this.activeClimbArea = null;
+    this.climbTarget = null;
+    this.climbOffset = CLIMB_PLANE_OFFSET;
+    this.climbLostAt = null;
 
     this.vehicle = null;
 
@@ -561,47 +567,53 @@ export class PlayerControls {
     return 0;
   }
 
-  getClimbLocalPosition(area, position) {
-    if (!area?.center) return null;
-    const local = position.clone().sub(area.center);
-    local.applyAxisAngle(new THREE.Vector3(0, 1, 0), -(area.rotationY ?? 0));
-    return local;
-  }
-
-  findClimbableArea(position) {
-    const areas = window.climbableAreas || [];
-    if (!areas.length) return null;
-    let closest = null;
-    let closestDist = Infinity;
-    for (const area of areas) {
-      if (!area?.center) continue;
-      const local = this.getClimbLocalPosition(area, position);
-      if (!local) continue;
-      const halfWidth = area.halfWidth ?? 0;
-      const halfDepth = area.halfDepth ?? 0;
-      const halfHeight = area.halfHeight ?? 0;
-      const withinWidth = Math.abs(local.x) <= halfWidth + CLIMB_SNAP_DISTANCE;
-      const withinHeight = local.y >= -halfHeight - CLIMB_SNAP_DISTANCE && local.y <= halfHeight + CLIMB_SNAP_DISTANCE;
-      const minDepth = halfDepth - CLIMB_SNAP_DISTANCE;
-      const maxDepth = halfDepth + CLIMB_SNAP_DISTANCE + PLAYER_RADIUS;
-      const withinDepth = local.z >= minDepth && local.z <= maxDepth;
-      if (!withinWidth || !withinHeight || !withinDepth) continue;
-      const dist = area.center?.distanceTo(position) ?? 0;
-      if (dist < closestDist) {
-        closest = area;
-        closestDist = dist;
-      }
+  getClimbNormal(target) {
+    const normal = target?.normal?.clone?.() ?? new THREE.Vector3(0, 0, 1);
+    if (normal.lengthSq() < 1e-6) {
+      normal.set(0, 0, 1);
     }
-    return closest;
+    return normal.normalize();
   }
 
-  startClimbing(area) {
+  getClimbPlanePosition(target, position) {
+    const normal = this.getClimbNormal(target);
+    const center = target?.center ?? { x: 0, y: 0, z: 0 };
+    const toPos = new THREE.Vector3(position.x - center.x, position.y - center.y, position.z - center.z);
+    const distance = toPos.dot(normal);
+    const adjust = this.climbOffset - distance;
+    return position.clone().addScaledVector(normal, adjust);
+  }
+
+  getClimbRightAxis(target) {
+    const normal = this.getClimbNormal(target);
+    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), normal);
+    if (right.lengthSq() < 1e-6) {
+      right.set(1, 0, 0);
+    }
+    return right.normalize();
+  }
+
+  isMovingTowardClimbTarget(target, movement) {
+    if (!target?.normal) return false;
+    if (!movement || movement.length() === 0) return false;
+    const moveDir = movement.clone().normalize();
+    const normal = this.getClimbNormal(target);
+    return moveDir.dot(normal) < -0.2;
+  }
+
+  enterClimb(target, position) {
     this.isClimbing = true;
-    this.activeClimbArea = area;
+    this.climbTarget = target;
+    this.climbLostAt = null;
     this.canJump = false;
+    if (this.body) {
+      const snapped = this.getClimbPlanePosition(target, position);
+      this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      this.body.setTranslation({ x: snapped.x, y: snapped.y, z: snapped.z }, true);
+    }
   }
 
-  stopClimbing() {
+  exitClimb({ reason, impulse } = {}) {
     if (!this.isClimbing) return;
     const actions = this.playerModel?.userData?.actions;
     if (actions?.climb) {
@@ -609,30 +621,100 @@ export class PlayerControls {
       actions.climb.timeScale = 1;
     }
     this.isClimbing = false;
-    this.activeClimbArea = null;
+    this.climbTarget = null;
+    this.climbLostAt = null;
+    if (impulse && this.body) {
+      this.body.applyImpulse(impulse, true);
+    }
   }
 
-  isMovingTowardClimbArea(area, movement) {
-    if (!area?.normal) return false;
-    if (!movement || movement.length() === 0) return false;
-    const moveDir = movement.clone().normalize();
-    return moveDir.dot(area.normal) < -0.2;
+  tryEnterClimb({ position, movement, moveDirection, cameraDirection }) {
+    if (this.isClimbing || !this.body) return;
+    if (this.isGrabbed || this.vehicle || this.isInWater || !this.enabled) return;
+    const climbInput = this.getClimbInput(moveDirection, cameraDirection);
+    if (climbInput <= 0) return;
+    const target = getNearestClimbable(position, CLIMB_SNAP_DISTANCE);
+    if (!target) return;
+    if (!this.isMovingTowardClimbTarget(target, movement)) return;
+    this.enterClimb(target, position);
   }
 
-  getClimbSnapPosition(area, position) {
-    const local = this.getClimbLocalPosition(area, position);
-    if (!local) return position.clone();
-    const maxX = Math.max(0.01, (area.halfWidth ?? 0) - PLAYER_RADIUS * 0.5);
-    const clampedX = THREE.MathUtils.clamp(local.x, -maxX, maxX);
-    local.x = clampedX;
-    local.z = (area.halfDepth ?? 0) + PLAYER_RADIUS * 0.1;
-    local.applyAxisAngle(new THREE.Vector3(0, 1, 0), area.rotationY ?? 0);
-    return local.add(area.center);
-  }
+  updateClimbMovement({ position, movement, moveDirection, cameraDirection }) {
+    if (!this.body || !this.isClimbing) return;
+    const now = Date.now();
+    const target = getNearestClimbable(position, CLIMB_SNAP_DISTANCE + 0.2);
+    if (!target) {
+      if (!this.climbLostAt) this.climbLostAt = now;
+      if (now - this.climbLostAt > CLIMB_LOST_GRACE_MS) {
+        this.exitClimb({ reason: "lost" });
+      }
+      return;
+    }
+    this.climbTarget = target;
+    this.climbLostAt = null;
 
-  updateClimbing({ area, climbInput, position, velocity, groundExpectedY }) {
+    if (this.keysPressed.has(" ") || (this.isMobile && this.jumpButtonPressed)) {
+      const normal = this.getClimbNormal(target);
+      this.exitClimb({ reason: "jump", impulse: { x: normal.x * 0.6, y: 0.2, z: normal.z * 0.6 } });
+      return;
+    }
+
+    const climbInput = this.getClimbInput(moveDirection, cameraDirection);
+    let strafeInput = 0;
+    if (this.isMobile) {
+      if (movement.length() > 0) {
+        const right = this.getClimbRightAxis(target);
+        strafeInput = THREE.MathUtils.clamp(movement.dot(right), -1, 1);
+      }
+    } else {
+      strafeInput = (this.keysPressed.has("a") ? 1 : 0) + (this.keysPressed.has("d") ? -1 : 0);
+    }
+
+    const delta = this.deltaSeconds || 0.016;
+    const normal = this.getClimbNormal(target);
+    const right = this.getClimbRightAxis(target);
+    const center = target.center ?? { x: 0, y: 0, z: 0 };
+    const minY = (target.minY ?? position.y) + PLAYER_RADIUS * 0.5;
+    const maxY = (target.maxY ?? position.y) - PLAYER_RADIUS * 0.5;
+
+    let newY = position.y + climbInput * CLIMB_SPEED * delta;
+    newY = THREE.MathUtils.clamp(newY, minY, maxY);
+
+    const newPos = position.clone();
+    newPos.y = newY;
+    if (strafeInput !== 0) {
+      newPos.addScaledVector(right, strafeInput * CLIMB_STRAFE_SPEED * delta);
+    }
+
+    const localRight = new THREE.Vector3(newPos.x - center.x, 0, newPos.z - center.z).dot(right);
+    const maxRight = Math.max(0.1, (target.halfExtents?.x ?? 0) - PLAYER_RADIUS * 0.5);
+    if (Math.abs(localRight) > maxRight + 0.2) {
+      this.exitClimb({ reason: "edge" });
+      return;
+    }
+
+    if (climbInput > 0 && newY >= maxY - 0.01) {
+      const topOut = newPos.clone().addScaledVector(normal, -0.4);
+      topOut.y = maxY + 0.1;
+      this.body.setTranslation({ x: topOut.x, y: topOut.y, z: topOut.z }, true);
+      this.exitClimb({ reason: "top" });
+      return;
+    }
+    if (climbInput < 0 && newY <= minY + 0.01) {
+      this.exitClimb({ reason: "bottom" });
+      return;
+    }
+
+    const snapped = this.getClimbPlanePosition(target, newPos);
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setTranslation({ x: snapped.x, y: snapped.y, z: snapped.z }, true);
+
+    if (this.playerModel) {
+      this.playerModel.rotation.y = Math.atan2(-normal.x, -normal.z);
+    }
+
     const actions = this.playerModel?.userData?.actions;
-    if (actions?.climb) {
+    if (actions?.climb && !this.currentSpecialAction) {
       const current = this.playerModel.userData.currentAction;
       if (current !== 'climb') {
         actions[current]?.fadeOut(0.1);
@@ -649,32 +731,6 @@ export class PlayerControls {
       } else {
         actions.climb.paused = true;
       }
-    }
-
-    const delta = this.deltaSeconds || 0.016;
-    const direction = climbInput === 0 ? 0 : climbInput > 0 ? 1 : -1;
-    let newY = position.y + direction * CLIMB_SPEED * delta;
-    const minY = Math.max(groundExpectedY, area.minY ?? groundExpectedY);
-    const maxY = area.maxY ?? position.y;
-    if (position.y > maxY + 0.05) {
-      this.stopClimbing();
-      return;
-    }
-    if (direction > 0 && newY >= maxY) {
-      newY = maxY;
-    } else if (direction < 0 && newY <= minY) {
-      newY = minY;
-    }
-
-    const snapped = this.getClimbSnapPosition(area, position);
-    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    this.body.setTranslation({ x: snapped.x, y: newY, z: snapped.z }, true);
-
-    if (direction < 0 && newY <= minY + 0.01) {
-      this.stopClimbing();
-    }
-    if (direction > 0 && newY >= maxY - 0.01) {
-      this.stopClimbing();
     }
   }
 
@@ -738,32 +794,34 @@ export class PlayerControls {
     }
     const groundExpectedY = groundY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
     const grounded = !this.isInWater && t.y <= groundExpectedY + 0.05;
-    if (grounded && !this.isInWater) {
+    if (grounded && !this.isInWater && !this.isClimbing) {
       this.canJump = true;
       this.hasDoubleJumped = false;
     } else {
       this.canJump = false;
     }
-    if (this.isInWater) {
-      if (this.keysPressed.has(" ")) {
-        const newY = t.y - 0.2;
-        this.body.setTranslation({ x: t.x, y: newY, z: t.z }, true);
-        this.body.setLinvel({ x: vel.x, y: -1, z: vel.z }, true);
-        t.y = newY;
-      } else if (t.y < floatTargetY) {
-        const newY = t.y + (floatTargetY - t.y) * 0.1;
-        this.body.setTranslation({ x: t.x, y: newY, z: t.z }, true);
+    if (!this.isClimbing) {
+      if (this.isInWater) {
+        if (this.keysPressed.has(" ")) {
+          const newY = t.y - 0.2;
+          this.body.setTranslation({ x: t.x, y: newY, z: t.z }, true);
+          this.body.setLinvel({ x: vel.x, y: -1, z: vel.z }, true);
+          t.y = newY;
+        } else if (t.y < floatTargetY) {
+          const newY = t.y + (floatTargetY - t.y) * 0.1;
+          this.body.setTranslation({ x: t.x, y: newY, z: t.z }, true);
+          if (vel.y < 0) {
+            this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
+          }
+          t.y = newY;
+        }
+      } else if (t.y < groundExpectedY) {
+        this.body.setTranslation({ x: t.x, y: groundExpectedY, z: t.z }, true);
         if (vel.y < 0) {
           this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
         }
-        t.y = newY;
+        t.y = groundExpectedY;
       }
-    } else if (t.y < groundExpectedY) {
-      this.body.setTranslation({ x: t.x, y: groundExpectedY, z: t.z }, true);
-      if (vel.y < 0) {
-        this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
-      }
-      t.y = groundExpectedY;
     }
     const moveDirection = new THREE.Vector3(0, 0, 0);
     const movementLocked = ['mutantPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
@@ -814,25 +872,33 @@ export class PlayerControls {
     } else if (movement.length() > 0) {
       this.lastMoveDirection.copy(movement);
     }
-    if (this.isClimbing) {
-      movement.set(0, 0, 0);
+    if (this.isClimbing && (this.isInWater || this.vehicle || this.isGrabbed)) {
+      this.exitClimb({ reason: "force" });
     }
 
-    const climbInput = this.getClimbInput(moveDirection, cameraDirection);
-    const climbArea = this.findClimbableArea(position);
-    const shouldStartClimb = !this.isClimbing && climbArea && climbInput > 0 && this.isMovingTowardClimbArea(climbArea, movement);
-    if (this.isClimbing || shouldStartClimb) {
-      if (!climbArea) {
-        this.stopClimbing();
-      } else {
-        if (!this.isClimbing) this.startClimbing(climbArea);
-        this.updateClimbing({
-          area: climbArea,
-          climbInput,
+    if (this.isClimbing) {
+      this.updateClimbMovement({
+        position,
+        movement,
+        moveDirection,
+        cameraDirection
+      });
+      movement.set(0, 0, 0);
+    } else {
+      this.tryEnterClimb({
+        position,
+        movement,
+        moveDirection,
+        cameraDirection
+      });
+      if (this.isClimbing) {
+        this.updateClimbMovement({
           position,
-          velocity: vel,
-          groundExpectedY
+          movement,
+          moveDirection,
+          cameraDirection
         });
+        movement.set(0, 0, 0);
       }
     }
     const gpsMove = this.getGpsMoveDirection(position);
@@ -1140,6 +1206,10 @@ export class PlayerControls {
       } else {
         const playerPos = this.playerModel.position;
         let closestDist = Infinity;
+        const climbTarget = getNearestClimbable(playerPos, CLIMB_SNAP_DISTANCE);
+        const climbPrompt = climbTarget && !this.isClimbing
+          ? (this.isMobile ? 'Tap to climb' : 'W/S climb (Space to drop)')
+          : '';
 
         const consider = (object, maxDistance, message) => {
           if (!object) return;
@@ -1167,6 +1237,11 @@ export class PlayerControls {
               : 'weapon';
           consider(weapon, 3, `'x' pick up ${weaponLabel}`);
         });
+
+        if (!visible && climbPrompt) {
+          promptText = climbPrompt;
+          visible = true;
+        }
       }
     }
 
