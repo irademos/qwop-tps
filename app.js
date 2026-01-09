@@ -1823,8 +1823,12 @@ async function main() {
   let playerDead = false;
   const updateControlAvailability = () => {
     if (!playerControls) return;
+    playerControls.enabled = !mapViewEnabled && !playerDead;
+  };
+  const updateEnergyEffects = () => {
+    if (!playerControls) return;
     const energyDepleted = statsState.energy <= 0;
-    playerControls.enabled = !mapViewEnabled && !playerDead && !energyDepleted;
+    playerControls.setEnergyDepleted?.(energyDepleted);
   };
 
   const healthFill = document.getElementById('health-fill');
@@ -1972,7 +1976,7 @@ async function main() {
     }
     if (key === 'energy') {
       updateEnergyUI();
-      updateControlAvailability();
+      updateEnergyEffects();
     }
     if (key === 'level') {
       updatePlayerInfoUI();
@@ -2318,6 +2322,7 @@ async function main() {
   });
   window.playerControls = playerControls;
   updateControlAvailability();
+  updateEnergyEffects();
 
   initMapView({ camera, scene, player: playerModel });
 
