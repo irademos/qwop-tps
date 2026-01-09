@@ -697,6 +697,7 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
         });
 
       }
+      window.rebuildBuildingColliders?.();
     }).catch((err => {
       console.error("Error in ladder loading/placement:", err);
     })
