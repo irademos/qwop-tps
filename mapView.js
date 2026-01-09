@@ -86,13 +86,8 @@ function getMapPose() {
 
   // Look straight down
   state.tempObject.position.copy(state.tempPos);
-  state.tempObject.up.set(0, 0, 1);      // choose (0,0,1) or (0,0,-1) for north-up
+  state.tempObject.up.copy(state.mapUp);
   state.tempObject.lookAt(x, state.player.position.y, z);
-
-  // Force "down" direction (avoid roll)
-  state.tempObject.rotation.x = -Math.PI / 2; // straight down
-  // Optional: if you want north-up, add a yaw here:
-  // state.tempObject.rotation.z = 0; // keep stable
 
   state.tempObject.updateMatrixWorld(true);
   state.tempQuat.copy(state.tempObject.quaternion);
