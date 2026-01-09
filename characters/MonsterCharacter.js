@@ -35,7 +35,8 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.mixer = mixer;
     this.model.userData.mode = "friendly";
     this.model.userData.direction = new THREE.Vector3();
-    this.baseScale = this.model.scale.clone();
+    this.pivot = this.model?.userData?.pivot ?? this.model;
+    this.baseScale = this.pivot.scale.clone();
     this.model.userData.health = DEFAULT_HEALTH;
     this.health = DEFAULT_HEALTH;
     this.maxHealth = DEFAULT_HEALTH;
@@ -112,8 +113,8 @@ export class MonsterCharacter extends CharacterBase {
     this.attackDamage = MONSTER_ATTACK.damage * this.sizeScale;
     this.maxHealth = DEFAULT_HEALTH * this.sizeScale;
     this.model.userData.maxHealth = this.maxHealth;
-    if (this.model?.scale) {
-      this.model.scale.set(
+    if (this.pivot?.scale) {
+      this.pivot.scale.set(
         this.baseScale.x * this.sizeScale,
         this.baseScale.y * this.sizeScale,
         this.baseScale.z * this.sizeScale
