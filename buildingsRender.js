@@ -27,7 +27,7 @@ const textureLoader = new THREE.TextureLoader();
 const SIDES = ["+Z", "-Z", "+X", "-X"];
 
 function buildLadderPlacementFromShape(shape2D, bounds, lonScale, bottomY, topY) {
-  const pts2 = shape2D.getPoints(); // Vector2 in (x, z) space from your ringToPoints()
+  const pts2 = shape2D.getPoints(); // Vector2 in (x, -z) space from your ringToPoints()
   if (pts2.length < 2) return null;
 
   // pick a stable edge: longest edge
@@ -43,9 +43,9 @@ function buildLadderPlacementFromShape(shape2D, bounds, lonScale, bottomY, topY)
   const a = pts2[bestI];
   const b = pts2[(bestI + 1) % pts2.length];
 
-  // convert Vector2 (x, y) to world (x, z)
-  const ax = a.x, az = a.y;
-  const bx = b.x, bz = b.y;
+  // convert Vector2 (x, y) to world (x, z) where z = -y
+  const ax = a.x, az = -a.y;
+  const bx = b.x, bz = -b.y;
 
   const midX = (ax + bx) * 0.5;
   const midZ = (az + bz) * 0.5;
@@ -181,7 +181,7 @@ function ringToPoints(ring, origin, lonScale) {
   for (const coord of coords) {
     if (!coord || coord.length < 2) continue;
     const local = toLocalMeters(coord, origin, lonScale);
-    points.push(new THREE.Vector2(local.x, local.z));
+    points.push(new THREE.Vector2(local.x, -local.z));
   }
   return points;
 }
