@@ -424,6 +424,29 @@ body {
   transform: translateY(0);
 }
 
+#coin-popup {
+  position: absolute;
+  top: 168px;
+  left: 10px;
+  padding: 6px 10px;
+  background: rgba(23, 16, 0, 0.8);
+  border: 2px solid #000;
+  border-radius: 6px;
+  color: #ffd968;
+  font-family: 'Press Start 2P', sans-serif;
+  font-size: 11px;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  z-index: 1100;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#coin-popup.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 #player-info {
   position: absolute;
   top: 10px;
