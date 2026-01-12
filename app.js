@@ -3435,7 +3435,10 @@ async function main() {
     if (!mapViewEnabled) {
       playerControls.update();
     }
-    updateMapView(frameDelta);
+    updateMapView(frameDelta, {
+      monsters,
+      friendlies: friendlyNpcManager?.friendlies
+    });
 
     const now = performance.now();
     if (now - lastPerfUpdateMs >= 1000) {
