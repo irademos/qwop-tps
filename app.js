@@ -3646,73 +3646,47 @@ async function main() {
     }
 
     const mixerDelta = mixerClock.getDelta();
-    monsterAnimAccumulator += mixerDelta;
 
-    if (monsterAnimAccumulator >= MONSTER_ANIM_INTERVAL) {
-      const d = monsterAnimAccumulator;
-      monsterAnimAccumulator = 0;
+    // 1) Always advance animation mixers (every frame)
+    Object.values(otherPlayers).forEach(p => {
+      p.model?.userData?.mixer?.update(mixerDelta);
+    });
 
-      for (const monster of monsters) {
-        const mm = monster?.model?.userData?.mixer;
-        if (mm) mm.update(d);
-      }
+    for (const monster of monsters) {
+      monster?.model?.userData?.mixer?.update(mixerDelta);
     }
 
-    remoteAnimAccumulator += mixerDelta;
-    monsterAnimAccumulator += mixerDelta;
-    const remoteAnimDelta = remoteAnimAccumulator >= REMOTE_ANIM_INTERVAL ? remoteAnimAccumulator : 0;
-    const monsterAnimDelta = monsterAnimAccumulator >= MONSTER_ANIM_INTERVAL ? monsterAnimAccumulator : 0;
-    if (remoteAnimDelta > 0) {
-      remoteAnimAccumulator = 0;
-      Object.values(otherPlayers).forEach(p => {
-        p.model?.userData?.mixer?.update(remoteAnimDelta);
-      });
-    }
-    if (monsterAnimDelta > 0) {
-      monsterAnimAccumulator = 0;
-    }
-
+    // 2) AI can still be throttled, but pass a real delta when you DO run it
+    const aiNowMs = Date.now();
     const isHostNow = !multiplayer || multiplayer.isHost;
+
     if (isHostNow) {
       if (monstersSeeded) {
         ensureMonsters();
-        const nowMs = Date.now();
         monsters.forEach(monster => {
           if (!monster || !monster.model) return;
-          if (monster.isDead) {
-            const slotId = monster.id;
-            if (!respawnTimers.has(slotId)) {
-              cleanupMonster(monster);
-              monsters = monsters.filter(entry => entry.id !== slotId);
-              window.monsters = monsters;
-              const delay = THREE.MathUtils.randFloat(...MONSTER_RESPAWN_DELAY_RANGE_MS);
-              const timer = setTimeout(() => {
-                respawnTimers.delete(slotId);
-                spawnMonsterInSlot(slotId, getRandomMonsterModel());
-              }, delay);
-              respawnTimers.set(slotId, timer);
-            }
-            return;
-          }
+
+          if (monster.isDead) return; // your respawn logic here...
+
           if (PERF.throttleAI) {
-            const lastUpdate = monster.lastAIUpdateMs ?? 0;
-            if (nowMs - lastUpdate > 150) {
-              monster.lastAIUpdateMs = nowMs;
-              monster.updateAI(monsterAnimDelta, playerModel, otherPlayers);
+            const last = monster.lastAIUpdateMs ?? 0;
+            if (aiNowMs - last > 150) {
+              monster.lastAIUpdateMs = aiNowMs;
+              monster.updateAI(mixerDelta, playerModel, otherPlayers); // <-- use mixerDelta
             }
           } else {
-            monster.updateAI(monsterAnimDelta, playerModel, otherPlayers);
+            monster.updateAI(mixerDelta, playerModel, otherPlayers);   // <-- use mixerDelta
           }
-          persistMonsterState(monster);
         });
       }
     } else {
-      monsters.forEach(monster => {
-        monster?.model && monster.update(monsterAnimDelta);
-      });
+      // non-host prediction
+      monsters.forEach(monster => monster?.update?.(mixerDelta));
     }
 
-    friendlyNpcManager?.update({ delta: monsterAnimDelta, isHost: isHostNow });
+    // Friendlies: same idea—do NOT pass 0 deltas
+    friendlyNpcManager?.update({ delta: mixerDelta, isHost: isHostNow });
+
 
     if (now - lastPresenceSweep >= PRESENCE_SWEEP_MS) {
       lastPresenceSweep = now;

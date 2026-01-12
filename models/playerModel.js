@@ -260,6 +260,9 @@ export function createPlayerModel(
                   // const clean = stripRootTracks(src, rootName);
                   // const action = mixer.clipAction(clean);
                   const action = mixer.clipAction(clip);
+                  if (name === 'walk') {
+                    action.setEffectiveTimeScale(1.8);
+                  }
                   if (
                     ['jump', 'hit', 'mutantPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
                   ) {
