@@ -86,7 +86,8 @@ function getMapPose() {
 
   // Look straight down
   state.tempObject.position.copy(state.tempPos);
-  state.tempObject.up.set(0, 0, 1);      // choose (0,0,1) or (0,0,-1) for north-up
+  // state.tempObject.up.set(0, 0, -1);      // choose (0,0,1) or (0,0,-1) for north-up
+  state.tempObject.up.copy(state.mapUp);
   state.tempObject.lookAt(x, state.player.position.y, z);
 
   // Force "down" direction (avoid roll)

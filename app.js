@@ -2592,8 +2592,8 @@ async function main() {
     if (!Number.isFinite(location.lat) || !Number.isFinite(location.lon)) return null;
     const lonScale = metersPerDegreeLon(worldOrigin.lat);
     return {
-      x: (location.lon - worldOrigin.lon) * lonScale,
-      z: -(location.lat - worldOrigin.lat) * METERS_PER_DEGREE_LAT
+      x: -(location.lon - worldOrigin.lon) * lonScale,
+      z: (location.lat - worldOrigin.lat) * METERS_PER_DEGREE_LAT
     };
   };
 
@@ -2635,8 +2635,8 @@ async function main() {
     if (!origin || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
     const lonScale = metersPerDegreeLon(origin.centerLat);
     return {
-      x: (lon - origin.centerLon) * lonScale,
-      z: -(lat - origin.centerLat) * METERS_PER_DEGREE_LAT
+      x: -(lon - origin.centerLon) * lonScale,
+      z: (lat - origin.centerLat) * METERS_PER_DEGREE_LAT
     };
   };
 
@@ -2644,8 +2644,8 @@ async function main() {
     if (!origin || !Number.isFinite(x) || !Number.isFinite(z)) return null;
     const lonScale = metersPerDegreeLon(origin.centerLat);
     return {
-      lat: origin.centerLat - z / METERS_PER_DEGREE_LAT,
-      lon: origin.centerLon + x / lonScale
+      lat: origin.centerLat + z / METERS_PER_DEGREE_LAT,
+      lon: origin.centerLon - x / lonScale
     };
   };
 
@@ -2887,7 +2887,11 @@ async function main() {
         locationState.playerX = playerMeters.x;
         locationState.playerZ = playerMeters.z;
 
-        if (!didInitialGpsSnap) {
+        if (mapViewEnabled) {
+          applyPlayerMeters(playerMeters);
+          didInitialGpsSnap = true;
+          playerControls?.clearGpsMoveTarget?.();
+        } else if (!didInitialGpsSnap) {
           applyPlayerMeters(playerMeters);
           didInitialGpsSnap = true;
         } else if (playerControls && playerModel) {
@@ -3314,6 +3318,8 @@ async function main() {
       locationState.playerZ = null;
       locationState.tile = null;
       rebuildMapFromCache();
+      didInitialGpsSnap = false;
+      window.clearTileCache?.();
     }
   };
 
@@ -3367,6 +3373,12 @@ async function main() {
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
     const frameDelta = clock.getDelta();
+    if (mapViewEnabled && playerControls?.body && playerModel) {
+      const { x, y, z } = playerModel.position;
+      playerControls.body.setTranslation({ x, y, z }, true);
+      playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
     physicsAccumulator += frameDelta;
     while (physicsAccumulator >= FIXED_DT) {
       // applyGlobalGravity(rapierWorld, window.moon);

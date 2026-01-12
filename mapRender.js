@@ -77,8 +77,8 @@ function computeBounds(lines) {
 function toLocalMeters(coord, origin, lonScale) {
   const [lon, lat] = coord;
   return {
-    x: (lon - origin.centerLon) * lonScale,
-    z: -(lat - origin.centerLat) * METERS_PER_DEGREE_LAT
+    x: -(lon - origin.centerLon) * lonScale,
+    z: (lat - origin.centerLat) * METERS_PER_DEGREE_LAT
   };
 }
 

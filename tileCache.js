@@ -34,7 +34,7 @@ export function createTileCache({
     if (!base) return null;
     const lonScale = metersPerDegreeLon(base.lat);
     return {
-      x: (location.lon - base.lon) * lonScale,
+      x: -(location.lon - base.lon) * lonScale,
       z: (location.lat - base.lat) * METERS_PER_DEGREE_LAT
     };
   };
@@ -58,7 +58,7 @@ export function createTileCache({
     };
     return {
       lat: origin.lat + centerLocal.z / METERS_PER_DEGREE_LAT,
-      lon: origin.lon + centerLocal.x / lonScale
+      lon: origin.lon - centerLocal.x / lonScale
     };
   };
 
