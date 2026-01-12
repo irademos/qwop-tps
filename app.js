@@ -146,9 +146,11 @@ async function main() {
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 30;
+  const MAX_COIN_PICKUPS = 80;
   const TILE_STOCK_AMMO_COUNT = 400;
   const TILE_STOCK_FOOD_COUNT = 500;
   const TILE_STOCK_HEALTH_COUNT = 500;
+  const TILE_STOCK_COIN_COUNT = 500;
   const TILE_STOCK_WEAPON_COUNT = 100;
   const PICKUP_SPAWN_RADIUS = 225;
   const PICKUP_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
@@ -181,8 +183,10 @@ async function main() {
   const droppedAmmoPickups = new Map();
   const pendingDropRemovals = new Set();
   const AMMO_PICKUP_AMOUNT = 5;
+  const COIN_PICKUP_GAIN = 1;
   const foodPickups = [];
   const healthPickups = [];
+  const coinPickups = [];
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
 
@@ -1243,6 +1247,7 @@ async function main() {
     droppedAmmoPickups.forEach(entry => liftMeshToBuildingTop(entry?.mesh, 0.6));
     foodPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
     healthPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
+    coinPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
     if (!iceGun?.holder) {
       liftMeshToBuildingTop(iceGun?.mesh, 0.5);
     }
@@ -1638,15 +1643,18 @@ async function main() {
     smarts: playerProfile.stats.smarts,
     charm: playerProfile.stats.charm,
     luck: playerProfile.stats.luck,
-    levelKills: playerProfile.stats.levelKills
+    levelKills: playerProfile.stats.levelKills,
+    coins: playerProfile.stats.coins
   };
   const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'energy', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
   const levelPopup = document.getElementById('level-popup');
   const ammoPopup = document.getElementById('ammo-popup');
+  const coinPopup = document.getElementById('coin-popup');
   let levelPopupTimer = null;
   let ammoPopupTimer = null;
+  let coinPopupTimer = null;
   updatePlayerInfoUI = () => {
     if (playerNameDisplay) {
       playerNameDisplay.textContent = playerName;
@@ -1680,6 +1688,19 @@ async function main() {
     ammoPopupTimer = setTimeout(() => {
       ammoPopup.classList.remove('visible');
       ammoPopupTimer = null;
+    }, 1600);
+  };
+  const showCoinPopup = totalCoins => {
+    if (!coinPopup) return;
+    const displayCount = Number.isFinite(totalCoins) ? Math.max(0, Math.floor(totalCoins)) : 0;
+    coinPopup.textContent = `Coins: ${displayCount}`;
+    coinPopup.classList.add('visible');
+    if (coinPopupTimer) {
+      clearTimeout(coinPopupTimer);
+    }
+    coinPopupTimer = setTimeout(() => {
+      coinPopup.classList.remove('visible');
+      coinPopupTimer = null;
     }, 1600);
   };
   const ICE_AMMO_KEY = 'ice ammo';
@@ -1991,6 +2012,13 @@ async function main() {
       }
       return Math.max(0, Math.floor(num));
     }
+    if (key === 'coins') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return 0;
+      }
+      return Math.max(0, Math.floor(num));
+    }
     return value;
   };
 
@@ -2267,6 +2295,35 @@ async function main() {
     return pickup;
   }
 
+  function spawnCoinPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    spawnPos.y = terrainHeight + 0.6;
+    liftPositionToBuildingTop(spawnPos, 0.6);
+
+    const geometry = new THREE.CylinderGeometry(0.2, 0.2, 0.06, 24);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xf8cf45,
+      emissive: 0x7a5a00,
+      emissiveIntensity: 0.45,
+      metalness: 0.7,
+      roughness: 0.25
+    });
+
+    const pickup = new THREE.Mesh(geometry, material);
+    pickup.position.copy(spawnPos);
+    pickup.castShadow = true;
+    pickup.userData.skipTerrainCorrection = true;
+    pickup.userData.baseY = spawnPos.y;
+    pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.type = 'coin';
+    pickup.rotation.x = Math.PI / 2;
+    scene.add(pickup);
+    coinPickups.push(pickup);
+    return pickup;
+  }
+
   function applyFoodPickupEffects() {
     setStat('hunger', statsState.hunger + FOOD_HUNGER_GAIN, { skipSave: true });
     setStat('energy', statsState.energy + FOOD_ENERGY_GAIN, { skipSave: true });
@@ -2278,6 +2335,13 @@ async function main() {
     setStat('health', statsState.health + HEALTH_PICKUP_GAIN, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+
+  function applyCoinPickupEffects() {
+    const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + COIN_PICKUP_GAIN;
+    setStat('coins', nextCoins, { skipSave: true });
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+    showCoinPopup(statsState.coins);
   }
 
   function spawnIceGunPickup(position) {
@@ -2482,6 +2546,7 @@ async function main() {
     removePickupOutsideRadius(ammoPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(foodPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(healthPickups, center, PICKUP_SPAWN_RADIUS);
+    removePickupOutsideRadius(coinPickups, center, PICKUP_SPAWN_RADIUS);
 
     const now = Date.now();
     if (now - lastPickupStockAt < PICKUP_STOCK_COOLDOWN_MS) {
@@ -2506,6 +2571,12 @@ async function main() {
       count: TILE_STOCK_HEALTH_COUNT,
       maxTotal: () => healthPickups.length < MAX_HEALTH_PICKUPS,
       spawnFn: spawnHealthPickup
+    });
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_COIN_COUNT,
+      maxTotal: () => coinPickups.length < MAX_COIN_PICKUPS,
+      spawnFn: spawnCoinPickup
     });
 
     const isHost = !multiplayer || multiplayer.isHost;
@@ -2542,6 +2613,7 @@ async function main() {
     ammoPickups: 0,
     foodPickups: 0,
     healthPickups: 0,
+    coinPickups: 0,
     tileCacheSize: 0
   };
   window.debugPerf = debugPerf;
@@ -3446,6 +3518,7 @@ async function main() {
       debugPerf.ammoPickups = ammoPickups.length;
       debugPerf.foodPickups = foodPickups.length;
       debugPerf.healthPickups = healthPickups.length;
+      debugPerf.coinPickups = coinPickups.length;
       debugPerf.tileCacheSize = tileCache.cache.size;
       lastPerfUpdateMs = now;
     }
@@ -3515,6 +3588,12 @@ async function main() {
         if (!pickup) continue;
         disposePickup(pickup);
         healthPickups.splice(i, 1);
+      }
+      for (let i = coinPickups.length - 1; i >= 0; i--) {
+        const pickup = coinPickups[i];
+        if (!pickup) continue;
+        disposePickup(pickup);
+        coinPickups.splice(i, 1);
       }
     } else {
       for (let i = ammoPickups.length - 1; i >= 0; i--) {
@@ -3603,6 +3682,25 @@ async function main() {
           applyHealthPickupEffects();
           disposePickup(pickup);
           healthPickups.splice(i, 1);
+        }
+      }
+
+      for (let i = coinPickups.length - 1; i >= 0; i--) {
+        const pickup = coinPickups[i];
+        if (!pickup) continue;
+
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        pickup.rotation.y += 0.05;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+          applyCoinPickupEffects();
+          disposePickup(pickup);
+          coinPickups.splice(i, 1);
         }
       }
     }

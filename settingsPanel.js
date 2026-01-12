@@ -16,7 +16,8 @@ const CHARACTER_STATS = [
   { key: 'agility', label: 'Agility' },
   { key: 'smarts', label: 'Smarts' },
   { key: 'charm', label: 'Charm' },
-  { key: 'luck', label: 'Luck' }
+  { key: 'luck', label: 'Luck' },
+  { key: 'coins', label: 'Coins' }
 ];
 const PERCENT_STATS = new Set(['health', 'hunger', 'energy']);
 
