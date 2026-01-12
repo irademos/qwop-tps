@@ -2668,6 +2668,15 @@ async function main() {
     if (playerControls.body) {
       playerControls.body.setTranslation({ x: playerMeters.x, y: nextY, z: playerMeters.z }, true);
     }
+    if (playerControls.geoBoundsCenterXZ) {
+      playerControls.geoBoundsCenterXZ.set(playerMeters.x, 0, playerMeters.z);
+    }
+    if (playerControls.geoBoundsShiftMeters) {
+      playerControls.geoBoundsShiftMeters.x = 0;
+      playerControls.geoBoundsShiftMeters.z = 0;
+    }
+    playerControls.clearGpsMoveTarget?.();
+
   };
 
   worldOrigin = loadWorldOrigin();

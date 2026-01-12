@@ -1396,11 +1396,9 @@ export class PlayerControls {
     const prevLon = this.geoCenterLatLon.lon;
     const deltaLat = lat - prevLat;
     const deltaLon = lon - prevLon;
-    const latRadians = lat * Math.PI / 180;
-    const metersPerDegreeLon = 111320 * Math.cos(latRadians);
-    const metersPerDegreeLat = 110540;
-    const dxMeters = deltaLon * metersPerDegreeLon;
-    const dzMeters = deltaLat * metersPerDegreeLat;
+    const lonScale = 111_412.84 * Math.cos((prevLat * Math.PI) / 180);
+    const dxMeters = -deltaLon * lonScale;
+    const dzMeters = deltaLat * 111_132.92; // north => -z
 
     this.geoCenterLatLon = { lat, lon };
     if (!this.geoBoundsCenterXZ) {
