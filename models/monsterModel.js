@@ -80,6 +80,10 @@ export function loadMonsterModel(modelPath, callback) {
           }
 
           const model = fbx;
+          const modelName = modelPath.split('/').pop().toLowerCase();
+          const fastModels = ['andy', 'chris', 'old_man'];
+          const forceFast = fastModels.some(n => modelName.includes(n));
+
           makeModelUnlit(model);
 
           model.traverse(o => {
@@ -118,9 +122,9 @@ export function loadMonsterModel(modelPath, callback) {
                     return;
                   }
                   const action = mixer.clipAction(clip);
-                  if (name === 'Walk') action.setEffectiveTimeScale(10.0);
-                  if (name === 'Idle') action.setEffectiveTimeScale(10.0);
-                  if (name === 'TwistDance') action.setEffectiveTimeScale(10.0);
+                  if (forceFast) {
+                    action.setEffectiveTimeScale(10.0);
+                  }
                   if (['Weapon', 'Death'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
