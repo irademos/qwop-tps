@@ -5,7 +5,7 @@ const MIN_ZOOM_HEIGHT = 30;
 const MAX_ZOOM_HEIGHT = 260;
 const ZOOM_STEP = 15;
 const TRANSITION_MS = 400;
-const DOT_SIZE = 10;
+const DOT_SIZE = 0.6;
 const DOT_Y_OFFSET = 2;
 
 const state = {
