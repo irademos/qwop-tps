@@ -20,6 +20,7 @@ const CLIMB_WALL_DEPTH = 0.6;
 
 // --- building texture ---
 const textureLoader = new THREE.TextureLoader();
+const QUALITY_TIER_OPTIONS = ["low", "medium", "high"];
 
 const SIDES = ["+Z", "-Z", "+X", "-X"];
 
@@ -92,8 +93,67 @@ function pickDisabledSide(polygon, height) {
   return SIDES[idx];
 }
 
-function loadTex(url, { srgb = false, repeat = 2 } = {}) {
-  const tex = textureLoader.load(url);
+function resolveBuildingQualityTier() {
+  if (typeof window === "undefined") return "high";
+  const override =
+    window?.gameSettings?.buildingQualityTier ??
+    window?.gameSettings?.graphics?.buildingQualityTier ??
+    window?.localStorage?.getItem("buildingQualityTier") ??
+    window?.buildingQualityTier;
+  if (override && QUALITY_TIER_OPTIONS.includes(override)) return override;
+
+  const dpr = window.devicePixelRatio ?? 1;
+  const cores = navigator?.hardwareConcurrency ?? 4;
+  if (dpr <= 1.25 && cores <= 4) return "low";
+  if (dpr <= 1.75 && cores <= 6) return "medium";
+  return "high";
+}
+
+const BUILDING_QUALITY = resolveBuildingQualityTier();
+const BUILDING_QUALITY_SETTINGS = {
+  high: {
+    textureTargetSize: null,
+    useNormalRoughness: true,
+    fullDetailDistance: EXTRUDE_DISTANCE,
+    simpleDetailDistance: EXTRUDE_DISTANCE * 1.5,
+    enableHollow: true,
+    enableCsg: true
+  },
+  medium: {
+    textureTargetSize: 1024,
+    useNormalRoughness: false,
+    fullDetailDistance: EXTRUDE_DISTANCE * 0.75,
+    simpleDetailDistance: EXTRUDE_DISTANCE * 1.25,
+    enableHollow: true,
+    enableCsg: false
+  },
+  low: {
+    textureTargetSize: 512,
+    useNormalRoughness: false,
+    fullDetailDistance: 0,
+    simpleDetailDistance: EXTRUDE_DISTANCE,
+    enableHollow: false,
+    enableCsg: false
+  }
+};
+
+function loadTex(url, { srgb = false, repeat = 2, targetSize = null } = {}) {
+  const tex = textureLoader.load(url, (loaded) => {
+    if (!targetSize || !loaded?.image?.width) return;
+    const { width, height } = loaded.image;
+    if (width <= targetSize && height <= targetSize) return;
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(targetSize / width, targetSize / height);
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(loaded.image, 0, 0, canvas.width, canvas.height);
+    loaded.image = canvas;
+    loaded.needsUpdate = true;
+  });
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(repeat, repeat);
@@ -102,19 +162,26 @@ function loadTex(url, { srgb = false, repeat = 2 } = {}) {
 }
 const repeat_val = 0.05;
 
+const buildingTextureBasePath =
+  "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02";
+const buildingTextureTargetSize = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY].textureTargetSize;
 const buildingBase = loadTex(
-  "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_diff_4k.jpg",
-  { srgb: true, repeat: repeat_val }
+  `${buildingTextureBasePath}_diff_4k.jpg`,
+  { srgb: true, repeat: repeat_val, targetSize: buildingTextureTargetSize }
 );
 
-const buildingNormal = loadTex(
-  "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_nor_gl_4k.jpg",
-  { repeat: repeat_val }
-);
-const buildingRough = loadTex(
-  "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02_rough_4k.jpg",
-  { repeat: repeat_val }
-);
+const buildingNormal = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY].useNormalRoughness
+  ? loadTex(
+    `${buildingTextureBasePath}_nor_gl_4k.jpg`,
+    { repeat: repeat_val }
+  )
+  : null;
+const buildingRough = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY].useNormalRoughness
+  ? loadTex(
+    `${buildingTextureBasePath}_rough_4k.jpg`,
+    { repeat: repeat_val }
+  )
+  : null;
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -451,10 +518,12 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
   group.name = "osm-buildings";
   scene?.add(group);
 
+  const qualitySettings = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY];
+
   const extrudedMaterial = new THREE.MeshStandardMaterial({
     map: buildingBase,
-    normalMap: buildingNormal,
-    roughnessMap: buildingRough,
+    normalMap: buildingNormal ?? null,
+    roughnessMap: buildingRough ?? null,
     roughness: 1.0,
     metalness: 0.0,
   });
@@ -527,43 +596,51 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
       const distance = Math.hypot(dx, dz);
       const height = resolveHeight(polygon.properties);
 
-      if (distance <= EXTRUDE_DISTANCE) {
+      const isFullDetail = distance <= qualitySettings.fullDetailDistance;
+      const isSimpleDetail = !isFullDetail && distance <= qualitySettings.simpleDetailDistance;
+
+      if (isFullDetail || isSimpleDetail) {
         // 1) Outer solid
         let geom = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
         geom.rotateX(-Math.PI / 2);
         geom.translate(0, BASE_ELEVATION, 0);
         geom.computeBoundingBox();
 
-        // 2) Hollow it (shell)
-        geom = hollowExtrudedGeometry(geom, shape, {
-          wall: WALL_THICKNESS,
-          floor: FLOOR_THICKNESS,
-          roof: ROOF_THICKNESS
-        });
-        if (!geom.boundingBox) geom.computeBoundingBox();
-
-        const disabledSide = pickDisabledSide(polygon, height);
-
-        const cutters = buildWindowDoorCuttersFromBBox(geom.boundingBox, {
-          windowW: 1.0,
-          windowH: 1.0,
-          windowBottom: 1.3,
-          windowSpacing: 2.4,
-          doorW: 1.5,
-          doorH: 2.3,
-          disabledSide
-        });
-
-        if (cutters.length) {
-          geom = csgSubtractGeom(geom, cutters);
-          geom.computeBoundingBox();
-          for (const g of cutters) g.dispose();
+        if (isFullDetail && qualitySettings.enableHollow) {
+          // 2) Hollow it (shell)
+          geom = hollowExtrudedGeometry(geom, shape, {
+            wall: WALL_THICKNESS,
+            floor: FLOOR_THICKNESS,
+            roof: ROOF_THICKNESS
+          });
+          if (!geom.boundingBox) geom.computeBoundingBox();
         }
 
-        wallClimbAreas.push(
-          ...buildWallClimbAreas(shape, geom.boundingBox.min.y, geom.boundingBox.max.y)
-        );
+        if (isFullDetail && qualitySettings.enableCsg) {
+          const disabledSide = pickDisabledSide(polygon, height);
 
+          const cutters = buildWindowDoorCuttersFromBBox(geom.boundingBox, {
+            windowW: 1.0,
+            windowH: 1.0,
+            windowBottom: 1.3,
+            windowSpacing: 2.4,
+            doorW: 1.5,
+            doorH: 2.3,
+            disabledSide
+          });
+
+          if (cutters.length) {
+            geom = csgSubtractGeom(geom, cutters);
+            geom.computeBoundingBox();
+            for (const g of cutters) g.dispose();
+          }
+        }
+
+        if (isFullDetail) {
+          wallClimbAreas.push(
+            ...buildWallClimbAreas(shape, geom.boundingBox.min.y, geom.boundingBox.max.y)
+          );
+        }
 
         extrudedResults.push(geom);
       } else {
