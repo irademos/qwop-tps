@@ -19,7 +19,8 @@ import { AutumnSword } from './autumnSword.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
 import { createLocationProvider } from './location.js';
-import { fetchOSMFeatures } from './osmClient.js';
+import { fetchOSMData } from './osmClient.js';
+import { overpassToGeoJSON } from './osmGeoJson.js';
 import { createMapRenderer } from './mapRender.js';
 import { createBuildingsRenderer } from './buildingsRender.js';
 import { createTileCache } from './tileCache.js';
@@ -171,6 +172,7 @@ async function main() {
   let currentRenderOrigin = null;
   let activeTileKey = null;
   let pendingMapRebuild = false;
+  let mapRebuildToken = 0;
   const networkedEntities = new Map();
   const pendingEntityStates = new Map();
   const authoritativeEntityStates = new Map();
@@ -2805,12 +2807,72 @@ async function main() {
     return computeGeojsonBounds(geojson);
   };
 
+  const osmWorkerPending = new Map();
+  let osmWorkerRequestId = 0;
+  let osmWorker = null;
+
+  const disableOsmWorker = (error) => {
+    if (!osmWorker) return;
+    console.warn('Disabling OSM worker due to error:', error);
+    osmWorker.terminate();
+    osmWorker = null;
+    for (const { reject } of osmWorkerPending.values()) {
+      reject(error);
+    }
+    osmWorkerPending.clear();
+  };
+
+  const initOsmWorker = () => {
+    if (typeof Worker === "undefined") {
+      return;
+    }
+    try {
+      osmWorker = new Worker(new URL("./workers/osmWorker.js", import.meta.url), { type: "module" });
+      osmWorker.addEventListener("message", (event) => {
+        const { id, geojson, error } = event.data || {};
+        if (id == null) return;
+        const pending = osmWorkerPending.get(id);
+        if (!pending) return;
+        osmWorkerPending.delete(id);
+        if (error) {
+          pending.reject(new Error(error));
+        } else {
+          pending.resolve(geojson);
+        }
+      });
+      osmWorker.addEventListener("error", (event) => disableOsmWorker(event));
+    } catch (error) {
+      console.warn('Failed to initialize OSM worker, falling back to main thread parsing.', error);
+      osmWorker = null;
+    }
+  };
+
+  const parseOverpassData = async (data) => {
+    if (!osmWorker) {
+      return overpassToGeoJSON(data);
+    }
+    const requestId = osmWorkerRequestId += 1;
+    return new Promise((resolve, reject) => {
+      osmWorkerPending.set(requestId, { resolve, reject });
+      try {
+        osmWorker.postMessage({ id: requestId, data });
+      } catch (error) {
+        osmWorkerPending.delete(requestId);
+        reject(error);
+      }
+    });
+  };
+
+  initOsmWorker();
+
   function rebuildMapFromCache() {
     if (!tileCache || !mapRenderer || !buildingsRenderer) {
       pendingMapRebuild = true;
       return;
     }
     pendingMapRebuild = false;
+    mapRebuildToken += 1;
+    const rebuildId = mapRebuildToken;
     const combined = {
       type: 'FeatureCollection',
       features: []
@@ -2825,9 +2887,19 @@ async function main() {
       currentRenderOrigin = bounds;
     }
     mapRenderer.updateHighways(combined, bounds);
-    buildingsRenderer.updateBuildings(combined, bounds);
-    rebuildBuildingColliders();
-    liftEntitiesToBuildingTop();
+
+    const finishBuildingRender = () => {
+      if (rebuildId !== mapRebuildToken) return;
+      buildingsRenderer.updateBuildings(combined, bounds);
+      rebuildBuildingColliders();
+      liftEntitiesToBuildingTop();
+    };
+
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(finishBuildingRender, { timeout: 200 });
+    } else {
+      finishBuildingRender();
+    }
   }
 
   window.clearTileCache = () => {
@@ -2885,8 +2957,14 @@ async function main() {
     mapFetchInFlight.add(tileKey);
     let geojson;
     try {
-      geojson = await fetchOSMFeatures(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS);
+      const overpassData = await fetchOSMData(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS);
       debugState.lastOsmFetchAt = Date.now();
+      try {
+        geojson = await parseOverpassData(overpassData);
+      } catch (parseError) {
+        console.warn('OSM worker parse failed, falling back to main thread:', parseError);
+        geojson = overpassToGeoJSON(overpassData);
+      }
     } catch (error) {
       console.warn('OSM fetch failed:', error);
       debugState.lastError = {
