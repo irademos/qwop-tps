@@ -1,6 +1,7 @@
 const CACHE_VERSION = 'v1';
 const CORE_CACHE = `core-shell-${CACHE_VERSION}`;
 const STATIC_CACHE = `static-assets-${CACHE_VERSION}`;
+const CDN_CACHE = `cdn-assets-${CACHE_VERSION}`;
 
 const CORE_ASSETS = [
   '/',
@@ -58,9 +59,48 @@ const isStaticAsset = (request) => {
   );
 };
 
+const isCdnScript = (request) => {
+  const url = new URL(request.url);
+  if (url.origin !== 'https://cdn.jsdelivr.net') {
+    return false;
+  }
+  return (
+    url.pathname.includes('/peerjs@') ||
+    url.pathname.includes('/nipplejs@') ||
+    url.pathname.includes('/simple-peer@')
+  );
+};
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') {
+    return;
+  }
+
+  if (isCdnScript(request)) {
+    const updatePromise = caches.open(CDN_CACHE).then((cache) =>
+      fetch(request).then((networkResponse) => {
+        if (
+          networkResponse &&
+          (networkResponse.ok || networkResponse.type === 'opaque')
+        ) {
+          cache.put(request, networkResponse.clone());
+        }
+        return networkResponse;
+      })
+    );
+
+    event.respondWith(
+      caches.open(CDN_CACHE).then((cache) =>
+        cache.match(request).then((cachedResponse) => {
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          return updatePromise;
+        })
+      )
+    );
+    event.waitUntil(updatePromise);
     return;
   }
 
