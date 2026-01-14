@@ -950,7 +950,7 @@ async function main() {
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   mapRenderer = createMapRenderer({ scene, renderer });
-  buildingsRenderer = createBuildingsRenderer({ scene, camera });
+  buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
   window.mapRenderer = mapRenderer;
   window.buildingsRenderer = buildingsRenderer;
   if (pendingMapRebuild) {
