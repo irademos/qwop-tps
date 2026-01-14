@@ -2804,6 +2804,9 @@ async function main() {
     if (worldOrigin) {
       return { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
     }
+    if (currentRenderOrigin) {
+      return currentRenderOrigin;
+    }
     return computeGeojsonBounds(geojson);
   };
 
@@ -2873,6 +2876,9 @@ async function main() {
     pendingMapRebuild = false;
     mapRebuildToken += 1;
     const rebuildId = mapRebuildToken;
+    mapRenderer.clearTiles?.();
+    buildingsRenderer.clearTiles?.();
+
     const combined = {
       type: 'FeatureCollection',
       features: []
@@ -2886,11 +2892,15 @@ async function main() {
     if (bounds) {
       currentRenderOrigin = bounds;
     }
-    mapRenderer.updateHighways(combined, bounds);
+
+    for (const [tileKey, entry] of tileCache.cache.entries()) {
+      if (!entry.geojson) continue;
+      mapRenderer.updateTileHighways?.(tileKey, entry.geojson, bounds);
+      buildingsRenderer.updateTileBuildings?.(tileKey, entry.geojson, bounds);
+    }
 
     const finishBuildingRender = () => {
       if (rebuildId !== mapRebuildToken) return;
-      buildingsRenderer.updateBuildings(combined, bounds);
       rebuildBuildingColliders();
       liftEntitiesToBuildingTop();
     };
@@ -2909,14 +2919,44 @@ async function main() {
     rebuildMapFromCache();
   };
 
+  let buildingRefreshPending = false;
+  const scheduleBuildingRefresh = () => {
+    if (buildingRefreshPending) return;
+    buildingRefreshPending = true;
+    const refresh = () => {
+      buildingRefreshPending = false;
+      rebuildBuildingColliders();
+      liftEntitiesToBuildingTop();
+    };
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(refresh, { timeout: 200 });
+    } else {
+      setTimeout(refresh, 0);
+    }
+  };
+
+  const updateTileMeshes = (tileKey, geojson) => {
+    if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
+    const bounds = getRenderOrigin(geojson);
+    if (bounds) {
+      currentRenderOrigin = bounds;
+    }
+    mapRenderer.updateTileHighways?.(tileKey, geojson, bounds);
+
+    const finishBuildingRender = () => {
+      buildingsRenderer.updateTileBuildings?.(tileKey, geojson, bounds);
+      scheduleBuildingRefresh();
+    };
+
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(finishBuildingRender, { timeout: 200 });
+    } else {
+      finishBuildingRender();
+    }
+  };
+
   const requestMapUpdate = async (location) => {
     if (!location || PERF.disableMapUpdates) return;
-    let needsMapRebuild = false;
-    const flushMapRebuild = () => {
-      if (!needsMapRebuild) return;
-      rebuildMapFromCache();
-      needsMapRebuild = false;
-    };
     const localMeters = tileCache.getLocalMeters(location);
     const tile = tileCache.getTileCoords(localMeters);
     if (!tile) return;
@@ -2929,11 +2969,14 @@ async function main() {
 
     const evictedKeys = tileCache.evictTiles(tile);
     if (evictedKeys.length) {
-      needsMapRebuild = true;
+      for (const key of evictedKeys) {
+        mapRenderer.removeTile?.(key);
+        buildingsRenderer.removeTile?.(key);
+      }
+      scheduleBuildingRefresh();
     }
 
     if (tileCache.hasTile(tileKey) || mapFetchInFlight.has(tileKey)) {
-      flushMapRebuild();
       return;
     }
 
@@ -2944,8 +2987,7 @@ async function main() {
         meshes: { highways: null, buildings: null },
         fetchedAt: cachedTile.fetchedAt
       });
-      needsMapRebuild = true;
-      flushMapRebuild();
+      updateTileMeshes(tileKey, cachedTile.geojson);
       if (Date.now() - cachedTile.fetchedAt < TILE_CACHE_MAX_AGE_MS) {
         return;
       }
@@ -2981,11 +3023,10 @@ async function main() {
         meshes: { highways: null, buildings: null },
         fetchedAt: Date.now()
       });
-      needsMapRebuild = true;
       setCachedTile(tileKey, geojson).catch((error) => {
         console.warn('Failed to persist tile cache:', error);
       });
-      flushMapRebuild();
+      updateTileMeshes(tileKey, geojson);
     } catch (error) {
       console.warn('OSM render failed:', error);
       debugState.lastError = {
@@ -2993,7 +3034,6 @@ async function main() {
         timestamp: Date.now()
       };
     } finally {
-      flushMapRebuild();
       mapFetchInFlight.delete(tileKey);
     }
   };
