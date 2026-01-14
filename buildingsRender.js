@@ -532,26 +532,41 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
   const flatMaterial = new THREE.MeshStandardMaterial({ /* ... */ });
 
-  const extrudedMesh = new THREE.Mesh(new THREE.BufferGeometry(), extrudedMaterial);
-  const flatMesh = new THREE.Mesh(new THREE.BufferGeometry(), flatMaterial);
-
-  const extrudedColliderMesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
-  extrudedColliderMesh.visible = false;
-  extrudedColliderMesh.name = "extruded-collider";
-
-  // Collision root owns the solid meshes
-  const collisionGroup = new THREE.Group();
-  collisionGroup.name = "building-collision";
-  collisionGroup.add(extrudedColliderMesh);
-
-  group.add(extrudedMesh);     // render
-  group.add(flatMesh);         // render
-  group.add(collisionGroup);   // collision only
-
+  const tileMeshes = new Map();
+  const climbableAreasByTile = new Map();
   const climbableAreas = [];
 
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
+  }
+
+  function createTileMeshes(tileKey) {
+    const tileGroup = new THREE.Group();
+    tileGroup.name = `osm-buildings-${tileKey}`;
+
+    const extrudedMesh = new THREE.Mesh(new THREE.BufferGeometry(), extrudedMaterial);
+    const flatMesh = new THREE.Mesh(new THREE.BufferGeometry(), flatMaterial);
+
+    const extrudedColliderMesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
+    extrudedColliderMesh.visible = false;
+    extrudedColliderMesh.name = `extruded-collider-${tileKey}`;
+
+    const collisionGroup = new THREE.Group();
+    collisionGroup.name = `building-collision-${tileKey}`;
+    collisionGroup.add(extrudedColliderMesh);
+
+    tileGroup.add(extrudedMesh);     // render
+    tileGroup.add(flatMesh);         // render
+    tileGroup.add(collisionGroup);   // collision only
+    group.add(tileGroup);
+
+    return {
+      group: tileGroup,
+      extrudedMesh,
+      flatMesh,
+      extrudedColliderMesh,
+      collisionGroup
+    };
   }
 
   function setClimbableAreas(areas) {
@@ -560,23 +575,57 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
     window.climbableAreas = climbableAreas;
   }
 
+  function refreshClimbableAreas() {
+    const merged = [];
+    for (const areas of climbableAreasByTile.values()) {
+      merged.push(...areas);
+    }
+    setClimbableAreas(merged);
+  }
 
-  function updateBuildings(geojson, boundsOverride) {
+  function ensureTile(tileKey) {
+    let entry = tileMeshes.get(tileKey);
+    if (entry) return entry;
+    entry = createTileMeshes(tileKey);
+    tileMeshes.set(tileKey, entry);
+    return entry;
+  }
+
+  function updateTileBuildings(tileKey, geojson, boundsOverride) {
+    if (!tileKey) return null;
+    const tileEntry = ensureTile(tileKey);
+    const { extrudedMesh, flatMesh, extrudedColliderMesh } = tileEntry;
 
     const polygons = collectBuildingPolygons(geojson);
     if (polygons.length === 0) {
+      disposeGeometry(extrudedMesh);
+      disposeGeometry(flatMesh);
+      disposeGeometry(extrudedColliderMesh);
+      extrudedMesh.geometry = new THREE.BufferGeometry();
+      flatMesh.geometry = new THREE.BufferGeometry();
+      extrudedColliderMesh.geometry = new THREE.BufferGeometry();
       extrudedMesh.visible = false;
       flatMesh.visible = false;
-      setClimbableAreas([]);
-      return;
+      extrudedColliderMesh.visible = false;
+      climbableAreasByTile.set(tileKey, []);
+      refreshClimbableAreas();
+      return tileEntry;
     }
 
     const bounds = boundsOverride ?? computeBoundsFromPolygons(polygons);
     if (!bounds) {
+      disposeGeometry(extrudedMesh);
+      disposeGeometry(flatMesh);
+      disposeGeometry(extrudedColliderMesh);
+      extrudedMesh.geometry = new THREE.BufferGeometry();
+      flatMesh.geometry = new THREE.BufferGeometry();
+      extrudedColliderMesh.geometry = new THREE.BufferGeometry();
       extrudedMesh.visible = false;
       flatMesh.visible = false;
-      setClimbableAreas([]);
-      return;
+      extrudedColliderMesh.visible = false;
+      climbableAreasByTile.set(tileKey, []);
+      refreshClimbableAreas();
+      return tileEntry;
     }
 
     const lonScale = metersPerDegreeLon(bounds.centerLat);
@@ -683,13 +732,34 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
       flatMesh.visible = false;
     }
 
-    setClimbableAreas(wallClimbAreas);
+    climbableAreasByTile.set(tileKey, wallClimbAreas);
+    refreshClimbableAreas();
+    return tileEntry;
+  }
+
+  function removeTile(tileKey) {
+    const entry = tileMeshes.get(tileKey);
+    if (!entry) return;
+    disposeGeometry(entry.extrudedMesh);
+    disposeGeometry(entry.flatMesh);
+    disposeGeometry(entry.extrudedColliderMesh);
+    entry.group.clear();
+    group.remove(entry.group);
+    tileMeshes.delete(tileKey);
+    climbableAreasByTile.delete(tileKey);
+    refreshClimbableAreas();
+  }
+
+  function clearTiles() {
+    for (const tileKey of tileMeshes.keys()) {
+      removeTile(tileKey);
+    }
   }
 
   function dispose() {
-    disposeGeometry(extrudedMesh);
-    disposeGeometry(flatMesh);
-    disposeGeometry(extrudedColliderMesh);
+    for (const tileKey of tileMeshes.keys()) {
+      removeTile(tileKey);
+    }
     extrudedMaterial.dispose();
     flatMaterial.dispose();
     group.clear();
@@ -698,11 +768,17 @@ export function createBuildingsRenderer({ scene, camera } = {}) {
 
   return {
     group,
-    updateBuildings,
-    getCollisionMesh: () => collisionGroup,
+    updateTileBuildings,
+    removeTile,
+    clearTiles,
+    getCollisionMesh: () => group,
     getCollisionMeshes: () => {
       const meshes = [];
-      if (extrudedColliderMesh.geometry?.attributes?.position?.count) meshes.push(extrudedColliderMesh);
+      for (const entry of tileMeshes.values()) {
+        if (entry.extrudedColliderMesh.geometry?.attributes?.position?.count) {
+          meshes.push(entry.extrudedColliderMesh);
+        }
+      }
       return meshes;
     },
     dispose

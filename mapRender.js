@@ -112,7 +112,7 @@ export function createMapRenderer({
   group.name = "osm-highways";
   scene?.add(group);
 
-  const pool = [];
+  const tileMeshes = new Map();
   const lineMaterials = new Map();
   const fallbackMaterials = new Map();
   const resolution = new THREE.Vector2(1, 1);
@@ -148,12 +148,12 @@ export function createMapRenderer({
     return line;
   }
 
-  function ensureLine(index, width) {
+  function ensureLine(pool, parentGroup, index, width) {
     let line = pool[index];
     if (!line) {
       line = createLine(width);
       pool[index] = line;
-      group.add(line);
+      parentGroup.add(line);
     }
     line.visible = true;
     const isWide = line.userData.isWideLine;
@@ -193,7 +193,7 @@ export function createMapRenderer({
     }
   }
 
-  function clearUnused(fromIndex) {
+  function clearUnused(pool, fromIndex) {
     for (let i = fromIndex; i < pool.length; i += 1) {
       const line = pool[i];
       if (line) {
@@ -202,17 +202,34 @@ export function createMapRenderer({
     }
   }
 
-  function updateHighways(geojson, boundsOverride) {
+  function ensureTile(tileKey) {
+    let entry = tileMeshes.get(tileKey);
+    if (entry) return entry;
+    const tileGroup = new THREE.Group();
+    tileGroup.name = `osm-highways-${tileKey}`;
+    group.add(tileGroup);
+    entry = {
+      group: tileGroup,
+      pool: []
+    };
+    tileMeshes.set(tileKey, entry);
+    return entry;
+  }
+
+  function updateTileHighways(tileKey, geojson, boundsOverride) {
+    if (!tileKey) return null;
+    const tileEntry = ensureTile(tileKey);
+    const { pool: tilePool, group: tileGroup } = tileEntry;
     const lines = collectHighwayLines(geojson);
     if (lines.length === 0) {
-      clearUnused(0);
-      return;
+      clearUnused(tilePool, 0);
+      return tileEntry;
     }
 
     const bounds = boundsOverride ?? computeBounds(lines);
     if (!bounds) {
-      clearUnused(0);
-      return;
+      clearUnused(tilePool, 0);
+      return tileEntry;
     }
 
     const lonScale = metersPerDegreeLon(bounds.centerLat);
@@ -230,16 +247,34 @@ export function createMapRenderer({
         positions.push(local.x, elevation, local.z);
       }
       if (positions.length < 6) continue;
-      const lineMesh = ensureLine(activeIndex, width);
+      const lineMesh = ensureLine(tilePool, tileGroup, activeIndex, width);
       updateLineGeometry(lineMesh, positions);
       activeIndex += 1;
     }
 
     if (activeIndex === 0) {
-      clearUnused(0);
-      return;
+      clearUnused(tilePool, 0);
+      return tileEntry;
     }
-    clearUnused(activeIndex);
+    clearUnused(tilePool, activeIndex);
+    return tileEntry;
+  }
+
+  function removeTile(tileKey) {
+    const entry = tileMeshes.get(tileKey);
+    if (!entry) return;
+    for (const line of entry.pool) {
+      line?.geometry?.dispose?.();
+    }
+    entry.group.clear();
+    group.remove(entry.group);
+    tileMeshes.delete(tileKey);
+  }
+
+  function clearTiles() {
+    for (const tileKey of tileMeshes.keys()) {
+      removeTile(tileKey);
+    }
   }
 
   function setResolution(width, height) {
@@ -251,9 +286,7 @@ export function createMapRenderer({
   }
 
   function dispose() {
-    for (const line of pool) {
-      line?.geometry?.dispose?.();
-    }
+    clearTiles();
     for (const material of lineMaterials.values()) {
       material.dispose();
     }
@@ -272,7 +305,9 @@ export function createMapRenderer({
 
   return {
     group,
-    updateHighways,
+    updateTileHighways,
+    removeTile,
+    clearTiles,
     setResolution,
     dispose
   };
