@@ -39,6 +39,14 @@ import {
   setMonsterPersistenceHost
 } from './monsterPersistence.js';
 
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch((error) => {
+      console.error('Service worker registration failed:', error);
+    });
+  });
+}
+
 const DEFAULT_CHARACTER_MODEL = "/models/old_man.fbx";
 const MAX_MONSTERS = 2;
 const MONSTER_MODELS = [
