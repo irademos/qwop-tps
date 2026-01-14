@@ -288,11 +288,13 @@ async function main() {
   function updateAuthoritativeState(id, state, sourceId) {
     const copy = cloneState(state);
     const existing = authoritativeEntityStates.get(id);
+    const baselineState = existing?.lastSentState ?? existing?.state;
     const isDirty = !existing
-      || isStateDifferent(existing.state, copy)
+      || isStateDifferent(baselineState, copy)
       || existing.sourceId !== sourceId;
     authoritativeEntityStates.set(id, {
       state: copy,
+      lastSentState: existing?.lastSentState ?? cloneState(copy),
       sourceId,
       timestamp: performance.now(),
       dirty: existing?.dirty || isDirty
@@ -330,6 +332,7 @@ async function main() {
     authoritativeEntityStates.forEach((entry, id) => {
       if (!entry.dirty) return;
       payload[id] = { ...cloneState(entry.state), sourceId: entry.sourceId };
+      entry.lastSentState = cloneState(entry.state);
       entry.dirty = false;
     });
     return payload;
@@ -339,6 +342,7 @@ async function main() {
     const payload = {};
     authoritativeEntityStates.forEach((entry, id) => {
       payload[id] = { ...cloneState(entry.state), sourceId: entry.sourceId };
+      entry.lastSentState = cloneState(entry.state);
       entry.dirty = false;
     });
     return payload;
