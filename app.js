@@ -2494,6 +2494,10 @@ async function main() {
   };
   let lastPickupStockAt = 0;
   let activeGroundTileKey = null;
+  let lastPickupTilesUpdateAt = 0;
+  let lastPickupTilesPosition = null;
+  const PICKUP_TILE_UPDATE_COOLDOWN_MS = 1000;
+  const PICKUP_TILE_UPDATE_DISTANCE_METERS = 10;
   const getGroundTileCoords = (position) => {
     if (!position) return null;
     return {
@@ -2609,6 +2613,28 @@ async function main() {
       }
     });
   };
+  const shouldUpdatePickupTiles = (position) => {
+    if (!position) return false;
+    const now = Date.now();
+    if (lastPickupTilesUpdateAt === 0) {
+      lastPickupTilesUpdateAt = now;
+      lastPickupTilesPosition = { x: position.x, z: position.z };
+      return true;
+    }
+    const elapsed = now - lastPickupTilesUpdateAt;
+    let movedEnough = false;
+    if (lastPickupTilesPosition) {
+      const dx = position.x - lastPickupTilesPosition.x;
+      const dz = position.z - lastPickupTilesPosition.z;
+      movedEnough = Math.hypot(dx, dz) >= PICKUP_TILE_UPDATE_DISTANCE_METERS;
+    }
+    if (movedEnough || elapsed >= PICKUP_TILE_UPDATE_COOLDOWN_MS) {
+      lastPickupTilesUpdateAt = now;
+      lastPickupTilesPosition = { x: position.x, z: position.z };
+      return true;
+    }
+    return false;
+  };
   const mapFetchInFlight = new Set();
   const debugPerf = {
     monsters: 0,
@@ -2620,6 +2646,9 @@ async function main() {
   };
   window.debugPerf = debugPerf;
   let lastPerfUpdateMs = 0;
+  let lastMapUpdateAt = 0;
+  let lastMapUpdateTileKey = null;
+  const MAP_UPDATE_THROTTLE_MS = 1500;
 
   function loadWorldOrigin() {
     try {
@@ -2955,6 +2984,28 @@ async function main() {
     }
   };
 
+  const shouldRequestMapUpdate = (location) => {
+    if (!location || PERF.disableMapUpdates) return false;
+    const localMeters = tileCache.getLocalMeters(location);
+    const tile = tileCache.getTileCoords(localMeters);
+    if (!tile) return false;
+    const tileKey = tileCache.getTileKey(tile);
+    const now = Date.now();
+    if (lastMapUpdateAt === 0) {
+      lastMapUpdateAt = now;
+      lastMapUpdateTileKey = tileKey;
+      return true;
+    }
+    const elapsed = now - lastMapUpdateAt;
+    const tileChanged = tileKey !== lastMapUpdateTileKey;
+    if (tileChanged || elapsed >= MAP_UPDATE_THROTTLE_MS) {
+      lastMapUpdateAt = now;
+      lastMapUpdateTileKey = tileKey;
+      return true;
+    }
+    return false;
+  };
+
   const requestMapUpdate = async (location) => {
     if (!location || PERF.disableMapUpdates) return;
     const localMeters = tileCache.getLocalMeters(location);
@@ -3133,8 +3184,13 @@ async function main() {
 
       const localMeters = tileCache.getLocalMeters(location);
       locationState.tile = tileCache.getTileCoords(localMeters);
-      requestMapUpdate(location);
-      updatePickupTiles(playerModel?.position);
+      if (shouldRequestMapUpdate(location)) {
+        requestMapUpdate(location);
+      }
+      const playerPosition = playerModel?.position;
+      if (shouldUpdatePickupTiles(playerPosition)) {
+        updatePickupTiles(playerPosition);
+      }
     },
     onError: (error, message) => {
       console.warn('Location error:', message, error);
@@ -3619,8 +3675,11 @@ async function main() {
 
 
 
-    updateGroundTiles(playerModel?.position);
-    updatePickupTiles(playerModel?.position);
+    const playerPosition = playerModel?.position;
+    updateGroundTiles(playerPosition);
+    if (shouldUpdatePickupTiles(playerPosition)) {
+      updatePickupTiles(playerPosition);
+    }
 
     if (!mapViewEnabled) {
       playerControls.update();
