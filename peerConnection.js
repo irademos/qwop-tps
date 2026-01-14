@@ -46,17 +46,36 @@ export class Multiplayer {
   }
 
   async initPeer() {
-    // Fetch TURN credentials
-    const response = await fetch(`https://multiplayer-game.metered.live/api/v1/turn/credentials?apiKey=${import.meta.env.VITE_METERED_API_KEY}`);
-    const dynamic = await response.json();
-  
-    // Select only the first two TURN entries (after filtering out STUNs, just in case)
-    const turnServers = dynamic.filter(server => server.urls.startsWith("turn")).slice(0, 2);
-  
-    const iceServers = [
-      { urls: "stun:stun.l.google.com:19302" },
-      ...turnServers
-    ];
+    let iceServers = [{ urls: "stun:stun.l.google.com:19302" }];
+    const fetchTimeoutMs = 5000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), fetchTimeoutMs);
+
+    try {
+      // Fetch TURN credentials
+      const response = await fetch(
+        `https://multiplayer-game.metered.live/api/v1/turn/credentials?apiKey=${import.meta.env.VITE_METERED_API_KEY}`,
+        { signal: controller.signal }
+      );
+      if (!response.ok) {
+        throw new Error(`TURN credential fetch failed with status ${response.status}`);
+      }
+      const dynamic = await response.json();
+      if (!Array.isArray(dynamic)) {
+        throw new Error('TURN credential response was not an array');
+      }
+
+      // Select only the first two TURN entries (after filtering out STUNs, just in case)
+      const turnServers = dynamic.filter(server => server.urls.startsWith("turn")).slice(0, 2);
+      if (turnServers.length > 0) {
+        iceServers = [...iceServers, ...turnServers];
+      }
+    } catch (err) {
+      console.warn('Failed to fetch TURN credentials. Falling back to STUN only.', err);
+      this.recordError(err);
+    } finally {
+      clearTimeout(timeoutId);
+    }
   
     this.peer = new Peer({
       config: { iceServers }
