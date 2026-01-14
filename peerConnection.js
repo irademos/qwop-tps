@@ -27,6 +27,8 @@ export class Multiplayer {
   constructor(playerName, onPeerData) {
     this.connections = {};
     this.pendingConnections = new Set();
+    this.pendingPayloads = new Map();
+    this.pendingConnectionRetries = new Map();
     this.failedConnectionAt = new Map();
     this.onPeerData = onPeerData;
     this.playerName = playerName;
@@ -270,7 +272,16 @@ export class Multiplayer {
       this.connections[conn.peer] = conn;
       this.pendingConnections.delete(conn.peer);
       this.failedConnectionAt.delete(conn.peer);
+      if (this.pendingConnectionRetries.has(conn.peer)) {
+        clearTimeout(this.pendingConnectionRetries.get(conn.peer));
+        this.pendingConnectionRetries.delete(conn.peer);
+      }
       console.log("Connected to peer:", conn.peer);
+      const queuedPayloads = this.pendingPayloads.get(conn.peer);
+      if (queuedPayloads?.length) {
+        queuedPayloads.forEach(payload => conn.send(payload));
+        this.pendingPayloads.delete(conn.peer);
+      }
       conn.on('data', data => {
         const isObjectPayload = data && typeof data === 'object' && !Array.isArray(data);
         if (!isObjectPayload) {
@@ -332,6 +343,11 @@ export class Multiplayer {
       this.stopPingLoop(conn.peer);
       delete this.connections[conn.peer];
       this.pendingConnections.delete(conn.peer);
+      this.pendingPayloads.delete(conn.peer);
+      if (this.pendingConnectionRetries.has(conn.peer)) {
+        clearTimeout(this.pendingConnectionRetries.get(conn.peer));
+        this.pendingConnectionRetries.delete(conn.peer);
+      }
     });
   
     conn.on('error', err => {
@@ -340,6 +356,11 @@ export class Multiplayer {
       if (conn?.peer) {
         this.pendingConnections.delete(conn.peer);
         this.failedConnectionAt.set(conn.peer, Date.now());
+        this.pendingPayloads.delete(conn.peer);
+        if (this.pendingConnectionRetries.has(conn.peer)) {
+          clearTimeout(this.pendingConnectionRetries.get(conn.peer));
+          this.pendingConnectionRetries.delete(conn.peer);
+        }
       }
     });
   }
@@ -429,21 +450,61 @@ export class Multiplayer {
         existing.send(data);
         return;
       }
-      if (typeof existing.once === 'function') {
-        existing.once('open', () => existing.send(data));
-        return;
+      if (!this.pendingPayloads.has(peerId)) {
+        this.pendingPayloads.set(peerId, []);
       }
+      this.pendingPayloads.get(peerId).push(data);
+      return;
     }
 
     try {
+      if (this.pendingConnections.has(peerId)) {
+        if (!this.pendingPayloads.has(peerId)) {
+          this.pendingPayloads.set(peerId, []);
+        }
+        this.pendingPayloads.get(peerId).push(data);
+        return;
+      }
+      if (!this.shouldAttemptConnection(peerId)) {
+        if (!this.pendingPayloads.has(peerId)) {
+          this.pendingPayloads.set(peerId, []);
+        }
+        this.pendingPayloads.get(peerId).push(data);
+        this.scheduleConnectionRetry(peerId);
+        return;
+      }
+      if (!this.peer || this.peer.destroyed) {
+        console.warn('Peer connection not ready for', peerId);
+        return;
+      }
       const conn = this.peer.connect(peerId);
       this.setupConnection(conn);
-      if (typeof conn.once === 'function') {
-        conn.once('open', () => conn.send(data));
+      if (!this.pendingPayloads.has(peerId)) {
+        this.pendingPayloads.set(peerId, []);
       }
+      this.pendingPayloads.get(peerId).push(data);
     } catch (err) {
       console.warn(`Failed to send direct message to ${peerId}:`, err);
     }
+  }
+
+  scheduleConnectionRetry(peerId) {
+    if (!peerId || this.pendingConnectionRetries.has(peerId)) return;
+    const lastFailedAt = this.failedConnectionAt.get(peerId) || 0;
+    const now = Date.now();
+    const delayMs = Math.max(0, 5000 - (now - lastFailedAt));
+    const timeoutId = setTimeout(() => {
+      this.pendingConnectionRetries.delete(peerId);
+      if (!this.pendingPayloads.get(peerId)?.length) {
+        return;
+      }
+      if (!this.shouldAttemptConnection(peerId)) {
+        this.scheduleConnectionRetry(peerId);
+        return;
+      }
+      this.connectToPeer(peerId);
+    }, delayMs);
+    this.pendingConnectionRetries.set(peerId, timeoutId);
   }
 
   recordError(err) {
