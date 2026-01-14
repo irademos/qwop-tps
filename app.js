@@ -185,8 +185,11 @@ async function main() {
   const pendingEntityStates = new Map();
   const authoritativeEntityStates = new Map();
   let lastEntityBroadcast = 0;
+  let lastFullEntityBroadcast = 0;
   let lastControlSend = 0;
   const ENTITY_BROADCAST_INTERVAL = 200;
+  const ENTITY_STATE_DIRTY_THRESHOLD = 0.01;
+  const ENTITY_FULL_SNAPSHOT_INTERVAL = 5000;
   const CONTROL_SEND_INTERVAL = 140;
   const projectiles = [];
   const ammoPickups = [];
@@ -284,18 +287,59 @@ async function main() {
 
   function updateAuthoritativeState(id, state, sourceId) {
     const copy = cloneState(state);
+    const existing = authoritativeEntityStates.get(id);
+    const isDirty = !existing
+      || isStateDifferent(existing.state, copy)
+      || existing.sourceId !== sourceId;
     authoritativeEntityStates.set(id, {
       state: copy,
       sourceId,
-      timestamp: performance.now()
+      timestamp: performance.now(),
+      dirty: existing?.dirty || isDirty
     });
     applyNetworkedState(id, copy);
   }
 
-  function serializeAuthoritativeStates() {
+  function isStateDifferent(previous, next) {
+    if (previous === next) return false;
+    if (previous == null || next == null) return previous !== next;
+    if (typeof previous !== typeof next) return true;
+    if (typeof previous === 'number' && typeof next === 'number') {
+      if (!Number.isFinite(previous) || !Number.isFinite(next)) {
+        return previous !== next;
+      }
+      return Math.abs(previous - next) > ENTITY_STATE_DIRTY_THRESHOLD;
+    }
+    if (Array.isArray(previous) || Array.isArray(next)) {
+      if (!Array.isArray(previous) || !Array.isArray(next)) return true;
+      if (previous.length !== next.length) return true;
+      return previous.some((value, index) => isStateDifferent(value, next[index]));
+    }
+    if (typeof previous === 'object') {
+      const previousKeys = Object.keys(previous);
+      const nextKeys = Object.keys(next);
+      if (previousKeys.length !== nextKeys.length) return true;
+      return previousKeys.some(key => !Object.prototype.hasOwnProperty.call(next, key)
+        || isStateDifferent(previous[key], next[key]));
+    }
+    return previous !== next;
+  }
+
+  function serializeDirtyAuthoritativeStates() {
+    const payload = {};
+    authoritativeEntityStates.forEach((entry, id) => {
+      if (!entry.dirty) return;
+      payload[id] = { ...cloneState(entry.state), sourceId: entry.sourceId };
+      entry.dirty = false;
+    });
+    return payload;
+  }
+
+  function serializeFullAuthoritativeStates() {
     const payload = {};
     authoritativeEntityStates.forEach((entry, id) => {
       payload[id] = { ...cloneState(entry.state), sourceId: entry.sourceId };
+      entry.dirty = false;
     });
     return payload;
   }
@@ -478,7 +522,7 @@ async function main() {
       if (data.previousHostId !== multiplayer?.getId?.()) {
         return;
       }
-      const snapshot = serializeAuthoritativeStates();
+      const snapshot = serializeFullAuthoritativeStates();
       if (Object.keys(snapshot).length > 0) {
         multiplayer.sendTo(data.requesterId, { type: 'entitySnapshot', states: snapshot });
       }
@@ -751,7 +795,7 @@ async function main() {
     friendlyNpcManager?.setHost(isHost);
     logMonsterPersist('isHost', isHost);
     if (previousHostId && previousHostId === multiplayer.getId() && previousHostId !== newHostId) {
-      const snapshot = serializeAuthoritativeStates();
+      const snapshot = serializeFullAuthoritativeStates();
       if (newHostId) {
         multiplayer.sendTo(newHostId, { type: 'entitySnapshot', states: snapshot });
       }
@@ -3902,9 +3946,15 @@ async function main() {
       });
 
       if (now - lastEntityBroadcast >= ENTITY_BROADCAST_INTERVAL) {
-        const payload = serializeAuthoritativeStates();
+        const shouldSendFull = now - lastFullEntityBroadcast >= ENTITY_FULL_SNAPSHOT_INTERVAL;
+        const payload = shouldSendFull
+          ? serializeFullAuthoritativeStates()
+          : serializeDirtyAuthoritativeStates();
         if (Object.keys(payload).length > 0) {
           multiplayer.send({ type: 'entityStates', states: payload });
+          if (shouldSendFull) {
+            lastFullEntityBroadcast = now;
+          }
         }
         lastEntityBroadcast = now;
       }
