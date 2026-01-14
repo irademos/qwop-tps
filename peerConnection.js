@@ -122,29 +122,42 @@ export class Multiplayer {
         // Filter for only currently active peer IDs
         const validPeerIds = allPeerIds.filter(pid => activePeers[pid]);
 
-        // Sort by join timestamp so the most recent becomes host
-        validPeerIds.sort((a, b) => {
-          return activePeers[b]?.timestamp - activePeers[a]?.timestamp;
+        const orderedPeerIds = [...validPeerIds].sort((a, b) => {
+          const timestampA = activePeers[a]?.timestamp ?? 0;
+          const timestampB = activePeers[b]?.timestamp ?? 0;
+          if (timestampA !== timestampB) {
+            return timestampA - timestampB;
+          }
+          return a.localeCompare(b);
         });
 
-        const peerLogKey = `${this.id}|${validPeerIds.join(',')}`;
+        const peerLogKey = `${this.id}|${orderedPeerIds.join(',')}`;
         const nowMs = Date.now();
         if (peerLogKey !== this.lastPeerLogKey || nowMs - this.lastPeerLogAt > 10000) {
           console.log("My ID:", this.id);
-          console.log("Valid Peers (more recent first):", validPeerIds);
+          console.log("Valid Peers (oldest first):", orderedPeerIds);
           this.lastPeerLogKey = peerLogKey;
           this.lastPeerLogAt = nowMs;
         }
 
-        // The latest joined player becomes the host
-        const hostPeerId = validPeerIds[0];
         const previousHostId = this.currentHostId;
+        let hostPeerId = previousHostId && validPeerIds.includes(previousHostId)
+          ? previousHostId
+          : null;
+
+        if (!hostPeerId && orderedPeerIds.length > 0) {
+          hostPeerId = orderedPeerIds[0];
+        }
+
         this.currentHostId = hostPeerId;
         this.isHost = (hostPeerId === this.id);
 
         if (this.isHost && this.lastHostLogId !== this.id) {
           console.log("👑 I am the host player");
           this.lastHostLogId = this.id;
+        }
+        if (previousHostId !== hostPeerId && hostPeerId) {
+          console.log("Host selected (stable):", hostPeerId);
         }
 
         if (previousHostId !== hostPeerId && typeof this.onHostChange === 'function') {
@@ -160,7 +173,7 @@ export class Multiplayer {
         }
 
         // Connect to any valid peers we haven't yet connected to
-        for (const peerId of validPeerIds) {
+        for (const peerId of orderedPeerIds) {
           if (peerId !== this.id && !this.connections[peerId] && this.shouldAttemptConnection(peerId)) {
             this.connectToPeer(peerId);
           }
