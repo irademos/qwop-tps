@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from './water.js';
-import { MOON_RADIUS } from "./worldGeneration.js";
 import { getSpawnPosition } from './spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import { getKnockbackImpulse } from "./knockback.js";
@@ -1144,34 +1143,11 @@ export class PlayerControls {
         // this.playerModel.rotation.y = yawAngle;
       }
 
-      const moon = window.moon;
-      if (moon) {
-        const playerPos = this.playerModel.position;
-        const moonPos = moon.position;
-        const dist = playerPos.distanceTo(moonPos);
-        if (dist < MOON_RADIUS * 2) {
-          const up = new THREE.Vector3().subVectors(playerPos, moonPos).normalize();
-          this.playerModel.up.copy(up);
-          let forward;
-          if (movement.length() > 0) {
-            forward = movement.clone().normalize();
-          } else {
-            forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion);
-          }
-          forward.projectOnPlane(up).normalize();
-          const target = playerPos.clone().add(forward);
-          this.playerModel.lookAt(target);
-          this.camera.up.copy(up);
-        } else {
-          this.playerModel.rotation.set(0, yawAngle, 0);
-          this.playerModel.up.set(0, 1, 0);
-          this.camera.up.set(0, 1, 0);
-        }
-      } else {
-        this.playerModel.rotation.set(0, yawAngle, 0);
-        this.playerModel.up.set(0, 1, 0);
-        this.camera.up.set(0, 1, 0);
-      }
+      
+      this.playerModel.rotation.set(0, yawAngle, 0);
+      this.playerModel.up.set(0, 1, 0);
+      this.camera.up.set(0, 1, 0);
+      
       const actions = this.playerModel.userData.actions;
       if (actions && !this.isKnocked && !this.currentSpecialAction && !this.isClimbing) {
         let actionName;

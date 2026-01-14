@@ -134,22 +134,26 @@ const BUILDING_QUALITY_SETTINGS = {
   }
 };
 
-function loadKtx2Tex(ktx2, url, { srgb = false, repeat = 2, anisotropy = null } = {}) {
-  const tex = ktx2.load(url, (loaded) => {
-    loaded.wrapS = THREE.RepeatWrapping;
-    loaded.wrapT = THREE.RepeatWrapping;
-    loaded.repeat.set(repeat, repeat);
-    if (anisotropy) loaded.anisotropy = anisotropy;
-    if (srgb && loaded.colorSpace !== undefined) loaded.colorSpace = THREE.SRGBColorSpace;
-    loaded.needsUpdate = true;
-  });
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(repeat, repeat);
-  if (anisotropy) tex.anisotropy = anisotropy;
-  if (srgb && tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+function applyKtx2ToMaterial(ktx2, material, slot, url, { srgb = false, repeat = 2, anisotropy = null } = {}) {
+  if (!material || !slot || !url) return;
+
+  ktx2.load(
+    url,
+    (tex) => {
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(repeat, repeat);
+      if (anisotropy) tex.anisotropy = anisotropy;
+      if (srgb && tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+
+      material[slot] = tex;
+      material.needsUpdate = true;
+    },
+    undefined,
+    (err) => console.warn("KTX2 load failed:", slot, url, err)
+  );
 }
+
 const repeat_val = 0.05;
 
 const buildingTextureBasePath = "/assets/textures/planks/planks";
@@ -492,34 +496,38 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   const qualitySettings = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY];
   const ktx2 = getKtx2Loader(renderer);
   const maxAnisotropy = renderer?.capabilities?.getMaxAnisotropy?.() ?? null;
-  const buildingBase = loadKtx2Tex(
-    ktx2,
-    `${buildingTextureBasePath}_albedo.ktx2`,
-    { srgb: true, repeat: repeat_val, anisotropy: maxAnisotropy }
-  );
-  const buildingNormal = qualitySettings.useNormalRoughness
-    ? loadKtx2Tex(
-      ktx2,
-      `${buildingTextureBasePath}_normal.ktx2`,
-      { repeat: repeat_val, anisotropy: maxAnisotropy }
-    )
-    : null;
-  const buildingRough = qualitySettings.useNormalRoughness
-    ? loadKtx2Tex(
-      ktx2,
-      `${buildingTextureBasePath}_roughness.ktx2`,
-      { repeat: repeat_val, anisotropy: maxAnisotropy }
-    )
-    : null;
-
   const extrudedMaterial = new THREE.MeshStandardMaterial({
     color: 0x8a8a8a,
-    map: buildingBase,
-    normalMap: buildingNormal ?? null,
-    roughnessMap: buildingRough ?? null,
     roughness: 1.0,
     metalness: 0.0,
   });
+
+  applyKtx2ToMaterial(
+    ktx2,
+    extrudedMaterial,
+    "map",
+    `${buildingTextureBasePath}_albedo.ktx2`,
+    { srgb: true, repeat: repeat_val, anisotropy: maxAnisotropy }
+  );
+
+  if (qualitySettings.useNormalRoughness) {
+    applyKtx2ToMaterial(
+      ktx2,
+      extrudedMaterial,
+      "normalMap",
+      `${buildingTextureBasePath}_normal.ktx2`,
+      { repeat: repeat_val, anisotropy: maxAnisotropy }
+    );
+
+    applyKtx2ToMaterial(
+      ktx2,
+      extrudedMaterial,
+      "roughnessMap",
+      `${buildingTextureBasePath}_roughness.ktx2`,
+      { repeat: repeat_val, anisotropy: maxAnisotropy }
+    );
+  }
+
 
   extrudedMaterial.needsUpdate = true;
 
