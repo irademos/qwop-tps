@@ -1,8 +1,8 @@
 import * as THREE from "three";
+import { getKtx2Loader } from "./ktx2Loader.js";
 
 export const GROUND_TEX_REPEAT_PER_TILE = 6;
-const GROUND_TEXTURE_URL =
-  "/assets/textures/forrest_ground_01_4k.blend/textures/forrest_ground_01_diff_4k.jpg";
+const GROUND_TEXTURE_URL = "/assets/textures/grass/grass_albedo.ktx2";
 
 export function createGroundTiles({
   scene,
@@ -13,19 +13,25 @@ export function createGroundTiles({
 } = {}) {
   const tiles = new Map();
 
-  const texture = new THREE.TextureLoader().load(textureUrl);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
   const repeatScale = (tileSizeMeters / 300) * GROUND_TEX_REPEAT_PER_TILE;
-  texture.repeat.set(repeatScale, repeatScale);
-  if (renderer?.capabilities?.getMaxAnisotropy) {
-    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  }
-  if ("colorSpace" in texture && THREE.SRGBColorSpace) {
-    texture.colorSpace = THREE.SRGBColorSpace;
-  }
+  const material = new THREE.MeshStandardMaterial({ color: 0x8a8a8a });
+  const state = { texture: null };
 
-  const material = new THREE.MeshStandardMaterial({ map: texture });
+  const ktx2Loader = getKtx2Loader(renderer);
+  ktx2Loader.load(textureUrl, (loaded) => {
+    loaded.wrapS = THREE.RepeatWrapping;
+    loaded.wrapT = THREE.RepeatWrapping;
+    loaded.repeat.set(repeatScale, repeatScale);
+    if (renderer?.capabilities?.getMaxAnisotropy) {
+      loaded.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    }
+    if ("colorSpace" in loaded && THREE.SRGBColorSpace) {
+      loaded.colorSpace = THREE.SRGBColorSpace;
+    }
+    state.texture = loaded;
+    material.map = loaded;
+    material.needsUpdate = true;
+  });
 
   const createGroundMesh = (tile) => {
     const geometry = new THREE.PlaneGeometry(tileSizeMeters, tileSizeMeters);
@@ -69,7 +75,9 @@ export function createGroundTiles({
   return {
     tiles,
     material,
-    texture,
+    get texture() {
+      return state.texture;
+    },
     ensureTile,
     removeTile,
     clear
