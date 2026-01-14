@@ -1413,9 +1413,35 @@ async function main() {
     return fallback;
   };
 
+  const disposeWeaponMesh = (mesh) => {
+    if (!mesh) return;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    }
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
+      const materials = Array.isArray(child.material)
+        ? child.material
+        : [child.material];
+      materials.forEach(material => material?.dispose?.());
+    });
+  };
+
   const cleanupMonster = (monster) => {
     if (!monster) return;
     monster.model?.userData?.mixer?.stopAllAction?.();
+    if (monster.weaponMesh) {
+      disposeWeaponMesh(monster.weaponMesh);
+      monster.weaponMesh = null;
+      monster.weaponType = null;
+      monster.weaponBaseScale = null;
+    }
+    if (monster.model?.userData?.equippedWeaponType) {
+      monster.model.userData.equippedWeaponType = null;
+    }
     if (monster.model?.parent) {
       monster.model.parent.remove(monster.model);
     }
@@ -1479,6 +1505,53 @@ async function main() {
 
         cleanupMonster(oldMonster);
         scene.add(monster.model);
+        if (modelPath === "/models/rainbow_troll.fbx") {
+          const attachSwordToMonster = async () => {
+            try {
+              const weapon = new AutumnSword(scene);
+              await weapon.load(monster.model.position);
+              if (!weapon.mesh) return;
+              if (!monster.model) {
+                disposeWeaponMesh(weapon.mesh);
+                return;
+              }
+              const root = monster.model.userData?.pivot ?? monster.model;
+              let handBone = null;
+              root.traverse(child => {
+                if (handBone || !child.isBone || !child.name) return;
+                const name = child.name.toLowerCase();
+                if (name.includes('righthand')) {
+                  handBone = child;
+                }
+              });
+              if (!handBone) {
+                root.traverse(child => {
+                  if (handBone || !child.isBone || !child.name) return;
+                  if (child.name.toLowerCase().includes('hand')) {
+                    handBone = child;
+                  }
+                });
+              }
+              if (weapon.mesh.parent) {
+                weapon.mesh.parent.remove(weapon.mesh);
+              }
+              if (handBone) {
+                handBone.add(weapon.mesh);
+              } else {
+                monster.model.add(weapon.mesh);
+              }
+              weapon.mesh.position.copy(weapon._holdOffset);
+              weapon.mesh.quaternion.copy(weapon._holdQuaternion);
+              monster.weaponType = "sword";
+              monster.weaponMesh = weapon.mesh;
+              monster.weaponBaseScale = weapon.mesh.scale.clone();
+              monster.model.userData.equippedWeaponType = "sword";
+            } catch (error) {
+              console.warn('Failed to attach autumn sword to monster.', error);
+            }
+          };
+          attachSwordToMonster();
+        }
         if (rapierWorld) {
           attachMonsterPhysics(monster);
         }
