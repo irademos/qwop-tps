@@ -204,7 +204,7 @@ export function createPlayerModel(
           }
 
           model.traverse(o => {
-            if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
+            if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = true;
             if (o.material?.skinning === true) o.material.skinning = true;
           });
 
