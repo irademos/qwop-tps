@@ -14,6 +14,17 @@ const animationFiles = {
 const animationClipCache = new Map();
 const missingAnimationLogs = new Set();
 
+function normalizeLodConfigs(config) {
+  if (!Array.isArray(config?.lods)) return [];
+  return config.lods
+    .filter((lod) => lod && typeof lod.path === 'string' && lod.path.trim())
+    .map((lod) => ({
+      path: lod.path,
+      distance: Number.isFinite(lod.distance) ? lod.distance : null,
+    }))
+    .filter((lod) => lod.distance !== null);
+}
+
 function makeModelUnlit(model) {
   const lightsToRemove = [];
   model.traverse((obj) => {
@@ -84,6 +95,7 @@ export function loadMonsterModel(modelPath, callback) {
           const modelName = modelPath.split('/').pop().toLowerCase();
           const fastModels = ['cowboy'];
           const forceFast = fastModels.some(n => modelName.includes(n));
+          const lodConfigs = normalizeLodConfigs(config);
 
           makeModelUnlit(model);
 
@@ -99,18 +111,23 @@ export function loadMonsterModel(modelPath, callback) {
           const box = new THREE.Box3().setFromObject(model);
           const center = box.getCenter(new THREE.Vector3());
 
-          const monsterGroup = new THREE.Group();
+          const monsterGroup = lodConfigs.length ? new THREE.LOD() : new THREE.Group();
           const pivot = new THREE.Group();
           const yOffset = (config.yOffset ?? 0) - box.min.y;
           pivot.position.set(-center.x, yOffset, -center.z - (config.zOffset ?? 0));
           pivot.add(model);
-          monsterGroup.add(pivot);
+          if (monsterGroup.isLOD) {
+            monsterGroup.addLevel(pivot, 0);
+          } else {
+            monsterGroup.add(pivot);
+          }
           monsterGroup.userData.pivot = pivot;
           monsterGroup.userData.modelRoot = model;
 
           const mixer = new THREE.AnimationMixer(model);
           const actions = {};
           const fbxLoader = new FBXLoader();
+          const lodLoader = new FBXLoader();
 
           const promises = Object.entries(animationFiles).map(([name, file]) => {
             return new Promise((resolve, reject) => {
@@ -155,7 +172,52 @@ export function loadMonsterModel(modelPath, callback) {
             });
           });
 
-          Promise.all(promises).then(() => {
+          const lodPromises = lodConfigs.map((lod) => {
+            return new Promise((resolve) => {
+              lodLoader.load(
+                lod.path,
+                (lodFbx) => {
+                  if (!lodFbx || typeof lodFbx.traverse !== 'function') {
+                    console.warn('LOD FBXLoader returned an unexpected result:', lodFbx);
+                    resolve();
+                    return;
+                  }
+                  const lodModel = lodFbx;
+                  makeModelUnlit(lodModel);
+                  lodModel.traverse(o => {
+                    if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
+                    if (o.material?.skinning === true) o.material.skinning = true;
+                  });
+
+                  lodModel.scale.set(scale, scale, scale);
+                  lodModel.updateMatrixWorld(true);
+                  const lodBox = new THREE.Box3().setFromObject(lodModel);
+                  const lodCenter = lodBox.getCenter(new THREE.Vector3());
+                  const lodPivot = new THREE.Group();
+                  const lodYOffset = (config.yOffset ?? 0) - lodBox.min.y;
+                  lodPivot.position.set(
+                    -lodCenter.x,
+                    lodYOffset,
+                    -lodCenter.z - (config.zOffset ?? 0)
+                  );
+                  lodPivot.add(lodModel);
+                  if (monsterGroup.isLOD) {
+                    monsterGroup.addLevel(lodPivot, lod.distance);
+                  } else {
+                    monsterGroup.add(lodPivot);
+                  }
+                  resolve();
+                },
+                undefined,
+                (err) => {
+                  console.warn('Failed to load monster LOD model:', lod.path, err);
+                  resolve();
+                }
+              );
+            });
+          });
+
+          Promise.all([...promises, ...lodPromises]).then(() => {
             if (!actions.Idle) {
               logMissingAnimation('Idle', modelPath);
             }
