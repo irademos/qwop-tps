@@ -3569,11 +3569,23 @@ async function main() {
     playerModel.userData.currentAction = 'idle';
   }
 
-  // Initialize speech commands for voice-controlled actions
+  const voiceTranscript = document.getElementById('voice-transcript');
+  let voiceTranscriptTimer = null;
+  const showVoiceTranscript = (text) => {
+    if (!voiceTranscript) return;
+    voiceTranscript.textContent = text;
+    voiceTranscript.classList.add('visible');
+    if (voiceTranscriptTimer) {
+      clearTimeout(voiceTranscriptTimer);
+    }
+    voiceTranscriptTimer = setTimeout(() => {
+      voiceTranscript.classList.remove('visible');
+    }, 2500);
+  };
+
+  // Initialize speech-to-text overlay for voice input
   const speech = initSpeechCommands({
-    jump: () => playerControls.triggerJump(),
-    fire: () => playerControls.triggerFire(),
-    shoot: () => playerControls.triggerFire()
+    onTranscript: showVoiceTranscript
   });
   const talkButton = document.getElementById('talk-button');
   if (talkButton) {
@@ -3599,30 +3611,6 @@ async function main() {
     window.addEventListener('touchcancel', stopTalking);
   }
 
-  let localStream = null;
-  let micActive = false;
-  const voiceButton = document.getElementById('voice-button');
-
-  voiceButton.addEventListener('click', async () => {
-    if (!micActive) {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        multiplayer.startVoice(localStream);
-        micActive = true;
-        voiceButton.textContent = "Mute";
-      } catch (err) {
-        console.error("Microphone access denied:", err);
-      }
-    } else {
-      if (localStream) {
-        multiplayer.stopVoice();
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-      }
-      micActive = false;
-      voiceButton.textContent = "Unmute";
-    }
-  });
 
   function swapPlayerCharacter(newModelPath) {
     if (!newModelPath || newModelPath === characterModel) {
@@ -4248,16 +4236,6 @@ async function main() {
       multiplayer.send(payload);
       lastPresenceSend = now;
     }
-
-    Object.entries(multiplayer.voiceAudios || {}).forEach(([peerId, { audio }]) => {
-      const peerModel = otherPlayers[peerId]?.model;
-      if (!peerModel || !peerModel.position) return;
-      const dist = playerModel.position.distanceTo(peerModel.position);
-      const maxDist = 30;
-      const rawVolume = 1 - dist / maxDist;
-      const volume = Math.max(0, rawVolume * rawVolume);
-      audio.volume = volume;
-    });
 
     Object.entries(otherPlayers).forEach(([id, { model, nameLabel }]) => {
       if (!model.visible) {
