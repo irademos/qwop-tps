@@ -82,7 +82,7 @@ export function loadMonsterModel(modelPath, callback) {
 
           const model = fbx;
           const modelName = modelPath.split('/').pop().toLowerCase();
-          const fastModels = ['andy', 'chris', 'old_man'];
+          const fastModels = ['cowboy'];
           const forceFast = fastModels.some(n => modelName.includes(n));
 
           makeModelUnlit(model);

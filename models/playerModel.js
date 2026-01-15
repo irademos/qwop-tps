@@ -126,7 +126,7 @@ export function createPlayerModel(
   THREE,
   username,
   onLoad,
-  modelPath = '/models/old_man.fbx'
+  modelPath = '/models/cowboy.fbx'
 ) {
   const playerGroup = new THREE.Group();
   const loader = new FBXLoader();

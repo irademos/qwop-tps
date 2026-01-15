@@ -11,9 +11,10 @@ import {
 } from "./friendlyPersistence.js";
 
 const FRIENDLY_MODELS = [
-  "/models/andy.fbx",
-  "/models/chris.fbx",
-  "/models/old_man.fbx"
+  // "/models/andy.fbx",
+  // "/models/chris.fbx",
+  // "/models/old_man.fbx"
+  "/models/cowboy.fbx"
 ];
 const FRIENDLY_MAX_ACTIVE = 6;
 const FRIENDLY_ACTIVE_RADIUS = 360;
