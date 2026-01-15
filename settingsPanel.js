@@ -8,6 +8,7 @@ const TABS = [
   { id: 'inventory', label: 'Inventory' },
   { id: 'multiplayer', label: 'Multiplayer' },
   { id: 'location', label: 'Location' },
+  { id: 'display', label: 'Display' },
   { id: 'developer', label: 'Developer' }
 ];
 const CHARACTER_STATS = [
@@ -80,6 +81,11 @@ function formatStatValue(key, value) {
     return `${Math.max(1, Math.round(value))}`;
   }
   return `${Math.round(value)}`;
+}
+
+function formatRangeValue(value, decimals = 2) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  return value.toFixed(decimals);
 }
 
 function buildHeader() {
@@ -448,19 +454,134 @@ function buildDeveloperPanel() {
   return panelEl;
 }
 
+function buildDisplayPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-display';
+  panelEl.dataset.panel = 'display';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-display');
+
+  const modeGroup = createElement('div', 'settings-field');
+  const modeLabel = createElement('label', 'settings-label', 'Day/Night Mode');
+  modeLabel.setAttribute('for', 'settings-display-mode');
+  const modeSelect = createElement('select', 'settings-select');
+  modeSelect.id = 'settings-display-mode';
+  const modeOptions = [
+    { value: 'auto', label: 'Auto (8:00am / 5:30pm)' },
+    { value: 'day', label: 'Day' },
+    { value: 'night', label: 'Night' }
+  ];
+  modeOptions.forEach(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    modeSelect.appendChild(option);
+  });
+  modeGroup.append(modeLabel, modeSelect);
+
+  const createRangeField = ({ id, label, min, max, step }) => {
+    const field = createElement('div', 'settings-field');
+    const labelRow = createElement('div', 'settings-range-row');
+    const fieldLabel = createElement('label', 'settings-label', label);
+    fieldLabel.setAttribute('for', id);
+    const valueLabel = createElement('span', 'settings-range-value', '—');
+    valueLabel.dataset.valueFor = id;
+    labelRow.append(fieldLabel, valueLabel);
+    const input = createElement('input', 'settings-range');
+    input.type = 'range';
+    input.id = id;
+    input.min = `${min}`;
+    input.max = `${max}`;
+    input.step = `${step}`;
+    field.append(labelRow, input);
+    return { field, input, valueLabel };
+  };
+
+  const ambientField = createRangeField({
+    id: 'settings-display-ambient',
+    label: 'Ambient Light',
+    min: 0,
+    max: 2,
+    step: 0.05
+  });
+  const directionalField = createRangeField({
+    id: 'settings-display-directional',
+    label: 'Direct Light',
+    min: 0,
+    max: 2,
+    step: 0.05
+  });
+  const groundField = createRangeField({
+    id: 'settings-display-ground',
+    label: 'Ground Brightness',
+    min: 0.2,
+    max: 1.6,
+    step: 0.05
+  });
+  const buildingField = createRangeField({
+    id: 'settings-display-building',
+    label: 'Building Brightness',
+    min: 0.2,
+    max: 1.6,
+    step: 0.05
+  });
+  const skyField = createRangeField({
+    id: 'settings-display-sky',
+    label: 'Sky Brightness',
+    min: 0.1,
+    max: 1.6,
+    step: 0.05
+  });
+
+  const hint = createElement('div', 'settings-muted');
+  hint.textContent = 'Auto mode uses local time to switch between day and night lighting.';
+
+  panelEl.append(
+    modeGroup,
+    ambientField.field,
+    directionalField.field,
+    groundField.field,
+    buildingField.field,
+    skyField.field,
+    hint
+  );
+
+  elements.displayFields = {
+    modeSelect,
+    sliders: {
+      ambientIntensity: ambientField.input,
+      directionalIntensity: directionalField.input,
+      groundBrightness: groundField.input,
+      buildingBrightness: buildingField.input,
+      skyBrightness: skyField.input
+    },
+    values: {
+      ambientIntensity: ambientField.valueLabel,
+      directionalIntensity: directionalField.valueLabel,
+      groundBrightness: groundField.valueLabel,
+      buildingBrightness: buildingField.valueLabel,
+      skyBrightness: skyField.valueLabel
+    }
+  };
+
+  return panelEl;
+}
+
 function buildPanels() {
   const body = createElement('div', 'settings-body');
   const characterPanel = buildCharacterPanel();
   const inventoryPanel = buildInventoryPanel();
   const multiplayerPanel = buildMultiplayerPanel();
   const locationPanel = buildLocationPanel();
+  const displayPanel = buildDisplayPanel();
   const developerPanel = buildDeveloperPanel();
-  body.append(characterPanel, inventoryPanel, multiplayerPanel, locationPanel, developerPanel);
+  body.append(characterPanel, inventoryPanel, multiplayerPanel, locationPanel, displayPanel, developerPanel);
   elements.panels = {
     character: characterPanel,
     inventory: inventoryPanel,
     multiplayer: multiplayerPanel,
     location: locationPanel,
+    display: displayPanel,
     developer: developerPanel
   };
   return body;
@@ -724,6 +845,25 @@ function bindEvents() {
     elements.debugLocationFields.accuracy.addEventListener('change', (event) => {
       const value = parseFloat(event.target.value);
       context.location?.setDebugAccuracy?.(value);
+    });
+  }
+
+  if (elements.displayFields?.modeSelect) {
+    elements.displayFields.modeSelect.addEventListener('change', (event) => {
+      const value = event.target.value;
+      context.appState?.setDisplayMode?.(value);
+    });
+  }
+
+  if (elements.displayFields?.sliders) {
+    Object.entries(elements.displayFields.sliders).forEach(([key, slider]) => {
+      slider.addEventListener('input', (event) => {
+        const value = parseFloat(event.target.value);
+        if (elements.displayFields?.values?.[key]) {
+          elements.displayFields.values[key].textContent = formatRangeValue(value);
+        }
+        context.appState?.setDisplaySetting?.(key, value);
+      });
     });
   }
 
@@ -1029,6 +1169,25 @@ export function updateUI() {
           : '';
       }
     }
+  }
+
+  if (elements.displayFields && context.appState?.getDisplaySettings) {
+    const displaySettings = context.appState.getDisplaySettings();
+    if (displaySettings?.mode && elements.displayFields.modeSelect) {
+      if (elements.displayFields.modeSelect.value !== displaySettings.mode) {
+        elements.displayFields.modeSelect.value = displaySettings.mode;
+      }
+    }
+    Object.entries(elements.displayFields.sliders || {}).forEach(([key, slider]) => {
+      const value = displaySettings?.[key];
+      if (typeof value !== 'number' || Number.isNaN(value)) return;
+      if (document.activeElement !== slider) {
+        slider.value = `${value}`;
+      }
+      if (elements.displayFields?.values?.[key]) {
+        elements.displayFields.values[key].textContent = formatRangeValue(value);
+      }
+    });
   }
 
   renderInventory();
