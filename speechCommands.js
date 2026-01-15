@@ -1,4 +1,4 @@
-export function initSpeechCommands(commands = {}) {
+export function initSpeechCommands({ onTranscript } = {}) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     console.warn('Speech recognition not supported in this browser.');
@@ -11,21 +11,17 @@ export function initSpeechCommands(commands = {}) {
   recognition.lang = 'en-US';
 
   recognition.onresult = (event) => {
-    console.log(event);
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
       if (result.isFinal) {
-        const transcript = result[0].transcript.trim().toLowerCase();
-        console.log('Detected speech:', transcript);
-        Object.entries(commands).forEach(([phrase, callback]) => {
-          if (transcript.includes(phrase.toLowerCase())) {
-            try {
-              callback();
-            } catch (err) {
-              console.error('Error executing command for phrase', phrase, err);
-            }
+        const transcript = result[0].transcript.trim();
+        if (transcript && typeof onTranscript === 'function') {
+          try {
+            onTranscript(transcript);
+          } catch (err) {
+            console.error('Error handling transcript', err);
           }
-        });
+        }
       }
     }
   };

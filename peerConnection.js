@@ -211,31 +211,11 @@ export class Multiplayer {
 
     });
 
+    // Voice calls are disabled; only data connections are handled.
     this.peer.on('connection', conn => {
       this.setupConnection(conn);
     });
 
-    this.peer.on('call', call => {
-      call.answer(); // no stream sent
-
-      call.on('stream', remoteStream => {
-        this.handleIncomingVoice(call.peer, remoteStream);
-      });
-
-      call.on('close', () => {
-        if (this.voiceAudios?.[call.peer]) {
-          this.voiceAudios[call.peer].audio.pause();
-          delete this.voiceAudios[call.peer];
-        }
-      });
-
-      call.on('error', err => {
-        console.error('Peer error:', err);
-        this.recordError(err);
-      });
-
-    });
- 
     onValue(ref(db, 'peers'), snapshot => {
       const peers = snapshot.val() || {};
     });
@@ -411,53 +391,6 @@ export class Multiplayer {
     const lastFailedAt = this.failedConnectionAt.get(peerId) || 0;
     const now = Date.now();
     return now - lastFailedAt > 5000;
-  }
-
-  startVoice(stream) {
-    for (const peerId in this.connections) {
-      const conn = this.connections[peerId];
-      if (!conn.callActive) {
-        const call = this.peer.call(peerId, stream);
-        conn.callActive = true;
-      }
-    }
-  }
-  
-  stopVoice() {
-    for (const peerId in this.voiceAudios || {}) {
-      const { audio, stream } = this.voiceAudios[peerId];
-      if (audio) {
-        audio.pause();
-        audio.srcObject = null;
-      }
-      if (stream) {
-        stream.getTracks().forEach(t => t.stop());
-      }
-    }
-    this.voiceAudios = {};
-  } 
-
-  handleIncomingVoice(peerId, stream) {
-    const audio = new Audio();
-    audio.autoplay = true;
-    audio.srcObject = stream;
-    audio.playsInline = true; // iOS-specific
-
-    // Ensure audio can play (especially on mobile)
-    audio.onloadedmetadata = () => {
-      audio.play().catch(err => {
-        console.warn(`Audio play failed for ${peerId}:`, err);
-      });
-    };
-
-    // Prevent memory leaks from duplicates
-    if (this.voiceAudios?.[peerId]?.audio) {
-      this.voiceAudios[peerId].audio.pause();
-      this.voiceAudios[peerId].audio.srcObject = null;
-    }
-
-    this.voiceAudios = this.voiceAudios || {};
-    this.voiceAudios[peerId] = { audio, stream };
   }
 
   send(data) {

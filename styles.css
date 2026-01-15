@@ -522,11 +522,27 @@ body {
   color: #ff9b9b;
 }
 
-#voice-button {
+#voice-transcript {
+  position: absolute;
+  left: 50%;
+  bottom: 120px;
+  transform: translate(-50%, 10px);
+  max-width: 80%;
+  padding: 10px 16px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.85);
+  color: #f8fafc;
+  font-size: 14px;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 1100;
 }
 
-#voice-button.active {
-  background-color: rgba(255, 0, 0, 0.5);
+#voice-transcript.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 #chat-ui {
