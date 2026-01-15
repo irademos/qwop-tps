@@ -11,6 +11,7 @@ const animationFiles = {
   TwistDance: 'Twist Dance.fbx'
 };
 
+const animationClipCache = new Map();
 const missingAnimationLogs = new Set();
 
 function makeModelUnlit(model) {
@@ -113,6 +114,21 @@ export function loadMonsterModel(modelPath, callback) {
 
           const promises = Object.entries(animationFiles).map(([name, file]) => {
             return new Promise((resolve, reject) => {
+              const cachedClip = animationClipCache.get(file);
+              if (cachedClip) {
+                const action = mixer.clipAction(cachedClip);
+                if (forceFast) {
+                  action.setEffectiveTimeScale(10.0);
+                }
+                if (['Weapon', 'Death'].includes(name)) {
+                  action.loop = THREE.LoopOnce;
+                  action.clampWhenFinished = true;
+                }
+                actions[name] = action;
+                resolve();
+                return;
+              }
+
               fbxLoader.load(
                 `/models/animations/${encodeURIComponent(file)}`,
                 (anim) => {
@@ -121,6 +137,7 @@ export function loadMonsterModel(modelPath, callback) {
                     resolve();
                     return;
                   }
+                  animationClipCache.set(file, clip);
                   const action = mixer.clipAction(clip);
                   if (forceFast) {
                     action.setEffectiveTimeScale(10.0);

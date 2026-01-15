@@ -3,6 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import * as THREE from 'three';
 
 const EPSILON = 1e-4;
+const animationClipCache = new Map();
 
 function clampIndexRange(times, startTime, endTime) {
   let startIndex = 0;
@@ -251,10 +252,33 @@ export function createPlayerModel(
 
           const promises = Object.entries(animationFiles).map(([name, file]) => {
             return new Promise((resolve, reject) => {
+              const cachedClip = animationClipCache.get(file);
+              if (cachedClip) {
+                const action = mixer.clipAction(cachedClip);
+                if (name === 'walk') {
+                  action.setEffectiveTimeScale(1.8);
+                }
+                if (
+                  ['jump', 'hit', 'mutantPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
+                ) {
+                  action.loop = THREE.LoopOnce;
+                  action.clampWhenFinished = true;
+                }
+                if (name === 'climb') {
+                  action.loop = THREE.LoopRepeat;
+                }
+                actions[name] = action;
+                resolve();
+                return;
+              }
+
               fbxLoader.load(
                 `/models/animations/${encodeURIComponent(file)}`,
                 (anim) => {
                   const clip = anim.animations[0];
+                  if (clip) {
+                    animationClipCache.set(file, clip);
+                  }
                   // const rootName = model.name || 'Root';
                   // const src = anim.animations[0];
                   // const clean = stripRootTracks(src, rootName);
@@ -282,6 +306,24 @@ export function createPlayerModel(
           });
 
           promises.push(new Promise((resolve, reject) => {
+            const paddlingFile = 'Paddling.fbx';
+            const cachedClip = animationClipCache.get(paddlingFile);
+            if (cachedClip) {
+              const { leftClip, rightClip } = splitPaddlingClip(THREE, cachedClip);
+
+              const leftAction = mixer.clipAction(leftClip);
+              leftAction.loop = THREE.LoopOnce;
+              leftAction.clampWhenFinished = true;
+              actions.paddleLeft = leftAction;
+
+              const rightAction = mixer.clipAction(rightClip);
+              rightAction.loop = THREE.LoopOnce;
+              rightAction.clampWhenFinished = true;
+              actions.paddleRight = rightAction;
+              resolve();
+              return;
+            }
+
             fbxLoader.load(
               '/models/animations/Paddling.fbx',
               (anim) => {
@@ -292,6 +334,7 @@ export function createPlayerModel(
                   return;
                 }
 
+                animationClipCache.set(paddlingFile, baseClip);
                 const { leftClip, rightClip } = splitPaddlingClip(THREE, baseClip);
 
                 const leftAction = mixer.clipAction(leftClip);
