@@ -1,5 +1,6 @@
 // /characters/CharacterBase.js
 import * as THREE from "three";
+import { updateSkinnedMeshBounds } from "../utils.js";
 
 export const CHARACTER_MOVEMENT = {
   walkSpeed: 2,
@@ -28,6 +29,7 @@ export class CharacterBase {
   update(delta) {
     if (!this.mixer || !Number.isFinite(delta) || delta <= 0) return;
     this.mixer.update(delta);
+    updateSkinnedMeshBounds(this.model);
   }
 
   playAnimation(name, fadeDuration = 0.2) {

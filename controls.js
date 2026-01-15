@@ -4,6 +4,7 @@ import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from './water.j
 import { getSpawnPosition } from './spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import { getKnockbackImpulse } from "./knockback.js";
+import { updateSkinnedMeshBounds } from "./utils.js";
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -1251,6 +1252,7 @@ export class PlayerControls {
 
       if (this.playerModel && this.playerModel.userData.mixer) {
         this.playerModel.userData.mixer.update(delta);
+        updateSkinnedMeshBounds(this.playerModel);
       }
 
       if (this.enabled) {
