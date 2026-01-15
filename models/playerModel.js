@@ -5,6 +5,83 @@ import * as THREE from 'three';
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
 
+function normalizeLodConfigs(config) {
+  if (!Array.isArray(config?.lods)) return [];
+  return config.lods
+    .filter((lod) => lod && typeof lod.path === 'string' && lod.path.trim())
+    .map((lod) => ({
+      path: lod.path,
+      distance: Number.isFinite(lod.distance) ? lod.distance : null,
+    }))
+    .filter((lod) => lod.distance !== null);
+}
+
+function bindSkinnedMeshesToBaseSkeleton(baseModel, lodModel) {
+  const baseBoneMap = new Map();
+  baseModel.traverse((obj) => {
+    if (obj.isBone && obj.name) {
+      baseBoneMap.set(obj.name, obj);
+    }
+  });
+
+  if (baseBoneMap.size === 0) return;
+
+  lodModel.traverse((obj) => {
+    if (!obj.isSkinnedMesh || !obj.skeleton) return;
+    const bones = obj.skeleton.bones.map((bone) => baseBoneMap.get(bone.name) ?? bone);
+    const skeleton = new THREE.Skeleton(bones, obj.skeleton.boneInverses);
+    obj.bind(skeleton, obj.bindMatrix);
+    obj.skeleton = skeleton;
+  });
+}
+
+function makeModelUnlit(model) {
+  const lightsToRemove = [];
+
+  model.traverse((obj) => {
+    if (obj.isLight) {
+      lightsToRemove.push(obj);
+      return;
+    }
+
+    if (obj.isMesh) {
+      obj.castShadow = false;
+      obj.receiveShadow = false;
+
+      const toBasic = (mat) => {
+        if (!mat) return mat;
+
+        const basicParams = {
+          map: mat.map || null,
+          color: (mat.color && mat.color.clone()) || new THREE.Color(0xffffff),
+          transparent: !!mat.transparent,
+          opacity: (typeof mat.opacity === 'number') ? mat.opacity : 1,
+          side: mat.side ?? THREE.FrontSide,
+          vertexColors: !!mat.vertexColors,
+          alphaMap: mat.alphaMap || null,
+        };
+
+        const newMat = new THREE.MeshBasicMaterial(basicParams);
+        if (obj.isSkinnedMesh === true) newMat.skinning = true;
+        if (typeof mat.dispose === 'function') {
+          queueMicrotask(() => mat.dispose());
+        }
+        return newMat;
+      };
+
+      if (Array.isArray(obj.material)) {
+        obj.material = obj.material.map(toBasic);
+      } else if (obj.material) {
+        obj.material = toBasic(obj.material);
+      }
+    }
+  });
+
+  for (const light of lightsToRemove) {
+    if (light.parent) light.parent.remove(light);
+  }
+}
+
 function clampIndexRange(times, startTime, endTime) {
   let startIndex = 0;
   while (startIndex < times.length && times[startIndex] < startTime - EPSILON) {
@@ -146,59 +223,10 @@ export function createPlayerModel(
           }
 
           const model = fbx;
+          const lodConfigs = normalizeLodConfigs(config);
 
           try {
-            const lightsToRemove = [];
-
-            model.traverse((obj) => {
-              // Mark embedded lights for removal (don't remove yet!)
-              if (obj.isLight) {
-                lightsToRemove.push(obj);
-                return;
-              }
-
-              // Make meshes unlit
-              if (obj.isMesh) {
-                obj.castShadow = false;
-                obj.receiveShadow = false;
-
-                const toBasic = (mat) => {
-                  if (!mat) return mat;
-
-                  const basicParams = {
-                    map: mat.map || null,
-                    color: (mat.color && mat.color.clone()) || new THREE.Color(0xffffff),
-                    transparent: !!mat.transparent,
-                    opacity: (typeof mat.opacity === 'number') ? mat.opacity : 1,
-                    side: mat.side ?? THREE.FrontSide,
-                    vertexColors: !!mat.vertexColors,
-                    alphaMap: mat.alphaMap || null,
-                  };
-
-                  // dispose AFTER replacement to avoid disposing a material that might
-                  // still be referenced during traversal in some engines
-                  const newMat = new THREE.MeshBasicMaterial(basicParams);
-                  if (obj.isSkinnedMesh === true) newMat.skinning = true;
-                  if (typeof mat.dispose === 'function') {
-                    // dispose old material on next tick to be extra safe
-                    queueMicrotask(() => mat.dispose());
-                  }
-                  return newMat;
-                };
-
-                if (Array.isArray(obj.material)) {
-                  obj.material = obj.material.map(toBasic);
-                } else if (obj.material) {
-                  obj.material = toBasic(obj.material);
-                }
-              }
-            });
-
-            // Now it's safe to remove the lights
-            for (const light of lightsToRemove) {
-              if (light.parent) light.parent.remove(light);
-            }
-
+            makeModelUnlit(model);
             console.log('✅ FBX made unlit and internal lights removed (no in-traverse mutations)');
           } catch (err) {
             console.error('While making FBX unlit:', err);
@@ -220,11 +248,17 @@ export function createPlayerModel(
           const center = box.getCenter(new THREE.Vector3());
 
           // Offset the model inside a pivot group instead of shifting the mesh directly
+          const lodGroup = lodConfigs.length ? new THREE.LOD() : new THREE.Group();
+          playerGroup.add(lodGroup);
           const pivot = new THREE.Group();
           const yOffset = (config.yOffset ?? 0) - box.min.y;
           pivot.position.set(-center.x, yOffset, -center.z - (config.zOffset ?? 0));
           pivot.add(model);
-          playerGroup.add(pivot);
+          if (lodGroup.isLOD) {
+            lodGroup.addLevel(pivot, 0);
+          } else {
+            lodGroup.add(pivot);
+          }
           playerGroup.userData.pivot = pivot;
 
           const mixer = new THREE.AnimationMixer(model);
@@ -232,6 +266,7 @@ export function createPlayerModel(
 
           // Load Mixamo animations
           const fbxLoader = new FBXLoader();
+          const lodLoader = new FBXLoader();
           const animationFiles = {
             idle: 'Breathing Idle.fbx',
             walk: 'Old Man Walk.fbx',
@@ -353,7 +388,59 @@ export function createPlayerModel(
             );
           }));
 
-          Promise.all(promises).then(() => {
+          const lodPromises = lodConfigs.map((lod) => {
+            return new Promise((resolve) => {
+              lodLoader.load(
+                lod.path,
+                (lodFbx) => {
+                  if (!lodFbx || typeof lodFbx.traverse !== 'function') {
+                    console.warn('LOD FBXLoader returned an unexpected result:', lodFbx);
+                    resolve();
+                    return;
+                  }
+
+                  const lodModel = lodFbx;
+                  try {
+                    makeModelUnlit(lodModel);
+                  } catch (err) {
+                    console.error('While making LOD FBX unlit:', err);
+                  }
+
+                  lodModel.traverse(o => {
+                    if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
+                    if (o.material?.skinning === true) o.material.skinning = true;
+                  });
+
+                  lodModel.scale.set(scale, scale, scale);
+                  bindSkinnedMeshesToBaseSkeleton(model, lodModel);
+                  lodModel.updateMatrixWorld(true);
+                  const lodBox = new THREE.Box3().setFromObject(lodModel);
+                  const lodCenter = lodBox.getCenter(new THREE.Vector3());
+                  const lodPivot = new THREE.Group();
+                  const lodYOffset = (config.yOffset ?? 0) - lodBox.min.y;
+                  lodPivot.position.set(
+                    -lodCenter.x,
+                    lodYOffset,
+                    -lodCenter.z - (config.zOffset ?? 0)
+                  );
+                  lodPivot.add(lodModel);
+                  if (lodGroup.isLOD) {
+                    lodGroup.addLevel(lodPivot, lod.distance);
+                  } else {
+                    lodGroup.add(lodPivot);
+                  }
+                  resolve();
+                },
+                undefined,
+                (err) => {
+                  console.warn('Failed to load player LOD model:', lod.path, err);
+                  resolve();
+                }
+              );
+            });
+          });
+
+          Promise.all([...promises, ...lodPromises]).then(() => {
             actions.idle.play();
             playerGroup.userData.currentAction = 'idle';
             playerGroup.userData.mixer = mixer;
