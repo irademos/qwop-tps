@@ -54,6 +54,7 @@ export class MonsterCharacter extends CharacterBase {
     this.attackHasHit = false;
     this.isKnocked = false;
     this.knockbackEndTime = 0;
+    this.freezeEndTime = 0;
     this.attackDirection = new THREE.Vector3();
     this.attackLungeEndTime = 0;
     this.healthBar = this.createHealthBar();
@@ -84,6 +85,17 @@ export class MonsterCharacter extends CharacterBase {
       return true;
     }
     return false;
+  }
+
+  applyFreeze(durationMs = 5000) {
+    if (this.isDead) return;
+    const duration = Number.isFinite(durationMs) ? durationMs : 5000;
+    const now = Date.now();
+    this.freezeEndTime = Math.max(this.freezeEndTime || 0, now + duration);
+  }
+
+  isFrozen() {
+    return Date.now() < (this.freezeEndTime || 0);
   }
 
   markDead() {
@@ -182,6 +194,15 @@ export class MonsterCharacter extends CharacterBase {
 
     const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
     if (this.isDead) {
+      this.update(delta);
+      return;
+    }
+    if (this.isFrozen()) {
+      if (body) {
+        const vel = body.linvel();
+        body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      }
+      this.playAnimation("Idle", MOVE_FADE);
       this.update(delta);
       return;
     }
