@@ -16,6 +16,7 @@ import { initSpeechCommands } from './speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import { IceGun } from './iceGun.js';
 import { AutumnSword } from './autumnSword.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
 import { createLocationProvider } from './location.js';
@@ -85,6 +86,11 @@ const REMOTE_ANIM_FPS = 8;
 const REMOTE_ANIM_INTERVAL = 1 / REMOTE_ANIM_FPS;
 const MONSTER_ANIM_FPS = 8;
 const MONSTER_ANIM_INTERVAL = 1 / MONSTER_ANIM_FPS;
+const MONSTER_SWORD_MODEL_URL = '/assets/props/autumn_sword.glb';
+const MONSTER_SWORD_SCALE = 0.16;
+const MONSTER_SWORD_HOLD_OFFSET = new THREE.Vector3(-0.05, 0.15, 0.08);
+const MONSTER_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
+const MONSTER_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(MONSTER_SWORD_HOLD_ROTATION);
 
 
 // --- Rapier demo state ---
@@ -92,6 +98,8 @@ let rapierWorld;
 const rbToMesh = new Map(); // RigidBody -> THREE.Mesh
 let physicsAccumulator = 0;
 const FIXED_DT = 1 / 60;
+let monsterSwordTemplate = null;
+let monsterSwordTemplatePromise = null;
 const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
@@ -1430,6 +1438,45 @@ async function main() {
     });
   };
 
+  const loadMonsterSwordTemplate = async () => {
+    if (monsterSwordTemplate) return monsterSwordTemplate;
+    if (!monsterSwordTemplatePromise) {
+      const loader = new GLTFLoader();
+      monsterSwordTemplatePromise = loader.loadAsync(MONSTER_SWORD_MODEL_URL)
+        .then(gltf => {
+          monsterSwordTemplate = gltf.scene;
+          return monsterSwordTemplate;
+        })
+        .catch(error => {
+          console.warn('Failed to load monster sword model.', error);
+          monsterSwordTemplate = null;
+          return null;
+        })
+        .finally(() => {
+          monsterSwordTemplatePromise = null;
+        });
+    }
+    return monsterSwordTemplatePromise;
+  };
+
+  const cloneMonsterSwordMesh = (template) => {
+    if (!template) return null;
+    const swordMesh = template.clone(true);
+    swordMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry = child.geometry?.clone?.() ?? child.geometry;
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map(material => material?.clone?.() ?? material);
+      } else {
+        child.material = child.material?.clone?.() ?? child.material;
+      }
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    swordMesh.scale.setScalar(MONSTER_SWORD_SCALE);
+    return swordMesh;
+  };
+
   const cleanupMonster = (monster) => {
     if (!monster) return;
     monster.model?.userData?.mixer?.stopAllAction?.();
@@ -1508,11 +1555,11 @@ async function main() {
         if (modelPath === "/models/rainbow_troll.fbx") {
           const attachSwordToMonster = async () => {
             try {
-              const weapon = new AutumnSword(scene);
-              await weapon.load(monster.model.position);
-              if (!weapon.mesh) return;
+              const template = await loadMonsterSwordTemplate();
+              const swordMesh = cloneMonsterSwordMesh(template);
+              if (!swordMesh) return;
               if (!monster.model) {
-                disposeWeaponMesh(weapon.mesh);
+                disposeWeaponMesh(swordMesh);
                 return;
               }
               const root = monster.model.userData?.pivot ?? monster.model;
@@ -1532,19 +1579,16 @@ async function main() {
                   }
                 });
               }
-              if (weapon.mesh.parent) {
-                weapon.mesh.parent.remove(weapon.mesh);
-              }
               if (handBone) {
-                handBone.add(weapon.mesh);
+                handBone.add(swordMesh);
               } else {
-                monster.model.add(weapon.mesh);
+                monster.model.add(swordMesh);
               }
-              weapon.mesh.position.copy(weapon._holdOffset);
-              weapon.mesh.quaternion.copy(weapon._holdQuaternion);
+              swordMesh.position.copy(MONSTER_SWORD_HOLD_OFFSET);
+              swordMesh.quaternion.copy(MONSTER_SWORD_HOLD_QUATERNION);
               monster.weaponType = "sword";
-              monster.weaponMesh = weapon.mesh;
-              monster.weaponBaseScale = weapon.mesh.scale.clone();
+              monster.weaponMesh = swordMesh;
+              monster.weaponBaseScale = swordMesh.scale.clone();
               monster.model.userData.equippedWeaponType = "sword";
             } catch (error) {
               console.warn('Failed to attach autumn sword to monster.', error);
