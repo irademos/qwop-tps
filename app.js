@@ -220,6 +220,7 @@ async function main() {
   const ENTITY_FULL_SNAPSHOT_INTERVAL = 5000;
   const CONTROL_SEND_INTERVAL = 140;
   const projectiles = [];
+  const iceMists = [];
   const ammoPickups = [];
   const droppedAmmoPickups = new Map();
   const pendingDropRemovals = new Set();
@@ -578,6 +579,12 @@ async function main() {
       && isVector3Array(payload.position)
       && isVector3Array(payload.direction);
 
+    const isIceMistMessage = payload => isObject(payload)
+      && payload.type === 'iceMist'
+      && typeof payload.id === 'string'
+      && isVector3Array(payload.position)
+      && isVector3Array(payload.direction);
+
     const isInventoryDropMessage = payload => {
       if (!isObject(payload) || payload.type !== 'inventoryDrop' || !Array.isArray(payload.drops)) return false;
       return payload.drops.every(drop => {
@@ -854,6 +861,29 @@ async function main() {
       const position = new THREE.Vector3(...data.position);
       const direction = new THREE.Vector3(...data.direction);
       spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+
+      const shooter = otherPlayers[data.id];
+      if (shooter) {
+        const actions = shooter.model.userData.actions;
+        const current = shooter.model.userData.currentAction;
+        const projAction = actions?.projectile;
+        if (projAction) {
+          actions[current]?.fadeOut(0.1);
+          projAction.reset().fadeIn(0.1).play();
+          shooter.model.userData.currentAction = 'projectile';
+        }
+      }
+      return;
+    }
+
+    if (data.type === 'iceMist') {
+      if (!isIceMistMessage(data)) {
+        logInvalidPayload('iceMist', data);
+        return;
+      }
+      const position = new THREE.Vector3(...data.position);
+      const direction = new THREE.Vector3(...data.direction);
+      spawnIceMist(scene, iceMists, position, direction, data.id);
 
       const shooter = otherPlayers[data.id];
       if (shooter) {
@@ -2453,6 +2483,131 @@ async function main() {
     }
   }
 
+  const ICE_MIST_RANGE = 5;
+  const ICE_MIST_SPEED = 3.2;
+  const ICE_MIST_LIFETIME_MS = (ICE_MIST_RANGE / ICE_MIST_SPEED) * 1000;
+  const ICE_MIST_PARTICLE_COUNT = 7;
+  const ICE_MIST_FREEZE_MS = 5000;
+  const ICE_MIST_RADIUS = 0.9;
+
+  function spawnIceMist(scene, mistList, position, direction, shooterId) {
+    const mistGroup = new THREE.Group();
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x66ccff,
+      transparent: true,
+      opacity: 0.65,
+      emissive: 0x3aa5ff,
+      emissiveIntensity: 0.6,
+      depthWrite: false
+    });
+
+    for (let i = 0; i < ICE_MIST_PARTICLE_COUNT; i++) {
+      const size = THREE.MathUtils.lerp(0.2, 0.45, Math.random());
+      const geometry = new THREE.SphereGeometry(size, 10, 8);
+      const particle = new THREE.Mesh(geometry, material);
+      const spread = 0.35;
+      particle.position.set(
+        (Math.random() - 0.5) * spread,
+        (Math.random() - 0.3) * spread,
+        (Math.random() - 0.5) * spread
+      );
+      particle.castShadow = false;
+      particle.receiveShadow = false;
+      mistGroup.add(particle);
+    }
+
+    mistGroup.position.copy(position);
+    mistGroup.userData.skipTerrainCorrection = true;
+    scene.add(mistGroup);
+
+    const normalizedDirection = direction.clone().normalize();
+    const speed = ICE_MIST_SPEED * THREE.MathUtils.lerp(0.9, 1.15, Math.random());
+    const drift = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.3,
+      Math.random() * 0.2,
+      (Math.random() - 0.5) * 0.3
+    );
+    const velocity = normalizedDirection.multiplyScalar(speed).add(drift);
+
+    mistList.push({
+      group: mistGroup,
+      material,
+      velocity,
+      spawnTime: performance.now(),
+      lifetimeMs: ICE_MIST_LIFETIME_MS,
+      traveled: 0,
+      maxDistance: ICE_MIST_RANGE,
+      radius: ICE_MIST_RADIUS,
+      hitTargets: new Set(),
+      shooterId
+    });
+  }
+
+  function updateIceMists({
+    scene,
+    mistList,
+    deltaSeconds,
+    playerModel,
+    playerControls,
+    monsters,
+    multiplayer
+  }) {
+    if (!mistList.length) return;
+    const now = performance.now();
+    const isHost = !multiplayer || multiplayer.isHost;
+
+    const removeMist = (index) => {
+      const mist = mistList[index];
+      if (!mist) return;
+      if (mist.group) {
+        scene.remove(mist.group);
+        mist.group.traverse(child => {
+          if (child.isMesh && child.geometry) {
+            child.geometry.dispose();
+          }
+        });
+      }
+      mist.material?.dispose?.();
+      mistList.splice(index, 1);
+    };
+
+    for (let i = mistList.length - 1; i >= 0; i--) {
+      const mist = mistList[i];
+      const moveStep = mist.velocity.clone().multiplyScalar(deltaSeconds);
+      mist.group.position.add(moveStep);
+      mist.traveled += moveStep.length();
+
+      const ageMs = now - mist.spawnTime;
+      const progress = Math.min(1, ageMs / mist.lifetimeMs);
+      mist.material.opacity = THREE.MathUtils.lerp(0.65, 0, progress);
+      mist.material.emissiveIntensity = THREE.MathUtils.lerp(0.6, 0, progress);
+
+      if (playerModel && playerControls && !mist.hitTargets.has('local')) {
+        const distance = mist.group.position.distanceTo(playerModel.position);
+        if (distance <= mist.radius + 0.6) {
+          playerControls.applyFreeze(ICE_MIST_FREEZE_MS);
+          mist.hitTargets.add('local');
+        }
+      }
+
+      if (isHost && Array.isArray(monsters)) {
+        for (const monster of monsters) {
+          if (!monster || !monster.model) continue;
+          if (mist.hitTargets.has(monster.id)) continue;
+          const distance = mist.group.position.distanceTo(monster.model.position);
+          if (distance <= mist.radius + 0.8) {
+            monster.applyFreeze?.(ICE_MIST_FREEZE_MS);
+            mist.hitTargets.add(monster.id);
+          }
+        }
+      }
+
+      if (ageMs >= mist.lifetimeMs || mist.traveled >= mist.maxDistance) {
+        removeMist(i);
+      }
+    }
+  }
+
   const asVec3 = (p) => (
     p?.isVector3 ? p.clone()
     : p && Number.isFinite(p.x) && Number.isFinite(p.z) ? new THREE.Vector3(p.x, p.y ?? 0, p.z)
@@ -2735,6 +2890,8 @@ async function main() {
     multiplayer,
     spawnProjectile: spawnProjectileWithPerfFlags,
     projectiles,
+    spawnIceMist,
+    iceMists,
     audioManager,
     initialAmmo: inventoryState.iceGun?.[ICE_AMMO_KEY],
     onAmmoChange: setIceAmmoCount
@@ -4421,6 +4578,16 @@ async function main() {
       monsters,
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage
+    });
+
+    updateIceMists({
+      scene,
+      mistList: iceMists,
+      deltaSeconds: frameDelta,
+      playerModel,
+      playerControls,
+      monsters,
+      multiplayer
     });
 
     updateMeleeAttacks({
