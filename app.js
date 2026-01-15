@@ -16,6 +16,7 @@ import { initSpeechCommands } from './speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import { IceGun } from './iceGun.js';
 import { AutumnSword } from './autumnSword.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
 import { createLocationProvider } from './location.js';
@@ -85,6 +86,11 @@ const REMOTE_ANIM_FPS = 8;
 const REMOTE_ANIM_INTERVAL = 1 / REMOTE_ANIM_FPS;
 const MONSTER_ANIM_FPS = 8;
 const MONSTER_ANIM_INTERVAL = 1 / MONSTER_ANIM_FPS;
+const MONSTER_SWORD_MODEL_URL = '/assets/props/autumn_sword.glb';
+const MONSTER_SWORD_SCALE = 0.16;
+const MONSTER_SWORD_HOLD_OFFSET = new THREE.Vector3(-0.05, 0.15, 0.08);
+const MONSTER_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
+const MONSTER_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(MONSTER_SWORD_HOLD_ROTATION);
 
 
 // --- Rapier demo state ---
@@ -92,6 +98,8 @@ let rapierWorld;
 const rbToMesh = new Map(); // RigidBody -> THREE.Mesh
 let physicsAccumulator = 0;
 const FIXED_DT = 1 / 60;
+let monsterSwordTemplate = null;
+let monsterSwordTemplatePromise = null;
 const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
@@ -1413,9 +1421,74 @@ async function main() {
     return fallback;
   };
 
+  const disposeWeaponMesh = (mesh) => {
+    if (!mesh) return;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    }
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
+      const materials = Array.isArray(child.material)
+        ? child.material
+        : [child.material];
+      materials.forEach(material => material?.dispose?.());
+    });
+  };
+
+  const loadMonsterSwordTemplate = async () => {
+    if (monsterSwordTemplate) return monsterSwordTemplate;
+    if (!monsterSwordTemplatePromise) {
+      const loader = new GLTFLoader();
+      monsterSwordTemplatePromise = loader.loadAsync(MONSTER_SWORD_MODEL_URL)
+        .then(gltf => {
+          monsterSwordTemplate = gltf.scene;
+          return monsterSwordTemplate;
+        })
+        .catch(error => {
+          console.warn('Failed to load monster sword model.', error);
+          monsterSwordTemplate = null;
+          return null;
+        })
+        .finally(() => {
+          monsterSwordTemplatePromise = null;
+        });
+    }
+    return monsterSwordTemplatePromise;
+  };
+
+  const cloneMonsterSwordMesh = (template) => {
+    if (!template) return null;
+    const swordMesh = template.clone(true);
+    swordMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry = child.geometry?.clone?.() ?? child.geometry;
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map(material => material?.clone?.() ?? material);
+      } else {
+        child.material = child.material?.clone?.() ?? child.material;
+      }
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    swordMesh.scale.setScalar(MONSTER_SWORD_SCALE);
+    return swordMesh;
+  };
+
   function cleanupMonster(monster) {
     if (!monster) return;
     monster.model?.userData?.mixer?.stopAllAction?.();
+    if (monster.weaponMesh) {
+      disposeWeaponMesh(monster.weaponMesh);
+      monster.weaponMesh = null;
+      monster.weaponType = null;
+      monster.weaponBaseScale = null;
+    }
+    if (monster.model?.userData?.equippedWeaponType) {
+      monster.model.userData.equippedWeaponType = null;
+    }
     if (monster.model?.parent) {
       monster.model.parent.remove(monster.model);
     }
@@ -1479,6 +1552,50 @@ async function main() {
 
         cleanupMonster(oldMonster);
         scene.add(monster.model);
+        if (modelPath === "/models/rainbow_troll.fbx") {
+          const attachSwordToMonster = async () => {
+            try {
+              const template = await loadMonsterSwordTemplate();
+              const swordMesh = cloneMonsterSwordMesh(template);
+              if (!swordMesh) return;
+              if (!monster.model) {
+                disposeWeaponMesh(swordMesh);
+                return;
+              }
+              const root = monster.model.userData?.pivot ?? monster.model;
+              let handBone = null;
+              root.traverse(child => {
+                if (handBone || !child.isBone || !child.name) return;
+                const name = child.name.toLowerCase();
+                if (name.includes('righthand')) {
+                  handBone = child;
+                }
+              });
+              if (!handBone) {
+                root.traverse(child => {
+                  if (handBone || !child.isBone || !child.name) return;
+                  if (child.name.toLowerCase().includes('hand')) {
+                    handBone = child;
+                  }
+                });
+              }
+              if (handBone) {
+                handBone.add(swordMesh);
+              } else {
+                monster.model.add(swordMesh);
+              }
+              swordMesh.position.copy(MONSTER_SWORD_HOLD_OFFSET);
+              swordMesh.quaternion.copy(MONSTER_SWORD_HOLD_QUATERNION);
+              monster.weaponType = "sword";
+              monster.weaponMesh = swordMesh;
+              monster.weaponBaseScale = swordMesh.scale.clone();
+              monster.model.userData.equippedWeaponType = "sword";
+            } catch (error) {
+              console.warn('Failed to attach autumn sword to monster.', error);
+            }
+          };
+          attachSwordToMonster();
+        }
         if (rapierWorld) {
           attachMonsterPhysics(monster);
         }
