@@ -307,6 +307,13 @@ function buildDeveloperPanel() {
   levelBuilderButton.type = 'button';
   levelBuilderButton.id = 'level-builder-button';
 
+  const serverToolsTitle = createElement('h3', 'settings-section-title', 'Server Tools');
+  const clearServerButton = createElement('button', 'settings-button', 'Clear Rooms/Sessions Cache');
+  clearServerButton.type = 'button';
+  clearServerButton.dataset.action = 'clear-server-state';
+  const clearServerStatus = createElement('div', 'settings-muted');
+  clearServerStatus.textContent = 'Clears server-side rooms, sessions, and caches.';
+
   const debugLocationTitle = createElement('h3', 'settings-section-title', 'Debug Location');
 
   const debugToggleRow = createElement('div', 'settings-row');
@@ -407,6 +414,9 @@ function buildDeveloperPanel() {
     consoleButton,
     copyDebugButton,
     resetOriginButton,
+    serverToolsTitle,
+    clearServerButton,
+    clearServerStatus,
     debugLocationTitle,
     debugToggleRow,
     debugLocationGrid,
@@ -419,6 +429,8 @@ function buildDeveloperPanel() {
   );
   elements.consoleButton = consoleButton;
   elements.consoleLog = consoleLog;
+  elements.clearServerButton = clearServerButton;
+  elements.clearServerStatus = clearServerStatus;
   elements.debugLocationFields = {
     toggle: debugToggle,
     lat: debugLatInput,
@@ -510,7 +522,7 @@ function closeOverlay() {
   }
 }
 
-function handleAction(target) {
+async function handleAction(target) {
   const action = target.dataset.action;
   if (!action) return;
   if (action === 'close') {
@@ -532,6 +544,32 @@ function handleAction(target) {
     navigator.clipboard?.writeText?.(info);
   } else if (action === 'reset-origin') {
     context.appState?.resetWorldOrigin?.();
+  } else if (action === 'clear-server-state') {
+    const { clearServerButton, clearServerStatus } = elements;
+    if (!context.multiplayer?.clearServerState) {
+      clearServerStatus.textContent = 'Server clear unavailable in this build.';
+      return;
+    }
+    const confirmed = window.confirm(
+      'Clear server-side rooms, sessions, and caches? This will disconnect players.'
+    );
+    if (!confirmed) return;
+    clearServerButton.disabled = true;
+    clearServerStatus.textContent = 'Clearing server-side state...';
+    try {
+      const result = await context.multiplayer.clearServerState();
+      if (result.failed.length) {
+        const failedList = result.failed.map(item => item.path).join(', ');
+        clearServerStatus.textContent = `Cleared: ${result.cleared.join(', ')}. Failed: ${failedList}.`;
+      } else {
+        clearServerStatus.textContent = `Cleared: ${result.cleared.join(', ')}.`;
+      }
+    } catch (error) {
+      console.warn('Failed to clear server-side state:', error);
+      clearServerStatus.textContent = 'Failed to clear server-side state. Check console.';
+    } finally {
+      clearServerButton.disabled = false;
+    }
   } else if (action === 'apply-debug-location') {
     const lat = parseFloat(elements.debugLocationFields?.lat?.value);
     const lon = parseFloat(elements.debugLocationFields?.lon?.value);
@@ -652,7 +690,7 @@ function bindEvents() {
       return;
     }
     if (button.dataset.action) {
-      handleAction(button);
+      void handleAction(button);
     }
   });
 
