@@ -14,7 +14,11 @@ export function createGroundTiles({
   const tiles = new Map();
 
   const repeatScale = (tileSizeMeters / 300) * GROUND_TEX_REPEAT_PER_TILE;
-  const material = new THREE.MeshStandardMaterial({ color: 0x8a8a8a });
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: 0x1f1f1f,
+    emissiveIntensity: 0.25
+  });
   const state = { texture: null };
 
   const ktx2Loader = getKtx2Loader(renderer);

@@ -497,9 +497,11 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   const ktx2 = getKtx2Loader(renderer);
   const maxAnisotropy = renderer?.capabilities?.getMaxAnisotropy?.() ?? null;
   const extrudedMaterial = new THREE.MeshStandardMaterial({
-    color: 0x8a8a8a,
+    color: 0xffffff,
     roughness: 1.0,
     metalness: 0.0,
+    emissive: 0x1a1a1a,
+    emissiveIntensity: 0.2
   });
 
   applyKtx2ToMaterial(
