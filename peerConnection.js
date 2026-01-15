@@ -331,25 +331,37 @@ export class Multiplayer {
   
       // Attempt to access the internal peer connection
       try {
-        const interval = setInterval(async () => {
-          // PeerJS sometimes delays access to the connection internals
-          const pc = conn._pc || conn.peerConnection || conn._connection?.peerConnection;
-          if (!pc) {
-            console.warn("RTCPeerConnection not ready for", conn.peer);
-            return;
-          }
-          if (pc && pc.connectionState === 'connected') {
-            clearInterval(interval);
+        conn.statsIntervalId = setInterval(async () => {
+          try {
+            // PeerJS sometimes delays access to the connection internals
+            const pc = conn._pc || conn.peerConnection || conn._connection?.peerConnection;
+            if (!pc) {
+              console.warn("RTCPeerConnection not ready for", conn.peer);
+              return;
+            }
+            if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+              clearInterval(conn.statsIntervalId);
+              conn.statsIntervalId = null;
+              return;
+            }
+            if (pc.connectionState === 'connected') {
+              clearInterval(conn.statsIntervalId);
+              conn.statsIntervalId = null;
   
-            const stats = await pc.getStats();
-            stats.forEach(report => {
-              if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                console.log(`🎯 Connected to peer ${conn.peer}`);
-                console.log('Selected candidate pair:');
-                console.log(`🔹 Local: ${report.localCandidateId}`);
-                console.log(`🔸 Remote: ${report.remoteCandidateId}`);
-              }
-            });
+              const stats = await pc.getStats();
+              stats.forEach(report => {
+                if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                  console.log(`🎯 Connected to peer ${conn.peer}`);
+                  console.log('Selected candidate pair:');
+                  console.log(`🔹 Local: ${report.localCandidateId}`);
+                  console.log(`🔸 Remote: ${report.remoteCandidateId}`);
+                }
+              });
+            }
+          } catch (err) {
+            clearInterval(conn.statsIntervalId);
+            conn.statsIntervalId = null;
+            console.warn(`Could not access RTCPeerConnection stats for peer ${conn.peer}`, err);
           }
         }, 1000);
       } catch (err) {
@@ -361,6 +373,10 @@ export class Multiplayer {
   
     conn.on('close', () => {
       this.stopPingLoop(conn.peer);
+      if (conn.statsIntervalId) {
+        clearInterval(conn.statsIntervalId);
+        conn.statsIntervalId = null;
+      }
       delete this.connections[conn.peer];
       this.pendingConnections.delete(conn.peer);
       this.pendingPayloads.delete(conn.peer);
@@ -373,6 +389,10 @@ export class Multiplayer {
     conn.on('error', err => {
       console.error('Peer error:', err);
       this.recordError(err);
+      if (conn.statsIntervalId) {
+        clearInterval(conn.statsIntervalId);
+        conn.statsIntervalId = null;
+      }
       if (conn?.peer) {
         this.pendingConnections.delete(conn.peer);
         this.failedConnectionAt.set(conn.peer, Date.now());
