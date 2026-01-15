@@ -731,12 +731,29 @@ body {
   font-weight: 600;
 }
 
+.settings-range-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-range-value {
+  font-size: 11px;
+  color: #555;
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-input,
 .settings-select {
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid #d6d6d6;
   font-size: 14px;
+}
+
+.settings-range {
+  width: 100%;
 }
 
 .settings-checkbox {

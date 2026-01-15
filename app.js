@@ -108,6 +108,23 @@ const PRESENCE_SEND_MS = 250;
 const PRESENCE_SWEEP_MS = 250;
 const REMOTE_LERP_ALPHA = 0.15;
 const REMOTE_TELEPORT_THRESHOLD_M = 25;
+const DISPLAY_SETTINGS_KEY = 'settings:display';
+const DISPLAY_PRESETS = {
+  day: {
+    ambientIntensity: 0.6,
+    directionalIntensity: 1.1,
+    groundBrightness: 1.05,
+    buildingBrightness: 1.0,
+    skyBrightness: 1.1
+  },
+  night: {
+    ambientIntensity: 0.2,
+    directionalIntensity: 0.35,
+    groundBrightness: 0.6,
+    buildingBrightness: 0.65,
+    skyBrightness: 0.25
+  }
+};
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -183,6 +200,9 @@ async function main() {
   let scene = null;
   let mapRenderer = null;
   let buildingsRenderer = null;
+  let groundTiles = null;
+  let ambientLight = null;
+  let dirLight = null;
   let tileCache = null;
   let worldOrigin = null;
   let currentRenderOrigin = null;
@@ -222,6 +242,122 @@ async function main() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x87CEEB);
   createClouds(scene);
+
+  const SKY_COLORS = {
+    day: new THREE.Color(0x87ceeb),
+    night: new THREE.Color(0x0b1020)
+  };
+  const DISPLAY_MODES = new Set(['auto', 'day', 'night']);
+  const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
+  const captureMaterialBase = (material) => {
+    if (!material) return null;
+    const color = material.color?.clone ? material.color.clone() : new THREE.Color(0xffffff);
+    const emissiveIntensity = typeof material.emissiveIntensity === 'number' ? material.emissiveIntensity : 0;
+    return { color, emissiveIntensity };
+  };
+  const applyMaterialBrightness = (material, base, brightness) => {
+    if (!material || !base) return;
+    const clamped = clampValue(brightness, 0, 2);
+    if (material.color?.copy) {
+      material.color.copy(base.color).multiplyScalar(clamped);
+    }
+    material.emissiveIntensity = base.emissiveIntensity * clamped;
+    material.needsUpdate = true;
+  };
+  const getAutoMode = () => {
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    if (minutes >= 17 * 60 + 30 || minutes < 8 * 60) {
+      return 'night';
+    }
+    return 'day';
+  };
+  const loadDisplaySettings = () => {
+    const defaults = { mode: 'auto', ...DISPLAY_PRESETS.day };
+    const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
+    if (!raw) return defaults;
+    try {
+      const parsed = JSON.parse(raw);
+      return { ...defaults, ...parsed };
+    } catch (error) {
+      console.warn('Failed to parse display settings, using defaults.', error);
+      return defaults;
+    }
+  };
+  const saveDisplaySettings = () => {
+    localStorage.setItem(DISPLAY_SETTINGS_KEY, JSON.stringify(displaySettings));
+  };
+  const applyPresetForMode = (mode) => {
+    const preset = DISPLAY_PRESETS[mode] || DISPLAY_PRESETS.day;
+    displaySettings = { ...displaySettings, ...preset };
+  };
+
+  let displaySettings = loadDisplaySettings();
+  let lastAutoMode = null;
+  let groundMaterialBase = null;
+  let buildingMaterialBase = null;
+
+  if (!DISPLAY_MODES.has(displaySettings.mode)) {
+    displaySettings.mode = 'auto';
+  }
+  if (displaySettings.mode === 'auto') {
+    lastAutoMode = getAutoMode();
+    applyPresetForMode(lastAutoMode);
+  }
+
+  const applyDisplaySettings = () => {
+    const effectiveMode = displaySettings.mode === 'auto'
+      ? (lastAutoMode || getAutoMode())
+      : displaySettings.mode;
+    const skyBase = SKY_COLORS[effectiveMode] || SKY_COLORS.day;
+    const skyBrightness = clampValue(displaySettings.skyBrightness, 0.1, 1.6);
+    const skyColor = skyBase.clone().multiplyScalar(skyBrightness);
+    if (scene) {
+      scene.background = skyColor;
+    }
+    if (ambientLight) {
+      ambientLight.intensity = clampValue(displaySettings.ambientIntensity, 0, 2);
+    }
+    if (dirLight) {
+      dirLight.intensity = clampValue(displaySettings.directionalIntensity, 0, 2);
+    }
+    applyMaterialBrightness(groundTiles?.material, groundMaterialBase, displaySettings.groundBrightness);
+    applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, displaySettings.buildingBrightness);
+    applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, displaySettings.buildingBrightness);
+  };
+
+  const updateAutoDisplayMode = () => {
+    if (displaySettings.mode !== 'auto') return;
+    const nextMode = getAutoMode();
+    if (nextMode === lastAutoMode) return;
+    lastAutoMode = nextMode;
+    applyPresetForMode(nextMode);
+    saveDisplaySettings();
+    applyDisplaySettings();
+    updateSettingsUI();
+  };
+
+  const setDisplayMode = (mode) => {
+    if (!DISPLAY_MODES.has(mode)) return;
+    displaySettings.mode = mode;
+    if (mode === 'auto') {
+      lastAutoMode = getAutoMode();
+      applyPresetForMode(lastAutoMode);
+    } else {
+      lastAutoMode = mode;
+      applyPresetForMode(mode);
+    }
+    saveDisplaySettings();
+    applyDisplaySettings();
+    updateSettingsUI();
+  };
+
+  const setDisplaySetting = (key, value) => {
+    if (!Number.isFinite(value)) return;
+    displaySettings[key] = value;
+    saveDisplaySettings();
+    applyDisplaySettings();
+  };
 
   const logNet = (...args) => {
     if (window.DEBUG_NET) {
@@ -961,6 +1097,12 @@ async function main() {
   buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
   window.mapRenderer = mapRenderer;
   window.buildingsRenderer = buildingsRenderer;
+  if (buildingsRenderer?.materials) {
+    buildingMaterialBase = {
+      extruded: captureMaterialBase(buildingsRenderer.materials.extruded),
+      flat: captureMaterialBase(buildingsRenderer.materials.flat)
+    };
+  }
   if (pendingMapRebuild) {
     rebuildMapFromCache();
   }
@@ -974,13 +1116,14 @@ async function main() {
   window.addEventListener('resize', handleResize);
   handleResize();
 
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+  ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
 
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+  dirLight = new THREE.DirectionalLight(0xffffff, 1);
   dirLight.position.set(5, 10, 5);
   dirLight.castShadow = true;
   scene.add(dirLight);
+  applyDisplaySettings();
 
 
 
@@ -2645,12 +2788,14 @@ async function main() {
   if (pendingMapRebuild) {
     rebuildMapFromCache();
   }
-  const groundTiles = createGroundTiles({
+  groundTiles = createGroundTiles({
     scene,
     renderer,
     tileSizeMeters: TILE_SIZE_METERS
   });
   window.groundTiles = groundTiles.tiles;
+  groundMaterialBase = captureMaterialBase(groundTiles.material);
+  applyDisplaySettings();
   const getRandomPickupPosition = (center) => {
     if (!center) return null;
     const radius = PICKUP_SPAWN_RADIUS * Math.sqrt(Math.random());
@@ -3736,6 +3881,9 @@ async function main() {
       return (networkError.timestamp || 0) >= (generalError.timestamp || 0) ? networkError : generalError;
     },
     getAppVersion: () => import.meta.env?.VITE_APP_VERSION || import.meta.env?.VITE_GIT_COMMIT || 'unknown',
+    getDisplaySettings: () => ({ ...displaySettings }),
+    setDisplayMode: (mode) => setDisplayMode(mode),
+    setDisplaySetting: (key, value) => setDisplaySetting(key, value),
     resetWorldOrigin: () => {
       resetWorldOrigin();
       locationState.originLat = null;
@@ -3777,6 +3925,10 @@ async function main() {
   setInterval(() => {
     updateSettingsUI();
   }, 1000);
+  updateAutoDisplayMode();
+  setInterval(() => {
+    updateAutoDisplayMode();
+  }, 60 * 1000);
 
   const consoleDiv = document.getElementById("console-log");
   if (window.DEBUG_CONSOLE === true) {

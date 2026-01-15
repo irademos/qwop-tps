@@ -771,6 +771,10 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
   return {
     group,
+    materials: {
+      extruded: extrudedMaterial,
+      flat: flatMaterial
+    },
     updateTileBuildings,
     removeTile,
     clearTiles,
