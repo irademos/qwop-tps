@@ -958,7 +958,7 @@ async function main() {
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   mapRenderer = createMapRenderer({ scene, renderer });
-  buildingsRenderer = createBuildingsRenderer({ scene, camera });
+  buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
   window.mapRenderer = mapRenderer;
   window.buildingsRenderer = buildingsRenderer;
   if (pendingMapRebuild) {
@@ -1477,7 +1477,7 @@ async function main() {
     return swordMesh;
   };
 
-  const cleanupMonster = (monster) => {
+  function cleanupMonster(monster) {
     if (!monster) return;
     monster.model?.userData?.mixer?.stopAllAction?.();
     if (monster.weaponMesh) {
@@ -1503,7 +1503,7 @@ async function main() {
     monster.model = null;
   };
 
-  const setMonsterForSlot = (slotId, monster) => {
+  function setMonsterForSlot(slotId, monster) {
     const existingIndex = monsters.findIndex(entry => entry.id === slotId);
     if (existingIndex >= 0) {
       monsters[existingIndex] = monster;
@@ -1512,7 +1512,7 @@ async function main() {
     }
   };
 
-  const spawnMonsterInSlot = (slotId, modelPath, oldMonster = null, options = {}) => {
+  function spawnMonsterInSlot(slotId, modelPath, oldMonster = null, options = {}) {
     if (PERF.disableMonsters) return;
     if (spawningSlots.has(slotId)) return;
     spawningSlots.add(slotId);
@@ -1617,21 +1617,24 @@ async function main() {
     });
   };
 
-  const applyMonsterRecord = (record, recordId, { applyTransform = false } = {}) => {
+  function applyMonsterRecord(record, recordId, { applyTransform = false } = {}) {
     if (!record) return;
     const slotId = record.id || recordId;
     if (!slotId) return;
+
     const incomingVersion = Number.isFinite(record.version) ? record.version : null;
     const existing = monsters.find(entry => entry.id === slotId);
     const existingVersion = Number.isFinite(existing?.version) ? existing.version : -Infinity;
-    if (incomingVersion != null && incomingVersion < existingVersion) {
-      return;
-    }
+
+    if (incomingVersion != null && incomingVersion < existingVersion) return;
+
     const modelPath = record.type || record.modelPath || existing?.modelPath;
     if (!modelPath) return;
+
     const needsSpawn = !existing || existing.modelPath !== modelPath;
     const rotation = applyTransform ? record.rot : null;
     const position = applyTransform ? record.pos : null;
+
     if (needsSpawn) {
       if (!existing || (incomingVersion != null && incomingVersion > existingVersion)) {
         spawnMonsterInSlot(slotId, modelPath, existing, {
@@ -1647,25 +1650,31 @@ async function main() {
       }
       return;
     }
+
     if (!existing?.model) return;
+
     if (Number.isFinite(record.level)) {
       existing.setLevel(record.level, { preserveHealth: true });
     }
+
     if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
       existing.model.position.set(position.x, position.y, position.z);
       existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
     }
+
     if (rotation && Number.isFinite(rotation.x) && Number.isFinite(rotation.y) && Number.isFinite(rotation.z) && Number.isFinite(rotation.w)) {
       existing.model.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
       existing.body?.setRotation(rotation, true);
     }
+
     existing.applyPersistedState?.({
       hp: record.hp,
       alive: record.alive,
       level: record.level,
       version: incomingVersion
     });
-  };
+  }
+
 
   const ensureMonsters = () => {
     if (PERF.disableMonsters) {

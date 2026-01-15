@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import ClipperLib from "clipper-lib";
 import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
+import { getKtx2Loader } from "./ktx2Loader.js";
 
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const DEFAULT_HEIGHT = 10;
@@ -19,7 +20,6 @@ const ROOF_THICKNESS = 0.05;
 const CLIMB_WALL_DEPTH = 0.6;
 
 // --- building texture ---
-const textureLoader = new THREE.TextureLoader();
 const QUALITY_TIER_OPTIONS = ["low", "medium", "high"];
 
 const SIDES = ["+Z", "-Z", "+X", "-X"];
@@ -112,7 +112,6 @@ function resolveBuildingQualityTier() {
 const BUILDING_QUALITY = resolveBuildingQualityTier();
 const BUILDING_QUALITY_SETTINGS = {
   high: {
-    textureTargetSize: null,
     useNormalRoughness: true,
     fullDetailDistance: EXTRUDE_DISTANCE,
     simpleDetailDistance: EXTRUDE_DISTANCE * 1.5,
@@ -120,7 +119,6 @@ const BUILDING_QUALITY_SETTINGS = {
     enableCsg: true
   },
   medium: {
-    textureTargetSize: 1024,
     useNormalRoughness: false,
     fullDetailDistance: EXTRUDE_DISTANCE * 0.75,
     simpleDetailDistance: EXTRUDE_DISTANCE * 1.25,
@@ -128,7 +126,6 @@ const BUILDING_QUALITY_SETTINGS = {
     enableCsg: false
   },
   low: {
-    textureTargetSize: 512,
     useNormalRoughness: false,
     fullDetailDistance: 0,
     simpleDetailDistance: EXTRUDE_DISTANCE,
@@ -137,51 +134,29 @@ const BUILDING_QUALITY_SETTINGS = {
   }
 };
 
-function loadTex(url, { srgb = false, repeat = 2, targetSize = null } = {}) {
-  const tex = textureLoader.load(url, (loaded) => {
-    if (!targetSize || !loaded?.image?.width) return;
-    const { width, height } = loaded.image;
-    if (width <= targetSize && height <= targetSize) return;
-    const canvas = document.createElement("canvas");
-    const scale = Math.min(targetSize / width, targetSize / height);
-    canvas.width = Math.max(1, Math.round(width * scale));
-    canvas.height = Math.max(1, Math.round(height * scale));
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(loaded.image, 0, 0, canvas.width, canvas.height);
-    loaded.image = canvas;
-    loaded.needsUpdate = true;
-  });
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(repeat, repeat);
-  if (srgb && tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+function applyKtx2ToMaterial(ktx2, material, slot, url, { srgb = false, repeat = 2, anisotropy = null } = {}) {
+  if (!material || !slot || !url) return;
+
+  ktx2.load(
+    url,
+    (tex) => {
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(repeat, repeat);
+      if (anisotropy) tex.anisotropy = anisotropy;
+      if (srgb && tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+
+      material[slot] = tex;
+      material.needsUpdate = true;
+    },
+    undefined,
+    (err) => console.warn("KTX2 load failed:", slot, url, err)
+  );
 }
+
 const repeat_val = 0.05;
 
-const buildingTextureBasePath =
-  "/assets/textures/rustic_stone_wall_02_4k.blend/textures/rustic_stone_wall_02";
-const buildingTextureTargetSize = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY].textureTargetSize;
-const buildingBase = loadTex(
-  `${buildingTextureBasePath}_diff_4k.jpg`,
-  { srgb: true, repeat: repeat_val, targetSize: buildingTextureTargetSize }
-);
-
-const buildingNormal = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY].useNormalRoughness
-  ? loadTex(
-    `${buildingTextureBasePath}_nor_gl_4k.jpg`,
-    { repeat: repeat_val }
-  )
-  : null;
-const buildingRough = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY].useNormalRoughness
-  ? loadTex(
-    `${buildingTextureBasePath}_rough_4k.jpg`,
-    { repeat: repeat_val }
-  )
-  : null;
+const buildingTextureBasePath = "/assets/textures/planks/planks";
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -513,20 +488,46 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   return cutters;
 }
 
-export function createBuildingsRenderer({ scene, camera } = {}) {
+export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   const group = new THREE.Group();
   group.name = "osm-buildings";
   scene?.add(group);
 
   const qualitySettings = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY];
-
+  const ktx2 = getKtx2Loader(renderer);
+  const maxAnisotropy = renderer?.capabilities?.getMaxAnisotropy?.() ?? null;
   const extrudedMaterial = new THREE.MeshStandardMaterial({
-    map: buildingBase,
-    normalMap: buildingNormal ?? null,
-    roughnessMap: buildingRough ?? null,
+    color: 0x8a8a8a,
     roughness: 1.0,
     metalness: 0.0,
   });
+
+  applyKtx2ToMaterial(
+    ktx2,
+    extrudedMaterial,
+    "map",
+    `${buildingTextureBasePath}_albedo.ktx2`,
+    { srgb: true, repeat: repeat_val, anisotropy: maxAnisotropy }
+  );
+
+  if (qualitySettings.useNormalRoughness) {
+    applyKtx2ToMaterial(
+      ktx2,
+      extrudedMaterial,
+      "normalMap",
+      `${buildingTextureBasePath}_normal.ktx2`,
+      { repeat: repeat_val, anisotropy: maxAnisotropy }
+    );
+
+    applyKtx2ToMaterial(
+      ktx2,
+      extrudedMaterial,
+      "roughnessMap",
+      `${buildingTextureBasePath}_roughness.ktx2`,
+      { repeat: repeat_val, anisotropy: maxAnisotropy }
+    );
+  }
+
 
   extrudedMaterial.needsUpdate = true;
 
