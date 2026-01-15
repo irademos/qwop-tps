@@ -16,6 +16,7 @@ import { initSpeechCommands } from './speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import { IceGun } from './iceGun.js';
 import { AutumnSword } from './autumnSword.js';
+import { createNature } from './nature.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
@@ -1201,6 +1202,7 @@ async function main() {
   playerModel.userData.hideInMapView = true;
   scene.add(playerModel);
   window.playerModel = playerModel;
+  await createNature({ scene, playerModel, getTerrainHeight });
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
