@@ -22,6 +22,8 @@ const VALID_MESSAGE_TYPES = new Set([
   'grab',
   'grabMove'
 ]);
+const MAX_PENDING_PAYLOADS = 75;
+const COALESCED_PAYLOAD_TYPES = new Set(['entitySnapshot', 'entityStates']);
 
 export class Multiplayer {
   constructor(playerName, onPeerData) {
@@ -490,26 +492,17 @@ export class Multiplayer {
         existing.send(data);
         return;
       }
-      if (!this.pendingPayloads.has(peerId)) {
-        this.pendingPayloads.set(peerId, []);
-      }
-      this.pendingPayloads.get(peerId).push(data);
+      this.enqueuePendingPayload(peerId, data);
       return;
     }
 
     try {
       if (this.pendingConnections.has(peerId)) {
-        if (!this.pendingPayloads.has(peerId)) {
-          this.pendingPayloads.set(peerId, []);
-        }
-        this.pendingPayloads.get(peerId).push(data);
+        this.enqueuePendingPayload(peerId, data);
         return;
       }
       if (!this.shouldAttemptConnection(peerId)) {
-        if (!this.pendingPayloads.has(peerId)) {
-          this.pendingPayloads.set(peerId, []);
-        }
-        this.pendingPayloads.get(peerId).push(data);
+        this.enqueuePendingPayload(peerId, data);
         this.scheduleConnectionRetry(peerId);
         return;
       }
@@ -519,12 +512,30 @@ export class Multiplayer {
       }
       const conn = this.peer.connect(peerId);
       this.setupConnection(conn);
-      if (!this.pendingPayloads.has(peerId)) {
-        this.pendingPayloads.set(peerId, []);
-      }
-      this.pendingPayloads.get(peerId).push(data);
+      this.enqueuePendingPayload(peerId, data);
     } catch (err) {
       console.warn(`Failed to send direct message to ${peerId}:`, err);
+    }
+  }
+
+  enqueuePendingPayload(peerId, data) {
+    if (!this.pendingPayloads.has(peerId)) {
+      this.pendingPayloads.set(peerId, []);
+    }
+    const queue = this.pendingPayloads.get(peerId);
+    if (data?.type && COALESCED_PAYLOAD_TYPES.has(data.type)) {
+      const existingIndex = queue.findIndex(payload => payload?.type === data.type);
+      if (existingIndex !== -1) {
+        queue.splice(existingIndex, 1);
+      }
+    }
+    queue.push(data);
+    if (queue.length > MAX_PENDING_PAYLOADS) {
+      const dropCount = queue.length - MAX_PENDING_PAYLOADS;
+      queue.splice(0, dropCount);
+      console.warn(
+        `Pending payload queue exceeded ${MAX_PENDING_PAYLOADS}; dropped ${dropCount} oldest messages for peer ${peerId}.`
+      );
     }
   }
 
