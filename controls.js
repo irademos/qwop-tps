@@ -66,7 +66,20 @@ const FRIENDLY_DIALOGUE_POOL = [
 ];
 
 export class PlayerControls {
-  constructor({ scene, camera, playerModel, renderer, multiplayer, spawnProjectile, projectiles, audioManager, initialAmmo, onAmmoChange }) {
+  constructor({
+    scene,
+    camera,
+    playerModel,
+    renderer,
+    multiplayer,
+    spawnProjectile,
+    projectiles,
+    spawnIceMist,
+    iceMists,
+    audioManager,
+    initialAmmo,
+    onAmmoChange
+  }) {
     this.yaw = 0;
     this.pitch = 0;
     this.pointerLocked = false;
@@ -81,10 +94,14 @@ export class PlayerControls {
     this.isMoving = false;
     this.spawnProjectile = spawnProjectile;
     this.projectiles = projectiles;
+    this.spawnIceMist = spawnIceMist;
+    this.iceMists = iceMists;
     this.audioManager = audioManager;
     this.isKnocked = false;
     this.knockbackRestYaw = 0;
     this.knockbackEndTime = 0;
+    this.freezeEndTime = 0;
+    this.wasFrozen = false;
     this.slideMomentum = new THREE.Vector3();
     this.lastMoveDirection = new THREE.Vector3();
     this.grabbedTarget = null;
@@ -218,6 +235,25 @@ export class PlayerControls {
 
   setEnergyDepleted(value) {
     this.energyDepleted = Boolean(value);
+  }
+
+  applyFreeze(durationMs = 5000) {
+    const duration = Number.isFinite(durationMs) ? durationMs : 5000;
+    const now = Date.now();
+    this.freezeEndTime = Math.max(this.freezeEndTime || 0, now + duration);
+    if (this.playerModel?.userData?.actions) {
+      const actions = this.playerModel.userData.actions;
+      const current = this.playerModel.userData.currentAction;
+      if (current && current !== 'idle') {
+        actions[current]?.fadeOut(0.1);
+      }
+      actions?.idle?.reset().fadeIn(0.1).play();
+      this.playerModel.userData.currentAction = 'idle';
+    }
+  }
+
+  isFrozen() {
+    return Date.now() < (this.freezeEndTime || 0);
   }
 
   setPlayerModel(newModel) {
@@ -925,6 +961,20 @@ export class PlayerControls {
       return;
     }
 
+    const freezeActive = this.isFrozen();
+    if (freezeActive) {
+      this.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      if (this.isClimbing) {
+        this.stopClimbing();
+      }
+      this.wasFrozen = true;
+    } else if (this.wasFrozen) {
+      if (this.playerModel?.userData) {
+        this.playerModel.userData.currentAction = null;
+      }
+      this.wasFrozen = false;
+    }
+
     const terrainY = getTerrainHeight(t.x, t.z);
     let groundY = terrainY;
     const world = window.rapierWorld;
@@ -967,7 +1017,7 @@ export class PlayerControls {
       t.y = groundExpectedY;
     }
     const moveDirection = new THREE.Vector3(0, 0, 0);
-    const movementLocked = ['mutantPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
+    const movementLocked = freezeActive || ['mutantPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
     const position = new THREE.Vector3(t.x, t.y, t.z);
     if (!movementLocked) {
       if (this.isMobile) {
@@ -1008,10 +1058,13 @@ export class PlayerControls {
     if (hasPlayerInput && this.gpsMoveTarget) {
       this.clearGpsMoveTarget();
     }
-    if (movementLocked) {
+    if (movementLocked && !freezeActive) {
       movement.copy(this.slideMomentum);
       this.slideMomentum.multiplyScalar(0.99);
       if (this.slideMomentum.length() < 0.01) this.slideMomentum.set(0, 0, 0);
+    } else if (freezeActive) {
+      movement.set(0, 0, 0);
+      this.slideMomentum.set(0, 0, 0);
     } else if (movement.length() > 0) {
       this.lastMoveDirection.copy(movement);
     }
@@ -1455,26 +1508,47 @@ export class PlayerControls {
   attemptFireProjectile() {
     if (!this.canFireProjectile()) return false;
 
-    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
+    const gun = this.getEquippedGun();
+    const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
+    const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
+    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
 
-    this.multiplayer.send({
-      type: 'projectile',
-      id: this.multiplayer.getId(),
-      position: position.toArray(),
-      direction: direction.toArray()
-    });
+    if (usesIceMist) {
+      this.multiplayer.send({
+        type: 'iceMist',
+        id: this.multiplayer.getId(),
+        position: position.toArray(),
+        direction: direction.toArray()
+      });
 
-    this.playAction('projectile');
-    this.spawnProjectile(
-      this.scene,
-      this.projectiles,
-      position,
-      direction,
-      this.multiplayer.getId()
-    );
+      this.playAction('projectile');
+      this.spawnIceMist(
+        this.scene,
+        this.iceMists,
+        position,
+        direction,
+        this.multiplayer.getId()
+      );
+    } else {
+      this.multiplayer.send({
+        type: 'projectile',
+        id: this.multiplayer.getId(),
+        position: position.toArray(),
+        direction: direction.toArray()
+      });
+
+      this.playAction('projectile');
+      this.spawnProjectile(
+        this.scene,
+        this.projectiles,
+        position,
+        direction,
+        this.multiplayer.getId()
+      );
+    }
     return true;
   }
 
