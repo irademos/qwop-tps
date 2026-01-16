@@ -288,6 +288,9 @@ export async function createNature({
         .filter(Boolean)
       : [buildingsGroup];
     if (groupsToCheck.length === 0) return false;
+    for (const group of groupsToCheck) {
+      group.updateWorldMatrix(true, true);
+    }
     const terrainY = getTerrainHeight?.(position.x, position.z) ?? position.y ?? 0;
     const rayOrigin = tempPosition.set(
       position.x,
@@ -440,14 +443,42 @@ export async function createNature({
     if (!buildingsGroup) return;
     const tileGroup = getTileGroup(buildingsGroup, 'osm-buildings', tileKey);
     if (!tileGroup) return;
-    tempBox.setFromObject(tileGroup);
-    if (!Number.isFinite(tempBox.min.x) || !Number.isFinite(tempBox.max.x)) return;
-    const helper = new THREE.Box3Helper(tempBox, DEBUG_COLOR);
-    helper.material.transparent = true;
-    helper.material.opacity = DEBUG_BUILDING_OPACITY;
-    helper.name = `tree-building-debug-${tileKey}`;
-    buildingDebugByTile.set(tileKey, helper);
-    debugGroup.add(helper);
+    const helperGroup = new THREE.Group();
+    helperGroup.name = `tree-building-debug-${tileKey}`;
+    const collisionMesh =
+      tileGroup.getObjectByName(`extruded-collider-${tileKey}`) ??
+      tileGroup.getObjectByName(`extruded-mesh-${tileKey}`) ??
+      null;
+    const meshes = [];
+    if (collisionMesh?.isMesh && collisionMesh.geometry) {
+      meshes.push(collisionMesh);
+    } else {
+      tileGroup.traverse((child) => {
+        if (child?.isMesh && child.geometry) meshes.push(child);
+      });
+    }
+
+    for (const mesh of meshes) {
+      if (!mesh.geometry?.attributes?.position) continue;
+      mesh.updateWorldMatrix(true, false);
+      const edges = new THREE.EdgesGeometry(mesh.geometry);
+      const material = new THREE.LineBasicMaterial({
+        color: DEBUG_COLOR,
+        transparent: true,
+        opacity: DEBUG_BUILDING_OPACITY
+      });
+      const lines = new THREE.LineSegments(edges, material);
+      lines.matrixAutoUpdate = false;
+      lines.matrix.copy(mesh.matrixWorld);
+      helperGroup.add(lines);
+    }
+
+    if (!helperGroup.children.length) {
+      helperGroup.clear();
+      return;
+    }
+    buildingDebugByTile.set(tileKey, helperGroup);
+    debugGroup.add(helperGroup);
   };
 
   const refreshAll = () => {
