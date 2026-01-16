@@ -202,6 +202,7 @@ async function main() {
   let scene = null;
   let mapRenderer = null;
   let buildingsRenderer = null;
+  let natureController = null;
   let groundTiles = null;
   let ambientLight = null;
   let dirLight = null;
@@ -1376,7 +1377,28 @@ async function main() {
   playerModel.userData.hideInMapView = true;
   scene.add(playerModel);
   window.playerModel = playerModel;
-  await createNature({ scene, playerModel, getTerrainHeight });
+  const getTreeGeoForLocal = (position) => {
+    if (!position) return null;
+    const origin = worldOrigin
+      ? { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon }
+      : currentRenderOrigin;
+    if (!origin) return null;
+    const lonScale = metersPerDegreeLon(origin.centerLat);
+    return {
+      lat: origin.centerLat + position.z / METERS_PER_DEGREE_LAT,
+      lon: origin.centerLon - position.x / lonScale
+    };
+  };
+  natureController = await createNature({
+    scene,
+    playerModel,
+    getTerrainHeight,
+    mapRenderer,
+    buildingsRenderer,
+    getGeoForLocal: getTreeGeoForLocal,
+    tileCache
+  });
+  natureController?.update(playerModel?.position);
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
@@ -2958,6 +2980,8 @@ async function main() {
     tileSizeMeters: TILE_SIZE_METERS,
     evictRadiusTiles: TILE_EVICT_RADIUS
   });
+  natureController?.setTileCache?.(tileCache);
+  natureController?.refreshAll?.();
   if (pendingMapRebuild) {
     rebuildMapFromCache();
   }
@@ -3432,6 +3456,7 @@ async function main() {
       if (rebuildId !== mapRebuildToken) return;
       rebuildBuildingColliders();
       liftEntitiesToBuildingTop();
+      natureController?.refreshAll?.();
     };
 
     if (typeof requestIdleCallback === "function") {
@@ -3475,6 +3500,7 @@ async function main() {
     const finishBuildingRender = () => {
       buildingsRenderer.updateTileBuildings?.(tileKey, geojson, bounds);
       scheduleBuildingRefresh();
+      natureController?.refreshTile?.(tileKey);
     };
 
     if (typeof requestIdleCallback === "function") {
@@ -4173,6 +4199,7 @@ async function main() {
 
     const playerPosition = playerModel?.position;
     updateGroundTiles(playerPosition);
+    natureController?.update(playerPosition);
     if (shouldUpdatePickupTiles(playerPosition)) {
       updatePickupTiles(playerPosition);
     }
