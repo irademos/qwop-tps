@@ -2,16 +2,15 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const TREE_MODEL_URL = '/assets/props/low_poly_tree_pack.glb';
-const TREE_SCALE = 0.005;
-const TREE_NODE_NAMES = [
-  'Circle',
-  'Circle.001',
-  'Circle.002',
-  'Circle.003',
-  'Circle.004',
-  'Circle.005',
-  'Circle.006',
-  'Circle.007'
+const TREE_SCALE = 0.016; // around 0.012 to 0.02 looks good
+const TREE_PREFABS = [
+  ['Circle'],                 // Eucalyptus (has multiple meshes under it)
+  ['Circle001'],              // Pine
+  ['Circle002'],              // Palm
+  ['Circle003', 'Circle004'], // Cypress or Larch or Fir (split across 2 sibling nodes)
+  ['Circle005'],              // Oak
+  ['Circle006'],              // Scary / Dead tree
+  ['Circle007']               // Larch or Beech
 ];
 
 const DEFAULT_OFFSETS = [
@@ -47,6 +46,12 @@ export async function createNature({ scene, playerModel, getTerrainHeight }) {
     return null;
   }
 
+  gltf.scene.traverse((o) => {
+    const indent = '  '.repeat(o.parent ? o.parent.children.indexOf(o) + 1 : 0);
+    console.log(`${o.type}: "${o.name || '(no name)'}"`);
+  });
+
+
   const forward = new THREE.Vector3(0, 0, -1)
     .applyQuaternion(playerModel.quaternion)
     .setY(0)
@@ -60,24 +65,28 @@ export async function createNature({ scene, playerModel, getTerrainHeight }) {
   const group = new THREE.Group();
   group.name = 'nature-group';
 
-  TREE_NODE_NAMES.forEach((name, index) => {
-    const source = gltf.scene.getObjectByName(name);
-    if (!source) return;
+  TREE_PREFABS.forEach((parts, i) => {
+    const wrapper = new THREE.Group();
+    wrapper.name = `tree_${i}`;
 
-    const tree = source.clone(true);
-    setTreeShadowing(tree);
-    tree.scale.setScalar(TREE_SCALE);
+    for (const partName of parts) {
+      const src = gltf.scene.getObjectByName(partName);
+      if (!src) continue;
 
-    const offset = DEFAULT_OFFSETS[index] ?? DEFAULT_OFFSETS[0];
+      const part = src.clone(true);
+      setTreeShadowing(part);
+      wrapper.add(part);
+    }
+
+    wrapper.scale.setScalar(TREE_SCALE);
+    const offset = DEFAULT_OFFSETS[i] ?? DEFAULT_OFFSETS[0];
     const position = basePosition.clone()
       .addScaledVector(right, offset.x)
       .addScaledVector(forward, offset.z);
 
-    const terrainY = getTerrainHeight?.(position.x, position.z);
-    position.y = Number.isFinite(terrainY) ? terrainY : playerModel.position.y;
-
-    tree.position.copy(position);
-    group.add(tree);
+    position.y = 0;
+    wrapper.position.copy(position);
+    group.add(wrapper);
   });
 
   scene.add(group);
