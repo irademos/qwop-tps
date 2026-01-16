@@ -22,6 +22,9 @@ const TREE_TILE_BUFFER = 2;
 const TREE_ROAD_CLEARANCE = 4.5;
 const TREE_BUILDING_CLEARANCE = 2.5;
 const BUILDING_RAYCAST_HEIGHT = 200;
+const DEBUG_COLOR = 0xffeb3b;
+const DEBUG_ROAD_OPACITY = 0.9;
+const DEBUG_BUILDING_OPACITY = 0.65;
 
 const setTreeShadowing = (tree) => {
   tree.traverse((child) => {
@@ -102,16 +105,58 @@ export async function createNature({
   group.name = 'nature-group';
   scene.add(group);
 
+  const debugGroup = new THREE.Group();
+  debugGroup.name = 'tree-blockers-debug';
+  scene.add(debugGroup);
+
   const treeTiles = new Map();
   const roadSegmentsByTile = new Map();
+  const roadDebugByTile = new Map();
+  const buildingDebugByTile = new Map();
 
   const tempStart = new THREE.Vector3();
   const tempEnd = new THREE.Vector3();
   const tempPosition = new THREE.Vector3();
+  const tempBox = new THREE.Box3();
 
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
   let tileBuffer = activeTileCache?.evictRadiusTiles ?? TREE_TILE_BUFFER;
+
+  const isDebugEnabled = () => Boolean(globalThis?.DEBUG_TREE_BLOCKERS);
+
+  const disposeDebugEntry = (entry) => {
+    if (!entry) return;
+    entry.traverse((child) => {
+      if (child.geometry?.dispose) {
+        child.geometry.dispose();
+      }
+      if (child.material?.dispose) {
+        child.material.dispose();
+      }
+    });
+  };
+
+  const removeDebugEntry = (map, tileKey) => {
+    const entry = map.get(tileKey);
+    if (!entry) return;
+    debugGroup.remove(entry);
+    disposeDebugEntry(entry);
+    map.delete(tileKey);
+  };
+
+  const clearDebug = () => {
+    for (const entry of roadDebugByTile.values()) {
+      debugGroup.remove(entry);
+      disposeDebugEntry(entry);
+    }
+    roadDebugByTile.clear();
+    for (const entry of buildingDebugByTile.values()) {
+      debugGroup.remove(entry);
+      disposeDebugEntry(entry);
+    }
+    buildingDebugByTile.clear();
+  };
 
   const getTileKey = (tile) => `${tile.x},${tile.y}`;
   const parseTileKey = (tileKey) => {
@@ -176,6 +221,36 @@ export async function createNature({
       }
     });
     roadSegmentsByTile.set(tileKey, segments);
+
+    if (isDebugEnabled()) {
+      removeDebugEntry(roadDebugByTile, tileKey);
+      if (segments.length) {
+        const positions = new Float32Array(segments.length * 6);
+        segments.forEach((segment, index) => {
+          const offset = index * 6;
+          positions[offset] = segment.ax;
+          positions[offset + 1] = 0.2;
+          positions[offset + 2] = segment.az;
+          positions[offset + 3] = segment.bx;
+          positions[offset + 4] = 0.2;
+          positions[offset + 5] = segment.bz;
+        });
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.LineBasicMaterial({
+          color: DEBUG_COLOR,
+          transparent: true,
+          opacity: DEBUG_ROAD_OPACITY
+        });
+        const lines = new THREE.LineSegments(geometry, material);
+        lines.name = `tree-road-debug-${tileKey}`;
+        roadDebugByTile.set(tileKey, lines);
+        debugGroup.add(lines);
+      }
+    } else if (roadDebugByTile.has(tileKey)) {
+      removeDebugEntry(roadDebugByTile, tileKey);
+    }
+
     return segments;
   };
 
@@ -345,6 +420,8 @@ export async function createNature({
       group.remove(entry.group);
       treeTiles.delete(key);
       roadSegmentsByTile.delete(key);
+      removeDebugEntry(roadDebugByTile, key);
+      removeDebugEntry(buildingDebugByTile, key);
     }
   };
 
@@ -352,11 +429,31 @@ export async function createNature({
     if (!tileKey) return;
     cacheRoadSegmentsForTile(tileKey);
     pruneTileTrees(tileKey);
+    if (!isDebugEnabled()) {
+      removeDebugEntry(buildingDebugByTile, tileKey);
+      return;
+    }
+    removeDebugEntry(buildingDebugByTile, tileKey);
+    const buildingsGroup = buildingsRenderer?.group;
+    if (!buildingsGroup) return;
+    const tileGroup = getTileGroup(buildingsGroup, 'osm-buildings', tileKey);
+    if (!tileGroup) return;
+    tempBox.setFromObject(tileGroup);
+    if (!Number.isFinite(tempBox.min.x) || !Number.isFinite(tempBox.max.x)) return;
+    const helper = new THREE.Box3Helper(tempBox, DEBUG_COLOR);
+    helper.material.transparent = true;
+    helper.material.opacity = DEBUG_BUILDING_OPACITY;
+    helper.name = `tree-building-debug-${tileKey}`;
+    buildingDebugByTile.set(tileKey, helper);
+    debugGroup.add(helper);
   };
 
   const refreshAll = () => {
     for (const tileKey of treeTiles.keys()) {
       refreshTile(tileKey);
+    }
+    if (!isDebugEnabled()) {
+      clearDebug();
     }
   };
 
@@ -371,6 +468,7 @@ export async function createNature({
     }
     treeTiles.clear();
     roadSegmentsByTile.clear();
+    clearDebug();
   };
 
   const dispose = () => {
@@ -380,8 +478,11 @@ export async function createNature({
     }
     treeTiles.clear();
     roadSegmentsByTile.clear();
+    clearDebug();
     group.clear();
     scene?.remove(group);
+    debugGroup.clear();
+    scene?.remove(debugGroup);
   };
 
   return {
