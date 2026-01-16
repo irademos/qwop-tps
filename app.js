@@ -127,8 +127,8 @@ const DISPLAY_PRESETS = {
     skyBrightness: 1.1
   },
   night: {
-    ambientIntensity: 0.2,
-    directionalIntensity: 0.35,
+    ambientIntensity: 0.0,
+    directionalIntensity: 0.0,
     groundBrightness: 0.6,
     buildingBrightness: 0.65,
     skyBrightness: 0.25
