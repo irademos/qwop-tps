@@ -617,7 +617,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedColliderMesh.geometry = new THREE.BufferGeometry();
       extrudedMesh.visible = false;
       flatMesh.visible = false;
-      extrudedColliderMesh.visible = false;
+      extrudedColliderMesh.visible = true; // keep raycastable (material is invisible anyway)
       climbableAreasByTile.set(tileKey, []);
       refreshClimbableAreas();
       return tileEntry;
@@ -633,7 +633,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedColliderMesh.geometry = new THREE.BufferGeometry();
       extrudedMesh.visible = false;
       flatMesh.visible = false;
-      extrudedColliderMesh.visible = false;
+      extrudedColliderMesh.visible = true; // keep raycastable (material is invisible anyway)
       climbableAreasByTile.set(tileKey, []);
       refreshClimbableAreas();
       return tileEntry;
@@ -722,7 +722,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedColliderMesh.geometry = merged.clone(); // collision (clone to avoid shared dispose issues)
 
       extrudedMesh.visible = true;
-      extrudedColliderMesh.visible = false;
+      extrudedColliderMesh.visible = true; // keep raycastable (material is invisible anyway)
 
       for (const g of extrudedResults) g.dispose();
     } else {
