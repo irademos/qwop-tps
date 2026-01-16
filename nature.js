@@ -114,6 +114,7 @@ export async function createNature({
   const roadDebugByTile = new Map();
   const buildingDebugByTile = new Map();
   const buildingPolygonsByTile = new Map();
+  const buildingBoxesByTile = new Map();
 
   const tempStart = new THREE.Vector3();
   const tempEnd = new THREE.Vector3();
@@ -197,6 +198,34 @@ export async function createNature({
       if (!polygons.length) continue;
       for (const rings of polygons) {
         if (pointInPolygon(point, rings)) return true;
+      }
+    }
+    return false;
+  };
+
+  const getBuildingBoxesForTile = (tileKey) => {
+    if (!tileKey) return [];
+    if (buildingBoxesByTile.has(tileKey)) {
+      return buildingBoxesByTile.get(tileKey) ?? [];
+    }
+    return [];
+  };
+
+  const isInsideBuildingBoxes = (position, tileKey) => {
+    const keys = tileKey ? getNeighborTileKeys(tileKey) : [];
+    if (keys.length === 0) return false;
+    for (const key of keys) {
+      const boxes = getBuildingBoxesForTile(key);
+      if (!boxes.length) continue;
+      for (const box of boxes) {
+        if (
+          position.x >= box.min.x - TREE_BUILDING_CLEARANCE
+          && position.x <= box.max.x + TREE_BUILDING_CLEARANCE
+          && position.z >= box.min.z - TREE_BUILDING_CLEARANCE
+          && position.z <= box.max.z + TREE_BUILDING_CLEARANCE
+        ) {
+          return true;
+        }
       }
     }
     return false;
@@ -359,6 +388,7 @@ export async function createNature({
     if (!buildingsGroup) return false;
     const targetTiles = tileKey ? getNeighborTileKeys(tileKey) : [];
     if (isInsideBuildingFootprint(position, tileKey)) return true;
+    if (isInsideBuildingBoxes(position, tileKey)) return true;
     let groupsToCheck = targetTiles.length
       ? targetTiles
         .map((key) => getTileGroup(buildingsGroup, 'osm-buildings', key))
@@ -505,6 +535,7 @@ export async function createNature({
       treeTiles.delete(key);
       roadSegmentsByTile.delete(key);
       buildingPolygonsByTile.delete(key);
+      buildingBoxesByTile.delete(key);
       removeDebugEntry(roadDebugByTile, key);
       removeDebugEntry(buildingDebugByTile, key);
     }
@@ -518,6 +549,7 @@ export async function createNature({
       if (neighborKey === tileKey) continue;
       pruneTileTrees(neighborKey);
     }
+    buildingBoxesByTile.delete(tileKey);
     if (!isDebugEnabled()) {
       removeDebugEntry(buildingDebugByTile, tileKey);
       return;
@@ -527,6 +559,21 @@ export async function createNature({
     if (!buildingsGroup) return;
     const tileGroup = getTileGroup(buildingsGroup, 'osm-buildings', tileKey);
     if (!tileGroup) return;
+    const boxes = [];
+    tileGroup.traverse((child) => {
+      if (!child?.isMesh || !child.geometry) return;
+      if (!child.geometry.boundingBox) {
+        child.geometry.computeBoundingBox();
+      }
+      if (!child.geometry.boundingBox) return;
+      child.updateWorldMatrix(true, false);
+      const box = child.geometry.boundingBox.clone();
+      box.applyMatrix4(child.matrixWorld);
+      boxes.push(box);
+    });
+    if (boxes.length) {
+      buildingBoxesByTile.set(tileKey, boxes);
+    }
     const helperGroup = new THREE.Group();
     helperGroup.name = `tree-building-debug-${tileKey}`;
     const collisionMesh =
@@ -586,6 +633,7 @@ export async function createNature({
     treeTiles.clear();
     roadSegmentsByTile.clear();
     buildingPolygonsByTile.clear();
+    buildingBoxesByTile.clear();
     clearDebug();
   };
 
@@ -597,6 +645,7 @@ export async function createNature({
     treeTiles.clear();
     roadSegmentsByTile.clear();
     buildingPolygonsByTile.clear();
+    buildingBoxesByTile.clear();
     clearDebug();
     group.clear();
     scene?.remove(group);
