@@ -1782,6 +1782,19 @@ async function main() {
     });
   };
 
+  const disposeSceneObject = (object) => {
+    if (!object) return;
+    if (object.parent) {
+      object.parent.remove(object);
+    }
+    object.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach(material => material?.dispose?.());
+    });
+  };
+
   const loadMonsterSwordTemplate = async () => {
     if (monsterSwordTemplate) return monsterSwordTemplate;
     if (!monsterSwordTemplatePromise) {
@@ -2244,10 +2257,11 @@ async function main() {
       levelPopupTimer = null;
     }, 2200);
   };
-  const showAmmoPopup = (ammoCount, label = playerControls?.ammoLabel || 'Ammo') => {
+  const showAmmoPopup = (ammoCount, label) => {
     if (!ammoPopup) return;
     const displayCount = Number.isFinite(ammoCount) ? Math.max(0, Math.floor(ammoCount)) : 0;
-    ammoPopup.textContent = `${label}: ${displayCount}`;
+    const safeLabel = label || 'Ammo';
+    ammoPopup.textContent = `${safeLabel}: ${displayCount}`;
     ammoPopup.classList.add('visible');
     if (ammoPopupTimer) {
       clearTimeout(ammoPopupTimer);
@@ -4638,9 +4652,7 @@ async function main() {
 
       // Simple cleanup: remove if it falls far below the world
       if (mesh.position.y < -50) {
-        scene.remove(mesh);
-        mesh.geometry.dispose();
-        mesh.material.dispose();
+        disposeSceneObject(mesh);
         rbToMesh.delete(rb);
         rapierWorld.removeRigidBody(rb);
       }
