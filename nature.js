@@ -288,18 +288,21 @@ export async function createNature({
         .filter(Boolean)
       : [buildingsGroup];
     if (groupsToCheck.length === 0) return false;
+    for (const group of groupsToCheck) {
+      group.updateWorldMatrix(true, true);
+    }
     const terrainY = getTerrainHeight?.(position.x, position.z) ?? position.y ?? 0;
+    const rayBaseY = Math.max(position.y ?? terrainY, terrainY);
     const rayOrigin = tempPosition.set(
       position.x,
-      Math.max(position.y ?? terrainY, terrainY) + BUILDING_RAYCAST_HEIGHT,
+      rayBaseY + BUILDING_RAYCAST_HEIGHT,
       position.z
     );
+    buildingRaycaster.near = 0;
+    buildingRaycaster.far = BUILDING_RAYCAST_HEIGHT + Math.max(0, rayBaseY) + TREE_BUILDING_CLEARANCE;
     buildingRaycaster.set(rayOrigin, buildingRayDirection);
     const intersections = buildingRaycaster.intersectObjects(groupsToCheck, true);
-    if (!intersections.length) return false;
-    const nearest = intersections[0];
-    if (!nearest) return false;
-    return nearest.distance <= BUILDING_RAYCAST_HEIGHT + TREE_BUILDING_CLEARANCE;
+    return intersections.length > 0;
   };
 
   const isNearRoad = (x, z, tileKey) => {
@@ -440,14 +443,42 @@ export async function createNature({
     if (!buildingsGroup) return;
     const tileGroup = getTileGroup(buildingsGroup, 'osm-buildings', tileKey);
     if (!tileGroup) return;
-    tempBox.setFromObject(tileGroup);
-    if (!Number.isFinite(tempBox.min.x) || !Number.isFinite(tempBox.max.x)) return;
-    const helper = new THREE.Box3Helper(tempBox, DEBUG_COLOR);
-    helper.material.transparent = true;
-    helper.material.opacity = DEBUG_BUILDING_OPACITY;
-    helper.name = `tree-building-debug-${tileKey}`;
-    buildingDebugByTile.set(tileKey, helper);
-    debugGroup.add(helper);
+    const helperGroup = new THREE.Group();
+    helperGroup.name = `tree-building-debug-${tileKey}`;
+    const collisionMesh =
+      tileGroup.getObjectByName(`extruded-collider-${tileKey}`) ??
+      tileGroup.getObjectByName(`extruded-mesh-${tileKey}`) ??
+      null;
+    const meshes = [];
+    if (collisionMesh?.isMesh && collisionMesh.geometry) {
+      meshes.push(collisionMesh);
+    } else {
+      tileGroup.traverse((child) => {
+        if (child?.isMesh && child.geometry) meshes.push(child);
+      });
+    }
+
+    for (const mesh of meshes) {
+      if (!mesh.geometry?.attributes?.position) continue;
+      mesh.updateWorldMatrix(true, false);
+      const edges = new THREE.EdgesGeometry(mesh.geometry);
+      const material = new THREE.LineBasicMaterial({
+        color: DEBUG_COLOR,
+        transparent: true,
+        opacity: DEBUG_BUILDING_OPACITY
+      });
+      const lines = new THREE.LineSegments(edges, material);
+      lines.matrixAutoUpdate = false;
+      lines.matrix.copy(mesh.matrixWorld);
+      helperGroup.add(lines);
+    }
+
+    if (!helperGroup.children.length) {
+      helperGroup.clear();
+      return;
+    }
+    buildingDebugByTile.set(tileKey, helperGroup);
+    debugGroup.add(helperGroup);
   };
 
   const refreshAll = () => {
