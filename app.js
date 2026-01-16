@@ -15,6 +15,7 @@ import { BreakManager } from './breakManager.js';
 import { initSpeechCommands } from './speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import { IceGun } from './iceGun.js';
+import { Bow } from './bow.js';
 import { Lantern } from './lantern.js';
 import { AutumnSword } from './autumnSword.js';
 import { createNature } from './nature.js';
@@ -93,6 +94,10 @@ const MONSTER_SWORD_SCALE = 0.16;
 const MONSTER_SWORD_HOLD_OFFSET = new THREE.Vector3(-0.05, 0.15, 0.08);
 const MONSTER_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
 const MONSTER_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(MONSTER_SWORD_HOLD_ROTATION);
+const ARROW_MODEL_URL = '/assets/props/arrow.glb';
+const ARROW_PROJECTILE_SCALE = 0.06;
+const ARROW_PROJECTILE_SPEED = 18;
+const ARROW_PROJECTILE_LIFETIME = 12000;
 
 
 // --- Rapier demo state ---
@@ -102,6 +107,8 @@ let physicsAccumulator = 0;
 const FIXED_DT = 1 / 60;
 let monsterSwordTemplate = null;
 let monsterSwordTemplatePromise = null;
+let arrowTemplate = null;
+let arrowTemplatePromise = null;
 const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
@@ -228,6 +235,10 @@ async function main() {
   const droppedAmmoPickups = new Map();
   const pendingDropRemovals = new Set();
   const AMMO_PICKUP_AMOUNT = 5;
+  const ICE_AMMO_KEY = 'ice ammo';
+  const ARROW_AMMO_KEY = 'arrow ammo';
+  const DEFAULT_ICE_AMMO = 10;
+  const DEFAULT_ARROW_AMMO = 5;
   const COIN_PICKUP_GAIN = 1;
   const foodPickups = [];
   const healthPickups = [];
@@ -580,7 +591,8 @@ async function main() {
       && payload.type === 'projectile'
       && typeof payload.id === 'string'
       && isVector3Array(payload.position)
-      && isVector3Array(payload.direction);
+      && isVector3Array(payload.direction)
+      && (payload.weapon == null || typeof payload.weapon === 'string');
 
     const isIceMistMessage = payload => isObject(payload)
       && payload.type === 'iceMist'
@@ -863,7 +875,11 @@ async function main() {
       }
       const position = new THREE.Vector3(...data.position);
       const direction = new THREE.Vector3(...data.direction);
-      spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      if (data.weapon === 'bow') {
+        spawnArrowProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      } else {
+        spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      }
 
       const shooter = otherPlayers[data.id];
       if (shooter) {
@@ -1105,6 +1121,7 @@ async function main() {
   }
 
   let iceGun;
+  let bow;
   let autumnSword;
   let lantern;
 
@@ -1210,7 +1227,7 @@ async function main() {
   };
 
   const dropOtherWeapons = (activeWeapon) => {
-    [iceGun, autumnSword].forEach(weapon => {
+    [iceGun, bow, autumnSword].forEach(weapon => {
       if (!weapon || weapon === activeWeapon) return;
       if (weapon.holder === playerControls) {
         weapon.drop({ removeFromInventory: true });
@@ -1253,6 +1270,12 @@ async function main() {
     dropOtherWeapons(iceGun);
     addToInventory('iceGun', 1);
     setPlayerWeaponType(holder, iceGun.type);
+    playerControls.updateAmmoUI?.(true);
+    playerControls.setAmmo?.(
+      inventoryState.iceGun?.[ICE_AMMO_KEY] ?? 0,
+      getAmmoLabelForType('ammo'),
+      getAmmoIconForType('ammo')
+    );
   };
   iceGun.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
@@ -1296,6 +1319,72 @@ async function main() {
       }
     },
     isLocallyControlled: () => iceGun?.holder === playerControls
+  });
+
+  bow = new Bow(scene);
+  await bow.load();
+  window.bow = bow;
+  await loadArrowTemplate();
+  const bowMarker = createWeaponMarker(0xffc26b);
+  bow.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    if (lantern?.holder === playerControls) {
+      bow.holder = null;
+      return;
+    }
+    dropOtherWeapons(bow);
+    addToInventory('bow', 1);
+    setPlayerWeaponType(holder, bow.type);
+    playerControls.updateAmmoUI?.(true);
+    playerControls.setAmmo?.(
+      inventoryState.bow?.[ARROW_AMMO_KEY] ?? 0,
+      getAmmoLabelForType('arrow'),
+      getAmmoIconForType('arrow')
+    );
+  };
+  bow.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('bow', 1);
+    }
+    clearPlayerWeaponType(holder, bow.type);
+    playerControls?.updateAmmoUI?.(false);
+    playerControls?.setAiming?.(false);
+  };
+  if (bow.mesh) {
+    bow.mesh.userData.hideInMapView = true;
+    bow.mesh.visible = false;
+  }
+  registerNetworkedEntity('bow', {
+    getState: () => {
+      if (!bow?.mesh) return null;
+      const pos = bow.mesh.position;
+      const q = bow.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: bow.holder === playerControls ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!bow?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        bow.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        bow.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = bow.remoteHolderId ?? null;
+      bow.remoteHolderId = state.holderId ?? null;
+      updateRemoteWeaponType(bow, bow.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && bow.holder === playerControls) {
+        bow.holder = null;
+        clearPlayerWeaponType(playerControls, bow.type);
+      }
+    },
+    isLocallyControlled: () => bow?.holder === playerControls
   });
 
   autumnSword = new AutumnSword(scene);
@@ -1355,7 +1444,7 @@ async function main() {
     isLocallyControlled: () => autumnSword?.holder === playerControls
   });
 
-  window.weapons = { iceGun, autumnSword };
+  window.weapons = { iceGun, bow, autumnSword };
 
   function attachMonsterPhysics(monster) {
     const model = monster.model;
@@ -1432,7 +1521,7 @@ async function main() {
     isLocallyControlled: () => lantern?.holder === playerControls
   });
 
-  window.weapons = { iceGun, autumnSword, lantern };
+  window.weapons = { iceGun, bow, autumnSword, lantern };
   const getTreeGeoForLocal = (position) => {
     if (!position) return null;
     const origin = worldOrigin
@@ -1697,6 +1786,19 @@ async function main() {
     });
   };
 
+  const disposeSceneObject = (object) => {
+    if (!object) return;
+    if (object.parent) {
+      object.parent.remove(object);
+    }
+    object.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach(material => material?.dispose?.());
+    });
+  };
+
   const loadMonsterSwordTemplate = async () => {
     if (monsterSwordTemplate) return monsterSwordTemplate;
     if (!monsterSwordTemplatePromise) {
@@ -1735,6 +1837,45 @@ async function main() {
     swordMesh.scale.setScalar(MONSTER_SWORD_SCALE);
     return swordMesh;
   };
+
+  async function loadArrowTemplate() {
+    if (arrowTemplate) return arrowTemplate;
+    if (!arrowTemplatePromise) {
+      const loader = new GLTFLoader();
+      arrowTemplatePromise = loader.loadAsync(ARROW_MODEL_URL)
+        .then(gltf => {
+          arrowTemplate = gltf.scene;
+          return arrowTemplate;
+        })
+        .catch(error => {
+          console.warn('Failed to load arrow model.', error);
+          arrowTemplate = null;
+          return null;
+        })
+        .finally(() => {
+          arrowTemplatePromise = null;
+        });
+    }
+    return arrowTemplatePromise;
+  }
+
+  function cloneArrowMesh(template, scale = ARROW_PROJECTILE_SCALE) {
+    if (!template) return null;
+    const arrowMesh = template.clone(true);
+    arrowMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry = child.geometry?.clone?.() ?? child.geometry;
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map(material => material?.clone?.() ?? material);
+      } else {
+        child.material = child.material?.clone?.() ?? child.material;
+      }
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    arrowMesh.scale.setScalar(scale);
+    return arrowMesh;
+  }
 
   function cleanupMonster(monster) {
     if (!monster) return;
@@ -2120,10 +2261,11 @@ async function main() {
       levelPopupTimer = null;
     }, 2200);
   };
-  const showAmmoPopup = ammoCount => {
+  const showAmmoPopup = (ammoCount, label) => {
     if (!ammoPopup) return;
     const displayCount = Number.isFinite(ammoCount) ? Math.max(0, Math.floor(ammoCount)) : 0;
-    ammoPopup.textContent = `Ice ammo: ${displayCount}`;
+    const safeLabel = label || 'Ammo';
+    ammoPopup.textContent = `${safeLabel}: ${displayCount}`;
     ammoPopup.classList.add('visible');
     if (ammoPopupTimer) {
       clearTimeout(ammoPopupTimer);
@@ -2146,12 +2288,14 @@ async function main() {
       coinPopupTimer = null;
     }, 1600);
   };
-  const ICE_AMMO_KEY = 'ice ammo';
-  const DEFAULT_ICE_AMMO = 10;
   const inventoryCatalog = {
     iceGun: {
       name: 'Ice Gun',
       icon: '/assets/ui/items/icegun.png'
+    },
+    bow: {
+      name: 'Bow',
+      icon: ''
     },
     autumnSword: {
       name: 'Autumn Sword',
@@ -2188,6 +2332,16 @@ async function main() {
     };
     inventoryDirty = true;
   }
+  if (!Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])) {
+    const bowEntry = inventoryState.bow || {};
+    inventoryState.bow = {
+      ...bowEntry,
+      [ARROW_AMMO_KEY]: DEFAULT_ARROW_AMMO,
+      icon: bowEntry.icon || inventoryCatalog.bow.icon,
+      name: bowEntry.name || inventoryCatalog.bow.name
+    };
+    inventoryDirty = true;
+  }
   if (inventoryDirty) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
   }
@@ -2205,6 +2359,20 @@ async function main() {
       [ICE_AMMO_KEY]: normalized,
       icon: current.icon || inventoryCatalog.iceGun.icon,
       name: current.name || inventoryCatalog.iceGun.name
+    };
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
+    updateSettingsUI();
+  }
+
+  function setArrowAmmoCount(amount) {
+    if (!Number.isFinite(amount)) return;
+    const normalized = Math.max(0, Math.floor(amount));
+    const current = inventoryState.bow || {};
+    inventoryState.bow = {
+      ...current,
+      [ARROW_AMMO_KEY]: normalized,
+      icon: current.icon || inventoryCatalog.bow.icon,
+      name: current.name || inventoryCatalog.bow.name
     };
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
     updateSettingsUI();
@@ -2239,6 +2407,9 @@ async function main() {
       if (itemId === 'iceGun' && Number.isFinite(current?.[ICE_AMMO_KEY])) {
         const { count, ...rest } = current;
         inventoryState[itemId] = rest;
+      } else if (itemId === 'bow' && Number.isFinite(current?.[ARROW_AMMO_KEY])) {
+        const { count, ...rest } = current;
+        inventoryState[itemId] = rest;
       } else {
         delete inventoryState[itemId];
       }
@@ -2257,6 +2428,9 @@ async function main() {
     if (itemId === 'iceGun') {
       return iceGun?.holder === playerControls;
     }
+    if (itemId === 'bow') {
+      return bow?.holder === playerControls;
+    }
     if (itemId === 'autumnSword') {
       return autumnSword?.holder === playerControls;
     }
@@ -2266,6 +2440,7 @@ async function main() {
   function getEquippedInventoryItemId() {
     if (isInventoryItemEquipped('lantern')) return 'lantern';
     if (isInventoryItemEquipped('iceGun')) return 'iceGun';
+    if (isInventoryItemEquipped('bow')) return 'bow';
     if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
     return null;
   }
@@ -2290,6 +2465,27 @@ async function main() {
       dropOtherWeapons(iceGun);
       setPlayerWeaponType(playerControls, iceGun.type);
       playerControls.updateAmmoUI?.(true);
+      playerControls.setAmmo?.(
+        inventoryState.iceGun?.[ICE_AMMO_KEY] ?? 0,
+        getAmmoLabelForType('ammo'),
+        getAmmoIconForType('ammo')
+      );
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'bow') {
+      if (!bow?.mesh || !playerControls) return;
+      if (bow.remoteHolderId && bow.remoteHolderId !== multiplayer?.getId?.()) return;
+      bow.mesh.visible = true;
+      bow.holder = playerControls;
+      dropOtherWeapons(bow);
+      setPlayerWeaponType(playerControls, bow.type);
+      playerControls.updateAmmoUI?.(true);
+      playerControls.setAmmo?.(
+        inventoryState.bow?.[ARROW_AMMO_KEY] ?? 0,
+        getAmmoLabelForType('arrow'),
+        getAmmoIconForType('arrow')
+      );
       updateSettingsUI();
       return;
     }
@@ -2320,6 +2516,19 @@ async function main() {
       removeFromInventory('iceGun', 1);
       clearPlayerWeaponType(playerControls, iceGun.type);
       playerControls?.updateAmmoUI?.(false);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'bow') {
+      if (bow?.holder !== playerControls) return;
+      bow.holder = null;
+      if (bow.mesh) {
+        bow.mesh.visible = false;
+      }
+      removeFromInventory('bow', 1);
+      clearPlayerWeaponType(playerControls, bow.type);
+      playerControls?.updateAmmoUI?.(false);
+      playerControls?.setAiming?.(false);
       updateSettingsUI();
       return;
     }
@@ -2405,11 +2614,20 @@ async function main() {
   const dropInventoryOnDeath = () => {
     if (!playerModel) return;
     const deathPosition = playerModel.position.clone();
-    const ammoCount = Number.isFinite(playerControls?.ammo)
-      ? playerControls.ammo
-      : (Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
-        ? inventoryState.iceGun[ICE_AMMO_KEY]
-        : 0);
+    let ammoCount = 0;
+    if (playerControls?.ammoLabel === 'Arrows') {
+      ammoCount = Number.isFinite(playerControls?.ammo)
+        ? playerControls.ammo
+        : (Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
+          ? inventoryState.bow[ARROW_AMMO_KEY]
+          : 0);
+    } else {
+      ammoCount = Number.isFinite(playerControls?.ammo)
+        ? playerControls.ammo
+        : (Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+          ? inventoryState.iceGun[ICE_AMMO_KEY]
+          : 0);
+    }
     const ammoDrops = createAmmoDrops(deathPosition, ammoCount);
     ammoDrops.forEach(drop => {
       addDroppedAmmoPickup({
@@ -2424,6 +2642,7 @@ async function main() {
 
     const weaponDrops = [];
     if ((inventoryState.iceGun?.count || 0) > 0) weaponDrops.push('iceGun');
+    if ((inventoryState.bow?.count || 0) > 0) weaponDrops.push('bow');
     if ((inventoryState.autumnSword?.count || 0) > 0) weaponDrops.push('autumnSword');
     if ((inventoryState.lantern?.count || 0) > 0) weaponDrops.push('lantern');
     const weaponPositions = createRingPositions(deathPosition, weaponDrops.length, 2.2);
@@ -2431,6 +2650,8 @@ async function main() {
       const position = weaponPositions[index] || deathPosition;
       if (weaponId === 'iceGun') {
         spawnIceGunPickup(position);
+      } else if (weaponId === 'bow') {
+        spawnBowPickup(position);
       } else if (weaponId === 'autumnSword') {
         spawnAutumnSwordPickup(position);
       } else if (weaponId === 'lantern') {
@@ -2596,6 +2817,44 @@ async function main() {
     }
   }
 
+  function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    const arrowDirection = direction.clone().normalize();
+    const createMesh = () => {
+      const template = arrowTemplate;
+      const arrowMesh = cloneArrowMesh(template, ARROW_PROJECTILE_SCALE);
+      if (arrowMesh) {
+        const forward = new THREE.Vector3(0, 0, 1);
+        arrowMesh.quaternion.setFromUnitVectors(forward, arrowDirection);
+        return arrowMesh;
+      }
+      const geometry = new THREE.CylinderGeometry(0.04, 0.05, 0.6, 8);
+      const material = new THREE.MeshStandardMaterial({ color: 0x6a4b2a });
+      const fallback = new THREE.Mesh(geometry, material);
+      fallback.rotation.x = Math.PI / 2;
+      return fallback;
+    };
+
+    const colliderDesc = RAPIER.ColliderDesc.cuboid(0.05, 0.05, 0.35)
+      .setRestitution(0.1)
+      .setFriction(0.6);
+
+    spawnProjectile(scene, list, position, direction, shooterId, {
+      createMesh,
+      colliderDesc,
+      speed: ARROW_PROJECTILE_SPEED,
+      lifetime: ARROW_PROJECTILE_LIFETIME,
+      pickupOnRest: true,
+      pickupAmount: 1,
+      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount),
+      isArrow: true
+    });
+
+    const latest = list[list.length - 1];
+    if (latest) {
+      latest.userData.skipTerrainCorrection = true;
+    }
+  }
+
   const ICE_MIST_RANGE = 5;
   const ICE_MIST_SPEED = 3.2;
   const ICE_MIST_LIFETIME_MS = (ICE_MIST_RANGE / ICE_MIST_SPEED) * 1000;
@@ -2732,15 +2991,15 @@ async function main() {
     : null
   );
 
-  function spawnAmmoPickup(position) {
+  function spawnAmmoPickup(position, amount = AMMO_PICKUP_AMOUNT, options = {}) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
     liftPositionToBuildingTop(spawnPos, 0.6);
 
-    const geometry = new THREE.IcosahedronGeometry(0.25, 0);
-    const material = new THREE.MeshStandardMaterial({
+    const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
+    const material = options.material || new THREE.MeshStandardMaterial({
       color: 0x7fd0ff,
       emissive: 0x225577,
       emissiveIntensity: 0.4,
@@ -2748,15 +3007,84 @@ async function main() {
       roughness: 0.4,
     });
 
-    const pickup = new THREE.Mesh(geometry, material);
+    let pickup = options.createMesh ? options.createMesh() : null;
+    if (!pickup) {
+      pickup = new THREE.Mesh(geometry, material);
+    }
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
     pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.amount = amount;
+    pickup.userData.type = options.type || 'ammo';
+    pickup.userData.sparkle = !!options.sparkle;
+    if (options.sparkle) {
+      const light = new THREE.PointLight(0xfff2a8, 0.6, 2);
+      light.position.set(0, 0.4, 0);
+      pickup.add(light);
+      pickup.userData.sparkleLight = light;
+    }
     scene.add(pickup);
     ammoPickups.push(pickup);
     return pickup;
+  }
+
+  function spawnArrowPickup(position, amount = 1) {
+    return spawnAmmoPickup(position, amount, {
+      type: 'arrow',
+      sparkle: true,
+      createMesh: () => {
+        const arrowMesh = cloneArrowMesh(arrowTemplate, 0.05);
+        if (arrowMesh) {
+          if (amount > 1) {
+            arrowMesh.scale.multiplyScalar(1.3);
+          }
+          arrowMesh.rotation.set(0, Math.PI / 2, Math.PI / 2);
+          return arrowMesh;
+        }
+        const geometry = new THREE.CylinderGeometry(0.04, 0.05, 0.6, 8);
+        const material = new THREE.MeshStandardMaterial({
+          color: 0x7b5530,
+          emissive: 0x2b1a0a,
+          emissiveIntensity: 0.35
+        });
+        const fallback = new THREE.Mesh(geometry, material);
+        fallback.rotation.x = Math.PI / 2;
+        return fallback;
+      }
+    });
+  }
+
+  function getAmmoLabelForType(type) {
+    return type === 'arrow' ? 'Arrows' : 'Ice ammo';
+  }
+
+  function getAmmoIconForType(type) {
+    return type === 'arrow' ? '🏹' : '❄️';
+  }
+
+  function addAmmoForType(type, amount) {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    if (type === 'arrow') {
+      if (bow?.holder === playerControls) {
+        playerControls.addAmmo(amount);
+      } else {
+        const current = Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
+          ? inventoryState.bow[ARROW_AMMO_KEY]
+          : 0;
+        setArrowAmmoCount(current + amount);
+      }
+      return;
+    }
+    if (iceGun?.holder === playerControls) {
+      playerControls.addAmmo(amount);
+    } else {
+      const current = Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+        ? inventoryState.iceGun[ICE_AMMO_KEY]
+        : 0;
+      setIceAmmoCount(current + amount);
+    }
   }
 
   function spawnDroppedAmmoPickup(position, amount, dropId) {
@@ -2960,6 +3288,22 @@ async function main() {
     iceGun.holder = null;
   }
 
+  function spawnBowPickup(position) {
+    if (!bow?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (!Number.isFinite(terrainHeight)) return;
+
+    spawnPos.y = terrainHeight + 0.5;
+    liftPositionToBuildingTop(spawnPos, 0.5);
+    bow.mesh.position.copy(spawnPos);
+    bow.mesh.quaternion.set(0, 0, 0, 1);
+    bow.mesh.visible = true;
+    bow.holder = null;
+  }
+
   function spawnAutumnSwordPickup(position) {
     if (!autumnSword?.mesh) return;
     const spawnPos = asVec3(position);
@@ -3022,16 +3366,33 @@ async function main() {
     renderer,
     multiplayer,
     spawnProjectile: spawnProjectileWithPerfFlags,
+    spawnArrowProjectile: spawnArrowProjectileWithPerfFlags,
     projectiles,
     spawnIceMist,
     iceMists,
     audioManager,
     initialAmmo: inventoryState.iceGun?.[ICE_AMMO_KEY],
-    onAmmoChange: setIceAmmoCount
+    onAmmoChange: (amount) => {
+      if (playerControls?.ammoLabel === 'Arrows') {
+        setArrowAmmoCount(amount);
+      } else {
+        setIceAmmoCount(amount);
+      }
+    }
   });
   window.playerControls = playerControls;
   updateControlAvailability();
   updateEnergyEffects();
+
+  const starterPosition = playerModel?.position?.clone?.() || getSpawnPosition();
+  if (starterPosition) {
+    const bowSpawn = starterPosition.clone().add(new THREE.Vector3(2.2, 0, 1.2));
+    const arrowSingle = starterPosition.clone().add(new THREE.Vector3(1.2, 0, -1.4));
+    const arrowBundle = starterPosition.clone().add(new THREE.Vector3(-1.4, 0, -1.1));
+    spawnBowPickup(bowSpawn);
+    spawnArrowPickup(arrowSingle, 1);
+    spawnArrowPickup(arrowBundle, 5);
+  }
 
   initMapView({ camera, scene, player: playerModel });
 
@@ -3215,6 +3576,15 @@ async function main() {
         }
       }
 
+      const hasBow = (inventoryState?.bow?.count || 0) > 0;
+      const canSpawnBow = bow?.mesh && !bow.holder && !hasBow && !bow.mesh.visible;
+      if (canSpawnBow) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnBowPickup(spawnPos);
+        }
+      }
+
       const hasSword = (inventoryState?.autumnSword?.count || 0) > 0;
       const canSpawnSword = autumnSword?.mesh && !autumnSword.holder && !hasSword && !autumnSword.mesh.visible;
       if (canSpawnSword) {
@@ -3225,7 +3595,7 @@ async function main() {
       }
     }
 
-    [iceGun, autumnSword].forEach((weapon) => {
+    [iceGun, bow, autumnSword].forEach((weapon) => {
       if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
       if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
         weapon.mesh.visible = false;
@@ -4282,9 +4652,7 @@ async function main() {
 
       // Simple cleanup: remove if it falls far below the world
       if (mesh.position.y < -50) {
-        scene.remove(mesh);
-        mesh.geometry.dispose();
-        mesh.material.dispose();
+        disposeSceneObject(mesh);
         rbToMesh.delete(rb);
         rapierWorld.removeRigidBody(rb);
       }
@@ -4402,13 +4770,25 @@ async function main() {
         pickup.rotation.y += 0.03;
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        if (pickup.userData.sparkle && pickup.userData.sparkleLight) {
+          pickup.userData.sparkleLight.intensity = 0.4 + Math.sin(pickupTime * 2 + phase) * 0.3;
+        }
 
         if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
+          const ammoType = pickup.userData.type || 'ammo';
           const amount = Number.isFinite(pickup.userData.amount)
             ? pickup.userData.amount
             : AMMO_PICKUP_AMOUNT;
-          playerControls.addAmmo(amount);
-          showAmmoPopup(playerControls.ammo);
+          addAmmoForType(ammoType, amount);
+          const popupLabel = getAmmoLabelForType(ammoType);
+          const displayAmount = ammoType === 'arrow'
+            ? (bow?.holder === playerControls
+              ? playerControls.ammo
+              : inventoryState.bow?.[ARROW_AMMO_KEY] ?? amount)
+            : (iceGun?.holder === playerControls
+              ? playerControls.ammo
+              : inventoryState.iceGun?.[ICE_AMMO_KEY] ?? amount);
+          showAmmoPopup(displayAmount, popupLabel);
           disposePickup(pickup);
           ammoPickups.splice(i, 1);
         }
@@ -4432,8 +4812,11 @@ async function main() {
           const amount = Number.isFinite(entry.amount)
             ? entry.amount
             : (Number.isFinite(pickup.userData.amount) ? pickup.userData.amount : AMMO_PICKUP_AMOUNT);
-          playerControls.addAmmo(amount);
-          showAmmoPopup(playerControls.ammo);
+          addAmmoForType('ammo', amount);
+          const displayAmount = iceGun?.holder === playerControls
+            ? playerControls.ammo
+            : (inventoryState.iceGun?.[ICE_AMMO_KEY] ?? amount);
+          showAmmoPopup(displayAmount, getAmmoLabelForType('ammo'));
           removeDroppedAmmoPickup(id);
           if (multiplayer && !multiplayer.isHost) {
             pendingDropRemovals.add(id);
@@ -4504,6 +4887,7 @@ async function main() {
     autumnSword?.update();
     lantern?.update();
     updateWeaponMarker(iceGun, iceGunMarker, 0.03);
+    updateWeaponMarker(bow, bowMarker, 0.03);
     updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
     updateWeaponMarker(lantern, lanternMarker, 0.03);
     const localStates = collectLocalControlStates();

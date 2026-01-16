@@ -1,39 +1,63 @@
 import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 
-export function spawnProjectile(scene, projectiles, position, direction, shooterId) {
+const disposeProjectileMesh = (mesh) => {
+  if (!mesh) return;
+  if (mesh.parent) {
+    mesh.parent.remove(mesh);
+  }
+  mesh.traverse(child => {
+    if (!child.isMesh) return;
+    if (child.geometry) {
+      child.geometry.dispose();
+    }
+    const materials = Array.isArray(child.material) ? child.material : [child.material];
+    materials.forEach(material => material?.dispose?.());
+  });
+};
+
+export function spawnProjectile(scene, projectiles, position, direction, shooterId, options = {}) {
   const size = 0.5;
   const half = size / 2;
-  const geometry = new THREE.BoxGeometry(size, size, size);
-  const color = new THREE.Color(Math.random(), Math.random(), Math.random());
+  const geometry = options.geometry || new THREE.BoxGeometry(size, size, size);
+  const color = options.color || new THREE.Color(Math.random(), Math.random(), Math.random());
   const material = new THREE.MeshStandardMaterial({ color });
-  const box = new THREE.Mesh(geometry, material);
+  let mesh = options.createMesh ? options.createMesh() : null;
+  if (!mesh) {
+    mesh = new THREE.Mesh(geometry, material);
+  }
   const spawnPosition = position.clone();
-  box.position.copy(spawnPosition);
+  mesh.position.copy(spawnPosition);
   const groundY = half;
-  if (box.position.y < groundY) {
-    box.position.y = groundY;
+  if (mesh.position.y < groundY) {
+    mesh.position.y = groundY;
   }
 
   // Rapier body
   const world = window.rapierWorld;
-  const rbDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(box.position.x, box.position.y, box.position.z);
+  const rbDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(mesh.position.x, mesh.position.y, mesh.position.z);
   const rb = world.createRigidBody(rbDesc);
-  const colDesc = RAPIER.ColliderDesc.cuboid(half, half, half).setRestitution(0.2).setFriction(0.5);
+  const colDesc = options.colliderDesc || RAPIER.ColliderDesc.cuboid(half, half, half)
+    .setRestitution(0.2)
+    .setFriction(0.5);
   world.createCollider(colDesc, rb);
-  const speed = 10;
+  const speed = Number.isFinite(options.speed) ? options.speed : 10;
   const vel = direction.clone().normalize().multiplyScalar(speed);
   rb.setLinvel({ x: vel.x, y: vel.y, z: vel.z }, true);
 
-  window.rbToMesh.set(rb, box);
+  window.rbToMesh.set(rb, mesh);
 
-  box.userData.rb = rb;
-  box.userData.velocity = vel.clone();
-  box.userData.lifetime = 4000;
-  box.userData.spawnTime = Date.now();
-  box.userData.shooterId = shooterId;
-  scene.add(box);
-  projectiles.push(box);
+  mesh.userData.rb = rb;
+  mesh.userData.velocity = vel.clone();
+  mesh.userData.lifetime = Number.isFinite(options.lifetime) ? options.lifetime : 4000;
+  mesh.userData.spawnTime = Date.now();
+  mesh.userData.shooterId = shooterId;
+  mesh.userData.pickupOnRest = options.pickupOnRest ?? false;
+  mesh.userData.pickupAmount = options.pickupAmount ?? 0;
+  mesh.userData.spawnPickup = options.spawnPickup ?? null;
+  mesh.userData.isArrow = options.isArrow ?? false;
+  scene.add(mesh);
+  projectiles.push(mesh);
 }
 
 export function updateProjectiles({
@@ -60,9 +84,7 @@ export function updateProjectiles({
   const removeProjectile = (index) => {
     const p = projectiles[index];
     const body = p.userData.rb;
-    scene.remove(p);
-    if (p.geometry) p.geometry.dispose();
-    if (p.material) p.material.dispose();
+    disposeProjectileMesh(p);
     projectiles.splice(index, 1);
     window.rbToMesh.delete(body);
     if (window.rapierWorld?.getRigidBody(body.handle)) {
@@ -89,11 +111,27 @@ export function updateProjectiles({
 
     const vel = new THREE.Vector3(linvel.x, linvel.y, linvel.z);
     proj.userData.velocity = vel.clone();
+    if (proj.userData.isArrow && vel.lengthSq() > 0.0001) {
+      const forward = new THREE.Vector3(0, 0, 1);
+      proj.quaternion.setFromUnitVectors(forward, vel.clone().normalize());
+    }
 
     proj.userData.lifetime -= 16;
     if (proj.userData.lifetime <= 0) {
+      if (proj.userData.pickupOnRest && typeof proj.userData.spawnPickup === 'function') {
+        proj.userData.spawnPickup(proj.position.clone(), proj.userData.pickupAmount || 1);
+      }
       removeProjectile(i);
       continue;
+    }
+
+    if (proj.userData.pickupOnRest && typeof proj.userData.spawnPickup === 'function') {
+      const speed = vel.length();
+      if (speed < 0.6 && proj.position.y <= 1.0) {
+        proj.userData.spawnPickup(proj.position.clone(), proj.userData.pickupAmount || 1);
+        removeProjectile(i);
+        continue;
+      }
     }
 
     const age = Date.now() - proj.userData.spawnTime;

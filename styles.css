@@ -131,7 +131,11 @@ body {
   transform: translate(-50%, -50%);
   pointer-events: none;
   z-index: 1000;
-  display: none; /* Hide crosshair for third-person view */
+  display: none; /* Hidden until aiming */
+}
+
+.crosshair.visible {
+  display: block;
 }
 
 .crosshair::before,
