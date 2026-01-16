@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export const LANTERN_LIGHT_SETTINGS = {
-  intensity: 2.4,
-  distance: 10,
-  decay: 2,
+  intensity: 2.6,
+  distance: 27,
+  decay: 1,
   emissiveIntensity: 1.2
 };
 
@@ -18,7 +18,7 @@ export const ROAD_LIGHT_SETTINGS = {
 export const LIGHT_SOURCE_CONFIGS = {
   lantern: {
     modelUrl: '/assets/props/lantern.glb',
-    scale: 0.7,
+    scale: 0.1,
     emissiveColor: 0xffc16b,
     lightColor: 0xffd9a3,
     lightOffset: new THREE.Vector3(0, 0.6, 0),

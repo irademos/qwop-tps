@@ -123,7 +123,9 @@ export async function createNature({
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
   let tileBuffer = activeTileCache?.evictRadiusTiles ?? TREE_TILE_BUFFER;
 
-  const isDebugEnabled = () => Boolean(globalThis?.DEBUG_TREE_BLOCKERS);
+  // const isDebugEnabled = () => Boolean(globalThis?.DEBUG_TREE_BLOCKERS);
+  const isDebugEnabled = () => Boolean(true);
+
 
   const disposeDebugEntry = (entry) => {
     if (!entry) return;
