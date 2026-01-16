@@ -116,19 +116,25 @@ export function createMapRenderer({
   const lineMaterials = new Map();
   const fallbackMaterials = new Map();
   const resolution = new THREE.Vector2(1, 1);
+  const baseColor = new THREE.Color(color);
+  let brightness = 1;
 
   const useWideLines = Boolean(Line2 && LineGeometry && LineMaterial);
 
   function getLineMaterial(width) {
     if (!lineMaterials.has(width)) {
-      lineMaterials.set(width, makeLineMaterial(width, color));
+      const material = makeLineMaterial(width, color);
+      material.color.copy(baseColor).multiplyScalar(brightness);
+      lineMaterials.set(width, material);
     }
     return lineMaterials.get(width);
   }
 
   function getFallbackMaterial(width) {
     if (!fallbackMaterials.has(width)) {
-      fallbackMaterials.set(width, makeFallbackMaterial(width, color));
+      const material = makeFallbackMaterial(width, color);
+      material.color.copy(baseColor).multiplyScalar(brightness);
+      fallbackMaterials.set(width, material);
     }
     return fallbackMaterials.get(width);
   }
@@ -199,6 +205,20 @@ export function createMapRenderer({
       if (line) {
         line.visible = false;
       }
+    }
+  }
+
+  function setBrightness(nextBrightness) {
+    const clamped = Math.min(Math.max(nextBrightness, 0), 1);
+    if (brightness === clamped) return;
+    brightness = clamped;
+    for (const material of lineMaterials.values()) {
+      material.color.copy(baseColor).multiplyScalar(brightness);
+      material.needsUpdate = true;
+    }
+    for (const material of fallbackMaterials.values()) {
+      material.color.copy(baseColor).multiplyScalar(brightness);
+      material.needsUpdate = true;
     }
   }
 
@@ -309,6 +329,7 @@ export function createMapRenderer({
     removeTile,
     clearTiles,
     setResolution,
+    setBrightness,
     dispose
   };
 }

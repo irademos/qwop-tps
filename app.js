@@ -264,11 +264,46 @@ async function main() {
   };
   const DISPLAY_MODES = new Set(['auto', 'day', 'night']);
   const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
+  const pickupEmissiveMaterials = new Set();
+  let pickupEmissiveBrightness = 1;
   const captureMaterialBase = (material) => {
     if (!material) return null;
     const color = material.color?.clone ? material.color.clone() : new THREE.Color(0xffffff);
     const emissiveIntensity = typeof material.emissiveIntensity === 'number' ? material.emissiveIntensity : 0;
     return { color, emissiveIntensity };
+  };
+  const registerPickupEmissiveMaterials = (target) => {
+    const registerMaterial = (material) => {
+      if (!material || typeof material.emissiveIntensity !== 'number') return;
+      material.userData = material.userData || {};
+      if (typeof material.userData.baseEmissiveIntensity !== 'number') {
+        material.userData.baseEmissiveIntensity = material.emissiveIntensity;
+      }
+      pickupEmissiveMaterials.add(material);
+      material.emissiveIntensity = material.userData.baseEmissiveIntensity * pickupEmissiveBrightness;
+      material.needsUpdate = true;
+    };
+    if (!target) return;
+    if (Array.isArray(target)) {
+      target.forEach(registerMaterial);
+      return;
+    }
+    if (target.isMaterial) {
+      registerMaterial(target);
+      return;
+    }
+    if (target.isMesh) {
+      const materials = Array.isArray(target.material) ? target.material : [target.material];
+      materials.forEach(registerMaterial);
+      return;
+    }
+    if (typeof target.traverse === 'function') {
+      target.traverse((child) => {
+        if (!child.isMesh) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach(registerMaterial);
+      });
+    }
   };
   const applyMaterialBrightness = (material, base, brightness) => {
     if (!material || !base) return;
@@ -327,6 +362,12 @@ async function main() {
     const skyBase = SKY_COLORS[effectiveMode] || SKY_COLORS.day;
     const skyBrightness = clampValue(displaySettings.skyBrightness, 0.1, 1.6);
     const skyColor = skyBase.clone().multiplyScalar(skyBrightness);
+    const pickupBrightness = clampValue(
+      (displaySettings.ambientIntensity + displaySettings.directionalIntensity) / 2,
+      0,
+      1
+    );
+    pickupEmissiveBrightness = pickupBrightness;
     if (scene) {
       scene.background = skyColor;
     }
@@ -339,6 +380,13 @@ async function main() {
     applyMaterialBrightness(groundTiles?.material, groundMaterialBase, displaySettings.groundBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, displaySettings.buildingBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, displaySettings.buildingBrightness);
+    mapRenderer?.setBrightness?.(pickupBrightness);
+    for (const material of pickupEmissiveMaterials) {
+      if (!material || typeof material.emissiveIntensity !== 'number') continue;
+      const base = material.userData?.baseEmissiveIntensity ?? material.emissiveIntensity;
+      material.emissiveIntensity = base * pickupBrightness;
+      material.needsUpdate = true;
+    }
   };
 
   const updateAutoDisplayMode = () => {
@@ -3039,6 +3087,7 @@ async function main() {
     if (!pickup) {
       pickup = new THREE.Mesh(geometry, material);
     }
+    registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
     pickup.userData.skipTerrainCorrection = true;
@@ -3135,6 +3184,7 @@ async function main() {
     });
 
     const pickup = new THREE.Mesh(geometry, material);
+    registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
     pickup.userData.skipTerrainCorrection = true;
@@ -3215,6 +3265,7 @@ async function main() {
     });
 
     const pickup = new THREE.Mesh(geometry, material);
+    registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
     pickup.userData.skipTerrainCorrection = true;
@@ -3243,6 +3294,7 @@ async function main() {
     });
 
     const pickup = new THREE.Mesh(geometry, material);
+    registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
     pickup.userData.skipTerrainCorrection = true;
@@ -3271,6 +3323,7 @@ async function main() {
     });
 
     const pickup = new THREE.Mesh(geometry, material);
+    registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
     pickup.userData.skipTerrainCorrection = true;
