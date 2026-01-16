@@ -1838,7 +1838,7 @@ async function main() {
     return swordMesh;
   };
 
-  const loadArrowTemplate = async () => {
+  async function loadArrowTemplate() {
     if (arrowTemplate) return arrowTemplate;
     if (!arrowTemplatePromise) {
       const loader = new GLTFLoader();
@@ -1857,9 +1857,9 @@ async function main() {
         });
     }
     return arrowTemplatePromise;
-  };
+  }
 
-  const cloneArrowMesh = (template, scale = ARROW_PROJECTILE_SCALE) => {
+  function cloneArrowMesh(template, scale = ARROW_PROJECTILE_SCALE) {
     if (!template) return null;
     const arrowMesh = template.clone(true);
     arrowMesh.traverse(child => {
@@ -1875,7 +1875,7 @@ async function main() {
     });
     arrowMesh.scale.setScalar(scale);
     return arrowMesh;
-  };
+  }
 
   function cleanupMonster(monster) {
     if (!monster) return;

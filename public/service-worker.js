@@ -8,7 +8,6 @@ const CORE_ASSETS = [
   '/index.html',
   '/app.js',
   '/styles.css',
-  '/manifest.webmanifest',
   '/models/cowboy.fbx',
   '/models/animations/Breathing Idle.fbx',
   '/models/animations/Old Man Walk.fbx',
@@ -17,7 +16,11 @@ const CORE_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CORE_CACHE).then((cache) => cache.addAll(CORE_ASSETS))
+    caches.open(CORE_CACHE)
+      .then((cache) => cache.addAll(CORE_ASSETS))
+      .catch((error) => {
+        console.warn('Core cache prefetch failed:', error);
+      })
   );
   self.skipWaiting();
 });
