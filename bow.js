@@ -6,7 +6,7 @@ export class Bow extends Weapon {
       itemId: 'bow',
       type: 'bow',
       modelUrl: '/assets/props/bow.glb',
-      scale: 0.001,
+      scale: 0.3,
       fallbackColor: 0x8b5a2b
     });
   }
