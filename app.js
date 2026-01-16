@@ -15,9 +15,9 @@ import { BreakManager } from './breakManager.js';
 import { initSpeechCommands } from './speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import { IceGun } from './iceGun.js';
+import { Lantern } from './lantern.js';
 import { AutumnSword } from './autumnSword.js';
 import { createNature } from './nature.js';
-import { createLightSources } from './light_sources.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
@@ -1106,6 +1106,7 @@ async function main() {
 
   let iceGun;
   let autumnSword;
+  let lantern;
 
   const breakManager = new BreakManager(scene);
   // Expose to window for debugging
@@ -1245,6 +1246,10 @@ async function main() {
   const iceGunMarker = createWeaponMarker(0xffd400);
   iceGun.onPickup = (holder) => {
     if (holder !== playerControls) return;
+    if (lantern?.holder === playerControls) {
+      iceGun.holder = null;
+      return;
+    }
     dropOtherWeapons(iceGun);
     addToInventory('iceGun', 1);
     setPlayerWeaponType(holder, iceGun.type);
@@ -1299,6 +1304,10 @@ async function main() {
   const autumnSwordMarker = createWeaponMarker(0xffd400);
   autumnSword.onPickup = (holder) => {
     if (holder !== playerControls) return;
+    if (lantern?.holder === playerControls) {
+      autumnSword.holder = null;
+      return;
+    }
     dropOtherWeapons(autumnSword);
     addToInventory('autumnSword', 1);
     setPlayerWeaponType(holder, autumnSword.type);
@@ -1377,6 +1386,53 @@ async function main() {
   playerModel.userData.hideInMapView = true;
   scene.add(playerModel);
   window.playerModel = playerModel;
+  lantern = new Lantern(scene);
+  await lantern.load(playerModel.position.clone().add(new THREE.Vector3(2.5, 0, 2)));
+  window.lantern = lantern;
+  const lanternMarker = createWeaponMarker(0xffd400);
+  lantern.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    addToInventory('lantern', 1);
+  };
+  lantern.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('lantern', 1);
+    }
+  };
+  if (lantern.mesh) {
+    lantern.mesh.userData.hideInMapView = true;
+  }
+  registerNetworkedEntity('lantern', {
+    getState: () => {
+      if (!lantern?.mesh) return null;
+      const pos = lantern.mesh.position;
+      const q = lantern.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: lantern.holder === playerControls ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!lantern?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        lantern.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        lantern.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      lantern.remoteHolderId = state.holderId ?? null;
+      if (state.holderId !== multiplayer?.getId?.() && lantern.holder === playerControls) {
+        lantern.holder = null;
+      }
+    },
+    isLocallyControlled: () => lantern?.holder === playerControls
+  });
+
+  window.weapons = { iceGun, autumnSword, lantern };
   const getTreeGeoForLocal = (position) => {
     if (!position) return null;
     const origin = worldOrigin
@@ -1460,13 +1516,7 @@ async function main() {
     return lifted;
   };
 
-  const lightSources = await createLightSources({
-    scene,
-    playerModel,
-    getTerrainHeight,
-    liftPositionToBuildingTop
-  });
-  window.lightSources = lightSources;
+  window.lightSources = [];
 
   const liftMonsterToBuildingTop = (monster, heightOffset = 0.5) => {
     if (!monster?.model) return false;
@@ -1525,6 +1575,9 @@ async function main() {
     }
     if (!autumnSword?.holder) {
       liftMeshToBuildingTop(autumnSword?.mesh, 0.5);
+    }
+    if (!lantern?.holder) {
+      liftMeshToBuildingTop(lantern?.mesh, 0.3);
     }
   };
 
@@ -2103,6 +2156,10 @@ async function main() {
     autumnSword: {
       name: 'Autumn Sword',
       icon: ''
+    },
+    lantern: {
+      name: 'Lantern',
+      icon: ''
     }
   };
   const inventoryState = { ...(playerProfile.inventory || {}) };
@@ -2194,6 +2251,9 @@ async function main() {
   }
 
   function isInventoryItemEquipped(itemId) {
+    if (itemId === 'lantern') {
+      return lantern?.holder === playerControls;
+    }
     if (itemId === 'iceGun') {
       return iceGun?.holder === playerControls;
     }
@@ -2204,6 +2264,7 @@ async function main() {
   }
 
   function getEquippedInventoryItemId() {
+    if (isInventoryItemEquipped('lantern')) return 'lantern';
     if (isInventoryItemEquipped('iceGun')) return 'iceGun';
     if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
     return null;
@@ -2211,6 +2272,16 @@ async function main() {
 
   function equipInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
+    if (itemId !== 'lantern' && lantern?.holder === playerControls) return;
+    if (itemId === 'lantern') {
+      if (!lantern?.mesh || !playerControls) return;
+      if (lantern.remoteHolderId && lantern.remoteHolderId !== multiplayer?.getId?.()) return;
+      lantern.mesh.visible = true;
+      lantern.holder = playerControls;
+      dropOtherWeapons();
+      updateSettingsUI();
+      return;
+    }
     if (itemId === 'iceGun') {
       if (!iceGun?.mesh || !playerControls) return;
       if (iceGun.remoteHolderId && iceGun.remoteHolderId !== multiplayer?.getId?.()) return;
@@ -2234,6 +2305,12 @@ async function main() {
   }
 
   function unequipInventoryItem(itemId) {
+    if (itemId === 'lantern') {
+      if (lantern?.holder !== playerControls) return;
+      lantern.drop({ removeFromInventory: true });
+      updateSettingsUI();
+      return;
+    }
     if (itemId === 'iceGun') {
       if (iceGun?.holder !== playerControls) return;
       iceGun.holder = null;
@@ -2348,6 +2425,7 @@ async function main() {
     const weaponDrops = [];
     if ((inventoryState.iceGun?.count || 0) > 0) weaponDrops.push('iceGun');
     if ((inventoryState.autumnSword?.count || 0) > 0) weaponDrops.push('autumnSword');
+    if ((inventoryState.lantern?.count || 0) > 0) weaponDrops.push('lantern');
     const weaponPositions = createRingPositions(deathPosition, weaponDrops.length, 2.2);
     weaponDrops.forEach((weaponId, index) => {
       const position = weaponPositions[index] || deathPosition;
@@ -2355,6 +2433,8 @@ async function main() {
         spawnIceGunPickup(position);
       } else if (weaponId === 'autumnSword') {
         spawnAutumnSwordPickup(position);
+      } else if (weaponId === 'lantern') {
+        spawnLanternPickup(position);
       }
     });
 
@@ -2894,6 +2974,21 @@ async function main() {
     autumnSword.mesh.quaternion.set(0, 0, 0, 1);
     autumnSword.mesh.visible = true;
     autumnSword.holder = null;
+  }
+
+  function spawnLanternPickup(position) {
+    if (!lantern?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (!Number.isFinite(terrainHeight)) return;
+
+    spawnPos.y = terrainHeight + 0.2;
+    lantern.mesh.position.copy(spawnPos);
+    lantern.mesh.quaternion.set(0, 0, 0, 1);
+    lantern.mesh.visible = true;
+    lantern.holder = null;
   }
 
   registerNetworkedEntity('droppedAmmo', {
@@ -4407,8 +4502,10 @@ async function main() {
 
     iceGun?.update();
     autumnSword?.update();
+    lantern?.update();
     updateWeaponMarker(iceGun, iceGunMarker, 0.03);
     updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
+    updateWeaponMarker(lantern, lanternMarker, 0.03);
     const localStates = collectLocalControlStates();
 
     if (multiplayer.isHost) {
