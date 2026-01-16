@@ -235,6 +235,10 @@ async function main() {
   const droppedAmmoPickups = new Map();
   const pendingDropRemovals = new Set();
   const AMMO_PICKUP_AMOUNT = 5;
+  const ICE_AMMO_KEY = 'ice ammo';
+  const ARROW_AMMO_KEY = 'arrow ammo';
+  const DEFAULT_ICE_AMMO = 10;
+  const DEFAULT_ARROW_AMMO = 5;
   const COIN_PICKUP_GAIN = 1;
   const foodPickups = [];
   const healthPickups = [];
@@ -2284,10 +2288,6 @@ async function main() {
       coinPopupTimer = null;
     }, 1600);
   };
-  const ICE_AMMO_KEY = 'ice ammo';
-  const ARROW_AMMO_KEY = 'arrow ammo';
-  const DEFAULT_ICE_AMMO = 10;
-  const DEFAULT_ARROW_AMMO = 5;
   const inventoryCatalog = {
     iceGun: {
       name: 'Ice Gun',
