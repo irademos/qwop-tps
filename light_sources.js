@@ -34,7 +34,7 @@ export const LIGHT_SOURCE_CONFIGS = {
   }
 };
 
-const applyEmissiveGlow = (model, color, intensity) => {
+export const applyEmissiveGlow = (model, color, intensity) => {
   if (!model) return;
   model.traverse(child => {
     if (!child.isMesh || !child.material) return;
