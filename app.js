@@ -96,7 +96,7 @@ const MONSTER_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'Y
 const MONSTER_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(MONSTER_SWORD_HOLD_ROTATION);
 const ARROW_MODEL_URL = '/assets/props/arrow.glb';
 const ARROW_PROJECTILE_SCALE = 2.2;
-const ARROW_PROJECTILE_SPEED = 5;
+const ARROW_PROJECTILE_SPEED = 20;
 const ARROW_PROJECTILE_LIFETIME = 12000;
 
 
@@ -3115,7 +3115,7 @@ async function main() {
       noFloat: options.noFloat,
       groundOffset: options.groundOffset,
       createMesh: () => {
-        const arrowMesh = cloneArrowMesh(arrowTemplate, 0.05);
+        const arrowMesh = cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE);
         if (arrowMesh) {
           if (amount > 1) {
             arrowMesh.scale.multiplyScalar(1.3);
