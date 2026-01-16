@@ -1325,6 +1325,20 @@ async function main() {
   await bow.load();
   window.bow = bow;
   await loadArrowTemplate();
+  let bowHeldArrow = null;
+  const ensureBowHeldArrow = () => {
+    if (bowHeldArrow || !arrowTemplate) return bowHeldArrow;
+    bowHeldArrow = cloneArrowMesh(arrowTemplate, 0.12);
+    if (!bowHeldArrow) return null;
+    bowHeldArrow.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    bowHeldArrow.visible = false;
+    bowHeldArrow.userData.hideInMapView = true;
+    return bowHeldArrow;
+  };
   const bowMarker = createWeaponMarker(0xffc26b);
   bow.onPickup = (holder) => {
     if (holder !== playerControls) return;
@@ -1341,6 +1355,12 @@ async function main() {
       getAmmoLabelForType('arrow'),
       getAmmoIconForType('arrow')
     );
+    const heldArrow = ensureBowHeldArrow();
+    if (heldArrow && bow.mesh && !heldArrow.parent) {
+      bow.mesh.add(heldArrow);
+      heldArrow.position.set(0, 0, 0);
+      heldArrow.quaternion.identity();
+    }
   };
   bow.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
@@ -1350,6 +1370,9 @@ async function main() {
     clearPlayerWeaponType(holder, bow.type);
     playerControls?.updateAmmoUI?.(false);
     playerControls?.setAiming?.(false);
+    if (bowHeldArrow) {
+      bowHeldArrow.visible = false;
+    }
   };
   if (bow.mesh) {
     bow.mesh.userData.hideInMapView = true;
@@ -2845,7 +2868,7 @@ async function main() {
       lifetime: ARROW_PROJECTILE_LIFETIME,
       pickupOnRest: true,
       pickupAmount: 1,
-      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount),
+      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount, { noFloat: true }),
       isArrow: true
     });
 
@@ -2995,8 +3018,13 @@ async function main() {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
-    liftPositionToBuildingTop(spawnPos, 0.6);
+    if (options.noFloat) {
+      const groundOffset = Number.isFinite(options.groundOffset) ? options.groundOffset : 0.08;
+      spawnPos.y = terrainHeight + groundOffset;
+    } else {
+      spawnPos.y = terrainHeight + 0.6;
+      liftPositionToBuildingTop(spawnPos, 0.6);
+    }
 
     const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
     const material = options.material || new THREE.MeshStandardMaterial({
@@ -3019,6 +3047,7 @@ async function main() {
     pickup.userData.amount = amount;
     pickup.userData.type = options.type || 'ammo';
     pickup.userData.sparkle = !!options.sparkle;
+    pickup.userData.noFloat = !!options.noFloat;
     if (options.sparkle) {
       const light = new THREE.PointLight(0xfff2a8, 0.6, 2);
       light.position.set(0, 0.4, 0);
@@ -3030,10 +3059,12 @@ async function main() {
     return pickup;
   }
 
-  function spawnArrowPickup(position, amount = 1) {
+  function spawnArrowPickup(position, amount = 1, options = {}) {
     return spawnAmmoPickup(position, amount, {
       type: 'arrow',
       sparkle: true,
+      noFloat: options.noFloat,
+      groundOffset: options.groundOffset,
       createMesh: () => {
         const arrowMesh = cloneArrowMesh(arrowTemplate, 0.05);
         if (arrowMesh) {
@@ -4767,9 +4798,11 @@ async function main() {
           pickup.userData.baseY = pickup.position.y;
         }
 
-        pickup.rotation.y += 0.03;
         const phase = pickup.userData.phase ?? 0;
-        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        if (!pickup.userData.noFloat) {
+          pickup.rotation.y += 0.03;
+          pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        }
         if (pickup.userData.sparkle && pickup.userData.sparkleLight) {
           pickup.userData.sparkleLight.intensity = 0.4 + Math.sin(pickupTime * 2 + phase) * 0.3;
         }
@@ -4884,8 +4917,13 @@ async function main() {
     }
 
     iceGun?.update();
+    bow?.update();
     autumnSword?.update();
     lantern?.update();
+    if (bowHeldArrow) {
+      const shouldShowArrow = bow?.holder === playerControls && playerControls?.isFireHeld;
+      bowHeldArrow.visible = shouldShowArrow;
+    }
     updateWeaponMarker(iceGun, iceGunMarker, 0.03);
     updateWeaponMarker(bow, bowMarker, 0.03);
     updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
