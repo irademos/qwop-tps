@@ -716,6 +716,7 @@ function renderInventory() {
   const equippedItemId = context.appState?.getEquippedInventoryItemId?.() || null;
   const fallbackIcons = {
     iceGun: '❄️',
+    bow: '🏹',
     autumnSword: '🗡️',
     lantern: '🏮'
   };
@@ -771,6 +772,11 @@ function renderInventory() {
       const ammoLabel = createElement('span', 'inventory-ammo', `Ice ammo: ${ammoCount}`);
       button.appendChild(ammoLabel);
     }
+    if (itemId === 'bow') {
+      const ammoCount = Number.isFinite(item?.['arrow ammo']) ? item['arrow ammo'] : 0;
+      const ammoLabel = createElement('span', 'inventory-ammo', `Arrows: ${ammoCount}`);
+      button.appendChild(ammoLabel);
+    }
 
     elements.inventoryGrid.appendChild(button);
   });
@@ -781,7 +787,9 @@ function renderInventory() {
     const countText = selectedItem.count ? ` • Qty ${selectedItem.count}` : '';
     const ammoText = selectedInventoryId === 'iceGun'
       ? ` • Ice ammo ${Number.isFinite(selectedItem?.['ice ammo']) ? selectedItem['ice ammo'] : 0}`
-      : '';
+      : selectedInventoryId === 'bow'
+        ? ` • Arrows ${Number.isFinite(selectedItem?.['arrow ammo']) ? selectedItem['arrow ammo'] : 0}`
+        : '';
     elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${equippedText}${countText}${ammoText}`;
   }
 }

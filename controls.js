@@ -74,6 +74,7 @@ export class PlayerControls {
     multiplayer,
     spawnProjectile,
     projectiles,
+    spawnArrowProjectile,
     spawnIceMist,
     iceMists,
     audioManager,
@@ -93,6 +94,7 @@ export class PlayerControls {
     this.wasMoving = false;
     this.isMoving = false;
     this.spawnProjectile = spawnProjectile;
+    this.spawnArrowProjectile = spawnArrowProjectile;
     this.projectiles = projectiles;
     this.spawnIceMist = spawnIceMist;
     this.iceMists = iceMists;
@@ -200,6 +202,11 @@ export class PlayerControls {
     this.dialogueIndex = 0;
     this.awaitingResponse = false;
     this.awaitingExit = false;
+    this.crosshairEl = document.querySelector('.crosshair');
+    this.defaultFov = this.camera.fov;
+    this.aimFov = Math.max(45, this.defaultFov - 10);
+    this.isAiming = false;
+    this.isFireHeld = false;
 
     if (this.isMobile && this.interactionPromptEl) {
       const activateInteraction = (event) => {
@@ -226,9 +233,15 @@ export class PlayerControls {
     this.maxAmmo = 30;
     this.ammoContainerEl = document.getElementById('ammo-display');
     this.ammoCountEl = document.getElementById('ammo-count');
+    this.ammoIconEl = document.getElementById('ammo-icon');
+    this.ammoLabel = 'Ice ammo';
+    this.ammoIcon = '❄️';
     this.lastAmmoValue = null;
     this.lastAmmoEmpty = null;
     this.lastHasGun = null;
+    if (this.ammoIconEl) {
+      this.ammoIconEl.textContent = this.ammoIcon;
+    }
     this.updateAmmoUI(!!this.getEquippedGun());
     this.onAmmoChange?.(this.ammo);
   }
@@ -423,11 +436,31 @@ export class PlayerControls {
       actionContainer.appendChild(newFireButton);
     }
 
-    document.getElementById('fire-button').addEventListener('touchstart', (event) => {
+    const fireButton = document.getElementById('fire-button');
+    fireButton.addEventListener('touchstart', (event) => {
       if (!this.enabled) return;
+      if (this.shouldHoldToFire()) {
+        this.isFireHeld = true;
+        this.setAiming(true);
+        event.preventDefault();
+        return;
+      }
       if (this.attemptFireProjectile()) {
         event.preventDefault();
       }
+    });
+    fireButton.addEventListener('touchend', (event) => {
+      if (!this.enabled) return;
+      if (!this.isFireHeld) return;
+      this.isFireHeld = false;
+      this.setAiming(false);
+      this.attemptFireProjectile();
+      event.preventDefault();
+    });
+    fireButton.addEventListener('touchcancel', () => {
+      if (!this.enabled) return;
+      this.isFireHeld = false;
+      this.setAiming(false);
     });
 
     // Kick button
@@ -560,9 +593,29 @@ export class PlayerControls {
       }
     });
 
+    this.domElement.addEventListener('mousedown', (event) => {
+      if (!this.enabled || this.isMobile) return;
+      if (event.button !== 0) return;
+      if (this.shouldHoldToFire()) {
+        this.isFireHeld = true;
+        this.setAiming(true);
+      }
+    });
+
+    this.domElement.addEventListener('mouseup', (event) => {
+      if (!this.enabled || this.isMobile) return;
+      if (event.button !== 0) return;
+      if (this.isFireHeld) {
+        this.isFireHeld = false;
+        this.setAiming(false);
+        this.attemptFireProjectile();
+      }
+    });
+
     this.domElement.addEventListener("click", (event) => {
       // Don't fire if chat or settings are open
       if (!this.enabled || this.isMobile) return;
+      if (this.shouldHoldToFire()) return;
       this.attemptFireProjectile();
     });
   }
@@ -1336,7 +1389,9 @@ export class PlayerControls {
   }
 
   getEquippedGun() {
-    return this.getWeapons().find(weapon => weapon.holder === this && weapon.type === 'gun') || null;
+    return this.getWeapons().find(
+      weapon => weapon.holder === this && (weapon.type === 'gun' || weapon.type === 'bow')
+    ) || null;
   }
 
   getEquippedSword() {
@@ -1353,6 +1408,7 @@ export class PlayerControls {
       if (!weapon) return 'weapon';
       if (weapon.type === 'sword') return 'sword';
       if (weapon.type === 'gun') return 'gun';
+      if (weapon.type === 'bow') return 'bow';
       if (weapon.type === 'lantern') return 'lantern';
       return 'weapon';
     };
@@ -1510,8 +1566,12 @@ export class PlayerControls {
 
     const gun = this.getEquippedGun();
     const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
+    const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
     const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
     const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
+    if (usesArrow) {
+      this.alignPlayerToDirection(direction);
+    }
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
@@ -1528,6 +1588,23 @@ export class PlayerControls {
       this.spawnIceMist(
         this.scene,
         this.iceMists,
+        position,
+        direction,
+        this.multiplayer.getId()
+      );
+    } else if (usesArrow) {
+      this.multiplayer.send({
+        type: 'projectile',
+        id: this.multiplayer.getId(),
+        position: position.toArray(),
+        direction: direction.toArray(),
+        weapon: 'bow'
+      });
+
+      this.playAction('projectile');
+      this.spawnArrowProjectile(
+        this.scene,
+        this.projectiles,
         position,
         direction,
         this.multiplayer.getId()
@@ -1550,6 +1627,27 @@ export class PlayerControls {
       );
     }
     return true;
+  }
+
+  shouldHoldToFire() {
+    const weapon = this.getEquippedWeapon();
+    return weapon?.itemId === 'bow';
+  }
+
+  setAiming(active) {
+    if (this.isAiming === active) return;
+    this.isAiming = active;
+    if (this.crosshairEl) {
+      this.crosshairEl.classList.toggle('visible', active);
+    }
+    this.camera.fov = active ? this.aimFov : this.defaultFov;
+    this.camera.updateProjectionMatrix();
+  }
+
+  alignPlayerToDirection(direction) {
+    if (!this.playerModel) return;
+    const yaw = Math.atan2(direction.x, direction.z);
+    this.playerModel.rotation.set(0, yaw, 0);
   }
 
   getProjectileSpawnPosition(direction) {
@@ -1577,8 +1675,17 @@ export class PlayerControls {
     this.setAmmo(nextAmmo);
   }
 
-  setAmmo(value) {
+  setAmmo(value, label = this.ammoLabel, icon = this.ammoIcon) {
     const nextAmmo = Math.max(0, Math.floor(value));
+    if (label) {
+      this.ammoLabel = label;
+    }
+    if (icon) {
+      this.ammoIcon = icon;
+      if (this.ammoIconEl) {
+        this.ammoIconEl.textContent = icon;
+      }
+    }
     if (nextAmmo === this.ammo) return;
     this.ammo = nextAmmo;
     this.updateAmmoUI(!!this.getEquippedGun());
