@@ -15,8 +15,8 @@ export class Lantern extends Weapon {
       scale: config.scale,
       fallbackSize: new THREE.Vector3(0.25, 0.4, 0.25),
       fallbackColor: config.emissiveColor,
-      holdOffset: new THREE.Vector3(0.05, 0.1, 0.08),
-      holdRotation: new THREE.Euler(0, Math.PI, 0, 'YXZ')
+      holdOffset: new THREE.Vector3(0.05, 0.55, 0.08),
+      holdRotation: new THREE.Euler(Math.PI, Math.PI, 0, 'YXZ') // add X flip
     });
     this.light = null;
     this._groundOffset = 0.2;
