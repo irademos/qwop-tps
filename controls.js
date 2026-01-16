@@ -991,6 +991,7 @@ export class PlayerControls {
     }
 
     if (!this.body) return;
+    this.updateAimingRotation();
     const t = this.body.translation();
     const vel = this.body.linvel();
 
@@ -1247,6 +1248,10 @@ export class PlayerControls {
       if (movement.length() > 0) {
         yawAngle = Math.atan2(movement.x, movement.z);
         // this.playerModel.rotation.y = yawAngle;
+      }
+      if (this.isFireHeld && this.shouldHoldToFire()) {
+        const aimDirection = this.getAimDirection(true);
+        yawAngle = Math.atan2(aimDirection.x, aimDirection.z);
       }
 
       
@@ -1567,11 +1572,7 @@ export class PlayerControls {
     const gun = this.getEquippedGun();
     const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
-    const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
-    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
-    if (usesArrow) {
-      this.alignPlayerToDirection(direction);
-    }
+    const direction = this.getAimDirection(usesArrow);
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
@@ -1642,6 +1643,21 @@ export class PlayerControls {
     }
     this.camera.fov = active ? this.aimFov : this.defaultFov;
     this.camera.updateProjectionMatrix();
+  }
+
+  getAimDirection(invertForBow = false) {
+    const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
+    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
+    if (invertForBow) {
+      direction.multiplyScalar(-1);
+    }
+    return direction;
+  }
+
+  updateAimingRotation() {
+    if (!this.isFireHeld || !this.shouldHoldToFire()) return;
+    const direction = this.getAimDirection(true);
+    this.alignPlayerToDirection(direction);
   }
 
   alignPlayerToDirection(direction) {
