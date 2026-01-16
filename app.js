@@ -1375,7 +1375,26 @@ async function main() {
   playerModel.userData.hideInMapView = true;
   scene.add(playerModel);
   window.playerModel = playerModel;
-  await createNature({ scene, playerModel, getTerrainHeight });
+  const getTreeGeoForLocal = (position) => {
+    if (!position) return null;
+    const origin = worldOrigin
+      ? { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon }
+      : currentRenderOrigin;
+    if (!origin) return null;
+    const lonScale = metersPerDegreeLon(origin.centerLat);
+    return {
+      lat: origin.centerLat + position.z / METERS_PER_DEGREE_LAT,
+      lon: origin.centerLon - position.x / lonScale
+    };
+  };
+  await createNature({
+    scene,
+    playerModel,
+    getTerrainHeight,
+    mapRenderer,
+    buildingsRenderer,
+    getGeoForLocal: getTreeGeoForLocal
+  });
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
