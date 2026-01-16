@@ -101,6 +101,7 @@ export class PlayerControls {
     this.knockbackRestYaw = 0;
     this.knockbackEndTime = 0;
     this.freezeEndTime = 0;
+    this.wasFrozen = false;
     this.slideMomentum = new THREE.Vector3();
     this.lastMoveDirection = new THREE.Vector3();
     this.grabbedTarget = null;
@@ -966,6 +967,12 @@ export class PlayerControls {
       if (this.isClimbing) {
         this.stopClimbing();
       }
+      this.wasFrozen = true;
+    } else if (this.wasFrozen) {
+      if (this.playerModel?.userData) {
+        this.playerModel.userData.currentAction = null;
+      }
+      this.wasFrozen = false;
     }
 
     const terrainY = getTerrainHeight(t.x, t.z);

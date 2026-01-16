@@ -2555,6 +2555,7 @@ async function main() {
     if (!mistList.length) return;
     const now = performance.now();
     const isHost = !multiplayer || multiplayer.isHost;
+    const localId = multiplayer?.getId?.();
 
     const removeMist = (index) => {
       const mist = mistList[index];
@@ -2583,10 +2584,14 @@ async function main() {
       mist.material.emissiveIntensity = THREE.MathUtils.lerp(0.6, 0, progress);
 
       if (playerModel && playerControls && !mist.hitTargets.has('local')) {
-        const distance = mist.group.position.distanceTo(playerModel.position);
-        if (distance <= mist.radius + 0.6) {
-          playerControls.applyFreeze(ICE_MIST_FREEZE_MS);
+        if (mist.shooterId && localId && mist.shooterId === localId) {
           mist.hitTargets.add('local');
+        } else {
+          const distance = mist.group.position.distanceTo(playerModel.position);
+          if (distance <= mist.radius + 0.6) {
+            playerControls.applyFreeze(ICE_MIST_FREEZE_MS);
+            mist.hitTargets.add('local');
+          }
         }
       }
 
