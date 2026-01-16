@@ -17,6 +17,7 @@ import { AudioManager } from './audioManager.js';
 import { IceGun } from './iceGun.js';
 import { AutumnSword } from './autumnSword.js';
 import { createNature } from './nature.js';
+import { createLightSources } from './light_sources.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
@@ -1436,6 +1437,14 @@ async function main() {
     }
     return lifted;
   };
+
+  const lightSources = await createLightSources({
+    scene,
+    playerModel,
+    getTerrainHeight,
+    liftPositionToBuildingTop
+  });
+  window.lightSources = lightSources;
 
   const liftMonsterToBuildingTop = (monster, heightOffset = 0.5) => {
     if (!monster?.model) return false;
