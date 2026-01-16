@@ -182,11 +182,8 @@ export async function createNature({
 
   const pointInPolygon = (point, rings) => {
     if (!rings?.length) return false;
-    if (!pointInRing(point, rings[0])) return false;
-    for (let i = 1; i < rings.length; i += 1) {
-      if (pointInRing(point, rings[i])) return false;
-    }
-    return true;
+    // Treat courtyards/holes as blocked too.
+    return pointInRing(point, rings[0]);
   };
 
   const isInsideBuildingFootprint = (position, tileKey) => {
