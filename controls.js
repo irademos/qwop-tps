@@ -1349,6 +1349,14 @@ export class PlayerControls {
     let promptText = '';
     let visible = false;
 
+    const getWeaponLabel = (weapon) => {
+      if (!weapon) return 'weapon';
+      if (weapon.type === 'sword') return 'sword';
+      if (weapon.type === 'gun') return 'gun';
+      if (weapon.type === 'lantern') return 'lantern';
+      return 'weapon';
+    };
+
     if (this.vehicle) {
       const type = this.vehicle.type;
       if (type === 'spaceship') {
@@ -1362,11 +1370,7 @@ export class PlayerControls {
     } else {
       const equippedWeapon = this.getEquippedWeapon();
       if (equippedWeapon) {
-        const weaponLabel = equippedWeapon.type === 'sword'
-          ? 'sword'
-          : equippedWeapon.type === 'gun'
-            ? 'gun'
-            : 'weapon';
+        const weaponLabel = getWeaponLabel(equippedWeapon);
         promptText = `'x' drop ${weaponLabel}`;
         visible = true;
       } else {
@@ -1392,11 +1396,7 @@ export class PlayerControls {
         consider(window.surfboard, 3, "'x' enter surfboard");
         this.getWeapons().forEach(weapon => {
           if (!weapon) return;
-          const weaponLabel = weapon.type === 'sword'
-            ? 'sword'
-            : weapon.type === 'gun'
-              ? 'gun'
-              : 'weapon';
+          const weaponLabel = getWeaponLabel(weapon);
           consider(weapon, 3, `'x' pick up ${weaponLabel}`);
         });
       }
