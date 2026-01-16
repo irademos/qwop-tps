@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const TREE_MODEL_URL = '/assets/props/low_poly_tree_pack.glb';
+const TREE_SCALE = 0.005;
 const TREE_NODE_NAMES = [
   'Circle',
   'Circle.001',
@@ -65,6 +66,7 @@ export async function createNature({ scene, playerModel, getTerrainHeight }) {
 
     const tree = source.clone(true);
     setTreeShadowing(tree);
+    tree.scale.setScalar(TREE_SCALE);
 
     const offset = DEFAULT_OFFSETS[index] ?? DEFAULT_OFFSETS[0];
     const position = basePosition.clone()
