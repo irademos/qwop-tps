@@ -45,7 +45,7 @@ function bindSkinnedMeshesToBaseSkeleton(baseModel, lodModel) {
   });
 }
 
-function makeModelUnlit(model) {
+function stripEmbeddedLights(model) {
   const lightsToRemove = [];
   model.traverse((obj) => {
     if (obj.isLight) {
@@ -56,31 +56,6 @@ function makeModelUnlit(model) {
     if (obj.isMesh) {
       obj.castShadow = false;
       obj.receiveShadow = false;
-
-      const toBasic = (mat) => {
-        if (!mat) return mat;
-        const basicParams = {
-          map: mat.map || null,
-          color: (mat.color && mat.color.clone()) || new THREE.Color(0xffffff),
-          transparent: !!mat.transparent,
-          opacity: (typeof mat.opacity === 'number') ? mat.opacity : 1,
-          side: mat.side ?? THREE.FrontSide,
-          vertexColors: !!mat.vertexColors,
-          alphaMap: mat.alphaMap || null,
-        };
-        const newMat = new THREE.MeshBasicMaterial(basicParams);
-        if (obj.isSkinnedMesh === true) newMat.skinning = true;
-        if (typeof mat.dispose === 'function') {
-          queueMicrotask(() => mat.dispose());
-        }
-        return newMat;
-      };
-
-      if (Array.isArray(obj.material)) {
-        obj.material = obj.material.map(toBasic);
-      } else if (obj.material) {
-        obj.material = toBasic(obj.material);
-      }
     }
   });
 
@@ -117,7 +92,7 @@ export function loadMonsterModel(modelPath, callback) {
           const forceFast = fastModels.some(n => modelName.includes(n));
           const lodConfigs = normalizeLodConfigs(config);
 
-          makeModelUnlit(model);
+          stripEmbeddedLights(model);
 
           model.traverse(o => {
             if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
@@ -203,7 +178,7 @@ export function loadMonsterModel(modelPath, callback) {
                     return;
                   }
                   const lodModel = lodFbx;
-                  makeModelUnlit(lodModel);
+                  stripEmbeddedLights(lodModel);
                   lodModel.traverse(o => {
                     if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
                     if (o.material?.skinning === true) o.material.skinning = true;

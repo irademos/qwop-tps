@@ -36,7 +36,7 @@ function bindSkinnedMeshesToBaseSkeleton(baseModel, lodModel) {
   });
 }
 
-function makeModelUnlit(model) {
+function stripEmbeddedLights(model) {
   const lightsToRemove = [];
 
   model.traverse((obj) => {
@@ -48,33 +48,6 @@ function makeModelUnlit(model) {
     if (obj.isMesh) {
       obj.castShadow = false;
       obj.receiveShadow = false;
-
-      const toBasic = (mat) => {
-        if (!mat) return mat;
-
-        const basicParams = {
-          map: mat.map || null,
-          color: (mat.color && mat.color.clone()) || new THREE.Color(0xffffff),
-          transparent: !!mat.transparent,
-          opacity: (typeof mat.opacity === 'number') ? mat.opacity : 1,
-          side: mat.side ?? THREE.FrontSide,
-          vertexColors: !!mat.vertexColors,
-          alphaMap: mat.alphaMap || null,
-        };
-
-        const newMat = new THREE.MeshBasicMaterial(basicParams);
-        if (obj.isSkinnedMesh === true) newMat.skinning = true;
-        if (typeof mat.dispose === 'function') {
-          queueMicrotask(() => mat.dispose());
-        }
-        return newMat;
-      };
-
-      if (Array.isArray(obj.material)) {
-        obj.material = obj.material.map(toBasic);
-      } else if (obj.material) {
-        obj.material = toBasic(obj.material);
-      }
     }
   });
 
@@ -227,10 +200,10 @@ export function createPlayerModel(
           const lodConfigs = normalizeLodConfigs(config);
 
           try {
-            makeModelUnlit(model);
-            console.log('✅ FBX made unlit and internal lights removed (no in-traverse mutations)');
+            stripEmbeddedLights(model);
+            console.log('✅ FBX lights stripped (no in-traverse mutations)');
           } catch (err) {
-            console.error('While making FBX unlit:', err);
+            console.error('While stripping FBX lights:', err);
           }
 
           model.traverse(o => {
@@ -402,9 +375,9 @@ export function createPlayerModel(
 
                   const lodModel = lodFbx;
                   try {
-                    makeModelUnlit(lodModel);
+                    stripEmbeddedLights(lodModel);
                   } catch (err) {
-                    console.error('While making LOD FBX unlit:', err);
+                    console.error('While stripping LOD FBX lights:', err);
                   }
 
                   lodModel.traverse(o => {
