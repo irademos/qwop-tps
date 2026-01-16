@@ -361,7 +361,10 @@ export async function createNature({
     if (isInsideBuildingFootprint(position, tileKey)) return true;
     let groupsToCheck = targetTiles.length
       ? targetTiles
-        .map((key) => getTileGroup(buildingsGroup, 'osm-buildings', key))
+        .map((key) => {
+          const tileGroup = getTileGroup(buildingsGroup, 'osm-buildings', key);
+          return tileGroup?.getObjectByName(`building-collision-${key}`) ?? tileGroup;
+        })
         .filter(Boolean)
       : [buildingsGroup];
     if (groupsToCheck.length === 0) {

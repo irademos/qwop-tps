@@ -550,8 +550,16 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     const extrudedMesh = new THREE.Mesh(new THREE.BufferGeometry(), extrudedMaterial);
     const flatMesh = new THREE.Mesh(new THREE.BufferGeometry(), flatMaterial);
 
-    const extrudedColliderMesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
-    extrudedColliderMesh.visible = false;
+    const extrudedColliderMesh = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        colorWrite: false
+      })
+    );
+    extrudedColliderMesh.visible = true;
     extrudedColliderMesh.name = `extruded-collider-${tileKey}`;
 
     const collisionGroup = new THREE.Group();
