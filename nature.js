@@ -397,6 +397,8 @@ export async function createNature({
 
   const buildingRaycaster = new THREE.Raycaster();
   const buildingRayDirection = new THREE.Vector3(0, -1, 0);
+  const buildingRayDirectionUp = new THREE.Vector3(0, 1, 0);
+  const tempPositionUp = new THREE.Vector3();
 
   const getBuildingBlockerInfo = (position, tileKey) => {
     const buildingsGroup = buildingsRenderer?.group;
@@ -407,9 +409,10 @@ export async function createNature({
       return { blocked: false, reason: 'no-buildings', intersections: [] };
     }
     const targetTiles = tileKey ? getNeighborTileKeys(tileKey) : [];
-    if (isInsideBuildingFootprint(position, tileKey)) {
-      return { blocked: true, reason: 'footprint', intersections: [] };
-    }
+    // Footprint is lon/lat and can drift vs rendered mesh; use raycasts as truth.
+    // if (isInsideBuildingFootprint(position, tileKey)) {
+    //   return { blocked: true, reason: 'footprint', intersections: [] };
+    // }
     let groupsToCheck = targetTiles.length
       ? targetTiles
         .map((key) => {
@@ -426,15 +429,27 @@ export async function createNature({
     }
     const terrainY = getTerrainHeight?.(position.x, position.z) ?? position.y ?? 0;
     const rayBaseY = Math.max(position.y ?? terrainY, terrainY);
-    const rayOrigin = tempPosition.set(
+    const rayOriginDown = tempPosition.set(
       position.x,
       rayBaseY + BUILDING_RAYCAST_HEIGHT,
       position.z
     );
     buildingRaycaster.near = 0;
     buildingRaycaster.far = BUILDING_RAYCAST_HEIGHT + Math.max(0, rayBaseY) + TREE_BUILDING_CLEARANCE;
-    buildingRaycaster.set(rayOrigin, buildingRayDirection);
-    const intersections = buildingRaycaster.intersectObjects(groupsToCheck, true);
+    buildingRaycaster.set(rayOriginDown, buildingRayDirection);
+    const hitsDown = buildingRaycaster.intersectObjects(groupsToCheck, true);
+
+    const rayOriginUp = tempPositionUp.set(
+      position.x,
+      rayBaseY - 5,
+      position.z
+    );
+    buildingRaycaster.near = 0;
+    buildingRaycaster.far = BUILDING_RAYCAST_HEIGHT + 10;
+    buildingRaycaster.set(rayOriginUp, buildingRayDirectionUp);
+    const hitsUp = buildingRaycaster.intersectObjects(groupsToCheck, true);
+
+    const intersections = hitsDown.length ? hitsDown : hitsUp;
     if (intersections.length > 0) {
       return { blocked: true, reason: 'raycast', intersections };
     }
