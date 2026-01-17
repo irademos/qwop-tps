@@ -10,6 +10,7 @@ import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls.js';
 import { getCookie, setCookie } from './utils.js';
 import { spawnProjectile, updateProjectiles } from './projectiles.js';
+import { spawnArrowProjectile } from './arrow.js';
 import { updateMeleeAttacks } from './melee.js';
 import { BreakManager } from './breakManager.js';
 import { initSpeechCommands } from './speechCommands.js';
@@ -1228,7 +1229,7 @@ async function main() {
 
   // --- RAPIER INIT ---
   await RAPIER.init();
-  rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+  rapierWorld = new RAPIER.World({ x: 0, y: -3.0, z: 0 });
   window.rapierWorld = rapierWorld;
   window.rbToMesh = rbToMesh;
   breakManager.setWorld(rapierWorld);
@@ -2889,38 +2890,20 @@ async function main() {
   }
 
   function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
-    const arrowDirection = direction.clone().normalize();
-    const createMesh = () => {
-      const template = arrowTemplate;
-      const arrowMesh = cloneArrowMesh(template, ARROW_PROJECTILE_SCALE);
-      if (arrowMesh) {
-        const forward = new THREE.Vector3(0, 0, 1);
-        arrowMesh.quaternion.setFromUnitVectors(forward, arrowDirection);
-        return arrowMesh;
-      }
-      const geometry = new THREE.CylinderGeometry(0.04, 0.05, 0.6, 8);
-      const material = new THREE.MeshStandardMaterial({ color: 0x6a4b2a });
-      const fallback = new THREE.Mesh(geometry, material);
-      fallback.rotation.x = Math.PI / 2;
-      return fallback;
-    };
-
-    const colliderDesc = RAPIER.ColliderDesc.cuboid(0.05, 0.05, 0.35)
-      .setRestitution(0.1)
-      .setFriction(0.6);
-
-    spawnProjectile(scene, list, position, direction, shooterId, {
-      createMesh,
-      colliderDesc,
+    const latest = spawnArrowProjectile({
+      scene,
+      list,
+      position,
+      direction,
+      shooterId,
+      template: arrowTemplate,
+      cloneArrowMesh,
+      scale: ARROW_PROJECTILE_SCALE,
       speed: ARROW_PROJECTILE_SPEED,
       lifetime: ARROW_PROJECTILE_LIFETIME,
-      pickupOnRest: true,
-      pickupAmount: 1,
-      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount, { noFloat: true }),
-      isArrow: true
+      spawnProjectile,
+      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount, { noFloat: true })
     });
-
-    const latest = list[list.length - 1];
     if (latest) {
       latest.userData.skipTerrainCorrection = true;
     }

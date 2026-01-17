@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
+import { updateArrowProjectile } from "./arrow.js";
 
 const disposeProjectileMesh = (mesh) => {
   if (!mesh) return;
@@ -111,10 +112,7 @@ export function updateProjectiles({
 
     const vel = new THREE.Vector3(linvel.x, linvel.y, linvel.z);
     proj.userData.velocity = vel.clone();
-    if (proj.userData.isArrow && vel.lengthSq() > 0.0001) {
-      const forward = new THREE.Vector3(0, 0, 1);
-      proj.quaternion.setFromUnitVectors(forward, vel.clone().normalize());
-    }
+    updateArrowProjectile(proj, rb, vel);
 
     proj.userData.lifetime -= 16;
     if (proj.userData.lifetime <= 0) {
@@ -125,7 +123,7 @@ export function updateProjectiles({
       continue;
     }
 
-    if (proj.userData.pickupOnRest && typeof proj.userData.spawnPickup === 'function') {
+    if (proj.userData.pickupOnRest && !proj.userData.arrowStuck && typeof proj.userData.spawnPickup === 'function') {
       const speed = vel.length();
       if (speed < 0.6 && proj.position.y <= 1.0) {
         proj.userData.spawnPickup(proj.position.clone(), proj.userData.pickupAmount || 1);
