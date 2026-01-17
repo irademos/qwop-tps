@@ -562,9 +562,22 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     extrudedColliderMesh.visible = true;
     extrudedColliderMesh.name = `extruded-collider-${tileKey}`;
 
+    const flatColliderMesh = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        colorWrite: false
+      })
+    );
+    flatColliderMesh.visible = true;
+    flatColliderMesh.name = `flat-collider-${tileKey}`;
+
     const collisionGroup = new THREE.Group();
     collisionGroup.name = `building-collision-${tileKey}`;
     collisionGroup.add(extrudedColliderMesh);
+    collisionGroup.add(flatColliderMesh);
 
     tileGroup.add(extrudedMesh);     // render
     tileGroup.add(flatMesh);         // render
@@ -576,6 +589,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedMesh,
       flatMesh,
       extrudedColliderMesh,
+      flatColliderMesh,
       collisionGroup
     };
   }
@@ -605,19 +619,27 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   function updateTileBuildings(tileKey, geojson, boundsOverride) {
     if (!tileKey) return null;
     const tileEntry = ensureTile(tileKey);
-    const { extrudedMesh, flatMesh, extrudedColliderMesh } = tileEntry;
+    const {
+      extrudedMesh,
+      flatMesh,
+      extrudedColliderMesh,
+      flatColliderMesh
+    } = tileEntry;
 
     const polygons = collectBuildingPolygons(geojson);
     if (polygons.length === 0) {
       disposeGeometry(extrudedMesh);
       disposeGeometry(flatMesh);
       disposeGeometry(extrudedColliderMesh);
+      disposeGeometry(flatColliderMesh);
       extrudedMesh.geometry = new THREE.BufferGeometry();
       flatMesh.geometry = new THREE.BufferGeometry();
       extrudedColliderMesh.geometry = new THREE.BufferGeometry();
+      flatColliderMesh.geometry = new THREE.BufferGeometry();
       extrudedMesh.visible = false;
       flatMesh.visible = false;
       extrudedColliderMesh.visible = true; // keep raycastable (material is invisible anyway)
+      flatColliderMesh.visible = true; // keep raycastable (material is invisible anyway)
       climbableAreasByTile.set(tileKey, []);
       refreshClimbableAreas();
       return tileEntry;
@@ -628,12 +650,15 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       disposeGeometry(extrudedMesh);
       disposeGeometry(flatMesh);
       disposeGeometry(extrudedColliderMesh);
+      disposeGeometry(flatColliderMesh);
       extrudedMesh.geometry = new THREE.BufferGeometry();
       flatMesh.geometry = new THREE.BufferGeometry();
       extrudedColliderMesh.geometry = new THREE.BufferGeometry();
+      flatColliderMesh.geometry = new THREE.BufferGeometry();
       extrudedMesh.visible = false;
       flatMesh.visible = false;
       extrudedColliderMesh.visible = true; // keep raycastable (material is invisible anyway)
+      flatColliderMesh.visible = true; // keep raycastable (material is invisible anyway)
       climbableAreasByTile.set(tileKey, []);
       refreshClimbableAreas();
       return tileEntry;
@@ -713,6 +738,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     disposeGeometry(extrudedMesh);
     disposeGeometry(flatMesh);
+    disposeGeometry(flatColliderMesh);
 
     if (extrudedResults.length > 0) {
       const merged = mergeGeometries(extrudedResults, false);
@@ -729,6 +755,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedMesh.geometry = new THREE.BufferGeometry();
       extrudedColliderMesh.geometry = new THREE.BufferGeometry();
       extrudedMesh.visible = false;
+      extrudedColliderMesh.visible = true; // keep raycastable (material is invisible anyway)
     }
 
 
@@ -737,10 +764,15 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       merged.computeBoundingSphere();
       flatMesh.geometry = merged;
       flatMesh.visible = true;
+      // collision “cap” so vertical rays hit inside footprint
+      flatColliderMesh.geometry = merged.clone();
+      flatColliderMesh.visible = true;
       for (const g of flatGeometries) g.dispose();
     } else {
       flatMesh.geometry = new THREE.BufferGeometry();
       flatMesh.visible = false;
+      flatColliderMesh.geometry = new THREE.BufferGeometry();
+      flatColliderMesh.visible = true;
     }
 
     climbableAreasByTile.set(tileKey, wallClimbAreas);
@@ -754,6 +786,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     disposeGeometry(entry.extrudedMesh);
     disposeGeometry(entry.flatMesh);
     disposeGeometry(entry.extrudedColliderMesh);
+    disposeGeometry(entry.flatColliderMesh);
     entry.group.clear();
     group.remove(entry.group);
     tileMeshes.delete(tileKey);

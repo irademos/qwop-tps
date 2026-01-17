@@ -397,8 +397,6 @@ export async function createNature({
 
   const buildingRaycaster = new THREE.Raycaster();
   const buildingRayDirection = new THREE.Vector3(0, -1, 0);
-  const buildingRayDirectionUp = new THREE.Vector3(0, 1, 0);
-  const tempPositionUp = new THREE.Vector3();
 
   const getBuildingBlockerInfo = (position, tileKey) => {
     const buildingsGroup = buildingsRenderer?.group;
@@ -437,19 +435,7 @@ export async function createNature({
     buildingRaycaster.near = 0;
     buildingRaycaster.far = BUILDING_RAYCAST_HEIGHT + Math.max(0, rayBaseY) + TREE_BUILDING_CLEARANCE;
     buildingRaycaster.set(rayOriginDown, buildingRayDirection);
-    const hitsDown = buildingRaycaster.intersectObjects(groupsToCheck, true);
-
-    const rayOriginUp = tempPositionUp.set(
-      position.x,
-      rayBaseY - 5,
-      position.z
-    );
-    buildingRaycaster.near = 0;
-    buildingRaycaster.far = BUILDING_RAYCAST_HEIGHT + 10;
-    buildingRaycaster.set(rayOriginUp, buildingRayDirectionUp);
-    const hitsUp = buildingRaycaster.intersectObjects(groupsToCheck, true);
-
-    const intersections = hitsDown.length ? hitsDown : hitsUp;
+    const intersections = buildingRaycaster.intersectObjects(groupsToCheck, true);
     if (intersections.length > 0) {
       return { blocked: true, reason: 'raycast', intersections };
     }
