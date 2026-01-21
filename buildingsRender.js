@@ -373,7 +373,7 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   windowH = 1.0,
   windowBottom = 1.2,
   windowSpacing = 2.2,
-  doorW = 1.4,
+  doorW = 2.8,
   doorH = 2.2,
   inset = 0.02,
   disabledSide = null // "+Z" | "-Z" | "+X" | "-X"
@@ -676,7 +676,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
             windowH: 1.0,
             windowBottom: 1.3,
             windowSpacing: 2.4,
-            doorW: 1.5,
+            doorW: 3.0,
             doorH: 2.3,
             disabledSide
           });
