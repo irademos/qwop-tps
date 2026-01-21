@@ -52,10 +52,11 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-const DEFAULT_CHARACTER_MODEL = "/models/cowboy.fbx";
+const DEFAULT_CHARACTER_MODEL = "/models/zombie.fbx";
 const MAX_MONSTERS = 2;
 const MONSTER_MODELS = [
-  "/models/cowboy.fbx",
+  // "/models/cowboy.fbx",
+  "/models/zombie.fbx",
   // "/models/rainbow_troll.fbx",
   // "/models/swamp_guy.fbx",
   // "/models/wizard.fbx",
@@ -4544,7 +4545,7 @@ async function main() {
 
   const settingsBtn = document.getElementById('settings-button');
   // const characterOptions = ['andy', 'chris', 'old_man', 'wizard', 'rainbow_troll', 'alien_bumpy_bump', 'swamp_guy'].map(name => ({
-  const characterOptions = ['cowboy'].map(name => ({
+  const characterOptions = ['zombie'].map(name => ({
     label: name,
     value: `/models/${name}.fbx`
   }));

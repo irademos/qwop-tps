@@ -9,6 +9,7 @@ const CORE_ASSETS = [
   '/app.js',
   '/styles.css',
   '/models/cowboy.fbx',
+  '/models/zombie.fbx',
   '/models/animations/Breathing Idle.fbx',
   '/models/animations/Old Man Walk.fbx',
   '/assets/audio/BGS Loops/Forest Day/Forest Day.ogg'
