@@ -3432,6 +3432,18 @@ async function main() {
     playerModel,
     renderer,
     multiplayer,
+    getCameraOccluders: () => {
+      const occluders = [];
+      if (buildingsRenderer?.getCollisionMeshes) {
+        occluders.push(...buildingsRenderer.getCollisionMeshes());
+      } else if (buildingsRenderer?.group) {
+        occluders.push(buildingsRenderer.group);
+      }
+      if (natureController?.group) {
+        occluders.push(natureController.group);
+      }
+      return occluders;
+    },
     spawnProjectile: spawnProjectileWithPerfFlags,
     spawnArrowProjectile: spawnArrowProjectileWithPerfFlags,
     projectiles,

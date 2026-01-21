@@ -72,6 +72,7 @@ export class PlayerControls {
     playerModel,
     renderer,
     multiplayer,
+    getCameraOccluders,
     spawnProjectile,
     projectiles,
     spawnArrowProjectile,
@@ -90,6 +91,7 @@ export class PlayerControls {
     this.playerModel = playerModel;
     this.camera = camera;
     this.multiplayer = multiplayer;
+    this.getCameraOccluders = getCameraOccluders || null;
     this.lastPosition = new THREE.Vector3();
     this.wasMoving = false;
     this.isMoving = false;
@@ -207,6 +209,12 @@ export class PlayerControls {
     this.aimFov = Math.max(45, this.defaultFov - 10);
     this.isAiming = false;
     this.isFireHeld = false;
+    this.cameraRaycaster = new THREE.Raycaster();
+    this.lastOcclusionOrbitCenter = null;
+    this.lastOcclusionDesiredPosition = null;
+    this.lastOcclusionPosition = null;
+    this.lastOcclusionYaw = null;
+    this.lastOcclusionPitch = null;
 
     if (this.isMobile && this.interactionPromptEl) {
       const activateInteraction = (event) => {
@@ -1350,7 +1358,47 @@ export class PlayerControls {
       offset.x * Math.sin(this.yaw) + offset.z * Math.cos(this.yaw)
     );
 
-    this.camera.position.copy(orbitCenter).add(rotatedOffset);
+    const desiredCameraPosition = orbitCenter.clone().add(rotatedOffset);
+    const occlusionEpsilon = 0.02;
+    const occlusionEpsilonSq = occlusionEpsilon * occlusionEpsilon;
+    const yawPitchEpsilon = 0.0005;
+    const shouldRaycast = (() => {
+      if (!this.lastOcclusionOrbitCenter || !this.lastOcclusionDesiredPosition) return true;
+      if (this.lastOcclusionOrbitCenter.distanceToSquared(orbitCenter) > occlusionEpsilonSq) return true;
+      if (this.lastOcclusionDesiredPosition.distanceToSquared(desiredCameraPosition) > occlusionEpsilonSq) return true;
+      if (this.lastOcclusionYaw === null || this.lastOcclusionPitch === null) return true;
+      if (Math.abs(this.yaw - this.lastOcclusionYaw) > yawPitchEpsilon) return true;
+      if (Math.abs(this.pitch - this.lastOcclusionPitch) > yawPitchEpsilon) return true;
+      return false;
+    })();
+
+    let resolvedCameraPosition = desiredCameraPosition;
+    if (shouldRaycast && this.getCameraOccluders) {
+      const occluders = this.getCameraOccluders() || [];
+      const direction = desiredCameraPosition.clone().sub(orbitCenter);
+      const distance = direction.length();
+      if (distance > 0.0001 && occluders.length) {
+        direction.normalize();
+        this.cameraRaycaster.set(orbitCenter, direction);
+        this.cameraRaycaster.far = distance;
+        const intersections = this.cameraRaycaster.intersectObjects(occluders, true);
+        if (intersections.length) {
+          const padding = 0.3;
+          const clampedDistance = Math.max(intersections[0].distance - padding, 0.05);
+          resolvedCameraPosition = orbitCenter.clone().addScaledVector(direction, clampedDistance);
+        }
+      }
+
+      this.lastOcclusionOrbitCenter = orbitCenter.clone();
+      this.lastOcclusionDesiredPosition = desiredCameraPosition.clone();
+      this.lastOcclusionPosition = resolvedCameraPosition.clone();
+      this.lastOcclusionYaw = this.yaw;
+      this.lastOcclusionPitch = this.pitch;
+    } else if (this.lastOcclusionPosition) {
+      resolvedCameraPosition = this.lastOcclusionPosition.clone();
+    }
+
+    this.camera.position.copy(resolvedCameraPosition);
     this.camera.lookAt(orbitCenter);
 
       const now = performance.now();
