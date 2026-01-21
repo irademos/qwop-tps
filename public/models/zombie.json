@@ -1,4 +1,5 @@
 {
   "scale": 0.01,
-  "yOffset": 0.5
+  "yOffset": 0.5,
+  "materialBrightness": 1.25
 }

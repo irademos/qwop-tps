@@ -4,6 +4,25 @@ import * as THREE from 'three';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
+const DEFAULT_MATERIAL_BRIGHTNESS = 1;
+
+function applyMaterialBrightness(model, brightness) {
+  if (!Number.isFinite(brightness) || brightness === DEFAULT_MATERIAL_BRIGHTNESS) return;
+  const clamped = THREE.MathUtils.clamp(brightness, 0, 2);
+  model.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+    materials.forEach((material) => {
+      if (material?.color?.multiplyScalar) {
+        material.color.multiplyScalar(clamped);
+      }
+      if (typeof material?.emissiveIntensity === 'number') {
+        material.emissiveIntensity *= clamped;
+      }
+      material.needsUpdate = true;
+    });
+  });
+}
 
 function normalizeLodConfigs(config) {
   if (!Array.isArray(config?.lods)) return [];
@@ -198,6 +217,7 @@ export function createPlayerModel(
 
           const model = fbx;
           const lodConfigs = normalizeLodConfigs(config);
+          const materialBrightness = config.materialBrightness ?? DEFAULT_MATERIAL_BRIGHTNESS;
 
           try {
             stripEmbeddedLights(model);
@@ -215,6 +235,7 @@ export function createPlayerModel(
           // Scale and center the model so it rotates around its midpoint
           const scale = config.scale ?? 1;
           model.scale.set(scale, scale, scale);
+          applyMaterialBrightness(model, materialBrightness);
 
           // Center the FBX so rotations pivot around the model itself
           model.updateMatrixWorld(true);
@@ -386,6 +407,7 @@ export function createPlayerModel(
                   });
 
                   lodModel.scale.set(scale, scale, scale);
+                  applyMaterialBrightness(lodModel, materialBrightness);
                   bindSkinnedMeshesToBaseSkeleton(model, lodModel);
                   lodModel.updateMatrixWorld(true);
                   const lodBox = new THREE.Box3().setFromObject(lodModel);
