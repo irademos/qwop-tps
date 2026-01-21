@@ -539,6 +539,28 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   const climbableAreasByTile = new Map();
   const climbableAreas = [];
 
+  function createTileMaterial(baseMaterial) {
+    const material = baseMaterial.clone();
+    material.transparent = false;
+    material.opacity = 1;
+    material.depthWrite = true;
+    return material;
+  }
+
+  function syncMaterialAppearance(material, baseMaterial) {
+    if (!material || !baseMaterial) return;
+    if (material.color?.copy && baseMaterial.color) {
+      material.color.copy(baseMaterial.color);
+    }
+    if (material.emissive?.copy && baseMaterial.emissive) {
+      material.emissive.copy(baseMaterial.emissive);
+    }
+    if (typeof baseMaterial.emissiveIntensity === "number") {
+      material.emissiveIntensity = baseMaterial.emissiveIntensity;
+    }
+    material.needsUpdate = true;
+  }
+
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
   }
@@ -547,8 +569,11 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     const tileGroup = new THREE.Group();
     tileGroup.name = `osm-buildings-${tileKey}`;
 
-    const extrudedMesh = new THREE.Mesh(new THREE.BufferGeometry(), extrudedMaterial);
-    const flatMesh = new THREE.Mesh(new THREE.BufferGeometry(), flatMaterial);
+    const extrudedMesh = new THREE.Mesh(new THREE.BufferGeometry(), createTileMaterial(extrudedMaterial));
+    const flatMesh = new THREE.Mesh(new THREE.BufferGeometry(), createTileMaterial(flatMaterial));
+    extrudedMesh.userData.isBuildingSolid = true;
+    extrudedMesh.userData.tileKey = tileKey;
+    flatMesh.userData.tileKey = tileKey;
 
     const extrudedColliderMesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
     extrudedColliderMesh.visible = false;
@@ -746,6 +771,12 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     disposeGeometry(entry.extrudedMesh);
     disposeGeometry(entry.flatMesh);
     disposeGeometry(entry.extrudedColliderMesh);
+    if (entry.extrudedMesh.material?.dispose) {
+      entry.extrudedMesh.material.dispose();
+    }
+    if (entry.flatMesh.material?.dispose) {
+      entry.flatMesh.material.dispose();
+    }
     entry.group.clear();
     group.remove(entry.group);
     tileMeshes.delete(tileKey);
@@ -769,12 +800,36 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     scene?.remove(group);
   }
 
+  function syncTileMaterialsFromBase() {
+    for (const entry of tileMeshes.values()) {
+      syncMaterialAppearance(entry.extrudedMesh.material, extrudedMaterial);
+      syncMaterialAppearance(entry.flatMesh.material, flatMaterial);
+    }
+  }
+
+  function setTileOpacity(tileKey, opacity) {
+    const entry = tileMeshes.get(tileKey);
+    if (!entry) return;
+    const clamped = Math.min(1, Math.max(0, opacity));
+    const updateMaterial = (material) => {
+      if (!material) return;
+      material.transparent = clamped < 1;
+      material.opacity = clamped;
+      material.depthWrite = clamped >= 1;
+      material.needsUpdate = true;
+    };
+    updateMaterial(entry.extrudedMesh.material);
+    updateMaterial(entry.flatMesh.material);
+  }
+
   return {
     group,
     materials: {
       extruded: extrudedMaterial,
       flat: flatMaterial
     },
+    syncTileMaterialsFromBase,
+    setTileOpacity,
     updateTileBuildings,
     removeTile,
     clearTiles,

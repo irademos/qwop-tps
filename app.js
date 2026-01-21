@@ -381,6 +381,7 @@ async function main() {
     applyMaterialBrightness(groundTiles?.material, groundMaterialBase, displaySettings.groundBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, displaySettings.buildingBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, displaySettings.buildingBrightness);
+    buildingsRenderer?.syncTileMaterialsFromBase?.();
     mapRenderer?.setBrightness?.(pickupBrightness);
     for (const material of pickupEmissiveMaterials) {
       if (!material || typeof material.emissiveIntensity !== 'number') continue;
@@ -1637,8 +1638,11 @@ async function main() {
 
   const BUILDING_RAYCAST_HEIGHT = 200;
   const BUILDING_LIFT_EPSILON = 0.05;
+  const BUILDING_INTERIOR_OPACITY = 0.3;
+  const BUILDING_INTERIOR_EPSILON = 0.25;
   const buildingRaycaster = new THREE.Raycaster();
   const buildingRayDirection = new THREE.Vector3(0, -1, 0);
+  let activeInteriorBuildingTile = null;
 
   const getBuildingIntersection = (position) => {
     const buildingsGroup = buildingsRenderer?.group;
@@ -1657,6 +1661,22 @@ async function main() {
       }
     }
     return null;
+  };
+
+  const updateInteriorBuildingOpacity = (position) => {
+    if (!position || !buildingsRenderer?.setTileOpacity) return;
+    const intersection = getBuildingIntersection(position);
+    let nextTileKey = null;
+    if (intersection && intersection.point && position.y < intersection.point.y - BUILDING_INTERIOR_EPSILON) {
+      nextTileKey = intersection.object?.userData?.tileKey ?? null;
+    }
+    if (activeInteriorBuildingTile && activeInteriorBuildingTile !== nextTileKey) {
+      buildingsRenderer.setTileOpacity(activeInteriorBuildingTile, 1);
+    }
+    if (nextTileKey && nextTileKey !== activeInteriorBuildingTile) {
+      buildingsRenderer.setTileOpacity(nextTileKey, BUILDING_INTERIOR_OPACITY);
+    }
+    activeInteriorBuildingTile = nextTileKey;
   };
 
   const liftPositionToBuildingTop = (position, heightOffset = 0.6) => {
@@ -4729,6 +4749,7 @@ async function main() {
 
     const playerPosition = playerModel?.position;
     updateGroundTiles(playerPosition);
+    updateInteriorBuildingOpacity(playerPosition);
     natureController?.update(playerPosition);
     if (shouldUpdatePickupTiles(playerPosition)) {
       updatePickupTiles(playerPosition);
