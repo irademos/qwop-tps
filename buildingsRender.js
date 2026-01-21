@@ -373,7 +373,7 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   windowH = 1.0,
   windowBottom = 1.2,
   windowSpacing = 2.2,
-  doorW = 1.4,
+  doorW = 2.8,
   doorH = 2.2,
   inset = 0.02,
   disabledSide = null // "+Z" | "-Z" | "+X" | "-X"
@@ -397,13 +397,16 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   // padding around door opening so nearby windows don't clip
   const doorClearance = 0.35;
 
+  const doorSpanX = Math.max(0.1, Math.min(doorW, sizeX - doorClearance * 2));
+  const doorSpanZ = Math.max(0.1, Math.min(doorW, sizeZ - doorClearance * 2));
+
   // for ±Z walls, door spans X
-  const doorMinX = midX - doorW * 0.5 - doorClearance;
-  const doorMaxX = midX + doorW * 0.5 + doorClearance;
+  const doorMinX = midX - doorSpanX * 0.5 - doorClearance;
+  const doorMaxX = midX + doorSpanX * 0.5 + doorClearance;
 
   // for ±X walls, door spans Z (use doorW as its horizontal span)
-  const doorMinZ = midZ - doorW * 0.5 - doorClearance;
-  const doorMaxZ = midZ + doorW * 0.5 + doorClearance;
+  const doorMinZ = midZ - doorSpanZ * 0.5 - doorClearance;
+  const doorMaxZ = midZ + doorSpanZ * 0.5 + doorClearance;
 
 
   function addWindowsOnZWall(zWall, sideTag) {
@@ -457,28 +460,28 @@ function buildWindowDoorCuttersFromBBox(bbox, {
 
   // Doors (skip disabled side)
   if (disabledSide !== "+Z") {
-    const g = new THREE.BoxGeometry(doorW, doorH, CUT_DEPTH);
+    const g = new THREE.BoxGeometry(doorSpanX, doorH, CUT_DEPTH);
     g.applyMatrix4(new THREE.Matrix4().makeTranslation(
       (min.x + max.x) * 0.5, yDoorCenter, max.z - (CUT_DEPTH * 0.5 - inset)
     ));
     cutters.push(g);
   }
   if (disabledSide !== "-Z") {
-    const g = new THREE.BoxGeometry(doorW, doorH, CUT_DEPTH);
+    const g = new THREE.BoxGeometry(doorSpanX, doorH, CUT_DEPTH);
     g.applyMatrix4(new THREE.Matrix4().makeTranslation(
       (min.x + max.x) * 0.5, yDoorCenter, min.z + (CUT_DEPTH * 0.5 - inset)
     ));
     cutters.push(g);
   }
   if (disabledSide !== "+X") {
-    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorW);
+    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorSpanZ);
     g.applyMatrix4(new THREE.Matrix4().makeTranslation(
       max.x - (CUT_DEPTH * 0.5 - inset), yDoorCenter, (min.z + max.z) * 0.5
     ));
     cutters.push(g);
   }
   if (disabledSide !== "-X") {
-    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorW);
+    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorSpanZ);
     g.applyMatrix4(new THREE.Matrix4().makeTranslation(
       min.x + (CUT_DEPTH * 0.5 - inset), yDoorCenter, (min.z + max.z) * 0.5
     ));
@@ -676,7 +679,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
             windowH: 1.0,
             windowBottom: 1.3,
             windowSpacing: 2.4,
-            doorW: 1.5,
+            doorW: 3.0,
             doorH: 2.3,
             disabledSide
           });
