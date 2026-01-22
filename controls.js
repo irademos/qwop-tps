@@ -213,6 +213,7 @@ export class PlayerControls {
     this.lastOcclusionOrbitCenter = null;
     this.lastOcclusionDesiredPosition = null;
     this.lastOcclusionPosition = null;
+    this.lastOcclusionDistance = null;
     this.lastOcclusionYaw = null;
     this.lastOcclusionPitch = null;
 
@@ -1377,6 +1378,7 @@ export class PlayerControls {
       const occluders = this.getCameraOccluders() || [];
       const direction = desiredCameraPosition.clone().sub(orbitCenter);
       const distance = direction.length();
+      let resolvedDistance = distance;
       if (distance > 0.0001 && occluders.length) {
         direction.normalize();
         this.cameraRaycaster.set(orbitCenter, direction);
@@ -1384,16 +1386,25 @@ export class PlayerControls {
         const intersections = this.cameraRaycaster.intersectObjects(occluders, true);
         if (intersections.length) {
           const padding = 0.3;
-          const clampedDistance = Math.max(intersections[0].distance - padding, 0.05);
-          resolvedCameraPosition = orbitCenter.clone().addScaledVector(direction, clampedDistance);
+          resolvedDistance = Math.max(intersections[0].distance - padding, 0.05);
+          resolvedCameraPosition = orbitCenter.clone().addScaledVector(direction, resolvedDistance);
         }
       }
 
       this.lastOcclusionOrbitCenter = orbitCenter.clone();
       this.lastOcclusionDesiredPosition = desiredCameraPosition.clone();
       this.lastOcclusionPosition = resolvedCameraPosition.clone();
+      this.lastOcclusionDistance = resolvedDistance;
       this.lastOcclusionYaw = this.yaw;
       this.lastOcclusionPitch = this.pitch;
+    } else if (this.lastOcclusionDistance !== null) {
+      const direction = desiredCameraPosition.clone().sub(orbitCenter);
+      const distance = direction.length();
+      if (distance > 0.0001) {
+        direction.normalize();
+        const clampedDistance = Math.min(this.lastOcclusionDistance, distance);
+        resolvedCameraPosition = orbitCenter.clone().addScaledVector(direction, clampedDistance);
+      }
     } else if (this.lastOcclusionPosition) {
       resolvedCameraPosition = this.lastOcclusionPosition.clone();
     }
