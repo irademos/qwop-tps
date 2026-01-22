@@ -18,10 +18,13 @@ const DEFAULT_MATERIAL_BRIGHTNESS = 1;
 function applyMaterialBrightness(model, brightness) {
   if (!Number.isFinite(brightness) || brightness === DEFAULT_MATERIAL_BRIGHTNESS) return;
   const clamped = THREE.MathUtils.clamp(brightness, 0, 2);
+  const processedMaterials = new Set();
   model.traverse((obj) => {
     if (!obj.isMesh || !obj.material) return;
     const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
     materials.forEach((material) => {
+      if (!material || processedMaterials.has(material)) return;
+      processedMaterials.add(material);
       if (material?.color?.multiplyScalar) {
         material.color.multiplyScalar(clamped);
       }
