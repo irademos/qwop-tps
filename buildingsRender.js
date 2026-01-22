@@ -373,10 +373,11 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   windowH = 1.0,
   windowBottom = 1.2,
   windowSpacing = 2.2,
-  doorW = 1.4,
+  doorW = 2.8,
   doorH = 2.2,
   inset = 0.02,
-  disabledSide = null // "+Z" | "-Z" | "+X" | "-X"
+  disabledSide = null, // "+Z" | "-Z" | "+X" | "-X"
+  shape2D = null
 } = {}) {
   const cutters = [];
   const min = bbox.min, max = bbox.max;
@@ -397,13 +398,16 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   // padding around door opening so nearby windows don't clip
   const doorClearance = 0.35;
 
+  const doorSpanX = Math.max(0.1, Math.min(doorW, sizeX));
+  const doorSpanZ = Math.max(0.1, Math.min(doorW, sizeZ));
+
   // for ±Z walls, door spans X
-  const doorMinX = midX - doorW * 0.5 - doorClearance;
-  const doorMaxX = midX + doorW * 0.5 + doorClearance;
+  const doorMinX = midX - doorSpanX * 0.5 - doorClearance;
+  const doorMaxX = midX + doorSpanX * 0.5 + doorClearance;
 
   // for ±X walls, door spans Z (use doorW as its horizontal span)
-  const doorMinZ = midZ - doorW * 0.5 - doorClearance;
-  const doorMaxZ = midZ + doorW * 0.5 + doorClearance;
+  const doorMinZ = midZ - doorSpanZ * 0.5 - doorClearance;
+  const doorMaxZ = midZ + doorSpanZ * 0.5 + doorClearance;
 
 
   function addWindowsOnZWall(zWall, sideTag) {
@@ -455,34 +459,108 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   addWindowsOnXWall(max.x, "+X");
   addWindowsOnXWall(min.x, "-X");
 
-  // Doors (skip disabled side)
-  if (disabledSide !== "+Z") {
-    const g = new THREE.BoxGeometry(doorW, doorH, CUT_DEPTH);
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-      (min.x + max.x) * 0.5, yDoorCenter, max.z - (CUT_DEPTH * 0.5 - inset)
-    ));
+  const doorInset = CUT_DEPTH * 0.5 - inset;
+  const up = new THREE.Vector3(0, 1, 0);
+
+  function addDoorOnEdge(edge, span) {
+    if (!edge || span <= 0.1) return;
+    const g = new THREE.BoxGeometry(span, doorH, CUT_DEPTH);
+    const rotation = new THREE.Matrix4().makeBasis(edge.direction, up, edge.outward);
+    const center = edge.center.clone().addScaledVector(edge.outward, doorInset);
+    g.applyMatrix4(rotation);
+    g.applyMatrix4(new THREE.Matrix4().makeTranslation(center.x, yDoorCenter, center.z));
     cutters.push(g);
   }
-  if (disabledSide !== "-Z") {
-    const g = new THREE.BoxGeometry(doorW, doorH, CUT_DEPTH);
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-      (min.x + max.x) * 0.5, yDoorCenter, min.z + (CUT_DEPTH * 0.5 - inset)
-    ));
-    cutters.push(g);
+
+  function addAxisAlignedDoors() {
+    // Doors (skip disabled side)
+    if (disabledSide !== "+Z") {
+      const g = new THREE.BoxGeometry(doorSpanX, doorH, CUT_DEPTH);
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+        (min.x + max.x) * 0.5, yDoorCenter, max.z - doorInset
+      ));
+      cutters.push(g);
+    }
+    if (disabledSide !== "-Z") {
+      const g = new THREE.BoxGeometry(doorSpanX, doorH, CUT_DEPTH);
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+        (min.x + max.x) * 0.5, yDoorCenter, min.z + doorInset
+      ));
+      cutters.push(g);
+    }
+    if (disabledSide !== "+X") {
+      const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorSpanZ);
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+        max.x - doorInset, yDoorCenter, (min.z + max.z) * 0.5
+      ));
+      cutters.push(g);
+    }
+    if (disabledSide !== "-X") {
+      const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorSpanZ);
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(
+        min.x + doorInset, yDoorCenter, (min.z + max.z) * 0.5
+      ));
+      cutters.push(g);
+    }
   }
-  if (disabledSide !== "+X") {
-    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorW);
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-      max.x - (CUT_DEPTH * 0.5 - inset), yDoorCenter, (min.z + max.z) * 0.5
-    ));
-    cutters.push(g);
+
+  function addEdgeAlignedDoors() {
+    const points2D = shape2D?.getPoints?.() ?? [];
+    if (points2D.length < 2) return false;
+    const winding = getRingWinding(points2D);
+    const edges = [];
+    for (let i = 0; i < points2D.length; i += 1) {
+      const a = points2D[i];
+      const b = points2D[(i + 1) % points2D.length];
+      const ax = a.x;
+      const az = -a.y;
+      const bx = b.x;
+      const bz = -b.y;
+      const edgeVec = new THREE.Vector3(bx - ax, 0, bz - az);
+      const edgeLen = edgeVec.length();
+      if (edgeLen < 0.2) continue;
+      const direction = edgeVec.clone().normalize();
+      const leftNormal = new THREE.Vector3(-direction.z, 0, direction.x);
+      const rightNormal = new THREE.Vector3(direction.z, 0, -direction.x);
+      const outward = (winding >= 0 ? rightNormal : leftNormal).normalize();
+      edges.push({
+        center: new THREE.Vector3((ax + bx) * 0.5, 0, (az + bz) * 0.5),
+        direction,
+        outward,
+        length: edgeLen
+      });
+    }
+
+    if (!edges.length) return false;
+
+    const sideVectors = {
+      "+Z": new THREE.Vector3(0, 0, 1),
+      "-Z": new THREE.Vector3(0, 0, -1),
+      "+X": new THREE.Vector3(1, 0, 0),
+      "-X": new THREE.Vector3(-1, 0, 0)
+    };
+
+    for (const side of SIDES) {
+      if (disabledSide === side) continue;
+      const target = sideVectors[side];
+      let bestEdge = null;
+      let bestDot = -Infinity;
+      for (const edge of edges) {
+        const dot = edge.outward.dot(target);
+        if (dot > bestDot) {
+          bestDot = dot;
+          bestEdge = edge;
+        }
+      }
+      if (!bestEdge) continue;
+      const span = Math.max(0.1, Math.min(doorW, bestEdge.length));
+      addDoorOnEdge(bestEdge, span);
+    }
+    return true;
   }
-  if (disabledSide !== "-X") {
-    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorW);
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-      min.x + (CUT_DEPTH * 0.5 - inset), yDoorCenter, (min.z + max.z) * 0.5
-    ));
-    cutters.push(g);
+
+  if (!shape2D || !addEdgeAlignedDoors()) {
+    addAxisAlignedDoors();
   }
 
   return cutters;
@@ -676,9 +754,10 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
             windowH: 1.0,
             windowBottom: 1.3,
             windowSpacing: 2.4,
-            doorW: 1.5,
+            doorW: 3.0,
             doorH: 2.3,
-            disabledSide
+            disabledSide,
+            shape2D: shape
           });
 
           if (cutters.length) {
