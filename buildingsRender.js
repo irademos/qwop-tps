@@ -373,8 +373,9 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   windowH = 1.0,
   windowBottom = 1.2,
   windowSpacing = 2.2,
-  doorW = 1.4,
+  doorW = 2.8,
   doorH = 2.2,
+  doorSpacing = 8,
   inset = 0.02,
   disabledSide = null // "+Z" | "-Z" | "+X" | "-X"
 } = {}) {
@@ -383,107 +384,44 @@ function buildWindowDoorCuttersFromBBox(bbox, {
   const sizeX = max.x - min.x;
   const sizeZ = max.z - min.z;
 
-  if (sizeX < windowW * 1.5 || sizeZ < windowW * 1.5) return cutters;
+  if (sizeX <= 0 || sizeZ <= 0) return cutters;
 
-  const yWindowCenter = windowBottom + windowH * 0.5;
   const yDoorCenter = doorH * 0.5;
-  // --- door exclusion zones (prevents windows overlapping doors) ---
-  const doorTop = doorH;
+  const doorSpanX = Math.min(doorW, sizeX);
+  const doorSpanZ = Math.min(doorW, sizeZ);
 
-  // center of the bbox footprint
-  const midX = (min.x + max.x) * 0.5;
-  const midZ = (min.z + max.z) * 0.5;
-
-  // padding around door opening so nearby windows don't clip
-  const doorClearance = 0.35;
-
-  // for ±Z walls, door spans X
-  const doorMinX = midX - doorW * 0.5 - doorClearance;
-  const doorMaxX = midX + doorW * 0.5 + doorClearance;
-
-  // for ±X walls, door spans Z (use doorW as its horizontal span)
-  const doorMinZ = midZ - doorW * 0.5 - doorClearance;
-  const doorMaxZ = midZ + doorW * 0.5 + doorClearance;
-
-
-  function addWindowsOnZWall(zWall, sideTag) {
+  function addDoorsOnZWall(zWall, sideTag) {
     if (disabledSide === sideTag) return;
-
-    const usable = sizeX - windowW * 1.2;
-    const count = Math.max(1, Math.floor(usable / windowSpacing));
+    const spacing = Math.max(doorSpacing, doorSpanX * 1.2);
+    const count = Math.max(1, Math.floor(sizeX / spacing));
     for (let i = 0; i < count; i++) {
       const t = (count === 1) ? 0.5 : (i + 1) / (count + 1);
       const x = min.x + t * sizeX;
-
-      // Skip windows that would overlap the door area on ±Z walls
-      const overlapsDoorZone = (x >= doorMinX && x <= doorMaxX) && (windowBottom < doorTop);
-      if (overlapsDoorZone) continue;
-
-      if (x < min.x + 1.0 || x > max.x - 1.0) continue;
-
-      const g = new THREE.BoxGeometry(windowW, windowH, CUT_DEPTH);
+      const g = new THREE.BoxGeometry(doorSpanX, doorH, CUT_DEPTH);
       const zCenter = zWall + (zWall === max.z ? -(CUT_DEPTH * 0.5 - inset) : (CUT_DEPTH * 0.5 - inset));
-      g.applyMatrix4(new THREE.Matrix4().makeTranslation(x, yWindowCenter, zCenter));
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(x, yDoorCenter, zCenter));
       cutters.push(g);
     }
   }
 
-  function addWindowsOnXWall(xWall, sideTag) {
+  function addDoorsOnXWall(xWall, sideTag) {
     if (disabledSide === sideTag) return;
-
-    const usable = sizeZ - windowW * 1.2;
-    const count = Math.max(1, Math.floor(usable / windowSpacing));
+    const spacing = Math.max(doorSpacing, doorSpanZ * 1.2);
+    const count = Math.max(1, Math.floor(sizeZ / spacing));
     for (let i = 0; i < count; i++) {
       const t = (count === 1) ? 0.5 : (i + 1) / (count + 1);
       const z = min.z + t * sizeZ;
-
-      // Skip windows that would overlap the door area on ±X walls
-      const overlapsDoorZone = (z >= doorMinZ && z <= doorMaxZ) && (windowBottom < doorTop);
-      if (overlapsDoorZone) continue;
-
-      if (z < min.z + 1.0 || z > max.z - 1.0) continue;
-
-      const g = new THREE.BoxGeometry(CUT_DEPTH, windowH, windowW);
+      const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorSpanZ);
       const xCenter = xWall + (xWall === max.x ? -(CUT_DEPTH * 0.5 - inset) : (CUT_DEPTH * 0.5 - inset));
-      g.applyMatrix4(new THREE.Matrix4().makeTranslation(xCenter, yWindowCenter, z));
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(xCenter, yDoorCenter, z));
       cutters.push(g);
     }
   }
 
-  addWindowsOnZWall(max.z, "+Z");
-  addWindowsOnZWall(min.z, "-Z");
-  addWindowsOnXWall(max.x, "+X");
-  addWindowsOnXWall(min.x, "-X");
-
-  // Doors (skip disabled side)
-  if (disabledSide !== "+Z") {
-    const g = new THREE.BoxGeometry(doorW, doorH, CUT_DEPTH);
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-      (min.x + max.x) * 0.5, yDoorCenter, max.z - (CUT_DEPTH * 0.5 - inset)
-    ));
-    cutters.push(g);
-  }
-  if (disabledSide !== "-Z") {
-    const g = new THREE.BoxGeometry(doorW, doorH, CUT_DEPTH);
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-      (min.x + max.x) * 0.5, yDoorCenter, min.z + (CUT_DEPTH * 0.5 - inset)
-    ));
-    cutters.push(g);
-  }
-  if (disabledSide !== "+X") {
-    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorW);
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-      max.x - (CUT_DEPTH * 0.5 - inset), yDoorCenter, (min.z + max.z) * 0.5
-    ));
-    cutters.push(g);
-  }
-  if (disabledSide !== "-X") {
-    const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorW);
-    g.applyMatrix4(new THREE.Matrix4().makeTranslation(
-      min.x + (CUT_DEPTH * 0.5 - inset), yDoorCenter, (min.z + max.z) * 0.5
-    ));
-    cutters.push(g);
-  }
+  addDoorsOnZWall(max.z, "+Z");
+  addDoorsOnZWall(min.z, "-Z");
+  addDoorsOnXWall(max.x, "+X");
+  addDoorsOnXWall(min.x, "-X");
 
   return cutters;
 }
@@ -676,8 +614,9 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
             windowH: 1.0,
             windowBottom: 1.3,
             windowSpacing: 2.4,
-            doorW: 1.5,
+            doorW: 3.0,
             doorH: 2.3,
+            doorSpacing: 8,
             disabledSide
           });
 
