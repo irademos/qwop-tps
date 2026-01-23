@@ -51,8 +51,42 @@
   <div id="game-container">
     <div class="crosshair"></div>
   </div>
-  <div id="start-overlay" role="button" aria-label="Tap to start the game" aria-hidden="false" tabindex="0">
-    <div class="start-overlay-content">Tap to Start</div>
+  <div id="start-overlay" aria-label="Street Quest login and start screen" aria-hidden="false">
+    <div class="arcade-shell" role="dialog" aria-modal="true" aria-labelledby="arcade-title">
+      <div class="arcade-header">
+        <div id="arcade-title" class="arcade-title">Street Quest</div>
+        <div class="arcade-subtitle">Insert Coin to Continue</div>
+      </div>
+      <div class="arcade-panel">
+        <div class="arcade-message" data-arcade-message></div>
+        <div class="arcade-welcome hidden" data-arcade-welcome>
+          <div class="arcade-welcome-text" data-arcade-welcome-text></div>
+          <button class="arcade-button arcade-secondary" type="button" data-arcade-switch>
+            Not you? Switch user
+          </button>
+        </div>
+        <form class="arcade-form" data-arcade-form>
+          <label class="arcade-field">
+            <span class="arcade-label">Name</span>
+            <input class="arcade-input" type="text" name="name" autocomplete="nickname" data-arcade-name>
+          </label>
+          <label class="arcade-field">
+            <span class="arcade-label">PIN</span>
+            <input class="arcade-input" type="password" inputmode="numeric" name="pin" autocomplete="off" data-arcade-pin>
+          </label>
+          <label class="arcade-field arcade-confirm hidden" data-arcade-confirm-field>
+            <span class="arcade-label">Confirm PIN</span>
+            <input class="arcade-input" type="password" inputmode="numeric" name="confirmPin" autocomplete="off" data-arcade-confirm>
+          </label>
+          <div class="arcade-actions">
+            <button class="arcade-button" type="submit" data-arcade-login>Log In</button>
+            <button class="arcade-button arcade-secondary" type="button" data-arcade-signup>Sign Up</button>
+            <button class="arcade-button arcade-secondary hidden" type="button" data-arcade-back>Back to Log In</button>
+          </div>
+        </form>
+        <button class="arcade-button arcade-start hidden" type="button" data-arcade-start>Start</button>
+      </div>
+    </div>
   </div>
   <div id="interaction-tooltip" class="interaction-tooltip"></div>
   <button id="friendly-interact" class="friendly-interact hidden" type="button" aria-label="Interact"></button>

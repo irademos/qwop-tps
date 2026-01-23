@@ -147,19 +147,47 @@ async function promptForLoginPin(name) {
   }
 }
 
-export async function loadOrCreateWithPin(playerName) {
+export function getStoredPinHash(name) {
+  if (!name) return null;
+  const nameKey = normalizeNameKey(name);
+  if (!nameKey) return null;
+  return getCookie(pinCookieName(nameKey));
+}
+
+export function clearStoredPin(name) {
+  if (!name) return;
+  const nameKey = normalizeNameKey(name);
+  if (!nameKey) return;
+  setCookie(pinCookieName(nameKey), '', -1);
+}
+
+export async function loadOrCreateWithPin(playerName, options = {}) {
   const trimmedName = playerName.trim();
   const nameKey = normalizeNameKey(trimmedName);
   if (!nameKey) {
     throw new Error('Invalid player name.');
   }
+  const requestNewPin = options.requestNewPin || promptForNewPin;
+  const requestLoginPin = options.requestLoginPin || promptForLoginPin;
+  const onIncorrectPin = options.onIncorrectPin || null;
+  const onInvalidPin = options.onInvalidPin || null;
+  const useAlerts = options.useAlerts ?? (
+    requestNewPin === promptForNewPin && requestLoginPin === promptForLoginPin
+  );
 
   const claimRef = ref(db, `nameClaims/${nameKey}`);
   const profileRef = ref(db, `profiles/${nameKey}`);
 
   const claimSnap = await get(claimRef);
   if (!claimSnap.exists()) {
-    const pin = await promptForNewPin(trimmedName);
+    let pin = await requestNewPin(trimmedName);
+    while (pin && !isValidPin(pin)) {
+      if (useAlerts) {
+        alert('PIN must be 4–6 digits.');
+      }
+      onInvalidPin?.('new');
+      pin = await requestNewPin(trimmedName);
+    }
     if (!pin) {
       return { canceled: true };
     }
@@ -194,9 +222,16 @@ export async function loadOrCreateWithPin(playerName) {
   }
 
   while (true) {
-    const pin = await promptForLoginPin(trimmedName);
+    const pin = await requestLoginPin(trimmedName);
     if (!pin) {
       return { canceled: true };
+    }
+    if (!isValidPin(pin)) {
+      if (useAlerts) {
+        alert('PIN must be 4–6 digits.');
+      }
+      onInvalidPin?.('login');
+      continue;
     }
     const pinHash = await hashPin(nameKey, pin);
     const latestClaimSnap = await get(claimRef);
@@ -207,7 +242,10 @@ export async function loadOrCreateWithPin(playerName) {
 
     if (latestClaim?.pinHash !== pinHash) {
       console.warn('❌ Incorrect PIN for', trimmedName);
-      alert('Incorrect PIN. Try again.');
+      if (useAlerts) {
+        alert('Incorrect PIN. Try again.');
+      }
+      onIncorrectPin?.();
       continue;
     }
 

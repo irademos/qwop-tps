@@ -33,7 +33,12 @@ import { createGroundTiles } from './groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './settingsPanel.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './mapView.js';
-import { loadOrCreateWithPin, saveStatsThrottled } from './playerProfile.js';
+import {
+  clearStoredPin,
+  getStoredPinHash,
+  loadOrCreateWithPin,
+  saveStatsThrottled
+} from './playerProfile.js';
 import {
   initMonsterPersistence,
   loadMonstersSnapshot,
@@ -147,28 +152,327 @@ function distanceMeters(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function createArcadeOverlay(startOverlay) {
+  const message = startOverlay.querySelector('[data-arcade-message]');
+  const welcomeSection = startOverlay.querySelector('[data-arcade-welcome]');
+  const welcomeText = startOverlay.querySelector('[data-arcade-welcome-text]');
+  const switchButton = startOverlay.querySelector('[data-arcade-switch]');
+  const form = startOverlay.querySelector('[data-arcade-form]');
+  const nameInput = startOverlay.querySelector('[data-arcade-name]');
+  const pinInput = startOverlay.querySelector('[data-arcade-pin]');
+  const confirmField = startOverlay.querySelector('[data-arcade-confirm-field]');
+  const confirmInput = startOverlay.querySelector('[data-arcade-confirm]');
+  const loginButton = startOverlay.querySelector('[data-arcade-login]');
+  const signupButton = startOverlay.querySelector('[data-arcade-signup]');
+  const backButton = startOverlay.querySelector('[data-arcade-back]');
+  const startButton = startOverlay.querySelector('[data-arcade-start]');
+
+  let mode = 'login';
+  let currentName = '';
+  let authInProgress = false;
+  let authToken = 0;
+  let resolveAuth = null;
+  let startHandler = null;
+  let activeLoadProfile = loadOrCreateWithPin;
+
+  const createWaiter = () => {
+    const queue = [];
+    let resolver = null;
+    return {
+      push(value) {
+        if (resolver) {
+          resolver(value);
+          resolver = null;
+          return;
+        }
+        queue.push(value);
+      },
+      wait() {
+        return new Promise(resolve => {
+          if (queue.length > 0) {
+            resolve(queue.shift());
+          } else {
+            resolver = resolve;
+          }
+        });
+      }
+    };
+  };
+
+  const loginWaiter = createWaiter();
+  const signupWaiter = createWaiter();
+
+  const setMessage = text => {
+    if (!message) return;
+    message.textContent = text || '';
+  };
+
+  const setMode = nextMode => {
+    mode = nextMode;
+    if (mode === 'signup') {
+      confirmField?.classList.remove('hidden');
+      loginButton?.classList.add('hidden');
+      backButton?.classList.remove('hidden');
+      signupButton?.classList.remove('arcade-secondary');
+      confirmInput.value = '';
+    } else {
+      confirmField?.classList.add('hidden');
+      loginButton?.classList.remove('hidden');
+      backButton?.classList.add('hidden');
+      signupButton?.classList.add('arcade-secondary');
+      confirmInput.value = '';
+    }
+  };
+
+  const showLoginForm = ({ name, preserveMessage = false } = {}) => {
+    form?.classList.remove('hidden');
+    welcomeSection?.classList.add('hidden');
+    startButton?.classList.add('hidden');
+    setMode('login');
+    if (!preserveMessage) {
+      setMessage('');
+    }
+    nameInput.value = name || '';
+    pinInput.value = '';
+    confirmInput.value = '';
+  };
+
+  const showWelcome = (name, { ready = false } = {}) => {
+    welcomeText.textContent = `Welcome back ${name}`;
+    welcomeSection?.classList.remove('hidden');
+    form?.classList.add('hidden');
+    startButton?.classList.remove('hidden');
+    startButton.disabled = !ready;
+  };
+
+  const hideOverlay = () => {
+    startOverlay.setAttribute('aria-hidden', 'true');
+    startOverlay.classList.add('hidden');
+    startOverlay.style.display = 'none';
+  };
+
+  const requestLoginPin = async name => {
+    showLoginForm({ name, preserveMessage: true });
+    return loginWaiter.wait();
+  };
+
+  const requestNewPin = async name => {
+    showLoginForm({ name, preserveMessage: true });
+    setMode('signup');
+    return signupWaiter.wait();
+  };
+
+  const startAuthFlow = async name => {
+    if (!name) return;
+    const token = ++authToken;
+    authInProgress = true;
+    setMessage('Checking your save...');
+    try {
+      const result = await activeLoadProfile(name, {
+        requestLoginPin,
+        requestNewPin,
+        onIncorrectPin: () => setMessage('Incorrect PIN. Try again.'),
+        onInvalidPin: () => setMessage('PIN must be 4–6 digits.'),
+        useAlerts: false
+      });
+      if (token !== authToken) return;
+      authInProgress = false;
+      if (result?.canceled) {
+        setMessage('Login canceled.');
+        showLoginForm({ name: nameInput.value });
+        return;
+      }
+      currentName = result.profile?.name || name;
+      showWelcome(currentName, { ready: true });
+      setMessage('');
+      resolveAuth?.(result);
+    } catch (err) {
+      if (token !== authToken) return;
+      authInProgress = false;
+      setMessage('Login failed. Try again.');
+      showLoginForm({ name: nameInput.value });
+      console.warn('Login flow failed', err);
+    }
+  };
+
+  const handleLoginSubmit = event => {
+    event.preventDefault();
+    if (mode !== 'login') return;
+    const name = nameInput.value.trim();
+    const pin = pinInput.value.trim();
+    if (!name) {
+      setMessage('Enter your name to continue.');
+      return false;
+    }
+    if (!pin) {
+      setMessage('Enter your PIN to continue.');
+      return false;
+    }
+    if (authInProgress && name !== currentName) {
+      setMessage('Switch user to log in with a different name.');
+      return false;
+    }
+    currentName = name;
+    loginWaiter.push(pin);
+    return true;
+  };
+
+  const handleSignupSubmit = event => {
+    event.preventDefault();
+    if (mode !== 'signup') {
+      setMode('signup');
+      setMessage('');
+      return false;
+    }
+    const name = nameInput.value.trim();
+    const pin = pinInput.value.trim();
+    const confirm = confirmInput.value.trim();
+    if (!name) {
+      setMessage('Enter your name to continue.');
+      return false;
+    }
+    if (!pin || !confirm) {
+      setMessage('Enter and confirm your PIN.');
+      return false;
+    }
+    if (pin !== confirm) {
+      setMessage('PINs do not match.');
+      return false;
+    }
+    if (authInProgress && name !== currentName) {
+      setMessage('Switch user to sign up with a different name.');
+      return false;
+    }
+    currentName = name;
+    signupWaiter.push(pin);
+    return true;
+  };
+
+  const handleBackToLogin = event => {
+    event.preventDefault();
+    setMode('login');
+    setMessage('');
+  };
+
+  const handleSwitchUser = () => {
+    authToken += 1;
+    authInProgress = false;
+    if (currentName) {
+      clearStoredPin(currentName);
+      setCookie('playerName', '', -1);
+      localStorage.removeItem('playerName');
+    }
+    currentName = '';
+    showLoginForm();
+    setMessage('Enter a new name to continue.');
+  };
+
+  loginButton?.addEventListener('click', event => {
+    const queued = handleLoginSubmit(event);
+    if (queued && !authInProgress && nameInput.value.trim()) {
+      startAuthFlow(nameInput.value.trim());
+    }
+  });
+
+  form?.addEventListener('submit', event => {
+    if (mode === 'login') {
+      const queued = handleLoginSubmit(event);
+      if (queued && !authInProgress && nameInput.value.trim()) {
+        startAuthFlow(nameInput.value.trim());
+      }
+    } else if (mode === 'signup') {
+      const queued = handleSignupSubmit(event);
+      if (queued && !authInProgress && nameInput.value.trim()) {
+        startAuthFlow(nameInput.value.trim());
+      }
+    }
+  });
+
+  signupButton?.addEventListener('click', event => {
+    if (mode === 'login') {
+      handleSignupSubmit(event);
+      return;
+    }
+    const queued = handleSignupSubmit(event);
+    if (queued && !authInProgress && nameInput.value.trim()) {
+      startAuthFlow(nameInput.value.trim());
+    }
+  });
+
+  backButton?.addEventListener('click', handleBackToLogin);
+  switchButton?.addEventListener('click', handleSwitchUser);
+
+  startButton?.addEventListener('click', () => {
+    if (startHandler) {
+      startHandler();
+    }
+    hideOverlay();
+  });
+
+  return {
+    async authenticate({ initialName, hasStoredPin, loadProfile }) {
+      if (loadProfile) {
+        activeLoadProfile = loadProfile;
+      }
+      const authPromise = new Promise(resolve => {
+        resolveAuth = resolve;
+      });
+      if (initialName) {
+        nameInput.value = initialName;
+      }
+      if (initialName && hasStoredPin) {
+        currentName = initialName;
+        showWelcome(initialName, { ready: false });
+        startAuthFlow(initialName);
+      } else {
+        showLoginForm({ name: initialName });
+      }
+      return authPromise;
+    },
+    setStartHandler(handler) {
+      startHandler = handler;
+    },
+    hideOverlay
+  };
+}
+
 async function main() {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
+  const audioManager = new AudioManager();
+  const startOverlay = document.getElementById('start-overlay');
+  const arcadeOverlay = createArcadeOverlay(startOverlay);
+  let hasStartedAudio = false;
+
+  const resumeAudioContext = async () => {
+    const context = THREE.AudioContext?.getContext?.();
+    if (context?.state === 'suspended') {
+      try {
+        await context.resume();
+      } catch (err) {
+        console.warn('AudioContext resume failed', err);
+      }
+    }
+  };
+
+  const startAudioAndGameOnce = async () => {
+    if (hasStartedAudio) return;
+    hasStartedAudio = true;
+    await resumeAudioContext();
+    audioManager.playBGS('Forest Day/Forest Day.ogg');
+    focusGameCanvas?.();
+  };
+
+  arcadeOverlay.setStartHandler(startAudioAndGameOnce);
+
   let playerName = localStorage.getItem('playerName') || getCookie("playerName");
-  let profileResult = null;
-  while (!profileResult) {
-    if (!playerName) {
-      playerName = prompt("Enter your name") || `Player${Math.floor(Math.random() * 1000)}`;
-    }
-    const trimmedName = playerName.trim();
-    if (!trimmedName) {
-      playerName = null;
-      continue;
-    }
-    const result = await loadOrCreateWithPin(trimmedName);
-    if (result?.canceled) {
-      playerName = null;
-      continue;
-    }
-    profileResult = result;
-    playerName = result.profile?.name || trimmedName;
-  }
+  const hasStoredPin = !!getStoredPinHash(playerName);
+  const profileResult = await arcadeOverlay.authenticate({
+    initialName: playerName,
+    hasStoredPin,
+    loadProfile: loadOrCreateWithPin
+  });
+  playerName = profileResult.profile?.name || playerName;
   const { nameKey: profileNameKey, profile: playerProfile } = profileResult;
 
   setCookie("playerName", playerName);
@@ -1097,10 +1401,6 @@ async function main() {
       monstersSeeded = true;
     }
   };
-  const audioManager = new AudioManager();
-  const startOverlay = document.getElementById('start-overlay');
-  let hasStartedAudio = false;
-
   const focusGameCanvas = () => {
     const canvas = document.querySelector('#game-container canvas');
     if (canvas) {
@@ -1110,60 +1410,6 @@ async function main() {
       document.body?.focus?.();
     }
   };
-
-  const hideStartOverlay = () => {
-    if (!startOverlay) return;
-    startOverlay.setAttribute('aria-hidden', 'true');
-    startOverlay.removeAttribute('tabindex');
-    startOverlay.classList.add('hidden');
-    startOverlay.style.display = 'none';
-    startOverlay.blur();
-    focusGameCanvas();
-  };
-
-  const resumeAudioContext = async () => {
-    const context = THREE.AudioContext?.getContext?.();
-    if (context?.state === 'suspended') {
-      try {
-        await context.resume();
-      } catch (err) {
-        console.warn('AudioContext resume failed', err);
-      }
-    }
-  };
-
-  const startAudioAndGameOnce = async () => {
-    if (hasStartedAudio) return;
-    hasStartedAudio = true;
-    removeStartOverlayListeners();
-    hideStartOverlay();
-    await resumeAudioContext();
-    audioManager.playBGS('Forest Day/Forest Day.ogg');
-  };
-
-  const handleStartOverlayClick = () => {
-    startAudioAndGameOnce();
-  };
-
-  const handleStartOverlayKeydown = event => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      startAudioAndGameOnce();
-    }
-  };
-
-  const removeStartOverlayListeners = () => {
-    if (!startOverlay) return;
-    startOverlay.removeEventListener('click', handleStartOverlayClick);
-    startOverlay.removeEventListener('keydown', handleStartOverlayKeydown);
-  };
-
-  if (startOverlay) {
-    startOverlay.setAttribute('aria-hidden', 'false');
-    startOverlay.tabIndex = 0;
-    startOverlay.addEventListener('click', handleStartOverlayClick);
-    startOverlay.addEventListener('keydown', handleStartOverlayKeydown);
-  }
 
   let iceGun;
   let bow;
