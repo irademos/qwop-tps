@@ -537,7 +537,9 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   function setClimbableAreas(areas) {
     climbableAreas.length = 0;
     climbableAreas.push(...areas);
-    window.climbableAreas = climbableAreas;
+    window.buildingClimbableAreas = climbableAreas;
+    const treeAreas = window.treeClimbableAreas || [];
+    window.climbableAreas = [...climbableAreas, ...treeAreas];
   }
 
   function refreshClimbableAreas() {
@@ -644,11 +646,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
           }
         }
 
-        if (isFullDetail) {
-          wallClimbAreas.push(
-            ...buildWallClimbAreas(shape, geom.boundingBox.min.y, geom.boundingBox.max.y)
-          );
-        }
+        // Buildings are no longer climbable.
 
         extrudedResults.push(geom);
       } else {
