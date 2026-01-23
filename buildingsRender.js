@@ -22,8 +22,6 @@ const CLIMB_WALL_DEPTH = 0.6;
 // --- building texture ---
 const QUALITY_TIER_OPTIONS = ["low", "medium", "high"];
 
-const SIDES = ["+Z", "-Z", "+X", "-X"];
-
 function getRingWinding(points) {
   let sum = 0;
   const count = points.length;
@@ -77,21 +75,6 @@ function buildWallClimbAreas(shape2D, bottomY, topY) {
   return areas;
 }
 
-
-// quick per-building “random” (stable-ish) based on footprint + height
-function pickDisabledSide(polygon, height) {
-  const ring = polygon?.rings?.[0] ?? [];
-  if (!ring.length) return SIDES[(Math.random() * SIDES.length) | 0];
-
-  // hash a few points + height
-  let h = (height * 1000) | 0;
-  for (let i = 0; i < ring.length; i += Math.max(1, (ring.length / 6) | 0)) {
-    const [lon, lat] = ring[i];
-    h = (h * 1664525 + ((lon * 1e6) | 0) + ((lat * 1e6) | 0) + 1013904223) | 0;
-  }
-  const idx = (h >>> 0) % SIDES.length;
-  return SIDES[idx];
-}
 
 function resolveBuildingQualityTier() {
   if (typeof window === "undefined") return "high";
@@ -367,61 +350,52 @@ function hollowExtrudedGeometry(outerGeom, originalShape2D, {
   return csgSubtractGeom(outerGeom, [innerGeom]);
 }
 
-// Modify buildWindowDoorCuttersFromBBox to accept a "disabledSide" and skip that wall
-function buildWindowDoorCuttersFromBBox(bbox, {
-  windowW = 1.0,
-  windowH = 1.0,
-  windowBottom = 1.2,
-  windowSpacing = 2.2,
+function buildDoorCuttersFromShape(shape2D, {
   doorW = 2.8,
   doorH = 2.2,
   doorSpacing = 8,
-  inset = 0.02,
-  disabledSide = null // "+Z" | "-Z" | "+X" | "-X"
+  inset = 0.02
 } = {}) {
   const cutters = [];
-  const min = bbox.min, max = bbox.max;
-  const sizeX = max.x - min.x;
-  const sizeZ = max.z - min.z;
-
-  if (sizeX <= 0 || sizeZ <= 0) return cutters;
-
+  const points2D = shape2D?.getPoints?.() ?? [];
+  if (points2D.length < 2) return cutters;
+  const winding = getRingWinding(points2D);
   const yDoorCenter = doorH * 0.5;
-  const doorSpanX = Math.min(doorW, sizeX);
-  const doorSpanZ = Math.min(doorW, sizeZ);
+  const outwardFactor = CUT_DEPTH * 0.5 - inset;
 
-  function addDoorsOnZWall(zWall, sideTag) {
-    if (disabledSide === sideTag) return;
-    const spacing = Math.max(doorSpacing, doorSpanX * 1.2);
-    const count = Math.max(1, Math.floor(sizeX / spacing));
-    for (let i = 0; i < count; i++) {
-      const t = (count === 1) ? 0.5 : (i + 1) / (count + 1);
-      const x = min.x + t * sizeX;
-      const g = new THREE.BoxGeometry(doorSpanX, doorH, CUT_DEPTH);
-      const zCenter = zWall + (zWall === max.z ? -(CUT_DEPTH * 0.5 - inset) : (CUT_DEPTH * 0.5 - inset));
-      g.applyMatrix4(new THREE.Matrix4().makeTranslation(x, yDoorCenter, zCenter));
+  for (let i = 0; i < points2D.length; i += 1) {
+    const a2 = points2D[i];
+    const b2 = points2D[(i + 1) % points2D.length];
+    const ax = a2.x;
+    const az = -a2.y;
+    const bx = b2.x;
+    const bz = -b2.y;
+    const edgeVec = new THREE.Vector3(bx - ax, 0, bz - az);
+    const edgeLen = edgeVec.length();
+    if (edgeLen < 0.1) continue;
+
+    const doorSpan = Math.min(doorW, edgeLen);
+    if (doorSpan <= 0.01) continue;
+
+    const edgeDir = edgeVec.clone().normalize();
+    const leftNormal = new THREE.Vector3(-edgeDir.z, 0, edgeDir.x);
+    const rightNormal = new THREE.Vector3(edgeDir.z, 0, -edgeDir.x);
+    const outward = (winding >= 0 ? rightNormal : leftNormal).normalize();
+    const spacing = Math.max(doorSpacing, doorSpan * 1.2);
+    const count = Math.max(1, Math.floor(edgeLen / spacing));
+    const rotationY = Math.atan2(edgeDir.x, edgeDir.z);
+
+    for (let j = 0; j < count; j += 1) {
+      const t = (count === 1) ? 0.5 : (j + 1) / (count + 1);
+      const center = new THREE.Vector3(ax, 0, az)
+        .addScaledVector(edgeDir, edgeLen * t)
+        .addScaledVector(outward, outwardFactor);
+      const g = new THREE.BoxGeometry(doorSpan, doorH, CUT_DEPTH);
+      g.applyMatrix4(new THREE.Matrix4().makeRotationY(rotationY));
+      g.applyMatrix4(new THREE.Matrix4().makeTranslation(center.x, yDoorCenter, center.z));
       cutters.push(g);
     }
   }
-
-  function addDoorsOnXWall(xWall, sideTag) {
-    if (disabledSide === sideTag) return;
-    const spacing = Math.max(doorSpacing, doorSpanZ * 1.2);
-    const count = Math.max(1, Math.floor(sizeZ / spacing));
-    for (let i = 0; i < count; i++) {
-      const t = (count === 1) ? 0.5 : (i + 1) / (count + 1);
-      const z = min.z + t * sizeZ;
-      const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorSpanZ);
-      const xCenter = xWall + (xWall === max.x ? -(CUT_DEPTH * 0.5 - inset) : (CUT_DEPTH * 0.5 - inset));
-      g.applyMatrix4(new THREE.Matrix4().makeTranslation(xCenter, yDoorCenter, z));
-      cutters.push(g);
-    }
-  }
-
-  addDoorsOnZWall(max.z, "+Z");
-  addDoorsOnZWall(min.z, "-Z");
-  addDoorsOnXWall(max.x, "+X");
-  addDoorsOnXWall(min.x, "-X");
 
   return cutters;
 }
@@ -607,17 +581,10 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
         }
 
         if (isFullDetail && qualitySettings.enableCsg) {
-          const disabledSide = pickDisabledSide(polygon, height);
-
-          const cutters = buildWindowDoorCuttersFromBBox(geom.boundingBox, {
-            windowW: 1.0,
-            windowH: 1.0,
-            windowBottom: 1.3,
-            windowSpacing: 2.4,
+          const cutters = buildDoorCuttersFromShape(shape, {
             doorW: 3.0,
             doorH: 2.3,
-            doorSpacing: 8,
-            disabledSide
+            doorSpacing: 8
           });
 
           if (cutters.length) {
