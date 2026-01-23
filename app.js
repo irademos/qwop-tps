@@ -1539,6 +1539,9 @@ async function main() {
     return marker;
   };
 
+  const droppedWeaponPickups = [];
+  window.weaponPickups = droppedWeaponPickups;
+
   const updateWeaponMarker = (weapon, marker, rotationSpeed, offsetY = 1.2) => {
     if (!weapon?.mesh || !marker) return;
     const shouldShow = weapon.mesh.visible && !weapon.holder;
@@ -2906,14 +2909,59 @@ async function main() {
     return dropPosition;
   }
 
-  function duplicatePickupMesh(item) {
+  function disposeDroppedWeaponPickup(pickup) {
+    if (!pickup) return;
+    const mesh = pickup.mesh;
+    if (mesh) {
+      scene.remove(mesh);
+      mesh.traverse(child => {
+        if (!child.isMesh) return;
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(material => material?.dispose?.());
+        } else {
+          child.material?.dispose?.();
+        }
+      });
+    }
+    if (pickup.marker) {
+      scene.remove(pickup.marker);
+      pickup.marker.geometry?.dispose?.();
+      pickup.marker.material?.dispose?.();
+    }
+  }
+
+  function createDroppedWeaponPickup(item, { itemId, markerColor, markerOffsetY } = {}) {
     if (!item?.mesh || !item.mesh.visible) return;
-    const pickupClone = item.mesh.clone(true);
-    pickupClone.position.copy(item.mesh.position);
-    pickupClone.quaternion.copy(item.mesh.quaternion);
-    pickupClone.visible = true;
-    pickupClone.userData.hideInMapView = item.mesh.userData?.hideInMapView;
-    scene.add(pickupClone);
+    const pickupMesh = item.mesh.clone(true);
+    pickupMesh.position.copy(item.mesh.position);
+    pickupMesh.quaternion.copy(item.mesh.quaternion);
+    pickupMesh.visible = true;
+    pickupMesh.userData.hideInMapView = item.mesh.userData?.hideInMapView;
+    scene.add(pickupMesh);
+    const marker = createWeaponMarker(markerColor);
+    const pickup = {
+      mesh: pickupMesh,
+      marker,
+      itemId,
+      type: item?.type || itemId,
+      holder: null,
+      markerOffsetY,
+      tryPickup: (playerControls) => {
+        if (!pickupMesh?.visible || !playerControls?.playerModel) return;
+        const distance = playerControls.playerModel.position.distanceTo(pickupMesh.position);
+        if (distance > 3) return;
+        addToInventory(itemId, 1);
+        updateSettingsUI();
+        const index = droppedWeaponPickups.indexOf(pickup);
+        if (index !== -1) {
+          droppedWeaponPickups.splice(index, 1);
+        }
+        disposeDroppedWeaponPickup(pickup);
+      }
+    };
+    droppedWeaponPickups.push(pickup);
+    return pickup;
   }
 
   function dropInventoryItem(itemId) {
@@ -2941,7 +2989,8 @@ async function main() {
       return;
     }
     if (shouldDuplicatePickup) {
-      duplicatePickupMesh(item);
+      const markerColor = itemId === 'bow' ? 0xffc26b : 0xffd400;
+      createDroppedWeaponPickup(item, { itemId, markerColor, markerOffsetY: 1.2 });
     }
     item.holder = null;
     item.mesh.visible = true;
@@ -5314,6 +5363,9 @@ async function main() {
     updateWeaponMarker(bow, bowMarker, 0.03);
     updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
     updateWeaponMarker(lantern, lanternMarker, 0.03);
+    droppedWeaponPickups.forEach(pickup => {
+      updateWeaponMarker(pickup, pickup.marker, 0.03, pickup.markerOffsetY ?? 1.2);
+    });
     const localStates = collectLocalControlStates();
 
     if (multiplayer.isHost) {
