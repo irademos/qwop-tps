@@ -1545,7 +1545,9 @@ export class PlayerControls {
   }
 
   getWeapons() {
-    return Object.values(window.weapons || {}).filter(Boolean);
+    const weapons = Object.values(window.weapons || {}).filter(Boolean);
+    const pickups = Array.isArray(window.weaponPickups) ? window.weaponPickups : [];
+    return weapons.concat(pickups);
   }
 
   getEquippedWeapon() {
