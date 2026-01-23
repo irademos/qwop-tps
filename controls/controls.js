@@ -8,7 +8,7 @@ import { QuestManager } from "../quest.js";
 
 // Movement constants
 const SWIM_SPEED = 2;
-const JUMP_FORCE = 5;
+const JUMP_FORCE = 4;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
@@ -566,7 +566,7 @@ export class PlayerControls {
           this.canJump = false;
           this.hasDoubleJumped = false;
         } else if (!this.hasDoubleJumped && this.body) {
-          this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
+          this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
           this.hasDoubleJumped = true;
           this.playAction('hurricaneKick');
         }
