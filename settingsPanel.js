@@ -227,13 +227,25 @@ function buildInventoryPanel() {
   emptyState.classList.add('inventory-empty');
   emptyState.textContent = 'Empty';
   const details = createElement('div', 'inventory-details');
-  details.textContent = 'Select an item to see details.';
+  const detailsText = createElement('div', 'inventory-details-text', 'Select an item to see details.');
+  const actions = createElement('div', 'inventory-actions');
+  const dropButton = createElement('button', 'settings-button', 'Drop');
+  dropButton.type = 'button';
+  dropButton.dataset.inventoryAction = 'drop';
+  const equipButton = createElement('button', 'settings-button', 'Equip');
+  equipButton.type = 'button';
+  equipButton.dataset.inventoryAction = 'equip';
+  actions.append(dropButton, equipButton);
+  details.append(detailsText, actions);
 
   panelEl.append(grid, emptyState, details);
 
   elements.inventoryGrid = grid;
   elements.inventoryEmpty = emptyState;
-  elements.inventoryDetails = details;
+  elements.inventoryDetails = detailsText;
+  elements.inventoryActions = actions;
+  elements.inventoryDropButton = dropButton;
+  elements.inventoryEquipButton = equipButton;
 
   return panelEl;
 }
@@ -725,6 +737,9 @@ function renderInventory() {
   if (!entries.length) {
     elements.inventoryEmpty.style.display = 'block';
     elements.inventoryDetails.textContent = 'Inventory is empty.';
+    if (elements.inventoryActions) {
+      elements.inventoryActions.style.display = 'none';
+    }
     selectedInventoryId = null;
     return;
   }
@@ -791,6 +806,14 @@ function renderInventory() {
         ? ` • Arrows ${Number.isFinite(selectedItem?.['arrow ammo']) ? selectedItem['arrow ammo'] : 0}`
         : '';
     elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${equippedText}${countText}${ammoText}`;
+    if (elements.inventoryActions) {
+      elements.inventoryActions.style.display = 'flex';
+    }
+    if (elements.inventoryEquipButton) {
+      elements.inventoryEquipButton.textContent = selectedInventoryId === equippedItemId ? 'Unequip' : 'Equip';
+      elements.inventoryEquipButton.dataset.inventoryAction =
+        selectedInventoryId === equippedItemId ? 'unequip' : 'equip';
+    }
   }
 }
 
@@ -804,14 +827,21 @@ function bindEvents() {
   panel.addEventListener('click', (event) => {
     const button = event.target.closest('button');
     if (!button) return;
+    if (button.dataset.inventoryAction) {
+      const action = button.dataset.inventoryAction;
+      if (!selectedInventoryId) return;
+      if (action === 'drop') {
+        context.appState?.dropInventoryItem?.(selectedInventoryId);
+      } else if (action === 'equip') {
+        context.appState?.equipInventoryItem?.(selectedInventoryId);
+      } else if (action === 'unequip') {
+        context.appState?.unequipInventoryItem?.(selectedInventoryId);
+      }
+      renderInventory();
+      return;
+    }
     if (button.dataset.inventoryId) {
       selectedInventoryId = button.dataset.inventoryId;
-      const isEquipped = context.appState?.isInventoryItemEquipped?.(selectedInventoryId);
-      if (isEquipped) {
-        context.appState?.unequipInventoryItem?.(selectedInventoryId);
-      } else {
-        context.appState?.equipInventoryItem?.(selectedInventoryId);
-      }
       renderInventory();
       return;
     }
