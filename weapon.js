@@ -15,6 +15,8 @@ export class Weapon {
     this.modelUrl = options.modelUrl || '';
     this.onPickup = null;
     this.onDrop = null;
+    this.heldMesh = null;
+    this.useHeldMeshWhenHeld = false;
     this._holdOffset = options.holdOffset || new THREE.Vector3(-0.05, 0.15, 0.08);
     this._holdRotation = options.holdRotation || new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
     this._holdQuaternion = new THREE.Quaternion().setFromEuler(this._holdRotation);
@@ -97,15 +99,16 @@ export class Weapon {
     if (!this.holder || !this.mesh) return;
     const previousHolder = this.holder;
     const player = previousHolder.playerModel;
+    const activeMesh = this.useHeldMeshWhenHeld && this.heldMesh ? this.heldMesh : this.mesh;
     if (player) {
       const dropPosition = player.position.clone();
       const terrainHeight = getTerrainHeight(dropPosition.x, dropPosition.z);
       dropPosition.y = terrainHeight + 0.5;
-      this.mesh.position.copy(dropPosition);
-      this.mesh.quaternion.copy(player.quaternion);
+      activeMesh.position.copy(dropPosition);
+      activeMesh.quaternion.copy(player.quaternion);
     }
     this.holder = null;
-    this.mesh.visible = true;
+    activeMesh.visible = true;
     if (typeof this.onDrop === 'function') {
       this.onDrop(previousHolder, { removeFromInventory });
     }
@@ -117,24 +120,26 @@ export class Weapon {
 
     const player = this.holder.playerModel;
     const handBone = this._getHandBone(player);
+    const activeMesh = this.useHeldMeshWhenHeld && this.heldMesh ? this.heldMesh : this.mesh;
+    if (!activeMesh) return;
 
     if (handBone) {
       handBone.updateWorldMatrix(true, false);
       handBone.getWorldPosition(this._tempPosition);
       handBone.getWorldQuaternion(this._tempQuaternion);
 
-      this.mesh.position.copy(this._tempPosition);
+      activeMesh.position.copy(this._tempPosition);
       this._tempOffset.copy(this._holdOffset).applyQuaternion(this._tempQuaternion);
-      this.mesh.position.add(this._tempOffset);
+      activeMesh.position.add(this._tempOffset);
 
-      this.mesh.quaternion.copy(this._tempQuaternion).multiply(this._holdQuaternion);
+      activeMesh.quaternion.copy(this._tempQuaternion).multiply(this._holdQuaternion);
       return;
     }
 
     const quaternion = player.quaternion;
     this._tempOffset.copy(this._holdOffset).applyQuaternion(quaternion);
-    this.mesh.position.copy(player.position).add(this._tempOffset);
-    this.mesh.quaternion.copy(quaternion).multiply(this._holdQuaternion);
+    activeMesh.position.copy(player.position).add(this._tempOffset);
+    activeMesh.quaternion.copy(quaternion).multiply(this._holdQuaternion);
   }
 
   _getHandBone(playerModel) {
