@@ -86,6 +86,7 @@ export class MonsterCharacter extends CharacterBase {
       this.markDead();
       return true;
     }
+    this.playAnimation("Hit", MOVE_FADE);
     return false;
   }
 

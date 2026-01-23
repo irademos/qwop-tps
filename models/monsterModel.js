@@ -8,6 +8,7 @@ const animationFiles = {
   Run: 'Drunk Run Forward.fbx',
   Weapon: 'Mutant Punch.fbx',
   Death: 'Dying.fbx',
+  Hit: 'Flying Back Death.fbx',
   TwistDance: 'Twist Dance.fbx'
 };
 
@@ -156,7 +157,7 @@ export function loadMonsterModel(modelPath, callback) {
                 if (forceFast) {
                   action.setEffectiveTimeScale(10.0);
                 }
-                if (['Weapon', 'Death'].includes(name)) {
+                if (['Weapon', 'Death', 'Hit'].includes(name)) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
                 }
@@ -178,7 +179,7 @@ export function loadMonsterModel(modelPath, callback) {
                   if (forceFast) {
                     action.setEffectiveTimeScale(10.0);
                   }
-                  if (['Weapon', 'Death'].includes(name)) {
+                  if (['Weapon', 'Death', 'Hit'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
                   }
