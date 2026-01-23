@@ -33,6 +33,57 @@ function getRingWinding(points) {
   return sum;
 }
 
+function pointInPolygon(p, poly) {
+  // ray-casting algorithm
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y;
+    const xj = poly[j].x, yj = poly[j].y;
+
+    const intersect =
+      ((yi > p.y) !== (yj > p.y)) &&
+      (p.x < (xj - xi) * (p.y - yi) / (yj - yi + 1e-12) + xi);
+
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function shapeContains2D(shape2D, p) {
+  const pts = shape2D.getPoints(); // outer ring only
+  return pointInPolygon(p, pts);
+}
+
+function outwardNormalForEdge(shape2D, a2, b2) {
+  // edge direction in 2D
+  const dx = b2.x - a2.x;
+  const dy = b2.y - a2.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ex = dx / len;
+  const ey = dy / len;
+
+  // candidate normals
+  const left2  = new THREE.Vector2(-ey, ex);
+  const right2 = new THREE.Vector2(ey, -ex);
+
+  // midpoint of edge
+  const mid = new THREE.Vector2(
+    (a2.x + b2.x) * 0.5,
+    (a2.y + b2.y) * 0.5
+  );
+
+  const eps = 0.05;
+
+  const testL = mid.clone().addScaledVector(left2, eps);
+  const leftIsInside = shapeContains2D(shape2D, testL);
+
+  // if left side is inside, outward is right, else left
+  const outward2 = leftIsInside ? right2 : left2;
+
+  // convert 2D → world (x, z = -y)
+  return new THREE.Vector3(outward2.x, 0, -outward2.y).normalize();
+}
+
 function buildWallClimbAreas(shape2D, bottomY, topY) {
   const points2D = shape2D.getPoints();
   if (points2D.length < 2) return [];
@@ -54,7 +105,7 @@ function buildWallClimbAreas(shape2D, bottomY, topY) {
     const edgeDir = edgeVec.clone().normalize();
     const leftNormal = new THREE.Vector3(-edgeDir.z, 0, edgeDir.x);
     const rightNormal = new THREE.Vector3(edgeDir.z, 0, -edgeDir.x);
-    const outward = (winding >= 0 ? rightNormal : leftNormal).normalize();
+    const outward = outwardNormalForEdge(shape2D, a, b);
     const rotationY = Math.atan2(outward.x, outward.z);
 
     const center = new THREE.Vector3((ax + bx) * 0.5, midY, (az + bz) * 0.5)
@@ -74,7 +125,6 @@ function buildWallClimbAreas(shape2D, bottomY, topY) {
 
   return areas;
 }
-
 
 function resolveBuildingQualityTier() {
   if (typeof window === "undefined") return "high";
@@ -351,7 +401,7 @@ function hollowExtrudedGeometry(outerGeom, originalShape2D, {
 }
 
 function buildDoorCuttersFromShape(shape2D, {
-  doorW = 2.8,
+  doorW = 3.0,
   doorH = 2.2,
   doorSpacing = 8,
   inset = 0.02
@@ -374,7 +424,7 @@ function buildDoorCuttersFromShape(shape2D, {
     const edgeLen = edgeVec.length();
     if (edgeLen < 0.1) continue;
 
-    const doorSpan = Math.min(doorW, edgeLen);
+    const doorSpan = doorW;//Math.min(doorW, edgeLen);
     if (doorSpan <= 0.01) continue;
 
     const edgeDir = edgeVec.clone().normalize();
@@ -390,7 +440,7 @@ function buildDoorCuttersFromShape(shape2D, {
       const center = new THREE.Vector3(ax, 0, az)
         .addScaledVector(edgeDir, edgeLen * t)
         .addScaledVector(outward, outwardFactor);
-      const g = new THREE.BoxGeometry(doorSpan, doorH, CUT_DEPTH);
+      const g = new THREE.BoxGeometry(CUT_DEPTH, doorH, doorSpan);
       g.applyMatrix4(new THREE.Matrix4().makeRotationY(rotationY));
       g.applyMatrix4(new THREE.Matrix4().makeTranslation(center.x, yDoorCenter, center.z));
       cutters.push(g);
@@ -583,8 +633,8 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
         if (isFullDetail && qualitySettings.enableCsg) {
           const cutters = buildDoorCuttersFromShape(shape, {
             doorW: 3.0,
-            doorH: 2.3,
-            doorSpacing: 8
+            doorH: 3.0,
+            doorSpacing: 12
           });
 
           if (cutters.length) {

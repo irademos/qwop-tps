@@ -8,7 +8,7 @@ const CORE_ASSETS = [
   '/index.html',
   '/app.js',
   '/styles.css',
-  '/models/cowboy.fbx',
+  // '/models/cowboy.fbx',
   '/models/zombie.fbx',
   '/models/animations/Breathing Idle.fbx',
   '/models/animations/Old Man Walk.fbx',
