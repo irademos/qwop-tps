@@ -455,6 +455,16 @@ async function main() {
     }
   };
 
+  const focusGameCanvas = () => {
+    const canvas = document.querySelector('#game-container canvas');
+    if (canvas) {
+      canvas.tabIndex = 0;
+      canvas.focus();
+    } else {
+      document.body?.focus?.();
+    }
+  };
+
   const startAudioAndGameOnce = async () => {
     if (hasStartedAudio) return;
     hasStartedAudio = true;
@@ -1399,15 +1409,6 @@ async function main() {
       console.warn('Failed to load monster snapshot', err);
       monsterSnapshotLoaded = true;
       monstersSeeded = true;
-    }
-  };
-  const focusGameCanvas = () => {
-    const canvas = document.querySelector('#game-container canvas');
-    if (canvas) {
-      canvas.tabIndex = 0;
-      canvas.focus();
-    } else {
-      document.body?.focus?.();
     }
   };
 
