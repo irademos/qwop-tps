@@ -1106,7 +1106,7 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.85);
+  background: radial-gradient(circle at top, rgba(46, 16, 101, 0.85), rgba(6, 7, 20, 0.95));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1114,16 +1114,147 @@ body {
   color: #fff;
   font-family: 'Press Start 2P', monospace;
   text-align: center;
-  cursor: pointer;
+  padding: 24px;
 }
 
-.start-overlay-content {
-  font-size: 24px;
-  line-height: 1.6;
-  padding: 24px 32px;
-  border: 2px solid #fff;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.4);
+#start-overlay.hidden {
+  display: none;
+}
+
+.arcade-shell {
+  width: min(560px, 100%);
+  border: 3px solid #facc15;
+  border-radius: 20px;
+  background: rgba(5, 6, 17, 0.95);
+  box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.2), 0 0 30px rgba(88, 225, 255, 0.35);
+  padding: 28px 24px;
+  display: grid;
+  gap: 20px;
+}
+
+.arcade-header {
+  display: grid;
+  gap: 10px;
+}
+
+.arcade-title {
+  font-size: clamp(26px, 4vw, 36px);
+  letter-spacing: 1px;
+  color: #fcd34d;
+  text-shadow: 0 0 8px rgba(250, 204, 21, 0.7), 0 0 20px rgba(59, 130, 246, 0.6);
+}
+
+.arcade-subtitle {
+  font-size: 12px;
+  color: #93c5fd;
+  text-transform: uppercase;
+}
+
+.arcade-panel {
+  border-radius: 16px;
+  border: 2px solid rgba(148, 163, 184, 0.3);
+  padding: 20px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.9));
+  display: grid;
+  gap: 18px;
+}
+
+.arcade-message {
+  min-height: 20px;
+  font-size: 12px;
+  color: #f472b6;
+}
+
+.arcade-form {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+}
+
+.arcade-field {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+
+.arcade-label {
+  font-size: 10px;
+  color: #e2e8f0;
+}
+
+.arcade-input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 2px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 12px;
+  outline: none;
+}
+
+.arcade-input:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.4);
+}
+
+.arcade-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.arcade-button {
+  border: 2px solid #facc15;
+  background: linear-gradient(180deg, #facc15, #eab308);
+  color: #0f172a;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 11px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.arcade-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.5);
+}
+
+.arcade-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: none;
+}
+
+.arcade-secondary {
+  border-color: #38bdf8;
+  background: linear-gradient(180deg, #38bdf8, #0ea5e9);
+  color: #0b1120;
+}
+
+.arcade-start {
+  font-size: 14px;
+  padding: 14px 20px;
+}
+
+.arcade-welcome {
+  display: grid;
+  gap: 12px;
+}
+
+.arcade-welcome-text {
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.arcade-confirm.hidden,
+.arcade-welcome.hidden,
+.arcade-button.hidden,
+.arcade-form.hidden {
+  display: none;
 }
 
 #level-builder-sidebar {
