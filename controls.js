@@ -756,6 +756,7 @@ export class PlayerControls {
 
     this.getWeapons().forEach((weapon) => {
       if (!weapon || weapon.holder) return;
+      if (weapon.mesh && !weapon.mesh.visible) return;
       const target = weapon.mesh || weapon;
       if (!target?.position) return;
       const dist = playerPos.distanceTo(target.position);
