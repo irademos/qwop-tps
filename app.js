@@ -4036,6 +4036,7 @@ async function main() {
       currentRenderOrigin = bounds;
     }
     mapRenderer.updateTileHighways?.(tileKey, geojson, bounds);
+    natureController?.refreshTile?.(tileKey);
 
     const finishBuildingRender = () => {
       buildingsRenderer.updateTileBuildings?.(tileKey, geojson, bounds);
