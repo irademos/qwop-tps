@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { getWaterDepth, getTerrainHeight } from './water.js';
+import { getWaterDepth, getTerrainHeight } from '../environment/water.js';
 
 // Easily tweakable placement and gameplay constants
 const DEFAULT_BOAT_POSITION = new THREE.Vector3(8, 0, 14);
