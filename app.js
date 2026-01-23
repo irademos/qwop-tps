@@ -2952,7 +2952,7 @@ async function main() {
         const distance = playerControls.playerModel.position.distanceTo(pickupMesh.position);
         if (distance > 3) return;
         addToInventory(itemId, 1);
-        updateSettingsUI();
+        equipInventoryItem(itemId);
         const index = droppedWeaponPickups.indexOf(pickup);
         if (index !== -1) {
           droppedWeaponPickups.splice(index, 1);
