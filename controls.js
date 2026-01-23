@@ -598,11 +598,6 @@ export class PlayerControls {
         return;
       }
 
-      if (key === 'c') {
-        this.handleFriendlyInteractionAction();
-        return;
-      }
-
       if (e.key === " ") {
         if (this.parachute) {
           this.removeParachute();
@@ -709,6 +704,7 @@ export class PlayerControls {
     if (!this.enabled) return;
 
     if (this.isInteracting) {
+      this.advanceFriendlyDialogue();
       return;
     }
 
@@ -717,19 +713,21 @@ export class PlayerControls {
       return;
     }
 
-    const equippedWeapon = this.getEquippedWeapon();
-    if (equippedWeapon) {
-      equippedWeapon.tryPickup?.(this);
+    const closest = this.getClosestInteractionTarget();
+    if (!closest) return;
+
+    if (closest.type === 'friendly') {
+      this.startFriendlyInteraction(closest.friendly);
       return;
     }
 
-    window.spaceship?.tryMount(this);
-    window.surfboard?.tryMount(this);
-    window.rowBoat?.tryMount(this);
-    for (const weapon of this.getWeapons()) {
-      if (!weapon) continue;
-      weapon.tryPickup?.(this);
-      if (weapon.holder === this) break;
+    if (closest.type === 'weapon') {
+      closest.weapon.tryPickup?.(this);
+      return;
+    }
+
+    if (closest.type === 'vehicle') {
+      closest.vehicle.tryMount?.(this);
     }
   }
 
@@ -755,6 +753,70 @@ export class PlayerControls {
       }
     }
     return closest ? { friendly: closest, distance: closestDistance } : null;
+  }
+
+  getClosestInteractionTarget() {
+    if (!this.playerModel) return null;
+    const playerPos = this.playerModel.position;
+    let closest = null;
+    let closestDistance = Infinity;
+
+    const consider = (distance, data) => {
+      if (distance <= data.maxDistance && distance < closestDistance) {
+        closestDistance = distance;
+        closest = { ...data, distance };
+      }
+    };
+
+    const nearbyFriendly = this.getClosestFriendly(FRIENDLY_INTERACT_RANGE);
+    if (nearbyFriendly?.friendly) {
+      consider(nearbyFriendly.distance, {
+        type: 'friendly',
+        friendly: nearbyFriendly.friendly,
+        maxDistance: FRIENDLY_INTERACT_RANGE,
+        promptText: "'x' interact"
+      });
+    }
+
+    const vehicles = [
+      { vehicle: window.spaceship, maxDistance: 10, promptText: "'x' enter spaceship" },
+      { vehicle: window.rowBoat, maxDistance: 4, promptText: "'x' enter rowboat" },
+      { vehicle: window.surfboard, maxDistance: 3, promptText: "'x' enter surfboard" }
+    ];
+
+    vehicles.forEach(({ vehicle, maxDistance, promptText }) => {
+      if (!vehicle) return;
+      const target = vehicle.mesh || vehicle;
+      if (!target?.position) return;
+      if (vehicle.occupant) return;
+      const dist = playerPos.distanceTo(target.position);
+      consider(dist, { type: 'vehicle', vehicle, maxDistance, promptText });
+    });
+
+    const getWeaponLabel = (weapon) => {
+      if (!weapon) return 'weapon';
+      if (weapon.type === 'sword') return 'sword';
+      if (weapon.type === 'gun') return 'gun';
+      if (weapon.type === 'bow') return 'bow';
+      if (weapon.type === 'lantern') return 'lantern';
+      return 'weapon';
+    };
+
+    this.getWeapons().forEach((weapon) => {
+      if (!weapon || weapon.holder) return;
+      const target = weapon.mesh || weapon;
+      if (!target?.position) return;
+      const dist = playerPos.distanceTo(target.position);
+      const weaponLabel = getWeaponLabel(weapon);
+      consider(dist, {
+        type: 'weapon',
+        weapon,
+        maxDistance: 3,
+        promptText: `'x' pick up ${weaponLabel}`
+      });
+    });
+
+    return closest;
   }
 
   isFriendlyWithinRange(friendly, range) {
@@ -858,10 +920,11 @@ export class PlayerControls {
     }
 
     const nearby = this.getClosestFriendly(FRIENDLY_INTERACT_RANGE);
-    if (nearby?.friendly) {
+    const closest = this.getClosestInteractionTarget();
+    if (nearby?.friendly && closest?.type === 'friendly' && closest.friendly === nearby.friendly) {
       this.friendlyInteractButton.classList.remove('hidden');
       this.friendlyInteractButton.disabled = false;
-      this.friendlyInteractButton.textContent = this.isMobile ? 'Talk' : 'Interact (C)';
+      this.friendlyInteractButton.textContent = this.isMobile ? 'Talk' : 'Interact (X)';
       return;
     }
 
@@ -1757,15 +1820,6 @@ export class PlayerControls {
     let promptText = '';
     let visible = false;
 
-    const getWeaponLabel = (weapon) => {
-      if (!weapon) return 'weapon';
-      if (weapon.type === 'sword') return 'sword';
-      if (weapon.type === 'gun') return 'gun';
-      if (weapon.type === 'bow') return 'bow';
-      if (weapon.type === 'lantern') return 'lantern';
-      return 'weapon';
-    };
-
     if (this.vehicle) {
       const type = this.vehicle.type;
       if (type === 'spaceship') {
@@ -1777,31 +1831,11 @@ export class PlayerControls {
       }
       visible = !!promptText;
     } else {
-      const playerPos = this.playerModel.position;
-      let closestDist = Infinity;
-
-      const consider = (object, maxDistance, message) => {
-        if (!object) return;
-        const target = object.mesh || object;
-        if (!target || !target.position) return;
-        if (object.occupant) return;
-        if (object.holder) return;
-        const dist = playerPos.distanceTo(target.position);
-        if (dist <= maxDistance && dist < closestDist) {
-          closestDist = dist;
-          promptText = message;
-          visible = true;
-        }
-      };
-
-      consider(window.spaceship, 10, "'x' enter spaceship");
-      consider(window.rowBoat, 4, "'x' enter rowboat");
-      consider(window.surfboard, 3, "'x' enter surfboard");
-      this.getWeapons().forEach(weapon => {
-        if (!weapon) return;
-        const weaponLabel = getWeaponLabel(weapon);
-        consider(weapon, 3, `'x' pick up ${weaponLabel}`);
-      });
+      const closest = this.getClosestInteractionTarget();
+      if (closest?.promptText) {
+        promptText = closest.promptText;
+        visible = true;
+      }
     }
 
     if (visible) {
