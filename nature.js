@@ -19,12 +19,6 @@ const TREE_ZONE_METERS = 100;
 const TREE_GRID_SPACING = 20;
 const TREE_SPAWN_CHANCE = 0.4;
 const TREE_TILE_BUFFER = 2;
-const TREE_ROAD_CLEARANCE = 4.5;
-const TREE_BUILDING_CLEARANCE = 2.5;
-const BUILDING_RAYCAST_HEIGHT = 200;
-const DEBUG_COLOR = 0xffeb3b;
-const DEBUG_ROAD_OPACITY = 0.9;
-const DEBUG_BUILDING_OPACITY = 0.65;
 
 const setTreeShadowing = (tree) => {
   tree.traverse((child) => {
@@ -44,30 +38,10 @@ function hashZoneIndex(a, b) {
   return hash;
 }
 
-function distanceToSegmentSquared(px, pz, ax, az, bx, bz) {
-  const dx = bx - ax;
-  const dz = bz - az;
-  const lengthSq = dx * dx + dz * dz;
-  if (lengthSq === 0) {
-    const dx0 = px - ax;
-    const dz0 = pz - az;
-    return dx0 * dx0 + dz0 * dz0;
-  }
-  let t = ((px - ax) * dx + (pz - az) * dz) / lengthSq;
-  t = Math.max(0, Math.min(1, t));
-  const cx = ax + t * dx;
-  const cz = az + t * dz;
-  const dx1 = px - cx;
-  const dz1 = pz - cz;
-  return dx1 * dx1 + dz1 * dz1;
-}
-
 export async function createNature({
   scene,
   playerModel,
   getTerrainHeight,
-  mapRenderer,
-  buildingsRenderer,
   getGeoForLocal,
   tileCache
 } = {}) {
@@ -105,217 +79,15 @@ export async function createNature({
   group.name = 'nature-group';
   scene.add(group);
 
-  const debugGroup = new THREE.Group();
-  debugGroup.name = 'tree-blockers-debug';
-  scene.add(debugGroup);
-
   const treeTiles = new Map();
-  const roadSegmentsByTile = new Map();
-  const roadDebugByTile = new Map();
-  const buildingDebugByTile = new Map();
 
-  const tempStart = new THREE.Vector3();
-  const tempEnd = new THREE.Vector3();
   const tempPosition = new THREE.Vector3();
-  const tempBox = new THREE.Box3();
 
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
   let tileBuffer = activeTileCache?.evictRadiusTiles ?? TREE_TILE_BUFFER;
 
-  // const isDebugEnabled = () => Boolean(globalThis?.DEBUG_TREE_BLOCKERS);
-  const isDebugEnabled = () => Boolean(true);
-
-
-  const disposeDebugEntry = (entry) => {
-    if (!entry) return;
-    entry.traverse((child) => {
-      if (child.geometry?.dispose) {
-        child.geometry.dispose();
-      }
-      if (child.material?.dispose) {
-        child.material.dispose();
-      }
-    });
-  };
-
-  const removeDebugEntry = (map, tileKey) => {
-    const entry = map.get(tileKey);
-    if (!entry) return;
-    debugGroup.remove(entry);
-    disposeDebugEntry(entry);
-    map.delete(tileKey);
-  };
-
-  const clearDebug = () => {
-    for (const entry of roadDebugByTile.values()) {
-      debugGroup.remove(entry);
-      disposeDebugEntry(entry);
-    }
-    roadDebugByTile.clear();
-    for (const entry of buildingDebugByTile.values()) {
-      debugGroup.remove(entry);
-      disposeDebugEntry(entry);
-    }
-    buildingDebugByTile.clear();
-  };
-
   const getTileKey = (tile) => `${tile.x},${tile.y}`;
-  const parseTileKey = (tileKey) => {
-    const [x, y] = tileKey.split(',').map(Number);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    return { x, y };
-  };
-
-  const getTileGroup = (rootGroup, prefix, tileKey) => {
-    if (!rootGroup || !tileKey) return null;
-    return rootGroup.getObjectByName(`${prefix}-${tileKey}`) ?? null;
-  };
-
-  const cacheRoadSegmentsForTile = (tileKey) => {
-    if (!tileKey || !mapRenderer?.group) return [];
-    const tileGroup = getTileGroup(mapRenderer.group, 'osm-highways', tileKey);
-    if (!tileGroup) {
-      roadSegmentsByTile.set(tileKey, []);
-      return [];
-    }
-
-    const segments = [];
-    tileGroup.traverse((child) => {
-      if (!child?.geometry) return;
-      if (!child.isLine && !child.userData?.isWideLine) return;
-
-      const width = Number.isFinite(child.material?.linewidth) ? child.material.linewidth : 1;
-      const clearance = width * 0.5 + TREE_ROAD_CLEARANCE;
-      const geometry = child.geometry;
-      const instanceStart = geometry.attributes?.instanceStart?.array;
-      const instanceEnd = geometry.attributes?.instanceEnd?.array;
-      const positions = geometry.attributes?.position?.array;
-
-      if (instanceStart && instanceEnd) {
-        for (let i = 0; i < instanceStart.length; i += 3) {
-          tempStart.set(instanceStart[i], instanceStart[i + 1], instanceStart[i + 2]);
-          tempEnd.set(instanceEnd[i], instanceEnd[i + 1], instanceEnd[i + 2]);
-          child.localToWorld(tempStart);
-          child.localToWorld(tempEnd);
-          segments.push({
-            ax: tempStart.x,
-            az: tempStart.z,
-            bx: tempEnd.x,
-            bz: tempEnd.z,
-            clearance
-          });
-        }
-      } else if (positions && positions.length >= 6) {
-        for (let i = 0; i < positions.length - 3; i += 3) {
-          tempStart.set(positions[i], positions[i + 1], positions[i + 2]);
-          tempEnd.set(positions[i + 3], positions[i + 4], positions[i + 5]);
-          child.localToWorld(tempStart);
-          child.localToWorld(tempEnd);
-          segments.push({
-            ax: tempStart.x,
-            az: tempStart.z,
-            bx: tempEnd.x,
-            bz: tempEnd.z,
-            clearance
-          });
-        }
-      }
-    });
-    roadSegmentsByTile.set(tileKey, segments);
-
-    if (isDebugEnabled()) {
-      removeDebugEntry(roadDebugByTile, tileKey);
-      if (segments.length) {
-        const positions = new Float32Array(segments.length * 6);
-        segments.forEach((segment, index) => {
-          const offset = index * 6;
-          positions[offset] = segment.ax;
-          positions[offset + 1] = 0.2;
-          positions[offset + 2] = segment.az;
-          positions[offset + 3] = segment.bx;
-          positions[offset + 4] = 0.2;
-          positions[offset + 5] = segment.bz;
-        });
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const material = new THREE.LineBasicMaterial({
-          color: DEBUG_COLOR,
-          transparent: true,
-          opacity: DEBUG_ROAD_OPACITY
-        });
-        const lines = new THREE.LineSegments(geometry, material);
-        lines.name = `tree-road-debug-${tileKey}`;
-        roadDebugByTile.set(tileKey, lines);
-        debugGroup.add(lines);
-      }
-    } else if (roadDebugByTile.has(tileKey)) {
-      removeDebugEntry(roadDebugByTile, tileKey);
-    }
-
-    return segments;
-  };
-
-  const getRoadSegmentsForTile = (tileKey) => {
-    if (!roadSegmentsByTile.has(tileKey)) {
-      cacheRoadSegmentsForTile(tileKey);
-    }
-    return roadSegmentsByTile.get(tileKey) ?? [];
-  };
-
-  const getNeighborTileKeys = (tileKey) => {
-    const tile = parseTileKey(tileKey);
-    if (!tile) return [];
-    const keys = [];
-    for (let dx = -1; dx <= 1; dx += 1) {
-      for (let dy = -1; dy <= 1; dy += 1) {
-        keys.push(getTileKey({ x: tile.x + dx, y: tile.y + dy }));
-      }
-    }
-    return keys;
-  };
-
-  const buildingRaycaster = new THREE.Raycaster();
-  const buildingRayDirection = new THREE.Vector3(0, -1, 0);
-
-  const isNearBuilding = (position, tileKey) => {
-    const buildingsGroup = buildingsRenderer?.group;
-    if (!buildingsGroup) return false;
-    const targetTiles = tileKey ? getNeighborTileKeys(tileKey) : [];
-    const groupsToCheck = targetTiles.length
-      ? targetTiles
-        .map((key) => getTileGroup(buildingsGroup, 'osm-buildings', key))
-        .filter(Boolean)
-      : [buildingsGroup];
-    if (groupsToCheck.length === 0) return false;
-    const terrainY = getTerrainHeight?.(position.x, position.z) ?? position.y ?? 0;
-    const rayOrigin = tempPosition.set(
-      position.x,
-      Math.max(position.y ?? terrainY, terrainY) + BUILDING_RAYCAST_HEIGHT,
-      position.z
-    );
-    buildingRaycaster.set(rayOrigin, buildingRayDirection);
-    const intersections = buildingRaycaster.intersectObjects(groupsToCheck, true);
-    if (!intersections.length) return false;
-    const nearest = intersections[0];
-    if (!nearest) return false;
-    return nearest.distance <= BUILDING_RAYCAST_HEIGHT + TREE_BUILDING_CLEARANCE;
-  };
-
-  const isNearRoad = (x, z, tileKey) => {
-    const keys = tileKey ? getNeighborTileKeys(tileKey) : [];
-    for (const key of keys) {
-      const roadSegments = getRoadSegmentsForTile(key);
-      if (roadSegments.length === 0) continue;
-      for (const segment of roadSegments) {
-        const clearanceSq = segment.clearance * segment.clearance;
-        if (distanceToSegmentSquared(x, z, segment.ax, segment.az, segment.bx, segment.bz) <= clearanceSq) {
-          return true;
-        }
-      }
-    }
-    return false;
-  };
 
   const resolveTreeTypeIndex = (position) => {
     const geo = getGeoForLocal?.(position);
@@ -348,10 +120,8 @@ export async function createNature({
         const worldX = baseX + ix;
         const worldZ = baseZ + iz;
         if (pseudoRandom2D(worldX, worldZ, 1.2) > TREE_SPAWN_CHANCE) continue;
-        if (isNearRoad(worldX, worldZ, tileKey)) continue;
 
         tempPosition.set(worldX, 0, worldZ);
-        if (isNearBuilding(tempPosition, tileKey)) continue;
 
         const treeTypeIndex = resolveTreeTypeIndex(tempPosition);
         const template = treeTemplates[treeTypeIndex];
@@ -373,26 +143,6 @@ export async function createNature({
     const entry = { tile, tileKey, group: tileGroup, trees };
     treeTiles.set(tileKey, entry);
     return entry;
-  };
-
-  const pruneTileTrees = (tileKey) => {
-    const entry = treeTiles.get(tileKey);
-    if (!entry) return;
-    const remaining = [];
-    for (const tree of entry.trees) {
-      if (!tree) continue;
-      const { x, z } = tree.position;
-      if (isNearRoad(x, z, tileKey)) {
-        entry.group.remove(tree);
-        continue;
-      }
-      if (isNearBuilding(tree.position, tileKey)) {
-        entry.group.remove(tree);
-        continue;
-      }
-      remaining.push(tree);
-    }
-    entry.trees = remaining;
   };
 
   let lastPlayerTileKey = null;
@@ -421,42 +171,14 @@ export async function createNature({
       if (neededKeys.has(key)) continue;
       group.remove(entry.group);
       treeTiles.delete(key);
-      roadSegmentsByTile.delete(key);
-      removeDebugEntry(roadDebugByTile, key);
-      removeDebugEntry(buildingDebugByTile, key);
     }
   };
 
   const refreshTile = (tileKey) => {
     if (!tileKey) return;
-    cacheRoadSegmentsForTile(tileKey);
-    pruneTileTrees(tileKey);
-    if (!isDebugEnabled()) {
-      removeDebugEntry(buildingDebugByTile, tileKey);
-      return;
-    }
-    removeDebugEntry(buildingDebugByTile, tileKey);
-    const buildingsGroup = buildingsRenderer?.group;
-    if (!buildingsGroup) return;
-    const tileGroup = getTileGroup(buildingsGroup, 'osm-buildings', tileKey);
-    if (!tileGroup) return;
-    tempBox.setFromObject(tileGroup);
-    if (!Number.isFinite(tempBox.min.x) || !Number.isFinite(tempBox.max.x)) return;
-    const helper = new THREE.Box3Helper(tempBox, DEBUG_COLOR);
-    helper.material.transparent = true;
-    helper.material.opacity = DEBUG_BUILDING_OPACITY;
-    helper.name = `tree-building-debug-${tileKey}`;
-    buildingDebugByTile.set(tileKey, helper);
-    debugGroup.add(helper);
   };
 
   const refreshAll = () => {
-    for (const tileKey of treeTiles.keys()) {
-      refreshTile(tileKey);
-    }
-    if (!isDebugEnabled()) {
-      clearDebug();
-    }
   };
 
   const setTileCache = (nextCache) => {
@@ -469,8 +191,6 @@ export async function createNature({
       group.remove(entry.group);
     }
     treeTiles.clear();
-    roadSegmentsByTile.clear();
-    clearDebug();
   };
 
   const dispose = () => {
@@ -479,12 +199,8 @@ export async function createNature({
       group.remove(entry.group);
     }
     treeTiles.clear();
-    roadSegmentsByTile.clear();
-    clearDebug();
     group.clear();
     scene?.remove(group);
-    debugGroup.clear();
-    scene?.remove(debugGroup);
   };
 
   return {
