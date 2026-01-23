@@ -4,6 +4,8 @@ import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from './water.j
 import { getSpawnPosition } from './spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import { getKnockbackImpulse } from "./knockback.js";
+import { loadMonsterModel } from "./models/monsterModel.js";
+import { FriendlyCharacter } from "./characters/FriendlyCharacter.js";
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -14,6 +16,17 @@ const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
 const CLIMB_SPEED = 1.6;
 const CLIMB_SNAP_DISTANCE = 0.6;
 const FRIENDLY_INTERACT_RANGE = 6;
+const QUEST_FRIEND_MODEL = "/models/cowboy.fbx";
+const QUEST_FRIEND_SPAWN_MIN_DISTANCE = 18;
+const QUEST_FRIEND_SPAWN_MAX_DISTANCE = 32;
+const QUEST_FRIEND_REACH_DISTANCE = 4.5;
+const QUEST_RETURN_DISTANCE = 6;
+const QUEST_FOLLOW_STOP_DISTANCE = 2.2;
+const QUEST_TRAIL_SEGMENT_LENGTH = 2.2;
+const QUEST_TRAIL_SEGMENT_GAP = 1.4;
+const QUEST_TRAIL_HEIGHT_OFFSET = 0.15;
+const QUEST_TRAIL_MAX_SEGMENTS = 80;
+const QUEST_TRAIL_COLOR = 0xffd84d;
 const FRIENDLY_DIALOGUE_POOL = [
   {
     blocks: [
@@ -64,6 +77,39 @@ const FRIENDLY_DIALOGUE_POOL = [
     ]
   }
 ];
+const QUEST_OFFER_DIALOGUE = {
+  blocks: [
+    "Can you help me?",
+    "My friend went out to fight zombies and hasn't returned. Can you find them?"
+  ],
+  responses: [
+    {
+      label: "I'll help find them.",
+      reply: "Thank you! I'll wait right here.",
+      onSelect: "acceptQuest"
+    },
+    {
+      label: "Not right now.",
+      reply: "I understand. Stay safe out there."
+    }
+  ]
+};
+const QUEST_FRIEND_DIALOGUE = {
+  blocks: [
+    "Thank you for saving me! Can you show me the way back?"
+  ],
+  responses: [
+    {
+      label: "Follow me.",
+      reply: "Lead the way!",
+      onSelect: "startEscort"
+    },
+    {
+      label: "I'll come back later.",
+      reply: "Okay, I'll wait here and catch my breath."
+    }
+  ]
+};
 
 export class PlayerControls {
   constructor({
@@ -204,6 +250,16 @@ export class PlayerControls {
     this.dialogueIndex = 0;
     this.awaitingResponse = false;
     this.awaitingExit = false;
+    this.questState = {
+      status: 'inactive',
+      giver: null,
+      giverPosition: null,
+      friend: null,
+      friendFollowing: false,
+      trail: null,
+      trailMode: null,
+      pendingSpawn: false
+    };
     this.crosshairEl = document.querySelector('.crosshair');
     this.defaultFov = this.camera.fov;
     this.aimFov = Math.max(45, this.defaultFov - 10);
@@ -690,6 +746,14 @@ export class PlayerControls {
         closest = friendly;
       }
     });
+    const questFriend = this.questState?.friend;
+    if (questFriend?.model && !questFriend.isDead) {
+      const dist = this.playerModel.position.distanceTo(questFriend.model.position);
+      if (dist <= maxDistance && dist < closestDistance) {
+        closestDistance = dist;
+        closest = questFriend;
+      }
+    }
     return closest ? { friendly: closest, distance: closestDistance } : null;
   }
 
@@ -700,7 +764,14 @@ export class PlayerControls {
 
   startFriendlyInteraction(friendly) {
     if (!friendly) return;
-    const choice = FRIENDLY_DIALOGUE_POOL[Math.floor(Math.random() * FRIENDLY_DIALOGUE_POOL.length)];
+    let choice = null;
+    if (this.isQuestFriend(friendly)) {
+      choice = QUEST_FRIEND_DIALOGUE;
+    } else if (this.shouldOfferQuest(friendly)) {
+      choice = QUEST_OFFER_DIALOGUE;
+    } else {
+      choice = FRIENDLY_DIALOGUE_POOL[Math.floor(Math.random() * FRIENDLY_DIALOGUE_POOL.length)];
+    }
     this.isInteracting = true;
     this.activeFriendly = friendly;
     this.activeDialogue = choice;
@@ -759,6 +830,7 @@ export class PlayerControls {
           this.friendlyDialogueTextEl.textContent = option.reply;
           this.awaitingResponse = false;
           this.awaitingExit = true;
+          this.handleDialogueOption(option);
           this.updateFriendlyInteractionUI();
         });
         this.friendlyDialogueOptionsEl.appendChild(button);
@@ -1448,6 +1520,7 @@ export class PlayerControls {
         this.controls.update();
       }
 
+      this.updateQuestBehavior();
       this.updateFriendlyInteractionUI();
       this.updateInteractionPrompt();
 
@@ -1455,6 +1528,209 @@ export class PlayerControls {
       if (hasGun !== this.lastHasGun) {
         this.updateAmmoUI(hasGun);
       }
+  }
+
+  shouldOfferQuest(friendly) {
+    if (!friendly) return false;
+    if (this.isQuestFriend(friendly)) return false;
+    return this.questState?.status === 'inactive';
+  }
+
+  isQuestFriend(friendly) {
+    return this.questState?.friend === friendly;
+  }
+
+  handleDialogueOption(option) {
+    if (!option || !option.onSelect) return;
+    if (option.onSelect === 'acceptQuest') {
+      this.acceptQuest();
+    }
+    if (option.onSelect === 'startEscort') {
+      this.startQuestEscort();
+    }
+  }
+
+  acceptQuest() {
+    if (!this.activeFriendly || !this.playerModel) return;
+    if (this.questState.status !== 'inactive') return;
+    this.questState.status = 'searching';
+    this.questState.giver = this.activeFriendly;
+    this.questState.giverPosition = this.activeFriendly.model?.position?.clone?.() || null;
+    this.spawnQuestFriend();
+  }
+
+  spawnQuestFriend() {
+    if (this.questState.pendingSpawn || !this.playerModel) return;
+    this.questState.pendingSpawn = true;
+    const basePos = this.playerModel.position.clone();
+    const angle = Math.random() * Math.PI * 2;
+    const distance = QUEST_FRIEND_SPAWN_MIN_DISTANCE
+      + Math.random() * (QUEST_FRIEND_SPAWN_MAX_DISTANCE - QUEST_FRIEND_SPAWN_MIN_DISTANCE);
+    const spawnPos = new THREE.Vector3(
+      basePos.x + Math.cos(angle) * distance,
+      basePos.y,
+      basePos.z + Math.sin(angle) * distance
+    );
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (Number.isFinite(terrainHeight)) {
+      spawnPos.y = terrainHeight + 0.5;
+    }
+    loadMonsterModel(QUEST_FRIEND_MODEL, (data) => {
+      try {
+        const questFriend = new FriendlyCharacter(data);
+        questFriend.id = `quest-friend-${Date.now()}`;
+        questFriend.modelPath = QUEST_FRIEND_MODEL;
+        questFriend.type = QUEST_FRIEND_MODEL;
+        questFriend.model.userData.hideInMapView = true;
+        questFriend.model.userData.isQuestFriend = true;
+        questFriend.setNoticeRadius(0);
+        questFriend.setWanderRadius(0);
+        questFriend.setEngageRadius(0);
+        questFriend.setDisengageRadius(0);
+        questFriend.setLevel(1, { preserveHealth: false });
+        questFriend.resetHealth();
+        questFriend.setPosition(spawnPos.x, spawnPos.y, spawnPos.z);
+        questFriend.setHomePosition(spawnPos.clone());
+        this.scene?.add(questFriend.model);
+        window.attachMonsterPhysics?.(questFriend);
+        this.questState.friend = questFriend;
+        this.questState.trailMode = 'toFriend';
+      } finally {
+        this.questState.pendingSpawn = false;
+      }
+    });
+  }
+
+  startQuestEscort() {
+    if (this.questState.status !== 'found' && this.questState.status !== 'searching') {
+      return;
+    }
+    if (!this.questState.friend || !this.questState.giverPosition) return;
+    this.questState.status = 'escorting';
+    this.questState.friendFollowing = true;
+    this.questState.trailMode = 'toGiver';
+  }
+
+  completeQuest() {
+    this.questState.status = 'inactive';
+    this.questState.friendFollowing = false;
+    this.questState.trailMode = null;
+    this.clearQuestTrail();
+    const friend = this.questState.friend;
+    if (friend?.body) {
+      const vel = friend.body.linvel();
+      friend.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+    }
+    window.adjustPlayerLevel?.(1);
+    this.questState.giver = null;
+    this.questState.giverPosition = null;
+    this.questState.friend = null;
+  }
+
+  updateQuestBehavior() {
+    const quest = this.questState;
+    if (!quest || !this.playerModel) return;
+    const friend = quest.friend;
+    if (friend?.model) {
+      friend.update(this.deltaSeconds);
+    }
+
+    if (quest.status === 'searching' && friend?.model) {
+      const distanceToFriend = this.playerModel.position.distanceTo(friend.model.position);
+      this.updateQuestTrail(this.playerModel.position, friend.model.position);
+      if (distanceToFriend <= QUEST_FRIEND_REACH_DISTANCE) {
+        quest.status = 'found';
+        quest.trailMode = null;
+        this.clearQuestTrail();
+      }
+      return;
+    }
+
+    if (quest.status === 'escorting' && friend?.model && quest.giverPosition) {
+      const giverTarget = quest.giver?.model?.position ?? quest.giverPosition;
+      this.updateQuestTrail(this.playerModel.position, giverTarget);
+      this.updateQuestFriendFollow(friend);
+      const playerNearGiver = this.playerModel.position.distanceTo(giverTarget) <= QUEST_RETURN_DISTANCE;
+      const friendNearGiver = friend.model.position.distanceTo(giverTarget) <= QUEST_RETURN_DISTANCE;
+      if (playerNearGiver && friendNearGiver) {
+        this.completeQuest();
+      }
+    }
+  }
+
+  updateQuestFriendFollow(friend) {
+    if (!friend?.body || !this.playerModel) return;
+    const toPlayer = this.playerModel.position.clone().sub(friend.model.position);
+    toPlayer.y = 0;
+    const distance = toPlayer.length();
+    const vel = friend.body.linvel();
+    if (distance > QUEST_FOLLOW_STOP_DISTANCE) {
+      const direction = toPlayer.normalize();
+      const speed = CHARACTER_MOVEMENT.walkSpeed * 0.9;
+      friend.setDirection(direction);
+      friend.body.setLinvel({ x: direction.x * speed, y: vel.y, z: direction.z * speed }, true);
+      const angle = Math.atan2(direction.x, direction.z);
+      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+      friend.body.setRotation(rot, true);
+      friend.playAnimation("Walk", 0.2);
+    } else {
+      friend.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      friend.playAnimation("Idle", 0.2);
+    }
+  }
+
+  updateQuestTrail(start, end) {
+    if (!start || !end) return;
+    const direction = new THREE.Vector3().subVectors(end, start);
+    const distance = direction.length();
+    if (distance < 0.5) {
+      this.clearQuestTrail();
+      return;
+    }
+    if (!this.questState.trail) {
+      const geometry = new THREE.BufferGeometry();
+      const material = new THREE.LineBasicMaterial({ color: QUEST_TRAIL_COLOR, transparent: true, opacity: 0.9 });
+      const line = new THREE.LineSegments(geometry, material);
+      line.frustumCulled = false;
+      this.scene?.add(line);
+      this.questState.trail = { geometry, material, line };
+    }
+
+    const normalized = direction.normalize();
+    const segmentSpan = QUEST_TRAIL_SEGMENT_LENGTH + QUEST_TRAIL_SEGMENT_GAP;
+    const segmentCount = Math.min(
+      QUEST_TRAIL_MAX_SEGMENTS,
+      Math.max(1, Math.floor(distance / segmentSpan))
+    );
+    const positions = [];
+    for (let i = 0; i < segmentCount; i += 1) {
+      const segmentStart = i * segmentSpan;
+      const segmentEnd = Math.min(segmentStart + QUEST_TRAIL_SEGMENT_LENGTH, distance);
+      const startPoint = start.clone().addScaledVector(normalized, segmentStart);
+      const endPoint = start.clone().addScaledVector(normalized, segmentEnd);
+      const startHeight = getTerrainHeight(startPoint.x, startPoint.z);
+      const endHeight = getTerrainHeight(endPoint.x, endPoint.z);
+      if (Number.isFinite(startHeight)) {
+        startPoint.y = startHeight + QUEST_TRAIL_HEIGHT_OFFSET;
+      }
+      if (Number.isFinite(endHeight)) {
+        endPoint.y = endHeight + QUEST_TRAIL_HEIGHT_OFFSET;
+      }
+      positions.push(
+        startPoint.x, startPoint.y, startPoint.z,
+        endPoint.x, endPoint.y, endPoint.z
+      );
+    }
+    const geometry = this.questState.trail.geometry;
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeBoundingSphere();
+    this.questState.trail.line.visible = true;
+  }
+
+  clearQuestTrail() {
+    const trail = this.questState?.trail;
+    if (!trail) return;
+    trail.line.visible = false;
   }
 
   getWeapons() {

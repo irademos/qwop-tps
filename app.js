@@ -1536,6 +1536,9 @@ async function main() {
     }
   };
 
+  window.attachMonsterPhysics = attachMonsterPhysics;
+  window.detachNpcPhysics = detachNpcPhysics;
+
 
 
   let player = new PlayerCharacter(playerName, characterModel);
@@ -2875,6 +2878,7 @@ async function main() {
     applyLevelBonus(nextLevel - currentLevel);
     showLevelPopup(nextLevel);
   };
+  window.adjustPlayerLevel = adjustLevel;
 
   const getKillsRequiredForNextLevel = level => Math.max(1, level);
   const registerKillProgress = () => {
