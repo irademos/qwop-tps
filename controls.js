@@ -221,7 +221,7 @@ export class PlayerControls {
       const activateInteraction = (event) => {
         if (!this.interactionPromptEl.classList.contains('visible')) return;
         event.preventDefault();
-        this.handleInteractionAction();
+        this.handlePickupAction();
       };
       this.interactionPromptEl.addEventListener('touchstart', activateInteraction, { passive: false });
       this.interactionPromptEl.addEventListener('click', activateInteraction);
@@ -231,7 +231,7 @@ export class PlayerControls {
       const activateFriendly = (event) => {
         if (this.friendlyInteractButton.classList.contains('hidden')) return;
         event.preventDefault();
-        this.handleInteractionAction();
+        this.handleFriendlyInteractionAction();
       };
       this.friendlyInteractButton.addEventListener('click', activateFriendly);
       this.friendlyInteractButton.addEventListener('touchstart', activateFriendly, { passive: false });
@@ -538,7 +538,12 @@ export class PlayerControls {
       }
 
       if (key === 'x') {
-        this.handleInteractionAction();
+        this.handlePickupAction();
+        return;
+      }
+
+      if (key === 'c') {
+        this.handleFriendlyInteractionAction();
         return;
       }
 
@@ -629,7 +634,7 @@ export class PlayerControls {
     });
   }
 
-  handleInteractionAction() {
+  handleFriendlyInteractionAction() {
     if (!this.enabled) return;
 
     if (this.isInteracting) {
@@ -640,6 +645,14 @@ export class PlayerControls {
     const nearbyFriendly = this.getClosestFriendly(FRIENDLY_INTERACT_RANGE);
     if (nearbyFriendly?.friendly) {
       this.startFriendlyInteraction(nearbyFriendly.friendly);
+      return;
+    }
+  }
+
+  handlePickupAction() {
+    if (!this.enabled) return;
+
+    if (this.isInteracting) {
       return;
     }
 
@@ -776,7 +789,7 @@ export class PlayerControls {
     if (nearby?.friendly) {
       this.friendlyInteractButton.classList.remove('hidden');
       this.friendlyInteractButton.disabled = false;
-      this.friendlyInteractButton.textContent = this.isMobile ? 'Talk' : 'Interact';
+      this.friendlyInteractButton.textContent = this.isMobile ? 'Talk' : 'Interact (C)';
       return;
     }
 
@@ -1488,38 +1501,31 @@ export class PlayerControls {
       }
       visible = !!promptText;
     } else {
-      const equippedWeapon = this.getEquippedWeapon();
-      if (equippedWeapon) {
-        const weaponLabel = getWeaponLabel(equippedWeapon);
-        promptText = `'x' drop ${weaponLabel}`;
-        visible = true;
-      } else {
-        const playerPos = this.playerModel.position;
-        let closestDist = Infinity;
+      const playerPos = this.playerModel.position;
+      let closestDist = Infinity;
 
-        const consider = (object, maxDistance, message) => {
-          if (!object) return;
-          const target = object.mesh || object;
-          if (!target || !target.position) return;
-          if (object.occupant) return;
-          if (object.holder) return;
-          const dist = playerPos.distanceTo(target.position);
-          if (dist <= maxDistance && dist < closestDist) {
-            closestDist = dist;
-            promptText = message;
-            visible = true;
-          }
-        };
+      const consider = (object, maxDistance, message) => {
+        if (!object) return;
+        const target = object.mesh || object;
+        if (!target || !target.position) return;
+        if (object.occupant) return;
+        if (object.holder) return;
+        const dist = playerPos.distanceTo(target.position);
+        if (dist <= maxDistance && dist < closestDist) {
+          closestDist = dist;
+          promptText = message;
+          visible = true;
+        }
+      };
 
-        consider(window.spaceship, 10, "'x' enter spaceship");
-        consider(window.rowBoat, 4, "'x' enter rowboat");
-        consider(window.surfboard, 3, "'x' enter surfboard");
-        this.getWeapons().forEach(weapon => {
-          if (!weapon) return;
-          const weaponLabel = getWeaponLabel(weapon);
-          consider(weapon, 3, `'x' pick up ${weaponLabel}`);
-        });
-      }
+      consider(window.spaceship, 10, "'x' enter spaceship");
+      consider(window.rowBoat, 4, "'x' enter rowboat");
+      consider(window.surfboard, 3, "'x' enter surfboard");
+      this.getWeapons().forEach(weapon => {
+        if (!weapon) return;
+        const weaponLabel = getWeaponLabel(weapon);
+        consider(weapon, 3, `'x' pick up ${weaponLabel}`);
+      });
     }
 
     if (visible) {
