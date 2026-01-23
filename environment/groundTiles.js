@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { getKtx2Loader } from "./ktx2Loader.js";
+import { getKtx2Loader } from "../ktx2Loader.js";
 
 export const GROUND_TEX_REPEAT_PER_TILE = 6;
 const GROUND_TEXTURE_URL = "/assets/textures/grass/grass_albedo.ktx2";

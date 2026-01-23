@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
-import { ATTACKS } from "../melee.js";
+import { ATTACKS } from "../items/melee.js";
 import { getKnockbackImpulse } from "../knockback.js";
 
 const AGGRO_RADIUS = 12;

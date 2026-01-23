@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { getWaterDepth, getTerrainHeight } from './water.js';
+import { getWaterDepth, getTerrainHeight } from '../environment/water.js';
 
 const FLOAT_HEIGHT = -0.1;
 const LINEAR_DAMPING = 0.9;
