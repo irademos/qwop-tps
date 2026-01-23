@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { MOON_RADIUS } from "./worldGeneration.js";
+import { MOON_RADIUS } from "./environment/worldGeneration.js";
 
 export const MOON_GRAVITY = 2.0;
 // Cap the gravitational force to avoid large impulses when bodies

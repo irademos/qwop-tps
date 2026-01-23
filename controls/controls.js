@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
-import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from './water.js';
-import { getSpawnPosition } from './spawnUtils.js';
+import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from '../environment/water.js';
+import { getSpawnPosition } from '../spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import { getKnockbackImpulse } from "./knockback.js";
 import { QuestManager } from "./quest.js";

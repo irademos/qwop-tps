@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { getTerrainHeight } from './water.js';
+import { getTerrainHeight } from '../environment/water.js';
 import { Weapon } from './weapon.js';
-import { applyEmissiveGlow, LIGHT_SOURCE_CONFIGS } from './light_sources.js';
+import { applyEmissiveGlow, LIGHT_SOURCE_CONFIGS } from '../environment/light_sources.js';
 
 const DROP_OFFSET = new THREE.Vector3(0.8, 0, 0.6);
 
