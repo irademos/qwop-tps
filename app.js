@@ -2513,15 +2513,21 @@ async function main() {
     return null;
   }
 
+  function unequipOtherInventoryItems(nextItemId) {
+    const equippedId = getEquippedInventoryItemId();
+    if (equippedId && equippedId !== nextItemId) {
+      unequipInventoryItem(equippedId);
+    }
+  }
+
   function equipInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
-    if (itemId !== 'lantern' && lantern?.holder === playerControls) return;
+    unequipOtherInventoryItems(itemId);
     if (itemId === 'lantern') {
       if (!lantern?.mesh || !playerControls) return;
       if (lantern.remoteHolderId && lantern.remoteHolderId !== multiplayer?.getId?.()) return;
       lantern.mesh.visible = true;
       lantern.holder = playerControls;
-      dropOtherWeapons();
       updateSettingsUI();
       return;
     }
@@ -2530,7 +2536,6 @@ async function main() {
       if (iceGun.remoteHolderId && iceGun.remoteHolderId !== multiplayer?.getId?.()) return;
       iceGun.mesh.visible = true;
       iceGun.holder = playerControls;
-      dropOtherWeapons(iceGun);
       setPlayerWeaponType(playerControls, iceGun.type);
       playerControls.updateAmmoUI?.(true);
       playerControls.setAmmo?.(
@@ -2546,7 +2551,6 @@ async function main() {
       if (bow.remoteHolderId && bow.remoteHolderId !== multiplayer?.getId?.()) return;
       bow.mesh.visible = true;
       bow.holder = playerControls;
-      dropOtherWeapons(bow);
       setPlayerWeaponType(playerControls, bow.type);
       playerControls.updateAmmoUI?.(true);
       playerControls.setAmmo?.(
@@ -2562,7 +2566,6 @@ async function main() {
       if (autumnSword.remoteHolderId && autumnSword.remoteHolderId !== multiplayer?.getId?.()) return;
       autumnSword.mesh.visible = true;
       autumnSword.holder = playerControls;
-      dropOtherWeapons(autumnSword);
       setPlayerWeaponType(playerControls, autumnSword.type);
       updateSettingsUI();
     }
@@ -2571,7 +2574,10 @@ async function main() {
   function unequipInventoryItem(itemId) {
     if (itemId === 'lantern') {
       if (lantern?.holder !== playerControls) return;
-      lantern.drop({ removeFromInventory: true });
+      lantern.holder = null;
+      if (lantern.mesh) {
+        lantern.mesh.visible = false;
+      }
       updateSettingsUI();
       return;
     }
@@ -2581,7 +2587,6 @@ async function main() {
       if (iceGun.mesh) {
         iceGun.mesh.visible = false;
       }
-      removeFromInventory('iceGun', 1);
       clearPlayerWeaponType(playerControls, iceGun.type);
       playerControls?.updateAmmoUI?.(false);
       updateSettingsUI();
@@ -2593,7 +2598,6 @@ async function main() {
       if (bow.mesh) {
         bow.mesh.visible = false;
       }
-      removeFromInventory('bow', 1);
       clearPlayerWeaponType(playerControls, bow.type);
       playerControls?.updateAmmoUI?.(false);
       playerControls?.setAiming?.(false);
@@ -2606,10 +2610,51 @@ async function main() {
       if (autumnSword.mesh) {
         autumnSword.mesh.visible = false;
       }
-      removeFromInventory('autumnSword', 1);
       clearPlayerWeaponType(playerControls, autumnSword.type);
       updateSettingsUI();
     }
+  }
+
+  function getInventoryDropPosition() {
+    if (!playerControls?.playerModel) return null;
+    const dropPosition = playerControls.playerModel.position.clone();
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 1.2;
+    dropPosition.x += Math.cos(angle) * radius;
+    dropPosition.z += Math.sin(angle) * radius;
+    dropPosition.y = getTerrainHeight(dropPosition.x, dropPosition.z) + 0.5;
+    return dropPosition;
+  }
+
+  function dropInventoryItem(itemId) {
+    if (!itemId || !inventoryState[itemId]) return;
+    const dropPosition = getInventoryDropPosition();
+    if (!dropPosition) return;
+    const itemMap = {
+      iceGun,
+      bow,
+      autumnSword,
+      lantern
+    };
+    const item = itemMap[itemId];
+    if (!item?.mesh) {
+      removeFromInventory(itemId, 1);
+      updateSettingsUI();
+      return;
+    }
+    if (item.holder === playerControls) {
+      item.drop({ removeFromInventory: true });
+      updateSettingsUI();
+      return;
+    }
+    item.holder = null;
+    item.mesh.visible = true;
+    item.mesh.position.copy(dropPosition);
+    if (playerControls?.playerModel?.quaternion) {
+      item.mesh.quaternion.copy(playerControls.playerModel.quaternion);
+    }
+    removeFromInventory(itemId, 1);
+    updateSettingsUI();
   }
 
   let mapViewEnabled = false;
@@ -4578,6 +4623,7 @@ async function main() {
     isInventoryItemEquipped: (itemId) => isInventoryItemEquipped(itemId),
     equipInventoryItem: (itemId) => equipInventoryItem(itemId),
     unequipInventoryItem: (itemId) => unequipInventoryItem(itemId),
+    dropInventoryItem: (itemId) => dropInventoryItem(itemId),
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
     getConnectedPlayers: () => {
