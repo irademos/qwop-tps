@@ -1472,7 +1472,7 @@ async function main() {
 
   // --- RAPIER INIT ---
   await RAPIER.init();
-  rapierWorld = new RAPIER.World({ x: 0, y: -3.0, z: 0 });
+  rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   window.rapierWorld = rapierWorld;
   window.rbToMesh = rbToMesh;
   breakManager.setWorld(rapierWorld);
