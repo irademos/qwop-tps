@@ -16,6 +16,7 @@ const STANDOFF_BUFFER = 0.35;
 const STRAFE_SPEED = 1.1;
 const STRAFE_OSCILLATION = 0.004;
 const ATTACK_LUNGE_DURATION_MS = 280;
+const STANDOFF_RETREAT_INTERVAL_MS = 2000;
 const HEALTH_BAR_WIDTH = 128;
 const HEALTH_BAR_HEIGHT = 14;
 const HEALTH_BAR_DISPLAY_MS = 1800;
@@ -57,6 +58,7 @@ export class MonsterCharacter extends CharacterBase {
     this.freezeEndTime = 0;
     this.attackDirection = new THREE.Vector3();
     this.attackLungeEndTime = 0;
+    this.lastStandoffRetreatTime = 0;
     this.healthBar = this.createHealthBar();
     this.healthBarVisibleUntil = 0;
     this.setLevel(1, { preserveHealth: false });
@@ -296,7 +298,10 @@ export class MonsterCharacter extends CharacterBase {
       const strafeOffset = Math.sin(now * STRAFE_OSCILLATION) * STRAFE_SPEED * this.speedMultiplier;
       let forwardSpeed = 0;
       if (distance < STANDOFF_DISTANCE - STANDOFF_BUFFER) {
-        forwardSpeed = -walkSpeed;
+        if (now - this.lastStandoffRetreatTime >= STANDOFF_RETREAT_INTERVAL_MS) {
+          forwardSpeed = -walkSpeed;
+          this.lastStandoffRetreatTime = now;
+        }
       } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
         forwardSpeed = walkSpeed;
       }
