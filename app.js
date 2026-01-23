@@ -1618,6 +1618,21 @@ async function main() {
   window.bow = bow;
   await loadArrowTemplate();
   let bowHeldArrow = null;
+  let bowHeldMesh = null;
+  const ensureBowHeldMesh = () => {
+    if (bowHeldMesh || !bow?.mesh) return bowHeldMesh;
+    bowHeldMesh = bow.mesh.clone(true);
+    bowHeldMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    bowHeldMesh.visible = false;
+    bowHeldMesh.userData.hideInMapView = true;
+    scene.add(bowHeldMesh);
+    bow.heldMesh = bowHeldMesh;
+    return bowHeldMesh;
+  };
   const ensureBowHeldArrow = () => {
     if (bowHeldArrow || !arrowTemplate) return bowHeldArrow;
     bowHeldArrow = cloneArrowMesh(arrowTemplate, 0.12);
@@ -1631,14 +1646,23 @@ async function main() {
     bowHeldArrow.userData.hideInMapView = true;
     return bowHeldArrow;
   };
+  const attachBowHeldArrow = (targetMesh) => {
+    const heldArrow = ensureBowHeldArrow();
+    if (!heldArrow || !targetMesh) return;
+    if (heldArrow.parent === targetMesh) return;
+    heldArrow.parent?.remove(heldArrow);
+    targetMesh.add(heldArrow);
+    heldArrow.position.set(0, 0, 0);
+    heldArrow.quaternion.identity();
+  };
   const bowMarker = createWeaponMarker(0xffc26b);
   bow.onPickup = (holder) => {
     if (holder !== playerControls) return;
-    if (lantern?.holder === playerControls) {
-      bow.holder = null;
-      return;
+    unequipOtherInventoryItems('bow');
+    bow.useHeldMeshWhenHeld = false;
+    if (bowHeldMesh) {
+      bowHeldMesh.visible = false;
     }
-    dropOtherWeapons(bow);
     addToInventory('bow', 1);
     setPlayerWeaponType(holder, bow.type);
     playerControls.updateAmmoUI?.(true);
@@ -1647,12 +1671,7 @@ async function main() {
       getAmmoLabelForType('arrow'),
       getAmmoIconForType('arrow')
     );
-    const heldArrow = ensureBowHeldArrow();
-    if (heldArrow && bow.mesh && !heldArrow.parent) {
-      bow.mesh.add(heldArrow);
-      heldArrow.position.set(0, 0, 0);
-      heldArrow.quaternion.identity();
-    }
+    attachBowHeldArrow(bow.mesh);
   };
   bow.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
@@ -1664,6 +1683,10 @@ async function main() {
     playerControls?.setAiming?.(false);
     if (bowHeldArrow) {
       bowHeldArrow.visible = false;
+    }
+    bow.useHeldMeshWhenHeld = false;
+    if (bowHeldMesh) {
+      bowHeldMesh.visible = false;
     }
   };
   if (bow.mesh) {
@@ -2799,7 +2822,10 @@ async function main() {
     if (itemId === 'bow') {
       if (!bow?.mesh || !playerControls) return;
       if (bow.remoteHolderId && bow.remoteHolderId !== multiplayer?.getId?.()) return;
-      bow.mesh.visible = true;
+      const heldMesh = ensureBowHeldMesh();
+      if (!heldMesh) return;
+      bow.useHeldMeshWhenHeld = true;
+      heldMesh.visible = true;
       bow.holder = playerControls;
       setPlayerWeaponType(playerControls, bow.type);
       playerControls.updateAmmoUI?.(true);
@@ -2808,6 +2834,7 @@ async function main() {
         getAmmoLabelForType('arrow'),
         getAmmoIconForType('arrow')
       );
+      attachBowHeldArrow(heldMesh);
       updateSettingsUI();
       return;
     }
@@ -2845,9 +2872,12 @@ async function main() {
     if (itemId === 'bow') {
       if (bow?.holder !== playerControls) return;
       bow.holder = null;
-      if (bow.mesh) {
+      if (bow.useHeldMeshWhenHeld && bowHeldMesh) {
+        bowHeldMesh.visible = false;
+      } else if (bow.mesh) {
         bow.mesh.visible = false;
       }
+      bow.useHeldMeshWhenHeld = false;
       clearPlayerWeaponType(playerControls, bow.type);
       playerControls?.updateAmmoUI?.(false);
       playerControls?.setAiming?.(false);
@@ -2876,6 +2906,16 @@ async function main() {
     return dropPosition;
   }
 
+  function duplicatePickupMesh(item) {
+    if (!item?.mesh || !item.mesh.visible) return;
+    const pickupClone = item.mesh.clone(true);
+    pickupClone.position.copy(item.mesh.position);
+    pickupClone.quaternion.copy(item.mesh.quaternion);
+    pickupClone.visible = true;
+    pickupClone.userData.hideInMapView = item.mesh.userData?.hideInMapView;
+    scene.add(pickupClone);
+  }
+
   function dropInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
     const dropPosition = getInventoryDropPosition();
@@ -2892,10 +2932,16 @@ async function main() {
       updateSettingsUI();
       return;
     }
+    const shouldDuplicatePickup = (itemId === 'bow' || itemId === 'lantern')
+      && item.mesh.visible
+      && item.holder !== playerControls;
     if (item.holder === playerControls) {
       item.drop({ removeFromInventory: true });
       updateSettingsUI();
       return;
+    }
+    if (shouldDuplicatePickup) {
+      duplicatePickupMesh(item);
     }
     item.holder = null;
     item.mesh.visible = true;
