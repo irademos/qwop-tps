@@ -566,7 +566,10 @@ async function main() {
   let monsterAnimAccumulator = 0;
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87CEEB);
+  const skyboxTexture = new THREE.CubeTextureLoader()
+    .setPath('/assets/textures/sky/')
+    .load(['px.jpg', 'nx.jpg', 'py.jpg', 'ny.jpg', 'pz.jpg', 'nz.jpg']);
+  scene.background = skyboxTexture;
   createClouds(scene);
 
   const SKY_COLORS = {
@@ -679,7 +682,7 @@ async function main() {
       1
     );
     pickupEmissiveBrightness = pickupBrightness;
-    if (scene) {
+    if (scene && scene.background?.isColor) {
       scene.background = skyColor;
     }
     if (ambientLight) {
