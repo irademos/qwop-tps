@@ -235,7 +235,10 @@ function buildInventoryPanel() {
   const equipButton = createElement('button', 'settings-button', 'Equip');
   equipButton.type = 'button';
   equipButton.dataset.inventoryAction = 'equip';
-  actions.append(dropButton, equipButton);
+  const eatButton = createElement('button', 'settings-button', 'Eat');
+  eatButton.type = 'button';
+  eatButton.dataset.inventoryAction = 'eat';
+  actions.append(dropButton, equipButton, eatButton);
   details.append(detailsText, actions);
 
   panelEl.append(grid, emptyState, details);
@@ -246,6 +249,7 @@ function buildInventoryPanel() {
   elements.inventoryActions = actions;
   elements.inventoryDropButton = dropButton;
   elements.inventoryEquipButton = equipButton;
+  elements.inventoryEatButton = eatButton;
 
   return panelEl;
 }
@@ -758,6 +762,7 @@ function renderInventory() {
     button.classList.toggle('is-equipped', itemId === equippedItemId);
 
     const iconWrapper = createElement('div', 'inventory-icon-wrapper');
+    const fallbackIcon = fallbackIcons[itemId] || (itemId.startsWith('mushroom_') ? '🍄' : '🎒');
     if (item.icon) {
       const img = document.createElement('img');
       img.className = 'inventory-icon';
@@ -766,12 +771,12 @@ function renderInventory() {
       img.src = item.icon;
       img.addEventListener('error', () => {
         img.remove();
-        const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcons[itemId] || '🎒');
+        const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcon);
         iconWrapper.appendChild(fallback);
       }, { once: true });
       iconWrapper.appendChild(img);
     } else {
-      const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcons[itemId] || '🎒');
+      const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcon);
       iconWrapper.appendChild(fallback);
     }
 
@@ -798,6 +803,7 @@ function renderInventory() {
 
   const selectedItem = inventory[selectedInventoryId];
   if (selectedItem) {
+    const itemActions = context.appState?.getInventoryItemActions?.(selectedInventoryId) || ['drop', 'equip'];
     const equippedText = selectedInventoryId === equippedItemId ? ' • Equipped' : '';
     const countText = selectedItem.count ? ` • Qty ${selectedItem.count}` : '';
     const ammoText = selectedInventoryId === 'iceGun'
@@ -810,9 +816,21 @@ function renderInventory() {
       elements.inventoryActions.style.display = 'flex';
     }
     if (elements.inventoryEquipButton) {
-      elements.inventoryEquipButton.textContent = selectedInventoryId === equippedItemId ? 'Unequip' : 'Equip';
-      elements.inventoryEquipButton.dataset.inventoryAction =
-        selectedInventoryId === equippedItemId ? 'unequip' : 'equip';
+      const canEquip = itemActions.includes('equip');
+      elements.inventoryEquipButton.style.display = canEquip ? 'inline-flex' : 'none';
+      if (canEquip) {
+        elements.inventoryEquipButton.textContent = selectedInventoryId === equippedItemId ? 'Unequip' : 'Equip';
+        elements.inventoryEquipButton.dataset.inventoryAction =
+          selectedInventoryId === equippedItemId ? 'unequip' : 'equip';
+      }
+    }
+    if (elements.inventoryDropButton) {
+      const canDrop = itemActions.includes('drop');
+      elements.inventoryDropButton.style.display = canDrop ? 'inline-flex' : 'none';
+    }
+    if (elements.inventoryEatButton) {
+      const canEat = itemActions.includes('eat');
+      elements.inventoryEatButton.style.display = canEat ? 'inline-flex' : 'none';
     }
   }
 }
@@ -836,6 +854,8 @@ function bindEvents() {
         context.appState?.equipInventoryItem?.(selectedInventoryId);
       } else if (action === 'unequip') {
         context.appState?.unequipInventoryItem?.(selectedInventoryId);
+      } else if (action === 'eat') {
+        context.appState?.eatInventoryItem?.(selectedInventoryId);
       }
       renderInventory();
       return;
