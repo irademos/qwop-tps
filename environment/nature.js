@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { setClimbableAreas } from './climb.js';
+import { setClimbableAreas } from '../controls/climb.js';
 
 const TREE_MODEL_URL = '/assets/props/low_poly_tree_pack.glb';
 const TREE_SCALE = 0.016; // around 0.012 to 0.02 looks good
@@ -22,6 +22,8 @@ const TREE_SPAWN_CHANCE = 0.4;
 const TREE_TILE_BUFFER = 2;
 const TREE_CLIMB_HALF_WIDTH = 0.6;
 const TREE_CLIMB_HALF_DEPTH = 0.6;
+const TREE_CLIMB_ENTRY_RADIUS = 1.0;
+const TREE_CLIMB_ENTRY_HEIGHT = 1.4;
 
 const setTreeShadowing = (tree) => {
   tree.traverse((child) => {
@@ -130,6 +132,8 @@ export async function createNature({
     center.y = (minY + maxY) * 0.5;
     const halfWidth = TREE_CLIMB_HALF_WIDTH;
     const halfDepth = TREE_CLIMB_HALF_DEPTH;
+    const entryCenter = tempWorldPos.clone();
+    entryCenter.y = minY + 0.2;
     const areas = [];
     const directions = [
       new THREE.Vector3(1, 0, 0),
@@ -148,6 +152,9 @@ export async function createNature({
         halfHeight,
         minY,
         maxY,
+        entryCenter: entryCenter.clone(),
+        entryRadius: TREE_CLIMB_ENTRY_RADIUS,
+        entryHeight: TREE_CLIMB_ENTRY_HEIGHT,
         normal: normal.clone()
       });
     }
