@@ -86,6 +86,7 @@ export async function createNature({
 
   const treeTiles = new Map();
   const climbableAreasByTile = new Map();
+  const debugMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
   const tempPosition = new THREE.Vector3();
   const tempBox = new THREE.Box3();
   const tempSize = new THREE.Vector3();
@@ -161,6 +162,20 @@ export async function createNature({
     return areas;
   };
 
+  const addClimbDebugLines = (area, parent) => {
+    if (!area || !parent) return;
+    const width = (area.halfWidth ?? 0) * 2;
+    const height = (area.halfHeight ?? 0) * 2;
+    const depth = (area.halfDepth ?? 0) * 2;
+    if (width <= 0 || height <= 0 || depth <= 0) return;
+    const geometry = new THREE.BoxGeometry(width, height, depth);
+    const edges = new THREE.EdgesGeometry(geometry);
+    const lines = new THREE.LineSegments(edges, debugMaterial);
+    lines.position.copy(area.center);
+    lines.rotation.y = area.rotationY ?? 0;
+    parent.add(lines);
+  };
+
   const createTileTrees = (tile) => {
     const tileKey = getTileKey(tile);
     if (treeTiles.has(tileKey)) return treeTiles.get(tileKey);
@@ -168,6 +183,9 @@ export async function createNature({
     const tileGroup = new THREE.Group();
     tileGroup.name = `nature-tile-${tileKey}`;
     group.add(tileGroup);
+    const debugGroup = new THREE.Group();
+    debugGroup.name = `nature-tile-${tileKey}-climb-debug`;
+    tileGroup.add(debugGroup);
 
     const baseX = tile.x * tileSizeMeters;
     const baseZ = tile.y * tileSizeMeters;
@@ -196,7 +214,11 @@ export async function createNature({
         tree.position.set(worldX, terrainY, worldZ);
         tileGroup.add(tree);
         trees.push(tree);
-        tileClimbAreas.push(...buildTreeClimbAreas(tree));
+        const areas = buildTreeClimbAreas(tree);
+        tileClimbAreas.push(...areas);
+        for (const area of areas) {
+          addClimbDebugLines(area, debugGroup);
+        }
       }
     }
 
