@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { setClimbableAreas } from './climb.js';
 
 const TREE_MODEL_URL = '/assets/props/low_poly_tree_pack.glb';
 const TREE_SCALE = 0.016; // around 0.012 to 0.02 looks good
@@ -19,6 +20,8 @@ const TREE_ZONE_METERS = 100;
 const TREE_GRID_SPACING = 20;
 const TREE_SPAWN_CHANCE = 0.4;
 const TREE_TILE_BUFFER = 2;
+const TREE_CLIMB_HALF_WIDTH = 0.6;
+const TREE_CLIMB_HALF_DEPTH = 0.6;
 
 const setTreeShadowing = (tree) => {
   tree.traverse((child) => {
@@ -80,8 +83,11 @@ export async function createNature({
   scene.add(group);
 
   const treeTiles = new Map();
-
+  const climbableAreasByTile = new Map();
   const tempPosition = new THREE.Vector3();
+  const tempBox = new THREE.Box3();
+  const tempSize = new THREE.Vector3();
+  const tempWorldPos = new THREE.Vector3();
 
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
@@ -103,6 +109,51 @@ export async function createNature({
     return treeTypeIndices[zoneHash % treeTypeIndices.length];
   };
 
+  const refreshClimbableAreas = () => {
+    const merged = [];
+    for (const areas of climbableAreasByTile.values()) {
+      merged.push(...areas);
+    }
+    setClimbableAreas('trees', merged);
+  };
+
+  const buildTreeClimbAreas = (tree) => {
+    tree.updateWorldMatrix(true, true);
+    tempBox.setFromObject(tree);
+    if (!Number.isFinite(tempBox.min.x)) return [];
+    tempBox.getSize(tempSize);
+    tree.getWorldPosition(tempWorldPos);
+    const halfHeight = tempSize.y * 0.5;
+    const minY = tempBox.min.y;
+    const maxY = tempBox.max.y;
+    const center = tempWorldPos.clone();
+    center.y = (minY + maxY) * 0.5;
+    const halfWidth = TREE_CLIMB_HALF_WIDTH;
+    const halfDepth = TREE_CLIMB_HALF_DEPTH;
+    const areas = [];
+    const directions = [
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 0, -1)
+    ];
+    for (const normal of directions) {
+      const rotationY = Math.atan2(normal.x, normal.z);
+      const areaCenter = center.clone().addScaledVector(normal, halfDepth + 0.05);
+      areas.push({
+        center: areaCenter,
+        rotationY,
+        halfWidth,
+        halfDepth,
+        halfHeight,
+        minY,
+        maxY,
+        normal: normal.clone()
+      });
+    }
+    return areas;
+  };
+
   const createTileTrees = (tile) => {
     const tileKey = getTileKey(tile);
     if (treeTiles.has(tileKey)) return treeTiles.get(tileKey);
@@ -114,6 +165,7 @@ export async function createNature({
     const baseX = tile.x * tileSizeMeters;
     const baseZ = tile.y * tileSizeMeters;
     const trees = [];
+    const tileClimbAreas = [];
 
     for (let ix = 0; ix <= tileSizeMeters; ix += TREE_GRID_SPACING) {
       for (let iz = 0; iz <= tileSizeMeters; iz += TREE_GRID_SPACING) {
@@ -137,11 +189,14 @@ export async function createNature({
         tree.position.set(worldX, terrainY, worldZ);
         tileGroup.add(tree);
         trees.push(tree);
+        tileClimbAreas.push(...buildTreeClimbAreas(tree));
       }
     }
 
     const entry = { tile, tileKey, group: tileGroup, trees };
     treeTiles.set(tileKey, entry);
+    climbableAreasByTile.set(tileKey, tileClimbAreas);
+    refreshClimbableAreas();
     return entry;
   };
 
@@ -171,7 +226,9 @@ export async function createNature({
       if (neededKeys.has(key)) continue;
       group.remove(entry.group);
       treeTiles.delete(key);
+      climbableAreasByTile.delete(key);
     }
+    refreshClimbableAreas();
   };
 
   const refreshTile = (tileKey) => {
@@ -191,6 +248,8 @@ export async function createNature({
       group.remove(entry.group);
     }
     treeTiles.clear();
+    climbableAreasByTile.clear();
+    refreshClimbableAreas();
   };
 
   const dispose = () => {
@@ -199,6 +258,8 @@ export async function createNature({
       group.remove(entry.group);
     }
     treeTiles.clear();
+    climbableAreasByTile.clear();
+    refreshClimbableAreas();
     group.clear();
     scene?.remove(group);
   };
