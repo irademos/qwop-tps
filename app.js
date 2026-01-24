@@ -566,16 +566,30 @@ async function main() {
   let monsterAnimAccumulator = 0;
 
   scene = new THREE.Scene();
+  const rotateSkyboxFaceClockwise = (image) => {
+    if (!image) return image;
+    const canvas = document.createElement('canvas');
+    canvas.width = image.height;
+    canvas.height = image.width;
+    const context = canvas.getContext('2d');
+    if (!context) return image;
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate(Math.PI / 2);
+    context.drawImage(image, -image.width / 2, -image.height / 2);
+    return canvas;
+  };
   const skyboxTexture = new THREE.CubeTextureLoader()
     .setPath('/assets/textures/sky/')
-    .load(['px.jpg', 'nx.jpg', 'py.jpg', 'ny.jpg', 'pz.jpg', 'nz.jpg']);
+    .load(
+      ['px.jpg', 'nx.jpg', 'py.jpg', 'ny.jpg', 'pz.jpg', 'nz.jpg'],
+      (texture) => {
+        texture.image[2] = rotateSkyboxFaceClockwise(texture.image[2]);
+        texture.needsUpdate = true;
+      }
+    );
   scene.background = skyboxTexture;
   createClouds(scene);
 
-  const SKY_COLORS = {
-    day: new THREE.Color(0x87ceeb),
-    night: new THREE.Color(0x0b1020)
-  };
   const DISPLAY_MODES = new Set(['auto', 'day', 'night']);
   const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
   const pickupEmissiveMaterials = new Set();
@@ -673,17 +687,18 @@ async function main() {
     const effectiveMode = displaySettings.mode === 'auto'
       ? (lastAutoMode || getAutoMode())
       : displaySettings.mode;
-    const skyBase = SKY_COLORS[effectiveMode] || SKY_COLORS.day;
-    const skyBrightness = clampValue(displaySettings.skyBrightness, 0.1, 1.6);
-    const skyColor = skyBase.clone().multiplyScalar(skyBrightness);
     const pickupBrightness = clampValue(
       (displaySettings.ambientIntensity + displaySettings.directionalIntensity) / 2,
       0,
       1
     );
     pickupEmissiveBrightness = pickupBrightness;
-    if (scene && scene.background?.isColor) {
-      scene.background = skyColor;
+    if (scene) {
+      if (effectiveMode === 'night') {
+        scene.background = new THREE.Color(0x000000);
+      } else {
+        scene.background = skyboxTexture;
+      }
     }
     if (ambientLight) {
       ambientLight.intensity = clampValue(displaySettings.ambientIntensity, 0, 2);
