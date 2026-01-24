@@ -89,6 +89,7 @@ export async function createNature({
   const debugMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
   const tempPosition = new THREE.Vector3();
   const tempBox = new THREE.Box3();
+  const tempCenter = new THREE.Vector3();
   const tempSize = new THREE.Vector3();
   const tempWorldPos = new THREE.Vector3();
 
@@ -126,14 +127,15 @@ export async function createNature({
     if (!Number.isFinite(tempBox.min.x)) return [];
     tempBox.getSize(tempSize);
     tree.getWorldPosition(tempWorldPos);
+    tempBox.getCenter(tempCenter);
     const halfHeight = tempSize.y * 0.5;
     const minY = tempBox.min.y;
     const maxY = tempBox.max.y;
-    const center = tempWorldPos.clone();
+    const center = tempCenter.clone();
     center.y = (minY + maxY) * 0.5;
     const halfWidth = TREE_CLIMB_HALF_WIDTH;
     const halfDepth = TREE_CLIMB_HALF_DEPTH;
-    const entryCenter = tempWorldPos.clone();
+    const entryCenter = tempCenter.clone();
     entryCenter.y = minY + 0.2;
     const areas = [];
     const directions = [
