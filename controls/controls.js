@@ -14,6 +14,7 @@ const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
 const CLIMB_SPEED = 1.6;
 const CLIMB_SNAP_DISTANCE = 0.6;
+const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const FRIENDLY_INTERACT_RANGE = 6;
 const FRIENDLY_DIALOGUE_POOL = [
   {
@@ -967,6 +968,18 @@ export class PlayerControls {
     return local;
   }
 
+  isWithinClimbEntry(area, position) {
+    if (!area?.entryCenter || !Number.isFinite(area.entryRadius)) return false;
+    const dx = position.x - area.entryCenter.x;
+    const dz = position.z - area.entryCenter.z;
+    const horizontalDist = Math.hypot(dx, dz);
+    if (horizontalDist > area.entryRadius) return false;
+    const minY = (area.minY ?? area.entryCenter.y) - CLIMB_ENTRY_BUFFER_Y;
+    const entryHeight = area.entryHeight ?? CLIMB_SNAP_DISTANCE * 2;
+    const maxY = minY + entryHeight + CLIMB_ENTRY_BUFFER_Y;
+    return position.y >= minY && position.y <= maxY;
+  }
+
   findClimbableArea(position) {
     const areas = window.climbableAreas || [];
     if (!areas.length) return null;
@@ -984,7 +997,8 @@ export class PlayerControls {
       const minDepth = halfDepth - CLIMB_SNAP_DISTANCE;
       const maxDepth = halfDepth + CLIMB_SNAP_DISTANCE + PLAYER_RADIUS;
       const withinDepth = local.z >= minDepth && local.z <= maxDepth;
-      if (!withinWidth || !withinHeight || !withinDepth) continue;
+      const withinEntry = this.isWithinClimbEntry(area, position);
+      if (!withinWidth || !withinHeight || (!withinDepth && !withinEntry)) continue;
       const dist = area.center?.distanceTo(position) ?? 0;
       if (dist < closestDist) {
         closest = area;
@@ -1237,7 +1251,9 @@ export class PlayerControls {
 
     const climbInput = this.getClimbInput(moveDirection, cameraDirection);
     const climbArea = this.findClimbableArea(position);
-    const shouldStartClimb = !this.isClimbing && climbArea && climbInput > 0 && this.isMovingTowardClimbArea(climbArea, movement);
+    const nearEntry = climbArea && this.isWithinClimbEntry(climbArea, position);
+    const shouldStartClimb = !this.isClimbing && climbArea && climbInput > 0
+      && (nearEntry || this.isMovingTowardClimbArea(climbArea, movement));
     if (this.isClimbing || shouldStartClimb) {
       if (!climbArea) {
         this.stopClimbing();
