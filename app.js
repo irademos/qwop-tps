@@ -20,6 +20,8 @@ import { Bow } from './items/bow.js';
 import { Lantern } from './items/lantern.js';
 import { AutumnSword } from './items/autumnSword.js';
 import { createNature } from './environment/nature.js';
+import { createCabin } from './environment/cabin.js';
+import { createMushrooms, MUSHROOM_ENTRIES } from './environment/mushrooms.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
@@ -493,6 +495,9 @@ async function main() {
   const FOOD_HUNGER_GAIN = 25;
   const FOOD_ENERGY_GAIN = 15;
   const HEALTH_PICKUP_GAIN = 20;
+  const MUSHROOM_HEALTH_GAIN = 6;
+  const MUSHROOM_HUNGER_GAIN = 6;
+  const MUSHROOM_ENERGY_GAIN = 6;
   const HUNGER_DECAY_PER_HOUR = 6;
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
@@ -556,6 +561,9 @@ async function main() {
   const foodPickups = [];
   const healthPickups = [];
   const coinPickups = [];
+  let mushroomController = null;
+  let mushroomPickups = [];
+  const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
 
@@ -1908,6 +1916,9 @@ async function main() {
     tileCache
   });
   natureController?.update(playerModel?.position);
+  await createCabin({ scene, getTerrainHeight });
+  mushroomController = await createMushrooms({ scene, getTerrainHeight });
+  mushroomPickups = mushroomController?.pickups || [];
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
@@ -2670,6 +2681,12 @@ async function main() {
       icon: ''
     }
   };
+  MUSHROOM_ENTRIES.forEach((entry) => {
+    inventoryCatalog[entry.id] = {
+      name: entry.name,
+      icon: ''
+    };
+  });
   const inventoryState = { ...(playerProfile.inventory || {}) };
   let inventoryDirty = false;
   Object.entries(inventoryState).forEach(([itemId, entry]) => {
@@ -2709,6 +2726,18 @@ async function main() {
   if (inventoryDirty) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
   }
+
+  const equippableItems = new Set(['lantern', 'iceGun', 'bow', 'autumnSword']);
+  const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
+  const getInventoryItemActions = (itemId) => {
+    if (isMushroomItem(itemId)) {
+      return ['drop', 'eat'];
+    }
+    if (equippableItems.has(itemId)) {
+      return ['drop', 'equip'];
+    }
+    return ['drop'];
+  };
 
   function getInventory() {
     return inventoryState;
@@ -2929,6 +2958,26 @@ async function main() {
     return dropPosition;
   }
 
+  function disposeMushroomPickup(pickup) {
+    if (!pickup?.mesh) return;
+    const mesh = pickup.mesh;
+    scene.remove(mesh);
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+  }
+
+  function spawnMushroomPickup(itemId, position) {
+    if (!mushroomController?.spawnPickup || !position) return null;
+    return mushroomController.spawnPickup(itemId, position);
+  }
+
   function disposeDroppedWeaponPickup(pickup) {
     if (!pickup) return;
     const mesh = pickup.mesh;
@@ -2986,6 +3035,14 @@ async function main() {
 
   function dropInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
+    if (isMushroomItem(itemId)) {
+      const dropPosition = getInventoryDropPosition();
+      if (!dropPosition) return;
+      const pickup = spawnMushroomPickup(itemId, dropPosition);
+      if (!pickup) return;
+      removeFromInventory(itemId, 1);
+      return;
+    }
     const dropPosition = getInventoryDropPosition();
     if (!dropPosition) return;
     const itemMap = {
@@ -3020,6 +3077,16 @@ async function main() {
     }
     removeFromInventory(itemId, 1);
     updateSettingsUI();
+  }
+
+  function eatInventoryItem(itemId) {
+    if (!itemId || !inventoryState[itemId]) return;
+    if (!isMushroomItem(itemId)) return;
+    setStat('health', statsState.health + MUSHROOM_HEALTH_GAIN, { skipSave: true });
+    setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
+    setStat('energy', statsState.energy + MUSHROOM_ENERGY_GAIN, { skipSave: true });
+    lastStatUpdateAt = Date.now();
+    removeFromInventory(itemId, 1);
   }
 
   let mapViewEnabled = false;
@@ -4996,9 +5063,11 @@ async function main() {
     getInventory: () => getInventory(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
     isInventoryItemEquipped: (itemId) => isInventoryItemEquipped(itemId),
+    getInventoryItemActions: (itemId) => getInventoryItemActions(itemId),
     equipInventoryItem: (itemId) => equipInventoryItem(itemId),
     unequipInventoryItem: (itemId) => unequipInventoryItem(itemId),
     dropInventoryItem: (itemId) => dropInventoryItem(itemId),
+    eatInventoryItem: (itemId) => eatInventoryItem(itemId),
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
     getConnectedPlayers: () => {
@@ -5253,6 +5322,12 @@ async function main() {
         disposePickup(pickup);
         coinPickups.splice(i, 1);
       }
+      for (let i = mushroomPickups.length - 1; i >= 0; i--) {
+        const pickup = mushroomPickups[i];
+        if (!pickup) continue;
+        disposeMushroomPickup(pickup);
+        mushroomPickups.splice(i, 1);
+      }
     } else {
       for (let i = ammoPickups.length - 1; i >= 0; i--) {
         const pickup = ammoPickups[i];
@@ -5376,6 +5451,19 @@ async function main() {
           applyCoinPickupEffects();
           disposePickup(pickup);
           coinPickups.splice(i, 1);
+        }
+      }
+
+      for (let i = mushroomPickups.length - 1; i >= 0; i--) {
+        const pickup = mushroomPickups[i];
+        if (!pickup?.mesh) {
+          mushroomPickups.splice(i, 1);
+          continue;
+        }
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.mesh.position) < PICKUP_RADIUS) {
+          addToInventory(pickup.id, 1);
+          disposeMushroomPickup(pickup);
+          mushroomPickups.splice(i, 1);
         }
       }
     }
