@@ -1451,7 +1451,7 @@ export class PlayerControls {
     this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
     this.deltaSeconds = delta;
 
-    const rotateSpeed = CHARACTER_MOVEMENT.turnRate;
+    const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 1.25;
     if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
     if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
 
