@@ -98,8 +98,8 @@ const MONSTER_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'Y
 const MONSTER_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(MONSTER_SWORD_HOLD_ROTATION);
 const ARROW_MODEL_URL = '/assets/props/arrow.glb';
 const ARROW_PROJECTILE_SCALE = 2.2;
-const ARROW_PROJECTILE_SPEED = 20;
-const ARROW_PROJECTILE_LIFETIME = 12000;
+const ARROW_PROJECTILE_SPEED = 55;
+const ARROW_PROJECTILE_LIFETIME = 6000;
 
 
 // --- Rapier demo state ---
