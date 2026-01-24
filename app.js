@@ -499,15 +499,17 @@ async function main() {
   const PICKUP_RADIUS = 1.2;
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
-  const MAX_HEALTH_PICKUPS = 30;
+  const MAX_HEALTH_PICKUPS = 60;
   const MAX_COIN_PICKUPS = 80;
-  const TILE_STOCK_AMMO_COUNT = 400;
+  const TILE_STOCK_AMMO_COUNT = 0;
   const TILE_STOCK_FOOD_COUNT = 500;
-  const TILE_STOCK_HEALTH_COUNT = 500;
+  const TILE_STOCK_HEALTH_COUNT = 800;
   const TILE_STOCK_COIN_COUNT = 500;
   const TILE_STOCK_WEAPON_COUNT = 100;
   const PICKUP_SPAWN_RADIUS = 225;
   const PICKUP_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
+  const ICE_GUN_AMMO_CLUSTER_COUNT = 3;
+  const ICE_GUN_AMMO_CLUSTER_RADIUS = 1.4;
 
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
   setCookie("characterModel", characterModel);
@@ -3078,6 +3080,14 @@ async function main() {
     return positions;
   };
 
+  const spawnIceGunAmmoCluster = (center) => {
+    if (!center) return;
+    const positions = createRingPositions(center, ICE_GUN_AMMO_CLUSTER_COUNT, ICE_GUN_AMMO_CLUSTER_RADIUS);
+    positions.forEach(position => {
+      spawnAmmoPickup(position, AMMO_PICKUP_AMOUNT);
+    });
+  };
+
   const clearInventoryState = () => {
     Object.keys(inventoryState).forEach(key => {
       delete inventoryState[key];
@@ -3758,6 +3768,7 @@ async function main() {
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
     iceGun.mesh.visible = true;
     iceGun.holder = null;
+    spawnIceGunAmmoCluster(spawnPos);
   }
 
   function spawnBowPickup(position) {
@@ -5357,7 +5368,7 @@ async function main() {
           pickup.userData.baseY = pickup.position.y;
         }
 
-        pickup.rotation.y += 0.05;
+        pickup.rotation.y += 0.02;
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
