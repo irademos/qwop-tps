@@ -220,6 +220,9 @@ export class PlayerControls {
     this.isFireHeld = false;
     this.baseCameraOffset = this.cameraOffset.clone();
     this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
+    this.baseCameraTargetOffset = new THREE.Vector3();
+    this.aimCameraTargetOffset = new THREE.Vector3(1.3, 0, 0);
+    this.cameraTargetOffset = new THREE.Vector3();
     this.aimZoomInSpeed = 6;
     this.aimZoomOutSpeed = 3;
     this.aimReleaseDelayMs = 500;
@@ -1469,6 +1472,8 @@ export class PlayerControls {
     const targetOffset = aimingActive ? this.aimCameraOffset : this.baseCameraOffset;
     const targetFov = aimingActive ? this.aimFov : this.defaultFov;
     this.cameraOffset.lerp(targetOffset, aimLerpFactor);
+    const targetCameraTargetOffset = aimingActive ? this.aimCameraTargetOffset : this.baseCameraTargetOffset;
+    this.cameraTargetOffset.lerp(targetCameraTargetOffset, aimLerpFactor);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, aimLerpFactor);
     this.camera.updateProjectionMatrix();
 
@@ -1484,6 +1489,15 @@ export class PlayerControls {
       offset = new THREE.Vector3(0, maxDim * 0.5, distance);
     } else {
       orbitCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
+      const targetOffset = this.cameraTargetOffset;
+      if (targetOffset.lengthSq() > 0) {
+        const rotatedTargetOffset = new THREE.Vector3(
+          targetOffset.x * Math.cos(this.yaw) - targetOffset.z * Math.sin(this.yaw),
+          targetOffset.y,
+          targetOffset.x * Math.sin(this.yaw) + targetOffset.z * Math.cos(this.yaw)
+        );
+        orbitCenter.add(rotatedTargetOffset);
+      }
       offset = this.cameraOffset;
     }
     const rotatedOffset = new THREE.Vector3(
