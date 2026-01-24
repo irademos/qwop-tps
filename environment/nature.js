@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { setClimbableAreas } from './climb.js';
 
 const TREE_MODEL_URL = '/assets/props/low_poly_tree_pack.glb';
 const TREE_SCALE = 0.016; // around 0.012 to 0.02 looks good
@@ -19,7 +20,8 @@ const TREE_ZONE_METERS = 100;
 const TREE_GRID_SPACING = 20;
 const TREE_SPAWN_CHANCE = 0.4;
 const TREE_TILE_BUFFER = 2;
-const TREE_CLIMB_DEPTH = 0.6;
+const TREE_CLIMB_HALF_WIDTH = 0.6;
+const TREE_CLIMB_HALF_DEPTH = 0.6;
 
 const setTreeShadowing = (tree) => {
   tree.traverse((child) => {
@@ -82,12 +84,10 @@ export async function createNature({
 
   const treeTiles = new Map();
   const climbableAreasByTile = new Map();
-  const climbableAreas = [];
-
   const tempPosition = new THREE.Vector3();
   const tempBox = new THREE.Box3();
   const tempSize = new THREE.Vector3();
-  const tempCenter = new THREE.Vector3();
+  const tempWorldPos = new THREE.Vector3();
 
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
@@ -109,20 +109,12 @@ export async function createNature({
     return treeTypeIndices[zoneHash % treeTypeIndices.length];
   };
 
-  const setClimbableAreas = (areas) => {
-    climbableAreas.length = 0;
-    climbableAreas.push(...areas);
-    window.treeClimbableAreas = climbableAreas;
-    const buildingAreas = window.buildingClimbableAreas || [];
-    window.climbableAreas = [...buildingAreas, ...climbableAreas];
-  };
-
   const refreshClimbableAreas = () => {
     const merged = [];
     for (const areas of climbableAreasByTile.values()) {
       merged.push(...areas);
     }
-    setClimbableAreas(merged);
+    setClimbableAreas('trees', merged);
   };
 
   const buildTreeClimbAreas = (tree) => {
@@ -130,15 +122,14 @@ export async function createNature({
     tempBox.setFromObject(tree);
     if (!Number.isFinite(tempBox.min.x)) return [];
     tempBox.getSize(tempSize);
-    tempBox.getCenter(tempCenter);
-    const radius = Math.max(tempSize.x, tempSize.z) * 0.5;
-    if (radius <= 0) return [];
+    tree.getWorldPosition(tempWorldPos);
     const halfHeight = tempSize.y * 0.5;
     const minY = tempBox.min.y;
     const maxY = tempBox.max.y;
-    const center = tempCenter.clone();
-    const halfWidth = Math.max(radius, 0.5);
-    const halfDepth = TREE_CLIMB_DEPTH * 0.5;
+    const center = tempWorldPos.clone();
+    center.y = (minY + maxY) * 0.5;
+    const halfWidth = TREE_CLIMB_HALF_WIDTH;
+    const halfDepth = TREE_CLIMB_HALF_DEPTH;
     const areas = [];
     const directions = [
       new THREE.Vector3(1, 0, 0),
@@ -148,7 +139,7 @@ export async function createNature({
     ];
     for (const normal of directions) {
       const rotationY = Math.atan2(normal.x, normal.z);
-      const areaCenter = center.clone().addScaledVector(normal, radius + halfDepth);
+      const areaCenter = center.clone().addScaledVector(normal, halfDepth + 0.05);
       areas.push({
         center: areaCenter,
         rotationY,
