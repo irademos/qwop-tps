@@ -219,7 +219,7 @@ export class PlayerControls {
     this.isAiming = false;
     this.isFireHeld = false;
     this.baseCameraOffset = this.cameraOffset.clone();
-    this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0.6, 0, -1.2));
+    this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
     this.aimZoomInSpeed = 6;
     this.aimZoomOutSpeed = 3;
     this.aimReleaseDelayMs = 500;
