@@ -214,9 +214,15 @@ export class PlayerControls {
     });
     this.crosshairEl = document.querySelector('.crosshair');
     this.defaultFov = this.camera.fov;
-    this.aimFov = Math.max(45, this.defaultFov - 10);
+    this.aimFov = Math.max(40, this.defaultFov - 15);
     this.isAiming = false;
     this.isFireHeld = false;
+    this.baseCameraOffset = this.cameraOffset.clone();
+    this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0.6, 0, -1.2));
+    this.aimZoomInSpeed = 6;
+    this.aimZoomOutSpeed = 3;
+    this.aimReleaseDelayMs = 500;
+    this.aimReleaseHoldUntil = null;
     this.cameraRaycaster = new THREE.Raycaster();
     this.lastOcclusionOrbitCenter = null;
     this.lastOcclusionDesiredPosition = null;
@@ -1419,6 +1425,13 @@ export class PlayerControls {
       document.addEventListener('keyup', (e) => this.keys.delete(e.key));
     }
 
+    const now = performance.now();
+    if (!this.lastUpdate) this.lastUpdate = now;
+    const delta = (now - this.lastUpdate) / 1000;
+    this.lastUpdate = now;
+    this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
+    this.deltaSeconds = delta;
+
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate;
     if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
     if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
@@ -1432,6 +1445,16 @@ export class PlayerControls {
     if (this.keys.has('ArrowDown')) {
       this.pitch = Math.max(minPitch, this.pitch - 0.02);
     }
+
+    const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
+    const aimingActive = this.isAiming || shouldHoldAim;
+    const aimLerpSpeed = aimingActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
+    const aimLerpFactor = 1 - Math.exp(-aimLerpSpeed * this.deltaSeconds);
+    const targetOffset = aimingActive ? this.aimCameraOffset : this.baseCameraOffset;
+    const targetFov = aimingActive ? this.aimFov : this.defaultFov;
+    this.cameraOffset.lerp(targetOffset, aimLerpFactor);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, aimLerpFactor);
+    this.camera.updateProjectionMatrix();
 
     let orbitCenter;
     let offset;
@@ -1506,38 +1529,31 @@ export class PlayerControls {
     this.camera.position.copy(resolvedCameraPosition);
     this.camera.lookAt(orbitCenter);
 
-      const now = performance.now();
-      if (!this.lastUpdate) this.lastUpdate = now;
-      const delta = (now - this.lastUpdate) / 1000;
-      this.lastUpdate = now;
-      this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
-      this.deltaSeconds = delta;
-
-      if (this.playerModel && this.playerModel.userData.mixer) {
-        this.playerModel.userData.mixer.update(delta);
-      }
+    if (this.playerModel && this.playerModel.userData.mixer) {
+      this.playerModel.userData.mixer.update(delta);
+    }
 
     if (this.enabled) {
       this.processMovement();
     }
-      if (this.grabbedTarget) {
-        this.updateGrabbedTarget();
-      }
+    if (this.grabbedTarget) {
+      this.updateGrabbedTarget();
+    }
 
-      // Always update controls even when movement is disabled
-      if (this.controls) {
-        this.controls.update();
-      }
+    // Always update controls even when movement is disabled
+    if (this.controls) {
+      this.controls.update();
+    }
 
-      this.questManager?.setDeltaSeconds(this.deltaSeconds);
-      this.questManager?.update();
-      this.updateFriendlyInteractionUI();
-      this.updateInteractionPrompt();
+    this.questManager?.setDeltaSeconds(this.deltaSeconds);
+    this.questManager?.update();
+    this.updateFriendlyInteractionUI();
+    this.updateInteractionPrompt();
 
-      const hasGun = !!this.getEquippedGun();
-      if (hasGun !== this.lastHasGun) {
-        this.updateAmmoUI(hasGun);
-      }
+    const hasGun = !!this.getEquippedGun();
+    if (hasGun !== this.lastHasGun) {
+      this.updateAmmoUI(hasGun);
+    }
   }
 
   handleDialogueOption(option) {
@@ -1766,8 +1782,11 @@ export class PlayerControls {
     if (this.crosshairEl) {
       this.crosshairEl.classList.toggle('visible', active);
     }
-    this.camera.fov = active ? this.aimFov : this.defaultFov;
-    this.camera.updateProjectionMatrix();
+    if (active) {
+      this.aimReleaseHoldUntil = null;
+    } else {
+      this.aimReleaseHoldUntil = performance.now() + this.aimReleaseDelayMs;
+    }
   }
 
   getAimDirection(invertForBow = false) {
