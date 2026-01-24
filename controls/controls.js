@@ -146,7 +146,7 @@ export class PlayerControls {
     this.joystick = null;
     this.touchStartX = 0;
     this.touchStartY = 0;
-    this.touchSensitivity = 0.005;
+    this.touchSensitivity = 0.006;
     this.moveVector = { x: 0, z: 0 };
     this.jumpButtonPressed = false;
     this.moveForward = 0;
@@ -1451,7 +1451,7 @@ export class PlayerControls {
     this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
     this.deltaSeconds = delta;
 
-    const rotateSpeed = CHARACTER_MOVEMENT.turnRate;
+    const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 1.25;
     if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
     if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
 
@@ -1521,7 +1521,14 @@ export class PlayerControls {
     })();
 
     let resolvedCameraPosition = desiredCameraPosition;
-    if (shouldRaycast && this.getCameraOccluders) {
+    if (this.isClimbing) {
+      this.lastOcclusionOrbitCenter = null;
+      this.lastOcclusionDesiredPosition = null;
+      this.lastOcclusionPosition = null;
+      this.lastOcclusionDistance = null;
+      this.lastOcclusionYaw = null;
+      this.lastOcclusionPitch = null;
+    } else if (shouldRaycast && this.getCameraOccluders) {
       const occluders = this.getCameraOccluders() || [];
       const direction = desiredCameraPosition.clone().sub(orbitCenter);
       const distance = direction.length();
@@ -2016,7 +2023,7 @@ export class PlayerControls {
   
     document.addEventListener('mousemove', (event) => {
       if (this.pointerLocked) {
-        const sensitivity = 0.002;
+        const sensitivity = 0.0025;
         this.yaw -= event.movementX * sensitivity;
         this.pitch -= event.movementY * sensitivity;
     
