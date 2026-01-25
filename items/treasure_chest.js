@@ -3,9 +3,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/water.js';
 
 const DEFAULT_CHEST_POSITION = new THREE.Vector3(1.5, 0, 1.5);
-const DEFAULT_SCALE = 0.12;
+const DEFAULT_SCALE = 0.015;
 const DEFAULT_PICKUP_RADIUS = 3;
-const DEFAULT_GROUND_OFFSET = 0.2;
+const DEFAULT_GROUND_OFFSET = 0.0;
 
 const disposeMaterial = (material) => {
   if (!material) return;
