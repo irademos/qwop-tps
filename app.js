@@ -1921,6 +1921,7 @@ async function main() {
   await createCabin({ scene, getTerrainHeight });
   mushroomController = await createMushrooms({ scene, getTerrainHeight });
   mushroomPickups = mushroomController?.pickups || [];
+  window.mushroomPickups = mushroomPickups;
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
@@ -2973,6 +2974,17 @@ async function main() {
         child.material?.dispose?.();
       }
     });
+  }
+
+  function pickupMushroom(pickup) {
+    if (!pickup?.mesh) return false;
+    addToInventory(pickup.id, 1);
+    disposeMushroomPickup(pickup);
+    const index = mushroomPickups.indexOf(pickup);
+    if (index >= 0) {
+      mushroomPickups.splice(index, 1);
+    }
+    return true;
   }
 
   function spawnMushroomPickup(itemId, position) {
@@ -5130,6 +5142,7 @@ async function main() {
   window.getInventory = getInventory;
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
+  window.pickupMushroom = pickupMushroom;
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
