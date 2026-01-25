@@ -1983,6 +1983,7 @@ async function main() {
   await createCabin({ scene, getTerrainHeight });
   mushroomController = await createMushrooms({ scene, getTerrainHeight });
   mushroomPickups = mushroomController?.pickups || [];
+  window.mushroomPickups = mushroomPickups;
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
@@ -3039,7 +3040,12 @@ async function main() {
   function disposeMushroomPickup(pickup) {
     if (!pickup?.mesh) return;
     const mesh = pickup.mesh;
-    scene.remove(mesh);
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
     mesh.traverse(child => {
       if (!child.isMesh) return;
       child.geometry?.dispose?.();
@@ -3049,6 +3055,21 @@ async function main() {
         child.material?.dispose?.();
       }
     });
+  }
+
+  function pickupMushroom(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const distance = playerControls.playerModel.position.distanceTo(pickup.mesh.position);
+      if (distance > PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeMushroomPickup(pickup);
+    const index = mushroomPickups.indexOf(pickup);
+    if (index >= 0) {
+      mushroomPickups.splice(index, 1);
+    }
+    return true;
   }
 
   function spawnMushroomPickup(itemId, position) {
@@ -5206,6 +5227,7 @@ async function main() {
   window.getInventory = getInventory;
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
+  window.pickupMushroom = pickupMushroom;
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -5537,11 +5559,6 @@ async function main() {
         if (!pickup?.mesh) {
           mushroomPickups.splice(i, 1);
           continue;
-        }
-        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.mesh.position) < PICKUP_RADIUS) {
-          addToInventory(pickup.id, 1);
-          disposeMushroomPickup(pickup);
-          mushroomPickups.splice(i, 1);
         }
       }
     }

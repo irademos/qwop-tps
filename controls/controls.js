@@ -16,6 +16,7 @@ const CLIMB_SPEED = 1.6;
 const CLIMB_SNAP_DISTANCE = 0.6;
 const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const FRIENDLY_INTERACT_RANGE = 6;
+const MUSHROOM_INTERACT_RANGE = 1.2;
 const FRIENDLY_DIALOGUE_POOL = [
   {
     blocks: [
@@ -692,6 +693,11 @@ export class PlayerControls {
       closest.treasureChest.tryOpen?.(this);
       return;
     }
+    
+    if (closest.type === 'mushroom') {
+      window.pickupMushroom?.(closest.pickup);
+      return;
+    }
 
     if (closest.type === 'vehicle') {
       closest.vehicle.tryMount?.(this);
@@ -800,6 +806,18 @@ export class PlayerControls {
         });
       }
     }
+    
+    const mushroomPickups = Array.isArray(window.mushroomPickups) ? window.mushroomPickups : [];
+    mushroomPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'mushroom',
+        pickup,
+        maxDistance: MUSHROOM_INTERACT_RANGE,
+        promptText: "'x' pick up mushroom"
+      });
+    });
 
     return closest;
   }
@@ -1658,18 +1676,25 @@ export class PlayerControls {
     } else {
       const closest = this.getClosestInteractionTarget();
       if (closest?.promptText) {
-        promptText = closest.promptText;
-        visible = true;
+        if (closest.type !== 'friendly' || !this.friendlyInteractButton) {
+          promptText = closest.promptText;
+          visible = true;
+        }
       }
     }
 
     if (visible) {
-      this.interactionPromptEl.textContent = promptText;
+      this.interactionPromptEl.textContent = this.formatInteractionPrompt(promptText);
       this.interactionPromptEl.classList.add('visible');
     } else {
       this.interactionPromptEl.classList.remove('visible');
       this.interactionPromptEl.textContent = '';
     }
+  }
+
+  formatInteractionPrompt(text) {
+    if (!text || !this.isMobile) return text;
+    return text.replace(/^'x'\s*/i, 'touch ');
   }
 
   setGeoCenter({ lat, lon }) {
