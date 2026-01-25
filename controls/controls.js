@@ -689,6 +689,11 @@ export class PlayerControls {
       return;
     }
 
+    if (closest.type === 'treasureChest') {
+      closest.treasureChest.tryOpen?.(this);
+      return;
+    }
+    
     if (closest.type === 'mushroom') {
       window.pickupMushroom?.(closest.pickup);
       return;
@@ -785,6 +790,23 @@ export class PlayerControls {
       });
     });
 
+    const treasureChest = window.treasureChest;
+    if (treasureChest?.mesh && !treasureChest.isOpen) {
+      const target = treasureChest.mesh;
+      if (target?.position) {
+        const dist = playerPos.distanceTo(target.position);
+        const promptText = this.isMobile
+          ? 'click to open chest'
+          : "press 'x' to open chest";
+        consider(dist, {
+          type: 'treasureChest',
+          treasureChest,
+          maxDistance: 3,
+          promptText
+        });
+      }
+    }
+    
     const mushroomPickups = Array.isArray(window.mushroomPickups) ? window.mushroomPickups : [];
     mushroomPickups.forEach((pickup) => {
       if (!pickup?.mesh || !pickup.mesh.visible) return;
