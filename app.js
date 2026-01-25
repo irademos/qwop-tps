@@ -2964,7 +2964,12 @@ async function main() {
   function disposeMushroomPickup(pickup) {
     if (!pickup?.mesh) return;
     const mesh = pickup.mesh;
-    scene.remove(mesh);
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
     mesh.traverse(child => {
       if (!child.isMesh) return;
       child.geometry?.dispose?.();
