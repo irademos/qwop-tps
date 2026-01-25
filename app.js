@@ -19,6 +19,7 @@ import { IceGun } from './items/iceGun.js';
 import { Bow } from './items/bow.js';
 import { Lantern } from './items/lantern.js';
 import { AutumnSword } from './items/autumnSword.js';
+import { TreasureChest } from './items/treasure_chest.js';
 import { createNature } from './environment/nature.js';
 import { createCabin } from './environment/cabin.js';
 import { createMushrooms, MUSHROOM_ENTRIES } from './environment/mushrooms.js';
@@ -1446,6 +1447,7 @@ async function main() {
   let bow;
   let autumnSword;
   let lantern;
+  let treasureChest;
 
   const breakManager = new BreakManager(scene);
   // Expose to window for debugging
@@ -1896,6 +1898,66 @@ async function main() {
   });
 
   window.weapons = { iceGun, bow, autumnSword, lantern };
+  treasureChest = new TreasureChest(scene);
+  await treasureChest.load();
+  window.treasureChest = treasureChest;
+  treasureChest.onOpen = (holder) => {
+    if (holder !== playerControls) return;
+    const rewards = [
+      {
+        label: '5 arrows',
+        apply: () => {
+          const current = Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
+            ? inventoryState.bow[ARROW_AMMO_KEY]
+            : 0;
+          setArrowAmmoCount(current + 5);
+        }
+      },
+      {
+        label: 'Autumn Sword',
+        apply: () => addToInventory('autumnSword', 1)
+      },
+      {
+        label: 'Bow',
+        apply: () => addToInventory('bow', 1)
+      },
+      {
+        label: 'Ice Gun',
+        apply: () => addToInventory('iceGun', 1)
+      },
+      {
+        label: 'Lantern',
+        apply: () => addToInventory('lantern', 1)
+      },
+      {
+        label: '5 ice ammo',
+        apply: () => {
+          const current = Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+            ? inventoryState.iceGun[ICE_AMMO_KEY]
+            : 0;
+          setIceAmmoCount(current + 5);
+        }
+      },
+      {
+        label: '5 mushrooms',
+        apply: () => {
+          const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
+          addToInventory(entry.id, 5);
+        }
+      },
+      {
+        label: '20 coins',
+        apply: () => {
+          const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + 20;
+          setStat('coins', nextCoins, { skipSave: true });
+          showCoinPopup(statsState.coins);
+        }
+      }
+    ];
+    const reward = rewards[Math.floor(Math.random() * rewards.length)];
+    reward?.apply?.();
+    showTreasurePopup(`You received a ${reward?.label ?? 'treasure'}`);
+  };
   const getTreeGeoForLocal = (position) => {
     if (!position) return null;
     const origin = worldOrigin
@@ -2613,9 +2675,11 @@ async function main() {
   const levelPopup = document.getElementById('level-popup');
   const ammoPopup = document.getElementById('ammo-popup');
   const coinPopup = document.getElementById('coin-popup');
+  const treasurePopup = document.getElementById('treasure-popup');
   let levelPopupTimer = null;
   let ammoPopupTimer = null;
   let coinPopupTimer = null;
+  let treasurePopupTimer = null;
   updatePlayerInfoUI = () => {
     if (playerNameDisplay) {
       playerNameDisplay.textContent = playerName;
@@ -2664,6 +2728,18 @@ async function main() {
       coinPopup.classList.remove('visible');
       coinPopupTimer = null;
     }, 1600);
+  };
+  const showTreasurePopup = (message) => {
+    if (!treasurePopup) return;
+    treasurePopup.textContent = message;
+    treasurePopup.classList.add('visible');
+    if (treasurePopupTimer) {
+      clearTimeout(treasurePopupTimer);
+    }
+    treasurePopupTimer = setTimeout(() => {
+      treasurePopup.classList.remove('visible');
+      treasurePopupTimer = null;
+    }, 2000);
   };
   const inventoryCatalog = {
     iceGun: {

@@ -688,6 +688,11 @@ export class PlayerControls {
       return;
     }
 
+    if (closest.type === 'treasureChest') {
+      closest.treasureChest.tryOpen?.(this);
+      return;
+    }
+
     if (closest.type === 'vehicle') {
       closest.vehicle.tryMount?.(this);
     }
@@ -778,6 +783,23 @@ export class PlayerControls {
         promptText: `'x' pick up ${weaponLabel}`
       });
     });
+
+    const treasureChest = window.treasureChest;
+    if (treasureChest?.mesh && !treasureChest.isOpen) {
+      const target = treasureChest.mesh;
+      if (target?.position) {
+        const dist = playerPos.distanceTo(target.position);
+        const promptText = this.isMobile
+          ? 'click to open chest'
+          : "press 'x' to open chest";
+        consider(dist, {
+          type: 'treasureChest',
+          treasureChest,
+          maxDistance: 3,
+          promptText
+        });
+      }
+    }
 
     return closest;
   }
