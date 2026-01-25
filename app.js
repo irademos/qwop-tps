@@ -2978,6 +2978,10 @@ async function main() {
 
   function pickupMushroom(pickup) {
     if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const distance = playerControls.playerModel.position.distanceTo(pickup.mesh.position);
+      if (distance > PICKUP_RADIUS) return false;
+    }
     addToInventory(pickup.id, 1);
     disposeMushroomPickup(pickup);
     const index = mushroomPickups.indexOf(pickup);
@@ -5474,11 +5478,6 @@ async function main() {
         if (!pickup?.mesh) {
           mushroomPickups.splice(i, 1);
           continue;
-        }
-        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.mesh.position) < PICKUP_RADIUS) {
-          addToInventory(pickup.id, 1);
-          disposeMushroomPickup(pickup);
-          mushroomPickups.splice(i, 1);
         }
       }
     }
