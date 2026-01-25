@@ -13,6 +13,16 @@ const TREE_PREFABS = [
   ['Circle006'],              // Scary / Dead tree
   ['Circle007']               // Larch or Beech
 ];
+const TREE_CLIMB_RIGHT_SHIFT_BY_TYPE = {
+  0: 2.7, // eucalyptus
+  5: -2.5  // scary/dead
+};
+
+const TREE_CLIMB_OVERRIDES = {
+  0: { halfWidth: 0.4, halfDepth: 0.75, entryHeight: 0.0, maxYPad: 3.0 }, // eucalyptus
+  5: { halfWidth: 0.75, halfDepth: 0.75, entryHeight: 0.0, minYPad: 0.0, maxYPad: 6.4 }  // dead/scary
+  // others default
+};
 
 const PALM_TREE_INDEX = 2;
 const TREE_ZONE_DEGREES = 0.0009;
@@ -128,15 +138,33 @@ export async function createNature({
     tempBox.getSize(tempSize);
     tree.getWorldPosition(tempWorldPos);
     tempBox.getCenter(tempCenter);
-    const halfHeight = tempSize.y * 0.5;
-    const minY = tempBox.min.y;
-    const maxY = tempBox.max.y;
+    
+    const typeIndex = tree.userData.treeTypeIndex;
+    const o = TREE_CLIMB_OVERRIDES[typeIndex] ?? {};
+    const minY = tempBox.min.y + (o.minYPad ?? 0);
+    const maxY = tempBox.max.y - (o.maxYPad ?? 0);
+    const halfHeight = (maxY - minY) * 0.5;
     const center = tempCenter.clone();
     center.y = (minY + maxY) * 0.5;
-    const halfWidth = TREE_CLIMB_HALF_WIDTH;
-    const halfDepth = TREE_CLIMB_HALF_DEPTH;
+
+    const halfWidth  = o.halfWidth  ?? TREE_CLIMB_HALF_WIDTH;
+    const halfDepth  = o.halfDepth  ?? TREE_CLIMB_HALF_DEPTH;
+    const entryRadius = o.entryRadius ?? TREE_CLIMB_ENTRY_RADIUS;
+    const entryHeight = o.entryHeight ?? TREE_CLIMB_ENTRY_HEIGHT;
+
     const entryCenter = tempCenter.clone();
     entryCenter.y = minY + 0.2;
+
+    const shift = TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
+
+    // tree's local +X rotated by tree.rotation.y
+    const rightWorld = new THREE.Vector3(1, 0, 0).applyAxisAngle(
+      new THREE.Vector3(0, 1, 0),
+      tree.rotation.y
+    );
+    center.addScaledVector(rightWorld, shift);
+    entryCenter.addScaledVector(rightWorld, shift);
+
     const areas = [];
     const directions = [
       new THREE.Vector3(1, 0, 0),
@@ -156,8 +184,8 @@ export async function createNature({
         minY,
         maxY,
         entryCenter: entryCenter.clone(),
-        entryRadius: TREE_CLIMB_ENTRY_RADIUS,
-        entryHeight: TREE_CLIMB_ENTRY_HEIGHT,
+        entryRadius,
+        entryHeight,
         normal: normal.clone()
       });
     }
@@ -207,6 +235,7 @@ export async function createNature({
         if (!template) continue;
 
         const tree = template.clone(true);
+        tree.userData.treeTypeIndex = treeTypeIndex;
         const rotation = pseudoRandom2D(worldX, worldZ, 3.4) * Math.PI * 2;
         const scaleVariance = 0.9 + pseudoRandom2D(worldX, worldZ, 7.7) * 0.3;
         tree.rotation.y = rotation;
@@ -218,9 +247,9 @@ export async function createNature({
         trees.push(tree);
         const areas = buildTreeClimbAreas(tree);
         tileClimbAreas.push(...areas);
-        for (const area of areas) {
-          addClimbDebugLines(area, debugGroup);
-        }
+        // for (const area of areas) {
+        //   addClimbDebugLines(area, debugGroup);
+        // }
       }
     }
 
