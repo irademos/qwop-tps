@@ -735,7 +735,8 @@ function renderInventory() {
     iceGun: '❄️',
     bow: '🏹',
     autumnSword: '🗡️',
-    lantern: '🏮'
+    lantern: '🏮',
+    apple: '🍎'
   };
 
   elements.inventoryGrid.innerHTML = '';
