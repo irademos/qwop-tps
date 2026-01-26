@@ -1146,7 +1146,8 @@ body {
 }
 
 .arcade-shell {
-  width: min(560px, 100%);
+  width: 80vw;
+  max-width: 560px;
   border: 3px solid #facc15;
   border-radius: 20px;
   background: rgba(5, 6, 17, 0.95);
@@ -1207,7 +1208,8 @@ body {
 }
 
 .arcade-input {
-  width: 100%;
+  width: 90%;
+  margin: 0 auto;
   padding: 12px 14px;
   border-radius: 10px;
   border: 2px solid rgba(148, 163, 184, 0.45);
