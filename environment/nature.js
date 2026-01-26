@@ -3,7 +3,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { setClimbableAreas } from '../controls/climb.js';
 
 const TREE_MODEL_URL = '/assets/props/low_poly_tree_pack.glb';
-const TREE_SCALE = 0.016; // around 0.012 to 0.02 looks good
+const TREE_SCALE_REFERENCE = 0.016;
+const TREE_SCALE_MIN = 0.012;
+const TREE_SCALE_MAX = 0.02;
 const TREE_PREFABS = [
   ['Circle'],                 // Eucalyptus (has multiple meshes under it)
   ['Circle001'],              // Pine
@@ -86,7 +88,7 @@ export async function createNature({
       setTreeShadowing(part);
       wrapper.add(part);
     }
-    wrapper.scale.setScalar(TREE_SCALE);
+    wrapper.scale.setScalar(1);
     return wrapper;
   });
 
@@ -141,21 +143,24 @@ export async function createNature({
     
     const typeIndex = tree.userData.treeTypeIndex;
     const o = TREE_CLIMB_OVERRIDES[typeIndex] ?? {};
-    const minY = tempBox.min.y + (o.minYPad ?? 0);
-    const maxY = tempBox.max.y - (o.maxYPad ?? 0);
+    const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
+    const scaleValue = (value) => value * scaleFactor;
+
+    const minY = tempBox.min.y + scaleValue(o.minYPad ?? 0);
+    const maxY = tempBox.max.y - scaleValue(o.maxYPad ?? 0);
     const halfHeight = (maxY - minY) * 0.5;
     const center = tempCenter.clone();
     center.y = (minY + maxY) * 0.5;
 
-    const halfWidth  = o.halfWidth  ?? TREE_CLIMB_HALF_WIDTH;
-    const halfDepth  = o.halfDepth  ?? TREE_CLIMB_HALF_DEPTH;
-    const entryRadius = o.entryRadius ?? TREE_CLIMB_ENTRY_RADIUS;
-    const entryHeight = o.entryHeight ?? TREE_CLIMB_ENTRY_HEIGHT;
+    const halfWidth = scaleValue(o.halfWidth ?? TREE_CLIMB_HALF_WIDTH);
+    const halfDepth = scaleValue(o.halfDepth ?? TREE_CLIMB_HALF_DEPTH);
+    const entryRadius = scaleValue(o.entryRadius ?? TREE_CLIMB_ENTRY_RADIUS);
+    const entryHeight = scaleValue(o.entryHeight ?? TREE_CLIMB_ENTRY_HEIGHT);
 
     const entryCenter = tempCenter.clone();
-    entryCenter.y = minY + 0.2;
+    entryCenter.y = minY + scaleValue(0.2);
 
-    const shift = TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
+    const shift = scaleValue(TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0);
 
     // tree's local +X rotated by tree.rotation.y
     const rightWorld = new THREE.Vector3(1, 0, 0).applyAxisAngle(
@@ -174,7 +179,7 @@ export async function createNature({
     ];
     for (const normal of directions) {
       const rotationY = Math.atan2(normal.x, normal.z);
-      const areaCenter = center.clone().addScaledVector(normal, halfDepth + 0.05);
+      const areaCenter = center.clone().addScaledVector(normal, halfDepth + scaleValue(0.05));
       areas.push({
         center: areaCenter,
         rotationY,
@@ -237,9 +242,11 @@ export async function createNature({
         const tree = template.clone(true);
         tree.userData.treeTypeIndex = treeTypeIndex;
         const rotation = pseudoRandom2D(worldX, worldZ, 3.4) * Math.PI * 2;
-        const scaleVariance = 0.9 + pseudoRandom2D(worldX, worldZ, 7.7) * 0.3;
         tree.rotation.y = rotation;
-        tree.scale.multiplyScalar(scaleVariance);
+        const scale =
+          TREE_SCALE_MIN +
+          pseudoRandom2D(worldX, worldZ, 7.7) * (TREE_SCALE_MAX - TREE_SCALE_MIN);
+        tree.scale.setScalar(scale);
 
         const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
         tree.position.set(worldX, terrainY, worldZ);
