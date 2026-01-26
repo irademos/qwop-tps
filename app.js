@@ -4957,6 +4957,8 @@ async function main() {
       }
     }
   });
+
+  homeSystem?.setLocationProvider?.(locationProvider);
   locationProvider.start();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {

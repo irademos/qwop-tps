@@ -205,6 +205,7 @@ export class HomeSystem {
     this.homeData = initialHome || null;
     this.isInsideHome = false;
     this.lastExteriorPosition = null;
+    this.locationProvider = null;
 
     this.interiorGroup = createInteriorMesh();
     this.interiorGroup.position.copy(HOME_INTERIOR_ORIGIN);
@@ -217,6 +218,10 @@ export class HomeSystem {
     this.rayDirection = new THREE.Vector3(0, -1, 0);
 
     this.interiorBody = createInteriorColliders(window.rapierWorld, HOME_INTERIOR_ORIGIN);
+  }
+
+  setLocationProvider(locationProvider) {
+    this.locationProvider = locationProvider || null;
   }
 
   getHomeLocalPosition() {
@@ -268,6 +273,10 @@ export class HomeSystem {
 
   enterHome() {
     if (!this.playerModel) return;
+    const debugState = this.locationProvider?.getDebugState?.();
+    if (debugState?.enabled) {
+      this.locationProvider?.setDebugEnabled?.(false);
+    }
     this.lastExteriorPosition = this.playerModel.position.clone();
     const interiorSpawn = HOME_INTERIOR_ORIGIN.clone().add(HOME_INTERIOR_SPAWN_OFFSET);
     syncPlayerPosition(this.playerModel, this.playerControls, interiorSpawn);
