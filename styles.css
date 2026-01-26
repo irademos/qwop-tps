@@ -817,6 +817,39 @@ body {
   font-size: 12px;
 }
 
+.settings-button.settings-button-danger {
+  background: #d9342b;
+}
+
+.settings-button.settings-button-secondary {
+  background: #6c7a89;
+}
+
+.settings-confirmation {
+  border: 1px solid #f0c9c7;
+  background: #fff6f5;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-confirmation[hidden] {
+  display: none;
+}
+
+.settings-confirmation-text {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-confirmation-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .settings-row {
   display: flex;
   justify-content: space-between;

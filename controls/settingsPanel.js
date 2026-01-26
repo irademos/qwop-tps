@@ -9,6 +9,7 @@ const TABS = [
   { id: 'multiplayer', label: 'Multiplayer' },
   { id: 'location', label: 'Location' },
   { id: 'display', label: 'Display' },
+  { id: 'account', label: 'Account' },
   { id: 'developer', label: 'Developer' }
 ];
 const CHARACTER_STATS = [
@@ -615,6 +616,52 @@ function buildDisplayPanel() {
   return panelEl;
 }
 
+function buildAccountPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-account';
+  panelEl.dataset.panel = 'account';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-account');
+
+  const description = createElement(
+    'div',
+    'settings-muted',
+    'Deleting your account permanently removes your profile data from Firebase.'
+  );
+
+  const deleteButton = createElement('button', 'settings-button settings-button-danger', 'Delete Account');
+  deleteButton.type = 'button';
+  deleteButton.dataset.action = 'delete-account';
+
+  const confirm = createElement('div', 'settings-confirmation');
+  confirm.hidden = true;
+
+  const confirmText = createElement('div', 'settings-confirmation-text', 'Are you sure?');
+  const confirmActions = createElement('div', 'settings-confirmation-actions');
+  const confirmYes = createElement('button', 'settings-button settings-button-danger', 'Yes');
+  confirmYes.type = 'button';
+  confirmYes.dataset.action = 'confirm-delete-account';
+  const confirmCancel = createElement('button', 'settings-button settings-button-secondary', 'Cancel');
+  confirmCancel.type = 'button';
+  confirmCancel.dataset.action = 'cancel-delete-account';
+
+  confirmActions.append(confirmYes, confirmCancel);
+  confirm.append(confirmText, confirmActions);
+
+  const status = createElement('div', 'settings-muted');
+  status.dataset.field = 'delete-account-status';
+
+  panelEl.append(description, deleteButton, confirm, status);
+
+  elements.deleteAccountButton = deleteButton;
+  elements.deleteAccountConfirm = confirm;
+  elements.deleteAccountConfirmYes = confirmYes;
+  elements.deleteAccountConfirmCancel = confirmCancel;
+  elements.deleteAccountStatus = status;
+
+  return panelEl;
+}
+
 function buildPanels() {
   const body = createElement('div', 'settings-body');
   const characterPanel = buildCharacterPanel();
@@ -622,14 +669,16 @@ function buildPanels() {
   const multiplayerPanel = buildMultiplayerPanel();
   const locationPanel = buildLocationPanel();
   const displayPanel = buildDisplayPanel();
+  const accountPanel = buildAccountPanel();
   const developerPanel = buildDeveloperPanel();
-  body.append(characterPanel, inventoryPanel, multiplayerPanel, locationPanel, displayPanel, developerPanel);
+  body.append(characterPanel, inventoryPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, developerPanel);
   elements.panels = {
     character: characterPanel,
     inventory: inventoryPanel,
     multiplayer: multiplayerPanel,
     location: locationPanel,
     display: displayPanel,
+    account: accountPanel,
     developer: developerPanel
   };
   return body;
@@ -793,6 +842,48 @@ async function handleAction(target) {
     if (direction === 'east') delta.eastMeters = stepMeters;
     if (direction === 'west') delta.eastMeters = -stepMeters;
     context.location?.stepDebugLocation?.(delta);
+  } else if (action === 'delete-account') {
+    if (elements.deleteAccountConfirm) {
+      elements.deleteAccountConfirm.hidden = false;
+    }
+  } else if (action === 'cancel-delete-account') {
+    if (elements.deleteAccountConfirm) {
+      elements.deleteAccountConfirm.hidden = true;
+    }
+  } else if (action === 'confirm-delete-account') {
+    const { deleteAccountButton, deleteAccountConfirm, deleteAccountStatus } = elements;
+    if (deleteAccountConfirm) {
+      deleteAccountConfirm.hidden = true;
+    }
+    if (!context.appState?.deleteAccount) {
+      if (deleteAccountStatus) {
+        deleteAccountStatus.textContent = 'Account deletion is unavailable.';
+      }
+      return;
+    }
+    if (deleteAccountStatus) {
+      deleteAccountStatus.textContent = 'Deleting account...';
+    }
+    if (deleteAccountButton) {
+      deleteAccountButton.disabled = true;
+    }
+    try {
+      const result = await context.appState.deleteAccount();
+      if (deleteAccountStatus) {
+        deleteAccountStatus.textContent = result?.status === 'ok'
+          ? 'Account deleted.'
+          : 'Failed to delete account. Try again.';
+      }
+    } catch (error) {
+      console.warn('Failed to delete account:', error);
+      if (deleteAccountStatus) {
+        deleteAccountStatus.textContent = 'Failed to delete account. Try again.';
+      }
+    } finally {
+      if (deleteAccountButton) {
+        deleteAccountButton.disabled = false;
+      }
+    }
   }
 }
 

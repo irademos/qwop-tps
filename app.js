@@ -40,6 +40,7 @@ import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from '.
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './environment/mapView.js';
 import {
   clearStoredPin,
+  deleteProfileData,
   getStoredPinHash,
   loadOrCreateWithPin,
   renameProfile,
@@ -5339,6 +5340,21 @@ async function main() {
       rebuildMapFromCache();
       didInitialGpsSnap = false;
       window.clearTileCache?.();
+    },
+    deleteAccount: async () => {
+      if (!profileNameKey) {
+        return { status: 'missing-key' };
+      }
+      const result = await deleteProfileData(profileNameKey, playerName);
+      if (result.status === 'ok') {
+        localStorage.removeItem('playerName');
+        localStorage.removeItem('characterModel');
+        setCookie('playerName', '', -1);
+        setCookie('characterModel', '', -1);
+        clearStoredPin(playerName);
+        window.location.reload();
+      }
+      return result;
     }
   };
 
