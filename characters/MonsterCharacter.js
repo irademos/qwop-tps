@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { ATTACKS } from "../items/melee.js";
 import { getKnockbackImpulse } from "../knockback.js";
+import { getTerrainHeight } from "../environment/water.js";
 
 const AGGRO_RADIUS = 12;
 const WANDER_CHANGE_MS = 2000;
@@ -25,6 +26,11 @@ const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
 const LEVEL_SIZE_STEP = 0.5;
 const LEVEL_SPEED_STEP = 0.08;
 const DEATH_REMOVAL_DELAY_MS = 30000;
+const RECOVER_START_MS = 500;
+const RECOVER_DURATION_MS = 750;
+const RECOVER_GROUND_OFFSET = 0.5;
+const RECOVER_ROTATION_BLEND = 0.4;
+const RECOVER_TRANSLATION_BLEND = 0.3;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -57,6 +63,7 @@ export class MonsterCharacter extends CharacterBase {
     this.attackHasHit = false;
     this.isKnocked = false;
     this.knockbackEndTime = 0;
+    this.lastHitAt = null;
     this.freezeEndTime = 0;
     this.attackDirection = new THREE.Vector3();
     this.attackLungeEndTime = 0;
@@ -157,6 +164,7 @@ export class MonsterCharacter extends CharacterBase {
     const { impulse, profile } = getKnockbackImpulse(direction, strength);
     body.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
     const now = Date.now();
+    this.lastHitAt = now;
     this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + profile.recoveryMs);
     this.isKnocked = true;
     this.attackStartTime = null;
@@ -267,6 +275,7 @@ export class MonsterCharacter extends CharacterBase {
       const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
       const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
       body.setRotation(rot, true);
+      this.applyPostHitRecovery(now);
       this.playAnimation("Walk", MOVE_FADE);
       this.update(delta);
       return;
@@ -336,6 +345,7 @@ export class MonsterCharacter extends CharacterBase {
       }
     }
 
+    this.applyPostHitRecovery(now);
     this.update(delta);
 
     if (this.attackStartTime) {
@@ -372,6 +382,60 @@ export class MonsterCharacter extends CharacterBase {
   update(delta) {
     super.update(delta);
     this.updateHealthBarVisibility();
+  }
+
+  applyPostHitRecovery(now) {
+    if (!Number.isFinite(this.lastHitAt)) return;
+    if (this.isDead || this.isFrozen() || this.isKnocked) return;
+    const elapsed = now - this.lastHitAt;
+    if (elapsed < RECOVER_START_MS) return;
+    const body = this.body;
+    if (!body) return;
+    const t = THREE.MathUtils.clamp(
+      (elapsed - RECOVER_START_MS) / RECOVER_DURATION_MS,
+      0,
+      1
+    );
+    const eased = t * t * (3 - 2 * t);
+    const rotationBlend = THREE.MathUtils.clamp(RECOVER_ROTATION_BLEND * eased, 0, 1);
+    const translationBlend = THREE.MathUtils.clamp(RECOVER_TRANSLATION_BLEND * eased, 0, 1);
+
+    const currentRotation = body.rotation();
+    const currentQuat = new THREE.Quaternion(
+      currentRotation.x,
+      currentRotation.y,
+      currentRotation.z,
+      currentRotation.w
+    );
+    const currentEuler = new THREE.Euler().setFromQuaternion(currentQuat, "YXZ");
+    const targetQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(0, currentEuler.y, 0, "YXZ")
+    );
+    currentQuat.slerp(targetQuat, rotationBlend);
+    body.setRotation(
+      { x: currentQuat.x, y: currentQuat.y, z: currentQuat.z, w: currentQuat.w },
+      true
+    );
+
+    const position = body.translation();
+    const terrainHeight = getTerrainHeight(position.x, position.z);
+    if (Number.isFinite(terrainHeight)) {
+      const targetY = terrainHeight + RECOVER_GROUND_OFFSET * (this.sizeScale || 1);
+      const nextY = THREE.MathUtils.lerp(position.y, targetY, translationBlend);
+      body.setTranslation({ x: position.x, y: nextY, z: position.z }, true);
+      const vel = body.linvel();
+      body.setLinvel(
+        { x: vel.x, y: THREE.MathUtils.lerp(vel.y, 0, translationBlend), z: vel.z },
+        true
+      );
+    }
+
+    if (t >= 1) {
+      const tiltDone = Math.abs(currentEuler.x) < 0.01 && Math.abs(currentEuler.z) < 0.01;
+      if (tiltDone) {
+        this.lastHitAt = null;
+      }
+    }
   }
 
   createHealthBar() {
