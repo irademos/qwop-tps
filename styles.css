@@ -835,6 +835,10 @@ body {
   gap: 10px;
 }
 
+.settings-confirmation[hidden] {
+  display: none;
+}
+
 .settings-confirmation-text {
   font-size: 12px;
   font-weight: 600;
