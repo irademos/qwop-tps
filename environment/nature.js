@@ -60,7 +60,9 @@ export async function createNature({
   playerModel,
   getTerrainHeight,
   getGeoForLocal,
-  tileCache
+  tileCache,
+  spawnApplePickup,
+  removeApplePickup
 } = {}) {
   if (!scene || !playerModel) return null;
 
@@ -98,6 +100,7 @@ export async function createNature({
 
   const treeTiles = new Map();
   const climbableAreasByTile = new Map();
+  const applePickupsByTile = new Map();
   const debugMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
   const tempPosition = new THREE.Vector3();
   const tempBox = new THREE.Box3();
@@ -226,6 +229,7 @@ export async function createNature({
     const baseZ = tile.y * tileSizeMeters;
     const trees = [];
     const tileClimbAreas = [];
+    const tileApplePickups = [];
 
     for (let ix = 0; ix <= tileSizeMeters; ix += TREE_GRID_SPACING) {
       for (let iz = 0; iz <= tileSizeMeters; iz += TREE_GRID_SPACING) {
@@ -254,15 +258,39 @@ export async function createNature({
         trees.push(tree);
         const areas = buildTreeClimbAreas(tree);
         tileClimbAreas.push(...areas);
-        // for (const area of areas) {
-        //   addClimbDebugLines(area, debugGroup);
-        // }
+        if (typeof spawnApplePickup === 'function') {
+          tree.updateWorldMatrix(true, true);
+          tempBox.setFromObject(tree);
+          if (Number.isFinite(tempBox.min.y)) {
+            tempBox.getSize(tempSize);
+            tempBox.getCenter(tempCenter);
+            const height = tempSize.y;
+            if (height > 0) {
+              const radius = Math.max(0.4, Math.min(tempSize.x, tempSize.z) * 0.35);
+              for (let i = 0; i < 2; i += 1) {
+                const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
+                const distance = radius * (0.4 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.6);
+                const heightFactor = 0.6 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.35;
+                const applePosition = new THREE.Vector3(
+                  tempCenter.x + Math.cos(angle) * distance,
+                  tempBox.min.y + height * heightFactor,
+                  tempCenter.z + Math.sin(angle) * distance
+                );
+                const pickup = spawnApplePickup(applePosition, { applyTerrainHeight: false, lift: 0 });
+                if (pickup) {
+                  tileApplePickups.push(pickup);
+                }
+              }
+            }
+          }
+        }
       }
     }
 
     const entry = { tile, tileKey, group: tileGroup, trees };
     treeTiles.set(tileKey, entry);
     climbableAreasByTile.set(tileKey, tileClimbAreas);
+    applePickupsByTile.set(tileKey, tileApplePickups);
     refreshClimbableAreas();
     return entry;
   };
@@ -294,6 +322,11 @@ export async function createNature({
       group.remove(entry.group);
       treeTiles.delete(key);
       climbableAreasByTile.delete(key);
+      const tilePickups = applePickupsByTile.get(key) ?? [];
+      if (typeof removeApplePickup === 'function') {
+        tilePickups.forEach((pickup) => removeApplePickup(pickup));
+      }
+      applePickupsByTile.delete(key);
     }
     refreshClimbableAreas();
   };
@@ -316,6 +349,12 @@ export async function createNature({
     }
     treeTiles.clear();
     climbableAreasByTile.clear();
+    if (typeof removeApplePickup === 'function') {
+      for (const tilePickups of applePickupsByTile.values()) {
+        tilePickups.forEach((pickup) => removeApplePickup(pickup));
+      }
+    }
+    applePickupsByTile.clear();
     refreshClimbableAreas();
   };
 
@@ -326,6 +365,12 @@ export async function createNature({
     }
     treeTiles.clear();
     climbableAreasByTile.clear();
+    if (typeof removeApplePickup === 'function') {
+      for (const tilePickups of applePickupsByTile.values()) {
+        tilePickups.forEach((pickup) => removeApplePickup(pickup));
+      }
+    }
+    applePickupsByTile.clear();
     refreshClimbableAreas();
     group.clear();
     scene?.remove(group);
