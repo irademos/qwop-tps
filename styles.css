@@ -1138,7 +1138,7 @@ body {
   color: #fff;
   font-family: 'Press Start 2P', monospace;
   text-align: center;
-  padding: 24px;
+  padding: 0px;
 }
 
 #start-overlay.hidden {
