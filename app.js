@@ -587,6 +587,16 @@ async function main() {
   let remoteAnimAccumulator = 0;
   let monsterAnimAccumulator = 0;
 
+  let monsters = [];
+  window.monsters = monsters;
+  const monsterSlotIds = ["monster:0", "monster:1"];
+  const spawningSlots = new Set();
+  const respawnTimers = new Map();
+  let monstersSeeded = false;
+  let monsterSnapshotLoaded = false;
+  let unsubscribeMonsterUpdates = null;
+  const recentMonsterHits = new Map();
+
   scene = new THREE.Scene();
   const rotateSkyboxFaceClockwise = (image) => {
     if (!image) return image;
@@ -1461,16 +1471,6 @@ async function main() {
   const breakManager = new BreakManager(scene);
   // Expose to window for debugging
   window.breakManager = breakManager;
-
-  let monsters = [];
-  window.monsters = monsters;
-  const monsterSlotIds = ["monster:0", "monster:1"];
-  const spawningSlots = new Set();
-  const respawnTimers = new Map();
-  let monstersSeeded = false;
-  let monsterSnapshotLoaded = false;
-  let unsubscribeMonsterUpdates = null;
-  const recentMonsterHits = new Map();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
