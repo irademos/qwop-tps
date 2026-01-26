@@ -4883,7 +4883,7 @@ async function main() {
         locationState.playerX = playerMeters.x;
         locationState.playerZ = playerMeters.z;
 
-        let allowGpsSnap = true;
+        let allowGpsSnap = !homeSystem?.isInsideHome;
         if (homeSystem?.isInsideHome) {
           const homeGeo = homeSystem.getHomeGeo?.();
           const homeDistance = homeGeo
@@ -4891,6 +4891,7 @@ async function main() {
             : null;
           if (homeDistance != null && homeDistance > 50) {
             homeSystem.exitHome();
+            allowGpsSnap = true;
           } else {
             allowGpsSnap = false;
           }
