@@ -286,10 +286,6 @@ export class HomeSystem {
 
   enterHome() {
     if (!this.playerModel) return;
-    const debugState = this.locationProvider?.getDebugState?.();
-    if (debugState?.enabled) {
-      this.locationProvider?.setDebugEnabled?.(false);
-    }
     this.lastExteriorPosition = this.playerModel.position.clone();
     const interiorSpawn = HOME_INTERIOR_ORIGIN.clone().add(HOME_INTERIOR_SPAWN_OFFSET);
     syncPlayerPosition(this.playerModel, this.playerControls, interiorSpawn);
