@@ -239,6 +239,19 @@ export class HomeSystem {
     return null;
   }
 
+  getHomeGeo() {
+    if (!this.homeData) return null;
+    if (Number.isFinite(this.homeData.lat) && Number.isFinite(this.homeData.lon)) {
+      return { lat: this.homeData.lat, lon: this.homeData.lon };
+    }
+    const local = this.getHomeLocalPosition();
+    const origin = this.getLocalOrigin?.();
+    if (!local || !origin || !this.localMetersToGeo) return null;
+    const geo = this.localMetersToGeo(local.x, local.z, origin);
+    if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) return null;
+    return { lat: geo.lat, lon: geo.lon };
+  }
+
   async persistHome(homeData) {
     if (!this.profileNameKey || !homeData) return;
     try {

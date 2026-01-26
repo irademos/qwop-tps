@@ -4883,43 +4883,58 @@ async function main() {
         locationState.playerX = playerMeters.x;
         locationState.playerZ = playerMeters.z;
 
-        if (mapViewEnabled) {
-          applyPlayerMeters(playerMeters);
-          didInitialGpsSnap = true;
-          playerControls?.clearGpsMoveTarget?.();
-        } else if (!didInitialGpsSnap) {
-          applyPlayerMeters(playerMeters);
-          didInitialGpsSnap = true;
-        } else if (playerControls && playerModel) {
-          const currentPos = playerControls.body?.translation?.() ?? playerModel.position;
-          if (currentPos && Number.isFinite(currentPos.x) && Number.isFinite(currentPos.z)) {
-            const dx = playerMeters.x - currentPos.x;
-            const dz = playerMeters.z - currentPos.z;
-            const distance = Math.hypot(dx, dz);
-            if (distance > GPS_SNAP_DISTANCE_METERS) {
-              playerControls.clearGpsMoveTarget?.();
-              applyPlayerMeters(playerMeters);
-            } else if (distance > GPS_TARGET_EPSILON_METERS) {
-              const blocked = isGpsPathBlocked(
-                currentPos,
-                {
-                  x: playerMeters.x,
-                  y: currentPos.y ?? playerModel.position.y,
-                  z: playerMeters.z
-                }
-              );
-              if (blocked) {
+        let allowGpsSnap = true;
+        if (homeSystem?.isInsideHome) {
+          const homeGeo = homeSystem.getHomeGeo?.();
+          const homeDistance = homeGeo
+            ? distanceMeters(location.lat, location.lon, homeGeo.lat, homeGeo.lon)
+            : null;
+          if (homeDistance != null && homeDistance > 50) {
+            homeSystem.exitHome();
+          } else {
+            allowGpsSnap = false;
+          }
+        }
+
+        if (allowGpsSnap) {
+          if (mapViewEnabled) {
+            applyPlayerMeters(playerMeters);
+            didInitialGpsSnap = true;
+            playerControls?.clearGpsMoveTarget?.();
+          } else if (!didInitialGpsSnap) {
+            applyPlayerMeters(playerMeters);
+            didInitialGpsSnap = true;
+          } else if (playerControls && playerModel) {
+            const currentPos = playerControls.body?.translation?.() ?? playerModel.position;
+            if (currentPos && Number.isFinite(currentPos.x) && Number.isFinite(currentPos.z)) {
+              const dx = playerMeters.x - currentPos.x;
+              const dz = playerMeters.z - currentPos.z;
+              const distance = Math.hypot(dx, dz);
+              if (distance > GPS_SNAP_DISTANCE_METERS) {
                 playerControls.clearGpsMoveTarget?.();
                 applyPlayerMeters(playerMeters);
+              } else if (distance > GPS_TARGET_EPSILON_METERS) {
+                const blocked = isGpsPathBlocked(
+                  currentPos,
+                  {
+                    x: playerMeters.x,
+                    y: currentPos.y ?? playerModel.position.y,
+                    z: playerMeters.z
+                  }
+                );
+                if (blocked) {
+                  playerControls.clearGpsMoveTarget?.();
+                  applyPlayerMeters(playerMeters);
+                } else {
+                  playerControls.setGpsMoveTarget?.({
+                    x: playerMeters.x,
+                    y: currentPos.y ?? playerModel.position.y,
+                    z: playerMeters.z
+                  });
+                }
               } else {
-                playerControls.setGpsMoveTarget?.({
-                  x: playerMeters.x,
-                  y: currentPos.y ?? playerModel.position.y,
-                  z: playerMeters.z
-                });
+                playerControls.clearGpsMoveTarget?.();
               }
-            } else {
-              playerControls.clearGpsMoveTarget?.();
             }
           }
         }
