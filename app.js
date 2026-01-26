@@ -290,8 +290,11 @@ function createArcadeOverlay(startOverlay) {
         return;
       }
       currentName = result.profile?.name || name;
-      showWelcome(currentName, { ready: true });
       setMessage('');
+      if (startHandler) {
+        startHandler();
+      }
+      hideOverlay();
       resolveAuth?.(result);
     } catch (err) {
       if (token !== authToken) return;

@@ -1274,6 +1274,17 @@ body {
   color: #e2e8f0;
 }
 
+@media (max-width: 600px) {
+  .arcade-shell {
+    width: 90vw;
+  }
+
+  .arcade-input {
+    width: 90%;
+    margin: 0 auto;
+  }
+}
+
 .arcade-confirm.hidden,
 .arcade-welcome.hidden,
 .arcade-button.hidden,
