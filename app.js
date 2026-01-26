@@ -1979,6 +1979,13 @@ async function main() {
       lon: origin.centerLon - position.x / lonScale
     };
   };
+  appleController = await createApples({
+    scene,
+    getTerrainHeight,
+    allowDefaultPositions: false
+  });
+  applePickups = appleController?.pickups || [];
+  window.applePickups = applePickups;
   natureController = await createNature({
     scene,
     playerModel,
@@ -1986,7 +1993,9 @@ async function main() {
     mapRenderer,
     buildingsRenderer,
     getGeoForLocal: getTreeGeoForLocal,
-    tileCache
+    tileCache,
+    spawnApplePickup: appleController?.spawnPickup,
+    removeApplePickup: appleController?.removePickup
   });
   natureController?.update(playerModel?.position);
   await createCabin({ scene, getTerrainHeight });
@@ -1998,16 +2007,6 @@ async function main() {
   });
   mushroomPickups = mushroomController?.pickups || [];
   window.mushroomPickups = mushroomPickups;
-  appleController = await createApples({
-    scene,
-    getTerrainHeight,
-    spawnPositions: [
-      { x: 1.6, z: 1.2 },
-      { x: -1.4, z: 0.6 }
-    ]
-  });
-  applePickups = appleController?.pickups || [];
-  window.applePickups = applePickups;
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
