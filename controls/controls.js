@@ -17,6 +17,7 @@ const CLIMB_SNAP_DISTANCE = 0.6;
 const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const FRIENDLY_INTERACT_RANGE = 6;
 const MUSHROOM_INTERACT_RANGE = 1.2;
+const APPLE_INTERACT_RANGE = 1.2;
 const FRIENDLY_DIALOGUE_POOL = [
   {
     blocks: [
@@ -704,6 +705,11 @@ export class PlayerControls {
       return;
     }
 
+    if (closest.type === 'apple') {
+      window.pickupApple?.(closest.pickup);
+      return;
+    }
+
     if (closest.type === 'vehicle') {
       closest.vehicle.tryMount?.(this);
     }
@@ -826,6 +832,18 @@ export class PlayerControls {
         pickup,
         maxDistance: MUSHROOM_INTERACT_RANGE,
         promptText: "'x' pick up mushroom"
+      });
+    });
+
+    const applePickups = Array.isArray(window.applePickups) ? window.applePickups : [];
+    applePickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'apple',
+        pickup,
+        maxDistance: APPLE_INTERACT_RANGE,
+        promptText: "'x' pick up apple"
       });
     });
 

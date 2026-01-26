@@ -23,6 +23,7 @@ import { TreasureChest } from './items/treasure_chest.js';
 import { createNature } from './environment/nature.js';
 import { createCabin } from './environment/cabin.js';
 import { createMushrooms, MUSHROOM_ENTRIES } from './environment/mushrooms.js';
+import { createApples, APPLE_ITEM_ID } from './items/apple.js';
 import { createHomeSystem } from './home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -502,6 +503,9 @@ async function main() {
   const MUSHROOM_HEALTH_GAIN = 6;
   const MUSHROOM_HUNGER_GAIN = 6;
   const MUSHROOM_ENERGY_GAIN = 6;
+  const APPLE_HEALTH_GAIN = 4;
+  const APPLE_HUNGER_GAIN = 4;
+  const APPLE_ENERGY_GAIN = 4;
   const HUNGER_DECAY_PER_HOUR = 6;
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
@@ -568,7 +572,10 @@ async function main() {
   const coinPickups = [];
   let mushroomController = null;
   let mushroomPickups = [];
+  let appleController = null;
+  let applePickups = [];
   const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
+  const appleItemIds = new Set([APPLE_ITEM_ID]);
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
 
@@ -1991,6 +1998,16 @@ async function main() {
   });
   mushroomPickups = mushroomController?.pickups || [];
   window.mushroomPickups = mushroomPickups;
+  appleController = await createApples({
+    scene,
+    getTerrainHeight,
+    spawnPositions: [
+      { x: 1.6, z: 1.2 },
+      { x: -1.4, z: 0.6 }
+    ]
+  });
+  applePickups = appleController?.pickups || [];
+  window.applePickups = applePickups;
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
@@ -2761,6 +2778,10 @@ async function main() {
       icon: ''
     }
   };
+  inventoryCatalog[APPLE_ITEM_ID] = {
+    name: 'Apple',
+    icon: ''
+  };
   MUSHROOM_ENTRIES.forEach((entry) => {
     inventoryCatalog[entry.id] = {
       name: entry.name,
@@ -2809,8 +2830,10 @@ async function main() {
 
   const equippableItems = new Set(['lantern', 'iceGun', 'bow', 'autumnSword']);
   const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
+  const isAppleItem = (itemId) => appleItemIds.has(itemId);
+  const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId);
   const getInventoryItemActions = (itemId) => {
-    if (isMushroomItem(itemId)) {
+    if (isFoodItem(itemId)) {
       return ['drop', 'eat'];
     }
     if (equippableItems.has(itemId)) {
@@ -3058,6 +3081,26 @@ async function main() {
     });
   }
 
+  function disposeApplePickup(pickup) {
+    if (!pickup?.mesh) return;
+    const mesh = pickup.mesh;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+  }
+
   function pickupMushroom(pickup) {
     if (!pickup?.mesh) return false;
     if (playerControls?.playerModel) {
@@ -3073,9 +3116,29 @@ async function main() {
     return true;
   }
 
+  function pickupApple(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const distance = playerControls.playerModel.position.distanceTo(pickup.mesh.position);
+      if (distance > PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeApplePickup(pickup);
+    const index = applePickups.indexOf(pickup);
+    if (index >= 0) {
+      applePickups.splice(index, 1);
+    }
+    return true;
+  }
+
   function spawnMushroomPickup(itemId, position) {
     if (!mushroomController?.spawnPickup || !position) return null;
     return mushroomController.spawnPickup(itemId, position);
+  }
+
+  function spawnApplePickup(position) {
+    if (!appleController?.spawnPickup || !position) return null;
+    return appleController.spawnPickup(position);
   }
 
   function disposeDroppedWeaponPickup(pickup) {
@@ -3135,10 +3198,12 @@ async function main() {
 
   function dropInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
-    if (isMushroomItem(itemId)) {
+    if (isFoodItem(itemId)) {
       const dropPosition = getInventoryDropPosition();
       if (!dropPosition) return;
-      const pickup = spawnMushroomPickup(itemId, dropPosition);
+      const pickup = isMushroomItem(itemId)
+        ? spawnMushroomPickup(itemId, dropPosition)
+        : spawnApplePickup(dropPosition);
       if (!pickup) return;
       removeFromInventory(itemId, 1);
       return;
@@ -3181,10 +3246,16 @@ async function main() {
 
   function eatInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
-    if (!isMushroomItem(itemId)) return;
-    setStat('health', statsState.health + MUSHROOM_HEALTH_GAIN, { skipSave: true });
-    setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
-    setStat('energy', statsState.energy + MUSHROOM_ENERGY_GAIN, { skipSave: true });
+    if (!isFoodItem(itemId)) return;
+    if (isMushroomItem(itemId)) {
+      setStat('health', statsState.health + MUSHROOM_HEALTH_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
+      setStat('energy', statsState.energy + MUSHROOM_ENERGY_GAIN, { skipSave: true });
+    } else if (isAppleItem(itemId)) {
+      setStat('health', statsState.health + APPLE_HEALTH_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
+      setStat('energy', statsState.energy + APPLE_ENERGY_GAIN, { skipSave: true });
+    }
     lastStatUpdateAt = Date.now();
     removeFromInventory(itemId, 1);
   }
@@ -5243,6 +5314,7 @@ async function main() {
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
   window.pickupMushroom = pickupMushroom;
+  window.pickupApple = pickupApple;
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -5443,6 +5515,12 @@ async function main() {
         disposeMushroomPickup(pickup);
         mushroomPickups.splice(i, 1);
       }
+      for (let i = applePickups.length - 1; i >= 0; i--) {
+        const pickup = applePickups[i];
+        if (!pickup) continue;
+        disposeApplePickup(pickup);
+        applePickups.splice(i, 1);
+      }
     } else {
       for (let i = ammoPickups.length - 1; i >= 0; i--) {
         const pickup = ammoPickups[i];
@@ -5573,6 +5651,13 @@ async function main() {
         const pickup = mushroomPickups[i];
         if (!pickup?.mesh) {
           mushroomPickups.splice(i, 1);
+          continue;
+        }
+      }
+      for (let i = applePickups.length - 1; i >= 0; i--) {
+        const pickup = applePickups[i];
+        if (!pickup?.mesh) {
+          applePickups.splice(i, 1);
           continue;
         }
       }
