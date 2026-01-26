@@ -31,6 +31,7 @@ let lastFocusedElement = null;
 let isMobileView = false;
 let isListView = false;
 let selectedInventoryId = null;
+let isEditingName = false;
 let previewState = {
   active: false,
   renderer: null,
@@ -962,7 +963,12 @@ function bindEvents() {
     updateNameSaveState();
   });
 
+  elements.nameInput.addEventListener('focus', () => {
+    isEditingName = true;
+  });
+
   elements.nameInput.addEventListener('blur', (event) => {
+    isEditingName = false;
     if (!event.target.value.trim()) {
       event.target.value = context.appState?.getPlayerName?.() ?? '';
     }
@@ -1189,7 +1195,7 @@ function setListView(enabled) {
 
 export function updateUI() {
   if (!panel) return;
-  if (elements.nameInput && context.appState?.getPlayerName) {
+  if (elements.nameInput && context.appState?.getPlayerName && !isEditingName) {
     const name = context.appState.getPlayerName();
     if (elements.nameInput.value !== name) {
       elements.nameInput.value = name;
