@@ -246,6 +246,7 @@ function buildInventoryPanel() {
   elements.inventoryGrid = grid;
   elements.inventoryEmpty = emptyState;
   elements.inventoryDetails = detailsText;
+  elements.inventoryDetailsContainer = details;
   elements.inventoryActions = actions;
   elements.inventoryDropButton = dropButton;
   elements.inventoryEquipButton = equipButton;
@@ -744,6 +745,7 @@ function renderInventory() {
     if (elements.inventoryActions) {
       elements.inventoryActions.style.display = 'none';
     }
+    elements.inventoryDetailsContainer?.remove();
     selectedInventoryId = null;
     return;
   }
@@ -753,6 +755,7 @@ function renderInventory() {
     selectedInventoryId = entries[0][0];
   }
 
+  let selectedTile = null;
   entries.forEach(([itemId, item]) => {
     const button = createElement('button', 'inventory-tile');
     button.type = 'button';
@@ -760,6 +763,9 @@ function renderInventory() {
     button.setAttribute('aria-selected', itemId === selectedInventoryId ? 'true' : 'false');
     button.classList.toggle('is-selected', itemId === selectedInventoryId);
     button.classList.toggle('is-equipped', itemId === equippedItemId);
+    if (itemId === selectedInventoryId) {
+      selectedTile = button;
+    }
 
     const iconWrapper = createElement('div', 'inventory-icon-wrapper');
     const fallbackIcon = fallbackIcons[itemId] || (itemId.startsWith('mushroom_') ? '🍄' : '🎒');
@@ -831,6 +837,13 @@ function renderInventory() {
     if (elements.inventoryEatButton) {
       const canEat = itemActions.includes('eat');
       elements.inventoryEatButton.style.display = canEat ? 'inline-flex' : 'none';
+    }
+    if (elements.inventoryDetailsContainer) {
+      if (selectedTile && selectedTile.parentElement === elements.inventoryGrid) {
+        selectedTile.insertAdjacentElement('afterend', elements.inventoryDetailsContainer);
+      } else {
+        elements.inventoryGrid.appendChild(elements.inventoryDetailsContainer);
+      }
     }
   }
 }
