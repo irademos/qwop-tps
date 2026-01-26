@@ -2626,12 +2626,6 @@ async function main() {
           level: state.level,
           version: incomingVersion
         });
-        if (state.mode === 'dead' && state.health <= 0) {
-          cleanupMonster(monster);
-          monsters = monsters.filter(entry => entry.id !== slotId);
-          window.monsters = monsters;
-          return;
-        }
         if (state.action && monster.model.userData.currentAction !== state.action) {
           const fade = state.action === 'Weapon' ? 0.1 : 0.2;
           monster.playAnimation(state.action, fade);
