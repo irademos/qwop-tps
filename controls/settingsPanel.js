@@ -31,6 +31,7 @@ let lastFocusedElement = null;
 let isMobileView = false;
 let isListView = false;
 let selectedInventoryId = null;
+let isEditingName = false;
 let previewState = {
   active: false,
   renderer: null,
@@ -88,6 +89,27 @@ function formatRangeValue(value, decimals = 2) {
   return value.toFixed(decimals);
 }
 
+function setNameStatus(message, tone = 'error') {
+  if (!elements.nameStatus) return;
+  if (!message) {
+    elements.nameStatus.textContent = '';
+    elements.nameStatus.hidden = true;
+    elements.nameStatus.classList.remove('is-error');
+    return;
+  }
+  elements.nameStatus.textContent = message;
+  elements.nameStatus.hidden = false;
+  elements.nameStatus.classList.toggle('is-error', tone === 'error');
+}
+
+function updateNameSaveState() {
+  if (!elements.nameInput || !elements.nameSaveButton) return;
+  const currentName = context.appState?.getPlayerName?.() ?? '';
+  const proposedName = elements.nameInput.value.trim();
+  const hasChange = proposedName && proposedName !== currentName;
+  elements.nameSaveButton.disabled = !hasChange;
+}
+
 function buildHeader() {
   const header = createElement('div', 'settings-header');
   const backButton = createElement('button', 'settings-back', 'Back');
@@ -138,11 +160,18 @@ function buildCharacterPanel() {
   const nameGroup = createElement('div', 'settings-field');
   const nameLabel = createElement('label', 'settings-label', 'Name');
   nameLabel.setAttribute('for', 'settings-name-input');
+  const nameRow = createElement('div', 'settings-name-row');
   const nameInput = createElement('input', 'settings-input');
   nameInput.id = 'settings-name-input';
   nameInput.type = 'text';
   nameInput.autocomplete = 'nickname';
-  nameGroup.append(nameLabel, nameInput);
+  const nameSaveButton = createElement('button', 'settings-button', 'Save');
+  nameSaveButton.type = 'button';
+  nameSaveButton.dataset.action = 'save-name';
+  const nameStatus = createElement('div', 'settings-name-status');
+  nameStatus.hidden = true;
+  nameRow.append(nameInput, nameSaveButton);
+  nameGroup.append(nameLabel, nameRow, nameStatus);
 
   const characterGroup = createElement('div', 'settings-field');
   const characterLabel = createElement('label', 'settings-label', 'Character');
@@ -173,6 +202,8 @@ function buildCharacterPanel() {
   panelEl.append(nameGroup, characterGroup, previewWrapper, statsTitle, statsGrid);
 
   elements.nameInput = nameInput;
+  elements.nameSaveButton = nameSaveButton;
+  elements.nameStatus = nameStatus;
   elements.characterSelect = characterSelect;
   elements.previewCanvas = previewCanvas;
   elements.previewFallback = previewFallback;
@@ -682,6 +713,45 @@ async function handleAction(target) {
     navigator.clipboard?.writeText?.(info);
   } else if (action === 'reset-origin') {
     context.appState?.resetWorldOrigin?.();
+  } else if (action === 'save-name') {
+    if (!elements.nameInput) return;
+    const desiredName = elements.nameInput.value.trim();
+    if (!desiredName) {
+      elements.nameInput.value = context.appState?.getPlayerName?.() ?? '';
+      updateNameSaveState();
+      return;
+    }
+    if (!context.appState?.savePlayerName) {
+      setNameStatus('Name changes are unavailable right now.', 'error');
+      return;
+    }
+    const button = elements.nameSaveButton;
+    if (button) {
+      button.disabled = true;
+    }
+    setNameStatus('');
+    try {
+      const result = await context.appState.savePlayerName(desiredName);
+      if (result?.status === 'taken') {
+        setNameStatus('Name is taken! Choose another one.', 'error');
+      } else if (result?.status === 'invalid') {
+        setNameStatus('Enter a valid name before saving.', 'error');
+      } else if (result?.status === 'missing-pin') {
+        setNameStatus('Unable to verify name ownership. Please re-login.', 'error');
+      } else if (result?.status === 'error') {
+        setNameStatus('Failed to save name. Try again.', 'error');
+      } else {
+        setNameStatus('');
+      }
+    } catch (error) {
+      console.warn('Failed to save name:', error);
+      setNameStatus('Failed to save name. Try again.', 'error');
+    } finally {
+      if (button) {
+        button.disabled = false;
+      }
+      updateNameSaveState();
+    }
   } else if (action === 'clear-server-state') {
     const { clearServerButton, clearServerStatus } = elements;
     if (!context.multiplayer?.clearServerState) {
@@ -888,17 +958,21 @@ function bindEvents() {
     }
   });
 
-  elements.nameInput.addEventListener('input', (event) => {
-    const value = event.target.value.trim();
-    if (value) {
-      context.appState?.setPlayerName?.(value);
-    }
+  elements.nameInput.addEventListener('input', () => {
+    setNameStatus('');
+    updateNameSaveState();
+  });
+
+  elements.nameInput.addEventListener('focus', () => {
+    isEditingName = true;
   });
 
   elements.nameInput.addEventListener('blur', (event) => {
+    isEditingName = false;
     if (!event.target.value.trim()) {
       event.target.value = context.appState?.getPlayerName?.() ?? '';
     }
+    updateNameSaveState();
   });
 
   elements.characterSelect.addEventListener('change', (event) => {
@@ -1121,11 +1195,12 @@ function setListView(enabled) {
 
 export function updateUI() {
   if (!panel) return;
-  if (elements.nameInput && context.appState?.getPlayerName) {
+  if (elements.nameInput && context.appState?.getPlayerName && !isEditingName) {
     const name = context.appState.getPlayerName();
     if (elements.nameInput.value !== name) {
       elements.nameInput.value = name;
     }
+    updateNameSaveState();
   }
   if (elements.characterSelect && context.appState?.getCharacterModel) {
     const model = context.appState.getCharacterModel();

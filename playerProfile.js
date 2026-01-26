@@ -161,6 +161,66 @@ export function clearStoredPin(name) {
   setCookie(pinCookieName(nameKey), '', -1);
 }
 
+export async function renameProfile(currentName, currentNameKey, nextName) {
+  const trimmedNextName = nextName?.trim();
+  const nextNameKey = trimmedNextName ? normalizeNameKey(trimmedNextName) : '';
+  if (!trimmedNextName || !nextNameKey) {
+    return { status: 'invalid' };
+  }
+  if (!currentNameKey || currentNameKey === nextNameKey) {
+    return { status: 'unchanged', nameKey: currentNameKey || nextNameKey };
+  }
+
+  const newClaimRef = ref(db, `nameClaims/${nextNameKey}`);
+  const oldClaimRef = ref(db, `nameClaims/${currentNameKey}`);
+  const oldProfileRef = ref(db, `profiles/${currentNameKey}`);
+  const newProfileRef = ref(db, `profiles/${nextNameKey}`);
+
+  const [newClaimSnap, oldProfileSnap, oldClaimSnap] = await Promise.all([
+    get(newClaimRef),
+    get(oldProfileRef),
+    get(oldClaimRef)
+  ]);
+
+  if (newClaimSnap.exists()) {
+    return { status: 'taken' };
+  }
+  if (!oldProfileSnap.exists()) {
+    return { status: 'missing-profile' };
+  }
+
+  const pinHash = oldClaimSnap.val()?.pinHash || getStoredPinHash(currentName);
+  if (!pinHash) {
+    return { status: 'missing-pin' };
+  }
+
+  const now = Date.now();
+  const claimResult = await runTransaction(newClaimRef, current => {
+    if (current == null) {
+      return { pinHash, createdAt: now, updatedAt: now };
+    }
+    return;
+  });
+
+  if (!claimResult.committed) {
+    return { status: 'taken' };
+  }
+
+  const oldProfile = oldProfileSnap.val();
+  const nextProfile = {
+    ...oldProfile,
+    name: trimmedNextName,
+    updatedAt: now
+  };
+
+  await set(newProfileRef, nextProfile);
+  await Promise.all([set(oldProfileRef, null), set(oldClaimRef, null)]);
+  clearStoredPin(currentName);
+  rememberPinHash(nextNameKey, pinHash);
+
+  return { status: 'ok', nameKey: nextNameKey, profile: nextProfile };
+}
+
 export async function loadOrCreateWithPin(playerName, options = {}) {
   const trimmedName = playerName.trim();
   const nameKey = normalizeNameKey(trimmedName);

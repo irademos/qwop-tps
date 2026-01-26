@@ -42,6 +42,7 @@ import {
   clearStoredPin,
   getStoredPinHash,
   loadOrCreateWithPin,
+  renameProfile,
   saveStatsThrottled
 } from './playerProfile.js';
 import {
@@ -497,7 +498,7 @@ async function main() {
     loadProfile: loadOrCreateWithPin
   });
   playerName = profileResult.profile?.name || playerName;
-  const { nameKey: profileNameKey, profile: playerProfile } = profileResult;
+  let { nameKey: profileNameKey, profile: playerProfile } = profileResult;
 
   setCookie("playerName", playerName);
   localStorage.setItem('playerName', playerName);
@@ -5240,6 +5241,30 @@ async function main() {
       localStorage.setItem('playerName', playerName);
       if (multiplayer) {
         multiplayer.playerName = playerName;
+      }
+    },
+    savePlayerName: async (nextName) => {
+      const trimmedName = nextName?.trim();
+      if (!trimmedName) {
+        return { status: 'invalid' };
+      }
+      if (trimmedName === playerName) {
+        return { status: 'unchanged' };
+      }
+      try {
+        const result = await renameProfile(playerName, profileNameKey, trimmedName);
+        if (result.status === 'ok') {
+          profileNameKey = result.nameKey;
+          playerProfile.name = result.profile?.name || trimmedName;
+          appState.setPlayerName(result.profile?.name || trimmedName);
+          if (homeSystem) {
+            homeSystem.profileNameKey = profileNameKey;
+          }
+        }
+        return result;
+      } catch (error) {
+        console.error('Failed to rename profile:', error);
+        return { status: 'error' };
       }
     },
     getCharacterModel: () => characterModel,
