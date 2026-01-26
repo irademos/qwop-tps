@@ -1920,6 +1920,9 @@ async function main() {
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
+  if (treasureChest.mesh) {
+    treasureChest.mesh.visible = false;
+  }
   treasureChest.onOpen = (holder) => {
     if (holder !== playerControls) return;
     const rewards = [
@@ -4065,6 +4068,19 @@ async function main() {
     lantern.holder = null;
   }
 
+  function spawnTreasureChestPickup(position) {
+    if (!treasureChest?.mesh || treasureChest.isOpen) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (!Number.isFinite(terrainHeight)) return;
+
+    spawnPos.y = terrainHeight;
+    treasureChest.mesh.position.copy(spawnPos);
+    treasureChest.mesh.visible = true;
+  }
+
   registerNetworkedEntity('droppedAmmo', {
     getState: () => {
       const drops = Array.from(droppedAmmoPickups.entries()).map(([id, entry]) => {
@@ -4338,12 +4354,27 @@ async function main() {
       }
     }
 
+    const canSpawnTreasureChest = treasureChest?.mesh
+      && !treasureChest.isOpen
+      && !treasureChest.mesh.visible;
+    if (canSpawnTreasureChest) {
+      const spawnPos = getRandomPickupPosition(center);
+      if (spawnPos) {
+        spawnTreasureChestPickup(spawnPos);
+      }
+    }
+
     [iceGun, bow, autumnSword].forEach((weapon) => {
       if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
       if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
         weapon.mesh.visible = false;
       }
     });
+    if (treasureChest?.mesh && !treasureChest.isOpen && treasureChest.mesh.visible) {
+      if (center.distanceTo(treasureChest.mesh.position) > PICKUP_SPAWN_RADIUS) {
+        treasureChest.mesh.visible = false;
+      }
+    }
   };
   const shouldUpdatePickupTiles = (position) => {
     if (!position) return false;
