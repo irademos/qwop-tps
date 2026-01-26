@@ -266,11 +266,11 @@ export async function createNature({
             tempBox.getCenter(tempCenter);
             const height = tempSize.y;
             if (height > 0) {
-              const radius = Math.max(0.45, Math.min(tempSize.x, tempSize.z) * 0.3);
+              const radius = Math.max(0.6, Math.min(tempSize.x, tempSize.z) * 0.35);
               for (let i = 0; i < 2; i += 1) {
                 const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
-                const distance = radius * (0.35 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.45);
-                const heightFactor = 0.6 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.3;
+                const distance = radius * (0.4 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.4);
+                const heightFactor = 0.65 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.25;
                 const applePosition = new THREE.Vector3(
                   tempCenter.x + Math.cos(angle) * distance,
                   tempBox.min.y + height * heightFactor,

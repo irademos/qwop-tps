@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 const APPLE_MODEL_URL = '/assets/props/apple.glb';
-const APPLE_SCALE = 0.25;
-const APPLE_LIFT = 0.25;
+const APPLE_SCALE = 0.35;
+const APPLE_LIFT = 0.3;
 
 export const APPLE_ITEM_ID = 'apple';
 
