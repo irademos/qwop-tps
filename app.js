@@ -5639,6 +5639,12 @@ async function main() {
 
     // 2) AI can still be throttled, but pass a real delta when you DO run it
     const aiNowMs = Date.now();
+    monsters.forEach(monster => {
+      if (!monster?.model) return;
+      if (monster.shouldRemoveAfterDeath?.(aiNowMs)) {
+        cleanupMonster(monster);
+      }
+    });
     const isHostNow = !multiplayer || multiplayer.isHost;
 
     if (isHostNow) {

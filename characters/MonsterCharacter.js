@@ -24,6 +24,7 @@ const HEALTH_BAR_OFFSET_Y = 2.2;
 const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
 const LEVEL_SIZE_STEP = 0.5;
 const LEVEL_SPEED_STEP = 0.08;
+const DEATH_REMOVAL_DELAY_MS = 30000;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -48,6 +49,7 @@ export class MonsterCharacter extends CharacterBase {
     this.type = null;
     this.version = 0;
     this.isDead = false;
+    this.deathTime = null;
     this.lastDirectionChange = Date.now();
     this.lastAttackTime = 0;
     this.nextAttackTime = 0;
@@ -104,6 +106,7 @@ export class MonsterCharacter extends CharacterBase {
   markDead() {
     if (this.isDead) return;
     this.isDead = true;
+    this.deathTime = Date.now();
     this.model.userData.mode = "dead";
     this.playAnimation("Death", MOVE_FADE);
     const body = this.body;
@@ -117,6 +120,7 @@ export class MonsterCharacter extends CharacterBase {
     this.health = this.maxHealth;
     this.model.userData.health = this.maxHealth;
     this.isDead = false;
+    this.deathTime = null;
   }
 
   setLevel(level, { preserveHealth = true } = {}) {
@@ -183,10 +187,16 @@ export class MonsterCharacter extends CharacterBase {
       this.markDead();
     } else if (aliveFlag === true && this.isDead) {
       this.isDead = false;
+      this.deathTime = null;
       this.model.userData.mode = "friendly";
       this.playAnimation("Idle", MOVE_FADE);
     }
     return true;
+  }
+
+  shouldRemoveAfterDeath(now = Date.now()) {
+    if (!this.isDead || !Number.isFinite(this.deathTime)) return false;
+    return now - this.deathTime >= DEATH_REMOVAL_DELAY_MS;
   }
 
   updateAI(deltaTime, playerModel, otherPlayers) {
