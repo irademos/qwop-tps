@@ -5815,7 +5815,7 @@ async function main() {
     }
 
     Object.values(otherPlayers).forEach(player => {
-      if (!player?.targetPos || !player?.targetQuat) return;
+      if (!player?.model || !player?.targetPos || !player?.targetQuat) return;
       const currentPos = player.model.position;
       const distance = currentPos.distanceTo(player.targetPos);
       if (distance > REMOTE_TELEPORT_THRESHOLD_M) {
