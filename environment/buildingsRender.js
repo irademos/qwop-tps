@@ -416,6 +416,8 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     const extrudedMesh = new THREE.Mesh(new THREE.BufferGeometry(), extrudedMaterial);
     const flatMesh = new THREE.Mesh(new THREE.BufferGeometry(), flatMaterial);
+    extrudedMesh.userData.isBuildingSolid = true;
+    flatMesh.userData.isBuildingSolid = true;
 
     const extrudedColliderMesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
     extrudedColliderMesh.visible = false;
