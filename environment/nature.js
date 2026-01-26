@@ -266,17 +266,23 @@ export async function createNature({
             tempBox.getCenter(tempCenter);
             const height = tempSize.y;
             if (height > 0) {
-              const radius = Math.max(0.4, Math.min(tempSize.x, tempSize.z) * 0.35);
+              const radius = Math.max(0.2, Math.min(tempSize.x, tempSize.z) * 0.2);
               for (let i = 0; i < 2; i += 1) {
                 const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
-                const distance = radius * (0.4 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.6);
+                const distance = radius * (0.2 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.4);
                 const heightFactor = 0.6 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.35;
                 const applePosition = new THREE.Vector3(
                   tempCenter.x + Math.cos(angle) * distance,
                   tempBox.min.y + height * heightFactor,
                   tempCenter.z + Math.sin(angle) * distance
                 );
-                const pickup = spawnApplePickup(applePosition, { applyTerrainHeight: false, lift: 0 });
+                const localApplePosition = applePosition.clone();
+                tree.worldToLocal(localApplePosition);
+                const pickup = spawnApplePickup(localApplePosition, {
+                  applyTerrainHeight: false,
+                  lift: 0,
+                  parent: tree
+                });
                 if (pickup) {
                   tileApplePickups.push(pickup);
                 }

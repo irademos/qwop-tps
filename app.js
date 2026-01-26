@@ -509,7 +509,7 @@ async function main() {
   const HUNGER_DECAY_PER_HOUR = 6;
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
-  const PICKUP_RADIUS = 1.2;
+  const PICKUP_RADIUS = 1.8;
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 60;
