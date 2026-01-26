@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 const MUSHROOM_MODEL_URL = '/assets/props/mushrooms.glb';
 const MUSHROOM_SCALE = 0.1; // tweak (0.5 = half size)
 const MUSHROOM_LIFT = 0.4; // tweak (0.5 = half size)
+const DEFAULT_MUSHROOM_SPAWN_RADIUS = 225;
 
 export const MUSHROOM_ENTRIES = [
   { nodeName: 'Cylinder_0', id: 'mushroom_cylinder_0', name: 'Mushroom 1', lift: 0.25 }, // #12
@@ -23,23 +24,16 @@ export const MUSHROOM_ENTRIES = [
   { nodeName: 'Cylinder024_14', id: 'mushroom_cylinder_024', name: 'Mushroom 15', lift: 0.35 } // #15
 ];
 
-const MUSHROOM_OFFSETS = [
-  new THREE.Vector3(-4.5, 0, -2.5),
-  new THREE.Vector3(-2.2, 0, 1.2),
-  new THREE.Vector3(-1.1, 0, 4.4),
-  new THREE.Vector3(2.4, 0, -3.6),
-  new THREE.Vector3(3.5, 0, 2.1),
-  new THREE.Vector3(4.8, 0, 4.9),
-  new THREE.Vector3(-5.6, 0, 3.3),
-  new THREE.Vector3(1.6, 0, -5.1),
-  new THREE.Vector3(5.2, 0, -1.4),
-  new THREE.Vector3(-3.4, 0, -5.4),
-  new THREE.Vector3(0.6, 0, 2.6),
-  new THREE.Vector3(6.2, 0, 1.1),
-  new THREE.Vector3(-6.4, 0, -0.8),
-  new THREE.Vector3(2.2, 0, 6.1),
-  new THREE.Vector3(-1.8, 0, -6.6)
-];
+const getRandomScatterPosition = (center, radius) => {
+  if (!center) return null;
+  const distance = radius * Math.sqrt(Math.random());
+  const angle = Math.random() * Math.PI * 2;
+  return new THREE.Vector3(
+    center.x + Math.cos(angle) * distance,
+    0,
+    center.z + Math.sin(angle) * distance
+  );
+};
 
 const setMushroomShadows = (mushroom) => {
   mushroom.traverse((child) => {
@@ -58,7 +52,12 @@ const cloneMushroom = (source, itemId) => {
   return clone;
 };
 
-export async function createMushrooms({ scene, getTerrainHeight } = {}) {
+export async function createMushrooms({
+  scene,
+  getTerrainHeight,
+  scatterCenter,
+  scatterRadius = DEFAULT_MUSHROOM_SPAWN_RADIUS
+} = {}) {
   if (!scene) return null;
 
   const loader = new GLTFLoader();
@@ -78,7 +77,7 @@ export async function createMushrooms({ scene, getTerrainHeight } = {}) {
   const templates = new Map();
   const pickups = [];
 
-  MUSHROOM_ENTRIES.forEach((entry, index) => {
+  MUSHROOM_ENTRIES.forEach((entry) => {
     const source = modelRoot.getObjectByName(entry.nodeName);
     if (!source) {
       console.warn(`Missing mushroom node ${entry.nodeName}.`);
@@ -87,13 +86,23 @@ export async function createMushrooms({ scene, getTerrainHeight } = {}) {
     source.userData.lift = entry.lift ?? MUSHROOM_LIFT;
     templates.set(entry.id, source);
 
-    const offset = MUSHROOM_OFFSETS[index] || new THREE.Vector3();
-    const x = offset.x;
-    const z = offset.z;
-    const y = getTerrainHeight?.(x, z) ?? 0;
+    let spawnPosition = null;
+    let attempts = 0;
+    while (!spawnPosition && attempts < 6) {
+      attempts += 1;
+      const candidate = getRandomScatterPosition(scatterCenter, scatterRadius);
+      if (!candidate) break;
+      const terrainHeight = getTerrainHeight?.(candidate.x, candidate.z);
+      if (!Number.isFinite(terrainHeight)) continue;
+      candidate.y = terrainHeight;
+      spawnPosition = candidate;
+    }
+    if (!spawnPosition) {
+      return;
+    }
 
     const mesh = cloneMushroom(source, entry.id);
-    mesh.position.set(x, y, z);
+    mesh.position.copy(spawnPosition);
     mesh.position.y += entry.lift ?? MUSHROOM_LIFT; // small lift, tune as needed
     mesh.rotation.y = Math.random() * Math.PI * 2;
     group.add(mesh);

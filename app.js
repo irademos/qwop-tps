@@ -1981,7 +1981,12 @@ async function main() {
   });
   natureController?.update(playerModel?.position);
   await createCabin({ scene, getTerrainHeight });
-  mushroomController = await createMushrooms({ scene, getTerrainHeight });
+  mushroomController = await createMushrooms({
+    scene,
+    getTerrainHeight,
+    scatterCenter: playerModel?.position,
+    scatterRadius: PICKUP_SPAWN_RADIUS
+  });
   mushroomPickups = mushroomController?.pickups || [];
   window.mushroomPickups = mushroomPickups;
   let didInitialGpsSnap = false;
