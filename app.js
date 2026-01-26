@@ -23,6 +23,7 @@ import { TreasureChest } from './items/treasure_chest.js';
 import { createNature } from './environment/nature.js';
 import { createCabin } from './environment/cabin.js';
 import { createMushrooms, MUSHROOM_ENTRIES } from './environment/mushrooms.js';
+import { createHomeSystem } from './home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
@@ -527,6 +528,7 @@ async function main() {
   let isHost = false;
   let playerControls = null;
   let friendlyNpcManager = null;
+  let homeSystem = null;
   let scene = null;
   let mapRenderer = null;
   let buildingsRenderer = null;
@@ -4050,6 +4052,7 @@ async function main() {
   updateControlAvailability();
   updateEnergyEffects();
 
+
   const starterPosition = playerModel?.position?.clone?.() || getSpawnPosition();
   if (starterPosition) {
     const bowSpawn = starterPosition.clone().add(new THREE.Vector3(2.2, 0, 1.2));
@@ -4406,6 +4409,19 @@ async function main() {
       lon: origin.centerLon - x / lonScale
     };
   };
+
+  homeSystem = createHomeSystem({
+    scene,
+    playerModel,
+    playerControls,
+    buildingsRenderer,
+    profileNameKey,
+    initialHome: playerProfile?.home ?? null,
+    getLocalOrigin: getLocalMapOrigin,
+    localMetersToGeo,
+    geoToLocal: geoToLocalMeters
+  });
+  window.homeSystem = homeSystem;
 
   function getLatestLocationFix() {
     const latest = window.latestLocation;

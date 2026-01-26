@@ -679,6 +679,11 @@ export class PlayerControls {
     const closest = this.getClosestInteractionTarget();
     if (!closest) return;
 
+    if (closest.type === 'home-select' || closest.type === 'home-enter' || closest.type === 'home-exit') {
+      window.homeSystem?.handleInteraction?.(closest);
+      return;
+    }
+
     if (closest.type === 'friendly') {
       this.startFriendlyInteraction(closest.friendly);
       return;
@@ -733,6 +738,11 @@ export class PlayerControls {
     const playerPos = this.playerModel.position;
     let closest = null;
     let closestDistance = Infinity;
+
+    const homeTarget = window.homeSystem?.getInteractionTarget?.(playerPos, this.isMobile);
+    if (homeTarget) {
+      return homeTarget;
+    }
 
     const consider = (distance, data) => {
       if (distance <= data.maxDistance && distance < closestDistance) {
