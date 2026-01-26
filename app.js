@@ -269,7 +269,7 @@ function createArcadeOverlay(startOverlay) {
     return signupWaiter.wait();
   };
 
-  const startAuthFlow = async name => {
+  const startAuthFlow = async (name, { autoStart = false } = {}) => {
     if (!name) return;
     const token = ++authToken;
     authInProgress = true;
@@ -291,10 +291,14 @@ function createArcadeOverlay(startOverlay) {
       }
       currentName = result.profile?.name || name;
       setMessage('');
-      if (startHandler) {
-        startHandler();
+      if (autoStart) {
+        if (startHandler) {
+          startHandler();
+        }
+        hideOverlay();
+      } else {
+        showWelcome(currentName, { ready: true });
       }
-      hideOverlay();
       resolveAuth?.(result);
     } catch (err) {
       if (token !== authToken) return;
@@ -380,7 +384,7 @@ function createArcadeOverlay(startOverlay) {
   loginButton?.addEventListener('click', event => {
     const queued = handleLoginSubmit(event);
     if (queued && !authInProgress && nameInput.value.trim()) {
-      startAuthFlow(nameInput.value.trim());
+      startAuthFlow(nameInput.value.trim(), { autoStart: true });
     }
   });
 
@@ -388,12 +392,12 @@ function createArcadeOverlay(startOverlay) {
     if (mode === 'login') {
       const queued = handleLoginSubmit(event);
       if (queued && !authInProgress && nameInput.value.trim()) {
-        startAuthFlow(nameInput.value.trim());
+        startAuthFlow(nameInput.value.trim(), { autoStart: true });
       }
     } else if (mode === 'signup') {
       const queued = handleSignupSubmit(event);
       if (queued && !authInProgress && nameInput.value.trim()) {
-        startAuthFlow(nameInput.value.trim());
+        startAuthFlow(nameInput.value.trim(), { autoStart: true });
       }
     }
   });
@@ -405,7 +409,7 @@ function createArcadeOverlay(startOverlay) {
     }
     const queued = handleSignupSubmit(event);
     if (queued && !authInProgress && nameInput.value.trim()) {
-      startAuthFlow(nameInput.value.trim());
+      startAuthFlow(nameInput.value.trim(), { autoStart: true });
     }
   });
 
@@ -433,7 +437,7 @@ function createArcadeOverlay(startOverlay) {
       if (initialName && hasStoredPin) {
         currentName = initialName;
         showWelcome(initialName, { ready: false });
-        startAuthFlow(initialName);
+        startAuthFlow(initialName, { autoStart: false });
       } else {
         showLoginForm({ name: initialName });
       }
