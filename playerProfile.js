@@ -376,3 +376,32 @@ export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt, inventory) 
   }, delay);
   pendingTimersByName.set(nameKey, timer);
 }
+
+export async function deleteProfileData(nameKey, playerName) {
+  if (!nameKey) {
+    return { status: 'missing-key' };
+  }
+  const pendingTimer = pendingTimersByName.get(nameKey);
+  if (pendingTimer) {
+    clearTimeout(pendingTimer);
+    pendingTimersByName.delete(nameKey);
+  }
+  pendingStatsByName.delete(nameKey);
+  pendingInventoryByName.delete(nameKey);
+  pendingMetaByName.delete(nameKey);
+  lastWriteByName.delete(nameKey);
+
+  try {
+    await Promise.all([
+      set(ref(db, `profiles/${nameKey}`), null),
+      set(ref(db, `nameClaims/${nameKey}`), null)
+    ]);
+    if (playerName) {
+      clearStoredPin(playerName);
+    }
+    return { status: 'ok' };
+  } catch (error) {
+    console.error('Failed to delete profile data for', nameKey, error);
+    return { status: 'error' };
+  }
+}
