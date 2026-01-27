@@ -4,6 +4,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import ClipperLib from "clipper-lib";
 import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 import { getKtx2Loader } from "../ktx2Loader.js";
+import { clearClimbableAreas, setClimbableAreas } from "../controls/climb.js";
 
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const DEFAULT_HEIGHT = 10;
@@ -17,8 +18,6 @@ const WALL_THICKNESS = 0.5;
 const CUT_DEPTH = WALL_THICKNESS + 0.35; // clear wall reliably
 const FLOOR_THICKNESS = 0.05;
 const ROOF_THICKNESS = 0.05;
-const CLIMB_WALL_DEPTH = 0.6;
-
 // --- building texture ---
 const QUALITY_TIER_OPTIONS = ["low", "medium", "high"];
 
@@ -31,99 +30,6 @@ function getRingWinding(points) {
     sum += a.x * b.y - b.x * a.y;
   }
   return sum;
-}
-
-function pointInPolygon(p, poly) {
-  // ray-casting algorithm
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x, yi = poly[i].y;
-    const xj = poly[j].x, yj = poly[j].y;
-
-    const intersect =
-      ((yi > p.y) !== (yj > p.y)) &&
-      (p.x < (xj - xi) * (p.y - yi) / (yj - yi + 1e-12) + xi);
-
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-function shapeContains2D(shape2D, p) {
-  const pts = shape2D.getPoints(); // outer ring only
-  return pointInPolygon(p, pts);
-}
-
-function outwardNormalForEdge(shape2D, a2, b2) {
-  // edge direction in 2D
-  const dx = b2.x - a2.x;
-  const dy = b2.y - a2.y;
-  const len = Math.hypot(dx, dy) || 1;
-  const ex = dx / len;
-  const ey = dy / len;
-
-  // candidate normals
-  const left2  = new THREE.Vector2(-ey, ex);
-  const right2 = new THREE.Vector2(ey, -ex);
-
-  // midpoint of edge
-  const mid = new THREE.Vector2(
-    (a2.x + b2.x) * 0.5,
-    (a2.y + b2.y) * 0.5
-  );
-
-  const eps = 0.05;
-
-  const testL = mid.clone().addScaledVector(left2, eps);
-  const leftIsInside = shapeContains2D(shape2D, testL);
-
-  // if left side is inside, outward is right, else left
-  const outward2 = leftIsInside ? right2 : left2;
-
-  // convert 2D → world (x, z = -y)
-  return new THREE.Vector3(outward2.x, 0, -outward2.y).normalize();
-}
-
-function buildWallClimbAreas(shape2D, bottomY, topY) {
-  const points2D = shape2D.getPoints();
-  if (points2D.length < 2) return [];
-  const winding = getRingWinding(points2D);
-  const midY = (bottomY + topY) * 0.5;
-  const areas = [];
-
-  for (let i = 0; i < points2D.length; i += 1) {
-    const a = points2D[i];
-    const b = points2D[(i + 1) % points2D.length];
-    const ax = a.x;
-    const az = -a.y;
-    const bx = b.x;
-    const bz = -b.y;
-    const edgeVec = new THREE.Vector3(bx - ax, 0, bz - az);
-    const edgeLen = edgeVec.length();
-    if (edgeLen < 0.1) continue;
-
-    const edgeDir = edgeVec.clone().normalize();
-    const leftNormal = new THREE.Vector3(-edgeDir.z, 0, edgeDir.x);
-    const rightNormal = new THREE.Vector3(edgeDir.z, 0, -edgeDir.x);
-    const outward = outwardNormalForEdge(shape2D, a, b);
-    const rotationY = Math.atan2(outward.x, outward.z);
-
-    const center = new THREE.Vector3((ax + bx) * 0.5, midY, (az + bz) * 0.5)
-      .addScaledVector(outward, WALL_THICKNESS * 0.5);
-
-    areas.push({
-      center,
-      rotationY,
-      halfWidth: edgeLen * 0.5,
-      halfDepth: CLIMB_WALL_DEPTH * 0.5,
-      halfHeight: (topY - bottomY) * 0.5,
-      minY: bottomY,
-      maxY: topY,
-      normal: outward.clone()
-    });
-  }
-
-  return areas;
 }
 
 function resolveBuildingQualityTier() {
@@ -455,6 +361,8 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   group.name = "osm-buildings";
   scene?.add(group);
 
+  setClimbableAreas("buildings", []);
+
   const qualitySettings = BUILDING_QUALITY_SETTINGS[BUILDING_QUALITY];
   const ktx2 = getKtx2Loader(renderer);
   const maxAnisotropy = renderer?.capabilities?.getMaxAnisotropy?.() ?? null;
@@ -498,9 +406,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   const flatMaterial = new THREE.MeshStandardMaterial({ /* ... */ });
 
   const tileMeshes = new Map();
-  const climbableAreasByTile = new Map();
-  const climbableAreas = [];
-
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
   }
@@ -511,6 +416,8 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     const extrudedMesh = new THREE.Mesh(new THREE.BufferGeometry(), extrudedMaterial);
     const flatMesh = new THREE.Mesh(new THREE.BufferGeometry(), flatMaterial);
+    extrudedMesh.userData.isBuildingSolid = true;
+    flatMesh.userData.isBuildingSolid = true;
 
     const extrudedColliderMesh = new THREE.Mesh(new THREE.BufferGeometry(), new THREE.MeshBasicMaterial());
     extrudedColliderMesh.visible = false;
@@ -532,20 +439,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedColliderMesh,
       collisionGroup
     };
-  }
-
-  function setClimbableAreas(areas) {
-    climbableAreas.length = 0;
-    climbableAreas.push(...areas);
-    window.climbableAreas = climbableAreas;
-  }
-
-  function refreshClimbableAreas() {
-    const merged = [];
-    for (const areas of climbableAreasByTile.values()) {
-      merged.push(...areas);
-    }
-    setClimbableAreas(merged);
   }
 
   function ensureTile(tileKey) {
@@ -572,8 +465,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedMesh.visible = false;
       flatMesh.visible = false;
       extrudedColliderMesh.visible = false;
-      climbableAreasByTile.set(tileKey, []);
-      refreshClimbableAreas();
       return tileEntry;
     }
 
@@ -588,8 +479,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedMesh.visible = false;
       flatMesh.visible = false;
       extrudedColliderMesh.visible = false;
-      climbableAreasByTile.set(tileKey, []);
-      refreshClimbableAreas();
       return tileEntry;
     }
 
@@ -598,8 +487,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     const flatGeometries = [];
     const extrudedResults = [];
-    const wallClimbAreas = [];
-
     for (const polygon of polygons) {
       const shape = makeShape(polygon.rings, bounds, lonScale);
       if (!shape) continue;
@@ -644,12 +531,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
           }
         }
 
-        if (isFullDetail) {
-          wallClimbAreas.push(
-            ...buildWallClimbAreas(shape, geom.boundingBox.min.y, geom.boundingBox.max.y)
-          );
-        }
-
         extrudedResults.push(geom);
       } else {
         const geom = new THREE.ShapeGeometry(shape);
@@ -691,8 +572,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       flatMesh.visible = false;
     }
 
-    climbableAreasByTile.set(tileKey, wallClimbAreas);
-    refreshClimbableAreas();
     return tileEntry;
   }
 
@@ -705,8 +584,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     entry.group.clear();
     group.remove(entry.group);
     tileMeshes.delete(tileKey);
-    climbableAreasByTile.delete(tileKey);
-    refreshClimbableAreas();
   }
 
   function clearTiles() {
@@ -723,6 +600,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     flatMaterial.dispose();
     group.clear();
     scene?.remove(group);
+    clearClimbableAreas("buildings");
   }
 
   return {

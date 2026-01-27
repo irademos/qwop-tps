@@ -2,8 +2,9 @@ const MIN_STRENGTH = 1;
 const MAX_STRENGTH = 5;
 const MIN_RECOVERY_MS = 1000;
 const MAX_RECOVERY_MS = 5000;
-const MIN_PUSH_SCALE = 0.1;
-const MAX_PUSH_SCALE = 0.35;
+const MIN_PUSH_SCALE = 0.04;
+const MAX_PUSH_SCALE = 0.18;
+const VERTICAL_IMPULSE_SCALE = 0.2;
 
 const lerp = (start, end, amount) => start + (end - start) * amount;
 
@@ -27,6 +28,7 @@ export function getKnockbackImpulse(direction, strength = 3) {
   const impulse = direction.clone();
   if (impulse.lengthSq() > 0) {
     impulse.normalize().multiplyScalar(profile.pushScale);
+    impulse.y *= VERTICAL_IMPULSE_SCALE;
   } else {
     impulse.set(0, 0, 0);
   }

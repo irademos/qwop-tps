@@ -19,7 +19,12 @@ import { IceGun } from './items/iceGun.js';
 import { Bow } from './items/bow.js';
 import { Lantern } from './items/lantern.js';
 import { AutumnSword } from './items/autumnSword.js';
+import { TreasureChest } from './items/treasure_chest.js';
 import { createNature } from './environment/nature.js';
+import { createCabin } from './environment/cabin.js';
+import { createMushrooms, MUSHROOM_ENTRIES } from './environment/mushrooms.js';
+import { createApples, APPLE_ITEM_ID } from './items/apple.js';
+import { createHomeSystem } from './home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { getSpawnPosition } from './spawnUtils.js';
@@ -35,8 +40,10 @@ import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from '.
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './environment/mapView.js';
 import {
   clearStoredPin,
+  deleteProfileData,
   getStoredPinHash,
   loadOrCreateWithPin,
+  renameProfile,
   saveStatsThrottled
 } from './playerProfile.js';
 import {
@@ -51,9 +58,11 @@ import {
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').catch((error) => {
-      console.error('Service worker registration failed:', error);
-    });
+    if (location.hostname !== 'localhost') {
+      navigator.serviceWorker.register('/service-worker.js').catch((error) => {
+        console.error('Service worker registration failed:', error);
+      });
+    }
   });
 }
 
@@ -98,8 +107,8 @@ const MONSTER_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'Y
 const MONSTER_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(MONSTER_SWORD_HOLD_ROTATION);
 const ARROW_MODEL_URL = '/assets/props/arrow.glb';
 const ARROW_PROJECTILE_SCALE = 2.2;
-const ARROW_PROJECTILE_SPEED = 20;
-const ARROW_PROJECTILE_LIFETIME = 12000;
+const ARROW_PROJECTILE_SPEED = 55;
+const ARROW_PROJECTILE_LIFETIME = 6000;
 
 
 // --- Rapier demo state ---
@@ -262,7 +271,7 @@ function createArcadeOverlay(startOverlay) {
     return signupWaiter.wait();
   };
 
-  const startAuthFlow = async name => {
+  const startAuthFlow = async (name, { autoStart = false } = {}) => {
     if (!name) return;
     const token = ++authToken;
     authInProgress = true;
@@ -283,8 +292,15 @@ function createArcadeOverlay(startOverlay) {
         return;
       }
       currentName = result.profile?.name || name;
-      showWelcome(currentName, { ready: true });
       setMessage('');
+      if (autoStart) {
+        if (startHandler) {
+          startHandler();
+        }
+        hideOverlay();
+      } else {
+        showWelcome(currentName, { ready: true });
+      }
       resolveAuth?.(result);
     } catch (err) {
       if (token !== authToken) return;
@@ -370,7 +386,7 @@ function createArcadeOverlay(startOverlay) {
   loginButton?.addEventListener('click', event => {
     const queued = handleLoginSubmit(event);
     if (queued && !authInProgress && nameInput.value.trim()) {
-      startAuthFlow(nameInput.value.trim());
+      startAuthFlow(nameInput.value.trim(), { autoStart: true });
     }
   });
 
@@ -378,12 +394,12 @@ function createArcadeOverlay(startOverlay) {
     if (mode === 'login') {
       const queued = handleLoginSubmit(event);
       if (queued && !authInProgress && nameInput.value.trim()) {
-        startAuthFlow(nameInput.value.trim());
+        startAuthFlow(nameInput.value.trim(), { autoStart: true });
       }
     } else if (mode === 'signup') {
       const queued = handleSignupSubmit(event);
       if (queued && !authInProgress && nameInput.value.trim()) {
-        startAuthFlow(nameInput.value.trim());
+        startAuthFlow(nameInput.value.trim(), { autoStart: true });
       }
     }
   });
@@ -395,7 +411,7 @@ function createArcadeOverlay(startOverlay) {
     }
     const queued = handleSignupSubmit(event);
     if (queued && !authInProgress && nameInput.value.trim()) {
-      startAuthFlow(nameInput.value.trim());
+      startAuthFlow(nameInput.value.trim(), { autoStart: true });
     }
   });
 
@@ -423,7 +439,7 @@ function createArcadeOverlay(startOverlay) {
       if (initialName && hasStoredPin) {
         currentName = initialName;
         showWelcome(initialName, { ready: false });
-        startAuthFlow(initialName);
+        startAuthFlow(initialName, { autoStart: false });
       } else {
         showLoginForm({ name: initialName });
       }
@@ -483,7 +499,7 @@ async function main() {
     loadProfile: loadOrCreateWithPin
   });
   playerName = profileResult.profile?.name || playerName;
-  const { nameKey: profileNameKey, profile: playerProfile } = profileResult;
+  let { nameKey: profileNameKey, profile: playerProfile } = profileResult;
 
   setCookie("playerName", playerName);
   localStorage.setItem('playerName', playerName);
@@ -493,21 +509,29 @@ async function main() {
   const FOOD_HUNGER_GAIN = 25;
   const FOOD_ENERGY_GAIN = 15;
   const HEALTH_PICKUP_GAIN = 20;
+  const MUSHROOM_HEALTH_GAIN = 6;
+  const MUSHROOM_HUNGER_GAIN = 6;
+  const MUSHROOM_ENERGY_GAIN = 6;
+  const APPLE_HEALTH_GAIN = 4;
+  const APPLE_HUNGER_GAIN = 4;
+  const APPLE_ENERGY_GAIN = 4;
   const HUNGER_DECAY_PER_HOUR = 6;
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
   const PICKUP_RADIUS = 1.2;
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
-  const MAX_HEALTH_PICKUPS = 30;
+  const MAX_HEALTH_PICKUPS = 60;
   const MAX_COIN_PICKUPS = 80;
-  const TILE_STOCK_AMMO_COUNT = 400;
+  const TILE_STOCK_AMMO_COUNT = 0;
   const TILE_STOCK_FOOD_COUNT = 500;
-  const TILE_STOCK_HEALTH_COUNT = 500;
+  const TILE_STOCK_HEALTH_COUNT = 800;
   const TILE_STOCK_COIN_COUNT = 500;
   const TILE_STOCK_WEAPON_COUNT = 100;
   const PICKUP_SPAWN_RADIUS = 225;
   const PICKUP_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
+  const ICE_GUN_AMMO_CLUSTER_COUNT = 3;
+  const ICE_GUN_AMMO_CLUSTER_RADIUS = 1.4;
 
   let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
   setCookie("characterModel", characterModel);
@@ -517,6 +541,7 @@ async function main() {
   let isHost = false;
   let playerControls = null;
   let friendlyNpcManager = null;
+  let homeSystem = null;
   let scene = null;
   let mapRenderer = null;
   let buildingsRenderer = null;
@@ -554,6 +579,12 @@ async function main() {
   const foodPickups = [];
   const healthPickups = [];
   const coinPickups = [];
+  let mushroomController = null;
+  let mushroomPickups = [];
+  let appleController = null;
+  let applePickups = [];
+  const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
+  const appleItemIds = new Set([APPLE_ITEM_ID]);
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
 
@@ -565,14 +596,42 @@ async function main() {
   let remoteAnimAccumulator = 0;
   let monsterAnimAccumulator = 0;
 
+  let monsters = [];
+  window.monsters = monsters;
+  const monsterSlotIds = ["monster:0", "monster:1"];
+  const spawningSlots = new Set();
+  const respawnTimers = new Map();
+  let monstersSeeded = false;
+  let monsterSnapshotLoaded = false;
+  let unsubscribeMonsterUpdates = null;
+  const recentMonsterHits = new Map();
+
+
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87CEEB);
+  const rotateSkyboxFaceClockwise = (image) => {
+    if (!image) return image;
+    const canvas = document.createElement('canvas');
+    canvas.width = image.height;
+    canvas.height = image.width;
+    const context = canvas.getContext('2d');
+    if (!context) return image;
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate(Math.PI / 2);
+    context.drawImage(image, -image.width / 2, -image.height / 2);
+    return canvas;
+  };
+  const skyboxTexture = new THREE.CubeTextureLoader()
+    .setPath('/assets/textures/sky/')
+    .load(
+      ['px.jpg', 'nx.jpg', 'py.jpg', 'ny.jpg', 'pz.jpg', 'nz.jpg'],
+      (texture) => {
+        texture.image[2] = rotateSkyboxFaceClockwise(texture.image[2]);
+        texture.needsUpdate = true;
+      }
+    );
+  scene.background = skyboxTexture;
   createClouds(scene);
 
-  const SKY_COLORS = {
-    day: new THREE.Color(0x87ceeb),
-    night: new THREE.Color(0x0b1020)
-  };
   const DISPLAY_MODES = new Set(['auto', 'day', 'night']);
   const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
   const pickupEmissiveMaterials = new Set();
@@ -670,9 +729,6 @@ async function main() {
     const effectiveMode = displaySettings.mode === 'auto'
       ? (lastAutoMode || getAutoMode())
       : displaySettings.mode;
-    const skyBase = SKY_COLORS[effectiveMode] || SKY_COLORS.day;
-    const skyBrightness = clampValue(displaySettings.skyBrightness, 0.1, 1.6);
-    const skyColor = skyBase.clone().multiplyScalar(skyBrightness);
     const pickupBrightness = clampValue(
       (displaySettings.ambientIntensity + displaySettings.directionalIntensity) / 2,
       0,
@@ -680,7 +736,11 @@ async function main() {
     );
     pickupEmissiveBrightness = pickupBrightness;
     if (scene) {
-      scene.background = skyColor;
+      if (effectiveMode === 'night') {
+        scene.background = new THREE.Color(0x000000);
+      } else {
+        scene.background = skyboxTexture;
+      }
     }
     if (ambientLight) {
       ambientLight.intensity = clampValue(displaySettings.ambientIntensity, 0, 2);
@@ -1416,20 +1476,11 @@ async function main() {
   let bow;
   let autumnSword;
   let lantern;
+  let treasureChest;
 
   const breakManager = new BreakManager(scene);
   // Expose to window for debugging
   window.breakManager = breakManager;
-
-  let monsters = [];
-  window.monsters = monsters;
-  const monsterSlotIds = ["monster:0", "monster:1"];
-  const spawningSlots = new Set();
-  const respawnTimers = new Map();
-  let monstersSeeded = false;
-  let monsterSnapshotLoaded = false;
-  let unsubscribeMonsterUpdates = null;
-  const recentMonsterHits = new Map();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1866,6 +1917,69 @@ async function main() {
   });
 
   window.weapons = { iceGun, bow, autumnSword, lantern };
+  treasureChest = new TreasureChest(scene);
+  await treasureChest.load();
+  window.treasureChest = treasureChest;
+  if (treasureChest.mesh) {
+    treasureChest.mesh.visible = false;
+  }
+  treasureChest.onOpen = (holder) => {
+    if (holder !== playerControls) return;
+    const rewards = [
+      {
+        label: '5 arrows',
+        apply: () => {
+          const current = Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
+            ? inventoryState.bow[ARROW_AMMO_KEY]
+            : 0;
+          setArrowAmmoCount(current + 5);
+        }
+      },
+      {
+        label: 'Autumn Sword',
+        apply: () => addToInventory('autumnSword', 1)
+      },
+      {
+        label: 'Bow',
+        apply: () => addToInventory('bow', 1)
+      },
+      {
+        label: 'Ice Gun',
+        apply: () => addToInventory('iceGun', 1)
+      },
+      {
+        label: 'Lantern',
+        apply: () => addToInventory('lantern', 1)
+      },
+      {
+        label: '5 ice ammo',
+        apply: () => {
+          const current = Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+            ? inventoryState.iceGun[ICE_AMMO_KEY]
+            : 0;
+          setIceAmmoCount(current + 5);
+        }
+      },
+      {
+        label: '5 mushrooms',
+        apply: () => {
+          const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
+          addToInventory(entry.id, 5);
+        }
+      },
+      {
+        label: '20 coins',
+        apply: () => {
+          const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + 20;
+          setStat('coins', nextCoins, { skipSave: true });
+          showCoinPopup(statsState.coins);
+        }
+      }
+    ];
+    const reward = rewards[Math.floor(Math.random() * rewards.length)];
+    reward?.apply?.();
+    showTreasurePopup(`You received a ${reward?.label ?? 'treasure'}`);
+  };
   const getTreeGeoForLocal = (position) => {
     if (!position) return null;
     const origin = worldOrigin
@@ -1878,6 +1992,13 @@ async function main() {
       lon: origin.centerLon - position.x / lonScale
     };
   };
+  appleController = await createApples({
+    scene,
+    getTerrainHeight,
+    allowDefaultPositions: false
+  });
+  applePickups = appleController?.pickups || [];
+  window.applePickups = applePickups;
   natureController = await createNature({
     scene,
     playerModel,
@@ -1885,9 +2006,20 @@ async function main() {
     mapRenderer,
     buildingsRenderer,
     getGeoForLocal: getTreeGeoForLocal,
-    tileCache
+    tileCache,
+    spawnApplePickup: appleController?.spawnPickup,
+    removeApplePickup: appleController?.removePickup
   });
   natureController?.update(playerModel?.position);
+  await createCabin({ scene, getTerrainHeight });
+  mushroomController = await createMushrooms({
+    scene,
+    getTerrainHeight,
+    scatterCenter: playerModel?.position,
+    scatterRadius: PICKUP_SPAWN_RADIUS
+  });
+  mushroomPickups = mushroomController?.pickups || [];
+  window.mushroomPickups = mushroomPickups;
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
@@ -2525,12 +2657,6 @@ async function main() {
           level: state.level,
           version: incomingVersion
         });
-        if (state.mode === 'dead' && state.health <= 0) {
-          cleanupMonster(monster);
-          monsters = monsters.filter(entry => entry.id !== slotId);
-          window.monsters = monsters;
-          return;
-        }
         if (state.action && monster.model.userData.currentAction !== state.action) {
           const fade = state.action === 'Weapon' ? 0.1 : 0.2;
           monster.playAnimation(state.action, fade);
@@ -2580,9 +2706,11 @@ async function main() {
   const levelPopup = document.getElementById('level-popup');
   const ammoPopup = document.getElementById('ammo-popup');
   const coinPopup = document.getElementById('coin-popup');
+  const treasurePopup = document.getElementById('treasure-popup');
   let levelPopupTimer = null;
   let ammoPopupTimer = null;
   let coinPopupTimer = null;
+  let treasurePopupTimer = null;
   updatePlayerInfoUI = () => {
     if (playerNameDisplay) {
       playerNameDisplay.textContent = playerName;
@@ -2632,6 +2760,18 @@ async function main() {
       coinPopupTimer = null;
     }, 1600);
   };
+  const showTreasurePopup = (message) => {
+    if (!treasurePopup) return;
+    treasurePopup.textContent = message;
+    treasurePopup.classList.add('visible');
+    if (treasurePopupTimer) {
+      clearTimeout(treasurePopupTimer);
+    }
+    treasurePopupTimer = setTimeout(() => {
+      treasurePopup.classList.remove('visible');
+      treasurePopupTimer = null;
+    }, 2000);
+  };
   const inventoryCatalog = {
     iceGun: {
       name: 'Ice Gun',
@@ -2650,6 +2790,16 @@ async function main() {
       icon: ''
     }
   };
+  inventoryCatalog[APPLE_ITEM_ID] = {
+    name: 'Apple',
+    icon: ''
+  };
+  MUSHROOM_ENTRIES.forEach((entry) => {
+    inventoryCatalog[entry.id] = {
+      name: entry.name,
+      icon: ''
+    };
+  });
   const inventoryState = { ...(playerProfile.inventory || {}) };
   let inventoryDirty = false;
   Object.entries(inventoryState).forEach(([itemId, entry]) => {
@@ -2689,6 +2839,20 @@ async function main() {
   if (inventoryDirty) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
   }
+
+  const equippableItems = new Set(['lantern', 'iceGun', 'bow', 'autumnSword']);
+  const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
+  const isAppleItem = (itemId) => appleItemIds.has(itemId);
+  const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId);
+  const getInventoryItemActions = (itemId) => {
+    if (isFoodItem(itemId)) {
+      return ['drop', 'eat'];
+    }
+    if (equippableItems.has(itemId)) {
+      return ['drop', 'equip'];
+    }
+    return ['drop'];
+  };
 
   function getInventory() {
     return inventoryState;
@@ -2909,6 +3073,86 @@ async function main() {
     return dropPosition;
   }
 
+  function disposeMushroomPickup(pickup) {
+    if (!pickup?.mesh) return;
+    const mesh = pickup.mesh;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+  }
+
+  function disposeApplePickup(pickup) {
+    if (!pickup?.mesh) return;
+    const mesh = pickup.mesh;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+  }
+
+  function pickupMushroom(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const distance = playerControls.playerModel.position.distanceTo(pickup.mesh.position);
+      if (distance > PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeMushroomPickup(pickup);
+    const index = mushroomPickups.indexOf(pickup);
+    if (index >= 0) {
+      mushroomPickups.splice(index, 1);
+    }
+    return true;
+  }
+
+  function pickupApple(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const distance = playerControls.playerModel.position.distanceTo(pickup.mesh.position);
+      if (distance > PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeApplePickup(pickup);
+    const index = applePickups.indexOf(pickup);
+    if (index >= 0) {
+      applePickups.splice(index, 1);
+    }
+    return true;
+  }
+
+  function spawnMushroomPickup(itemId, position) {
+    if (!mushroomController?.spawnPickup || !position) return null;
+    return mushroomController.spawnPickup(itemId, position);
+  }
+
+  function spawnApplePickup(position) {
+    if (!appleController?.spawnPickup || !position) return null;
+    return appleController.spawnPickup(position);
+  }
+
   function disposeDroppedWeaponPickup(pickup) {
     if (!pickup) return;
     const mesh = pickup.mesh;
@@ -2952,7 +3196,7 @@ async function main() {
         const distance = playerControls.playerModel.position.distanceTo(pickupMesh.position);
         if (distance > 3) return;
         addToInventory(itemId, 1);
-        updateSettingsUI();
+        equipInventoryItem(itemId);
         const index = droppedWeaponPickups.indexOf(pickup);
         if (index !== -1) {
           droppedWeaponPickups.splice(index, 1);
@@ -2966,6 +3210,16 @@ async function main() {
 
   function dropInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
+    if (isFoodItem(itemId)) {
+      const dropPosition = getInventoryDropPosition();
+      if (!dropPosition) return;
+      const pickup = isMushroomItem(itemId)
+        ? spawnMushroomPickup(itemId, dropPosition)
+        : spawnApplePickup(dropPosition);
+      if (!pickup) return;
+      removeFromInventory(itemId, 1);
+      return;
+    }
     const dropPosition = getInventoryDropPosition();
     if (!dropPosition) return;
     const itemMap = {
@@ -3000,6 +3254,22 @@ async function main() {
     }
     removeFromInventory(itemId, 1);
     updateSettingsUI();
+  }
+
+  function eatInventoryItem(itemId) {
+    if (!itemId || !inventoryState[itemId]) return;
+    if (!isFoodItem(itemId)) return;
+    if (isMushroomItem(itemId)) {
+      setStat('health', statsState.health + MUSHROOM_HEALTH_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
+      setStat('energy', statsState.energy + MUSHROOM_ENERGY_GAIN, { skipSave: true });
+    } else if (isAppleItem(itemId)) {
+      setStat('health', statsState.health + APPLE_HEALTH_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
+      setStat('energy', statsState.energy + APPLE_ENERGY_GAIN, { skipSave: true });
+    }
+    lastStatUpdateAt = Date.now();
+    removeFromInventory(itemId, 1);
   }
 
   let mapViewEnabled = false;
@@ -3058,6 +3328,14 @@ async function main() {
       ));
     }
     return positions;
+  };
+
+  const spawnIceGunAmmoCluster = (center) => {
+    if (!center) return;
+    const positions = createRingPositions(center, ICE_GUN_AMMO_CLUSTER_COUNT, ICE_GUN_AMMO_CLUSTER_RADIUS);
+    positions.forEach(position => {
+      spawnAmmoPickup(position, AMMO_PICKUP_AMOUNT);
+    });
   };
 
   const clearInventoryState = () => {
@@ -3740,6 +4018,7 @@ async function main() {
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
     iceGun.mesh.visible = true;
     iceGun.holder = null;
+    spawnIceGunAmmoCluster(spawnPos);
   }
 
   function spawnBowPickup(position) {
@@ -3787,6 +4066,19 @@ async function main() {
     lantern.mesh.quaternion.set(0, 0, 0, 1);
     lantern.mesh.visible = true;
     lantern.holder = null;
+  }
+
+  function spawnTreasureChestPickup(position) {
+    if (!treasureChest?.mesh || treasureChest.isOpen) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (!Number.isFinite(terrainHeight)) return;
+
+    spawnPos.y = terrainHeight;
+    treasureChest.mesh.position.copy(spawnPos);
+    treasureChest.mesh.visible = true;
   }
 
   registerNetworkedEntity('droppedAmmo', {
@@ -3849,6 +4141,7 @@ async function main() {
   window.playerControls = playerControls;
   updateControlAvailability();
   updateEnergyEffects();
+
 
   const starterPosition = playerModel?.position?.clone?.() || getSpawnPosition();
   if (starterPosition) {
@@ -4061,12 +4354,27 @@ async function main() {
       }
     }
 
+    const canSpawnTreasureChest = treasureChest?.mesh
+      && !treasureChest.isOpen
+      && !treasureChest.mesh.visible;
+    if (canSpawnTreasureChest) {
+      const spawnPos = getRandomPickupPosition(center);
+      if (spawnPos) {
+        spawnTreasureChestPickup(spawnPos);
+      }
+    }
+
     [iceGun, bow, autumnSword].forEach((weapon) => {
       if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
       if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
         weapon.mesh.visible = false;
       }
     });
+    if (treasureChest?.mesh && !treasureChest.isOpen && treasureChest.mesh.visible) {
+      if (center.distanceTo(treasureChest.mesh.position) > PICKUP_SPAWN_RADIUS) {
+        treasureChest.mesh.visible = false;
+      }
+    }
   };
   const shouldUpdatePickupTiles = (position) => {
     if (!position) return false;
@@ -4206,6 +4514,19 @@ async function main() {
       lon: origin.centerLon - x / lonScale
     };
   };
+
+  homeSystem = createHomeSystem({
+    scene,
+    playerModel,
+    playerControls,
+    buildingsRenderer,
+    profileNameKey,
+    initialHome: playerProfile?.home ?? null,
+    getLocalOrigin: getLocalMapOrigin,
+    localMetersToGeo,
+    geoToLocal: geoToLocalMeters
+  });
+  window.homeSystem = homeSystem;
 
   function getLatestLocationFix() {
     const latest = window.latestLocation;
@@ -4954,6 +5275,30 @@ async function main() {
         multiplayer.playerName = playerName;
       }
     },
+    savePlayerName: async (nextName) => {
+      const trimmedName = nextName?.trim();
+      if (!trimmedName) {
+        return { status: 'invalid' };
+      }
+      if (trimmedName === playerName) {
+        return { status: 'unchanged' };
+      }
+      try {
+        const result = await renameProfile(playerName, profileNameKey, trimmedName);
+        if (result.status === 'ok') {
+          profileNameKey = result.nameKey;
+          playerProfile.name = result.profile?.name || trimmedName;
+          appState.setPlayerName(result.profile?.name || trimmedName);
+          if (homeSystem) {
+            homeSystem.profileNameKey = profileNameKey;
+          }
+        }
+        return result;
+      } catch (error) {
+        console.error('Failed to rename profile:', error);
+        return { status: 'error' };
+      }
+    },
     getCharacterModel: () => characterModel,
     setCharacterModel: (modelPath) => {
       if (!modelPath || modelPath === characterModel) return;
@@ -4967,9 +5312,11 @@ async function main() {
     getInventory: () => getInventory(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
     isInventoryItemEquipped: (itemId) => isInventoryItemEquipped(itemId),
+    getInventoryItemActions: (itemId) => getInventoryItemActions(itemId),
     equipInventoryItem: (itemId) => equipInventoryItem(itemId),
     unequipInventoryItem: (itemId) => unequipInventoryItem(itemId),
     dropInventoryItem: (itemId) => dropInventoryItem(itemId),
+    eatInventoryItem: (itemId) => eatInventoryItem(itemId),
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
     getConnectedPlayers: () => {
@@ -5024,12 +5371,29 @@ async function main() {
       rebuildMapFromCache();
       didInitialGpsSnap = false;
       window.clearTileCache?.();
+    },
+    deleteAccount: async () => {
+      if (!profileNameKey) {
+        return { status: 'missing-key' };
+      }
+      const result = await deleteProfileData(profileNameKey, playerName);
+      if (result.status === 'ok') {
+        localStorage.removeItem('playerName');
+        localStorage.removeItem('characterModel');
+        setCookie('playerName', '', -1);
+        setCookie('characterModel', '', -1);
+        clearStoredPin(playerName);
+        window.location.reload();
+      }
+      return result;
     }
   };
 
   window.getInventory = getInventory;
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
+  window.pickupMushroom = pickupMushroom;
+  window.pickupApple = pickupApple;
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -5224,6 +5588,18 @@ async function main() {
         disposePickup(pickup);
         coinPickups.splice(i, 1);
       }
+      for (let i = mushroomPickups.length - 1; i >= 0; i--) {
+        const pickup = mushroomPickups[i];
+        if (!pickup) continue;
+        disposeMushroomPickup(pickup);
+        mushroomPickups.splice(i, 1);
+      }
+      for (let i = applePickups.length - 1; i >= 0; i--) {
+        const pickup = applePickups[i];
+        if (!pickup) continue;
+        disposeApplePickup(pickup);
+        applePickups.splice(i, 1);
+      }
     } else {
       for (let i = ammoPickups.length - 1; i >= 0; i--) {
         const pickup = ammoPickups[i];
@@ -5339,7 +5715,7 @@ async function main() {
           pickup.userData.baseY = pickup.position.y;
         }
 
-        pickup.rotation.y += 0.05;
+        pickup.rotation.z += 0.10;
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
 
@@ -5347,6 +5723,21 @@ async function main() {
           applyCoinPickupEffects();
           disposePickup(pickup);
           coinPickups.splice(i, 1);
+        }
+      }
+
+      for (let i = mushroomPickups.length - 1; i >= 0; i--) {
+        const pickup = mushroomPickups[i];
+        if (!pickup?.mesh) {
+          mushroomPickups.splice(i, 1);
+          continue;
+        }
+      }
+      for (let i = applePickups.length - 1; i >= 0; i--) {
+        const pickup = applePickups[i];
+        if (!pickup?.mesh) {
+          applePickups.splice(i, 1);
+          continue;
         }
       }
     }
@@ -5422,6 +5813,12 @@ async function main() {
 
     // 2) AI can still be throttled, but pass a real delta when you DO run it
     const aiNowMs = Date.now();
+    monsters.forEach(monster => {
+      if (!monster?.model) return;
+      if (monster.shouldRemoveAfterDeath?.(aiNowMs)) {
+        cleanupMonster(monster);
+      }
+    });
     const isHostNow = !multiplayer || multiplayer.isHost;
 
     if (isHostNow) {
@@ -5498,7 +5895,7 @@ async function main() {
     }
 
     Object.values(otherPlayers).forEach(player => {
-      if (!player?.targetPos || !player?.targetQuat) return;
+      if (!player?.model || !player?.targetPos || !player?.targetQuat) return;
       const currentPos = player.model.position;
       const distance = currentPos.distanceTo(player.targetPos);
       if (distance > REMOTE_TELEPORT_THRESHOLD_M) {

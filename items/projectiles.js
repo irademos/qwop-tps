@@ -17,6 +17,15 @@ const disposeProjectileMesh = (mesh) => {
   });
 };
 
+const getObjectBox = (object) => {
+  if (!object || typeof object.updateWorldMatrix !== 'function') {
+    return null;
+  }
+  const box = new THREE.Box3();
+  box.setFromObject(object);
+  return box;
+};
+
 export function spawnProjectile(scene, projectiles, position, direction, shooterId, options = {}) {
   const size = 0.5;
   const half = size / 2;
@@ -135,12 +144,16 @@ export function updateProjectiles({
     const age = Date.now() - proj.userData.spawnTime;
 
     let removed = false;
+    const projBox = getObjectBox(proj);
+    if (!projBox) {
+      continue;
+    }
 
     for (const [id, { model }] of Object.entries(otherPlayers)) {
       if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
       if (age < 80) continue;
-      const projBox = new THREE.Box3().setFromObject(proj);
-      const playerBox = new THREE.Box3().setFromObject(model);
+      const playerBox = getObjectBox(model);
+      if (!playerBox) continue;
       if (projBox.intersectsBox(playerBox)) {
         const player = otherPlayers[id];
         if (player) {
@@ -169,7 +182,7 @@ export function updateProjectiles({
     // Check destructible props loaded via LevelLoader
     if (window.breakManager) {
       for (const [id, data] of window.breakManager.registry.entries()) {
-        const projBox = new THREE.Box3().setFromObject(proj);
+        if (!data?.bbox) continue;
         if (projBox.intersectsBox(data.bbox)) {
           window.breakManager.onHit(id, 25, proj.userData.velocity.clone());
           const remaining = window.breakManager.registry.get(id)?.health ?? 0;
@@ -183,8 +196,8 @@ export function updateProjectiles({
 
     if (removed) continue;
 
-    const projBox = new THREE.Box3().setFromObject(proj);
-    const localBox = new THREE.Box3().setFromObject(playerModel);
+    const localBox = getObjectBox(playerModel);
+    if (!localBox) continue;
     if (projBox.intersectsBox(localBox) && age >= 80 && proj.userData.shooterId !== localId) {
       console.log(`💥 You were hit`);
       removeProjectile(i);
@@ -205,8 +218,8 @@ export function updateProjectiles({
 
     if (isHost && Array.isArray(monsters)) {
       for (const monster of monsters) {
-        if (!monster) continue;
-        const monsterBox = new THREE.Box3().setFromObject(monster.model);
+        const monsterBox = getObjectBox(monster?.model);
+        if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           console.log(`💥 Monster was hit`);
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
@@ -226,8 +239,8 @@ export function updateProjectiles({
       }
     } else if (!isHost && Array.isArray(monsters)) {
       for (const monster of monsters) {
-        if (!monster) continue;
-        const monsterBox = new THREE.Box3().setFromObject(monster.model);
+        const monsterBox = getObjectBox(monster?.model);
+        if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
           sendMonsterAttack?.({

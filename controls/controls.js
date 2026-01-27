@@ -14,7 +14,10 @@ const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
 const CLIMB_SPEED = 1.6;
 const CLIMB_SNAP_DISTANCE = 0.6;
+const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const FRIENDLY_INTERACT_RANGE = 6;
+const MUSHROOM_INTERACT_RANGE = 1.2;
+const APPLE_INTERACT_RANGE = 1.2;
 const FRIENDLY_DIALOGUE_POOL = [
   {
     blocks: [
@@ -145,7 +148,7 @@ export class PlayerControls {
     this.joystick = null;
     this.touchStartX = 0;
     this.touchStartY = 0;
-    this.touchSensitivity = 0.005;
+    this.touchSensitivity = 0.006;
     this.moveVector = { x: 0, z: 0 };
     this.jumpButtonPressed = false;
     this.moveForward = 0;
@@ -214,9 +217,18 @@ export class PlayerControls {
     });
     this.crosshairEl = document.querySelector('.crosshair');
     this.defaultFov = this.camera.fov;
-    this.aimFov = Math.max(45, this.defaultFov - 10);
+    this.aimFov = Math.max(40, this.defaultFov - 15);
     this.isAiming = false;
     this.isFireHeld = false;
+    this.baseCameraOffset = this.cameraOffset.clone();
+    this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
+    this.baseCameraTargetOffset = new THREE.Vector3();
+    this.aimCameraTargetOffset = new THREE.Vector3(1.3, 0, 0);
+    this.cameraTargetOffset = new THREE.Vector3();
+    this.aimZoomInSpeed = 6;
+    this.aimZoomOutSpeed = 3;
+    this.aimReleaseDelayMs = 500;
+    this.aimReleaseHoldUntil = null;
     this.cameraRaycaster = new THREE.Raycaster();
     this.lastOcclusionOrbitCenter = null;
     this.lastOcclusionDesiredPosition = null;
@@ -668,6 +680,11 @@ export class PlayerControls {
     const closest = this.getClosestInteractionTarget();
     if (!closest) return;
 
+    if (closest.type === 'home-select' || closest.type === 'home-enter' || closest.type === 'home-exit') {
+      window.homeSystem?.handleInteraction?.(closest);
+      return;
+    }
+
     if (closest.type === 'friendly') {
       this.startFriendlyInteraction(closest.friendly);
       return;
@@ -675,6 +692,21 @@ export class PlayerControls {
 
     if (closest.type === 'weapon') {
       closest.weapon.tryPickup?.(this);
+      return;
+    }
+
+    if (closest.type === 'treasureChest') {
+      closest.treasureChest.tryOpen?.(this);
+      return;
+    }
+    
+    if (closest.type === 'mushroom') {
+      window.pickupMushroom?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'apple') {
+      window.pickupApple?.(closest.pickup);
       return;
     }
 
@@ -712,6 +744,11 @@ export class PlayerControls {
     const playerPos = this.playerModel.position;
     let closest = null;
     let closestDistance = Infinity;
+
+    const homeTarget = window.homeSystem?.getInteractionTarget?.(playerPos, this.isMobile);
+    if (homeTarget) {
+      return homeTarget;
+    }
 
     const consider = (distance, data) => {
       if (distance <= data.maxDistance && distance < closestDistance) {
@@ -766,6 +803,47 @@ export class PlayerControls {
         weapon,
         maxDistance: 3,
         promptText: `'x' pick up ${weaponLabel}`
+      });
+    });
+
+    const treasureChest = window.treasureChest;
+    if (treasureChest?.mesh && !treasureChest.isOpen) {
+      const target = treasureChest.mesh;
+      if (target?.position) {
+        const dist = playerPos.distanceTo(target.position);
+        const promptText = this.isMobile
+          ? 'click to open chest'
+          : "press 'x' to open chest";
+        consider(dist, {
+          type: 'treasureChest',
+          treasureChest,
+          maxDistance: 3,
+          promptText
+        });
+      }
+    }
+    
+    const mushroomPickups = Array.isArray(window.mushroomPickups) ? window.mushroomPickups : [];
+    mushroomPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'mushroom',
+        pickup,
+        maxDistance: MUSHROOM_INTERACT_RANGE,
+        promptText: "'x' pick up mushroom"
+      });
+    });
+
+    const applePickups = Array.isArray(window.applePickups) ? window.applePickups : [];
+    applePickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'apple',
+        pickup,
+        maxDistance: APPLE_INTERACT_RANGE,
+        promptText: "'x' pick up apple"
       });
     });
 
@@ -961,6 +1039,18 @@ export class PlayerControls {
     return local;
   }
 
+  isWithinClimbEntry(area, position) {
+    if (!area?.entryCenter || !Number.isFinite(area.entryRadius)) return false;
+    const dx = position.x - area.entryCenter.x;
+    const dz = position.z - area.entryCenter.z;
+    const horizontalDist = Math.hypot(dx, dz);
+    if (horizontalDist > area.entryRadius) return false;
+    const minY = (area.minY ?? area.entryCenter.y) - CLIMB_ENTRY_BUFFER_Y;
+    const entryHeight = area.entryHeight ?? CLIMB_SNAP_DISTANCE * 2;
+    const maxY = minY + entryHeight + CLIMB_ENTRY_BUFFER_Y;
+    return position.y >= minY && position.y <= maxY;
+  }
+
   findClimbableArea(position) {
     const areas = window.climbableAreas || [];
     if (!areas.length) return null;
@@ -978,7 +1068,8 @@ export class PlayerControls {
       const minDepth = halfDepth - CLIMB_SNAP_DISTANCE;
       const maxDepth = halfDepth + CLIMB_SNAP_DISTANCE + PLAYER_RADIUS;
       const withinDepth = local.z >= minDepth && local.z <= maxDepth;
-      if (!withinWidth || !withinHeight || !withinDepth) continue;
+      const withinEntry = this.isWithinClimbEntry(area, position);
+      if (!withinWidth || !withinHeight || (!withinDepth && !withinEntry)) continue;
       const dist = area.center?.distanceTo(position) ?? 0;
       if (dist < closestDist) {
         closest = area;
@@ -1231,7 +1322,9 @@ export class PlayerControls {
 
     const climbInput = this.getClimbInput(moveDirection, cameraDirection);
     const climbArea = this.findClimbableArea(position);
-    const shouldStartClimb = !this.isClimbing && climbArea && climbInput > 0 && this.isMovingTowardClimbArea(climbArea, movement);
+    const nearEntry = climbArea && this.isWithinClimbEntry(climbArea, position);
+    const shouldStartClimb = !this.isClimbing && climbArea && climbInput > 0
+      && (nearEntry || this.isMovingTowardClimbArea(climbArea, movement));
     if (this.isClimbing || shouldStartClimb) {
       if (!climbArea) {
         this.stopClimbing();
@@ -1419,7 +1512,14 @@ export class PlayerControls {
       document.addEventListener('keyup', (e) => this.keys.delete(e.key));
     }
 
-    const rotateSpeed = CHARACTER_MOVEMENT.turnRate;
+    const now = performance.now();
+    if (!this.lastUpdate) this.lastUpdate = now;
+    const delta = (now - this.lastUpdate) / 1000;
+    this.lastUpdate = now;
+    this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
+    this.deltaSeconds = delta;
+
+    const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
     if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
     if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
 
@@ -1433,6 +1533,18 @@ export class PlayerControls {
       this.pitch = Math.max(minPitch, this.pitch - 0.02);
     }
 
+    const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
+    const aimingActive = this.isAiming || shouldHoldAim;
+    const aimLerpSpeed = aimingActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
+    const aimLerpFactor = 1 - Math.exp(-aimLerpSpeed * this.deltaSeconds);
+    const targetOffset = aimingActive ? this.aimCameraOffset : this.baseCameraOffset;
+    const targetFov = aimingActive ? this.aimFov : this.defaultFov;
+    this.cameraOffset.lerp(targetOffset, aimLerpFactor);
+    const targetCameraTargetOffset = aimingActive ? this.aimCameraTargetOffset : this.baseCameraTargetOffset;
+    this.cameraTargetOffset.lerp(targetCameraTargetOffset, aimLerpFactor);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, aimLerpFactor);
+    this.camera.updateProjectionMatrix();
+
     let orbitCenter;
     let offset;
     if (this.vehicle && this.vehicle.mesh && this.vehicle.type !== 'surfboard') {
@@ -1445,6 +1557,15 @@ export class PlayerControls {
       offset = new THREE.Vector3(0, maxDim * 0.5, distance);
     } else {
       orbitCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
+      const targetOffset = this.cameraTargetOffset;
+      if (targetOffset.lengthSq() > 0) {
+        const rotatedTargetOffset = new THREE.Vector3(
+          targetOffset.x * Math.cos(this.yaw) - targetOffset.z * Math.sin(this.yaw),
+          targetOffset.y,
+          targetOffset.x * Math.sin(this.yaw) + targetOffset.z * Math.cos(this.yaw)
+        );
+        orbitCenter.add(rotatedTargetOffset);
+      }
       offset = this.cameraOffset;
     }
     const rotatedOffset = new THREE.Vector3(
@@ -1468,7 +1589,14 @@ export class PlayerControls {
     })();
 
     let resolvedCameraPosition = desiredCameraPosition;
-    if (shouldRaycast && this.getCameraOccluders) {
+    if (this.isClimbing) {
+      this.lastOcclusionOrbitCenter = null;
+      this.lastOcclusionDesiredPosition = null;
+      this.lastOcclusionPosition = null;
+      this.lastOcclusionDistance = null;
+      this.lastOcclusionYaw = null;
+      this.lastOcclusionPitch = null;
+    } else if (shouldRaycast && this.getCameraOccluders) {
       const occluders = this.getCameraOccluders() || [];
       const direction = desiredCameraPosition.clone().sub(orbitCenter);
       const distance = direction.length();
@@ -1506,38 +1634,31 @@ export class PlayerControls {
     this.camera.position.copy(resolvedCameraPosition);
     this.camera.lookAt(orbitCenter);
 
-      const now = performance.now();
-      if (!this.lastUpdate) this.lastUpdate = now;
-      const delta = (now - this.lastUpdate) / 1000;
-      this.lastUpdate = now;
-      this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
-      this.deltaSeconds = delta;
-
-      if (this.playerModel && this.playerModel.userData.mixer) {
-        this.playerModel.userData.mixer.update(delta);
-      }
+    if (this.playerModel && this.playerModel.userData.mixer) {
+      this.playerModel.userData.mixer.update(delta);
+    }
 
     if (this.enabled) {
       this.processMovement();
     }
-      if (this.grabbedTarget) {
-        this.updateGrabbedTarget();
-      }
+    if (this.grabbedTarget) {
+      this.updateGrabbedTarget();
+    }
 
-      // Always update controls even when movement is disabled
-      if (this.controls) {
-        this.controls.update();
-      }
+    // Always update controls even when movement is disabled
+    if (this.controls) {
+      this.controls.update();
+    }
 
-      this.questManager?.setDeltaSeconds(this.deltaSeconds);
-      this.questManager?.update();
-      this.updateFriendlyInteractionUI();
-      this.updateInteractionPrompt();
+    this.questManager?.setDeltaSeconds(this.deltaSeconds);
+    this.questManager?.update();
+    this.updateFriendlyInteractionUI();
+    this.updateInteractionPrompt();
 
-      const hasGun = !!this.getEquippedGun();
-      if (hasGun !== this.lastHasGun) {
-        this.updateAmmoUI(hasGun);
-      }
+    const hasGun = !!this.getEquippedGun();
+    if (hasGun !== this.lastHasGun) {
+      this.updateAmmoUI(hasGun);
+    }
   }
 
   handleDialogueOption(option) {
@@ -1583,18 +1704,25 @@ export class PlayerControls {
     } else {
       const closest = this.getClosestInteractionTarget();
       if (closest?.promptText) {
-        promptText = closest.promptText;
-        visible = true;
+        if (closest.type !== 'friendly' || !this.friendlyInteractButton) {
+          promptText = closest.promptText;
+          visible = true;
+        }
       }
     }
 
     if (visible) {
-      this.interactionPromptEl.textContent = promptText;
+      this.interactionPromptEl.textContent = this.formatInteractionPrompt(promptText);
       this.interactionPromptEl.classList.add('visible');
     } else {
       this.interactionPromptEl.classList.remove('visible');
       this.interactionPromptEl.textContent = '';
     }
+  }
+
+  formatInteractionPrompt(text) {
+    if (!text || !this.isMobile) return text;
+    return text.replace(/^'x'\s*/i, 'touch ');
   }
 
   setGeoCenter({ lat, lon }) {
@@ -1766,8 +1894,11 @@ export class PlayerControls {
     if (this.crosshairEl) {
       this.crosshairEl.classList.toggle('visible', active);
     }
-    this.camera.fov = active ? this.aimFov : this.defaultFov;
-    this.camera.updateProjectionMatrix();
+    if (active) {
+      this.aimReleaseHoldUntil = null;
+    } else {
+      this.aimReleaseHoldUntil = performance.now() + this.aimReleaseDelayMs;
+    }
   }
 
   getAimDirection(invertForBow = false) {
@@ -1967,7 +2098,7 @@ export class PlayerControls {
   
     document.addEventListener('mousemove', (event) => {
       if (this.pointerLocked) {
-        const sensitivity = 0.002;
+        const sensitivity = 0.0025;
         this.yaw -= event.movementX * sensitivity;
         this.pitch -= event.movementY * sensitivity;
     

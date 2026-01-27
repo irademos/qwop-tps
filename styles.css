@@ -451,6 +451,29 @@ body {
   transform: translateY(0);
 }
 
+#treasure-popup {
+  position: absolute;
+  top: 196px;
+  left: 10px;
+  padding: 6px 10px;
+  background: rgba(25, 10, 40, 0.85);
+  border: 2px solid #000;
+  border-radius: 6px;
+  color: #f7d6ff;
+  font-family: 'Press Start 2P', sans-serif;
+  font-size: 11px;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  z-index: 1100;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#treasure-popup.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 #player-info {
   position: absolute;
   top: 10px;
@@ -756,6 +779,25 @@ body {
   font-size: 14px;
 }
 
+.settings-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-name-row .settings-input {
+  flex: 1;
+}
+
+.settings-name-status {
+  font-size: 12px;
+  color: #555;
+}
+
+.settings-name-status.is-error {
+  color: #b00020;
+}
+
 .settings-range {
   width: 100%;
 }
@@ -773,6 +815,39 @@ body {
   color: #fff;
   cursor: pointer;
   font-size: 12px;
+}
+
+.settings-button.settings-button-danger {
+  background: #d9342b;
+}
+
+.settings-button.settings-button-secondary {
+  background: #6c7a89;
+}
+
+.settings-confirmation {
+  border: 1px solid #f0c9c7;
+  background: #fff6f5;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-confirmation[hidden] {
+  display: none;
+}
+
+.settings-confirmation-text {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-confirmation-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .settings-row {
@@ -940,6 +1015,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  grid-column: 1 / -1;
 }
 
 .inventory-actions {
@@ -1114,7 +1190,7 @@ body {
   color: #fff;
   font-family: 'Press Start 2P', monospace;
   text-align: center;
-  padding: 24px;
+  padding: 0px;
 }
 
 #start-overlay.hidden {
@@ -1122,7 +1198,8 @@ body {
 }
 
 .arcade-shell {
-  width: min(560px, 100%);
+  width: 80vw;
+  max-width: 560px;
   border: 3px solid #facc15;
   border-radius: 20px;
   background: rgba(5, 6, 17, 0.95);
@@ -1183,7 +1260,8 @@ body {
 }
 
 .arcade-input {
-  width: 100%;
+  width: 90%;
+  margin: 0 auto;
   padding: 12px 14px;
   border-radius: 10px;
   border: 2px solid rgba(148, 163, 184, 0.45);

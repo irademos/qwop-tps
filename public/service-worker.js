@@ -80,6 +80,9 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET') {
     return;
   }
+  if (request.headers.has('range')) {
+    return;
+  }
 
   if (isCdnScript(request)) {
     const updatePromise = caches.open(CDN_CACHE).then((cache) =>
