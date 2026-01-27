@@ -4889,7 +4889,7 @@ async function main() {
           const homeDistance = homeGeo
             ? distanceMeters(location.lat, location.lon, homeGeo.lat, homeGeo.lon)
             : null;
-          if (homeDistance != null && homeDistance > 50) {
+          if (location.source !== 'debug' && homeDistance != null && homeDistance > 50) {
             homeSystem.exitHome();
             allowGpsSnap = true;
           } else {
