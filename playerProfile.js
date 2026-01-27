@@ -19,10 +19,12 @@ const DEFAULT_STATS = {
   coins: 0
 };
 const DEFAULT_INVENTORY = {};
+const DEFAULT_HOME_STORAGE = {};
 
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
 const pendingInventoryByName = new Map();
+const pendingHomeStorageByName = new Map();
 const pendingMetaByName = new Map();
 const pendingTimersByName = new Map();
 
@@ -58,6 +60,7 @@ function buildProfile(name) {
     name,
     stats: { ...DEFAULT_STATS },
     inventory: { ...DEFAULT_INVENTORY },
+    homeStorage: { ...DEFAULT_HOME_STORAGE },
     lastStatUpdateAt: now,
     createdAt: now,
     updatedAt: now
@@ -80,10 +83,12 @@ async function loadProfileForName(profileRef, trimmedName) {
 
   const mergedStats = mergeStats(profile.stats);
   const mergedInventory = profile.inventory ? { ...profile.inventory } : { ...DEFAULT_INVENTORY };
+  const mergedHomeStorage = profile.homeStorage ? { ...profile.homeStorage } : { ...DEFAULT_HOME_STORAGE };
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
   const inventoryMissing = profile.inventory == null;
-  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing) {
+  const homeStorageMissing = profile.homeStorage == null;
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
@@ -97,6 +102,12 @@ async function loadProfileForName(profileRef, trimmedName) {
     } else {
       profile.inventory = mergedInventory;
     }
+    if (homeStorageMissing) {
+      updatePayload.homeStorage = mergedHomeStorage;
+      profile.homeStorage = mergedHomeStorage;
+    } else {
+      profile.homeStorage = mergedHomeStorage;
+    }
     if (!hasLastStatUpdateAt) {
       updatePayload.lastStatUpdateAt = Date.now();
       profile.lastStatUpdateAt = updatePayload.lastStatUpdateAt;
@@ -105,6 +116,7 @@ async function loadProfileForName(profileRef, trimmedName) {
   } else {
     profile.stats = mergedStats;
     profile.inventory = mergedInventory;
+    profile.homeStorage = mergedHomeStorage;
   }
 
   console.log('✅ Loaded profile for', trimmedName);
@@ -321,12 +333,14 @@ async function flushStats(nameKey) {
   pendingTimersByName.delete(nameKey);
   const stats = pendingStatsByName.get(nameKey);
   const inventory = pendingInventoryByName.get(nameKey);
+  const homeStorage = pendingHomeStorageByName.get(nameKey);
   const meta = pendingMetaByName.get(nameKey) || {};
-  if (!stats && !inventory) {
+  if (!stats && !inventory && !homeStorage) {
     return;
   }
   pendingStatsByName.delete(nameKey);
   pendingInventoryByName.delete(nameKey);
+  pendingHomeStorageByName.delete(nameKey);
   pendingMetaByName.delete(nameKey);
   lastWriteByName.set(nameKey, Date.now());
   try {
@@ -339,6 +353,9 @@ async function flushStats(nameKey) {
     if (inventory) {
       payload.inventory = inventory;
     }
+    if (homeStorage) {
+      payload.homeStorage = homeStorage;
+    }
     if (Number.isFinite(meta.lastStatUpdateAt)) {
       payload.lastStatUpdateAt = meta.lastStatUpdateAt;
     }
@@ -348,12 +365,15 @@ async function flushStats(nameKey) {
   }
 }
 
-export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt, inventory) {
+export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt, inventory, homeStorage) {
   if (stats) {
     pendingStatsByName.set(nameKey, { ...stats });
   }
   if (inventory) {
     pendingInventoryByName.set(nameKey, { ...inventory });
+  }
+  if (homeStorage) {
+    pendingHomeStorageByName.set(nameKey, { ...homeStorage });
   }
   if (Number.isFinite(lastStatUpdateAt)) {
     pendingMetaByName.set(nameKey, { lastStatUpdateAt });
@@ -388,6 +408,7 @@ export async function deleteProfileData(nameKey, playerName) {
   }
   pendingStatsByName.delete(nameKey);
   pendingInventoryByName.delete(nameKey);
+  pendingHomeStorageByName.delete(nameKey);
   pendingMetaByName.delete(nameKey);
   lastWriteByName.delete(nameKey);
 
