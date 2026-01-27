@@ -165,22 +165,6 @@ function createInteriorColliders(world, origin) {
   return body;
 }
 
-function syncPlayerPosition(playerModel, playerControls, position) {
-  if (!playerModel || !position) return;
-  playerModel.position.copy(position);
-  if (playerControls?.body) {
-    playerControls.body.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
-    playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-  }
-  if (playerControls) {
-    playerControls.playerX = position.x;
-    playerControls.playerY = position.y;
-    playerControls.playerZ = position.z;
-    playerControls.lastPosition.copy(position);
-  }
-}
-
 export class HomeSystem {
   constructor({
     scene,
@@ -217,7 +201,7 @@ export class HomeSystem {
     this.raycaster = new THREE.Raycaster();
     this.rayDirection = new THREE.Vector3(0, -1, 0);
 
-    this.interiorBody = createInteriorColliders(window.rapierWorld, HOME_INTERIOR_ORIGIN);
+    this.interiorBody = null;
   }
 
   setLocationProvider(locationProvider) {
@@ -287,21 +271,34 @@ export class HomeSystem {
   enterHome() {
     if (!this.playerModel) return;
     this.lastExteriorPosition = this.playerModel.position.clone();
-    const interiorSpawn = HOME_INTERIOR_ORIGIN.clone().add(HOME_INTERIOR_SPAWN_OFFSET);
-    syncPlayerPosition(this.playerModel, this.playerControls, interiorSpawn);
+    const interiorOrigin = this.playerModel.position.clone().sub(HOME_INTERIOR_SPAWN_OFFSET);
+    this.interiorGroup.position.copy(interiorOrigin);
+    this.interiorDoorPosition = interiorOrigin
+      .clone()
+      .add(HOME_INTERIOR_DOOR_OFFSET)
+      .setY(interiorOrigin.y + 1.1);
+    if (this.interiorBody && window.rapierWorld?.getRigidBody(this.interiorBody.handle)) {
+      window.rapierWorld.removeRigidBody(this.interiorBody);
+    }
+    this.interiorBody = createInteriorColliders(window.rapierWorld, interiorOrigin);
     this.playerControls?.clearGpsMoveTarget?.();
     this.isInsideHome = true;
     this.interiorGroup.visible = true;
+    if (this.buildingsRenderer?.group) {
+      this.buildingsRenderer.group.visible = false;
+    }
   }
 
   exitHome() {
-    const exterior = this.lastExteriorPosition || this.getHomeLocalPosition();
-    if (!exterior) return;
-    const exitPosition = exterior.clone();
-    exitPosition.y = this.playerModel?.position?.y ?? exitPosition.y;
-    syncPlayerPosition(this.playerModel, this.playerControls, exitPosition);
+    if (this.interiorBody && window.rapierWorld?.getRigidBody(this.interiorBody.handle)) {
+      window.rapierWorld.removeRigidBody(this.interiorBody);
+    }
+    this.interiorBody = null;
     this.isInsideHome = false;
     this.interiorGroup.visible = false;
+    if (this.buildingsRenderer?.group) {
+      this.buildingsRenderer.group.visible = true;
+    }
   }
 
   isNearHomeDoor(position) {
