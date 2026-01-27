@@ -4861,7 +4861,9 @@ async function main() {
   const locationProvider = createLocationProvider({
     onUpdate: (location) => {
       window.latestLocation = location;
-      playerControls?.setGeoCenter({ lat: location.lat, lon: location.lon });
+      if (!homeSystem?.isInsideHome) {
+        playerControls?.setGeoCenter({ lat: location.lat, lon: location.lon });
+      }
       if (!worldOrigin && Number.isFinite(location.accuracyMeters) && location.accuracyMeters <= 50) {
         setWorldOrigin({ lat: location.lat, lon: location.lon });
         rebuildMapFromCache();
