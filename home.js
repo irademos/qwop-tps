@@ -289,6 +289,7 @@ export class HomeSystem {
     this.lastExteriorPosition = this.playerModel.position.clone();
     const interiorSpawn = HOME_INTERIOR_ORIGIN.clone().add(HOME_INTERIOR_SPAWN_OFFSET);
     syncPlayerPosition(this.playerModel, this.playerControls, interiorSpawn);
+    this.playerControls?.clearGpsMoveTarget?.();
     this.isInsideHome = true;
     this.interiorGroup.visible = true;
   }
