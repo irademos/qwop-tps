@@ -9,6 +9,7 @@ const TABS = [
   { id: 'multiplayer', label: 'Multiplayer' },
   { id: 'location', label: 'Location' },
   { id: 'display', label: 'Display' },
+  { id: 'about', label: 'About' },
   { id: 'developer', label: 'Developer' }
 ];
 const CHARACTER_STATS = [
@@ -579,6 +580,30 @@ function buildDisplayPanel() {
   return panelEl;
 }
 
+function buildAboutPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-about';
+  panelEl.dataset.panel = 'about';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-about');
+
+  const title = createElement('h3', 'settings-section-title', 'About');
+  const text = createElement('div', 'settings-muted');
+  text.style.whiteSpace = 'pre-wrap';
+  text.innerHTML = `
+<strong>Credits</strong>
+
+“Base Mesh Low Poly Character” by YOPN
+Source: <a href="https://skfb.ly/oCvvG" target="_blank" rel="noreferrer noopener">https://skfb.ly/oCvvG</a>
+License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer noopener">CC BY 4.0</a>
+${/* optionally */''}
+`;
+
+  panelEl.append(title, text);
+  return panelEl;
+}
+
+
 function buildPanels() {
   const body = createElement('div', 'settings-body');
   const characterPanel = buildCharacterPanel();
@@ -586,14 +611,16 @@ function buildPanels() {
   const multiplayerPanel = buildMultiplayerPanel();
   const locationPanel = buildLocationPanel();
   const displayPanel = buildDisplayPanel();
+  const aboutPanel = buildAboutPanel();
   const developerPanel = buildDeveloperPanel();
-  body.append(characterPanel, inventoryPanel, multiplayerPanel, locationPanel, displayPanel, developerPanel);
+  body.append(characterPanel, inventoryPanel, multiplayerPanel, locationPanel, displayPanel, aboutPanel, developerPanel);
   elements.panels = {
     character: characterPanel,
     inventory: inventoryPanel,
     multiplayer: multiplayerPanel,
     location: locationPanel,
     display: displayPanel,
+    about: aboutPanel,
     developer: developerPanel
   };
   return body;
