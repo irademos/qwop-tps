@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ref, update } from 'firebase/database';
 import { db } from './firebase-init.js';
+import { getKtx2Loader } from './ktx2Loader.js';
 
 const HOME_INTERIOR_ORIGIN = new THREE.Vector3(10000, 0, 10000);
 const HOME_INTERIOR_SIZE = {
@@ -13,21 +15,45 @@ const HOME_INTERIOR_WALL_THICKNESS = 0.3;
 const HOME_INTERIOR_FLOOR_THICKNESS = 0.2;
 const HOME_INTERIOR_SPAWN_OFFSET = new THREE.Vector3(0, 1.1, 0);
 const HOME_INTERIOR_DOOR_OFFSET = new THREE.Vector3(0, 0, -(HOME_INTERIOR_SIZE.depth / 2 - 0.5));
+const HOME_INTERIOR_STORAGE_OFFSET = new THREE.Vector3(3, 0, 3);
 const HOME_DOOR_INTERACT_DISTANCE = 2.2;
 const HOME_ENTER_DISTANCE = 8;
 const BUILDING_RAYCAST_HEIGHT = 120;
+const HOME_STORAGE_INTERACT_DISTANCE = 2.4;
+const HOME_STORAGE_CHEST_SCALE = 0.015;
+const HOME_STORAGE_CLAMP_MARGIN = 0.6;
+const HOME_INTERIOR_TEXTURE_REPEAT = 0.05;
+const HOME_TEXTURE_BASE_PATH = '/assets/textures/planks/planks';
 
-function createInteriorMesh() {
+function applyKtx2ToMaterial(ktx2, material, slot, url, { srgb = false, repeat = 2, anisotropy = null } = {}) {
+  if (!material || !slot || !url || !ktx2) return;
+  ktx2.load(
+    url,
+    (tex) => {
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(repeat, repeat);
+      if (anisotropy) tex.anisotropy = anisotropy;
+      if (srgb && tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+      material[slot] = tex;
+      material.needsUpdate = true;
+    },
+    undefined,
+    (err) => console.warn('KTX2 load failed:', slot, url, err)
+  );
+}
+
+function createInteriorMesh(renderer) {
   const group = new THREE.Group();
   group.name = 'home-interior';
 
   const floorMaterial = new THREE.MeshStandardMaterial({
-    color: 0xb0b7c3,
+    color: 0xffffff,
     roughness: 0.9,
     metalness: 0.0
   });
   const wallMaterial = new THREE.MeshStandardMaterial({
-    color: 0xdad1c1,
+    color: 0xffffff,
     roughness: 0.85,
     metalness: 0.0
   });
@@ -36,6 +62,53 @@ function createInteriorMesh() {
     roughness: 0.9,
     metalness: 0.0
   });
+
+  if (renderer) {
+    const ktx2 = getKtx2Loader(renderer);
+    const maxAnisotropy = renderer?.capabilities?.getMaxAnisotropy?.() ?? null;
+    applyKtx2ToMaterial(
+      ktx2,
+      floorMaterial,
+      'map',
+      `${HOME_TEXTURE_BASE_PATH}_albedo.ktx2`,
+      { srgb: true, repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      wallMaterial,
+      'map',
+      `${HOME_TEXTURE_BASE_PATH}_albedo.ktx2`,
+      { srgb: true, repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      floorMaterial,
+      'normalMap',
+      `${HOME_TEXTURE_BASE_PATH}_normal.ktx2`,
+      { repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      wallMaterial,
+      'normalMap',
+      `${HOME_TEXTURE_BASE_PATH}_normal.ktx2`,
+      { repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      floorMaterial,
+      'roughnessMap',
+      `${HOME_TEXTURE_BASE_PATH}_roughness.ktx2`,
+      { repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      wallMaterial,
+      'roughnessMap',
+      `${HOME_TEXTURE_BASE_PATH}_roughness.ktx2`,
+      { repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+  }
 
   const floor = new THREE.Mesh(
     new THREE.BoxGeometry(
@@ -170,6 +243,7 @@ export class HomeSystem {
     scene,
     playerModel,
     playerControls,
+    renderer,
     buildingsRenderer,
     profileNameKey,
     initialHome,
@@ -180,6 +254,7 @@ export class HomeSystem {
     this.scene = scene;
     this.playerModel = playerModel;
     this.playerControls = playerControls;
+    this.renderer = renderer;
     this.buildingsRenderer = buildingsRenderer;
     this.profileNameKey = profileNameKey;
     this.getLocalOrigin = getLocalOrigin;
@@ -191,7 +266,7 @@ export class HomeSystem {
     this.lastExteriorPosition = null;
     this.locationProvider = null;
 
-    this.interiorGroup = createInteriorMesh();
+    this.interiorGroup = createInteriorMesh(this.renderer);
     this.interiorGroup.position.copy(HOME_INTERIOR_ORIGIN);
     this.interiorGroup.visible = false;
     this.scene?.add(this.interiorGroup);
@@ -202,10 +277,41 @@ export class HomeSystem {
     this.rayDirection = new THREE.Vector3(0, -1, 0);
 
     this.interiorBody = null;
+    this.storageChest = null;
+    this.storageChestLoaded = false;
+    this.savedGeoBounds = null;
   }
 
   setLocationProvider(locationProvider) {
     this.locationProvider = locationProvider || null;
+  }
+
+  async loadStorageChest() {
+    if (this.storageChestLoaded) return;
+    this.storageChestLoaded = true;
+    const loader = new GLTFLoader();
+    let chestMesh = null;
+    try {
+      const gltf = await loader.loadAsync('/assets/props/treasure_chest.glb');
+      chestMesh = gltf.scene;
+    } catch (error) {
+      console.warn('Failed to load home storage chest model, using placeholder box.', error);
+      chestMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.8, 0.6, 0.6),
+        new THREE.MeshStandardMaterial({ color: 0x8b5a2b })
+      );
+    }
+    if (!chestMesh) return;
+    chestMesh.name = 'home-storage-chest';
+    chestMesh.position.copy(HOME_INTERIOR_STORAGE_OFFSET);
+    chestMesh.scale.setScalar(HOME_STORAGE_CHEST_SCALE);
+    chestMesh.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    this.storageChest = chestMesh;
+    this.interiorGroup?.add(chestMesh);
   }
 
   getHomeLocalPosition() {
@@ -284,6 +390,7 @@ export class HomeSystem {
     this.playerControls?.clearGpsMoveTarget?.();
     this.isInsideHome = true;
     this.interiorGroup.visible = true;
+    this.applyInteriorClamp(interiorOrigin);
     if (this.buildingsRenderer?.group) {
       this.buildingsRenderer.group.visible = false;
     }
@@ -296,6 +403,7 @@ export class HomeSystem {
     this.interiorBody = null;
     this.isInsideHome = false;
     this.interiorGroup.visible = false;
+    this.restoreExteriorClamp();
     if (this.buildingsRenderer?.group) {
       this.buildingsRenderer.group.visible = true;
     }
@@ -305,6 +413,59 @@ export class HomeSystem {
     if (!position) return false;
     const distance = position.distanceTo(this.interiorDoorPosition);
     return distance <= HOME_DOOR_INTERACT_DISTANCE;
+  }
+
+  getStorageChestWorldPosition() {
+    if (!this.storageChest) return null;
+    const worldPosition = new THREE.Vector3();
+    this.storageChest.getWorldPosition(worldPosition);
+    return worldPosition;
+  }
+
+  isNearStorageChest(position) {
+    if (!position || !this.storageChest) return false;
+    const chestPosition = this.getStorageChestWorldPosition();
+    if (!chestPosition) return false;
+    return position.distanceTo(chestPosition) <= HOME_STORAGE_INTERACT_DISTANCE;
+  }
+
+  applyInteriorClamp(origin) {
+    if (!this.playerControls) return;
+    if (!this.savedGeoBounds) {
+      this.savedGeoBounds = {
+        center: this.playerControls.geoBoundsCenterXZ?.clone?.() ?? null,
+        halfSize: this.playerControls.geoBoundHalfSizeM ?? null,
+        edgeEps: this.playerControls.geoEdgeEpsM ?? null
+      };
+    }
+    const halfSize = Math.max(
+      1,
+      (HOME_INTERIOR_SIZE.width / 2) - HOME_STORAGE_CLAMP_MARGIN
+    );
+    this.playerControls.geoBoundHalfSizeM = halfSize;
+    this.playerControls.geoBoundsCenterXZ = new THREE.Vector3(origin.x, 0, origin.z);
+    if (this.playerControls.geoBoundsShiftMeters) {
+      this.playerControls.geoBoundsShiftMeters.x = 0;
+      this.playerControls.geoBoundsShiftMeters.z = 0;
+    }
+  }
+
+  restoreExteriorClamp() {
+    if (!this.playerControls) return;
+    if (!this.savedGeoBounds) return;
+    const { center, halfSize, edgeEps } = this.savedGeoBounds;
+    this.playerControls.geoBoundsCenterXZ = center ? center.clone() : null;
+    if (typeof halfSize === 'number') {
+      this.playerControls.geoBoundHalfSizeM = halfSize;
+    }
+    if (typeof edgeEps === 'number') {
+      this.playerControls.geoEdgeEpsM = edgeEps;
+    }
+    if (this.playerControls.geoBoundsShiftMeters) {
+      this.playerControls.geoBoundsShiftMeters.x = 0;
+      this.playerControls.geoBoundsShiftMeters.z = 0;
+    }
+    this.savedGeoBounds = null;
   }
 
   getDistanceToHome(position) {
@@ -332,6 +493,14 @@ export class HomeSystem {
     if (!playerPosition) return null;
 
     if (this.isInsideHome) {
+      if (this.isNearStorageChest(playerPosition)) {
+        return {
+          type: 'home-storage',
+          maxDistance: HOME_STORAGE_INTERACT_DISTANCE,
+          distance: playerPosition.distanceTo(this.getStorageChestWorldPosition()),
+          promptText: isMobile ? 'click here to access storage' : "press 'x' to access storage"
+        };
+      }
       if (!this.isNearHomeDoor(playerPosition)) return null;
       return {
         type: 'home-exit',
@@ -372,6 +541,10 @@ export class HomeSystem {
     }
     if (target.type === 'home-enter') {
       this.enterHome();
+      return;
+    }
+    if (target.type === 'home-storage') {
+      window.openHomeStorage?.();
       return;
     }
     if (target.type === 'home-exit') {
