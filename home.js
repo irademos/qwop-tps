@@ -5,7 +5,7 @@ import { ref, update } from 'firebase/database';
 import { db } from './firebase-init.js';
 import { getKtx2Loader } from './ktx2Loader.js';
 
-const HOME_INTERIOR_ORIGIN = new THREE.Vector3(10000, 0, 10000);
+const HOME_INTERIOR_ORIGIN = new THREE.Vector3(10000, -500, 10000);
 const HOME_INTERIOR_SIZE = {
   width: 12,
   depth: 12,
@@ -377,12 +377,13 @@ export class HomeSystem {
   enterHome() {
     if (!this.playerModel) return;
     this.lastExteriorPosition = this.playerModel.position.clone();
-    const interiorOrigin = this.playerModel.position.clone().sub(HOME_INTERIOR_SPAWN_OFFSET);
+    const interiorOrigin = HOME_INTERIOR_ORIGIN.clone();
     this.interiorGroup.position.copy(interiorOrigin);
     this.interiorDoorPosition = interiorOrigin
       .clone()
       .add(HOME_INTERIOR_DOOR_OFFSET)
       .setY(interiorOrigin.y + 1.1);
+    this.playerModel.position.copy(interiorOrigin.clone().add(HOME_INTERIOR_SPAWN_OFFSET));
     if (this.interiorBody && window.rapierWorld?.getRigidBody(this.interiorBody.handle)) {
       window.rapierWorld.removeRigidBody(this.interiorBody);
     }
@@ -406,6 +407,9 @@ export class HomeSystem {
     this.restoreExteriorClamp();
     if (this.buildingsRenderer?.group) {
       this.buildingsRenderer.group.visible = true;
+    }
+    if (this.lastExteriorPosition && this.playerModel) {
+      this.playerModel.position.copy(this.lastExteriorPosition);
     }
   }
 
