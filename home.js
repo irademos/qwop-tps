@@ -14,7 +14,7 @@ const HOME_INTERIOR_FLOOR_THICKNESS = 0.2;
 const HOME_INTERIOR_SPAWN_OFFSET = new THREE.Vector3(0, 1.1, 0);
 const HOME_INTERIOR_DOOR_OFFSET = new THREE.Vector3(0, 0, -(HOME_INTERIOR_SIZE.depth / 2 - 0.5));
 const HOME_DOOR_INTERACT_DISTANCE = 2.2;
-const HOME_ENTER_DISTANCE = 6;
+const HOME_ENTER_DISTANCE = 8;
 const BUILDING_RAYCAST_HEIGHT = 120;
 
 function createInteriorMesh() {
@@ -165,22 +165,6 @@ function createInteriorColliders(world, origin) {
   return body;
 }
 
-function syncPlayerPosition(playerModel, playerControls, position) {
-  if (!playerModel || !position) return;
-  playerModel.position.copy(position);
-  if (playerControls?.body) {
-    playerControls.body.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
-    playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-  }
-  if (playerControls) {
-    playerControls.playerX = position.x;
-    playerControls.playerY = position.y;
-    playerControls.playerZ = position.z;
-    playerControls.lastPosition.copy(position);
-  }
-}
-
 export class HomeSystem {
   constructor({
     scene,
@@ -205,6 +189,7 @@ export class HomeSystem {
     this.homeData = initialHome || null;
     this.isInsideHome = false;
     this.lastExteriorPosition = null;
+    this.locationProvider = null;
 
     this.interiorGroup = createInteriorMesh();
     this.interiorGroup.position.copy(HOME_INTERIOR_ORIGIN);
@@ -216,7 +201,11 @@ export class HomeSystem {
     this.raycaster = new THREE.Raycaster();
     this.rayDirection = new THREE.Vector3(0, -1, 0);
 
-    this.interiorBody = createInteriorColliders(window.rapierWorld, HOME_INTERIOR_ORIGIN);
+    this.interiorBody = null;
+  }
+
+  setLocationProvider(locationProvider) {
+    this.locationProvider = locationProvider || null;
   }
 
   getHomeLocalPosition() {
@@ -232,6 +221,19 @@ export class HomeSystem {
       return new THREE.Vector3(local.x, 0, local.z);
     }
     return null;
+  }
+
+  getHomeGeo() {
+    if (!this.homeData) return null;
+    if (Number.isFinite(this.homeData.lat) && Number.isFinite(this.homeData.lon)) {
+      return { lat: this.homeData.lat, lon: this.homeData.lon };
+    }
+    const local = this.getHomeLocalPosition();
+    const origin = this.getLocalOrigin?.();
+    if (!local || !origin || !this.localMetersToGeo) return null;
+    const geo = this.localMetersToGeo(local.x, local.z, origin);
+    if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) return null;
+    return { lat: geo.lat, lon: geo.lon };
   }
 
   async persistHome(homeData) {
@@ -269,20 +271,34 @@ export class HomeSystem {
   enterHome() {
     if (!this.playerModel) return;
     this.lastExteriorPosition = this.playerModel.position.clone();
-    const interiorSpawn = HOME_INTERIOR_ORIGIN.clone().add(HOME_INTERIOR_SPAWN_OFFSET);
-    syncPlayerPosition(this.playerModel, this.playerControls, interiorSpawn);
+    const interiorOrigin = this.playerModel.position.clone().sub(HOME_INTERIOR_SPAWN_OFFSET);
+    this.interiorGroup.position.copy(interiorOrigin);
+    this.interiorDoorPosition = interiorOrigin
+      .clone()
+      .add(HOME_INTERIOR_DOOR_OFFSET)
+      .setY(interiorOrigin.y + 1.1);
+    if (this.interiorBody && window.rapierWorld?.getRigidBody(this.interiorBody.handle)) {
+      window.rapierWorld.removeRigidBody(this.interiorBody);
+    }
+    this.interiorBody = createInteriorColliders(window.rapierWorld, interiorOrigin);
+    this.playerControls?.clearGpsMoveTarget?.();
     this.isInsideHome = true;
     this.interiorGroup.visible = true;
+    if (this.buildingsRenderer?.group) {
+      this.buildingsRenderer.group.visible = false;
+    }
   }
 
   exitHome() {
-    const exterior = this.lastExteriorPosition || this.getHomeLocalPosition();
-    if (!exterior) return;
-    const exitPosition = exterior.clone();
-    exitPosition.y = this.playerModel?.position?.y ?? exitPosition.y;
-    syncPlayerPosition(this.playerModel, this.playerControls, exitPosition);
+    if (this.interiorBody && window.rapierWorld?.getRigidBody(this.interiorBody.handle)) {
+      window.rapierWorld.removeRigidBody(this.interiorBody);
+    }
+    this.interiorBody = null;
     this.isInsideHome = false;
     this.interiorGroup.visible = false;
+    if (this.buildingsRenderer?.group) {
+      this.buildingsRenderer.group.visible = true;
+    }
   }
 
   isNearHomeDoor(position) {
