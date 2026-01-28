@@ -131,8 +131,11 @@ export class PlayerControls {
     this.geoBoundsShiftMeters = { x: 0, z: 0 };
     this.geoBoundHalfSizeM = 8;
     this.geoEdgeEpsM = 0.75;
+    this.geoBoundsDebug = null;
+    this.geoBoundsDebugHeight = 2;
     this.gpsMoveTarget = null;
     this.gpsMoveEpsilon = 0.35;
+    this.groundOverrideY = null;
 
     // Player state
     this.canJump = true;
@@ -1224,9 +1227,9 @@ export class PlayerControls {
     }
 
     const terrainY = getTerrainHeight(t.x, t.z);
-    let groundY = terrainY;
+    let groundY = Number.isFinite(this.groundOverrideY) ? this.groundOverrideY : terrainY;
     const world = window.rapierWorld;
-    if (world) {
+    if (world && !Number.isFinite(this.groundOverrideY)) {
       const ray = new RAPIER.Ray({ x: t.x, y: t.y, z: t.z }, { x: 0, y: -1, z: 0 });
       const hit = world.castRay(ray, t.y + 10, true, undefined, undefined, undefined, this.body);
       if (hit) {
@@ -1340,7 +1343,8 @@ export class PlayerControls {
       }
     }
     const gpsMove = this.getGpsMoveDirection(position);
-    if (gpsMove && !movementLocked && !this.isClimbing && !this.isKnocked) {
+    const allowGpsMove = this.isOutsideGeoBounds(position);
+    if (gpsMove && allowGpsMove && !movementLocked && !this.isClimbing && !this.isKnocked) {
       movement.copy(gpsMove.direction);
       this.lastMoveDirection.copy(movement);
     }
@@ -1494,8 +1498,10 @@ export class PlayerControls {
         this.lastPosition.set(newX, displayY, newZ);
         this.wasMoving = this.isMoving;
       }
+      this.updateGeoBoundsDebug(this.playerModel.position);
     } else {
       this.camera.position.set(newX, newY + 1.2, newZ);
+      this.updateGeoBoundsDebug(new THREE.Vector3(newX, newY, newZ));
     }
     if (this.isMobile && this.controls) {
       this.controls.target.set(newX, newY + 1, newZ);
@@ -1767,6 +1773,18 @@ export class PlayerControls {
     this.gpsMoveTarget = null;
   }
 
+  isOutsideGeoBounds(position) {
+    if (!position || !this.geoBoundsCenterXZ || !Number.isFinite(this.geoBoundHalfSizeM)) {
+      return true;
+    }
+    const halfSize = this.geoBoundHalfSizeM;
+    const minX = this.geoBoundsCenterXZ.x - halfSize;
+    const maxX = this.geoBoundsCenterXZ.x + halfSize;
+    const minZ = this.geoBoundsCenterXZ.z - halfSize;
+    const maxZ = this.geoBoundsCenterXZ.z + halfSize;
+    return position.x < minX || position.x > maxX || position.z < minZ || position.z > maxZ;
+  }
+
   getGpsMoveDirection(position) {
     if (!this.gpsMoveTarget || !position) return null;
     const dx = this.gpsMoveTarget.x - position.x;
@@ -1777,6 +1795,30 @@ export class PlayerControls {
       return null;
     }
     return { direction: new THREE.Vector3(dx / distance, 0, dz / distance), distance };
+  }
+
+  updateGeoBoundsDebug(position) {
+    if (!this.scene) return;
+    if (!this.geoBoundsCenterXZ || !Number.isFinite(this.geoBoundHalfSizeM)) {
+      if (this.geoBoundsDebug) {
+        this.geoBoundsDebug.visible = false;
+      }
+      return;
+    }
+    if (!this.geoBoundsDebug) {
+      const geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1));
+      const material = new THREE.LineBasicMaterial({ color: 0x1e90ff });
+      this.geoBoundsDebug = new THREE.LineSegments(geometry, material);
+      this.geoBoundsDebug.name = 'geo-bounds-debug';
+      this.geoBoundsDebug.frustumCulled = false;
+      this.scene.add(this.geoBoundsDebug);
+    }
+    const size = this.geoBoundHalfSizeM * 2;
+    const height = this.geoBoundsDebugHeight;
+    const centerY = position?.y ?? 0;
+    this.geoBoundsDebug.scale.set(size, height, size);
+    this.geoBoundsDebug.position.set(this.geoBoundsCenterXZ.x, centerY, this.geoBoundsCenterXZ.z);
+    this.geoBoundsDebug.visible = true;
   }
   
   getCamera() {
