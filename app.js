@@ -5590,9 +5590,13 @@ async function main() {
     if (!mapViewEnabled) {
       playerControls.update();
     }
+    const homePosition = homeSystem?.getHomeLocalPosition?.();
+    const homeEnterDistance = homeSystem?.getHomeEnterDistance?.();
     updateMapView(frameDelta, {
       monsters,
-      friendlies: friendlyNpcManager?.friendlies
+      friendlies: friendlyNpcManager?.friendlies,
+      homePosition,
+      homeEnterDistance
     });
 
     const now = performance.now();
