@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CORE_CACHE = `core-shell-${CACHE_VERSION}`;
 const STATIC_CACHE = `static-assets-${CACHE_VERSION}`;
 const CDN_CACHE = `cdn-assets-${CACHE_VERSION}`;
@@ -9,10 +9,14 @@ const CORE_ASSETS = [
   '/app.js',
   '/styles.css',
   // '/models/cowboy.fbx',
+  '/models/base_character_2.fbx',
   '/models/zombie.fbx',
+  '/models/zombie_boy.fbx',
+  '/models/zombie_green.fbx',
   '/models/animations/Breathing Idle.fbx',
   '/models/animations/Old Man Walk.fbx',
-  '/assets/audio/BGS Loops/Forest Day/Forest Day.ogg'
+  '/assets/audio/BGS Loops/Forest Day/Forest Day.ogg',
+  '/icons/zombie_icon.png'
 ];
 
 self.addEventListener('install', (event) => {
