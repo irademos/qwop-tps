@@ -568,6 +568,10 @@ export class HomeSystem {
     };
   }
 
+  getHomeEnterDistance() {
+    return HOME_ENTER_DISTANCE;
+  }
+
   handleInteraction(target) {
     if (!target) return;
     if (target.type === 'home-select') {

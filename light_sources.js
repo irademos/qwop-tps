@@ -50,7 +50,7 @@ export const applyEmissiveGlow = (model, color, intensity) => {
   });
 };
 
-const createLightSource = async (config, position) => {
+export const createLightSource = async (config, position) => {
   const loader = new GLTFLoader();
   const gltf = await loader.loadAsync(config.modelUrl);
   const model = gltf.scene;

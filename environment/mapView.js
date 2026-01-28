@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { createLightSource, LIGHT_SOURCE_CONFIGS } from "../light_sources.js";
 
 const DEFAULT_ZOOM_HEIGHT = 90;
 const MIN_ZOOM_HEIGHT = 30;
@@ -27,7 +28,12 @@ const state = {
   monsterDots: [],
   friendlyDots: [],
   monsterDotMaterial: null,
-  friendlyDotMaterial: null
+  friendlyDotMaterial: null,
+  homeIcon: null,
+  homeRadiusLine: null,
+  homeRadiusValue: null,
+  homeLight: null,
+  homeLightPending: false
 };
 
 function createPlayerIconTexture() {
@@ -80,6 +86,43 @@ function createDotTexture(color) {
   return canvas;
 }
 
+function createHomeIconTexture() {
+  const size = 96;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "rgba(0, 0, 0, 0)";
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.fillStyle = "#f97316";
+  ctx.strokeStyle = "#7c2d12";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(size * 0.2, size * 0.45);
+  ctx.lineTo(size * 0.5, size * 0.2);
+  ctx.lineTo(size * 0.8, size * 0.45);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#fef3c7";
+  ctx.beginPath();
+  ctx.rect(size * 0.28, size * 0.45, size * 0.44, size * 0.35);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "#7c2d12";
+  ctx.beginPath();
+  ctx.rect(size * 0.47, size * 0.6, size * 0.12, size * 0.2);
+  ctx.fill();
+
+  return canvas;
+}
+
 function getDotMaterial(kind) {
   if (kind === "monster") {
     if (state.monsterDotMaterial) return state.monsterDotMaterial;
@@ -114,6 +157,75 @@ function createDotSprite(kind) {
   sprite.visible = false;
   sprite.renderOrder = 998;
   return sprite;
+}
+
+function ensureHomeIcon() {
+  if (!state.scene || state.homeIcon) return;
+  const canvas = createHomeIconTexture();
+  const texture = canvas ? new THREE.CanvasTexture(canvas) : null;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(5, 5, 5);
+  sprite.visible = false;
+  sprite.renderOrder = 999;
+  state.homeIcon = sprite;
+  state.scene.add(sprite);
+}
+
+function createHomeRadiusLine(radius) {
+  const curve = new THREE.EllipseCurve(0, 0, radius, radius, 0, Math.PI * 2, false, 0);
+  const points = curve.getPoints(64);
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color: 0xef4444,
+    transparent: true,
+    opacity: 0.9
+  });
+  const line = new THREE.LineLoop(geometry, material);
+  line.visible = false;
+  line.renderOrder = 997;
+  return line;
+}
+
+function ensureHomeRadiusLine(radius) {
+  if (!state.scene || !Number.isFinite(radius)) return;
+  if (state.homeRadiusLine && state.homeRadiusValue === radius) return;
+  if (state.homeRadiusLine) {
+    state.scene.remove(state.homeRadiusLine);
+    state.homeRadiusLine.geometry.dispose();
+    state.homeRadiusLine.material.dispose();
+  }
+  state.homeRadiusLine = createHomeRadiusLine(radius);
+  state.homeRadiusValue = radius;
+  state.scene.add(state.homeRadiusLine);
+}
+
+function ensureHomeLight(homePosition) {
+  if (!state.scene || !homePosition) return;
+  if (state.homeLight?.model) {
+    state.homeLight.model.position.copy(homePosition);
+    return;
+  }
+  if (state.homeLightPending) return;
+  state.homeLightPending = true;
+  createLightSource(LIGHT_SOURCE_CONFIGS.roadLight, homePosition.clone())
+    .then((lightSource) => {
+      if (!state.scene) return;
+      state.homeLight = lightSource;
+      state.homeLight.model.position.copy(homePosition);
+      state.scene.add(lightSource.model);
+    })
+    .catch((error) => {
+      console.warn("Failed to load home road light:", error);
+    })
+    .finally(() => {
+      state.homeLightPending = false;
+    });
 }
 
 function ensurePlayerIcon() {
@@ -169,6 +281,35 @@ function updateDotPool(entities, pool, kind) {
       entity.model.position.z
     );
     sprite.visible = state.enabled;
+  }
+}
+
+function updateHomeIndicators(homePosition, homeEnterDistance) {
+  if (!state.scene) return;
+  if (!homePosition) {
+    if (state.homeIcon) state.homeIcon.visible = false;
+    if (state.homeRadiusLine) state.homeRadiusLine.visible = false;
+    if (state.homeLight?.model) state.homeLight.model.visible = false;
+    return;
+  }
+  const hasEnterDistance = Number.isFinite(homeEnterDistance);
+  ensureHomeIcon();
+  if (hasEnterDistance) {
+    ensureHomeRadiusLine(homeEnterDistance);
+  } else if (state.homeRadiusLine) {
+    state.homeRadiusLine.visible = false;
+  }
+  ensureHomeLight(homePosition);
+  if (state.homeLight?.model) {
+    state.homeLight.model.visible = true;
+  }
+  if (state.homeIcon) {
+    state.homeIcon.position.set(homePosition.x, homePosition.y + DOT_Y_OFFSET, homePosition.z);
+    state.homeIcon.visible = state.enabled;
+  }
+  if (state.homeRadiusLine && hasEnterDistance) {
+    state.homeRadiusLine.position.set(homePosition.x, homePosition.y + 0.05, homePosition.z);
+    state.homeRadiusLine.visible = state.enabled;
   }
 }
 
@@ -300,8 +441,10 @@ function updatePlayerIcon() {
   }
 }
 
-function update(dt, { monsters, friendlies } = {}) {
+function update(dt, { monsters, friendlies, homePosition, homeEnterDistance } = {}) {
   if (!state.camera || !state.player) return;
+
+  updateHomeIndicators(homePosition, homeEnterDistance);
 
   if (state.enabled) {
     state.mapZoomHeight = THREE.MathUtils.damp(
