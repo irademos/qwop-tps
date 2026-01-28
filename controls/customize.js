@@ -22,11 +22,30 @@ const SKIN_COLORS = [
   '#8f5a3e'
 ];
 
-const CLOTHING_ITEMS = [
+const SHIRT_ITEMS = [
   { id: 'vest', label: 'Vest', model: '/models/clothes/vest.glb', offsets: '/models/clothes/vest.json' },
   { id: 'vest_armor', label: 'Vest Armor', model: '/models/clothes/vest_armor.glb', offsets: '/models/clothes/vest_armor.json' },
   { id: 'vest_rainbow', label: 'Vest Rainbow', model: '/models/clothes/vest_rainbow.glb', offsets: '/models/clothes/vest_rainbow.json' }
 ];
+const HAT_ITEMS = [];
+
+const DEFAULT_CUSTOMIZATION = {
+  skinTone: null,
+  shirts: { selectedId: null, overrides: {} },
+  hats: { selectedId: null, overrides: {} }
+};
+
+const AXIS_ORDER = ['x', 'y', 'z'];
+const GROUP_LABELS = {
+  position: 'pos',
+  scale: 'scale',
+  rotation: 'rot'
+};
+const ADJUST_STEPS = {
+  position: 0.1,
+  scale: 0.01,
+  rotation: 0.05
+};
 
 const loader = new GLTFLoader();
 const gltfCache = new Map();
@@ -38,8 +57,12 @@ let activeTab = 'skin';
 let getPlayerModel = () => window.playerModel;
 let getPlayerControls = () => window.playerControls;
 let cameraState = null;
-let currentClothing = null;
-let clothingRequestToken = 0;
+const currentClothingBySlot = new Map();
+const clothingRequestTokens = new Map();
+let customizationState = cloneCustomization(DEFAULT_CUSTOMIZATION);
+let onSaveCustomization = null;
+let controlsBySlot = new Map();
+let tilesBySlot = new Map();
 
 function createElement(tag, className, text) {
   const el = document.createElement(tag);
@@ -94,6 +117,7 @@ function focusCameraOnPlayer() {
 function applyPlayerColor(color) {
   const playerModel = getPlayerModel?.();
   if (!playerModel) return;
+  customizationState.skinTone = color;
   const nextColor = new THREE.Color(color);
   playerModel.traverse((child) => {
     if (!child.isMesh) return;
@@ -106,6 +130,83 @@ function applyPlayerColor(color) {
       }
     });
   });
+}
+
+function cloneCustomization(data) {
+  const source = data || {};
+  return {
+    skinTone: source.skinTone ?? null,
+    shirts: {
+      selectedId: source.shirts?.selectedId ?? null,
+      overrides: cloneOverrides(source.shirts?.overrides)
+    },
+    hats: {
+      selectedId: source.hats?.selectedId ?? null,
+      overrides: cloneOverrides(source.hats?.overrides)
+    }
+  };
+}
+
+function cloneOverrides(overrides) {
+  const result = {};
+  if (!overrides || typeof overrides !== 'object') {
+    return result;
+  }
+  Object.entries(overrides).forEach(([itemId, value]) => {
+    result[itemId] = {
+      position: { ...(value?.position || {}) },
+      scale: { ...(value?.scale || {}) },
+      rotation: { ...(value?.rotation || {}) }
+    };
+  });
+  return result;
+}
+
+function getSlotState(slot) {
+  return customizationState[slot] || { selectedId: null, overrides: {} };
+}
+
+function setSlotSelection(slot, itemId) {
+  const slotState = getSlotState(slot);
+  slotState.selectedId = itemId;
+  customizationState[slot] = slotState;
+  updateTileSelection(slot, itemId);
+  attachTransformControls(slot, itemId);
+}
+
+function updateTileSelection(slot, selectedId) {
+  const tileMap = tilesBySlot.get(slot);
+  if (!tileMap) return;
+  tileMap.forEach((tile, id) => {
+    tile.classList.toggle('is-active', id === selectedId);
+    if (id !== selectedId) {
+      restoreTileLabel(tile);
+    }
+  });
+}
+
+function restoreTileLabel(tile) {
+  if (tile.dataset.label != null) {
+    tile.textContent = tile.dataset.label;
+  }
+}
+
+function attachTransformControls(slot, selectedId) {
+  const tileMap = tilesBySlot.get(slot);
+  const controls = controlsBySlot.get(slot);
+  if (!tileMap || !controls) return;
+  const selectedTile = tileMap.get(selectedId);
+  if (!selectedTile) {
+    if (controls.parentElement) {
+      controls.parentElement.removeChild(controls);
+    }
+    return;
+  }
+  if (controls.parentElement && controls.parentElement !== selectedTile) {
+    controls.parentElement.removeChild(controls);
+  }
+  selectedTile.textContent = '';
+  selectedTile.appendChild(controls);
 }
 
 function findTorsoAnchor(model) {
@@ -152,10 +253,11 @@ function getGltf(url) {
   return promise;
 }
 
-async function loadClothing(item) {
+async function loadClothing(item, slot) {
   const playerModel = getPlayerModel?.();
   if (!playerModel) return;
-  const requestToken = ++clothingRequestToken;
+  const requestToken = (clothingRequestTokens.get(slot) || 0) + 1;
+  clothingRequestTokens.set(slot, requestToken);
   let gltf = null;
   try {
     gltf = await getGltf(item.model);
@@ -163,7 +265,7 @@ async function loadClothing(item) {
     console.warn('Failed to load clothing model', error);
     return;
   }
-  if (requestToken !== clothingRequestToken) {
+  if (requestToken !== clothingRequestTokens.get(slot)) {
     return;
   }
   const clothing = gltf.scene.clone(true);
@@ -176,37 +278,56 @@ async function loadClothing(item) {
     }
   });
 
-  if (currentClothing && currentClothing.parent) {
-    currentClothing.parent.remove(currentClothing);
+  const currentEntry = currentClothingBySlot.get(slot);
+  if (currentEntry?.mesh && currentEntry.mesh.parent) {
+    currentEntry.mesh.parent.remove(currentEntry.mesh);
   }
 
   const anchor = findTorsoAnchor(playerModel);
   const parent = anchor || playerModel;
-  parent.add(clothing);
   const basePosition = anchor ? new THREE.Vector3() : getFallbackTorsoPosition(playerModel);
   if (!anchor) {
     playerModel.worldToLocal(basePosition);
   }
-  const offsets = (await loadOffsets(item.offsets)) || {};
-  const positionOffset = offsets.position || {};
-  const scaleOffset = offsets.scale || {};
-  const rotationOffset = offsets.rotation || {};
+  const clothingWrapper = new THREE.Group();
+  clothingWrapper.name = `customize-wrapper-${item.id}`;
+  const clothingBounds = new THREE.Box3().setFromObject(clothing);
+  const clothingCenter = new THREE.Vector3();
+  clothingBounds.getCenter(clothingCenter);
+  clothing.position.sub(clothingCenter);
+  clothingWrapper.add(clothing);
+  parent.add(clothingWrapper);
+  const baseOffsets = (await loadOffsets(item.offsets)) || {};
+  const overrides = getSlotState(slot).overrides?.[item.id] || {};
+  applyOffsetsToClothing(clothingWrapper, baseOffsets, overrides, basePosition, clothingCenter);
+  currentClothingBySlot.set(slot, {
+    mesh: clothingWrapper,
+    item,
+    baseOffsets,
+    basePosition,
+    center: clothingCenter
+  });
+}
+
+function applyOffsetsToClothing(clothing, baseOffsets, overrides, basePosition, center = new THREE.Vector3()) {
+  const positionOffset = resolveOffsets(baseOffsets?.position, overrides?.position, { x: 0, y: 0, z: 0 });
+  const scaleOffset = resolveOffsets(baseOffsets?.scale, overrides?.scale, { x: 1, y: 1, z: 1 });
+  const rotationOffset = resolveOffsets(baseOffsets?.rotation, overrides?.rotation, { x: 0, y: 0, z: 0 });
   clothing.position.set(
-    basePosition.x + (positionOffset.x || 0),
-    basePosition.y + (positionOffset.y || 0),
-    basePosition.z + (positionOffset.z || 0)
+    basePosition.x + positionOffset.x + center.x,
+    basePosition.y + positionOffset.y + center.y,
+    basePosition.z + positionOffset.z + center.z
   );
-  clothing.scale.set(
-    scaleOffset.x != null ? scaleOffset.x : 1,
-    scaleOffset.y != null ? scaleOffset.y : 1,
-    scaleOffset.z != null ? scaleOffset.z : 1
-  );
-  clothing.rotation.set(
-    rotationOffset.x || 0,
-    rotationOffset.y || 0,
-    rotationOffset.z || 0
-  );
-  currentClothing = clothing;
+  clothing.scale.set(scaleOffset.x, scaleOffset.y, scaleOffset.z);
+  clothing.rotation.set(rotationOffset.x, rotationOffset.y, rotationOffset.z);
+}
+
+function resolveOffsets(base, override, fallback) {
+  return {
+    x: override?.x ?? base?.x ?? fallback.x,
+    y: override?.y ?? base?.y ?? fallback.y,
+    z: override?.z ?? base?.z ?? fallback.z
+  };
 }
 
 function buildSkinPanel() {
@@ -231,22 +352,78 @@ function buildShirtsPanel() {
   panelEl.dataset.panel = 'shirts';
 
   const grid = createElement('div', 'customize-grid');
-  CLOTHING_ITEMS.forEach((item) => {
+  const tileMap = new Map();
+  SHIRT_ITEMS.forEach((item) => {
     const tile = createElement('button', 'customize-tile', item.label);
     tile.type = 'button';
     tile.dataset.clothing = item.id;
+    tile.dataset.slot = 'shirts';
+    tile.dataset.label = item.label;
     grid.appendChild(tile);
+    tileMap.set(item.id, tile);
   });
   panelEl.appendChild(grid);
+  tilesBySlot.set('shirts', tileMap);
+
+  const controls = buildTransformControls('shirts');
+  controlsBySlot.set('shirts', controls);
   return panelEl;
 }
 
 function buildHatsPanel() {
   const panelEl = createElement('div', 'customize-tab-panel');
   panelEl.dataset.panel = 'hats';
-  const empty = createElement('div', 'customize-empty', 'No hats available yet.');
-  panelEl.appendChild(empty);
+  if (!HAT_ITEMS.length) {
+    const empty = createElement('div', 'customize-empty', 'No hats available yet.');
+    panelEl.appendChild(empty);
+  } else {
+    const grid = createElement('div', 'customize-grid');
+    const tileMap = new Map();
+    HAT_ITEMS.forEach((item) => {
+      const tile = createElement('button', 'customize-tile', item.label);
+      tile.type = 'button';
+      tile.dataset.clothing = item.id;
+      tile.dataset.slot = 'hats';
+      tile.dataset.label = item.label;
+      grid.appendChild(tile);
+      tileMap.set(item.id, tile);
+    });
+    panelEl.appendChild(grid);
+    tilesBySlot.set('hats', tileMap);
+  }
+  const controls = buildTransformControls('hats');
+  controlsBySlot.set('hats', controls);
   return panelEl;
+}
+
+function buildTransformControls(slot) {
+  const wrapper = createElement('div', 'customize-transform');
+  wrapper.dataset.slot = slot;
+  Object.entries(GROUP_LABELS).forEach(([group, label]) => {
+    const groupRow = createElement('div', 'customize-transform-group');
+    const groupLabel = createElement('span', 'customize-transform-label', label);
+    groupRow.appendChild(groupLabel);
+    AXIS_ORDER.forEach((axis) => {
+      const axisGroup = createElement('div', 'customize-transform-axis');
+      const axisLabel = createElement('span', 'customize-transform-axis-label', axis);
+      const upButton = createElement('button', 'customize-adjust', '▲');
+      const downButton = createElement('button', 'customize-adjust', '▼');
+      upButton.type = 'button';
+      downButton.type = 'button';
+      upButton.dataset.slot = slot;
+      downButton.dataset.slot = slot;
+      upButton.dataset.group = group;
+      downButton.dataset.group = group;
+      upButton.dataset.axis = axis;
+      downButton.dataset.axis = axis;
+      upButton.dataset.direction = 'up';
+      downButton.dataset.direction = 'down';
+      axisGroup.append(axisLabel, upButton, downButton);
+      groupRow.appendChild(axisGroup);
+    });
+    wrapper.appendChild(groupRow);
+  });
+  return wrapper;
 }
 
 function buildPanel() {
@@ -303,21 +480,92 @@ function buildPanel() {
       return;
     }
     if (target.dataset.clothing) {
-      const item = CLOTHING_ITEMS.find((entry) => entry.id === target.dataset.clothing);
+      const slot = target.dataset.slot || 'shirts';
+      const items = slot === 'hats' ? HAT_ITEMS : SHIRT_ITEMS;
+      const item = items.find((entry) => entry.id === target.dataset.clothing);
       if (item) {
-        loadClothing(item);
+        setSlotSelection(slot, item.id);
+        loadClothing(item, slot);
       }
+      return;
+    }
+    if (target.dataset.direction && target.dataset.group && target.dataset.axis) {
+      const slot = target.dataset.slot || 'shirts';
+      adjustClothingTransform(slot, target.dataset.group, target.dataset.axis, target.dataset.direction);
     }
   });
 
   setActiveTab(activeTab);
 }
 
-export function initCustomizeUI({ getPlayerModel: getModel, getPlayerControls: getControls } = {}) {
+function adjustClothingTransform(slot, group, axis, direction) {
+  const currentEntry = currentClothingBySlot.get(slot);
+  if (!currentEntry?.mesh) return;
+  const step = ADJUST_STEPS[group] || 0;
+  const delta = direction === 'down' ? -step : step;
+  const slotState = getSlotState(slot);
+  if (!slotState.selectedId) return;
+  const itemId = slotState.selectedId;
+  const overrides = slotState.overrides?.[itemId] || {};
+  const baseOffsets = currentEntry.baseOffsets || {};
+  const basePosition = currentEntry.basePosition || new THREE.Vector3();
+  const center = currentEntry.center || new THREE.Vector3();
+
+  const currentOffsets = {
+    position: resolveOffsets(baseOffsets.position, overrides.position, { x: 0, y: 0, z: 0 }),
+    scale: resolveOffsets(baseOffsets.scale, overrides.scale, { x: 1, y: 1, z: 1 }),
+    rotation: resolveOffsets(baseOffsets.rotation, overrides.rotation, { x: 0, y: 0, z: 0 })
+  };
+  currentOffsets[group][axis] = (currentOffsets[group][axis] || 0) + delta;
+
+  const nextOverrides = {
+    position: { ...(overrides.position || {}) },
+    scale: { ...(overrides.scale || {}) },
+    rotation: { ...(overrides.rotation || {}) }
+  };
+  nextOverrides[group][axis] = currentOffsets[group][axis];
+  slotState.overrides = { ...(slotState.overrides || {}), [itemId]: nextOverrides };
+  customizationState[slot] = slotState;
+  applyOffsetsToClothing(currentEntry.mesh, baseOffsets, nextOverrides, basePosition, center);
+}
+
+function applyCustomizationState() {
+  if (customizationState.skinTone) {
+    applyPlayerColor(customizationState.skinTone);
+  }
+  if (customizationState.shirts?.selectedId) {
+    const item = SHIRT_ITEMS.find((entry) => entry.id === customizationState.shirts.selectedId);
+    if (item) {
+      setSlotSelection('shirts', item.id);
+      loadClothing(item, 'shirts');
+    }
+  }
+  if (customizationState.hats?.selectedId) {
+    const item = HAT_ITEMS.find((entry) => entry.id === customizationState.hats.selectedId);
+    if (item) {
+      setSlotSelection('hats', item.id);
+      loadClothing(item, 'hats');
+    }
+  }
+}
+
+export function initCustomizeUI({
+  getPlayerModel: getModel,
+  getPlayerControls: getControls,
+  initialCustomization,
+  onSaveCustomization: handleSaveCustomization
+} = {}) {
   if (panel) return;
   if (typeof getModel === 'function') getPlayerModel = getModel;
   if (typeof getControls === 'function') getPlayerControls = getControls;
+  if (typeof initialCustomization !== 'undefined') {
+    customizationState = cloneCustomization(initialCustomization);
+  }
+  if (typeof handleSaveCustomization === 'function') {
+    onSaveCustomization = handleSaveCustomization;
+  }
   buildPanel();
+  applyCustomizationState();
 }
 
 export function openCustomizeUI() {
@@ -330,4 +578,12 @@ export function closeCustomizeUI() {
   if (!panel) return;
   setPanelVisibility(false);
   restoreCameraState();
+  if (onSaveCustomization) {
+    const result = onSaveCustomization(cloneCustomization(customizationState));
+    if (result && typeof result.catch === 'function') {
+      result.catch((error) => {
+        console.warn('Failed to save customization', error);
+      });
+    }
+  }
 }

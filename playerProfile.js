@@ -20,6 +20,11 @@ const DEFAULT_STATS = {
 };
 const DEFAULT_INVENTORY = {};
 const DEFAULT_HOME_STORAGE = {};
+const DEFAULT_CUSTOMIZATION = {
+  skinTone: null,
+  shirts: { selectedId: null, overrides: {} },
+  hats: { selectedId: null, overrides: {} }
+};
 
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
@@ -61,6 +66,7 @@ function buildProfile(name) {
     stats: { ...DEFAULT_STATS },
     inventory: { ...DEFAULT_INVENTORY },
     homeStorage: { ...DEFAULT_HOME_STORAGE },
+    customization: mergeCustomization(DEFAULT_CUSTOMIZATION),
     lastStatUpdateAt: now,
     createdAt: now,
     updatedAt: now
@@ -69,6 +75,20 @@ function buildProfile(name) {
 
 function mergeStats(stats) {
   return { ...DEFAULT_STATS, ...(stats || {}) };
+}
+
+function mergeCustomization(customization) {
+  return {
+    skinTone: customization?.skinTone ?? DEFAULT_CUSTOMIZATION.skinTone,
+    shirts: {
+      selectedId: customization?.shirts?.selectedId ?? null,
+      overrides: { ...(customization?.shirts?.overrides || {}) }
+    },
+    hats: {
+      selectedId: customization?.hats?.selectedId ?? null,
+      overrides: { ...(customization?.hats?.overrides || {}) }
+    }
+  };
 }
 
 async function loadProfileForName(profileRef, trimmedName) {
@@ -84,11 +104,15 @@ async function loadProfileForName(profileRef, trimmedName) {
   const mergedStats = mergeStats(profile.stats);
   const mergedInventory = profile.inventory ? { ...profile.inventory } : { ...DEFAULT_INVENTORY };
   const mergedHomeStorage = profile.homeStorage ? { ...profile.homeStorage } : { ...DEFAULT_HOME_STORAGE };
+  const mergedCustomization = mergeCustomization(profile.customization);
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
   const inventoryMissing = profile.inventory == null;
   const homeStorageMissing = profile.homeStorage == null;
-  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing) {
+  const customizationMissing = profile.customization == null
+    || profile.customization.shirts == null
+    || profile.customization.hats == null;
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
@@ -108,6 +132,12 @@ async function loadProfileForName(profileRef, trimmedName) {
     } else {
       profile.homeStorage = mergedHomeStorage;
     }
+    if (customizationMissing) {
+      updatePayload.customization = mergedCustomization;
+      profile.customization = mergedCustomization;
+    } else {
+      profile.customization = mergedCustomization;
+    }
     if (!hasLastStatUpdateAt) {
       updatePayload.lastStatUpdateAt = Date.now();
       profile.lastStatUpdateAt = updatePayload.lastStatUpdateAt;
@@ -117,6 +147,7 @@ async function loadProfileForName(profileRef, trimmedName) {
     profile.stats = mergedStats;
     profile.inventory = mergedInventory;
     profile.homeStorage = mergedHomeStorage;
+    profile.customization = mergedCustomization;
   }
 
   console.log('✅ Loaded profile for', trimmedName);
@@ -395,6 +426,18 @@ export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt, inventory, 
     void flushStats(nameKey);
   }, delay);
   pendingTimersByName.set(nameKey, timer);
+}
+
+export async function saveCustomization(nameKey, customization) {
+  if (!nameKey) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}`), {
+      customization: mergeCustomization(customization),
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.error('Failed to save customization for', nameKey, error);
+  }
 }
 
 export async function deleteProfileData(nameKey, playerName) {
