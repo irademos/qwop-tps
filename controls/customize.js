@@ -42,7 +42,7 @@ const GROUP_LABELS = {
   rotation: 'rot'
 };
 const ADJUST_STEPS = {
-  position: 0.01,
+  position: 0.1,
   scale: 0.01,
   rotation: 0.05
 };
@@ -58,7 +58,7 @@ let getPlayerModel = () => window.playerModel;
 let getPlayerControls = () => window.playerControls;
 let cameraState = null;
 const currentClothingBySlot = new Map();
-let clothingRequestToken = 0;
+const clothingRequestTokens = new Map();
 let customizationState = cloneCustomization(DEFAULT_CUSTOMIZATION);
 let onSaveCustomization = null;
 let controlsBySlot = new Map();
@@ -256,7 +256,8 @@ function getGltf(url) {
 async function loadClothing(item, slot) {
   const playerModel = getPlayerModel?.();
   if (!playerModel) return;
-  const requestToken = ++clothingRequestToken;
+  const requestToken = (clothingRequestTokens.get(slot) || 0) + 1;
+  clothingRequestTokens.set(slot, requestToken);
   let gltf = null;
   try {
     gltf = await getGltf(item.model);
@@ -264,7 +265,7 @@ async function loadClothing(item, slot) {
     console.warn('Failed to load clothing model', error);
     return;
   }
-  if (requestToken !== clothingRequestToken) {
+  if (requestToken !== clothingRequestTokens.get(slot)) {
     return;
   }
   const clothing = gltf.scene.clone(true);
@@ -284,30 +285,38 @@ async function loadClothing(item, slot) {
 
   const anchor = findTorsoAnchor(playerModel);
   const parent = anchor || playerModel;
-  parent.add(clothing);
   const basePosition = anchor ? new THREE.Vector3() : getFallbackTorsoPosition(playerModel);
   if (!anchor) {
     playerModel.worldToLocal(basePosition);
   }
+  const clothingWrapper = new THREE.Group();
+  clothingWrapper.name = `customize-wrapper-${item.id}`;
+  const clothingBounds = new THREE.Box3().setFromObject(clothing);
+  const clothingCenter = new THREE.Vector3();
+  clothingBounds.getCenter(clothingCenter);
+  clothing.position.sub(clothingCenter);
+  clothingWrapper.add(clothing);
+  parent.add(clothingWrapper);
   const baseOffsets = (await loadOffsets(item.offsets)) || {};
   const overrides = getSlotState(slot).overrides?.[item.id] || {};
-  applyOffsetsToClothing(clothing, baseOffsets, overrides, basePosition);
+  applyOffsetsToClothing(clothingWrapper, baseOffsets, overrides, basePosition, clothingCenter);
   currentClothingBySlot.set(slot, {
-    mesh: clothing,
+    mesh: clothingWrapper,
     item,
     baseOffsets,
-    basePosition
+    basePosition,
+    center: clothingCenter
   });
 }
 
-function applyOffsetsToClothing(clothing, baseOffsets, overrides, basePosition) {
+function applyOffsetsToClothing(clothing, baseOffsets, overrides, basePosition, center = new THREE.Vector3()) {
   const positionOffset = resolveOffsets(baseOffsets?.position, overrides?.position, { x: 0, y: 0, z: 0 });
   const scaleOffset = resolveOffsets(baseOffsets?.scale, overrides?.scale, { x: 1, y: 1, z: 1 });
   const rotationOffset = resolveOffsets(baseOffsets?.rotation, overrides?.rotation, { x: 0, y: 0, z: 0 });
   clothing.position.set(
-    basePosition.x + positionOffset.x,
-    basePosition.y + positionOffset.y,
-    basePosition.z + positionOffset.z
+    basePosition.x + positionOffset.x + center.x,
+    basePosition.y + positionOffset.y + center.y,
+    basePosition.z + positionOffset.z + center.z
   );
   clothing.scale.set(scaleOffset.x, scaleOffset.y, scaleOffset.z);
   clothing.rotation.set(rotationOffset.x, rotationOffset.y, rotationOffset.z);
@@ -500,6 +509,7 @@ function adjustClothingTransform(slot, group, axis, direction) {
   const overrides = slotState.overrides?.[itemId] || {};
   const baseOffsets = currentEntry.baseOffsets || {};
   const basePosition = currentEntry.basePosition || new THREE.Vector3();
+  const center = currentEntry.center || new THREE.Vector3();
 
   const currentOffsets = {
     position: resolveOffsets(baseOffsets.position, overrides.position, { x: 0, y: 0, z: 0 }),
@@ -516,7 +526,7 @@ function adjustClothingTransform(slot, group, axis, direction) {
   nextOverrides[group][axis] = currentOffsets[group][axis];
   slotState.overrides = { ...(slotState.overrides || {}), [itemId]: nextOverrides };
   customizationState[slot] = slotState;
-  applyOffsetsToClothing(currentEntry.mesh, baseOffsets, nextOverrides, basePosition);
+  applyOffsetsToClothing(currentEntry.mesh, baseOffsets, nextOverrides, basePosition, center);
 }
 
 function applyCustomizationState() {
