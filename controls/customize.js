@@ -39,6 +39,7 @@ let getPlayerModel = () => window.playerModel;
 let getPlayerControls = () => window.playerControls;
 let cameraState = null;
 let currentClothing = null;
+let clothingRequestToken = 0;
 
 function createElement(tag, className, text) {
   const el = document.createElement(tag);
@@ -154,11 +155,15 @@ function getGltf(url) {
 async function loadClothing(item) {
   const playerModel = getPlayerModel?.();
   if (!playerModel) return;
+  const requestToken = ++clothingRequestToken;
   let gltf = null;
   try {
     gltf = await getGltf(item.model);
   } catch (error) {
     console.warn('Failed to load clothing model', error);
+    return;
+  }
+  if (requestToken !== clothingRequestToken) {
     return;
   }
   const clothing = gltf.scene.clone(true);
