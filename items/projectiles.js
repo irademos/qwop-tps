@@ -179,7 +179,7 @@ export function updateProjectiles({
 
     if (removed) continue;
 
-    // Check destructible props loaded via LevelLoader
+    // Check destructible props
     if (window.breakManager) {
       for (const [id, data] of window.breakManager.registry.entries()) {
         if (!data?.bbox) continue;

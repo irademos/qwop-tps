@@ -2072,18 +2072,6 @@ export class PlayerControls {
       }
     }
 
-    const bm = window.breakManager;
-    if (bm) {
-      for (const [id, data] of bm.registry.entries()) {
-        const obj = data.object;
-        const dist = playerPos.distanceTo(obj.position);
-        if (dist < minDist) {
-          closest = { type: 'object', id, object: obj };
-          minDist = dist;
-        }
-      }
-    }
-
     if (closest) {
       this.grabbedTarget = closest;
       if (closest.type === 'player') {

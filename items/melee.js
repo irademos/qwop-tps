@@ -110,24 +110,6 @@ export function updateMeleeAttacks({
         }
       }
 
-      if (window.breakManager) {
-        for (const [id, data] of window.breakManager.registry.entries()) {
-          const center = data.center || data.object.position;
-          const dist = attacker.model.position.distanceTo(center);
-          if (dist <= cfg.range) {
-            hit = true;
-          const dir = new THREE.Vector3()
-            .subVectors(center, attacker.model.position)
-            .normalize();
-          const impulse = dir.multiplyScalar(2);
-          window.breakManager.onHit(id, attackDamage, impulse);
-          const remaining = window.breakManager.registry.get(id)?.health ?? 0;
-          console.log(`🪓 ${id} health: ${remaining}`);
-
-          }
-        }
-      }
-
       if (hit) {
         audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 1.ogg', 0.6);
       }

@@ -12,7 +12,6 @@ import { getCookie, setCookie } from './utils.js';
 import { spawnProjectile, updateProjectiles } from './items/projectiles.js';
 import { spawnArrowProjectile } from './items/arrow.js';
 import { updateMeleeAttacks } from './items/melee.js';
-import { BreakManager } from './breakManager.js';
 import { initSpeechCommands } from './controls/speechCommands.js';
 import { AudioManager } from './audioManager.js';
 import { IceGun } from './items/iceGun.js';
@@ -1479,10 +1478,6 @@ async function main() {
   let lantern;
   let treasureChest;
 
-  const breakManager = new BreakManager(scene);
-  // Expose to window for debugging
-  window.breakManager = breakManager;
-
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
@@ -1527,7 +1522,6 @@ async function main() {
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   window.rapierWorld = rapierWorld;
   window.rbToMesh = rbToMesh;
-  breakManager.setWorld(rapierWorld);
 
   // Ground collider
   {
@@ -6084,8 +6078,6 @@ async function main() {
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage
     });
-
-    breakManager.update();
 
     renderer.render(scene, camera);
   }
