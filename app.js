@@ -45,6 +45,7 @@ import {
   getStoredPinHash,
   loadOrCreateWithPin,
   renameProfile,
+  saveCustomization,
   saveStatsThrottled
 } from './playerProfile.js';
 import {
@@ -5494,7 +5495,13 @@ async function main() {
   });
   initCustomizeUI({
     getPlayerModel: () => playerModel,
-    getPlayerControls: () => playerControls
+    getPlayerControls: () => playerControls,
+    initialCustomization: playerProfile?.customization,
+    onSaveCustomization: async (customization) => {
+      playerProfile.customization = customization;
+      if (!profileNameKey) return;
+      await saveCustomization(profileNameKey, customization);
+    }
   });
   initHomeStoragePanel({ appState });
 

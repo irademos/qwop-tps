@@ -1187,9 +1187,65 @@ body {
   cursor: pointer;
 }
 
+.customize-tile.is-active {
+  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .customize-empty {
   color: rgba(255, 255, 255, 0.7);
   font-size: 0.95rem;
+}
+
+.customize-transform {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.customize-transform-group {
+  display: grid;
+  grid-template-columns: 48px repeat(3, minmax(70px, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
+.customize-transform-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.customize-transform-axis {
+  display: grid;
+  grid-template-columns: 18px repeat(2, 1fr);
+  gap: 4px;
+  align-items: center;
+}
+
+.customize-transform-axis-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.customize-adjust {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  border-radius: 6px;
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.customize-adjust:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .customize-tabs {
