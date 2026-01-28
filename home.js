@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ref, update } from 'firebase/database';
 import { db } from './firebase-init.js';
+import { getKtx2Loader } from './ktx2Loader.js';
 
 const HOME_INTERIOR_ORIGIN = new THREE.Vector3(10000, 0, 10000);
 const HOME_INTERIOR_SIZE = {
@@ -13,21 +15,45 @@ const HOME_INTERIOR_WALL_THICKNESS = 0.3;
 const HOME_INTERIOR_FLOOR_THICKNESS = 0.2;
 const HOME_INTERIOR_SPAWN_OFFSET = new THREE.Vector3(0, 1.1, 0);
 const HOME_INTERIOR_DOOR_OFFSET = new THREE.Vector3(0, 0, -(HOME_INTERIOR_SIZE.depth / 2 - 0.5));
+const HOME_INTERIOR_STORAGE_OFFSET = new THREE.Vector3(3, 0, 3);
 const HOME_DOOR_INTERACT_DISTANCE = 2.2;
-const HOME_ENTER_DISTANCE = 6;
+const HOME_ENTER_DISTANCE = 8;
 const BUILDING_RAYCAST_HEIGHT = 120;
+const HOME_STORAGE_INTERACT_DISTANCE = 2.4;
+const HOME_STORAGE_CHEST_SCALE = 0.015;
+const HOME_STORAGE_CLAMP_MARGIN = 0.6;
+const HOME_INTERIOR_TEXTURE_REPEAT = 0.05;
+const HOME_TEXTURE_BASE_PATH = '/assets/textures/planks/planks';
 
-function createInteriorMesh() {
+function applyKtx2ToMaterial(ktx2, material, slot, url, { srgb = false, repeat = 2, anisotropy = null } = {}) {
+  if (!material || !slot || !url || !ktx2) return;
+  ktx2.load(
+    url,
+    (tex) => {
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(repeat, repeat);
+      if (anisotropy) tex.anisotropy = anisotropy;
+      if (srgb && tex.colorSpace !== undefined) tex.colorSpace = THREE.SRGBColorSpace;
+      material[slot] = tex;
+      material.needsUpdate = true;
+    },
+    undefined,
+    (err) => console.warn('KTX2 load failed:', slot, url, err)
+  );
+}
+
+function createInteriorMesh(renderer) {
   const group = new THREE.Group();
   group.name = 'home-interior';
 
   const floorMaterial = new THREE.MeshStandardMaterial({
-    color: 0xb0b7c3,
+    color: 0xffffff,
     roughness: 0.9,
     metalness: 0.0
   });
   const wallMaterial = new THREE.MeshStandardMaterial({
-    color: 0xdad1c1,
+    color: 0xffffff,
     roughness: 0.85,
     metalness: 0.0
   });
@@ -36,6 +62,53 @@ function createInteriorMesh() {
     roughness: 0.9,
     metalness: 0.0
   });
+
+  if (renderer) {
+    const ktx2 = getKtx2Loader(renderer);
+    const maxAnisotropy = renderer?.capabilities?.getMaxAnisotropy?.() ?? null;
+    applyKtx2ToMaterial(
+      ktx2,
+      floorMaterial,
+      'map',
+      `${HOME_TEXTURE_BASE_PATH}_albedo.ktx2`,
+      { srgb: true, repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      wallMaterial,
+      'map',
+      `${HOME_TEXTURE_BASE_PATH}_albedo.ktx2`,
+      { srgb: true, repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      floorMaterial,
+      'normalMap',
+      `${HOME_TEXTURE_BASE_PATH}_normal.ktx2`,
+      { repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      wallMaterial,
+      'normalMap',
+      `${HOME_TEXTURE_BASE_PATH}_normal.ktx2`,
+      { repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      floorMaterial,
+      'roughnessMap',
+      `${HOME_TEXTURE_BASE_PATH}_roughness.ktx2`,
+      { repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+    applyKtx2ToMaterial(
+      ktx2,
+      wallMaterial,
+      'roughnessMap',
+      `${HOME_TEXTURE_BASE_PATH}_roughness.ktx2`,
+      { repeat: HOME_INTERIOR_TEXTURE_REPEAT, anisotropy: maxAnisotropy }
+    );
+  }
 
   const floor = new THREE.Mesh(
     new THREE.BoxGeometry(
@@ -165,27 +238,12 @@ function createInteriorColliders(world, origin) {
   return body;
 }
 
-function syncPlayerPosition(playerModel, playerControls, position) {
-  if (!playerModel || !position) return;
-  playerModel.position.copy(position);
-  if (playerControls?.body) {
-    playerControls.body.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
-    playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-  }
-  if (playerControls) {
-    playerControls.playerX = position.x;
-    playerControls.playerY = position.y;
-    playerControls.playerZ = position.z;
-    playerControls.lastPosition.copy(position);
-  }
-}
-
 export class HomeSystem {
   constructor({
     scene,
     playerModel,
     playerControls,
+    renderer,
     buildingsRenderer,
     profileNameKey,
     initialHome,
@@ -196,6 +254,7 @@ export class HomeSystem {
     this.scene = scene;
     this.playerModel = playerModel;
     this.playerControls = playerControls;
+    this.renderer = renderer;
     this.buildingsRenderer = buildingsRenderer;
     this.profileNameKey = profileNameKey;
     this.getLocalOrigin = getLocalOrigin;
@@ -205,8 +264,9 @@ export class HomeSystem {
     this.homeData = initialHome || null;
     this.isInsideHome = false;
     this.lastExteriorPosition = null;
+    this.locationProvider = null;
 
-    this.interiorGroup = createInteriorMesh();
+    this.interiorGroup = createInteriorMesh(this.renderer);
     this.interiorGroup.position.copy(HOME_INTERIOR_ORIGIN);
     this.interiorGroup.visible = false;
     this.scene?.add(this.interiorGroup);
@@ -216,7 +276,42 @@ export class HomeSystem {
     this.raycaster = new THREE.Raycaster();
     this.rayDirection = new THREE.Vector3(0, -1, 0);
 
-    this.interiorBody = createInteriorColliders(window.rapierWorld, HOME_INTERIOR_ORIGIN);
+    this.interiorBody = null;
+    this.storageChest = null;
+    this.storageChestLoaded = false;
+    this.savedGeoBounds = null;
+  }
+
+  setLocationProvider(locationProvider) {
+    this.locationProvider = locationProvider || null;
+  }
+
+  async loadStorageChest() {
+    if (this.storageChestLoaded) return;
+    this.storageChestLoaded = true;
+    const loader = new GLTFLoader();
+    let chestMesh = null;
+    try {
+      const gltf = await loader.loadAsync('/assets/props/treasure_chest.glb');
+      chestMesh = gltf.scene;
+    } catch (error) {
+      console.warn('Failed to load home storage chest model, using placeholder box.', error);
+      chestMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.8, 0.6, 0.6),
+        new THREE.MeshStandardMaterial({ color: 0x8b5a2b })
+      );
+    }
+    if (!chestMesh) return;
+    chestMesh.name = 'home-storage-chest';
+    chestMesh.position.copy(HOME_INTERIOR_STORAGE_OFFSET);
+    chestMesh.scale.setScalar(HOME_STORAGE_CHEST_SCALE);
+    chestMesh.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    this.storageChest = chestMesh;
+    this.interiorGroup?.add(chestMesh);
   }
 
   getHomeLocalPosition() {
@@ -232,6 +327,19 @@ export class HomeSystem {
       return new THREE.Vector3(local.x, 0, local.z);
     }
     return null;
+  }
+
+  getHomeGeo() {
+    if (!this.homeData) return null;
+    if (Number.isFinite(this.homeData.lat) && Number.isFinite(this.homeData.lon)) {
+      return { lat: this.homeData.lat, lon: this.homeData.lon };
+    }
+    const local = this.getHomeLocalPosition();
+    const origin = this.getLocalOrigin?.();
+    if (!local || !origin || !this.localMetersToGeo) return null;
+    const geo = this.localMetersToGeo(local.x, local.z, origin);
+    if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) return null;
+    return { lat: geo.lat, lon: geo.lon };
   }
 
   async persistHome(homeData) {
@@ -269,26 +377,95 @@ export class HomeSystem {
   enterHome() {
     if (!this.playerModel) return;
     this.lastExteriorPosition = this.playerModel.position.clone();
-    const interiorSpawn = HOME_INTERIOR_ORIGIN.clone().add(HOME_INTERIOR_SPAWN_OFFSET);
-    syncPlayerPosition(this.playerModel, this.playerControls, interiorSpawn);
+    const interiorOrigin = this.playerModel.position.clone().sub(HOME_INTERIOR_SPAWN_OFFSET);
+    this.interiorGroup.position.copy(interiorOrigin);
+    this.interiorDoorPosition = interiorOrigin
+      .clone()
+      .add(HOME_INTERIOR_DOOR_OFFSET)
+      .setY(interiorOrigin.y + 1.1);
+    if (this.interiorBody && window.rapierWorld?.getRigidBody(this.interiorBody.handle)) {
+      window.rapierWorld.removeRigidBody(this.interiorBody);
+    }
+    this.interiorBody = createInteriorColliders(window.rapierWorld, interiorOrigin);
+    this.playerControls?.clearGpsMoveTarget?.();
     this.isInsideHome = true;
     this.interiorGroup.visible = true;
+    this.applyInteriorClamp(interiorOrigin);
+    if (this.buildingsRenderer?.group) {
+      this.buildingsRenderer.group.visible = false;
+    }
   }
 
   exitHome() {
-    const exterior = this.lastExteriorPosition || this.getHomeLocalPosition();
-    if (!exterior) return;
-    const exitPosition = exterior.clone();
-    exitPosition.y = this.playerModel?.position?.y ?? exitPosition.y;
-    syncPlayerPosition(this.playerModel, this.playerControls, exitPosition);
+    if (this.interiorBody && window.rapierWorld?.getRigidBody(this.interiorBody.handle)) {
+      window.rapierWorld.removeRigidBody(this.interiorBody);
+    }
+    this.interiorBody = null;
     this.isInsideHome = false;
     this.interiorGroup.visible = false;
+    this.restoreExteriorClamp();
+    if (this.buildingsRenderer?.group) {
+      this.buildingsRenderer.group.visible = true;
+    }
   }
 
   isNearHomeDoor(position) {
     if (!position) return false;
     const distance = position.distanceTo(this.interiorDoorPosition);
     return distance <= HOME_DOOR_INTERACT_DISTANCE;
+  }
+
+  getStorageChestWorldPosition() {
+    if (!this.storageChest) return null;
+    const worldPosition = new THREE.Vector3();
+    this.storageChest.getWorldPosition(worldPosition);
+    return worldPosition;
+  }
+
+  isNearStorageChest(position) {
+    if (!position || !this.storageChest) return false;
+    const chestPosition = this.getStorageChestWorldPosition();
+    if (!chestPosition) return false;
+    return position.distanceTo(chestPosition) <= HOME_STORAGE_INTERACT_DISTANCE;
+  }
+
+  applyInteriorClamp(origin) {
+    if (!this.playerControls) return;
+    if (!this.savedGeoBounds) {
+      this.savedGeoBounds = {
+        center: this.playerControls.geoBoundsCenterXZ?.clone?.() ?? null,
+        halfSize: this.playerControls.geoBoundHalfSizeM ?? null,
+        edgeEps: this.playerControls.geoEdgeEpsM ?? null
+      };
+    }
+    const halfSize = Math.max(
+      1,
+      (HOME_INTERIOR_SIZE.width / 2) - HOME_STORAGE_CLAMP_MARGIN
+    );
+    this.playerControls.geoBoundHalfSizeM = halfSize;
+    this.playerControls.geoBoundsCenterXZ = new THREE.Vector3(origin.x, 0, origin.z);
+    if (this.playerControls.geoBoundsShiftMeters) {
+      this.playerControls.geoBoundsShiftMeters.x = 0;
+      this.playerControls.geoBoundsShiftMeters.z = 0;
+    }
+  }
+
+  restoreExteriorClamp() {
+    if (!this.playerControls) return;
+    if (!this.savedGeoBounds) return;
+    const { center, halfSize, edgeEps } = this.savedGeoBounds;
+    this.playerControls.geoBoundsCenterXZ = center ? center.clone() : null;
+    if (typeof halfSize === 'number') {
+      this.playerControls.geoBoundHalfSizeM = halfSize;
+    }
+    if (typeof edgeEps === 'number') {
+      this.playerControls.geoEdgeEpsM = edgeEps;
+    }
+    if (this.playerControls.geoBoundsShiftMeters) {
+      this.playerControls.geoBoundsShiftMeters.x = 0;
+      this.playerControls.geoBoundsShiftMeters.z = 0;
+    }
+    this.savedGeoBounds = null;
   }
 
   getDistanceToHome(position) {
@@ -316,6 +493,14 @@ export class HomeSystem {
     if (!playerPosition) return null;
 
     if (this.isInsideHome) {
+      if (this.isNearStorageChest(playerPosition)) {
+        return {
+          type: 'home-storage',
+          maxDistance: HOME_STORAGE_INTERACT_DISTANCE,
+          distance: playerPosition.distanceTo(this.getStorageChestWorldPosition()),
+          promptText: isMobile ? 'click here to access storage' : "press 'x' to access storage"
+        };
+      }
       if (!this.isNearHomeDoor(playerPosition)) return null;
       return {
         type: 'home-exit',
@@ -356,6 +541,10 @@ export class HomeSystem {
     }
     if (target.type === 'home-enter') {
       this.enterHome();
+      return;
+    }
+    if (target.type === 'home-storage') {
+      window.openHomeStorage?.();
       return;
     }
     if (target.type === 'home-exit') {

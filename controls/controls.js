@@ -680,7 +680,7 @@ export class PlayerControls {
     const closest = this.getClosestInteractionTarget();
     if (!closest) return;
 
-    if (closest.type === 'home-select' || closest.type === 'home-enter' || closest.type === 'home-exit') {
+    if (closest.type?.startsWith?.('home-')) {
       window.homeSystem?.handleInteraction?.(closest);
       return;
     }

@@ -36,6 +36,7 @@ import { createBuildingsRenderer } from './environment/buildingsRender.js';
 import { createTileCache } from './tileCache.js';
 import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
+import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI } from './controls/homeStoragePanel.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './environment/mapView.js';
 import {
@@ -66,7 +67,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-const DEFAULT_CHARACTER_MODEL = "/models/cowboy.fbx";
+const DEFAULT_CHARACTER_MODEL = "/models/base_character.fbx";
 const MAX_MONSTERS = 2;
 const MONSTER_MODELS = [
   "/models/zombie.fbx"
@@ -2800,21 +2801,31 @@ async function main() {
       icon: ''
     };
   });
+  const ensureCatalogEntry = (itemId, entry) => {
+    const itemConfig = inventoryCatalog[itemId] || {};
+    return {
+      ...entry,
+      icon: entry?.icon || itemConfig.icon || '',
+      name: entry?.name || itemConfig.name || itemId
+    };
+  };
   const inventoryState = { ...(playerProfile.inventory || {}) };
+  const homeStorageState = { ...(playerProfile.homeStorage || {}) };
   let inventoryDirty = false;
+  let homeStorageDirty = false;
   Object.entries(inventoryState).forEach(([itemId, entry]) => {
-    const itemConfig = inventoryCatalog[itemId];
-    if (!itemConfig) return;
-    const nextEntry = { ...entry };
-    if (!nextEntry.name) {
-      nextEntry.name = itemConfig.name;
-      inventoryDirty = true;
-    }
-    if (!nextEntry.icon) {
-      nextEntry.icon = itemConfig.icon;
+    const nextEntry = ensureCatalogEntry(itemId, entry);
+    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon) {
       inventoryDirty = true;
     }
     inventoryState[itemId] = nextEntry;
+  });
+  Object.entries(homeStorageState).forEach(([itemId, entry]) => {
+    const nextEntry = ensureCatalogEntry(itemId, entry);
+    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon) {
+      homeStorageDirty = true;
+    }
+    homeStorageState[itemId] = nextEntry;
   });
   if (!Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])) {
     const iceGunEntry = inventoryState.iceGun || {};
@@ -2836,8 +2847,8 @@ async function main() {
     };
     inventoryDirty = true;
   }
-  if (inventoryDirty) {
-    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
+  if (inventoryDirty || homeStorageDirty) {
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
   }
 
   const equippableItems = new Set(['lantern', 'iceGun', 'bow', 'autumnSword']);
@@ -2858,6 +2869,16 @@ async function main() {
     return inventoryState;
   }
 
+  function getHomeStorage() {
+    return homeStorageState;
+  }
+
+  function persistInventoryAndStorage() {
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
+    updateSettingsUI();
+    updateHomeStorageUI();
+  }
+
   function setIceAmmoCount(amount) {
     if (!Number.isFinite(amount)) return;
     const normalized = Math.max(0, Math.floor(amount));
@@ -2868,8 +2889,7 @@ async function main() {
       icon: current.icon || inventoryCatalog.iceGun.icon,
       name: current.name || inventoryCatalog.iceGun.name
     };
-    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
-    updateSettingsUI();
+    persistInventoryAndStorage();
   }
 
   function setArrowAmmoCount(amount) {
@@ -2882,26 +2902,18 @@ async function main() {
       icon: current.icon || inventoryCatalog.bow.icon,
       name: current.name || inventoryCatalog.bow.name
     };
-    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
-    updateSettingsUI();
+    persistInventoryAndStorage();
   }
 
   function addToInventory(itemId, amount = 1) {
     if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
-    const itemConfig = inventoryCatalog[itemId] || {};
     const current = inventoryState[itemId];
     const nextCount = (current?.count || 0) + amount;
-    inventoryState[itemId] = {
-      ...current,
-      count: nextCount,
-      icon: current?.icon || itemConfig.icon || '',
-      name: current?.name || itemConfig.name || itemId
-    };
+    inventoryState[itemId] = ensureCatalogEntry(itemId, { ...current, count: nextCount });
     if (window.DEBUG_INVENTORY) {
       console.log('[inventory] added', itemId, amount, inventoryState[itemId]);
     }
-    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
-    updateSettingsUI();
+    persistInventoryAndStorage();
   }
 
   function removeFromInventory(itemId, amount = 1) {
@@ -2925,8 +2937,57 @@ async function main() {
     if (window.DEBUG_INVENTORY) {
       console.log('[inventory] removed', itemId, amount, inventoryState[itemId]);
     }
-    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
-    updateSettingsUI();
+    persistInventoryAndStorage();
+  }
+
+  function storeHomeStorageItem(itemId) {
+    if (!itemId) return;
+    const current = inventoryState[itemId];
+    if (!current || !current.count) return;
+
+    const nextCount = current.count - 1;
+    if (nextCount > 0) {
+      inventoryState[itemId] = { ...current, count: nextCount };
+    } else {
+      if (isInventoryItemEquipped(itemId)) {
+        unequipInventoryItem(itemId);
+      }
+      delete inventoryState[itemId];
+    }
+
+    const existingStorage = homeStorageState[itemId];
+    const storageCount = (existingStorage?.count || 0) + 1;
+    homeStorageState[itemId] = ensureCatalogEntry(itemId, {
+      ...existingStorage,
+      ...current,
+      count: storageCount
+    });
+
+    persistInventoryAndStorage();
+  }
+
+  function takeOutHomeStorageItem(itemId) {
+    if (!itemId) return;
+    const current = homeStorageState[itemId];
+    if (!current || !current.count) return;
+
+    const nextStorageCount = current.count - 1;
+    if (nextStorageCount > 0) {
+      homeStorageState[itemId] = { ...current, count: nextStorageCount };
+    } else {
+      delete homeStorageState[itemId];
+    }
+
+    const inventoryEntry = inventoryState[itemId] || {};
+    const nextInventoryCount = (inventoryEntry.count || 0) + 1;
+    const mergedEntry = ensureCatalogEntry(itemId, {
+      ...inventoryEntry,
+      ...current,
+      count: nextInventoryCount
+    });
+    inventoryState[itemId] = mergedEntry;
+
+    persistInventoryAndStorage();
   }
 
   function isInventoryItemEquipped(itemId) {
@@ -3342,8 +3403,7 @@ async function main() {
     Object.keys(inventoryState).forEach(key => {
       delete inventoryState[key];
     });
-    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
-    updateSettingsUI();
+    persistInventoryAndStorage();
     playerControls?.updateAmmoUI?.(false);
   };
 
@@ -4519,6 +4579,7 @@ async function main() {
     scene,
     playerModel,
     playerControls,
+    renderer,
     buildingsRenderer,
     profileNameKey,
     initialHome: playerProfile?.home ?? null,
@@ -4526,6 +4587,7 @@ async function main() {
     localMetersToGeo,
     geoToLocal: geoToLocalMeters
   });
+  void homeSystem.loadStorageChest?.();
   window.homeSystem = homeSystem;
 
   function getLatestLocationFix() {
@@ -4893,7 +4955,9 @@ async function main() {
   const locationProvider = createLocationProvider({
     onUpdate: (location) => {
       window.latestLocation = location;
-      playerControls?.setGeoCenter({ lat: location.lat, lon: location.lon });
+      if (!homeSystem?.isInsideHome) {
+        playerControls?.setGeoCenter({ lat: location.lat, lon: location.lon });
+      }
       if (!worldOrigin && Number.isFinite(location.accuracyMeters) && location.accuracyMeters <= 50) {
         setWorldOrigin({ lat: location.lat, lon: location.lon });
         rebuildMapFromCache();
@@ -4915,43 +4979,59 @@ async function main() {
         locationState.playerX = playerMeters.x;
         locationState.playerZ = playerMeters.z;
 
-        if (mapViewEnabled) {
-          applyPlayerMeters(playerMeters);
-          didInitialGpsSnap = true;
-          playerControls?.clearGpsMoveTarget?.();
-        } else if (!didInitialGpsSnap) {
-          applyPlayerMeters(playerMeters);
-          didInitialGpsSnap = true;
-        } else if (playerControls && playerModel) {
-          const currentPos = playerControls.body?.translation?.() ?? playerModel.position;
-          if (currentPos && Number.isFinite(currentPos.x) && Number.isFinite(currentPos.z)) {
-            const dx = playerMeters.x - currentPos.x;
-            const dz = playerMeters.z - currentPos.z;
-            const distance = Math.hypot(dx, dz);
-            if (distance > GPS_SNAP_DISTANCE_METERS) {
-              playerControls.clearGpsMoveTarget?.();
-              applyPlayerMeters(playerMeters);
-            } else if (distance > GPS_TARGET_EPSILON_METERS) {
-              const blocked = isGpsPathBlocked(
-                currentPos,
-                {
-                  x: playerMeters.x,
-                  y: currentPos.y ?? playerModel.position.y,
-                  z: playerMeters.z
-                }
-              );
-              if (blocked) {
+        let allowGpsSnap = !homeSystem?.isInsideHome;
+        if (homeSystem?.isInsideHome) {
+          const homeGeo = homeSystem.getHomeGeo?.();
+          const homeDistance = homeGeo
+            ? distanceMeters(location.lat, location.lon, homeGeo.lat, homeGeo.lon)
+            : null;
+          if (location.source !== 'debug' && homeDistance != null && homeDistance > 50) {
+            homeSystem.exitHome();
+            allowGpsSnap = true;
+          } else {
+            allowGpsSnap = false;
+          }
+        }
+
+        if (allowGpsSnap) {
+          if (mapViewEnabled) {
+            applyPlayerMeters(playerMeters);
+            didInitialGpsSnap = true;
+            playerControls?.clearGpsMoveTarget?.();
+          } else if (!didInitialGpsSnap) {
+            applyPlayerMeters(playerMeters);
+            didInitialGpsSnap = true;
+          } else if (playerControls && playerModel) {
+            const currentPos = playerControls.body?.translation?.() ?? playerModel.position;
+            if (currentPos && Number.isFinite(currentPos.x) && Number.isFinite(currentPos.z)) {
+              const dx = playerMeters.x - currentPos.x;
+              const dz = playerMeters.z - currentPos.z;
+              const distance = Math.hypot(dx, dz);
+              if (distance > GPS_SNAP_DISTANCE_METERS) {
                 playerControls.clearGpsMoveTarget?.();
                 applyPlayerMeters(playerMeters);
+              } else if (distance > GPS_TARGET_EPSILON_METERS) {
+                const blocked = isGpsPathBlocked(
+                  currentPos,
+                  {
+                    x: playerMeters.x,
+                    y: currentPos.y ?? playerModel.position.y,
+                    z: playerMeters.z
+                  }
+                );
+                if (blocked) {
+                  playerControls.clearGpsMoveTarget?.();
+                  applyPlayerMeters(playerMeters);
+                } else {
+                  playerControls.setGpsMoveTarget?.({
+                    x: playerMeters.x,
+                    y: currentPos.y ?? playerModel.position.y,
+                    z: playerMeters.z
+                  });
+                }
               } else {
-                playerControls.setGpsMoveTarget?.({
-                  x: playerMeters.x,
-                  y: currentPos.y ?? playerModel.position.y,
-                  z: playerMeters.z
-                });
+                playerControls.clearGpsMoveTarget?.();
               }
-            } else {
-              playerControls.clearGpsMoveTarget?.();
             }
           }
         }
@@ -4989,6 +5069,8 @@ async function main() {
       }
     }
   });
+
+  homeSystem?.setLocationProvider?.(locationProvider);
   locationProvider.start();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
@@ -5251,7 +5333,7 @@ async function main() {
   }
 
   const settingsBtn = document.getElementById('settings-button');
-  const characterOptions = ['andy', 'chris', 'old_man', 'wizard', 'rainbow_troll', 'alien_bumpy_bump', 'swamp_guy', 'cowboy'].map(name => ({
+  const characterOptions = ['base_character', 'andy', 'chris', 'old_man', 'wizard', 'rainbow_troll', 'alien_bumpy_bump', 'swamp_guy', 'cowboy'].map(name => ({
     label: name,
     value: `/models/${name}.fbx`
   }));
@@ -5310,6 +5392,7 @@ async function main() {
     getPlayerStats: () => ({ ...statsState }),
     getCharacterOptions: () => characterOptions,
     getInventory: () => getInventory(),
+    getHomeStorage: () => getHomeStorage(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
     isInventoryItemEquipped: (itemId) => isInventoryItemEquipped(itemId),
     getInventoryItemActions: (itemId) => getInventoryItemActions(itemId),
@@ -5319,6 +5402,8 @@ async function main() {
     eatInventoryItem: (itemId) => eatInventoryItem(itemId),
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
+    storeHomeStorageItem: (itemId) => storeHomeStorageItem(itemId),
+    takeOutHomeStorageItem: (itemId) => takeOutHomeStorageItem(itemId),
     getConnectedPlayers: () => {
       const players = [];
       const playerPos = playerModel?.position;
@@ -5392,6 +5477,7 @@ async function main() {
   window.getInventory = getInventory;
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
+  window.openHomeStorage = openHomeStorage;
   window.pickupMushroom = pickupMushroom;
   window.pickupApple = pickupApple;
 
@@ -5411,6 +5497,7 @@ async function main() {
     location: locationAdapter,
     player
   });
+  initHomeStoragePanel({ appState });
 
   settingsBtn.addEventListener('click', () => {
     openSettings();
@@ -5418,6 +5505,7 @@ async function main() {
 
   setInterval(() => {
     updateSettingsUI();
+    updateHomeStorageUI();
   }, 1000);
   updateAutoDisplayMode();
   setInterval(() => {
