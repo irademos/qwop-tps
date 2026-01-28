@@ -67,10 +67,12 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-const DEFAULT_CHARACTER_MODEL = "/models/base_character.fbx";
+const DEFAULT_CHARACTER_MODEL = "/models/base_character_2.fbx";
 const MAX_MONSTERS = 2;
 const MONSTER_MODELS = [
-  "/models/zombie.fbx"
+  "/models/zombie.fbx",
+  "/models/zombie_boy.fbx",
+  "/models/zombie_green.fbx"
 ];
 const MONSTER_SPAWN_MIN_RADIUS = 25;
 const MONSTER_SPAWN_MAX_RADIUS = 80;
@@ -5331,7 +5333,7 @@ async function main() {
   }
 
   const settingsBtn = document.getElementById('settings-button');
-  const characterOptions = ['base_character', 'andy', 'chris', 'old_man', 'wizard', 'rainbow_troll', 'alien_bumpy_bump', 'swamp_guy', 'cowboy'].map(name => ({
+  const characterOptions = ['base_character_2', 'base_character', 'andy', 'chris', 'old_man', 'wizard', 'rainbow_troll', 'alien_bumpy_bump', 'swamp_guy', 'cowboy'].map(name => ({
     label: name,
     value: `/models/${name}.fbx`
   }));
