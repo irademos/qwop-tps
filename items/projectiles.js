@@ -179,23 +179,6 @@ export function updateProjectiles({
 
     if (removed) continue;
 
-    // Check destructible props
-    if (window.breakManager) {
-      for (const [id, data] of window.breakManager.registry.entries()) {
-        if (!data?.bbox) continue;
-        if (projBox.intersectsBox(data.bbox)) {
-          window.breakManager.onHit(id, 25, proj.userData.velocity.clone());
-          const remaining = window.breakManager.registry.get(id)?.health ?? 0;
-          console.log(`🎯 ${id} health: ${remaining}`);
-          removeProjectile(i);
-          removed = true;
-          break;
-        }
-      }
-    }
-
-    if (removed) continue;
-
     const localBox = getObjectBox(playerModel);
     if (!localBox) continue;
     if (projBox.intersectsBox(localBox) && age >= 80 && proj.userData.shooterId !== localId) {
