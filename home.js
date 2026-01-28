@@ -374,6 +374,26 @@ export class HomeSystem {
     await this.persistHome(nextHome);
   }
 
+  syncPlayerPosition(position) {
+    if (!this.playerModel || !position) return;
+    this.playerModel.position.copy(position);
+    if (this.playerControls?.body?.setTranslation) {
+      this.playerControls.body.setTranslation(
+        { x: position.x, y: position.y, z: position.z },
+        true
+      );
+      if (this.playerControls.body.setLinvel) {
+        this.playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      }
+    }
+    if (this.playerControls) {
+      this.playerControls.playerX = position.x;
+      this.playerControls.playerY = position.y;
+      this.playerControls.playerZ = position.z;
+      this.playerControls.lastPosition?.copy?.(position);
+    }
+  }
+
   enterHome() {
     if (!this.playerModel) return;
     this.lastExteriorPosition = this.playerModel.position.clone();
@@ -383,7 +403,8 @@ export class HomeSystem {
       .clone()
       .add(HOME_INTERIOR_DOOR_OFFSET)
       .setY(interiorOrigin.y + 1.1);
-    this.playerModel.position.copy(interiorOrigin.clone().add(HOME_INTERIOR_SPAWN_OFFSET));
+    const spawnPosition = interiorOrigin.clone().add(HOME_INTERIOR_SPAWN_OFFSET);
+    this.syncPlayerPosition(spawnPosition);
     if (this.interiorBody && window.rapierWorld?.getRigidBody(this.interiorBody.handle)) {
       window.rapierWorld.removeRigidBody(this.interiorBody);
     }
@@ -409,7 +430,7 @@ export class HomeSystem {
       this.buildingsRenderer.group.visible = true;
     }
     if (this.lastExteriorPosition && this.playerModel) {
-      this.playerModel.position.copy(this.lastExteriorPosition);
+      this.syncPlayerPosition(this.lastExteriorPosition);
     }
   }
 
