@@ -749,7 +749,8 @@ export class PlayerControls {
     let closestDistance = Infinity;
 
     const homeTarget = window.homeSystem?.getInteractionTarget?.(playerPos, this.isMobile);
-    if (homeTarget) {
+    const homeEnterTarget = homeTarget?.type === 'home-enter' ? homeTarget : null;
+    if (homeTarget && !homeEnterTarget) {
       return homeTarget;
     }
 
@@ -850,7 +851,7 @@ export class PlayerControls {
       });
     });
 
-    return closest;
+    return closest ?? homeEnterTarget;
   }
 
   isFriendlyWithinRange(friendly, range) {
