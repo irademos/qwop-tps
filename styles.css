@@ -1106,7 +1106,7 @@ body {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(10, 12, 18, 0.96);
+  background: rgba(10, 12, 18, 0.5);
   color: #f6f7fb;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   padding: 16px;
@@ -1190,6 +1190,7 @@ body {
 .customize-tile.is-active {
   border-color: rgba(255, 255, 255, 0.6);
   background: rgba(255, 255, 255, 0.18);
+  padding: 8px;
 }
 
 .customize-empty {
@@ -1200,21 +1201,21 @@ body {
 .customize-transform {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: none;
 }
 
 .customize-transform-group {
   display: grid;
-  grid-template-columns: 48px repeat(3, minmax(70px, 1fr));
-  gap: 8px;
+  grid-template-columns: 32px repeat(3, minmax(54px, 1fr));
+  gap: 6px;
   align-items: center;
 }
 
 .customize-transform-label {
-  font-size: 0.75rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: rgba(255, 255, 255, 0.7);
@@ -1222,13 +1223,13 @@ body {
 
 .customize-transform-axis {
   display: grid;
-  grid-template-columns: 18px repeat(2, 1fr);
-  gap: 4px;
+  grid-template-columns: 14px repeat(2, 1fr);
+  gap: 2px;
   align-items: center;
 }
 
 .customize-transform-axis-label {
-  font-size: 0.75rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.8);
 }
@@ -1238,10 +1239,14 @@ body {
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
   border-radius: 6px;
-  padding: 4px 6px;
+  padding: 2px 4px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   line-height: 1;
+}
+
+.customize-tile .customize-transform {
+  width: 100%;
 }
 
 .customize-adjust:hover {

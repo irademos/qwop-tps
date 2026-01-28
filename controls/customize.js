@@ -171,7 +171,7 @@ function setSlotSelection(slot, itemId) {
   slotState.selectedId = itemId;
   customizationState[slot] = slotState;
   updateTileSelection(slot, itemId);
-  updateControlsVisibility(slot);
+  attachTransformControls(slot, itemId);
 }
 
 function updateTileSelection(slot, selectedId) {
@@ -179,14 +179,34 @@ function updateTileSelection(slot, selectedId) {
   if (!tileMap) return;
   tileMap.forEach((tile, id) => {
     tile.classList.toggle('is-active', id === selectedId);
+    if (id !== selectedId) {
+      restoreTileLabel(tile);
+    }
   });
 }
 
-function updateControlsVisibility(slot) {
+function restoreTileLabel(tile) {
+  if (tile.dataset.label != null) {
+    tile.textContent = tile.dataset.label;
+  }
+}
+
+function attachTransformControls(slot, selectedId) {
+  const tileMap = tilesBySlot.get(slot);
   const controls = controlsBySlot.get(slot);
-  if (!controls) return;
-  const slotState = getSlotState(slot);
-  controls.hidden = !slotState.selectedId;
+  if (!tileMap || !controls) return;
+  const selectedTile = tileMap.get(selectedId);
+  if (!selectedTile) {
+    if (controls.parentElement) {
+      controls.parentElement.removeChild(controls);
+    }
+    return;
+  }
+  if (controls.parentElement && controls.parentElement !== selectedTile) {
+    controls.parentElement.removeChild(controls);
+  }
+  selectedTile.textContent = '';
+  selectedTile.appendChild(controls);
 }
 
 function findTorsoAnchor(model) {
@@ -329,6 +349,7 @@ function buildShirtsPanel() {
     tile.type = 'button';
     tile.dataset.clothing = item.id;
     tile.dataset.slot = 'shirts';
+    tile.dataset.label = item.label;
     grid.appendChild(tile);
     tileMap.set(item.id, tile);
   });
@@ -336,7 +357,7 @@ function buildShirtsPanel() {
   tilesBySlot.set('shirts', tileMap);
 
   const controls = buildTransformControls('shirts');
-  panelEl.appendChild(controls);
+  controlsBySlot.set('shirts', controls);
   return panelEl;
 }
 
@@ -354,6 +375,7 @@ function buildHatsPanel() {
       tile.type = 'button';
       tile.dataset.clothing = item.id;
       tile.dataset.slot = 'hats';
+      tile.dataset.label = item.label;
       grid.appendChild(tile);
       tileMap.set(item.id, tile);
     });
@@ -361,14 +383,13 @@ function buildHatsPanel() {
     tilesBySlot.set('hats', tileMap);
   }
   const controls = buildTransformControls('hats');
-  panelEl.appendChild(controls);
+  controlsBySlot.set('hats', controls);
   return panelEl;
 }
 
 function buildTransformControls(slot) {
   const wrapper = createElement('div', 'customize-transform');
   wrapper.dataset.slot = slot;
-  wrapper.hidden = true;
   Object.entries(GROUP_LABELS).forEach(([group, label]) => {
     const groupRow = createElement('div', 'customize-transform-group');
     const groupLabel = createElement('span', 'customize-transform-label', label);
@@ -393,7 +414,6 @@ function buildTransformControls(slot) {
     });
     wrapper.appendChild(groupRow);
   });
-  controlsBySlot.set(slot, wrapper);
   return wrapper;
 }
 
