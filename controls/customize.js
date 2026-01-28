@@ -179,6 +179,9 @@ async function loadClothing(item) {
   const parent = anchor || playerModel;
   parent.add(clothing);
   const basePosition = anchor ? new THREE.Vector3() : getFallbackTorsoPosition(playerModel);
+  if (!anchor) {
+    playerModel.worldToLocal(basePosition);
+  }
   const offsets = (await loadOffsets(item.offsets)) || {};
   const positionOffset = offsets.position || {};
   const scaleOffset = offsets.scale || {};
