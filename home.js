@@ -414,6 +414,9 @@ export class HomeSystem {
     }
     this.interiorBody = createInteriorColliders(window.rapierWorld, interiorOrigin);
     this.playerControls?.clearGpsMoveTarget?.();
+    if (this.playerControls) {
+      this.playerControls.groundOverrideY = interiorOrigin.y;
+    }
     this.isInsideHome = true;
     this.interiorGroup.visible = true;
     this.applyInteriorClamp(interiorOrigin);
@@ -430,6 +433,9 @@ export class HomeSystem {
     this.isInsideHome = false;
     this.interiorGroup.visible = false;
     this.restoreExteriorClamp();
+    if (this.playerControls) {
+      this.playerControls.groundOverrideY = null;
+    }
     if (this.buildingsRenderer?.group) {
       this.buildingsRenderer.group.visible = true;
     }

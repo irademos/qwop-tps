@@ -135,6 +135,7 @@ export class PlayerControls {
     this.geoBoundsDebugHeight = 2;
     this.gpsMoveTarget = null;
     this.gpsMoveEpsilon = 0.35;
+    this.groundOverrideY = null;
 
     // Player state
     this.canJump = true;
@@ -1226,9 +1227,9 @@ export class PlayerControls {
     }
 
     const terrainY = getTerrainHeight(t.x, t.z);
-    let groundY = terrainY;
+    let groundY = Number.isFinite(this.groundOverrideY) ? this.groundOverrideY : terrainY;
     const world = window.rapierWorld;
-    if (world) {
+    if (world && !Number.isFinite(this.groundOverrideY)) {
       const ray = new RAPIER.Ray({ x: t.x, y: t.y, z: t.z }, { x: 0, y: -1, z: 0 });
       const hit = world.castRay(ray, t.y + 10, true, undefined, undefined, undefined, this.body);
       if (hit) {
