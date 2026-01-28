@@ -397,7 +397,11 @@ export class HomeSystem {
   enterHome() {
     if (!this.playerModel) return;
     this.lastExteriorPosition = this.playerModel.position.clone();
-    const interiorOrigin = HOME_INTERIOR_ORIGIN.clone();
+    const interiorOrigin = new THREE.Vector3(
+      this.playerModel.position.x,
+      HOME_INTERIOR_ORIGIN.y,
+      this.playerModel.position.z
+    );
     this.interiorGroup.position.copy(interiorOrigin);
     this.interiorDoorPosition = interiorOrigin
       .clone()
