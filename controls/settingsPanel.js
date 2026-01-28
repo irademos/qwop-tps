@@ -628,13 +628,16 @@ function buildAboutPanel() {
   const text = createElement('div', 'settings-muted');
   text.style.whiteSpace = 'pre-wrap';
   text.innerHTML = `
-<strong>Credits</strong>
+  <strong>Credits</strong>
 
-“Base Mesh Low Poly Character” by YOPN
-Source: <a href="https://skfb.ly/oCvvG" target="_blank" rel="noreferrer noopener">https://skfb.ly/oCvvG</a>
-License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer noopener">CC BY 4.0</a>
-${/* optionally */''}
-`;
+  “Base Mesh Low Poly Character” by YOPN
+  Source: <a href="https://skfb.ly/oCvvG" target="_blank" rel="noreferrer noopener">https://skfb.ly/oCvvG</a>
+  License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer noopener">CC BY 4.0</a>
+
+  “T-shirt” by Sirenko
+  Source: <a href="https://skfb.ly/6CJyy" target="_blank" rel="noreferrer noopener">https://skfb.ly/6CJyy</a>
+  License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer noopener">CC BY 4.0</a>
+  `;
 
   panelEl.append(title, text);
   return panelEl;
