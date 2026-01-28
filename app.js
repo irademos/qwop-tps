@@ -38,6 +38,7 @@ import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI } from './controls/homeStoragePanel.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
+import { initCustomizeUI } from './controls/customize.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './environment/mapView.js';
 import {
   clearStoredPin,
@@ -5496,6 +5497,10 @@ async function main() {
     multiplayer,
     location: locationAdapter,
     player
+  });
+  initCustomizeUI({
+    getPlayerModel: () => playerModel,
+    getPlayerControls: () => playerControls
   });
   initHomeStoragePanel({ appState });
 
