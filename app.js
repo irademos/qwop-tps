@@ -4176,6 +4176,9 @@ async function main() {
       if (natureController?.group) {
         occluders.push(natureController.group);
       }
+      if (homeSystem?.isInsideHome && homeSystem?.interiorGroup) {
+        occluders.push(homeSystem.interiorGroup);
+      }
       return occluders;
     },
     spawnProjectile: spawnProjectileWithPerfFlags,
