@@ -1101,6 +1101,117 @@ body {
   color: #666;
 }
 
+.customize-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(10, 12, 18, 0.96);
+  color: #f6f7fb;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transform: translateY(110%);
+  transition: transform 0.2s ease;
+  z-index: 1200;
+  max-height: 45vh;
+}
+
+.customize-panel.is-open {
+  transform: translateY(0);
+}
+
+.customize-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.customize-title {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.customize-close {
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+  font-size: 1.1rem;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.customize-content {
+  flex: 1;
+  overflow: hidden;
+}
+
+.customize-tab-panel {
+  height: 100%;
+}
+
+.customize-swatch-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  max-height: 140px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.customize-swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+}
+
+.customize-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 12px;
+}
+
+.customize-tile {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  padding: 12px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.customize-empty {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.95rem;
+}
+
+.customize-tabs {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.customize-tab {
+  flex: 1;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  padding: 10px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.customize-tab.is-active {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 .location-banner {
   position: fixed;
   left: 50%;

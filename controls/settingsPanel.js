@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { openCustomizeUI } from './customize.js';
 
 const TAB_KEY = 'settings:lastTab';
 
@@ -188,6 +189,10 @@ function buildCharacterPanel() {
   const previewFallback = createElement('div', 'character-preview-fallback', 'Preview unavailable');
   previewWrapper.append(previewCanvas, previewFallback);
 
+  const customizeButton = createElement('button', 'settings-button', 'Customize');
+  customizeButton.type = 'button';
+  customizeButton.dataset.action = 'customize';
+
   const statsTitle = createElement('h3', 'settings-section-title', 'Stats');
   const statsGrid = createElement('div', 'settings-stats-grid');
   elements.characterStatFields = {};
@@ -201,7 +206,7 @@ function buildCharacterPanel() {
     elements.characterStatFields[key] = statValue;
   });
 
-  panelEl.append(nameGroup, characterGroup, previewWrapper, statsTitle, statsGrid);
+  panelEl.append(nameGroup, characterGroup, previewWrapper, customizeButton, statsTitle, statsGrid);
 
   elements.nameInput = nameInput;
   elements.nameSaveButton = nameSaveButton;
@@ -209,6 +214,7 @@ function buildCharacterPanel() {
   elements.characterSelect = characterSelect;
   elements.previewCanvas = previewCanvas;
   elements.previewFallback = previewFallback;
+  elements.customizeButton = customizeButton;
 
   return panelEl;
 }
@@ -783,6 +789,9 @@ async function handleAction(target) {
     context.multiplayer?.reconnect?.();
   } else if (action === 'location-retry') {
     context.location?.retry?.();
+  } else if (action === 'customize') {
+    closeOverlay();
+    openCustomizeUI();
   } else if (action === 'toggle-console') {
     const visible = elements.consoleLog.style.display === 'block';
     elements.consoleLog.style.display = visible ? 'none' : 'block';
