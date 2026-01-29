@@ -4707,6 +4707,10 @@ async function main() {
   const osmWorkerPending = new Map();
   let osmWorkerRequestId = 0;
   let osmWorker = null;
+  const MAP_FRAME_BUDGET_MS = 18;
+  let lastFrameDurationMs = 0;
+  const deferredTileUpdates = new Map();
+  let tileUpdateScheduled = false;
 
   const disableOsmWorker = (error) => {
     if (!osmWorker) return;
@@ -4719,6 +4723,34 @@ async function main() {
     osmWorkerPending.clear();
   };
 
+  const buildOsmSubsets = (geojson) => {
+    const highways = [];
+    const buildings = [];
+    const features = geojson?.features ?? [];
+    for (const feature of features) {
+      const props = feature?.properties;
+      if (!props) continue;
+      if (props.highway) {
+        highways.push(feature);
+      }
+      if (props.building) {
+        buildings.push(feature);
+      }
+    }
+    return {
+      highways: { type: "FeatureCollection", features: highways },
+      buildings: { type: "FeatureCollection", features: buildings }
+    };
+  };
+
+  const ensureTileSubsets = (entry) => {
+    if (!entry || !entry.geojson) return null;
+    if (!entry.subsets) {
+      entry.subsets = buildOsmSubsets(entry.geojson);
+    }
+    return entry.subsets;
+  };
+
   const initOsmWorker = () => {
     if (typeof Worker === "undefined") {
       return;
@@ -4726,7 +4758,7 @@ async function main() {
     try {
       osmWorker = new Worker(new URL("./workers/osmWorker.js", import.meta.url), { type: "module" });
       osmWorker.addEventListener("message", (event) => {
-        const { id, geojson, error } = event.data || {};
+        const { id, geojson, subsets, error } = event.data || {};
         if (id == null) return;
         const pending = osmWorkerPending.get(id);
         if (!pending) return;
@@ -4734,7 +4766,7 @@ async function main() {
         if (error) {
           pending.reject(new Error(error));
         } else {
-          pending.resolve(geojson);
+          pending.resolve({ geojson, subsets });
         }
       });
       osmWorker.addEventListener("error", (event) => disableOsmWorker(event));
@@ -4746,7 +4778,8 @@ async function main() {
 
   const parseOverpassData = async (data) => {
     if (!osmWorker) {
-      return overpassToGeoJSON(data);
+      const geojson = overpassToGeoJSON(data);
+      return { geojson, subsets: buildOsmSubsets(geojson) };
     }
     const requestId = osmWorkerRequestId += 1;
     return new Promise((resolve, reject) => {
@@ -4789,8 +4822,9 @@ async function main() {
 
     for (const [tileKey, entry] of tileCache.cache.entries()) {
       if (!entry.geojson) continue;
-      mapRenderer.updateTileHighways?.(tileKey, entry.geojson, bounds);
-      buildingsRenderer.updateTileBuildings?.(tileKey, entry.geojson, bounds);
+      const subsets = ensureTileSubsets(entry);
+      mapRenderer.updateTileHighways?.(tileKey, subsets?.highways ?? entry.geojson, bounds);
+      buildingsRenderer.updateTileBuildings?.(tileKey, subsets?.buildings ?? entry.geojson, bounds);
     }
 
     const finishBuildingRender = () => {
@@ -4819,6 +4853,14 @@ async function main() {
     if (buildingRefreshPending) return;
     buildingRefreshPending = true;
     const refresh = () => {
+      if (shouldDeferMapWork()) {
+        if (typeof requestIdleCallback === "function") {
+          requestIdleCallback(refresh, { timeout: 200 });
+        } else {
+          setTimeout(refresh, 0);
+        }
+        return;
+      }
       buildingRefreshPending = false;
       rebuildBuildingColliders();
       liftEntitiesToBuildingTop();
@@ -4830,16 +4872,20 @@ async function main() {
     }
   };
 
-  const updateTileMeshes = (tileKey, geojson) => {
+  const shouldDeferMapWork = () => mapFetchInFlight.size > 0 || lastFrameDurationMs > MAP_FRAME_BUDGET_MS;
+
+  const applyTileMeshes = (tileKey, geojson, subsets) => {
     if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
     const bounds = getRenderOrigin(geojson);
     if (bounds) {
       currentRenderOrigin = bounds;
     }
-    mapRenderer.updateTileHighways?.(tileKey, geojson, bounds);
+    const highwayGeojson = subsets?.highways ?? geojson;
+    const buildingGeojson = subsets?.buildings ?? geojson;
+    mapRenderer.updateTileHighways?.(tileKey, highwayGeojson, bounds);
 
     const finishBuildingRender = () => {
-      buildingsRenderer.updateTileBuildings?.(tileKey, geojson, bounds);
+      buildingsRenderer.updateTileBuildings?.(tileKey, buildingGeojson, bounds);
       scheduleBuildingRefresh();
       natureController?.refreshTile?.(tileKey);
     };
@@ -4849,6 +4895,36 @@ async function main() {
     } else {
       finishBuildingRender();
     }
+  };
+
+  const scheduleDeferredTileProcessing = () => {
+    if (tileUpdateScheduled) return;
+    tileUpdateScheduled = true;
+    const process = () => {
+      tileUpdateScheduled = false;
+      if (shouldDeferMapWork()) {
+        scheduleDeferredTileProcessing();
+        return;
+      }
+      for (const [tileKey, payload] of deferredTileUpdates.entries()) {
+        deferredTileUpdates.delete(tileKey);
+        applyTileMeshes(tileKey, payload.geojson, payload.subsets);
+      }
+    };
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(process, { timeout: 200 });
+    } else {
+      setTimeout(process, 0);
+    }
+  };
+
+  const updateTileMeshes = (tileKey, geojson, subsets) => {
+    if (shouldDeferMapWork()) {
+      deferredTileUpdates.set(tileKey, { geojson, subsets });
+      scheduleDeferredTileProcessing();
+      return;
+    }
+    applyTileMeshes(tileKey, geojson, subsets);
   };
 
   const shouldRequestMapUpdate = (location) => {
@@ -4900,12 +4976,14 @@ async function main() {
 
     const cachedTile = await getCachedTile(tileKey);
     if (cachedTile?.geojson) {
+      const subsets = buildOsmSubsets(cachedTile.geojson);
       tileCache.setTile(tile, {
         geojson: cachedTile.geojson,
+        subsets,
         meshes: { highways: null, buildings: null },
         fetchedAt: cachedTile.fetchedAt
       });
-      updateTileMeshes(tileKey, cachedTile.geojson);
+      updateTileMeshes(tileKey, cachedTile.geojson, subsets);
       if (Date.now() - cachedTile.fetchedAt < TILE_CACHE_MAX_AGE_MS) {
         return;
       }
@@ -4916,14 +4994,20 @@ async function main() {
 
     mapFetchInFlight.add(tileKey);
     let geojson;
+    let subsets;
     try {
-      const overpassData = await fetchOSMData(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS);
+      const overpassData = await fetchOSMData(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS, {
+        staleDistanceMeters: TILE_SIZE_METERS
+      });
       debugState.lastOsmFetchAt = Date.now();
       try {
-        geojson = await parseOverpassData(overpassData);
+        const parsed = await parseOverpassData(overpassData);
+        geojson = parsed.geojson;
+        subsets = parsed.subsets ?? buildOsmSubsets(geojson);
       } catch (parseError) {
         console.warn('OSM worker parse failed, falling back to main thread:', parseError);
         geojson = overpassToGeoJSON(overpassData);
+        subsets = buildOsmSubsets(geojson);
       }
     } catch (error) {
       console.warn('OSM fetch failed:', error);
@@ -4938,13 +5022,14 @@ async function main() {
     try {
       tileCache.setTile(tile, {
         geojson,
+        subsets,
         meshes: { highways: null, buildings: null },
         fetchedAt: Date.now()
       });
       setCachedTile(tileKey, geojson).catch((error) => {
         console.warn('Failed to persist tile cache:', error);
       });
-      updateTileMeshes(tileKey, geojson);
+      updateTileMeshes(tileKey, geojson, subsets);
     } catch (error) {
       console.warn('OSM render failed:', error);
       debugState.lastError = {
@@ -5568,6 +5653,7 @@ async function main() {
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
     const frameDelta = clock.getDelta();
+    lastFrameDurationMs = frameDelta * 1000;
     if (mapViewEnabled && playerControls?.body && playerModel) {
       const { x, y, z } = playerModel.position;
       playerControls.body.setTranslation({ x, y, z }, true);

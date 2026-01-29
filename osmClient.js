@@ -3,7 +3,7 @@ import { overpassToGeoJSON } from "./osmGeoJson.js";
 
 const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_STALE_DISTANCE_METERS = 1500;
+const DEFAULT_STALE_DISTANCE_METERS = 600;
 
 const HIGHWAY_TAGS = [
   "footway",
