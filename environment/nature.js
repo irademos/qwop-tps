@@ -111,7 +111,7 @@ export async function createNature({
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
   const getTreeTileBuffer = (cache) =>
-    Math.max(0, Math.floor((cache?.evictRadiusTiles ?? TREE_TILE_BUFFER) / 2));
+    Math.max(0, Math.floor((cache?.evictRadiusTiles ?? TREE_TILE_BUFFER) / 3));
   let tileBuffer = getTreeTileBuffer(activeTileCache);
 
   const getTileKey = (tile) => `${tile.x},${tile.y}`;
