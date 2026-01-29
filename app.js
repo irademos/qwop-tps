@@ -5021,8 +5021,13 @@ async function main() {
                   }
                 );
                 if (blocked) {
-                  playerControls.clearGpsMoveTarget?.();
-                  applyPlayerMeters(playerMeters);
+                  const outsideGeoBounds = playerControls.isOutsideGeoBounds?.(currentPos) ?? true;
+                  if (outsideGeoBounds) {
+                    playerControls.clearGpsMoveTarget?.();
+                    applyPlayerMeters(playerMeters);
+                  } else {
+                    playerControls.clearGpsMoveTarget?.();
+                  }
                 } else {
                   playerControls.setGpsMoveTarget?.({
                     x: playerMeters.x,
