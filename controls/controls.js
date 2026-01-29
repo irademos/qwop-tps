@@ -623,22 +623,25 @@ export class PlayerControls {
       } else if (key === 'e') {
         if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
         if (this.isInWater) return;
-        if (this.isMoving) {
-          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.5);
+        if (this.isSlideMomentumActive()) return;
+        if (this.isMoving && !this.isSlideMomentumActive()) {
+          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
         }
         this.playAction('mutantPunch');
         this.audioManager?.playAttack();
       } else if (key === 'q') {
         if (this.isInWater) return;
-        if (this.isMoving) {
-          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.5);
+        if (this.isSlideMomentumActive()) return;
+        if (this.isMoving && !this.isSlideMomentumActive()) {
+          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
         }
         this.playAction('leftPunch');
         this.audioManager?.playAttack();
       } else if (key === 'r') {
         if (this.isInWater) return;
-        if (this.isMoving) {
-          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(1.4);
+        if (this.isSlideMomentumActive()) return;
+        if (this.isMoving && !this.isSlideMomentumActive()) {
+          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(1.1);
           this.playAction('runningKick');
           this.audioManager?.playAttack();
         } else {
@@ -1002,10 +1005,17 @@ export class PlayerControls {
     this.friendlyDialogueEl?.classList.add('hidden');
   }
 
+  isSlideMomentumActive() {
+    return this.slideMomentum.length() > 0.01;
+  }
+
   playAction(actionName) {
     if (!this.playerModel) return;
     const actions = this.playerModel.userData.actions;
     if (!actions || !actions[actionName]) return;
+    const slideBlockedActions = new Set(['mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'roll']);
+    if (slideBlockedActions.has(actionName) && this.isSlideMomentumActive()) return;
+    if (actionName === 'roll' && this.currentSpecialAction === 'roll') return;
 
     if (this.runningKickTimer) {
       clearTimeout(this.runningKickTimer);
@@ -1357,7 +1367,7 @@ export class PlayerControls {
     }
     if (movementLocked && !freezeActive) {
       movement.copy(this.slideMomentum);
-      this.slideMomentum.multiplyScalar(0.99);
+      this.slideMomentum.multiplyScalar(0.97);
       if (this.slideMomentum.length() < 0.01) this.slideMomentum.set(0, 0, 0);
     } else if (freezeActive) {
       movement.set(0, 0, 0);
@@ -1491,11 +1501,12 @@ export class PlayerControls {
       }
       this.playerModel.position.set(newX, displayY, newZ);
       let yawAngle = this.playerModel.rotation.y;
-      if (movement.length() > 0) {
+      const slideMomentumActive = movementLocked && this.isSlideMomentumActive();
+      if (movement.length() > 0 && !slideMomentumActive) {
         yawAngle = Math.atan2(movement.x, movement.z);
         // this.playerModel.rotation.y = yawAngle;
       }
-      if (this.isFireHeld && this.shouldHoldToFire()) {
+      if (this.isFireHeld && this.shouldHoldToFire() && !slideMomentumActive) {
         const aimDirection = this.getAimDirection(true);
         yawAngle = Math.atan2(aimDirection.x, aimDirection.z);
       }
