@@ -438,21 +438,29 @@ export class PlayerControls {
 
     // Action buttons container
     const actionContainer = document.getElementById('action-buttons');
-
     const toggleButton = document.getElementById('mobile-action-toggle');
+    let setActionState = null;
     if (actionContainer && toggleButton) {
-      const setExpanded = (expanded) => {
+      setActionState = (state) => {
+        this.mobileActionState = state;
+        const expanded = state === 'expanded';
+        const punchMode = state === 'punch';
         actionContainer.classList.toggle('mobile-expanded', expanded);
-        toggleButton.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        actionContainer.classList.toggle('mobile-punch-mode', punchMode);
+        toggleButton.setAttribute('aria-expanded', expanded || punchMode ? 'true' : 'false');
         toggleButton.textContent = expanded ? '✕' : '⋯';
       };
 
-      setExpanded(false);
+      setActionState('collapsed');
 
       const handleToggle = (event) => {
         event.preventDefault();
-        const nextState = !actionContainer.classList.contains('mobile-expanded');
-        setExpanded(nextState);
+        if (this.mobileActionState === 'punch') {
+          setActionState('expanded');
+          return;
+        }
+        const nextState = this.mobileActionState === 'expanded' ? 'collapsed' : 'expanded';
+        setActionState(nextState);
       };
 
       toggleButton.addEventListener('touchstart', handleToggle, { passive: false });
@@ -495,20 +503,6 @@ export class PlayerControls {
       this.setAiming(false);
     });
 
-    // Kick button
-    if (!document.getElementById('kick-button')) {
-      const kickButton = document.createElement('button');
-      kickButton.id = 'kick-button';
-      kickButton.className = 'action-button mobile-action';
-      kickButton.innerText = 'KICK';
-      actionContainer.appendChild(kickButton);
-      kickButton.addEventListener('touchstart', (event) => {
-        if (!this.enabled || this.isInWater) return;
-        this.playAction('mmaKick');
-        event.preventDefault();
-      });
-    }
-
     // Punch button
     if (!document.getElementById('punch-button')) {
       const punchButton = document.createElement('button');
@@ -516,7 +510,48 @@ export class PlayerControls {
       punchButton.className = 'action-button mobile-action';
       punchButton.innerText = 'PUNCH';
       actionContainer.appendChild(punchButton);
-      punchButton.addEventListener('touchstart', (event) => {
+    }
+
+    const punchButton = document.getElementById('punch-button');
+    punchButton.addEventListener('touchstart', (event) => {
+      if (!this.enabled) return;
+      setActionState?.('punch');
+      event.preventDefault();
+    });
+
+    if (!document.getElementById('left-punch-button')) {
+      const leftPunchButton = document.createElement('button');
+      leftPunchButton.id = 'left-punch-button';
+      leftPunchButton.className = 'action-button mobile-punch-action';
+      leftPunchButton.innerText = 'LEFT';
+      actionContainer.appendChild(leftPunchButton);
+      leftPunchButton.addEventListener('touchstart', (event) => {
+        if (!this.enabled || this.isInWater) return;
+        this.playAction('leftPunch');
+        event.preventDefault();
+      });
+    }
+
+    if (!document.getElementById('punch-kick-button')) {
+      const punchKickButton = document.createElement('button');
+      punchKickButton.id = 'punch-kick-button';
+      punchKickButton.className = 'action-button mobile-punch-action';
+      punchKickButton.innerText = 'KICK';
+      actionContainer.appendChild(punchKickButton);
+      punchKickButton.addEventListener('touchstart', (event) => {
+        if (!this.enabled || this.isInWater) return;
+        this.playAction('mmaKick');
+        event.preventDefault();
+      });
+    }
+
+    if (!document.getElementById('right-punch-button')) {
+      const rightPunchButton = document.createElement('button');
+      rightPunchButton.id = 'right-punch-button';
+      rightPunchButton.className = 'action-button mobile-punch-action';
+      rightPunchButton.innerText = 'RIGHT';
+      actionContainer.appendChild(rightPunchButton);
+      rightPunchButton.addEventListener('touchstart', (event) => {
         if (!this.enabled || this.isInWater) return;
         this.playAction('mutantPunch');
         event.preventDefault();
@@ -592,6 +627,13 @@ export class PlayerControls {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.5);
         }
         this.playAction('mutantPunch');
+        this.audioManager?.playAttack();
+      } else if (key === 'q') {
+        if (this.isInWater) return;
+        if (this.isMoving) {
+          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.5);
+        }
+        this.playAction('leftPunch');
         this.audioManager?.playAttack();
       } else if (key === 'r') {
         if (this.isInWater) return;
@@ -981,10 +1023,13 @@ export class PlayerControls {
     this.playerModel.userData.currentAction = actionName;
     this.currentSpecialAction = actionName;
 
-    if (["mutantPunch", "hurricaneKick", "mmaKick", "runningKick"].includes(actionName)) {
-      const attackName = actionName === 'mutantPunch' && this.getEquippedSword()
+    if (["mutantPunch", "leftPunch", "hurricaneKick", "mmaKick", "runningKick"].includes(actionName)) {
+      const isPunch = actionName === 'mutantPunch' || actionName === 'leftPunch';
+      const attackName = isPunch && this.getEquippedSword()
         ? 'swordSlash'
-        : actionName;
+        : isPunch
+          ? 'mutantPunch'
+          : actionName;
       this.playerModel.userData.attack = {
         name: attackName,
         start: Date.now(),
@@ -1269,7 +1314,7 @@ export class PlayerControls {
       t.y = groundExpectedY;
     }
     const moveDirection = new THREE.Vector3(0, 0, 0);
-    const movementLocked = freezeActive || ['mutantPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
+    const movementLocked = freezeActive || ['mutantPunch', 'leftPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
     const position = new THREE.Vector3(t.x, t.y, t.z);
     if (!movementLocked) {
       if (this.isMobile) {

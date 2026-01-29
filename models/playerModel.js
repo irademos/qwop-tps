@@ -158,24 +158,6 @@ function combineTrackSegments(firstTrack, secondTrack) {
   return new TrackClass(firstTrack.name, combinedTimes, combinedValues);
 }
 
-function splitPaddlingClip(THREE, clip) {
-  const duration = clip.duration;
-  const leftStart = duration * 0.25;
-  const leftEnd = duration * 0.75;
-
-  const leftTracks = clip.tracks.map((track) => sliceTrackByTime(track, leftStart, leftEnd));
-  const leftClip = new THREE.AnimationClip('paddleLeft', -1, leftTracks);
-  leftClip.resetDuration();
-
-  const firstHalfTracks = clip.tracks.map((track) => sliceTrackByTime(track, leftEnd, duration + EPSILON));
-  const secondHalfTracks = clip.tracks.map((track) => sliceTrackByTime(track, 0, leftStart));
-  const rightTracks = firstHalfTracks.map((track, index) => combineTrackSegments(track, secondHalfTracks[index]));
-  const rightClip = new THREE.AnimationClip('paddleRight', -1, rightTracks);
-  rightClip.resetDuration();
-
-  return { leftClip, rightClip };
-}
-
 function clipWithExistingTargetsOnly(clip, root) {
   const names = new Set();
   root.traverse(o => names.add(o.name));
@@ -272,6 +254,7 @@ export function createPlayerModel(
             jump: 'Joyful Jump.fbx',
             hit: 'Flying Back Death.fbx',
             mutantPunch: 'Mutant Punch.fbx',
+            leftPunch: 'Left Punch.fbx',
             mmaKick: 'Mma Kick.fbx',
             runningKick: 'Stand To Roll.fbx',
             hurricaneKick: 'Hurricane Kick.fbx',
@@ -292,7 +275,7 @@ export function createPlayerModel(
                   action.setEffectiveTimeScale(1.8);
                 }
                 if (
-                  ['jump', 'hit', 'mutantPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
+                  ['jump', 'hit', 'mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
                 ) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
@@ -321,7 +304,7 @@ export function createPlayerModel(
                     action.setEffectiveTimeScale(1.8);
                   }
                   if (
-                    ['jump', 'hit', 'mutantPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
+                    ['jump', 'hit', 'mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
                   ) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
@@ -337,54 +320,6 @@ export function createPlayerModel(
               );
             });
           });
-
-          promises.push(new Promise((resolve, reject) => {
-            const paddlingFile = 'Paddling.fbx';
-            const cachedClip = animationClipCache.get(paddlingFile);
-            if (cachedClip) {
-              const { leftClip, rightClip } = splitPaddlingClip(THREE, cachedClip);
-
-              const leftAction = mixer.clipAction(leftClip);
-              leftAction.loop = THREE.LoopOnce;
-              leftAction.clampWhenFinished = true;
-              actions.paddleLeft = leftAction;
-
-              const rightAction = mixer.clipAction(rightClip);
-              rightAction.loop = THREE.LoopOnce;
-              rightAction.clampWhenFinished = true;
-              actions.paddleRight = rightAction;
-              resolve();
-              return;
-            }
-
-            fbxLoader.load(
-              '/models/animations/Paddling.fbx',
-              (anim) => {
-
-                const baseClip = anim?.animations?.[0];
-                if (!baseClip) {
-                  resolve();
-                  return;
-                }
-
-                animationClipCache.set(paddlingFile, baseClip);
-                const { leftClip, rightClip } = splitPaddlingClip(THREE, baseClip);
-
-                const leftAction = mixer.clipAction(leftClip);
-                leftAction.loop = THREE.LoopOnce;
-                leftAction.clampWhenFinished = true;
-                actions.paddleLeft = leftAction;
-
-                const rightAction = mixer.clipAction(rightClip);
-                rightAction.loop = THREE.LoopOnce;
-                rightAction.clampWhenFinished = true;
-                actions.paddleRight = rightAction;
-                resolve();
-              },
-              undefined,
-              reject
-            );
-          }));
 
           const lodPromises = lodConfigs.map((lod) => {
             return new Promise((resolve) => {
