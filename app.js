@@ -4949,6 +4949,9 @@ async function main() {
       const queuedUpdates = Array.from(deferredTileUpdates.entries());
       deferredTileUpdates.clear();
       for (const [tileKey, geojson] of queuedUpdates) {
+        if (!tileCache.hasTile(tileKey)) {
+          continue;
+        }
         updateTileMeshes(tileKey, geojson, { force: true });
       }
       if (deferredBuildingRefresh) {
@@ -5089,6 +5092,7 @@ async function main() {
         buildingsRenderer.removeTile?.(key);
         renderedTileGeojson.delete(key);
         tileRenderBounds.delete(key);
+        deferredTileUpdates.delete(key);
       }
       scheduleBuildingRefresh();
     }
