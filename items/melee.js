@@ -31,9 +31,10 @@ export function updateMeleeAttacks({
   const players = [
     { id: 'local', model: playerModel },
     ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p.model }))
-  ];
+  ].filter((player) => player.model && player.model.position);
 
   for (const attacker of players) {
+    if (!attacker.model || !attacker.model.userData) continue;
     const info = attacker.model.userData.attack;
     if (!info) continue;
     const attackName = info.name === 'mutantPunch' && attacker.model.userData?.equippedWeaponType === 'sword'
@@ -47,6 +48,7 @@ export function updateMeleeAttacks({
       const attackDamage = getStrengthDamage(attacker.id, cfg.damage);
       for (const target of players) {
         if (target === attacker) continue;
+        if (!target.model || !target.model.position) continue;
         const dist = attacker.model.position.distanceTo(target.model.position);
         if (dist <= cfg.range) {
           hit = true;
@@ -77,7 +79,7 @@ export function updateMeleeAttacks({
 
       if (isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
-          if (!monster) continue;
+          if (!monster?.model?.position) continue;
           const dist = attacker.model.position.distanceTo(monster.model.position);
           if (dist <= cfg.range) {
             hit = true;
@@ -96,7 +98,7 @@ export function updateMeleeAttacks({
         }
       } else if (!isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
-          if (!monster) continue;
+          if (!monster?.model?.position) continue;
           const dist = attacker.model.position.distanceTo(monster.model.position);
           if (dist <= cfg.range) {
             hit = true;
