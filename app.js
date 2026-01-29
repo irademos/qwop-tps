@@ -3676,7 +3676,7 @@ async function main() {
     mistGroup.userData.skipTerrainCorrection = true;
     scene.add(mistGroup);
 
-    const normalizedDirection = direction.clone().normalize().multiplyScalar(-1);
+    const normalizedDirection = direction.clone().normalize()
     const speed = ICE_MIST_SPEED * THREE.MathUtils.lerp(0.9, 1.15, Math.random());
     const drift = new THREE.Vector3(
       (Math.random() - 0.5) * 0.3,
