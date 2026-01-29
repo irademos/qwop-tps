@@ -2013,7 +2013,7 @@ async function main() {
     removeApplePickup: appleController?.removePickup
   });
   natureController?.update(playerModel?.position);
-  await createCabin({ scene, getTerrainHeight });
+  // await createCabin({ scene, getTerrainHeight });
   mushroomController = await createMushrooms({
     scene,
     getTerrainHeight,
