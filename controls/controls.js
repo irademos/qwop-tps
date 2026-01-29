@@ -527,6 +527,7 @@ export class PlayerControls {
       actionContainer.appendChild(leftPunchButton);
       leftPunchButton.addEventListener('touchstart', (event) => {
         if (!this.enabled || this.isInWater) return;
+        this.slideMomentum.set(0, 0, 0);
         this.playAction('leftPunch');
         event.preventDefault();
       });
@@ -540,6 +541,7 @@ export class PlayerControls {
       actionContainer.appendChild(punchKickButton);
       punchKickButton.addEventListener('touchstart', (event) => {
         if (!this.enabled || this.isInWater) return;
+        this.slideMomentum.set(0, 0, 0);
         this.playAction('mmaKick');
         event.preventDefault();
       });
@@ -553,6 +555,7 @@ export class PlayerControls {
       actionContainer.appendChild(rightPunchButton);
       rightPunchButton.addEventListener('touchstart', (event) => {
         if (!this.enabled || this.isInWater) return;
+        this.slideMomentum.set(0, 0, 0);
         this.playAction('mutantPunch');
         event.preventDefault();
       });
@@ -623,16 +626,12 @@ export class PlayerControls {
       } else if (key === 'e') {
         if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
         if (this.isInWater) return;
-        if (this.isMoving) {
-          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.5);
-        }
+        this.slideMomentum.set(0, 0, 0);
         this.playAction('mutantPunch');
         this.audioManager?.playAttack();
       } else if (key === 'q') {
         if (this.isInWater) return;
-        if (this.isMoving) {
-          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.5);
-        }
+        this.slideMomentum.set(0, 0, 0);
         this.playAction('leftPunch');
         this.audioManager?.playAttack();
       } else if (key === 'r') {
@@ -642,6 +641,7 @@ export class PlayerControls {
           this.playAction('runningKick');
           this.audioManager?.playAttack();
         } else {
+          this.slideMomentum.set(0, 0, 0);
           this.playAction('mmaKick');
           this.audioManager?.playAttack();
         }
