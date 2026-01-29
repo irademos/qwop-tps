@@ -5564,38 +5564,77 @@ async function main() {
 
   const getMeshWorldBounds = (mesh) => {
     const geometry = mesh.geometry;
-    if (!geometry) {
-      return null;
-    }
-    if (!geometry.boundingBox && typeof geometry.computeBoundingBox === 'function') {
-      geometry.computeBoundingBox();
-    }
-    if (!geometry.boundingBox) {
-      return null;
-    }
     const userData = mesh.userData ?? {};
     mesh.userData = userData;
     if (!userData.boundsState) {
       userData.boundsState = {
         worldBox: new THREE.Box3(),
+        tempBox: new THREE.Box3(),
         lastPosition: new THREE.Vector3(),
         lastQuaternion: new THREE.Quaternion()
       };
       userData.boundsDirty = true;
     }
     const { boundsState } = userData;
+    if (userData.boundsHasSkinned == null) {
+      let hasSkinned = false;
+      mesh.traverse((child) => {
+        if (child.isSkinnedMesh) {
+          hasSkinned = true;
+        }
+      });
+      userData.boundsHasSkinned = hasSkinned;
+    }
     const hasMoved = !boundsState.lastPosition.equals(mesh.position)
       || !boundsState.lastQuaternion.equals(mesh.quaternion);
     if (hasMoved) {
       userData.boundsDirty = true;
     }
-    if (userData.boundsDirty) {
-      mesh.updateMatrixWorld();
-      boundsState.worldBox.copy(geometry.boundingBox).applyMatrix4(mesh.matrixWorld);
+    if (!userData.boundsDirty && !userData.boundsAlwaysDirty && !userData.boundsHasSkinned) {
+      return boundsState.worldBox;
+    }
+    if (userData.boundsHasSkinned) {
+      mesh.updateMatrixWorld(true);
+      boundsState.worldBox.setFromObject(mesh);
       boundsState.lastPosition.copy(mesh.position);
       boundsState.lastQuaternion.copy(mesh.quaternion);
       userData.boundsDirty = false;
+      return boundsState.worldBox;
     }
+    if (geometry && !geometry.boundingBox && typeof geometry.computeBoundingBox === 'function') {
+      geometry.computeBoundingBox();
+    }
+    if (!geometry || !geometry.boundingBox) {
+      if (!mesh.isGroup && !mesh.isLOD && !mesh.isObject3D) {
+        return null;
+      }
+      mesh.updateMatrixWorld(true);
+      let hasChildBounds = false;
+      boundsState.worldBox.makeEmpty();
+      mesh.traverse((child) => {
+        if (!child.isMesh || !child.geometry) {
+          return;
+        }
+        if (!child.geometry.boundingBox && typeof child.geometry.computeBoundingBox === 'function') {
+          child.geometry.computeBoundingBox();
+        }
+        if (!child.geometry.boundingBox) {
+          return;
+        }
+        boundsState.tempBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+        boundsState.worldBox.union(boundsState.tempBox);
+        hasChildBounds = true;
+      });
+      if (!hasChildBounds) {
+        boundsState.worldBox.setFromObject(mesh);
+      }
+    } else {
+      mesh.updateMatrixWorld();
+      boundsState.worldBox.copy(geometry.boundingBox).applyMatrix4(mesh.matrixWorld);
+    }
+    boundsState.lastPosition.copy(mesh.position);
+    boundsState.lastQuaternion.copy(mesh.quaternion);
+    userData.boundsDirty = false;
     return boundsState.worldBox;
   };
 
