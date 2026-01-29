@@ -191,6 +191,15 @@ function restoreTileLabel(tile) {
   }
 }
 
+function clearClothing(slot) {
+  const currentEntry = currentClothingBySlot.get(slot);
+  if (currentEntry?.mesh && currentEntry.mesh.parent) {
+    currentEntry.mesh.parent.remove(currentEntry.mesh);
+  }
+  currentClothingBySlot.delete(slot);
+  setSlotSelection(slot, null);
+}
+
 function attachTransformControls(slot, selectedId) {
   const tileMap = tilesBySlot.get(slot);
   const controls = controlsBySlot.get(slot);
@@ -353,6 +362,13 @@ function buildShirtsPanel() {
 
   const grid = createElement('div', 'customize-grid');
   const tileMap = new Map();
+  const noneTile = createElement('button', 'customize-tile', 'None');
+  noneTile.type = 'button';
+  noneTile.dataset.slot = 'shirts';
+  noneTile.dataset.none = 'true';
+  noneTile.dataset.label = 'None';
+  grid.appendChild(noneTile);
+  tileMap.set(null, noneTile);
   SHIRT_ITEMS.forEach((item) => {
     const tile = createElement('button', 'customize-tile', item.label);
     tile.type = 'button';
@@ -373,12 +389,19 @@ function buildShirtsPanel() {
 function buildHatsPanel() {
   const panelEl = createElement('div', 'customize-tab-panel');
   panelEl.dataset.panel = 'hats';
+  const grid = createElement('div', 'customize-grid');
+  const tileMap = new Map();
+  const noneTile = createElement('button', 'customize-tile', 'None');
+  noneTile.type = 'button';
+  noneTile.dataset.slot = 'hats';
+  noneTile.dataset.none = 'true';
+  noneTile.dataset.label = 'None';
+  grid.appendChild(noneTile);
+  tileMap.set(null, noneTile);
   if (!HAT_ITEMS.length) {
     const empty = createElement('div', 'customize-empty', 'No hats available yet.');
     panelEl.appendChild(empty);
   } else {
-    const grid = createElement('div', 'customize-grid');
-    const tileMap = new Map();
     HAT_ITEMS.forEach((item) => {
       const tile = createElement('button', 'customize-tile', item.label);
       tile.type = 'button';
@@ -388,9 +411,9 @@ function buildHatsPanel() {
       grid.appendChild(tile);
       tileMap.set(item.id, tile);
     });
-    panelEl.appendChild(grid);
-    tilesBySlot.set('hats', tileMap);
   }
+  panelEl.appendChild(grid);
+  tilesBySlot.set('hats', tileMap);
   const controls = buildTransformControls('hats');
   controlsBySlot.set('hats', controls);
   return panelEl;
@@ -479,6 +502,11 @@ function buildPanel() {
       applyPlayerColor(target.dataset.color);
       return;
     }
+    if (target.dataset.none) {
+      const slot = target.dataset.slot || 'shirts';
+      clearClothing(slot);
+      return;
+    }
     if (target.dataset.clothing) {
       const slot = target.dataset.slot || 'shirts';
       const items = slot === 'hats' ? HAT_ITEMS : SHIRT_ITEMS;
@@ -539,6 +567,8 @@ function applyCustomizationState() {
       setSlotSelection('shirts', item.id);
       loadClothing(item, 'shirts');
     }
+  } else {
+    clearClothing('shirts');
   }
   if (customizationState.hats?.selectedId) {
     const item = HAT_ITEMS.find((entry) => entry.id === customizationState.hats.selectedId);
@@ -546,6 +576,8 @@ function applyCustomizationState() {
       setSlotSelection('hats', item.id);
       loadClothing(item, 'hats');
     }
+  } else {
+    clearClothing('hats');
   }
 }
 
