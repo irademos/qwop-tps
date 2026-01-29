@@ -316,15 +316,15 @@ export class HomeSystem {
 
   getHomeLocalPosition() {
     if (!this.homeData) return null;
-    if (Number.isFinite(this.homeData.localX) && Number.isFinite(this.homeData.localZ)) {
-      return new THREE.Vector3(this.homeData.localX, 0, this.homeData.localZ);
-    }
     if (Number.isFinite(this.homeData.lat) && Number.isFinite(this.homeData.lon)) {
       const origin = this.getLocalOrigin?.();
       if (!origin || !this.geoToLocal) return null;
       const local = this.geoToLocal(this.homeData.lat, this.homeData.lon, origin);
       if (!local) return null;
       return new THREE.Vector3(local.x, 0, local.z);
+    }
+    if (Number.isFinite(this.homeData.localX) && Number.isFinite(this.homeData.localZ)) {
+      return new THREE.Vector3(this.homeData.localX, 0, this.homeData.localZ);
     }
     return null;
   }
