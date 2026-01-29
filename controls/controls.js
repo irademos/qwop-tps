@@ -1374,6 +1374,9 @@ export class PlayerControls {
       this.slideMomentum.set(0, 0, 0);
     } else if (movement.length() > 0) {
       this.lastMoveDirection.copy(movement);
+    } else if (this.isSlideMomentumActive()) {
+      this.slideMomentum.multiplyScalar(0.9);
+      if (this.slideMomentum.length() < 0.01) this.slideMomentum.set(0, 0, 0);
     }
     if (this.isClimbing) {
       movement.set(0, 0, 0);
