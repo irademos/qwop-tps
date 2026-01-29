@@ -110,7 +110,9 @@ export async function createNature({
 
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
-  let tileBuffer = activeTileCache?.evictRadiusTiles ?? TREE_TILE_BUFFER;
+  const getTreeTileBuffer = (cache) =>
+    Math.max(0, Math.floor((cache?.evictRadiusTiles ?? TREE_TILE_BUFFER) / 2));
+  let tileBuffer = getTreeTileBuffer(activeTileCache);
 
   const getTileKey = (tile) => `${tile.x},${tile.y}`;
 
@@ -341,7 +343,7 @@ export async function createNature({
   const setTileCache = (nextCache) => {
     activeTileCache = nextCache ?? null;
     tileSizeMeters = activeTileCache?.tileSizeMeters ?? tileSizeMeters;
-    tileBuffer = activeTileCache?.evictRadiusTiles ?? tileBuffer;
+    tileBuffer = getTreeTileBuffer(activeTileCache);
     lastPlayerTileKey = null;
     for (const entry of treeTiles.values()) {
       entry.group.clear();
