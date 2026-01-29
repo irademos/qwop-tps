@@ -166,11 +166,19 @@ function clipWithExistingTargetsOnly(clip, root) {
 }
 
 function stripRootTranslationTracks(clip, rootName) {
-  const blocked = new Set([
-    `${rootName}.position`,
-    `${rootName}.matrix`,
-  ]);
-  const tracks = clip.tracks.filter(t => !blocked.has(t.name));
+  const candidates = new Set([
+    rootName,
+    'Hips',
+    'mixamorig:Hips',
+    'Root',
+    'mixamorig:Root',
+    'Armature'
+  ].filter(Boolean).map(name => name.toLowerCase()));
+  const tracks = clip.tracks.filter((track) => {
+    if (!track.name.endsWith('.position') && !track.name.endsWith('.matrix')) return true;
+    const nodeName = track.name.split('.')[0].toLowerCase();
+    return !candidates.has(nodeName);
+  });
   return new THREE.AnimationClip(clip.name, clip.duration, tracks);
 }
 
