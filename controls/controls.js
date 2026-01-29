@@ -68,7 +68,7 @@ const FRIENDLY_DIALOGUE_POOL = [
     ]
   }
 ];
-const SLIDE_BLOCKED_ACTIONS = ['mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
+const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 
 export class PlayerControls {
   constructor({
@@ -624,7 +624,6 @@ export class PlayerControls {
       } else if (key === 'e') {
         if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
         if (this.isInWater) return;
-        if (this.isSlideMomentumActive()) return;
         if (this.isMoving && !this.isSlideMomentumActive()) {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
         }
@@ -632,7 +631,6 @@ export class PlayerControls {
         this.audioManager?.playAttack();
       } else if (key === 'q') {
         if (this.isInWater) return;
-        if (this.isSlideMomentumActive()) return;
         if (this.isMoving && !this.isSlideMomentumActive()) {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
         }
@@ -640,7 +638,6 @@ export class PlayerControls {
         this.audioManager?.playAttack();
       } else if (key === 'r') {
         if (this.isInWater) return;
-        if (this.isSlideMomentumActive()) return;
         if (this.isMoving && !this.isSlideMomentumActive()) {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(1.1);
           this.playAction('runningKick');
@@ -1014,8 +1011,7 @@ export class PlayerControls {
     if (!this.playerModel) return;
     const actions = this.playerModel.userData.actions;
     if (!actions || !actions[actionName]) return;
-    if (SLIDE_BLOCKED_ACTIONS.includes(actionName) && this.isSlideMomentumActive()) return;
-    if (actionName === 'roll' && this.currentSpecialAction === 'roll') return;
+    if (ACTION_LOCKED_ATTACKS.includes(actionName) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return;
 
     if (this.runningKickTimer) {
       clearTimeout(this.runningKickTimer);
