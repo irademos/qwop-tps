@@ -1923,7 +1923,7 @@ export class PlayerControls {
     const gun = this.getEquippedGun();
     const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
-    const direction = this.getAimDirection(usesArrow);
+    const direction = usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow);
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
@@ -2006,6 +2006,11 @@ export class PlayerControls {
       direction.multiplyScalar(-1);
     }
     return direction;
+  }
+
+  getPlayerFacingDirection() {
+    if (!this.playerModel) return new THREE.Vector3(0, 0, 1);
+    return new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
   }
 
   updateAimingRotation() {
