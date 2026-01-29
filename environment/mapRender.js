@@ -31,7 +31,7 @@ function metersPerDegreeLon(latDeg) {
 
 function collectHighwayLines(geojson) {
   const lines = [];
-  const features = geojson?.features ?? [];
+  const features = geojson?.prefiltered?.highways ?? geojson?.features ?? [];
   for (const feature of features) {
     if (!feature?.properties?.highway) continue;
     const highway = feature.properties.highway;

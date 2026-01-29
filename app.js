@@ -4481,6 +4481,10 @@ async function main() {
   let lastMapUpdateAt = 0;
   let lastMapUpdateTileKey = null;
   const MAP_UPDATE_THROTTLE_MS = 1500;
+  const MAP_FRAME_BUDGET_MS = 18;
+  const MAP_DEFER_TIMEOUT_MS = 200;
+  const MAP_DEFER_MAX_WAIT_MS = 900;
+  let lastFrameDurationMs = 0;
 
   function loadWorldOrigin() {
     try {
@@ -4752,6 +4756,25 @@ async function main() {
     }
   };
 
+  const prefilterGeojson = (geojson) => {
+    if (!geojson) return geojson;
+    const highways = [];
+    const buildings = [];
+    const features = geojson?.features ?? [];
+    for (const feature of features) {
+      const props = feature?.properties;
+      if (!props) continue;
+      if (props.highway) {
+        highways.push(feature);
+      }
+      if (props.building) {
+        buildings.push(feature);
+      }
+    }
+    geojson.prefiltered = { highways, buildings };
+    return geojson;
+  };
+
   const osmWorkerPending = new Map();
   let osmWorkerRequestId = 0;
   let osmWorker = null;
@@ -4774,7 +4797,7 @@ async function main() {
     try {
       osmWorker = new Worker(new URL("./workers/osmWorker.js", import.meta.url), { type: "module" });
       osmWorker.addEventListener("message", (event) => {
-        const { id, geojson, error } = event.data || {};
+        const { id, geojson, prefiltered, error } = event.data || {};
         if (id == null) return;
         const pending = osmWorkerPending.get(id);
         if (!pending) return;
@@ -4782,6 +4805,9 @@ async function main() {
         if (error) {
           pending.reject(new Error(error));
         } else {
+          if (geojson && prefiltered) {
+            geojson.prefiltered = prefiltered;
+          }
           pending.resolve(geojson);
         }
       });
@@ -4794,7 +4820,7 @@ async function main() {
 
   const parseOverpassData = async (data) => {
     if (!osmWorker) {
-      return overpassToGeoJSON(data);
+      return prefilterGeojson(overpassToGeoJSON(data));
     }
     const requestId = osmWorkerRequestId += 1;
     return new Promise((resolve, reject) => {
@@ -4867,8 +4893,7 @@ async function main() {
     const finishBuildingRender = () => {
       if (rebuildId !== mapRebuildToken) return;
       if (changedTileKeys.size === 0) return;
-      rebuildBuildingColliders();
-      liftEntitiesToBuildingTop();
+      scheduleBuildingRefresh();
       if (typeof natureController?.refreshTile === "function") {
         for (const tileKey of changedTileKeys) {
           natureController.refreshTile(tileKey);
@@ -4893,8 +4918,66 @@ async function main() {
     rebuildMapFromCache();
   };
 
+  const deferredTileUpdates = new Map();
+  let deferredMapWorkHandle = null;
+  let deferredMapWorkQueuedAt = 0;
+  let deferredBuildingRefresh = false;
+
+  const shouldDeferMapWork = () => {
+    if (mapFetchInFlight.size > 0) return true;
+    if (!Number.isFinite(lastFrameDurationMs) || lastFrameDurationMs <= 0) return false;
+    return lastFrameDurationMs > MAP_FRAME_BUDGET_MS;
+  };
+
+  const scheduleDeferredMapWork = () => {
+    if (deferredMapWorkHandle) return;
+    if (!deferredMapWorkQueuedAt) {
+      deferredMapWorkQueuedAt = performance.now();
+    }
+    const runDeferred = (deadline) => {
+      deferredMapWorkHandle = null;
+      const now = performance.now();
+      const waitedMs = deferredMapWorkQueuedAt ? now - deferredMapWorkQueuedAt : 0;
+      const canRun = !shouldDeferMapWork()
+        || deadline?.didTimeout
+        || waitedMs >= MAP_DEFER_MAX_WAIT_MS;
+      if (!canRun) {
+        scheduleDeferredMapWork();
+        return;
+      }
+      deferredMapWorkQueuedAt = 0;
+      const queuedUpdates = Array.from(deferredTileUpdates.entries());
+      deferredTileUpdates.clear();
+      for (const [tileKey, geojson] of queuedUpdates) {
+        if (!tileCache.hasTile(tileKey)) {
+          continue;
+        }
+        updateTileMeshes(tileKey, geojson, { force: true });
+      }
+      if (deferredBuildingRefresh) {
+        deferredBuildingRefresh = false;
+        scheduleBuildingRefresh({ force: true });
+      }
+    };
+    if (typeof requestIdleCallback === "function") {
+      deferredMapWorkHandle = requestIdleCallback(runDeferred, { timeout: MAP_DEFER_TIMEOUT_MS });
+    } else {
+      deferredMapWorkHandle = setTimeout(() => runDeferred({ didTimeout: true }), 0);
+    }
+  };
+
+  const queueTileUpdate = (tileKey, geojson) => {
+    deferredTileUpdates.set(tileKey, geojson);
+    scheduleDeferredMapWork();
+  };
+
   let buildingRefreshPending = false;
-  const scheduleBuildingRefresh = () => {
+  const scheduleBuildingRefresh = ({ force = false } = {}) => {
+    if (!force && shouldDeferMapWork()) {
+      deferredBuildingRefresh = true;
+      scheduleDeferredMapWork();
+      return;
+    }
     if (buildingRefreshPending) return;
     buildingRefreshPending = true;
     const refresh = () => {
@@ -4909,7 +4992,7 @@ async function main() {
     }
   };
 
-  const updateTileMeshes = (tileKey, geojson) => {
+  const updateTileMeshesImmediate = (tileKey, geojson) => {
     if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
     const previousGeojson = renderedTileGeojson.get(tileKey);
     if (previousGeojson === geojson) return;
@@ -4959,6 +5042,15 @@ async function main() {
     lastRenderOrigin = bounds ?? null;
   };
 
+  const updateTileMeshes = (tileKey, geojson, { force = false } = {}) => {
+    if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
+    if (!force && shouldDeferMapWork()) {
+      queueTileUpdate(tileKey, geojson);
+      return;
+    }
+    updateTileMeshesImmediate(tileKey, geojson);
+  };
+
   const shouldRequestMapUpdate = (location) => {
     if (!location || PERF.disableMapUpdates) return false;
     const localMeters = tileCache.getLocalMeters(location);
@@ -5000,6 +5092,7 @@ async function main() {
         buildingsRenderer.removeTile?.(key);
         renderedTileGeojson.delete(key);
         tileRenderBounds.delete(key);
+        deferredTileUpdates.delete(key);
       }
       scheduleBuildingRefresh();
     }
@@ -5027,13 +5120,15 @@ async function main() {
     mapFetchInFlight.add(tileKey);
     let geojson;
     try {
-      const overpassData = await fetchOSMData(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS);
+      const overpassData = await fetchOSMData(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS, {
+        staleDistanceMeters: TILE_SIZE_METERS * 2
+      });
       debugState.lastOsmFetchAt = Date.now();
       try {
         geojson = await parseOverpassData(overpassData);
       } catch (parseError) {
         console.warn('OSM worker parse failed, falling back to main thread:', parseError);
-        geojson = overpassToGeoJSON(overpassData);
+        geojson = prefilterGeojson(overpassToGeoJSON(overpassData));
       }
     } catch (error) {
       console.warn('OSM fetch failed:', error);
@@ -5762,6 +5857,7 @@ async function main() {
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
     const frameDelta = clock.getDelta();
+    lastFrameDurationMs = frameDelta * 1000;
     if (mapViewEnabled && playerControls?.body && playerModel) {
       const { x, y, z } = playerModel.position;
       playerControls.body.setTranslation({ x, y, z }, true);

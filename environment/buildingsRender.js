@@ -111,7 +111,7 @@ function toLocalMeters(coord, origin, lonScale) {
 
 function collectBuildingPolygons(geojson) {
   const polygons = [];
-  const features = geojson?.features ?? [];
+  const features = geojson?.prefiltered?.buildings ?? geojson?.features ?? [];
   for (const feature of features) {
     if (!feature?.properties?.building) continue;
     const geometry = feature.geometry;
