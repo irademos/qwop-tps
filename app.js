@@ -1791,7 +1791,7 @@ async function main() {
       autumnSword.holder = null;
       return;
     }
-    dropOtherWeapons(autumnSword);
+    unequipOtherInventoryItems('autumnSword');
     addToInventory('autumnSword', 1);
     setPlayerWeaponType(holder, autumnSword.type);
   };
