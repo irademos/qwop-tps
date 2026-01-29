@@ -45,6 +45,7 @@ import {
   getStoredPinHash,
   loadOrCreateWithPin,
   renameProfile,
+  saveCharacterModel,
   saveCustomization,
   saveStatsThrottled
 } from './playerProfile.js';
@@ -508,6 +509,18 @@ async function main() {
   setCookie("playerName", playerName);
   localStorage.setItem('playerName', playerName);
 
+  let characterModel = DEFAULT_CHARACTER_MODEL;
+  const storedCharacterModel = playerProfile?.characterModel
+    || localStorage.getItem('characterModel')
+    || getCookie("characterModel")
+    || DEFAULT_CHARACTER_MODEL;
+  characterModel = storedCharacterModel;
+  if (profileNameKey && playerProfile?.characterModel !== storedCharacterModel) {
+    playerProfile = playerProfile || {};
+    playerProfile.characterModel = storedCharacterModel;
+    await saveCharacterModel(profileNameKey, storedCharacterModel);
+  }
+
   let updatePlayerInfoUI = () => {};
 
   const FOOD_HUNGER_GAIN = 25;
@@ -537,10 +550,6 @@ async function main() {
   const PICKUP_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
   const ICE_GUN_AMMO_CLUSTER_COUNT = 3;
   const ICE_GUN_AMMO_CLUSTER_RADIUS = 1.4;
-
-  let characterModel = localStorage.getItem('characterModel') || getCookie("characterModel") || DEFAULT_CHARACTER_MODEL;
-  setCookie("characterModel", characterModel);
-  localStorage.setItem('characterModel', characterModel);
 
   let multiplayer = null;
   let isHost = false;
@@ -5521,7 +5530,7 @@ async function main() {
 
 
   function swapPlayerCharacter(newModelPath) {
-    if (!newModelPath || newModelPath === characterModel) {
+    if (!newModelPath) {
       return;
     }
 
@@ -5614,10 +5623,13 @@ async function main() {
     getCharacterModel: () => characterModel,
     setCharacterModel: (modelPath) => {
       if (!modelPath || modelPath === characterModel) return;
+      swapPlayerCharacter(modelPath);
       characterModel = modelPath;
-      swapPlayerCharacter(characterModel);
-      setCookie("characterModel", characterModel);
-      localStorage.setItem('characterModel', characterModel);
+      playerProfile = playerProfile || {};
+      playerProfile.characterModel = modelPath;
+      if (profileNameKey) {
+        void saveCharacterModel(profileNameKey, modelPath);
+      }
     },
     getPlayerStats: () => ({ ...statsState }),
     getCharacterOptions: () => characterOptions,
