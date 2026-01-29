@@ -5562,6 +5562,43 @@ async function main() {
     })();
   }
 
+  const getMeshWorldBounds = (mesh) => {
+    const geometry = mesh.geometry;
+    if (!geometry) {
+      return null;
+    }
+    if (!geometry.boundingBox && typeof geometry.computeBoundingBox === 'function') {
+      geometry.computeBoundingBox();
+    }
+    if (!geometry.boundingBox) {
+      return null;
+    }
+    const userData = mesh.userData ?? {};
+    mesh.userData = userData;
+    if (!userData.boundsState) {
+      userData.boundsState = {
+        worldBox: new THREE.Box3(),
+        lastPosition: new THREE.Vector3(),
+        lastQuaternion: new THREE.Quaternion()
+      };
+      userData.boundsDirty = true;
+    }
+    const { boundsState } = userData;
+    const hasMoved = !boundsState.lastPosition.equals(mesh.position)
+      || !boundsState.lastQuaternion.equals(mesh.quaternion);
+    if (hasMoved) {
+      userData.boundsDirty = true;
+    }
+    if (userData.boundsDirty) {
+      mesh.updateMatrixWorld();
+      boundsState.worldBox.copy(geometry.boundingBox).applyMatrix4(mesh.matrixWorld);
+      boundsState.lastPosition.copy(mesh.position);
+      boundsState.lastQuaternion.copy(mesh.quaternion);
+      userData.boundsDirty = false;
+    }
+    return boundsState.worldBox;
+  };
+
   function animate() {
     requestAnimationFrame(animate);
 
@@ -5588,17 +5625,19 @@ async function main() {
       mesh.position.set(t.x, t.y, t.z);
       mesh.quaternion.set(r.x, r.y, r.z, r.w);
 
-      if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection) {
-        mesh.updateMatrixWorld();
-        const bbox = new THREE.Box3().setFromObject(mesh);
-        const terrainY = getTerrainHeight(mesh.position.x, mesh.position.z);
-        if (bbox.min.y < terrainY) {
-          const correction = terrainY - bbox.min.y;
-          mesh.position.y += correction;
-          rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
-          const lv = rb.linvel();
-          if (lv.y < 0) {
-            rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
+      const isStaticBody = typeof rb.isFixed === 'function' && rb.isFixed();
+      if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection && !isStaticBody) {
+        const bbox = getMeshWorldBounds(mesh);
+        if (bbox) {
+          const terrainY = getTerrainHeight(mesh.position.x, mesh.position.z);
+          if (bbox.min.y < terrainY) {
+            const correction = terrainY - bbox.min.y;
+            mesh.position.y += correction;
+            rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
+            const lv = rb.linvel();
+            if (lv.y < 0) {
+              rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
+            }
           }
         }
       }
