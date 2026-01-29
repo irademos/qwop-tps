@@ -557,6 +557,7 @@ async function main() {
   let tileCache = null;
   let worldOrigin = null;
   let currentRenderOrigin = null;
+  let lastRenderOrigin = null;
   let activeTileKey = null;
   let pendingMapRebuild = false;
   let mapRebuildToken = 0;
@@ -4514,7 +4515,7 @@ async function main() {
     } else {
       pendingMapRebuild = true;
     }
-    currentRenderOrigin = null;
+    refreshRenderOriginFromBounds();
   }
 
   const GPS_SNAP_DISTANCE_METERS = 20;
@@ -4689,19 +4690,66 @@ async function main() {
     }
 
     return {
+      minLon,
+      maxLon,
+      minLat,
+      maxLat,
       centerLon: (minLon + maxLon) / 2,
       centerLat: (minLat + maxLat) / 2
     };
   };
 
-  const getRenderOrigin = (geojson) => {
-    if (worldOrigin) {
-      return { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
+  const tileRenderBounds = new Map();
+  const renderedTileGeojson = new Map();
+  const isSameRenderOrigin = (nextOrigin, prevOrigin) => {
+    if (!nextOrigin || !prevOrigin) {
+      return nextOrigin === prevOrigin;
     }
-    if (currentRenderOrigin) {
+    return nextOrigin.centerLat === prevOrigin.centerLat
+      && nextOrigin.centerLon === prevOrigin.centerLon;
+  };
+
+  const refreshRenderOriginFromBounds = () => {
+    if (worldOrigin) {
+      currentRenderOrigin = { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
       return currentRenderOrigin;
     }
-    return computeGeojsonBounds(geojson);
+    let minLon = Infinity;
+    let maxLon = -Infinity;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let count = 0;
+    for (const bounds of tileRenderBounds.values()) {
+      if (!bounds) continue;
+      minLon = Math.min(minLon, bounds.minLon);
+      maxLon = Math.max(maxLon, bounds.maxLon);
+      minLat = Math.min(minLat, bounds.minLat);
+      maxLat = Math.max(maxLat, bounds.maxLat);
+      count += 1;
+    }
+    if (count === 0 || !Number.isFinite(minLon)) {
+      currentRenderOrigin = null;
+      return null;
+    }
+    currentRenderOrigin = {
+      centerLat: (minLat + maxLat) / 2,
+      centerLon: (minLon + maxLon) / 2
+    };
+    return currentRenderOrigin;
+  };
+
+  const updateTileRenderBounds = (tileKey, geojson) => {
+    if (!tileKey) return;
+    if (worldOrigin) {
+      currentRenderOrigin = { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
+      return;
+    }
+    const bounds = computeGeojsonBounds(geojson);
+    if (bounds) {
+      tileRenderBounds.set(tileKey, bounds);
+    } else {
+      tileRenderBounds.delete(tileKey);
+    }
   };
 
   const osmWorkerPending = new Map();
@@ -4770,34 +4818,64 @@ async function main() {
     pendingMapRebuild = false;
     mapRebuildToken += 1;
     const rebuildId = mapRebuildToken;
-    mapRenderer.clearTiles?.();
-    buildingsRenderer.clearTiles?.();
-
-    const combined = {
-      type: 'FeatureCollection',
-      features: []
-    };
-    for (const entry of tileCache.cache.values()) {
-      if (entry.geojson?.features?.length) {
-        combined.features.push(...entry.geojson.features);
-      }
-    }
-    const bounds = getRenderOrigin(combined);
-    if (bounds) {
-      currentRenderOrigin = bounds;
-    }
+    const desiredKeys = new Set();
+    const changedTileKeys = new Set();
+    let boundsDirty = false;
 
     for (const [tileKey, entry] of tileCache.cache.entries()) {
+      desiredKeys.add(tileKey);
       if (!entry.geojson) continue;
+      const previousGeojson = renderedTileGeojson.get(tileKey);
+      if (previousGeojson === entry.geojson) continue;
+      renderedTileGeojson.set(tileKey, entry.geojson);
+      updateTileRenderBounds(tileKey, entry.geojson);
+      boundsDirty = true;
+      changedTileKeys.add(tileKey);
+    }
+
+    for (const tileKey of Array.from(renderedTileGeojson.keys())) {
+      if (desiredKeys.has(tileKey)) continue;
+      renderedTileGeojson.delete(tileKey);
+      tileRenderBounds.delete(tileKey);
+      mapRenderer.removeTile?.(tileKey);
+      buildingsRenderer.removeTile?.(tileKey);
+      boundsDirty = true;
+      changedTileKeys.add(tileKey);
+    }
+
+    if (boundsDirty) {
+      refreshRenderOriginFromBounds();
+    }
+    const originChanged = !isSameRenderOrigin(currentRenderOrigin, lastRenderOrigin);
+    if (originChanged) {
+      for (const tileKey of desiredKeys) {
+        const entry = tileCache.cache.get(tileKey);
+        if (entry?.geojson) {
+          changedTileKeys.add(tileKey);
+        }
+      }
+    }
+
+    const bounds = currentRenderOrigin;
+    for (const tileKey of changedTileKeys) {
+      const entry = tileCache.cache.get(tileKey);
+      if (!entry?.geojson) continue;
       mapRenderer.updateTileHighways?.(tileKey, entry.geojson, bounds);
       buildingsRenderer.updateTileBuildings?.(tileKey, entry.geojson, bounds);
     }
 
     const finishBuildingRender = () => {
       if (rebuildId !== mapRebuildToken) return;
+      if (changedTileKeys.size === 0) return;
       rebuildBuildingColliders();
       liftEntitiesToBuildingTop();
-      natureController?.refreshAll?.();
+      if (typeof natureController?.refreshTile === "function") {
+        for (const tileKey of changedTileKeys) {
+          natureController.refreshTile(tileKey);
+        }
+      } else {
+        natureController?.refreshAll?.();
+      }
     };
 
     if (typeof requestIdleCallback === "function") {
@@ -4805,6 +4883,7 @@ async function main() {
     } else {
       finishBuildingRender();
     }
+    lastRenderOrigin = bounds ?? null;
   }
 
   window.clearTileCache = () => {
@@ -4832,16 +4911,44 @@ async function main() {
 
   const updateTileMeshes = (tileKey, geojson) => {
     if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
-    const bounds = getRenderOrigin(geojson);
-    if (bounds) {
-      currentRenderOrigin = bounds;
+    const previousGeojson = renderedTileGeojson.get(tileKey);
+    if (previousGeojson === geojson) return;
+    renderedTileGeojson.set(tileKey, geojson);
+    updateTileRenderBounds(tileKey, geojson);
+    const bounds = refreshRenderOriginFromBounds();
+    const originChanged = !isSameRenderOrigin(bounds, lastRenderOrigin);
+    const tilesToUpdate = new Set();
+    if (originChanged) {
+      for (const [key, entry] of tileCache.cache.entries()) {
+        if (entry?.geojson) {
+          tilesToUpdate.add(key);
+        }
+      }
+    } else {
+      tilesToUpdate.add(tileKey);
     }
-    mapRenderer.updateTileHighways?.(tileKey, geojson, bounds);
+
+    for (const key of tilesToUpdate) {
+      const entry = tileCache.cache.get(key);
+      if (!entry?.geojson) continue;
+      mapRenderer.updateTileHighways?.(key, entry.geojson, bounds);
+    }
 
     const finishBuildingRender = () => {
-      buildingsRenderer.updateTileBuildings?.(tileKey, geojson, bounds);
+      if (tilesToUpdate.size === 0) return;
+      for (const key of tilesToUpdate) {
+        const entry = tileCache.cache.get(key);
+        if (!entry?.geojson) continue;
+        buildingsRenderer.updateTileBuildings?.(key, entry.geojson, bounds);
+      }
       scheduleBuildingRefresh();
-      natureController?.refreshTile?.(tileKey);
+      if (typeof natureController?.refreshTile === "function") {
+        for (const key of tilesToUpdate) {
+          natureController.refreshTile(key);
+        }
+      } else {
+        natureController?.refreshAll?.();
+      }
     };
 
     if (typeof requestIdleCallback === "function") {
@@ -4849,6 +4956,7 @@ async function main() {
     } else {
       finishBuildingRender();
     }
+    lastRenderOrigin = bounds ?? null;
   };
 
   const shouldRequestMapUpdate = (location) => {
@@ -4890,6 +4998,8 @@ async function main() {
       for (const key of evictedKeys) {
         mapRenderer.removeTile?.(key);
         buildingsRenderer.removeTile?.(key);
+        renderedTileGeojson.delete(key);
+        tileRenderBounds.delete(key);
       }
       scheduleBuildingRefresh();
     }
