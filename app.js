@@ -4708,7 +4708,9 @@ async function main() {
   let osmWorkerRequestId = 0;
   let osmWorker = null;
   const MAP_FRAME_BUDGET_MS = 18;
+  const MAP_DEFER_MAX_MS = 500;
   let lastFrameDurationMs = 0;
+  let lastMapWorkAt = 0;
   const deferredTileUpdates = new Map();
   let tileUpdateScheduled = false;
 
@@ -4872,7 +4874,11 @@ async function main() {
     }
   };
 
-  const shouldDeferMapWork = () => mapFetchInFlight.size > 0 || lastFrameDurationMs > MAP_FRAME_BUDGET_MS;
+  const shouldDeferMapWork = () => {
+    if (mapFetchInFlight.size > 0) return true;
+    if (lastFrameDurationMs <= MAP_FRAME_BUDGET_MS) return false;
+    return performance.now() - lastMapWorkAt < MAP_DEFER_MAX_MS;
+  };
 
   const applyTileMeshes = (tileKey, geojson, subsets) => {
     if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
@@ -4895,6 +4901,7 @@ async function main() {
     } else {
       finishBuildingRender();
     }
+    lastMapWorkAt = performance.now();
   };
 
   const scheduleDeferredTileProcessing = () => {
