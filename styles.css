@@ -1574,6 +1574,18 @@ body {
     display: flex;
   }
 
+  #action-buttons .mobile-punch-action {
+    display: none;
+  }
+
+  #action-buttons.mobile-punch-mode .mobile-action {
+    display: none;
+  }
+
+  #action-buttons.mobile-punch-mode .mobile-punch-action {
+    display: flex;
+  }
+
   #mobile-action-toggle {
     display: flex;
     font-size: 24px;

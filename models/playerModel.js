@@ -272,6 +272,7 @@ export function createPlayerModel(
             jump: 'Joyful Jump.fbx',
             hit: 'Flying Back Death.fbx',
             mutantPunch: 'Mutant Punch.fbx',
+            leftPunch: 'Left Punch.fbx',
             mmaKick: 'Mma Kick.fbx',
             runningKick: 'Stand To Roll.fbx',
             hurricaneKick: 'Hurricane Kick.fbx',
@@ -292,7 +293,7 @@ export function createPlayerModel(
                   action.setEffectiveTimeScale(1.8);
                 }
                 if (
-                  ['jump', 'hit', 'mutantPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
+                  ['jump', 'hit', 'mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
                 ) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
@@ -321,7 +322,7 @@ export function createPlayerModel(
                     action.setEffectiveTimeScale(1.8);
                   }
                   if (
-                    ['jump', 'hit', 'mutantPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
+                    ['jump', 'hit', 'mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
                   ) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
