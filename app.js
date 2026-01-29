@@ -523,6 +523,7 @@ async function main() {
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.6;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
   const PICKUP_RADIUS = 1.2;
+  const APPLE_PICKUP_RADIUS = 3;
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 60;
@@ -3190,8 +3191,13 @@ async function main() {
   function pickupApple(pickup) {
     if (!pickup?.mesh) return false;
     if (playerControls?.playerModel) {
-      const distance = playerControls.playerModel.position.distanceTo(pickup.mesh.position);
-      if (distance > PICKUP_RADIUS) return false;
+      const playerPosition = playerControls.playerModel.position;
+      const applePosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - applePosition.x,
+        playerPosition.z - applePosition.z
+      );
+      if (horizontalDistance > APPLE_PICKUP_RADIUS) return false;
     }
     addToInventory(pickup.id, 1);
     disposeApplePickup(pickup);
