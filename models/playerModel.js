@@ -165,13 +165,10 @@ function clipWithExistingTargetsOnly(clip, root) {
   return new THREE.AnimationClip(clip.name, clip.duration, tracks);
 }
 
-function stripRootTracks(clip, rootName) {
+function stripRootTranslationTracks(clip, rootName) {
   const blocked = new Set([
     `${rootName}.position`,
-    `${rootName}.quaternion`,
-    `${rootName}.scale`,
     `${rootName}.matrix`,
-    `${rootName}.visible`,
   ]);
   const tracks = clip.tracks.filter(t => !blocked.has(t.name));
   return new THREE.AnimationClip(clip.name, clip.duration, tracks);
@@ -270,7 +267,9 @@ export function createPlayerModel(
             return new Promise((resolve, reject) => {
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
-                const action = mixer.clipAction(cachedClip);
+                const rootName = model.name || 'Root';
+                const clean = stripRootTranslationTracks(cachedClip, rootName);
+                const action = mixer.clipAction(clean);
                 if (name === 'walk') {
                   action.setEffectiveTimeScale(1.8);
                 }
@@ -292,14 +291,14 @@ export function createPlayerModel(
                 `/models/animations/${encodeURIComponent(file)}`,
                 (anim) => {
                   const clip = anim.animations[0];
-                  if (clip) {
-                    animationClipCache.set(file, clip);
+                  if (!clip) {
+                    resolve();
+                    return;
                   }
-                  // const rootName = model.name || 'Root';
-                  // const src = anim.animations[0];
-                  // const clean = stripRootTracks(src, rootName);
-                  // const action = mixer.clipAction(clean);
-                  const action = mixer.clipAction(clip);
+                  const rootName = model.name || 'Root';
+                  const cleanClip = stripRootTranslationTracks(clip, rootName);
+                  animationClipCache.set(file, cleanClip);
+                  const action = mixer.clipAction(cleanClip);
                   if (name === 'walk') {
                     action.setEffectiveTimeScale(1.8);
                   }
