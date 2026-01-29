@@ -68,6 +68,7 @@ const FRIENDLY_DIALOGUE_POOL = [
     ]
   }
 ];
+const SLIDE_BLOCKED_ACTIONS = ['mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 
 export class PlayerControls {
   constructor({
@@ -1013,8 +1014,7 @@ export class PlayerControls {
     if (!this.playerModel) return;
     const actions = this.playerModel.userData.actions;
     if (!actions || !actions[actionName]) return;
-    const slideBlockedActions = new Set(['mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'roll']);
-    if (slideBlockedActions.has(actionName) && this.isSlideMomentumActive()) return;
+    if (SLIDE_BLOCKED_ACTIONS.includes(actionName) && this.isSlideMomentumActive()) return;
     if (actionName === 'roll' && this.currentSpecialAction === 'roll') return;
 
     if (this.runningKickTimer) {
