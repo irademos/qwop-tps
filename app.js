@@ -5538,9 +5538,17 @@ async function main() {
     openSettings();
   });
 
+  const settingsOverlay = document.getElementById('settings-overlay');
+  const homeStorageOverlay = document.getElementById('home-storage-overlay');
+  const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
+
   setInterval(() => {
-    updateSettingsUI();
-    updateHomeStorageUI();
+    if (isOverlayVisible(settingsOverlay)) {
+      updateSettingsUI();
+    }
+    if (isOverlayVisible(homeStorageOverlay)) {
+      updateHomeStorageUI();
+    }
   }, 1000);
   updateAutoDisplayMode();
   setInterval(() => {
