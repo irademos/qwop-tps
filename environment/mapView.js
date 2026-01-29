@@ -187,6 +187,7 @@ function createHomeRadiusLine(radius) {
     opacity: 0.9
   });
   const line = new THREE.LineLoop(geometry, material);
+  line.rotation.x = Math.PI / 2;
   line.visible = false;
   line.renderOrder = 997;
   return line;
@@ -309,7 +310,7 @@ function updateHomeIndicators(homePosition, homeEnterDistance) {
   }
   if (state.homeRadiusLine && hasEnterDistance) {
     state.homeRadiusLine.position.set(homePosition.x, homePosition.y + 0.05, homePosition.z);
-    state.homeRadiusLine.visible = state.enabled;
+    state.homeRadiusLine.visible = !state.enabled;
   }
 }
 
