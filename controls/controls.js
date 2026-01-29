@@ -8,6 +8,7 @@ import { QuestManager } from "../quest.js";
 
 // Movement constants
 const SWIM_SPEED = 2;
+const ENERGY_DEPLETED_SPEED_MULTIPLIER = 1.2;
 const JUMP_FORCE = 4;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
@@ -1415,7 +1416,9 @@ export class PlayerControls {
     } else if (!this.isClimbing) {
       const speed = this.isInWater
         ? SWIM_SPEED
-        : (this.energyDepleted ? CHARACTER_MOVEMENT.walkSpeed : CHARACTER_MOVEMENT.runSpeed);
+        : (this.energyDepleted
+          ? CHARACTER_MOVEMENT.walkSpeed * ENERGY_DEPLETED_SPEED_MULTIPLIER
+          : CHARACTER_MOVEMENT.runSpeed);
       this.body.setLinvel({ x: movement.x * speed, y: vel.y, z: movement.z * speed }, true);
       }
       
