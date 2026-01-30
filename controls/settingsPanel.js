@@ -624,7 +624,7 @@ function buildDisplayPanel() {
 }
 
 const CREDITS_PATH = '/credits.txt';
-const CREDIT_LINE_PATTERN = /^"(.+)" \((.+)\) by (.+) is licensed under Creative Commons Attribution \((.+)\)\.?$/;
+const CREDIT_LINE_PATTERN = /^([“"])(.+?)["”] \((.+?)\) by (.+?) is licensed under Creative Commons Attribution \((.+?)\)\.?$/;
 
 function escapeHtml(value) {
   return value
@@ -659,7 +659,7 @@ function parseCredits(rawText) {
     .map((line) => {
       const match = line.match(CREDIT_LINE_PATTERN);
       if (!match) return null;
-      const [, title, source, author, license] = match;
+      const [, , title, source, author, license] = match;
       return {
         title,
         source,
