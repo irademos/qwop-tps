@@ -354,11 +354,17 @@ export async function createNature({
     const maxDistance = Math.max(0, range);
     let closest = null;
     let closestDistance = Infinity;
+    const searchBox = new THREE.Box3();
+    const searchCenter = new THREE.Vector3();
     for (const entry of treeTiles.values()) {
       for (const tree of entry.trees) {
         if (!tree?.position) continue;
-        const dx = position.x - tree.position.x;
-        const dz = position.z - tree.position.z;
+        tree.updateWorldMatrix(true, true);
+        searchBox.setFromObject(tree);
+        if (!Number.isFinite(searchBox.min.x)) continue;
+        searchBox.getCenter(searchCenter);
+        const dx = position.x - searchCenter.x;
+        const dz = position.z - searchCenter.z;
         const distance = Math.hypot(dx, dz);
         if (distance <= maxDistance && distance < closestDistance) {
           closestDistance = distance;
