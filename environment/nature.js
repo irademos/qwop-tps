@@ -263,6 +263,12 @@ export async function createNature({
         const areas = buildTreeClimbAreas(tree);
         tree.userData.climbAreas = areas;
         tileClimbAreas.push(...areas);
+        tree.updateWorldMatrix(true, true);
+        tempBox.setFromObject(tree);
+        if (Number.isFinite(tempBox.min.x)) {
+          tempBox.getCenter(tempCenter);
+          tree.userData.boundsCenterLocal = tree.worldToLocal(tempCenter.clone());
+        }
         if (typeof spawnApplePickup === 'function') {
           tree.updateWorldMatrix(true, true);
           tempBox.setFromObject(tree);
@@ -356,15 +362,21 @@ export async function createNature({
     let closestDistance = Infinity;
     const searchBox = new THREE.Box3();
     const searchCenter = new THREE.Vector3();
+    const worldCenter = new THREE.Vector3();
     for (const entry of treeTiles.values()) {
       for (const tree of entry.trees) {
         if (!tree?.position) continue;
         tree.updateWorldMatrix(true, true);
-        searchBox.setFromObject(tree);
-        if (!Number.isFinite(searchBox.min.x)) continue;
-        searchBox.getCenter(searchCenter);
-        const dx = position.x - searchCenter.x;
-        const dz = position.z - searchCenter.z;
+        if (tree.userData?.boundsCenterLocal) {
+          worldCenter.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
+        } else {
+          searchBox.setFromObject(tree);
+          if (!Number.isFinite(searchBox.min.x)) continue;
+          searchBox.getCenter(searchCenter);
+          worldCenter.copy(searchCenter);
+        }
+        const dx = position.x - worldCenter.x;
+        const dz = position.z - worldCenter.z;
         const distance = Math.hypot(dx, dz);
         if (distance <= maxDistance && distance < closestDistance) {
           closestDistance = distance;
