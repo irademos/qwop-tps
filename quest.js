@@ -3,6 +3,7 @@ import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { FriendlyCharacter } from "./characters/FriendlyCharacter.js";
 import { getTerrainHeight } from "./environment/water.js";
+import { ATTACKS } from "./items/melee.js";
 
 const QUEST_FRIEND_MODEL = "/models/cowboy.fbx";
 const QUEST_FRIEND_SPAWN_MIN_DISTANCE = 18;
@@ -10,6 +11,10 @@ const QUEST_FRIEND_SPAWN_MAX_DISTANCE = 32;
 const QUEST_FRIEND_REACH_DISTANCE = 4.5;
 const QUEST_RETURN_DISTANCE = 6;
 const QUEST_FOLLOW_STOP_DISTANCE = 2.2;
+const QUEST_LEAD_PLAYER_DISTANCE = 10;
+const QUEST_LEAD_REACH_DISTANCE = 2.4;
+const QUEST_LEAD_MUSHROOM_DISTANCE = 1.8;
+const QUEST_FIGHT_DISENGAGE_DISTANCE = 14;
 const QUEST_TRAIL_SEGMENT_LENGTH = 2.2;
 const QUEST_TRAIL_SEGMENT_GAP = 1.4;
 const QUEST_TRAIL_HEIGHT_OFFSET = 0.15;
@@ -36,17 +41,28 @@ const QUEST_OFFER_DIALOGUE = {
 
 const QUEST_FRIEND_DIALOGUE = {
   blocks: [
-    "Thank you for saving me! Can you show me the way back?"
+    "Thanks for saving me!",
+    "Do you want to fight zombies, collect mushrooms, or head back to my friend?"
   ],
   responses: [
     {
-      label: "Follow me.",
-      reply: "Lead the way!",
-      onSelect: "startEscort"
+      label: "Fight zombies.",
+      reply: "Let's hunt some zombies together.",
+      onSelect: "fightZombies"
     },
     {
-      label: "I'll come back later.",
-      reply: "Okay, I'll wait here and catch my breath."
+      label: "Collect mushrooms.",
+      reply: "I'll guide us to the closest mushrooms.",
+      onSelect: "collectMushrooms"
+    },
+    {
+      label: "Return to your friend.",
+      reply: "Let's get back to them.",
+      onSelect: "returnToFriend"
+    },
+    {
+      label: "Maybe later.",
+      reply: "No worries. I'll wait here."
     }
   ]
 };
@@ -72,7 +88,10 @@ export class QuestManager {
       friendFollowing: false,
       trail: null,
       trailMode: null,
-      pendingSpawn: false
+      pendingSpawn: false,
+      friendMode: "idle",
+      friendTarget: null,
+      friendTargetType: null
     };
     this.deltaSeconds = 0;
   }
@@ -116,6 +135,15 @@ export class QuestManager {
     if (option.onSelect === "startEscort") {
       this.startQuestEscort();
     }
+    if (option.onSelect === "returnToFriend") {
+      this.startQuestEscort();
+    }
+    if (option.onSelect === "fightZombies") {
+      this.startQuestFriendlyLead("monster");
+    }
+    if (option.onSelect === "collectMushrooms") {
+      this.startQuestFriendlyLead("mushroom");
+    }
   }
 
   acceptQuest(giver) {
@@ -125,6 +153,9 @@ export class QuestManager {
     this.state.status = "searching";
     this.state.giver = giver;
     this.state.giverPosition = giver.model?.position?.clone?.() || null;
+    this.state.friendMode = "idle";
+    this.state.friendTarget = null;
+    this.state.friendTargetType = null;
     this.spawnQuestFriend();
   }
 
@@ -178,12 +209,18 @@ export class QuestManager {
     if (!this.state.friend || !this.state.giverPosition) return;
     this.state.status = "escorting";
     this.state.friendFollowing = true;
+    this.state.friendMode = "idle";
+    this.state.friendTarget = null;
+    this.state.friendTargetType = null;
     this.state.trailMode = "toGiver";
   }
 
   completeQuest() {
     this.state.status = "inactive";
     this.state.friendFollowing = false;
+    this.state.friendMode = "idle";
+    this.state.friendTarget = null;
+    this.state.friendTargetType = null;
     this.state.trailMode = null;
     this.clearQuestTrail();
     const friend = this.state.friend;
@@ -207,18 +244,19 @@ export class QuestManager {
     const quest = this.state;
     if (!quest || !playerModel) return;
     const friend = quest.friend;
-    if (friend?.model) {
-      friend.update(this.deltaSeconds);
-    }
 
     if (quest.status === "searching" && friend?.model) {
       const distanceToFriend = playerModel.position.distanceTo(friend.model.position);
       this.updateQuestTrail(playerModel.position, friend.model.position);
       if (distanceToFriend <= QUEST_FRIEND_REACH_DISTANCE) {
         quest.status = "found";
+        quest.friendMode = "idle";
+        quest.friendTarget = null;
+        quest.friendTargetType = null;
         quest.trailMode = null;
         this.clearQuestTrail();
       }
+      friend.update(this.deltaSeconds);
       return;
     }
 
@@ -231,6 +269,13 @@ export class QuestManager {
       if (playerNearGiver && friendNearGiver) {
         this.completeQuest();
       }
+      friend.update(this.deltaSeconds);
+      return;
+    }
+
+    if (quest.status === "found" && friend?.model) {
+      this.updateQuestFriendActivity(friend);
+      return;
     }
   }
 
@@ -254,6 +299,181 @@ export class QuestManager {
       friend.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
       friend.playAnimation("Idle", 0.2);
     }
+  }
+
+  updateQuestFriendActivity(friend) {
+    if (!friend?.body) return;
+    const mode = this.state.friendMode || "idle";
+    if (mode === "leading") {
+      const target = this.state.friendTarget;
+      const targetType = this.state.friendTargetType;
+      const targetPosition = this.getQuestTargetPosition(target, targetType);
+      if (!targetPosition) {
+        this.setQuestFriendIdle(friend);
+        return;
+      }
+      const reachDistance = targetType === "mushroom"
+        ? QUEST_LEAD_MUSHROOM_DISTANCE
+        : QUEST_LEAD_REACH_DISTANCE;
+      const reached = this.updateQuestFriendLeadMode(friend, targetPosition, reachDistance);
+      friend.update(this.deltaSeconds);
+      if (reached) {
+        if (targetType === "monster") {
+          this.state.friendMode = "fighting";
+          this.state.friendTarget = target;
+          this.state.friendTargetType = "monster";
+          friend.attackDamage = ATTACKS.mutantPunch.damage;
+        } else {
+          this.setQuestFriendIdle(friend);
+        }
+      }
+      return;
+    }
+
+    if (mode === "fighting") {
+      const target = this.state.friendTarget;
+      if (!this.isValidQuestTarget(target, "monster")) {
+        this.setQuestFriendIdle(friend);
+        return;
+      }
+      const distanceToTarget = friend.model.position.distanceTo(target.model.position);
+      if (distanceToTarget > QUEST_FIGHT_DISENGAGE_DISTANCE || target.isDead) {
+        this.setQuestFriendIdle(friend);
+        return;
+      }
+      friend.updateCombatAI(this.deltaSeconds, target, [target], (hitTarget, info) => {
+        if (!hitTarget?.model || hitTarget.isDead) return;
+        const died = hitTarget.applyDamage?.(friend.attackDamage) ?? false;
+        if (info?.strength && hitTarget.applyKnockback) {
+          hitTarget.applyKnockback({ direction: info.direction, strength: info.strength });
+        }
+        if (died) {
+          this.setQuestFriendIdle(friend);
+        }
+      });
+      return;
+    }
+
+    this.setQuestFriendIdle(friend);
+  }
+
+  setQuestFriendIdle(friend) {
+    if (friend?.body) {
+      const vel = friend.body.linvel();
+      friend.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+    }
+    friend?.playAnimation?.("Idle", 0.2);
+    friend?.update?.(this.deltaSeconds);
+    this.state.friendMode = "idle";
+    this.state.friendTarget = null;
+    this.state.friendTargetType = null;
+  }
+
+  getQuestTargetPosition(target, targetType) {
+    if (targetType === "monster") {
+      if (!this.isValidQuestTarget(target, targetType)) return null;
+      return target.model.position.clone();
+    }
+    if (targetType === "mushroom") {
+      if (!target?.mesh || !target.mesh.visible) return null;
+      return target.mesh.position.clone();
+    }
+    return null;
+  }
+
+  isValidQuestTarget(target, targetType) {
+    if (targetType === "monster") {
+      return !!(target?.model && !target.isDead);
+    }
+    return false;
+  }
+
+  updateQuestFriendLeadMode(friend, targetPosition, reachDistance) {
+    const playerModel = this.getPlayerModel?.();
+    if (!playerModel || !friend?.body || !targetPosition) return false;
+    const toPlayer = playerModel.position.clone().sub(friend.model.position);
+    toPlayer.y = 0;
+    const distanceToPlayer = toPlayer.length();
+    const vel = friend.body.linvel();
+    if (distanceToPlayer > QUEST_LEAD_PLAYER_DISTANCE) {
+      const direction = toPlayer.normalize();
+      const angle = Math.atan2(direction.x, direction.z);
+      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+      friend.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      friend.body.setRotation(rot, true);
+      friend.playAnimation("Idle", 0.2);
+      return false;
+    }
+
+    const toTarget = targetPosition.clone().sub(friend.model.position);
+    toTarget.y = 0;
+    const distanceToTarget = toTarget.length();
+    if (distanceToTarget <= reachDistance) {
+      friend.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      friend.playAnimation("Idle", 0.2);
+      return true;
+    }
+    const direction = toTarget.normalize();
+    const speed = CHARACTER_MOVEMENT.walkSpeed * 0.9;
+    friend.setDirection(direction);
+    friend.body.setLinvel({ x: direction.x * speed, y: vel.y, z: direction.z * speed }, true);
+    const angle = Math.atan2(direction.x, direction.z);
+    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+    friend.body.setRotation(rot, true);
+    friend.playAnimation("Walk", 0.2);
+    return false;
+  }
+
+  startQuestFriendlyLead(targetType) {
+    if (this.state.status !== "found") return;
+    const friend = this.state.friend;
+    if (!friend?.model) return;
+    let target = null;
+    if (targetType === "monster") {
+      target = this.getClosestMonster(friend.model.position);
+    }
+    if (targetType === "mushroom") {
+      target = this.getClosestMushroom(friend.model.position);
+    }
+    if (!target) {
+      this.setQuestFriendIdle(friend);
+      return;
+    }
+    this.state.friendMode = "leading";
+    this.state.friendTarget = target;
+    this.state.friendTargetType = targetType;
+  }
+
+  getClosestMonster(position) {
+    if (!position) return null;
+    const monsters = Array.isArray(window.monsters) ? window.monsters : [];
+    let closest = null;
+    let closestDistance = Infinity;
+    monsters.forEach((monster) => {
+      if (!monster?.model || monster.isDead) return;
+      const dist = position.distanceTo(monster.model.position);
+      if (dist < closestDistance) {
+        closestDistance = dist;
+        closest = monster;
+      }
+    });
+    return closest;
+  }
+
+  getClosestMushroom(position) {
+    if (!position) return null;
+    const pickups = Array.isArray(window.mushroomPickups) ? window.mushroomPickups : [];
+    let closest = null;
+    let closestDistance = Infinity;
+    pickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = position.distanceTo(pickup.mesh.position);
+      if (dist < closestDistance) {
+        closestDistance = dist;
+        closest = pickup;
+      }
+    });
+    return closest;
   }
 
   updateQuestTrail(start, end) {
