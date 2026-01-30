@@ -623,7 +623,7 @@ function buildDisplayPanel() {
   return panelEl;
 }
 
-const CREDITS_PATH = '/credits.txt';
+const CREDITS_PATH = new URL('credits.txt', import.meta.env.BASE_URL).toString();
 const CREDIT_LINE_PATTERN = /^([“"])(.+?)["”] \((.+?)\) by (.+?) is licensed under Creative Commons Attribution \((.+?)\)\.?$/;
 
 function escapeHtml(value) {
@@ -679,6 +679,9 @@ async function loadCredits(textEl) {
     }
     const rawText = await response.text();
     const entries = parseCredits(rawText);
+    if (!entries.length) {
+      throw new Error('No credits parsed from credits.txt');
+    }
     textEl.innerHTML = buildCreditsMarkup(entries);
   } catch (error) {
     textEl.innerHTML = '<strong>Credits</strong>\\n\\nUnable to load credits right now.';
