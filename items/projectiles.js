@@ -213,7 +213,8 @@ export function updateProjectiles({
           }
           onMonsterHit?.(monster, { damage, killed, sourceId: proj.userData.shooterId });
           if (killed && proj.userData.shooterId === localId) {
-            window.onMonsterKill?.();
+            const withFriend = window.questManager?.isFriendActive?.() ?? false;
+            window.onMonsterKill?.(monster, { withFriend });
           }
           removeProjectile(i);
           removed = true;

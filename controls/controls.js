@@ -219,8 +219,10 @@ export class PlayerControls {
       getPlayerModel: () => this.playerModel,
       attachPhysics: (npc) => window.attachMonsterPhysics?.(npc),
       detachPhysics: (npc) => window.detachNpcPhysics?.(npc),
-      adjustPlayerLevel: (level) => window.adjustPlayerLevel?.(level)
+      addXp: (amount) => window.addPlayerXp?.(amount),
+      getMonsterXpForLevel: (level) => window.getMonsterXpForLevel?.(level)
     });
+    window.questManager = this.questManager;
     this.crosshairEl = document.querySelector('.crosshair');
     this.defaultFov = this.camera.fov;
     this.aimFov = Math.max(40, this.defaultFov - 15);
