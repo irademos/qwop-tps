@@ -2073,7 +2073,8 @@ export class PlayerControls {
     this.engagedFacingDirection.y = 0;
     if (this.engagedFacingDirection.lengthSq() < 0.0001) return;
     this.engagedFacingDirection.normalize();
-    this.yaw = Math.atan2(this.engagedFacingDirection.x, this.engagedFacingDirection.z);
+    const targetYaw = Math.atan2(this.engagedFacingDirection.x, this.engagedFacingDirection.z);
+    this.yaw = targetYaw + Math.PI;
     this.alignPlayerToDirection(this.engagedFacingDirection);
   }
 
