@@ -119,6 +119,9 @@ const BOMB_THROW_SPEED = 11;
 const BOMB_THROW_LIFETIME = 15000;
 const BOMB_THROW_UPWARD_BIAS = 0.25;
 const BOMB_GROUND_Y = 0.25;
+const BOMB_DAMAGE_RADIUS = 5;
+const BOMB_BASE_DAMAGE = 60;
+const BOMB_KNOCKBACK_STRENGTH = 6;
 const BOMB_MIST_LIFETIME_MS = 8000;
 const BOMB_MIST_PARTICLE_COUNT = 35;
 
@@ -3922,6 +3925,94 @@ async function main() {
     }
   }
 
+  function getBombDamage(shooterId) {
+    if (shooterId && shooterId === multiplayer?.getId?.()) {
+      if (typeof window.getPlayerStrength === 'function') {
+        const strength = window.getPlayerStrength();
+        if (Number.isFinite(strength)) {
+          return Math.max(0, BOMB_BASE_DAMAGE + strength);
+        }
+      }
+    }
+    return BOMB_BASE_DAMAGE;
+  }
+
+  function applyBombImpactDamage(hitPosition, shooterId) {
+    if (!hitPosition) return;
+    const localId = multiplayer?.getId?.();
+    const isHost = !multiplayer || multiplayer.isHost;
+    const damage = getBombDamage(shooterId);
+
+    if (playerModel?.position) {
+      const distance = hitPosition.distanceTo(playerModel.position);
+      if (distance <= BOMB_DAMAGE_RADIUS) {
+        window.localHealth = Math.max(0, window.localHealth - damage);
+        if (window.playerControls) {
+          const direction = new THREE.Vector3()
+            .subVectors(playerModel.position, hitPosition)
+            .normalize();
+          window.playerControls.applyKnockback({
+            direction,
+            strength: BOMB_KNOCKBACK_STRENGTH
+          });
+        }
+      }
+    }
+
+    for (const [id, { model }] of Object.entries(otherPlayers)) {
+      if (!model?.position) continue;
+      const distance = hitPosition.distanceTo(model.position);
+      if (distance > BOMB_DAMAGE_RADIUS) continue;
+      const player = otherPlayers[id];
+      if (!player) continue;
+      const previousHealth = player.health || 100;
+      const nextHealth = Math.max(0, previousHealth - damage);
+      player.health = nextHealth;
+      if (nextHealth <= 0 && previousHealth > 0) {
+        player.isDead = true;
+        if (shooterId && shooterId === localId) {
+          window.onPlayerKill?.(id);
+        }
+      } else if (nextHealth > 0 && player.isDead) {
+        player.isDead = false;
+      }
+    }
+
+    if (Array.isArray(monsters)) {
+      if (isHost) {
+        for (const monster of monsters) {
+          if (!monster?.model?.position) continue;
+          const distance = hitPosition.distanceTo(monster.model.position);
+          if (distance > BOMB_DAMAGE_RADIUS) continue;
+          const killed = monster.applyDamage(damage);
+          if (!killed) {
+            const direction = new THREE.Vector3()
+              .subVectors(monster.model.position, hitPosition)
+              .normalize();
+            monster.applyKnockback({ direction, strength: BOMB_KNOCKBACK_STRENGTH });
+          }
+          handleMonsterDamage?.(monster, { damage, killed, sourceId: shooterId ?? localId });
+          if (killed && shooterId && shooterId === localId) {
+            const withFriend = window.questManager?.isFriendActive?.() ?? false;
+            window.onMonsterKill?.(monster, { withFriend });
+          }
+        }
+      } else {
+        for (const monster of monsters) {
+          if (!monster?.model?.position) continue;
+          const distance = hitPosition.distanceTo(monster.model.position);
+          if (distance > BOMB_DAMAGE_RADIUS) continue;
+          sendMonsterAttackIntent?.({
+            monsterId: monster.id,
+            damage,
+            sourcePlayerId: shooterId ?? localId,
+            at: Date.now()
+          });
+        }
+      }
+    }
+  }
+
   function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
     const latest = spawnArrowProjectile({
       scene,
@@ -3967,6 +4058,7 @@ async function main() {
       colliderDesc: RAPIER.ColliderDesc.ball(0.18).setRestitution(0.3).setFriction(0.8),
       onGroundHit: (hitPosition) => {
         spawnBombMist(scene, bombMists, hitPosition);
+        applyBombImpactDamage(hitPosition, shooterId);
       },
       groundY: BOMB_GROUND_Y
     });
