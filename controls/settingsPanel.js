@@ -623,6 +623,68 @@ function buildDisplayPanel() {
   return panelEl;
 }
 
+const CREDITS_PATH = `${import.meta.env.BASE_URL ?? '/'}credits.json`;
+
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function buildCreditsMarkup(entries) {
+  if (!entries.length) {
+    return '<strong>Credits</strong><br><br>No credits found.';
+  }
+
+  const blocks = entries.map((entry) => {
+    const sourceText = escapeHtml(entry.source);
+    const licenseText = escapeHtml(entry.licenseLabel);
+    return `“${escapeHtml(entry.title)}” by ${escapeHtml(entry.author)}
+  <br>Source: <a href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer noopener">${sourceText}</a>
+  <br>License: <a href="${escapeHtml(entry.license)}" target="_blank" rel="noreferrer noopener">${licenseText}</a>`;
+  });
+
+  return `<strong>Credits</strong><br><br>${blocks.join('<br><br>')}`;
+}
+
+function normalizeCredits(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const title = typeof entry.title === 'string' ? entry.title.trim() : '';
+      const source = typeof entry.source === 'string' ? entry.source.trim() : '';
+      const author = typeof entry.author === 'string' ? entry.author.trim() : '';
+      const license = typeof entry.license === 'string' ? entry.license.trim() : '';
+      if (!title || !source || !author || !license) return null;
+      return {
+        title,
+        source,
+        author,
+        license,
+        licenseLabel: license.includes('/4.0') ? 'CC BY 4.0' : license
+      };
+    })
+    .filter(Boolean);
+}
+
+async function loadCredits(textEl) {
+  try {
+    const response = await fetch(CREDITS_PATH, { cache: 'no-cache' });
+    if (!response.ok) {
+      throw new Error(`Failed to load credits: ${response.status}`);
+    }
+    const rawJson = await response.json();
+    const entries = normalizeCredits(rawJson);
+    textEl.innerHTML = buildCreditsMarkup(entries);
+  } catch (error) {
+    textEl.innerHTML = '<strong>Credits</strong><br><br>Unable to load credits right now.';
+  }
+}
+
 function buildAboutPanel() {
   const panelEl = createElement('section', 'settings-tabpanel');
   panelEl.id = 'panel-about';
@@ -633,17 +695,8 @@ function buildAboutPanel() {
   const title = createElement('h3', 'settings-section-title', 'About');
   const text = createElement('div', 'settings-muted');
   text.style.whiteSpace = 'pre-wrap';
-  text.innerHTML = `
-  <strong>Credits</strong>
-
-  “Base Mesh Low Poly Character” by YOPN
-  Source: <a href="https://skfb.ly/oCvvG" target="_blank" rel="noreferrer noopener">https://skfb.ly/oCvvG</a>
-  License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer noopener">CC BY 4.0</a>
-
-  “T-shirt” by Sirenko
-  Source: <a href="https://skfb.ly/6CJyy" target="_blank" rel="noreferrer noopener">https://skfb.ly/6CJyy</a>
-  License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer noopener">CC BY 4.0</a>
-  `;
+  text.innerHTML = '<strong>Credits</strong><br><br>Loading credits...';
+  loadCredits(text);
 
   panelEl.append(title, text);
   return panelEl;
