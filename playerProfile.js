@@ -67,6 +67,7 @@ function buildProfile(name) {
     inventory: { ...DEFAULT_INVENTORY },
     homeStorage: { ...DEFAULT_HOME_STORAGE },
     customization: mergeCustomization(DEFAULT_CUSTOMIZATION),
+    characterModel: null,
     lastStatUpdateAt: now,
     createdAt: now,
     updatedAt: now
@@ -105,6 +106,7 @@ async function loadProfileForName(profileRef, trimmedName) {
   const mergedInventory = profile.inventory ? { ...profile.inventory } : { ...DEFAULT_INVENTORY };
   const mergedHomeStorage = profile.homeStorage ? { ...profile.homeStorage } : { ...DEFAULT_HOME_STORAGE };
   const mergedCustomization = mergeCustomization(profile.customization);
+  const mergedCharacterModel = typeof profile.characterModel === 'string' ? profile.characterModel : null;
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
   const inventoryMissing = profile.inventory == null;
@@ -112,7 +114,8 @@ async function loadProfileForName(profileRef, trimmedName) {
   const customizationMissing = profile.customization == null
     || profile.customization.shirts == null
     || profile.customization.hats == null;
-  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing) {
+  const characterModelMissing = profile.characterModel !== mergedCharacterModel;
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || characterModelMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
@@ -138,6 +141,12 @@ async function loadProfileForName(profileRef, trimmedName) {
     } else {
       profile.customization = mergedCustomization;
     }
+    if (characterModelMissing) {
+      updatePayload.characterModel = mergedCharacterModel;
+      profile.characterModel = mergedCharacterModel;
+    } else {
+      profile.characterModel = mergedCharacterModel;
+    }
     if (!hasLastStatUpdateAt) {
       updatePayload.lastStatUpdateAt = Date.now();
       profile.lastStatUpdateAt = updatePayload.lastStatUpdateAt;
@@ -148,6 +157,7 @@ async function loadProfileForName(profileRef, trimmedName) {
     profile.inventory = mergedInventory;
     profile.homeStorage = mergedHomeStorage;
     profile.customization = mergedCustomization;
+    profile.characterModel = mergedCharacterModel;
   }
 
   console.log('✅ Loaded profile for', trimmedName);
@@ -437,6 +447,19 @@ export async function saveCustomization(nameKey, customization) {
     });
   } catch (error) {
     console.error('Failed to save customization for', nameKey, error);
+  }
+}
+
+export async function saveCharacterModel(nameKey, modelPath) {
+  if (!nameKey) return;
+  if (!modelPath) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}`), {
+      characterModel: modelPath,
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.error('Failed to save character model for', nameKey, error);
   }
 }
 
