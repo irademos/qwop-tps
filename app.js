@@ -1153,7 +1153,8 @@ async function main() {
       const killed = monster.applyDamage(data.damage);
       persistMonsterHp(monster);
       if (killed && sourceId === multiplayer.getId()) {
-        window.onMonsterKill?.();
+        const withFriend = window.questManager?.isFriendActive?.() ?? false;
+        window.onMonsterKill?.(monster, { withFriend });
       }
       return;
     }
@@ -2714,13 +2715,17 @@ async function main() {
     smarts: playerProfile.stats.smarts,
     charm: playerProfile.stats.charm,
     luck: playerProfile.stats.luck,
-    levelKills: playerProfile.stats.levelKills,
+    xp: playerProfile.stats.xp,
     coins: playerProfile.stats.coins
   };
   const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'energy', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
   const levelPopup = document.getElementById('level-popup');
+  const xpBar = document.getElementById('xp-bar');
+  const xpBarFill = document.getElementById('xp-bar-fill');
+  const xpGainText = document.getElementById('xp-gain');
+  const xpLevelUpText = document.getElementById('xp-level-up');
   const ammoPopup = document.getElementById('ammo-popup');
   const coinPopup = document.getElementById('coin-popup');
   const treasurePopup = document.getElementById('treasure-popup');
@@ -2728,16 +2733,22 @@ async function main() {
   let ammoPopupTimer = null;
   let coinPopupTimer = null;
   let treasurePopupTimer = null;
+  let xpBarHideTimer = null;
+  let xpGainTimer = null;
+  let xpLevelUpTimer = null;
+  let xpAnimationRunning = false;
+  let xpAnimationQueue = [];
+  let displayedLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
+  let displayedXp = Number.isFinite(statsState.xp) ? statsState.xp : 0;
   updatePlayerInfoUI = () => {
     if (playerNameDisplay) {
       playerNameDisplay.textContent = playerName;
     }
     if (playerLevelDisplay) {
-      const levelValue = Number.isFinite(statsState.level) ? statsState.level : 1;
+      const levelValue = Number.isFinite(displayedLevel) ? displayedLevel : 1;
       playerLevelDisplay.textContent = levelValue;
     }
   };
-  updatePlayerInfoUI();
   const showLevelPopup = level => {
     if (!levelPopup) return;
     levelPopup.textContent = `You've reached level ${level}!`;
@@ -2789,6 +2800,168 @@ async function main() {
       treasurePopupTimer = null;
     }, 2000);
   };
+  const XP_GAIN_DISPLAY_MS = 900;
+  const XP_LEVEL_UP_DISPLAY_MS = 900;
+  const XP_BAR_HIDE_DELAY_MS = 1400;
+  const XP_SEGMENT_MIN_MS = 260;
+  const XP_SEGMENT_MAX_MS = 1200;
+  const XP_SEGMENT_SPEED = 6;
+
+  const getTotalXpForLevel = (level) => {
+    const safeLevel = Math.max(1, Math.floor(level || 1));
+    return 50 * safeLevel * (safeLevel - 1);
+  };
+
+  const getLevelForXp = (totalXp) => {
+    const safeXp = Math.max(0, Math.floor(totalXp || 0));
+    const rawLevel = (1 + Math.sqrt(1 + safeXp / 12.5)) / 2;
+    return Math.max(1, Math.floor(rawLevel));
+  };
+
+  const getXpProgress = (totalXp, level) => {
+    const levelStart = getTotalXpForLevel(level);
+    const levelEnd = getTotalXpForLevel(level + 1);
+    const span = Math.max(1, levelEnd - levelStart);
+    const progress = Math.max(0, Math.min(1, (totalXp - levelStart) / span));
+    return { progress, levelStart, levelEnd };
+  };
+
+  const setXpBarProgress = (totalXp, level) => {
+    if (!xpBarFill) return;
+    const { progress } = getXpProgress(totalXp, level);
+    xpBarFill.style.width = `${Math.round(progress * 1000) / 10}%`;
+  };
+
+  const showXpGain = (amount) => {
+    if (!xpGainText) return;
+    xpGainText.textContent = `+${amount} XP`;
+    xpGainText.classList.add('visible');
+    if (xpGainTimer) {
+      clearTimeout(xpGainTimer);
+    }
+    xpGainTimer = setTimeout(() => {
+      xpGainText.classList.remove('visible');
+      xpGainTimer = null;
+    }, XP_GAIN_DISPLAY_MS);
+  };
+
+  const showXpLevelUp = () => {
+    if (!xpLevelUpText) return;
+    xpLevelUpText.classList.add('visible');
+    if (xpLevelUpTimer) {
+      clearTimeout(xpLevelUpTimer);
+    }
+    xpLevelUpTimer = setTimeout(() => {
+      xpLevelUpText.classList.remove('visible');
+      xpLevelUpTimer = null;
+    }, XP_LEVEL_UP_DISPLAY_MS);
+  };
+
+  const showXpBar = () => {
+    if (!xpBar) return;
+    xpBar.classList.remove('hidden');
+    if (xpBarHideTimer) {
+      clearTimeout(xpBarHideTimer);
+      xpBarHideTimer = null;
+    }
+  };
+
+  const hideXpBarLater = () => {
+    if (!xpBar) return;
+    if (xpBarHideTimer) {
+      clearTimeout(xpBarHideTimer);
+    }
+    xpBarHideTimer = setTimeout(() => {
+      xpBar.classList.add('hidden');
+      xpBarHideTimer = null;
+    }, XP_BAR_HIDE_DELAY_MS);
+  };
+
+  const animateXpSegment = (startXp, endXp, level) => new Promise(resolve => {
+    const delta = Math.max(0, endXp - startXp);
+    if (delta === 0) {
+      setXpBarProgress(endXp, level);
+      resolve();
+      return;
+    }
+    const duration = Math.min(
+      XP_SEGMENT_MAX_MS,
+      Math.max(XP_SEGMENT_MIN_MS, delta * XP_SEGMENT_SPEED)
+    );
+    const startTime = performance.now();
+    const tick = (now) => {
+      const elapsed = now - startTime;
+      const t = Math.min(1, elapsed / duration);
+      const currentXp = startXp + delta * t;
+      setXpBarProgress(currentXp, level);
+      if (t < 1) {
+        requestAnimationFrame(tick);
+      } else {
+        resolve();
+      }
+    };
+    requestAnimationFrame(tick);
+  });
+
+  const queueXpAnimation = (amount) => {
+    xpAnimationQueue.push(amount);
+    if (!xpAnimationRunning) {
+      runXpAnimationQueue();
+    }
+  };
+
+  const runXpAnimationQueue = async () => {
+    xpAnimationRunning = true;
+    while (xpAnimationQueue.length > 0) {
+      const amount = xpAnimationQueue.shift();
+      if (!Number.isFinite(amount) || amount <= 0) {
+        continue;
+      }
+      showXpBar();
+      showXpGain(amount);
+      let segmentStartXp = displayedXp;
+      const targetXp = displayedXp + amount;
+      let segmentLevel = getLevelForXp(segmentStartXp);
+      while (segmentStartXp < targetXp) {
+        const nextLevelXp = getTotalXpForLevel(segmentLevel + 1);
+        const segmentEndXp = Math.min(targetXp, nextLevelXp);
+        await animateXpSegment(segmentStartXp, segmentEndXp, segmentLevel);
+        segmentStartXp = segmentEndXp;
+        displayedXp = segmentStartXp;
+        if (segmentStartXp >= nextLevelXp && segmentStartXp < targetXp) {
+          segmentLevel += 1;
+          displayedLevel = segmentLevel;
+          updatePlayerInfoUI();
+          showLevelPopup(segmentLevel);
+          showXpLevelUp();
+          setXpBarProgress(segmentStartXp, segmentLevel);
+          await new Promise(resolve => setTimeout(resolve, 320));
+        }
+      }
+      displayedXp = targetXp;
+      setXpBarProgress(displayedXp, segmentLevel);
+    }
+    xpAnimationRunning = false;
+    hideXpBarLater();
+  };
+  const initialXp = Number.isFinite(statsState.xp) ? statsState.xp : 0;
+  const initialLevel = getLevelForXp(initialXp);
+  let statsNeedsSave = false;
+  if (initialXp !== statsState.xp) {
+    statsState.xp = initialXp;
+    statsNeedsSave = true;
+  }
+  if (initialLevel !== statsState.level) {
+    statsState.level = initialLevel;
+    statsNeedsSave = true;
+  }
+  if (statsNeedsSave) {
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+  displayedLevel = initialLevel;
+  displayedXp = initialXp;
+  setXpBarProgress(displayedXp, displayedLevel);
+  updatePlayerInfoUI();
   const inventoryCatalog = {
     iceGun: {
       name: 'Ice Gun',
@@ -3210,6 +3383,7 @@ async function main() {
     if (index >= 0) {
       mushroomPickups.splice(index, 1);
     }
+    window.questManager?.handleMushroomCollected?.(pickup);
     return true;
   }
 
@@ -3521,7 +3695,7 @@ async function main() {
       }
       return Math.max(1, Math.round(num));
     }
-    if (key === 'levelKills') {
+    if (key === 'xp') {
       const num = Number(value);
       if (!Number.isFinite(num)) {
         return 0;
@@ -3577,37 +3751,48 @@ async function main() {
     }
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   };
-  const adjustLevel = delta => {
-    const currentLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
-    const nextLevel = clampStat('level', currentLevel + delta);
-    if (nextLevel === currentLevel) {
+  const getMonsterXpForLevel = (level) => {
+    const safeLevel = Math.max(1, Math.round(level || 1));
+    return 50 + (safeLevel - 1) * 25;
+  };
+  const addPlayerXp = (amount) => {
+    const normalized = clampStat('xp', amount);
+    if (!Number.isFinite(normalized) || normalized <= 0) {
       return;
     }
-    setStat('level', nextLevel, { skipSave: true });
-    applyLevelBonus(nextLevel - currentLevel);
-    showLevelPopup(nextLevel);
-  };
-  window.adjustPlayerLevel = adjustLevel;
-
-  const getKillsRequiredForNextLevel = level => Math.max(1, level);
-  const registerKillProgress = () => {
-    const currentLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
-    const currentKills = Number.isFinite(statsState.levelKills) ? statsState.levelKills : 0;
-    const nextKills = clampStat('levelKills', currentKills + 1);
-    if (nextKills >= getKillsRequiredForNextLevel(currentLevel)) {
-      setStat('levelKills', 0, { skipSave: true });
-      adjustLevel(1);
+    const previousTotalXp = Number.isFinite(statsState.xp) ? statsState.xp : 0;
+    const nextTotalXp = clampStat('xp', previousTotalXp + normalized);
+    if (nextTotalXp === previousTotalXp) {
       return;
     }
-    setStat('levelKills', nextKills);
+    const previousLevel = getLevelForXp(previousTotalXp);
+    const nextLevel = getLevelForXp(nextTotalXp);
+    statsState.xp = nextTotalXp;
+    if (nextLevel !== statsState.level) {
+      const currentLevel = Number.isFinite(statsState.level) ? statsState.level : previousLevel;
+      const delta = nextLevel - currentLevel;
+      if (delta !== 0) {
+        applyLevelBonus(delta);
+      }
+      statsState.level = nextLevel;
+    }
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+    queueXpAnimation(normalized);
   };
+  window.addPlayerXp = addPlayerXp;
+  window.getMonsterXpForLevel = getMonsterXpForLevel;
 
-  window.onMonsterKill = () => registerKillProgress();
-  window.onPlayerKill = () => registerKillProgress();
-  window.onPlayerDeath = () => {
-    setStat('levelKills', 0, { skipSave: true });
-    adjustLevel(-1);
+  window.onMonsterKill = (monster, { withFriend = false } = {}) => {
+    const monsterLevel = Number.isFinite(monster?.level) ? monster.level : 1;
+    const baseXp = getMonsterXpForLevel(monsterLevel);
+    const bonusXp = withFriend ? 50 : 0;
+    addPlayerXp(baseXp + bonusXp);
   };
+  window.onPlayerKill = () => {
+    const currentLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
+    addPlayerXp(currentLevel * 100);
+  };
+  window.onPlayerDeath = () => {};
 
   Object.defineProperty(window, 'localHealth', {
     configurable: true,

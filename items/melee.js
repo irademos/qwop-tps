@@ -92,7 +92,8 @@ export function updateMeleeAttacks({
             }
             onMonsterHit?.(monster, { damage: attackDamage, killed, sourceId: attacker.id });
             if (killed && attacker.id === 'local') {
-              window.onMonsterKill?.();
+              const withFriend = window.questManager?.isFriendActive?.() ?? false;
+              window.onMonsterKill?.(monster, { withFriend });
             }
           }
         }
