@@ -196,7 +196,8 @@ export async function createNature({
         entryCenter: entryCenter.clone(),
         entryRadius,
         entryHeight,
-        normal: normal.clone()
+        normal: normal.clone(),
+        sourceTree: tree
       });
     }
     return areas;
@@ -349,26 +350,6 @@ export async function createNature({
   const refreshAll = () => {
   };
 
-  const getClosestTree = (position, range) => {
-    if (!position || !Number.isFinite(range)) return null;
-    const maxDistance = Math.max(0, range);
-    let closest = null;
-    let closestDistance = Infinity;
-    for (const entry of treeTiles.values()) {
-      for (const tree of entry.trees) {
-        if (!tree?.position) continue;
-        const dx = position.x - tree.position.x;
-        const dz = position.z - tree.position.z;
-        const distance = Math.hypot(dx, dz);
-        if (distance <= maxDistance && distance < closestDistance) {
-          closestDistance = distance;
-          closest = tree;
-        }
-      }
-    }
-    return closest;
-  };
-
   const removeTree = (tree) => {
     if (!tree) return false;
     const tileKey = tree.userData?.tileKey;
@@ -432,7 +413,6 @@ export async function createNature({
     refreshTile,
     refreshAll,
     setTileCache,
-    getClosestTree,
     removeTree,
     dispose
   };
