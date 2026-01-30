@@ -623,6 +623,68 @@ function buildDisplayPanel() {
   return panelEl;
 }
 
+const CREDITS_PATH = '/credits.txt';
+const CREDIT_LINE_PATTERN = /^"(.+)" \\((.+)\\) by (.+) is licensed under Creative Commons Attribution \\((.+)\\)\\.$/;
+
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function buildCreditsMarkup(entries) {
+  if (!entries.length) {
+    return '<strong>Credits</strong>\\n\\nNo credits found.';
+  }
+
+  const blocks = entries.map((entry) => {
+    const sourceText = escapeHtml(entry.source);
+    const licenseText = escapeHtml(entry.licenseLabel);
+    return `“${escapeHtml(entry.title)}” by ${escapeHtml(entry.author)}
+  Source: <a href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer noopener">${sourceText}</a>
+  License: <a href="${escapeHtml(entry.license)}" target="_blank" rel="noreferrer noopener">${licenseText}</a>`;
+  });
+
+  return `<strong>Credits</strong>\\n\\n${blocks.join('\\n\\n')}`;
+}
+
+function parseCredits(rawText) {
+  return rawText
+    .split(/\\r?\\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const match = line.match(CREDIT_LINE_PATTERN);
+      if (!match) return null;
+      const [, title, source, author, license] = match;
+      return {
+        title,
+        source,
+        author,
+        license,
+        licenseLabel: license.includes('/4.0') ? 'CC BY 4.0' : license
+      };
+    })
+    .filter(Boolean);
+}
+
+async function loadCredits(textEl) {
+  try {
+    const response = await fetch(CREDITS_PATH, { cache: 'no-cache' });
+    if (!response.ok) {
+      throw new Error(`Failed to load credits: ${response.status}`);
+    }
+    const rawText = await response.text();
+    const entries = parseCredits(rawText);
+    textEl.innerHTML = buildCreditsMarkup(entries);
+  } catch (error) {
+    textEl.innerHTML = '<strong>Credits</strong>\\n\\nUnable to load credits right now.';
+  }
+}
+
 function buildAboutPanel() {
   const panelEl = createElement('section', 'settings-tabpanel');
   panelEl.id = 'panel-about';
@@ -633,17 +695,8 @@ function buildAboutPanel() {
   const title = createElement('h3', 'settings-section-title', 'About');
   const text = createElement('div', 'settings-muted');
   text.style.whiteSpace = 'pre-wrap';
-  text.innerHTML = `
-  <strong>Credits</strong>
-
-  “Base Mesh Low Poly Character” by YOPN
-  Source: <a href="https://skfb.ly/oCvvG" target="_blank" rel="noreferrer noopener">https://skfb.ly/oCvvG</a>
-  License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer noopener">CC BY 4.0</a>
-
-  “T-shirt” by Sirenko
-  Source: <a href="https://skfb.ly/6CJyy" target="_blank" rel="noreferrer noopener">https://skfb.ly/6CJyy</a>
-  License: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer noopener">CC BY 4.0</a>
-  `;
+  text.innerHTML = '<strong>Credits</strong>\\n\\nLoading credits...';
+  loadCredits(text);
 
   panelEl.append(title, text);
   return panelEl;
