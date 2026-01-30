@@ -19,6 +19,7 @@ const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const FRIENDLY_INTERACT_RANGE = 6;
 const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
+const ENGAGED_MODE_DISTANCE = 7;
 const FRIENDLY_DIALOGUE_POOL = [
   {
     blocks: [
@@ -241,6 +242,11 @@ export class PlayerControls {
     this.lastOcclusionDistance = null;
     this.lastOcclusionYaw = null;
     this.lastOcclusionPitch = null;
+    this.isEngaged = false;
+    this.engagedTarget = null;
+    this.engagedDirection = null;
+    this.freeYaw = null;
+    this.freePitch = null;
 
     if (this.isMobile && this.interactionPromptEl) {
       const activateInteraction = (event) => {
@@ -395,7 +401,7 @@ export class PlayerControls {
     // Touch camera control
     this.cameraTouchId = null;
     this.domElement.addEventListener('touchstart', (event) => {
-      if (!this.enabled) return;
+      if (!this.enabled || this.isEngaged) return;
       for (const touch of event.changedTouches) {
         const target = document.elementFromPoint(touch.clientX, touch.clientY);
         if (target && !target.closest('#joystick-container') && !target.closest('#jump-button') && !target.closest('#action-buttons')) {
@@ -409,7 +415,7 @@ export class PlayerControls {
     }, { passive: false });
 
     this.domElement.addEventListener('touchmove', (event) => {
-      if (!this.enabled || this.cameraTouchId === null) return;
+      if (!this.enabled || this.isEngaged || this.cameraTouchId === null) return;
       for (const touch of event.changedTouches) {
         if (touch.identifier === this.cameraTouchId) {
           const deltaX = touch.clientX - this.touchStartX;
@@ -1512,6 +1518,9 @@ export class PlayerControls {
         const aimDirection = this.getAimDirection(true);
         yawAngle = Math.atan2(aimDirection.x, aimDirection.z);
       }
+      if (this.engagedDirection) {
+        yawAngle = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
+      }
 
       
       this.playerModel.rotation.set(0, yawAngle, 0);
@@ -1584,22 +1593,28 @@ export class PlayerControls {
     this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
     this.deltaSeconds = delta;
 
+    this.updateEngagedMode();
+
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
-    if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
-    if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
+    if (!this.isEngaged) {
+      if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
+      if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
+    }
 
     const maxPitch = Math.PI / 3;   // ~60° upward
     const minPitch = -Math.PI / 8;  // ~30° downward
 
-    if (this.keys.has('ArrowUp')) {
-      this.pitch = Math.min(maxPitch, this.pitch + 0.02);
-    }
-    if (this.keys.has('ArrowDown')) {
-      this.pitch = Math.max(minPitch, this.pitch - 0.02);
+    if (!this.isEngaged) {
+      if (this.keys.has('ArrowUp')) {
+        this.pitch = Math.min(maxPitch, this.pitch + 0.02);
+      }
+      if (this.keys.has('ArrowDown')) {
+        this.pitch = Math.max(minPitch, this.pitch - 0.02);
+      }
     }
 
     const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
-    const aimingActive = this.isAiming || shouldHoldAim;
+    const aimingActive = !this.isEngaged && (this.isAiming || shouldHoldAim);
     const aimLerpSpeed = aimingActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
     const aimLerpFactor = 1 - Math.exp(-aimLerpSpeed * this.deltaSeconds);
     const targetOffset = aimingActive ? this.aimCameraOffset : this.baseCameraOffset;
@@ -1633,13 +1648,25 @@ export class PlayerControls {
       }
       offset = this.cameraOffset;
     }
-    const rotatedOffset = new THREE.Vector3(
-      offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
-      offset.y + 5 * Math.sin(this.pitch),
-      offset.x * Math.sin(this.yaw) + offset.z * Math.cos(this.yaw)
-    );
-
-    const desiredCameraPosition = orbitCenter.clone().add(rotatedOffset);
+    let desiredCameraPosition;
+    if (this.isEngaged && this.engagedDirection) {
+      const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
+      this.yaw = engagedYaw;
+      this.pitch = 0;
+      const cameraDistance = Math.max(2.5, Math.abs(this.baseCameraOffset?.z ?? this.cameraOffset.z));
+      const cameraHeight = this.baseCameraOffset?.y ?? this.cameraOffset.y ?? 1;
+      const behindOffset = this.engagedDirection.clone().multiplyScalar(-cameraDistance);
+      desiredCameraPosition = orbitCenter.clone()
+        .add(new THREE.Vector3(0, cameraHeight, 0))
+        .add(behindOffset);
+    } else {
+      const rotatedOffset = new THREE.Vector3(
+        offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
+        offset.y + 5 * Math.sin(this.pitch),
+        offset.x * Math.sin(this.yaw) + offset.z * Math.cos(this.yaw)
+      );
+      desiredCameraPosition = orbitCenter.clone().add(rotatedOffset);
+    }
     const occlusionEpsilon = 0.02;
     const occlusionEpsilonSq = occlusionEpsilon * occlusionEpsilon;
     const yawPitchEpsilon = 0.0005;
@@ -2191,7 +2218,7 @@ export class PlayerControls {
     });
   
     document.addEventListener('mousemove', (event) => {
-      if (this.pointerLocked) {
+      if (this.pointerLocked && !this.isEngaged) {
         const sensitivity = 0.0025;
         this.yaw -= event.movementX * sensitivity;
         this.pitch -= event.movementY * sensitivity;
@@ -2209,6 +2236,58 @@ export class PlayerControls {
         document.exitPointerLock();
       }
     });
+  }
+
+  updateEngagedMode() {
+    if (!this.playerModel) {
+      this.setEngaged(false);
+      return;
+    }
+    const monsters = window.monsters || [];
+    let closest = null;
+    let closestDistance = Infinity;
+    for (const monster of monsters) {
+      if (!monster?.model || monster.isDead) continue;
+      const distance = this.playerModel.position.distanceTo(monster.model.position);
+      if (distance < closestDistance) {
+        closest = monster;
+        closestDistance = distance;
+      }
+    }
+    const shouldEngage = closest && closestDistance <= ENGAGED_MODE_DISTANCE;
+    if (shouldEngage) {
+      if (!this.isEngaged) {
+        this.freeYaw = this.yaw;
+        this.freePitch = this.pitch;
+        this.cameraTouchId = null;
+      }
+      this.isEngaged = true;
+      this.engagedTarget = closest;
+      this.engagedDirection = closest.model.position.clone().sub(this.playerModel.position);
+      this.engagedDirection.y = 0;
+      if (this.engagedDirection.lengthSq() > 0) {
+        this.engagedDirection.normalize();
+      }
+    } else {
+      this.setEngaged(false);
+    }
+  }
+
+  setEngaged(active) {
+    if (active) return;
+    if (this.isEngaged) {
+      if (Number.isFinite(this.freeYaw)) {
+        this.yaw = this.freeYaw;
+      }
+      if (Number.isFinite(this.freePitch)) {
+        this.pitch = this.freePitch;
+      }
+    }
+    this.isEngaged = false;
+    this.engagedTarget = null;
+    this.engagedDirection = null;
+    this.freeYaw = null;
+    this.freePitch = null;
   }
 
 }
