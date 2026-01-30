@@ -246,7 +246,6 @@ export class PlayerControls {
     this.engagedTarget = null;
     this.engagedModeDistanceSq = ENGAGED_MODE_DISTANCE * ENGAGED_MODE_DISTANCE;
     this.engagedTargetPosition = new THREE.Vector3();
-    this.engagedOrbitCenter = new THREE.Vector3();
     this.engagedFacingDirection = new THREE.Vector3();
 
     if (this.isMobile && this.interactionPromptEl) {
@@ -416,7 +415,7 @@ export class PlayerControls {
     }, { passive: false });
 
     this.domElement.addEventListener('touchmove', (event) => {
-      if (!this.enabled || this.cameraTouchId === null) return;
+      if (!this.enabled || this.cameraTouchId === null || this.isEngaged) return;
       for (const touch of event.changedTouches) {
         if (touch.identifier === this.cameraTouchId) {
           const deltaX = touch.clientX - this.touchStartX;
@@ -1591,21 +1590,22 @@ export class PlayerControls {
     this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
     this.deltaSeconds = delta;
 
-    const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
-    if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
-    if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
-
-    const maxPitch = Math.PI / 3;   // ~60° upward
-    const minPitch = -Math.PI / 8;  // ~30° downward
-
-    if (this.keys.has('ArrowUp')) {
-      this.pitch = Math.min(maxPitch, this.pitch + 0.02);
-    }
-    if (this.keys.has('ArrowDown')) {
-      this.pitch = Math.max(minPitch, this.pitch - 0.02);
-    }
-
     this.updateEngagedState();
+    if (!this.isEngaged) {
+      const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
+      if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
+      if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
+
+      const maxPitch = Math.PI / 3;   // ~60° upward
+      const minPitch = -Math.PI / 8;  // ~30° downward
+
+      if (this.keys.has('ArrowUp')) {
+        this.pitch = Math.min(maxPitch, this.pitch + 0.02);
+      }
+      if (this.keys.has('ArrowDown')) {
+        this.pitch = Math.max(minPitch, this.pitch - 0.02);
+      }
+    }
 
     const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
     const aimingActive = this.isAiming || shouldHoldAim;
@@ -1621,13 +1621,7 @@ export class PlayerControls {
 
     let orbitCenter;
     let offset;
-    if (this.isEngaged && this.engagedTarget?.model) {
-      this.engagedTarget.model.getWorldPosition(this.engagedTargetPosition);
-      this.engagedOrbitCenter.copy(this.engagedTargetPosition);
-      this.engagedOrbitCenter.y += 1;
-      orbitCenter = this.engagedOrbitCenter;
-      offset = this.cameraOffset;
-    } else if (this.vehicle && this.vehicle.mesh && this.vehicle.type !== 'surfboard') {
+    if (this.vehicle && this.vehicle.mesh && this.vehicle.type !== 'surfboard') {
       const size = this.vehicle.boundingSize;
       const centerOffset = this.vehicle.boundingCenterOffset || new THREE.Vector3();
       orbitCenter = this.vehicle.mesh.position.clone().add(centerOffset);
@@ -2079,6 +2073,7 @@ export class PlayerControls {
     this.engagedFacingDirection.y = 0;
     if (this.engagedFacingDirection.lengthSq() < 0.0001) return;
     this.engagedFacingDirection.normalize();
+    this.yaw = Math.atan2(this.engagedFacingDirection.x, this.engagedFacingDirection.z);
     this.alignPlayerToDirection(this.engagedFacingDirection);
   }
 
