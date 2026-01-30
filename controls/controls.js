@@ -1591,6 +1591,9 @@ export class PlayerControls {
     this.deltaSeconds = delta;
 
     this.updateEngagedState();
+    if (this.isEngaged) {
+      this.updateEngagedFacing();
+    }
     if (!this.isEngaged) {
       const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
       if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
@@ -1715,7 +1718,6 @@ export class PlayerControls {
     if (this.enabled) {
       this.processMovement();
     }
-    this.updateEngagedFacing();
     if (this.grabbedTarget) {
       this.updateGrabbedTarget();
     }
