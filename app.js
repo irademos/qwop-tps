@@ -5623,6 +5623,10 @@ async function main() {
     getCharacterModel: () => characterModel,
     setCharacterModel: (modelPath) => {
       if (!modelPath || modelPath === characterModel) return;
+      const equippedItemId = getEquippedInventoryItemId();
+      if (equippedItemId) {
+        unequipInventoryItem(equippedItemId);
+      }
       swapPlayerCharacter(modelPath);
       characterModel = modelPath;
       playerProfile = playerProfile || {};
