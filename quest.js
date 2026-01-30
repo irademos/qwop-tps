@@ -20,6 +20,10 @@ const QUEST_TRAIL_SEGMENT_GAP = 1.4;
 const QUEST_TRAIL_HEIGHT_OFFSET = 0.15;
 const QUEST_TRAIL_MAX_SEGMENTS = 80;
 const QUEST_TRAIL_COLOR = 0xffd84d;
+const QUEST_FIND_FRIEND_XP = 25;
+const QUEST_FRIEND_MONSTER_BONUS_XP = 50;
+const QUEST_MUSHROOM_XP = 15;
+const QUEST_RETURN_FRIEND_XP = 50;
 
 const QUEST_OFFER_DIALOGUE = {
   blocks: [
@@ -73,13 +77,15 @@ export class QuestManager {
     getPlayerModel,
     attachPhysics,
     detachPhysics,
-    adjustPlayerLevel
+    addXp,
+    getMonsterXpForLevel
   }) {
     this.scene = scene;
     this.getPlayerModel = getPlayerModel;
     this.attachPhysics = attachPhysics;
     this.detachPhysics = detachPhysics;
-    this.adjustPlayerLevel = adjustPlayerLevel;
+    this.addXp = addXp;
+    this.getMonsterXpForLevel = getMonsterXpForLevel;
     this.state = {
       status: "inactive",
       giver: null,
@@ -106,6 +112,10 @@ export class QuestManager {
 
   isQuestFriend(friendly) {
     return this.state.friend === friendly;
+  }
+
+  isFriendActive() {
+    return !!this.state.friend && this.state.status !== "inactive";
   }
 
   shouldOfferQuest(friendly) {
@@ -233,10 +243,19 @@ export class QuestManager {
       this.scene?.remove(friend.model);
     }
     this.detachPhysics?.(friend);
-    this.adjustPlayerLevel?.(1);
+    this.addXp?.(QUEST_RETURN_FRIEND_XP);
     this.state.giver = null;
     this.state.giverPosition = null;
     this.state.friend = null;
+  }
+
+  handleMushroomCollected(pickup) {
+    if (!pickup) return;
+    if (this.state.status !== "found") return;
+    if (this.state.friendTargetType !== "mushroom") return;
+    if (this.state.friendTarget !== pickup) return;
+    this.addXp?.(QUEST_MUSHROOM_XP);
+    this.setQuestFriendIdle(this.state.friend);
   }
 
   update() {
@@ -255,6 +274,7 @@ export class QuestManager {
         quest.friendTargetType = null;
         quest.trailMode = null;
         this.clearQuestTrail();
+        this.addXp?.(QUEST_FIND_FRIEND_XP);
       }
       friend.update(this.deltaSeconds);
       return;
@@ -348,6 +368,9 @@ export class QuestManager {
           hitTarget.applyKnockback({ direction: info.direction, strength: info.strength });
         }
         if (died) {
+          const targetLevel = Number.isFinite(hitTarget.level) ? hitTarget.level : 1;
+          const baseXp = this.getMonsterXpForLevel?.(targetLevel) ?? 0;
+          this.addXp?.(baseXp + QUEST_FRIEND_MONSTER_BONUS_XP);
           this.setQuestFriendIdle(friend);
         }
       });
