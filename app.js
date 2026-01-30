@@ -553,6 +553,7 @@ async function main() {
   const WOOD_DROP_LIFT = 0.12;
   const TREE_HITS_TO_CUT = 3;
   const TREE_SWING_TILT_STEP = 0.08;
+  const TREE_HIT_RANGE_BOOST = 0.8;
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 60;
@@ -3587,6 +3588,8 @@ async function main() {
 
   const tempTreePosition = new THREE.Vector3();
   const tempTreeDirection = new THREE.Vector3();
+  const tempTreeCenter = new THREE.Vector3();
+  const tempTreeCenterNext = new THREE.Vector3();
 
   function dropTreeApples(tree) {
     if (!tree) return;
@@ -3610,8 +3613,13 @@ async function main() {
 
   function handleSwordTreeHit({ attacker, range }) {
     if (!attacker?.model?.position) return;
-    const tree = natureController?.getClosestTree?.(attacker.model.position, range);
+    const effectiveRange = (Number.isFinite(range) ? range : 0) + TREE_HIT_RANGE_BOOST;
+    const tree = natureController?.getClosestTree?.(attacker.model.position, effectiveRange);
     if (!tree || tree.userData?.isCutDown) return;
+    const centerLocal = tree.userData?.boundsCenterLocal;
+    if (centerLocal) {
+      tempTreeCenter.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+    }
     tree.userData.swordHits = (tree.userData.swordHits ?? 0) + 1;
     tempTreeDirection.subVectors(tree.position, attacker.model.position);
     tempTreeDirection.y = 0;
@@ -3625,6 +3633,13 @@ async function main() {
     tree.userData.tiltZ = tiltZ;
     tree.rotation.x = tiltX;
     tree.rotation.z = tiltZ;
+    if (centerLocal) {
+      tree.updateWorldMatrix(true, true);
+      tempTreeCenterNext.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+      tempTreePosition.subVectors(tempTreeCenter, tempTreeCenterNext);
+      tree.position.add(tempTreePosition);
+      tree.updateWorldMatrix(true, true);
+    }
     if (tree.userData.swordHits >= TREE_HITS_TO_CUT) {
       tree.userData.isCutDown = true;
       dropTreeApples(tree);
