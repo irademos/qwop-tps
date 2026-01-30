@@ -623,7 +623,10 @@ function buildDisplayPanel() {
   return panelEl;
 }
 
-const CREDITS_PATH = new URL('credits.txt', import.meta.env.BASE_URL).toString();
+const CREDITS_PATH = new URL(
+  'credits.txt',
+  `${window.location.origin}${import.meta.env.BASE_URL ?? '/'}`
+).toString();
 const CREDIT_LINE_PATTERN = /^([“"])(.+?)["”] \((.+?)\) by (.+?) is licensed under Creative Commons Attribution \((.+?)\)\.?$/;
 
 function escapeHtml(value) {
