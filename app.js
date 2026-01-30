@@ -1791,7 +1791,7 @@ async function main() {
       autumnSword.holder = null;
       return;
     }
-    dropOtherWeapons(autumnSword);
+    unequipOtherInventoryItems('autumnSword');
     addToInventory('autumnSword', 1);
     setPlayerWeaponType(holder, autumnSword.type);
   };
@@ -1878,6 +1878,12 @@ async function main() {
   const lanternMarker = createWeaponMarker(0xffd400);
   lantern.onPickup = (holder) => {
     if (holder !== playerControls) return;
+    if (bow?.holder === playerControls) {
+      unequipInventoryItem('bow');
+    }
+    if (autumnSword?.holder === playerControls) {
+      unequipInventoryItem('autumnSword');
+    }
     addToInventory('lantern', 1);
   };
   lantern.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
@@ -3028,6 +3034,14 @@ async function main() {
     if (itemId === 'lantern') {
       if (!lantern?.mesh || !playerControls) return;
       if (lantern.remoteHolderId && lantern.remoteHolderId !== multiplayer?.getId?.()) return;
+      const shouldDuplicateDrop = lantern.mesh.visible && lantern.holder !== playerControls;
+      if (shouldDuplicateDrop) {
+        createDroppedWeaponPickup(lantern, {
+          itemId: 'lantern',
+          markerColor: 0xffd400,
+          markerOffsetY: 1.2
+        });
+      }
       lantern.mesh.visible = true;
       lantern.holder = playerControls;
       updateSettingsUI();
