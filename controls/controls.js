@@ -19,6 +19,7 @@ const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const FRIENDLY_INTERACT_RANGE = 6;
 const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
+const ENGAGED_MODE_DISTANCE = 7;
 const FRIENDLY_DIALOGUE_POOL = [
   {
     blocks: [
@@ -241,6 +242,12 @@ export class PlayerControls {
     this.lastOcclusionDistance = null;
     this.lastOcclusionYaw = null;
     this.lastOcclusionPitch = null;
+    this.isEngaged = false;
+    this.engagedTarget = null;
+    this.engagedModeDistanceSq = ENGAGED_MODE_DISTANCE * ENGAGED_MODE_DISTANCE;
+    this.engagedTargetPosition = new THREE.Vector3();
+    this.engagedOrbitCenter = new THREE.Vector3();
+    this.engagedFacingDirection = new THREE.Vector3();
 
     if (this.isMobile && this.interactionPromptEl) {
       const activateInteraction = (event) => {
@@ -1598,6 +1605,8 @@ export class PlayerControls {
       this.pitch = Math.max(minPitch, this.pitch - 0.02);
     }
 
+    this.updateEngagedState();
+
     const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
     const aimingActive = this.isAiming || shouldHoldAim;
     const aimLerpSpeed = aimingActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
@@ -1612,7 +1621,13 @@ export class PlayerControls {
 
     let orbitCenter;
     let offset;
-    if (this.vehicle && this.vehicle.mesh && this.vehicle.type !== 'surfboard') {
+    if (this.isEngaged && this.engagedTarget?.model) {
+      this.engagedTarget.model.getWorldPosition(this.engagedTargetPosition);
+      this.engagedOrbitCenter.copy(this.engagedTargetPosition);
+      this.engagedOrbitCenter.y += 1;
+      orbitCenter = this.engagedOrbitCenter;
+      offset = this.cameraOffset;
+    } else if (this.vehicle && this.vehicle.mesh && this.vehicle.type !== 'surfboard') {
       const size = this.vehicle.boundingSize;
       const centerOffset = this.vehicle.boundingCenterOffset || new THREE.Vector3();
       orbitCenter = this.vehicle.mesh.position.clone().add(centerOffset);
@@ -1706,6 +1721,7 @@ export class PlayerControls {
     if (this.enabled) {
       this.processMovement();
     }
+    this.updateEngagedFacing();
     if (this.grabbedTarget) {
       this.updateGrabbedTarget();
     }
@@ -2026,6 +2042,44 @@ export class PlayerControls {
     if (!this.playerModel) return;
     const yaw = Math.atan2(direction.x, direction.z);
     this.playerModel.rotation.set(0, yaw, 0);
+  }
+
+  updateEngagedState() {
+    if (!this.playerModel) {
+      this.isEngaged = false;
+      this.engagedTarget = null;
+      return;
+    }
+    const monsters = window.monsters || [];
+    let closest = null;
+    let closestDistanceSq = Infinity;
+    for (const monster of monsters) {
+      if (!monster?.model || monster.isDead || monster.model.userData?.mode === 'dead') continue;
+      const distanceSq = this.playerModel.position.distanceToSquared(monster.model.position);
+      if (distanceSq < closestDistanceSq) {
+        closestDistanceSq = distanceSq;
+        closest = monster;
+      }
+    }
+    if (closest && closestDistanceSq <= this.engagedModeDistanceSq) {
+      this.isEngaged = true;
+      this.engagedTarget = closest;
+    } else {
+      this.isEngaged = false;
+      this.engagedTarget = null;
+    }
+  }
+
+  updateEngagedFacing() {
+    if (!this.isEngaged || !this.engagedTarget?.model || !this.playerModel) return;
+    this.engagedTarget.model.getWorldPosition(this.engagedTargetPosition);
+    this.engagedFacingDirection
+      .copy(this.engagedTargetPosition)
+      .sub(this.playerModel.position);
+    this.engagedFacingDirection.y = 0;
+    if (this.engagedFacingDirection.lengthSq() < 0.0001) return;
+    this.engagedFacingDirection.normalize();
+    this.alignPlayerToDirection(this.engagedFacingDirection);
   }
 
   getProjectileSpawnPosition(direction) {
