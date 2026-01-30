@@ -1950,6 +1950,16 @@ export class PlayerControls {
   }
 
   attemptFireProjectile() {
+    const equippedWeapon = this.getEquippedWeapon();
+    if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
+      const direction = this.getAimDirection(false);
+      const position = this.getProjectileSpawnPosition(direction);
+      const fired = this.throwBomb(position, direction);
+      if (fired) {
+        this.playAction('projectile');
+      }
+      return fired;
+    }
     if (!this.canFireProjectile()) return false;
 
     const gun = this.getEquippedGun();
@@ -2015,7 +2025,7 @@ export class PlayerControls {
 
   shouldHoldToFire() {
     const weapon = this.getEquippedWeapon();
-    return weapon?.itemId === 'bow';
+    return weapon?.itemId === 'bow' || weapon?.itemId === 'bomb';
   }
 
   setAiming(active) {
@@ -2047,7 +2057,9 @@ export class PlayerControls {
 
   updateAimingRotation() {
     if (!this.isFireHeld || !this.shouldHoldToFire()) return;
-    const direction = this.getAimDirection(true);
+    const weapon = this.getEquippedWeapon();
+    const invertForBow = weapon?.itemId === 'bow';
+    const direction = this.getAimDirection(invertForBow);
     this.alignPlayerToDirection(direction);
   }
 

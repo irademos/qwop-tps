@@ -66,6 +66,9 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.pickupAmount = options.pickupAmount ?? 0;
   mesh.userData.spawnPickup = options.spawnPickup ?? null;
   mesh.userData.isArrow = options.isArrow ?? false;
+  mesh.userData.onGroundHit = options.onGroundHit ?? null;
+  mesh.userData.groundY = options.groundY ?? null;
+  mesh.userData.hasHitGround = false;
   scene.add(mesh);
   projectiles.push(mesh);
 }
@@ -122,6 +125,16 @@ export function updateProjectiles({
     const vel = new THREE.Vector3(linvel.x, linvel.y, linvel.z);
     proj.userData.velocity = vel.clone();
     updateArrowProjectile(proj, rb, vel);
+
+    if (typeof proj.userData.onGroundHit === 'function' && !proj.userData.hasHitGround) {
+      const groundY = Number.isFinite(proj.userData.groundY) ? proj.userData.groundY : 0.3;
+      if (proj.position.y <= groundY && vel.y <= 0.1) {
+        proj.userData.hasHitGround = true;
+        proj.userData.onGroundHit(proj.position.clone(), proj);
+        removeProjectile(i);
+        continue;
+      }
+    }
 
     proj.userData.lifetime -= 16;
     if (proj.userData.lifetime <= 0) {
