@@ -246,6 +246,7 @@ export async function createNature({
         if (!template) continue;
 
         const tree = template.clone(true);
+        tree.userData.applePickups = [];
         tree.userData.treeTypeIndex = treeTypeIndex;
         const rotation = pseudoRandom2D(worldX, worldZ, 3.4) * Math.PI * 2;
         tree.rotation.y = rotation;
@@ -256,9 +257,11 @@ export async function createNature({
 
         const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
         tree.position.set(worldX, terrainY, worldZ);
+        tree.userData.tileKey = tileKey;
         tileGroup.add(tree);
         trees.push(tree);
         const areas = buildTreeClimbAreas(tree);
+        tree.userData.climbAreas = areas;
         tileClimbAreas.push(...areas);
         if (typeof spawnApplePickup === 'function') {
           tree.updateWorldMatrix(true, true);
@@ -278,9 +281,15 @@ export async function createNature({
                   tempBox.min.y + height * heightFactor,
                   tempCenter.z + Math.sin(angle) * distance
                 );
-                const pickup = spawnApplePickup(applePosition, { applyTerrainHeight: false, lift: 0 });
+                const localApplePosition = tree.worldToLocal(applePosition.clone());
+                const pickup = spawnApplePickup(localApplePosition, {
+                  applyTerrainHeight: false,
+                  lift: 0,
+                  parent: tree
+                });
                 if (pickup) {
                   tileApplePickups.push(pickup);
+                  tree.userData.applePickups.push(pickup);
                 }
               }
             }
@@ -340,6 +349,45 @@ export async function createNature({
   const refreshAll = () => {
   };
 
+  const getClosestTree = (position, range) => {
+    if (!position || !Number.isFinite(range)) return null;
+    const maxDistance = Math.max(0, range);
+    let closest = null;
+    let closestDistance = Infinity;
+    for (const entry of treeTiles.values()) {
+      for (const tree of entry.trees) {
+        if (!tree?.position) continue;
+        const dx = position.x - tree.position.x;
+        const dz = position.z - tree.position.z;
+        const distance = Math.hypot(dx, dz);
+        if (distance <= maxDistance && distance < closestDistance) {
+          closestDistance = distance;
+          closest = tree;
+        }
+      }
+    }
+    return closest;
+  };
+
+  const removeTree = (tree) => {
+    if (!tree) return false;
+    const tileKey = tree.userData?.tileKey;
+    const entry = tileKey ? treeTiles.get(tileKey) : null;
+    if (!entry) return false;
+    const index = entry.trees.indexOf(tree);
+    if (index === -1) return false;
+    entry.trees.splice(index, 1);
+    entry.group.remove(tree);
+    const tileClimbAreas = climbableAreasByTile.get(tileKey);
+    const treeAreas = tree.userData?.climbAreas ?? [];
+    if (Array.isArray(tileClimbAreas) && treeAreas.length > 0) {
+      const remainingAreas = tileClimbAreas.filter((area) => !treeAreas.includes(area));
+      climbableAreasByTile.set(tileKey, remainingAreas);
+    }
+    refreshClimbableAreas();
+    return true;
+  };
+
   const setTileCache = (nextCache) => {
     activeTileCache = nextCache ?? null;
     tileSizeMeters = activeTileCache?.tileSizeMeters ?? tileSizeMeters;
@@ -384,6 +432,8 @@ export async function createNature({
     refreshTile,
     refreshAll,
     setTileCache,
+    getClosestTree,
+    removeTree,
     dispose
   };
 }

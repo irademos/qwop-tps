@@ -542,11 +542,17 @@ async function main() {
   const APPLE_HEALTH_GAIN = 4;
   const APPLE_HUNGER_GAIN = 4;
   const APPLE_ENERGY_GAIN = 6;
+  const APPLE_DROP_LIFT = 0.25;
   const HUNGER_DECAY_PER_HOUR = 8;
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.45;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
   const PICKUP_RADIUS = 1.2;
   const APPLE_PICKUP_RADIUS = 3;
+  const WOOD_ITEM_ID = 'wood';
+  const WOOD_PICKUP_RADIUS = 3;
+  const WOOD_DROP_LIFT = 0.12;
+  const TREE_HITS_TO_CUT = 3;
+  const TREE_SWING_TILT_STEP = 0.08;
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 60;
@@ -609,8 +615,10 @@ async function main() {
   let mushroomPickups = [];
   let appleController = null;
   let applePickups = [];
+  let woodPickups = [];
   const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
   const appleItemIds = new Set([APPLE_ITEM_ID]);
+  const woodItemIds = new Set([WOOD_ITEM_ID]);
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
 
@@ -2082,6 +2090,7 @@ async function main() {
   });
   applePickups = appleController?.pickups || [];
   window.applePickups = applePickups;
+  window.woodPickups = woodPickups;
   natureController = await createNature({
     scene,
     playerModel,
@@ -3053,6 +3062,10 @@ async function main() {
     name: 'Apple',
     icon: ''
   };
+  inventoryCatalog[WOOD_ITEM_ID] = {
+    name: 'Wood',
+    icon: ''
+  };
   MUSHROOM_ENTRIES.forEach((entry) => {
     inventoryCatalog[entry.id] = {
       name: entry.name,
@@ -3112,6 +3125,7 @@ async function main() {
   const equippableItems = new Set(['lantern', 'iceGun', 'bow', 'bomb', 'autumnSword']);
   const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
   const isAppleItem = (itemId) => appleItemIds.has(itemId);
+  const isWoodItem = (itemId) => woodItemIds.has(itemId);
   const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId);
   const getInventoryItemActions = (itemId) => {
     if (isFoodItem(itemId)) {
@@ -3464,6 +3478,23 @@ async function main() {
     });
   }
 
+  function disposeWoodPickup(pickup) {
+    if (!pickup?.mesh) return;
+    const mesh = pickup.mesh;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
+    mesh.geometry?.dispose?.();
+    if (Array.isArray(mesh.material)) {
+      mesh.material.forEach(material => material?.dispose?.());
+    } else {
+      mesh.material?.dispose?.();
+    }
+  }
+
   function pickupMushroom(pickup) {
     if (!pickup?.mesh) return false;
     if (playerControls?.playerModel) {
@@ -3500,6 +3531,26 @@ async function main() {
     return true;
   }
 
+  function pickupWood(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const playerPosition = playerControls.playerModel.position;
+      const woodPosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - woodPosition.x,
+        playerPosition.z - woodPosition.z
+      );
+      if (horizontalDistance > WOOD_PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeWoodPickup(pickup);
+    const index = woodPickups.indexOf(pickup);
+    if (index >= 0) {
+      woodPickups.splice(index, 1);
+    }
+    return true;
+  }
+
   function spawnMushroomPickup(itemId, position) {
     if (!mushroomController?.spawnPickup || !position) return null;
     return mushroomController.spawnPickup(itemId, position);
@@ -3508,6 +3559,86 @@ async function main() {
   function spawnApplePickup(position) {
     if (!appleController?.spawnPickup || !position) return null;
     return appleController.spawnPickup(position);
+  }
+
+  function spawnWoodPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (Number.isFinite(terrainHeight)) {
+      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
+    }
+    const geometry = new THREE.BoxGeometry(0.5, 0.18, 0.3);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x8b5a2b,
+      roughness: 0.7,
+      metalness: 0.05
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.position.copy(spawnPos);
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(mesh);
+    const pickup = { id: WOOD_ITEM_ID, mesh };
+    woodPickups.push(pickup);
+    return pickup;
+  }
+
+  const tempTreePosition = new THREE.Vector3();
+  const tempTreeDirection = new THREE.Vector3();
+
+  function dropTreeApples(tree) {
+    if (!tree) return;
+    const apples = tree.userData?.applePickups ?? [];
+    if (!apples.length) return;
+    const appleParent = appleController?.group || scene;
+    apples.forEach((pickup) => {
+      if (!pickup?.mesh) return;
+      const mesh = pickup.mesh;
+      mesh.getWorldPosition(tempTreePosition);
+      appleParent.add(mesh);
+      mesh.position.copy(tempTreePosition);
+      const terrainY = getTerrainHeight(tempTreePosition.x, tempTreePosition.z);
+      if (Number.isFinite(terrainY)) {
+        mesh.position.y = terrainY + APPLE_DROP_LIFT;
+        mesh.userData.baseY = mesh.position.y;
+      }
+      mesh.rotation.y = Math.random() * Math.PI * 2;
+    });
+  }
+
+  function handleSwordTreeHit({ attacker, range }) {
+    if (!attacker?.model?.position) return;
+    const tree = natureController?.getClosestTree?.(attacker.model.position, range);
+    if (!tree || tree.userData?.isCutDown) return;
+    tree.userData.swordHits = (tree.userData.swordHits ?? 0) + 1;
+    tempTreeDirection.subVectors(tree.position, attacker.model.position);
+    tempTreeDirection.y = 0;
+    if (tempTreeDirection.lengthSq() === 0) {
+      tempTreeDirection.set(0, 0, 1);
+    }
+    tempTreeDirection.normalize();
+    const tiltX = (tree.userData.tiltX ?? tree.rotation.x) + tempTreeDirection.z * TREE_SWING_TILT_STEP;
+    const tiltZ = (tree.userData.tiltZ ?? tree.rotation.z) + -tempTreeDirection.x * TREE_SWING_TILT_STEP;
+    tree.userData.tiltX = tiltX;
+    tree.userData.tiltZ = tiltZ;
+    tree.rotation.x = tiltX;
+    tree.rotation.z = tiltZ;
+    if (tree.userData.swordHits >= TREE_HITS_TO_CUT) {
+      tree.userData.isCutDown = true;
+      dropTreeApples(tree);
+      tree.getWorldPosition(tempTreePosition);
+      for (let i = 0; i < 3; i += 1) {
+        const angle = (i / 3) * Math.PI * 2 + Math.random() * 0.4;
+        const radius = 0.6 + Math.random() * 0.2;
+        const dropPosition = tempTreePosition.clone();
+        dropPosition.x += Math.cos(angle) * radius;
+        dropPosition.z += Math.sin(angle) * radius;
+        spawnWoodPickup(dropPosition);
+      }
+      natureController?.removeTree?.(tree);
+    }
   }
 
   function disposeDroppedWeaponPickup(pickup) {
@@ -3573,6 +3704,14 @@ async function main() {
       const pickup = isMushroomItem(itemId)
         ? spawnMushroomPickup(itemId, dropPosition)
         : spawnApplePickup(dropPosition);
+      if (!pickup) return;
+      removeFromInventory(itemId, 1);
+      return;
+    }
+    if (isWoodItem(itemId)) {
+      const dropPosition = getInventoryDropPosition();
+      if (!dropPosition) return;
+      const pickup = spawnWoodPickup(dropPosition);
       if (!pickup) return;
       removeFromInventory(itemId, 1);
       return;
@@ -6251,6 +6390,7 @@ async function main() {
   window.openHomeStorage = openHomeStorage;
   window.pickupMushroom = pickupMushroom;
   window.pickupApple = pickupApple;
+  window.pickupWood = pickupWood;
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -6700,6 +6840,12 @@ async function main() {
           continue;
         }
       }
+      for (let i = woodPickups.length - 1; i >= 0; i--) {
+        const pickup = woodPickups[i];
+        if (!pickup?.mesh) {
+          woodPickups.splice(i, 1);
+        }
+      }
     }
 
     iceGun?.update();
@@ -6962,7 +7108,8 @@ async function main() {
       audioManager,
       multiplayer,
       sendMonsterAttack: sendMonsterAttackIntent,
-      onMonsterHit: handleMonsterDamage
+      onMonsterHit: handleMonsterDamage,
+      onSwordHit: handleSwordTreeHit
     });
 
     renderer.render(scene, camera);

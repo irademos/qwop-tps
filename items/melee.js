@@ -24,7 +24,8 @@ export function updateMeleeAttacks({
   audioManager,
   multiplayer,
   sendMonsterAttack,
-  onMonsterHit
+  onMonsterHit,
+  onSwordHit
 }) {
   const now = Date.now();
   const isHost = !multiplayer || multiplayer.isHost;
@@ -46,6 +47,9 @@ export function updateMeleeAttacks({
     if (elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow && !info.hasHit) {
       let hit = false;
       const attackDamage = getStrengthDamage(attacker.id, cfg.damage);
+      if (attackName === 'swordSlash' && attacker.id === 'local') {
+        onSwordHit?.({ attacker, range: cfg.range });
+      }
       for (const target of players) {
         if (target === attacker) continue;
         if (!target.model || !target.model.position) continue;
