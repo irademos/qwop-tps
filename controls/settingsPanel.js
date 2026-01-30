@@ -623,8 +623,7 @@ function buildDisplayPanel() {
   return panelEl;
 }
 
-const CREDITS_PATH = `${import.meta.env.BASE_URL ?? '/'}credits.txt`;
-const CREDIT_LINE_PATTERN = /^([“"])(.+?)["”] \((.+?)\) by (.+?) is licensed under Creative Commons Attribution \((.+?)\)\.?$/;
+const CREDITS_PATH = `${import.meta.env.BASE_URL ?? '/'}credits.json`;
 
 function escapeHtml(value) {
   return value
@@ -651,15 +650,16 @@ function buildCreditsMarkup(entries) {
   return `<strong>Credits</strong>\\n\\n${blocks.join('\\n\\n')}`;
 }
 
-function parseCredits(rawText) {
-  return rawText
-    .split(/\\r?\\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const match = line.match(CREDIT_LINE_PATTERN);
-      if (!match) return null;
-      const [, , title, source, author, license] = match;
+function normalizeCredits(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const title = typeof entry.title === 'string' ? entry.title.trim() : '';
+      const source = typeof entry.source === 'string' ? entry.source.trim() : '';
+      const author = typeof entry.author === 'string' ? entry.author.trim() : '';
+      const license = typeof entry.license === 'string' ? entry.license.trim() : '';
+      if (!title || !source || !author || !license) return null;
       return {
         title,
         source,
@@ -677,8 +677,8 @@ async function loadCredits(textEl) {
     if (!response.ok) {
       throw new Error(`Failed to load credits: ${response.status}`);
     }
-    const rawText = await response.text();
-    const entries = parseCredits(rawText);
+    const rawJson = await response.json();
+    const entries = normalizeCredits(rawJson);
     textEl.innerHTML = buildCreditsMarkup(entries);
   } catch (error) {
     textEl.innerHTML = '<strong>Credits</strong>\\n\\nUnable to load credits right now.';
