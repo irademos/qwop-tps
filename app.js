@@ -3610,10 +3610,8 @@ async function main() {
 
   function handleSwordTreeHit({ attacker, range }) {
     if (!attacker?.model?.position) return;
-    const climbArea = playerControls?.findClimbableArea?.(attacker.model.position);
-    const tree = climbArea?.sourceTree;
+    const tree = natureController?.getClosestTree?.(attacker.model.position, range);
     if (!tree || tree.userData?.isCutDown) return;
-    if (climbArea?.center && climbArea.center.distanceTo(attacker.model.position) > range) return;
     tree.userData.swordHits = (tree.userData.swordHits ?? 0) + 1;
     tempTreeDirection.subVectors(tree.position, attacker.model.position);
     tempTreeDirection.y = 0;
