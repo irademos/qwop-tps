@@ -3644,6 +3644,9 @@ async function main() {
       tree.userData.isCutDown = true;
       dropTreeApples(tree);
       tree.getWorldPosition(tempTreePosition);
+      if (centerLocal) {
+        tempTreePosition.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+      }
       for (let i = 0; i < 3; i += 1) {
         const angle = (i / 3) * Math.PI * 2 + Math.random() * 0.4;
         const radius = 0.6 + Math.random() * 0.2;
