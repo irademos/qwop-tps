@@ -115,12 +115,12 @@ const ARROW_MODEL_URL = '/assets/props/arrow.glb';
 const ARROW_PROJECTILE_SCALE = 2.2;
 const ARROW_PROJECTILE_SPEED = 55;
 const ARROW_PROJECTILE_LIFETIME = 6000;
-const BOMB_THROW_SPEED = 18;
-const BOMB_THROW_LIFETIME = 5000;
-const BOMB_THROW_UPWARD_BIAS = 0.35;
+const BOMB_THROW_SPEED = 11;
+const BOMB_THROW_LIFETIME = 15000;
+const BOMB_THROW_UPWARD_BIAS = 0.25;
 const BOMB_GROUND_Y = 0.25;
-const BOMB_MIST_LIFETIME_MS = 1400;
-const BOMB_MIST_PARTICLE_COUNT = 12;
+const BOMB_MIST_LIFETIME_MS = 8000;
+const BOMB_MIST_PARTICLE_COUNT = 35;
 
 
 // --- Rapier demo state ---
@@ -3955,6 +3955,7 @@ async function main() {
       return clone;
     };
 
+    // const lobDirection = direction.clone().multiplyScalar(-1).normalize();
     const lobDirection = direction.clone().normalize();
     lobDirection.y += BOMB_THROW_UPWARD_BIAS;
     lobDirection.normalize();
@@ -4051,7 +4052,7 @@ async function main() {
       const size = THREE.MathUtils.lerp(0.25, 0.6, Math.random());
       const geometry = new THREE.SphereGeometry(size, 10, 8);
       const particle = new THREE.Mesh(geometry, material);
-      const spread = 0.9;
+      const spread = 8.0;
       particle.position.set(
         (Math.random() - 0.5) * spread,
         Math.random() * 0.4,

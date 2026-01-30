@@ -1952,7 +1952,7 @@ export class PlayerControls {
   attemptFireProjectile() {
     const equippedWeapon = this.getEquippedWeapon();
     if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
-      const direction = this.getAimDirection(false);
+      const direction = this.getAimDirection(true);
       const position = this.getProjectileSpawnPosition(direction);
       const fired = this.throwBomb(position, direction);
       if (fired) {

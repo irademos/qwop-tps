@@ -6,7 +6,7 @@ export class Bomb extends Weapon {
       itemId: 'bomb',
       type: 'bomb',
       modelUrl: '/assets/props/bomb.glb',
-      scale: 0.25,
+      scale: 0.85,
       fallbackColor: 0x3b3b3b
     });
   }
