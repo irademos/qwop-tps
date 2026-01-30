@@ -624,7 +624,7 @@ function buildDisplayPanel() {
 }
 
 const CREDITS_PATH = '/credits.txt';
-const CREDIT_LINE_PATTERN = /^"(.+)" \\((.+)\\) by (.+) is licensed under Creative Commons Attribution \\((.+)\\)\\.$/;
+const CREDIT_LINE_PATTERN = /^"(.+)" \((.+)\) by (.+) is licensed under Creative Commons Attribution \((.+)\)\.?$/;
 
 function escapeHtml(value) {
   return value
