@@ -1645,6 +1645,10 @@ export class PlayerControls {
       }
       offset = this.cameraOffset;
     }
+
+    if (this.isEngaged && this.controls) {
+      this.syncOrbitControlsToYawPitch(orbitCenter);
+    }
     const rotatedOffset = new THREE.Vector3(
       offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
       offset.y + 5 * Math.sin(this.pitch),
@@ -2075,8 +2079,32 @@ export class PlayerControls {
     this.engagedFacingDirection.y = 0;
     if (this.engagedFacingDirection.lengthSq() < 0.0001) return;
     this.engagedFacingDirection.normalize();
-    this.yaw = Math.atan2(this.engagedFacingDirection.x, this.engagedFacingDirection.z);
-    this.alignPlayerToDirection(this.engagedFacingDirection);
+    const playerYaw = Math.atan2(this.engagedFacingDirection.x, this.engagedFacingDirection.z);
+    // Player faces target
+    this.playerModel.rotation.set(0, playerYaw, 0);
+    // Camera goes behind player (180° around)
+    this.yaw = playerYaw + Math.PI;
+  }
+
+  syncOrbitControlsToYawPitch(orbitCenter) {
+    if (!this.controls) return;
+    // Use your existing pitch limits if needed
+    const maxPitch = Math.PI / 3;
+    const minPitch = -Math.PI / 8;
+    this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
+
+    // Force OrbitControls to match our yaw/pitch
+    this.controls.target.copy(orbitCenter);
+    if (typeof this.controls.setAzimuthalAngle === 'function') {
+      this.controls.setAzimuthalAngle(this.yaw);
+    }
+    if (typeof this.controls.setPolarAngle === 'function') {
+      // OrbitControls polar angle is measured from +Y down.
+      // If your pitch is "up/down around horizon", convert like this:
+      const polar = (Math.PI / 2) - this.pitch;
+      this.controls.setPolarAngle(polar);
+    }
+    this.controls.update();
   }
 
   getProjectileSpawnPosition(direction) {
