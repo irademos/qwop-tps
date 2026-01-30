@@ -272,7 +272,58 @@ export class MonsterCharacter extends CharacterBase {
       return;
     }
 
-    const targetPos = closestPlayer.model.position.clone();
+    this.updateCombatAI(delta, closestPlayer, allPlayers, (player) => {
+      if (player.id === 'local' && !window.playerControls?.isKnocked) {
+        window.localHealth = Math.max(0, window.localHealth - this.attackDamage);
+        if (window.playerControls) {
+          window.playerControls.applyKnockback({
+            direction: this.model.userData.direction.clone(),
+            strength: MONSTER_ATTACK.knockbackStrength
+          });
+        }
+      } else if (player.id !== 'local') {
+        const op = otherPlayers[player.id];
+        if (op) {
+          op.health = Math.max(0, (op.health || 100) - this.attackDamage);
+        }
+      }
+    });
+  }
+
+  updateCombatAI(deltaTime, primaryTarget, targets, onHit) {
+    const now = Date.now();
+    if (!this.model) return;
+    const body = this.body;
+    if (!body) return;
+
+    const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
+    if (this.isDead) {
+      this.update(delta);
+      return;
+    }
+    if (this.isFrozen()) {
+      const vel = body.linvel();
+      body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      this.playAnimation("Idle", MOVE_FADE);
+      this.update(delta);
+      return;
+    }
+    if (this.isKnocked) {
+      if (now >= this.knockbackEndTime) {
+        this.isKnocked = false;
+      } else {
+        this.update(delta);
+        return;
+      }
+    }
+
+    if (!primaryTarget?.model) {
+      this.playAnimation("Idle", MOVE_FADE);
+      this.update(delta);
+      return;
+    }
+
+    const targetPos = primaryTarget.model.position.clone();
     const distance = this.model.position.distanceTo(targetPos);
     const attackRange = MONSTER_ATTACK.range;
     const canAttack = !this.attackStartTime && now >= this.nextAttackTime;
@@ -341,25 +392,17 @@ export class MonsterCharacter extends CharacterBase {
     if (this.attackStartTime) {
       const elapsed = now - this.attackStartTime;
       if (!this.attackHasHit && elapsed >= MONSTER_ATTACK.hitTime && elapsed <= MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
-        for (const player of allPlayers) {
-          const dist = this.model.position.distanceTo(player.model.position);
+        const hitTargets = Array.isArray(targets) && targets.length ? targets : [primaryTarget];
+        hitTargets.forEach((target) => {
+          if (!target?.model) return;
+          const dist = this.model.position.distanceTo(target.model.position);
           if (dist <= attackRange) {
-            if (player.id === 'local' && !window.playerControls?.isKnocked) {
-              window.localHealth = Math.max(0, window.localHealth - this.attackDamage);
-              if (window.playerControls) {
-                window.playerControls.applyKnockback({
-                  direction: this.model.userData.direction.clone(),
-                  strength: MONSTER_ATTACK.knockbackStrength
-                });
-              }
-            } else if (player.id !== 'local') {
-              const op = otherPlayers[player.id];
-              if (op) {
-                op.health = Math.max(0, (op.health || 100) - this.attackDamage);
-              }
-            }
+            onHit?.(target, {
+              direction: this.model.userData.direction.clone(),
+              strength: MONSTER_ATTACK.knockbackStrength
+            });
           }
-        }
+        });
         this.attackHasHit = true;
       }
       if (elapsed > MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
