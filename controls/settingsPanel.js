@@ -636,18 +636,18 @@ function escapeHtml(value) {
 
 function buildCreditsMarkup(entries) {
   if (!entries.length) {
-    return '<strong>Credits</strong>\\n\\nNo credits found.';
+    return '<strong>Credits</strong><br><br>No credits found.';
   }
 
   const blocks = entries.map((entry) => {
     const sourceText = escapeHtml(entry.source);
     const licenseText = escapeHtml(entry.licenseLabel);
     return `“${escapeHtml(entry.title)}” by ${escapeHtml(entry.author)}
-  Source: <a href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer noopener">${sourceText}</a>
-  License: <a href="${escapeHtml(entry.license)}" target="_blank" rel="noreferrer noopener">${licenseText}</a>`;
+  <br>Source: <a href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer noopener">${sourceText}</a>
+  <br>License: <a href="${escapeHtml(entry.license)}" target="_blank" rel="noreferrer noopener">${licenseText}</a>`;
   });
 
-  return `<strong>Credits</strong>\\n\\n${blocks.join('\\n\\n')}`;
+  return `<strong>Credits</strong><br><br>${blocks.join('<br><br>')}`;
 }
 
 function normalizeCredits(entries) {
@@ -681,7 +681,7 @@ async function loadCredits(textEl) {
     const entries = normalizeCredits(rawJson);
     textEl.innerHTML = buildCreditsMarkup(entries);
   } catch (error) {
-    textEl.innerHTML = '<strong>Credits</strong>\\n\\nUnable to load credits right now.';
+    textEl.innerHTML = '<strong>Credits</strong><br><br>Unable to load credits right now.';
   }
 }
 
@@ -695,7 +695,7 @@ function buildAboutPanel() {
   const title = createElement('h3', 'settings-section-title', 'About');
   const text = createElement('div', 'settings-muted');
   text.style.whiteSpace = 'pre-wrap';
-  text.innerHTML = '<strong>Credits</strong>\\n\\nLoading credits...';
+  text.innerHTML = '<strong>Credits</strong><br><br>Loading credits...';
   loadCredits(text);
 
   panelEl.append(title, text);
