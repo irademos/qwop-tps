@@ -113,6 +113,15 @@ export class MonsterCharacter extends CharacterBase {
     if (body) {
       const vel = body.linvel();
       body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      body.setLinearDamping(4);
+      body.setAngularDamping(4);
+      if (body.setEnabledRotations) {
+        body.setEnabledRotations(false, true, false, true);
+      }
+      const rot = this.model.quaternion;
+      const yaw = Math.atan2(2 * (rot.w * rot.y + rot.x * rot.z), 1 - 2 * (rot.y * rot.y + rot.x * rot.x));
+      const upright = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
+      body.setRotation(upright, true);
     }
   }
 

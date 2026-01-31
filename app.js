@@ -1934,10 +1934,13 @@ async function main() {
     const scale = monster.sizeScale || 1;
     const rbDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(model.position.x, model.position.y, model.position.z)
-      .setLinearDamping(0.5)
-      .setAngularDamping(0.5);
+      .setLinearDamping(0.9)
+      .setAngularDamping(1.2)
+      .setEnabledRotations(false, true, false);
     const rb = rapierWorld.createRigidBody(rbDesc);
-    const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
+    const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale)
+      .setDensity(3)
+      .setFriction(1);
     rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
     rbToMesh.set(rb, model);
