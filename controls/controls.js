@@ -5,6 +5,7 @@ import { getSpawnPosition } from '../spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse } from "../knockback.js";
 import { QuestManager } from "../quest.js";
+import { openMerchantPanel } from "./merchantPanel.js";
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -71,6 +72,23 @@ const FRIENDLY_DIALOGUE_POOL = [
     ]
   }
 ];
+const MERCHANT_DIALOGUE = {
+  blocks: [
+    "Welcome! Looking to trade?"
+  ],
+  responses: [
+    {
+      label: "Buy items",
+      reply: "Here's what I have for sale.",
+      merchantAction: "buy"
+    },
+    {
+      label: "Sell items",
+      reply: "Let's see what you've got.",
+      merchantAction: "sell"
+    }
+  ]
+};
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 
 export class PlayerControls {
@@ -789,6 +807,14 @@ export class PlayerControls {
         closest = friendly;
       }
     });
+    const merchant = window.merchantFriendly;
+    if (merchant?.model && !merchant.isDead) {
+      const dist = this.playerModel.position.distanceTo(merchant.model.position);
+      if (dist <= maxDistance && dist < closestDistance) {
+        closestDistance = dist;
+        closest = merchant;
+      }
+    }
     const questFriend = this.questManager?.getQuestFriend();
     if (questFriend?.model && !questFriend.isDead) {
       const dist = this.playerModel.position.distanceTo(questFriend.model.position);
@@ -931,7 +957,10 @@ export class PlayerControls {
 
   startFriendlyInteraction(friendly) {
     if (!friendly) return;
-    const choice = this.questManager?.getDialogueForFriendly(friendly, FRIENDLY_DIALOGUE_POOL) || null;
+    const isMerchant = friendly?.model?.userData?.npcRole === 'merchant';
+    const choice = isMerchant
+      ? MERCHANT_DIALOGUE
+      : this.questManager?.getDialogueForFriendly(friendly, FRIENDLY_DIALOGUE_POOL) || null;
     this.isInteracting = true;
     this.activeFriendly = friendly;
     this.activeDialogue = choice;
@@ -1775,6 +1804,9 @@ export class PlayerControls {
 
   handleDialogueOption(option) {
     this.questManager?.handleDialogueOption(option, this.activeFriendly);
+    if (option?.merchantAction) {
+      openMerchantPanel(option.merchantAction);
+    }
   }
 
   getWeapons() {

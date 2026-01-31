@@ -21,6 +21,7 @@ export class FriendlyCharacter extends MonsterCharacter {
     this.engageRadius = 5;
     this.disengageRadius = 8;
     this.isEngaged = false;
+    this.forceEngaged = false;
     this.nextDanceAt = 0;
     this.danceUntil = 0;
     this.lastDirectionChange = Date.now();
@@ -141,8 +142,14 @@ export class FriendlyCharacter extends MonsterCharacter {
       this.model.userData.mode = "friendly";
     }
 
-    if (this.isEngaged && closestPlayer) {
-      const targetPos = closestPlayer.model.position.clone();
+    if (this.forceEngaged) {
+      this.isEngaged = true;
+      this.model.userData.mode = "engaged";
+    }
+
+    if (this.isEngaged && (closestPlayer || this.forceEngaged)) {
+      const targetSource = closestPlayer?.model?.position || this.homePosition;
+      const targetPos = targetSource.clone();
       const faceDir = targetPos.sub(this.model.position).normalize();
       this.setDirection(faceDir);
       const vel = body.linvel();
