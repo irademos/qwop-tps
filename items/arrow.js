@@ -6,6 +6,8 @@ const ARROW_MIN_SPEED_SQ = 0.0001;
 const ARROW_TRAIL_MIN_SPEED = 0.2;
 const ARROW_TRAIL_MAX_OPACITY = 0.35;
 const ARROW_TRAIL_MAX_LENGTH = 1.6;
+const DEFAULT_ARROW_FORWARD = new THREE.Vector3(0, 0, 1);
+const MODEL_ARROW_FORWARD = new THREE.Vector3(0, -1, 0);
 
 const createArrowTrailTexture = () => {
   const canvas = document.createElement('canvas');
@@ -55,10 +57,11 @@ const createArrowMesh = ({
   scale
 }) => {
   const arrowDirection = direction.clone().normalize();
-  const forward = new THREE.Vector3(0, 0, 1);
+  const forward = template ? MODEL_ARROW_FORWARD : DEFAULT_ARROW_FORWARD;
   if (template && typeof cloneArrowMesh === 'function') {
     const arrowMesh = cloneArrowMesh(template, scale);
     if (arrowMesh) {
+      arrowMesh.userData.arrowForward = forward.clone();
       arrowMesh.quaternion.setFromUnitVectors(forward, arrowDirection);
       arrowMesh.rotation.y += Math.PI / 2;
       const trail = createArrowTrail();
@@ -71,6 +74,7 @@ const createArrowMesh = ({
   const material = new THREE.MeshStandardMaterial({ color: 0x6a4b2a });
   const fallback = new THREE.Mesh(geometry, material);
   fallback.rotation.x = Math.PI / 2;
+  fallback.userData.arrowForward = DEFAULT_ARROW_FORWARD.clone();
   const trail = createArrowTrail();
   fallback.add(trail);
   fallback.userData.arrowTrail = trail;
@@ -139,7 +143,7 @@ export const updateArrowProjectile = (proj, rb, velocity) => {
     }
   }
   if (!proj.userData.arrowStuck && velocity.lengthSq() > ARROW_MIN_SPEED_SQ) {
-    const forward = new THREE.Vector3(0, 0, 1);
+    const forward = proj.userData.arrowForward || DEFAULT_ARROW_FORWARD;
     proj.quaternion.setFromUnitVectors(forward, velocity.clone().normalize());
   }
 
