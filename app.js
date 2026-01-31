@@ -560,11 +560,12 @@ async function main() {
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 60;
   const MAX_COIN_PICKUPS = 80;
+  const MAX_WEAPON_PICKUPS = Math.max(1, Math.round(MAX_COIN_PICKUPS / 3));
   const TILE_STOCK_AMMO_COUNT = 0;
   const TILE_STOCK_FOOD_COUNT = 500;
   const TILE_STOCK_HEALTH_COUNT = 800;
   const TILE_STOCK_COIN_COUNT = 500;
-  const TILE_STOCK_WEAPON_COUNT = 100;
+  const TILE_STOCK_WEAPON_COUNT = Math.max(1, Math.round(TILE_STOCK_COIN_COUNT / 3));
   const PICKUP_SPAWN_RADIUS = 225;
   const PICKUP_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
   const ICE_GUN_AMMO_CLUSTER_COUNT = 3;
@@ -3711,11 +3712,29 @@ async function main() {
     }
   }
 
-  function createDroppedWeaponPickup(item, { itemId, markerColor, markerOffsetY } = {}) {
-    if (!item?.mesh || !item.mesh.visible) return;
+  function createDroppedWeaponPickup(
+    item,
+    {
+      itemId,
+      markerColor,
+      markerOffsetY,
+      position,
+      quaternion,
+      allowHidden = false
+    } = {}
+  ) {
+    if (!item?.mesh || (!allowHidden && !item.mesh.visible)) return;
     const pickupMesh = item.mesh.clone(true);
-    pickupMesh.position.copy(item.mesh.position);
-    pickupMesh.quaternion.copy(item.mesh.quaternion);
+    if (position) {
+      pickupMesh.position.copy(position);
+    } else {
+      pickupMesh.position.copy(item.mesh.position);
+    }
+    if (quaternion) {
+      pickupMesh.quaternion.copy(quaternion);
+    } else {
+      pickupMesh.quaternion.copy(item.mesh.quaternion);
+    }
     pickupMesh.visible = true;
     pickupMesh.userData.hideInMapView = item.mesh.userData?.hideInMapView;
     scene.add(pickupMesh);
@@ -5084,6 +5103,72 @@ async function main() {
       }
     }
   };
+  const removeDroppedWeaponPickupsOutsideRadius = (pickups, center, radius) => {
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      const pickup = pickups[i];
+      const mesh = pickup?.mesh;
+      if (!mesh) {
+        pickups.splice(i, 1);
+        continue;
+      }
+      if (center.distanceTo(mesh.position) > radius) {
+        disposeDroppedWeaponPickup(pickup);
+        pickups.splice(i, 1);
+      }
+    }
+  };
+  const getWeaponPickupConfigs = () => ([
+    {
+      itemId: 'iceGun',
+      item: iceGun,
+      markerColor: 0xffd400,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
+      liftOffset: 0.5
+    },
+    {
+      itemId: 'bow',
+      item: bow,
+      markerColor: 0xffc26b,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
+      liftOffset: 0.5
+    },
+    {
+      itemId: 'bomb',
+      item: bomb,
+      markerColor: 0xff4d4d,
+      markerOffsetY: 1.2,
+      groundOffset: 0.4,
+      liftOffset: 0.5
+    },
+    {
+      itemId: 'autumnSword',
+      item: autumnSword,
+      markerColor: 0xffd400,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
+      liftOffset: 0.5
+    }
+  ]);
+  const spawnWeaponPickupCopy = (position) => {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+    const configs = getWeaponPickupConfigs().filter(config => config.item?.mesh);
+    if (configs.length === 0) return;
+    const config = configs[Math.floor(Math.random() * configs.length)];
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (!Number.isFinite(terrainHeight)) return;
+    spawnPos.y = terrainHeight + config.groundOffset;
+    liftPositionToBuildingTop(spawnPos, config.liftOffset ?? config.groundOffset);
+    createDroppedWeaponPickup(config.item, {
+      itemId: config.itemId,
+      markerColor: config.markerColor,
+      markerOffsetY: config.markerOffsetY,
+      position: spawnPos,
+      allowHidden: true
+    });
+  };
   const updatePickupTiles = (position) => {
     if (!position) return;
     const center = position.clone();
@@ -5091,6 +5176,7 @@ async function main() {
     removePickupOutsideRadius(foodPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(healthPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(coinPickups, center, PICKUP_SPAWN_RADIUS);
+    removeDroppedWeaponPickupsOutsideRadius(droppedWeaponPickups, center, PICKUP_SPAWN_RADIUS);
 
     const now = Date.now();
     if (now - lastPickupStockAt < PICKUP_STOCK_COOLDOWN_MS) {
@@ -5121,6 +5207,12 @@ async function main() {
       count: TILE_STOCK_COIN_COUNT,
       maxTotal: () => coinPickups.length < MAX_COIN_PICKUPS,
       spawnFn: spawnCoinPickup
+    });
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_WEAPON_COUNT,
+      maxTotal: () => droppedWeaponPickups.length < MAX_WEAPON_PICKUPS,
+      spawnFn: spawnWeaponPickupCopy
     });
 
     const isHost = !multiplayer || multiplayer.isHost;
