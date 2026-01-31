@@ -39,7 +39,7 @@ import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI } from './controls/homeStoragePanel.js';
 import { initMerchantPanel, updateMerchantUI } from './controls/merchantPanel.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
-import { initMerchant, setMerchantHost, setMerchantRoom } from './characters/merchant.js';
+import { getMerchantFriendly, initMerchant, setMerchantHost, setMerchantRoom } from './characters/merchant.js';
 import { initCustomizeUI } from './controls/customize.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './environment/mapView.js';
 import {
@@ -7029,6 +7029,10 @@ async function main() {
 
     // Friendlies: same idea—do NOT pass 0 deltas
     friendlyNpcManager?.update({ delta: mixerDelta, isHost: isHostNow });
+    const merchantFriendly = getMerchantFriendly?.();
+    if (merchantFriendly?.updateAI) {
+      merchantFriendly.updateAI(mixerDelta, playerModel, otherPlayers);
+    }
 
 
     if (now - lastPresenceSweep >= PRESENCE_SWEEP_MS) {
