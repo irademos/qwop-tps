@@ -989,7 +989,8 @@ function renderInventory() {
     bow: '🏹',
     autumnSword: '🗡️',
     lantern: '🏮',
-    apple: '🍎'
+    apple: '🍎',
+    wood: '🪵'
   };
 
   elements.inventoryGrid.innerHTML = '';

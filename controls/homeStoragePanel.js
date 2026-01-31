@@ -127,6 +127,7 @@ function getFallbackIcon(itemId) {
   if (itemId === 'autumnSword') return '🗡️';
   if (itemId === 'lantern') return '🏮';
   if (itemId === 'apple') return '🍎';
+  if (itemId === 'wood') return '🪵';
   if (itemId.startsWith('mushroom_')) return '🍄';
   return '🎒';
 }

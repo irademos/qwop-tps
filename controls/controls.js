@@ -19,6 +19,7 @@ const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const FRIENDLY_INTERACT_RANGE = 6;
 const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
+const WOOD_INTERACT_RANGE = 3;
 const ENGAGED_MODE_DISTANCE = 7;
 const FRIENDLY_DIALOGUE_POOL = [
   {
@@ -765,6 +766,11 @@ export class PlayerControls {
       return;
     }
 
+    if (closest.type === 'wood') {
+      window.pickupWood?.(closest.pickup);
+      return;
+    }
+
     if (closest.type === 'vehicle') {
       closest.vehicle.tryMount?.(this);
     }
@@ -900,6 +906,18 @@ export class PlayerControls {
         pickup,
         maxDistance: APPLE_INTERACT_RANGE,
         promptText: "'x' pick up apple"
+      });
+    });
+
+    const woodPickups = Array.isArray(window.woodPickups) ? window.woodPickups : [];
+    woodPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'wood',
+        pickup,
+        maxDistance: WOOD_INTERACT_RANGE,
+        promptText: "'x' pick up wood"
       });
     });
 
