@@ -25,6 +25,7 @@ const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
 const LEVEL_SIZE_STEP = 0.5;
 const LEVEL_SPEED_STEP = 0.08;
 const DEATH_REMOVAL_DELAY_MS = 30000;
+const DEAD_UPRIGHT_RATE = 6;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -113,6 +114,9 @@ export class MonsterCharacter extends CharacterBase {
     if (body) {
       const vel = body.linvel();
       body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      body.setLinearDamping(2);
+      body.setAngularDamping(4);
+      this.stabilizeDeadBody(1 / 60);
     }
   }
 
@@ -413,8 +417,25 @@ export class MonsterCharacter extends CharacterBase {
   }
 
   update(delta) {
+    if (this.isDead) {
+      this.stabilizeDeadBody(delta);
+    }
     super.update(delta);
     this.updateHealthBarVisibility();
+  }
+
+  stabilizeDeadBody(delta) {
+    const body = this.body;
+    if (!body || !Number.isFinite(delta)) return;
+    const rotation = body.rotation();
+    const current = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+    const euler = new THREE.Euler().setFromQuaternion(current, "YXZ");
+    const target = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, euler.y, 0, "YXZ"));
+    const t = Math.min(1, DEAD_UPRIGHT_RATE * delta);
+    const upright = current.clone().slerp(target, t);
+    body.setRotation({ x: upright.x, y: upright.y, z: upright.z, w: upright.w }, true);
+    const angvel = body.angvel();
+    body.setAngvel({ x: 0, y: angvel.y * (1 - t), z: 0 }, true);
   }
 
   createHealthBar() {
