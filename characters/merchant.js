@@ -9,8 +9,9 @@ import { FriendlyCharacter } from './FriendlyCharacter.js';
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
 const MERCHANT_MODEL = '/models/cowboy.fbx';
 const MERCHANT_RESTOCK_MS = 60 * 60 * 1000;
-const MARKET_STALL_POSITION = new THREE.Vector3(2, 0, 2);
-const MERCHANT_OFFSET = new THREE.Vector3(1.8, 0, -1.2);
+const MARKET_STALL_POSITION = new THREE.Vector3(5, 0, 5);
+const MARKET_STALL_SIZE = 0.013
+const MERCHANT_OFFSET = new THREE.Vector3(0.0, 0, -1.4);
 const ICE_AMMO_ITEM_ID = 'ice ammo';
 const ARROW_AMMO_ITEM_ID = 'arrow ammo';
 const AMMO_PACK_AMOUNT = 5;
@@ -142,10 +143,11 @@ const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuilding
   try {
     const gltf = await loader.loadAsync(MARKET_STALL_MODEL);
     marketStall = gltf.scene;
+    marketStall.scale.multiplyScalar(MARKET_STALL_SIZE);
     marketStall.position.copy(MARKET_STALL_POSITION);
     const terrainHeight = getTerrainHeight?.(marketStall.position.x, marketStall.position.z);
     if (Number.isFinite(terrainHeight)) {
-      marketStall.position.y = terrainHeight;
+      marketStall.position.y = terrainHeight - 0.005;
     }
     liftPositionToBuildingTop?.(marketStall.position, 0.5);
     scene.add(marketStall);
