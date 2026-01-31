@@ -74,8 +74,31 @@ function buildProfile(name) {
   };
 }
 
+function normalizeStatValue(key, value) {
+  const fallback = DEFAULT_STATS[key];
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  if (['health', 'hunger', 'energy'].includes(key)) {
+    return Math.max(0, Math.min(100, numeric));
+  }
+  if (key === 'level') {
+    return Math.max(1, Math.floor(numeric));
+  }
+  if (key === 'xp' || key === 'coins') {
+    return Math.max(0, Math.floor(numeric));
+  }
+  return numeric;
+}
+
 function mergeStats(stats) {
-  return { ...DEFAULT_STATS, ...(stats || {}) };
+  const merged = { ...DEFAULT_STATS, ...(stats || {}) };
+  const normalized = {};
+  for (const key of Object.keys(DEFAULT_STATS)) {
+    normalized[key] = normalizeStatValue(key, merged[key]);
+  }
+  return normalized;
 }
 
 function mergeCustomization(customization) {
