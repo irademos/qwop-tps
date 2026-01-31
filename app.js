@@ -4559,6 +4559,10 @@ async function main() {
         });
         const fallback = new THREE.Mesh(geometry, material);
         fallback.rotation.x = Math.PI / 2;
+        fallback.scale.setScalar(ARROW_PROJECTILE_SCALE);
+        if (amount > 1) {
+          fallback.scale.multiplyScalar(1.3);
+        }
         return fallback;
       }
     });

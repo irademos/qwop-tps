@@ -71,6 +71,9 @@ const createArrowMesh = ({
   const material = new THREE.MeshStandardMaterial({ color: 0x6a4b2a });
   const fallback = new THREE.Mesh(geometry, material);
   fallback.rotation.x = Math.PI / 2;
+  if (Number.isFinite(scale)) {
+    fallback.scale.setScalar(scale);
+  }
   const trail = createArrowTrail();
   fallback.add(trail);
   fallback.userData.arrowTrail = trail;
