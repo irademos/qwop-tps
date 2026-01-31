@@ -431,11 +431,14 @@ export class MonsterCharacter extends CharacterBase {
     const current = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
     const euler = new THREE.Euler().setFromQuaternion(current, "YXZ");
     const target = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, euler.y, 0, "YXZ"));
-    const t = Math.min(1, DEAD_UPRIGHT_RATE * delta);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(current);
+    const upsideDown = up.y < 0.2;
+    const t = Math.min(1, (upsideDown ? DEAD_UPRIGHT_RATE * 3 : DEAD_UPRIGHT_RATE) * delta);
     const upright = current.clone().slerp(target, t);
     body.setRotation({ x: upright.x, y: upright.y, z: upright.z, w: upright.w }, true);
     const angvel = body.angvel();
-    body.setAngvel({ x: 0, y: angvel.y * (1 - t), z: 0 }, true);
+    const angularDampen = upsideDown ? 0 : 1 - t;
+    body.setAngvel({ x: 0, y: angvel.y * angularDampen, z: 0 }, true);
   }
 
   createHealthBar() {
