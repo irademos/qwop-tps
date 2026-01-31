@@ -125,7 +125,9 @@ function getTabData(tabId) {
 
 function getFallbackIcon(itemId) {
   if (itemId === 'iceGun') return '❄️';
+  if (itemId === 'ice ammo') return '❄️';
   if (itemId === 'bow') return '🏹';
+  if (itemId === 'arrow ammo') return '🏹';
   if (itemId === 'autumnSword') return '🗡️';
   if (itemId === 'lantern') return '🏮';
   if (itemId === 'apple') return '🍎';

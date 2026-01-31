@@ -11,12 +11,18 @@ const MERCHANT_MODEL = '/models/cowboy.fbx';
 const MERCHANT_RESTOCK_MS = 60 * 60 * 1000;
 const MARKET_STALL_POSITION = new THREE.Vector3(2, 0, 2);
 const MERCHANT_OFFSET = new THREE.Vector3(1.8, 0, -1.2);
+const ICE_AMMO_ITEM_ID = 'ice ammo';
+const ARROW_AMMO_ITEM_ID = 'arrow ammo';
+const AMMO_PACK_AMOUNT = 5;
 
 const BASE_MERCHANT_ITEMS = {
+  iceGun: { name: 'Ice Gun', price: 30, count: 1 },
   autumnSword: { name: 'Autumn Sword', price: 30, count: 1 },
   bow: { name: 'Bow', price: 30, count: 1 },
   bomb: { name: 'Bombs', price: 10, count: 5 },
   lantern: { name: 'Lantern', price: 20, count: 1 },
+  [ICE_AMMO_ITEM_ID]: { name: 'Ice Ammo', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
+  [ARROW_AMMO_ITEM_ID]: { name: 'Arrows', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
   apple: { name: 'Apples', price: 2, count: 5 },
   wood: { name: 'Wood', price: 1, count: 15 }
 };
@@ -198,10 +204,20 @@ export const getMerchantItemMeta = (itemId) => {
 export const buyMerchantItem = async (itemId) => {
   const item = merchantState.items?.[itemId];
   if (!item || item.count <= 0) return false;
+  const catalogEntry = merchantItemCatalog[itemId] || {};
   const price = Number.isFinite(item.price) ? item.price : getMerchantItemMeta(itemId).price;
   const currentCoins = merchantAppState?.getCoins?.() ?? merchantAppState?.getPlayerStats?.()?.coins ?? 0;
   if (currentCoins < price) return false;
-  merchantAppState?.addToInventory?.(itemId, 1);
+  if (itemId === ICE_AMMO_ITEM_ID || itemId === ARROW_AMMO_ITEM_ID) {
+    const ammoAmount = Number.isFinite(catalogEntry.ammoAmount) ? catalogEntry.ammoAmount : 1;
+    if (itemId === ICE_AMMO_ITEM_ID) {
+      merchantAppState?.addIceAmmo?.(ammoAmount);
+    } else {
+      merchantAppState?.addArrowAmmo?.(ammoAmount);
+    }
+  } else {
+    merchantAppState?.addToInventory?.(itemId, 1);
+  }
   merchantAppState?.addCoins?.(-price);
   merchantState.items[itemId] = { ...item, count: item.count - 1 };
   await persistMerchantState();
@@ -209,11 +225,25 @@ export const buyMerchantItem = async (itemId) => {
 };
 
 export const sellMerchantItem = async (itemId) => {
-  const inventory = merchantAppState?.getInventory?.() || {};
-  const entry = inventory[itemId];
-  if (!entry || (entry.count || 0) <= 0) return false;
+  const catalogEntry = merchantItemCatalog[itemId] || {};
+  if (itemId === ICE_AMMO_ITEM_ID || itemId === ARROW_AMMO_ITEM_ID) {
+    const ammoAmount = Number.isFinite(catalogEntry.ammoAmount) ? catalogEntry.ammoAmount : 1;
+    const currentAmmo = itemId === ICE_AMMO_ITEM_ID
+      ? merchantAppState?.getIceAmmoCount?.() ?? 0
+      : merchantAppState?.getArrowAmmoCount?.() ?? 0;
+    if (currentAmmo < ammoAmount) return false;
+    if (itemId === ICE_AMMO_ITEM_ID) {
+      merchantAppState?.addIceAmmo?.(-ammoAmount);
+    } else {
+      merchantAppState?.addArrowAmmo?.(-ammoAmount);
+    }
+  } else {
+    const inventory = merchantAppState?.getInventory?.() || {};
+    const entry = inventory[itemId];
+    if (!entry || (entry.count || 0) <= 0) return false;
+    merchantAppState?.removeFromInventory?.(itemId, 1);
+  }
   const price = getMerchantItemMeta(itemId).price;
-  merchantAppState?.removeFromInventory?.(itemId, 1);
   merchantAppState?.addCoins?.(price);
   if (merchantState.items?.[itemId]) {
     const current = merchantState.items[itemId];
