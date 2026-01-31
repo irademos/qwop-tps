@@ -2092,6 +2092,7 @@ async function main() {
   appleController = await createApples({
     scene,
     getTerrainHeight,
+    spawnPositions: [],
     allowDefaultPositions: false
   });
   applePickups = appleController?.pickups || [];
@@ -4795,7 +4796,27 @@ async function main() {
     bow.mesh.quaternion.set(0, 0, 0, 1);
     bow.mesh.visible = true;
     bow.holder = null;
+    scatterArrowPickups(spawnPos);
   }
+
+  const scatterArrowPickups = (center) => {
+    if (!center) return;
+    const offsets = [
+      new THREE.Vector3(1.2, 0, 0.6),
+      new THREE.Vector3(-1.1, 0, 0.9),
+      new THREE.Vector3(0.8, 0, -1.2),
+      new THREE.Vector3(-0.7, 0, -1.0),
+      new THREE.Vector3(1.0, 0, -0.4)
+    ];
+    const shuffled = offsets
+      .map(offset => ({ offset, order: Math.random() }))
+      .sort((a, b) => a.order - b.order);
+    const amounts = [1, 1, 3];
+    shuffled.slice(0, amounts.length).forEach((entry, index) => {
+      const arrowPos = center.clone().add(entry.offset);
+      spawnArrowPickup(arrowPos, amounts[index]);
+    });
+  };
 
   function spawnBombPickup(position) {
     if (!bomb?.mesh) return;
@@ -4930,16 +4951,6 @@ async function main() {
   updateControlAvailability();
   updateEnergyEffects();
 
-
-  const starterPosition = playerModel?.position?.clone?.() || getSpawnPosition();
-  if (starterPosition) {
-    const bowSpawn = starterPosition.clone().add(new THREE.Vector3(2.2, 0, 1.2));
-    const arrowSingle = starterPosition.clone().add(new THREE.Vector3(1.2, 0, -1.4));
-    const arrowBundle = starterPosition.clone().add(new THREE.Vector3(-1.4, 0, -1.1));
-    spawnBowPickup(bowSpawn);
-    spawnArrowPickup(arrowSingle, 1);
-    spawnArrowPickup(arrowBundle, 5);
-  }
 
   initMapView({ camera, scene, player: playerModel });
 
