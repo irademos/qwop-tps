@@ -9,7 +9,7 @@ import { getTerrainHeight } from './environment/water.js';
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls/controls.js';
 import { getCookie, setCookie } from './utils.js';
-import { spawnProjectile, updateProjectiles } from './items/projectiles.js';
+import { spawnProjectile, updateProjectiles, removeProjectileAt } from './items/projectiles.js';
 import { spawnArrowProjectile } from './items/arrow.js';
 import { updateMeleeAttacks } from './items/melee.js';
 import { initSpeechCommands } from './controls/speechCommands.js';
@@ -4940,7 +4940,6 @@ async function main() {
     spawnArrowPickup(arrowSingle, 1);
     spawnArrowPickup(arrowBundle, 5);
   }
-  spawnBombPickup(new THREE.Vector3(0.8, 0, 0.6));
 
   initMapView({ camera, scene, player: playerModel });
 
@@ -5124,6 +5123,15 @@ async function main() {
         }
       }
 
+      const hasBomb = (inventoryState?.bomb?.count || 0) > 0;
+      const canSpawnBomb = bomb?.mesh && !bomb.holder && !hasBomb && !bomb.mesh.visible;
+      if (canSpawnBomb) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnBombPickup(spawnPos);
+        }
+      }
+
       const hasBow = (inventoryState?.bow?.count || 0) > 0;
       const canSpawnBow = bow?.mesh && !bow.holder && !hasBow && !bow.mesh.visible;
       if (canSpawnBow) {
@@ -5153,7 +5161,7 @@ async function main() {
       }
     }
 
-    [iceGun, bow, autumnSword].forEach((weapon) => {
+    [iceGun, bow, autumnSword, bomb].forEach((weapon) => {
       if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
       if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
         weapon.mesh.visible = false;
@@ -6606,6 +6614,26 @@ async function main() {
     return boundsState.worldBox;
   };
 
+  const handleBombPickupArrowHit = () => {
+    if (!bomb?.mesh || bomb.holder || !bomb.mesh.visible) return;
+    const bombBounds = getMeshWorldBounds(bomb.mesh);
+    if (!bombBounds) return;
+    for (let i = projectiles.length - 1; i >= 0; i -= 1) {
+      const projectile = projectiles[i];
+      if (!projectile?.userData?.isArrow) continue;
+      const projectileBounds = getMeshWorldBounds(projectile);
+      if (!projectileBounds) continue;
+      if (!projectileBounds.intersectsBox(bombBounds)) continue;
+      const hitPosition = bomb.mesh.position.clone();
+      spawnBombMist(scene, bombMists, hitPosition);
+      applyBombImpactDamage(hitPosition, projectile.userData?.shooterId);
+      bomb.mesh.visible = false;
+      bomb.holder = null;
+      removeProjectileAt(projectiles, i);
+      break;
+    }
+  };
+
   function animate() {
     requestAnimationFrame(animate);
 
@@ -7158,6 +7186,7 @@ async function main() {
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage
     });
+    handleBombPickupArrowHit();
 
     updateIceMists({
       scene,
