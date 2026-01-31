@@ -3183,6 +3183,30 @@ async function main() {
     persistInventoryAndStorage();
   }
 
+  function getIceAmmoCount() {
+    return Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+      ? inventoryState.iceGun[ICE_AMMO_KEY]
+      : 0;
+  }
+
+  function getArrowAmmoCount() {
+    return Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
+      ? inventoryState.bow[ARROW_AMMO_KEY]
+      : 0;
+  }
+
+  function addIceAmmo(amount) {
+    if (!Number.isFinite(amount)) return;
+    const nextAmount = getIceAmmoCount() + amount;
+    setIceAmmoCount(nextAmount);
+  }
+
+  function addArrowAmmo(amount) {
+    if (!Number.isFinite(amount)) return;
+    const nextAmount = getArrowAmmoCount() + amount;
+    setArrowAmmoCount(nextAmount);
+  }
+
   function addToInventory(itemId, amount = 1) {
     if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
     const current = inventoryState[itemId];
@@ -6334,6 +6358,10 @@ async function main() {
     },
     getCharacterOptions: () => characterOptions,
     getInventory: () => getInventory(),
+    getIceAmmoCount: () => getIceAmmoCount(),
+    getArrowAmmoCount: () => getArrowAmmoCount(),
+    addIceAmmo: (amount) => addIceAmmo(amount),
+    addArrowAmmo: (amount) => addArrowAmmo(amount),
     getHomeStorage: () => getHomeStorage(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
     isInventoryItemEquipped: (itemId) => isInventoryItemEquipped(itemId),
