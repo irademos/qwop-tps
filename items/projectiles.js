@@ -26,6 +26,20 @@ const getObjectBox = (object) => {
   return box;
 };
 
+export function removeProjectileAt(projectiles, index) {
+  const projectile = projectiles[index];
+  if (!projectile) return;
+  const body = projectile.userData?.rb;
+  disposeProjectileMesh(projectile);
+  projectiles.splice(index, 1);
+  if (body) {
+    window.rbToMesh?.delete?.(body);
+    if (window.rapierWorld?.getRigidBody(body.handle)) {
+      window.rapierWorld.removeRigidBody(body);
+    }
+  }
+}
+
 export function spawnProjectile(scene, projectiles, position, direction, shooterId, options = {}) {
   const size = 0.5;
   const half = size / 2;
@@ -95,14 +109,7 @@ export function updateProjectiles({
     return baseDamage;
   };
   const removeProjectile = (index) => {
-    const p = projectiles[index];
-    const body = p.userData.rb;
-    disposeProjectileMesh(p);
-    projectiles.splice(index, 1);
-    window.rbToMesh.delete(body);
-    if (window.rapierWorld?.getRigidBody(body.handle)) {
-      window.rapierWorld.removeRigidBody(body);
-    }
+    removeProjectileAt(projectiles, index);
   };
 
   for (let i = projectiles.length - 1; i >= 0; i--) {
