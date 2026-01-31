@@ -37,7 +37,9 @@ import { createTileCache } from './tileCache.js';
 import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI } from './controls/homeStoragePanel.js';
+import { initMerchantPanel, updateMerchantUI } from './controls/merchantPanel.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
+import { initMerchant, setMerchantHost, setMerchantRoom } from './characters/merchant.js';
 import { initCustomizeUI } from './controls/customize.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './environment/mapView.js';
 import {
@@ -1446,6 +1448,7 @@ async function main() {
     isHost = !!isCurrentHost;
     setMonsterPersistenceHost(isHost);
     friendlyNpcManager?.setHost(isHost);
+    setMerchantHost(isHost);
     logMonsterPersist('isHost', isHost);
     if (previousHostId && previousHostId === multiplayer.getId() && previousHostId !== newHostId) {
       const snapshot = serializeFullAuthoritativeStates();
@@ -1469,6 +1472,7 @@ async function main() {
     if (!roomId) {
       monstersSeeded = true;
       friendlyNpcManager?.onRoomReady({ roomId: null, isHost: multiplayer.isHost });
+      await setMerchantRoom({ roomId: null, isHost: multiplayer.isHost });
       return;
     }
     initMonsterPersistence({
@@ -1481,6 +1485,7 @@ async function main() {
     logMonsterPersist('isHost', isHost);
     monstersSeeded = false;
     friendlyNpcManager?.onRoomReady({ roomId, isHost: multiplayer.isHost });
+    await setMerchantRoom({ roomId, isHost: multiplayer.isHost });
     try {
       const snapshot = await loadMonstersSnapshot();
       const snapshotEntries = Object.entries(snapshot || {});
@@ -6318,6 +6323,15 @@ async function main() {
       }
     },
     getPlayerStats: () => ({ ...statsState }),
+    getCoins: () => (Number.isFinite(statsState.coins) ? statsState.coins : 0),
+    addCoins: (delta) => {
+      const safeDelta = Number.isFinite(delta) ? delta : 0;
+      if (safeDelta === 0) return;
+      const current = Number.isFinite(statsState.coins) ? statsState.coins : 0;
+      const nextCoins = current + safeDelta;
+      setStat('coins', nextCoins, { skipSave: true });
+      showCoinPopup(statsState.coins);
+    },
     getCharacterOptions: () => characterOptions,
     getInventory: () => getInventory(),
     getHomeStorage: () => getHomeStorage(),
@@ -6437,6 +6451,16 @@ async function main() {
     }
   });
   initHomeStoragePanel({ appState });
+  initMerchantPanel({ appState });
+  void initMerchant({
+    scene,
+    attachPhysics: attachMonsterPhysics,
+    getTerrainHeight,
+    liftPositionToBuildingTop,
+    appState,
+    roomId: multiplayer?.roomId,
+    isHost
+  });
 
   settingsBtn.addEventListener('click', () => {
     openSettings();
@@ -6444,6 +6468,7 @@ async function main() {
 
   const settingsOverlay = document.getElementById('settings-overlay');
   const homeStorageOverlay = document.getElementById('home-storage-overlay');
+  const merchantOverlay = document.getElementById('merchant-overlay');
   const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
 
   setInterval(() => {
@@ -6452,6 +6477,9 @@ async function main() {
     }
     if (isOverlayVisible(homeStorageOverlay)) {
       updateHomeStorageUI();
+    }
+    if (isOverlayVisible(merchantOverlay)) {
+      updateMerchantUI();
     }
   }, 1000);
   updateAutoDisplayMode();
