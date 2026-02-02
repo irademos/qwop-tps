@@ -6591,6 +6591,7 @@ async function main() {
     }
   };
 
+  window.appState = appState;
   window.getInventory = getInventory;
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
