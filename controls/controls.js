@@ -984,7 +984,8 @@ export class PlayerControls {
 
     const bed = window.bed;
     if (bed?.mesh) {
-      const dist = playerPos.distanceTo(bed.mesh.position);
+      const bedPosition = bed.getWorldPosition?.(new THREE.Vector3()) ?? bed.mesh.position;
+      const dist = playerPos.distanceTo(bedPosition);
       const maxDistance = bed.getInteractionDistance?.() ?? 2.5;
       consider(dist, {
         type: 'bed',
