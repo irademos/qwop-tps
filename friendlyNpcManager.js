@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { FriendlyCharacter } from "./characters/FriendlyCharacter.js";
+import { createLightSource, LIGHT_SOURCE_CONFIGS } from "./light_sources.js";
 import {
   initFriendlyPersistence,
   loadFriendliesSnapshot,
@@ -150,6 +151,15 @@ export function createFriendlyNpcManager({
 
   const cleanupFriendly = (friendly) => {
     if (!friendly) return;
+    const roadLight = friendly.model?.userData?.roadLight;
+    if (roadLight?.model?.parent) {
+      roadLight.model.parent.remove(roadLight.model);
+    }
+    if (friendly.model?.userData) {
+      friendly.model.userData.roadLight = null;
+      friendly.model.userData.roadLightPending = false;
+      friendly.model.userData.roadLightToken = null;
+    }
     friendly.model?.userData?.mixer?.stopAllAction?.();
     if (friendly.model?.parent) {
       friendly.model.parent.remove(friendly.model);
@@ -159,6 +169,47 @@ export function createFriendlyNpcManager({
       friendly.model.userData.rb = null;
     }
     friendly.model = null;
+  };
+
+  const getRoadLightPosition = (basePosition) => {
+    const lightPosition = basePosition.clone().add(new THREE.Vector3(2.5, 0, 2));
+    const terrainHeight = getTerrainHeight?.(lightPosition.x, lightPosition.z);
+    lightPosition.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.1 : basePosition.y;
+    liftPositionToBuildingTop?.(lightPosition, 0.3);
+    return lightPosition;
+  };
+
+  const ensureFriendlyRoadLight = (friendly, basePosition) => {
+    if (!friendly?.model || !scene) return;
+    if (friendly.model.userData.roadLight || friendly.model.userData.roadLightPending) {
+      return;
+    }
+    const token = Symbol("friendlyRoadLight");
+    friendly.model.userData.roadLightToken = token;
+    friendly.model.userData.roadLightPending = true;
+    const lightPosition = getRoadLightPosition(basePosition);
+    createLightSource(LIGHT_SOURCE_CONFIGS.roadLight, lightPosition)
+      .then((lightSource) => {
+        if (!friendly.model || friendly.model.userData.roadLightToken !== token) return;
+        friendly.model.userData.roadLight = lightSource;
+        friendly.model.userData.roadLightPending = false;
+        scene.add(lightSource.model);
+      })
+      .catch((error) => {
+        console.warn("Failed to load friendly road light:", error);
+      })
+      .finally(() => {
+        if (friendly.model?.userData?.roadLightToken === token) {
+          friendly.model.userData.roadLightPending = false;
+        }
+      });
+  };
+
+  const syncFriendlyRoadLight = (friendly, basePosition) => {
+    if (!friendly?.model) return;
+    const roadLight = friendly.model.userData.roadLight;
+    if (!roadLight?.model) return;
+    roadLight.model.position.copy(getRoadLightPosition(basePosition));
   };
 
   const setFriendlyForSlot = (slotId, friendly) => {
@@ -213,6 +264,7 @@ export function createFriendlyNpcManager({
           friendly.model.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
         }
         friendly.setHomePosition(friendly.model.position.clone());
+        ensureFriendlyRoadLight(friendly, friendly.model.position.clone());
         cleanupFriendly(existing);
         scene?.add(friendly.model);
         attachPhysics?.(friendly);
@@ -234,6 +286,7 @@ export function createFriendlyNpcManager({
       friendly.model.position.set(position.x, position.y, position.z);
       friendly.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
       friendly.setHomePosition(friendly.model.position);
+      syncFriendlyRoadLight(friendly, friendly.model.position.clone());
     }
     if (rotation && Number.isFinite(rotation.x) && Number.isFinite(rotation.y)
       && Number.isFinite(rotation.z) && Number.isFinite(rotation.w)) {
