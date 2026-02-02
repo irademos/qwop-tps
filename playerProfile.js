@@ -68,6 +68,7 @@ function buildProfile(name) {
     homeStorage: { ...DEFAULT_HOME_STORAGE },
     customization: mergeCustomization(DEFAULT_CUSTOMIZATION),
     characterModel: null,
+    sleepStartedAt: null,
     lastStatUpdateAt: now,
     createdAt: now,
     updatedAt: now
@@ -483,6 +484,30 @@ export async function saveCharacterModel(nameKey, modelPath) {
     });
   } catch (error) {
     console.error('Failed to save character model for', nameKey, error);
+  }
+}
+
+export async function saveSleepTimestamp(nameKey, sleepStartedAt) {
+  if (!nameKey) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}`), {
+      sleepStartedAt: Number.isFinite(sleepStartedAt) ? sleepStartedAt : null,
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.error('Failed to save sleep timestamp for', nameKey, error);
+  }
+}
+
+export async function getSleepTimestamp(nameKey) {
+  if (!nameKey) return null;
+  try {
+    const snap = await get(ref(db, `profiles/${nameKey}/sleepStartedAt`));
+    const value = snap.val();
+    return Number.isFinite(value) ? value : null;
+  } catch (error) {
+    console.error('Failed to fetch sleep timestamp for', nameKey, error);
+    return null;
   }
 }
 

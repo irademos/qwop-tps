@@ -20,6 +20,7 @@ import { Lantern } from './items/lantern.js';
 import { AutumnSword } from './items/autumnSword.js';
 import { Bomb } from './items/bomb.js';
 import { TreasureChest } from './items/treasure_chest.js';
+import { Bed } from './items/bed.js';
 import { createNature } from './environment/nature.js';
 import { createCabin } from './environment/cabin.js';
 import { createMushrooms, MUSHROOM_ENTRIES } from './environment/mushrooms.js';
@@ -46,10 +47,12 @@ import {
   clearStoredPin,
   deleteProfileData,
   getStoredPinHash,
+  getSleepTimestamp,
   loadOrCreateWithPin,
   renameProfile,
   saveCharacterModel,
   saveCustomization,
+  saveSleepTimestamp,
   saveStatsThrottled
 } from './playerProfile.js';
 import {
@@ -548,6 +551,7 @@ async function main() {
   const HUNGER_DECAY_PER_HOUR = 8;
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.45;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
+  const SLEEP_RECOVERY_PER_SECOND = 100 / 3600;
   const PICKUP_RADIUS = 1.2;
   const APPLE_PICKUP_RADIUS = 3;
   const WOOD_ITEM_ID = 'wood';
@@ -1521,6 +1525,7 @@ async function main() {
   let lantern;
   let bomb;
   let treasureChest;
+  let bed;
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -2012,6 +2017,9 @@ async function main() {
   if (treasureChest.mesh) {
     treasureChest.mesh.visible = false;
   }
+  bed = new Bed(scene);
+  await bed.load();
+  window.bed = bed;
   treasureChest.onOpen = (holder) => {
     if (holder !== playerControls) return;
     const rewards = [
@@ -4074,6 +4082,50 @@ async function main() {
     }
   }
 
+  const sleepState = {
+    active: false,
+    startedAt: null,
+    startHealth: null,
+    startEnergy: null,
+    bed: null
+  };
+
+  const getSleepRecoveryValue = (key, startValue, elapsedSeconds) => {
+    const base = Number.isFinite(startValue) ? startValue : 0;
+    return clampStat(key, base + elapsedSeconds * SLEEP_RECOVERY_PER_SECOND);
+  };
+
+  const startSleepSession = ({ bed } = {}) => {
+    if (sleepState.active) return;
+    const startedAt = Date.now();
+    sleepState.active = true;
+    sleepState.startedAt = startedAt;
+    sleepState.startHealth = statsState.health;
+    sleepState.startEnergy = statsState.energy;
+    sleepState.bed = bed || null;
+    if (profileNameKey) {
+      playerProfile.sleepStartedAt = startedAt;
+      void saveSleepTimestamp(profileNameKey, startedAt);
+    }
+  };
+
+  const endSleepSession = async () => {
+    if (!sleepState.active) return;
+    sleepState.active = false;
+    const now = Date.now();
+    const storedStart = profileNameKey ? await getSleepTimestamp(profileNameKey) : null;
+    const startAt = Number.isFinite(storedStart) ? storedStart : sleepState.startedAt;
+    const elapsedSeconds = startAt ? Math.max(0, (now - startAt) / 1000) : 0;
+    const expectedHealth = getSleepRecoveryValue('health', sleepState.startHealth ?? statsState.health, elapsedSeconds);
+    const expectedEnergy = getSleepRecoveryValue('energy', sleepState.startEnergy ?? statsState.energy, elapsedSeconds);
+    const nextHealth = Math.max(statsState.health, expectedHealth);
+    const nextEnergy = Math.max(statsState.energy, expectedEnergy);
+    setStat('health', nextHealth, { skipSave: true });
+    setStat('energy', nextEnergy, { skipSave: true });
+    lastStatUpdateAt = Date.now();
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  };
+
   window.setStat = setStat;
   window.getPlayerStrength = () => (Number.isFinite(statsState.strength) ? statsState.strength : 0);
   const applyLevelBonus = delta => {
@@ -4991,7 +5043,9 @@ async function main() {
       } else {
         setIceAmmoCount(amount);
       }
-    }
+    },
+    onSleepStart: startSleepSession,
+    onSleepEnd: endSleepSession
   });
   playerControls.throwBomb = (position, direction) => {
     if (!bomb?.mesh || bomb.holder !== playerControls) return false;
@@ -6861,29 +6915,39 @@ async function main() {
       const elapsedSeconds = statDecayAccumulator;
       statDecayAccumulator = 0;
       let statsChanged = false;
+      const isSleeping = playerControls?.isSleeping;
 
-      if (statsState.hunger > 0) {
-        const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
-        if (hungerDecay > 0) {
-          setStat('hunger', statsState.hunger - hungerDecay, { skipSave: true });
+      if (isSleeping) {
+        const recovery = SLEEP_RECOVERY_PER_SECOND * elapsedSeconds;
+        if (recovery > 0) {
+          setStat('health', statsState.health + recovery, { skipSave: true });
+          setStat('energy', statsState.energy + recovery, { skipSave: true });
           statsChanged = true;
         }
-      }
-
-      const isMoving = playerControls?.isMoving;
-      if (isMoving && statsState.energy > 0) {
-        const energyDecay = ENERGY_DECAY_PER_SECOND_WHILE_MOVING * elapsedSeconds;
-        if (energyDecay > 0) {
-          setStat('energy', statsState.energy - energyDecay, { skipSave: true });
-          statsChanged = true;
+      } else {
+        if (statsState.hunger > 0) {
+          const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
+          if (hungerDecay > 0) {
+            setStat('hunger', statsState.hunger - hungerDecay, { skipSave: true });
+            statsChanged = true;
+          }
         }
-      }
 
-      if (statsState.hunger <= 0 && statsState.health > 0) {
-        const healthDecay = HUNGER_HEALTH_DECAY_PER_SECOND * elapsedSeconds;
-        if (healthDecay > 0) {
-          setStat('health', statsState.health - healthDecay, { skipSave: true });
-          statsChanged = true;
+        const isMoving = playerControls?.isMoving;
+        if (isMoving && statsState.energy > 0) {
+          const energyDecay = ENERGY_DECAY_PER_SECOND_WHILE_MOVING * elapsedSeconds;
+          if (energyDecay > 0) {
+            setStat('energy', statsState.energy - energyDecay, { skipSave: true });
+            statsChanged = true;
+          }
+        }
+
+        if (statsState.hunger <= 0 && statsState.health > 0) {
+          const healthDecay = HUNGER_HEALTH_DECAY_PER_SECOND * elapsedSeconds;
+          if (healthDecay > 0) {
+            setStat('health', statsState.health - healthDecay, { skipSave: true });
+            statsChanged = true;
+          }
         }
       }
 

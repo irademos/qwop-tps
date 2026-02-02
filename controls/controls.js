@@ -22,6 +22,8 @@ const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
 const WOOD_INTERACT_RANGE = 3;
 const ENGAGED_MODE_DISTANCE = 7;
+const BED_SLEEP_PROMPT = "click or press 'x' to sleep";
+const BED_WAKE_PROMPT = "click or press 'x' to wake";
 const FRIENDLY_DIALOGUE_POOL = [
   {
     blocks: [
@@ -106,7 +108,9 @@ export class PlayerControls {
     iceMists,
     audioManager,
     initialAmmo,
-    onAmmoChange
+    onAmmoChange,
+    onSleepStart,
+    onSleepEnd
   }) {
     this.yaw = 0;
     this.pitch = 0;
@@ -147,6 +151,10 @@ export class PlayerControls {
     this.waterDepth = 0;
 
     this.parachute = null;
+    this.isSleeping = false;
+    this.sleepData = null;
+    this.onSleepStart = typeof onSleepStart === 'function' ? onSleepStart : null;
+    this.onSleepEnd = typeof onSleepEnd === 'function' ? onSleepEnd : null;
 
     this.geoCenterLatLon = null;
     this.geoBoundsCenterXZ = null;
@@ -269,13 +277,15 @@ export class PlayerControls {
     this.freeYaw = null;
     this.freePitch = null;
 
-    if (this.isMobile && this.interactionPromptEl) {
+    if (this.interactionPromptEl) {
       const activateInteraction = (event) => {
         if (!this.interactionPromptEl.classList.contains('visible')) return;
         event.preventDefault();
         this.handlePickupAction();
       };
-      this.interactionPromptEl.addEventListener('touchstart', activateInteraction, { passive: false });
+      if (this.isMobile) {
+        this.interactionPromptEl.addEventListener('touchstart', activateInteraction, { passive: false });
+      }
       this.interactionPromptEl.addEventListener('click', activateInteraction);
     }
 
@@ -591,9 +601,16 @@ export class PlayerControls {
   setupEventListeners() {
     // Listen for key events (for desktop controls)
     document.addEventListener("keydown", (e) => {
-      if (!this.enabled) return;
+      if (!this.enabled && !this.isSleeping) return;
       const key = e.key.toLowerCase();
       this.keysPressed.add(key);
+
+      if (this.isSleeping) {
+        if (key === 'x') {
+          this.wakeFromSleep();
+        }
+        return;
+      }
 
       if (this.vehicle) {
         if (key === 'x') {
@@ -724,7 +741,7 @@ export class PlayerControls {
   }
 
   handleFriendlyInteractionAction() {
-    if (!this.enabled) return;
+    if (!this.enabled || this.isSleeping) return;
 
     if (this.isInteracting) {
       this.advanceFriendlyDialogue();
@@ -739,7 +756,12 @@ export class PlayerControls {
   }
 
   handlePickupAction() {
-    if (!this.enabled) return;
+    if (!this.enabled && !this.isSleeping) return;
+
+    if (this.isSleeping) {
+      this.wakeFromSleep();
+      return;
+    }
 
     if (this.isInteracting) {
       this.advanceFriendlyDialogue();
@@ -786,6 +808,11 @@ export class PlayerControls {
 
     if (closest.type === 'wood') {
       window.pickupWood?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'bed') {
+      this.startSleep(closest.bed);
       return;
     }
 
@@ -852,6 +879,18 @@ export class PlayerControls {
         friendly: nearbyFriendly.friendly,
         maxDistance: FRIENDLY_INTERACT_RANGE,
         promptText: "'x' interact"
+      });
+    }
+
+    const bed = window.bed;
+    if (bed?.mesh) {
+      const dist = playerPos.distanceTo(bed.mesh.position);
+      const maxDistance = bed.getInteractionDistance?.() ?? 2.5;
+      consider(dist, {
+        type: 'bed',
+        bed,
+        maxDistance,
+        promptText: BED_SLEEP_PROMPT
       });
     }
 
@@ -1028,6 +1067,11 @@ export class PlayerControls {
   }
 
   updateFriendlyInteractionUI() {
+    if (this.isSleeping) {
+      this.friendlyInteractButton?.classList.add('hidden');
+      this.friendlyDialogueEl?.classList.add('hidden');
+      return;
+    }
     if (!this.friendlyInteractButton) return;
 
     if (this.isInteracting) {
@@ -1779,7 +1823,7 @@ export class PlayerControls {
       this.playerModel.userData.mixer.update(delta);
     }
 
-    if (this.enabled) {
+    if (this.enabled && !this.isSleeping) {
       this.processMovement();
     }
     if (this.grabbedTarget) {
@@ -1839,7 +1883,10 @@ export class PlayerControls {
     let promptText = '';
     let visible = false;
 
-    if (this.vehicle) {
+    if (this.isSleeping) {
+      promptText = BED_WAKE_PROMPT;
+      visible = true;
+    } else if (this.vehicle) {
       const type = this.vehicle.type;
       if (type === 'spaceship') {
         promptText = "'x' exit spaceship";
@@ -1871,6 +1918,68 @@ export class PlayerControls {
   formatInteractionPrompt(text) {
     if (!text || !this.isMobile) return text;
     return text.replace(/^'x'\s*/i, 'touch ');
+  }
+
+  startSleep(bed) {
+    if (this.isSleeping || !bed?.mesh || !this.playerModel) return;
+    const maxDistance = bed.getInteractionDistance?.() ?? 2.5;
+    const distance = this.playerModel.position.distanceTo(bed.mesh.position);
+    if (distance > maxDistance) return;
+
+    const sleepPosition = bed.getSleepPosition?.();
+    if (!sleepPosition) return;
+
+    this.sleepData = {
+      bed,
+      previousQuaternion: this.playerModel.quaternion.clone(),
+      previousYaw: this.playerModel.rotation.y
+    };
+    this.isSleeping = true;
+    this.isMoving = false;
+    this.keysPressed.clear();
+    this.setAiming(false);
+    if (this.playerModel.userData?.actions) {
+      Object.values(this.playerModel.userData.actions).forEach(action => action?.stop?.());
+    }
+    this.playerModel.userData.currentAction = null;
+
+    const bedYaw = new THREE.Euler().setFromQuaternion(bed.mesh.quaternion, 'YXZ').y;
+    this.playerModel.position.copy(sleepPosition);
+    this.playerModel.quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, bedYaw, 0, 'YXZ'));
+
+    if (this.body) {
+      this.body.setTranslation({ x: sleepPosition.x, y: sleepPosition.y, z: sleepPosition.z }, true);
+      this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+
+    this.onSleepStart?.({ bed });
+  }
+
+  wakeFromSleep() {
+    if (!this.isSleeping) return;
+    const bed = this.sleepData?.bed;
+    const wakePosition = bed?.getWakePosition?.();
+    if (wakePosition && this.playerModel) {
+      this.playerModel.position.copy(wakePosition);
+      const yaw = this.sleepData?.previousYaw ?? this.playerModel.rotation.y;
+      this.playerModel.rotation.set(0, yaw, 0);
+      const actions = this.playerModel.userData?.actions;
+      if (actions?.idle) {
+        actions.idle.reset().fadeIn(0.2).play();
+        this.playerModel.userData.currentAction = 'idle';
+      }
+      if (this.body) {
+        this.body.setTranslation({ x: wakePosition.x, y: wakePosition.y, z: wakePosition.z }, true);
+        this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      }
+    }
+
+    this.isSleeping = false;
+    this.keysPressed.clear();
+    this.onSleepEnd?.({ bed });
+    this.sleepData = null;
   }
 
   setGeoCenter({ lat, lon }) {

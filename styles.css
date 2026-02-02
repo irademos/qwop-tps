@@ -42,6 +42,8 @@ body {
 
 .interaction-tooltip.visible {
   opacity: 1;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .friendly-interact {
