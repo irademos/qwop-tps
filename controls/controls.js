@@ -2026,7 +2026,8 @@ export class PlayerControls {
   startSleep(bed) {
     if (this.isSleeping || !bed?.mesh || !this.playerModel) return;
     const maxDistance = bed.getInteractionDistance?.() ?? 2.5;
-    const distance = this.playerModel.position.distanceTo(bed.mesh.position);
+    const bedPosition = bed.getWorldPosition?.(new THREE.Vector3()) ?? bed.mesh.position;
+    const distance = this.playerModel.position.distanceTo(bedPosition);
     if (distance > maxDistance) return;
 
     const sleepPosition = bed.getSleepPosition?.();
@@ -2046,7 +2047,9 @@ export class PlayerControls {
     }
     this.playerModel.userData.currentAction = null;
 
-    const bedYaw = new THREE.Euler().setFromQuaternion(bed.mesh.quaternion, 'YXZ').y;
+    const bedQuaternion = new THREE.Quaternion();
+    bed.mesh.getWorldQuaternion(bedQuaternion);
+    const bedYaw = new THREE.Euler().setFromQuaternion(bedQuaternion, 'YXZ').y;
 
     this.playerModel.position.copy(sleepPosition);
     this.playerModel.quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, bedYaw - Math.PI / 2, 0, 'YXZ')); // Math.PI / 2, bedYaw, 0
