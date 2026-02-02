@@ -3998,6 +3998,26 @@ async function main() {
     }
   }
 
+  function handleTorchTreeHit({ attacker, range }) {
+    if (!attacker?.model?.position) return;
+    const effectiveRange = (Number.isFinite(range) ? range : 0) + TREE_HIT_RANGE_BOOST;
+    const tree = natureController?.getClosestTree?.(attacker.model.position, effectiveRange);
+    if (!tree || tree.userData?.isCutDown || !tree.userData?.isFlammable) return;
+    if (tree.userData?.isBurning) return;
+    tree.userData.isBurning = true;
+    const centerLocal = tree.userData?.boundsCenterLocal;
+    if (centerLocal) {
+      tempTreePosition.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+    } else {
+      tree.getWorldPosition(tempTreePosition);
+    }
+    spawnBombMist(scene, bombMists, tempTreePosition);
+    tree.userData.burnTimeout = setTimeout(() => {
+      if (!tree.userData?.isBurning) return;
+      natureController?.removeTree?.(tree);
+    }, BOMB_MIST_LIFETIME_MS);
+  }
+
   function disposeDroppedWeaponPickup(pickup) {
     if (!pickup) return;
     const mesh = pickup.mesh;
@@ -7784,7 +7804,8 @@ async function main() {
       multiplayer,
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage,
-      onSwordHit: handleSwordTreeHit
+      onSwordHit: handleSwordTreeHit,
+      onTorchHit: handleTorchTreeHit
     });
 
     renderer.render(scene, camera);

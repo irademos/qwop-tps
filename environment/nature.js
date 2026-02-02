@@ -509,6 +509,7 @@ export async function createNature({
 
         const tree = template.clone(true);
         tree.userData.applePickups = [];
+        tree.userData.isFlammable = true;
         tree.userData.treeTypeIndex = treeTypeIndex;
         const rotation = pseudoRandom2D(worldX, worldZ, 3.4) * Math.PI * 2;
         tree.rotation.y = rotation;
