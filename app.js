@@ -1877,10 +1877,6 @@ async function main() {
   const autumnSwordMarker = createWeaponMarker(0xffd400);
   autumnSword.onPickup = (holder) => {
     if (holder !== playerControls) return;
-    if (lantern?.holder === playerControls) {
-      autumnSword.holder = null;
-      return;
-    }
     unequipOtherInventoryItems('autumnSword');
     addToInventory('autumnSword', 1);
     setPlayerWeaponType(holder, autumnSword.type);
@@ -1968,12 +1964,7 @@ async function main() {
   const lanternMarker = createWeaponMarker(0xffd400);
   lantern.onPickup = (holder) => {
     if (holder !== playerControls) return;
-    if (bow?.holder === playerControls) {
-      unequipInventoryItem('bow');
-    }
-    if (autumnSword?.holder === playerControls) {
-      unequipInventoryItem('autumnSword');
-    }
+    unequipOtherInventoryItems('lantern');
     addToInventory('lantern', 1);
   };
   lantern.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
@@ -3062,7 +3053,7 @@ async function main() {
       icon: ''
     },
     lantern: {
-      name: 'Lantern',
+      name: 'Lantern (Left Hand)',
       icon: ''
     }
   };
@@ -3126,11 +3117,33 @@ async function main() {
     };
     inventoryDirty = true;
   }
+  if (inventoryState.lantern?.name !== inventoryCatalog.lantern.name) {
+    inventoryState.lantern = {
+      ...(inventoryState.lantern || {}),
+      name: inventoryCatalog.lantern.name
+    };
+    inventoryDirty = true;
+  }
+  if (homeStorageState.lantern?.name !== inventoryCatalog.lantern.name) {
+    homeStorageState.lantern = {
+      ...(homeStorageState.lantern || {}),
+      name: inventoryCatalog.lantern.name
+    };
+    homeStorageDirty = true;
+  }
   if (inventoryDirty || homeStorageDirty) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
   }
 
   const equippableItems = new Set(['lantern', 'iceGun', 'bow', 'bomb', 'autumnSword']);
+  const inventoryHandSlots = {
+    lantern: 'left',
+    iceGun: 'right',
+    bow: 'right',
+    bomb: 'right',
+    autumnSword: 'right'
+  };
+  const getInventoryItemHand = (itemId) => inventoryHandSlots[itemId] || null;
   const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
   const isAppleItem = (itemId) => appleItemIds.has(itemId);
   const isWoodItem = (itemId) => woodItemIds.has(itemId);
@@ -3313,17 +3326,38 @@ async function main() {
     return false;
   }
 
-  function getEquippedInventoryItemId() {
-    if (isInventoryItemEquipped('lantern')) return 'lantern';
-    if (isInventoryItemEquipped('iceGun')) return 'iceGun';
-    if (isInventoryItemEquipped('bow')) return 'bow';
-    if (isInventoryItemEquipped('bomb')) return 'bomb';
-    if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
+  function getEquippedInventoryItemIdForHand(hand) {
+    if (hand === 'left') {
+      if (isInventoryItemEquipped('lantern')) return 'lantern';
+      return null;
+    }
+    if (hand === 'right') {
+      if (isInventoryItemEquipped('iceGun')) return 'iceGun';
+      if (isInventoryItemEquipped('bow')) return 'bow';
+      if (isInventoryItemEquipped('bomb')) return 'bomb';
+      if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
+    }
     return null;
   }
 
+  function getEquippedInventoryItemIds() {
+    const equipped = [];
+    const left = getEquippedInventoryItemIdForHand('left');
+    const right = getEquippedInventoryItemIdForHand('right');
+    if (left) equipped.push(left);
+    if (right) equipped.push(right);
+    return equipped;
+  }
+
+  function getEquippedInventoryItemId() {
+    return getEquippedInventoryItemIdForHand('right')
+      || getEquippedInventoryItemIdForHand('left');
+  }
+
   function unequipOtherInventoryItems(nextItemId) {
-    const equippedId = getEquippedInventoryItemId();
+    const hand = getInventoryItemHand(nextItemId);
+    if (!hand) return;
+    const equippedId = getEquippedInventoryItemIdForHand(hand);
     if (equippedId && equippedId !== nextItemId) {
       unequipInventoryItem(equippedId);
     }
@@ -6445,10 +6479,9 @@ async function main() {
     getCharacterModel: () => characterModel,
     setCharacterModel: (modelPath) => {
       if (!modelPath || modelPath === characterModel) return;
-      const equippedItemId = getEquippedInventoryItemId();
-      if (equippedItemId) {
+      getEquippedInventoryItemIds().forEach((equippedItemId) => {
         unequipInventoryItem(equippedItemId);
-      }
+      });
       swapPlayerCharacter(modelPath);
       characterModel = modelPath;
       playerProfile = playerProfile || {};
@@ -6475,6 +6508,7 @@ async function main() {
     addArrowAmmo: (amount) => addArrowAmmo(amount),
     getHomeStorage: () => getHomeStorage(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
+    getEquippedInventoryItemIds: () => getEquippedInventoryItemIds(),
     isInventoryItemEquipped: (itemId) => isInventoryItemEquipped(itemId),
     getInventoryItemActions: (itemId) => getInventoryItemActions(itemId),
     equipInventoryItem: (itemId) => equipInventoryItem(itemId),

@@ -984,7 +984,7 @@ function renderInventory() {
   if (!elements.inventoryGrid) return;
   const inventory = context.appState?.getInventory?.() || {};
   const entries = Object.entries(inventory).filter(([, item]) => (item?.count || 0) > 0);
-  const equippedItemId = context.appState?.getEquippedInventoryItemId?.() || null;
+  const equippedItems = new Set(context.appState?.getEquippedInventoryItemIds?.() || []);
   const fallbackIcons = {
     iceGun: '❄️',
     bow: '🏹',
@@ -1018,7 +1018,7 @@ function renderInventory() {
     button.dataset.inventoryId = itemId;
     button.setAttribute('aria-selected', itemId === selectedInventoryId ? 'true' : 'false');
     button.classList.toggle('is-selected', itemId === selectedInventoryId);
-    button.classList.toggle('is-equipped', itemId === equippedItemId);
+    button.classList.toggle('is-equipped', equippedItems.has(itemId));
     if (itemId === selectedInventoryId) {
       selectedTile = button;
     }
@@ -1066,7 +1066,8 @@ function renderInventory() {
   const selectedItem = inventory[selectedInventoryId];
   if (selectedItem) {
     const itemActions = context.appState?.getInventoryItemActions?.(selectedInventoryId) || ['drop', 'equip'];
-    const equippedText = selectedInventoryId === equippedItemId ? ' • Equipped' : '';
+    const isEquipped = equippedItems.has(selectedInventoryId);
+    const equippedText = isEquipped ? ' • Equipped' : '';
     const countText = selectedItem.count ? ` • Qty ${selectedItem.count}` : '';
     const ammoText = selectedInventoryId === 'iceGun'
       ? ` • Ice ammo ${Number.isFinite(selectedItem?.['ice ammo']) ? selectedItem['ice ammo'] : 0}`
@@ -1081,9 +1082,9 @@ function renderInventory() {
       const canEquip = itemActions.includes('equip');
       elements.inventoryEquipButton.style.display = canEquip ? 'inline-flex' : 'none';
       if (canEquip) {
-        elements.inventoryEquipButton.textContent = selectedInventoryId === equippedItemId ? 'Unequip' : 'Equip';
+        elements.inventoryEquipButton.textContent = isEquipped ? 'Unequip' : 'Equip';
         elements.inventoryEquipButton.dataset.inventoryAction =
-          selectedInventoryId === equippedItemId ? 'unequip' : 'equip';
+          isEquipped ? 'unequip' : 'equip';
       }
     }
     if (elements.inventoryDropButton) {

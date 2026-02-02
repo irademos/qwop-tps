@@ -11,6 +11,7 @@ export class Lantern extends Weapon {
     super(scene, {
       itemId: 'lantern',
       type: 'lantern',
+      hand: 'left',
       modelUrl: config.modelUrl,
       scale: config.scale,
       fallbackSize: new THREE.Vector3(0.25, 0.4, 0.25),
