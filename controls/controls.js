@@ -590,12 +590,12 @@ export class PlayerControls {
     equipButton.addEventListener('touchstart', showEquipMenu, { passive: false });
     equipButton.addEventListener('click', showEquipMenu);
 
-    // Punch button
+    // Attack button
     if (!document.getElementById('punch-button')) {
       const punchButton = document.createElement('button');
       punchButton.id = 'punch-button';
       punchButton.className = 'action-button mobile-action';
-      punchButton.innerText = 'PUNCH';
+      punchButton.innerText = 'ATTACK';
       actionContainer.appendChild(punchButton);
     }
 
@@ -612,9 +612,30 @@ export class PlayerControls {
       leftPunchButton.className = 'action-button mobile-punch-action';
       leftPunchButton.innerText = 'LEFT';
       actionContainer.appendChild(leftPunchButton);
+      let leftFireHeld = false;
       leftPunchButton.addEventListener('touchstart', (event) => {
         if (!this.enabled || this.isInWater) return;
+        const weapon = this.getEquippedWeapon('left');
+        if (this.isProjectileWeapon(weapon)) {
+          if (this.shouldHoldToFire('left')) {
+            leftFireHeld = true;
+            this.isFireHeld = true;
+            this.setAiming(true);
+          } else {
+            this.attemptFireProjectileForHand('left');
+          }
+          event.preventDefault();
+          return;
+        }
         this.playAction('leftPunch');
+        event.preventDefault();
+      });
+      leftPunchButton.addEventListener('touchend', (event) => {
+        if (!this.enabled || this.isInWater || !leftFireHeld) return;
+        leftFireHeld = false;
+        this.isFireHeld = false;
+        this.setAiming(false);
+        this.attemptFireProjectileForHand('left');
         event.preventDefault();
       });
     }
@@ -638,9 +659,30 @@ export class PlayerControls {
       rightPunchButton.className = 'action-button mobile-punch-action';
       rightPunchButton.innerText = 'RIGHT';
       actionContainer.appendChild(rightPunchButton);
+      let rightFireHeld = false;
       rightPunchButton.addEventListener('touchstart', (event) => {
         if (!this.enabled || this.isInWater) return;
+        const weapon = this.getEquippedWeapon();
+        if (this.isProjectileWeapon(weapon)) {
+          if (this.shouldHoldToFire()) {
+            rightFireHeld = true;
+            this.isFireHeld = true;
+            this.setAiming(true);
+          } else {
+            this.attemptFireProjectileForHand('right');
+          }
+          event.preventDefault();
+          return;
+        }
         this.playAction('mutantPunch');
+        event.preventDefault();
+      });
+      rightPunchButton.addEventListener('touchend', (event) => {
+        if (!this.enabled || this.isInWater || !rightFireHeld) return;
+        rightFireHeld = false;
+        this.isFireHeld = false;
+        this.setAiming(false);
+        this.attemptFireProjectileForHand('right');
         event.preventDefault();
       });
     }
@@ -1873,21 +1915,23 @@ export class PlayerControls {
     return weapons.concat(pickups);
   }
 
-  getEquippedWeapon() {
-    return this.getWeapons().find(weapon => weapon.holder === this && weapon.hand !== 'left') || null;
+  getEquippedWeapon(hand = 'right') {
+    return this.getWeapons().find(weapon => weapon.holder === this && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')) || null;
   }
 
-  getEquippedGun() {
+  getEquippedGun(hand = 'right') {
     return this.getWeapons().find(
       weapon => weapon.holder === this
-        && weapon.hand !== 'left'
+        && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')
         && (weapon.type === 'gun' || weapon.type === 'bow')
     ) || null;
   }
 
-  getEquippedSword() {
+  getEquippedSword(hand = 'right') {
     return this.getWeapons().find(
-      weapon => weapon.holder === this && weapon.hand !== 'left' && weapon.type === 'sword'
+      weapon => weapon.holder === this
+        && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')
+        && weapon.type === 'sword'
     ) || null;
   }
 
@@ -2050,8 +2094,8 @@ export class PlayerControls {
     this.attemptFireProjectile();
   }
 
-  canFireProjectile() {
-    const gun = this.getEquippedGun();
+  canFireProjectile(hand = 'right') {
+    const gun = this.getEquippedGun(hand);
     return !!gun && this.ammo > 0 && this.playerModel;
   }
 
@@ -2062,7 +2106,11 @@ export class PlayerControls {
   }
 
   attemptFireProjectile() {
-    const equippedWeapon = this.getEquippedWeapon();
+    return this.attemptFireProjectileForHand('right');
+  }
+
+  attemptFireProjectileForHand(hand = 'right') {
+    const equippedWeapon = this.getEquippedWeapon(hand);
     if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
       const direction = this.getAimDirection(true);
       const position = this.getProjectileSpawnPosition(direction);
@@ -2072,9 +2120,9 @@ export class PlayerControls {
       }
       return fired;
     }
-    if (!this.canFireProjectile()) return false;
+    if (!this.canFireProjectile(hand)) return false;
 
-    const gun = this.getEquippedGun();
+    const gun = this.getEquippedGun(hand);
     const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
     const direction = usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow);
@@ -2135,9 +2183,13 @@ export class PlayerControls {
     return true;
   }
 
-  shouldHoldToFire() {
-    const weapon = this.getEquippedWeapon();
+  shouldHoldToFire(hand = 'right') {
+    const weapon = this.getEquippedWeapon(hand);
     return weapon?.itemId === 'bow' || weapon?.itemId === 'bomb';
+  }
+
+  isProjectileWeapon(weapon) {
+    return !!weapon && (weapon.type === 'gun' || weapon.type === 'bow' || weapon.type === 'bomb');
   }
 
   setAiming(active) {
