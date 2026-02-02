@@ -2429,8 +2429,10 @@ async function main() {
   function cloneArrowMesh(template, scale = ARROW_PROJECTILE_SCALE) {
     if (!template) return null;
     const arrowMesh = template.clone(true);
+    arrowMesh.visible = true;
     arrowMesh.traverse(child => {
       if (!child.isMesh) return;
+      child.visible = true;
       child.geometry = child.geometry?.clone?.() ?? child.geometry;
       if (Array.isArray(child.material)) {
         child.material = child.material.map(material => material?.clone?.() ?? material);
