@@ -469,15 +469,27 @@ export class PlayerControls {
     const actionContainer = document.getElementById('action-buttons');
     const toggleButton = document.getElementById('mobile-action-toggle');
     let setActionState = null;
+    let equipMenuButtons = [];
+    let equipBackButton = null;
     if (actionContainer && toggleButton) {
       setActionState = (state) => {
         this.mobileActionState = state;
-        const expanded = state === 'expanded';
+        const expanded = state === 'expanded' || state === 'equip';
         const punchMode = state === 'punch';
+        const equipMode = state === 'equip';
         actionContainer.classList.toggle('mobile-expanded', expanded);
         actionContainer.classList.toggle('mobile-punch-mode', punchMode);
+        actionContainer.classList.toggle('mobile-equip-mode', equipMode);
         toggleButton.setAttribute('aria-expanded', expanded || punchMode ? 'true' : 'false');
-        toggleButton.textContent = expanded ? '✕' : '⋯';
+        toggleButton.textContent = expanded || punchMode ? '✕' : '⋯';
+        if (!equipMode) {
+          equipMenuButtons.forEach(button => button.remove());
+          equipMenuButtons = [];
+          if (equipBackButton) {
+            equipBackButton.remove();
+            equipBackButton = null;
+          }
+        }
       };
 
       setActionState('collapsed');
@@ -488,7 +500,9 @@ export class PlayerControls {
           setActionState('expanded');
           return;
         }
-        const nextState = this.mobileActionState === 'expanded' ? 'collapsed' : 'expanded';
+        const nextState = this.mobileActionState === 'expanded' || this.mobileActionState === 'equip'
+          ? 'collapsed'
+          : 'expanded';
         setActionState(nextState);
       };
 
@@ -496,41 +510,85 @@ export class PlayerControls {
       toggleButton.addEventListener('click', handleToggle);
     }
 
-    // Fire button
-    if (!document.getElementById('fire-button')) {
-      const newFireButton = document.createElement('button');
-      newFireButton.id = 'fire-button';
-      newFireButton.className = 'action-button mobile-action';
-      newFireButton.innerText = 'FIRE';
-      actionContainer.appendChild(newFireButton);
+    const buildEquipMenuButtons = () => {
+      if (!actionContainer) return;
+      const appState = window.appState;
+      const inventory = appState?.getInventory?.() || {};
+      const equipCandidates = [
+        { id: 'bomb', label: 'Bomb' },
+        { id: 'bow', label: 'Bow' },
+        { id: 'iceGun', label: 'Ice Gun' },
+        { id: 'autumnSword', label: 'Sword' },
+        { id: 'lantern', label: 'Lantern' }
+      ];
+
+      const hasInventoryItem = (itemId) => {
+        const entry = inventory[itemId];
+        if (!entry) return false;
+        if (typeof entry.count === 'number') {
+          return entry.count > 0;
+        }
+        return true;
+      };
+
+      equipMenuButtons.forEach(button => button.remove());
+      equipMenuButtons = [];
+
+      const itemsToShow = equipCandidates.filter(item => hasInventoryItem(item.id));
+      itemsToShow.forEach((item) => {
+        const button = document.createElement('button');
+        button.className = 'action-button mobile-equip-action';
+        button.dataset.equipItemId = item.id;
+        button.innerText = item.label;
+        const handleEquip = (event) => {
+          if (!this.enabled) return;
+          const isEquipped = appState?.isInventoryItemEquipped?.(item.id);
+          if (isEquipped) {
+            appState?.unequipInventoryItem?.(item.id);
+          } else {
+            appState?.equipInventoryItem?.(item.id);
+          }
+          event.preventDefault();
+        };
+        button.addEventListener('touchstart', handleEquip, { passive: false });
+        button.addEventListener('click', handleEquip);
+        equipMenuButtons.push(button);
+        actionContainer.appendChild(button);
+      });
+    };
+
+    const showEquipMenu = (event) => {
+      if (!this.enabled) return;
+      setActionState?.('equip');
+      if (!equipBackButton) {
+        equipBackButton = document.createElement('button');
+        equipBackButton.className = 'action-button mobile-equip-action';
+        equipBackButton.innerText = '<';
+        const handleBack = (backEvent) => {
+          if (!this.enabled) return;
+          setActionState?.('expanded');
+          backEvent.preventDefault();
+        };
+        equipBackButton.addEventListener('touchstart', handleBack, { passive: false });
+        equipBackButton.addEventListener('click', handleBack);
+        actionContainer.appendChild(equipBackButton);
+      }
+      buildEquipMenuButtons();
+      event.preventDefault();
+    };
+
+    // Equip button
+    if (!document.getElementById('equip-button')) {
+      const newEquipButton = document.createElement('button');
+      newEquipButton.id = 'equip-button';
+      newEquipButton.className = 'action-button mobile-action';
+      newEquipButton.innerText = 'EQUIP';
+      actionContainer.appendChild(newEquipButton);
     }
 
-    const fireButton = document.getElementById('fire-button');
-    fireButton.addEventListener('touchstart', (event) => {
-      if (!this.enabled) return;
-      if (this.shouldHoldToFire()) {
-        this.isFireHeld = true;
-        this.setAiming(true);
-        event.preventDefault();
-        return;
-      }
-      if (this.attemptFireProjectile()) {
-        event.preventDefault();
-      }
-    });
-    fireButton.addEventListener('touchend', (event) => {
-      if (!this.enabled) return;
-      if (!this.isFireHeld) return;
-      this.isFireHeld = false;
-      this.setAiming(false);
-      this.attemptFireProjectile();
-      event.preventDefault();
-    });
-    fireButton.addEventListener('touchcancel', () => {
-      if (!this.enabled) return;
-      this.isFireHeld = false;
-      this.setAiming(false);
-    });
+    const equipButton = document.getElementById('equip-button');
+    equipButton.addEventListener('touchstart', showEquipMenu, { passive: false });
+    equipButton.addEventListener('click', showEquipMenu);
 
     // Punch button
     if (!document.getElementById('punch-button')) {
