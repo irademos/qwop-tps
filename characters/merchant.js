@@ -4,6 +4,7 @@ import { get, onValue, ref, set } from 'firebase/database';
 import { db } from '../firebase-init.js';
 import { MUSHROOM_ENTRIES } from '../environment/mushrooms.js';
 import { loadMonsterModel } from '../models/monsterModel.js';
+import { createLightSource, LIGHT_SOURCE_CONFIGS } from '../light_sources.js';
 import { FriendlyCharacter } from './FriendlyCharacter.js';
 
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
@@ -49,6 +50,7 @@ let merchantUnsubscribe = null;
 let merchantAppState = null;
 let merchantFriendly = null;
 let marketStall = null;
+let merchantRoadLight = null;
 let merchantIsHost = false;
 
 const buildDefaultInventory = () => {
@@ -189,6 +191,23 @@ const loadMerchantFriendly = ({
     attachPhysics?.(friendly);
     merchantFriendly = friendly;
     window.merchantFriendly = friendly;
+
+    if (!merchantRoadLight) {
+      const lightPosition = basePosition.clone().add(new THREE.Vector3(2.5, 0, 2));
+      const terrainHeight = getTerrainHeight?.(lightPosition.x, lightPosition.z);
+      lightPosition.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.1 : basePosition.y;
+      liftPositionToBuildingTop?.(lightPosition, 0.3);
+      createLightSource(LIGHT_SOURCE_CONFIGS.roadLight, lightPosition)
+        .then((lightSource) => {
+          if (!scene) return;
+          merchantRoadLight = lightSource;
+          merchantRoadLight.model.position.copy(lightPosition);
+          scene.add(lightSource.model);
+        })
+        .catch((error) => {
+          console.warn('Failed to load merchant road light:', error);
+        });
+    }
   });
 };
 
