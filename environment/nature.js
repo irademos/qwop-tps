@@ -36,6 +36,24 @@ const TREE_CLIMB_HALF_WIDTH = 0.6;
 const TREE_CLIMB_HALF_DEPTH = 0.6;
 const TREE_CLIMB_ENTRY_RADIUS = 1.0;
 const TREE_CLIMB_ENTRY_HEIGHT = 1.4;
+const METERS_PER_DEGREE_LAT = 111_132.92;
+const ROAD_WIDTHS = {
+  footway: 0.4,
+  path: 0.5,
+  cycleway: 0.6,
+  steps: 0.35,
+  track: 0.7,
+  service: 0.9,
+  residential: 1.2,
+  living_street: 1.1,
+  unclassified: 1.1,
+  tertiary: 1.5,
+  secondary: 2.0,
+  primary: 2.6,
+  trunk: 3.0,
+  motorway: 3.4
+};
+const DEFAULT_ROAD_WIDTH = 1.0;
 
 const setTreeShadowing = (tree) => {
   tree.traverse((child) => {
@@ -53,6 +71,133 @@ function pseudoRandom2D(x, z, seed = 0) {
 function hashZoneIndex(a, b) {
   const hash = Math.abs(Math.imul(a, 73856093) ^ Math.imul(b, 19349663)) >>> 0;
   return hash;
+}
+
+function metersPerDegreeLon(latDeg) {
+  return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
+}
+
+function toLocalMeters(coord, origin, lonScale) {
+  const [lon, lat] = coord;
+  return {
+    x: -(lon - origin.centerLon) * lonScale,
+    z: (lat - origin.centerLat) * METERS_PER_DEGREE_LAT
+  };
+}
+
+function resolveRoadWidth(highway) {
+  if (typeof highway !== 'string') return DEFAULT_ROAD_WIDTH;
+  return ROAD_WIDTHS[highway] ?? DEFAULT_ROAD_WIDTH;
+}
+
+function collectBuildingPolygons(geojson) {
+  const polygons = [];
+  const features = geojson?.prefiltered?.buildings ?? geojson?.features ?? [];
+  for (const feature of features) {
+    if (!feature?.properties?.building) continue;
+    const geometry = feature.geometry;
+    if (!geometry) continue;
+    if (geometry.type === 'Polygon') {
+      polygons.push(geometry.coordinates);
+    } else if (geometry.type === 'MultiPolygon') {
+      for (const polygon of geometry.coordinates) {
+        polygons.push(polygon);
+      }
+    }
+  }
+  return polygons;
+}
+
+function collectHighwayLines(geojson) {
+  const lines = [];
+  const features = geojson?.prefiltered?.highways ?? geojson?.features ?? [];
+  for (const feature of features) {
+    if (!feature?.properties?.highway) continue;
+    const geometry = feature.geometry;
+    if (!geometry) continue;
+    if (geometry.type === 'LineString') {
+      lines.push({ highway: feature.properties.highway, coords: geometry.coordinates });
+    } else if (geometry.type === 'MultiLineString') {
+      for (const line of geometry.coordinates) {
+        lines.push({ highway: feature.properties.highway, coords: line });
+      }
+    }
+  }
+  return lines;
+}
+
+function normalizeRing(ring) {
+  if (!ring || ring.length === 0) return [];
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first[0] === last[0] && first[1] === last[1]) return ring.slice(0, -1);
+  return ring;
+}
+
+function ringToPoints(ring, origin, lonScale) {
+  const points = [];
+  const coords = normalizeRing(ring);
+  for (const coord of coords) {
+    if (!coord || coord.length < 2) continue;
+    const local = toLocalMeters(coord, origin, lonScale);
+    points.push({ x: local.x, z: local.z });
+  }
+  return points;
+}
+
+function computeRingBounds(points) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const point of points) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minZ = Math.min(minZ, point.z);
+    maxZ = Math.max(maxZ, point.z);
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { minX, maxX, minZ, maxZ };
+}
+
+function pointInRing(point, ring) {
+  if (!ring || ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const xi = ring[i].x;
+    const zi = ring[i].z;
+    const xj = ring[j].x;
+    const zj = ring[j].z;
+    const intersect = ((zi > point.z) !== (zj > point.z))
+      && (point.x < ((xj - xi) * (point.z - zi)) / (zj - zi + Number.EPSILON) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function distancePointToSegment(point, a, b) {
+  const abx = b.x - a.x;
+  const abz = b.z - a.z;
+  const apx = point.x - a.x;
+  const apz = point.z - a.z;
+  const abLenSq = abx * abx + abz * abz;
+  const t = abLenSq > 0 ? Math.max(0, Math.min(1, (apx * abx + apz * abz) / abLenSq)) : 0;
+  const closestX = a.x + abx * t;
+  const closestZ = a.z + abz * t;
+  const dx = point.x - closestX;
+  const dz = point.z - closestZ;
+  return Math.hypot(dx, dz);
+}
+
+function distanceToRing(point, ring) {
+  if (!ring || ring.length < 2) return Infinity;
+  let min = Infinity;
+  for (let i = 0; i < ring.length; i += 1) {
+    const next = (i + 1) % ring.length;
+    const dist = distancePointToSegment(point, ring[i], ring[next]);
+    if (dist < min) min = dist;
+  }
+  return min;
 }
 
 export async function createNature({
@@ -107,6 +252,8 @@ export async function createNature({
   const tempCenter = new THREE.Vector3();
   const tempSize = new THREE.Vector3();
   const tempWorldPos = new THREE.Vector3();
+  const tempTreeCenter = new THREE.Vector3();
+  const tempTreeRight = new THREE.Vector3();
 
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
@@ -128,6 +275,62 @@ export async function createNature({
     const zoneZ = Math.floor(position.z / TREE_ZONE_METERS);
     const zoneHash = hashZoneIndex(zoneX, zoneZ);
     return treeTypeIndices[zoneHash % treeTypeIndices.length];
+  };
+
+  const getRenderOrigin = () => {
+    if (typeof getGeoForLocal !== 'function') return null;
+    tempPosition.set(0, 0, 0);
+    const originGeo = getGeoForLocal(tempPosition);
+    if (!originGeo || !Number.isFinite(originGeo.lat) || !Number.isFinite(originGeo.lon)) {
+      return null;
+    }
+    return {
+      centerLat: originGeo.lat,
+      centerLon: originGeo.lon
+    };
+  };
+
+  const buildTileBlockers = (tileKey) => {
+    const entry = activeTileCache?.getEntry?.(tileKey) ?? activeTileCache?.cache?.get(tileKey);
+    const geojson = entry?.geojson;
+    if (!geojson) return null;
+    const origin = getRenderOrigin();
+    if (!origin) return null;
+    const lonScale = metersPerDegreeLon(origin.centerLat);
+
+    const buildings = [];
+    for (const rings of collectBuildingPolygons(geojson)) {
+      if (!rings || rings.length === 0) continue;
+      const outer = ringToPoints(rings[0], origin, lonScale);
+      if (outer.length < 3) continue;
+      const holes = [];
+      for (let i = 1; i < rings.length; i += 1) {
+        const hole = ringToPoints(rings[i], origin, lonScale);
+        if (hole.length >= 3) holes.push(hole);
+      }
+      const bounds = computeRingBounds(outer);
+      if (!bounds) continue;
+      buildings.push({ outer, holes, bounds });
+    }
+
+    const roads = [];
+    for (const line of collectHighwayLines(geojson)) {
+      if (!line.coords || line.coords.length < 2) continue;
+      const points = [];
+      for (const coord of line.coords) {
+        if (!coord || coord.length < 2) continue;
+        const local = toLocalMeters(coord, origin, lonScale);
+        points.push({ x: local.x, z: local.z });
+      }
+      if (points.length < 2) continue;
+      roads.push({
+        width: resolveRoadWidth(line.highway),
+        points
+      });
+    }
+
+    if (buildings.length === 0 && roads.length === 0) return null;
+    return { buildings, roads };
   };
 
   const refreshClimbableAreas = () => {
@@ -202,6 +405,64 @@ export async function createNature({
     return areas;
   };
 
+  const getTreeWorldCenter = (tree) => {
+    if (!tree) return null;
+    if (tree.userData?.boundsCenterLocal) {
+      tempTreeCenter.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
+    } else {
+      tempTreeCenter.copy(tree.position);
+    }
+    const typeIndex = tree.userData?.treeTypeIndex;
+    const shift = TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
+    if (shift) {
+      const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
+      tempTreeRight.set(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), tree.rotation.y);
+      tempTreeCenter.addScaledVector(tempTreeRight, shift * scaleFactor);
+    }
+    return tempTreeCenter;
+  };
+
+  const isTreeBlocked = (tree, blockers) => {
+    if (!tree || !blockers) return false;
+    const center = getTreeWorldCenter(tree);
+    if (!center) return false;
+    const radius = tree.userData?.boundsRadius ?? 0;
+    const point = { x: center.x, z: center.z };
+    for (const building of blockers.buildings ?? []) {
+      const { bounds, outer, holes } = building;
+      if (bounds) {
+        if (point.x < bounds.minX - radius
+          || point.x > bounds.maxX + radius
+          || point.z < bounds.minZ - radius
+          || point.z > bounds.maxZ + radius) {
+          continue;
+        }
+      }
+      const insideOuter = pointInRing(point, outer);
+      const distanceToOuter = insideOuter ? 0 : distanceToRing(point, outer);
+      if (insideOuter || distanceToOuter <= radius) {
+        let insideHole = false;
+        for (const hole of holes ?? []) {
+          if (pointInRing(point, hole)) {
+            insideHole = true;
+            break;
+          }
+        }
+        if (!insideHole) return true;
+      }
+    }
+    for (const road of blockers.roads ?? []) {
+      const width = road.width ?? DEFAULT_ROAD_WIDTH;
+      const threshold = width * 0.5 + radius;
+      const points = road.points ?? [];
+      for (let i = 0; i < points.length - 1; i += 1) {
+        const dist = distancePointToSegment(point, points[i], points[i + 1]);
+        if (dist <= threshold) return true;
+      }
+    }
+    return false;
+  };
+
   const addClimbDebugLines = (area, parent) => {
     if (!area || !parent) return;
     const width = (area.halfWidth ?? 0) * 2;
@@ -232,6 +493,7 @@ export async function createNature({
     const trees = [];
     const tileClimbAreas = [];
     const tileApplePickups = [];
+    const tileBlockers = buildTileBlockers(tileKey);
 
     for (let ix = 0; ix <= tileSizeMeters; ix += TREE_GRID_SPACING) {
       for (let iz = 0; iz <= tileSizeMeters; iz += TREE_GRID_SPACING) {
@@ -258,17 +520,22 @@ export async function createNature({
         const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
         tree.position.set(worldX, terrainY, worldZ);
         tree.userData.tileKey = tileKey;
-        tileGroup.add(tree);
-        trees.push(tree);
-        const areas = buildTreeClimbAreas(tree);
-        tree.userData.climbAreas = areas;
-        tileClimbAreas.push(...areas);
         tree.updateWorldMatrix(true, true);
         tempBox.setFromObject(tree);
         if (Number.isFinite(tempBox.min.x)) {
           tempBox.getCenter(tempCenter);
           tree.userData.boundsCenterLocal = tree.worldToLocal(tempCenter.clone());
+          tempBox.getSize(tempSize);
+          tree.userData.boundsRadius = Math.max(tempSize.x, tempSize.z) * 0.5;
         }
+        if (tileBlockers && isTreeBlocked(tree, tileBlockers)) {
+          continue;
+        }
+        tileGroup.add(tree);
+        trees.push(tree);
+        const areas = buildTreeClimbAreas(tree);
+        tree.userData.climbAreas = areas;
+        tileClimbAreas.push(...areas);
         if (typeof spawnApplePickup === 'function') {
           tree.updateWorldMatrix(true, true);
           tempBox.setFromObject(tree);
@@ -314,6 +581,20 @@ export async function createNature({
 
   let lastPlayerTileKey = null;
 
+  const removeTileEntry = (tileKey) => {
+    const entry = treeTiles.get(tileKey);
+    if (!entry) return;
+    group.remove(entry.group);
+    entry.group.clear();
+    treeTiles.delete(tileKey);
+    climbableAreasByTile.delete(tileKey);
+    const tilePickups = applePickupsByTile.get(tileKey) ?? [];
+    if (typeof removeApplePickup === 'function') {
+      tilePickups.forEach((pickup) => removeApplePickup(pickup));
+    }
+    applePickupsByTile.delete(tileKey);
+  };
+
   const update = (playerPosition) => {
     if (!playerPosition) return;
     const tile = {
@@ -336,23 +617,39 @@ export async function createNature({
 
     for (const [key, entry] of treeTiles.entries()) {
       if (neededKeys.has(key)) continue;
-      group.remove(entry.group);
-      treeTiles.delete(key);
-      climbableAreasByTile.delete(key);
-      const tilePickups = applePickupsByTile.get(key) ?? [];
-      if (typeof removeApplePickup === 'function') {
-        tilePickups.forEach((pickup) => removeApplePickup(pickup));
-      }
-      applePickupsByTile.delete(key);
+      removeTileEntry(key);
     }
     refreshClimbableAreas();
   };
 
   const refreshTile = (tileKey) => {
     if (!tileKey) return;
+    const entry = treeTiles.get(tileKey);
+    const tile = entry?.tile ?? null;
+    if (entry) {
+      removeTileEntry(tileKey);
+    }
+    if (tile) {
+      createTileTrees(tile);
+      refreshClimbableAreas();
+      return;
+    }
+    const [x, y] = tileKey.split(',').map((value) => parseInt(value, 10));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    createTileTrees({ x, y });
+    refreshClimbableAreas();
   };
 
   const refreshAll = () => {
+    const tiles = Array.from(treeTiles.values()).map((entry) => entry.tile);
+    for (const entry of Array.from(treeTiles.keys())) {
+      removeTileEntry(entry);
+    }
+    for (const tile of tiles) {
+      if (!tile) continue;
+      createTileTrees(tile);
+    }
+    refreshClimbableAreas();
   };
 
   const getClosestTree = (position, range) => {
