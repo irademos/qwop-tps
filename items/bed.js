@@ -37,6 +37,7 @@ export class Bed {
     this.location = (options.position || BED_LOCATION).clone();
     this.scale = Number.isFinite(options.scale) ? options.scale : DEFAULT_SCALE;
     this.sleepInset = Number.isFinite(options.sleepInset) ? options.sleepInset : DEFAULT_SLEEP_INSET;
+    this.useTerrainHeight = options.useTerrainHeight !== false;
     this.interactDistance = Number.isFinite(options.interactDistance)
       ? options.interactDistance
       : Math.max(this.size.x, this.size.z) * 0.75;
@@ -59,9 +60,11 @@ export class Bed {
     if (!this.mesh) return;
 
     const targetPos = position.clone();
-    const terrainHeight = getTerrainHeight(targetPos.x, targetPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      targetPos.y = terrainHeight + BED_LIFT;
+    if (this.useTerrainHeight) {
+      const terrainHeight = getTerrainHeight(targetPos.x, targetPos.z);
+      if (Number.isFinite(terrainHeight)) {
+        targetPos.y = terrainHeight + BED_LIFT;
+      }
     }
 
     this.mesh.traverse(child => {

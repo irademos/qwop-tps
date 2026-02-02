@@ -2017,9 +2017,6 @@ async function main() {
   if (treasureChest.mesh) {
     treasureChest.mesh.visible = false;
   }
-  bed = new Bed(scene);
-  await bed.load();
-  window.bed = bed;
   treasureChest.onOpen = (holder) => {
     if (holder !== playerControls) return;
     const rewards = [
@@ -5542,6 +5539,13 @@ async function main() {
   });
   void homeSystem.loadStorageChest?.();
   window.homeSystem = homeSystem;
+  const bedScene = homeSystem?.interiorGroup ?? scene;
+  bed = new Bed(bedScene, {
+    position: new THREE.Vector3(-3, 0.5, 3),
+    useTerrainHeight: false
+  });
+  await bed.load();
+  window.bed = bed;
 
   function getLatestLocationFix() {
     const latest = window.latestLocation;
