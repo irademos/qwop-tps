@@ -3,9 +3,11 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/water.js';
 
 export const BED_SIZE = new THREE.Vector3(2.2, 0.6, 1.4);
-export const BED_LOCATION = new THREE.Vector3(2, 0, 2);
-
-const DEFAULT_SCALE = 1;
+export const BED_LOCATION = new THREE.Vector3(-2, 0, 2);
+const BED_LIFT = 0.5;
+const SLEEP_Y_OFFSET = -0.8;
+const SLEEP_X_OFFSET = 1.3;
+const DEFAULT_SCALE = 0.02;
 const DEFAULT_SLEEP_INSET = 0.08;
 
 const disposeMaterial = (material) => {
@@ -59,7 +61,7 @@ export class Bed {
     const targetPos = position.clone();
     const terrainHeight = getTerrainHeight(targetPos.x, targetPos.z);
     if (Number.isFinite(terrainHeight)) {
-      targetPos.y = terrainHeight;
+      targetPos.y = terrainHeight + BED_LIFT;
     }
 
     this.mesh.traverse(child => {
@@ -100,7 +102,8 @@ export class Bed {
   getSleepPosition() {
     if (!this.mesh) return null;
     const pos = this.mesh.position.clone();
-    pos.y = this.getSleepSurfaceY();
+    pos.y = this.getSleepSurfaceY() + SLEEP_Y_OFFSET;
+    pos.x = pos.x + SLEEP_X_OFFSET;
     return pos;
   }
 

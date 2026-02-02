@@ -2046,8 +2046,9 @@ export class PlayerControls {
     this.playerModel.userData.currentAction = null;
 
     const bedYaw = new THREE.Euler().setFromQuaternion(bed.mesh.quaternion, 'YXZ').y;
+
     this.playerModel.position.copy(sleepPosition);
-    this.playerModel.quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, bedYaw, 0, 'YXZ'));
+    this.playerModel.quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, bedYaw - Math.PI / 2, 0, 'YXZ')); // Math.PI / 2, bedYaw, 0
 
     if (this.body) {
       this.body.setTranslation({ x: sleepPosition.x, y: sleepPosition.y, z: sleepPosition.z }, true);
