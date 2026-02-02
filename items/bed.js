@@ -37,6 +37,7 @@ export class Bed {
     this.location = (options.position || BED_LOCATION).clone();
     this.scale = Number.isFinite(options.scale) ? options.scale : DEFAULT_SCALE;
     this.sleepInset = Number.isFinite(options.sleepInset) ? options.sleepInset : DEFAULT_SLEEP_INSET;
+    this.useTerrainHeight = options.useTerrainHeight !== false;
     this.interactDistance = Number.isFinite(options.interactDistance)
       ? options.interactDistance
       : Math.max(this.size.x, this.size.z) * 0.75;
@@ -59,9 +60,11 @@ export class Bed {
     if (!this.mesh) return;
 
     const targetPos = position.clone();
-    const terrainHeight = getTerrainHeight(targetPos.x, targetPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      targetPos.y = terrainHeight + BED_LIFT;
+    if (this.useTerrainHeight) {
+      const terrainHeight = getTerrainHeight(targetPos.x, targetPos.z);
+      if (Number.isFinite(terrainHeight)) {
+        targetPos.y = terrainHeight + BED_LIFT;
+      }
     }
 
     this.mesh.traverse(child => {
@@ -93,15 +96,14 @@ export class Bed {
   }
 
   getSleepSurfaceY() {
-    if (this.bounds) {
-      return this.bounds.max.y - this.sleepInset;
-    }
-    return this.mesh ? this.mesh.position.y + this.boundingSize.y - this.sleepInset : 0;
+    if (!this.mesh) return 0;
+    const bounds = new THREE.Box3().setFromObject(this.mesh);
+    return bounds.max.y - this.sleepInset;
   }
 
   getSleepPosition() {
     if (!this.mesh) return null;
-    const pos = this.mesh.position.clone();
+    const pos = this.getWorldPosition();
     pos.y = this.getSleepSurfaceY() + SLEEP_Y_OFFSET;
     pos.x = pos.x + SLEEP_X_OFFSET;
     return pos;
@@ -110,13 +112,26 @@ export class Bed {
   getWakePosition() {
     if (!this.mesh) return null;
     const offset = new THREE.Vector3(this.boundingSize.x * 0.7, 0, 0);
-    offset.applyQuaternion(this.mesh.quaternion);
-    const pos = this.mesh.position.clone().add(offset);
-    const terrainHeight = getTerrainHeight(pos.x, pos.z);
-    if (Number.isFinite(terrainHeight)) {
-      pos.y = terrainHeight;
+    const worldQuaternion = new THREE.Quaternion();
+    this.mesh.getWorldQuaternion(worldQuaternion);
+    offset.applyQuaternion(worldQuaternion);
+    const basePos = this.getWorldPosition();
+    const pos = basePos.clone().add(offset);
+    if (this.useTerrainHeight) {
+      const terrainHeight = getTerrainHeight(pos.x, pos.z);
+      if (Number.isFinite(terrainHeight)) {
+        pos.y = terrainHeight;
+      }
+    } else {
+      pos.y = basePos.y - BED_LIFT;
     }
     return pos;
+  }
+
+  getWorldPosition(target = new THREE.Vector3()) {
+    if (!this.mesh) return null;
+    this.mesh.getWorldPosition(target);
+    return target;
   }
 
   removeFromScene() {
