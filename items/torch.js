@@ -3,15 +3,15 @@ import { getTerrainHeight } from '../environment/water.js';
 import { Weapon } from './weapon.js';
 import { applyEmissiveGlow, LIGHT_SOURCE_CONFIGS } from '../light_sources.js';
 
-export const TORCH_SIZE = new THREE.Vector3(0.12, 0.45, 0.12);
+export const TORCH_SIZE = new THREE.Vector3(0.24, 0.9, 0.24);
 export const TORCH_PICKUP_LOCATION = new THREE.Vector3(1.4, 0, 1.2);
 
 const DROP_OFFSET = new THREE.Vector3(0.8, 0, 0.6);
-const TORCH_HOLD_OFFSET = new THREE.Vector3(0.05, 0.55, 0.08);
-const TORCH_HOLD_ROTATION = new THREE.Euler(Math.PI, Math.PI, 0, 'YXZ');
-const TORCH_MIST_OFFSET = new THREE.Vector3(0, 0.7, 0);
+const TORCH_HOLD_OFFSET = new THREE.Vector3(0.0, 0.08, 0.08);
+const TORCH_HOLD_ROTATION = new THREE.Euler(Math.PI + Math.PI / 7, Math.PI, 0 - Math.PI / 9, 'YXZ');
+const TORCH_MIST_OFFSET = new THREE.Vector3(0, 3.2, 0);
 const TORCH_MIST_PARTICLE_COUNT = 6;
-const TORCH_MIST_SPREAD = 0.08;
+const TORCH_MIST_SPREAD = 1.2;
 
 export class Torch extends Weapon {
   constructor(scene) {
@@ -125,7 +125,7 @@ export class Torch extends Weapon {
     this._mistMaterials = [yellowMaterial, redMaterial];
 
     const createParticle = (material) => {
-      const size = THREE.MathUtils.lerp(0.04, 0.09, Math.random());
+      const size = THREE.MathUtils.lerp(0.14, 0.39, Math.random());
       const geometry = new THREE.SphereGeometry(size, 8, 6);
       const particle = new THREE.Mesh(geometry, material);
       particle.position.set(
