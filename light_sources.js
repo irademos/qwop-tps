@@ -15,6 +15,13 @@ export const ROAD_LIGHT_SETTINGS = {
   emissiveIntensity: 1.0
 };
 
+export const TORCH_LIGHT_SETTINGS = {
+  intensity: 2.4,
+  distance: 32,
+  decay: 1.0,
+  emissiveIntensity: 1.1
+};
+
 export const LIGHT_SOURCE_CONFIGS = {
   lantern: {
     modelUrl: '/assets/props/lantern.glb',
@@ -31,6 +38,14 @@ export const LIGHT_SOURCE_CONFIGS = {
     lightColor: 0xfff1c1,
     lightOffset: new THREE.Vector3(0, 3.4, 0),
     settings: ROAD_LIGHT_SETTINGS
+  },
+  torch: {
+    modelUrl: '/assets/props/torch.glb',
+    scale: 0.12,
+    emissiveColor: 0xffa24a,
+    lightColor: 0xffc077,
+    lightOffset: new THREE.Vector3(0, 4.0, 0),
+    settings: TORCH_LIGHT_SETTINGS
   }
 };
 

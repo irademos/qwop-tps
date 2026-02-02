@@ -17,6 +17,7 @@ import { AudioManager } from './audioManager.js';
 import { IceGun } from './items/iceGun.js';
 import { Bow } from './items/bow.js';
 import { Lantern } from './items/lantern.js';
+import { Torch, TORCH_PICKUP_LOCATION } from './items/torch.js';
 import { AutumnSword } from './items/autumnSword.js';
 import { Bomb } from './items/bomb.js';
 import { TreasureChest } from './items/treasure_chest.js';
@@ -126,6 +127,10 @@ const BOMB_BASE_DAMAGE = 60;
 const BOMB_KNOCKBACK_STRENGTH = 6;
 const BOMB_MIST_LIFETIME_MS = 8000;
 const BOMB_MIST_PARTICLE_COUNT = 35;
+const TORCH_ITEM_ID = 'torch';
+const TORCH_HEALTH_KEY = 'healths';
+const DEFAULT_TORCH_HEALTH = 100;
+const TORCH_HEALTH_DECAY_PER_SECOND = 0.6;
 
 
 // --- Rapier demo state ---
@@ -1519,6 +1524,7 @@ async function main() {
   let bow;
   let autumnSword;
   let lantern;
+  let torch;
   let bomb;
   let treasureChest;
 
@@ -2005,7 +2011,69 @@ async function main() {
     isLocallyControlled: () => lantern?.holder === playerControls
   });
 
-  window.weapons = { iceGun, bow, bomb, autumnSword, lantern };
+  torch = new Torch(scene);
+  await torch.load(TORCH_PICKUP_LOCATION.clone());
+  window.torch = torch;
+  const torchMarker = createWeaponMarker(0xffa54c);
+  torch.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    unequipOtherInventoryItems(TORCH_ITEM_ID);
+    const pickupHealth = normalizeTorchHealth(torch.mesh?.userData?.torchHealth);
+    addToInventory(TORCH_ITEM_ID, 1, { torchHealth: pickupHealth });
+    const torchEntry = inventoryState[TORCH_ITEM_ID];
+    const healths = getTorchHealths(torchEntry);
+    equippedTorchIndex = healths.length ? healths.length - 1 : null;
+    torch.mesh.userData.torchHealth = pickupHealth;
+  };
+  torch.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    if (shouldRemoveFromInventory) {
+      const result = takeTorchHealth(inventoryState, equippedTorchIndex);
+      if (result?.health != null) {
+        torch.mesh.userData.torchHealth = result.health;
+      }
+      equippedTorchIndex = null;
+      persistInventoryAndStorage();
+    }
+  };
+  if (torch.mesh) {
+    torch.mesh.userData.hideInMapView = true;
+    torch.mesh.userData.torchHealth = DEFAULT_TORCH_HEALTH;
+  }
+  registerNetworkedEntity('torch', {
+    getState: () => {
+      if (!torch?.mesh) return null;
+      const pos = torch.mesh.position;
+      const q = torch.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: torch.holder === playerControls ? multiplayer?.getId?.() : null,
+        torchHealth: torch.mesh.userData.torchHealth ?? DEFAULT_TORCH_HEALTH
+      };
+    },
+    applyState: state => {
+      if (!torch?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        torch.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        torch.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      if (Number.isFinite(state.torchHealth)) {
+        torch.mesh.userData.torchHealth = normalizeTorchHealth(state.torchHealth);
+      }
+      torch.remoteHolderId = state.holderId ?? null;
+      if (state.holderId !== multiplayer?.getId?.() && torch.holder === playerControls) {
+        torch.holder = null;
+      }
+    },
+    isLocallyControlled: () => torch?.holder === playerControls
+  });
+
+  window.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -3037,6 +3105,33 @@ async function main() {
   displayedXp = initialXp;
   setXpBarProgress(displayedXp, displayedLevel);
   updatePlayerInfoUI();
+  const normalizeTorchHealth = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return DEFAULT_TORCH_HEALTH;
+    }
+    return Math.max(0, Math.min(DEFAULT_TORCH_HEALTH, numeric));
+  };
+  const normalizeTorchEntry = (entry = {}) => {
+    const countValue = Number.isFinite(entry.count) ? Math.max(0, Math.floor(entry.count)) : 0;
+    const healths = Array.isArray(entry[TORCH_HEALTH_KEY])
+      ? entry[TORCH_HEALTH_KEY].map(normalizeTorchHealth).filter(health => health > 0)
+      : [];
+    while (healths.length < countValue) {
+      healths.push(DEFAULT_TORCH_HEALTH);
+    }
+    if (healths.length > countValue) {
+      healths.length = countValue;
+    }
+    return {
+      ...entry,
+      count: healths.length,
+      [TORCH_HEALTH_KEY]: healths
+    };
+  };
+  const getTorchHealths = (entry) => (
+    Array.isArray(entry?.[TORCH_HEALTH_KEY]) ? [...entry[TORCH_HEALTH_KEY]] : []
+  );
   const inventoryCatalog = {
     iceGun: {
       name: 'Ice Gun',
@@ -3056,6 +3151,10 @@ async function main() {
     },
     lantern: {
       name: 'Lantern (Left Hand)',
+      icon: ''
+    },
+    torch: {
+      name: 'Torch (Left Hand)',
       icon: ''
     }
   };
@@ -3086,15 +3185,25 @@ async function main() {
   let inventoryDirty = false;
   let homeStorageDirty = false;
   Object.entries(inventoryState).forEach(([itemId, entry]) => {
-    const nextEntry = ensureCatalogEntry(itemId, entry);
-    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon) {
+    const catalogEntry = ensureCatalogEntry(itemId, entry);
+    const nextEntry = itemId === TORCH_ITEM_ID
+      ? normalizeTorchEntry(catalogEntry)
+      : catalogEntry;
+    const healthsChanged = itemId === TORCH_ITEM_ID
+      && JSON.stringify(nextEntry[TORCH_HEALTH_KEY]) !== JSON.stringify(entry?.[TORCH_HEALTH_KEY]);
+    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon || healthsChanged) {
       inventoryDirty = true;
     }
     inventoryState[itemId] = nextEntry;
   });
   Object.entries(homeStorageState).forEach(([itemId, entry]) => {
-    const nextEntry = ensureCatalogEntry(itemId, entry);
-    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon) {
+    const catalogEntry = ensureCatalogEntry(itemId, entry);
+    const nextEntry = itemId === TORCH_ITEM_ID
+      ? normalizeTorchEntry(catalogEntry)
+      : catalogEntry;
+    const healthsChanged = itemId === TORCH_ITEM_ID
+      && JSON.stringify(nextEntry[TORCH_HEALTH_KEY]) !== JSON.stringify(entry?.[TORCH_HEALTH_KEY]);
+    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon || healthsChanged) {
       homeStorageDirty = true;
     }
     homeStorageState[itemId] = nextEntry;
@@ -3126,6 +3235,13 @@ async function main() {
     };
     inventoryDirty = true;
   }
+  if (inventoryState[TORCH_ITEM_ID]?.name !== inventoryCatalog.torch.name) {
+    inventoryState[TORCH_ITEM_ID] = {
+      ...(inventoryState[TORCH_ITEM_ID] || {}),
+      name: inventoryCatalog.torch.name
+    };
+    inventoryDirty = true;
+  }
   if (homeStorageState.lantern?.name !== inventoryCatalog.lantern.name) {
     homeStorageState.lantern = {
       ...(homeStorageState.lantern || {}),
@@ -3133,13 +3249,21 @@ async function main() {
     };
     homeStorageDirty = true;
   }
+  if (homeStorageState[TORCH_ITEM_ID]?.name !== inventoryCatalog.torch.name) {
+    homeStorageState[TORCH_ITEM_ID] = {
+      ...(homeStorageState[TORCH_ITEM_ID] || {}),
+      name: inventoryCatalog.torch.name
+    };
+    homeStorageDirty = true;
+  }
   if (inventoryDirty || homeStorageDirty) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
   }
 
-  const equippableItems = new Set(['lantern', 'iceGun', 'bow', 'bomb', 'autumnSword']);
+  const equippableItems = new Set(['lantern', 'torch', 'iceGun', 'bow', 'bomb', 'autumnSword']);
   const inventoryHandSlots = {
     lantern: 'left',
+    torch: 'left',
     iceGun: 'right',
     bow: 'right',
     bomb: 'right',
@@ -3173,6 +3297,47 @@ async function main() {
     updateSettingsUI();
     updateHomeStorageUI();
   }
+
+  let equippedTorchIndex = null;
+  let torchHealthDirty = false;
+  let lastTorchHealthSaveAt = 0;
+
+  const updateTorchEntry = (state, entry) => {
+    if (!entry || !entry.count || !Array.isArray(entry[TORCH_HEALTH_KEY]) || !entry[TORCH_HEALTH_KEY].length) {
+      delete state[TORCH_ITEM_ID];
+      return;
+    }
+    state[TORCH_ITEM_ID] = ensureCatalogEntry(TORCH_ITEM_ID, entry);
+  };
+
+  const applyTorchHealths = (state, entry, healths) => {
+    const nextEntry = {
+      ...(entry || {}),
+      count: healths.length,
+      [TORCH_HEALTH_KEY]: healths
+    };
+    updateTorchEntry(state, nextEntry);
+  };
+
+  const takeTorchHealth = (state, preferredIndex = null) => {
+    const entry = state[TORCH_ITEM_ID];
+    if (!entry) return null;
+    const healths = getTorchHealths(entry);
+    if (!healths.length) return null;
+    let index = Number.isInteger(preferredIndex) ? preferredIndex : healths.length - 1;
+    if (index < 0 || index >= healths.length) {
+      index = healths.length - 1;
+    }
+    const [health] = healths.splice(index, 1);
+    applyTorchHealths(state, entry, healths);
+    return { health, index };
+  };
+
+  const addTorchHealths = (state, entry, healthsToAdd) => {
+    const healths = getTorchHealths(entry);
+    healths.push(...healthsToAdd);
+    applyTorchHealths(state, entry, healths);
+  };
 
   function setIceAmmoCount(amount) {
     if (!Number.isFinite(amount)) return;
@@ -3224,9 +3389,27 @@ async function main() {
     setArrowAmmoCount(nextAmount);
   }
 
-  function addToInventory(itemId, amount = 1) {
+  function addToInventory(itemId, amount = 1, options = {}) {
     if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
     const current = inventoryState[itemId];
+    if (itemId === TORCH_ITEM_ID) {
+      const healthsToAdd = Array.isArray(options.torchHealths)
+        ? options.torchHealths.map(normalizeTorchHealth)
+        : [];
+      const singleHealth = Number.isFinite(options.torchHealth)
+        ? normalizeTorchHealth(options.torchHealth)
+        : null;
+      while (healthsToAdd.length < amount) {
+        if (singleHealth != null && healthsToAdd.length === 0) {
+          healthsToAdd.push(singleHealth);
+        } else {
+          healthsToAdd.push(DEFAULT_TORCH_HEALTH);
+        }
+      }
+      addTorchHealths(inventoryState, current, healthsToAdd);
+      persistInventoryAndStorage();
+      return;
+    }
     const nextCount = (current?.count || 0) + amount;
     inventoryState[itemId] = ensureCatalogEntry(itemId, { ...current, count: nextCount });
     if (window.DEBUG_INVENTORY) {
@@ -3239,6 +3422,16 @@ async function main() {
     if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
     const current = inventoryState[itemId];
     if (!current) return;
+    if (itemId === TORCH_ITEM_ID) {
+      const healths = getTorchHealths(current);
+      const nextHealths = healths.slice(0, Math.max(0, healths.length - amount));
+      applyTorchHealths(inventoryState, current, nextHealths);
+      if (equippedTorchIndex != null && equippedTorchIndex >= nextHealths.length) {
+        equippedTorchIndex = nextHealths.length ? nextHealths.length - 1 : null;
+      }
+      persistInventoryAndStorage();
+      return;
+    }
     const nextCount = current.count - amount;
     if (nextCount > 0) {
       inventoryState[itemId] = { ...current, count: nextCount };
@@ -3261,6 +3454,21 @@ async function main() {
 
   function storeHomeStorageItem(itemId) {
     if (!itemId) return;
+    if (itemId === TORCH_ITEM_ID) {
+      const current = inventoryState[itemId];
+      if (!current || !current.count) return;
+      const preferredIndex = isInventoryItemEquipped(itemId) ? equippedTorchIndex : null;
+      const result = takeTorchHealth(inventoryState, preferredIndex);
+      if (!result) return;
+      if (isInventoryItemEquipped(itemId) && result.index === equippedTorchIndex) {
+        equippedTorchIndex = null;
+        unequipInventoryItem(itemId);
+      }
+      const existingStorage = homeStorageState[itemId];
+      addTorchHealths(homeStorageState, existingStorage, [result.health]);
+      persistInventoryAndStorage();
+      return;
+    }
     const current = inventoryState[itemId];
     if (!current || !current.count) return;
 
@@ -3287,6 +3495,16 @@ async function main() {
 
   function takeOutHomeStorageItem(itemId) {
     if (!itemId) return;
+    if (itemId === TORCH_ITEM_ID) {
+      const current = homeStorageState[itemId];
+      if (!current || !current.count) return;
+      const result = takeTorchHealth(homeStorageState);
+      if (!result) return;
+      const inventoryEntry = inventoryState[itemId];
+      addTorchHealths(inventoryState, inventoryEntry, [result.health]);
+      persistInventoryAndStorage();
+      return;
+    }
     const current = homeStorageState[itemId];
     if (!current || !current.count) return;
 
@@ -3313,6 +3531,9 @@ async function main() {
     if (itemId === 'lantern') {
       return lantern?.holder === playerControls;
     }
+    if (itemId === 'torch') {
+      return torch?.holder === playerControls;
+    }
     if (itemId === 'iceGun') {
       return iceGun?.holder === playerControls;
     }
@@ -3330,6 +3551,7 @@ async function main() {
 
   function getEquippedInventoryItemIdForHand(hand) {
     if (hand === 'left') {
+      if (isInventoryItemEquipped('torch')) return 'torch';
       if (isInventoryItemEquipped('lantern')) return 'lantern';
       return null;
     }
@@ -3381,6 +3603,39 @@ async function main() {
       }
       lantern.mesh.visible = true;
       lantern.holder = playerControls;
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === TORCH_ITEM_ID) {
+      if (!torch?.mesh || !playerControls) return;
+      if (torch.remoteHolderId && torch.remoteHolderId !== multiplayer?.getId?.()) return;
+      const entry = inventoryState[TORCH_ITEM_ID];
+      const healths = getTorchHealths(entry);
+      if (!healths.length) {
+        updateTorchEntry(inventoryState, null);
+        persistInventoryAndStorage();
+        return;
+      }
+      if (!Number.isInteger(equippedTorchIndex) || equippedTorchIndex >= healths.length) {
+        equippedTorchIndex = healths.findIndex(health => health > 0);
+      }
+      if (equippedTorchIndex < 0) {
+        updateTorchEntry(inventoryState, null);
+        persistInventoryAndStorage();
+        return;
+      }
+      const shouldDuplicateDrop = torch.mesh.visible && torch.holder !== playerControls;
+      if (shouldDuplicateDrop) {
+        createDroppedWeaponPickup(torch, {
+          itemId: TORCH_ITEM_ID,
+          markerColor: 0xffa54c,
+          markerOffsetY: 1.2,
+          torchHealth: healths[equippedTorchIndex]
+        });
+      }
+      torch.mesh.userData.torchHealth = healths[equippedTorchIndex];
+      torch.mesh.visible = true;
+      torch.holder = playerControls;
       updateSettingsUI();
       return;
     }
@@ -3443,6 +3698,15 @@ async function main() {
       lantern.holder = null;
       if (lantern.mesh) {
         lantern.mesh.visible = false;
+      }
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === TORCH_ITEM_ID) {
+      if (torch?.holder !== playerControls) return;
+      torch.holder = null;
+      if (torch.mesh) {
+        torch.mesh.visible = false;
       }
       updateSettingsUI();
       return;
@@ -3756,7 +4020,8 @@ async function main() {
       markerOffsetY,
       position,
       quaternion,
-      allowHidden = false
+      allowHidden = false,
+      torchHealth
     } = {}
   ) {
     if (!item?.mesh || (!allowHidden && !item.mesh.visible)) return;
@@ -3773,6 +4038,9 @@ async function main() {
     }
     pickupMesh.visible = true;
     pickupMesh.userData.hideInMapView = item.mesh.userData?.hideInMapView;
+    if (itemId === TORCH_ITEM_ID && Number.isFinite(torchHealth)) {
+      pickupMesh.userData.torchHealth = normalizeTorchHealth(torchHealth);
+    }
     scene.add(pickupMesh);
     const marker = createWeaponMarker(markerColor);
     const pickup = {
@@ -3781,12 +4049,19 @@ async function main() {
       itemId,
       type: item?.type || itemId,
       holder: null,
+      torchHealth: Number.isFinite(torchHealth) ? normalizeTorchHealth(torchHealth) : null,
       markerOffsetY,
       tryPickup: (playerControls) => {
         if (!pickupMesh?.visible || !playerControls?.playerModel) return;
         const distance = playerControls.playerModel.position.distanceTo(pickupMesh.position);
         if (distance > 3) return;
-        addToInventory(itemId, 1);
+        if (itemId === TORCH_ITEM_ID) {
+          addToInventory(itemId, 1, {
+            torchHealth: pickup.torchHealth ?? pickupMesh.userData.torchHealth ?? DEFAULT_TORCH_HEALTH
+          });
+        } else {
+          addToInventory(itemId, 1);
+        }
         equipInventoryItem(itemId);
         const index = droppedWeaponPickups.indexOf(pickup);
         if (index !== -1) {
@@ -3826,7 +4101,8 @@ async function main() {
       bow,
       bomb,
       autumnSword,
-      lantern
+      lantern,
+      torch
     };
     const item = itemMap[itemId];
     if (!item?.mesh) {
@@ -3834,7 +4110,7 @@ async function main() {
       updateSettingsUI();
       return;
     }
-    const shouldDuplicatePickup = (itemId === 'bow' || itemId === 'lantern')
+    const shouldDuplicatePickup = (itemId === 'bow' || itemId === 'lantern' || itemId === TORCH_ITEM_ID)
       && item.mesh.visible
       && item.holder !== playerControls;
     if (item.holder === playerControls) {
@@ -3843,8 +4119,25 @@ async function main() {
       return;
     }
     if (shouldDuplicatePickup) {
-      const markerColor = itemId === 'bow' ? 0xffc26b : 0xffd400;
-      createDroppedWeaponPickup(item, { itemId, markerColor, markerOffsetY: 1.2 });
+      const markerColor = itemId === 'bow'
+        ? 0xffc26b
+        : itemId === TORCH_ITEM_ID
+          ? 0xffa54c
+          : 0xffd400;
+      const torchPickupHealth = itemId === TORCH_ITEM_ID
+        ? takeTorchHealth(inventoryState)?.health
+        : null;
+      createDroppedWeaponPickup(item, {
+        itemId,
+        markerColor,
+        markerOffsetY: 1.2,
+        torchHealth: torchPickupHealth ?? undefined
+      });
+      if (itemId === TORCH_ITEM_ID) {
+        persistInventoryAndStorage();
+      }
+      updateSettingsUI();
+      return;
     }
     item.holder = null;
     item.mesh.visible = true;
@@ -3852,7 +4145,15 @@ async function main() {
     if (playerControls?.playerModel?.quaternion) {
       item.mesh.quaternion.copy(playerControls.playerModel.quaternion);
     }
-    removeFromInventory(itemId, 1);
+    if (itemId === TORCH_ITEM_ID) {
+      const result = takeTorchHealth(inventoryState);
+      if (result?.health != null) {
+        item.mesh.userData.torchHealth = result.health;
+      }
+      persistInventoryAndStorage();
+    } else {
+      removeFromInventory(itemId, 1);
+    }
     updateSettingsUI();
   }
 
@@ -3981,6 +4282,7 @@ async function main() {
     if ((inventoryState.bomb?.count || 0) > 0) weaponDrops.push('bomb');
     if ((inventoryState.autumnSword?.count || 0) > 0) weaponDrops.push('autumnSword');
     if ((inventoryState.lantern?.count || 0) > 0) weaponDrops.push('lantern');
+    if ((inventoryState[TORCH_ITEM_ID]?.count || 0) > 0) weaponDrops.push(TORCH_ITEM_ID);
     const weaponPositions = createRingPositions(deathPosition, weaponDrops.length, 2.2);
     weaponDrops.forEach((weaponId, index) => {
       const position = weaponPositions[index] || deathPosition;
@@ -3994,6 +4296,10 @@ async function main() {
         spawnAutumnSwordPickup(position);
       } else if (weaponId === 'lantern') {
         spawnLanternPickup(position);
+      } else if (weaponId === TORCH_ITEM_ID) {
+        const torchEntry = inventoryState[TORCH_ITEM_ID];
+        const torchHealth = getTorchHealths(torchEntry)[0] ?? DEFAULT_TORCH_HEALTH;
+        spawnTorchPickup(position, torchHealth);
       }
     });
 
@@ -4918,6 +5224,22 @@ async function main() {
     lantern.mesh.quaternion.set(0, 0, 0, 1);
     lantern.mesh.visible = true;
     lantern.holder = null;
+  }
+
+  function spawnTorchPickup(position, torchHealth = DEFAULT_TORCH_HEALTH) {
+    if (!torch?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (!Number.isFinite(terrainHeight)) return;
+
+    spawnPos.y = terrainHeight + 0.2;
+    torch.mesh.position.copy(spawnPos);
+    torch.mesh.quaternion.set(0, 0, 0, 1);
+    torch.mesh.visible = true;
+    torch.mesh.userData.torchHealth = normalizeTorchHealth(torchHealth);
+    torch.holder = null;
   }
 
   function spawnTreasureChestPickup(position) {
@@ -6893,6 +7215,46 @@ async function main() {
         saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
       }
     }
+    if (torch?.holder === playerControls) {
+      const entry = inventoryState[TORCH_ITEM_ID];
+      const healths = getTorchHealths(entry);
+      if (!healths.length) {
+        equippedTorchIndex = null;
+        unequipInventoryItem(TORCH_ITEM_ID);
+      } else {
+        if (!Number.isInteger(equippedTorchIndex) || equippedTorchIndex >= healths.length) {
+          equippedTorchIndex = healths.findIndex(health => health > 0);
+        }
+        if (equippedTorchIndex < 0) {
+          equippedTorchIndex = null;
+          applyTorchHealths(inventoryState, entry, []);
+          unequipInventoryItem(TORCH_ITEM_ID);
+        } else {
+          const currentHealth = healths[equippedTorchIndex];
+          const nextHealth = Math.max(0, currentHealth - TORCH_HEALTH_DECAY_PER_SECOND * frameDelta);
+          if (nextHealth <= 0) {
+            healths.splice(equippedTorchIndex, 1);
+            equippedTorchIndex = null;
+            applyTorchHealths(inventoryState, entry, healths);
+            torch.mesh.userData.torchHealth = 0;
+            unequipInventoryItem(TORCH_ITEM_ID);
+            persistInventoryAndStorage();
+            torchHealthDirty = false;
+            lastTorchHealthSaveAt = now;
+          } else if (nextHealth !== currentHealth) {
+            healths[equippedTorchIndex] = nextHealth;
+            applyTorchHealths(inventoryState, entry, healths);
+            torch.mesh.userData.torchHealth = nextHealth;
+            torchHealthDirty = true;
+          }
+        }
+      }
+    }
+    if (torchHealthDirty && now - lastTorchHealthSaveAt >= 1000) {
+      persistInventoryAndStorage();
+      torchHealthDirty = false;
+      lastTorchHealthSaveAt = now;
+    }
 
     const pickupTime = performance.now() * 0.002;
     const shouldCheckPickups = !PERF.throttlePickups || now - lastPickupCheckMs >= PICKUP_CHECK_INTERVAL_MS;
@@ -7095,6 +7457,7 @@ async function main() {
     bomb?.update();
     autumnSword?.update();
     lantern?.update();
+    torch?.update();
     if (bowHeldArrow) {
       const shouldShowArrow = bow?.holder === playerControls && playerControls?.isFireHeld;
       bowHeldArrow.visible = shouldShowArrow;
@@ -7104,6 +7467,7 @@ async function main() {
     updateWeaponMarker(bomb, bombMarker, 0.03);
     updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
     updateWeaponMarker(lantern, lanternMarker, 0.03);
+    updateWeaponMarker(torch, torchMarker, 0.03);
     droppedWeaponPickups.forEach(pickup => {
       updateWeaponMarker(pickup, pickup.marker, 0.03, pickup.markerOffsetY ?? 1.2);
     });
