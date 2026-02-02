@@ -1816,17 +1816,21 @@ export class PlayerControls {
   }
 
   getEquippedWeapon() {
-    return this.getWeapons().find(weapon => weapon.holder === this) || null;
+    return this.getWeapons().find(weapon => weapon.holder === this && weapon.hand !== 'left') || null;
   }
 
   getEquippedGun() {
     return this.getWeapons().find(
-      weapon => weapon.holder === this && (weapon.type === 'gun' || weapon.type === 'bow')
+      weapon => weapon.holder === this
+        && weapon.hand !== 'left'
+        && (weapon.type === 'gun' || weapon.type === 'bow')
     ) || null;
   }
 
   getEquippedSword() {
-    return this.getWeapons().find(weapon => weapon.holder === this && weapon.type === 'sword') || null;
+    return this.getWeapons().find(
+      weapon => weapon.holder === this && weapon.hand !== 'left' && weapon.type === 'sword'
+    ) || null;
   }
 
   updateInteractionPrompt() {

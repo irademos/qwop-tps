@@ -13,6 +13,7 @@ export class Weapon {
     this.type = options.type || 'weapon';
     this.itemId = options.itemId || this.type;
     this.modelUrl = options.modelUrl || '';
+    this.hand = options.hand || 'right';
     this.onPickup = null;
     this.onDrop = null;
     this.heldMesh = null;
@@ -162,30 +163,40 @@ export class Weapon {
     if (!playerModel) return null;
 
     if (this._handBones.has(playerModel)) {
-      return this._handBones.get(playerModel);
+      const cached = this._handBones.get(playerModel);
+      if (cached?.[this.hand]) {
+        return cached[this.hand];
+      }
     }
 
     const root = playerModel.userData?.pivot ?? playerModel;
-    let handBone = null;
+    let leftHandBone = null;
+    let rightHandBone = null;
+    let anyHandBone = null;
 
     root.traverse(child => {
-      if (handBone || !child.isBone || !child.name) return;
+      if ((!child.isBone || !child.name)) return;
       const name = child.name.toLowerCase();
-      if (name.includes('righthand')) {
-        handBone = child;
+      if (!rightHandBone && name.includes('righthand')) {
+        rightHandBone = child;
+      }
+      if (!leftHandBone && name.includes('lefthand')) {
+        leftHandBone = child;
+      }
+      if (!anyHandBone && name.includes('hand')) {
+        anyHandBone = child;
       }
     });
 
-    if (!handBone) {
-      root.traverse(child => {
-        if (handBone || !child.isBone || !child.name) return;
-        if (child.name.toLowerCase().includes('hand')) {
-          handBone = child;
-        }
-      });
-    }
+    const resolved = this.hand === 'left'
+      ? leftHandBone || anyHandBone || rightHandBone
+      : rightHandBone || anyHandBone || leftHandBone;
 
-    this._handBones.set(playerModel, handBone || null);
-    return handBone || null;
+    this._handBones.set(playerModel, {
+      left: leftHandBone || anyHandBone || null,
+      right: rightHandBone || anyHandBone || null,
+      any: anyHandBone || null
+    });
+    return resolved || null;
   }
 }
