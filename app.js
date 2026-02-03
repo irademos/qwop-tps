@@ -4017,17 +4017,18 @@ async function main() {
     } else {
       tree.getWorldPosition(tempTreePosition);
     }
+    const treeFireRadius = Math.max(2.6, tree.userData?.boundsRadius ?? 0);
     const treeFire = createFire({
-      particleCount: 22,
-      spread: 3.4,
-      sizeRange: [0.45, 1.1],
+      particleCount: 36,
+      spread: treeFireRadius * 1.6,
+      sizeRange: [0.55, 1.4],
       lightSettings: {
         color: 0xffc077,
         intensity: 4.5,
         distance: 70,
         decay: 1.1
       },
-      lightOffset: new THREE.Vector3(0, 2.8, 0),
+      lightOffset: new THREE.Vector3(0, treeFireRadius * 0.9, 0),
       pulse: {
         base: 0.8,
         variance: 0.2,
@@ -4038,6 +4039,7 @@ async function main() {
     });
     if (treeFire?.group) {
       treeFire.group.position.copy(tempTreePosition);
+      treeFire.group.position.y += treeFireRadius * 0.7;
       treeFire.group.userData.skipTerrainCorrection = true;
       scene.add(treeFire.group);
       tree.userData.fireEffect = treeFire;
