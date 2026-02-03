@@ -6,6 +6,7 @@ const TOWER_MODEL_URL = '/assets/props/tower.glb';
 const TOWER_SCALE = 1;
 const TOWER_POSITION = new THREE.Vector3(-8, 0, -4);
 const TOWER_Y_OFFSET = -1.08;
+const TOWER_COLLIDER_SIZE = new THREE.Vector3(3.2, 9, 3.2);
 const TOWER_CLIMB_AREA_SIZE = {
   widthRatio: 0.15,
   depthRatio: 0.1,
@@ -14,8 +15,6 @@ const TOWER_CLIMB_AREA_SIZE = {
   surfaceOffset: -1.5
 };
 const TOWER_CLIMB_SIDE = 'south';
-
-const debugMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
 
 const setTowerShadows = (tower) => {
   tower.traverse((child) => {
@@ -78,22 +77,31 @@ const buildClimbArea = (tower) => {
   };
 };
 
-const addClimbDebugLines = (area, parent) => {
-  if (!area || !parent) return;
-  parent.position.copy(area.center);
-  parent.rotation.y = area.rotationY ?? 0;
-  const width = (area.halfWidth ?? 0) * 2;
-  const height = (area.halfHeight ?? 0) * 2;
-  const depth = (area.halfDepth ?? 0) * 2;
-  if (width <= 0 || height <= 0 || depth <= 0) return;
-  const geometry = new THREE.BoxGeometry(width, height, depth);
-  const edges = new THREE.EdgesGeometry(geometry);
-  const lines = new THREE.LineSegments(edges, debugMaterial);
-  lines.position.set(0, 0, 0);
-  parent.add(lines);
+const addTowerCollider = ({ tower, rapierWorld, rapier }) => {
+  if (!tower || !rapierWorld || !rapier) return null;
+  const bounds = new THREE.Box3().setFromObject(tower);
+  if (!Number.isFinite(bounds.min.y)) return null;
+
+  const center = bounds.getCenter(new THREE.Vector3());
+  const halfSize = TOWER_COLLIDER_SIZE.clone().multiplyScalar(0.5);
+  const colliderCenter = new THREE.Vector3(
+    center.x,
+    bounds.min.y + halfSize.y,
+    center.z
+  );
+
+  const rbDesc = rapier.RigidBodyDesc.fixed()
+    .setTranslation(colliderCenter.x, colliderCenter.y, colliderCenter.z);
+  const rb = rapierWorld.createRigidBody(rbDesc);
+
+  const colDesc = rapier.ColliderDesc.cuboid(halfSize.x, halfSize.y, halfSize.z)
+    .setRestitution(0)
+    .setFriction(1);
+  rapierWorld.createCollider(colDesc, rb);
+  return rb;
 };
 
-export async function createTower({ scene, getTerrainHeight } = {}) {
+export async function createTower({ scene, getTerrainHeight, rapierWorld, rapier } = {}) {
   if (!scene) return null;
 
   const loader = new GLTFLoader();
@@ -119,11 +127,9 @@ export async function createTower({ scene, getTerrainHeight } = {}) {
   const climbArea = buildClimbArea(tower);
   if (climbArea) {
     setClimbableAreas('tower', [climbArea]);
-    const debugGroup = new THREE.Group();
-    debugGroup.name = 'tower-climb-debug';
-    addClimbDebugLines(climbArea, debugGroup);
-    scene.add(debugGroup);
   }
+
+  addTowerCollider({ tower, rapierWorld, rapier });
 
   scene.add(tower);
   return tower;
@@ -132,6 +138,7 @@ export async function createTower({ scene, getTerrainHeight } = {}) {
 export {
   TOWER_CLIMB_AREA_SIZE,
   TOWER_CLIMB_SIDE,
+  TOWER_COLLIDER_SIZE,
   TOWER_POSITION,
   TOWER_SCALE
 };

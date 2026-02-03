@@ -2190,7 +2190,7 @@ async function main() {
     scatterCenter: playerModel?.position,
     scatterRadius: PICKUP_SPAWN_RADIUS
   });
-  await createTower({ scene, getTerrainHeight });
+  await createTower({ scene, getTerrainHeight, rapierWorld, rapier: RAPIER });
   mushroomPickups = mushroomController?.pickups || [];
   window.mushroomPickups = mushroomPickups;
   let didInitialGpsSnap = false;
