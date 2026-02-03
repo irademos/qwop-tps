@@ -120,7 +120,7 @@ export async function createTower({ scene, getTerrainHeight } = {}) {
     const debugGroup = new THREE.Group();
     debugGroup.name = 'tower-climb-debug';
     addClimbDebugLines(climbArea, debugGroup);
-    tower.add(debugGroup);
+    scene.add(debugGroup);
   }
 
   scene.add(tower);
