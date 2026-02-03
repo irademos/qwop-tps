@@ -25,7 +25,8 @@ export function updateMeleeAttacks({
   multiplayer,
   sendMonsterAttack,
   onMonsterHit,
-  onSwordHit
+  onSwordHit,
+  onTorchHit
 }) {
   const now = Date.now();
   const isHost = !multiplayer || multiplayer.isHost;
@@ -49,6 +50,11 @@ export function updateMeleeAttacks({
       const attackDamage = getStrengthDamage(attacker.id, cfg.damage);
       if (attackName === 'swordSlash' && attacker.id === 'local') {
         onSwordHit?.({ attacker, range: cfg.range });
+      }
+      if (attackName === 'mutantPunch'
+        && attacker.id === 'local'
+        && attacker.model.userData?.equippedWeaponType === 'torch') {
+        onTorchHit?.({ attacker, range: cfg.range });
       }
       for (const target of players) {
         if (target === attacker) continue;

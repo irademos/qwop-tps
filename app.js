@@ -2029,6 +2029,7 @@ async function main() {
     const healths = getTorchHealths(torchEntry);
     equippedTorchIndex = healths.length ? healths.length - 1 : null;
     torch.mesh.userData.torchHealth = pickupHealth;
+    setPlayerWeaponType(holder, torch.type);
   };
   torch.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
@@ -2040,6 +2041,7 @@ async function main() {
       equippedTorchIndex = null;
       persistInventoryAndStorage();
     }
+    clearPlayerWeaponType(holder, torch.type);
   };
   if (torch.mesh) {
     torch.mesh.userData.hideInMapView = true;
@@ -2070,9 +2072,12 @@ async function main() {
       if (Number.isFinite(state.torchHealth)) {
         torch.mesh.userData.torchHealth = normalizeTorchHealth(state.torchHealth);
       }
+      const previousHolderId = torch.remoteHolderId ?? null;
       torch.remoteHolderId = state.holderId ?? null;
+      updateRemoteWeaponType(torch, torch.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && torch.holder === playerControls) {
         torch.holder = null;
+        clearPlayerWeaponType(playerControls, torch.type);
       }
     },
     isLocallyControlled: () => torch?.holder === playerControls
@@ -3641,6 +3646,7 @@ async function main() {
       torch.mesh.userData.torchHealth = healths[equippedTorchIndex];
       torch.mesh.visible = true;
       torch.holder = playerControls;
+      setPlayerWeaponType(playerControls, torch.type);
       updateSettingsUI();
       return;
     }
@@ -3713,6 +3719,7 @@ async function main() {
       if (torch.mesh) {
         torch.mesh.visible = false;
       }
+      clearPlayerWeaponType(playerControls, torch.type);
       updateSettingsUI();
       return;
     }
@@ -3993,6 +4000,26 @@ async function main() {
       }
       natureController?.removeTree?.(tree);
     }
+  }
+
+  function handleTorchTreeHit({ attacker, range }) {
+    if (!attacker?.model?.position) return;
+    const effectiveRange = (Number.isFinite(range) ? range : 0) + TREE_HIT_RANGE_BOOST;
+    const tree = natureController?.getClosestTree?.(attacker.model.position, effectiveRange);
+    if (!tree || tree.userData?.isCutDown || !tree.userData?.isFlammable) return;
+    if (tree.userData?.isBurning) return;
+    tree.userData.isBurning = true;
+    const centerLocal = tree.userData?.boundsCenterLocal;
+    if (centerLocal) {
+      tempTreePosition.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+    } else {
+      tree.getWorldPosition(tempTreePosition);
+    }
+    spawnBombMist(scene, bombMists, tempTreePosition);
+    tree.userData.burnTimeout = setTimeout(() => {
+      if (!tree.userData?.isBurning) return;
+      natureController?.removeTree?.(tree);
+    }, BOMB_MIST_LIFETIME_MS);
   }
 
   function disposeDroppedWeaponPickup(pickup) {
@@ -7788,7 +7815,8 @@ async function main() {
       multiplayer,
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage,
-      onSwordHit: handleSwordTreeHit
+      onSwordHit: handleSwordTreeHit,
+      onTorchHit: handleTorchTreeHit
     });
 
     renderer.render(scene, camera);
