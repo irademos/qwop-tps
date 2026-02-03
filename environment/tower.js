@@ -6,9 +6,9 @@ const TOWER_MODEL_URL = '/assets/props/tower.glb';
 const TOWER_SCALE = 1;
 const TOWER_POSITION = new THREE.Vector3(-8, 0, -4);
 const TOWER_Y_OFFSET = -1.08;
-const TOWER_FENCE_HEIGHT = 0.1;
-const TOWER_FENCE_THICKNESS = 0.1;
-const TOWER_COLLIDER_SIZE = new THREE.Vector3(6.0, 10.5, 6.0);
+const TOWER_FENCE_HEIGHT = 1.2;
+const TOWER_FENCE_THICKNESS = 0.7;
+const TOWER_COLLIDER_SIZE = new THREE.Vector3(5.0, 10.5, 3.2);
 const TOWER_CLIMB_AREA_SIZE = {
   widthRatio: 0.15,
   depthRatio: 0.1,
