@@ -562,6 +562,8 @@ async function main() {
   const PICKUP_RADIUS = 1.2;
   const APPLE_PICKUP_RADIUS = 3;
   const WOOD_ITEM_ID = 'wood';
+  const LIFE_POTION_ITEM_ID = 'life_potion';
+  const MANA_POTION_ITEM_ID = 'mana_potion';
   const WOOD_PICKUP_RADIUS = 3;
   const WOOD_DROP_LIFT = 0.12;
   const TREE_HITS_TO_CUT = 3;
@@ -635,6 +637,7 @@ async function main() {
   const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
   const appleItemIds = new Set([APPLE_ITEM_ID]);
   const woodItemIds = new Set([WOOD_ITEM_ID]);
+  const potionItemIds = new Set([LIFE_POTION_ITEM_ID, MANA_POTION_ITEM_ID]);
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
 
@@ -2866,6 +2869,7 @@ async function main() {
     health: playerProfile.stats.health,
     hunger: playerProfile.stats.hunger,
     energy: playerProfile.stats.energy,
+    magic: playerProfile.stats.magic,
     level: playerProfile.stats.level,
     strength: playerProfile.stats.strength,
     agility: playerProfile.stats.agility,
@@ -3170,6 +3174,14 @@ async function main() {
     torch: {
       name: 'Torch (Left Hand)',
       icon: ''
+    },
+    [LIFE_POTION_ITEM_ID]: {
+      name: 'Life Potion',
+      icon: ''
+    },
+    [MANA_POTION_ITEM_ID]: {
+      name: 'Mana Potion',
+      icon: ''
     }
   };
   inventoryCatalog[APPLE_ITEM_ID] = {
@@ -3288,9 +3300,13 @@ async function main() {
   const isAppleItem = (itemId) => appleItemIds.has(itemId);
   const isWoodItem = (itemId) => woodItemIds.has(itemId);
   const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId);
+  const isPotionItem = (itemId) => potionItemIds.has(itemId);
   const getInventoryItemActions = (itemId) => {
     if (isFoodItem(itemId)) {
       return ['drop', 'eat'];
+    }
+    if (isPotionItem(itemId)) {
+      return ['drop', 'use'];
     }
     if (equippableItems.has(itemId)) {
       return ['drop', 'equip'];
@@ -4247,6 +4263,18 @@ async function main() {
     removeFromInventory(itemId, 1);
   }
 
+  function useInventoryItem(itemId) {
+    if (!itemId || !inventoryState[itemId]) return;
+    if (!isPotionItem(itemId)) return;
+    if (itemId === LIFE_POTION_ITEM_ID) {
+      setStat('health', 100, { skipSave: true });
+    }
+    if (itemId === MANA_POTION_ITEM_ID) {
+      setStat('magic', 100, { skipSave: true });
+    }
+    removeFromInventory(itemId, 1);
+  }
+
   let mapViewEnabled = false;
   let playerDead = false;
   const updateControlAvailability = () => {
@@ -4262,6 +4290,7 @@ async function main() {
   const healthFill = document.getElementById('health-fill');
   const hungerFill = document.getElementById('hunger-fill');
   const energyFill = document.getElementById('energy-fill');
+  const magicFill = document.getElementById('magic-fill');
 
   const createDropId = (index = 0) => {
     const owner = multiplayer?.getId?.() || 'local';
@@ -4399,8 +4428,14 @@ async function main() {
     }
   }
 
+  function updateMagicUI() {
+    if (magicFill) {
+      magicFill.style.width = `${statsState.magic}%`;
+    }
+  }
+
   const clampStat = (key, value) => {
-    if (['health', 'hunger', 'energy'].includes(key)) {
+    if (['health', 'hunger', 'energy', 'magic'].includes(key)) {
       const num = Number(value);
       if (!Number.isFinite(num)) {
         return 0;
@@ -4442,6 +4477,9 @@ async function main() {
     if (key === 'energy') {
       updateEnergyUI();
       updateEnergyEffects();
+    }
+    if (key === 'magic') {
+      updateMagicUI();
     }
     if (key === 'level') {
       updatePlayerInfoUI();
@@ -4574,10 +4612,16 @@ async function main() {
     get: () => statsState.energy,
     set: value => setStat('energy', value)
   });
+  Object.defineProperty(window, 'magic', {
+    configurable: true,
+    get: () => statsState.magic,
+    set: value => setStat('magic', value)
+  });
 
   updateHealthUI();
   updateHungerUI();
   updateEnergyUI();
+  updateMagicUI();
 
   if (offlineDecay.changed) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -6772,6 +6816,7 @@ async function main() {
     setStat('health', 100);
     setStat('hunger', 100);
     setStat('energy', 100);
+    setStat('magic', 100);
     const spawn = getSpawnPosition();
     liftPositionToBuildingTop(spawn, 0.6);
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
@@ -6966,6 +7011,7 @@ async function main() {
     unequipInventoryItem: (itemId) => unequipInventoryItem(itemId),
     dropInventoryItem: (itemId) => dropInventoryItem(itemId),
     eatInventoryItem: (itemId) => eatInventoryItem(itemId),
+    useInventoryItem: (itemId) => useInventoryItem(itemId),
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
     storeHomeStorageItem: (itemId) => storeHomeStorageItem(itemId),

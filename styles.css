@@ -391,7 +391,7 @@ body {
 
 #ammo-display {
   position: absolute;
-  top: 114px;
+  top: 138px;
   left: 10px;
   display: flex;
   align-items: center;
@@ -409,7 +409,7 @@ body {
 
 #ammo-popup {
   position: absolute;
-  top: 140px;
+  top: 164px;
   left: 10px;
   padding: 6px 10px;
   background: rgba(0, 0, 0, 0.7);
@@ -432,7 +432,7 @@ body {
 
 #coin-popup {
   position: absolute;
-  top: 168px;
+  top: 192px;
   left: 10px;
   padding: 6px 10px;
   background: rgba(23, 16, 0, 0.8);
@@ -455,7 +455,7 @@ body {
 
 #treasure-popup {
   position: absolute;
-  top: 196px;
+  top: 220px;
   left: 10px;
   padding: 6px 10px;
   background: rgba(25, 10, 40, 0.85);

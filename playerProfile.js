@@ -9,6 +9,7 @@ const DEFAULT_STATS = {
   health: 100,
   hunger: 100,
   energy: 100,
+  magic: 100,
   level: 1,
   strength: 5,
   agility: 5,
@@ -81,7 +82,7 @@ function normalizeStatValue(key, value) {
   if (!Number.isFinite(numeric)) {
     return fallback;
   }
-  if (['health', 'hunger', 'energy'].includes(key)) {
+  if (['health', 'hunger', 'energy', 'magic'].includes(key)) {
     return Math.max(0, Math.min(100, numeric));
   }
   if (key === 'level') {

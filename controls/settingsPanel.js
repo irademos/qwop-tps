@@ -272,13 +272,16 @@ function buildInventoryPanel() {
   const dropButton = createElement('button', 'settings-button', 'Drop');
   dropButton.type = 'button';
   dropButton.dataset.inventoryAction = 'drop';
+  const useButton = createElement('button', 'settings-button', 'Use');
+  useButton.type = 'button';
+  useButton.dataset.inventoryAction = 'use';
   const equipButton = createElement('button', 'settings-button', 'Equip');
   equipButton.type = 'button';
   equipButton.dataset.inventoryAction = 'equip';
   const eatButton = createElement('button', 'settings-button', 'Eat');
   eatButton.type = 'button';
   eatButton.dataset.inventoryAction = 'eat';
-  actions.append(dropButton, equipButton, eatButton);
+  actions.append(dropButton, useButton, equipButton, eatButton);
   details.append(detailsText, actions);
 
   panelEl.append(grid, emptyState, details);
@@ -289,6 +292,7 @@ function buildInventoryPanel() {
   elements.inventoryDetailsContainer = details;
   elements.inventoryActions = actions;
   elements.inventoryDropButton = dropButton;
+  elements.inventoryUseButton = useButton;
   elements.inventoryEquipButton = equipButton;
   elements.inventoryEatButton = eatButton;
 
@@ -1091,6 +1095,10 @@ function renderInventory() {
       const canDrop = itemActions.includes('drop');
       elements.inventoryDropButton.style.display = canDrop ? 'inline-flex' : 'none';
     }
+    if (elements.inventoryUseButton) {
+      const canUse = itemActions.includes('use');
+      elements.inventoryUseButton.style.display = canUse ? 'inline-flex' : 'none';
+    }
     if (elements.inventoryEatButton) {
       const canEat = itemActions.includes('eat');
       elements.inventoryEatButton.style.display = canEat ? 'inline-flex' : 'none';
@@ -1120,6 +1128,8 @@ function bindEvents() {
       if (!selectedInventoryId) return;
       if (action === 'drop') {
         context.appState?.dropInventoryItem?.(selectedInventoryId);
+      } else if (action === 'use') {
+        context.appState?.useInventoryItem?.(selectedInventoryId);
       } else if (action === 'equip') {
         context.appState?.equipInventoryItem?.(selectedInventoryId);
       } else if (action === 'unequip') {
