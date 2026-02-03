@@ -24,6 +24,7 @@ import { TreasureChest } from './items/treasure_chest.js';
 import { Bed } from './items/bed.js';
 import { createNature } from './environment/nature.js';
 import { createCabin } from './environment/cabin.js';
+import { createTower } from './environment/tower.js';
 import { createMushrooms, MUSHROOM_ENTRIES } from './environment/mushrooms.js';
 import { createApples, APPLE_ITEM_ID } from './items/apple.js';
 import { createHomeSystem } from './home.js';
@@ -2187,6 +2188,7 @@ async function main() {
     scatterCenter: playerModel?.position,
     scatterRadius: PICKUP_SPAWN_RADIUS
   });
+  await createTower({ scene, getTerrainHeight });
   mushroomPickups = mushroomController?.pickups || [];
   window.mushroomPickups = mushroomPickups;
   let didInitialGpsSnap = false;
