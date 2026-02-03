@@ -1343,6 +1343,7 @@ export class PlayerControls {
     this.isClimbing = true;
     this.activeClimbArea = area;
     this.canJump = false;
+    this.currentSpecialAction = null;
   }
 
   stopClimbing() {
