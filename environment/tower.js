@@ -4,15 +4,16 @@ import { setClimbableAreas } from '../controls/climb.js';
 
 const TOWER_MODEL_URL = '/assets/props/tower.glb';
 const TOWER_SCALE = 1;
-const TOWER_POSITION = new THREE.Vector3(4, 0, -2);
+const TOWER_POSITION = new THREE.Vector3(-8, 0, -4);
+const TOWER_Y_OFFSET = -1.08;
 const TOWER_CLIMB_AREA_SIZE = {
-  widthRatio: 0.5,
-  depthRatio: 0.25,
+  widthRatio: 0.15,
+  depthRatio: 0.1,
   entryRadius: 0.9,
   entryHeight: 1.4,
-  surfaceOffset: 0.05
+  surfaceOffset: -1.5
 };
-const TOWER_CLIMB_SIDE = 'east';
+const TOWER_CLIMB_SIDE = 'south';
 
 const debugMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
 
@@ -111,7 +112,7 @@ export async function createTower({ scene, getTerrainHeight } = {}) {
 
   const x = TOWER_POSITION.x;
   const z = TOWER_POSITION.z;
-  const y = getTerrainHeight?.(x, z) ?? TOWER_POSITION.y;
+  const y = getTerrainHeight?.(x, z) + TOWER_Y_OFFSET ?? TOWER_POSITION.y;
   tower.position.set(x, y, z);
 
   tower.updateWorldMatrix(true, true);
