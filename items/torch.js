@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from '../environment/water.js';
+import { createFire } from '../environment/fire.js';
 import { Weapon } from './weapon.js';
 import { applyEmissiveGlow, LIGHT_SOURCE_CONFIGS } from '../light_sources.js';
 
@@ -9,9 +10,10 @@ export const TORCH_PICKUP_LOCATION = new THREE.Vector3(1.4, 0, 1.2);
 const DROP_OFFSET = new THREE.Vector3(0.8, 0, 0.6);
 const TORCH_HOLD_OFFSET = new THREE.Vector3(0.0, 0.08, 0.08);
 const TORCH_HOLD_ROTATION = new THREE.Euler(Math.PI + Math.PI / 7, Math.PI, 0 - Math.PI / 9, 'YXZ');
-const TORCH_MIST_OFFSET = new THREE.Vector3(0, 3.2, 0);
-const TORCH_MIST_PARTICLE_COUNT = 6;
-const TORCH_MIST_SPREAD = 1.2;
+const TORCH_FIRE_OFFSET = new THREE.Vector3(0, 3.2, 0);
+const TORCH_FIRE_PARTICLE_COUNT = 6;
+const TORCH_FIRE_SPREAD = 1.2;
+const TORCH_FIRE_SIZE_RANGE = [0.14, 0.39];
 
 export class Torch extends Weapon {
   constructor(scene) {
@@ -33,8 +35,7 @@ export class Torch extends Weapon {
     this._lightColor = config.lightColor;
     this._lightSettings = config.settings;
     this._emissiveColor = config.emissiveColor;
-    this._mistGroup = null;
-    this._mistMaterials = [];
+    this._fire = null;
   }
 
   async load(position) {
@@ -48,20 +49,31 @@ export class Torch extends Weapon {
 
     applyEmissiveGlow(this.mesh, this._emissiveColor, this._lightSettings.emissiveIntensity);
 
-    this.light = new THREE.PointLight(
-      this._lightColor,
-      this._lightSettings.intensity,
-      this._lightSettings.distance,
-      this._lightSettings.decay
-    );
-    this.light.position.copy(this._lightOffset);
-    this.mesh.add(this.light);
-
-    this._mistGroup = this._createMist();
-    if (this._mistGroup) {
-      this._mistGroup.position.copy(TORCH_MIST_OFFSET);
-      this._mistGroup.visible = false;
-      this.mesh.add(this._mistGroup);
+    const fire = createFire({
+      particleCount: TORCH_FIRE_PARTICLE_COUNT,
+      spread: TORCH_FIRE_SPREAD,
+      sizeRange: TORCH_FIRE_SIZE_RANGE,
+      lightSettings: {
+        color: this._lightColor,
+        intensity: this._lightSettings.intensity,
+        distance: this._lightSettings.distance,
+        decay: this._lightSettings.decay
+      },
+      lightOffset: this._lightOffset.clone().sub(TORCH_FIRE_OFFSET),
+      pulse: {
+        base: 0.65,
+        variance: 0.15,
+        opacityRange: [0.35, 0.8],
+        emissiveRange: [0.35, 0.9],
+        lightIntensityRange: [0.75, 1.15]
+      }
+    });
+    this._fire = fire;
+    this.light = fire?.light ?? null;
+    if (fire?.group) {
+      fire.group.position.copy(TORCH_FIRE_OFFSET);
+      fire.group.visible = false;
+      this.mesh.add(fire.group);
     }
   }
 
@@ -81,8 +93,8 @@ export class Torch extends Weapon {
     }
     this.holder = null;
     this.mesh.visible = true;
-    if (this._mistGroup) {
-      this._mistGroup.visible = false;
+    if (this._fire?.group) {
+      this._fire.group.visible = false;
     }
     if (typeof this.onDrop === 'function') {
       this.onDrop(previousHolder, { removeFromInventory });
@@ -91,60 +103,12 @@ export class Torch extends Weapon {
 
   update() {
     super.update();
-    if (!this._mistGroup || !this.mesh) return;
+    if (!this._fire?.group || !this.mesh) return;
     const shouldShow = !!this.holder;
-    if (this._mistGroup.visible !== shouldShow) {
-      this._mistGroup.visible = shouldShow;
+    if (this._fire.group.visible !== shouldShow) {
+      this._fire.group.visible = shouldShow;
     }
     if (!shouldShow) return;
-    const pulse = 0.65 + Math.sin(performance.now() * 0.004) * 0.15;
-    this._mistMaterials.forEach(material => {
-      material.opacity = THREE.MathUtils.clamp(pulse, 0.35, 0.8);
-      material.emissiveIntensity = THREE.MathUtils.clamp(pulse, 0.35, 0.9);
-    });
-  }
-
-  _createMist() {
-    const mistGroup = new THREE.Group();
-    const yellowMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffd166,
-      emissive: 0xffb703,
-      emissiveIntensity: 0.6,
-      transparent: true,
-      opacity: 0.65,
-      depthWrite: false
-    });
-    const redMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff7b54,
-      emissive: 0xff3b1f,
-      emissiveIntensity: 0.5,
-      transparent: true,
-      opacity: 0.55,
-      depthWrite: false
-    });
-    this._mistMaterials = [yellowMaterial, redMaterial];
-
-    const createParticle = (material) => {
-      const size = THREE.MathUtils.lerp(0.14, 0.39, Math.random());
-      const geometry = new THREE.SphereGeometry(size, 8, 6);
-      const particle = new THREE.Mesh(geometry, material);
-      particle.position.set(
-        (Math.random() - 0.5) * TORCH_MIST_SPREAD,
-        Math.random() * TORCH_MIST_SPREAD,
-        (Math.random() - 0.5) * TORCH_MIST_SPREAD
-      );
-      particle.castShadow = false;
-      particle.receiveShadow = false;
-      return particle;
-    };
-
-    for (let i = 0; i < TORCH_MIST_PARTICLE_COUNT; i += 1) {
-      mistGroup.add(createParticle(yellowMaterial));
-    }
-    for (let i = 0; i < Math.ceil(TORCH_MIST_PARTICLE_COUNT / 2); i += 1) {
-      mistGroup.add(createParticle(redMaterial));
-    }
-
-    return mistGroup;
+    this._fire.update?.(performance.now());
   }
 }

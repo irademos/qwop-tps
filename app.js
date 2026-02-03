@@ -6,6 +6,7 @@ import { MonsterCharacter } from "./characters/MonsterCharacter.js";
 import { createFriendlyNpcManager } from "./friendlyNpcManager.js";
 import { createClouds } from "./environment/worldGeneration.js";
 import { getTerrainHeight } from './environment/water.js';
+import { createFire } from './environment/fire.js';
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls/controls.js';
 import { getCookie, setCookie } from './utils.js';
@@ -612,6 +613,7 @@ async function main() {
   const projectiles = [];
   const iceMists = [];
   const bombMists = [];
+  const treeFires = [];
   const ammoPickups = [];
   const droppedAmmoPickups = new Map();
   const pendingDropRemovals = new Set();
@@ -4015,9 +4017,47 @@ async function main() {
     } else {
       tree.getWorldPosition(tempTreePosition);
     }
-    spawnBombMist(scene, bombMists, tempTreePosition);
+    const treeFireRadius = Math.max(2.6, tree.userData?.boundsRadius ?? 0);
+    const treeFire = createFire({
+      particleCount: 36,
+      spread: treeFireRadius * 1.6,
+      sizeRange: [0.55, 1.4],
+      lightSettings: {
+        color: 0xffc077,
+        intensity: 4.5,
+        distance: 70,
+        decay: 1.1
+      },
+      lightOffset: new THREE.Vector3(0, treeFireRadius * 0.9, 0),
+      pulse: {
+        base: 0.8,
+        variance: 0.2,
+        opacityRange: [0.4, 1],
+        emissiveRange: [0.4, 1.2],
+        lightIntensityRange: [0.8, 1.35]
+      }
+    });
+    if (treeFire?.group) {
+      treeFire.group.position.copy(tempTreePosition);
+      treeFire.group.position.y += treeFireRadius * 0.7;
+      treeFire.group.userData.skipTerrainCorrection = true;
+      scene.add(treeFire.group);
+      tree.userData.fireEffect = treeFire;
+      treeFires.push({ tree, fire: treeFire });
+    }
     tree.userData.burnTimeout = setTimeout(() => {
       if (!tree.userData?.isBurning) return;
+      const fireEffect = tree.userData?.fireEffect;
+      if (fireEffect?.group) {
+        scene.remove(fireEffect.group);
+        fireEffect.dispose?.();
+      }
+      if (fireEffect) {
+        const fireIndex = treeFires.findIndex(entry => entry.fire === fireEffect);
+        if (fireIndex >= 0) {
+          treeFires.splice(fireIndex, 1);
+        }
+      }
       natureController?.removeTree?.(tree);
     }, BOMB_MIST_LIFETIME_MS);
   }
@@ -7806,6 +7846,18 @@ async function main() {
       mistList: bombMists,
       deltaSeconds: frameDelta
     });
+
+    if (treeFires.length) {
+      const fireTime = performance.now();
+      for (let i = treeFires.length - 1; i >= 0; i -= 1) {
+        const entry = treeFires[i];
+        if (!entry?.fire?.group) {
+          treeFires.splice(i, 1);
+          continue;
+        }
+        entry.fire.update?.(fireTime);
+      }
+    }
 
     updateMeleeAttacks({
       playerModel,
