@@ -11,7 +11,8 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <style>
     #hunger-bar,
-    #energy-bar {
+    #energy-bar,
+    #magic-bar {
       position: absolute;
       left: 10px;
       width: 150px;
@@ -29,8 +30,13 @@
       top: 90px;
     }
 
+    #magic-bar {
+      top: 114px;
+    }
+
     #hunger-fill,
-    #energy-fill {
+    #energy-fill,
+    #magic-fill {
       height: 100%;
       width: 100%;
     }
@@ -41,6 +47,10 @@
 
     #energy-fill {
       background: #3fa9f5;
+    }
+
+    #magic-fill {
+      background: #b455ff;
     }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
@@ -112,6 +122,7 @@
   <div id="health-bar"><div id="health-fill"></div></div>
   <div id="hunger-bar"><div id="hunger-fill"></div></div>
   <div id="energy-bar"><div id="energy-fill"></div></div>
+  <div id="magic-bar"><div id="magic-fill"></div></div>
   <div id="ammo-display" class="hidden">
     <span id="ammo-icon">❄️</span>
     <span id="ammo-count">0</span>

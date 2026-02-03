@@ -11,11 +11,19 @@ const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
 const MERCHANT_MODEL = '/models/cowboy.fbx';
 const MERCHANT_RESTOCK_MS = 60 * 60 * 1000;
 const MARKET_STALL_POSITION = new THREE.Vector3(5, 0, 5);
-const MARKET_STALL_SIZE = 0.013
+const MARKET_STALL_SIZE = 0.013;
 const MERCHANT_OFFSET = new THREE.Vector3(0.0, 0, -1.4);
+const LIFE_POTION_MODEL = '/assets/props/life_potion.glb';
+const MANA_POTION_MODEL = '/assets/props/mana_potion.glb';
+const LIFE_POTION_SCALE = 0.05;
+const MANA_POTION_SCALE = 0.05;
+const LIFE_POTION_OFFSET = new THREE.Vector3(-0.35, 0.58, 0.05);
+const MANA_POTION_OFFSET = new THREE.Vector3(-0.15, 0.58, 0.05);
 const ICE_AMMO_ITEM_ID = 'ice ammo';
 const ARROW_AMMO_ITEM_ID = 'arrow ammo';
 const AMMO_PACK_AMOUNT = 5;
+const LIFE_POTION_ITEM_ID = 'life_potion';
+const MANA_POTION_ITEM_ID = 'mana_potion';
 
 const BASE_MERCHANT_ITEMS = {
   iceGun: { name: 'Ice Gun', price: 30, count: 1 },
@@ -23,6 +31,8 @@ const BASE_MERCHANT_ITEMS = {
   bow: { name: 'Bow', price: 30, count: 1 },
   bomb: { name: 'Bombs', price: 10, count: 5 },
   lantern: { name: 'Lantern', price: 20, count: 1 },
+  [LIFE_POTION_ITEM_ID]: { name: 'Life Potion', price: 30, count: 5 },
+  [MANA_POTION_ITEM_ID]: { name: 'Mana Potion', price: 30, count: 5 },
   [ICE_AMMO_ITEM_ID]: { name: 'Ice Ammo', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
   [ARROW_AMMO_ITEM_ID]: { name: 'Arrows', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
   apple: { name: 'Apples', price: 2, count: 5 },
@@ -153,8 +163,35 @@ const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuilding
     }
     liftPositionToBuildingTop?.(marketStall.position, 0.5);
     scene.add(marketStall);
+    await Promise.all([
+      loadMarketStallPotion({
+        loader,
+        modelPath: LIFE_POTION_MODEL,
+        scale: LIFE_POTION_SCALE,
+        offset: LIFE_POTION_OFFSET
+      }),
+      loadMarketStallPotion({
+        loader,
+        modelPath: MANA_POTION_MODEL,
+        scale: MANA_POTION_SCALE,
+        offset: MANA_POTION_OFFSET
+      })
+    ]);
   } catch (error) {
     console.warn('Failed to load market stall model.', error);
+  }
+};
+
+const loadMarketStallPotion = async ({ loader, modelPath, scale, offset }) => {
+  if (!marketStall || !loader) return;
+  try {
+    const gltf = await loader.loadAsync(modelPath);
+    const potion = gltf.scene;
+    potion.scale.multiplyScalar(scale);
+    potion.position.copy(offset);
+    marketStall.add(potion);
+  } catch (error) {
+    console.warn('Failed to load merchant potion:', modelPath, error);
   }
 };
 
