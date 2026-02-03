@@ -6,6 +6,8 @@ const TOWER_MODEL_URL = '/assets/props/tower.glb';
 const TOWER_SCALE = 1;
 const TOWER_POSITION = new THREE.Vector3(-8, 0, -4);
 const TOWER_Y_OFFSET = -1.08;
+const TOWER_FENCE_HEIGHT = 0.1;
+const TOWER_FENCE_THICKNESS = 0.1;
 const TOWER_COLLIDER_SIZE = new THREE.Vector3(6.0, 10.5, 6.0);
 const TOWER_CLIMB_AREA_SIZE = {
   widthRatio: 0.15,
@@ -89,6 +91,7 @@ const addTowerCollider = ({ tower, rapierWorld, rapier }) => {
     bounds.min.y + halfSize.y,
     center.z
   );
+  const fenceCenterY = bounds.min.y + TOWER_COLLIDER_SIZE.y + (TOWER_FENCE_HEIGHT * 0.5);
 
   const rbDesc = rapier.RigidBodyDesc.fixed()
     .setTranslation(colliderCenter.x, colliderCenter.y, colliderCenter.z);
@@ -98,6 +101,32 @@ const addTowerCollider = ({ tower, rapierWorld, rapier }) => {
     .setRestitution(0)
     .setFriction(1);
   rapierWorld.createCollider(colDesc, rb);
+
+  const fenceHalfHeight = TOWER_FENCE_HEIGHT * 0.5;
+  const fenceHalfThickness = TOWER_FENCE_THICKNESS * 0.5;
+  const fenceOffsets = [
+    new THREE.Vector3(center.x, fenceCenterY, center.z + halfSize.z + fenceHalfThickness),
+    new THREE.Vector3(center.x, fenceCenterY, center.z - halfSize.z - fenceHalfThickness),
+    new THREE.Vector3(center.x + halfSize.x + fenceHalfThickness, fenceCenterY, center.z),
+    new THREE.Vector3(center.x - halfSize.x - fenceHalfThickness, fenceCenterY, center.z)
+  ];
+
+  const fenceSizes = [
+    new THREE.Vector3(halfSize.x, fenceHalfHeight, fenceHalfThickness),
+    new THREE.Vector3(halfSize.x, fenceHalfHeight, fenceHalfThickness),
+    new THREE.Vector3(fenceHalfThickness, fenceHalfHeight, halfSize.z),
+    new THREE.Vector3(fenceHalfThickness, fenceHalfHeight, halfSize.z)
+  ];
+
+  fenceOffsets.forEach((offset, index) => {
+    const fenceSize = fenceSizes[index];
+    const localOffset = offset.clone().sub(colliderCenter);
+    const fenceDesc = rapier.ColliderDesc.cuboid(fenceSize.x, fenceSize.y, fenceSize.z)
+      .setTranslation(localOffset.x, localOffset.y, localOffset.z)
+      .setRestitution(0)
+      .setFriction(1);
+    rapierWorld.createCollider(fenceDesc, rb);
+  });
   return rb;
 };
 
