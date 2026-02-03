@@ -45,6 +45,7 @@ import { initMerchantPanel, updateMerchantUI } from './controls/merchantPanel.js
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
 import { getMerchantFriendly, initMerchant, setMerchantHost, setMerchantRoom } from './characters/merchant.js';
 import { initCustomizeUI } from './controls/customize.js';
+import { initSpells } from './controls/spells.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './environment/mapView.js';
 import {
   clearStoredPin,
@@ -2879,6 +2880,7 @@ async function main() {
     xp: playerProfile.stats.xp,
     coins: playerProfile.stats.coins
   };
+  const spellsAvailable = { ...(playerProfile?.spells || {}) };
   const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'energy', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
@@ -4656,15 +4658,23 @@ async function main() {
     if (playerModel?.position) {
       const distance = hitPosition.distanceTo(playerModel.position);
       if (distance <= BOMB_DAMAGE_RADIUS) {
-        window.localHealth = Math.max(0, window.localHealth - damage);
-        if (window.playerControls) {
-          const direction = new THREE.Vector3()
-            .subVectors(playerModel.position, hitPosition)
-            .normalize();
-          window.playerControls.applyKnockback({
-            direction,
-            strength: BOMB_KNOCKBACK_STRENGTH
-          });
+        const localControls = window.playerControls;
+        if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
+          localControls.isInvincible = false;
+          localControls.invincibleUntil = 0;
+        }
+        const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
+        if (!isInvincible) {
+          window.localHealth = Math.max(0, window.localHealth - damage);
+          if (localControls) {
+            const direction = new THREE.Vector3()
+              .subVectors(playerModel.position, hitPosition)
+              .normalize();
+            localControls.applyKnockback({
+              direction,
+              strength: BOMB_KNOCKBACK_STRENGTH
+            });
+          }
         }
       }
     }
@@ -5489,6 +5499,13 @@ async function main() {
     return true;
   };
   window.playerControls = playerControls;
+  initSpells({
+    playerControls,
+    getPlayerModel: () => playerModel,
+    spellsAvailable,
+    getMagic: () => statsState.magic,
+    setMagic: (value) => setStat('magic', value)
+  });
   updateControlAvailability();
   updateEnergyEffects();
 

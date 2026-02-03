@@ -136,6 +136,8 @@ export class PlayerControls {
     this.knockbackEndTime = 0;
     this.freezeEndTime = 0;
     this.wasFrozen = false;
+    this.isInvincible = false;
+    this.invincibleUntil = 0;
     this.slideMomentum = new THREE.Vector3();
     this.lastMoveDirection = new THREE.Vector3();
     this.grabbedTarget = null;

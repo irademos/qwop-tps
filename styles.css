@@ -197,7 +197,7 @@ body {
   bottom: 20px;
   left: 20px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 10px;
   z-index: 1000;
 }
@@ -219,6 +219,37 @@ body {
 
 .mobile-only {
   display: none;
+}
+
+#action-buttons .spell-action {
+  display: none;
+  position: relative;
+}
+
+#action-buttons.spell-menu-active .spell-action {
+  display: flex;
+}
+
+#action-buttons.spell-menu-active #mobile-action-toggle,
+#action-buttons.spell-menu-active .mobile-action,
+#action-buttons.spell-menu-active .mobile-punch-action,
+#action-buttons.spell-menu-active .mobile-equip-action {
+  display: none;
+}
+
+#action-buttons .spell-disabled {
+  opacity: 0.6;
+}
+
+#action-buttons .spell-timer {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  padding: 2px 4px;
+  border-radius: 6px;
 }
 
 #camera-controls {
@@ -1668,6 +1699,7 @@ body {
   #action-buttons {
     bottom: 16px;
     left: 16px;
+    flex-direction: column;
     gap: 6px;
   }
 
