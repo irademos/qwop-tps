@@ -1256,6 +1256,9 @@ export class PlayerControls {
 
   applyKnockback({ direction, strength } = {}) {
     if (!direction || !this.playerModel) return;
+    if (this.isClimbing) {
+      this.stopClimbing();
+    }
     const { impulse, profile } = getKnockbackImpulse(direction, strength);
     if (this.body) {
       this.body.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
@@ -1267,6 +1270,7 @@ export class PlayerControls {
     const actions = this.playerModel.userData.actions;
     const current = this.playerModel.userData.currentAction;
     const hitAction = actions?.hit;
+    this.currentSpecialAction = null;
     if (hitAction) {
       actions[current]?.fadeOut(0.1);
       hitAction.reset().fadeIn(0.1).play();
@@ -1347,6 +1351,10 @@ export class PlayerControls {
     if (actions?.climb) {
       actions.climb.paused = false;
       actions.climb.timeScale = 1;
+      if (this.playerModel?.userData?.currentAction === 'climb') {
+        actions.climb.fadeOut(0.1);
+        this.playerModel.userData.currentAction = null;
+      }
     }
     this.isClimbing = false;
     this.activeClimbArea = null;
