@@ -273,10 +273,16 @@ export class MonsterCharacter extends CharacterBase {
     }
 
     this.updateCombatAI(delta, closestPlayer, allPlayers, (player) => {
-      if (player.id === 'local' && !window.playerControls?.isKnocked) {
+      const localControls = window.playerControls;
+      if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
+        localControls.isInvincible = false;
+        localControls.invincibleUntil = 0;
+      }
+      const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
+      if (player.id === 'local' && !localControls?.isKnocked && !isInvincible) {
         window.localHealth = Math.max(0, window.localHealth - this.attackDamage);
-        if (window.playerControls) {
-          window.playerControls.applyKnockback({
+        if (localControls) {
+          localControls.applyKnockback({
             direction: this.model.userData.direction.clone(),
             strength: MONSTER_ATTACK.knockbackStrength
           });

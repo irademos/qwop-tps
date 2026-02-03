@@ -26,6 +26,9 @@ const DEFAULT_CUSTOMIZATION = {
   shirts: { selectedId: null, overrides: {} },
   hats: { selectedId: null, overrides: {} }
 };
+const DEFAULT_SPELLS = {
+  shield: true
+};
 
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
@@ -68,6 +71,7 @@ function buildProfile(name) {
     inventory: { ...DEFAULT_INVENTORY },
     homeStorage: { ...DEFAULT_HOME_STORAGE },
     customization: mergeCustomization(DEFAULT_CUSTOMIZATION),
+    spells: { ...DEFAULT_SPELLS },
     characterModel: null,
     sleepStartedAt: null,
     lastStatUpdateAt: now,
@@ -117,6 +121,10 @@ function mergeCustomization(customization) {
   };
 }
 
+function mergeSpells(spells) {
+  return { ...DEFAULT_SPELLS, ...(spells || {}) };
+}
+
 async function loadProfileForName(profileRef, trimmedName) {
   const profileSnap = await get(profileRef);
   let profile = profileSnap.val();
@@ -131,6 +139,7 @@ async function loadProfileForName(profileRef, trimmedName) {
   const mergedInventory = profile.inventory ? { ...profile.inventory } : { ...DEFAULT_INVENTORY };
   const mergedHomeStorage = profile.homeStorage ? { ...profile.homeStorage } : { ...DEFAULT_HOME_STORAGE };
   const mergedCustomization = mergeCustomization(profile.customization);
+  const mergedSpells = mergeSpells(profile.spells);
   const mergedCharacterModel = typeof profile.characterModel === 'string' ? profile.characterModel : null;
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
@@ -139,8 +148,9 @@ async function loadProfileForName(profileRef, trimmedName) {
   const customizationMissing = profile.customization == null
     || profile.customization.shirts == null
     || profile.customization.hats == null;
+  const spellsMissing = profile.spells == null;
   const characterModelMissing = profile.characterModel !== mergedCharacterModel;
-  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || characterModelMissing) {
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || characterModelMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
@@ -166,6 +176,12 @@ async function loadProfileForName(profileRef, trimmedName) {
     } else {
       profile.customization = mergedCustomization;
     }
+    if (spellsMissing) {
+      updatePayload.spells = mergedSpells;
+      profile.spells = mergedSpells;
+    } else {
+      profile.spells = mergedSpells;
+    }
     if (characterModelMissing) {
       updatePayload.characterModel = mergedCharacterModel;
       profile.characterModel = mergedCharacterModel;
@@ -182,6 +198,7 @@ async function loadProfileForName(profileRef, trimmedName) {
     profile.inventory = mergedInventory;
     profile.homeStorage = mergedHomeStorage;
     profile.customization = mergedCustomization;
+    profile.spells = mergedSpells;
     profile.characterModel = mergedCharacterModel;
   }
 
