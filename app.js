@@ -2029,6 +2029,7 @@ async function main() {
     const healths = getTorchHealths(torchEntry);
     equippedTorchIndex = healths.length ? healths.length - 1 : null;
     torch.mesh.userData.torchHealth = pickupHealth;
+    setPlayerWeaponType(holder, torch.type);
   };
   torch.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
@@ -2040,6 +2041,7 @@ async function main() {
       equippedTorchIndex = null;
       persistInventoryAndStorage();
     }
+    clearPlayerWeaponType(holder, torch.type);
   };
   if (torch.mesh) {
     torch.mesh.userData.hideInMapView = true;
@@ -2070,9 +2072,12 @@ async function main() {
       if (Number.isFinite(state.torchHealth)) {
         torch.mesh.userData.torchHealth = normalizeTorchHealth(state.torchHealth);
       }
+      const previousHolderId = torch.remoteHolderId ?? null;
       torch.remoteHolderId = state.holderId ?? null;
+      updateRemoteWeaponType(torch, torch.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && torch.holder === playerControls) {
         torch.holder = null;
+        clearPlayerWeaponType(playerControls, torch.type);
       }
     },
     isLocallyControlled: () => torch?.holder === playerControls
@@ -3644,6 +3649,7 @@ async function main() {
       torch.mesh.userData.torchHealth = healths[equippedTorchIndex];
       torch.mesh.visible = true;
       torch.holder = playerControls;
+      setPlayerWeaponType(playerControls, torch.type);
       updateSettingsUI();
       return;
     }
@@ -3716,6 +3722,7 @@ async function main() {
       if (torch.mesh) {
         torch.mesh.visible = false;
       }
+      clearPlayerWeaponType(playerControls, torch.type);
       updateSettingsUI();
       return;
     }
