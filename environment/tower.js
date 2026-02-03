@@ -79,6 +79,8 @@ const buildClimbArea = (tower) => {
 
 const addClimbDebugLines = (area, parent) => {
   if (!area || !parent) return;
+  parent.position.copy(area.center);
+  parent.rotation.y = area.rotationY ?? 0;
   const width = (area.halfWidth ?? 0) * 2;
   const height = (area.halfHeight ?? 0) * 2;
   const depth = (area.halfDepth ?? 0) * 2;
@@ -86,8 +88,7 @@ const addClimbDebugLines = (area, parent) => {
   const geometry = new THREE.BoxGeometry(width, height, depth);
   const edges = new THREE.EdgesGeometry(geometry);
   const lines = new THREE.LineSegments(edges, debugMaterial);
-  lines.position.copy(area.center);
-  lines.rotation.y = area.rotationY ?? 0;
+  lines.position.set(0, 0, 0);
   parent.add(lines);
 };
 
