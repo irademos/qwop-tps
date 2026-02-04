@@ -28,7 +28,7 @@ const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
 const LEVEL_SIZE_STEP = 0.5;
 const LEVEL_SPEED_STEP = 0.08;
 const DEATH_REMOVAL_DELAY_MS = 30000;
-const FRIENDLY_APPROACH_BLEND = 0.12;
+const FRIENDLY_APPROACH_BLEND = 0.07;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
