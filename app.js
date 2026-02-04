@@ -82,7 +82,7 @@ if ('serviceWorker' in navigator) {
 }
 
 const DEFAULT_CHARACTER_MODEL = "/models/base_character_2.fbx";
-const MAX_MONSTERS = 2;
+const MAX_MONSTERS = 6;
 const MONSTER_MODELS = [
   "/models/zombie.fbx",
   "/models/zombie_boy.fbx",
@@ -92,6 +92,7 @@ const MONSTER_SPAWN_MIN_RADIUS = 25;
 const MONSTER_SPAWN_MAX_RADIUS = 80;
 const MONSTER_RESPAWN_DELAY_RANGE_MS = [3000, 5000];
 const MONSTER_SPAWN_ATTEMPTS = 12;
+const MONSTER_SNAPSHOT_TIMEOUT_MS = 6000;
 const MONSTER_LEVEL_WEIGHTS = [
   { level: 1, weight: 0.55 },
   { level: 2, weight: 0.25 },
@@ -654,11 +655,12 @@ async function main() {
 
   let monsters = [];
   window.monsters = monsters;
-  const monsterSlotIds = ["monster:0", "monster:1"];
+  const monsterSlotIds = Array.from({ length: MAX_MONSTERS }, (_, index) => `monster:${index}`);
   const spawningSlots = new Set();
   const respawnTimers = new Map();
   let monstersSeeded = false;
   let monsterSnapshotLoaded = false;
+  let monsterSnapshotTimeout = null;
   let unsubscribeMonsterUpdates = null;
   const recentMonsterHits = new Map();
 
@@ -1490,6 +1492,11 @@ async function main() {
   multiplayer.onReady = async ({ roomId }) => {
     if (!roomId) {
       monstersSeeded = true;
+      monsterSnapshotLoaded = true;
+      if (monsterSnapshotTimeout) {
+        clearTimeout(monsterSnapshotTimeout);
+        monsterSnapshotTimeout = null;
+      }
       friendlyNpcManager?.onRoomReady({ roomId: null, isHost: multiplayer.isHost });
       await setMerchantRoom({ roomId: null, isHost: multiplayer.isHost });
       return;
@@ -1503,6 +1510,16 @@ async function main() {
     setMonsterPersistenceHost(isHost);
     logMonsterPersist('isHost', isHost);
     monstersSeeded = false;
+    monsterSnapshotLoaded = false;
+    if (monsterSnapshotTimeout) {
+      clearTimeout(monsterSnapshotTimeout);
+    }
+    monsterSnapshotTimeout = setTimeout(() => {
+      if (monsterSnapshotLoaded) return;
+      console.warn('Monster snapshot load timed out, seeding defaults.');
+      monsterSnapshotLoaded = true;
+      monstersSeeded = true;
+    }, MONSTER_SNAPSHOT_TIMEOUT_MS);
     friendlyNpcManager?.onRoomReady({ roomId, isHost: multiplayer.isHost });
     await setMerchantRoom({ roomId, isHost: multiplayer.isHost });
     try {
@@ -1513,6 +1530,10 @@ async function main() {
       });
       monsterSnapshotLoaded = true;
       monstersSeeded = true;
+      if (monsterSnapshotTimeout) {
+        clearTimeout(monsterSnapshotTimeout);
+        monsterSnapshotTimeout = null;
+      }
       if (unsubscribeMonsterUpdates) {
         unsubscribeMonsterUpdates();
       }
@@ -1530,6 +1551,10 @@ async function main() {
       console.warn('Failed to load monster snapshot', err);
       monsterSnapshotLoaded = true;
       monstersSeeded = true;
+      if (monsterSnapshotTimeout) {
+        clearTimeout(monsterSnapshotTimeout);
+        monsterSnapshotTimeout = null;
+      }
     }
   };
 
