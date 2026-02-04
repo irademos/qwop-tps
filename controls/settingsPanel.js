@@ -812,6 +812,7 @@ function openOverlay() {
   lastFocusedElement = document.activeElement;
   overlay.style.display = 'flex';
   overlay.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('settings-open');
   refreshLayout();
   if (isMobileView) {
     setListView(true);
@@ -828,6 +829,7 @@ function closeOverlay() {
   if (!overlay) return;
   overlay.style.display = 'none';
   overlay.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('settings-open');
   stopPreview();
   if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
     lastFocusedElement.focus();
