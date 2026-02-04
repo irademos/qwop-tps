@@ -25,6 +25,7 @@ let lastFocusedElement = null;
 let inventoryItems = [];
 let inventoryCounts = {};
 let selectedMaterials = {};
+let craftInventoryScrollTop = 0;
 
 const createElement = (tag, className, text) => {
   const el = document.createElement(tag);
@@ -202,6 +203,10 @@ const closeCraftOptions = () => {
 
 const render = () => {
   if (!panel) return;
+  if (view === 'select') {
+    const scrollContainer = panel.querySelector('.craft-inventory');
+    craftInventoryScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+  }
   panel.innerHTML = '';
   const title = view === 'recipes'
     ? 'Crafting Recipes'
@@ -215,6 +220,10 @@ const render = () => {
   }
   if (view === 'select') {
     panel.append(buildMaterials());
+    const scrollContainer = panel.querySelector('.craft-inventory');
+    if (scrollContainer) {
+      scrollContainer.scrollTop = craftInventoryScrollTop;
+    }
     return;
   }
   panel.append(buildMenu());
