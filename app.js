@@ -2857,7 +2857,7 @@ async function main() {
     const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
     const currentHunger = Number.isFinite(profile?.stats?.hunger) ? profile.stats.hunger : 0;
     const nextHunger = Math.max(0, Math.min(100, currentHunger - hungerDecay));
-    const updatedStats = { ...profile.stats, hunger: nextHunger };
+    const updatedStats = { ...profile.stats, hunger: nextHunger, energy: nextHunger };
     const changed = nextHunger !== currentHunger || !Number.isFinite(profile?.lastStatUpdateAt);
     return {
       stats: updatedStats,
@@ -2873,7 +2873,7 @@ async function main() {
   const statsState = {
     health: playerProfile.stats.health,
     hunger: playerProfile.stats.hunger,
-    energy: playerProfile.stats.energy,
+    energy: playerProfile.stats.hunger,
     magic: playerProfile.stats.magic,
     level: playerProfile.stats.level,
     strength: playerProfile.stats.strength,
@@ -2885,7 +2885,7 @@ async function main() {
     coins: playerProfile.stats.coins
   };
   const spellsAvailable = { ...(playerProfile?.spells || {}) };
-  const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'energy', 'strength', 'agility', 'smarts', 'charm', 'luck'];
+  const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
   const levelPopup = document.getElementById('level-popup');
@@ -4522,11 +4522,11 @@ async function main() {
     if (isMushroomItem(itemId)) {
       setStat('health', statsState.health + MUSHROOM_HEALTH_GAIN, { skipSave: true });
       setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
-      setStat('energy', statsState.energy + MUSHROOM_ENERGY_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + MUSHROOM_ENERGY_GAIN, { skipSave: true });
     } else if (isAppleItem(itemId)) {
       setStat('health', statsState.health + APPLE_HEALTH_GAIN, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
-      setStat('energy', statsState.energy + APPLE_ENERGY_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + APPLE_ENERGY_GAIN, { skipSave: true });
     }
     lastStatUpdateAt = Date.now();
     removeFromInventory(itemId, 1);
@@ -4552,14 +4552,15 @@ async function main() {
   };
   const updateEnergyEffects = () => {
     if (!playerControls) return;
-    const energyDepleted = statsState.energy <= 0;
+    const energyDepleted = statsState.hunger <= 0;
     playerControls.setEnergyDepleted?.(energyDepleted);
   };
 
   const healthFill = document.getElementById('health-fill');
   const hungerFill = document.getElementById('hunger-fill');
-  const energyFill = document.getElementById('energy-fill');
   const magicFill = document.getElementById('magic-fill');
+  const hungerWarning = document.getElementById('hunger-warning');
+  let hungerWarningTimer = null;
 
   const createDropId = (index = 0) => {
     const owner = multiplayer?.getId?.() || 'local';
@@ -4691,17 +4692,22 @@ async function main() {
     }
   }
 
-  function updateEnergyUI() {
-    if (energyFill) {
-      energyFill.style.width = `${statsState.energy}%`;
-    }
-  }
-
   function updateMagicUI() {
     if (magicFill) {
       magicFill.style.width = `${statsState.magic}%`;
     }
   }
+
+  const showHungerWarning = () => {
+    if (!hungerWarning) return;
+    hungerWarning.classList.add('visible');
+    if (hungerWarningTimer) {
+      clearTimeout(hungerWarningTimer);
+    }
+    hungerWarningTimer = setTimeout(() => {
+      hungerWarning.classList.remove('visible');
+    }, 3500);
+  };
 
   const clampStat = (key, value) => {
     if (['health', 'hunger', 'energy', 'magic'].includes(key)) {
@@ -4736,15 +4742,17 @@ async function main() {
   };
 
   function setStat(key, value, { skipSave = false } = {}) {
+    if (key === 'energy') {
+      setStat('hunger', value, { skipSave });
+      return;
+    }
     statsState[key] = clampStat(key, value);
     if (key === 'health') {
       updateHealthUI();
     }
     if (key === 'hunger') {
       updateHungerUI();
-    }
-    if (key === 'energy') {
-      updateEnergyUI();
+      statsState.energy = statsState.hunger;
       updateEnergyEffects();
     }
     if (key === 'magic') {
@@ -4754,7 +4762,7 @@ async function main() {
       updatePlayerInfoUI();
     }
     if (!skipSave) {
-      if (key === 'hunger' || key === 'energy') {
+      if (key === 'hunger') {
         lastStatUpdateAt = Date.now();
       }
       saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -4765,7 +4773,7 @@ async function main() {
     active: false,
     startedAt: null,
     startHealth: null,
-    startEnergy: null,
+    startHunger: null,
     bed: null
   };
 
@@ -4780,7 +4788,7 @@ async function main() {
     sleepState.active = true;
     sleepState.startedAt = startedAt;
     sleepState.startHealth = statsState.health;
-    sleepState.startEnergy = statsState.energy;
+    sleepState.startHunger = statsState.hunger;
     sleepState.bed = bed || null;
     if (profileNameKey) {
       playerProfile.sleepStartedAt = startedAt;
@@ -4796,11 +4804,11 @@ async function main() {
     const startAt = Number.isFinite(storedStart) ? storedStart : sleepState.startedAt;
     const elapsedSeconds = startAt ? Math.max(0, (now - startAt) / 1000) : 0;
     const expectedHealth = getSleepRecoveryValue('health', sleepState.startHealth ?? statsState.health, elapsedSeconds);
-    const expectedEnergy = getSleepRecoveryValue('energy', sleepState.startEnergy ?? statsState.energy, elapsedSeconds);
+    const expectedHunger = getSleepRecoveryValue('hunger', sleepState.startHunger ?? statsState.hunger, elapsedSeconds);
     const nextHealth = Math.max(statsState.health, expectedHealth);
-    const nextEnergy = Math.max(statsState.energy, expectedEnergy);
+    const nextHunger = Math.max(statsState.hunger, expectedHunger);
     setStat('health', nextHealth, { skipSave: true });
-    setStat('energy', nextEnergy, { skipSave: true });
+    setStat('hunger', nextHunger, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   };
@@ -4814,7 +4822,7 @@ async function main() {
     const adjustment = delta * 2;
     for (const key of STAT_KEYS_FOR_LEVEL) {
       const current = Number.isFinite(statsState[key]) ? statsState[key] : 0;
-      const nextValue = key === 'health' || key === 'hunger' || key === 'energy'
+      const nextValue = key === 'health' || key === 'hunger'
         ? clampStat(key, current + adjustment)
         : current + adjustment;
       setStat(key, nextValue, { skipSave: true });
@@ -4889,8 +4897,15 @@ async function main() {
 
   updateHealthUI();
   updateHungerUI();
-  updateEnergyUI();
   updateMagicUI();
+  updateEnergyEffects();
+
+  const HUNGER_WARNING_INTERVAL_MS = 3 * 60 * 1000;
+  setInterval(() => {
+    if (statsState.hunger < 10) {
+      showHungerWarning();
+    }
+  }, HUNGER_WARNING_INTERVAL_MS);
 
   if (offlineDecay.changed) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -5547,7 +5562,7 @@ async function main() {
 
   function applyFoodPickupEffects() {
     setStat('hunger', statsState.hunger + FOOD_HUNGER_GAIN, { skipSave: true });
-    setStat('energy', statsState.energy + FOOD_ENERGY_GAIN, { skipSave: true });
+    setStat('hunger', statsState.hunger + FOOD_ENERGY_GAIN, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
@@ -7123,7 +7138,7 @@ async function main() {
   function respawnPlayer() {
     setStat('health', 100);
     setStat('hunger', 100);
-    setStat('energy', 100);
+    setStat('hunger', 100);
     setStat('magic', 100);
     const spawn = getSpawnPosition();
     liftPositionToBuildingTop(spawn, 0.6);
@@ -7685,7 +7700,7 @@ async function main() {
         const recovery = SLEEP_RECOVERY_PER_SECOND * elapsedSeconds;
         if (recovery > 0) {
           setStat('health', statsState.health + recovery, { skipSave: true });
-          setStat('energy', statsState.energy + recovery, { skipSave: true });
+          setStat('hunger', statsState.hunger + recovery, { skipSave: true });
           statsChanged = true;
         }
       } else {
@@ -7698,10 +7713,10 @@ async function main() {
         }
 
         const isMoving = playerControls?.isMoving;
-        if (isMoving && statsState.energy > 0) {
+        if (isMoving && statsState.hunger > 0) {
           const energyDecay = ENERGY_DECAY_PER_SECOND_WHILE_MOVING * elapsedSeconds;
           if (energyDecay > 0) {
-            setStat('energy', statsState.energy - energyDecay, { skipSave: true });
+            setStat('hunger', statsState.hunger - energyDecay, { skipSave: true });
             statsChanged = true;
           }
         }
