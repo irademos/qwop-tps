@@ -25,6 +25,7 @@ const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
 const LEVEL_SIZE_STEP = 0.5;
 const LEVEL_SPEED_STEP = 0.08;
 const DEATH_REMOVAL_DELAY_MS = 30000;
+const FRIENDLY_APPROACH_BLEND = 0.12;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -258,6 +259,16 @@ export class MonsterCharacter extends CharacterBase {
       if (now - this.lastDirectionChange > WANDER_CHANGE_MS) {
         this.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         this.lastDirectionChange = now;
+      }
+      const wanderDirection = this.model.userData.direction.clone();
+      const approachDirection = closestPlayer.model.position
+        .clone()
+        .sub(this.model.position)
+        .setY(0);
+      if (approachDirection.lengthSq() > 0.0001) {
+        approachDirection.normalize();
+        wanderDirection.lerp(approachDirection, FRIENDLY_APPROACH_BLEND).normalize();
+        this.setDirection(wanderDirection);
       }
       const movement = this.model.userData.direction
         .clone()
