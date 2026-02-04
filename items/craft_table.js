@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/water.js';
 
-export const CRAFT_TABLE_SCALE = 0.02;
+export const CRAFT_TABLE_SCALE = 1.2;
 export const CRAFT_TABLE_POSITION = new THREE.Vector3(1.5, 0, 0.5);
-const CRAFT_TABLE_LIFT = 0.1;
+const CRAFT_TABLE_LIFT = 0.5;
 const DEFAULT_INTERACT_DISTANCE = 3;
 
 const disposeMaterial = (material) => {
