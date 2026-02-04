@@ -781,6 +781,10 @@ body {
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
 
+body.settings-open #settings-button {
+  display: none;
+}
+
 #home-storage-overlay {
   position: fixed;
   inset: 0;
@@ -1056,8 +1060,8 @@ body {
 }
 
 .craft-inventory {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 10px;
   max-height: 40vh;
   overflow-y: auto;
@@ -1066,19 +1070,23 @@ body {
 
 .craft-inventory-item {
   display: flex;
+  flex-direction: column;
   justify-content: space-between;
-  align-items: center;
+  align-items: stretch;
   border: 1px solid #e6e6e6;
   border-radius: 10px;
-  padding: 8px 10px;
+  padding: 10px;
   background: #fff;
-  gap: 12px;
+  gap: 10px;
+  min-height: 140px;
 }
 
 .craft-item-info {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  text-align: center;
 }
 
 .craft-inventory .inventory-icon-wrapper {
@@ -1096,11 +1104,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  align-items: center;
 }
 
 .craft-item-name {
   font-size: 12px;
   font-weight: 600;
+  text-align: center;
 }
 
 .craft-item-qty {
@@ -1111,6 +1121,7 @@ body {
 .craft-item-actions {
   display: flex;
   gap: 6px;
+  justify-content: center;
 }
 
 .craft-adjust {
@@ -1637,17 +1648,18 @@ body {
 
 @media (max-width: 720px) {
   #settings-overlay {
-    align-items: flex-start;
-    
-    margin-top: 18%;
+    align-items: center;
+    margin-top: 0;
   }
 
   .settings-shell {
     width: 100%;
     max-width: none;
-    /* ensure it never exceeds visible viewport */
-    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    border-radius: 16px 16px 0 0;
+    height: 90vh;
+    height: 90svh;
+    height: 90dvh;
+    max-height: 90dvh;
+    border-radius: 16px;
   }
 
   .settings-shell.is-mobile .settings-tabs {
@@ -1674,6 +1686,29 @@ body {
 
   .inventory-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  body.settings-open #health-bar,
+  body.settings-open #hunger-bar,
+  body.settings-open #energy-bar,
+  body.settings-open #magic-bar,
+  body.settings-open #xp-bar,
+  body.settings-open #player-info,
+  body.settings-open #level-popup,
+  body.settings-open #action-buttons,
+  body.settings-open #joystick-container,
+  body.settings-open #jump-button,
+  body.settings-open .map-controls,
+  body.settings-open #camera-controls,
+  body.settings-open #interaction-tooltip,
+  body.settings-open #friendly-interact,
+  body.settings-open #ammo-display,
+  body.settings-open #ammo-popup,
+  body.settings-open #coin-popup,
+  body.settings-open #treasure-popup,
+  body.settings-open #craft-message,
+  body.settings-open #voice-transcript {
+    display: none;
   }
 }
 
