@@ -2363,9 +2363,13 @@ export class PlayerControls {
     const normalizedDirection = direction.clone().normalize();
     const gun = this.getEquippedGun();
 
-    if (gun?.mesh) {
+    const activeGunMesh = gun?.useHeldMeshWhenHeld && gun?.heldMesh
+      ? gun.heldMesh
+      : gun?.mesh;
+
+    if (activeGunMesh) {
       const gunPosition = new THREE.Vector3();
-      gun.mesh.getWorldPosition(gunPosition);
+      activeGunMesh.getWorldPosition(gunPosition);
       return gunPosition.add(normalizedDirection.clone().multiplyScalar(offsetDistance));
     }
 
