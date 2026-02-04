@@ -1,17 +1,19 @@
 import * as THREE from 'three';
+import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from '../healthUtils.js';
 
 export const ATTACKS = {
-  mutantPunch: { damage: 10, range: 1.5, hitTime: 300, hitWindow: 300, knockbackStrength: 2 },
-  swordSlash: { damage: 18, range: 1.7, hitTime: 300, hitWindow: 300, knockbackStrength: 3 },
-  hurricaneKick: { damage: 15, range: 2.0, hitTime: 400, hitWindow: 400, knockbackStrength: 5 },
-  mmaKick: { damage: 12, range: 1.7, hitTime: 350, hitWindow: 300, knockbackStrength: 4 }
+  mutantPunch: { damage: 1, range: 1.5, hitTime: 300, hitWindow: 300, knockbackStrength: 2 },
+  swordSlash: { damage: 2, range: 1.7, hitTime: 300, hitWindow: 300, knockbackStrength: 3 },
+  hurricaneKick: { damage: 2, range: 2.0, hitTime: 400, hitWindow: 400, knockbackStrength: 5 },
+  mmaKick: { damage: 1, range: 1.7, hitTime: 350, hitWindow: 300, knockbackStrength: 4 }
 };
 
 function getStrengthDamage(attackerId, baseDamage) {
   if (attackerId === 'local' && typeof window.getPlayerStrength === 'function') {
     const strength = window.getPlayerStrength();
     if (Number.isFinite(strength)) {
-      return Math.max(0, baseDamage + strength);
+      const bonus = convertPointsToSegments(strength, { minimum: 0 });
+      return Math.max(0, baseDamage + bonus);
     }
   }
   return baseDamage;
@@ -71,7 +73,7 @@ export function updateMeleeAttacks({
           } else {
             const tp = otherPlayers[target.id];
             if (tp) {
-              const previousHealth = tp.health || 100;
+              const previousHealth = Number.isFinite(tp.health) ? tp.health : BASE_HEALTH_SEGMENTS;
               const nextHealth = Math.max(0, previousHealth - attackDamage);
               tp.health = nextHealth;
               if (nextHealth <= 0 && previousHealth > 0) {

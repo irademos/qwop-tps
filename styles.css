@@ -403,21 +403,44 @@ body {
   cursor: pointer;
 }
 
-#health-bar {
+#health-display {
   position: absolute;
-  top: 38px;
+  top: 32px;
   left: 10px;
-  width: 150px;
-  height: 20px;
-  background: #555;
-  border: 2px solid #000;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   z-index: 1000;
+  font-family: 'Press Start 2P', sans-serif;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
 }
 
-#health-fill {
-  height: 100%;
-  background: #0f0;
-  width: 100%;
+#health-label {
+  font-size: 10px;
+}
+
+#health-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid #000;
+  border-radius: 6px;
+}
+
+.health-segment {
+  width: 12px;
+  height: 12px;
+  background: rgba(70, 70, 70, 0.9);
+  border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.health-segment.filled {
+  background: linear-gradient(180deg, #f86b6f, #c62828);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 #ammo-display {
@@ -1714,7 +1737,7 @@ body.settings-open #settings-button {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  body.settings-open #health-bar,
+  body.settings-open #health-display,
   body.settings-open #hunger-bar,
   body.settings-open #energy-bar,
   body.settings-open #magic-bar,

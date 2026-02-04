@@ -10,6 +10,7 @@ import {
   persistFriendlyState,
   setFriendlyPersistenceHost
 } from "./friendlyPersistence.js";
+import { BASE_HEALTH_SEGMENTS, getMaxHealthSegments, normalizeHealthSegments } from "./healthUtils.js";
 
 const FRIENDLY_MODELS = [
   // "/models/andy.fbx",
@@ -25,8 +26,7 @@ const FRIENDLY_WANDER_RADIUS = 4;
 const FRIENDLY_ENGAGE_RADIUS = 5;
 const FRIENDLY_DISENGAGE_RADIUS = 8;
 const FRIENDLY_ANIM_MIN_INTERVAL_MS = 150;
-const FRIENDLY_BASE_HEALTH = 100;
-const FRIENDLY_LEVEL_HEALTH_STEP = 0.5;
+const FRIENDLY_BASE_HEALTH = BASE_HEALTH_SEGMENTS;
 const FRIENDLY_LEVEL_WEIGHTS = [
   { level: 1, weight: 0.55 },
   { level: 2, weight: 0.25 },
@@ -76,9 +76,9 @@ export function createFriendlyNpcManager({
     return FRIENDLY_LEVEL_WEIGHTS[0]?.level ?? 1;
   };
 
-  const getHealthForLevel = (level) => {
+const getHealthForLevel = (level) => {
     const clampedLevel = Math.max(1, Math.round(level || 1));
-    return FRIENDLY_BASE_HEALTH * (1 + FRIENDLY_LEVEL_HEALTH_STEP * (clampedLevel - 1));
+    return getMaxHealthSegments(clampedLevel);
   };
 
   const getSpawnPosition = (position) => {
@@ -247,8 +247,8 @@ export function createFriendlyNpcManager({
         friendly.resetHealth();
 
         if (Number.isFinite(record.hp)) {
-          friendly.health = record.hp;
-          friendly.model.userData.health = record.hp;
+          friendly.health = normalizeHealthSegments(record.hp, friendly.level);
+          friendly.model.userData.health = friendly.health;
         }
         if (record.alive === false || (Number.isFinite(record.hp) && record.hp <= 0)) {
           friendly.markDead();

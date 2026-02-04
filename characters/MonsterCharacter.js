@@ -2,13 +2,14 @@ import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { ATTACKS } from "../items/melee.js";
 import { getKnockbackImpulse } from "../knockback.js";
+import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from "../healthUtils.js";
 
 const AGGRO_RADIUS = 12;
 const WANDER_CHANGE_MS = 2000;
 const ATTACK_NAME = 'Weapon';
 const MOVE_FADE = 0.2;
 const ATTACK_FADE = 0.1;
-const DEFAULT_HEALTH = 100;
+const DEFAULT_HEALTH = BASE_HEALTH_SEGMENTS;
 const MONSTER_ATTACK = ATTACKS.mutantPunch;
 const ATTACK_COOLDOWN_RANGE_MS = [2000, 5000];
 const STANDOFF_DISTANCE = 2.5;
@@ -17,8 +18,10 @@ const STRAFE_SPEED = 1.1;
 const STRAFE_OSCILLATION = 0.004;
 const ATTACK_LUNGE_DURATION_MS = 280;
 const STANDOFF_RETREAT_INTERVAL_MS = 2000;
-const HEALTH_BAR_WIDTH = 128;
 const HEALTH_BAR_HEIGHT = 14;
+const HEALTH_BAR_PADDING = 4;
+const HEALTH_BAR_SEGMENT_WIDTH = 10;
+const HEALTH_BAR_SEGMENT_GAP = 2;
 const HEALTH_BAR_DISPLAY_MS = 1800;
 const HEALTH_BAR_OFFSET_Y = 2.2;
 const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
@@ -81,7 +84,8 @@ export class MonsterCharacter extends CharacterBase {
 
   applyDamage(amount) {
     if (this.isDead) return;
-    this.health = Math.max(0, this.health - amount);
+    const damage = Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+    this.health = Math.max(0, this.health - damage);
     this.model.userData.health = this.health;
     this.showHealthBar();
     if (this.health <= 0) {
@@ -129,8 +133,8 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.level = nextLevel;
     this.sizeScale = 1 + LEVEL_SIZE_STEP * (nextLevel - 1);
     this.speedMultiplier = Math.max(0.6, 1 - LEVEL_SPEED_STEP * (nextLevel - 1));
-    this.attackDamage = MONSTER_ATTACK.damage * this.sizeScale;
-    this.maxHealth = DEFAULT_HEALTH * this.sizeScale;
+    this.attackDamage = Math.max(1, Math.round(MONSTER_ATTACK.damage * this.sizeScale));
+    this.maxHealth = getMaxHealthSegments(nextLevel);
     this.model.userData.maxHealth = this.maxHealth;
     if (this.pivot?.scale) {
       this.pivot.scale.set(
@@ -143,9 +147,9 @@ export class MonsterCharacter extends CharacterBase {
     if (!preserveHealth) {
       this.health = this.maxHealth;
       this.model.userData.health = this.maxHealth;
-    } else if (this.health > this.maxHealth) {
-      this.health = this.maxHealth;
-      this.model.userData.health = this.maxHealth;
+    } else {
+      this.health = clampHealthSegments(this.health, this.level);
+      this.model.userData.health = this.health;
     }
     this.updateHealthBarTexture();
   }
@@ -176,9 +180,9 @@ export class MonsterCharacter extends CharacterBase {
     }
     if (Number.isFinite(data.hp)) {
       const previousHealth = this.health;
-      this.health = data.hp;
-      this.model.userData.health = data.hp;
-      if (data.hp < previousHealth) {
+      this.health = clampHealthSegments(data.hp, this.level);
+      this.model.userData.health = this.health;
+      if (this.health < previousHealth) {
         this.showHealthBar();
       }
     }
@@ -290,7 +294,8 @@ export class MonsterCharacter extends CharacterBase {
       } else if (player.id !== 'local') {
         const op = otherPlayers[player.id];
         if (op) {
-          op.health = Math.max(0, (op.health || 100) - this.attackDamage);
+          const current = Number.isFinite(op.health) ? op.health : BASE_HEALTH_SEGMENTS;
+          op.health = Math.max(0, current - this.attackDamage);
         }
       }
     });
@@ -425,7 +430,10 @@ export class MonsterCharacter extends CharacterBase {
 
   createHealthBar() {
     const canvas = document.createElement('canvas');
-    canvas.width = HEALTH_BAR_WIDTH;
+    const segmentCount = Math.max(1, Math.round(this.maxHealth || DEFAULT_HEALTH));
+    canvas.width = HEALTH_BAR_PADDING * 2
+      + segmentCount * HEALTH_BAR_SEGMENT_WIDTH
+      + Math.max(0, segmentCount - 1) * HEALTH_BAR_SEGMENT_GAP;
     canvas.height = HEALTH_BAR_HEIGHT;
     const context = canvas.getContext('2d');
     const texture = new THREE.CanvasTexture(canvas);
@@ -455,14 +463,24 @@ export class MonsterCharacter extends CharacterBase {
     const canvas = this.healthBar.userData.canvas;
     const maxHealth = this.maxHealth || DEFAULT_HEALTH;
     const clampedHealth = Math.max(0, Math.min(maxHealth, this.health));
-    const pct = maxHealth > 0 ? clampedHealth / maxHealth : 0;
+    const segmentCount = Math.max(1, Math.round(maxHealth));
+    const width = HEALTH_BAR_PADDING * 2
+      + segmentCount * HEALTH_BAR_SEGMENT_WIDTH
+      + Math.max(0, segmentCount - 1) * HEALTH_BAR_SEGMENT_GAP;
+    if (canvas.width !== width || canvas.height !== HEALTH_BAR_HEIGHT) {
+      canvas.width = width;
+      canvas.height = HEALTH_BAR_HEIGHT;
+    }
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = 'rgba(0, 0, 0, 0.6)';
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = 'rgba(60, 60, 60, 0.8)';
     context.fillRect(2, 2, canvas.width - 4, canvas.height - 4);
-    context.fillStyle = 'rgba(214, 53, 60, 0.9)';
-    context.fillRect(4, 4, (canvas.width - 8) * pct, canvas.height - 8);
+    for (let i = 0; i < segmentCount; i += 1) {
+      const x = HEALTH_BAR_PADDING + i * (HEALTH_BAR_SEGMENT_WIDTH + HEALTH_BAR_SEGMENT_GAP);
+      context.fillStyle = i < clampedHealth ? 'rgba(214, 53, 60, 0.9)' : 'rgba(80, 80, 80, 0.85)';
+      context.fillRect(x, 4, HEALTH_BAR_SEGMENT_WIDTH, canvas.height - 8);
+    }
     this.healthBar.userData.texture.needsUpdate = true;
   }
 
@@ -478,8 +496,9 @@ export class MonsterCharacter extends CharacterBase {
     const scale = this.sizeScale || 1;
     const baseScale = this.healthBar.userData.baseScale || HEALTH_BAR_SCALE;
     const baseOffset = this.healthBar.userData.baseOffset ?? HEALTH_BAR_OFFSET_Y;
+    const segmentScale = (this.maxHealth || DEFAULT_HEALTH) / BASE_HEALTH_SEGMENTS;
     this.healthBar.position.set(0, baseOffset * scale, 0);
-    this.healthBar.scale.set(baseScale.x * scale, baseScale.y * scale, baseScale.z);
+    this.healthBar.scale.set(baseScale.x * scale * segmentScale, baseScale.y * scale, baseScale.z);
   }
 
   updateHealthBarVisibility() {

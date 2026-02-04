@@ -1,5 +1,6 @@
 // /characters/CharacterBase.js
 import * as THREE from "three";
+import { BASE_HEALTH_SEGMENTS } from "../healthUtils.js";
 
 export const CHARACTER_MOVEMENT = {
   walkSpeed: 2,
@@ -10,7 +11,7 @@ export const CHARACTER_MOVEMENT = {
 export class CharacterBase {
   constructor(model) {
     this.model = model;
-    this.health = 100;
+    this.health = BASE_HEALTH_SEGMENTS;
     this.velocity = new THREE.Vector3();
     this.actions = {};
     this.currentAction = null;

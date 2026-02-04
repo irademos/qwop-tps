@@ -38,6 +38,14 @@ import { fetchOSMData } from './osmClient.js';
 import { overpassToGeoJSON } from './osmGeoJson.js';
 import { createMapRenderer } from './environment/mapRender.js';
 import { createBuildingsRenderer } from './environment/buildingsRender.js';
+import {
+  BASE_HEALTH_SEGMENTS,
+  HEALTH_SEGMENT_VALUE,
+  clampHealthSegments,
+  convertPointsToSegments,
+  getMaxHealthSegments,
+  normalizeHealthSegments
+} from './healthUtils.js';
 import { createTileCache } from './tileCache.js';
 import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
@@ -131,7 +139,7 @@ const BOMB_THROW_LIFETIME = 15000;
 const BOMB_THROW_UPWARD_BIAS = 0.25;
 const BOMB_GROUND_Y = 0.25;
 const BOMB_DAMAGE_RADIUS = 5;
-const BOMB_BASE_DAMAGE = 60;
+const BOMB_BASE_DAMAGE = 6;
 const BOMB_KNOCKBACK_STRENGTH = 6;
 const BOMB_MIST_LIFETIME_MS = 8000;
 const BOMB_MIST_PARTICLE_COUNT = 35;
@@ -550,11 +558,11 @@ async function main() {
 
   const FOOD_HUNGER_GAIN = 25;
   const FOOD_ENERGY_GAIN = 15;
-  const HEALTH_PICKUP_GAIN = 20;
-  const MUSHROOM_HEALTH_GAIN = 6;
+  const HEALTH_PICKUP_SEGMENTS = 2;
+  const MUSHROOM_HEALTH_SEGMENTS = 1;
   const MUSHROOM_HUNGER_GAIN = 6;
   const MUSHROOM_ENERGY_GAIN = 8;
-  const APPLE_HEALTH_GAIN = 4;
+  const APPLE_HEALTH_SEGMENTS = 1;
   const APPLE_HUNGER_GAIN = 4;
   const APPLE_ENERGY_GAIN = 6;
   const APPLE_DROP_LIFT = 0.25;
@@ -562,6 +570,8 @@ async function main() {
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.45;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
   const SLEEP_RECOVERY_PER_SECOND = 100 / 3600;
+  const HUNGER_HEALTH_DECAY_SEGMENTS_PER_SECOND = HUNGER_HEALTH_DECAY_PER_SECOND / HEALTH_SEGMENT_VALUE;
+  const SLEEP_RECOVERY_SEGMENTS_PER_SECOND = SLEEP_RECOVERY_PER_SECOND / HEALTH_SEGMENT_VALUE;
   const PICKUP_RADIUS = 1.2;
   const APPLE_PICKUP_RADIUS = 3;
   const WOOD_ITEM_ID = 'wood';
@@ -1266,7 +1276,7 @@ async function main() {
           model: other.model,
           nameLabel: other.nameLabel,
           name: data.name,
-          health: existing?.health ?? 100,
+          health: existing?.health ?? BASE_HEALTH_SEGMENTS,
           modelPath: desiredModel,
           targetPos: new THREE.Vector3(),
           targetQuat: new THREE.Quaternion(),
@@ -2594,8 +2604,8 @@ async function main() {
         monster.resetHealth();
 
         if (Number.isFinite(options.health)) {
-          monster.health = options.health;
-          monster.model.userData.health = options.health;
+          monster.health = normalizeHealthSegments(options.health, monster.level);
+          monster.model.userData.health = monster.health;
         }
         if (options.alive === false || (Number.isFinite(options.health) && options.health <= 0)) {
           monster.markDead();
@@ -2830,8 +2840,8 @@ async function main() {
           monster.model.userData.mode = state.mode;
         }
         if (typeof state.health === 'number') {
-          monster.health = state.health;
-          monster.model.userData.health = state.health;
+          monster.health = normalizeHealthSegments(state.health, monster.level);
+          monster.model.userData.health = monster.health;
         }
         const aliveFlag = typeof state.mode === 'string' ? state.mode !== 'dead' : undefined;
         monster.applyPersistedState?.({
@@ -2884,6 +2894,7 @@ async function main() {
     xp: playerProfile.stats.xp,
     coins: playerProfile.stats.coins
   };
+  statsState.health = normalizeHealthSegments(statsState.health, statsState.level);
   const spellsAvailable = { ...(playerProfile?.spells || {}) };
   const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
@@ -4520,11 +4531,11 @@ async function main() {
     if (!itemId || !inventoryState[itemId]) return;
     if (!isFoodItem(itemId)) return;
     if (isMushroomItem(itemId)) {
-      setStat('health', statsState.health + MUSHROOM_HEALTH_GAIN, { skipSave: true });
+      setStat('health', statsState.health + MUSHROOM_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
       setStat('hunger', statsState.hunger + MUSHROOM_ENERGY_GAIN, { skipSave: true });
     } else if (isAppleItem(itemId)) {
-      setStat('health', statsState.health + APPLE_HEALTH_GAIN, { skipSave: true });
+      setStat('health', statsState.health + APPLE_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_ENERGY_GAIN, { skipSave: true });
     }
@@ -4536,7 +4547,7 @@ async function main() {
     if (!itemId || !inventoryState[itemId]) return;
     if (!isPotionItem(itemId)) return;
     if (itemId === LIFE_POTION_ITEM_ID) {
-      setStat('health', 100, { skipSave: true });
+      setStat('health', getMaxHealthSegments(statsState.level), { skipSave: true });
     }
     if (itemId === MANA_POTION_ITEM_ID) {
       setStat('magic', 100, { skipSave: true });
@@ -4556,7 +4567,8 @@ async function main() {
     playerControls.setEnergyDepleted?.(energyDepleted);
   };
 
-  const healthFill = document.getElementById('health-fill');
+  const healthBar = document.getElementById('health-bar');
+  const healthLabel = document.getElementById('health-label');
   const hungerFill = document.getElementById('hunger-fill');
   const magicFill = document.getElementById('magic-fill');
   const hungerWarning = document.getElementById('hunger-warning');
@@ -4681,8 +4693,22 @@ async function main() {
   };
 
   function updateHealthUI() {
-    if (healthFill) {
-      healthFill.style.width = `${statsState.health}%`;
+    if (!healthBar) return;
+    const maxSegments = getMaxHealthSegments(statsState.level);
+    const currentSegments = clampHealthSegments(statsState.health, statsState.level);
+    if (healthBar.childElementCount !== maxSegments) {
+      healthBar.innerHTML = '';
+      for (let i = 0; i < maxSegments; i += 1) {
+        const segment = document.createElement('span');
+        segment.className = 'health-segment';
+        healthBar.appendChild(segment);
+      }
+    }
+    Array.from(healthBar.children).forEach((segment, index) => {
+      segment.classList.toggle('filled', index < currentSegments);
+    });
+    if (healthLabel) {
+      healthLabel.textContent = `Health ${currentSegments}/${maxSegments}`;
     }
   }
 
@@ -4714,6 +4740,9 @@ async function main() {
       const num = Number(value);
       if (!Number.isFinite(num)) {
         return 0;
+      }
+      if (key === 'health') {
+        return clampHealthSegments(num, statsState.level);
       }
       return Math.max(0, Math.min(100, num));
     }
@@ -4760,6 +4789,8 @@ async function main() {
     }
     if (key === 'level') {
       updatePlayerInfoUI();
+      statsState.health = clampHealthSegments(statsState.health, statsState.level);
+      updateHealthUI();
     }
     if (!skipSave) {
       if (key === 'hunger') {
@@ -4779,6 +4810,9 @@ async function main() {
 
   const getSleepRecoveryValue = (key, startValue, elapsedSeconds) => {
     const base = Number.isFinite(startValue) ? startValue : 0;
+    if (key === 'health') {
+      return clampStat(key, base + elapsedSeconds * SLEEP_RECOVERY_SEGMENTS_PER_SECOND);
+    }
     return clampStat(key, base + elapsedSeconds * SLEEP_RECOVERY_PER_SECOND);
   };
 
@@ -4819,12 +4853,16 @@ async function main() {
     if (!Number.isFinite(delta) || delta === 0) {
       return;
     }
-    const adjustment = delta * 2;
     for (const key of STAT_KEYS_FOR_LEVEL) {
       const current = Number.isFinite(statsState[key]) ? statsState[key] : 0;
-      const nextValue = key === 'health' || key === 'hunger'
-        ? clampStat(key, current + adjustment)
-        : current + adjustment;
+      let nextValue = current;
+      if (key === 'health') {
+        nextValue = clampStat(key, current + delta);
+      } else if (key === 'hunger') {
+        nextValue = clampStat(key, current + delta * 2);
+      } else {
+        nextValue = current + delta * 2;
+      }
       setStat(key, nextValue, { skipSave: true });
     }
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -4924,7 +4962,8 @@ async function main() {
       if (typeof window.getPlayerStrength === 'function') {
         const strength = window.getPlayerStrength();
         if (Number.isFinite(strength)) {
-          return Math.max(0, BOMB_BASE_DAMAGE + strength);
+          const bonus = convertPointsToSegments(strength, { minimum: 0 });
+          return Math.max(0, BOMB_BASE_DAMAGE + bonus);
         }
       }
     }
@@ -4967,7 +5006,7 @@ async function main() {
       if (distance > BOMB_DAMAGE_RADIUS) continue;
       const player = otherPlayers[id];
       if (!player) continue;
-      const previousHealth = player.health || 100;
+      const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
       const nextHealth = Math.max(0, previousHealth - damage);
       player.health = nextHealth;
       if (nextHealth <= 0 && previousHealth > 0) {
@@ -5568,7 +5607,7 @@ async function main() {
   }
 
   function applyHealthPickupEffects() {
-    setStat('health', statsState.health + HEALTH_PICKUP_GAIN, { skipSave: true });
+    setStat('health', statsState.health + HEALTH_PICKUP_SEGMENTS, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
@@ -5732,6 +5771,8 @@ async function main() {
   });
 
   let statDecayAccumulator = 0;
+  let healthRecoveryRemainder = 0;
+  let healthDecayRemainder = 0;
 
   playerControls = new PlayerControls({
     scene,
@@ -7136,7 +7177,7 @@ async function main() {
   }
 
   function respawnPlayer() {
-    setStat('health', 100);
+    setStat('health', getMaxHealthSegments(statsState.level));
     setStat('hunger', 100);
     setStat('hunger', 100);
     setStat('magic', 100);
@@ -7699,9 +7740,18 @@ async function main() {
       if (isSleeping) {
         const recovery = SLEEP_RECOVERY_PER_SECOND * elapsedSeconds;
         if (recovery > 0) {
-          setStat('health', statsState.health + recovery, { skipSave: true });
           setStat('hunger', statsState.hunger + recovery, { skipSave: true });
           statsChanged = true;
+        }
+        const healthRecovery = SLEEP_RECOVERY_SEGMENTS_PER_SECOND * elapsedSeconds;
+        if (healthRecovery > 0) {
+          healthRecoveryRemainder += healthRecovery;
+          const segments = Math.floor(healthRecoveryRemainder);
+          if (segments > 0) {
+            setStat('health', statsState.health + segments, { skipSave: true });
+            healthRecoveryRemainder -= segments;
+            statsChanged = true;
+          }
         }
       } else {
         if (statsState.hunger > 0) {
@@ -7722,10 +7772,15 @@ async function main() {
         }
 
         if (statsState.hunger <= 0 && statsState.health > 0) {
-          const healthDecay = HUNGER_HEALTH_DECAY_PER_SECOND * elapsedSeconds;
+          const healthDecay = HUNGER_HEALTH_DECAY_SEGMENTS_PER_SECOND * elapsedSeconds;
           if (healthDecay > 0) {
-            setStat('health', statsState.health - healthDecay, { skipSave: true });
-            statsChanged = true;
+            healthDecayRemainder += healthDecay;
+            const segments = Math.floor(healthDecayRemainder);
+            if (segments > 0) {
+              setStat('health', statsState.health - segments, { skipSave: true });
+              healthDecayRemainder -= segments;
+              statsChanged = true;
+            }
           }
         }
       }
