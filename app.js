@@ -76,6 +76,7 @@ import {
   ensureMonsterRecord,
   persistMonsterHp,
   persistMonsterState,
+  removeMonsterRecord,
   setMonsterPersistenceHost
 } from './monsterPersistence.js';
 
@@ -2715,6 +2716,19 @@ async function main() {
     if (!record) return;
     const slotId = record.id || recordId;
     if (!slotId) return;
+
+    const recordIsDead = record.alive === false
+      || (Number.isFinite(record.hp) && record.hp <= 0);
+    if (recordIsDead && isHost) {
+      const existing = monsters.find(entry => entry.id === slotId);
+      if (existing) {
+        cleanupMonster(existing);
+        monsters = monsters.filter(entry => entry && entry.id !== slotId);
+        window.monsters = monsters;
+      }
+      removeMonsterRecord(slotId);
+      return;
+    }
 
     const incomingVersion = Number.isFinite(record.version) ? record.version : null;
     const existing = monsters.find(entry => entry.id === slotId);

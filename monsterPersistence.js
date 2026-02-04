@@ -16,3 +16,4 @@ export const subscribeMonsterUpdates = monsterPersistence.subscribeUpdates;
 export const ensureMonsterRecord = monsterPersistence.ensureRecord;
 export const persistMonsterHp = monsterPersistence.persistHp;
 export const persistMonsterState = monsterPersistence.persistState;
+export const removeMonsterRecord = monsterPersistence.removeRecord;
