@@ -42,7 +42,7 @@ import { createTileCache } from './tileCache.js';
 import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI } from './controls/homeStoragePanel.js';
-import { initCraftPanel, openCraftPanel, updateUI as updateCraftUI } from './controls/craftPanel.js';
+import { CRAFT_RECIPES, initCraftPanel, openCraftPanel, updateUI as updateCraftUI } from './controls/craftPanel.js';
 import { initMerchantPanel, updateMerchantUI } from './controls/merchantPanel.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
 import { getMerchantFriendly, initMerchant, setMerchantHost, setMerchantRoom } from './characters/merchant.js';
@@ -1542,6 +1542,7 @@ async function main() {
   let treasureChest;
   let bed;
   let craftTable;
+  let craftTableColliderBody;
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -4175,6 +4176,58 @@ async function main() {
     swirl: null,
     craftTimeout: null
   };
+  const craftRecipeMap = new Map(CRAFT_RECIPES.map((recipe) => [recipe.id, recipe]));
+
+  const getCraftMaterialKey = (itemId) => {
+    if (itemId === WOOD_ITEM_ID) return 'wood';
+    if (itemId === APPLE_ITEM_ID) return 'apples';
+    if (itemId?.startsWith?.('mushroom_')) return 'mushrooms';
+    return null;
+  };
+
+  const getSelectionMaterialCounts = (selection) => {
+    const totals = { wood: 0, apples: 0, mushrooms: 0 };
+    if (!selection) return totals;
+    Object.entries(selection).forEach(([itemId, count]) => {
+      const key = getCraftMaterialKey(itemId);
+      if (!key) return;
+      totals[key] += count;
+    });
+    return totals;
+  };
+
+  const computeCraftCount = (recipe, selection) => {
+    if (!recipe) return 0;
+    const totals = getSelectionMaterialCounts(selection);
+    const limits = Object.entries(recipe.materials).map(([key, amount]) => (
+      amount > 0 ? Math.floor((totals[key] || 0) / amount) : 0
+    ));
+    if (!limits.length) return 0;
+    return Math.max(0, Math.min(...limits));
+  };
+
+  const returnUnusedCraftMaterials = (selection, recipe, craftCount) => {
+    if (!selection) return;
+    const required = {};
+    if (recipe?.materials) {
+      Object.entries(recipe.materials).forEach(([key, amount]) => {
+        required[key] = (required[key] || 0) + amount * craftCount;
+      });
+    }
+    Object.entries(selection).forEach(([itemId, count]) => {
+      if (!count) return;
+      const key = getCraftMaterialKey(itemId);
+      let used = 0;
+      if (key && required[key] > 0) {
+        used = Math.min(count, required[key]);
+        required[key] -= used;
+      }
+      const leftover = count - used;
+      if (leftover > 0) {
+        addToInventory(itemId, leftover);
+      }
+    });
+  };
 
   const clearCraftSwirl = () => {
     if (!craftState.swirl) return;
@@ -4302,7 +4355,8 @@ async function main() {
         itemId: pickupConfig.itemId,
         markerColor: pickupConfig.markerColor,
         markerOffsetY: 1.2,
-        position: dropPos
+        position: dropPos,
+        allowHidden: true
       });
     }
   };
@@ -4351,12 +4405,29 @@ async function main() {
     if (craftState.craftTimeout) {
       clearTimeout(craftState.craftTimeout);
     }
+    const recipe = craftRecipeMap.get(itemId);
+    const craftCount = computeCraftCount(recipe, craftState.selection);
+    if (craftCount <= 0) {
+      returnUnusedCraftMaterials(craftState.selection, recipe, 0);
+      craftState.selection = null;
+      clearCraftMaterials();
+      clearCraftSwirl();
+      return;
+    }
     const basePos = craftTable.getCraftSurfacePosition?.() || craftTable.mesh.position.clone();
     craftState.swirl = createCraftSwirl(basePos);
     craftState.craftTimeout = setTimeout(() => {
       clearCraftMaterials();
       clearCraftSwirl();
-      spawnCraftedPickup(itemId, basePos);
+      if (craftCount > 0) {
+        const radius = 0.4;
+        for (let i = 0; i < craftCount; i += 1) {
+          const angle = (i / Math.max(craftCount, 1)) * Math.PI * 2;
+          const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+          spawnCraftedPickup(itemId, basePos.clone().add(offset));
+        }
+      }
+      returnUnusedCraftMaterials(craftState.selection, recipe, craftCount);
       craftState.selection = null;
       craftState.craftTimeout = null;
     }, 4000);
@@ -6200,6 +6271,24 @@ async function main() {
   });
   await craftTable.load();
   window.craftTable = craftTable;
+  if (rapierWorld && craftTable?.mesh) {
+    if (craftTableColliderBody && rapierWorld.getRigidBody(craftTableColliderBody.handle)) {
+      rapierWorld.removeRigidBody(craftTableColliderBody);
+      craftTableColliderBody = null;
+    }
+    const bounds = new THREE.Box3().setFromObject(craftTable.mesh);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    bounds.getSize(size);
+    bounds.getCenter(center);
+    const half = size.multiplyScalar(0.5);
+    const rbDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(center.x, center.y, center.z);
+    craftTableColliderBody = rapierWorld.createRigidBody(rbDesc);
+    const colDesc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
+      .setRestitution(0.05)
+      .setFriction(0.9);
+    rapierWorld.createCollider(colDesc, craftTableColliderBody);
+  }
 
   function getLatestLocationFix() {
     const latest = window.latestLocation;

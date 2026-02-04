@@ -1,4 +1,4 @@
-const CRAFT_RECIPES = [
+export const CRAFT_RECIPES = [
   { id: 'torch', label: 'Torch', materials: { wood: 1 } },
   { id: 'arrow', label: 'Arrow', materials: { wood: 1 } },
   { id: 'bow', label: 'Bow', materials: { wood: 9, mushrooms: 4 } },
