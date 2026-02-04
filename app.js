@@ -4721,6 +4721,7 @@ async function main() {
     if (!healthBar) return;
     const maxSegments = getMaxHealthSegments(statsState.level);
     const currentSegments = clampHealthSegments(statsState.health, statsState.level);
+    const healthRatio = maxSegments > 0 ? currentSegments / maxSegments : 0;
     if (healthBar.childElementCount !== maxSegments) {
       healthBar.innerHTML = '';
       for (let i = 0; i < maxSegments; i += 1) {
@@ -4732,8 +4733,17 @@ async function main() {
     Array.from(healthBar.children).forEach((segment, index) => {
       segment.classList.toggle('filled', index < currentSegments);
     });
+    if (healthRatio > 0.75) {
+      healthBar.dataset.healthLevel = 'high';
+    } else if (healthRatio > 0.5) {
+      healthBar.dataset.healthLevel = 'mid';
+    } else if (healthRatio > 0.25) {
+      healthBar.dataset.healthLevel = 'low';
+    } else {
+      healthBar.dataset.healthLevel = 'critical';
+    }
     if (healthLabel) {
-      healthLabel.textContent = `Health ${currentSegments}/${maxSegments}`;
+      healthLabel.textContent = 'Health';
     }
   }
 
