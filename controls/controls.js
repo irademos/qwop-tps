@@ -913,6 +913,11 @@ export class PlayerControls {
       return;
     }
 
+    if (closest.type === 'craft-table') {
+      window.openCraftPanel?.();
+      return;
+    }
+
     if (closest.type === 'bed') {
       this.startSleep(closest.bed);
       return;
@@ -994,6 +999,22 @@ export class PlayerControls {
         bed,
         maxDistance,
         promptText: BED_SLEEP_PROMPT
+      });
+    }
+
+    const craftTable = window.craftTable;
+    if (craftTable?.mesh) {
+      const tablePosition = craftTable.getWorldPosition?.(new THREE.Vector3()) ?? craftTable.mesh.position;
+      const dist = playerPos.distanceTo(tablePosition);
+      const maxDistance = craftTable.getInteractionDistance?.() ?? 3;
+      const promptText = this.isMobile
+        ? 'click to craft'
+        : "Press 'x' to craft";
+      consider(dist, {
+        type: 'craft-table',
+        craftTable,
+        maxDistance,
+        promptText
       });
     }
 

@@ -104,6 +104,10 @@
     <div class="friendly-dialogue-text"></div>
     <div class="friendly-dialogue-options"></div>
   </div>
+  <div id="craft-dialogue" class="friendly-dialogue hidden" role="dialog" aria-live="polite" aria-atomic="true">
+    <div class="friendly-dialogue-text"></div>
+    <div class="friendly-dialogue-options"></div>
+  </div>
   <div id="player-info">
     <div id="player-level-badge"><span id="player-level">1</span></div>
     <div id="player-name-display"></div>
@@ -130,6 +134,7 @@
   <div id="ammo-popup" aria-live="polite" aria-atomic="true"></div>
   <div id="coin-popup" aria-live="polite" aria-atomic="true"></div>
   <div id="treasure-popup" aria-live="polite" aria-atomic="true"></div>
+  <div id="craft-message" aria-live="polite" aria-atomic="true"></div>
   <div id="voice-transcript" aria-live="polite" aria-atomic="true"></div>
   <div id="action-buttons">
     <button id="mobile-action-toggle" class="action-button mobile-only" aria-expanded="false" aria-label="Toggle actions">⋯</button>
@@ -152,6 +157,11 @@
   <!-- Merchant Overlay -->
   <div id="merchant-overlay">
     <div id="merchant-panel"></div>
+  </div>
+
+  <!-- Crafting Overlay -->
+  <div id="craft-overlay">
+    <div id="craft-panel"></div>
   </div>
 
   <!-- Game Over Overlay -->
