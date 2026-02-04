@@ -11,7 +11,6 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <style>
     #hunger-bar,
-    #energy-bar,
     #magic-bar {
       position: absolute;
       left: 10px;
@@ -26,16 +25,11 @@
       top: 66px;
     }
 
-    #energy-bar {
+    #magic-bar {
       top: 90px;
     }
 
-    #magic-bar {
-      top: 114px;
-    }
-
     #hunger-fill,
-    #energy-fill,
     #magic-fill {
       height: 100%;
       width: 100%;
@@ -43,10 +37,6 @@
 
     #hunger-fill {
       background: #f4c542;
-    }
-
-    #energy-fill {
-      background: #3fa9f5;
     }
 
     #magic-fill {
@@ -125,7 +115,6 @@
   </div>
   <div id="health-bar"><div id="health-fill"></div></div>
   <div id="hunger-bar"><div id="hunger-fill"></div></div>
-  <div id="energy-bar"><div id="energy-fill"></div></div>
   <div id="magic-bar"><div id="magic-fill"></div></div>
   <div id="ammo-display" class="hidden">
     <span id="ammo-icon">❄️</span>
@@ -135,6 +124,9 @@
   <div id="coin-popup" aria-live="polite" aria-atomic="true"></div>
   <div id="treasure-popup" aria-live="polite" aria-atomic="true"></div>
   <div id="craft-message" aria-live="polite" aria-atomic="true"></div>
+  <div id="hunger-warning" aria-live="polite" aria-atomic="true">
+    You're famished! Eat something to avoid losing health!
+  </div>
   <div id="voice-transcript" aria-live="polite" aria-atomic="true"></div>
   <div id="action-buttons">
     <button id="mobile-action-toggle" class="action-button mobile-only" aria-expanded="false" aria-label="Toggle actions">⋯</button>

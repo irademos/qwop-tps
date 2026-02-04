@@ -530,6 +530,32 @@ body {
   transform: translateY(0);
 }
 
+#hunger-warning {
+  position: fixed;
+  top: 22%;
+  left: 50%;
+  transform: translate(-50%, -30%) scale(0.98);
+  padding: 12px 16px;
+  border: 3px solid #000;
+  border-radius: 10px;
+  background: rgba(96, 14, 14, 0.92);
+  color: #ffe2b7;
+  font-family: 'Press Start 2P', sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.85);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1200;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#hunger-warning.visible {
+  opacity: 1;
+  transform: translate(-50%, -30%) scale(1);
+}
+
 #player-info {
   position: absolute;
   top: 10px;
