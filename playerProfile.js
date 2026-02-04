@@ -1,12 +1,13 @@
 import { ref, get, set, update, runTransaction } from 'firebase/database';
 import { db } from './firebase-init.js';
 import { getCookie, setCookie } from './utils.js';
+import { BASE_HEALTH_SEGMENTS, normalizeHealthSegments } from './healthUtils.js';
 
 const SALT = 'prototype-salt-v1';
 const PIN_COOKIE_PREFIX = 'playerPinHash_';
 
 const DEFAULT_STATS = {
-  health: 100,
+  health: BASE_HEALTH_SEGMENTS,
   hunger: 100,
   energy: 100,
   magic: 100,
@@ -87,6 +88,9 @@ function normalizeStatValue(key, value) {
     return fallback;
   }
   if (['health', 'hunger', 'energy', 'magic'].includes(key)) {
+    if (key === 'health') {
+      return numeric;
+    }
     return Math.max(0, Math.min(100, numeric));
   }
   if (key === 'level') {
@@ -104,6 +108,7 @@ function mergeStats(stats) {
   for (const key of Object.keys(DEFAULT_STATS)) {
     normalized[key] = normalizeStatValue(key, merged[key]);
   }
+  normalized.health = normalizeHealthSegments(normalized.health, normalized.level);
   return normalized;
 }
 
