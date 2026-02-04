@@ -23,6 +23,7 @@ import { AutumnSword } from './items/autumnSword.js';
 import { Bomb } from './items/bomb.js';
 import { TreasureChest } from './items/treasure_chest.js';
 import { Bed } from './items/bed.js';
+import { CraftTable } from './items/craft_table.js';
 import { createNature } from './environment/nature.js';
 import { createCabin } from './environment/cabin.js';
 import { createTower } from './environment/tower.js';
@@ -41,6 +42,7 @@ import { createTileCache } from './tileCache.js';
 import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI } from './controls/homeStoragePanel.js';
+import { initCraftPanel, openCraftPanel, updateUI as updateCraftUI } from './controls/craftPanel.js';
 import { initMerchantPanel, updateMerchantUI } from './controls/merchantPanel.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
 import { getMerchantFriendly, initMerchant, setMerchantHost, setMerchantRoom } from './characters/merchant.js';
@@ -1539,6 +1541,7 @@ async function main() {
   let bomb;
   let treasureChest;
   let bed;
+  let craftTable;
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -4166,6 +4169,199 @@ async function main() {
     return pickup;
   }
 
+  const craftState = {
+    materials: [],
+    selection: null,
+    swirl: null,
+    craftTimeout: null
+  };
+
+  const clearCraftSwirl = () => {
+    if (!craftState.swirl) return;
+    scene.remove(craftState.swirl.line);
+    craftState.swirl.geometry?.dispose?.();
+    craftState.swirl.material?.dispose?.();
+    craftState.swirl = null;
+  };
+
+  const clearCraftMaterials = () => {
+    craftState.materials.forEach((entry) => {
+      if (!entry?.mesh) return;
+      scene.remove(entry.mesh);
+      entry.mesh.geometry?.dispose?.();
+      if (Array.isArray(entry.mesh.material)) {
+        entry.mesh.material.forEach(material => material?.dispose?.());
+      } else {
+        entry.mesh.material?.dispose?.();
+      }
+    });
+    craftState.materials = [];
+  };
+
+  const restoreCraftInventory = () => {
+    if (!craftState.selection) return;
+    Object.entries(craftState.selection).forEach(([itemId, count]) => {
+      if (count > 0) {
+        addToInventory(itemId, count);
+      }
+    });
+    craftState.selection = null;
+  };
+
+  const createCraftMaterialMesh = (itemId) => {
+    if (itemId === APPLE_ITEM_ID) {
+      const geometry = new THREE.SphereGeometry(0.18, 16, 16);
+      const material = new THREE.MeshStandardMaterial({ color: 0xd73a3a });
+      return new THREE.Mesh(geometry, material);
+    }
+    if (itemId.startsWith('mushroom_')) {
+      const geometry = new THREE.CylinderGeometry(0.12, 0.16, 0.28, 10);
+      const material = new THREE.MeshStandardMaterial({ color: 0xc98b4a });
+      return new THREE.Mesh(geometry, material);
+    }
+    if (itemId === WOOD_ITEM_ID) {
+      const geometry = new THREE.BoxGeometry(0.35, 0.14, 0.2);
+      const material = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
+      return new THREE.Mesh(geometry, material);
+    }
+    return null;
+  };
+
+  const createCraftSwirl = (position) => {
+    if (!position) return null;
+    const points = [];
+    const loops = 3;
+    const radius = 0.6;
+    const height = 0.6;
+    const segments = 80;
+    for (let i = 0; i <= segments; i += 1) {
+      const t = i / segments;
+      const angle = t * Math.PI * 2 * loops;
+      const y = t * height;
+      points.push(new THREE.Vector3(
+        Math.cos(angle) * radius,
+        y,
+        Math.sin(angle) * radius
+      ));
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({ color: 0x7fd0ff, transparent: true, opacity: 0.8 });
+    const line = new THREE.Line(geometry, material);
+    line.position.copy(position);
+    line.userData.skipTerrainCorrection = true;
+    scene.add(line);
+    return { line, geometry, material };
+  };
+
+  const spawnCraftArrowPickup = (position) => {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const arrowMesh = cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE);
+    const pickupMesh = arrowMesh || new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.05, 0.6, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0x7b5530,
+        emissive: 0x2b1a0a,
+        emissiveIntensity: 0.35
+      })
+    );
+    pickupMesh.rotation.set(0, Math.PI / 2, Math.PI / 2);
+    registerPickupEmissiveMaterials(pickupMesh);
+    pickupMesh.position.copy(spawnPos);
+    pickupMesh.castShadow = true;
+    pickupMesh.userData.skipTerrainCorrection = true;
+    pickupMesh.userData.baseY = spawnPos.y;
+    pickupMesh.userData.phase = Math.random() * Math.PI * 2;
+    pickupMesh.userData.amount = 1;
+    pickupMesh.userData.type = 'arrow';
+    pickupMesh.userData.sparkle = true;
+    pickupMesh.userData.noFloat = true;
+    const light = new THREE.PointLight(0xfff2a8, 0.6, 2);
+    light.position.set(0, 0.4, 0);
+    pickupMesh.add(light);
+    pickupMesh.userData.sparkleLight = light;
+    scene.add(pickupMesh);
+    ammoPickups.push(pickupMesh);
+    return pickupMesh;
+  };
+
+  const spawnCraftedPickup = (itemId, position) => {
+    if (!itemId || !position) return;
+    const dropPos = position.clone().add(new THREE.Vector3(0, 0.4, 0));
+    if (itemId === 'arrow') {
+      spawnCraftArrowPickup(dropPos);
+      return;
+    }
+    const pickupConfig = {
+      bow: { item: bow, itemId: 'bow', markerColor: 0xffc26b },
+      lantern: { item: lantern, itemId: 'lantern', markerColor: 0xffd400 },
+      torch: { item: torch, itemId: TORCH_ITEM_ID, markerColor: 0xffa54c }
+    }[itemId];
+    if (pickupConfig?.item?.mesh) {
+      createDroppedWeaponPickup(pickupConfig.item, {
+        itemId: pickupConfig.itemId,
+        markerColor: pickupConfig.markerColor,
+        markerOffsetY: 1.2,
+        position: dropPos
+      });
+    }
+  };
+
+  const placeCraftMaterials = (selection) => {
+    if (!selection || !craftTable?.mesh) return;
+    clearCraftMaterials();
+    clearCraftSwirl();
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+      craftState.craftTimeout = null;
+    }
+    craftState.selection = { ...selection };
+    const entries = Object.entries(selection).filter(([, count]) => count > 0);
+    const basePos = craftTable.getCraftSurfacePosition?.() || craftTable.mesh.position.clone();
+    entries.forEach(([itemId], index) => {
+      const mesh = createCraftMaterialMesh(itemId);
+      if (!mesh) return;
+      const angle = (index / Math.max(entries.length, 1)) * Math.PI * 2;
+      const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
+      mesh.position.copy(basePos).add(offset);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.skipTerrainCorrection = true;
+      scene.add(mesh);
+      craftState.materials.push({ itemId, mesh });
+    });
+  };
+
+  const cancelCrafting = ({ restoreInventory = false } = {}) => {
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+      craftState.craftTimeout = null;
+    }
+    clearCraftSwirl();
+    clearCraftMaterials();
+    if (restoreInventory) {
+      restoreCraftInventory();
+    } else {
+      craftState.selection = null;
+    }
+  };
+
+  const craftItem = (itemId) => {
+    if (!craftState.selection || !craftTable?.mesh) return;
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+    }
+    const basePos = craftTable.getCraftSurfacePosition?.() || craftTable.mesh.position.clone();
+    craftState.swirl = createCraftSwirl(basePos);
+    craftState.craftTimeout = setTimeout(() => {
+      clearCraftMaterials();
+      clearCraftSwirl();
+      spawnCraftedPickup(itemId, basePos);
+      craftState.selection = null;
+      craftState.craftTimeout = null;
+    }, 4000);
+  };
+
   function dropInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
     if (isFoodItem(itemId)) {
@@ -5999,6 +6195,12 @@ async function main() {
   await bed.load();
   window.bed = bed;
 
+  craftTable = new CraftTable(scene, {
+    position: new THREE.Vector3(1.5, 0, 0.5)
+  });
+  await craftTable.load();
+  window.craftTable = craftTable;
+
   function getLatestLocationFix() {
     const latest = window.latestLocation;
     if (!latest || !Number.isFinite(latest.lat) || !Number.isFinite(latest.lon)) {
@@ -7108,6 +7310,12 @@ async function main() {
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
   window.openHomeStorage = openHomeStorage;
+  window.openCraftPanel = openCraftPanel;
+  window.craftTableActions = {
+    placeMaterials: placeCraftMaterials,
+    cancelCrafting,
+    craftItem
+  };
   window.pickupMushroom = pickupMushroom;
   window.pickupApple = pickupApple;
   window.pickupWood = pickupWood;
@@ -7140,6 +7348,7 @@ async function main() {
   });
   initHomeStoragePanel({ appState });
   initMerchantPanel({ appState });
+  initCraftPanel({ appState });
   void initMerchant({
     scene,
     attachPhysics: attachMonsterPhysics,
@@ -7157,6 +7366,7 @@ async function main() {
   const settingsOverlay = document.getElementById('settings-overlay');
   const homeStorageOverlay = document.getElementById('home-storage-overlay');
   const merchantOverlay = document.getElementById('merchant-overlay');
+  const craftOverlay = document.getElementById('craft-overlay');
   const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
 
   setInterval(() => {
@@ -7168,6 +7378,9 @@ async function main() {
     }
     if (isOverlayVisible(merchantOverlay)) {
       updateMerchantUI();
+    }
+    if (isOverlayVisible(craftOverlay)) {
+      updateCraftUI();
     }
   }, 1000);
   updateAutoDisplayMode();
@@ -7349,6 +7562,9 @@ async function main() {
 
     if (!mapViewEnabled) {
       playerControls.update();
+    }
+    if (craftState.swirl?.line) {
+      craftState.swirl.line.rotation.y += frameDelta * 2;
     }
     const homePosition = homeSystem?.getHomeLocalPosition?.();
     const homeEnterDistance = homeSystem?.getHomeEnterDistance?.();
