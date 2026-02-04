@@ -3159,31 +3159,31 @@ async function main() {
     },
     bow: {
       name: 'Bow',
-      icon: ''
+      icon: '/assets/ui/items/bow.png'
     },
     bomb: {
       name: 'Bomb',
-      icon: ''
+      icon: '/assets/ui/items/bomb.png'
     },
     autumnSword: {
       name: 'Autumn Sword',
-      icon: ''
+      icon: '/assets/ui/items/sword.png'
     },
     lantern: {
       name: 'Lantern (Left Hand)',
-      icon: ''
+      icon: '/assets/ui/items/lantern.png'
     },
     torch: {
       name: 'Torch (Left Hand)',
-      icon: ''
+      icon: '/assets/ui/items/torch.png'
     },
     [LIFE_POTION_ITEM_ID]: {
       name: 'Life Potion',
-      icon: ''
+      icon: '/assets/ui/items/life_potion.png'
     },
     [MANA_POTION_ITEM_ID]: {
       name: 'Mana Potion',
-      icon: ''
+      icon: '/assets/ui/items/mana_potion.png'
     }
   };
   inventoryCatalog[APPLE_ITEM_ID] = {
@@ -3197,7 +3197,7 @@ async function main() {
   MUSHROOM_ENTRIES.forEach((entry) => {
     inventoryCatalog[entry.id] = {
       name: entry.name,
-      icon: ''
+      icon: '/assets/ui/items/{entry.icon_name}.png'.replace('{entry.icon_name}', entry.icon_name)
     };
   });
   const ensureCatalogEntry = (itemId, entry) => {
