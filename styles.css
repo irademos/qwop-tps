@@ -417,10 +417,6 @@ body {
   text-shadow: 1px 1px 0 #000;
 }
 
-#health-label {
-  font-size: 10px;
-}
-
 #health-bar {
   display: inline-flex;
   align-items: center;
