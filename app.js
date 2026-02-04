@@ -3934,7 +3934,7 @@ async function main() {
     if (Number.isFinite(terrainHeight)) {
       spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
     }
-    const geometry = new THREE.BoxGeometry(0.5, 0.18, 0.3);
+    const geometry = new THREE.BoxGeometry(3.0, 0.36, 0.6);
     const material = new THREE.MeshStandardMaterial({
       color: 0x8b5a2b,
       roughness: 0.7,

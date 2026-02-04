@@ -9,10 +9,10 @@ export const LANTERN_LIGHT_SETTINGS = {
 };
 
 export const ROAD_LIGHT_SETTINGS = {
-  intensity: 3.2,
-  distance: 16,
-  decay: 2,
-  emissiveIntensity: 1.0
+  intensity: 2.6,
+  distance: 40,
+  decay: 0.5,
+  emissiveIntensity: 1.2
 };
 
 export const TORCH_LIGHT_SETTINGS = {
