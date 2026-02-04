@@ -169,6 +169,14 @@ export function createEntityPersistence({
     logDebug('persist state', entity.id, payload.version);
   }
 
+  function removeRecord(entityId) {
+    if (!state.isHost) return;
+    const entityRef = getEntityRef(entityId);
+    if (!entityRef) return;
+    set(entityRef, null);
+    logDebug('persist remove', entityId);
+  }
+
   return {
     init,
     setHost,
@@ -176,6 +184,7 @@ export function createEntityPersistence({
     subscribeUpdates,
     ensureRecord,
     persistHp,
-    persistState
+    persistState,
+    removeRecord
   };
 }
