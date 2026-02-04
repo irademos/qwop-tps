@@ -1081,6 +1081,17 @@ body {
   gap: 10px;
 }
 
+.craft-inventory .inventory-icon-wrapper {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+}
+
+.craft-inventory .inventory-icon {
+  width: 100%;
+  height: 100%;
+}
+
 .craft-item-text {
   display: flex;
   flex-direction: column;
