@@ -1908,7 +1908,7 @@ export class PlayerControls {
       const cameraDistance = Math.max(2.5, Math.abs(shoulderOffset?.z ?? this.cameraOffset.z));
       const cameraHeight = shoulderOffset?.y ?? this.cameraOffset.y ?? 1;
       const behindOffset = this.engagedDirection.clone().multiplyScalar(-cameraDistance);
-      const engagedRight = new THREE.Vector3(this.engagedDirection.z, 0, -this.engagedDirection.x).normalize();
+      const engagedRight = new THREE.Vector3(-this.engagedDirection.z, 0, this.engagedDirection.x).normalize();
       desiredCameraPosition = orbitCenter.clone()
         .add(new THREE.Vector3(0, cameraHeight + ENGAGED_CAMERA_OFFSET.up, 0))
         .add(behindOffset)
