@@ -715,6 +715,19 @@ function buildAccountPanel() {
   panelEl.setAttribute('role', 'tabpanel');
   panelEl.setAttribute('aria-labelledby', 'tab-account');
 
+  const homeDescription = createElement(
+    'div',
+    'settings-muted',
+    'Clear your home location to select a new home while standing in a building.'
+  );
+
+  const clearHomeButton = createElement('button', 'settings-button', 'Clear Home Location');
+  clearHomeButton.type = 'button';
+  clearHomeButton.dataset.action = 'clear-home-location';
+
+  const clearHomeStatus = createElement('div', 'settings-muted');
+  clearHomeStatus.dataset.field = 'clear-home-status';
+
   const description = createElement(
     'div',
     'settings-muted',
@@ -743,8 +756,18 @@ function buildAccountPanel() {
   const status = createElement('div', 'settings-muted');
   status.dataset.field = 'delete-account-status';
 
-  panelEl.append(description, deleteButton, confirm, status);
+  panelEl.append(
+    homeDescription,
+    clearHomeButton,
+    clearHomeStatus,
+    description,
+    deleteButton,
+    confirm,
+    status
+  );
 
+  elements.clearHomeButton = clearHomeButton;
+  elements.clearHomeStatus = clearHomeStatus;
   elements.deleteAccountButton = deleteButton;
   elements.deleteAccountConfirm = confirm;
   elements.deleteAccountConfirmYes = confirmYes;
@@ -941,6 +964,37 @@ async function handleAction(target) {
     if (direction === 'east') delta.eastMeters = stepMeters;
     if (direction === 'west') delta.eastMeters = -stepMeters;
     context.location?.stepDebugLocation?.(delta);
+  } else if (action === 'clear-home-location') {
+    const { clearHomeButton, clearHomeStatus } = elements;
+    if (!context.appState?.clearHomeLocation) {
+      if (clearHomeStatus) {
+        clearHomeStatus.textContent = 'Home clearing is unavailable right now.';
+      }
+      return;
+    }
+    if (clearHomeStatus) {
+      clearHomeStatus.textContent = 'Clearing home location...';
+    }
+    if (clearHomeButton) {
+      clearHomeButton.disabled = true;
+    }
+    try {
+      const result = await context.appState.clearHomeLocation();
+      if (clearHomeStatus) {
+        clearHomeStatus.textContent = result?.status === 'ok'
+          ? 'Home location cleared.'
+          : 'Failed to clear home location.';
+      }
+    } catch (error) {
+      console.warn('Failed to clear home location:', error);
+      if (clearHomeStatus) {
+        clearHomeStatus.textContent = 'Failed to clear home location.';
+      }
+    } finally {
+      if (clearHomeButton) {
+        clearHomeButton.disabled = false;
+      }
+    }
   } else if (action === 'delete-account') {
     if (elements.deleteAccountConfirm) {
       elements.deleteAccountConfirm.hidden = false;

@@ -354,6 +354,23 @@ export class HomeSystem {
     }
   }
 
+  async clearHomeSelection() {
+    this.homeData = null;
+    if (!this.profileNameKey) {
+      return { status: 'missing-key' };
+    }
+    try {
+      await update(ref(db, `profiles/${this.profileNameKey}`), {
+        home: null,
+        updatedAt: Date.now()
+      });
+      return { status: 'ok' };
+    } catch (error) {
+      console.error('Failed to clear home selection', error);
+      return { status: 'error' };
+    }
+  }
+
   async selectHome() {
     if (!this.playerModel) return;
     const position = this.playerModel.position;

@@ -405,7 +405,7 @@ body {
 
 #health-display {
   position: absolute;
-  top: 32px;
+  top: 40px;
   left: 10px;
   display: flex;
   flex-direction: column;

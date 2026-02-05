@@ -1579,6 +1579,9 @@ async function main() {
   let bed;
   let craftTable;
   let craftTableColliderBody;
+  let craftTableColliderLastCenter = null;
+  const craftTableColliderBounds = new THREE.Box3();
+  const craftTableColliderCenter = new THREE.Vector3();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -6369,16 +6372,17 @@ async function main() {
   });
   void homeSystem.loadStorageChest?.();
   window.homeSystem = homeSystem;
-  const bedScene = homeSystem?.interiorGroup ?? scene;
-  bed = new Bed(bedScene, {
+  const interiorScene = homeSystem?.interiorGroup ?? scene;
+  bed = new Bed(interiorScene, {
     position: new THREE.Vector3(-3, 0.5, 3),
     useTerrainHeight: false
   });
   await bed.load();
   window.bed = bed;
 
-  craftTable = new CraftTable(scene, {
-    position: new THREE.Vector3(1.5, 0, 0.5)
+  craftTable = new CraftTable(interiorScene, {
+    position: new THREE.Vector3(2.5, 0.5, -2.5),
+    useTerrainHeight: false
   });
   await craftTable.load();
   window.craftTable = craftTable;
@@ -6399,7 +6403,23 @@ async function main() {
       .setRestitution(0.05)
       .setFriction(0.9);
     rapierWorld.createCollider(colDesc, craftTableColliderBody);
+    craftTableColliderLastCenter = center.clone();
   }
+
+  const syncCraftTableCollider = () => {
+    if (!craftTable?.mesh || !craftTableColliderBody) return;
+    craftTableColliderBounds.setFromObject(craftTable.mesh);
+    craftTableColliderBounds.getCenter(craftTableColliderCenter);
+    if (craftTableColliderLastCenter?.equals?.(craftTableColliderCenter)) return;
+    craftTableColliderBody.setTranslation(
+      { x: craftTableColliderCenter.x, y: craftTableColliderCenter.y, z: craftTableColliderCenter.z },
+      true
+    );
+    if (!craftTableColliderLastCenter) {
+      craftTableColliderLastCenter = new THREE.Vector3();
+    }
+    craftTableColliderLastCenter.copy(craftTableColliderCenter);
+  };
 
   function getLatestLocationFix() {
     const latest = window.latestLocation;
@@ -7488,6 +7508,16 @@ async function main() {
       didInitialGpsSnap = false;
       window.clearTileCache?.();
     },
+    clearHomeLocation: async () => {
+      if (!homeSystem?.clearHomeSelection) {
+        return { status: 'unavailable' };
+      }
+      const result = await homeSystem.clearHomeSelection();
+      if (playerProfile) {
+        playerProfile.home = null;
+      }
+      return result;
+    },
     deleteAccount: async () => {
       if (!profileNameKey) {
         return { status: 'missing-key' };
@@ -7718,6 +7748,7 @@ async function main() {
       rapierWorld.step();
       physicsAccumulator -= FIXED_DT;
     }
+    syncCraftTableCollider();
 
     // Sync Rapier bodies -> Three meshes
     for (const [rb, mesh] of rbToMesh.entries()) {
