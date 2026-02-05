@@ -502,8 +502,9 @@ export class PlayerControls {
     };
 
     this.punchButton = createButton('punch-button', 'mobile-primary-action', 'PUNCH');
-    this.spellsButton = createButton('spells-button', 'mobile-primary-action', 'Shield');
+    this.spellsButton = createButton('spells-button', 'mobile-primary-action', '🎤');
     this.equipButton = createButton('equip-button', 'mobile-primary-action', 'EQUIP');
+    this.stopVoiceButton = createButton('stop-voice-button', 'mobile-stop-action', '■');
 
     this.optionLeftButton = createButton('left-punch-button', 'mobile-option-action', 'Left');
     this.optionCenterButton = createButton('punch-kick-button', 'mobile-option-action', 'Kick');
@@ -564,9 +565,18 @@ export class PlayerControls {
 
     bindPrimaryButton(
       this.spellsButton,
-      () => this.castSpellById?.('shield'),
+      () => this.handleVoiceMicPress?.(),
       () => this.showMobileSpellOptions()
     );
+
+    const onStopVoice = (event) => {
+      if (!this.enabled) return;
+      this.stopVoiceListening?.();
+      if (event) event.preventDefault();
+    };
+    this.stopVoiceButton.addEventListener('touchstart', onStopVoice, { passive: false });
+    this.stopVoiceButton.addEventListener('mousedown', onStopVoice);
+    this.stopVoiceButton.addEventListener('click', (event) => event.preventDefault());
 
     const openEquip = (event) => {
       if (!this.enabled) return;
@@ -582,6 +592,12 @@ export class PlayerControls {
       if (this.mobileActionState === 'spell-options') {
         if (slot === 'left') {
           this.castSpellById?.('shield');
+        } else if (slot === 'kick') {
+          this.mobileActionState = 'default';
+          this.refreshActionButtons();
+          this.handleVoiceMicPress?.();
+          if (event) event.preventDefault();
+          return;
         }
       } else {
         this.mobileSelectedAttack = slot;
@@ -740,19 +756,20 @@ export class PlayerControls {
     actionContainer.classList.toggle('mobile-attack-options', state === 'attack-options');
     actionContainer.classList.toggle('mobile-spell-options', state === 'spell-options');
     actionContainer.classList.toggle('mobile-equip-mode', state === 'equip');
+    actionContainer.classList.toggle('mobile-voice-listening', !!this.isVoiceListening?.());
 
     this.punchButton.textContent = this.getMobileAttackLabel(this.mobileSelectedAttack || 'right');
     this.optionLeftButton.textContent = this.getMobileAttackLabel('left');
     this.optionCenterButton.textContent = 'Kick';
     this.optionRightButton.textContent = this.getMobileAttackLabel('right');
 
-    const shieldState = this.getSpellStateById?.('shield') || { disabled: false, remainingSeconds: 0 };
-    this.spellsButton.textContent = shieldState.remainingSeconds > 0 ? `Shield ${shieldState.remainingSeconds}s` : 'Shield';
-    this.spellsButton.disabled = !!shieldState.disabled;
+    const voiceState = this.getVoiceMicState?.() || { disabled: false, remainingSeconds: 0 };
+    this.spellsButton.textContent = voiceState.remainingSeconds > 0 ? `🎤 ${voiceState.remainingSeconds}s` : '🎤';
+    this.spellsButton.disabled = !!voiceState.disabled;
 
     if (state === 'spell-options') {
       this.optionLeftButton.textContent = 'Shield';
-      this.optionCenterButton.textContent = '—';
+      this.optionCenterButton.textContent = '🎤';
       this.optionRightButton.textContent = '—';
     }
 

@@ -5879,6 +5879,15 @@ async function main() {
     removeFromInventory('bomb', 1);
     return true;
   };
+  playerControls.handleVoiceMicPress = () => {
+    startVoiceListening();
+  };
+  playerControls.stopVoiceListening = () => {
+    stopVoiceListening();
+  };
+  playerControls.isVoiceListening = () => voiceListening;
+  playerControls.getVoiceMicState = () => getVoiceMicState();
+
   window.playerControls = playerControls;
   initSpells({
     playerControls,
@@ -7279,6 +7288,13 @@ async function main() {
 
   const voiceTranscript = document.getElementById('voice-transcript');
   let voiceTranscriptTimer = null;
+  let lastVoiceTranscript = '';
+  let voiceListening = false;
+  let pendingVoiceSpellResolution = false;
+  let pendingVoiceSpellTimeout = null;
+  let voiceCooldownUntil = 0;
+  const VOICE_COOLDOWN_MS = 60_000;
+
   const showVoiceTranscript = (text) => {
     if (!voiceTranscript) return;
     voiceTranscript.textContent = text;
@@ -7291,10 +7307,154 @@ async function main() {
     }, 2500);
   };
 
+  const voiceSpellDefs = {
+    apples: { magicCost: 20 },
+    mushrooms: { magicCost: 20 },
+    bombs: { magicCost: 45 },
+    freeze: { magicCost: 12 }
+  };
+
+  const getVoiceSpellFromTranscript = (transcript) => {
+    const normalized = String(transcript || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes('apple')) return 'apples';
+    if (normalized.includes('mushroom')) return 'mushrooms';
+    if (normalized.includes('bomb')) return 'bombs';
+    if (normalized.includes('freeze')) return 'freeze';
+    return null;
+  };
+
+  const castVoiceSpellFromTranscript = (transcript) => {
+    const spellId = getVoiceSpellFromTranscript(transcript);
+    if (!spellId || !playerControls || !playerModel) return false;
+
+    const spellDef = voiceSpellDefs[spellId];
+    const currentMagic = Number.isFinite(statsState.magic) ? statsState.magic : 0;
+    if (currentMagic < spellDef.magicCost) {
+      showVoiceTranscript('Not enough magic for that spell.');
+      return false;
+    }
+
+    const aimDirection = playerControls.getAimDirection(false);
+    playerControls.alignPlayerToDirection(aimDirection);
+    playerControls.playAction('projectile');
+
+    const origin = playerControls.getProjectileSpawnPosition(aimDirection);
+    const sprinkleDirection = () => {
+      const d = aimDirection.clone();
+      d.x += (Math.random() - 0.5) * 0.25;
+      d.y += (Math.random() - 0.5) * 0.15;
+      d.z += (Math.random() - 0.5) * 0.25;
+      return d.normalize();
+    };
+
+    if (spellId === 'apples') {
+      for (let i = 0; i < 10; i++) {
+        const d = sprinkleDirection();
+        const spawnPos = origin.clone()
+          .add(d.clone().multiplyScalar(0.5 + Math.random() * 1.8))
+          .add(new THREE.Vector3(0, 0.2 + Math.random() * 0.8, 0));
+        spawnApplePickup(spawnPos);
+      }
+    } else if (spellId === 'mushrooms') {
+      for (let i = 0; i < 10; i++) {
+        const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
+        if (!entry?.id) continue;
+        const d = sprinkleDirection();
+        const spawnPos = origin.clone()
+          .add(d.clone().multiplyScalar(0.5 + Math.random() * 1.8))
+          .add(new THREE.Vector3(0, 0.2 + Math.random() * 0.8, 0));
+        spawnMushroomPickup(entry.id, spawnPos);
+      }
+    } else if (spellId === 'bombs') {
+      const shooterId = multiplayer?.getId?.();
+      for (let i = 0; i < 5; i++) {
+        const d = sprinkleDirection();
+        spawnBombProjectileWithPerfFlags(scene, projectiles, origin.clone(), d, shooterId);
+      }
+    } else if (spellId === 'freeze') {
+      const shooterId = multiplayer?.getId?.();
+      for (let i = 0; i < 3; i++) {
+        const d = sprinkleDirection();
+        spawnIceMist(scene, iceMists, origin.clone(), d, shooterId);
+      }
+    }
+
+    setStat('magic', Math.max(0, currentMagic - spellDef.magicCost));
+    return true;
+  };
+
+  const getVoiceMicState = () => {
+    const remainingMs = Math.max(0, voiceCooldownUntil - Date.now());
+    return {
+      disabled: voiceListening || remainingMs > 0,
+      remainingSeconds: remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0
+    };
+  };
+
+  const stopVoiceListening = () => {
+    if (!voiceListening) return;
+    voiceListening = false;
+    speech.stop();
+
+    const finalizeTranscript = (text) => {
+      if (!text) return;
+      showVoiceTranscript(text);
+      castVoiceSpellFromTranscript(text);
+    };
+
+    if (lastVoiceTranscript) {
+      finalizeTranscript(lastVoiceTranscript);
+    } else {
+      pendingVoiceSpellResolution = true;
+      if (pendingVoiceSpellTimeout) {
+        clearTimeout(pendingVoiceSpellTimeout);
+      }
+      pendingVoiceSpellTimeout = setTimeout(() => {
+        pendingVoiceSpellResolution = false;
+      }, 1200);
+    }
+
+    voiceCooldownUntil = Date.now() + VOICE_COOLDOWN_MS;
+    playerControls?.refreshActionButtons?.();
+  };
+
+  const startVoiceListening = () => {
+    const state = getVoiceMicState();
+    if (state.disabled) return false;
+    lastVoiceTranscript = '';
+    pendingVoiceSpellResolution = false;
+    if (pendingVoiceSpellTimeout) {
+      clearTimeout(pendingVoiceSpellTimeout);
+      pendingVoiceSpellTimeout = null;
+    }
+    voiceListening = true;
+    speech.start();
+    playerControls?.refreshActionButtons?.();
+    return true;
+  };
+
   // Initialize speech-to-text overlay for voice input
   const speech = initSpeechCommands({
-    onTranscript: showVoiceTranscript
+    onTranscript: (text) => {
+      lastVoiceTranscript = text;
+      if (pendingVoiceSpellResolution) {
+        pendingVoiceSpellResolution = false;
+        if (pendingVoiceSpellTimeout) {
+          clearTimeout(pendingVoiceSpellTimeout);
+          pendingVoiceSpellTimeout = null;
+        }
+        showVoiceTranscript(text);
+        castVoiceSpellFromTranscript(text);
+      } else if (!voiceListening) {
+        showVoiceTranscript(text);
+      }
+    }
   });
+
+  setInterval(() => {
+    playerControls?.refreshActionButtons?.();
+  }, 250);
 
 
   function swapPlayerCharacter(newModelPath) {

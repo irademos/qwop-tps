@@ -224,7 +224,8 @@ body {
 }
 
 #action-buttons .mobile-option-action,
-#action-buttons .mobile-equip-action {
+#action-buttons .mobile-equip-action,
+#action-buttons .mobile-stop-action {
   display: none;
 }
 
@@ -240,6 +241,10 @@ body {
 }
 
 #action-buttons.mobile-equip-mode .mobile-equip-action {
+  display: flex;
+}
+
+#action-buttons.mobile-voice-listening .mobile-stop-action {
   display: flex;
 }
 
