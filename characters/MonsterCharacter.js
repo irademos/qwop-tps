@@ -32,6 +32,10 @@ const DEATH_REMOVAL_DELAY_MS = 30000;
 const FRIENDLY_APPROACH_BLEND = 0.07;
 const FRIENDLY_DRIFT_LEVEL_SPEED_STEP = 0.06;
 const FRIENDLY_DRIFT_MIN_MULTIPLIER = 0.45;
+const FRIENDLY_DRIFT_AVOID_RADIUS = 8;
+const FRIENDLY_DRIFT_AVOID_HARD_RADIUS = 3;
+const FRIENDLY_DRIFT_AVOID_MIN_FACTOR = 0.02;
+const ENEMY_DISENGAGE_RADIUS = 22;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -214,7 +218,39 @@ export class MonsterCharacter extends CharacterBase {
     return now - this.deathTime >= DEATH_REMOVAL_DELAY_MS;
   }
 
-  updateAI(deltaTime, playerModel, otherPlayers) {
+  getFriendlyDriftAvoidanceFactor(closestPlayer, context = {}) {
+    const zones = Array.isArray(context.friendlyAvoidanceZones)
+      ? context.friendlyAvoidanceZones
+      : [];
+    if (!closestPlayer?.model || zones.length === 0) {
+      return 1;
+    }
+
+    let nearestZoneDistance = Infinity;
+    for (const zonePos of zones) {
+      if (!zonePos) continue;
+      const dist = closestPlayer.model.position.distanceTo(zonePos);
+      if (dist < nearestZoneDistance) {
+        nearestZoneDistance = dist;
+      }
+    }
+
+    if (!Number.isFinite(nearestZoneDistance)) {
+      return 1;
+    }
+    if (nearestZoneDistance <= FRIENDLY_DRIFT_AVOID_HARD_RADIUS) {
+      return FRIENDLY_DRIFT_AVOID_MIN_FACTOR;
+    }
+    if (nearestZoneDistance >= FRIENDLY_DRIFT_AVOID_RADIUS) {
+      return 1;
+    }
+
+    const normalized = (nearestZoneDistance - FRIENDLY_DRIFT_AVOID_HARD_RADIUS)
+      / (FRIENDLY_DRIFT_AVOID_RADIUS - FRIENDLY_DRIFT_AVOID_HARD_RADIUS);
+    return Math.max(FRIENDLY_DRIFT_AVOID_MIN_FACTOR, normalized);
+  }
+
+  updateAI(deltaTime, playerModel, otherPlayers, context = {}) {
     const now = Date.now();
     if (!this.model) return;
     const body = this.body;
@@ -269,20 +305,31 @@ export class MonsterCharacter extends CharacterBase {
       this.model.userData.mode = "enemy";
     }
 
+    if (this.model.userData.mode === "enemy" && closestDistance > ENEMY_DISENGAGE_RADIUS) {
+      this.model.userData.mode = "friendly";
+      this.attackStartTime = null;
+      this.attackHasHit = false;
+    }
+
     if (this.model.userData.mode === "friendly") {
       if (now - this.lastDirectionChange > WANDER_CHANGE_MS) {
         this.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         this.lastDirectionChange = now;
       }
       const wanderDirection = this.model.userData.direction.clone();
-      const approachDirection = closestPlayer.model.position
-        .clone()
-        .sub(this.model.position)
-        .setY(0);
-      if (approachDirection.lengthSq() > 0.0001) {
-        approachDirection.normalize();
-        wanderDirection.lerp(approachDirection, FRIENDLY_APPROACH_BLEND).normalize();
-        this.setDirection(wanderDirection);
+      const shouldDriftToClosestPlayer = context.enableFriendlyDrift !== false;
+      if (shouldDriftToClosestPlayer) {
+        const approachDirection = closestPlayer.model.position
+          .clone()
+          .sub(this.model.position)
+          .setY(0);
+        if (approachDirection.lengthSq() > 0.0001) {
+          approachDirection.normalize();
+          const avoidFactor = this.getFriendlyDriftAvoidanceFactor(closestPlayer, context);
+          const approachBlend = FRIENDLY_APPROACH_BLEND * avoidFactor;
+          wanderDirection.lerp(approachDirection, approachBlend).normalize();
+          this.setDirection(wanderDirection);
+        }
       }
       const movement = this.model.userData.direction
         .clone()
