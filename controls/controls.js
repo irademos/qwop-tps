@@ -512,6 +512,7 @@ export class PlayerControls {
     this.mobileEquipButtons = [];
     this.mobileActionState = 'default';
     this.mobileSelectedAttack = 'right';
+    this.mobileStatusToastTimer = null;
 
     const pressEvent = this.isMobile ? 'touchstart' : 'mousedown';
     const releaseEvents = this.isMobile ? ['touchend', 'touchcancel'] : ['mouseup', 'mouseleave'];
@@ -654,7 +655,6 @@ export class PlayerControls {
   }
 
   showMobileEquipMenu() {
-    this.mobileActionState = 'equip';
     const actionContainer = document.getElementById('action-buttons');
     if (!actionContainer) return;
 
@@ -680,7 +680,17 @@ export class PlayerControls {
       return true;
     };
 
-    equipCandidates.filter(item => hasInventoryItem(item.id)).forEach((item) => {
+    const itemsToShow = equipCandidates.filter(item => hasInventoryItem(item.id));
+    if (!itemsToShow.length) {
+      this.mobileActionState = 'default';
+      this.refreshActionButtons();
+      this.showMobileStatusToast('No items in inventory!');
+      return;
+    }
+
+    this.mobileActionState = 'equip';
+
+    itemsToShow.forEach((item) => {
       const button = document.createElement('button');
       button.className = 'action-button mobile-equip-action';
       button.textContent = item.label;
@@ -689,6 +699,8 @@ export class PlayerControls {
         const isEquipped = appState?.isInventoryItemEquipped?.(item.id);
         if (isEquipped) appState?.unequipInventoryItem?.(item.id);
         else appState?.equipInventoryItem?.(item.id);
+        this.mobileActionState = 'default';
+        this.refreshActionButtons();
         if (event) event.preventDefault();
       };
       button.addEventListener('touchstart', onEquip, { passive: false });
@@ -699,6 +711,28 @@ export class PlayerControls {
     });
 
     this.refreshActionButtons();
+  }
+
+  showMobileStatusToast(message) {
+    if (!message) return;
+
+    let toast = document.getElementById('mobile-action-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'mobile-action-toast';
+      document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+    toast.classList.add('visible');
+
+    if (this.mobileStatusToastTimer) {
+      clearTimeout(this.mobileStatusToastTimer);
+    }
+
+    this.mobileStatusToastTimer = setTimeout(() => {
+      toast.classList.remove('visible');
+    }, 1400);
   }
 
   refreshActionButtons() {

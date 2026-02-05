@@ -243,6 +243,28 @@ body {
   display: flex;
 }
 
+
+#mobile-action-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 94px;
+  z-index: 1100;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+#mobile-action-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 #camera-controls {
   position: fixed;
   bottom: 10px;
