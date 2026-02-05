@@ -22,6 +22,13 @@ const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
 const WOOD_INTERACT_RANGE = 3;
 const ENGAGED_MODE_DISTANCE = 7;
+const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
+const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
+const WEAPON_CAMERA_FOV_DELTA = 8;
+const ENGAGED_CAMERA_OFFSET = {
+  right: 0.65,
+  up: 0.4
+};
 const BED_SLEEP_PROMPT = "click or press 'x' to sleep";
 const BED_WAKE_PROMPT = "click or press 'x' to wake";
 const FRIENDLY_DIALOGUE_POOL = [
@@ -259,8 +266,10 @@ export class PlayerControls {
     this.isFireHeld = false;
     this.baseCameraOffset = this.cameraOffset.clone();
     this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
+    this.weaponCameraOffset = this.baseCameraOffset.clone().add(WEAPON_CAMERA_OFFSET);
     this.baseCameraTargetOffset = new THREE.Vector3();
     this.aimCameraTargetOffset = new THREE.Vector3(1.3, 0, 0);
+    this.weaponCameraTargetOffset = WEAPON_CAMERA_TARGET_OFFSET.clone();
     this.cameraTargetOffset = new THREE.Vector3();
     this.aimZoomInSpeed = 6;
     this.aimZoomOutSpeed = 3;
@@ -1841,12 +1850,28 @@ export class PlayerControls {
 
     const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
     const aimingActive = !this.isEngaged && (this.isAiming || shouldHoldAim);
-    const aimLerpSpeed = aimingActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
+    const engagedCameraActive = this.isEngaged;
+    const weaponCameraActive = !engagedCameraActive && !aimingActive;
+    const closeCameraActive = aimingActive || weaponCameraActive || engagedCameraActive;
+    const aimLerpSpeed = closeCameraActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
     const aimLerpFactor = 1 - Math.exp(-aimLerpSpeed * this.deltaSeconds);
-    const targetOffset = aimingActive ? this.aimCameraOffset : this.baseCameraOffset;
-    const targetFov = aimingActive ? this.aimFov : this.defaultFov;
+    const targetOffset = aimingActive
+      ? this.aimCameraOffset
+      : weaponCameraActive
+        ? this.weaponCameraOffset
+        : this.baseCameraOffset;
+    const shoulderFov = Math.max(45, this.defaultFov - WEAPON_CAMERA_FOV_DELTA);
+    const targetFov = aimingActive
+      ? this.aimFov
+      : (weaponCameraActive || engagedCameraActive)
+        ? shoulderFov
+        : this.defaultFov;
     this.cameraOffset.lerp(targetOffset, aimLerpFactor);
-    const targetCameraTargetOffset = aimingActive ? this.aimCameraTargetOffset : this.baseCameraTargetOffset;
+    const targetCameraTargetOffset = aimingActive
+      ? this.aimCameraTargetOffset
+      : weaponCameraActive
+        ? this.weaponCameraTargetOffset
+        : this.baseCameraTargetOffset;
     this.cameraTargetOffset.lerp(targetCameraTargetOffset, aimLerpFactor);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, aimLerpFactor);
     this.camera.updateProjectionMatrix();
@@ -1879,12 +1904,15 @@ export class PlayerControls {
       const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
       this.yaw = engagedYaw;
       this.pitch = 0;
-      const cameraDistance = Math.max(2.5, Math.abs(this.baseCameraOffset?.z ?? this.cameraOffset.z));
-      const cameraHeight = this.baseCameraOffset?.y ?? this.cameraOffset.y ?? 1;
+      const shoulderOffset = this.weaponCameraOffset || this.baseCameraOffset || this.cameraOffset;
+      const cameraDistance = Math.max(2.5, Math.abs(shoulderOffset?.z ?? this.cameraOffset.z));
+      const cameraHeight = shoulderOffset?.y ?? this.cameraOffset.y ?? 1;
       const behindOffset = this.engagedDirection.clone().multiplyScalar(-cameraDistance);
+      const engagedRight = new THREE.Vector3(-this.engagedDirection.z, 0, this.engagedDirection.x).normalize();
       desiredCameraPosition = orbitCenter.clone()
-        .add(new THREE.Vector3(0, cameraHeight, 0))
-        .add(behindOffset);
+        .add(new THREE.Vector3(0, cameraHeight + ENGAGED_CAMERA_OFFSET.up, 0))
+        .add(behindOffset)
+        .addScaledVector(engagedRight, ENGAGED_CAMERA_OFFSET.right);
     } else {
       const rotatedOffset = new THREE.Vector3(
         offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
@@ -2366,12 +2394,17 @@ export class PlayerControls {
   }
 
   updateAimingRotation() {
-    if (!this.isFireHeld || !this.shouldHoldToFire()) return;
+    if (!this.isFireHeld || !this.shouldHoldToFire() || this.isWeaponShoulderCameraActive()) return;
     const weapon = this.getEquippedWeapon();
     const invertForBow = weapon?.itemId === 'bow';
     const direction = this.getAimDirection(invertForBow);
     this.alignPlayerToDirection(direction);
   }
+
+  isWeaponShoulderCameraActive() {
+    return !this.isEngaged && !this.isAiming;
+  }
+
 
   alignPlayerToDirection(direction) {
     if (!this.playerModel) return;
