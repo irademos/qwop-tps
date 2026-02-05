@@ -6,7 +6,7 @@ import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from 
 const DEFAULT_HEALTH = BASE_HEALTH_SEGMENTS;
 const WANDER_CHANGE_MS = 2400;
 const MOVE_FADE = 0.2;
-const IDLE_SPEED_MULTIPLIER = 1.0;
+const FRIENDLY_MOVE_SPEED = CHARACTER_MOVEMENT.runSpeed;
 const DANCE_MIN_INTERVAL_MS = 3200;
 const DANCE_MAX_INTERVAL_MS = 7200;
 const DANCE_MIN_DURATION_MS = 1800;
@@ -181,7 +181,7 @@ export class FriendlyCharacter extends MonsterCharacter {
 
     const movement = this.model.userData.direction
       .clone()
-      .multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * IDLE_SPEED_MULTIPLIER);
+      .multiplyScalar(FRIENDLY_MOVE_SPEED);
     const vel = body.linvel();
     body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
     const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);

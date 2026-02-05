@@ -27,8 +27,11 @@ const HEALTH_BAR_OFFSET_Y = 2.2;
 const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
 const LEVEL_SIZE_STEP = 0.5;
 const LEVEL_SPEED_STEP = 0.08;
+const MONSTER_RUN_SPEED_OFFSET = 1.8;
 const DEATH_REMOVAL_DELAY_MS = 30000;
 const FRIENDLY_APPROACH_BLEND = 0.07;
+const FRIENDLY_DRIFT_LEVEL_SPEED_STEP = 0.06;
+const FRIENDLY_DRIFT_MIN_MULTIPLIER = 0.45;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -155,6 +158,13 @@ export class MonsterCharacter extends CharacterBase {
     this.updateHealthBarTexture();
   }
 
+  getFriendlyDriftSpeedMultiplier() {
+    return Math.max(
+      FRIENDLY_DRIFT_MIN_MULTIPLIER,
+      1 - FRIENDLY_DRIFT_LEVEL_SPEED_STEP * (this.level - 1)
+    );
+  }
+
   applyKnockback({ direction, strength } = {}) {
     if (!direction) return;
     const body = this.body;
@@ -276,7 +286,11 @@ export class MonsterCharacter extends CharacterBase {
       }
       const movement = this.model.userData.direction
         .clone()
-        .multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier);
+        .multiplyScalar(
+          CHARACTER_MOVEMENT.walkSpeed
+          * this.speedMultiplier
+          * this.getFriendlyDriftSpeedMultiplier()
+        );
       const vel = body.linvel();
       body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
       const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
@@ -349,7 +363,7 @@ export class MonsterCharacter extends CharacterBase {
     const distance = this.model.position.distanceTo(targetPos);
     const attackRange = MONSTER_ATTACK.range;
     const canAttack = !this.attackStartTime && now >= this.nextAttackTime;
-    const runSpeed = (CHARACTER_MOVEMENT.runSpeed - 1.5) * this.speedMultiplier;
+    const runSpeed = (CHARACTER_MOVEMENT.runSpeed - MONSTER_RUN_SPEED_OFFSET) * this.speedMultiplier;
     const walkSpeed = CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier;
 
     if (this.attackStartTime) {
