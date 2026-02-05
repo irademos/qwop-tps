@@ -41,21 +41,8 @@ export function initSpells({
   getMagic,
   setMagic
 } = {}) {
-  const actionContainer = document.getElementById('action-buttons');
-  if (!actionContainer) return null;
-
-  let spellsButton = document.getElementById('spells-button');
-  if (!spellsButton) {
-    spellsButton = document.createElement('button');
-    spellsButton.id = 'spells-button';
-    spellsButton.className = 'action-button mobile-action';
-    spellsButton.textContent = 'SPELLS';
-    actionContainer.appendChild(spellsButton);
-  }
-
   const availableSpells = getAvailableSpells(spellsAvailable);
   const cooldowns = new Map();
-  const spellButtons = new Map();
   let shieldBubble = null;
   let shieldTimeout = null;
   let cooldownTimer = null;
@@ -125,81 +112,43 @@ export function initSpells({
       activateShield(spell);
     }
     setCooldown(spell);
-    updateSpellButtonState(spell);
+    playerControls?.refreshActionButtons?.();
   };
 
-  const updateSpellButtonState = (spell) => {
-    const button = spellButtons.get(spell.id);
-    if (!button) return;
+  const getSpellState = (spell) => {
     const cooldownUntil = cooldowns.get(spell.id) || 0;
     const remainingMs = cooldownUntil - Date.now();
-    const timerLabel = button.querySelector('.spell-timer');
     const magicValue = Number.isFinite(getMagic?.()) ? getMagic() : 0;
     const hasMagic = magicValue >= spell.magicCost;
-    if (remainingMs > 0) {
-      const seconds = Math.ceil(remainingMs / 1000);
-      button.disabled = true;
-      button.classList.add('spell-disabled');
-      if (timerLabel) {
-        timerLabel.textContent = `${seconds}s`;
-      }
-    } else if (!hasMagic) {
-      button.disabled = true;
-      button.classList.add('spell-disabled');
-      if (timerLabel) {
-        timerLabel.textContent = '';
-      }
-    } else {
-      button.disabled = false;
-      button.classList.remove('spell-disabled');
-      if (timerLabel) {
-        timerLabel.textContent = '';
-      }
-    }
+    return {
+      disabled: remainingMs > 0 || !hasMagic,
+      remainingSeconds: remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0
+    };
   };
 
-  const showSpellMenu = () => {
-    actionContainer.classList.add('spell-menu-active');
-    actionContainer.classList.remove('mobile-expanded', 'mobile-punch-mode', 'mobile-equip-mode');
+  const castSpellById = (spellId) => {
+    const spell = availableSpells.find(entry => entry.id === spellId);
+    if (!spell) return false;
+    if (!canCastSpell(spell)) return false;
+    handleSpellCast(spell);
+    return true;
   };
 
-  const hideSpellMenu = () => {
-    actionContainer.classList.remove('spell-menu-active');
+  const getSpellStateById = (spellId) => {
+    const spell = availableSpells.find(entry => entry.id === spellId);
+    if (!spell) return { disabled: true, remainingSeconds: 0 };
+    return getSpellState(spell);
   };
 
-  const closeButton = document.createElement('button');
-  closeButton.className = 'action-button spell-action spell-close';
-  closeButton.setAttribute('aria-label', 'Close spells');
-  closeButton.textContent = '✕';
-  closeButton.addEventListener('click', (event) => {
-    event.preventDefault();
-    hideSpellMenu();
-  });
-  actionContainer.appendChild(closeButton);
-
-  availableSpells.forEach((spell) => {
-    const button = document.createElement('button');
-    button.className = 'action-button spell-action';
-    button.dataset.spellId = spell.id;
-    button.textContent = spell.label;
-    const timerLabel = document.createElement('span');
-    timerLabel.className = 'spell-timer';
-    button.appendChild(timerLabel);
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      handleSpellCast(spell);
-    });
-    actionContainer.appendChild(button);
-    spellButtons.set(spell.id, button);
-  });
-
-  spellsButton.addEventListener('click', (event) => {
-    event.preventDefault();
-    showSpellMenu();
-  });
+  if (playerControls) {
+    playerControls.castSpellById = castSpellById;
+    playerControls.getSpellStateById = getSpellStateById;
+  }
 
   cooldownTimer = setInterval(() => {
-    availableSpells.forEach((spell) => updateSpellButtonState(spell));
+    if (playerControls?.refreshActionButtons) {
+      playerControls.refreshActionButtons();
+    }
   }, 250);
 
   return {
@@ -211,8 +160,10 @@ export function initSpells({
         clearTimeout(shieldTimeout);
       }
       clearShieldBubble();
-      spellButtons.forEach(button => button.remove());
-      closeButton.remove();
+      if (playerControls) {
+        delete playerControls.castSpellById;
+        delete playerControls.getSpellStateById;
+      }
     }
   };
 }

@@ -372,6 +372,7 @@ export class PlayerControls {
   }
 
   initializeControls() {
+    this.initializeActionButtons();
     if (this.isMobile) {
       this.initializeMobileControls();
     } else {
@@ -387,7 +388,7 @@ export class PlayerControls {
       newJoystickContainer.id = 'joystick-container';
       document.body.appendChild(newJoystickContainer);
     }
-    
+
     // Add jump button for mobile
     const jumpButton = document.getElementById('jump-button');
     if (!jumpButton) {
@@ -396,7 +397,7 @@ export class PlayerControls {
       newJumpButton.innerText = 'JUMP';
       document.body.appendChild(newJumpButton);
     }
-    
+
     // Jump button event listeners
     document.getElementById('jump-button').addEventListener('touchstart', (event) => {
       if (!this.enabled || this.isInWater) return;
@@ -418,7 +419,7 @@ export class PlayerControls {
       this.jumpButtonPressed = false;
       event.preventDefault();
     });
-    
+
     // Initialize joystick with improved behavior
     this.joystick = nipplejs.create({
       zone: document.getElementById('joystick-container'),
@@ -427,15 +428,13 @@ export class PlayerControls {
       color: 'rgba(255, 255, 255, 0.5)',
       size: 100
     });
-    
+
     this.joystick.on('move', (evt, data) => {
       const angle = data.angle.radian;
       this.joystickAngle = angle;
       this.joystickForce = Math.min(data.force, 1);
-    
-      // this.yaw = -angle; // Flip joystick angle to align with world yaw
     });
-    
+
     this.joystick.on('end', () => {
       this.joystickForce = 0;
     });
@@ -485,230 +484,253 @@ export class PlayerControls {
         }
       }
     });
+  }
 
-    // Action buttons container
+  initializeActionButtons() {
     const actionContainer = document.getElementById('action-buttons');
-    const toggleButton = document.getElementById('mobile-action-toggle');
-    let setActionState = null;
-    let equipMenuButtons = [];
-    let equipBackButton = null;
-    if (actionContainer && toggleButton) {
-      setActionState = (state) => {
-        this.mobileActionState = state;
-        const expanded = state === 'expanded' || state === 'equip';
-        const punchMode = state === 'punch';
-        const equipMode = state === 'equip';
-        actionContainer.classList.toggle('mobile-expanded', expanded);
-        actionContainer.classList.toggle('mobile-punch-mode', punchMode);
-        actionContainer.classList.toggle('mobile-equip-mode', equipMode);
-        toggleButton.setAttribute('aria-expanded', expanded || punchMode ? 'true' : 'false');
-        toggleButton.textContent = expanded || punchMode ? '✕' : '⋯';
-        if (!equipMode) {
-          equipMenuButtons.forEach(button => button.remove());
-          equipMenuButtons = [];
-          if (equipBackButton) {
-            equipBackButton.remove();
-            equipBackButton = null;
-          }
+    if (!actionContainer) return;
+
+    actionContainer.innerHTML = '';
+
+    const createButton = (id, className, label) => {
+      const button = document.createElement('button');
+      button.id = id;
+      button.className = `action-button ${className}`;
+      button.textContent = label;
+      actionContainer.appendChild(button);
+      return button;
+    };
+
+    this.punchButton = createButton('punch-button', 'mobile-primary-action', 'PUNCH');
+    this.spellsButton = createButton('spells-button', 'mobile-primary-action', 'Shield');
+    this.equipButton = createButton('equip-button', 'mobile-primary-action', 'EQUIP');
+
+    this.optionLeftButton = createButton('left-punch-button', 'mobile-option-action', 'Left');
+    this.optionCenterButton = createButton('punch-kick-button', 'mobile-option-action', 'Kick');
+    this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', 'Right');
+
+    this.mobileEquipButtons = [];
+    this.mobileActionState = 'default';
+    this.mobileSelectedAttack = 'right';
+
+    const pressEvent = this.isMobile ? 'touchstart' : 'mousedown';
+    const releaseEvents = this.isMobile ? ['touchend', 'touchcancel'] : ['mouseup', 'mouseleave'];
+
+    const bindPrimaryButton = (button, onClick, onLongPress) => {
+      let pressTimer = null;
+      let longPressTriggered = false;
+      const clearPress = () => {
+        if (pressTimer) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
         }
       };
 
-      setActionState('collapsed');
-
-      const handleToggle = (event) => {
+      button.addEventListener(pressEvent, (event) => {
+        if (!this.enabled) return;
+        longPressTriggered = false;
+        clearPress();
+        pressTimer = setTimeout(() => {
+          longPressTriggered = true;
+          onLongPress();
+        }, 1700);
         event.preventDefault();
-        if (this.mobileActionState === 'punch') {
-          setActionState('expanded');
-          return;
-        }
-        const nextState = this.mobileActionState === 'expanded' || this.mobileActionState === 'equip'
-          ? 'collapsed'
-          : 'expanded';
-        setActionState(nextState);
-      };
+      }, { passive: false });
 
-      toggleButton.addEventListener('touchstart', handleToggle, { passive: false });
-      toggleButton.addEventListener('click', handleToggle);
-    }
-
-    const buildEquipMenuButtons = () => {
-      if (!actionContainer) return;
-      const appState = window.appState;
-      const inventory = appState?.getInventory?.() || {};
-      const equipCandidates = [
-        { id: 'bomb', label: 'Bomb' },
-        { id: 'bow', label: 'Bow' },
-        { id: 'iceGun', label: 'Ice Gun' },
-        { id: 'autumnSword', label: 'Sword' },
-        { id: 'lantern', label: 'Lantern' }
-      ];
-
-      const hasInventoryItem = (itemId) => {
-        const entry = inventory[itemId];
-        if (!entry) return false;
-        if (typeof entry.count === 'number') {
-          return entry.count > 0;
-        }
-        return true;
-      };
-
-      equipMenuButtons.forEach(button => button.remove());
-      equipMenuButtons = [];
-
-      const itemsToShow = equipCandidates.filter(item => hasInventoryItem(item.id));
-      itemsToShow.forEach((item) => {
-        const button = document.createElement('button');
-        button.className = 'action-button mobile-equip-action';
-        button.dataset.equipItemId = item.id;
-        button.innerText = item.label;
-        const handleEquip = (event) => {
+      releaseEvents.forEach((eventName) => {
+        button.addEventListener(eventName, (event) => {
           if (!this.enabled) return;
-          const isEquipped = appState?.isInventoryItemEquipped?.(item.id);
-          if (isEquipped) {
-            appState?.unequipInventoryItem?.(item.id);
-          } else {
-            appState?.equipInventoryItem?.(item.id);
+          const hadTimer = !!pressTimer;
+          clearPress();
+          if (!longPressTriggered && hadTimer) {
+            onClick();
           }
-          event.preventDefault();
-        };
-        button.addEventListener('touchstart', handleEquip, { passive: false });
-        button.addEventListener('click', handleEquip);
-        equipMenuButtons.push(button);
-        actionContainer.appendChild(button);
+          longPressTriggered = false;
+          if (event) event.preventDefault();
+        }, { passive: false });
+      });
+
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
       });
     };
 
-    const showEquipMenu = (event) => {
+    bindPrimaryButton(
+      this.punchButton,
+      () => this.handlePrimaryAttackPress(),
+      () => this.showMobileAttackOptions()
+    );
+
+    bindPrimaryButton(
+      this.spellsButton,
+      () => this.castSpellById?.('shield'),
+      () => this.showMobileSpellOptions()
+    );
+
+    const openEquip = (event) => {
       if (!this.enabled) return;
-      setActionState?.('equip');
-      if (!equipBackButton) {
-        equipBackButton = document.createElement('button');
-        equipBackButton.className = 'action-button mobile-equip-action';
-        equipBackButton.innerText = '<';
-        const handleBack = (backEvent) => {
-          if (!this.enabled) return;
-          setActionState?.('expanded');
-          backEvent.preventDefault();
-        };
-        equipBackButton.addEventListener('touchstart', handleBack, { passive: false });
-        equipBackButton.addEventListener('click', handleBack);
-        actionContainer.appendChild(equipBackButton);
+      this.showMobileEquipMenu();
+      if (event) event.preventDefault();
+    };
+    this.equipButton.addEventListener('touchstart', openEquip, { passive: false });
+    this.equipButton.addEventListener('mousedown', openEquip);
+    this.equipButton.addEventListener('click', (event) => event.preventDefault());
+
+    const handleOptionPick = (slot) => (event) => {
+      if (!this.enabled) return;
+      if (this.mobileActionState === 'spell-options') {
+        if (slot === 'left') {
+          this.castSpellById?.('shield');
+        }
+      } else {
+        this.mobileSelectedAttack = slot;
       }
-      buildEquipMenuButtons();
-      event.preventDefault();
+      this.mobileActionState = 'default';
+      this.refreshActionButtons();
+      if (event) event.preventDefault();
     };
 
-    // Equip button
-    if (!document.getElementById('equip-button')) {
-      const newEquipButton = document.createElement('button');
-      newEquipButton.id = 'equip-button';
-      newEquipButton.className = 'action-button mobile-action';
-      newEquipButton.innerText = 'EQUIP';
-      actionContainer.appendChild(newEquipButton);
+    this.optionLeftButton.addEventListener('touchstart', handleOptionPick('left'), { passive: false });
+    this.optionLeftButton.addEventListener('mousedown', handleOptionPick('left'));
+    this.optionCenterButton.addEventListener('touchstart', handleOptionPick('kick'), { passive: false });
+    this.optionCenterButton.addEventListener('mousedown', handleOptionPick('kick'));
+    this.optionRightButton.addEventListener('touchstart', handleOptionPick('right'), { passive: false });
+    this.optionRightButton.addEventListener('mousedown', handleOptionPick('right'));
+
+    this.refreshActionButtons();
+  }
+
+  getMobileAttackLabel(slot) {
+    if (slot === 'left') {
+      const weapon = this.getEquippedWeapon('left');
+      return weapon?.name || weapon?.itemId || 'Left';
+    }
+    if (slot === 'right') {
+      const weapon = this.getEquippedWeapon('right');
+      return weapon?.name || weapon?.itemId || 'PUNCH';
+    }
+    return 'Kick';
+  }
+
+  performAttackForSlot(slot) {
+    if (!this.enabled || this.isInWater) return;
+    if (slot === 'kick') {
+      this.playAction('mmaKick');
+      return;
     }
 
-    const equipButton = document.getElementById('equip-button');
-    equipButton.addEventListener('touchstart', showEquipMenu, { passive: false });
-    equipButton.addEventListener('click', showEquipMenu);
-
-    // Attack button
-    if (!document.getElementById('punch-button')) {
-      const punchButton = document.createElement('button');
-      punchButton.id = 'punch-button';
-      punchButton.className = 'action-button mobile-action';
-      punchButton.innerText = 'ATTACK';
-      actionContainer.appendChild(punchButton);
+    const hand = slot === 'left' ? 'left' : 'right';
+    const weapon = this.getEquippedWeapon(hand);
+    if (this.isProjectileWeapon(weapon)) {
+      if (this.shouldHoldToFire(hand)) {
+        this.isFireHeld = true;
+        this.setAiming(true);
+        setTimeout(() => {
+          this.isFireHeld = false;
+          this.setAiming(false);
+          this.attemptFireProjectileForHand(hand);
+        }, 150);
+      } else {
+        this.attemptFireProjectileForHand(hand);
+      }
+      return;
     }
 
-    const punchButton = document.getElementById('punch-button');
-    punchButton.addEventListener('touchstart', (event) => {
-      if (!this.enabled) return;
-      setActionState?.('punch');
-      event.preventDefault();
+    this.playAction(hand === 'left' ? 'leftPunch' : 'mutantPunch');
+  }
+
+  handlePrimaryAttackPress() {
+    this.performAttackForSlot(this.mobileSelectedAttack || 'right');
+  }
+
+  showMobileAttackOptions() {
+    this.mobileActionState = 'attack-options';
+    this.refreshActionButtons();
+  }
+
+  showMobileSpellOptions() {
+    this.mobileActionState = 'spell-options';
+    this.refreshActionButtons();
+  }
+
+  showMobileEquipMenu() {
+    this.mobileActionState = 'equip';
+    const actionContainer = document.getElementById('action-buttons');
+    if (!actionContainer) return;
+
+    const appState = window.appState;
+    const inventory = appState?.getInventory?.() || {};
+    const equipCandidates = [
+      { id: 'bomb', label: 'Bomb' },
+      { id: 'bow', label: 'Bow' },
+      { id: 'iceGun', label: 'Ice Gun' },
+      { id: 'autumnSword', label: 'Sword' },
+      { id: 'lantern', label: 'Lantern' }
+    ];
+
+    this.mobileEquipButtons.forEach(button => button.remove());
+    this.mobileEquipButtons = [];
+
+    const hasInventoryItem = (itemId) => {
+      const entry = inventory[itemId];
+      if (!entry) return false;
+      if (typeof entry.count === 'number') {
+        return entry.count > 0;
+      }
+      return true;
+    };
+
+    equipCandidates.filter(item => hasInventoryItem(item.id)).forEach((item) => {
+      const button = document.createElement('button');
+      button.className = 'action-button mobile-equip-action';
+      button.textContent = item.label;
+      const onEquip = (event) => {
+        if (!this.enabled) return;
+        const isEquipped = appState?.isInventoryItemEquipped?.(item.id);
+        if (isEquipped) appState?.unequipInventoryItem?.(item.id);
+        else appState?.equipInventoryItem?.(item.id);
+        if (event) event.preventDefault();
+      };
+      button.addEventListener('touchstart', onEquip, { passive: false });
+      button.addEventListener('mousedown', onEquip);
+      button.addEventListener('click', (event) => event.preventDefault());
+      this.mobileEquipButtons.push(button);
+      actionContainer.appendChild(button);
     });
 
-    if (!document.getElementById('left-punch-button')) {
-      const leftPunchButton = document.createElement('button');
-      leftPunchButton.id = 'left-punch-button';
-      leftPunchButton.className = 'action-button mobile-punch-action';
-      leftPunchButton.innerText = 'LEFT';
-      actionContainer.appendChild(leftPunchButton);
-      let leftFireHeld = false;
-      leftPunchButton.addEventListener('touchstart', (event) => {
-        if (!this.enabled || this.isInWater) return;
-        const weapon = this.getEquippedWeapon('left');
-        if (this.isProjectileWeapon(weapon)) {
-          if (this.shouldHoldToFire('left')) {
-            leftFireHeld = true;
-            this.isFireHeld = true;
-            this.setAiming(true);
-          } else {
-            this.attemptFireProjectileForHand('left');
-          }
-          event.preventDefault();
-          return;
-        }
-        this.playAction('leftPunch');
-        event.preventDefault();
-      });
-      leftPunchButton.addEventListener('touchend', (event) => {
-        if (!this.enabled || this.isInWater || !leftFireHeld) return;
-        leftFireHeld = false;
-        this.isFireHeld = false;
-        this.setAiming(false);
-        this.attemptFireProjectileForHand('left');
-        event.preventDefault();
-      });
+    this.refreshActionButtons();
+  }
+
+  refreshActionButtons() {
+    const actionContainer = document.getElementById('action-buttons');
+    if (!actionContainer || !this.punchButton) return;
+
+    const state = this.mobileActionState || 'default';
+    actionContainer.classList.toggle('mobile-attack-options', state === 'attack-options');
+    actionContainer.classList.toggle('mobile-spell-options', state === 'spell-options');
+    actionContainer.classList.toggle('mobile-equip-mode', state === 'equip');
+
+    this.punchButton.textContent = this.getMobileAttackLabel(this.mobileSelectedAttack || 'right');
+    this.optionLeftButton.textContent = this.getMobileAttackLabel('left');
+    this.optionCenterButton.textContent = 'Kick';
+    this.optionRightButton.textContent = this.getMobileAttackLabel('right');
+
+    const shieldState = this.getSpellStateById?.('shield') || { disabled: false, remainingSeconds: 0 };
+    this.spellsButton.textContent = shieldState.remainingSeconds > 0 ? `Shield ${shieldState.remainingSeconds}s` : 'Shield';
+    this.spellsButton.disabled = !!shieldState.disabled;
+
+    if (state === 'spell-options') {
+      this.optionLeftButton.textContent = 'Shield';
+      this.optionCenterButton.textContent = '—';
+      this.optionRightButton.textContent = '—';
     }
 
-    if (!document.getElementById('punch-kick-button')) {
-      const punchKickButton = document.createElement('button');
-      punchKickButton.id = 'punch-kick-button';
-      punchKickButton.className = 'action-button mobile-punch-action';
-      punchKickButton.innerText = 'KICK';
-      actionContainer.appendChild(punchKickButton);
-      punchKickButton.addEventListener('touchstart', (event) => {
-        if (!this.enabled || this.isInWater) return;
-        this.playAction('mmaKick');
-        event.preventDefault();
-      });
-    }
-
-    if (!document.getElementById('right-punch-button')) {
-      const rightPunchButton = document.createElement('button');
-      rightPunchButton.id = 'right-punch-button';
-      rightPunchButton.className = 'action-button mobile-punch-action';
-      rightPunchButton.innerText = 'RIGHT';
-      actionContainer.appendChild(rightPunchButton);
-      let rightFireHeld = false;
-      rightPunchButton.addEventListener('touchstart', (event) => {
-        if (!this.enabled || this.isInWater) return;
-        const weapon = this.getEquippedWeapon();
-        if (this.isProjectileWeapon(weapon)) {
-          if (this.shouldHoldToFire()) {
-            rightFireHeld = true;
-            this.isFireHeld = true;
-            this.setAiming(true);
-          } else {
-            this.attemptFireProjectileForHand('right');
-          }
-          event.preventDefault();
-          return;
-        }
-        this.playAction('mutantPunch');
-        event.preventDefault();
-      });
-      rightPunchButton.addEventListener('touchend', (event) => {
-        if (!this.enabled || this.isInWater || !rightFireHeld) return;
-        rightFireHeld = false;
-        this.isFireHeld = false;
-        this.setAiming(false);
-        this.attemptFireProjectileForHand('right');
-        event.preventDefault();
-      });
+    if (state !== 'equip') {
+      this.mobileEquipButtons.forEach(button => button.remove());
+      this.mobileEquipButtons = [];
     }
   }
-  
+
   setupEventListeners() {
     // Listen for key events (for desktop controls)
     document.addEventListener("keydown", (e) => {
