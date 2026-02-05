@@ -164,7 +164,8 @@ body {
 #joystick-container {
   position: fixed;
   bottom: 20px;
-  right: 20px;
+  left: 20px;
+  right: auto;
   width: 150px;
   height: 150px;
   z-index: 1000;
@@ -176,7 +177,7 @@ body {
 
 #jump-button {
   position: fixed;
-  bottom: 190px;
+  bottom: 20px;
   right: 20px;
   width: 80px;
   height: 80px;
@@ -195,7 +196,8 @@ body {
 #action-buttons {
   position: fixed;
   bottom: 20px;
-  left: 20px;
+  right: 120px;
+  left: auto;
   display: flex;
   flex-direction: row;
   gap: 10px;
@@ -221,35 +223,46 @@ body {
   display: none;
 }
 
-#action-buttons .spell-action {
+#action-buttons .mobile-option-action,
+#action-buttons .mobile-equip-action {
   display: none;
-  position: relative;
 }
 
-#action-buttons.spell-menu-active .spell-action {
+#action-buttons.mobile-attack-options .mobile-primary-action,
+#action-buttons.mobile-spell-options .mobile-primary-action,
+#action-buttons.mobile-equip-mode .mobile-primary-action {
+  display: none;
+}
+
+#action-buttons.mobile-attack-options .mobile-option-action,
+#action-buttons.mobile-spell-options .mobile-option-action {
   display: flex;
 }
 
-#action-buttons.spell-menu-active #mobile-action-toggle,
-#action-buttons.spell-menu-active .mobile-action,
-#action-buttons.spell-menu-active .mobile-punch-action,
-#action-buttons.spell-menu-active .mobile-equip-action {
-  display: none;
+#action-buttons.mobile-equip-mode .mobile-equip-action {
+  display: flex;
 }
 
-#action-buttons .spell-disabled {
-  opacity: 0.6;
-}
 
-#action-buttons .spell-timer {
-  position: absolute;
-  bottom: 4px;
-  right: 6px;
-  font-size: 10px;
-  background: rgba(0, 0, 0, 0.45);
+#mobile-action-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 94px;
+  z-index: 1100;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.78);
   color: #fff;
-  padding: 2px 4px;
-  border-radius: 6px;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+#mobile-action-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 #camera-controls {
@@ -1987,8 +2000,8 @@ body.settings-open #settings-button {
 @media (pointer: coarse) {
   #action-buttons {
     bottom: 16px;
-    left: 16px;
-    flex-direction: column;
+    right: 100px;
+    left: auto;
     gap: 6px;
   }
 
@@ -1998,57 +2011,12 @@ body.settings-open #settings-button {
     font-size: clamp(12px, 2.6vw, 18px);
   }
 
-  #action-buttons .mobile-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-expanded .mobile-action {
-    display: flex;
-  }
-
-  #action-buttons .mobile-punch-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-punch-mode .mobile-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-punch-mode .mobile-punch-action {
-    display: flex;
-  }
-
-  #action-buttons .mobile-equip-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-equip-mode .mobile-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-equip-mode .mobile-equip-action {
-    display: flex;
-  }
-
-  #mobile-action-toggle {
-    display: flex;
-    font-size: 24px;
-    padding-bottom: 4px;
-  }
-
-  #mobile-action-toggle[aria-expanded="true"] {
-    background-color: rgba(255, 255, 255, 0.7);
-  }
-
-  .mobile-only {
-    display: flex;
-  }
-
   #joystick-container {
     width: 120px;
     height: 120px;
     bottom: 16px;
-    right: 16px;
+    left: 16px;
+    right: auto;
   }
 
   #jump-button {
@@ -2056,7 +2024,7 @@ body.settings-open #settings-button {
     height: 70px;
     line-height: 70px;
     font-size: 14px;
-    bottom: 140px;
+    bottom: 16px;
     right: 16px;
   }
 
