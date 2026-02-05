@@ -1850,7 +1850,7 @@ export class PlayerControls {
 
     const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
     const aimingActive = !this.isEngaged && (this.isAiming || shouldHoldAim);
-    const weaponCameraActive = !this.isEngaged && this.isWeaponShoulderCameraActive();
+    const weaponCameraActive = !this.isEngaged && !aimingActive;
     const closeCameraActive = aimingActive || weaponCameraActive;
     const aimLerpSpeed = closeCameraActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
     const aimLerpFactor = 1 - Math.exp(-aimLerpSpeed * this.deltaSeconds);
@@ -2403,8 +2403,7 @@ export class PlayerControls {
   }
 
   isWeaponShoulderCameraActive() {
-    const weapon = this.getEquippedWeapon();
-    return weapon?.itemId === 'bow' || weapon?.itemId === 'bomb';
+    return !this.isEngaged && !this.isAiming;
   }
 
   isEngagedTargetAttackingPlayer() {
