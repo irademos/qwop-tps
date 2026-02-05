@@ -308,7 +308,7 @@ export class QuestManager {
     const vel = friend.body.linvel();
     if (distance > QUEST_FOLLOW_STOP_DISTANCE) {
       const direction = toPlayer.normalize();
-      const speed = CHARACTER_MOVEMENT.walkSpeed * 0.9;
+      const speed = CHARACTER_MOVEMENT.runSpeed;
       friend.setDirection(direction);
       friend.body.setLinvel({ x: direction.x * speed, y: vel.y, z: direction.z * speed }, true);
       const angle = Math.atan2(direction.x, direction.z);
@@ -437,7 +437,7 @@ export class QuestManager {
       return true;
     }
     const direction = toTarget.normalize();
-    const speed = CHARACTER_MOVEMENT.walkSpeed * 0.9;
+    const speed = CHARACTER_MOVEMENT.runSpeed;
     friend.setDirection(direction);
     friend.body.setLinvel({ x: direction.x * speed, y: vel.y, z: direction.z * speed }, true);
     const angle = Math.atan2(direction.x, direction.z);
