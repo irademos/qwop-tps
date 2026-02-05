@@ -4398,7 +4398,12 @@ async function main() {
     const pickupConfig = {
       bow: { item: bow, itemId: 'bow', markerColor: 0xffc26b },
       lantern: { item: lantern, itemId: 'lantern', markerColor: 0xffd400 },
-      torch: { item: torch, itemId: TORCH_ITEM_ID, markerColor: 0xffa54c }
+      torch: {
+        item: torch,
+        itemId: TORCH_ITEM_ID,
+        markerColor: 0xffa54c,
+        torchHealth: DEFAULT_TORCH_HEALTH
+      }
     }[itemId];
     if (pickupConfig?.item?.mesh) {
       createDroppedWeaponPickup(pickupConfig.item, {
@@ -4406,7 +4411,8 @@ async function main() {
         markerColor: pickupConfig.markerColor,
         markerOffsetY: 1.2,
         position: dropPos,
-        allowHidden: true
+        allowHidden: true,
+        torchHealth: pickupConfig.torchHealth
       });
     }
   };
