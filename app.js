@@ -8199,19 +8199,61 @@ async function main() {
     if (isHostNow) {
       if (monstersSeeded) {
         ensureMonsters();
+        const livingMonsters = monsters.filter(monster => monster?.model && !monster.isDead);
+        const activePlayers = [
+          { id: 'local', model: playerModel },
+          ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p?.model }))
+        ].filter((entry) => entry.model);
+        const claimedMonsters = new Set();
+        const friendlyDriftMonsterIds = new Set();
+
+        activePlayers.forEach((player) => {
+          let bestMonster = null;
+          let bestDistance = Infinity;
+          livingMonsters.forEach((monster) => {
+            if (claimedMonsters.has(monster.id)) return;
+            if (monster.model?.userData?.mode !== 'friendly') return;
+            const dist = monster.model.position.distanceTo(player.model.position);
+            if (dist < bestDistance) {
+              bestDistance = dist;
+              bestMonster = monster;
+            }
+          });
+          if (bestMonster) {
+            claimedMonsters.add(bestMonster.id);
+            friendlyDriftMonsterIds.add(bestMonster.id);
+          }
+        });
+
+        const friendlyAvoidanceZones = [];
+        const merchantFriendly = getMerchantFriendly?.();
+        if (merchantFriendly?.model?.position) {
+          friendlyAvoidanceZones.push(merchantFriendly.model.position.clone());
+        }
+        const roomFriendlies = friendlyNpcManager?.friendlies || [];
+        roomFriendlies.forEach((friendly) => {
+          if (friendly?.isDead || !friendly?.model?.position) return;
+          friendlyAvoidanceZones.push(friendly.model.position.clone());
+        });
+
         monsters.forEach(monster => {
           if (!monster || !monster.model) return;
 
           if (monster.isDead) return; // your respawn logic here...
 
+          const aiContext = {
+            enableFriendlyDrift: friendlyDriftMonsterIds.has(monster.id),
+            friendlyAvoidanceZones
+          };
+
           if (PERF.throttleAI) {
             const last = monster.lastAIUpdateMs ?? 0;
             if (aiNowMs - last > 150) {
               monster.lastAIUpdateMs = aiNowMs;
-              monster.updateAI(mixerDelta, playerModel, otherPlayers); // <-- use mixerDelta
+              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext); // <-- use mixerDelta
             }
           } else {
-            monster.updateAI(mixerDelta, playerModel, otherPlayers);   // <-- use mixerDelta
+            monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);   // <-- use mixerDelta
           }
         });
       }
