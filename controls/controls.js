@@ -673,11 +673,8 @@ export class PlayerControls {
 
     const hasInventoryItem = (itemId) => {
       const entry = inventory[itemId];
-      if (!entry) return false;
-      if (typeof entry.count === 'number') {
-        return entry.count > 0;
-      }
-      return true;
+      const count = Number(entry?.count);
+      return Number.isFinite(count) && count > 0;
     };
 
     const itemsToShow = equipCandidates.filter(item => hasInventoryItem(item.id));
