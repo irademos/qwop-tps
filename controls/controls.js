@@ -25,7 +25,7 @@ const ENGAGED_MODE_DISTANCE = 7;
 const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
 const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
 const WEAPON_CAMERA_FOV_DELTA = 8;
-const ENGAGED_UNDER_ATTACK_CAMERA_OFFSET = {
+const ENGAGED_CAMERA_OFFSET = {
   right: 0.65,
   up: 0.4
 };
@@ -1850,8 +1850,9 @@ export class PlayerControls {
 
     const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
     const aimingActive = !this.isEngaged && (this.isAiming || shouldHoldAim);
-    const weaponCameraActive = !this.isEngaged && !aimingActive;
-    const closeCameraActive = aimingActive || weaponCameraActive;
+    const engagedCameraActive = this.isEngaged;
+    const weaponCameraActive = !engagedCameraActive && !aimingActive;
+    const closeCameraActive = aimingActive || weaponCameraActive || engagedCameraActive;
     const aimLerpSpeed = closeCameraActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
     const aimLerpFactor = 1 - Math.exp(-aimLerpSpeed * this.deltaSeconds);
     const targetOffset = aimingActive
@@ -1859,10 +1860,11 @@ export class PlayerControls {
       : weaponCameraActive
         ? this.weaponCameraOffset
         : this.baseCameraOffset;
+    const shoulderFov = Math.max(45, this.defaultFov - WEAPON_CAMERA_FOV_DELTA);
     const targetFov = aimingActive
       ? this.aimFov
-      : weaponCameraActive
-        ? Math.max(45, this.defaultFov - WEAPON_CAMERA_FOV_DELTA)
+      : (weaponCameraActive || engagedCameraActive)
+        ? shoulderFov
         : this.defaultFov;
     this.cameraOffset.lerp(targetOffset, aimLerpFactor);
     const targetCameraTargetOffset = aimingActive
@@ -1902,18 +1904,15 @@ export class PlayerControls {
       const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
       this.yaw = engagedYaw;
       this.pitch = 0;
-      const cameraDistance = Math.max(2.5, Math.abs(this.baseCameraOffset?.z ?? this.cameraOffset.z));
-      const cameraHeight = this.baseCameraOffset?.y ?? this.cameraOffset.y ?? 1;
+      const shoulderOffset = this.weaponCameraOffset || this.baseCameraOffset || this.cameraOffset;
+      const cameraDistance = Math.max(2.5, Math.abs(shoulderOffset?.z ?? this.cameraOffset.z));
+      const cameraHeight = shoulderOffset?.y ?? this.cameraOffset.y ?? 1;
       const behindOffset = this.engagedDirection.clone().multiplyScalar(-cameraDistance);
+      const engagedRight = new THREE.Vector3(this.engagedDirection.z, 0, -this.engagedDirection.x).normalize();
       desiredCameraPosition = orbitCenter.clone()
-        .add(new THREE.Vector3(0, cameraHeight, 0))
-        .add(behindOffset);
-      if (this.isEngagedTargetAttackingPlayer()) {
-        const engagedRight = new THREE.Vector3(this.engagedDirection.z, 0, -this.engagedDirection.x).normalize();
-        desiredCameraPosition
-          .addScaledVector(engagedRight, ENGAGED_UNDER_ATTACK_CAMERA_OFFSET.right)
-          .add(new THREE.Vector3(0, ENGAGED_UNDER_ATTACK_CAMERA_OFFSET.up, 0));
-      }
+        .add(new THREE.Vector3(0, cameraHeight + ENGAGED_CAMERA_OFFSET.up, 0))
+        .add(behindOffset)
+        .addScaledVector(engagedRight, ENGAGED_CAMERA_OFFSET.right);
     } else {
       const rotatedOffset = new THREE.Vector3(
         offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
@@ -2406,9 +2405,6 @@ export class PlayerControls {
     return !this.isEngaged && !this.isAiming;
   }
 
-  isEngagedTargetAttackingPlayer() {
-    return Boolean(this.isEngaged && this.engagedTarget && !this.engagedTarget.isDead && this.engagedTarget.attackStartTime);
-  }
 
   alignPlayerToDirection(direction) {
     if (!this.playerModel) return;
