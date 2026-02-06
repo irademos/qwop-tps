@@ -2,7 +2,6 @@ import * as THREE from "three";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { FriendlyCharacter } from "./characters/FriendlyCharacter.js";
 import { createLightSource, LIGHT_SOURCE_CONFIGS } from "./light_sources.js";
-import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import {
   initFriendlyPersistence,
   loadFriendliesSnapshot,
@@ -26,8 +25,7 @@ const FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE = 70;
 const FRIENDLY_SPAWN_TRAVEL_MAX_DISTANCE = 150;
 const FRIENDLY_SPAWN_MAX_STEP_DISTANCE = 14;
 const FRIENDLY_SPAWN_MAX_SPEED = 20;
-const FRIENDLY_APPROACH_STOP_DISTANCE = 8;
-const FRIENDLY_APPROACH_SPEED_MULTIPLIER = 1.35;
+const FRIENDLY_SPAWN_FORWARD_CONE_RADIANS = Math.PI * 0.55;
 const FRIENDLY_NOTICE_RADIUS = 10;
 const FRIENDLY_WANDER_RADIUS = 4;
 const FRIENDLY_ENGAGE_RADIUS = 5;
@@ -63,6 +61,7 @@ export function createFriendlyNpcManager({
   let spawnDistanceAccum = 0;
   let nextSpawnDistance = 0;
   let lastPlayerPosition = null;
+  let playerTravelDirection = new THREE.Vector3(0, 0, 1);
 
   const getNextSpawnDistance = () => {
     return FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE
@@ -74,10 +73,16 @@ export function createFriendlyNpcManager({
     return action === "walk" || action === "run";
   };
 
-  const getSpawnNearPlayerPosition = () => {
+  const getSpawnNearPlayerPosition = (forwardDirection = null) => {
     const basePos = playerModel?.position;
     if (!basePos) return null;
-    const angle = Math.random() * Math.PI * 2;
+    const canSpawnForward = forwardDirection && forwardDirection.lengthSq() > 0.0001;
+    const forward = canSpawnForward
+      ? forwardDirection.clone().setY(0).normalize()
+      : null;
+    const baseAngle = forward ? Math.atan2(forward.x, forward.z) : Math.random() * Math.PI * 2;
+    const offset = forward ? ((Math.random() - 0.5) * FRIENDLY_SPAWN_FORWARD_CONE_RADIANS) : 0;
+    const angle = baseAngle + offset;
     const distance = FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE
       + Math.random() * (FRIENDLY_SPAWN_NEARBY_MAX_DISTANCE - FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE);
     const spawnPos = new THREE.Vector3(
@@ -99,6 +104,8 @@ export function createFriendlyNpcManager({
       return;
     }
     const frameDistance = currentPos.distanceTo(lastPlayerPosition);
+    const frameDirection = currentPos.clone().sub(lastPlayerPosition);
+    frameDirection.y = 0;
     lastPlayerPosition.copy(currentPos);
     if (!isPlayerTravelAnimationActive()) return;
     if (!Number.isFinite(frameDistance) || frameDistance <= 0 || frameDistance > FRIENDLY_SPAWN_MAX_STEP_DISTANCE) {
@@ -108,13 +115,17 @@ export function createFriendlyNpcManager({
     if (Number.isFinite(speed) && speed > FRIENDLY_SPAWN_MAX_SPEED) {
       return;
     }
+    if (frameDirection.lengthSq() > 0.0001) {
+      const normalizedFrameDirection = frameDirection.normalize();
+      playerTravelDirection.lerp(normalizedFrameDirection, 0.25).normalize();
+    }
     spawnDistanceAccum += frameDistance;
     if (spawnDistanceAccum < nextSpawnDistance) return;
 
     spawnedCount += 1;
     const slotId = `friendly:distance:${spawnedCount}`;
     if (!records.has(slotId)) {
-      const spawnPos = getSpawnNearPlayerPosition();
+      const spawnPos = getSpawnNearPlayerPosition(playerTravelDirection);
       if (spawnPos) {
         const level = getRandomLevel();
         const hp = getHealthForLevel(level);
@@ -127,7 +138,6 @@ export function createFriendlyNpcManager({
           hp,
           level,
           alive: true,
-          approachToPlayer: true,
           pos: { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z },
           rot: { x: rot.x, y: rot.y, z: rot.z, w: rot.w }
         };
@@ -171,31 +181,6 @@ const getHealthForLevel = (level) => {
     spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : spawnPos.y;
     liftPositionToBuildingTop?.(spawnPos, 0.5);
     return spawnPos;
-  };
-
-  const updateFriendlyApproachToPlayer = (friendly, delta) => {
-    if (!friendly?.model || !friendly?.body || !playerModel) return false;
-    const toPlayer = playerModel.position.clone().sub(friendly.model.position);
-    toPlayer.y = 0;
-    const distance = toPlayer.length();
-    const vel = friendly.body.linvel();
-    if (distance <= FRIENDLY_APPROACH_STOP_DISTANCE) {
-      friendly.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
-      friendly.playAnimation("Idle", 0.2);
-      friendly.update(delta);
-      friendly.model.userData.approachToPlayer = false;
-      return false;
-    }
-    const direction = toPlayer.normalize();
-    const speed = CHARACTER_MOVEMENT.runSpeed * FRIENDLY_APPROACH_SPEED_MULTIPLIER;
-    friendly.setDirection(direction);
-    friendly.body.setLinvel({ x: direction.x * speed, y: vel.y, z: direction.z * speed }, true);
-    const angle = Math.atan2(direction.x, direction.z);
-    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-    friendly.body.setRotation(rot, true);
-    friendly.playAnimation("Run", 0.2);
-    friendly.update(delta);
-    return true;
   };
 
   const cleanupFriendly = (friendly) => {
@@ -285,7 +270,7 @@ const getHealthForLevel = (level) => {
         if (Number.isFinite(record.version)) {
           friendly.version = record.version;
         }
-        friendly.model.userData.approachToPlayer = record.approachToPlayer === true;
+        friendly.model.userData.approachToPlayer = false;
         friendly.model.userData.hideInMapView = true;
         friendly.setNoticeRadius(FRIENDLY_NOTICE_RADIUS);
         friendly.setWanderRadius(FRIENDLY_WANDER_RADIUS);
@@ -450,18 +435,7 @@ const getHealthForLevel = (level) => {
       if (isHostNow) {
         if (nowMs - lastUpdate > FRIENDLY_ANIM_MIN_INTERVAL_MS) {
           friendly.lastAIUpdateMs = nowMs;
-          const isApproaching = friendly.model.userData.approachToPlayer === true;
-          if (isApproaching) {
-            const stillApproaching = updateFriendlyApproachToPlayer(friendly, delta);
-            if (!stillApproaching) {
-              const record = records.get(friendly.id);
-              if (record) {
-                record.approachToPlayer = false;
-              }
-            }
-          } else {
-            friendly.updateAI(delta, playerModel, otherPlayers);
-          }
+          friendly.updateAI(delta, playerModel, otherPlayers);
         }
         persistFriendlyState(friendly);
       } else {
