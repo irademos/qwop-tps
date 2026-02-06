@@ -182,6 +182,11 @@ function stripRootTranslationTracks(clip, rootName) {
   return new THREE.AnimationClip(clip.name, clip.duration, tracks);
 }
 
+function maybeStripRootTranslationTracksForAnimationFile(clip, rootName, animationFile) {
+  if (animationFile !== 'Joyful Jump.fbx') return clip;
+  return stripRootTranslationTracks(clip, rootName);
+}
+
 export function createPlayerModel(
   THREE,
   username,
@@ -276,7 +281,7 @@ export function createPlayerModel(
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
                 const rootName = model.name || 'Root';
-                const clean = stripRootTranslationTracks(cachedClip, rootName);
+                const clean = maybeStripRootTranslationTracksForAnimationFile(cachedClip, rootName, file);
                 const action = mixer.clipAction(clean);
                 if (name === 'walk') {
                   action.setEffectiveTimeScale(1.8);
@@ -304,7 +309,7 @@ export function createPlayerModel(
                     return;
                   }
                   const rootName = model.name || 'Root';
-                  const cleanClip = stripRootTranslationTracks(clip, rootName);
+                  const cleanClip = maybeStripRootTranslationTracksForAnimationFile(clip, rootName, file);
                   animationClipCache.set(file, cleanClip);
                   const action = mixer.clipAction(cleanClip);
                   if (name === 'walk') {
