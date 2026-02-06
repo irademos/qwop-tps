@@ -1995,6 +1995,7 @@ async function main() {
       .setLinearDamping(0.5)
       .setAngularDamping(0.5);
     const rb = rapierWorld.createRigidBody(rbDesc);
+    rb.setEnabledRotations(false, true, false, true);
     const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
     rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
