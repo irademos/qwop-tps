@@ -2,11 +2,11 @@ import * as THREE from "three";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { FriendlyCharacter } from "./characters/FriendlyCharacter.js";
 import { createLightSource, LIGHT_SOURCE_CONFIGS } from "./light_sources.js";
+import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import {
   initFriendlyPersistence,
   loadFriendliesSnapshot,
   subscribeFriendlyUpdates,
-  ensureFriendlyRecord,
   persistFriendlyState,
   setFriendlyPersistenceHost
 } from "./friendlyPersistence.js";
@@ -20,7 +20,14 @@ const FRIENDLY_MODELS = [
 ];
 const FRIENDLY_MAX_ACTIVE = 6;
 const FRIENDLY_ACTIVE_RADIUS = 360;
-const FRIENDLY_SPAWN_SPACING = 150;
+const FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE = 24;
+const FRIENDLY_SPAWN_NEARBY_MAX_DISTANCE = 42;
+const FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE = 70;
+const FRIENDLY_SPAWN_TRAVEL_MAX_DISTANCE = 150;
+const FRIENDLY_SPAWN_MAX_STEP_DISTANCE = 14;
+const FRIENDLY_SPAWN_MAX_SPEED = 20;
+const FRIENDLY_APPROACH_STOP_DISTANCE = 8;
+const FRIENDLY_APPROACH_SPEED_MULTIPLIER = 1.35;
 const FRIENDLY_NOTICE_RADIUS = 10;
 const FRIENDLY_WANDER_RADIUS = 4;
 const FRIENDLY_ENGAGE_RADIUS = 5;
@@ -51,8 +58,85 @@ export function createFriendlyNpcManager({
   let snapshotLoaded = false;
   let persistenceEnabled = true;
   let unsubscribeUpdates = null;
-  let lastEnsureAt = 0;
   let currentHost = !!isHost;
+  let spawnedCount = 0;
+  let spawnDistanceAccum = 0;
+  let nextSpawnDistance = 0;
+  let lastPlayerPosition = null;
+
+  const getNextSpawnDistance = () => {
+    return FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE
+      + Math.random() * (FRIENDLY_SPAWN_TRAVEL_MAX_DISTANCE - FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE);
+  };
+
+  const isPlayerTravelAnimationActive = () => {
+    const action = playerModel?.userData?.currentAction;
+    return action === "walk" || action === "run";
+  };
+
+  const getSpawnNearPlayerPosition = () => {
+    const basePos = playerModel?.position;
+    if (!basePos) return null;
+    const angle = Math.random() * Math.PI * 2;
+    const distance = FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE
+      + Math.random() * (FRIENDLY_SPAWN_NEARBY_MAX_DISTANCE - FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE);
+    const spawnPos = new THREE.Vector3(
+      basePos.x + Math.cos(angle) * distance,
+      basePos.y,
+      basePos.z + Math.sin(angle) * distance
+    );
+    return getSpawnPosition(spawnPos);
+  };
+
+  const maybeSpawnFriendlyFromDistance = (deltaSeconds = 0) => {
+    if (!playerModel) return;
+    if (!Number.isFinite(nextSpawnDistance) || nextSpawnDistance <= 0) {
+      nextSpawnDistance = getNextSpawnDistance();
+    }
+    const currentPos = playerModel.position.clone();
+    if (!lastPlayerPosition) {
+      lastPlayerPosition = currentPos;
+      return;
+    }
+    const frameDistance = currentPos.distanceTo(lastPlayerPosition);
+    lastPlayerPosition.copy(currentPos);
+    if (!isPlayerTravelAnimationActive()) return;
+    if (!Number.isFinite(frameDistance) || frameDistance <= 0 || frameDistance > FRIENDLY_SPAWN_MAX_STEP_DISTANCE) {
+      return;
+    }
+    const speed = deltaSeconds > 0 ? frameDistance / deltaSeconds : 0;
+    if (Number.isFinite(speed) && speed > FRIENDLY_SPAWN_MAX_SPEED) {
+      return;
+    }
+    spawnDistanceAccum += frameDistance;
+    if (spawnDistanceAccum < nextSpawnDistance) return;
+
+    spawnedCount += 1;
+    const slotId = `friendly:distance:${spawnedCount}`;
+    if (!records.has(slotId)) {
+      const spawnPos = getSpawnNearPlayerPosition();
+      if (spawnPos) {
+        const level = getRandomLevel();
+        const hp = getHealthForLevel(level);
+        const modelPath = getRandomFriendlyModel();
+        const angle = Math.random() * Math.PI * 2;
+        const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+        const record = {
+          id: slotId,
+          type: modelPath,
+          hp,
+          level,
+          alive: true,
+          approachToPlayer: true,
+          pos: { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z },
+          rot: { x: rot.x, y: rot.y, z: rot.z, w: rot.w }
+        };
+        records.set(slotId, record);
+      }
+    }
+    spawnDistanceAccum = 0;
+    nextSpawnDistance = getNextSpawnDistance();
+  };
 
   const setHost = (nextHost) => {
     currentHost = !!nextHost;
@@ -89,64 +173,29 @@ const getHealthForLevel = (level) => {
     return spawnPos;
   };
 
-  const getGridKey = (x, z) => {
-    return `friendly:${x}:${z}`;
-  };
-
-  const getCandidateSlots = () => {
-    if (!playerModel) return [];
-    const centerX = Math.round(playerModel.position.x / FRIENDLY_SPAWN_SPACING);
-    const centerZ = Math.round(playerModel.position.z / FRIENDLY_SPAWN_SPACING);
-    const gridRadius = Math.ceil(FRIENDLY_ACTIVE_RADIUS / FRIENDLY_SPAWN_SPACING);
-    const candidates = [];
-    for (let gx = centerX - gridRadius; gx <= centerX + gridRadius; gx += 1) {
-      for (let gz = centerZ - gridRadius; gz <= centerZ + gridRadius; gz += 1) {
-        const worldX = gx * FRIENDLY_SPAWN_SPACING;
-        const worldZ = gz * FRIENDLY_SPAWN_SPACING;
-        const pos = new THREE.Vector3(worldX, 0, worldZ);
-        const dist = playerModel.position.distanceTo(pos);
-        if (dist <= FRIENDLY_ACTIVE_RADIUS) {
-          candidates.push({ key: getGridKey(gx, gz), pos, dist });
-        }
-      }
+  const updateFriendlyApproachToPlayer = (friendly, delta) => {
+    if (!friendly?.model || !friendly?.body || !playerModel) return false;
+    const toPlayer = playerModel.position.clone().sub(friendly.model.position);
+    toPlayer.y = 0;
+    const distance = toPlayer.length();
+    const vel = friendly.body.linvel();
+    if (distance <= FRIENDLY_APPROACH_STOP_DISTANCE) {
+      friendly.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      friendly.playAnimation("Idle", 0.2);
+      friendly.update(delta);
+      friendly.model.userData.approachToPlayer = false;
+      return false;
     }
-    candidates.sort((a, b) => a.dist - b.dist);
-    return candidates.slice(0, FRIENDLY_MAX_ACTIVE);
-  };
-
-  const ensureFriendlyRecords = () => {
-    if (!playerModel) return;
-    const candidates = getCandidateSlots();
-    candidates.forEach(({ key, pos }) => {
-      if (records.has(key)) return;
-      const spawnPos = getSpawnPosition(pos);
-      const level = getRandomLevel();
-      const hp = getHealthForLevel(level);
-      const modelPath = getRandomFriendlyModel();
-      const angle = Math.random() * Math.PI * 2;
-      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-      const record = {
-        id: key,
-        type: modelPath,
-        hp,
-        level,
-        alive: true,
-        pos: { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z },
-        rot: { x: rot.x, y: rot.y, z: rot.z, w: rot.w }
-      };
-      records.set(key, record);
-      if (persistenceEnabled) {
-        ensureFriendlyRecord({
-          id: key,
-          modelPath,
-          type: modelPath,
-          health: hp,
-          level,
-          isDead: false,
-          model: { position: spawnPos, quaternion: rot }
-        });
-      }
-    });
+    const direction = toPlayer.normalize();
+    const speed = CHARACTER_MOVEMENT.runSpeed * FRIENDLY_APPROACH_SPEED_MULTIPLIER;
+    friendly.setDirection(direction);
+    friendly.body.setLinvel({ x: direction.x * speed, y: vel.y, z: direction.z * speed }, true);
+    const angle = Math.atan2(direction.x, direction.z);
+    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+    friendly.body.setRotation(rot, true);
+    friendly.playAnimation("Run", 0.2);
+    friendly.update(delta);
+    return true;
   };
 
   const cleanupFriendly = (friendly) => {
@@ -236,6 +285,7 @@ const getHealthForLevel = (level) => {
         if (Number.isFinite(record.version)) {
           friendly.version = record.version;
         }
+        friendly.model.userData.approachToPlayer = record.approachToPlayer === true;
         friendly.model.userData.hideInMapView = true;
         friendly.setNoticeRadius(FRIENDLY_NOTICE_RADIUS);
         friendly.setWanderRadius(FRIENDLY_WANDER_RADIUS);
@@ -390,9 +440,8 @@ const getHealthForLevel = (level) => {
     const isHostNow = hostOverride ?? currentHost;
     if (!snapshotLoaded) return;
     const nowMs = Date.now();
-    if (isHostNow && nowMs - lastEnsureAt > 5000) {
-      lastEnsureAt = nowMs;
-      ensureFriendlyRecords();
+    if (isHostNow) {
+      maybeSpawnFriendlyFromDistance(delta);
     }
     updateActiveFriendlies(!isHostNow);
     friendlies.forEach((friendly) => {
@@ -401,7 +450,18 @@ const getHealthForLevel = (level) => {
       if (isHostNow) {
         if (nowMs - lastUpdate > FRIENDLY_ANIM_MIN_INTERVAL_MS) {
           friendly.lastAIUpdateMs = nowMs;
-          friendly.updateAI(delta, playerModel, otherPlayers);
+          const isApproaching = friendly.model.userData.approachToPlayer === true;
+          if (isApproaching) {
+            const stillApproaching = updateFriendlyApproachToPlayer(friendly, delta);
+            if (!stillApproaching) {
+              const record = records.get(friendly.id);
+              if (record) {
+                record.approachToPlayer = false;
+              }
+            }
+          } else {
+            friendly.updateAI(delta, playerModel, otherPlayers);
+          }
         }
         persistFriendlyState(friendly);
       } else {
