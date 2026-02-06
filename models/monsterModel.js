@@ -190,8 +190,10 @@ export function loadMonsterModel(modelPath, callback) {
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
                 const rootName = model.name || 'Root';
-                const cleanClip = stripRootHorizontalTranslationTracks(cachedClip, rootName);
-                const action = mixer.clipAction(cleanClip);
+                const preparedClip = name === 'JumpAttack'
+                  ? cachedClip
+                  : stripRootHorizontalTranslationTracks(cachedClip, rootName);
+                const action = mixer.clipAction(preparedClip);
                 if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
@@ -211,8 +213,10 @@ export function loadMonsterModel(modelPath, callback) {
                   }
                   animationClipCache.set(file, clip);
                   const rootName = model.name || 'Root';
-                  const cleanClip = stripRootHorizontalTranslationTracks(clip, rootName);
-                  const action = mixer.clipAction(cleanClip);
+                  const preparedClip = name === 'JumpAttack'
+                    ? clip
+                    : stripRootHorizontalTranslationTracks(clip, rootName);
+                  const action = mixer.clipAction(preparedClip);
                   if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
