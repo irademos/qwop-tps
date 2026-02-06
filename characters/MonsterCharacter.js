@@ -20,6 +20,7 @@ const STRAFE_OSCILLATION = 0.004;
 const ATTACK_LUNGE_DURATION_MS = 280;
 const JUMP_ATTACK_CHANCE = 0.3;
 const JUMP_ATTACK_DAMAGE_MULTIPLIER = 2.5;
+const JUMP_ATTACK_ARC_HEIGHT = 1.35;
 const STANDOFF_RETREAT_INTERVAL_MS = 2000;
 const HEALTH_BAR_HEIGHT = 14;
 const HEALTH_BAR_PADDING = 4;
@@ -77,6 +78,7 @@ export class MonsterCharacter extends CharacterBase {
     this.attackKind = 'normal';
     this.jumpAttackTarget = null;
     this.jumpAttackDurationMs = 0;
+    this.jumpAttackStartY = null;
     this.lastStandoffRetreatTime = 0;
     this.healthBar = this.createHealthBar();
     this.healthBarVisibleUntil = 0;
@@ -318,6 +320,7 @@ export class MonsterCharacter extends CharacterBase {
       this.attackKind = 'normal';
       this.jumpAttackTarget = null;
       this.jumpAttackDurationMs = 0;
+      this.jumpAttackStartY = null;
     }
 
     if (this.model.userData.mode === "friendly") {
@@ -397,6 +400,7 @@ export class MonsterCharacter extends CharacterBase {
     this.attackKind = 'normal';
     this.jumpAttackTarget = null;
     this.jumpAttackDurationMs = 0;
+    this.jumpAttackStartY = null;
     this.attackLungeEndTime = now + ATTACK_LUNGE_DURATION_MS;
     this.nextAttackTime = now + THREE.MathUtils.randInt(...ATTACK_COOLDOWN_RANGE_MS);
   }
@@ -412,6 +416,7 @@ export class MonsterCharacter extends CharacterBase {
     this.jumpAttackTarget = targetPos.clone();
     const jumpClip = this.actions?.[JUMP_ATTACK_NAME]?.getClip?.();
     this.jumpAttackDurationMs = Math.max(350, Math.round((jumpClip?.duration || 0.8) * 1000));
+    this.jumpAttackStartY = Number.isFinite(this.body?.translation?.().y) ? this.body.translation().y : this.model.position.y;
     this.attackLungeEndTime = now + this.jumpAttackDurationMs;
     this.nextAttackTime = now + THREE.MathUtils.randInt(...ATTACK_COOLDOWN_RANGE_MS);
   }
@@ -462,15 +467,21 @@ export class MonsterCharacter extends CharacterBase {
         const elapsed = Math.max(0, now - this.attackStartTime);
         const duration = Math.max(1, this.jumpAttackDurationMs || 1);
         const remaining = Math.max(0, duration - elapsed);
+        const progress = THREE.MathUtils.clamp(elapsed / duration, 0, 1);
         const toTarget = this.jumpAttackTarget.clone().sub(this.model.position).setY(0);
         if (remaining > 0 && toTarget.lengthSq() > 0.0001) {
           const velocityToTarget = toTarget.multiplyScalar(1000 / remaining);
-          body.setLinvel({ x: velocityToTarget.x, y: vel.y, z: velocityToTarget.z }, true);
+          body.setLinvel({ x: velocityToTarget.x, y: 0, z: velocityToTarget.z }, true);
           this.attackDirection.copy(velocityToTarget.clone().normalize());
           this.setDirection(this.attackDirection);
         } else {
-          body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+          body.setLinvel({ x: 0, y: 0, z: 0 }, true);
         }
+
+        const startY = Number.isFinite(this.jumpAttackStartY) ? this.jumpAttackStartY : this.model.position.y;
+        const arcLift = 4 * JUMP_ATTACK_ARC_HEIGHT * progress * (1 - progress);
+        const current = body.translation();
+        body.setTranslation({ x: current.x, y: startY + arcLift, z: current.z }, true);
       } else if (now < this.attackLungeEndTime) {
         const movement = this.attackDirection
           .clone()
@@ -553,6 +564,11 @@ export class MonsterCharacter extends CharacterBase {
           this.attackKind = 'normal';
           this.jumpAttackTarget = null;
           this.jumpAttackDurationMs = 0;
+          if (Number.isFinite(this.jumpAttackStartY)) {
+            const current = body.translation();
+            body.setTranslation({ x: current.x, y: this.jumpAttackStartY, z: current.z }, true);
+          }
+          this.jumpAttackStartY = null;
         }
       } else {
         if (!this.attackHasHit && elapsed >= MONSTER_ATTACK.hitTime && elapsed <= MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
