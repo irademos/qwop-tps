@@ -410,6 +410,11 @@ export class PlayerControls {
       } else if (this.canJump && this.body) {
         this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
         this.canJump = false;
+        this.hasDoubleJumped = false;
+      } else if (!this.hasDoubleJumped && this.body) {
+        this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
+        this.hasDoubleJumped = true;
+        this.playAction('hurricaneKick');
       }
       event.preventDefault();
     });
