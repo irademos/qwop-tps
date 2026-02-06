@@ -7,6 +7,7 @@ import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from 
 const AGGRO_RADIUS = 12;
 const WANDER_CHANGE_MS = 2000;
 const ATTACK_NAME = 'Weapon';
+const JUMP_ATTACK_NAME = 'JumpAttack';
 const MOVE_FADE = 0.2;
 const ATTACK_FADE = 0.1;
 const DEFAULT_HEALTH = BASE_HEALTH_SEGMENTS;
@@ -17,6 +18,9 @@ const STANDOFF_BUFFER = 0.35;
 const STRAFE_SPEED = 1.1;
 const STRAFE_OSCILLATION = 0.004;
 const ATTACK_LUNGE_DURATION_MS = 280;
+const JUMP_ATTACK_CHANCE = 0.22;
+const JUMP_ATTACK_DAMAGE_MULTIPLIER = 2.75;
+const JUMP_ATTACK_CONTACT_WINDOW = [0.7, 0.9];
 const STANDOFF_RETREAT_INTERVAL_MS = 2000;
 const HEALTH_BAR_HEIGHT = 14;
 const HEALTH_BAR_PADDING = 4;
@@ -66,6 +70,7 @@ export class MonsterCharacter extends CharacterBase {
     this.nextAttackTime = 0;
     this.attackStartTime = null;
     this.attackHasHit = false;
+    this.attackAnimationName = ATTACK_NAME;
     this.isKnocked = false;
     this.knockbackEndTime = 0;
     this.freezeEndTime = 0;
@@ -309,6 +314,7 @@ export class MonsterCharacter extends CharacterBase {
       this.model.userData.mode = "friendly";
       this.attackStartTime = null;
       this.attackHasHit = false;
+      this.attackAnimationName = ATTACK_NAME;
     }
 
     if (this.model.userData.mode === "friendly") {
@@ -348,7 +354,10 @@ export class MonsterCharacter extends CharacterBase {
       return;
     }
 
-    this.updateCombatAI(delta, closestPlayer, allPlayers, (player) => {
+    this.updateCombatAI(delta, closestPlayer, allPlayers, (player, hitContext = {}) => {
+      const damage = Number.isFinite(hitContext.damage)
+        ? Math.max(1, Math.round(hitContext.damage))
+        : this.attackDamage;
       const localControls = window.playerControls;
       if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
         localControls.isInvincible = false;
@@ -356,7 +365,7 @@ export class MonsterCharacter extends CharacterBase {
       }
       const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
       if (player.id === 'local' && !localControls?.isKnocked && !isInvincible) {
-        window.localHealth = Math.max(0, window.localHealth - this.attackDamage);
+        window.localHealth = Math.max(0, window.localHealth - damage);
         if (localControls) {
           localControls.applyKnockback({
             direction: this.model.userData.direction.clone(),
@@ -367,7 +376,7 @@ export class MonsterCharacter extends CharacterBase {
         const op = otherPlayers[player.id];
         if (op) {
           const current = Number.isFinite(op.health) ? op.health : BASE_HEALTH_SEGMENTS;
-          op.health = Math.max(0, current - this.attackDamage);
+          op.health = Math.max(0, current - damage);
         }
       }
     });
@@ -459,7 +468,9 @@ export class MonsterCharacter extends CharacterBase {
       if (canAttack && distance <= STANDOFF_DISTANCE + 0.5) {
         this.attackDirection.copy(faceDir);
         this.setDirection(this.attackDirection);
-        this.playAnimation(ATTACK_NAME, ATTACK_FADE);
+        const useJumpAttack = this.actions?.[JUMP_ATTACK_NAME] && Math.random() < JUMP_ATTACK_CHANCE;
+        this.attackAnimationName = useJumpAttack ? JUMP_ATTACK_NAME : ATTACK_NAME;
+        this.playAnimation(this.attackAnimationName, ATTACK_FADE);
         this.lastAttackTime = now;
         this.attackStartTime = now;
         this.attackHasHit = false;
@@ -474,23 +485,40 @@ export class MonsterCharacter extends CharacterBase {
 
     if (this.attackStartTime) {
       const elapsed = now - this.attackStartTime;
-      if (!this.attackHasHit && elapsed >= MONSTER_ATTACK.hitTime && elapsed <= MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
+      const currentAction = this.attackAnimationName || ATTACK_NAME;
+      const actionClip = this.actions?.[currentAction]?.getClip?.();
+      const durationMs = Number.isFinite(actionClip?.duration) ? actionClip.duration * 1000 : 0;
+      const isJumpAttack = currentAction === JUMP_ATTACK_NAME;
+      const hitStart = isJumpAttack && durationMs > 0
+        ? durationMs * JUMP_ATTACK_CONTACT_WINDOW[0]
+        : MONSTER_ATTACK.hitTime;
+      const hitEnd = isJumpAttack && durationMs > 0
+        ? durationMs * JUMP_ATTACK_CONTACT_WINDOW[1]
+        : MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow;
+
+      if (!this.attackHasHit && elapsed >= hitStart && elapsed <= hitEnd) {
         const hitTargets = Array.isArray(targets) && targets.length ? targets : [primaryTarget];
+        const hitDamage = isJumpAttack
+          ? this.attackDamage * JUMP_ATTACK_DAMAGE_MULTIPLIER
+          : this.attackDamage;
         hitTargets.forEach((target) => {
           if (!target?.model) return;
           const dist = this.model.position.distanceTo(target.model.position);
           if (dist <= attackRange) {
             onHit?.(target, {
               direction: this.model.userData.direction.clone(),
-              strength: MONSTER_ATTACK.knockbackStrength
+              strength: MONSTER_ATTACK.knockbackStrength,
+              damage: hitDamage,
+              attackName: currentAction
             });
           }
         });
         this.attackHasHit = true;
       }
-      if (elapsed > MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
+      if (elapsed > hitEnd) {
         this.attackStartTime = null;
         this.attackHasHit = false;
+        this.attackAnimationName = ATTACK_NAME;
       }
     }
   }

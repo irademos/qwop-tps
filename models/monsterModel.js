@@ -7,6 +7,7 @@ const animationFiles = {
   Walk: 'Old Man Walk.fbx',
   Run: 'Drunk Run Forward.fbx',
   Weapon: 'Mutant Punch.fbx',
+  JumpAttack: 'Jump Attack.fbx',
   Death: 'Dying.fbx',
   Hit: 'Flying Back Death.fbx',
   TwistDance: 'Twist Dance.fbx'
@@ -151,7 +152,7 @@ export function loadMonsterModel(modelPath, callback) {
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
                 const action = mixer.clipAction(cachedClip);
-                if (['Weapon', 'Death', 'Hit'].includes(name)) {
+                if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
                 }
@@ -170,7 +171,7 @@ export function loadMonsterModel(modelPath, callback) {
                   }
                   animationClipCache.set(file, clip);
                   const action = mixer.clipAction(clip);
-                  if (['Weapon', 'Death', 'Hit'].includes(name)) {
+                  if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
                   }
