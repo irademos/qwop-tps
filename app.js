@@ -5879,13 +5879,23 @@ async function main() {
     removeFromInventory('bomb', 1);
     return true;
   };
+  const voiceMicState = {
+    listening: false,
+    lastTranscript: '',
+    pendingSpellResolution: false,
+    pendingSpellTimeout: null,
+    cooldownUntil: 0,
+    transcriptTimer: null
+  };
+  const VOICE_COOLDOWN_MS = 60_000;
+
   playerControls.handleVoiceMicPress = () => {
     startVoiceListening();
   };
   playerControls.stopVoiceListening = () => {
     stopVoiceListening();
   };
-  playerControls.isVoiceListening = () => voiceListening;
+  playerControls.isVoiceListening = () => voiceMicState.listening;
   playerControls.getVoiceMicState = () => getVoiceMicState();
 
   window.playerControls = playerControls;
@@ -7287,22 +7297,15 @@ async function main() {
   }
 
   const voiceTranscript = document.getElementById('voice-transcript');
-  let voiceTranscriptTimer = null;
-  let lastVoiceTranscript = '';
-  let voiceListening = false;
-  let pendingVoiceSpellResolution = false;
-  let pendingVoiceSpellTimeout = null;
-  let voiceCooldownUntil = 0;
-  const VOICE_COOLDOWN_MS = 60_000;
 
   const showVoiceTranscript = (text) => {
     if (!voiceTranscript) return;
     voiceTranscript.textContent = text;
     voiceTranscript.classList.add('visible');
-    if (voiceTranscriptTimer) {
-      clearTimeout(voiceTranscriptTimer);
+    if (voiceMicState.transcriptTimer) {
+      clearTimeout(voiceMicState.transcriptTimer);
     }
-    voiceTranscriptTimer = setTimeout(() => {
+    voiceMicState.transcriptTimer = setTimeout(() => {
       voiceTranscript.classList.remove('visible');
     }, 2500);
   };
@@ -7405,16 +7408,16 @@ async function main() {
   };
 
   const getVoiceMicState = () => {
-    const remainingMs = Math.max(0, voiceCooldownUntil - Date.now());
+    const remainingMs = Math.max(0, voiceMicState.cooldownUntil - Date.now());
     return {
-      disabled: voiceListening || remainingMs > 0,
+      disabled: voiceMicState.listening || remainingMs > 0,
       remainingSeconds: remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0
     };
   };
 
   const stopVoiceListening = () => {
-    if (!voiceListening) return;
-    voiceListening = false;
+    if (!voiceMicState.listening) return;
+    voiceMicState.listening = false;
     speech.stop();
 
     const finalizeTranscript = (text) => {
@@ -7423,32 +7426,32 @@ async function main() {
       castVoiceSpellFromTranscript(text);
     };
 
-    if (lastVoiceTranscript) {
-      finalizeTranscript(lastVoiceTranscript);
+    if (voiceMicState.lastTranscript) {
+      finalizeTranscript(voiceMicState.lastTranscript);
     } else {
-      pendingVoiceSpellResolution = true;
-      if (pendingVoiceSpellTimeout) {
-        clearTimeout(pendingVoiceSpellTimeout);
+      voiceMicState.pendingSpellResolution = true;
+      if (voiceMicState.pendingSpellTimeout) {
+        clearTimeout(voiceMicState.pendingSpellTimeout);
       }
-      pendingVoiceSpellTimeout = setTimeout(() => {
-        pendingVoiceSpellResolution = false;
+      voiceMicState.pendingSpellTimeout = setTimeout(() => {
+        voiceMicState.pendingSpellResolution = false;
       }, 1200);
     }
 
-    voiceCooldownUntil = Date.now() + VOICE_COOLDOWN_MS;
+    voiceMicState.cooldownUntil = Date.now() + VOICE_COOLDOWN_MS;
     playerControls?.refreshActionButtons?.();
   };
 
   const startVoiceListening = () => {
     const state = getVoiceMicState();
     if (state.disabled) return false;
-    lastVoiceTranscript = '';
-    pendingVoiceSpellResolution = false;
-    if (pendingVoiceSpellTimeout) {
-      clearTimeout(pendingVoiceSpellTimeout);
-      pendingVoiceSpellTimeout = null;
+    voiceMicState.lastTranscript = '';
+    voiceMicState.pendingSpellResolution = false;
+    if (voiceMicState.pendingSpellTimeout) {
+      clearTimeout(voiceMicState.pendingSpellTimeout);
+      voiceMicState.pendingSpellTimeout = null;
     }
-    voiceListening = true;
+    voiceMicState.listening = true;
     speech.start();
     playerControls?.refreshActionButtons?.();
     return true;
@@ -7457,16 +7460,16 @@ async function main() {
   // Initialize speech-to-text overlay for voice input
   const speech = initSpeechCommands({
     onTranscript: (text) => {
-      lastVoiceTranscript = text;
-      if (pendingVoiceSpellResolution) {
-        pendingVoiceSpellResolution = false;
-        if (pendingVoiceSpellTimeout) {
-          clearTimeout(pendingVoiceSpellTimeout);
-          pendingVoiceSpellTimeout = null;
+      voiceMicState.lastTranscript = text;
+      if (voiceMicState.pendingSpellResolution) {
+        voiceMicState.pendingSpellResolution = false;
+        if (voiceMicState.pendingSpellTimeout) {
+          clearTimeout(voiceMicState.pendingSpellTimeout);
+          voiceMicState.pendingSpellTimeout = null;
         }
         showVoiceTranscript(text);
         castVoiceSpellFromTranscript(text);
-      } else if (!voiceListening) {
+      } else if (!voiceMicState.listening) {
         showVoiceTranscript(text);
       }
     }
