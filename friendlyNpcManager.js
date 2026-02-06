@@ -26,7 +26,9 @@ const FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE = 70;
 const FRIENDLY_SPAWN_TRAVEL_MAX_DISTANCE = 150;
 const FRIENDLY_SPAWN_MAX_STEP_DISTANCE = 14;
 const FRIENDLY_SPAWN_MAX_SPEED = 20;
-const FRIENDLY_SPAWN_FORWARD_CONE_RADIANS = Math.PI * 0.55;
+const FRIENDLY_SPAWN_PREDICT_MIN_AHEAD_DISTANCE = 24;
+const FRIENDLY_SPAWN_PREDICT_MAX_AHEAD_DISTANCE = 42;
+const FRIENDLY_SPAWN_PREDICT_LATERAL_JITTER = 10;
 const FRIENDLY_NOTICE_RADIUS = 10;
 const FRIENDLY_WANDER_RADIUS = 4;
 const FRIENDLY_ENGAGE_RADIUS = 5;
@@ -62,7 +64,7 @@ export function createFriendlyNpcManager({
   let spawnDistanceAccum = 0;
   let nextSpawnDistance = 0;
   let lastPlayerPosition = null;
-  let playerTravelDirection = new THREE.Vector3(0, 0, 1);
+  let travelStartPosition = null;
 
   const getNextSpawnDistance = () => {
     return FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE
@@ -74,24 +76,33 @@ export function createFriendlyNpcManager({
     return action === "walk" || action === "run";
   };
 
-  const getSpawnNearPlayerPosition = (forwardDirection = null) => {
+  const getSpawnNearPlayerPosition = (startPos, currentPos) => {
     const basePos = playerModel?.position;
     if (!basePos) return null;
-    const canSpawnForward = forwardDirection && forwardDirection.lengthSq() > 0.0001;
-    const forward = canSpawnForward
-      ? forwardDirection.clone().setY(0).normalize()
-      : null;
-    const baseAngle = forward ? Math.atan2(forward.x, forward.z) : Math.random() * Math.PI * 2;
-    const offset = forward ? ((Math.random() - 0.5) * FRIENDLY_SPAWN_FORWARD_CONE_RADIANS) : 0;
-    const angle = baseAngle + offset;
-    const distance = FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE
-      + Math.random() * (FRIENDLY_SPAWN_NEARBY_MAX_DISTANCE - FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE);
-    const spawnPos = new THREE.Vector3(
-      basePos.x + Math.cos(angle) * distance,
-      basePos.y,
-      basePos.z + Math.sin(angle) * distance
-    );
-    return getSpawnPosition(spawnPos);
+    const start = startPos?.clone?.() || basePos.clone();
+    const current = currentPos?.clone?.() || basePos.clone();
+    const travelRay = current.sub(start);
+    travelRay.y = 0;
+
+    if (travelRay.lengthSq() <= 0.0001) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE
+        + Math.random() * (FRIENDLY_SPAWN_NEARBY_MAX_DISTANCE - FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE);
+      return getSpawnPosition(new THREE.Vector3(
+        basePos.x + Math.cos(angle) * distance,
+        basePos.y,
+        basePos.z + Math.sin(angle) * distance
+      ));
+    }
+
+    const rayDirection = travelRay.normalize();
+    const extraAhead = FRIENDLY_SPAWN_PREDICT_MIN_AHEAD_DISTANCE
+      + Math.random() * (FRIENDLY_SPAWN_PREDICT_MAX_AHEAD_DISTANCE - FRIENDLY_SPAWN_PREDICT_MIN_AHEAD_DISTANCE);
+    const predictedPos = basePos.clone().add(rayDirection.clone().multiplyScalar(extraAhead));
+    const lateral = new THREE.Vector3(-rayDirection.z, 0, rayDirection.x)
+      .multiplyScalar((Math.random() - 0.5) * FRIENDLY_SPAWN_PREDICT_LATERAL_JITTER);
+    predictedPos.add(lateral);
+    return getSpawnPosition(predictedPos);
   };
 
 
@@ -142,11 +153,10 @@ export function createFriendlyNpcManager({
     const currentPos = playerModel.position.clone();
     if (!lastPlayerPosition) {
       lastPlayerPosition = currentPos;
+      travelStartPosition = currentPos.clone();
       return;
     }
     const frameDistance = currentPos.distanceTo(lastPlayerPosition);
-    const frameDirection = currentPos.clone().sub(lastPlayerPosition);
-    frameDirection.y = 0;
     lastPlayerPosition.copy(currentPos);
     if (!isPlayerTravelAnimationActive()) return;
     if (!Number.isFinite(frameDistance) || frameDistance <= 0 || frameDistance > FRIENDLY_SPAWN_MAX_STEP_DISTANCE) {
@@ -156,17 +166,13 @@ export function createFriendlyNpcManager({
     if (Number.isFinite(speed) && speed > FRIENDLY_SPAWN_MAX_SPEED) {
       return;
     }
-    if (frameDirection.lengthSq() > 0.0001) {
-      const normalizedFrameDirection = frameDirection.normalize();
-      playerTravelDirection.lerp(normalizedFrameDirection, 0.25).normalize();
-    }
     spawnDistanceAccum += frameDistance;
     if (spawnDistanceAccum < nextSpawnDistance) return;
 
     dropFurthestFriendlyRecord(currentPos);
     spawnedCount += 1;
     const slotId = `friendly:distance:${spawnedCount}`;
-    const spawnPos = getSpawnNearPlayerPosition(playerTravelDirection);
+    const spawnPos = getSpawnNearPlayerPosition(travelStartPosition, currentPos);
     if (spawnPos) {
       const level = getRandomLevel();
       const hp = getHealthForLevel(level);
@@ -185,6 +191,7 @@ export function createFriendlyNpcManager({
       records.set(slotId, record);
     }
     spawnDistanceAccum = 0;
+    travelStartPosition = currentPos.clone();
     nextSpawnDistance = getNextSpawnDistance();
   };
 
