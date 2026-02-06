@@ -7,7 +7,8 @@ import {
   loadFriendliesSnapshot,
   subscribeFriendlyUpdates,
   persistFriendlyState,
-  setFriendlyPersistenceHost
+  setFriendlyPersistenceHost,
+  removeFriendlyRecord
 } from "./friendlyPersistence.js";
 import { BASE_HEALTH_SEGMENTS, getMaxHealthSegments, normalizeHealthSegments } from "./healthUtils.js";
 
@@ -93,6 +94,46 @@ export function createFriendlyNpcManager({
     return getSpawnPosition(spawnPos);
   };
 
+
+  const refreshSpawnCounterFromRecords = () => {
+    let maxSpawnedId = 0;
+    records.forEach((record, recordId) => {
+      const slotId = record?.id || recordId;
+      const match = typeof slotId === "string" ? slotId.match(/^friendly:distance:(\d+)$/) : null;
+      if (!match) return;
+      const value = Number.parseInt(match[1], 10);
+      if (Number.isFinite(value)) {
+        maxSpawnedId = Math.max(maxSpawnedId, value);
+      }
+    });
+    spawnedCount = maxSpawnedId;
+  };
+
+  const dropFurthestFriendlyRecord = (originPosition) => {
+    if (!originPosition || records.size < FRIENDLY_MAX_ACTIVE) return;
+    let furthestId = null;
+    let furthestDistance = -Infinity;
+    records.forEach((record, id) => {
+      const pos = record?.pos;
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) return;
+      const distance = originPosition.distanceTo(new THREE.Vector3(pos.x, pos.y, pos.z));
+      if (distance > furthestDistance) {
+        furthestDistance = distance;
+        furthestId = id;
+      }
+    });
+    if (!furthestId) return;
+
+    records.delete(furthestId);
+    removeFriendlyRecord(furthestId);
+
+    const index = friendlies.findIndex(entry => entry?.id === furthestId);
+    if (index >= 0) {
+      cleanupFriendly(friendlies[index]);
+      friendlies.splice(index, 1);
+      window.friendlies = friendlies;
+    }
+  };
   const maybeSpawnFriendlyFromDistance = (deltaSeconds = 0) => {
     if (!playerModel) return;
     if (!Number.isFinite(nextSpawnDistance) || nextSpawnDistance <= 0) {
@@ -122,27 +163,26 @@ export function createFriendlyNpcManager({
     spawnDistanceAccum += frameDistance;
     if (spawnDistanceAccum < nextSpawnDistance) return;
 
+    dropFurthestFriendlyRecord(currentPos);
     spawnedCount += 1;
     const slotId = `friendly:distance:${spawnedCount}`;
-    if (!records.has(slotId)) {
-      const spawnPos = getSpawnNearPlayerPosition(playerTravelDirection);
-      if (spawnPos) {
-        const level = getRandomLevel();
-        const hp = getHealthForLevel(level);
-        const modelPath = getRandomFriendlyModel();
-        const angle = Math.random() * Math.PI * 2;
-        const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-        const record = {
-          id: slotId,
-          type: modelPath,
-          hp,
-          level,
-          alive: true,
-          pos: { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z },
-          rot: { x: rot.x, y: rot.y, z: rot.z, w: rot.w }
-        };
-        records.set(slotId, record);
-      }
+    const spawnPos = getSpawnNearPlayerPosition(playerTravelDirection);
+    if (spawnPos) {
+      const level = getRandomLevel();
+      const hp = getHealthForLevel(level);
+      const modelPath = getRandomFriendlyModel();
+      const angle = Math.random() * Math.PI * 2;
+      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+      const record = {
+        id: slotId,
+        type: modelPath,
+        hp,
+        level,
+        alive: true,
+        pos: { x: spawnPos.x, y: spawnPos.y, z: spawnPos.z },
+        rot: { x: rot.x, y: rot.y, z: rot.z, w: rot.w }
+      };
+      records.set(slotId, record);
     }
     spawnDistanceAccum = 0;
     nextSpawnDistance = getNextSpawnDistance();
@@ -389,6 +429,7 @@ const getHealthForLevel = (level) => {
         syncFriendlyFromRecord(existingFriendly, merged, applyTransform);
       }
     });
+    refreshSpawnCounterFromRecords();
   };
 
   const onRoomReady = async ({ roomId, isHost: nextHost } = {}) => {

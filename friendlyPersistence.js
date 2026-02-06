@@ -12,3 +12,5 @@ export const subscribeFriendlyUpdates = friendlyPersistence.subscribeUpdates;
 export const ensureFriendlyRecord = friendlyPersistence.ensureRecord;
 export const persistFriendlyHp = friendlyPersistence.persistHp;
 export const persistFriendlyState = friendlyPersistence.persistState;
+
+export const removeFriendlyRecord = friendlyPersistence.removeRecord;
