@@ -7352,16 +7352,44 @@ async function main() {
       return d.normalize();
     };
 
-    const launchProduceProjectile = ({ direction, spawnPickup, color = 0xd9d9d9 }) => {
+    const createAppleProjectileMesh = () => {
+      const source = applePickups.find(entry => entry?.mesh)?.mesh;
+      if (!source) return null;
+      const mesh = source.clone(true);
+      mesh.visible = true;
+      mesh.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+      return mesh;
+    };
+
+    const createMushroomProjectileMesh = (itemId) => {
+      const source = mushroomPickups.find(entry => entry?.id === itemId && entry?.mesh)?.mesh
+        || mushroomPickups.find(entry => entry?.mesh)?.mesh;
+      if (!source) return null;
+      const mesh = source.clone(true);
+      mesh.visible = true;
+      mesh.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+      return mesh;
+    };
+
+    const launchProduceProjectile = ({ direction, spawnPickup, createMesh, color = 0xd9d9d9 }) => {
       const shooterId = multiplayer?.getId?.();
       spawnProjectile(scene, projectiles, origin.clone(), direction, shooterId, {
         color,
-        speed: BOMB_THROW_SPEED,
-        lifetime: BOMB_THROW_LIFETIME,
+        createMesh,
+        speed: BOMB_THROW_SPEED * 0.45,
+        lifetime: Math.floor(BOMB_THROW_LIFETIME * 0.75),
         pickupOnRest: true,
         pickupAmount: 1,
         spawnPickup,
-        colliderDesc: RAPIER.ColliderDesc.ball(0.14).setRestitution(0.25).setFriction(0.8)
+        colliderDesc: RAPIER.ColliderDesc.ball(0.11).setRestitution(0.25).setFriction(0.8)
       });
     };
 
@@ -7371,6 +7399,7 @@ async function main() {
         launchProduceProjectile({
           direction: d,
           color: 0xd14b33,
+          createMesh: createAppleProjectileMesh,
           spawnPickup: (pickupPosition) => {
             spawnApplePickup(pickupPosition);
           }
@@ -7384,6 +7413,7 @@ async function main() {
         launchProduceProjectile({
           direction: d,
           color: 0x8f6ad9,
+          createMesh: () => createMushroomProjectileMesh(entry.id),
           spawnPickup: (pickupPosition) => {
             spawnMushroomPickup(entry.id, pickupPosition);
           }
