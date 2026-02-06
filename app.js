@@ -1990,14 +1990,21 @@ async function main() {
   function attachMonsterPhysics(monster) {
     const model = monster.model;
     const scale = monster.sizeScale || 1;
+    const terrainY = getTerrainHeight(model.position.x, model.position.z);
+    const terrainOffset = Number.isFinite(terrainY)
+      ? model.position.y - terrainY
+      : 0;
     const rbDesc = RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(model.position.x, model.position.y, model.position.z)
       .setLinearDamping(0.5)
       .setAngularDamping(0.5);
     const rb = rapierWorld.createRigidBody(rbDesc);
+    rb.setGravityScale(0, true);
     const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
     rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
+    model.userData.lockToTerrain = true;
+    model.userData.terrainOffset = terrainOffset;
     rbToMesh.set(rb, model);
   }
 
@@ -7946,6 +7953,22 @@ async function main() {
       const r = rb.rotation();
       mesh.position.set(t.x, t.y, t.z);
       mesh.quaternion.set(r.x, r.y, r.z, r.w);
+
+      if (mesh.userData?.lockToTerrain) {
+        const terrainY = getTerrainHeight(mesh.position.x, mesh.position.z);
+        if (Number.isFinite(terrainY)) {
+          const offset = Number.isFinite(mesh.userData.terrainOffset)
+            ? mesh.userData.terrainOffset
+            : 0;
+          const clampedY = terrainY + offset;
+          mesh.position.y = clampedY;
+          rb.setTranslation({ x: mesh.position.x, y: clampedY, z: mesh.position.z }, true);
+          const lv = rb.linvel();
+          if (Math.abs(lv.y) > 0.0001) {
+            rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
+          }
+        }
+      }
 
       const isStaticBody = typeof rb.isFixed === 'function' && rb.isFixed();
       if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection && !isStaticBody) {
