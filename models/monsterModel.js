@@ -7,6 +7,7 @@ const animationFiles = {
   Walk: 'Old Man Walk.fbx',
   Run: 'Drunk Run Forward.fbx',
   Weapon: 'Mutant Punch.fbx',
+  JumpAttack: 'Jump Attack.fbx',
   Death: 'Dying.fbx',
   Hit: 'Flying Back Death.fbx',
   TwistDance: 'Twist Dance.fbx'
@@ -94,6 +95,23 @@ function logMissingAnimation(name, modelPath) {
   console.warn(`Missing monster animation clip "${name}" for model ${modelPath}. Falling back to Idle.`);
 }
 
+function stripRootTranslationTracks(clip, rootName) {
+  const candidates = new Set([
+    rootName,
+    'Hips',
+    'mixamorig:Hips',
+    'Root',
+    'mixamorig:Root',
+    'Armature'
+  ].filter(Boolean).map(name => name.toLowerCase()));
+  const tracks = clip.tracks.filter((track) => {
+    if (!track.name.endsWith('.position') && !track.name.endsWith('.matrix')) return true;
+    const nodeName = track.name.split('.')[0].toLowerCase();
+    return !candidates.has(nodeName);
+  });
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+}
+
 export function loadMonsterModel(modelPath, callback) {
   const loader = new FBXLoader();
   const configPath = modelPath.replace(/\.[^/.]+$/, '.json');
@@ -150,8 +168,10 @@ export function loadMonsterModel(modelPath, callback) {
             return new Promise((resolve, reject) => {
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
-                const action = mixer.clipAction(cachedClip);
-                if (['Weapon', 'Death', 'Hit'].includes(name)) {
+                const rootName = model.name || 'Root';
+                const cleanClip = stripRootTranslationTracks(cachedClip, rootName);
+                const action = mixer.clipAction(cleanClip);
+                if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
                 }
@@ -169,8 +189,10 @@ export function loadMonsterModel(modelPath, callback) {
                     return;
                   }
                   animationClipCache.set(file, clip);
-                  const action = mixer.clipAction(clip);
-                  if (['Weapon', 'Death', 'Hit'].includes(name)) {
+                  const rootName = model.name || 'Root';
+                  const cleanClip = stripRootTranslationTracks(clip, rootName);
+                  const action = mixer.clipAction(cleanClip);
+                  if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
                   }
