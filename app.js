@@ -5879,6 +5879,25 @@ async function main() {
     removeFromInventory('bomb', 1);
     return true;
   };
+  const voiceMicState = {
+    listening: false,
+    lastTranscript: '',
+    pendingSpellResolution: false,
+    pendingSpellTimeout: null,
+    cooldownUntil: 0,
+    transcriptTimer: null
+  };
+  const VOICE_COOLDOWN_MS = 60_000;
+
+  playerControls.handleVoiceMicPress = () => {
+    startVoiceListening();
+  };
+  playerControls.stopVoiceListening = () => {
+    stopVoiceListening();
+  };
+  playerControls.isVoiceListening = () => voiceMicState.listening;
+  playerControls.getVoiceMicState = () => getVoiceMicState();
+
   window.playerControls = playerControls;
   initSpells({
     playerControls,
@@ -7278,23 +7297,217 @@ async function main() {
   }
 
   const voiceTranscript = document.getElementById('voice-transcript');
-  let voiceTranscriptTimer = null;
+
   const showVoiceTranscript = (text) => {
     if (!voiceTranscript) return;
     voiceTranscript.textContent = text;
     voiceTranscript.classList.add('visible');
-    if (voiceTranscriptTimer) {
-      clearTimeout(voiceTranscriptTimer);
+    if (voiceMicState.transcriptTimer) {
+      clearTimeout(voiceMicState.transcriptTimer);
     }
-    voiceTranscriptTimer = setTimeout(() => {
+    voiceMicState.transcriptTimer = setTimeout(() => {
       voiceTranscript.classList.remove('visible');
     }, 2500);
   };
 
+  const voiceSpellDefs = {
+    apples: { magicCost: 20 },
+    mushrooms: { magicCost: 20 },
+    bombs: { magicCost: 45 },
+    freeze: { magicCost: 12 }
+  };
+
+  const getVoiceSpellFromTranscript = (transcript) => {
+    const normalized = String(transcript || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes('apple')) return 'apples';
+    if (normalized.includes('mushroom')) return 'mushrooms';
+    if (normalized.includes('bomb')) return 'bombs';
+    if (normalized.includes('freeze')) return 'freeze';
+    return null;
+  };
+
+  const castVoiceSpellFromTranscript = (transcript) => {
+    const spellId = getVoiceSpellFromTranscript(transcript);
+    if (!spellId || !playerControls || !playerModel) return false;
+
+    const spellDef = voiceSpellDefs[spellId];
+    const currentMagic = Number.isFinite(statsState.magic) ? statsState.magic : 0;
+    if (currentMagic < spellDef.magicCost) {
+      showVoiceTranscript('Not enough magic for that spell.');
+      return false;
+    }
+
+    // Use the same camera-relative direction convention as bomb throwing.
+    const aimDirection = playerControls.getAimDirection(true);
+    playerControls.alignPlayerToDirection(aimDirection);
+    playerControls.playAction('projectile');
+
+    const origin = playerControls.getProjectileSpawnPosition(aimDirection);
+    const sprinkleDirection = () => {
+      const d = aimDirection.clone();
+      d.x += (Math.random() - 0.5) * 0.25;
+      d.y += (Math.random() - 0.5) * 0.15;
+      d.z += (Math.random() - 0.5) * 0.25;
+      return d.normalize();
+    };
+
+    const createAppleProjectileMesh = () => {
+      const source = applePickups.find(entry => entry?.mesh)?.mesh;
+      if (!source) return null;
+      const mesh = source.clone(true);
+      mesh.visible = true;
+      mesh.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+      return mesh;
+    };
+
+    const createMushroomProjectileMesh = (itemId) => {
+      const source = mushroomPickups.find(entry => entry?.id === itemId && entry?.mesh)?.mesh
+        || mushroomPickups.find(entry => entry?.mesh)?.mesh;
+      if (!source) return null;
+      const mesh = source.clone(true);
+      mesh.visible = true;
+      mesh.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+      return mesh;
+    };
+
+    const launchProduceProjectile = ({ direction, spawnPickup, createMesh, color = 0xd9d9d9 }) => {
+      const shooterId = multiplayer?.getId?.();
+      spawnProjectile(scene, projectiles, origin.clone(), direction, shooterId, {
+        color,
+        createMesh,
+        speed: BOMB_THROW_SPEED * 0.45,
+        lifetime: Math.floor(BOMB_THROW_LIFETIME * 0.75),
+        pickupOnRest: true,
+        pickupAmount: 1,
+        spawnPickup,
+        colliderDesc: RAPIER.ColliderDesc.ball(0.11).setRestitution(0.25).setFriction(0.8)
+      });
+    };
+
+    if (spellId === 'apples') {
+      for (let i = 0; i < 10; i++) {
+        const d = sprinkleDirection();
+        launchProduceProjectile({
+          direction: d,
+          color: 0xd14b33,
+          createMesh: createAppleProjectileMesh,
+          spawnPickup: (pickupPosition) => {
+            spawnApplePickup(pickupPosition);
+          }
+        });
+      }
+    } else if (spellId === 'mushrooms') {
+      for (let i = 0; i < 10; i++) {
+        const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
+        if (!entry?.id) continue;
+        const d = sprinkleDirection();
+        launchProduceProjectile({
+          direction: d,
+          color: 0x8f6ad9,
+          createMesh: () => createMushroomProjectileMesh(entry.id),
+          spawnPickup: (pickupPosition) => {
+            spawnMushroomPickup(entry.id, pickupPosition);
+          }
+        });
+      }
+    } else if (spellId === 'bombs') {
+      const shooterId = multiplayer?.getId?.();
+      for (let i = 0; i < 5; i++) {
+        const d = sprinkleDirection();
+        spawnBombProjectileWithPerfFlags(scene, projectiles, origin.clone(), d, shooterId);
+      }
+    } else if (spellId === 'freeze') {
+      const shooterId = multiplayer?.getId?.();
+      for (let i = 0; i < 3; i++) {
+        const d = sprinkleDirection();
+        spawnIceMist(scene, iceMists, origin.clone(), d, shooterId);
+      }
+    }
+
+    setStat('magic', Math.max(0, currentMagic - spellDef.magicCost));
+    return true;
+  };
+
+  const getVoiceMicState = () => {
+    const remainingMs = Math.max(0, voiceMicState.cooldownUntil - Date.now());
+    return {
+      disabled: voiceMicState.listening || remainingMs > 0,
+      remainingSeconds: remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0
+    };
+  };
+
+  const stopVoiceListening = () => {
+    if (!voiceMicState.listening) return;
+    voiceMicState.listening = false;
+    speech.stop();
+
+    const finalizeTranscript = (text) => {
+      if (!text) return;
+      showVoiceTranscript(text);
+      castVoiceSpellFromTranscript(text);
+    };
+
+    if (voiceMicState.lastTranscript) {
+      finalizeTranscript(voiceMicState.lastTranscript);
+    } else {
+      voiceMicState.pendingSpellResolution = true;
+      if (voiceMicState.pendingSpellTimeout) {
+        clearTimeout(voiceMicState.pendingSpellTimeout);
+      }
+      voiceMicState.pendingSpellTimeout = setTimeout(() => {
+        voiceMicState.pendingSpellResolution = false;
+      }, 1200);
+    }
+
+    voiceMicState.cooldownUntil = Date.now() + VOICE_COOLDOWN_MS;
+    playerControls?.refreshActionButtons?.();
+  };
+
+  const startVoiceListening = () => {
+    const state = getVoiceMicState();
+    if (state.disabled) return false;
+    voiceMicState.lastTranscript = '';
+    voiceMicState.pendingSpellResolution = false;
+    if (voiceMicState.pendingSpellTimeout) {
+      clearTimeout(voiceMicState.pendingSpellTimeout);
+      voiceMicState.pendingSpellTimeout = null;
+    }
+    voiceMicState.listening = true;
+    speech.start();
+    playerControls?.refreshActionButtons?.();
+    return true;
+  };
+
   // Initialize speech-to-text overlay for voice input
   const speech = initSpeechCommands({
-    onTranscript: showVoiceTranscript
+    onTranscript: (text) => {
+      voiceMicState.lastTranscript = text;
+      if (voiceMicState.pendingSpellResolution) {
+        voiceMicState.pendingSpellResolution = false;
+        if (voiceMicState.pendingSpellTimeout) {
+          clearTimeout(voiceMicState.pendingSpellTimeout);
+          voiceMicState.pendingSpellTimeout = null;
+        }
+        showVoiceTranscript(text);
+        castVoiceSpellFromTranscript(text);
+      } else if (!voiceMicState.listening) {
+        showVoiceTranscript(text);
+      }
+    }
   });
+
+  setInterval(() => {
+    playerControls?.refreshActionButtons?.();
+  }, 250);
 
 
   function swapPlayerCharacter(newModelPath) {
