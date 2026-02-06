@@ -7335,7 +7335,8 @@ async function main() {
       return false;
     }
 
-    const aimDirection = playerControls.getAimDirection(false);
+    // Use the same camera-relative direction convention as bomb throwing.
+    const aimDirection = playerControls.getAimDirection(true);
     playerControls.alignPlayerToDirection(aimDirection);
     playerControls.playAction('projectile');
 
@@ -7348,23 +7349,42 @@ async function main() {
       return d.normalize();
     };
 
+    const launchProduceProjectile = ({ direction, spawnPickup, color = 0xd9d9d9 }) => {
+      const shooterId = multiplayer?.getId?.();
+      spawnProjectile(scene, projectiles, origin.clone(), direction, shooterId, {
+        color,
+        speed: BOMB_THROW_SPEED,
+        lifetime: BOMB_THROW_LIFETIME,
+        pickupOnRest: true,
+        pickupAmount: 1,
+        spawnPickup,
+        colliderDesc: RAPIER.ColliderDesc.ball(0.14).setRestitution(0.25).setFriction(0.8)
+      });
+    };
+
     if (spellId === 'apples') {
       for (let i = 0; i < 10; i++) {
         const d = sprinkleDirection();
-        const spawnPos = origin.clone()
-          .add(d.clone().multiplyScalar(0.5 + Math.random() * 1.8))
-          .add(new THREE.Vector3(0, 0.2 + Math.random() * 0.8, 0));
-        spawnApplePickup(spawnPos);
+        launchProduceProjectile({
+          direction: d,
+          color: 0xd14b33,
+          spawnPickup: (pickupPosition) => {
+            spawnApplePickup(pickupPosition);
+          }
+        });
       }
     } else if (spellId === 'mushrooms') {
       for (let i = 0; i < 10; i++) {
         const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
         if (!entry?.id) continue;
         const d = sprinkleDirection();
-        const spawnPos = origin.clone()
-          .add(d.clone().multiplyScalar(0.5 + Math.random() * 1.8))
-          .add(new THREE.Vector3(0, 0.2 + Math.random() * 0.8, 0));
-        spawnMushroomPickup(entry.id, spawnPos);
+        launchProduceProjectile({
+          direction: d,
+          color: 0x8f6ad9,
+          spawnPickup: (pickupPosition) => {
+            spawnMushroomPickup(entry.id, pickupPosition);
+          }
+        });
       }
     } else if (spellId === 'bombs') {
       const shooterId = multiplayer?.getId?.();
