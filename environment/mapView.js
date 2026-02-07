@@ -8,6 +8,8 @@ const ZOOM_STEP = 15;
 const TRANSITION_MS = 400;
 const DOT_SIZE = 0.06;
 const DOT_Y_OFFSET = 2;
+const ICON_SIZE = 0.075;
+const PLAYER_LABEL_SIZE = 0.2;
 
 const state = {
   camera: null,
@@ -29,11 +31,21 @@ const state = {
   friendlyDots: [],
   monsterDotMaterial: null,
   friendlyDotMaterial: null,
+  weaponIconMaterial: null,
+  itemIconMaterial: null,
+  chestIconMaterial: null,
+  merchantIconMaterial: null,
+  remotePlayerIconMaterial: null,
   homeIcon: null,
   homeRadiusLine: null,
   homeRadiusValue: null,
   homeLight: null,
-  homeLightPending: false
+  homeLightPending: false,
+  weaponIcons: [],
+  itemIcons: [],
+  chestIcons: [],
+  merchantIcons: [],
+  remotePlayerMarkers: new Map()
 };
 
 function createPlayerIconTexture() {
@@ -83,6 +95,97 @@ function createDotTexture(color) {
   ctx.beginPath();
   ctx.arc(center, center, radius, 0, Math.PI * 2);
   ctx.fill();
+  return canvas;
+}
+
+function createIconTexture(kind) {
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  ctx.clearRect(0, 0, size, size);
+  const center = size / 2;
+
+  if (kind === "weapon") {
+    ctx.fillStyle = "#fde68a";
+    ctx.strokeStyle = "#92400e";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(center, size * 0.16);
+    ctx.lineTo(size * 0.78, center);
+    ctx.lineTo(center, size * 0.84);
+    ctx.lineTo(size * 0.22, center);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    return canvas;
+  }
+
+  if (kind === "item") {
+    ctx.fillStyle = "#a7f3d0";
+    ctx.strokeStyle = "#065f46";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.rect(size * 0.2, size * 0.2, size * 0.6, size * 0.6);
+    ctx.fill();
+    ctx.stroke();
+    return canvas;
+  }
+
+  if (kind === "chest") {
+    ctx.fillStyle = "#f59e0b";
+    ctx.strokeStyle = "#78350f";
+    ctx.lineWidth = 5;
+    ctx.fillRect(size * 0.15, size * 0.42, size * 0.7, size * 0.35);
+    ctx.strokeRect(size * 0.15, size * 0.42, size * 0.7, size * 0.35);
+    ctx.beginPath();
+    ctx.moveTo(size * 0.15, size * 0.42);
+    ctx.quadraticCurveTo(center, size * 0.16, size * 0.85, size * 0.42);
+    ctx.stroke();
+    ctx.fillStyle = "#78350f";
+    ctx.fillRect(center - 4, size * 0.5, 8, 10);
+    return canvas;
+  }
+
+  if (kind === "merchant") {
+    ctx.fillStyle = "#60a5fa";
+    ctx.beginPath();
+    ctx.arc(center, center, size * 0.32, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#1e3a8a";
+    ctx.font = "bold 34px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("M", center, center + 1);
+    return canvas;
+  }
+
+  return createDotTexture("#93c5fd");
+}
+
+function createNameTexture(name) {
+  const text = (name || "Player").slice(0, 24);
+  const fontSize = 28;
+  const padX = 12;
+  const padY = 8;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.font = `600 ${fontSize}px sans-serif`;
+  const width = Math.ceil(ctx.measureText(text).width + padX * 2);
+  const height = fontSize + padY * 2;
+  canvas.width = Math.max(64, width);
+  canvas.height = Math.max(32, height);
+  ctx.font = `600 ${fontSize}px sans-serif`;
+  ctx.fillStyle = "rgba(0,0,0,0.6)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#e0f2fe";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 1);
   return canvas;
 }
 
@@ -150,10 +253,34 @@ function getDotMaterial(kind) {
   return state.friendlyDotMaterial;
 }
 
+function getIconMaterial(kind) {
+  const key = `${kind}IconMaterial`;
+  if (state[key]) return state[key];
+  const canvas = createIconTexture(kind);
+  const texture = canvas ? new THREE.CanvasTexture(canvas) : null;
+  state[key] = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    sizeAttenuation: false
+  });
+  return state[key];
+}
+
 function createDotSprite(kind) {
   const material = getDotMaterial(kind);
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(DOT_SIZE, DOT_SIZE, 1);
+  sprite.visible = false;
+  sprite.renderOrder = 998;
+  return sprite;
+}
+
+function createIconSprite(kind) {
+  const material = getIconMaterial(kind);
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(ICON_SIZE, ICON_SIZE, 1);
   sprite.visible = false;
   sprite.renderOrder = 998;
   return sprite;
@@ -167,7 +294,8 @@ function ensureHomeIcon() {
     map: texture,
     transparent: true,
     depthTest: false,
-    depthWrite: false
+    depthWrite: false,
+    sizeAttenuation: false
   });
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(5, 5, 5);
@@ -237,7 +365,8 @@ function ensurePlayerIcon() {
     map: texture,
     transparent: true,
     depthTest: false,
-    depthWrite: false
+    depthWrite: false,
+    sizeAttenuation: false
   });
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(4, 4, 4);
@@ -251,6 +380,15 @@ function ensureDotPool(pool, count, kind) {
   if (!state.scene) return;
   while (pool.length < count) {
     const sprite = createDotSprite(kind);
+    pool.push(sprite);
+    state.scene.add(sprite);
+  }
+}
+
+function ensureIconPool(pool, count, kind) {
+  if (!state.scene) return;
+  while (pool.length < count) {
+    const sprite = createIconSprite(kind);
     pool.push(sprite);
     state.scene.add(sprite);
   }
@@ -283,6 +421,68 @@ function updateDotPool(entities, pool, kind) {
     );
     sprite.visible = state.enabled;
   }
+}
+
+function updateIconPool(entities, pool, kind, offsetY = DOT_Y_OFFSET) {
+  const activeEntities = (entities ?? []).filter(Boolean);
+  ensureIconPool(pool, activeEntities.length, kind);
+  for (let i = 0; i < pool.length; i += 1) {
+    const sprite = pool[i];
+    const entity = activeEntities[i];
+    const pos = entity?.position ?? entity?.mesh?.position ?? entity?.model?.position;
+    if (!pos) {
+      sprite.visible = false;
+      continue;
+    }
+    sprite.position.set(pos.x, pos.y + offsetY, pos.z);
+    sprite.visible = state.enabled;
+  }
+}
+
+function updateRemotePlayerMarkers(otherPlayers) {
+  if (!state.scene) return;
+  const entries = Object.entries(otherPlayers ?? {}).filter(([, player]) => player?.model?.position);
+  const activeIds = new Set(entries.map(([id]) => id));
+
+  state.remotePlayerMarkers.forEach((marker, id) => {
+    if (activeIds.has(id)) return;
+    state.scene.remove(marker.dot);
+    state.scene.remove(marker.label);
+    marker.label.material?.map?.dispose?.();
+    marker.label.material?.dispose?.();
+    state.remotePlayerMarkers.delete(id);
+  });
+
+  entries.forEach(([id, player]) => {
+    let marker = state.remotePlayerMarkers.get(id);
+    if (!marker) {
+      const dot = createIconSprite("remotePlayer");
+      const labelTexture = new THREE.CanvasTexture(createNameTexture(player.name));
+      const label = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: labelTexture,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false,
+        sizeAttenuation: false
+      }));
+      label.scale.set(PLAYER_LABEL_SIZE, PLAYER_LABEL_SIZE * 0.35, 1);
+      label.renderOrder = 999;
+      marker = { dot, label, name: player.name || "" };
+      state.remotePlayerMarkers.set(id, marker);
+      state.scene.add(dot);
+      state.scene.add(label);
+    } else if (marker.name !== player.name) {
+      marker.name = player.name || "";
+      marker.label.material?.map?.dispose?.();
+      marker.label.material.map = new THREE.CanvasTexture(createNameTexture(player.name));
+      marker.label.material.needsUpdate = true;
+    }
+    const pos = player.model.position;
+    marker.dot.position.set(pos.x, pos.y + DOT_Y_OFFSET, pos.z);
+    marker.label.position.set(pos.x, pos.y + DOT_Y_OFFSET + 1.3, pos.z);
+    marker.dot.visible = state.enabled;
+    marker.label.visible = state.enabled;
+  });
 }
 
 function updateHomeIndicators(homePosition, homeEnterDistance) {
@@ -442,7 +642,17 @@ function updatePlayerIcon() {
   }
 }
 
-function update(dt, { monsters, friendlies, homePosition, homeEnterDistance } = {}) {
+function update(dt, {
+  monsters,
+  friendlies,
+  weapons,
+  items,
+  treasureChests,
+  merchants,
+  otherPlayers,
+  homePosition,
+  homeEnterDistance
+} = {}) {
   if (!state.camera || !state.player) return;
 
   updateHomeIndicators(homePosition, homeEnterDistance);
@@ -457,9 +667,22 @@ function update(dt, { monsters, friendlies, homePosition, homeEnterDistance } = 
     updatePlayerIcon();
     updateDotPool(monsters, state.monsterDots, "monster");
     updateDotPool(friendlies, state.friendlyDots, "friendly");
+    updateIconPool(weapons, state.weaponIcons, "weapon");
+    updateIconPool(items, state.itemIcons, "item");
+    updateIconPool(treasureChests, state.chestIcons, "chest");
+    updateIconPool(merchants, state.merchantIcons, "merchant");
+    updateRemotePlayerMarkers(otherPlayers);
   } else {
     setDotVisibility(state.monsterDots, false);
     setDotVisibility(state.friendlyDots, false);
+    setDotVisibility(state.weaponIcons, false);
+    setDotVisibility(state.itemIcons, false);
+    setDotVisibility(state.chestIcons, false);
+    setDotVisibility(state.merchantIcons, false);
+    state.remotePlayerMarkers.forEach((marker) => {
+      marker.dot.visible = false;
+      marker.label.visible = false;
+    });
   }
 
   if (state.transition) {

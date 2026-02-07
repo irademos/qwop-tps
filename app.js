@@ -7990,9 +7990,26 @@ async function main() {
     }
     const homePosition = homeSystem?.getHomeLocalPosition?.();
     const homeEnterDistance = homeSystem?.getHomeEnterDistance?.();
+    const mapMerchantFriendly = getMerchantFriendly?.();
+    const mapItems = [
+      ...ammoPickups,
+      ...foodPickups,
+      ...healthPickups,
+      ...coinPickups,
+      ...mushroomPickups,
+      ...applePickups,
+      ...woodPickups
+    ];
+    const mapTreasureChests = treasureChest?.mesh?.visible ? [treasureChest.mesh] : [];
+    const mapMerchants = mapMerchantFriendly?.model ? [mapMerchantFriendly.model] : [];
     updateMapView(frameDelta, {
       monsters,
       friendlies: friendlyNpcManager?.friendlies,
+      weapons: droppedWeaponPickups,
+      items: mapItems,
+      treasureChests: mapTreasureChests,
+      merchants: mapMerchants,
+      otherPlayers,
       homePosition,
       homeEnterDistance
     });
