@@ -7993,11 +7993,6 @@ async function main() {
     const mapMerchantFriendly = getMerchantFriendly?.();
     const mapItems = [
       ...ammoPickups,
-      ...foodPickups,
-      ...healthPickups,
-      ...coinPickups,
-      ...mushroomPickups,
-      ...applePickups,
       ...woodPickups
     ];
     const mapTreasureChests = treasureChest?.mesh?.visible ? [treasureChest.mesh] : [];
