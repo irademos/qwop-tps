@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/water.js';
+import { createStaticBoxColliderForObject, removeStaticBoxCollider } from '../physics/staticBoxCollider.js';
 
 export const BED_SIZE = new THREE.Vector3(2.2, 0.6, 1.4);
 export const BED_LOCATION = new THREE.Vector3(-2, 0, 2);
@@ -40,9 +41,10 @@ export class Bed {
     this.useTerrainHeight = options.useTerrainHeight !== false;
     this.interactDistance = Number.isFinite(options.interactDistance)
       ? options.interactDistance
-      : Math.max(this.size.x, this.size.z) * 0.75;
+      : Math.max(this.size.x, this.size.z) * 1.35;
     this.bounds = null;
     this.boundingSize = this.size.clone();
+    this.collider = null;
   }
 
   async load(position = this.location) {
@@ -79,6 +81,11 @@ export class Bed {
     this.scene.add(this.mesh);
 
     this.updateBounds();
+    this.collider = createStaticBoxColliderForObject(this.mesh, {
+      friction: 0.95,
+      restitution: 0.01,
+      padding: new THREE.Vector3(0.1, 0.05, 0.1)
+    });
   }
 
   updateBounds() {
@@ -137,6 +144,8 @@ export class Bed {
   removeFromScene() {
     if (!this.mesh) return;
     this.scene.remove(this.mesh);
+    removeStaticBoxCollider(this.collider);
+    this.collider = null;
     disposeMesh(this.mesh);
     this.mesh = null;
   }

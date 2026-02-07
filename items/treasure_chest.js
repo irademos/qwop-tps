@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/water.js';
+import { createStaticBoxColliderForObject, removeStaticBoxCollider } from '../physics/staticBoxCollider.js';
 
 const DEFAULT_CHEST_POSITION = new THREE.Vector3(1.5, 0, 1.5);
 const DEFAULT_SCALE = 0.015;
@@ -40,6 +41,7 @@ export class TreasureChest {
     this._groundOffset = Number.isFinite(options.groundOffset)
       ? options.groundOffset
       : DEFAULT_GROUND_OFFSET;
+    this.collider = null;
   }
 
   async load(position = this._defaultPosition) {
@@ -72,6 +74,11 @@ export class TreasureChest {
     this.mesh.scale.setScalar(this._scale);
     this.mesh.userData.hideInMapView = true;
     this.scene.add(this.mesh);
+    this.collider = createStaticBoxColliderForObject(this.mesh, {
+      friction: 0.9,
+      restitution: 0.02,
+      padding: new THREE.Vector3(0.05, 0.03, 0.05)
+    });
   }
 
   tryOpen(playerControls) {
@@ -90,6 +97,8 @@ export class TreasureChest {
   removeFromScene() {
     if (!this.mesh) return;
     this.scene.remove(this.mesh);
+    removeStaticBoxCollider(this.collider);
+    this.collider = null;
     disposeMesh(this.mesh);
     this.mesh = null;
   }
