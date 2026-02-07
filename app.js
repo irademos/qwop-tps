@@ -7438,13 +7438,13 @@ async function main() {
     return true;
   };
 
-  const getVoiceMicState = () => {
+  function getVoiceMicState() {
     const remainingMs = Math.max(0, voiceMicState.cooldownUntil - Date.now());
     return {
       disabled: voiceMicState.listening || remainingMs > 0,
       remainingSeconds: remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0
     };
-  };
+  }
 
   const stopVoiceListening = () => {
     if (!voiceMicState.listening) return;
