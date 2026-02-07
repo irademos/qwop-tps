@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { createLightSource, LIGHT_SOURCE_CONFIGS } from "../light_sources.js";
+import { createStaticBoxColliderForObject, syncStaticBoxColliderForObject } from "../physics/staticBoxCollider.js";
 
 const DEFAULT_ZOOM_HEIGHT = 90;
 const MIN_ZOOM_HEIGHT = 30;
@@ -338,6 +339,7 @@ function ensureHomeLight(homePosition) {
   if (!state.scene || !homePosition) return;
   if (state.homeLight?.model) {
     state.homeLight.model.position.copy(homePosition);
+    syncStaticBoxColliderForObject(state.homeLight.collider);
     return;
   }
   if (state.homeLightPending) return;
@@ -348,6 +350,13 @@ function ensureHomeLight(homePosition) {
       state.homeLight = lightSource;
       state.homeLight.model.position.copy(homePosition);
       state.scene.add(lightSource.model);
+      lightSource.collider = createStaticBoxColliderForObject(lightSource.model, {
+        friction: 0.9,
+        restitution: 0.02,
+        halfExtents: new THREE.Vector3(0.35, 1.8, 0.35),
+        centerOffset: new THREE.Vector3(0, 1.8, 0),
+        useObjectPosition: true
+      });
     })
     .catch((error) => {
       console.warn("Failed to load home road light:", error);

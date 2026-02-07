@@ -6,6 +6,7 @@ import { MUSHROOM_ENTRIES } from '../environment/mushrooms.js';
 import { loadMonsterModel } from '../models/monsterModel.js';
 import { createLightSource, LIGHT_SOURCE_CONFIGS } from '../light_sources.js';
 import { FriendlyCharacter } from './FriendlyCharacter.js';
+import { createStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
 
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
 const MERCHANT_MODEL = '/models/cowboy.fbx';
@@ -62,6 +63,7 @@ let merchantFriendly = null;
 let marketStall = null;
 let merchantRoadLight = null;
 let merchantIsHost = false;
+let marketStallCollider = null;
 
 const buildDefaultInventory = () => {
   const items = {};
@@ -163,6 +165,11 @@ const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuilding
     }
     liftPositionToBuildingTop?.(marketStall.position, 0.5);
     scene.add(marketStall);
+    marketStallCollider = createStaticBoxColliderForObject(marketStall, {
+      friction: 0.95,
+      restitution: 0.01,
+      halfExtents: new THREE.Vector3(1.35, 1.2, 0.9)
+    });
     await Promise.all([
       loadMarketStallPotion({
         loader,
@@ -240,6 +247,13 @@ const loadMerchantFriendly = ({
           merchantRoadLight = lightSource;
           merchantRoadLight.model.position.copy(lightPosition);
           scene.add(lightSource.model);
+          lightSource.collider = createStaticBoxColliderForObject(lightSource.model, {
+            friction: 0.9,
+            restitution: 0.02,
+            halfExtents: new THREE.Vector3(0.35, 1.8, 0.35),
+            centerOffset: new THREE.Vector3(0, 1.8, 0),
+            useObjectPosition: true
+          });
         })
         .catch((error) => {
           console.warn('Failed to load merchant road light:', error);

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { FriendlyCharacter } from "./characters/FriendlyCharacter.js";
 import { createLightSource, LIGHT_SOURCE_CONFIGS } from "./light_sources.js";
+import { createStaticBoxColliderForObject, syncStaticBoxColliderForObject } from "./physics/staticBoxCollider.js";
 import {
   initFriendlyPersistence,
   loadFriendliesSnapshot,
@@ -275,6 +276,13 @@ const getHealthForLevel = (level) => {
         friendly.model.userData.roadLight = lightSource;
         friendly.model.userData.roadLightPending = false;
         scene.add(lightSource.model);
+        lightSource.collider = createStaticBoxColliderForObject(lightSource.model, {
+          friction: 0.9,
+          restitution: 0.02,
+          halfExtents: new THREE.Vector3(0.35, 1.8, 0.35),
+          centerOffset: new THREE.Vector3(0, 1.8, 0),
+          useObjectPosition: true
+        });
       })
       .catch((error) => {
         console.warn("Failed to load friendly road light:", error);
@@ -291,6 +299,7 @@ const getHealthForLevel = (level) => {
     const roadLight = friendly.model.userData.roadLight;
     if (!roadLight?.model) return;
     roadLight.model.position.copy(getRoadLightPosition(basePosition));
+    syncStaticBoxColliderForObject(roadLight.collider);
   };
 
   const setFriendlyForSlot = (slotId, friendly) => {
