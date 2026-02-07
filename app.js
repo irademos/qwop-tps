@@ -6382,8 +6382,6 @@ async function main() {
     scene,
     playerModel,
     playerControls,
-    renderer,
-    buildingsRenderer,
     profileNameKey,
     initialHome: playerProfile?.home ?? null,
     getLocalOrigin: getLocalMapOrigin,
@@ -6391,6 +6389,7 @@ async function main() {
     geoToLocal: geoToLocalMeters
   });
   void homeSystem.loadStorageChest?.();
+  void homeSystem.loadRoadLight?.();
   window.homeSystem = homeSystem;
   const interiorScene = homeSystem?.interiorGroup ?? scene;
   bed = new Bed(interiorScene, {
@@ -6406,6 +6405,7 @@ async function main() {
   });
   await craftTable.load();
   window.craftTable = craftTable;
+  homeSystem?.registerPlacedObjects?.({ bed, craftTable });
   if (rapierWorld && craftTable?.mesh) {
     if (craftTableColliderBody && rapierWorld.getRigidBody(craftTableColliderBody.handle)) {
       rapierWorld.removeRigidBody(craftTableColliderBody);
@@ -7976,6 +7976,7 @@ async function main() {
 
 
     const playerPosition = playerModel?.position;
+    homeSystem?.syncHomePlacement?.();
     updateGroundTiles(playerPosition);
     natureController?.update(playerPosition);
     if (shouldUpdatePickupTiles(playerPosition)) {
