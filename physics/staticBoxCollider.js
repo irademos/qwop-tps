@@ -11,6 +11,13 @@ const toVector3 = (value) => {
   return null;
 };
 
+const getObjectWorldCenter = (object3D, target = new THREE.Vector3()) => {
+  if (!object3D) return target;
+  object3D.updateWorldMatrix?.(true, true);
+  object3D.getWorldPosition?.(target);
+  return target;
+};
+
 const toPaddingVector = (padding = DEFAULT_PADDING) => {
   if (padding instanceof THREE.Vector3) return padding;
   if (Array.isArray(padding) && padding.length >= 3) {
@@ -31,7 +38,12 @@ export const createStaticBoxColliderForObject = (object3D, options = {}) => {
   if (worldBox.isEmpty()) return null;
 
   const center = new THREE.Vector3();
-  worldBox.getCenter(center);
+  const useObjectPosition = options.useObjectPosition === true;
+  if (useObjectPosition) {
+    getObjectWorldCenter(object3D, center);
+  } else {
+    worldBox.getCenter(center);
+  }
 
   const explicitHalf = toVector3(options.halfExtents);
   const explicitCenterOffset = toVector3(options.centerOffset);
@@ -73,6 +85,7 @@ export const createStaticBoxColliderForObject = (object3D, options = {}) => {
     worldBox,
     object3D,
     centerOffset: explicitCenterOffset || null,
+    useObjectPosition,
     rapierWorld
   };
 };
@@ -81,7 +94,11 @@ export const syncStaticBoxColliderForObject = (entry) => {
   if (!entry?.object3D || !entry?.body || !entry?.worldBox) return;
   entry.worldBox.setFromObject(entry.object3D);
   if (entry.worldBox.isEmpty()) return;
-  entry.worldBox.getCenter(entry.center);
+  if (entry.useObjectPosition) {
+    getObjectWorldCenter(entry.object3D, entry.center);
+  } else {
+    entry.worldBox.getCenter(entry.center);
+  }
   if (entry.centerOffset) {
     entry.center.add(entry.centerOffset);
   }

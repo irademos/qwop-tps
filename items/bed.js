@@ -84,7 +84,9 @@ export class Bed {
     this.collider = createStaticBoxColliderForObject(this.mesh, {
       friction: 0.95,
       restitution: 0.01,
-      padding: new THREE.Vector3(0.1, 0.05, 0.1)
+      halfExtents: new THREE.Vector3(1.1, 0.45, 0.75),
+      centerOffset: new THREE.Vector3(0, 0.45, 0),
+      useObjectPosition: true
     });
   }
 

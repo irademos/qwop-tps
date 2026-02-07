@@ -225,8 +225,9 @@ function ensureHomeLight(homePosition) {
       lightSource.collider = createStaticBoxColliderForObject(lightSource.model, {
         friction: 0.9,
         restitution: 0.02,
-        halfExtents: new THREE.Vector3(0.28, 1.7, 0.28),
-        centerOffset: new THREE.Vector3(0, 1.7, 0)
+        halfExtents: new THREE.Vector3(0.35, 1.8, 0.35),
+        centerOffset: new THREE.Vector3(0, 1.8, 0),
+        useObjectPosition: true
       });
     })
     .catch((error) => {

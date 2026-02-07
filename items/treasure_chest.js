@@ -77,8 +77,9 @@ export class TreasureChest {
     this.collider = createStaticBoxColliderForObject(this.mesh, {
       friction: 0.9,
       restitution: 0.02,
-      halfExtents: new THREE.Vector3(0.38, 0.34, 0.30),
-      centerOffset: new THREE.Vector3(0, 0.34, 0)
+      halfExtents: new THREE.Vector3(0.45, 0.35, 0.35),
+      centerOffset: new THREE.Vector3(0, 0.35, 0),
+      useObjectPosition: true
     });
   }
 
