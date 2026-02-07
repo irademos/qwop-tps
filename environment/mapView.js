@@ -369,7 +369,7 @@ function ensurePlayerIcon() {
     sizeAttenuation: false
   });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(4, 4, 4);
+  sprite.scale.set(0.02, 0.02, 1);
   sprite.visible = false;
   sprite.renderOrder = 999;
   state.playerIcon = sprite;
