@@ -53,7 +53,14 @@ import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI 
 import { CRAFT_RECIPES, initCraftPanel, openCraftPanel, updateUI as updateCraftUI } from './controls/craftPanel.js';
 import { initMerchantPanel, updateMerchantUI } from './controls/merchantPanel.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
-import { getMerchantFriendly, initMerchant, setMerchantHost, setMerchantRoom } from './characters/merchant.js';
+import {
+  getMarketStall,
+  getMerchantFriendly,
+  getMerchantRoadLightModel,
+  initMerchant,
+  setMerchantHost,
+  setMerchantRoom
+} from './characters/merchant.js';
 import { initCustomizeUI } from './controls/customize.js';
 import { initSpells } from './controls/spells.js';
 import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './environment/mapView.js';
@@ -1582,6 +1589,10 @@ async function main() {
   let craftTableColliderLastCenter = null;
   const craftTableColliderBounds = new THREE.Box3();
   const craftTableColliderCenter = new THREE.Vector3();
+  let bedColliderBody = null;
+  let treasureChestColliderBody = null;
+  let marketStallColliderBody = null;
+  const friendlyRoadLightColliderBodies = new Map();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -6395,7 +6406,8 @@ async function main() {
   const interiorScene = homeSystem?.interiorGroup ?? scene;
   bed = new Bed(interiorScene, {
     position: new THREE.Vector3(-3, 0.5, 3),
-    useTerrainHeight: false
+    useTerrainHeight: false,
+    interactDistance: 3.8
   });
   await bed.load();
   window.bed = bed;
@@ -6439,6 +6451,78 @@ async function main() {
       craftTableColliderLastCenter = new THREE.Vector3();
     }
     craftTableColliderLastCenter.copy(craftTableColliderCenter);
+  };
+
+  const ensureStaticMeshCollider = (mesh, colliderRef, halfScale = 0.5) => {
+    if (!rapierWorld || !mesh) return colliderRef;
+    if (colliderRef && rapierWorld.getRigidBody(colliderRef.handle)) {
+      return colliderRef;
+    }
+    const bounds = new THREE.Box3().setFromObject(mesh);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    bounds.getSize(size);
+    bounds.getCenter(center);
+    if (size.lengthSq() <= 0) return colliderRef;
+    const half = size.multiplyScalar(halfScale);
+    const rbDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(center.x, center.y, center.z);
+    const body = rapierWorld.createRigidBody(rbDesc);
+    const colDesc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
+      .setRestitution(0.05)
+      .setFriction(0.9);
+    rapierWorld.createCollider(colDesc, body);
+    return body;
+  };
+
+  const syncSimplePropCollider = (mesh, body, enabled = true) => {
+    if (!mesh || !body) return;
+    if (!enabled) {
+      body.setTranslation({ x: 0, y: -1000, z: 0 }, true);
+      return;
+    }
+    const bounds = new THREE.Box3().setFromObject(mesh);
+    const center = new THREE.Vector3();
+    bounds.getCenter(center);
+    body.setTranslation({ x: center.x, y: center.y, z: center.z }, true);
+  };
+
+  const syncAdditionalPropColliders = () => {
+    bedColliderBody = ensureStaticMeshCollider(bed?.mesh, bedColliderBody);
+    treasureChestColliderBody = ensureStaticMeshCollider(treasureChest?.mesh, treasureChestColliderBody);
+    marketStallColliderBody = ensureStaticMeshCollider(getMarketStall?.(), marketStallColliderBody);
+    const activeRoadLightModels = [];
+    const merchantRoadLightModel = getMerchantRoadLightModel?.();
+    if (merchantRoadLightModel) activeRoadLightModels.push(merchantRoadLightModel);
+    const friendlies = Array.isArray(window.friendlies) ? window.friendlies : [];
+    friendlies.forEach((friendly) => {
+      const model = friendly?.model?.userData?.roadLight?.model;
+      if (model) activeRoadLightModels.push(model);
+    });
+
+    for (const model of activeRoadLightModels) {
+      const existingBody = friendlyRoadLightColliderBodies.get(model.uuid);
+      const body = ensureStaticMeshCollider(model, existingBody, 0.35);
+      if (body && body !== existingBody) {
+        friendlyRoadLightColliderBodies.set(model.uuid, body);
+      }
+      syncSimplePropCollider(model, body, true);
+    }
+
+    for (const [uuid, body] of friendlyRoadLightColliderBodies.entries()) {
+      if (activeRoadLightModels.some(model => model.uuid === uuid)) continue;
+      if (body && rapierWorld.getRigidBody(body.handle)) {
+        rapierWorld.removeRigidBody(body);
+      }
+      friendlyRoadLightColliderBodies.delete(uuid);
+    }
+
+    syncSimplePropCollider(bed?.mesh, bedColliderBody, true);
+    syncSimplePropCollider(
+      treasureChest?.mesh,
+      treasureChestColliderBody,
+      !!treasureChest?.mesh && !treasureChest.isOpen && treasureChest.mesh.visible
+    );
+    syncSimplePropCollider(getMarketStall?.(), marketStallColliderBody, true);
   };
 
   function getLatestLocationFix() {
@@ -7940,6 +8024,7 @@ async function main() {
       physicsAccumulator -= FIXED_DT;
     }
     syncCraftTableCollider();
+    syncAdditionalPropColliders();
 
     // Sync Rapier bodies -> Three meshes
     for (const [rb, mesh] of rbToMesh.entries()) {
