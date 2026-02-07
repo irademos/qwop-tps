@@ -240,6 +240,7 @@ export class PlayerControls {
     this.enabled = true; // Add enabled flag for chat input
 
     this.interactionPromptEl = document.getElementById('interaction-tooltip');
+    this.climbOverlayEl = document.getElementById('climb-overlay');
     this.friendlyInteractButton = document.getElementById('friendly-interact');
     this.friendlyDialogueEl = document.getElementById('friendly-dialogue');
     this.friendlyDialogueTextEl = this.friendlyDialogueEl?.querySelector('.friendly-dialogue-text') || null;
@@ -298,6 +299,16 @@ export class PlayerControls {
         this.interactionPromptEl.addEventListener('touchstart', activateInteraction, { passive: false });
       }
       this.interactionPromptEl.addEventListener('click', activateInteraction);
+    }
+
+    if (this.climbOverlayEl) {
+      const activateClimb = (event) => {
+        if (this.climbOverlayEl.classList.contains('hidden')) return;
+        event.preventDefault();
+        this.handleClimbAction();
+      };
+      this.climbOverlayEl.addEventListener('click', activateClimb);
+      this.climbOverlayEl.addEventListener('touchstart', activateClimb, { passive: false });
     }
 
     if (this.friendlyInteractButton) {
@@ -828,6 +839,9 @@ export class PlayerControls {
       }
 
       if (key === 'x') {
+        if (this.handleClimbAction()) {
+          return;
+        }
         this.handlePickupAction();
         return;
       }
@@ -939,6 +953,23 @@ export class PlayerControls {
       this.startFriendlyInteraction(nearbyFriendly.friendly);
       return;
     }
+  }
+
+  handleClimbAction() {
+    if (!this.enabled || this.isSleeping || this.vehicle || this.isInteracting) return false;
+    if (this.isClimbing) return false;
+    if (!this.playerModel) return false;
+
+    const position = this.playerModel.position;
+    const climbArea = this.findClimbableArea(position);
+    if (!climbArea) return false;
+
+    const nearEntry = this.isWithinClimbEntry(climbArea, position);
+    const movement = this.lastMoveDirection?.length?.() > 0 ? this.lastMoveDirection : null;
+    if (!nearEntry && !this.isMovingTowardClimbArea(climbArea, movement)) return false;
+
+    this.startClimbing(climbArea);
+    return true;
   }
 
   handlePickupAction() {
@@ -1697,14 +1728,10 @@ export class PlayerControls {
 
     const climbInput = this.getClimbInput(moveDirection, cameraDirection);
     const climbArea = this.findClimbableArea(position);
-    const nearEntry = climbArea && this.isWithinClimbEntry(climbArea, position);
-    const shouldStartClimb = !this.isClimbing && climbArea && climbInput > 0
-      && (nearEntry || this.isMovingTowardClimbArea(climbArea, movement));
-    if (this.isClimbing || shouldStartClimb) {
+    if (this.isClimbing) {
       if (!climbArea) {
         this.stopClimbing();
       } else {
-        if (!this.isClimbing) this.startClimbing(climbArea);
         this.updateClimbing({
           area: climbArea,
           climbInput,
@@ -2075,6 +2102,7 @@ export class PlayerControls {
     this.questManager?.update();
     this.updateFriendlyInteractionUI();
     this.updateInteractionPrompt();
+    this.updateClimbOverlay();
 
     const hasGun = !!this.getEquippedGun();
     if (hasGun !== this.lastHasGun) {
@@ -2113,6 +2141,28 @@ export class PlayerControls {
         && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')
         && weapon.type === 'sword'
     ) || null;
+  }
+
+  updateClimbOverlay() {
+    if (!this.climbOverlayEl || !this.playerModel) return;
+    if (this.isClimbing || this.isSleeping || this.vehicle || this.isInteracting) {
+      this.climbOverlayEl.classList.add('hidden');
+      return;
+    }
+
+    const position = this.playerModel.position;
+    const climbArea = this.findClimbableArea(position);
+    const nearEntry = climbArea && this.isWithinClimbEntry(climbArea, position);
+    const movement = this.lastMoveDirection?.length?.() > 0 ? this.lastMoveDirection : null;
+    const movingToward = climbArea && this.isMovingTowardClimbArea(climbArea, movement);
+    const canStartClimbing = !!climbArea && (nearEntry || movingToward);
+
+    if (canStartClimbing) {
+      this.climbOverlayEl.textContent = this.isMobile ? 'Tap to climb' : "Press X to climb";
+      this.climbOverlayEl.classList.remove('hidden');
+    } else {
+      this.climbOverlayEl.classList.add('hidden');
+    }
   }
 
   updateInteractionPrompt() {
