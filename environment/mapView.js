@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { createLightSource, LIGHT_SOURCE_CONFIGS } from "../light_sources.js";
-import { createStaticBoxColliderForObject } from "../physics/staticBoxCollider.js";
+import { createStaticBoxColliderForObject, syncStaticBoxColliderForObject } from "../physics/staticBoxCollider.js";
 
 const DEFAULT_ZOOM_HEIGHT = 90;
 const MIN_ZOOM_HEIGHT = 30;
@@ -211,6 +211,7 @@ function ensureHomeLight(homePosition) {
   if (!state.scene || !homePosition) return;
   if (state.homeLight?.model) {
     state.homeLight.model.position.copy(homePosition);
+    syncStaticBoxColliderForObject(state.homeLight.collider);
     return;
   }
   if (state.homeLightPending) return;
@@ -224,8 +225,8 @@ function ensureHomeLight(homePosition) {
       lightSource.collider = createStaticBoxColliderForObject(lightSource.model, {
         friction: 0.9,
         restitution: 0.02,
-        padding: new THREE.Vector3(0.08, 0.1, 0.08),
-        minHalfExtent: 0.15
+        halfExtents: new THREE.Vector3(0.28, 1.7, 0.28),
+        centerOffset: new THREE.Vector3(0, 1.7, 0)
       });
     })
     .catch((error) => {

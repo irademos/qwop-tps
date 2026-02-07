@@ -168,7 +168,7 @@ const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuilding
     marketStallCollider = createStaticBoxColliderForObject(marketStall, {
       friction: 0.95,
       restitution: 0.01,
-      padding: new THREE.Vector3(0.1, 0.05, 0.1)
+      halfExtents: new THREE.Vector3(1.35, 1.2, 0.9)
     });
     await Promise.all([
       loadMarketStallPotion({
@@ -250,8 +250,8 @@ const loadMerchantFriendly = ({
           lightSource.collider = createStaticBoxColliderForObject(lightSource.model, {
             friction: 0.9,
             restitution: 0.02,
-            padding: new THREE.Vector3(0.08, 0.1, 0.08),
-            minHalfExtent: 0.15
+            halfExtents: new THREE.Vector3(0.28, 1.7, 0.28),
+            centerOffset: new THREE.Vector3(0, 1.7, 0)
           });
         })
         .catch((error) => {

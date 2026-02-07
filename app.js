@@ -5805,6 +5805,7 @@ async function main() {
     spawnPos.y = terrainHeight;
     treasureChest.mesh.position.copy(spawnPos);
     treasureChest.mesh.visible = true;
+    treasureChest.syncCollider?.();
   }
 
   registerNetworkedEntity('droppedAmmo', {
