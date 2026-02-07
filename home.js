@@ -17,8 +17,6 @@ const BED_VERTICAL_OFFSET = 0.5;
 const CRAFT_TABLE_VERTICAL_OFFSET = 0.5;
 const STORAGE_VERTICAL_OFFSET = 0.35;
 
-const ROAD_LIGHT_EMISSIVE_COLOR = 0xffe9a6;
-
 export class HomeSystem {
   constructor({
     scene,
@@ -49,7 +47,6 @@ export class HomeSystem {
     this.storageChestLoaded = false;
     this.roadLight = null;
     this.roadLightLoaded = false;
-    this.roadLightGlow = null;
 
     this.lastPlacedHomeKey = null;
   }
@@ -117,6 +114,12 @@ export class HomeSystem {
       lightMesh.add(bulb);
     }
     if (!lightMesh) return;
+
+    const existingRoadLights = this.scene?.children?.filter?.((child) => child?.name === 'home-road-light') ?? [];
+    existingRoadLights.forEach((child) => {
+      this.scene?.remove?.(child);
+    });
+
     lightMesh.name = 'home-road-light';
     lightMesh.scale.setScalar(HOME_ROAD_LIGHT_SCALE);
     lightMesh.traverse((child) => {
@@ -124,11 +127,7 @@ export class HomeSystem {
       child.castShadow = true;
       child.receiveShadow = true;
     });
-    const glow = new THREE.PointLight(ROAD_LIGHT_EMISSIVE_COLOR, 1.5, 10, 2);
-    glow.position.set(0, 2.6, 0);
-    lightMesh.add(glow);
     lightMesh.visible = false;
-    this.roadLightGlow = glow;
     this.roadLight = lightMesh;
     this.scene?.add(lightMesh);
     this.syncHomePlacement();
@@ -178,7 +177,6 @@ export class HomeSystem {
     const nextHomeKey = homePos
       ? `${homePos.x.toFixed(3)}:${homePos.z.toFixed(3)}`
       : 'none';
-    if (nextHomeKey === this.lastPlacedHomeKey) return;
     this.lastPlacedHomeKey = nextHomeKey;
 
     if (!homePos) {
