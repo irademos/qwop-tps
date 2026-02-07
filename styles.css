@@ -46,6 +46,29 @@ body {
   cursor: pointer;
 }
 
+
+.climb-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 30%;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  background: rgba(46, 204, 113, 0.92);
+  color: #06140b;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  z-index: 945;
+}
+
+.climb-overlay:hover {
+  background: rgba(76, 225, 138, 0.98);
+}
+
 .friendly-interact {
   position: absolute;
   left: 50%;
@@ -1785,6 +1808,7 @@ body.settings-open #settings-button {
   body.settings-open .map-controls,
   body.settings-open #camera-controls,
   body.settings-open #interaction-tooltip,
+  body.settings-open #climb-overlay,
   body.settings-open #friendly-interact,
   body.settings-open #ammo-display,
   body.settings-open #ammo-popup,
