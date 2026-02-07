@@ -506,82 +506,65 @@ export class PlayerControls {
       return button;
     };
 
-    this.punchButton = createButton('punch-button', 'mobile-primary-action', 'PUNCH');
-    this.spellsButton = createButton('spells-button', 'mobile-primary-action', '🎤');
+    this.punchButton = createButton('punch-button', 'mobile-primary-action', 'Attack');
+    this.spellsButton = createButton('spells-button', 'mobile-primary-action', 'Spells');
     this.equipButton = createButton('equip-button', 'mobile-primary-action', 'EQUIP');
-    this.stopVoiceButton = createButton('stop-voice-button', 'mobile-stop-action', '■');
-
-    this.optionLeftButton = createButton('left-punch-button', 'mobile-option-action', 'Left');
-    this.optionCenterButton = createButton('punch-kick-button', 'mobile-option-action', 'Kick');
-    this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', 'Right');
+    this.optionLeftButton = createButton('left-punch-button', 'mobile-option-action', 'Shield');
+    this.optionCenterButton = createButton('punch-kick-button', 'mobile-option-action', '🎤');
+    this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', '—');
 
     this.mobileEquipButtons = [];
     this.mobileActionState = 'default';
-    this.mobileSelectedAttack = 'right';
+    this.mobileMeleeComboIndex = 0;
     this.mobileStatusToastTimer = null;
+    this.mobileAttackHoldActive = false;
+    this.mobileAttackPressStartedAt = 0;
+    this.mobileAttackPressActive = false;
 
-    const pressEvent = this.isMobile ? 'touchstart' : 'mousedown';
-    const releaseEvents = this.isMobile ? ['touchend', 'touchcancel'] : ['mouseup', 'mouseleave'];
-
-    const bindPrimaryButton = (button, onClick, onLongPress) => {
-      let pressTimer = null;
-      let longPressTriggered = false;
-      const clearPress = () => {
-        if (pressTimer) {
-          clearTimeout(pressTimer);
-          pressTimer = null;
-        }
-      };
-
-      button.addEventListener(pressEvent, (event) => {
-        if (!this.enabled) return;
-        longPressTriggered = false;
-        clearPress();
-        pressTimer = setTimeout(() => {
-          longPressTriggered = true;
-          onLongPress();
-        }, 1700);
-        event.preventDefault();
-      }, { passive: false });
-
-      releaseEvents.forEach((eventName) => {
-        button.addEventListener(eventName, (event) => {
-          if (!this.enabled) return;
-          const hadTimer = !!pressTimer;
-          clearPress();
-          if (!longPressTriggered && hadTimer) {
-            onClick();
-          }
-          longPressTriggered = false;
-          if (event) event.preventDefault();
-        }, { passive: false });
-      });
-
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-      });
-    };
-
-    bindPrimaryButton(
-      this.punchButton,
-      () => this.handlePrimaryAttackPress(),
-      () => this.showMobileAttackOptions()
-    );
-
-    bindPrimaryButton(
-      this.spellsButton,
-      () => this.handleVoiceMicPress?.(),
-      () => this.showMobileSpellOptions()
-    );
-
-    const onStopVoice = (event) => {
-      if (!this.enabled) return;
-      this.stopVoiceListening?.();
+    const onAttackPressStart = (event) => {
+      if (!this.enabled || !this.isMobile) return;
+      this.mobileAttackPressStartedAt = performance.now();
+      this.mobileAttackPressActive = true;
+      if (this.shouldHoldToFire()) {
+        this.mobileAttackHoldActive = true;
+        this.isFireHeld = true;
+        this.setAiming(true);
+      }
       if (event) event.preventDefault();
     };
-    this.stopVoiceButton.addEventListener('touchstart', onStopVoice, { passive: false });
-    this.stopVoiceButton.addEventListener('mousedown', onStopVoice);
-    this.stopVoiceButton.addEventListener('click', (event) => event.preventDefault());
+
+    const onAttackPressEnd = (event) => {
+      if (!this.enabled || !this.isMobile) return;
+      if (!this.mobileAttackPressActive) return;
+      this.mobileAttackPressActive = false;
+      if (this.mobileAttackHoldActive) {
+        this.mobileAttackHoldActive = false;
+        this.isFireHeld = false;
+        this.setAiming(false);
+        this.attemptFireProjectile();
+      } else {
+        this.handlePrimaryAttackPress();
+      }
+      if (event) event.preventDefault();
+    };
+
+    this.punchButton.addEventListener('touchstart', onAttackPressStart, { passive: false });
+    this.punchButton.addEventListener('touchend', onAttackPressEnd, { passive: false });
+    this.punchButton.addEventListener('touchcancel', onAttackPressEnd, { passive: false });
+    this.punchButton.addEventListener('mousedown', onAttackPressStart);
+    this.punchButton.addEventListener('mouseup', onAttackPressEnd);
+    this.punchButton.addEventListener('mouseleave', onAttackPressEnd);
+    this.punchButton.addEventListener('click', (event) => event.preventDefault());
+
+    const onSpellsToggle = (event) => {
+      if (!this.enabled) return;
+      this.mobileActionState = this.mobileActionState === 'spell-options' ? 'default' : 'spell-options';
+      this.refreshActionButtons();
+      if (event) event.preventDefault();
+    };
+    this.spellsButton.addEventListener('touchstart', onSpellsToggle, { passive: false });
+    this.spellsButton.addEventListener('mousedown', onSpellsToggle);
+    this.spellsButton.addEventListener('click', (event) => event.preventDefault());
 
     const openEquip = (event) => {
       if (!this.enabled) return;
@@ -596,18 +579,24 @@ export class PlayerControls {
       if (!this.enabled) return;
       if (this.mobileActionState === 'spell-options') {
         if (slot === 'left') {
-          this.castSpellById?.('shield');
+          const casted = this.castSpellById?.('shield');
+          if (casted) {
+            this.mobileActionState = 'default';
+          }
         } else if (slot === 'kick') {
-          this.mobileActionState = 'default';
-          this.refreshActionButtons();
-          this.handleVoiceMicPress?.();
+          if (this.isVoiceListening?.()) {
+            this.stopVoiceListening?.();
+            this.mobileActionState = 'default';
+          } else {
+            this.handleVoiceMicPress?.();
+          }
           if (event) event.preventDefault();
-          return;
         }
+      } else if (this.mobileActionState === 'freeze') {
+        this.attemptFireProjectileForHand('right');
       } else {
-        this.mobileSelectedAttack = slot;
+        this.handlePrimaryAttackPress();
       }
-      this.mobileActionState = 'default';
       this.refreshActionButtons();
       if (event) event.preventDefault();
     };
@@ -622,16 +611,11 @@ export class PlayerControls {
     this.refreshActionButtons();
   }
 
-  getMobileAttackLabel(slot) {
-    if (slot === 'left') {
-      const weapon = this.getEquippedWeapon('left');
-      return weapon?.name || weapon?.itemId || 'Left';
-    }
-    if (slot === 'right') {
-      const weapon = this.getEquippedWeapon('right');
-      return weapon?.name || weapon?.itemId || 'PUNCH';
-    }
-    return 'Kick';
+  getMobileAttackLabel() {
+    const weapon = this.getEquippedWeapon('right');
+    if (weapon?.itemId === 'bow') return 'Bow';
+    if (weapon?.itemId === 'bomb') return 'Bomb';
+    return 'Attack';
   }
 
   performAttackForSlot(slot) {
@@ -662,17 +646,15 @@ export class PlayerControls {
   }
 
   handlePrimaryAttackPress() {
-    this.performAttackForSlot(this.mobileSelectedAttack || 'right');
-  }
-
-  showMobileAttackOptions() {
-    this.mobileActionState = 'attack-options';
-    this.refreshActionButtons();
-  }
-
-  showMobileSpellOptions() {
-    this.mobileActionState = 'spell-options';
-    this.refreshActionButtons();
+    const weapon = this.getEquippedWeapon('right');
+    if (weapon?.itemId === 'bow' || weapon?.itemId === 'bomb') {
+      this.attemptFireProjectileForHand('right');
+      return;
+    }
+    const cycle = ['right', 'left', 'kick'];
+    const slot = cycle[this.mobileMeleeComboIndex % cycle.length];
+    this.mobileMeleeComboIndex = (this.mobileMeleeComboIndex + 1) % cycle.length;
+    this.performAttackForSlot(slot);
   }
 
   showMobileEquipMenu() {
@@ -757,25 +739,56 @@ export class PlayerControls {
     const actionContainer = document.getElementById('action-buttons');
     if (!actionContainer || !this.punchButton) return;
 
-    const state = this.mobileActionState || 'default';
-    actionContainer.classList.toggle('mobile-attack-options', state === 'attack-options');
+    const voiceState = this.getVoiceMicState?.() || { disabled: false, remainingSeconds: 0 };
+    const rightWeapon = this.getEquippedWeapon('right');
+    const isIceGunEquipped = rightWeapon?.itemId === 'iceGun';
+
+    let state = this.mobileActionState || 'default';
+    if (state === 'freeze' && !isIceGunEquipped) {
+      state = 'default';
+      this.mobileActionState = 'default';
+    }
+
+    if (state === 'default' && isIceGunEquipped && this.isMobile) {
+      state = 'freeze';
+      this.mobileActionState = 'freeze';
+    }
+
     actionContainer.classList.toggle('mobile-spell-options', state === 'spell-options');
     actionContainer.classList.toggle('mobile-equip-mode', state === 'equip');
-    actionContainer.classList.toggle('mobile-voice-listening', !!this.isVoiceListening?.());
+    actionContainer.classList.toggle('mobile-freeze-mode', state === 'freeze');
 
-    this.punchButton.textContent = this.getMobileAttackLabel(this.mobileSelectedAttack || 'right');
-    this.optionLeftButton.textContent = this.getMobileAttackLabel('left');
-    this.optionCenterButton.textContent = 'Kick';
-    this.optionRightButton.textContent = this.getMobileAttackLabel('right');
+    this.punchButton.textContent = this.getMobileAttackLabel();
+    this.spellsButton.textContent = 'Spells';
+    this.spellsButton.disabled = false;
 
-    const voiceState = this.getVoiceMicState?.() || { disabled: false, remainingSeconds: 0 };
-    this.spellsButton.textContent = voiceState.remainingSeconds > 0 ? `🎤 ${voiceState.remainingSeconds}s` : '🎤';
-    this.spellsButton.disabled = !!voiceState.disabled;
+    this.optionLeftButton.textContent = isIceGunEquipped ? 'Freeze' : 'Shield';
+    this.optionLeftButton.disabled = false;
+    this.optionCenterButton.textContent = '🎤';
+    this.optionCenterButton.disabled = false;
+    this.optionRightButton.textContent = '—';
+    this.optionRightButton.disabled = true;
+
+    if (!this.isMobile) {
+      this.punchButton.style.display = 'none';
+    } else {
+      this.punchButton.style.display = '';
+    }
 
     if (state === 'spell-options') {
-      this.optionLeftButton.textContent = 'Shield';
-      this.optionCenterButton.textContent = '🎤';
-      this.optionRightButton.textContent = '—';
+      const shieldState = this.getSpellStateById?.('shield') || { disabled: true, remainingSeconds: 0 };
+      this.optionLeftButton.textContent = shieldState.remainingSeconds > 0 ? `Shield ${shieldState.remainingSeconds}s` : 'Shield';
+      this.optionLeftButton.disabled = !!shieldState.disabled;
+
+      if (this.isVoiceListening?.()) {
+        this.optionCenterButton.textContent = '■';
+      } else {
+        this.optionCenterButton.textContent = voiceState.remainingSeconds > 0 ? `🎤 ${voiceState.remainingSeconds}s` : '🎤';
+        this.optionCenterButton.disabled = !!voiceState.disabled;
+      }
+    } else if (state === 'freeze') {
+      this.optionCenterButton.disabled = true;
+      this.optionRightButton.disabled = true;
     }
 
     if (state !== 'equip') {

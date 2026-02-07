@@ -229,22 +229,25 @@ body {
   display: none;
 }
 
-#action-buttons.mobile-attack-options .mobile-primary-action,
 #action-buttons.mobile-spell-options .mobile-primary-action,
 #action-buttons.mobile-equip-mode .mobile-primary-action {
   display: none;
 }
 
-#action-buttons.mobile-attack-options .mobile-option-action,
 #action-buttons.mobile-spell-options .mobile-option-action {
   display: flex;
 }
 
-#action-buttons.mobile-equip-mode .mobile-equip-action {
+#action-buttons.mobile-freeze-mode .mobile-option-action {
   display: flex;
 }
 
-#action-buttons.mobile-voice-listening .mobile-stop-action {
+#action-buttons.mobile-freeze-mode #punch-kick-button,
+#action-buttons.mobile-freeze-mode #right-punch-button {
+  display: none;
+}
+
+#action-buttons.mobile-equip-mode .mobile-equip-action {
   display: flex;
 }
 
