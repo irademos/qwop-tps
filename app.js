@@ -6390,7 +6390,6 @@ async function main() {
     geoToLocal: geoToLocalMeters
   });
   void homeSystem.loadStorageChest?.();
-  void homeSystem.loadRoadLight?.();
   window.homeSystem = homeSystem;
   const interiorScene = homeSystem?.interiorGroup ?? scene;
   bed = new Bed(interiorScene, {

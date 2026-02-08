@@ -1,6 +1,4 @@
 import * as THREE from "three";
-import { createLightSource, LIGHT_SOURCE_CONFIGS } from "../light_sources.js";
-import { createStaticBoxColliderForObject, syncStaticBoxColliderForObject } from "../physics/staticBoxCollider.js";
 
 const DEFAULT_ZOOM_HEIGHT = 90;
 const MIN_ZOOM_HEIGHT = 30;
@@ -40,8 +38,6 @@ const state = {
   homeIcon: null,
   homeRadiusLine: null,
   homeRadiusValue: null,
-  homeLight: null,
-  homeLightPending: false,
   weaponIcons: [],
   itemIcons: [],
   chestIcons: [],
@@ -335,37 +331,6 @@ function ensureHomeRadiusLine(radius) {
   state.scene.add(state.homeRadiusLine);
 }
 
-function ensureHomeLight(homePosition) {
-  if (!state.scene || !homePosition) return;
-  if (state.homeLight?.model) {
-    state.homeLight.model.position.copy(homePosition);
-    syncStaticBoxColliderForObject(state.homeLight.collider);
-    return;
-  }
-  if (state.homeLightPending) return;
-  state.homeLightPending = true;
-  createLightSource(LIGHT_SOURCE_CONFIGS.roadLight, homePosition.clone())
-    .then((lightSource) => {
-      if (!state.scene) return;
-      state.homeLight = lightSource;
-      state.homeLight.model.position.copy(homePosition);
-      state.scene.add(lightSource.model);
-      lightSource.collider = createStaticBoxColliderForObject(lightSource.model, {
-        friction: 0.9,
-        restitution: 0.02,
-        halfExtents: new THREE.Vector3(0.35, 1.8, 0.35),
-        centerOffset: new THREE.Vector3(0, 1.8, 0),
-        useObjectPosition: true
-      });
-    })
-    .catch((error) => {
-      console.warn("Failed to load home road light:", error);
-    })
-    .finally(() => {
-      state.homeLightPending = false;
-    });
-}
-
 function ensurePlayerIcon() {
   if (state.playerIcon) return;
   const canvas = createPlayerIconTexture();
@@ -499,7 +464,6 @@ function updateHomeIndicators(homePosition, homeEnterDistance) {
   if (!homePosition) {
     if (state.homeIcon) state.homeIcon.visible = false;
     if (state.homeRadiusLine) state.homeRadiusLine.visible = false;
-    if (state.homeLight?.model) state.homeLight.model.visible = false;
     return;
   }
   const hasEnterDistance = Number.isFinite(homeEnterDistance);
@@ -508,10 +472,6 @@ function updateHomeIndicators(homePosition, homeEnterDistance) {
     ensureHomeRadiusLine(homeEnterDistance);
   } else if (state.homeRadiusLine) {
     state.homeRadiusLine.visible = false;
-  }
-  ensureHomeLight(homePosition);
-  if (state.homeLight?.model) {
-    state.homeLight.model.visible = true;
   }
   if (state.homeIcon) {
     state.homeIcon.position.set(homePosition.x, homePosition.y + DOT_Y_OFFSET, homePosition.z);

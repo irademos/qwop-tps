@@ -79,6 +79,7 @@ export class HomeSystem {
     if (!chestMesh) return;
     chestMesh.name = 'home-storage-chest';
     chestMesh.scale.setScalar(HOME_STORAGE_CHEST_SCALE);
+    chestMesh.rotation.y = Math.PI;
     chestMesh.traverse((child) => {
       if (!child.isMesh) return;
       child.castShadow = true;
@@ -183,24 +184,22 @@ export class HomeSystem {
       if (this.bed?.mesh) this.bed.mesh.visible = false;
       if (this.craftTable?.mesh) this.craftTable.mesh.visible = false;
       if (this.storageChest) this.storageChest.visible = false;
-      if (this.roadLight) this.roadLight.visible = false;
       return;
     }
 
     const bedPos = homePos.clone().add(HOME_BED_OFFSET);
     const craftPos = homePos.clone().add(HOME_CRAFT_TABLE_OFFSET);
     const storagePos = homePos.clone().add(HOME_STORAGE_OFFSET);
-    const lightPos = homePos.clone().add(HOME_ROAD_LIGHT_OFFSET);
 
     if (this.bed?.mesh) {
       this.setObjectPosition(this.bed.mesh, bedPos.x, bedPos.z, BED_VERTICAL_OFFSET);
       this.bed.updateBounds?.();
+      this.bed.syncCollider?.();
     }
     if (this.craftTable?.mesh) {
       this.setObjectPosition(this.craftTable.mesh, craftPos.x, craftPos.z, CRAFT_TABLE_VERTICAL_OFFSET);
     }
     this.setObjectPosition(this.storageChest, storagePos.x, storagePos.z, STORAGE_VERTICAL_OFFSET);
-    this.setObjectPosition(this.roadLight, lightPos.x, lightPos.z, 0);
   }
 
   async persistHome(homeData) {
