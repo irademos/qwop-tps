@@ -295,7 +295,7 @@ function ensureHomeIcon() {
     sizeAttenuation: false
   });
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(5, 5, 5);
+  sprite.scale.set(0.05, 0.05, 0.05);
   sprite.visible = false;
   sprite.renderOrder = 999;
   state.homeIcon = sprite;
