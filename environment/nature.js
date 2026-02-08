@@ -32,6 +32,11 @@ const TREE_ZONE_METERS = 100;
 const TREE_GRID_SPACING = 20;
 const TREE_SPAWN_CHANCE = 0.4;
 const TREE_TILE_BUFFER = 2;
+const ROCK_GRID_SPACING = 24;
+const ROCK_SPAWN_CHANCE = 0.28;
+const ROCK_MIN_RADIUS = 0.45;
+const ROCK_MAX_RADIUS = 1.4;
+const ROCK_COLLIDER_HEIGHT_RATIO = 0.7;
 const TREE_CLIMB_HALF_WIDTH = 0.6;
 const TREE_CLIMB_HALF_DEPTH = 0.6;
 const TREE_CLIMB_ENTRY_RADIUS = 1.0;
@@ -206,6 +211,8 @@ export async function createNature({
   getTerrainHeight,
   getGeoForLocal,
   tileCache,
+  rapier,
+  rapierWorld,
   spawnApplePickup,
   removeApplePickup
 } = {}) {
@@ -247,6 +254,16 @@ export async function createNature({
   const climbableAreasByTile = new Map();
   const applePickupsByTile = new Map();
   const debugMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
+  const rockMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8b8f96,
+    roughness: 0.95,
+    metalness: 0.05,
+    flatShading: true
+  });
+  const rockGeometries = [
+    new THREE.DodecahedronGeometry(1, 0),
+    new THREE.IcosahedronGeometry(1, 0)
+  ];
   const tempPosition = new THREE.Vector3();
   const tempBox = new THREE.Box3();
   const tempCenter = new THREE.Vector3();
@@ -463,6 +480,21 @@ export async function createNature({
     return false;
   };
 
+  const createRockCollider = (rock, radius) => {
+    if (!rock || !rapier || !rapierWorld) return null;
+    const center = rock.position;
+    const colliderRadius = Math.max(0.1, radius * 0.92);
+    const halfHeight = Math.max(0.12, radius * ROCK_COLLIDER_HEIGHT_RATIO);
+    const rbDesc = rapier.RigidBodyDesc.fixed()
+      .setTranslation(center.x, center.y + halfHeight, center.z);
+    const rb = rapierWorld.createRigidBody(rbDesc);
+    const colliderDesc = rapier.ColliderDesc.cylinder(halfHeight, colliderRadius)
+      .setFriction(0.9)
+      .setRestitution(0.05);
+    const collider = rapierWorld.createCollider(colliderDesc, rb);
+    return { rb, collider };
+  };
+
   const addClimbDebugLines = (area, parent) => {
     if (!area || !parent) return;
     const width = (area.halfWidth ?? 0) * 2;
@@ -491,6 +523,8 @@ export async function createNature({
     const baseX = tile.x * tileSizeMeters;
     const baseZ = tile.y * tileSizeMeters;
     const trees = [];
+    const rocks = [];
+    const rockPhysics = [];
     const tileClimbAreas = [];
     const tileApplePickups = [];
     const tileBlockers = buildTileBlockers(tileKey);
@@ -572,7 +606,55 @@ export async function createNature({
       }
     }
 
-    const entry = { tile, tileKey, group: tileGroup, trees };
+    for (let ix = 0; ix <= tileSizeMeters; ix += ROCK_GRID_SPACING) {
+      for (let iz = 0; iz <= tileSizeMeters; iz += ROCK_GRID_SPACING) {
+        const worldX = baseX + ix;
+        const worldZ = baseZ + iz;
+        if (pseudoRandom2D(worldX, worldZ, 21.1) > ROCK_SPAWN_CHANCE) continue;
+
+        const radius = ROCK_MIN_RADIUS
+          + pseudoRandom2D(worldX, worldZ, 22.7) * (ROCK_MAX_RADIUS - ROCK_MIN_RADIUS);
+        tempPosition.set(worldX, 0, worldZ);
+        const rockBlockerProbe = {
+          position: tempPosition,
+          userData: { boundsRadius: radius * 1.05 }
+        };
+        if (tileBlockers && isTreeBlocked(rockBlockerProbe, tileBlockers)) {
+          continue;
+        }
+
+        const geometryIndex = Math.floor(pseudoRandom2D(worldX, worldZ, 23.5) * rockGeometries.length)
+          % rockGeometries.length;
+        const rock = new THREE.Mesh(rockGeometries[geometryIndex], rockMaterial);
+        rock.castShadow = true;
+        rock.receiveShadow = true;
+        const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
+        rock.position.set(worldX, terrainY + radius * 0.36, worldZ);
+        const uniformScale = radius * (1.5 + pseudoRandom2D(worldX, worldZ, 26.1) * 0.5);
+        rock.scale.set(
+          uniformScale,
+          uniformScale * (0.7 + pseudoRandom2D(worldX, worldZ, 25.4) * 0.6),
+          uniformScale * (0.8 + pseudoRandom2D(worldX, worldZ, 24.8) * 0.5)
+        );
+        rock.rotation.set(
+          pseudoRandom2D(worldX, worldZ, 31.1) * Math.PI,
+          pseudoRandom2D(worldX, worldZ, 31.7) * Math.PI * 2,
+          pseudoRandom2D(worldX, worldZ, 32.3) * Math.PI
+        );
+        rock.userData.tileKey = tileKey;
+        rock.userData.rockRadius = radius;
+        tileGroup.add(rock);
+        rocks.push(rock);
+
+        const physics = createRockCollider(rock, radius);
+        if (physics) {
+          rockPhysics.push(physics);
+          rock.userData.physics = physics;
+        }
+      }
+    }
+
+    const entry = { tile, tileKey, group: tileGroup, trees, rocks, rockPhysics };
     treeTiles.set(tileKey, entry);
     climbableAreasByTile.set(tileKey, tileClimbAreas);
     applePickupsByTile.set(tileKey, tileApplePickups);
@@ -587,6 +669,10 @@ export async function createNature({
     if (!entry) return;
     group.remove(entry.group);
     entry.group.clear();
+    for (const physics of entry.rockPhysics ?? []) {
+      if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
+      if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+    }
     treeTiles.delete(tileKey);
     climbableAreasByTile.delete(tileKey);
     const tilePickups = applePickupsByTile.get(tileKey) ?? [];
@@ -738,6 +824,8 @@ export async function createNature({
     }
     applePickupsByTile.clear();
     refreshClimbableAreas();
+    rockGeometries.forEach((geometry) => geometry.dispose());
+    rockMaterial.dispose();
     group.clear();
     scene?.remove(group);
   };
