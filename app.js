@@ -2073,6 +2073,9 @@ async function main() {
   const torchMarker = createWeaponMarker(0xffa54c);
   torch.onPickup = (holder) => {
     if (holder !== playerControls) return;
+    if (lantern?.holder === holder) {
+      unequipInventoryItem('lantern');
+    }
     unequipOtherInventoryItems(TORCH_ITEM_ID);
     const pickupHealth = normalizeTorchHealth(torch.mesh?.userData?.torchHealth);
     addToInventory(TORCH_ITEM_ID, 1, { torchHealth: pickupHealth });

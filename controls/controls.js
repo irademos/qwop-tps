@@ -679,7 +679,8 @@ export class PlayerControls {
       { id: 'bow', label: 'Bow' },
       { id: 'iceGun', label: 'Ice Gun' },
       { id: 'autumnSword', label: 'Sword' },
-      { id: 'lantern', label: 'Lantern' }
+      { id: 'lantern', label: 'Lantern' },
+      { id: 'torch', label: 'Torch' }
     ];
 
     this.mobileEquipButtons.forEach(button => button.remove());
