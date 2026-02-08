@@ -6,6 +6,7 @@ import { MUSHROOM_ENTRIES } from '../environment/mushrooms.js';
 import { loadMonsterModel } from '../models/monsterModel.js';
 import { createLightSource, LIGHT_SOURCE_CONFIGS } from '../light_sources.js';
 import { FriendlyCharacter } from './FriendlyCharacter.js';
+import { createStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
 
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
 const MERCHANT_MODEL = '/models/cowboy.fbx';
@@ -26,13 +27,13 @@ const LIFE_POTION_ITEM_ID = 'life_potion';
 const MANA_POTION_ITEM_ID = 'mana_potion';
 
 const BASE_MERCHANT_ITEMS = {
-  iceGun: { name: 'Ice Gun', price: 30, count: 1 },
-  autumnSword: { name: 'Autumn Sword', price: 30, count: 1 },
-  bow: { name: 'Bow', price: 30, count: 1 },
-  bomb: { name: 'Bombs', price: 10, count: 5 },
-  lantern: { name: 'Lantern', price: 20, count: 1 },
-  [LIFE_POTION_ITEM_ID]: { name: 'Life Potion', price: 30, count: 5 },
-  [MANA_POTION_ITEM_ID]: { name: 'Mana Potion', price: 30, count: 5 },
+  iceGun: { name: 'Ice Gun', price: 30, count: 1, icon: '/assets/ui/items/icegun.png' },
+  autumnSword: { name: 'Autumn Sword', price: 30, count: 1, icon: '/assets/ui/items/sword.png' },
+  bow: { name: 'Bow', price: 30, count: 1, icon: '/assets/ui/items/bow.png' },
+  bomb: { name: 'Bombs', price: 10, count: 5, icon: '/assets/ui/items/bomb.png' },
+  lantern: { name: 'Lantern', price: 20, count: 1, icon: '/assets/ui/items/lantern.png' },
+  [LIFE_POTION_ITEM_ID]: { name: 'Life Potion', price: 30, count: 5, icon: '/assets/ui/items/life_potion.png' },
+  [MANA_POTION_ITEM_ID]: { name: 'Mana Potion', price: 30, count: 5, icon: '/assets/ui/items/mana_potion.png' },
   [ICE_AMMO_ITEM_ID]: { name: 'Ice Ammo', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
   [ARROW_AMMO_ITEM_ID]: { name: 'Arrows', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
   apple: { name: 'Apples', price: 2, count: 5 },
@@ -45,7 +46,8 @@ const merchantItemCatalog = (() => {
     catalog[entry.id] = {
       name: entry.name,
       price: 2,
-      count: 5
+      count: 5,
+      icon: `/assets/ui/items/${entry.icon_name}.png`
     };
   });
   return catalog;
@@ -62,6 +64,7 @@ let merchantFriendly = null;
 let marketStall = null;
 let merchantRoadLight = null;
 let merchantIsHost = false;
+let marketStallCollider = null;
 
 const buildDefaultInventory = () => {
   const items = {};
@@ -163,6 +166,11 @@ const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuilding
     }
     liftPositionToBuildingTop?.(marketStall.position, 0.5);
     scene.add(marketStall);
+    marketStallCollider = createStaticBoxColliderForObject(marketStall, {
+      friction: 0.95,
+      restitution: 0.01,
+      halfExtents: new THREE.Vector3(1.35, 1.2, 0.9)
+    });
     await Promise.all([
       loadMarketStallPotion({
         loader,
@@ -240,6 +248,13 @@ const loadMerchantFriendly = ({
           merchantRoadLight = lightSource;
           merchantRoadLight.model.position.copy(lightPosition);
           scene.add(lightSource.model);
+          lightSource.collider = createStaticBoxColliderForObject(lightSource.model, {
+            friction: 0.9,
+            restitution: 0.02,
+            halfExtents: new THREE.Vector3(0.35, 1.8, 0.35),
+            centerOffset: new THREE.Vector3(0, 1.8, 0),
+            useObjectPosition: true
+          });
         })
         .catch((error) => {
           console.warn('Failed to load merchant road light:', error);

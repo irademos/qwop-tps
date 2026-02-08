@@ -7,21 +7,21 @@ const MUSHROOM_LIFT = 0.4; // tweak (0.5 = half size)
 const DEFAULT_MUSHROOM_SPAWN_RADIUS = 225;
 
 export const MUSHROOM_ENTRIES = [
-  { nodeName: 'Cylinder_0', id: 'mushroom_cylinder_0', name: 'Mushroom 1', lift: 0.25 }, // #12
-  { nodeName: 'Cylinder001_1', id: 'mushroom_cylinder_001', name: 'Mushroom 2', lift: 0.4 },  // #10
-  { nodeName: 'Cylinder002_2', id: 'mushroom_cylinder_002', name: 'Mushroom 3', lift: 0.15 }, // #5
-  { nodeName: 'Cylinder003_3', id: 'mushroom_cylinder_003', name: 'Mushroom 4', lift: 0.35 }, // #9
-  { nodeName: 'Cylinder004_4', id: 'mushroom_cylinder_004', name: 'Mushroom 5', lift: 0.3 }, // #8
-  { nodeName: 'Cylinder005_5', id: 'mushroom_cylinder_005', name: 'Mushroom 6', lift: 0.3 },  // #6
-  { nodeName: 'Cylinder007_6', id: 'mushroom_cylinder_007', name: 'Mushroom 7', lift: 0.4 }, // #7
-  { nodeName: 'Cylinder008_7', id: 'mushroom_cylinder_008', name: 'Mushroom 8', lift: 0.7 }, // #3
-  { nodeName: 'Cylinder009_8', id: 'mushroom_cylinder_009', name: 'Mushroom 9', lift: 0.31 }, // #4
-  { nodeName: 'Cylinder010_9', id: 'mushroom_cylinder_010', name: 'Mushroom 10', lift: 0.4 }, // #2
-  { nodeName: 'Cylinder011_10', id: 'mushroom_cylinder_011', name: 'Mushroom 11', lift: 0.31 }, // #1
-  { nodeName: 'Cylinder006_11', id: 'mushroom_cylinder_006', name: 'Mushroom 12', lift: 0.24 },  // #11
-  { nodeName: 'Cylinder012_12', id: 'mushroom_cylinder_012', name: 'Mushroom 13', lift: 0.2 },  //  #13
-  { nodeName: 'Cylinder013_13', id: 'mushroom_cylinder_013', name: 'Mushroom 14', lift: 0.22 }, // #14
-  { nodeName: 'Cylinder024_14', id: 'mushroom_cylinder_024', name: 'Mushroom 15', lift: 0.35 } // #15
+  { nodeName: 'Cylinder_0', id: 'mushroom_cylinder_0', name: 'Mushroom 1', lift: 0.25, icon_name: 'mushroom12' }, // #12
+  { nodeName: 'Cylinder001_1', id: 'mushroom_cylinder_001', name: 'Mushroom 2', lift: 0.4, icon_name: 'mushroom10' },  // #10
+  { nodeName: 'Cylinder002_2', id: 'mushroom_cylinder_002', name: 'Mushroom 3', lift: 0.15, icon_name: 'mushroom5' }, // #5
+  { nodeName: 'Cylinder003_3', id: 'mushroom_cylinder_003', name: 'Mushroom 4', lift: 0.35, icon_name: 'mushroom9' }, // #9
+  { nodeName: 'Cylinder004_4', id: 'mushroom_cylinder_004', name: 'Mushroom 5', lift: 0.3, icon_name: 'mushroom8' }, // #8
+  { nodeName: 'Cylinder005_5', id: 'mushroom_cylinder_005', name: 'Mushroom 6', lift: 0.3, icon_name: 'mushroom6' },  // #6
+  { nodeName: 'Cylinder007_6', id: 'mushroom_cylinder_007', name: 'Mushroom 7', lift: 0.4, icon_name: 'mushroom7' }, // #7
+  { nodeName: 'Cylinder008_7', id: 'mushroom_cylinder_008', name: 'Mushroom 8', lift: 0.7, icon_name: 'mushroom3' }, // #3
+  { nodeName: 'Cylinder009_8', id: 'mushroom_cylinder_009', name: 'Mushroom 9', lift: 0.31, icon_name: 'mushroom4' }, // #4
+  { nodeName: 'Cylinder010_9', id: 'mushroom_cylinder_010', name: 'Mushroom 10', lift: 0.4, icon_name: 'mushroom2' }, // #2
+  { nodeName: 'Cylinder011_10', id: 'mushroom_cylinder_011', name: 'Mushroom 11', lift: 0.31, icon_name: 'mushroom1' }, // #1
+  { nodeName: 'Cylinder006_11', id: 'mushroom_cylinder_006', name: 'Mushroom 12', lift: 0.24, icon_name: 'mushroom11' },  // #11
+  { nodeName: 'Cylinder012_12', id: 'mushroom_cylinder_012', name: 'Mushroom 13', lift: 0.2, icon_name: 'mushroom13' },  //  #13
+  { nodeName: 'Cylinder013_13', id: 'mushroom_cylinder_013', name: 'Mushroom 14', lift: 0.22, icon_name: 'mushroom14' }, // #14
+  { nodeName: 'Cylinder024_14', id: 'mushroom_cylinder_024', name: 'Mushroom 15', lift: 0.35, icon_name: 'mushroom15' } // #15
 ];
 
 const getRandomScatterPosition = (center, radius) => {

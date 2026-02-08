@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 import { updateArrowProjectile } from "./arrow.js";
+import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../healthUtils.js";
 
 const disposeProjectileMesh = (mesh) => {
   if (!mesh) return;
@@ -103,7 +104,8 @@ export function updateProjectiles({
     if (typeof window.getPlayerStrength === 'function') {
       const strength = window.getPlayerStrength();
       if (Number.isFinite(strength)) {
-        return Math.max(0, baseDamage + strength);
+        const bonus = convertPointsToSegments(strength, { minimum: 0 });
+        return Math.max(0, baseDamage + bonus);
       }
     }
     return baseDamage;
@@ -177,8 +179,8 @@ export function updateProjectiles({
       if (projBox.intersectsBox(playerBox)) {
         const player = otherPlayers[id];
         if (player) {
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
-          const previousHealth = player.health || 100;
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
+          const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
           const nextHealth = Math.max(0, previousHealth - damage);
           player.health = nextHealth;
           if (nextHealth <= 0 && previousHealth > 0) {
@@ -207,7 +209,7 @@ export function updateProjectiles({
       removed = true;
 
       if (typeof window.localHealth === 'number') {
-        const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
+        const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
         window.localHealth = Math.max(0, window.localHealth - damage);
         console.log(`❤️ Your Health: ${window.localHealth}`);
       }
@@ -225,7 +227,7 @@ export function updateProjectiles({
         if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           console.log(`💥 Monster was hit`);
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
           const killed = monster.applyDamage(damage);
           if (!killed) {
             const direction = vel.clone();
@@ -246,7 +248,7 @@ export function updateProjectiles({
         const monsterBox = getObjectBox(monster?.model);
         if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(10) : 10;
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
           sendMonsterAttack?.({
             monsterId: monster.id,
             damage,

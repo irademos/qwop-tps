@@ -9,6 +9,14 @@ const QUEST_FRIEND_MODEL = "/models/cowboy.fbx";
 const QUEST_FRIEND_SPAWN_MIN_DISTANCE = 18;
 const QUEST_FRIEND_SPAWN_MAX_DISTANCE = 32;
 const QUEST_FRIEND_REACH_DISTANCE = 4.5;
+const QUEST_FRIEND_APPROACH_STOP_DISTANCE = 5.5;
+const QUEST_FRIEND_APPROACH_SPEED_MULTIPLIER = 1.25;
+const QUEST_DISTANCE_SPAWN_MIN_TRAVEL = 45;
+const QUEST_DISTANCE_SPAWN_MAX_TRAVEL = 105;
+const QUEST_DISTANCE_MAX_STEP = 14;
+const QUEST_DISTANCE_MAX_SPEED = 20;
+const QUEST_VIEW_APPROACH_MIN_DISTANCE = 12;
+const QUEST_VIEW_APPROACH_MAX_DISTANCE = 20;
 const QUEST_RETURN_DISTANCE = 6;
 const QUEST_FOLLOW_STOP_DISTANCE = 2.2;
 const QUEST_LEAD_PLAYER_DISTANCE = 10;
@@ -100,6 +108,13 @@ export class QuestManager {
       friendTargetType: null
     };
     this.deltaSeconds = 0;
+    this.travelSpawn = {
+      active: false,
+      progress: 0,
+      nextDistance: 0,
+      lastPlayerPosition: null,
+      spawnMode: "search"
+    };
   }
 
   setDeltaSeconds(deltaSeconds) {
@@ -166,17 +181,66 @@ export class QuestManager {
     this.state.friendMode = "idle";
     this.state.friendTarget = null;
     this.state.friendTargetType = null;
-    this.spawnQuestFriend();
+    this.startQuestDistanceSpawn("search");
   }
 
-  spawnQuestFriend() {
+  getNextQuestSpawnDistance() {
+    return QUEST_DISTANCE_SPAWN_MIN_TRAVEL
+      + Math.random() * (QUEST_DISTANCE_SPAWN_MAX_TRAVEL - QUEST_DISTANCE_SPAWN_MIN_TRAVEL);
+  }
+
+  isPlayerTravelAnimationActive() {
+    const action = this.getPlayerModel?.()?.userData?.currentAction;
+    return action === "walk" || action === "run";
+  }
+
+  startQuestDistanceSpawn(mode = "search") {
+    const playerModel = this.getPlayerModel?.();
+    this.travelSpawn.active = true;
+    this.travelSpawn.progress = 0;
+    this.travelSpawn.nextDistance = this.getNextQuestSpawnDistance();
+    this.travelSpawn.lastPlayerPosition = playerModel?.position?.clone?.() || null;
+    this.travelSpawn.spawnMode = mode;
+  }
+
+  stopQuestDistanceSpawn() {
+    this.travelSpawn.active = false;
+    this.travelSpawn.progress = 0;
+    this.travelSpawn.nextDistance = 0;
+    this.travelSpawn.lastPlayerPosition = null;
+  }
+
+  updateQuestDistanceSpawn(playerModel) {
+    if (!this.travelSpawn.active || !playerModel || this.state.pendingSpawn || this.state.friend) {
+      return;
+    }
+    if (!this.travelSpawn.lastPlayerPosition) {
+      this.travelSpawn.lastPlayerPosition = playerModel.position.clone();
+      return;
+    }
+    const frameDistance = playerModel.position.distanceTo(this.travelSpawn.lastPlayerPosition);
+    this.travelSpawn.lastPlayerPosition.copy(playerModel.position);
+    if (!this.isPlayerTravelAnimationActive()) return;
+    if (!Number.isFinite(frameDistance) || frameDistance <= 0 || frameDistance > QUEST_DISTANCE_MAX_STEP) return;
+    const speed = this.deltaSeconds > 0 ? frameDistance / this.deltaSeconds : 0;
+    if (Number.isFinite(speed) && speed > QUEST_DISTANCE_MAX_SPEED) return;
+    this.travelSpawn.progress += frameDistance;
+    if (this.travelSpawn.progress < this.travelSpawn.nextDistance) return;
+    const mode = this.travelSpawn.spawnMode || "search";
+    this.stopQuestDistanceSpawn();
+    this.spawnQuestFriend(mode);
+  }
+
+  spawnQuestFriend(mode = "search") {
     const playerModel = this.getPlayerModel?.();
     if (this.state.pendingSpawn || !playerModel) return;
     this.state.pendingSpawn = true;
     const basePos = playerModel.position.clone();
     const angle = Math.random() * Math.PI * 2;
-    const distance = QUEST_FRIEND_SPAWN_MIN_DISTANCE
-      + Math.random() * (QUEST_FRIEND_SPAWN_MAX_DISTANCE - QUEST_FRIEND_SPAWN_MIN_DISTANCE);
+    const isViewMode = mode === "view";
+    const minDistance = isViewMode ? QUEST_VIEW_APPROACH_MIN_DISTANCE : QUEST_FRIEND_SPAWN_MIN_DISTANCE;
+    const maxDistance = isViewMode ? QUEST_VIEW_APPROACH_MAX_DISTANCE : QUEST_FRIEND_SPAWN_MAX_DISTANCE;
+    const distance = minDistance + Math.random() * (maxDistance - minDistance);
     const spawnPos = new THREE.Vector3(
       basePos.x + Math.cos(angle) * distance,
       basePos.y,
@@ -206,6 +270,13 @@ export class QuestManager {
         this.attachPhysics?.(questFriend);
         this.state.friend = questFriend;
         this.state.trailMode = "toFriend";
+        if (isViewMode) {
+          questFriend.model.userData.approachToPlayer = true;
+          questFriend.model.userData.questApproachMode = "view";
+        } else {
+          questFriend.model.userData.approachToPlayer = true;
+          questFriend.model.userData.questApproachMode = "search";
+        }
       } finally {
         this.state.pendingSpawn = false;
       }
@@ -247,6 +318,7 @@ export class QuestManager {
     this.state.giver = null;
     this.state.giverPosition = null;
     this.state.friend = null;
+    this.stopQuestDistanceSpawn();
   }
 
   handleMushroomCollected(pickup) {
@@ -264,9 +336,12 @@ export class QuestManager {
     if (!quest || !playerModel) return;
     const friend = quest.friend;
 
+    this.updateQuestDistanceSpawn(playerModel);
+
     if (quest.status === "searching" && friend?.model) {
       const distanceToFriend = playerModel.position.distanceTo(friend.model.position);
       this.updateQuestTrail(playerModel.position, friend.model.position);
+      this.updateQuestFriendApproach(friend);
       if (distanceToFriend <= QUEST_FRIEND_REACH_DISTANCE) {
         quest.status = "found";
         quest.friendMode = "idle";
@@ -294,9 +369,33 @@ export class QuestManager {
     }
 
     if (quest.status === "found" && friend?.model) {
+      this.updateQuestFriendApproach(friend);
       this.updateQuestFriendActivity(friend);
       return;
     }
+  }
+
+  updateQuestFriendApproach(friend) {
+    if (!friend?.body || !friend?.model?.userData?.approachToPlayer) return;
+    const playerModel = this.getPlayerModel?.();
+    if (!playerModel) return;
+    const toPlayer = playerModel.position.clone().sub(friend.model.position);
+    toPlayer.y = 0;
+    const distance = toPlayer.length();
+    const vel = friend.body.linvel();
+    if (distance <= QUEST_FRIEND_APPROACH_STOP_DISTANCE) {
+      friend.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      friend.model.userData.approachToPlayer = false;
+      return;
+    }
+    const direction = toPlayer.normalize();
+    const speed = CHARACTER_MOVEMENT.runSpeed * QUEST_FRIEND_APPROACH_SPEED_MULTIPLIER;
+    friend.setDirection(direction);
+    friend.body.setLinvel({ x: direction.x * speed, y: vel.y, z: direction.z * speed }, true);
+    const angle = Math.atan2(direction.x, direction.z);
+    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+    friend.body.setRotation(rot, true);
+    friend.playAnimation("Run", 0.2);
   }
 
   updateQuestFriendFollow(friend) {
@@ -308,7 +407,7 @@ export class QuestManager {
     const vel = friend.body.linvel();
     if (distance > QUEST_FOLLOW_STOP_DISTANCE) {
       const direction = toPlayer.normalize();
-      const speed = CHARACTER_MOVEMENT.walkSpeed * 0.9;
+      const speed = CHARACTER_MOVEMENT.runSpeed * 0.85;
       friend.setDirection(direction);
       friend.body.setLinvel({ x: direction.x * speed, y: vel.y, z: direction.z * speed }, true);
       const angle = Math.atan2(direction.x, direction.z);
@@ -437,7 +536,7 @@ export class QuestManager {
       return true;
     }
     const direction = toTarget.normalize();
-    const speed = CHARACTER_MOVEMENT.walkSpeed * 0.9;
+    const speed = CHARACTER_MOVEMENT.runSpeed * 0.8;
     friend.setDirection(direction);
     friend.body.setLinvel({ x: direction.x * speed, y: vel.y, z: direction.z * speed }, true);
     const angle = Math.atan2(direction.x, direction.z);
@@ -460,6 +559,21 @@ export class QuestManager {
     }
     if (!target) {
       this.setQuestFriendIdle(friend);
+      return;
+    }
+    if (targetType === "mushroom") {
+      this.state.status = "searching";
+      this.state.friendMode = "idle";
+      this.state.friendTarget = null;
+      this.state.friendTargetType = null;
+      if (friend?.model) {
+        friend.model.removeFromParent?.();
+        this.scene?.remove(friend.model);
+      }
+      this.detachPhysics?.(friend);
+      this.state.friend = null;
+      this.startQuestDistanceSpawn("view");
+      this.clearQuestTrail();
       return;
     }
     this.state.friendMode = "leading";

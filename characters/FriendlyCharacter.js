@@ -1,9 +1,9 @@
 import * as THREE from "three";
 import { CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { MonsterCharacter } from "./MonsterCharacter.js";
+import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from "../healthUtils.js";
 
-const DEFAULT_HEALTH = 100;
-const LEVEL_HEALTH_STEP = 0.5;
+const DEFAULT_HEALTH = BASE_HEALTH_SEGMENTS;
 const WANDER_CHANGE_MS = 2400;
 const MOVE_FADE = 0.2;
 const IDLE_SPEED_MULTIPLIER = 1.0;
@@ -75,26 +75,21 @@ export class FriendlyCharacter extends MonsterCharacter {
     this.sizeScale = 1;
     this.speedMultiplier = 1;
     this.attackDamage = 0;
-    const healthMultiplier = 1 + LEVEL_HEALTH_STEP * (nextLevel - 1);
-    this.maxHealth = DEFAULT_HEALTH * healthMultiplier;
+    this.maxHealth = getMaxHealthSegments(nextLevel);
     this.model.userData.maxHealth = this.maxHealth;
     if (!preserveHealth) {
       this.health = this.maxHealth;
       this.model.userData.health = this.maxHealth;
-    } else if (this.health > this.maxHealth) {
-      this.health = this.maxHealth;
-      this.model.userData.health = this.maxHealth;
+    } else {
+      this.health = clampHealthSegments(this.health, this.level);
+      this.model.userData.health = this.health;
     }
     this.updateHealthBarScale();
     this.updateHealthBarTexture();
   }
 
   updateHealthBarScale() {
-    if (!this.healthBar) return;
-    const baseScale = this.healthBar.userData.baseScale;
-    const baseOffset = this.healthBar.userData.baseOffset;
-    this.healthBar.position.set(0, baseOffset, 0);
-    this.healthBar.scale.copy(baseScale);
+    super.updateHealthBarScale();
   }
 
   updateAI(deltaTime, playerModel, otherPlayers) {

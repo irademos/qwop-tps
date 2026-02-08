@@ -46,6 +46,29 @@ body {
   cursor: pointer;
 }
 
+
+.climb-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 30%;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  background: rgba(46, 204, 113, 0.92);
+  color: #06140b;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  z-index: 945;
+}
+
+.climb-overlay:hover {
+  background: rgba(76, 225, 138, 0.98);
+}
+
 .friendly-interact {
   position: absolute;
   left: 50%;
@@ -164,7 +187,8 @@ body {
 #joystick-container {
   position: fixed;
   bottom: 20px;
-  right: 20px;
+  left: 20px;
+  right: auto;
   width: 150px;
   height: 150px;
   z-index: 1000;
@@ -176,7 +200,7 @@ body {
 
 #jump-button {
   position: fixed;
-  bottom: 190px;
+  bottom: 20px;
   right: 20px;
   width: 80px;
   height: 80px;
@@ -195,7 +219,8 @@ body {
 #action-buttons {
   position: fixed;
   bottom: 20px;
-  left: 20px;
+  right: 120px;
+  left: auto;
   display: flex;
   flex-direction: row;
   gap: 10px;
@@ -221,35 +246,54 @@ body {
   display: none;
 }
 
-#action-buttons .spell-action {
+#action-buttons .mobile-option-action,
+#action-buttons .mobile-equip-action,
+#action-buttons .mobile-stop-action {
   display: none;
-  position: relative;
 }
 
-#action-buttons.spell-menu-active .spell-action {
+#action-buttons.mobile-spell-options .mobile-primary-action,
+#action-buttons.mobile-equip-mode .mobile-primary-action {
+  display: none;
+}
+
+#action-buttons.mobile-spell-options .mobile-option-action {
   display: flex;
 }
 
-#action-buttons.spell-menu-active #mobile-action-toggle,
-#action-buttons.spell-menu-active .mobile-action,
-#action-buttons.spell-menu-active .mobile-punch-action,
-#action-buttons.spell-menu-active .mobile-equip-action {
+#action-buttons.mobile-freeze-mode .mobile-option-action {
+  display: flex;
+}
+
+#action-buttons.mobile-freeze-mode #punch-kick-button,
+#action-buttons.mobile-freeze-mode #right-punch-button {
   display: none;
 }
 
-#action-buttons .spell-disabled {
-  opacity: 0.6;
+#action-buttons.mobile-equip-mode .mobile-equip-action {
+  display: flex;
 }
 
-#action-buttons .spell-timer {
-  position: absolute;
-  bottom: 4px;
-  right: 6px;
-  font-size: 10px;
-  background: rgba(0, 0, 0, 0.45);
+
+#mobile-action-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 94px;
+  z-index: 1100;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.78);
   color: #fff;
-  padding: 2px 4px;
-  border-radius: 6px;
+  font-size: 12px;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+#mobile-action-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 #camera-controls {
@@ -403,21 +447,58 @@ body {
   cursor: pointer;
 }
 
-#health-bar {
+#health-display {
   position: absolute;
-  top: 38px;
+  top: 40px;
   left: 10px;
-  width: 150px;
-  height: 20px;
-  background: #555;
-  border: 2px solid #000;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 6px;
   z-index: 1000;
+  font-family: 'Press Start 2P', sans-serif;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
 }
 
-#health-fill {
-  height: 100%;
-  background: #0f0;
-  width: 100%;
+#health-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  --health-fill-start: #7be26a;
+  --health-fill-end: #2e7d32;
+  background: rgba(0, 0, 0, 0.6);
+  border: 2px solid #000;
+  border-radius: 6px;
+}
+
+#health-bar[data-health-level="mid"] {
+  --health-fill-start: #ffe066;
+  --health-fill-end: #f4b400;
+}
+
+#health-bar[data-health-level="low"] {
+  --health-fill-start: #ffb347;
+  --health-fill-end: #f57c00;
+}
+
+#health-bar[data-health-level="critical"] {
+  --health-fill-start: #f86b6f;
+  --health-fill-end: #c62828;
+}
+
+.health-segment {
+  width: 6px;
+  height: 12px;
+  background: rgba(70, 70, 70, 0.9);
+  border: 1px solid #000;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.health-segment.filled {
+  background: linear-gradient(180deg, var(--health-fill-start), var(--health-fill-end));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
 }
 
 #ammo-display {
@@ -505,6 +586,55 @@ body {
 #treasure-popup.visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+#craft-message {
+  position: absolute;
+  top: 248px;
+  left: 10px;
+  padding: 6px 10px;
+  background: rgba(20, 24, 38, 0.88);
+  border: 2px solid #000;
+  border-radius: 6px;
+  color: #c7e6ff;
+  font-family: 'Press Start 2P', sans-serif;
+  font-size: 11px;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  z-index: 1100;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#craft-message.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#hunger-warning {
+  position: fixed;
+  top: 22%;
+  left: 50%;
+  transform: translate(-50%, -30%) scale(0.98);
+  padding: 12px 16px;
+  border: 3px solid #000;
+  border-radius: 10px;
+  background: rgba(96, 14, 14, 0.92);
+  color: #ffe2b7;
+  font-family: 'Press Start 2P', sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.85);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1200;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+#hunger-warning.visible {
+  opacity: 1;
+  transform: translate(-50%, -30%) scale(1);
 }
 
 #player-info {
@@ -758,6 +888,10 @@ body {
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
 
+body.settings-open #settings-button {
+  display: none;
+}
+
 #home-storage-overlay {
   position: fixed;
   inset: 0;
@@ -790,11 +924,31 @@ body {
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
 
+#craft-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+  overflow-y: auto;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+
 #home-storage-panel {
   outline: none;
 }
 
 #merchant-panel {
+  outline: none;
+}
+
+#craft-panel {
   outline: none;
 }
 
@@ -973,6 +1127,161 @@ body {
 
 .settings-button.settings-button-secondary {
   background: #6c7a89;
+}
+
+.craft-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.craft-recipes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 55vh;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.craft-recipe {
+  border: 1px solid #e6e6e6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f9f9f9;
+}
+
+.craft-recipe-title {
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.craft-recipe-detail {
+  font-size: 11px;
+  color: #444;
+}
+
+.craft-materials-body {
+  gap: 16px;
+}
+
+.craft-inventory {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+  max-height: 40vh;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.craft-inventory-item {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+  border: 1px solid #e6e6e6;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+  gap: 10px;
+  min-height: 140px;
+}
+
+.craft-item-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.craft-inventory .inventory-icon-wrapper {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+}
+
+.craft-inventory .inventory-icon {
+  width: 100%;
+  height: 100%;
+}
+
+.craft-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+}
+
+.craft-item-name {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.craft-item-qty {
+  font-size: 11px;
+  color: #555;
+}
+
+.craft-item-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.craft-adjust {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: none;
+  background: #1f8bff;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.craft-adjust:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.craft-selected {
+  border: 1px solid #e6e6e6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fdfdfd;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.craft-selected-title {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.craft-selected-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: #444;
+}
+
+.craft-selected-item {
+  display: flex;
+  justify-content: space-between;
+}
+
+.craft-selected-empty {
+  color: #666;
+}
+
+.craft-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .settings-confirmation {
@@ -1446,17 +1755,18 @@ body {
 
 @media (max-width: 720px) {
   #settings-overlay {
-    align-items: flex-start;
-    
-    margin-top: 18%;
+    align-items: center;
+    margin-top: 0;
   }
 
   .settings-shell {
     width: 100%;
     max-width: none;
-    /* ensure it never exceeds visible viewport */
-    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    border-radius: 16px 16px 0 0;
+    height: 90vh;
+    height: 90svh;
+    height: 90dvh;
+    max-height: 90dvh;
+    border-radius: 16px;
   }
 
   .settings-shell.is-mobile .settings-tabs {
@@ -1483,6 +1793,30 @@ body {
 
   .inventory-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  body.settings-open #health-display,
+  body.settings-open #hunger-bar,
+  body.settings-open #energy-bar,
+  body.settings-open #magic-bar,
+  body.settings-open #xp-bar,
+  body.settings-open #player-info,
+  body.settings-open #level-popup,
+  body.settings-open #action-buttons,
+  body.settings-open #joystick-container,
+  body.settings-open #jump-button,
+  body.settings-open .map-controls,
+  body.settings-open #camera-controls,
+  body.settings-open #interaction-tooltip,
+  body.settings-open #climb-overlay,
+  body.settings-open #friendly-interact,
+  body.settings-open #ammo-display,
+  body.settings-open #ammo-popup,
+  body.settings-open #coin-popup,
+  body.settings-open #treasure-popup,
+  body.settings-open #craft-message,
+  body.settings-open #voice-transcript {
+    display: none;
   }
 }
 
@@ -1698,8 +2032,8 @@ body {
 @media (pointer: coarse) {
   #action-buttons {
     bottom: 16px;
-    left: 16px;
-    flex-direction: column;
+    right: 100px;
+    left: auto;
     gap: 6px;
   }
 
@@ -1709,57 +2043,12 @@ body {
     font-size: clamp(12px, 2.6vw, 18px);
   }
 
-  #action-buttons .mobile-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-expanded .mobile-action {
-    display: flex;
-  }
-
-  #action-buttons .mobile-punch-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-punch-mode .mobile-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-punch-mode .mobile-punch-action {
-    display: flex;
-  }
-
-  #action-buttons .mobile-equip-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-equip-mode .mobile-action {
-    display: none;
-  }
-
-  #action-buttons.mobile-equip-mode .mobile-equip-action {
-    display: flex;
-  }
-
-  #mobile-action-toggle {
-    display: flex;
-    font-size: 24px;
-    padding-bottom: 4px;
-  }
-
-  #mobile-action-toggle[aria-expanded="true"] {
-    background-color: rgba(255, 255, 255, 0.7);
-  }
-
-  .mobile-only {
-    display: flex;
-  }
-
   #joystick-container {
     width: 120px;
     height: 120px;
     bottom: 16px;
-    right: 16px;
+    left: 16px;
+    right: auto;
   }
 
   #jump-button {
@@ -1767,7 +2056,7 @@ body {
     height: 70px;
     line-height: 70px;
     font-size: 14px;
-    bottom: 140px;
+    bottom: 16px;
     right: 16px;
   }
 

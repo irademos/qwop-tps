@@ -2,13 +2,15 @@ import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { ATTACKS } from "../items/melee.js";
 import { getKnockbackImpulse } from "../knockback.js";
+import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from "../healthUtils.js";
 
 const AGGRO_RADIUS = 12;
 const WANDER_CHANGE_MS = 2000;
 const ATTACK_NAME = 'Weapon';
+const JUMP_ATTACK_NAME = 'JumpAttack';
 const MOVE_FADE = 0.2;
 const ATTACK_FADE = 0.1;
-const DEFAULT_HEALTH = 100;
+const DEFAULT_HEALTH = BASE_HEALTH_SEGMENTS;
 const MONSTER_ATTACK = ATTACKS.mutantPunch;
 const ATTACK_COOLDOWN_RANGE_MS = [2000, 5000];
 const STANDOFF_DISTANCE = 2.5;
@@ -16,15 +18,28 @@ const STANDOFF_BUFFER = 0.35;
 const STRAFE_SPEED = 1.1;
 const STRAFE_OSCILLATION = 0.004;
 const ATTACK_LUNGE_DURATION_MS = 280;
+const JUMP_ATTACK_CHANCE = 0.22;
+const JUMP_ATTACK_DAMAGE_MULTIPLIER = 2.75;
+const JUMP_ATTACK_CONTACT_WINDOW = [0.7, 0.9];
 const STANDOFF_RETREAT_INTERVAL_MS = 2000;
-const HEALTH_BAR_WIDTH = 128;
 const HEALTH_BAR_HEIGHT = 14;
+const HEALTH_BAR_PADDING = 4;
+const HEALTH_BAR_SEGMENT_WIDTH = 10;
+const HEALTH_BAR_SEGMENT_GAP = 2;
 const HEALTH_BAR_DISPLAY_MS = 1800;
 const HEALTH_BAR_OFFSET_Y = 2.2;
 const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
 const LEVEL_SIZE_STEP = 0.5;
 const LEVEL_SPEED_STEP = 0.08;
+const MONSTER_RUN_SPEED_OFFSET = 1.8;
 const DEATH_REMOVAL_DELAY_MS = 30000;
+const FRIENDLY_APPROACH_BLEND = 0.07;
+const FRIENDLY_DRIFT_LEVEL_SPEED_STEP = 0.06;
+const FRIENDLY_DRIFT_MIN_MULTIPLIER = 0.45;
+const FRIENDLY_DRIFT_AVOID_RADIUS = 8;
+const FRIENDLY_DRIFT_AVOID_HARD_RADIUS = 3;
+const FRIENDLY_DRIFT_AVOID_MIN_FACTOR = 0.02;
+const ENEMY_DISENGAGE_RADIUS = 22;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -55,6 +70,7 @@ export class MonsterCharacter extends CharacterBase {
     this.nextAttackTime = 0;
     this.attackStartTime = null;
     this.attackHasHit = false;
+    this.attackAnimationName = ATTACK_NAME;
     this.isKnocked = false;
     this.knockbackEndTime = 0;
     this.freezeEndTime = 0;
@@ -81,7 +97,8 @@ export class MonsterCharacter extends CharacterBase {
 
   applyDamage(amount) {
     if (this.isDead) return;
-    this.health = Math.max(0, this.health - amount);
+    const damage = Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+    this.health = Math.max(0, this.health - damage);
     this.model.userData.health = this.health;
     this.showHealthBar();
     if (this.health <= 0) {
@@ -129,8 +146,8 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.level = nextLevel;
     this.sizeScale = 1 + LEVEL_SIZE_STEP * (nextLevel - 1);
     this.speedMultiplier = Math.max(0.6, 1 - LEVEL_SPEED_STEP * (nextLevel - 1));
-    this.attackDamage = MONSTER_ATTACK.damage * this.sizeScale;
-    this.maxHealth = DEFAULT_HEALTH * this.sizeScale;
+    this.attackDamage = Math.max(1, Math.round(MONSTER_ATTACK.damage * this.sizeScale));
+    this.maxHealth = getMaxHealthSegments(nextLevel);
     this.model.userData.maxHealth = this.maxHealth;
     if (this.pivot?.scale) {
       this.pivot.scale.set(
@@ -143,11 +160,18 @@ export class MonsterCharacter extends CharacterBase {
     if (!preserveHealth) {
       this.health = this.maxHealth;
       this.model.userData.health = this.maxHealth;
-    } else if (this.health > this.maxHealth) {
-      this.health = this.maxHealth;
-      this.model.userData.health = this.maxHealth;
+    } else {
+      this.health = clampHealthSegments(this.health, this.level);
+      this.model.userData.health = this.health;
     }
     this.updateHealthBarTexture();
+  }
+
+  getFriendlyDriftSpeedMultiplier() {
+    return Math.max(
+      FRIENDLY_DRIFT_MIN_MULTIPLIER,
+      1 - FRIENDLY_DRIFT_LEVEL_SPEED_STEP * (this.level - 1)
+    );
   }
 
   applyKnockback({ direction, strength } = {}) {
@@ -176,9 +200,9 @@ export class MonsterCharacter extends CharacterBase {
     }
     if (Number.isFinite(data.hp)) {
       const previousHealth = this.health;
-      this.health = data.hp;
-      this.model.userData.health = data.hp;
-      if (data.hp < previousHealth) {
+      this.health = clampHealthSegments(data.hp, this.level);
+      this.model.userData.health = this.health;
+      if (this.health < previousHealth) {
         this.showHealthBar();
       }
     }
@@ -199,7 +223,39 @@ export class MonsterCharacter extends CharacterBase {
     return now - this.deathTime >= DEATH_REMOVAL_DELAY_MS;
   }
 
-  updateAI(deltaTime, playerModel, otherPlayers) {
+  getFriendlyDriftAvoidanceFactor(closestPlayer, context = {}) {
+    const zones = Array.isArray(context.friendlyAvoidanceZones)
+      ? context.friendlyAvoidanceZones
+      : [];
+    if (!closestPlayer?.model || zones.length === 0) {
+      return 1;
+    }
+
+    let nearestZoneDistance = Infinity;
+    for (const zonePos of zones) {
+      if (!zonePos) continue;
+      const dist = closestPlayer.model.position.distanceTo(zonePos);
+      if (dist < nearestZoneDistance) {
+        nearestZoneDistance = dist;
+      }
+    }
+
+    if (!Number.isFinite(nearestZoneDistance)) {
+      return 1;
+    }
+    if (nearestZoneDistance <= FRIENDLY_DRIFT_AVOID_HARD_RADIUS) {
+      return FRIENDLY_DRIFT_AVOID_MIN_FACTOR;
+    }
+    if (nearestZoneDistance >= FRIENDLY_DRIFT_AVOID_RADIUS) {
+      return 1;
+    }
+
+    const normalized = (nearestZoneDistance - FRIENDLY_DRIFT_AVOID_HARD_RADIUS)
+      / (FRIENDLY_DRIFT_AVOID_RADIUS - FRIENDLY_DRIFT_AVOID_HARD_RADIUS);
+    return Math.max(FRIENDLY_DRIFT_AVOID_MIN_FACTOR, normalized);
+  }
+
+  updateAI(deltaTime, playerModel, otherPlayers, context = {}) {
     const now = Date.now();
     if (!this.model) return;
     const body = this.body;
@@ -254,14 +310,40 @@ export class MonsterCharacter extends CharacterBase {
       this.model.userData.mode = "enemy";
     }
 
+    if (this.model.userData.mode === "enemy" && closestDistance > ENEMY_DISENGAGE_RADIUS) {
+      this.model.userData.mode = "friendly";
+      this.attackStartTime = null;
+      this.attackHasHit = false;
+      this.attackAnimationName = ATTACK_NAME;
+    }
+
     if (this.model.userData.mode === "friendly") {
       if (now - this.lastDirectionChange > WANDER_CHANGE_MS) {
         this.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         this.lastDirectionChange = now;
       }
+      const wanderDirection = this.model.userData.direction.clone();
+      const shouldDriftToClosestPlayer = context.enableFriendlyDrift !== false;
+      if (shouldDriftToClosestPlayer) {
+        const approachDirection = closestPlayer.model.position
+          .clone()
+          .sub(this.model.position)
+          .setY(0);
+        if (approachDirection.lengthSq() > 0.0001) {
+          approachDirection.normalize();
+          const avoidFactor = this.getFriendlyDriftAvoidanceFactor(closestPlayer, context);
+          const approachBlend = FRIENDLY_APPROACH_BLEND * avoidFactor;
+          wanderDirection.lerp(approachDirection, approachBlend).normalize();
+          this.setDirection(wanderDirection);
+        }
+      }
       const movement = this.model.userData.direction
         .clone()
-        .multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier);
+        .multiplyScalar(
+          CHARACTER_MOVEMENT.walkSpeed
+          * this.speedMultiplier
+          * this.getFriendlyDriftSpeedMultiplier()
+        );
       const vel = body.linvel();
       body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
       const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
@@ -272,7 +354,10 @@ export class MonsterCharacter extends CharacterBase {
       return;
     }
 
-    this.updateCombatAI(delta, closestPlayer, allPlayers, (player) => {
+    this.updateCombatAI(delta, closestPlayer, allPlayers, (player, hitContext = {}) => {
+      const damage = Number.isFinite(hitContext.damage)
+        ? Math.max(1, Math.round(hitContext.damage))
+        : this.attackDamage;
       const localControls = window.playerControls;
       if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
         localControls.isInvincible = false;
@@ -280,7 +365,7 @@ export class MonsterCharacter extends CharacterBase {
       }
       const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
       if (player.id === 'local' && !localControls?.isKnocked && !isInvincible) {
-        window.localHealth = Math.max(0, window.localHealth - this.attackDamage);
+        window.localHealth = Math.max(0, window.localHealth - damage);
         if (localControls) {
           localControls.applyKnockback({
             direction: this.model.userData.direction.clone(),
@@ -290,7 +375,8 @@ export class MonsterCharacter extends CharacterBase {
       } else if (player.id !== 'local') {
         const op = otherPlayers[player.id];
         if (op) {
-          op.health = Math.max(0, (op.health || 100) - this.attackDamage);
+          const current = Number.isFinite(op.health) ? op.health : BASE_HEALTH_SEGMENTS;
+          op.health = Math.max(0, current - damage);
         }
       }
     });
@@ -333,7 +419,7 @@ export class MonsterCharacter extends CharacterBase {
     const distance = this.model.position.distanceTo(targetPos);
     const attackRange = MONSTER_ATTACK.range;
     const canAttack = !this.attackStartTime && now >= this.nextAttackTime;
-    const runSpeed = (CHARACTER_MOVEMENT.runSpeed - 1.5) * this.speedMultiplier;
+    const runSpeed = (CHARACTER_MOVEMENT.runSpeed - MONSTER_RUN_SPEED_OFFSET) * this.speedMultiplier;
     const walkSpeed = CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier;
 
     if (this.attackStartTime) {
@@ -382,7 +468,9 @@ export class MonsterCharacter extends CharacterBase {
       if (canAttack && distance <= STANDOFF_DISTANCE + 0.5) {
         this.attackDirection.copy(faceDir);
         this.setDirection(this.attackDirection);
-        this.playAnimation(ATTACK_NAME, ATTACK_FADE);
+        const useJumpAttack = this.actions?.[JUMP_ATTACK_NAME] && Math.random() < JUMP_ATTACK_CHANCE;
+        this.attackAnimationName = useJumpAttack ? JUMP_ATTACK_NAME : ATTACK_NAME;
+        this.playAnimation(this.attackAnimationName, ATTACK_FADE);
         this.lastAttackTime = now;
         this.attackStartTime = now;
         this.attackHasHit = false;
@@ -397,23 +485,40 @@ export class MonsterCharacter extends CharacterBase {
 
     if (this.attackStartTime) {
       const elapsed = now - this.attackStartTime;
-      if (!this.attackHasHit && elapsed >= MONSTER_ATTACK.hitTime && elapsed <= MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
+      const currentAction = this.attackAnimationName || ATTACK_NAME;
+      const actionClip = this.actions?.[currentAction]?.getClip?.();
+      const durationMs = Number.isFinite(actionClip?.duration) ? actionClip.duration * 1000 : 0;
+      const isJumpAttack = currentAction === JUMP_ATTACK_NAME;
+      const hitStart = isJumpAttack && durationMs > 0
+        ? durationMs * JUMP_ATTACK_CONTACT_WINDOW[0]
+        : MONSTER_ATTACK.hitTime;
+      const hitEnd = isJumpAttack && durationMs > 0
+        ? durationMs * JUMP_ATTACK_CONTACT_WINDOW[1]
+        : MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow;
+
+      if (!this.attackHasHit && elapsed >= hitStart && elapsed <= hitEnd) {
         const hitTargets = Array.isArray(targets) && targets.length ? targets : [primaryTarget];
+        const hitDamage = isJumpAttack
+          ? this.attackDamage * JUMP_ATTACK_DAMAGE_MULTIPLIER
+          : this.attackDamage;
         hitTargets.forEach((target) => {
           if (!target?.model) return;
           const dist = this.model.position.distanceTo(target.model.position);
           if (dist <= attackRange) {
             onHit?.(target, {
               direction: this.model.userData.direction.clone(),
-              strength: MONSTER_ATTACK.knockbackStrength
+              strength: MONSTER_ATTACK.knockbackStrength,
+              damage: hitDamage,
+              attackName: currentAction
             });
           }
         });
         this.attackHasHit = true;
       }
-      if (elapsed > MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow) {
+      if (elapsed > hitEnd) {
         this.attackStartTime = null;
         this.attackHasHit = false;
+        this.attackAnimationName = ATTACK_NAME;
       }
     }
   }
@@ -425,7 +530,10 @@ export class MonsterCharacter extends CharacterBase {
 
   createHealthBar() {
     const canvas = document.createElement('canvas');
-    canvas.width = HEALTH_BAR_WIDTH;
+    const segmentCount = Math.max(1, Math.round(this.maxHealth || DEFAULT_HEALTH));
+    canvas.width = HEALTH_BAR_PADDING * 2
+      + segmentCount * HEALTH_BAR_SEGMENT_WIDTH
+      + Math.max(0, segmentCount - 1) * HEALTH_BAR_SEGMENT_GAP;
     canvas.height = HEALTH_BAR_HEIGHT;
     const context = canvas.getContext('2d');
     const texture = new THREE.CanvasTexture(canvas);
@@ -455,14 +563,24 @@ export class MonsterCharacter extends CharacterBase {
     const canvas = this.healthBar.userData.canvas;
     const maxHealth = this.maxHealth || DEFAULT_HEALTH;
     const clampedHealth = Math.max(0, Math.min(maxHealth, this.health));
-    const pct = maxHealth > 0 ? clampedHealth / maxHealth : 0;
+    const segmentCount = Math.max(1, Math.round(maxHealth));
+    const width = HEALTH_BAR_PADDING * 2
+      + segmentCount * HEALTH_BAR_SEGMENT_WIDTH
+      + Math.max(0, segmentCount - 1) * HEALTH_BAR_SEGMENT_GAP;
+    if (canvas.width !== width || canvas.height !== HEALTH_BAR_HEIGHT) {
+      canvas.width = width;
+      canvas.height = HEALTH_BAR_HEIGHT;
+    }
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = 'rgba(0, 0, 0, 0.6)';
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = 'rgba(60, 60, 60, 0.8)';
     context.fillRect(2, 2, canvas.width - 4, canvas.height - 4);
-    context.fillStyle = 'rgba(214, 53, 60, 0.9)';
-    context.fillRect(4, 4, (canvas.width - 8) * pct, canvas.height - 8);
+    for (let i = 0; i < segmentCount; i += 1) {
+      const x = HEALTH_BAR_PADDING + i * (HEALTH_BAR_SEGMENT_WIDTH + HEALTH_BAR_SEGMENT_GAP);
+      context.fillStyle = i < clampedHealth ? 'rgba(214, 53, 60, 0.9)' : 'rgba(80, 80, 80, 0.85)';
+      context.fillRect(x, 4, HEALTH_BAR_SEGMENT_WIDTH, canvas.height - 8);
+    }
     this.healthBar.userData.texture.needsUpdate = true;
   }
 
@@ -478,8 +596,9 @@ export class MonsterCharacter extends CharacterBase {
     const scale = this.sizeScale || 1;
     const baseScale = this.healthBar.userData.baseScale || HEALTH_BAR_SCALE;
     const baseOffset = this.healthBar.userData.baseOffset ?? HEALTH_BAR_OFFSET_Y;
+    const segmentScale = (this.maxHealth || DEFAULT_HEALTH) / BASE_HEALTH_SEGMENTS;
     this.healthBar.position.set(0, baseOffset * scale, 0);
-    this.healthBar.scale.set(baseScale.x * scale, baseScale.y * scale, baseScale.z);
+    this.healthBar.scale.set(baseScale.x * scale * segmentScale, baseScale.y * scale, baseScale.z);
   }
 
   updateHealthBarVisibility() {

@@ -7,6 +7,7 @@ const animationFiles = {
   Walk: 'Old Man Walk.fbx',
   Run: 'Drunk Run Forward.fbx',
   Weapon: 'Mutant Punch.fbx',
+  JumpAttack: 'Jump Attack.fbx',
   Death: 'Dying.fbx',
   Hit: 'Flying Back Death.fbx',
   TwistDance: 'Twist Dance.fbx'
@@ -110,9 +111,6 @@ export function loadMonsterModel(modelPath, callback) {
           }
 
           const model = fbx;
-          const modelName = modelPath.split('/').pop().toLowerCase();
-          const fastModels = ['cowboy'];
-          const forceFast = fastModels.some(n => modelName.includes(n));
           const lodConfigs = normalizeLodConfigs(config);
 
           stripEmbeddedLights(model);
@@ -154,10 +152,7 @@ export function loadMonsterModel(modelPath, callback) {
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
                 const action = mixer.clipAction(cachedClip);
-                if (forceFast) {
-                  action.setEffectiveTimeScale(10.0);
-                }
-                if (['Weapon', 'Death', 'Hit'].includes(name)) {
+                if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
                 }
@@ -176,10 +171,7 @@ export function loadMonsterModel(modelPath, callback) {
                   }
                   animationClipCache.set(file, clip);
                   const action = mixer.clipAction(clip);
-                  if (forceFast) {
-                    action.setEffectiveTimeScale(10.0);
-                  }
-                  if (['Weapon', 'Death', 'Hit'].includes(name)) {
+                  if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
                   }

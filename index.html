@@ -11,7 +11,6 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <style>
     #hunger-bar,
-    #energy-bar,
     #magic-bar {
       position: absolute;
       left: 10px;
@@ -23,19 +22,14 @@
     }
 
     #hunger-bar {
-      top: 66px;
-    }
-
-    #energy-bar {
-      top: 90px;
+      top: 74px;
     }
 
     #magic-bar {
-      top: 114px;
+      top: 98px;
     }
 
     #hunger-fill,
-    #energy-fill,
     #magic-fill {
       height: 100%;
       width: 100%;
@@ -43,10 +37,6 @@
 
     #hunger-fill {
       background: #f4c542;
-    }
-
-    #energy-fill {
-      background: #3fa9f5;
     }
 
     #magic-fill {
@@ -99,8 +89,13 @@
     </div>
   </div>
   <div id="interaction-tooltip" class="interaction-tooltip"></div>
+  <button id="climb-overlay" class="climb-overlay hidden" type="button" aria-label="Start climbing">Tap to climb</button>
   <button id="friendly-interact" class="friendly-interact hidden" type="button" aria-label="Interact"></button>
   <div id="friendly-dialogue" class="friendly-dialogue hidden" role="dialog" aria-live="polite" aria-atomic="true">
+    <div class="friendly-dialogue-text"></div>
+    <div class="friendly-dialogue-options"></div>
+  </div>
+  <div id="craft-dialogue" class="friendly-dialogue hidden" role="dialog" aria-live="polite" aria-atomic="true">
     <div class="friendly-dialogue-text"></div>
     <div class="friendly-dialogue-options"></div>
   </div>
@@ -119,9 +114,10 @@
       <div id="xp-bar-fill"></div>
     </div>
   </div>
-  <div id="health-bar"><div id="health-fill"></div></div>
+  <div id="health-display">
+    <div id="health-bar" role="img" aria-label="Health bar"></div>
+  </div>
   <div id="hunger-bar"><div id="hunger-fill"></div></div>
-  <div id="energy-bar"><div id="energy-fill"></div></div>
   <div id="magic-bar"><div id="magic-fill"></div></div>
   <div id="ammo-display" class="hidden">
     <span id="ammo-icon">❄️</span>
@@ -130,11 +126,12 @@
   <div id="ammo-popup" aria-live="polite" aria-atomic="true"></div>
   <div id="coin-popup" aria-live="polite" aria-atomic="true"></div>
   <div id="treasure-popup" aria-live="polite" aria-atomic="true"></div>
-  <div id="voice-transcript" aria-live="polite" aria-atomic="true"></div>
-  <div id="action-buttons">
-    <button id="mobile-action-toggle" class="action-button mobile-only" aria-expanded="false" aria-label="Toggle actions">⋯</button>
-    <button id="talk-button" class="action-button mobile-action">🎤</button>
+  <div id="craft-message" aria-live="polite" aria-atomic="true"></div>
+  <div id="hunger-warning" aria-live="polite" aria-atomic="true">
+    You're famished! Eat something to avoid losing health!
   </div>
+  <div id="voice-transcript" aria-live="polite" aria-atomic="true"></div>
+  <div id="action-buttons"></div>
   
   <!-- Settings Button -->
   <div id="settings-button">⚙️</div>
@@ -152,6 +149,11 @@
   <!-- Merchant Overlay -->
   <div id="merchant-overlay">
     <div id="merchant-panel"></div>
+  </div>
+
+  <!-- Crafting Overlay -->
+  <div id="craft-overlay">
+    <div id="craft-panel"></div>
   </div>
 
   <!-- Game Over Overlay -->

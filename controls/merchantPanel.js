@@ -185,11 +185,12 @@ function renderTab(tabId) {
 
     const iconWrapper = createElement('div', 'inventory-icon-wrapper');
     const fallbackIcon = getFallbackIcon(itemId);
-    const itemIcon = item?.icon || '';
+    const itemMeta = getMerchantItemMeta(itemId);
+    const itemIcon = item?.icon || itemMeta?.icon || '';
     if (itemIcon) {
       const img = document.createElement('img');
       img.className = 'inventory-icon';
-      img.alt = item?.name || itemId;
+      img.alt = item?.name || itemMeta?.name || itemId;
       img.loading = 'lazy';
       img.src = itemIcon;
       img.addEventListener('error', () => {

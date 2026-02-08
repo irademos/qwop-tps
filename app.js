@@ -23,6 +23,7 @@ import { AutumnSword } from './items/autumnSword.js';
 import { Bomb } from './items/bomb.js';
 import { TreasureChest } from './items/treasure_chest.js';
 import { Bed } from './items/bed.js';
+import { CraftTable } from './items/craft_table.js';
 import { createNature } from './environment/nature.js';
 import { createCabin } from './environment/cabin.js';
 import { createTower } from './environment/tower.js';
@@ -37,10 +38,19 @@ import { fetchOSMData } from './osmClient.js';
 import { overpassToGeoJSON } from './osmGeoJson.js';
 import { createMapRenderer } from './environment/mapRender.js';
 import { createBuildingsRenderer } from './environment/buildingsRender.js';
+import {
+  BASE_HEALTH_SEGMENTS,
+  HEALTH_SEGMENT_VALUE,
+  clampHealthSegments,
+  convertPointsToSegments,
+  getMaxHealthSegments,
+  normalizeHealthSegments
+} from './healthUtils.js';
 import { createTileCache } from './tileCache.js';
 import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
 import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI } from './controls/homeStoragePanel.js';
+import { CRAFT_RECIPES, initCraftPanel, openCraftPanel, updateUI as updateCraftUI } from './controls/craftPanel.js';
 import { initMerchantPanel, updateMerchantUI } from './controls/merchantPanel.js';
 import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
 import { getMerchantFriendly, initMerchant, setMerchantHost, setMerchantRoom } from './characters/merchant.js';
@@ -66,6 +76,7 @@ import {
   ensureMonsterRecord,
   persistMonsterHp,
   persistMonsterState,
+  removeMonsterRecord,
   setMonsterPersistenceHost
 } from './monsterPersistence.js';
 
@@ -80,16 +91,17 @@ if ('serviceWorker' in navigator) {
 }
 
 const DEFAULT_CHARACTER_MODEL = "/models/base_character_2.fbx";
-const MAX_MONSTERS = 2;
+const MAX_MONSTERS = 6;
 const MONSTER_MODELS = [
   "/models/zombie.fbx",
   "/models/zombie_boy.fbx",
   "/models/zombie_green.fbx"
 ];
 const MONSTER_SPAWN_MIN_RADIUS = 25;
-const MONSTER_SPAWN_MAX_RADIUS = 80;
+const MONSTER_SPAWN_MAX_RADIUS = 160;
 const MONSTER_RESPAWN_DELAY_RANGE_MS = [3000, 5000];
 const MONSTER_SPAWN_ATTEMPTS = 12;
+const MONSTER_SNAPSHOT_TIMEOUT_MS = 6000;
 const MONSTER_LEVEL_WEIGHTS = [
   { level: 1, weight: 0.55 },
   { level: 2, weight: 0.25 },
@@ -129,7 +141,7 @@ const BOMB_THROW_LIFETIME = 15000;
 const BOMB_THROW_UPWARD_BIAS = 0.25;
 const BOMB_GROUND_Y = 0.25;
 const BOMB_DAMAGE_RADIUS = 5;
-const BOMB_BASE_DAMAGE = 60;
+const BOMB_BASE_DAMAGE = 6;
 const BOMB_KNOCKBACK_STRENGTH = 6;
 const BOMB_MIST_LIFETIME_MS = 8000;
 const BOMB_MIST_PARTICLE_COUNT = 35;
@@ -548,11 +560,11 @@ async function main() {
 
   const FOOD_HUNGER_GAIN = 25;
   const FOOD_ENERGY_GAIN = 15;
-  const HEALTH_PICKUP_GAIN = 20;
-  const MUSHROOM_HEALTH_GAIN = 6;
+  const HEALTH_PICKUP_SEGMENTS = 2;
+  const MUSHROOM_HEALTH_SEGMENTS = 1;
   const MUSHROOM_HUNGER_GAIN = 6;
   const MUSHROOM_ENERGY_GAIN = 8;
-  const APPLE_HEALTH_GAIN = 4;
+  const APPLE_HEALTH_SEGMENTS = 1;
   const APPLE_HUNGER_GAIN = 4;
   const APPLE_ENERGY_GAIN = 6;
   const APPLE_DROP_LIFT = 0.25;
@@ -560,6 +572,8 @@ async function main() {
   const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.45;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
   const SLEEP_RECOVERY_PER_SECOND = 100 / 3600;
+  const HUNGER_HEALTH_DECAY_SEGMENTS_PER_SECOND = HUNGER_HEALTH_DECAY_PER_SECOND / HEALTH_SEGMENT_VALUE;
+  const SLEEP_RECOVERY_SEGMENTS_PER_SECOND = SLEEP_RECOVERY_PER_SECOND / HEALTH_SEGMENT_VALUE;
   const PICKUP_RADIUS = 1.2;
   const APPLE_PICKUP_RADIUS = 3;
   const WOOD_ITEM_ID = 'wood';
@@ -652,11 +666,12 @@ async function main() {
 
   let monsters = [];
   window.monsters = monsters;
-  const monsterSlotIds = ["monster:0", "monster:1"];
+  const monsterSlotIds = Array.from({ length: MAX_MONSTERS }, (_, index) => `monster:${index}`);
   const spawningSlots = new Set();
   const respawnTimers = new Map();
   let monstersSeeded = false;
   let monsterSnapshotLoaded = false;
+  let monsterSnapshotTimeout = null;
   let unsubscribeMonsterUpdates = null;
   const recentMonsterHits = new Map();
 
@@ -1264,7 +1279,7 @@ async function main() {
           model: other.model,
           nameLabel: other.nameLabel,
           name: data.name,
-          health: existing?.health ?? 100,
+          health: existing?.health ?? BASE_HEALTH_SEGMENTS,
           modelPath: desiredModel,
           targetPos: new THREE.Vector3(),
           targetQuat: new THREE.Quaternion(),
@@ -1488,6 +1503,11 @@ async function main() {
   multiplayer.onReady = async ({ roomId }) => {
     if (!roomId) {
       monstersSeeded = true;
+      monsterSnapshotLoaded = true;
+      if (monsterSnapshotTimeout) {
+        clearTimeout(monsterSnapshotTimeout);
+        monsterSnapshotTimeout = null;
+      }
       friendlyNpcManager?.onRoomReady({ roomId: null, isHost: multiplayer.isHost });
       await setMerchantRoom({ roomId: null, isHost: multiplayer.isHost });
       return;
@@ -1501,6 +1521,16 @@ async function main() {
     setMonsterPersistenceHost(isHost);
     logMonsterPersist('isHost', isHost);
     monstersSeeded = false;
+    monsterSnapshotLoaded = false;
+    if (monsterSnapshotTimeout) {
+      clearTimeout(monsterSnapshotTimeout);
+    }
+    monsterSnapshotTimeout = setTimeout(() => {
+      if (monsterSnapshotLoaded) return;
+      console.warn('Monster snapshot load timed out, seeding defaults.');
+      monsterSnapshotLoaded = true;
+      monstersSeeded = true;
+    }, MONSTER_SNAPSHOT_TIMEOUT_MS);
     friendlyNpcManager?.onRoomReady({ roomId, isHost: multiplayer.isHost });
     await setMerchantRoom({ roomId, isHost: multiplayer.isHost });
     try {
@@ -1511,6 +1541,10 @@ async function main() {
       });
       monsterSnapshotLoaded = true;
       monstersSeeded = true;
+      if (monsterSnapshotTimeout) {
+        clearTimeout(monsterSnapshotTimeout);
+        monsterSnapshotTimeout = null;
+      }
       if (unsubscribeMonsterUpdates) {
         unsubscribeMonsterUpdates();
       }
@@ -1528,6 +1562,10 @@ async function main() {
       console.warn('Failed to load monster snapshot', err);
       monsterSnapshotLoaded = true;
       monstersSeeded = true;
+      if (monsterSnapshotTimeout) {
+        clearTimeout(monsterSnapshotTimeout);
+        monsterSnapshotTimeout = null;
+      }
     }
   };
 
@@ -1539,6 +1577,11 @@ async function main() {
   let bomb;
   let treasureChest;
   let bed;
+  let craftTable;
+  let craftTableColliderBody;
+  let craftTableColliderLastCenter = null;
+  const craftTableColliderBounds = new THREE.Box3();
+  const craftTableColliderCenter = new THREE.Vector3();
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -1952,6 +1995,7 @@ async function main() {
       .setLinearDamping(0.5)
       .setAngularDamping(0.5);
     const rb = rapierWorld.createRigidBody(rbDesc);
+    rb.setEnabledRotations(false, true, false, true);
     const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
     rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
@@ -2249,31 +2293,7 @@ async function main() {
     return true;
   };
 
-  const liftMeshToBuildingTop = (mesh, heightOffset = 0.6) => {
-    if (!mesh) return false;
-    const lifted = liftPositionToBuildingTop(mesh.position, heightOffset);
-    if (lifted) {
-      mesh.userData.baseY = mesh.position.y;
-    }
-    return lifted;
-  };
-
   window.lightSources = [];
-
-  const liftMonsterToBuildingTop = (monster, heightOffset = 0.5) => {
-    if (!monster?.model) return false;
-    const lifted = liftPositionToBuildingTop(monster.model.position, heightOffset);
-    if (lifted) {
-      const body = monster.body;
-      if (body) {
-        body.setTranslation(
-          { x: monster.model.position.x, y: monster.model.position.y, z: monster.model.position.z },
-          true
-        );
-      }
-    }
-    return lifted;
-  };
 
   friendlyNpcManager = createFriendlyNpcManager({
     scene,
@@ -2289,49 +2309,6 @@ async function main() {
   if (multiplayer?.roomId) {
     friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
   }
-
-  const liftPlayerToBuildingTop = (heightOffset = 0.6) => {
-    if (!playerModel) return false;
-    const lifted = liftPositionToBuildingTop(playerModel.position, heightOffset);
-    if (lifted && playerControls?.body) {
-      playerControls.body.setTranslation(
-        { x: playerModel.position.x, y: playerModel.position.y, z: playerModel.position.z },
-        true
-      );
-      playerControls.playerX = playerModel.position.x;
-      playerControls.playerY = playerModel.position.y;
-      playerControls.playerZ = playerModel.position.z;
-      playerControls.lastPosition.copy(playerModel.position);
-    }
-    return lifted;
-  };
-
-  const liftPickupsToBuildingTop = () => {
-    ammoPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
-    droppedAmmoPickups.forEach(entry => liftMeshToBuildingTop(entry?.mesh, 0.6));
-    foodPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
-    healthPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
-    coinPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
-    if (!iceGun?.holder) {
-      liftMeshToBuildingTop(iceGun?.mesh, 0.5);
-    }
-    if (!autumnSword?.holder) {
-      liftMeshToBuildingTop(autumnSword?.mesh, 0.5);
-    }
-    if (!lantern?.holder) {
-      liftMeshToBuildingTop(lantern?.mesh, 0.3);
-    }
-  };
-
-  const liftEntitiesToBuildingTop = () => {
-    liftPlayerToBuildingTop(0.6);
-    monsters.forEach(monster => liftMonsterToBuildingTop(monster, 0.5));
-    Object.values(otherPlayers).forEach(entry => {
-      if (!entry?.model) return;
-      liftPositionToBuildingTop(entry.model.position, 0.6);
-    });
-    liftPickupsToBuildingTop();
-  };
 
   let buildingColliderBody = null;
   const rebuildBuildingColliders = () => {
@@ -2413,7 +2390,6 @@ async function main() {
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
       }
-      liftPositionToBuildingTop(spawnPos, 0.5);
       return spawnPos;
     }
     const fallback = playerModel.position.clone();
@@ -2590,8 +2566,8 @@ async function main() {
         monster.resetHealth();
 
         if (Number.isFinite(options.health)) {
-          monster.health = options.health;
-          monster.model.userData.health = options.health;
+          monster.health = normalizeHealthSegments(options.health, monster.level);
+          monster.model.userData.health = monster.health;
         }
         if (options.alive === false || (Number.isFinite(options.health) && options.health <= 0)) {
           monster.markDead();
@@ -2676,6 +2652,19 @@ async function main() {
     if (!record) return;
     const slotId = record.id || recordId;
     if (!slotId) return;
+
+    const recordIsDead = record.alive === false
+      || (Number.isFinite(record.hp) && record.hp <= 0);
+    if (recordIsDead && isHost) {
+      const existing = monsters.find(entry => entry.id === slotId);
+      if (existing) {
+        cleanupMonster(existing);
+        monsters = monsters.filter(entry => entry && entry.id !== slotId);
+        window.monsters = monsters;
+      }
+      removeMonsterRecord(slotId);
+      return;
+    }
 
     const incomingVersion = Number.isFinite(record.version) ? record.version : null;
     const existing = monsters.find(entry => entry.id === slotId);
@@ -2826,8 +2815,8 @@ async function main() {
           monster.model.userData.mode = state.mode;
         }
         if (typeof state.health === 'number') {
-          monster.health = state.health;
-          monster.model.userData.health = state.health;
+          monster.health = normalizeHealthSegments(state.health, monster.level);
+          monster.model.userData.health = monster.health;
         }
         const aliveFlag = typeof state.mode === 'string' ? state.mode !== 'dead' : undefined;
         monster.applyPersistedState?.({
@@ -2853,7 +2842,7 @@ async function main() {
     const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
     const currentHunger = Number.isFinite(profile?.stats?.hunger) ? profile.stats.hunger : 0;
     const nextHunger = Math.max(0, Math.min(100, currentHunger - hungerDecay));
-    const updatedStats = { ...profile.stats, hunger: nextHunger };
+    const updatedStats = { ...profile.stats, hunger: nextHunger, energy: nextHunger };
     const changed = nextHunger !== currentHunger || !Number.isFinite(profile?.lastStatUpdateAt);
     return {
       stats: updatedStats,
@@ -2869,7 +2858,7 @@ async function main() {
   const statsState = {
     health: playerProfile.stats.health,
     hunger: playerProfile.stats.hunger,
-    energy: playerProfile.stats.energy,
+    energy: playerProfile.stats.hunger,
     magic: playerProfile.stats.magic,
     level: playerProfile.stats.level,
     strength: playerProfile.stats.strength,
@@ -2880,8 +2869,9 @@ async function main() {
     xp: playerProfile.stats.xp,
     coins: playerProfile.stats.coins
   };
+  statsState.health = normalizeHealthSegments(statsState.health, statsState.level);
   const spellsAvailable = { ...(playerProfile?.spells || {}) };
-  const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'energy', 'strength', 'agility', 'smarts', 'charm', 'luck'];
+  const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
   const levelPopup = document.getElementById('level-popup');
@@ -3159,31 +3149,31 @@ async function main() {
     },
     bow: {
       name: 'Bow',
-      icon: ''
+      icon: '/assets/ui/items/bow.png'
     },
     bomb: {
       name: 'Bomb',
-      icon: ''
+      icon: '/assets/ui/items/bomb.png'
     },
     autumnSword: {
       name: 'Autumn Sword',
-      icon: ''
+      icon: '/assets/ui/items/sword.png'
     },
     lantern: {
       name: 'Lantern (Left Hand)',
-      icon: ''
+      icon: '/assets/ui/items/lantern.png'
     },
     torch: {
       name: 'Torch (Left Hand)',
-      icon: ''
+      icon: '/assets/ui/items/torch.png'
     },
     [LIFE_POTION_ITEM_ID]: {
       name: 'Life Potion',
-      icon: ''
+      icon: '/assets/ui/items/life_potion.png'
     },
     [MANA_POTION_ITEM_ID]: {
       name: 'Mana Potion',
-      icon: ''
+      icon: '/assets/ui/items/mana_potion.png'
     }
   };
   inventoryCatalog[APPLE_ITEM_ID] = {
@@ -3197,7 +3187,7 @@ async function main() {
   MUSHROOM_ENTRIES.forEach((entry) => {
     inventoryCatalog[entry.id] = {
       name: entry.name,
-      icon: ''
+      icon: '/assets/ui/items/{entry.icon_name}.png'.replace('{entry.icon_name}', entry.icon_name)
     };
   });
   const ensureCatalogEntry = (itemId, entry) => {
@@ -3934,7 +3924,7 @@ async function main() {
     if (Number.isFinite(terrainHeight)) {
       spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
     }
-    const geometry = new THREE.BoxGeometry(0.5, 0.18, 0.3);
+    const geometry = new THREE.BoxGeometry(3.0, 0.36, 0.6);
     const material = new THREE.MeshStandardMaterial({
       color: 0x8b5a2b,
       roughness: 0.7,
@@ -4166,6 +4156,275 @@ async function main() {
     return pickup;
   }
 
+  const craftState = {
+    materials: [],
+    selection: null,
+    swirl: null,
+    craftTimeout: null
+  };
+  const craftRecipeMap = new Map(CRAFT_RECIPES.map((recipe) => [recipe.id, recipe]));
+
+  const getCraftMaterialKey = (itemId) => {
+    if (itemId === WOOD_ITEM_ID) return 'wood';
+    if (itemId === APPLE_ITEM_ID) return 'apples';
+    if (itemId?.startsWith?.('mushroom_')) return 'mushrooms';
+    return null;
+  };
+
+  const getSelectionMaterialCounts = (selection) => {
+    const totals = { wood: 0, apples: 0, mushrooms: 0 };
+    if (!selection) return totals;
+    Object.entries(selection).forEach(([itemId, count]) => {
+      const key = getCraftMaterialKey(itemId);
+      if (!key) return;
+      totals[key] += count;
+    });
+    return totals;
+  };
+
+  const computeCraftCount = (recipe, selection) => {
+    if (!recipe) return 0;
+    const totals = getSelectionMaterialCounts(selection);
+    const limits = Object.entries(recipe.materials).map(([key, amount]) => (
+      amount > 0 ? Math.floor((totals[key] || 0) / amount) : 0
+    ));
+    if (!limits.length) return 0;
+    return Math.max(0, Math.min(...limits));
+  };
+
+  const returnUnusedCraftMaterials = (selection, recipe, craftCount) => {
+    if (!selection) return;
+    const required = {};
+    if (recipe?.materials) {
+      Object.entries(recipe.materials).forEach(([key, amount]) => {
+        required[key] = (required[key] || 0) + amount * craftCount;
+      });
+    }
+    Object.entries(selection).forEach(([itemId, count]) => {
+      if (!count) return;
+      const key = getCraftMaterialKey(itemId);
+      let used = 0;
+      if (key && required[key] > 0) {
+        used = Math.min(count, required[key]);
+        required[key] -= used;
+      }
+      const leftover = count - used;
+      if (leftover > 0) {
+        addToInventory(itemId, leftover);
+      }
+    });
+  };
+
+  const clearCraftSwirl = () => {
+    if (!craftState.swirl) return;
+    scene.remove(craftState.swirl.line);
+    craftState.swirl.geometry?.dispose?.();
+    craftState.swirl.material?.dispose?.();
+    craftState.swirl = null;
+  };
+
+  const clearCraftMaterials = () => {
+    craftState.materials.forEach((entry) => {
+      if (!entry?.mesh) return;
+      scene.remove(entry.mesh);
+      entry.mesh.geometry?.dispose?.();
+      if (Array.isArray(entry.mesh.material)) {
+        entry.mesh.material.forEach(material => material?.dispose?.());
+      } else {
+        entry.mesh.material?.dispose?.();
+      }
+    });
+    craftState.materials = [];
+  };
+
+  const restoreCraftInventory = () => {
+    if (!craftState.selection) return;
+    Object.entries(craftState.selection).forEach(([itemId, count]) => {
+      if (count > 0) {
+        addToInventory(itemId, count);
+      }
+    });
+    craftState.selection = null;
+  };
+
+  const createCraftMaterialMesh = (itemId) => {
+    if (itemId === APPLE_ITEM_ID) {
+      const geometry = new THREE.SphereGeometry(0.18, 16, 16);
+      const material = new THREE.MeshStandardMaterial({ color: 0xd73a3a });
+      return new THREE.Mesh(geometry, material);
+    }
+    if (itemId.startsWith('mushroom_')) {
+      const geometry = new THREE.CylinderGeometry(0.12, 0.16, 0.28, 10);
+      const material = new THREE.MeshStandardMaterial({ color: 0xc98b4a });
+      return new THREE.Mesh(geometry, material);
+    }
+    if (itemId === WOOD_ITEM_ID) {
+      const geometry = new THREE.BoxGeometry(0.35, 0.14, 0.2);
+      const material = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
+      return new THREE.Mesh(geometry, material);
+    }
+    return null;
+  };
+
+  const createCraftSwirl = (position) => {
+    if (!position) return null;
+    const points = [];
+    const loops = 3;
+    const radius = 0.6;
+    const height = 0.6;
+    const segments = 80;
+    for (let i = 0; i <= segments; i += 1) {
+      const t = i / segments;
+      const angle = t * Math.PI * 2 * loops;
+      const y = t * height;
+      points.push(new THREE.Vector3(
+        Math.cos(angle) * radius,
+        y,
+        Math.sin(angle) * radius
+      ));
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({ color: 0x7fd0ff, transparent: true, opacity: 0.8 });
+    const line = new THREE.Line(geometry, material);
+    line.position.copy(position);
+    line.userData.skipTerrainCorrection = true;
+    scene.add(line);
+    return { line, geometry, material };
+  };
+
+  const spawnCraftArrowPickup = (position) => {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const arrowMesh = cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE);
+    const pickupMesh = arrowMesh || new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.05, 0.6, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0x7b5530,
+        emissive: 0x2b1a0a,
+        emissiveIntensity: 0.35
+      })
+    );
+    pickupMesh.rotation.set(0, Math.PI / 2, Math.PI / 2);
+    registerPickupEmissiveMaterials(pickupMesh);
+    pickupMesh.position.copy(spawnPos);
+    pickupMesh.castShadow = true;
+    pickupMesh.userData.skipTerrainCorrection = true;
+    pickupMesh.userData.baseY = spawnPos.y;
+    pickupMesh.userData.phase = Math.random() * Math.PI * 2;
+    pickupMesh.userData.amount = 1;
+    pickupMesh.userData.type = 'arrow';
+    pickupMesh.userData.sparkle = true;
+    pickupMesh.userData.noFloat = true;
+    const light = new THREE.PointLight(0xfff2a8, 0.6, 2);
+    light.position.set(0, 0.4, 0);
+    pickupMesh.add(light);
+    pickupMesh.userData.sparkleLight = light;
+    scene.add(pickupMesh);
+    ammoPickups.push(pickupMesh);
+    return pickupMesh;
+  };
+
+  const spawnCraftedPickup = (itemId, position) => {
+    if (!itemId || !position) return;
+    const dropPos = position.clone().add(new THREE.Vector3(0, 0.4, 0));
+    if (itemId === 'arrow') {
+      spawnCraftArrowPickup(dropPos);
+      return;
+    }
+    const pickupConfig = {
+      bow: { item: bow, itemId: 'bow', markerColor: 0xffc26b },
+      lantern: { item: lantern, itemId: 'lantern', markerColor: 0xffd400 },
+      torch: {
+        item: torch,
+        itemId: TORCH_ITEM_ID,
+        markerColor: 0xffa54c,
+        torchHealth: DEFAULT_TORCH_HEALTH
+      }
+    }[itemId];
+    if (pickupConfig?.item?.mesh) {
+      createDroppedWeaponPickup(pickupConfig.item, {
+        itemId: pickupConfig.itemId,
+        markerColor: pickupConfig.markerColor,
+        markerOffsetY: 1.2,
+        position: dropPos,
+        allowHidden: true,
+        torchHealth: pickupConfig.torchHealth
+      });
+    }
+  };
+
+  const placeCraftMaterials = (selection) => {
+    if (!selection || !craftTable?.mesh) return;
+    clearCraftMaterials();
+    clearCraftSwirl();
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+      craftState.craftTimeout = null;
+    }
+    craftState.selection = { ...selection };
+    const entries = Object.entries(selection).filter(([, count]) => count > 0);
+    const basePos = craftTable.getCraftSurfacePosition?.() || craftTable.mesh.position.clone();
+    entries.forEach(([itemId], index) => {
+      const mesh = createCraftMaterialMesh(itemId);
+      if (!mesh) return;
+      const angle = (index / Math.max(entries.length, 1)) * Math.PI * 2;
+      const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
+      mesh.position.copy(basePos).add(offset);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.skipTerrainCorrection = true;
+      scene.add(mesh);
+      craftState.materials.push({ itemId, mesh });
+    });
+  };
+
+  const cancelCrafting = ({ restoreInventory = false } = {}) => {
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+      craftState.craftTimeout = null;
+    }
+    clearCraftSwirl();
+    clearCraftMaterials();
+    if (restoreInventory) {
+      restoreCraftInventory();
+    } else {
+      craftState.selection = null;
+    }
+  };
+
+  const craftItem = (itemId) => {
+    if (!craftState.selection || !craftTable?.mesh) return;
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+    }
+    const recipe = craftRecipeMap.get(itemId);
+    const craftCount = computeCraftCount(recipe, craftState.selection);
+    if (craftCount <= 0) {
+      returnUnusedCraftMaterials(craftState.selection, recipe, 0);
+      craftState.selection = null;
+      clearCraftMaterials();
+      clearCraftSwirl();
+      return;
+    }
+    const basePos = craftTable.getCraftSurfacePosition?.() || craftTable.mesh.position.clone();
+    craftState.swirl = createCraftSwirl(basePos);
+    craftState.craftTimeout = setTimeout(() => {
+      clearCraftMaterials();
+      clearCraftSwirl();
+      if (craftCount > 0) {
+        const radius = 0.4;
+        for (let i = 0; i < craftCount; i += 1) {
+          const angle = (i / Math.max(craftCount, 1)) * Math.PI * 2;
+          const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+          spawnCraftedPickup(itemId, basePos.clone().add(offset));
+        }
+      }
+      returnUnusedCraftMaterials(craftState.selection, recipe, craftCount);
+      craftState.selection = null;
+      craftState.craftTimeout = null;
+    }, 4000);
+  };
+
   function dropInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
     if (isFoodItem(itemId)) {
@@ -4253,13 +4512,13 @@ async function main() {
     if (!itemId || !inventoryState[itemId]) return;
     if (!isFoodItem(itemId)) return;
     if (isMushroomItem(itemId)) {
-      setStat('health', statsState.health + MUSHROOM_HEALTH_GAIN, { skipSave: true });
+      setStat('health', statsState.health + MUSHROOM_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
-      setStat('energy', statsState.energy + MUSHROOM_ENERGY_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + MUSHROOM_ENERGY_GAIN, { skipSave: true });
     } else if (isAppleItem(itemId)) {
-      setStat('health', statsState.health + APPLE_HEALTH_GAIN, { skipSave: true });
+      setStat('health', statsState.health + APPLE_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
-      setStat('energy', statsState.energy + APPLE_ENERGY_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + APPLE_ENERGY_GAIN, { skipSave: true });
     }
     lastStatUpdateAt = Date.now();
     removeFromInventory(itemId, 1);
@@ -4269,7 +4528,7 @@ async function main() {
     if (!itemId || !inventoryState[itemId]) return;
     if (!isPotionItem(itemId)) return;
     if (itemId === LIFE_POTION_ITEM_ID) {
-      setStat('health', 100, { skipSave: true });
+      setStat('health', getMaxHealthSegments(statsState.level), { skipSave: true });
     }
     if (itemId === MANA_POTION_ITEM_ID) {
       setStat('magic', 100, { skipSave: true });
@@ -4285,14 +4544,16 @@ async function main() {
   };
   const updateEnergyEffects = () => {
     if (!playerControls) return;
-    const energyDepleted = statsState.energy <= 0;
+    const energyDepleted = statsState.hunger <= 0;
     playerControls.setEnergyDepleted?.(energyDepleted);
   };
 
-  const healthFill = document.getElementById('health-fill');
+  const healthBar = document.getElementById('health-bar');
+  const healthLabel = document.getElementById('health-label');
   const hungerFill = document.getElementById('hunger-fill');
-  const energyFill = document.getElementById('energy-fill');
   const magicFill = document.getElementById('magic-fill');
+  const hungerWarning = document.getElementById('hunger-warning');
+  let hungerWarningTimer = null;
 
   const createDropId = (index = 0) => {
     const owner = multiplayer?.getId?.() || 'local';
@@ -4413,8 +4674,32 @@ async function main() {
   };
 
   function updateHealthUI() {
-    if (healthFill) {
-      healthFill.style.width = `${statsState.health}%`;
+    if (!healthBar) return;
+    const maxSegments = getMaxHealthSegments(statsState.level);
+    const currentSegments = clampHealthSegments(statsState.health, statsState.level);
+    const healthRatio = maxSegments > 0 ? currentSegments / maxSegments : 0;
+    if (healthBar.childElementCount !== maxSegments) {
+      healthBar.innerHTML = '';
+      for (let i = 0; i < maxSegments; i += 1) {
+        const segment = document.createElement('span');
+        segment.className = 'health-segment';
+        healthBar.appendChild(segment);
+      }
+    }
+    Array.from(healthBar.children).forEach((segment, index) => {
+      segment.classList.toggle('filled', index < currentSegments);
+    });
+    if (healthRatio > 0.75) {
+      healthBar.dataset.healthLevel = 'high';
+    } else if (healthRatio > 0.5) {
+      healthBar.dataset.healthLevel = 'mid';
+    } else if (healthRatio > 0.25) {
+      healthBar.dataset.healthLevel = 'low';
+    } else {
+      healthBar.dataset.healthLevel = 'critical';
+    }
+    if (healthLabel) {
+      healthLabel.textContent = 'Health';
     }
   }
 
@@ -4424,23 +4709,31 @@ async function main() {
     }
   }
 
-  function updateEnergyUI() {
-    if (energyFill) {
-      energyFill.style.width = `${statsState.energy}%`;
-    }
-  }
-
   function updateMagicUI() {
     if (magicFill) {
       magicFill.style.width = `${statsState.magic}%`;
     }
   }
 
+  const showHungerWarning = () => {
+    if (!hungerWarning) return;
+    hungerWarning.classList.add('visible');
+    if (hungerWarningTimer) {
+      clearTimeout(hungerWarningTimer);
+    }
+    hungerWarningTimer = setTimeout(() => {
+      hungerWarning.classList.remove('visible');
+    }, 3500);
+  };
+
   const clampStat = (key, value) => {
     if (['health', 'hunger', 'energy', 'magic'].includes(key)) {
       const num = Number(value);
       if (!Number.isFinite(num)) {
         return 0;
+      }
+      if (key === 'health') {
+        return clampHealthSegments(num, statsState.level);
       }
       return Math.max(0, Math.min(100, num));
     }
@@ -4469,15 +4762,17 @@ async function main() {
   };
 
   function setStat(key, value, { skipSave = false } = {}) {
+    if (key === 'energy') {
+      setStat('hunger', value, { skipSave });
+      return;
+    }
     statsState[key] = clampStat(key, value);
     if (key === 'health') {
       updateHealthUI();
     }
     if (key === 'hunger') {
       updateHungerUI();
-    }
-    if (key === 'energy') {
-      updateEnergyUI();
+      statsState.energy = statsState.hunger;
       updateEnergyEffects();
     }
     if (key === 'magic') {
@@ -4485,9 +4780,11 @@ async function main() {
     }
     if (key === 'level') {
       updatePlayerInfoUI();
+      statsState.health = clampHealthSegments(statsState.health, statsState.level);
+      updateHealthUI();
     }
     if (!skipSave) {
-      if (key === 'hunger' || key === 'energy') {
+      if (key === 'hunger') {
         lastStatUpdateAt = Date.now();
       }
       saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -4498,12 +4795,15 @@ async function main() {
     active: false,
     startedAt: null,
     startHealth: null,
-    startEnergy: null,
+    startHunger: null,
     bed: null
   };
 
   const getSleepRecoveryValue = (key, startValue, elapsedSeconds) => {
     const base = Number.isFinite(startValue) ? startValue : 0;
+    if (key === 'health') {
+      return clampStat(key, base + elapsedSeconds * SLEEP_RECOVERY_SEGMENTS_PER_SECOND);
+    }
     return clampStat(key, base + elapsedSeconds * SLEEP_RECOVERY_PER_SECOND);
   };
 
@@ -4513,7 +4813,7 @@ async function main() {
     sleepState.active = true;
     sleepState.startedAt = startedAt;
     sleepState.startHealth = statsState.health;
-    sleepState.startEnergy = statsState.energy;
+    sleepState.startHunger = statsState.hunger;
     sleepState.bed = bed || null;
     if (profileNameKey) {
       playerProfile.sleepStartedAt = startedAt;
@@ -4529,11 +4829,11 @@ async function main() {
     const startAt = Number.isFinite(storedStart) ? storedStart : sleepState.startedAt;
     const elapsedSeconds = startAt ? Math.max(0, (now - startAt) / 1000) : 0;
     const expectedHealth = getSleepRecoveryValue('health', sleepState.startHealth ?? statsState.health, elapsedSeconds);
-    const expectedEnergy = getSleepRecoveryValue('energy', sleepState.startEnergy ?? statsState.energy, elapsedSeconds);
+    const expectedHunger = getSleepRecoveryValue('hunger', sleepState.startHunger ?? statsState.hunger, elapsedSeconds);
     const nextHealth = Math.max(statsState.health, expectedHealth);
-    const nextEnergy = Math.max(statsState.energy, expectedEnergy);
+    const nextHunger = Math.max(statsState.hunger, expectedHunger);
     setStat('health', nextHealth, { skipSave: true });
-    setStat('energy', nextEnergy, { skipSave: true });
+    setStat('hunger', nextHunger, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   };
@@ -4544,12 +4844,16 @@ async function main() {
     if (!Number.isFinite(delta) || delta === 0) {
       return;
     }
-    const adjustment = delta * 2;
     for (const key of STAT_KEYS_FOR_LEVEL) {
       const current = Number.isFinite(statsState[key]) ? statsState[key] : 0;
-      const nextValue = key === 'health' || key === 'hunger' || key === 'energy'
-        ? clampStat(key, current + adjustment)
-        : current + adjustment;
+      let nextValue = current;
+      if (key === 'health') {
+        nextValue = clampStat(key, current + delta);
+      } else if (key === 'hunger') {
+        nextValue = clampStat(key, current + delta * 2);
+      } else {
+        nextValue = current + delta * 2;
+      }
       setStat(key, nextValue, { skipSave: true });
     }
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -4622,8 +4926,15 @@ async function main() {
 
   updateHealthUI();
   updateHungerUI();
-  updateEnergyUI();
   updateMagicUI();
+  updateEnergyEffects();
+
+  const HUNGER_WARNING_INTERVAL_MS = 3 * 60 * 1000;
+  setInterval(() => {
+    if (statsState.hunger < 10) {
+      showHungerWarning();
+    }
+  }, HUNGER_WARNING_INTERVAL_MS);
 
   if (offlineDecay.changed) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -4642,7 +4953,8 @@ async function main() {
       if (typeof window.getPlayerStrength === 'function') {
         const strength = window.getPlayerStrength();
         if (Number.isFinite(strength)) {
-          return Math.max(0, BOMB_BASE_DAMAGE + strength);
+          const bonus = convertPointsToSegments(strength, { minimum: 0 });
+          return Math.max(0, BOMB_BASE_DAMAGE + bonus);
         }
       }
     }
@@ -4685,7 +4997,7 @@ async function main() {
       if (distance > BOMB_DAMAGE_RADIUS) continue;
       const player = otherPlayers[id];
       if (!player) continue;
-      const previousHealth = player.health || 100;
+      const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
       const nextHealth = Math.max(0, previousHealth - damage);
       player.health = nextHealth;
       if (nextHealth <= 0 && previousHealth > 0) {
@@ -5013,7 +5325,6 @@ async function main() {
       spawnPos.y = terrainHeight + groundOffset;
     } else {
       spawnPos.y = terrainHeight + 0.6;
-      liftPositionToBuildingTop(spawnPos, 0.6);
     }
 
     const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
@@ -5114,7 +5425,6 @@ async function main() {
     if (!spawnPos) return null;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
-    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -5195,7 +5505,6 @@ async function main() {
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
-    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -5224,7 +5533,6 @@ async function main() {
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
-    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -5253,7 +5561,6 @@ async function main() {
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
-    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.CylinderGeometry(0.2, 0.2, 0.06, 24);
     const material = new THREE.MeshStandardMaterial({
@@ -5280,13 +5587,13 @@ async function main() {
 
   function applyFoodPickupEffects() {
     setStat('hunger', statsState.hunger + FOOD_HUNGER_GAIN, { skipSave: true });
-    setStat('energy', statsState.energy + FOOD_ENERGY_GAIN, { skipSave: true });
+    setStat('hunger', statsState.hunger + FOOD_ENERGY_GAIN, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
 
   function applyHealthPickupEffects() {
-    setStat('health', statsState.health + HEALTH_PICKUP_GAIN, { skipSave: true });
+    setStat('health', statsState.health + HEALTH_PICKUP_SEGMENTS, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
@@ -5307,7 +5614,6 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.5;
-    liftPositionToBuildingTop(spawnPos, 0.5);
     iceGun.mesh.position.copy(spawnPos);
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
     iceGun.mesh.visible = true;
@@ -5324,7 +5630,6 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.5;
-    liftPositionToBuildingTop(spawnPos, 0.5);
     bow.mesh.position.copy(spawnPos);
     bow.mesh.quaternion.set(0, 0, 0, 1);
     bow.mesh.visible = true;
@@ -5360,7 +5665,6 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.4;
-    liftPositionToBuildingTop(spawnPos, 0.5);
     bomb.mesh.position.copy(spawnPos);
     bomb.mesh.quaternion.set(0, 0, 0, 1);
     bomb.mesh.visible = true;
@@ -5376,7 +5680,6 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.5;
-    liftPositionToBuildingTop(spawnPos, 0.5);
     autumnSword.mesh.position.copy(spawnPos);
     autumnSword.mesh.quaternion.set(0, 0, 0, 1);
     autumnSword.mesh.visible = true;
@@ -5425,6 +5728,7 @@ async function main() {
     spawnPos.y = terrainHeight;
     treasureChest.mesh.position.copy(spawnPos);
     treasureChest.mesh.visible = true;
+    treasureChest.syncCollider?.();
   }
 
   registerNetworkedEntity('droppedAmmo', {
@@ -5450,6 +5754,8 @@ async function main() {
   });
 
   let statDecayAccumulator = 0;
+  let healthRecoveryRemainder = 0;
+  let healthDecayRemainder = 0;
 
   playerControls = new PlayerControls({
     scene,
@@ -5498,6 +5804,25 @@ async function main() {
     removeFromInventory('bomb', 1);
     return true;
   };
+  const voiceMicState = {
+    listening: false,
+    lastTranscript: '',
+    pendingSpellResolution: false,
+    pendingSpellTimeout: null,
+    cooldownUntil: 0,
+    transcriptTimer: null
+  };
+  const VOICE_COOLDOWN_MS = 60_000;
+
+  playerControls.handleVoiceMicPress = () => {
+    startVoiceListening();
+  };
+  playerControls.stopVoiceListening = () => {
+    stopVoiceListening();
+  };
+  playerControls.isVoiceListening = () => voiceMicState.listening;
+  playerControls.getVoiceMicState = () => getVoiceMicState();
+
   window.playerControls = playerControls;
   initSpells({
     playerControls,
@@ -5663,7 +5988,6 @@ async function main() {
       markerColor: 0xffd400,
       markerOffsetY: 1.2,
       groundOffset: 0.5,
-      liftOffset: 0.5
     },
     {
       itemId: 'bow',
@@ -5671,7 +5995,6 @@ async function main() {
       markerColor: 0xffc26b,
       markerOffsetY: 1.2,
       groundOffset: 0.5,
-      liftOffset: 0.5
     },
     {
       itemId: 'bomb',
@@ -5679,7 +6002,6 @@ async function main() {
       markerColor: 0xff4d4d,
       markerOffsetY: 1.2,
       groundOffset: 0.4,
-      liftOffset: 0.5
     },
     {
       itemId: 'autumnSword',
@@ -5687,7 +6009,6 @@ async function main() {
       markerColor: 0xffd400,
       markerOffsetY: 1.2,
       groundOffset: 0.5,
-      liftOffset: 0.5
     }
   ]);
   const spawnWeaponPickupCopy = (position) => {
@@ -5699,7 +6020,6 @@ async function main() {
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     if (!Number.isFinite(terrainHeight)) return;
     spawnPos.y = terrainHeight + config.groundOffset;
-    liftPositionToBuildingTop(spawnPos, config.liftOffset ?? config.groundOffset);
     createDroppedWeaponPickup(config.item, {
       itemId: config.itemId,
       markerColor: config.markerColor,
@@ -5981,8 +6301,6 @@ async function main() {
     scene,
     playerModel,
     playerControls,
-    renderer,
-    buildingsRenderer,
     profileNameKey,
     initialHome: playerProfile?.home ?? null,
     getLocalOrigin: getLocalMapOrigin,
@@ -5991,13 +6309,55 @@ async function main() {
   });
   void homeSystem.loadStorageChest?.();
   window.homeSystem = homeSystem;
-  const bedScene = homeSystem?.interiorGroup ?? scene;
-  bed = new Bed(bedScene, {
+  const interiorScene = homeSystem?.interiorGroup ?? scene;
+  bed = new Bed(interiorScene, {
     position: new THREE.Vector3(-3, 0.5, 3),
     useTerrainHeight: false
   });
   await bed.load();
   window.bed = bed;
+
+  craftTable = new CraftTable(interiorScene, {
+    position: new THREE.Vector3(2.5, 0.5, -2.5),
+    useTerrainHeight: false
+  });
+  await craftTable.load();
+  window.craftTable = craftTable;
+  homeSystem?.registerPlacedObjects?.({ bed, craftTable });
+  if (rapierWorld && craftTable?.mesh) {
+    if (craftTableColliderBody && rapierWorld.getRigidBody(craftTableColliderBody.handle)) {
+      rapierWorld.removeRigidBody(craftTableColliderBody);
+      craftTableColliderBody = null;
+    }
+    const bounds = new THREE.Box3().setFromObject(craftTable.mesh);
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    bounds.getSize(size);
+    bounds.getCenter(center);
+    const half = size.multiplyScalar(0.5);
+    const rbDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(center.x, center.y, center.z);
+    craftTableColliderBody = rapierWorld.createRigidBody(rbDesc);
+    const colDesc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
+      .setRestitution(0.05)
+      .setFriction(0.9);
+    rapierWorld.createCollider(colDesc, craftTableColliderBody);
+    craftTableColliderLastCenter = center.clone();
+  }
+
+  const syncCraftTableCollider = () => {
+    if (!craftTable?.mesh || !craftTableColliderBody) return;
+    craftTableColliderBounds.setFromObject(craftTable.mesh);
+    craftTableColliderBounds.getCenter(craftTableColliderCenter);
+    if (craftTableColliderLastCenter?.equals?.(craftTableColliderCenter)) return;
+    craftTableColliderBody.setTranslation(
+      { x: craftTableColliderCenter.x, y: craftTableColliderCenter.y, z: craftTableColliderCenter.z },
+      true
+    );
+    if (!craftTableColliderLastCenter) {
+      craftTableColliderLastCenter = new THREE.Vector3();
+    }
+    craftTableColliderLastCenter.copy(craftTableColliderCenter);
+  };
 
   function getLatestLocationFix() {
     const latest = window.latestLocation;
@@ -6360,7 +6720,6 @@ async function main() {
     const refresh = () => {
       buildingRefreshPending = false;
       rebuildBuildingColliders();
-      liftEntitiesToBuildingTop();
     };
     if (typeof requestIdleCallback === "function") {
       requestIdleCallback(refresh, { timeout: 200 });
@@ -6830,12 +7189,11 @@ async function main() {
   }
 
   function respawnPlayer() {
-    setStat('health', 100);
+    setStat('health', getMaxHealthSegments(statsState.level));
     setStat('hunger', 100);
-    setStat('energy', 100);
+    setStat('hunger', 100);
     setStat('magic', 100);
     const spawn = getSpawnPosition();
-    liftPositionToBuildingTop(spawn, 0.6);
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
     playerControls.playerY = spawn.y;
@@ -6856,46 +7214,217 @@ async function main() {
   }
 
   const voiceTranscript = document.getElementById('voice-transcript');
-  let voiceTranscriptTimer = null;
+
   const showVoiceTranscript = (text) => {
     if (!voiceTranscript) return;
     voiceTranscript.textContent = text;
     voiceTranscript.classList.add('visible');
-    if (voiceTranscriptTimer) {
-      clearTimeout(voiceTranscriptTimer);
+    if (voiceMicState.transcriptTimer) {
+      clearTimeout(voiceMicState.transcriptTimer);
     }
-    voiceTranscriptTimer = setTimeout(() => {
+    voiceMicState.transcriptTimer = setTimeout(() => {
       voiceTranscript.classList.remove('visible');
     }, 2500);
   };
 
+  const voiceSpellDefs = {
+    apples: { magicCost: 20 },
+    mushrooms: { magicCost: 20 },
+    bombs: { magicCost: 45 },
+    freeze: { magicCost: 12 }
+  };
+
+  const getVoiceSpellFromTranscript = (transcript) => {
+    const normalized = String(transcript || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes('apple')) return 'apples';
+    if (normalized.includes('mushroom')) return 'mushrooms';
+    if (normalized.includes('bomb')) return 'bombs';
+    if (normalized.includes('freeze')) return 'freeze';
+    return null;
+  };
+
+  const castVoiceSpellFromTranscript = (transcript) => {
+    const spellId = getVoiceSpellFromTranscript(transcript);
+    if (!spellId || !playerControls || !playerModel) return false;
+
+    const spellDef = voiceSpellDefs[spellId];
+    const currentMagic = Number.isFinite(statsState.magic) ? statsState.magic : 0;
+    if (currentMagic < spellDef.magicCost) {
+      showVoiceTranscript('Not enough magic for that spell.');
+      return false;
+    }
+
+    // Use the same camera-relative direction convention as bomb throwing.
+    const aimDirection = playerControls.getAimDirection(true);
+    playerControls.alignPlayerToDirection(aimDirection);
+    playerControls.playAction('projectile');
+
+    const origin = playerControls.getProjectileSpawnPosition(aimDirection);
+    const sprinkleDirection = () => {
+      const d = aimDirection.clone();
+      d.x += (Math.random() - 0.5) * 0.25;
+      d.y += (Math.random() - 0.5) * 0.15;
+      d.z += (Math.random() - 0.5) * 0.25;
+      return d.normalize();
+    };
+
+    const createAppleProjectileMesh = () => {
+      const source = applePickups.find(entry => entry?.mesh)?.mesh;
+      if (!source) return null;
+      const mesh = source.clone(true);
+      mesh.visible = true;
+      mesh.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+      return mesh;
+    };
+
+    const createMushroomProjectileMesh = (itemId) => {
+      const source = mushroomPickups.find(entry => entry?.id === itemId && entry?.mesh)?.mesh
+        || mushroomPickups.find(entry => entry?.mesh)?.mesh;
+      if (!source) return null;
+      const mesh = source.clone(true);
+      mesh.visible = true;
+      mesh.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+      return mesh;
+    };
+
+    const launchProduceProjectile = ({ direction, spawnPickup, createMesh, color = 0xd9d9d9 }) => {
+      const shooterId = multiplayer?.getId?.();
+      spawnProjectile(scene, projectiles, origin.clone(), direction, shooterId, {
+        color,
+        createMesh,
+        speed: BOMB_THROW_SPEED * 0.45,
+        lifetime: Math.floor(BOMB_THROW_LIFETIME * 0.75),
+        pickupOnRest: true,
+        pickupAmount: 1,
+        spawnPickup,
+        colliderDesc: RAPIER.ColliderDesc.ball(0.11).setRestitution(0.25).setFriction(0.8)
+      });
+    };
+
+    if (spellId === 'apples') {
+      for (let i = 0; i < 10; i++) {
+        const d = sprinkleDirection();
+        launchProduceProjectile({
+          direction: d,
+          color: 0xd14b33,
+          createMesh: createAppleProjectileMesh,
+          spawnPickup: (pickupPosition) => {
+            spawnApplePickup(pickupPosition);
+          }
+        });
+      }
+    } else if (spellId === 'mushrooms') {
+      for (let i = 0; i < 10; i++) {
+        const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
+        if (!entry?.id) continue;
+        const d = sprinkleDirection();
+        launchProduceProjectile({
+          direction: d,
+          color: 0x8f6ad9,
+          createMesh: () => createMushroomProjectileMesh(entry.id),
+          spawnPickup: (pickupPosition) => {
+            spawnMushroomPickup(entry.id, pickupPosition);
+          }
+        });
+      }
+    } else if (spellId === 'bombs') {
+      const shooterId = multiplayer?.getId?.();
+      for (let i = 0; i < 5; i++) {
+        const d = sprinkleDirection();
+        spawnBombProjectileWithPerfFlags(scene, projectiles, origin.clone(), d, shooterId);
+      }
+    } else if (spellId === 'freeze') {
+      const shooterId = multiplayer?.getId?.();
+      for (let i = 0; i < 3; i++) {
+        const d = sprinkleDirection();
+        spawnIceMist(scene, iceMists, origin.clone(), d, shooterId);
+      }
+    }
+
+    setStat('magic', Math.max(0, currentMagic - spellDef.magicCost));
+    return true;
+  };
+
+  function getVoiceMicState() {
+    const remainingMs = Math.max(0, voiceMicState.cooldownUntil - Date.now());
+    return {
+      disabled: voiceMicState.listening || remainingMs > 0,
+      remainingSeconds: remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0
+    };
+  }
+
+  const stopVoiceListening = () => {
+    if (!voiceMicState.listening) return;
+    voiceMicState.listening = false;
+    speech.stop();
+
+    const finalizeTranscript = (text) => {
+      if (!text) return;
+      showVoiceTranscript(text);
+      castVoiceSpellFromTranscript(text);
+    };
+
+    if (voiceMicState.lastTranscript) {
+      finalizeTranscript(voiceMicState.lastTranscript);
+    } else {
+      voiceMicState.pendingSpellResolution = true;
+      if (voiceMicState.pendingSpellTimeout) {
+        clearTimeout(voiceMicState.pendingSpellTimeout);
+      }
+      voiceMicState.pendingSpellTimeout = setTimeout(() => {
+        voiceMicState.pendingSpellResolution = false;
+      }, 1200);
+    }
+
+    voiceMicState.cooldownUntil = Date.now() + VOICE_COOLDOWN_MS;
+    playerControls?.refreshActionButtons?.();
+  };
+
+  const startVoiceListening = () => {
+    const state = getVoiceMicState();
+    if (state.disabled) return false;
+    voiceMicState.lastTranscript = '';
+    voiceMicState.pendingSpellResolution = false;
+    if (voiceMicState.pendingSpellTimeout) {
+      clearTimeout(voiceMicState.pendingSpellTimeout);
+      voiceMicState.pendingSpellTimeout = null;
+    }
+    voiceMicState.listening = true;
+    speech.start();
+    playerControls?.refreshActionButtons?.();
+    return true;
+  };
+
   // Initialize speech-to-text overlay for voice input
   const speech = initSpeechCommands({
-    onTranscript: showVoiceTranscript
+    onTranscript: (text) => {
+      voiceMicState.lastTranscript = text;
+      if (voiceMicState.pendingSpellResolution) {
+        voiceMicState.pendingSpellResolution = false;
+        if (voiceMicState.pendingSpellTimeout) {
+          clearTimeout(voiceMicState.pendingSpellTimeout);
+          voiceMicState.pendingSpellTimeout = null;
+        }
+        showVoiceTranscript(text);
+        castVoiceSpellFromTranscript(text);
+      } else if (!voiceMicState.listening) {
+        showVoiceTranscript(text);
+      }
+    }
   });
-  const talkButton = document.getElementById('talk-button');
-  if (talkButton) {
-    let talking = false;
-    const startTalking = (e) => {
-      e.preventDefault();
-      if (!talking) {
-        talking = true;
-        speech.start();
-      }
-    };
-    const stopTalking = (e) => {
-      if (talking) {
-        if (e) e.preventDefault();
-        talking = false;
-        speech.stop();
-      }
-    };
-    talkButton.addEventListener('mousedown', startTalking);
-    talkButton.addEventListener('touchstart', startTalking);
-    window.addEventListener('mouseup', stopTalking);
-    window.addEventListener('touchend', stopTalking);
-    window.addEventListener('touchcancel', stopTalking);
-  }
+
+  setInterval(() => {
+    playerControls?.refreshActionButtons?.();
+  }, 250);
 
 
   function swapPlayerCharacter(newModelPath) {
@@ -7086,6 +7615,16 @@ async function main() {
       didInitialGpsSnap = false;
       window.clearTileCache?.();
     },
+    clearHomeLocation: async () => {
+      if (!homeSystem?.clearHomeSelection) {
+        return { status: 'unavailable' };
+      }
+      const result = await homeSystem.clearHomeSelection();
+      if (playerProfile) {
+        playerProfile.home = null;
+      }
+      return result;
+    },
     deleteAccount: async () => {
       if (!profileNameKey) {
         return { status: 'missing-key' };
@@ -7108,6 +7647,12 @@ async function main() {
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
   window.openHomeStorage = openHomeStorage;
+  window.openCraftPanel = openCraftPanel;
+  window.craftTableActions = {
+    placeMaterials: placeCraftMaterials,
+    cancelCrafting,
+    craftItem
+  };
   window.pickupMushroom = pickupMushroom;
   window.pickupApple = pickupApple;
   window.pickupWood = pickupWood;
@@ -7140,6 +7685,7 @@ async function main() {
   });
   initHomeStoragePanel({ appState });
   initMerchantPanel({ appState });
+  initCraftPanel({ appState });
   void initMerchant({
     scene,
     attachPhysics: attachMonsterPhysics,
@@ -7157,6 +7703,7 @@ async function main() {
   const settingsOverlay = document.getElementById('settings-overlay');
   const homeStorageOverlay = document.getElementById('home-storage-overlay');
   const merchantOverlay = document.getElementById('merchant-overlay');
+  const craftOverlay = document.getElementById('craft-overlay');
   const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
 
   setInterval(() => {
@@ -7168,6 +7715,9 @@ async function main() {
     }
     if (isOverlayVisible(merchantOverlay)) {
       updateMerchantUI();
+    }
+    if (isOverlayVisible(craftOverlay)) {
+      updateCraftUI();
     }
   }, 1000);
   updateAutoDisplayMode();
@@ -7305,6 +7855,7 @@ async function main() {
       rapierWorld.step();
       physicsAccumulator -= FIXED_DT;
     }
+    syncCraftTableCollider();
 
     // Sync Rapier bodies -> Three meshes
     for (const [rb, mesh] of rbToMesh.entries()) {
@@ -7341,6 +7892,7 @@ async function main() {
 
 
     const playerPosition = playerModel?.position;
+    homeSystem?.syncHomePlacement?.();
     updateGroundTiles(playerPosition);
     natureController?.update(playerPosition);
     if (shouldUpdatePickupTiles(playerPosition)) {
@@ -7350,11 +7902,26 @@ async function main() {
     if (!mapViewEnabled) {
       playerControls.update();
     }
+    if (craftState.swirl?.line) {
+      craftState.swirl.line.rotation.y += frameDelta * 2;
+    }
     const homePosition = homeSystem?.getHomeLocalPosition?.();
     const homeEnterDistance = homeSystem?.getHomeEnterDistance?.();
+    const mapMerchantFriendly = getMerchantFriendly?.();
+    const mapItems = [
+      ...ammoPickups,
+      ...woodPickups
+    ];
+    const mapTreasureChests = treasureChest?.mesh?.visible ? [treasureChest.mesh] : [];
+    const mapMerchants = mapMerchantFriendly?.model ? [mapMerchantFriendly.model] : [];
     updateMapView(frameDelta, {
       monsters,
       friendlies: friendlyNpcManager?.friendlies,
+      weapons: droppedWeaponPickups,
+      items: mapItems,
+      treasureChests: mapTreasureChests,
+      merchants: mapMerchants,
+      otherPlayers,
       homePosition,
       homeEnterDistance
     });
@@ -7379,9 +7946,18 @@ async function main() {
       if (isSleeping) {
         const recovery = SLEEP_RECOVERY_PER_SECOND * elapsedSeconds;
         if (recovery > 0) {
-          setStat('health', statsState.health + recovery, { skipSave: true });
-          setStat('energy', statsState.energy + recovery, { skipSave: true });
+          setStat('hunger', statsState.hunger + recovery, { skipSave: true });
           statsChanged = true;
+        }
+        const healthRecovery = SLEEP_RECOVERY_SEGMENTS_PER_SECOND * elapsedSeconds;
+        if (healthRecovery > 0) {
+          healthRecoveryRemainder += healthRecovery;
+          const segments = Math.floor(healthRecoveryRemainder);
+          if (segments > 0) {
+            setStat('health', statsState.health + segments, { skipSave: true });
+            healthRecoveryRemainder -= segments;
+            statsChanged = true;
+          }
         }
       } else {
         if (statsState.hunger > 0) {
@@ -7393,19 +7969,24 @@ async function main() {
         }
 
         const isMoving = playerControls?.isMoving;
-        if (isMoving && statsState.energy > 0) {
+        if (isMoving && statsState.hunger > 0) {
           const energyDecay = ENERGY_DECAY_PER_SECOND_WHILE_MOVING * elapsedSeconds;
           if (energyDecay > 0) {
-            setStat('energy', statsState.energy - energyDecay, { skipSave: true });
+            setStat('hunger', statsState.hunger - energyDecay, { skipSave: true });
             statsChanged = true;
           }
         }
 
         if (statsState.hunger <= 0 && statsState.health > 0) {
-          const healthDecay = HUNGER_HEALTH_DECAY_PER_SECOND * elapsedSeconds;
+          const healthDecay = HUNGER_HEALTH_DECAY_SEGMENTS_PER_SECOND * elapsedSeconds;
           if (healthDecay > 0) {
-            setStat('health', statsState.health - healthDecay, { skipSave: true });
-            statsChanged = true;
+            healthDecayRemainder += healthDecay;
+            const segments = Math.floor(healthDecayRemainder);
+            if (segments > 0) {
+              setStat('health', statsState.health - segments, { skipSave: true });
+              healthDecayRemainder -= segments;
+              statsChanged = true;
+            }
           }
         }
       }
@@ -7738,19 +8319,61 @@ async function main() {
     if (isHostNow) {
       if (monstersSeeded) {
         ensureMonsters();
+        const livingMonsters = monsters.filter(monster => monster?.model && !monster.isDead);
+        const activePlayers = [
+          { id: 'local', model: playerModel },
+          ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p?.model }))
+        ].filter((entry) => entry.model);
+        const claimedMonsters = new Set();
+        const friendlyDriftMonsterIds = new Set();
+
+        activePlayers.forEach((player) => {
+          let bestMonster = null;
+          let bestDistance = Infinity;
+          livingMonsters.forEach((monster) => {
+            if (claimedMonsters.has(monster.id)) return;
+            if (monster.model?.userData?.mode !== 'friendly') return;
+            const dist = monster.model.position.distanceTo(player.model.position);
+            if (dist < bestDistance) {
+              bestDistance = dist;
+              bestMonster = monster;
+            }
+          });
+          if (bestMonster) {
+            claimedMonsters.add(bestMonster.id);
+            friendlyDriftMonsterIds.add(bestMonster.id);
+          }
+        });
+
+        const friendlyAvoidanceZones = [];
+        const merchantFriendly = getMerchantFriendly?.();
+        if (merchantFriendly?.model?.position) {
+          friendlyAvoidanceZones.push(merchantFriendly.model.position.clone());
+        }
+        const roomFriendlies = friendlyNpcManager?.friendlies || [];
+        roomFriendlies.forEach((friendly) => {
+          if (friendly?.isDead || !friendly?.model?.position) return;
+          friendlyAvoidanceZones.push(friendly.model.position.clone());
+        });
+
         monsters.forEach(monster => {
           if (!monster || !monster.model) return;
 
           if (monster.isDead) return; // your respawn logic here...
 
+          const aiContext = {
+            enableFriendlyDrift: friendlyDriftMonsterIds.has(monster.id),
+            friendlyAvoidanceZones
+          };
+
           if (PERF.throttleAI) {
             const last = monster.lastAIUpdateMs ?? 0;
             if (aiNowMs - last > 150) {
               monster.lastAIUpdateMs = aiNowMs;
-              monster.updateAI(mixerDelta, playerModel, otherPlayers); // <-- use mixerDelta
+              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext); // <-- use mixerDelta
             }
           } else {
-            monster.updateAI(mixerDelta, playerModel, otherPlayers);   // <-- use mixerDelta
+            monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);   // <-- use mixerDelta
           }
         });
       }

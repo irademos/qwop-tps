@@ -22,6 +22,13 @@ const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
 const WOOD_INTERACT_RANGE = 3;
 const ENGAGED_MODE_DISTANCE = 7;
+const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
+const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
+const WEAPON_CAMERA_FOV_DELTA = 8;
+const ENGAGED_CAMERA_OFFSET = {
+  right: 0.65,
+  up: 0.4
+};
 const BED_SLEEP_PROMPT = "click or press 'x' to sleep";
 const BED_WAKE_PROMPT = "click or press 'x' to wake";
 const FRIENDLY_DIALOGUE_POOL = [
@@ -233,6 +240,7 @@ export class PlayerControls {
     this.enabled = true; // Add enabled flag for chat input
 
     this.interactionPromptEl = document.getElementById('interaction-tooltip');
+    this.climbOverlayEl = document.getElementById('climb-overlay');
     this.friendlyInteractButton = document.getElementById('friendly-interact');
     this.friendlyDialogueEl = document.getElementById('friendly-dialogue');
     this.friendlyDialogueTextEl = this.friendlyDialogueEl?.querySelector('.friendly-dialogue-text') || null;
@@ -259,8 +267,10 @@ export class PlayerControls {
     this.isFireHeld = false;
     this.baseCameraOffset = this.cameraOffset.clone();
     this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
+    this.weaponCameraOffset = this.baseCameraOffset.clone().add(WEAPON_CAMERA_OFFSET);
     this.baseCameraTargetOffset = new THREE.Vector3();
     this.aimCameraTargetOffset = new THREE.Vector3(1.3, 0, 0);
+    this.weaponCameraTargetOffset = WEAPON_CAMERA_TARGET_OFFSET.clone();
     this.cameraTargetOffset = new THREE.Vector3();
     this.aimZoomInSpeed = 6;
     this.aimZoomOutSpeed = 3;
@@ -289,6 +299,16 @@ export class PlayerControls {
         this.interactionPromptEl.addEventListener('touchstart', activateInteraction, { passive: false });
       }
       this.interactionPromptEl.addEventListener('click', activateInteraction);
+    }
+
+    if (this.climbOverlayEl) {
+      const activateClimb = (event) => {
+        if (this.climbOverlayEl.classList.contains('hidden')) return;
+        event.preventDefault();
+        this.handleClimbAction();
+      };
+      this.climbOverlayEl.addEventListener('click', activateClimb);
+      this.climbOverlayEl.addEventListener('touchstart', activateClimb, { passive: false });
     }
 
     if (this.friendlyInteractButton) {
@@ -363,6 +383,7 @@ export class PlayerControls {
   }
 
   initializeControls() {
+    this.initializeActionButtons();
     if (this.isMobile) {
       this.initializeMobileControls();
     } else {
@@ -378,7 +399,7 @@ export class PlayerControls {
       newJoystickContainer.id = 'joystick-container';
       document.body.appendChild(newJoystickContainer);
     }
-    
+
     // Add jump button for mobile
     const jumpButton = document.getElementById('jump-button');
     if (!jumpButton) {
@@ -387,7 +408,7 @@ export class PlayerControls {
       newJumpButton.innerText = 'JUMP';
       document.body.appendChild(newJumpButton);
     }
-    
+
     // Jump button event listeners
     document.getElementById('jump-button').addEventListener('touchstart', (event) => {
       if (!this.enabled || this.isInWater) return;
@@ -400,6 +421,11 @@ export class PlayerControls {
       } else if (this.canJump && this.body) {
         this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
         this.canJump = false;
+        this.hasDoubleJumped = false;
+      } else if (!this.hasDoubleJumped && this.body) {
+        this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
+        this.hasDoubleJumped = true;
+        this.playAction('hurricaneKick');
       }
       event.preventDefault();
     });
@@ -409,7 +435,7 @@ export class PlayerControls {
       this.jumpButtonPressed = false;
       event.preventDefault();
     });
-    
+
     // Initialize joystick with improved behavior
     this.joystick = nipplejs.create({
       zone: document.getElementById('joystick-container'),
@@ -418,15 +444,13 @@ export class PlayerControls {
       color: 'rgba(255, 255, 255, 0.5)',
       size: 100
     });
-    
+
     this.joystick.on('move', (evt, data) => {
       const angle = data.angle.radian;
       this.joystickAngle = angle;
       this.joystickForce = Math.min(data.force, 1);
-    
-      // this.yaw = -angle; // Flip joystick angle to align with world yaw
     });
-    
+
     this.joystick.on('end', () => {
       this.joystickForce = 0;
     });
@@ -476,230 +500,314 @@ export class PlayerControls {
         }
       }
     });
+  }
 
-    // Action buttons container
+  initializeActionButtons() {
     const actionContainer = document.getElementById('action-buttons');
-    const toggleButton = document.getElementById('mobile-action-toggle');
-    let setActionState = null;
-    let equipMenuButtons = [];
-    let equipBackButton = null;
-    if (actionContainer && toggleButton) {
-      setActionState = (state) => {
-        this.mobileActionState = state;
-        const expanded = state === 'expanded' || state === 'equip';
-        const punchMode = state === 'punch';
-        const equipMode = state === 'equip';
-        actionContainer.classList.toggle('mobile-expanded', expanded);
-        actionContainer.classList.toggle('mobile-punch-mode', punchMode);
-        actionContainer.classList.toggle('mobile-equip-mode', equipMode);
-        toggleButton.setAttribute('aria-expanded', expanded || punchMode ? 'true' : 'false');
-        toggleButton.textContent = expanded || punchMode ? '✕' : '⋯';
-        if (!equipMode) {
-          equipMenuButtons.forEach(button => button.remove());
-          equipMenuButtons = [];
-          if (equipBackButton) {
-            equipBackButton.remove();
-            equipBackButton = null;
-          }
-        }
-      };
+    if (!actionContainer) return;
 
-      setActionState('collapsed');
+    actionContainer.innerHTML = '';
 
-      const handleToggle = (event) => {
-        event.preventDefault();
-        if (this.mobileActionState === 'punch') {
-          setActionState('expanded');
-          return;
-        }
-        const nextState = this.mobileActionState === 'expanded' || this.mobileActionState === 'equip'
-          ? 'collapsed'
-          : 'expanded';
-        setActionState(nextState);
-      };
-
-      toggleButton.addEventListener('touchstart', handleToggle, { passive: false });
-      toggleButton.addEventListener('click', handleToggle);
-    }
-
-    const buildEquipMenuButtons = () => {
-      if (!actionContainer) return;
-      const appState = window.appState;
-      const inventory = appState?.getInventory?.() || {};
-      const equipCandidates = [
-        { id: 'bomb', label: 'Bomb' },
-        { id: 'bow', label: 'Bow' },
-        { id: 'iceGun', label: 'Ice Gun' },
-        { id: 'autumnSword', label: 'Sword' },
-        { id: 'lantern', label: 'Lantern' }
-      ];
-
-      const hasInventoryItem = (itemId) => {
-        const entry = inventory[itemId];
-        if (!entry) return false;
-        if (typeof entry.count === 'number') {
-          return entry.count > 0;
-        }
-        return true;
-      };
-
-      equipMenuButtons.forEach(button => button.remove());
-      equipMenuButtons = [];
-
-      const itemsToShow = equipCandidates.filter(item => hasInventoryItem(item.id));
-      itemsToShow.forEach((item) => {
-        const button = document.createElement('button');
-        button.className = 'action-button mobile-equip-action';
-        button.dataset.equipItemId = item.id;
-        button.innerText = item.label;
-        const handleEquip = (event) => {
-          if (!this.enabled) return;
-          const isEquipped = appState?.isInventoryItemEquipped?.(item.id);
-          if (isEquipped) {
-            appState?.unequipInventoryItem?.(item.id);
-          } else {
-            appState?.equipInventoryItem?.(item.id);
-          }
-          event.preventDefault();
-        };
-        button.addEventListener('touchstart', handleEquip, { passive: false });
-        button.addEventListener('click', handleEquip);
-        equipMenuButtons.push(button);
-        actionContainer.appendChild(button);
-      });
+    const createButton = (id, className, label) => {
+      const button = document.createElement('button');
+      button.id = id;
+      button.className = `action-button ${className}`;
+      button.textContent = label;
+      actionContainer.appendChild(button);
+      return button;
     };
 
-    const showEquipMenu = (event) => {
-      if (!this.enabled) return;
-      setActionState?.('equip');
-      if (!equipBackButton) {
-        equipBackButton = document.createElement('button');
-        equipBackButton.className = 'action-button mobile-equip-action';
-        equipBackButton.innerText = '<';
-        const handleBack = (backEvent) => {
-          if (!this.enabled) return;
-          setActionState?.('expanded');
-          backEvent.preventDefault();
-        };
-        equipBackButton.addEventListener('touchstart', handleBack, { passive: false });
-        equipBackButton.addEventListener('click', handleBack);
-        actionContainer.appendChild(equipBackButton);
+    this.punchButton = createButton('punch-button', 'mobile-primary-action', 'Attack');
+    this.spellsButton = createButton('spells-button', 'mobile-primary-action', 'Spells');
+    this.equipButton = createButton('equip-button', 'mobile-primary-action', 'EQUIP');
+    this.optionLeftButton = createButton('left-punch-button', 'mobile-option-action', 'Shield');
+    this.optionCenterButton = createButton('punch-kick-button', 'mobile-option-action', '🎤');
+    this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', '—');
+
+    this.mobileEquipButtons = [];
+    this.mobileActionState = 'default';
+    this.mobileMeleeComboIndex = 0;
+    this.mobileStatusToastTimer = null;
+    this.mobileAttackHoldActive = false;
+    this.mobileAttackPressStartedAt = 0;
+    this.mobileAttackPressActive = false;
+
+    const onAttackPressStart = (event) => {
+      if (!this.enabled || !this.isMobile) return;
+      this.mobileAttackPressStartedAt = performance.now();
+      this.mobileAttackPressActive = true;
+      if (this.shouldHoldToFire()) {
+        this.mobileAttackHoldActive = true;
+        this.isFireHeld = true;
+        this.setAiming(true);
       }
-      buildEquipMenuButtons();
-      event.preventDefault();
+      if (event) event.preventDefault();
     };
 
-    // Equip button
-    if (!document.getElementById('equip-button')) {
-      const newEquipButton = document.createElement('button');
-      newEquipButton.id = 'equip-button';
-      newEquipButton.className = 'action-button mobile-action';
-      newEquipButton.innerText = 'EQUIP';
-      actionContainer.appendChild(newEquipButton);
-    }
+    const onAttackPressEnd = (event) => {
+      if (!this.enabled || !this.isMobile) return;
+      if (!this.mobileAttackPressActive) return;
+      this.mobileAttackPressActive = false;
+      if (this.mobileAttackHoldActive) {
+        this.mobileAttackHoldActive = false;
+        this.isFireHeld = false;
+        this.setAiming(false);
+        this.attemptFireProjectile();
+      } else {
+        this.handlePrimaryAttackPress();
+      }
+      if (event) event.preventDefault();
+    };
 
-    const equipButton = document.getElementById('equip-button');
-    equipButton.addEventListener('touchstart', showEquipMenu, { passive: false });
-    equipButton.addEventListener('click', showEquipMenu);
+    this.punchButton.addEventListener('touchstart', onAttackPressStart, { passive: false });
+    this.punchButton.addEventListener('touchend', onAttackPressEnd, { passive: false });
+    this.punchButton.addEventListener('touchcancel', onAttackPressEnd, { passive: false });
+    this.punchButton.addEventListener('mousedown', onAttackPressStart);
+    this.punchButton.addEventListener('mouseup', onAttackPressEnd);
+    this.punchButton.addEventListener('mouseleave', onAttackPressEnd);
+    this.punchButton.addEventListener('click', (event) => event.preventDefault());
 
-    // Attack button
-    if (!document.getElementById('punch-button')) {
-      const punchButton = document.createElement('button');
-      punchButton.id = 'punch-button';
-      punchButton.className = 'action-button mobile-action';
-      punchButton.innerText = 'ATTACK';
-      actionContainer.appendChild(punchButton);
-    }
-
-    const punchButton = document.getElementById('punch-button');
-    punchButton.addEventListener('touchstart', (event) => {
+    const onSpellsToggle = (event) => {
       if (!this.enabled) return;
-      setActionState?.('punch');
-      event.preventDefault();
+      this.mobileActionState = this.mobileActionState === 'spell-options' ? 'default' : 'spell-options';
+      this.refreshActionButtons();
+      if (event) event.preventDefault();
+    };
+    this.spellsButton.addEventListener('touchstart', onSpellsToggle, { passive: false });
+    this.spellsButton.addEventListener('mousedown', onSpellsToggle);
+    this.spellsButton.addEventListener('click', (event) => event.preventDefault());
+
+    const openEquip = (event) => {
+      if (!this.enabled) return;
+      this.showMobileEquipMenu();
+      if (event) event.preventDefault();
+    };
+    this.equipButton.addEventListener('touchstart', openEquip, { passive: false });
+    this.equipButton.addEventListener('mousedown', openEquip);
+    this.equipButton.addEventListener('click', (event) => event.preventDefault());
+
+    const handleOptionPick = (slot) => (event) => {
+      if (!this.enabled) return;
+      if (this.mobileActionState === 'spell-options') {
+        if (slot === 'left') {
+          const casted = this.castSpellById?.('shield');
+          if (casted) {
+            this.mobileActionState = 'default';
+          }
+        } else if (slot === 'kick') {
+          if (this.isVoiceListening?.()) {
+            this.stopVoiceListening?.();
+            this.mobileActionState = 'default';
+          } else {
+            this.handleVoiceMicPress?.();
+          }
+          if (event) event.preventDefault();
+        }
+      } else if (this.mobileActionState === 'freeze') {
+        this.attemptFireProjectileForHand('right');
+      } else {
+        this.handlePrimaryAttackPress();
+      }
+      this.refreshActionButtons();
+      if (event) event.preventDefault();
+    };
+
+    this.optionLeftButton.addEventListener('touchstart', handleOptionPick('left'), { passive: false });
+    this.optionLeftButton.addEventListener('mousedown', handleOptionPick('left'));
+    this.optionCenterButton.addEventListener('touchstart', handleOptionPick('kick'), { passive: false });
+    this.optionCenterButton.addEventListener('mousedown', handleOptionPick('kick'));
+    this.optionRightButton.addEventListener('touchstart', handleOptionPick('right'), { passive: false });
+    this.optionRightButton.addEventListener('mousedown', handleOptionPick('right'));
+
+    this.refreshActionButtons();
+  }
+
+  getMobileAttackLabel() {
+    const weapon = this.getEquippedWeapon('right');
+    if (weapon?.itemId === 'bow') return 'Bow';
+    if (weapon?.itemId === 'bomb') return 'Bomb';
+    return 'Attack';
+  }
+
+  performAttackForSlot(slot) {
+    if (!this.enabled || this.isInWater) return;
+    if (slot === 'kick') {
+      this.playAction('mmaKick');
+      return;
+    }
+
+    const hand = slot === 'left' ? 'left' : 'right';
+    const weapon = this.getEquippedWeapon(hand);
+    if (this.isProjectileWeapon(weapon)) {
+      if (this.shouldHoldToFire(hand)) {
+        this.isFireHeld = true;
+        this.setAiming(true);
+        setTimeout(() => {
+          this.isFireHeld = false;
+          this.setAiming(false);
+          this.attemptFireProjectileForHand(hand);
+        }, 150);
+      } else {
+        this.attemptFireProjectileForHand(hand);
+      }
+      return;
+    }
+
+    this.playAction(hand === 'left' ? 'leftPunch' : 'mutantPunch');
+  }
+
+  handlePrimaryAttackPress() {
+    const weapon = this.getEquippedWeapon('right');
+    if (weapon?.itemId === 'bow' || weapon?.itemId === 'bomb') {
+      this.attemptFireProjectileForHand('right');
+      return;
+    }
+    const cycle = ['right', 'left', 'kick'];
+    const slot = cycle[this.mobileMeleeComboIndex % cycle.length];
+    this.mobileMeleeComboIndex = (this.mobileMeleeComboIndex + 1) % cycle.length;
+    this.performAttackForSlot(slot);
+  }
+
+  showMobileEquipMenu() {
+    const actionContainer = document.getElementById('action-buttons');
+    if (!actionContainer) return;
+
+    const appState = window.appState;
+    const inventory = appState?.getInventory?.() || {};
+    const equipCandidates = [
+      { id: 'bomb', label: 'Bomb' },
+      { id: 'bow', label: 'Bow' },
+      { id: 'iceGun', label: 'Ice Gun' },
+      { id: 'autumnSword', label: 'Sword' },
+      { id: 'lantern', label: 'Lantern' }
+    ];
+
+    this.mobileEquipButtons.forEach(button => button.remove());
+    this.mobileEquipButtons = [];
+
+    const hasInventoryItem = (itemId) => {
+      const entry = inventory[itemId];
+      const count = Number(entry?.count);
+      return Number.isFinite(count) && count > 0;
+    };
+
+    const itemsToShow = equipCandidates.filter(item => hasInventoryItem(item.id));
+    if (!itemsToShow.length) {
+      this.mobileActionState = 'default';
+      this.refreshActionButtons();
+      this.showMobileStatusToast('No items in inventory!');
+      return;
+    }
+
+    this.mobileActionState = 'equip';
+
+    itemsToShow.forEach((item) => {
+      const button = document.createElement('button');
+      button.className = 'action-button mobile-equip-action';
+      button.textContent = item.label;
+      const onEquip = (event) => {
+        if (!this.enabled) return;
+        const isEquipped = appState?.isInventoryItemEquipped?.(item.id);
+        if (isEquipped) appState?.unequipInventoryItem?.(item.id);
+        else appState?.equipInventoryItem?.(item.id);
+        this.mobileActionState = 'default';
+        this.refreshActionButtons();
+        if (event) event.preventDefault();
+      };
+      button.addEventListener('touchstart', onEquip, { passive: false });
+      button.addEventListener('mousedown', onEquip);
+      button.addEventListener('click', (event) => event.preventDefault());
+      this.mobileEquipButtons.push(button);
+      actionContainer.appendChild(button);
     });
 
-    if (!document.getElementById('left-punch-button')) {
-      const leftPunchButton = document.createElement('button');
-      leftPunchButton.id = 'left-punch-button';
-      leftPunchButton.className = 'action-button mobile-punch-action';
-      leftPunchButton.innerText = 'LEFT';
-      actionContainer.appendChild(leftPunchButton);
-      let leftFireHeld = false;
-      leftPunchButton.addEventListener('touchstart', (event) => {
-        if (!this.enabled || this.isInWater) return;
-        const weapon = this.getEquippedWeapon('left');
-        if (this.isProjectileWeapon(weapon)) {
-          if (this.shouldHoldToFire('left')) {
-            leftFireHeld = true;
-            this.isFireHeld = true;
-            this.setAiming(true);
-          } else {
-            this.attemptFireProjectileForHand('left');
-          }
-          event.preventDefault();
-          return;
-        }
-        this.playAction('leftPunch');
-        event.preventDefault();
-      });
-      leftPunchButton.addEventListener('touchend', (event) => {
-        if (!this.enabled || this.isInWater || !leftFireHeld) return;
-        leftFireHeld = false;
-        this.isFireHeld = false;
-        this.setAiming(false);
-        this.attemptFireProjectileForHand('left');
-        event.preventDefault();
-      });
+    this.refreshActionButtons();
+  }
+
+  showMobileStatusToast(message) {
+    if (!message) return;
+
+    let toast = document.getElementById('mobile-action-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'mobile-action-toast';
+      document.body.appendChild(toast);
     }
 
-    if (!document.getElementById('punch-kick-button')) {
-      const punchKickButton = document.createElement('button');
-      punchKickButton.id = 'punch-kick-button';
-      punchKickButton.className = 'action-button mobile-punch-action';
-      punchKickButton.innerText = 'KICK';
-      actionContainer.appendChild(punchKickButton);
-      punchKickButton.addEventListener('touchstart', (event) => {
-        if (!this.enabled || this.isInWater) return;
-        this.playAction('mmaKick');
-        event.preventDefault();
-      });
+    toast.textContent = message;
+    toast.classList.add('visible');
+
+    if (this.mobileStatusToastTimer) {
+      clearTimeout(this.mobileStatusToastTimer);
     }
 
-    if (!document.getElementById('right-punch-button')) {
-      const rightPunchButton = document.createElement('button');
-      rightPunchButton.id = 'right-punch-button';
-      rightPunchButton.className = 'action-button mobile-punch-action';
-      rightPunchButton.innerText = 'RIGHT';
-      actionContainer.appendChild(rightPunchButton);
-      let rightFireHeld = false;
-      rightPunchButton.addEventListener('touchstart', (event) => {
-        if (!this.enabled || this.isInWater) return;
-        const weapon = this.getEquippedWeapon();
-        if (this.isProjectileWeapon(weapon)) {
-          if (this.shouldHoldToFire()) {
-            rightFireHeld = true;
-            this.isFireHeld = true;
-            this.setAiming(true);
-          } else {
-            this.attemptFireProjectileForHand('right');
-          }
-          event.preventDefault();
-          return;
-        }
-        this.playAction('mutantPunch');
-        event.preventDefault();
-      });
-      rightPunchButton.addEventListener('touchend', (event) => {
-        if (!this.enabled || this.isInWater || !rightFireHeld) return;
-        rightFireHeld = false;
-        this.isFireHeld = false;
-        this.setAiming(false);
-        this.attemptFireProjectileForHand('right');
-        event.preventDefault();
-      });
+    this.mobileStatusToastTimer = setTimeout(() => {
+      toast.classList.remove('visible');
+    }, 1400);
+  }
+
+  refreshActionButtons() {
+    const actionContainer = document.getElementById('action-buttons');
+    if (!actionContainer || !this.punchButton) return;
+
+    const voiceState = this.getVoiceMicState?.() || { disabled: false, remainingSeconds: 0 };
+    const rightWeapon = this.getEquippedWeapon('right');
+    const isIceGunEquipped = rightWeapon?.itemId === 'iceGun';
+
+    let state = this.mobileActionState || 'default';
+    if (state === 'freeze' && !isIceGunEquipped) {
+      state = 'default';
+      this.mobileActionState = 'default';
+    }
+
+    if (state === 'default' && isIceGunEquipped && this.isMobile) {
+      state = 'freeze';
+      this.mobileActionState = 'freeze';
+    }
+
+    actionContainer.classList.toggle('mobile-spell-options', state === 'spell-options');
+    actionContainer.classList.toggle('mobile-equip-mode', state === 'equip');
+    actionContainer.classList.toggle('mobile-freeze-mode', state === 'freeze');
+
+    this.punchButton.textContent = this.getMobileAttackLabel();
+    this.spellsButton.textContent = 'Spells';
+    this.spellsButton.disabled = false;
+
+    this.optionLeftButton.textContent = isIceGunEquipped ? 'Freeze' : 'Shield';
+    this.optionLeftButton.disabled = false;
+    this.optionCenterButton.textContent = '🎤';
+    this.optionCenterButton.disabled = false;
+    this.optionRightButton.textContent = '—';
+    this.optionRightButton.disabled = true;
+
+    if (!this.isMobile) {
+      this.punchButton.style.display = 'none';
+    } else {
+      this.punchButton.style.display = '';
+    }
+
+    if (state === 'spell-options') {
+      const shieldState = this.getSpellStateById?.('shield') || { disabled: true, remainingSeconds: 0 };
+      this.optionLeftButton.textContent = shieldState.remainingSeconds > 0 ? `Shield ${shieldState.remainingSeconds}s` : 'Shield';
+      this.optionLeftButton.disabled = !!shieldState.disabled;
+
+      if (this.isVoiceListening?.()) {
+        this.optionCenterButton.textContent = '■';
+      } else {
+        this.optionCenterButton.textContent = voiceState.remainingSeconds > 0 ? `🎤 ${voiceState.remainingSeconds}s` : '🎤';
+        this.optionCenterButton.disabled = !!voiceState.disabled;
+      }
+    } else if (state === 'freeze') {
+      this.optionCenterButton.disabled = true;
+      this.optionRightButton.disabled = true;
+    }
+
+    if (state !== 'equip') {
+      this.mobileEquipButtons.forEach(button => button.remove());
+      this.mobileEquipButtons = [];
     }
   }
-  
+
   setupEventListeners() {
     // Listen for key events (for desktop controls)
     document.addEventListener("keydown", (e) => {
@@ -744,6 +852,9 @@ export class PlayerControls {
       }
 
       if (key === 'x') {
+        if (this.handleClimbAction()) {
+          return;
+        }
         this.handlePickupAction();
         return;
       }
@@ -857,6 +968,23 @@ export class PlayerControls {
     }
   }
 
+  handleClimbAction() {
+    if (!this.enabled || this.isSleeping || this.vehicle || this.isInteracting) return false;
+    if (this.isClimbing) return false;
+    if (!this.playerModel) return false;
+
+    const position = this.playerModel.position;
+    const climbArea = this.findClimbableArea(position);
+    if (!climbArea) return false;
+
+    const nearEntry = this.isWithinClimbEntry(climbArea, position);
+    const movement = this.lastMoveDirection?.length?.() > 0 ? this.lastMoveDirection : null;
+    if (!nearEntry && !this.isMovingTowardClimbArea(climbArea, movement)) return false;
+
+    this.startClimbing(climbArea);
+    return true;
+  }
+
   handlePickupAction() {
     if (!this.enabled && !this.isSleeping) return;
 
@@ -910,6 +1038,11 @@ export class PlayerControls {
 
     if (closest.type === 'wood') {
       window.pickupWood?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'craft-table') {
+      window.openCraftPanel?.();
       return;
     }
 
@@ -994,6 +1127,22 @@ export class PlayerControls {
         bed,
         maxDistance,
         promptText: BED_SLEEP_PROMPT
+      });
+    }
+
+    const craftTable = window.craftTable;
+    if (craftTable?.mesh) {
+      const tablePosition = craftTable.getWorldPosition?.(new THREE.Vector3()) ?? craftTable.mesh.position;
+      const dist = playerPos.distanceTo(tablePosition);
+      const maxDistance = craftTable.getInteractionDistance?.() ?? 3;
+      const promptText = this.isMobile
+        ? 'click to craft'
+        : "Press 'x' to craft";
+      consider(dist, {
+        type: 'craft-table',
+        craftTable,
+        maxDistance,
+        promptText
       });
     }
 
@@ -1592,14 +1741,10 @@ export class PlayerControls {
 
     const climbInput = this.getClimbInput(moveDirection, cameraDirection);
     const climbArea = this.findClimbableArea(position);
-    const nearEntry = climbArea && this.isWithinClimbEntry(climbArea, position);
-    const shouldStartClimb = !this.isClimbing && climbArea && climbInput > 0
-      && (nearEntry || this.isMovingTowardClimbArea(climbArea, movement));
-    if (this.isClimbing || shouldStartClimb) {
+    if (this.isClimbing) {
       if (!climbArea) {
         this.stopClimbing();
       } else {
-        if (!this.isClimbing) this.startClimbing(climbArea);
         this.updateClimbing({
           area: climbArea,
           climbInput,
@@ -1820,12 +1965,28 @@ export class PlayerControls {
 
     const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
     const aimingActive = !this.isEngaged && (this.isAiming || shouldHoldAim);
-    const aimLerpSpeed = aimingActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
+    const engagedCameraActive = this.isEngaged;
+    const weaponCameraActive = !engagedCameraActive && !aimingActive;
+    const closeCameraActive = aimingActive || weaponCameraActive || engagedCameraActive;
+    const aimLerpSpeed = closeCameraActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
     const aimLerpFactor = 1 - Math.exp(-aimLerpSpeed * this.deltaSeconds);
-    const targetOffset = aimingActive ? this.aimCameraOffset : this.baseCameraOffset;
-    const targetFov = aimingActive ? this.aimFov : this.defaultFov;
+    const targetOffset = aimingActive
+      ? this.aimCameraOffset
+      : weaponCameraActive
+        ? this.weaponCameraOffset
+        : this.baseCameraOffset;
+    const shoulderFov = Math.max(45, this.defaultFov - WEAPON_CAMERA_FOV_DELTA);
+    const targetFov = aimingActive
+      ? this.aimFov
+      : (weaponCameraActive || engagedCameraActive)
+        ? shoulderFov
+        : this.defaultFov;
     this.cameraOffset.lerp(targetOffset, aimLerpFactor);
-    const targetCameraTargetOffset = aimingActive ? this.aimCameraTargetOffset : this.baseCameraTargetOffset;
+    const targetCameraTargetOffset = aimingActive
+      ? this.aimCameraTargetOffset
+      : weaponCameraActive
+        ? this.weaponCameraTargetOffset
+        : this.baseCameraTargetOffset;
     this.cameraTargetOffset.lerp(targetCameraTargetOffset, aimLerpFactor);
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, aimLerpFactor);
     this.camera.updateProjectionMatrix();
@@ -1858,12 +2019,15 @@ export class PlayerControls {
       const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
       this.yaw = engagedYaw;
       this.pitch = 0;
-      const cameraDistance = Math.max(2.5, Math.abs(this.baseCameraOffset?.z ?? this.cameraOffset.z));
-      const cameraHeight = this.baseCameraOffset?.y ?? this.cameraOffset.y ?? 1;
+      const shoulderOffset = this.weaponCameraOffset || this.baseCameraOffset || this.cameraOffset;
+      const cameraDistance = Math.max(2.5, Math.abs(shoulderOffset?.z ?? this.cameraOffset.z));
+      const cameraHeight = shoulderOffset?.y ?? this.cameraOffset.y ?? 1;
       const behindOffset = this.engagedDirection.clone().multiplyScalar(-cameraDistance);
+      const engagedRight = new THREE.Vector3(-this.engagedDirection.z, 0, this.engagedDirection.x).normalize();
       desiredCameraPosition = orbitCenter.clone()
-        .add(new THREE.Vector3(0, cameraHeight, 0))
-        .add(behindOffset);
+        .add(new THREE.Vector3(0, cameraHeight + ENGAGED_CAMERA_OFFSET.up, 0))
+        .add(behindOffset)
+        .addScaledVector(engagedRight, ENGAGED_CAMERA_OFFSET.right);
     } else {
       const rotatedOffset = new THREE.Vector3(
         offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
@@ -1951,6 +2115,7 @@ export class PlayerControls {
     this.questManager?.update();
     this.updateFriendlyInteractionUI();
     this.updateInteractionPrompt();
+    this.updateClimbOverlay();
 
     const hasGun = !!this.getEquippedGun();
     if (hasGun !== this.lastHasGun) {
@@ -1989,6 +2154,28 @@ export class PlayerControls {
         && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')
         && weapon.type === 'sword'
     ) || null;
+  }
+
+  updateClimbOverlay() {
+    if (!this.climbOverlayEl || !this.playerModel) return;
+    if (this.isClimbing || this.isSleeping || this.vehicle || this.isInteracting) {
+      this.climbOverlayEl.classList.add('hidden');
+      return;
+    }
+
+    const position = this.playerModel.position;
+    const climbArea = this.findClimbableArea(position);
+    const nearEntry = climbArea && this.isWithinClimbEntry(climbArea, position);
+    const movement = this.lastMoveDirection?.length?.() > 0 ? this.lastMoveDirection : null;
+    const movingToward = climbArea && this.isMovingTowardClimbArea(climbArea, movement);
+    const canStartClimbing = !!climbArea && (nearEntry || movingToward);
+
+    if (canStartClimbing) {
+      this.climbOverlayEl.textContent = this.isMobile ? 'Tap to climb' : "Press X to climb";
+      this.climbOverlayEl.classList.remove('hidden');
+    } else {
+      this.climbOverlayEl.classList.add('hidden');
+    }
   }
 
   updateInteractionPrompt() {
@@ -2345,12 +2532,17 @@ export class PlayerControls {
   }
 
   updateAimingRotation() {
-    if (!this.isFireHeld || !this.shouldHoldToFire()) return;
+    if (!this.isFireHeld || !this.shouldHoldToFire() || this.isWeaponShoulderCameraActive()) return;
     const weapon = this.getEquippedWeapon();
     const invertForBow = weapon?.itemId === 'bow';
     const direction = this.getAimDirection(invertForBow);
     this.alignPlayerToDirection(direction);
   }
+
+  isWeaponShoulderCameraActive() {
+    return !this.isEngaged && !this.isAiming;
+  }
+
 
   alignPlayerToDirection(direction) {
     if (!this.playerModel) return;
@@ -2363,9 +2555,13 @@ export class PlayerControls {
     const normalizedDirection = direction.clone().normalize();
     const gun = this.getEquippedGun();
 
-    if (gun?.mesh) {
+    const activeGunMesh = gun?.useHeldMeshWhenHeld && gun?.heldMesh
+      ? gun.heldMesh
+      : gun?.mesh;
+
+    if (activeGunMesh) {
       const gunPosition = new THREE.Vector3();
-      gun.mesh.getWorldPosition(gunPosition);
+      activeGunMesh.getWorldPosition(gunPosition);
       return gunPosition.add(normalizedDirection.clone().multiplyScalar(offsetDistance));
     }
 

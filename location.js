@@ -31,24 +31,21 @@ function createStatusElement() {
         clearTimeout(hideTimer);
         hideTimer = null;
       }
-      if (state === 'requesting') {
-        statusLine.textContent = 'Requesting location…';
-      } else if (state === 'found') {
-        const accuracyText = typeof accuracy === 'number' ? ` (±${Math.round(accuracy)}m)` : '';
-        statusLine.textContent = `Location found${accuracyText}`;
-      } else if (state === 'error') {
+      if (state === 'error') {
         statusLine.textContent = message ? `Location error: ${message}` : 'Location error';
       } else {
-        statusLine.textContent = message || 'Location status updated.';
+        element.classList.remove('is-visible');
+        element.classList.add('is-hidden');
+        return;
       }
+
       element.classList.add('is-visible');
       element.classList.remove('is-hidden');
 
-      if (state === 'found') {
-        hideTimer = setTimeout(() => {
-          element.classList.add('is-hidden');
-        }, 1700);
-      }
+      hideTimer = setTimeout(() => {
+        element.classList.remove('is-visible');
+        element.classList.add('is-hidden');
+      }, 2400);
     },
     element
   };
@@ -60,9 +57,9 @@ function getErrorMessage(error) {
   }
   switch (error.code) {
     case error.PERMISSION_DENIED:
-      return 'Enable Location in browser settings and reload.';
+      return 'Location can\'t be found. Enable location permissions and reload.';
     case error.POSITION_UNAVAILABLE:
-      return 'Location unavailable. Check your signal and try again.';
+      return 'Location can\'t be found right now. Check permissions/signal and try again.';
     case error.TIMEOUT:
       return 'Location request timed out. Try again soon.';
     default:
