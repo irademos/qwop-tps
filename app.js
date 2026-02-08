@@ -94,7 +94,8 @@ const MAX_MONSTERS = 6;
 const MONSTER_MODELS = [
   "/models/zombie.fbx",
   "/models/zombie_boy.fbx",
-  "/models/zombie_green.fbx"
+  "/models/zombie_green.fbx",
+  "/models/golem.fbx"
 ];
 const MONSTER_SPAWN_MIN_RADIUS = 25;
 const MONSTER_SPAWN_MAX_RADIUS = 160;

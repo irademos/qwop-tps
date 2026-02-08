@@ -13,6 +13,7 @@ const CORE_ASSETS = [
   '/models/zombie.fbx',
   '/models/zombie_boy.fbx',
   '/models/zombie_green.fbx',
+  '/models/golem.fbx',
   '/models/animations/Breathing Idle.fbx',
   '/models/animations/Old Man Walk.fbx',
   '/assets/audio/BGS Loops/Forest Day/Forest Day.ogg',
