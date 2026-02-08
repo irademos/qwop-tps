@@ -60,7 +60,8 @@ const createArrowMesh = ({
     const arrowMesh = cloneArrowMesh(template, scale);
     if (arrowMesh) {
       arrowMesh.quaternion.setFromUnitVectors(forward, arrowDirection);
-      arrowMesh.rotation.x += Math.PI / 2;
+      const rollOffset = new THREE.Quaternion().setFromAxisAngle(forward, Math.PI / 2);
+      arrowMesh.quaternion.multiply(rollOffset);
       const trail = createArrowTrail();
       arrowMesh.add(trail);
       arrowMesh.userData.arrowTrail = trail;
