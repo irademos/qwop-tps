@@ -4040,8 +4040,8 @@ async function main() {
     const treeFireRadius = Math.max(2.6, tree.userData?.boundsRadius ?? 0);
     const treeFire = createFire({
       particleCount: 36,
-      spread: treeFireRadius * 1.6,
-      sizeRange: [0.55, 1.4],
+      spread: treeFireRadius * 1.1,
+      sizeRange: [0.4, 1.1],
       lightSettings: {
         color: 0xffc077,
         intensity: 4.5,
@@ -4059,7 +4059,7 @@ async function main() {
     });
     if (treeFire?.group) {
       treeFire.group.position.copy(tempTreePosition);
-      treeFire.group.position.y += treeFireRadius * 0.7;
+      treeFire.group.position.y += -6.0;//treeFireRadius * 0.7 - 11.0;
       treeFire.group.userData.skipTerrainCorrection = true;
       scene.add(treeFire.group);
       tree.userData.fireEffect = treeFire;
