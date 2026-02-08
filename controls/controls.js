@@ -98,7 +98,7 @@ const MERCHANT_DIALOGUE = {
     }
   ]
 };
-const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
+const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 
 export class PlayerControls {
   constructor({
@@ -660,6 +660,10 @@ export class PlayerControls {
     const weapon = this.getEquippedWeapon('right');
     if (weapon?.itemId === 'bow' || weapon?.itemId === 'bomb') {
       this.attemptFireProjectileForHand('right');
+      return;
+    }
+    if (weapon?.itemId === 'autumnSword') {
+      this.playAction('mutantPunch');
       return;
     }
     const cycle = ['right', 'left', 'kick'];
@@ -1362,9 +1366,10 @@ export class PlayerControls {
 
   playAction(actionName) {
     if (!this.playerModel) return;
+    const resolvedAction = actionName === 'mutantPunch' && this.getEquippedSword() ? 'swordSlash' : actionName;
     const actions = this.playerModel.userData.actions;
-    if (!actions || !actions[actionName]) return;
-    if (ACTION_LOCKED_ATTACKS.includes(actionName) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return;
+    if (!actions || !actions[resolvedAction]) return;
+    if (ACTION_LOCKED_ATTACKS.includes(resolvedAction) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return;
 
     if (this.runningKickTimer) {
       clearTimeout(this.runningKickTimer);
@@ -1376,19 +1381,19 @@ export class PlayerControls {
     }
 
     const current = this.playerModel.userData.currentAction;
-    const action = actions[actionName];
+    const action = actions[resolvedAction];
     actions[current]?.fadeOut(0.1);
     action.reset().fadeIn(0.1).play();
-    this.playerModel.userData.currentAction = actionName;
-    this.currentSpecialAction = actionName;
+    this.playerModel.userData.currentAction = resolvedAction;
+    this.currentSpecialAction = resolvedAction;
 
-    if (["mutantPunch", "leftPunch", "hurricaneKick", "mmaKick", "runningKick"].includes(actionName)) {
-      const isPunch = actionName === 'mutantPunch' || actionName === 'leftPunch';
+    if (["mutantPunch", "swordSlash", "leftPunch", "hurricaneKick", "mmaKick", "runningKick"].includes(resolvedAction)) {
+      const isPunch = resolvedAction === 'mutantPunch' || resolvedAction === 'leftPunch' || resolvedAction === 'swordSlash';
       const attackName = isPunch && this.getEquippedSword()
         ? 'swordSlash'
         : isPunch
           ? 'mutantPunch'
-          : actionName;
+          : resolvedAction;
       this.playerModel.userData.attack = {
         name: attackName,
         start: Date.now(),
@@ -1682,7 +1687,7 @@ export class PlayerControls {
       t.y = groundExpectedY;
     }
     const moveDirection = new THREE.Vector3(0, 0, 0);
-    const movementLocked = freezeActive || ['mutantPunch', 'leftPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
+    const movementLocked = freezeActive || ['mutantPunch', 'swordSlash', 'leftPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
     const position = new THREE.Vector3(t.x, t.y, t.z);
     if (!movementLocked) {
       if (this.isMobile) {

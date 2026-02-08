@@ -1343,7 +1343,7 @@ async function main() {
         actions[current]?.fadeOut(0.2);
         actions[data.action]?.reset().fadeIn(0.2).play();
         player.model.userData.currentAction = data.action;
-        if (['mutantPunch', 'leftPunch', 'hurricaneKick', 'mmaKick'].includes(data.action)) {
+        if (['mutantPunch', 'swordSlash', 'leftPunch', 'hurricaneKick', 'mmaKick'].includes(data.action)) {
           const attackName = data.action === 'leftPunch' ? 'mutantPunch' : data.action;
           player.model.userData.attack = {
             name: attackName,
