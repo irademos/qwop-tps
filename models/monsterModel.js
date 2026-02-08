@@ -95,8 +95,14 @@ function logMissingAnimation(name, modelPath) {
   console.warn(`Missing monster animation clip "${name}" for model ${modelPath}. Falling back to Idle.`);
 }
 
-export function loadMonsterModel(modelPath, callback) {
+export function loadMonsterModel(modelPath, callback, onError = null) {
   const loader = new FBXLoader();
+  const reportError = (error) => {
+    console.warn(`Failed to load monster model: ${modelPath}`, error);
+    if (typeof onError === 'function') {
+      onError(error);
+    }
+  };
   const configPath = modelPath.replace(/\.[^/.]+$/, '.json');
   fetch(configPath)
     .then((res) => (res.ok ? res.json() : {}))
@@ -231,7 +237,7 @@ export function loadMonsterModel(modelPath, callback) {
             });
           });
 
-          Promise.all([...promises, ...lodPromises]).then(() => {
+          Promise.allSettled([...promises, ...lodPromises]).then(() => {
             if (!actions.Idle) {
               logMissingAnimation('Idle', modelPath);
             }

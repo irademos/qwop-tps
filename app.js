@@ -2247,9 +2247,12 @@ async function main() {
   window.mushroomPickups = mushroomPickups;
   let didInitialGpsSnap = false;
 
-  const getRandomMonsterModel = () => {
-    const index = Math.floor(Math.random() * MONSTER_MODELS.length);
-    return MONSTER_MODELS[index];
+  const getRandomMonsterModel = ({ exclude = [] } = {}) => {
+    const blocked = new Set(Array.isArray(exclude) ? exclude : []);
+    const candidates = MONSTER_MODELS.filter((path) => !blocked.has(path));
+    if (!candidates.length) return null;
+    const index = Math.floor(Math.random() * candidates.length);
+    return candidates[index];
   };
 
   const getRandomMonsterLevel = () => {
@@ -2649,6 +2652,15 @@ async function main() {
       } finally {
         spawningSlots.delete(slotId);
       }
+    }, (error) => {
+      spawningSlots.delete(slotId);
+      const fallbackModel = getRandomMonsterModel({ exclude: [modelPath] });
+      if (!fallbackModel) {
+        console.warn(`No fallback monster model available after load failure for ${modelPath}.`, error);
+        return;
+      }
+      console.warn(`Falling back from monster model ${modelPath} to ${fallbackModel}.`, error);
+      spawnMonsterInSlot(slotId, fallbackModel, oldMonster, options);
     });
   };
 
