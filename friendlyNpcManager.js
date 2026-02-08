@@ -30,6 +30,7 @@ const FRIENDLY_SPAWN_MAX_SPEED = 20;
 const FRIENDLY_SPAWN_PREDICT_MIN_AHEAD_DISTANCE = 24;
 const FRIENDLY_SPAWN_PREDICT_MAX_AHEAD_DISTANCE = 42;
 const FRIENDLY_SPAWN_PREDICT_LATERAL_JITTER = 10;
+const FRIENDLY_PLAYER_SPAWN_BLOCK_RADIUS = 32;
 const FRIENDLY_NOTICE_RADIUS = 10;
 const FRIENDLY_WANDER_RADIUS = 4;
 const FRIENDLY_ENGAGE_RADIUS = 5;
@@ -169,6 +170,17 @@ export function createFriendlyNpcManager({
     }
     spawnDistanceAccum += frameDistance;
     if (spawnDistanceAccum < nextSpawnDistance) return;
+
+    const playerIsNearFriendly = Array.from(records.values()).some((record) => {
+      if (!record?.alive) return false;
+      const pos = record?.pos;
+      if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) {
+        return false;
+      }
+      const friendlyPosition = new THREE.Vector3(pos.x, pos.y, pos.z);
+      return currentPos.distanceTo(friendlyPosition) <= FRIENDLY_PLAYER_SPAWN_BLOCK_RADIUS;
+    });
+    if (playerIsNearFriendly) return;
 
     dropFurthestFriendlyRecord(currentPos);
     spawnedCount += 1;
