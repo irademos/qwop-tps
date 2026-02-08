@@ -2227,6 +2227,8 @@ async function main() {
     buildingsRenderer,
     getGeoForLocal: getTreeGeoForLocal,
     tileCache,
+    rapier: RAPIER,
+    rapierWorld,
     spawnApplePickup: appleController?.spawnPickup,
     removeApplePickup: appleController?.removePickup
   });
