@@ -2293,31 +2293,7 @@ async function main() {
     return true;
   };
 
-  const liftMeshToBuildingTop = (mesh, heightOffset = 0.6) => {
-    if (!mesh) return false;
-    const lifted = liftPositionToBuildingTop(mesh.position, heightOffset);
-    if (lifted) {
-      mesh.userData.baseY = mesh.position.y;
-    }
-    return lifted;
-  };
-
   window.lightSources = [];
-
-  const liftMonsterToBuildingTop = (monster, heightOffset = 0.5) => {
-    if (!monster?.model) return false;
-    const lifted = liftPositionToBuildingTop(monster.model.position, heightOffset);
-    if (lifted) {
-      const body = monster.body;
-      if (body) {
-        body.setTranslation(
-          { x: monster.model.position.x, y: monster.model.position.y, z: monster.model.position.z },
-          true
-        );
-      }
-    }
-    return lifted;
-  };
 
   friendlyNpcManager = createFriendlyNpcManager({
     scene,
@@ -2333,49 +2309,6 @@ async function main() {
   if (multiplayer?.roomId) {
     friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
   }
-
-  const liftPlayerToBuildingTop = (heightOffset = 0.6) => {
-    if (!playerModel) return false;
-    const lifted = liftPositionToBuildingTop(playerModel.position, heightOffset);
-    if (lifted && playerControls?.body) {
-      playerControls.body.setTranslation(
-        { x: playerModel.position.x, y: playerModel.position.y, z: playerModel.position.z },
-        true
-      );
-      playerControls.playerX = playerModel.position.x;
-      playerControls.playerY = playerModel.position.y;
-      playerControls.playerZ = playerModel.position.z;
-      playerControls.lastPosition.copy(playerModel.position);
-    }
-    return lifted;
-  };
-
-  const liftPickupsToBuildingTop = () => {
-    ammoPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
-    droppedAmmoPickups.forEach(entry => liftMeshToBuildingTop(entry?.mesh, 0.6));
-    foodPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
-    healthPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
-    coinPickups.forEach(pickup => liftMeshToBuildingTop(pickup, 0.6));
-    if (!iceGun?.holder) {
-      liftMeshToBuildingTop(iceGun?.mesh, 0.5);
-    }
-    if (!autumnSword?.holder) {
-      liftMeshToBuildingTop(autumnSword?.mesh, 0.5);
-    }
-    if (!lantern?.holder) {
-      liftMeshToBuildingTop(lantern?.mesh, 0.3);
-    }
-  };
-
-  const liftEntitiesToBuildingTop = () => {
-    liftPlayerToBuildingTop(0.6);
-    monsters.forEach(monster => liftMonsterToBuildingTop(monster, 0.5));
-    Object.values(otherPlayers).forEach(entry => {
-      if (!entry?.model) return;
-      liftPositionToBuildingTop(entry.model.position, 0.6);
-    });
-    liftPickupsToBuildingTop();
-  };
 
   let buildingColliderBody = null;
   const rebuildBuildingColliders = () => {
@@ -2457,7 +2390,6 @@ async function main() {
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
       }
-      liftPositionToBuildingTop(spawnPos, 0.5);
       return spawnPos;
     }
     const fallback = playerModel.position.clone();
@@ -5393,7 +5325,6 @@ async function main() {
       spawnPos.y = terrainHeight + groundOffset;
     } else {
       spawnPos.y = terrainHeight + 0.6;
-      liftPositionToBuildingTop(spawnPos, 0.6);
     }
 
     const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
@@ -5494,7 +5425,6 @@ async function main() {
     if (!spawnPos) return null;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
-    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -5575,7 +5505,6 @@ async function main() {
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
-    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -5604,7 +5533,6 @@ async function main() {
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
-    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -5633,7 +5561,6 @@ async function main() {
     if (!spawnPos) return;
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     spawnPos.y = terrainHeight + 0.6;
-    liftPositionToBuildingTop(spawnPos, 0.6);
 
     const geometry = new THREE.CylinderGeometry(0.2, 0.2, 0.06, 24);
     const material = new THREE.MeshStandardMaterial({
@@ -5687,7 +5614,6 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.5;
-    liftPositionToBuildingTop(spawnPos, 0.5);
     iceGun.mesh.position.copy(spawnPos);
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
     iceGun.mesh.visible = true;
@@ -5704,7 +5630,6 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.5;
-    liftPositionToBuildingTop(spawnPos, 0.5);
     bow.mesh.position.copy(spawnPos);
     bow.mesh.quaternion.set(0, 0, 0, 1);
     bow.mesh.visible = true;
@@ -5740,7 +5665,6 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.4;
-    liftPositionToBuildingTop(spawnPos, 0.5);
     bomb.mesh.position.copy(spawnPos);
     bomb.mesh.quaternion.set(0, 0, 0, 1);
     bomb.mesh.visible = true;
@@ -5756,7 +5680,6 @@ async function main() {
     if (!Number.isFinite(terrainHeight)) return;
 
     spawnPos.y = terrainHeight + 0.5;
-    liftPositionToBuildingTop(spawnPos, 0.5);
     autumnSword.mesh.position.copy(spawnPos);
     autumnSword.mesh.quaternion.set(0, 0, 0, 1);
     autumnSword.mesh.visible = true;
@@ -6065,7 +5988,6 @@ async function main() {
       markerColor: 0xffd400,
       markerOffsetY: 1.2,
       groundOffset: 0.5,
-      liftOffset: 0.5
     },
     {
       itemId: 'bow',
@@ -6073,7 +5995,6 @@ async function main() {
       markerColor: 0xffc26b,
       markerOffsetY: 1.2,
       groundOffset: 0.5,
-      liftOffset: 0.5
     },
     {
       itemId: 'bomb',
@@ -6081,7 +6002,6 @@ async function main() {
       markerColor: 0xff4d4d,
       markerOffsetY: 1.2,
       groundOffset: 0.4,
-      liftOffset: 0.5
     },
     {
       itemId: 'autumnSword',
@@ -6089,7 +6009,6 @@ async function main() {
       markerColor: 0xffd400,
       markerOffsetY: 1.2,
       groundOffset: 0.5,
-      liftOffset: 0.5
     }
   ]);
   const spawnWeaponPickupCopy = (position) => {
@@ -6101,7 +6020,6 @@ async function main() {
     const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     if (!Number.isFinite(terrainHeight)) return;
     spawnPos.y = terrainHeight + config.groundOffset;
-    liftPositionToBuildingTop(spawnPos, config.liftOffset ?? config.groundOffset);
     createDroppedWeaponPickup(config.item, {
       itemId: config.itemId,
       markerColor: config.markerColor,
@@ -6802,7 +6720,6 @@ async function main() {
     const refresh = () => {
       buildingRefreshPending = false;
       rebuildBuildingColliders();
-      liftEntitiesToBuildingTop();
     };
     if (typeof requestIdleCallback === "function") {
       requestIdleCallback(refresh, { timeout: 200 });
@@ -7277,7 +7194,6 @@ async function main() {
     setStat('hunger', 100);
     setStat('magic', 100);
     const spawn = getSpawnPosition();
-    liftPositionToBuildingTop(spawn, 0.6);
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
     playerControls.playerY = spawn.y;
