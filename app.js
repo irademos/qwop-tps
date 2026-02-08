@@ -4,7 +4,6 @@ import { PlayerCharacter } from "./characters/PlayerCharacter.js";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { MonsterCharacter } from "./characters/MonsterCharacter.js";
 import { createFriendlyNpcManager } from "./friendlyNpcManager.js";
-import { createClouds } from "./environment/worldGeneration.js";
 import { getTerrainHeight } from './environment/water.js';
 import { createFire } from './environment/fire.js';
 import { Multiplayer } from './peerConnection.js';
@@ -699,7 +698,6 @@ async function main() {
       }
     );
   scene.background = skyboxTexture;
-  createClouds(scene);
 
   const DISPLAY_MODES = new Set(['auto', 'day', 'night']);
   const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -2073,6 +2071,9 @@ async function main() {
   const torchMarker = createWeaponMarker(0xffa54c);
   torch.onPickup = (holder) => {
     if (holder !== playerControls) return;
+    if (lantern?.holder === holder) {
+      unequipInventoryItem('lantern');
+    }
     unequipOtherInventoryItems(TORCH_ITEM_ID);
     const pickupHealth = normalizeTorchHealth(torch.mesh?.userData?.torchHealth);
     addToInventory(TORCH_ITEM_ID, 1, { torchHealth: pickupHealth });
@@ -2227,6 +2228,8 @@ async function main() {
     buildingsRenderer,
     getGeoForLocal: getTreeGeoForLocal,
     tileCache,
+    rapier: RAPIER,
+    rapierWorld,
     spawnApplePickup: appleController?.spawnPickup,
     removeApplePickup: appleController?.removePickup
   });
