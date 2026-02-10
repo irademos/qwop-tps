@@ -23,40 +23,36 @@ function normalizeNodeName(name) {
     .toLowerCase();
 }
 
-function retargetClipToModel(clip, model) {
+function normalizeBoneNames(model) {
+  model.traverse((obj) => {
+    if (!obj?.isBone || !obj.name) return;
+    const normalized = normalizeNodeName(obj.name);
+    if (normalized) obj.name = normalized;
+  });
+}
+
+function normalizeClipTrackTargets(clip) {
   if (!clip) return null;
 
-  const modelNodeNameMap = new Map();
-  model.traverse((obj) => {
-    if (!obj?.name) return;
-    const normalized = normalizeNodeName(obj.name);
-    if (!normalized || modelNodeNameMap.has(normalized)) return;
-    modelNodeNameMap.set(normalized, obj.name);
-  });
+  const normalizedTracks = clip.tracks
+    .map((track) => {
+      const dotIndex = track.name.indexOf('.');
+      if (dotIndex <= 0) return null;
+      const nodeName = track.name.slice(0, dotIndex);
+      const propertyPath = track.name.slice(dotIndex);
+      const normalizedNodeName = normalizeNodeName(nodeName);
+      if (!normalizedNodeName) return null;
+      const TrackClass = track.constructor;
+      return new TrackClass(
+        `${normalizedNodeName}${propertyPath}`,
+        track.times,
+        track.values
+      );
+    })
+    .filter(Boolean);
 
-  if (modelNodeNameMap.size === 0) return null;
-
-  const remappedTracks = [];
-  for (const track of clip.tracks) {
-    const dotIndex = track.name.indexOf('.');
-    if (dotIndex <= 0) continue;
-    const nodeName = track.name.slice(0, dotIndex);
-    const propertyPath = track.name.slice(dotIndex);
-    const normalized = normalizeNodeName(nodeName);
-    const mappedNodeName = modelNodeNameMap.get(normalized);
-    if (!mappedNodeName) continue;
-
-    const TrackClass = track.constructor;
-    const remappedTrack = new TrackClass(
-      `${mappedNodeName}${propertyPath}`,
-      track.times,
-      track.values
-    );
-    remappedTracks.push(remappedTrack);
-  }
-
-  if (!remappedTracks.length) return null;
-  return new THREE.AnimationClip(clip.name, clip.duration, remappedTracks);
+  if (!normalizedTracks.length) return null;
+  return new THREE.AnimationClip(clip.name, clip.duration, normalizedTracks);
 }
 
 function applyMaterialBrightness(model, brightness) {
@@ -156,6 +152,7 @@ export function loadMonsterModel(modelPath, callback) {
           const lodConfigs = normalizeLodConfigs(config);
 
           stripEmbeddedLights(model);
+          normalizeBoneNames(model);
 
           model.traverse(o => {
             if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
@@ -193,12 +190,7 @@ export function loadMonsterModel(modelPath, callback) {
             return new Promise((resolve, reject) => {
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
-                const remappedClip = retargetClipToModel(cachedClip, model);
-                if (!remappedClip) {
-                  resolve();
-                  return;
-                }
-                const action = mixer.clipAction(remappedClip);
+                const action = mixer.clipAction(cachedClip);
                 if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
@@ -216,13 +208,9 @@ export function loadMonsterModel(modelPath, callback) {
                     resolve();
                     return;
                   }
-                  animationClipCache.set(file, clip);
-                  const remappedClip = retargetClipToModel(clip, model);
-                  if (!remappedClip) {
-                    resolve();
-                    return;
-                  }
-                  const action = mixer.clipAction(remappedClip);
+                  const normalizedClip = normalizeClipTrackTargets(clip) ?? clip;
+                  animationClipCache.set(file, normalizedClip);
+                  const action = mixer.clipAction(normalizedClip);
                   if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
@@ -248,6 +236,7 @@ export function loadMonsterModel(modelPath, callback) {
                   }
                   const lodModel = lodFbx;
                   stripEmbeddedLights(lodModel);
+                  normalizeBoneNames(lodModel);
                   lodModel.traverse(o => {
                     if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
                     if (o.material?.skinning === true) o.material.skinning = true;
