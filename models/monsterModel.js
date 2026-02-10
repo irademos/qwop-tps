@@ -23,36 +23,56 @@ function normalizeNodeName(name) {
     .toLowerCase();
 }
 
-function normalizeBoneNames(model) {
+function createNormalizedNodeNameMap(model) {
+  const normalizedToActual = new Map();
   model.traverse((obj) => {
-    if (!obj?.isBone || !obj.name) return;
+    if (!obj?.name) return;
     const normalized = normalizeNodeName(obj.name);
-    if (normalized) obj.name = normalized;
+    if (!normalized || normalizedToActual.has(normalized)) return;
+    normalizedToActual.set(normalized, obj.name);
   });
+  return normalizedToActual;
 }
 
-function normalizeClipTrackTargets(clip) {
+function getTrackNodeBaseName(trackName) {
+  const dotIndex = trackName.indexOf('.');
+  if (dotIndex <= 0) return null;
+  const rawNodeName = trackName.slice(0, dotIndex);
+  const pathNodeName = rawNodeName.includes('|')
+    ? rawNodeName.slice(rawNodeName.lastIndexOf('|') + 1)
+    : rawNodeName;
+  return {
+    rawNodeName,
+    pathNodeName,
+    propertyPath: trackName.slice(dotIndex),
+  };
+}
+
+function retargetClipToModel(clip, model) {
   if (!clip) return null;
 
-  const normalizedTracks = clip.tracks
-    .map((track) => {
-      const dotIndex = track.name.indexOf('.');
-      if (dotIndex <= 0) return null;
-      const nodeName = track.name.slice(0, dotIndex);
-      const propertyPath = track.name.slice(dotIndex);
-      const normalizedNodeName = normalizeNodeName(nodeName);
-      if (!normalizedNodeName) return null;
-      const TrackClass = track.constructor;
-      return new TrackClass(
-        `${normalizedNodeName}${propertyPath}`,
-        track.times,
-        track.values
-      );
-    })
-    .filter(Boolean);
+  const normalizedNodeMap = createNormalizedNodeNameMap(model);
+  if (!normalizedNodeMap.size) return clip;
 
-  if (!normalizedTracks.length) return null;
-  return new THREE.AnimationClip(clip.name, clip.duration, normalizedTracks);
+  const remappedTracks = clip.tracks.map((track) => {
+    const base = getTrackNodeBaseName(track.name);
+    if (!base) return track;
+
+    const normalizedNodeName = normalizeNodeName(base.pathNodeName);
+    if (!normalizedNodeName) return track;
+
+    const mappedNodeName = normalizedNodeMap.get(normalizedNodeName);
+    if (!mappedNodeName) return track;
+
+    const TrackClass = track.constructor;
+    return new TrackClass(
+      `${mappedNodeName}${base.propertyPath}`,
+      track.times,
+      track.values
+    );
+  });
+
+  return new THREE.AnimationClip(clip.name, clip.duration, remappedTracks);
 }
 
 function applyMaterialBrightness(model, brightness) {
@@ -152,8 +172,6 @@ export function loadMonsterModel(modelPath, callback) {
           const lodConfigs = normalizeLodConfigs(config);
 
           stripEmbeddedLights(model);
-          normalizeBoneNames(model);
-
           model.traverse(o => {
             if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
             if (o.material?.skinning === true) o.material.skinning = true;
@@ -190,7 +208,8 @@ export function loadMonsterModel(modelPath, callback) {
             return new Promise((resolve, reject) => {
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
-                const action = mixer.clipAction(cachedClip);
+                const remappedCachedClip = retargetClipToModel(cachedClip, model);
+                const action = mixer.clipAction(remappedCachedClip ?? cachedClip);
                 if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
@@ -208,9 +227,9 @@ export function loadMonsterModel(modelPath, callback) {
                     resolve();
                     return;
                   }
-                  const normalizedClip = normalizeClipTrackTargets(clip) ?? clip;
-                  animationClipCache.set(file, normalizedClip);
-                  const action = mixer.clipAction(normalizedClip);
+                  animationClipCache.set(file, clip);
+                  const remappedClip = retargetClipToModel(clip, model);
+                  const action = mixer.clipAction(remappedClip ?? clip);
                   if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
@@ -236,7 +255,6 @@ export function loadMonsterModel(modelPath, callback) {
                   }
                   const lodModel = lodFbx;
                   stripEmbeddedLights(lodModel);
-                  normalizeBoneNames(lodModel);
                   lodModel.traverse(o => {
                     if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
                     if (o.material?.skinning === true) o.material.skinning = true;
