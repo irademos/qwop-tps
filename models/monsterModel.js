@@ -17,6 +17,48 @@ const animationClipCache = new Map();
 const missingAnimationLogs = new Set();
 const DEFAULT_MATERIAL_BRIGHTNESS = 1;
 
+function normalizeNodeName(name) {
+  return String(name ?? '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .toLowerCase();
+}
+
+function retargetClipToModel(clip, model) {
+  if (!clip) return null;
+
+  const modelNodeNameMap = new Map();
+  model.traverse((obj) => {
+    if (!obj?.name) return;
+    const normalized = normalizeNodeName(obj.name);
+    if (!normalized || modelNodeNameMap.has(normalized)) return;
+    modelNodeNameMap.set(normalized, obj.name);
+  });
+
+  if (modelNodeNameMap.size === 0) return null;
+
+  const remappedTracks = [];
+  for (const track of clip.tracks) {
+    const dotIndex = track.name.indexOf('.');
+    if (dotIndex <= 0) continue;
+    const nodeName = track.name.slice(0, dotIndex);
+    const propertyPath = track.name.slice(dotIndex);
+    const normalized = normalizeNodeName(nodeName);
+    const mappedNodeName = modelNodeNameMap.get(normalized);
+    if (!mappedNodeName) continue;
+
+    const TrackClass = track.constructor;
+    const remappedTrack = new TrackClass(
+      `${mappedNodeName}${propertyPath}`,
+      track.times,
+      track.values
+    );
+    remappedTracks.push(remappedTrack);
+  }
+
+  if (!remappedTracks.length) return null;
+  return new THREE.AnimationClip(clip.name, clip.duration, remappedTracks);
+}
+
 function applyMaterialBrightness(model, brightness) {
   if (!Number.isFinite(brightness) || brightness === DEFAULT_MATERIAL_BRIGHTNESS) return;
   const clamped = THREE.MathUtils.clamp(brightness, 0, 2);
@@ -151,7 +193,12 @@ export function loadMonsterModel(modelPath, callback) {
             return new Promise((resolve, reject) => {
               const cachedClip = animationClipCache.get(file);
               if (cachedClip) {
-                const action = mixer.clipAction(cachedClip);
+                const remappedClip = retargetClipToModel(cachedClip, model);
+                if (!remappedClip) {
+                  resolve();
+                  return;
+                }
+                const action = mixer.clipAction(remappedClip);
                 if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
@@ -170,7 +217,12 @@ export function loadMonsterModel(modelPath, callback) {
                     return;
                   }
                   animationClipCache.set(file, clip);
-                  const action = mixer.clipAction(clip);
+                  const remappedClip = retargetClipToModel(clip, model);
+                  if (!remappedClip) {
+                    resolve();
+                    return;
+                  }
+                  const action = mixer.clipAction(remappedClip);
                   if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;
