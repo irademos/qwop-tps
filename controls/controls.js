@@ -505,22 +505,29 @@ export class PlayerControls {
   bindMobileActionButtonPress(button, handler) {
     if (!button || typeof handler !== 'function') return;
 
+    let lastHandledAt = 0;
+    const invoke = (event) => {
+      const now = Date.now();
+      if (now - lastHandledAt < 250) return;
+      lastHandledAt = now;
+      handler(event);
+    };
+
+    button.addEventListener('click', (event) => {
+      invoke(event);
+    });
+
     if (typeof window !== 'undefined' && 'PointerEvent' in window) {
       button.addEventListener('pointerdown', (event) => {
-        handler(event);
+        if (event.pointerType === 'mouse') return;
+        invoke(event);
       }, { passive: false });
       return;
     }
 
-    let lastTouchAt = 0;
     button.addEventListener('touchstart', (event) => {
-      lastTouchAt = Date.now();
-      handler(event);
+      invoke(event);
     }, { passive: false });
-    button.addEventListener('mousedown', (event) => {
-      if (Date.now() - lastTouchAt < 700) return;
-      handler(event);
-    });
   }
 
   initializeActionButtons() {
@@ -604,7 +611,6 @@ export class PlayerControls {
       }
     };
     this.bindMobileActionButtonPress(this.spellsButton, onSpellsToggle);
-    this.spellsButton.addEventListener('click', (event) => event.preventDefault());
 
     const openEquip = (event) => {
       if (!this.enabled) return;
@@ -615,7 +621,6 @@ export class PlayerControls {
       }
     };
     this.bindMobileActionButtonPress(this.equipButton, openEquip);
-    this.equipButton.addEventListener('click', (event) => event.preventDefault());
 
     const handleOptionPick = (slot) => (event) => {
       if (!this.enabled) return;
@@ -757,7 +762,6 @@ export class PlayerControls {
         }
       };
       this.bindMobileActionButtonPress(button, onEquip);
-      button.addEventListener('click', (event) => event.preventDefault());
       this.mobileEquipButtons.push(button);
       actionContainer.appendChild(button);
     });
