@@ -12,6 +12,7 @@ const HOME_BED_OFFSET = new THREE.Vector3(-3, 0, 3);
 const HOME_CRAFT_TABLE_OFFSET = new THREE.Vector3(2.5, 0, -2.5);
 const HOME_STORAGE_OFFSET = new THREE.Vector3(3, 0, 3);
 const HOME_ROAD_LIGHT_OFFSET = new THREE.Vector3(-2.5, 0, -2.5);
+const HIDDEN_OBJECT_POSITION = new THREE.Vector3(0, -1000, 0);
 
 const BED_VERTICAL_OFFSET = 0.5;
 const CRAFT_TABLE_VERTICAL_OFFSET = 0.5;
@@ -173,6 +174,12 @@ export class HomeSystem {
     mesh.visible = !!this.homeData;
   }
 
+  hidePlacedObject(mesh) {
+    if (!mesh) return;
+    mesh.visible = false;
+    mesh.position.copy(HIDDEN_OBJECT_POSITION);
+  }
+
   syncHomePlacement() {
     const homePos = this.getHomeLocalPosition();
     const nextHomeKey = homePos
@@ -181,9 +188,14 @@ export class HomeSystem {
     this.lastPlacedHomeKey = nextHomeKey;
 
     if (!homePos) {
-      if (this.bed?.mesh) this.bed.mesh.visible = false;
-      if (this.craftTable?.mesh) this.craftTable.mesh.visible = false;
-      if (this.storageChest) this.storageChest.visible = false;
+      if (this.bed?.mesh) {
+        this.hidePlacedObject(this.bed.mesh);
+        this.bed.updateBounds?.();
+        this.bed.syncCollider?.();
+      }
+      if (this.craftTable?.mesh) this.hidePlacedObject(this.craftTable.mesh);
+      if (this.storageChest) this.hidePlacedObject(this.storageChest);
+      if (this.roadLight) this.hidePlacedObject(this.roadLight);
       return;
     }
 
