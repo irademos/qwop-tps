@@ -205,29 +205,38 @@ body {
   width: 80px;
   height: 80px;
   background-color: rgba(255, 255, 255, 0.5);
-  border-radius: 50%;
+  border-radius: 8px;
   display: none;
   z-index: 1000;
   touch-action: none;
   text-align: center;
-  line-height: 80px;
+  line-height: 1;
   font-weight: bold;
   color: #333;
   user-select: none;
+  align-items: center;
+  justify-content: center;
 }
 
 #action-buttons {
   position: fixed;
   bottom: 20px;
-  right: 120px;
+  right: 20px;
   left: auto;
-  display: flex;
-  flex-direction: row;
-  gap: 10px;
+  width: 0;
+  height: 0;
+  display: block;
   z-index: 1000;
 }
 
 .action-button {
+  --mobile-grid-size: 70px;
+  --mobile-grid-gap: 10px;
+  --mobile-grid-x: 0;
+  --mobile-grid-y: 0;
+  position: absolute;
+  right: calc((var(--mobile-grid-size) + var(--mobile-grid-gap)) * var(--mobile-grid-x));
+  bottom: calc((var(--mobile-grid-size) + var(--mobile-grid-gap)) * var(--mobile-grid-y));
   width: 60px;
   height: 60px;
   background-color: rgba(255, 255, 255, 0.5);
@@ -2032,14 +2041,15 @@ body.settings-open #settings-button {
 @media (pointer: coarse) {
   #action-buttons {
     bottom: 16px;
-    right: 100px;
+    right: 16px;
     left: auto;
-    gap: 6px;
   }
 
   #action-buttons .action-button {
-    width: clamp(44px, 8vw, 64px);
-    height: clamp(44px, 8vw, 64px);
+    --mobile-grid-size: clamp(44px, 8vw, 64px);
+    --mobile-grid-gap: clamp(6px, 1.5vw, 10px);
+    width: var(--mobile-grid-size);
+    height: var(--mobile-grid-size);
     font-size: clamp(12px, 2.6vw, 18px);
   }
 
@@ -2052,12 +2062,13 @@ body.settings-open #settings-button {
   }
 
   #jump-button {
-    width: 70px;
-    height: 70px;
-    line-height: 70px;
+    --mobile-grid-size: clamp(44px, 8vw, 64px);
+    width: var(--mobile-grid-size);
+    height: var(--mobile-grid-size);
     font-size: 14px;
     bottom: 16px;
     right: 16px;
+    border-radius: 8px;
   }
 
   .interaction-tooltip.visible {
@@ -2073,7 +2084,7 @@ body.settings-open #settings-button {
   }
 
   #jump-button {
-    display: block;
+    display: flex;
   }
 
   .instructions {
@@ -2096,10 +2107,8 @@ body.settings-open #settings-button {
 
   #action-buttons {
     left: auto;
-    right: 120px;
+    right: 20px;
     bottom: 20px;
-    flex-direction: row;
-    align-items: flex-end;
   }
 }
 
