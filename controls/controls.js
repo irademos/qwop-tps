@@ -860,36 +860,25 @@ export class PlayerControls {
   getMobileActionSlots(buttonCount) {
     if (buttonCount <= 0) return [];
     const slots = [
-      // Equip, Spells, Attack positions
+      // btn1, btn2, btn3 map to Equip, Spells, Attack positions.
       { x: 1, y: 1 },
       { x: 0, y: 1 },
-      { x: 0, y: 0 }
+      { x: 1, y: 0 }
     ];
 
-    if (buttonCount <= slots.length) {
-      return slots.slice(0, buttonCount);
-    }
+    if (buttonCount <= slots.length) return slots.slice(0, buttonCount);
 
-    // First overflow layer: left of Attack + above Spells/Equip
-    slots.push(
-      { x: 1, y: 0 },
-      { x: 0, y: 2 },
-      { x: 1, y: 2 }
-    );
-
-    if (buttonCount <= slots.length) {
-      return slots.slice(0, buttonCount);
-    }
-
-    // Additional overflow layers: keep expanding left and up.
+    // Layer expansion:
+    // 1) Fill the new top row above current area (excluding the new left column),
+    // 2) Then fill the new left column from bottom to top.
     for (let layer = 2; slots.length < buttonCount; layer += 1) {
-      for (let y = 0; y <= layer; y += 1) {
-        slots.push({ x: layer, y });
+      for (let x = layer - 1; x >= 0; x -= 1) {
+        slots.push({ x, y: layer });
         if (slots.length >= buttonCount) return slots.slice(0, buttonCount);
       }
 
-      for (let x = 0; x <= layer; x += 1) {
-        slots.push({ x, y: layer + 1 });
+      for (let y = 0; y <= layer; y += 1) {
+        slots.push({ x: layer, y });
         if (slots.length >= buttonCount) return slots.slice(0, buttonCount);
       }
     }
@@ -924,7 +913,7 @@ export class PlayerControls {
     if (state === 'spell-options' || state === 'freeze') {
       this.applyMobileButtonPosition(this.optionLeftButton, { x: 1, y: 1 });
       this.applyMobileButtonPosition(this.optionCenterButton, { x: 0, y: 1 });
-      this.applyMobileButtonPosition(this.optionRightButton, { x: 0, y: 0 });
+      this.applyMobileButtonPosition(this.optionRightButton, { x: 1, y: 0 });
       return;
     }
 
@@ -936,7 +925,7 @@ export class PlayerControls {
       return;
     }
 
-    this.applyMobileButtonPosition(this.punchButton, { x: 0, y: 0 });
+    this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
     this.applyMobileButtonPosition(this.spellsButton, { x: 0, y: 1 });
     this.applyMobileButtonPosition(this.equipButton, { x: 1, y: 1 });
   }
