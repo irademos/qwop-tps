@@ -910,10 +910,21 @@ export class PlayerControls {
 
     if (!this.isMobile) return;
 
-    if (state === 'spell-options' || state === 'freeze') {
+    if (state === 'spell-options') {
       this.applyMobileButtonPosition(this.optionLeftButton, { x: 1, y: 1 });
       this.applyMobileButtonPosition(this.optionCenterButton, { x: 0, y: 1 });
       this.applyMobileButtonPosition(this.optionRightButton, { x: 1, y: 0 });
+      return;
+    }
+
+    if (state === 'freeze') {
+      // Keep the core layout visible and add Freeze as an extra row above.
+      this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
+      this.applyMobileButtonPosition(this.spellsButton, { x: 0, y: 1 });
+      this.applyMobileButtonPosition(this.equipButton, { x: 1, y: 1 });
+      this.applyMobileButtonPosition(this.optionLeftButton, { x: 1, y: 2 });
+      this.applyMobileButtonPosition(this.optionCenterButton, { x: 0, y: 2 });
+      this.applyMobileButtonPosition(this.optionRightButton, { x: 0, y: 0 });
       return;
     }
 
