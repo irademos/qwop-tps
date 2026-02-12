@@ -292,7 +292,7 @@ export class PlayerControls {
     if (this.interactionPromptEl) {
       const activateInteraction = (event) => {
         if (!this.interactionPromptEl.classList.contains('visible')) return;
-        event.preventDefault();
+        this.safePreventDefault(event);
         this.handlePickupAction();
       };
       if (this.isMobile) {
@@ -304,7 +304,7 @@ export class PlayerControls {
     if (this.climbOverlayEl) {
       const activateClimb = (event) => {
         if (this.climbOverlayEl.classList.contains('hidden')) return;
-        event.preventDefault();
+        this.safePreventDefault(event);
         this.handleClimbAction();
       };
       this.climbOverlayEl.addEventListener('click', activateClimb);
@@ -314,7 +314,7 @@ export class PlayerControls {
     if (this.friendlyInteractButton) {
       const activateFriendly = (event) => {
         if (this.friendlyInteractButton.classList.contains('hidden')) return;
-        event.preventDefault();
+        this.safePreventDefault(event);
         this.handleFriendlyInteractionAction();
       };
       this.friendlyInteractButton.addEventListener('click', activateFriendly);
@@ -391,6 +391,12 @@ export class PlayerControls {
     }
   }
   
+  safePreventDefault(event) {
+    if (event?.cancelable) {
+      event.preventDefault();
+    }
+  }
+
   initializeMobileControls() {
     // Add joystick container for mobile
     const joystickContainer = document.getElementById('joystick-container');
@@ -427,13 +433,13 @@ export class PlayerControls {
         this.hasDoubleJumped = true;
         this.playAction('hurricaneKick');
       }
-      event.preventDefault();
+      this.safePreventDefault(event);
     });
 
     document.getElementById('jump-button').addEventListener('touchend', (event) => {
       if (!this.enabled || this.isInWater) return;
       this.jumpButtonPressed = false;
-      event.preventDefault();
+      this.safePreventDefault(event);
     });
 
     // Initialize joystick with improved behavior
@@ -465,7 +471,7 @@ export class PlayerControls {
           this.cameraTouchId = touch.identifier;
           this.touchStartX = touch.clientX;
           this.touchStartY = touch.clientY;
-          event.preventDefault();
+          this.safePreventDefault(event);
           break;
         }
       }
@@ -486,7 +492,7 @@ export class PlayerControls {
           const maxPitch = Math.PI / 3;
           const minPitch = -Math.PI / 8;
           this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
-          event.preventDefault();
+          this.safePreventDefault(event);
           break;
         }
       }
@@ -541,19 +547,19 @@ export class PlayerControls {
       button.addEventListener('touchstart', (event) => {
         this.lastTouchButtonTime = performance.now();
         if (onPressStart) onPressStart(event);
-        event.preventDefault();
+        this.safePreventDefault(event);
       }, { passive: false });
 
       button.addEventListener('touchend', (event) => {
         this.lastTouchButtonTime = performance.now();
         if (onPressEnd) onPressEnd(event);
-        event.preventDefault();
+        this.safePreventDefault(event);
       }, { passive: false });
 
       button.addEventListener('touchcancel', (event) => {
         this.lastTouchButtonTime = performance.now();
         if (onPressEnd) onPressEnd(event);
-        event.preventDefault();
+        this.safePreventDefault(event);
       }, { passive: false });
 
       button.addEventListener('mousedown', (event) => {
@@ -583,7 +589,7 @@ export class PlayerControls {
         this.isFireHeld = true;
         this.setAiming(true);
       }
-      if (event) event.preventDefault();
+      if (event) this.safePreventDefault(event);
     };
 
     const onAttackPressEnd = (event) => {
@@ -598,7 +604,7 @@ export class PlayerControls {
       } else {
         this.handlePrimaryAttackPress();
       }
-      if (event) event.preventDefault();
+      if (event) this.safePreventDefault(event);
     };
 
     bindActionPress(this.punchButton, {
@@ -610,7 +616,7 @@ export class PlayerControls {
       if (!this.enabled) return;
       this.mobileActionState = this.mobileActionState === 'spell-options' ? 'default' : 'spell-options';
       this.refreshActionButtons();
-      if (event) event.preventDefault();
+      if (event) this.safePreventDefault(event);
     };
     bindActionPress(this.spellsButton, {
       onPressStart: onSpellsToggle
@@ -619,7 +625,7 @@ export class PlayerControls {
     const openEquip = (event) => {
       if (!this.enabled) return;
       this.showMobileEquipMenu();
-      if (event) event.preventDefault();
+      if (event) this.safePreventDefault(event);
     };
     bindActionPress(this.equipButton, {
       onPressStart: openEquip
@@ -640,7 +646,7 @@ export class PlayerControls {
           } else {
             this.handleVoiceMicPress?.();
           }
-          if (event) event.preventDefault();
+          if (event) this.safePreventDefault(event);
         }
       } else if (this.mobileActionState === 'freeze') {
         this.attemptFireProjectileForHand('right');
@@ -648,7 +654,7 @@ export class PlayerControls {
         this.handlePrimaryAttackPress();
       }
       this.refreshActionButtons();
-      if (event) event.preventDefault();
+      if (event) this.safePreventDefault(event);
     };
 
     bindActionPress(this.optionLeftButton, { onPressStart: handleOptionPick('left') });
@@ -753,7 +759,7 @@ export class PlayerControls {
         else appState?.equipInventoryItem?.(item.id);
         this.mobileActionState = 'default';
         this.refreshActionButtons();
-        if (event) event.preventDefault();
+        if (event) this.safePreventDefault(event);
       };
       button.addEventListener('touchstart', (event) => {
         this.lastTouchButtonTime = performance.now();
