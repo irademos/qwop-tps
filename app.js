@@ -3999,6 +3999,7 @@ async function main() {
       tree.position.add(tempTreePosition);
       tree.updateWorldMatrix(true, true);
     }
+    natureController?.syncTreeInstanceTransform?.(tree);
     if (tree.userData.swordHits >= TREE_HITS_TO_CUT) {
       tree.userData.isCutDown = true;
       dropTreeApples(tree);

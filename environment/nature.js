@@ -246,6 +246,39 @@ export async function createNature({
     return wrapper;
   });
 
+  const treeTemplateMetrics = treeTemplates.map((template, index) => {
+    if (!template || index === PALM_TREE_INDEX) return null;
+    template.updateWorldMatrix(true, true);
+    const bounds = new THREE.Box3().setFromObject(template);
+    if (!Number.isFinite(bounds.min.x)) {
+      return {
+        centerLocal: new THREE.Vector3(),
+        sizeLocal: new THREE.Vector3(1, 1, 1),
+        radiusLocal: 0.5,
+        parts: []
+      };
+    }
+    const centerLocal = bounds.getCenter(new THREE.Vector3());
+    const sizeLocal = bounds.getSize(new THREE.Vector3());
+    const radiusLocal = Math.max(sizeLocal.x, sizeLocal.z) * 0.5;
+    const parts = [];
+    template.traverse((child) => {
+      if (!child.isMesh || !child.geometry || !child.material) return;
+      child.updateWorldMatrix(true, false);
+      parts.push({
+        geometry: child.geometry,
+        material: child.material,
+        templateMatrix: child.matrixWorld.clone()
+      });
+    });
+    return {
+      centerLocal,
+      sizeLocal,
+      radiusLocal,
+      parts
+    };
+  });
+
   const group = new THREE.Group();
   group.name = 'nature-group';
   scene.add(group);
@@ -271,6 +304,13 @@ export async function createNature({
   const tempWorldPos = new THREE.Vector3();
   const tempTreeCenter = new THREE.Vector3();
   const tempTreeRight = new THREE.Vector3();
+  const tempMatrixTree = new THREE.Matrix4();
+  const tempMatrixFinal = new THREE.Matrix4();
+  const HIDDEN_INSTANCE_MATRIX = new THREE.Matrix4().compose(
+    new THREE.Vector3(0, -10000, 0),
+    new THREE.Quaternion(),
+    new THREE.Vector3(0.0001, 0.0001, 0.0001)
+  );
 
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
@@ -360,21 +400,20 @@ export async function createNature({
 
   const buildTreeClimbAreas = (tree) => {
     tree.updateWorldMatrix(true, true);
-    tempBox.setFromObject(tree);
-    if (!Number.isFinite(tempBox.min.x)) return [];
-    tempBox.getSize(tempSize);
-    tree.getWorldPosition(tempWorldPos);
-    tempBox.getCenter(tempCenter);
-    
+    const templateMetrics = treeTemplateMetrics[tree.userData.treeTypeIndex];
+    if (!templateMetrics) return [];
+    tempTreeCenter.copy(templateMetrics.centerLocal).multiplyScalar(tree.scale.x).applyMatrix4(tree.matrixWorld);
+    tempSize.copy(templateMetrics.sizeLocal).multiplyScalar(tree.scale.x);
+
     const typeIndex = tree.userData.treeTypeIndex;
     const o = TREE_CLIMB_OVERRIDES[typeIndex] ?? {};
     const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
     const scaleValue = (value) => value * scaleFactor;
 
-    const minY = tempBox.min.y + scaleValue(o.minYPad ?? 0);
-    const maxY = tempBox.max.y - scaleValue(o.maxYPad ?? 0);
+    const minY = tempTreeCenter.y - tempSize.y * 0.5 + scaleValue(o.minYPad ?? 0);
+    const maxY = tempTreeCenter.y + tempSize.y * 0.5 - scaleValue(o.maxYPad ?? 0);
     const halfHeight = (maxY - minY) * 0.5;
-    const center = tempCenter.clone();
+    const center = tempTreeCenter.clone();
     center.y = (minY + maxY) * 0.5;
 
     const halfWidth = scaleValue(o.halfWidth ?? TREE_CLIMB_HALF_WIDTH);
@@ -382,7 +421,7 @@ export async function createNature({
     const entryRadius = scaleValue(o.entryRadius ?? TREE_CLIMB_ENTRY_RADIUS);
     const entryHeight = scaleValue(o.entryHeight ?? TREE_CLIMB_ENTRY_HEIGHT);
 
-    const entryCenter = tempCenter.clone();
+    const entryCenter = tempTreeCenter.clone();
     entryCenter.y = minY + scaleValue(0.2);
 
     const shift = scaleValue(TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0);
@@ -509,6 +548,23 @@ export async function createNature({
     parent.add(lines);
   };
 
+  const syncTreeInstanceTransform = (tree) => {
+    if (!tree) return;
+    tree.updateMatrixWorld(true);
+    const typeIndex = tree.userData?.treeTypeIndex;
+    const instanceIndex = tree.userData?.instanceIndex;
+    const entry = treeTiles.get(tree.userData?.tileKey);
+    const instancedParts = entry?.instancedTrees?.get(typeIndex);
+    const templateMetrics = treeTemplateMetrics[typeIndex];
+    if (!instancedParts || !templateMetrics || !Number.isInteger(instanceIndex)) return;
+    tempMatrixTree.copy(tree.matrixWorld);
+    for (const part of instancedParts) {
+      tempMatrixFinal.multiplyMatrices(tempMatrixTree, part.templateMatrix);
+      part.mesh.setMatrixAt(instanceIndex, tempMatrixFinal);
+      part.mesh.instanceMatrix.needsUpdate = true;
+    }
+  };
+
   const createTileTrees = (tile) => {
     const tileKey = getTileKey(tile);
     if (treeTiles.has(tileKey)) return treeTiles.get(tileKey);
@@ -528,6 +584,7 @@ export async function createNature({
     const tileClimbAreas = [];
     const tileApplePickups = [];
     const tileBlockers = buildTileBlockers(tileKey);
+    const treePartCounts = new Map();
 
     for (let ix = 0; ix <= tileSizeMeters; ix += TREE_GRID_SPACING) {
       for (let iz = 0; iz <= tileSizeMeters; iz += TREE_GRID_SPACING) {
@@ -539,7 +596,8 @@ export async function createNature({
 
         const treeTypeIndex = resolveTreeTypeIndex(tempPosition);
         const template = treeTemplates[treeTypeIndex];
-        if (!template) continue;
+        const templateMetrics = treeTemplateMetrics[treeTypeIndex];
+        if (!template || !templateMetrics || !templateMetrics.parts.length) continue;
 
         const tree = template.clone(true);
         tree.userData.applePickups = [];
@@ -556,18 +614,21 @@ export async function createNature({
         tree.position.set(worldX, terrainY, worldZ);
         tree.userData.tileKey = tileKey;
         tree.updateWorldMatrix(true, true);
-        tempBox.setFromObject(tree);
-        if (Number.isFinite(tempBox.min.x)) {
-          tempBox.getCenter(tempCenter);
-          tree.userData.boundsCenterLocal = tree.worldToLocal(tempCenter.clone());
-          tempBox.getSize(tempSize);
-          tree.userData.boundsRadius = Math.max(tempSize.x, tempSize.z) * 0.5;
-        }
+
+        const boundsCenterLocal = templateMetrics.centerLocal.clone();
+        tree.userData.boundsCenterLocal = boundsCenterLocal;
+        tree.userData.boundsRadius = templateMetrics.radiusLocal * scale;
+
         if (tileBlockers && isTreeBlocked(tree, tileBlockers)) {
           continue;
         }
+
+        tree.visible = false;
         tileGroup.add(tree);
         trees.push(tree);
+
+        treePartCounts.set(treeTypeIndex, (treePartCounts.get(treeTypeIndex) ?? 0) + 1);
+
         const areas = buildTreeClimbAreas(tree);
         tree.userData.climbAreas = areas;
         tileClimbAreas.push(...areas);
@@ -603,6 +664,39 @@ export async function createNature({
             }
           }
         }
+      }
+    }
+
+    const instancedTrees = new Map();
+    for (const [typeIndex, count] of treePartCounts.entries()) {
+      if (!count) continue;
+      const templateMetrics = treeTemplateMetrics[typeIndex];
+      const parts = [];
+      for (const part of templateMetrics.parts) {
+        const mesh = new THREE.InstancedMesh(part.geometry, part.material, count);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        mesh.name = `tree-instanced-${typeIndex}`;
+        tileGroup.add(mesh);
+        parts.push({ mesh, templateMatrix: part.templateMatrix });
+      }
+      instancedTrees.set(typeIndex, parts);
+    }
+
+    const typeOffsets = new Map();
+    for (const tree of trees) {
+      const typeIndex = tree.userData.treeTypeIndex;
+      const instanceIndex = typeOffsets.get(typeIndex) ?? 0;
+      typeOffsets.set(typeIndex, instanceIndex + 1);
+      tree.userData.instanceIndex = instanceIndex;
+      const parts = instancedTrees.get(typeIndex) ?? [];
+      tree.updateWorldMatrix(true, true);
+      tempMatrixTree.copy(tree.matrixWorld);
+      for (const part of parts) {
+        tempMatrixFinal.multiplyMatrices(tempMatrixTree, part.templateMatrix);
+        part.mesh.setMatrixAt(instanceIndex, tempMatrixFinal);
+        part.mesh.instanceMatrix.needsUpdate = true;
       }
     }
 
@@ -654,7 +748,7 @@ export async function createNature({
       }
     }
 
-    const entry = { tile, tileKey, group: tileGroup, trees, rocks, rockPhysics };
+    const entry = { tile, tileKey, group: tileGroup, trees, rocks, rockPhysics, instancedTrees };
     treeTiles.set(tileKey, entry);
     climbableAreasByTile.set(tileKey, tileClimbAreas);
     applePickupsByTile.set(tileKey, tileApplePickups);
@@ -779,6 +873,17 @@ export async function createNature({
     const index = entry.trees.indexOf(tree);
     if (index === -1) return false;
     entry.trees.splice(index, 1);
+
+    const typeIndex = tree.userData?.treeTypeIndex;
+    const instanceIndex = tree.userData?.instanceIndex;
+    const instancedParts = entry?.instancedTrees?.get(typeIndex) ?? [];
+    if (Number.isInteger(instanceIndex)) {
+      for (const part of instancedParts) {
+        part.mesh.setMatrixAt(instanceIndex, HIDDEN_INSTANCE_MATRIX);
+        part.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+
     entry.group.remove(tree);
     const tileClimbAreas = climbableAreasByTile.get(tileKey);
     const treeAreas = tree.userData?.climbAreas ?? [];
@@ -838,6 +943,7 @@ export async function createNature({
     setTileCache,
     getClosestTree,
     removeTree,
+    syncTreeInstanceTransform,
     dispose
   };
 }
