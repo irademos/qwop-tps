@@ -7430,7 +7430,7 @@ async function main() {
   }
 
   const settingsBtn = document.getElementById('settings-button');
-  const characterOptions = ['base_character_2', 'cowboy'].map(name => ({
+  const characterOptions = ['base_character_2', 'cowboy', 'Chimpanzee'].map(name => ({
     label: name,
     value: `/models/${name}.fbx`
   }));
