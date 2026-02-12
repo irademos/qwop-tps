@@ -14,9 +14,6 @@ import {
 import { BASE_HEALTH_SEGMENTS, getMaxHealthSegments, normalizeHealthSegments } from "./healthUtils.js";
 
 const FRIENDLY_MODELS = [
-  // "/models/andy.fbx",
-  // "/models/chris.fbx",
-  // "/models/old_man.fbx"
   "/models/cowboy.fbx"
 ];
 const FRIENDLY_MAX_ACTIVE = 6;

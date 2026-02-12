@@ -2587,50 +2587,6 @@ async function main() {
 
         cleanupMonster(oldMonster);
         scene.add(monster.model);
-        if (modelPath === "/models/rainbow_troll.fbx") {
-          const attachSwordToMonster = async () => {
-            try {
-              const template = await loadMonsterSwordTemplate();
-              const swordMesh = cloneMonsterSwordMesh(template);
-              if (!swordMesh) return;
-              if (!monster.model) {
-                disposeWeaponMesh(swordMesh);
-                return;
-              }
-              const root = monster.model.userData?.pivot ?? monster.model;
-              let handBone = null;
-              root.traverse(child => {
-                if (handBone || !child.isBone || !child.name) return;
-                const name = child.name.toLowerCase();
-                if (name.includes('righthand')) {
-                  handBone = child;
-                }
-              });
-              if (!handBone) {
-                root.traverse(child => {
-                  if (handBone || !child.isBone || !child.name) return;
-                  if (child.name.toLowerCase().includes('hand')) {
-                    handBone = child;
-                  }
-                });
-              }
-              if (handBone) {
-                handBone.add(swordMesh);
-              } else {
-                monster.model.add(swordMesh);
-              }
-              swordMesh.position.copy(MONSTER_SWORD_HOLD_OFFSET);
-              swordMesh.quaternion.copy(MONSTER_SWORD_HOLD_QUATERNION);
-              monster.weaponType = "sword";
-              monster.weaponMesh = swordMesh;
-              monster.weaponBaseScale = swordMesh.scale.clone();
-              monster.model.userData.equippedWeaponType = "sword";
-            } catch (error) {
-              console.warn('Failed to attach autumn sword to monster.', error);
-            }
-          };
-          attachSwordToMonster();
-        }
         if (rapierWorld) {
           attachMonsterPhysics(monster);
         }
@@ -7474,7 +7430,7 @@ async function main() {
   }
 
   const settingsBtn = document.getElementById('settings-button');
-  const characterOptions = ['base_character_2', 'base_character', 'andy', 'chris', 'old_man', 'wizard', 'rainbow_troll', 'alien_bumpy_bump', 'swamp_guy', 'cowboy'].map(name => ({
+  const characterOptions = ['base_character_2', 'cowboy'].map(name => ({
     label: name,
     value: `/models/${name}.fbx`
   }));
