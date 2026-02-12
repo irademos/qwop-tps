@@ -27,6 +27,7 @@ import { createNature } from './environment/nature.js';
 import { createCabin } from './environment/cabin.js';
 import { createTower } from './environment/tower.js';
 import { createMushrooms, MUSHROOM_ENTRIES } from './environment/mushrooms.js';
+import { createAnimalManager } from './environment/animals.js';
 import { createApples, APPLE_ITEM_ID } from './items/apple.js';
 import { createHomeSystem } from './home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -666,6 +667,9 @@ async function main() {
 
   let monsters = [];
   window.monsters = monsters;
+  let animalManager = null;
+  let animals = [];
+  window.animals = animals;
   const monsterSlotIds = Array.from({ length: MAX_MONSTERS }, (_, index) => `monster:${index}`);
   const spawningSlots = new Set();
   const respawnTimers = new Map();
@@ -675,6 +679,10 @@ async function main() {
   let unsubscribeMonsterUpdates = null;
   const recentMonsterHits = new Map();
 
+  const getDamageableCreatures = () => ([
+    ...(Array.isArray(monsters) ? monsters : []),
+    ...(Array.isArray(animals) ? animals : [])
+  ]);
 
   scene = new THREE.Scene();
   const rotateSkyboxFaceClockwise = (image) => {
@@ -1193,7 +1201,7 @@ async function main() {
       }
       if (!multiplayer?.isHost) return;
       const monsterId = data.monsterId;
-      const monster = monsters.find(entry => entry.id === monsterId);
+      const monster = getDamageableCreatures().find(entry => entry.id === monsterId);
       if (!monster) return;
       const sourceId = data.sourcePlayerId || peerId;
       const nowMs = Date.now();
@@ -2245,6 +2253,14 @@ async function main() {
   await createTower({ scene, getTerrainHeight, rapierWorld, rapier: RAPIER });
   mushroomPickups = mushroomController?.pickups || [];
   window.mushroomPickups = mushroomPickups;
+  animalManager = createAnimalManager({
+    scene,
+    getPlayerModel: () => playerModel,
+    getTerrainHeight
+  });
+  await animalManager.ensureAnimals();
+  animals = animalManager.getAnimals();
+  window.animals = animals;
   let didInitialGpsSnap = false;
 
   const getRandomMonsterModel = () => {
@@ -5014,9 +5030,10 @@ async function main() {
       }
     }
 
-    if (Array.isArray(monsters)) {
+    const creatures = getDamageableCreatures();
+    if (Array.isArray(creatures) && creatures.length) {
       if (isHost) {
-        for (const monster of monsters) {
+        for (const monster of creatures) {
           if (!monster?.model?.position) continue;
           const distance = hitPosition.distanceTo(monster.model.position);
           if (distance > BOMB_DAMAGE_RADIUS) continue;
@@ -5034,7 +5051,7 @@ async function main() {
           }
         }
       } else {
-        for (const monster of monsters) {
+        for (const monster of creatures) {
           if (!monster?.model?.position) continue;
           const distance = hitPosition.distanceTo(monster.model.position);
           if (distance > BOMB_DAMAGE_RADIUS) continue;
@@ -7919,7 +7936,7 @@ async function main() {
     const mapTreasureChests = treasureChest?.mesh?.visible ? [treasureChest.mesh] : [];
     const mapMerchants = mapMerchantFriendly?.model ? [mapMerchantFriendly.model] : [];
     updateMapView(frameDelta, {
-      monsters,
+      monsters: getDamageableCreatures(),
       friendlies: friendlyNpcManager?.friendlies,
       weapons: droppedWeaponPickups,
       items: mapItems,
@@ -8309,6 +8326,9 @@ async function main() {
     for (const monster of monsters) {
       monster?.model?.userData?.mixer?.update(mixerDelta);
     }
+    for (const animal of animals) {
+      animal?.model?.userData?.mixer?.update(mixerDelta);
+    }
 
     // 2) AI can still be throttled, but pass a real delta when you DO run it
     const aiNowMs = Date.now();
@@ -8318,6 +8338,11 @@ async function main() {
         cleanupMonster(monster);
       }
     });
+    if (animalManager) {
+      animalManager.update(mixerDelta);
+      animals = animalManager.getAnimals();
+      window.animals = animals;
+    }
     const isHostNow = !multiplayer || multiplayer.isHost;
 
     if (isHostNow) {
@@ -8517,7 +8542,7 @@ async function main() {
       playerModel,
       otherPlayers,
       multiplayer,
-      monsters,
+      monsters: getDamageableCreatures(),
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage
     });
@@ -8529,7 +8554,7 @@ async function main() {
       deltaSeconds: frameDelta,
       playerModel,
       playerControls,
-      monsters,
+      monsters: getDamageableCreatures(),
       multiplayer
     });
 
@@ -8554,7 +8579,7 @@ async function main() {
     updateMeleeAttacks({
       playerModel,
       otherPlayers,
-      monsters,
+      monsters: getDamageableCreatures(),
       audioManager,
       multiplayer,
       sendMonsterAttack: sendMonsterAttackIntent,
