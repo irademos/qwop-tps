@@ -1757,7 +1757,6 @@ body.settings-open #settings-button {
 
 .location-banner.is-visible {
   opacity: 1;
-  pointer-events: auto;
   transform: translateX(-50%) translateY(0);
 }
 
