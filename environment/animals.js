@@ -16,6 +16,36 @@ let animalSpawnCursor = 0;
 
 const randomRange = (min, max) => min + Math.random() * (max - min);
 
+function getModelBounds(modelRoot) {
+  if (!modelRoot) return null;
+  modelRoot.updateWorldMatrix(true, true);
+
+  const meshBounds = new THREE.Box3();
+  let hasMeshBounds = false;
+
+  modelRoot.traverse((obj) => {
+    if (!obj?.isMesh || !obj.geometry) return;
+    if (!obj.geometry.boundingBox) {
+      obj.geometry.computeBoundingBox();
+    }
+    const localBounds = obj.geometry.boundingBox;
+    if (!localBounds) return;
+    const worldBounds = localBounds.clone().applyMatrix4(obj.matrixWorld);
+    if (!hasMeshBounds) {
+      meshBounds.copy(worldBounds);
+      hasMeshBounds = true;
+    } else {
+      meshBounds.union(worldBounds);
+    }
+  });
+
+  if (hasMeshBounds) return meshBounds;
+
+  const fallback = new THREE.Box3().setFromObject(modelRoot);
+  if (fallback.isEmpty()) return null;
+  return fallback;
+}
+
 async function loadAnimalTemplate(typeName) {
   const cached = animalTemplateCache.get(typeName);
   if (cached) return cached;
@@ -74,7 +104,7 @@ async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight }) {
   const scale = Number.isFinite(template.config.scale) ? template.config.scale : 1;
   modelRoot.scale.setScalar(scale);
 
-  const box = new THREE.Box3().setFromObject(modelRoot);
+  const box = getModelBounds(modelRoot) || new THREE.Box3(new THREE.Vector3(-0.5, 0, -0.5), new THREE.Vector3(0.5, 1, 0.5));
   const center = box.getCenter(new THREE.Vector3());
   const yOffset = (template.config.yOffset ?? 0) - box.min.y;
   const zOffset = template.config.zOffset ?? 0;
