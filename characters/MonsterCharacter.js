@@ -79,6 +79,7 @@ export class MonsterCharacter extends CharacterBase {
     this.lastStandoffRetreatTime = 0;
     this.healthBar = this.createHealthBar();
     this.healthBarVisibleUntil = 0;
+    this.backgroundMode = false;
     this.setLevel(1, { preserveHealth: false });
   }
 
@@ -93,6 +94,64 @@ export class MonsterCharacter extends CharacterBase {
 
   setDirection(vec) {
     this.model.userData.direction.copy(vec);
+  }
+
+  setBackgroundMode(enabled) {
+    this.backgroundMode = !!enabled;
+    if (this.backgroundMode) {
+      this.attackStartTime = null;
+      this.attackHasHit = false;
+      this.attackAnimationName = ATTACK_NAME;
+    }
+  }
+
+  syncBodyFromTransform({ zeroVelocity = true } = {}) {
+    const body = this.body;
+    if (!body || !this.model) return;
+    body.setTranslation({
+      x: this.model.position.x,
+      y: this.model.position.y,
+      z: this.model.position.z
+    }, true);
+    body.setRotation(this.model.quaternion, true);
+    if (zeroVelocity) {
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+  }
+
+  setHorizontalMovement(direction, speed, delta = 0) {
+    const dir = direction?.clone ? direction.clone() : new THREE.Vector3();
+    dir.y = 0;
+    if (dir.lengthSq() > 0.000001) {
+      dir.normalize();
+    }
+    const movement = dir.multiplyScalar(Math.max(0, speed || 0));
+    const body = this.body;
+    if (body?.isDynamic?.()) {
+      const vel = body.linvel();
+      body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
+      return;
+    }
+    const dt = Number.isFinite(delta) ? Math.max(0, delta) : 0;
+    const nextPosition = this.model.position.clone().addScaledVector(movement, dt);
+    if (body?.setNextKinematicTranslation) {
+      body.setNextKinematicTranslation({ x: nextPosition.x, y: nextPosition.y, z: nextPosition.z });
+    } else if (body?.setTranslation) {
+      body.setTranslation({ x: nextPosition.x, y: nextPosition.y, z: nextPosition.z }, true);
+    }
+    this.model.position.copy(nextPosition);
+  }
+
+  faceDirection(direction) {
+    if (!direction || direction.lengthSq() <= 0.000001) return;
+    const angle = Math.atan2(direction.x, direction.z);
+    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+    const body = this.body;
+    if (body?.setRotation) {
+      body.setRotation(rot, true);
+    }
+    this.model.quaternion.copy(rot);
   }
 
   applyDamage(amount) {
@@ -337,18 +396,14 @@ export class MonsterCharacter extends CharacterBase {
           this.setDirection(wanderDirection);
         }
       }
-      const movement = this.model.userData.direction
-        .clone()
-        .multiplyScalar(
-          CHARACTER_MOVEMENT.walkSpeed
+      this.setHorizontalMovement(
+        this.model.userData.direction,
+        CHARACTER_MOVEMENT.walkSpeed
           * this.speedMultiplier
-          * this.getFriendlyDriftSpeedMultiplier()
-        );
-      const vel = body.linvel();
-      body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
-      const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
-      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-      body.setRotation(rot, true);
+          * this.getFriendlyDriftSpeedMultiplier(),
+        delta
+      );
+      this.faceDirection(this.model.userData.direction);
       this.playAnimation("Walk", MOVE_FADE);
       this.update(delta);
       return;
@@ -386,7 +441,7 @@ export class MonsterCharacter extends CharacterBase {
     const now = Date.now();
     if (!this.model) return;
     const body = this.body;
-    if (!body) return;
+    if (!body && !this.backgroundMode) return;
 
     const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
     if (this.isDead) {
@@ -394,8 +449,7 @@ export class MonsterCharacter extends CharacterBase {
       return;
     }
     if (this.isFrozen()) {
-      const vel = body.linvel();
-      body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      this.setHorizontalMovement(new THREE.Vector3(), 0, delta);
       this.playAnimation("Idle", MOVE_FADE);
       this.update(delta);
       return;
@@ -423,27 +477,21 @@ export class MonsterCharacter extends CharacterBase {
     const walkSpeed = CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier;
 
     if (this.attackStartTime) {
-      const vel = body.linvel();
       if (now < this.attackLungeEndTime) {
-        const movement = this.attackDirection
-          .clone()
-          .multiplyScalar((CHARACTER_MOVEMENT.runSpeed + 0.75) * this.speedMultiplier);
-        body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
+        this.setHorizontalMovement(
+          this.attackDirection,
+          (CHARACTER_MOVEMENT.runSpeed + 0.75) * this.speedMultiplier,
+          delta
+        );
       } else {
-        body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+        this.setHorizontalMovement(new THREE.Vector3(), 0, delta);
       }
-      const angle = Math.atan2(this.attackDirection.x, this.attackDirection.z);
-      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-      body.setRotation(rot, true);
+      this.faceDirection(this.attackDirection);
     } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
       const direction = targetPos.sub(this.model.position).normalize();
       this.setDirection(direction);
-      const movement = this.model.userData.direction.clone().multiplyScalar(runSpeed);
-      const vel = body.linvel();
-      body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
-      const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
-      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-      body.setRotation(rot, true);
+      this.setHorizontalMovement(this.model.userData.direction, runSpeed, delta);
+      this.faceDirection(this.model.userData.direction);
       this.playAnimation("Run", MOVE_FADE);
     } else {
       const faceDir = targetPos.sub(this.model.position).normalize();
@@ -460,11 +508,8 @@ export class MonsterCharacter extends CharacterBase {
         forwardSpeed = walkSpeed;
       }
       const movement = faceDir.clone().multiplyScalar(forwardSpeed).add(strafeDir.multiplyScalar(strafeOffset));
-      const vel = body.linvel();
-      body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
-      const angle = Math.atan2(faceDir.x, faceDir.z);
-      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-      body.setRotation(rot, true);
+      this.setHorizontalMovement(movement, 1, delta);
+      this.faceDirection(faceDir);
       if (canAttack && distance <= STANDOFF_DISTANCE + 0.5) {
         this.attackDirection.copy(faceDir);
         this.setDirection(this.attackDirection);

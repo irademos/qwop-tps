@@ -2022,10 +2022,22 @@ async function main() {
 
   window.weapons = { iceGun, bow, bomb, autumnSword };
 
-  function attachMonsterPhysics(monster) {
-    const model = monster.model;
+  function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
+    const model = monster?.model;
+    if (!model || !rapierWorld) return null;
+    const existingBody = monster.body;
+    if (existingBody && rapierWorld.getRigidBody(existingBody.handle)) {
+      rbToMesh.delete(existingBody);
+      rapierWorld.removeRigidBody(existingBody);
+      model.userData.rb = null;
+    }
+
     const scale = monster.sizeScale || 1;
-    const rbDesc = RAPIER.RigidBodyDesc.dynamic()
+    const isKinematic = mode === 'kinematic';
+    const rbDesc = isKinematic
+      ? RAPIER.RigidBodyDesc.kinematicPositionBased()
+      : RAPIER.RigidBodyDesc.dynamic();
+    rbDesc
       .setTranslation(model.position.x, model.position.y, model.position.z)
       .setLinearDamping(0.5)
       .setAngularDamping(0.5);
@@ -2035,6 +2047,44 @@ async function main() {
     rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
     rbToMesh.set(rb, model);
+    if (monster.syncBodyFromTransform) {
+      monster.syncBodyFromTransform({ zeroVelocity: true });
+    }
+    if (monster.setBackgroundMode) {
+      monster.setBackgroundMode(isKinematic);
+    }
+    return rb;
+  }
+
+  function detachMonsterPhysics(monster) {
+    if (!monster?.model) return;
+    const body = monster.body;
+    if (body && rapierWorld?.getRigidBody(body.handle)) {
+      rbToMesh.delete(body);
+      rapierWorld.removeRigidBody(body);
+    }
+    monster.model.userData.rb = null;
+    monster.setBackgroundMode?.(true);
+  }
+
+  function setMonsterPhysicsMode(monster, mode = 'dynamic') {
+    if (!monster?.model || !rapierWorld) return;
+    const body = monster.body;
+    const wantsDynamic = mode === 'dynamic';
+    const wantsKinematic = mode === 'kinematic';
+    const isDynamic = !!body?.isDynamic?.();
+    const isKinematic = !!body?.isKinematic?.();
+    if (wantsDynamic && isDynamic) {
+      monster.setBackgroundMode?.(false);
+      monster.syncBodyFromTransform?.({ zeroVelocity: false });
+      return;
+    }
+    if (wantsKinematic && isKinematic) {
+      monster.setBackgroundMode?.(true);
+      monster.syncBodyFromTransform?.({ zeroVelocity: true });
+      return;
+    }
+    attachMonsterPhysics(monster, { mode });
   }
 
   const detachNpcPhysics = (npc) => {
@@ -2047,6 +2097,7 @@ async function main() {
 
   window.attachMonsterPhysics = attachMonsterPhysics;
   window.detachNpcPhysics = detachNpcPhysics;
+  window.setMonsterPhysicsMode = setMonsterPhysicsMode;
 
 
 
@@ -2348,7 +2399,7 @@ async function main() {
     playerModel,
     otherPlayers,
     attachPhysics: attachMonsterPhysics,
-    detachPhysics: detachNpcPhysics,
+    detachPhysics: detachMonsterPhysics,
     getTerrainHeight,
     liftPositionToBuildingTop,
     isHost,
@@ -8476,8 +8527,17 @@ async function main() {
             monsterTier = 'background';
           }
 
+          const previousTier = monster.activityTier;
           monster.activityTier = monsterTier;
           monster.model.visible = monsterTier !== 'dormant';
+
+          if (monsterTier === 'active') {
+            setMonsterPhysicsMode(monster, 'dynamic');
+          } else if (monsterTier === 'background') {
+            setMonsterPhysicsMode(monster, 'kinematic');
+          } else {
+            detachMonsterPhysics(monster);
+          }
 
           const aiContext = {
             enableFriendlyDrift: friendlyDriftMonsterIds.has(monster.id),
@@ -8485,6 +8545,7 @@ async function main() {
           };
 
           if (monsterTier === 'active') {
+            monster.syncBodyFromTransform?.({ zeroVelocity: false });
             if (PERF.throttleAI) {
               const last = monster.lastAIUpdateMs ?? 0;
               if (aiNowMs - last > 150) {
@@ -8497,23 +8558,13 @@ async function main() {
             return;
           }
 
-          const body = monster.body;
           if (monsterTier === 'background') {
-            if (body) {
-              const vel = body.linvel();
-              body.setLinvel({ x: vel.x * 0.35, y: vel.y, z: vel.z * 0.35 }, true);
-            }
             const lastBackgroundAi = monster.lastBackgroundAIUpdateMs ?? 0;
-            if (aiNowMs - lastBackgroundAi > MONSTER_BACKGROUND_AI_INTERVAL_MS) {
+            if (previousTier !== 'background' || aiNowMs - lastBackgroundAi > MONSTER_BACKGROUND_AI_INTERVAL_MS) {
               monster.lastBackgroundAIUpdateMs = aiNowMs;
               monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
             }
             return;
-          }
-
-          if (body) {
-            const vel = body.linvel();
-            body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
           }
         });
       }
