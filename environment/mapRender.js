@@ -1,7 +1,4 @@
 import * as THREE from "three";
-import { Line2 } from "three/examples/jsm/lines/Line2.js";
-import { LineGeometry } from "three/examples/jsm/lines/LineGeometry.js";
-import { LineMaterial } from "three/examples/jsm/lines/LineMaterial.js";
 
 const ROAD_WIDTHS = {
   footway: 0.4,
@@ -83,18 +80,11 @@ function toLocalMeters(coord, origin, lonScale) {
   };
 }
 
-function makeLineMaterial(width, color) {
-  return new LineMaterial({
+function makeRoadMaterial(color) {
+  return new THREE.MeshStandardMaterial({
     color,
-    linewidth: width,
-    worldUnits: true
-  });
-}
-
-function makeFallbackMaterial(width, color) {
-  return new THREE.LineBasicMaterial({
-    color,
-    linewidth: width
+    roughness: 0.95,
+    metalness: 0.0
   });
 }
 
@@ -115,90 +105,79 @@ export function createMapRenderer({
   scene?.add(group);
 
   const tileMeshes = new Map();
-  const lineMaterials = new Map();
-  const fallbackMaterials = new Map();
-  const resolution = new THREE.Vector2(1, 1);
+  const roadMaterials = new Map();
   const baseColor = new THREE.Color(color);
   let brightness = 1;
 
-  const useWideLines = Boolean(Line2 && LineGeometry && LineMaterial);
-
-  function getLineMaterial(width) {
-    if (!lineMaterials.has(width)) {
-      const material = makeLineMaterial(width, color);
+  function getRoadMaterial(width) {
+    if (!roadMaterials.has(width)) {
+      const material = makeRoadMaterial(color);
       material.color.copy(baseColor).multiplyScalar(brightness);
-      lineMaterials.set(width, material);
+      roadMaterials.set(width, material);
     }
-    return lineMaterials.get(width);
+    return roadMaterials.get(width);
   }
 
-  function getFallbackMaterial(width) {
-    if (!fallbackMaterials.has(width)) {
-      const material = makeFallbackMaterial(width, color);
-      material.color.copy(baseColor).multiplyScalar(brightness);
-      fallbackMaterials.set(width, material);
-    }
-    return fallbackMaterials.get(width);
-  }
-
-  function createLine(width) {
-    if (useWideLines) {
-      const geometry = new LineGeometry();
-      const material = getLineMaterial(width);
-      const line = new Line2(geometry, material);
-      line.userData.isWideLine = true;
-      return line;
-    }
+  function createRoadMesh(width) {
     const geometry = new THREE.BufferGeometry();
-    const material = getFallbackMaterial(width);
-    const line = new THREE.Line(geometry, material);
-    line.userData.isWideLine = false;
-    return line;
+    const material = getRoadMaterial(width);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.frustumCulled = true;
+    return mesh;
   }
 
-  function ensureLine(pool, parentGroup, index, width) {
-    let line = pool[index];
-    if (!line) {
-      line = createLine(width);
-      pool[index] = line;
-      parentGroup.add(line);
+  function ensureRoadMesh(pool, parentGroup, index, width) {
+    let mesh = pool[index];
+    if (!mesh) {
+      mesh = createRoadMesh(width);
+      pool[index] = mesh;
+      parentGroup.add(mesh);
     }
-    line.visible = true;
-    const isWide = line.userData.isWideLine;
-    if (isWide) {
-      const material = getLineMaterial(width);
-      if (line.material !== material) {
-        line.material = material;
-      }
-    } else {
-      const material = getFallbackMaterial(width);
-      if (line.material !== material) {
-        line.material = material;
-      }
+    mesh.visible = true;
+    const material = getRoadMaterial(width);
+    if (mesh.material !== material) {
+      mesh.material = material;
     }
-    return line;
+    return mesh;
   }
 
-  function updateLineGeometry(line, positions) {
-    if (!line?.geometry) return;
-    if (line.userData.isWideLine) {
-      if (!line.geometry.setPositions) return;
-      line.geometry.setPositions(positions);
-      const positionCount = line.geometry?.attributes?.position?.count ?? 0;
-      if (positionCount > 0 && typeof line.computeLineDistances === "function") {
-        line.computeLineDistances();
-      }
-    } else {
-      if (!line.geometry.setFromPoints) return;
-      const points = [];
-      for (let i = 0; i < positions.length; i += 3) {
-        points.push(new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]));
-      }
-      line.geometry.setFromPoints(points);
-      if (line.geometry?.attributes?.position?.count > 0) {
-        line.geometry.computeBoundingSphere();
-      }
+  function updateRoadGeometry(mesh, points, width, y) {
+    if (!mesh?.geometry || !Array.isArray(points) || points.length < 2) return;
+
+    const halfWidth = width * 0.5;
+    const vertices = [];
+    const indices = [];
+
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const start = points[i];
+      const end = points[i + 1];
+      const dx = end.x - start.x;
+      const dz = end.z - start.z;
+      const length = Math.hypot(dx, dz);
+      if (length <= Number.EPSILON) continue;
+
+      const nx = -dz / length;
+      const nz = dx / length;
+
+      const baseIndex = vertices.length / 3;
+      vertices.push(
+        start.x + nx * halfWidth, y, start.z + nz * halfWidth,
+        start.x - nx * halfWidth, y, start.z - nz * halfWidth,
+        end.x + nx * halfWidth, y, end.z + nz * halfWidth,
+        end.x - nx * halfWidth, y, end.z - nz * halfWidth
+      );
+      indices.push(
+        baseIndex, baseIndex + 2, baseIndex + 1,
+        baseIndex + 2, baseIndex + 3, baseIndex + 1
+      );
     }
+
+    mesh.geometry.dispose();
+    mesh.geometry = new THREE.BufferGeometry();
+    mesh.geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    mesh.geometry.setIndex(indices);
+    mesh.geometry.computeVertexNormals();
+    mesh.geometry.computeBoundingSphere();
   }
 
   function clearUnused(pool, fromIndex) {
@@ -214,11 +193,7 @@ export function createMapRenderer({
     const clamped = Math.min(Math.max(nextBrightness, 0), 1);
     if (brightness === clamped) return;
     brightness = clamped;
-    for (const material of lineMaterials.values()) {
-      material.color.copy(baseColor).multiplyScalar(brightness);
-      material.needsUpdate = true;
-    }
-    for (const material of fallbackMaterials.values()) {
+    for (const material of roadMaterials.values()) {
       material.color.copy(baseColor).multiplyScalar(brightness);
       material.needsUpdate = true;
     }
@@ -260,17 +235,17 @@ export function createMapRenderer({
     for (const line of lines) {
       if (!line.coords || line.coords.length < 2) continue;
       const width = resolveLineWidth(line.highway);
-      const positions = [];
+      const points = [];
       for (const coord of line.coords) {
         if (!coord || coord.length < 2) continue;
         const [lon, lat] = coord;
         if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
         const local = toLocalMeters([lon, lat], bounds, lonScale);
-        positions.push(local.x, elevation, local.z);
+        points.push(local);
       }
-      if (positions.length < 6) continue;
-      const lineMesh = ensureLine(tilePool, tileGroup, activeIndex, width);
-      updateLineGeometry(lineMesh, positions);
+      if (points.length < 2) continue;
+      const roadMesh = ensureRoadMesh(tilePool, tileGroup, activeIndex, width);
+      updateRoadGeometry(roadMesh, points, width, elevation);
       activeIndex += 1;
     }
 
@@ -299,20 +274,11 @@ export function createMapRenderer({
     }
   }
 
-  function setResolution(width, height) {
-    resolution.set(width, height);
-    if (!useWideLines) return;
-    for (const material of lineMaterials.values()) {
-      material.resolution.set(width, height);
-    }
-  }
+  function setResolution() {}
 
   function dispose() {
     clearTiles();
-    for (const material of lineMaterials.values()) {
-      material.dispose();
-    }
-    for (const material of fallbackMaterials.values()) {
+    for (const material of roadMaterials.values()) {
       material.dispose();
     }
     group.clear();
