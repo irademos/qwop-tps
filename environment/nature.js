@@ -36,7 +36,9 @@ const TREE_SPAWN_CHANCE_NEAR = 0.6;
 const TREE_SPAWN_CHANCE_MID = 0.35;
 const TREE_SPAWN_CHANCE_FAR = 0.15;
 const TREE_TILE_BUFFER = 2;
-const NEAR_TILE_DISTANCE = 1;
+// Keep high-detail, interactable GLB trees only on the player's current tile.
+// Neighboring tiles and beyond should use primitive impostors.
+const NEAR_TILE_DISTANCE = 0;
 const ROCK_GRID_SPACING = 24;
 const ROCK_SPAWN_CHANCE = 0.28;
 const ROCK_MIN_RADIUS = 0.45;
@@ -803,7 +805,7 @@ export async function createNature({
         const detailLevel = getTileDetailLevel(nextTile, tile);
         const existingEntry = treeTiles.get(nextKey);
         if (existingEntry) {
-          if (existingEntry.detailLevel === 'far' && detailLevel === 'near') {
+          if (existingEntry.detailLevel !== detailLevel) {
             refreshTile(nextKey, tile);
             continue;
           }
