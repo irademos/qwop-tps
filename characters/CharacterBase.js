@@ -29,6 +29,7 @@ export class CharacterBase {
   update(delta) {
     if (!this.mixer || !Number.isFinite(delta) || delta <= 0) return;
     this.mixer.update(delta);
+    this.model?.userData?.updateSkinnedBounds?.();
   }
 
   playAnimation(name, fadeDuration = 0.2) {

@@ -16,6 +16,8 @@ const animationFiles = {
 const animationClipCache = new Map();
 const missingAnimationLogs = new Set();
 const DEFAULT_MATERIAL_BRIGHTNESS = 1;
+const BOUNDS_REFRESH_INTERVAL_MS = 250;
+const CONSERVATIVE_BOUNDS_PADDING = 1.15;
 
 function applyMaterialBrightness(model, brightness) {
   if (!Number.isFinite(brightness) || brightness === DEFAULT_MATERIAL_BRIGHTNESS) return;
@@ -46,7 +48,61 @@ function normalizeLodConfigs(config) {
       path: lod.path,
       distance: Number.isFinite(lod.distance) ? lod.distance : null,
     }))
-    .filter((lod) => lod.distance !== null);
+    .filter((lod) => lod.distance !== null && lod.distance > 0)
+    .sort((a, b) => a.distance - b.distance)
+    .filter((lod, index, lods) => index === 0 || lod.distance > lods[index - 1].distance);
+}
+
+function configureMeshCulling(model) {
+  const skinnedMeshes = [];
+  model.traverse((obj) => {
+    if (obj.material?.skinning === true) obj.material.skinning = true;
+    if (!obj.isMesh) return;
+    obj.frustumCulled = true;
+    if (obj.geometry) {
+      if (!obj.geometry.boundingBox) {
+        obj.geometry.computeBoundingBox();
+      }
+      if (!obj.geometry.boundingSphere) {
+        obj.geometry.computeBoundingSphere();
+      }
+    }
+    if (!obj.isSkinnedMesh) return;
+    skinnedMeshes.push(obj);
+
+    const boundingSphere = obj.geometry?.boundingSphere;
+    if (boundingSphere) {
+      boundingSphere.radius *= CONSERVATIVE_BOUNDS_PADDING;
+    }
+    const boundingBox = obj.geometry?.boundingBox;
+    if (boundingBox) {
+      const padding = boundingBox.getSize(new THREE.Vector3()).length() * 0.08;
+      boundingBox.expandByScalar(padding);
+    }
+  });
+  return skinnedMeshes;
+}
+
+function createSkinnedBoundsUpdater(skinnedMeshes) {
+  if (!Array.isArray(skinnedMeshes) || skinnedMeshes.length === 0) {
+    return () => {};
+  }
+  let lastUpdateTime = -Infinity;
+
+  return () => {
+    const now = performance.now();
+    if (now - lastUpdateTime < BOUNDS_REFRESH_INTERVAL_MS) return;
+    lastUpdateTime = now;
+
+    for (const mesh of skinnedMeshes) {
+      if (!mesh?.isSkinnedMesh) continue;
+      mesh.computeBoundingBox();
+      mesh.computeBoundingSphere();
+      if (mesh.boundingSphere) {
+        mesh.boundingSphere.radius *= 1.05;
+      }
+    }
+  };
 }
 
 function bindSkinnedMeshesToBaseSkeleton(baseModel, lodModel) {
@@ -115,10 +171,7 @@ export function loadMonsterModel(modelPath, callback) {
 
           stripEmbeddedLights(model);
 
-          model.traverse(o => {
-            if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
-            if (o.material?.skinning === true) o.material.skinning = true;
-          });
+          const skinnedMeshes = configureMeshCulling(model);
 
           const scale = config.scale ?? 1;
           const materialBrightness = config.materialBrightness ?? DEFAULT_MATERIAL_BRIGHTNESS;
@@ -196,10 +249,7 @@ export function loadMonsterModel(modelPath, callback) {
                   }
                   const lodModel = lodFbx;
                   stripEmbeddedLights(lodModel);
-                  lodModel.traverse(o => {
-                    if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
-                    if (o.material?.skinning === true) o.material.skinning = true;
-                  });
+                  skinnedMeshes.push(...configureMeshCulling(lodModel));
 
                   lodModel.scale.set(scale, scale, scale);
                   applyMaterialBrightness(lodModel, materialBrightness);
@@ -248,6 +298,7 @@ export function loadMonsterModel(modelPath, callback) {
             monsterGroup.userData.currentAction = 'Idle';
             monsterGroup.userData.mixer = mixer;
             monsterGroup.userData.actions = actions;
+            monsterGroup.userData.updateSkinnedBounds = createSkinnedBoundsUpdater(skinnedMeshes);
             callback({ model: monsterGroup, mixer, actions, pivot, modelRoot: model });
           });
         },
