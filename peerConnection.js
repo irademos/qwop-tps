@@ -1,4 +1,5 @@
 import { db } from './firebase-init.js';
+import { loadPeerJs } from './externalDeps.js';
 import {
   ref,
   set,
@@ -81,6 +82,8 @@ export class Multiplayer {
       clearTimeout(timeoutId);
     }
   
+    const Peer = await loadPeerJs();
+
     this.peer = new Peer({
       config: { iceServers }
     });
