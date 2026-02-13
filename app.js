@@ -2288,7 +2288,7 @@ async function main() {
     return MONSTER_MODELS[index];
   };
 
-  const resolvePersistedMonsterModel = (value) => {
+  function resolvePersistedMonsterModel(value) {
     if (typeof value !== 'string') return null;
     const normalized = value.trim();
     if (!normalized) return null;
@@ -2300,7 +2300,7 @@ async function main() {
     }
 
     return null;
-  };
+  }
 
   const getRandomMonsterLevel = () => {
     const totalWeight = MONSTER_LEVEL_WEIGHTS.reduce((sum, entry) => sum + entry.weight, 0);
