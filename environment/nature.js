@@ -30,7 +30,9 @@ const PALM_TREE_INDEX = 2;
 const TREE_ZONE_DEGREES = 0.0009;
 const TREE_ZONE_METERS = 100;
 const TREE_GRID_SPACING = 20;
-const TREE_SPAWN_CHANCE = 0.4;
+const TREE_SPAWN_CHANCE_NEAR = 0.6;
+const TREE_SPAWN_CHANCE_MID = 0.35;
+const TREE_SPAWN_CHANCE_FAR = 0.15;
 const TREE_TILE_BUFFER = 2;
 const ROCK_GRID_SPACING = 24;
 const ROCK_SPAWN_CHANCE = 0.28;
@@ -76,6 +78,15 @@ function pseudoRandom2D(x, z, seed = 0) {
 function hashZoneIndex(a, b) {
   const hash = Math.abs(Math.imul(a, 73856093) ^ Math.imul(b, 19349663)) >>> 0;
   return hash;
+}
+
+function getTreeSpawnChanceForTileDistance(tileDistance) {
+  if (!Number.isFinite(tileDistance) || tileDistance <= 0) {
+    return TREE_SPAWN_CHANCE_NEAR;
+  }
+  const normalizedDistance = Math.min(tileDistance, TREE_TILE_BUFFER) / TREE_TILE_BUFFER;
+  return TREE_SPAWN_CHANCE_MID
+    + (TREE_SPAWN_CHANCE_FAR - TREE_SPAWN_CHANCE_MID) * normalizedDistance;
 }
 
 function metersPerDegreeLon(latDeg) {
@@ -295,6 +306,12 @@ export async function createNature({
   let tileBuffer = getTreeTileBuffer(activeTileCache);
 
   const getTileKey = (tile) => `${tile.x},${tile.y}`;
+  const getTileFromKey = (tileKey) => {
+    if (!tileKey) return null;
+    const [x, y] = tileKey.split(',').map((value) => parseInt(value, 10));
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  };
 
   const resolveTreeTypeIndex = (position) => {
     const geo = getGeoForLocal?.(position);
@@ -518,7 +535,7 @@ export async function createNature({
     parent.add(lines);
   };
 
-  const createTileTrees = (tile) => {
+  const createTileTrees = (tile, centerTile = tile) => {
     const tileKey = getTileKey(tile);
     if (treeTiles.has(tileKey)) return treeTiles.get(tileKey);
 
@@ -537,12 +554,16 @@ export async function createNature({
     const tileClimbAreas = [];
     const tileApplePickups = [];
     const tileBlockers = buildTileBlockers(tileKey);
+    const tileDx = tile.x - centerTile.x;
+    const tileDy = tile.y - centerTile.y;
+    const tileDistance = Math.hypot(tileDx, tileDy);
+    const treeSpawnChance = getTreeSpawnChanceForTileDistance(tileDistance);
 
     for (let ix = 0; ix <= tileSizeMeters; ix += TREE_GRID_SPACING) {
       for (let iz = 0; iz <= tileSizeMeters; iz += TREE_GRID_SPACING) {
         const worldX = baseX + ix;
         const worldZ = baseZ + iz;
-        if (pseudoRandom2D(worldX, worldZ, 1.2) > TREE_SPAWN_CHANCE) continue;
+        if (pseudoRandom2D(worldX, worldZ, 1.2) > treeSpawnChance) continue;
 
         tempPosition.set(worldX, 0, worldZ);
 
@@ -708,7 +729,7 @@ export async function createNature({
         const nextTile = { x: tile.x + dx, y: tile.y + dy };
         const nextKey = getTileKey(nextTile);
         neededKeys.add(nextKey);
-        createTileTrees(nextTile);
+        createTileTrees(nextTile, tile);
       }
     }
 
@@ -727,13 +748,15 @@ export async function createNature({
       removeTileEntry(tileKey);
     }
     if (tile) {
-      createTileTrees(tile);
+      const centerTile = getTileFromKey(lastPlayerTileKey) ?? tile;
+      createTileTrees(tile, centerTile);
       refreshClimbableAreas();
       return;
     }
-    const [x, y] = tileKey.split(',').map((value) => parseInt(value, 10));
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    createTileTrees({ x, y });
+    const parsedTile = getTileFromKey(tileKey);
+    if (!parsedTile) return;
+    const centerTile = getTileFromKey(lastPlayerTileKey) ?? parsedTile;
+    createTileTrees(parsedTile, centerTile);
     refreshClimbableAreas();
   };
 
@@ -744,7 +767,8 @@ export async function createNature({
     }
     for (const tile of tiles) {
       if (!tile) continue;
-      createTileTrees(tile);
+      const centerTile = getTileFromKey(lastPlayerTileKey) ?? tile;
+      createTileTrees(tile, centerTile);
     }
     refreshClimbableAreas();
   };
