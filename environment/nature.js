@@ -6,6 +6,8 @@ const TREE_MODEL_URL = '/assets/props/low_poly_tree_pack.glb';
 const TREE_SCALE_REFERENCE = 0.016;
 const TREE_SCALE_MIN = 0.012;
 const TREE_SCALE_MAX = 0.02;
+const TREE_IMPOSTOR_TRUNK_COLOR = 0x6f4e37;
+const TREE_IMPOSTOR_LEAF_PALETTE = [0x3f8f3f, 0x4fa14f, 0x5a9f42, 0x6cae52, 0x4b8c3f, 0x739f55];
 const TREE_PREFABS = [
   ['Circle'],                 // Eucalyptus (has multiple meshes under it)
   ['Circle001'],              // Pine
@@ -284,6 +286,20 @@ export async function createNature({
     new THREE.DodecahedronGeometry(1, 0),
     new THREE.IcosahedronGeometry(1, 0)
   ];
+  const treeImpostorTrunkGeometry = new THREE.CylinderGeometry(0.06, 0.08, 0.35, 5);
+  const treeImpostorLeafGeometry = new THREE.ConeGeometry(0.28, 0.75, 6);
+  const treeImpostorTrunkMaterial = new THREE.MeshStandardMaterial({
+    color: TREE_IMPOSTOR_TRUNK_COLOR,
+    roughness: 0.95,
+    metalness: 0.02,
+    flatShading: true
+  });
+  const treeImpostorLeafMaterials = TREE_IMPOSTOR_LEAF_PALETTE.map((color) => new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.9,
+    metalness: 0.01,
+    flatShading: true
+  }));
   const tempPosition = new THREE.Vector3();
   const tempBox = new THREE.Box3();
   const tempCenter = new THREE.Vector3();
@@ -530,6 +546,42 @@ export async function createNature({
     return { rb, collider };
   };
 
+  const createTreeImpostor = ({
+    worldX,
+    worldZ,
+    tileKey,
+    scale,
+    rotation,
+    terrainY,
+    treeTypeIndex
+  }) => {
+    const impostor = new THREE.Group();
+    impostor.name = 'tree-impostor';
+
+    const trunk = new THREE.Mesh(treeImpostorTrunkGeometry, treeImpostorTrunkMaterial);
+    trunk.castShadow = false;
+    trunk.receiveShadow = true;
+    trunk.position.y = 0.2;
+    impostor.add(trunk);
+
+    const leafMaterial = treeImpostorLeafMaterials[treeTypeIndex % treeImpostorLeafMaterials.length];
+    const leaves = new THREE.Mesh(treeImpostorLeafGeometry, leafMaterial);
+    leaves.castShadow = false;
+    leaves.receiveShadow = true;
+    leaves.position.y = 0.8;
+    impostor.add(leaves);
+
+    impostor.position.set(worldX, terrainY, worldZ);
+    impostor.rotation.y = rotation;
+    impostor.scale.setScalar(Math.max(0.25, scale / TREE_SCALE_REFERENCE));
+    impostor.userData = {
+      tileKey,
+      interactable: false,
+      isImpostor: true
+    };
+    return impostor;
+  };
+
   const addClimbDebugLines = (area, parent) => {
     if (!area || !parent) return;
     const width = (area.halfWidth ?? 0) * 2;
@@ -582,20 +634,26 @@ export async function createNature({
         const template = treeTemplates[treeTypeIndex];
         if (!template) continue;
 
-        const tree = template.clone(true);
-        tree.userData.applePickups = [];
-        tree.userData.isFlammable = true;
-        tree.userData.treeTypeIndex = treeTypeIndex;
         const rotation = pseudoRandom2D(worldX, worldZ, 3.4) * Math.PI * 2;
-        tree.rotation.y = rotation;
         const scale =
           TREE_SCALE_MIN +
           pseudoRandom2D(worldX, worldZ, 7.7) * (TREE_SCALE_MAX - TREE_SCALE_MIN);
-        tree.scale.setScalar(scale);
-
         const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
-        tree.position.set(worldX, terrainY, worldZ);
-        tree.userData.tileKey = tileKey;
+        const tree = isNearDetail
+          ? template.clone(true)
+          : createTreeImpostor({ worldX, worldZ, tileKey, scale, rotation, terrainY, treeTypeIndex });
+
+        if (isNearDetail) {
+          tree.userData.applePickups = [];
+          tree.userData.isFlammable = true;
+          tree.userData.treeTypeIndex = treeTypeIndex;
+          tree.userData.interactable = true;
+          tree.rotation.y = rotation;
+          tree.scale.setScalar(scale);
+          tree.position.set(worldX, terrainY, worldZ);
+          tree.userData.tileKey = tileKey;
+        }
+
         if (isNearDetail) {
           tree.updateWorldMatrix(true, true);
           tempBox.setFromObject(tree);
@@ -807,6 +865,7 @@ export async function createNature({
     for (const entry of treeTiles.values()) {
       for (const tree of entry.trees) {
         if (!tree?.position) continue;
+        if (!tree.userData?.interactable) continue;
         tree.updateWorldMatrix(true, true);
         if (tree.userData?.boundsCenterLocal) {
           worldCenter.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
@@ -883,6 +942,10 @@ export async function createNature({
     refreshClimbableAreas();
     rockGeometries.forEach((geometry) => geometry.dispose());
     rockMaterial.dispose();
+    treeImpostorTrunkGeometry.dispose();
+    treeImpostorLeafGeometry.dispose();
+    treeImpostorTrunkMaterial.dispose();
+    treeImpostorLeafMaterials.forEach((material) => material.dispose());
     group.clear();
     scene?.remove(group);
   };
