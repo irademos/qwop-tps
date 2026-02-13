@@ -2288,6 +2288,20 @@ async function main() {
     return MONSTER_MODELS[index];
   };
 
+  const resolvePersistedMonsterModel = (value) => {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim();
+    if (!normalized) return null;
+    if (MONSTER_MODELS.includes(normalized)) return normalized;
+
+    if (!normalized.includes('/') && !normalized.includes('.')) {
+      const alias = `/models/${normalized.toLowerCase()}.fbx`;
+      if (MONSTER_MODELS.includes(alias)) return alias;
+    }
+
+    return null;
+  };
+
   const getRandomMonsterLevel = () => {
     const totalWeight = MONSTER_LEVEL_WEIGHTS.reduce((sum, entry) => sum + entry.weight, 0);
     let pick = Math.random() * totalWeight;
@@ -2668,8 +2682,13 @@ async function main() {
 
     if (incomingVersion != null && incomingVersion < existingVersion) return;
 
-    const modelPath = record.type || record.modelPath || existing?.modelPath;
-    if (!modelPath) return;
+    const modelPath = resolvePersistedMonsterModel(record.type)
+      || resolvePersistedMonsterModel(record.modelPath)
+      || resolvePersistedMonsterModel(existing?.modelPath);
+    if (!modelPath) {
+      console.warn('Skipping persisted monster with unknown model path:', record.type || record.modelPath);
+      return;
+    }
 
     const needsSpawn = !existing || existing.modelPath !== modelPath;
     const rotation = applyTransform ? record.rot : null;
