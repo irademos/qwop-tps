@@ -3,12 +3,12 @@
   "yOffset": -1.04,
   "lods": [
     {
-      "path": "/models/zombie_green.fbx",
-      "distance": 16
+      "path": "/models/golem.fbx",
+      "distance": 24
     },
     {
-      "path": "/models/zombie_boy.fbx",
-      "distance": 34
+      "path": "/models/golem.fbx",
+      "distance": 48
     }
   ]
 }

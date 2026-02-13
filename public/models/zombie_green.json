@@ -4,12 +4,12 @@
   "materialBrightness": 1.25,
   "lods": [
     {
-      "path": "/models/golem.fbx",
-      "distance": 22
+      "path": "/models/zombie_green.fbx",
+      "distance": 24
     },
     {
-      "path": "/models/zombie_boy.fbx",
-      "distance": 42
+      "path": "/models/zombie_green.fbx",
+      "distance": 48
     }
   ]
 }

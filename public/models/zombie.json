@@ -5,15 +5,11 @@
   "lods": [
     {
       "path": "/models/zombie_boy.fbx",
-      "distance": 20
+      "distance": 22
     },
     {
-      "path": "/models/zombie_green.fbx",
-      "distance": 38
-    },
-    {
-      "path": "/models/golem.fbx",
-      "distance": 58
+      "path": "/models/zombie.fbx",
+      "distance": 44
     }
   ]
 }
