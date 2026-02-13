@@ -4,7 +4,7 @@
   "materialBrightness": 1.25,
   "lods": [
     {
-      "path": "/models/zombie.fbx",
+      "path": "/models/zombie_boy.fbx",
       "distance": 22
     },
     {
