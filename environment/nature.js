@@ -67,6 +67,7 @@ const ROAD_WIDTHS = {
   motorway: 3.4
 };
 const DEFAULT_ROAD_WIDTH = 1.0;
+const ROAD_WIDTH_SCALE = 10;
 
 const setTreeShadowing = (tree) => {
   tree.traverse((child) => {
@@ -117,7 +118,8 @@ function toLocalMeters(coord, origin, lonScale) {
 
 function resolveRoadWidth(highway) {
   if (typeof highway !== 'string') return DEFAULT_ROAD_WIDTH;
-  return ROAD_WIDTHS[highway] ?? DEFAULT_ROAD_WIDTH;
+  const baseWidth = ROAD_WIDTHS[highway] ?? DEFAULT_ROAD_WIDTH;
+  return baseWidth * ROAD_WIDTH_SCALE;
 }
 
 function collectBuildingPolygons(geojson) {
