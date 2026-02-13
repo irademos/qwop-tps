@@ -5,6 +5,7 @@ import { getSpawnPosition } from '../spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse } from "../knockback.js";
 import { QuestManager } from "../quest.js";
+import { loadNippleJs } from '../externalDeps.js';
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -384,7 +385,9 @@ export class PlayerControls {
   initializeControls() {
     this.initializeActionButtons();
     if (this.isMobile) {
-      this.initializeMobileControls();
+      this.initializeMobileControls().catch((error) => {
+        console.warn('Mobile controls failed to initialize.', error);
+      });
     } else {
       // this.setupPointerLock(); // leave pointer lock in PlayerControls
     }
@@ -396,7 +399,8 @@ export class PlayerControls {
     }
   }
 
-  initializeMobileControls() {
+  async initializeMobileControls() {
+    const nipplejs = await loadNippleJs();
     // Add joystick container for mobile
     const joystickContainer = document.getElementById('joystick-container');
     if (!joystickContainer) {

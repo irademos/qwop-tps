@@ -146,8 +146,7 @@ const isCdnScript = (request) => {
   }
   return (
     url.pathname.includes('/peerjs@') ||
-    url.pathname.includes('/nipplejs@') ||
-    url.pathname.includes('/simple-peer@')
+    url.pathname.includes('/nipplejs@')
   );
 };
 
