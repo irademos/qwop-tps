@@ -35,8 +35,8 @@ const TREE_GRID_SPACING = 20;
 const TREE_SPAWN_CHANCE_NEAR = 0.6;
 const TREE_SPAWN_CHANCE_MID = 0.35;
 const TREE_SPAWN_CHANCE_FAR = 0.15;
-const TREE_TILE_SIZE_METERS = 100;
-const TREE_TILE_BUFFER = 2;
+const TREE_TILE_SIZE_METERS = 150;
+const TREE_TILE_BUFFER = 5;
 // Keep high-detail, interactable GLB trees only on the player's current tile.
 // Neighboring tiles and beyond should use primitive impostors.
 const NEAR_TILE_DISTANCE = 1;
