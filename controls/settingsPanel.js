@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { openCustomizeUI } from './customize.js';
 
 const TAB_KEY = 'settings:lastTab';
 
@@ -874,7 +873,7 @@ async function handleAction(target) {
     context.location?.retry?.();
   } else if (action === 'customize') {
     closeOverlay();
-    openCustomizeUI();
+    void import('./customize.js').then(({ openCustomizeUI }) => openCustomizeUI());
   } else if (action === 'toggle-console') {
     const visible = elements.consoleLog.style.display === 'block';
     elements.consoleLog.style.display = visible ? 'none' : 'block';

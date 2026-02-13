@@ -5,7 +5,6 @@ import { getSpawnPosition } from '../spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse } from "../knockback.js";
 import { QuestManager } from "../quest.js";
-import { openMerchantPanel } from "./merchantPanel.js";
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -2266,7 +2265,7 @@ export class PlayerControls {
   handleDialogueOption(option) {
     this.questManager?.handleDialogueOption(option, this.activeFriendly);
     if (option?.merchantAction) {
-      openMerchantPanel(option.merchantAction);
+      void import('./merchantPanel.js').then(({ openMerchantPanel }) => openMerchantPanel(option.merchantAction));
     }
   }
 

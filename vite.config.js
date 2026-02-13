@@ -3,7 +3,17 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   server: {
-    open: true,        // opens in browser automatically
+    open: true,
     port: 3000
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          three: ['three'],
+          rapier: ['@dimforge/rapier3d-compat']
+        }
+      }
+    }
   }
 });
