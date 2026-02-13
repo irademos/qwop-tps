@@ -5063,9 +5063,27 @@ async function main() {
     }
   }
 
-  function spawnBombProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
-    if (!bomb?.mesh) return;
-    const createMesh = () => {
+  const createMeshPool = ({ create }) => {
+    const available = [];
+    return {
+      acquire() {
+        const mesh = available.pop();
+        if (mesh) {
+          mesh.visible = true;
+          return mesh;
+        }
+        return create();
+      },
+      release(mesh) {
+        if (!mesh) return;
+        mesh.visible = false;
+        available.push(mesh);
+      }
+    };
+  };
+
+  const bombProjectileMeshPool = createMeshPool({
+    create: () => {
       const clone = bomb.mesh.clone(true);
       clone.traverse(child => {
         if (!child.isMesh) return;
@@ -5074,15 +5092,20 @@ async function main() {
       });
       clone.visible = true;
       return clone;
-    };
+    }
+  });
+
+  function spawnBombProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    if (!bomb?.mesh) return;
 
     // const lobDirection = direction.clone().multiplyScalar(-1).normalize();
-    const lobDirection = direction.clone().normalize();
-    lobDirection.y += BOMB_THROW_UPWARD_BIAS;
-    lobDirection.normalize();
+    tempLobDirection.copy(direction).normalize();
+    tempLobDirection.y += BOMB_THROW_UPWARD_BIAS;
+    tempLobDirection.normalize();
 
-    spawnProjectile(scene, list, position, lobDirection, shooterId, {
-      createMesh,
+    spawnProjectile(scene, list, position, tempLobDirection, shooterId, {
+      createMesh: () => bombProjectileMeshPool.acquire(),
+      releaseMesh: (mesh) => bombProjectileMeshPool.release(mesh),
       speed: BOMB_THROW_SPEED,
       lifetime: BOMB_THROW_LIFETIME,
       colliderDesc: RAPIER.ColliderDesc.ball(0.18).setRestitution(0.3).setFriction(0.8),
@@ -5105,49 +5128,102 @@ async function main() {
   const ICE_MIST_PARTICLE_COUNT = 7;
   const ICE_MIST_FREEZE_MS = 5000;
   const ICE_MIST_RADIUS = 0.9;
+  const tempLobDirection = new THREE.Vector3();
+  const tempMistDirection = new THREE.Vector3();
+  const tempMistMoveStep = new THREE.Vector3();
+
+  const createMistPool = ({ particleCount, color, emissive, opacity, emissiveIntensity, spread, yRandom, sizeRange }) => {
+    const available = [];
+    const sphereGeometry = new THREE.SphereGeometry(1, 10, 8);
+    return {
+      acquire() {
+        const pooled = available.pop();
+        if (pooled) {
+          pooled.group.visible = true;
+          return pooled;
+        }
+        const group = new THREE.Group();
+        const material = new THREE.MeshStandardMaterial({
+          color,
+          transparent: true,
+          opacity,
+          emissive,
+          emissiveIntensity,
+          depthWrite: false
+        });
+        for (let i = 0; i < particleCount; i++) {
+          const particle = new THREE.Mesh(sphereGeometry, material);
+          particle.castShadow = false;
+          particle.receiveShadow = false;
+          group.add(particle);
+        }
+        return { group, material };
+      },
+      setup(entry) {
+        entry.material.opacity = opacity;
+        entry.material.emissiveIntensity = emissiveIntensity;
+        entry.group.children.forEach((particle) => {
+          const size = THREE.MathUtils.lerp(sizeRange[0], sizeRange[1], Math.random());
+          particle.scale.setScalar(size);
+          particle.position.set(
+            (Math.random() - 0.5) * spread,
+            Math.random() * yRandom,
+            (Math.random() - 0.5) * spread
+          );
+        });
+      },
+      release(entry) {
+        if (!entry) return;
+        entry.group.visible = false;
+        available.push(entry);
+      }
+    };
+  };
+
+  const iceMistPool = createMistPool({
+    particleCount: ICE_MIST_PARTICLE_COUNT,
+    color: 0x66ccff,
+    emissive: 0x3aa5ff,
+    opacity: 0.65,
+    emissiveIntensity: 0.6,
+    spread: 0.35,
+    yRandom: 0.35,
+    sizeRange: [0.2, 0.45]
+  });
+
+  const bombMistPool = createMistPool({
+    particleCount: BOMB_MIST_PARTICLE_COUNT,
+    color: 0xd94b4b,
+    emissive: 0x7a1010,
+    opacity: 0.7,
+    emissiveIntensity: 0.5,
+    spread: 8.0,
+    yRandom: 0.4,
+    sizeRange: [0.25, 0.6]
+  });
 
   function spawnIceMist(scene, mistList, position, direction, shooterId) {
-    const mistGroup = new THREE.Group();
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x66ccff,
-      transparent: true,
-      opacity: 0.65,
-      emissive: 0x3aa5ff,
-      emissiveIntensity: 0.6,
-      depthWrite: false
-    });
-
-    for (let i = 0; i < ICE_MIST_PARTICLE_COUNT; i++) {
-      const size = THREE.MathUtils.lerp(0.2, 0.45, Math.random());
-      const geometry = new THREE.SphereGeometry(size, 10, 8);
-      const particle = new THREE.Mesh(geometry, material);
-      const spread = 0.35;
-      particle.position.set(
-        (Math.random() - 0.5) * spread,
-        (Math.random() - 0.3) * spread,
-        (Math.random() - 0.5) * spread
-      );
-      particle.castShadow = false;
-      particle.receiveShadow = false;
-      mistGroup.add(particle);
-    }
+    const pooled = iceMistPool.acquire();
+    const mistGroup = pooled.group;
+    iceMistPool.setup(pooled);
 
     mistGroup.position.copy(position);
     mistGroup.userData.skipTerrainCorrection = true;
     scene.add(mistGroup);
 
-    const normalizedDirection = direction.clone().normalize()
+    tempMistDirection.copy(direction).normalize();
     const speed = ICE_MIST_SPEED * THREE.MathUtils.lerp(0.9, 1.15, Math.random());
     const drift = new THREE.Vector3(
       (Math.random() - 0.5) * 0.3,
       Math.random() * 0.2,
       (Math.random() - 0.5) * 0.3
     );
-    const velocity = normalizedDirection.multiplyScalar(speed).add(drift);
+    const velocity = new THREE.Vector3().copy(tempMistDirection).multiplyScalar(speed).add(drift);
 
     mistList.push({
+      pooled,
       group: mistGroup,
-      material,
+      material: pooled.material,
       velocity,
       spawnTime: performance.now(),
       lifetimeMs: ICE_MIST_LIFETIME_MS,
@@ -5160,30 +5236,9 @@ async function main() {
   }
 
   function spawnBombMist(scene, mistList, position) {
-    const mistGroup = new THREE.Group();
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xd94b4b,
-      transparent: true,
-      opacity: 0.7,
-      emissive: 0x7a1010,
-      emissiveIntensity: 0.5,
-      depthWrite: false
-    });
-
-    for (let i = 0; i < BOMB_MIST_PARTICLE_COUNT; i++) {
-      const size = THREE.MathUtils.lerp(0.25, 0.6, Math.random());
-      const geometry = new THREE.SphereGeometry(size, 10, 8);
-      const particle = new THREE.Mesh(geometry, material);
-      const spread = 8.0;
-      particle.position.set(
-        (Math.random() - 0.5) * spread,
-        Math.random() * 0.4,
-        (Math.random() - 0.5) * spread
-      );
-      particle.castShadow = false;
-      particle.receiveShadow = false;
-      mistGroup.add(particle);
-    }
+    const pooled = bombMistPool.acquire();
+    const mistGroup = pooled.group;
+    bombMistPool.setup(pooled);
 
     mistGroup.position.copy(position);
     mistGroup.userData.skipTerrainCorrection = true;
@@ -5196,8 +5251,9 @@ async function main() {
     );
 
     mistList.push({
+      pooled,
       group: mistGroup,
-      material,
+      material: pooled.material,
       velocity: drift,
       spawnTime: performance.now(),
       lifetimeMs: BOMB_MIST_LIFETIME_MS
@@ -5223,21 +5279,16 @@ async function main() {
       if (!mist) return;
       if (mist.group) {
         scene.remove(mist.group);
-        mist.group.traverse(child => {
-          if (child.isMesh && child.geometry) {
-            child.geometry.dispose();
-          }
-        });
       }
-      mist.material?.dispose?.();
+      iceMistPool.release(mist.pooled);
       mistList.splice(index, 1);
     };
 
     for (let i = mistList.length - 1; i >= 0; i--) {
       const mist = mistList[i];
-      const moveStep = mist.velocity.clone().multiplyScalar(deltaSeconds);
-      mist.group.position.add(moveStep);
-      mist.traveled += moveStep.length();
+      tempMistMoveStep.copy(mist.velocity).multiplyScalar(deltaSeconds);
+      mist.group.position.add(tempMistMoveStep);
+      mist.traveled += tempMistMoveStep.length();
 
       const ageMs = now - mist.spawnTime;
       const progress = Math.min(1, ageMs / mist.lifetimeMs);
@@ -5283,20 +5334,16 @@ async function main() {
       if (!mist) return;
       if (mist.group) {
         scene.remove(mist.group);
-        mist.group.traverse(child => {
-          if (child.isMesh && child.geometry) {
-            child.geometry.dispose();
-          }
-        });
       }
-      mist.material?.dispose?.();
+      bombMistPool.release(mist.pooled);
       mistList.splice(index, 1);
     };
 
     for (let i = mistList.length - 1; i >= 0; i--) {
       const mist = mistList[i];
       if (mist.velocity) {
-        mist.group.position.add(mist.velocity.clone().multiplyScalar(deltaSeconds));
+        tempMistMoveStep.copy(mist.velocity).multiplyScalar(deltaSeconds);
+        mist.group.position.add(tempMistMoveStep);
       }
       const ageMs = now - mist.spawnTime;
       const progress = Math.min(1, ageMs / mist.lifetimeMs);

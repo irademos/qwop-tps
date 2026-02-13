@@ -3,11 +3,16 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { updateArrowProjectile } from "./arrow.js";
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../healthUtils.js";
 
-const disposeProjectileMesh = (mesh) => {
+const detachProjectileMesh = (mesh) => {
   if (!mesh) return;
   if (mesh.parent) {
     mesh.parent.remove(mesh);
   }
+};
+
+const disposeProjectileMesh = (mesh) => {
+  if (!mesh) return;
+  detachProjectileMesh(mesh);
   mesh.traverse(child => {
     if (!child.isMesh) return;
     if (child.geometry) {
@@ -31,7 +36,12 @@ export function removeProjectileAt(projectiles, index) {
   const projectile = projectiles[index];
   if (!projectile) return;
   const body = projectile.userData?.rb;
-  disposeProjectileMesh(projectile);
+  if (typeof projectile.userData?.releaseMesh === 'function') {
+    detachProjectileMesh(projectile);
+    projectile.userData.releaseMesh(projectile);
+  } else {
+    disposeProjectileMesh(projectile);
+  }
   projectiles.splice(index, 1);
   if (body) {
     window.rbToMesh?.delete?.(body);
@@ -81,6 +91,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.pickupAmount = options.pickupAmount ?? 0;
   mesh.userData.spawnPickup = options.spawnPickup ?? null;
   mesh.userData.isArrow = options.isArrow ?? false;
+  mesh.userData.releaseMesh = options.releaseMesh ?? null;
   mesh.userData.onGroundHit = options.onGroundHit ?? null;
   mesh.userData.groundY = options.groundY ?? null;
   mesh.userData.hasHitGround = false;
