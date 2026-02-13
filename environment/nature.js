@@ -35,6 +35,7 @@ const TREE_GRID_SPACING = 20;
 const TREE_SPAWN_CHANCE_NEAR = 0.6;
 const TREE_SPAWN_CHANCE_MID = 0.35;
 const TREE_SPAWN_CHANCE_FAR = 0.15;
+const TREE_TILE_SIZE_METERS = 100;
 const TREE_TILE_BUFFER = 2;
 // Keep high-detail, interactable GLB trees only on the player's current tile.
 // Neighboring tiles and beyond should use primitive impostors.
@@ -322,7 +323,7 @@ export async function createNature({
   ];
 
   let activeTileCache = tileCache ?? null;
-  let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 20;
+  let tileSizeMeters = TREE_TILE_SIZE_METERS;
   const getTreeTileBuffer = (cache) => {
     const evictRadius = cache?.evictRadiusTiles ?? TREE_TILE_BUFFER;
     // Keep at least one ring of neighboring tiles populated around the player.
@@ -367,8 +368,20 @@ export async function createNature({
     };
   };
 
-  const buildTileBlockers = (tileKey) => {
-    const entry = activeTileCache?.getEntry?.(tileKey) ?? activeTileCache?.cache?.get(tileKey);
+  const resolveCacheTileKey = (tile, tileKey) => {
+    if (!activeTileCache || !tile) return tileKey;
+    const tileCenter = {
+      x: (tile.x + 0.5) * tileSizeMeters,
+      z: (tile.y + 0.5) * tileSizeMeters
+    };
+    const cacheTile = activeTileCache.getTileCoords?.(tileCenter);
+    if (!cacheTile) return tileKey;
+    return activeTileCache.getTileKey?.(cacheTile) ?? `${cacheTile.x},${cacheTile.y}`;
+  };
+
+  const buildTileBlockers = (tile, tileKey) => {
+    const cacheTileKey = resolveCacheTileKey(tile, tileKey);
+    const entry = activeTileCache?.getEntry?.(cacheTileKey) ?? activeTileCache?.cache?.get(cacheTileKey);
     const geojson = entry?.geojson;
     if (!geojson) return null;
     const origin = getRenderOrigin();
@@ -618,7 +631,7 @@ export async function createNature({
     const rockPhysics = [];
     const tileClimbAreas = [];
     const tileApplePickups = [];
-    const tileBlockers = isNearDetail ? buildTileBlockers(tileKey) : null;
+    const tileBlockers = isNearDetail ? buildTileBlockers(tile, tileKey) : null;
     const tileDx = tile.x - centerTile.x;
     const tileDy = tile.y - centerTile.y;
     const tileDistance = Math.hypot(tileDx, tileDy);
@@ -910,7 +923,7 @@ export async function createNature({
 
   const setTileCache = (nextCache) => {
     activeTileCache = nextCache ?? null;
-    tileSizeMeters = activeTileCache?.tileSizeMeters ?? tileSizeMeters;
+    tileSizeMeters = TREE_TILE_SIZE_METERS;
     tileBuffer = getTreeTileBuffer(activeTileCache);
     lastPlayerTileKey = null;
     for (const entry of treeTiles.values()) {
