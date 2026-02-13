@@ -109,7 +109,11 @@ if ('serviceWorker' in navigator) {
 }
 
 const DEFAULT_CHARACTER_MODEL = "/models/base_character_2.fbx";
-const MAX_MONSTERS = 6;
+const MAX_MONSTERS_TOTAL = 24;
+const MAX_MONSTERS_ACTIVE = 8;
+const MONSTER_COMBAT_RADIUS = 26;
+const MONSTER_BACKGROUND_RADIUS = 70;
+const MONSTER_BACKGROUND_AI_INTERVAL_MS = 700;
 const MONSTER_MODELS = [
   "/models/zombie.fbx",
   "/models/zombie_boy.fbx",
@@ -688,7 +692,7 @@ async function main() {
   let animalManager = null;
   let animals = [];
   window.animals = animals;
-  const monsterSlotIds = Array.from({ length: MAX_MONSTERS }, (_, index) => `monster:${index}`);
+  const monsterSlotIds = Array.from({ length: MAX_MONSTERS_TOTAL }, (_, index) => `monster:${index}`);
   const spawningSlots = new Set();
   const respawnTimers = new Map();
   let monstersSeeded = false;
@@ -8409,24 +8413,69 @@ async function main() {
           friendlyAvoidanceZones.push(friendly.model.position.clone());
         });
 
+        let activeMonsterCount = 0;
         monsters.forEach(monster => {
           if (!monster || !monster.model) return;
 
           if (monster.isDead) return; // your respawn logic here...
+
+          let nearestPlayerDistance = Infinity;
+          for (const player of activePlayers) {
+            const dist = monster.model.position.distanceTo(player.model.position);
+            if (dist < nearestPlayerDistance) {
+              nearestPlayerDistance = dist;
+            }
+          }
+
+          const withinCombatRadius = nearestPlayerDistance <= MONSTER_COMBAT_RADIUS;
+          const withinBackgroundRadius = nearestPlayerDistance <= MONSTER_BACKGROUND_RADIUS;
+
+          let monsterTier = 'dormant';
+          if (withinCombatRadius && activeMonsterCount < MAX_MONSTERS_ACTIVE) {
+            monsterTier = 'active';
+            activeMonsterCount += 1;
+          } else if (withinBackgroundRadius) {
+            monsterTier = 'background';
+          }
+
+          monster.activityTier = monsterTier;
+          monster.model.visible = monsterTier !== 'dormant';
 
           const aiContext = {
             enableFriendlyDrift: friendlyDriftMonsterIds.has(monster.id),
             friendlyAvoidanceZones
           };
 
-          if (PERF.throttleAI) {
-            const last = monster.lastAIUpdateMs ?? 0;
-            if (aiNowMs - last > 150) {
-              monster.lastAIUpdateMs = aiNowMs;
-              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext); // <-- use mixerDelta
+          if (monsterTier === 'active') {
+            if (PERF.throttleAI) {
+              const last = monster.lastAIUpdateMs ?? 0;
+              if (aiNowMs - last > 150) {
+                monster.lastAIUpdateMs = aiNowMs;
+                monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+              }
+            } else {
+              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
             }
-          } else {
-            monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);   // <-- use mixerDelta
+            return;
+          }
+
+          const body = monster.body;
+          if (monsterTier === 'background') {
+            if (body) {
+              const vel = body.linvel();
+              body.setLinvel({ x: vel.x * 0.35, y: vel.y, z: vel.z * 0.35 }, true);
+            }
+            const lastBackgroundAi = monster.lastBackgroundAIUpdateMs ?? 0;
+            if (aiNowMs - lastBackgroundAi > MONSTER_BACKGROUND_AI_INTERVAL_MS) {
+              monster.lastBackgroundAIUpdateMs = aiNowMs;
+              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+            }
+            return;
+          }
+
+          if (body) {
+            const vel = body.linvel();
+            body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
           }
         });
       }
