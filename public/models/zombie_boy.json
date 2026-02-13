@@ -4,6 +4,20 @@
   "materialBrightness": 1.25,
   "lods": [
     {
+      "path": "/models/zombie.fbx",
+      "distance": 24,
+      "scaleMultiplier": 1.0,
+      "bindSkeleton": false
+    },
+    {
+      "path": "/models/golem.fbx",
+      "distance": 52,
+      "scaleMultiplier": 0.01,
+      "bindSkeleton": false
+    }
+  ]
+  "lods": [
+    {
       "path": "/models/zombie_boy.fbx",
       "distance": 22
     },

@@ -47,8 +47,10 @@ function normalizeLodConfigs(config) {
     .map((lod) => ({
       path: lod.path,
       distance: Number.isFinite(lod.distance) ? lod.distance : null,
+      scaleMultiplier: Number.isFinite(lod.scaleMultiplier) ? lod.scaleMultiplier : 1,
+      bindSkeleton: lod.bindSkeleton === true,
     }))
-    .filter((lod) => lod.distance !== null && lod.distance > 0)
+    .filter((lod) => lod.distance !== null && lod.distance > 0 && lod.scaleMultiplier > 0)
     .sort((a, b) => a.distance - b.distance)
     .filter((lod, index, lods) => index === 0 || lod.distance > lods[index - 1].distance);
 }
@@ -249,11 +251,15 @@ export function loadMonsterModel(modelPath, callback) {
                   }
                   const lodModel = lodFbx;
                   stripEmbeddedLights(lodModel);
-                  skinnedMeshes.push(...configureMeshCulling(lodModel));
+                  const lodSkinnedMeshes = configureMeshCulling(lodModel);
 
-                  lodModel.scale.set(scale, scale, scale);
+                  const lodScale = scale * lod.scaleMultiplier;
+                  lodModel.scale.set(lodScale, lodScale, lodScale);
                   applyMaterialBrightness(lodModel, materialBrightness);
-                  bindSkinnedMeshesToBaseSkeleton(model, lodModel);
+                  if (lod.bindSkeleton) {
+                    bindSkinnedMeshesToBaseSkeleton(model, lodModel);
+                    skinnedMeshes.push(...lodSkinnedMeshes);
+                  }
                   lodModel.updateMatrixWorld(true);
                   const lodBox = new THREE.Box3().setFromObject(lodModel);
                   const lodCenter = lodBox.getCenter(new THREE.Vector3());
