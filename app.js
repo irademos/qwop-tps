@@ -9,17 +9,18 @@ import { createFire } from './environment/fire.js';
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls/controls.js';
 import { getCookie, setCookie } from './utils.js';
-import { spawnProjectile, updateProjectiles, removeProjectileAt } from './items/projectiles.js';
-import { spawnArrowProjectile } from './items/arrow.js';
-import { updateMeleeAttacks } from './items/melee.js';
 import { initSpeechCommands } from './controls/speechCommands.js';
-import { AudioManager } from './audioManager.js';
-import { IceGun } from './items/iceGun.js';
-import { Bow } from './items/bow.js';
-import { Lantern } from './items/lantern.js';
-import { Torch, TORCH_PICKUP_LOCATION } from './items/torch.js';
-import { AutumnSword } from './items/autumnSword.js';
-import { Bomb } from './items/bomb.js';
+import { createAudioManager } from './features/audioFeature.js';
+import {
+  spawnProjectile,
+  updateProjectiles,
+  removeProjectileAt,
+  spawnArrowProjectile,
+  updateMeleeAttacks,
+  Torch,
+  TORCH_PICKUP_LOCATION,
+  loadSpecialWeapons
+} from './features/combatFeature.js';
 import { TreasureChest } from './items/treasure_chest.js';
 import { Bed } from './items/bed.js';
 import { CraftTable } from './items/craft_table.js';
@@ -49,14 +50,33 @@ import {
 import { createTileCache } from './tileCache.js';
 import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
-import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI } from './controls/homeStoragePanel.js';
-import { CRAFT_RECIPES, initCraftPanel, openCraftPanel, updateUI as updateCraftUI } from './controls/craftPanel.js';
-import { initMerchantPanel, updateMerchantUI } from './controls/merchantPanel.js';
-import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from './controls/settingsPanel.js';
-import { getMerchantFriendly, initMerchant, setMerchantHost, setMerchantRoom } from './characters/merchant.js';
-import { initCustomizeUI } from './controls/customize.js';
-import { initSpells } from './controls/spells.js';
-import { initMapView, setMapViewEnabled, update as updateMapView, zoomIn, zoomOut } from './environment/mapView.js';
+import {
+  initHomeStoragePanel,
+  openHomeStorage,
+  updateHomeStorageUI,
+  initSettingsPanel,
+  openSettings,
+  updateSettingsUI,
+  getCraftRecipes,
+  initCraftPanelFeature,
+  openCraftPanelFeature,
+  updateCraftUIFeature,
+  initMerchantPanelFeature,
+  updateMerchantUIFeature,
+  initMerchantFeature,
+  getMerchantFriendlyFeature,
+  setMerchantHostFeature,
+  setMerchantRoomFeature,
+  initCustomizeUIFeature,
+  initSpellsFeature
+} from './features/uiPanelsFeature.js';
+import {
+  initMapViewFeature,
+  setMapViewEnabledFeature,
+  updateMapViewFeature,
+  zoomInMapFeature,
+  zoomOutMapFeature
+} from './features/mapFeature.js';
 import {
   clearStoredPin,
   deleteProfileData,
@@ -67,9 +87,7 @@ import {
   saveCharacterModel,
   saveCustomization,
   saveSleepTimestamp,
-  saveStatsThrottled
-} from './playerProfile.js';
-import {
+  saveStatsThrottled,
   initMonsterPersistence,
   loadMonstersSnapshot,
   subscribeMonsterUpdates,
@@ -78,7 +96,7 @@ import {
   persistMonsterState,
   removeMonsterRecord,
   setMonsterPersistenceHost
-} from './monsterPersistence.js';
+} from './features/persistenceFeature.js';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -496,7 +514,7 @@ function createArcadeOverlay(startOverlay) {
 async function main() {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
-  const audioManager = new AudioManager();
+  const audioManager = createAudioManager();
   const startOverlay = document.getElementById('start-overlay');
   const arcadeOverlay = createArcadeOverlay(startOverlay);
   let hasStartedAudio = false;
@@ -1487,7 +1505,7 @@ async function main() {
     isHost = !!isCurrentHost;
     setMonsterPersistenceHost(isHost);
     friendlyNpcManager?.setHost(isHost);
-    setMerchantHost(isHost);
+    setMerchantHostFeature(isHost);
     logMonsterPersist('isHost', isHost);
     if (previousHostId && previousHostId === multiplayer.getId() && previousHostId !== newHostId) {
       const snapshot = serializeFullAuthoritativeStates();
@@ -1516,7 +1534,7 @@ async function main() {
         monsterSnapshotTimeout = null;
       }
       friendlyNpcManager?.onRoomReady({ roomId: null, isHost: multiplayer.isHost });
-      await setMerchantRoom({ roomId: null, isHost: multiplayer.isHost });
+      await setMerchantRoomFeature({ roomId: null, isHost: multiplayer.isHost });
       return;
     }
     initMonsterPersistence({
@@ -1539,7 +1557,7 @@ async function main() {
       monstersSeeded = true;
     }, MONSTER_SNAPSHOT_TIMEOUT_MS);
     friendlyNpcManager?.onRoomReady({ roomId, isHost: multiplayer.isHost });
-    await setMerchantRoom({ roomId, isHost: multiplayer.isHost });
+    await setMerchantRoomFeature({ roomId, isHost: multiplayer.isHost });
     try {
       const snapshot = await loadMonstersSnapshot();
       const snapshotEntries = Object.entries(snapshot || {});
@@ -1699,6 +1717,8 @@ async function main() {
 
   const droppedWeaponPickups = [];
   window.weaponPickups = droppedWeaponPickups;
+
+  const { IceGun, Bow, Lantern, AutumnSword, Bomb } = await loadSpecialWeapons();
 
   const updateWeaponMarker = (weapon, marker, rotationSpeed, offsetY = 1.2) => {
     if (!weapon?.mesh || !marker) return;
@@ -4138,7 +4158,8 @@ async function main() {
     swirl: null,
     craftTimeout: null
   };
-  const craftRecipeMap = new Map(CRAFT_RECIPES.map((recipe) => [recipe.id, recipe]));
+  const craftRecipes = await getCraftRecipes();
+  const craftRecipeMap = new Map(craftRecipes.map((recipe) => [recipe.id, recipe]));
 
   const getCraftMaterialKey = (itemId) => {
     if (itemId === WOOD_ITEM_ID) return 'wood';
@@ -5801,7 +5822,7 @@ async function main() {
   playerControls.getVoiceMicState = () => getVoiceMicState();
 
   window.playerControls = playerControls;
-  initSpells({
+  await initSpellsFeature({
     playerControls,
     getPlayerModel: () => playerModel,
     spellsAvailable,
@@ -5812,7 +5833,7 @@ async function main() {
   updateEnergyEffects();
 
 
-  initMapView({ camera, scene, player: playerModel });
+  await initMapViewFeature({ camera, scene, player: playerModel });
 
   const mapControls = document.createElement('div');
   mapControls.className = 'map-controls';
@@ -5832,17 +5853,17 @@ async function main() {
 
   mapToggleButton.addEventListener('click', () => {
     mapViewEnabled = !mapViewEnabled;
-    setMapViewEnabled(mapViewEnabled);
+    void setMapViewEnabledFeature(mapViewEnabled);
     updateControlAvailability();
     mapToggleButton.classList.toggle('active', mapViewEnabled);
     mapControls.classList.toggle('map-enabled', mapViewEnabled);
   });
 
   zoomInButton.addEventListener('click', () => {
-    zoomIn();
+    void zoomInMapFeature();
   });
   zoomOutButton.addEventListener('click', () => {
-    zoomOut();
+    void zoomOutMapFeature();
   });
 
   const TILE_SIZE_METERS = 300;
@@ -7443,7 +7464,7 @@ async function main() {
     playerModel = newModel;
     window.playerModel = playerModel;
     playerControls?.setPlayerModel(playerModel);
-    initMapView({ camera, scene, player: playerModel });
+    void initMapViewFeature({ camera, scene, player: playerModel });
   }
 
   const settingsBtn = document.getElementById('settings-button');
@@ -7624,7 +7645,7 @@ async function main() {
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
   window.openHomeStorage = openHomeStorage;
-  window.openCraftPanel = openCraftPanel;
+  window.openCraftPanel = () => void openCraftPanelFeature();
   window.craftTableActions = {
     placeMaterials: placeCraftMaterials,
     cancelCrafting,
@@ -7650,7 +7671,7 @@ async function main() {
     location: locationAdapter,
     player
   });
-  initCustomizeUI({
+  await initCustomizeUIFeature({
     getPlayerModel: () => playerModel,
     getPlayerControls: () => playerControls,
     initialCustomization: playerProfile?.customization,
@@ -7661,9 +7682,9 @@ async function main() {
     }
   });
   initHomeStoragePanel({ appState });
-  initMerchantPanel({ appState });
-  initCraftPanel({ appState });
-  void initMerchant({
+  await initMerchantPanelFeature({ appState });
+  await initCraftPanelFeature({ appState });
+  void initMerchantFeature({
     scene,
     attachPhysics: attachMonsterPhysics,
     getTerrainHeight,
@@ -7691,10 +7712,10 @@ async function main() {
       updateHomeStorageUI();
     }
     if (isOverlayVisible(merchantOverlay)) {
-      updateMerchantUI();
+      void updateMerchantUIFeature();
     }
     if (isOverlayVisible(craftOverlay)) {
-      updateCraftUI();
+      void updateCraftUIFeature();
     }
   }, 1000);
   updateAutoDisplayMode();
@@ -7884,14 +7905,14 @@ async function main() {
     }
     const homePosition = homeSystem?.getHomeLocalPosition?.();
     const homeEnterDistance = homeSystem?.getHomeEnterDistance?.();
-    const mapMerchantFriendly = getMerchantFriendly?.();
+    const mapMerchantFriendly = getMerchantFriendlyFeature();
     const mapItems = [
       ...ammoPickups,
       ...woodPickups
     ];
     const mapTreasureChests = treasureChest?.mesh?.visible ? [treasureChest.mesh] : [];
     const mapMerchants = mapMerchantFriendly?.model ? [mapMerchantFriendly.model] : [];
-    updateMapView(frameDelta, {
+    void updateMapViewFeature(frameDelta, {
       monsters: getDamageableCreatures(),
       friendlies: friendlyNpcManager?.friendlies,
       weapons: droppedWeaponPickups,
@@ -8331,7 +8352,7 @@ async function main() {
         });
 
         const friendlyAvoidanceZones = [];
-        const merchantFriendly = getMerchantFriendly?.();
+        const merchantFriendly = getMerchantFriendlyFeature();
         if (merchantFriendly?.model?.position) {
           friendlyAvoidanceZones.push(merchantFriendly.model.position.clone());
         }
@@ -8369,7 +8390,7 @@ async function main() {
 
     // Friendlies: same idea—do NOT pass 0 deltas
     friendlyNpcManager?.update({ delta: mixerDelta, isHost: isHostNow });
-    const merchantFriendly = getMerchantFriendly?.();
+    const merchantFriendly = getMerchantFriendlyFeature();
     if (merchantFriendly?.updateAI) {
       merchantFriendly.updateAI(mixerDelta, playerModel, otherPlayers);
     }
