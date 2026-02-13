@@ -3,16 +3,14 @@
   "yOffset": -1.04,
   "lods": [
     {
-      "path": "/models/zombie_boy.fbx",
-      "distance": 18,
-      "scaleMultiplier": 100.0,
-      "bindSkeleton": false
+      "path": "/models/golem.fbx",
+      "distance": 60,
+      "bindSkeleton": true
     },
     {
-      "path": "/models/zombie.fbx",
-      "distance": 42,
-      "scaleMultiplier": 100.0,
-      "bindSkeleton": false
+      "path": "/models/golem.fbx",
+      "distance": 120,
+      "bindSkeleton": true
     }
   ]
   "lods": [

@@ -115,16 +115,34 @@ function bindSkinnedMeshesToBaseSkeleton(baseModel, lodModel) {
     }
   });
 
-  if (baseBoneMap.size === 0) return;
+  if (baseBoneMap.size === 0) return false;
+
+  let hasSkinnedMesh = false;
+  let isCompatible = true;
 
   lodModel.traverse((obj) => {
     if (!obj.isSkinnedMesh || !obj.skeleton) return;
-    const bones = obj.skeleton.bones.map((bone) => baseBoneMap.get(bone.name) ?? bone);
+    hasSkinnedMesh = true;
+    for (const bone of obj.skeleton.bones) {
+      if (!baseBoneMap.has(bone.name)) {
+        isCompatible = false;
+        return;
+      }
+    }
+  });
+
+  if (!hasSkinnedMesh || !isCompatible) return false;
+
+  lodModel.traverse((obj) => {
+    if (!obj.isSkinnedMesh || !obj.skeleton) return;
+    const bones = obj.skeleton.bones.map((bone) => baseBoneMap.get(bone.name));
     const skeleton = new THREE.Skeleton(bones, obj.skeleton.boneInverses);
     skeleton.calculateInverses();
     obj.bind(skeleton, obj.bindMatrix);
     obj.skeleton = skeleton;
   });
+
+  return true;
 }
 
 function stripEmbeddedLights(model) {
@@ -256,10 +274,23 @@ export function loadMonsterModel(modelPath, callback) {
                   const lodScale = scale * lod.scaleMultiplier;
                   lodModel.scale.set(lodScale, lodScale, lodScale);
                   applyMaterialBrightness(lodModel, materialBrightness);
-                  if (lod.bindSkeleton) {
-                    bindSkinnedMeshesToBaseSkeleton(model, lodModel);
+
+                  const hasSkinnedLodMeshes = lodSkinnedMeshes.length > 0;
+                  if (hasSkinnedLodMeshes) {
+                    if (!lod.bindSkeleton) {
+                      console.warn('Skipping skinned monster LOD without skeleton binding:', lod.path);
+                      resolve();
+                      return;
+                    }
+                    const bindOk = bindSkinnedMeshesToBaseSkeleton(model, lodModel);
+                    if (!bindOk) {
+                      console.warn('Skipping incompatible monster LOD skeleton:', lod.path);
+                      resolve();
+                      return;
+                    }
                     skinnedMeshes.push(...lodSkinnedMeshes);
                   }
+
                   lodModel.updateMatrixWorld(true);
                   const lodBox = new THREE.Box3().setFromObject(lodModel);
                   const lodCenter = lodBox.getCenter(new THREE.Vector3());
