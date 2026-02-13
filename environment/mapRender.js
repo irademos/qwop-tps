@@ -21,8 +21,9 @@ const ROAD_WIDTHS = {
 };
 
 const DEFAULT_WIDTH = 1.0;
+const ROAD_WIDTH_SCALE = 10;
 const DEFAULT_COLOR = 0x2f2f2f;
-const DEFAULT_ELEVATION = 0.05;
+const DEFAULT_ELEVATION = 0.01;
 const METERS_PER_DEGREE_LAT = 111_132.92;
 
 function metersPerDegreeLon(latDeg) {
@@ -99,7 +100,8 @@ function makeFallbackMaterial(width, color) {
 
 function resolveLineWidth(highway) {
   if (typeof highway !== "string") return DEFAULT_WIDTH;
-  return ROAD_WIDTHS[highway] ?? DEFAULT_WIDTH;
+  const baseWidth = ROAD_WIDTHS[highway] ?? DEFAULT_WIDTH;
+  return baseWidth * ROAD_WIDTH_SCALE;
 }
 
 export function createMapRenderer({
