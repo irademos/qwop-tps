@@ -34,6 +34,7 @@ const TREE_SPAWN_CHANCE_NEAR = 0.6;
 const TREE_SPAWN_CHANCE_MID = 0.35;
 const TREE_SPAWN_CHANCE_FAR = 0.15;
 const TREE_TILE_BUFFER = 2;
+const NEAR_TILE_DISTANCE = 1;
 const ROCK_GRID_SPACING = 24;
 const ROCK_SPAWN_CHANCE = 0.28;
 const ROCK_MIN_RADIUS = 0.45;
@@ -87,6 +88,14 @@ function getTreeSpawnChanceForTileDistance(tileDistance) {
   const normalizedDistance = Math.min(tileDistance, TREE_TILE_BUFFER) / TREE_TILE_BUFFER;
   return TREE_SPAWN_CHANCE_MID
     + (TREE_SPAWN_CHANCE_FAR - TREE_SPAWN_CHANCE_MID) * normalizedDistance;
+}
+
+function getTileDetailLevel(tile, centerTile) {
+  if (!tile || !centerTile) return 'far';
+  const dx = tile.x - centerTile.x;
+  const dy = tile.y - centerTile.y;
+  const tileDistance = Math.hypot(dx, dy);
+  return tileDistance <= NEAR_TILE_DISTANCE ? 'near' : 'far';
 }
 
 function metersPerDegreeLon(latDeg) {
@@ -538,6 +547,8 @@ export async function createNature({
   const createTileTrees = (tile, centerTile = tile) => {
     const tileKey = getTileKey(tile);
     if (treeTiles.has(tileKey)) return treeTiles.get(tileKey);
+    const detailLevel = getTileDetailLevel(tile, centerTile);
+    const isNearDetail = detailLevel === 'near';
 
     const tileGroup = new THREE.Group();
     tileGroup.name = `nature-tile-${tileKey}`;
@@ -553,7 +564,7 @@ export async function createNature({
     const rockPhysics = [];
     const tileClimbAreas = [];
     const tileApplePickups = [];
-    const tileBlockers = buildTileBlockers(tileKey);
+    const tileBlockers = isNearDetail ? buildTileBlockers(tileKey) : null;
     const tileDx = tile.x - centerTile.x;
     const tileDy = tile.y - centerTile.y;
     const tileDistance = Math.hypot(tileDx, tileDy);
@@ -585,50 +596,52 @@ export async function createNature({
         const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
         tree.position.set(worldX, terrainY, worldZ);
         tree.userData.tileKey = tileKey;
-        tree.updateWorldMatrix(true, true);
-        tempBox.setFromObject(tree);
-        if (Number.isFinite(tempBox.min.x)) {
-          tempBox.getCenter(tempCenter);
-          tempWorldToLocal.copy(tempCenter);
-          tree.userData.boundsCenterLocal = tree.worldToLocal(tempWorldToLocal);
-          tempBox.getSize(tempSize);
-          tree.userData.boundsRadius = Math.max(tempSize.x, tempSize.z) * 0.5;
+        if (isNearDetail) {
+          tree.updateWorldMatrix(true, true);
+          tempBox.setFromObject(tree);
+          if (Number.isFinite(tempBox.min.x)) {
+            tempBox.getCenter(tempCenter);
+            tempWorldToLocal.copy(tempCenter);
+            tree.userData.boundsCenterLocal = tree.worldToLocal(tempWorldToLocal);
+            tempBox.getSize(tempSize);
+            tree.userData.boundsRadius = Math.max(tempSize.x, tempSize.z) * 0.5;
+          }
         }
         if (tileBlockers && isTreeBlocked(tree, tileBlockers)) {
           continue;
         }
         tileGroup.add(tree);
         trees.push(tree);
-        const areas = buildTreeClimbAreas(tree);
-        tree.userData.climbAreas = areas;
-        tileClimbAreas.push(...areas);
-        if (typeof spawnApplePickup === 'function') {
-          tree.updateWorldMatrix(true, true);
-          tempBox.setFromObject(tree);
-          if (Number.isFinite(tempBox.min.y)) {
-            tempBox.getSize(tempSize);
-            tempBox.getCenter(tempCenter);
-            const height = tempSize.y;
-            if (height > 0) {
-              const radius = Math.max(0.4, Math.min(tempSize.x, tempSize.z) * 0.35);
-              for (let i = 0; i < 2; i += 1) {
-                const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
-                const distance = radius * (0.1 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.2);
-                const heightFactor = 0.6 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.35;
-                tempApplePosition.set(
-                  tempCenter.x + Math.cos(angle) * distance,
-                  tempBox.min.y + height * heightFactor,
-                  tempCenter.z + Math.sin(angle) * distance
-                );
-                const localApplePosition = tree.worldToLocal(tempWorldToLocal.copy(tempApplePosition));
-                const pickup = spawnApplePickup(localApplePosition, {
-                  applyTerrainHeight: false,
-                  lift: 0,
-                  parent: tree
-                });
-                if (pickup) {
-                  tileApplePickups.push(pickup);
-                  tree.userData.applePickups.push(pickup);
+        if (isNearDetail) {
+          const areas = buildTreeClimbAreas(tree);
+          tree.userData.climbAreas = areas;
+          tileClimbAreas.push(...areas);
+          if (typeof spawnApplePickup === 'function') {
+            if (Number.isFinite(tempBox.min.y)) {
+              tempBox.getSize(tempSize);
+              tempBox.getCenter(tempCenter);
+              const height = tempSize.y;
+              if (height > 0) {
+                const radius = Math.max(0.4, Math.min(tempSize.x, tempSize.z) * 0.35);
+                for (let i = 0; i < 2; i += 1) {
+                  const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
+                  const distance = radius * (0.1 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.2);
+                  const heightFactor = 0.6 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.35;
+                  tempApplePosition.set(
+                    tempCenter.x + Math.cos(angle) * distance,
+                    tempBox.min.y + height * heightFactor,
+                    tempCenter.z + Math.sin(angle) * distance
+                  );
+                  const localApplePosition = tree.worldToLocal(tempWorldToLocal.copy(tempApplePosition));
+                  const pickup = spawnApplePickup(localApplePosition, {
+                    applyTerrainHeight: false,
+                    lift: 0,
+                    parent: tree
+                  });
+                  if (pickup) {
+                    tileApplePickups.push(pickup);
+                    tree.userData.applePickups.push(pickup);
+                  }
                 }
               }
             }
@@ -685,7 +698,7 @@ export async function createNature({
       }
     }
 
-    const entry = { tile, tileKey, group: tileGroup, trees, rocks, rockPhysics };
+    const entry = { tile, tileKey, detailLevel, group: tileGroup, trees, rocks, rockPhysics };
     treeTiles.set(tileKey, entry);
     climbableAreasByTile.set(tileKey, tileClimbAreas);
     applePickupsByTile.set(tileKey, tileApplePickups);
@@ -729,6 +742,16 @@ export async function createNature({
         const nextTile = { x: tile.x + dx, y: tile.y + dy };
         const nextKey = getTileKey(nextTile);
         neededKeys.add(nextKey);
+        const detailLevel = getTileDetailLevel(nextTile, tile);
+        const existingEntry = treeTiles.get(nextKey);
+        if (existingEntry) {
+          if (existingEntry.detailLevel === 'far' && detailLevel === 'near') {
+            refreshTile(nextKey, tile);
+            continue;
+          }
+          existingEntry.detailLevel = detailLevel;
+          continue;
+        }
         createTileTrees(nextTile, tile);
       }
     }
@@ -740,7 +763,7 @@ export async function createNature({
     refreshClimbableAreas();
   };
 
-  const refreshTile = (tileKey) => {
+  const refreshTile = (tileKey, centerTileOverride = null) => {
     if (!tileKey) return;
     const entry = treeTiles.get(tileKey);
     const tile = entry?.tile ?? null;
@@ -748,14 +771,14 @@ export async function createNature({
       removeTileEntry(tileKey);
     }
     if (tile) {
-      const centerTile = getTileFromKey(lastPlayerTileKey) ?? tile;
+      const centerTile = centerTileOverride ?? getTileFromKey(lastPlayerTileKey) ?? tile;
       createTileTrees(tile, centerTile);
       refreshClimbableAreas();
       return;
     }
     const parsedTile = getTileFromKey(tileKey);
     if (!parsedTile) return;
-    const centerTile = getTileFromKey(lastPlayerTileKey) ?? parsedTile;
+    const centerTile = centerTileOverride ?? getTileFromKey(lastPlayerTileKey) ?? parsedTile;
     createTileTrees(parsedTile, centerTile);
     refreshClimbableAreas();
   };
