@@ -72,6 +72,7 @@ async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight }) {
   });
 
   const scale = Number.isFinite(template.config.scale) ? template.config.scale : 1;
+  console.log(`Spawning animal of type "${typeName}" with scale ${scale}.`);
   modelRoot.scale.setScalar(scale);
 
   const box = new THREE.Box3().setFromObject(modelRoot);

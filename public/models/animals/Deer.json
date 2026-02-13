@@ -1,7 +1,7 @@
 {
   "name": "Deer",
   "behavior": "runAway",
-  "scale": 0.85,
+  "scale": 1.0,
   "health": 8,
   "fleeDistance": 9,
   "walkSpeed": 1.3,
