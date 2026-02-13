@@ -271,6 +271,17 @@ export async function createNature({
   const tempWorldPos = new THREE.Vector3();
   const tempTreeCenter = new THREE.Vector3();
   const tempTreeRight = new THREE.Vector3();
+  const tempEntryCenter = new THREE.Vector3();
+  const tempAreaCenter = new THREE.Vector3();
+  const tempWorldToLocal = new THREE.Vector3();
+  const tempApplePosition = new THREE.Vector3();
+  const tempAxisY = new THREE.Vector3(0, 1, 0);
+  const climbDirections = [
+    new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(-1, 0, 0),
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(0, 0, -1)
+  ];
 
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
@@ -374,49 +385,42 @@ export async function createNature({
     const minY = tempBox.min.y + scaleValue(o.minYPad ?? 0);
     const maxY = tempBox.max.y - scaleValue(o.maxYPad ?? 0);
     const halfHeight = (maxY - minY) * 0.5;
-    const center = tempCenter.clone();
-    center.y = (minY + maxY) * 0.5;
+    const centerX = tempCenter.x;
+    const centerY = (minY + maxY) * 0.5;
+    const centerZ = tempCenter.z;
 
     const halfWidth = scaleValue(o.halfWidth ?? TREE_CLIMB_HALF_WIDTH);
     const halfDepth = scaleValue(o.halfDepth ?? TREE_CLIMB_HALF_DEPTH);
     const entryRadius = scaleValue(o.entryRadius ?? TREE_CLIMB_ENTRY_RADIUS);
     const entryHeight = scaleValue(o.entryHeight ?? TREE_CLIMB_ENTRY_HEIGHT);
 
-    const entryCenter = tempCenter.clone();
-    entryCenter.y = minY + scaleValue(0.2);
+    tempEntryCenter.set(tempCenter.x, minY + scaleValue(0.2), tempCenter.z);
 
     const shift = scaleValue(TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0);
 
     // tree's local +X rotated by tree.rotation.y
-    const rightWorld = new THREE.Vector3(1, 0, 0).applyAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      tree.rotation.y
-    );
-    center.addScaledVector(rightWorld, shift);
-    entryCenter.addScaledVector(rightWorld, shift);
+    tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
+    const shiftedCenterX = centerX + tempTreeRight.x * shift;
+    const shiftedCenterZ = centerZ + tempTreeRight.z * shift;
+    tempEntryCenter.addScaledVector(tempTreeRight, shift);
 
     const areas = [];
-    const directions = [
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0, 0, -1)
-    ];
-    for (const normal of directions) {
+    for (const normal of climbDirections) {
       const rotationY = Math.atan2(normal.x, normal.z);
-      const areaCenter = center.clone().addScaledVector(normal, halfDepth + scaleValue(0.05));
+      tempAreaCenter.set(shiftedCenterX, centerY, shiftedCenterZ)
+        .addScaledVector(normal, halfDepth + scaleValue(0.05));
       areas.push({
-        center: areaCenter,
+        center: new THREE.Vector3(tempAreaCenter.x, tempAreaCenter.y, tempAreaCenter.z),
         rotationY,
         halfWidth,
         halfDepth,
         halfHeight,
         minY,
         maxY,
-        entryCenter: entryCenter.clone(),
+        entryCenter: new THREE.Vector3(tempEntryCenter.x, tempEntryCenter.y, tempEntryCenter.z),
         entryRadius,
         entryHeight,
-        normal: normal.clone()
+        normal: new THREE.Vector3(normal.x, normal.y, normal.z)
       });
     }
     return areas;
@@ -433,7 +437,7 @@ export async function createNature({
     const shift = TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
     if (shift) {
       const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
-      tempTreeRight.set(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), tree.rotation.y);
+      tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
       tempTreeCenter.addScaledVector(tempTreeRight, shift * scaleFactor);
     }
     return tempTreeCenter;
@@ -559,7 +563,8 @@ export async function createNature({
         tempBox.setFromObject(tree);
         if (Number.isFinite(tempBox.min.x)) {
           tempBox.getCenter(tempCenter);
-          tree.userData.boundsCenterLocal = tree.worldToLocal(tempCenter.clone());
+          tempWorldToLocal.copy(tempCenter);
+          tree.userData.boundsCenterLocal = tree.worldToLocal(tempWorldToLocal);
           tempBox.getSize(tempSize);
           tree.userData.boundsRadius = Math.max(tempSize.x, tempSize.z) * 0.5;
         }
@@ -584,12 +589,12 @@ export async function createNature({
                 const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
                 const distance = radius * (0.1 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.2);
                 const heightFactor = 0.6 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.35;
-                const applePosition = new THREE.Vector3(
+                tempApplePosition.set(
                   tempCenter.x + Math.cos(angle) * distance,
                   tempBox.min.y + height * heightFactor,
                   tempCenter.z + Math.sin(angle) * distance
                 );
-                const localApplePosition = tree.worldToLocal(applePosition.clone());
+                const localApplePosition = tree.worldToLocal(tempWorldToLocal.copy(tempApplePosition));
                 const pickup = spawnApplePickup(localApplePosition, {
                   applyTerrainHeight: false,
                   lift: 0,
