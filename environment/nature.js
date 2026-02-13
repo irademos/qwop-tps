@@ -38,7 +38,7 @@ const TREE_SPAWN_CHANCE_FAR = 0.15;
 const TREE_TILE_BUFFER = 2;
 // Keep high-detail, interactable GLB trees only on the player's current tile.
 // Neighboring tiles and beyond should use primitive impostors.
-const NEAR_TILE_DISTANCE = 0;
+const NEAR_TILE_DISTANCE = 1;
 const ROCK_GRID_SPACING = 24;
 const ROCK_SPAWN_CHANCE = 0.28;
 const ROCK_MIN_RADIUS = 0.45;
@@ -322,7 +322,7 @@ export async function createNature({
   ];
 
   let activeTileCache = tileCache ?? null;
-  let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
+  let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 20;
   const getTreeTileBuffer = (cache) => {
     const evictRadius = cache?.evictRadiusTiles ?? TREE_TILE_BUFFER;
     // Keep at least one ring of neighboring tiles populated around the player.
@@ -575,7 +575,7 @@ export async function createNature({
 
     impostor.position.set(worldX, terrainY, worldZ);
     impostor.rotation.y = rotation;
-    impostor.scale.setScalar(Math.max(0.25, scale / TREE_SCALE_REFERENCE));
+    impostor.scale.setScalar(Math.max(0.25, scale * 20.0 / TREE_SCALE_REFERENCE));
     impostor.userData = {
       tileKey,
       interactable: false,
@@ -805,7 +805,7 @@ export async function createNature({
         const detailLevel = getTileDetailLevel(nextTile, tile);
         const existingEntry = treeTiles.get(nextKey);
         if (existingEntry) {
-          if (existingEntry.detailLevel !== detailLevel) {
+          if (existingEntry.detailLevel === 'far' && detailLevel === 'near') {
             refreshTile(nextKey, tile);
             continue;
           }
