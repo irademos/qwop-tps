@@ -100,6 +100,35 @@ const MERCHANT_DIALOGUE = {
 };
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 
+
+let nippleCtorPromise = null;
+
+function loadNippleJs() {
+  if (globalThis.nipplejs?.create) {
+    return Promise.resolve(globalThis.nipplejs);
+  }
+  if (nippleCtorPromise) {
+    return nippleCtorPromise;
+  }
+
+  nippleCtorPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/nipplejs@0.10.1/dist/nipplejs.min.js';
+    script.defer = true;
+    script.onload = () => {
+      if (globalThis.nipplejs?.create) {
+        resolve(globalThis.nipplejs);
+      } else {
+        reject(new Error('nipplejs loaded but API was unavailable.'));
+      }
+    };
+    script.onerror = () => reject(new Error('Failed to load nipplejs from CDN.'));
+    document.head.appendChild(script);
+  });
+
+  return nippleCtorPromise;
+}
+
 export class PlayerControls {
   constructor({
     scene,
@@ -385,7 +414,9 @@ export class PlayerControls {
   initializeControls() {
     this.initializeActionButtons();
     if (this.isMobile) {
-      this.initializeMobileControls();
+      this.initializeMobileControls().catch((error) => {
+        console.warn('Mobile joystick setup failed:', error);
+      });
     } else {
       // this.setupPointerLock(); // leave pointer lock in PlayerControls
     }
@@ -397,7 +428,7 @@ export class PlayerControls {
     }
   }
 
-  initializeMobileControls() {
+  async initializeMobileControls() {
     // Add joystick container for mobile
     const joystickContainer = document.getElementById('joystick-container');
     if (!joystickContainer) {
@@ -443,6 +474,8 @@ export class PlayerControls {
     });
 
     // Initialize joystick with improved behavior
+    const nipplejs = await loadNippleJs();
+
     this.joystick = nipplejs.create({
       zone: document.getElementById('joystick-container'),
       mode: 'static',

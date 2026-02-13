@@ -25,6 +25,35 @@ const VALID_MESSAGE_TYPES = new Set([
 const MAX_PENDING_PAYLOADS = 75;
 const COALESCED_PAYLOAD_TYPES = new Set(['entitySnapshot', 'entityStates']);
 
+
+let peerCtorPromise = null;
+
+function loadPeerCtor() {
+  if (typeof globalThis.Peer === 'function') {
+    return Promise.resolve(globalThis.Peer);
+  }
+  if (peerCtorPromise) {
+    return peerCtorPromise;
+  }
+
+  peerCtorPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js';
+    script.defer = true;
+    script.onload = () => {
+      if (typeof globalThis.Peer === 'function') {
+        resolve(globalThis.Peer);
+      } else {
+        reject(new Error('PeerJS loaded but Peer constructor was not found.'));
+      }
+    };
+    script.onerror = () => reject(new Error('Failed to load PeerJS from CDN.'));
+    document.head.appendChild(script);
+  });
+
+  return peerCtorPromise;
+}
+
 export class Multiplayer {
   constructor(playerName, onPeerData) {
     this.connections = {};
@@ -81,7 +110,9 @@ export class Multiplayer {
       clearTimeout(timeoutId);
     }
   
-    this.peer = new Peer({
+    const PeerCtor = await loadPeerCtor();
+
+    this.peer = new PeerCtor({
       config: { iceServers }
     });
 
