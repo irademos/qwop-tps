@@ -285,8 +285,13 @@ export async function createNature({
 
   let activeTileCache = tileCache ?? null;
   let tileSizeMeters = activeTileCache?.tileSizeMeters ?? 300;
-  const getTreeTileBuffer = (cache) =>
-    Math.max(0, Math.floor((cache?.evictRadiusTiles ?? TREE_TILE_BUFFER) / 3));
+  const getTreeTileBuffer = (cache) => {
+    const evictRadius = cache?.evictRadiusTiles ?? TREE_TILE_BUFFER;
+    // Keep at least one ring of neighboring tiles populated around the player.
+    // This avoids trees/rocks popping right at tile boundaries while still
+    // respecting larger cache radii when configured.
+    return Math.max(1, Math.ceil(evictRadius / 2));
+  };
   let tileBuffer = getTreeTileBuffer(activeTileCache);
 
   const getTileKey = (tile) => `${tile.x},${tile.y}`;
