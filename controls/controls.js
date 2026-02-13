@@ -288,6 +288,7 @@ export class PlayerControls {
     this.engagedDirection = null;
     this.freeYaw = null;
     this.freePitch = null;
+    this.firstPersonEnabled = false;
 
     if (this.interactionPromptEl) {
       const activateInteraction = (event) => {
@@ -2158,7 +2159,9 @@ export class PlayerControls {
       offset = this.cameraOffset;
     }
     let desiredCameraPosition;
-    if (this.isEngaged && this.engagedDirection) {
+    if (this.firstPersonEnabled) {
+      desiredCameraPosition = orbitCenter.clone().add(new THREE.Vector3(0, 0.62, 0));
+    } else if (this.isEngaged && this.engagedDirection) {
       const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
       this.yaw = engagedYaw;
       this.pitch = 0;
@@ -2645,6 +2648,13 @@ export class PlayerControls {
 
   isProjectileWeapon(weapon) {
     return !!weapon && (weapon.type === 'gun' || weapon.type === 'bow' || weapon.type === 'bomb');
+  }
+
+  setFirstPersonEnabled(enabled) {
+    this.firstPersonEnabled = Boolean(enabled);
+    if (this.firstPersonEnabled) {
+      this.setAiming(false);
+    }
   }
 
   setAiming(active) {
