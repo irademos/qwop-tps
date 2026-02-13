@@ -150,6 +150,8 @@ const REMOTE_ANIM_FPS = 8;
 const REMOTE_ANIM_INTERVAL = 1 / REMOTE_ANIM_FPS;
 const MONSTER_ANIM_FPS = 8;
 const MONSTER_ANIM_INTERVAL = 1 / MONSTER_ANIM_FPS;
+const MONSTER_ANIM_MID_FPS = 4;
+const MONSTER_ANIM_MID_INTERVAL_MS = 1000 / MONSTER_ANIM_MID_FPS;
 const MONSTER_SWORD_MODEL_URL = '/assets/props/autumn_sword.glb';
 const MONSTER_SWORD_SCALE = 0.16;
 const MONSTER_SWORD_HOLD_OFFSET = new THREE.Vector3(-0.05, 0.15, 0.08);
@@ -686,6 +688,8 @@ async function main() {
   let lastPresenceSweep = 0;
   let remoteAnimAccumulator = 0;
   let monsterAnimAccumulator = 0;
+  const monsterAnimFrustum = new THREE.Frustum();
+  const monsterAnimProjMatrix = new THREE.Matrix4();
 
   let monsters = [];
   window.monsters = monsters;
@@ -2605,6 +2609,7 @@ async function main() {
         monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         monster.lastDirectionChange = Date.now();
         monster.lastAIUpdateMs = 0;
+        monster.lastAnimUpdateMs = 0;
         const level = Number.isFinite(options.level) ? options.level : getRandomMonsterLevel();
         monster.setLevel(level, { preserveHealth: false });
         monster.resetHealth();
@@ -8351,8 +8356,41 @@ async function main() {
       p.model?.userData?.mixer?.update(mixerDelta);
     });
 
+    camera.updateMatrixWorld();
+    monsterAnimProjMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    monsterAnimFrustum.setFromProjectionMatrix(monsterAnimProjMatrix);
+
     for (const monster of monsters) {
-      monster?.model?.userData?.mixer?.update(mixerDelta);
+      const model = monster?.model;
+      const mixer = model?.userData?.mixer;
+      if (!mixer || !model) continue;
+
+      const mode = model.userData?.mode;
+      const distanceToCamera = camera.position.distanceTo(model.position);
+      const isVisible = monsterAnimFrustum.containsPoint(model.position);
+      const isActiveOrNear = mode !== 'friendly' || distanceToCamera <= MONSTER_COMBAT_RADIUS;
+
+      if (isActiveOrNear) {
+        mixer.update(mixerDelta);
+        monster.lastAnimUpdateMs = now;
+        continue;
+      }
+
+      const isMidDistance = distanceToCamera <= MONSTER_BACKGROUND_RADIUS && isVisible;
+      if (!isMidDistance) {
+        continue;
+      }
+
+      const lastAnimUpdateMs = Number.isFinite(monster.lastAnimUpdateMs) ? monster.lastAnimUpdateMs : 0;
+      if (lastAnimUpdateMs > 0 && now - lastAnimUpdateMs < MONSTER_ANIM_MID_INTERVAL_MS) {
+        continue;
+      }
+
+      const deltaSeconds = lastAnimUpdateMs > 0
+        ? (now - lastAnimUpdateMs) / 1000
+        : mixerDelta;
+      mixer.update(deltaSeconds);
+      monster.lastAnimUpdateMs = now;
     }
     for (const animal of animals) {
       animal?.model?.userData?.mixer?.update(mixerDelta);
