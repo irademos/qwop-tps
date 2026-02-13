@@ -1,4 +1,14 @@
 {
   "scale": 1.0,
-  "yOffset": -1.04
+  "yOffset": -1.04,
+  "lods": [
+    {
+      "path": "/models/zombie_green.fbx",
+      "distance": 16
+    },
+    {
+      "path": "/models/zombie_boy.fbx",
+      "distance": 34
+    }
+  ]
 }

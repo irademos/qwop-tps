@@ -1,5 +1,15 @@
 {
   "scale": 0.01,
   "yOffset": 0.55,
-  "materialBrightness": 1.25
+  "materialBrightness": 1.25,
+  "lods": [
+    {
+      "path": "/models/zombie_green.fbx",
+      "distance": 18
+    },
+    {
+      "path": "/models/golem.fbx",
+      "distance": 36
+    }
+  ]
 }
