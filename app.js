@@ -626,7 +626,7 @@ async function main() {
 
   let multiplayer = null;
   let isHost = false;
-  let playerControls = null;
+  var playerControls = null;
   let friendlyNpcManager = null;
   let homeSystem = null;
   let scene = null;
