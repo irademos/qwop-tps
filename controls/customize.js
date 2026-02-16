@@ -23,9 +23,7 @@ const SKIN_COLORS = [
 ];
 
 const SHIRT_ITEMS = [
-  { id: 'vest', label: 'Vest', model: '/models/clothes/vest.glb', offsets: '/models/clothes/vest.json' },
-  { id: 'vest_armor', label: 'Vest Armor', model: '/models/clothes/vest_armor.glb', offsets: '/models/clothes/vest_armor.json' },
-  { id: 'vest_rainbow', label: 'Vest Rainbow', model: '/models/clothes/vest_rainbow.glb', offsets: '/models/clothes/vest_rainbow.json' }
+  { id: 'vest_armor', label: 'Vest Armor', model: '/models/clothes/vest_armor.glb', offsets: '/models/clothes/vest_armor.json' }
 ];
 const HAT_ITEMS = [];
 
