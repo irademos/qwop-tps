@@ -109,7 +109,11 @@ if ('serviceWorker' in navigator) {
 }
 
 const DEFAULT_CHARACTER_MODEL = "/models/base_character_2.fbx";
-const MAX_MONSTERS = 6;
+const MAX_MONSTERS_TOTAL = 24;
+const MAX_MONSTERS_ACTIVE = 8;
+const MONSTER_COMBAT_RADIUS = 26;
+const MONSTER_BACKGROUND_RADIUS = 70;
+const MONSTER_BACKGROUND_AI_INTERVAL_MS = 700;
 const MONSTER_MODELS = [
   "/models/zombie.fbx",
   "/models/zombie_boy.fbx",
@@ -146,6 +150,8 @@ const REMOTE_ANIM_FPS = 8;
 const REMOTE_ANIM_INTERVAL = 1 / REMOTE_ANIM_FPS;
 const MONSTER_ANIM_FPS = 8;
 const MONSTER_ANIM_INTERVAL = 1 / MONSTER_ANIM_FPS;
+const MONSTER_ANIM_MID_FPS = 4;
+const MONSTER_ANIM_MID_INTERVAL_MS = 1000 / MONSTER_ANIM_MID_FPS;
 const MONSTER_SWORD_MODEL_URL = '/assets/props/autumn_sword.glb';
 const MONSTER_SWORD_SCALE = 0.16;
 const MONSTER_SWORD_HOLD_OFFSET = new THREE.Vector3(-0.05, 0.15, 0.08);
@@ -682,13 +688,15 @@ async function main() {
   let lastPresenceSweep = 0;
   let remoteAnimAccumulator = 0;
   let monsterAnimAccumulator = 0;
+  const monsterAnimFrustum = new THREE.Frustum();
+  const monsterAnimProjMatrix = new THREE.Matrix4();
 
   let monsters = [];
   window.monsters = monsters;
   let animalManager = null;
   let animals = [];
   window.animals = animals;
-  const monsterSlotIds = Array.from({ length: MAX_MONSTERS }, (_, index) => `monster:${index}`);
+  const monsterSlotIds = Array.from({ length: MAX_MONSTERS_TOTAL }, (_, index) => `monster:${index}`);
   const spawningSlots = new Set();
   const respawnTimers = new Map();
   let monstersSeeded = false;
@@ -2014,10 +2022,22 @@ async function main() {
 
   window.weapons = { iceGun, bow, bomb, autumnSword };
 
-  function attachMonsterPhysics(monster) {
-    const model = monster.model;
+  function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
+    const model = monster?.model;
+    if (!model || !rapierWorld) return null;
+    const existingBody = monster.body;
+    if (existingBody && rapierWorld.getRigidBody(existingBody.handle)) {
+      rbToMesh.delete(existingBody);
+      rapierWorld.removeRigidBody(existingBody);
+      model.userData.rb = null;
+    }
+
     const scale = monster.sizeScale || 1;
-    const rbDesc = RAPIER.RigidBodyDesc.dynamic()
+    const isKinematic = mode === 'kinematic';
+    const rbDesc = isKinematic
+      ? RAPIER.RigidBodyDesc.kinematicPositionBased()
+      : RAPIER.RigidBodyDesc.dynamic();
+    rbDesc
       .setTranslation(model.position.x, model.position.y, model.position.z)
       .setLinearDamping(0.5)
       .setAngularDamping(0.5);
@@ -2027,6 +2047,44 @@ async function main() {
     rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
     rbToMesh.set(rb, model);
+    if (monster.syncBodyFromTransform) {
+      monster.syncBodyFromTransform({ zeroVelocity: true });
+    }
+    if (monster.setBackgroundMode) {
+      monster.setBackgroundMode(isKinematic);
+    }
+    return rb;
+  }
+
+  function detachMonsterPhysics(monster) {
+    if (!monster?.model) return;
+    const body = monster.body;
+    if (body && rapierWorld?.getRigidBody(body.handle)) {
+      rbToMesh.delete(body);
+      rapierWorld.removeRigidBody(body);
+    }
+    monster.model.userData.rb = null;
+    monster.setBackgroundMode?.(true);
+  }
+
+  function setMonsterPhysicsMode(monster, mode = 'dynamic') {
+    if (!monster?.model || !rapierWorld) return;
+    const body = monster.body;
+    const wantsDynamic = mode === 'dynamic';
+    const wantsKinematic = mode === 'kinematic';
+    const isDynamic = !!body?.isDynamic?.();
+    const isKinematic = !!body?.isKinematic?.();
+    if (wantsDynamic && isDynamic) {
+      monster.setBackgroundMode?.(false);
+      monster.syncBodyFromTransform?.({ zeroVelocity: false });
+      return;
+    }
+    if (wantsKinematic && isKinematic) {
+      monster.setBackgroundMode?.(true);
+      monster.syncBodyFromTransform?.({ zeroVelocity: true });
+      return;
+    }
+    attachMonsterPhysics(monster, { mode });
   }
 
   const detachNpcPhysics = (npc) => {
@@ -2039,6 +2097,7 @@ async function main() {
 
   window.attachMonsterPhysics = attachMonsterPhysics;
   window.detachNpcPhysics = detachNpcPhysics;
+  window.setMonsterPhysicsMode = setMonsterPhysicsMode;
 
 
 
@@ -2340,7 +2399,7 @@ async function main() {
     playerModel,
     otherPlayers,
     attachPhysics: attachMonsterPhysics,
-    detachPhysics: detachNpcPhysics,
+    detachPhysics: detachMonsterPhysics,
     getTerrainHeight,
     liftPositionToBuildingTop,
     isHost,
@@ -2601,6 +2660,7 @@ async function main() {
         monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         monster.lastDirectionChange = Date.now();
         monster.lastAIUpdateMs = 0;
+        monster.lastAnimUpdateMs = 0;
         const level = Number.isFinite(options.level) ? options.level : getRandomMonsterLevel();
         monster.setLevel(level, { preserveHealth: false });
         monster.resetHealth();
@@ -5063,9 +5123,27 @@ async function main() {
     }
   }
 
-  function spawnBombProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
-    if (!bomb?.mesh) return;
-    const createMesh = () => {
+  const createMeshPool = ({ create }) => {
+    const available = [];
+    return {
+      acquire() {
+        const mesh = available.pop();
+        if (mesh) {
+          mesh.visible = true;
+          return mesh;
+        }
+        return create();
+      },
+      release(mesh) {
+        if (!mesh) return;
+        mesh.visible = false;
+        available.push(mesh);
+      }
+    };
+  };
+
+  const bombProjectileMeshPool = createMeshPool({
+    create: () => {
       const clone = bomb.mesh.clone(true);
       clone.traverse(child => {
         if (!child.isMesh) return;
@@ -5074,15 +5152,20 @@ async function main() {
       });
       clone.visible = true;
       return clone;
-    };
+    }
+  });
+
+  function spawnBombProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    if (!bomb?.mesh) return;
 
     // const lobDirection = direction.clone().multiplyScalar(-1).normalize();
-    const lobDirection = direction.clone().normalize();
-    lobDirection.y += BOMB_THROW_UPWARD_BIAS;
-    lobDirection.normalize();
+    tempLobDirection.copy(direction).normalize();
+    tempLobDirection.y += BOMB_THROW_UPWARD_BIAS;
+    tempLobDirection.normalize();
 
-    spawnProjectile(scene, list, position, lobDirection, shooterId, {
-      createMesh,
+    spawnProjectile(scene, list, position, tempLobDirection, shooterId, {
+      createMesh: () => bombProjectileMeshPool.acquire(),
+      releaseMesh: (mesh) => bombProjectileMeshPool.release(mesh),
       speed: BOMB_THROW_SPEED,
       lifetime: BOMB_THROW_LIFETIME,
       colliderDesc: RAPIER.ColliderDesc.ball(0.18).setRestitution(0.3).setFriction(0.8),
@@ -5105,49 +5188,102 @@ async function main() {
   const ICE_MIST_PARTICLE_COUNT = 7;
   const ICE_MIST_FREEZE_MS = 5000;
   const ICE_MIST_RADIUS = 0.9;
+  const tempLobDirection = new THREE.Vector3();
+  const tempMistDirection = new THREE.Vector3();
+  const tempMistMoveStep = new THREE.Vector3();
+
+  const createMistPool = ({ particleCount, color, emissive, opacity, emissiveIntensity, spread, yRandom, sizeRange }) => {
+    const available = [];
+    const sphereGeometry = new THREE.SphereGeometry(1, 10, 8);
+    return {
+      acquire() {
+        const pooled = available.pop();
+        if (pooled) {
+          pooled.group.visible = true;
+          return pooled;
+        }
+        const group = new THREE.Group();
+        const material = new THREE.MeshStandardMaterial({
+          color,
+          transparent: true,
+          opacity,
+          emissive,
+          emissiveIntensity,
+          depthWrite: false
+        });
+        for (let i = 0; i < particleCount; i++) {
+          const particle = new THREE.Mesh(sphereGeometry, material);
+          particle.castShadow = false;
+          particle.receiveShadow = false;
+          group.add(particle);
+        }
+        return { group, material };
+      },
+      setup(entry) {
+        entry.material.opacity = opacity;
+        entry.material.emissiveIntensity = emissiveIntensity;
+        entry.group.children.forEach((particle) => {
+          const size = THREE.MathUtils.lerp(sizeRange[0], sizeRange[1], Math.random());
+          particle.scale.setScalar(size);
+          particle.position.set(
+            (Math.random() - 0.5) * spread,
+            Math.random() * yRandom,
+            (Math.random() - 0.5) * spread
+          );
+        });
+      },
+      release(entry) {
+        if (!entry) return;
+        entry.group.visible = false;
+        available.push(entry);
+      }
+    };
+  };
+
+  const iceMistPool = createMistPool({
+    particleCount: ICE_MIST_PARTICLE_COUNT,
+    color: 0x66ccff,
+    emissive: 0x3aa5ff,
+    opacity: 0.65,
+    emissiveIntensity: 0.6,
+    spread: 0.35,
+    yRandom: 0.35,
+    sizeRange: [0.2, 0.45]
+  });
+
+  const bombMistPool = createMistPool({
+    particleCount: BOMB_MIST_PARTICLE_COUNT,
+    color: 0xd94b4b,
+    emissive: 0x7a1010,
+    opacity: 0.7,
+    emissiveIntensity: 0.5,
+    spread: 8.0,
+    yRandom: 0.4,
+    sizeRange: [0.25, 0.6]
+  });
 
   function spawnIceMist(scene, mistList, position, direction, shooterId) {
-    const mistGroup = new THREE.Group();
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x66ccff,
-      transparent: true,
-      opacity: 0.65,
-      emissive: 0x3aa5ff,
-      emissiveIntensity: 0.6,
-      depthWrite: false
-    });
-
-    for (let i = 0; i < ICE_MIST_PARTICLE_COUNT; i++) {
-      const size = THREE.MathUtils.lerp(0.2, 0.45, Math.random());
-      const geometry = new THREE.SphereGeometry(size, 10, 8);
-      const particle = new THREE.Mesh(geometry, material);
-      const spread = 0.35;
-      particle.position.set(
-        (Math.random() - 0.5) * spread,
-        (Math.random() - 0.3) * spread,
-        (Math.random() - 0.5) * spread
-      );
-      particle.castShadow = false;
-      particle.receiveShadow = false;
-      mistGroup.add(particle);
-    }
+    const pooled = iceMistPool.acquire();
+    const mistGroup = pooled.group;
+    iceMistPool.setup(pooled);
 
     mistGroup.position.copy(position);
     mistGroup.userData.skipTerrainCorrection = true;
     scene.add(mistGroup);
 
-    const normalizedDirection = direction.clone().normalize()
+    tempMistDirection.copy(direction).normalize();
     const speed = ICE_MIST_SPEED * THREE.MathUtils.lerp(0.9, 1.15, Math.random());
     const drift = new THREE.Vector3(
       (Math.random() - 0.5) * 0.3,
       Math.random() * 0.2,
       (Math.random() - 0.5) * 0.3
     );
-    const velocity = normalizedDirection.multiplyScalar(speed).add(drift);
+    const velocity = new THREE.Vector3().copy(tempMistDirection).multiplyScalar(speed).add(drift);
 
     mistList.push({
+      pooled,
       group: mistGroup,
-      material,
+      material: pooled.material,
       velocity,
       spawnTime: performance.now(),
       lifetimeMs: ICE_MIST_LIFETIME_MS,
@@ -5160,30 +5296,9 @@ async function main() {
   }
 
   function spawnBombMist(scene, mistList, position) {
-    const mistGroup = new THREE.Group();
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xd94b4b,
-      transparent: true,
-      opacity: 0.7,
-      emissive: 0x7a1010,
-      emissiveIntensity: 0.5,
-      depthWrite: false
-    });
-
-    for (let i = 0; i < BOMB_MIST_PARTICLE_COUNT; i++) {
-      const size = THREE.MathUtils.lerp(0.25, 0.6, Math.random());
-      const geometry = new THREE.SphereGeometry(size, 10, 8);
-      const particle = new THREE.Mesh(geometry, material);
-      const spread = 8.0;
-      particle.position.set(
-        (Math.random() - 0.5) * spread,
-        Math.random() * 0.4,
-        (Math.random() - 0.5) * spread
-      );
-      particle.castShadow = false;
-      particle.receiveShadow = false;
-      mistGroup.add(particle);
-    }
+    const pooled = bombMistPool.acquire();
+    const mistGroup = pooled.group;
+    bombMistPool.setup(pooled);
 
     mistGroup.position.copy(position);
     mistGroup.userData.skipTerrainCorrection = true;
@@ -5196,8 +5311,9 @@ async function main() {
     );
 
     mistList.push({
+      pooled,
       group: mistGroup,
-      material,
+      material: pooled.material,
       velocity: drift,
       spawnTime: performance.now(),
       lifetimeMs: BOMB_MIST_LIFETIME_MS
@@ -5223,21 +5339,16 @@ async function main() {
       if (!mist) return;
       if (mist.group) {
         scene.remove(mist.group);
-        mist.group.traverse(child => {
-          if (child.isMesh && child.geometry) {
-            child.geometry.dispose();
-          }
-        });
       }
-      mist.material?.dispose?.();
+      iceMistPool.release(mist.pooled);
       mistList.splice(index, 1);
     };
 
     for (let i = mistList.length - 1; i >= 0; i--) {
       const mist = mistList[i];
-      const moveStep = mist.velocity.clone().multiplyScalar(deltaSeconds);
-      mist.group.position.add(moveStep);
-      mist.traveled += moveStep.length();
+      tempMistMoveStep.copy(mist.velocity).multiplyScalar(deltaSeconds);
+      mist.group.position.add(tempMistMoveStep);
+      mist.traveled += tempMistMoveStep.length();
 
       const ageMs = now - mist.spawnTime;
       const progress = Math.min(1, ageMs / mist.lifetimeMs);
@@ -5283,20 +5394,16 @@ async function main() {
       if (!mist) return;
       if (mist.group) {
         scene.remove(mist.group);
-        mist.group.traverse(child => {
-          if (child.isMesh && child.geometry) {
-            child.geometry.dispose();
-          }
-        });
       }
-      mist.material?.dispose?.();
+      bombMistPool.release(mist.pooled);
       mistList.splice(index, 1);
     };
 
     for (let i = mistList.length - 1; i >= 0; i--) {
       const mist = mistList[i];
       if (mist.velocity) {
-        mist.group.position.add(mist.velocity.clone().multiplyScalar(deltaSeconds));
+        tempMistMoveStep.copy(mist.velocity).multiplyScalar(deltaSeconds);
+        mist.group.position.add(tempMistMoveStep);
       }
       const ageMs = now - mist.spawnTime;
       const progress = Math.min(1, ageMs / mist.lifetimeMs);
@@ -8300,8 +8407,41 @@ async function main() {
       p.model?.userData?.mixer?.update(mixerDelta);
     });
 
+    camera.updateMatrixWorld();
+    monsterAnimProjMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    monsterAnimFrustum.setFromProjectionMatrix(monsterAnimProjMatrix);
+
     for (const monster of monsters) {
-      monster?.model?.userData?.mixer?.update(mixerDelta);
+      const model = monster?.model;
+      const mixer = model?.userData?.mixer;
+      if (!mixer || !model) continue;
+
+      const mode = model.userData?.mode;
+      const distanceToCamera = camera.position.distanceTo(model.position);
+      const isVisible = monsterAnimFrustum.containsPoint(model.position);
+      const isActiveOrNear = mode !== 'friendly' || distanceToCamera <= MONSTER_COMBAT_RADIUS;
+
+      if (isActiveOrNear) {
+        mixer.update(mixerDelta);
+        monster.lastAnimUpdateMs = now;
+        continue;
+      }
+
+      const isMidDistance = distanceToCamera <= MONSTER_BACKGROUND_RADIUS && isVisible;
+      if (!isMidDistance) {
+        continue;
+      }
+
+      const lastAnimUpdateMs = Number.isFinite(monster.lastAnimUpdateMs) ? monster.lastAnimUpdateMs : 0;
+      if (lastAnimUpdateMs > 0 && now - lastAnimUpdateMs < MONSTER_ANIM_MID_INTERVAL_MS) {
+        continue;
+      }
+
+      const deltaSeconds = lastAnimUpdateMs > 0
+        ? (now - lastAnimUpdateMs) / 1000
+        : mixerDelta;
+      mixer.update(deltaSeconds);
+      monster.lastAnimUpdateMs = now;
     }
     for (const animal of animals) {
       animal?.model?.userData?.mixer?.update(mixerDelta);
@@ -8362,24 +8502,69 @@ async function main() {
           friendlyAvoidanceZones.push(friendly.model.position.clone());
         });
 
+        let activeMonsterCount = 0;
         monsters.forEach(monster => {
           if (!monster || !monster.model) return;
 
           if (monster.isDead) return; // your respawn logic here...
+
+          let nearestPlayerDistance = Infinity;
+          for (const player of activePlayers) {
+            const dist = monster.model.position.distanceTo(player.model.position);
+            if (dist < nearestPlayerDistance) {
+              nearestPlayerDistance = dist;
+            }
+          }
+
+          const withinCombatRadius = nearestPlayerDistance <= MONSTER_COMBAT_RADIUS;
+          const withinBackgroundRadius = nearestPlayerDistance <= MONSTER_BACKGROUND_RADIUS;
+
+          let monsterTier = 'dormant';
+          if (withinCombatRadius && activeMonsterCount < MAX_MONSTERS_ACTIVE) {
+            monsterTier = 'active';
+            activeMonsterCount += 1;
+          } else if (withinBackgroundRadius) {
+            monsterTier = 'background';
+          }
+
+          const previousTier = monster.activityTier;
+          monster.activityTier = monsterTier;
+          monster.model.visible = monsterTier !== 'dormant';
+
+          if (monsterTier === 'active') {
+            setMonsterPhysicsMode(monster, 'dynamic');
+          } else if (monsterTier === 'background') {
+            setMonsterPhysicsMode(monster, 'kinematic');
+          } else {
+            detachMonsterPhysics(monster);
+          }
 
           const aiContext = {
             enableFriendlyDrift: friendlyDriftMonsterIds.has(monster.id),
             friendlyAvoidanceZones
           };
 
-          if (PERF.throttleAI) {
-            const last = monster.lastAIUpdateMs ?? 0;
-            if (aiNowMs - last > 150) {
-              monster.lastAIUpdateMs = aiNowMs;
-              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext); // <-- use mixerDelta
+          if (monsterTier === 'active') {
+            monster.syncBodyFromTransform?.({ zeroVelocity: false });
+            if (PERF.throttleAI) {
+              const last = monster.lastAIUpdateMs ?? 0;
+              if (aiNowMs - last > 150) {
+                monster.lastAIUpdateMs = aiNowMs;
+                monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+              }
+            } else {
+              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
             }
-          } else {
-            monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);   // <-- use mixerDelta
+            return;
+          }
+
+          if (monsterTier === 'background') {
+            const lastBackgroundAi = monster.lastBackgroundAIUpdateMs ?? 0;
+            if (previousTier !== 'background' || aiNowMs - lastBackgroundAi > MONSTER_BACKGROUND_AI_INTERVAL_MS) {
+              monster.lastBackgroundAIUpdateMs = aiNowMs;
+              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+            }
+            return;
           }
         });
       }

@@ -25,6 +25,9 @@ const ENGAGED_MODE_DISTANCE = 7;
 const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
 const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
 const WEAPON_CAMERA_FOV_DELTA = 8;
+const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 2.1;
+const MOBILE_PORTRAIT_CAMERA_HEIGHT_BONUS = 0.8;
+const MOBILE_PORTRAIT_CAMERA_FOV_BONUS = 14;
 const ENGAGED_CAMERA_OFFSET = {
   right: 0.65,
   up: 0.4
@@ -268,6 +271,9 @@ export class PlayerControls {
     this.baseCameraOffset = this.cameraOffset.clone();
     this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
     this.weaponCameraOffset = this.baseCameraOffset.clone().add(WEAPON_CAMERA_OFFSET);
+    this.baseCameraOffsetDesktop = this.baseCameraOffset.clone();
+    this.defaultFovDesktop = this.defaultFov;
+    this.applyMobilePortraitCameraTuning();
     this.baseCameraTargetOffset = new THREE.Vector3();
     this.aimCameraTargetOffset = new THREE.Vector3(1.3, 0, 0);
     this.weaponCameraTargetOffset = WEAPON_CAMERA_TARGET_OFFSET.clone();
@@ -1061,11 +1067,16 @@ export class PlayerControls {
     
     // Handle window resize
     window.addEventListener('resize', () => {
+      this.applyMobilePortraitCameraTuning();
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       if (this.renderer) {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
       }
+    });
+
+    window.addEventListener('orientationchange', () => {
+      this.applyMobilePortraitCameraTuning();
     });
 
     this.domElement.addEventListener('mousedown', (event) => {
@@ -1093,6 +1104,25 @@ export class PlayerControls {
       if (this.shouldHoldToFire()) return;
       this.attemptFireProjectile();
     });
+  }
+
+  applyMobilePortraitCameraTuning() {
+    const isPortraitMobile = this.isMobile && window.innerHeight > window.innerWidth;
+    const nextBaseCameraOffset = this.baseCameraOffsetDesktop.clone();
+    const nextDefaultFov = this.defaultFovDesktop;
+
+    if (isPortraitMobile) {
+      nextBaseCameraOffset.z *= MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER;
+      nextBaseCameraOffset.y += MOBILE_PORTRAIT_CAMERA_HEIGHT_BONUS;
+      this.defaultFov = nextDefaultFov + MOBILE_PORTRAIT_CAMERA_FOV_BONUS;
+    } else {
+      this.defaultFov = nextDefaultFov;
+    }
+
+    this.baseCameraOffset.copy(nextBaseCameraOffset);
+    this.aimCameraOffset.copy(this.baseCameraOffset).add(new THREE.Vector3(0, 0, -3.2));
+    this.weaponCameraOffset.copy(this.baseCameraOffset).add(WEAPON_CAMERA_OFFSET);
+    this.aimFov = Math.max(40, this.defaultFov - 15);
   }
 
   handleFriendlyInteractionAction() {
