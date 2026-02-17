@@ -49,6 +49,10 @@ const TREE_CLIMB_HALF_WIDTH = 0.6;
 const TREE_CLIMB_HALF_DEPTH = 0.6;
 const TREE_CLIMB_ENTRY_RADIUS = 1.0;
 const TREE_CLIMB_ENTRY_HEIGHT = 1.4;
+const TREE_BASE_COLLIDER_RADIUS_MIN = 0.18;
+const TREE_BASE_COLLIDER_RADIUS_MAX = 0.42;
+const TREE_BASE_COLLIDER_RADIUS_FACTOR = 0.12;
+const TREE_BASE_COLLIDER_HALF_HEIGHT = 0.45;
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const ROAD_WIDTHS = {
   footway: 0.4,
@@ -280,6 +284,7 @@ export async function createNature({
   const treeTiles = new Map();
   const climbableAreasByTile = new Map();
   const applePickupsByTile = new Map();
+  let treeCollidersEnabled = true;
   const debugMaterial = new THREE.LineBasicMaterial({ color: 0xffff00 });
   const rockMaterial = new THREE.MeshStandardMaterial({
     color: 0x8b8f96,
@@ -563,6 +568,42 @@ export async function createNature({
     return { rb, collider };
   };
 
+  const createTreeBaseCollider = (tree) => {
+    if (!tree || !rapier || !rapierWorld) return null;
+    tree.updateWorldMatrix(true, true);
+    tempBox.setFromObject(tree);
+    if (!Number.isFinite(tempBox.min.x)) return null;
+    tempBox.getCenter(tempCenter);
+    tempBox.getSize(tempSize);
+
+    const trunkWidthEstimate = Math.min(tempSize.x, tempSize.z);
+    const radiusFromBounds = trunkWidthEstimate * TREE_BASE_COLLIDER_RADIUS_FACTOR;
+    const colliderRadius = THREE.MathUtils.clamp(
+      radiusFromBounds,
+      TREE_BASE_COLLIDER_RADIUS_MIN,
+      TREE_BASE_COLLIDER_RADIUS_MAX
+    );
+
+    // Use unshifted bounds center for XZ so collider follows the actual tree model offset,
+    // and keep it short so it only blocks near the base/trunk.
+    const centerX = tempCenter.x;
+    const centerZ = tempCenter.z;
+    const halfHeight = THREE.MathUtils.clamp(
+      TREE_BASE_COLLIDER_HALF_HEIGHT * (tree.scale.x / TREE_SCALE_REFERENCE),
+      0.3,
+      0.75
+    );
+    const terrainY = getTerrainHeight?.(centerX, centerZ) ?? tree.position.y;
+    const rbDesc = rapier.RigidBodyDesc.fixed().setTranslation(centerX, terrainY + halfHeight, centerZ);
+    const rb = rapierWorld.createRigidBody(rbDesc);
+    const colliderDesc = rapier.ColliderDesc.cylinder(halfHeight, colliderRadius)
+      .setFriction(0.9)
+      .setRestitution(0.05);
+    const collider = rapierWorld.createCollider(colliderDesc, rb);
+    collider.setSensor(!treeCollidersEnabled);
+    return { rb, collider };
+  };
+
   const createTreeImpostor = ({
     worldX,
     worldZ,
@@ -631,6 +672,7 @@ export async function createNature({
     const trees = [];
     const rocks = [];
     const rockPhysics = [];
+    const treePhysics = [];
     const tileClimbAreas = [];
     const tileApplePickups = [];
     const tileBlockers = isNearDetail ? buildTileBlockers(tile, tileKey) : null;
@@ -697,11 +739,11 @@ export async function createNature({
               tempBox.getCenter(tempCenter);
               const height = tempSize.y;
               if (height > 0) {
-                const radius = Math.max(0.4, Math.min(tempSize.x, tempSize.z) * 0.35);
+                const radius = Math.max(0.8, Math.max(tempSize.x, tempSize.z) * 0.45);
                 for (let i = 0; i < 2; i += 1) {
                   const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
-                  const distance = radius * (0.1 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.2);
-                  const heightFactor = 0.6 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.35;
+                  const distance = radius * (0.55 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.35);
+                  const heightFactor = 0.65 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.3;
                   tempApplePosition.set(
                     tempCenter.x + Math.cos(angle) * distance,
                     tempBox.min.y + height * heightFactor,
@@ -720,6 +762,11 @@ export async function createNature({
                 }
               }
             }
+          }
+          const physics = createTreeBaseCollider(tree);
+          if (physics) {
+            treePhysics.push(physics);
+            tree.userData.physics = physics;
           }
         }
       }
@@ -773,7 +820,16 @@ export async function createNature({
       }
     }
 
-    const entry = { tile, tileKey, detailLevel, group: tileGroup, trees, rocks, rockPhysics };
+    const entry = {
+      tile,
+      tileKey,
+      detailLevel,
+      group: tileGroup,
+      trees,
+      rocks,
+      rockPhysics,
+      treePhysics
+    };
     treeTiles.set(tileKey, entry);
     climbableAreasByTile.set(tileKey, tileClimbAreas);
     applePickupsByTile.set(tileKey, tileApplePickups);
@@ -789,6 +845,10 @@ export async function createNature({
     group.remove(entry.group);
     entry.group.clear();
     for (const physics of entry.rockPhysics ?? []) {
+      if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
+      if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+    }
+    for (const physics of entry.treePhysics ?? []) {
       if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
       if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
     }
@@ -943,6 +1003,10 @@ export async function createNature({
     if (index === -1) return false;
     entry.trees.splice(index, 1);
     entry.group.remove(tree);
+    const treePhysics = tree.userData?.physics;
+    if (treePhysics?.collider) rapierWorld?.removeCollider(treePhysics.collider, true);
+    if (treePhysics?.rb) rapierWorld?.removeRigidBody(treePhysics.rb);
+    entry.treePhysics = (entry.treePhysics ?? []).filter((physics) => physics !== treePhysics);
     const tileClimbAreas = climbableAreasByTile.get(tileKey);
     const treeAreas = tree.userData?.climbAreas ?? [];
     if (Array.isArray(tileClimbAreas) && treeAreas.length > 0) {
@@ -961,6 +1025,14 @@ export async function createNature({
     for (const entry of treeTiles.values()) {
       entry.group.clear();
       group.remove(entry.group);
+      for (const physics of entry.rockPhysics ?? []) {
+        if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
+        if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+      }
+      for (const physics of entry.treePhysics ?? []) {
+        if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
+        if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+      }
     }
     treeTiles.clear();
     climbableAreasByTile.clear();
@@ -977,6 +1049,14 @@ export async function createNature({
     for (const entry of treeTiles.values()) {
       entry.group.clear();
       group.remove(entry.group);
+      for (const physics of entry.rockPhysics ?? []) {
+        if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
+        if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+      }
+      for (const physics of entry.treePhysics ?? []) {
+        if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
+        if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+      }
     }
     treeTiles.clear();
     climbableAreasByTile.clear();
@@ -997,6 +1077,17 @@ export async function createNature({
     scene?.remove(group);
   };
 
+  const setTreeColliderEnabled = (enabled) => {
+    const nextEnabled = enabled !== false;
+    if (treeCollidersEnabled === nextEnabled) return;
+    treeCollidersEnabled = nextEnabled;
+    for (const entry of treeTiles.values()) {
+      for (const physics of entry.treePhysics ?? []) {
+        physics?.collider?.setSensor(!treeCollidersEnabled);
+      }
+    }
+  };
+
   return {
     group,
     update,
@@ -1006,6 +1097,7 @@ export async function createNature({
     setTileCache,
     getClosestTree,
     removeTree,
+    setTreeColliderEnabled,
     dispose
   };
 }
