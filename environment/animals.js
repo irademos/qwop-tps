@@ -293,6 +293,9 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight } 
 
   const getAnimals = () => animals.map(entry => entry.animal).filter(Boolean);
 
+  // Backward-compatible no-op retained for older call sites/bundles.
+  const ensureAnimals = async () => {};
+
   const spawnDeerAt = async (position) => {
     const entry = await spawnAnimal({
       scene,
@@ -309,6 +312,7 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight } 
 
   return {
     update,
+    ensureAnimals,
     getAnimals,
     removeAnimal,
     spawnDeerAt
