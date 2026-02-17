@@ -858,6 +858,36 @@ export async function createNature({
     refreshClimbableAreas();
   };
 
+  const refreshTilesForCacheTile = (cacheTileKey, centerTileOverride = null) => {
+    if (!cacheTileKey) return;
+    const cacheTile = getTileFromKey(cacheTileKey);
+    if (!cacheTile) return;
+
+    const cacheTileSize = activeTileCache?.tileSizeMeters;
+    if (!Number.isFinite(cacheTileSize) || cacheTileSize <= 0) {
+      refreshTile(cacheTileKey, centerTileOverride);
+      return;
+    }
+
+    const minX = cacheTile.x * cacheTileSize;
+    const maxX = minX + cacheTileSize;
+    const minZ = cacheTile.y * cacheTileSize;
+    const maxZ = minZ + cacheTileSize;
+
+    const treeTileMinX = Math.floor(minX / tileSizeMeters);
+    const treeTileMaxX = Math.floor((maxX - Number.EPSILON) / tileSizeMeters);
+    const treeTileMinY = Math.floor(minZ / tileSizeMeters);
+    const treeTileMaxY = Math.floor((maxZ - Number.EPSILON) / tileSizeMeters);
+
+    for (let tx = treeTileMinX; tx <= treeTileMaxX; tx += 1) {
+      for (let ty = treeTileMinY; ty <= treeTileMaxY; ty += 1) {
+        const key = getTileKey({ x: tx, y: ty });
+        if (!treeTiles.has(key)) continue;
+        refreshTile(key, centerTileOverride);
+      }
+    }
+  };
+
   const refreshAll = () => {
     const tiles = Array.from(treeTiles.values()).map((entry) => entry.tile);
     for (const entry of Array.from(treeTiles.keys())) {
@@ -971,6 +1001,7 @@ export async function createNature({
     group,
     update,
     refreshTile,
+    refreshTilesForCacheTile,
     refreshAll,
     setTileCache,
     getClosestTree,
