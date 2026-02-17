@@ -11,7 +11,7 @@ import { createStaticBoxColliderForObject } from '../physics/staticBoxCollider.j
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
 const MERCHANT_MODEL = '/models/cowboy.fbx';
 const MERCHANT_RESTOCK_MS = 60 * 60 * 1000;
-const MARKET_STALL_POSITION = new THREE.Vector3(5, 0, 5);
+const DEFAULT_MARKET_STALL_POSITION = new THREE.Vector3(5, 0, 5);
 const MARKET_STALL_SIZE = 0.013;
 const MERCHANT_OFFSET = new THREE.Vector3(0.0, 0, -1.4);
 const LIFE_POTION_MODEL = '/assets/props/life_potion.glb';
@@ -65,6 +65,7 @@ let marketStall = null;
 let merchantRoadLight = null;
 let merchantIsHost = false;
 let marketStallCollider = null;
+let merchantSpawnBasePosition = DEFAULT_MARKET_STALL_POSITION.clone();
 
 const buildDefaultInventory = () => {
   const items = {};
@@ -159,7 +160,7 @@ const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuilding
     const gltf = await loader.loadAsync(MARKET_STALL_MODEL);
     marketStall = gltf.scene;
     marketStall.scale.multiplyScalar(MARKET_STALL_SIZE);
-    marketStall.position.copy(MARKET_STALL_POSITION);
+    marketStall.position.copy(merchantSpawnBasePosition);
     const terrainHeight = getTerrainHeight?.(marketStall.position.x, marketStall.position.z);
     if (Number.isFinite(terrainHeight)) {
       marketStall.position.y = terrainHeight - 0.005;
@@ -188,6 +189,29 @@ const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuilding
   } catch (error) {
     console.warn('Failed to load market stall model.', error);
   }
+};
+
+
+const removeMerchantEntities = () => {
+  if (merchantFriendly?.model?.parent) {
+    merchantFriendly.model.parent.remove(merchantFriendly.model);
+  }
+  merchantFriendly?.model?.userData?.mixer?.stopAllAction?.();
+  merchantFriendly = null;
+  window.merchantFriendly = null;
+
+  if (marketStall?.parent) {
+    marketStall.parent.remove(marketStall);
+  }
+  marketStall = null;
+  if (marketStallCollider) {
+    marketStallCollider = null;
+  }
+
+  if (merchantRoadLight?.model?.parent) {
+    merchantRoadLight.model.parent.remove(merchantRoadLight.model);
+  }
+  merchantRoadLight = null;
 };
 
 const loadMarketStallPotion = async ({ loader, modelPath, scale, offset }) => {
@@ -224,7 +248,7 @@ const loadMerchantFriendly = ({
     friendly.resetHealth();
     friendly.model.userData.npcRole = 'merchant';
     friendly.model.userData.mode = 'engaged';
-    const basePosition = MARKET_STALL_POSITION.clone().add(MERCHANT_OFFSET);
+    const basePosition = merchantSpawnBasePosition.clone().add(MERCHANT_OFFSET);
     const terrainHeight = getTerrainHeight?.(basePosition.x, basePosition.z);
     if (Number.isFinite(terrainHeight)) {
       basePosition.y = terrainHeight + 0.5;
@@ -354,8 +378,6 @@ export const initMerchant = async ({
   merchantIsHost = !!isHost;
   await ensureInventoryLoaded();
   subscribeInventoryUpdates();
-  await loadMarketStall({ scene, getTerrainHeight, liftPositionToBuildingTop });
-  loadMerchantFriendly({ scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop });
 };
 
 export const setMerchantRoom = async ({ roomId, isHost = false } = {}) => {
@@ -370,3 +392,18 @@ export const setMerchantHost = (isHost) => {
 };
 
 export const getMerchantFriendly = () => merchantFriendly;
+
+
+export const spawnMerchantAt = async ({ position, scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop } = {}) => {
+  if (!scene) return;
+  if (position?.clone) {
+    merchantSpawnBasePosition = position.clone();
+  }
+  removeMerchantEntities();
+  await loadMarketStall({ scene, getTerrainHeight, liftPositionToBuildingTop });
+  loadMerchantFriendly({ scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop });
+};
+
+export const clearMerchantSpawn = () => {
+  removeMerchantEntities();
+};
