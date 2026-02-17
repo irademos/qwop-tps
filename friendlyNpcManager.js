@@ -22,8 +22,9 @@ const FRIENDLY_SPAWN_NEARBY_MIN_DISTANCE = 24;
 const FRIENDLY_SPAWN_NEARBY_MAX_DISTANCE = 42;
 const FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE = 70;
 const FRIENDLY_SPAWN_TRAVEL_MAX_DISTANCE = 150;
-const FRIENDLY_SPAWN_MAX_STEP_DISTANCE = 14;
-const FRIENDLY_SPAWN_MAX_SPEED = 20;
+const FRIENDLY_SPAWN_MIN_GPS_ACCURACY_METERS = 15;
+const FRIENDLY_SPAWN_MAX_GPS_STEP_DISTANCE = 25;
+const FRIENDLY_SPAWN_MIN_INTERVAL_MS = 20_000;
 const FRIENDLY_SPAWN_PREDICT_MIN_AHEAD_DISTANCE = 24;
 const FRIENDLY_SPAWN_PREDICT_MAX_AHEAD_DISTANCE = 42;
 const FRIENDLY_SPAWN_PREDICT_LATERAL_JITTER = 10;
@@ -60,19 +61,50 @@ export function createFriendlyNpcManager({
   let unsubscribeUpdates = null;
   let currentHost = !!isHost;
   let spawnedCount = 0;
-  let spawnDistanceAccum = 0;
   let nextSpawnDistance = 0;
   let lastPlayerPosition = null;
   let travelStartPosition = null;
+  let lastSpawnAtMs = 0;
+  let gpsDistanceAccum = 0;
+  let lastGpsSample = null;
 
   const getNextSpawnDistance = () => {
     return FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE
       + Math.random() * (FRIENDLY_SPAWN_TRAVEL_MAX_DISTANCE - FRIENDLY_SPAWN_TRAVEL_MIN_DISTANCE);
   };
 
-  const isPlayerTravelAnimationActive = () => {
-    const action = playerModel?.userData?.currentAction;
-    return action === "walk" || action === "run";
+  const haversineMeters = (lat1, lon1, lat2, lon2) => {
+    const toRad = (value) => value * (Math.PI / 180);
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * 6_371_000 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const recordGpsTravel = ({ lat, lon, accuracyMeters, timestampMs } = {}) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    if (!Number.isFinite(accuracyMeters) || accuracyMeters > FRIENDLY_SPAWN_MIN_GPS_ACCURACY_METERS) {
+      return;
+    }
+
+    const sample = {
+      lat,
+      lon,
+      timestampMs: Number.isFinite(timestampMs) ? timestampMs : Date.now()
+    };
+
+    if (!lastGpsSample) {
+      lastGpsSample = sample;
+      return;
+    }
+
+    const stepDistance = haversineMeters(lastGpsSample.lat, lastGpsSample.lon, sample.lat, sample.lon);
+    lastGpsSample = sample;
+    if (!Number.isFinite(stepDistance) || stepDistance <= 0) return;
+    if (stepDistance > FRIENDLY_SPAWN_MAX_GPS_STEP_DISTANCE) return;
+
+    gpsDistanceAccum += stepDistance;
   };
 
   const getSpawnNearPlayerPosition = (startPos, currentPos) => {
@@ -144,7 +176,7 @@ export function createFriendlyNpcManager({
       window.friendlies = friendlies;
     }
   };
-  const maybeSpawnFriendlyFromDistance = (deltaSeconds = 0) => {
+  const maybeSpawnFriendlyFromDistance = () => {
     if (!playerModel) return;
     if (!Number.isFinite(nextSpawnDistance) || nextSpawnDistance <= 0) {
       nextSpawnDistance = getNextSpawnDistance();
@@ -155,18 +187,12 @@ export function createFriendlyNpcManager({
       travelStartPosition = currentPos.clone();
       return;
     }
-    const frameDistance = currentPos.distanceTo(lastPlayerPosition);
     lastPlayerPosition.copy(currentPos);
-    if (!isPlayerTravelAnimationActive()) return;
-    if (!Number.isFinite(frameDistance) || frameDistance <= 0 || frameDistance > FRIENDLY_SPAWN_MAX_STEP_DISTANCE) {
+    if (gpsDistanceAccum < nextSpawnDistance) {
       return;
     }
-    const speed = deltaSeconds > 0 ? frameDistance / deltaSeconds : 0;
-    if (Number.isFinite(speed) && speed > FRIENDLY_SPAWN_MAX_SPEED) {
-      return;
-    }
-    spawnDistanceAccum += frameDistance;
-    if (spawnDistanceAccum < nextSpawnDistance) return;
+    const now = Date.now();
+    if (now - lastSpawnAtMs < FRIENDLY_SPAWN_MIN_INTERVAL_MS) return;
 
     const playerIsNearFriendly = Array.from(records.values()).some((record) => {
       if (!record?.alive) return false;
@@ -200,7 +226,8 @@ export function createFriendlyNpcManager({
       };
       records.set(slotId, record);
     }
-    spawnDistanceAccum = 0;
+    gpsDistanceAccum = 0;
+    lastSpawnAtMs = now;
     travelStartPosition = currentPos.clone();
     nextSpawnDistance = getNextSpawnDistance();
   };
@@ -208,6 +235,11 @@ export function createFriendlyNpcManager({
   const setHost = (nextHost) => {
     currentHost = !!nextHost;
     setFriendlyPersistenceHost(nextHost);
+    if (currentHost) {
+      gpsDistanceAccum = 0;
+      lastGpsSample = null;
+      lastSpawnAtMs = 0;
+    }
   };
 
   const getRandomFriendlyModel = () => {
@@ -513,6 +545,7 @@ const getHealthForLevel = (level) => {
   return {
     friendlies,
     setHost,
+    recordGpsTravel,
     onRoomReady,
     update
   };

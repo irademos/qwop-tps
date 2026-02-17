@@ -7028,6 +7028,12 @@ async function main() {
   const locationProvider = createLocationProvider({
     onUpdate: (location) => {
       window.latestLocation = location;
+      friendlyNpcManager?.recordGpsTravel?.({
+        lat: location.lat,
+        lon: location.lon,
+        accuracyMeters: location.accuracyMeters,
+        timestampMs: location.timestamp
+      });
       if (!homeSystem?.isInsideHome) {
         playerControls?.setGeoCenter({ lat: location.lat, lon: location.lon });
       }
