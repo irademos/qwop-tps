@@ -274,6 +274,14 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight } 
     model?.userData?.mixer?.stopAllAction?.();
   };
 
+  const removeAnimalById = (animalId) => {
+    if (!animalId) return false;
+    const entry = animals.find((candidate) => candidate?.animal?.id === animalId);
+    if (!entry) return false;
+    removeAnimal(entry);
+    return true;
+  };
+
   const update = (delta) => {
     const now = Date.now();
     for (let i = animals.length - 1; i >= 0; i -= 1) {
@@ -311,6 +319,7 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight } 
     update,
     getAnimals,
     removeAnimal,
+    removeAnimalById,
     spawnDeerAt
   };
 }

@@ -43,7 +43,8 @@ export function createFriendlyNpcManager({
   liftPositionToBuildingTop,
   isHost = false,
   debug = false,
-  onSpawnEvent
+  onSpawnEvent,
+  onBeforeSpawn
 } = {}) {
   const friendlies = [];
   const records = new Map();
@@ -79,6 +80,20 @@ export function createFriendlyNpcManager({
       }
     });
     spawnedCount = maxSpawnedId;
+  };
+
+  const removeFriendlyById = (friendlyId) => {
+    if (!friendlyId) return false;
+    records.delete(friendlyId);
+    removeFriendlyRecord(friendlyId);
+    const index = friendlies.findIndex(entry => entry?.id === friendlyId);
+    if (index >= 0) {
+      cleanupFriendly(friendlies[index]);
+      friendlies.splice(index, 1);
+      window.friendlies = friendlies;
+      return true;
+    }
+    return true;
   };
 
   const dropFurthestFriendlyRecord = (originPosition) => {
@@ -124,10 +139,12 @@ export function createFriendlyNpcManager({
     if (playerIsNearFriendly) return;
 
     if (spawnEvent.type !== 'friendly') {
+      void onBeforeSpawn?.(1, spawnEvent.position);
       onSpawnEvent?.(spawnEvent);
       return;
     }
 
+    void onBeforeSpawn?.(1, spawnEvent.position);
     dropFurthestFriendlyRecord(currentPos);
     spawnedCount += 1;
     const slotId = `friendly:distance:${spawnedCount}`;
@@ -462,6 +479,7 @@ const getHealthForLevel = (level) => {
     setHost,
     recordGpsTravel,
     onRoomReady,
-    update
+    update,
+    removeFriendlyById
   };
 }
