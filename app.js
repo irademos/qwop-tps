@@ -6902,7 +6902,11 @@ async function main() {
         buildingsRenderer.updateTileBuildings?.(key, entry.geojson, bounds);
       }
       scheduleBuildingRefresh();
-      if (typeof natureController?.refreshTile === "function") {
+      if (typeof natureController?.refreshTilesForCacheTile === "function") {
+        for (const key of tilesToUpdate) {
+          natureController.refreshTilesForCacheTile(key);
+        }
+      } else if (typeof natureController?.refreshTile === "function") {
         for (const key of tilesToUpdate) {
           natureController.refreshTile(key);
         }
