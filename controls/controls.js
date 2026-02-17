@@ -590,7 +590,7 @@ export class PlayerControls {
     };
 
     const onAttackPressStart = (event) => {
-      if (!this.enabled || !this.isMobile) return;
+      if (!this.enabled) return;
       this.mobileAttackPressStartedAt = performance.now();
       this.mobileAttackPressActive = true;
       if (this.shouldHoldToFire()) {
@@ -602,7 +602,7 @@ export class PlayerControls {
     };
 
     const onAttackPressEnd = (event) => {
-      if (!this.enabled || !this.isMobile) return;
+      if (!this.enabled) return;
       if (!this.mobileAttackPressActive) return;
       this.mobileAttackPressActive = false;
       if (this.mobileAttackHoldActive) {
@@ -822,7 +822,7 @@ export class PlayerControls {
       this.mobileActionState = 'default';
     }
 
-    if (state === 'default' && isIceGunEquipped && this.isMobile) {
+    if (state === 'default' && isIceGunEquipped) {
       state = 'freeze';
       this.mobileActionState = 'freeze';
     }
@@ -842,11 +842,7 @@ export class PlayerControls {
     this.optionRightButton.textContent = '—';
     this.optionRightButton.disabled = true;
 
-    if (!this.isMobile) {
-      this.punchButton.style.display = 'none';
-    } else {
-      this.punchButton.style.display = '';
-    }
+    this.punchButton.style.display = '';
 
     if (state === 'spell-options') {
       const shieldState = this.getSpellStateById?.('shield') || { disabled: true, remainingSeconds: 0 };
@@ -922,8 +918,6 @@ export class PlayerControls {
       this.optionRightButton,
       ...(this.mobileEquipButtons || [])
     ].forEach(clearButtonPos);
-
-    if (!this.isMobile) return;
 
     if (state === 'spell-options') {
       this.applyMobileButtonPosition(this.optionLeftButton, { x: 1, y: 1 });
