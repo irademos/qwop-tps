@@ -27,6 +27,15 @@ const TREE_COLLIDER_RIGHT_SHIFT_BY_TYPE = {
   5: -2.5  // scary/dead
 };
 
+const TREE_COLLIDER_SCALE_BY_TYPE = {
+  0: { radius: 0.7, height: 0.95 }, // eucalyptus
+  1: { radius: 0.85, height: 0.95 }, // pine
+  3: { radius: 0.8, height: 0.9 }, // cypress/fir
+  4: { radius: 1.1, height: 1.0 }, // oak
+  5: { radius: 0.75, height: 1.15 }, // scary/dead
+  6: { radius: 0.95, height: 1.0 } // larch/beech
+};
+
 const TREE_CLIMB_OVERRIDES = {
   0: { halfWidth: 0.4, halfDepth: 0.75, entryHeight: 0.0, maxYPad: 3.0 }, // eucalyptus
   5: { halfWidth: 0.75, halfDepth: 0.75, entryHeight: 0.0, minYPad: 0.0, maxYPad: 6.4 }  // dead/scary
@@ -583,13 +592,14 @@ export async function createNature({
 
     const trunkWidthEstimate = Math.min(tempSize.x, tempSize.z);
     const radiusFromBounds = trunkWidthEstimate * TREE_BASE_COLLIDER_RADIUS_FACTOR;
+    const typeIndex = tree.userData?.treeTypeIndex;
+    const colliderScale = TREE_COLLIDER_SCALE_BY_TYPE[typeIndex] ?? { radius: 1, height: 1 };
     const colliderRadius = THREE.MathUtils.clamp(
-      radiusFromBounds,
+      radiusFromBounds * colliderScale.radius,
       TREE_BASE_COLLIDER_RADIUS_MIN,
       TREE_BASE_COLLIDER_RADIUS_MAX
     );
 
-    const typeIndex = tree.userData?.treeTypeIndex;
     const shift = TREE_COLLIDER_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
     const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
     tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
@@ -598,7 +608,7 @@ export async function createNature({
     const centerX = tempCenter.x + tempTreeRight.x * shift * scaleFactor;
     const centerZ = tempCenter.z + tempTreeRight.z * shift * scaleFactor;
     const halfHeight = THREE.MathUtils.clamp(
-      TREE_BASE_COLLIDER_HALF_HEIGHT * (tree.scale.x / TREE_SCALE_REFERENCE),
+      TREE_BASE_COLLIDER_HALF_HEIGHT * (tree.scale.x / TREE_SCALE_REFERENCE) * colliderScale.height,
       0.3,
       0.75
     );
