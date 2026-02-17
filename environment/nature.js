@@ -753,10 +753,10 @@ export async function createNature({
                 for (let i = 0; i < 2; i += 1) {
                   const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
                   const distance = radius * (0.55 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.35);
-                  const heightFactor = 0.65 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.3;
+                  const trunkTopY = tempBox.min.y + height * 0.35;
                   tempApplePosition.set(
                     tempCenter.x + Math.cos(angle) * distance,
-                    tempBox.min.y + height * heightFactor,
+                    trunkTopY,
                     tempCenter.z + Math.sin(angle) * distance
                   );
                   const localApplePosition = tree.worldToLocal(tempWorldToLocal.copy(tempApplePosition));

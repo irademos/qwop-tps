@@ -1383,8 +1383,11 @@ export class PlayerControls {
     const applePickups = Array.isArray(window.applePickups) ? window.applePickups : [];
     applePickups.forEach((pickup) => {
       if (!pickup?.mesh || !pickup.mesh.visible) return;
-      const dist = playerPos.distanceTo(pickup.mesh.position);
-      consider(dist, {
+      const horizontalDistance = Math.hypot(
+        playerPos.x - pickup.mesh.position.x,
+        playerPos.z - pickup.mesh.position.z
+      );
+      consider(horizontalDistance, {
         type: 'apple',
         pickup,
         maxDistance: APPLE_INTERACT_RANGE,
