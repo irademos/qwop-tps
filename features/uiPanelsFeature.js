@@ -96,6 +96,11 @@ export async function spawnMerchantAtFeature(params) {
   return merchantModule.spawnMerchantAt?.(params);
 }
 
+export async function clearMerchantSpawnFeature() {
+  const { merchantModule } = await loadMerchantModule();
+  return merchantModule.clearMerchantSpawn?.();
+}
+
 export function getMerchantFriendlyFeature() {
   if (!merchantModuleRef) {
     ensureMerchantLoadedSoon();

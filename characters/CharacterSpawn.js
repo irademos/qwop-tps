@@ -12,10 +12,10 @@ const SPAWN_PREDICT_MAX_AHEAD_DISTANCE = 42;
 const SPAWN_PREDICT_LATERAL_JITTER = 10;
 
 const DEFAULT_TYPE_WEIGHTS = [
-  { type: 'friendly', weight: 0.35 },
-  { type: 'merchant', weight: 0.15 },
-  { type: 'monster', weight: 0.3 },
-  { type: 'animal', weight: 0.2 }
+  { type: 'monster', weight: 0.40 },
+  { type: 'merchant', weight: 0.25 },
+  { type: 'animal', weight: 0.15 },
+  { type: 'friendly', weight: 0.20 }
 ];
 
 const haversineMeters = (lat1, lon1, lat2, lon2) => {

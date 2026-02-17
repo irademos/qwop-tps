@@ -65,6 +65,7 @@ import {
   updateMerchantUIFeature,
   initMerchantFeature,
   spawnMerchantAtFeature,
+  clearMerchantSpawnFeature,
   getMerchantFriendlyFeature,
   setMerchantHostFeature,
   setMerchantRoomFeature,
@@ -111,6 +112,8 @@ if ('serviceWorker' in navigator) {
 
 const DEFAULT_CHARACTER_MODEL = "/models/base_character_2.fbx";
 const MAX_MONSTERS_TOTAL = 24;
+const MAX_TRAVEL_SPAWN_CHARACTERS_TOTAL = 32;
+const MONSTER_CLUSTER_MAX_SIZE = 5;
 const MAX_MONSTERS_ACTIVE = 8;
 const MONSTER_COMBAT_RADIUS = 26;
 const MONSTER_BACKGROUND_RADIUS = 70;
@@ -2341,22 +2344,44 @@ async function main() {
   animals = animalManager.getAnimals();
   window.animals = animals;
   let didInitialGpsSnap = false;
+  let currentPlayerLevel = 1;
 
   const getRandomMonsterModel = () => {
     const index = Math.floor(Math.random() * MONSTER_MODELS.length);
     return MONSTER_MODELS[index];
   };
 
-  const getRandomMonsterLevel = () => {
-    const totalWeight = MONSTER_LEVEL_WEIGHTS.reduce((sum, entry) => sum + entry.weight, 0);
+  const getRandomMonsterLevel = (playerLevel = currentPlayerLevel) => {
+    const safePlayerLevel = Math.max(1, Math.round(playerLevel || 1));
+    const cap = Math.max(1, Math.min(8, safePlayerLevel + 1));
+    const weighted = MONSTER_LEVEL_WEIGHTS
+      .map((entry) => {
+        const baseWeight = Math.max(0, Number(entry.weight) || 0);
+        if (entry.level > cap) return null;
+        const distanceFromPlayer = Math.abs(entry.level - safePlayerLevel);
+        const closenessBoost = 1 + Math.max(0, safePlayerLevel - distanceFromPlayer) * 0.15;
+        const highLevelBias = 1 + Math.max(0, safePlayerLevel - 1) * (entry.level / cap) * 0.08;
+        return { level: entry.level, weight: baseWeight * closenessBoost * highLevelBias };
+      })
+      .filter(Boolean);
+    const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
+    if (totalWeight <= 0) return 1;
     let pick = Math.random() * totalWeight;
-    for (const entry of MONSTER_LEVEL_WEIGHTS) {
+    for (const entry of weighted) {
       pick -= entry.weight;
       if (pick <= 0) {
         return entry.level;
       }
     }
-    return MONSTER_LEVEL_WEIGHTS[0]?.level ?? 1;
+    return weighted[0]?.level ?? 1;
+  };
+
+  const getMonsterClusterSizeForLevel = (playerLevel = currentPlayerLevel) => {
+    const safePlayerLevel = Math.max(1, Math.round(playerLevel || 1));
+    const guaranteed = 1 + Math.floor((safePlayerLevel - 1) / 4);
+    const bonusChance = Math.min(0.75, (safePlayerLevel - 1) * 0.08);
+    const withBonus = guaranteed + (Math.random() < bonusChance ? 1 : 0);
+    return Math.max(1, Math.min(MONSTER_CLUSTER_MAX_SIZE, withBonus));
   };
 
   const BUILDING_RAYCAST_HEIGHT = 200;
@@ -2404,7 +2429,8 @@ async function main() {
     liftPositionToBuildingTop,
     isHost,
     debug: window.DEBUG_FRIENDLY_PERSIST,
-    onSpawnEvent: handleCharacterSpawnEvent
+    onSpawnEvent: handleCharacterSpawnEvent,
+    onBeforeSpawn: (...args) => trimTravelSpawnPopulationIfNeeded(...args)
   });
   if (multiplayer?.roomId) {
     friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
@@ -2474,23 +2500,102 @@ async function main() {
   };
   window.rebuildBuildingColliders = rebuildBuildingColliders;
 
+  const removeMonsterById = (monsterId) => {
+    const index = monsters.findIndex((entry) => entry?.id === monsterId);
+    if (index < 0) return false;
+    const [monster] = monsters.splice(index, 1);
+    cleanupMonster(monster);
+    window.monsters = monsters;
+    return true;
+  };
+
+  const countSpawnedTravelCharacters = () => {
+    const livingMonsters = monsters.filter((monster) => monster?.model && !monster?.isDead).length;
+    const livingFriendlies = (friendlyNpcManager?.friendlies || []).filter((friendly) => friendly?.model && !friendly?.isDead).length;
+    const livingAnimals = (animals || []).filter((animal) => animal?.model && !animal?.isDead).length;
+    const merchantCount = getMerchantFriendlyFeature()?.model ? 1 : 0;
+    return livingMonsters + livingFriendlies + livingAnimals + merchantCount;
+  };
+
+  const trimTravelSpawnPopulationIfNeeded = async (incomingCount = 1, originPosition = playerModel?.position) => {
+    const targetOrigin = originPosition?.clone?.() || playerModel?.position?.clone?.();
+    if (!targetOrigin) return;
+    let total = countSpawnedTravelCharacters();
+    while (total + incomingCount > MAX_TRAVEL_SPAWN_CHARACTERS_TOTAL) {
+      const candidates = [];
+      monsters.forEach((monster) => {
+        if (!monster?.model || monster?.isDead) return;
+        candidates.push({ type: 'monster', id: monster.id, distance: monster.model.position.distanceTo(targetOrigin) });
+      });
+      (friendlyNpcManager?.friendlies || []).forEach((friendly) => {
+        if (!friendly?.model || friendly?.isDead) return;
+        candidates.push({ type: 'friendly', id: friendly.id, distance: friendly.model.position.distanceTo(targetOrigin) });
+      });
+      (animals || []).forEach((animal) => {
+        if (!animal?.model || animal?.isDead) return;
+        candidates.push({ type: 'animal', id: animal.id, distance: animal.model.position.distanceTo(targetOrigin) });
+      });
+      const merchantFriendly = getMerchantFriendlyFeature();
+      if (merchantFriendly?.model) {
+        candidates.push({ type: 'merchant', distance: merchantFriendly.model.position.distanceTo(targetOrigin) });
+      }
+      if (!candidates.length) return;
+      candidates.sort((a, b) => b.distance - a.distance);
+      const furthest = candidates[0];
+      if (!furthest) return;
+      if (furthest.type === 'monster') {
+        removeMonsterById(furthest.id);
+      } else if (furthest.type === 'friendly') {
+        friendlyNpcManager?.removeFriendlyById?.(furthest.id);
+      } else if (furthest.type === 'animal') {
+        animalManager?.removeAnimalById?.(furthest.id);
+      } else if (furthest.type === 'merchant') {
+        await clearMerchantSpawnFeature?.();
+      }
+      total = countSpawnedTravelCharacters();
+    }
+  };
+
   function spawnEncounterMonster(spawnEvent) {
     if (!spawnEvent?.position) return;
-    const slotId = monsterSlotIds.find((id) => !monsters.some((monster) => monster?.id === id));
-    if (!slotId || spawningSlots.has(slotId) || respawnTimers.has(slotId)) return;
-    const modelPath = getRandomMonsterModel();
+    const playerLevel = currentPlayerLevel;
+    const clusterSize = getMonsterClusterSizeForLevel(playerLevel);
     const yaw = Math.atan2(spawnEvent.direction?.x || 0, spawnEvent.direction?.z || 1);
     const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
-    spawnMonsterInSlot(slotId, modelPath, null, {
-      position: spawnEvent.position,
-      rotation,
-      skipPersist: false
+    void trimTravelSpawnPopulationIfNeeded(clusterSize, spawnEvent.position).then(() => {
+      for (let index = 0; index < clusterSize; index += 1) {
+        const slotId = monsterSlotIds.find((id) => (
+          !monsters.some((monster) => monster?.id === id)
+          && !spawningSlots.has(id)
+          && !respawnTimers.has(id)
+        ));
+        if (!slotId) continue;
+        const modelPath = getRandomMonsterModel();
+        const offsetAngle = Math.random() * Math.PI * 2;
+        const offsetRadius = index === 0 ? 0 : THREE.MathUtils.randFloat(1.5, 5.5);
+        const clusterPosition = spawnEvent.position.clone().add(new THREE.Vector3(
+          Math.cos(offsetAngle) * offsetRadius,
+          0,
+          Math.sin(offsetAngle) * offsetRadius
+        ));
+        const terrainHeight = getTerrainHeight(clusterPosition.x, clusterPosition.z);
+        if (Number.isFinite(terrainHeight)) {
+          clusterPosition.y = terrainHeight + 0.5;
+        }
+        spawnMonsterInSlot(slotId, modelPath, null, {
+          position: clusterPosition,
+          rotation,
+          level: getRandomMonsterLevel(playerLevel),
+          skipPersist: false
+        });
+      }
     });
   }
 
   async function handleCharacterSpawnEvent(spawnEvent) {
     if (!spawnEvent?.position) return;
     if (spawnEvent.type === 'merchant') {
+      await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
       await spawnMerchantAtFeature({
         position: spawnEvent.position,
         scene,
@@ -2505,6 +2610,7 @@ async function main() {
       return;
     }
     if (spawnEvent.type === 'animal') {
+      await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
       await animalManager?.spawnDeerAt?.(spawnEvent.position);
       return;
     }
@@ -2962,6 +3068,7 @@ async function main() {
     coins: playerProfile.stats.coins
   };
   statsState.health = normalizeHealthSegments(statsState.health, statsState.level);
+  currentPlayerLevel = Math.max(1, Math.round(statsState.level || 1));
   const spellsAvailable = { ...(playerProfile?.spells || {}) };
   const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
@@ -4872,6 +4979,7 @@ async function main() {
       updateMagicUI();
     }
     if (key === 'level') {
+      currentPlayerLevel = statsState.level;
       updatePlayerInfoUI();
       statsState.health = clampHealthSegments(statsState.health, statsState.level);
       updateHealthUI();
@@ -8515,27 +8623,6 @@ async function main() {
           { id: 'local', model: playerModel },
           ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p?.model }))
         ].filter((entry) => entry.model);
-        const claimedMonsters = new Set();
-        const friendlyDriftMonsterIds = new Set();
-
-        activePlayers.forEach((player) => {
-          let bestMonster = null;
-          let bestDistance = Infinity;
-          livingMonsters.forEach((monster) => {
-            if (claimedMonsters.has(monster.id)) return;
-            if (monster.model?.userData?.mode !== 'friendly') return;
-            const dist = monster.model.position.distanceTo(player.model.position);
-            if (dist < bestDistance) {
-              bestDistance = dist;
-              bestMonster = monster;
-            }
-          });
-          if (bestMonster) {
-            claimedMonsters.add(bestMonster.id);
-            friendlyDriftMonsterIds.add(bestMonster.id);
-          }
-        });
-
         const friendlyAvoidanceZones = [];
         const merchantFriendly = getMerchantFriendlyFeature();
         if (merchantFriendly?.model?.position) {
@@ -8585,7 +8672,7 @@ async function main() {
           }
 
           const aiContext = {
-            enableFriendlyDrift: friendlyDriftMonsterIds.has(monster.id),
+            enableFriendlyDrift: true,
             friendlyAvoidanceZones
           };
 
