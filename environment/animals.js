@@ -3,7 +3,6 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MonsterCharacter } from '../characters/MonsterCharacter.js';
 
-const TARGET_ANIMAL_COUNT = 3;
 const ANIMAL_TYPES = ['Deer'];
 const SPAWN_MIN_RADIUS = 10;
 const SPAWN_MAX_RADIUS = 26;
@@ -87,10 +86,10 @@ function resolveAnimationMap(config = {}, clips = []) {
   };
 }
 
-async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight }) {
+async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight, forcedPosition = null, forcedType = null }) {
   const playerModel = getPlayerModel?.();
   if (!scene || !playerModel?.position) return null;
-  const typeName = ANIMAL_TYPES[animalSpawnCursor % ANIMAL_TYPES.length];
+  const typeName = forcedType || ANIMAL_TYPES[animalSpawnCursor % ANIMAL_TYPES.length];
   animalSpawnCursor += 1;
   const template = await loadAnimalTemplate(typeName);
 
@@ -149,7 +148,15 @@ async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight }) {
   animal.updateHealthBarScale();
 
   let spawnPosition = null;
-  for (let attempt = 0; attempt < SPAWN_ATTEMPTS; attempt += 1) {
+  if (forcedPosition?.clone) {
+    spawnPosition = forcedPosition.clone();
+    const forcedTerrain = getTerrainHeight?.(spawnPosition.x, spawnPosition.z);
+    if (Number.isFinite(forcedTerrain)) {
+      spawnPosition.y = forcedTerrain + 0.4;
+    }
+  }
+
+  for (let attempt = 0; !spawnPosition && attempt < SPAWN_ATTEMPTS; attempt += 1) {
     const angle = Math.random() * Math.PI * 2;
     const radius = randomRange(SPAWN_MIN_RADIUS, SPAWN_MAX_RADIUS);
     const x = playerModel.position.x + Math.cos(angle) * radius;
@@ -254,8 +261,6 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
 
 export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight } = {}) {
   const animals = [];
-  let spawningCount = 0;
-
   const removeAnimal = (entry) => {
     if (!entry?.animal) return;
     const index = animals.indexOf(entry);
@@ -267,24 +272,6 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight } 
       model.parent.remove(model);
     }
     model?.userData?.mixer?.stopAllAction?.();
-  };
-
-  const ensureAnimals = async () => {
-    if (!scene || !getPlayerModel?.()) return;
-    while (animals.length + spawningCount < TARGET_ANIMAL_COUNT) {
-      spawningCount += 1;
-      spawnAnimal({ scene, getPlayerModel, getTerrainHeight })
-        .then((entry) => {
-          if (entry) animals.push(entry);
-        })
-        .catch((error) => {
-          console.warn('Failed to spawn animal.', error);
-        })
-        .finally(() => {
-          spawningCount = Math.max(0, spawningCount - 1);
-        });
-      break;
-    }
   };
 
   const update = (delta) => {
@@ -302,15 +289,28 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight } 
       }
       updateAnimalMovement({ animal, config: entry.config || {}, getPlayerModel, getTerrainHeight, delta });
     }
-    ensureAnimals();
   };
 
   const getAnimals = () => animals.map(entry => entry.animal).filter(Boolean);
 
+  const spawnDeerAt = async (position) => {
+    const entry = await spawnAnimal({
+      scene,
+      getPlayerModel,
+      getTerrainHeight,
+      forcedPosition: position || null,
+      forcedType: "Deer"
+    });
+    if (entry) {
+      animals.push(entry);
+    }
+    return entry?.animal || null;
+  };
+
   return {
     update,
-    ensureAnimals,
     getAnimals,
-    removeAnimal
+    removeAnimal,
+    spawnDeerAt
   };
 }

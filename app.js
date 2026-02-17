@@ -64,6 +64,7 @@ import {
   initMerchantPanelFeature,
   updateMerchantUIFeature,
   initMerchantFeature,
+  spawnMerchantAtFeature,
   getMerchantFriendlyFeature,
   setMerchantHostFeature,
   setMerchantRoomFeature,
@@ -2337,7 +2338,6 @@ async function main() {
     getPlayerModel: () => playerModel,
     getTerrainHeight
   });
-  await animalManager.ensureAnimals();
   animals = animalManager.getAnimals();
   window.animals = animals;
   let didInitialGpsSnap = false;
@@ -2403,7 +2403,8 @@ async function main() {
     getTerrainHeight,
     liftPositionToBuildingTop,
     isHost,
-    debug: window.DEBUG_FRIENDLY_PERSIST
+    debug: window.DEBUG_FRIENDLY_PERSIST,
+    onSpawnEvent: handleCharacterSpawnEvent
   });
   if (multiplayer?.roomId) {
     friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
@@ -2473,6 +2474,41 @@ async function main() {
   };
   window.rebuildBuildingColliders = rebuildBuildingColliders;
 
+  function spawnEncounterMonster(spawnEvent) {
+    if (!spawnEvent?.position) return;
+    const slotId = monsterSlotIds.find((id) => !monsters.some((monster) => monster?.id === id));
+    if (!slotId || spawningSlots.has(slotId) || respawnTimers.has(slotId)) return;
+    const modelPath = getRandomMonsterModel();
+    const yaw = Math.atan2(spawnEvent.direction?.x || 0, spawnEvent.direction?.z || 1);
+    const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
+    spawnMonsterInSlot(slotId, modelPath, null, {
+      position: spawnEvent.position,
+      rotation,
+      skipPersist: false
+    });
+  }
+
+  async function handleCharacterSpawnEvent(spawnEvent) {
+    if (!spawnEvent?.position) return;
+    if (spawnEvent.type === 'merchant') {
+      await spawnMerchantAtFeature({
+        position: spawnEvent.position,
+        scene,
+        attachPhysics: attachMonsterPhysics,
+        getTerrainHeight,
+        liftPositionToBuildingTop
+      });
+      return;
+    }
+    if (spawnEvent.type === 'monster') {
+      spawnEncounterMonster(spawnEvent);
+      return;
+    }
+    if (spawnEvent.type === 'animal') {
+      await animalManager?.spawnDeerAt?.(spawnEvent.position);
+      return;
+    }
+  }
 
 
   const getMonsterSpawnPosition = () => {
@@ -8470,7 +8506,6 @@ async function main() {
 
     if (isHostNow) {
       if (monstersSeeded) {
-        ensureMonsters();
         const livingMonsters = monsters.filter(monster => monster?.model && !monster.isDead);
         const activePlayers = [
           { id: 'local', model: playerModel },
