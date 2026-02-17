@@ -49,9 +49,10 @@ const TREE_CLIMB_HALF_WIDTH = 0.6;
 const TREE_CLIMB_HALF_DEPTH = 0.6;
 const TREE_CLIMB_ENTRY_RADIUS = 1.0;
 const TREE_CLIMB_ENTRY_HEIGHT = 1.4;
-const TREE_BASE_COLLIDER_RADIUS_MIN = 0.35;
-const TREE_BASE_COLLIDER_RADIUS_FACTOR = 0.32;
-const TREE_BASE_COLLIDER_HALF_HEIGHT = 0.75;
+const TREE_BASE_COLLIDER_RADIUS_MIN = 0.18;
+const TREE_BASE_COLLIDER_RADIUS_MAX = 0.42;
+const TREE_BASE_COLLIDER_RADIUS_FACTOR = 0.12;
+const TREE_BASE_COLLIDER_HALF_HEIGHT = 0.45;
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const ROAD_WIDTHS = {
   footway: 0.4,
@@ -572,14 +573,28 @@ export async function createNature({
     tree.updateWorldMatrix(true, true);
     tempBox.setFromObject(tree);
     if (!Number.isFinite(tempBox.min.x)) return null;
-    const center = getTreeWorldCenter(tree);
-    if (!center) return null;
+    tempBox.getCenter(tempCenter);
     tempBox.getSize(tempSize);
-    const radiusFromBounds = Math.max(tempSize.x, tempSize.z) * TREE_BASE_COLLIDER_RADIUS_FACTOR;
-    const colliderRadius = Math.max(TREE_BASE_COLLIDER_RADIUS_MIN, radiusFromBounds);
-    const halfHeight = TREE_BASE_COLLIDER_HALF_HEIGHT * Math.max(0.8, tree.scale.x / TREE_SCALE_REFERENCE);
-    const terrainY = getTerrainHeight?.(center.x, center.z) ?? tree.position.y;
-    const rbDesc = rapier.RigidBodyDesc.fixed().setTranslation(center.x, terrainY + halfHeight, center.z);
+
+    const trunkWidthEstimate = Math.min(tempSize.x, tempSize.z);
+    const radiusFromBounds = trunkWidthEstimate * TREE_BASE_COLLIDER_RADIUS_FACTOR;
+    const colliderRadius = THREE.MathUtils.clamp(
+      radiusFromBounds,
+      TREE_BASE_COLLIDER_RADIUS_MIN,
+      TREE_BASE_COLLIDER_RADIUS_MAX
+    );
+
+    // Use unshifted bounds center for XZ so collider follows the actual tree model offset,
+    // and keep it short so it only blocks near the base/trunk.
+    const centerX = tempCenter.x;
+    const centerZ = tempCenter.z;
+    const halfHeight = THREE.MathUtils.clamp(
+      TREE_BASE_COLLIDER_HALF_HEIGHT * (tree.scale.x / TREE_SCALE_REFERENCE),
+      0.3,
+      0.75
+    );
+    const terrainY = getTerrainHeight?.(centerX, centerZ) ?? tree.position.y;
+    const rbDesc = rapier.RigidBodyDesc.fixed().setTranslation(centerX, terrainY + halfHeight, centerZ);
     const rb = rapierWorld.createRigidBody(rbDesc);
     const colliderDesc = rapier.ColliderDesc.cylinder(halfHeight, colliderRadius)
       .setFriction(0.9)
