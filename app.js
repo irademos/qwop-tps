@@ -2338,7 +2338,6 @@ async function main() {
     getPlayerModel: () => playerModel,
     getTerrainHeight
   });
-  await animalManager.ensureAnimals();
   animals = animalManager.getAnimals();
   window.animals = animals;
   let didInitialGpsSnap = false;
