@@ -1662,6 +1662,7 @@ export class PlayerControls {
     this.activeClimbArea = area;
     this.canJump = false;
     this.currentSpecialAction = null;
+    window.natureController?.setTreeColliderEnabled?.(false);
   }
 
   stopClimbing() {
@@ -1677,6 +1678,7 @@ export class PlayerControls {
     }
     this.isClimbing = false;
     this.activeClimbArea = null;
+    window.natureController?.setTreeColliderEnabled?.(true);
   }
 
   isMovingTowardClimbArea(area, movement) {

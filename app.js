@@ -609,7 +609,7 @@ async function main() {
   const WOOD_DROP_LIFT = 0.12;
   const TREE_HITS_TO_CUT = 3;
   const TREE_SWING_TILT_STEP = 0.08;
-  const TREE_HIT_RANGE_BOOST = 0.8;
+  const TREE_HIT_RANGE_BOOST = 1.8;
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 60;
@@ -2322,6 +2322,7 @@ async function main() {
     spawnApplePickup: appleController?.spawnPickup,
     removeApplePickup: appleController?.removePickup
   });
+  window.natureController = natureController;
   natureController?.update(playerModel?.position);
   // await createCabin({ scene, getTerrainHeight });
   mushroomController = await createMushrooms({
