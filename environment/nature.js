@@ -321,6 +321,7 @@ export async function createNature({
   const tempAreaCenter = new THREE.Vector3();
   const tempWorldToLocal = new THREE.Vector3();
   const tempApplePosition = new THREE.Vector3();
+  const tempTreeWorldScale = new THREE.Vector3();
   const tempAxisY = new THREE.Vector3(0, 1, 0);
   const climbDirections = [
     new THREE.Vector3(1, 0, 0),
@@ -756,6 +757,11 @@ export async function createNature({
                     parent: tree
                   });
                   if (pickup) {
+                    tree.getWorldScale(tempTreeWorldScale);
+                    const worldScaleX = Math.abs(tempTreeWorldScale.x);
+                    if (worldScaleX > Number.EPSILON) {
+                      pickup.mesh.scale.multiplyScalar(1 / worldScaleX);
+                    }
                     tileApplePickups.push(pickup);
                     tree.userData.applePickups.push(pickup);
                   }
