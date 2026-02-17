@@ -22,6 +22,11 @@ const TREE_CLIMB_RIGHT_SHIFT_BY_TYPE = {
   5: -2.5  // scary/dead
 };
 
+const TREE_COLLIDER_RIGHT_SHIFT_BY_TYPE = {
+  0: 2.7, // eucalyptus
+  5: -2.5  // scary/dead
+};
+
 const TREE_CLIMB_OVERRIDES = {
   0: { halfWidth: 0.4, halfDepth: 0.75, entryHeight: 0.0, maxYPad: 3.0 }, // eucalyptus
   5: { halfWidth: 0.75, halfDepth: 0.75, entryHeight: 0.0, minYPad: 0.0, maxYPad: 6.4 }  // dead/scary
@@ -584,10 +589,14 @@ export async function createNature({
       TREE_BASE_COLLIDER_RADIUS_MAX
     );
 
-    // Use unshifted bounds center for XZ so collider follows the actual tree model offset,
-    // and keep it short so it only blocks near the base/trunk.
-    const centerX = tempCenter.x;
-    const centerZ = tempCenter.z;
+    const typeIndex = tree.userData?.treeTypeIndex;
+    const shift = TREE_COLLIDER_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
+    const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
+    tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
+
+    // Keep collider short so it only blocks near the base/trunk.
+    const centerX = tempCenter.x + tempTreeRight.x * shift * scaleFactor;
+    const centerZ = tempCenter.z + tempTreeRight.z * shift * scaleFactor;
     const halfHeight = THREE.MathUtils.clamp(
       TREE_BASE_COLLIDER_HALF_HEIGHT * (tree.scale.x / TREE_SCALE_REFERENCE),
       0.3,
