@@ -2474,7 +2474,7 @@ async function main() {
   };
   window.rebuildBuildingColliders = rebuildBuildingColliders;
 
-  const spawnEncounterMonster = (spawnEvent) => {
+  function spawnEncounterMonster(spawnEvent) {
     if (!spawnEvent?.position) return;
     const slotId = monsterSlotIds.find((id) => !monsters.some((monster) => monster?.id === id));
     if (!slotId || spawningSlots.has(slotId) || respawnTimers.has(slotId)) return;
@@ -2486,9 +2486,9 @@ async function main() {
       rotation,
       skipPersist: false
     });
-  };
+  }
 
-  const handleCharacterSpawnEvent = async (spawnEvent) => {
+  async function handleCharacterSpawnEvent(spawnEvent) {
     if (!spawnEvent?.position) return;
     if (spawnEvent.type === 'merchant') {
       await spawnMerchantAtFeature({
@@ -2508,7 +2508,7 @@ async function main() {
       await animalManager?.spawnDeerAt?.(spawnEvent.position);
       return;
     }
-  };
+  }
 
 
   const getMonsterSpawnPosition = () => {
