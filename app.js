@@ -4071,7 +4071,9 @@ async function main() {
     if (!pickup?.mesh) return false;
     if (playerControls?.playerModel) {
       const playerPosition = playerControls.playerModel.position;
-      const applePosition = pickup.mesh.position;
+      const applePosition = pickup.mesh.getWorldPosition
+        ? pickup.mesh.getWorldPosition(tempTreePosition)
+        : pickup.mesh.position;
       const horizontalDistance = Math.hypot(
         playerPosition.x - applePosition.x,
         playerPosition.z - applePosition.z
