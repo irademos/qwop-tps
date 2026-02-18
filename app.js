@@ -2865,6 +2865,16 @@ async function main() {
     });
   };
 
+  function resolvePersistedMonsterModelPath(record, fallbackModelPath = null) {
+    const modelPath = typeof record?.modelPath === 'string' ? record.modelPath.trim() : '';
+    if (modelPath) return modelPath;
+
+    const legacyType = typeof record?.type === 'string' ? record.type.trim() : '';
+    if (legacyType.startsWith('/models/')) return legacyType;
+
+    return fallbackModelPath;
+  }
+
   function applyMonsterRecord(record, recordId, { applyTransform = false } = {}) {
     if (!record) return;
     const slotId = record.id || recordId;
@@ -2894,7 +2904,7 @@ async function main() {
 
     if (incomingVersion != null && incomingVersion < existingVersion) return;
 
-    const modelPath = record.type || record.modelPath || existing?.modelPath;
+    const modelPath = resolvePersistedMonsterModelPath(record, existing?.modelPath);
     if (!modelPath) return;
 
     const needsSpawn = !existing || existing.modelPath !== modelPath;
