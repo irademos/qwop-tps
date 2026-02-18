@@ -5679,7 +5679,7 @@ async function main() {
     if (!cfg) return;
 
     const elapsed = Date.now() - activeAttack.start;
-    const inHitWindow = elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow && !activeAttack.hasHit;
+    const inHitWindow = elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow;
 
     if (!inHitWindow) {
       if (attackWindowMists.length) {
@@ -9123,6 +9123,8 @@ async function main() {
       }
     }
 
+    updateAttackWindowMist({ scene, playerModel });
+
     updateMeleeAttacks({
       playerModel,
       otherPlayers,
@@ -9136,7 +9138,6 @@ async function main() {
       onEntityHit: handleCombatEntityHit
     });
 
-    updateAttackWindowMist({ scene, playerModel });
     updateHitRibbonBursts({ scene, deltaSeconds: frameDelta });
 
     renderer.render(scene, camera);
