@@ -1539,6 +1539,7 @@ export class PlayerControls {
   playAction(actionName) {
     if (!this.playerModel) return;
     const resolvedAction = actionName === 'mutantPunch' && this.getEquippedSword() ? 'swordSlash' : actionName;
+    const swordAttackActions = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
     const actions = this.playerModel.userData.actions;
     if (!actions || !actions[resolvedAction]) return;
     if (ACTION_LOCKED_ATTACKS.includes(resolvedAction) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return;
@@ -1560,9 +1561,9 @@ export class PlayerControls {
     this.currentSpecialAction = resolvedAction;
 
     if (["mutantPunch", "swordSlash", "swordSlashLeft", "swordSpin", "swordFwdSpin", "leftPunch", "hurricaneKick", "mmaKick", "runningKick"].includes(resolvedAction)) {
-      const isPunch = resolvedAction === 'mutantPunch' || resolvedAction === 'leftPunch' || ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'].includes(resolvedAction);
+      const isPunch = resolvedAction === 'mutantPunch' || resolvedAction === 'leftPunch' || swordAttackActions.includes(resolvedAction);
       const attackName = isPunch && this.getEquippedSword()
-        ? 'swordSlash'
+        ? (swordAttackActions.includes(resolvedAction) ? resolvedAction : 'swordSlash')
         : isPunch
           ? 'mutantPunch'
           : resolvedAction;
