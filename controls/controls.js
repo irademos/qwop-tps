@@ -3,7 +3,7 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from '../environment/water.js';
 import { getSpawnPosition } from '../spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
-import { getKnockbackImpulse } from "../knockback.js";
+import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { QuestManager } from "../quest.js";
 import { loadNippleJs } from '../externalDeps.js';
 
@@ -144,6 +144,7 @@ export class PlayerControls {
     this.isKnocked = false;
     this.knockbackRestYaw = 0;
     this.knockbackEndTime = 0;
+    this.knockbackVelocity = new THREE.Vector3();
     this.freezeEndTime = 0;
     this.wasFrozen = false;
     this.isInvincible = false;
@@ -212,6 +213,7 @@ export class PlayerControls {
     if (this.playerModel) {
       this.playerModel.position.set(this.playerX, this.playerY, this.playerZ);
       this.lastPosition.set(this.playerX, this.playerY, this.playerZ);
+      this.playerModel.userData.isKnocked = false;
     }
     
     const world = window.rapierWorld;
@@ -1590,13 +1592,19 @@ export class PlayerControls {
       this.stopClimbing();
     }
     const { impulse, profile } = getKnockbackImpulse(direction, strength);
+    const { velocity } = getKnockbackMotion(direction, strength);
     if (this.body) {
       this.body.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
+      const vel = this.body.linvel();
+      this.body.setLinvel({ x: velocity.x, y: vel.y, z: velocity.z }, true);
     }
+    this.knockbackVelocity.copy(velocity);
     this.isKnocked = true;
+    this.playerModel.userData.isKnocked = true;
     const now = Date.now();
     this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + profile.recoveryMs);
     this.knockbackRestYaw = this.playerModel.rotation.y;
+    this.playerModel.userData.attack = null;
     const actions = this.playerModel.userData.actions;
     const current = this.playerModel.userData.currentAction;
     const hitAction = actions?.hit;
@@ -1944,11 +1952,15 @@ export class PlayerControls {
     if (this.isKnocked) {
       if (Date.now() >= this.knockbackEndTime) {
         this.isKnocked = false;
+        this.playerModel.userData.isKnocked = false;
+        this.knockbackVelocity.set(0, 0, 0);
         this.playerModel.rotation.set(0, this.knockbackRestYaw || this.playerModel.rotation.y, 0);
         const actions = this.playerModel.userData.actions;
         actions?.hit?.fadeOut(0.2);
         actions?.idle?.reset().fadeIn(0.2).play();
         this.playerModel.userData.currentAction = 'idle';
+      } else {
+        this.body.setLinvel({ x: this.knockbackVelocity.x, y: vel.y, z: this.knockbackVelocity.z }, true);
       }
     } else if (!this.isClimbing) {
       const speed = this.isInWater

@@ -22,6 +22,20 @@ function getStrengthDamage(attackerId, baseDamage) {
   return baseDamage;
 }
 
+function isAttackInterrupted(attacker, attackName) {
+  const model = attacker?.model;
+  if (!model?.userData) return true;
+  if (model.userData.isKnocked) return true;
+  if (model.userData.currentAction === 'hit') return true;
+  const resolved = attackName === 'mutantPunch' && model.userData?.equippedWeaponType === 'sword'
+    ? 'swordSlash'
+    : attackName;
+  if (resolved && model.userData.currentAction && model.userData.currentAction !== resolved) {
+    return true;
+  }
+  return false;
+}
+
 export function updateMeleeAttacks({
   playerModel,
   otherPlayers,
@@ -49,6 +63,10 @@ export function updateMeleeAttacks({
       : info.name;
     const cfg = ATTACKS[attackName];
     if (!cfg) continue;
+    if (isAttackInterrupted(attacker, attackName)) {
+      info.hasHit = true;
+      continue;
+    }
     const elapsed = now - info.start;
     if (elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow && !info.hasHit) {
       let hit = false;
