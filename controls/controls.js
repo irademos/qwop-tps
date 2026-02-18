@@ -176,6 +176,8 @@ export class PlayerControls {
     this.geoBoundHalfSizeM = 8;
     this.geoEdgeEpsM = 0.75;
     this.geoBoundsDebug = null;
+    this.geoBoundsDebugArrow = null;
+    this.geoBoundsLastMoveDirection = new THREE.Vector3(0, 0, 1);
     this.geoBoundsDebugHeight = 2;
     this.gpsMoveTarget = null;
     this.gpsMoveEpsilon = 0.35;
@@ -2003,7 +2005,7 @@ export class PlayerControls {
     }
 
     if (this.geoBoundsCenterXZ && !gpsMoveActive) {
-      const halfSize = this.geoBoundHalfSizeM;
+      const radius = this.geoBoundHalfSizeM;
 
       const shiftX = this.geoBoundsShiftMeters?.x ?? 0;
       const shiftZ = this.geoBoundsShiftMeters?.z ?? 0;
@@ -2016,32 +2018,43 @@ export class PlayerControls {
       let targetX = newX;
       let targetZ = newZ;
 
-      // "Conveyor" push only if player was near the OLD edge
-      if (shiftX > 0 && newX >= prevCenterX + halfSize - edgeEps) { targetX += shiftX; pushedByGeo = true; }
-      else if (shiftX < 0 && newX <= prevCenterX - halfSize + edgeEps) { targetX += shiftX; pushedByGeo = true; }
+      // "Conveyor" push only if player was near the OLD boundary edge
+      const prevDx = newX - prevCenterX;
+      const prevDz = newZ - prevCenterZ;
+      const prevDistance = Math.hypot(prevDx, prevDz);
+      if (prevDistance >= radius - edgeEps) {
+        targetX += shiftX;
+        targetZ += shiftZ;
+        pushedByGeo = (shiftX !== 0) || (shiftZ !== 0);
+      }
 
-      if (shiftZ > 0 && newZ >= prevCenterZ + halfSize - edgeEps) { targetZ += shiftZ; pushedByGeo = true; }
-      else if (shiftZ < 0 && newZ <= prevCenterZ - halfSize + edgeEps) { targetZ += shiftZ; pushedByGeo = true; }
+      const centerDx = targetX - this.geoBoundsCenterXZ.x;
+      const centerDz = targetZ - this.geoBoundsCenterXZ.z;
+      const centerDistance = Math.hypot(centerDx, centerDz);
 
-      const minX = this.geoBoundsCenterXZ.x - halfSize;
-      const maxX = this.geoBoundsCenterXZ.x + halfSize;
-      const minZ = this.geoBoundsCenterXZ.z - halfSize;
-      const maxZ = this.geoBoundsCenterXZ.z + halfSize;
-
-      const clampedX = Math.min(maxX, Math.max(minX, targetX));
-      const clampedZ = Math.min(maxZ, Math.max(minZ, targetZ));
+      let clampedX = targetX;
+      let clampedZ = targetZ;
+      if (centerDistance > radius) {
+        const scale = radius / Math.max(centerDistance, 1e-6);
+        clampedX = this.geoBoundsCenterXZ.x + centerDx * scale;
+        clampedZ = this.geoBoundsCenterXZ.z + centerDz * scale;
+      }
 
       clampedByGeo = (clampedX !== targetX) || (clampedZ !== targetZ);
 
       if (clampedByGeo || clampedX !== newX || clampedZ !== newZ) {
-        // Cancel velocity into the wall (otherwise you'll "fight" the clamp forever)
+        // Cancel outward velocity into the boundary wall.
         const v = this.body.linvel();
         let vx = v.x, vz = v.z;
-
-        if (clampedX <= minX + 1e-6 && vx < 0) vx = 0;
-        if (clampedX >= maxX - 1e-6 && vx > 0) vx = 0;
-        if (clampedZ <= minZ + 1e-6 && vz < 0) vz = 0;
-        if (clampedZ >= maxZ - 1e-6 && vz > 0) vz = 0;
+        if (centerDistance > 1e-6) {
+          const outwardX = centerDx / centerDistance;
+          const outwardZ = centerDz / centerDistance;
+          const outwardVel = vx * outwardX + vz * outwardZ;
+          if (outwardVel > 0) {
+            vx -= outwardX * outwardVel;
+            vz -= outwardZ * outwardVel;
+          }
+        }
 
         this.body.setLinvel({ x: vx, y: v.y, z: vz }, true);
         this.body.setTranslation({ x: clampedX, y: newY, z: clampedZ }, true);
@@ -2523,6 +2536,10 @@ export class PlayerControls {
     }
     this.geoBoundsCenterXZ.x += dxMeters;
     this.geoBoundsCenterXZ.z += dzMeters;
+    const moveDistance = Math.hypot(dxMeters, dzMeters);
+    if (moveDistance > 1e-4) {
+      this.geoBoundsLastMoveDirection.set(dxMeters / moveDistance, 0, dzMeters / moveDistance);
+    }
     this.geoBoundsShiftMeters.x += dxMeters;
     this.geoBoundsShiftMeters.z += dzMeters;
   }
@@ -2544,12 +2561,9 @@ export class PlayerControls {
     if (!position || !this.geoBoundsCenterXZ || !Number.isFinite(this.geoBoundHalfSizeM)) {
       return true;
     }
-    const halfSize = this.geoBoundHalfSizeM;
-    const minX = this.geoBoundsCenterXZ.x - halfSize;
-    const maxX = this.geoBoundsCenterXZ.x + halfSize;
-    const minZ = this.geoBoundsCenterXZ.z - halfSize;
-    const maxZ = this.geoBoundsCenterXZ.z + halfSize;
-    return position.x < minX || position.x > maxX || position.z < minZ || position.z > maxZ;
+    const dx = position.x - this.geoBoundsCenterXZ.x;
+    const dz = position.z - this.geoBoundsCenterXZ.z;
+    return Math.hypot(dx, dz) > this.geoBoundHalfSizeM;
   }
 
   getGpsMoveDirection(position) {
@@ -2570,22 +2584,51 @@ export class PlayerControls {
       if (this.geoBoundsDebug) {
         this.geoBoundsDebug.visible = false;
       }
+      if (this.geoBoundsDebugArrow) {
+        this.geoBoundsDebugArrow.visible = false;
+      }
       return;
     }
     if (!this.geoBoundsDebug) {
-      const geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1));
+      const geometry = new THREE.BufferGeometry().setFromPoints(
+        new THREE.EllipseCurve(0, 0, 1, 1, 0, Math.PI * 2, false, 0)
+          .getPoints(64)
+          .map((point) => new THREE.Vector3(point.x, point.y, 0))
+      );
       const material = new THREE.LineBasicMaterial({ color: 0x1e90ff });
-      this.geoBoundsDebug = new THREE.LineSegments(geometry, material);
-      this.geoBoundsDebug.name = 'geo-bounds-debug';
+      this.geoBoundsDebug = new THREE.LineLoop(geometry, material);
+      this.geoBoundsDebug.name = 'geo-bounds-debug-circle';
       this.geoBoundsDebug.frustumCulled = false;
+      this.geoBoundsDebug.rotation.x = Math.PI / 2;
       this.scene.add(this.geoBoundsDebug);
     }
-    const size = this.geoBoundHalfSizeM * 2;
-    const height = this.geoBoundsDebugHeight;
-    const centerY = position?.y ?? 0;
-    this.geoBoundsDebug.scale.set(size, height, size);
+    if (!this.geoBoundsDebugArrow) {
+      this.geoBoundsDebugArrow = new THREE.ArrowHelper(
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(),
+        1.6,
+        0x1e90ff,
+        0.55,
+        0.35
+      );
+      this.geoBoundsDebugArrow.name = 'geo-bounds-debug-arrow';
+      this.geoBoundsDebugArrow.frustumCulled = false;
+      this.scene.add(this.geoBoundsDebugArrow);
+    }
+    const radius = this.geoBoundHalfSizeM;
+    const centerY = (position?.y ?? 0) + 0.1;
+    this.geoBoundsDebug.scale.set(radius, radius, 1);
     this.geoBoundsDebug.position.set(this.geoBoundsCenterXZ.x, centerY, this.geoBoundsCenterXZ.z);
     this.geoBoundsDebug.visible = true;
+
+    const hasDirection = !!this.geoBoundsLastMoveDirection && this.geoBoundsLastMoveDirection.lengthSq() > 0;
+    const dir = hasDirection
+      ? this.geoBoundsLastMoveDirection.clone().normalize()
+      : new THREE.Vector3(0, 0, 1);
+    this.geoBoundsDebugArrow.setDirection(dir);
+    this.geoBoundsDebugArrow.setLength(Math.max(1.2, radius * 0.45), 0.55, 0.35);
+    this.geoBoundsDebugArrow.position.set(this.geoBoundsCenterXZ.x, centerY + 0.02, this.geoBoundsCenterXZ.z);
+    this.geoBoundsDebugArrow.visible = true;
   }
   
   getCamera() {
