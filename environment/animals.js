@@ -8,6 +8,10 @@ const SPAWN_MIN_RADIUS = 10;
 const SPAWN_MAX_RADIUS = 26;
 const SPAWN_ATTEMPTS = 10;
 const DEATH_REMOVE_DELAY_MS = 15000;
+const DEER_HIT_REACT_ANIMATIONS = [
+  'AnimalArmature|Idle_HitReact_Left',
+  'AnimalArmature|Idle_HitReact_Right'
+];
 
 const loader = new GLTFLoader();
 const animalTemplateCache = new Map();
@@ -76,7 +80,7 @@ function findClip(clips, ...names) {
 function resolveAnimationMap(config = {}, clips = []) {
   const aliases = config.animations || {};
   const pick = (key, ...fallbacks) => findClip(clips, aliases[key], ...fallbacks);
-  return {
+  const animationMap = {
     Idle: pick('Idle', 'Idle', 'AnimalArmature|Idle', 'Idle_2', 'AnimalArmature|Idle_2', 'Idle_Headlow', 'AnimalArmature|Idle_Headlow'),
     Walk: pick('Walk', 'Walk', 'AnimalArmature|Walk'),
     Run: pick('Run', 'Gallop', 'AnimalArmature|Gallop'),
@@ -84,6 +88,13 @@ function resolveAnimationMap(config = {}, clips = []) {
     Death: pick('Death', 'Death', 'AnimalArmature|Death'),
     Hit: pick('Hit', 'Idle_HitReact_Left', 'AnimalArmature|Idle_HitReact_Left', 'Idle_HitReact_Right', 'AnimalArmature|Idle_HitReact_Right')
   };
+  DEER_HIT_REACT_ANIMATIONS.forEach((name, index) => {
+    const clip = findClip(clips, name);
+    if (clip) {
+      animationMap[`HitReact${index + 1}`] = clip;
+    }
+  });
+  return animationMap;
 }
 
 async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight, forcedPosition = null, forcedType = null }) {
@@ -179,11 +190,35 @@ async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight, forcedPosi
     decisionAt: Date.now() + randomRange(1200, 3200),
     stateUntil: Date.now() + randomRange(1800, 4000),
     wanderDir: new THREE.Vector3(),
-    runAwayUntil: 0
+    runAwayUntil: 0,
+    nextHitReactIndex: 0
+  };
+
+  animal.getNextHitAnimationName = () => {
+    if (animal.type !== 'Deer') return 'Hit';
+    const options = ['HitReact1', 'HitReact2'].filter(name => !!animal.actions?.[name]);
+    if (!options.length) {
+      return animal.actions?.Hit ? 'Hit' : null;
+    }
+    const nextIndex = animal.userData?.nextHitReactIndex ?? 0;
+    const animationName = options[nextIndex % options.length];
+    animal.userData.nextHitReactIndex = (nextIndex + 1) % options.length;
+    return animationName;
   };
 
   scene.add(animal.model);
   return { animal, config: template.config };
+}
+
+
+function isHitReactPlaying(animal) {
+  if (!animal?.currentAction || !animal?.actions) return false;
+  if (animal.currentAction === 'Hit') {
+    return !!animal.actions.Hit?.isRunning?.();
+  }
+  if (!animal.currentAction.startsWith('HitReact')) return false;
+  const action = animal.actions[animal.currentAction];
+  return !!action?.isRunning?.();
 }
 
 function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight, delta }) {
@@ -229,6 +264,8 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
     }
   }
 
+  const hitReactLocked = isHitReactPlaying(animal);
+
   if (data.state === 'runAway') {
     const direction = new THREE.Vector3().subVectors(animal.model.position, playerModel.position).setY(0);
     if (direction.lengthSq() < 0.0001) {
@@ -237,17 +274,23 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
     direction.normalize();
     animal.model.position.addScaledVector(direction, runSpeed * delta);
     animal.model.lookAt(animal.model.position.clone().add(direction));
-    animal.playAnimation('Run', 0.12);
+    if (!hitReactLocked) {
+      animal.playAnimation('Run', 0.12);
+    }
   } else if (data.state === 'attack') {
-    animal.playAnimation('Weapon', 0.08);
+    if (!hitReactLocked) {
+      animal.playAnimation('Weapon', 0.08);
+    }
   } else if (data.state === 'walk') {
     if (!data.wanderDir || data.wanderDir.lengthSq() < 0.0001) {
       data.wanderDir = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
     }
     animal.model.position.addScaledVector(data.wanderDir, walkSpeed * delta);
     animal.model.lookAt(animal.model.position.clone().add(data.wanderDir));
-    animal.playAnimation('Walk', 0.15);
-  } else {
+    if (!hitReactLocked) {
+      animal.playAnimation('Walk', 0.15);
+    }
+  } else if (!hitReactLocked) {
     animal.playAnimation('Idle', 0.15);
   }
 
@@ -259,7 +302,7 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   animal.update(delta);
 }
 
-export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight } = {}) {
+export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, onAnimalRemoved } = {}) {
   const animals = [];
   const removeAnimal = (entry) => {
     if (!entry?.animal) return;
@@ -268,10 +311,15 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight } 
       animals.splice(index, 1);
     }
     const model = entry.animal.model;
+    const wasDead = !!entry.animal.isDead;
+    const lastPosition = model?.position?.clone?.() || null;
     if (model?.parent) {
       model.parent.remove(model);
     }
     model?.userData?.mixer?.stopAllAction?.();
+    if (wasDead) {
+      onAnimalRemoved?.({ animal: entry.animal, wasDead, position: lastPosition });
+    }
   };
 
   const removeAnimalById = (animalId) => {

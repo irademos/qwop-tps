@@ -606,9 +606,14 @@ async function main() {
   const PICKUP_RADIUS = 1.2;
   const APPLE_PICKUP_RADIUS = 3;
   const WOOD_ITEM_ID = 'wood';
+  const MEAT_ITEM_ID = 'meat';
   const LIFE_POTION_ITEM_ID = 'life_potion';
   const MANA_POTION_ITEM_ID = 'mana_potion';
   const WOOD_PICKUP_RADIUS = 3;
+  const MEAT_PICKUP_RADIUS = 3;
+  const MEAT_HEALTH_SEGMENTS = 4;
+  const MEAT_HUNGER_GAIN = 35;
+  const MEAT_ENERGY_GAIN = 45;
   const WOOD_DROP_LIFT = 0.12;
   const TREE_HITS_TO_CUT = 3;
   const TREE_SWING_TILT_STEP = 0.08;
@@ -678,9 +683,11 @@ async function main() {
   let appleController = null;
   let applePickups = [];
   let woodPickups = [];
+  let meatPickups = [];
   const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
   const appleItemIds = new Set([APPLE_ITEM_ID]);
   const woodItemIds = new Set([WOOD_ITEM_ID]);
+  const meatItemIds = new Set([MEAT_ITEM_ID]);
   const potionItemIds = new Set([LIFE_POTION_ITEM_ID, MANA_POTION_ITEM_ID]);
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
@@ -2314,6 +2321,7 @@ async function main() {
   applePickups = appleController?.pickups || [];
   window.applePickups = applePickups;
   window.woodPickups = woodPickups;
+  window.meatPickups = meatPickups;
   natureController = await createNature({
     scene,
     playerModel,
@@ -2342,7 +2350,15 @@ async function main() {
   animalManager = createAnimalManager({
     scene,
     getPlayerModel: () => playerModel,
-    getTerrainHeight
+    getTerrainHeight,
+    onAnimalRemoved: ({ animal, wasDead, position }) => {
+      if (!wasDead || !position) return;
+      for (let i = 0; i < 2; i += 1) {
+        const angle = (i / 2) * Math.PI * 2;
+        const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
+        spawnMeatPickup(position.clone().add(offset));
+      }
+    }
   });
   animals = animalManager.getAnimals();
   window.animals = animals;
@@ -3386,6 +3402,10 @@ async function main() {
     name: 'Wood',
     icon: ''
   };
+  inventoryCatalog[MEAT_ITEM_ID] = {
+    name: 'Meat',
+    icon: ''
+  };
   MUSHROOM_ENTRIES.forEach((entry) => {
     inventoryCatalog[entry.id] = {
       name: entry.name,
@@ -3493,7 +3513,8 @@ async function main() {
   const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
   const isAppleItem = (itemId) => appleItemIds.has(itemId);
   const isWoodItem = (itemId) => woodItemIds.has(itemId);
-  const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId);
+  const isMeatItem = (itemId) => meatItemIds.has(itemId);
+  const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId) || isMeatItem(itemId);
   const isPotionItem = (itemId) => potionItemIds.has(itemId);
   const getInventoryItemActions = (itemId) => {
     if (isFoodItem(itemId)) {
@@ -4111,6 +4132,27 @@ async function main() {
     return true;
   }
 
+
+  function pickupMeat(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const playerPosition = playerControls.playerModel.position;
+      const meatPosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - meatPosition.x,
+        playerPosition.z - meatPosition.z
+      );
+      if (horizontalDistance > MEAT_PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeWoodPickup(pickup);
+    const index = meatPickups.indexOf(pickup);
+    if (index >= 0) {
+      meatPickups.splice(index, 1);
+    }
+    return true;
+  }
+
   function spawnMushroomPickup(itemId, position) {
     if (!mushroomController?.spawnPickup || !position) return null;
     return mushroomController.spawnPickup(itemId, position);
@@ -4142,6 +4184,31 @@ async function main() {
     scene.add(mesh);
     const pickup = { id: WOOD_ITEM_ID, mesh };
     woodPickups.push(pickup);
+    return pickup;
+  }
+
+
+  function spawnMeatPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (Number.isFinite(terrainHeight)) {
+      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
+    }
+    const geometry = new THREE.BoxGeometry(1.1, 0.45, 0.7);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x6b3f23,
+      roughness: 0.85,
+      metalness: 0.02
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.position.copy(spawnPos);
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(mesh);
+    const pickup = { id: MEAT_ITEM_ID, mesh };
+    meatPickups.push(pickup);
     return pickup;
   }
 
@@ -4637,7 +4704,9 @@ async function main() {
       if (!dropPosition) return;
       const pickup = isMushroomItem(itemId)
         ? spawnMushroomPickup(itemId, dropPosition)
-        : spawnApplePickup(dropPosition);
+        : isAppleItem(itemId)
+        ? spawnApplePickup(dropPosition)
+        : spawnMeatPickup(dropPosition);
       if (!pickup) return;
       removeFromInventory(itemId, 1);
       return;
@@ -4724,6 +4793,10 @@ async function main() {
       setStat('health', statsState.health + APPLE_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_ENERGY_GAIN, { skipSave: true });
+    } else if (isMeatItem(itemId)) {
+      setStat('health', statsState.health + MEAT_HEALTH_SEGMENTS, { skipSave: true });
+      setStat('hunger', statsState.hunger + MEAT_HUNGER_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + MEAT_ENERGY_GAIN, { skipSave: true });
     }
     lastStatUpdateAt = Date.now();
     removeFromInventory(itemId, 1);
@@ -7920,6 +7993,7 @@ async function main() {
   window.pickupMushroom = pickupMushroom;
   window.pickupApple = pickupApple;
   window.pickupWood = pickupWood;
+  window.pickupMeat = pickupMeat;
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -8493,6 +8567,12 @@ async function main() {
         const pickup = woodPickups[i];
         if (!pickup?.mesh) {
           woodPickups.splice(i, 1);
+        }
+      }
+      for (let i = meatPickups.length - 1; i >= 0; i--) {
+        const pickup = meatPickups[i];
+        if (!pickup?.mesh) {
+          meatPickups.splice(i, 1);
         }
       }
     }

@@ -1050,7 +1050,8 @@ function renderInventory() {
     autumnSword: '🗡️',
     lantern: '🏮',
     apple: '🍎',
-    wood: '🪵'
+    wood: '🪵',
+    meat: '🥩'
   };
 
   elements.inventoryGrid.innerHTML = '';
