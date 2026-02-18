@@ -1383,7 +1383,8 @@ export class PlayerControls {
     const applePickups = Array.isArray(window.applePickups) ? window.applePickups : [];
     applePickups.forEach((pickup) => {
       if (!pickup?.mesh || !pickup.mesh.visible) return;
-      const dist = playerPos.distanceTo(pickup.mesh.position);
+      const pickupPosition = pickup.mesh.getWorldPosition?.(new THREE.Vector3()) ?? pickup.mesh.position;
+      const dist = playerPos.distanceTo(pickupPosition);
       consider(dist, {
         type: 'apple',
         pickup,
