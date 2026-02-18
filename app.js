@@ -2859,11 +2859,16 @@ async function main() {
     if (recordIsDead && isHost) {
       const existing = monsters.find(entry => entry.id === slotId);
       if (existing) {
-        cleanupMonster(existing);
-        monsters = monsters.filter(entry => entry && entry.id !== slotId);
-        window.monsters = monsters;
+        existing.applyPersistedState?.({
+          hp: record.hp,
+          alive: false,
+          level: record.level,
+          version: Number.isFinite(record.version) ? record.version : null
+        });
+        if (!existing.isDead) {
+          existing.markDead?.();
+        }
       }
-      removeMonsterRecord(slotId);
       return;
     }
 
@@ -8608,18 +8613,26 @@ async function main() {
 
     // 2) AI can still be throttled, but pass a real delta when you DO run it
     const aiNowMs = Date.now();
-    monsters.forEach(monster => {
-      if (!monster?.model) return;
-      if (monster.shouldRemoveAfterDeath?.(aiNowMs)) {
-        cleanupMonster(monster);
+    const isHostNow = !multiplayer || multiplayer.isHost;
+    let removedDeadMonsters = false;
+    monsters = monsters.filter(monster => {
+      if (!monster?.model) return true;
+      if (!monster.shouldRemoveAfterDeath?.(aiNowMs)) return true;
+      cleanupMonster(monster);
+      if (isHostNow && monster.id) {
+        removeMonsterRecord(monster.id);
       }
+      removedDeadMonsters = true;
+      return false;
     });
+    if (removedDeadMonsters) {
+      window.monsters = monsters;
+    }
     if (animalManager) {
       animalManager.update(mixerDelta);
       animals = animalManager.getAnimals();
       window.animals = animals;
     }
-    const isHostNow = !multiplayer || multiplayer.isHost;
 
     if (isHostNow) {
       if (monstersSeeded) {
