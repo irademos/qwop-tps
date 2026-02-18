@@ -759,11 +759,11 @@ export async function createNature({
               tempBox.getCenter(tempCenter);
               const height = tempSize.y;
               if (height > 0) {
-                const radius = Math.max(0.8, Math.max(tempSize.x, tempSize.z) * 0.45);
+                const radius = Math.max(0.8, Math.max(tempSize.x, tempSize.z) * 0.18);
                 for (let i = 0; i < 2; i += 1) {
                   const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
                   const distance = radius * (0.55 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.35);
-                  const heightFactor = 0.65 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.3;
+                  const heightFactor = 0.4 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.3;
                   tempApplePosition.set(
                     tempCenter.x + Math.cos(angle) * distance,
                     tempBox.min.y + height * heightFactor,
