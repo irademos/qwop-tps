@@ -6587,20 +6587,18 @@ async function main() {
 
   const getClosestPointWithinGeoBounds = (position) => {
     if (!position || !playerControls?.geoBoundsCenterXZ) return null;
-    const halfSize = playerControls.geoBoundHalfSizeM;
-    if (!Number.isFinite(halfSize)) return null;
+    const radius = playerControls.geoBoundHalfSizeM;
+    if (!Number.isFinite(radius)) return null;
     if (!Number.isFinite(position.x) || !Number.isFinite(position.z)) return null;
-    const minX = playerControls.geoBoundsCenterXZ.x - halfSize;
-    const maxX = playerControls.geoBoundsCenterXZ.x + halfSize;
-    const minZ = playerControls.geoBoundsCenterXZ.z - halfSize;
-    const maxZ = playerControls.geoBoundsCenterXZ.z + halfSize;
-    const clampedX = Math.min(maxX, Math.max(minX, position.x));
-    const clampedZ = Math.min(maxZ, Math.max(minZ, position.z));
-    if (clampedX === position.x && clampedZ === position.z) return null;
+    const dx = position.x - playerControls.geoBoundsCenterXZ.x;
+    const dz = position.z - playerControls.geoBoundsCenterXZ.z;
+    const distance = Math.hypot(dx, dz);
+    if (!Number.isFinite(distance) || distance <= radius) return null;
+    const scale = radius / Math.max(distance, 1e-6);
     return {
-      x: clampedX,
+      x: playerControls.geoBoundsCenterXZ.x + dx * scale,
       y: position.y ?? playerModel?.position?.y ?? 0,
-      z: clampedZ
+      z: playerControls.geoBoundsCenterXZ.z + dz * scale
     };
   };
 
