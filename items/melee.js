@@ -3,10 +3,10 @@ import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from '../healthUtils.js
 
 export const ATTACKS = {
   mutantPunch: { damage: 1, range: 1.5, hitTime: 300, hitWindow: 300, knockbackStrength: 2 },
-  swordSlash: { damage: 2, range: 3.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3 },
-  swordSlashLeft: { damage: 2, range: 3.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3 },
-  swordFwdSpin: { damage: 3, range: 3.5, hitTime: 300, hitWindow: 500, knockbackStrength: 5 },
-  swordSpin: { damage: 4, range: 4.0, hitTime: 400, hitWindow: 300, knockbackStrength: 7 },
+  swordSlash: { damage: 2, range: 2.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3 },
+  swordSlashLeft: { damage: 2, range: 2.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3 },
+  swordFwdSpin: { damage: 3, range: 2.0, hitTime: 300, hitWindow: 500, knockbackStrength: 5 },
+  swordSpin: { damage: 4, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 12 },
   hurricaneKick: { damage: 1, range: 2.0, hitTime: 300, hitWindow: 800, knockbackStrength: 5 },
   mmaKick: { damage: 1, range: 1.7, hitTime: 300, hitWindow: 300, knockbackStrength: 8 }
 };
