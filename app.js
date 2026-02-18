@@ -16,6 +16,7 @@ import {
   updateProjectiles,
   removeProjectileAt,
   spawnArrowProjectile,
+  ATTACKS,
   updateMeleeAttacks,
   Torch,
   TORCH_PICKUP_LOCATION,
@@ -174,6 +175,10 @@ const BOMB_BASE_DAMAGE = 6;
 const BOMB_KNOCKBACK_STRENGTH = 6;
 const BOMB_MIST_LIFETIME_MS = 8000;
 const BOMB_MIST_PARTICLE_COUNT = 35;
+const ATTACK_WINDOW_MIST_OPACITY = 0.38;
+const ATTACK_WINDOW_MIST_HEIGHT = 1.4;
+const HIT_RIBBON_STREAK_COUNT = 9;
+const HIT_RIBBON_LIFETIME_MS = 260;
 const TORCH_ITEM_ID = 'torch';
 const TORCH_HEALTH_KEY = 'healths';
 const DEFAULT_TORCH_HEALTH = 100;
@@ -665,6 +670,8 @@ async function main() {
   const projectiles = [];
   const iceMists = [];
   const bombMists = [];
+  const attackWindowMists = [];
+  const hitRibbonBursts = [];
   const treeFires = [];
   const ammoPickups = [];
   const droppedAmmoPickups = new Map();
@@ -934,6 +941,11 @@ async function main() {
   const handleMonsterDamage = (monster) => {
     if (!multiplayer?.isHost || !monster) return;
     persistMonsterHp(monster);
+  };
+
+  const handleCombatEntityHit = ({ targetPosition }) => {
+    if (!targetPosition) return;
+    spawnHitRibbonBurst(scene, targetPosition);
   };
 
   const removeRemotePlayer = (remoteId, reason = 'unknown') => {
@@ -5418,6 +5430,8 @@ async function main() {
   const tempLobDirection = new THREE.Vector3();
   const tempMistDirection = new THREE.Vector3();
   const tempMistMoveStep = new THREE.Vector3();
+  const tempAttackForward = new THREE.Vector3();
+  const tempAttackCenter = new THREE.Vector3();
 
   const createMistPool = ({ particleCount, color, emissive, opacity, emissiveIntensity, spread, yRandom, sizeRange }) => {
     const available = [];
@@ -5638,6 +5652,147 @@ async function main() {
       mist.material.emissiveIntensity = THREE.MathUtils.lerp(0.5, 0, progress);
       if (ageMs >= mist.lifetimeMs) {
         removeMist(i);
+      }
+    }
+  }
+
+  function updateAttackWindowMist({ scene, playerModel }) {
+    if (!scene || !playerModel?.userData) return;
+    const activeAttack = playerModel.userData.attack;
+    if (!activeAttack?.name || !Number.isFinite(activeAttack.start)) {
+      if (attackWindowMists.length) {
+        for (let i = attackWindowMists.length - 1; i >= 0; i--) {
+          const entry = attackWindowMists[i];
+          if (entry?.mesh?.parent) {
+            entry.mesh.parent.remove(entry.mesh);
+          }
+          attackWindowMists.splice(i, 1);
+        }
+      }
+      return;
+    }
+
+    const attackName = activeAttack.name === 'mutantPunch' && playerModel.userData?.equippedWeaponType === 'sword'
+      ? 'swordSlash'
+      : activeAttack.name;
+    const cfg = ATTACKS[attackName];
+    if (!cfg) return;
+
+    const elapsed = Date.now() - activeAttack.start;
+    const inHitWindow = elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow && !activeAttack.hasHit;
+
+    if (!inHitWindow) {
+      if (attackWindowMists.length) {
+        for (let i = attackWindowMists.length - 1; i >= 0; i--) {
+          const entry = attackWindowMists[i];
+          if (entry?.mesh?.parent) {
+            entry.mesh.parent.remove(entry.mesh);
+          }
+          attackWindowMists.splice(i, 1);
+        }
+      }
+      return;
+    }
+
+    if (!attackWindowMists.length) {
+      const geometry = new THREE.CylinderGeometry(1, 1, ATTACK_WINDOW_MIST_HEIGHT, 24, 1, true);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0xffdd33,
+        emissive: 0xf0bc00,
+        emissiveIntensity: 0.45,
+        transparent: true,
+        opacity: ATTACK_WINDOW_MIST_OPACITY,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.userData.skipTerrainCorrection = true;
+      attackWindowMists.push({ mesh });
+      scene.add(mesh);
+    }
+
+    const entry = attackWindowMists[0];
+    const mesh = entry.mesh;
+    const radius = Math.max(0.4, cfg.range);
+    mesh.scale.set(radius, 1, radius);
+
+    tempAttackForward.set(0, 0, 1).applyQuaternion(playerModel.quaternion);
+    tempAttackForward.y = 0;
+    if (tempAttackForward.lengthSq() < 1e-6) {
+      tempAttackForward.set(0, 0, 1);
+    } else {
+      tempAttackForward.normalize();
+    }
+
+    tempAttackCenter.copy(playerModel.position).addScaledVector(tempAttackForward, radius * 0.5);
+    tempAttackCenter.y += ATTACK_WINDOW_MIST_HEIGHT * 0.5;
+    mesh.position.copy(tempAttackCenter);
+    mesh.rotation.y = Math.atan2(tempAttackForward.x, tempAttackForward.z);
+  }
+
+  function spawnHitRibbonBurst(scene, position) {
+    if (!scene || !position) return;
+    const group = new THREE.Group();
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xff3344,
+      emissive: 0xbb0f20,
+      emissiveIntensity: 0.9,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+
+    const streaks = [];
+    for (let i = 0; i < HIT_RIBBON_STREAK_COUNT; i++) {
+      const geometry = new THREE.PlaneGeometry(0.08, THREE.MathUtils.lerp(0.5, 0.95, Math.random()));
+      const streak = new THREE.Mesh(geometry, material);
+      const angle = (Math.PI * 2 * i) / HIT_RIBBON_STREAK_COUNT + (Math.random() - 0.5) * 0.45;
+      streak.position.set(0, THREE.MathUtils.lerp(0.15, 0.55, Math.random()), 0);
+      streak.rotation.x = -Math.PI / 2;
+      streak.rotation.z = angle;
+      const direction = new THREE.Vector3(Math.cos(angle), 0.08 + Math.random() * 0.22, Math.sin(angle)).normalize();
+      const speed = THREE.MathUtils.lerp(4.0, 7.2, Math.random());
+      streaks.push({ mesh: streak, velocity: direction.multiplyScalar(speed) });
+      group.add(streak);
+    }
+
+    group.position.copy(position);
+    group.userData.skipTerrainCorrection = true;
+    scene.add(group);
+
+    hitRibbonBursts.push({
+      group,
+      material,
+      streaks,
+      spawnTime: performance.now(),
+      lifetimeMs: HIT_RIBBON_LIFETIME_MS
+    });
+  }
+
+  function updateHitRibbonBursts({ scene, deltaSeconds }) {
+    if (!hitRibbonBursts.length) return;
+    const now = performance.now();
+
+    for (let i = hitRibbonBursts.length - 1; i >= 0; i--) {
+      const burst = hitRibbonBursts[i];
+      const ageMs = now - burst.spawnTime;
+      const progress = Math.min(1, ageMs / burst.lifetimeMs);
+      burst.material.opacity = THREE.MathUtils.lerp(0.95, 0, progress);
+      burst.material.emissiveIntensity = THREE.MathUtils.lerp(0.9, 0.1, progress);
+
+      burst.streaks.forEach(({ mesh, velocity }) => {
+        tempMistMoveStep.copy(velocity).multiplyScalar(deltaSeconds);
+        mesh.position.add(tempMistMoveStep);
+      });
+
+      if (ageMs >= burst.lifetimeMs) {
+        if (burst.group?.parent) {
+          burst.group.parent.remove(burst.group);
+        }
+        hitRibbonBursts.splice(i, 1);
       }
     }
   }
@@ -8977,8 +9132,12 @@ async function main() {
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage,
       onSwordHit: handleSwordTreeHit,
-      onTorchHit: handleTorchTreeHit
+      onTorchHit: handleTorchTreeHit,
+      onEntityHit: handleCombatEntityHit
     });
+
+    updateAttackWindowMist({ scene, playerModel });
+    updateHitRibbonBursts({ scene, deltaSeconds: frameDelta });
 
     renderer.render(scene, camera);
   }

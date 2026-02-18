@@ -45,7 +45,8 @@ export function updateMeleeAttacks({
   sendMonsterAttack,
   onMonsterHit,
   onSwordHit,
-  onTorchHit
+  onTorchHit,
+  onEntityHit
 }) {
   const now = Date.now();
   const isHost = !multiplayer || multiplayer.isHost;
@@ -85,6 +86,7 @@ export function updateMeleeAttacks({
         const dist = attacker.model.position.distanceTo(target.model.position);
         if (dist <= cfg.range) {
           hit = true;
+          onEntityHit?.({ targetType: target.id === 'local' ? 'player' : 'remotePlayer', targetId: target.id, targetPosition: target.model.position.clone() });
           if (target.id === 'local') {
             window.localHealth = Math.max(0, window.localHealth - attackDamage);
             if (window.playerControls) {
@@ -124,6 +126,7 @@ export function updateMeleeAttacks({
               monster.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
             }
             onMonsterHit?.(monster, { damage: attackDamage, killed, sourceId: attacker.id });
+            onEntityHit?.({ targetType: 'monster', targetId: monster.id, targetPosition: monster.model.position.clone() });
             if (killed && attacker.id === 'local') {
               const withFriend = window.questManager?.isFriendActive?.() ?? false;
               window.onMonsterKill?.(monster, { withFriend });
