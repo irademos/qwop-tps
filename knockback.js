@@ -5,6 +5,8 @@ const MAX_RECOVERY_MS = 5000;
 const MIN_PUSH_SCALE = 0.04;
 const MAX_PUSH_SCALE = 0.18;
 const VERTICAL_IMPULSE_SCALE = 0.2;
+const MIN_TRAVEL_DISTANCE = 0.8;
+const MAX_TRAVEL_DISTANCE = 3.6;
 
 const lerp = (start, end, amount) => start + (end - start) * amount;
 
@@ -20,6 +22,7 @@ export function getKnockbackProfile(strength = 3) {
     strength: clamped,
     recoveryMs: Math.round(lerp(MIN_RECOVERY_MS, MAX_RECOVERY_MS, t)),
     pushScale: lerp(MIN_PUSH_SCALE, MAX_PUSH_SCALE, t),
+    travelDistance: lerp(MIN_TRAVEL_DISTANCE, MAX_TRAVEL_DISTANCE, t),
   };
 }
 
@@ -33,4 +36,23 @@ export function getKnockbackImpulse(direction, strength = 3) {
     impulse.set(0, 0, 0);
   }
   return { impulse, profile };
+}
+
+export function getKnockbackMotion(direction, strength = 3) {
+  const profile = getKnockbackProfile(strength);
+  const horizontalDirection = direction.clone();
+  horizontalDirection.y = 0;
+  if (horizontalDirection.lengthSq() <= 0.000001) {
+    return {
+      velocity: horizontalDirection.set(0, 0, 0),
+      profile,
+    };
+  }
+  horizontalDirection.normalize();
+  const recoverySeconds = Math.max(0.001, profile.recoveryMs / 1000);
+  const speed = profile.travelDistance / recoverySeconds;
+  return {
+    velocity: horizontalDirection.multiplyScalar(speed),
+    profile,
+  };
 }
