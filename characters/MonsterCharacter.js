@@ -156,7 +156,7 @@ export class MonsterCharacter extends CharacterBase {
     this.model.quaternion.copy(rot);
   }
 
-  applyDamage(amount) {
+  applyDamage(amount, options = {}) {
     if (this.isDead) return;
     const damage = Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
     this.health = Math.max(0, this.health - damage);
@@ -166,7 +166,17 @@ export class MonsterCharacter extends CharacterBase {
       this.markDead();
       return true;
     }
-    this.playAnimation("Hit", MOVE_FADE);
+    const requestedHitAnimation = typeof options?.hitAnimationName === 'string'
+      ? options.hitAnimationName
+      : null;
+    const resolvedHitAnimation = requestedHitAnimation
+      || this.getNextHitAnimationName?.()
+      || 'Hit';
+    if (resolvedHitAnimation && this.actions?.[resolvedHitAnimation]) {
+      this.playAnimation(resolvedHitAnimation, MOVE_FADE);
+    } else {
+      this.playAnimation('Hit', MOVE_FADE);
+    }
     return false;
   }
 
