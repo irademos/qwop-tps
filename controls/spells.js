@@ -3,11 +3,10 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // import { SkeletonUtils } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-export const FLY_WINGS_OFFSET = Object.freeze({ x: 0.0, y: -23.0, z: 5.0 });
-// export const FLY_WINGS_SCALE = Object.freeze({ x: 0.0001, y: 0.0001, z: 0.0001 });
-export const FLY_WINGS_SCALE = 0.35;
+export const FLY_WINGS_OFFSET = Object.freeze({ x: 0.0, y: -0.45, z: 0.1 });
+export const FLY_WINGS_SCALE = 0.00525;
 export const FLY_WINGS_ANIMATION_START_TIME = 0;
-export const FLY_WINGS_ANIMATION_STOP_TIME = 12.0;
+export const FLY_WINGS_ANIMATION_STOP_TIME = 4.0;
 export const FLY_WINGS_ANIMATION_SPEED = 1.5;
 const FLY_WINGS_MODEL_URL = '/assets/props/wings.glb';
 const FLY_WINGS_ANIMATION_CLIP = 'Demon Wings Rig|animations';
