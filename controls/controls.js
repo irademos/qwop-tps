@@ -1015,6 +1015,7 @@ export class PlayerControls {
       }
 
       if (e.key === " ") {
+        if (e.repeat) return;
         if (this.parachute) {
           this.removeParachute();
           return;
