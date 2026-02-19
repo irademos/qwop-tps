@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { ATTACKS } from "../items/melee.js";
-import { getKnockbackImpulse } from "../knockback.js";
+import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from "../healthUtils.js";
 
 const AGGRO_RADIUS = 12;
@@ -32,7 +32,7 @@ const HEALTH_BAR_SCALE = new THREE.Vector3(1.2, 0.18, 1);
 const LEVEL_SIZE_STEP = 0.5;
 const LEVEL_SPEED_STEP = 0.08;
 const MONSTER_RUN_SPEED_OFFSET = 1.8;
-const DEATH_REMOVAL_DELAY_MS = 30000;
+const DEATH_REMOVAL_DELAY_MS = 15000;
 const FRIENDLY_APPROACH_BLEND = 0.07;
 const FRIENDLY_DRIFT_LEVEL_SPEED_STEP = 0.06;
 const FRIENDLY_DRIFT_MIN_MULTIPLIER = 0.45;
@@ -52,6 +52,7 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.mixer = mixer;
     this.model.userData.mode = "friendly";
     this.model.userData.direction = new THREE.Vector3();
+    this.model.userData.isKnocked = false;
     this.pivot = this.model?.userData?.pivot ?? this.model;
     this.baseScale = this.pivot.scale.clone();
     this.model.userData.health = DEFAULT_HEALTH;
@@ -73,6 +74,7 @@ export class MonsterCharacter extends CharacterBase {
     this.attackAnimationName = ATTACK_NAME;
     this.isKnocked = false;
     this.knockbackEndTime = 0;
+    this.knockbackVelocity = new THREE.Vector3();
     this.freezeEndTime = 0;
     this.attackDirection = new THREE.Vector3();
     this.attackLungeEndTime = 0;
@@ -154,7 +156,7 @@ export class MonsterCharacter extends CharacterBase {
     this.model.quaternion.copy(rot);
   }
 
-  applyDamage(amount) {
+  applyDamage(amount, options = {}) {
     if (this.isDead) return;
     const damage = Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
     this.health = Math.max(0, this.health - damage);
@@ -164,7 +166,17 @@ export class MonsterCharacter extends CharacterBase {
       this.markDead();
       return true;
     }
-    this.playAnimation("Hit", MOVE_FADE);
+    const requestedHitAnimation = typeof options?.hitAnimationName === 'string'
+      ? options.hitAnimationName
+      : null;
+    const resolvedHitAnimation = requestedHitAnimation
+      || this.getNextHitAnimationName?.()
+      || 'Hit';
+    if (resolvedHitAnimation && this.actions?.[resolvedHitAnimation]) {
+      this.playAnimation(resolvedHitAnimation, MOVE_FADE);
+    } else {
+      this.playAnimation('Hit', MOVE_FADE);
+    }
     return false;
   }
 
@@ -238,12 +250,18 @@ export class MonsterCharacter extends CharacterBase {
     const body = this.body;
     if (!body) return;
     const { impulse, profile } = getKnockbackImpulse(direction, strength);
+    const { velocity } = getKnockbackMotion(direction, strength);
     body.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
+    const vel = body.linvel();
+    body.setLinvel({ x: velocity.x, y: vel.y, z: velocity.z }, true);
+    this.knockbackVelocity.copy(velocity);
     const now = Date.now();
     this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + profile.recoveryMs);
     this.isKnocked = true;
+    this.model.userData.isKnocked = true;
     this.attackStartTime = null;
     this.attackHasHit = false;
+    this.attackAnimationName = ATTACK_NAME;
   }
 
   applyPersistedState(data = {}) {
@@ -337,7 +355,11 @@ export class MonsterCharacter extends CharacterBase {
     if (this.isKnocked) {
       if (now >= this.knockbackEndTime) {
         this.isKnocked = false;
+        this.model.userData.isKnocked = false;
+        this.knockbackVelocity.set(0, 0, 0);
       } else {
+        const vel = body.linvel();
+        body.setLinvel({ x: this.knockbackVelocity.x, y: vel.y, z: this.knockbackVelocity.z }, true);
         this.update(delta);
         return;
       }
@@ -457,7 +479,11 @@ export class MonsterCharacter extends CharacterBase {
     if (this.isKnocked) {
       if (now >= this.knockbackEndTime) {
         this.isKnocked = false;
+        this.model.userData.isKnocked = false;
+        this.knockbackVelocity.set(0, 0, 0);
       } else {
+        const vel = body.linvel();
+        body.setLinvel({ x: this.knockbackVelocity.x, y: vel.y, z: this.knockbackVelocity.z }, true);
         this.update(delta);
         return;
       }

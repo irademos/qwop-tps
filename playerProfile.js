@@ -28,7 +28,8 @@ const DEFAULT_CUSTOMIZATION = {
   hats: { selectedId: null, overrides: {} }
 };
 const DEFAULT_SPELLS = {
-  shield: true
+  shield: true,
+  fly: true
 };
 
 const lastWriteByName = new Map();

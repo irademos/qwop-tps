@@ -16,6 +16,7 @@ import {
   updateProjectiles,
   removeProjectileAt,
   spawnArrowProjectile,
+  ATTACKS,
   updateMeleeAttacks,
   Torch,
   TORCH_PICKUP_LOCATION,
@@ -174,6 +175,11 @@ const BOMB_BASE_DAMAGE = 6;
 const BOMB_KNOCKBACK_STRENGTH = 6;
 const BOMB_MIST_LIFETIME_MS = 8000;
 const BOMB_MIST_PARTICLE_COUNT = 35;
+const ATTACK_WINDOW_MIST_OPACITY = 0.52;
+const ATTACK_WINDOW_MIST_HEIGHT = 1.6;
+const ATTACK_WINDOW_VISUAL_MULTIPLIER = 2;
+const HIT_RIBBON_STREAK_COUNT = 9;
+const HIT_RIBBON_LIFETIME_MS = 260;
 const TORCH_ITEM_ID = 'torch';
 const TORCH_HEALTH_KEY = 'healths';
 const DEFAULT_TORCH_HEALTH = 100;
@@ -606,9 +612,14 @@ async function main() {
   const PICKUP_RADIUS = 1.2;
   const APPLE_PICKUP_RADIUS = 3;
   const WOOD_ITEM_ID = 'wood';
+  const MEAT_ITEM_ID = 'meat';
   const LIFE_POTION_ITEM_ID = 'life_potion';
   const MANA_POTION_ITEM_ID = 'mana_potion';
   const WOOD_PICKUP_RADIUS = 3;
+  const MEAT_PICKUP_RADIUS = 3;
+  const MEAT_HEALTH_SEGMENTS = 4;
+  const MEAT_HUNGER_GAIN = 35;
+  const MEAT_ENERGY_GAIN = 45;
   const WOOD_DROP_LIFT = 0.12;
   const TREE_HITS_TO_CUT = 3;
   const TREE_SWING_TILT_STEP = 0.08;
@@ -660,6 +671,8 @@ async function main() {
   const projectiles = [];
   const iceMists = [];
   const bombMists = [];
+  const attackWindowMists = [];
+  const hitRibbonBursts = [];
   const treeFires = [];
   const ammoPickups = [];
   const droppedAmmoPickups = new Map();
@@ -678,9 +691,11 @@ async function main() {
   let appleController = null;
   let applePickups = [];
   let woodPickups = [];
+  let meatPickups = [];
   const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
   const appleItemIds = new Set([APPLE_ITEM_ID]);
   const woodItemIds = new Set([WOOD_ITEM_ID]);
+  const meatItemIds = new Set([MEAT_ITEM_ID]);
   const potionItemIds = new Set([LIFE_POTION_ITEM_ID, MANA_POTION_ITEM_ID]);
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
@@ -927,6 +942,11 @@ async function main() {
   const handleMonsterDamage = (monster) => {
     if (!multiplayer?.isHost || !monster) return;
     persistMonsterHp(monster);
+  };
+
+  const handleCombatEntityHit = ({ targetPosition }) => {
+    if (!targetPosition) return;
+    spawnHitRibbonBurst(scene, targetPosition);
   };
 
   const removeRemotePlayer = (remoteId, reason = 'unknown') => {
@@ -1383,12 +1403,9 @@ async function main() {
         actions[data.action]?.reset().fadeIn(0.2).play();
         player.model.userData.currentAction = data.action;
         if (['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'hurricaneKick', 'mmaKick'].includes(data.action)) {
-          const swordAttackActions = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
           const attackName = data.action === 'leftPunch'
             ? 'mutantPunch'
-            : swordAttackActions.includes(data.action)
-              ? 'swordSlash'
-              : data.action;
+            : data.action;
           player.model.userData.attack = {
             name: attackName,
             start: Date.now(),
@@ -2317,6 +2334,7 @@ async function main() {
   applePickups = appleController?.pickups || [];
   window.applePickups = applePickups;
   window.woodPickups = woodPickups;
+  window.meatPickups = meatPickups;
   natureController = await createNature({
     scene,
     playerModel,
@@ -2345,7 +2363,15 @@ async function main() {
   animalManager = createAnimalManager({
     scene,
     getPlayerModel: () => playerModel,
-    getTerrainHeight
+    getTerrainHeight,
+    onAnimalRemoved: ({ animal, wasDead, position }) => {
+      if (!wasDead || !position) return;
+      for (let i = 0; i < 2; i += 1) {
+        const angle = (i / 2) * Math.PI * 2;
+        const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
+        spawnMeatPickup(position.clone().add(offset));
+      }
+    }
   });
   animals = animalManager.getAnimals();
   window.animals = animals;
@@ -2852,6 +2878,16 @@ async function main() {
     });
   };
 
+  function resolvePersistedMonsterModelPath(record, fallbackModelPath = null) {
+    const modelPath = typeof record?.modelPath === 'string' ? record.modelPath.trim() : '';
+    if (modelPath) return modelPath;
+
+    const legacyType = typeof record?.type === 'string' ? record.type.trim() : '';
+    if (legacyType.startsWith('/models/')) return legacyType;
+
+    return fallbackModelPath;
+  }
+
   function applyMonsterRecord(record, recordId, { applyTransform = false } = {}) {
     if (!record) return;
     const slotId = record.id || recordId;
@@ -2862,11 +2898,16 @@ async function main() {
     if (recordIsDead && isHost) {
       const existing = monsters.find(entry => entry.id === slotId);
       if (existing) {
-        cleanupMonster(existing);
-        monsters = monsters.filter(entry => entry && entry.id !== slotId);
-        window.monsters = monsters;
+        existing.applyPersistedState?.({
+          hp: record.hp,
+          alive: false,
+          level: record.level,
+          version: Number.isFinite(record.version) ? record.version : null
+        });
+        if (!existing.isDead) {
+          existing.markDead?.();
+        }
       }
-      removeMonsterRecord(slotId);
       return;
     }
 
@@ -2876,7 +2917,7 @@ async function main() {
 
     if (incomingVersion != null && incomingVersion < existingVersion) return;
 
-    const modelPath = record.type || record.modelPath || existing?.modelPath;
+    const modelPath = resolvePersistedMonsterModelPath(record, existing?.modelPath);
     if (!modelPath) return;
 
     const needsSpawn = !existing || existing.modelPath !== modelPath;
@@ -3389,6 +3430,10 @@ async function main() {
     name: 'Wood',
     icon: ''
   };
+  inventoryCatalog[MEAT_ITEM_ID] = {
+    name: 'Meat',
+    icon: ''
+  };
   MUSHROOM_ENTRIES.forEach((entry) => {
     inventoryCatalog[entry.id] = {
       name: entry.name,
@@ -3496,7 +3541,8 @@ async function main() {
   const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
   const isAppleItem = (itemId) => appleItemIds.has(itemId);
   const isWoodItem = (itemId) => woodItemIds.has(itemId);
-  const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId);
+  const isMeatItem = (itemId) => meatItemIds.has(itemId);
+  const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId) || isMeatItem(itemId);
   const isPotionItem = (itemId) => potionItemIds.has(itemId);
   const getInventoryItemActions = (itemId) => {
     if (isFoodItem(itemId)) {
@@ -4114,6 +4160,27 @@ async function main() {
     return true;
   }
 
+
+  function pickupMeat(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const playerPosition = playerControls.playerModel.position;
+      const meatPosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - meatPosition.x,
+        playerPosition.z - meatPosition.z
+      );
+      if (horizontalDistance > MEAT_PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeWoodPickup(pickup);
+    const index = meatPickups.indexOf(pickup);
+    if (index >= 0) {
+      meatPickups.splice(index, 1);
+    }
+    return true;
+  }
+
   function spawnMushroomPickup(itemId, position) {
     if (!mushroomController?.spawnPickup || !position) return null;
     return mushroomController.spawnPickup(itemId, position);
@@ -4145,6 +4212,31 @@ async function main() {
     scene.add(mesh);
     const pickup = { id: WOOD_ITEM_ID, mesh };
     woodPickups.push(pickup);
+    return pickup;
+  }
+
+
+  function spawnMeatPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (Number.isFinite(terrainHeight)) {
+      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
+    }
+    const geometry = new THREE.BoxGeometry(1.1, 0.45, 0.7);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x6b3f23,
+      roughness: 0.85,
+      metalness: 0.02
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.position.copy(spawnPos);
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(mesh);
+    const pickup = { id: MEAT_ITEM_ID, mesh };
+    meatPickups.push(pickup);
     return pickup;
   }
 
@@ -4640,7 +4732,9 @@ async function main() {
       if (!dropPosition) return;
       const pickup = isMushroomItem(itemId)
         ? spawnMushroomPickup(itemId, dropPosition)
-        : spawnApplePickup(dropPosition);
+        : isAppleItem(itemId)
+        ? spawnApplePickup(dropPosition)
+        : spawnMeatPickup(dropPosition);
       if (!pickup) return;
       removeFromInventory(itemId, 1);
       return;
@@ -4727,6 +4821,10 @@ async function main() {
       setStat('health', statsState.health + APPLE_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_ENERGY_GAIN, { skipSave: true });
+    } else if (isMeatItem(itemId)) {
+      setStat('health', statsState.health + MEAT_HEALTH_SEGMENTS, { skipSave: true });
+      setStat('hunger', statsState.hunger + MEAT_HUNGER_GAIN, { skipSave: true });
+      setStat('hunger', statsState.hunger + MEAT_ENERGY_GAIN, { skipSave: true });
     }
     lastStatUpdateAt = Date.now();
     removeFromInventory(itemId, 1);
@@ -5343,6 +5441,7 @@ async function main() {
   const tempLobDirection = new THREE.Vector3();
   const tempMistDirection = new THREE.Vector3();
   const tempMistMoveStep = new THREE.Vector3();
+  const tempAttackMistForward = new THREE.Vector3();
 
   const createMistPool = ({ particleCount, color, emissive, opacity, emissiveIntensity, spread, yRandom, sizeRange }) => {
     const available = [];
@@ -5563,6 +5662,166 @@ async function main() {
       mist.material.emissiveIntensity = THREE.MathUtils.lerp(0.5, 0, progress);
       if (ageMs >= mist.lifetimeMs) {
         removeMist(i);
+      }
+    }
+  }
+
+  function updateAttackWindowMist({ scene, playerModel }) {
+    if (!scene || !playerModel?.userData) return;
+    const activeAttack = playerModel.userData.attack;
+    if (!activeAttack?.name || !Number.isFinite(activeAttack.start)) {
+      if (attackWindowMists.length) {
+        for (let i = attackWindowMists.length - 1; i >= 0; i--) {
+          const entry = attackWindowMists[i];
+          if (entry?.mesh?.parent) {
+            entry.mesh.parent.remove(entry.mesh);
+          }
+          attackWindowMists.splice(i, 1);
+        }
+      }
+      return;
+    }
+
+    const attackName = activeAttack.name === 'mutantPunch' && playerModel.userData?.equippedWeaponType === 'sword'
+      ? 'swordSlash'
+      : activeAttack.name;
+    const cfg = ATTACKS[attackName];
+    if (!cfg) return;
+
+    const elapsed = Date.now() - activeAttack.start;
+    const visualWindowMs = Math.max(cfg.hitWindow * ATTACK_WINDOW_VISUAL_MULTIPLIER, 220);
+    const inHitWindow = elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + visualWindowMs;
+
+    if (!inHitWindow) {
+      if (attackWindowMists.length) {
+        for (let i = attackWindowMists.length - 1; i >= 0; i--) {
+          const entry = attackWindowMists[i];
+          if (entry?.mesh?.parent) {
+            entry.mesh.parent.remove(entry.mesh);
+          }
+          attackWindowMists.splice(i, 1);
+        }
+      }
+      return;
+    }
+
+    const attackRegion = cfg.region || 'around';
+    const expectedShape = attackRegion === 'forward' ? 'box' : 'circle';
+
+    if (!attackWindowMists.length || attackWindowMists[0]?.shape !== expectedShape) {
+      if (attackWindowMists.length) {
+        for (let i = attackWindowMists.length - 1; i >= 0; i--) {
+          const staleEntry = attackWindowMists[i];
+          if (staleEntry?.mesh?.parent) {
+            staleEntry.mesh.parent.remove(staleEntry.mesh);
+          }
+          attackWindowMists.splice(i, 1);
+        }
+      }
+
+      const geometry = expectedShape === 'box'
+        ? new THREE.BoxGeometry(1, ATTACK_WINDOW_MIST_HEIGHT, 1)
+        : new THREE.CylinderGeometry(1, 1, ATTACK_WINDOW_MIST_HEIGHT, 24, 1, true);
+      const material = new THREE.MeshBasicMaterial({
+        color: 0xffdd33,
+        transparent: true,
+        opacity: ATTACK_WINDOW_MIST_OPACITY,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.userData.skipTerrainCorrection = true;
+      attackWindowMists.push({ mesh, shape: expectedShape });
+      scene.add(mesh);
+    }
+
+    const entry = attackWindowMists[0];
+    const mesh = entry.mesh;
+    const range = Math.max(0.4, cfg.range);
+    mesh.position.copy(playerModel.position);
+    mesh.position.y += ATTACK_WINDOW_MIST_HEIGHT * 0.5;
+
+    if (attackRegion === 'forward') {
+      const width = range * 2;
+      mesh.scale.set(width, 1, range);
+      mesh.rotation.set(0, playerModel.rotation.y, 0);
+      playerModel.getWorldDirection(tempAttackMistForward);
+      tempAttackMistForward.y = 0;
+      if (tempAttackMistForward.lengthSq() < 0.0001) {
+        tempAttackMistForward.set(0, 0, 1);
+      } else {
+        tempAttackMistForward.normalize();
+      }
+      mesh.position.addScaledVector(tempAttackMistForward, range * 0.5);
+    } else {
+      mesh.scale.set(range, 1, range);
+      mesh.rotation.set(0, 0, 0);
+    }
+  }
+
+  function spawnHitRibbonBurst(scene, position) {
+    if (!scene || !position) return;
+    const group = new THREE.Group();
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xff3344,
+      emissive: 0xbb0f20,
+      emissiveIntensity: 0.9,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+
+    const streaks = [];
+    for (let i = 0; i < HIT_RIBBON_STREAK_COUNT; i++) {
+      const geometry = new THREE.PlaneGeometry(0.08, THREE.MathUtils.lerp(0.5, 0.95, Math.random()));
+      const streak = new THREE.Mesh(geometry, material);
+      const angle = (Math.PI * 2 * i) / HIT_RIBBON_STREAK_COUNT + (Math.random() - 0.5) * 0.45;
+      streak.position.set(0, THREE.MathUtils.lerp(0.15, 0.55, Math.random()), 0);
+      streak.rotation.x = -Math.PI / 2;
+      streak.rotation.z = angle;
+      const direction = new THREE.Vector3(Math.cos(angle), 0.08 + Math.random() * 0.22, Math.sin(angle)).normalize();
+      const speed = THREE.MathUtils.lerp(4.0, 7.2, Math.random());
+      streaks.push({ mesh: streak, velocity: direction.multiplyScalar(speed) });
+      group.add(streak);
+    }
+
+    group.position.copy(position);
+    group.userData.skipTerrainCorrection = true;
+    scene.add(group);
+
+    hitRibbonBursts.push({
+      group,
+      material,
+      streaks,
+      spawnTime: performance.now(),
+      lifetimeMs: HIT_RIBBON_LIFETIME_MS
+    });
+  }
+
+  function updateHitRibbonBursts({ scene, deltaSeconds }) {
+    if (!hitRibbonBursts.length) return;
+    const now = performance.now();
+
+    for (let i = hitRibbonBursts.length - 1; i >= 0; i--) {
+      const burst = hitRibbonBursts[i];
+      const ageMs = now - burst.spawnTime;
+      const progress = Math.min(1, ageMs / burst.lifetimeMs);
+      burst.material.opacity = THREE.MathUtils.lerp(0.95, 0, progress);
+      burst.material.emissiveIntensity = THREE.MathUtils.lerp(0.9, 0.1, progress);
+
+      burst.streaks.forEach(({ mesh, velocity }) => {
+        tempMistMoveStep.copy(velocity).multiplyScalar(deltaSeconds);
+        mesh.position.add(tempMistMoveStep);
+      });
+
+      if (ageMs >= burst.lifetimeMs) {
+        if (burst.group?.parent) {
+          burst.group.parent.remove(burst.group);
+        }
+        hitRibbonBursts.splice(i, 1);
       }
     }
   }
@@ -6512,20 +6771,18 @@ async function main() {
 
   const getClosestPointWithinGeoBounds = (position) => {
     if (!position || !playerControls?.geoBoundsCenterXZ) return null;
-    const halfSize = playerControls.geoBoundHalfSizeM;
-    if (!Number.isFinite(halfSize)) return null;
+    const radius = playerControls.geoBoundHalfSizeM;
+    if (!Number.isFinite(radius)) return null;
     if (!Number.isFinite(position.x) || !Number.isFinite(position.z)) return null;
-    const minX = playerControls.geoBoundsCenterXZ.x - halfSize;
-    const maxX = playerControls.geoBoundsCenterXZ.x + halfSize;
-    const minZ = playerControls.geoBoundsCenterXZ.z - halfSize;
-    const maxZ = playerControls.geoBoundsCenterXZ.z + halfSize;
-    const clampedX = Math.min(maxX, Math.max(minX, position.x));
-    const clampedZ = Math.min(maxZ, Math.max(minZ, position.z));
-    if (clampedX === position.x && clampedZ === position.z) return null;
+    const dx = position.x - playerControls.geoBoundsCenterXZ.x;
+    const dz = position.z - playerControls.geoBoundsCenterXZ.z;
+    const distance = Math.hypot(dx, dz);
+    if (!Number.isFinite(distance) || distance <= radius) return null;
+    const scale = radius / Math.max(distance, 1e-6);
     return {
-      x: clampedX,
+      x: playerControls.geoBoundsCenterXZ.x + dx * scale,
       y: position.y ?? playerModel?.position?.y ?? 0,
-      z: clampedZ
+      z: playerControls.geoBoundsCenterXZ.z + dz * scale
     };
   };
 
@@ -7923,6 +8180,7 @@ async function main() {
   window.pickupMushroom = pickupMushroom;
   window.pickupApple = pickupApple;
   window.pickupWood = pickupWood;
+  window.pickupMeat = pickupMeat;
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -8498,6 +8756,12 @@ async function main() {
           woodPickups.splice(i, 1);
         }
       }
+      for (let i = meatPickups.length - 1; i >= 0; i--) {
+        const pickup = meatPickups[i];
+        if (!pickup?.mesh) {
+          meatPickups.splice(i, 1);
+        }
+      }
     }
 
     iceGun?.update();
@@ -8611,18 +8875,26 @@ async function main() {
 
     // 2) AI can still be throttled, but pass a real delta when you DO run it
     const aiNowMs = Date.now();
-    monsters.forEach(monster => {
-      if (!monster?.model) return;
-      if (monster.shouldRemoveAfterDeath?.(aiNowMs)) {
-        cleanupMonster(monster);
+    const isHostNow = !multiplayer || multiplayer.isHost;
+    let removedDeadMonsters = false;
+    monsters = monsters.filter(monster => {
+      if (!monster?.model) return true;
+      if (!monster.shouldRemoveAfterDeath?.(aiNowMs)) return true;
+      cleanupMonster(monster);
+      if (isHostNow && monster.id) {
+        removeMonsterRecord(monster.id);
       }
+      removedDeadMonsters = true;
+      return false;
     });
+    if (removedDeadMonsters) {
+      window.monsters = monsters;
+    }
     if (animalManager) {
       animalManager.update(mixerDelta);
       animals = animalManager.getAnimals();
       window.animals = animals;
     }
-    const isHostNow = !multiplayer || multiplayer.isHost;
 
     if (isHostNow) {
       if (monstersSeeded) {
@@ -8878,6 +9150,8 @@ async function main() {
       }
     }
 
+    updateAttackWindowMist({ scene, playerModel });
+
     updateMeleeAttacks({
       playerModel,
       otherPlayers,
@@ -8887,8 +9161,11 @@ async function main() {
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage,
       onSwordHit: handleSwordTreeHit,
-      onTorchHit: handleTorchTreeHit
+      onTorchHit: handleTorchTreeHit,
+      onEntityHit: handleCombatEntityHit
     });
+
+    updateHitRibbonBursts({ scene, deltaSeconds: frameDelta });
 
     renderer.render(scene, camera);
   }

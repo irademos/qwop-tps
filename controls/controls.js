@@ -3,7 +3,7 @@ import RAPIER from "@dimforge/rapier3d-compat";
 import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from '../environment/water.js';
 import { getSpawnPosition } from '../spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
-import { getKnockbackImpulse } from "../knockback.js";
+import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { QuestManager } from "../quest.js";
 import { loadNippleJs } from '../externalDeps.js';
 
@@ -11,6 +11,7 @@ import { loadNippleJs } from '../externalDeps.js';
 const SWIM_SPEED = 2;
 const ENERGY_DEPLETED_SPEED_MULTIPLIER = 1.2;
 const JUMP_FORCE = 4;
+const FLY_JUMP_FORCE_MULTIPLIER = 2;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
@@ -21,6 +22,7 @@ const FRIENDLY_INTERACT_RANGE = 6;
 const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
 const WOOD_INTERACT_RANGE = 3;
+const MEAT_INTERACT_RANGE = 3;
 const ENGAGED_MODE_DISTANCE = 7;
 const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
 const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
@@ -144,6 +146,7 @@ export class PlayerControls {
     this.isKnocked = false;
     this.knockbackRestYaw = 0;
     this.knockbackEndTime = 0;
+    this.knockbackVelocity = new THREE.Vector3();
     this.freezeEndTime = 0;
     this.wasFrozen = false;
     this.isInvincible = false;
@@ -174,6 +177,8 @@ export class PlayerControls {
     this.geoBoundHalfSizeM = 8;
     this.geoEdgeEpsM = 0.75;
     this.geoBoundsDebug = null;
+    this.geoBoundsDebugArrow = null;
+    this.geoBoundsLastMoveDirection = new THREE.Vector3(0, 0, 1);
     this.geoBoundsDebugHeight = 2;
     this.gpsMoveTarget = null;
     this.gpsMoveEpsilon = 0.35;
@@ -184,6 +189,9 @@ export class PlayerControls {
     this.keysPressed = new Set();
     this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     this.hasDoubleJumped = false;
+    this.flySpellActive = false;
+    this.flySpellEndsAt = 0;
+    this.onFlyJump = null;
     this.currentSpecialAction = null;
     this.runningKickTimer = null;
     this.runningKickOriginalY = 0;
@@ -212,6 +220,7 @@ export class PlayerControls {
     if (this.playerModel) {
       this.playerModel.position.set(this.playerX, this.playerY, this.playerZ);
       this.lastPosition.set(this.playerX, this.playerY, this.playerZ);
+      this.playerModel.userData.isKnocked = false;
     }
     
     const world = window.rapierWorld;
@@ -429,20 +438,7 @@ export class PlayerControls {
     document.getElementById('jump-button').addEventListener('touchstart', (event) => {
       if (!this.enabled || this.isInWater) return;
       this.jumpButtonPressed = true;
-      if (this.isClimbing && this.body) {
-        this.stopClimbing();
-        this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
-        this.canJump = false;
-        this.hasDoubleJumped = false;
-      } else if (this.canJump && this.body) {
-        this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
-        this.canJump = false;
-        this.hasDoubleJumped = false;
-      } else if (!this.hasDoubleJumped && this.body) {
-        this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
-        this.hasDoubleJumped = true;
-        this.playAction('hurricaneKick');
-      }
+      this.tryJump();
       this.safePreventDefault(event);
     });
 
@@ -649,6 +645,11 @@ export class PlayerControls {
           if (casted) {
             this.mobileActionState = 'default';
           }
+        } else if (slot === 'right') {
+          const casted = this.castSpellById?.('fly');
+          if (casted) {
+            this.mobileActionState = 'default';
+          }
         } else if (slot === 'kick') {
           if (this.isVoiceListening?.()) {
             this.stopVoiceListening?.();
@@ -848,15 +849,18 @@ export class PlayerControls {
     this.optionLeftButton.disabled = false;
     this.optionCenterButton.textContent = '🎤';
     this.optionCenterButton.disabled = false;
-    this.optionRightButton.textContent = '—';
-    this.optionRightButton.disabled = true;
+    this.optionRightButton.textContent = 'Fly';
+    this.optionRightButton.disabled = false;
 
     this.punchButton.style.display = '';
 
     if (state === 'spell-options') {
       const shieldState = this.getSpellStateById?.('shield') || { disabled: true, remainingSeconds: 0 };
+      const flyState = this.getSpellStateById?.('fly') || { disabled: true, remainingSeconds: 0 };
       this.optionLeftButton.textContent = shieldState.remainingSeconds > 0 ? `Shield ${shieldState.remainingSeconds}s` : 'Shield';
       this.optionLeftButton.disabled = !!shieldState.disabled;
+      this.optionRightButton.textContent = flyState.remainingSeconds > 0 ? `Fly ${flyState.remainingSeconds}s` : 'Fly';
+      this.optionRightButton.disabled = !!flyState.disabled;
 
       if (this.isVoiceListening?.()) {
         this.optionCenterButton.textContent = '■';
@@ -1016,20 +1020,7 @@ export class PlayerControls {
           return;
         }
         if (this.isInWater) return;
-        if (this.isClimbing && this.body) {
-          this.stopClimbing();
-          this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
-          this.canJump = false;
-          this.hasDoubleJumped = false;
-        } else if (this.canJump && this.body) {
-          this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
-          this.canJump = false;
-          this.hasDoubleJumped = false;
-        } else if (!this.hasDoubleJumped && this.body) {
-          this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
-          this.hasDoubleJumped = true;
-          this.playAction('hurricaneKick');
-        }
+        this.tryJump();
       } else if (key === 'e') {
         if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
         if (this.isInWater) return;
@@ -1214,6 +1205,11 @@ export class PlayerControls {
 
     if (closest.type === 'wood') {
       window.pickupWood?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'meat') {
+      window.pickupMeat?.(closest.pickup);
       return;
     }
 
@@ -1415,6 +1411,18 @@ export class PlayerControls {
       });
     });
 
+    const meatPickups = Array.isArray(window.meatPickups) ? window.meatPickups : [];
+    meatPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'meat',
+        pickup,
+        maxDistance: MEAT_INTERACT_RANGE,
+        promptText: "'x' pick up meat"
+      });
+    });
+
     return closest ?? homeEnterTarget;
   }
 
@@ -1539,6 +1547,7 @@ export class PlayerControls {
   playAction(actionName) {
     if (!this.playerModel) return;
     const resolvedAction = actionName === 'mutantPunch' && this.getEquippedSword() ? 'swordSlash' : actionName;
+    const swordAttackActions = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
     const actions = this.playerModel.userData.actions;
     if (!actions || !actions[resolvedAction]) return;
     if (ACTION_LOCKED_ATTACKS.includes(resolvedAction) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return;
@@ -1560,9 +1569,9 @@ export class PlayerControls {
     this.currentSpecialAction = resolvedAction;
 
     if (["mutantPunch", "swordSlash", "swordSlashLeft", "swordSpin", "swordFwdSpin", "leftPunch", "hurricaneKick", "mmaKick", "runningKick"].includes(resolvedAction)) {
-      const isPunch = resolvedAction === 'mutantPunch' || resolvedAction === 'leftPunch' || ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'].includes(resolvedAction);
+      const isPunch = resolvedAction === 'mutantPunch' || resolvedAction === 'leftPunch' || swordAttackActions.includes(resolvedAction);
       const attackName = isPunch && this.getEquippedSword()
-        ? 'swordSlash'
+        ? (swordAttackActions.includes(resolvedAction) ? resolvedAction : 'swordSlash')
         : isPunch
           ? 'mutantPunch'
           : resolvedAction;
@@ -1589,13 +1598,19 @@ export class PlayerControls {
       this.stopClimbing();
     }
     const { impulse, profile } = getKnockbackImpulse(direction, strength);
+    const { velocity } = getKnockbackMotion(direction, strength);
     if (this.body) {
       this.body.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
+      const vel = this.body.linvel();
+      this.body.setLinvel({ x: velocity.x, y: vel.y, z: velocity.z }, true);
     }
+    this.knockbackVelocity.copy(velocity);
     this.isKnocked = true;
+    this.playerModel.userData.isKnocked = true;
     const now = Date.now();
     this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + profile.recoveryMs);
     this.knockbackRestYaw = this.playerModel.rotation.y;
+    this.playerModel.userData.attack = null;
     const actions = this.playerModel.userData.actions;
     const current = this.playerModel.userData.currentAction;
     const hitAction = actions?.hit;
@@ -1943,11 +1958,15 @@ export class PlayerControls {
     if (this.isKnocked) {
       if (Date.now() >= this.knockbackEndTime) {
         this.isKnocked = false;
+        this.playerModel.userData.isKnocked = false;
+        this.knockbackVelocity.set(0, 0, 0);
         this.playerModel.rotation.set(0, this.knockbackRestYaw || this.playerModel.rotation.y, 0);
         const actions = this.playerModel.userData.actions;
         actions?.hit?.fadeOut(0.2);
         actions?.idle?.reset().fadeIn(0.2).play();
         this.playerModel.userData.currentAction = 'idle';
+      } else {
+        this.body.setLinvel({ x: this.knockbackVelocity.x, y: vel.y, z: this.knockbackVelocity.z }, true);
       }
     } else if (!this.isClimbing) {
       const speed = this.isInWater
@@ -1972,7 +1991,7 @@ export class PlayerControls {
     }
 
     if (this.geoBoundsCenterXZ && !gpsMoveActive) {
-      const halfSize = this.geoBoundHalfSizeM;
+      const radius = this.geoBoundHalfSizeM;
 
       const shiftX = this.geoBoundsShiftMeters?.x ?? 0;
       const shiftZ = this.geoBoundsShiftMeters?.z ?? 0;
@@ -1985,32 +2004,43 @@ export class PlayerControls {
       let targetX = newX;
       let targetZ = newZ;
 
-      // "Conveyor" push only if player was near the OLD edge
-      if (shiftX > 0 && newX >= prevCenterX + halfSize - edgeEps) { targetX += shiftX; pushedByGeo = true; }
-      else if (shiftX < 0 && newX <= prevCenterX - halfSize + edgeEps) { targetX += shiftX; pushedByGeo = true; }
+      // "Conveyor" push only if player was near the OLD boundary edge
+      const prevDx = newX - prevCenterX;
+      const prevDz = newZ - prevCenterZ;
+      const prevDistance = Math.hypot(prevDx, prevDz);
+      if (prevDistance >= radius - edgeEps) {
+        targetX += shiftX;
+        targetZ += shiftZ;
+        pushedByGeo = (shiftX !== 0) || (shiftZ !== 0);
+      }
 
-      if (shiftZ > 0 && newZ >= prevCenterZ + halfSize - edgeEps) { targetZ += shiftZ; pushedByGeo = true; }
-      else if (shiftZ < 0 && newZ <= prevCenterZ - halfSize + edgeEps) { targetZ += shiftZ; pushedByGeo = true; }
+      const centerDx = targetX - this.geoBoundsCenterXZ.x;
+      const centerDz = targetZ - this.geoBoundsCenterXZ.z;
+      const centerDistance = Math.hypot(centerDx, centerDz);
 
-      const minX = this.geoBoundsCenterXZ.x - halfSize;
-      const maxX = this.geoBoundsCenterXZ.x + halfSize;
-      const minZ = this.geoBoundsCenterXZ.z - halfSize;
-      const maxZ = this.geoBoundsCenterXZ.z + halfSize;
-
-      const clampedX = Math.min(maxX, Math.max(minX, targetX));
-      const clampedZ = Math.min(maxZ, Math.max(minZ, targetZ));
+      let clampedX = targetX;
+      let clampedZ = targetZ;
+      if (centerDistance > radius) {
+        const scale = radius / Math.max(centerDistance, 1e-6);
+        clampedX = this.geoBoundsCenterXZ.x + centerDx * scale;
+        clampedZ = this.geoBoundsCenterXZ.z + centerDz * scale;
+      }
 
       clampedByGeo = (clampedX !== targetX) || (clampedZ !== targetZ);
 
       if (clampedByGeo || clampedX !== newX || clampedZ !== newZ) {
-        // Cancel velocity into the wall (otherwise you'll "fight" the clamp forever)
+        // Cancel outward velocity into the boundary wall.
         const v = this.body.linvel();
         let vx = v.x, vz = v.z;
-
-        if (clampedX <= minX + 1e-6 && vx < 0) vx = 0;
-        if (clampedX >= maxX - 1e-6 && vx > 0) vx = 0;
-        if (clampedZ <= minZ + 1e-6 && vz < 0) vz = 0;
-        if (clampedZ >= maxZ - 1e-6 && vz > 0) vz = 0;
+        if (centerDistance > 1e-6) {
+          const outwardX = centerDx / centerDistance;
+          const outwardZ = centerDz / centerDistance;
+          const outwardVel = vx * outwardX + vz * outwardZ;
+          if (outwardVel > 0) {
+            vx -= outwardX * outwardVel;
+            vz -= outwardZ * outwardVel;
+          }
+        }
 
         this.body.setLinvel({ x: vx, y: v.y, z: vz }, true);
         this.body.setTranslation({ x: clampedX, y: newY, z: clampedZ }, true);
@@ -2492,6 +2522,10 @@ export class PlayerControls {
     }
     this.geoBoundsCenterXZ.x += dxMeters;
     this.geoBoundsCenterXZ.z += dzMeters;
+    const moveDistance = Math.hypot(dxMeters, dzMeters);
+    if (moveDistance > 1e-4) {
+      this.geoBoundsLastMoveDirection.set(dxMeters / moveDistance, 0, dzMeters / moveDistance);
+    }
     this.geoBoundsShiftMeters.x += dxMeters;
     this.geoBoundsShiftMeters.z += dzMeters;
   }
@@ -2513,12 +2547,9 @@ export class PlayerControls {
     if (!position || !this.geoBoundsCenterXZ || !Number.isFinite(this.geoBoundHalfSizeM)) {
       return true;
     }
-    const halfSize = this.geoBoundHalfSizeM;
-    const minX = this.geoBoundsCenterXZ.x - halfSize;
-    const maxX = this.geoBoundsCenterXZ.x + halfSize;
-    const minZ = this.geoBoundsCenterXZ.z - halfSize;
-    const maxZ = this.geoBoundsCenterXZ.z + halfSize;
-    return position.x < minX || position.x > maxX || position.z < minZ || position.z > maxZ;
+    const dx = position.x - this.geoBoundsCenterXZ.x;
+    const dz = position.z - this.geoBoundsCenterXZ.z;
+    return Math.hypot(dx, dz) > this.geoBoundHalfSizeM;
   }
 
   getGpsMoveDirection(position) {
@@ -2539,22 +2570,51 @@ export class PlayerControls {
       if (this.geoBoundsDebug) {
         this.geoBoundsDebug.visible = false;
       }
+      if (this.geoBoundsDebugArrow) {
+        this.geoBoundsDebugArrow.visible = false;
+      }
       return;
     }
     if (!this.geoBoundsDebug) {
-      const geometry = new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1));
+      const geometry = new THREE.BufferGeometry().setFromPoints(
+        new THREE.EllipseCurve(0, 0, 1, 1, 0, Math.PI * 2, false, 0)
+          .getPoints(64)
+          .map((point) => new THREE.Vector3(point.x, point.y, 0))
+      );
       const material = new THREE.LineBasicMaterial({ color: 0x1e90ff });
-      this.geoBoundsDebug = new THREE.LineSegments(geometry, material);
-      this.geoBoundsDebug.name = 'geo-bounds-debug';
+      this.geoBoundsDebug = new THREE.LineLoop(geometry, material);
+      this.geoBoundsDebug.name = 'geo-bounds-debug-circle';
       this.geoBoundsDebug.frustumCulled = false;
+      this.geoBoundsDebug.rotation.x = Math.PI / 2;
       this.scene.add(this.geoBoundsDebug);
     }
-    const size = this.geoBoundHalfSizeM * 2;
-    const height = this.geoBoundsDebugHeight;
-    const centerY = position?.y ?? 0;
-    this.geoBoundsDebug.scale.set(size, height, size);
+    if (!this.geoBoundsDebugArrow) {
+      this.geoBoundsDebugArrow = new THREE.ArrowHelper(
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(),
+        1.6,
+        0x1e90ff,
+        0.55,
+        0.35
+      );
+      this.geoBoundsDebugArrow.name = 'geo-bounds-debug-arrow';
+      this.geoBoundsDebugArrow.frustumCulled = false;
+      this.scene.add(this.geoBoundsDebugArrow);
+    }
+    const radius = this.geoBoundHalfSizeM;
+    const centerY = (position?.y ?? 0) + 0.1;
+    this.geoBoundsDebug.scale.set(radius, radius, 1);
     this.geoBoundsDebug.position.set(this.geoBoundsCenterXZ.x, centerY, this.geoBoundsCenterXZ.z);
     this.geoBoundsDebug.visible = true;
+
+    const hasDirection = !!this.geoBoundsLastMoveDirection && this.geoBoundsLastMoveDirection.lengthSq() > 0;
+    const dir = hasDirection
+      ? this.geoBoundsLastMoveDirection.clone().normalize()
+      : new THREE.Vector3(0, 0, 1);
+    this.geoBoundsDebugArrow.setDirection(dir);
+    this.geoBoundsDebugArrow.setLength(Math.max(1.2, radius * 0.45), 0.55, 0.35);
+    this.geoBoundsDebugArrow.position.set(this.geoBoundsCenterXZ.x, centerY + 0.02, this.geoBoundsCenterXZ.z);
+    this.geoBoundsDebugArrow.visible = true;
   }
   
   getCamera() {
@@ -2571,10 +2631,47 @@ export class PlayerControls {
    */
   triggerJump() {
     if (!this.enabled || !this.body) return;
-    if (this.canJump) {
-      this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
+    this.tryJump();
+  }
+
+  tryJump() {
+    if (!this.body) return false;
+
+    const isFlyActive = this.flySpellActive && Date.now() < (this.flySpellEndsAt || 0);
+    const jumpForce = isFlyActive ? JUMP_FORCE * FLY_JUMP_FORCE_MULTIPLIER : JUMP_FORCE;
+
+    if (this.isClimbing) {
+      this.stopClimbing();
+      this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
       this.canJump = false;
+      this.hasDoubleJumped = false;
+      if (isFlyActive) this.onFlyJump?.();
+      return true;
     }
+
+    if (this.canJump) {
+      this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
+      this.canJump = false;
+      this.hasDoubleJumped = false;
+      if (isFlyActive) this.onFlyJump?.();
+      return true;
+    }
+
+    if (isFlyActive) {
+      this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
+      this.hasDoubleJumped = false;
+      this.onFlyJump?.();
+      return true;
+    }
+
+    if (!this.hasDoubleJumped) {
+      this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
+      this.hasDoubleJumped = true;
+      this.playAction('hurricaneKick');
+      return true;
+    }
+
+    return false;
   }
 
   /**

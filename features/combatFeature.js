@@ -1,12 +1,21 @@
 import { showFeatureLoading } from './loadingState.js';
 import { spawnProjectile, updateProjectiles, removeProjectileAt } from '../items/projectiles.js';
 import { spawnArrowProjectile } from '../items/arrow.js';
-import { updateMeleeAttacks } from '../items/melee.js';
+import { ATTACKS, updateMeleeAttacks } from '../items/melee.js';
 import { Torch, TORCH_PICKUP_LOCATION } from '../items/torch.js';
 
 let specialWeaponsPromise = null;
 
-export { spawnProjectile, updateProjectiles, removeProjectileAt, spawnArrowProjectile, updateMeleeAttacks, Torch, TORCH_PICKUP_LOCATION };
+export {
+  spawnProjectile,
+  updateProjectiles,
+  removeProjectileAt,
+  spawnArrowProjectile,
+  ATTACKS,
+  updateMeleeAttacks,
+  Torch,
+  TORCH_PICKUP_LOCATION
+};
 
 export async function loadSpecialWeapons() {
   if (!specialWeaponsPromise) {
