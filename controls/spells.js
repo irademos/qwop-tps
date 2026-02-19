@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export const FLY_WINGS_OFFSET = Object.freeze({ x: 0, y: 0.15, z: -0.2 });
-export const FLY_WINGS_SCALE = Object.freeze({ x: 1.25, y: 1.25, z: 1.25 });
+// export const FLY_WINGS_SCALE = Object.freeze({ x: 0.0001, y: 0.0001, z: 0.0001 });
+export const FLY_WINGS_SCALE = 10.0;
 export const FLY_WINGS_ANIMATION_START_TIME = 0;
 export const FLY_WINGS_ANIMATION_STOP_TIME = null;
 const FLY_WINGS_MODEL_URL = '/assets/props/wings.glb';
@@ -164,7 +165,8 @@ export function initSpells({
       const cloned = gltf.scene.clone(true);
       cloned.name = 'fly-wings';
       cloned.position.set(FLY_WINGS_OFFSET.x, FLY_WINGS_OFFSET.y, FLY_WINGS_OFFSET.z);
-      cloned.scale.set(FLY_WINGS_SCALE.x, FLY_WINGS_SCALE.y, FLY_WINGS_SCALE.z);
+      // cloned.scale.set(FLY_WINGS_SCALE.x, FLY_WINGS_SCALE.y, FLY_WINGS_SCALE.z);
+      cloned.scale.setScalar(FLY_WINGS_SCALE);
       const anchor = findTorsoAnchor(targetModel) || targetModel;
       anchor.add(cloned);
       wingsRoot = cloned;
