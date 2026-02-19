@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+// import { SkeletonUtils } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-export const FLY_WINGS_OFFSET = Object.freeze({ x: 0, y: 0.15, z: -0.2 });
+export const FLY_WINGS_OFFSET = Object.freeze({ x: 0.0, y: -23.0, z: 5.0 });
 // export const FLY_WINGS_SCALE = Object.freeze({ x: 0.0001, y: 0.0001, z: 0.0001 });
-export const FLY_WINGS_SCALE = 10.0;
+export const FLY_WINGS_SCALE = 0.35;
 export const FLY_WINGS_ANIMATION_START_TIME = 0;
-export const FLY_WINGS_ANIMATION_STOP_TIME = null;
+export const FLY_WINGS_ANIMATION_STOP_TIME = 12.0;
 const FLY_WINGS_MODEL_URL = '/assets/props/wings.glb';
 const FLY_WINGS_ANIMATION_CLIP = 'Demon Wings Rig|animations';
 
@@ -20,8 +22,8 @@ const SPELL_DEFS = [
   {
     id: 'fly',
     label: 'Fly',
-    magicCost: 60,
-    cooldownMs: 180_000,
+    magicCost: 1,
+    cooldownMs: 5_000,
     durationMs: 45_000
   }
 ];
@@ -56,6 +58,7 @@ const findTorsoAnchor = (model) => {
   let anchor = null;
   model?.traverse?.((child) => {
     if (anchor) return;
+    console.log(child.name);
     if (child.name && /spine|chest|torso|upper/i.test(child.name)) {
       anchor = child;
     }
@@ -162,13 +165,17 @@ export function initSpells({
     clearWings();
     try {
       const gltf = await getWingsAsset();
-      const cloned = gltf.scene.clone(true);
+      const cloned = SkeletonUtils.clone(gltf.scene);
       cloned.name = 'fly-wings';
       cloned.position.set(FLY_WINGS_OFFSET.x, FLY_WINGS_OFFSET.y, FLY_WINGS_OFFSET.z);
-      // cloned.scale.set(FLY_WINGS_SCALE.x, FLY_WINGS_SCALE.y, FLY_WINGS_SCALE.z);
       cloned.scale.setScalar(FLY_WINGS_SCALE);
+
       const anchor = findTorsoAnchor(targetModel) || targetModel;
-      anchor.add(cloned);
+      const wingsAnchor = new THREE.Object3D();
+      wingsAnchor.name = 'wings-anchor';
+      wingsAnchor.position.set(0, 0.15, -0.2);
+      anchor.add(wingsAnchor);
+      wingsAnchor.add(cloned);
       wingsRoot = cloned;
       if (Array.isArray(gltf.animations) && gltf.animations.length > 0) {
         wingsMixer = new THREE.AnimationMixer(cloned);
