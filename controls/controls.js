@@ -11,6 +11,7 @@ import { loadNippleJs } from '../externalDeps.js';
 const SWIM_SPEED = 2;
 const ENERGY_DEPLETED_SPEED_MULTIPLIER = 1.2;
 const JUMP_FORCE = 4;
+const FLY_JUMP_FORCE_MULTIPLIER = 2;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
@@ -188,6 +189,9 @@ export class PlayerControls {
     this.keysPressed = new Set();
     this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
     this.hasDoubleJumped = false;
+    this.flySpellActive = false;
+    this.flySpellEndsAt = 0;
+    this.onFlyJump = null;
     this.currentSpecialAction = null;
     this.runningKickTimer = null;
     this.runningKickOriginalY = 0;
@@ -434,20 +438,7 @@ export class PlayerControls {
     document.getElementById('jump-button').addEventListener('touchstart', (event) => {
       if (!this.enabled || this.isInWater) return;
       this.jumpButtonPressed = true;
-      if (this.isClimbing && this.body) {
-        this.stopClimbing();
-        this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
-        this.canJump = false;
-        this.hasDoubleJumped = false;
-      } else if (this.canJump && this.body) {
-        this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
-        this.canJump = false;
-        this.hasDoubleJumped = false;
-      } else if (!this.hasDoubleJumped && this.body) {
-        this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
-        this.hasDoubleJumped = true;
-        this.playAction('hurricaneKick');
-      }
+      this.tryJump();
       this.safePreventDefault(event);
     });
 
@@ -654,6 +645,11 @@ export class PlayerControls {
           if (casted) {
             this.mobileActionState = 'default';
           }
+        } else if (slot === 'right') {
+          const casted = this.castSpellById?.('fly');
+          if (casted) {
+            this.mobileActionState = 'default';
+          }
         } else if (slot === 'kick') {
           if (this.isVoiceListening?.()) {
             this.stopVoiceListening?.();
@@ -853,15 +849,18 @@ export class PlayerControls {
     this.optionLeftButton.disabled = false;
     this.optionCenterButton.textContent = '🎤';
     this.optionCenterButton.disabled = false;
-    this.optionRightButton.textContent = '—';
-    this.optionRightButton.disabled = true;
+    this.optionRightButton.textContent = 'Fly';
+    this.optionRightButton.disabled = false;
 
     this.punchButton.style.display = '';
 
     if (state === 'spell-options') {
       const shieldState = this.getSpellStateById?.('shield') || { disabled: true, remainingSeconds: 0 };
+      const flyState = this.getSpellStateById?.('fly') || { disabled: true, remainingSeconds: 0 };
       this.optionLeftButton.textContent = shieldState.remainingSeconds > 0 ? `Shield ${shieldState.remainingSeconds}s` : 'Shield';
       this.optionLeftButton.disabled = !!shieldState.disabled;
+      this.optionRightButton.textContent = flyState.remainingSeconds > 0 ? `Fly ${flyState.remainingSeconds}s` : 'Fly';
+      this.optionRightButton.disabled = !!flyState.disabled;
 
       if (this.isVoiceListening?.()) {
         this.optionCenterButton.textContent = '■';
@@ -1021,20 +1020,7 @@ export class PlayerControls {
           return;
         }
         if (this.isInWater) return;
-        if (this.isClimbing && this.body) {
-          this.stopClimbing();
-          this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
-          this.canJump = false;
-          this.hasDoubleJumped = false;
-        } else if (this.canJump && this.body) {
-          this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
-          this.canJump = false;
-          this.hasDoubleJumped = false;
-        } else if (!this.hasDoubleJumped && this.body) {
-          this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
-          this.hasDoubleJumped = true;
-          this.playAction('hurricaneKick');
-        }
+        this.tryJump();
       } else if (key === 'e') {
         if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
         if (this.isInWater) return;
@@ -2645,10 +2631,47 @@ export class PlayerControls {
    */
   triggerJump() {
     if (!this.enabled || !this.body) return;
-    if (this.canJump) {
-      this.body.applyImpulse({ x: 0, y: JUMP_FORCE, z: 0 }, true);
+    this.tryJump();
+  }
+
+  tryJump() {
+    if (!this.body) return false;
+
+    const isFlyActive = this.flySpellActive && Date.now() < (this.flySpellEndsAt || 0);
+    const jumpForce = isFlyActive ? JUMP_FORCE * FLY_JUMP_FORCE_MULTIPLIER : JUMP_FORCE;
+
+    if (this.isClimbing) {
+      this.stopClimbing();
+      this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
       this.canJump = false;
+      this.hasDoubleJumped = false;
+      if (isFlyActive) this.onFlyJump?.();
+      return true;
     }
+
+    if (this.canJump) {
+      this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
+      this.canJump = false;
+      this.hasDoubleJumped = false;
+      if (isFlyActive) this.onFlyJump?.();
+      return true;
+    }
+
+    if (isFlyActive) {
+      this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
+      this.hasDoubleJumped = false;
+      this.onFlyJump?.();
+      return true;
+    }
+
+    if (!this.hasDoubleJumped) {
+      this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
+      this.hasDoubleJumped = true;
+      this.playAction('hurricaneKick');
+      return true;
+    }
+
+    return false;
   }
 
   /**
