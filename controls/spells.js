@@ -180,7 +180,6 @@ export function initSpells({
           if (FLY_WINGS_ANIMATION_START_TIME > 0) {
             wingsAnimationAction.time = FLY_WINGS_ANIMATION_START_TIME;
           }
-          wingsAnimationAction.paused = true;
         }
       }
       if (playerControls) {
@@ -190,14 +189,15 @@ export function initSpells({
         playerControls.onFlyJump = () => {
           if (!wingsAnimationAction) return;
           const clipDuration = wingsAnimationAction.getClip().duration;
-          const stopAt = Number.isFinite(FLY_WINGS_ANIMATION_STOP_TIME)
+          const hasCustomStopTime = Number.isFinite(FLY_WINGS_ANIMATION_STOP_TIME);
+          const stopAt = hasCustomStopTime
             ? Math.max(FLY_WINGS_ANIMATION_START_TIME, FLY_WINGS_ANIMATION_STOP_TIME)
-            : clipDuration;
+            : null;
           const clampedStart = Math.max(0, Math.min(FLY_WINGS_ANIMATION_START_TIME, clipDuration));
           wingsAnimationAction.reset();
           wingsAnimationAction.paused = false;
           wingsAnimationAction.time = clampedStart;
-          if (Number.isFinite(stopAt) && stopAt > clampedStart) {
+          if (hasCustomStopTime && stopAt > clampedStart) {
             setTimeout(() => {
               if (!wingsAnimationAction || !playerControls?.flySpellActive) return;
               wingsAnimationAction.paused = true;
