@@ -2,14 +2,47 @@ import * as THREE from 'three';
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from '../healthUtils.js';
 
 export const ATTACKS = {
-  mutantPunch: { damage: 1, range: 1.5, hitTime: 300, hitWindow: 300, knockbackStrength: 2 },
-  swordSlash: { damage: 2, range: 2.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3 },
-  swordSlashLeft: { damage: 2, range: 2.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3 },
-  swordFwdSpin: { damage: 3, range: 2.0, hitTime: 300, hitWindow: 500, knockbackStrength: 5 },
-  swordSpin: { damage: 4, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 12 },
-  hurricaneKick: { damage: 1, range: 2.0, hitTime: 300, hitWindow: 800, knockbackStrength: 5 },
-  mmaKick: { damage: 1, range: 1.7, hitTime: 300, hitWindow: 300, knockbackStrength: 8 }
+  mutantPunch: { damage: 1, range: 1.5, hitTime: 300, hitWindow: 300, knockbackStrength: 2, region: 'forward' },
+  swordSlash: { damage: 2, range: 2.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3, region: 'forward' },
+  swordSlashLeft: { damage: 2, range: 2.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3, region: 'forward' },
+  swordFwdSpin: { damage: 3, range: 2.0, hitTime: 300, hitWindow: 500, knockbackStrength: 5, region: 'forward' },
+  swordSpin: { damage: 4, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 12, region: 'around' },
+  hurricaneKick: { damage: 1, range: 2.0, hitTime: 300, hitWindow: 800, knockbackStrength: 5, region: 'around' },
+  mmaKick: { damage: 1, range: 1.7, hitTime: 300, hitWindow: 300, knockbackStrength: 8, region: 'forward' }
 };
+
+const tempToTarget = new THREE.Vector3();
+const tempForward = new THREE.Vector3();
+const tempRight = new THREE.Vector3();
+
+function isTargetInAttackRange(attackerModel, targetPosition, cfg) {
+  if (!attackerModel?.position || !targetPosition || !cfg) return false;
+  const range = Number.isFinite(cfg.range) ? cfg.range : 0;
+  if (range <= 0) return false;
+
+  tempToTarget.subVectors(targetPosition, attackerModel.position);
+  if ((cfg.region || 'around') !== 'forward') {
+    return tempToTarget.lengthSq() <= range * range;
+  }
+
+  attackerModel.getWorldDirection(tempForward);
+  tempForward.y = 0;
+  if (tempForward.lengthSq() < 0.0001) {
+    tempForward.set(0, 0, 1);
+  } else {
+    tempForward.normalize();
+  }
+
+  tempToTarget.y = 0;
+  const forwardDistance = tempToTarget.dot(tempForward);
+  if (forwardDistance < 0 || forwardDistance > range) {
+    return false;
+  }
+
+  tempRight.set(tempForward.z, 0, -tempForward.x);
+  const lateralDistance = tempToTarget.dot(tempRight);
+  return Math.abs(lateralDistance) <= range;
+}
 
 function getStrengthDamage(attackerId, baseDamage) {
   if (attackerId === 'local' && typeof window.getPlayerStrength === 'function') {
@@ -83,8 +116,7 @@ export function updateMeleeAttacks({
       for (const target of players) {
         if (target === attacker) continue;
         if (!target.model || !target.model.position) continue;
-        const dist = attacker.model.position.distanceTo(target.model.position);
-        if (dist <= cfg.range) {
+        if (isTargetInAttackRange(attacker.model, target.model.position, cfg)) {
           hit = true;
           onEntityHit?.({ targetType: target.id === 'local' ? 'player' : 'remotePlayer', targetId: target.id, targetPosition: target.model.position.clone() });
           if (target.id === 'local') {
@@ -115,8 +147,7 @@ export function updateMeleeAttacks({
       if (isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
           if (!monster?.model?.position) continue;
-          const dist = attacker.model.position.distanceTo(monster.model.position);
-          if (dist <= cfg.range) {
+          if (isTargetInAttackRange(attacker.model, monster.model.position, cfg)) {
             hit = true;
             const killed = monster.applyDamage(attackDamage);
             if (!killed) {
@@ -136,8 +167,7 @@ export function updateMeleeAttacks({
       } else if (!isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
           if (!monster?.model?.position) continue;
-          const dist = attacker.model.position.distanceTo(monster.model.position);
-          if (dist <= cfg.range) {
+          if (isTargetInAttackRange(attacker.model, monster.model.position, cfg)) {
             hit = true;
             sendMonsterAttack?.({
               monsterId: monster.id,
