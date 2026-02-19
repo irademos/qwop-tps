@@ -8,6 +8,7 @@ export const FLY_WINGS_OFFSET = Object.freeze({ x: 0.0, y: -23.0, z: 5.0 });
 export const FLY_WINGS_SCALE = 0.35;
 export const FLY_WINGS_ANIMATION_START_TIME = 0;
 export const FLY_WINGS_ANIMATION_STOP_TIME = 12.0;
+export const FLY_WINGS_ANIMATION_SPEED = 1.5;
 const FLY_WINGS_MODEL_URL = '/assets/props/wings.glb';
 const FLY_WINGS_ANIMATION_CLIP = 'Demon Wings Rig|animations';
 
@@ -58,7 +59,6 @@ const findTorsoAnchor = (model) => {
   let anchor = null;
   model?.traverse?.((child) => {
     if (anchor) return;
-    console.log(child.name);
     if (child.name && /spine|chest|torso|upper/i.test(child.name)) {
       anchor = child;
     }
@@ -91,6 +91,7 @@ export function initSpells({
   let cooldownTimer = null;
   let flyTimeout = null;
   let wingsRoot = null;
+  let wingsAnchor = null;
   let wingsMixer = null;
   let wingsAnimationAction = null;
 
@@ -147,12 +148,16 @@ export function initSpells({
       wingsAnimationAction = null;
     }
     wingsMixer = null;
-    if (wingsRoot?.parent) {
+    if (wingsAnchor?.parent) {
+      wingsAnchor.parent.remove(wingsAnchor);
+    } else if (wingsRoot?.parent) {
       wingsRoot.parent.remove(wingsRoot);
     }
+    wingsAnchor = null;
     wingsRoot = null;
     if (playerControls) {
       playerControls.flySpellActive = false;
+      playerControls.updateFlyWingsAnimation = null;
       playerControls.onFlyJump = null;
       playerControls.flySpellEndsAt = 0;
     }
@@ -168,14 +173,21 @@ export function initSpells({
       const cloned = SkeletonUtils.clone(gltf.scene);
       cloned.name = 'fly-wings';
       cloned.position.set(FLY_WINGS_OFFSET.x, FLY_WINGS_OFFSET.y, FLY_WINGS_OFFSET.z);
-      cloned.scale.setScalar(FLY_WINGS_SCALE);
 
       const anchor = findTorsoAnchor(targetModel) || targetModel;
-      const wingsAnchor = new THREE.Object3D();
+      wingsAnchor = new THREE.Object3D();
       wingsAnchor.name = 'wings-anchor';
       wingsAnchor.position.set(0, 0.15, -0.2);
+      const inheritedScale = new THREE.Vector3();
+      anchor.getWorldScale(inheritedScale);
+      wingsAnchor.scale.set(
+        inheritedScale.x !== 0 ? 1 / inheritedScale.x : 1,
+        inheritedScale.y !== 0 ? 1 / inheritedScale.y : 1,
+        inheritedScale.z !== 0 ? 1 / inheritedScale.z : 1
+      );
       anchor.add(wingsAnchor);
       wingsAnchor.add(cloned);
+      cloned.scale.setScalar(FLY_WINGS_SCALE);
       wingsRoot = cloned;
       if (Array.isArray(gltf.animations) && gltf.animations.length > 0) {
         wingsMixer = new THREE.AnimationMixer(cloned);
@@ -185,6 +197,7 @@ export function initSpells({
           wingsAnimationAction.loop = THREE.LoopRepeat;
           wingsAnimationAction.clampWhenFinished = false;
           wingsAnimationAction.enabled = true;
+          wingsAnimationAction.timeScale = FLY_WINGS_ANIMATION_SPEED;
           wingsAnimationAction.play();
           if (FLY_WINGS_ANIMATION_START_TIME > 0) {
             wingsAnimationAction.time = FLY_WINGS_ANIMATION_START_TIME;
@@ -196,6 +209,10 @@ export function initSpells({
         playerControls.flySpellActive = true;
         playerControls.flySpellEndsAt = Date.now() + spell.durationMs;
         playerControls.flyWingsAnimationAction = wingsAnimationAction;
+        playerControls.updateFlyWingsAnimation = (deltaSec) => {
+          if (!wingsMixer || !playerControls?.flySpellActive || !Number.isFinite(deltaSec) || deltaSec <= 0) return;
+          wingsMixer.update(deltaSec);
+        };
         playerControls.onFlyJump = () => {
           if (!wingsAnimationAction) return;
           const clipDuration = wingsAnimationAction.getClip().duration;
@@ -209,6 +226,9 @@ export function initSpells({
           if (Number.isFinite(stopAt) && stopAt > clampedStart) {
             setTimeout(() => {
               if (!wingsAnimationAction || !playerControls?.flySpellActive) return;
+              wingsAnimationAction.stop();
+              wingsAnimationAction.reset();
+              wingsAnimationAction.time = 0;
               wingsAnimationAction.paused = true;
             }, Math.max(100, (stopAt - clampedStart) * 1000));
           }
@@ -281,10 +301,6 @@ export function initSpells({
   }
 
   cooldownTimer = setInterval(() => {
-    const deltaSec = Number.isFinite(playerControls?.deltaSeconds) ? playerControls.deltaSeconds : 0;
-    if (wingsMixer && deltaSec > 0 && playerControls?.flySpellActive) {
-      wingsMixer.update(deltaSec);
-    }
     if (playerControls?.refreshActionButtons) {
       playerControls.refreshActionButtons();
     }
@@ -306,6 +322,7 @@ export function initSpells({
         delete playerControls.flySpellActive;
         delete playerControls.flySpellEndsAt;
         delete playerControls.flyWingsAnimationAction;
+        delete playerControls.updateFlyWingsAnimation;
         delete playerControls.onFlyJump;
       }
     }

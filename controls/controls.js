@@ -2308,6 +2308,7 @@ export class PlayerControls {
     if (this.playerModel && this.playerModel.userData.mixer) {
       this.playerModel.userData.mixer.update(delta);
     }
+    this.updateFlyWingsAnimation?.(delta);
 
     if (this.enabled && !this.isSleeping) {
       this.processMovement();
