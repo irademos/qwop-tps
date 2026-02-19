@@ -5441,6 +5441,7 @@ async function main() {
   const tempLobDirection = new THREE.Vector3();
   const tempMistDirection = new THREE.Vector3();
   const tempMistMoveStep = new THREE.Vector3();
+  const tempAttackMistForward = new THREE.Vector3();
 
   const createMistPool = ({ particleCount, color, emissive, opacity, emissiveIntensity, spread, yRandom, sizeRange }) => {
     const available = [];
@@ -5704,8 +5705,23 @@ async function main() {
       return;
     }
 
-    if (!attackWindowMists.length) {
-      const geometry = new THREE.CylinderGeometry(1, 1, ATTACK_WINDOW_MIST_HEIGHT, 24, 1, true);
+    const attackRegion = cfg.region || 'around';
+    const expectedShape = attackRegion === 'forward' ? 'box' : 'circle';
+
+    if (!attackWindowMists.length || attackWindowMists[0]?.shape !== expectedShape) {
+      if (attackWindowMists.length) {
+        for (let i = attackWindowMists.length - 1; i >= 0; i--) {
+          const staleEntry = attackWindowMists[i];
+          if (staleEntry?.mesh?.parent) {
+            staleEntry.mesh.parent.remove(staleEntry.mesh);
+          }
+          attackWindowMists.splice(i, 1);
+        }
+      }
+
+      const geometry = expectedShape === 'box'
+        ? new THREE.BoxGeometry(1, ATTACK_WINDOW_MIST_HEIGHT, 1)
+        : new THREE.CylinderGeometry(1, 1, ATTACK_WINDOW_MIST_HEIGHT, 24, 1, true);
       const material = new THREE.MeshBasicMaterial({
         color: 0xffdd33,
         transparent: true,
@@ -5717,16 +5733,32 @@ async function main() {
       mesh.castShadow = false;
       mesh.receiveShadow = false;
       mesh.userData.skipTerrainCorrection = true;
-      attackWindowMists.push({ mesh });
+      attackWindowMists.push({ mesh, shape: expectedShape });
       scene.add(mesh);
     }
 
     const entry = attackWindowMists[0];
     const mesh = entry.mesh;
-    const radius = Math.max(0.4, cfg.range);
-    mesh.scale.set(radius, 1, radius);
+    const range = Math.max(0.4, cfg.range);
     mesh.position.copy(playerModel.position);
     mesh.position.y += ATTACK_WINDOW_MIST_HEIGHT * 0.5;
+
+    if (attackRegion === 'forward') {
+      const width = range * 2;
+      mesh.scale.set(width, 1, range);
+      mesh.rotation.set(0, playerModel.rotation.y, 0);
+      playerModel.getWorldDirection(tempAttackMistForward);
+      tempAttackMistForward.y = 0;
+      if (tempAttackMistForward.lengthSq() < 0.0001) {
+        tempAttackMistForward.set(0, 0, 1);
+      } else {
+        tempAttackMistForward.normalize();
+      }
+      mesh.position.addScaledVector(tempAttackMistForward, range * 0.5);
+    } else {
+      mesh.scale.set(range, 1, range);
+      mesh.rotation.set(0, 0, 0);
+    }
   }
 
   function spawnHitRibbonBurst(scene, position) {
