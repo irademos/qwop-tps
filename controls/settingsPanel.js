@@ -271,6 +271,9 @@ function buildInventoryPanel() {
   const dropButton = createElement('button', 'settings-button', 'Drop');
   dropButton.type = 'button';
   dropButton.dataset.inventoryAction = 'drop';
+  const infoButton = createElement('button', 'settings-button', 'Info');
+  infoButton.type = 'button';
+  infoButton.dataset.inventoryAction = 'info';
   const useButton = createElement('button', 'settings-button', 'Use');
   useButton.type = 'button';
   useButton.dataset.inventoryAction = 'use';
@@ -280,10 +283,26 @@ function buildInventoryPanel() {
   const eatButton = createElement('button', 'settings-button', 'Eat');
   eatButton.type = 'button';
   eatButton.dataset.inventoryAction = 'eat';
-  actions.append(dropButton, useButton, equipButton, eatButton);
+  actions.append(dropButton, infoButton, useButton, equipButton, eatButton);
   details.append(detailsText, actions);
-
   panelEl.append(grid, emptyState, details);
+
+  const infoModal = createElement('div', 'inventory-info-modal hidden');
+  infoModal.setAttribute('role', 'dialog');
+  infoModal.setAttribute('aria-modal', 'true');
+  const infoCard = createElement('div', 'inventory-info-card');
+  const infoHeader = createElement('div', 'inventory-info-header');
+  const infoClose = createElement('button', 'settings-close', '✕');
+  infoClose.type = 'button';
+  infoClose.dataset.inventoryAction = 'close-info';
+  infoClose.setAttribute('aria-label', 'Close item info');
+  const infoTitle = createElement('h3', 'settings-section-title', 'Item Info');
+  infoHeader.append(infoTitle, infoClose);
+  const infoText = createElement('div', 'settings-muted');
+  infoText.textContent = '';
+  infoCard.append(infoHeader, infoText);
+  infoModal.append(infoCard);
+  panelEl.append(infoModal);
 
   elements.inventoryGrid = grid;
   elements.inventoryEmpty = emptyState;
@@ -291,9 +310,12 @@ function buildInventoryPanel() {
   elements.inventoryDetailsContainer = details;
   elements.inventoryActions = actions;
   elements.inventoryDropButton = dropButton;
+  elements.inventoryInfoButton = infoButton;
   elements.inventoryUseButton = useButton;
   elements.inventoryEquipButton = equipButton;
   elements.inventoryEatButton = eatButton;
+  elements.inventoryInfoModal = infoModal;
+  elements.inventoryInfoText = infoText;
 
   return panelEl;
 }
@@ -1124,6 +1146,10 @@ function renderInventory() {
   });
 
   const selectedItem = inventory[selectedInventoryId];
+  if (elements.inventoryInfoModal && selectedInventoryId !== 'zombie_brains') {
+    elements.inventoryInfoModal.classList.add('hidden');
+  }
+
   if (selectedItem) {
     const itemActions = context.appState?.getInventoryItemActions?.(selectedInventoryId) || ['drop', 'equip'];
     const isEquipped = equippedItems.has(selectedInventoryId);
@@ -1155,6 +1181,10 @@ function renderInventory() {
       const canUse = itemActions.includes('use');
       elements.inventoryUseButton.style.display = canUse ? 'inline-flex' : 'none';
     }
+    if (elements.inventoryInfoButton) {
+      const canInfo = itemActions.includes('info');
+      elements.inventoryInfoButton.style.display = canInfo ? 'inline-flex' : 'none';
+    }
     if (elements.inventoryEatButton) {
       const canEat = itemActions.includes('eat');
       elements.inventoryEatButton.style.display = canEat ? 'inline-flex' : 'none';
@@ -1181,7 +1211,7 @@ function bindEvents() {
     if (!button) return;
     if (button.dataset.inventoryAction) {
       const action = button.dataset.inventoryAction;
-      if (!selectedInventoryId) return;
+      if (!selectedInventoryId && action !== 'close-info') return;
       if (action === 'drop') {
         context.appState?.dropInventoryItem?.(selectedInventoryId);
       } else if (action === 'use') {
@@ -1192,12 +1222,20 @@ function bindEvents() {
         context.appState?.unequipInventoryItem?.(selectedInventoryId);
       } else if (action === 'eat') {
         context.appState?.eatInventoryItem?.(selectedInventoryId);
+      } else if (action === 'info') {
+        if (selectedInventoryId === 'zombie_brains' && elements.inventoryInfoModal && elements.inventoryInfoText) {
+          elements.inventoryInfoText.textContent = 'Zombie Brains are unstable remains from undead creatures. They pulse with strange energy. Maybe you can craft them into something useful at your home crafting table.';
+          elements.inventoryInfoModal.classList.remove('hidden');
+        }
+      } else if (action === 'close-info') {
+        elements.inventoryInfoModal?.classList.add('hidden');
       }
       renderInventory();
       return;
     }
     if (button.dataset.inventoryId) {
       selectedInventoryId = button.dataset.inventoryId;
+      elements.inventoryInfoModal?.classList.add('hidden');
       renderInventory();
       return;
     }

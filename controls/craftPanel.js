@@ -4,13 +4,15 @@ export const CRAFT_RECIPES = [
   { id: 'bow', label: 'Bow', materials: { wood: 9, mushrooms: 4 } },
   { id: 'lantern', label: 'Lantern', materials: { wood: 9, apples: 4 } },
   { id: 'bed', label: 'Bed', materials: { wood: 12, mushrooms: 8 } },
-  { id: 'home-storage', label: 'Home Storage', materials: { wood: 12 } }
+  { id: 'home-storage', label: 'Home Storage', materials: { wood: 12 } },
+  { id: 'mana_potion', label: 'Magic potion', materials: { zombie_brains: 4 } }
 ];
 
 const MATERIAL_FILTERS = {
   apple: (itemId) => itemId === 'apple',
   wood: (itemId) => itemId === 'wood',
-  mushroom: (itemId) => itemId.startsWith('mushroom_')
+  mushroom: (itemId) => itemId.startsWith('mushroom_'),
+  zombieBrains: (itemId) => itemId === 'zombie_brains'
 };
 
 let overlay;
@@ -35,7 +37,7 @@ const createElement = (tag, className, text) => {
 };
 
 const getMaterialItems = (inventory = {}) => Object.entries(inventory)
-  .filter(([itemId]) => MATERIAL_FILTERS.apple(itemId) || MATERIAL_FILTERS.wood(itemId) || MATERIAL_FILTERS.mushroom(itemId))
+  .filter(([itemId]) => MATERIAL_FILTERS.apple(itemId) || MATERIAL_FILTERS.wood(itemId) || MATERIAL_FILTERS.mushroom(itemId) || MATERIAL_FILTERS.zombieBrains(itemId))
   .map(([itemId, entry]) => ({
     id: itemId,
     name: entry?.name || itemId,
@@ -107,7 +109,9 @@ const buildRecipes = () => {
           ? 'Apples'
           : key === 'wood'
             ? 'Wood'
-            : key;
+            : key === 'zombie_brains'
+              ? 'Zombie Brains'
+              : key;
       return `${qty} x ${label}`;
     }).join(', ');
     const detail = createElement('div', 'craft-recipe-detail', materials);
