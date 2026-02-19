@@ -234,12 +234,12 @@ export function initSpells({
             : clipDuration;
           const clampedStart = Math.max(0, Math.min(FLY_WINGS_ANIMATION_START_TIME, clipDuration));
           wingsAnimationAction.reset();
+          wingsAnimationAction.play();
           wingsAnimationAction.paused = false;
           wingsAnimationAction.time = clampedStart;
           if (Number.isFinite(stopAt) && stopAt > clampedStart) {
             wingsAnimationStopTimeout = setTimeout(() => {
               if (!wingsAnimationAction || !playerControls?.flySpellActive) return;
-              wingsAnimationAction.stop();
               wingsAnimationAction.reset();
               wingsAnimationAction.time = 0;
               wingsAnimationAction.paused = true;
