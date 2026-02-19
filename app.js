@@ -613,6 +613,7 @@ async function main() {
   const APPLE_PICKUP_RADIUS = 3;
   const WOOD_ITEM_ID = 'wood';
   const MEAT_ITEM_ID = 'meat';
+  const ZOMBIE_BRAINS_ITEM_ID = 'zombie_brains';
   const LIFE_POTION_ITEM_ID = 'life_potion';
   const MANA_POTION_ITEM_ID = 'mana_potion';
   const WOOD_PICKUP_RADIUS = 3;
@@ -692,10 +693,12 @@ async function main() {
   let applePickups = [];
   let woodPickups = [];
   let meatPickups = [];
+  let zombieBrainsPickups = [];
   const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
   const appleItemIds = new Set([APPLE_ITEM_ID]);
   const woodItemIds = new Set([WOOD_ITEM_ID]);
   const meatItemIds = new Set([MEAT_ITEM_ID]);
+  const zombieBrainsItemIds = new Set([ZOMBIE_BRAINS_ITEM_ID]);
   const potionItemIds = new Set([LIFE_POTION_ITEM_ID, MANA_POTION_ITEM_ID]);
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
@@ -2335,6 +2338,7 @@ async function main() {
   window.applePickups = applePickups;
   window.woodPickups = woodPickups;
   window.meatPickups = meatPickups;
+  window.zombieBrainsPickups = zombieBrainsPickups;
   natureController = await createNature({
     scene,
     playerModel,
@@ -2876,6 +2880,11 @@ async function main() {
         spawningSlots.delete(slotId);
       }
     });
+  };
+
+  const isZombieMonsterType = (monster) => {
+    const typeLabel = String(monster?.type || monster?.modelPath || '').toLowerCase();
+    return typeLabel.includes('zombie');
   };
 
   function resolvePersistedMonsterModelPath(record, fallbackModelPath = null) {
@@ -3434,6 +3443,10 @@ async function main() {
     name: 'Meat',
     icon: ''
   };
+  inventoryCatalog[ZOMBIE_BRAINS_ITEM_ID] = {
+    name: 'Zombie Brains',
+    icon: ''
+  };
   MUSHROOM_ENTRIES.forEach((entry) => {
     inventoryCatalog[entry.id] = {
       name: entry.name,
@@ -3542,6 +3555,7 @@ async function main() {
   const isAppleItem = (itemId) => appleItemIds.has(itemId);
   const isWoodItem = (itemId) => woodItemIds.has(itemId);
   const isMeatItem = (itemId) => meatItemIds.has(itemId);
+  const isZombieBrainsItem = (itemId) => zombieBrainsItemIds.has(itemId);
   const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId) || isMeatItem(itemId);
   const isPotionItem = (itemId) => potionItemIds.has(itemId);
   const getInventoryItemActions = (itemId) => {
@@ -3553,6 +3567,9 @@ async function main() {
     }
     if (equippableItems.has(itemId)) {
       return ['drop', 'equip'];
+    }
+    if (isZombieBrainsItem(itemId)) {
+      return ['drop', 'info'];
     }
     return ['drop'];
   };
@@ -4181,6 +4198,26 @@ async function main() {
     return true;
   }
 
+  function pickupZombieBrains(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const playerPosition = playerControls.playerModel.position;
+      const brainPosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - brainPosition.x,
+        playerPosition.z - brainPosition.z
+      );
+      if (horizontalDistance > MEAT_PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeWoodPickup(pickup);
+    const index = zombieBrainsPickups.indexOf(pickup);
+    if (index >= 0) {
+      zombieBrainsPickups.splice(index, 1);
+    }
+    return true;
+  }
+
   function spawnMushroomPickup(itemId, position) {
     if (!mushroomController?.spawnPickup || !position) return null;
     return mushroomController.spawnPickup(itemId, position);
@@ -4237,6 +4274,55 @@ async function main() {
     scene.add(mesh);
     const pickup = { id: MEAT_ITEM_ID, mesh };
     meatPickups.push(pickup);
+    return pickup;
+  }
+
+  function spawnZombieBrainsPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (Number.isFinite(terrainHeight)) {
+      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
+    }
+
+    const brainGroup = new THREE.Group();
+    const lobeMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff8ccf,
+      emissive: 0x5a1f49,
+      emissiveIntensity: 0.28,
+      roughness: 0.78,
+      metalness: 0.02,
+      flatShading: true
+    });
+    const stemMaterial = new THREE.MeshStandardMaterial({
+      color: 0xe46bb6,
+      emissive: 0x4b1537,
+      emissiveIntensity: 0.24,
+      roughness: 0.82,
+      metalness: 0.01,
+      flatShading: true
+    });
+
+    const leftLobe = new THREE.Mesh(new THREE.IcosahedronGeometry(0.26, 0), lobeMaterial);
+    const rightLobe = new THREE.Mesh(new THREE.IcosahedronGeometry(0.26, 0), lobeMaterial.clone());
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.22, 6), stemMaterial);
+
+    leftLobe.position.set(-0.18, 0, 0);
+    rightLobe.position.set(0.18, 0, 0);
+    stem.position.set(0, -0.18, 0);
+
+    brainGroup.add(leftLobe, rightLobe, stem);
+    brainGroup.position.copy(spawnPos);
+    brainGroup.rotation.y = Math.random() * Math.PI * 2;
+    brainGroup.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    scene.add(brainGroup);
+
+    const pickup = { id: ZOMBIE_BRAINS_ITEM_ID, mesh: brainGroup };
+    zombieBrainsPickups.push(pickup);
     return pickup;
   }
 
@@ -4631,6 +4717,10 @@ async function main() {
       spawnCraftArrowPickup(dropPos);
       return;
     }
+    if (itemId === MANA_POTION_ITEM_ID) {
+      addToInventory(MANA_POTION_ITEM_ID, 1);
+      return;
+    }
     const pickupConfig = {
       bow: { item: bow, itemId: 'bow', markerColor: 0xffc26b },
       lantern: { item: lantern, itemId: 'lantern', markerColor: 0xffd400 },
@@ -4743,6 +4833,14 @@ async function main() {
       const dropPosition = getInventoryDropPosition();
       if (!dropPosition) return;
       const pickup = spawnWoodPickup(dropPosition);
+      if (!pickup) return;
+      removeFromInventory(itemId, 1);
+      return;
+    }
+    if (isZombieBrainsItem(itemId)) {
+      const dropPosition = getInventoryDropPosition();
+      if (!dropPosition) return;
+      const pickup = spawnZombieBrainsPickup(dropPosition);
       if (!pickup) return;
       removeFromInventory(itemId, 1);
       return;
@@ -6551,6 +6649,7 @@ async function main() {
     removePickupOutsideRadius(foodPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(healthPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(coinPickups, center, PICKUP_SPAWN_RADIUS);
+    removePickupOutsideRadius(zombieBrainsPickups, center, PICKUP_SPAWN_RADIUS);
     removeDroppedWeaponPickupsOutsideRadius(droppedWeaponPickups, center, PICKUP_SPAWN_RADIUS);
 
     const now = Date.now();
@@ -8598,6 +8697,12 @@ async function main() {
         disposePickup(pickup);
         coinPickups.splice(i, 1);
       }
+      for (let i = zombieBrainsPickups.length - 1; i >= 0; i--) {
+        const pickup = zombieBrainsPickups[i];
+        if (!pickup?.mesh) continue;
+        disposeWoodPickup(pickup);
+        zombieBrainsPickups.splice(i, 1);
+      }
       for (let i = mushroomPickups.length - 1; i >= 0; i--) {
         const pickup = mushroomPickups[i];
         if (!pickup) continue;
@@ -8762,6 +8867,17 @@ async function main() {
           meatPickups.splice(i, 1);
         }
       }
+      for (let i = zombieBrainsPickups.length - 1; i >= 0; i--) {
+        const pickup = zombieBrainsPickups[i];
+        if (!pickup?.mesh) {
+          zombieBrainsPickups.splice(i, 1);
+          continue;
+        }
+        pickup.mesh.rotation.y += 0.02;
+        if (shouldCheckPickups && !playerDead) {
+          pickupZombieBrains(pickup);
+        }
+      }
     }
 
     iceGun?.update();
@@ -8880,6 +8996,10 @@ async function main() {
     monsters = monsters.filter(monster => {
       if (!monster?.model) return true;
       if (!monster.shouldRemoveAfterDeath?.(aiNowMs)) return true;
+      if (isHostNow && monster.isDead && isZombieMonsterType(monster) && !monster.hasDroppedZombieBrains) {
+        spawnZombieBrainsPickup(monster.model.position.clone());
+        monster.hasDroppedZombieBrains = true;
+      }
       cleanupMonster(monster);
       if (isHostNow && monster.id) {
         removeMonsterRecord(monster.id);
