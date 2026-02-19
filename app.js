@@ -175,8 +175,9 @@ const BOMB_BASE_DAMAGE = 6;
 const BOMB_KNOCKBACK_STRENGTH = 6;
 const BOMB_MIST_LIFETIME_MS = 8000;
 const BOMB_MIST_PARTICLE_COUNT = 35;
-const ATTACK_WINDOW_MIST_OPACITY = 0.38;
-const ATTACK_WINDOW_MIST_HEIGHT = 1.4;
+const ATTACK_WINDOW_MIST_OPACITY = 0.52;
+const ATTACK_WINDOW_MIST_HEIGHT = 1.6;
+const ATTACK_WINDOW_VISUAL_MULTIPLIER = 2;
 const HIT_RIBBON_STREAK_COUNT = 9;
 const HIT_RIBBON_LIFETIME_MS = 260;
 const TORCH_ITEM_ID = 'torch';
@@ -5430,8 +5431,6 @@ async function main() {
   const tempLobDirection = new THREE.Vector3();
   const tempMistDirection = new THREE.Vector3();
   const tempMistMoveStep = new THREE.Vector3();
-  const tempAttackForward = new THREE.Vector3();
-  const tempAttackCenter = new THREE.Vector3();
 
   const createMistPool = ({ particleCount, color, emissive, opacity, emissiveIntensity, spread, yRandom, sizeRange }) => {
     const available = [];
@@ -5679,7 +5678,8 @@ async function main() {
     if (!cfg) return;
 
     const elapsed = Date.now() - activeAttack.start;
-    const inHitWindow = elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow;
+    const visualWindowMs = Math.max(cfg.hitWindow * ATTACK_WINDOW_VISUAL_MULTIPLIER, 220);
+    const inHitWindow = elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + visualWindowMs;
 
     if (!inHitWindow) {
       if (attackWindowMists.length) {
@@ -5696,10 +5696,8 @@ async function main() {
 
     if (!attackWindowMists.length) {
       const geometry = new THREE.CylinderGeometry(1, 1, ATTACK_WINDOW_MIST_HEIGHT, 24, 1, true);
-      const material = new THREE.MeshStandardMaterial({
+      const material = new THREE.MeshBasicMaterial({
         color: 0xffdd33,
-        emissive: 0xf0bc00,
-        emissiveIntensity: 0.45,
         transparent: true,
         opacity: ATTACK_WINDOW_MIST_OPACITY,
         depthWrite: false,
@@ -5717,19 +5715,8 @@ async function main() {
     const mesh = entry.mesh;
     const radius = Math.max(0.4, cfg.range);
     mesh.scale.set(radius, 1, radius);
-
-    tempAttackForward.set(0, 0, 1).applyQuaternion(playerModel.quaternion);
-    tempAttackForward.y = 0;
-    if (tempAttackForward.lengthSq() < 1e-6) {
-      tempAttackForward.set(0, 0, 1);
-    } else {
-      tempAttackForward.normalize();
-    }
-
-    tempAttackCenter.copy(playerModel.position).addScaledVector(tempAttackForward, radius * 0.5);
-    tempAttackCenter.y += ATTACK_WINDOW_MIST_HEIGHT * 0.5;
-    mesh.position.copy(tempAttackCenter);
-    mesh.rotation.y = Math.atan2(tempAttackForward.x, tempAttackForward.z);
+    mesh.position.copy(playerModel.position);
+    mesh.position.y += ATTACK_WINDOW_MIST_HEIGHT * 0.5;
   }
 
   function spawnHitRibbonBurst(scene, position) {
