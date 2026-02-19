@@ -6441,6 +6441,7 @@ async function main() {
   await initSpellsFeature({
     playerControls,
     getPlayerModel: () => playerModel,
+    getCharacterModel: () => characterModel,
     spellsAvailable,
     getMagic: () => statsState.magic,
     setMagic: (value) => setStat('magic', value)

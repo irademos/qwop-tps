@@ -8,6 +8,7 @@ export const FLY_WINGS_SCALE = 0.00525;
 export const FLY_WINGS_ANIMATION_START_TIME = 0;
 export const FLY_WINGS_ANIMATION_STOP_TIME = 4.0;
 export const FLY_WINGS_ANIMATION_SPEED = 1.5;
+const FLY_WINGS_COWBOY_ROTATION_Y = Math.PI;
 const FLY_WINGS_MODEL_URL = '/assets/props/wings.glb';
 const FLY_WINGS_ANIMATION_CLIP = 'Demon Wings Rig|animations';
 
@@ -79,6 +80,7 @@ const getWingsAsset = () => {
 export function initSpells({
   playerControls,
   getPlayerModel,
+  getCharacterModel,
   spellsAvailable,
   getMagic,
   setMagic
@@ -93,6 +95,7 @@ export function initSpells({
   let wingsAnchor = null;
   let wingsMixer = null;
   let wingsAnimationAction = null;
+  let wingsAnimationStopTimeout = null;
 
   const setInvincible = (durationMs) => {
     if (!playerControls) return;
@@ -142,6 +145,10 @@ export function initSpells({
       clearTimeout(flyTimeout);
       flyTimeout = null;
     }
+    if (wingsAnimationStopTimeout) {
+      clearTimeout(wingsAnimationStopTimeout);
+      wingsAnimationStopTimeout = null;
+    }
     if (wingsAnimationAction) {
       wingsAnimationAction.stop();
       wingsAnimationAction = null;
@@ -177,6 +184,9 @@ export function initSpells({
       wingsAnchor = new THREE.Object3D();
       wingsAnchor.name = 'wings-anchor';
       wingsAnchor.position.set(0, 0.15, -0.2);
+      const characterModel = getCharacterModel?.() || '';
+      const isCowboyModel = /\/cowboy\.fbx$/i.test(characterModel);
+      wingsAnchor.rotation.y = isCowboyModel ? FLY_WINGS_COWBOY_ROTATION_Y : 0;
       const inheritedScale = new THREE.Vector3();
       anchor.getWorldScale(inheritedScale);
       wingsAnchor.scale.set(
@@ -214,21 +224,26 @@ export function initSpells({
         };
         playerControls.onFlyJump = () => {
           if (!wingsAnimationAction) return;
+          if (wingsAnimationStopTimeout) {
+            clearTimeout(wingsAnimationStopTimeout);
+            wingsAnimationStopTimeout = null;
+          }
           const clipDuration = wingsAnimationAction.getClip().duration;
           const stopAt = Number.isFinite(FLY_WINGS_ANIMATION_STOP_TIME)
             ? Math.max(FLY_WINGS_ANIMATION_START_TIME, FLY_WINGS_ANIMATION_STOP_TIME)
             : clipDuration;
           const clampedStart = Math.max(0, Math.min(FLY_WINGS_ANIMATION_START_TIME, clipDuration));
           wingsAnimationAction.reset();
+          wingsAnimationAction.play();
           wingsAnimationAction.paused = false;
           wingsAnimationAction.time = clampedStart;
           if (Number.isFinite(stopAt) && stopAt > clampedStart) {
-            setTimeout(() => {
+            wingsAnimationStopTimeout = setTimeout(() => {
               if (!wingsAnimationAction || !playerControls?.flySpellActive) return;
-              wingsAnimationAction.stop();
               wingsAnimationAction.reset();
               wingsAnimationAction.time = 0;
               wingsAnimationAction.paused = true;
+              wingsAnimationStopTimeout = null;
             }, Math.max(100, (stopAt - clampedStart) * 1000));
           }
         };
