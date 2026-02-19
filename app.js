@@ -612,7 +612,7 @@ async function main() {
   const WOOD_DROP_LIFT = 0.12;
   const TREE_HITS_TO_CUT = 3;
   const TREE_SWING_TILT_STEP = 0.08;
-  const TREE_HIT_RANGE_BOOST = 1.8;
+  const TREE_HIT_RANGE_BOOST = 3.5;
   const MAX_AMMO_PICKUPS = 60;
   const MAX_FOOD_PICKUPS = 80;
   const MAX_HEALTH_PICKUPS = 60;
