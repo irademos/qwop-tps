@@ -643,7 +643,7 @@ async function main() {
 
   let multiplayer = null;
   let isHost = false;
-  let playerControls = null;
+  var playerControls = null;
   let friendlyNpcManager = null;
   let homeSystem = null;
   let scene = null;
@@ -818,7 +818,7 @@ async function main() {
     return 'day';
   };
   const loadDisplaySettings = () => {
-    const defaults = { mode: 'auto', ...DISPLAY_PRESETS.day };
+    const defaults = { mode: 'auto', firstPerson: false, ...DISPLAY_PRESETS.day };
     const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
     if (!raw) return defaults;
     try {
@@ -845,6 +845,7 @@ async function main() {
   if (!DISPLAY_MODES.has(displaySettings.mode)) {
     displaySettings.mode = 'auto';
   }
+  displaySettings.firstPerson = Boolean(displaySettings.firstPerson);
   if (displaySettings.mode === 'auto') {
     lastAutoMode = getAutoMode();
     applyPresetForMode(lastAutoMode);
@@ -873,6 +874,7 @@ async function main() {
     if (dirLight) {
       dirLight.intensity = clampValue(displaySettings.directionalIntensity, 0, 2);
     }
+    playerControls?.setFirstPersonEnabled?.(displaySettings.firstPerson);
     applyMaterialBrightness(groundTiles?.material, groundMaterialBase, displaySettings.groundBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, displaySettings.buildingBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, displaySettings.buildingBrightness);
@@ -912,6 +914,12 @@ async function main() {
   };
 
   const setDisplaySetting = (key, value) => {
+    if (key === 'firstPerson') {
+      displaySettings.firstPerson = Boolean(value);
+      saveDisplaySettings();
+      applyDisplaySettings();
+      return;
+    }
     if (!Number.isFinite(value)) return;
     displaySettings[key] = value;
     saveDisplaySettings();
