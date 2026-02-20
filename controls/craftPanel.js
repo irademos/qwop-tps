@@ -292,12 +292,14 @@ const computeCraftable = () => {
   const counts = {
     wood: 0,
     apples: 0,
-    mushrooms: 0
+    mushrooms: 0,
+    zombie_brains: 0
   };
   Object.entries(selectedMaterials).forEach(([itemId, count]) => {
     if (MATERIAL_FILTERS.wood(itemId)) counts.wood += count;
     if (MATERIAL_FILTERS.apple(itemId)) counts.apples += count;
     if (MATERIAL_FILTERS.mushroom(itemId)) counts.mushrooms += count;
+    if (MATERIAL_FILTERS.zombieBrains(itemId)) counts.zombie_brains += count;
   });
   return CRAFT_RECIPES.filter((recipe) => Object.entries(recipe.materials).every(([key, amount]) => {
     return counts[key] >= amount;
