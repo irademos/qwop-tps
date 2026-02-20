@@ -6701,8 +6701,17 @@ async function main() {
     for (let i = pickups.length - 1; i >= 0; i--) {
       const pickup = pickups[i];
       if (!pickup) continue;
-      if (center.distanceTo(pickup.position) > radius) {
-        disposePickup(pickup);
+      const pickupMesh = pickup?.position ? pickup : pickup?.mesh;
+      if (!pickupMesh?.position) {
+        pickups.splice(i, 1);
+        continue;
+      }
+      if (center.distanceTo(pickupMesh.position) > radius) {
+        if (pickupMesh === pickup) {
+          disposePickup(pickupMesh);
+        } else {
+          disposeWoodPickup(pickup);
+        }
         pickups.splice(i, 1);
       }
     }
