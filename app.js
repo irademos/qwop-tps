@@ -163,6 +163,8 @@ const MONSTER_SWORD_HOLD_OFFSET = new THREE.Vector3(-0.05, 0.15, 0.08);
 const MONSTER_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
 const MONSTER_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(MONSTER_SWORD_HOLD_ROTATION);
 const ARROW_MODEL_URL = '/assets/props/arrow.glb';
+const MANA_POTION_MODEL_URL = '/assets/props/mana_potion.glb';
+const MANA_POTION_SCALE = 8.0;
 const ARROW_PROJECTILE_SCALE = 2.2;
 const ARROW_PROJECTILE_SPEED = 55;
 const ARROW_PROJECTILE_LIFETIME = 6000;
@@ -195,6 +197,8 @@ let monsterSwordTemplate = null;
 let monsterSwordTemplatePromise = null;
 let arrowTemplate = null;
 let arrowTemplatePromise = null;
+let manaPotionTemplate = null;
+let manaPotionTemplatePromise = null;
 const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
@@ -1835,6 +1839,7 @@ async function main() {
   await bow.load();
   window.bow = bow;
   await loadArrowTemplate();
+  await loadManaPotionTemplate();
   let bowHeldArrow = null;
   let bowHeldMesh = null;
   const ensureBowHeldMesh = () => {
@@ -2783,6 +2788,47 @@ async function main() {
     });
     arrowMesh.scale.setScalar(scale);
     return arrowMesh;
+  }
+
+  async function loadManaPotionTemplate() {
+    if (manaPotionTemplate) return manaPotionTemplate;
+    if (!manaPotionTemplatePromise) {
+      const loader = new GLTFLoader();
+      manaPotionTemplatePromise = loader.loadAsync(MANA_POTION_MODEL_URL)
+        .then(gltf => {
+          manaPotionTemplate = gltf.scene;
+          return manaPotionTemplate;
+        })
+        .catch(error => {
+          console.warn('Failed to load mana potion model.', error);
+          manaPotionTemplate = null;
+          return null;
+        })
+        .finally(() => {
+          manaPotionTemplatePromise = null;
+        });
+    }
+    return manaPotionTemplatePromise;
+  }
+
+  function cloneManaPotionMesh(template, scale = MANA_POTION_SCALE) {
+    if (!template) return null;
+    const potionMesh = template.clone(true);
+    potionMesh.visible = true;
+    potionMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.visible = true;
+      child.geometry = child.geometry?.clone?.() ?? child.geometry;
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map(material => material?.clone?.() ?? material);
+      } else {
+        child.material = child.material?.clone?.() ?? child.material;
+      }
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    potionMesh.scale.setScalar(scale);
+    return potionMesh;
   }
 
   function cleanupMonster(monster) {
@@ -4277,14 +4323,7 @@ async function main() {
     return pickup;
   }
 
-  function spawnZombieBrainsPickup(position) {
-    const spawnPos = asVec3(position);
-    if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
-
+  function createZombieBrainsGroup() {
     const brainGroup = new THREE.Group();
     const lobeMaterial = new THREE.MeshStandardMaterial({
       color: 0xff8ccf,
@@ -4312,13 +4351,25 @@ async function main() {
     stem.position.set(0, -0.18, 0);
 
     brainGroup.add(leftLobe, rightLobe, stem);
-    brainGroup.position.copy(spawnPos);
-    brainGroup.rotation.y = Math.random() * Math.PI * 2;
     brainGroup.traverse((child) => {
       if (!child.isMesh) return;
       child.castShadow = true;
       child.receiveShadow = true;
     });
+    return brainGroup;
+  }
+
+  function spawnZombieBrainsPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (Number.isFinite(terrainHeight)) {
+      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
+    }
+
+    const brainGroup = createZombieBrainsGroup();
+    brainGroup.position.copy(spawnPos);
+    brainGroup.rotation.y = Math.random() * Math.PI * 2;
     scene.add(brainGroup);
 
     const pickup = { id: ZOMBIE_BRAINS_ITEM_ID, mesh: brainGroup };
@@ -4554,11 +4605,12 @@ async function main() {
     if (itemId === WOOD_ITEM_ID) return 'wood';
     if (itemId === APPLE_ITEM_ID) return 'apples';
     if (itemId?.startsWith?.('mushroom_')) return 'mushrooms';
+    if (itemId === ZOMBIE_BRAINS_ITEM_ID) return 'zombie_brains';
     return null;
   };
 
   const getSelectionMaterialCounts = (selection) => {
-    const totals = { wood: 0, apples: 0, mushrooms: 0 };
+    const totals = { wood: 0, apples: 0, mushrooms: 0, zombie_brains: 0 };
     if (!selection) return totals;
     Object.entries(selection).forEach(([itemId, count]) => {
       const key = getCraftMaterialKey(itemId);
@@ -4613,6 +4665,15 @@ async function main() {
     craftState.materials.forEach((entry) => {
       if (!entry?.mesh) return;
       scene.remove(entry.mesh);
+      entry.mesh.traverse?.((child) => {
+        if (!child?.isMesh) return;
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(material => material?.dispose?.());
+        } else {
+          child.material?.dispose?.();
+        }
+      });
       entry.mesh.geometry?.dispose?.();
       if (Array.isArray(entry.mesh.material)) {
         entry.mesh.material.forEach(material => material?.dispose?.());
@@ -4648,6 +4709,9 @@ async function main() {
       const geometry = new THREE.BoxGeometry(0.35, 0.14, 0.2);
       const material = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
       return new THREE.Mesh(geometry, material);
+    }
+    if (itemId === ZOMBIE_BRAINS_ITEM_ID) {
+      return createZombieBrainsGroup();
     }
     return null;
   };
@@ -4718,7 +4782,20 @@ async function main() {
       return;
     }
     if (itemId === MANA_POTION_ITEM_ID) {
-      addToInventory(MANA_POTION_ITEM_ID, 1);
+      const potionMesh = cloneManaPotionMesh(manaPotionTemplate, MANA_POTION_SCALE);
+      if (!potionMesh) return;
+      potionMesh.position.copy(dropPos);
+      potionMesh.userData.skipTerrainCorrection = true;
+      createDroppedWeaponPickup(
+        { mesh: potionMesh, type: MANA_POTION_ITEM_ID },
+        {
+          itemId: MANA_POTION_ITEM_ID,
+          markerColor: 0x7f7dff,
+          markerOffsetY: 1.0,
+          position: dropPos,
+          allowHidden: true
+        }
+      );
       return;
     }
     const pickupConfig = {
