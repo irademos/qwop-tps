@@ -16,7 +16,7 @@ const SPELL_DEFS = [
   {
     id: 'shield',
     label: 'Shield',
-    magicCost: 25,
+    magicCost: 5,
     cooldownMs: 60_000,
     durationMs: 5_000
   },
