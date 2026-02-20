@@ -1,13 +1,17 @@
 export const BASE_HEALTH_SEGMENTS = 10;
 export const HEALTH_SEGMENT_VALUE = 10;
 
-export const getMaxHealthSegments = (level = 1) => {
+export const getMaxHealthSegments = (level = 1, bonusSegments = 0) => {
   const safeLevel = Math.max(1, Math.round(level || 1));
-  return BASE_HEALTH_SEGMENTS + Math.max(0, safeLevel - 1);
+  const safeBonus = Math.max(0, Math.round(bonusSegments || 0));
+  return BASE_HEALTH_SEGMENTS + Math.max(0, safeLevel - 1) + safeBonus;
 };
 
-export const normalizeHealthSegments = (value, level = 1) => {
-  const maxSegments = getMaxHealthSegments(level);
+export const normalizeHealthSegments = (value, level = 1, maxSegmentsOverride = null) => {
+  const computedMax = getMaxHealthSegments(level);
+  const maxSegments = maxSegmentsOverride == null
+    ? computedMax
+    : Math.max(0, Math.round(maxSegmentsOverride || 0));
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return maxSegments;
@@ -21,8 +25,11 @@ export const normalizeHealthSegments = (value, level = 1) => {
   return Math.max(0, Math.min(maxSegments, Math.round(numeric)));
 };
 
-export const clampHealthSegments = (value, level = 1) => {
-  const maxSegments = getMaxHealthSegments(level);
+export const clampHealthSegments = (value, level = 1, maxSegmentsOverride = null) => {
+  const computedMax = getMaxHealthSegments(level);
+  const maxSegments = maxSegmentsOverride == null
+    ? computedMax
+    : Math.max(0, Math.round(maxSegmentsOverride || 0));
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return 0;
