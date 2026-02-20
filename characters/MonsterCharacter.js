@@ -33,7 +33,10 @@ const LEVEL_SIZE_STEP = 0.5;
 const LEVEL_SPEED_STEP = 0.08;
 const MONSTER_RUN_SPEED_OFFSET = 1.8;
 const DEATH_REMOVAL_DELAY_MS = 15000;
-const FRIENDLY_APPROACH_BLEND = 0.07;
+const FRIENDLY_APPROACH_BLEND = 0.28;
+const FRIENDLY_APPROACH_BLEND_MIN = 0.12;
+const FRIENDLY_APPROACH_BLEND_RATE = 1.4;
+const FRIENDLY_WANDER_INFLUENCE = 0.35;
 const FRIENDLY_DRIFT_LEVEL_SPEED_STEP = 0.06;
 const FRIENDLY_DRIFT_MIN_MULTIPLIER = 0.45;
 const FRIENDLY_DRIFT_AVOID_RADIUS = 8;
@@ -406,7 +409,7 @@ export class MonsterCharacter extends CharacterBase {
         this.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
         this.lastDirectionChange = now;
       }
-      const wanderDirection = this.model.userData.direction.clone();
+      const currentDirection = this.model.userData.direction.clone();
       const shouldDriftToClosestPlayer = context.enableFriendlyDrift !== false;
       if (shouldDriftToClosestPlayer) {
         const approachDirection = closestPlayer.model.position
@@ -416,9 +419,17 @@ export class MonsterCharacter extends CharacterBase {
         if (approachDirection.lengthSq() > 0.0001) {
           approachDirection.normalize();
           const avoidFactor = this.getFriendlyDriftAvoidanceFactor(closestPlayer, context);
-          const approachBlend = FRIENDLY_APPROACH_BLEND * avoidFactor;
-          wanderDirection.lerp(approachDirection, approachBlend).normalize();
-          this.setDirection(wanderDirection);
+          const approachBlendFromDelta = 1 - Math.exp(-FRIENDLY_APPROACH_BLEND_RATE * Math.max(0, delta));
+          const approachBlend = Math.max(
+            FRIENDLY_APPROACH_BLEND_MIN,
+            Math.max(FRIENDLY_APPROACH_BLEND, approachBlendFromDelta)
+          ) * avoidFactor;
+          const blendedDirection = approachDirection.clone().lerp(currentDirection, FRIENDLY_WANDER_INFLUENCE);
+          if (blendedDirection.lengthSq() > 0.0001) {
+            blendedDirection.normalize();
+            currentDirection.lerp(blendedDirection, approachBlend).normalize();
+            this.setDirection(currentDirection);
+          }
         }
       }
       this.setHorizontalMovement(
