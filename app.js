@@ -120,6 +120,7 @@ const MAX_MONSTERS_ACTIVE = 8;
 const MONSTER_COMBAT_RADIUS = 26;
 const MONSTER_BACKGROUND_RADIUS = 70;
 const MONSTER_BACKGROUND_AI_INTERVAL_MS = 700;
+const MONSTER_DORMANT_AI_INTERVAL_MS = 2800;
 const MONSTER_MODELS = [
   "/models/zombie.fbx",
   "/models/zombie_boy.fbx",
@@ -9265,6 +9266,15 @@ async function main() {
               monster.updateAI(aiDelta, playerModel, otherPlayers, aiContext);
             }
             return;
+          }
+
+          const lastDormantAi = monster.lastDormantAIUpdateMs ?? 0;
+          if (previousTier !== 'dormant' || aiNowMs - lastDormantAi > MONSTER_DORMANT_AI_INTERVAL_MS) {
+            const aiDelta = lastDormantAi > 0
+              ? Math.min(2.8, Math.max(mixerDelta, (aiNowMs - lastDormantAi) / 1000))
+              : mixerDelta;
+            monster.lastDormantAIUpdateMs = aiNowMs;
+            monster.updateAI(aiDelta, playerModel, otherPlayers, aiContext);
           }
         });
       }
