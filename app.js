@@ -543,6 +543,9 @@ async function main() {
 
   const audioManager = createAudioManager();
   window.audioManager = audioManager;
+  let syncBackgroundLoopForDisplayMode = () => {
+    audioManager.playBGS('Forest Day/Forest Day.ogg');
+  };
   const startOverlay = document.getElementById('start-overlay');
   const arcadeOverlay = createArcadeOverlay(startOverlay);
   let hasStartedAudio = false;
@@ -895,7 +898,7 @@ async function main() {
   };
 
 
-  const syncBackgroundLoopForDisplayMode = () => {
+  syncBackgroundLoopForDisplayMode = () => {
     const effectiveMode = displaySettings.mode === 'auto'
       ? (lastAutoMode || getAutoMode())
       : displaySettings.mode;
