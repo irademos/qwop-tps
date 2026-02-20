@@ -193,6 +193,23 @@ const TORCH_ITEM_ID = 'torch';
 const TORCH_HEALTH_KEY = 'healths';
 const DEFAULT_TORCH_HEALTH = 100;
 const TORCH_HEALTH_DECAY_PER_SECOND = 0.6;
+const NPC_AUDIO_HEAR_RADIUS = 30;
+const FRIENDLY_VOICE_MAX_VOLUME = 0.35;
+const ZOMBIE_VOICE_MAX_VOLUME = 0.4;
+const MERCHANT_LOOP_MAX_VOLUME = 0.38;
+const FRIENDLY_VOICE_INTERVAL_MS = [5000, 11000];
+const ZOMBIE_VOICE_INTERVAL_MS = [3500, 8000];
+const FRIENDLY_VOICE_CLIPS = [
+  'NPC Sounds/friendly_sound_1.ogg',
+  'NPC Sounds/friendly_sound_2.ogg',
+  'NPC Sounds/friendly_sound_3.ogg',
+  'NPC Sounds/friendly_sound_4.ogg'
+];
+const ZOMBIE_VOICE_CLIPS = [
+  'NPC Sounds/zombie_sound_1.ogg',
+  'NPC Sounds/zombie_sound_2.ogg'
+];
+const MERCHANT_LOOP_CLIP = 'NPC Sounds/merchant_loop.ogg';
 
 
 // --- Rapier demo state ---
@@ -729,6 +746,62 @@ async function main() {
   let animalManager = null;
   let animals = [];
   window.animals = animals;
+  const npcVoiceSchedule = new Map();
+  const getRandomDelayMs = ([min, max]) => {
+    const safeMin = Number.isFinite(min) ? min : 0;
+    const safeMax = Number.isFinite(max) ? max : safeMin;
+    if (safeMax <= safeMin) return safeMin;
+    return safeMin + Math.random() * (safeMax - safeMin);
+  };
+  const getVolumeByDistance = (distance, maxDistance, maxVolume) => {
+    if (!Number.isFinite(distance) || !Number.isFinite(maxDistance) || maxDistance <= 0) return 0;
+    if (distance >= maxDistance) return 0;
+    const normalized = 1 - (distance / maxDistance);
+    return Math.max(0, Math.min(1, maxVolume * normalized));
+  };
+  const maybePlayNpcVoice = ({
+    entityId,
+    position,
+    now,
+    intervalRange,
+    clips,
+    maxVolume,
+    playerPosition,
+    cooldownPrefix
+  }) => {
+    if (!entityId || !position || !clips?.length || !playerPosition || !audioManager) return;
+    const distance = playerPosition.distanceTo(position);
+    const volume = getVolumeByDistance(distance, NPC_AUDIO_HEAR_RADIUS, maxVolume);
+    if (volume <= 0.01) {
+      npcVoiceSchedule.delete(entityId);
+      return;
+    }
+
+    const nextAt = npcVoiceSchedule.get(entityId) ?? 0;
+    if (now < nextAt) return;
+
+    const clip = clips[Math.floor(Math.random() * clips.length)];
+    audioManager.playSFX(clip, volume, {
+      cooldownKey: `${cooldownPrefix}:${entityId}`,
+      cooldownMs: 800
+    });
+    npcVoiceSchedule.set(entityId, now + getRandomDelayMs(intervalRange));
+  };
+  const updateMerchantLoopVoice = ({ merchant, playerPosition }) => {
+    const loopId = 'merchant-voice-loop';
+    if (!merchant?.model?.position || !playerPosition || !audioManager) {
+      audioManager?.stopLoopingSFX(loopId);
+      return;
+    }
+    const distance = playerPosition.distanceTo(merchant.model.position);
+    const volume = getVolumeByDistance(distance, NPC_AUDIO_HEAR_RADIUS, MERCHANT_LOOP_MAX_VOLUME);
+    if (volume <= 0.01) {
+      audioManager.stopLoopingSFX(loopId);
+      return;
+    }
+    audioManager.startLoopingSFX(loopId, MERCHANT_LOOP_CLIP, volume);
+    audioManager.setLoopingSFXVolume(loopId, volume);
+  };
   const monsterSlotIds = Array.from({ length: MAX_MONSTERS_TOTAL }, (_, index) => `monster:${index}`);
   const spawningSlots = new Set();
   const respawnTimers = new Map();
@@ -9549,6 +9622,9 @@ async function main() {
 
     const localPlayerPosition = playerModel?.position;
     if (localPlayerPosition && audioManager) {
+      const merchantFriendly = getMerchantFriendlyFeature();
+      updateMerchantLoopVoice({ merchant: merchantFriendly, playerPosition: localPlayerPosition });
+
       const playNearFootstepsFor = (entityId, position, isMoving) => {
         if (!position || !isMoving) return;
         const distance = localPlayerPosition.distanceTo(position);
@@ -9564,6 +9640,16 @@ async function main() {
       });
 
       (friendlyNpcManager?.friendlies || []).forEach((friendly) => {
+        maybePlayNpcVoice({
+          entityId: `friendly-voice:${friendly?.id || 'unknown'}`,
+          position: friendly?.model?.position,
+          now,
+          intervalRange: FRIENDLY_VOICE_INTERVAL_MS,
+          clips: FRIENDLY_VOICE_CLIPS,
+          maxVolume: FRIENDLY_VOICE_MAX_VOLUME,
+          playerPosition: localPlayerPosition,
+          cooldownPrefix: 'friendly-voice'
+        });
         const action = friendly?.model?.userData?.currentAction;
         const isMoving = action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk';
         playNearFootstepsFor(`friendly:${friendly?.id || 'unknown'}`, friendly?.model?.position, isMoving);
@@ -9576,6 +9662,18 @@ async function main() {
       });
 
       (monsters || []).forEach((monster) => {
+        if (isZombieMonsterType(monster)) {
+          maybePlayNpcVoice({
+            entityId: `zombie-voice:${monster?.id || 'unknown'}`,
+            position: monster?.model?.position,
+            now,
+            intervalRange: ZOMBIE_VOICE_INTERVAL_MS,
+            clips: ZOMBIE_VOICE_CLIPS,
+            maxVolume: ZOMBIE_VOICE_MAX_VOLUME,
+            playerPosition: localPlayerPosition,
+            cooldownPrefix: 'zombie-voice'
+          });
+        }
         const action = monster?.model?.userData?.currentAction;
         const isMoving = action === 'Weapon' ? false : (action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk');
         playNearFootstepsFor(`monster:${monster?.id || 'unknown'}`, monster?.model?.position, isMoving);

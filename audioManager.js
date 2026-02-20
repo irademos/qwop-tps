@@ -128,7 +128,14 @@ export class AudioManager {
       'SFX/Spells/Waterspray 1.ogg',
       'SFX/Torch/Light Torch 1.ogg',
       'SFX/Torch/Torch Attack Strike 1.ogg',
-      'SFX/Torch/Torch Loop.ogg'
+      'SFX/Torch/Torch Loop.ogg',
+      'NPC Sounds/friendly_sound_1.ogg',
+      'NPC Sounds/friendly_sound_2.ogg',
+      'NPC Sounds/friendly_sound_3.ogg',
+      'NPC Sounds/friendly_sound_4.ogg',
+      'NPC Sounds/zombie_sound_1.ogg',
+      'NPC Sounds/zombie_sound_2.ogg',
+      'NPC Sounds/merchant_loop.ogg'
     ];
     await Promise.allSettled(common.map(path => this.loadBuffer(path)));
   }
@@ -306,5 +313,11 @@ export class AudioManager {
       entry.source.stop(0);
     } catch {}
     this.loopingSFX.delete(loopId);
+  }
+
+  setLoopingSFXVolume(loopId, volume = 0) {
+    const entry = this.loopingSFX.get(loopId);
+    if (!entry?.gainNode) return;
+    entry.gainNode.gain.value = Math.max(0, Math.min(1, volume));
   }
 }
