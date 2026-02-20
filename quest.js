@@ -33,6 +33,8 @@ const QUEST_FRIEND_MONSTER_BONUS_XP = 50;
 const QUEST_MUSHROOM_XP = 15;
 const QUEST_RETURN_FRIEND_XP = 50;
 
+const hasVectorPosition = (value) => !!value && Number.isFinite(value.x) && Number.isFinite(value.y) && Number.isFinite(value.z);
+
 const QUEST_OFFER_DIALOGUE = {
   blocks: [
     "Can you help me?",
@@ -338,7 +340,7 @@ export class QuestManager {
 
     this.updateQuestDistanceSpawn(playerModel);
 
-    if (quest.status === "searching" && friend?.model) {
+    if (quest.status === "searching" && friend?.model && hasVectorPosition(playerModel.position) && hasVectorPosition(friend.model.position)) {
       const distanceToFriend = playerModel.position.distanceTo(friend.model.position);
       this.updateQuestTrail(playerModel.position, friend.model.position);
       this.updateQuestFriendApproach(friend);
@@ -357,6 +359,9 @@ export class QuestManager {
 
     if (quest.status === "escorting" && friend?.model && quest.giverPosition) {
       const giverTarget = quest.giver?.model?.position ?? quest.giverPosition;
+      if (!hasVectorPosition(giverTarget) || !hasVectorPosition(playerModel.position) || !hasVectorPosition(friend.model.position)) {
+        return;
+      }
       this.updateQuestTrail(playerModel.position, giverTarget);
       this.updateQuestFriendFollow(friend);
       const playerNearGiver = playerModel.position.distanceTo(giverTarget) <= QUEST_RETURN_DISTANCE;
@@ -455,6 +460,10 @@ export class QuestManager {
         this.setQuestFriendIdle(friend);
         return;
       }
+      if (!hasVectorPosition(friend?.model?.position) || !hasVectorPosition(target?.model?.position)) {
+        this.setQuestFriendIdle(friend);
+        return;
+      }
       const distanceToTarget = friend.model.position.distanceTo(target.model.position);
       if (distanceToTarget > QUEST_FIGHT_DISENGAGE_DISTANCE || target.isDead) {
         this.setQuestFriendIdle(friend);
@@ -505,7 +514,7 @@ export class QuestManager {
 
   isValidQuestTarget(target, targetType) {
     if (targetType === "monster") {
-      return !!(target?.model && !target.isDead);
+      return !!(target?.model && hasVectorPosition(target.model.position) && !target.isDead);
     }
     return false;
   }
