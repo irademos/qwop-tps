@@ -2,15 +2,26 @@ import { ref, get, set, update, runTransaction } from 'firebase/database';
 import { db } from './firebase-init.js';
 import { getCookie, setCookie } from './utils.js';
 import { BASE_HEALTH_SEGMENTS, normalizeHealthSegments } from './healthUtils.js';
+import {
+  BASE_HUNGER_SEGMENTS,
+  BASE_MAGIC_SEGMENTS,
+  HUNGER_MAX_SEGMENTS,
+  MAGIC_MAX_SEGMENTS,
+  clampHungerSegments,
+  clampMagicSegments
+} from './statSegments.js';
 
 const SALT = 'prototype-salt-v1';
 const PIN_COOKIE_PREFIX = 'playerPinHash_';
 
 const DEFAULT_STATS = {
   health: BASE_HEALTH_SEGMENTS,
-  hunger: 100,
-  energy: 100,
-  magic: 100,
+  hunger: BASE_HUNGER_SEGMENTS,
+  energy: BASE_HUNGER_SEGMENTS,
+  magic: BASE_MAGIC_SEGMENTS,
+  maxHealthSegments: BASE_HEALTH_SEGMENTS,
+  maxHungerSegments: BASE_HUNGER_SEGMENTS,
+  maxMagicSegments: BASE_MAGIC_SEGMENTS,
   level: 1,
   strength: 5,
   agility: 5,
@@ -88,17 +99,17 @@ function normalizeStatValue(key, value) {
   if (!Number.isFinite(numeric)) {
     return fallback;
   }
-  if (['health', 'hunger', 'energy', 'magic'].includes(key)) {
-    if (key === 'health') {
-      return numeric;
-    }
-    return Math.max(0, Math.min(100, numeric));
-  }
   if (key === 'level') {
     return Math.max(1, Math.floor(numeric));
   }
   if (key === 'xp' || key === 'coins') {
     return Math.max(0, Math.floor(numeric));
+  }
+  if (['maxHealthSegments', 'maxHungerSegments', 'maxMagicSegments'].includes(key)) {
+    return Math.max(1, Math.round(numeric));
+  }
+  if (['health', 'hunger', 'energy', 'magic'].includes(key)) {
+    return Math.round(numeric);
   }
   return numeric;
 }
@@ -109,7 +120,13 @@ function mergeStats(stats) {
   for (const key of Object.keys(DEFAULT_STATS)) {
     normalized[key] = normalizeStatValue(key, merged[key]);
   }
-  normalized.health = normalizeHealthSegments(normalized.health, normalized.level);
+  normalized.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, normalized.maxHealthSegments);
+  normalized.maxHungerSegments = Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, normalized.maxHungerSegments));
+  normalized.maxMagicSegments = Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, normalized.maxMagicSegments));
+  normalized.health = normalizeHealthSegments(normalized.health, normalized.level, normalized.maxHealthSegments);
+  normalized.hunger = clampHungerSegments(normalized.hunger, normalized.maxHungerSegments);
+  normalized.energy = normalized.hunger;
+  normalized.magic = clampMagicSegments(normalized.magic, normalized.maxMagicSegments);
   return normalized;
 }
 

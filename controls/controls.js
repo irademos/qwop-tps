@@ -304,6 +304,7 @@ export class PlayerControls {
     this.engagedDirection = null;
     this.freeYaw = null;
     this.freePitch = null;
+    this.firstPersonEnabled = false;
 
     if (this.interactionPromptEl) {
       const activateInteraction = (event) => {
@@ -1015,6 +1016,7 @@ export class PlayerControls {
       }
 
       if (e.key === " ") {
+        if (e.repeat) return;
         if (this.parachute) {
           this.removeParachute();
           return;
@@ -2225,7 +2227,17 @@ export class PlayerControls {
       offset = this.cameraOffset;
     }
     let desiredCameraPosition;
-    if (this.isEngaged && this.engagedDirection) {
+    let cameraLookTarget = orbitCenter;
+    if (this.firstPersonEnabled) {
+      desiredCameraPosition = orbitCenter.clone().add(new THREE.Vector3(0, 0.62, 0));
+      const cosPitch = Math.cos(this.pitch);
+      const forward = new THREE.Vector3(
+        Math.sin(this.yaw) * cosPitch,
+        Math.sin(this.pitch),
+        Math.cos(this.yaw) * cosPitch
+      ).normalize();
+      cameraLookTarget = desiredCameraPosition.clone().addScaledVector(forward, 10);
+    } else if (this.isEngaged && this.engagedDirection) {
       const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
       this.yaw = engagedYaw;
       this.pitch = 0;
@@ -2303,7 +2315,7 @@ export class PlayerControls {
     }
 
     this.camera.position.copy(resolvedCameraPosition);
-    this.camera.lookAt(orbitCenter);
+    this.camera.lookAt(cameraLookTarget);
 
     if (this.playerModel && this.playerModel.userData.mixer) {
       this.playerModel.userData.mixer.update(delta);
@@ -2780,6 +2792,13 @@ export class PlayerControls {
 
   isProjectileWeapon(weapon) {
     return !!weapon && (weapon.type === 'gun' || weapon.type === 'bow' || weapon.type === 'bomb');
+  }
+
+  setFirstPersonEnabled(enabled) {
+    this.firstPersonEnabled = Boolean(enabled);
+    if (this.firstPersonEnabled) {
+      this.setAiming(false);
+    }
   }
 
   setAiming(active) {

@@ -45,9 +45,16 @@ import {
   HEALTH_SEGMENT_VALUE,
   clampHealthSegments,
   convertPointsToSegments,
-  getMaxHealthSegments,
   normalizeHealthSegments
 } from './healthUtils.js';
+import {
+  BASE_HUNGER_SEGMENTS,
+  BASE_MAGIC_SEGMENTS,
+  HUNGER_MAX_SEGMENTS,
+  MAGIC_MAX_SEGMENTS,
+  clampHungerSegments,
+  clampMagicSegments
+} from './statSegments.js';
 import { createTileCache } from './tileCache.js';
 import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
@@ -163,6 +170,8 @@ const MONSTER_SWORD_HOLD_OFFSET = new THREE.Vector3(-0.05, 0.15, 0.08);
 const MONSTER_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
 const MONSTER_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(MONSTER_SWORD_HOLD_ROTATION);
 const ARROW_MODEL_URL = '/assets/props/arrow.glb';
+const MANA_POTION_MODEL_URL = '/assets/props/mana_potion.glb';
+const MANA_POTION_SCALE = 8.0;
 const ARROW_PROJECTILE_SCALE = 2.2;
 const ARROW_PROJECTILE_SPEED = 55;
 const ARROW_PROJECTILE_LIFETIME = 6000;
@@ -195,6 +204,8 @@ let monsterSwordTemplate = null;
 let monsterSwordTemplatePromise = null;
 let arrowTemplate = null;
 let arrowTemplatePromise = null;
+let manaPotionTemplate = null;
+let manaPotionTemplatePromise = null;
 const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
@@ -593,20 +604,17 @@ async function main() {
 
   let updatePlayerInfoUI = () => {};
 
-  const FOOD_HUNGER_GAIN = 25;
-  const FOOD_ENERGY_GAIN = 15;
+  const FOOD_HUNGER_GAIN = 8;
   const HEALTH_PICKUP_SEGMENTS = 2;
   const MUSHROOM_HEALTH_SEGMENTS = 1;
-  const MUSHROOM_HUNGER_GAIN = 6;
-  const MUSHROOM_ENERGY_GAIN = 8;
+  const MUSHROOM_HUNGER_GAIN = 3;
   const APPLE_HEALTH_SEGMENTS = 1;
-  const APPLE_HUNGER_GAIN = 4;
-  const APPLE_ENERGY_GAIN = 6;
+  const APPLE_HUNGER_GAIN = 2;
   const APPLE_DROP_LIFT = 0.25;
-  const HUNGER_DECAY_PER_HOUR = 8;
-  const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.45;
+  const HUNGER_DECAY_PER_HOUR = 1.6;
+  const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.09;
   const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
-  const SLEEP_RECOVERY_PER_SECOND = 100 / 3600;
+  const SLEEP_RECOVERY_PER_SECOND = HUNGER_MAX_SEGMENTS / 3600;
   const HUNGER_HEALTH_DECAY_SEGMENTS_PER_SECOND = HUNGER_HEALTH_DECAY_PER_SECOND / HEALTH_SEGMENT_VALUE;
   const SLEEP_RECOVERY_SEGMENTS_PER_SECOND = SLEEP_RECOVERY_PER_SECOND / HEALTH_SEGMENT_VALUE;
   const PICKUP_RADIUS = 1.2;
@@ -619,8 +627,7 @@ async function main() {
   const WOOD_PICKUP_RADIUS = 3;
   const MEAT_PICKUP_RADIUS = 3;
   const MEAT_HEALTH_SEGMENTS = 4;
-  const MEAT_HUNGER_GAIN = 35;
-  const MEAT_ENERGY_GAIN = 45;
+  const MEAT_HUNGER_GAIN = 16;
   const WOOD_DROP_LIFT = 0.12;
   const TREE_HITS_TO_CUT = 3;
   const TREE_SWING_TILT_STEP = 0.08;
@@ -642,7 +649,7 @@ async function main() {
 
   let multiplayer = null;
   let isHost = false;
-  let playerControls = null;
+  var playerControls = null;
   let friendlyNpcManager = null;
   let homeSystem = null;
   let scene = null;
@@ -817,7 +824,7 @@ async function main() {
     return 'day';
   };
   const loadDisplaySettings = () => {
-    const defaults = { mode: 'auto', ...DISPLAY_PRESETS.day };
+    const defaults = { mode: 'auto', firstPerson: false, ...DISPLAY_PRESETS.day };
     const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
     if (!raw) return defaults;
     try {
@@ -844,6 +851,7 @@ async function main() {
   if (!DISPLAY_MODES.has(displaySettings.mode)) {
     displaySettings.mode = 'auto';
   }
+  displaySettings.firstPerson = Boolean(displaySettings.firstPerson);
   if (displaySettings.mode === 'auto') {
     lastAutoMode = getAutoMode();
     applyPresetForMode(lastAutoMode);
@@ -872,6 +880,7 @@ async function main() {
     if (dirLight) {
       dirLight.intensity = clampValue(displaySettings.directionalIntensity, 0, 2);
     }
+    playerControls?.setFirstPersonEnabled?.(displaySettings.firstPerson);
     applyMaterialBrightness(groundTiles?.material, groundMaterialBase, displaySettings.groundBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, displaySettings.buildingBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, displaySettings.buildingBrightness);
@@ -911,6 +920,12 @@ async function main() {
   };
 
   const setDisplaySetting = (key, value) => {
+    if (key === 'firstPerson') {
+      displaySettings.firstPerson = Boolean(value);
+      saveDisplaySettings();
+      applyDisplaySettings();
+      return;
+    }
     if (!Number.isFinite(value)) return;
     displaySettings[key] = value;
     saveDisplaySettings();
@@ -1835,6 +1850,7 @@ async function main() {
   await bow.load();
   window.bow = bow;
   await loadArrowTemplate();
+  await loadManaPotionTemplate();
   let bowHeldArrow = null;
   let bowHeldMesh = null;
   const ensureBowHeldMesh = () => {
@@ -2785,6 +2801,47 @@ async function main() {
     return arrowMesh;
   }
 
+  async function loadManaPotionTemplate() {
+    if (manaPotionTemplate) return manaPotionTemplate;
+    if (!manaPotionTemplatePromise) {
+      const loader = new GLTFLoader();
+      manaPotionTemplatePromise = loader.loadAsync(MANA_POTION_MODEL_URL)
+        .then(gltf => {
+          manaPotionTemplate = gltf.scene;
+          return manaPotionTemplate;
+        })
+        .catch(error => {
+          console.warn('Failed to load mana potion model.', error);
+          manaPotionTemplate = null;
+          return null;
+        })
+        .finally(() => {
+          manaPotionTemplatePromise = null;
+        });
+    }
+    return manaPotionTemplatePromise;
+  }
+
+  function cloneManaPotionMesh(template, scale = MANA_POTION_SCALE) {
+    if (!template) return null;
+    const potionMesh = template.clone(true);
+    potionMesh.visible = true;
+    potionMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.visible = true;
+      child.geometry = child.geometry?.clone?.() ?? child.geometry;
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map(material => material?.clone?.() ?? material);
+      } else {
+        child.material = child.material?.clone?.() ?? child.material;
+      }
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    potionMesh.scale.setScalar(scale);
+    return potionMesh;
+  }
+
   function cleanupMonster(monster) {
     if (!monster) return;
     monster.model?.userData?.mixer?.stopAllAction?.();
@@ -3095,7 +3152,7 @@ async function main() {
     const elapsedSeconds = Math.max(0, (now - lastUpdate) / 1000);
     const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
     const currentHunger = Number.isFinite(profile?.stats?.hunger) ? profile.stats.hunger : 0;
-    const nextHunger = Math.max(0, Math.min(100, currentHunger - hungerDecay));
+    const nextHunger = clampHungerSegments(currentHunger - hungerDecay);
     const updatedStats = { ...profile.stats, hunger: nextHunger, energy: nextHunger };
     const changed = nextHunger !== currentHunger || !Number.isFinite(profile?.lastStatUpdateAt);
     return {
@@ -3114,6 +3171,9 @@ async function main() {
     hunger: playerProfile.stats.hunger,
     energy: playerProfile.stats.hunger,
     magic: playerProfile.stats.magic,
+    maxHealthSegments: playerProfile.stats.maxHealthSegments,
+    maxHungerSegments: playerProfile.stats.maxHungerSegments,
+    maxMagicSegments: playerProfile.stats.maxMagicSegments,
     level: playerProfile.stats.level,
     strength: playerProfile.stats.strength,
     agility: playerProfile.stats.agility,
@@ -3123,13 +3183,26 @@ async function main() {
     xp: playerProfile.stats.xp,
     coins: playerProfile.stats.coins
   };
-  statsState.health = normalizeHealthSegments(statsState.health, statsState.level);
+  statsState.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
+  statsState.maxHungerSegments = Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(statsState.maxHungerSegments || BASE_HUNGER_SEGMENTS)));
+  statsState.maxMagicSegments = Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, Math.round(statsState.maxMagicSegments || BASE_MAGIC_SEGMENTS)));
+  statsState.health = normalizeHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
+  statsState.hunger = clampHungerSegments(statsState.hunger, statsState.maxHungerSegments);
+  statsState.energy = statsState.hunger;
+  statsState.magic = clampMagicSegments(statsState.magic, statsState.maxMagicSegments);
   currentPlayerLevel = Math.max(1, Math.round(statsState.level || 1));
   const spellsAvailable = { ...(playerProfile?.spells || {}) };
-  const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
   const levelPopup = document.getElementById('level-popup');
+  const levelUpPanel = document.getElementById('level-up-panel');
+  const levelUpTitle = document.getElementById('level-up-title');
+  const levelUpSubtitle = document.getElementById('level-up-subtitle');
+  const levelUpRemaining = document.getElementById('level-up-remaining');
+  const levelUpStrengthButton = document.getElementById('level-up-strength');
+  const levelUpMagicButton = document.getElementById('level-up-magic');
+  const levelUpHungerButton = document.getElementById('level-up-hunger');
+  const levelUpHealthButton = document.getElementById('level-up-health');
   const xpBar = document.getElementById('xp-bar');
   const xpBarFill = document.getElementById('xp-bar-fill');
   const xpGainText = document.getElementById('xp-gain');
@@ -3148,6 +3221,9 @@ async function main() {
   let xpAnimationQueue = [];
   let displayedLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
   let displayedXp = Number.isFinite(statsState.xp) ? statsState.xp : 0;
+  let pendingLevelUpChoices = 0;
+  let pendingLevelUpLevel = displayedLevel;
+  let levelUpSelectionActive = false;
   updatePlayerInfoUI = () => {
     if (playerNameDisplay) {
       playerNameDisplay.textContent = playerName;
@@ -4277,14 +4353,7 @@ async function main() {
     return pickup;
   }
 
-  function spawnZombieBrainsPickup(position) {
-    const spawnPos = asVec3(position);
-    if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
-
+  function createZombieBrainsGroup() {
     const brainGroup = new THREE.Group();
     const lobeMaterial = new THREE.MeshStandardMaterial({
       color: 0xff8ccf,
@@ -4312,13 +4381,25 @@ async function main() {
     stem.position.set(0, -0.18, 0);
 
     brainGroup.add(leftLobe, rightLobe, stem);
-    brainGroup.position.copy(spawnPos);
-    brainGroup.rotation.y = Math.random() * Math.PI * 2;
     brainGroup.traverse((child) => {
       if (!child.isMesh) return;
       child.castShadow = true;
       child.receiveShadow = true;
     });
+    return brainGroup;
+  }
+
+  function spawnZombieBrainsPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (Number.isFinite(terrainHeight)) {
+      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
+    }
+
+    const brainGroup = createZombieBrainsGroup();
+    brainGroup.position.copy(spawnPos);
+    brainGroup.rotation.y = Math.random() * Math.PI * 2;
     scene.add(brainGroup);
 
     const pickup = { id: ZOMBIE_BRAINS_ITEM_ID, mesh: brainGroup };
@@ -4483,6 +4564,7 @@ async function main() {
     item,
     {
       itemId,
+      quantity = 1,
       markerColor,
       markerOffsetY,
       position,
@@ -4514,6 +4596,7 @@ async function main() {
       mesh: pickupMesh,
       marker,
       itemId,
+      quantity: Number.isFinite(quantity) ? Math.max(1, Math.floor(quantity)) : 1,
       type: item?.type || itemId,
       holder: null,
       torchHealth: Number.isFinite(torchHealth) ? normalizeTorchHealth(torchHealth) : null,
@@ -4523,11 +4606,11 @@ async function main() {
         const distance = playerControls.playerModel.position.distanceTo(pickupMesh.position);
         if (distance > 3) return;
         if (itemId === TORCH_ITEM_ID) {
-          addToInventory(itemId, 1, {
+          addToInventory(itemId, pickup.quantity, {
             torchHealth: pickup.torchHealth ?? pickupMesh.userData.torchHealth ?? DEFAULT_TORCH_HEALTH
           });
         } else {
-          addToInventory(itemId, 1);
+          addToInventory(itemId, pickup.quantity);
         }
         equipInventoryItem(itemId);
         const index = droppedWeaponPickups.indexOf(pickup);
@@ -4554,11 +4637,12 @@ async function main() {
     if (itemId === WOOD_ITEM_ID) return 'wood';
     if (itemId === APPLE_ITEM_ID) return 'apples';
     if (itemId?.startsWith?.('mushroom_')) return 'mushrooms';
+    if (itemId === ZOMBIE_BRAINS_ITEM_ID) return 'zombie_brains';
     return null;
   };
 
   const getSelectionMaterialCounts = (selection) => {
-    const totals = { wood: 0, apples: 0, mushrooms: 0 };
+    const totals = { wood: 0, apples: 0, mushrooms: 0, zombie_brains: 0 };
     if (!selection) return totals;
     Object.entries(selection).forEach(([itemId, count]) => {
       const key = getCraftMaterialKey(itemId);
@@ -4613,6 +4697,15 @@ async function main() {
     craftState.materials.forEach((entry) => {
       if (!entry?.mesh) return;
       scene.remove(entry.mesh);
+      entry.mesh.traverse?.((child) => {
+        if (!child?.isMesh) return;
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(material => material?.dispose?.());
+        } else {
+          child.material?.dispose?.();
+        }
+      });
       entry.mesh.geometry?.dispose?.();
       if (Array.isArray(entry.mesh.material)) {
         entry.mesh.material.forEach(material => material?.dispose?.());
@@ -4649,7 +4742,37 @@ async function main() {
       const material = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
       return new THREE.Mesh(geometry, material);
     }
+    if (itemId === ZOMBIE_BRAINS_ITEM_ID) {
+      return createZombieBrainsGroup();
+    }
     return null;
+  };
+
+  const createManaPotionDisplayMesh = () => {
+    const group = new THREE.Group();
+    const bottle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.14, 0.3, 14),
+      new THREE.MeshStandardMaterial({
+        color: 0x5f8bff,
+        transparent: true,
+        opacity: 0.85,
+        roughness: 0.2,
+        metalness: 0.1
+      })
+    );
+    bottle.castShadow = true;
+    bottle.receiveShadow = true;
+    const cork = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.08, 12),
+      new THREE.MeshStandardMaterial({ color: 0x7a5b39, roughness: 0.9 })
+    );
+    cork.position.y = 0.19;
+    cork.castShadow = true;
+    cork.receiveShadow = true;
+    group.add(bottle, cork);
+    group.scale.setScalar(1.15);
+    group.rotation.x = Math.PI * 0.04;
+    return group;
   };
 
   const createCraftSwirl = (position) => {
@@ -4710,15 +4833,32 @@ async function main() {
     return pickupMesh;
   };
 
-  const spawnCraftedPickup = (itemId, position) => {
+  const spawnCraftedPickup = (itemId, position, amount = 1) => {
     if (!itemId || !position) return;
     const dropPos = position.clone().add(new THREE.Vector3(0, 0.4, 0));
     if (itemId === 'arrow') {
-      spawnCraftArrowPickup(dropPos);
+      const pickup = spawnCraftArrowPickup(dropPos);
+      if (pickup) {
+        pickup.userData.amount = Math.max(1, Math.floor(amount));
+      }
       return;
     }
     if (itemId === MANA_POTION_ITEM_ID) {
-      addToInventory(MANA_POTION_ITEM_ID, 1);
+      const potionMesh = cloneManaPotionMesh(manaPotionTemplate, MANA_POTION_SCALE);
+      if (!potionMesh) return;
+      potionMesh.position.copy(dropPos);
+      potionMesh.userData.skipTerrainCorrection = true;
+      createDroppedWeaponPickup(
+        { mesh: potionMesh, type: MANA_POTION_ITEM_ID },
+        {
+          itemId: MANA_POTION_ITEM_ID,
+          quantity: amount,
+          markerColor: 0x7f7dff,
+          markerOffsetY: 1.0,
+          position: dropPos,
+          allowHidden: true
+        }
+      );
       return;
     }
     const pickupConfig = {
@@ -4734,6 +4874,7 @@ async function main() {
     if (pickupConfig?.item?.mesh) {
       createDroppedWeaponPickup(pickupConfig.item, {
         itemId: pickupConfig.itemId,
+        quantity: amount,
         markerColor: pickupConfig.markerColor,
         markerOffsetY: 1.2,
         position: dropPos,
@@ -4802,11 +4943,15 @@ async function main() {
       clearCraftMaterials();
       clearCraftSwirl();
       if (craftCount > 0) {
+        const bundleCount = Math.min(craftCount, 5);
+        const bundleBaseAmount = Math.floor(craftCount / bundleCount);
+        const bundleRemainder = craftCount % bundleCount;
         const radius = 0.4;
-        for (let i = 0; i < craftCount; i += 1) {
-          const angle = (i / Math.max(craftCount, 1)) * Math.PI * 2;
+        for (let i = 0; i < bundleCount; i += 1) {
+          const bundleAmount = bundleBaseAmount + (i < bundleRemainder ? 1 : 0);
+          const angle = (i / Math.max(bundleCount, 1)) * Math.PI * 2;
           const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-          spawnCraftedPickup(itemId, basePos.clone().add(offset));
+          spawnCraftedPickup(itemId, basePos.clone().add(offset), bundleAmount);
         }
       }
       returnUnusedCraftMaterials(craftState.selection, recipe, craftCount);
@@ -4914,15 +5059,12 @@ async function main() {
     if (isMushroomItem(itemId)) {
       setStat('health', statsState.health + MUSHROOM_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
-      setStat('hunger', statsState.hunger + MUSHROOM_ENERGY_GAIN, { skipSave: true });
     } else if (isAppleItem(itemId)) {
       setStat('health', statsState.health + APPLE_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
-      setStat('hunger', statsState.hunger + APPLE_ENERGY_GAIN, { skipSave: true });
     } else if (isMeatItem(itemId)) {
       setStat('health', statsState.health + MEAT_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + MEAT_HUNGER_GAIN, { skipSave: true });
-      setStat('hunger', statsState.hunger + MEAT_ENERGY_GAIN, { skipSave: true });
     }
     lastStatUpdateAt = Date.now();
     removeFromInventory(itemId, 1);
@@ -4932,10 +5074,10 @@ async function main() {
     if (!itemId || !inventoryState[itemId]) return;
     if (!isPotionItem(itemId)) return;
     if (itemId === LIFE_POTION_ITEM_ID) {
-      setStat('health', getMaxHealthSegments(statsState.level), { skipSave: true });
+      setStat('health', statsState.maxHealthSegments, { skipSave: true });
     }
     if (itemId === MANA_POTION_ITEM_ID) {
-      setStat('magic', 100, { skipSave: true });
+      setStat('magic', statsState.maxMagicSegments, { skipSave: true });
     }
     removeFromInventory(itemId, 1);
   }
@@ -4944,7 +5086,7 @@ async function main() {
   let playerDead = false;
   const updateControlAvailability = () => {
     if (!playerControls) return;
-    playerControls.enabled = !mapViewEnabled && !playerDead;
+    playerControls.enabled = !mapViewEnabled && !playerDead && !levelUpSelectionActive;
   };
   const updateEnergyEffects = () => {
     if (!playerControls) return;
@@ -4954,8 +5096,8 @@ async function main() {
 
   const healthBar = document.getElementById('health-bar');
   const healthLabel = document.getElementById('health-label');
-  const hungerFill = document.getElementById('hunger-fill');
-  const magicFill = document.getElementById('magic-fill');
+  const hungerBar = document.getElementById('hunger-bar');
+  const magicBar = document.getElementById('magic-bar');
   const hungerWarning = document.getElementById('hunger-warning');
   let hungerWarningTimer = null;
 
@@ -5079,8 +5221,8 @@ async function main() {
 
   function updateHealthUI() {
     if (!healthBar) return;
-    const maxSegments = getMaxHealthSegments(statsState.level);
-    const currentSegments = clampHealthSegments(statsState.health, statsState.level);
+    const maxSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
+    const currentSegments = clampHealthSegments(statsState.health, statsState.level, maxSegments);
     const healthRatio = maxSegments > 0 ? currentSegments / maxSegments : 0;
     if (healthBar.childElementCount !== maxSegments) {
       healthBar.innerHTML = '';
@@ -5107,16 +5249,27 @@ async function main() {
     }
   }
 
-  function updateHungerUI() {
-    if (hungerFill) {
-      hungerFill.style.width = `${statsState.hunger}%`;
+  function updateSegmentedBar(barElement, maxSegments, currentSegments, filledClass = 'filled') {
+    if (!barElement) return;
+    if (barElement.childElementCount !== maxSegments) {
+      barElement.innerHTML = '';
+      for (let i = 0; i < maxSegments; i += 1) {
+        const segment = document.createElement('span');
+        segment.className = 'stat-segment';
+        barElement.appendChild(segment);
+      }
     }
+    Array.from(barElement.children).forEach((segment, index) => {
+      segment.classList.toggle(filledClass, index < currentSegments);
+    });
+  }
+
+  function updateHungerUI() {
+    updateSegmentedBar(hungerBar, statsState.maxHungerSegments, clampHungerSegments(statsState.hunger, statsState.maxHungerSegments));
   }
 
   function updateMagicUI() {
-    if (magicFill) {
-      magicFill.style.width = `${statsState.magic}%`;
-    }
+    updateSegmentedBar(magicBar, statsState.maxMagicSegments, clampMagicSegments(statsState.magic, statsState.maxMagicSegments));
   }
 
   const showHungerWarning = () => {
@@ -5137,9 +5290,12 @@ async function main() {
         return 0;
       }
       if (key === 'health') {
-        return clampHealthSegments(num, statsState.level);
+        return clampHealthSegments(num, statsState.level, statsState.maxHealthSegments);
       }
-      return Math.max(0, Math.min(100, num));
+      if (key === 'magic') {
+        return clampMagicSegments(num, statsState.maxMagicSegments);
+      }
+      return clampHungerSegments(num, statsState.maxHungerSegments);
     }
     if (key === 'level') {
       const num = Number(value);
@@ -5147,6 +5303,21 @@ async function main() {
         return 1;
       }
       return Math.max(1, Math.round(num));
+    }
+    if (key === 'maxHealthSegments') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return BASE_HEALTH_SEGMENTS;
+      return Math.max(BASE_HEALTH_SEGMENTS, Math.round(num));
+    }
+    if (key === 'maxHungerSegments') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return BASE_HUNGER_SEGMENTS;
+      return Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(num)));
+    }
+    if (key === 'maxMagicSegments') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return BASE_MAGIC_SEGMENTS;
+      return Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, Math.round(num)));
     }
     if (key === 'xp') {
       const num = Number(value);
@@ -5185,8 +5356,22 @@ async function main() {
     if (key === 'level') {
       currentPlayerLevel = statsState.level;
       updatePlayerInfoUI();
-      statsState.health = clampHealthSegments(statsState.health, statsState.level);
+      statsState.health = clampHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
       updateHealthUI();
+    }
+    if (key === 'maxHealthSegments') {
+      statsState.health = clampHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
+      updateHealthUI();
+    }
+    if (key === 'maxHungerSegments') {
+      statsState.hunger = clampHungerSegments(statsState.hunger, statsState.maxHungerSegments);
+      statsState.energy = statsState.hunger;
+      updateHungerUI();
+      updateEnergyEffects();
+    }
+    if (key === 'maxMagicSegments') {
+      statsState.magic = clampMagicSegments(statsState.magic, statsState.maxMagicSegments);
+      updateMagicUI();
     }
     if (!skipSave) {
       if (key === 'hunger') {
@@ -5245,24 +5430,93 @@ async function main() {
 
   window.setStat = setStat;
   window.getPlayerStrength = () => (Number.isFinite(statsState.strength) ? statsState.strength : 0);
-  const applyLevelBonus = delta => {
-    if (!Number.isFinite(delta) || delta === 0) {
+
+  const getPowerUpsForLevel = (level) => {
+    const safeLevel = Math.max(1, Math.round(level || 1));
+    if (safeLevel >= 15) return 4;
+    if (safeLevel >= 10) return 3;
+    if (safeLevel >= 5) return 2;
+    return 1;
+  };
+
+  const updateLevelUpPanelUI = () => {
+    if (!levelUpPanel) return;
+    if (levelUpTitle) {
+      levelUpTitle.textContent = `You've reached Level ${pendingLevelUpLevel}`;
+    }
+    if (levelUpSubtitle) {
+      levelUpSubtitle.textContent = 'Choose your power ups / stat increases.';
+    }
+    if (levelUpRemaining) {
+      levelUpRemaining.textContent = `You have ${pendingLevelUpChoices} power ups to choose.`;
+    }
+  };
+
+  const closeLevelUpPanel = () => {
+    pendingLevelUpChoices = 0;
+    levelUpSelectionActive = false;
+    if (levelUpPanel) {
+      levelUpPanel.classList.add('hidden');
+    }
+    updateControlAvailability();
+  };
+
+  const openLevelUpPanel = () => {
+    if (!levelUpPanel) return;
+    levelUpSelectionActive = pendingLevelUpChoices > 0;
+    updateLevelUpPanelUI();
+    levelUpPanel.classList.remove('hidden');
+    updateControlAvailability();
+  };
+
+  const applyLevelUpChoice = (choiceKey) => {
+    if (pendingLevelUpChoices <= 0) {
+      closeLevelUpPanel();
       return;
     }
-    for (const key of STAT_KEYS_FOR_LEVEL) {
-      const current = Number.isFinite(statsState[key]) ? statsState[key] : 0;
-      let nextValue = current;
-      if (key === 'health') {
-        nextValue = clampStat(key, current + delta);
-      } else if (key === 'hunger') {
-        nextValue = clampStat(key, current + delta * 2);
-      } else {
-        nextValue = current + delta * 2;
-      }
-      setStat(key, nextValue, { skipSave: true });
+    if (choiceKey === 'strength') {
+      setStat('strength', (Number.isFinite(statsState.strength) ? statsState.strength : 0) + 1, { skipSave: true });
     }
+    if (choiceKey === 'health') {
+      setStat('maxHealthSegments', statsState.maxHealthSegments + 1, { skipSave: true });
+      setStat('health', statsState.health + 1, { skipSave: true });
+    }
+    if (choiceKey === 'hunger') {
+      setStat('maxHungerSegments', statsState.maxHungerSegments + 1, { skipSave: true });
+      setStat('hunger', statsState.hunger + 1, { skipSave: true });
+    }
+    if (choiceKey === 'magic') {
+      setStat('maxMagicSegments', statsState.maxMagicSegments + 1, { skipSave: true });
+      setStat('magic', statsState.magic + 1, { skipSave: true });
+    }
+    pendingLevelUpChoices = Math.max(0, pendingLevelUpChoices - 1);
+    if (pendingLevelUpChoices <= 0) {
+      saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+      closeLevelUpPanel();
+      return;
+    }
+    updateLevelUpPanelUI();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   };
+
+  levelUpStrengthButton?.addEventListener('click', () => applyLevelUpChoice('strength'));
+  levelUpMagicButton?.addEventListener('click', () => applyLevelUpChoice('magic'));
+  levelUpHungerButton?.addEventListener('click', () => applyLevelUpChoice('hunger'));
+  levelUpHealthButton?.addEventListener('click', () => applyLevelUpChoice('health'));
+
+  const queueLevelUpChoices = (fromLevel, toLevel) => {
+    if (!Number.isFinite(fromLevel) || !Number.isFinite(toLevel) || toLevel <= fromLevel) {
+      return;
+    }
+    for (let level = fromLevel + 1; level <= toLevel; level += 1) {
+      pendingLevelUpChoices += getPowerUpsForLevel(level);
+      pendingLevelUpLevel = level;
+    }
+    if (pendingLevelUpChoices > 0) {
+      openLevelUpPanel();
+    }
+  };
+
   const getMonsterXpForLevel = (level) => {
     const safeLevel = Math.max(1, Math.round(level || 1));
     return 50 + (safeLevel - 1) * 25;
@@ -5282,11 +5536,10 @@ async function main() {
     statsState.xp = nextTotalXp;
     if (nextLevel !== statsState.level) {
       const currentLevel = Number.isFinite(statsState.level) ? statsState.level : previousLevel;
-      const delta = nextLevel - currentLevel;
-      if (delta !== 0) {
-        applyLevelBonus(delta);
+      if (nextLevel > currentLevel) {
+        queueLevelUpChoices(currentLevel, nextLevel);
       }
-      statsState.level = nextLevel;
+      setStat('level', nextLevel, { skipSave: true });
     }
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     queueXpAnimation(normalized);
@@ -6201,7 +6454,6 @@ async function main() {
 
   function applyFoodPickupEffects() {
     setStat('hunger', statsState.hunger + FOOD_HUNGER_GAIN, { skipSave: true });
-    setStat('hunger', statsState.hunger + FOOD_ENERGY_GAIN, { skipSave: true });
     lastStatUpdateAt = Date.now();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   }
@@ -6370,6 +6622,9 @@ async function main() {
   let statDecayAccumulator = 0;
   let healthRecoveryRemainder = 0;
   let healthDecayRemainder = 0;
+  let hungerRecoveryRemainder = 0;
+  let hungerDecayRemainder = 0;
+  let movementHungerDecayRemainder = 0;
 
   playerControls = new PlayerControls({
     scene,
@@ -6441,6 +6696,7 @@ async function main() {
   await initSpellsFeature({
     playerControls,
     getPlayerModel: () => playerModel,
+    getCharacterModel: () => characterModel,
     spellsAvailable,
     getMagic: () => statsState.magic,
     setMagic: (value) => setStat('magic', value)
@@ -6575,8 +6831,17 @@ async function main() {
     for (let i = pickups.length - 1; i >= 0; i--) {
       const pickup = pickups[i];
       if (!pickup) continue;
-      if (center.distanceTo(pickup.position) > radius) {
-        disposePickup(pickup);
+      const pickupMesh = pickup?.position ? pickup : pickup?.mesh;
+      if (!pickupMesh?.position) {
+        pickups.splice(i, 1);
+        continue;
+      }
+      if (center.distanceTo(pickupMesh.position) > radius) {
+        if (pickupMesh === pickup) {
+          disposePickup(pickupMesh);
+        } else {
+          disposeWoodPickup(pickup);
+        }
         pickups.splice(i, 1);
       }
     }
@@ -7812,10 +8077,9 @@ async function main() {
   }
 
   function respawnPlayer() {
-    setStat('health', getMaxHealthSegments(statsState.level));
-    setStat('hunger', 100);
-    setStat('hunger', 100);
-    setStat('magic', 100);
+    setStat('health', statsState.maxHealthSegments);
+    setStat('hunger', statsState.maxHungerSegments);
+    setStat('magic', statsState.maxMagicSegments);
     const spawn = getSpawnPosition();
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
@@ -7851,10 +8115,10 @@ async function main() {
   };
 
   const voiceSpellDefs = {
-    apples: { magicCost: 20 },
-    mushrooms: { magicCost: 20 },
-    bombs: { magicCost: 45 },
-    freeze: { magicCost: 12 }
+    apples: { magicCost: 4 },
+    mushrooms: { magicCost: 4 },
+    bombs: { magicCost: 9 },
+    freeze: { magicCost: 2 }
   };
 
   const getVoiceSpellFromTranscript = (transcript) => {
@@ -8493,12 +8757,16 @@ async function main() {
         const bbox = getMeshWorldBounds(mesh);
         if (bbox) {
           const terrainY = getTerrainHeight(mesh.position.x, mesh.position.z);
-          if (bbox.min.y < terrainY) {
+          const isDeadEntity = mesh.userData?.mode === 'dead';
+          const shouldSnapToGround = isDeadEntity
+            ? Math.abs(bbox.min.y - terrainY) > 0.01
+            : bbox.min.y < terrainY;
+          if (shouldSnapToGround) {
             const correction = terrainY - bbox.min.y;
             mesh.position.y += correction;
             rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
             const lv = rb.linvel();
-            if (lv.y < 0) {
+            if (isDeadEntity || lv.y < 0) {
               rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
             }
           }
@@ -8570,8 +8838,13 @@ async function main() {
       if (isSleeping) {
         const recovery = SLEEP_RECOVERY_PER_SECOND * elapsedSeconds;
         if (recovery > 0) {
-          setStat('hunger', statsState.hunger + recovery, { skipSave: true });
-          statsChanged = true;
+          hungerRecoveryRemainder += recovery;
+          const segments = Math.floor(hungerRecoveryRemainder);
+          if (segments > 0) {
+            setStat('hunger', statsState.hunger + segments, { skipSave: true });
+            hungerRecoveryRemainder -= segments;
+            statsChanged = true;
+          }
         }
         const healthRecovery = SLEEP_RECOVERY_SEGMENTS_PER_SECOND * elapsedSeconds;
         if (healthRecovery > 0) {
@@ -8587,8 +8860,13 @@ async function main() {
         if (statsState.hunger > 0) {
           const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
           if (hungerDecay > 0) {
-            setStat('hunger', statsState.hunger - hungerDecay, { skipSave: true });
-            statsChanged = true;
+            hungerDecayRemainder += hungerDecay;
+            const segments = Math.floor(hungerDecayRemainder);
+            if (segments > 0) {
+              setStat('hunger', statsState.hunger - segments, { skipSave: true });
+              hungerDecayRemainder -= segments;
+              statsChanged = true;
+            }
           }
         }
 
@@ -8596,8 +8874,13 @@ async function main() {
         if (isMoving && statsState.hunger > 0) {
           const energyDecay = ENERGY_DECAY_PER_SECOND_WHILE_MOVING * elapsedSeconds;
           if (energyDecay > 0) {
-            setStat('hunger', statsState.hunger - energyDecay, { skipSave: true });
-            statsChanged = true;
+            movementHungerDecayRemainder += energyDecay;
+            const segments = Math.floor(movementHungerDecayRemainder);
+            if (segments > 0) {
+              setStat('hunger', statsState.hunger - segments, { skipSave: true });
+              movementHungerDecayRemainder -= segments;
+              statsChanged = true;
+            }
           }
         }
 
