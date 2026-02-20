@@ -4554,11 +4554,12 @@ async function main() {
     if (itemId === WOOD_ITEM_ID) return 'wood';
     if (itemId === APPLE_ITEM_ID) return 'apples';
     if (itemId?.startsWith?.('mushroom_')) return 'mushrooms';
+    if (itemId === ZOMBIE_BRAINS_ITEM_ID) return 'zombie_brains';
     return null;
   };
 
   const getSelectionMaterialCounts = (selection) => {
-    const totals = { wood: 0, apples: 0, mushrooms: 0 };
+    const totals = { wood: 0, apples: 0, mushrooms: 0, zombie_brains: 0 };
     if (!selection) return totals;
     Object.entries(selection).forEach(([itemId, count]) => {
       const key = getCraftMaterialKey(itemId);
@@ -4649,7 +4650,45 @@ async function main() {
       const material = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
       return new THREE.Mesh(geometry, material);
     }
+    if (itemId === ZOMBIE_BRAINS_ITEM_ID) {
+      const geometry = new THREE.SphereGeometry(0.16, 14, 12);
+      const material = new THREE.MeshStandardMaterial({
+        color: 0xc8a8bd,
+        emissive: 0x4a2744,
+        emissiveIntensity: 0.2,
+        roughness: 0.7,
+        metalness: 0.05
+      });
+      return new THREE.Mesh(geometry, material);
+    }
     return null;
+  };
+
+  const createManaPotionDisplayMesh = () => {
+    const group = new THREE.Group();
+    const bottle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.14, 0.3, 14),
+      new THREE.MeshStandardMaterial({
+        color: 0x5f8bff,
+        transparent: true,
+        opacity: 0.85,
+        roughness: 0.2,
+        metalness: 0.1
+      })
+    );
+    bottle.castShadow = true;
+    bottle.receiveShadow = true;
+    const cork = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.08, 12),
+      new THREE.MeshStandardMaterial({ color: 0x7a5b39, roughness: 0.9 })
+    );
+    cork.position.y = 0.19;
+    cork.castShadow = true;
+    cork.receiveShadow = true;
+    group.add(bottle, cork);
+    group.scale.setScalar(1.15);
+    group.rotation.x = Math.PI * 0.04;
+    return group;
   };
 
   const createCraftSwirl = (position) => {
@@ -4718,7 +4757,19 @@ async function main() {
       return;
     }
     if (itemId === MANA_POTION_ITEM_ID) {
-      addToInventory(MANA_POTION_ITEM_ID, 1);
+      const potionMesh = createManaPotionDisplayMesh();
+      potionMesh.position.copy(dropPos);
+      potionMesh.userData.skipTerrainCorrection = true;
+      createDroppedWeaponPickup(
+        { mesh: potionMesh, type: MANA_POTION_ITEM_ID },
+        {
+          itemId: MANA_POTION_ITEM_ID,
+          markerColor: 0x7f7dff,
+          markerOffsetY: 1.0,
+          position: dropPos,
+          allowHidden: true
+        }
+      );
       return;
     }
     const pickupConfig = {
