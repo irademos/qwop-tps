@@ -67,6 +67,19 @@
     <div id="player-name-display"></div>
   </div>
   <div id="level-popup" aria-live="polite" aria-atomic="true"></div>
+  <div id="level-up-panel" class="level-up-panel hidden" role="dialog" aria-modal="true" aria-live="polite" aria-atomic="true">
+    <div class="level-up-card">
+      <h2 id="level-up-title">You've reached Level 1</h2>
+      <p id="level-up-subtitle">Choose your power ups.</p>
+      <p id="level-up-remaining">You have 0 power ups left.</p>
+      <div class="level-up-grid">
+        <button id="level-up-strength" type="button" class="level-up-tile strength"><span class="icon">⚔️</span><span>Strength</span></button>
+        <button id="level-up-magic" type="button" class="level-up-tile magic"><span class="icon">✨</span><span>Magic</span></button>
+        <button id="level-up-hunger" type="button" class="level-up-tile hunger"><span class="icon">🍗</span><span>Hunger</span></button>
+        <button id="level-up-health" type="button" class="level-up-tile health"><span class="icon">❤️</span><span>Health</span></button>
+      </div>
+    </div>
+  </div>
   <div id="xp-bar" class="xp-bar hidden" aria-live="polite" aria-atomic="true">
     <div class="xp-bar-header">
       <span id="xp-bar-label">XP</span>

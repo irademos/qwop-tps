@@ -45,10 +45,16 @@ import {
   HEALTH_SEGMENT_VALUE,
   clampHealthSegments,
   convertPointsToSegments,
-  getMaxHealthSegments,
   normalizeHealthSegments
 } from './healthUtils.js';
-import { HUNGER_MAX_SEGMENTS, MAGIC_MAX_SEGMENTS, clampHungerSegments, clampMagicSegments } from './statSegments.js';
+import {
+  BASE_HUNGER_SEGMENTS,
+  BASE_MAGIC_SEGMENTS,
+  HUNGER_MAX_SEGMENTS,
+  MAGIC_MAX_SEGMENTS,
+  clampHungerSegments,
+  clampMagicSegments
+} from './statSegments.js';
 import { createTileCache } from './tileCache.js';
 import { createGroundTiles } from './environment/groundTiles.js';
 import { clearCache, getCachedTile, setCachedTile } from './idbCache.js';
@@ -3165,6 +3171,9 @@ async function main() {
     hunger: playerProfile.stats.hunger,
     energy: playerProfile.stats.hunger,
     magic: playerProfile.stats.magic,
+    maxHealthSegments: playerProfile.stats.maxHealthSegments,
+    maxHungerSegments: playerProfile.stats.maxHungerSegments,
+    maxMagicSegments: playerProfile.stats.maxMagicSegments,
     level: playerProfile.stats.level,
     strength: playerProfile.stats.strength,
     agility: playerProfile.stats.agility,
@@ -3174,13 +3183,26 @@ async function main() {
     xp: playerProfile.stats.xp,
     coins: playerProfile.stats.coins
   };
-  statsState.health = normalizeHealthSegments(statsState.health, statsState.level);
+  statsState.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
+  statsState.maxHungerSegments = Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(statsState.maxHungerSegments || BASE_HUNGER_SEGMENTS)));
+  statsState.maxMagicSegments = Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, Math.round(statsState.maxMagicSegments || BASE_MAGIC_SEGMENTS)));
+  statsState.health = normalizeHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
+  statsState.hunger = clampHungerSegments(statsState.hunger, statsState.maxHungerSegments);
+  statsState.energy = statsState.hunger;
+  statsState.magic = clampMagicSegments(statsState.magic, statsState.maxMagicSegments);
   currentPlayerLevel = Math.max(1, Math.round(statsState.level || 1));
   const spellsAvailable = { ...(playerProfile?.spells || {}) };
-  const STAT_KEYS_FOR_LEVEL = ['health', 'hunger', 'strength', 'agility', 'smarts', 'charm', 'luck'];
   const playerNameDisplay = document.getElementById('player-name-display');
   const playerLevelDisplay = document.getElementById('player-level');
   const levelPopup = document.getElementById('level-popup');
+  const levelUpPanel = document.getElementById('level-up-panel');
+  const levelUpTitle = document.getElementById('level-up-title');
+  const levelUpSubtitle = document.getElementById('level-up-subtitle');
+  const levelUpRemaining = document.getElementById('level-up-remaining');
+  const levelUpStrengthButton = document.getElementById('level-up-strength');
+  const levelUpMagicButton = document.getElementById('level-up-magic');
+  const levelUpHungerButton = document.getElementById('level-up-hunger');
+  const levelUpHealthButton = document.getElementById('level-up-health');
   const xpBar = document.getElementById('xp-bar');
   const xpBarFill = document.getElementById('xp-bar-fill');
   const xpGainText = document.getElementById('xp-gain');
@@ -3199,6 +3221,9 @@ async function main() {
   let xpAnimationQueue = [];
   let displayedLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
   let displayedXp = Number.isFinite(statsState.xp) ? statsState.xp : 0;
+  let pendingLevelUpChoices = 0;
+  let pendingLevelUpLevel = displayedLevel;
+  let levelUpSelectionActive = false;
   updatePlayerInfoUI = () => {
     if (playerNameDisplay) {
       playerNameDisplay.textContent = playerName;
@@ -5049,10 +5074,10 @@ async function main() {
     if (!itemId || !inventoryState[itemId]) return;
     if (!isPotionItem(itemId)) return;
     if (itemId === LIFE_POTION_ITEM_ID) {
-      setStat('health', getMaxHealthSegments(statsState.level), { skipSave: true });
+      setStat('health', statsState.maxHealthSegments, { skipSave: true });
     }
     if (itemId === MANA_POTION_ITEM_ID) {
-      setStat('magic', MAGIC_MAX_SEGMENTS, { skipSave: true });
+      setStat('magic', statsState.maxMagicSegments, { skipSave: true });
     }
     removeFromInventory(itemId, 1);
   }
@@ -5061,7 +5086,7 @@ async function main() {
   let playerDead = false;
   const updateControlAvailability = () => {
     if (!playerControls) return;
-    playerControls.enabled = !mapViewEnabled && !playerDead;
+    playerControls.enabled = !mapViewEnabled && !playerDead && !levelUpSelectionActive;
   };
   const updateEnergyEffects = () => {
     if (!playerControls) return;
@@ -5196,8 +5221,8 @@ async function main() {
 
   function updateHealthUI() {
     if (!healthBar) return;
-    const maxSegments = getMaxHealthSegments(statsState.level);
-    const currentSegments = clampHealthSegments(statsState.health, statsState.level);
+    const maxSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
+    const currentSegments = clampHealthSegments(statsState.health, statsState.level, maxSegments);
     const healthRatio = maxSegments > 0 ? currentSegments / maxSegments : 0;
     if (healthBar.childElementCount !== maxSegments) {
       healthBar.innerHTML = '';
@@ -5240,11 +5265,11 @@ async function main() {
   }
 
   function updateHungerUI() {
-    updateSegmentedBar(hungerBar, HUNGER_MAX_SEGMENTS, clampHungerSegments(statsState.hunger));
+    updateSegmentedBar(hungerBar, statsState.maxHungerSegments, clampHungerSegments(statsState.hunger, statsState.maxHungerSegments));
   }
 
   function updateMagicUI() {
-    updateSegmentedBar(magicBar, MAGIC_MAX_SEGMENTS, clampMagicSegments(statsState.magic));
+    updateSegmentedBar(magicBar, statsState.maxMagicSegments, clampMagicSegments(statsState.magic, statsState.maxMagicSegments));
   }
 
   const showHungerWarning = () => {
@@ -5265,12 +5290,12 @@ async function main() {
         return 0;
       }
       if (key === 'health') {
-        return clampHealthSegments(num, statsState.level);
+        return clampHealthSegments(num, statsState.level, statsState.maxHealthSegments);
       }
       if (key === 'magic') {
-        return clampMagicSegments(num);
+        return clampMagicSegments(num, statsState.maxMagicSegments);
       }
-      return clampHungerSegments(num);
+      return clampHungerSegments(num, statsState.maxHungerSegments);
     }
     if (key === 'level') {
       const num = Number(value);
@@ -5278,6 +5303,21 @@ async function main() {
         return 1;
       }
       return Math.max(1, Math.round(num));
+    }
+    if (key === 'maxHealthSegments') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return BASE_HEALTH_SEGMENTS;
+      return Math.max(BASE_HEALTH_SEGMENTS, Math.round(num));
+    }
+    if (key === 'maxHungerSegments') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return BASE_HUNGER_SEGMENTS;
+      return Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(num)));
+    }
+    if (key === 'maxMagicSegments') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return BASE_MAGIC_SEGMENTS;
+      return Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, Math.round(num)));
     }
     if (key === 'xp') {
       const num = Number(value);
@@ -5316,8 +5356,22 @@ async function main() {
     if (key === 'level') {
       currentPlayerLevel = statsState.level;
       updatePlayerInfoUI();
-      statsState.health = clampHealthSegments(statsState.health, statsState.level);
+      statsState.health = clampHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
       updateHealthUI();
+    }
+    if (key === 'maxHealthSegments') {
+      statsState.health = clampHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
+      updateHealthUI();
+    }
+    if (key === 'maxHungerSegments') {
+      statsState.hunger = clampHungerSegments(statsState.hunger, statsState.maxHungerSegments);
+      statsState.energy = statsState.hunger;
+      updateHungerUI();
+      updateEnergyEffects();
+    }
+    if (key === 'maxMagicSegments') {
+      statsState.magic = clampMagicSegments(statsState.magic, statsState.maxMagicSegments);
+      updateMagicUI();
     }
     if (!skipSave) {
       if (key === 'hunger') {
@@ -5376,24 +5430,93 @@ async function main() {
 
   window.setStat = setStat;
   window.getPlayerStrength = () => (Number.isFinite(statsState.strength) ? statsState.strength : 0);
-  const applyLevelBonus = delta => {
-    if (!Number.isFinite(delta) || delta === 0) {
+
+  const getPowerUpsForLevel = (level) => {
+    const safeLevel = Math.max(1, Math.round(level || 1));
+    if (safeLevel >= 15) return 4;
+    if (safeLevel >= 10) return 3;
+    if (safeLevel >= 5) return 2;
+    return 1;
+  };
+
+  const updateLevelUpPanelUI = () => {
+    if (!levelUpPanel) return;
+    if (levelUpTitle) {
+      levelUpTitle.textContent = `You've reached Level ${pendingLevelUpLevel}`;
+    }
+    if (levelUpSubtitle) {
+      levelUpSubtitle.textContent = 'Choose your power ups / stat increases.';
+    }
+    if (levelUpRemaining) {
+      levelUpRemaining.textContent = `You have ${pendingLevelUpChoices} power ups to choose.`;
+    }
+  };
+
+  const closeLevelUpPanel = () => {
+    pendingLevelUpChoices = 0;
+    levelUpSelectionActive = false;
+    if (levelUpPanel) {
+      levelUpPanel.classList.add('hidden');
+    }
+    updateControlAvailability();
+  };
+
+  const openLevelUpPanel = () => {
+    if (!levelUpPanel) return;
+    levelUpSelectionActive = pendingLevelUpChoices > 0;
+    updateLevelUpPanelUI();
+    levelUpPanel.classList.remove('hidden');
+    updateControlAvailability();
+  };
+
+  const applyLevelUpChoice = (choiceKey) => {
+    if (pendingLevelUpChoices <= 0) {
+      closeLevelUpPanel();
       return;
     }
-    for (const key of STAT_KEYS_FOR_LEVEL) {
-      const current = Number.isFinite(statsState[key]) ? statsState[key] : 0;
-      let nextValue = current;
-      if (key === 'health') {
-        nextValue = clampStat(key, current + delta);
-      } else if (key === 'hunger') {
-        nextValue = clampStat(key, current + delta * 2);
-      } else {
-        nextValue = current + delta * 2;
-      }
-      setStat(key, nextValue, { skipSave: true });
+    if (choiceKey === 'strength') {
+      setStat('strength', (Number.isFinite(statsState.strength) ? statsState.strength : 0) + 1, { skipSave: true });
     }
+    if (choiceKey === 'health') {
+      setStat('maxHealthSegments', statsState.maxHealthSegments + 1, { skipSave: true });
+      setStat('health', statsState.health + 1, { skipSave: true });
+    }
+    if (choiceKey === 'hunger') {
+      setStat('maxHungerSegments', statsState.maxHungerSegments + 1, { skipSave: true });
+      setStat('hunger', statsState.hunger + 1, { skipSave: true });
+    }
+    if (choiceKey === 'magic') {
+      setStat('maxMagicSegments', statsState.maxMagicSegments + 1, { skipSave: true });
+      setStat('magic', statsState.magic + 1, { skipSave: true });
+    }
+    pendingLevelUpChoices = Math.max(0, pendingLevelUpChoices - 1);
+    if (pendingLevelUpChoices <= 0) {
+      saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+      closeLevelUpPanel();
+      return;
+    }
+    updateLevelUpPanelUI();
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
   };
+
+  levelUpStrengthButton?.addEventListener('click', () => applyLevelUpChoice('strength'));
+  levelUpMagicButton?.addEventListener('click', () => applyLevelUpChoice('magic'));
+  levelUpHungerButton?.addEventListener('click', () => applyLevelUpChoice('hunger'));
+  levelUpHealthButton?.addEventListener('click', () => applyLevelUpChoice('health'));
+
+  const queueLevelUpChoices = (fromLevel, toLevel) => {
+    if (!Number.isFinite(fromLevel) || !Number.isFinite(toLevel) || toLevel <= fromLevel) {
+      return;
+    }
+    for (let level = fromLevel + 1; level <= toLevel; level += 1) {
+      pendingLevelUpChoices += getPowerUpsForLevel(level);
+      pendingLevelUpLevel = level;
+    }
+    if (pendingLevelUpChoices > 0) {
+      openLevelUpPanel();
+    }
+  };
+
   const getMonsterXpForLevel = (level) => {
     const safeLevel = Math.max(1, Math.round(level || 1));
     return 50 + (safeLevel - 1) * 25;
@@ -5413,11 +5536,10 @@ async function main() {
     statsState.xp = nextTotalXp;
     if (nextLevel !== statsState.level) {
       const currentLevel = Number.isFinite(statsState.level) ? statsState.level : previousLevel;
-      const delta = nextLevel - currentLevel;
-      if (delta !== 0) {
-        applyLevelBonus(delta);
+      if (nextLevel > currentLevel) {
+        queueLevelUpChoices(currentLevel, nextLevel);
       }
-      statsState.level = nextLevel;
+      setStat('level', nextLevel, { skipSave: true });
     }
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     queueXpAnimation(normalized);
@@ -7955,9 +8077,9 @@ async function main() {
   }
 
   function respawnPlayer() {
-    setStat('health', getMaxHealthSegments(statsState.level));
-    setStat('hunger', HUNGER_MAX_SEGMENTS);
-    setStat('magic', MAGIC_MAX_SEGMENTS);
+    setStat('health', statsState.maxHealthSegments);
+    setStat('hunger', statsState.maxHungerSegments);
+    setStat('magic', statsState.maxMagicSegments);
     const spawn = getSpawnPosition();
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
