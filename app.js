@@ -4531,6 +4531,7 @@ async function main() {
     item,
     {
       itemId,
+      quantity = 1,
       markerColor,
       markerOffsetY,
       position,
@@ -4562,6 +4563,7 @@ async function main() {
       mesh: pickupMesh,
       marker,
       itemId,
+      quantity: Number.isFinite(quantity) ? Math.max(1, Math.floor(quantity)) : 1,
       type: item?.type || itemId,
       holder: null,
       torchHealth: Number.isFinite(torchHealth) ? normalizeTorchHealth(torchHealth) : null,
@@ -4571,11 +4573,11 @@ async function main() {
         const distance = playerControls.playerModel.position.distanceTo(pickupMesh.position);
         if (distance > 3) return;
         if (itemId === TORCH_ITEM_ID) {
-          addToInventory(itemId, 1, {
+          addToInventory(itemId, pickup.quantity, {
             torchHealth: pickup.torchHealth ?? pickupMesh.userData.torchHealth ?? DEFAULT_TORCH_HEALTH
           });
         } else {
-          addToInventory(itemId, 1);
+          addToInventory(itemId, pickup.quantity);
         }
         equipInventoryItem(itemId);
         const index = droppedWeaponPickups.indexOf(pickup);
@@ -4798,11 +4800,14 @@ async function main() {
     return pickupMesh;
   };
 
-  const spawnCraftedPickup = (itemId, position) => {
+  const spawnCraftedPickup = (itemId, position, amount = 1) => {
     if (!itemId || !position) return;
     const dropPos = position.clone().add(new THREE.Vector3(0, 0.4, 0));
     if (itemId === 'arrow') {
-      spawnCraftArrowPickup(dropPos);
+      const pickup = spawnCraftArrowPickup(dropPos);
+      if (pickup) {
+        pickup.userData.amount = Math.max(1, Math.floor(amount));
+      }
       return;
     }
     if (itemId === MANA_POTION_ITEM_ID) {
@@ -4814,6 +4819,7 @@ async function main() {
         { mesh: potionMesh, type: MANA_POTION_ITEM_ID },
         {
           itemId: MANA_POTION_ITEM_ID,
+          quantity: amount,
           markerColor: 0x7f7dff,
           markerOffsetY: 1.0,
           position: dropPos,
@@ -4835,6 +4841,7 @@ async function main() {
     if (pickupConfig?.item?.mesh) {
       createDroppedWeaponPickup(pickupConfig.item, {
         itemId: pickupConfig.itemId,
+        quantity: amount,
         markerColor: pickupConfig.markerColor,
         markerOffsetY: 1.2,
         position: dropPos,
@@ -4903,11 +4910,15 @@ async function main() {
       clearCraftMaterials();
       clearCraftSwirl();
       if (craftCount > 0) {
+        const bundleCount = Math.min(craftCount, 5);
+        const bundleBaseAmount = Math.floor(craftCount / bundleCount);
+        const bundleRemainder = craftCount % bundleCount;
         const radius = 0.4;
-        for (let i = 0; i < craftCount; i += 1) {
-          const angle = (i / Math.max(craftCount, 1)) * Math.PI * 2;
+        for (let i = 0; i < bundleCount; i += 1) {
+          const bundleAmount = bundleBaseAmount + (i < bundleRemainder ? 1 : 0);
+          const angle = (i / Math.max(bundleCount, 1)) * Math.PI * 2;
           const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-          spawnCraftedPickup(itemId, basePos.clone().add(offset));
+          spawnCraftedPickup(itemId, basePos.clone().add(offset), bundleAmount);
         }
       }
       returnUnusedCraftMaterials(craftState.selection, recipe, craftCount);
