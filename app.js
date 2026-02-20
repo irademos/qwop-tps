@@ -542,6 +542,7 @@ async function main() {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
   const audioManager = createAudioManager();
+  window.audioManager = audioManager;
   const startOverlay = document.getElementById('start-overlay');
   const arcadeOverlay = createArcadeOverlay(startOverlay);
   let hasStartedAudio = false;
@@ -571,7 +572,7 @@ async function main() {
     if (hasStartedAudio) return;
     hasStartedAudio = true;
     await resumeAudioContext();
-    audioManager.playBGS('Forest Day/Forest Day.ogg');
+    syncBackgroundLoopForDisplayMode();
     focusGameCanvas?.();
   };
 
@@ -893,6 +894,18 @@ async function main() {
     }
   };
 
+
+  const syncBackgroundLoopForDisplayMode = () => {
+    const effectiveMode = displaySettings.mode === 'auto'
+      ? (lastAutoMode || getAutoMode())
+      : displaySettings.mode;
+    if (effectiveMode === 'night') {
+      audioManager.playBGS('Interior Night/Inside Night.ogg');
+      return;
+    }
+    audioManager.playBGS('Forest Day/Forest Day.ogg');
+  };
+
   const updateAutoDisplayMode = () => {
     if (displaySettings.mode !== 'auto') return;
     const nextMode = getAutoMode();
@@ -901,6 +914,7 @@ async function main() {
     applyPresetForMode(nextMode);
     saveDisplaySettings();
     applyDisplaySettings();
+    syncBackgroundLoopForDisplayMode();
     updateSettingsUI();
   };
 
@@ -916,6 +930,7 @@ async function main() {
     }
     saveDisplaySettings();
     applyDisplaySettings();
+    syncBackgroundLoopForDisplayMode();
     updateSettingsUI();
   };
 
@@ -2277,6 +2292,10 @@ async function main() {
   }
   treasureChest.onOpen = (holder) => {
     if (holder !== playerControls) return;
+    audioManager?.playSFX('SFX/Doors Gates and Chests/Door Open 1.ogg', 0.65, {
+      cooldownKey: 'door-open-chest',
+      cooldownMs: 120
+    });
     const rewards = [
       {
         label: '5 arrows',
@@ -3969,6 +3988,8 @@ async function main() {
       }
       lantern.mesh.visible = true;
       lantern.holder = playerControls;
+      audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-lantern', cooldownMs: 100 });
+      audioManager?.startLoopingSFX('torch-loop', 'SFX/Torch/Torch Loop.ogg', 0.32);
       updateSettingsUI();
       return;
     }
@@ -4003,6 +4024,8 @@ async function main() {
       torch.mesh.visible = true;
       torch.holder = playerControls;
       setPlayerWeaponType(playerControls, torch.type);
+      audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-torch', cooldownMs: 100 });
+      audioManager?.startLoopingSFX('torch-loop', 'SFX/Torch/Torch Loop.ogg', 0.32);
       updateSettingsUI();
       return;
     }
@@ -4029,6 +4052,7 @@ async function main() {
       bow.useHeldMeshWhenHeld = true;
       heldMesh.visible = true;
       bow.holder = playerControls;
+      audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Take Out 1.ogg', 0.6, { cooldownKey: 'bow-equip', cooldownMs: 100 });
       setPlayerWeaponType(playerControls, bow.type);
       playerControls.updateAmmoUI?.(true);
       playerControls.setAmmo?.(
@@ -4055,6 +4079,7 @@ async function main() {
       autumnSword.mesh.visible = true;
       autumnSword.holder = playerControls;
       setPlayerWeaponType(playerControls, autumnSword.type);
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'sword-equip', cooldownMs: 100 });
       updateSettingsUI();
     }
   }
@@ -4066,6 +4091,7 @@ async function main() {
       if (lantern.mesh) {
         lantern.mesh.visible = false;
       }
+      audioManager?.stopLoopingSFX('torch-loop');
       updateSettingsUI();
       return;
     }
@@ -4076,6 +4102,7 @@ async function main() {
         torch.mesh.visible = false;
       }
       clearPlayerWeaponType(playerControls, torch.type);
+      audioManager?.stopLoopingSFX('torch-loop');
       updateSettingsUI();
       return;
     }
@@ -4099,6 +4126,7 @@ async function main() {
         bow.mesh.visible = false;
       }
       bow.useHeldMeshWhenHeld = false;
+      audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Put Away 1.ogg', 0.58, { cooldownKey: 'bow-unequip', cooldownMs: 100 });
       clearPlayerWeaponType(playerControls, bow.type);
       playerControls?.updateAmmoUI?.(false);
       playerControls?.setAiming?.(false);
@@ -4123,6 +4151,7 @@ async function main() {
         autumnSword.mesh.visible = false;
       }
       clearPlayerWeaponType(playerControls, autumnSword.type);
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'sword-unequip', cooldownMs: 100 });
       updateSettingsUI();
     }
   }
@@ -8719,6 +8748,7 @@ async function main() {
       applyBombImpactDamage(hitPosition, projectile.userData?.shooterId);
       bomb.mesh.visible = false;
       bomb.holder = null;
+      audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Blocked 1.ogg', 0.58, { cooldownKey: 'bow-blocked', cooldownMs: 60 });
       removeProjectileAt(projectiles, i);
       break;
     }
@@ -9512,6 +9542,42 @@ async function main() {
       nameLabel.style.transform = `translate(-50%, -50%) scale(${scale})`;
       nameLabel.style.opacity = opacity.toFixed(2);
     });
+
+
+    const localPlayerPosition = playerModel?.position;
+    if (localPlayerPosition && audioManager) {
+      const playNearFootstepsFor = (entityId, position, isMoving) => {
+        if (!position || !isMoving) return;
+        const distance = localPlayerPosition.distanceTo(position);
+        if (!Number.isFinite(distance) || distance > 18) return;
+        const volume = Math.max(0.04, 0.28 * (1 - (distance / 18)));
+        audioManager.playFootstepAt(entityId, volume);
+      };
+
+      Object.entries(otherPlayers).forEach(([id, remote]) => {
+        const action = remote?.model?.userData?.currentAction;
+        const isMoving = action === 'run' || action === 'walk' || action === 'swim';
+        playNearFootstepsFor(`remote:${id}`, remote?.model?.position, isMoving);
+      });
+
+      (friendlyNpcManager?.friendlies || []).forEach((friendly) => {
+        const action = friendly?.model?.userData?.currentAction;
+        const isMoving = action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk';
+        playNearFootstepsFor(`friendly:${friendly?.id || 'unknown'}`, friendly?.model?.position, isMoving);
+      });
+
+      (animals || []).forEach((animal) => {
+        const action = animal?.model?.userData?.currentAction;
+        const isMoving = action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk';
+        playNearFootstepsFor(`animal:${animal?.id || 'unknown'}`, animal?.model?.position, isMoving);
+      });
+
+      (monsters || []).forEach((monster) => {
+        const action = monster?.model?.userData?.currentAction;
+        const isMoving = action === 'Weapon' ? false : (action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk');
+        playNearFootstepsFor(`monster:${monster?.id || 'unknown'}`, monster?.model?.position, isMoving);
+      });
+    }
 
     updateProjectiles({
       scene,

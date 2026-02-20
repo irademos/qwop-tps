@@ -35,6 +35,7 @@ export class AudioManager {
     this.pendingLoads = new Map();
     this.soundCooldowns = new Map();
     this.activeSFXNodes = new Set();
+    this.loopingSFX = new Map();
 
     this.context = null;
     this.masterGain = null;
@@ -113,7 +114,22 @@ export class AudioManager {
   }
 
   async preloadCommonSFX() {
-    const common = [...this.footsteps, ...this.attacks];
+    const common = [
+      ...this.footsteps,
+      ...this.attacks,
+      'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg',
+      'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg',
+      'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg',
+      'SFX/Attacks/Bow Attacks Hits and Blocks/Bow Attack 2.ogg',
+      'SFX/Attacks/Bow Attacks Hits and Blocks/Bow Blocked 1.ogg',
+      'SFX/Attacks/Bow Attacks Hits and Blocks/Bow Take Out 1.ogg',
+      'SFX/Attacks/Bow Attacks Hits and Blocks/Bow Put Away 1.ogg',
+      'SFX/Doors Gates and Chests/Door Open 1.ogg',
+      'SFX/Spells/Waterspray 1.ogg',
+      'SFX/Torch/Light Torch 1.ogg',
+      'SFX/Torch/Torch Attack Strike 1.ogg',
+      'SFX/Torch/Torch Loop.ogg'
+    ];
     await Promise.allSettled(common.map(path => this.loadBuffer(path)));
   }
 
@@ -251,5 +267,44 @@ export class AudioManager {
       cooldownKey: 'footstep',
       cooldownMs: this.performanceProfile.footstepCooldownMs
     });
+  }
+
+  playFootstepAt(entityId, volume = 0.3) {
+    const clip = this.footsteps[Math.floor(Math.random() * this.footsteps.length)];
+    this.playSFX(clip, volume, {
+      cooldownKey: `footstep:${entityId}`,
+      cooldownMs: this.performanceProfile.footstepCooldownMs
+    });
+  }
+
+  startLoopingSFX(loopId, path, volume = 0.35) {
+    if (!loopId || !path) return;
+    if (this.loopingSFX.has(loopId)) return;
+    this.resumeAudioContext().then(async () => {
+      const buffer = await this.loadBuffer(path);
+      if (!buffer || !this.context || !this.sfxGain || this.loopingSFX.has(loopId)) {
+        return;
+      }
+      const source = this.context.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+
+      const gainNode = this.context.createGain();
+      gainNode.gain.value = Math.max(0, Math.min(1, volume));
+      source.connect(gainNode);
+      gainNode.connect(this.sfxGain);
+
+      this.loopingSFX.set(loopId, { source, gainNode });
+      source.start(0);
+    });
+  }
+
+  stopLoopingSFX(loopId) {
+    const entry = this.loopingSFX.get(loopId);
+    if (!entry) return;
+    try {
+      entry.source.stop(0);
+    } catch {}
+    this.loopingSFX.delete(loopId);
   }
 }
