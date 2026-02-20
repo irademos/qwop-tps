@@ -43,6 +43,7 @@ const FRIENDLY_DRIFT_AVOID_RADIUS = 8;
 const FRIENDLY_DRIFT_AVOID_HARD_RADIUS = 3;
 const FRIENDLY_DRIFT_AVOID_MIN_FACTOR = 0.02;
 const ENEMY_DISENGAGE_RADIUS = 22;
+const FRIENDLY_DIRECT_PULL_DISTANCE = 30;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -419,16 +420,20 @@ export class MonsterCharacter extends CharacterBase {
         if (approachDirection.lengthSq() > 0.0001) {
           approachDirection.normalize();
           const avoidFactor = this.getFriendlyDriftAvoidanceFactor(closestPlayer, context);
-          const approachBlendFromDelta = 1 - Math.exp(-FRIENDLY_APPROACH_BLEND_RATE * Math.max(0, delta));
-          const approachBlend = Math.max(
-            FRIENDLY_APPROACH_BLEND_MIN,
-            Math.max(FRIENDLY_APPROACH_BLEND, approachBlendFromDelta)
-          ) * avoidFactor;
-          const blendedDirection = approachDirection.clone().lerp(currentDirection, FRIENDLY_WANDER_INFLUENCE);
-          if (blendedDirection.lengthSq() > 0.0001) {
-            blendedDirection.normalize();
-            currentDirection.lerp(blendedDirection, approachBlend).normalize();
-            this.setDirection(currentDirection);
+          if (closestDistance >= FRIENDLY_DIRECT_PULL_DISTANCE && avoidFactor > FRIENDLY_DRIFT_AVOID_MIN_FACTOR) {
+            this.setDirection(approachDirection);
+          } else {
+            const approachBlendFromDelta = 1 - Math.exp(-FRIENDLY_APPROACH_BLEND_RATE * Math.max(0, delta));
+            const approachBlend = Math.max(
+              FRIENDLY_APPROACH_BLEND_MIN,
+              Math.max(FRIENDLY_APPROACH_BLEND, approachBlendFromDelta)
+            ) * avoidFactor;
+            const blendedDirection = approachDirection.clone().lerp(currentDirection, FRIENDLY_WANDER_INFLUENCE);
+            if (blendedDirection.lengthSq() > 0.0001) {
+              blendedDirection.normalize();
+              currentDirection.lerp(blendedDirection, approachBlend).normalize();
+              this.setDirection(currentDirection);
+            }
           }
         }
       }
