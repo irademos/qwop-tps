@@ -316,6 +316,10 @@ export class HomeSystem {
       return;
     }
     if (target.type === 'home-storage') {
+      window.audioManager?.playSFX('SFX/Doors Gates and Chests/Door Open 1.ogg', 0.65, {
+        cooldownKey: 'door-open-home-storage',
+        cooldownMs: 120
+      });
       window.openHomeStorage?.();
     }
   }
