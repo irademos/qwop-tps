@@ -336,7 +336,6 @@ export class MonsterCharacter extends CharacterBase {
     const now = Date.now();
     if (!this.model) return;
     const body = this.body;
-    if (!body) return;
 
     const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
     if (this.isDead) {
@@ -354,6 +353,10 @@ export class MonsterCharacter extends CharacterBase {
     }
     if (this.isKnocked) {
       if (now >= this.knockbackEndTime) {
+        this.isKnocked = false;
+        this.model.userData.isKnocked = false;
+        this.knockbackVelocity.set(0, 0, 0);
+      } else if (!body) {
         this.isKnocked = false;
         this.model.userData.isKnocked = false;
         this.knockbackVelocity.set(0, 0, 0);
