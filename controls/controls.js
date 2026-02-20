@@ -725,7 +725,14 @@ export class PlayerControls {
       return;
     }
     if (weapon?.itemId === 'autumnSword') {
-      this.playAction(this.getNextSwordAttackAction());
+      const attackAction = this.getNextSwordAttackAction();
+      this.playAction(attackAction);
+      if (attackAction === 'swordSlash' || attackAction === 'swordSlashLeft') {
+        this.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg', 0.6, {
+          cooldownKey: 'sword-attack',
+          cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+        });
+      }
       return;
     }
     const cycle = ['right', 'left', 'kick'];
@@ -1030,15 +1037,31 @@ export class PlayerControls {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
         }
         const sword = this.getEquippedSword();
-        this.playAction(sword ? this.getNextSwordAttackAction() : 'mutantPunch');
-        this.audioManager?.playAttack();
+        const attackAction = sword ? this.getNextSwordAttackAction() : 'mutantPunch';
+        this.playAction(attackAction);
+        if (attackAction === 'swordSlash' || attackAction === 'swordSlashLeft') {
+          this.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg', 0.6, {
+            cooldownKey: 'sword-attack',
+            cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+          });
+        } else {
+          this.audioManager?.playAttack();
+        }
       } else if (key === 'q') {
         if (this.isInWater) return;
         if (this.isMoving && !this.isSlideMomentumActive()) {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
         }
         this.playAction('leftPunch');
-        this.audioManager?.playAttack();
+        const leftHandItem = this.getEquippedWeapon('left')?.itemId;
+        if (leftHandItem === 'torch' || leftHandItem === 'lantern') {
+          this.audioManager?.playSFX('SFX/Torch/Torch Attack Strike 1.ogg', 0.65, {
+            cooldownKey: 'torch-strike',
+            cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+          });
+        } else {
+          this.audioManager?.playAttack();
+        }
       } else if (key === 'r') {
         if (this.isInWater) return;
         if (this.isMoving && !this.isSlideMomentumActive()) {
@@ -2741,6 +2764,10 @@ export class PlayerControls {
       });
 
       this.playAction('projectile');
+      this.audioManager?.playSFX('SFX/Spells/Waterspray 1.ogg', 0.55, {
+        cooldownKey: 'ice-mist-fire',
+        cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+      });
       this.spawnIceMist(
         this.scene,
         this.iceMists,
@@ -2758,6 +2785,10 @@ export class PlayerControls {
       });
 
       this.playAction('projectile');
+      this.audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Attack 2.ogg', 0.6, {
+        cooldownKey: 'bow-fire',
+        cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+      });
       this.spawnArrowProjectile(
         this.scene,
         this.projectiles,

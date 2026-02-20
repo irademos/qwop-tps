@@ -23,6 +23,14 @@ const disposeProjectileMesh = (mesh) => {
   });
 };
 
+
+const playArrowBlockedSFX = () => {
+  window.audioManager?.playSFX?.('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Blocked 1.ogg', 0.58, {
+    cooldownKey: 'bow-blocked',
+    cooldownMs: 60
+  });
+};
+
 const getObjectBox = (object) => {
   if (!object || typeof object.updateWorldMatrix !== 'function') {
     return null;
@@ -133,6 +141,7 @@ export function updateProjectiles({
     try {
       const body = window.rapierWorld?.getRigidBody(rb.handle);
       if (!body) {
+        if (proj.userData?.isArrow) playArrowBlockedSFX();
         removeProjectile(i);
         continue;
       }
@@ -151,6 +160,7 @@ export function updateProjectiles({
       if (proj.position.y <= groundY && vel.y <= 0.1) {
         proj.userData.hasHitGround = true;
         proj.userData.onGroundHit(proj.position.clone(), proj);
+        if (proj.userData?.isArrow) playArrowBlockedSFX();
         removeProjectile(i);
         continue;
       }
@@ -169,6 +179,7 @@ export function updateProjectiles({
       const speed = vel.length();
       if (speed < 0.6 && proj.position.y <= 1.0) {
         proj.userData.spawnPickup(proj.position.clone(), proj.userData.pickupAmount || 1);
+        if (proj.userData?.isArrow) playArrowBlockedSFX();
         removeProjectile(i);
         continue;
       }
@@ -204,6 +215,7 @@ export function updateProjectiles({
           }
           console.log(`💥 Hit player: ${id}, Health: ${player.health}`);
         }
+        if (proj.userData?.isArrow) playArrowBlockedSFX();
         removeProjectile(i);
         removed = true;
         break;
@@ -216,6 +228,7 @@ export function updateProjectiles({
     if (!localBox) continue;
     if (projBox.intersectsBox(localBox) && age >= 80 && proj.userData.shooterId !== localId) {
       console.log(`💥 You were hit`);
+      if (proj.userData?.isArrow) playArrowBlockedSFX();
       removeProjectile(i);
       removed = true;
 
@@ -249,6 +262,7 @@ export function updateProjectiles({
             const withFriend = window.questManager?.isFriendActive?.() ?? false;
             window.onMonsterKill?.(monster, { withFriend });
           }
+          if (proj.userData?.isArrow) playArrowBlockedSFX();
           removeProjectile(i);
           removed = true;
           break;
@@ -266,6 +280,7 @@ export function updateProjectiles({
             sourcePlayerId: proj.userData.shooterId || localId,
             at: Date.now()
           });
+          if (proj.userData?.isArrow) playArrowBlockedSFX();
           removeProjectile(i);
           removed = true;
           break;
