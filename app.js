@@ -8618,12 +8618,16 @@ async function main() {
         const bbox = getMeshWorldBounds(mesh);
         if (bbox) {
           const terrainY = getTerrainHeight(mesh.position.x, mesh.position.z);
-          if (bbox.min.y < terrainY) {
+          const isDeadEntity = mesh.userData?.mode === 'dead';
+          const shouldSnapToGround = isDeadEntity
+            ? Math.abs(bbox.min.y - terrainY) > 0.01
+            : bbox.min.y < terrainY;
+          if (shouldSnapToGround) {
             const correction = terrainY - bbox.min.y;
             mesh.position.y += correction;
             rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
             const lv = rb.linvel();
-            if (lv.y < 0) {
+            if (isDeadEntity || lv.y < 0) {
               rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
             }
           }
