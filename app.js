@@ -177,7 +177,7 @@ const BOMB_MIST_LIFETIME_MS = 8000;
 const BOMB_MIST_PARTICLE_COUNT = 35;
 const ATTACK_WINDOW_MIST_OPACITY = 0.52;
 const ATTACK_WINDOW_MIST_HEIGHT = 1.6;
-const ATTACK_WINDOW_VISUAL_MULTIPLIER = 2;
+const ATTACK_WINDOW_VISUAL_MULTIPLIER = 1;
 const HIT_RIBBON_STREAK_COUNT = 9;
 const HIT_RIBBON_LIFETIME_MS = 260;
 const TORCH_ITEM_ID = 'torch';
@@ -5842,7 +5842,7 @@ async function main() {
     mesh.position.y += ATTACK_WINDOW_MIST_HEIGHT * 0.5;
 
     if (attackRegion === 'forward') {
-      const width = range * 2;
+      const width = range;
       mesh.scale.set(width, 1, range);
       mesh.rotation.set(0, playerModel.rotation.y, 0);
       playerModel.getWorldDirection(tempAttackMistForward);
