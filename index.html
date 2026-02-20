@@ -9,40 +9,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="icon" href="data:,">
   <link rel="manifest" href="/manifest.webmanifest">
-  <style>
-    #hunger-bar,
-    #magic-bar {
-      position: absolute;
-      left: 10px;
-      width: 150px;
-      height: 16px;
-      background: #555;
-      border: 2px solid #000;
-      z-index: 1000;
-    }
-
-    #hunger-bar {
-      top: 74px;
-    }
-
-    #magic-bar {
-      top: 98px;
-    }
-
-    #hunger-fill,
-    #magic-fill {
-      height: 100%;
-      width: 100%;
-    }
-
-    #hunger-fill {
-      background: #f4c542;
-    }
-
-    #magic-fill {
-      background: #b455ff;
-    }
-  </style>
 </head>
 <body>
   <div id="game-container">
@@ -114,8 +80,8 @@
   <div id="health-display">
     <div id="health-bar" role="img" aria-label="Health bar"></div>
   </div>
-  <div id="hunger-bar"><div id="hunger-fill"></div></div>
-  <div id="magic-bar"><div id="magic-fill"></div></div>
+  <div id="hunger-bar" role="img" aria-label="Hunger bar"></div>
+  <div id="magic-bar" role="img" aria-label="Magic bar"></div>
   <div id="ammo-display" class="hidden">
     <span id="ammo-icon">❄️</span>
     <span id="ammo-count">0</span>

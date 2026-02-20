@@ -2,15 +2,16 @@ import { ref, get, set, update, runTransaction } from 'firebase/database';
 import { db } from './firebase-init.js';
 import { getCookie, setCookie } from './utils.js';
 import { BASE_HEALTH_SEGMENTS, normalizeHealthSegments } from './healthUtils.js';
+import { HUNGER_MAX_SEGMENTS, MAGIC_MAX_SEGMENTS, clampHungerSegments, clampMagicSegments } from './statSegments.js';
 
 const SALT = 'prototype-salt-v1';
 const PIN_COOKIE_PREFIX = 'playerPinHash_';
 
 const DEFAULT_STATS = {
   health: BASE_HEALTH_SEGMENTS,
-  hunger: 100,
-  energy: 100,
-  magic: 100,
+  hunger: HUNGER_MAX_SEGMENTS,
+  energy: HUNGER_MAX_SEGMENTS,
+  magic: MAGIC_MAX_SEGMENTS,
   level: 1,
   strength: 5,
   agility: 5,
@@ -92,7 +93,10 @@ function normalizeStatValue(key, value) {
     if (key === 'health') {
       return numeric;
     }
-    return Math.max(0, Math.min(100, numeric));
+    if (key === 'magic') {
+      return clampMagicSegments(numeric);
+    }
+    return clampHungerSegments(numeric);
   }
   if (key === 'level') {
     return Math.max(1, Math.floor(numeric));
