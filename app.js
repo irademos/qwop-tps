@@ -4716,6 +4716,33 @@ async function main() {
     return null;
   };
 
+  const createManaPotionDisplayMesh = () => {
+    const group = new THREE.Group();
+    const bottle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.14, 0.3, 14),
+      new THREE.MeshStandardMaterial({
+        color: 0x5f8bff,
+        transparent: true,
+        opacity: 0.85,
+        roughness: 0.2,
+        metalness: 0.1
+      })
+    );
+    bottle.castShadow = true;
+    bottle.receiveShadow = true;
+    const cork = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.08, 12),
+      new THREE.MeshStandardMaterial({ color: 0x7a5b39, roughness: 0.9 })
+    );
+    cork.position.y = 0.19;
+    cork.castShadow = true;
+    cork.receiveShadow = true;
+    group.add(bottle, cork);
+    group.scale.setScalar(1.15);
+    group.rotation.x = Math.PI * 0.04;
+    return group;
+  };
+
   const createCraftSwirl = (position) => {
     if (!position) return null;
     const points = [];
