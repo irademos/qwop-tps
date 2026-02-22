@@ -9465,14 +9465,20 @@ async function main() {
             enableFriendlyDrift: true,
             friendlyAvoidanceZones
           };
+          const MAX_AI_DELTA_SECONDS = 0.5;
 
           if (monsterTier === 'active') {
             monster.syncBodyFromTransform?.({ zeroVelocity: false });
             if (PERF.throttleAI) {
               const last = monster.lastAIUpdateMs ?? 0;
               if (aiNowMs - last > 150) {
+                const elapsedAiSeconds = Math.max(0, (aiNowMs - last) / 1000);
+                const aiDelta = Math.min(
+                  MAX_AI_DELTA_SECONDS,
+                  last > 0 ? elapsedAiSeconds : mixerDelta
+                );
                 monster.lastAIUpdateMs = aiNowMs;
-                monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+                monster.updateAI(aiDelta, playerModel, otherPlayers, aiContext);
               }
             } else {
               monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
@@ -9483,8 +9489,13 @@ async function main() {
           if (monsterTier === 'background') {
             const lastBackgroundAi = monster.lastBackgroundAIUpdateMs ?? 0;
             if (previousTier !== 'background' || aiNowMs - lastBackgroundAi > MONSTER_BACKGROUND_AI_INTERVAL_MS) {
+              const elapsedAiSeconds = Math.max(0, (aiNowMs - lastBackgroundAi) / 1000);
+              const aiDelta = Math.min(
+                MAX_AI_DELTA_SECONDS,
+                lastBackgroundAi > 0 ? elapsedAiSeconds : mixerDelta
+              );
               monster.lastBackgroundAIUpdateMs = aiNowMs;
-              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+              monster.updateAI(aiDelta, playerModel, otherPlayers, aiContext);
             }
             return;
           }
