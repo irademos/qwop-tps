@@ -503,6 +503,28 @@ export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt, inventory, 
   pendingTimersByName.set(nameKey, timer);
 }
 
+export async function saveStatsImmediate(nameKey, stats, lastStatUpdateAt, inventory, homeStorage) {
+  if (!nameKey) return;
+  if (stats) {
+    pendingStatsByName.set(nameKey, { ...stats });
+  }
+  if (inventory) {
+    pendingInventoryByName.set(nameKey, { ...inventory });
+  }
+  if (homeStorage) {
+    pendingHomeStorageByName.set(nameKey, { ...homeStorage });
+  }
+  if (Number.isFinite(lastStatUpdateAt)) {
+    pendingMetaByName.set(nameKey, { lastStatUpdateAt });
+  }
+  const pendingTimer = pendingTimersByName.get(nameKey);
+  if (pendingTimer) {
+    clearTimeout(pendingTimer);
+    pendingTimersByName.delete(nameKey);
+  }
+  await flushStats(nameKey);
+}
+
 export async function saveCustomization(nameKey, customization) {
   if (!nameKey) return;
   try {

@@ -8,6 +8,7 @@ export {
   saveCharacterModel,
   saveCustomization,
   saveSleepTimestamp,
+  saveStatsImmediate,
   saveStatsThrottled
 } from '../playerProfile.js';
 
