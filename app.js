@@ -97,6 +97,7 @@ import {
   saveCharacterModel,
   saveCustomization,
   saveSleepTimestamp,
+  saveStatsImmediate,
   saveStatsThrottled,
   initMonsterPersistence,
   loadMonstersSnapshot,
@@ -5596,12 +5597,12 @@ async function main() {
     }
     pendingLevelUpChoices = Math.max(0, pendingLevelUpChoices - 1);
     if (pendingLevelUpChoices <= 0) {
-      saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+      void saveStatsImmediate(profileNameKey, statsState, lastStatUpdateAt);
       closeLevelUpPanel();
       return;
     }
     updateLevelUpPanelUI();
-    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+    void saveStatsImmediate(profileNameKey, statsState, lastStatUpdateAt);
   };
 
   levelUpStrengthButton?.addEventListener('click', () => applyLevelUpChoice('strength'));
