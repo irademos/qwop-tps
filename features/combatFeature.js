@@ -1,6 +1,6 @@
 import { showFeatureLoading } from './loadingState.js';
 import { spawnProjectile, updateProjectiles, removeProjectileAt } from '../items/projectiles.js';
-import { spawnArrowProjectile } from '../items/arrow.js';
+import { createArrowMesh, spawnArrowProjectile } from '../items/arrow.js';
 import { ATTACKS, updateMeleeAttacks } from '../items/melee.js';
 import { Torch, TORCH_PICKUP_LOCATION } from '../items/torch.js';
 
@@ -11,6 +11,7 @@ export {
   updateProjectiles,
   removeProjectileAt,
   spawnArrowProjectile,
+  createArrowMesh,
   ATTACKS,
   updateMeleeAttacks,
   Torch,

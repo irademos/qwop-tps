@@ -16,6 +16,7 @@ import {
   updateProjectiles,
   removeProjectileAt,
   spawnArrowProjectile,
+  createArrowMesh,
   ATTACKS,
   updateMeleeAttacks,
   Torch,
@@ -5809,26 +5810,6 @@ async function main() {
     }
   }
 
-  function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
-    const latest = spawnArrowProjectile({
-      scene,
-      list,
-      position,
-      direction,
-      shooterId,
-      template: arrowTemplate,
-      cloneArrowMesh,
-      scale: ARROW_PROJECTILE_SCALE,
-      speed: ARROW_PROJECTILE_SPEED,
-      lifetime: ARROW_PROJECTILE_LIFETIME,
-      spawnProjectile,
-      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount, { noFloat: true })
-    });
-    if (latest) {
-      latest.userData.skipTerrainCorrection = true;
-    }
-  }
-
   const createMeshPool = ({ create }) => {
     const available = [];
     return {
@@ -5847,6 +5828,52 @@ async function main() {
       }
     };
   };
+
+  const arrowProjectileMeshPool = createMeshPool({
+    create: () => {
+      const clone = createArrowMesh({
+        template: arrowTemplate,
+        cloneArrowMesh,
+        direction: new THREE.Vector3(0, 0, 1),
+        scale: ARROW_PROJECTILE_SCALE
+      });
+      clone.visible = true;
+      return clone;
+    }
+  });
+
+  const resetArrowProjectileMeshForReuse = (mesh) => {
+    if (!mesh) return;
+    mesh.visible = true;
+    const trail = mesh.userData?.arrowTrail;
+    if (trail) {
+      trail.visible = false;
+      trail.scale.set(1, 1, 1);
+    }
+  };
+
+  function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    const latest = spawnArrowProjectile({
+      scene,
+      list,
+      position,
+      direction,
+      shooterId,
+      speed: ARROW_PROJECTILE_SPEED,
+      lifetime: ARROW_PROJECTILE_LIFETIME,
+      createMesh: () => {
+        const mesh = arrowProjectileMeshPool.acquire();
+        resetArrowProjectileMeshForReuse(mesh);
+        return mesh;
+      },
+      releaseMesh: (mesh) => arrowProjectileMeshPool.release(mesh),
+      spawnProjectile,
+      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount, { noFloat: true })
+    });
+    if (latest) {
+      latest.userData.skipTerrainCorrection = true;
+    }
+  }
 
   const bombProjectileMeshPool = createMeshPool({
     create: () => {

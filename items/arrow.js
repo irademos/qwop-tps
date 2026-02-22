@@ -48,7 +48,7 @@ const setTrailOpacity = (trail, opacity) => {
   });
 };
 
-const createArrowMesh = ({
+export const createArrowMesh = ({
   template,
   cloneArrowMesh,
   direction,
@@ -88,24 +88,27 @@ export const spawnArrowProjectile = ({
   scale,
   speed,
   lifetime,
+  createMesh,
+  releaseMesh,
   spawnProjectile,
   spawnPickup,
   pickupAmount = 1
 }) => {
   if (typeof spawnProjectile !== 'function') return null;
-  const createMesh = () => createArrowMesh({
+  const createArrowProjectileMesh = createMesh || (() => createArrowMesh({
     template,
     cloneArrowMesh,
     direction,
     scale
-  });
+  }));
 
   const colliderDesc = RAPIER.ColliderDesc.cuboid(0.05, 0.05, 0.35)
     .setRestitution(0.1)
     .setFriction(0.6);
 
   spawnProjectile(scene, list, position, direction, shooterId, {
-    createMesh,
+    createMesh: createArrowProjectileMesh,
+    releaseMesh,
     colliderDesc,
     speed,
     lifetime,
