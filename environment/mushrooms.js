@@ -5,6 +5,7 @@ const MUSHROOM_MODEL_URL = '/assets/props/mushrooms.glb';
 const MUSHROOM_SCALE = 0.1; // tweak (0.5 = half size)
 const MUSHROOM_LIFT = 0.4; // tweak (0.5 = half size)
 const DEFAULT_MUSHROOM_SPAWN_RADIUS = 225;
+const MUSHROOM_SHADOWS_ENABLED = false;
 
 export const MUSHROOM_ENTRIES = [
   { nodeName: 'Cylinder_0', id: 'mushroom_cylinder_0', name: 'Mushroom 1', lift: 0.25, icon_name: 'mushroom12' }, // #12
@@ -35,21 +36,33 @@ const getRandomScatterPosition = (center, radius) => {
   );
 };
 
-const setMushroomShadows = (mushroom) => {
+const setMushroomShadows = (mushroom, enabled = MUSHROOM_SHADOWS_ENABLED) => {
   mushroom.traverse((child) => {
     if (!child.isMesh) return;
-    child.castShadow = true;
-    child.receiveShadow = true;
+    child.castShadow = Boolean(enabled);
+    child.receiveShadow = Boolean(enabled);
   });
 };
 
-const cloneMushroom = (source, itemId) => {
-  const clone = source.clone(true);
-  clone.userData.mushroomId = itemId;
-  clone.userData.itemId = itemId;
-  clone.scale.setScalar(MUSHROOM_SCALE);   // <-- add this
-  setMushroomShadows(clone);
-  return clone;
+const getTemplateMesh = (source) => {
+  if (!source) return null;
+  if (source.isMesh) return source;
+  let templateMesh = null;
+  source.traverse((child) => {
+    if (templateMesh || !child.isMesh) return;
+    templateMesh = child;
+  });
+  return templateMesh;
+};
+
+const createSharedMeshInstance = (templateMesh, itemId) => {
+  if (!templateMesh?.geometry || !templateMesh?.material) return null;
+  const mesh = new THREE.Mesh(templateMesh.geometry, templateMesh.material);
+  mesh.userData.mushroomId = itemId;
+  mesh.userData.itemId = itemId;
+  mesh.scale.setScalar(MUSHROOM_SCALE);
+  setMushroomShadows(mesh);
+  return mesh;
 };
 
 export async function createMushrooms({
@@ -75,7 +88,14 @@ export async function createMushrooms({
   scene.add(group);
 
   const templates = new Map();
+  const variantBuckets = new Map();
+  const variantInstancedMeshes = new Map();
   const pickups = [];
+
+  const registerPickup = (pickup) => {
+    pickups.push(pickup);
+    return pickup;
+  };
 
   MUSHROOM_ENTRIES.forEach((entry) => {
     const source = modelRoot.getObjectByName(entry.nodeName);
@@ -83,8 +103,15 @@ export async function createMushrooms({
       console.warn(`Missing mushroom node ${entry.nodeName}.`);
       return;
     }
-    source.userData.lift = entry.lift ?? MUSHROOM_LIFT;
-    templates.set(entry.id, source);
+    const templateMesh = getTemplateMesh(source);
+    if (!templateMesh) {
+      console.warn(`Missing mesh for mushroom node ${entry.nodeName}.`);
+      return;
+    }
+    templates.set(entry.id, {
+      mesh: templateMesh,
+      lift: entry.lift ?? MUSHROOM_LIFT
+    });
 
     let spawnPosition = null;
     let attempts = 0;
@@ -101,33 +128,116 @@ export async function createMushrooms({
       return;
     }
 
-    const mesh = cloneMushroom(source, entry.id);
-    mesh.position.copy(spawnPosition);
-    mesh.position.y += entry.lift ?? MUSHROOM_LIFT; // small lift, tune as needed
-    mesh.rotation.y = Math.random() * Math.PI * 2;
-    group.add(mesh);
-    pickups.push({ id: entry.id, mesh });
+    const pickup = {
+      id: entry.id,
+      position: spawnPosition.clone(),
+      rotationY: Math.random() * Math.PI * 2,
+      active: true,
+      type: 'instanced'
+    };
+    pickup.position.y += entry.lift ?? MUSHROOM_LIFT;
+
+    if (!variantBuckets.has(entry.id)) {
+      variantBuckets.set(entry.id, []);
+    }
+    variantBuckets.get(entry.id).push(pickup);
+    registerPickup(pickup);
   });
 
+  const tempMatrix = new THREE.Matrix4();
+  const tempPosition = new THREE.Vector3();
+  const tempQuaternion = new THREE.Quaternion();
+  const tempScale = new THREE.Vector3(MUSHROOM_SCALE, MUSHROOM_SCALE, MUSHROOM_SCALE);
+
+  variantBuckets.forEach((bucket, itemId) => {
+    const template = templates.get(itemId);
+    if (!template?.mesh || bucket.length === 0) return;
+    const instancedMesh = new THREE.InstancedMesh(template.mesh.geometry, template.mesh.material, bucket.length);
+    instancedMesh.name = `mushroom-instanced-${itemId}`;
+    instancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    instancedMesh.castShadow = false;
+    instancedMesh.receiveShadow = false;
+    instancedMesh.frustumCulled = false;
+
+    bucket.forEach((pickup, index) => {
+      tempPosition.copy(pickup.position);
+      tempQuaternion.setFromEuler(new THREE.Euler(0, pickup.rotationY, 0));
+      tempMatrix.compose(tempPosition, tempQuaternion, tempScale);
+      instancedMesh.setMatrixAt(index, tempMatrix);
+      pickup.instanceIndex = index;
+      pickup.instanceMesh = instancedMesh;
+    });
+
+    instancedMesh.instanceMatrix.needsUpdate = true;
+    group.add(instancedMesh);
+    variantInstancedMeshes.set(itemId, instancedMesh);
+  });
+
+  const setPickupActiveState = (pickup, active) => {
+    if (!pickup) return;
+    pickup.active = Boolean(active);
+    if (pickup.type === 'instanced' && pickup.instanceMesh && Number.isInteger(pickup.instanceIndex)) {
+      const instancedMesh = pickup.instanceMesh;
+      if (active) {
+        tempPosition.copy(pickup.position);
+      } else {
+        tempPosition.set(0, -10000, 0);
+      }
+      tempQuaternion.setFromEuler(new THREE.Euler(0, pickup.rotationY || 0, 0));
+      tempMatrix.compose(tempPosition, tempQuaternion, tempScale);
+      instancedMesh.setMatrixAt(pickup.instanceIndex, tempMatrix);
+      instancedMesh.instanceMatrix.needsUpdate = true;
+      return;
+    }
+    if (pickup.mesh) {
+      pickup.mesh.visible = Boolean(active);
+      if (!active && pickup.mesh.parent) {
+        pickup.mesh.parent.remove(pickup.mesh);
+      }
+    }
+  };
+
   const spawnPickup = (itemId, position) => {
-    const source = templates.get(itemId);
-    if (!source || !position) return null;
-    const mesh = cloneMushroom(source, itemId);
+    const template = templates.get(itemId);
+    if (!template || !position) return null;
+    const mesh = createSharedMeshInstance(template.mesh, itemId);
+    if (!mesh) return null;
     const x = position.x;
     const z = position.z;
     const y = getTerrainHeight?.(x, z) ?? position.y ?? 0;
     mesh.position.set(x, y, z);
-    mesh.position.y += source.userData.lift ?? MUSHROOM_LIFT; // small lift, tune as needed
+    mesh.position.y += template.lift ?? MUSHROOM_LIFT;
     mesh.rotation.y = Math.random() * Math.PI * 2;
     group.add(mesh);
-    const pickup = { id: itemId, mesh };
-    pickups.push(pickup);
-    return pickup;
+    return registerPickup({
+      id: itemId,
+      position: mesh.position,
+      rotationY: mesh.rotation.y,
+      active: true,
+      type: 'mesh',
+      mesh
+    });
+  };
+
+  const removePickup = (pickup) => {
+    if (!pickup) return false;
+    setPickupActiveState(pickup, false);
+    return true;
+  };
+
+  const createProjectileMesh = (itemId) => {
+    const template = templates.get(itemId) || templates.values().next().value;
+    if (!template) return null;
+    const mesh = createSharedMeshInstance(template.mesh, itemId || 'mushroom_projectile');
+    return mesh;
   };
 
   return {
     group,
     pickups,
-    spawnPickup
+    spawnPickup,
+    removePickup,
+    createProjectileMesh,
+    variantInstancedMeshes
   };
 }
