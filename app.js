@@ -5889,10 +5889,11 @@ async function main() {
       },
       releaseMesh: (mesh) => arrowProjectileMeshPool.release(mesh),
       spawnProjectile,
-      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount, {
+      spawnPickup: (pickupPosition, amount, conversionOptions = {}) => spawnArrowPickup(pickupPosition, amount, {
         noFloat: true,
         sparkle: false,
-        usePool: true
+        usePool: true,
+        ...conversionOptions
       })
     });
     if (latest) {
@@ -6364,7 +6365,11 @@ async function main() {
     if (!pickup) {
       pickup = new THREE.Mesh(geometry, material);
     }
-    registerPickupEmissiveMaterials(pickup);
+    if (!pickup.userData?.pickupEmissiveRegistered) {
+      registerPickupEmissiveMaterials(pickup);
+      pickup.userData = pickup.userData || {};
+      pickup.userData.pickupEmissiveRegistered = true;
+    }
     pickup.position.copy(spawnPos);
     pickup.castShadow = true;
     pickup.userData.skipTerrainCorrection = true;
@@ -6389,17 +6394,22 @@ async function main() {
   function spawnArrowPickup(position, amount = 1, options = {}) {
     const usePool = !!options.usePool;
     const sparkle = options.sparkle ?? true;
+    const sourceMesh = options.sourceMesh ?? null;
     return spawnAmmoPickup(position, amount, {
       type: 'arrow',
       sparkle,
       noFloat: options.noFloat,
       groundOffset: options.groundOffset,
       createMesh: () => {
-        const arrowMesh = usePool
+        const arrowMesh = sourceMesh || (usePool
           ? arrowGroundPickupMeshPool.acquire()
-          : cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE);
+          : cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE));
         if (arrowMesh) {
           arrowMesh.visible = true;
+          const trail = arrowMesh.userData?.arrowTrail;
+          if (trail) {
+            trail.visible = false;
+          }
           arrowMesh.rotation.set(0, Math.PI / 2, Math.PI / 2);
           arrowMesh.scale.setScalar(ARROW_PROJECTILE_SCALE * (amount > 1 ? 1.3 : 1));
           return arrowMesh;
@@ -6414,7 +6424,7 @@ async function main() {
         fallback.rotation.x = Math.PI / 2;
         return fallback;
       },
-      releaseMesh: usePool ? (mesh) => arrowGroundPickupMeshPool.release(mesh) : null
+      releaseMesh: sourceMesh ? null : (usePool ? (mesh) => arrowGroundPickupMeshPool.release(mesh) : null)
     });
   }
 

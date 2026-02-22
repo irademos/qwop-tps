@@ -40,15 +40,18 @@ const getObjectBox = (object) => {
   return box;
 };
 
-export function removeProjectileAt(projectiles, index) {
+export function removeProjectileAt(projectiles, index, options = {}) {
   const projectile = projectiles[index];
   if (!projectile) return;
   const body = projectile.userData?.rb;
-  if (typeof projectile.userData?.releaseMesh === 'function') {
-    detachProjectileMesh(projectile);
-    projectile.userData.releaseMesh(projectile);
-  } else {
-    disposeProjectileMesh(projectile);
+  const preserveMesh = !!options?.preserveMesh;
+  if (!preserveMesh) {
+    if (typeof projectile.userData?.releaseMesh === 'function') {
+      detachProjectileMesh(projectile);
+      projectile.userData.releaseMesh(projectile);
+    } else {
+      disposeProjectileMesh(projectile);
+    }
   }
   projectiles.splice(index, 1);
   if (body) {
@@ -129,8 +132,8 @@ export function updateProjectiles({
     }
     return baseDamage;
   };
-  const removeProjectile = (index) => {
-    removeProjectileAt(projectiles, index);
+  const removeProjectile = (index, options = {}) => {
+    removeProjectileAt(projectiles, index, options);
   };
 
   for (let i = projectiles.length - 1; i >= 0; i--) {
@@ -178,9 +181,13 @@ export function updateProjectiles({
     if (proj.userData.pickupOnRest && !proj.userData.arrowStuck && typeof proj.userData.spawnPickup === 'function') {
       const speed = vel.length();
       if (speed < 0.6 && proj.position.y <= 1.0) {
-        proj.userData.spawnPickup(proj.position.clone(), proj.userData.pickupAmount || 1);
+        const converted = proj.userData.spawnPickup(
+          proj.position.clone(),
+          proj.userData.pickupAmount || 1,
+          { sourceMesh: proj, fromProjectile: true }
+        );
         if (proj.userData?.isArrow) playArrowBlockedSFX();
-        removeProjectile(i);
+        removeProjectile(i, { preserveMesh: !!converted });
         continue;
       }
     }
