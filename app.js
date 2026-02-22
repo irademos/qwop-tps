@@ -9469,9 +9469,11 @@ async function main() {
             monster.syncBodyFromTransform?.({ zeroVelocity: false });
             if (PERF.throttleAI) {
               const last = monster.lastAIUpdateMs ?? 0;
-              if (aiNowMs - last > 150) {
+              const elapsedMs = aiNowMs - last;
+              if (elapsedMs > 150) {
                 monster.lastAIUpdateMs = aiNowMs;
-                monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+                const throttledDelta = Math.max(mixerDelta, elapsedMs / 1000);
+                monster.updateAI(throttledDelta, playerModel, otherPlayers, aiContext);
               }
             } else {
               monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
@@ -9481,9 +9483,11 @@ async function main() {
 
           if (monsterTier === 'background') {
             const lastBackgroundAi = monster.lastBackgroundAIUpdateMs ?? 0;
-            if (previousTier !== 'background' || aiNowMs - lastBackgroundAi > MONSTER_BACKGROUND_AI_INTERVAL_MS) {
+            const elapsedBackgroundMs = aiNowMs - lastBackgroundAi;
+            if (previousTier !== 'background' || elapsedBackgroundMs > MONSTER_BACKGROUND_AI_INTERVAL_MS) {
               monster.lastBackgroundAIUpdateMs = aiNowMs;
-              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+              const throttledDelta = Math.max(mixerDelta, elapsedBackgroundMs / 1000);
+              monster.updateAI(throttledDelta, playerModel, otherPlayers, aiContext);
             }
             return;
           }
