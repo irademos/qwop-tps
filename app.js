@@ -1386,6 +1386,9 @@ async function main() {
         return;
       }
       const remoteId = data.id || peerId;
+      if (remoteId === multiplayer.getId()) {
+        return;
+      }
       const desiredModel = data.model || DEFAULT_CHARACTER_MODEL;
       const now = performance.now();
       if (!remotePresenceMeta[remoteId]) {
