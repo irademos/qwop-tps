@@ -1301,6 +1301,7 @@ export class PlayerControls {
     const playerPos = this.playerModel.position;
     let closest = null;
     let closestDistance = Infinity;
+    let closestDistanceSq = Infinity;
 
     const homeTarget = window.homeSystem?.getInteractionTarget?.(playerPos, this.isMobile);
     const homeEnterTarget = homeTarget?.type === 'home-enter' ? homeTarget : null;
@@ -1311,7 +1312,17 @@ export class PlayerControls {
     const consider = (distance, data) => {
       if (distance <= data.maxDistance && distance < closestDistance) {
         closestDistance = distance;
+        closestDistanceSq = distance * distance;
         closest = { ...data, distance };
+      }
+    };
+
+    const considerSquared = (distanceSq, data) => {
+      const maxDistanceSq = data.maxDistance * data.maxDistance;
+      if (distanceSq <= maxDistanceSq && distanceSq < closestDistanceSq) {
+        closestDistanceSq = distanceSq;
+        closestDistance = Math.sqrt(distanceSq);
+        closest = { ...data, distance: closestDistance };
       }
     };
 
@@ -1410,11 +1421,18 @@ export class PlayerControls {
       }
     }
     
-    const mushroomPickups = Array.isArray(window.mushroomPickups) ? window.mushroomPickups : [];
-    mushroomPickups.forEach((pickup) => {
+    const mushroomPickupGrid = window.mushroomPickupGrid;
+    const mushroomCandidates = mushroomPickupGrid?.queryNearby
+      ? mushroomPickupGrid.queryNearby(playerPos.x, playerPos.z, MUSHROOM_INTERACT_RANGE)
+      : (Array.isArray(window.mushroomPickups) ? window.mushroomPickups : []);
+    const mushroomInteractRangeSq = MUSHROOM_INTERACT_RANGE * MUSHROOM_INTERACT_RANGE;
+    mushroomCandidates.forEach((pickup) => {
       if (!pickup?.mesh || !pickup.mesh.visible) return;
-      const dist = playerPos.distanceTo(pickup.mesh.position);
-      consider(dist, {
+      const dx = playerPos.x - pickup.mesh.position.x;
+      const dz = playerPos.z - pickup.mesh.position.z;
+      const distSq = (dx * dx) + (dz * dz);
+      if (distSq > mushroomInteractRangeSq) return;
+      considerSquared(distSq, {
         type: 'mushroom',
         pickup,
         maxDistance: MUSHROOM_INTERACT_RANGE,

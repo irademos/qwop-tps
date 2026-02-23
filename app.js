@@ -9,6 +9,7 @@ import { createFire } from './environment/fire.js';
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls/controls.js';
 import { getCookie, setCookie } from './utils.js';
+import { PickupSpatialGrid } from './pickupSpatialGrid.js';
 import { initSpeechCommands } from './controls/speechCommands.js';
 import { createAudioManager } from './features/audioFeature.js';
 import {
@@ -718,6 +719,12 @@ async function main() {
   const coinPickups = [];
   let mushroomController = null;
   let mushroomPickups = [];
+  const mushroomPickupGrid = new PickupSpatialGrid(4);
+  window.mushroomPickupGrid = mushroomPickupGrid;
+  window.pickupSpatialIndices = {
+    ...(window.pickupSpatialIndices || {}),
+    mushrooms: mushroomPickupGrid
+  };
   let appleController = null;
   let applePickups = [];
   let woodPickups = [];
@@ -2478,6 +2485,11 @@ async function main() {
   });
   await createTower({ scene, getTerrainHeight, rapierWorld, rapier: RAPIER });
   mushroomPickups = mushroomController?.pickups || [];
+  mushroomPickups.forEach((pickup) => {
+    if (pickup?.mesh?.position) {
+      mushroomPickupGrid.add(pickup, pickup.mesh.position);
+    }
+  });
   window.mushroomPickups = mushroomPickups;
   animalManager = createAnimalManager({
     scene,
@@ -4316,6 +4328,7 @@ async function main() {
     if (index >= 0) {
       mushroomPickups.splice(index, 1);
     }
+    mushroomPickupGrid.remove(pickup);
     window.questManager?.handleMushroomCollected?.(pickup);
     return true;
   }
@@ -4405,7 +4418,11 @@ async function main() {
 
   function spawnMushroomPickup(itemId, position) {
     if (!mushroomController?.spawnPickup || !position) return null;
-    return mushroomController.spawnPickup(itemId, position);
+    const pickup = mushroomController.spawnPickup(itemId, position);
+    if (pickup?.mesh?.position) {
+      mushroomPickupGrid.add(pickup, pickup.mesh.position);
+    }
+    return pickup;
   }
 
   function spawnApplePickup(position) {
@@ -9100,6 +9117,7 @@ async function main() {
         const pickup = mushroomPickups[i];
         if (!pickup) continue;
         disposeMushroomPickup(pickup);
+        mushroomPickupGrid.remove(pickup);
         mushroomPickups.splice(i, 1);
       }
       for (let i = applePickups.length - 1; i >= 0; i--) {
@@ -9237,6 +9255,7 @@ async function main() {
       for (let i = mushroomPickups.length - 1; i >= 0; i--) {
         const pickup = mushroomPickups[i];
         if (!pickup?.mesh) {
+          mushroomPickupGrid.remove(pickup);
           mushroomPickups.splice(i, 1);
           continue;
         }
