@@ -199,7 +199,6 @@ const FRIENDLY_VOICE_MAX_VOLUME = 0.35;
 const ZOMBIE_VOICE_MAX_VOLUME = 0.4;
 const MERCHANT_LOOP_MAX_VOLUME = 0.38;
 const FRIENDLY_VOICE_INTERVAL_MS = [5000, 11000];
-const ZOMBIE_VOICE_INTERVAL_MS = [3500, 8000];
 const FRIENDLY_VOICE_CLIPS = [
   'NPC Sounds/friendly_sound_1.ogg',
   'NPC Sounds/friendly_sound_2.ogg',
@@ -748,6 +747,7 @@ async function main() {
   let animals = [];
   window.animals = animals;
   const npcVoiceSchedule = new Map();
+  const zombieVoiceLoops = new Map();
   const getRandomDelayMs = ([min, max]) => {
     const safeMin = Number.isFinite(min) ? min : 0;
     const safeMax = Number.isFinite(max) ? max : safeMin;
@@ -801,6 +801,36 @@ async function main() {
       return;
     }
     audioManager.startLoopingSFX(loopId, MERCHANT_LOOP_CLIP, volume);
+    audioManager.setLoopingSFXVolume(loopId, volume);
+  };
+  const stopZombieLoopVoice = (monsterId) => {
+    if (!monsterId || !audioManager) return;
+    const loopId = zombieVoiceLoops.get(monsterId);
+    if (!loopId) return;
+    audioManager.stopLoopingSFX(loopId);
+    zombieVoiceLoops.delete(monsterId);
+  };
+  const updateZombieLoopVoice = ({ monster, playerPosition }) => {
+    const monsterId = monster?.id;
+    if (!monsterId || !audioManager || !playerPosition || !isZombieMonsterType(monster) || monster?.isDead || !monster?.model?.position) {
+      stopZombieLoopVoice(monsterId);
+      return;
+    }
+
+    const distance = playerPosition.distanceTo(monster.model.position);
+    const volume = getVolumeByDistance(distance, NPC_AUDIO_HEAR_RADIUS, ZOMBIE_VOICE_MAX_VOLUME);
+    if (volume <= 0.01) {
+      stopZombieLoopVoice(monsterId);
+      return;
+    }
+
+    let loopId = zombieVoiceLoops.get(monsterId);
+    if (!loopId) {
+      const randomClip = ZOMBIE_VOICE_CLIPS[Math.floor(Math.random() * ZOMBIE_VOICE_CLIPS.length)] || ZOMBIE_VOICE_CLIPS[0];
+      loopId = `zombie-voice-loop:${monsterId}`;
+      zombieVoiceLoops.set(monsterId, loopId);
+      audioManager.startLoopingSFX(loopId, randomClip, volume);
+    }
     audioManager.setLoopingSFXVolume(loopId, volume);
   };
   const monsterSlotIds = Array.from({ length: MAX_MONSTERS_TOTAL }, (_, index) => `monster:${index}`);
@@ -2655,6 +2685,7 @@ async function main() {
     const index = monsters.findIndex((entry) => entry?.id === monsterId);
     if (index < 0) return false;
     const [monster] = monsters.splice(index, 1);
+    stopZombieLoopVoice(monsterId);
     cleanupMonster(monster);
     window.monsters = monsters;
     return true;
@@ -9677,18 +9708,7 @@ async function main() {
       });
 
       (monsters || []).forEach((monster) => {
-        if (isZombieMonsterType(monster)) {
-          maybePlayNpcVoice({
-            entityId: `zombie-voice:${monster?.id || 'unknown'}`,
-            position: monster?.model?.position,
-            now,
-            intervalRange: ZOMBIE_VOICE_INTERVAL_MS,
-            clips: ZOMBIE_VOICE_CLIPS,
-            maxVolume: ZOMBIE_VOICE_MAX_VOLUME,
-            playerPosition: localPlayerPosition,
-            cooldownPrefix: 'zombie-voice'
-          });
-        }
+        updateZombieLoopVoice({ monster, playerPosition: localPlayerPosition });
         const action = monster?.model?.userData?.currentAction;
         const isMoving = action === 'Weapon' ? false : (action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk');
         playNearFootstepsFor(`monster:${monster?.id || 'unknown'}`, monster?.model?.position, isMoving);
