@@ -9470,15 +9470,15 @@ async function main() {
           if (monsterTier === 'active') {
             monster.syncBodyFromTransform?.({ zeroVelocity: false });
             if (PERF.throttleAI) {
-              const last = monster.lastAIUpdateMs ?? 0;
-              if (aiNowMs - last > 150) {
-                const elapsedAiSeconds = Math.max(0, (aiNowMs - last) / 1000);
-                const aiDelta = Math.min(
+              const lastAIUpdateMs = monster.lastAIUpdateMs ?? 0;
+              if (aiNowMs - lastAIUpdateMs > 150) {
+                const elapsedAiSeconds = Math.max(0, (aiNowMs - lastAIUpdateMs) / 1000);
+                const aiDeltaSeconds = Math.min(
                   MAX_AI_DELTA_SECONDS,
-                  last > 0 ? elapsedAiSeconds : mixerDelta
+                  lastAIUpdateMs > 0 ? elapsedAiSeconds : mixerDelta
                 );
                 monster.lastAIUpdateMs = aiNowMs;
-                monster.updateAI(aiDelta, playerModel, otherPlayers, aiContext);
+                monster.updateAI(aiDeltaSeconds, playerModel, otherPlayers, aiContext);
               }
             } else {
               monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
