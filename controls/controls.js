@@ -1401,8 +1401,11 @@ export class PlayerControls {
     
     const mushroomPickups = Array.isArray(window.mushroomPickups) ? window.mushroomPickups : [];
     mushroomPickups.forEach((pickup) => {
-      if (!pickup?.mesh || !pickup.mesh.visible) return;
-      const dist = playerPos.distanceTo(pickup.mesh.position);
+      if (!pickup?.active) return;
+      const pickupPosition = pickup.position || pickup.mesh?.position;
+      if (!pickupPosition) return;
+      if (pickup.mesh && !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickupPosition);
       consider(dist, {
         type: 'mushroom',
         pickup,
