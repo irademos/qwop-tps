@@ -1,6 +1,7 @@
 const DEFAULT_PERF_PROFILE = {
   maxConcurrentSFX: 12,
   footstepCooldownMs: 220,
+  footstepMinIntervalMs: 300,
   attackCooldownMs: 120,
   preloadCommonSFX: true
 };
@@ -8,6 +9,7 @@ const DEFAULT_PERF_PROFILE = {
 const LOW_END_PERF_PROFILE = {
   maxConcurrentSFX: 5,
   footstepCooldownMs: 320,
+  footstepMinIntervalMs: 420,
   attackCooldownMs: 180,
   preloadCommonSFX: true
 };
@@ -36,6 +38,7 @@ export class AudioManager {
     this.soundCooldowns = new Map();
     this.activeSFXNodes = new Set();
     this.loopingSFX = new Map();
+    this.lastFootstepAt = 0;
 
     this.context = null;
     this.masterGain = null;
@@ -269,6 +272,13 @@ export class AudioManager {
   }
 
   playFootstep() {
+    const now = performance.now();
+    const minInterval = this.performanceProfile.footstepMinIntervalMs ?? 0;
+    if (minInterval > 0 && now - this.lastFootstepAt < minInterval) {
+      return;
+    }
+    this.lastFootstepAt = now;
+
     const clip = this.footsteps[Math.floor(Math.random() * this.footsteps.length)];
     this.playSFX(clip, 0.4, {
       cooldownKey: 'footstep',
@@ -277,6 +287,13 @@ export class AudioManager {
   }
 
   playFootstepAt(entityId, volume = 0.3) {
+    const now = performance.now();
+    const minInterval = this.performanceProfile.footstepMinIntervalMs ?? 0;
+    if (minInterval > 0 && now - this.lastFootstepAt < minInterval) {
+      return;
+    }
+    this.lastFootstepAt = now;
+
     const clip = this.footsteps[Math.floor(Math.random() * this.footsteps.length)];
     this.playSFX(clip, volume, {
       cooldownKey: `footstep:${entityId}`,
