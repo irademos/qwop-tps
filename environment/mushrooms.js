@@ -55,6 +55,29 @@ const getTemplateMesh = (source) => {
   return templateMesh;
 };
 
+const getTemplateLocalMatrix = (source, templateMesh) => {
+  if (!source || !templateMesh) return new THREE.Matrix4();
+  source.updateWorldMatrix(true, true);
+  templateMesh.updateWorldMatrix(true, false);
+  const sourceWorldInverse = new THREE.Matrix4().copy(source.matrixWorld).invert();
+  return new THREE.Matrix4().multiplyMatrices(sourceWorldInverse, templateMesh.matrixWorld);
+};
+
+const applyRootTransformToMatrix = ({
+  targetMatrix,
+  rootPosition,
+  rootRotationY,
+  templateLocalMatrix,
+  rootScale = MUSHROOM_SCALE
+}) => {
+  const rootMatrix = new THREE.Matrix4();
+  const rootQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rootRotationY || 0, 0));
+  const rootScaleVector = new THREE.Vector3(rootScale, rootScale, rootScale);
+  rootMatrix.compose(rootPosition, rootQuaternion, rootScaleVector);
+  targetMatrix.multiplyMatrices(rootMatrix, templateLocalMatrix || new THREE.Matrix4());
+  return targetMatrix;
+};
+
 const createSharedMeshInstance = (templateMesh, itemId) => {
   if (!templateMesh?.geometry || !templateMesh?.material) return null;
   const mesh = new THREE.Mesh(templateMesh.geometry, templateMesh.material);
@@ -110,6 +133,7 @@ export async function createMushrooms({
     }
     templates.set(entry.id, {
       mesh: templateMesh,
+      localMatrix: getTemplateLocalMatrix(source, templateMesh),
       lift: entry.lift ?? MUSHROOM_LIFT
     });
 
@@ -146,8 +170,6 @@ export async function createMushrooms({
 
   const tempMatrix = new THREE.Matrix4();
   const tempPosition = new THREE.Vector3();
-  const tempQuaternion = new THREE.Quaternion();
-  const tempScale = new THREE.Vector3(MUSHROOM_SCALE, MUSHROOM_SCALE, MUSHROOM_SCALE);
 
   variantBuckets.forEach((bucket, itemId) => {
     const template = templates.get(itemId);
@@ -161,8 +183,13 @@ export async function createMushrooms({
 
     bucket.forEach((pickup, index) => {
       tempPosition.copy(pickup.position);
-      tempQuaternion.setFromEuler(new THREE.Euler(0, pickup.rotationY, 0));
-      tempMatrix.compose(tempPosition, tempQuaternion, tempScale);
+      applyRootTransformToMatrix({
+        targetMatrix: tempMatrix,
+        rootPosition: tempPosition,
+        rootRotationY: pickup.rotationY,
+        templateLocalMatrix: template.localMatrix,
+        rootScale: MUSHROOM_SCALE
+      });
       instancedMesh.setMatrixAt(index, tempMatrix);
       pickup.instanceIndex = index;
       pickup.instanceMesh = instancedMesh;
@@ -183,8 +210,13 @@ export async function createMushrooms({
       } else {
         tempPosition.set(0, -10000, 0);
       }
-      tempQuaternion.setFromEuler(new THREE.Euler(0, pickup.rotationY || 0, 0));
-      tempMatrix.compose(tempPosition, tempQuaternion, tempScale);
+      applyRootTransformToMatrix({
+        targetMatrix: tempMatrix,
+        rootPosition: tempPosition,
+        rootRotationY: pickup.rotationY || 0,
+        templateLocalMatrix: templates.get(pickup.id)?.localMatrix,
+        rootScale: MUSHROOM_SCALE
+      });
       instancedMesh.setMatrixAt(pickup.instanceIndex, tempMatrix);
       instancedMesh.instanceMatrix.needsUpdate = true;
       return;
@@ -205,14 +237,21 @@ export async function createMushrooms({
     const x = position.x;
     const z = position.z;
     const y = getTerrainHeight?.(x, z) ?? position.y ?? 0;
-    mesh.position.set(x, y, z);
-    mesh.position.y += template.lift ?? MUSHROOM_LIFT;
-    mesh.rotation.y = Math.random() * Math.PI * 2;
+    const rootPosition = new THREE.Vector3(x, y + (template.lift ?? MUSHROOM_LIFT), z);
+    const rootRotationY = Math.random() * Math.PI * 2;
+    applyRootTransformToMatrix({
+      targetMatrix: tempMatrix,
+      rootPosition,
+      rootRotationY,
+      templateLocalMatrix: template.localMatrix,
+      rootScale: MUSHROOM_SCALE
+    });
+    tempMatrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
     group.add(mesh);
     return registerPickup({
       id: itemId,
       position: mesh.position,
-      rotationY: mesh.rotation.y,
+      rotationY: rootRotationY,
       active: true,
       type: 'mesh',
       mesh
