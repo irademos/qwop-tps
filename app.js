@@ -2516,8 +2516,9 @@ async function main() {
   await createTower({ scene, getTerrainHeight, rapierWorld, rapier: RAPIER });
   mushroomPickups = mushroomController?.pickups || [];
   mushroomPickups.forEach((pickup) => {
-    if (pickup?.mesh?.position) {
-      mushroomPickupGrid.add(pickup, pickup.mesh.position);
+    const pickupPosition = pickup?.mesh?.position || pickup?.position;
+    if (pickup?.active && pickupPosition) {
+      mushroomPickupGrid.add(pickup, pickupPosition);
     }
   });
   window.mushroomPickups = mushroomPickups;

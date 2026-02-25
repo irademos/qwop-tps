@@ -1435,9 +1435,12 @@ export class PlayerControls {
       : (Array.isArray(window.mushroomPickups) ? window.mushroomPickups : []);
     const mushroomInteractRangeSq = MUSHROOM_INTERACT_RANGE * MUSHROOM_INTERACT_RANGE;
     mushroomCandidates.forEach((pickup) => {
-      if (!pickup?.mesh || !pickup.mesh.visible) return;
-      const dx = playerPos.x - pickup.mesh.position.x;
-      const dz = playerPos.z - pickup.mesh.position.z;
+      if (!pickup?.active) return;
+      const pickupPosition = pickup.mesh?.position || pickup.position;
+      if (!pickupPosition) return;
+      if (pickup.mesh && !pickup.mesh.visible) return;
+      const dx = playerPos.x - pickupPosition.x;
+      const dz = playerPos.z - pickupPosition.z;
       const distSq = (dx * dx) + (dz * dz);
       if (distSq > mushroomInteractRangeSq) return;
       considerSquared(distSq, {
