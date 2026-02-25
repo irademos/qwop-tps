@@ -5161,6 +5161,7 @@ async function main() {
       const pickup = spawnSaltPickup(dropPos, { itemId: SAUTEED_MUSHROOMS_ITEM_ID, amount, groupedMushrooms: 3, useTerrainHeight: false });
       if (pickup?.mesh) {
         pickup.mesh.position.copy(dropPos);
+        pickup.mesh.userData.baseY = dropPos.y;
       }
       return;
     }
@@ -6020,7 +6021,7 @@ async function main() {
       }
     }
 
-    if (isHost && natureController?.removeRocksInRadius) {
+    if (natureController?.removeRocksInRadius) {
       const removedRockPositions = natureController.removeRocksInRadius(hitPosition, BOMB_DAMAGE_RADIUS);
       removedRockPositions.forEach((rockPosition) => {
         for (let i = 0; i < 3; i += 1) {
