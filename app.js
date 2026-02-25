@@ -4700,10 +4700,20 @@ async function main() {
     }
   }
 
-  function handleTorchTreeHit({ attacker, range }) {
+  function handleTorchTreeHit({ attacker, range, region = 'forward' }) {
     if (!attacker?.model?.position) return;
-    const effectiveRange = (Number.isFinite(range) ? range : 0) + TREE_HIT_RANGE_BOOST;
-    const tree = natureController?.getClosestTree?.(attacker.model.position, effectiveRange);
+    const baseRange = Number.isFinite(range) ? Math.max(0, range) : 0;
+    const effectiveRange = baseRange + TREE_HIT_RANGE_BOOST;
+    const tree = natureController?.getClosestTree?.(
+      attacker.model.position,
+      effectiveRange,
+      {
+        filter: (candidateTree, center) => {
+          const radius = candidateTree?.userData?.boundsRadius ?? 0;
+          return isTreeWithinSwordAttackArea(attacker.model, center, baseRange, region, radius);
+        }
+      }
+    );
     if (!tree || tree.userData?.isCutDown || !tree.userData?.isFlammable) return;
     if (tree.userData?.isBurning) return;
     tree.userData.isBurning = true;

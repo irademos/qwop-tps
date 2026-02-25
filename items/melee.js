@@ -63,7 +63,11 @@ function isAttackInterrupted(attacker, attackName) {
   const resolved = attackName === 'mutantPunch' && model.userData?.equippedWeaponType === 'sword'
     ? 'swordSlash'
     : attackName;
-  if (resolved && model.userData.currentAction && model.userData.currentAction !== resolved) {
+  const currentAction = model.userData.currentAction;
+  const actionMatches = !resolved || !currentAction
+    || currentAction === resolved
+    || (resolved === 'mutantPunch' && currentAction === 'leftPunch');
+  if (!actionMatches) {
     return true;
   }
   return false;
@@ -112,7 +116,7 @@ export function updateMeleeAttacks({
       if (attackName === 'mutantPunch'
         && attacker.id === 'local'
         && attacker.model.userData?.equippedWeaponType === 'torch') {
-        onTorchHit?.({ attacker, range: cfg.range });
+        onTorchHit?.({ attacker, range: cfg.range, region: cfg.region, attackName });
       }
       for (const target of players) {
         if (target === attacker) continue;
