@@ -2,13 +2,13 @@ import * as THREE from 'three';
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from '../healthUtils.js';
 
 export const ATTACKS = {
-  mutantPunch: { damage: 1, range: 1.5, hitTime: 300, hitWindow: 300, knockbackStrength: 2, region: 'forward' },
-  swordSlash: { damage: 2, range: 2.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3, region: 'forward' },
-  swordSlashLeft: { damage: 2, range: 2.5, hitTime: 300, hitWindow: 300, knockbackStrength: 3, region: 'forward' },
-  swordFwdSpin: { damage: 3, range: 2.0, hitTime: 300, hitWindow: 500, knockbackStrength: 5, region: 'forward' },
+  mutantPunch: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward' },
+  swordSlash: { damage: 2, range: 2.5, hitTime: 100, hitWindow: 300, knockbackStrength: 3, region: 'forward' },
+  swordSlashLeft: { damage: 2, range: 2.5, hitTime: 200, hitWindow: 300, knockbackStrength: 3, region: 'forward' },
+  swordFwdSpin: { damage: 3, range: 2.0, hitTime: 280, hitWindow: 500, knockbackStrength: 5, region: 'forward' },
   swordSpin: { damage: 4, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 12, region: 'around' },
-  hurricaneKick: { damage: 1, range: 2.0, hitTime: 300, hitWindow: 800, knockbackStrength: 5, region: 'around' },
-  mmaKick: { damage: 1, range: 1.7, hitTime: 300, hitWindow: 300, knockbackStrength: 8, region: 'forward' }
+  hurricaneKick: { damage: 1, range: 2.0, hitTime: 280, hitWindow: 800, knockbackStrength: 5, region: 'around' },
+  mmaKick: { damage: 1, range: 1.7, hitTime: 100, hitWindow: 300, knockbackStrength: 8, region: 'forward' }
 };
 
 const tempToTarget = new THREE.Vector3();
