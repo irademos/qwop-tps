@@ -4580,12 +4580,14 @@ async function main() {
     return pickup;
   }
 
-  function spawnSaltPickup(position, { itemId = SALT_ITEM_ID, amount = 1, groupedMushrooms = 0 } = {}) {
+  function spawnSaltPickup(position, { itemId = SALT_ITEM_ID, amount = 1, groupedMushrooms = 0, useTerrainHeight = true } = {}) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
+    if (useTerrainHeight) {
+      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+      if (Number.isFinite(terrainHeight)) {
+        spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
+      }
     }
     const group = new THREE.Group();
     const pieces = groupedMushrooms > 0 ? groupedMushrooms : 3;
@@ -5001,6 +5003,12 @@ async function main() {
       return new THREE.Mesh(geometry, material);
     }
     if (itemId.startsWith('mushroom_')) {
+      const randomEntry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)]?.id;
+      const mushroomMesh = randomEntry ? mushroomController?.createProjectileMesh?.(randomEntry) : null;
+      if (mushroomMesh) {
+        mushroomMesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
+        return mushroomMesh;
+      }
       const geometry = new THREE.CylinderGeometry(0.12, 0.16, 0.28, 10);
       const material = new THREE.MeshStandardMaterial({ color: 0xc98b4a });
       return new THREE.Mesh(geometry, material);
@@ -5150,7 +5158,7 @@ async function main() {
       return;
     }
     if (itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
-      const pickup = spawnSaltPickup(dropPos, { itemId: SAUTEED_MUSHROOMS_ITEM_ID, amount, groupedMushrooms: 3 });
+      const pickup = spawnSaltPickup(dropPos, { itemId: SAUTEED_MUSHROOMS_ITEM_ID, amount, groupedMushrooms: 3, useTerrainHeight: false });
       if (pickup?.mesh) {
         pickup.mesh.position.copy(dropPos);
       }
