@@ -5,14 +5,16 @@ export const CRAFT_RECIPES = [
   { id: 'lantern', label: 'Lantern', materials: { wood: 9, apples: 4 } },
   { id: 'bed', label: 'Bed', materials: { wood: 12, mushrooms: 8 } },
   { id: 'home-storage', label: 'Home Storage', materials: { wood: 12 } },
-  { id: 'mana_potion', label: 'Magic potion', materials: { zombie_brains: 4 } }
+  { id: 'mana_potion', label: 'Magic potion', materials: { zombie_brains: 4 } },
+  { id: 'sauteed_mushrooms', label: 'Sauteed Mushrooms', materials: { salt: 1, mushrooms: 1 } }
 ];
 
 const MATERIAL_FILTERS = {
   apple: (itemId) => itemId === 'apple',
   wood: (itemId) => itemId === 'wood',
   mushroom: (itemId) => itemId.startsWith('mushroom_'),
-  zombieBrains: (itemId) => itemId === 'zombie_brains'
+  zombieBrains: (itemId) => itemId === 'zombie_brains',
+  salt: (itemId) => itemId === 'salt'
 };
 
 let overlay;
@@ -37,7 +39,11 @@ const createElement = (tag, className, text) => {
 };
 
 const getMaterialItems = (inventory = {}) => Object.entries(inventory)
-  .filter(([itemId]) => MATERIAL_FILTERS.apple(itemId) || MATERIAL_FILTERS.wood(itemId) || MATERIAL_FILTERS.mushroom(itemId) || MATERIAL_FILTERS.zombieBrains(itemId))
+  .filter(([itemId]) => MATERIAL_FILTERS.apple(itemId)
+    || MATERIAL_FILTERS.wood(itemId)
+    || MATERIAL_FILTERS.mushroom(itemId)
+    || MATERIAL_FILTERS.zombieBrains(itemId)
+    || MATERIAL_FILTERS.salt(itemId))
   .map(([itemId, entry]) => ({
     id: itemId,
     name: entry?.name || itemId,
@@ -111,7 +117,9 @@ const buildRecipes = () => {
             ? 'Wood'
             : key === 'zombie_brains'
               ? 'Zombie Brains'
-              : key;
+              : key === 'salt'
+                ? 'Salt'
+                : key;
       return `${qty} x ${label}`;
     }).join(', ');
     const detail = createElement('div', 'craft-recipe-detail', materials);
@@ -293,13 +301,15 @@ const computeCraftable = () => {
     wood: 0,
     apples: 0,
     mushrooms: 0,
-    zombie_brains: 0
+    zombie_brains: 0,
+    salt: 0
   };
   Object.entries(selectedMaterials).forEach(([itemId, count]) => {
     if (MATERIAL_FILTERS.wood(itemId)) counts.wood += count;
     if (MATERIAL_FILTERS.apple(itemId)) counts.apples += count;
     if (MATERIAL_FILTERS.mushroom(itemId)) counts.mushrooms += count;
     if (MATERIAL_FILTERS.zombieBrains(itemId)) counts.zombie_brains += count;
+    if (MATERIAL_FILTERS.salt(itemId)) counts.salt += count;
   });
   return CRAFT_RECIPES.filter((recipe) => Object.entries(recipe.materials).every(([key, amount]) => {
     return counts[key] >= amount;

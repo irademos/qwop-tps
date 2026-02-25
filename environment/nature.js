@@ -1042,6 +1042,30 @@ export async function createNature({
     return true;
   };
 
+  const removeRocksInRadius = (position, radius = 0) => {
+    if (!position || !Number.isFinite(radius) || radius <= 0) return [];
+    const removed = [];
+    const radiusSq = radius * radius;
+    for (const entry of treeTiles.values()) {
+      if (!Array.isArray(entry?.rocks) || !entry.rocks.length) continue;
+      for (let i = entry.rocks.length - 1; i >= 0; i -= 1) {
+        const rock = entry.rocks[i];
+        if (!rock?.position) continue;
+        const dx = rock.position.x - position.x;
+        const dz = rock.position.z - position.z;
+        if ((dx * dx) + (dz * dz) > radiusSq) continue;
+        removed.push(rock.position.clone());
+        entry.rocks.splice(i, 1);
+        entry.group.remove(rock);
+        const rockPhysics = rock.userData?.physics;
+        if (rockPhysics?.collider) rapierWorld?.removeCollider(rockPhysics.collider, true);
+        if (rockPhysics?.rb) rapierWorld?.removeRigidBody(rockPhysics.rb);
+        entry.rockPhysics = (entry.rockPhysics ?? []).filter((physics) => physics !== rockPhysics);
+      }
+    }
+    return removed;
+  };
+
   const setTileCache = (nextCache) => {
     activeTileCache = nextCache ?? null;
     tileSizeMeters = TREE_TILE_SIZE_METERS;
@@ -1122,6 +1146,7 @@ export async function createNature({
     setTileCache,
     getClosestTree,
     removeTree,
+    removeRocksInRadius,
     setTreeColliderEnabled,
     dispose
   };
