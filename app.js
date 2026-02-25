@@ -4291,23 +4291,11 @@ async function main() {
   }
 
   function disposeMushroomPickup(pickup) {
-    if (!pickup?.mesh) return;
+    if (!pickup) return;
+    mushroomController?.removePickup?.(pickup);
+    if (!pickup.mesh) return;
     const mesh = pickup.mesh;
-    if (mesh.parent) {
-      mesh.parent.remove(mesh);
-    } else {
-      scene.remove(mesh);
-    }
     mesh.visible = false;
-    mesh.traverse(child => {
-      if (!child.isMesh) return;
-      child.geometry?.dispose?.();
-      if (Array.isArray(child.material)) {
-        child.material.forEach(material => material?.dispose?.());
-      } else {
-        child.material?.dispose?.();
-      }
-    });
   }
 
   function disposeApplePickup(pickup) {
@@ -4348,10 +4336,16 @@ async function main() {
   }
 
   function pickupMushroom(pickup) {
-    if (!pickup?.mesh) return false;
+    if (!pickup?.active) return false;
+    const pickupPosition = pickup.position || pickup.mesh?.position;
+    if (!pickupPosition) return false;
     if (playerControls?.playerModel) {
-      const distance = playerControls.playerModel.position.distanceTo(pickup.mesh.position);
-      if (distance > PICKUP_RADIUS) return false;
+      const playerPosition = playerControls.playerModel.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - pickupPosition.x,
+        playerPosition.z - pickupPosition.z
+      );
+      if (horizontalDistance > PICKUP_RADIUS) return false;
     }
     addToInventory(pickup.id, 1);
     disposeMushroomPickup(pickup);
@@ -8327,16 +8321,9 @@ async function main() {
     };
 
     const createMushroomProjectileMesh = (itemId) => {
-      const source = mushroomPickups.find(entry => entry?.id === itemId && entry?.mesh)?.mesh
-        || mushroomPickups.find(entry => entry?.mesh)?.mesh;
-      if (!source) return null;
-      const mesh = source.clone(true);
+      const mesh = mushroomController?.createProjectileMesh?.(itemId);
+      if (!mesh) return null;
       mesh.visible = true;
-      mesh.traverse((child) => {
-        if (!child.isMesh) return;
-        child.castShadow = true;
-        child.receiveShadow = true;
-      });
       return mesh;
     };
 
@@ -9285,7 +9272,7 @@ async function main() {
 
       for (let i = mushroomPickups.length - 1; i >= 0; i--) {
         const pickup = mushroomPickups[i];
-        if (!pickup?.mesh) {
+        if (!pickup?.active) {
           mushroomPickupGrid.remove(pickup);
           mushroomPickups.splice(i, 1);
           continue;
