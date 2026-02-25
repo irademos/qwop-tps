@@ -4598,12 +4598,16 @@ async function main() {
     const effectiveRange = (Number.isFinite(range) ? range : 0) + TREE_HIT_RANGE_BOOST;
     const tree = natureController?.getClosestTree?.(attacker.model.position, effectiveRange);
     if (!tree || tree.userData?.isCutDown) return;
+    const treeCenter = natureController?.getTreeWorldCenter?.(tree);
     const centerLocal = tree.userData?.boundsCenterLocal;
-    if (centerLocal) {
+    if (treeCenter) {
+      tempTreeCenter.copy(treeCenter);
+    } else if (centerLocal) {
       tempTreeCenter.copy(centerLocal).applyMatrix4(tree.matrixWorld);
     }
+    const hasTreeCenter = Boolean(treeCenter || centerLocal);
     tree.userData.swordHits = (tree.userData.swordHits ?? 0) + 1;
-    tempTreeDirection.subVectors(tree.position, attacker.model.position);
+    tempTreeDirection.subVectors(hasTreeCenter ? tempTreeCenter : tree.position, attacker.model.position);
     tempTreeDirection.y = 0;
     if (tempTreeDirection.lengthSq() === 0) {
       tempTreeDirection.set(0, 0, 1);
@@ -4626,7 +4630,10 @@ async function main() {
       tree.userData.isCutDown = true;
       dropTreeApples(tree);
       tree.getWorldPosition(tempTreePosition);
-      if (centerLocal) {
+      const cutDownCenter = natureController?.getTreeWorldCenter?.(tree);
+      if (cutDownCenter) {
+        tempTreePosition.copy(cutDownCenter);
+      } else if (centerLocal) {
         tempTreePosition.copy(centerLocal).applyMatrix4(tree.matrixWorld);
       }
       for (let i = 0; i < 3; i += 1) {

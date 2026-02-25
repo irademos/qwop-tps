@@ -510,21 +510,21 @@ export async function createNature({
     return areas;
   };
 
-  const getTreeWorldCenter = (tree) => {
+  const getTreeWorldCenter = (tree, target = tempTreeCenter) => {
     if (!tree) return null;
     if (tree.userData?.boundsCenterLocal) {
-      tempTreeCenter.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
+      target.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
     } else {
-      tempTreeCenter.copy(tree.position);
+      target.copy(tree.position);
     }
     const typeIndex = tree.userData?.treeTypeIndex;
     const shift = TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
     if (shift) {
       const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
       tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
-      tempTreeCenter.addScaledVector(tempTreeRight, shift * scaleFactor);
+      target.addScaledVector(tempTreeRight, shift * scaleFactor);
     }
-    return tempTreeCenter;
+    return target;
   };
 
   const isTreeBlocked = (tree, blockers) => {
@@ -999,8 +999,9 @@ export async function createNature({
         if (!tree?.position) continue;
         if (!tree.userData?.interactable) continue;
         tree.updateWorldMatrix(true, true);
-        if (tree.userData?.boundsCenterLocal) {
-          worldCenter.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
+        if (tree.userData?.boundsCenterLocal || tree.userData?.treeTypeIndex != null) {
+          const center = getTreeWorldCenter(tree, worldCenter);
+          if (!center) continue;
         } else {
           searchBox.setFromObject(tree);
           if (!Number.isFinite(searchBox.min.x)) continue;
@@ -1121,6 +1122,7 @@ export async function createNature({
     refreshAll,
     setTileCache,
     getClosestTree,
+    getTreeWorldCenter,
     removeTree,
     setTreeColliderEnabled,
     dispose

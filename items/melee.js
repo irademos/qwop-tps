@@ -105,7 +105,8 @@ export function updateMeleeAttacks({
     if (elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow && !info.hasHit) {
       let hit = false;
       const attackDamage = getStrengthDamage(attacker.id, cfg.damage);
-      if (attackName === 'swordSlash' && attacker.id === 'local') {
+      if (['swordSlash', 'swordSlashLeft', 'swordFwdSpin', 'swordSpin'].includes(attackName)
+        && attacker.id === 'local') {
         onSwordHit?.({ attacker, range: cfg.range });
       }
       if (attackName === 'mutantPunch'
