@@ -4577,14 +4577,16 @@ async function main() {
   const tempSwordToTree = new THREE.Vector3();
   const tempSwordRight = new THREE.Vector3();
 
-  function isTreeWithinSwordAttackArea(attackerModel, treeCenter, range, region = 'around') {
+  function isTreeWithinSwordAttackArea(attackerModel, treeCenter, range, region = 'around', treeRadius = 0) {
     if (!attackerModel?.position || !treeCenter) return false;
     const maxRange = Number.isFinite(range) ? Math.max(0, range) : 0;
-    if (maxRange <= 0) return false;
+    const radiusPad = Number.isFinite(treeRadius) ? Math.max(0, treeRadius) : 0;
+    const reach = maxRange + radiusPad;
+    if (reach <= 0) return false;
 
     tempSwordToTree.subVectors(treeCenter, attackerModel.position);
     if (region !== 'forward') {
-      return tempSwordToTree.lengthSq() <= maxRange * maxRange;
+      return tempSwordToTree.lengthSq() <= reach * reach;
     }
 
     attackerModel.getWorldDirection(tempSwordForward);
@@ -4597,13 +4599,13 @@ async function main() {
 
     tempSwordToTree.y = 0;
     const forwardDistance = tempSwordToTree.dot(tempSwordForward);
-    if (forwardDistance < 0 || forwardDistance > maxRange) {
+    if (forwardDistance < -radiusPad || forwardDistance > reach) {
       return false;
     }
 
     tempSwordRight.set(tempSwordForward.z, 0, -tempSwordForward.x);
     const lateralDistance = tempSwordToTree.dot(tempSwordRight);
-    return Math.abs(lateralDistance) <= maxRange;
+    return Math.abs(lateralDistance) <= reach;
   }
 
   function dropTreeApples(tree) {
@@ -4615,8 +4617,10 @@ async function main() {
       if (!pickup?.mesh) return;
       const mesh = pickup.mesh;
       mesh.getWorldPosition(tempTreePosition);
+      mesh.getWorldScale(tempTreeCenterNext);
       appleParent.add(mesh);
       mesh.position.copy(tempTreePosition);
+      mesh.scale.copy(tempTreeCenterNext);
       const terrainY = getTerrainHeight(tempTreePosition.x, tempTreePosition.z);
       if (Number.isFinite(terrainY)) {
         mesh.position.y = terrainY + APPLE_DROP_LIFT;
@@ -4628,13 +4632,16 @@ async function main() {
 
   function handleSwordTreeHit({ attacker, range, region = 'around' }) {
     if (!attacker?.model?.position) return;
-    const baseRange = Number.isFinite(range) ? range : 0;
+    const baseRange = Number.isFinite(range) ? Math.max(0, range) : 0;
     const effectiveRange = baseRange + TREE_HIT_RANGE_BOOST;
     const tree = natureController?.getClosestTree?.(
       attacker.model.position,
       effectiveRange,
       {
-        filter: (_, center) => isTreeWithinSwordAttackArea(attacker.model, center, effectiveRange, region)
+        filter: (candidateTree, center) => {
+          const radius = candidateTree?.userData?.boundsRadius ?? 0;
+          return isTreeWithinSwordAttackArea(attacker.model, center, baseRange, region, radius);
+        }
       }
     );
     if (!tree || tree.userData?.isCutDown) return;
