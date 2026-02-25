@@ -655,15 +655,15 @@ async function main() {
   const TREE_SWING_TILT_STEP = 0.08;
   const TREE_HIT_RANGE_BOOST = 3.5;
   const MAX_AMMO_PICKUPS = 60;
-  const MAX_FOOD_PICKUPS = 80;
-  const MAX_HEALTH_PICKUPS = 60;
-  const MAX_COIN_PICKUPS = 80;
-  const MAX_WEAPON_PICKUPS = Math.max(1, Math.round(MAX_COIN_PICKUPS / 3));
+  const MAX_FOOD_PICKUPS = 0;
+  const MAX_HEALTH_PICKUPS = 0;
+  const MAX_COIN_PICKUPS = 160;
+  const MAX_WEAPON_PICKUPS = 24;
   const TILE_STOCK_AMMO_COUNT = 0;
-  const TILE_STOCK_FOOD_COUNT = 500;
-  const TILE_STOCK_HEALTH_COUNT = 800;
-  const TILE_STOCK_COIN_COUNT = 500;
-  const TILE_STOCK_WEAPON_COUNT = Math.max(1, Math.round(TILE_STOCK_COIN_COUNT / 3));
+  const TILE_STOCK_FOOD_COUNT = 0;
+  const TILE_STOCK_HEALTH_COUNT = 0;
+  const TILE_STOCK_COIN_COUNT = 1000;
+  const TILE_STOCK_WEAPON_COUNT = 24;
   const PICKUP_SPAWN_RADIUS = 225;
   const PICKUP_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
   const ICE_GUN_AMMO_CLUSTER_COUNT = 3;
@@ -740,6 +740,8 @@ async function main() {
 
   const otherPlayers = {};
   window.otherPlayers = otherPlayers;
+  const pendingIncomingPeerData = [];
+  let canProcessIncomingPeerData = false;
   const remotePresenceMeta = {};
   let lastPresenceSend = 0;
   let lastPresenceSweep = 0;
@@ -1225,6 +1227,13 @@ async function main() {
   };
 
   function handleIncomingData(peerId, data) {
+    if (!canProcessIncomingPeerData) {
+      pendingIncomingPeerData.push([peerId, data]);
+      if (pendingIncomingPeerData.length > 200) {
+        pendingIncomingPeerData.shift();
+      }
+      return;
+    }
     // console.log('📡 Incoming data:', data);
     const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
     const isFiniteNumber = value => Number.isFinite(value);
@@ -9785,6 +9794,13 @@ async function main() {
     updateHitRibbonBursts({ scene, deltaSeconds: frameDelta });
 
     renderer.render(scene, camera);
+  }
+
+  canProcessIncomingPeerData = true;
+  while (pendingIncomingPeerData.length > 0) {
+    const next = pendingIncomingPeerData.shift();
+    if (!next) continue;
+    handleIncomingData(next[0], next[1]);
   }
 
   animate();

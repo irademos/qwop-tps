@@ -5,7 +5,7 @@ const MUSHROOM_MODEL_URL = '/assets/props/mushrooms.glb';
 const MUSHROOM_SCALE = 0.1; // tweak (0.5 = half size)
 const MUSHROOM_LIFT = 0.4; // tweak (0.5 = half size)
 const DEFAULT_MUSHROOM_SPAWN_RADIUS = 225;
-const DEFAULT_MUSHROOMS_PER_VARIANT = 5;
+const DEFAULT_MUSHROOMS_PER_VARIANT = 10;
 const MUSHROOM_SHADOWS_ENABLED = false;
 
 export const MUSHROOM_ENTRIES = [
