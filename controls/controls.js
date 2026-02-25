@@ -1405,7 +1405,10 @@ export class PlayerControls {
       const pickupPosition = pickup.position || pickup.mesh?.position;
       if (!pickupPosition) return;
       if (pickup.mesh && !pickup.mesh.visible) return;
-      const dist = playerPos.distanceTo(pickupPosition);
+      const dist = Math.hypot(
+        playerPos.x - pickupPosition.x,
+        playerPos.z - pickupPosition.z
+      );
       consider(dist, {
         type: 'mushroom',
         pickup,

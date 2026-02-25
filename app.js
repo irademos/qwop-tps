@@ -4294,8 +4294,12 @@ async function main() {
     const pickupPosition = pickup.position || pickup.mesh?.position;
     if (!pickupPosition) return false;
     if (playerControls?.playerModel) {
-      const distance = playerControls.playerModel.position.distanceTo(pickupPosition);
-      if (distance > PICKUP_RADIUS) return false;
+      const playerPosition = playerControls.playerModel.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - pickupPosition.x,
+        playerPosition.z - pickupPosition.z
+      );
+      if (horizontalDistance > PICKUP_RADIUS) return false;
     }
     addToInventory(pickup.id, 1);
     disposeMushroomPickup(pickup);

@@ -5,6 +5,7 @@ const MUSHROOM_MODEL_URL = '/assets/props/mushrooms.glb';
 const MUSHROOM_SCALE = 0.1; // tweak (0.5 = half size)
 const MUSHROOM_LIFT = 0.4; // tweak (0.5 = half size)
 const DEFAULT_MUSHROOM_SPAWN_RADIUS = 225;
+const DEFAULT_MUSHROOMS_PER_VARIANT = 5;
 const MUSHROOM_SHADOWS_ENABLED = false;
 
 export const MUSHROOM_ENTRIES = [
@@ -137,35 +138,39 @@ export async function createMushrooms({
       lift: entry.lift ?? MUSHROOM_LIFT
     });
 
-    let spawnPosition = null;
-    let attempts = 0;
-    while (!spawnPosition && attempts < 6) {
-      attempts += 1;
-      const candidate = getRandomScatterPosition(scatterCenter, scatterRadius);
-      if (!candidate) break;
-      const terrainHeight = getTerrainHeight?.(candidate.x, candidate.z);
-      if (!Number.isFinite(terrainHeight)) continue;
-      candidate.y = terrainHeight;
-      spawnPosition = candidate;
-    }
-    if (!spawnPosition) {
-      return;
-    }
+    const spawnCount = Number.isFinite(entry.spawnCount)
+      ? Math.max(1, Math.round(entry.spawnCount))
+      : DEFAULT_MUSHROOMS_PER_VARIANT;
 
-    const pickup = {
-      id: entry.id,
-      position: spawnPosition.clone(),
-      rotationY: Math.random() * Math.PI * 2,
-      active: true,
-      type: 'instanced'
-    };
-    pickup.position.y += entry.lift ?? MUSHROOM_LIFT;
+    for (let i = 0; i < spawnCount; i += 1) {
+      let spawnPosition = null;
+      let attempts = 0;
+      while (!spawnPosition && attempts < 8) {
+        attempts += 1;
+        const candidate = getRandomScatterPosition(scatterCenter, scatterRadius);
+        if (!candidate) break;
+        const terrainHeight = getTerrainHeight?.(candidate.x, candidate.z);
+        if (!Number.isFinite(terrainHeight)) continue;
+        candidate.y = terrainHeight;
+        spawnPosition = candidate;
+      }
+      if (!spawnPosition) continue;
 
-    if (!variantBuckets.has(entry.id)) {
-      variantBuckets.set(entry.id, []);
+      const pickup = {
+        id: entry.id,
+        position: spawnPosition.clone(),
+        rotationY: Math.random() * Math.PI * 2,
+        active: true,
+        type: 'instanced'
+      };
+      pickup.position.y += entry.lift ?? MUSHROOM_LIFT;
+
+      if (!variantBuckets.has(entry.id)) {
+        variantBuckets.set(entry.id, []);
+      }
+      variantBuckets.get(entry.id).push(pickup);
+      registerPickup(pickup);
     }
-    variantBuckets.get(entry.id).push(pickup);
-    registerPickup(pickup);
   });
 
   const tempMatrix = new THREE.Matrix4();
