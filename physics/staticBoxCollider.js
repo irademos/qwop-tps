@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { appContext } from '../src/runtime/appContext.js';
 
 const DEFAULT_PADDING = new THREE.Vector3(0, 0, 0);
 
@@ -31,7 +32,7 @@ const toPaddingVector = (padding = DEFAULT_PADDING) => {
 
 export const createStaticBoxColliderForObject = (object3D, options = {}) => {
   if (!object3D) return null;
-  const rapierWorld = options.rapierWorld || window.rapierWorld;
+  const rapierWorld = options.rapierWorld || appContext.entities.rapierWorld;
   if (!rapierWorld) return null;
 
   const worldBox = new THREE.Box3().setFromObject(object3D);

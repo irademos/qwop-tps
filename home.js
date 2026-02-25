@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ref, update } from 'firebase/database';
 import { db } from './firebase-init.js';
 import { getTerrainHeight } from './environment/water.js';
+import { appContext } from './src/runtime/appContext.js';
 
 const HOME_STORAGE_INTERACT_DISTANCE = 2.4;
 const HOME_STORAGE_CHEST_SCALE = 0.015;
@@ -320,7 +321,7 @@ export class HomeSystem {
         cooldownKey: 'door-open-home-storage',
         cooldownMs: 120
       });
-      window.openHomeStorage?.();
+      appContext.systems.openHomeStorage?.();
     }
   }
 }

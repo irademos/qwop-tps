@@ -2,6 +2,7 @@ import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 import { updateArrowProjectile } from "./arrow.js";
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../healthUtils.js";
+import { appContext } from '../src/runtime/appContext.js';
 
 const detachProjectileMesh = (mesh) => {
   if (!mesh) return;
@@ -52,9 +53,9 @@ export function removeProjectileAt(projectiles, index) {
   }
   projectiles.splice(index, 1);
   if (body) {
-    window.rbToMesh?.delete?.(body);
-    if (window.rapierWorld?.getRigidBody(body.handle)) {
-      window.rapierWorld.removeRigidBody(body);
+    appContext.entities.rbToMesh?.delete?.(body);
+    if (appContext.entities.rapierWorld?.getRigidBody(body.handle)) {
+      appContext.entities.rapierWorld.removeRigidBody(body);
     }
   }
 }
@@ -77,7 +78,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   }
 
   // Rapier body
-  const world = window.rapierWorld;
+  const world = appContext.entities.rapierWorld;
   const rbDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(mesh.position.x, mesh.position.y, mesh.position.z);
   const rb = world.createRigidBody(rbDesc);
   const colDesc = options.colliderDesc || RAPIER.ColliderDesc.cuboid(half, half, half)
@@ -88,7 +89,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   const vel = direction.clone().normalize().multiplyScalar(speed);
   rb.setLinvel({ x: vel.x, y: vel.y, z: vel.z }, true);
 
-  window.rbToMesh.set(rb, mesh);
+  appContext.entities.rbToMesh.set(rb, mesh);
 
   mesh.userData.rb = rb;
   mesh.userData.velocity = vel.clone();
@@ -120,8 +121,8 @@ export function updateProjectiles({
   const localId = multiplayer?.getId?.();
   const isHost = !multiplayer || multiplayer.isHost;
   const getStrengthDamage = baseDamage => {
-    if (typeof window.getPlayerStrength === 'function') {
-      const strength = window.getPlayerStrength();
+    if (typeof appContext.systems.callbacks.getPlayerStrength === 'function') {
+      const strength = appContext.systems.callbacks.getPlayerStrength();
       if (Number.isFinite(strength)) {
         const bonus = convertPointsToSegments(strength, { minimum: 0 });
         return Math.max(0, baseDamage + bonus);
@@ -139,7 +140,7 @@ export function updateProjectiles({
 
     let linvel;
     try {
-      const body = window.rapierWorld?.getRigidBody(rb.handle);
+      const body = appContext.entities.rapierWorld?.getRigidBody(rb.handle);
       if (!body) {
         if (proj.userData?.isArrow) playArrowBlockedSFX();
         removeProjectile(i);
@@ -208,7 +209,7 @@ export function updateProjectiles({
           if (nextHealth <= 0 && previousHealth > 0) {
             player.isDead = true;
             if (proj.userData.shooterId === localId) {
-              window.onPlayerKill?.(id);
+              appContext.systems.callbacks.onPlayerKill?.(id);
             }
           } else if (nextHealth > 0 && player.isDead) {
             player.isDead = false;
@@ -232,14 +233,14 @@ export function updateProjectiles({
       removeProjectile(i);
       removed = true;
 
-      if (typeof window.localHealth === 'number') {
+      if (typeof appContext.entities.localHealth === 'number') {
         const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
-        window.localHealth = Math.max(0, window.localHealth - damage);
-        console.log(`❤️ Your Health: ${window.localHealth}`);
+        appContext.entities.localHealth = Math.max(0, appContext.entities.localHealth - damage);
+        console.log(`❤️ Your Health: ${appContext.entities.localHealth}`);
       }
 
-      if (window.playerControls) {
-        window.playerControls.applyKnockback({ direction: vel, strength: 3 });
+      if (appContext.entities.playerControls) {
+        appContext.entities.playerControls.applyKnockback({ direction: vel, strength: 3 });
       }
     }
 
@@ -259,8 +260,8 @@ export function updateProjectiles({
           }
           onMonsterHit?.(monster, { damage, killed, sourceId: proj.userData.shooterId });
           if (killed && proj.userData.shooterId === localId) {
-            const withFriend = window.questManager?.isFriendActive?.() ?? false;
-            window.onMonsterKill?.(monster, { withFriend });
+            const withFriend = appContext.entities.questManager?.isFriendActive?.() ?? false;
+            appContext.systems.callbacks.onMonsterKill?.(monster, { withFriend });
           }
           if (proj.userData?.isArrow) playArrowBlockedSFX();
           removeProjectile(i);

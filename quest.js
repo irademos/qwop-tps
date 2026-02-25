@@ -4,6 +4,7 @@ import { loadMonsterModel } from "./models/monsterModel.js";
 import { FriendlyCharacter } from "./characters/FriendlyCharacter.js";
 import { getTerrainHeight } from "./environment/water.js";
 import { ATTACKS } from "./items/melee.js";
+import { appContext } from './src/runtime/appContext.js';
 
 const QUEST_FRIEND_MODEL = "/models/cowboy.fbx";
 const QUEST_FRIEND_SPAWN_MIN_DISTANCE = 18;
@@ -592,7 +593,7 @@ export class QuestManager {
 
   getClosestMonster(position) {
     if (!position) return null;
-    const monsters = Array.isArray(window.monsters) ? window.monsters : [];
+    const monsters = Array.isArray(appContext.entities.monsters) ? appContext.entities.monsters : [];
     let closest = null;
     let closestDistance = Infinity;
     monsters.forEach((monster) => {
@@ -608,7 +609,7 @@ export class QuestManager {
 
   getClosestMushroom(position) {
     if (!position) return null;
-    const pickups = Array.isArray(window.mushroomPickups) ? window.mushroomPickups : [];
+    const pickups = Array.isArray(appContext.entities.pickups.mushrooms) ? appContext.entities.pickups.mushrooms : [];
     let closest = null;
     let closestDistance = Infinity;
     pickups.forEach((pickup) => {

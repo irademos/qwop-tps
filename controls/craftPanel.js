@@ -1,3 +1,5 @@
+import { appContext } from '../src/runtime/appContext.js';
+
 export const CRAFT_RECIPES = [
   { id: 'torch', label: 'Torch', materials: { wood: 1 } },
   { id: 'arrow', label: 'Arrow', materials: { wood: 1 } },
@@ -322,7 +324,7 @@ const startCraftingFlow = () => {
   const craftable = computeCraftable();
   resetSelection({ restoreInventory: false });
   closeOverlay();
-  window.craftTableActions?.placeMaterials?.(selection);
+  appContext.systems.crafting.craftTableActions?.placeMaterials?.(selection);
   openCraftOptions(craftable);
 };
 
@@ -345,17 +347,17 @@ const adjustMaterial = (itemId, delta) => {
 const handleCraftChoice = (choice) => {
   if (!choice) return;
   if (choice === 'nevermind') {
-    window.craftTableActions?.cancelCrafting?.({ restoreInventory: true });
+    appContext.systems.crafting.craftTableActions?.cancelCrafting?.({ restoreInventory: true });
     closeCraftOptions();
     return;
   }
   if (choice === 'bed' || choice === 'home-storage') {
-    window.craftTableActions?.cancelCrafting?.({ restoreInventory: true });
+    appContext.systems.crafting.craftTableActions?.cancelCrafting?.({ restoreInventory: true });
     closeCraftOptions();
     showCraftMessage('You already have this item!');
     return;
   }
-  window.craftTableActions?.craftItem?.(choice);
+  appContext.systems.crafting.craftTableActions?.craftItem?.(choice);
   closeCraftOptions();
 };
 

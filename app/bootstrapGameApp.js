@@ -109,6 +109,8 @@ import {
   removeMonsterRecord,
   setMonsterPersistenceHost
 } from '../features/persistenceFeature.js';
+import { appContext, defineCompatibilityGlobal } from '../src/runtime/appContext.js';
+import { exposeDebugGlobals } from '../src/runtime/exposeDebugGlobals.js';
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -155,8 +157,8 @@ const PERF = {
   disableMapUpdates: false
 };
 
-window.PERF = PERF;
-window.DEBUG_CONSOLE = false;
+appContext.settings.perf = PERF;
+appContext.settings.debugConsole = false;
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -761,10 +763,10 @@ async function initCore(appContext) {
   const monsterAnimProjMatrix = new THREE.Matrix4();
 
   let monsters = [];
-  window.monsters = monsters;
+  appContext.entities.monsters = monsters;
   let animalManager = null;
   let animals = [];
-  window.animals = animals;
+  appContext.entities.animals = animals;
   const npcVoiceSchedule = new Map();
   const zombieVoiceLoops = new Map();
   const getRandomDelayMs = ([min, max]) => {
@@ -1430,8 +1432,8 @@ async function initCore(appContext) {
       const killed = monster.applyDamage(data.damage);
       persistMonsterHp(monster);
       if (killed && sourceId === multiplayer.getId()) {
-        const withFriend = window.questManager?.isFriendActive?.() ?? false;
-        window.onMonsterKill?.(monster, { withFriend });
+        const withFriend = appContext.entities.questManager?.isFriendActive?.() ?? false;
+        appContext.systems.callbacks.onMonsterKill?.(monster, { withFriend });
       }
       return;
     }
@@ -1853,8 +1855,8 @@ async function initCore(appContext) {
   // --- RAPIER INIT ---
   await RAPIER.init();
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
-  window.rapierWorld = rapierWorld;
-  window.rbToMesh = rbToMesh;
+  appContext.entities.rapierWorld = rapierWorld;
+  appContext.entities.rbToMesh = rbToMesh;
 
   // Ground collider
   {
@@ -2216,7 +2218,7 @@ async function initCore(appContext) {
     isLocallyControlled: () => autumnSword?.holder === playerControls
   });
 
-  window.weapons = { iceGun, bow, bomb, autumnSword };
+  appContext.entities.weapons = { iceGun, bow, bomb, autumnSword };
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
@@ -2419,7 +2421,7 @@ async function initCore(appContext) {
     isLocallyControlled: () => torch?.holder === playerControls
   });
 
-  window.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
+  appContext.entities.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -2506,11 +2508,11 @@ async function initCore(appContext) {
     allowDefaultPositions: false
   });
   applePickups = appleController?.pickups || [];
-  window.applePickups = applePickups;
-  window.woodPickups = woodPickups;
-  window.meatPickups = meatPickups;
+  appContext.entities.pickups.apples = applePickups;
+  appContext.entities.pickups.wood = woodPickups;
+  appContext.entities.pickups.meat = meatPickups;
   window.zombieBrainsPickups = zombieBrainsPickups;
-  window.saltPickups = saltPickups;
+  appContext.entities.pickups.salt = saltPickups;
   natureController = await createNature({
     scene,
     playerModel,
@@ -2541,7 +2543,7 @@ async function initCore(appContext) {
       mushroomPickupGrid.add(pickup, pickupPosition);
     }
   });
-  window.mushroomPickups = mushroomPickups;
+  appContext.entities.pickups.mushrooms = mushroomPickups;
   animalManager = createAnimalManager({
     scene,
     getPlayerModel: () => playerModel,
@@ -2556,7 +2558,7 @@ async function initCore(appContext) {
     }
   });
   animals = animalManager.getAnimals();
-  window.animals = animals;
+  appContext.entities.animals = animals;
   let didInitialGpsSnap = false;
   let currentPlayerLevel = 1;
 
@@ -2720,7 +2722,7 @@ async function initCore(appContext) {
     const [monster] = monsters.splice(index, 1);
     stopZombieLoopVoice(monsterId);
     cleanupMonster(monster);
-    window.monsters = monsters;
+    appContext.entities.monsters = monsters;
     return true;
   };
 
@@ -3198,7 +3200,7 @@ async function initCore(appContext) {
     if (PERF.disableMonsters) {
       monsters.forEach(monster => cleanupMonster(monster));
       monsters = [];
-      window.monsters = monsters;
+      appContext.entities.monsters = monsters;
       respawnTimers.forEach((timer) => clearTimeout(timer));
       respawnTimers.clear();
       return;
@@ -3217,7 +3219,7 @@ async function initCore(appContext) {
       seenSlots.add(monster.id);
       return true;
     });
-    window.monsters = monsters;
+    appContext.entities.monsters = monsters;
 
     monsterSlotIds.forEach((slotId) => {
       const existing = monsters.find(entry => entry.id === slotId);
@@ -4389,7 +4391,7 @@ async function initCore(appContext) {
       mushroomPickups.splice(index, 1);
     }
     mushroomPickupGrid.remove(pickup);
-    window.questManager?.handleMushroomCollected?.(pickup);
+    appContext.entities.questManager?.handleMushroomCollected?.(pickup);
     return true;
   }
 
@@ -5741,7 +5743,7 @@ async function initCore(appContext) {
   };
 
   window.setStat = setStat;
-  window.getPlayerStrength = () => (Number.isFinite(statsState.strength) ? statsState.strength : 0);
+  appContext.systems.callbacks.getPlayerStrength = () => (Number.isFinite(statsState.strength) ? statsState.strength : 0);
 
   const getPowerUpsForLevel = (level) => {
     const safeLevel = Math.max(1, Math.round(level || 1));
@@ -5859,17 +5861,17 @@ async function initCore(appContext) {
   window.addPlayerXp = addPlayerXp;
   window.getMonsterXpForLevel = getMonsterXpForLevel;
 
-  window.onMonsterKill = (monster, { withFriend = false } = {}) => {
+  appContext.systems.callbacks.onMonsterKill = (monster, { withFriend = false } = {}) => {
     const monsterLevel = Number.isFinite(monster?.level) ? monster.level : 1;
     const baseXp = getMonsterXpForLevel(monsterLevel);
     const bonusXp = withFriend ? 50 : 0;
     addPlayerXp(baseXp + bonusXp);
   };
-  window.onPlayerKill = () => {
+  appContext.systems.callbacks.onPlayerKill = () => {
     const currentLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
     addPlayerXp(currentLevel * 100);
   };
-  window.onPlayerDeath = () => {};
+  appContext.systems.callbacks.onPlayerDeath = () => {};
 
   Object.defineProperty(window, 'localHealth', {
     configurable: true,
@@ -5926,8 +5928,8 @@ async function initCore(appContext) {
 
   function getBombDamage(shooterId) {
     if (shooterId && shooterId === multiplayer?.getId?.()) {
-      if (typeof window.getPlayerStrength === 'function') {
-        const strength = window.getPlayerStrength();
+      if (typeof appContext.systems.callbacks.getPlayerStrength === 'function') {
+        const strength = appContext.systems.callbacks.getPlayerStrength();
         if (Number.isFinite(strength)) {
           const bonus = convertPointsToSegments(strength, { minimum: 0 });
           return Math.max(0, BOMB_BASE_DAMAGE + bonus);
@@ -5946,14 +5948,14 @@ async function initCore(appContext) {
     if (playerModel?.position) {
       const distance = hitPosition.distanceTo(playerModel.position);
       if (distance <= BOMB_DAMAGE_RADIUS) {
-        const localControls = window.playerControls;
+        const localControls = appContext.entities.playerControls;
         if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
           localControls.isInvincible = false;
           localControls.invincibleUntil = 0;
         }
         const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
         if (!isInvincible) {
-          window.localHealth = Math.max(0, window.localHealth - damage);
+          appContext.entities.localHealth = Math.max(0, appContext.entities.localHealth - damage);
           if (localControls) {
             const direction = new THREE.Vector3()
               .subVectors(playerModel.position, hitPosition)
@@ -5979,7 +5981,7 @@ async function initCore(appContext) {
       if (nextHealth <= 0 && previousHealth > 0) {
         player.isDead = true;
         if (shooterId && shooterId === localId) {
-          window.onPlayerKill?.(id);
+          appContext.systems.callbacks.onPlayerKill?.(id);
         }
       } else if (nextHealth > 0 && player.isDead) {
         player.isDead = false;
@@ -6002,8 +6004,8 @@ async function initCore(appContext) {
           }
           handleMonsterDamage?.(monster, { damage, killed, sourceId: shooterId ?? localId });
           if (killed && shooterId && shooterId === localId) {
-            const withFriend = window.questManager?.isFriendActive?.() ?? false;
-            window.onMonsterKill?.(monster, { withFriend });
+            const withFriend = appContext.entities.questManager?.isFriendActive?.() ?? false;
+            appContext.systems.callbacks.onMonsterKill?.(monster, { withFriend });
           }
         }
       } else {
@@ -7021,7 +7023,7 @@ async function initCore(appContext) {
   playerControls.isVoiceListening = () => voiceMicState.listening;
   playerControls.getVoiceMicState = () => getVoiceMicState();
 
-  window.playerControls = playerControls;
+  appContext.entities.playerControls = playerControls;
   await initSpellsFeature({
     playerControls,
     getPlayerModel: () => playerModel,
@@ -7567,7 +7569,7 @@ async function initCore(appContext) {
   };
 
   function getLatestLocationFix() {
-    const latest = window.latestLocation;
+    const latest = appContext.uiState.latestLocation;
     if (!latest || !Number.isFinite(latest.lat) || !Number.isFinite(latest.lon)) {
       return null;
     }
@@ -8133,7 +8135,7 @@ async function initCore(appContext) {
 
   const locationProvider = createLocationProvider({
     onUpdate: (location) => {
-      window.latestLocation = location;
+      appContext.uiState.latestLocation = location;
       friendlyNpcManager?.recordGpsTravel?.({
         lat: location.lat,
         lon: location.lon,
@@ -8851,22 +8853,77 @@ async function initCore(appContext) {
     }
   };
 
-  window.appState = appState;
-  window.getInventory = getInventory;
-  window.addToInventory = addToInventory;
-  window.removeFromInventory = removeFromInventory;
-  window.openHomeStorage = openHomeStorage;
-  window.openCraftPanel = () => void openCraftPanelFeature();
-  window.craftTableActions = {
+  appContext.systems.appState = appState;
+  appContext.systems.inventory.getInventory = getInventory;
+  appContext.systems.inventory.addToInventory = addToInventory;
+  appContext.systems.inventory.removeFromInventory = removeFromInventory;
+  appContext.systems.openHomeStorage = openHomeStorage;
+  appContext.systems.crafting.openCraftPanel = () => void openCraftPanelFeature();
+  appContext.systems.crafting.craftTableActions = {
     placeMaterials: placeCraftMaterials,
     cancelCrafting,
     craftItem
   };
-  window.pickupMushroom = pickupMushroom;
-  window.pickupApple = pickupApple;
-  window.pickupWood = pickupWood;
-  window.pickupMeat = pickupMeat;
-  window.pickupSalt = pickupSalt;
+  appContext.systems.pickups.pickupMushroom = pickupMushroom;
+  appContext.systems.pickups.pickupApple = pickupApple;
+  appContext.systems.pickups.pickupWood = pickupWood;
+  appContext.systems.pickups.pickupMeat = pickupMeat;
+  appContext.systems.pickups.pickupSalt = pickupSalt;
+
+
+  defineCompatibilityGlobal('appState', {
+    get: () => appContext.systems.appState,
+    set: value => { appContext.systems.appState = value; }
+  });
+  defineCompatibilityGlobal('getInventory', {
+    get: () => appContext.systems.inventory.getInventory,
+    set: value => { appContext.systems.inventory.getInventory = value; }
+  });
+  defineCompatibilityGlobal('addToInventory', {
+    get: () => appContext.systems.inventory.addToInventory,
+    set: value => { appContext.systems.inventory.addToInventory = value; }
+  });
+  defineCompatibilityGlobal('removeFromInventory', {
+    get: () => appContext.systems.inventory.removeFromInventory,
+    set: value => { appContext.systems.inventory.removeFromInventory = value; }
+  });
+  defineCompatibilityGlobal('openHomeStorage', {
+    get: () => appContext.systems.openHomeStorage,
+    set: value => { appContext.systems.openHomeStorage = value; }
+  });
+  defineCompatibilityGlobal('openCraftPanel', {
+    get: () => appContext.systems.crafting.openCraftPanel,
+    set: value => { appContext.systems.crafting.openCraftPanel = value; }
+  });
+  defineCompatibilityGlobal('craftTableActions', {
+    get: () => appContext.systems.crafting.craftTableActions,
+    set: value => { appContext.systems.crafting.craftTableActions = value; }
+  });
+  defineCompatibilityGlobal('pickupMushroom', { get: () => appContext.systems.pickups.pickupMushroom, set: v => { appContext.systems.pickups.pickupMushroom = v; } });
+  defineCompatibilityGlobal('pickupApple', { get: () => appContext.systems.pickups.pickupApple, set: v => { appContext.systems.pickups.pickupApple = v; } });
+  defineCompatibilityGlobal('pickupWood', { get: () => appContext.systems.pickups.pickupWood, set: v => { appContext.systems.pickups.pickupWood = v; } });
+  defineCompatibilityGlobal('pickupMeat', { get: () => appContext.systems.pickups.pickupMeat, set: v => { appContext.systems.pickups.pickupMeat = v; } });
+  defineCompatibilityGlobal('pickupSalt', { get: () => appContext.systems.pickups.pickupSalt, set: v => { appContext.systems.pickups.pickupSalt = v; } });
+  defineCompatibilityGlobal('playerControls', { get: () => appContext.entities.playerControls, set: v => { appContext.entities.playerControls = v; } });
+  defineCompatibilityGlobal('monsters', { get: () => appContext.entities.monsters, set: v => { appContext.entities.monsters = Array.isArray(v) ? v : []; } });
+  defineCompatibilityGlobal('weapons', { get: () => appContext.entities.weapons, set: v => { appContext.entities.weapons = v || {}; } });
+  defineCompatibilityGlobal('mushroomPickups', { get: () => appContext.entities.pickups.mushrooms, set: v => { appContext.entities.pickups.mushrooms = Array.isArray(v) ? v : []; } });
+  defineCompatibilityGlobal('applePickups', { get: () => appContext.entities.pickups.apples, set: v => { appContext.entities.pickups.apples = Array.isArray(v) ? v : []; } });
+  defineCompatibilityGlobal('woodPickups', { get: () => appContext.entities.pickups.wood, set: v => { appContext.entities.pickups.wood = Array.isArray(v) ? v : []; } });
+  defineCompatibilityGlobal('meatPickups', { get: () => appContext.entities.pickups.meat, set: v => { appContext.entities.pickups.meat = Array.isArray(v) ? v : []; } });
+  defineCompatibilityGlobal('saltPickups', { get: () => appContext.entities.pickups.salt, set: v => { appContext.entities.pickups.salt = Array.isArray(v) ? v : []; } });
+  defineCompatibilityGlobal('animals', { get: () => appContext.entities.animals, set: v => { appContext.entities.animals = Array.isArray(v) ? v : []; } });
+  defineCompatibilityGlobal('rapierWorld', { get: () => appContext.entities.rapierWorld, set: v => { appContext.entities.rapierWorld = v; } });
+  defineCompatibilityGlobal('rbToMesh', { get: () => appContext.entities.rbToMesh, set: v => { appContext.entities.rbToMesh = v; } });
+  defineCompatibilityGlobal('questManager', { get: () => appContext.entities.questManager, set: v => { appContext.entities.questManager = v; } });
+  defineCompatibilityGlobal('localHealth', { get: () => appContext.entities.localHealth, set: v => { appContext.entities.localHealth = v; } });
+  defineCompatibilityGlobal('getPlayerStrength', { get: () => appContext.systems.callbacks.getPlayerStrength, set: v => { appContext.systems.callbacks.getPlayerStrength = v; } });
+  defineCompatibilityGlobal('onMonsterKill', { get: () => appContext.systems.callbacks.onMonsterKill, set: v => { appContext.systems.callbacks.onMonsterKill = v; } });
+  defineCompatibilityGlobal('onPlayerKill', { get: () => appContext.systems.callbacks.onPlayerKill, set: v => { appContext.systems.callbacks.onPlayerKill = v; } });
+  defineCompatibilityGlobal('onPlayerDeath', { get: () => appContext.systems.callbacks.onPlayerDeath, set: v => { appContext.systems.callbacks.onPlayerDeath = v; } });
+  defineCompatibilityGlobal('latestLocation', { get: () => appContext.uiState.latestLocation, set: v => { appContext.uiState.latestLocation = v; } });
+
+  exposeDebugGlobals({ enabled: import.meta.env?.DEV || appContext.debugFlags.exposeGlobals });
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -8937,7 +8994,7 @@ async function initCore(appContext) {
   }, 60 * 1000);
 
   const consoleDiv = document.getElementById("console-log");
-  if (window.DEBUG_CONSOLE === true) {
+  if (appContext.settings.debugConsole === true) {
     (function() {
       const originalLog = console.log;
       console.log = function(...args) {
@@ -9548,7 +9605,7 @@ async function initCore(appContext) {
       lastControlSend = now;
     }
 
-    if (window.localHealth <= 0 && !playerDead) {
+    if (appContext.entities.localHealth <= 0 && !playerDead) {
       playerDead = true;
       window.onPlayerDeath?.();
       dropInventoryOnDeath();
@@ -9630,12 +9687,12 @@ async function initCore(appContext) {
       return false;
     });
     if (removedDeadMonsters) {
-      window.monsters = monsters;
+      appContext.entities.monsters = monsters;
     }
     if (animalManager) {
       animalManager.update(mixerDelta);
       animals = animalManager.getAnimals();
-      window.animals = animals;
+      appContext.entities.animals = animals;
     }
 
     if (isHostNow) {

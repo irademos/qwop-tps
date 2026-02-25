@@ -3,6 +3,7 @@ import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { ATTACKS } from "../items/melee.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from "../healthUtils.js";
+import { appContext } from '../src/runtime/appContext.js';
 
 const AGGRO_RADIUS = 12;
 const WANDER_CHANGE_MS = 2000;
@@ -435,14 +436,14 @@ export class MonsterCharacter extends CharacterBase {
       const damage = Number.isFinite(hitContext.damage)
         ? Math.max(1, Math.round(hitContext.damage))
         : this.attackDamage;
-      const localControls = window.playerControls;
+      const localControls = appContext.entities.playerControls;
       if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
         localControls.isInvincible = false;
         localControls.invincibleUntil = 0;
       }
       const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
       if (player.id === 'local' && !localControls?.isKnocked && !isInvincible) {
-        window.localHealth = Math.max(0, window.localHealth - damage);
+        appContext.entities.localHealth = Math.max(0, appContext.entities.localHealth - damage);
         if (localControls) {
           localControls.applyKnockback({
             direction: this.model.userData.direction.clone(),

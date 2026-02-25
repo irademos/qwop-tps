@@ -6,6 +6,7 @@ import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { QuestManager } from "../quest.js";
 import { loadNippleJs } from '../externalDeps.js';
+import { appContext } from '../src/runtime/appContext.js';
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -224,7 +225,7 @@ export class PlayerControls {
       this.playerModel.userData.isKnocked = false;
     }
     
-    const world = window.rapierWorld;
+    const world = appContext.entities.rapierWorld;
     if (world) {
       const rbDesc = RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(this.playerX, this.playerY, this.playerZ)
@@ -273,7 +274,7 @@ export class PlayerControls {
       addXp: (amount) => window.addPlayerXp?.(amount),
       getMonsterXpForLevel: (level) => window.getMonsterXpForLevel?.(level)
     });
-    window.questManager = this.questManager;
+    appContext.entities.questManager = this.questManager;
     this.crosshairEl = document.querySelector('.crosshair');
     this.defaultFov = this.camera.fov;
     this.aimFov = Math.max(40, this.defaultFov - 15);
@@ -758,7 +759,7 @@ export class PlayerControls {
     const actionContainer = document.getElementById('action-buttons');
     if (!actionContainer) return;
 
-    const appState = window.appState;
+    const appState = appContext.systems.appState;
     const inventory = appState?.getInventory?.() || {};
     const equipCandidates = [
       { id: 'bomb', label: 'Bomb' },
@@ -1239,32 +1240,32 @@ export class PlayerControls {
     }
     
     if (closest.type === 'mushroom') {
-      window.pickupMushroom?.(closest.pickup);
+      appContext.systems.pickups.pickupMushroom?.(closest.pickup);
       return;
     }
 
     if (closest.type === 'apple') {
-      window.pickupApple?.(closest.pickup);
+      appContext.systems.pickups.pickupApple?.(closest.pickup);
       return;
     }
 
     if (closest.type === 'wood') {
-      window.pickupWood?.(closest.pickup);
+      appContext.systems.pickups.pickupWood?.(closest.pickup);
       return;
     }
 
     if (closest.type === 'meat') {
-      window.pickupMeat?.(closest.pickup);
+      appContext.systems.pickups.pickupMeat?.(closest.pickup);
       return;
     }
 
     if (closest.type === 'salt') {
-      window.pickupSalt?.(closest.pickup);
+      appContext.systems.pickups.pickupSalt?.(closest.pickup);
       return;
     }
 
     if (closest.type === 'craft-table') {
-      window.openCraftPanel?.();
+      appContext.systems.crafting.openCraftPanel?.();
       return;
     }
 
@@ -1280,7 +1281,7 @@ export class PlayerControls {
 
   getClosestFriendly(maxDistance) {
     if (!this.playerModel) return null;
-    const friendlies = Array.isArray(window.friendlies) ? window.friendlies : [];
+    const friendlies = Array.isArray(appContext.entities.friendlies) ? appContext.entities.friendlies : [];
     let closest = null;
     let closestDistance = Infinity;
     friendlies.forEach((friendly) => {
@@ -1438,7 +1439,7 @@ export class PlayerControls {
     const mushroomPickupGrid = window.mushroomPickupGrid;
     const mushroomCandidates = mushroomPickupGrid?.queryNearby
       ? mushroomPickupGrid.queryNearby(playerPos.x, playerPos.z, MUSHROOM_INTERACT_RANGE)
-      : (Array.isArray(window.mushroomPickups) ? window.mushroomPickups : []);
+      : (Array.isArray(appContext.entities.pickups.mushrooms) ? appContext.entities.pickups.mushrooms : []);
     const mushroomInteractRangeSq = MUSHROOM_INTERACT_RANGE * MUSHROOM_INTERACT_RANGE;
     mushroomCandidates.forEach((pickup) => {
       if (!pickup?.active) return;
@@ -1457,7 +1458,7 @@ export class PlayerControls {
       });
     });
 
-    const applePickups = Array.isArray(window.applePickups) ? window.applePickups : [];
+    const applePickups = Array.isArray(appContext.entities.pickups.apples) ? appContext.entities.pickups.apples : [];
     applePickups.forEach((pickup) => {
       if (!pickup?.mesh || !pickup.mesh.visible) return;
       const pickupPosition = pickup.mesh.getWorldPosition?.(new THREE.Vector3()) ?? pickup.mesh.position;
@@ -1470,7 +1471,7 @@ export class PlayerControls {
       });
     });
 
-    const woodPickups = Array.isArray(window.woodPickups) ? window.woodPickups : [];
+    const woodPickups = Array.isArray(appContext.entities.pickups.wood) ? appContext.entities.pickups.wood : [];
     woodPickups.forEach((pickup) => {
       if (!pickup?.mesh || !pickup.mesh.visible) return;
       const dist = playerPos.distanceTo(pickup.mesh.position);
@@ -1482,7 +1483,7 @@ export class PlayerControls {
       });
     });
 
-    const meatPickups = Array.isArray(window.meatPickups) ? window.meatPickups : [];
+    const meatPickups = Array.isArray(appContext.entities.pickups.meat) ? appContext.entities.pickups.meat : [];
     meatPickups.forEach((pickup) => {
       if (!pickup?.mesh || !pickup.mesh.visible) return;
       const dist = playerPos.distanceTo(pickup.mesh.position);
@@ -1494,7 +1495,7 @@ export class PlayerControls {
       });
     });
 
-    const saltPickups = Array.isArray(window.saltPickups) ? window.saltPickups : [];
+    const saltPickups = Array.isArray(appContext.entities.pickups.salt) ? appContext.entities.pickups.salt : [];
     saltPickups.forEach((pickup) => {
       if (!pickup?.mesh || !pickup.mesh.visible) return;
       const dist = playerPos.distanceTo(pickup.mesh.position);
@@ -1921,7 +1922,7 @@ export class PlayerControls {
 
     const terrainY = getTerrainHeight(t.x, t.z);
     let groundY = Number.isFinite(this.groundOverrideY) ? this.groundOverrideY : terrainY;
-    const world = window.rapierWorld;
+    const world = appContext.entities.rapierWorld;
     if (world && !Number.isFinite(this.groundOverrideY)) {
       const ray = new RAPIER.Ray({ x: t.x, y: t.y, z: t.z }, { x: 0, y: -1, z: 0 });
       const hit = world.castRay(ray, t.y + 10, true, undefined, undefined, undefined, this.body);
@@ -2437,7 +2438,7 @@ export class PlayerControls {
   }
 
   getWeapons() {
-    const weapons = Object.values(window.weapons || {}).filter(Boolean);
+    const weapons = Object.values(appContext.entities.weapons || {}).filter(Boolean);
     const pickups = Array.isArray(window.weaponPickups) ? window.weaponPickups : [];
     return weapons.concat(pickups);
   }
@@ -3039,7 +3040,7 @@ export class PlayerControls {
       }
     }
 
-    const monsterList = window.monsters || [];
+    const monsterList = appContext.entities.monsters || [];
     for (const mon of monsterList) {
       const model = mon?.model || mon;
       if (!model) continue;
@@ -3130,7 +3131,7 @@ export class PlayerControls {
       this.setEngaged(false);
       return;
     }
-    const monsters = window.monsters || [];
+    const monsters = appContext.entities.monsters || [];
     let closest = null;
     let closestDistance = Infinity;
     for (const monster of monsters) {

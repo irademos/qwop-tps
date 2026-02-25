@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from '../healthUtils.js';
+import { appContext } from '../src/runtime/appContext.js';
 
 export const ATTACKS = {
   mutantPunch: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward' },
@@ -45,8 +46,8 @@ function isTargetInAttackRange(attackerModel, targetPosition, cfg) {
 }
 
 function getStrengthDamage(attackerId, baseDamage) {
-  if (attackerId === 'local' && typeof window.getPlayerStrength === 'function') {
-    const strength = window.getPlayerStrength();
+  if (attackerId === 'local' && typeof appContext.systems.callbacks.getPlayerStrength === 'function') {
+    const strength = appContext.systems.callbacks.getPlayerStrength();
     if (Number.isFinite(strength)) {
       const bonus = convertPointsToSegments(strength, { minimum: 0 });
       return Math.max(0, baseDamage + bonus);
@@ -120,10 +121,10 @@ export function updateMeleeAttacks({
           hit = true;
           onEntityHit?.({ targetType: target.id === 'local' ? 'player' : 'remotePlayer', targetId: target.id, targetPosition: target.model.position.clone() });
           if (target.id === 'local') {
-            window.localHealth = Math.max(0, window.localHealth - attackDamage);
-            if (window.playerControls) {
+            appContext.entities.localHealth = Math.max(0, appContext.entities.localHealth - attackDamage);
+            if (appContext.entities.playerControls) {
               const dir = new THREE.Vector3().subVectors(target.model.position, attacker.model.position).normalize();
-              window.playerControls.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
+              appContext.entities.playerControls.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
             }
           } else {
             const tp = otherPlayers[target.id];
@@ -134,7 +135,7 @@ export function updateMeleeAttacks({
               if (nextHealth <= 0 && previousHealth > 0) {
                 tp.isDead = true;
                 if (attacker.id === 'local') {
-                  window.onPlayerKill?.(target.id);
+                  appContext.systems.callbacks.onPlayerKill?.(target.id);
                 }
               } else if (nextHealth > 0 && tp.isDead) {
                 tp.isDead = false;
@@ -159,8 +160,8 @@ export function updateMeleeAttacks({
             onMonsterHit?.(monster, { damage: attackDamage, killed, sourceId: attacker.id });
             onEntityHit?.({ targetType: 'monster', targetId: monster.id, targetPosition: monster.model.position.clone() });
             if (killed && attacker.id === 'local') {
-              const withFriend = window.questManager?.isFriendActive?.() ?? false;
-              window.onMonsterKill?.(monster, { withFriend });
+              const withFriend = appContext.entities.questManager?.isFriendActive?.() ?? false;
+              appContext.systems.callbacks.onMonsterKill?.(monster, { withFriend });
             }
           }
         }

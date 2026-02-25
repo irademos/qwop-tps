@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { appContext } from '../src/runtime/appContext.js';
 
 const TABS = [
   { id: 'skin', label: 'Skin' },
@@ -53,7 +54,7 @@ let tabButtons = new Map();
 let tabPanels = new Map();
 let activeTab = 'skin';
 let getPlayerModel = () => window.playerModel;
-let getPlayerControls = () => window.playerControls;
+let getPlayerControls = () => appContext.entities.playerControls;
 let cameraState = null;
 const currentClothingBySlot = new Map();
 const clothingRequestTokens = new Map();
