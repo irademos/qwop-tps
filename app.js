@@ -740,6 +740,8 @@ async function main() {
 
   const otherPlayers = {};
   window.otherPlayers = otherPlayers;
+  const pendingIncomingPeerData = [];
+  let canProcessIncomingPeerData = false;
   const remotePresenceMeta = {};
   let lastPresenceSend = 0;
   let lastPresenceSweep = 0;
@@ -1225,6 +1227,13 @@ async function main() {
   };
 
   function handleIncomingData(peerId, data) {
+    if (!canProcessIncomingPeerData) {
+      pendingIncomingPeerData.push([peerId, data]);
+      if (pendingIncomingPeerData.length > 200) {
+        pendingIncomingPeerData.shift();
+      }
+      return;
+    }
     // console.log('📡 Incoming data:', data);
     const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
     const isFiniteNumber = value => Number.isFinite(value);
@@ -9779,6 +9788,13 @@ async function main() {
     updateHitRibbonBursts({ scene, deltaSeconds: frameDelta });
 
     renderer.render(scene, camera);
+  }
+
+  canProcessIncomingPeerData = true;
+  while (pendingIncomingPeerData.length > 0) {
+    const next = pendingIncomingPeerData.shift();
+    if (!next) continue;
+    handleIncomingData(next[0], next[1]);
   }
 
   animate();
