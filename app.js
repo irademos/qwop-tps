@@ -5738,9 +5738,15 @@ async function main() {
   updateMagicUI();
   updateEnergyEffects();
 
+  const getHungerWarningThresholdSegments = () => {
+    const maxSegments = clampHungerSegments(statsState.maxHungerSegments, statsState.maxHungerSegments);
+    return Math.max(1, Math.ceil(maxSegments * 0.25));
+  };
+
   const HUNGER_WARNING_INTERVAL_MS = 3 * 60 * 1000;
   setInterval(() => {
-    if (statsState.hunger < 10) {
+    const threshold = getHungerWarningThresholdSegments();
+    if (statsState.hunger <= threshold) {
       showHungerWarning();
     }
   }, HUNGER_WARNING_INTERVAL_MS);
