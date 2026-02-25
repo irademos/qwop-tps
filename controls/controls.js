@@ -23,6 +23,7 @@ const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
 const WOOD_INTERACT_RANGE = 3;
 const MEAT_INTERACT_RANGE = 3;
+const SALT_INTERACT_RANGE = 3;
 const ENGAGED_MODE_DISTANCE = 7;
 const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
 const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
@@ -1257,6 +1258,11 @@ export class PlayerControls {
       return;
     }
 
+    if (closest.type === 'salt') {
+      window.pickupSalt?.(closest.pickup);
+      return;
+    }
+
     if (closest.type === 'craft-table') {
       window.openCraftPanel?.();
       return;
@@ -1485,6 +1491,19 @@ export class PlayerControls {
         pickup,
         maxDistance: MEAT_INTERACT_RANGE,
         promptText: "'x' pick up meat"
+      });
+    });
+
+    const saltPickups = Array.isArray(window.saltPickups) ? window.saltPickups : [];
+    saltPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      const isSauteed = pickup.id === 'sauteed_mushrooms';
+      consider(dist, {
+        type: 'salt',
+        pickup,
+        maxDistance: SALT_INTERACT_RANGE,
+        promptText: isSauteed ? "press x to pickup sauteed mushrooms" : "'x' pick up salt"
       });
     });
 

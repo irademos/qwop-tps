@@ -646,10 +646,17 @@ async function main() {
   const ZOMBIE_BRAINS_ITEM_ID = 'zombie_brains';
   const LIFE_POTION_ITEM_ID = 'life_potion';
   const MANA_POTION_ITEM_ID = 'mana_potion';
+  const SALT_ITEM_ID = 'salt';
+  const SAUTEED_MUSHROOMS_ITEM_ID = 'sauteed_mushrooms';
   const WOOD_PICKUP_RADIUS = 3;
   const MEAT_PICKUP_RADIUS = 3;
+  const SALT_PICKUP_RADIUS = 3;
   const MEAT_HEALTH_SEGMENTS = 4;
   const MEAT_HUNGER_GAIN = 16;
+  const SALT_HEALTH_SEGMENTS = 1;
+  const SALT_HUNGER_GAIN = 2;
+  const SAUTEED_MUSHROOMS_HEALTH_SEGMENTS = 12;
+  const SAUTEED_MUSHROOMS_HUNGER_GAIN = 28;
   const WOOD_DROP_LIFT = 0.12;
   const TREE_HITS_TO_CUT = 3;
   const TREE_SWING_TILT_STEP = 0.08;
@@ -729,11 +736,14 @@ async function main() {
   let woodPickups = [];
   let meatPickups = [];
   let zombieBrainsPickups = [];
+  let saltPickups = [];
   const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
   const appleItemIds = new Set([APPLE_ITEM_ID]);
   const woodItemIds = new Set([WOOD_ITEM_ID]);
   const meatItemIds = new Set([MEAT_ITEM_ID]);
   const zombieBrainsItemIds = new Set([ZOMBIE_BRAINS_ITEM_ID]);
+  const saltItemIds = new Set([SALT_ITEM_ID]);
+  const sauteedMushroomsItemIds = new Set([SAUTEED_MUSHROOMS_ITEM_ID]);
   const potionItemIds = new Set([LIFE_POTION_ITEM_ID, MANA_POTION_ITEM_ID]);
   const PICKUP_CHECK_INTERVAL_MS = 250;
   let lastPickupCheckMs = 0;
@@ -2500,6 +2510,7 @@ async function main() {
   window.woodPickups = woodPickups;
   window.meatPickups = meatPickups;
   window.zombieBrainsPickups = zombieBrainsPickups;
+  window.saltPickups = saltPickups;
   natureController = await createNature({
     scene,
     playerModel,
@@ -3675,6 +3686,14 @@ async function main() {
     name: 'Zombie Brains',
     icon: ''
   };
+  inventoryCatalog[SALT_ITEM_ID] = {
+    name: 'Salt',
+    icon: ''
+  };
+  inventoryCatalog[SAUTEED_MUSHROOMS_ITEM_ID] = {
+    name: 'Sauteed Mushrooms',
+    icon: ''
+  };
   MUSHROOM_ENTRIES.forEach((entry) => {
     inventoryCatalog[entry.id] = {
       name: entry.name,
@@ -3783,8 +3802,14 @@ async function main() {
   const isAppleItem = (itemId) => appleItemIds.has(itemId);
   const isWoodItem = (itemId) => woodItemIds.has(itemId);
   const isMeatItem = (itemId) => meatItemIds.has(itemId);
+  const isSaltItem = (itemId) => saltItemIds.has(itemId);
+  const isSauteedMushroomsItem = (itemId) => sauteedMushroomsItemIds.has(itemId);
   const isZombieBrainsItem = (itemId) => zombieBrainsItemIds.has(itemId);
-  const isFoodItem = (itemId) => isMushroomItem(itemId) || isAppleItem(itemId) || isMeatItem(itemId);
+  const isFoodItem = (itemId) => isMushroomItem(itemId)
+    || isAppleItem(itemId)
+    || isMeatItem(itemId)
+    || isSaltItem(itemId)
+    || isSauteedMushroomsItem(itemId);
   const isPotionItem = (itemId) => potionItemIds.has(itemId);
   const getInventoryItemActions = (itemId) => {
     if (isFoodItem(itemId)) {
@@ -4431,6 +4456,47 @@ async function main() {
     return true;
   }
 
+  function disposeSaltPickup(pickup) {
+    if (!pickup?.mesh) return;
+    const mesh = pickup.mesh;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
+    mesh.traverse?.((child) => {
+      if (!child?.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+  }
+
+  function pickupSalt(pickup) {
+    if (!pickup?.mesh || !pickup?.id) return false;
+    if (playerControls?.playerModel) {
+      const playerPosition = playerControls.playerModel.position;
+      const pickupPosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - pickupPosition.x,
+        playerPosition.z - pickupPosition.z
+      );
+      if (horizontalDistance > SALT_PICKUP_RADIUS) return false;
+    }
+    const amount = Math.max(1, Math.floor(Number.isFinite(pickup.amount) ? pickup.amount : 1));
+    addToInventory(pickup.id, amount);
+    disposeSaltPickup(pickup);
+    const index = saltPickups.indexOf(pickup);
+    if (index >= 0) {
+      saltPickups.splice(index, 1);
+    }
+    return true;
+  }
+
   function pickupZombieBrains(pickup) {
     if (!pickup?.mesh) return false;
     if (playerControls?.playerModel) {
@@ -4511,6 +4577,46 @@ async function main() {
     scene.add(mesh);
     const pickup = { id: MEAT_ITEM_ID, mesh };
     meatPickups.push(pickup);
+    return pickup;
+  }
+
+  function spawnSaltPickup(position, { itemId = SALT_ITEM_ID, amount = 1, groupedMushrooms = 0 } = {}) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+    if (Number.isFinite(terrainHeight)) {
+      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
+    }
+    const group = new THREE.Group();
+    const pieces = groupedMushrooms > 0 ? groupedMushrooms : 3;
+    for (let i = 0; i < pieces; i += 1) {
+      const isMushroomCluster = itemId === SAUTEED_MUSHROOMS_ITEM_ID;
+      const mesh = isMushroomCluster
+        ? mushroomController?.createProjectileMesh?.(MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)]?.id)
+        : new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.16 + Math.random() * 0.05, 0),
+          new THREE.MeshStandardMaterial({
+            color: 0xd9d9d9,
+            emissive: 0x4a4a4a,
+            emissiveIntensity: 0.25,
+            roughness: 0.35,
+            metalness: 0.45
+          })
+        );
+      if (!mesh) continue;
+      mesh.position.set((Math.random() - 0.5) * 0.42, 0.1 + Math.random() * 0.14, (Math.random() - 0.5) * 0.42);
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+    group.position.copy(spawnPos);
+    group.userData.baseY = spawnPos.y;
+    group.userData.phase = Math.random() * Math.PI * 2;
+    group.userData.type = itemId;
+    scene.add(group);
+    const pickup = { id: itemId, mesh: group, amount: Math.max(1, Math.floor(amount)) };
+    saltPickups.push(pickup);
     return pickup;
   }
 
@@ -4799,11 +4905,12 @@ async function main() {
     if (itemId === APPLE_ITEM_ID) return 'apples';
     if (itemId?.startsWith?.('mushroom_')) return 'mushrooms';
     if (itemId === ZOMBIE_BRAINS_ITEM_ID) return 'zombie_brains';
+    if (itemId === SALT_ITEM_ID) return 'salt';
     return null;
   };
 
   const getSelectionMaterialCounts = (selection) => {
-    const totals = { wood: 0, apples: 0, mushrooms: 0, zombie_brains: 0 };
+    const totals = { wood: 0, apples: 0, mushrooms: 0, zombie_brains: 0, salt: 0 };
     if (!selection) return totals;
     Object.entries(selection).forEach(([itemId, count]) => {
       const key = getCraftMaterialKey(itemId);
@@ -4905,6 +5012,26 @@ async function main() {
     }
     if (itemId === ZOMBIE_BRAINS_ITEM_ID) {
       return createZombieBrainsGroup();
+    }
+    if (itemId === SALT_ITEM_ID) {
+      const group = new THREE.Group();
+      for (let i = 0; i < 3; i += 1) {
+        const crystal = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.11 + Math.random() * 0.03, 0),
+          new THREE.MeshStandardMaterial({
+            color: 0xd9d9d9,
+            emissive: 0x3a3a3a,
+            emissiveIntensity: 0.25,
+            roughness: 0.45,
+            metalness: 0.35
+          })
+        );
+        crystal.position.set((Math.random() - 0.5) * 0.22, 0.1 + Math.random() * 0.12, (Math.random() - 0.5) * 0.22);
+        crystal.castShadow = true;
+        crystal.receiveShadow = true;
+        group.add(crystal);
+      }
+      return group;
     }
     return null;
   };
@@ -5022,6 +5149,13 @@ async function main() {
       );
       return;
     }
+    if (itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
+      const pickup = spawnSaltPickup(dropPos, { itemId: SAUTEED_MUSHROOMS_ITEM_ID, amount, groupedMushrooms: 3 });
+      if (pickup?.mesh) {
+        pickup.mesh.position.copy(dropPos);
+      }
+      return;
+    }
     const pickupConfig = {
       bow: { item: bow, itemId: 'bow', markerColor: 0xffc26b },
       lantern: { item: lantern, itemId: 'lantern', markerColor: 0xffd400 },
@@ -5130,7 +5264,9 @@ async function main() {
         ? spawnMushroomPickup(itemId, dropPosition)
         : isAppleItem(itemId)
         ? spawnApplePickup(dropPosition)
-        : spawnMeatPickup(dropPosition);
+        : isMeatItem(itemId)
+        ? spawnMeatPickup(dropPosition)
+        : spawnSaltPickup(dropPosition, { itemId });
       if (!pickup) return;
       removeFromInventory(itemId, 1);
       return;
@@ -5226,6 +5362,12 @@ async function main() {
     } else if (isMeatItem(itemId)) {
       setStat('health', statsState.health + MEAT_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + MEAT_HUNGER_GAIN, { skipSave: true });
+    } else if (isSaltItem(itemId)) {
+      setStat('health', statsState.health + SALT_HEALTH_SEGMENTS, { skipSave: true });
+      setStat('hunger', statsState.hunger + SALT_HUNGER_GAIN, { skipSave: true });
+    } else if (isSauteedMushroomsItem(itemId)) {
+      setStat('health', statsState.health + SAUTEED_MUSHROOMS_HEALTH_SEGMENTS, { skipSave: true });
+      setStat('hunger', statsState.hunger + SAUTEED_MUSHROOMS_HUNGER_GAIN, { skipSave: true });
     }
     lastStatUpdateAt = Date.now();
     removeFromInventory(itemId, 1);
@@ -5868,6 +6010,17 @@ async function main() {
           });
         }
       }
+    }
+
+    if (isHost && natureController?.removeRocksInRadius) {
+      const removedRockPositions = natureController.removeRocksInRadius(hitPosition, BOMB_DAMAGE_RADIUS);
+      removedRockPositions.forEach((rockPosition) => {
+        for (let i = 0; i < 3; i += 1) {
+          const angle = (i / 3) * Math.PI * 2;
+          const offset = new THREE.Vector3(Math.cos(angle) * 0.28, 0, Math.sin(angle) * 0.28);
+          spawnSaltPickup(rockPosition.clone().add(offset));
+        }
+      });
     }
   }
 
@@ -8704,6 +8857,7 @@ async function main() {
   window.pickupApple = pickupApple;
   window.pickupWood = pickupWood;
   window.pickupMeat = pickupMeat;
+  window.pickupSalt = pickupSalt;
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -9323,6 +9477,19 @@ async function main() {
         if (shouldCheckPickups && !playerDead) {
           pickupZombieBrains(pickup);
         }
+      }
+      for (let i = saltPickups.length - 1; i >= 0; i--) {
+        const pickup = saltPickups[i];
+        if (!pickup?.mesh) {
+          saltPickups.splice(i, 1);
+          continue;
+        }
+        pickup.mesh.rotation.y += 0.028;
+        if (pickup.mesh.userData.baseY === undefined) {
+          pickup.mesh.userData.baseY = pickup.mesh.position.y;
+        }
+        const phase = pickup.mesh.userData.phase ?? 0;
+        pickup.mesh.position.y = pickup.mesh.userData.baseY + Math.sin(pickupTime + phase) * 0.08;
       }
     }
 
