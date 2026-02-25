@@ -9,6 +9,7 @@ import { createFire } from './environment/fire.js';
 import { Multiplayer } from './peerConnection.js';
 import { PlayerControls } from './controls/controls.js';
 import { getCookie, setCookie } from './utils.js';
+import { PickupSpatialGrid } from './pickupSpatialGrid.js';
 import { initSpeechCommands } from './controls/speechCommands.js';
 import { createAudioManager } from './features/audioFeature.js';
 import {
@@ -199,7 +200,6 @@ const FRIENDLY_VOICE_MAX_VOLUME = 0.35;
 const ZOMBIE_VOICE_MAX_VOLUME = 0.4;
 const MERCHANT_LOOP_MAX_VOLUME = 0.38;
 const FRIENDLY_VOICE_INTERVAL_MS = [5000, 11000];
-const ZOMBIE_VOICE_INTERVAL_MS = [3500, 8000];
 const FRIENDLY_VOICE_CLIPS = [
   'NPC Sounds/friendly_sound_1.ogg',
   'NPC Sounds/friendly_sound_2.ogg',
@@ -718,6 +718,12 @@ async function main() {
   const coinPickups = [];
   let mushroomController = null;
   let mushroomPickups = [];
+  const mushroomPickupGrid = new PickupSpatialGrid(4);
+  window.mushroomPickupGrid = mushroomPickupGrid;
+  window.pickupSpatialIndices = {
+    ...(window.pickupSpatialIndices || {}),
+    mushrooms: mushroomPickupGrid
+  };
   let appleController = null;
   let applePickups = [];
   let woodPickups = [];
@@ -748,6 +754,7 @@ async function main() {
   let animals = [];
   window.animals = animals;
   const npcVoiceSchedule = new Map();
+  const zombieVoiceLoops = new Map();
   const getRandomDelayMs = ([min, max]) => {
     const safeMin = Number.isFinite(min) ? min : 0;
     const safeMax = Number.isFinite(max) ? max : safeMin;
@@ -801,6 +808,36 @@ async function main() {
       return;
     }
     audioManager.startLoopingSFX(loopId, MERCHANT_LOOP_CLIP, volume);
+    audioManager.setLoopingSFXVolume(loopId, volume);
+  };
+  const stopZombieLoopVoice = (monsterId) => {
+    if (!monsterId || !audioManager) return;
+    const loopId = zombieVoiceLoops.get(monsterId);
+    if (!loopId) return;
+    audioManager.stopLoopingSFX(loopId);
+    zombieVoiceLoops.delete(monsterId);
+  };
+  const updateZombieLoopVoice = ({ monster, playerPosition }) => {
+    const monsterId = monster?.id;
+    if (!monsterId || !audioManager || !playerPosition || !isZombieMonsterType(monster) || monster?.isDead || !monster?.model?.position) {
+      stopZombieLoopVoice(monsterId);
+      return;
+    }
+
+    const distance = playerPosition.distanceTo(monster.model.position);
+    const volume = getVolumeByDistance(distance, NPC_AUDIO_HEAR_RADIUS, ZOMBIE_VOICE_MAX_VOLUME);
+    if (volume <= 0.01) {
+      stopZombieLoopVoice(monsterId);
+      return;
+    }
+
+    let loopId = zombieVoiceLoops.get(monsterId);
+    if (!loopId) {
+      const randomClip = ZOMBIE_VOICE_CLIPS[Math.floor(Math.random() * ZOMBIE_VOICE_CLIPS.length)] || ZOMBIE_VOICE_CLIPS[0];
+      loopId = `zombie-voice-loop:${monsterId}`;
+      zombieVoiceLoops.set(monsterId, loopId);
+      audioManager.startLoopingSFX(loopId, randomClip, volume);
+    }
     audioManager.setLoopingSFXVolume(loopId, volume);
   };
   const monsterSlotIds = Array.from({ length: MAX_MONSTERS_TOTAL }, (_, index) => `monster:${index}`);
@@ -1386,6 +1423,9 @@ async function main() {
         return;
       }
       const remoteId = data.id || peerId;
+      if (remoteId === multiplayer.getId()) {
+        return;
+      }
       const desiredModel = data.model || DEFAULT_CHARACTER_MODEL;
       const now = performance.now();
       if (!remotePresenceMeta[remoteId]) {
@@ -2475,6 +2515,11 @@ async function main() {
   });
   await createTower({ scene, getTerrainHeight, rapierWorld, rapier: RAPIER });
   mushroomPickups = mushroomController?.pickups || [];
+  mushroomPickups.forEach((pickup) => {
+    if (pickup?.mesh?.position) {
+      mushroomPickupGrid.add(pickup, pickup.mesh.position);
+    }
+  });
   window.mushroomPickups = mushroomPickups;
   animalManager = createAnimalManager({
     scene,
@@ -2652,6 +2697,7 @@ async function main() {
     const index = monsters.findIndex((entry) => entry?.id === monsterId);
     if (index < 0) return false;
     const [monster] = monsters.splice(index, 1);
+    stopZombieLoopVoice(monsterId);
     cleanupMonster(monster);
     window.monsters = monsters;
     return true;
@@ -4307,6 +4353,7 @@ async function main() {
     if (index >= 0) {
       mushroomPickups.splice(index, 1);
     }
+    mushroomPickupGrid.remove(pickup);
     window.questManager?.handleMushroomCollected?.(pickup);
     return true;
   }
@@ -4396,7 +4443,11 @@ async function main() {
 
   function spawnMushroomPickup(itemId, position) {
     if (!mushroomController?.spawnPickup || !position) return null;
-    return mushroomController.spawnPickup(itemId, position);
+    const pickup = mushroomController.spawnPickup(itemId, position);
+    if (pickup?.mesh?.position) {
+      mushroomPickupGrid.add(pickup, pickup.mesh.position);
+    }
+    return pickup;
   }
 
   function spawnApplePickup(position) {
@@ -9084,6 +9135,7 @@ async function main() {
         const pickup = mushroomPickups[i];
         if (!pickup) continue;
         disposeMushroomPickup(pickup);
+        mushroomPickupGrid.remove(pickup);
         mushroomPickups.splice(i, 1);
       }
       for (let i = applePickups.length - 1; i >= 0; i--) {
@@ -9221,6 +9273,7 @@ async function main() {
       for (let i = mushroomPickups.length - 1; i >= 0; i--) {
         const pickup = mushroomPickups[i];
         if (!pickup?.active) {
+          mushroomPickupGrid.remove(pickup);
           mushroomPickups.splice(i, 1);
           continue;
         }
@@ -9452,14 +9505,20 @@ async function main() {
             enableFriendlyDrift: true,
             friendlyAvoidanceZones
           };
+          const MAX_AI_DELTA_SECONDS = 0.5;
 
           if (monsterTier === 'active') {
             monster.syncBodyFromTransform?.({ zeroVelocity: false });
             if (PERF.throttleAI) {
-              const last = monster.lastAIUpdateMs ?? 0;
-              if (aiNowMs - last > 150) {
+              const lastAIUpdateMs = monster.lastAIUpdateMs ?? 0;
+              if (aiNowMs - lastAIUpdateMs > 150) {
+                const elapsedAiSeconds = Math.max(0, (aiNowMs - lastAIUpdateMs) / 1000);
+                const aiDeltaSeconds = Math.min(
+                  MAX_AI_DELTA_SECONDS,
+                  lastAIUpdateMs > 0 ? elapsedAiSeconds : mixerDelta
+                );
                 monster.lastAIUpdateMs = aiNowMs;
-                monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+                monster.updateAI(aiDeltaSeconds, playerModel, otherPlayers, aiContext);
               }
             } else {
               monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
@@ -9470,8 +9529,13 @@ async function main() {
           if (monsterTier === 'background') {
             const lastBackgroundAi = monster.lastBackgroundAIUpdateMs ?? 0;
             if (previousTier !== 'background' || aiNowMs - lastBackgroundAi > MONSTER_BACKGROUND_AI_INTERVAL_MS) {
+              const elapsedAiSeconds = Math.max(0, (aiNowMs - lastBackgroundAi) / 1000);
+              const aiDelta = Math.min(
+                MAX_AI_DELTA_SECONDS,
+                lastBackgroundAi > 0 ? elapsedAiSeconds : mixerDelta
+              );
               monster.lastBackgroundAIUpdateMs = aiNowMs;
-              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+              monster.updateAI(aiDelta, playerModel, otherPlayers, aiContext);
             }
             return;
           }
@@ -9650,18 +9714,7 @@ async function main() {
       });
 
       (monsters || []).forEach((monster) => {
-        if (isZombieMonsterType(monster)) {
-          maybePlayNpcVoice({
-            entityId: `zombie-voice:${monster?.id || 'unknown'}`,
-            position: monster?.model?.position,
-            now,
-            intervalRange: ZOMBIE_VOICE_INTERVAL_MS,
-            clips: ZOMBIE_VOICE_CLIPS,
-            maxVolume: ZOMBIE_VOICE_MAX_VOLUME,
-            playerPosition: localPlayerPosition,
-            cooldownPrefix: 'zombie-voice'
-          });
-        }
+        updateZombieLoopVoice({ monster, playerPosition: localPlayerPosition });
         const action = monster?.model?.userData?.currentAction;
         const isMoving = action === 'Weapon' ? false : (action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk');
         playNearFootstepsFor(`monster:${monster?.id || 'unknown'}`, monster?.model?.position, isMoving);

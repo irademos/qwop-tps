@@ -677,10 +677,12 @@ export class PlayerControls {
   }
 
 
-  getNextSwordAttackAction() {
+  getNextSwordAttackAction({ advance = true } = {}) {
     const swordCombo = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
     const action = swordCombo[this.swordComboIndex % swordCombo.length];
-    this.swordComboIndex = (this.swordComboIndex + 1) % swordCombo.length;
+    if (advance) {
+      this.swordComboIndex = (this.swordComboIndex + 1) % swordCombo.length;
+    }
     return action;
   }
 
@@ -692,10 +694,9 @@ export class PlayerControls {
   }
 
   performAttackForSlot(slot) {
-    if (!this.enabled || this.isInWater) return;
+    if (!this.enabled || this.isInWater) return false;
     if (slot === 'kick') {
-      this.playAction('mmaKick');
-      return;
+      return this.playAction('mmaKick');
     }
 
     const hand = slot === 'left' ? 'left' : 'right';
@@ -712,10 +713,10 @@ export class PlayerControls {
       } else {
         this.attemptFireProjectileForHand(hand);
       }
-      return;
+      return true;
     }
 
-    this.playAction(hand === 'left' ? 'leftPunch' : 'mutantPunch');
+    return this.playAction(hand === 'left' ? 'leftPunch' : 'mutantPunch');
   }
 
   handlePrimaryAttackPress() {
@@ -725,8 +726,10 @@ export class PlayerControls {
       return;
     }
     if (weapon?.itemId === 'autumnSword') {
-      const attackAction = this.getNextSwordAttackAction();
-      this.playAction(attackAction);
+      const attackAction = this.getNextSwordAttackAction({ advance: false });
+      const started = this.playAction(attackAction);
+      if (!started) return;
+      this.swordComboIndex = (this.swordComboIndex + 1) % 4;
       if (attackAction === 'swordSlash' || attackAction === 'swordSlashLeft') {
         this.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg', 0.6, {
           cooldownKey: 'sword-attack',
@@ -737,8 +740,9 @@ export class PlayerControls {
     }
     const cycle = ['right', 'left', 'kick'];
     const slot = cycle[this.mobileMeleeComboIndex % cycle.length];
+    const started = this.performAttackForSlot(slot);
+    if (!started) return;
     this.mobileMeleeComboIndex = (this.mobileMeleeComboIndex + 1) % cycle.length;
-    this.performAttackForSlot(slot);
   }
 
   showMobileEquipMenu() {
@@ -1037,8 +1041,12 @@ export class PlayerControls {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
         }
         const sword = this.getEquippedSword();
-        const attackAction = sword ? this.getNextSwordAttackAction() : 'mutantPunch';
-        this.playAction(attackAction);
+        const attackAction = sword ? this.getNextSwordAttackAction({ advance: false }) : 'mutantPunch';
+        const started = this.playAction(attackAction);
+        if (!started) return;
+        if (sword) {
+          this.swordComboIndex = (this.swordComboIndex + 1) % 4;
+        }
         if (attackAction === 'swordSlash' || attackAction === 'swordSlashLeft') {
           this.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg', 0.6, {
             cooldownKey: 'sword-attack',
@@ -1052,7 +1060,8 @@ export class PlayerControls {
         if (this.isMoving && !this.isSlideMomentumActive()) {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
         }
-        this.playAction('leftPunch');
+        const started = this.playAction('leftPunch');
+        if (!started) return;
         const leftHandItem = this.getEquippedWeapon('left')?.itemId;
         if (leftHandItem === 'torch' || leftHandItem === 'lantern') {
           this.audioManager?.playSFX('SFX/Torch/Torch Attack Strike 1.ogg', 0.65, {
@@ -1066,10 +1075,12 @@ export class PlayerControls {
         if (this.isInWater) return;
         if (this.isMoving && !this.isSlideMomentumActive()) {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(1.1);
-          this.playAction('runningKick');
+          const started = this.playAction('runningKick');
+          if (!started) return;
           this.audioManager?.playAttack();
         } else {
-          this.playAction('mmaKick');
+          const started = this.playAction('mmaKick');
+          if (!started) return;
           this.audioManager?.playAttack();
         }
       } else if (key === 'g') {
@@ -1290,6 +1301,7 @@ export class PlayerControls {
     const playerPos = this.playerModel.position;
     let closest = null;
     let closestDistance = Infinity;
+    let closestDistanceSq = Infinity;
 
     const homeTarget = window.homeSystem?.getInteractionTarget?.(playerPos, this.isMobile);
     const homeEnterTarget = homeTarget?.type === 'home-enter' ? homeTarget : null;
@@ -1300,7 +1312,17 @@ export class PlayerControls {
     const consider = (distance, data) => {
       if (distance <= data.maxDistance && distance < closestDistance) {
         closestDistance = distance;
+        closestDistanceSq = distance * distance;
         closest = { ...data, distance };
+      }
+    };
+
+    const considerSquared = (distanceSq, data) => {
+      const maxDistanceSq = data.maxDistance * data.maxDistance;
+      if (distanceSq <= maxDistanceSq && distanceSq < closestDistanceSq) {
+        closestDistanceSq = distanceSq;
+        closestDistance = Math.sqrt(distanceSq);
+        closest = { ...data, distance: closestDistance };
       }
     };
 
@@ -1399,17 +1421,18 @@ export class PlayerControls {
       }
     }
     
-    const mushroomPickups = Array.isArray(window.mushroomPickups) ? window.mushroomPickups : [];
-    mushroomPickups.forEach((pickup) => {
-      if (!pickup?.active) return;
-      const pickupPosition = pickup.position || pickup.mesh?.position;
-      if (!pickupPosition) return;
-      if (pickup.mesh && !pickup.mesh.visible) return;
-      const dist = Math.hypot(
-        playerPos.x - pickupPosition.x,
-        playerPos.z - pickupPosition.z
-      );
-      consider(dist, {
+    const mushroomPickupGrid = window.mushroomPickupGrid;
+    const mushroomCandidates = mushroomPickupGrid?.queryNearby
+      ? mushroomPickupGrid.queryNearby(playerPos.x, playerPos.z, MUSHROOM_INTERACT_RANGE)
+      : (Array.isArray(window.mushroomPickups) ? window.mushroomPickups : []);
+    const mushroomInteractRangeSq = MUSHROOM_INTERACT_RANGE * MUSHROOM_INTERACT_RANGE;
+    mushroomCandidates.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dx = playerPos.x - pickup.mesh.position.x;
+      const dz = playerPos.z - pickup.mesh.position.z;
+      const distSq = (dx * dx) + (dz * dz);
+      if (distSq > mushroomInteractRangeSq) return;
+      considerSquared(distSq, {
         type: 'mushroom',
         pickup,
         maxDistance: MUSHROOM_INTERACT_RANGE,
@@ -1576,12 +1599,12 @@ export class PlayerControls {
   }
 
   playAction(actionName) {
-    if (!this.playerModel) return;
+    if (!this.playerModel) return false;
     const resolvedAction = actionName === 'mutantPunch' && this.getEquippedSword() ? 'swordSlash' : actionName;
     const swordAttackActions = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
     const actions = this.playerModel.userData.actions;
-    if (!actions || !actions[resolvedAction]) return;
-    if (ACTION_LOCKED_ATTACKS.includes(resolvedAction) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return;
+    if (!actions || !actions[resolvedAction]) return false;
+    if (ACTION_LOCKED_ATTACKS.includes(resolvedAction) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return false;
 
     if (this.runningKickTimer) {
       clearTimeout(this.runningKickTimer);
@@ -1621,6 +1644,7 @@ export class PlayerControls {
       }
     };
     mixer.addEventListener("finished", onFinished);
+    return true;
   }
 
   applyKnockback({ direction, strength } = {}) {
