@@ -107,7 +107,7 @@ export function updateMeleeAttacks({
       const attackDamage = getStrengthDamage(attacker.id, cfg.damage);
       if (['swordSlash', 'swordSlashLeft', 'swordFwdSpin', 'swordSpin'].includes(attackName)
         && attacker.id === 'local') {
-        onSwordHit?.({ attacker, range: cfg.range });
+        onSwordHit?.({ attacker, range: cfg.range, region: cfg.region, attackName });
       }
       if (attackName === 'mutantPunch'
         && attacker.id === 'local'

@@ -4572,6 +4572,39 @@ async function main() {
   const tempTreeDirection = new THREE.Vector3();
   const tempTreeCenter = new THREE.Vector3();
   const tempTreeCenterNext = new THREE.Vector3();
+  const tempTreeCenterRaw = new THREE.Vector3();
+  const tempSwordForward = new THREE.Vector3();
+  const tempSwordToTree = new THREE.Vector3();
+  const tempSwordRight = new THREE.Vector3();
+
+  function isTreeWithinSwordAttackArea(attackerModel, treeCenter, range, region = 'around') {
+    if (!attackerModel?.position || !treeCenter) return false;
+    const maxRange = Number.isFinite(range) ? Math.max(0, range) : 0;
+    if (maxRange <= 0) return false;
+
+    tempSwordToTree.subVectors(treeCenter, attackerModel.position);
+    if (region !== 'forward') {
+      return tempSwordToTree.lengthSq() <= maxRange * maxRange;
+    }
+
+    attackerModel.getWorldDirection(tempSwordForward);
+    tempSwordForward.y = 0;
+    if (tempSwordForward.lengthSq() < 0.0001) {
+      tempSwordForward.set(0, 0, 1);
+    } else {
+      tempSwordForward.normalize();
+    }
+
+    tempSwordToTree.y = 0;
+    const forwardDistance = tempSwordToTree.dot(tempSwordForward);
+    if (forwardDistance < 0 || forwardDistance > maxRange) {
+      return false;
+    }
+
+    tempSwordRight.set(tempSwordForward.z, 0, -tempSwordForward.x);
+    const lateralDistance = tempSwordToTree.dot(tempSwordRight);
+    return Math.abs(lateralDistance) <= maxRange;
+  }
 
   function dropTreeApples(tree) {
     if (!tree) return;
@@ -4593,21 +4626,33 @@ async function main() {
     });
   }
 
-  function handleSwordTreeHit({ attacker, range }) {
+  function handleSwordTreeHit({ attacker, range, region = 'around' }) {
     if (!attacker?.model?.position) return;
-    const effectiveRange = (Number.isFinite(range) ? range : 0) + TREE_HIT_RANGE_BOOST;
-    const tree = natureController?.getClosestTree?.(attacker.model.position, effectiveRange);
+    const baseRange = Number.isFinite(range) ? range : 0;
+    const effectiveRange = baseRange + TREE_HIT_RANGE_BOOST;
+    const tree = natureController?.getClosestTree?.(
+      attacker.model.position,
+      effectiveRange,
+      {
+        filter: (_, center) => isTreeWithinSwordAttackArea(attacker.model, center, effectiveRange, region)
+      }
+    );
     if (!tree || tree.userData?.isCutDown) return;
-    const treeCenter = natureController?.getTreeWorldCenter?.(tree);
+
     const centerLocal = tree.userData?.boundsCenterLocal;
+    tree.getWorldPosition(tempTreeCenterRaw);
+    if (centerLocal) {
+      tempTreeCenterRaw.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+    }
+    const treeCenter = natureController?.getTreeWorldCenter?.(tree);
     if (treeCenter) {
       tempTreeCenter.copy(treeCenter);
-    } else if (centerLocal) {
-      tempTreeCenter.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+    } else {
+      tempTreeCenter.copy(tempTreeCenterRaw);
     }
-    const hasTreeCenter = Boolean(treeCenter || centerLocal);
+
     tree.userData.swordHits = (tree.userData.swordHits ?? 0) + 1;
-    tempTreeDirection.subVectors(hasTreeCenter ? tempTreeCenter : tree.position, attacker.model.position);
+    tempTreeDirection.subVectors(tempTreeCenter, attacker.model.position);
     tempTreeDirection.y = 0;
     if (tempTreeDirection.lengthSq() === 0) {
       tempTreeDirection.set(0, 0, 1);
@@ -4622,7 +4667,7 @@ async function main() {
     if (centerLocal) {
       tree.updateWorldMatrix(true, true);
       tempTreeCenterNext.copy(centerLocal).applyMatrix4(tree.matrixWorld);
-      tempTreePosition.subVectors(tempTreeCenter, tempTreeCenterNext);
+      tempTreePosition.subVectors(tempTreeCenterRaw, tempTreeCenterNext);
       tree.position.add(tempTreePosition);
       tree.updateWorldMatrix(true, true);
     }

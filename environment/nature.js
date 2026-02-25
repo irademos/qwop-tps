@@ -986,9 +986,10 @@ export async function createNature({
     refreshClimbableAreas();
   };
 
-  const getClosestTree = (position, range) => {
+  const getClosestTree = (position, range, options = {}) => {
     if (!position || !Number.isFinite(range)) return null;
     const maxDistance = Math.max(0, range);
+    const filter = typeof options?.filter === 'function' ? options.filter : null;
     let closest = null;
     let closestDistance = Infinity;
     const searchBox = new THREE.Box3();
@@ -1008,6 +1009,7 @@ export async function createNature({
           searchBox.getCenter(searchCenter);
           worldCenter.copy(searchCenter);
         }
+        if (filter && !filter(tree, worldCenter)) continue;
         const dx = position.x - worldCenter.x;
         const dz = position.z - worldCenter.z;
         const distance = Math.hypot(dx, dz);
