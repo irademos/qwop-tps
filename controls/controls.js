@@ -725,6 +725,14 @@ export class PlayerControls {
       this.attemptFireProjectileForHand('right');
       return;
     }
+    if (weapon?.itemId === 'iceGun') {
+      const cycle = ['left', 'kick'];
+      const slot = cycle[this.mobileMeleeComboIndex % cycle.length];
+      const started = this.performAttackForSlot(slot);
+      if (!started) return;
+      this.mobileMeleeComboIndex = (this.mobileMeleeComboIndex + 1) % cycle.length;
+      return;
+    }
     if (weapon?.itemId === 'autumnSword') {
       const attackAction = this.getNextSwordAttackAction({ advance: false });
       const started = this.playAction(attackAction);
