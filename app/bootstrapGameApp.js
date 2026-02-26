@@ -563,11 +563,11 @@ function createArcadeOverlay(startOverlay) {
   };
 }
 
-async function initCore(appContext) {
+async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
   const audioManager = createAudioManager();
-  appContext.systems.audioManager = audioManager;
+  runtimeContext.systems.audioManager = audioManager;
   let syncBackgroundLoopForDisplayMode = () => {
     audioManager.playBGS('Forest Day/Forest Day.ogg');
   };
@@ -756,7 +756,7 @@ async function initCore(appContext) {
   let lastPickupCheckMs = 0;
 
   const otherPlayers = {};
-  appContext.entities.otherPlayers = otherPlayers;
+  runtimeContext.entities.otherPlayers = otherPlayers;
   const pendingIncomingPeerData = [];
   let canProcessIncomingPeerData = false;
   const remotePresenceMeta = {};
@@ -768,10 +768,10 @@ async function initCore(appContext) {
   const monsterAnimProjMatrix = new THREE.Matrix4();
 
   let monsters = [];
-  appContext.entities.monsters = monsters;
+  runtimeContext.entities.monsters = monsters;
   let animalManager = null;
   let animals = [];
-  appContext.entities.animals = animals;
+  runtimeContext.entities.animals = animals;
   const npcVoiceSchedule = new Map();
   const zombieVoiceLoops = new Map();
   const getRandomDelayMs = ([min, max]) => {
@@ -1825,8 +1825,8 @@ async function initCore(appContext) {
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   mapRenderer = createMapRenderer({ scene, renderer });
   buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
-  appContext.systems.mapRenderer = mapRenderer;
-  appContext.systems.buildingsRenderer = buildingsRenderer;
+  runtimeContext.systems.mapRenderer = mapRenderer;
+  runtimeContext.systems.buildingsRenderer = buildingsRenderer;
   if (buildingsRenderer?.materials) {
     buildingMaterialBase = {
       extruded: captureMaterialBase(buildingsRenderer.materials.extruded),
@@ -1860,8 +1860,8 @@ async function initCore(appContext) {
   // --- RAPIER INIT ---
   await RAPIER.init();
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
-  appContext.systems.rapierWorld = rapierWorld;
-  appContext.systems.rbToMesh = rbToMesh;
+  runtimeContext.systems.rapierWorld = rapierWorld;
+  runtimeContext.systems.rbToMesh = rbToMesh;
 
   // Ground collider
   {
@@ -2223,7 +2223,7 @@ async function initCore(appContext) {
     isLocallyControlled: () => autumnSword?.holder === playerControls
   });
 
-  appContext.entities.weapons = { iceGun, bow, bomb, autumnSword };
+  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword };
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
@@ -2426,7 +2426,7 @@ async function initCore(appContext) {
     isLocallyControlled: () => torch?.holder === playerControls
   });
 
-  appContext.entities.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
+  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -2563,7 +2563,7 @@ async function initCore(appContext) {
     }
   });
   animals = animalManager.getAnimals();
-  appContext.entities.animals = animals;
+  runtimeContext.entities.animals = animals;
   let didInitialGpsSnap = false;
   let currentPlayerLevel = 1;
 
@@ -2727,7 +2727,7 @@ async function initCore(appContext) {
     const [monster] = monsters.splice(index, 1);
     stopZombieLoopVoice(monsterId);
     cleanupMonster(monster);
-    appContext.entities.monsters = monsters;
+    runtimeContext.entities.monsters = monsters;
     return true;
   };
 
@@ -3205,7 +3205,7 @@ async function initCore(appContext) {
     if (PERF.disableMonsters) {
       monsters.forEach(monster => cleanupMonster(monster));
       monsters = [];
-      appContext.entities.monsters = monsters;
+      runtimeContext.entities.monsters = monsters;
       respawnTimers.forEach((timer) => clearTimeout(timer));
       respawnTimers.clear();
       return;
@@ -3224,7 +3224,7 @@ async function initCore(appContext) {
       seenSlots.add(monster.id);
       return true;
     });
-    appContext.entities.monsters = monsters;
+    runtimeContext.entities.monsters = monsters;
 
     monsterSlotIds.forEach((slotId) => {
       const existing = monsters.find(entry => entry.id === slotId);
@@ -5953,7 +5953,7 @@ async function initCore(appContext) {
     if (playerModel?.position) {
       const distance = hitPosition.distanceTo(playerModel.position);
       if (distance <= BOMB_DAMAGE_RADIUS) {
-        const localControls = appContext.systems.playerControls ?? window.playerControls;
+        const localControls = runtimeContext.systems.playerControls ?? window.playerControls;
         if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
           localControls.isInvincible = false;
           localControls.invincibleUntil = 0;
@@ -7028,7 +7028,7 @@ async function initCore(appContext) {
   playerControls.isVoiceListening = () => voiceMicState.listening;
   playerControls.getVoiceMicState = () => getVoiceMicState();
 
-  appContext.systems.playerControls = playerControls;
+  runtimeContext.systems.playerControls = playerControls;
   await initSpellsFeature({
     playerControls,
     getPlayerModel: () => playerModel,
@@ -8858,7 +8858,7 @@ async function initCore(appContext) {
     }
   };
 
-  appContext.uiState.appState = appState;
+  runtimeContext.uiState.appState = appState;
   window.getInventory = getInventory;
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
@@ -8944,7 +8944,7 @@ async function initCore(appContext) {
   }, 60 * 1000);
 
   const consoleDiv = document.getElementById("console-log");
-  if (appContext.debugFlags.DEBUG_CONSOLE === true) {
+  if (runtimeContext.debugFlags.DEBUG_CONSOLE === true) {
     (function() {
       const originalLog = console.log;
       console.log = function(...args) {
@@ -9637,12 +9637,12 @@ async function initCore(appContext) {
       return false;
     });
     if (removedDeadMonsters) {
-      appContext.entities.monsters = monsters;
+      runtimeContext.entities.monsters = monsters;
     }
     if (animalManager) {
       animalManager.update(mixerDelta);
       animals = animalManager.getAnimals();
-      appContext.entities.animals = animals;
+      runtimeContext.entities.animals = animals;
     }
 
     if (isHostNow) {
@@ -9989,37 +9989,35 @@ async function initCore(appContext) {
 
   animate();
 
-  return appContext;
+  return runtimeContext;
 }
 
-async function initWorld(appContext) {
-  appContext.startupPhases = appContext.startupPhases || [];
-  appContext.startupPhases.push('world');
-  return appContext;
+async function initWorld(runtimeContext) {
+  runtimeContext.settings.startupPhases = runtimeContext.settings.startupPhases || [];
+  runtimeContext.settings.startupPhases.push('world');
+  return runtimeContext;
 }
 
-async function initActors(appContext) {
-  appContext.startupPhases = appContext.startupPhases || [];
-  appContext.startupPhases.push('actors');
-  return appContext;
+async function initActors(runtimeContext) {
+  runtimeContext.settings.startupPhases = runtimeContext.settings.startupPhases || [];
+  runtimeContext.settings.startupPhases.push('actors');
+  return runtimeContext;
 }
 
-async function initUI(appContext) {
-  appContext.startupPhases = appContext.startupPhases || [];
-  appContext.startupPhases.push('ui');
-  return appContext;
+async function initUI(runtimeContext) {
+  runtimeContext.settings.startupPhases = runtimeContext.settings.startupPhases || [];
+  runtimeContext.settings.startupPhases.push('ui');
+  return runtimeContext;
 }
 
-async function initNetworkingAndPersistence(appContext) {
-  appContext.startupPhases = appContext.startupPhases || [];
-  appContext.startupPhases.push('networking-and-persistence');
-  return appContext;
+async function initNetworkingAndPersistence(runtimeContext) {
+  runtimeContext.settings.startupPhases = runtimeContext.settings.startupPhases || [];
+  runtimeContext.settings.startupPhases.push('networking-and-persistence');
+  return runtimeContext;
 }
 
 export async function bootstrapGameApp() {
-  const appContext = {
-    startupPhases: []
-  };
+  appContext.settings.startupPhases = [];
 
   await initCore(appContext);
   await initWorld(appContext);
