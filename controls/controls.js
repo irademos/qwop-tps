@@ -213,9 +213,12 @@ export class PlayerControls {
     
     // Initial player position
     const spawn = getSpawnPosition();
-    this.playerX = spawn.x;
-    this.playerY = spawn.y;
-    this.playerZ = spawn.z;
+    const spawnX = Number.isFinite(spawn?.x) ? spawn.x : 0;
+    const spawnY = Number.isFinite(spawn?.y) ? spawn.y : 0.9;
+    const spawnZ = Number.isFinite(spawn?.z) ? spawn.z : 0;
+    this.playerX = spawnX;
+    this.playerY = spawnY;
+    this.playerZ = spawnZ;
 
     
     // Set initial player model position if it exists
@@ -1932,6 +1935,13 @@ export class PlayerControls {
         if (hitY > groundY) groundY = hitY;
       }
     }
+    if (!Number.isFinite(groundY)) {
+      // Keep ground math stable even if terrain sampling/raycast is temporarily unavailable.
+      groundY = Number.isFinite(t.y)
+        ? t.y - (PLAYER_HALF_HEIGHT + PLAYER_RADIUS)
+        : 0;
+    }
+
     const groundExpectedY = groundY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
     const grounded = !this.isInWater && t.y <= groundExpectedY + 0.05;
     if (grounded && !this.isInWater) {
