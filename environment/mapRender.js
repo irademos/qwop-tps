@@ -98,7 +98,8 @@ export function createMapRenderer({
   scene,
   renderer,
   color = DEFAULT_COLOR,
-  elevation = DEFAULT_ELEVATION
+  elevation = DEFAULT_ELEVATION,
+  getTerrainHeight = null
 } = {}) {
   const group = new THREE.Group();
   group.name = "osm-highways";
@@ -160,11 +161,20 @@ export function createMapRenderer({
       const nz = dx / length;
 
       const baseIndex = vertices.length / 3;
+      const startTerrain = typeof getTerrainHeight === "function"
+        ? getTerrainHeight(start.x, start.z)
+        : 0;
+      const endTerrain = typeof getTerrainHeight === "function"
+        ? getTerrainHeight(end.x, end.z)
+        : 0;
+      const startY = (Number.isFinite(startTerrain) ? startTerrain : 0) + y;
+      const endY = (Number.isFinite(endTerrain) ? endTerrain : 0) + y;
+
       vertices.push(
-        start.x + nx * halfWidth, y, start.z + nz * halfWidth,
-        start.x - nx * halfWidth, y, start.z - nz * halfWidth,
-        end.x + nx * halfWidth, y, end.z + nz * halfWidth,
-        end.x - nx * halfWidth, y, end.z - nz * halfWidth
+        start.x + nx * halfWidth, startY, start.z + nz * halfWidth,
+        start.x - nx * halfWidth, startY, start.z - nz * halfWidth,
+        end.x + nx * halfWidth, endY, end.z + nz * halfWidth,
+        end.x - nx * halfWidth, endY, end.z - nz * halfWidth
       );
       indices.push(
         baseIndex, baseIndex + 2, baseIndex + 1,

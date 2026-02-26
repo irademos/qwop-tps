@@ -356,7 +356,7 @@ function buildDoorCuttersFromShape(shape2D, {
   return cutters;
 }
 
-export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
+export function createBuildingsRenderer({ scene, camera, renderer, getTerrainHeight = null } = {}) {
   const group = new THREE.Group();
   group.name = "osm-buildings";
   scene?.add(group);
@@ -492,6 +492,10 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       if (!shape) continue;
 
       const centroid = estimateCentroid(shape.getPoints());
+      const terrainBase = typeof getTerrainHeight === "function"
+        ? getTerrainHeight(centroid.x, -centroid.y)
+        : 0;
+      const terrainBaseY = Number.isFinite(terrainBase) ? terrainBase : 0;
       const dx = centroid.x - cameraPos.x;
       const dz = -centroid.y - cameraPos.z;
       const distance = Math.hypot(dx, dz);
@@ -504,7 +508,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
         // 1) Outer solid
         let geom = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
         geom.rotateX(-Math.PI / 2);
-        geom.translate(0, BASE_ELEVATION, 0);
+        geom.translate(0, BASE_ELEVATION + terrainBaseY, 0);
         geom.computeBoundingBox();
 
         if (isFullDetail && qualitySettings.enableHollow) {
@@ -535,7 +539,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       } else {
         const geom = new THREE.ShapeGeometry(shape);
         geom.rotateX(-Math.PI / 2);
-        geom.translate(0, BASE_ELEVATION, 0);
+        geom.translate(0, BASE_ELEVATION + terrainBaseY, 0);
         flatGeometries.push(geom);
       }
     }

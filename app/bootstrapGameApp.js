@@ -1816,8 +1816,8 @@ async function initCore(appContext) {
   document.getElementById('game-container').appendChild(renderer.domElement);
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-  mapRenderer = createMapRenderer({ scene, renderer });
-  buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
+  mapRenderer = createMapRenderer({ scene, renderer, getTerrainHeight });
+  buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer, getTerrainHeight });
   window.mapRenderer = mapRenderer;
   window.buildingsRenderer = buildingsRenderer;
   if (buildingsRenderer?.materials) {

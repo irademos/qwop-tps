@@ -99,7 +99,7 @@ export function getProceduralTerrainHeight(x, z) {
   const normalized = (n + 1) * 0.5;
   const height = profile.minHeight + amplitude * normalized;
   const step = Math.max(0.001, profile.quantizeStep);
-  return Math.round(height / step) * step;
+  return Math.round(height / step) * step * 10;
 }
 
 export function applyTerrainToGroundGeometry({ geometry, tile, tileSizeMeters = 300, elevation = 0 } = {}) {
