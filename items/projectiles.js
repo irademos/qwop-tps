@@ -1,3 +1,4 @@
+import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 import { updateArrowProjectile } from "./arrow.js";
@@ -238,8 +239,9 @@ export function updateProjectiles({
         console.log(`❤️ Your Health: ${window.localHealth}`);
       }
 
-      if (window.playerControls) {
-        window.playerControls.applyKnockback({ direction: vel, strength: 3 });
+      const playerControls = appContext.systems.playerControls ?? window.playerControls;
+      if (playerControls) {
+        playerControls.applyKnockback({ direction: vel, strength: 3 });
       }
     }
 

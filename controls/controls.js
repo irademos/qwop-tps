@@ -1,3 +1,4 @@
+import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from '../environment/water.js';
@@ -758,7 +759,7 @@ export class PlayerControls {
     const actionContainer = document.getElementById('action-buttons');
     if (!actionContainer) return;
 
-    const appState = window.appState;
+    const appState = appContext.uiState.appState ?? window.appState;
     const inventory = appState?.getInventory?.() || {};
     const equipCandidates = [
       { id: 'bomb', label: 'Bomb' },
@@ -2437,7 +2438,7 @@ export class PlayerControls {
   }
 
   getWeapons() {
-    const weapons = Object.values(window.weapons || {}).filter(Boolean);
+    const weapons = Object.values(appContext.entities.weapons || window.weapons || {}).filter(Boolean);
     const pickups = Array.isArray(window.weaponPickups) ? window.weaponPickups : [];
     return weapons.concat(pickups);
   }
@@ -3030,7 +3031,7 @@ export class PlayerControls {
     let closest = null;
     let minDist = 1.5;
 
-    const others = window.otherPlayers || {};
+    const others = appContext.entities.otherPlayers || window.otherPlayers || {};
     for (const [id, p] of Object.entries(others)) {
       const dist = playerPos.distanceTo(p.model.position);
       if (dist < minDist) {
@@ -3039,7 +3040,7 @@ export class PlayerControls {
       }
     }
 
-    const monsterList = window.monsters || [];
+    const monsterList = appContext.entities.monsters || window.monsters || [];
     for (const mon of monsterList) {
       const model = mon?.model || mon;
       if (!model) continue;
@@ -3130,7 +3131,7 @@ export class PlayerControls {
       this.setEngaged(false);
       return;
     }
-    const monsters = window.monsters || [];
+    const monsters = appContext.entities.monsters || window.monsters || [];
     let closest = null;
     let closestDistance = Infinity;
     for (const monster of monsters) {

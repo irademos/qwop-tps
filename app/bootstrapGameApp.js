@@ -88,6 +88,9 @@ import {
   zoomInMapFeature,
   zoomOutMapFeature
 } from '../features/mapFeature.js';
+import { appContext } from '../src/runtime/appContext.js';
+import { exposeDebugGlobals } from '../src/runtime/exposeDebugGlobals.js';
+
 import {
   clearStoredPin,
   deleteProfileData,
@@ -155,8 +158,12 @@ const PERF = {
   disableMapUpdates: false
 };
 
-window.PERF = PERF;
-window.DEBUG_CONSOLE = false;
+appContext.debugFlags.PERF = PERF;
+appContext.debugFlags.DEBUG_CONSOLE = false;
+exposeDebugGlobals({
+  enableDebugMirror: appContext.debugFlags.DEBUG_CONSOLE === true,
+  enableCompatibilityShims: true
+});
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
@@ -560,7 +567,7 @@ async function initCore(appContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
   const audioManager = createAudioManager();
-  window.audioManager = audioManager;
+  appContext.systems.audioManager = audioManager;
   let syncBackgroundLoopForDisplayMode = () => {
     audioManager.playBGS('Forest Day/Forest Day.ogg');
   };
@@ -749,7 +756,7 @@ async function initCore(appContext) {
   let lastPickupCheckMs = 0;
 
   const otherPlayers = {};
-  window.otherPlayers = otherPlayers;
+  appContext.entities.otherPlayers = otherPlayers;
   const pendingIncomingPeerData = [];
   let canProcessIncomingPeerData = false;
   const remotePresenceMeta = {};
@@ -761,10 +768,10 @@ async function initCore(appContext) {
   const monsterAnimProjMatrix = new THREE.Matrix4();
 
   let monsters = [];
-  window.monsters = monsters;
+  appContext.entities.monsters = monsters;
   let animalManager = null;
   let animals = [];
-  window.animals = animals;
+  appContext.entities.animals = animals;
   const npcVoiceSchedule = new Map();
   const zombieVoiceLoops = new Map();
   const getRandomDelayMs = ([min, max]) => {
@@ -1818,8 +1825,8 @@ async function initCore(appContext) {
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   mapRenderer = createMapRenderer({ scene, renderer });
   buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
-  window.mapRenderer = mapRenderer;
-  window.buildingsRenderer = buildingsRenderer;
+  appContext.systems.mapRenderer = mapRenderer;
+  appContext.systems.buildingsRenderer = buildingsRenderer;
   if (buildingsRenderer?.materials) {
     buildingMaterialBase = {
       extruded: captureMaterialBase(buildingsRenderer.materials.extruded),
@@ -1853,8 +1860,8 @@ async function initCore(appContext) {
   // --- RAPIER INIT ---
   await RAPIER.init();
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
-  window.rapierWorld = rapierWorld;
-  window.rbToMesh = rbToMesh;
+  appContext.systems.rapierWorld = rapierWorld;
+  appContext.systems.rbToMesh = rbToMesh;
 
   // Ground collider
   {
@@ -2216,7 +2223,7 @@ async function initCore(appContext) {
     isLocallyControlled: () => autumnSword?.holder === playerControls
   });
 
-  window.weapons = { iceGun, bow, bomb, autumnSword };
+  appContext.entities.weapons = { iceGun, bow, bomb, autumnSword };
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
@@ -2419,7 +2426,7 @@ async function initCore(appContext) {
     isLocallyControlled: () => torch?.holder === playerControls
   });
 
-  window.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
+  appContext.entities.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -2556,7 +2563,7 @@ async function initCore(appContext) {
     }
   });
   animals = animalManager.getAnimals();
-  window.animals = animals;
+  appContext.entities.animals = animals;
   let didInitialGpsSnap = false;
   let currentPlayerLevel = 1;
 
@@ -2720,7 +2727,7 @@ async function initCore(appContext) {
     const [monster] = monsters.splice(index, 1);
     stopZombieLoopVoice(monsterId);
     cleanupMonster(monster);
-    window.monsters = monsters;
+    appContext.entities.monsters = monsters;
     return true;
   };
 
@@ -3198,7 +3205,7 @@ async function initCore(appContext) {
     if (PERF.disableMonsters) {
       monsters.forEach(monster => cleanupMonster(monster));
       monsters = [];
-      window.monsters = monsters;
+      appContext.entities.monsters = monsters;
       respawnTimers.forEach((timer) => clearTimeout(timer));
       respawnTimers.clear();
       return;
@@ -3217,7 +3224,7 @@ async function initCore(appContext) {
       seenSlots.add(monster.id);
       return true;
     });
-    window.monsters = monsters;
+    appContext.entities.monsters = monsters;
 
     monsterSlotIds.forEach((slotId) => {
       const existing = monsters.find(entry => entry.id === slotId);
@@ -5946,7 +5953,7 @@ async function initCore(appContext) {
     if (playerModel?.position) {
       const distance = hitPosition.distanceTo(playerModel.position);
       if (distance <= BOMB_DAMAGE_RADIUS) {
-        const localControls = window.playerControls;
+        const localControls = appContext.systems.playerControls ?? window.playerControls;
         if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
           localControls.isInvincible = false;
           localControls.invincibleUntil = 0;
@@ -7021,7 +7028,7 @@ async function initCore(appContext) {
   playerControls.isVoiceListening = () => voiceMicState.listening;
   playerControls.getVoiceMicState = () => getVoiceMicState();
 
-  window.playerControls = playerControls;
+  appContext.systems.playerControls = playerControls;
   await initSpellsFeature({
     playerControls,
     getPlayerModel: () => playerModel,
@@ -8851,7 +8858,7 @@ async function initCore(appContext) {
     }
   };
 
-  window.appState = appState;
+  appContext.uiState.appState = appState;
   window.getInventory = getInventory;
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
@@ -8937,7 +8944,7 @@ async function initCore(appContext) {
   }, 60 * 1000);
 
   const consoleDiv = document.getElementById("console-log");
-  if (window.DEBUG_CONSOLE === true) {
+  if (appContext.debugFlags.DEBUG_CONSOLE === true) {
     (function() {
       const originalLog = console.log;
       console.log = function(...args) {
@@ -9630,12 +9637,12 @@ async function initCore(appContext) {
       return false;
     });
     if (removedDeadMonsters) {
-      window.monsters = monsters;
+      appContext.entities.monsters = monsters;
     }
     if (animalManager) {
       animalManager.update(mixerDelta);
       animals = animalManager.getAnimals();
-      window.animals = animals;
+      appContext.entities.animals = animals;
     }
 
     if (isHostNow) {

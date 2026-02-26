@@ -1,3 +1,4 @@
+import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { ATTACKS } from "../items/melee.js";
@@ -435,7 +436,7 @@ export class MonsterCharacter extends CharacterBase {
       const damage = Number.isFinite(hitContext.damage)
         ? Math.max(1, Math.round(hitContext.damage))
         : this.attackDamage;
-      const localControls = window.playerControls;
+      const localControls = appContext.systems.playerControls ?? window.playerControls;
       if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
         localControls.isInvincible = false;
         localControls.invincibleUntil = 0;

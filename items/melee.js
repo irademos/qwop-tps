@@ -1,3 +1,4 @@
+import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from 'three';
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from '../healthUtils.js';
 
@@ -121,9 +122,10 @@ export function updateMeleeAttacks({
           onEntityHit?.({ targetType: target.id === 'local' ? 'player' : 'remotePlayer', targetId: target.id, targetPosition: target.model.position.clone() });
           if (target.id === 'local') {
             window.localHealth = Math.max(0, window.localHealth - attackDamage);
-            if (window.playerControls) {
+            const playerControls = appContext.systems.playerControls ?? window.playerControls;
+            if (playerControls) {
               const dir = new THREE.Vector3().subVectors(target.model.position, attacker.model.position).normalize();
-              window.playerControls.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
+              playerControls.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
             }
           } else {
             const tp = otherPlayers[target.id];
