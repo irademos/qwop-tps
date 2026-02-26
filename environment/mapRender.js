@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { registerTerrainFlatZone, clearTerrainFlatZones } from "./terrainHeight.js";
 
 const ROAD_WIDTHS = {
   footway: 0.4,
@@ -227,6 +228,7 @@ export function createMapRenderer({
     if (!tileKey) return null;
     const tileEntry = ensureTile(tileKey);
     const { pool: tilePool, group: tileGroup } = tileEntry;
+    clearTerrainFlatZones(`road:${tileKey}:`);
     const lines = collectHighwayLines(geojson);
     if (lines.length === 0) {
       clearUnused(tilePool, 0);
@@ -254,6 +256,32 @@ export function createMapRenderer({
         points.push(local);
       }
       if (points.length < 2) continue;
+
+      const zoneSpacing = Math.max(5, width * 0.35);
+      let traveled = 0;
+      for (let i = 0; i < points.length - 1; i += 1) {
+        const a = points[i];
+        const b = points[i + 1];
+        const segDx = b.x - a.x;
+        const segDz = b.z - a.z;
+        const segLen = Math.hypot(segDx, segDz);
+        if (segLen <= Number.EPSILON) continue;
+        const steps = Math.max(1, Math.ceil(segLen / zoneSpacing));
+        for (let step = 0; step <= steps; step += 1) {
+          const t = step / steps;
+          const x = a.x + segDx * t;
+          const z = a.z + segDz * t;
+          registerTerrainFlatZone({
+            x,
+            z,
+            radius: Math.max(2, width * 0.52),
+            blendRadius: Math.max(3, width * 0.85),
+            owner: `road:${tileKey}:${activeIndex}:${Math.round(traveled + segLen * t)}`,
+          });
+        }
+        traveled += segLen;
+      }
+
       const roadMesh = ensureRoadMesh(tilePool, tileGroup, activeIndex, width);
       updateRoadGeometry(roadMesh, points, width, elevation);
       activeIndex += 1;
@@ -268,6 +296,7 @@ export function createMapRenderer({
   }
 
   function removeTile(tileKey) {
+    clearTerrainFlatZones(`road:${tileKey}:`);
     const entry = tileMeshes.get(tileKey);
     if (!entry) return;
     for (const line of entry.pool) {
@@ -288,6 +317,7 @@ export function createMapRenderer({
 
   function dispose() {
     clearTiles();
+    clearTerrainFlatZones("road:");
     for (const material of roadMaterials.values()) {
       material.dispose();
     }

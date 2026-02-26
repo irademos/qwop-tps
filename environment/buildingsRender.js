@@ -5,6 +5,7 @@ import ClipperLib from "clipper-lib";
 import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 import { getKtx2Loader } from "../ktx2Loader.js";
 import { clearClimbableAreas, setClimbableAreas } from "../controls/climb.js";
+import { registerTerrainFlatZone, clearTerrainFlatZones } from "./terrainHeight.js";
 
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const DEFAULT_HEIGHT = 10;
@@ -453,6 +454,7 @@ export function createBuildingsRenderer({ scene, camera, renderer, getTerrainHei
     if (!tileKey) return null;
     const tileEntry = ensureTile(tileKey);
     const { extrudedMesh, flatMesh, extrudedColliderMesh } = tileEntry;
+    clearTerrainFlatZones(`building:${tileKey}:`);
 
     const polygons = collectBuildingPolygons(geojson);
     if (polygons.length === 0) {
@@ -496,6 +498,23 @@ export function createBuildingsRenderer({ scene, camera, renderer, getTerrainHei
         ? getTerrainHeight(centroid.x, -centroid.y)
         : 0;
       const terrainBaseY = Number.isFinite(terrainBase) ? terrainBase : 0;
+      const shapePoints = shape.getPoints();
+      let flatRadius = 6;
+      for (const point of shapePoints) {
+        const px = point.x;
+        const pz = -point.y;
+        const ddx = px - centroid.x;
+        const ddz = pz - (-centroid.y);
+        flatRadius = Math.max(flatRadius, Math.hypot(ddx, ddz));
+      }
+      registerTerrainFlatZone({
+        x: centroid.x,
+        z: -centroid.y,
+        radius: flatRadius + 1.5,
+        blendRadius: Math.max(4, flatRadius * 0.45),
+        height: terrainBaseY,
+        owner: `building:${tileKey}:${extrudedResults.length + flatGeometries.length}`,
+      });
       const dx = centroid.x - cameraPos.x;
       const dz = -centroid.y - cameraPos.z;
       const distance = Math.hypot(dx, dz);
@@ -580,6 +599,7 @@ export function createBuildingsRenderer({ scene, camera, renderer, getTerrainHei
   }
 
   function removeTile(tileKey) {
+    clearTerrainFlatZones(`building:${tileKey}:`);
     const entry = tileMeshes.get(tileKey);
     if (!entry) return;
     disposeGeometry(entry.extrudedMesh);
@@ -597,6 +617,7 @@ export function createBuildingsRenderer({ scene, camera, renderer, getTerrainHei
   }
 
   function dispose() {
+    clearTerrainFlatZones("building:");
     for (const tileKey of tileMeshes.keys()) {
       removeTile(tileKey);
     }

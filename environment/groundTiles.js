@@ -84,6 +84,27 @@ export function createGroundTiles({
     }
   };
 
+  const refreshTile = (key) => {
+    const mesh = tiles.get(key);
+    if (!mesh?.geometry) return false;
+    const [xStr, yStr] = `${key}`.split(',');
+    const tile = { x: Number(xStr), y: Number(yStr) };
+    if (!Number.isFinite(tile.x) || !Number.isFinite(tile.y)) return false;
+    applyTerrainToGroundGeometry({
+      geometry: mesh.geometry,
+      tile,
+      tileSizeMeters,
+      elevation,
+    });
+    return true;
+  };
+
+  const refreshAll = () => {
+    for (const key of tiles.keys()) {
+      refreshTile(key);
+    }
+  };
+
   return {
     tiles,
     material,
@@ -92,6 +113,8 @@ export function createGroundTiles({
     },
     ensureTile,
     removeTile,
+    refreshTile,
+    refreshAll,
     clear
   };
 }

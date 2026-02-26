@@ -7837,6 +7837,7 @@ async function initCore(appContext) {
     const finishBuildingRender = () => {
       if (rebuildId !== mapRebuildToken) return;
       if (changedTileKeys.size === 0) return;
+      groundTiles?.refreshAll?.();
       scheduleBuildingRefresh();
       if (typeof natureController?.refreshTile === "function") {
         for (const tileKey of changedTileKeys) {
@@ -7967,6 +7968,7 @@ async function initCore(appContext) {
         if (!entry?.geojson) continue;
         buildingsRenderer.updateTileBuildings?.(key, entry.geojson, bounds);
       }
+      groundTiles?.refreshAll?.();
       scheduleBuildingRefresh();
       if (typeof natureController?.refreshTilesForCacheTile === "function") {
         for (const key of tilesToUpdate) {
