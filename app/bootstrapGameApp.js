@@ -568,6 +568,7 @@ async function initCore(runtimeContext) {
 
   const audioManager = createAudioManager();
   runtimeContext.systems.audioManager = audioManager;
+  window.audioManager = audioManager;
   let syncBackgroundLoopForDisplayMode = () => {
     audioManager.playBGS('Forest Day/Forest Day.ogg');
   };
@@ -757,6 +758,7 @@ async function initCore(runtimeContext) {
 
   const otherPlayers = {};
   runtimeContext.entities.otherPlayers = otherPlayers;
+  window.otherPlayers = otherPlayers;
   const pendingIncomingPeerData = [];
   let canProcessIncomingPeerData = false;
   const remotePresenceMeta = {};
@@ -769,9 +771,11 @@ async function initCore(runtimeContext) {
 
   let monsters = [];
   runtimeContext.entities.monsters = monsters;
+  window.monsters = monsters;
   let animalManager = null;
   let animals = [];
   runtimeContext.entities.animals = animals;
+  window.animals = animals;
   const npcVoiceSchedule = new Map();
   const zombieVoiceLoops = new Map();
   const getRandomDelayMs = ([min, max]) => {
@@ -1826,7 +1830,9 @@ async function initCore(runtimeContext) {
   mapRenderer = createMapRenderer({ scene, renderer });
   buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
   runtimeContext.systems.mapRenderer = mapRenderer;
+  window.mapRenderer = mapRenderer;
   runtimeContext.systems.buildingsRenderer = buildingsRenderer;
+  window.buildingsRenderer = buildingsRenderer;
   if (buildingsRenderer?.materials) {
     buildingMaterialBase = {
       extruded: captureMaterialBase(buildingsRenderer.materials.extruded),
@@ -1861,7 +1867,9 @@ async function initCore(runtimeContext) {
   await RAPIER.init();
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   runtimeContext.systems.rapierWorld = rapierWorld;
+  window.rapierWorld = rapierWorld;
   runtimeContext.systems.rbToMesh = rbToMesh;
+  window.rbToMesh = rbToMesh;
 
   // Ground collider
   {
@@ -2224,6 +2232,7 @@ async function initCore(runtimeContext) {
   });
 
   runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword };
+  window.weapons = { iceGun, bow, bomb, autumnSword };
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
@@ -2427,6 +2436,7 @@ async function initCore(runtimeContext) {
   });
 
   runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
+  window.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -2564,6 +2574,7 @@ async function initCore(runtimeContext) {
   });
   animals = animalManager.getAnimals();
   runtimeContext.entities.animals = animals;
+  window.animals = animals;
   let didInitialGpsSnap = false;
   let currentPlayerLevel = 1;
 
@@ -2728,6 +2739,7 @@ async function initCore(runtimeContext) {
     stopZombieLoopVoice(monsterId);
     cleanupMonster(monster);
     runtimeContext.entities.monsters = monsters;
+  window.monsters = monsters;
     return true;
   };
 
@@ -3206,6 +3218,7 @@ async function initCore(runtimeContext) {
       monsters.forEach(monster => cleanupMonster(monster));
       monsters = [];
       runtimeContext.entities.monsters = monsters;
+  window.monsters = monsters;
       respawnTimers.forEach((timer) => clearTimeout(timer));
       respawnTimers.clear();
       return;
@@ -3225,6 +3238,7 @@ async function initCore(runtimeContext) {
       return true;
     });
     runtimeContext.entities.monsters = monsters;
+  window.monsters = monsters;
 
     monsterSlotIds.forEach((slotId) => {
       const existing = monsters.find(entry => entry.id === slotId);
@@ -7029,6 +7043,7 @@ async function initCore(runtimeContext) {
   playerControls.getVoiceMicState = () => getVoiceMicState();
 
   runtimeContext.systems.playerControls = playerControls;
+  window.playerControls = playerControls;
   await initSpellsFeature({
     playerControls,
     getPlayerModel: () => playerModel,
@@ -8859,6 +8874,7 @@ async function initCore(runtimeContext) {
   };
 
   runtimeContext.uiState.appState = appState;
+  window.appState = appState;
   window.getInventory = getInventory;
   window.addToInventory = addToInventory;
   window.removeFromInventory = removeFromInventory;
@@ -9638,11 +9654,13 @@ async function initCore(runtimeContext) {
     });
     if (removedDeadMonsters) {
       runtimeContext.entities.monsters = monsters;
+  window.monsters = monsters;
     }
     if (animalManager) {
       animalManager.update(mixerDelta);
       animals = animalManager.getAnimals();
       runtimeContext.entities.animals = animals;
+  window.animals = animals;
     }
 
     if (isHostNow) {
