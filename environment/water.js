@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getProceduralTerrainHeight } from './terrainHeight.js';
 
 // Store all water bodies for later lookup
 const waterBodies = [];
@@ -30,7 +31,7 @@ export function registerIsland({ center, radius, surfaceRadius = radius, getHeig
 }
 
 export function getTerrainHeight(x, z) {
-  let height = 0; //SEA_FLOOR_Y;
+  let height = getProceduralTerrainHeight(x, z);
   for (const island of islandAreas) {
     const dx = x - island.center.x;
     const dz = z - island.center.z;

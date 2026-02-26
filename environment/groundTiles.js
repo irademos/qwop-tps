@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { getKtx2Loader } from "../ktx2Loader.js";
+import { applyTerrainToGroundGeometry } from "./terrainHeight.js";
 
 export const GROUND_TEX_REPEAT_PER_TILE = 6;
 const GROUND_TEXTURE_URL = "/assets/textures/grass/grass_albedo.ktx2";
@@ -17,7 +18,8 @@ export function createGroundTiles({
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     emissive: 0x1f1f1f,
-    emissiveIntensity: 0.25
+    emissiveIntensity: 0.25,
+    flatShading: true
   });
   const state = { texture: null };
 
@@ -38,7 +40,13 @@ export function createGroundTiles({
   });
 
   const createGroundMesh = (tile) => {
-    const geometry = new THREE.PlaneGeometry(tileSizeMeters, tileSizeMeters);
+    const geometry = new THREE.PlaneGeometry(tileSizeMeters, tileSizeMeters, 24, 24);
+    applyTerrainToGroundGeometry({
+      geometry,
+      tile,
+      tileSizeMeters,
+      elevation,
+    });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(
