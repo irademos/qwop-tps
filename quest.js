@@ -1,3 +1,4 @@
+import { appContext } from './src/runtime/appContext.js';
 import * as THREE from "three";
 import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import { loadMonsterModel } from "./models/monsterModel.js";
@@ -592,7 +593,7 @@ export class QuestManager {
 
   getClosestMonster(position) {
     if (!position) return null;
-    const monsters = Array.isArray(window.monsters) ? window.monsters : [];
+    const monsters = Array.isArray(appContext.entities.monsters) ? appContext.entities.monsters : (Array.isArray(window.monsters) ? window.monsters : []);
     let closest = null;
     let closestDistance = Infinity;
     monsters.forEach((monster) => {

@@ -1,3 +1,4 @@
+import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from '../environment/water.js';
@@ -212,9 +213,12 @@ export class PlayerControls {
     
     // Initial player position
     const spawn = getSpawnPosition();
-    this.playerX = spawn.x;
-    this.playerY = spawn.y;
-    this.playerZ = spawn.z;
+    const spawnX = Number.isFinite(spawn?.x) ? spawn.x : 0;
+    const spawnY = Number.isFinite(spawn?.y) ? spawn.y : 0.9;
+    const spawnZ = Number.isFinite(spawn?.z) ? spawn.z : 0;
+    this.playerX = spawnX;
+    this.playerY = spawnY;
+    this.playerZ = spawnZ;
 
     
     // Set initial player model position if it exists
@@ -758,7 +762,7 @@ export class PlayerControls {
     const actionContainer = document.getElementById('action-buttons');
     if (!actionContainer) return;
 
-    const appState = window.appState;
+    const appState = appContext.uiState.appState ?? window.appState;
     const inventory = appState?.getInventory?.() || {};
     const equipCandidates = [
       { id: 'bomb', label: 'Bomb' },
@@ -1931,6 +1935,13 @@ export class PlayerControls {
         if (hitY > groundY) groundY = hitY;
       }
     }
+    if (!Number.isFinite(groundY)) {
+      // Keep ground math stable even if terrain sampling/raycast is temporarily unavailable.
+      groundY = Number.isFinite(t.y)
+        ? t.y - (PLAYER_HALF_HEIGHT + PLAYER_RADIUS)
+        : 0;
+    }
+
     const groundExpectedY = groundY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
     const grounded = !this.isInWater && t.y <= groundExpectedY + 0.05;
     if (grounded && !this.isInWater) {
@@ -2437,7 +2448,7 @@ export class PlayerControls {
   }
 
   getWeapons() {
-    const weapons = Object.values(window.weapons || {}).filter(Boolean);
+    const weapons = Object.values(appContext.entities.weapons || window.weapons || {}).filter(Boolean);
     const pickups = Array.isArray(window.weaponPickups) ? window.weaponPickups : [];
     return weapons.concat(pickups);
   }
@@ -3030,7 +3041,7 @@ export class PlayerControls {
     let closest = null;
     let minDist = 1.5;
 
-    const others = window.otherPlayers || {};
+    const others = appContext.entities.otherPlayers || window.otherPlayers || {};
     for (const [id, p] of Object.entries(others)) {
       const dist = playerPos.distanceTo(p.model.position);
       if (dist < minDist) {
@@ -3039,7 +3050,7 @@ export class PlayerControls {
       }
     }
 
-    const monsterList = window.monsters || [];
+    const monsterList = appContext.entities.monsters || window.monsters || [];
     for (const mon of monsterList) {
       const model = mon?.model || mon;
       if (!model) continue;
@@ -3130,7 +3141,7 @@ export class PlayerControls {
       this.setEngaged(false);
       return;
     }
-    const monsters = window.monsters || [];
+    const monsters = appContext.entities.monsters || window.monsters || [];
     let closest = null;
     let closestDistance = Infinity;
     for (const monster of monsters) {
