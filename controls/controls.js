@@ -1,7 +1,8 @@
 import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
-import { getWaterDepth, SWIM_DEPTH_THRESHOLD, getTerrainHeight } from '../environment/water.js';
+import { getWaterDepth, SWIM_DEPTH_THRESHOLD } from '../environment/water.js';
+import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { getSpawnPosition } from '../spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";

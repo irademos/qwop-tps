@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { getTerrainHeight } from '../environment/water.js';
+import { getTerrainHeight } from '../environment/terrainHeight.js';
 
 const DEFAULT_POSITION = new THREE.Vector3(-6, 0, 5);
 const DEFAULT_PICKUP_RADIUS = 3;

@@ -4,7 +4,11 @@ import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { loadMonsterModel } from "../models/monsterModel.js";
 import { MonsterCharacter } from "../characters/MonsterCharacter.js";
 import { createFriendlyNpcManager } from "../friendlyNpcManager.js";
-import { getTerrainHeight } from '../environment/water.js';
+import {
+  clearTerrainStampsForTile,
+  getTerrainHeight,
+  setTerrainStampsForTile
+} from '../environment/terrainHeight.js';
 import { createFire } from '../environment/fire.js';
 import { Multiplayer } from '../peerConnection.js';
 import { PlayerControls } from '../controls/controls.js';
@@ -7979,6 +7983,7 @@ async function initCore(runtimeContext) {
     for (const key of tilesToUpdate) {
       const entry = tileCache.cache.get(key);
       if (!entry?.geojson) continue;
+      setTerrainStampsForTile(key, entry.geojson, bounds);
       mapRenderer.updateTileHighways?.(key, entry.geojson, bounds);
     }
 
@@ -8059,6 +8064,7 @@ async function initCore(runtimeContext) {
       for (const key of evictedKeys) {
         mapRenderer.removeTile?.(key);
         buildingsRenderer.removeTile?.(key);
+        clearTerrainStampsForTile(key);
         renderedTileGeojson.delete(key);
         tileRenderBounds.delete(key);
         deferredTileUpdates.delete(key);
