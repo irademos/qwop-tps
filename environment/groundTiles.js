@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { getKtx2Loader } from "../ktx2Loader.js";
+import { getStampedTerrainHeight } from "./terrainHeight.js";
 
 export const GROUND_TEX_REPEAT_PER_TILE = 6;
 const GROUND_TEXTURE_URL = "/assets/textures/grass/grass_albedo.ktx2";
@@ -8,10 +9,22 @@ export function createGroundTiles({
   scene,
   renderer,
   tileSizeMeters = 300,
+  tileResolution = 32,
   elevation = 0,
+  terrainSeed = "default",
+  terrainSettingsKey = "default",
   textureUrl = GROUND_TEXTURE_URL
 } = {}) {
   const tiles = new Map();
+  const geometryCache = new Map();
+
+  const segmentCount = Math.max(1, Math.floor(tileResolution));
+  const terrainKey = JSON.stringify({
+    tileSizeMeters,
+    tileResolution: segmentCount,
+    terrainSeed,
+    terrainSettingsKey
+  });
 
   const repeatScale = (tileSizeMeters / 300) * GROUND_TEX_REPEAT_PER_TILE;
   const material = new THREE.MeshStandardMaterial({
@@ -38,7 +51,27 @@ export function createGroundTiles({
   });
 
   const createGroundMesh = (tile) => {
-    const geometry = new THREE.PlaneGeometry(tileSizeMeters, tileSizeMeters);
+    const cacheKey = `${tile.x},${tile.y}|${terrainKey}`;
+    let geometry = geometryCache.get(cacheKey);
+    if (!geometry) {
+      geometry = new THREE.PlaneGeometry(tileSizeMeters, tileSizeMeters, segmentCount, segmentCount);
+      const positions = geometry.attributes.position;
+      const centerX = (tile.x + 0.5) * tileSizeMeters;
+      const centerZ = -(tile.y + 0.5) * tileSizeMeters;
+
+      for (let i = 0; i < positions.count; i += 1) {
+        const localX = positions.getX(i);
+        const localY = positions.getY(i);
+        const worldX = centerX + localX;
+        const worldZ = centerZ - localY;
+        positions.setZ(i, getStampedTerrainHeight(worldX, worldZ));
+      }
+
+      positions.needsUpdate = true;
+      geometry.computeVertexNormals();
+      geometryCache.set(cacheKey, geometry);
+    }
+
     const mesh = new THREE.Mesh(geometry, material);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(
@@ -66,7 +99,6 @@ export function createGroundTiles({
     if (mesh.parent) {
       mesh.parent.remove(mesh);
     }
-    mesh.geometry?.dispose?.();
     return true;
   };
 
@@ -74,6 +106,10 @@ export function createGroundTiles({
     for (const key of tiles.keys()) {
       removeTile(key);
     }
+    for (const geometry of geometryCache.values()) {
+      geometry.dispose?.();
+    }
+    geometryCache.clear();
   };
 
   return {
