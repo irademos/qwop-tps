@@ -3,9 +3,9 @@ const METERS_PER_DEGREE_LAT = 111_132.92;
 const BASE_NOISE_SCALE_X = 0.0035;
 const BASE_NOISE_SCALE_Z = 0.0042;
 const BASE_NOISE_SCALE_DIAG = 0.0024;
-const BASE_HEIGHT_A = 1.8;
-const BASE_HEIGHT_B = 1.2;
-const BASE_HEIGHT_C = 0.9;
+const BASE_HEIGHT_A = 0.35;
+const BASE_HEIGHT_B = 0.25;
+const BASE_HEIGHT_C = 0.15;
 
 const BUILDING_FALLOFF_METERS = 8;
 const ROAD_FALLOFF_METERS = 6;
@@ -189,7 +189,7 @@ function collectBuildings(geojson, origin, lonScale) {
 export function getBaseTerrainHeight(x, z) {
   return (
     Math.sin(x * BASE_NOISE_SCALE_X) * BASE_HEIGHT_A
-    + Math.cos(z * BASE_NOISE_SCALE_Z) * BASE_HEIGHT_B
+    + Math.sin(z * BASE_NOISE_SCALE_Z) * BASE_HEIGHT_B
     + Math.sin((x + z) * BASE_NOISE_SCALE_DIAG) * BASE_HEIGHT_C
   );
 }
