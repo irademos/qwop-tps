@@ -3,6 +3,7 @@ import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 import { updateArrowProjectile } from "./arrow.js";
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../healthUtils.js";
+import { getTerrainHeight } from "../environment/water.js";
 
 const detachProjectileMesh = (mesh) => {
   if (!mesh) return;
@@ -72,7 +73,8 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   }
   const spawnPosition = position.clone();
   mesh.position.copy(spawnPosition);
-  const groundY = half;
+  const terrainY = getTerrainHeight(mesh.position.x, mesh.position.z);
+  const groundY = terrainY + half;
   if (mesh.position.y < groundY) {
     mesh.position.y = groundY;
   }
@@ -157,7 +159,8 @@ export function updateProjectiles({
     updateArrowProjectile(proj, rb, vel);
 
     if (typeof proj.userData.onGroundHit === 'function' && !proj.userData.hasHitGround) {
-      const groundY = Number.isFinite(proj.userData.groundY) ? proj.userData.groundY : 0.3;
+      const dynamicGround = getTerrainHeight(proj.position.x, proj.position.z) + 0.3;
+      const groundY = Number.isFinite(proj.userData.groundY) ? proj.userData.groundY : dynamicGround;
       if (proj.position.y <= groundY && vel.y <= 0.1) {
         proj.userData.hasHitGround = true;
         proj.userData.onGroundHit(proj.position.clone(), proj);

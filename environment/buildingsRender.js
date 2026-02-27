@@ -5,6 +5,7 @@ import ClipperLib from "clipper-lib";
 import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 import { getKtx2Loader } from "../ktx2Loader.js";
 import { clearClimbableAreas, setClimbableAreas } from "../controls/climb.js";
+import { clearTerrainFlatteningForSource, registerTerrainBuildingFootprints } from "./water.js";
 
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const DEFAULT_HEIGHT = 10;
@@ -465,6 +466,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedMesh.visible = false;
       flatMesh.visible = false;
       extrudedColliderMesh.visible = false;
+      clearTerrainFlatteningForSource(`buildings:${tileKey}:buildings`);
       return tileEntry;
     }
 
@@ -479,6 +481,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedMesh.visible = false;
       flatMesh.visible = false;
       extrudedColliderMesh.visible = false;
+      clearTerrainFlatteningForSource(`buildings:${tileKey}:buildings`);
       return tileEntry;
     }
 
@@ -487,11 +490,16 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     const flatGeometries = [];
     const extrudedResults = [];
+    const terrainFootprints = [];
     for (const polygon of polygons) {
       const shape = makeShape(polygon.rings, bounds, lonScale);
       if (!shape) continue;
 
-      const centroid = estimateCentroid(shape.getPoints());
+      const outerPoints = shape.getPoints();
+      if (outerPoints.length >= 3) {
+        terrainFootprints.push(outerPoints.map((pt) => ({ x: pt.x, z: -pt.y })));
+      }
+      const centroid = estimateCentroid(outerPoints);
       const dx = centroid.x - cameraPos.x;
       const dz = -centroid.y - cameraPos.z;
       const distance = Math.hypot(dx, dz);
@@ -542,6 +550,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     disposeGeometry(extrudedMesh);
     disposeGeometry(flatMesh);
+    registerTerrainBuildingFootprints(`buildings:${tileKey}`, terrainFootprints);
 
     if (extrudedResults.length > 0) {
       const merged = mergeGeometries(extrudedResults, false);
@@ -578,6 +587,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   function removeTile(tileKey) {
     const entry = tileMeshes.get(tileKey);
     if (!entry) return;
+    clearTerrainFlatteningForSource(`buildings:${tileKey}:buildings`);
     disposeGeometry(entry.extrudedMesh);
     disposeGeometry(entry.flatMesh);
     disposeGeometry(entry.extrudedColliderMesh);

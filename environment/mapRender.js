@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { clearTerrainFlatteningForSource, registerTerrainRoadSegments } from "./water.js";
 
 const ROAD_WIDTHS = {
   footway: 0.4,
@@ -220,18 +221,21 @@ export function createMapRenderer({
     const lines = collectHighwayLines(geojson);
     if (lines.length === 0) {
       clearUnused(tilePool, 0);
+      clearTerrainFlatteningForSource(`map:${tileKey}:roads`);
       return tileEntry;
     }
 
     const bounds = boundsOverride ?? computeBounds(lines);
     if (!bounds) {
       clearUnused(tilePool, 0);
+      clearTerrainFlatteningForSource(`map:${tileKey}:roads`);
       return tileEntry;
     }
 
     const lonScale = metersPerDegreeLon(bounds.centerLat);
 
     let activeIndex = 0;
+    const terrainSegments = [];
     for (const line of lines) {
       if (!line.coords || line.coords.length < 2) continue;
       const width = resolveLineWidth(line.highway);
@@ -246,13 +250,22 @@ export function createMapRenderer({
       if (points.length < 2) continue;
       const roadMesh = ensureRoadMesh(tilePool, tileGroup, activeIndex, width);
       updateRoadGeometry(roadMesh, points, width, elevation);
+      for (let i = 0; i < points.length - 1; i += 1) {
+        terrainSegments.push({
+          start: points[i],
+          end: points[i + 1],
+          width
+        });
+      }
       activeIndex += 1;
     }
 
     if (activeIndex === 0) {
       clearUnused(tilePool, 0);
+      clearTerrainFlatteningForSource(`map:${tileKey}:roads`);
       return tileEntry;
     }
+    registerTerrainRoadSegments(`map:${tileKey}`, terrainSegments);
     clearUnused(tilePool, activeIndex);
     return tileEntry;
   }
@@ -260,6 +273,7 @@ export function createMapRenderer({
   function removeTile(tileKey) {
     const entry = tileMeshes.get(tileKey);
     if (!entry) return;
+    clearTerrainFlatteningForSource(`map:${tileKey}:roads`);
     for (const line of entry.pool) {
       line?.geometry?.dispose?.();
     }

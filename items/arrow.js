@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
+import { getTerrainHeight } from "../environment/water.js";
 
-const ARROW_GROUND_Y = 0.2;
+const ARROW_GROUND_OFFSET = 0.2;
 const ARROW_MIN_SPEED_SQ = 0.0001;
 const ARROW_TRAIL_MIN_SPEED = 0.2;
 const ARROW_TRAIL_MAX_OPACITY = 0.35;
@@ -117,7 +118,7 @@ export const spawnArrowProjectile = ({
 
   const latest = list[list.length - 1];
   if (latest) {
-    latest.userData.arrowGroundY = ARROW_GROUND_Y;
+    latest.userData.arrowGroundY = getTerrainHeight(position.x, position.z) + ARROW_GROUND_OFFSET;
     latest.userData.arrowStuck = false;
   }
   return latest;
@@ -145,9 +146,10 @@ export const updateArrowProjectile = (proj, rb, velocity) => {
 
   if (proj.userData.arrowStuck) return;
 
+  const sampledGroundY = getTerrainHeight(proj.position.x, proj.position.z) + ARROW_GROUND_OFFSET;
   const groundY = Number.isFinite(proj.userData.arrowGroundY)
-    ? proj.userData.arrowGroundY
-    : ARROW_GROUND_Y;
+    ? Math.max(proj.userData.arrowGroundY, sampledGroundY)
+    : sampledGroundY;
   if (proj.position.y <= groundY && velocity.y <= 0) {
     proj.userData.arrowStuck = true;
     rb.setLinvel({ x: 0, y: 0, z: 0 }, true);

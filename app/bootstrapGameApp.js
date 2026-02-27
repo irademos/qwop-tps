@@ -187,7 +187,6 @@ const ARROW_PROJECTILE_LIFETIME = 6000;
 const BOMB_THROW_SPEED = 11;
 const BOMB_THROW_LIFETIME = 15000;
 const BOMB_THROW_UPWARD_BIAS = 0.25;
-const BOMB_GROUND_Y = 0.25;
 const BOMB_DAMAGE_RADIUS = 5;
 const BOMB_BASE_DAMAGE = 6;
 const BOMB_KNOCKBACK_STRENGTH = 6;
@@ -6123,8 +6122,7 @@ async function initCore(runtimeContext) {
       onGroundHit: (hitPosition) => {
         spawnBombMist(scene, bombMists, hitPosition);
         applyBombImpactDamage(hitPosition, shooterId);
-      },
-      groundY: BOMB_GROUND_Y
+      }
     });
 
     const latest = list[list.length - 1];
