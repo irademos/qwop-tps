@@ -1,3 +1,5 @@
+import { resolveRoadWidth } from "./roadWidths.js";
+
 const METERS_PER_DEGREE_LAT = 111_132.92;
 
 const BASE_NOISE_SCALE_X = 0.0035;
@@ -9,7 +11,6 @@ const BASE_HEIGHT_C = 0.15;
 
 const BUILDING_FALLOFF_METERS = 8;
 const ROAD_FALLOFF_METERS = 6;
-const ROAD_DEFAULT_WIDTH = 8;
 
 const terrainStampTiles = new Map();
 
@@ -28,6 +29,11 @@ function toLocalMeters(coord, origin, lonScale) {
 function smoothstep01(t) {
   const c = Math.min(Math.max(t, 0), 1);
   return c * c * (3 - 2 * c);
+}
+
+function quintic01(t) {
+  const c = Math.min(Math.max(t, 0), 1);
+  return c * c * c * (c * (c * 6 - 15) + 10);
 }
 
 function distanceToSegment2D(px, pz, ax, az, bx, bz) {
@@ -104,6 +110,25 @@ function calcInfluence(distance, falloff) {
   return 1 - smoothstep01(distance / falloff);
 }
 
+function computeRoadGrade(points) {
+  let total = 0;
+  for (const point of points) {
+    total += getBaseTerrainHeight(point.x, point.z);
+  }
+  return points.length > 0 ? total / points.length : 0;
+}
+
+function buildRoadStamp(points, width) {
+  if (!Array.isArray(points) || points.length < 2 || !Number.isFinite(width) || width <= 0) return null;
+  const innerHalfWidth = width * 0.5;
+  return {
+    centerline: points,
+    innerHalfWidth,
+    outerHalfWidth: innerHalfWidth + ROAD_FALLOFF_METERS,
+    targetHeight: computeRoadGrade(points)
+  };
+}
+
 function collectRoads(geojson, origin, lonScale) {
   const roads = [];
   const features = geojson?.prefiltered?.highways ?? geojson?.features ?? [];
@@ -111,7 +136,9 @@ function collectRoads(geojson, origin, lonScale) {
     if (!feature?.properties?.highway) continue;
     const geometry = feature.geometry;
     if (!geometry) continue;
-    const width = Number(feature?.properties?.width) || ROAD_DEFAULT_WIDTH;
+    const classifiedWidth = resolveRoadWidth(feature.properties.highway);
+    const explicitWidth = Number(feature?.properties?.width);
+    const width = Number.isFinite(explicitWidth) && explicitWidth > 0 ? explicitWidth : classifiedWidth;
     const lines = geometry.type === 'LineString'
       ? [geometry.coordinates]
       : geometry.type === 'MultiLineString'
@@ -126,14 +153,8 @@ function collectRoads(geojson, origin, lonScale) {
         if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
         points.push(toLocalMeters(coord, origin, lonScale));
       }
-      if (points.length < 2) continue;
-      const sample = points[Math.floor(points.length / 2)];
-      roads.push({
-        points,
-        halfWidth: width * 0.5,
-        targetHeight: getBaseTerrainHeight(sample.x, sample.z),
-        falloff: ROAD_FALLOFF_METERS
-      });
+      const stamp = buildRoadStamp(points, width);
+      if (stamp) roads.push(stamp);
     }
   }
   return roads;
@@ -208,39 +229,58 @@ export function clearTerrainStampsForTile(tileKey) {
 
 export function getStampedTerrainHeight(x, z) {
   const baseHeight = getBaseTerrainHeight(x, z);
-  let influenceTotal = 0;
-  let weightedTarget = 0;
 
+  let roadInfluenceTotal = 0;
+  let roadWeightedTarget = 0;
   for (const stampData of terrainStampTiles.values()) {
     for (const road of stampData.roads ?? []) {
-      let minDistance = Infinity;
-      const points = road.points ?? [];
+      let minDistanceToCenter = Infinity;
+      const points = road.centerline ?? [];
       for (let i = 0; i < points.length - 1; i += 1) {
         const a = points[i];
         const b = points[i + 1];
-        const d = distanceToSegment2D(x, z, a.x, a.z, b.x, b.z) - road.halfWidth;
-        if (d < minDistance) minDistance = d;
+        const d = distanceToSegment2D(x, z, a.x, a.z, b.x, b.z);
+        if (d < minDistanceToCenter) minDistanceToCenter = d;
       }
-      const influence = calcInfluence(minDistance, road.falloff ?? ROAD_FALLOFF_METERS);
+      if (!Number.isFinite(minDistanceToCenter)) continue;
+      let influence = 0;
+      if (minDistanceToCenter <= road.innerHalfWidth) {
+        influence = 1;
+      } else if (minDistanceToCenter < road.outerHalfWidth) {
+        const band = Math.max(road.outerHalfWidth - road.innerHalfWidth, Number.EPSILON);
+        const t = (minDistanceToCenter - road.innerHalfWidth) / band;
+        influence = 1 - quintic01(t);
+      }
       if (influence <= 0) continue;
-      influenceTotal += influence;
-      weightedTarget += road.targetHeight * influence;
+      roadInfluenceTotal += influence;
+      roadWeightedTarget += road.targetHeight * influence;
     }
+  }
 
+  let terrainHeight = baseHeight;
+  if (roadInfluenceTotal > 0) {
+    const roadBlend = Math.min(roadInfluenceTotal, 1);
+    const roadTarget = roadWeightedTarget / roadInfluenceTotal;
+    terrainHeight = baseHeight * (1 - roadBlend) + roadTarget * roadBlend;
+  }
+
+  let buildingInfluenceTotal = 0;
+  let buildingWeightedTarget = 0;
+  for (const stampData of terrainStampTiles.values()) {
     for (const building of stampData.buildings ?? []) {
       const isInside = isPointInPolygonWithHoles(x, z, building.rings);
       const distance = isInside ? 0 : distanceToPolygonBoundary(x, z, building.rings);
       const influence = calcInfluence(distance, building.falloff ?? BUILDING_FALLOFF_METERS);
       if (influence <= 0) continue;
-      influenceTotal += influence;
-      weightedTarget += building.targetHeight * influence;
+      buildingInfluenceTotal += influence;
+      buildingWeightedTarget += building.targetHeight * influence;
     }
   }
 
-  if (influenceTotal <= 0) return baseHeight;
-  const blend = Math.min(influenceTotal, 1);
-  const target = weightedTarget / influenceTotal;
-  return baseHeight * (1 - blend) + target * blend;
+  if (buildingInfluenceTotal <= 0) return terrainHeight;
+  const buildingBlend = Math.min(buildingInfluenceTotal, 1);
+  const buildingTarget = buildingWeightedTarget / buildingInfluenceTotal;
+  return terrainHeight * (1 - buildingBlend) + buildingTarget * buildingBlend;
 }
 
 export function getTerrainHeight(x, z) {

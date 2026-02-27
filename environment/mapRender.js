@@ -1,26 +1,11 @@
 import * as THREE from "three";
 
-const ROAD_WIDTHS = {
-  footway: 0.4,
-  path: 0.5,
-  cycleway: 0.6,
-  steps: 0.35,
-  track: 0.7,
-  service: 0.9,
-  residential: 1.2,
-  living_street: 1.1,
-  unclassified: 1.1,
-  tertiary: 1.5,
-  secondary: 2.0,
-  primary: 2.6,
-  trunk: 3.0,
-  motorway: 3.4
-};
-
-const DEFAULT_WIDTH = 1.0;
-const ROAD_WIDTH_SCALE = 10;
+import { getTerrainHeight } from "./terrainHeight.js";
+import { resolveRoadWidth } from "./roadWidths.js";
 const DEFAULT_COLOR = 0x2f2f2f;
 const DEFAULT_ELEVATION = 0.01;
+const ROAD_SURFACE_EPSILON = 0.025;
+const ROAD_STAMP_FALLOFF_METERS = 6;
 const METERS_PER_DEGREE_LAT = 111_132.92;
 
 function metersPerDegreeLon(latDeg) {
@@ -88,12 +73,6 @@ function makeRoadMaterial(color) {
   });
 }
 
-function resolveLineWidth(highway) {
-  if (typeof highway !== "string") return DEFAULT_WIDTH;
-  const baseWidth = ROAD_WIDTHS[highway] ?? DEFAULT_WIDTH;
-  return baseWidth * ROAD_WIDTH_SCALE;
-}
-
 export function createMapRenderer({
   scene,
   renderer,
@@ -141,10 +120,22 @@ export function createMapRenderer({
     return mesh;
   }
 
-  function updateRoadGeometry(mesh, points, width, y) {
-    if (!mesh?.geometry || !Array.isArray(points) || points.length < 2) return;
-
+  function buildRoadStamp(points, width) {
+    if (!Array.isArray(points) || points.length < 2 || !Number.isFinite(width) || width <= 0) return null;
     const halfWidth = width * 0.5;
+    return {
+      points,
+      width,
+      innerHalfWidth: halfWidth,
+      outerHalfWidth: halfWidth + ROAD_STAMP_FALLOFF_METERS
+    };
+  }
+
+  function updateRoadGeometry(mesh, stamp, elevationOffset) {
+    if (!mesh?.geometry || !stamp || !Array.isArray(stamp.points) || stamp.points.length < 2) return;
+
+    const halfWidth = stamp.innerHalfWidth;
+    const points = stamp.points;
     const vertices = [];
     const indices = [];
 
@@ -160,11 +151,19 @@ export function createMapRenderer({
       const nz = dx / length;
 
       const baseIndex = vertices.length / 3;
+      const l0x = start.x + nx * halfWidth;
+      const l0z = start.z + nz * halfWidth;
+      const r0x = start.x - nx * halfWidth;
+      const r0z = start.z - nz * halfWidth;
+      const l1x = end.x + nx * halfWidth;
+      const l1z = end.z + nz * halfWidth;
+      const r1x = end.x - nx * halfWidth;
+      const r1z = end.z - nz * halfWidth;
       vertices.push(
-        start.x + nx * halfWidth, y, start.z + nz * halfWidth,
-        start.x - nx * halfWidth, y, start.z - nz * halfWidth,
-        end.x + nx * halfWidth, y, end.z + nz * halfWidth,
-        end.x - nx * halfWidth, y, end.z - nz * halfWidth
+        l0x, getTerrainHeight(l0x, l0z) + elevationOffset, l0z,
+        r0x, getTerrainHeight(r0x, r0z) + elevationOffset, r0z,
+        l1x, getTerrainHeight(l1x, l1z) + elevationOffset, l1z,
+        r1x, getTerrainHeight(r1x, r1z) + elevationOffset, r1z
       );
       indices.push(
         baseIndex, baseIndex + 2, baseIndex + 1,
@@ -234,7 +233,7 @@ export function createMapRenderer({
     let activeIndex = 0;
     for (const line of lines) {
       if (!line.coords || line.coords.length < 2) continue;
-      const width = resolveLineWidth(line.highway);
+      const width = resolveRoadWidth(line.highway);
       const points = [];
       for (const coord of line.coords) {
         if (!coord || coord.length < 2) continue;
@@ -244,8 +243,11 @@ export function createMapRenderer({
         points.push(local);
       }
       if (points.length < 2) continue;
+      const stamp = buildRoadStamp(points, width);
+      if (!stamp) continue;
       const roadMesh = ensureRoadMesh(tilePool, tileGroup, activeIndex, width);
-      updateRoadGeometry(roadMesh, points, width, elevation);
+      roadMesh.userData.roadStamp = stamp;
+      updateRoadGeometry(roadMesh, stamp, elevation + ROAD_SURFACE_EPSILON);
       activeIndex += 1;
     }
 
