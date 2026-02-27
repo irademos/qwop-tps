@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getTerrainHeight } from '../environment/water.js';
+import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { Weapon } from './weapon.js';
 import { applyEmissiveGlow, LIGHT_SOURCE_CONFIGS } from '../light_sources.js';
 

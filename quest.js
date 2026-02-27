@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { CHARACTER_MOVEMENT } from "./characters/CharacterBase.js";
 import { loadMonsterModel } from "./models/monsterModel.js";
 import { FriendlyCharacter } from "./characters/FriendlyCharacter.js";
-import { getTerrainHeight } from "./environment/water.js";
+import { getTerrainHeight } from "./environment/terrainHeight.js";
 import { ATTACKS } from "./items/melee.js";
 
 const QUEST_FRIEND_MODEL = "/models/cowboy.fbx";

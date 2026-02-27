@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { getTerrainHeight } from '../environment/water.js';
+import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { createStaticBoxColliderForObject, removeStaticBoxCollider, syncStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
 
 const DEFAULT_CHEST_POSITION = new THREE.Vector3(1.5, 0, 1.5);

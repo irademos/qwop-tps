@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { getTerrainHeight } from '../environment/water.js';
+import { getTerrainHeight } from '../environment/terrainHeight.js';
 
 export const CRAFT_TABLE_SCALE = 1.2;
 export const CRAFT_TABLE_POSITION = new THREE.Vector3(1.5, 0, 0.5);

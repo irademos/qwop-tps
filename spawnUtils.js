@@ -1,4 +1,5 @@
-import { getTerrainHeight, getWaterDepth } from './environment/water.js';
+import { getWaterDepth } from './environment/water.js';
+import { getTerrainHeight } from './environment/terrainHeight.js';
 
 const DEFAULT_RADIUS = 12;
 const MAX_ATTEMPTS = 30;

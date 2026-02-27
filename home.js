@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { ref, update } from 'firebase/database';
 import { db } from './firebase-init.js';
-import { getTerrainHeight } from './environment/water.js';
+import { getTerrainHeight } from './environment/terrainHeight.js';
 
 const HOME_STORAGE_INTERACT_DISTANCE = 2.4;
 const HOME_STORAGE_CHEST_SCALE = 0.015;

@@ -1,4 +1,9 @@
 import * as THREE from 'three';
+import {
+  getBaseTerrainHeight as getSharedBaseTerrainHeight,
+  getStampedTerrainHeight as getSharedStampedTerrainHeight,
+  getTerrainHeight as getSharedTerrainHeight
+} from './terrainHeight.js';
 
 // Store all water bodies for later lookup
 const waterBodies = [];
@@ -29,20 +34,36 @@ export function registerIsland({ center, radius, surfaceRadius = radius, getHeig
   });
 }
 
-export function getTerrainHeight(x, z) {
-  let height = 0; //SEA_FLOOR_Y;
+function getIslandHeight(x, z) {
+  let height = -Infinity;
   for (const island of islandAreas) {
     const dx = x - island.center.x;
     const dz = z - island.center.z;
     const dist = Math.hypot(dx, dz);
-    if (dist <= island.radius) {
-      if (typeof island.getHeight === 'function') {
-        const h = island.getHeight(x, z);
-        if (h > height) height = h;
-      }
+    if (dist <= island.radius && typeof island.getHeight === 'function') {
+      const h = island.getHeight(x, z);
+      if (Number.isFinite(h) && h > height) height = h;
     }
   }
   return height;
+}
+
+export function getBaseTerrainHeight(x, z) {
+  const shared = getSharedBaseTerrainHeight(x, z);
+  const island = getIslandHeight(x, z);
+  return Number.isFinite(island) ? Math.max(shared, island) : shared;
+}
+
+export function getStampedTerrainHeight(x, z) {
+  const shared = getSharedStampedTerrainHeight(x, z);
+  const island = getIslandHeight(x, z);
+  return Number.isFinite(island) ? Math.max(shared, island) : shared;
+}
+
+export function getTerrainHeight(x, z) {
+  const shared = getSharedTerrainHeight(x, z);
+  const island = getIslandHeight(x, z);
+  return Number.isFinite(island) ? Math.max(shared, island) : shared;
 }
 
 export function getWaterDepth(x, z) {
