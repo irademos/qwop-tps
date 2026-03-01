@@ -20,6 +20,10 @@ const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
 const CLIMB_SPEED = 1.6;
 const CLIMB_SNAP_DISTANCE = 0.6;
 const CLIMB_ENTRY_BUFFER_Y = 0.4;
+const GROUND_SMOOTH_ALPHA = 0.2;
+const GROUND_SMOOTH_SNAP_DELTA = 0.45;
+const MAX_WALKABLE_SLOPE_DEGREES = 42;
+const STEEP_SLOPE_SPEED_MULTIPLIER = 0.55;
 const FRIENDLY_INTERACT_RANGE = 6;
 const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
@@ -186,6 +190,8 @@ export class PlayerControls {
     this.gpsMoveTarget = null;
     this.gpsMoveEpsilon = 0.35;
     this.groundOverrideY = null;
+    this.smoothedGroundExpectedY = null;
+    this.lastGroundResolution = null;
 
     // Player state
     this.canJump = true;
@@ -1863,6 +1869,67 @@ export class PlayerControls {
     }
   }
 
+  resolveGroundY(x, y, z, options = {}) {
+    const {
+      includeSolidHit = true,
+      maxRayDistance = 12,
+      walkableSlopeDegrees = MAX_WALKABLE_SLOPE_DEGREES,
+      fallbackGroundY = Number.isFinite(y) ? y - (PLAYER_HALF_HEIGHT + PLAYER_RADIUS) : 0
+    } = options;
+
+    const metadata = {
+      surfaceType: 'terrain',
+      slopeDegrees: 0,
+      walkable: true
+    };
+
+    let terrainHeight = Number.isFinite(this.groundOverrideY) ? this.groundOverrideY : NaN;
+    if (!Number.isFinite(terrainHeight)) {
+      terrainHeight = getTerrainHeight(x, z);
+    }
+    if (!Number.isFinite(terrainHeight)) {
+      terrainHeight = fallbackGroundY;
+      metadata.surfaceType = 'fallback';
+    }
+
+    let groundY = terrainHeight;
+    const world = window.rapierWorld;
+    if (includeSolidHit && world && !Number.isFinite(this.groundOverrideY)) {
+      const ray = new RAPIER.Ray({ x, y, z }, { x: 0, y: -1, z: 0 });
+      const rayHit = world.castRayAndGetNormal
+        ? world.castRayAndGetNormal(ray, maxRayDistance, true, undefined, undefined, undefined, this.body)
+        : null;
+      const simpleHit = rayHit ? null : world.castRay(ray, maxRayDistance, true, undefined, undefined, undefined, this.body);
+      const hitDistance = rayHit?.toi ?? rayHit?.timeOfImpact ?? simpleHit?.toi ?? simpleHit?.timeOfImpact;
+      if (Number.isFinite(hitDistance)) {
+        const hitY = y - hitDistance;
+        if (hitY > groundY) {
+          groundY = hitY;
+          metadata.surfaceType = 'solid';
+        }
+      }
+
+      const normal = rayHit?.normal;
+      if (normal && Number.isFinite(normal.y)) {
+        const upDot = Math.min(Math.max(normal.y, -1), 1);
+        metadata.slopeDegrees = THREE.MathUtils.radToDeg(Math.acos(upDot));
+      }
+    }
+
+    if (!Number.isFinite(groundY)) {
+      groundY = fallbackGroundY;
+      metadata.surfaceType = 'fallback';
+    }
+
+    metadata.walkable = metadata.slopeDegrees <= walkableSlopeDegrees;
+
+    return {
+      groundY,
+      terrainHeight,
+      metadata
+    };
+  }
+
   processMovement() {
     if (!this.enabled) return;
 
@@ -1924,28 +1991,23 @@ export class PlayerControls {
       this.wasFrozen = false;
     }
 
-    const terrainY = getTerrainHeight(t.x, t.z);
-    let groundY = Number.isFinite(this.groundOverrideY) ? this.groundOverrideY : terrainY;
-    const world = window.rapierWorld;
-    if (world && !Number.isFinite(this.groundOverrideY)) {
-      const ray = new RAPIER.Ray({ x: t.x, y: t.y, z: t.z }, { x: 0, y: -1, z: 0 });
-      const hit = world.castRay(ray, t.y + 10, true, undefined, undefined, undefined, this.body);
-      if (hit) {
-        const hitDist = hit.toi ?? hit.timeOfImpact;
-        const hitY = t.y - hitDist;
-        if (hitY > groundY) groundY = hitY;
+    const groundResolution = this.resolveGroundY(t.x, t.y, t.z);
+    this.lastGroundResolution = groundResolution;
+    const rawGroundExpectedY = groundResolution.groundY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
+    if (!Number.isFinite(this.smoothedGroundExpectedY)) {
+      this.smoothedGroundExpectedY = rawGroundExpectedY;
+    } else {
+      const groundDelta = Math.abs(rawGroundExpectedY - this.smoothedGroundExpectedY);
+      if (groundDelta > GROUND_SMOOTH_SNAP_DELTA) {
+        this.smoothedGroundExpectedY = rawGroundExpectedY;
+      } else {
+        this.smoothedGroundExpectedY += (rawGroundExpectedY - this.smoothedGroundExpectedY) * GROUND_SMOOTH_ALPHA;
       }
     }
-    if (!Number.isFinite(groundY)) {
-      // Keep ground math stable even if terrain sampling/raycast is temporarily unavailable.
-      groundY = Number.isFinite(t.y)
-        ? t.y - (PLAYER_HALF_HEIGHT + PLAYER_RADIUS)
-        : 0;
-    }
-
-    const groundExpectedY = groundY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
-    const grounded = !this.isInWater && t.y <= groundExpectedY + 0.05;
-    if (grounded && !this.isInWater) {
+    const groundExpectedY = this.smoothedGroundExpectedY;
+    const canStandOnGround = groundResolution.metadata.walkable;
+    const grounded = !this.isInWater && canStandOnGround && t.y <= groundExpectedY + 0.05;
+    if (grounded) {
       this.canJump = true;
       this.hasDoubleJumped = false;
     } else {
@@ -2071,7 +2133,10 @@ export class PlayerControls {
         : (this.energyDepleted
           ? CHARACTER_MOVEMENT.walkSpeed * ENERGY_DEPLETED_SPEED_MULTIPLIER
           : CHARACTER_MOVEMENT.runSpeed);
-      this.body.setLinvel({ x: movement.x * speed, y: vel.y, z: movement.z * speed }, true);
+      const slopeSpeedMultiplier = !this.isInWater && !groundResolution.metadata.walkable
+        ? STEEP_SLOPE_SPEED_MULTIPLIER
+        : 1;
+      this.body.setLinvel({ x: movement.x * speed * slopeSpeedMultiplier, y: vel.y, z: movement.z * speed * slopeSpeedMultiplier }, true);
       }
       
     let { x: newX, y: newY, z: newZ } = this.body.translation();
