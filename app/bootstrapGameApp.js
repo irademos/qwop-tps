@@ -2256,7 +2256,11 @@ async function initCore(runtimeContext) {
       .setAngularDamping(0.5);
     const rb = rapierWorld.createRigidBody(rbDesc);
     rb.setEnabledRotations(false, true, false, true);
-    const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
+    const capsuleHalfHeight = 0.6 * scale;
+    const capsuleRadius = 0.3 * scale;
+    const colliderCenterYOffset = capsuleHalfHeight + capsuleRadius;
+    const colDesc = RAPIER.ColliderDesc.capsule(capsuleHalfHeight, capsuleRadius)
+      .setTranslation(0, colliderCenterYOffset, 0);
     rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
     rbToMesh.set(rb, model);
