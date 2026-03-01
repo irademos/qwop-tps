@@ -93,17 +93,6 @@ function distanceToPolygonBoundary(x, z, rings) {
   return minDist;
 }
 
-function normalizeRing(ring) {
-  if (!Array.isArray(ring) || ring.length < 3) return null;
-  const coords = ring.slice();
-  const first = coords[0];
-  const last = coords[coords.length - 1];
-  if (first?.[0] === last?.[0] && first?.[1] === last?.[1]) {
-    coords.pop();
-  }
-  return coords.length >= 3 ? coords : null;
-}
-
 function calcInfluence(distance, falloff) {
   if (distance <= 0) return 1;
   if (distance >= falloff) return 0;
@@ -160,53 +149,6 @@ function collectRoads(geojson, origin, lonScale) {
   return roads;
 }
 
-function collectBuildings(geojson, origin, lonScale) {
-  const buildings = [];
-  const features = geojson?.prefiltered?.buildings ?? geojson?.features ?? [];
-  for (const feature of features) {
-    if (!feature?.properties?.building) continue;
-    const geometry = feature.geometry;
-    if (!geometry) continue;
-    const polygons = geometry.type === 'Polygon'
-      ? [geometry.coordinates]
-      : geometry.type === 'MultiPolygon'
-        ? geometry.coordinates
-        : [];
-    for (const poly of polygons) {
-      if (!Array.isArray(poly) || poly.length === 0) continue;
-      const rings = [];
-      for (const rawRing of poly) {
-        const normalized = normalizeRing(rawRing);
-        if (!normalized) continue;
-        const ring = [];
-        for (const coord of normalized) {
-          if (!coord || coord.length < 2) continue;
-          const [lon, lat] = coord;
-          if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
-          ring.push(toLocalMeters(coord, origin, lonScale));
-        }
-        if (ring.length >= 3) rings.push(ring);
-      }
-      if (rings.length === 0) continue;
-      const outer = rings[0];
-      let sx = 0;
-      let sz = 0;
-      for (const point of outer) {
-        sx += point.x;
-        sz += point.z;
-      }
-      const cx = sx / outer.length;
-      const cz = sz / outer.length;
-      buildings.push({
-        rings,
-        targetHeight: getBaseTerrainHeight(cx, cz),
-        falloff: BUILDING_FALLOFF_METERS
-      });
-    }
-  }
-  return buildings;
-}
-
 export function getBaseTerrainHeight(x, z) {
   return (
     Math.sin(x * BASE_NOISE_SCALE_X) * BASE_HEIGHT_A
@@ -219,8 +161,17 @@ export function setTerrainStampsForTile(tileKey, geojson, bounds) {
   if (!tileKey || !geojson || !bounds) return;
   const lonScale = metersPerDegreeLon(bounds.centerLat);
   const roads = collectRoads(geojson, bounds, lonScale);
-  const buildings = collectBuildings(geojson, bounds, lonScale);
+  const buildings = terrainStampTiles.get(tileKey)?.buildings ?? [];
   terrainStampTiles.set(tileKey, { roads, buildings });
+}
+
+export function setBuildingStampsForTile(tileKey, buildings) {
+  if (!tileKey) return;
+  const roads = terrainStampTiles.get(tileKey)?.roads ?? [];
+  terrainStampTiles.set(tileKey, {
+    roads,
+    buildings: Array.isArray(buildings) ? buildings : []
+  });
 }
 
 export function clearTerrainStampsForTile(tileKey) {

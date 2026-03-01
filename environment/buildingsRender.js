@@ -5,12 +5,13 @@ import ClipperLib from "clipper-lib";
 import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 import { getKtx2Loader } from "../ktx2Loader.js";
 import { clearClimbableAreas, setClimbableAreas } from "../controls/climb.js";
+import { getStampedTerrainHeight, setBuildingStampsForTile } from "./terrainHeight.js";
 
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const DEFAULT_HEIGHT = 10;
 const LEVEL_HEIGHT = 3;
 const EXTRUDE_DISTANCE = 250;
-const BASE_ELEVATION = 0.0;
+const BUILDING_PERIMETER_FALLOFF_METERS = 8;
 const CLIPPER_SCALE = 10000;
 
 // Shell params
@@ -164,30 +165,59 @@ function normalizeRing(ring) {
   return ring;
 }
 
-function ringToPoints(ring, origin, lonScale) {
-  const points = [];
-  const coords = normalizeRing(ring);
-  for (const coord of coords) {
-    if (!coord || coord.length < 2) continue;
-    const local = toLocalMeters(coord, origin, lonScale);
-    points.push(new THREE.Vector2(local.x, -local.z));
+function polygonRingsToLocalMeters(rings, origin, lonScale) {
+  const localRings = [];
+  for (const ring of rings || []) {
+    const normalized = normalizeRing(ring);
+    if (!normalized || normalized.length < 3) continue;
+    const points = [];
+    for (const coord of normalized) {
+      if (!coord || coord.length < 2) continue;
+      const [lon, lat] = coord;
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
+      points.push(toLocalMeters(coord, origin, lonScale));
+    }
+    if (points.length >= 3) localRings.push(points);
   }
-  return points;
+  return localRings;
 }
 
-function makeShape(rings, origin, lonScale) {
-  if (!rings || rings.length === 0) return null;
-  const outerPoints = ringToPoints(rings[0], origin, lonScale);
+function makeShapeFromLocalRings(localRings) {
+  if (!localRings || localRings.length === 0) return null;
+  const outerPoints = localRings[0].map((point) => new THREE.Vector2(point.x, -point.z));
   if (outerPoints.length < 3) return null;
 
   const shape = new THREE.Shape(outerPoints);
-  for (let i = 1; i < rings.length; i += 1) {
-    const holePoints = ringToPoints(rings[i], origin, lonScale);
+  for (let i = 1; i < localRings.length; i += 1) {
+    const holePoints = localRings[i].map((point) => new THREE.Vector2(point.x, -point.z));
     if (holePoints.length < 3) continue;
-    const hole = new THREE.Path(holePoints);
-    shape.holes.push(hole);
+    shape.holes.push(new THREE.Path(holePoints));
   }
   return shape;
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) * 0.5
+    : sorted[mid];
+}
+
+function computeBuildingGrade(localRings, shape) {
+  const outer = localRings?.[0] ?? [];
+  const sampleHeights = [];
+  for (const point of outer) {
+    const h = getStampedTerrainHeight(point.x, point.z);
+    if (Number.isFinite(h)) sampleHeights.push(h);
+  }
+
+  const centroid2 = estimateCentroid(shape?.getPoints?.() ?? []);
+  const centroidHeight = getStampedTerrainHeight(centroid2.x, -centroid2.y);
+  if (Number.isFinite(centroidHeight)) sampleHeights.push(centroidHeight);
+
+  return sampleHeights.length > 0 ? median(sampleHeights) : 0;
 }
 
 function estimateCentroid(points) {
@@ -285,7 +315,8 @@ function csgSubtractGeom(baseGeom, cutterGeoms) {
 function hollowExtrudedGeometry(outerGeom, originalShape2D, {
   wall = WALL_THICKNESS,
   floor = FLOOR_THICKNESS,
-  roof = ROOF_THICKNESS
+  roof = ROOF_THICKNESS,
+  baseElevation = 0
 } = {}) {
   // outerGeom MUST have bbox
   if (!outerGeom.boundingBox) outerGeom.computeBoundingBox();
@@ -299,7 +330,7 @@ function hollowExtrudedGeometry(outerGeom, originalShape2D, {
 
   const innerGeom = new THREE.ExtrudeGeometry(innerShape, { depth: innerH, bevelEnabled: false });
   innerGeom.rotateX(-Math.PI / 2);
-  innerGeom.translate(0, BASE_ELEVATION + floor, 0);
+  innerGeom.translate(0, baseElevation + floor, 0);
   innerGeom.computeBoundingBox();
 
   // outer - inner
@@ -310,13 +341,14 @@ function buildDoorCuttersFromShape(shape2D, {
   doorW = 3.0,
   doorH = 2.2,
   doorSpacing = 8,
-  inset = 0.02
+  inset = 0.02,
+  baseElevation = 0
 } = {}) {
   const cutters = [];
   const points2D = shape2D?.getPoints?.() ?? [];
   if (points2D.length < 2) return cutters;
   const winding = getRingWinding(points2D);
-  const yDoorCenter = doorH * 0.5;
+  const yDoorCenter = baseElevation + doorH * 0.5;
   const outwardFactor = CUT_DEPTH * 0.5 - inset;
 
   for (let i = 0; i < points2D.length; i += 1) {
@@ -454,6 +486,8 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     const tileEntry = ensureTile(tileKey);
     const { extrudedMesh, flatMesh, extrudedColliderMesh } = tileEntry;
 
+    setBuildingStampsForTile(tileKey, []);
+
     const polygons = collectBuildingPolygons(geojson);
     if (polygons.length === 0) {
       disposeGeometry(extrudedMesh);
@@ -487,9 +521,18 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     const flatGeometries = [];
     const extrudedResults = [];
+    const buildingStamps = [];
     for (const polygon of polygons) {
-      const shape = makeShape(polygon.rings, bounds, lonScale);
-      if (!shape) continue;
+      const localRings = polygonRingsToLocalMeters(polygon.rings, bounds, lonScale);
+      const shape = makeShapeFromLocalRings(localRings);
+      if (!shape || localRings.length === 0) continue;
+
+      const buildingGrade = computeBuildingGrade(localRings, shape);
+      buildingStamps.push({
+        rings: localRings,
+        targetHeight: buildingGrade,
+        falloff: BUILDING_PERIMETER_FALLOFF_METERS
+      });
 
       const centroid = estimateCentroid(shape.getPoints());
       const dx = centroid.x - cameraPos.x;
@@ -501,18 +544,17 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       const isSimpleDetail = !isFullDetail && distance <= qualitySettings.simpleDetailDistance;
 
       if (isFullDetail || isSimpleDetail) {
-        // 1) Outer solid
         let geom = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
         geom.rotateX(-Math.PI / 2);
-        geom.translate(0, BASE_ELEVATION, 0);
+        geom.translate(0, buildingGrade, 0);
         geom.computeBoundingBox();
 
         if (isFullDetail && qualitySettings.enableHollow) {
-          // 2) Hollow it (shell)
           geom = hollowExtrudedGeometry(geom, shape, {
             wall: WALL_THICKNESS,
             floor: FLOOR_THICKNESS,
-            roof: ROOF_THICKNESS
+            roof: ROOF_THICKNESS,
+            baseElevation: buildingGrade
           });
           if (!geom.boundingBox) geom.computeBoundingBox();
         }
@@ -521,7 +563,8 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
           const cutters = buildDoorCuttersFromShape(shape, {
             doorW: 3.0,
             doorH: 3.0,
-            doorSpacing: 12
+            doorSpacing: 12,
+            baseElevation: buildingGrade
           });
 
           if (cutters.length) {
@@ -535,10 +578,12 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       } else {
         const geom = new THREE.ShapeGeometry(shape);
         geom.rotateX(-Math.PI / 2);
-        geom.translate(0, BASE_ELEVATION, 0);
+        geom.translate(0, buildingGrade, 0);
         flatGeometries.push(geom);
       }
     }
+
+    setBuildingStampsForTile(tileKey, buildingStamps);
 
     disposeGeometry(extrudedMesh);
     disposeGeometry(flatMesh);
