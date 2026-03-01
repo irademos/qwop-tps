@@ -9097,6 +9097,7 @@ async function initCore(runtimeContext) {
     syncCraftTableCollider();
 
     // Sync Rapier bodies -> Three meshes
+    const resolveGroundY = playerControls?.resolveGroundY?.bind(playerControls);
     for (const [rb, mesh] of rbToMesh.entries()) {
       const t = rb.translation();
       const r = rb.rotation();
@@ -9107,17 +9108,19 @@ async function initCore(runtimeContext) {
       if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection && !isStaticBody) {
         const bbox = getMeshWorldBounds(mesh);
         if (bbox) {
-          const terrainY = getTerrainHeight(mesh.position.x, mesh.position.z);
+          const groundResolution = resolveGroundY
+            ? resolveGroundY(mesh.position.x, Math.max(mesh.position.y, bbox.max.y + 0.05), mesh.position.z)
+            : null;
+          const resolvedGroundY = groundResolution?.groundY ?? getTerrainHeight(mesh.position.x, mesh.position.z);
           const isDeadEntity = mesh.userData?.mode === 'dead';
-          const shouldSnapToGround = isDeadEntity
-            ? Math.abs(bbox.min.y - terrainY) > 0.01
-            : bbox.min.y < terrainY;
+          const belowResolvedGround = Number.isFinite(resolvedGroundY) && bbox.min.y < resolvedGroundY - 0.01;
+          const shouldSnapToGround = isDeadEntity ? belowResolvedGround : belowResolvedGround;
           if (shouldSnapToGround) {
-            const correction = terrainY - bbox.min.y;
+            const correction = resolvedGroundY - bbox.min.y;
             mesh.position.y += correction;
             rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
             const lv = rb.linvel();
-            if (isDeadEntity || lv.y < 0) {
+            if (lv.y < 0) {
               rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
             }
           }
