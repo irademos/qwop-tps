@@ -348,7 +348,7 @@ const getHealthForLevel = (level) => {
     const rotation = applyTransform ? record.rot : null;
     if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
       friendly.model.position.set(position.x, position.y, position.z);
-      friendly.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+      friendly.syncBodyFromTransform?.({ zeroVelocity: true });
       friendly.setHomePosition(friendly.model.position);
       syncFriendlyRoadLight(friendly, friendly.model.position.clone());
     }

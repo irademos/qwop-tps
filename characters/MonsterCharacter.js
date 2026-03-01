@@ -111,9 +111,12 @@ export class MonsterCharacter extends CharacterBase {
   syncBodyFromTransform({ zeroVelocity = true } = {}) {
     const body = this.body;
     if (!body || !this.model) return;
+    const bodyYOffset = Number.isFinite(this.model.userData?.physicsBodyYOffset)
+      ? this.model.userData.physicsBodyYOffset
+      : 0;
     body.setTranslation({
       x: this.model.position.x,
-      y: this.model.position.y,
+      y: this.model.position.y - bodyYOffset,
       z: this.model.position.z
     }, true);
     body.setRotation(this.model.quaternion, true);
@@ -138,10 +141,13 @@ export class MonsterCharacter extends CharacterBase {
     }
     const dt = Number.isFinite(delta) ? Math.max(0, delta) : 0;
     const nextPosition = this.model.position.clone().addScaledVector(movement, dt);
+    const bodyYOffset = Number.isFinite(this.model.userData?.physicsBodyYOffset)
+      ? this.model.userData.physicsBodyYOffset
+      : 0;
     if (body?.setNextKinematicTranslation) {
-      body.setNextKinematicTranslation({ x: nextPosition.x, y: nextPosition.y, z: nextPosition.z });
+      body.setNextKinematicTranslation({ x: nextPosition.x, y: nextPosition.y - bodyYOffset, z: nextPosition.z });
     } else if (body?.setTranslation) {
-      body.setTranslation({ x: nextPosition.x, y: nextPosition.y, z: nextPosition.z }, true);
+      body.setTranslation({ x: nextPosition.x, y: nextPosition.y - bodyYOffset, z: nextPosition.z }, true);
     }
     this.model.position.copy(nextPosition);
   }

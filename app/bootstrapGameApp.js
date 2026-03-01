@@ -2235,6 +2235,17 @@ async function initCore(runtimeContext) {
   runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword };
   window.weapons = { iceGun, bow, bomb, autumnSword };
 
+  const getModelPhysicsBodyYOffset = (model) => {
+    if (!model) return 0;
+    const cached = model.userData?.physicsBodyYOffset;
+    if (Number.isFinite(cached)) return cached;
+    const bbox = getMeshWorldBounds(model);
+    if (!bbox) return 0;
+    const offset = Math.max(0, model.position.y - bbox.min.y);
+    model.userData.physicsBodyYOffset = offset;
+    return offset;
+  };
+
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
     if (!model || !rapierWorld) return null;
@@ -2250,8 +2261,9 @@ async function initCore(runtimeContext) {
     const rbDesc = isKinematic
       ? RAPIER.RigidBodyDesc.kinematicPositionBased()
       : RAPIER.RigidBodyDesc.dynamic();
+    const bodyYOffset = getModelPhysicsBodyYOffset(model);
     rbDesc
-      .setTranslation(model.position.x, model.position.y, model.position.z)
+      .setTranslation(model.position.x, model.position.y - bodyYOffset, model.position.z)
       .setLinearDamping(0.5)
       .setAngularDamping(0.5);
     const rb = rapierWorld.createRigidBody(rbDesc);
@@ -3220,7 +3232,7 @@ async function initCore(runtimeContext) {
 
     if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
       existing.model.position.set(position.x, position.y, position.z);
-      existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+      existing.syncBodyFromTransform?.({ zeroVelocity: true });
     }
 
     if (rotation && Number.isFinite(rotation.x) && Number.isFinite(rotation.y) && Number.isFinite(rotation.z) && Number.isFinite(rotation.w)) {
@@ -3325,7 +3337,7 @@ async function initCore(runtimeContext) {
         if (Number.isFinite(px) && Number.isFinite(pz)) {
           const resolvedY = getSpawnY(px, pz, 0.5);
           monster.model.position.set(px, resolvedY, pz);
-          monster.body?.setTranslation({ x: px, y: resolvedY, z: pz }, true);
+          monster.syncBodyFromTransform?.({ zeroVelocity: true });
         }
         if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
           monster.model.quaternion.set(rx, ry, rz, rw);
@@ -9081,7 +9093,10 @@ async function initCore(runtimeContext) {
     for (const [rb, mesh] of rbToMesh.entries()) {
       const t = rb.translation();
       const r = rb.rotation();
-      mesh.position.set(t.x, t.y, t.z);
+      const bodyYOffset = Number.isFinite(mesh.userData?.physicsBodyYOffset)
+        ? mesh.userData.physicsBodyYOffset
+        : 0;
+      mesh.position.set(t.x, t.y + bodyYOffset, t.z);
       mesh.quaternion.set(r.x, r.y, r.z, r.w);
 
       const isStaticBody = typeof rb.isFixed === 'function' && rb.isFixed();
@@ -9098,7 +9113,7 @@ async function initCore(runtimeContext) {
           if (shouldSnapToGround) {
             const correction = resolvedGroundY - bbox.min.y;
             mesh.position.y += correction;
-            rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
+            rb.setTranslation({ x: mesh.position.x, y: mesh.position.y - bodyYOffset, z: mesh.position.z }, true);
             const lv = rb.linvel();
             if (lv.y < 0) {
               rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
