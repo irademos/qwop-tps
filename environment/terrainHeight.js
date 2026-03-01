@@ -11,8 +11,36 @@ const BASE_HEIGHT_C = 0.15;
 
 const BUILDING_FALLOFF_METERS = 8;
 const ROAD_FALLOFF_METERS = 6;
+const CHUNK_SIZE_METERS = 64;
+const QUERY_CACHE_GRID_METERS = 0.5;
+
+const STAMP_PRIORITY = Object.freeze({
+  BUILDING: 300,
+  ROAD_MAJOR: 200,
+  ROAD_MINOR: 100
+});
+
+const MAJOR_ROAD_TYPES = new Set([
+  "motorway",
+  "trunk",
+  "primary",
+  "secondary",
+  "motorway_link",
+  "trunk_link",
+  "primary_link",
+  "secondary_link"
+]);
 
 const terrainStampTiles = new Map();
+const terrainChunkStampCache = new Map();
+const terrainChunkHeightCache = new Map();
+
+const stampDebugOptions = {
+  showPriority: false,
+  showInfluenceRadii: false
+};
+
+let stampIdCounter = 1;
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -24,11 +52,6 @@ function toLocalMeters(coord, origin, lonScale) {
     x: -(lon - origin.centerLon) * lonScale,
     z: (lat - origin.centerLat) * METERS_PER_DEGREE_LAT
   };
-}
-
-function smoothstep01(t) {
-  const c = Math.min(Math.max(t, 0), 1);
-  return c * c * (3 - 2 * c);
 }
 
 function quintic01(t) {
@@ -93,12 +116,6 @@ function distanceToPolygonBoundary(x, z, rings) {
   return minDist;
 }
 
-function calcInfluence(distance, falloff) {
-  if (distance <= 0) return 1;
-  if (distance >= falloff) return 0;
-  return 1 - smoothstep01(distance / falloff);
-}
-
 function computeRoadGrade(points) {
   let total = 0;
   for (const point of points) {
@@ -107,14 +124,188 @@ function computeRoadGrade(points) {
   return points.length > 0 ? total / points.length : 0;
 }
 
-function buildRoadStamp(points, width) {
-  if (!Array.isArray(points) || points.length < 2 || !Number.isFinite(width) || width <= 0) return null;
-  const innerHalfWidth = width * 0.5;
+function buildStampBoundsFromPoints(points, radius = 0) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const point of points ?? []) {
+    if (!point) continue;
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minZ = Math.min(minZ, point.z);
+    maxZ = Math.max(maxZ, point.z);
+  }
+  if (!Number.isFinite(minX)) return null;
   return {
+    minX: minX - radius,
+    maxX: maxX + radius,
+    minZ: minZ - radius,
+    maxZ: maxZ + radius
+  };
+}
+
+function stampIntersectsBounds(stamp, bounds) {
+  const s = stamp?.bounds;
+  if (!s || !bounds) return false;
+  return !(s.maxX < bounds.minX || s.minX > bounds.maxX || s.maxZ < bounds.minZ || s.minZ > bounds.maxZ);
+}
+
+function getChunkCoord(value) {
+  return Math.floor(value / CHUNK_SIZE_METERS);
+}
+
+function getChunkKey(cx, cz) {
+  return `${cx},${cz}`;
+}
+
+function getChunkBounds(cx, cz) {
+  const minX = cx * CHUNK_SIZE_METERS;
+  const minZ = cz * CHUNK_SIZE_METERS;
+  return {
+    minX,
+    maxX: minX + CHUNK_SIZE_METERS,
+    minZ,
+    maxZ: minZ + CHUNK_SIZE_METERS
+  };
+}
+
+function clearTerrainCompositorCache() {
+  terrainChunkStampCache.clear();
+  terrainChunkHeightCache.clear();
+}
+
+function compareStampsDeterministic(a, b) {
+  if ((b.priority ?? 0) !== (a.priority ?? 0)) return (b.priority ?? 0) - (a.priority ?? 0);
+  if ((a.type ?? "") !== (b.type ?? "")) return (a.type ?? "").localeCompare(b.type ?? "");
+  return (a.id ?? 0) - (b.id ?? 0);
+}
+
+function collectAllStamps() {
+  const all = [];
+  for (const tileData of terrainStampTiles.values()) {
+    for (const stamp of tileData?.stamps ?? []) {
+      all.push(stamp);
+    }
+  }
+  all.sort(compareStampsDeterministic);
+  return all;
+}
+
+function getStampsForChunk(cx, cz) {
+  const chunkKey = getChunkKey(cx, cz);
+  const cached = terrainChunkStampCache.get(chunkKey);
+  if (cached) return cached;
+
+  const bounds = getChunkBounds(cx, cz);
+  const stamps = collectAllStamps().filter((stamp) => stampIntersectsBounds(stamp, bounds));
+  const chunkData = { bounds, stamps };
+  terrainChunkStampCache.set(chunkKey, chunkData);
+  return chunkData;
+}
+
+function quantizeToGrid(value, step) {
+  return Math.round(value / step) * step;
+}
+
+function computeStampDistanceToCore(stamp, x, z) {
+  if (!stamp) return Infinity;
+  if (stamp.geometryType === "line") {
+    let minDistanceToCenter = Infinity;
+    const points = stamp.centerline ?? [];
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const a = points[i];
+      const b = points[i + 1];
+      const d = distanceToSegment2D(x, z, a.x, a.z, b.x, b.z);
+      if (d < minDistanceToCenter) minDistanceToCenter = d;
+    }
+    if (!Number.isFinite(minDistanceToCenter)) return Infinity;
+    return Math.max(0, minDistanceToCenter - (stamp.innerRadius ?? 0));
+  }
+
+  if (stamp.geometryType === "polygon") {
+    const isInside = isPointInPolygonWithHoles(x, z, stamp.rings);
+    if (isInside) return 0;
+    return distanceToPolygonBoundary(x, z, stamp.rings);
+  }
+
+  return Infinity;
+}
+
+function computeStampInfluence(stamp, x, z) {
+  const distanceToCore = computeStampDistanceToCore(stamp, x, z);
+  if (!Number.isFinite(distanceToCore)) return null;
+
+  const falloffRadius = Math.max(stamp.falloffRadius ?? 0, 0);
+  if (distanceToCore > falloffRadius) return null;
+  const influence = falloffRadius <= 0 ? 1 : 1 - quintic01(distanceToCore / Math.max(falloffRadius, Number.EPSILON));
+  if (influence <= 0) return null;
+
+  const innerRadius = Math.max(stamp.innerRadius ?? 0, 0);
+  const coreWeight = 1 - Math.min(distanceToCore / Math.max(innerRadius + falloffRadius, Number.EPSILON), 1);
+  return {
+    influence,
+    coreWeight: Math.max(coreWeight, Number.EPSILON)
+  };
+}
+
+function applyStampCompositor(baseHeight, stamps, x, z) {
+  if (!Array.isArray(stamps) || stamps.length === 0) return baseHeight;
+
+  const byPriority = new Map();
+  for (const stamp of stamps) {
+    const contribution = computeStampInfluence(stamp, x, z);
+    if (!contribution) continue;
+    const priority = stamp.priority ?? 0;
+    if (!byPriority.has(priority)) byPriority.set(priority, []);
+    byPriority.get(priority).push({ stamp, ...contribution });
+  }
+
+  if (byPriority.size === 0) return baseHeight;
+
+  const priorities = Array.from(byPriority.keys()).sort((a, b) => b - a);
+  let height = baseHeight;
+
+  for (const priority of priorities) {
+    const contributions = byPriority.get(priority) ?? [];
+    if (contributions.length === 0) continue;
+
+    let influenceTotal = 0;
+    let weightedTarget = 0;
+    let coreWeightTotal = 0;
+    for (const item of contributions) {
+      influenceTotal += item.influence;
+      coreWeightTotal += item.coreWeight;
+      weightedTarget += item.stamp.targetGrade * item.coreWeight;
+    }
+    if (influenceTotal <= 0 || coreWeightTotal <= 0) continue;
+
+    const target = weightedTarget / coreWeightTotal;
+    const blend = Math.min(influenceTotal, 1);
+    height = height * (1 - blend) + target * blend;
+  }
+
+  return height;
+}
+
+function classifyRoadPriority(highwayType) {
+  return MAJOR_ROAD_TYPES.has(highwayType) ? STAMP_PRIORITY.ROAD_MAJOR : STAMP_PRIORITY.ROAD_MINOR;
+}
+
+function buildRoadStamp(points, width, highwayType) {
+  if (!Array.isArray(points) || points.length < 2 || !Number.isFinite(width) || width <= 0) return null;
+  const innerRadius = width * 0.5;
+  const falloffRadius = ROAD_FALLOFF_METERS;
+  return {
+    id: stampIdCounter += 1,
+    type: "road",
+    geometryType: "line",
     centerline: points,
-    innerHalfWidth,
-    outerHalfWidth: innerHalfWidth + ROAD_FALLOFF_METERS,
-    targetHeight: computeRoadGrade(points)
+    targetGrade: computeRoadGrade(points),
+    innerRadius,
+    falloffRadius,
+    priority: classifyRoadPriority(highwayType),
+    bounds: buildStampBoundsFromPoints(points, innerRadius + falloffRadius)
   };
 }
 
@@ -128,9 +319,9 @@ function collectRoads(geojson, origin, lonScale) {
     const classifiedWidth = resolveRoadWidth(feature.properties.highway);
     const explicitWidth = Number(feature?.properties?.width);
     const width = Number.isFinite(explicitWidth) && explicitWidth > 0 ? explicitWidth : classifiedWidth;
-    const lines = geometry.type === 'LineString'
+    const lines = geometry.type === "LineString"
       ? [geometry.coordinates]
-      : geometry.type === 'MultiLineString'
+      : geometry.type === "MultiLineString"
         ? geometry.coordinates
         : [];
     for (const line of lines) {
@@ -142,7 +333,7 @@ function collectRoads(geojson, origin, lonScale) {
         if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
         points.push(toLocalMeters(coord, origin, lonScale));
       }
-      const stamp = buildRoadStamp(points, width);
+      const stamp = buildRoadStamp(points, width, feature.properties.highway);
       if (stamp) roads.push(stamp);
     }
   }
@@ -162,76 +353,87 @@ export function setTerrainStampsForTile(tileKey, geojson, bounds) {
   const lonScale = metersPerDegreeLon(bounds.centerLat);
   const roads = collectRoads(geojson, bounds, lonScale);
   const buildings = terrainStampTiles.get(tileKey)?.buildings ?? [];
-  terrainStampTiles.set(tileKey, { roads, buildings });
+  terrainStampTiles.set(tileKey, { roads, buildings, stamps: [...roads, ...buildings] });
+  clearTerrainCompositorCache();
 }
 
 export function setBuildingStampsForTile(tileKey, buildings) {
   if (!tileKey) return;
   const roads = terrainStampTiles.get(tileKey)?.roads ?? [];
+  const normalizedBuildings = (Array.isArray(buildings) ? buildings : []).map((building) => {
+    const falloffRadius = building.falloffRadius ?? building.falloff ?? BUILDING_FALLOFF_METERS;
+    const rings = building.rings ?? [];
+    return {
+      id: building.id ?? (stampIdCounter += 1),
+      type: "building",
+      geometryType: "polygon",
+      rings,
+      targetGrade: building.targetGrade ?? building.targetHeight ?? 0,
+      innerRadius: Math.max(building.innerRadius ?? 0, 0),
+      falloffRadius,
+      priority: building.priority ?? STAMP_PRIORITY.BUILDING,
+      bounds: building.bounds ?? buildStampBoundsFromPoints(rings.flat(), falloffRadius)
+    };
+  });
   terrainStampTiles.set(tileKey, {
     roads,
-    buildings: Array.isArray(buildings) ? buildings : []
+    buildings: normalizedBuildings,
+    stamps: [...roads, ...normalizedBuildings]
   });
+  clearTerrainCompositorCache();
 }
 
 export function clearTerrainStampsForTile(tileKey) {
   terrainStampTiles.delete(tileKey);
+  clearTerrainCompositorCache();
 }
 
 export function getStampedTerrainHeight(x, z) {
   const baseHeight = getBaseTerrainHeight(x, z);
 
-  let roadInfluenceTotal = 0;
-  let roadWeightedTarget = 0;
-  for (const stampData of terrainStampTiles.values()) {
-    for (const road of stampData.roads ?? []) {
-      let minDistanceToCenter = Infinity;
-      const points = road.centerline ?? [];
-      for (let i = 0; i < points.length - 1; i += 1) {
-        const a = points[i];
-        const b = points[i + 1];
-        const d = distanceToSegment2D(x, z, a.x, a.z, b.x, b.z);
-        if (d < minDistanceToCenter) minDistanceToCenter = d;
-      }
-      if (!Number.isFinite(minDistanceToCenter)) continue;
-      let influence = 0;
-      if (minDistanceToCenter <= road.innerHalfWidth) {
-        influence = 1;
-      } else if (minDistanceToCenter < road.outerHalfWidth) {
-        const band = Math.max(road.outerHalfWidth - road.innerHalfWidth, Number.EPSILON);
-        const t = (minDistanceToCenter - road.innerHalfWidth) / band;
-        influence = 1 - quintic01(t);
-      }
-      if (influence <= 0) continue;
-      roadInfluenceTotal += influence;
-      roadWeightedTarget += road.targetHeight * influence;
-    }
+  const cx = getChunkCoord(x);
+  const cz = getChunkCoord(z);
+  const chunkKey = getChunkKey(cx, cz);
+
+  let heightCache = terrainChunkHeightCache.get(chunkKey);
+  if (!heightCache) {
+    heightCache = new Map();
+    terrainChunkHeightCache.set(chunkKey, heightCache);
   }
 
-  let terrainHeight = baseHeight;
-  if (roadInfluenceTotal > 0) {
-    const roadBlend = Math.min(roadInfluenceTotal, 1);
-    const roadTarget = roadWeightedTarget / roadInfluenceTotal;
-    terrainHeight = baseHeight * (1 - roadBlend) + roadTarget * roadBlend;
-  }
+  const qx = quantizeToGrid(x, QUERY_CACHE_GRID_METERS);
+  const qz = quantizeToGrid(z, QUERY_CACHE_GRID_METERS);
+  const localKey = `${qx},${qz}`;
+  const cached = heightCache.get(localKey);
+  if (Number.isFinite(cached)) return cached;
 
-  let buildingInfluenceTotal = 0;
-  let buildingWeightedTarget = 0;
-  for (const stampData of terrainStampTiles.values()) {
-    for (const building of stampData.buildings ?? []) {
-      const isInside = isPointInPolygonWithHoles(x, z, building.rings);
-      const distance = isInside ? 0 : distanceToPolygonBoundary(x, z, building.rings);
-      const influence = calcInfluence(distance, building.falloff ?? BUILDING_FALLOFF_METERS);
-      if (influence <= 0) continue;
-      buildingInfluenceTotal += influence;
-      buildingWeightedTarget += building.targetHeight * influence;
-    }
-  }
+  const chunkData = getStampsForChunk(cx, cz);
+  const compositedHeight = applyStampCompositor(baseHeight, chunkData.stamps, x, z);
+  heightCache.set(localKey, compositedHeight);
+  return compositedHeight;
+}
 
-  if (buildingInfluenceTotal <= 0) return terrainHeight;
-  const buildingBlend = Math.min(buildingInfluenceTotal, 1);
-  const buildingTarget = buildingWeightedTarget / buildingInfluenceTotal;
-  return terrainHeight * (1 - buildingBlend) + buildingTarget * buildingBlend;
+export function setTerrainStampDebugOptions(options = {}) {
+  if (typeof options.showPriority === "boolean") stampDebugOptions.showPriority = options.showPriority;
+  if (typeof options.showInfluenceRadii === "boolean") stampDebugOptions.showInfluenceRadii = options.showInfluenceRadii;
+}
+
+export function getTerrainStampDebugOptions() {
+  return { ...stampDebugOptions };
+}
+
+export function getTerrainStampDebugDataForChunk(chunkX, chunkZ) {
+  if (!stampDebugOptions.showPriority && !stampDebugOptions.showInfluenceRadii) return [];
+  const chunk = getStampsForChunk(chunkX, chunkZ);
+  return (chunk.stamps ?? []).map((stamp) => ({
+    id: stamp.id,
+    type: stamp.type,
+    geometryType: stamp.geometryType,
+    priority: stampDebugOptions.showPriority ? stamp.priority : undefined,
+    innerRadius: stampDebugOptions.showInfluenceRadii ? stamp.innerRadius : undefined,
+    falloffRadius: stampDebugOptions.showInfluenceRadii ? stamp.falloffRadius : undefined,
+    bounds: stamp.bounds
+  }));
 }
 
 export function getTerrainHeight(x, z) {

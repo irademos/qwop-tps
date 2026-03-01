@@ -529,9 +529,13 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
       const buildingGrade = computeBuildingGrade(localRings, shape);
       buildingStamps.push({
+        type: "building",
+        geometryType: "polygon",
         rings: localRings,
-        targetHeight: buildingGrade,
-        falloff: BUILDING_PERIMETER_FALLOFF_METERS
+        targetGrade: buildingGrade,
+        innerRadius: 0,
+        falloffRadius: BUILDING_PERIMETER_FALLOFF_METERS,
+        priority: 300
       });
 
       const centroid = estimateCentroid(shape.getPoints());
