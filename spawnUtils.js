@@ -6,6 +6,18 @@ const MAX_ATTEMPTS = 30;
 const DEFAULT_HEIGHT_OFFSET = 0.6;
 const WATER_THRESHOLD = 0.1;
 
+export function getSpawnY(x, z, offset = DEFAULT_HEIGHT_OFFSET, { allowOnBuildings = false, getBuildingTopY } = {}) {
+  const terrainY = getTerrainHeight(x, z);
+  let spawnY = Number.isFinite(terrainY) ? terrainY + offset : offset;
+  if (allowOnBuildings && typeof getBuildingTopY === 'function') {
+    const buildingTopY = getBuildingTopY(x, z, spawnY, offset);
+    if (Number.isFinite(buildingTopY) && buildingTopY > spawnY) {
+      spawnY = buildingTopY;
+    }
+  }
+  return spawnY;
+}
+
 function sampleXZ(radius) {
   const angle = Math.random() * Math.PI * 2;
   const distance = Math.random() * radius;
@@ -29,21 +41,20 @@ export function getSpawnPosition({
       if (!fallback) fallback = { x, z, terrainY };
       continue;
     }
-    return { x, y: terrainY + heightOffset, z, terrainY };
+    return { x, y: getSpawnY(x, z, heightOffset), z, terrainY };
   }
 
   if (fallback) {
     const { x, z, terrainY } = fallback;
-    return { x, y: terrainY + heightOffset, z, terrainY };
+    return { x, y: getSpawnY(x, z, heightOffset), z, terrainY };
   }
 
   const originTerrain = getTerrainHeight(0, 0);
-  return { x: 0, y: originTerrain + heightOffset, z: 0, terrainY: originTerrain };
+  return { x: 0, y: getSpawnY(0, 0, heightOffset), z: 0, terrainY: originTerrain };
 }
 
 export function snapObjectToTerrain(object, { heightOffset = DEFAULT_HEIGHT_OFFSET } = {}) {
   if (!object) return;
   const { x, z } = object.position;
-  const terrainY = getTerrainHeight(x, z);
-  object.position.y = terrainY + heightOffset;
+  object.position.y = getSpawnY(x, z, heightOffset);
 }
