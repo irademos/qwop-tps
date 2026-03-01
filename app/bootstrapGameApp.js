@@ -2836,7 +2836,7 @@ async function initCore(runtimeContext) {
           0,
           Math.sin(offsetAngle) * offsetRadius
         ));
-        applySpawnYToPosition(clusterPosition, 0.5, { allowOnBuildings: true });
+        clusterPosition.y = getSpawnY(clusterPosition.x, clusterPosition.z, 0.5);
         spawnMonsterInSlot(slotId, modelPath, null, {
           position: clusterPosition,
           rotation,
@@ -2881,7 +2881,7 @@ async function initCore(runtimeContext) {
         0,
         playerModel.position.z + Math.sin(angle) * radius
       );
-      applySpawnYToPosition(spawnPos, 0.5, { allowOnBuildings: true });
+      spawnPos.y = getSpawnY(spawnPos.x, spawnPos.z, 0.5);
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
       }
@@ -2889,7 +2889,7 @@ async function initCore(runtimeContext) {
     }
     const fallback = playerModel.position.clone();
     fallback.x += MONSTER_SPAWN_MIN_RADIUS;
-    fallback.y = getSpawnYWithPolicy(fallback.x, fallback.z, 0.5, { allowOnBuildings: true });
+    fallback.y = getSpawnY(fallback.x, fallback.z, 0.5);
     return fallback;
   };
 
@@ -3319,7 +3319,7 @@ async function initCore(runtimeContext) {
           monster.setLevel(state.level, { preserveHealth: true });
         }
         if (Number.isFinite(px) && Number.isFinite(pz)) {
-          const resolvedY = getSpawnYWithPolicy(px, pz, 0.5, { allowOnBuildings: true });
+          const resolvedY = getSpawnY(px, pz, 0.5);
           monster.model.position.set(px, resolvedY, pz);
           monster.body?.setTranslation({ x: px, y: resolvedY, z: pz }, true);
         }
