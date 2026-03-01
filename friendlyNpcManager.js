@@ -41,6 +41,7 @@ export function createFriendlyNpcManager({
   detachPhysics,
   getTerrainHeight,
   liftPositionToBuildingTop,
+  resolveSpawnY,
   isHost = false,
   debug = false,
   onSpawnEvent,
@@ -198,6 +199,10 @@ const getHealthForLevel = (level) => {
 
   const getSpawnPosition = (position) => {
     const spawnPos = position.clone();
+    if (resolveSpawnY) {
+      spawnPos.y = resolveSpawnY(spawnPos.x, spawnPos.z, 0.5);
+      return spawnPos;
+    }
     const terrainHeight = getTerrainHeight?.(spawnPos.x, spawnPos.z);
     spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : spawnPos.y;
     liftPositionToBuildingTop?.(spawnPos, 0.5);
@@ -228,6 +233,10 @@ const getHealthForLevel = (level) => {
 
   const getRoadLightPosition = (basePosition) => {
     const lightPosition = basePosition.clone().add(new THREE.Vector3(2.5, 0, 2));
+    if (resolveSpawnY) {
+      lightPosition.y = resolveSpawnY(lightPosition.x, lightPosition.z, 0.3);
+      return lightPosition;
+    }
     const terrainHeight = getTerrainHeight?.(lightPosition.x, lightPosition.z);
     lightPosition.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.1 : basePosition.y;
     liftPositionToBuildingTop?.(lightPosition, 0.3);
@@ -346,8 +355,11 @@ const getHealthForLevel = (level) => {
     if (!friendly?.model || !record) return;
     const position = applyTransform ? record.pos : null;
     const rotation = applyTransform ? record.rot : null;
-    if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
-      friendly.model.position.set(position.x, position.y, position.z);
+    if (position && Number.isFinite(position.x) && Number.isFinite(position.z)) {
+      const resolvedY = resolveSpawnY
+        ? resolveSpawnY(position.x, position.z, 0.5)
+        : (Number.isFinite(position.y) ? position.y : friendly.model.position.y);
+      friendly.model.position.set(position.x, resolvedY, position.z);
       friendly.syncBodyFromTransform?.({ zeroVelocity: true });
       friendly.setHomePosition(friendly.model.position);
       syncFriendlyRoadLight(friendly, friendly.model.position.clone());

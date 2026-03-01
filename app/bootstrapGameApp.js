@@ -2235,16 +2235,7 @@ async function initCore(runtimeContext) {
   runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword };
   window.weapons = { iceGun, bow, bomb, autumnSword };
 
-  const getModelPhysicsBodyYOffset = (model) => {
-    if (!model) return 0;
-    const cached = model.userData?.physicsBodyYOffset;
-    if (Number.isFinite(cached)) return cached;
-    const bbox = getMeshWorldBounds(model);
-    if (!bbox) return 0;
-    const offset = Math.max(0, model.position.y - bbox.min.y);
-    model.userData.physicsBodyYOffset = offset;
-    return offset;
-  };
+  const getModelPhysicsBodyYOffset = () => 0;
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
@@ -2262,6 +2253,7 @@ async function initCore(runtimeContext) {
       ? RAPIER.RigidBodyDesc.kinematicPositionBased()
       : RAPIER.RigidBodyDesc.dynamic();
     const bodyYOffset = getModelPhysicsBodyYOffset(model);
+    model.userData.physicsBodyYOffset = bodyYOffset;
     rbDesc
       .setTranslation(model.position.x, model.position.y - bodyYOffset, model.position.z)
       .setLinearDamping(0.5)
@@ -2699,6 +2691,7 @@ async function initCore(runtimeContext) {
     detachPhysics: detachMonsterPhysics,
     getTerrainHeight,
     liftPositionToBuildingTop,
+    resolveSpawnY: (x, z, offset = 0.5) => getSpawnYWithPolicy(x, z, offset, { allowOnBuildings: true }),
     isHost,
     debug: window.DEBUG_FRIENDLY_PERSIST,
     onSpawnEvent: handleCharacterSpawnEvent,
@@ -2872,7 +2865,8 @@ async function initCore(runtimeContext) {
         scene,
         attachPhysics: attachMonsterPhysics,
         getTerrainHeight,
-        liftPositionToBuildingTop
+        liftPositionToBuildingTop,
+        resolveSpawnY: (x, z, offset = 0.5) => getSpawnYWithPolicy(x, z, offset, { allowOnBuildings: true })
       });
       return;
     }

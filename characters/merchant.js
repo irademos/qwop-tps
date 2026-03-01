@@ -153,7 +153,7 @@ const subscribeInventoryUpdates = () => {
   });
 };
 
-const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuildingTop } = {}) => {
+const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuildingTop, resolveSpawnY } = {}) => {
   if (!scene) return;
   const loader = new GLTFLoader();
   try {
@@ -161,11 +161,15 @@ const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuilding
     marketStall = gltf.scene;
     marketStall.scale.multiplyScalar(MARKET_STALL_SIZE);
     marketStall.position.copy(merchantSpawnBasePosition);
-    const terrainHeight = getTerrainHeight?.(marketStall.position.x, marketStall.position.z);
-    if (Number.isFinite(terrainHeight)) {
-      marketStall.position.y = terrainHeight - 0.005;
+    if (resolveSpawnY) {
+      marketStall.position.y = resolveSpawnY(marketStall.position.x, marketStall.position.z, 0.5) - 0.505;
+    } else {
+      const terrainHeight = getTerrainHeight?.(marketStall.position.x, marketStall.position.z);
+      if (Number.isFinite(terrainHeight)) {
+        marketStall.position.y = terrainHeight - 0.005;
+      }
+      liftPositionToBuildingTop?.(marketStall.position, 0.5);
     }
-    liftPositionToBuildingTop?.(marketStall.position, 0.5);
     scene.add(marketStall);
     marketStallCollider = createStaticBoxColliderForObject(marketStall, {
       friction: 0.95,
@@ -231,7 +235,8 @@ const loadMerchantFriendly = ({
   scene,
   attachPhysics,
   getTerrainHeight,
-  liftPositionToBuildingTop
+  liftPositionToBuildingTop,
+  resolveSpawnY
 } = {}) => {
   if (!scene) return;
   loadMonsterModel(MERCHANT_MODEL, data => {
@@ -249,11 +254,15 @@ const loadMerchantFriendly = ({
     friendly.model.userData.npcRole = 'merchant';
     friendly.model.userData.mode = 'engaged';
     const basePosition = merchantSpawnBasePosition.clone().add(MERCHANT_OFFSET);
-    const terrainHeight = getTerrainHeight?.(basePosition.x, basePosition.z);
-    if (Number.isFinite(terrainHeight)) {
-      basePosition.y = terrainHeight + 0.5;
+    if (resolveSpawnY) {
+      basePosition.y = resolveSpawnY(basePosition.x, basePosition.z, 0.5);
+    } else {
+      const terrainHeight = getTerrainHeight?.(basePosition.x, basePosition.z);
+      if (Number.isFinite(terrainHeight)) {
+        basePosition.y = terrainHeight + 0.5;
+      }
+      liftPositionToBuildingTop?.(basePosition, 0.5);
     }
-    liftPositionToBuildingTop?.(basePosition, 0.5);
     friendly.setPosition(basePosition.x, basePosition.y, basePosition.z);
     friendly.setHomePosition(basePosition.clone());
     scene.add(friendly.model);
@@ -263,9 +272,13 @@ const loadMerchantFriendly = ({
 
     if (!merchantRoadLight) {
       const lightPosition = basePosition.clone().add(new THREE.Vector3(2.5, 0, 2));
-      const terrainHeight = getTerrainHeight?.(lightPosition.x, lightPosition.z);
-      lightPosition.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.1 : basePosition.y;
-      liftPositionToBuildingTop?.(lightPosition, 0.3);
+      if (resolveSpawnY) {
+        lightPosition.y = resolveSpawnY(lightPosition.x, lightPosition.z, 0.3);
+      } else {
+        const terrainHeight = getTerrainHeight?.(lightPosition.x, lightPosition.z);
+        lightPosition.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.1 : basePosition.y;
+        liftPositionToBuildingTop?.(lightPosition, 0.3);
+      }
       createLightSource(LIGHT_SOURCE_CONFIGS.roadLight, lightPosition)
         .then((lightSource) => {
           if (!scene) return;
@@ -394,14 +407,14 @@ export const setMerchantHost = (isHost) => {
 export const getMerchantFriendly = () => merchantFriendly;
 
 
-export const spawnMerchantAt = async ({ position, scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop } = {}) => {
+export const spawnMerchantAt = async ({ position, scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop, resolveSpawnY } = {}) => {
   if (!scene) return;
   if (position?.clone) {
     merchantSpawnBasePosition = position.clone();
   }
   removeMerchantEntities();
-  await loadMarketStall({ scene, getTerrainHeight, liftPositionToBuildingTop });
-  loadMerchantFriendly({ scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop });
+  await loadMarketStall({ scene, getTerrainHeight, liftPositionToBuildingTop, resolveSpawnY });
+  loadMerchantFriendly({ scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop, resolveSpawnY });
 };
 
 export const clearMerchantSpawn = () => {
