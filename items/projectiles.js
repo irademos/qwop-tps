@@ -3,6 +3,7 @@ import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 import { updateArrowProjectile } from "./arrow.js";
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../healthUtils.js";
+import { getTerrainHeight } from '../environment/terrainHeight.js';
 
 const detachProjectileMesh = (mesh) => {
   if (!mesh) return;
@@ -72,11 +73,6 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   }
   const spawnPosition = position.clone();
   mesh.position.copy(spawnPosition);
-  const groundY = half;
-  if (mesh.position.y < groundY) {
-    mesh.position.y = groundY;
-  }
-
   // Rapier body
   const world = window.rapierWorld;
   const rbDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(mesh.position.x, mesh.position.y, mesh.position.z);
@@ -93,6 +89,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
 
   mesh.userData.rb = rb;
   mesh.userData.velocity = vel.clone();
+  mesh.userData.prevY = mesh.position.y;
   mesh.userData.lifetime = Number.isFinite(options.lifetime) ? options.lifetime : 4000;
   mesh.userData.spawnTime = Date.now();
   mesh.userData.shooterId = shooterId;
@@ -102,7 +99,6 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.isArrow = options.isArrow ?? false;
   mesh.userData.releaseMesh = options.releaseMesh ?? null;
   mesh.userData.onGroundHit = options.onGroundHit ?? null;
-  mesh.userData.groundY = options.groundY ?? null;
   mesh.userData.hasHitGround = false;
   scene.add(mesh);
   projectiles.push(mesh);
@@ -154,11 +150,15 @@ export function updateProjectiles({
 
     const vel = new THREE.Vector3(linvel.x, linvel.y, linvel.z);
     proj.userData.velocity = vel.clone();
-    updateArrowProjectile(proj, rb, vel);
+    const sampledGroundY = getTerrainHeight(proj.position.x, proj.position.z);
+    const prevY = Number.isFinite(proj.userData.prevY) ? proj.userData.prevY : proj.position.y;
+    const crossedGround = Number.isFinite(sampledGroundY)
+      ? (prevY > sampledGroundY && proj.position.y <= sampledGroundY)
+      : false;
+    updateArrowProjectile(proj, rb, vel, sampledGroundY, crossedGround);
 
     if (typeof proj.userData.onGroundHit === 'function' && !proj.userData.hasHitGround) {
-      const groundY = Number.isFinite(proj.userData.groundY) ? proj.userData.groundY : 0.3;
-      if (proj.position.y <= groundY && vel.y <= 0.1) {
+      if (crossedGround && vel.y <= 0.1) {
         proj.userData.hasHitGround = true;
         proj.userData.onGroundHit(proj.position.clone(), proj);
         if (proj.userData?.isArrow) playArrowBlockedSFX();
@@ -186,6 +186,7 @@ export function updateProjectiles({
       }
     }
 
+    proj.userData.prevY = proj.position.y;
     const age = Date.now() - proj.userData.spawnTime;
 
     let removed = false;

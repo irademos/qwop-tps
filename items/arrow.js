@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 
-const ARROW_GROUND_Y = 0.2;
 const ARROW_MIN_SPEED_SQ = 0.0001;
 const ARROW_TRAIL_MIN_SPEED = 0.2;
 const ARROW_TRAIL_MAX_OPACITY = 0.35;
@@ -117,13 +116,12 @@ export const spawnArrowProjectile = ({
 
   const latest = list[list.length - 1];
   if (latest) {
-    latest.userData.arrowGroundY = ARROW_GROUND_Y;
     latest.userData.arrowStuck = false;
   }
   return latest;
 };
 
-export const updateArrowProjectile = (proj, rb, velocity) => {
+export const updateArrowProjectile = (proj, rb, velocity, sampledGroundY = null, crossedGround = false) => {
   if (!proj?.userData?.isArrow) return;
   const trail = proj.userData.arrowTrail;
   const speed = velocity.length();
@@ -145,10 +143,9 @@ export const updateArrowProjectile = (proj, rb, velocity) => {
 
   if (proj.userData.arrowStuck) return;
 
-  const groundY = Number.isFinite(proj.userData.arrowGroundY)
-    ? proj.userData.arrowGroundY
-    : ARROW_GROUND_Y;
-  if (proj.position.y <= groundY && velocity.y <= 0) {
+  const groundY = Number.isFinite(sampledGroundY) ? sampledGroundY : null;
+  if (!Number.isFinite(groundY)) return;
+  if (crossedGround && velocity.y <= 0) {
     proj.userData.arrowStuck = true;
     rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
     rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
