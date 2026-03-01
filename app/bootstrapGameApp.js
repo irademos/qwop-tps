@@ -3319,8 +3319,9 @@ async function initCore(runtimeContext) {
           monster.setLevel(state.level, { preserveHealth: true });
         }
         if (Number.isFinite(px) && Number.isFinite(pz)) {
-          monster.model.position.set(px, py, pz);
-          monster.body?.setTranslation({ x: px, y: py, z: pz }, true);
+          const resolvedY = getSpawnYWithPolicy(px, pz, 0.5, { allowOnBuildings: true });
+          monster.model.position.set(px, resolvedY, pz);
+          monster.body?.setTranslation({ x: px, y: resolvedY, z: pz }, true);
         }
         if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
           monster.model.quaternion.set(rx, ry, rz, rw);
