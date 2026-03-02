@@ -9095,7 +9095,7 @@ async function initCore(runtimeContext) {
       }
 
       const isStaticBody = typeof rb.isFixed === 'function' && rb.isFixed();
-      if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection && !isStaticBody) {
+      if (!mesh.userData?.isTerrain && (!mesh.userData?.skipTerrainCorrection || mesh.userData?.forceTerrainCorrection) && !isStaticBody) {
         const bbox = getMeshWorldBounds(mesh);
         if (bbox) {
           const groundResolution = resolveGroundY
@@ -9725,7 +9725,10 @@ async function initCore(runtimeContext) {
 
           const aiContext = {
             enableFriendlyDrift: true,
-            friendlyAvoidanceZones
+            friendlyAvoidanceZones,
+            resolveGroundY,
+            walkableSlopeDegrees: 42,
+            groundOffset: 0.9 * (Number.isFinite(monster.sizeScale) ? monster.sizeScale : 1)
           };
           const MAX_AI_DELTA_SECONDS = 0.5;
 
