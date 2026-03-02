@@ -8,6 +8,7 @@ import {
   clearTerrainStampsForTile,
   consumeDirtyTerrainChunks,
   getTerrainHeight,
+  getTerrainStampDebugSample,
   setTerrainStampsForTile
 } from '../environment/terrainHeight.js';
 import { createFire } from '../environment/fire.js';
@@ -63,6 +64,7 @@ import {
 } from '../statSegments.js';
 import { createTileCache } from '../tileCache.js';
 import { createGroundTiles } from '../environment/groundTiles.js';
+import { createTerrainStampDebugOverlay } from '../environment/terrainStampDebugOverlay.js';
 import { clearCache, getCachedTile, setCachedTile } from '../idbCache.js';
 import {
   initHomeStoragePanel,
@@ -223,6 +225,10 @@ const ZOMBIE_VOICE_CLIPS = [
   'NPC Sounds/zombie_sound_2.ogg'
 ];
 const MERCHANT_LOOP_CLIP = 'NPC Sounds/merchant_loop.ogg';
+const TERRAIN_STAMP_REGRESSION_SCENE = Object.freeze({
+  seed: 'terrain-stamp-regression-v1',
+  location: { lat: 37.7749, lon: -122.4194 }
+});
 
 
 // --- Rapier demo state ---
@@ -7082,6 +7088,7 @@ async function initCore(runtimeContext) {
   });
 
   const TILE_SIZE_METERS = 300;
+  let terrainStampDebugOverlay = null;
   const TILE_EVICT_RADIUS = 2;
   const GROUND_TILE_RADIUS = 2;
   const TILE_FETCH_RADIUS_METERS = TILE_SIZE_METERS * Math.SQRT2 * 0.5;
@@ -7098,7 +7105,12 @@ async function initCore(runtimeContext) {
   groundTiles = createGroundTiles({
     scene,
     renderer,
-    tileSizeMeters: TILE_SIZE_METERS
+    tileSizeMeters: TILE_SIZE_METERS,
+    terrainSeed: TERRAIN_STAMP_REGRESSION_SCENE.seed
+  });
+  terrainStampDebugOverlay = createTerrainStampDebugOverlay({
+    scene,
+    getTargetPosition: () => playerModel?.position ?? null
   });
   window.groundTiles = groundTiles.tiles;
   groundMaterialBase = captureMaterialBase(groundTiles.material);
@@ -8840,6 +8852,21 @@ async function initCore(runtimeContext) {
     },
     getLastPing: () => multiplayer?.lastPingMs,
     getLastOsmFetch: () => debugState.lastOsmFetchAt,
+    getTerrainStampDebugSample: (x, z, options) => getTerrainStampDebugSample(x, z, options),
+    setTerrainStampDebugOverlay: (enabled, options = {}) => {
+      terrainStampDebugOverlay?.setOptions?.(options);
+      terrainStampDebugOverlay?.setEnabled?.(enabled);
+      return terrainStampDebugOverlay?.getState?.() ?? null;
+    },
+    getTerrainStampDebugOverlayState: () => terrainStampDebugOverlay?.getState?.() ?? null,
+    loadTerrainStampRegressionScene: () => {
+      locationProvider.setDebugLocation(TERRAIN_STAMP_REGRESSION_SCENE.location);
+      locationProvider.setDebugAccuracy(5);
+      locationProvider.setDebugEnabled(true);
+      terrainStampDebugOverlay?.setOptions?.({ showHeatmap: true });
+      terrainStampDebugOverlay?.setEnabled?.(true);
+      return { ...TERRAIN_STAMP_REGRESSION_SCENE, debugLocationEnabled: true };
+    },
     getLastError: () => {
       const networkError = multiplayer?.lastError;
       const generalError = debugState.lastError;
@@ -8906,6 +8933,9 @@ async function initCore(runtimeContext) {
   window.pickupWood = pickupWood;
   window.pickupMeat = pickupMeat;
   window.pickupSalt = pickupSalt;
+  window.loadTerrainStampRegressionScene = () => appState.loadTerrainStampRegressionScene();
+  window.setTerrainStampDebugOverlay = (enabled, options) => appState.setTerrainStampDebugOverlay(enabled, options);
+  window.getTerrainStampDebugSample = (x, z, options) => appState.getTerrainStampDebugSample(x, z, options);
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -10028,6 +10058,7 @@ async function initCore(runtimeContext) {
     });
 
     updateHitRibbonBursts({ scene, deltaSeconds: frameDelta });
+    terrainStampDebugOverlay?.update?.();
 
     renderer.render(scene, camera);
   }
