@@ -9111,10 +9111,19 @@ async function initCore(runtimeContext) {
           const groundResolution = resolveGroundY
             ? resolveGroundY(mesh.position.x, Math.max(mesh.position.y, bbox.max.y + 0.05), mesh.position.z)
             : null;
-          const resolvedGroundY = groundResolution?.groundY ?? getTerrainHeight(mesh.position.x, mesh.position.z);
+          const monsterGroundProbe = mesh.userData?.groundProbe;
+          const resolvedGroundY = monsterGroundProbe?.groundY
+            ?? groundResolution?.groundY
+            ?? getTerrainHeight(mesh.position.x, mesh.position.z);
+          const resolvedMetadata = monsterGroundProbe?.metadata ?? groundResolution?.metadata;
           const isDeadEntity = mesh.userData?.mode === 'dead';
+          const bodyIsKinematic = typeof rb.isKinematic === 'function' && rb.isKinematic();
+          const bodyIsDynamic = typeof rb.isDynamic === 'function' && rb.isDynamic();
+          const canApplySlopeCorrection = resolvedMetadata?.walkable !== false;
           const belowResolvedGround = Number.isFinite(resolvedGroundY) && bbox.min.y < resolvedGroundY - 0.01;
-          const shouldSnapToGround = isDeadEntity ? belowResolvedGround : belowResolvedGround;
+          const shouldSnapToGround = belowResolvedGround
+            && canApplySlopeCorrection
+            && (isDeadEntity || bodyIsKinematic || bodyIsDynamic);
           if (shouldSnapToGround) {
             const correction = resolvedGroundY - bbox.min.y;
             mesh.position.y += correction;
@@ -9727,7 +9736,29 @@ async function initCore(runtimeContext) {
 
           const aiContext = {
             enableFriendlyDrift: true,
-            friendlyAvoidanceZones
+            friendlyAvoidanceZones,
+            resolveGround: (x, z, options = {}) => {
+              const sampleY = Number.isFinite(options.sampleY)
+                ? options.sampleY
+                : (monster?.model?.position?.y ?? getTerrainHeight(x, z));
+              const walkableSlopeDegrees = Number.isFinite(options.walkableSlopeDegrees)
+                ? options.walkableSlopeDegrees
+                : 45;
+              if (!resolveGroundY) {
+                return {
+                  groundY: getTerrainHeight(x, z),
+                  metadata: {
+                    walkable: true,
+                    slopeDegrees: 0,
+                    surfaceType: 'terrain'
+                  }
+                };
+              }
+              return resolveGroundY(x, sampleY + 2, z, {
+                walkableSlopeDegrees,
+                fallbackGroundY: getTerrainHeight(x, z)
+              });
+            }
           };
           const MAX_AI_DELTA_SECONDS = 0.5;
 

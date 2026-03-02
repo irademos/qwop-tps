@@ -4,6 +4,7 @@ import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { ATTACKS } from "../items/melee.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from "../healthUtils.js";
+import { getTerrainHeight } from "../environment/terrainHeight.js";
 
 const AGGRO_RADIUS = 12;
 const WANDER_CHANGE_MS = 2000;
@@ -41,6 +42,9 @@ const FRIENDLY_DRIFT_AVOID_RADIUS = 8;
 const FRIENDLY_DRIFT_AVOID_HARD_RADIUS = 3;
 const FRIENDLY_DRIFT_AVOID_MIN_FACTOR = 0.02;
 const ENEMY_DISENGAGE_RADIUS = 22;
+const MONSTER_MAX_PATH_SLOPE_DEGREES = 42;
+const MONSTER_MAX_STEP_HEIGHT = 1.4;
+const MONSTER_PATH_SAMPLE_COUNT = 3;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -333,6 +337,67 @@ export class MonsterCharacter extends CharacterBase {
     return Math.max(FRIENDLY_DRIFT_AVOID_MIN_FACTOR, normalized);
   }
 
+  sampleGroundAt(x, z, context = {}) {
+    const resolver = context?.resolveGround;
+    const fallbackY = getTerrainHeight(x, z);
+    if (typeof resolver !== 'function') {
+      return {
+        groundY: fallbackY,
+        metadata: {
+          walkable: true,
+          slopeDegrees: 0,
+          surfaceType: 'terrain'
+        }
+      };
+    }
+    const sampleY = this.model?.position?.y ?? fallbackY;
+    const result = resolver(x, z, { sampleY, walkableSlopeDegrees: MONSTER_MAX_PATH_SLOPE_DEGREES }) || {};
+    const metadata = {
+      walkable: true,
+      slopeDegrees: 0,
+      surfaceType: 'terrain',
+      ...(result.metadata || {})
+    };
+    return {
+      groundY: Number.isFinite(result.groundY) ? result.groundY : fallbackY,
+      metadata
+    };
+  }
+
+  isGroundPathWalkable(from, to, context = {}) {
+    if (!from || !to) return false;
+    const stepCount = Math.max(1, MONSTER_PATH_SAMPLE_COUNT);
+    let previousSample = this.sampleGroundAt(from.x, from.z, context);
+    if (previousSample.metadata.walkable === false) return false;
+    for (let i = 1; i <= stepCount; i += 1) {
+      const t = i / stepCount;
+      const x = THREE.MathUtils.lerp(from.x, to.x, t);
+      const z = THREE.MathUtils.lerp(from.z, to.z, t);
+      const sample = this.sampleGroundAt(x, z, context);
+      if (sample.metadata.walkable === false) return false;
+      const segmentDistance = Math.max(0.001, Math.hypot(x - THREE.MathUtils.lerp(from.x, to.x, (i - 1) / stepCount), z - THREE.MathUtils.lerp(from.z, to.z, (i - 1) / stepCount)));
+      const stepHeight = Math.abs(sample.groundY - previousSample.groundY);
+      const slopeDegrees = THREE.MathUtils.radToDeg(Math.atan(stepHeight / segmentDistance));
+      if (stepHeight > MONSTER_MAX_STEP_HEIGHT || slopeDegrees > MONSTER_MAX_PATH_SLOPE_DEGREES) {
+        return false;
+      }
+      previousSample = sample;
+    }
+    return true;
+  }
+
+  getWalkableDirection(direction, speed, delta, context = {}) {
+    const dir = direction?.clone ? direction.clone() : new THREE.Vector3();
+    dir.y = 0;
+    if (dir.lengthSq() <= 0.000001 || !Number.isFinite(speed) || speed <= 0 || !Number.isFinite(delta) || delta <= 0) {
+      return dir;
+    }
+    dir.normalize();
+    const nextPosition = this.model.position.clone().addScaledVector(dir, speed * delta);
+    const canWalk = this.isGroundPathWalkable(this.model.position, nextPosition, context);
+    return canWalk ? dir : new THREE.Vector3();
+  }
+
   updateAI(deltaTime, playerModel, otherPlayers, context = {}) {
     const now = Date.now();
     if (!this.model) return;
@@ -419,8 +484,16 @@ export class MonsterCharacter extends CharacterBase {
           this.setDirection(wanderDirection);
         }
       }
+      this.model.userData.groundProbe = this.sampleGroundAt(this.model.position.x, this.model.position.z, context);
       this.setHorizontalMovement(
-        this.model.userData.direction,
+        this.getWalkableDirection(
+          this.model.userData.direction,
+          CHARACTER_MOVEMENT.walkSpeed
+            * this.speedMultiplier
+            * this.getFriendlyDriftSpeedMultiplier(),
+          delta,
+          context
+        ),
         CHARACTER_MOVEMENT.walkSpeed
           * this.speedMultiplier
           * this.getFriendlyDriftSpeedMultiplier(),
@@ -457,10 +530,10 @@ export class MonsterCharacter extends CharacterBase {
           op.health = Math.max(0, current - damage);
         }
       }
-    });
+    }, context);
   }
 
-  updateCombatAI(deltaTime, primaryTarget, targets, onHit) {
+  updateCombatAI(deltaTime, primaryTarget, targets, onHit, context = {}) {
     const now = Date.now();
     if (!this.model) return;
     const body = this.body;
@@ -502,11 +575,17 @@ export class MonsterCharacter extends CharacterBase {
     const canAttack = !this.attackStartTime && now >= this.nextAttackTime;
     const runSpeed = (CHARACTER_MOVEMENT.runSpeed - MONSTER_RUN_SPEED_OFFSET) * this.speedMultiplier;
     const walkSpeed = CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier;
+    this.model.userData.groundProbe = this.sampleGroundAt(this.model.position.x, this.model.position.z, context);
 
     if (this.attackStartTime) {
       if (now < this.attackLungeEndTime) {
         this.setHorizontalMovement(
-          this.attackDirection,
+          this.getWalkableDirection(
+            this.attackDirection,
+            (CHARACTER_MOVEMENT.runSpeed + 0.75) * this.speedMultiplier,
+            delta,
+            context
+          ),
           (CHARACTER_MOVEMENT.runSpeed + 0.75) * this.speedMultiplier,
           delta
         );
@@ -517,7 +596,11 @@ export class MonsterCharacter extends CharacterBase {
     } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
       const direction = targetPos.sub(this.model.position).normalize();
       this.setDirection(direction);
-      this.setHorizontalMovement(this.model.userData.direction, runSpeed, delta);
+      this.setHorizontalMovement(
+        this.getWalkableDirection(this.model.userData.direction, runSpeed, delta, context),
+        runSpeed,
+        delta
+      );
       this.faceDirection(this.model.userData.direction);
       this.playAnimation("Run", MOVE_FADE);
     } else {
@@ -535,7 +618,11 @@ export class MonsterCharacter extends CharacterBase {
         forwardSpeed = walkSpeed;
       }
       const movement = faceDir.clone().multiplyScalar(forwardSpeed).add(strafeDir.multiplyScalar(strafeOffset));
-      this.setHorizontalMovement(movement, 1, delta);
+      this.setHorizontalMovement(
+        this.getWalkableDirection(movement, 1, delta, context),
+        1,
+        delta
+      );
       this.faceDirection(faceDir);
       if (canAttack && distance <= STANDOFF_DISTANCE + 0.5) {
         this.attackDirection.copy(faceDir);
