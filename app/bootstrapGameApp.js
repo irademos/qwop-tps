@@ -2621,6 +2621,7 @@ async function initCore(runtimeContext) {
 
   const BUILDING_RAYCAST_HEIGHT = 200;
   const BUILDING_LIFT_EPSILON = 0.05;
+  const NPC_GROUND_SPAWN_OFFSET = 0.95;
   const buildingRaycaster = new THREE.Raycaster();
   const buildingRayDirection = new THREE.Vector3(0, -1, 0);
 
@@ -2817,7 +2818,7 @@ async function initCore(runtimeContext) {
         ));
         const terrainHeight = getTerrainHeight(clusterPosition.x, clusterPosition.z);
         if (Number.isFinite(terrainHeight)) {
-          clusterPosition.y = terrainHeight + 0.5;
+          clusterPosition.y = terrainHeight + NPC_GROUND_SPAWN_OFFSET;
         }
         spawnMonsterInSlot(slotId, modelPath, null, {
           position: clusterPosition,
@@ -2864,7 +2865,7 @@ async function initCore(runtimeContext) {
         playerModel.position.z + Math.sin(angle) * radius
       );
       const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-      spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : 0.5;
+      spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + NPC_GROUND_SPAWN_OFFSET : NPC_GROUND_SPAWN_OFFSET;
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
       }
@@ -2872,7 +2873,7 @@ async function initCore(runtimeContext) {
     }
     const fallback = playerModel.position.clone();
     fallback.x += MONSTER_SPAWN_MIN_RADIUS;
-    fallback.y = getTerrainHeight(fallback.x, fallback.z) + 0.5;
+    fallback.y = getTerrainHeight(fallback.x, fallback.z) + NPC_GROUND_SPAWN_OFFSET;
     return fallback;
   };
 
