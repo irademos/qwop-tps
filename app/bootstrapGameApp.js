@@ -92,6 +92,7 @@ import {
   initMapViewFeature,
   setMapViewEnabledFeature,
   updateMapViewFeature,
+  isMapViewTransitionActiveFeature,
   zoomInMapFeature,
   zoomOutMapFeature
 } from '../features/mapFeature.js';
@@ -9214,17 +9215,19 @@ async function initCore(runtimeContext) {
     ];
     const mapTreasureChests = treasureChest?.mesh?.visible ? [treasureChest.mesh] : [];
     const mapMerchants = mapMerchantFriendly?.model ? [mapMerchantFriendly.model] : [];
-    void updateMapViewFeature(frameDelta, {
-      monsters: getDamageableCreatures(),
-      friendlies: friendlyNpcManager?.friendlies,
-      weapons: droppedWeaponPickups,
-      items: mapItems,
-      treasureChests: mapTreasureChests,
-      merchants: mapMerchants,
-      otherPlayers,
-      homePosition,
-      homeEnterDistance
-    });
+    if (mapViewEnabled || isMapViewTransitionActiveFeature()) {
+      void updateMapViewFeature(frameDelta, {
+        monsters: getDamageableCreatures(),
+        friendlies: friendlyNpcManager?.friendlies,
+        weapons: droppedWeaponPickups,
+        items: mapItems,
+        treasureChests: mapTreasureChests,
+        merchants: mapMerchants,
+        otherPlayers,
+        homePosition,
+        homeEnterDistance
+      });
+    }
 
     const now = performance.now();
     if (now - lastPerfUpdateMs >= 1000) {
