@@ -7459,6 +7459,7 @@ async function initCore(runtimeContext) {
       { x: from.x, y: from.y ?? playerModel?.position?.y ?? 0, z: from.z },
       { x: direction.x, y: direction.y, z: direction.z }
     );
+    const excludeHandle = typeof playerControls.body?.handle === 'number' ? playerControls.body.handle : null;
     const hit = rapierWorld.castRay(
       ray,
       distance,
@@ -7466,7 +7467,8 @@ async function initCore(runtimeContext) {
       undefined,
       undefined,
       undefined,
-      playerControls.body
+      undefined,
+      excludeHandle == null ? undefined : (collider) => collider?.parent()?.handle !== excludeHandle
     );
     if (!hit) return false;
     const hitDistance = hit.toi ?? hit.timeOfImpact ?? distance;
