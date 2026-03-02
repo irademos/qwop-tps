@@ -1896,10 +1896,43 @@ export class PlayerControls {
     const world = window.rapierWorld;
     if (includeSolidHit && world && !Number.isFinite(this.groundOverrideY)) {
       const ray = new RAPIER.Ray({ x, y, z }, { x: 0, y: -1, z: 0 });
+      const excludedColliderHandles = new Set();
+      if (this.body && typeof this.body.numColliders === 'function' && typeof this.body.collider === 'function') {
+        const colliderCount = this.body.numColliders();
+        for (let i = 0; i < colliderCount; i += 1) {
+          const collider = this.body.collider(i);
+          if (typeof collider?.handle === 'number') {
+            excludedColliderHandles.add(collider.handle);
+          }
+        }
+      }
+      const excludeSelfCollider = excludedColliderHandles.size
+        ? (collider) => !excludedColliderHandles.has(collider?.handle)
+        : undefined;
       const rayHit = world.castRayAndGetNormal
-        ? world.castRayAndGetNormal(ray, maxRayDistance, true, undefined, undefined, undefined, this.body)
+        ? world.castRayAndGetNormal(
+          ray,
+          maxRayDistance,
+          true,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          excludeSelfCollider
+        )
         : null;
-      const simpleHit = rayHit ? null : world.castRay(ray, maxRayDistance, true, undefined, undefined, undefined, this.body);
+      const simpleHit = rayHit
+        ? null
+        : world.castRay(
+          ray,
+          maxRayDistance,
+          true,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          excludeSelfCollider
+        );
       const hitDistance = rayHit?.toi ?? rayHit?.timeOfImpact ?? simpleHit?.toi ?? simpleHit?.timeOfImpact;
       if (Number.isFinite(hitDistance)) {
         const hitY = y - hitDistance;
