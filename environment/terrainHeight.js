@@ -462,7 +462,16 @@ export function clearTerrainStampsForTile(tileKey) {
   clearTerrainCompositorCache();
 }
 
+function computeStampedTerrainHeightUncached(x, z) {
+  const baseHeight = getBaseTerrainHeight(x, z);
+  const cx = getChunkCoord(x);
+  const cz = getChunkCoord(z);
+  const chunkData = getStampsForChunk(cx, cz);
+  return applyStampCompositor(baseHeight, chunkData.stamps, x, z);
+}
+
 export function getStampedTerrainHeight(x, z) {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return getBaseTerrainHeight(x, z);
   const baseHeight = getBaseTerrainHeight(x, z);
 
   const cx = getChunkCoord(x);
@@ -481,8 +490,7 @@ export function getStampedTerrainHeight(x, z) {
   const cached = heightCache.get(localKey);
   if (Number.isFinite(cached)) return cached;
 
-  const chunkData = getStampsForChunk(cx, cz);
-  const compositedHeight = applyStampCompositor(baseHeight, chunkData.stamps, x, z);
+  const compositedHeight = computeStampedTerrainHeightUncached(x, z);
   heightCache.set(localKey, compositedHeight);
   return compositedHeight;
 }
@@ -520,10 +528,10 @@ export function getTerrainStampDebugSample(x, z, options = {}) {
   const baseHeight = getBaseTerrainHeight(x, z);
   const debugCompositor = computeStampCompositorDebug(baseHeight, chunkData.stamps, x, z);
 
-  const left = getStampedTerrainHeight(x - sampleStep, z);
-  const right = getStampedTerrainHeight(x + sampleStep, z);
-  const down = getStampedTerrainHeight(x, z - sampleStep);
-  const up = getStampedTerrainHeight(x, z + sampleStep);
+  const left = computeStampedTerrainHeightUncached(x - sampleStep, z);
+  const right = computeStampedTerrainHeightUncached(x + sampleStep, z);
+  const down = computeStampedTerrainHeightUncached(x, z - sampleStep);
+  const up = computeStampedTerrainHeightUncached(x, z + sampleStep);
   const slopeDx = Number.isFinite(left) && Number.isFinite(right) ? (right - left) / (2 * sampleStep) : 0;
   const slopeDz = Number.isFinite(down) && Number.isFinite(up) ? (up - down) / (2 * sampleStep) : 0;
   const slopeGradient = Math.hypot(slopeDx, slopeDz);
