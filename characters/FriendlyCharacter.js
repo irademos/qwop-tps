@@ -147,8 +147,8 @@ export class FriendlyCharacter extends MonsterCharacter {
       const targetPos = targetSource.clone();
       const faceDir = targetPos.sub(this.model.position).normalize();
       this.setDirection(faceDir);
-      const vel = body.linvel();
-      body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      const currentYVelocity = body.linvel().y;
+      body.setLinvel({ x: 0, y: currentYVelocity, z: 0 }, true);
       const angle = Math.atan2(faceDir.x, faceDir.z);
       const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
       body.setRotation(rot, true);
@@ -182,8 +182,8 @@ export class FriendlyCharacter extends MonsterCharacter {
     const movement = this.model.userData.direction
       .clone()
       .multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * IDLE_SPEED_MULTIPLIER);
-    const vel = body.linvel();
-    body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
+    const currentYVelocity = body.linvel().y;
+    body.setLinvel({ x: movement.x, y: currentYVelocity, z: movement.z }, true);
     const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
     const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
     body.setRotation(rot, true);
