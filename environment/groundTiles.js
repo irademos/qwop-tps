@@ -81,6 +81,8 @@ export function createGroundTiles({
     );
     mesh.receiveShadow = true;
     mesh.userData.hideInMapView = true;
+    mesh.userData.groundTileX = tile.x;
+    mesh.userData.groundTileY = tile.y;
     return mesh;
   };
 
@@ -102,6 +104,59 @@ export function createGroundTiles({
     return true;
   };
 
+
+  const parseChunkKey = (chunkKey) => {
+    if (!chunkKey || typeof chunkKey !== "string") return null;
+    const [cxRaw, czRaw] = chunkKey.split(",");
+    const cx = Number(cxRaw);
+    const cz = Number(czRaw);
+    if (!Number.isFinite(cx) || !Number.isFinite(cz)) return null;
+    return { cx, cz };
+  };
+
+  const intersectsBounds = (a, b) => {
+    if (!a || !b) return false;
+    return !(a.maxX < b.minX || a.minX > b.maxX || a.maxZ < b.minZ || a.minZ > b.maxZ);
+  };
+
+  const rebuildTilesForChunks = (chunkKeys, chunkSizeMeters = 64) => {
+    if (!Array.isArray(chunkKeys) || chunkKeys.length === 0) return 0;
+    const chunkBoundsList = chunkKeys
+      .map(parseChunkKey)
+      .filter(Boolean)
+      .map(({ cx, cz }) => ({
+        minX: cx * chunkSizeMeters,
+        maxX: (cx + 1) * chunkSizeMeters,
+        minZ: cz * chunkSizeMeters,
+        maxZ: (cz + 1) * chunkSizeMeters
+      }));
+    if (chunkBoundsList.length === 0) return 0;
+
+    let rebuilt = 0;
+    for (const [key, mesh] of tiles.entries()) {
+      const tileX = Number(mesh?.userData?.groundTileX);
+      const tileY = Number(mesh?.userData?.groundTileY);
+      if (!Number.isFinite(tileX) || !Number.isFinite(tileY)) continue;
+      const tileBounds = {
+        minX: tileX * tileSizeMeters,
+        maxX: (tileX + 1) * tileSizeMeters,
+        minZ: -(tileY + 1) * tileSizeMeters,
+        maxZ: -tileY * tileSizeMeters
+      };
+      const overlapsDirtyChunk = chunkBoundsList.some((chunkBounds) => intersectsBounds(tileBounds, chunkBounds));
+      if (!overlapsDirtyChunk) continue;
+      const cacheKey = `${tileX},${tileY}|${terrainKey}`;
+      const geometry = geometryCache.get(cacheKey);
+      if (geometry) {
+        geometry.dispose?.();
+        geometryCache.delete(cacheKey);
+      }
+      removeTile(key);
+      ensureTile({ x: tileX, y: tileY }, key);
+      rebuilt += 1;
+    }
+    return rebuilt;
+  };
   const clear = () => {
     for (const key of tiles.keys()) {
       removeTile(key);
@@ -119,6 +174,7 @@ export function createGroundTiles({
       return state.texture;
     },
     ensureTile,
+    rebuildTilesForChunks,
     removeTile,
     clear
   };
