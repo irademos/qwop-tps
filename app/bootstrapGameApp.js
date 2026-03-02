@@ -883,11 +883,34 @@ async function initCore(runtimeContext) {
   let monsterSnapshotTimeout = null;
   let unsubscribeMonsterUpdates = null;
   const recentMonsterHits = new Map();
+  const damageableCreaturesBuffer = [];
 
-  const getDamageableCreatures = () => ([
-    ...(Array.isArray(monsters) ? monsters : []),
-    ...(Array.isArray(animals) ? animals : [])
-  ]);
+  const refillCombinedList = (target, first, second) => {
+    target.length = 0;
+    if (Array.isArray(first) && first.length > 0) {
+      target.push(...first);
+    }
+    if (Array.isArray(second) && second.length > 0) {
+      target.push(...second);
+    }
+    return target;
+  };
+
+  const getDamageableCreatures = () => refillCombinedList(damageableCreaturesBuffer, monsters, animals);
+  const findDamageableCreatureById = (id) => {
+    if (!id) return null;
+    if (Array.isArray(monsters)) {
+      for (const monster of monsters) {
+        if (monster?.id === id) return monster;
+      }
+    }
+    if (Array.isArray(animals)) {
+      for (const animal of animals) {
+        if (animal?.id === id) return animal;
+      }
+    }
+    return null;
+  };
 
   scene = new THREE.Scene();
   const rotateSkyboxFaceClockwise = (image) => {
@@ -1440,7 +1463,7 @@ async function initCore(runtimeContext) {
       }
       if (!multiplayer?.isHost) return;
       const monsterId = data.monsterId;
-      const monster = getDamageableCreatures().find(entry => entry.id === monsterId);
+      const monster = findDamageableCreatureById(monsterId);
       if (!monster) return;
       const sourceId = data.sourcePlayerId || peerId;
       const nowMs = Date.now();
@@ -9209,18 +9232,16 @@ async function initCore(runtimeContext) {
     const homePosition = homeSystem?.getHomeLocalPosition?.();
     const homeEnterDistance = homeSystem?.getHomeEnterDistance?.();
     const mapMerchantFriendly = getMerchantFriendlyFeature();
-    const mapItems = [
-      ...ammoPickups,
-      ...woodPickups
-    ];
     const mapTreasureChests = treasureChest?.mesh?.visible ? [treasureChest.mesh] : [];
     const mapMerchants = mapMerchantFriendly?.model ? [mapMerchantFriendly.model] : [];
     if (mapViewEnabled || isMapViewTransitionActiveFeature()) {
       void updateMapViewFeature(frameDelta, {
-        monsters: getDamageableCreatures(),
+        monsters,
+        animals,
         friendlies: friendlyNpcManager?.friendlies,
         weapons: droppedWeaponPickups,
-        items: mapItems,
+        ammoItems: ammoPickups,
+        woodItems: woodPickups,
         treasureChests: mapTreasureChests,
         merchants: mapMerchants,
         otherPlayers,
