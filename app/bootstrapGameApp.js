@@ -6,6 +6,7 @@ import { MonsterCharacter } from "../characters/MonsterCharacter.js";
 import { createFriendlyNpcManager } from "../friendlyNpcManager.js";
 import {
   clearTerrainStampsForTile,
+  consumeDirtyTerrainChunks,
   getTerrainHeight,
   setTerrainStampsForTile
 } from '../environment/terrainHeight.js';
@@ -7832,12 +7833,14 @@ async function initCore(runtimeContext) {
       tileRenderBounds.delete(tileKey);
       mapRenderer.removeTile?.(tileKey);
       buildingsRenderer.removeTile?.(tileKey);
+      clearTerrainStampsForTile(tileKey);
       boundsDirty = true;
       changedTileKeys.add(tileKey);
     }
 
     if (boundsDirty) {
       refreshRenderOriginFromBounds();
+      rebuildGroundTilesForDirtyTerrainChunks();
     }
     const originChanged = !isSameRenderOrigin(currentRenderOrigin, lastRenderOrigin);
     if (originChanged) {
@@ -7853,9 +7856,11 @@ async function initCore(runtimeContext) {
     for (const tileKey of changedTileKeys) {
       const entry = tileCache.cache.get(tileKey);
       if (!entry?.geojson) continue;
+      setTerrainStampsForTile(tileKey, entry.geojson, bounds);
       mapRenderer.updateTileHighways?.(tileKey, entry.geojson, bounds);
       buildingsRenderer.updateTileBuildings?.(tileKey, entry.geojson, bounds);
     }
+    rebuildGroundTilesForDirtyTerrainChunks();
 
     const finishBuildingRender = () => {
       if (rebuildId !== mapRebuildToken) return;
@@ -7958,6 +7963,12 @@ async function initCore(runtimeContext) {
     }
   };
 
+  const rebuildGroundTilesForDirtyTerrainChunks = () => {
+    const dirtyChunks = consumeDirtyTerrainChunks();
+    if (dirtyChunks.length === 0) return 0;
+    return groundTiles?.rebuildTilesForChunks?.(dirtyChunks) ?? 0;
+  };
+
   const updateTileMeshesImmediate = (tileKey, geojson) => {
     if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
     const previousGeojson = renderedTileGeojson.get(tileKey);
@@ -7991,6 +8002,7 @@ async function initCore(runtimeContext) {
         if (!entry?.geojson) continue;
         buildingsRenderer.updateTileBuildings?.(key, entry.geojson, bounds);
       }
+      rebuildGroundTilesForDirtyTerrainChunks();
       scheduleBuildingRefresh();
       if (typeof natureController?.refreshTilesForCacheTile === "function") {
         for (const key of tilesToUpdate) {
@@ -8066,6 +8078,7 @@ async function initCore(runtimeContext) {
         tileRenderBounds.delete(key);
         deferredTileUpdates.delete(key);
       }
+      rebuildGroundTilesForDirtyTerrainChunks();
       scheduleBuildingRefresh();
     }
 
