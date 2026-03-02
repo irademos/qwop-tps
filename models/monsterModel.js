@@ -58,11 +58,7 @@ function configureMeshCulling(model) {
   model.traverse((obj) => {
     if (obj.material?.skinning === true) obj.material.skinning = true;
     if (!obj.isMesh) return;
-    // Animated FBX characters can report stale/undersized bounds when far from
-    // origin (common in GPS-sized worlds), which causes them to be culled even
-    // while their gameplay/map positions are valid. Keep character meshes always
-    // renderable to avoid disappearing NPCs.
-    obj.frustumCulled = false;
+    obj.frustumCulled = true;
     if (obj.geometry) {
       if (!obj.geometry.boundingBox) {
         obj.geometry.computeBoundingBox();
