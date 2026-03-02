@@ -7459,7 +7459,17 @@ async function initCore(runtimeContext) {
       { x: from.x, y: from.y ?? playerModel?.position?.y ?? 0, z: from.z },
       { x: direction.x, y: direction.y, z: direction.z }
     );
-    const excludeHandle = typeof playerControls.body?.handle === 'number' ? playerControls.body.handle : null;
+    const excludedColliderHandles = new Set();
+    const body = playerControls.body;
+    if (body && typeof body.numColliders === 'function' && typeof body.collider === 'function') {
+      const colliderCount = body.numColliders();
+      for (let i = 0; i < colliderCount; i += 1) {
+        const collider = body.collider(i);
+        if (typeof collider?.handle === 'number') {
+          excludedColliderHandles.add(collider.handle);
+        }
+      }
+    }
     const hit = rapierWorld.castRay(
       ray,
       distance,
@@ -7468,7 +7478,7 @@ async function initCore(runtimeContext) {
       undefined,
       undefined,
       undefined,
-      excludeHandle == null ? undefined : (collider) => collider?.parent()?.handle !== excludeHandle
+      excludedColliderHandles.size ? (collider) => !excludedColliderHandles.has(collider?.handle) : undefined
     );
     if (!hit) return false;
     const hitDistance = hit.toi ?? hit.timeOfImpact ?? distance;

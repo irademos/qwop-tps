@@ -1896,10 +1896,19 @@ export class PlayerControls {
     const world = window.rapierWorld;
     if (includeSolidHit && world && !Number.isFinite(this.groundOverrideY)) {
       const ray = new RAPIER.Ray({ x, y, z }, { x: 0, y: -1, z: 0 });
-      const excludeHandle = typeof this.body?.handle === 'number' ? this.body.handle : null;
-      const excludeSelfCollider = excludeHandle == null
-        ? undefined
-        : (collider) => collider?.parent()?.handle !== excludeHandle;
+      const excludedColliderHandles = new Set();
+      if (this.body && typeof this.body.numColliders === 'function' && typeof this.body.collider === 'function') {
+        const colliderCount = this.body.numColliders();
+        for (let i = 0; i < colliderCount; i += 1) {
+          const collider = this.body.collider(i);
+          if (typeof collider?.handle === 'number') {
+            excludedColliderHandles.add(collider.handle);
+          }
+        }
+      }
+      const excludeSelfCollider = excludedColliderHandles.size
+        ? (collider) => !excludedColliderHandles.has(collider?.handle)
+        : undefined;
       const rayHit = world.castRayAndGetNormal
         ? world.castRayAndGetNormal(
           ray,
