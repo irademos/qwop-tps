@@ -39,7 +39,7 @@ import { createApples, APPLE_ITEM_ID } from '../items/apple.js';
 import { createHomeSystem } from '../home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { getSpawnPosition } from '../spawnUtils.js';
+import { configureSpawnAlignment, getSpawnPosition, getSpawnY } from '../spawnUtils.js';
 import { createLocationProvider } from '../location.js';
 import { fetchOSMData } from '../osmClient.js';
 import { overpassToGeoJSON } from '../osmGeoJson.js';
@@ -1553,9 +1553,9 @@ async function initCore(runtimeContext) {
         return;
       }
 
-      const terrainY = getTerrainHeight(targetX, targetZ);
       const hasAuthoritativeY = Number.isFinite(data.y);
-      const targetY = hasAuthoritativeY ? data.y : terrainY;
+      const resolvedNetworkY = getSpawnY(targetX, targetZ, 0.6, { allowOnBuildings: true });
+      const targetY = hasAuthoritativeY ? data.y : (Number.isFinite(resolvedNetworkY) ? resolvedNetworkY : getTerrainHeight(targetX, targetZ));
 
       if (!player.targetPos) {
         player.targetPos = new THREE.Vector3(targetX, targetY, targetZ);
@@ -2652,6 +2652,8 @@ async function initCore(runtimeContext) {
     return true;
   };
 
+  configureSpawnAlignment({ liftPositionToBuildingTop });
+
   window.lightSources = [];
 
   friendlyNpcManager = createFriendlyNpcManager({
@@ -2815,10 +2817,7 @@ async function initCore(runtimeContext) {
           0,
           Math.sin(offsetAngle) * offsetRadius
         ));
-        const terrainHeight = getTerrainHeight(clusterPosition.x, clusterPosition.z);
-        if (Number.isFinite(terrainHeight)) {
-          clusterPosition.y = terrainHeight + 0.5;
-        }
+        applySpawnY(clusterPosition, 0.5, { allowOnBuildings: true });
         spawnMonsterInSlot(slotId, modelPath, null, {
           position: clusterPosition,
           rotation,
@@ -2863,8 +2862,8 @@ async function initCore(runtimeContext) {
         0,
         playerModel.position.z + Math.sin(angle) * radius
       );
-      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-      spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : 0.5;
+      const spawnY = getSpawnY(spawnPos.x, spawnPos.z, 0.5, { allowOnBuildings: true });
+      spawnPos.y = Number.isFinite(spawnY) ? spawnY : 0.5;
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
       }
@@ -2872,7 +2871,8 @@ async function initCore(runtimeContext) {
     }
     const fallback = playerModel.position.clone();
     fallback.x += MONSTER_SPAWN_MIN_RADIUS;
-    fallback.y = getTerrainHeight(fallback.x, fallback.z) + 0.5;
+    const fallbackY = getSpawnY(fallback.x, fallback.z, 0.5, { allowOnBuildings: true });
+    fallback.y = Number.isFinite(fallbackY) ? fallbackY : fallback.y;
     return fallback;
   };
 
@@ -3095,9 +3095,8 @@ async function initCore(runtimeContext) {
 
         const spawnPos = options.position
           && Number.isFinite(options.position.x)
-          && Number.isFinite(options.position.y)
           && Number.isFinite(options.position.z)
-          ? options.position
+          ? normalizeNetworkSpawnPosition(options.position, 0.5, { allowOnBuildings: true }) || getMonsterSpawnPosition()
           : getMonsterSpawnPosition();
         monster.setPosition(spawnPos.x, spawnPos.y, spawnPos.z);
 
@@ -3301,9 +3300,12 @@ async function initCore(runtimeContext) {
         if (Number.isFinite(state.level)) {
           monster.setLevel(state.level, { preserveHealth: true });
         }
-        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-          monster.model.position.set(px, py, pz);
-          monster.body?.setTranslation({ x: px, y: py, z: pz }, true);
+        if (Number.isFinite(px) && Number.isFinite(pz)) {
+          const normalizedPos = normalizeNetworkSpawnPosition({ x: px, y: py, z: pz }, 0.5, { allowOnBuildings: true });
+          if (normalizedPos) {
+            monster.model.position.copy(normalizedPos);
+            monster.body?.setTranslation({ x: normalizedPos.x, y: normalizedPos.y, z: normalizedPos.z }, true);
+          }
         }
         if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
           monster.model.quaternion.set(rx, ry, rz, rw);
@@ -4345,7 +4347,9 @@ async function initCore(runtimeContext) {
     const radius = 1.2;
     dropPosition.x += Math.cos(angle) * radius;
     dropPosition.z += Math.sin(angle) * radius;
-    dropPosition.y = getTerrainHeight(dropPosition.x, dropPosition.z) + 0.5;
+    if (!applySpawnY(dropPosition, 0.5, { allowOnBuildings: true })) {
+      return null;
+    }
     return dropPosition;
   }
 
@@ -4558,10 +4562,7 @@ async function initCore(runtimeContext) {
   function spawnWoodPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
+    applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     const geometry = new THREE.BoxGeometry(3.0, 0.36, 0.6);
     const material = new THREE.MeshStandardMaterial({
       color: 0x8b5a2b,
@@ -4583,10 +4584,7 @@ async function initCore(runtimeContext) {
   function spawnMeatPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
+    applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     const geometry = new THREE.BoxGeometry(1.1, 0.45, 0.7);
     const material = new THREE.MeshStandardMaterial({
       color: 0x6b3f23,
@@ -4608,10 +4606,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
     if (useTerrainHeight) {
-      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-      if (Number.isFinite(terrainHeight)) {
-        spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-      }
+      applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     }
     const group = new THREE.Group();
     const pieces = groupedMushrooms > 0 ? groupedMushrooms : 3;
@@ -4685,10 +4680,7 @@ async function initCore(runtimeContext) {
   function spawnZombieBrainsPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
+    applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
 
     const brainGroup = createZombieBrainsGroup();
     brainGroup.position.copy(spawnPos);
@@ -4716,9 +4708,7 @@ async function initCore(runtimeContext) {
       mesh.getWorldPosition(tempTreePosition);
       appleParent.add(mesh);
       mesh.position.copy(tempTreePosition);
-      const terrainY = getTerrainHeight(tempTreePosition.x, tempTreePosition.z);
-      if (Number.isFinite(terrainY)) {
-        mesh.position.y = terrainY + APPLE_DROP_LIFT;
+      if (applySpawnY(mesh.position, APPLE_DROP_LIFT, { allowOnBuildings: true })) {
         mesh.userData.baseY = mesh.position.y;
       }
       mesh.rotation.y = Math.random() * Math.PI * 2;
@@ -6529,21 +6519,41 @@ async function initCore(runtimeContext) {
     }
   }
 
-  const asVec3 = (p) => (
-    p?.isVector3 ? p.clone()
-    : p && Number.isFinite(p.x) && Number.isFinite(p.z) ? new THREE.Vector3(p.x, p.y ?? 0, p.z)
-    : null
-  );
+  function asVec3(p) {
+    return p?.isVector3 ? p.clone()
+      : p && Number.isFinite(p.x) && Number.isFinite(p.z) ? new THREE.Vector3(p.x, p.y ?? 0, p.z)
+      : null;
+  }
+
+  function resolveSpawnY(position, offset, { allowOnBuildings = false } = {}) {
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.z)) return null;
+    return getSpawnY(position.x, position.z, offset, { allowOnBuildings });
+  }
+
+  function applySpawnY(position, offset, { allowOnBuildings = false } = {}) {
+    const resolvedY = resolveSpawnY(position, offset, { allowOnBuildings });
+    if (!Number.isFinite(resolvedY)) return false;
+    position.y = resolvedY;
+    return true;
+  }
+
+  function normalizeNetworkSpawnPosition(position, offset, { allowOnBuildings = false } = {}) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const resolvedY = resolveSpawnY(spawnPos, offset, { allowOnBuildings });
+    if (!Number.isFinite(resolvedY)) return null;
+    spawnPos.y = resolvedY;
+    return spawnPos;
+  }
 
   function spawnAmmoPickup(position, amount = AMMO_PICKUP_AMOUNT, options = {}) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     if (options.noFloat) {
       const groundOffset = Number.isFinite(options.groundOffset) ? options.groundOffset : 0.08;
-      spawnPos.y = terrainHeight + groundOffset;
-    } else {
-      spawnPos.y = terrainHeight + 0.6;
+      if (!applySpawnY(spawnPos, groundOffset, { allowOnBuildings: true })) return;
+    } else if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) {
+      return;
     }
 
     const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
@@ -6642,8 +6652,7 @@ async function initCore(runtimeContext) {
   function spawnDroppedAmmoPickup(position, amount, dropId) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -6699,9 +6708,12 @@ async function initCore(runtimeContext) {
         const entry = droppedAmmoPickups.get(drop.id);
         const mesh = entry?.mesh;
         const [x, y, z] = drop.position;
-        if (mesh && Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
-          mesh.position.set(x, y, z);
-          mesh.userData.baseY = y;
+        if (mesh && Number.isFinite(x) && Number.isFinite(z)) {
+          const normalizedPos = normalizeNetworkSpawnPosition({ x, y, z }, 0.6, { allowOnBuildings: true });
+          if (normalizedPos) {
+            mesh.position.copy(normalizedPos);
+            mesh.userData.baseY = normalizedPos.y;
+          }
         }
       }
     });
@@ -6722,8 +6734,7 @@ async function initCore(runtimeContext) {
   function spawnFoodPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -6750,8 +6761,7 @@ async function initCore(runtimeContext) {
   function spawnHealthPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -6778,8 +6788,7 @@ async function initCore(runtimeContext) {
   function spawnCoinPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
 
     const geometry = new THREE.CylinderGeometry(0.2, 0.2, 0.06, 24);
     const material = new THREE.MeshStandardMaterial({
@@ -6828,10 +6837,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.5;
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
     iceGun.mesh.position.copy(spawnPos);
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
     iceGun.mesh.visible = true;
@@ -6844,10 +6850,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.5;
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
     bow.mesh.position.copy(spawnPos);
     bow.mesh.quaternion.set(0, 0, 0, 1);
     bow.mesh.visible = true;
@@ -6879,10 +6882,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.4;
+    if (!applySpawnY(spawnPos, 0.4, { allowOnBuildings: true })) return;
     bomb.mesh.position.copy(spawnPos);
     bomb.mesh.quaternion.set(0, 0, 0, 1);
     bomb.mesh.visible = true;
@@ -6894,10 +6894,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.5;
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
     autumnSword.mesh.position.copy(spawnPos);
     autumnSword.mesh.quaternion.set(0, 0, 0, 1);
     autumnSword.mesh.visible = true;
@@ -6909,10 +6906,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.2;
+    if (!applySpawnY(spawnPos, 0.2, { allowOnBuildings: true })) return;
     lantern.mesh.position.copy(spawnPos);
     lantern.mesh.quaternion.set(0, 0, 0, 1);
     lantern.mesh.visible = true;
@@ -6924,10 +6918,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.2;
+    if (!applySpawnY(spawnPos, 0.2, { allowOnBuildings: true })) return;
     torch.mesh.position.copy(spawnPos);
     torch.mesh.quaternion.set(0, 0, 0, 1);
     torch.mesh.visible = true;
@@ -6940,10 +6931,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight;
+    if (!applySpawnY(spawnPos, 0, { allowOnBuildings: true })) return;
     treasureChest.mesh.position.copy(spawnPos);
     treasureChest.mesh.visible = true;
     treasureChest.syncCollider?.();
@@ -7249,9 +7237,7 @@ async function initCore(runtimeContext) {
     const configs = getWeaponPickupConfigs().filter(config => config.item?.mesh);
     if (configs.length === 0) return;
     const config = configs[Math.floor(Math.random() * configs.length)];
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-    spawnPos.y = terrainHeight + config.groundOffset;
+    if (!applySpawnY(spawnPos, config.groundOffset, { allowOnBuildings: true })) return;
     createDroppedWeaponPickup(config.item, {
       itemId: config.itemId,
       markerColor: config.markerColor,
@@ -8435,7 +8421,7 @@ async function initCore(runtimeContext) {
     setStat('health', statsState.maxHealthSegments);
     setStat('hunger', statsState.maxHungerSegments);
     setStat('magic', statsState.maxMagicSegments);
-    const spawn = getSpawnPosition();
+    const spawn = getSpawnPosition({ allowOnBuildings: true });
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
     playerControls.playerY = spawn.y;
