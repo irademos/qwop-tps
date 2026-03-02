@@ -9085,10 +9085,14 @@ async function initCore(runtimeContext) {
     // Sync Rapier bodies -> Three meshes
     const resolveGroundY = playerControls?.resolveGroundY?.bind(playerControls);
     for (const [rb, mesh] of rbToMesh.entries()) {
-      const t = rb.translation();
-      const r = rb.rotation();
-      mesh.position.set(t.x, t.y, t.z);
-      mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      {
+        const t = rb.translation();
+        mesh.position.set(t.x, t.y, t.z);
+      }
+      {
+        const r = rb.rotation();
+        mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      }
 
       const isStaticBody = typeof rb.isFixed === 'function' && rb.isFixed();
       if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection && !isStaticBody) {
@@ -9105,9 +9109,17 @@ async function initCore(runtimeContext) {
             const correction = resolvedGroundY - bbox.min.y;
             mesh.position.y += correction;
             rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
-            const lv = rb.linvel();
-            if (lv.y < 0) {
-              rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
+            let shouldClampDownwardVelocity = false;
+            let clampVelocityX = 0;
+            let clampVelocityZ = 0;
+            {
+              const lv = rb.linvel();
+              shouldClampDownwardVelocity = lv.y < 0;
+              clampVelocityX = lv.x;
+              clampVelocityZ = lv.z;
+            }
+            if (shouldClampDownwardVelocity) {
+              rb.setLinvel({ x: clampVelocityX, y: 0, z: clampVelocityZ }, true);
             }
           }
         }
