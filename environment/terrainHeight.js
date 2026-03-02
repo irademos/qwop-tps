@@ -288,6 +288,80 @@ function applyStampCompositor(baseHeight, stamps, x, z) {
   return height;
 }
 
+function computeStampCompositorDebug(baseHeight, stamps, x, z) {
+  if (!Array.isArray(stamps) || stamps.length === 0) {
+    return {
+      compositedHeight: baseHeight,
+      totalInfluence: 0,
+      strongestInfluence: null,
+      appliedCount: 0
+    };
+  }
+
+  const byPriority = new Map();
+  const contributions = [];
+  for (const stamp of stamps) {
+    const contribution = computeStampInfluence(stamp, x, z);
+    if (!contribution) continue;
+    const priority = stamp.priority ?? 0;
+    if (!byPriority.has(priority)) byPriority.set(priority, []);
+    const item = { stamp, ...contribution };
+    byPriority.get(priority).push(item);
+    contributions.push(item);
+  }
+
+  if (byPriority.size === 0) {
+    return {
+      compositedHeight: baseHeight,
+      totalInfluence: 0,
+      strongestInfluence: null,
+      appliedCount: 0
+    };
+  }
+
+  const priorities = Array.from(byPriority.keys()).sort((a, b) => b - a);
+  let height = baseHeight;
+
+  for (const priority of priorities) {
+    const levelContributions = byPriority.get(priority) ?? [];
+    if (levelContributions.length === 0) continue;
+
+    let influenceTotal = 0;
+    let weightedTarget = 0;
+    let coreWeightTotal = 0;
+    for (const item of levelContributions) {
+      influenceTotal += item.influence;
+      coreWeightTotal += item.coreWeight;
+      weightedTarget += item.stamp.targetGrade * item.coreWeight;
+    }
+    if (influenceTotal <= 0 || coreWeightTotal <= 0) continue;
+
+    const target = weightedTarget / coreWeightTotal;
+    const blend = Math.min(influenceTotal, 1);
+    height = height * (1 - blend) + target * blend;
+  }
+
+  const strongest = contributions.reduce((best, item) => {
+    if (!best || item.influence > best.influence) return item;
+    return best;
+  }, null);
+
+  return {
+    compositedHeight: height,
+    totalInfluence: contributions.reduce((sum, item) => sum + item.influence, 0),
+    strongestInfluence: strongest
+      ? {
+          stampId: strongest.stamp.id,
+          stampType: strongest.stamp.type,
+          priority: strongest.stamp.priority,
+          influence: strongest.influence,
+          coreWeight: strongest.coreWeight
+        }
+      : null,
+    appliedCount: contributions.length
+  };
+}
+
 function classifyRoadPriority(highwayType) {
   return MAJOR_ROAD_TYPES.has(highwayType) ? STAMP_PRIORITY.ROAD_MAJOR : STAMP_PRIORITY.ROAD_MINOR;
 }
@@ -434,6 +508,42 @@ export function getTerrainStampDebugDataForChunk(chunkX, chunkZ) {
     falloffRadius: stampDebugOptions.showInfluenceRadii ? stamp.falloffRadius : undefined,
     bounds: stamp.bounds
   }));
+}
+
+export function getTerrainStampDebugSample(x, z, options = {}) {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  const sampleStep = Number.isFinite(options.sampleStepMeters) ? Math.max(0.1, options.sampleStepMeters) : 0.5;
+
+  const cx = getChunkCoord(x);
+  const cz = getChunkCoord(z);
+  const chunkData = getStampsForChunk(cx, cz);
+  const baseHeight = getBaseTerrainHeight(x, z);
+  const debugCompositor = computeStampCompositorDebug(baseHeight, chunkData.stamps, x, z);
+
+  const left = getStampedTerrainHeight(x - sampleStep, z);
+  const right = getStampedTerrainHeight(x + sampleStep, z);
+  const down = getStampedTerrainHeight(x, z - sampleStep);
+  const up = getStampedTerrainHeight(x, z + sampleStep);
+  const slopeDx = Number.isFinite(left) && Number.isFinite(right) ? (right - left) / (2 * sampleStep) : 0;
+  const slopeDz = Number.isFinite(down) && Number.isFinite(up) ? (up - down) / (2 * sampleStep) : 0;
+  const slopeGradient = Math.hypot(slopeDx, slopeDz);
+
+  return {
+    x,
+    z,
+    chunkX: cx,
+    chunkZ: cz,
+    baseHeight,
+    stampedHeight: debugCompositor.compositedHeight,
+    slopeAngleDeg: Math.atan(slopeGradient) * (180 / Math.PI),
+    slopeGradient,
+    stampInfluence: {
+      total: debugCompositor.totalInfluence,
+      normalized: Math.min(1, debugCompositor.totalInfluence),
+      appliedCount: debugCompositor.appliedCount,
+      strongest: debugCompositor.strongestInfluence
+    }
+  };
 }
 
 export function getTerrainHeight(x, z) {
