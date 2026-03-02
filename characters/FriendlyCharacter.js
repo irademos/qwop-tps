@@ -96,6 +96,7 @@ export class FriendlyCharacter extends MonsterCharacter {
     if (!this.model) return;
     const body = this.body;
     if (!body) return;
+    if (typeof body.isValid === "function" && !body.isValid()) return;
     const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
     const now = Date.now();
 
@@ -147,8 +148,7 @@ export class FriendlyCharacter extends MonsterCharacter {
       const targetPos = targetSource.clone();
       const faceDir = targetPos.sub(this.model.position).normalize();
       this.setDirection(faceDir);
-      const currentYVelocity = body.linvel().y;
-      body.setLinvel({ x: 0, y: currentYVelocity, z: 0 }, true);
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       const angle = Math.atan2(faceDir.x, faceDir.z);
       const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
       body.setRotation(rot, true);
@@ -182,8 +182,7 @@ export class FriendlyCharacter extends MonsterCharacter {
     const movement = this.model.userData.direction
       .clone()
       .multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * IDLE_SPEED_MULTIPLIER);
-    const currentYVelocity = body.linvel().y;
-    body.setLinvel({ x: movement.x, y: currentYVelocity, z: movement.z }, true);
+    body.setLinvel({ x: movement.x, y: 0, z: movement.z }, true);
     const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
     const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
     body.setRotation(rot, true);
