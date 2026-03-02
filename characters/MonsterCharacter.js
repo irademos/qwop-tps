@@ -41,6 +41,8 @@ const FRIENDLY_DRIFT_AVOID_RADIUS = 8;
 const FRIENDLY_DRIFT_AVOID_HARD_RADIUS = 3;
 const FRIENDLY_DRIFT_AVOID_MIN_FACTOR = 0.02;
 const ENEMY_DISENGAGE_RADIUS = 22;
+const MONSTER_MAX_WALKABLE_SLOPE_DEGREES = 42;
+const MONSTER_MAX_GROUND_DELTA = 0.75;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions }) {
@@ -124,21 +126,62 @@ export class MonsterCharacter extends CharacterBase {
     }
   }
 
-  setHorizontalMovement(direction, speed, delta = 0) {
+  resolveGroundSample(x, z, context = {}) {
+    const resolver = context?.resolveGroundY;
+    if (typeof resolver !== 'function') return null;
+    const referenceY = Number.isFinite(context?.referenceY) ? context.referenceY : this.model?.position?.y;
+    const result = resolver(
+      x,
+      Number.isFinite(referenceY) ? referenceY + 4 : 4,
+      z,
+      {
+        includeSolidHit: true,
+        walkableSlopeDegrees: Number.isFinite(context?.walkableSlopeDegrees)
+          ? context.walkableSlopeDegrees
+          : MONSTER_MAX_WALKABLE_SLOPE_DEGREES
+      }
+    );
+    return result && Number.isFinite(result.groundY) ? result : null;
+  }
+
+  setHorizontalMovement(direction, speed, delta = 0, context = {}) {
     const dir = direction?.clone ? direction.clone() : new THREE.Vector3();
     dir.y = 0;
     if (dir.lengthSq() > 0.000001) {
       dir.normalize();
     }
     const movement = dir.multiplyScalar(Math.max(0, speed || 0));
+    const dt = Number.isFinite(delta) ? Math.max(0, delta) : 0;
+    const nextPosition = this.model.position.clone().addScaledVector(movement, dt);
+    const currentGround = this.resolveGroundSample(this.model.position.x, this.model.position.z, {
+      ...context,
+      referenceY: this.model.position.y
+    });
+    const nextGround = this.resolveGroundSample(nextPosition.x, nextPosition.z, {
+      ...context,
+      referenceY: this.model.position.y
+    });
+    const canTraverse = !nextGround
+      || (nextGround.metadata?.walkable !== false
+        && (!currentGround
+          || Math.abs(nextGround.groundY - currentGround.groundY) <= MONSTER_MAX_GROUND_DELTA));
+    if (!canTraverse) {
+      movement.set(0, 0, 0);
+      nextPosition.copy(this.model.position);
+    }
+
     const body = this.body;
     if (body?.isDynamic?.()) {
       const vel = body.linvel();
       body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
       return;
     }
-    const dt = Number.isFinite(delta) ? Math.max(0, delta) : 0;
-    const nextPosition = this.model.position.clone().addScaledVector(movement, dt);
+    const configuredOffset = Number.isFinite(context?.groundOffset)
+      ? context.groundOffset
+      : 0.9 * (Number.isFinite(this.sizeScale) ? this.sizeScale : 1);
+    if (nextGround && Number.isFinite(nextGround.groundY)) {
+      nextPosition.y = nextGround.groundY + configuredOffset;
+    }
     if (body?.setNextKinematicTranslation) {
       body.setNextKinematicTranslation({ x: nextPosition.x, y: nextPosition.y, z: nextPosition.z });
     } else if (body?.setTranslation) {
@@ -425,7 +468,8 @@ export class MonsterCharacter extends CharacterBase {
         CHARACTER_MOVEMENT.walkSpeed
           * this.speedMultiplier
           * this.getFriendlyDriftSpeedMultiplier(),
-        delta
+        delta,
+        context
       );
       this.faceDirection(this.model.userData.direction);
       this.playAnimation("Walk", MOVE_FADE);
@@ -458,10 +502,10 @@ export class MonsterCharacter extends CharacterBase {
           op.health = Math.max(0, current - damage);
         }
       }
-    });
+    }, context);
   }
 
-  updateCombatAI(deltaTime, primaryTarget, targets, onHit) {
+  updateCombatAI(deltaTime, primaryTarget, targets, onHit, context = {}) {
     const now = Date.now();
     if (!this.model) return;
     const body = this.body;
@@ -509,16 +553,17 @@ export class MonsterCharacter extends CharacterBase {
         this.setHorizontalMovement(
           this.attackDirection,
           (CHARACTER_MOVEMENT.runSpeed + 0.75) * this.speedMultiplier,
-          delta
+          delta,
+          context
         );
       } else {
-        this.setHorizontalMovement(new THREE.Vector3(), 0, delta);
+        this.setHorizontalMovement(new THREE.Vector3(), 0, delta, context);
       }
       this.faceDirection(this.attackDirection);
     } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
       const direction = targetPos.sub(this.model.position).normalize();
       this.setDirection(direction);
-      this.setHorizontalMovement(this.model.userData.direction, runSpeed, delta);
+      this.setHorizontalMovement(this.model.userData.direction, runSpeed, delta, context);
       this.faceDirection(this.model.userData.direction);
       this.playAnimation("Run", MOVE_FADE);
     } else {
@@ -536,7 +581,7 @@ export class MonsterCharacter extends CharacterBase {
         forwardSpeed = walkSpeed;
       }
       const movement = faceDir.clone().multiplyScalar(forwardSpeed).add(strafeDir.multiplyScalar(strafeOffset));
-      this.setHorizontalMovement(movement, 1, delta);
+      this.setHorizontalMovement(movement, 1, delta, context);
       this.faceDirection(faceDir);
       if (canAttack && distance <= STANDOFF_DISTANCE + 0.5) {
         this.attackDirection.copy(faceDir);

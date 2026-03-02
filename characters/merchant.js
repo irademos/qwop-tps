@@ -14,6 +14,7 @@ const MERCHANT_RESTOCK_MS = 60 * 60 * 1000;
 const DEFAULT_MARKET_STALL_POSITION = new THREE.Vector3(5, 0, 5);
 const MARKET_STALL_SIZE = 0.013;
 const MERCHANT_OFFSET = new THREE.Vector3(0.0, 0, -1.4);
+const MERCHANT_GROUND_OFFSET = 0.9;
 const LIFE_POTION_MODEL = '/assets/props/life_potion.glb';
 const MANA_POTION_MODEL = '/assets/props/mana_potion.glb';
 const LIFE_POTION_SCALE = 4000.0;
@@ -251,9 +252,9 @@ const loadMerchantFriendly = ({
     const basePosition = merchantSpawnBasePosition.clone().add(MERCHANT_OFFSET);
     const terrainHeight = getTerrainHeight?.(basePosition.x, basePosition.z);
     if (Number.isFinite(terrainHeight)) {
-      basePosition.y = terrainHeight + 0.5;
+      basePosition.y = terrainHeight + MERCHANT_GROUND_OFFSET;
     }
-    liftPositionToBuildingTop?.(basePosition, 0.5);
+    liftPositionToBuildingTop?.(basePosition, MERCHANT_GROUND_OFFSET);
     friendly.setPosition(basePosition.x, basePosition.y, basePosition.z);
     friendly.setHomePosition(basePosition.clone());
     scene.add(friendly.model);
