@@ -135,6 +135,7 @@ const MAX_MONSTERS_ACTIVE = 8;
 const MONSTER_COMBAT_RADIUS = 26;
 const MONSTER_BACKGROUND_RADIUS = 70;
 const MONSTER_BACKGROUND_AI_INTERVAL_MS = 700;
+const MONSTER_SPAWN_GROUND_OFFSET = 0.9;
 const MONSTER_MODELS = [
   // "/models/zombie.fbx",
   // "/models/zombie_boy.fbx",
@@ -2862,7 +2863,7 @@ async function initCore(runtimeContext) {
         0,
         playerModel.position.z + Math.sin(angle) * radius
       );
-      const spawnY = getSpawnY(spawnPos.x, spawnPos.z, 0.5, { allowOnBuildings: true });
+      const spawnY = getSpawnY(spawnPos.x, spawnPos.z, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true });
       spawnPos.y = Number.isFinite(spawnY) ? spawnY : 0.5;
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
@@ -2871,7 +2872,7 @@ async function initCore(runtimeContext) {
     }
     const fallback = playerModel.position.clone();
     fallback.x += MONSTER_SPAWN_MIN_RADIUS;
-    const fallbackY = getSpawnY(fallback.x, fallback.z, 0.5, { allowOnBuildings: true });
+    const fallbackY = getSpawnY(fallback.x, fallback.z, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true });
     fallback.y = Number.isFinite(fallbackY) ? fallbackY : fallback.y;
     return fallback;
   };
@@ -3096,7 +3097,7 @@ async function initCore(runtimeContext) {
         const spawnPos = options.position
           && Number.isFinite(options.position.x)
           && Number.isFinite(options.position.z)
-          ? normalizeNetworkSpawnPosition(options.position, 0.5, { allowOnBuildings: true }) || getMonsterSpawnPosition()
+          ? normalizeNetworkSpawnPosition(options.position, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true }) || getMonsterSpawnPosition()
           : getMonsterSpawnPosition();
         monster.setPosition(spawnPos.x, spawnPos.y, spawnPos.z);
 
@@ -3301,7 +3302,7 @@ async function initCore(runtimeContext) {
           monster.setLevel(state.level, { preserveHealth: true });
         }
         if (Number.isFinite(px) && Number.isFinite(pz)) {
-          const normalizedPos = normalizeNetworkSpawnPosition({ x: px, y: py, z: pz }, 0.5, { allowOnBuildings: true });
+          const normalizedPos = normalizeNetworkSpawnPosition({ x: px, y: py, z: pz }, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true });
           if (normalizedPos) {
             monster.model.position.copy(normalizedPos);
             monster.body?.setTranslation({ x: normalizedPos.x, y: normalizedPos.y, z: normalizedPos.z }, true);
@@ -9095,7 +9096,7 @@ async function initCore(runtimeContext) {
       }
 
       const isStaticBody = typeof rb.isFixed === 'function' && rb.isFixed();
-      if (!mesh.userData?.isTerrain && (!mesh.userData?.skipTerrainCorrection || mesh.userData?.forceTerrainCorrection) && !isStaticBody) {
+      if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection && !isStaticBody) {
         const bbox = getMeshWorldBounds(mesh);
         if (bbox) {
           const groundResolution = resolveGroundY

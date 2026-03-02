@@ -57,7 +57,6 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.direction = new THREE.Vector3();
     this.model.userData.isKnocked = false;
     this.model.userData.skipTerrainCorrection = true;
-    this.model.userData.forceTerrainCorrection = true;
     this.pivot = this.model?.userData?.pivot ?? this.model;
     this.baseScale = this.pivot.scale.clone();
     this.model.userData.health = DEFAULT_HEALTH;
