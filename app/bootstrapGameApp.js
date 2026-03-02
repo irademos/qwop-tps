@@ -7859,13 +7859,12 @@ async function initCore(runtimeContext) {
       setTerrainStampsForTile(tileKey, entry.geojson, bounds);
       mapRenderer.updateTileHighways?.(tileKey, entry.geojson, bounds);
       buildingsRenderer.updateTileBuildings?.(tileKey, entry.geojson, bounds);
-      rebuildGroundTilesForDirtyTerrainChunks();
     }
+    rebuildGroundTilesForDirtyTerrainChunks();
 
     const finishBuildingRender = () => {
       if (rebuildId !== mapRebuildToken) return;
       if (changedTileKeys.size === 0) return;
-      rebuildGroundTilesForDirtyTerrainChunks();
       scheduleBuildingRefresh();
       if (typeof natureController?.refreshTile === "function") {
         for (const tileKey of changedTileKeys) {

@@ -132,7 +132,7 @@ export function createGroundTiles({
       }));
     if (chunkBoundsList.length === 0) return 0;
 
-    let rebuilt = 0;
+    const tilesToRebuild = [];
     for (const [key, mesh] of tiles.entries()) {
       const tileX = Number(mesh?.userData?.groundTileX);
       const tileY = Number(mesh?.userData?.groundTileY);
@@ -145,6 +145,10 @@ export function createGroundTiles({
       };
       const overlapsDirtyChunk = chunkBoundsList.some((chunkBounds) => intersectsBounds(tileBounds, chunkBounds));
       if (!overlapsDirtyChunk) continue;
+      tilesToRebuild.push({ key, tileX, tileY });
+    }
+
+    for (const { key, tileX, tileY } of tilesToRebuild) {
       const cacheKey = `${tileX},${tileY}|${terrainKey}`;
       const geometry = geometryCache.get(cacheKey);
       if (geometry) {
@@ -153,9 +157,9 @@ export function createGroundTiles({
       }
       removeTile(key);
       ensureTile({ x: tileX, y: tileY }, key);
-      rebuilt += 1;
     }
-    return rebuilt;
+
+    return tilesToRebuild.length;
   };
   const clear = () => {
     for (const key of tiles.keys()) {
