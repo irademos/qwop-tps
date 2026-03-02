@@ -374,20 +374,32 @@ function setDotVisibility(pool, visible) {
   });
 }
 
-function updateDotPool(entities, pool, kind) {
-  const activeEntities = (entities ?? []).filter((entity) => {
-    if (!entity?.model) return false;
-    if (entity.isDead) return false;
-    return true;
-  });
-  ensureDotPool(pool, activeEntities.length, kind);
-  for (let i = 0; i < pool.length; i += 1) {
-    const sprite = pool[i];
-    const entity = activeEntities[i];
-    if (!entity?.model) {
-      sprite.visible = false;
-      continue;
+
+function forEachEntityPair(first, second, iteratee) {
+  if (Array.isArray(first)) {
+    for (const entry of first) {
+      iteratee(entry);
     }
+  }
+  if (Array.isArray(second)) {
+    for (const entry of second) {
+      iteratee(entry);
+    }
+  }
+}
+
+function updateDotPool(entities, pool, kind) {
+  let activeCount = 0;
+  for (const entity of (entities ?? [])) {
+    if (!entity?.model || entity.isDead) continue;
+    activeCount += 1;
+  }
+  ensureDotPool(pool, activeCount, kind);
+  let nextIndex = 0;
+  for (const entity of (entities ?? [])) {
+    if (!entity?.model || entity.isDead) continue;
+    const sprite = pool[nextIndex];
+    nextIndex += 1;
     sprite.position.set(
       entity.model.position.x,
       entity.model.position.y + DOT_Y_OFFSET,
@@ -395,21 +407,80 @@ function updateDotPool(entities, pool, kind) {
     );
     sprite.visible = state.enabled;
   }
+  for (let i = nextIndex; i < pool.length; i += 1) {
+    pool[i].visible = false;
+  }
 }
 
 function updateIconPool(entities, pool, kind, offsetY = DOT_Y_OFFSET) {
-  const activeEntities = (entities ?? []).filter(Boolean);
-  ensureIconPool(pool, activeEntities.length, kind);
-  for (let i = 0; i < pool.length; i += 1) {
-    const sprite = pool[i];
-    const entity = activeEntities[i];
-    const pos = entity?.position ?? entity?.mesh?.position ?? entity?.model?.position;
-    if (!pos) {
-      sprite.visible = false;
-      continue;
-    }
+  let activeCount = 0;
+  for (const entity of (entities ?? [])) {
+    if (!entity) continue;
+    const pos = entity.position ?? entity.mesh?.position ?? entity.model?.position;
+    if (!pos) continue;
+    activeCount += 1;
+  }
+  ensureIconPool(pool, activeCount, kind);
+  let nextIndex = 0;
+  for (const entity of (entities ?? [])) {
+    if (!entity) continue;
+    const pos = entity.position ?? entity.mesh?.position ?? entity.model?.position;
+    if (!pos) continue;
+    const sprite = pool[nextIndex];
+    nextIndex += 1;
     sprite.position.set(pos.x, pos.y + offsetY, pos.z);
     sprite.visible = state.enabled;
+  }
+  for (let i = nextIndex; i < pool.length; i += 1) {
+    pool[i].visible = false;
+  }
+}
+
+function updateDotPoolFromLists(first, second, pool, kind) {
+  let activeCount = 0;
+  forEachEntityPair(first, second, (entity) => {
+    if (!entity?.model || entity.isDead) return;
+    activeCount += 1;
+  });
+  ensureDotPool(pool, activeCount, kind);
+  let nextIndex = 0;
+  forEachEntityPair(first, second, (entity) => {
+    if (!entity?.model || entity.isDead) return;
+    const sprite = pool[nextIndex];
+    nextIndex += 1;
+    sprite.position.set(
+      entity.model.position.x,
+      entity.model.position.y + DOT_Y_OFFSET,
+      entity.model.position.z
+    );
+    sprite.visible = state.enabled;
+  });
+  for (let i = nextIndex; i < pool.length; i += 1) {
+    pool[i].visible = false;
+  }
+}
+
+function updateIconPoolFromLists(first, second, pool, kind, offsetY = DOT_Y_OFFSET) {
+  let activeCount = 0;
+  forEachEntityPair(first, second, (entity) => {
+    if (!entity) return;
+    const pos = entity.position ?? entity.mesh?.position ?? entity.model?.position;
+    if (!pos) return;
+    activeCount += 1;
+  });
+  ensureIconPool(pool, activeCount, kind);
+  let nextIndex = 0;
+  forEachEntityPair(first, second, (entity) => {
+    if (!entity) return;
+    const pos = entity.position ?? entity.mesh?.position ?? entity.model?.position;
+    if (!pos) return;
+    const sprite = pool[nextIndex];
+    nextIndex += 1;
+    sprite.position.set(pos.x, pos.y + offsetY, pos.z);
+    sprite.visible = state.enabled;
+  });
+  for (let i = nextIndex; i < pool.length; i += 1) {
+    pool[i].visible = false;
   }
 }
 
@@ -613,9 +684,12 @@ function updatePlayerIcon() {
 
 function update(dt, {
   monsters,
+  animals,
   friendlies,
   weapons,
   items,
+  ammoItems,
+  woodItems,
   treasureChests,
   merchants,
   otherPlayers,
@@ -634,10 +708,18 @@ function update(dt, {
       dt
     );
     updatePlayerIcon();
-    updateDotPool(monsters, state.monsterDots, "monster");
+    if (animals) {
+      updateDotPoolFromLists(monsters, animals, state.monsterDots, "monster");
+    } else {
+      updateDotPool(monsters, state.monsterDots, "monster");
+    }
     updateDotPool(friendlies, state.friendlyDots, "friendly");
     updateIconPool(weapons, state.weaponIcons, "weapon");
-    updateIconPool(items, state.itemIcons, "item");
+    if (ammoItems || woodItems) {
+      updateIconPoolFromLists(ammoItems, woodItems, state.itemIcons, "item");
+    } else {
+      updateIconPool(items, state.itemIcons, "item");
+    }
     updateIconPool(treasureChests, state.chestIcons, "chest");
     updateIconPool(merchants, state.merchantIcons, "merchant");
     updateRemotePlayerMarkers(otherPlayers);
