@@ -49,7 +49,6 @@ const FRIENDLY_DRIFT_AVOID_HARD_RADIUS = 3;
 const FRIENDLY_DRIFT_AVOID_MIN_FACTOR = 0.02;
 const ENEMY_DISENGAGE_RADIUS = 22;
 const MONSTER_MAX_WALKABLE_SLOPE_DEGREES = 42;
-const MONSTER_MAX_GROUND_DELTA = 0.75;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions, monsterConfig = {} }) {
@@ -175,24 +174,10 @@ export class MonsterCharacter extends CharacterBase {
     const movement = dir.multiplyScalar(Math.max(0, speed || 0));
     const dt = Number.isFinite(delta) ? Math.max(0, delta) : 0;
     const nextPosition = this.model.position.clone().addScaledVector(movement, dt);
-    const currentGround = this.resolveGroundSample(this.model.position.x, this.model.position.z, {
-      ...context,
-      referenceY: this.model.position.y
-    });
     const nextGround = this.resolveGroundSample(nextPosition.x, nextPosition.z, {
       ...context,
       referenceY: this.model.position.y
     });
-    const blocksForTerrainSlope = nextGround?.metadata?.surfaceType === 'terrain'
-      && nextGround?.metadata?.walkable === false;
-    const canTraverse = !nextGround
-      || (!blocksForTerrainSlope
-        && (!currentGround
-          || Math.abs(nextGround.groundY - currentGround.groundY) <= MONSTER_MAX_GROUND_DELTA));
-    if (!canTraverse) {
-      movement.set(0, 0, 0);
-      nextPosition.copy(this.model.position);
-    }
 
     const body = this.body;
     if (body?.isDynamic?.()) {
