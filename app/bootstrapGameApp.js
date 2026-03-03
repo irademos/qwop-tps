@@ -97,6 +97,7 @@ import {
   zoomOutMapFeature
 } from '../features/mapFeature.js';
 import { appContext } from '../src/runtime/appContext.js';
+import { getAttackTypes } from '../items/melee.js';
 import { exposeDebugGlobals } from '../src/runtime/exposeDebugGlobals.js';
 
 import {
@@ -1131,7 +1132,7 @@ async function initCore(runtimeContext) {
     }
   };
 
-  const sendMonsterAttackIntent = ({ monsterId, damage, sourcePlayerId, at }) => {
+  const sendMonsterAttackIntent = ({ monsterId, damage, sourcePlayerId, attackTypes, at }) => {
     if (!multiplayer || multiplayer.isHost) return;
     const hostId = multiplayer.getHostId?.();
     if (!hostId || !monsterId || !Number.isFinite(damage)) return;
@@ -1140,6 +1141,7 @@ async function initCore(runtimeContext) {
       monsterId,
       damage,
       sourcePlayerId: sourcePlayerId ?? multiplayer.getId?.(),
+      attackTypes: getAttackTypes(null, attackTypes || []),
       at: at ?? Date.now()
     });
   };
@@ -1388,6 +1390,7 @@ async function initCore(runtimeContext) {
       && typeof payload.monsterId === 'string'
       && isFiniteNumber(payload.damage)
       && (payload.sourcePlayerId == null || typeof payload.sourcePlayerId === 'string')
+      && (payload.attackTypes == null || (Array.isArray(payload.attackTypes) && payload.attackTypes.every(type => typeof type === 'string')))
       && (payload.at == null || isFiniteNumber(payload.at));
 
     if (!isObject(data)) {
@@ -1473,7 +1476,8 @@ async function initCore(runtimeContext) {
       if (eventAt - lastHitAt < 250) return;
       recentMonsterHits.set(key, eventAt);
       logMonsterPersist('attack intent', { monsterId, damage: data.damage, sourceId });
-      const killed = monster.applyDamage(data.damage);
+      const attackTypes = getAttackTypes(null, data.attackTypes || []);
+      const killed = monster.applyDamage(data.damage, { attackTypes });
       persistMonsterHp(monster);
       if (killed && sourceId === multiplayer.getId()) {
         const withFriend = window.questManager?.isFriendActive?.() ?? false;
@@ -5999,7 +6003,9 @@ async function initCore(runtimeContext) {
         }
         const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
         if (!isInvincible) {
+          const attackTypes = getAttackTypes('bombExplosion', ['explosive']);
           window.localHealth = Math.max(0, window.localHealth - damage);
+          window.lastHitAttackTypes = attackTypes;
           if (localControls) {
             const direction = new THREE.Vector3()
               .subVectors(playerModel.position, hitPosition)
@@ -6019,9 +6025,11 @@ async function initCore(runtimeContext) {
       if (distance > BOMB_DAMAGE_RADIUS) continue;
       const player = otherPlayers[id];
       if (!player) continue;
+      const attackTypes = getAttackTypes('bombExplosion', ['explosive']);
       const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
       const nextHealth = Math.max(0, previousHealth - damage);
       player.health = nextHealth;
+      player.lastHitAttackTypes = attackTypes;
       if (nextHealth <= 0 && previousHealth > 0) {
         player.isDead = true;
         if (shooterId && shooterId === localId) {
@@ -6039,14 +6047,15 @@ async function initCore(runtimeContext) {
           if (!monster?.model?.position) continue;
           const distance = hitPosition.distanceTo(monster.model.position);
           if (distance > BOMB_DAMAGE_RADIUS) continue;
-          const killed = monster.applyDamage(damage);
+          const attackTypes = getAttackTypes('bombExplosion', ['explosive']);
+          const killed = monster.applyDamage(damage, { attackTypes });
           if (!killed) {
             const direction = new THREE.Vector3()
               .subVectors(monster.model.position, hitPosition)
               .normalize();
             monster.applyKnockback({ direction, strength: BOMB_KNOCKBACK_STRENGTH });
           }
-          handleMonsterDamage?.(monster, { damage, killed, sourceId: shooterId ?? localId });
+          handleMonsterDamage?.(monster, { damage, killed, sourceId: shooterId ?? localId, attackTypes });
           if (killed && shooterId && shooterId === localId) {
             const withFriend = window.questManager?.isFriendActive?.() ?? false;
             window.onMonsterKill?.(monster, { withFriend });
@@ -6061,6 +6070,7 @@ async function initCore(runtimeContext) {
             monsterId: monster.id,
             damage,
             sourcePlayerId: shooterId ?? localId,
+            attackTypes: getAttackTypes('bombExplosion', ['explosive']),
             at: Date.now()
           });
         }
@@ -6338,6 +6348,7 @@ async function initCore(runtimeContext) {
           const distance = mist.group.position.distanceTo(playerModel.position);
           if (distance <= mist.radius + 0.6) {
             playerControls.applyFreeze(ICE_MIST_FREEZE_MS);
+            window.lastHitAttackTypes = getAttackTypes('iceMistProjectile', ['ice']);
             mist.hitTargets.add('local');
           }
         }
@@ -6350,6 +6361,7 @@ async function initCore(runtimeContext) {
           const distance = mist.group.position.distanceTo(monster.model.position);
           if (distance <= mist.radius + 0.8) {
             monster.applyFreeze?.(ICE_MIST_FREEZE_MS);
+            monster.model.userData.lastHitAttackTypes = getAttackTypes('iceMistProjectile', ['ice']);
             mist.hitTargets.add(monster.id);
           }
         }

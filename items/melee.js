@@ -3,14 +3,27 @@ import * as THREE from 'three';
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from '../healthUtils.js';
 
 export const ATTACKS = {
-  mutantPunch: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward' },
-  swordSlash: { damage: 2, range: 2.5, hitTime: 100, hitWindow: 300, knockbackStrength: 3, region: 'forward' },
-  swordSlashLeft: { damage: 2, range: 2.5, hitTime: 200, hitWindow: 300, knockbackStrength: 3, region: 'forward' },
-  swordFwdSpin: { damage: 3, range: 2.0, hitTime: 280, hitWindow: 500, knockbackStrength: 5, region: 'forward' },
-  swordSpin: { damage: 4, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 12, region: 'around' },
-  hurricaneKick: { damage: 1, range: 2.0, hitTime: 280, hitWindow: 800, knockbackStrength: 5, region: 'around' },
-  mmaKick: { damage: 1, range: 1.7, hitTime: 100, hitWindow: 300, knockbackStrength: 8, region: 'forward' }
+  mutantPunch: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward', types: ['melee', 'punch'] },
+  swordSlash: { damage: 2, range: 2.5, hitTime: 100, hitWindow: 300, knockbackStrength: 3, region: 'forward', types: ['cut'] },
+  swordSlashLeft: { damage: 2, range: 2.5, hitTime: 200, hitWindow: 300, knockbackStrength: 3, region: 'forward', types: ['cut'] },
+  swordFwdSpin: { damage: 3, range: 2.0, hitTime: 280, hitWindow: 500, knockbackStrength: 5, region: 'forward', types: ['cut'] },
+  swordSpin: { damage: 4, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 12, region: 'around', types: ['cut'] },
+  hurricaneKick: { damage: 1, range: 2.0, hitTime: 280, hitWindow: 800, knockbackStrength: 5, region: 'around', types: ['melee', 'kick'] },
+  mmaKick: { damage: 1, range: 1.7, hitTime: 100, hitWindow: 300, knockbackStrength: 8, region: 'forward', types: ['melee', 'kick'] },
+  torchSwing: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward', types: ['fire'] },
+  lanternSwing: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward', types: ['fire'] },
+  bombExplosion: { types: ['explosive', 'fire'] },
+  bowArrowProjectile: { types: ['arrow'] },
+  iceMistProjectile: { types: ['ice'] }
 };
+
+export function getAttackTypes(attackName, fallback = []) {
+  const raw = ATTACKS?.[attackName]?.types;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return Array.isArray(fallback) ? [...fallback] : [];
+  }
+  return [...new Set(raw.filter(type => typeof type === 'string' && type.trim()))];
+}
 
 const tempToTarget = new THREE.Vector3();
 const tempForward = new THREE.Vector3();
@@ -106,6 +119,14 @@ export function updateMeleeAttacks({
     if (elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow && !info.hasHit) {
       let hit = false;
       const attackDamage = getStrengthDamage(attacker.id, cfg.damage);
+      const attackTypes = getAttackTypes(
+        attacker.model.userData?.equippedWeaponType === 'torch'
+          ? 'torchSwing'
+          : attacker.model.userData?.equippedWeaponType === 'lantern'
+            ? 'lanternSwing'
+            : attackName,
+        ['melee']
+      );
       if (attackName === 'swordSlash' && attacker.id === 'local') {
         onSwordHit?.({ attacker, range: cfg.range });
       }
@@ -119,9 +140,15 @@ export function updateMeleeAttacks({
         if (!target.model || !target.model.position) continue;
         if (isTargetInAttackRange(attacker.model, target.model.position, cfg)) {
           hit = true;
-          onEntityHit?.({ targetType: target.id === 'local' ? 'player' : 'remotePlayer', targetId: target.id, targetPosition: target.model.position.clone() });
+          onEntityHit?.({
+            targetType: target.id === 'local' ? 'player' : 'remotePlayer',
+            targetId: target.id,
+            targetPosition: target.model.position.clone(),
+            attackTypes
+          });
           if (target.id === 'local') {
             window.localHealth = Math.max(0, window.localHealth - attackDamage);
+            window.lastHitAttackTypes = attackTypes;
             const playerControls = appContext.systems.playerControls ?? window.playerControls;
             if (playerControls) {
               const dir = new THREE.Vector3().subVectors(target.model.position, attacker.model.position).normalize();
@@ -133,6 +160,7 @@ export function updateMeleeAttacks({
               const previousHealth = Number.isFinite(tp.health) ? tp.health : BASE_HEALTH_SEGMENTS;
               const nextHealth = Math.max(0, previousHealth - attackDamage);
               tp.health = nextHealth;
+              tp.lastHitAttackTypes = attackTypes;
               if (nextHealth <= 0 && previousHealth > 0) {
                 tp.isDead = true;
                 if (attacker.id === 'local') {
@@ -151,15 +179,15 @@ export function updateMeleeAttacks({
           if (!monster?.model?.position) continue;
           if (isTargetInAttackRange(attacker.model, monster.model.position, cfg)) {
             hit = true;
-            const killed = monster.applyDamage(attackDamage);
+            const killed = monster.applyDamage(attackDamage, { attackTypes });
             if (!killed) {
               const dir = new THREE.Vector3()
                 .subVectors(monster.model.position, attacker.model.position)
                 .normalize();
               monster.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
             }
-            onMonsterHit?.(monster, { damage: attackDamage, killed, sourceId: attacker.id });
-            onEntityHit?.({ targetType: 'monster', targetId: monster.id, targetPosition: monster.model.position.clone() });
+            onMonsterHit?.(monster, { damage: attackDamage, killed, sourceId: attacker.id, attackTypes });
+            onEntityHit?.({ targetType: 'monster', targetId: monster.id, targetPosition: monster.model.position.clone(), attackTypes });
             if (killed && attacker.id === 'local') {
               const withFriend = window.questManager?.isFriendActive?.() ?? false;
               window.onMonsterKill?.(monster, { withFriend });
@@ -175,6 +203,7 @@ export function updateMeleeAttacks({
               monsterId: monster.id,
               damage: attackDamage,
               sourcePlayerId: attacker.id,
+              attackTypes,
               at: Date.now()
             });
           }

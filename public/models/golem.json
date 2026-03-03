@@ -1,4 +1,18 @@
 {
   "scale": 0.005,
-  "yOffset": 1.0
+  "yOffset": 1.0,
+  "monsterProperties": {
+    "moveSpeed": 0.78,
+    "animationSpeed": 0.88,
+    "attackRange": 2.9,
+    "healthBonusSegments": 3,
+    "attackSensitivity": {
+      "explosive": 1.7,
+      "fire": 1.2,
+      "cut": 0.75,
+      "ice": 0.9,
+      "arrow": 0.85,
+      "melee": 0.8
+    }
+  }
 }

@@ -4,6 +4,7 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import { updateArrowProjectile } from "./arrow.js";
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../healthUtils.js";
 import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { getAttackTypes } from './melee.js';
 
 const detachProjectileMesh = (mesh) => {
   if (!mesh) return;
@@ -204,9 +205,11 @@ export function updateProjectiles({
         const player = otherPlayers[id];
         if (player) {
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
+          const attackTypes = getAttackTypes('bowArrowProjectile', ['projectile']);
           const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
           const nextHealth = Math.max(0, previousHealth - damage);
           player.health = nextHealth;
+          player.lastHitAttackTypes = attackTypes;
           if (nextHealth <= 0 && previousHealth > 0) {
             player.isDead = true;
             if (proj.userData.shooterId === localId) {
@@ -236,7 +239,9 @@ export function updateProjectiles({
 
       if (typeof window.localHealth === 'number') {
         const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
+        const attackTypes = getAttackTypes('bowArrowProjectile', ['projectile']);
         window.localHealth = Math.max(0, window.localHealth - damage);
+        window.lastHitAttackTypes = attackTypes;
         console.log(`❤️ Your Health: ${window.localHealth}`);
       }
 
@@ -255,12 +260,13 @@ export function updateProjectiles({
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           console.log(`💥 Monster was hit`);
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
-          const killed = monster.applyDamage(damage);
+          const attackTypes = getAttackTypes('bowArrowProjectile', ['projectile']);
+          const killed = monster.applyDamage(damage, { attackTypes });
           if (!killed) {
             const direction = vel.clone();
             monster.applyKnockback({ direction, strength: 3 });
           }
-          onMonsterHit?.(monster, { damage, killed, sourceId: proj.userData.shooterId });
+          onMonsterHit?.(monster, { damage, killed, sourceId: proj.userData.shooterId, attackTypes });
           if (killed && proj.userData.shooterId === localId) {
             const withFriend = window.questManager?.isFriendActive?.() ?? false;
             window.onMonsterKill?.(monster, { withFriend });
@@ -277,10 +283,12 @@ export function updateProjectiles({
         if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
+          const attackTypes = getAttackTypes('bowArrowProjectile', ['projectile']);
           sendMonsterAttack?.({
             monsterId: monster.id,
             damage,
             sourcePlayerId: proj.userData.shooterId || localId,
+            attackTypes,
             at: Date.now()
           });
           if (proj.userData?.isArrow) playArrowBlockedSFX();
