@@ -2009,8 +2009,6 @@ async function initCore(runtimeContext) {
       if (nextHolder?.model) {
         nextHolder.model.userData.equippedWeaponType = weapon.type;
       }
-    } else if (!holderId) {
-      weapon.mesh.visible = true;
     }
   };
 
@@ -2018,7 +2016,9 @@ async function initCore(runtimeContext) {
     [iceGun, bow, autumnSword, bomb].forEach(weapon => {
       if (!weapon || weapon === activeWeapon) return;
       if (weapon.holder === playerControls) {
-        weapon.drop({ removeFromInventory: true });
+        if (weapon.itemId) {
+          unequipInventoryItem(weapon.itemId);
+        }
       }
     });
   };
@@ -2039,8 +2039,28 @@ async function initCore(runtimeContext) {
   const networkDroppedWeaponPickups = new Map();
   window.weaponPickups = droppedWeaponPickups;
 
-  const ensureLocalHeldWeaponMesh = (weapon, key = weapon?.type) => {
+  const disposeLocalHeldWeaponMesh = (key) => {
+    const mesh = localHeldWeaponMeshes.get(key);
+    if (!mesh) return;
+    scene.remove(mesh);
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+    localHeldWeaponMeshes.delete(key);
+  };
+
+  const ensureLocalHeldWeaponMesh = (weapon, key = weapon?.type, options = {}) => {
+    const { forceNew = false } = options;
     if (!weapon?.mesh || !key) return null;
+    if (forceNew && localHeldWeaponMeshes.has(key)) {
+      disposeLocalHeldWeaponMesh(key);
+    }
     if (localHeldWeaponMeshes.has(key)) return localHeldWeaponMeshes.get(key);
     const heldMesh = weapon.mesh.clone(true);
     heldMesh.traverse(child => {
@@ -2114,9 +2134,6 @@ async function initCore(runtimeContext) {
     const holderId = weapon.remoteHolderId ?? null;
     if (!holderId || holderId === localId) {
       clearRemoteHeldWeaponFor(weapon.type, holderId);
-      if (!weapon.holder) {
-        weapon.mesh.visible = true;
-      }
       return;
     }
     const remotePlayer = otherPlayers[holderId];
@@ -2241,8 +2258,23 @@ async function initCore(runtimeContext) {
   await loadManaPotionTemplate();
   let bowHeldArrow = null;
   let bowHeldMesh = null;
-  const ensureBowHeldMesh = () => {
-    if (bowHeldMesh || !bow?.mesh) return bowHeldMesh;
+  const ensureBowHeldMesh = ({ forceNew = false } = {}) => {
+    if (!bow?.mesh) return bowHeldMesh;
+    if (forceNew && bowHeldMesh) {
+      scene.remove(bowHeldMesh);
+      bowHeldMesh.traverse(child => {
+        if (!child.isMesh) return;
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(material => material?.dispose?.());
+        } else {
+          child.material?.dispose?.();
+        }
+      });
+      bowHeldMesh = null;
+      bow.heldMesh = null;
+    }
+    if (bowHeldMesh) return bowHeldMesh;
     bowHeldMesh = bow.mesh.clone(true);
     bowHeldMesh.traverse(child => {
       if (!child.isMesh) return;
@@ -4417,7 +4449,7 @@ async function initCore(runtimeContext) {
           markerOffsetY: 1.2
         });
       }
-      const heldMesh = ensureLocalHeldWeaponMesh(lantern, 'lantern');
+      const heldMesh = ensureLocalHeldWeaponMesh(lantern, 'lantern', { forceNew: true });
       lantern.useHeldMeshWhenHeld = true;
       if (heldMesh) {
         heldMesh.visible = true;
@@ -4457,7 +4489,7 @@ async function initCore(runtimeContext) {
         });
       }
       torch.mesh.userData.torchHealth = healths[equippedTorchIndex];
-      const heldMesh = ensureLocalHeldWeaponMesh(torch, 'torch');
+      const heldMesh = ensureLocalHeldWeaponMesh(torch, 'torch', { forceNew: true });
       torch.useHeldMeshWhenHeld = true;
       if (heldMesh) {
         heldMesh.userData.torchHealth = healths[equippedTorchIndex];
@@ -4474,7 +4506,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'iceGun') {
       if (!iceGun?.mesh || !playerControls) return;
       if (iceGun.remoteHolderId && iceGun.remoteHolderId !== multiplayer?.getId?.()) return;
-      const heldMesh = ensureLocalHeldWeaponMesh(iceGun, 'iceGun');
+      const heldMesh = ensureLocalHeldWeaponMesh(iceGun, 'iceGun', { forceNew: true });
       iceGun.useHeldMeshWhenHeld = true;
       if (heldMesh) {
         heldMesh.visible = true;
@@ -4494,7 +4526,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'bow') {
       if (!bow?.mesh || !playerControls) return;
       if (bow.remoteHolderId && bow.remoteHolderId !== multiplayer?.getId?.()) return;
-      const heldMesh = ensureBowHeldMesh();
+      const heldMesh = ensureBowHeldMesh({ forceNew: true });
       if (!heldMesh) return;
       bow.useHeldMeshWhenHeld = true;
       heldMesh.visible = true;
@@ -4515,7 +4547,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'bomb') {
       if (!bomb?.mesh || !playerControls) return;
       if (bomb.remoteHolderId && bomb.remoteHolderId !== multiplayer?.getId?.()) return;
-      const heldMesh = ensureLocalHeldWeaponMesh(bomb, 'bomb');
+      const heldMesh = ensureLocalHeldWeaponMesh(bomb, 'bomb', { forceNew: true });
       bomb.useHeldMeshWhenHeld = true;
       if (heldMesh) {
         heldMesh.visible = true;
@@ -4529,7 +4561,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'autumnSword') {
       if (!autumnSword?.mesh || !playerControls) return;
       if (autumnSword.remoteHolderId && autumnSword.remoteHolderId !== multiplayer?.getId?.()) return;
-      const heldMesh = ensureLocalHeldWeaponMesh(autumnSword, 'autumnSword');
+      const heldMesh = ensureLocalHeldWeaponMesh(autumnSword, 'autumnSword', { forceNew: true });
       autumnSword.useHeldMeshWhenHeld = true;
       if (heldMesh) {
         heldMesh.visible = true;
