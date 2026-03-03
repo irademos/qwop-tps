@@ -25,6 +25,7 @@ const FRIENDLY_WANDER_RADIUS = 4;
 const FRIENDLY_ENGAGE_RADIUS = 5;
 const FRIENDLY_DISENGAGE_RADIUS = 8;
 const FRIENDLY_ANIM_MIN_INTERVAL_MS = 150;
+const FRIENDLY_AI_MAX_DELTA_SECONDS = 0.5;
 const FRIENDLY_BASE_HEALTH = BASE_HEALTH_SEGMENTS;
 const FRIENDLY_GROUND_OFFSET = 0.9;
 
@@ -466,12 +467,27 @@ const getHealthForLevel = (level) => {
       const lastUpdate = friendly.lastAIUpdateMs ?? 0;
       if (isHostNow) {
         if (nowMs - lastUpdate > FRIENDLY_ANIM_MIN_INTERVAL_MS) {
+          const elapsedSeconds = Math.max(0, (nowMs - lastUpdate) / 1000);
+          const aiDeltaSeconds = Math.min(
+            FRIENDLY_AI_MAX_DELTA_SECONDS,
+            lastUpdate > 0 ? elapsedSeconds : (Number.isFinite(delta) ? delta : 0)
+          );
           friendly.lastAIUpdateMs = nowMs;
-          friendly.updateAI(delta, playerModel, otherPlayers);
+          friendly.updateAI(aiDeltaSeconds, playerModel, otherPlayers);
         }
         persistFriendlyState(friendly);
       } else {
-        friendly.update(delta);
+        if (nowMs - lastUpdate > FRIENDLY_ANIM_MIN_INTERVAL_MS) {
+          const elapsedSeconds = Math.max(0, (nowMs - lastUpdate) / 1000);
+          const aiDeltaSeconds = Math.min(
+            FRIENDLY_AI_MAX_DELTA_SECONDS,
+            lastUpdate > 0 ? elapsedSeconds : (Number.isFinite(delta) ? delta : 0)
+          );
+          friendly.lastAIUpdateMs = nowMs;
+          friendly.updateAI(aiDeltaSeconds, playerModel, otherPlayers);
+        } else {
+          friendly.update(delta);
+        }
       }
     });
   };
