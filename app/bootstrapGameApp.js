@@ -2247,10 +2247,12 @@ async function initCore(runtimeContext) {
     if (heldMesh) heldMesh.visible = true;
     if (lantern?.holder === playerControls) {
       iceGun.holder = null;
+      iceGun.localHoldOrigin = null;
       return;
     }
     dropOtherWeapons(iceGun);
     addToInventory('iceGun', 1);
+    iceGun.localHoldOrigin = 'world';
     setPlayerWeaponType(holder, iceGun.type);
     playerControls.updateAmmoUI?.(true);
     playerControls.setAmmo?.(
@@ -2261,6 +2263,7 @@ async function initCore(runtimeContext) {
   };
   iceGun.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
+    iceGun.localHoldOrigin = null;
     if (shouldRemoveFromInventory) {
       removeFromInventory('iceGun', 1);
     }
@@ -2283,7 +2286,7 @@ async function initCore(runtimeContext) {
       return {
         position: [pos.x, pos.y, pos.z],
         rotation: [q.x, q.y, q.z, q.w],
-        holderId: iceGun.holder === playerControls ? multiplayer?.getId?.() : null
+        holderId: (iceGun.holder === playerControls && iceGun.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
       };
     },
     applyState: state => {
@@ -2299,8 +2302,9 @@ async function initCore(runtimeContext) {
       const previousHolderId = iceGun.remoteHolderId ?? null;
       iceGun.remoteHolderId = state.holderId ?? null;
       updateRemoteWeaponType(iceGun, iceGun.remoteHolderId, previousHolderId);
-      if (state.holderId !== multiplayer?.getId?.() && iceGun.holder === playerControls) {
+      if (state.holderId !== multiplayer?.getId?.() && iceGun.holder === playerControls && iceGun.localHoldOrigin === 'world') {
         iceGun.holder = null;
+        iceGun.localHoldOrigin = null;
         clearPlayerWeaponType(playerControls, iceGun.type);
       }
     },
@@ -2374,6 +2378,7 @@ async function initCore(runtimeContext) {
       bowHeldMesh.visible = false;
     }
     addToInventory('bow', 1);
+    bow.localHoldOrigin = 'world';
     setPlayerWeaponType(holder, bow.type);
     playerControls.updateAmmoUI?.(true);
     playerControls.setAmmo?.(
@@ -2385,6 +2390,7 @@ async function initCore(runtimeContext) {
   };
   bow.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
+    bow.localHoldOrigin = null;
     if (shouldRemoveFromInventory) {
       removeFromInventory('bow', 1);
     }
@@ -2411,7 +2417,7 @@ async function initCore(runtimeContext) {
       return {
         position: [pos.x, pos.y, pos.z],
         rotation: [q.x, q.y, q.z, q.w],
-        holderId: bow.holder === playerControls ? multiplayer?.getId?.() : null
+        holderId: (bow.holder === playerControls && bow.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
       };
     },
     applyState: state => {
@@ -2427,8 +2433,9 @@ async function initCore(runtimeContext) {
       const previousHolderId = bow.remoteHolderId ?? null;
       bow.remoteHolderId = state.holderId ?? null;
       updateRemoteWeaponType(bow, bow.remoteHolderId, previousHolderId);
-      if (state.holderId !== multiplayer?.getId?.() && bow.holder === playerControls) {
+      if (state.holderId !== multiplayer?.getId?.() && bow.holder === playerControls && bow.localHoldOrigin === 'world') {
         bow.holder = null;
+        bow.localHoldOrigin = null;
         clearPlayerWeaponType(playerControls, bow.type);
       }
     },
@@ -2446,10 +2453,12 @@ async function initCore(runtimeContext) {
     if (heldMesh) heldMesh.visible = true;
     unequipOtherInventoryItems('bomb');
     addToInventory('bomb', 1);
+    bomb.localHoldOrigin = 'world';
     setPlayerWeaponType(holder, bomb.type);
   };
   bomb.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
+    bomb.localHoldOrigin = null;
     if (shouldRemoveFromInventory) {
       removeFromInventory('bomb', 1);
     }
@@ -2471,7 +2480,7 @@ async function initCore(runtimeContext) {
       return {
         position: [pos.x, pos.y, pos.z],
         rotation: [q.x, q.y, q.z, q.w],
-        holderId: bomb.holder === playerControls ? multiplayer?.getId?.() : null
+        holderId: (bomb.holder === playerControls && bomb.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
       };
     },
     applyState: state => {
@@ -2487,8 +2496,9 @@ async function initCore(runtimeContext) {
       const previousHolderId = bomb.remoteHolderId ?? null;
       bomb.remoteHolderId = state.holderId ?? null;
       updateRemoteWeaponType(bomb, bomb.remoteHolderId, previousHolderId);
-      if (state.holderId !== multiplayer?.getId?.() && bomb.holder === playerControls) {
+      if (state.holderId !== multiplayer?.getId?.() && bomb.holder === playerControls && bomb.localHoldOrigin === 'world') {
         bomb.holder = null;
+        bomb.localHoldOrigin = null;
         clearPlayerWeaponType(playerControls, bomb.type);
       }
     },
@@ -2506,10 +2516,12 @@ async function initCore(runtimeContext) {
     if (heldMesh) heldMesh.visible = true;
     unequipOtherInventoryItems('autumnSword');
     addToInventory('autumnSword', 1);
+    autumnSword.localHoldOrigin = 'world';
     setPlayerWeaponType(holder, autumnSword.type);
   };
   autumnSword.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
+    autumnSword.localHoldOrigin = null;
     if (shouldRemoveFromInventory) {
       removeFromInventory('autumnSword', 1);
     }
@@ -2531,7 +2543,7 @@ async function initCore(runtimeContext) {
       return {
         position: [pos.x, pos.y, pos.z],
         rotation: [q.x, q.y, q.z, q.w],
-        holderId: autumnSword.holder === playerControls ? multiplayer?.getId?.() : null
+        holderId: (autumnSword.holder === playerControls && autumnSword.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
       };
     },
     applyState: state => {
@@ -2547,8 +2559,9 @@ async function initCore(runtimeContext) {
       const previousHolderId = autumnSword.remoteHolderId ?? null;
       autumnSword.remoteHolderId = state.holderId ?? null;
       updateRemoteWeaponType(autumnSword, autumnSword.remoteHolderId, previousHolderId);
-      if (state.holderId !== multiplayer?.getId?.() && autumnSword.holder === playerControls) {
+      if (state.holderId !== multiplayer?.getId?.() && autumnSword.holder === playerControls && autumnSword.localHoldOrigin === 'world') {
         autumnSword.holder = null;
+        autumnSword.localHoldOrigin = null;
         clearPlayerWeaponType(playerControls, autumnSword.type);
       }
     },
@@ -2655,9 +2668,11 @@ async function initCore(runtimeContext) {
     }
     unequipOtherInventoryItems('lantern');
     addToInventory('lantern', 1);
+    lantern.localHoldOrigin = 'world';
   };
   lantern.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
+    lantern.localHoldOrigin = null;
     if (shouldRemoveFromInventory) {
       removeFromInventory('lantern', 1);
     }
@@ -2674,7 +2689,7 @@ async function initCore(runtimeContext) {
       return {
         position: [pos.x, pos.y, pos.z],
         rotation: [q.x, q.y, q.z, q.w],
-        holderId: lantern.holder === playerControls ? multiplayer?.getId?.() : null
+        holderId: (lantern.holder === playerControls && lantern.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
       };
     },
     applyState: state => {
@@ -2690,8 +2705,9 @@ async function initCore(runtimeContext) {
       const previousHolderId = lantern.remoteHolderId ?? null;
       lantern.remoteHolderId = state.holderId ?? null;
       updateRemoteWeaponType(lantern, lantern.remoteHolderId, previousHolderId);
-      if (state.holderId !== multiplayer?.getId?.() && lantern.holder === playerControls) {
+      if (state.holderId !== multiplayer?.getId?.() && lantern.holder === playerControls && lantern.localHoldOrigin === 'world') {
         lantern.holder = null;
+        lantern.localHoldOrigin = null;
       }
     },
     isLocallyControlled: () => lantern?.holder === playerControls
@@ -2714,6 +2730,7 @@ async function initCore(runtimeContext) {
     unequipOtherInventoryItems(TORCH_ITEM_ID);
     const pickupHealth = normalizeTorchHealth(torch.mesh?.userData?.torchHealth);
     addToInventory(TORCH_ITEM_ID, 1, { torchHealth: pickupHealth });
+    torch.localHoldOrigin = 'world';
     const torchEntry = inventoryState[TORCH_ITEM_ID];
     const healths = getTorchHealths(torchEntry);
     equippedTorchIndex = healths.length ? healths.length - 1 : null;
@@ -2722,6 +2739,7 @@ async function initCore(runtimeContext) {
   };
   torch.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
+    torch.localHoldOrigin = null;
     if (shouldRemoveFromInventory) {
       const result = takeTorchHealth(inventoryState, equippedTorchIndex);
       if (result?.health != null) {
@@ -2745,7 +2763,7 @@ async function initCore(runtimeContext) {
       return {
         position: [pos.x, pos.y, pos.z],
         rotation: [q.x, q.y, q.z, q.w],
-        holderId: torch.holder === playerControls ? multiplayer?.getId?.() : null,
+        holderId: (torch.holder === playerControls && torch.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null,
         torchHealth: torch.mesh.userData.torchHealth ?? DEFAULT_TORCH_HEALTH
       };
     },
@@ -2765,8 +2783,9 @@ async function initCore(runtimeContext) {
       const previousHolderId = torch.remoteHolderId ?? null;
       torch.remoteHolderId = state.holderId ?? null;
       updateRemoteWeaponType(torch, torch.remoteHolderId, previousHolderId);
-      if (state.holderId !== multiplayer?.getId?.() && torch.holder === playerControls) {
+      if (state.holderId !== multiplayer?.getId?.() && torch.holder === playerControls && torch.localHoldOrigin === 'world') {
         torch.holder = null;
+        torch.localHoldOrigin = null;
         clearPlayerWeaponType(playerControls, torch.type);
       }
     },
@@ -4510,6 +4529,7 @@ async function initCore(runtimeContext) {
         heldMesh.visible = true;
       }
       lantern.mesh.visible = false;
+      lantern.localHoldOrigin = 'inventory';
       lantern.holder = playerControls;
       audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-lantern', cooldownMs: 100 });
       audioManager?.startLoopingSFX('torch-loop', 'SFX/Torch/Torch Loop.ogg', 0.32);
@@ -4550,6 +4570,7 @@ async function initCore(runtimeContext) {
         heldMesh.visible = true;
       }
       torch.mesh.visible = false;
+      torch.localHoldOrigin = 'inventory';
       torch.holder = playerControls;
       setPlayerWeaponType(playerControls, torch.type);
       audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-torch', cooldownMs: 100 });
@@ -4565,6 +4586,7 @@ async function initCore(runtimeContext) {
         heldMesh.visible = true;
       }
       iceGun.mesh.visible = false;
+      iceGun.localHoldOrigin = 'inventory';
       iceGun.holder = playerControls;
       setPlayerWeaponType(playerControls, iceGun.type);
       playerControls.updateAmmoUI?.(true);
@@ -4583,6 +4605,7 @@ async function initCore(runtimeContext) {
       bow.useHeldMeshWhenHeld = true;
       heldMesh.visible = true;
       bow.mesh.visible = false;
+      bow.localHoldOrigin = 'inventory';
       bow.holder = playerControls;
       audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Take Out 1.ogg', 0.6, { cooldownKey: 'bow-equip', cooldownMs: 100 });
       setPlayerWeaponType(playerControls, bow.type);
@@ -4604,6 +4627,7 @@ async function initCore(runtimeContext) {
         heldMesh.visible = true;
       }
       bomb.mesh.visible = false;
+      bomb.localHoldOrigin = 'inventory';
       bomb.holder = playerControls;
       setPlayerWeaponType(playerControls, bomb.type);
       updateSettingsUI();
@@ -4617,6 +4641,7 @@ async function initCore(runtimeContext) {
         heldMesh.visible = true;
       }
       autumnSword.mesh.visible = false;
+      autumnSword.localHoldOrigin = 'inventory';
       autumnSword.holder = playerControls;
       setPlayerWeaponType(playerControls, autumnSword.type);
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'sword-equip', cooldownMs: 100 });
@@ -4628,6 +4653,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'lantern') {
       if (lantern?.holder !== playerControls) return;
       lantern.holder = null;
+      lantern.localHoldOrigin = null;
       if (lantern.mesh) {
         lantern.mesh.visible = false;
       }
@@ -4641,6 +4667,7 @@ async function initCore(runtimeContext) {
     if (itemId === TORCH_ITEM_ID) {
       if (torch?.holder !== playerControls) return;
       torch.holder = null;
+      torch.localHoldOrigin = null;
       if (torch.mesh) {
         torch.mesh.visible = false;
       }
@@ -4655,6 +4682,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'iceGun') {
       if (iceGun?.holder !== playerControls) return;
       iceGun.holder = null;
+      iceGun.localHoldOrigin = null;
       if (iceGun.mesh) {
         iceGun.mesh.visible = false;
       }
@@ -4669,6 +4697,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'bow') {
       if (bow?.holder !== playerControls) return;
       bow.holder = null;
+      bow.localHoldOrigin = null;
       if (bow.useHeldMeshWhenHeld && bowHeldMesh) {
         bowHeldMesh.visible = false;
       } else if (bow.mesh) {
@@ -4685,6 +4714,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'bomb') {
       if (bomb?.holder !== playerControls) return;
       bomb.holder = null;
+      bomb.localHoldOrigin = null;
       if (bomb.mesh) {
         bomb.mesh.visible = false;
       }
@@ -4699,6 +4729,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'autumnSword') {
       if (autumnSword?.holder !== playerControls) return;
       autumnSword.holder = null;
+      autumnSword.localHoldOrigin = null;
       if (autumnSword.mesh) {
         autumnSword.mesh.visible = false;
       }
@@ -9639,6 +9670,7 @@ async function initCore(runtimeContext) {
       applyBombImpactDamage(hitPosition, projectile.userData?.shooterId);
       bomb.mesh.visible = false;
       bomb.holder = null;
+      bomb.localHoldOrigin = null;
       sendImmediateEntityControl('bomb');
       audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Blocked 1.ogg', 0.58, { cooldownKey: 'bow-blocked', cooldownMs: 60 });
       removeProjectileAt(projectiles, i);
