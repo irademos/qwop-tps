@@ -34,13 +34,22 @@ const MAJOR_ROAD_TYPES = new Set([
 const terrainStampTiles = new Map();
 const terrainChunkStampCache = new Map();
 const terrainChunkHeightCache = new Map();
+const dirtyTerrainChunks = new Set();
 
 const stampDebugOptions = {
   showPriority: false,
   showInfluenceRadii: false
 };
 
-let stampIdCounter = 1;
+function hashString(value) {
+  let hash = 2166136261;
+  const text = String(value ?? "");
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -170,9 +179,43 @@ function getChunkBounds(cx, cz) {
   };
 }
 
-function clearTerrainCompositorCache() {
-  terrainChunkStampCache.clear();
-  terrainChunkHeightCache.clear();
+function collectChunksForStamp(stamp) {
+  const bounds = stamp?.bounds;
+  if (!bounds) return [];
+  const minChunkX = getChunkCoord(bounds.minX);
+  const maxChunkX = getChunkCoord(bounds.maxX);
+  const minChunkZ = getChunkCoord(bounds.minZ);
+  const maxChunkZ = getChunkCoord(bounds.maxZ);
+  const chunks = [];
+  for (let cx = minChunkX; cx <= maxChunkX; cx += 1) {
+    for (let cz = minChunkZ; cz <= maxChunkZ; cz += 1) {
+      chunks.push(getChunkKey(cx, cz));
+    }
+  }
+  return chunks;
+}
+
+function invalidateChunks(chunkKeys) {
+  for (const chunkKey of chunkKeys) {
+    terrainChunkStampCache.delete(chunkKey);
+    terrainChunkHeightCache.delete(chunkKey);
+    dirtyTerrainChunks.add(chunkKey);
+  }
+}
+
+function invalidateTileChunkCache(previousTileData, nextTileData) {
+  const chunkKeys = new Set();
+  for (const stamp of previousTileData?.stamps ?? []) {
+    for (const chunkKey of collectChunksForStamp(stamp)) {
+      chunkKeys.add(chunkKey);
+    }
+  }
+  for (const stamp of nextTileData?.stamps ?? []) {
+    for (const chunkKey of collectChunksForStamp(stamp)) {
+      chunkKeys.add(chunkKey);
+    }
+  }
+  invalidateChunks(chunkKeys);
 }
 
 function compareStampsDeterministic(a, b) {
@@ -288,6 +331,80 @@ function applyStampCompositor(baseHeight, stamps, x, z) {
   return height;
 }
 
+function computeStampCompositorDebug(baseHeight, stamps, x, z) {
+  if (!Array.isArray(stamps) || stamps.length === 0) {
+    return {
+      compositedHeight: baseHeight,
+      totalInfluence: 0,
+      strongestInfluence: null,
+      appliedCount: 0
+    };
+  }
+
+  const byPriority = new Map();
+  const contributions = [];
+  for (const stamp of stamps) {
+    const contribution = computeStampInfluence(stamp, x, z);
+    if (!contribution) continue;
+    const priority = stamp.priority ?? 0;
+    if (!byPriority.has(priority)) byPriority.set(priority, []);
+    const item = { stamp, ...contribution };
+    byPriority.get(priority).push(item);
+    contributions.push(item);
+  }
+
+  if (byPriority.size === 0) {
+    return {
+      compositedHeight: baseHeight,
+      totalInfluence: 0,
+      strongestInfluence: null,
+      appliedCount: 0
+    };
+  }
+
+  const priorities = Array.from(byPriority.keys()).sort((a, b) => b - a);
+  let height = baseHeight;
+
+  for (const priority of priorities) {
+    const levelContributions = byPriority.get(priority) ?? [];
+    if (levelContributions.length === 0) continue;
+
+    let influenceTotal = 0;
+    let weightedTarget = 0;
+    let coreWeightTotal = 0;
+    for (const item of levelContributions) {
+      influenceTotal += item.influence;
+      coreWeightTotal += item.coreWeight;
+      weightedTarget += item.stamp.targetGrade * item.coreWeight;
+    }
+    if (influenceTotal <= 0 || coreWeightTotal <= 0) continue;
+
+    const target = weightedTarget / coreWeightTotal;
+    const blend = Math.min(influenceTotal, 1);
+    height = height * (1 - blend) + target * blend;
+  }
+
+  const strongest = contributions.reduce((best, item) => {
+    if (!best || item.influence > best.influence) return item;
+    return best;
+  }, null);
+
+  return {
+    compositedHeight: height,
+    totalInfluence: contributions.reduce((sum, item) => sum + item.influence, 0),
+    strongestInfluence: strongest
+      ? {
+          stampId: strongest.stamp.id,
+          stampType: strongest.stamp.type,
+          priority: strongest.stamp.priority,
+          influence: strongest.influence,
+          coreWeight: strongest.coreWeight
+        }
+      : null,
+    appliedCount: contributions.length
+  };
+}
+
 function classifyRoadPriority(highwayType) {
   return MAJOR_ROAD_TYPES.has(highwayType) ? STAMP_PRIORITY.ROAD_MAJOR : STAMP_PRIORITY.ROAD_MINOR;
 }
@@ -297,7 +414,7 @@ function buildRoadStamp(points, width, highwayType) {
   const innerRadius = width * 0.5;
   const falloffRadius = ROAD_FALLOFF_METERS;
   return {
-    id: stampIdCounter += 1,
+    id: 0,
     type: "road",
     geometryType: "line",
     centerline: points,
@@ -309,9 +426,14 @@ function buildRoadStamp(points, width, highwayType) {
   };
 }
 
-function collectRoads(geojson, origin, lonScale) {
+function buildDeterministicStampId(tileKey, sourceType, featureIndex, partIndex) {
+  return hashString(`${tileKey}:${sourceType}:${featureIndex}:${partIndex}`);
+}
+
+function collectRoads(geojson, origin, lonScale, tileKey) {
   const roads = [];
   const features = geojson?.prefiltered?.highways ?? geojson?.features ?? [];
+  let featureIndex = 0;
   for (const feature of features) {
     if (!feature?.properties?.highway) continue;
     const geometry = feature.geometry;
@@ -324,6 +446,7 @@ function collectRoads(geojson, origin, lonScale) {
       : geometry.type === "MultiLineString"
         ? geometry.coordinates
         : [];
+    let partIndex = 0;
     for (const line of lines) {
       if (!Array.isArray(line) || line.length < 2) continue;
       const points = [];
@@ -334,8 +457,13 @@ function collectRoads(geojson, origin, lonScale) {
         points.push(toLocalMeters(coord, origin, lonScale));
       }
       const stamp = buildRoadStamp(points, width, feature.properties.highway);
-      if (stamp) roads.push(stamp);
+      if (stamp) {
+        stamp.id = buildDeterministicStampId(tileKey, "road", featureIndex, partIndex);
+        roads.push(stamp);
+      }
+      partIndex += 1;
     }
+    featureIndex += 1;
   }
   return roads;
 }
@@ -351,20 +479,23 @@ export function getBaseTerrainHeight(x, z) {
 export function setTerrainStampsForTile(tileKey, geojson, bounds) {
   if (!tileKey || !geojson || !bounds) return;
   const lonScale = metersPerDegreeLon(bounds.centerLat);
-  const roads = collectRoads(geojson, bounds, lonScale);
-  const buildings = terrainStampTiles.get(tileKey)?.buildings ?? [];
-  terrainStampTiles.set(tileKey, { roads, buildings, stamps: [...roads, ...buildings] });
-  clearTerrainCompositorCache();
+  const roads = collectRoads(geojson, bounds, lonScale, tileKey);
+  const previousTileData = terrainStampTiles.get(tileKey);
+  const buildings = previousTileData?.buildings ?? [];
+  const nextTileData = { roads, buildings, stamps: [...roads, ...buildings] };
+  terrainStampTiles.set(tileKey, nextTileData);
+  invalidateTileChunkCache(previousTileData, nextTileData);
 }
 
 export function setBuildingStampsForTile(tileKey, buildings) {
   if (!tileKey) return;
-  const roads = terrainStampTiles.get(tileKey)?.roads ?? [];
-  const normalizedBuildings = (Array.isArray(buildings) ? buildings : []).map((building) => {
+  const previousTileData = terrainStampTiles.get(tileKey);
+  const roads = previousTileData?.roads ?? [];
+  const normalizedBuildings = (Array.isArray(buildings) ? buildings : []).map((building, index) => {
     const falloffRadius = building.falloffRadius ?? building.falloff ?? BUILDING_FALLOFF_METERS;
     const rings = building.rings ?? [];
     return {
-      id: building.id ?? (stampIdCounter += 1),
+      id: buildDeterministicStampId(tileKey, "building", index, 0),
       type: "building",
       geometryType: "polygon",
       rings,
@@ -375,20 +506,37 @@ export function setBuildingStampsForTile(tileKey, buildings) {
       bounds: building.bounds ?? buildStampBoundsFromPoints(rings.flat(), falloffRadius)
     };
   });
-  terrainStampTiles.set(tileKey, {
+  const nextTileData = {
     roads,
     buildings: normalizedBuildings,
     stamps: [...roads, ...normalizedBuildings]
-  });
-  clearTerrainCompositorCache();
+  };
+  terrainStampTiles.set(tileKey, nextTileData);
+  invalidateTileChunkCache(previousTileData, nextTileData);
 }
 
 export function clearTerrainStampsForTile(tileKey) {
+  const previousTileData = terrainStampTiles.get(tileKey);
   terrainStampTiles.delete(tileKey);
-  clearTerrainCompositorCache();
+  invalidateTileChunkCache(previousTileData, null);
+}
+
+export function consumeDirtyTerrainChunks() {
+  const dirtyChunks = Array.from(dirtyTerrainChunks);
+  dirtyTerrainChunks.clear();
+  return dirtyChunks;
+}
+
+function computeStampedTerrainHeightUncached(x, z) {
+  const baseHeight = getBaseTerrainHeight(x, z);
+  const cx = getChunkCoord(x);
+  const cz = getChunkCoord(z);
+  const chunkData = getStampsForChunk(cx, cz);
+  return applyStampCompositor(baseHeight, chunkData.stamps, x, z);
 }
 
 export function getStampedTerrainHeight(x, z) {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return getBaseTerrainHeight(x, z);
   const baseHeight = getBaseTerrainHeight(x, z);
 
   const cx = getChunkCoord(x);
@@ -407,8 +555,7 @@ export function getStampedTerrainHeight(x, z) {
   const cached = heightCache.get(localKey);
   if (Number.isFinite(cached)) return cached;
 
-  const chunkData = getStampsForChunk(cx, cz);
-  const compositedHeight = applyStampCompositor(baseHeight, chunkData.stamps, x, z);
+  const compositedHeight = computeStampedTerrainHeightUncached(x, z);
   heightCache.set(localKey, compositedHeight);
   return compositedHeight;
 }
@@ -434,6 +581,42 @@ export function getTerrainStampDebugDataForChunk(chunkX, chunkZ) {
     falloffRadius: stampDebugOptions.showInfluenceRadii ? stamp.falloffRadius : undefined,
     bounds: stamp.bounds
   }));
+}
+
+export function getTerrainStampDebugSample(x, z, options = {}) {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  const sampleStep = Number.isFinite(options.sampleStepMeters) ? Math.max(0.1, options.sampleStepMeters) : 0.5;
+
+  const cx = getChunkCoord(x);
+  const cz = getChunkCoord(z);
+  const chunkData = getStampsForChunk(cx, cz);
+  const baseHeight = getBaseTerrainHeight(x, z);
+  const debugCompositor = computeStampCompositorDebug(baseHeight, chunkData.stamps, x, z);
+
+  const left = computeStampedTerrainHeightUncached(x - sampleStep, z);
+  const right = computeStampedTerrainHeightUncached(x + sampleStep, z);
+  const down = computeStampedTerrainHeightUncached(x, z - sampleStep);
+  const up = computeStampedTerrainHeightUncached(x, z + sampleStep);
+  const slopeDx = Number.isFinite(left) && Number.isFinite(right) ? (right - left) / (2 * sampleStep) : 0;
+  const slopeDz = Number.isFinite(down) && Number.isFinite(up) ? (up - down) / (2 * sampleStep) : 0;
+  const slopeGradient = Math.hypot(slopeDx, slopeDz);
+
+  return {
+    x,
+    z,
+    chunkX: cx,
+    chunkZ: cz,
+    baseHeight,
+    stampedHeight: debugCompositor.compositedHeight,
+    slopeAngleDeg: Math.atan(slopeGradient) * (180 / Math.PI),
+    slopeGradient,
+    stampInfluence: {
+      total: debugCompositor.totalInfluence,
+      normalized: Math.min(1, debugCompositor.totalInfluence),
+      appliedCount: debugCompositor.appliedCount,
+      strongest: debugCompositor.strongestInfluence
+    }
+  };
 }
 
 export function getTerrainHeight(x, z) {

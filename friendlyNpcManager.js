@@ -26,6 +26,8 @@ const FRIENDLY_ENGAGE_RADIUS = 5;
 const FRIENDLY_DISENGAGE_RADIUS = 8;
 const FRIENDLY_ANIM_MIN_INTERVAL_MS = 150;
 const FRIENDLY_BASE_HEALTH = BASE_HEALTH_SEGMENTS;
+const FRIENDLY_GROUND_OFFSET = 0.9;
+
 const FRIENDLY_LEVEL_WEIGHTS = [
   { level: 1, weight: 0.55 },
   { level: 2, weight: 0.25 },
@@ -199,8 +201,8 @@ const getHealthForLevel = (level) => {
   const getSpawnPosition = (position) => {
     const spawnPos = position.clone();
     const terrainHeight = getTerrainHeight?.(spawnPos.x, spawnPos.z);
-    spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : spawnPos.y;
-    liftPositionToBuildingTop?.(spawnPos, 0.5);
+    spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + FRIENDLY_GROUND_OFFSET : spawnPos.y;
+    liftPositionToBuildingTop?.(spawnPos, FRIENDLY_GROUND_OFFSET);
     return spawnPos;
   };
 

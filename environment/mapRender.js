@@ -136,8 +136,15 @@ export function createMapRenderer({
 
     const halfWidth = stamp.innerHalfWidth;
     const points = stamp.points;
-    const vertices = [];
-    const indices = [];
+    const segmentCount = points.length - 1;
+    if (segmentCount <= 0) return;
+
+    const vertices = new Float32Array(segmentCount * 12);
+    const indexArrayType = segmentCount * 4 > 65_535 ? Uint32Array : Uint16Array;
+    const indices = new indexArrayType(segmentCount * 6);
+    let vertexOffset = 0;
+    let indexOffset = 0;
+    let baseIndex = 0;
 
     for (let i = 0; i < points.length - 1; i += 1) {
       const start = points[i];
@@ -145,12 +152,32 @@ export function createMapRenderer({
       const dx = end.x - start.x;
       const dz = end.z - start.z;
       const length = Math.hypot(dx, dz);
-      if (length <= Number.EPSILON) continue;
+      if (length <= Number.EPSILON) {
+        vertices[vertexOffset++] = start.x;
+        vertices[vertexOffset++] = getTerrainHeight(start.x, start.z) + elevationOffset;
+        vertices[vertexOffset++] = start.z;
+        vertices[vertexOffset++] = start.x;
+        vertices[vertexOffset++] = getTerrainHeight(start.x, start.z) + elevationOffset;
+        vertices[vertexOffset++] = start.z;
+        vertices[vertexOffset++] = end.x;
+        vertices[vertexOffset++] = getTerrainHeight(end.x, end.z) + elevationOffset;
+        vertices[vertexOffset++] = end.z;
+        vertices[vertexOffset++] = end.x;
+        vertices[vertexOffset++] = getTerrainHeight(end.x, end.z) + elevationOffset;
+        vertices[vertexOffset++] = end.z;
+        indices[indexOffset++] = baseIndex;
+        indices[indexOffset++] = baseIndex + 2;
+        indices[indexOffset++] = baseIndex + 1;
+        indices[indexOffset++] = baseIndex + 2;
+        indices[indexOffset++] = baseIndex + 3;
+        indices[indexOffset++] = baseIndex + 1;
+        baseIndex += 4;
+        continue;
+      }
 
       const nx = -dz / length;
       const nz = dx / length;
 
-      const baseIndex = vertices.length / 3;
       const l0x = start.x + nx * halfWidth;
       const l0z = start.z + nz * halfWidth;
       const r0x = start.x - nx * halfWidth;
@@ -159,24 +186,77 @@ export function createMapRenderer({
       const l1z = end.z + nz * halfWidth;
       const r1x = end.x - nx * halfWidth;
       const r1z = end.z - nz * halfWidth;
-      vertices.push(
-        l0x, getTerrainHeight(l0x, l0z) + elevationOffset, l0z,
-        r0x, getTerrainHeight(r0x, r0z) + elevationOffset, r0z,
-        l1x, getTerrainHeight(l1x, l1z) + elevationOffset, l1z,
-        r1x, getTerrainHeight(r1x, r1z) + elevationOffset, r1z
-      );
-      indices.push(
-        baseIndex, baseIndex + 2, baseIndex + 1,
-        baseIndex + 2, baseIndex + 3, baseIndex + 1
-      );
+      vertices[vertexOffset++] = l0x;
+      vertices[vertexOffset++] = getTerrainHeight(l0x, l0z) + elevationOffset;
+      vertices[vertexOffset++] = l0z;
+      vertices[vertexOffset++] = r0x;
+      vertices[vertexOffset++] = getTerrainHeight(r0x, r0z) + elevationOffset;
+      vertices[vertexOffset++] = r0z;
+      vertices[vertexOffset++] = l1x;
+      vertices[vertexOffset++] = getTerrainHeight(l1x, l1z) + elevationOffset;
+      vertices[vertexOffset++] = l1z;
+      vertices[vertexOffset++] = r1x;
+      vertices[vertexOffset++] = getTerrainHeight(r1x, r1z) + elevationOffset;
+      vertices[vertexOffset++] = r1z;
+      indices[indexOffset++] = baseIndex;
+      indices[indexOffset++] = baseIndex + 2;
+      indices[indexOffset++] = baseIndex + 1;
+      indices[indexOffset++] = baseIndex + 2;
+      indices[indexOffset++] = baseIndex + 3;
+      indices[indexOffset++] = baseIndex + 1;
+      baseIndex += 4;
     }
 
-    mesh.geometry.dispose();
-    mesh.geometry = new THREE.BufferGeometry();
-    mesh.geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
-    mesh.geometry.setIndex(indices);
-    mesh.geometry.computeVertexNormals();
-    mesh.geometry.computeBoundingSphere();
+    const geometry = mesh.geometry;
+    const positionAttribute = geometry.getAttribute("position");
+    const indexAttribute = geometry.getIndex();
+
+    const topologyStable =
+      positionAttribute &&
+      positionAttribute.array.length === vertices.length &&
+      indexAttribute &&
+      indexAttribute.array.length === indices.length &&
+      indexAttribute.array.constructor === indices.constructor;
+
+    let vertexDataChanged = false;
+
+    if (topologyStable) {
+      const positionArray = positionAttribute.array;
+      for (let i = 0; i < vertices.length; i += 1) {
+        if (positionArray[i] !== vertices[i]) {
+          vertexDataChanged = true;
+          break;
+        }
+      }
+
+      if (vertexDataChanged) {
+        positionArray.set(vertices);
+        positionAttribute.needsUpdate = true;
+      }
+
+      const indexArray = indexAttribute.array;
+      let indexChanged = false;
+      for (let i = 0; i < indices.length; i += 1) {
+        if (indexArray[i] !== indices[i]) {
+          indexChanged = true;
+          break;
+        }
+      }
+      if (indexChanged) {
+        indexArray.set(indices);
+        indexAttribute.needsUpdate = true;
+      }
+      vertexDataChanged ||= indexChanged;
+    } else {
+      geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+      geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      vertexDataChanged = true;
+    }
+
+    if (vertexDataChanged) {
+      geometry.computeVertexNormals();
+      geometry.computeBoundingSphere();
+    }
   }
 
   function clearUnused(pool, fromIndex) {

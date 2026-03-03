@@ -6,7 +6,9 @@ import { MonsterCharacter } from "../characters/MonsterCharacter.js";
 import { createFriendlyNpcManager } from "../friendlyNpcManager.js";
 import {
   clearTerrainStampsForTile,
+  consumeDirtyTerrainChunks,
   getTerrainHeight,
+  getTerrainStampDebugSample,
   setTerrainStampsForTile
 } from '../environment/terrainHeight.js';
 import { createFire } from '../environment/fire.js';
@@ -39,7 +41,7 @@ import { createApples, APPLE_ITEM_ID } from '../items/apple.js';
 import { createHomeSystem } from '../home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { getSpawnPosition } from '../spawnUtils.js';
+import { configureSpawnAlignment, getSpawnPosition, getSpawnY } from '../spawnUtils.js';
 import { createLocationProvider } from '../location.js';
 import { fetchOSMData } from '../osmClient.js';
 import { overpassToGeoJSON } from '../osmGeoJson.js';
@@ -62,6 +64,7 @@ import {
 } from '../statSegments.js';
 import { createTileCache } from '../tileCache.js';
 import { createGroundTiles } from '../environment/groundTiles.js';
+import { createTerrainStampDebugOverlay } from '../environment/terrainStampDebugOverlay.js';
 import { clearCache, getCachedTile, setCachedTile } from '../idbCache.js';
 import {
   initHomeStoragePanel,
@@ -89,6 +92,7 @@ import {
   initMapViewFeature,
   setMapViewEnabledFeature,
   updateMapViewFeature,
+  isMapViewTransitionActiveFeature,
   zoomInMapFeature,
   zoomOutMapFeature
 } from '../features/mapFeature.js';
@@ -135,6 +139,7 @@ const MAX_MONSTERS_ACTIVE = 8;
 const MONSTER_COMBAT_RADIUS = 26;
 const MONSTER_BACKGROUND_RADIUS = 70;
 const MONSTER_BACKGROUND_AI_INTERVAL_MS = 700;
+const MONSTER_SPAWN_GROUND_OFFSET = 0.9;
 const MONSTER_MODELS = [
   "/models/zombie.fbx",
   "/models/zombie_boy.fbx",
@@ -221,6 +226,10 @@ const ZOMBIE_VOICE_CLIPS = [
   'NPC Sounds/zombie_sound_2.ogg'
 ];
 const MERCHANT_LOOP_CLIP = 'NPC Sounds/merchant_loop.ogg';
+const TERRAIN_STAMP_REGRESSION_SCENE = Object.freeze({
+  seed: 'terrain-stamp-regression-v1',
+  location: { lat: 37.7749, lon: -122.4194 }
+});
 
 
 // --- Rapier demo state ---
@@ -874,11 +883,34 @@ async function initCore(runtimeContext) {
   let monsterSnapshotTimeout = null;
   let unsubscribeMonsterUpdates = null;
   const recentMonsterHits = new Map();
+  const damageableCreaturesBuffer = [];
 
-  const getDamageableCreatures = () => ([
-    ...(Array.isArray(monsters) ? monsters : []),
-    ...(Array.isArray(animals) ? animals : [])
-  ]);
+  const refillCombinedList = (target, first, second) => {
+    target.length = 0;
+    if (Array.isArray(first) && first.length > 0) {
+      target.push(...first);
+    }
+    if (Array.isArray(second) && second.length > 0) {
+      target.push(...second);
+    }
+    return target;
+  };
+
+  const getDamageableCreatures = () => refillCombinedList(damageableCreaturesBuffer, monsters, animals);
+  const findDamageableCreatureById = (id) => {
+    if (!id) return null;
+    if (Array.isArray(monsters)) {
+      for (const monster of monsters) {
+        if (monster?.id === id) return monster;
+      }
+    }
+    if (Array.isArray(animals)) {
+      for (const animal of animals) {
+        if (animal?.id === id) return animal;
+      }
+    }
+    return null;
+  };
 
   scene = new THREE.Scene();
   const rotateSkyboxFaceClockwise = (image) => {
@@ -1431,7 +1463,7 @@ async function initCore(runtimeContext) {
       }
       if (!multiplayer?.isHost) return;
       const monsterId = data.monsterId;
-      const monster = getDamageableCreatures().find(entry => entry.id === monsterId);
+      const monster = findDamageableCreatureById(monsterId);
       if (!monster) return;
       const sourceId = data.sourcePlayerId || peerId;
       const nowMs = Date.now();
@@ -1553,9 +1585,9 @@ async function initCore(runtimeContext) {
         return;
       }
 
-      const terrainY = getTerrainHeight(targetX, targetZ);
       const hasAuthoritativeY = Number.isFinite(data.y);
-      const targetY = hasAuthoritativeY ? data.y : terrainY;
+      const resolvedNetworkY = getSpawnY(targetX, targetZ, 0.6, { allowOnBuildings: true });
+      const targetY = hasAuthoritativeY ? data.y : (Number.isFinite(resolvedNetworkY) ? resolvedNetworkY : getTerrainHeight(targetX, targetZ));
 
       if (!player.targetPos) {
         player.targetPos = new THREE.Vector3(targetX, targetY, targetZ);
@@ -2652,6 +2684,8 @@ async function initCore(runtimeContext) {
     return true;
   };
 
+  configureSpawnAlignment({ liftPositionToBuildingTop });
+
   window.lightSources = [];
 
   friendlyNpcManager = createFriendlyNpcManager({
@@ -2815,10 +2849,7 @@ async function initCore(runtimeContext) {
           0,
           Math.sin(offsetAngle) * offsetRadius
         ));
-        const terrainHeight = getTerrainHeight(clusterPosition.x, clusterPosition.z);
-        if (Number.isFinite(terrainHeight)) {
-          clusterPosition.y = terrainHeight + 0.5;
-        }
+        applySpawnY(clusterPosition, 0.5, { allowOnBuildings: true });
         spawnMonsterInSlot(slotId, modelPath, null, {
           position: clusterPosition,
           rotation,
@@ -2863,8 +2894,8 @@ async function initCore(runtimeContext) {
         0,
         playerModel.position.z + Math.sin(angle) * radius
       );
-      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-      spawnPos.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : 0.5;
+      const spawnY = getSpawnY(spawnPos.x, spawnPos.z, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true });
+      spawnPos.y = Number.isFinite(spawnY) ? spawnY : 0.5;
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
       }
@@ -2872,7 +2903,8 @@ async function initCore(runtimeContext) {
     }
     const fallback = playerModel.position.clone();
     fallback.x += MONSTER_SPAWN_MIN_RADIUS;
-    fallback.y = getTerrainHeight(fallback.x, fallback.z) + 0.5;
+    const fallbackY = getSpawnY(fallback.x, fallback.z, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true });
+    fallback.y = Number.isFinite(fallbackY) ? fallbackY : fallback.y;
     return fallback;
   };
 
@@ -3095,9 +3127,8 @@ async function initCore(runtimeContext) {
 
         const spawnPos = options.position
           && Number.isFinite(options.position.x)
-          && Number.isFinite(options.position.y)
           && Number.isFinite(options.position.z)
-          ? options.position
+          ? normalizeNetworkSpawnPosition(options.position, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true }) || getMonsterSpawnPosition()
           : getMonsterSpawnPosition();
         monster.setPosition(spawnPos.x, spawnPos.y, spawnPos.z);
 
@@ -3301,9 +3332,12 @@ async function initCore(runtimeContext) {
         if (Number.isFinite(state.level)) {
           monster.setLevel(state.level, { preserveHealth: true });
         }
-        if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
-          monster.model.position.set(px, py, pz);
-          monster.body?.setTranslation({ x: px, y: py, z: pz }, true);
+        if (Number.isFinite(px) && Number.isFinite(pz)) {
+          const normalizedPos = normalizeNetworkSpawnPosition({ x: px, y: py, z: pz }, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true });
+          if (normalizedPos) {
+            monster.model.position.copy(normalizedPos);
+            monster.body?.setTranslation({ x: normalizedPos.x, y: normalizedPos.y, z: normalizedPos.z }, true);
+          }
         }
         if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
           monster.model.quaternion.set(rx, ry, rz, rw);
@@ -4345,7 +4379,9 @@ async function initCore(runtimeContext) {
     const radius = 1.2;
     dropPosition.x += Math.cos(angle) * radius;
     dropPosition.z += Math.sin(angle) * radius;
-    dropPosition.y = getTerrainHeight(dropPosition.x, dropPosition.z) + 0.5;
+    if (!applySpawnY(dropPosition, 0.5, { allowOnBuildings: true })) {
+      return null;
+    }
     return dropPosition;
   }
 
@@ -4558,10 +4594,7 @@ async function initCore(runtimeContext) {
   function spawnWoodPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
+    applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     const geometry = new THREE.BoxGeometry(3.0, 0.36, 0.6);
     const material = new THREE.MeshStandardMaterial({
       color: 0x8b5a2b,
@@ -4583,10 +4616,7 @@ async function initCore(runtimeContext) {
   function spawnMeatPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
+    applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     const geometry = new THREE.BoxGeometry(1.1, 0.45, 0.7);
     const material = new THREE.MeshStandardMaterial({
       color: 0x6b3f23,
@@ -4608,10 +4638,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
     if (useTerrainHeight) {
-      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-      if (Number.isFinite(terrainHeight)) {
-        spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-      }
+      applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     }
     const group = new THREE.Group();
     const pieces = groupedMushrooms > 0 ? groupedMushrooms : 3;
@@ -4685,10 +4712,7 @@ async function initCore(runtimeContext) {
   function spawnZombieBrainsPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (Number.isFinite(terrainHeight)) {
-      spawnPos.y = terrainHeight + WOOD_DROP_LIFT;
-    }
+    applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
 
     const brainGroup = createZombieBrainsGroup();
     brainGroup.position.copy(spawnPos);
@@ -4716,9 +4740,7 @@ async function initCore(runtimeContext) {
       mesh.getWorldPosition(tempTreePosition);
       appleParent.add(mesh);
       mesh.position.copy(tempTreePosition);
-      const terrainY = getTerrainHeight(tempTreePosition.x, tempTreePosition.z);
-      if (Number.isFinite(terrainY)) {
-        mesh.position.y = terrainY + APPLE_DROP_LIFT;
+      if (applySpawnY(mesh.position, APPLE_DROP_LIFT, { allowOnBuildings: true })) {
         mesh.userData.baseY = mesh.position.y;
       }
       mesh.rotation.y = Math.random() * Math.PI * 2;
@@ -6529,21 +6551,41 @@ async function initCore(runtimeContext) {
     }
   }
 
-  const asVec3 = (p) => (
-    p?.isVector3 ? p.clone()
-    : p && Number.isFinite(p.x) && Number.isFinite(p.z) ? new THREE.Vector3(p.x, p.y ?? 0, p.z)
-    : null
-  );
+  function asVec3(p) {
+    return p?.isVector3 ? p.clone()
+      : p && Number.isFinite(p.x) && Number.isFinite(p.z) ? new THREE.Vector3(p.x, p.y ?? 0, p.z)
+      : null;
+  }
+
+  function resolveSpawnY(position, offset, { allowOnBuildings = false } = {}) {
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.z)) return null;
+    return getSpawnY(position.x, position.z, offset, { allowOnBuildings });
+  }
+
+  function applySpawnY(position, offset, { allowOnBuildings = false } = {}) {
+    const resolvedY = resolveSpawnY(position, offset, { allowOnBuildings });
+    if (!Number.isFinite(resolvedY)) return false;
+    position.y = resolvedY;
+    return true;
+  }
+
+  function normalizeNetworkSpawnPosition(position, offset, { allowOnBuildings = false } = {}) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const resolvedY = resolveSpawnY(spawnPos, offset, { allowOnBuildings });
+    if (!Number.isFinite(resolvedY)) return null;
+    spawnPos.y = resolvedY;
+    return spawnPos;
+  }
 
   function spawnAmmoPickup(position, amount = AMMO_PICKUP_AMOUNT, options = {}) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
     if (options.noFloat) {
       const groundOffset = Number.isFinite(options.groundOffset) ? options.groundOffset : 0.08;
-      spawnPos.y = terrainHeight + groundOffset;
-    } else {
-      spawnPos.y = terrainHeight + 0.6;
+      if (!applySpawnY(spawnPos, groundOffset, { allowOnBuildings: true })) return;
+    } else if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) {
+      return;
     }
 
     const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
@@ -6642,8 +6684,7 @@ async function initCore(runtimeContext) {
   function spawnDroppedAmmoPickup(position, amount, dropId) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -6699,9 +6740,12 @@ async function initCore(runtimeContext) {
         const entry = droppedAmmoPickups.get(drop.id);
         const mesh = entry?.mesh;
         const [x, y, z] = drop.position;
-        if (mesh && Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
-          mesh.position.set(x, y, z);
-          mesh.userData.baseY = y;
+        if (mesh && Number.isFinite(x) && Number.isFinite(z)) {
+          const normalizedPos = normalizeNetworkSpawnPosition({ x, y, z }, 0.6, { allowOnBuildings: true });
+          if (normalizedPos) {
+            mesh.position.copy(normalizedPos);
+            mesh.userData.baseY = normalizedPos.y;
+          }
         }
       }
     });
@@ -6722,8 +6766,7 @@ async function initCore(runtimeContext) {
   function spawnFoodPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -6750,8 +6793,7 @@ async function initCore(runtimeContext) {
   function spawnHealthPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
@@ -6778,8 +6820,7 @@ async function initCore(runtimeContext) {
   function spawnCoinPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    spawnPos.y = terrainHeight + 0.6;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
 
     const geometry = new THREE.CylinderGeometry(0.2, 0.2, 0.06, 24);
     const material = new THREE.MeshStandardMaterial({
@@ -6828,10 +6869,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.5;
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
     iceGun.mesh.position.copy(spawnPos);
     iceGun.mesh.quaternion.set(0, 0, 0, 1);
     iceGun.mesh.visible = true;
@@ -6844,10 +6882,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.5;
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
     bow.mesh.position.copy(spawnPos);
     bow.mesh.quaternion.set(0, 0, 0, 1);
     bow.mesh.visible = true;
@@ -6879,10 +6914,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.4;
+    if (!applySpawnY(spawnPos, 0.4, { allowOnBuildings: true })) return;
     bomb.mesh.position.copy(spawnPos);
     bomb.mesh.quaternion.set(0, 0, 0, 1);
     bomb.mesh.visible = true;
@@ -6894,10 +6926,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.5;
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
     autumnSword.mesh.position.copy(spawnPos);
     autumnSword.mesh.quaternion.set(0, 0, 0, 1);
     autumnSword.mesh.visible = true;
@@ -6909,10 +6938,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.2;
+    if (!applySpawnY(spawnPos, 0.2, { allowOnBuildings: true })) return;
     lantern.mesh.position.copy(spawnPos);
     lantern.mesh.quaternion.set(0, 0, 0, 1);
     lantern.mesh.visible = true;
@@ -6924,10 +6950,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight + 0.2;
+    if (!applySpawnY(spawnPos, 0.2, { allowOnBuildings: true })) return;
     torch.mesh.position.copy(spawnPos);
     torch.mesh.quaternion.set(0, 0, 0, 1);
     torch.mesh.visible = true;
@@ -6940,10 +6963,7 @@ async function initCore(runtimeContext) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
 
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-
-    spawnPos.y = terrainHeight;
+    if (!applySpawnY(spawnPos, 0, { allowOnBuildings: true })) return;
     treasureChest.mesh.position.copy(spawnPos);
     treasureChest.mesh.visible = true;
     treasureChest.syncCollider?.();
@@ -7092,6 +7112,7 @@ async function initCore(runtimeContext) {
   });
 
   const TILE_SIZE_METERS = 300;
+  let terrainStampDebugOverlay = null;
   const TILE_EVICT_RADIUS = 2;
   const GROUND_TILE_RADIUS = 2;
   const TILE_FETCH_RADIUS_METERS = TILE_SIZE_METERS * Math.SQRT2 * 0.5;
@@ -7108,7 +7129,12 @@ async function initCore(runtimeContext) {
   groundTiles = createGroundTiles({
     scene,
     renderer,
-    tileSizeMeters: TILE_SIZE_METERS
+    tileSizeMeters: TILE_SIZE_METERS,
+    terrainSeed: TERRAIN_STAMP_REGRESSION_SCENE.seed
+  });
+  terrainStampDebugOverlay = createTerrainStampDebugOverlay({
+    scene,
+    getTargetPosition: () => playerModel?.position ?? null
   });
   window.groundTiles = groundTiles.tiles;
   groundMaterialBase = captureMaterialBase(groundTiles.material);
@@ -7249,9 +7275,7 @@ async function initCore(runtimeContext) {
     const configs = getWeaponPickupConfigs().filter(config => config.item?.mesh);
     if (configs.length === 0) return;
     const config = configs[Math.floor(Math.random() * configs.length)];
-    const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
-    if (!Number.isFinite(terrainHeight)) return;
-    spawnPos.y = terrainHeight + config.groundOffset;
+    if (!applySpawnY(spawnPos, config.groundOffset, { allowOnBuildings: true })) return;
     createDroppedWeaponPickup(config.item, {
       itemId: config.itemId,
       markerColor: config.markerColor,
@@ -7472,6 +7496,17 @@ async function initCore(runtimeContext) {
       { x: from.x, y: from.y ?? playerModel?.position?.y ?? 0, z: from.z },
       { x: direction.x, y: direction.y, z: direction.z }
     );
+    const excludedColliderHandles = new Set();
+    const body = playerControls.body;
+    if (body && typeof body.numColliders === 'function' && typeof body.collider === 'function') {
+      const colliderCount = body.numColliders();
+      for (let i = 0; i < colliderCount; i += 1) {
+        const collider = body.collider(i);
+        if (typeof collider?.handle === 'number') {
+          excludedColliderHandles.add(collider.handle);
+        }
+      }
+    }
     const hit = rapierWorld.castRay(
       ray,
       distance,
@@ -7479,7 +7514,8 @@ async function initCore(runtimeContext) {
       undefined,
       undefined,
       undefined,
-      playerControls.body
+      undefined,
+      excludedColliderHandles.size ? (collider) => !excludedColliderHandles.has(collider?.handle) : undefined
     );
     if (!hit) return false;
     const hitDistance = hit.toi ?? hit.timeOfImpact ?? distance;
@@ -7833,12 +7869,14 @@ async function initCore(runtimeContext) {
       tileRenderBounds.delete(tileKey);
       mapRenderer.removeTile?.(tileKey);
       buildingsRenderer.removeTile?.(tileKey);
+      clearTerrainStampsForTile(tileKey);
       boundsDirty = true;
       changedTileKeys.add(tileKey);
     }
 
     if (boundsDirty) {
       refreshRenderOriginFromBounds();
+      rebuildGroundTilesForDirtyTerrainChunks();
     }
     const originChanged = !isSameRenderOrigin(currentRenderOrigin, lastRenderOrigin);
     if (originChanged) {
@@ -7854,9 +7892,11 @@ async function initCore(runtimeContext) {
     for (const tileKey of changedTileKeys) {
       const entry = tileCache.cache.get(tileKey);
       if (!entry?.geojson) continue;
+      setTerrainStampsForTile(tileKey, entry.geojson, bounds);
       mapRenderer.updateTileHighways?.(tileKey, entry.geojson, bounds);
       buildingsRenderer.updateTileBuildings?.(tileKey, entry.geojson, bounds);
     }
+    rebuildGroundTilesForDirtyTerrainChunks();
 
     const finishBuildingRender = () => {
       if (rebuildId !== mapRebuildToken) return;
@@ -7959,6 +7999,12 @@ async function initCore(runtimeContext) {
     }
   };
 
+  const rebuildGroundTilesForDirtyTerrainChunks = () => {
+    const dirtyChunks = consumeDirtyTerrainChunks();
+    if (dirtyChunks.length === 0) return 0;
+    return groundTiles?.rebuildTilesForChunks?.(dirtyChunks) ?? 0;
+  };
+
   const updateTileMeshesImmediate = (tileKey, geojson) => {
     if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
     const previousGeojson = renderedTileGeojson.get(tileKey);
@@ -7992,6 +8038,7 @@ async function initCore(runtimeContext) {
         if (!entry?.geojson) continue;
         buildingsRenderer.updateTileBuildings?.(key, entry.geojson, bounds);
       }
+      rebuildGroundTilesForDirtyTerrainChunks();
       scheduleBuildingRefresh();
       if (typeof natureController?.refreshTilesForCacheTile === "function") {
         for (const key of tilesToUpdate) {
@@ -8067,6 +8114,7 @@ async function initCore(runtimeContext) {
         tileRenderBounds.delete(key);
         deferredTileUpdates.delete(key);
       }
+      rebuildGroundTilesForDirtyTerrainChunks();
       scheduleBuildingRefresh();
     }
 
@@ -8435,7 +8483,7 @@ async function initCore(runtimeContext) {
     setStat('health', statsState.maxHealthSegments);
     setStat('hunger', statsState.maxHungerSegments);
     setStat('magic', statsState.maxMagicSegments);
-    const spawn = getSpawnPosition();
+    const spawn = getSpawnPosition({ allowOnBuildings: true });
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
     playerControls.playerY = spawn.y;
@@ -8828,6 +8876,21 @@ async function initCore(runtimeContext) {
     },
     getLastPing: () => multiplayer?.lastPingMs,
     getLastOsmFetch: () => debugState.lastOsmFetchAt,
+    getTerrainStampDebugSample: (x, z, options) => getTerrainStampDebugSample(x, z, options),
+    setTerrainStampDebugOverlay: (enabled, options = {}) => {
+      terrainStampDebugOverlay?.setOptions?.(options);
+      terrainStampDebugOverlay?.setEnabled?.(enabled);
+      return terrainStampDebugOverlay?.getState?.() ?? null;
+    },
+    getTerrainStampDebugOverlayState: () => terrainStampDebugOverlay?.getState?.() ?? null,
+    loadTerrainStampRegressionScene: () => {
+      locationProvider.setDebugLocation(TERRAIN_STAMP_REGRESSION_SCENE.location);
+      locationProvider.setDebugAccuracy(5);
+      locationProvider.setDebugEnabled(true);
+      terrainStampDebugOverlay?.setOptions?.({ showHeatmap: true });
+      terrainStampDebugOverlay?.setEnabled?.(true);
+      return { ...TERRAIN_STAMP_REGRESSION_SCENE, debugLocationEnabled: true };
+    },
     getLastError: () => {
       const networkError = multiplayer?.lastError;
       const generalError = debugState.lastError;
@@ -8894,6 +8957,9 @@ async function initCore(runtimeContext) {
   window.pickupWood = pickupWood;
   window.pickupMeat = pickupMeat;
   window.pickupSalt = pickupSalt;
+  window.loadTerrainStampRegressionScene = () => appState.loadTerrainStampRegressionScene();
+  window.setTerrainStampDebugOverlay = (enabled, options) => appState.setTerrainStampDebugOverlay(enabled, options);
+  window.getTerrainStampDebugSample = (x, z, options) => appState.getTerrainStampDebugSample(x, z, options);
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -9099,10 +9165,14 @@ async function initCore(runtimeContext) {
     // Sync Rapier bodies -> Three meshes
     const resolveGroundY = playerControls?.resolveGroundY?.bind(playerControls);
     for (const [rb, mesh] of rbToMesh.entries()) {
-      const t = rb.translation();
-      const r = rb.rotation();
-      mesh.position.set(t.x, t.y, t.z);
-      mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      {
+        const t = rb.translation();
+        mesh.position.set(t.x, t.y, t.z);
+      }
+      {
+        const r = rb.rotation();
+        mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      }
 
       const isStaticBody = typeof rb.isFixed === 'function' && rb.isFixed();
       if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection && !isStaticBody) {
@@ -9119,9 +9189,17 @@ async function initCore(runtimeContext) {
             const correction = resolvedGroundY - bbox.min.y;
             mesh.position.y += correction;
             rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
-            const lv = rb.linvel();
-            if (lv.y < 0) {
-              rb.setLinvel({ x: lv.x, y: 0, z: lv.z }, true);
+            let shouldClampDownwardVelocity = false;
+            let clampVelocityX = 0;
+            let clampVelocityZ = 0;
+            {
+              const lv = rb.linvel();
+              shouldClampDownwardVelocity = lv.y < 0;
+              clampVelocityX = lv.x;
+              clampVelocityZ = lv.z;
+            }
+            if (shouldClampDownwardVelocity) {
+              rb.setLinvel({ x: clampVelocityX, y: 0, z: clampVelocityZ }, true);
             }
           }
         }
@@ -9154,23 +9232,23 @@ async function initCore(runtimeContext) {
     const homePosition = homeSystem?.getHomeLocalPosition?.();
     const homeEnterDistance = homeSystem?.getHomeEnterDistance?.();
     const mapMerchantFriendly = getMerchantFriendlyFeature();
-    const mapItems = [
-      ...ammoPickups,
-      ...woodPickups
-    ];
     const mapTreasureChests = treasureChest?.mesh?.visible ? [treasureChest.mesh] : [];
     const mapMerchants = mapMerchantFriendly?.model ? [mapMerchantFriendly.model] : [];
-    void updateMapViewFeature(frameDelta, {
-      monsters: getDamageableCreatures(),
-      friendlies: friendlyNpcManager?.friendlies,
-      weapons: droppedWeaponPickups,
-      items: mapItems,
-      treasureChests: mapTreasureChests,
-      merchants: mapMerchants,
-      otherPlayers,
-      homePosition,
-      homeEnterDistance
-    });
+    if (mapViewEnabled || isMapViewTransitionActiveFeature()) {
+      void updateMapViewFeature(frameDelta, {
+        monsters,
+        animals,
+        friendlies: friendlyNpcManager?.friendlies,
+        weapons: droppedWeaponPickups,
+        ammoItems: ammoPickups,
+        woodItems: woodPickups,
+        treasureChests: mapTreasureChests,
+        merchants: mapMerchants,
+        otherPlayers,
+        homePosition,
+        homeEnterDistance
+      });
+    }
 
     const now = performance.now();
     if (now - lastPerfUpdateMs >= 1000) {
@@ -9727,7 +9805,10 @@ async function initCore(runtimeContext) {
 
           const aiContext = {
             enableFriendlyDrift: true,
-            friendlyAvoidanceZones
+            friendlyAvoidanceZones,
+            resolveGroundY,
+            walkableSlopeDegrees: 42,
+            groundOffset: 0.9 * (Number.isFinite(monster.sizeScale) ? monster.sizeScale : 1)
           };
           const MAX_AI_DELTA_SECONDS = 0.5;
 
@@ -10001,6 +10082,7 @@ async function initCore(runtimeContext) {
     });
 
     updateHitRibbonBursts({ scene, deltaSeconds: frameDelta });
+    terrainStampDebugOverlay?.update?.();
 
     renderer.render(scene, camera);
   }
