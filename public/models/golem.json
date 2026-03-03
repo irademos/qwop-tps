@@ -13,6 +13,10 @@
       "ice": 0.9,
       "arrow": 0.85,
       "melee": 0.8
-    }
+    },
+    "drops": [
+      "salt",
+      "mushroom_cylinder_0"
+    ]
   }
 }

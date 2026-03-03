@@ -18,7 +18,8 @@ const DEFAULT_MONSTER_PROPERTIES = Object.freeze({
   animationSpeed: 1,
   attackRange: null,
   healthBonusSegments: 0,
-  attackSensitivity: {}
+  attackSensitivity: {},
+  drops: []
 });
 const ATTACK_COOLDOWN_RANGE_MS = [2000, 5000];
 const STANDOFF_DISTANCE = 2.5;
@@ -231,12 +232,19 @@ export class MonsterCharacter extends CharacterBase {
         attackSensitivity[type] = Math.max(0, multiplier);
       });
     }
+    const drops = Array.isArray(config?.drops)
+      ? config.drops
+        .filter((entry) => typeof entry === 'string' && entry.trim())
+        .map((entry) => entry.trim())
+      : DEFAULT_MONSTER_PROPERTIES.drops;
+
     return {
       moveSpeed,
       animationSpeed,
       attackRange,
       healthBonusSegments,
-      attackSensitivity
+      attackSensitivity,
+      drops
     };
   }
 
