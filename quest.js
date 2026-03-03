@@ -472,7 +472,7 @@ export class QuestManager {
       }
       friend.updateCombatAI(this.deltaSeconds, target, [target], (hitTarget, info) => {
         if (!hitTarget?.model || hitTarget.isDead) return;
-        const died = hitTarget.applyDamage?.(friend.attackDamage) ?? false;
+        const died = hitTarget.applyDamage?.(friend.attackDamage, { attackTypes: ['melee', 'punch'] }) ?? false;
         if (info?.strength && hitTarget.applyKnockback) {
           hitTarget.applyKnockback({ direction: info.direction, strength: info.strength });
         }

@@ -194,6 +194,7 @@ export function loadMonsterModel(modelPath, callback) {
           }
           monsterGroup.userData.pivot = pivot;
           monsterGroup.userData.modelRoot = model;
+          monsterGroup.userData.monsterConfig = config?.monsterProperties || {};
 
           const mixer = new THREE.AnimationMixer(model);
           const actions = {};
@@ -299,7 +300,14 @@ export function loadMonsterModel(modelPath, callback) {
             monsterGroup.userData.mixer = mixer;
             monsterGroup.userData.actions = actions;
             monsterGroup.userData.updateSkinnedBounds = createSkinnedBoundsUpdater(skinnedMeshes);
-            callback({ model: monsterGroup, mixer, actions, pivot, modelRoot: model });
+            callback({
+              model: monsterGroup,
+              mixer,
+              actions,
+              pivot,
+              modelRoot: model,
+              monsterConfig: config?.monsterProperties || {}
+            });
           });
         },
         undefined,

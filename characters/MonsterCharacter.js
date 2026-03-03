@@ -1,7 +1,7 @@
 import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
-import { ATTACKS } from "../items/melee.js";
+import { ATTACKS, getAttackTypes } from "../items/melee.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from "../healthUtils.js";
 
@@ -13,6 +13,13 @@ const MOVE_FADE = 0.2;
 const ATTACK_FADE = 0.1;
 const DEFAULT_HEALTH = BASE_HEALTH_SEGMENTS;
 const MONSTER_ATTACK = ATTACKS.mutantPunch;
+const DEFAULT_MONSTER_PROPERTIES = Object.freeze({
+  moveSpeed: 1,
+  animationSpeed: 1,
+  attackRange: null,
+  healthBonusSegments: 0,
+  attackSensitivity: {}
+});
 const ATTACK_COOLDOWN_RANGE_MS = [2000, 5000];
 const STANDOFF_DISTANCE = 2.5;
 const STANDOFF_BUFFER = 0.35;
@@ -45,7 +52,7 @@ const MONSTER_MAX_WALKABLE_SLOPE_DEGREES = 42;
 const MONSTER_MAX_GROUND_DELTA = 0.75;
 
 export class MonsterCharacter extends CharacterBase {
-  constructor({ model, mixer, actions }) {
+  constructor({ model, mixer, actions, monsterConfig = {} }) {
     super(model);
     this.mixer = mixer;
     this.actions = actions;
@@ -66,6 +73,7 @@ export class MonsterCharacter extends CharacterBase {
     this.sizeScale = 1;
     this.speedMultiplier = 1;
     this.attackDamage = MONSTER_ATTACK.damage;
+    this.monsterProperties = this.resolveMonsterProperties(monsterConfig);
     this.type = null;
     this.version = 0;
     this.isDead = false;
@@ -86,6 +94,8 @@ export class MonsterCharacter extends CharacterBase {
     this.healthBar = this.createHealthBar();
     this.healthBarVisibleUntil = 0;
     this.backgroundMode = false;
+    this.model.userData.monsterProperties = this.monsterProperties;
+    this.model.userData.lastHitAttackTypes = [];
     this.setLevel(1, { preserveHealth: false });
   }
 
@@ -215,9 +225,63 @@ export class MonsterCharacter extends CharacterBase {
     this.model.quaternion.copy(rot);
   }
 
+  resolveMonsterProperties(config = {}) {
+    const moveSpeed = Number.isFinite(config?.moveSpeed)
+      ? Math.max(0.1, config.moveSpeed)
+      : DEFAULT_MONSTER_PROPERTIES.moveSpeed;
+    const animationSpeed = Number.isFinite(config?.animationSpeed)
+      ? Math.max(0.1, config.animationSpeed)
+      : DEFAULT_MONSTER_PROPERTIES.animationSpeed;
+    const attackRange = Number.isFinite(config?.attackRange)
+      ? Math.max(0.5, config.attackRange)
+      : DEFAULT_MONSTER_PROPERTIES.attackRange;
+    const healthBonusSegments = Number.isFinite(config?.healthBonusSegments)
+      ? Math.max(0, Math.round(config.healthBonusSegments))
+      : DEFAULT_MONSTER_PROPERTIES.healthBonusSegments;
+    const attackSensitivity = {};
+    if (config?.attackSensitivity && typeof config.attackSensitivity === 'object') {
+      Object.entries(config.attackSensitivity).forEach(([type, multiplier]) => {
+        if (typeof type !== 'string' || !type.trim()) return;
+        if (!Number.isFinite(multiplier)) return;
+        attackSensitivity[type] = Math.max(0, multiplier);
+      });
+    }
+    return {
+      moveSpeed,
+      animationSpeed,
+      attackRange,
+      healthBonusSegments,
+      attackSensitivity
+    };
+  }
+
+  getDamageMultiplierForAttackTypes(attackTypes = []) {
+    const types = Array.isArray(attackTypes) ? attackTypes : [];
+    if (!types.length) return 1;
+    let multiplier = 1;
+    types.forEach((type) => {
+      const configured = this.monsterProperties?.attackSensitivity?.[type];
+      if (Number.isFinite(configured)) {
+        multiplier = Math.max(multiplier, Math.max(0, configured));
+      }
+    });
+    return multiplier;
+  }
+
+  getAttackRange() {
+    if (Number.isFinite(this.monsterProperties?.attackRange)) {
+      return this.monsterProperties.attackRange;
+    }
+    return MONSTER_ATTACK.range;
+  }
+
   applyDamage(amount, options = {}) {
     if (this.isDead) return;
-    const damage = Number.isFinite(amount) ? Math.max(0, Math.round(amount)) : 0;
+    const incomingDamage = Number.isFinite(amount) ? Math.max(0, amount) : 0;
+    const attackTypes = getAttackTypes(null, options?.attackTypes || []);
+    const damageMultiplier = this.getDamageMultiplierForAttackTypes(attackTypes);
+    const damage = Math.max(0, Math.round(incomingDamage * damageMultiplier));
+    this.model.userData.lastHitAttackTypes = attackTypes;
     this.health = Math.max(0, this.health - damage);
     this.model.userData.health = this.health;
     this.showHealthBar();
@@ -277,7 +341,8 @@ export class MonsterCharacter extends CharacterBase {
     this.sizeScale = 1 + LEVEL_SIZE_STEP * (nextLevel - 1);
     this.speedMultiplier = Math.max(0.6, 1 - LEVEL_SPEED_STEP * (nextLevel - 1));
     this.attackDamage = Math.max(1, Math.round(MONSTER_ATTACK.damage * this.sizeScale));
-    this.maxHealth = getMaxHealthSegments(nextLevel);
+    const bonusHealthSegments = this.monsterProperties?.healthBonusSegments ?? 0;
+    this.maxHealth = getMaxHealthSegments(nextLevel, bonusHealthSegments);
     this.model.userData.maxHealth = this.maxHealth;
     if (this.pivot?.scale) {
       this.pivot.scale.set(
@@ -291,7 +356,7 @@ export class MonsterCharacter extends CharacterBase {
       this.health = this.maxHealth;
       this.model.userData.health = this.maxHealth;
     } else {
-      this.health = clampHealthSegments(this.health, this.level);
+      this.health = clampHealthSegments(this.health, this.level, this.maxHealth);
       this.model.userData.health = this.health;
     }
     this.updateHealthBarTexture();
@@ -501,8 +566,10 @@ export class MonsterCharacter extends CharacterBase {
         localControls.invincibleUntil = 0;
       }
       const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
+      const attackTypes = getAttackTypes(null, hitContext.attackTypes || ['melee']);
       if (player.id === 'local' && !localControls?.isKnocked && !isInvincible) {
         window.localHealth = Math.max(0, window.localHealth - damage);
+        window.lastHitAttackTypes = attackTypes;
         if (localControls) {
           localControls.applyKnockback({
             direction: this.model.userData.direction.clone(),
@@ -514,6 +581,7 @@ export class MonsterCharacter extends CharacterBase {
         if (op) {
           const current = Number.isFinite(op.health) ? op.health : BASE_HEALTH_SEGMENTS;
           op.health = Math.max(0, current - damage);
+          op.lastHitAttackTypes = attackTypes;
         }
       }
     }, context);
@@ -557,10 +625,11 @@ export class MonsterCharacter extends CharacterBase {
 
     const targetPos = primaryTarget.model.position.clone();
     const distance = this.model.position.distanceTo(targetPos);
-    const attackRange = MONSTER_ATTACK.range;
+    const attackRange = this.getAttackRange();
     const canAttack = !this.attackStartTime && now >= this.nextAttackTime;
-    const runSpeed = (CHARACTER_MOVEMENT.runSpeed - MONSTER_RUN_SPEED_OFFSET) * this.speedMultiplier;
-    const walkSpeed = CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier;
+    const modelMoveSpeed = this.monsterProperties?.moveSpeed ?? 1;
+    const runSpeed = (CHARACTER_MOVEMENT.runSpeed - MONSTER_RUN_SPEED_OFFSET) * this.speedMultiplier * modelMoveSpeed;
+    const walkSpeed = CHARACTER_MOVEMENT.walkSpeed * this.speedMultiplier * modelMoveSpeed;
 
     if (this.attackStartTime) {
       if (now < this.attackLungeEndTime) {
@@ -641,7 +710,8 @@ export class MonsterCharacter extends CharacterBase {
               direction: this.model.userData.direction.clone(),
               strength: MONSTER_ATTACK.knockbackStrength,
               damage: hitDamage,
-              attackName: currentAction
+              attackName: currentAction,
+              attackTypes: getAttackTypes('mutantPunch', ['melee'])
             });
           }
         });
@@ -656,6 +726,9 @@ export class MonsterCharacter extends CharacterBase {
   }
 
   update(delta) {
+    if (this.mixer) {
+      this.mixer.timeScale = this.monsterProperties?.animationSpeed ?? 1;
+    }
     super.update(delta);
     this.updateHealthBarVisibility();
   }
