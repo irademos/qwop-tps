@@ -136,9 +136,9 @@ const MONSTER_COMBAT_RADIUS = 26;
 const MONSTER_BACKGROUND_RADIUS = 70;
 const MONSTER_BACKGROUND_AI_INTERVAL_MS = 700;
 const MONSTER_MODELS = [
-  // "/models/zombie.fbx",
-  // "/models/zombie_boy.fbx",
-  // "/models/zombie_green.fbx",
+  "/models/zombie.fbx",
+  "/models/zombie_boy.fbx",
+  "/models/zombie_green.fbx",
   "/models/golem.fbx"
 ];
 const MONSTER_SPAWN_MIN_RADIUS = 25;
