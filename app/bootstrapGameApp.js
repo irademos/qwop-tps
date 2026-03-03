@@ -838,6 +838,10 @@ async function initCore(runtimeContext) {
     });
     npcVoiceSchedule.set(entityId, now + getRandomDelayMs(intervalRange));
   };
+  const isZombieMonsterType = (monster) => {
+    const typeLabel = String(monster?.type || monster?.modelPath || '').toLowerCase();
+    return typeLabel.includes('zombie');
+  };
   const updateMerchantLoopVoice = ({ merchant, playerPosition }) => {
     const loopId = 'merchant-voice-loop';
     if (!merchant?.model?.position || !playerPosition || !audioManager) {
@@ -3496,10 +3500,6 @@ async function initCore(runtimeContext) {
     });
   };
 
-  const isZombieMonsterType = (monster) => {
-    const typeLabel = String(monster?.type || monster?.modelPath || '').toLowerCase();
-    return typeLabel.includes('zombie');
-  };
 
   function resolvePersistedMonsterModelPath(record, fallbackModelPath = null) {
     const modelPath = typeof record?.modelPath === 'string' ? record.modelPath.trim() : '';
@@ -5116,6 +5116,29 @@ async function initCore(runtimeContext) {
     const pickup = { id: ZOMBIE_BRAINS_ITEM_ID, mesh: brainGroup };
     zombieBrainsPickups.push(pickup);
     return pickup;
+  }
+
+  function spawnMonsterDrops(monster) {
+    if (!monster?.model?.position) return;
+    const configuredDrops = monster.monsterProperties?.drops;
+    if (!Array.isArray(configuredDrops) || configuredDrops.length === 0) return;
+    const dropOrigin = monster.model.position.clone();
+    const dropCount = configuredDrops.length;
+    const dropPositions = createRingPositions(dropOrigin, dropCount, 0.65);
+    configuredDrops.forEach((itemId, index) => {
+      const dropPosition = dropPositions[index] || dropOrigin;
+      if (isZombieBrainsItem(itemId)) {
+        spawnZombieBrainsPickup(dropPosition);
+        return;
+      }
+      if (isMushroomItem(itemId)) {
+        spawnMushroomPickup(itemId, dropPosition);
+        return;
+      }
+      if (isSaltItem(itemId) || itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
+        spawnSaltPickup(dropPosition, { itemId });
+      }
+    });
   }
 
   const tempTreePosition = new THREE.Vector3();
@@ -10296,9 +10319,9 @@ async function initCore(runtimeContext) {
     monsters = monsters.filter(monster => {
       if (!monster?.model) return true;
       if (!monster.shouldRemoveAfterDeath?.(aiNowMs)) return true;
-      if (isHostNow && monster.isDead && isZombieMonsterType(monster) && !monster.hasDroppedZombieBrains) {
-        spawnZombieBrainsPickup(monster.model.position.clone());
-        monster.hasDroppedZombieBrains = true;
+      if (isHostNow && monster.isDead && !monster.hasDroppedConfiguredDrops) {
+        spawnMonsterDrops(monster);
+        monster.hasDroppedConfiguredDrops = true;
       }
       cleanupMonster(monster);
       if (isHostNow && monster.id) {

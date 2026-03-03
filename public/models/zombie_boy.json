@@ -14,6 +14,9 @@
       "ice": 0.9,
       "arrow": 1.05,
       "melee": 1.0
-    }
+    },
+    "drops": [
+      "zombie_brains"
+    ]
   }
 }
