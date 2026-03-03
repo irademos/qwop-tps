@@ -258,14 +258,16 @@ export class MonsterCharacter extends CharacterBase {
   getDamageMultiplierForAttackTypes(attackTypes = []) {
     const types = Array.isArray(attackTypes) ? attackTypes : [];
     if (!types.length) return 1;
-    let multiplier = 1;
+
+    let multiplier = null;
     types.forEach((type) => {
       const configured = this.monsterProperties?.attackSensitivity?.[type];
-      if (Number.isFinite(configured)) {
-        multiplier = Math.max(multiplier, Math.max(0, configured));
-      }
+      if (!Number.isFinite(configured)) return;
+      const normalized = Math.max(0, configured);
+      multiplier = multiplier == null ? normalized : Math.max(multiplier, normalized);
     });
-    return multiplier;
+
+    return multiplier == null ? 1 : multiplier;
   }
 
   getAttackRange() {
