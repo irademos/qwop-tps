@@ -1368,9 +1368,30 @@ async function initCore(runtimeContext) {
       });
     };
 
+    const isInventoryWeaponDropMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'inventoryWeaponDrop' || !Array.isArray(payload.drops)) return false;
+      return payload.drops.every(drop => {
+        if (!isObject(drop)) return false;
+        if (typeof drop.id !== 'string') return false;
+        if (typeof drop.itemId !== 'string') return false;
+        if (!isVector3Array(drop.position)) return false;
+        if (!Array.isArray(drop.rotation) || drop.rotation.length !== 4 || !drop.rotation.every(isFiniteNumber)) return false;
+        if (drop.quantity != null && !isFiniteNumber(drop.quantity)) return false;
+        if (drop.torchHealth != null && !isFiniteNumber(drop.torchHealth)) return false;
+        return true;
+      });
+    };
+
     const isDropPickupMessage = payload => isObject(payload)
       && payload.type === 'dropPickup'
       && typeof payload.dropId === 'string';
+
+    const isDropWeaponPickupMessage = payload => isObject(payload)
+      && payload.type === 'dropWeaponPickup'
+      && typeof payload.dropId === 'string'
+      && (payload.itemId == null || typeof payload.itemId === 'string')
+      && (payload.quantity == null || isFiniteNumber(payload.quantity))
+      && (payload.torchHealth == null || isFiniteNumber(payload.torchHealth));
 
     const isGrabMessage = payload => isObject(payload)
       && payload.type === 'grab'
@@ -1704,6 +1725,18 @@ async function initCore(runtimeContext) {
       return;
     }
 
+    if (data.type === 'inventoryWeaponDrop' && multiplayer?.isHost) {
+      if (!isInventoryWeaponDropMessage(data)) {
+        logInvalidPayload('inventoryWeaponDrop', data);
+        return;
+      }
+      const drops = Array.isArray(data.drops) ? data.drops : [];
+      drops.forEach(drop => {
+        addDroppedWeaponPickupFromState(drop);
+      });
+      return;
+    }
+
     if (data.type === 'dropPickup' && multiplayer?.isHost) {
       if (!isDropPickupMessage(data)) {
         logInvalidPayload('dropPickup', data);
@@ -1711,6 +1744,17 @@ async function initCore(runtimeContext) {
       }
       if (data.dropId) {
         removeDroppedAmmoPickup(data.dropId);
+      }
+      return;
+    }
+
+    if (data.type === 'dropWeaponPickup' && multiplayer?.isHost) {
+      if (!isDropWeaponPickupMessage(data)) {
+        logInvalidPayload('dropWeaponPickup', data);
+        return;
+      }
+      if (data.dropId) {
+        removeDroppedWeaponPickupById(data.dropId);
       }
       return;
     }
@@ -1969,6 +2013,7 @@ async function initCore(runtimeContext) {
   };
 
   const droppedWeaponPickups = [];
+  const networkDroppedWeaponPickups = new Map();
   window.weaponPickups = droppedWeaponPickups;
 
   const { IceGun, Bow, Lantern, AutumnSword, Bomb } = await loadSpecialWeapons();
@@ -2356,9 +2401,30 @@ async function initCore(runtimeContext) {
   lantern = new Lantern(scene);
   await lantern.load(playerModel.position.clone().add(new THREE.Vector3(2.5, 0, 2)));
   window.lantern = lantern;
+  let lanternHeldMesh = null;
+  const ensureLanternHeldMesh = () => {
+    if (lanternHeldMesh || !lantern?.mesh) return lanternHeldMesh;
+    lanternHeldMesh = lantern.mesh.clone(true);
+    lanternHeldMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    lanternHeldMesh.visible = false;
+    lanternHeldMesh.userData.hideInMapView = true;
+    scene.add(lanternHeldMesh);
+    lantern.heldMesh = lanternHeldMesh;
+    lantern.useHeldMeshWhenHeld = true;
+    return lanternHeldMesh;
+  };
   const lanternMarker = createWeaponMarker(0xffd400);
   lantern.onPickup = (holder) => {
     if (holder !== playerControls) return;
+    const heldMesh = ensureLanternHeldMesh();
+    if (heldMesh) {
+      lantern.useHeldMeshWhenHeld = true;
+      heldMesh.visible = true;
+    }
     unequipOtherInventoryItems('lantern');
     addToInventory('lantern', 1);
   };
@@ -2370,6 +2436,7 @@ async function initCore(runtimeContext) {
   };
   if (lantern.mesh) {
     lantern.mesh.userData.hideInMapView = true;
+    lantern.mesh.visible = false;
   }
   registerNetworkedEntity('lantern', {
     getState: () => {
@@ -2392,7 +2459,9 @@ async function initCore(runtimeContext) {
       if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
         lantern.mesh.quaternion.set(rx, ry, rz, rw);
       }
+      const previousHolderId = lantern.remoteHolderId ?? null;
       lantern.remoteHolderId = state.holderId ?? null;
+      updateRemoteWeaponType(lantern, lantern.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && lantern.holder === playerControls) {
         lantern.holder = null;
       }
@@ -2403,9 +2472,30 @@ async function initCore(runtimeContext) {
   torch = new Torch(scene);
   await torch.load(TORCH_PICKUP_LOCATION.clone());
   window.torch = torch;
+  let torchHeldMesh = null;
+  const ensureTorchHeldMesh = () => {
+    if (torchHeldMesh || !torch?.mesh) return torchHeldMesh;
+    torchHeldMesh = torch.mesh.clone(true);
+    torchHeldMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    torchHeldMesh.visible = false;
+    torchHeldMesh.userData.hideInMapView = true;
+    scene.add(torchHeldMesh);
+    torch.heldMesh = torchHeldMesh;
+    torch.useHeldMeshWhenHeld = true;
+    return torchHeldMesh;
+  };
   const torchMarker = createWeaponMarker(0xffa54c);
   torch.onPickup = (holder) => {
     if (holder !== playerControls) return;
+    const heldMesh = ensureTorchHeldMesh();
+    if (heldMesh) {
+      torch.useHeldMeshWhenHeld = true;
+      heldMesh.visible = true;
+    }
     if (lantern?.holder === holder) {
       unequipInventoryItem('lantern');
     }
@@ -2433,6 +2523,7 @@ async function initCore(runtimeContext) {
   if (torch.mesh) {
     torch.mesh.userData.hideInMapView = true;
     torch.mesh.userData.torchHealth = DEFAULT_TORCH_HEALTH;
+    torch.mesh.visible = false;
   }
   registerNetworkedEntity('torch', {
     getState: () => {
@@ -4202,6 +4293,11 @@ async function initCore(runtimeContext) {
           markerOffsetY: 1.2
         });
       }
+      const heldMesh = ensureLanternHeldMesh();
+      lantern.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
       lantern.mesh.visible = true;
       lantern.holder = playerControls;
       audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-lantern', cooldownMs: 100 });
@@ -4237,6 +4333,12 @@ async function initCore(runtimeContext) {
         });
       }
       torch.mesh.userData.torchHealth = healths[equippedTorchIndex];
+      const heldMesh = ensureTorchHeldMesh();
+      torch.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.userData.torchHealth = healths[equippedTorchIndex];
+        heldMesh.visible = true;
+      }
       torch.mesh.visible = true;
       torch.holder = playerControls;
       setPlayerWeaponType(playerControls, torch.type);
@@ -4307,6 +4409,9 @@ async function initCore(runtimeContext) {
       if (lantern.mesh) {
         lantern.mesh.visible = false;
       }
+      if (lanternHeldMesh) {
+        lanternHeldMesh.visible = false;
+      }
       audioManager?.stopLoopingSFX('torch-loop');
       updateSettingsUI();
       return;
@@ -4316,6 +4421,9 @@ async function initCore(runtimeContext) {
       torch.holder = null;
       if (torch.mesh) {
         torch.mesh.visible = false;
+      }
+      if (torchHeldMesh) {
+        torchHeldMesh.visible = false;
       }
       clearPlayerWeaponType(playerControls, torch.type);
       audioManager?.stopLoopingSFX('torch-loop');
@@ -4370,6 +4478,11 @@ async function initCore(runtimeContext) {
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'sword-unequip', cooldownMs: 100 });
       updateSettingsUI();
     }
+  }
+
+  function createNetworkDropId(prefix = 'drop') {
+    const owner = multiplayer?.getId?.() || 'local';
+    return `${prefix}-${owner}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
   function getInventoryDropPosition() {
@@ -4853,6 +4966,15 @@ async function initCore(runtimeContext) {
     }, BOMB_MIST_LIFETIME_MS);
   }
 
+  function removeDroppedWeaponPickupById(dropId) {
+    if (!dropId) return;
+    const index = droppedWeaponPickups.findIndex(pickup => pickup?.dropId === dropId);
+    if (index === -1) return;
+    const [pickup] = droppedWeaponPickups.splice(index, 1);
+    disposeDroppedWeaponPickup(pickup);
+    networkDroppedWeaponPickups.delete(dropId);
+  }
+
   function disposeDroppedWeaponPickup(pickup) {
     if (!pickup) return;
     const mesh = pickup.mesh;
@@ -4885,7 +5007,10 @@ async function initCore(runtimeContext) {
       position,
       quaternion,
       allowHidden = false,
-      torchHealth
+      torchHealth,
+      dropId,
+      shouldBroadcastRemoval = true,
+      onPickup
     } = {}
   ) {
     if (!item?.mesh || (!allowHidden && !item.mesh.visible)) return;
@@ -4916,6 +5041,8 @@ async function initCore(runtimeContext) {
       holder: null,
       torchHealth: Number.isFinite(torchHealth) ? normalizeTorchHealth(torchHealth) : null,
       markerOffsetY,
+      dropId: dropId || null,
+      shouldBroadcastRemoval: !!shouldBroadcastRemoval,
       tryPickup: (playerControls) => {
         if (!pickupMesh?.visible || !playerControls?.playerModel) return;
         const distance = playerControls.playerModel.position.distanceTo(pickupMesh.position);
@@ -4932,7 +5059,16 @@ async function initCore(runtimeContext) {
         if (index !== -1) {
           droppedWeaponPickups.splice(index, 1);
         }
+        if (pickup.dropId && pickup.shouldBroadcastRemoval && multiplayer && !multiplayer.isHost) {
+          multiplayer.send({ type: 'dropWeaponPickup', dropId: pickup.dropId, itemId: pickup.itemId, quantity: pickup.quantity, torchHealth: pickup.torchHealth });
+        }
+        if (pickup.dropId) {
+          networkDroppedWeaponPickups.delete(pickup.dropId);
+        }
         disposeDroppedWeaponPickup(pickup);
+        if (typeof onPickup === 'function') {
+          onPickup(pickup);
+        }
       }
     };
     droppedWeaponPickups.push(pickup);
@@ -5222,6 +5358,7 @@ async function initCore(runtimeContext) {
       }
     }[itemId];
     if (pickupConfig?.item?.mesh) {
+      const dropId = createNetworkDropId('weapon');
       createDroppedWeaponPickup(pickupConfig.item, {
         itemId: pickupConfig.itemId,
         quantity: amount,
@@ -5229,8 +5366,22 @@ async function initCore(runtimeContext) {
         markerOffsetY: 1.2,
         position: dropPos,
         allowHidden: true,
-        torchHealth: pickupConfig.torchHealth
+        torchHealth: pickupConfig.torchHealth,
+        dropId
       });
+      if (multiplayer && !multiplayer.isHost) {
+        multiplayer.send({
+          type: 'inventoryWeaponDrop',
+          drops: [{
+            id: dropId,
+            itemId: pickupConfig.itemId,
+            position: [dropPos.x, dropPos.y, dropPos.z],
+            rotation: [pickupConfig.item.mesh.quaternion.x, pickupConfig.item.mesh.quaternion.y, pickupConfig.item.mesh.quaternion.z, pickupConfig.item.mesh.quaternion.w],
+            quantity: Math.max(1, Math.floor(amount)),
+            torchHealth: pickupConfig.torchHealth
+          }]
+        });
+      }
     }
   };
 
@@ -5358,8 +5509,7 @@ async function initCore(runtimeContext) {
       updateSettingsUI();
       return;
     }
-    const shouldDuplicatePickup = (itemId === 'bow' || itemId === 'lantern' || itemId === TORCH_ITEM_ID)
-      && item.mesh.visible
+    const shouldDuplicatePickup = item.mesh.visible
       && item.holder !== playerControls;
     if (item.holder === playerControls) {
       item.drop({ removeFromInventory: true });
@@ -5371,16 +5521,35 @@ async function initCore(runtimeContext) {
         ? 0xffc26b
         : itemId === TORCH_ITEM_ID
           ? 0xffa54c
-          : 0xffd400;
+          : itemId === 'bomb'
+            ? 0xff4d4d
+            : 0xffd400;
       const torchPickupHealth = itemId === TORCH_ITEM_ID
         ? takeTorchHealth(inventoryState)?.health
         : null;
+      const dropId = createNetworkDropId('weapon');
       createDroppedWeaponPickup(item, {
         itemId,
         markerColor,
         markerOffsetY: 1.2,
-        torchHealth: torchPickupHealth ?? undefined
+        torchHealth: torchPickupHealth ?? undefined,
+        dropId
       });
+      if (multiplayer && !multiplayer.isHost) {
+        const pos = item.mesh.position;
+        const q = item.mesh.quaternion;
+        multiplayer.send({
+          type: 'inventoryWeaponDrop',
+          drops: [{
+            id: dropId,
+            itemId,
+            position: [pos.x, pos.y, pos.z],
+            rotation: [q.x, q.y, q.z, q.w],
+            quantity: 1,
+            torchHealth: torchPickupHealth ?? undefined
+          }]
+        });
+      }
       if (itemId === TORCH_ITEM_ID) {
         persistInventoryAndStorage();
       }
@@ -6968,6 +7137,104 @@ async function initCore(runtimeContext) {
     treasureChest.mesh.visible = true;
     treasureChest.syncCollider?.();
   }
+
+  function addDroppedWeaponPickupFromState(drop) {
+    if (!drop?.id || typeof drop.itemId !== 'string') return;
+    const dropId = drop.id;
+    if (droppedWeaponPickups.some(pickup => pickup?.dropId === dropId)) {
+      networkDroppedWeaponPickups.set(dropId, true);
+      return;
+    }
+    const pickupConfig = {
+      bow: { item: bow, markerColor: 0xffc26b },
+      lantern: { item: lantern, markerColor: 0xffd400 },
+      torch: { item: torch, markerColor: 0xffa54c },
+      bomb: { item: bomb, markerColor: 0xff4d4d },
+      autumnSword: { item: autumnSword, markerColor: 0xffd400 },
+      iceGun: { item: iceGun, markerColor: 0xffd400 }
+    }[drop.itemId];
+    if (!pickupConfig?.item?.mesh) return;
+    const amount = Number.isFinite(drop.quantity) ? Math.max(1, Math.floor(drop.quantity)) : 1;
+    const pos = Array.isArray(drop.position) ? new THREE.Vector3(...drop.position) : null;
+    const quat = Array.isArray(drop.rotation) && drop.rotation.length === 4
+      ? new THREE.Quaternion(drop.rotation[0], drop.rotation[1], drop.rotation[2], drop.rotation[3])
+      : undefined;
+    createDroppedWeaponPickup(pickupConfig.item, {
+      itemId: drop.itemId,
+      quantity: amount,
+      markerColor: pickupConfig.markerColor,
+      markerOffsetY: 1.2,
+      position: pos,
+      quaternion: quat,
+      allowHidden: true,
+      torchHealth: Number.isFinite(drop.torchHealth) ? drop.torchHealth : undefined,
+      dropId,
+      shouldBroadcastRemoval: false
+    });
+    networkDroppedWeaponPickups.set(dropId, true);
+  }
+
+  function syncDroppedWeaponState(stateDrops = []) {
+    const seen = new Set();
+    stateDrops.forEach(drop => {
+      if (!drop?.id || typeof drop.itemId !== 'string') return;
+      const dropId = drop.id;
+      seen.add(dropId);
+      const existing = droppedWeaponPickups.find(pickup => pickup?.dropId === dropId);
+      const amount = Number.isFinite(drop.quantity) ? Math.max(1, Math.floor(drop.quantity)) : 1;
+      if (existing) {
+        networkDroppedWeaponPickups.set(dropId, true);
+        existing.quantity = amount;
+        if (Number.isFinite(drop.torchHealth)) {
+          const normalizedHealth = normalizeTorchHealth(drop.torchHealth);
+          existing.torchHealth = normalizedHealth;
+          if (existing.mesh) {
+            existing.mesh.userData.torchHealth = normalizedHealth;
+          }
+        }
+        return;
+      }
+      addDroppedWeaponPickupFromState(drop);
+    });
+
+    for (let i = droppedWeaponPickups.length - 1; i >= 0; i -= 1) {
+      const pickup = droppedWeaponPickups[i];
+      const dropId = pickup?.dropId;
+      if (!dropId || !networkDroppedWeaponPickups.has(dropId)) continue;
+      if (seen.has(dropId)) continue;
+      droppedWeaponPickups.splice(i, 1);
+      disposeDroppedWeaponPickup(pickup);
+      networkDroppedWeaponPickups.delete(dropId);
+    }
+  }
+
+  registerNetworkedEntity('droppedWeapons', {
+    getState: () => {
+      const drops = droppedWeaponPickups
+        .filter(pickup => pickup?.dropId)
+        .map(pickup => {
+          const pos = pickup.mesh?.position;
+          const q = pickup.mesh?.quaternion;
+          if (!pos || !q) return null;
+          return {
+            id: pickup.dropId,
+            itemId: pickup.itemId,
+            position: [pos.x, pos.y, pos.z],
+            rotation: [q.x, q.y, q.z, q.w],
+            quantity: pickup.quantity,
+            torchHealth: pickup.torchHealth
+          };
+        })
+        .filter(Boolean);
+      return { drops };
+    },
+    applyState: state => {
+      if (!state) return;
+      const drops = Array.isArray(state.drops) ? state.drops : [];
+      syncDroppedWeaponState(drops);
+    },
+    isLocallyControlled: () => multiplayer?.isHost
+  });
 
   registerNetworkedEntity('droppedAmmo', {
     getState: () => {

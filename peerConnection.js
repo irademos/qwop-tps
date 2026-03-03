@@ -19,7 +19,9 @@ const VALID_MESSAGE_TYPES = new Set([
   'monster',
   'attackMonster',
   'inventoryDrop',
+  'inventoryWeaponDrop',
   'dropPickup',
+  'dropWeaponPickup',
   'grab',
   'grabMove'
 ]);
