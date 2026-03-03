@@ -173,8 +173,10 @@ export class MonsterCharacter extends CharacterBase {
       ...context,
       referenceY: this.model.position.y
     });
+    const blocksForTerrainSlope = nextGround?.metadata?.surfaceType === 'terrain'
+      && nextGround?.metadata?.walkable === false;
     const canTraverse = !nextGround
-      || (nextGround.metadata?.walkable !== false
+      || (!blocksForTerrainSlope
         && (!currentGround
           || Math.abs(nextGround.groundY - currentGround.groundY) <= MONSTER_MAX_GROUND_DELTA));
     if (!canTraverse) {
