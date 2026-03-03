@@ -42,7 +42,8 @@ const state = {
   itemIcons: [],
   chestIcons: [],
   merchantIcons: [],
-  remotePlayerMarkers: new Map()
+  remotePlayerMarkers: new Map(),
+  visibilityNeedsSync: false
 };
 
 function createPlayerIconTexture() {
@@ -647,19 +648,30 @@ function setMapViewEnabled(enabled) {
     state.enabled = true;
     state.targetZoomHeight = state.mapZoomHeight;
     ensurePlayerIcon();
-    state.playerIcon.visible = true;
-    setDotVisibility(state.monsterDots, true);
-    setDotVisibility(state.friendlyDots, true);
+    state.visibilityNeedsSync = true;
     state.hiddenObjects = collectHiddenObjects();
     startTransition("enable");
   } else {
     state.enabled = false;
     restoreHiddenObjects();
-    if (state.playerIcon) state.playerIcon.visible = false;
-    setDotVisibility(state.monsterDots, false);
-    setDotVisibility(state.friendlyDots, false);
+    state.visibilityNeedsSync = true;
     startTransition("disable");
   }
+}
+
+
+function syncVisibility(enabled) {
+  if (state.playerIcon) state.playerIcon.visible = enabled;
+  setDotVisibility(state.monsterDots, enabled);
+  setDotVisibility(state.friendlyDots, enabled);
+  setDotVisibility(state.weaponIcons, enabled);
+  setDotVisibility(state.itemIcons, enabled);
+  setDotVisibility(state.chestIcons, enabled);
+  setDotVisibility(state.merchantIcons, enabled);
+  state.remotePlayerMarkers.forEach((marker) => {
+    marker.dot.visible = enabled;
+    marker.label.visible = enabled;
+  });
 }
 
 function zoomIn() {
@@ -700,6 +712,13 @@ function update(dt, {
 
   updateHomeIndicators(homePosition, homeEnterDistance);
 
+  if (!state.enabled && !state.transition && !state.visibilityNeedsSync) return;
+
+  if (state.visibilityNeedsSync) {
+    syncVisibility(state.enabled);
+    state.visibilityNeedsSync = false;
+  }
+
   if (state.enabled) {
     state.mapZoomHeight = THREE.MathUtils.damp(
       state.mapZoomHeight,
@@ -723,17 +742,6 @@ function update(dt, {
     updateIconPool(treasureChests, state.chestIcons, "chest");
     updateIconPool(merchants, state.merchantIcons, "merchant");
     updateRemotePlayerMarkers(otherPlayers);
-  } else {
-    setDotVisibility(state.monsterDots, false);
-    setDotVisibility(state.friendlyDots, false);
-    setDotVisibility(state.weaponIcons, false);
-    setDotVisibility(state.itemIcons, false);
-    setDotVisibility(state.chestIcons, false);
-    setDotVisibility(state.merchantIcons, false);
-    state.remotePlayerMarkers.forEach((marker) => {
-      marker.dot.visible = false;
-      marker.label.visible = false;
-    });
   }
 
   if (state.transition) {
