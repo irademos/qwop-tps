@@ -477,17 +477,7 @@ const getHealthForLevel = (level) => {
         }
         persistFriendlyState(friendly);
       } else {
-        if (nowMs - lastUpdate > FRIENDLY_ANIM_MIN_INTERVAL_MS) {
-          const elapsedSeconds = Math.max(0, (nowMs - lastUpdate) / 1000);
-          const aiDeltaSeconds = Math.min(
-            FRIENDLY_AI_MAX_DELTA_SECONDS,
-            lastUpdate > 0 ? elapsedSeconds : (Number.isFinite(delta) ? delta : 0)
-          );
-          friendly.lastAIUpdateMs = nowMs;
-          friendly.updateAI(aiDeltaSeconds, playerModel, otherPlayers);
-        } else {
-          friendly.update(delta);
-        }
+        friendly.update(delta);
       }
     });
   };
