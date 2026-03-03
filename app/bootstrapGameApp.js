@@ -716,6 +716,7 @@ async function initCore(runtimeContext) {
   let pendingMapRebuild = false;
   let mapRebuildToken = 0;
   const networkedEntities = new Map();
+  const networkedLocalControlState = new Map();
   const pendingEntityStates = new Map();
   const authoritativeEntityStates = new Map();
   let lastEntityBroadcast = 0;
@@ -1268,12 +1269,16 @@ async function initCore(runtimeContext) {
     const myId = multiplayer?.getId?.();
     if (!myId) return result;
     networkedEntities.forEach((entry, id) => {
-      if (typeof entry.isLocallyControlled === 'function' && entry.isLocallyControlled()) {
-        const state = entry.getState?.();
-        if (state) {
-          result.set(id, { state, sourceId: myId });
-        }
+      const isLocallyControlled = typeof entry.isLocallyControlled === 'function' && entry.isLocallyControlled();
+      const wasLocallyControlled = networkedLocalControlState.get(id) === true;
+      if (!isLocallyControlled && !wasLocallyControlled) {
+        return;
       }
+      const state = entry.getState?.();
+      if (state) {
+        result.set(id, { state, sourceId: myId });
+      }
+      networkedLocalControlState.set(id, isLocallyControlled);
     });
     return result;
   }
@@ -1800,6 +1805,7 @@ async function initCore(runtimeContext) {
   }
 
   multiplayer = new Multiplayer(playerName, handleIncomingData);
+  window.multiplayer = multiplayer;
   multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
     isHost = !!isCurrentHost;
     setMonsterPersistenceHost(isHost);
@@ -1822,6 +1828,14 @@ async function initCore(runtimeContext) {
           previousHostId
         });
       }
+    }
+
+    if (previousHostId !== newHostId) {
+      clearAllRemoteHeldWeaponMeshes();
+      [iceGun, bow, bomb, autumnSword, lantern, torch].forEach((weapon) => {
+        if (!weapon) return;
+        weapon.remoteHolderId = null;
+      });
     }
   };
   multiplayer.onReady = async ({ roomId }) => {
@@ -2131,6 +2145,10 @@ async function initCore(runtimeContext) {
       remoteHeldMesh.quaternion.copy(quaternion).multiply(holdQuaternion);
     }
     weapon.mesh.visible = false;
+  };
+
+  const clearAllRemoteHeldWeaponMeshes = () => {
+    Array.from(remoteHeldWeaponMeshes.keys()).forEach(disposeRemoteHeldWeaponMesh);
   };
 
   const { IceGun, Bow, Lantern, AutumnSword, Bomb } = await loadSpecialWeapons();
@@ -4480,6 +4498,7 @@ async function initCore(runtimeContext) {
       if (!heldMesh) return;
       bow.useHeldMeshWhenHeld = true;
       heldMesh.visible = true;
+      bow.mesh.visible = false;
       bow.holder = playerControls;
       audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Take Out 1.ogg', 0.6, { cooldownKey: 'bow-equip', cooldownMs: 100 });
       setPlayerWeaponType(playerControls, bow.type);
@@ -5642,6 +5661,10 @@ async function initCore(runtimeContext) {
     const shouldDuplicatePickup = item.mesh.visible
       && item.holder !== playerControls;
     if (item.holder === playerControls) {
+      item.mesh?.position?.copy?.(dropPosition);
+      if (playerControls?.playerModel?.quaternion && item.mesh?.quaternion) {
+        item.mesh.quaternion.copy(playerControls.playerModel.quaternion);
+      }
       item.drop({ removeFromInventory: true });
       updateSettingsUI();
       return;
