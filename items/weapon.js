@@ -150,6 +150,10 @@ export class Weapon {
       activeMesh.position.add(this._tempOffset);
 
       activeMesh.quaternion.copy(this._tempQuaternion).multiply(this._holdQuaternion);
+      if (activeMesh !== this.mesh && this.mesh) {
+        this.mesh.position.copy(activeMesh.position);
+        this.mesh.quaternion.copy(activeMesh.quaternion);
+      }
       return;
     }
 
@@ -157,6 +161,10 @@ export class Weapon {
     this._tempOffset.copy(this._holdOffset).applyQuaternion(quaternion);
     activeMesh.position.copy(player.position).add(this._tempOffset);
     activeMesh.quaternion.copy(quaternion).multiply(this._holdQuaternion);
+    if (activeMesh !== this.mesh && this.mesh) {
+      this.mesh.position.copy(activeMesh.position);
+      this.mesh.quaternion.copy(activeMesh.quaternion);
+    }
   }
 
   _getHandBone(playerModel) {
