@@ -1331,6 +1331,8 @@ async function initCore(runtimeContext) {
       if (typeof payload.name !== 'string' || typeof payload.model !== 'string') return false;
       if (payload.id != null && typeof payload.id !== 'string') return false;
       if (payload.action != null && typeof payload.action !== 'string') return false;
+      if (payload.equippedLeft != null && typeof payload.equippedLeft !== 'string') return false;
+      if (payload.equippedRight != null && typeof payload.equippedRight !== 'string') return false;
       const numberFields = ['lat', 'lon', 'x', 'y', 'z', 'rotation', 'heading'];
       if (numberFields.some(field => payload[field] != null && !isFiniteNumber(payload[field]))) return false;
       if (payload.worldAnchor != null) {
@@ -1609,6 +1611,7 @@ async function initCore(runtimeContext) {
       const player = otherPlayers[remoteId];
       player.name = data.name;
       player.modelPath = desiredModel;
+      syncPresenceRemoteEquipment(remoteId, data);
       if (player.nameLabel) {
         player.nameLabel.innerText = data.name;
       }
@@ -2176,6 +2179,45 @@ async function initCore(runtimeContext) {
       remoteHeldMesh.quaternion.copy(quaternion).multiply(holdQuaternion);
     }
     weapon.mesh.visible = false;
+  };
+
+  const syncPresenceRemoteEquipment = (remoteId, payload) => {
+    if (!remoteId || !payload) return;
+    const localId = multiplayer?.getId?.();
+    if (!remoteId || remoteId === localId) return;
+    const remotePlayer = otherPlayers[remoteId];
+    if (!remotePlayer?.model) return;
+
+    const nextLeft = typeof payload.equippedLeft === 'string' ? payload.equippedLeft : null;
+    const nextRight = typeof payload.equippedRight === 'string' ? payload.equippedRight : null;
+
+    const remoteEquipByType = {
+      lantern,
+      torch,
+      iceGun: iceGun,
+      bow,
+      bomb,
+      sword: autumnSword
+    };
+
+    const setRemoteEquipState = (weaponType, isEquipped) => {
+      const weapon = remoteEquipByType[weaponType];
+      if (!weapon) return;
+      const previousHolderId = weapon.remoteHolderId ?? null;
+      const nextHolderId = isEquipped ? remoteId : null;
+      if (previousHolderId === nextHolderId) return;
+      weapon.remoteHolderId = nextHolderId;
+      updateRemoteWeaponType(weapon, nextHolderId, previousHolderId);
+    };
+
+    setRemoteEquipState('lantern', nextLeft === 'lantern');
+    setRemoteEquipState('torch', nextLeft === 'torch');
+    setRemoteEquipState('iceGun', nextRight === 'iceGun');
+    setRemoteEquipState('bow', nextRight === 'bow');
+    setRemoteEquipState('bomb', nextRight === 'bomb');
+    setRemoteEquipState('sword', nextRight === 'sword');
+
+    remotePlayer.model.userData.equippedWeaponType = nextRight || nextLeft || null;
   };
 
   const clearAllRemoteHeldWeaponMeshes = () => {
@@ -10437,6 +10479,16 @@ async function initCore(runtimeContext) {
           centerLon: mapOrigin.centerLon
         };
       }
+      payload.equippedLeft = isInventoryItemEquipped('torch')
+        ? 'torch'
+        : (isInventoryItemEquipped('lantern') ? 'lantern' : null);
+      payload.equippedRight = isInventoryItemEquipped('iceGun')
+        ? 'iceGun'
+        : (isInventoryItemEquipped('bow')
+          ? 'bow'
+          : (isInventoryItemEquipped('bomb')
+            ? 'bomb'
+            : (isInventoryItemEquipped('autumnSword') ? 'sword' : null)));
       multiplayer.send(payload);
       lastPresenceSend = now;
     }
