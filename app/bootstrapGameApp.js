@@ -2039,23 +2039,23 @@ async function initCore(runtimeContext) {
     }
   };
 
-  const getPresenceHolderForWeaponType = (weaponType) => {
-    if (!weaponType) return null;
+  const getPresenceHolderForEquipKey = (equipKey) => {
+    if (!equipKey) return null;
     for (const [remoteId, equipState] of remotePresenceEquipment.entries()) {
       if (!equipState) continue;
-      if (equipState.left === weaponType || equipState.right === weaponType) {
+      if (equipState.left === equipKey || equipState.right === equipKey) {
         return remoteId;
       }
     }
     return null;
   };
 
-  const resolveRemoteWeaponHolderId = (stateHolderId, weaponType) => {
+  const resolveRemoteWeaponHolderId = (stateHolderId, equipKey) => {
     const localId = multiplayer?.getId?.();
     if (stateHolderId && stateHolderId !== localId) {
       return stateHolderId;
     }
-    return getPresenceHolderForWeaponType(weaponType);
+    return getPresenceHolderForEquipKey(equipKey);
   };
 
   const dropOtherWeapons = (activeWeapon) => {
@@ -2331,7 +2331,7 @@ async function initCore(runtimeContext) {
         iceGun.mesh.quaternion.set(rx, ry, rz, rw);
       }
       const previousHolderId = iceGun.remoteHolderId ?? null;
-      iceGun.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, iceGun.type);
+      iceGun.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, 'iceGun');
       updateRemoteWeaponType(iceGun, iceGun.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && iceGun.holder === playerControls && iceGun.localHoldOrigin === 'world') {
         iceGun.holder = null;
@@ -2462,7 +2462,7 @@ async function initCore(runtimeContext) {
         bow.mesh.quaternion.set(rx, ry, rz, rw);
       }
       const previousHolderId = bow.remoteHolderId ?? null;
-      bow.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, bow.type);
+      bow.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, 'bow');
       updateRemoteWeaponType(bow, bow.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && bow.holder === playerControls && bow.localHoldOrigin === 'world') {
         bow.holder = null;
@@ -2525,7 +2525,7 @@ async function initCore(runtimeContext) {
         bomb.mesh.quaternion.set(rx, ry, rz, rw);
       }
       const previousHolderId = bomb.remoteHolderId ?? null;
-      bomb.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, bomb.type);
+      bomb.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, 'bomb');
       updateRemoteWeaponType(bomb, bomb.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && bomb.holder === playerControls && bomb.localHoldOrigin === 'world') {
         bomb.holder = null;
@@ -2588,7 +2588,7 @@ async function initCore(runtimeContext) {
         autumnSword.mesh.quaternion.set(rx, ry, rz, rw);
       }
       const previousHolderId = autumnSword.remoteHolderId ?? null;
-      autumnSword.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, autumnSword.type);
+      autumnSword.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, 'sword');
       updateRemoteWeaponType(autumnSword, autumnSword.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && autumnSword.holder === playerControls && autumnSword.localHoldOrigin === 'world') {
         autumnSword.holder = null;
@@ -2734,7 +2734,7 @@ async function initCore(runtimeContext) {
         lantern.mesh.quaternion.set(rx, ry, rz, rw);
       }
       const previousHolderId = lantern.remoteHolderId ?? null;
-      lantern.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, lantern.type);
+      lantern.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, 'lantern');
       updateRemoteWeaponType(lantern, lantern.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && lantern.holder === playerControls && lantern.localHoldOrigin === 'world') {
         lantern.holder = null;
@@ -2812,7 +2812,7 @@ async function initCore(runtimeContext) {
         torch.mesh.userData.torchHealth = normalizeTorchHealth(state.torchHealth);
       }
       const previousHolderId = torch.remoteHolderId ?? null;
-      torch.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, torch.type);
+      torch.remoteHolderId = resolveRemoteWeaponHolderId(state.holderId, 'torch');
       updateRemoteWeaponType(torch, torch.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && torch.holder === playerControls && torch.localHoldOrigin === 'world') {
         torch.holder = null;
