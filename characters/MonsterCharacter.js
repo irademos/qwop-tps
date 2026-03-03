@@ -130,12 +130,24 @@ export class MonsterCharacter extends CharacterBase {
     const resolver = context?.resolveGroundY;
     if (typeof resolver !== 'function') return null;
     const referenceY = Number.isFinite(context?.referenceY) ? context.referenceY : this.model?.position?.y;
+    const body = this.body;
+    const excludedColliderHandles = [];
+    if (body && typeof body.numColliders === 'function' && typeof body.collider === 'function') {
+      const colliderCount = body.numColliders();
+      for (let i = 0; i < colliderCount; i += 1) {
+        const collider = body.collider(i);
+        if (typeof collider?.handle === 'number') {
+          excludedColliderHandles.push(collider.handle);
+        }
+      }
+    }
     const result = resolver(
       x,
       Number.isFinite(referenceY) ? referenceY + 4 : 4,
       z,
       {
         includeSolidHit: true,
+        excludedColliderHandles,
         walkableSlopeDegrees: Number.isFinite(context?.walkableSlopeDegrees)
           ? context.walkableSlopeDegrees
           : MONSTER_MAX_WALKABLE_SLOPE_DEGREES
