@@ -2247,7 +2247,6 @@ async function initCore(runtimeContext) {
     if (heldMesh) heldMesh.visible = true;
     if (lantern?.holder === playerControls) {
       iceGun.holder = null;
-      sendImmediateEntityControl('icegun');
       return;
     }
     dropOtherWeapons(iceGun);
@@ -2302,7 +2301,6 @@ async function initCore(runtimeContext) {
       updateRemoteWeaponType(iceGun, iceGun.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && iceGun.holder === playerControls) {
         iceGun.holder = null;
-      sendImmediateEntityControl('icegun');
         clearPlayerWeaponType(playerControls, iceGun.type);
       }
     },
@@ -2431,7 +2429,6 @@ async function initCore(runtimeContext) {
       updateRemoteWeaponType(bow, bow.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && bow.holder === playerControls) {
         bow.holder = null;
-      sendImmediateEntityControl('bow');
         clearPlayerWeaponType(playerControls, bow.type);
       }
     },
@@ -2492,7 +2489,6 @@ async function initCore(runtimeContext) {
       updateRemoteWeaponType(bomb, bomb.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && bomb.holder === playerControls) {
         bomb.holder = null;
-      sendImmediateEntityControl('bomb');
         clearPlayerWeaponType(playerControls, bomb.type);
       }
     },
@@ -2553,7 +2549,6 @@ async function initCore(runtimeContext) {
       updateRemoteWeaponType(autumnSword, autumnSword.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && autumnSword.holder === playerControls) {
         autumnSword.holder = null;
-      sendImmediateEntityControl('autumnsword');
         clearPlayerWeaponType(playerControls, autumnSword.type);
       }
     },
@@ -2697,7 +2692,6 @@ async function initCore(runtimeContext) {
       updateRemoteWeaponType(lantern, lantern.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && lantern.holder === playerControls) {
         lantern.holder = null;
-      sendImmediateEntityControl('lantern');
       }
     },
     isLocallyControlled: () => lantern?.holder === playerControls
@@ -2773,7 +2767,6 @@ async function initCore(runtimeContext) {
       updateRemoteWeaponType(torch, torch.remoteHolderId, previousHolderId);
       if (state.holderId !== multiplayer?.getId?.() && torch.holder === playerControls) {
         torch.holder = null;
-      sendImmediateEntityControl('torch');
         clearPlayerWeaponType(playerControls, torch.type);
       }
     },
@@ -4518,7 +4511,6 @@ async function initCore(runtimeContext) {
       }
       lantern.mesh.visible = false;
       lantern.holder = playerControls;
-      sendImmediateEntityControl('lantern');
       audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-lantern', cooldownMs: 100 });
       audioManager?.startLoopingSFX('torch-loop', 'SFX/Torch/Torch Loop.ogg', 0.32);
       updateSettingsUI();
@@ -4559,7 +4551,6 @@ async function initCore(runtimeContext) {
       }
       torch.mesh.visible = false;
       torch.holder = playerControls;
-      sendImmediateEntityControl('torch');
       setPlayerWeaponType(playerControls, torch.type);
       audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-torch', cooldownMs: 100 });
       audioManager?.startLoopingSFX('torch-loop', 'SFX/Torch/Torch Loop.ogg', 0.32);
@@ -4575,7 +4566,6 @@ async function initCore(runtimeContext) {
       }
       iceGun.mesh.visible = false;
       iceGun.holder = playerControls;
-      sendImmediateEntityControl('icegun');
       setPlayerWeaponType(playerControls, iceGun.type);
       playerControls.updateAmmoUI?.(true);
       playerControls.setAmmo?.(
@@ -4594,7 +4584,6 @@ async function initCore(runtimeContext) {
       heldMesh.visible = true;
       bow.mesh.visible = false;
       bow.holder = playerControls;
-      sendImmediateEntityControl('bow');
       audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Take Out 1.ogg', 0.6, { cooldownKey: 'bow-equip', cooldownMs: 100 });
       setPlayerWeaponType(playerControls, bow.type);
       playerControls.updateAmmoUI?.(true);
@@ -4616,7 +4605,6 @@ async function initCore(runtimeContext) {
       }
       bomb.mesh.visible = false;
       bomb.holder = playerControls;
-      sendImmediateEntityControl('bomb');
       setPlayerWeaponType(playerControls, bomb.type);
       updateSettingsUI();
       return;
@@ -4630,7 +4618,6 @@ async function initCore(runtimeContext) {
       }
       autumnSword.mesh.visible = false;
       autumnSword.holder = playerControls;
-      sendImmediateEntityControl('autumnsword');
       setPlayerWeaponType(playerControls, autumnSword.type);
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'sword-equip', cooldownMs: 100 });
       updateSettingsUI();
@@ -4641,7 +4628,6 @@ async function initCore(runtimeContext) {
     if (itemId === 'lantern') {
       if (lantern?.holder !== playerControls) return;
       lantern.holder = null;
-      sendImmediateEntityControl('lantern');
       if (lantern.mesh) {
         lantern.mesh.visible = false;
       }
@@ -4655,7 +4641,6 @@ async function initCore(runtimeContext) {
     if (itemId === TORCH_ITEM_ID) {
       if (torch?.holder !== playerControls) return;
       torch.holder = null;
-      sendImmediateEntityControl('torch');
       if (torch.mesh) {
         torch.mesh.visible = false;
       }
@@ -4670,7 +4655,6 @@ async function initCore(runtimeContext) {
     if (itemId === 'iceGun') {
       if (iceGun?.holder !== playerControls) return;
       iceGun.holder = null;
-      sendImmediateEntityControl('icegun');
       if (iceGun.mesh) {
         iceGun.mesh.visible = false;
       }
@@ -4685,7 +4669,6 @@ async function initCore(runtimeContext) {
     if (itemId === 'bow') {
       if (bow?.holder !== playerControls) return;
       bow.holder = null;
-      sendImmediateEntityControl('bow');
       if (bow.useHeldMeshWhenHeld && bowHeldMesh) {
         bowHeldMesh.visible = false;
       } else if (bow.mesh) {
@@ -4702,7 +4685,6 @@ async function initCore(runtimeContext) {
     if (itemId === 'bomb') {
       if (bomb?.holder !== playerControls) return;
       bomb.holder = null;
-      sendImmediateEntityControl('bomb');
       if (bomb.mesh) {
         bomb.mesh.visible = false;
       }
@@ -4717,7 +4699,6 @@ async function initCore(runtimeContext) {
     if (itemId === 'autumnSword') {
       if (autumnSword?.holder !== playerControls) return;
       autumnSword.holder = null;
-      sendImmediateEntityControl('autumnsword');
       if (autumnSword.mesh) {
         autumnSword.mesh.visible = false;
       }
