@@ -1812,7 +1812,7 @@ async function initCore(runtimeContext) {
       return;
     }
 
-    if (data.type === 'inventoryWorldDrop' && multiplayer?.isHost) {
+    if (data.type === 'inventoryWorldDrop') {
       if (!isInventoryWorldDropMessage(data)) {
         logInvalidPayload('inventoryWorldDrop', data);
         return;
