@@ -109,6 +109,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
     : ['projectile'];
   mesh.userData.gravity = Number.isFinite(options.gravity) ? options.gravity : null;
   mesh.userData.hasHitGround = false;
+  mesh.userData.wasAboveGround = false;
   scene.add(mesh);
   projectiles.push(mesh);
 }
@@ -174,10 +175,19 @@ export function updateProjectiles({
     const crossedGround = Number.isFinite(sampledGroundY)
       ? (prevY > sampledGroundY && proj.position.y <= sampledGroundY)
       : false;
+    const aboveGroundThreshold = 0.18;
+    const groundContactThreshold = 0.08;
+    const hasTerrainSample = Number.isFinite(sampledGroundY);
+    const aboveGround = hasTerrainSample && proj.position.y > sampledGroundY + aboveGroundThreshold;
+    if (aboveGround) {
+      proj.userData.wasAboveGround = true;
+    }
+    const touchingGround = hasTerrainSample && proj.position.y <= sampledGroundY + groundContactThreshold;
     updateArrowProjectile(proj, rb, vel, sampledGroundY, crossedGround);
 
     if (typeof proj.userData.onGroundHit === 'function' && !proj.userData.hasHitGround) {
-      if (crossedGround && vel.y <= 0.1) {
+      const groundedAfterThrow = proj.userData.wasAboveGround && touchingGround && vel.y <= 0.6;
+      if ((crossedGround && vel.y <= 0.1) || groundedAfterThrow) {
         proj.userData.hasHitGround = true;
         proj.userData.onGroundHit(proj.position.clone(), proj);
         if (proj.userData?.isArrow) playArrowBlockedSFX();
