@@ -1395,6 +1395,13 @@ async function initCore(runtimeContext) {
       && isVector3Array(payload.position)
       && isVector3Array(payload.direction);
 
+    const isInventoryThrowProjectileMessage = payload => isObject(payload)
+      && payload.type === 'inventoryThrowProjectile'
+      && typeof payload.id === 'string'
+      && typeof payload.itemId === 'string'
+      && isVector3Array(payload.position)
+      && isVector3Array(payload.direction);
+
     const isInventoryDropMessage = payload => {
       if (!isObject(payload) || payload.type !== 'inventoryDrop' || !Array.isArray(payload.drops)) return false;
       return payload.drops.every(drop => {
@@ -1739,6 +1746,34 @@ async function initCore(runtimeContext) {
           actions[current]?.fadeOut(0.1);
           projAction.reset().fadeIn(0.1).play();
           shooter.model.userData.currentAction = 'projectile';
+        }
+      }
+      return;
+    }
+
+    if (data.type === 'inventoryThrowProjectile') {
+      if (!isInventoryThrowProjectileMessage(data)) {
+        logInvalidPayload('inventoryThrowProjectile', data);
+        return;
+      }
+      const position = new THREE.Vector3(...data.position);
+      const direction = new THREE.Vector3(...data.direction);
+      spawnInventoryThrowProjectileWithPerfFlags(scene, projectiles, position, direction, data.id, {
+        itemId: data.itemId,
+        createPickupOnGround: false
+      });
+
+      const shooter = otherPlayers[data.id];
+      if (shooter) {
+        const actions = shooter.model.userData.actions;
+        const current = shooter.model.userData.currentAction;
+        const hand = getInventoryItemHand(data.itemId) || 'right';
+        const actionName = hand === 'left' ? 'throwLeft' : 'throw';
+        const throwAction = actions?.[actionName] || actions?.throw;
+        if (throwAction) {
+          actions[current]?.fadeOut(0.1);
+          throwAction.reset().fadeIn(0.1).play();
+          shooter.model.userData.currentAction = actionName;
         }
       }
       return;
@@ -6645,6 +6680,66 @@ async function initCore(runtimeContext) {
     }
   }
 
+  function spawnInventoryThrowProjectileWithPerfFlags(
+    scene,
+    list,
+    position,
+    direction,
+    shooterId,
+    {
+      itemId,
+      sourceItem,
+      damage,
+      thrownTorchHealth,
+      createPickupOnGround = true
+    } = {}
+  ) {
+    if (!itemId) return false;
+    const itemMap = { iceGun, bow, autumnSword, lantern, torch };
+    const resolvedItem = sourceItem || itemMap[itemId];
+    if (!resolvedItem?.mesh) return false;
+
+    const markerColorMap = {
+      bow: 0xffc26b,
+      torch: 0xffa54c,
+      lantern: 0xffd400,
+      autumnSword: 0xffd400,
+      iceGun: 0xffd400
+    };
+
+    tempLobDirection.copy(direction).normalize();
+    tempLobDirection.y += INVENTORY_THROW_UPWARD_BIAS;
+    tempLobDirection.normalize();
+
+    spawnProjectile(scene, list, position, tempLobDirection, shooterId, {
+      createMesh: () => {
+        const clone = resolvedItem.mesh.clone(true);
+        clone.visible = true;
+        return clone;
+      },
+      speed: INVENTORY_THROW_SPEED,
+      lifetime: INVENTORY_THROW_LIFETIME,
+      gravity: 9.8,
+      colliderDesc: RAPIER.ColliderDesc.ball(0.2).setRestitution(0.25).setFriction(0.8),
+      damage: Number.isFinite(damage) ? damage : (itemId === 'autumnSword' ? 2 : 1),
+      attackLabel: 'thrownItemProjectile',
+      attackTypes: ['projectile', 'throw'],
+      onGroundHit: createPickupOnGround ? (hitPosition) => {
+        createDroppedWeaponPickup(resolvedItem, {
+          itemId,
+          quantity: 1,
+          markerColor: markerColorMap[itemId] ?? 0xffd400,
+          markerOffsetY: 1.2,
+          position: hitPosition,
+          allowHidden: true,
+          torchHealth: itemId === TORCH_ITEM_ID ? thrownTorchHealth : undefined
+        });
+      } : null
+    });
+
+    return true;
+  }
+
   const ICE_MIST_RANGE = 5;
   const ICE_MIST_SPEED = 3.2;
   const ICE_MIST_LIFETIME_MS = (ICE_MIST_RANGE / ICE_MIST_SPEED) * 1000;
@@ -7641,20 +7736,7 @@ async function initCore(runtimeContext) {
       return playerControls.throwBomb(position, direction);
     }
 
-    const itemMap = {
-      iceGun,
-      bow,
-      autumnSword,
-      lantern,
-      torch
-    };
-    const markerColorMap = {
-      bow: 0xffc26b,
-      torch: 0xffa54c,
-      lantern: 0xffd400,
-      autumnSword: 0xffd400,
-      iceGun: 0xffd400
-    };
+    const itemMap = { iceGun, bow, autumnSword, lantern, torch };
     const sourceItem = itemMap[itemId];
     if (!sourceItem?.mesh) return false;
 
@@ -7674,37 +7756,24 @@ async function initCore(runtimeContext) {
       unequipInventoryItem(itemId);
     }
 
-    tempLobDirection.copy(direction).normalize();
-    tempLobDirection.y += INVENTORY_THROW_UPWARD_BIAS;
-    tempLobDirection.normalize();
+    const shooterId = multiplayer?.getId?.();
+    if (typeof shooterId === 'string') {
+      multiplayer?.send?.({
+        type: 'inventoryThrowProjectile',
+        id: shooterId,
+        itemId,
+        position: position.toArray(),
+        direction: direction.toArray()
+      });
+    }
 
-    spawnProjectile(scene, projectiles, position, tempLobDirection, multiplayer?.getId?.(), {
-      createMesh: () => {
-        const clone = sourceItem.mesh.clone(true);
-        clone.visible = true;
-        return clone;
-      },
-      speed: INVENTORY_THROW_SPEED,
-      lifetime: INVENTORY_THROW_LIFETIME,
-      gravity: 9.8,
-      colliderDesc: RAPIER.ColliderDesc.ball(0.2).setRestitution(0.25).setFriction(0.8),
+    return spawnInventoryThrowProjectileWithPerfFlags(scene, projectiles, position, direction, shooterId, {
+      itemId,
+      sourceItem,
       damage: itemId === 'autumnSword' ? 2 : 1,
-      attackLabel: 'thrownItemProjectile',
-      attackTypes: ['projectile', 'throw'],
-      onGroundHit: (hitPosition) => {
-        createDroppedWeaponPickup(sourceItem, {
-          itemId,
-          quantity: 1,
-          markerColor: markerColorMap[itemId] ?? 0xffd400,
-          markerOffsetY: 1.2,
-          position: hitPosition,
-          allowHidden: true,
-          torchHealth: itemId === TORCH_ITEM_ID ? thrownTorchHealth : undefined
-        });
-      }
+      thrownTorchHealth,
+      createPickupOnGround: true
     });
-
-    return true;
   };
   const voiceMicState = {
     listening: false,
