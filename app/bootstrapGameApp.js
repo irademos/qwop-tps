@@ -739,6 +739,8 @@ async function initCore(runtimeContext) {
   const ammoPickups = [];
   const droppedAmmoPickups = new Map();
   const pendingDropRemovals = new Set();
+  const droppedWorldPickups = new Map();
+  const pendingWorldDropRemovals = new Set();
   const localHeldWeaponMeshes = new Map();
   const remoteHeldWeaponMeshes = new Map();
   const remotePresenceEquipment = new Map();
@@ -1413,6 +1415,18 @@ async function initCore(runtimeContext) {
       });
     };
 
+    const isInventoryWorldDropMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'inventoryWorldDrop' || !Array.isArray(payload.drops)) return false;
+      return payload.drops.every(drop => {
+        if (!isObject(drop)) return false;
+        if (typeof drop.id !== 'string') return false;
+        if (typeof drop.itemId !== 'string') return false;
+        if (!isVector3Array(drop.position)) return false;
+        if (drop.amount != null && !isFiniteNumber(drop.amount)) return false;
+        return true;
+      });
+    };
+
     const isInventoryWeaponDropMessage = payload => {
       if (!isObject(payload) || payload.type !== 'inventoryWeaponDrop' || !Array.isArray(payload.drops)) return false;
       return payload.drops.every(drop => {
@@ -1429,6 +1443,10 @@ async function initCore(runtimeContext) {
 
     const isDropPickupMessage = payload => isObject(payload)
       && payload.type === 'dropPickup'
+      && typeof payload.dropId === 'string';
+
+    const isDropWorldPickupMessage = payload => isObject(payload)
+      && payload.type === 'dropWorldPickup'
       && typeof payload.dropId === 'string';
 
     const isDropWeaponPickupMessage = payload => isObject(payload)
@@ -1798,6 +1816,35 @@ async function initCore(runtimeContext) {
           amount: drop.amount
         });
       });
+      return;
+    }
+
+    if (data.type === 'inventoryWorldDrop' && multiplayer?.isHost) {
+      if (!isInventoryWorldDropMessage(data)) {
+        logInvalidPayload('inventoryWorldDrop', data);
+        return;
+      }
+      const drops = Array.isArray(data.drops) ? data.drops : [];
+      drops.forEach(drop => {
+        if (!drop?.id || !drop?.itemId || !Array.isArray(drop.position)) return;
+        addDroppedWorldPickup({
+          id: drop.id,
+          itemId: drop.itemId,
+          position: new THREE.Vector3(...drop.position),
+          amount: drop.amount
+        });
+      });
+      return;
+    }
+
+    if (data.type === 'dropWorldPickup' && multiplayer?.isHost) {
+      if (!isDropWorldPickupMessage(data)) {
+        logInvalidPayload('dropWorldPickup', data);
+        return;
+      }
+      if (data.dropId) {
+        removeDroppedWorldPickup(data.dropId);
+      }
       return;
     }
 
@@ -4862,6 +4909,16 @@ async function initCore(runtimeContext) {
     }
   }
 
+  function handleDroppedWorldPickupCollected(pickup) {
+    const dropId = pickup?.dropId;
+    if (!dropId) return;
+    droppedWorldPickups.delete(dropId);
+    if (multiplayer && !multiplayer.isHost) {
+      pendingWorldDropRemovals.add(dropId);
+      multiplayer.send({ type: 'dropWorldPickup', dropId });
+    }
+  }
+
   function pickupMushroom(pickup) {
     if (!pickup?.active) return false;
     const pickupPosition = pickup.position || pickup.mesh?.position;
@@ -4881,6 +4938,7 @@ async function initCore(runtimeContext) {
       mushroomPickups.splice(index, 1);
     }
     mushroomPickupGrid.remove(pickup);
+    handleDroppedWorldPickupCollected(pickup);
     window.questManager?.handleMushroomCollected?.(pickup);
     return true;
   }
@@ -4904,6 +4962,7 @@ async function initCore(runtimeContext) {
     if (index >= 0) {
       applePickups.splice(index, 1);
     }
+    handleDroppedWorldPickupCollected(pickup);
     return true;
   }
 
@@ -4924,6 +4983,7 @@ async function initCore(runtimeContext) {
     if (index >= 0) {
       woodPickups.splice(index, 1);
     }
+    handleDroppedWorldPickupCollected(pickup);
     return true;
   }
 
@@ -4945,6 +5005,7 @@ async function initCore(runtimeContext) {
     if (index >= 0) {
       meatPickups.splice(index, 1);
     }
+    handleDroppedWorldPickupCollected(pickup);
     return true;
   }
 
@@ -4986,6 +5047,7 @@ async function initCore(runtimeContext) {
     if (index >= 0) {
       saltPickups.splice(index, 1);
     }
+    handleDroppedWorldPickupCollected(pickup);
     return true;
   }
 
@@ -5006,6 +5068,7 @@ async function initCore(runtimeContext) {
     if (index >= 0) {
       zombieBrainsPickups.splice(index, 1);
     }
+    handleDroppedWorldPickupCollected(pickup);
     return true;
   }
 
@@ -5805,33 +5868,23 @@ async function initCore(runtimeContext) {
 
   function dropInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
-    if (isFoodItem(itemId)) {
+    if (isFoodItem(itemId) || isWoodItem(itemId) || isZombieBrainsItem(itemId)) {
       const dropPosition = getInventoryDropPosition();
       if (!dropPosition) return;
-      const pickup = isMushroomItem(itemId)
-        ? spawnMushroomPickup(itemId, dropPosition)
-        : isAppleItem(itemId)
-        ? spawnApplePickup(dropPosition)
-        : isMeatItem(itemId)
-        ? spawnMeatPickup(dropPosition)
-        : spawnSaltPickup(dropPosition, { itemId });
-      if (!pickup) return;
-      removeFromInventory(itemId, 1);
-      return;
-    }
-    if (isWoodItem(itemId)) {
-      const dropPosition = getInventoryDropPosition();
-      if (!dropPosition) return;
-      const pickup = spawnWoodPickup(dropPosition);
-      if (!pickup) return;
-      removeFromInventory(itemId, 1);
-      return;
-    }
-    if (isZombieBrainsItem(itemId)) {
-      const dropPosition = getInventoryDropPosition();
-      if (!dropPosition) return;
-      const pickup = spawnZombieBrainsPickup(dropPosition);
-      if (!pickup) return;
+      const dropId = createNetworkDropId('world');
+      if (multiplayer && !multiplayer.isHost) {
+        multiplayer.send({
+          type: 'inventoryWorldDrop',
+          drops: [{
+            id: dropId,
+            itemId,
+            position: [dropPosition.x, dropPosition.y, dropPosition.z],
+            amount: 1
+          }]
+        });
+      } else {
+        addDroppedWorldPickup({ id: dropId, itemId, position: dropPosition, amount: 1 });
+      }
       removeFromInventory(itemId, 1);
       return;
     }
@@ -5854,11 +5907,53 @@ async function initCore(runtimeContext) {
     const shouldDuplicatePickup = item.mesh.visible
       && item.holder !== playerControls;
     if (item.holder === playerControls) {
+      const markerColor = itemId === 'bow'
+        ? 0xffc26b
+        : itemId === TORCH_ITEM_ID
+          ? 0xffa54c
+          : itemId === 'bomb'
+            ? 0xff4d4d
+            : 0xffd400;
+      const torchPickupHealth = itemId === TORCH_ITEM_ID
+        ? takeTorchHealth(inventoryState)?.health
+        : null;
+      const dropId = createNetworkDropId('weapon');
+      const q = playerControls?.playerModel?.quaternion || item.mesh?.quaternion;
       item.mesh?.position?.copy?.(dropPosition);
-      if (playerControls?.playerModel?.quaternion && item.mesh?.quaternion) {
-        item.mesh.quaternion.copy(playerControls.playerModel.quaternion);
+      if (q && item.mesh?.quaternion) {
+        item.mesh.quaternion.copy(q);
       }
       item.drop({ removeFromInventory: true });
+      if (item.mesh) {
+        item.mesh.visible = false;
+      }
+      createDroppedWeaponPickup(item, {
+        itemId,
+        markerColor,
+        markerOffsetY: 1.2,
+        position: dropPosition,
+        quaternion: q,
+        torchHealth: torchPickupHealth ?? undefined,
+        dropId,
+        allowHidden: true
+      });
+      if (multiplayer && !multiplayer.isHost) {
+        const pos = dropPosition;
+        multiplayer.send({
+          type: 'inventoryWeaponDrop',
+          drops: [{
+            id: dropId,
+            itemId,
+            position: [pos.x, pos.y, pos.z],
+            rotation: [q.x, q.y, q.z, q.w],
+            quantity: 1,
+            torchHealth: torchPickupHealth ?? undefined
+          }]
+        });
+      }
+      if (itemId === TORCH_ITEM_ID) {
+        persistInventoryAndStorage();
+      }
       updateSettingsUI();
       return;
     }
@@ -7350,6 +7445,106 @@ async function initCore(runtimeContext) {
     });
   }
 
+
+  function removeSpecificPickup(list, pickup) {
+    const index = list.indexOf(pickup);
+    if (index >= 0) {
+      list.splice(index, 1);
+    }
+  }
+
+  function spawnDroppedWorldPickup(itemId, position, amount, dropId) {
+    const normalizedAmount = Number.isFinite(amount) ? Math.max(1, Math.floor(amount)) : 1;
+    let pickup = null;
+    if (isMushroomItem(itemId)) {
+      pickup = spawnMushroomPickup(itemId, position);
+    } else if (isAppleItem(itemId)) {
+      pickup = spawnApplePickup(position);
+    } else if (isMeatItem(itemId)) {
+      pickup = spawnMeatPickup(position);
+    } else if (isWoodItem(itemId)) {
+      pickup = spawnWoodPickup(position);
+    } else if (isZombieBrainsItem(itemId)) {
+      pickup = spawnZombieBrainsPickup(position);
+    } else if (isSaltItem(itemId) || itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
+      pickup = spawnSaltPickup(position, { itemId, amount: normalizedAmount });
+    }
+    if (!pickup) return null;
+    pickup.dropId = dropId;
+    pickup.networkDropped = true;
+    return pickup;
+  }
+
+  function addDroppedWorldPickup({ id, itemId, position, amount }) {
+    if (!id || !itemId || !position || droppedWorldPickups.has(id)) return;
+    const pickup = spawnDroppedWorldPickup(itemId, position, amount, id);
+    if (!pickup) return;
+    droppedWorldPickups.set(id, {
+      id,
+      itemId,
+      amount: Number.isFinite(amount) ? Math.max(1, Math.floor(amount)) : 1,
+      pickup
+    });
+  }
+
+  function removeDroppedWorldPickup(id) {
+    const entry = droppedWorldPickups.get(id);
+    if (!entry) return;
+    const pickup = entry.pickup;
+    if (pickup) {
+      if (isMushroomItem(entry.itemId)) {
+        disposeMushroomPickup(pickup);
+        removeSpecificPickup(mushroomPickups, pickup);
+        mushroomPickupGrid.remove(pickup);
+      } else if (isAppleItem(entry.itemId)) {
+        disposeApplePickup(pickup);
+        removeSpecificPickup(applePickups, pickup);
+      } else if (isMeatItem(entry.itemId)) {
+        disposeWoodPickup(pickup);
+        removeSpecificPickup(meatPickups, pickup);
+      } else if (isWoodItem(entry.itemId)) {
+        disposeWoodPickup(pickup);
+        removeSpecificPickup(woodPickups, pickup);
+      } else if (isZombieBrainsItem(entry.itemId)) {
+        disposeWoodPickup(pickup);
+        removeSpecificPickup(zombieBrainsPickups, pickup);
+      } else if (isSaltItem(entry.itemId) || entry.itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
+        disposeSaltPickup(pickup);
+        removeSpecificPickup(saltPickups, pickup);
+      }
+    }
+    droppedWorldPickups.delete(id);
+  }
+
+  function syncDroppedWorldState(stateDrops = []) {
+    const seen = new Set();
+    stateDrops.forEach(drop => {
+      if (!drop?.id || typeof drop.itemId !== 'string' || !Array.isArray(drop.position)) return;
+      if (pendingWorldDropRemovals.has(drop.id)) return;
+      seen.add(drop.id);
+      if (!droppedWorldPickups.has(drop.id)) {
+        addDroppedWorldPickup({
+          id: drop.id,
+          itemId: drop.itemId,
+          position: new THREE.Vector3(...drop.position),
+          amount: drop.amount
+        });
+      }
+    });
+
+    Array.from(droppedWorldPickups.keys()).forEach((id) => {
+      if (!seen.has(id)) {
+        removeDroppedWorldPickup(id);
+      }
+    });
+
+    Array.from(pendingWorldDropRemovals).forEach((id) => {
+      if (!seen.has(id)) {
+        pendingWorldDropRemovals.delete(id);
+      }
+    });
+  }
+
   function spawnFoodPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
@@ -7672,6 +7867,30 @@ async function initCore(runtimeContext) {
       if (!state) return;
       const drops = Array.isArray(state.drops) ? state.drops : [];
       syncDroppedAmmoState(drops);
+    },
+    isLocallyControlled: () => multiplayer?.isHost
+  });
+
+
+  registerNetworkedEntity('droppedWorld', {
+    getState: () => {
+      const drops = Array.from(droppedWorldPickups.entries()).map(([id, entry]) => {
+        const pickup = entry?.pickup;
+        const pos = pickup?.mesh?.position || pickup?.position;
+        if (!pos || typeof entry?.itemId !== 'string') return null;
+        return {
+          id,
+          itemId: entry.itemId,
+          position: [pos.x, pos.y, pos.z],
+          amount: entry.amount
+        };
+      }).filter(Boolean);
+      return { drops };
+    },
+    applyState: state => {
+      if (!state) return;
+      const drops = Array.isArray(state.drops) ? state.drops : [];
+      syncDroppedWorldState(drops);
     },
     isLocallyControlled: () => multiplayer?.isHost
   });
@@ -10127,6 +10346,9 @@ async function initCore(runtimeContext) {
         if (!entry?.mesh) return;
         disposePickup(entry.mesh);
         droppedAmmoPickups.delete(id);
+      });
+      droppedWorldPickups.forEach((entry, id) => {
+        removeDroppedWorldPickup(id);
       });
       for (let i = foodPickups.length - 1; i >= 0; i--) {
         const pickup = foodPickups[i];
