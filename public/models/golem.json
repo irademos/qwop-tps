@@ -2,17 +2,17 @@
   "scale": 0.005,
   "yOffset": 1.0,
   "monsterProperties": {
-    "moveSpeed": 0.78,
-    "animationSpeed": 0.88,
-    "attackRange": 2.9,
-    "healthBonusSegments": 3,
+    "moveSpeed": 0.3,
+    "animationSpeed": 0.3,
+    "attackRange": 5.0,
+    "healthBonusSegments": 7,
     "attackSensitivity": {
-      "explosive": 1.7,
-      "fire": 1.2,
-      "cut": 0.75,
-      "ice": 0.9,
-      "arrow": 0.85,
-      "melee": 0.8
+      "explosive": 4.0,
+      "fire": 0.2,
+      "cut": 0.3,
+      "ice": 0.2,
+      "arrow": 0.2,
+      "melee": 0.2
     },
     "drops": [
       "salt",
