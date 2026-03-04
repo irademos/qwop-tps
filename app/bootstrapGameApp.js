@@ -5907,11 +5907,53 @@ async function initCore(runtimeContext) {
     const shouldDuplicatePickup = item.mesh.visible
       && item.holder !== playerControls;
     if (item.holder === playerControls) {
+      const markerColor = itemId === 'bow'
+        ? 0xffc26b
+        : itemId === TORCH_ITEM_ID
+          ? 0xffa54c
+          : itemId === 'bomb'
+            ? 0xff4d4d
+            : 0xffd400;
+      const torchPickupHealth = itemId === TORCH_ITEM_ID
+        ? takeTorchHealth(inventoryState)?.health
+        : null;
+      const dropId = createNetworkDropId('weapon');
+      const q = playerControls?.playerModel?.quaternion || item.mesh?.quaternion;
       item.mesh?.position?.copy?.(dropPosition);
-      if (playerControls?.playerModel?.quaternion && item.mesh?.quaternion) {
-        item.mesh.quaternion.copy(playerControls.playerModel.quaternion);
+      if (q && item.mesh?.quaternion) {
+        item.mesh.quaternion.copy(q);
       }
       item.drop({ removeFromInventory: true });
+      if (item.mesh) {
+        item.mesh.visible = false;
+      }
+      createDroppedWeaponPickup(item, {
+        itemId,
+        markerColor,
+        markerOffsetY: 1.2,
+        position: dropPosition,
+        quaternion: q,
+        torchHealth: torchPickupHealth ?? undefined,
+        dropId,
+        allowHidden: true
+      });
+      if (multiplayer && !multiplayer.isHost) {
+        const pos = dropPosition;
+        multiplayer.send({
+          type: 'inventoryWeaponDrop',
+          drops: [{
+            id: dropId,
+            itemId,
+            position: [pos.x, pos.y, pos.z],
+            rotation: [q.x, q.y, q.z, q.w],
+            quantity: 1,
+            torchHealth: torchPickupHealth ?? undefined
+          }]
+        });
+      }
+      if (itemId === TORCH_ITEM_ID) {
+        persistInventoryAndStorage();
+      }
       updateSettingsUI();
       return;
     }
