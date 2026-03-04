@@ -3,15 +3,15 @@
   "yOffset": 0.5,
   "materialBrightness": 10.0,
   "monsterProperties": {
-    "moveSpeed": 1.06,
-    "animationSpeed": 1.08,
-    "attackRange": 2.4,
+    "moveSpeed": 0.8,
+    "animationSpeed": 0.8,
+    "attackRange": 1.5,
     "healthBonusSegments": 0,
     "attackSensitivity": {
-      "fire": 1.4,
-      "cut": 1.1,
-      "explosive": 1.2,
-      "ice": 0.85,
+      "fire": 1.0,
+      "cut": 1.0,
+      "explosive": 1.0,
+      "ice": 1.0,
       "arrow": 1.0,
       "melee": 1.0
     },

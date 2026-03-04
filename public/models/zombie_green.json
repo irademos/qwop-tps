@@ -3,17 +3,17 @@
   "yOffset": 0.5,
   "materialBrightness": 1.25,
   "monsterProperties": {
-    "moveSpeed": 0.95,
-    "animationSpeed": 1.0,
-    "attackRange": 2.6,
-    "healthBonusSegments": 2,
+    "moveSpeed": 0.7,
+    "animationSpeed": 0.7,
+    "attackRange": 1.5,
+    "healthBonusSegments": 0,
     "attackSensitivity": {
-      "fire": 1.05,
-      "cut": 0.95,
-      "explosive": 1.35,
-      "ice": 1.35,
-      "arrow": 0.95,
-      "melee": 0.95
+      "fire": 1.0,
+      "cut": 1.0,
+      "explosive": 1.0,
+      "ice": 1.0,
+      "arrow": 1.0,
+      "melee": 1.0
     },
     "drops": [
       "zombie_brains"
