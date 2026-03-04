@@ -7686,6 +7686,7 @@ async function initCore(runtimeContext) {
       },
       speed: INVENTORY_THROW_SPEED,
       lifetime: INVENTORY_THROW_LIFETIME,
+      gravity: 9.8,
       colliderDesc: RAPIER.ColliderDesc.ball(0.2).setRestitution(0.25).setFriction(0.8),
       damage: itemId === 'autumnSword' ? 2 : 1,
       attackLabel: 'thrownItemProjectile',

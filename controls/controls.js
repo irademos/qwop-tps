@@ -1065,6 +1065,8 @@ export class PlayerControls {
     if (state !== 'equip') {
       this.mobileEquipButtons.forEach(button => button.remove());
       this.mobileEquipButtons = [];
+      this.mobileItemActionButtons.forEach(button => button.remove());
+      this.mobileItemActionButtons = [];
     }
 
     this.layoutMobileActionButtons(state);
@@ -1118,7 +1120,8 @@ export class PlayerControls {
       this.optionLeftButton,
       this.optionCenterButton,
       this.optionRightButton,
-      ...(this.mobileEquipButtons || [])
+      ...(this.mobileEquipButtons || []),
+      ...(this.mobileItemActionButtons || [])
     ].forEach(clearButtonPos);
 
     if (state === 'spell-options') {
@@ -1140,8 +1143,12 @@ export class PlayerControls {
     }
 
     if (state === 'equip') {
-      const slots = this.getMobileActionSlots((this.mobileEquipButtons || []).length);
-      this.mobileEquipButtons.forEach((button, index) => {
+      const actionButtons = [
+        ...(this.mobileEquipButtons || []),
+        ...(this.mobileItemActionButtons || [])
+      ];
+      const slots = this.getMobileActionSlots(actionButtons.length);
+      actionButtons.forEach((button, index) => {
         this.applyMobileButtonPosition(button, slots[index]);
       });
       return;

@@ -107,6 +107,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.attackTypes = Array.isArray(options.attackTypes) && options.attackTypes.length
     ? options.attackTypes
     : ['projectile'];
+  mesh.userData.gravity = Number.isFinite(options.gravity) ? options.gravity : null;
   mesh.userData.hasHitGround = false;
   scene.add(mesh);
   projectiles.push(mesh);
@@ -149,6 +150,16 @@ export function updateProjectiles({
         if (proj.userData?.isArrow) playArrowBlockedSFX();
         removeProjectile(i);
         continue;
+      }
+      const customGravity = proj?.userData?.gravity;
+      if (Number.isFinite(customGravity) && customGravity !== 0) {
+        const currentVel = body.linvel();
+        const gravityStep = customGravity * (16 / 1000);
+        body.setLinvel({
+          x: currentVel.x,
+          y: currentVel.y - gravityStep,
+          z: currentVel.z
+        }, true);
       }
       linvel = body.linvel();
     } catch (e) {
