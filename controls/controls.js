@@ -1874,7 +1874,8 @@ export class PlayerControls {
       includeSolidHit = true,
       maxRayDistance = 12,
       walkableSlopeDegrees = MAX_WALKABLE_SLOPE_DEGREES,
-      fallbackGroundY = Number.isFinite(y) ? y - (PLAYER_HALF_HEIGHT + PLAYER_RADIUS) : 0
+      fallbackGroundY = Number.isFinite(y) ? y - (PLAYER_HALF_HEIGHT + PLAYER_RADIUS) : 0,
+      excludedColliderHandles = null
     } = options;
 
     const metadata = {
@@ -1896,18 +1897,28 @@ export class PlayerControls {
     const world = window.rapierWorld;
     if (includeSolidHit && world && !Number.isFinite(this.groundOverrideY)) {
       const ray = new RAPIER.Ray({ x, y, z }, { x: 0, y: -1, z: 0 });
-      const excludedColliderHandles = new Set();
+      const blockedColliderHandles = new Set();
       if (this.body && typeof this.body.numColliders === 'function' && typeof this.body.collider === 'function') {
         const colliderCount = this.body.numColliders();
         for (let i = 0; i < colliderCount; i += 1) {
           const collider = this.body.collider(i);
           if (typeof collider?.handle === 'number') {
-            excludedColliderHandles.add(collider.handle);
+            blockedColliderHandles.add(collider.handle);
           }
         }
       }
-      const excludeSelfCollider = excludedColliderHandles.size
-        ? (collider) => !excludedColliderHandles.has(collider?.handle)
+      if (excludedColliderHandles) {
+        const handles = Array.isArray(excludedColliderHandles)
+          ? excludedColliderHandles
+          : Array.from(excludedColliderHandles);
+        handles.forEach((handle) => {
+          if (typeof handle === 'number') {
+            blockedColliderHandles.add(handle);
+          }
+        });
+      }
+      const excludeSelfCollider = blockedColliderHandles.size
+        ? (collider) => !blockedColliderHandles.has(collider?.handle)
         : undefined;
       const rayHit = world.castRayAndGetNormal
         ? world.castRayAndGetNormal(

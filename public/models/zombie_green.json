@@ -1,5 +1,22 @@
 {
   "scale": 0.0001,
   "yOffset": 0.5,
-  "materialBrightness": 1.25
+  "materialBrightness": 1.25,
+  "monsterProperties": {
+    "moveSpeed": 0.95,
+    "animationSpeed": 1.0,
+    "attackRange": 2.6,
+    "healthBonusSegments": 2,
+    "attackSensitivity": {
+      "fire": 1.05,
+      "cut": 0.95,
+      "explosive": 1.35,
+      "ice": 1.35,
+      "arrow": 0.95,
+      "melee": 0.95
+    },
+    "drops": [
+      "zombie_brains"
+    ]
+  }
 }
