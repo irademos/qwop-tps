@@ -110,6 +110,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.gravity = Number.isFinite(options.gravity) ? options.gravity : null;
   mesh.userData.hasHitGround = false;
   mesh.userData.wasAboveGround = false;
+  mesh.userData.groundContactOffset = Number.isFinite(options.groundContactOffset) ? options.groundContactOffset : 0;
   scene.add(mesh);
   projectiles.push(mesh);
 }
@@ -176,13 +177,14 @@ export function updateProjectiles({
       ? (prevY > sampledGroundY && proj.position.y <= sampledGroundY)
       : false;
     const aboveGroundThreshold = 0.18;
-    const groundContactThreshold = 0.08;
+    const groundContactEpsilon = 0.08;
     const hasTerrainSample = Number.isFinite(sampledGroundY);
     const aboveGround = hasTerrainSample && proj.position.y > sampledGroundY + aboveGroundThreshold;
     if (aboveGround) {
       proj.userData.wasAboveGround = true;
     }
-    const touchingGround = hasTerrainSample && proj.position.y <= sampledGroundY + groundContactThreshold;
+    const groundContactOffset = Number.isFinite(proj.userData.groundContactOffset) ? proj.userData.groundContactOffset : 0;
+    const touchingGround = hasTerrainSample && proj.position.y <= sampledGroundY + groundContactOffset + groundContactEpsilon;
     updateArrowProjectile(proj, rb, vel, sampledGroundY, crossedGround);
 
     if (typeof proj.userData.onGroundHit === 'function' && !proj.userData.hasHitGround) {
