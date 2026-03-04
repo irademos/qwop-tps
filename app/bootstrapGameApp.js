@@ -6668,6 +6668,7 @@ async function initCore(runtimeContext) {
       speed: BOMB_THROW_SPEED,
       lifetime: BOMB_THROW_LIFETIME,
       colliderDesc: RAPIER.ColliderDesc.ball(0.18).setRestitution(0.3).setFriction(0.8),
+      groundContactOffset: 0.18,
       onGroundHit: (hitPosition) => {
         spawnBombMist(scene, bombMists, hitPosition);
         applyBombImpactDamage(hitPosition, shooterId);
@@ -6721,6 +6722,7 @@ async function initCore(runtimeContext) {
       lifetime: INVENTORY_THROW_LIFETIME,
       gravity: 9.8,
       colliderDesc: RAPIER.ColliderDesc.ball(0.2).setRestitution(0.25).setFriction(0.8),
+      groundContactOffset: 0.2,
       damage: Number.isFinite(damage) ? damage : (itemId === 'autumnSword' ? 2 : 1),
       attackLabel: 'thrownItemProjectile',
       attackTypes: ['projectile', 'throw'],
