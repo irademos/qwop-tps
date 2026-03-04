@@ -197,6 +197,9 @@ const ARROW_PROJECTILE_LIFETIME = 6000;
 const BOMB_THROW_SPEED = 11;
 const BOMB_THROW_LIFETIME = 15000;
 const BOMB_THROW_UPWARD_BIAS = 0.25;
+const INVENTORY_THROW_SPEED = 11;
+const INVENTORY_THROW_LIFETIME = 12000;
+const INVENTORY_THROW_UPWARD_BIAS = 0.22;
 const BOMB_DAMAGE_RADIUS = 5;
 const BOMB_BASE_DAMAGE = 6;
 const BOMB_KNOCKBACK_STRENGTH = 6;
@@ -7628,6 +7631,78 @@ async function initCore(runtimeContext) {
     spawnBombProjectileWithPerfFlags(scene, projectiles, position, direction, shooterId);
     unequipInventoryItem('bomb');
     removeFromInventory('bomb', 1);
+    return true;
+  };
+  playerControls.getInventoryItemHand = (itemId) => getInventoryItemHand(itemId);
+  playerControls.throwInventoryItem = (itemId, position, direction) => {
+    if (!itemId || !position || !direction) return false;
+    if ((inventoryState[itemId]?.count || 0) <= 0) return false;
+    if (itemId === 'bomb') {
+      return playerControls.throwBomb(position, direction);
+    }
+
+    const itemMap = {
+      iceGun,
+      bow,
+      autumnSword,
+      lantern,
+      torch
+    };
+    const markerColorMap = {
+      bow: 0xffc26b,
+      torch: 0xffa54c,
+      lantern: 0xffd400,
+      autumnSword: 0xffd400,
+      iceGun: 0xffd400
+    };
+    const sourceItem = itemMap[itemId];
+    if (!sourceItem?.mesh) return false;
+
+    let thrownTorchHealth = null;
+    if (itemId === TORCH_ITEM_ID) {
+      const torchTakeResult = takeTorchHealth(inventoryState, equippedTorchIndex);
+      thrownTorchHealth = normalizeTorchHealth(
+        torchTakeResult?.health ?? torch?.mesh?.userData?.torchHealth ?? DEFAULT_TORCH_HEALTH
+      );
+      equippedTorchIndex = null;
+      persistInventoryAndStorage();
+    } else {
+      removeFromInventory(itemId, 1);
+    }
+
+    if (isInventoryItemEquipped(itemId)) {
+      unequipInventoryItem(itemId);
+    }
+
+    tempLobDirection.copy(direction).normalize();
+    tempLobDirection.y += INVENTORY_THROW_UPWARD_BIAS;
+    tempLobDirection.normalize();
+
+    spawnProjectile(scene, projectiles, position, tempLobDirection, multiplayer?.getId?.(), {
+      createMesh: () => {
+        const clone = sourceItem.mesh.clone(true);
+        clone.visible = true;
+        return clone;
+      },
+      speed: INVENTORY_THROW_SPEED,
+      lifetime: INVENTORY_THROW_LIFETIME,
+      colliderDesc: RAPIER.ColliderDesc.ball(0.2).setRestitution(0.25).setFriction(0.8),
+      damage: itemId === 'autumnSword' ? 2 : 1,
+      attackLabel: 'thrownItemProjectile',
+      attackTypes: ['projectile', 'throw'],
+      onGroundHit: (hitPosition) => {
+        createDroppedWeaponPickup(sourceItem, {
+          itemId,
+          quantity: 1,
+          markerColor: markerColorMap[itemId] ?? 0xffd400,
+          markerOffsetY: 1.2,
+          position: hitPosition,
+          allowHidden: true,
+          torchHealth: itemId === TORCH_ITEM_ID ? thrownTorchHealth : undefined
+        });
+      }
+    });
+
     return true;
   };
   const voiceMicState = {

@@ -111,6 +111,7 @@ const MERCHANT_DIALOGUE = {
   ]
 };
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
+const MOBILE_EQUIP_HOLD_MS = 1500;
 
 export class PlayerControls {
   constructor({
@@ -550,6 +551,11 @@ export class PlayerControls {
     this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', '—');
 
     this.mobileEquipButtons = [];
+    this.mobileItemActionButtons = [];
+    this.mobileEquipHoldTimer = null;
+    this.mobileEquipHoldTriggered = false;
+    this.mobileEquipHeldItemId = null;
+    this.mobileThrowAimItemId = null;
     this.mobileActionState = 'default';
     this.mobileMeleeComboIndex = 0;
     this.mobileStatusToastTimer = null;
@@ -782,6 +788,8 @@ export class PlayerControls {
 
     this.mobileEquipButtons.forEach(button => button.remove());
     this.mobileEquipButtons = [];
+    this.mobileItemActionButtons.forEach(button => button.remove());
+    this.mobileItemActionButtons = [];
 
     const hasInventoryItem = (itemId) => {
       const entry = inventory[itemId];
@@ -799,11 +807,29 @@ export class PlayerControls {
 
     this.mobileActionState = 'equip';
 
+    const clearEquipHold = () => {
+      if (this.mobileEquipHoldTimer) {
+        clearTimeout(this.mobileEquipHoldTimer);
+        this.mobileEquipHoldTimer = null;
+      }
+      this.mobileEquipHoldTriggered = false;
+      this.mobileEquipHeldItemId = null;
+    };
+
+    const equipAndOpenActions = (itemId) => {
+      if (!this.enabled) return;
+      if (!appState?.isInventoryItemEquipped?.(itemId)) {
+        appState?.equipInventoryItem?.(itemId);
+      }
+      this.showMobileItemActionMenu(itemId);
+    };
+
     itemsToShow.forEach((item) => {
       const button = document.createElement('button');
       button.className = 'action-button mobile-equip-action';
       button.textContent = item.label;
-      const onEquip = (event) => {
+
+      const onEquipTap = (event) => {
         if (!this.enabled) return;
         const isEquipped = appState?.isInventoryItemEquipped?.(item.id);
         if (isEquipped) appState?.unequipInventoryItem?.(item.id);
@@ -812,19 +838,150 @@ export class PlayerControls {
         this.refreshActionButtons();
         if (event) this.safePreventDefault(event);
       };
+
+      const onPressStart = (event) => {
+        if (!this.enabled) return;
+        clearEquipHold();
+        this.mobileEquipHeldItemId = item.id;
+        this.mobileEquipHoldTimer = setTimeout(() => {
+          if (this.mobileEquipHeldItemId !== item.id) return;
+          this.mobileEquipHoldTriggered = true;
+          equipAndOpenActions(item.id);
+        }, MOBILE_EQUIP_HOLD_MS);
+        if (event) this.safePreventDefault(event);
+      };
+
+      const onPressEnd = (event) => {
+        if (!this.enabled) return;
+        const holdTriggered = this.mobileEquipHoldTriggered;
+        const heldItemId = this.mobileEquipHeldItemId;
+        clearEquipHold();
+        if (!holdTriggered && heldItemId === item.id) {
+          onEquipTap(event);
+          return;
+        }
+        if (event) this.safePreventDefault(event);
+      };
+
       button.addEventListener('touchstart', (event) => {
         this.lastTouchButtonTime = performance.now();
-        onEquip(event);
+        onPressStart(event);
+      }, { passive: false });
+      button.addEventListener('touchend', (event) => {
+        this.lastTouchButtonTime = performance.now();
+        onPressEnd(event);
+      }, { passive: false });
+      button.addEventListener('touchcancel', (event) => {
+        this.lastTouchButtonTime = performance.now();
+        clearEquipHold();
+        if (event) this.safePreventDefault(event);
       }, { passive: false });
       button.addEventListener('mousedown', (event) => {
         if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
-        onEquip(event);
+        onPressStart(event);
+      });
+      button.addEventListener('mouseup', (event) => {
+        if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+        onPressEnd(event);
+      });
+      button.addEventListener('mouseleave', (event) => {
+        if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+        clearEquipHold();
+        if (event) this.safePreventDefault(event);
       });
       button.addEventListener('click', (event) => event.preventDefault());
       this.mobileEquipButtons.push(button);
       actionContainer.appendChild(button);
     });
 
+    this.refreshActionButtons();
+  }
+
+  showMobileItemActionMenu(itemId) {
+    const actionContainer = document.getElementById('action-buttons');
+    if (!actionContainer || !itemId) return;
+    const appState = appContext.uiState.appState ?? window.appState;
+
+    this.mobileEquipButtons.forEach(button => button.remove());
+    this.mobileEquipButtons = [];
+    this.mobileItemActionButtons.forEach(button => button.remove());
+    this.mobileItemActionButtons = [];
+
+    this.mobileActionState = 'equip';
+
+    const dropButton = document.createElement('button');
+    dropButton.className = 'action-button mobile-equip-action';
+    dropButton.textContent = 'Drop';
+    const onDrop = (event) => {
+      if (!this.enabled) return;
+      appState?.dropInventoryItem?.(itemId);
+      this.mobileActionState = 'default';
+      this.refreshActionButtons();
+      if (event) this.safePreventDefault(event);
+    };
+    dropButton.addEventListener('touchstart', onDrop, { passive: false });
+    dropButton.addEventListener('mousedown', (event) => {
+      if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+      onDrop(event);
+    });
+    dropButton.addEventListener('click', (event) => event.preventDefault());
+
+    const throwButton = document.createElement('button');
+    throwButton.className = 'action-button mobile-equip-action';
+    throwButton.textContent = 'Throw';
+    const onThrowStart = (event) => {
+      if (!this.enabled) return;
+      this.mobileThrowAimItemId = itemId;
+      this.isFireHeld = true;
+      this.setAiming(true);
+      if (event) this.safePreventDefault(event);
+    };
+    const onThrowEnd = (event) => {
+      if (!this.enabled || !this.mobileThrowAimItemId) return;
+      const throwItemId = this.mobileThrowAimItemId;
+      this.mobileThrowAimItemId = null;
+      this.isFireHeld = false;
+      this.setAiming(false);
+      const hand = this.getInventoryItemHand?.(throwItemId) || 'right';
+      const direction = this.getAimDirection(true);
+      const position = this.getProjectileSpawnPosition(direction);
+      const didThrow = this.throwInventoryItem?.(throwItemId, position, direction);
+      if (didThrow) {
+        this.playAction(hand === 'left' ? 'throwLeft' : 'throw');
+      }
+      this.mobileActionState = 'default';
+      this.refreshActionButtons();
+      if (event) this.safePreventDefault(event);
+    };
+    throwButton.addEventListener('touchstart', (event) => {
+      this.lastTouchButtonTime = performance.now();
+      onThrowStart(event);
+    }, { passive: false });
+    throwButton.addEventListener('touchend', (event) => {
+      this.lastTouchButtonTime = performance.now();
+      onThrowEnd(event);
+    }, { passive: false });
+    throwButton.addEventListener('touchcancel', (event) => {
+      this.lastTouchButtonTime = performance.now();
+      onThrowEnd(event);
+    }, { passive: false });
+    throwButton.addEventListener('mousedown', (event) => {
+      if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+      onThrowStart(event);
+    });
+    throwButton.addEventListener('mouseup', (event) => {
+      if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+      onThrowEnd(event);
+    });
+    throwButton.addEventListener('mouseleave', (event) => {
+      if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+      onThrowEnd(event);
+    });
+    throwButton.addEventListener('click', (event) => event.preventDefault());
+
+    this.mobileItemActionButtons.push(dropButton, throwButton);
+    actionContainer.appendChild(dropButton);
+    actionContainer.appendChild(throwButton);
     this.refreshActionButtons();
   }
 

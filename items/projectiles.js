@@ -100,6 +100,13 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.isArrow = options.isArrow ?? false;
   mesh.userData.releaseMesh = options.releaseMesh ?? null;
   mesh.userData.onGroundHit = options.onGroundHit ?? null;
+  mesh.userData.damage = Number.isFinite(options.damage) ? options.damage : 1;
+  mesh.userData.attackLabel = typeof options.attackLabel === 'string' && options.attackLabel
+    ? options.attackLabel
+    : 'bowArrowProjectile';
+  mesh.userData.attackTypes = Array.isArray(options.attackTypes) && options.attackTypes.length
+    ? options.attackTypes
+    : ['projectile'];
   mesh.userData.hasHitGround = false;
   scene.add(mesh);
   projectiles.push(mesh);
@@ -204,8 +211,12 @@ export function updateProjectiles({
       if (projBox.intersectsBox(playerBox)) {
         const player = otherPlayers[id];
         if (player) {
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
-          const attackTypes = getAttackTypes('bowArrowProjectile', ['projectile']);
+          const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
+          const attackTypes = getAttackTypes(
+            proj.userData.attackLabel || 'bowArrowProjectile',
+            proj.userData.attackTypes || ['projectile']
+          );
           const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
           const nextHealth = Math.max(0, previousHealth - damage);
           player.health = nextHealth;
@@ -238,8 +249,12 @@ export function updateProjectiles({
       removed = true;
 
       if (typeof window.localHealth === 'number') {
-        const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
-        const attackTypes = getAttackTypes('bowArrowProjectile', ['projectile']);
+        const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
+        const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
+        const attackTypes = getAttackTypes(
+          proj.userData.attackLabel || 'bowArrowProjectile',
+          proj.userData.attackTypes || ['projectile']
+        );
         window.localHealth = Math.max(0, window.localHealth - damage);
         window.lastHitAttackTypes = attackTypes;
         console.log(`❤️ Your Health: ${window.localHealth}`);
@@ -259,8 +274,12 @@ export function updateProjectiles({
         if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           console.log(`💥 Monster was hit`);
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
-          const attackTypes = getAttackTypes('bowArrowProjectile', ['projectile']);
+          const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
+          const attackTypes = getAttackTypes(
+            proj.userData.attackLabel || 'bowArrowProjectile',
+            proj.userData.attackTypes || ['projectile']
+          );
           const killed = monster.applyDamage(damage, { attackTypes });
           if (!killed) {
             const direction = vel.clone();
@@ -282,8 +301,12 @@ export function updateProjectiles({
         const monsterBox = getObjectBox(monster?.model);
         if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(1) : 1;
-          const attackTypes = getAttackTypes('bowArrowProjectile', ['projectile']);
+          const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
+          const attackTypes = getAttackTypes(
+            proj.userData.attackLabel || 'bowArrowProjectile',
+            proj.userData.attackTypes || ['projectile']
+          );
           sendMonsterAttack?.({
             monsterId: monster.id,
             damage,
