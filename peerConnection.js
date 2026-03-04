@@ -23,6 +23,7 @@ const VALID_MESSAGE_TYPES = new Set([
   'inventoryWorldDrop',
   'inventoryWeaponDrop',
   'dropPickup',
+  'dropWorldPickup',
   'dropWeaponPickup',
   'grab',
   'grabMove'
