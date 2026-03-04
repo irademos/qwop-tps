@@ -267,6 +267,7 @@ export function createPlayerModel(
             mmaKick: 'Mma Kick.fbx',
             runningKick: 'Stand To Roll.fbx',
             hurricaneKick: 'Hurricane Kick.fbx',
+            throw: 'Throw.fbx',
             projectile: 'Projectile.fbx',
             die: 'Dying.fbx',
             float: 'Floating.fbx',
@@ -286,7 +287,7 @@ export function createPlayerModel(
                   action.setEffectiveTimeScale(1.8);
                 }
                 if (
-                  ['jump', 'hit', 'mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
+                  ['jump', 'hit', 'mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'throw', 'projectile', 'die'].includes(name)
                 ) {
                   action.loop = THREE.LoopOnce;
                   action.clampWhenFinished = true;
@@ -315,7 +316,7 @@ export function createPlayerModel(
                     action.setEffectiveTimeScale(1.8);
                   }
                   if (
-                    ['jump', 'hit', 'mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'projectile', 'die'].includes(name)
+                    ['jump', 'hit', 'mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'throw', 'projectile', 'die'].includes(name)
                   ) {
                     action.loop = THREE.LoopOnce;
                     action.clampWhenFinished = true;

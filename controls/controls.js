@@ -2922,7 +2922,7 @@ export class PlayerControls {
       const position = this.getProjectileSpawnPosition(direction);
       const fired = this.throwBomb(position, direction);
       if (fired) {
-        this.playAction('projectile');
+        this.playAction('throw');
       }
       return fired;
     }
