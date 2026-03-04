@@ -16,6 +16,7 @@ const VALID_MESSAGE_TYPES = new Set([
   'entitySnapshot',
   'entityStateRequest',
   'projectile',
+  'inventoryThrowProjectile',
   'monster',
   'attackMonster',
   'inventoryDrop',
