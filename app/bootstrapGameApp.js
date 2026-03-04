@@ -1413,6 +1413,17 @@ async function initCore(runtimeContext) {
       });
     };
 
+    const isInventoryWorldDropMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'inventoryWorldDrop' || !Array.isArray(payload.drops)) return false;
+      return payload.drops.every(drop => {
+        if (!isObject(drop)) return false;
+        if (typeof drop.itemId !== 'string') return false;
+        if (!isVector3Array(drop.position)) return false;
+        if (drop.amount != null && !isFiniteNumber(drop.amount)) return false;
+        return true;
+      });
+    };
+
     const isInventoryWeaponDropMessage = payload => {
       if (!isObject(payload) || payload.type !== 'inventoryWeaponDrop' || !Array.isArray(payload.drops)) return false;
       return payload.drops.every(drop => {
@@ -1797,6 +1808,43 @@ async function initCore(runtimeContext) {
           position: new THREE.Vector3(...drop.position),
           amount: drop.amount
         });
+      });
+      return;
+    }
+
+    if (data.type === 'inventoryWorldDrop' && multiplayer?.isHost) {
+      if (!isInventoryWorldDropMessage(data)) {
+        logInvalidPayload('inventoryWorldDrop', data);
+        return;
+      }
+      const drops = Array.isArray(data.drops) ? data.drops : [];
+      drops.forEach(drop => {
+        if (!drop?.itemId || !Array.isArray(drop.position)) return;
+        const dropPosition = new THREE.Vector3(...drop.position);
+        const amount = Number.isFinite(drop.amount) ? Math.max(1, Math.floor(drop.amount)) : 1;
+        if (isMushroomItem(drop.itemId)) {
+          for (let index = 0; index < amount; index += 1) {
+            spawnMushroomPickup(drop.itemId, dropPosition);
+          }
+        } else if (isAppleItem(drop.itemId)) {
+          for (let index = 0; index < amount; index += 1) {
+            spawnApplePickup(dropPosition);
+          }
+        } else if (isMeatItem(drop.itemId)) {
+          for (let index = 0; index < amount; index += 1) {
+            spawnMeatPickup(dropPosition);
+          }
+        } else if (isWoodItem(drop.itemId)) {
+          for (let index = 0; index < amount; index += 1) {
+            spawnWoodPickup(dropPosition);
+          }
+        } else if (isZombieBrainsItem(drop.itemId)) {
+          for (let index = 0; index < amount; index += 1) {
+            spawnZombieBrainsPickup(dropPosition);
+          }
+        } else if (isSaltItem(drop.itemId) || drop.itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
+          spawnSaltPickup(dropPosition, { itemId: drop.itemId, amount });
+        }
       });
       return;
     }
@@ -5816,6 +5864,16 @@ async function initCore(runtimeContext) {
         ? spawnMeatPickup(dropPosition)
         : spawnSaltPickup(dropPosition, { itemId });
       if (!pickup) return;
+      if (multiplayer && !multiplayer.isHost) {
+        multiplayer.send({
+          type: 'inventoryWorldDrop',
+          drops: [{
+            itemId,
+            position: [dropPosition.x, dropPosition.y, dropPosition.z],
+            amount: 1
+          }]
+        });
+      }
       removeFromInventory(itemId, 1);
       return;
     }
@@ -5824,6 +5882,16 @@ async function initCore(runtimeContext) {
       if (!dropPosition) return;
       const pickup = spawnWoodPickup(dropPosition);
       if (!pickup) return;
+      if (multiplayer && !multiplayer.isHost) {
+        multiplayer.send({
+          type: 'inventoryWorldDrop',
+          drops: [{
+            itemId,
+            position: [dropPosition.x, dropPosition.y, dropPosition.z],
+            amount: 1
+          }]
+        });
+      }
       removeFromInventory(itemId, 1);
       return;
     }
@@ -5832,6 +5900,16 @@ async function initCore(runtimeContext) {
       if (!dropPosition) return;
       const pickup = spawnZombieBrainsPickup(dropPosition);
       if (!pickup) return;
+      if (multiplayer && !multiplayer.isHost) {
+        multiplayer.send({
+          type: 'inventoryWorldDrop',
+          drops: [{
+            itemId,
+            position: [dropPosition.x, dropPosition.y, dropPosition.z],
+            amount: 1
+          }]
+        });
+      }
       removeFromInventory(itemId, 1);
       return;
     }
