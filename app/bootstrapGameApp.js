@@ -8753,7 +8753,7 @@ async function initCore(runtimeContext) {
   }
 
   const settingsBtn = document.getElementById('settings-button');
-  const characterOptions = ['base_character_2', 'cowboy', 'Chimpanzee'].map(name => ({
+  const characterOptions = ['base_character_2', 'cowboy', 'Chimpanzee', 'seagull'].map(name => ({
     label: name,
     value: `/models/${name}.fbx`
   }));
