@@ -442,7 +442,8 @@ const getHealthForLevel = (level) => {
             const entity = {
               id: slotId,
               type: merged.type,
-              modelPath: merged.type,
+              modelPath: merged.modelPath || merged.type,
+              version: Number.isFinite(merged.version) ? merged.version : 0,
               health: Number.isFinite(merged.hp) ? merged.hp : 0,
               level: Number.isFinite(merged.level) ? merged.level : 1,
               isDead: merged.alive === false,
