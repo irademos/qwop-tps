@@ -68,6 +68,17 @@ let merchantIsHost = false;
 let marketStallCollider = null;
 let merchantSpawnBasePosition = DEFAULT_MARKET_STALL_POSITION.clone();
 
+const resolveMerchantBasePosition = (position, { getTerrainHeight, liftPositionToBuildingTop } = {}) => {
+  if (!position) return merchantSpawnBasePosition.clone();
+  const basePosition = position.clone ? position.clone() : new THREE.Vector3(position.x || 0, position.y || 0, position.z || 0);
+  const terrainHeight = getTerrainHeight?.(basePosition.x, basePosition.z);
+  if (Number.isFinite(terrainHeight)) {
+    basePosition.y = terrainHeight;
+  }
+  liftPositionToBuildingTop?.(basePosition, 0.5);
+  return basePosition;
+};
+
 const buildDefaultInventory = () => {
   const items = {};
   Object.entries(merchantItemCatalog).forEach(([id, entry]) => {
@@ -397,8 +408,8 @@ export const getMerchantFriendly = () => merchantFriendly;
 
 export const spawnMerchantAt = async ({ position, scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop } = {}) => {
   if (!scene) return;
-  if (position?.clone) {
-    merchantSpawnBasePosition = position.clone();
+  if (position) {
+    merchantSpawnBasePosition = resolveMerchantBasePosition(position, { getTerrainHeight, liftPositionToBuildingTop });
   }
   removeMerchantEntities();
   await loadMarketStall({ scene, getTerrainHeight, liftPositionToBuildingTop });
