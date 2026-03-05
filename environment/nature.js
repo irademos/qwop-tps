@@ -36,6 +36,8 @@ const TREE_COLLIDER_SCALE_BY_TYPE = {
   6: { radius: 0.95, height: 1.0 } // larch/beech
 };
 
+const TREE_GROUND_OFFSET_BY_TYPE = {};
+
 const TREE_CLIMB_OVERRIDES = {
   0: { halfWidth: 0.4, halfDepth: 0.75, entryHeight: 0.0, maxYPad: 3.0 }, // eucalyptus
   5: { halfWidth: 0.75, halfDepth: 0.75, entryHeight: 0.0, minYPad: 0.0, maxYPad: 6.4 }  // dead/scary
@@ -288,8 +290,19 @@ export async function createNature({
       wrapper.add(part);
     }
     wrapper.scale.setScalar(1);
+
+    const templateBounds = new THREE.Box3().setFromObject(wrapper);
+    const localMinY = Number.isFinite(templateBounds.min.y) ? templateBounds.min.y : 0;
+    wrapper.userData.localMinY = localMinY;
+    TREE_GROUND_OFFSET_BY_TYPE[index] = localMinY;
+
     return wrapper;
   });
+
+  const getTreeGroundAnchorOffset = (treeTypeIndex, scale = TREE_SCALE_REFERENCE) => {
+    const baseMinY = TREE_GROUND_OFFSET_BY_TYPE[treeTypeIndex] ?? 0;
+    return baseMinY * scale;
+  };
 
   const group = new THREE.Group();
   group.name = 'nature-group';
@@ -631,7 +644,8 @@ export async function createNature({
     scale,
     rotation,
     terrainY,
-    treeTypeIndex
+    treeTypeIndex,
+    groundAnchorOffset
   }) => {
     const impostor = new THREE.Group();
     impostor.name = 'tree-impostor';
@@ -649,7 +663,7 @@ export async function createNature({
     leaves.position.y = 0.8;
     impostor.add(leaves);
 
-    impostor.position.set(worldX, terrainY, worldZ);
+    impostor.position.set(worldX, terrainY - groundAnchorOffset, worldZ);
     impostor.rotation.y = rotation;
     impostor.scale.setScalar(Math.max(0.25, scale * 20.0 / TREE_SCALE_REFERENCE));
     impostor.userData = {
@@ -718,9 +732,19 @@ export async function createNature({
           TREE_SCALE_MIN +
           pseudoRandom2D(worldX, worldZ, 7.7) * (TREE_SCALE_MAX - TREE_SCALE_MIN);
         const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
+        const groundAnchorOffset = getTreeGroundAnchorOffset(treeTypeIndex, scale);
         const tree = isNearDetail
           ? template.clone(true)
-          : createTreeImpostor({ worldX, worldZ, tileKey, scale, rotation, terrainY, treeTypeIndex });
+          : createTreeImpostor({
+            worldX,
+            worldZ,
+            tileKey,
+            scale,
+            rotation,
+            terrainY,
+            treeTypeIndex,
+            groundAnchorOffset
+          });
 
         if (isNearDetail) {
           tree.userData.applePickups = [];
@@ -729,7 +753,7 @@ export async function createNature({
           tree.userData.interactable = true;
           tree.rotation.y = rotation;
           tree.scale.setScalar(scale);
-          tree.position.set(worldX, terrainY, worldZ);
+          tree.position.set(worldX, terrainY - groundAnchorOffset, worldZ);
           tree.userData.tileKey = tileKey;
         }
 
