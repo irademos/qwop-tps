@@ -363,19 +363,6 @@ export async function createNature({
     return { x, y };
   };
 
-  const getCacheTileWorldBounds = (cacheTile, cacheTileSize) => {
-    if (!cacheTile || !Number.isFinite(cacheTileSize) || cacheTileSize <= 0) {
-      return null;
-    }
-    return {
-      minX: cacheTile.x * cacheTileSize,
-      maxX: (cacheTile.x + 1) * cacheTileSize,
-      // Cache tile +Y maps toward -worldZ in render space (ground/terrain tile placement).
-      minZ: -(cacheTile.y + 1) * cacheTileSize,
-      maxZ: -cacheTile.y * cacheTileSize
-    };
-  };
-
   const resolveTreeTypeIndex = (position) => {
     const geo = getGeoForLocal?.(position);
     if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lon)) {
@@ -407,7 +394,7 @@ export async function createNature({
     if (!activeTileCache || !tile) return tileKey;
     const tileCenter = {
       x: (tile.x + 0.5) * tileSizeMeters,
-      z: -(tile.y + 0.5) * tileSizeMeters
+      z: (tile.y + 0.5) * tileSizeMeters
     };
     const cacheTile = activeTileCache.getTileCoords?.(tileCenter);
     if (!cacheTile) return tileKey;
@@ -967,9 +954,11 @@ export async function createNature({
       return;
     }
 
-    const bounds = getCacheTileWorldBounds(cacheTile, cacheTileSize);
-    if (!bounds) return;
-    const { minX, maxX, minZ, maxZ } = bounds;
+    const minX = cacheTile.x * cacheTileSize;
+    const maxX = minX + cacheTileSize;
+    // Cache tiles and nature tiles both index +Y in +worldZ; keep this conversion aligned.
+    const minZ = cacheTile.y * cacheTileSize;
+    const maxZ = minZ + cacheTileSize;
 
     const treeTileMinX = Math.floor(minX / tileSizeMeters);
     const treeTileMaxX = Math.floor((maxX - Number.EPSILON) / tileSizeMeters);
