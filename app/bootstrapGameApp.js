@@ -10131,8 +10131,21 @@ async function initCore(runtimeContext) {
       if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection && !isStaticBody) {
         const bbox = getMeshWorldBounds(mesh);
         if (bbox) {
+          let excludedColliderHandles = null;
+          if (typeof rb.numColliders === 'function' && typeof rb.collider === 'function') {
+            excludedColliderHandles = [];
+            const colliderCount = rb.numColliders();
+            for (let i = 0; i < colliderCount; i += 1) {
+              const collider = rb.collider(i);
+              if (typeof collider?.handle === 'number') {
+                excludedColliderHandles.push(collider.handle);
+              }
+            }
+          }
           const groundResolution = resolveGroundY
-            ? resolveGroundY(mesh.position.x, Math.max(mesh.position.y, bbox.max.y + 0.05), mesh.position.z)
+            ? resolveGroundY(mesh.position.x, Math.max(mesh.position.y, bbox.max.y + 0.05), mesh.position.z, {
+              excludedColliderHandles
+            })
             : null;
           const resolvedGroundY = groundResolution?.groundY ?? getTerrainHeight(mesh.position.x, mesh.position.z);
           const isDeadEntity = mesh.userData?.mode === 'dead';
