@@ -22,6 +22,10 @@ const CLIMB_SNAP_DISTANCE = 0.6;
 const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const GROUND_SMOOTH_ALPHA = 0.2;
 const GROUND_SMOOTH_SNAP_DELTA = 0.45;
+const GROUND_SMOOTH_SURFACE_SWITCH_SNAP_DELTA = 0.2;
+const GROUND_DOWNWARD_CORRECTION_THRESHOLD = 0.08;
+const GROUND_DOWNWARD_CORRECTION_MAX_RATE = 2.5;
+const GROUND_DOWNWARD_CORRECTION_MAX_VERTICAL_SPEED = 0.18;
 const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const STEEP_SLOPE_SPEED_MULTIPLIER = 0.55;
 const FRIENDLY_INTERACT_RANGE = 6;
@@ -2199,21 +2203,30 @@ export class PlayerControls {
       this.wasFrozen = false;
     }
 
+    const previousGroundResolution = this.lastGroundResolution;
     const groundResolution = this.resolveGroundY(t.x, t.y, t.z);
     this.lastGroundResolution = groundResolution;
-    const rawGroundExpectedY = groundResolution.groundY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
+    const canStandOnGround = groundResolution.metadata.walkable;
+    const selectedGroundY = canStandOnGround
+      ? groundResolution.groundY
+      : groundResolution.terrainHeight;
+    const rawGroundExpectedY = selectedGroundY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
     if (!Number.isFinite(this.smoothedGroundExpectedY)) {
       this.smoothedGroundExpectedY = rawGroundExpectedY;
     } else {
       const groundDelta = Math.abs(rawGroundExpectedY - this.smoothedGroundExpectedY);
-      if (groundDelta > GROUND_SMOOTH_SNAP_DELTA) {
+      const previousSurfaceType = previousGroundResolution?.metadata?.surfaceType;
+      const currentSurfaceType = groundResolution?.metadata?.surfaceType;
+      const terrainStampTransition = previousSurfaceType && currentSurfaceType
+        && previousSurfaceType !== currentSurfaceType;
+      if (groundDelta > GROUND_SMOOTH_SNAP_DELTA
+        || (terrainStampTransition && groundDelta > GROUND_SMOOTH_SURFACE_SWITCH_SNAP_DELTA)) {
         this.smoothedGroundExpectedY = rawGroundExpectedY;
       } else {
         this.smoothedGroundExpectedY += (rawGroundExpectedY - this.smoothedGroundExpectedY) * GROUND_SMOOTH_ALPHA;
       }
     }
     const groundExpectedY = this.smoothedGroundExpectedY;
-    const canStandOnGround = groundResolution.metadata.walkable;
     const grounded = !this.isInWater && canStandOnGround && t.y <= groundExpectedY + 0.05;
     if (grounded) {
       this.canJump = true;
@@ -2241,6 +2254,26 @@ export class PlayerControls {
         this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
       }
       t.y = groundExpectedY;
+    } else {
+      const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
+        ? this.deltaSeconds
+        : 0.016;
+      const aboveGroundDelta = t.y - groundExpectedY;
+      const isTryingToJump = this.keysPressed.has(" ");
+      const canApplyDownwardCorrection = canStandOnGround
+        && !this.isInWater
+        && !this.isClimbing
+        && !isTryingToJump
+        && Math.abs(vel.y) <= GROUND_DOWNWARD_CORRECTION_MAX_VERTICAL_SPEED;
+      if (canApplyDownwardCorrection && aboveGroundDelta > GROUND_DOWNWARD_CORRECTION_THRESHOLD) {
+        const maxStep = GROUND_DOWNWARD_CORRECTION_MAX_RATE * deltaSeconds;
+        const correctedY = t.y - Math.min(aboveGroundDelta, maxStep);
+        this.body.setTranslation({ x: t.x, y: correctedY, z: t.z }, true);
+        if (vel.y > 0) {
+          this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
+        }
+        t.y = correctedY;
+      }
     }
     const moveDirection = new THREE.Vector3(0, 0, 0);
     const movementLocked = freezeActive || ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
