@@ -956,6 +956,7 @@ export async function createNature({
 
     const minX = cacheTile.x * cacheTileSize;
     const maxX = minX + cacheTileSize;
+    // Cache tiles and nature tiles both index +Y in +worldZ; keep this conversion aligned.
     const minZ = cacheTile.y * cacheTileSize;
     const maxZ = minZ + cacheTileSize;
 
