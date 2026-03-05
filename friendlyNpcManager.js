@@ -207,6 +207,23 @@ const getHealthForLevel = (level) => {
     return spawnPos;
   };
 
+  const resolveFriendlyPosition = (position) => {
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.z)) {
+      return null;
+    }
+    const resolvedPosition = new THREE.Vector3(
+      position.x,
+      Number.isFinite(position.y) ? position.y : 0,
+      position.z
+    );
+    const terrainHeight = getTerrainHeight?.(resolvedPosition.x, resolvedPosition.z);
+    if (Number.isFinite(terrainHeight)) {
+      resolvedPosition.y = terrainHeight + FRIENDLY_GROUND_OFFSET;
+    }
+    liftPositionToBuildingTop?.(resolvedPosition, FRIENDLY_GROUND_OFFSET);
+    return resolvedPosition;
+  };
+
   const cleanupFriendly = (friendly) => {
     if (!friendly) return;
     const roadLight = friendly.model?.userData?.roadLight;
@@ -349,9 +366,10 @@ const getHealthForLevel = (level) => {
     if (!friendly?.model || !record) return;
     const position = applyTransform ? record.pos : null;
     const rotation = applyTransform ? record.rot : null;
-    if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
-      friendly.model.position.set(position.x, position.y, position.z);
-      friendly.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+    const resolvedPosition = applyTransform ? resolveFriendlyPosition(position) : null;
+    if (resolvedPosition) {
+      friendly.model.position.copy(resolvedPosition);
+      friendly.body?.setTranslation({ x: resolvedPosition.x, y: resolvedPosition.y, z: resolvedPosition.z }, true);
       friendly.setHomePosition(friendly.model.position);
       syncFriendlyRoadLight(friendly, friendly.model.position.clone());
     }
@@ -415,6 +433,29 @@ const getHealthForLevel = (level) => {
         return;
       }
       const merged = { ...existing, ...record, id: slotId };
+      if (applyTransform) {
+        const resolvedPosition = resolveFriendlyPosition(merged.pos);
+        if (resolvedPosition) {
+          const priorY = Number.isFinite(merged.pos?.y) ? merged.pos.y : null;
+          merged.pos = { x: resolvedPosition.x, y: resolvedPosition.y, z: resolvedPosition.z };
+          if (currentHost && priorY != null && Math.abs(priorY - resolvedPosition.y) > 1e-3) {
+            const entity = {
+              id: slotId,
+              type: merged.type,
+              modelPath: merged.modelPath || merged.type,
+              version: Number.isFinite(merged.version) ? merged.version : 0,
+              health: Number.isFinite(merged.hp) ? merged.hp : 0,
+              level: Number.isFinite(merged.level) ? merged.level : 1,
+              isDead: merged.alive === false,
+              model: {
+                position: resolvedPosition,
+                quaternion: merged.rot || { x: 0, y: 0, z: 0, w: 1 }
+              }
+            };
+            persistFriendlyState(entity);
+          }
+        }
+      }
       records.set(slotId, merged);
       const existingFriendly = friendlies.find(entry => entry.id === slotId);
       if (existingFriendly && syncExisting) {
