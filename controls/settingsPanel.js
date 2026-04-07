@@ -6,6 +6,7 @@ const TAB_KEY = 'settings:lastTab';
 const TABS = [
   { id: 'character', label: 'Character' },
   { id: 'inventory', label: 'Inventory' },
+  { id: 'quests', label: 'Quests' },
   { id: 'multiplayer', label: 'Multiplayer' },
   { id: 'location', label: 'Location' },
   { id: 'display', label: 'Display' },
@@ -316,6 +317,26 @@ function buildInventoryPanel() {
   elements.inventoryEatButton = eatButton;
   elements.inventoryInfoModal = infoModal;
   elements.inventoryInfoText = infoText;
+
+  return panelEl;
+}
+
+
+function buildQuestsPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-quests';
+  panelEl.dataset.panel = 'quests';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-quests');
+
+  const title = createElement('h3', 'settings-section-title', 'Accepted Quests');
+  const list = createElement('ul', 'settings-list');
+  const emptyState = createElement('div', 'settings-muted', 'Accept a quest by talking to the tutorial friendly near the origin.');
+
+  panelEl.append(title, list, emptyState);
+
+  elements.questList = list;
+  elements.questEmpty = emptyState;
 
   return panelEl;
 }
@@ -813,16 +834,18 @@ function buildPanels() {
   const characterPanel = buildCharacterPanel();
   const inventoryPanel = buildInventoryPanel();
   const multiplayerPanel = buildMultiplayerPanel();
+  const questsPanel = buildQuestsPanel();
   const locationPanel = buildLocationPanel();
   const displayPanel = buildDisplayPanel();
   const aboutPanel = buildAboutPanel();
   const accountPanel = buildAccountPanel();
   const developerPanel = buildDeveloperPanel();
-  body.append(characterPanel, inventoryPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel);
+  body.append(characterPanel, inventoryPanel, questsPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel);
   elements.panels = {
     character: characterPanel,
     inventory: inventoryPanel,
     multiplayer: multiplayerPanel,
+    quests: questsPanel,
     location: locationPanel,
     display: displayPanel,
     about: aboutPanel,
@@ -1521,6 +1544,27 @@ export function updateUI() {
     const stats = context.appState.getPlayerStats() || {};
     Object.entries(elements.characterStatFields).forEach(([key, node]) => {
       node.textContent = formatStatValue(key, stats[key]);
+    });
+  }
+
+
+  if (elements.questList) {
+    const quests = context.appState?.getQuestLog?.() ?? [];
+    elements.questList.innerHTML = '';
+    const hasQuests = quests.length > 0;
+    if (elements.questEmpty) {
+      elements.questEmpty.style.display = hasQuests ? 'none' : 'block';
+    }
+    quests.forEach((quest) => {
+      const item = createElement('li', 'settings-list-item');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = Boolean(quest.completed);
+      checkbox.disabled = true;
+      checkbox.setAttribute('aria-label', `${quest.title} completed`);
+      const label = createElement('span', '', `${quest.title} ${quest.progress || ''}`.trim());
+      item.append(checkbox, label);
+      elements.questList.appendChild(item);
     });
   }
 
