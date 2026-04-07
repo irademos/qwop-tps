@@ -8424,6 +8424,11 @@ async function initCore(runtimeContext) {
   const GPS_SNAP_DISTANCE_METERS = 20;
   const GPS_TARGET_EPSILON_METERS = 0.35;
   const GPS_PATH_EPSILON_METERS = 0.05;
+  const ORIGIN_RESET_WINDOW_MS = 3 * 60 * 1000;
+  const ORIGIN_RESET_MAX_ACCURACY_METERS = 15;
+  const ORIGIN_RESET_JUMP_DISTANCE_METERS = 200;
+  const appStartedAtMs = Date.now();
+  let originWasAutoReset = false;
 
   const computePlayerMeters = (location) => {
     if (!worldOrigin || !location) return null;
@@ -9149,7 +9154,8 @@ async function initCore(runtimeContext) {
     speed: null,
     timestamp: null,
     message: null,
-    permissionDenied: false
+    permissionDenied: false,
+    originWasReset: false
   };
 
   const debugState = {
@@ -9173,6 +9179,21 @@ async function initCore(runtimeContext) {
         setWorldOrigin({ lat: location.lat, lon: location.lon });
         rebuildMapFromCache();
       }
+      const withinOriginResetWindow = Date.now() - appStartedAtMs <= ORIGIN_RESET_WINDOW_MS;
+      const canEvaluateOriginReset = !originWasAutoReset
+        && withinOriginResetWindow
+        && worldOrigin
+        && Number.isFinite(location.accuracyMeters)
+        && location.accuracyMeters <= ORIGIN_RESET_MAX_ACCURACY_METERS;
+      if (canEvaluateOriginReset) {
+        const originDeltaMeters = distanceMeters(worldOrigin.lat, worldOrigin.lon, location.lat, location.lon);
+        if (Number.isFinite(originDeltaMeters) && originDeltaMeters >= ORIGIN_RESET_JUMP_DISTANCE_METERS) {
+          setWorldOrigin({ lat: location.lat, lon: location.lon });
+          rebuildMapFromCache();
+          didInitialGpsSnap = false;
+          originWasAutoReset = true;
+        }
+      }
       locationState.state = 'found';
       locationState.lat = location.lat;
       locationState.lon = location.lon;
@@ -9185,6 +9206,7 @@ async function initCore(runtimeContext) {
       locationState.timestamp = location.timestamp;
       locationState.message = null;
       locationState.permissionDenied = false;
+      locationState.originWasReset = originWasAutoReset;
       const playerMeters = computePlayerMeters(location);
       if (playerMeters) {
         locationState.playerX = playerMeters.x;
