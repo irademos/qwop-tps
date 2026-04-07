@@ -9790,6 +9790,7 @@ async function initCore(runtimeContext) {
       }
     },
     getPlayerStats: () => ({ ...statsState }),
+    getQuestLog: () => window.questManager?.getQuestLog?.() || [],
     getCoins: () => (Number.isFinite(statsState.coins) ? statsState.coins : 0),
     addCoins: (delta) => {
       const safeDelta = Number.isFinite(delta) ? delta : 0;
