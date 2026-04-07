@@ -10,6 +10,11 @@ const QUEST_FIRST_GPS_TARGET_METERS = 30;
 const QUEST_FIRST_GPS_XP = 60;
 const QUEST_SECOND_MUSHROOM_TARGET = 1;
 const QUEST_SECOND_MUSHROOM_XP = 35;
+const QUEST_FRIEND_WANDER_RADIUS = 5;
+const QUEST_FRIEND_ENGAGE_RADIUS = 5;
+const QUEST_FRIEND_DISENGAGE_RADIUS = 8;
+const QUEST_FRIEND_FOLLOW_DISTANCE = 3;
+const QUEST_FRIEND_FOLLOW_START_DISTANCE = 4.5;
 
 const TUTORIAL_QUESTS = [
   {
@@ -49,6 +54,8 @@ export class QuestManager {
     this.state = {
       friend: null,
       pendingSpawn: false,
+      deltaSeconds: 0,
+      shouldFollowPlayer: false,
       acceptedQuestIds: [],
       completedQuestIds: [],
       gpsQuestStartFix: null,
@@ -57,7 +64,9 @@ export class QuestManager {
     };
   }
 
-  setDeltaSeconds() {}
+  setDeltaSeconds(deltaSeconds) {
+    this.state.deltaSeconds = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+  }
 
   getQuestFriend() {
     return this.state.friend;
@@ -99,10 +108,12 @@ export class QuestManager {
         questFriend.type = QUEST_FRIEND_MODEL;
         questFriend.model.userData.hideInMapView = true;
         questFriend.model.userData.isQuestFriend = true;
-        questFriend.setNoticeRadius(0);
-        questFriend.setWanderRadius(0);
-        questFriend.setEngageRadius(0);
-        questFriend.setDisengageRadius(0);
+        questFriend.enableDanceWhileEngaged = false;
+        questFriend.setNoticeRadius(10);
+        questFriend.setWanderRadius(QUEST_FRIEND_WANDER_RADIUS);
+        questFriend.setEngageRadius(QUEST_FRIEND_ENGAGE_RADIUS);
+        questFriend.setDisengageRadius(QUEST_FRIEND_DISENGAGE_RADIUS);
+        questFriend.setFollowTarget(null);
         questFriend.setLevel(1, { preserveHealth: false });
         questFriend.resetHealth();
         questFriend.setPosition(spawnX, spawnY, spawnZ);
@@ -173,7 +184,19 @@ export class QuestManager {
           label: "No thanks, see you later.",
           reply: "No worries. Come back anytime.",
           onSelect: "declineTutorialQuest"
-        }
+        },
+        ...(this.state.shouldFollowPlayer ? [
+          {
+            label: "why are you following me?",
+            reply: "I’m scared of the zombies out there, so I feel safer sticking close to you.",
+            onSelect: "askWhyFollowing"
+          },
+          {
+            label: "stop following me",
+            reply: "Okay, I’ll stay here and keep watch.",
+            onSelect: "stopFollowingQuestFriend"
+          }
+        ] : [])
       ]
     };
   }
@@ -182,6 +205,11 @@ export class QuestManager {
     if (!option?.onSelect) return;
     if (option.onSelect === "acceptTutorialQuest") {
       this.acceptSuggestedQuest();
+      return;
+    }
+    if (option.onSelect === "stopFollowingQuestFriend") {
+      this.state.shouldFollowPlayer = false;
+      this.state.friend?.setFollowTarget(null);
     }
   }
 
@@ -191,6 +219,11 @@ export class QuestManager {
     if (!this.state.acceptedQuestIds.includes(quest.id)) {
       this.state.acceptedQuestIds.push(quest.id);
     }
+    this.state.shouldFollowPlayer = true;
+    this.state.friend?.setFollowTarget(this.getPlayerModel?.(), {
+      followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+      followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE
+    });
     if (quest.id === "gps-walk-30m") {
       const latestFix = window.latestLocation;
       this.state.gpsQuestStartFix = hasValidFix(latestFix) ? { lat: latestFix.lat, lon: latestFix.lon } : null;
@@ -267,6 +300,19 @@ export class QuestManager {
 
   update() {
     this.ensureQuestFriendSpawned();
+    const friend = this.state.friend;
+    const playerModel = this.getPlayerModel?.();
+    if (friend?.model && playerModel) {
+      if (this.state.shouldFollowPlayer) {
+        friend.setFollowTarget(playerModel, {
+          followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+          followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE
+        });
+      } else {
+        friend.setFollowTarget(null);
+      }
+      friend.updateAI(this.state.deltaSeconds, playerModel, {});
+    }
     this.updateGpsQuestProgress();
   }
 }
