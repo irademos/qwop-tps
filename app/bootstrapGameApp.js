@@ -41,6 +41,7 @@ import { createApples, APPLE_ITEM_ID } from '../items/apple.js';
 import { createHomeSystem } from '../home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 import { configureSpawnAlignment, getSpawnPosition, getSpawnY } from '../spawnUtils.js';
 import { createLocationProvider } from '../location.js';
 import { fetchOSMData } from '../osmClient.js';
@@ -2685,7 +2686,7 @@ async function initCore(runtimeContext) {
     const existingBody = monster.body;
     if (existingBody && rapierWorld.getRigidBody(existingBody.handle)) {
       rbToMesh.delete(existingBody);
-      rapierWorld.removeRigidBody(existingBody);
+      removeRigidBodySafely(rapierWorld, existingBody);
       model.userData.rb = null;
     }
 
@@ -2718,7 +2719,7 @@ async function initCore(runtimeContext) {
     const body = monster.body;
     if (body && rapierWorld?.getRigidBody(body.handle)) {
       rbToMesh.delete(body);
-      rapierWorld.removeRigidBody(body);
+      removeRigidBodySafely(rapierWorld, body);
     }
     monster.model.userData.rb = null;
     monster.setBackgroundMode?.(true);
@@ -2748,7 +2749,7 @@ async function initCore(runtimeContext) {
     const body = npc?.body;
     if (body && rapierWorld?.getRigidBody(body.handle)) {
       rbToMesh.delete(body);
-      rapierWorld.removeRigidBody(body);
+      removeRigidBodySafely(rapierWorld, body);
     }
   };
 
@@ -3140,7 +3141,7 @@ async function initCore(runtimeContext) {
     if (!rapierWorld) return;
 
     if (buildingColliderBody && rapierWorld.getRigidBody(buildingColliderBody.handle)) {
-      rapierWorld.removeRigidBody(buildingColliderBody);
+      removeRigidBodySafely(rapierWorld, buildingColliderBody);
       buildingColliderBody = null;
     }
 
@@ -3507,7 +3508,7 @@ async function initCore(runtimeContext) {
     const body = monster.body;
     if (body && rapierWorld?.getRigidBody(body.handle)) {
       rbToMesh.delete(body);
-      rapierWorld.removeRigidBody(body);
+      removeRigidBodySafely(rapierWorld, body);
     }
     if (monster.model?.userData?.rb) {
       monster.model.userData.rb = null;
@@ -8544,7 +8545,7 @@ async function initCore(runtimeContext) {
   homeSystem?.registerPlacedObjects?.({ bed, craftTable });
   if (rapierWorld && craftTable?.mesh) {
     if (craftTableColliderBody && rapierWorld.getRigidBody(craftTableColliderBody.handle)) {
-      rapierWorld.removeRigidBody(craftTableColliderBody);
+      removeRigidBodySafely(rapierWorld, craftTableColliderBody);
       craftTableColliderBody = null;
     }
     const bounds = new THREE.Box3().setFromObject(craftTable.mesh);
@@ -10175,7 +10176,7 @@ async function initCore(runtimeContext) {
       if (mesh.position.y < -50) {
         disposeSceneObject(mesh);
         rbToMesh.delete(rb);
-        rapierWorld.removeRigidBody(rb);
+        removeRigidBodySafely(rapierWorld, rb);
       }
     }
 

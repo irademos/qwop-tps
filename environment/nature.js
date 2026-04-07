@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { setClimbableAreas } from '../controls/climb.js';
+import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 
 const TREE_MODEL_URL = '/assets/props/low_poly_tree_pack.glb';
 const TREE_SCALE_REFERENCE = 0.016;
@@ -895,11 +896,11 @@ export async function createNature({
     entry.group.clear();
     for (const physics of entry.rockPhysics ?? []) {
       if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
-      if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+      if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
     }
     for (const physics of entry.treePhysics ?? []) {
       if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
-      if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+      if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
     }
     treeTiles.delete(tileKey);
     climbableAreasByTile.delete(tileKey);
@@ -1055,7 +1056,7 @@ export async function createNature({
     entry.group.remove(tree);
     const treePhysics = tree.userData?.physics;
     if (treePhysics?.collider) rapierWorld?.removeCollider(treePhysics.collider, true);
-    if (treePhysics?.rb) rapierWorld?.removeRigidBody(treePhysics.rb);
+    if (treePhysics?.rb) removeRigidBodySafely(rapierWorld, treePhysics.rb);
     entry.treePhysics = (entry.treePhysics ?? []).filter((physics) => physics !== treePhysics);
     const tileClimbAreas = climbableAreasByTile.get(tileKey);
     const treeAreas = tree.userData?.climbAreas ?? [];
@@ -1084,7 +1085,7 @@ export async function createNature({
         entry.group.remove(rock);
         const rockPhysics = rock.userData?.physics;
         if (rockPhysics?.collider) rapierWorld?.removeCollider(rockPhysics.collider, true);
-        if (rockPhysics?.rb) rapierWorld?.removeRigidBody(rockPhysics.rb);
+        if (rockPhysics?.rb) removeRigidBodySafely(rapierWorld, rockPhysics.rb);
         entry.rockPhysics = (entry.rockPhysics ?? []).filter((physics) => physics !== rockPhysics);
       }
     }
@@ -1101,11 +1102,11 @@ export async function createNature({
       group.remove(entry.group);
       for (const physics of entry.rockPhysics ?? []) {
         if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
-        if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+        if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
       }
       for (const physics of entry.treePhysics ?? []) {
         if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
-        if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+        if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
       }
     }
     treeTiles.clear();
@@ -1125,11 +1126,11 @@ export async function createNature({
       group.remove(entry.group);
       for (const physics of entry.rockPhysics ?? []) {
         if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
-        if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+        if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
       }
       for (const physics of entry.treePhysics ?? []) {
         if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
-        if (physics?.rb) rapierWorld?.removeRigidBody(physics.rb);
+        if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
       }
     }
     treeTiles.clear();

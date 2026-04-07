@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { removeRigidBodySafely } from './rapierSafety.js';
 
 const DEFAULT_PADDING = new THREE.Vector3(0, 0, 0);
 
@@ -110,7 +111,5 @@ export const syncStaticBoxColliderForObject = (entry) => {
 
 export const removeStaticBoxCollider = (entry) => {
   if (!entry?.body || !entry?.rapierWorld) return;
-  const existingBody = entry.rapierWorld.getRigidBody?.(entry.body.handle);
-  if (!existingBody) return;
-  entry.rapierWorld.removeRigidBody(entry.body);
+  removeRigidBodySafely(entry.rapierWorld, entry.body);
 };
