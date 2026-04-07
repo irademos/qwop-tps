@@ -110,6 +110,7 @@ import {
   renameProfile,
   saveCharacterModel,
   saveCustomization,
+  saveQuestState,
   saveSleepTimestamp,
   saveStatsImmediate,
   saveStatsThrottled,
@@ -7940,6 +7941,14 @@ async function initCore(runtimeContext) {
     },
     onSleepStart: startSleepSession,
     onSleepEnd: endSleepSession
+  });
+  window.questManager?.hydratePersistentState?.(playerProfile?.quests);
+  window.questManager?.setQuestStateChangeListener?.((questState) => {
+    playerProfile = playerProfile || {};
+    playerProfile.quests = questState;
+    if (profileNameKey) {
+      void saveQuestState(profileNameKey, questState);
+    }
   });
   playerControls.throwBomb = (position, direction) => {
     if (!bomb?.mesh || bomb.holder !== playerControls) return false;

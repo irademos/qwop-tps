@@ -7,6 +7,7 @@ export {
   renameProfile,
   saveCharacterModel,
   saveCustomization,
+  saveQuestState,
   saveSleepTimestamp,
   saveStatsImmediate,
   saveStatsThrottled

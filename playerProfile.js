@@ -42,6 +42,10 @@ const DEFAULT_SPELLS = {
   shield: true,
   fly: true
 };
+const DEFAULT_QUESTS = {
+  acceptedQuestIds: [],
+  completedQuestIds: []
+};
 
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
@@ -85,11 +89,25 @@ function buildProfile(name) {
     homeStorage: { ...DEFAULT_HOME_STORAGE },
     customization: mergeCustomization(DEFAULT_CUSTOMIZATION),
     spells: { ...DEFAULT_SPELLS },
+    quests: mergeQuests(DEFAULT_QUESTS),
     characterModel: null,
     sleepStartedAt: null,
     lastStatUpdateAt: now,
     createdAt: now,
     updatedAt: now
+  };
+}
+
+function mergeQuests(quests) {
+  const acceptedQuestIds = Array.isArray(quests?.acceptedQuestIds)
+    ? quests.acceptedQuestIds.filter((id) => typeof id === 'string' && id.trim())
+    : [];
+  const completedQuestIds = Array.isArray(quests?.completedQuestIds)
+    ? quests.completedQuestIds.filter((id) => typeof id === 'string' && id.trim())
+    : [];
+  return {
+    acceptedQuestIds: Array.from(new Set(acceptedQuestIds)),
+    completedQuestIds: Array.from(new Set(completedQuestIds))
   };
 }
 
@@ -163,6 +181,7 @@ async function loadProfileForName(profileRef, trimmedName) {
   const mergedHomeStorage = profile.homeStorage ? { ...profile.homeStorage } : { ...DEFAULT_HOME_STORAGE };
   const mergedCustomization = mergeCustomization(profile.customization);
   const mergedSpells = mergeSpells(profile.spells);
+  const mergedQuests = mergeQuests(profile.quests);
   const mergedCharacterModel = typeof profile.characterModel === 'string' ? profile.characterModel : null;
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
@@ -172,8 +191,9 @@ async function loadProfileForName(profileRef, trimmedName) {
     || profile.customization.shirts == null
     || profile.customization.hats == null;
   const spellsMissing = profile.spells == null;
+  const questsMissing = profile.quests == null;
   const characterModelMissing = profile.characterModel !== mergedCharacterModel;
-  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || characterModelMissing) {
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || questsMissing || characterModelMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
@@ -205,6 +225,12 @@ async function loadProfileForName(profileRef, trimmedName) {
     } else {
       profile.spells = mergedSpells;
     }
+    if (questsMissing) {
+      updatePayload.quests = mergedQuests;
+      profile.quests = mergedQuests;
+    } else {
+      profile.quests = mergedQuests;
+    }
     if (characterModelMissing) {
       updatePayload.characterModel = mergedCharacterModel;
       profile.characterModel = mergedCharacterModel;
@@ -222,6 +248,7 @@ async function loadProfileForName(profileRef, trimmedName) {
     profile.homeStorage = mergedHomeStorage;
     profile.customization = mergedCustomization;
     profile.spells = mergedSpells;
+    profile.quests = mergedQuests;
     profile.characterModel = mergedCharacterModel;
   }
 
@@ -559,6 +586,18 @@ export async function saveSleepTimestamp(nameKey, sleepStartedAt) {
     });
   } catch (error) {
     console.error('Failed to save sleep timestamp for', nameKey, error);
+  }
+}
+
+export async function saveQuestState(nameKey, questState) {
+  if (!nameKey) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}`), {
+      quests: mergeQuests(questState),
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.error('Failed to save quest state for', nameKey, error);
   }
 }
 
