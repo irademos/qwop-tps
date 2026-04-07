@@ -62,6 +62,36 @@ export class QuestManager {
       gpsQuestDistanceMeters: 0,
       mushroomCount: 0
     };
+    this.onQuestStateChange = null;
+  }
+
+  setQuestStateChangeListener(listener) {
+    this.onQuestStateChange = typeof listener === "function" ? listener : null;
+  }
+
+  getPersistentState() {
+    return {
+      acceptedQuestIds: [...this.state.acceptedQuestIds],
+      completedQuestIds: [...this.state.completedQuestIds]
+    };
+  }
+
+  hydratePersistentState(savedState) {
+    const accepted = Array.isArray(savedState?.acceptedQuestIds)
+      ? savedState.acceptedQuestIds.filter((id) => typeof id === "string" && id.trim())
+      : [];
+    const completed = Array.isArray(savedState?.completedQuestIds)
+      ? savedState.completedQuestIds.filter((id) => typeof id === "string" && id.trim())
+      : [];
+    const acceptedSet = new Set(accepted);
+    completed.forEach((id) => acceptedSet.add(id));
+    this.state.acceptedQuestIds = Array.from(acceptedSet);
+    this.state.completedQuestIds = Array.from(new Set(completed));
+  }
+
+  notifyQuestStateChanged() {
+    if (!this.onQuestStateChange) return;
+    this.onQuestStateChange(this.getPersistentState());
   }
 
   setDeltaSeconds(deltaSeconds) {
@@ -218,6 +248,7 @@ export class QuestManager {
     if (!quest) return;
     if (!this.state.acceptedQuestIds.includes(quest.id)) {
       this.state.acceptedQuestIds.push(quest.id);
+      this.notifyQuestStateChanged();
     }
     this.state.shouldFollowPlayer = true;
     this.state.friend?.setFollowTarget(this.getPlayerModel?.(), {
@@ -245,6 +276,7 @@ export class QuestManager {
   completeQuest(questId, xpReward) {
     if (this.state.completedQuestIds.includes(questId)) return;
     this.state.completedQuestIds.push(questId);
+    this.notifyQuestStateChanged();
     this.addXp?.(xpReward);
   }
 
