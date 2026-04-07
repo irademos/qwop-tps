@@ -5,6 +5,7 @@ import { updateArrowProjectile } from "./arrow.js";
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../healthUtils.js";
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { getAttackTypes } from './melee.js';
+import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 
 const detachProjectileMesh = (mesh) => {
   if (!mesh) return;
@@ -56,9 +57,7 @@ export function removeProjectileAt(projectiles, index) {
   projectiles.splice(index, 1);
   if (body) {
     window.rbToMesh?.delete?.(body);
-    if (window.rapierWorld?.getRigidBody(body.handle)) {
-      window.rapierWorld.removeRigidBody(body);
-    }
+    removeRigidBodySafely(window.rapierWorld, body);
   }
 }
 
