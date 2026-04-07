@@ -1016,6 +1016,44 @@ export async function createNature({
     return removed;
   };
 
+
+  const spawnQuestRock = (position) => {
+    if (!position) return null;
+    const tile = {
+      x: Math.floor(position.x / tileSizeMeters),
+      y: Math.floor(position.z / tileSizeMeters)
+    };
+    const tileKey = getTileKey(tile);
+    let entry = treeTiles.get(tileKey);
+    if (!entry) {
+      const centerTile = getTileFromKey(lastPlayerTileKey) ?? tile;
+      entry = createTileTrees(tile, centerTile);
+    }
+    if (!entry?.group) return null;
+
+    const radius = (ROCK_MIN_RADIUS + ROCK_MAX_RADIUS) * 0.5;
+    const geometryIndex = Math.floor(Math.random() * rockGeometries.length) % rockGeometries.length;
+    const rock = new THREE.Mesh(rockGeometries[geometryIndex], rockMaterial);
+    rock.castShadow = true;
+    rock.receiveShadow = true;
+    const terrainY = getTerrainHeight?.(position.x, position.z) ?? position.y ?? 0;
+    rock.position.set(position.x, terrainY + radius * 0.36, position.z);
+    const uniformScale = radius * 1.8;
+    rock.scale.set(uniformScale, uniformScale * 0.85, uniformScale * 0.95);
+    rock.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI * 2, Math.random() * Math.PI);
+    rock.userData.tileKey = tileKey;
+    rock.userData.rockRadius = radius;
+
+    entry.group.add(rock);
+    entry.rocks.push(rock);
+    const physics = createRockCollider(rock, radius);
+    if (physics) {
+      entry.rockPhysics.push(physics);
+      rock.userData.physics = physics;
+    }
+    return rock;
+  };
+
   const setTileCache = (nextCache) => {
     activeTileCache = nextCache ?? null;
     tileSizeMeters = TREE_TILE_SIZE_METERS;
@@ -1097,6 +1135,7 @@ export async function createNature({
     getClosestTree,
     removeTree,
     removeRocksInRadius,
+    spawnQuestRock,
     setTreeColliderEnabled,
     dispose
   };

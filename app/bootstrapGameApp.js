@@ -3038,6 +3038,7 @@ async function initCore(runtimeContext) {
     onAnimalRemoved: ({ animal, wasDead, position }) => {
       if (!wasDead || !position) return;
       notifyAchievementProgress('animalsKilled', 1);
+      window.questManager?.handleAnimalKilled?.(animal);
       for (let i = 0; i < 2; i += 1) {
         const angle = (i / 2) * Math.PI * 2;
         const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
@@ -5928,6 +5929,7 @@ async function initCore(runtimeContext) {
           const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
           spawnCraftedPickup(itemId, basePos.clone().add(offset), bundleAmount);
         }
+        window.questManager?.handleCraftedItem?.();
       }
       returnUnusedCraftMaterials(craftState.selection, recipe, craftCount);
       craftState.selection = null;
@@ -6595,6 +6597,7 @@ async function initCore(runtimeContext) {
     if (isZombieMonsterType(monster)) {
       notifyAchievementProgress('zombiesKilled', 1);
     }
+    window.questManager?.handleMonsterKilled?.(monster);
     const typeLabel = String(monster?.type || monster?.modelPath || '').toLowerCase();
     if (typeLabel.includes('golem')) {
       notifyAchievementProgress('golemsKilled', 1);
@@ -6766,6 +6769,7 @@ async function initCore(runtimeContext) {
       const removedRockPositions = natureController.removeRocksInRadius(hitPosition, BOMB_DAMAGE_RADIUS);
       if (removedRockPositions.length > 0) {
         notifyAchievementProgress('rocksBlownUp', removedRockPositions.length);
+        window.questManager?.handleRockBlownUp?.(removedRockPositions.length);
       }
       removedRockPositions.forEach((rockPosition) => {
         for (let i = 0; i < 3; i += 1) {
@@ -7786,6 +7790,57 @@ async function initCore(runtimeContext) {
     bomb.mesh.visible = true;
     bomb.holder = null;
   }
+
+
+
+  const getTutorialNearbyPosition = (radius = 4.5) => {
+    if (!playerModel?.position) return null;
+    const angle = Math.random() * Math.PI * 2;
+    const x = playerModel.position.x + Math.cos(angle) * radius;
+    const z = playerModel.position.z + Math.sin(angle) * radius;
+    const y = (getTerrainHeight?.(x, z) ?? playerModel.position.y) + 0.3;
+    return new THREE.Vector3(x, y, z);
+  };
+
+  window.spawnTutorialMerchantNearby = async () => {
+    const position = getTutorialNearbyPosition(5.5);
+    if (!position) return;
+    await spawnMerchantAtFeature({
+      position,
+      scene,
+      attachPhysics: attachMonsterPhysics,
+      getTerrainHeight,
+      liftPositionToBuildingTop
+    });
+  };
+
+  window.spawnTutorialDeerNearby = async () => {
+    const position = getTutorialNearbyPosition(6.5);
+    if (!position) return;
+    await animalManager?.spawnDeerAt?.(position);
+  };
+
+  window.spawnTutorialBowAndArrowsNearby = () => {
+    const bowPos = getTutorialNearbyPosition(4.2);
+    if (bowPos) {
+      spawnBowPickup(bowPos);
+    }
+    const arrowPos = getTutorialNearbyPosition(3.6);
+    if (arrowPos) {
+      spawnArrowPickup(arrowPos, 18);
+    }
+  };
+
+  window.spawnTutorialRockAndBombNearby = () => {
+    const rockPos = getTutorialNearbyPosition(6.2);
+    if (rockPos) {
+      natureController?.spawnQuestRock?.(rockPos);
+    }
+    const bombPos = getTutorialNearbyPosition(4.6);
+    if (bombPos) {
+      spawnBombPickup(bombPos);
+    }
+  };
 
   function spawnAutumnSwordPickup(position) {
     if (!autumnSword?.mesh) return;
