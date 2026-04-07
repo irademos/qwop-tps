@@ -100,6 +100,7 @@ import {
 import { appContext } from '../src/runtime/appContext.js';
 import { getAttackTypes } from '../items/melee.js';
 import { exposeDebugGlobals } from '../src/runtime/exposeDebugGlobals.js';
+import { claimAchievement, getAchievementView, mergeAchievementState, recordAchievementProgress } from '../achievements.js';
 
 import {
   clearStoredPin,
@@ -111,6 +112,7 @@ import {
   saveCharacterModel,
   saveCustomization,
   saveQuestState,
+  saveAchievementState,
   saveSleepTimestamp,
   saveStatsImmediate,
   saveStatsThrottled,
@@ -2488,6 +2490,7 @@ async function initCore(runtimeContext) {
       bowHeldMesh.visible = false;
     }
     addToInventory('bow', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
     bow.localHoldOrigin = 'world';
     setPlayerWeaponType(holder, bow.type);
     playerControls.updateAmmoUI?.(true);
@@ -2563,6 +2566,7 @@ async function initCore(runtimeContext) {
     if (heldMesh) heldMesh.visible = true;
     unequipOtherInventoryItems('bomb');
     addToInventory('bomb', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
     bomb.localHoldOrigin = 'world';
     setPlayerWeaponType(holder, bomb.type);
   };
@@ -2626,6 +2630,7 @@ async function initCore(runtimeContext) {
     if (heldMesh) heldMesh.visible = true;
     unequipOtherInventoryItems('autumnSword');
     addToInventory('autumnSword', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
     autumnSword.localHoldOrigin = 'world';
     setPlayerWeaponType(holder, autumnSword.type);
   };
@@ -3032,6 +3037,7 @@ async function initCore(runtimeContext) {
     getTerrainHeight,
     onAnimalRemoved: ({ animal, wasDead, position }) => {
       if (!wasDead || !position) return;
+      notifyAchievementProgress('animalsKilled', 1);
       for (let i = 0; i < 2; i += 1) {
         const angle = (i / 2) * Math.PI * 2;
         const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
@@ -3932,6 +3938,66 @@ async function initCore(runtimeContext) {
       treasurePopup.classList.remove('visible');
       treasurePopupTimer = null;
     }, 2000);
+  };
+  const achievementBanner = document.createElement('div');
+  achievementBanner.className = 'achievement-banner hidden';
+  achievementBanner.setAttribute('aria-live', 'polite');
+  achievementBanner.setAttribute('aria-atomic', 'true');
+  achievementBanner.innerHTML = '<div class="achievement-banner-title"></div><div class="achievement-banner-subtitle"></div>';
+  document.body.appendChild(achievementBanner);
+  const achievementBannerTitle = achievementBanner.querySelector('.achievement-banner-title');
+  const achievementBannerSubtitle = achievementBanner.querySelector('.achievement-banner-subtitle');
+  let achievementBannerTimer = null;
+  const achievementState = mergeAchievementState(playerProfile?.achievements);
+  let questCompletionsTracked = Array.isArray(playerProfile?.quests?.completedQuestIds)
+    ? playerProfile.quests.completedQuestIds.length
+    : 0;
+  let climbedSinceGrounded = false;
+  const showAchievementBanner = (title, xpAmount) => {
+    if (!achievementBannerTitle || !achievementBannerSubtitle) return;
+    achievementBannerTitle.textContent = `Achievement Unlocked: ${title}`;
+    achievementBannerSubtitle.textContent = `+${Math.max(0, Math.floor(xpAmount || 0))} XP`;
+    achievementBanner.classList.remove('hidden');
+    if (achievementBannerTimer) {
+      clearTimeout(achievementBannerTimer);
+    }
+    achievementBannerTimer = setTimeout(() => {
+      achievementBanner.classList.add('hidden');
+      achievementBannerTimer = null;
+    }, 2200);
+  };
+  const persistAchievementProgress = () => {
+    if (!profileNameKey) return;
+    void saveAchievementState(profileNameKey, achievementState);
+  };
+  const applyAchievementRewards = (rewards = {}) => {
+    const grants = [];
+    Object.entries(rewards).forEach(([itemId, value]) => {
+      const amount = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+      if (!amount) return;
+      if (itemId === 'coins') {
+        setStat('coins', (Number.isFinite(statsState.coins) ? statsState.coins : 0) + amount);
+        grants.push(`${amount} coins`);
+      } else {
+        addToInventory(itemId, amount);
+        const label = inventoryCatalog[itemId]?.name || itemId;
+        grants.push(`${amount} ${label}`);
+      }
+    });
+    if (grants.length) {
+      showTreasurePopup(`Reward claimed: ${grants.join(', ')}`);
+    }
+    return grants;
+  };
+  const notifyAchievementProgress = (metric, amount = 1) => {
+    const unlocked = recordAchievementProgress(achievementState, metric, amount);
+    if (!unlocked.length) return;
+    unlocked.forEach((achievement) => {
+      addPlayerXp(achievement.xp);
+      showAchievementBanner(achievement.title, achievement.xp);
+    });
+    persistAchievementProgress();
+    updateSettingsUI();
   };
   const XP_GAIN_DISPLAY_MS = 900;
   const XP_LEVEL_UP_DISPLAY_MS = 900;
@@ -4942,6 +5008,7 @@ async function initCore(runtimeContext) {
     mushroomPickupGrid.remove(pickup);
     handleDroppedWorldPickupCollected(pickup);
     window.questManager?.handleMushroomCollected?.(pickup);
+    notifyAchievementProgress('mushroomsCollected', 1);
     return true;
   }
 
@@ -6524,6 +6591,14 @@ async function initCore(runtimeContext) {
     const baseXp = getMonsterXpForLevel(monsterLevel);
     const bonusXp = withFriend ? 50 : 0;
     addPlayerXp(baseXp + bonusXp);
+    notifyAchievementProgress('monstersKilled', 1);
+    if (isZombieMonsterType(monster)) {
+      notifyAchievementProgress('zombiesKilled', 1);
+    }
+    const typeLabel = String(monster?.type || monster?.modelPath || '').toLowerCase();
+    if (typeLabel.includes('golem')) {
+      notifyAchievementProgress('golemsKilled', 1);
+    }
   };
   window.onPlayerKill = () => {
     const currentLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
@@ -6689,6 +6764,9 @@ async function initCore(runtimeContext) {
 
     if (natureController?.removeRocksInRadius) {
       const removedRockPositions = natureController.removeRocksInRadius(hitPosition, BOMB_DAMAGE_RADIUS);
+      if (removedRockPositions.length > 0) {
+        notifyAchievementProgress('rocksBlownUp', removedRockPositions.length);
+      }
       removedRockPositions.forEach((rockPosition) => {
         for (let i = 0; i < 3; i += 1) {
           const angle = (i / 3) * Math.PI * 2;
@@ -6716,6 +6794,10 @@ async function initCore(runtimeContext) {
     });
     if (latest) {
       latest.userData.skipTerrainCorrection = true;
+      const localId = multiplayer?.getId?.();
+      if (!shooterId || (localId && shooterId === localId)) {
+        notifyAchievementProgress('bowShots', 1);
+      }
     }
   }
 
@@ -7944,6 +8026,14 @@ async function initCore(runtimeContext) {
   });
   window.questManager?.hydratePersistentState?.(playerProfile?.quests);
   window.questManager?.setQuestStateChangeListener?.((questState) => {
+    const completedCount = Array.isArray(questState?.completedQuestIds)
+      ? questState.completedQuestIds.length
+      : 0;
+    const newlyCompleted = Math.max(0, completedCount - questCompletionsTracked);
+    if (newlyCompleted > 0) {
+      notifyAchievementProgress('questsCompleted', newlyCompleted);
+      questCompletionsTracked = completedCount;
+    }
     playerProfile = playerProfile || {};
     playerProfile.quests = questState;
     if (profileNameKey) {
@@ -7957,6 +8047,7 @@ async function initCore(runtimeContext) {
     spawnBombProjectileWithPerfFlags(scene, projectiles, position, direction, shooterId);
     unequipInventoryItem('bomb');
     removeFromInventory('bomb', 1);
+    notifyAchievementProgress('bombsThrown', 1);
     return true;
   };
   playerControls.getInventoryItemHand = (itemId) => getInventoryItemHand(itemId);
@@ -9800,6 +9891,15 @@ async function initCore(runtimeContext) {
     },
     getPlayerStats: () => ({ ...statsState }),
     getQuestLog: () => window.questManager?.getQuestLog?.() || [],
+    getAchievements: () => getAchievementView(achievementState),
+    claimAchievementReward: (achievementId) => {
+      const claimed = claimAchievement(achievementState, achievementId);
+      if (!claimed) return { status: 'unavailable' };
+      const grants = applyAchievementRewards(claimed.rewards);
+      persistAchievementProgress();
+      updateSettingsUI();
+      return { status: 'ok', achievement: claimed, grants };
+    },
     getCoins: () => (Number.isFinite(statsState.coins) ? statsState.coins : 0),
     addCoins: (delta) => {
       const safeDelta = Number.isFinite(delta) ? delta : 0;
@@ -10224,6 +10324,13 @@ async function initCore(runtimeContext) {
 
     if (!mapViewEnabled) {
       playerControls.update();
+      if (playerControls?.isClimbing && !climbedSinceGrounded) {
+        climbedSinceGrounded = true;
+        notifyAchievementProgress('treesClimbed', 1);
+      }
+      if (!playerControls?.isClimbing) {
+        climbedSinceGrounded = false;
+      }
     }
     if (craftState.swirl?.line) {
       craftState.swirl.line.rotation.y += frameDelta * 2;

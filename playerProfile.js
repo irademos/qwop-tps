@@ -46,6 +46,10 @@ const DEFAULT_QUESTS = {
   acceptedQuestIds: [],
   completedQuestIds: []
 };
+const DEFAULT_ACHIEVEMENTS = {
+  trackers: {},
+  achievements: {}
+};
 
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
@@ -90,6 +94,7 @@ function buildProfile(name) {
     customization: mergeCustomization(DEFAULT_CUSTOMIZATION),
     spells: { ...DEFAULT_SPELLS },
     quests: mergeQuests(DEFAULT_QUESTS),
+    achievements: mergeAchievements(DEFAULT_ACHIEVEMENTS),
     characterModel: null,
     sleepStartedAt: null,
     lastStatUpdateAt: now,
@@ -109,6 +114,17 @@ function mergeQuests(quests) {
     acceptedQuestIds: Array.from(new Set(acceptedQuestIds)),
     completedQuestIds: Array.from(new Set(completedQuestIds))
   };
+}
+
+
+function mergeAchievements(achievements) {
+  const trackers = achievements?.trackers && typeof achievements.trackers === 'object'
+    ? { ...achievements.trackers }
+    : {};
+  const statuses = achievements?.achievements && typeof achievements.achievements === 'object'
+    ? { ...achievements.achievements }
+    : {};
+  return { trackers, achievements: statuses };
 }
 
 function normalizeStatValue(key, value) {
@@ -182,6 +198,7 @@ async function loadProfileForName(profileRef, trimmedName) {
   const mergedCustomization = mergeCustomization(profile.customization);
   const mergedSpells = mergeSpells(profile.spells);
   const mergedQuests = mergeQuests(profile.quests);
+  const mergedAchievements = mergeAchievements(profile.achievements);
   const mergedCharacterModel = typeof profile.characterModel === 'string' ? profile.characterModel : null;
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
@@ -192,8 +209,9 @@ async function loadProfileForName(profileRef, trimmedName) {
     || profile.customization.hats == null;
   const spellsMissing = profile.spells == null;
   const questsMissing = profile.quests == null;
+  const achievementsMissing = profile.achievements == null;
   const characterModelMissing = profile.characterModel !== mergedCharacterModel;
-  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || questsMissing || characterModelMissing) {
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || questsMissing || achievementsMissing || characterModelMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
@@ -231,6 +249,12 @@ async function loadProfileForName(profileRef, trimmedName) {
     } else {
       profile.quests = mergedQuests;
     }
+    if (achievementsMissing) {
+      updatePayload.achievements = mergedAchievements;
+      profile.achievements = mergedAchievements;
+    } else {
+      profile.achievements = mergedAchievements;
+    }
     if (characterModelMissing) {
       updatePayload.characterModel = mergedCharacterModel;
       profile.characterModel = mergedCharacterModel;
@@ -249,6 +273,7 @@ async function loadProfileForName(profileRef, trimmedName) {
     profile.customization = mergedCustomization;
     profile.spells = mergedSpells;
     profile.quests = mergedQuests;
+    profile.achievements = mergedAchievements;
     profile.characterModel = mergedCharacterModel;
   }
 
@@ -598,6 +623,19 @@ export async function saveQuestState(nameKey, questState) {
     });
   } catch (error) {
     console.error('Failed to save quest state for', nameKey, error);
+  }
+}
+
+
+export async function saveAchievementState(nameKey, achievementState) {
+  if (!nameKey) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}`), {
+      achievements: mergeAchievements(achievementState),
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.error('Failed to save achievement state for', nameKey, error);
   }
 }
 

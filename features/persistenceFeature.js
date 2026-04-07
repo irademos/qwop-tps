@@ -8,6 +8,7 @@ export {
   saveCharacterModel,
   saveCustomization,
   saveQuestState,
+  saveAchievementState,
   saveSleepTimestamp,
   saveStatsImmediate,
   saveStatsThrottled
