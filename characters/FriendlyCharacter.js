@@ -25,6 +25,10 @@ export class FriendlyCharacter extends MonsterCharacter {
     this.nextDanceAt = 0;
     this.danceUntil = 0;
     this.lastDirectionChange = Date.now();
+    this.enableDanceWhileEngaged = true;
+    this.followTargetModel = null;
+    this.followDistance = 3;
+    this.followStartDistance = 4.5;
     this.model.userData.mode = "friendly";
     this.speedMultiplier = 1;
     this.sizeScale = 1;
@@ -66,6 +70,16 @@ export class FriendlyCharacter extends MonsterCharacter {
     const interval = DANCE_MIN_INTERVAL_MS
       + Math.random() * (DANCE_MAX_INTERVAL_MS - DANCE_MIN_INTERVAL_MS);
     this.nextDanceAt = now + interval;
+  }
+
+  setFollowTarget(model, { followDistance = 3, followStartDistance = 4.5 } = {}) {
+    this.followTargetModel = model || null;
+    if (Number.isFinite(followDistance)) {
+      this.followDistance = Math.max(0, followDistance);
+    }
+    if (Number.isFinite(followStartDistance)) {
+      this.followStartDistance = Math.max(this.followDistance + 0.1, followStartDistance);
+    }
   }
 
   setLevel(level, { preserveHealth = true } = {}) {
@@ -143,6 +157,34 @@ export class FriendlyCharacter extends MonsterCharacter {
       this.model.userData.mode = "engaged";
     }
 
+    if (this.followTargetModel?.position && !this.forceEngaged) {
+      const toTarget = this.followTargetModel.position.clone().sub(this.model.position);
+      toTarget.y = 0;
+      const followDistance = toTarget.length();
+      const followDir = followDistance > 0.0001 ? toTarget.clone().multiplyScalar(1 / followDistance) : null;
+
+      if (followDistance > this.followStartDistance && followDir) {
+        this.setDirection(followDir);
+        const movement = followDir.clone().multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * IDLE_SPEED_MULTIPLIER);
+        body.setLinvel({ x: movement.x, y: 0, z: movement.z }, true);
+        const angle = Math.atan2(followDir.x, followDir.z);
+        const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+        body.setRotation(rot, true);
+        this.playAnimation("Walk", MOVE_FADE);
+      } else {
+        body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        if (followDir) {
+          this.setDirection(followDir);
+          const angle = Math.atan2(followDir.x, followDir.z);
+          const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+          body.setRotation(rot, true);
+        }
+        this.playAnimation("Idle", MOVE_FADE);
+      }
+      this.update(delta);
+      return;
+    }
+
     if (this.isEngaged && (closestPlayer || this.forceEngaged)) {
       const targetSource = closestPlayer?.model?.position || this.homePosition;
       const targetPos = targetSource.clone();
@@ -153,14 +195,14 @@ export class FriendlyCharacter extends MonsterCharacter {
       const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
       body.setRotation(rot, true);
 
-      if (now >= this.danceUntil && now >= this.nextDanceAt) {
+      if (this.enableDanceWhileEngaged && now >= this.danceUntil && now >= this.nextDanceAt) {
         const duration = DANCE_MIN_DURATION_MS
           + Math.random() * (DANCE_MAX_DURATION_MS - DANCE_MIN_DURATION_MS);
         this.danceUntil = now + duration;
         this.scheduleNextDance(this.danceUntil);
       }
 
-      if (now < this.danceUntil) {
+      if (this.enableDanceWhileEngaged && now < this.danceUntil) {
         this.playAnimation("TwistDance", MOVE_FADE);
       } else {
         this.playAnimation("Idle", MOVE_FADE);
