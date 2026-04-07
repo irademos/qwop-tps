@@ -7,6 +7,7 @@ const TABS = [
   { id: 'character', label: 'Character' },
   { id: 'inventory', label: 'Inventory' },
   { id: 'quests', label: 'Quests' },
+  { id: 'achievements', label: 'Achievements' },
   { id: 'multiplayer', label: 'Multiplayer' },
   { id: 'location', label: 'Location' },
   { id: 'display', label: 'Display' },
@@ -338,6 +339,23 @@ function buildQuestsPanel() {
   elements.questList = list;
   elements.questEmpty = emptyState;
 
+  return panelEl;
+}
+
+function buildAchievementsPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-achievements';
+  panelEl.dataset.panel = 'achievements';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-achievements');
+
+  const title = createElement('h3', 'settings-section-title', 'Achievements');
+  const list = createElement('div', 'achievement-list');
+  const emptyState = createElement('div', 'settings-muted', 'No achievements yet.');
+  panelEl.append(title, list, emptyState);
+
+  elements.achievementList = list;
+  elements.achievementEmpty = emptyState;
   return panelEl;
 }
 
@@ -835,17 +853,19 @@ function buildPanels() {
   const inventoryPanel = buildInventoryPanel();
   const multiplayerPanel = buildMultiplayerPanel();
   const questsPanel = buildQuestsPanel();
+  const achievementsPanel = buildAchievementsPanel();
   const locationPanel = buildLocationPanel();
   const displayPanel = buildDisplayPanel();
   const aboutPanel = buildAboutPanel();
   const accountPanel = buildAccountPanel();
   const developerPanel = buildDeveloperPanel();
-  body.append(characterPanel, inventoryPanel, questsPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel);
+  body.append(characterPanel, inventoryPanel, questsPanel, achievementsPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel);
   elements.panels = {
     character: characterPanel,
     inventory: inventoryPanel,
     multiplayer: multiplayerPanel,
     quests: questsPanel,
+    achievements: achievementsPanel,
     location: locationPanel,
     display: displayPanel,
     about: aboutPanel,
@@ -1266,6 +1286,14 @@ function bindEvents() {
       renderInventory();
       return;
     }
+    if (button.dataset.achievementAction === 'claim') {
+      const achievementId = button.dataset.achievementId;
+      if (achievementId) {
+        context.appState?.claimAchievementReward?.(achievementId);
+        updateUI();
+      }
+      return;
+    }
     if (button.dataset.inventoryId) {
       selectedInventoryId = button.dataset.inventoryId;
       elements.inventoryInfoModal?.classList.add('hidden');
@@ -1482,6 +1510,44 @@ function collectDebugInfo() {
   return info.join('\n');
 }
 
+function renderAchievements() {
+  if (!elements.achievementList) return;
+  const achievements = context.appState?.getAchievements?.() || [];
+  elements.achievementList.innerHTML = '';
+  if (elements.achievementEmpty) {
+    elements.achievementEmpty.style.display = achievements.length ? 'none' : 'block';
+  }
+  achievements.forEach((achievement) => {
+    const row = createElement('div', 'achievement-row');
+    const text = createElement('div', 'achievement-text');
+    const title = createElement('div', 'achievement-title', achievement.title);
+    const sub = createElement(
+      'div',
+      'achievement-subtitle',
+      `${achievement.description} (${achievement.progress}/${achievement.target})`
+    );
+    text.append(title, sub);
+    const button = createElement('button', 'settings-button achievement-claim-button');
+    button.type = 'button';
+    button.dataset.achievementAction = 'claim';
+    button.dataset.achievementId = achievement.id;
+    if (achievement.pendingClaim) {
+      button.textContent = 'Claim reward';
+    } else if (achievement.claimedAt) {
+      button.textContent = 'Claimed';
+      button.disabled = true;
+    } else if (!achievement.unlockedAt) {
+      button.textContent = 'Locked';
+      button.disabled = true;
+    } else {
+      button.textContent = 'Unavailable';
+      button.disabled = true;
+    }
+    row.append(text, button);
+    elements.achievementList.appendChild(row);
+  });
+}
+
 function updateCharacterOptions() {
   const options = context.appState?.getCharacterOptions?.() ?? [];
   elements.characterSelect.innerHTML = '';
@@ -1567,6 +1633,7 @@ export function updateUI() {
       elements.questList.appendChild(item);
     });
   }
+  renderAchievements();
 
   if (elements.connectionStatus) {
     elements.connectionStatus.textContent = context.appState?.getConnectionStatus?.() ?? 'Connecting';

@@ -2295,3 +2295,38 @@ body.settings-open #settings-button {
 .hidden {
   display: none;
 }
+
+.achievement-banner {
+  position: fixed;
+  top: 88px;
+  right: 16px;
+  z-index: 2300;
+  background: rgba(18, 24, 38, 0.95);
+  border: 1px solid rgba(255, 215, 100, 0.7);
+  border-radius: 10px;
+  padding: 10px 14px;
+  min-width: 240px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+.achievement-banner.hidden { display: none; }
+.achievement-banner-title { font-weight: 700; color: #ffe38a; }
+.achievement-banner-subtitle { font-size: 13px; color: #d8e5ff; margin-top: 4px; }
+
+.achievement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.achievement-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255,255,255,0.03);
+}
+.achievement-title { font-weight: 600; }
+.achievement-subtitle { font-size: 12px; opacity: 0.85; margin-top: 2px; }
+.achievement-claim-button { white-space: nowrap; }
