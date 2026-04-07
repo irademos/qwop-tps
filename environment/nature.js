@@ -1,23 +1,13 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { setClimbableAreas } from '../controls/climb.js';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 
-const TREE_MODEL_URL = '/assets/props/low_poly_tree_pack.glb';
 const TREE_SCALE_REFERENCE = 0.016;
 const TREE_SCALE_MIN = 0.012;
 const TREE_SCALE_MAX = 0.02;
+const TREE_TYPE_COUNT = 7;
 const TREE_IMPOSTOR_TRUNK_COLOR = 0x6f4e37;
 const TREE_IMPOSTOR_LEAF_PALETTE = [0x3f8f3f, 0x4fa14f, 0x5a9f42, 0x6cae52, 0x4b8c3f, 0x739f55];
-const TREE_PREFABS = [
-  ['Circle'],                 // Eucalyptus (has multiple meshes under it)
-  ['Circle001'],              // Pine
-  ['Circle002'],              // Palm
-  ['Circle003', 'Circle004'], // Cypress or Larch or Fir (split across 2 sibling nodes)
-  ['Circle005'],              // Oak
-  ['Circle006'],              // Scary / Dead tree
-  ['Circle007']               // Larch or Beech
-];
 const TREE_CLIMB_RIGHT_SHIFT_BY_TYPE = {
   0: 2.7, // eucalyptus
   5: -2.5  // scary/dead
@@ -37,15 +27,12 @@ const TREE_COLLIDER_SCALE_BY_TYPE = {
   6: { radius: 0.95, height: 1.0 } // larch/beech
 };
 
-const TREE_GROUND_OFFSET_BY_TYPE = {};
-
 const TREE_CLIMB_OVERRIDES = {
   0: { halfWidth: 0.4, halfDepth: 0.75, entryHeight: 0.0, maxYPad: 3.0 }, // eucalyptus
   5: { halfWidth: 0.75, halfDepth: 0.75, entryHeight: 0.0, minYPad: 0.0, maxYPad: 6.4 }  // dead/scary
   // others default
 };
 
-const PALM_TREE_INDEX = 2;
 const TREE_ZONE_DEGREES = 0.0009;
 const TREE_ZONE_METERS = 100;
 const TREE_GRID_SPACING = 20;
@@ -54,8 +41,6 @@ const TREE_SPAWN_CHANCE_MID = 0.35;
 const TREE_SPAWN_CHANCE_FAR = 0.15;
 const TREE_TILE_SIZE_METERS = 150;
 const TREE_TILE_BUFFER = 5;
-// Keep high-detail, interactable GLB trees only on the player's current tile.
-// Neighboring tiles and beyond should use primitive impostors.
 const NEAR_TILE_DISTANCE = 1;
 const ROCK_GRID_SPACING = 24;
 const ROCK_SPAWN_CHANCE = 0.28;
@@ -89,14 +74,6 @@ const ROAD_WIDTHS = {
 };
 const DEFAULT_ROAD_WIDTH = 1.0;
 const ROAD_WIDTH_SCALE = 10;
-
-const setTreeShadowing = (tree) => {
-  tree.traverse((child) => {
-    if (!child.isMesh) return;
-    child.castShadow = true;
-    child.receiveShadow = true;
-  });
-};
 
 function pseudoRandom2D(x, z, seed = 0) {
   const value = Math.sin(x * 12.9898 + z * 78.233 + seed) * 43758.5453;
@@ -266,44 +243,7 @@ export async function createNature({
 } = {}) {
   if (!scene || !playerModel) return null;
 
-  const loader = new GLTFLoader();
-  let gltf;
-  try {
-    gltf = await loader.loadAsync(TREE_MODEL_URL);
-  } catch (error) {
-    console.warn('Failed to load tree pack glb.', error);
-    return null;
-  }
-
-  const treeTypeIndices = TREE_PREFABS.map((_, index) => index)
-    .filter((index) => index !== PALM_TREE_INDEX);
-
-  const treeTemplates = TREE_PREFABS.map((parts, index) => {
-    if (index === PALM_TREE_INDEX) return null;
-    const wrapper = new THREE.Group();
-    wrapper.name = `tree_template_${index}`;
-
-    for (const partName of parts) {
-      const src = gltf.scene.getObjectByName(partName);
-      if (!src) continue;
-      const part = src.clone(true);
-      setTreeShadowing(part);
-      wrapper.add(part);
-    }
-    wrapper.scale.setScalar(1);
-
-    const templateBounds = new THREE.Box3().setFromObject(wrapper);
-    const localMinY = Number.isFinite(templateBounds.min.y) ? templateBounds.min.y : 0;
-    wrapper.userData.localMinY = localMinY;
-    TREE_GROUND_OFFSET_BY_TYPE[index] = localMinY;
-
-    return wrapper;
-  });
-
-  const getTreeGroundAnchorOffset = (treeTypeIndex, scale = TREE_SCALE_REFERENCE) => {
-    const baseMinY = TREE_GROUND_OFFSET_BY_TYPE[treeTypeIndex] ?? 0;
-    return baseMinY * scale;
-  };
+  const treeTypeIndices = Array.from({ length: TREE_TYPE_COUNT }, (_, index) => index);
 
   const group = new THREE.Group();
   group.name = 'nature-group';
@@ -654,7 +594,7 @@ export async function createNature({
     const trunk = new THREE.Mesh(treeImpostorTrunkGeometry, treeImpostorTrunkMaterial);
     trunk.castShadow = false;
     trunk.receiveShadow = true;
-    trunk.position.y = 0.2;
+    trunk.position.y = 0.175;
     impostor.add(trunk);
 
     const leafMaterial = treeImpostorLeafMaterials[treeTypeIndex % treeImpostorLeafMaterials.length];
@@ -669,7 +609,10 @@ export async function createNature({
     impostor.scale.setScalar(Math.max(0.25, scale * 20.0 / TREE_SCALE_REFERENCE));
     impostor.userData = {
       tileKey,
-      interactable: false,
+      applePickups: [],
+      isFlammable: true,
+      treeTypeIndex,
+      interactable: true,
       isImpostor: true
     };
     return impostor;
@@ -693,7 +636,6 @@ export async function createNature({
     const tileKey = getTileKey(tile);
     if (treeTiles.has(tileKey)) return treeTiles.get(tileKey);
     const detailLevel = getTileDetailLevel(tile, centerTile);
-    const isNearDetail = detailLevel === 'near';
 
     const tileGroup = new THREE.Group();
     tileGroup.name = `nature-tile-${tileKey}`;
@@ -710,7 +652,7 @@ export async function createNature({
     const treePhysics = [];
     const tileClimbAreas = [];
     const tileApplePickups = [];
-    const tileBlockers = isNearDetail ? buildTileBlockers(tile, tileKey) : null;
+    const tileBlockers = buildTileBlockers(tile, tileKey);
     const tileDx = tile.x - centerTile.x;
     const tileDy = tile.y - centerTile.y;
     const tileDistance = Math.hypot(tileDx, tileDy);
@@ -725,99 +667,80 @@ export async function createNature({
         tempPosition.set(worldX, 0, worldZ);
 
         const treeTypeIndex = resolveTreeTypeIndex(tempPosition);
-        const template = treeTemplates[treeTypeIndex];
-        if (!template) continue;
 
         const rotation = pseudoRandom2D(worldX, worldZ, 3.4) * Math.PI * 2;
         const scale =
           TREE_SCALE_MIN +
           pseudoRandom2D(worldX, worldZ, 7.7) * (TREE_SCALE_MAX - TREE_SCALE_MIN);
         const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
-        const groundAnchorOffset = getTreeGroundAnchorOffset(treeTypeIndex, scale);
-        const tree = isNearDetail
-          ? template.clone(true)
-          : createTreeImpostor({
-            worldX,
-            worldZ,
-            tileKey,
-            scale,
-            rotation,
-            terrainY,
-            treeTypeIndex,
-            groundAnchorOffset
-          });
+        const tree = createTreeImpostor({
+          worldX,
+          worldZ,
+          tileKey,
+          scale,
+          rotation,
+          terrainY,
+          treeTypeIndex,
+          groundAnchorOffset: 0
+        });
 
-        if (isNearDetail) {
-          tree.userData.applePickups = [];
-          tree.userData.isFlammable = true;
-          tree.userData.treeTypeIndex = treeTypeIndex;
-          tree.userData.interactable = true;
-          tree.rotation.y = rotation;
-          tree.scale.setScalar(scale);
-          tree.position.set(worldX, terrainY - groundAnchorOffset, worldZ);
-          tree.userData.tileKey = tileKey;
-        }
-
-        if (isNearDetail) {
-          tree.updateWorldMatrix(true, true);
-          tempBox.setFromObject(tree);
-          if (Number.isFinite(tempBox.min.x)) {
-            tempBox.getCenter(tempCenter);
-            tempWorldToLocal.copy(tempCenter);
-            tree.userData.boundsCenterLocal = tree.worldToLocal(tempWorldToLocal);
-            tempBox.getSize(tempSize);
-            tree.userData.boundsRadius = Math.max(tempSize.x, tempSize.z) * 0.5;
-          }
+        tree.updateWorldMatrix(true, true);
+        tempBox.setFromObject(tree);
+        if (Number.isFinite(tempBox.min.x)) {
+          tempBox.getCenter(tempCenter);
+          tempWorldToLocal.copy(tempCenter);
+          tree.userData.boundsCenterLocal = tree.worldToLocal(tempWorldToLocal);
+          tempBox.getSize(tempSize);
+          tree.userData.boundsRadius = Math.max(tempSize.x, tempSize.z) * 0.5;
         }
         if (tileBlockers && isTreeBlocked(tree, tileBlockers)) {
           continue;
         }
         tileGroup.add(tree);
         trees.push(tree);
-        if (isNearDetail) {
-          const areas = buildTreeClimbAreas(tree);
-          tree.userData.climbAreas = areas;
-          tileClimbAreas.push(...areas);
-          if (typeof spawnApplePickup === 'function') {
-            if (Number.isFinite(tempBox.min.y)) {
-              tempBox.getSize(tempSize);
-              tempBox.getCenter(tempCenter);
-              const height = tempSize.y;
-              if (height > 0) {
-                const radius = Math.max(0.8, Math.max(tempSize.x, tempSize.z) * 0.18);
-                for (let i = 0; i < 2; i += 1) {
-                  const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
-                  const distance = radius * (0.55 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.35);
-                  const heightFactor = 0.4 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.3;
-                  tempApplePosition.set(
-                    tempCenter.x + Math.cos(angle) * distance,
-                    tempBox.min.y + height * heightFactor,
-                    tempCenter.z + Math.sin(angle) * distance
-                  );
-                  const localApplePosition = tree.worldToLocal(tempWorldToLocal.copy(tempApplePosition));
-                  const pickup = spawnApplePickup(localApplePosition, {
-                    applyTerrainHeight: false,
-                    lift: 0,
-                    parent: tree
-                  });
-                  if (pickup) {
-                    tree.getWorldScale(tempTreeWorldScale);
-                    const worldScaleX = Math.abs(tempTreeWorldScale.x);
-                    if (worldScaleX > Number.EPSILON) {
-                      pickup.mesh.scale.multiplyScalar(1 / worldScaleX);
-                    }
-                    tileApplePickups.push(pickup);
-                    tree.userData.applePickups.push(pickup);
+
+        const areas = buildTreeClimbAreas(tree);
+        tree.userData.climbAreas = areas;
+        tileClimbAreas.push(...areas);
+        if (typeof spawnApplePickup === 'function') {
+          if (Number.isFinite(tempBox.min.y)) {
+            tempBox.getSize(tempSize);
+            tempBox.getCenter(tempCenter);
+            const height = tempSize.y;
+            if (height > 0) {
+              const radius = Math.max(0.8, Math.max(tempSize.x, tempSize.z) * 0.18);
+              for (let i = 0; i < 2; i += 1) {
+                const angle = pseudoRandom2D(worldX + i * 13.7, worldZ + i * 9.3, 12.4) * Math.PI * 2;
+                const distance = radius * (0.55 + pseudoRandom2D(worldX, worldZ, 7.1 + i) * 0.35);
+                const heightFactor = 0.4 + pseudoRandom2D(worldX, worldZ, 4.9 + i) * 0.3;
+                tempApplePosition.set(
+                  tempCenter.x + Math.cos(angle) * distance,
+                  tempBox.min.y + height * heightFactor,
+                  tempCenter.z + Math.sin(angle) * distance
+                );
+                const localApplePosition = tree.worldToLocal(tempWorldToLocal.copy(tempApplePosition));
+                const pickup = spawnApplePickup(localApplePosition, {
+                  applyTerrainHeight: false,
+                  lift: 0,
+                  parent: tree
+                });
+                if (pickup) {
+                  tree.getWorldScale(tempTreeWorldScale);
+                  const worldScaleX = Math.abs(tempTreeWorldScale.x);
+                  if (worldScaleX > Number.EPSILON) {
+                    pickup.mesh.scale.multiplyScalar(1 / worldScaleX);
                   }
+                  tileApplePickups.push(pickup);
+                  tree.userData.applePickups.push(pickup);
                 }
               }
             }
           }
-          const physics = createTreeBaseCollider(tree);
-          if (physics) {
-            treePhysics.push(physics);
-            tree.userData.physics = physics;
-          }
+        }
+        const physics = createTreeBaseCollider(tree);
+        if (physics) {
+          treePhysics.push(physics);
+          tree.userData.physics = physics;
         }
       }
     }
