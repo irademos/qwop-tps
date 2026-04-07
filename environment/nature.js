@@ -417,7 +417,7 @@ export async function createNature({
     
     const typeIndex = tree.userData.treeTypeIndex;
     const o = TREE_CLIMB_OVERRIDES[typeIndex] ?? {};
-    const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
+    const scaleFactor = tree.userData?.gameplayScaleFactor ?? (tree.scale.x / TREE_SCALE_REFERENCE);
     const scaleValue = (value) => value * scaleFactor;
 
     const minY = tempBox.min.y + scaleValue(o.minYPad ?? 0);
@@ -474,7 +474,7 @@ export async function createNature({
     const typeIndex = tree.userData?.treeTypeIndex;
     const shift = TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
     if (shift) {
-      const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
+      const scaleFactor = tree.userData?.gameplayScaleFactor ?? (tree.scale.x / TREE_SCALE_REFERENCE);
       tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
       tempTreeCenter.addScaledVector(tempTreeRight, shift * scaleFactor);
     }
@@ -556,14 +556,14 @@ export async function createNature({
     );
 
     const shift = TREE_COLLIDER_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
-    const scaleFactor = tree.scale.x / TREE_SCALE_REFERENCE;
+    const scaleFactor = tree.userData?.gameplayScaleFactor ?? (tree.scale.x / TREE_SCALE_REFERENCE);
     tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
 
     // Keep collider short so it only blocks near the base/trunk.
     const centerX = tempCenter.x + tempTreeRight.x * shift * scaleFactor;
     const centerZ = tempCenter.z + tempTreeRight.z * shift * scaleFactor;
     const halfHeight = THREE.MathUtils.clamp(
-      TREE_BASE_COLLIDER_HALF_HEIGHT * (tree.scale.x / TREE_SCALE_REFERENCE) * colliderScale.height,
+      TREE_BASE_COLLIDER_HALF_HEIGHT * scaleFactor * colliderScale.height,
       0.3,
       0.75
     );
@@ -612,6 +612,7 @@ export async function createNature({
       applePickups: [],
       isFlammable: true,
       treeTypeIndex,
+      gameplayScaleFactor: scale / TREE_SCALE_REFERENCE,
       interactable: true,
       isImpostor: true
     };
