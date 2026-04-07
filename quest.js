@@ -15,6 +15,7 @@ const QUEST_FRIEND_ENGAGE_RADIUS = 5;
 const QUEST_FRIEND_DISENGAGE_RADIUS = 8;
 const QUEST_FRIEND_FOLLOW_DISTANCE = 3;
 const QUEST_FRIEND_FOLLOW_START_DISTANCE = 4.5;
+const QUEST_GENERIC_XP = 60;
 
 const TUTORIAL_QUESTS = [
   {
@@ -28,6 +29,42 @@ const TUTORIAL_QUESTS = [
     title: "Collect 1 mushroom",
     description: "Pick up 1 mushroom so you can practice interacting with nearby items.",
     faq: "Walk up to a mushroom and press interact. If none are nearby, move around a little and look for them on the ground."
+  },
+  {
+    id: "climb-a-tree",
+    title: "Climb a tree",
+    description: "Climb any nearby tree.",
+    faq: "Find a tree, walk up to it, then use climb: press X on desktop or tap the climb prompt on mobile."
+  },
+  {
+    id: "kill-zombie",
+    title: "Kill a zombie",
+    description: "Defeat 1 zombie.",
+    faq: "Use your weapon and keep attacking until the zombie drops."
+  },
+  {
+    id: "trade-with-merchant",
+    title: "Buy and sell with the merchant",
+    description: "Buy at least one thing and sell at least one thing to the merchant.",
+    faq: "Talk to the merchant, open the shop, buy one item, then sell one item back."
+  },
+  {
+    id: "kill-deer",
+    title: "Kill a deer",
+    description: "Defeat 1 deer.",
+    faq: "A deer and a bow with arrows were spawned nearby. Equip the bow and hunt it."
+  },
+  {
+    id: "blow-up-rock",
+    title: "Blow up a rock",
+    description: "Use a bomb to blow up a rock.",
+    faq: "A rock and bomb pickup were spawned nearby. Pick up the bomb, equip it, and explode it near the rock."
+  },
+  {
+    id: "craft-at-table",
+    title: "Craft at the crafting table",
+    description: "Craft any item at the crafting table.",
+    faq: "Go to your crafting table, open it, choose materials, then press Craft and pick an item."
   }
 ];
 
@@ -60,7 +97,10 @@ export class QuestManager {
       completedQuestIds: [],
       gpsQuestStartFix: null,
       gpsQuestDistanceMeters: 0,
-      mushroomCount: 0
+      mushroomCount: 0,
+      merchantBought: false,
+      merchantSold: false,
+      wasClimbingLastFrame: false
     };
     this.onQuestStateChange = null;
   }
@@ -260,6 +300,22 @@ export class QuestManager {
       this.state.gpsQuestStartFix = hasValidFix(latestFix) ? { lat: latestFix.lat, lon: latestFix.lon } : null;
       this.state.gpsQuestDistanceMeters = 0;
     }
+    if (quest.id === "trade-with-merchant") {
+      this.state.merchantBought = false;
+      this.state.merchantSold = false;
+      const coins = window.appState?.getCoins?.() ?? 0;
+      if (coins < 30) {
+        window.appState?.addCoins?.(30 - coins);
+      }
+      window.spawnTutorialMerchantNearby?.();
+    }
+    if (quest.id === "kill-deer") {
+      window.spawnTutorialDeerNearby?.();
+      window.spawnTutorialBowAndArrowsNearby?.();
+    }
+    if (quest.id === "blow-up-rock") {
+      window.spawnTutorialRockAndBombNearby?.();
+    }
   }
 
   getQuestProgressText(questId) {
@@ -269,6 +325,11 @@ export class QuestManager {
     }
     if (questId === "collect-mushroom-1") {
       return `(${this.state.mushroomCount}/${QUEST_SECOND_MUSHROOM_TARGET})`;
+    }
+    if (questId === "trade-with-merchant") {
+      const buyLabel = this.state.merchantBought ? "✅ buy" : "⬜ buy";
+      const sellLabel = this.state.merchantSold ? "✅ sell" : "⬜ sell";
+      return `(${buyLabel}, ${sellLabel})`;
     }
     return "";
   }
@@ -287,6 +348,44 @@ export class QuestManager {
     if (this.state.mushroomCount >= QUEST_SECOND_MUSHROOM_TARGET) {
       this.completeQuest("collect-mushroom-1", QUEST_SECOND_MUSHROOM_XP);
     }
+  }
+
+  handleMonsterKilled(monster) {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.id !== "kill-zombie") return;
+    const label = String(monster?.type || monster?.modelPath || "").toLowerCase();
+    if (!label.includes("zombie")) return;
+    this.completeQuest("kill-zombie", QUEST_GENERIC_XP);
+  }
+
+  handleAnimalKilled(animal) {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.id !== "kill-deer") return;
+    if (String(animal?.type || "").toLowerCase() !== "deer") return;
+    this.completeQuest("kill-deer", QUEST_GENERIC_XP);
+  }
+
+  handleMerchantTransaction(kind) {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.id !== "trade-with-merchant") return;
+    if (kind === "buy") this.state.merchantBought = true;
+    if (kind === "sell") this.state.merchantSold = true;
+    if (this.state.merchantBought && this.state.merchantSold) {
+      this.completeQuest("trade-with-merchant", QUEST_GENERIC_XP);
+    }
+  }
+
+  handleRockBlownUp(count = 1) {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.id !== "blow-up-rock") return;
+    if (!Number.isFinite(count) || count <= 0) return;
+    this.completeQuest("blow-up-rock", QUEST_GENERIC_XP);
+  }
+
+  handleCraftedItem() {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.id !== "craft-at-table") return;
+    this.completeQuest("craft-at-table", QUEST_GENERIC_XP);
   }
 
   updateGpsQuestProgress() {
@@ -313,6 +412,15 @@ export class QuestManager {
     if (moved >= QUEST_FIRST_GPS_TARGET_METERS) {
       this.completeQuest("gps-walk-30m", QUEST_FIRST_GPS_XP);
     }
+  }
+
+  updateClimbQuestProgress() {
+    const activeQuest = this.getActiveQuest();
+    const isClimbing = window.playerControls?.isClimbing === true;
+    if (activeQuest?.id === "climb-a-tree" && isClimbing && !this.state.wasClimbingLastFrame) {
+      this.completeQuest("climb-a-tree", QUEST_GENERIC_XP);
+    }
+    this.state.wasClimbingLastFrame = isClimbing;
   }
 
   getQuestLog() {
@@ -346,5 +454,6 @@ export class QuestManager {
       friend.updateAI(this.state.deltaSeconds, playerModel, {});
     }
     this.updateGpsQuestProgress();
+    this.updateClimbQuestProgress();
   }
 }

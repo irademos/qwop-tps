@@ -330,6 +330,7 @@ export const buyMerchantItem = async (itemId) => {
   merchantAppState?.addCoins?.(-price);
   merchantState.items[itemId] = { ...item, count: item.count - 1 };
   await persistMerchantState();
+  window.questManager?.handleMerchantTransaction?.('buy');
   return true;
 };
 
@@ -359,6 +360,7 @@ export const sellMerchantItem = async (itemId) => {
     merchantState.items[itemId] = { ...current, count: (current.count || 0) + 1 };
   }
   await persistMerchantState();
+  window.questManager?.handleMerchantTransaction?.('sell');
   return true;
 };
 
