@@ -2408,6 +2408,23 @@ body.settings-open #inventory-button {
   padding: 10px;
   background: rgba(255,255,255,0.03);
 }
+.achievement-row.locked {
+  background: rgba(120, 120, 120, 0.15);
+  border-color: rgba(170, 170, 170, 0.3);
+}
+.achievement-row.locked .achievement-title,
+.achievement-row.locked .achievement-subtitle {
+  color: rgba(215, 215, 215, 0.85);
+}
 .achievement-title { font-weight: 600; }
 .achievement-subtitle { font-size: 12px; opacity: 0.85; margin-top: 2px; }
 .achievement-claim-button { white-space: nowrap; }
+.achievement-claim-button.claimable {
+  background: #2e9e49;
+  border-color: #2e9e49;
+  color: #ffffff;
+}
+.achievement-claim-button.claimable:hover {
+  background: #3cb85a;
+  border-color: #3cb85a;
+}

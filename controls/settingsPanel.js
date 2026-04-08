@@ -1575,13 +1575,19 @@ function collectDebugInfo() {
 
 function renderAchievements() {
   if (!elements.achievementList) return;
-  const achievements = context.appState?.getAchievements?.() || [];
+  const achievementExpiryMs = 10 * 60 * 1000;
+  const now = Date.now();
+  const achievements = (context.appState?.getAchievements?.() || []).filter((achievement) => {
+    if (!achievement.claimedAt) return true;
+    return (now - achievement.claimedAt) < achievementExpiryMs;
+  });
   elements.achievementList.innerHTML = '';
   if (elements.achievementEmpty) {
     elements.achievementEmpty.style.display = achievements.length ? 'none' : 'block';
   }
   achievements.forEach((achievement) => {
     const row = createElement('div', 'achievement-row');
+    const isLocked = !achievement.unlockedAt;
     const text = createElement('div', 'achievement-text');
     const title = createElement('div', 'achievement-title', achievement.title);
     const sub = createElement(
@@ -1596,6 +1602,7 @@ function renderAchievements() {
     button.dataset.achievementId = achievement.id;
     if (achievement.pendingClaim) {
       button.textContent = 'Claim reward';
+      button.classList.add('claimable');
     } else if (achievement.claimedAt) {
       button.textContent = 'Claimed';
       button.disabled = true;
@@ -1605,6 +1612,9 @@ function renderAchievements() {
     } else {
       button.textContent = 'Unavailable';
       button.disabled = true;
+    }
+    if (isLocked) {
+      row.classList.add('locked');
     }
     row.append(text, button);
     elements.achievementList.appendChild(row);
