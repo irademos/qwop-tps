@@ -5,7 +5,6 @@ const TAB_KEY = 'settings:lastTab';
 
 const TABS = [
   { id: 'character', label: 'Character' },
-  { id: 'inventory', label: 'Inventory' },
   { id: 'quests', label: 'Quests' },
   { id: 'achievements', label: 'Achievements' },
   { id: 'multiplayer', label: 'Multiplayer' },
@@ -29,6 +28,8 @@ const PERCENT_STATS = new Set(['health', 'hunger', 'energy']);
 
 let overlay;
 let panel;
+let inventoryOverlay;
+let inventoryPanel;
 let context = {};
 let elements = {};
 let activeTab = 'character';
@@ -850,7 +851,6 @@ function buildAccountPanel() {
 function buildPanels() {
   const body = createElement('div', 'settings-body');
   const characterPanel = buildCharacterPanel();
-  const inventoryPanel = buildInventoryPanel();
   const multiplayerPanel = buildMultiplayerPanel();
   const questsPanel = buildQuestsPanel();
   const achievementsPanel = buildAchievementsPanel();
@@ -859,10 +859,9 @@ function buildPanels() {
   const aboutPanel = buildAboutPanel();
   const accountPanel = buildAccountPanel();
   const developerPanel = buildDeveloperPanel();
-  body.append(characterPanel, inventoryPanel, questsPanel, achievementsPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel);
+  body.append(characterPanel, questsPanel, achievementsPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel);
   elements.panels = {
     character: characterPanel,
-    inventory: inventoryPanel,
     multiplayer: multiplayerPanel,
     quests: questsPanel,
     achievements: achievementsPanel,
@@ -873,6 +872,31 @@ function buildPanels() {
     developer: developerPanel
   };
   return body;
+}
+
+function buildInventoryOverlay() {
+  if (!inventoryPanel) return;
+  inventoryPanel.innerHTML = '';
+  inventoryPanel.classList.add('settings-shell', 'inventory-shell');
+  inventoryPanel.setAttribute('role', 'dialog');
+  inventoryPanel.setAttribute('aria-modal', 'true');
+  inventoryPanel.setAttribute('aria-labelledby', 'inventory-title');
+  inventoryPanel.tabIndex = -1;
+
+  const header = createElement('div', 'settings-header');
+  const title = createElement('h2', 'settings-title', 'Inventory');
+  title.id = 'inventory-title';
+  const closeButton = createElement('button', 'settings-close', '✕');
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', 'Close inventory');
+  closeButton.dataset.action = 'close-inventory';
+  header.append(title, closeButton);
+
+  const body = createElement('div', 'settings-body inventory-body');
+  const inventoryBodyPanel = buildInventoryPanel();
+  inventoryBodyPanel.hidden = false;
+  body.append(inventoryBodyPanel);
+  inventoryPanel.append(header, body);
 }
 
 function setActiveTab(tabId) {
@@ -909,7 +933,7 @@ function openOverlay() {
   lastFocusedElement = document.activeElement;
   overlay.style.display = 'flex';
   overlay.setAttribute('aria-hidden', 'false');
-  document.body.classList.add('settings-open');
+  syncOverlayBodyState();
   refreshLayout();
   if (isMobileView) {
     setListView(true);
@@ -926,11 +950,38 @@ function closeOverlay() {
   if (!overlay) return;
   overlay.style.display = 'none';
   overlay.setAttribute('aria-hidden', 'true');
-  document.body.classList.remove('settings-open');
+  syncOverlayBodyState();
   stopPreview();
   if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
     lastFocusedElement.focus();
   }
+}
+
+function openInventoryOverlay() {
+  if (!inventoryOverlay) return;
+  lastFocusedElement = document.activeElement;
+  inventoryOverlay.style.display = 'flex';
+  inventoryOverlay.setAttribute('aria-hidden', 'false');
+  syncOverlayBodyState();
+  inventoryPanel?.focus?.();
+  updateUI();
+}
+
+function closeInventoryOverlay() {
+  if (!inventoryOverlay) return;
+  inventoryOverlay.style.display = 'none';
+  inventoryOverlay.setAttribute('aria-hidden', 'true');
+  elements.inventoryInfoModal?.classList.add('hidden');
+  syncOverlayBodyState();
+  if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+    lastFocusedElement.focus();
+  }
+}
+
+function syncOverlayBodyState() {
+  const isSettingsOpen = overlay?.getAttribute('aria-hidden') === 'false';
+  const isInventoryOpen = inventoryOverlay?.getAttribute('aria-hidden') === 'false';
+  document.body.classList.toggle('settings-open', isSettingsOpen || isInventoryOpen);
 }
 
 async function handleAction(target) {
@@ -1258,8 +1309,13 @@ function bindEvents() {
       closeOverlay();
     }
   });
+  inventoryOverlay?.addEventListener('click', (event) => {
+    if (event.target === inventoryOverlay) {
+      closeInventoryOverlay();
+    }
+  });
 
-  panel.addEventListener('click', (event) => {
+  const handlePanelClick = (event) => {
     const button = event.target.closest('button');
     if (!button) return;
     if (button.dataset.inventoryAction) {
@@ -1305,9 +1361,16 @@ function bindEvents() {
       return;
     }
     if (button.dataset.action) {
+      if (button.dataset.action === 'close-inventory') {
+        closeInventoryOverlay();
+        return;
+      }
       void handleAction(button);
     }
-  });
+  };
+
+  panel.addEventListener('click', handlePanelClick);
+  inventoryPanel?.addEventListener('click', handlePanelClick);
 
   elements.nameInput.addEventListener('input', () => {
     setNameStatus('');
@@ -1774,14 +1837,26 @@ export function closeSettings() {
   closeOverlay();
 }
 
+export function openInventory() {
+  openInventoryOverlay();
+}
+
+export function closeInventory() {
+  closeInventoryOverlay();
+}
+
 export function initSettingsPanel({ appState, multiplayer, location, player } = {}) {
   context = { appState, multiplayer, location, player };
   overlay = document.getElementById('settings-overlay');
   panel = document.getElementById('settings-panel');
-  if (!overlay || !panel) {
-    throw new Error('Settings overlay not found.');
+  inventoryOverlay = document.getElementById('inventory-overlay');
+  inventoryPanel = document.getElementById('inventory-panel');
+  if (!overlay || !panel || !inventoryOverlay || !inventoryPanel) {
+    throw new Error('Settings or inventory overlay not found.');
   }
   overlay.setAttribute('aria-hidden', 'true');
+  inventoryOverlay.setAttribute('aria-hidden', 'true');
+  inventoryPanel.innerHTML = '';
   panel.innerHTML = '';
   panel.classList.add('settings-shell');
   panel.classList.add('show-tab-panel');
@@ -1794,6 +1869,7 @@ export function initSettingsPanel({ appState, multiplayer, location, player } = 
   const tabs = buildTabs();
   const body = buildPanels();
   panel.append(header, tabs, body);
+  buildInventoryOverlay();
 
   updateCharacterOptions();
   refreshLayout();
