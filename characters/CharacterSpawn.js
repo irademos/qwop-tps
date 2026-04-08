@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 
-const SPAWN_TRAVEL_MIN_DISTANCE = 70;
-const SPAWN_TRAVEL_MAX_DISTANCE = 150;
+const SPAWN_TRAVEL_MIN_DISTANCE = 30;
+const SPAWN_TRAVEL_MAX_DISTANCE = 70;
 const SPAWN_MIN_GPS_ACCURACY_METERS = 15;
 const SPAWN_MAX_GPS_STEP_DISTANCE = 25;
-const SPAWN_MIN_INTERVAL_MS = 20_000;
+const SPAWN_MIN_INTERVAL_MS = 7_000;
 const SPAWN_NEARBY_MIN_DISTANCE = 24;
 const SPAWN_NEARBY_MAX_DISTANCE = 42;
 const SPAWN_PREDICT_MIN_AHEAD_DISTANCE = 24;
@@ -74,7 +74,7 @@ export function createCharacterSpawner({ getPlayerPosition, getSpawnPosition, sp
 
   const recordGpsTravel = ({ lat, lon, accuracyMeters, timestampMs } = {}) => {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    if (!Number.isFinite(accuracyMeters) || accuracyMeters > SPAWN_MIN_GPS_ACCURACY_METERS) {
+    if (!Number.isFinite(accuracyMeters)) {       // || accuracyMeters > SPAWN_MIN_GPS_ACCURACY_METERS) {
       return;
     }
 
