@@ -1442,6 +1442,11 @@ export class PlayerControls {
       return;
     }
 
+    if (closest.type === 'zombie-brains') {
+      window.pickupZombieBrains?.(closest.pickup);
+      return;
+    }
+
     if (closest.type === 'craft-table') {
       window.openCraftPanel?.();
       return;
@@ -1683,6 +1688,18 @@ export class PlayerControls {
         pickup,
         maxDistance: SALT_INTERACT_RANGE,
         promptText: isSauteed ? "press x to pickup sauteed mushrooms" : "'x' pick up salt"
+      });
+    });
+
+    const zombieBrainsPickups = Array.isArray(window.zombieBrainsPickups) ? window.zombieBrainsPickups : [];
+    zombieBrainsPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'zombie-brains',
+        pickup,
+        maxDistance: MEAT_INTERACT_RANGE,
+        promptText: "'x' pick up zombie brains"
       });
     });
 
