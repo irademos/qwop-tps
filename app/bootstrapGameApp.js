@@ -10117,6 +10117,7 @@ async function initCore(runtimeContext) {
   window.pickupWood = pickupWood;
   window.pickupMeat = pickupMeat;
   window.pickupSalt = pickupSalt;
+  window.pickupZombieBrains = pickupZombieBrains;
   window.loadTerrainStampRegressionScene = () => appState.loadTerrainStampRegressionScene();
   window.setTerrainStampDebugOverlay = (enabled, options) => appState.setTerrainStampDebugOverlay(enabled, options);
   window.getTerrainStampDebugSample = (x, z, options) => appState.getTerrainStampDebugSample(x, z, options);
@@ -10776,9 +10777,6 @@ async function initCore(runtimeContext) {
           continue;
         }
         pickup.mesh.rotation.y += 0.02;
-        if (shouldCheckPickups && !playerDead) {
-          pickupZombieBrains(pickup);
-        }
       }
       for (let i = saltPickups.length - 1; i >= 0; i--) {
         const pickup = saltPickups[i];
