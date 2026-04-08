@@ -3471,18 +3471,27 @@ export class PlayerControls {
       return;
     }
     const rawMonsters = appContext.entities.monsters || window.monsters || [];
-    const monsters = Array.isArray(rawMonsters)
-      ? rawMonsters
-      : Object.values(rawMonsters).flatMap((entry) => {
-        if (Array.isArray(entry)) return entry;
-        return entry ? [entry] : [];
-      });
+    const normalizeMonsters = (source) => {
+      if (!source) return [];
+      if (Array.isArray(source)) return source;
+      if (source instanceof Set) return Array.from(source);
+      if (source instanceof Map) return Array.from(source.values());
+      if (typeof source === 'object') {
+        return Object.values(source).flatMap((entry) => normalizeMonsters(entry));
+      }
+      return [];
+    };
+    const monsters = normalizeMonsters(rawMonsters);
     let closest = null;
     let closestDistance = Infinity;
     for (const monster of monsters) {
       if (!monster?.model || monster.isDead) continue;
-      if (!Number.isFinite(monster.model.position?.x) || !Number.isFinite(monster.model.position?.z)) continue;
-      const distance = this.playerModel.position.distanceTo(monster.model.position);
+      const targetX = monster.model.position?.x;
+      const targetZ = monster.model.position?.z;
+      if (!Number.isFinite(targetX) || !Number.isFinite(targetZ)) continue;
+      const dx = targetX - this.playerModel.position.x;
+      const dz = targetZ - this.playerModel.position.z;
+      const distance = Math.hypot(dx, dz);
       if (distance < closestDistance) {
         closest = monster;
         closestDistance = distance;
