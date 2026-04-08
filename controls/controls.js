@@ -35,6 +35,7 @@ const WOOD_INTERACT_RANGE = 3;
 const MEAT_INTERACT_RANGE = 3;
 const SALT_INTERACT_RANGE = 3;
 const ENGAGED_MODE_DISTANCE = 7;
+const ENGAGED_MODE_RELEASE_DISTANCE = 10;
 const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
 const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
 const WEAPON_CAMERA_FOV_DELTA = 8;
@@ -3491,7 +3492,21 @@ export class PlayerControls {
         closestDistance = distance;
       }
     }
-    const shouldEngage = closest && closestDistance <= ENGAGED_MODE_DISTANCE;
+    const engagedTargetPosition = this.engagedTarget?.model?.position;
+    const hasTrackedTarget = Boolean(this.isEngaged && engagedTargetPosition);
+    let trackedTargetDistance = Infinity;
+    if (hasTrackedTarget) {
+      const dx = engagedTargetPosition.x - playerPosition.x;
+      const dz = engagedTargetPosition.z - playerPosition.z;
+      if (Number.isFinite(dx) && Number.isFinite(dz)) {
+        trackedTargetDistance = Math.hypot(dx, dz);
+      }
+    }
+
+    const shouldStayEngaged = hasTrackedTarget
+      && trackedTargetDistance <= ENGAGED_MODE_RELEASE_DISTANCE
+      && !this.engagedTarget?.isDead;
+    const shouldEngage = shouldStayEngaged || (closest && closestDistance <= ENGAGED_MODE_DISTANCE);
     if (shouldEngage) {
       if (!this.isEngaged) {
         this.freeYaw = this.yaw;
@@ -3499,8 +3514,8 @@ export class PlayerControls {
         this.cameraTouchId = null;
       }
       this.isEngaged = true;
-      this.engagedTarget = closest;
-      this.engagedDirection = closest.model.position.clone().sub(this.playerModel.position);
+      this.engagedTarget = shouldStayEngaged ? this.engagedTarget : closest;
+      this.engagedDirection = this.engagedTarget.model.position.clone().sub(this.playerModel.position);
       this.engagedDirection.y = 0;
       if (this.engagedDirection.lengthSq() > 0) {
         this.engagedDirection.normalize();
