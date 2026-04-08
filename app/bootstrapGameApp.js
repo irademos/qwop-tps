@@ -3324,7 +3324,20 @@ async function initCore(runtimeContext) {
   }
 
 
-  const getMonsterSpawnPosition = () => {
+  const getMonsterGroundOffset = (monsterLikeOrLevel = null) => {
+    if (monsterLikeOrLevel && Number.isFinite(monsterLikeOrLevel.sizeScale)) {
+      return MONSTER_SPAWN_GROUND_OFFSET * Math.max(0.75, monsterLikeOrLevel.sizeScale);
+    }
+    if (Number.isFinite(monsterLikeOrLevel)) {
+      const level = Math.max(1, Math.round(monsterLikeOrLevel));
+      const estimatedScale = 1 + (0.5 * (level - 1));
+      return MONSTER_SPAWN_GROUND_OFFSET * Math.max(0.75, estimatedScale);
+    }
+    return MONSTER_SPAWN_GROUND_OFFSET;
+  };
+
+  const getMonsterSpawnPosition = (monsterLikeOrLevel = null) => {
+    const groundOffset = getMonsterGroundOffset(monsterLikeOrLevel);
     for (let attempt = 0; attempt < MONSTER_SPAWN_ATTEMPTS; attempt += 1) {
       const angle = Math.random() * Math.PI * 2;
       const radius = THREE.MathUtils.randFloat(MONSTER_SPAWN_MIN_RADIUS, MONSTER_SPAWN_MAX_RADIUS);
@@ -3333,7 +3346,7 @@ async function initCore(runtimeContext) {
         0,
         playerModel.position.z + Math.sin(angle) * radius
       );
-      const spawnY = getSpawnY(spawnPos.x, spawnPos.z, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true });
+      const spawnY = getSpawnY(spawnPos.x, spawnPos.z, groundOffset, { allowOnBuildings: true });
       spawnPos.y = Number.isFinite(spawnY) ? spawnY : 0.5;
       if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
         continue;
@@ -3342,7 +3355,7 @@ async function initCore(runtimeContext) {
     }
     const fallback = playerModel.position.clone();
     fallback.x += MONSTER_SPAWN_MIN_RADIUS;
-    const fallbackY = getSpawnY(fallback.x, fallback.z, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true });
+    const fallbackY = getSpawnY(fallback.x, fallback.z, groundOffset, { allowOnBuildings: true });
     fallback.y = Number.isFinite(fallbackY) ? fallbackY : fallback.y;
     return fallback;
   };
@@ -3567,8 +3580,12 @@ async function initCore(runtimeContext) {
         const spawnPos = options.position
           && Number.isFinite(options.position.x)
           && Number.isFinite(options.position.z)
-          ? normalizeNetworkSpawnPosition(options.position, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true }) || getMonsterSpawnPosition()
-          : getMonsterSpawnPosition();
+          ? normalizeNetworkSpawnPosition(
+            options.position,
+            getMonsterGroundOffset(monster),
+            { allowOnBuildings: true }
+          ) || getMonsterSpawnPosition(monster)
+          : getMonsterSpawnPosition(monster);
         monster.setPosition(spawnPos.x, spawnPos.y, spawnPos.z);
 
         cleanupMonster(oldMonster);
@@ -3768,7 +3785,11 @@ async function initCore(runtimeContext) {
           monster.setLevel(state.level, { preserveHealth: true });
         }
         if (Number.isFinite(px) && Number.isFinite(pz)) {
-          const normalizedPos = normalizeNetworkSpawnPosition({ x: px, y: py, z: pz }, MONSTER_SPAWN_GROUND_OFFSET, { allowOnBuildings: true });
+          const normalizedPos = normalizeNetworkSpawnPosition(
+            { x: px, y: py, z: pz },
+            getMonsterGroundOffset(monster),
+            { allowOnBuildings: true }
+          );
           if (normalizedPos) {
             monster.model.position.copy(normalizedPos);
             monster.body?.setTranslation({ x: normalizedPos.x, y: normalizedPos.y, z: normalizedPos.z }, true);
