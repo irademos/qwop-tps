@@ -2668,6 +2668,12 @@ export class PlayerControls {
         .add(new THREE.Vector3(0, cameraHeight + ENGAGED_CAMERA_OFFSET.up, 0))
         .add(behindOffset)
         .addScaledVector(engagedRight, ENGAGED_CAMERA_OFFSET.right);
+      const engagedTargetPosition = this.engagedTarget?.model?.position;
+      if (engagedTargetPosition) {
+        const playerFocus = orbitCenter.clone().add(new THREE.Vector3(0, 0.25, 0));
+        const monsterFocus = engagedTargetPosition.clone().add(new THREE.Vector3(0, 0.9, 0));
+        cameraLookTarget = playerFocus.lerp(monsterFocus, 0.65);
+      }
     } else {
       const rotatedOffset = new THREE.Vector3(
         offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
