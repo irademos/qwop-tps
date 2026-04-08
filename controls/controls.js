@@ -3466,11 +3466,19 @@ export class PlayerControls {
       return;
     }
     const monsters = appContext.entities.monsters || window.monsters || [];
+    const playerPosition = this.playerModel.position;
+    if (!playerPosition) {
+      this.setEngaged(false);
+      return;
+    }
     let closest = null;
     let closestDistance = Infinity;
     for (const monster of monsters) {
-      if (!monster?.model || monster.isDead) continue;
-      const distance = this.playerModel.position.distanceTo(monster.model.position);
+      const monsterPosition = monster?.model?.position;
+      if (!monsterPosition || monster.isDead) continue;
+      const dx = monsterPosition.x - playerPosition.x;
+      const dz = monsterPosition.z - playerPosition.z;
+      const distance = Math.hypot(dx, dz);
       if (distance < closestDistance) {
         closest = monster;
         closestDistance = distance;
