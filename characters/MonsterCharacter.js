@@ -94,8 +94,10 @@ export class MonsterCharacter extends CharacterBase {
     this.healthBar = this.createHealthBar();
     this.healthBarVisibleUntil = 0;
     this.backgroundMode = false;
+    this.isProvoked = false;
     this.model.userData.monsterProperties = this.monsterProperties;
     this.model.userData.lastHitAttackTypes = [];
+    this.model.userData.isProvoked = false;
     this.setLevel(1, { preserveHealth: false });
   }
 
@@ -279,6 +281,9 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.lastHitAttackTypes = attackTypes;
     this.health = Math.max(0, this.health - damage);
     this.model.userData.health = this.health;
+    this.isProvoked = true;
+    this.model.userData.isProvoked = true;
+    this.model.userData.mode = "enemy";
     this.showHealthBar();
     if (this.health <= 0) {
       this.markDead();
@@ -327,6 +332,9 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.health = this.maxHealth;
     this.isDead = false;
     this.deathTime = null;
+    this.isProvoked = false;
+    this.model.userData.isProvoked = false;
+    this.model.userData.mode = "friendly";
   }
 
   setLevel(level, { preserveHealth = true } = {}) {
@@ -510,7 +518,13 @@ export class MonsterCharacter extends CharacterBase {
       this.model.userData.mode = "enemy";
     }
 
-    if (this.model.userData.mode === "enemy" && closestDistance > ENEMY_DISENGAGE_RADIUS) {
+    if (this.isProvoked && this.model.userData.mode !== "dead") {
+      this.model.userData.mode = "enemy";
+    }
+
+    if (!this.isProvoked
+      && this.model.userData.mode === "enemy"
+      && closestDistance > ENEMY_DISENGAGE_RADIUS) {
       this.model.userData.mode = "friendly";
       this.attackStartTime = null;
       this.attackHasHit = false;
