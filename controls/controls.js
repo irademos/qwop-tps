@@ -2646,16 +2646,12 @@ export class PlayerControls {
     }
     let desiredCameraPosition;
     let cameraLookTarget = orbitCenter;
-    if (this.firstPersonEnabled) {
-      desiredCameraPosition = orbitCenter.clone().add(new THREE.Vector3(0, 0.62, 0));
-      const cosPitch = Math.cos(this.pitch);
-      const forward = new THREE.Vector3(
-        Math.sin(this.yaw) * cosPitch,
-        Math.sin(this.pitch),
-        Math.cos(this.yaw) * cosPitch
-      ).normalize();
-      cameraLookTarget = desiredCameraPosition.clone().addScaledVector(forward, 10);
-    } else if (this.isEngaged && this.engagedDirection) {
+    const engagedTargetPosition = this.engagedTarget?.model?.position;
+    const hasValidEngagedTarget = this.isEngaged
+      && this.engagedDirection
+      && Number.isFinite(engagedTargetPosition?.x)
+      && Number.isFinite(engagedTargetPosition?.z);
+    if (hasValidEngagedTarget) {
       const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
       this.yaw = engagedYaw;
       this.pitch = 0;
@@ -2668,6 +2664,15 @@ export class PlayerControls {
         .add(new THREE.Vector3(0, cameraHeight + ENGAGED_CAMERA_OFFSET.up, 0))
         .add(behindOffset)
         .addScaledVector(engagedRight, ENGAGED_CAMERA_OFFSET.right);
+    } else if (this.firstPersonEnabled) {
+      desiredCameraPosition = orbitCenter.clone().add(new THREE.Vector3(0, 0.62, 0));
+      const cosPitch = Math.cos(this.pitch);
+      const forward = new THREE.Vector3(
+        Math.sin(this.yaw) * cosPitch,
+        Math.sin(this.pitch),
+        Math.cos(this.yaw) * cosPitch
+      ).normalize();
+      cameraLookTarget = desiredCameraPosition.clone().addScaledVector(forward, 10);
     } else {
       const rotatedOffset = new THREE.Vector3(
         offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
@@ -3465,12 +3470,28 @@ export class PlayerControls {
       this.setEngaged(false);
       return;
     }
-    const monsters = appContext.entities.monsters || window.monsters || [];
+    const rawMonsters = appContext.entities.monsters || window.monsters || [];
+    const normalizeMonsters = (source) => {
+      if (!source) return [];
+      if (Array.isArray(source)) return source;
+      if (source instanceof Set) return Array.from(source);
+      if (source instanceof Map) return Array.from(source.values());
+      if (typeof source === 'object') {
+        return Object.values(source).flatMap((entry) => normalizeMonsters(entry));
+      }
+      return [];
+    };
+    const monsters = normalizeMonsters(rawMonsters);
     let closest = null;
     let closestDistance = Infinity;
     for (const monster of monsters) {
       if (!monster?.model || monster.isDead) continue;
-      const distance = this.playerModel.position.distanceTo(monster.model.position);
+      const targetX = monster.model.position?.x;
+      const targetZ = monster.model.position?.z;
+      if (!Number.isFinite(targetX) || !Number.isFinite(targetZ)) continue;
+      const dx = targetX - this.playerModel.position.x;
+      const dz = targetZ - this.playerModel.position.z;
+      const distance = Math.hypot(dx, dz);
       if (distance < closestDistance) {
         closest = monster;
         closestDistance = distance;
