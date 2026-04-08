@@ -73,6 +73,7 @@ import {
   updateHomeStorageUI,
   initSettingsPanel,
   openSettings,
+  openInventory,
   updateSettingsUI,
   getCraftRecipes,
   initCraftPanelFeature,
@@ -9903,6 +9904,7 @@ async function initCore(runtimeContext) {
   }
 
   const settingsBtn = document.getElementById('settings-button');
+  const inventoryBtn = document.getElementById('inventory-button');
   const characterOptions = ['base_character_2', 'cowboy', 'Chimpanzee', 'seagull'].map(name => ({
     label: name,
     value: `/models/${name}.fbx`
@@ -10164,8 +10166,12 @@ async function initCore(runtimeContext) {
   settingsBtn.addEventListener('click', () => {
     openSettings();
   });
+  inventoryBtn?.addEventListener('click', () => {
+    openInventory();
+  });
 
   const settingsOverlay = document.getElementById('settings-overlay');
+  const inventoryOverlay = document.getElementById('inventory-overlay');
   const homeStorageOverlay = document.getElementById('home-storage-overlay');
   const merchantOverlay = document.getElementById('merchant-overlay');
   const craftOverlay = document.getElementById('craft-overlay');
@@ -10173,6 +10179,9 @@ async function initCore(runtimeContext) {
 
   setInterval(() => {
     if (isOverlayVisible(settingsOverlay)) {
+      updateSettingsUI();
+    }
+    if (isOverlayVisible(inventoryOverlay)) {
       updateSettingsUI();
     }
     if (isOverlayVisible(homeStorageOverlay)) {

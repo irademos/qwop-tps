@@ -1,8 +1,8 @@
 import { showFeatureLoading } from './loadingState.js';
 import { initHomeStoragePanel, openHomeStorage, updateUI as updateHomeStorageUI } from '../controls/homeStoragePanel.js';
-import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from '../controls/settingsPanel.js';
+import { initSettingsPanel, openSettings, openInventory, updateUI as updateSettingsUI } from '../controls/settingsPanel.js';
 
-export { initHomeStoragePanel, openHomeStorage, updateHomeStorageUI, initSettingsPanel, openSettings, updateSettingsUI };
+export { initHomeStoragePanel, openHomeStorage, updateHomeStorageUI, initSettingsPanel, openSettings, openInventory, updateSettingsUI };
 
 let craftPromise = null;
 let merchantPromise = null;

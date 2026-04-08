@@ -988,6 +988,47 @@ body {
   z-index: 1000;
 }
 
+#inventory-button {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: 68px;
+  height: 52px;
+  border: 2px solid rgba(37, 26, 11, 0.95);
+  border-radius: 8px 8px 12px 12px;
+  background: linear-gradient(180deg, #b98a57 0%, #85582d 100%);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.35), inset -6px 0 0 rgba(0, 0, 0, 0.18);
+  color: #fff8dc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1000;
+}
+
+#inventory-button::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 7px;
+  width: 8px;
+  height: calc(100% - 14px);
+  background: rgba(62, 35, 9, 0.45);
+  border-radius: 3px;
+}
+
+.inventory-button-icon {
+  font-size: 24px;
+  transform: translateX(3px);
+}
+
+#inventory-button:hover,
+#inventory-button:focus-visible {
+  transform: translateX(-50%) translateY(-1px);
+  filter: brightness(1.08);
+}
+
 #settings-overlay {
   position: fixed;
   inset: 0;
@@ -1011,8 +1052,25 @@ body {
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
 
-body.settings-open #settings-button {
+body.settings-open #settings-button,
+body.settings-open #inventory-button {
   display: none;
+}
+
+#inventory-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+  overflow-y: auto;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
 
 #home-storage-overlay {
@@ -1079,6 +1137,10 @@ body.settings-open #settings-button {
   outline: none;
 }
 
+#inventory-panel {
+  outline: none;
+}
+
 .settings-shell {
   width: min(520px, 92vw);
   max-height: 85vh;
@@ -1088,6 +1150,15 @@ body.settings-open #settings-button {
   flex-direction: column;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
   overflow: hidden;
+}
+
+.inventory-shell {
+  width: min(460px, 92vw);
+  max-height: 78vh;
+}
+
+.inventory-body {
+  padding-top: 12px;
 }
 
 .settings-header {
@@ -1914,6 +1985,10 @@ body.settings-open #settings-button {
     margin-top: 0;
   }
 
+  #inventory-overlay {
+    align-items: center;
+  }
+
   .settings-shell {
     width: 100%;
     max-width: none;
@@ -1922,6 +1997,12 @@ body.settings-open #settings-button {
     height: 90dvh;
     max-height: 90dvh;
     border-radius: 16px;
+  }
+
+  .inventory-shell {
+    width: min(460px, 94vw);
+    height: auto;
+    max-height: 85dvh;
   }
 
   .settings-shell.is-mobile .settings-tabs {
