@@ -241,6 +241,7 @@ function openOverlay() {
   lastFocusedElement = document.activeElement;
   overlay.style.display = 'flex';
   overlay.setAttribute('aria-hidden', 'false');
+  syncOverlayBodyState();
   panel?.focus?.();
   renderAllTabs();
 }
@@ -249,9 +250,17 @@ function closeOverlay() {
   if (!overlay) return;
   overlay.style.display = 'none';
   overlay.setAttribute('aria-hidden', 'true');
+  syncOverlayBodyState();
   if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
     lastFocusedElement.focus();
   }
+}
+
+function syncOverlayBodyState() {
+  const isStorageOpen = overlay?.getAttribute('aria-hidden') === 'false';
+  const isSettingsOpen = document.getElementById('settings-overlay')?.getAttribute('aria-hidden') === 'false';
+  const isInventoryOpen = document.getElementById('inventory-overlay')?.getAttribute('aria-hidden') === 'false';
+  document.body.classList.toggle('settings-open', isStorageOpen || isSettingsOpen || isInventoryOpen);
 }
 
 function handleActionClick(action, tabId) {
@@ -304,6 +313,7 @@ export function initHomeStoragePanel({ appState } = {}) {
     throw new Error('Home storage overlay not found.');
   }
   overlay.setAttribute('aria-hidden', 'true');
+  syncOverlayBodyState();
   panel.innerHTML = '';
   panel.classList.add('settings-shell');
   panel.setAttribute('role', 'dialog');
