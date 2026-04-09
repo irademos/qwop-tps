@@ -655,14 +655,6 @@ function buildDisplayPanel() {
     step: 0.05
   });
 
-  const firstPersonRow = createElement('div', 'settings-row');
-  const firstPersonLabel = createElement('label', 'settings-label', 'First Person Camera');
-  firstPersonLabel.setAttribute('for', 'settings-display-first-person');
-  const firstPersonToggle = createElement('input', 'settings-checkbox');
-  firstPersonToggle.type = 'checkbox';
-  firstPersonToggle.id = 'settings-display-first-person';
-  firstPersonRow.append(firstPersonLabel, firstPersonToggle);
-
   const hint = createElement('div', 'settings-muted');
   hint.textContent = 'Auto mode uses local time to switch between day and night lighting.';
 
@@ -673,7 +665,6 @@ function buildDisplayPanel() {
     groundField.field,
     buildingField.field,
     skyField.field,
-    firstPersonRow,
     hint
   );
 
@@ -692,8 +683,7 @@ function buildDisplayPanel() {
       groundBrightness: groundField.valueLabel,
       buildingBrightness: buildingField.valueLabel,
       skyBrightness: skyField.valueLabel
-    },
-    firstPersonToggle
+    }
   };
 
   return panelEl;
@@ -1428,12 +1418,6 @@ function bindEvents() {
     });
   }
 
-  if (elements.displayFields?.firstPersonToggle) {
-    elements.displayFields.firstPersonToggle.addEventListener('change', (event) => {
-      context.appState?.setDisplaySetting?.('firstPerson', event.target.checked);
-    });
-  }
-
   window.addEventListener('resize', () => {
     refreshLayout();
   });
@@ -1826,9 +1810,6 @@ export function updateUI() {
         elements.displayFields.values[key].textContent = formatRangeValue(value);
       }
     });
-    if (elements.displayFields.firstPersonToggle) {
-      elements.displayFields.firstPersonToggle.checked = Boolean(displaySettings?.firstPerson);
-    }
   }
 
   renderInventory();
