@@ -277,6 +277,12 @@ const DISPLAY_PRESETS = {
     skyBrightness: 0.25
   }
 };
+const PERFORMANCE_MODES = new Set(['auto', 'quality', 'balanced', 'performance']);
+const PERFORMANCE_PROFILE_CAPS = {
+  low: 1.0,
+  mid: 1.5,
+  high: 2.0
+};
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
@@ -1018,8 +1024,63 @@ async function initCore(runtimeContext) {
     }
     return 'day';
   };
+  const getDevicePerformanceProfile = () => {
+    const hardwareConcurrency = Number.isFinite(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 4;
+    const memory = Number.isFinite(navigator.deviceMemory) ? navigator.deviceMemory : 4;
+    const shortestSide = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+    const isTouchCapable = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    const mobileUA = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent || '');
+    const isMobileLike = mobileUA || (isTouchCapable && shortestSide > 0 && shortestSide <= 900);
+
+    const severeConstraint = hardwareConcurrency <= 4 || memory <= 4 || shortestSide <= 720;
+    const moderateConstraint = hardwareConcurrency <= 6 || memory <= 6 || shortestSide <= 1080;
+    if (isMobileLike && severeConstraint) {
+      return { tier: 'low', isMobileLike };
+    }
+    if (severeConstraint || (isMobileLike && moderateConstraint)) {
+      return { tier: 'mid', isMobileLike };
+    }
+    return { tier: 'high', isMobileLike };
+  };
+
+  const resolvePerformanceTier = (mode) => {
+    if (mode === 'performance') return 'low';
+    if (mode === 'quality') return 'high';
+    const profile = getDevicePerformanceProfile();
+    if (mode === 'balanced') {
+      return profile.tier === 'high' ? 'mid' : profile.tier;
+    }
+    return profile.tier;
+  };
+
+  const getPixelRatioCapForTier = (tier) => PERFORMANCE_PROFILE_CAPS[tier] ?? PERFORMANCE_PROFILE_CAPS.mid;
+  const isLowEndTier = (tier) => tier === 'low';
+  const markOptionalShadow = (target) => {
+    if (!target) return;
+    target.userData = target.userData || {};
+    target.userData.shadowProfileManaged = true;
+    target.userData.shadowImportance = 'optional';
+  };
+  const applyOptionalShadowState = (target, allowOptionalShadows) => {
+    if (!target) return;
+    markOptionalShadow(target);
+    if (typeof target.traverse === 'function') {
+      target.traverse((child) => {
+        if (!child?.isMesh) return;
+        child.userData = child.userData || {};
+        child.userData.shadowProfileManaged = true;
+        child.userData.shadowImportance = 'optional';
+        child.castShadow = !!allowOptionalShadows;
+      });
+      return;
+    }
+    if (target.isMesh) {
+      target.castShadow = !!allowOptionalShadows;
+    }
+  };
+
   const loadDisplaySettings = () => {
-    const defaults = { mode: 'auto', ...DISPLAY_PRESETS.day };
+    const defaults = { mode: 'auto', performanceMode: 'auto', ...DISPLAY_PRESETS.day };
     const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
     if (!raw) return defaults;
     try {
@@ -1042,9 +1103,15 @@ async function initCore(runtimeContext) {
   let lastAutoMode = null;
   let groundMaterialBase = null;
   let buildingMaterialBase = null;
+  let renderer = null;
+  let currentPerformanceTier = resolvePerformanceTier(displaySettings.performanceMode);
+  let optionalShadowsEnabled = !isLowEndTier(currentPerformanceTier);
 
   if (!DISPLAY_MODES.has(displaySettings.mode)) {
     displaySettings.mode = 'auto';
+  }
+  if (!PERFORMANCE_MODES.has(displaySettings.performanceMode)) {
+    displaySettings.performanceMode = 'auto';
   }
   if (displaySettings.mode === 'auto') {
     lastAutoMode = getAutoMode();
@@ -1086,6 +1153,32 @@ async function initCore(runtimeContext) {
     }
   };
 
+  const applyRendererPerformanceSettings = () => {
+    const nextTier = resolvePerformanceTier(displaySettings.performanceMode);
+    currentPerformanceTier = nextTier;
+    optionalShadowsEnabled = !isLowEndTier(nextTier);
+    if (renderer) {
+      const pixelRatioCap = getPixelRatioCapForTier(nextTier);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap));
+      const lowEnd = isLowEndTier(nextTier);
+      renderer.shadowMap.enabled = !lowEnd;
+      renderer.shadowMap.type = lowEnd ? THREE.BasicShadowMap : (nextTier === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap);
+    }
+    if (dirLight) {
+      const lowEnd = isLowEndTier(nextTier);
+      dirLight.castShadow = !lowEnd;
+      dirLight.shadow.mapSize.set(lowEnd ? 512 : 1024, lowEnd ? 512 : 1024);
+    }
+    if (scene) {
+      scene.traverse((child) => {
+        if (!child?.isMesh) return;
+        if (child.userData?.shadowProfileManaged && child.userData?.shadowImportance === 'optional') {
+          child.castShadow = optionalShadowsEnabled;
+        }
+      });
+    }
+  };
+
 
   syncBackgroundLoopForDisplayMode = () => {
     const effectiveMode = displaySettings.mode === 'auto'
@@ -1121,15 +1214,25 @@ async function initCore(runtimeContext) {
       applyPresetForMode(mode);
     }
     saveDisplaySettings();
+    applyRendererPerformanceSettings();
     applyDisplaySettings();
     syncBackgroundLoopForDisplayMode();
     updateSettingsUI();
   };
 
   const setDisplaySetting = (key, value) => {
+    if (key === 'performanceMode') {
+      if (!PERFORMANCE_MODES.has(value)) return;
+      displaySettings.performanceMode = value;
+      saveDisplaySettings();
+      applyRendererPerformanceSettings();
+      updateSettingsUI();
+      return;
+    }
     if (!Number.isFinite(value)) return;
     displaySettings[key] = value;
     saveDisplaySettings();
+    applyRendererPerformanceSettings();
     applyDisplaySettings();
   };
 
@@ -2030,7 +2133,11 @@ async function initCore(runtimeContext) {
   const craftTableColliderBounds = new THREE.Box3();
   const craftTableColliderCenter = new THREE.Vector3();
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const initialTier = resolvePerformanceTier(displaySettings.performanceMode);
+  renderer = new THREE.WebGLRenderer({ antialias: !isLowEndTier(initialTier) });
+  currentPerformanceTier = initialTier;
+  optionalShadowsEnabled = !isLowEndTier(initialTier);
+  applyRendererPerformanceSettings();
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
 
@@ -2052,6 +2159,7 @@ async function initCore(runtimeContext) {
   }
 
   const handleResize = () => {
+    applyRendererPerformanceSettings();
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -2067,6 +2175,7 @@ async function initCore(runtimeContext) {
   dirLight.position.set(5, 10, 5);
   dirLight.castShadow = true;
   scene.add(dirLight);
+  applyRendererPerformanceSettings();
   applyDisplaySettings();
 
 
@@ -5238,7 +5347,7 @@ async function initCore(runtimeContext) {
       if (!mesh) continue;
       mesh.position.set((Math.random() - 0.5) * 0.42, 0.1 + Math.random() * 0.14, (Math.random() - 0.5) * 0.42);
       mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-      mesh.castShadow = true;
+      applyOptionalShadowState(mesh, optionalShadowsEnabled);
       mesh.receiveShadow = true;
       group.add(mesh);
     }
@@ -5706,7 +5815,7 @@ async function initCore(runtimeContext) {
           })
         );
         crystal.position.set((Math.random() - 0.5) * 0.22, 0.1 + Math.random() * 0.12, (Math.random() - 0.5) * 0.22);
-        crystal.castShadow = true;
+        applyOptionalShadowState(crystal, optionalShadowsEnabled);
         crystal.receiveShadow = true;
         group.add(crystal);
       }
@@ -5727,14 +5836,14 @@ async function initCore(runtimeContext) {
         metalness: 0.1
       })
     );
-    bottle.castShadow = true;
+    applyOptionalShadowState(bottle, optionalShadowsEnabled);
     bottle.receiveShadow = true;
     const cork = new THREE.Mesh(
       new THREE.CylinderGeometry(0.06, 0.06, 0.08, 12),
       new THREE.MeshStandardMaterial({ color: 0x7a5b39, roughness: 0.9 })
     );
     cork.position.y = 0.19;
-    cork.castShadow = true;
+    applyOptionalShadowState(cork, optionalShadowsEnabled);
     cork.receiveShadow = true;
     group.add(bottle, cork);
     group.scale.setScalar(1.15);
@@ -5783,7 +5892,7 @@ async function initCore(runtimeContext) {
     pickupMesh.rotation.set(0, Math.PI / 2, Math.PI / 2);
     registerPickupEmissiveMaterials(pickupMesh);
     pickupMesh.position.copy(spawnPos);
-    pickupMesh.castShadow = true;
+    applyOptionalShadowState(pickupMesh, optionalShadowsEnabled);
     pickupMesh.userData.skipTerrainCorrection = true;
     pickupMesh.userData.baseY = spawnPos.y;
     pickupMesh.userData.phase = Math.random() * Math.PI * 2;
@@ -5891,7 +6000,7 @@ async function initCore(runtimeContext) {
       const angle = (index / Math.max(entries.length, 1)) * Math.PI * 2;
       const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
       mesh.position.copy(basePos).add(offset);
-      mesh.castShadow = true;
+      applyOptionalShadowState(mesh, optionalShadowsEnabled);
       mesh.receiveShadow = true;
       mesh.userData.skipTerrainCorrection = true;
       scene.add(mesh);
@@ -7387,7 +7496,7 @@ async function initCore(runtimeContext) {
     }
     registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
-    pickup.castShadow = true;
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
     pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
@@ -7482,7 +7591,7 @@ async function initCore(runtimeContext) {
     const pickup = new THREE.Mesh(geometry, material);
     registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
-    pickup.castShadow = true;
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
     pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
@@ -7664,7 +7773,7 @@ async function initCore(runtimeContext) {
     const pickup = new THREE.Mesh(geometry, material);
     registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
-    pickup.castShadow = true;
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
     pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
@@ -7691,7 +7800,7 @@ async function initCore(runtimeContext) {
     const pickup = new THREE.Mesh(geometry, material);
     registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
-    pickup.castShadow = true;
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
     pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
@@ -7718,7 +7827,7 @@ async function initCore(runtimeContext) {
     const pickup = new THREE.Mesh(geometry, material);
     registerPickupEmissiveMaterials(pickup);
     pickup.position.copy(spawnPos);
-    pickup.castShadow = true;
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
     pickup.userData.skipTerrainCorrection = true;
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
