@@ -256,7 +256,7 @@ const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
 const PRESENCE_STALE_MS = 5000;
-const PRESENCE_SEND_MS = 250;
+const PRESENCE_SEND_MS = 350;
 const PRESENCE_SWEEP_MS = 250;
 const REMOTE_LERP_ALPHA = 0.15;
 const REMOTE_TELEPORT_THRESHOLD_M = 25;
@@ -737,10 +737,29 @@ async function initCore(runtimeContext) {
   let lastEntityBroadcast = 0;
   let lastFullEntityBroadcast = 0;
   let lastControlSend = 0;
-  const ENTITY_BROADCAST_INTERVAL = 200;
+  let entityBroadcastIntervalMs = 260;
   const ENTITY_STATE_DIRTY_THRESHOLD = 0.01;
   const ENTITY_FULL_SNAPSHOT_INTERVAL = 5000;
-  const CONTROL_SEND_INTERVAL = 140;
+  let controlSendIntervalMs = 220;
+  let presenceSendIntervalMs = PRESENCE_SEND_MS;
+  const POSITION_DEADBAND_SQ = 0.03 * 0.03;
+  const ROTATION_DEADBAND_RAD = 0.045;
+  const netSendQueue = new Map();
+  const netStats = {
+    sentInWindow: 0,
+    windowStartMs: performance.now(),
+    messagesPerSecond: 0,
+    coalesced: 0,
+    dropped: 0
+  };
+  const lastSentPresenceState = {
+    x: null,
+    y: null,
+    z: null,
+    rotation: null,
+    action: null
+  };
+  const lastSentEntityControlStates = new Map();
   const projectiles = [];
   const iceMists = [];
   const bombMists = [];
@@ -819,6 +838,84 @@ async function initCore(runtimeContext) {
     const safeMax = Number.isFinite(max) ? max : safeMin;
     if (safeMax <= safeMin) return safeMin;
     return safeMin + Math.random() * (safeMax - safeMin);
+  };
+  const wrapDeltaRad = (value) => {
+    let wrapped = value;
+    while (wrapped > Math.PI) wrapped -= Math.PI * 2;
+    while (wrapped < -Math.PI) wrapped += Math.PI * 2;
+    return wrapped;
+  };
+  const getNetworkTier = () => {
+    const pingMs = multiplayer?.lastPingMs;
+    const pingAgeMs = Number.isFinite(multiplayer?.lastPingAt) ? (Date.now() - multiplayer.lastPingAt) : Infinity;
+    const hasLag = Number.isFinite(pingMs) && pingMs >= 220;
+    const stalePing = pingAgeMs > 20000;
+    const deviceTier = getDevicePerformanceProfile().tier;
+    if (deviceTier === 'low' || hasLag || stalePing) return 'low';
+    if (deviceTier === 'mid' || (Number.isFinite(pingMs) && pingMs >= 120)) return 'mid';
+    return 'high';
+  };
+  const applyRuntimeNetworkProfile = () => {
+    const tier = getNetworkTier();
+    if (tier === 'low') {
+      presenceSendIntervalMs = 550;
+      entityBroadcastIntervalMs = 380;
+      controlSendIntervalMs = 320;
+      return;
+    }
+    if (tier === 'mid') {
+      presenceSendIntervalMs = 420;
+      entityBroadcastIntervalMs = 300;
+      controlSendIntervalMs = 240;
+      return;
+    }
+    presenceSendIntervalMs = 350;
+    entityBroadcastIntervalMs = 260;
+    controlSendIntervalMs = 200;
+  };
+  const recordNetSent = (count = 1) => {
+    netStats.sentInWindow += count;
+  };
+  const queueNetMessage = (payload, coalesceKey = null) => {
+    if (!multiplayer || !payload) {
+      netStats.dropped += 1;
+      return false;
+    }
+    if (!coalesceKey) {
+      multiplayer.send(payload);
+      recordNetSent(1);
+      return true;
+    }
+    if (netSendQueue.has(coalesceKey)) {
+      netStats.coalesced += 1;
+    }
+    netSendQueue.set(coalesceKey, payload);
+    return true;
+  };
+  const flushNetSendQueue = () => {
+    if (!multiplayer || netSendQueue.size === 0) return;
+    const pending = Array.from(netSendQueue.values());
+    netSendQueue.clear();
+    pending.forEach((payload) => multiplayer.send(payload));
+    recordNetSent(pending.length);
+  };
+  const tickNetStats = (nowMs) => {
+    const elapsed = nowMs - netStats.windowStartMs;
+    if (elapsed < 1000) return;
+    netStats.messagesPerSecond = (netStats.sentInWindow * 1000) / elapsed;
+    netStats.sentInWindow = 0;
+    netStats.windowStartMs = nowMs;
+    window.netRuntimeStats = {
+      msgsPerSecond: Number(netStats.messagesPerSecond.toFixed(2)),
+      coalesced: netStats.coalesced,
+      dropped: netStats.dropped,
+      queueDepth: netSendQueue.size,
+      intervals: {
+        presenceSendIntervalMs,
+        entityBroadcastIntervalMs,
+        controlSendIntervalMs
+      }
+    };
   };
   const getVolumeByDistance = (distance, maxDistance, maxVolume) => {
     if (!Number.isFinite(distance) || !Number.isFinite(maxDistance) || maxDistance <= 0) return 0;
@@ -1407,7 +1504,7 @@ async function initCore(runtimeContext) {
       updateAuthoritativeState(id, state, myId);
       return;
     }
-    multiplayer.send({ type: 'entityControl', id, state, sourceId: myId });
+    queueNetMessage({ type: 'entityControl', id, state, sourceId: myId }, `entityControl:${id}`);
   }
 
   const worldAnchorMatchesLocal = (anchor) => {
@@ -2018,6 +2115,15 @@ async function initCore(runtimeContext) {
 
   multiplayer = new Multiplayer(playerName, handleIncomingData);
   window.multiplayer = multiplayer;
+  multiplayer.queueCoalesced = (payload, key) => queueNetMessage(payload, key);
+  multiplayer.sendHighFrequency = (payload, typeKey, targetKey = 'global') => {
+    const key = `${typeKey}:${targetKey}`;
+    return queueNetMessage(payload, key);
+  };
+  multiplayer.getNetRuntimeStats = () => ({ ...window.netRuntimeStats });
+  multiplayer.onPingUpdate = () => {
+    applyRuntimeNetworkProfile();
+  };
   multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
     isHost = !!isCurrentHost;
     setMonsterPersistenceHost(isHost);
@@ -10935,22 +11041,40 @@ async function initCore(runtimeContext) {
         updateAuthoritativeState(id, state, sourceId);
       });
 
-      if (now - lastEntityBroadcast >= ENTITY_BROADCAST_INTERVAL) {
+      if (now - lastEntityBroadcast >= entityBroadcastIntervalMs) {
         const shouldSendFull = now - lastFullEntityBroadcast >= ENTITY_FULL_SNAPSHOT_INTERVAL;
         const payload = shouldSendFull
           ? serializeFullAuthoritativeStates()
           : serializeDirtyAuthoritativeStates();
         if (Object.keys(payload).length > 0) {
-          multiplayer.send({ type: 'entityStates', states: payload });
+          queueNetMessage({ type: 'entityStates', states: payload }, 'entityStates:host');
           if (shouldSendFull) {
             lastFullEntityBroadcast = now;
           }
         }
         lastEntityBroadcast = now;
       }
-    } else if (localStates.size > 0 && now - lastControlSend >= CONTROL_SEND_INTERVAL) {
+    } else if (localStates.size > 0 && now - lastControlSend >= controlSendIntervalMs) {
       localStates.forEach(({ state, sourceId }, id) => {
-        multiplayer.send({ type: 'entityControl', id, state, sourceId });
+        const prev = lastSentEntityControlStates.get(id);
+        const dx = (state.x ?? 0) - (prev?.x ?? 0);
+        const dy = (state.y ?? 0) - (prev?.y ?? 0);
+        const dz = (state.z ?? 0) - (prev?.z ?? 0);
+        const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > POSITION_DEADBAND_SQ;
+        const rotDelta = Math.abs(wrapDeltaRad((state.rotation ?? 0) - (prev?.rotation ?? 0)));
+        const changedAction = (state.action ?? null) !== (prev?.action ?? null);
+        if (!prev || moved || rotDelta >= ROTATION_DEADBAND_RAD || changedAction) {
+          lastSentEntityControlStates.set(id, {
+            x: state.x ?? 0,
+            y: state.y ?? 0,
+            z: state.z ?? 0,
+            rotation: state.rotation ?? 0,
+            action: state.action ?? null
+          });
+          queueNetMessage({ type: 'entityControl', id, state, sourceId }, `entityControl:${id}`);
+        } else {
+          netStats.dropped += 1;
+        }
       });
       lastControlSend = now;
     }
@@ -11215,7 +11339,7 @@ async function initCore(runtimeContext) {
       player.model.quaternion.slerp(player.targetQuat, REMOTE_LERP_ALPHA);
     });
 
-    if (now - lastPresenceSend >= PRESENCE_SEND_MS) {
+    if (now - lastPresenceSend >= presenceSendIntervalMs) {
       const localFix = getLatestLocationFix();
       const mapOrigin = getLocalMapOrigin();
       const payload = {
@@ -11258,9 +11382,27 @@ async function initCore(runtimeContext) {
           : (isInventoryItemEquipped('bomb')
             ? 'bomb'
             : (isInventoryItemEquipped('autumnSword') ? 'sword' : null)));
-      multiplayer.send(payload);
+      const dx = payload.x - (lastSentPresenceState.x ?? payload.x);
+      const dy = payload.y - (lastSentPresenceState.y ?? payload.y);
+      const dz = payload.z - (lastSentPresenceState.z ?? payload.z);
+      const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > POSITION_DEADBAND_SQ;
+      const rotated = Math.abs(wrapDeltaRad((payload.rotation ?? 0) - (lastSentPresenceState.rotation ?? 0))) >= ROTATION_DEADBAND_RAD;
+      const actionChanged = payload.action !== lastSentPresenceState.action;
+      if (lastSentPresenceState.x == null || moved || rotated || actionChanged) {
+        queueNetMessage(payload, 'presence:self');
+        lastSentPresenceState.x = payload.x;
+        lastSentPresenceState.y = payload.y;
+        lastSentPresenceState.z = payload.z;
+        lastSentPresenceState.rotation = payload.rotation ?? 0;
+        lastSentPresenceState.action = payload.action ?? null;
+      } else {
+        netStats.dropped += 1;
+      }
       lastPresenceSend = now;
     }
+    applyRuntimeNetworkProfile();
+    flushNetSendQueue();
+    tickNetStats(now);
 
     Object.entries(otherPlayers).forEach(([id, { model, nameLabel }]) => {
       if (!model.visible) {

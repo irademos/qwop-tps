@@ -116,6 +116,8 @@ const MERCHANT_DIALOGUE = {
 };
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 const MOBILE_EQUIP_HOLD_MS = 1500;
+const GRAB_MOVE_SEND_INTERVAL_MS = 110;
+const GRAB_MOVE_MIN_DELTA_SQ = 0.02 * 0.02;
 
 export class PlayerControls {
   constructor({
@@ -169,6 +171,8 @@ export class PlayerControls {
     this.isGrabbed = false;
     this.grabberId = null;
     this.externalGrabPos = null;
+    this.lastGrabMoveSentAt = 0;
+    this.lastGrabMoveSentPos = null;
     this.isClimbing = false;
     this.activeClimbArea = null;
 
@@ -3336,7 +3340,28 @@ export class PlayerControls {
     const target = this.grabbedTarget;
     if (target.type === 'player') {
       target.model.position.copy(targetPos);
-      this.multiplayer.send({ type: 'grabMove', from: this.multiplayer.getId(), target: target.id, position: targetPos.toArray() });
+      const now = performance.now();
+      if (now - this.lastGrabMoveSentAt < GRAB_MOVE_SEND_INTERVAL_MS) {
+        return;
+      }
+      const lastPos = this.lastGrabMoveSentPos;
+      if (lastPos) {
+        const dx = targetPos.x - lastPos.x;
+        const dy = targetPos.y - lastPos.y;
+        const dz = targetPos.z - lastPos.z;
+        if (((dx * dx) + (dy * dy) + (dz * dz)) < GRAB_MOVE_MIN_DELTA_SQ) {
+          return;
+        }
+      }
+      const payload = { type: 'grabMove', from: this.multiplayer.getId(), target: target.id, position: targetPos.toArray() };
+      const sendHighFrequency = this.multiplayer?.sendHighFrequency;
+      if (typeof sendHighFrequency === 'function') {
+        sendHighFrequency(payload, 'grabMove', target.id);
+      } else {
+        this.multiplayer.send(payload);
+      }
+      this.lastGrabMoveSentAt = now;
+      this.lastGrabMoveSentPos = targetPos.clone();
     } else if (target.type === 'monster') {
       target.model.position.copy(targetPos);
       target.model.userData.rb?.setTranslation(targetPos, true);
@@ -3386,6 +3411,8 @@ export class PlayerControls {
       this.multiplayer.send({ type: 'grab', from: this.multiplayer.getId(), target: this.grabbedTarget.id, active: false });
     }
     this.grabbedTarget = null;
+    this.lastGrabMoveSentAt = 0;
+    this.lastGrabMoveSentPos = null;
   }
 
   setGrabbed(active, grabberId = null) {
