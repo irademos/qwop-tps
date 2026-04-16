@@ -601,6 +601,25 @@ function buildDisplayPanel() {
   });
   modeGroup.append(modeLabel, modeSelect);
 
+  const performanceGroup = createElement('div', 'settings-field');
+  const performanceLabel = createElement('label', 'settings-label', 'Performance Mode');
+  performanceLabel.setAttribute('for', 'settings-performance-mode');
+  const performanceSelect = createElement('select', 'settings-select');
+  performanceSelect.id = 'settings-performance-mode';
+  const performanceOptions = [
+    { value: 'auto', label: 'Auto (device tuned)' },
+    { value: 'quality', label: 'Quality' },
+    { value: 'balanced', label: 'Balanced' },
+    { value: 'performance', label: 'Performance' }
+  ];
+  performanceOptions.forEach(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    performanceSelect.appendChild(option);
+  });
+  performanceGroup.append(performanceLabel, performanceSelect);
+
   const createRangeField = ({ id, label, min, max, step }) => {
     const field = createElement('div', 'settings-field');
     const labelRow = createElement('div', 'settings-range-row');
@@ -660,6 +679,7 @@ function buildDisplayPanel() {
 
   panelEl.append(
     modeGroup,
+    performanceGroup,
     ambientField.field,
     directionalField.field,
     groundField.field,
@@ -670,6 +690,7 @@ function buildDisplayPanel() {
 
   elements.displayFields = {
     modeSelect,
+    performanceSelect,
     sliders: {
       ambientIntensity: ambientField.input,
       directionalIntensity: directionalField.input,
@@ -1406,6 +1427,13 @@ function bindEvents() {
     });
   }
 
+  if (elements.displayFields?.performanceSelect) {
+    elements.displayFields.performanceSelect.addEventListener('change', (event) => {
+      const value = event.target.value;
+      context.appState?.setDisplaySetting?.('performanceMode', value);
+    });
+  }
+
   if (elements.displayFields?.sliders) {
     Object.entries(elements.displayFields.sliders).forEach(([key, slider]) => {
       slider.addEventListener('input', (event) => {
@@ -1798,6 +1826,11 @@ export function updateUI() {
     if (displaySettings?.mode && elements.displayFields.modeSelect) {
       if (elements.displayFields.modeSelect.value !== displaySettings.mode) {
         elements.displayFields.modeSelect.value = displaySettings.mode;
+      }
+    }
+    if (displaySettings?.performanceMode && elements.displayFields.performanceSelect) {
+      if (elements.displayFields.performanceSelect.value !== displaySettings.performanceMode) {
+        elements.displayFields.performanceSelect.value = displaySettings.performanceMode;
       }
     }
     Object.entries(elements.displayFields.sliders || {}).forEach(([key, slider]) => {
