@@ -45,12 +45,19 @@ export class Multiplayer {
     this.lastHostLogId = null;
     this.lastPeerLogKey = '';
     this.lastPeerLogAt = 0;
+    this.lastValidPeerSetKey = '';
+    this.lastOrderedPeerIds = [];
     this.onHostChange = null;
     this.onConnectionError = null;
     this.onPingUpdate = null;
     this.lastPingMs = null;
     this.lastPingAt = null;
     this.lastError = null;
+    this.peersCache = {};
+    this.unsubscribePeersListener = null;
+    this.unsubscribeRoomListener = null;
+    this.hostRecalcTimer = null;
+    this.roomPeerIds = [];
     
     this.initPeer(); // Start async setup
   }
@@ -142,74 +149,8 @@ export class Multiplayer {
         remove(peerRef);
       });
 
-      onValue(ref(db, `rooms/${assignedRoom}`), async snapshot => {
-        const roomPeersObj = snapshot.val() || {};
-        const allPeerIds = Object.keys(roomPeersObj);
-
-        // Get all active peers
-        const peersSnapshot = await get(ref(db, 'peers'));
-        const activePeers = peersSnapshot.exists() ? peersSnapshot.val() : {};
-
-        // Filter for only currently active peer IDs
-        const validPeerIds = allPeerIds.filter(pid => activePeers[pid]);
-
-        const orderedPeerIds = [...validPeerIds].sort((a, b) => {
-          const timestampA = activePeers[a]?.timestamp ?? 0;
-          const timestampB = activePeers[b]?.timestamp ?? 0;
-          if (timestampA !== timestampB) {
-            return timestampA - timestampB;
-          }
-          return a.localeCompare(b);
-        });
-
-        const peerLogKey = `${this.id}|${orderedPeerIds.join(',')}`;
-        const nowMs = Date.now();
-        if (peerLogKey !== this.lastPeerLogKey || nowMs - this.lastPeerLogAt > 10000) {
-          console.log("My ID:", this.id);
-          console.log("Valid Peers (oldest first):", orderedPeerIds);
-          this.lastPeerLogKey = peerLogKey;
-          this.lastPeerLogAt = nowMs;
-        }
-
-        const previousHostId = this.currentHostId;
-        let hostPeerId = previousHostId && validPeerIds.includes(previousHostId)
-          ? previousHostId
-          : null;
-
-        if (!hostPeerId && orderedPeerIds.length > 0) {
-          hostPeerId = orderedPeerIds[0];
-        }
-
-        this.currentHostId = hostPeerId;
-        this.isHost = (hostPeerId === this.id);
-
-        if (this.isHost && this.lastHostLogId !== this.id) {
-          console.log("👑 I am the host player");
-          this.lastHostLogId = this.id;
-        }
-        if (previousHostId !== hostPeerId && hostPeerId) {
-          console.log("Host selected (stable):", hostPeerId);
-        }
-
-        if (previousHostId !== hostPeerId && typeof this.onHostChange === 'function') {
-          try {
-            this.onHostChange({
-              previousHostId,
-              newHostId: hostPeerId,
-              isCurrentHost: this.isHost
-            });
-          } catch (err) {
-            console.warn('Host change callback failed:', err);
-          }
-        }
-
-        // Connect to any valid peers we haven't yet connected to
-        for (const peerId of orderedPeerIds) {
-          if (peerId !== this.id && !this.connections[peerId] && this.shouldAttemptConnection(peerId)) {
-            this.connectToPeer(peerId);
-          }
-        }
-      });
+      this.attachPeersListener();
+      this.attachRoomListener(assignedRoom);
 
       if (typeof this.onReady === 'function') {
         try {
@@ -226,9 +167,126 @@ export class Multiplayer {
       this.setupConnection(conn);
     });
 
-    onValue(ref(db, 'peers'), snapshot => {
-      const peers = snapshot.val() || {};
+    this.peer.on('disconnected', () => {
+      this.resetRealtimeListeners();
     });
+    this.peer.on('close', () => {
+      this.resetRealtimeListeners();
+    });
+  }
+
+  attachPeersListener() {
+    if (this.unsubscribePeersListener) {
+      this.unsubscribePeersListener();
+      this.unsubscribePeersListener = null;
+    }
+    this.unsubscribePeersListener = onValue(ref(db, 'peers'), snapshot => {
+      this.peersCache = snapshot.val() || {};
+      this.scheduleHostRecalculation();
+    });
+  }
+
+  attachRoomListener(roomId) {
+    if (!roomId) return;
+    if (this.unsubscribeRoomListener) {
+      this.unsubscribeRoomListener();
+      this.unsubscribeRoomListener = null;
+    }
+    this.unsubscribeRoomListener = onValue(ref(db, `rooms/${roomId}`), snapshot => {
+      const roomPeersObj = snapshot.val() || {};
+      this.roomPeerIds = Object.keys(roomPeersObj);
+      this.scheduleHostRecalculation();
+    });
+  }
+
+  scheduleHostRecalculation() {
+    if (this.hostRecalcTimer) return;
+    this.hostRecalcTimer = setTimeout(() => {
+      this.hostRecalcTimer = null;
+      this.recalculateHostAndPeers();
+    }, 25);
+  }
+
+  recalculateHostAndPeers() {
+    const activePeers = this.peersCache || {};
+    const allPeerIds = this.roomPeerIds || [];
+    const validPeerIds = allPeerIds.filter(pid => activePeers[pid]);
+    const validPeerSetKey = validPeerIds.slice().sort().join(',');
+    const previousHostId = this.currentHostId;
+    const hostStillValid = previousHostId && validPeerIds.includes(previousHostId);
+
+    let orderedPeerIds = this.lastOrderedPeerIds;
+    let hasPeerSetChanged = validPeerSetKey !== this.lastValidPeerSetKey;
+    if (hasPeerSetChanged || !hostStillValid) {
+      orderedPeerIds = [...validPeerIds].sort((a, b) => {
+        const timestampA = activePeers[a]?.timestamp ?? 0;
+        const timestampB = activePeers[b]?.timestamp ?? 0;
+        if (timestampA !== timestampB) {
+          return timestampA - timestampB;
+        }
+        return a.localeCompare(b);
+      });
+      this.lastOrderedPeerIds = orderedPeerIds;
+      this.lastValidPeerSetKey = validPeerSetKey;
+    }
+
+    const peerLogKey = `${this.id}|${orderedPeerIds.join(',')}`;
+    const nowMs = Date.now();
+    if (peerLogKey !== this.lastPeerLogKey || nowMs - this.lastPeerLogAt > 10000) {
+      console.log("My ID:", this.id);
+      console.log("Valid Peers (oldest first):", orderedPeerIds);
+      this.lastPeerLogKey = peerLogKey;
+      this.lastPeerLogAt = nowMs;
+    }
+
+    let hostPeerId = hostStillValid ? previousHostId : null;
+    if (!hostPeerId && orderedPeerIds.length > 0) {
+      hostPeerId = orderedPeerIds[0];
+    }
+
+    this.currentHostId = hostPeerId;
+    this.isHost = (hostPeerId === this.id);
+
+    if (this.isHost && this.lastHostLogId !== this.id) {
+      console.log("👑 I am the host player");
+      this.lastHostLogId = this.id;
+    }
+    if (previousHostId !== hostPeerId && hostPeerId) {
+      console.log("Host selected (stable):", hostPeerId);
+    }
+
+    if (previousHostId !== hostPeerId && typeof this.onHostChange === 'function') {
+      try {
+        this.onHostChange({
+          previousHostId,
+          newHostId: hostPeerId,
+          isCurrentHost: this.isHost
+        });
+      } catch (err) {
+        console.warn('Host change callback failed:', err);
+      }
+    }
+
+    for (const peerId of orderedPeerIds) {
+      if (peerId !== this.id && !this.connections[peerId] && this.shouldAttemptConnection(peerId)) {
+        this.connectToPeer(peerId);
+      }
+    }
+  }
+
+  resetRealtimeListeners() {
+    if (this.unsubscribeRoomListener) {
+      this.unsubscribeRoomListener();
+      this.unsubscribeRoomListener = null;
+    }
+    if (this.unsubscribePeersListener) {
+      this.unsubscribePeersListener();
+      this.unsubscribePeersListener = null;
+    }
+    if (this.hostRecalcTimer) {
+      clearTimeout(this.hostRecalcTimer);
+      this.hostRecalcTimer = null;
+    }
   }
 
   async clearServerState() {
@@ -538,6 +596,9 @@ export class Multiplayer {
   }
 
   reconnect() {
+    this.resetRealtimeListeners();
+    this.attachPeersListener();
+    this.attachRoomListener(this.roomId);
     if (this.peer?.disconnected) {
       try {
         this.peer.reconnect();
