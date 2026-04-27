@@ -5,6 +5,44 @@ function isAllowedMethod(method) {
   return method === "POST" || method === "OPTIONS";
 }
 
+function readDataParam(body) {
+  if (!body) {
+    return null;
+  }
+
+  if (typeof body === "string") {
+    const trimmed = body.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (trimmed.startsWith("data=")) {
+      return new URLSearchParams(trimmed).get("data");
+    }
+
+    return trimmed;
+  }
+
+  if (body instanceof URLSearchParams) {
+    return body.get("data");
+  }
+
+  if (Buffer.isBuffer(body)) {
+    return readDataParam(body.toString("utf8"));
+  }
+
+  if (ArrayBuffer.isView(body)) {
+    return readDataParam(Buffer.from(body.buffer, body.byteOffset, body.byteLength));
+  }
+
+  if (typeof body === "object") {
+    const data = body.data;
+    return typeof data === "string" ? data : null;
+  }
+
+  return null;
+}
+
 export default async function handler(req, res) {
   if (!isAllowedMethod(req.method)) {
     res.setHeader("Allow", "POST, OPTIONS");
@@ -18,19 +56,22 @@ export default async function handler(req, res) {
     return res.status(204).end();
   }
 
+  const query = readDataParam(req.body);
+  if (!query) {
+    return res.status(400).json({ error: "Missing Overpass query in request body." });
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const contentType = req.headers["content-type"] || "application/x-www-form-urlencoded;charset=UTF-8";
-    const body = typeof req.body === "string"
-      ? req.body
-      : new URLSearchParams(req.body || {}).toString();
+    const body = new URLSearchParams({ data: query }).toString();
 
     const upstreamResponse = await fetch(OVERPASS_ENDPOINT, {
       method: "POST",
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "Accept": "application/json, text/plain;q=0.9, */*;q=0.8",
       },
       body,
       signal: controller.signal,
