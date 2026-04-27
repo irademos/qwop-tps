@@ -173,6 +173,19 @@ const PERF = {
   disableMapUpdates: false
 };
 
+const FRAME_TIME_DEGRADE_THRESHOLD_MS = 25;
+const FRAME_TIME_RECOVER_THRESHOLD_MS = 18;
+const FRAME_TIME_DEGRADE_MAX_LEVEL = 2;
+const INCOMING_QUEUE_MAX_PER_FRAME = 40;
+const INCOMING_QUEUE_BUDGET_MS = 3;
+const INCOMING_QUEUE_MAX_BACKLOG = 400;
+const LOW_END_BUCKET_INTERVALS = Object.freeze({
+  ai: 2,
+  pickups: 2,
+  remoteLabels: 2,
+  audio: 3
+});
+
 appContext.debugFlags.PERF = PERF;
 appContext.debugFlags.DEBUG_CONSOLE = false;
 exposeDebugGlobals({
@@ -816,6 +829,12 @@ async function initCore(runtimeContext) {
   window.otherPlayers = otherPlayers;
   const pendingIncomingPeerData = [];
   let canProcessIncomingPeerData = false;
+  let lastIncomingProcessCount = 0;
+  let lastIncomingBacklog = 0;
+  let frameIndex = 0;
+  let adaptiveDegradeLevel = 0;
+  let frameOverrunStreak = 0;
+  let frameRecoverStreak = 0;
   const remotePresenceMeta = {};
   let lastPresenceSend = 0;
   let lastPresenceSweep = 0;
@@ -1517,14 +1536,7 @@ async function initCore(runtimeContext) {
     return dist != null && dist <= 50;
   };
 
-  function handleIncomingData(peerId, data) {
-    if (!canProcessIncomingPeerData) {
-      pendingIncomingPeerData.push([peerId, data]);
-      if (pendingIncomingPeerData.length > 200) {
-        pendingIncomingPeerData.shift();
-      }
-      return;
-    }
+  function processIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
     const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
     const isFiniteNumber = value => Number.isFinite(value);
@@ -2110,6 +2122,12 @@ async function initCore(runtimeContext) {
         }
       }
       return;
+    }
+  }
+  function handleIncomingData(peerId, data) {
+    pendingIncomingPeerData.push([peerId, data]);
+    if (pendingIncomingPeerData.length > INCOMING_QUEUE_MAX_BACKLOG) {
+      pendingIncomingPeerData.shift();
     }
   }
 
@@ -8757,7 +8775,17 @@ async function initCore(runtimeContext) {
     foodPickups: 0,
     healthPickups: 0,
     coinPickups: 0,
-    tileCacheSize: 0
+    tileCacheSize: 0,
+    incomingBacklog: 0,
+    incomingProcessedPerFrame: 0,
+    adaptiveDegradeLevel: 0
+  };
+  const subsystemPerf = {
+    incomingQueue: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
+    ai: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
+    pickups: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
+    remoteLabels: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
+    audio: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 }
   };
   window.debugPerf = debugPerf;
   let lastPerfUpdateMs = 0;
@@ -8768,6 +8796,48 @@ async function initCore(runtimeContext) {
   const MAP_DEFER_TIMEOUT_MS = 200;
   const MAP_DEFER_MAX_WAIT_MS = 900;
   let lastFrameDurationMs = 0;
+  const withSubsystemTiming = (name, fn) => {
+    const tracker = subsystemPerf[name];
+    if (!tracker) {
+      return fn();
+    }
+    const startedAt = performance.now();
+    const result = fn();
+    const elapsed = performance.now() - startedAt;
+    tracker.totalMs += elapsed;
+    tracker.calls += 1;
+    tracker.lastMs = elapsed;
+    if (elapsed > tracker.maxMs) {
+      tracker.maxMs = elapsed;
+    }
+    return result;
+  };
+  const getAdaptiveInterval = (bucket) => {
+    const lowEndBase = LOW_END_BUCKET_INTERVALS[bucket] ?? 1;
+    const lowEndStep = Math.max(1, lowEndBase + adaptiveDegradeLevel);
+    return isLowEndTier(currentPerformanceTier) ? lowEndStep : Math.max(1, 1 + adaptiveDegradeLevel);
+  };
+  const shouldRunBucket = (bucket) => (frameIndex % getAdaptiveInterval(bucket)) === 0;
+  const processIncomingPeerDataQueue = () => withSubsystemTiming('incomingQueue', () => {
+    if (!canProcessIncomingPeerData || pendingIncomingPeerData.length === 0) {
+      lastIncomingProcessCount = 0;
+      lastIncomingBacklog = pendingIncomingPeerData.length;
+      return;
+    }
+    const startedAt = performance.now();
+    let processed = 0;
+    while (pendingIncomingPeerData.length > 0 && processed < INCOMING_QUEUE_MAX_PER_FRAME) {
+      if (performance.now() - startedAt >= INCOMING_QUEUE_BUDGET_MS) {
+        break;
+      }
+      const next = pendingIncomingPeerData.shift();
+      if (!next) continue;
+      processIncomingData(next[0], next[1]);
+      processed += 1;
+    }
+    lastIncomingProcessCount = processed;
+    lastIncomingBacklog = pendingIncomingPeerData.length;
+  });
 
   function loadWorldOrigin() {
     try {
@@ -10522,10 +10592,12 @@ async function initCore(runtimeContext) {
 
   function animate() {
     requestAnimationFrame(animate);
+    const frameStartMs = performance.now();
 
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
     const frameDelta = clock.getDelta();
+    frameIndex += 1;
     lastFrameDurationMs = frameDelta * 1000;
     if (mapViewEnabled && playerControls?.body && playerModel) {
       const { x, y, z } = playerModel.position;
@@ -10650,6 +10722,7 @@ async function initCore(runtimeContext) {
     }
 
     const now = performance.now();
+    processIncomingPeerDataQueue();
     if (now - lastPerfUpdateMs >= 1000) {
       debugPerf.monsters = monsters.length;
       debugPerf.ammoPickups = ammoPickups.length;
@@ -10657,6 +10730,18 @@ async function initCore(runtimeContext) {
       debugPerf.healthPickups = healthPickups.length;
       debugPerf.coinPickups = coinPickups.length;
       debugPerf.tileCacheSize = tileCache.cache.size;
+      debugPerf.incomingBacklog = lastIncomingBacklog;
+      debugPerf.incomingProcessedPerFrame = lastIncomingProcessCount;
+      debugPerf.adaptiveDegradeLevel = adaptiveDegradeLevel;
+      Object.entries(subsystemPerf).forEach(([name, tracker]) => {
+        const avgMs = tracker.calls > 0 ? tracker.totalMs / tracker.calls : 0;
+        debugPerf[`${name}AvgMs`] = Number(avgMs.toFixed(3));
+        debugPerf[`${name}MaxMs`] = Number(tracker.maxMs.toFixed(3));
+        debugPerf[`${name}LastMs`] = Number(tracker.lastMs.toFixed(3));
+        tracker.totalMs = 0;
+        tracker.calls = 0;
+        tracker.maxMs = 0;
+      });
       lastPerfUpdateMs = now;
     }
     statDecayAccumulator += frameDelta;
@@ -10775,13 +10860,15 @@ async function initCore(runtimeContext) {
       lastTorchHealthSaveAt = now;
     }
 
-    const pickupTime = performance.now() * 0.002;
-    const shouldCheckPickups = !PERF.throttlePickups || now - lastPickupCheckMs >= PICKUP_CHECK_INTERVAL_MS;
-    if (shouldCheckPickups) {
-      lastPickupCheckMs = now;
-    }
+    if (shouldRunBucket('pickups')) {
+      withSubsystemTiming('pickups', () => {
+        const pickupTime = performance.now() * 0.002;
+        const shouldCheckPickups = !PERF.throttlePickups || now - lastPickupCheckMs >= PICKUP_CHECK_INTERVAL_MS;
+        if (shouldCheckPickups) {
+          lastPickupCheckMs = now;
+        }
 
-    if (PERF.disablePickups) {
+        if (PERF.disablePickups) {
       for (let i = ammoPickups.length - 1; i >= 0; i--) {
         const pickup = ammoPickups[i];
         if (!pickup) continue;
@@ -10833,7 +10920,7 @@ async function initCore(runtimeContext) {
         disposeApplePickup(pickup);
         applePickups.splice(i, 1);
       }
-    } else {
+        } else {
       for (let i = ammoPickups.length - 1; i >= 0; i--) {
         const pickup = ammoPickups[i];
         if (!pickup) continue;
@@ -11007,6 +11094,8 @@ async function initCore(runtimeContext) {
         const phase = pickup.mesh.userData.phase ?? 0;
         pickup.mesh.position.y = pickup.mesh.userData.baseY + Math.sin(pickupTime + phase) * 0.08;
       }
+        }
+      });
     }
 
     iceGun?.update();
@@ -11143,35 +11232,37 @@ async function initCore(runtimeContext) {
     }
 
     // 2) AI can still be throttled, but pass a real delta when you DO run it
-    const aiNowMs = Date.now();
     const isHostNow = !multiplayer || multiplayer.isHost;
-    let removedDeadMonsters = false;
-    monsters = monsters.filter(monster => {
-      if (!monster?.model) return true;
-      if (!monster.shouldRemoveAfterDeath?.(aiNowMs)) return true;
-      if (isHostNow && monster.isDead && !monster.hasDroppedConfiguredDrops) {
-        spawnMonsterDrops(monster);
-        monster.hasDroppedConfiguredDrops = true;
-      }
-      cleanupMonster(monster);
-      if (isHostNow && monster.id) {
-        removeMonsterRecord(monster.id);
-      }
-      removedDeadMonsters = true;
-      return false;
-    });
-    if (removedDeadMonsters) {
-      runtimeContext.entities.monsters = monsters;
-  window.monsters = monsters;
-    }
-    if (animalManager) {
-      animalManager.update(mixerDelta);
-      animals = animalManager.getAnimals();
-      runtimeContext.entities.animals = animals;
-  window.animals = animals;
-    }
+    if (shouldRunBucket('ai')) {
+      withSubsystemTiming('ai', () => {
+        const aiNowMs = Date.now();
+        let removedDeadMonsters = false;
+        monsters = monsters.filter(monster => {
+          if (!monster?.model) return true;
+          if (!monster.shouldRemoveAfterDeath?.(aiNowMs)) return true;
+          if (isHostNow && monster.isDead && !monster.hasDroppedConfiguredDrops) {
+            spawnMonsterDrops(monster);
+            monster.hasDroppedConfiguredDrops = true;
+          }
+          cleanupMonster(monster);
+          if (isHostNow && monster.id) {
+            removeMonsterRecord(monster.id);
+          }
+          removedDeadMonsters = true;
+          return false;
+        });
+        if (removedDeadMonsters) {
+          runtimeContext.entities.monsters = monsters;
+          window.monsters = monsters;
+        }
+        if (animalManager) {
+          animalManager.update(mixerDelta);
+          animals = animalManager.getAnimals();
+          runtimeContext.entities.animals = animals;
+          window.animals = animals;
+        }
 
-    if (isHostNow) {
+        if (isHostNow) {
       if (monstersSeeded) {
         const livingMonsters = monsters.filter(monster => monster?.model && !monster.isDead);
         const activePlayers = [
@@ -11269,16 +11360,18 @@ async function initCore(runtimeContext) {
           }
         });
       }
-    } else {
-      // non-host prediction
-      monsters.forEach(monster => monster?.update?.(mixerDelta));
-    }
+        } else {
+          // non-host prediction
+          monsters.forEach(monster => monster?.update?.(mixerDelta));
+        }
 
-    // Friendlies: same idea—do NOT pass 0 deltas
-    friendlyNpcManager?.update({ delta: mixerDelta, isHost: isHostNow });
-    const merchantFriendly = getMerchantFriendlyFeature();
-    if (merchantFriendly?.updateAI) {
-      merchantFriendly.updateAI(mixerDelta, playerModel, otherPlayers);
+        // Friendlies: same idea—do NOT pass 0 deltas
+        friendlyNpcManager?.update({ delta: mixerDelta, isHost: isHostNow });
+        const merchantFriendly = getMerchantFriendlyFeature();
+        if (merchantFriendly?.updateAI) {
+          merchantFriendly.updateAI(mixerDelta, playerModel, otherPlayers);
+        }
+      });
     }
 
 
@@ -11404,76 +11497,82 @@ async function initCore(runtimeContext) {
     flushNetSendQueue();
     tickNetStats(now);
 
-    Object.entries(otherPlayers).forEach(([id, { model, nameLabel }]) => {
-      if (!model.visible) {
-        nameLabel.style.display = "none";
-        return;
-      }
-      const pos = model.position.clone().add(new THREE.Vector3(0, 2, 0));
-      pos.project(camera);
-      if (pos.z < 0 || pos.z > 1) {
-        nameLabel.style.display = "none";
-        return;
-      }
-      const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
-      const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
-      const cameraDist = camera.position.distanceTo(model.position);
-      const scale = Math.max(0.5, 1.5 - cameraDist / 30);
-      const opacity = Math.max(0, 1 - cameraDist / 40);
-      nameLabel.style.display = "block";
-      nameLabel.style.left = `${x}px`;
-      nameLabel.style.top = `${y}px`;
-      nameLabel.style.transform = `translate(-50%, -50%) scale(${scale})`;
-      nameLabel.style.opacity = opacity.toFixed(2);
-    });
+    if (shouldRunBucket('remoteLabels')) {
+      withSubsystemTiming('remoteLabels', () => {
+        Object.entries(otherPlayers).forEach(([id, { model, nameLabel }]) => {
+          if (!model.visible) {
+            nameLabel.style.display = "none";
+            return;
+          }
+          const pos = model.position.clone().add(new THREE.Vector3(0, 2, 0));
+          pos.project(camera);
+          if (pos.z < 0 || pos.z > 1) {
+            nameLabel.style.display = "none";
+            return;
+          }
+          const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+          const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
+          const cameraDist = camera.position.distanceTo(model.position);
+          const scale = Math.max(0.5, 1.5 - cameraDist / 30);
+          const opacity = Math.max(0, 1 - cameraDist / 40);
+          nameLabel.style.display = "block";
+          nameLabel.style.left = `${x}px`;
+          nameLabel.style.top = `${y}px`;
+          nameLabel.style.transform = `translate(-50%, -50%) scale(${scale})`;
+          nameLabel.style.opacity = opacity.toFixed(2);
+        });
+      });
+    }
 
 
     const localPlayerPosition = playerModel?.position;
-    if (localPlayerPosition && audioManager) {
-      const merchantFriendly = getMerchantFriendlyFeature();
-      updateMerchantLoopVoice({ merchant: merchantFriendly, playerPosition: localPlayerPosition });
+    if (localPlayerPosition && audioManager && shouldRunBucket('audio')) {
+      withSubsystemTiming('audio', () => {
+        const merchantFriendly = getMerchantFriendlyFeature();
+        updateMerchantLoopVoice({ merchant: merchantFriendly, playerPosition: localPlayerPosition });
 
-      const playNearFootstepsFor = (entityId, position, isMoving) => {
-        if (!position || !isMoving) return;
-        const distance = localPlayerPosition.distanceTo(position);
-        if (!Number.isFinite(distance) || distance > 18) return;
-        const volume = Math.max(0.04, 0.28 * (1 - (distance / 18)));
-        audioManager.playFootstepAt(entityId, volume);
-      };
+        const playNearFootstepsFor = (entityId, position, isMoving) => {
+          if (!position || !isMoving) return;
+          const distance = localPlayerPosition.distanceTo(position);
+          if (!Number.isFinite(distance) || distance > 18) return;
+          const volume = Math.max(0.04, 0.28 * (1 - (distance / 18)));
+          audioManager.playFootstepAt(entityId, volume);
+        };
 
-      Object.entries(otherPlayers).forEach(([id, remote]) => {
-        const action = remote?.model?.userData?.currentAction;
-        const isMoving = action === 'run' || action === 'walk' || action === 'swim';
-        playNearFootstepsFor(`remote:${id}`, remote?.model?.position, isMoving);
-      });
-
-      (friendlyNpcManager?.friendlies || []).forEach((friendly) => {
-        maybePlayNpcVoice({
-          entityId: `friendly-voice:${friendly?.id || 'unknown'}`,
-          position: friendly?.model?.position,
-          now,
-          intervalRange: FRIENDLY_VOICE_INTERVAL_MS,
-          clips: FRIENDLY_VOICE_CLIPS,
-          maxVolume: FRIENDLY_VOICE_MAX_VOLUME,
-          playerPosition: localPlayerPosition,
-          cooldownPrefix: 'friendly-voice'
+        Object.entries(otherPlayers).forEach(([id, remote]) => {
+          const action = remote?.model?.userData?.currentAction;
+          const isMoving = action === 'run' || action === 'walk' || action === 'swim';
+          playNearFootstepsFor(`remote:${id}`, remote?.model?.position, isMoving);
         });
-        const action = friendly?.model?.userData?.currentAction;
-        const isMoving = action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk';
-        playNearFootstepsFor(`friendly:${friendly?.id || 'unknown'}`, friendly?.model?.position, isMoving);
-      });
 
-      (animals || []).forEach((animal) => {
-        const action = animal?.model?.userData?.currentAction;
-        const isMoving = action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk';
-        playNearFootstepsFor(`animal:${animal?.id || 'unknown'}`, animal?.model?.position, isMoving);
-      });
+        (friendlyNpcManager?.friendlies || []).forEach((friendly) => {
+          maybePlayNpcVoice({
+            entityId: `friendly-voice:${friendly?.id || 'unknown'}`,
+            position: friendly?.model?.position,
+            now,
+            intervalRange: FRIENDLY_VOICE_INTERVAL_MS,
+            clips: FRIENDLY_VOICE_CLIPS,
+            maxVolume: FRIENDLY_VOICE_MAX_VOLUME,
+            playerPosition: localPlayerPosition,
+            cooldownPrefix: 'friendly-voice'
+          });
+          const action = friendly?.model?.userData?.currentAction;
+          const isMoving = action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk';
+          playNearFootstepsFor(`friendly:${friendly?.id || 'unknown'}`, friendly?.model?.position, isMoving);
+        });
 
-      (monsters || []).forEach((monster) => {
-        updateZombieLoopVoice({ monster, playerPosition: localPlayerPosition });
-        const action = monster?.model?.userData?.currentAction;
-        const isMoving = action === 'Weapon' ? false : (action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk');
-        playNearFootstepsFor(`monster:${monster?.id || 'unknown'}`, monster?.model?.position, isMoving);
+        (animals || []).forEach((animal) => {
+          const action = animal?.model?.userData?.currentAction;
+          const isMoving = action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk';
+          playNearFootstepsFor(`animal:${animal?.id || 'unknown'}`, animal?.model?.position, isMoving);
+        });
+
+        (monsters || []).forEach((monster) => {
+          updateZombieLoopVoice({ monster, playerPosition: localPlayerPosition });
+          const action = monster?.model?.userData?.currentAction;
+          const isMoving = action === 'Weapon' ? false : (action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk');
+          playNearFootstepsFor(`monster:${monster?.id || 'unknown'}`, monster?.model?.position, isMoving);
+        });
       });
     }
 
@@ -11536,14 +11635,28 @@ async function initCore(runtimeContext) {
     terrainStampDebugOverlay?.update?.();
 
     renderer.render(scene, camera);
+    const frameTotalMs = performance.now() - frameStartMs;
+    if (frameTotalMs > FRAME_TIME_DEGRADE_THRESHOLD_MS) {
+      frameOverrunStreak += 1;
+      frameRecoverStreak = 0;
+    } else if (frameTotalMs < FRAME_TIME_RECOVER_THRESHOLD_MS) {
+      frameRecoverStreak += 1;
+      frameOverrunStreak = 0;
+    } else {
+      frameOverrunStreak = 0;
+      frameRecoverStreak = 0;
+    }
+    if (frameOverrunStreak >= 6) {
+      adaptiveDegradeLevel = Math.min(FRAME_TIME_DEGRADE_MAX_LEVEL, adaptiveDegradeLevel + 1);
+      frameOverrunStreak = 0;
+    } else if (frameRecoverStreak >= 30) {
+      adaptiveDegradeLevel = Math.max(0, adaptiveDegradeLevel - 1);
+      frameRecoverStreak = 0;
+    }
   }
 
   canProcessIncomingPeerData = true;
-  while (pendingIncomingPeerData.length > 0) {
-    const next = pendingIncomingPeerData.shift();
-    if (!next) continue;
-    handleIncomingData(next[0], next[1]);
-  }
+  processIncomingPeerDataQueue();
 
   animate();
 
