@@ -1,46 +1,67 @@
-const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
+const OVERPASS_ENDPOINTS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
 const REQUEST_TIMEOUT_MS = 10_000;
+const RETRYABLE_STATUS = new Set([406, 429, 502, 503, 504]);
 
 function isAllowedMethod(method) {
   return method === "POST" || method === "OPTIONS";
 }
 
 function readDataParam(body) {
-  if (!body) {
-    return null;
-  }
+  if (!body) return null;
 
   if (typeof body === "string") {
     const trimmed = body.trim();
-    if (!trimmed) {
-      return null;
-    }
-
+    if (!trimmed) return null;
     if (trimmed.startsWith("data=")) {
       return new URLSearchParams(trimmed).get("data");
     }
-
     return trimmed;
   }
 
-  if (body instanceof URLSearchParams) {
-    return body.get("data");
-  }
+  if (body instanceof URLSearchParams) return body.get("data");
 
-  if (Buffer.isBuffer(body)) {
-    return readDataParam(body.toString("utf8"));
-  }
+  if (Buffer.isBuffer(body)) return readDataParam(body.toString("utf8"));
 
   if (ArrayBuffer.isView(body)) {
     return readDataParam(Buffer.from(body.buffer, body.byteOffset, body.byteLength));
   }
 
   if (typeof body === "object") {
-    const data = body.data;
-    return typeof data === "string" ? data : null;
+    return typeof body.data === "string" ? body.data : null;
   }
 
   return null;
+}
+
+async function fetchFromOverpass(body, signal) {
+  let lastResponse = null;
+
+  for (let i = 0; i < OVERPASS_ENDPOINTS.length; i += 1) {
+    const endpoint = OVERPASS_ENDPOINTS[i];
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        Accept: "application/json, text/plain;q=0.9, */*;q=0.8",
+      },
+      body,
+      signal,
+    });
+
+    if (response.ok) {
+      return response;
+    }
+
+    lastResponse = response;
+    if (!RETRYABLE_STATUS.has(response.status) || i === OVERPASS_ENDPOINTS.length - 1) {
+      return response;
+    }
+  }
+
+  return lastResponse;
 }
 
 export default async function handler(req, res) {
@@ -65,17 +86,12 @@ export default async function handler(req, res) {
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const body = new URLSearchParams({ data: query }).toString();
+    const requestBody = new URLSearchParams({ data: query }).toString();
+    const upstreamResponse = await fetchFromOverpass(requestBody, controller.signal);
 
-    const upstreamResponse = await fetch(OVERPASS_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "Accept": "application/json, text/plain;q=0.9, */*;q=0.8",
-      },
-      body,
-      signal: controller.signal,
-    });
+    if (!upstreamResponse) {
+      return res.status(502).json({ error: "No Overpass upstream response." });
+    }
 
     const responseText = await upstreamResponse.text();
     const upstreamContentType = upstreamResponse.headers.get("content-type") || "application/json; charset=utf-8";
