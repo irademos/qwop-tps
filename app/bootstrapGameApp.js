@@ -8815,7 +8815,7 @@ async function initCore(runtimeContext) {
   const getAdaptiveInterval = (bucket) => {
     const lowEndBase = LOW_END_BUCKET_INTERVALS[bucket] ?? 1;
     const lowEndStep = Math.max(1, lowEndBase + adaptiveDegradeLevel);
-    return isLowEndProfile ? lowEndStep : Math.max(1, 1 + adaptiveDegradeLevel);
+    return isLowEndTier(currentPerformanceTier) ? lowEndStep : Math.max(1, 1 + adaptiveDegradeLevel);
   };
   const shouldRunBucket = (bucket) => (frameIndex % getAdaptiveInterval(bucket)) === 0;
   const processIncomingPeerDataQueue = () => withSubsystemTiming('incomingQueue', () => {
