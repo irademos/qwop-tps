@@ -11070,7 +11070,7 @@ async function initCore(runtimeContext) {
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
         if (!playerDead && playerModel.position.distanceTo(pickup.position) <= PICKUP_ATTRACT_RADIUS) {
-          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, deltaSeconds);
+          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
         }
 
         if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
@@ -11092,7 +11092,7 @@ async function initCore(runtimeContext) {
         if (pickupMesh && targetModel && !playerDead) {
           const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickupMesh.position) <= PICKUP_ATTRACT_RADIUS;
           if (shouldHome) {
-            attractPickupToPlayer(pickupMesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, deltaSeconds);
+            attractPickupToPlayer(pickupMesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
           }
         }
         if (shouldCheckPickups && pickupMushroom(pickup)) continue;
@@ -11104,7 +11104,7 @@ async function initCore(runtimeContext) {
           continue;
         }
         if (!playerDead && playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS) {
-          attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, deltaSeconds);
+          attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
         }
         if (shouldCheckPickups && pickupApple(pickup)) continue;
       }
@@ -11118,7 +11118,7 @@ async function initCore(runtimeContext) {
         if (targetModel && !playerDead) {
           const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS;
           if (shouldHome) {
-            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, deltaSeconds);
+            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
           }
         }
         if (shouldCheckPickups && pickupWood(pickup)) continue;
@@ -11130,7 +11130,7 @@ async function initCore(runtimeContext) {
           continue;
         }
         if (!playerDead && playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS) {
-          attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, deltaSeconds);
+          attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
         }
         if (shouldCheckPickups && pickupMeat(pickup)) continue;
       }
@@ -11145,7 +11145,7 @@ async function initCore(runtimeContext) {
         if (targetModel && !playerDead) {
           const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS;
           if (shouldHome) {
-            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, deltaSeconds);
+            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
           }
         }
         if (shouldCheckPickups && pickupZombieBrains(pickup)) continue;
@@ -11166,7 +11166,7 @@ async function initCore(runtimeContext) {
         if (targetModel && !playerDead) {
           const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS;
           if (shouldHome) {
-            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, deltaSeconds);
+            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
           }
         }
         if (shouldCheckPickups && pickupSalt(pickup)) continue;
