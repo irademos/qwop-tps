@@ -1395,17 +1395,18 @@ async function initCore(runtimeContext) {
   };
 
   const attractPickupToPlayer = (meshOrPosition, targetModel, speed, deltaSeconds) => {
-    if (!meshOrPosition?.position || !targetModel?.position || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return false;
-    const toTarget = tempVector3A.subVectors(targetModel.position, meshOrPosition.position);
+    const sourcePosition = meshOrPosition?.isVector3 ? meshOrPosition : meshOrPosition?.position;
+    if (!sourcePosition || !targetModel?.position || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return false;
+    const toTarget = tempVector3A.subVectors(targetModel.position, sourcePosition);
     const distance = toTarget.length();
     if (!Number.isFinite(distance) || distance <= 0.001) return true;
     const maxStep = Math.max(0, speed) * deltaSeconds;
     if (distance <= maxStep) {
-      meshOrPosition.position.copy(targetModel.position);
+      sourcePosition.copy(targetModel.position);
       return true;
     }
     toTarget.multiplyScalar(maxStep / distance);
-    meshOrPosition.position.add(toTarget);
+    sourcePosition.add(toTarget);
     return false;
   };
 
@@ -11109,10 +11110,15 @@ async function initCore(runtimeContext) {
         }
         const pickupMesh = pickup.mesh;
         const targetModel = pickup.homeTargetModel || playerModel;
-        if (pickupMesh && targetModel && !playerDead) {
-          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickupMesh.position) <= getPickupAttractRadius();
-          if (shouldHome) {
+        if (targetModel && !playerDead) {
+          const pickupPosition = pickupMesh?.position || pickup.position;
+          const shouldHome = pickup.homeTargetModel || (pickupPosition && playerModel.position.distanceTo(pickupPosition) <= getPickupAttractRadius());
+          if (shouldHome && pickupMesh) {
             attractPickupToPlayer(pickupMesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
+          } else if (shouldHome && pickup.position) {
+            const nextPosition = pickup.position.clone();
+            attractPickupToPlayer(nextPosition, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
+            mushroomController?.updatePickupPosition?.(pickup, nextPosition);
           }
         }
         if (shouldCheckPickups && pickupMushroom(pickup)) continue;
@@ -11208,6 +11214,13 @@ async function initCore(runtimeContext) {
     updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
     updateWeaponMarker(lantern, lanternMarker, 0.03);
     updateWeaponMarker(torch, torchMarker, 0.03);
+    [iceGun, bow, bomb, autumnSword, lantern, torch].forEach((weapon) => {
+      const mesh = weapon?.mesh;
+      if (!mesh || weapon?.holder || playerDead) return;
+      if (playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {
+        attractPickupToPlayer(mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+      }
+    });
     droppedWeaponPickups.forEach(pickup => {
       const mesh = pickup?.mesh;
       if (mesh && !playerDead && playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {

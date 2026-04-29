@@ -263,6 +263,32 @@ export async function createMushrooms({
     });
   };
 
+
+  const updatePickupPosition = (pickup, position) => {
+    if (!pickup?.active || !position) return false;
+    if (pickup.position) {
+      pickup.position.copy(position);
+    }
+    if (pickup.type === 'instanced' && pickup.instanceMesh && Number.isInteger(pickup.instanceIndex)) {
+      tempPosition.copy(position);
+      applyRootTransformToMatrix({
+        targetMatrix: tempMatrix,
+        rootPosition: tempPosition,
+        rootRotationY: pickup.rotationY || 0,
+        templateLocalMatrix: templates.get(pickup.id)?.localMatrix,
+        rootScale: MUSHROOM_SCALE
+      });
+      pickup.instanceMesh.setMatrixAt(pickup.instanceIndex, tempMatrix);
+      pickup.instanceMesh.instanceMatrix.needsUpdate = true;
+      return true;
+    }
+    if (pickup.mesh) {
+      pickup.mesh.position.copy(position);
+      return true;
+    }
+    return false;
+  };
+
   const removePickup = (pickup) => {
     if (!pickup) return false;
     setPickupActiveState(pickup, false);
@@ -281,6 +307,7 @@ export async function createMushrooms({
     pickups,
     spawnPickup,
     removePickup,
+    updatePickupPosition,
     createProjectileMesh,
     variantInstancedMeshes
   };
