@@ -5812,7 +5812,13 @@ async function initCore(runtimeContext) {
         } else {
           addToInventory(itemId, pickup.quantity);
         }
-        equipInventoryItem(itemId);
+        const pickupHand = getInventoryItemHand(itemId);
+        const equippedInPickupHand = pickupHand
+          ? getEquippedInventoryItemIdForHand(pickupHand)
+          : null;
+        if (!equippedInPickupHand) {
+          equipInventoryItem(itemId);
+        }
         const index = droppedWeaponPickups.indexOf(pickup);
         if (index !== -1) {
           droppedWeaponPickups.splice(index, 1);
