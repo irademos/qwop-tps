@@ -1,4 +1,4 @@
-const DEFAULT_RATE_LIMIT_MS = 3500;
+const DEFAULT_RATE_LIMIT_MS = 5000;
 const DEFAULT_BACKOFF_MS = 1250;
 const DEFAULT_MAX_RETRIES = 5;
 const RETRYABLE_STATUS = new Set([429, 504]);
@@ -55,10 +55,12 @@ class RequestQueue {
     this.queue = [];
     this.processing = false;
     this.lastRequestStartedAt = 0;
+    this.globalNextAllowedAt = 0;
     this.latestLocation = null;
+    this.pendingByKey = new Map();
   }
 
-  enqueue({ lat, lon, staleDistanceMeters, requestFn }) {
+  enqueue({ lat, lon, staleDistanceMeters, requestFn, dedupeKey = null }) {
     if (typeof requestFn !== "function") {
       return Promise.reject(new TypeError("requestFn must be a function."));
     }
@@ -67,17 +69,33 @@ class RequestQueue {
       ? { lat, lon }
       : this.latestLocation;
 
-    return new Promise((resolve, reject) => {
+    if (dedupeKey && this.pendingByKey.has(dedupeKey)) {
+      return this.pendingByKey.get(dedupeKey);
+    }
+
+    const promise = new Promise((resolve, reject) => {
       this.queue.push({
         lat,
         lon,
         staleDistanceMeters,
         requestFn,
+        dedupeKey,
         resolve,
         reject,
       });
       this.processQueue();
     });
+
+    if (dedupeKey) {
+      this.pendingByKey.set(dedupeKey, promise);
+      promise.finally(() => {
+        if (this.pendingByKey.get(dedupeKey) === promise) {
+          this.pendingByKey.delete(dedupeKey);
+        }
+      });
+    }
+
+    return promise;
   }
 
   async processQueue() {
@@ -118,7 +136,9 @@ class RequestQueue {
 
   async waitForRateLimit() {
     const elapsed = Date.now() - this.lastRequestStartedAt;
-    const waitMs = Math.max(0, this.rateLimitMs - elapsed);
+    const baseWaitMs = Math.max(0, this.rateLimitMs - elapsed);
+    const globalWaitMs = Math.max(0, this.globalNextAllowedAt - Date.now());
+    const waitMs = Math.max(baseWaitMs, globalWaitMs);
     if (waitMs > 0) {
       await sleep(waitMs);
     }
@@ -150,7 +170,9 @@ class RequestQueue {
           const retryAfterMs = parseRetryAfterMs(response.headers?.get("retry-after"));
           const expBackoffMs = this.backoffMs * 2 ** (attempt - 1);
           const jitterMs = Math.floor(Math.random() * 350);
-          await sleep(Math.max(retryAfterMs ?? 0, expBackoffMs) + jitterMs);
+          const cooldownMs = Math.max(retryAfterMs ?? 0, expBackoffMs) + jitterMs;
+          this.globalNextAllowedAt = Math.max(this.globalNextAllowedAt, Date.now() + cooldownMs);
+          await sleep(cooldownMs);
           continue;
         }
         throw new Error(`Overpass request failed: ${response.status} ${response.statusText}`);
