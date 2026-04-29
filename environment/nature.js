@@ -8,16 +8,6 @@ const TREE_SCALE_MAX = 0.02;
 const TREE_TYPE_COUNT = 7;
 const TREE_IMPOSTOR_TRUNK_COLOR = 0x6f4e37;
 const TREE_IMPOSTOR_LEAF_PALETTE = [0x3f8f3f, 0x4fa14f, 0x5a9f42, 0x6cae52, 0x4b8c3f, 0x739f55];
-const TREE_CLIMB_RIGHT_SHIFT_BY_TYPE = {
-  0: 2.7, // eucalyptus
-  5: -2.5  // scary/dead
-};
-
-const TREE_COLLIDER_RIGHT_SHIFT_BY_TYPE = {
-  0: 2.7, // eucalyptus
-  5: -2.5  // scary/dead
-};
-
 const TREE_COLLIDER_SCALE_BY_TYPE = {
   0: { radius: 0.7, height: 0.95 }, // eucalyptus
   1: { radius: 0.85, height: 0.95 }, // pine
@@ -284,7 +274,6 @@ export async function createNature({
   const tempSize = new THREE.Vector3();
   const tempWorldPos = new THREE.Vector3();
   const tempTreeCenter = new THREE.Vector3();
-  const tempTreeRight = new THREE.Vector3();
   const tempEntryCenter = new THREE.Vector3();
   const tempAreaCenter = new THREE.Vector3();
   const tempWorldToLocal = new THREE.Vector3();
@@ -434,13 +423,8 @@ export async function createNature({
 
     tempEntryCenter.set(tempCenter.x, minY + scaleValue(0.2), tempCenter.z);
 
-    const shift = scaleValue(TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0);
-
-    // tree's local +X rotated by tree.rotation.y
-    tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
-    const shiftedCenterX = centerX + tempTreeRight.x * shift;
-    const shiftedCenterZ = centerZ + tempTreeRight.z * shift;
-    tempEntryCenter.addScaledVector(tempTreeRight, shift);
+    const shiftedCenterX = centerX;
+    const shiftedCenterZ = centerZ;
 
     const areas = [];
     for (const normal of climbDirections) {
@@ -470,13 +454,6 @@ export async function createNature({
       tempTreeCenter.copy(tree.userData.boundsCenterLocal).applyMatrix4(tree.matrixWorld);
     } else {
       tempTreeCenter.copy(tree.position);
-    }
-    const typeIndex = tree.userData?.treeTypeIndex;
-    const shift = TREE_CLIMB_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
-    if (shift) {
-      const scaleFactor = tree.userData?.gameplayScaleFactor ?? (tree.scale.x / TREE_SCALE_REFERENCE);
-      tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
-      tempTreeCenter.addScaledVector(tempTreeRight, shift * scaleFactor);
     }
     return tempTreeCenter;
   };
@@ -555,13 +532,11 @@ export async function createNature({
       TREE_BASE_COLLIDER_RADIUS_MAX
     );
 
-    const shift = TREE_COLLIDER_RIGHT_SHIFT_BY_TYPE[typeIndex] ?? 0;
     const scaleFactor = tree.userData?.gameplayScaleFactor ?? (tree.scale.x / TREE_SCALE_REFERENCE);
-    tempTreeRight.set(1, 0, 0).applyAxisAngle(tempAxisY, tree.rotation.y);
 
     // Keep collider short so it only blocks near the base/trunk.
-    const centerX = tempCenter.x + tempTreeRight.x * shift * scaleFactor;
-    const centerZ = tempCenter.z + tempTreeRight.z * shift * scaleFactor;
+    const centerX = tempCenter.x;
+    const centerZ = tempCenter.z;
     const halfHeight = THREE.MathUtils.clamp(
       TREE_BASE_COLLIDER_HALF_HEIGHT * scaleFactor * colliderScale.height,
       0.3,
