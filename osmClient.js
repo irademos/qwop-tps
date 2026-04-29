@@ -1,7 +1,13 @@
 import { overpassRequestQueue } from "./requestQueue.js";
 import { overpassToGeoJSON } from "./osmGeoJson.js";
 
-const OVERPASS_ENDPOINT = import.meta.env.PROD ? "/api/overpass" : "https://overpass-api.de/api/interpreter";
+const OVERPASS_ENDPOINTS = import.meta.env.PROD
+  ? ["/api/overpass"]
+  : [
+      "https://overpass-api.de/api/interpreter",
+      "https://overpass.kumi.systems/api/interpreter",
+      "https://lz4.overpass-api.de/api/interpreter",
+    ];
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_STALE_DISTANCE_METERS = 600;
 
@@ -39,19 +45,42 @@ function buildOverpassQuery(lat, lon, radiusMeters) {
   ].join("\n");
 }
 
-async function performOverpassRequest(body) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-
-  try {
-    return await fetch(OVERPASS_ENDPOINT, {
-      method: "POST",
-      body,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timeoutId);
+function getEndpointPriority() {
+  if (OVERPASS_ENDPOINTS.length <= 1) {
+    return OVERPASS_ENDPOINTS;
   }
+  const first = Math.floor(Math.random() * OVERPASS_ENDPOINTS.length);
+  const ordered = [];
+  for (let i = 0; i < OVERPASS_ENDPOINTS.length; i += 1) {
+    ordered.push(OVERPASS_ENDPOINTS[(first + i) % OVERPASS_ENDPOINTS.length]);
+  }
+  return ordered;
+}
+
+async function performOverpassRequest(body) {
+  const endpoints = getEndpointPriority();
+  let lastResponse = null;
+
+  for (const endpoint of endpoints) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body,
+        signal: controller.signal,
+      });
+      if (response.status !== 429) {
+        return response;
+      }
+      lastResponse = response;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  return lastResponse;
 }
 
 export async function fetchOSMData(lat, lon, radiusMeters, options = {}) {
