@@ -11213,9 +11213,7 @@ async function initCore(runtimeContext) {
       if (mesh && !playerDead && playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {
         attractPickupToPlayer(mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
       }
-      if (shouldCheckPickups) {
-        pickup?.tryPickup?.(playerControls);
-      }
+      pickup?.tryPickup?.(playerControls);
       updateWeaponMarker(pickup, pickup.marker, 0.03, pickup.markerOffsetY ?? 1.2);
     });
     const localStates = collectLocalControlStates();
