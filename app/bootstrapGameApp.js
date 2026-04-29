@@ -11140,7 +11140,7 @@ async function initCore(runtimeContext) {
           meatPickups.splice(i, 1);
           continue;
         }
-        if (!playerDead && playerModel.position.distanceTo(pickup.mesh.position) <= getPickupAttractRadius()) {
+        if (!playerDead) {
           attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
         }
         if (shouldCheckPickups && pickupMeat(pickup)) continue;
@@ -11154,10 +11154,7 @@ async function initCore(runtimeContext) {
         pickup.mesh.rotation.y += 0.02;
         const targetModel = pickup.homeTargetModel || playerModel;
         if (targetModel && !playerDead) {
-          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= getPickupAttractRadius();
-          if (shouldHome) {
-            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
-          }
+          attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
         }
         if (shouldCheckPickups && pickupZombieBrains(pickup)) continue;
       }
@@ -11175,10 +11172,7 @@ async function initCore(runtimeContext) {
         pickup.mesh.position.y = pickup.mesh.userData.baseY + Math.sin(pickupTime + phase) * 0.08;
         const targetModel = pickup.homeTargetModel || playerModel;
         if (targetModel && !playerDead) {
-          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= getPickupAttractRadius();
-          if (shouldHome) {
-            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
-          }
+          attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
         }
         if (shouldCheckPickups && pickupSalt(pickup)) continue;
       }
