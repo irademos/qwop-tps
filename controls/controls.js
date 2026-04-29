@@ -3507,24 +3507,50 @@ export class PlayerControls {
       }
       return [];
     };
-    const monsters = monsterSources.flatMap((source) => normalizeMonsters(source));
-    let closest = null;
-    let closestDistance = Infinity;
-    for (const entry of monsters) {
-      const monster = resolveMonsterActor(entry);
-      if (!monster || monster.isDead) continue;
-      const targetX = monster.model.position?.x;
-      const targetZ = monster.model.position?.z;
-      if (!Number.isFinite(targetX) || !Number.isFinite(targetZ)) continue;
-      const dx = targetX - this.playerModel.position.x;
-      const dz = targetZ - this.playerModel.position.z;
-      const distance = Math.hypot(dx, dz);
-      if (distance < closestDistance) {
-        closest = monster;
-        closestDistance = distance;
+    const dedupe = new Set();
+    const monsters = [];
+    for (const source of monsterSources) {
+      for (const entry of normalizeMonsters(source)) {
+        const monster = resolveMonsterActor(entry);
+        if (!monster) continue;
+        const dedupeKey = monster.id || monster.model?.uuid || monster.model?.id || monster;
+        if (dedupe.has(dedupeKey)) continue;
+        dedupe.add(dedupeKey);
+        monsters.push(monster);
       }
     }
-    const shouldEngage = closest && closestDistance <= ENGAGED_MODE_DISTANCE;
+    const getMonsterDistance = (monster) => {
+      if (!monster || monster.isDead) return Infinity;
+      const targetX = monster.model.position?.x;
+      const targetZ = monster.model.position?.z;
+      if (!Number.isFinite(targetX) || !Number.isFinite(targetZ)) return Infinity;
+      const dx = targetX - this.playerModel.position.x;
+      const dz = targetZ - this.playerModel.position.z;
+      return Math.hypot(dx, dz);
+    };
+
+    const RETARGET_HYSTERESIS = 1.2;
+    let selectedTarget = this.engagedTarget;
+    let selectedDistance = getMonsterDistance(selectedTarget);
+    if (!(selectedDistance <= ENGAGED_MODE_DISTANCE * RETARGET_HYSTERESIS)) {
+      selectedTarget = null;
+      selectedDistance = Infinity;
+    }
+
+    let closest = null;
+    let closestDistance = Infinity;
+    for (const monster of monsters) {
+      const distance = getMonsterDistance(monster);
+      if (!(distance < closestDistance)) continue;
+      closest = monster;
+      closestDistance = distance;
+    }
+
+    if (!selectedTarget && closest) {
+      selectedTarget = closest;
+      selectedDistance = closestDistance;
+    }
+    const shouldEngage = selectedTarget && selectedDistance <= ENGAGED_MODE_DISTANCE;
     if (shouldEngage) {
       if (!this.isEngaged) {
         this.freeYaw = this.yaw;
@@ -3532,8 +3558,8 @@ export class PlayerControls {
         this.cameraTouchId = null;
       }
       this.isEngaged = true;
-      this.engagedTarget = closest;
-      this.engagedDirection = closest.model.position.clone().sub(this.playerModel.position);
+      this.engagedTarget = selectedTarget;
+      this.engagedDirection = selectedTarget.model.position.clone().sub(this.playerModel.position);
       this.engagedDirection.y = 0;
       if (this.engagedDirection.lengthSq() > 0) {
         this.engagedDirection.normalize();
