@@ -11103,10 +11103,15 @@ async function initCore(runtimeContext) {
         }
         const pickupMesh = pickup.mesh;
         const targetModel = pickup.homeTargetModel || playerModel;
-        if (pickupMesh && targetModel && !playerDead) {
-          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickupMesh.position) <= getPickupAttractRadius();
-          if (shouldHome) {
+        if (targetModel && !playerDead) {
+          const pickupPosition = pickupMesh?.position || pickup.position;
+          const shouldHome = pickup.homeTargetModel || (pickupPosition && playerModel.position.distanceTo(pickupPosition) <= getPickupAttractRadius());
+          if (shouldHome && pickupMesh) {
             attractPickupToPlayer(pickupMesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
+          } else if (shouldHome && pickup.position) {
+            const nextPosition = pickup.position.clone();
+            attractPickupToPlayer(nextPosition, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
+            mushroomController?.updatePickupPosition?.(pickup, nextPosition);
           }
         }
         if (shouldCheckPickups && pickupMushroom(pickup)) continue;
