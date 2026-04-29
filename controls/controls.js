@@ -3491,11 +3491,20 @@ export class PlayerControls {
       }
       return [];
     };
+    const resolveMonsterActor = (monster) => {
+      if (!monster || typeof monster !== 'object') return null;
+      if (monster.model?.position) return monster;
+      if (monster.character?.model?.position) return monster.character;
+      if (monster.monster?.model?.position) return monster.monster;
+      if (monster.entity?.model?.position) return monster.entity;
+      return null;
+    };
     const monsters = normalizeMonsters(rawMonsters);
     let closest = null;
     let closestDistance = Infinity;
-    for (const monster of monsters) {
-      if (!monster?.model || monster.isDead) continue;
+    for (const entry of monsters) {
+      const monster = resolveMonsterActor(entry);
+      if (!monster || monster.isDead) continue;
       const targetX = monster.model.position?.x;
       const targetZ = monster.model.position?.z;
       if (!Number.isFinite(targetX) || !Number.isFinite(targetZ)) continue;
