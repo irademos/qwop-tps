@@ -688,7 +688,7 @@ async function initCore(runtimeContext) {
   const HUNGER_HEALTH_DECAY_SEGMENTS_PER_SECOND = HUNGER_HEALTH_DECAY_PER_SECOND / HEALTH_SEGMENT_VALUE;
   const SLEEP_RECOVERY_SEGMENTS_PER_SECOND = SLEEP_RECOVERY_PER_SECOND / HEALTH_SEGMENT_VALUE;
   const PICKUP_RADIUS = 1.2;
-  const PICKUP_ATTRACT_RADIUS = 3;
+  const PICKUP_ATTRACT_RADIUS = 8;
   const PICKUP_ATTRACT_SPEED = 7.5;
   const MONSTER_DROP_ATTRACT_SPEED = 9.5;
   const APPLE_PICKUP_RADIUS = 3;
@@ -1407,6 +1407,11 @@ async function initCore(runtimeContext) {
     toTarget.multiplyScalar(maxStep / distance);
     meshOrPosition.position.add(toTarget);
     return false;
+  };
+
+  const getPickupAttractRadius = () => {
+    const radius = Number.isFinite(playerControls?.geoBoundHalfSizeM) ? playerControls.geoBoundHalfSizeM : PICKUP_ATTRACT_RADIUS;
+    return Math.max(PICKUP_ATTRACT_RADIUS, radius);
   };
 
   const handleCombatEntityHit = ({ targetPosition }) => {
@@ -10969,6 +10974,10 @@ async function initCore(runtimeContext) {
         if (pickup.userData.sparkle && pickup.userData.sparkleLight) {
           pickup.userData.sparkleLight.intensity = 0.4 + Math.sin(pickupTime * 2 + phase) * 0.3;
         }
+        const pickupAttractRadius = getPickupAttractRadius();
+        if (!playerDead && playerModel.position.distanceTo(pickup.position) <= pickupAttractRadius) {
+          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+        }
 
         if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
           const ammoType = pickup.userData.type || 'ammo';
@@ -11002,6 +11011,10 @@ async function initCore(runtimeContext) {
           pickup.rotation.y += 0.03;
           const phase = pickup.userData.phase ?? 0;
           pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        }
+        const pickupAttractRadius = getPickupAttractRadius();
+        if (!playerDead && playerModel.position.distanceTo(pickup.position) <= pickupAttractRadius) {
+          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
         }
 
         if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
@@ -11070,7 +11083,7 @@ async function initCore(runtimeContext) {
         pickup.rotation.z += 0.10;
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
-        if (!playerDead && playerModel.position.distanceTo(pickup.position) <= PICKUP_ATTRACT_RADIUS) {
+        if (!playerDead && playerModel.position.distanceTo(pickup.position) <= getPickupAttractRadius()) {
           attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
         }
 
@@ -11091,7 +11104,7 @@ async function initCore(runtimeContext) {
         const pickupMesh = pickup.mesh;
         const targetModel = pickup.homeTargetModel || playerModel;
         if (pickupMesh && targetModel && !playerDead) {
-          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickupMesh.position) <= PICKUP_ATTRACT_RADIUS;
+          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickupMesh.position) <= getPickupAttractRadius();
           if (shouldHome) {
             attractPickupToPlayer(pickupMesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
           }
@@ -11104,9 +11117,6 @@ async function initCore(runtimeContext) {
           applePickups.splice(i, 1);
           continue;
         }
-        if (!playerDead && playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS) {
-          attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
-        }
         if (shouldCheckPickups && pickupApple(pickup)) continue;
       }
       for (let i = woodPickups.length - 1; i >= 0; i--) {
@@ -11117,7 +11127,7 @@ async function initCore(runtimeContext) {
         }
         const targetModel = pickup.homeTargetModel || playerModel;
         if (targetModel && !playerDead) {
-          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS;
+          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= getPickupAttractRadius();
           if (shouldHome) {
             attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
           }
@@ -11130,7 +11140,7 @@ async function initCore(runtimeContext) {
           meatPickups.splice(i, 1);
           continue;
         }
-        if (!playerDead && playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS) {
+        if (!playerDead && playerModel.position.distanceTo(pickup.mesh.position) <= getPickupAttractRadius()) {
           attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
         }
         if (shouldCheckPickups && pickupMeat(pickup)) continue;
@@ -11144,7 +11154,7 @@ async function initCore(runtimeContext) {
         pickup.mesh.rotation.y += 0.02;
         const targetModel = pickup.homeTargetModel || playerModel;
         if (targetModel && !playerDead) {
-          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS;
+          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= getPickupAttractRadius();
           if (shouldHome) {
             attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
           }
@@ -11165,7 +11175,7 @@ async function initCore(runtimeContext) {
         pickup.mesh.position.y = pickup.mesh.userData.baseY + Math.sin(pickupTime + phase) * 0.08;
         const targetModel = pickup.homeTargetModel || playerModel;
         if (targetModel && !playerDead) {
-          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= PICKUP_ATTRACT_RADIUS;
+          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= getPickupAttractRadius();
           if (shouldHome) {
             attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
           }
@@ -11199,6 +11209,13 @@ async function initCore(runtimeContext) {
     updateWeaponMarker(lantern, lanternMarker, 0.03);
     updateWeaponMarker(torch, torchMarker, 0.03);
     droppedWeaponPickups.forEach(pickup => {
+      const mesh = pickup?.mesh;
+      if (mesh && !playerDead && playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {
+        attractPickupToPlayer(mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+      }
+      if (shouldCheckPickups) {
+        pickup?.tryPickup?.(playerControls);
+      }
       updateWeaponMarker(pickup, pickup.marker, 0.03, pickup.markerOffsetY ?? 1.2);
     });
     const localStates = collectLocalControlStates();
