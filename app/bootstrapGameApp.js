@@ -11202,6 +11202,13 @@ async function initCore(runtimeContext) {
     updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
     updateWeaponMarker(lantern, lanternMarker, 0.03);
     updateWeaponMarker(torch, torchMarker, 0.03);
+    [iceGun, bow, bomb, autumnSword, lantern, torch].forEach((weapon) => {
+      const mesh = weapon?.mesh;
+      if (!mesh || weapon?.holder || playerDead) return;
+      if (playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {
+        attractPickupToPlayer(mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+      }
+    });
     droppedWeaponPickups.forEach(pickup => {
       const mesh = pickup?.mesh;
       if (mesh && !playerDead && playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {
