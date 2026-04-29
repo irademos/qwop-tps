@@ -1395,17 +1395,18 @@ async function initCore(runtimeContext) {
   };
 
   const attractPickupToPlayer = (meshOrPosition, targetModel, speed, deltaSeconds) => {
-    if (!meshOrPosition?.position || !targetModel?.position || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return false;
-    const toTarget = tempVector3A.subVectors(targetModel.position, meshOrPosition.position);
+    const sourcePosition = meshOrPosition?.isVector3 ? meshOrPosition : meshOrPosition?.position;
+    if (!sourcePosition || !targetModel?.position || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return false;
+    const toTarget = tempVector3A.subVectors(targetModel.position, sourcePosition);
     const distance = toTarget.length();
     if (!Number.isFinite(distance) || distance <= 0.001) return true;
     const maxStep = Math.max(0, speed) * deltaSeconds;
     if (distance <= maxStep) {
-      meshOrPosition.position.copy(targetModel.position);
+      sourcePosition.copy(targetModel.position);
       return true;
     }
     toTarget.multiplyScalar(maxStep / distance);
-    meshOrPosition.position.add(toTarget);
+    sourcePosition.add(toTarget);
     return false;
   };
 
