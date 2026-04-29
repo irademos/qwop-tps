@@ -1,6 +1,6 @@
-const DEFAULT_RATE_LIMIT_MS = 2000;
-const DEFAULT_BACKOFF_MS = 500;
-const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_RATE_LIMIT_MS = 3500;
+const DEFAULT_BACKOFF_MS = 1250;
+const DEFAULT_MAX_RETRIES = 5;
 const RETRYABLE_STATUS = new Set([429, 504]);
 
 class StaleRequestError extends Error {
@@ -12,6 +12,21 @@ class StaleRequestError extends Error {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(retryAfterHeader) {
+  if (!retryAfterHeader) {
+    return null;
+  }
+  const seconds = Number.parseFloat(retryAfterHeader);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const at = Date.parse(retryAfterHeader);
+  if (Number.isFinite(at)) {
+    return Math.max(0, at - Date.now());
+  }
+  return null;
 }
 
 function haversineMeters(a, b) {
@@ -132,7 +147,10 @@ class RequestQueue {
           if (attempt >= this.maxRetries) {
             break;
           }
-          await sleep(this.backoffMs * 2 ** (attempt - 1));
+          const retryAfterMs = parseRetryAfterMs(response.headers?.get("retry-after"));
+          const expBackoffMs = this.backoffMs * 2 ** (attempt - 1);
+          const jitterMs = Math.floor(Math.random() * 350);
+          await sleep(Math.max(retryAfterMs ?? 0, expBackoffMs) + jitterMs);
           continue;
         }
         throw new Error(`Overpass request failed: ${response.status} ${response.statusText}`);

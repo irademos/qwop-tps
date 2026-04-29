@@ -187,10 +187,12 @@ self.addEventListener('fetch', (event) => {
           return cachedResponse;
         }
 
-        return fetch(request).then(async (networkResponse) => {
-          await putWithLimits(CORE_CACHE, request, networkResponse, MAX_STATIC_ENTRIES);
-          return networkResponse;
-        });
+        return fetch(request)
+          .then(async (networkResponse) => {
+            await putWithLimits(CORE_CACHE, request, networkResponse, MAX_STATIC_ENTRIES);
+            return networkResponse;
+          })
+          .catch(() => caches.match('/index.html'));
       })
     );
     return;
@@ -225,7 +227,7 @@ self.addEventListener('fetch', (event) => {
         return cachedResponse;
       }
 
-      return staticUpdatePromise;
+      return staticUpdatePromise.then((networkResponse) => networkResponse || Response.error());
     })
   );
 
