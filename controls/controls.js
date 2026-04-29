@@ -3480,7 +3480,12 @@ export class PlayerControls {
       this.setEngaged(false);
       return;
     }
-    const rawMonsters = appContext.entities.monsters || window.monsters || [];
+    const monsterSources = [
+      appContext?.entities?.monsters,
+      window?.monsters,
+      window?.game?.monsters,
+      window?.runtimeContext?.entities?.monsters
+    ];
     const normalizeMonsters = (source) => {
       if (!source) return [];
       if (Array.isArray(source)) return source;
@@ -3499,7 +3504,7 @@ export class PlayerControls {
       if (monster.entity?.model?.position) return monster.entity;
       return null;
     };
-    const monsters = normalizeMonsters(rawMonsters);
+    const monsters = monsterSources.flatMap((source) => normalizeMonsters(source));
     let closest = null;
     let closestDistance = Infinity;
     for (const entry of monsters) {
