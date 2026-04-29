@@ -793,6 +793,7 @@ async function initCore(runtimeContext) {
   const remoteHoldTempPosition = new THREE.Vector3();
   const remoteHoldTempQuaternion = new THREE.Quaternion();
   const remoteHoldTempOffset = new THREE.Vector3();
+  const tempVector3A = new THREE.Vector3();
   const AMMO_PICKUP_AMOUNT = 5;
   const ICE_AMMO_KEY = 'ice ammo';
   const ARROW_AMMO_KEY = 'arrow ammo';
