@@ -3489,6 +3489,13 @@ export class PlayerControls {
     const resolveMonsterActor = (monster) => {
       if (!monster || typeof monster !== 'object') return null;
       if (monster.model?.position) return monster;
+      if (monster.mesh?.position) {
+        return {
+          ...monster,
+          model: monster.mesh,
+          isDead: monster.isDead ?? monster.dead ?? monster.model?.userData?.mode === 'dead'
+        };
+      }
       if (monster.character?.model?.position) return monster.character;
       if (monster.monster?.model?.position) return monster.monster;
       if (monster.entity?.model?.position) return monster.entity;
