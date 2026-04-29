@@ -3486,16 +3486,6 @@ export class PlayerControls {
       window?.game?.monsters,
       window?.runtimeContext?.entities?.monsters
     ];
-    const normalizeMonsters = (source) => {
-      if (!source) return [];
-      if (Array.isArray(source)) return source;
-      if (source instanceof Set) return Array.from(source);
-      if (source instanceof Map) return Array.from(source.values());
-      if (typeof source === 'object') {
-        return Object.values(source).flatMap((entry) => normalizeMonsters(entry));
-      }
-      return [];
-    };
     const resolveMonsterActor = (monster) => {
       if (!monster || typeof monster !== 'object') return null;
       if (monster.model?.position) return monster;
@@ -3503,6 +3493,19 @@ export class PlayerControls {
       if (monster.monster?.model?.position) return monster.monster;
       if (monster.entity?.model?.position) return monster.entity;
       return null;
+    };
+    const normalizeMonsters = (source, visited = new WeakSet()) => {
+      if (!source) return [];
+      if (Array.isArray(source)) return source.flatMap((entry) => normalizeMonsters(entry, visited));
+      if (source instanceof Set) return Array.from(source).flatMap((entry) => normalizeMonsters(entry, visited));
+      if (source instanceof Map) return Array.from(source.values()).flatMap((entry) => normalizeMonsters(entry, visited));
+      if (typeof source === 'object') {
+        if (visited.has(source)) return [];
+        visited.add(source);
+        if (resolveMonsterActor(source)) return [source];
+        return Object.values(source).flatMap((entry) => normalizeMonsters(entry, visited));
+      }
+      return [];
     };
     const monsters = monsterSources.flatMap((source) => normalizeMonsters(source));
     let closest = null;
