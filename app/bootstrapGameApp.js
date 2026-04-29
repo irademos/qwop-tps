@@ -3582,7 +3582,7 @@ async function initCore(runtimeContext) {
   }
 
 
-  const getMonsterGroundOffset = (monsterLikeOrLevel = null) => {
+  function getMonsterGroundOffset(monsterLikeOrLevel = null) {
     if (monsterLikeOrLevel && Number.isFinite(monsterLikeOrLevel.sizeScale)) {
       return MONSTER_SPAWN_GROUND_OFFSET * Math.max(0.75, monsterLikeOrLevel.sizeScale);
     }
@@ -3592,9 +3592,9 @@ async function initCore(runtimeContext) {
       return MONSTER_SPAWN_GROUND_OFFSET * Math.max(0.75, estimatedScale);
     }
     return MONSTER_SPAWN_GROUND_OFFSET;
-  };
+  }
 
-  const getMonsterSpawnPosition = (monsterLikeOrLevel = null) => {
+  function getMonsterSpawnPosition(monsterLikeOrLevel = null) {
     const groundOffset = getMonsterGroundOffset(monsterLikeOrLevel);
     for (let attempt = 0; attempt < MONSTER_SPAWN_ATTEMPTS; attempt += 1) {
       const angle = Math.random() * Math.PI * 2;
@@ -3616,7 +3616,7 @@ async function initCore(runtimeContext) {
     const fallbackY = getSpawnY(fallback.x, fallback.z, groundOffset, { allowOnBuildings: true });
     fallback.y = Number.isFinite(fallbackY) ? fallbackY : fallback.y;
     return fallback;
-  };
+  }
 
   const disposeWeaponMesh = (mesh) => {
     if (!mesh) return;
