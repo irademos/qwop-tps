@@ -24,6 +24,12 @@ const HIGHWAY_TAGS = [
 
 const highwayRegex = HIGHWAY_TAGS.join("|");
 
+function buildDedupeKey(lat, lon, radiusMeters) {
+  const latBucket = lat.toFixed(4);
+  const lonBucket = lon.toFixed(4);
+  return `${latBucket}:${lonBucket}:${Math.round(radiusMeters)}`;
+}
+
 function buildOverpassQuery(lat, lon, radiusMeters) {
   return [
     "[out:json][timeout:10];",
@@ -69,6 +75,7 @@ export async function fetchOSMData(lat, lon, radiusMeters, options = {}) {
     lat,
     lon,
     staleDistanceMeters,
+    dedupeKey: buildDedupeKey(lat, lon, radiusMeters),
     requestFn: () => performOverpassRequest(new URLSearchParams({ data: query })),
   });
 
