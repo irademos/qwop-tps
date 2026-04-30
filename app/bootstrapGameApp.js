@@ -4717,6 +4717,7 @@ async function initCore(runtimeContext) {
   };
   let pickupToastContainer = null;
   let pickupToastTimer = null;
+  let pickupToastAnimateTimer = null;
   let inventoryGlowTimer = null;
 
   const getPickupFallbackIcon = (itemId) => {
@@ -4766,14 +4767,17 @@ async function initCore(runtimeContext) {
     const targetY = buttonRect.top + (buttonRect.height / 2) - (toastRect.height / 2);
     const deltaX = targetX - toastRect.left;
     const deltaY = targetY - toastRect.top;
-    requestAnimationFrame(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(0.66)`;
-    });
+    if (pickupToastAnimateTimer) clearTimeout(pickupToastAnimateTimer);
+    pickupToastAnimateTimer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(0.66)`;
+      });
+    }, 2200);
     if (pickupToastTimer) clearTimeout(pickupToastTimer);
     pickupToastTimer = setTimeout(() => {
       pickupToastContainer.innerHTML = '';
-    }, 950);
+    }, 3050);
     triggerInventoryButtonGlow();
   };
 
