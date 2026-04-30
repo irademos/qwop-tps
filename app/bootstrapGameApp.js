@@ -3835,6 +3835,11 @@ async function initCore(runtimeContext) {
     monster.model = null;
   };
 
+
+  function canApplyMonsterBodyTransform() {
+    return !multiplayer || multiplayer.isHost;
+  }
+
   function setMonsterForSlot(slotId, monster) {
     const existingIndex = monsters.findIndex(entry => entry.id === slotId);
     if (existingIndex >= 0) {
