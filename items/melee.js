@@ -127,7 +127,10 @@ export function updateMeleeAttacks({
             : attackName,
         ['melee']
       );
-      if (attackName === 'swordSlash' && attacker.id === 'local') {
+      if (attacker.id === 'local'
+        && attacker.model.userData?.equippedWeaponType === 'sword'
+        && Array.isArray(cfg.types)
+        && cfg.types.includes('cut')) {
         onSwordHit?.({ attacker, range: cfg.range });
       }
       if (attackName === 'mutantPunch'
