@@ -3986,6 +3986,11 @@ async function initCore(runtimeContext) {
     runtimeContext.entities.monsters = monsters;
   window.monsters = monsters;
 
+    const shouldPopulateMissingSlots = !multiplayer || multiplayer.isHost;
+    if (!shouldPopulateMissingSlots) {
+      return;
+    }
+
     monsterSlotIds.forEach((slotId) => {
       const existing = monsters.find(entry => entry.id === slotId);
       if (!existing && !spawningSlots.has(slotId) && !respawnTimers.has(slotId)) {
