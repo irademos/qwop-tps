@@ -115,6 +115,10 @@ const MERCHANT_DIALOGUE = {
   ]
 };
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
+const SWORD_COMBO_ACTIONS = ['swordSlash', 'swordSlashLeft', 'swordFwdSpin'];
+const SWORD_SPIN_CHARGE_START_MS = 1000;
+const SWORD_SPIN_CHARGE_MAX_HOLD_MS = 3200;
+const SWORD_SPIN_WINDUP_SPEED = 0.25;
 const MOBILE_EQUIP_HOLD_MS = 1500;
 const GRAB_MOVE_SEND_INTERVAL_MS = 110;
 const GRAB_MOVE_MIN_DELTA_SQ = 0.02 * 0.02;
@@ -215,6 +219,8 @@ export class PlayerControls {
     this.runningKickOriginalY = 0;
     this.energyDepleted = false;
     this.swordComboIndex = 0;
+    this.swordSpinChargeStartAt = 0;
+    this.swordSpinChargeActive = false;
     
     // Mobile control variables
     this.joystick = null;
@@ -620,6 +626,13 @@ export class PlayerControls {
         this.mobileAttackHoldActive = true;
         this.isFireHeld = true;
         this.setAiming(true);
+      } else if (this.getEquippedSword()) {
+        this.swordSpinChargeStartAt = performance.now();
+        this.swordSpinChargeActive = false;
+        setTimeout(() => {
+          if (!this.mobileAttackPressActive) return;
+          this.startSwordSpinCharge();
+        }, SWORD_SPIN_CHARGE_START_MS);
       }
       if (event) this.safePreventDefault(event);
     };
@@ -633,6 +646,8 @@ export class PlayerControls {
         this.isFireHeld = false;
         this.setAiming(false);
         this.attemptFireProjectile();
+      } else if (this.releaseSwordSpinCharge()) {
+        // charge release handled above
       } else {
         this.handlePrimaryAttackPress();
       }
@@ -703,12 +718,45 @@ export class PlayerControls {
 
 
   getNextSwordAttackAction({ advance = true } = {}) {
-    const swordCombo = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
-    const action = swordCombo[this.swordComboIndex % swordCombo.length];
+    const action = SWORD_COMBO_ACTIONS[this.swordComboIndex % SWORD_COMBO_ACTIONS.length];
     if (advance) {
-      this.swordComboIndex = (this.swordComboIndex + 1) % swordCombo.length;
+      this.swordComboIndex = (this.swordComboIndex + 1) % SWORD_COMBO_ACTIONS.length;
     }
     return action;
+  }
+
+
+  startSwordSpinCharge() {
+    if (!this.enabled || this.isInWater || this.swordSpinChargeActive) return false;
+    if (!this.getEquippedSword()) return false;
+    const started = this.playAction('swordSpin', {
+      attackOverrides: { hitTime: SWORD_SPIN_CHARGE_MAX_HOLD_MS, hitWindow: 300, damage: 3, range: 3.0 }
+    });
+    if (!started) return false;
+    this.swordSpinChargeStartAt = performance.now();
+    this.swordSpinChargeActive = true;
+    const spinAction = this.playerModel?.userData?.actions?.swordSpin;
+    if (spinAction) spinAction.timeScale = SWORD_SPIN_WINDUP_SPEED;
+    return true;
+  }
+
+  releaseSwordSpinCharge() {
+    if (!this.swordSpinChargeActive) return false;
+    this.swordSpinChargeActive = false;
+    const heldForMs = Math.max(0, performance.now() - this.swordSpinChargeStartAt);
+    const chargeRatio = Math.max(0, Math.min(1, Math.min(SWORD_SPIN_CHARGE_MAX_HOLD_MS, heldForMs) / SWORD_SPIN_CHARGE_MAX_HOLD_MS));
+    const spinAction = this.playerModel?.userData?.actions?.swordSpin;
+    if (spinAction) spinAction.timeScale = 1;
+    if (this.playerModel?.userData?.attack?.name === 'swordSpin') {
+      this.playerModel.userData.attack.overrides = {
+        ...(this.playerModel.userData.attack.overrides || {}),
+        hitTime: 800,
+        hitWindow: 300,
+        damage: 3 + (3 * chargeRatio),
+        range: 3 + (3 * chargeRatio)
+      };
+    }
+    return true;
   }
 
   getMobileAttackLabel() {
@@ -762,7 +810,7 @@ export class PlayerControls {
       const attackAction = this.getNextSwordAttackAction({ advance: false });
       const started = this.playAction(attackAction);
       if (!started) return;
-      this.swordComboIndex = (this.swordComboIndex + 1) % 4;
+      this.swordComboIndex = (this.swordComboIndex + 1) % SWORD_COMBO_ACTIONS.length;
       if (attackAction === 'swordSlash' || attackAction === 'swordSlashLeft') {
         this.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg', 0.6, {
           cooldownKey: 'sword-attack',
@@ -1226,18 +1274,25 @@ export class PlayerControls {
         if (this.isInWater) return;
         this.tryJump();
       } else if (key === 'e') {
+        if (e.repeat) return;
         if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
         if (this.isInWater) return;
         if (this.isMoving && !this.isSlideMomentumActive()) {
           this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
         }
         const sword = this.getEquippedSword();
-        const attackAction = sword ? this.getNextSwordAttackAction({ advance: false }) : 'mutantPunch';
+        if (sword) {
+          this.swordSpinChargeStartAt = performance.now();
+          this.swordSpinChargeActive = false;
+          setTimeout(() => {
+            if (!this.keysPressed.has('e')) return;
+            this.startSwordSpinCharge();
+          }, SWORD_SPIN_CHARGE_START_MS);
+          return;
+        }
+        const attackAction = 'mutantPunch';
         const started = this.playAction(attackAction);
         if (!started) return;
-        if (sword) {
-          this.swordComboIndex = (this.swordComboIndex + 1) % 4;
-        }
         if (attackAction === 'swordSlash' || attackAction === 'swordSlashLeft') {
           this.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg', 0.6, {
             cooldownKey: 'sword-attack',
@@ -1284,7 +1339,16 @@ export class PlayerControls {
     });
 
     document.addEventListener("keyup", (e) => {
-      this.keysPressed.delete(e.key.toLowerCase());
+      const key = e.key.toLowerCase();
+      this.keysPressed.delete(key);
+      if (key === 'e') {
+        if (this.releaseSwordSpinCharge()) return;
+        if (this.getEquippedSword() && (performance.now() - this.swordSpinChargeStartAt) < SWORD_SPIN_CHARGE_START_MS) {
+          const attackAction = this.getNextSwordAttackAction({ advance: false });
+          const started = this.playAction(attackAction);
+          if (started) this.swordComboIndex = (this.swordComboIndex + 1) % SWORD_COMBO_ACTIONS.length;
+        }
+      }
     });
     
     // Handle window resize
@@ -1827,7 +1891,7 @@ export class PlayerControls {
     return this.slideMomentum.length() > 0.01;
   }
 
-  playAction(actionName) {
+  playAction(actionName, options = {}) {
     if (!this.playerModel) return false;
     const resolvedAction = actionName === 'mutantPunch' && this.getEquippedSword() ? 'swordSlash' : actionName;
     const swordAttackActions = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
@@ -1862,6 +1926,7 @@ export class PlayerControls {
         name: attackName,
         start: Date.now(),
         hasHit: false,
+        overrides: options.attackOverrides || null,
       };
     }
 

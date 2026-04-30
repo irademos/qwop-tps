@@ -111,14 +111,15 @@ export function updateMeleeAttacks({
       : info.name;
     const cfg = ATTACKS[attackName];
     if (!cfg) continue;
+    const attackCfg = info.overrides ? { ...cfg, ...info.overrides } : cfg;
     if (isAttackInterrupted(attacker, attackName)) {
       info.hasHit = true;
       continue;
     }
     const elapsed = now - info.start;
-    if (elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + cfg.hitWindow && !info.hasHit) {
+    if (elapsed >= attackCfg.hitTime && elapsed <= attackCfg.hitTime + attackCfg.hitWindow && !info.hasHit) {
       let hit = false;
-      const attackDamage = getStrengthDamage(attacker.id, cfg.damage);
+      const attackDamage = getStrengthDamage(attacker.id, attackCfg.damage);
       const attackTypes = getAttackTypes(
         attacker.model.userData?.equippedWeaponType === 'torch'
           ? 'torchSwing'
@@ -129,19 +130,19 @@ export function updateMeleeAttacks({
       );
       if (attacker.id === 'local'
         && attacker.model.userData?.equippedWeaponType === 'sword'
-        && Array.isArray(cfg.types)
-        && cfg.types.includes('cut')) {
-        onSwordHit?.({ attacker, range: cfg.range });
+        && Array.isArray(attackCfg.types)
+        && attackCfg.types.includes('cut')) {
+        onSwordHit?.({ attacker, range: attackCfg.range });
       }
       if (attackName === 'mutantPunch'
         && attacker.id === 'local'
         && attacker.model.userData?.equippedWeaponType === 'torch') {
-        onTorchHit?.({ attacker, range: cfg.range });
+        onTorchHit?.({ attacker, range: attackCfg.range });
       }
       for (const target of players) {
         if (target === attacker) continue;
         if (!target.model || !target.model.position) continue;
-        if (isTargetInAttackRange(attacker.model, target.model.position, cfg)) {
+        if (isTargetInAttackRange(attacker.model, target.model.position, attackCfg)) {
           hit = true;
           onEntityHit?.({
             targetType: target.id === 'local' ? 'player' : 'remotePlayer',
@@ -155,7 +156,7 @@ export function updateMeleeAttacks({
             const playerControls = appContext.systems.playerControls ?? window.playerControls;
             if (playerControls) {
               const dir = new THREE.Vector3().subVectors(target.model.position, attacker.model.position).normalize();
-              playerControls.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
+              playerControls.applyKnockback({ direction: dir, strength: attackCfg.knockbackStrength });
             }
           } else {
             const tp = otherPlayers[target.id];
@@ -180,14 +181,14 @@ export function updateMeleeAttacks({
       if (isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
           if (!monster?.model?.position) continue;
-          if (isTargetInAttackRange(attacker.model, monster.model.position, cfg)) {
+          if (isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
             hit = true;
             const killed = monster.applyDamage(attackDamage, { attackTypes });
             if (!killed) {
               const dir = new THREE.Vector3()
                 .subVectors(monster.model.position, attacker.model.position)
                 .normalize();
-              monster.applyKnockback({ direction: dir, strength: cfg.knockbackStrength });
+              monster.applyKnockback({ direction: dir, strength: attackCfg.knockbackStrength });
             }
             onMonsterHit?.(monster, { damage: attackDamage, killed, sourceId: attacker.id, attackTypes });
             onEntityHit?.({ targetType: 'monster', targetId: monster.id, targetPosition: monster.model.position.clone(), attackTypes });
@@ -200,7 +201,7 @@ export function updateMeleeAttacks({
       } else if (!isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
           if (!monster?.model?.position) continue;
-          if (isTargetInAttackRange(attacker.model, monster.model.position, cfg)) {
+          if (isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
             hit = true;
             sendMonsterAttack?.({
               monsterId: monster.id,
@@ -218,7 +219,7 @@ export function updateMeleeAttacks({
       }
       info.hasHit = true;
     }
-    if (elapsed > cfg.hitTime + cfg.hitWindow) {
+    if (elapsed > attackCfg.hitTime + attackCfg.hitWindow) {
       info.hasHit = true;
     }
   }
