@@ -5370,11 +5370,8 @@ async function initCore(runtimeContext) {
       const applePosition = pickup.mesh.getWorldPosition
         ? pickup.mesh.getWorldPosition(tempTreePosition)
         : pickup.mesh.position;
-      const horizontalDistance = Math.hypot(
-        playerPosition.x - applePosition.x,
-        playerPosition.z - applePosition.z
-      );
-      if (horizontalDistance > APPLE_PICKUP_RADIUS) return false;
+      const appleDistance = playerPosition.distanceTo(applePosition);
+      if (appleDistance > APPLE_PICKUP_RADIUS) return false;
     }
     addToInventory(pickup.id, 1);
     disposeApplePickup(pickup);
