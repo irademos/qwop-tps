@@ -115,6 +115,7 @@ import {
   saveQuestState,
   saveAchievementState,
   saveSleepTimestamp,
+  saveWalkingStats,
   saveStatsImmediate,
   saveStatsThrottled,
   initMonsterPersistence,
@@ -299,6 +300,37 @@ const PERFORMANCE_PROFILE_CAPS = {
 
 function metersPerDegreeLon(latDeg) {
   return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
+}
+
+function getUtcDateString(timestampMs) {
+  return new Date(timestampMs).toISOString().slice(0, 10);
+}
+
+function toMiles(meters) {
+  return meters / 1609.344;
+}
+
+function getStartOfUtcWeek(timestampMs) {
+  const d = new Date(timestampMs);
+  const day = d.getUTCDay();
+  const diff = (day + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - diff);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function mergeWalkingStats(walkingStats) {
+  const totalMilesRaw = Number(walkingStats?.totalMiles);
+  const totalMiles = Number.isFinite(totalMilesRaw) && totalMilesRaw >= 0 ? totalMilesRaw : 0;
+  const sourceDaily = walkingStats?.dailyMiles && typeof walkingStats.dailyMiles === 'object' ? walkingStats.dailyMiles : {};
+  const dailyMiles = {};
+  for (const [date, miles] of Object.entries(sourceDaily)) {
+    const parsed = Number(miles);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    dailyMiles[date] = parsed;
+  }
+  return { totalMiles, dailyMiles, updatedAt: Number.isFinite(walkingStats?.updatedAt) ? walkingStats.updatedAt : null };
 }
 
 function distanceMeters(lat1, lon1, lat2, lon2) {
@@ -4102,6 +4134,60 @@ async function initCore(runtimeContext) {
   const offlineDecay = applyOfflineHungerDecay(playerProfile);
   playerProfile.stats = offlineDecay.stats;
   let lastStatUpdateAt = offlineDecay.lastStatUpdateAt;
+
+  const walkingState = mergeWalkingStats(playerProfile.walkingStats);
+
+  function showWalkingSummaryOverlay() {
+    const today = Date.now();
+    const startWeek = getStartOfUtcWeek(today);
+    let milesThisWeek = 0;
+    let firstDayTs = null;
+    for (const [date, miles] of Object.entries(walkingState.dailyMiles)) {
+      const ts = Date.parse(`${date}T00:00:00.000Z`);
+      if (!Number.isFinite(ts)) continue;
+      if (firstDayTs == null || ts < firstDayTs) firstDayTs = ts;
+      if (ts >= startWeek) milesThisWeek += miles;
+    }
+    const todayMiles = walkingState.dailyMiles[getUtcDateString(today)] || 0;
+    const weeks = firstDayTs == null ? 1 : Math.max(1, Math.ceil((today - firstDayTs + 1) / (7 * 24 * 60 * 60 * 1000)));
+    const avgWeekly = walkingState.totalMiles / weeks;
+
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:12000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const panel = document.createElement('div');
+    panel.style.cssText = 'position:relative;width:min(460px,100%);background:#111;color:#fff;border:2px solid #39f;border-radius:12px;padding:20px 18px 18px;font-family:Arial,sans-serif;';
+    const exitBtn = document.createElement('button');
+    exitBtn.textContent = '✕';
+    exitBtn.setAttribute('aria-label', 'Exit summary');
+    exitBtn.style.cssText = 'position:absolute;right:10px;top:8px;background:transparent;border:0;color:#fff;font-size:22px;cursor:pointer;';
+    const title = document.createElement('h2');
+    title.textContent = 'Walking Summary';
+    title.style.margin = '0 0 14px 0';
+    const metrics = [
+      ['Total miles walked', walkingState.totalMiles],
+      ['Average miles walked per week', avgWeekly],
+      ['Miles walked this week', milesThisWeek],
+      ['Miles walked today', todayMiles]
+    ];
+    const list = document.createElement('div');
+    metrics.forEach(([label, value]) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.16);';
+      row.innerHTML = `<span>${label}</span><strong>${Number(value).toFixed(2)}</strong>`;
+      list.appendChild(row);
+    });
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'Ok';
+    okBtn.style.cssText = 'margin-top:16px;width:100%;padding:10px;border-radius:8px;border:1px solid #39f;background:#1f3cff;color:#fff;font-weight:700;cursor:pointer;';
+    const close = () => overlay.remove();
+    okBtn.addEventListener('click', close);
+    exitBtn.addEventListener('click', close);
+    panel.append(exitBtn, title, list, okBtn);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+  }
+
+  showWalkingSummaryOverlay();
 
   const statsState = {
     health: playerProfile.stats.health,
@@ -9732,6 +9818,25 @@ async function initCore(runtimeContext) {
   const locationProvider = createLocationProvider({
     onUpdate: (location) => {
       window.latestLocation = location;
+      const prevLat = locationState.lat;
+      const prevLon = locationState.lon;
+      const prevTs = Number.isFinite(locationState.timestamp) ? locationState.timestamp : null;
+      if (Number.isFinite(prevLat) && Number.isFinite(prevLon) && prevTs != null) {
+        const elapsedMs = Math.max(0, location.timestamp - prevTs);
+        const movedMeters = distanceMeters(prevLat, prevLon, location.lat, location.lon);
+        const maxReasonableMeters = Math.max(30, elapsedMs * (3.2 / 1000));
+        if (Number.isFinite(movedMeters) && movedMeters > 1 && movedMeters <= maxReasonableMeters) {
+          const miles = toMiles(movedMeters);
+          walkingState.totalMiles += miles;
+          const dayKey = getUtcDateString(location.timestamp);
+          walkingState.dailyMiles[dayKey] = (walkingState.dailyMiles[dayKey] || 0) + miles;
+          walkingState.updatedAt = Date.now();
+          if (profileNameKey) {
+            void saveWalkingStats(profileNameKey, walkingState);
+          }
+        }
+      }
+
       friendlyNpcManager?.recordGpsTravel?.({
         lat: location.lat,
         lon: location.lon,

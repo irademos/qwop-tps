@@ -10,6 +10,7 @@ export {
   saveQuestState,
   saveAchievementState,
   saveSleepTimestamp,
+  saveWalkingStats,
   saveStatsImmediate,
   saveStatsThrottled
 } from '../playerProfile.js';
