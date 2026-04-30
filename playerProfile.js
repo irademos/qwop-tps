@@ -50,6 +50,11 @@ const DEFAULT_ACHIEVEMENTS = {
   trackers: {},
   achievements: {}
 };
+const DEFAULT_WALKING_STATS = {
+  totalMiles: 0,
+  dailyMiles: {},
+  updatedAt: null
+};
 
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
@@ -95,6 +100,7 @@ function buildProfile(name) {
     spells: { ...DEFAULT_SPELLS },
     quests: mergeQuests(DEFAULT_QUESTS),
     achievements: mergeAchievements(DEFAULT_ACHIEVEMENTS),
+    walkingStats: { ...DEFAULT_WALKING_STATS },
     characterModel: null,
     sleepStartedAt: null,
     lastStatUpdateAt: now,
@@ -116,6 +122,21 @@ function mergeQuests(quests) {
   };
 }
 
+
+function mergeWalkingStats(walkingStats) {
+  const totalMilesRaw = Number(walkingStats?.totalMiles);
+  const totalMiles = Number.isFinite(totalMilesRaw) && totalMilesRaw >= 0 ? totalMilesRaw : 0;
+  const sourceDaily = walkingStats?.dailyMiles && typeof walkingStats.dailyMiles === 'object' ? walkingStats.dailyMiles : {};
+  const dailyMiles = {};
+  for (const [date, miles] of Object.entries(sourceDaily)) {
+    const parsed = Number(miles);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    dailyMiles[date] = parsed;
+  }
+  const updatedAt = Number.isFinite(walkingStats?.updatedAt) ? walkingStats.updatedAt : null;
+  return { totalMiles, dailyMiles, updatedAt };
+}
 
 function mergeAchievements(achievements) {
   const trackers = achievements?.trackers && typeof achievements.trackers === 'object'
@@ -200,6 +221,7 @@ async function loadProfileForName(profileRef, trimmedName) {
   const mergedQuests = mergeQuests(profile.quests);
   const mergedAchievements = mergeAchievements(profile.achievements);
   const mergedCharacterModel = typeof profile.characterModel === 'string' ? profile.characterModel : null;
+  const mergedWalkingStats = mergeWalkingStats(profile.walkingStats);
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
   const inventoryMissing = profile.inventory == null;
@@ -211,7 +233,8 @@ async function loadProfileForName(profileRef, trimmedName) {
   const questsMissing = profile.quests == null;
   const achievementsMissing = profile.achievements == null;
   const characterModelMissing = profile.characterModel !== mergedCharacterModel;
-  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || questsMissing || achievementsMissing || characterModelMissing) {
+  const walkingStatsMissing = profile.walkingStats == null;
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || questsMissing || achievementsMissing || characterModelMissing || walkingStatsMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
@@ -261,6 +284,12 @@ async function loadProfileForName(profileRef, trimmedName) {
     } else {
       profile.characterModel = mergedCharacterModel;
     }
+    if (walkingStatsMissing) {
+      updatePayload.walkingStats = mergedWalkingStats;
+      profile.walkingStats = mergedWalkingStats;
+    } else {
+      profile.walkingStats = mergedWalkingStats;
+    }
     if (!hasLastStatUpdateAt) {
       updatePayload.lastStatUpdateAt = Date.now();
       profile.lastStatUpdateAt = updatePayload.lastStatUpdateAt;
@@ -275,6 +304,7 @@ async function loadProfileForName(profileRef, trimmedName) {
     profile.quests = mergedQuests;
     profile.achievements = mergedAchievements;
     profile.characterModel = mergedCharacterModel;
+    profile.walkingStats = mergedWalkingStats;
   }
 
   console.log('✅ Loaded profile for', trimmedName);
@@ -636,6 +666,18 @@ export async function saveAchievementState(nameKey, achievementState) {
     });
   } catch (error) {
     console.error('Failed to save achievement state for', nameKey, error);
+  }
+}
+
+export async function saveWalkingStats(nameKey, walkingStats) {
+  if (!nameKey) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}`), {
+      walkingStats: mergeWalkingStats(walkingStats),
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.error('Failed to save walking stats for', nameKey, error);
   }
 }
 
