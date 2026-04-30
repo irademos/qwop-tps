@@ -102,6 +102,7 @@ import { appContext } from '../src/runtime/appContext.js';
 import { getAttackTypes } from '../items/melee.js';
 import { exposeDebugGlobals } from '../src/runtime/exposeDebugGlobals.js';
 import { claimAchievement, getAchievementView, mergeAchievementState, recordAchievementProgress } from '../achievements.js';
+import { getDistanceUnitPreference, setDistanceUnitPreference } from '../distanceUnits.js';
 
 import {
   clearStoredPin,
@@ -4163,11 +4164,14 @@ async function initCore(runtimeContext) {
     const title = document.createElement('h2');
     title.textContent = 'Walking Summary';
     title.style.margin = '0 0 14px 0';
+    const distanceUnit = getDistanceUnitPreference();
+    const convertMilesToDisplay = (miles) => (distanceUnit === 'miles' ? miles : miles * 1.609344);
+    const unitLabel = distanceUnit === 'miles' ? 'miles' : 'km';
     const metrics = [
-      ['Total miles walked', walkingState.totalMiles],
-      ['Average miles walked per week', avgWeekly],
-      ['Miles walked this week', milesThisWeek],
-      ['Miles walked today', todayMiles]
+      [`Total ${unitLabel} walked`, convertMilesToDisplay(walkingState.totalMiles)],
+      [`Average ${unitLabel} walked per week`, convertMilesToDisplay(avgWeekly)],
+      [`${distanceUnit === 'miles' ? 'Miles' : 'Km'} walked this week`, convertMilesToDisplay(milesThisWeek)],
+      [`${distanceUnit === 'miles' ? 'Miles' : 'Km'} walked today`, convertMilesToDisplay(todayMiles)]
     ];
     const list = document.createElement('div');
     metrics.forEach(([label, value]) => {
@@ -10559,6 +10563,8 @@ async function initCore(runtimeContext) {
     getDisplaySettings: () => ({ ...displaySettings }),
     setDisplayMode: (mode) => setDisplayMode(mode),
     setDisplaySetting: (key, value) => setDisplaySetting(key, value),
+    getDistanceUnitPreference: () => getDistanceUnitPreference(),
+    setDistanceUnitPreference: (unit) => setDistanceUnitPreference(unit),
     resetWorldOrigin: () => {
       resetWorldOrigin();
       locationState.originLat = null;

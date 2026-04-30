@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { formatDistanceForDisplay, getDistanceUnitPreference } from '../distanceUnits.js';
+import { formatDistanceForDisplay, getDistanceUnitPreference, setDistanceUnitPreference } from '../distanceUnits.js';
 
 const TAB_KEY = 'settings:lastTab';
 
@@ -73,7 +73,10 @@ function formatCoordinate(value) {
 
 function formatMeters(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  return value.toFixed(2);
+  if (getDistanceUnitPreference() === 'miles') {
+    return `${(value * 3.28084).toFixed(2)} ft`;
+  }
+  return `${value.toFixed(2)} m`;
 }
 
 function formatStatValue(key, value) {
@@ -1446,7 +1449,11 @@ function bindEvents() {
   }
   if (elements.displayFields?.unitsSelect) {
     elements.displayFields.unitsSelect.addEventListener('change', (event) => {
-      context.appState?.setDistanceUnitPreference?.(event.target.value);
+      const selectedUnit = event.target.value;
+      const appliedUnit = context.appState?.setDistanceUnitPreference?.(selectedUnit) ?? setDistanceUnitPreference(selectedUnit);
+      if (elements.displayFields?.unitsSelect) {
+        elements.displayFields.unitsSelect.value = appliedUnit;
+      }
       window.dispatchEvent(new Event('distance-unit-changed'));
       update();
     });
