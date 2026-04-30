@@ -3228,6 +3228,7 @@ async function initCore(runtimeContext) {
           const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + 20;
           setStat('coins', nextCoins, { skipSave: true });
           showCoinPopup(statsState.coins);
+          showPickupToast('coins', 20);
         }
       }
     ];
@@ -4714,6 +4715,71 @@ async function initCore(runtimeContext) {
     healths.push(...healthsToAdd);
     applyTorchHealths(state, entry, healths);
   };
+  let pickupToastContainer = null;
+  let pickupToastTimer = null;
+  let pickupToastAnimateTimer = null;
+  let inventoryGlowTimer = null;
+
+  const getPickupFallbackIcon = (itemId) => {
+    if (itemId === 'coins') return '🪙';
+    if (itemId === ICE_AMMO_KEY || itemId === 'iceGun') return '❄️';
+    if (itemId === ARROW_AMMO_KEY || itemId === 'bow') return '🏹';
+    if (itemId === APPLE_ITEM_ID) return '🍎';
+    if (itemId?.startsWith?.('mushroom_')) return '🍄';
+    return '🎒';
+  };
+
+  const triggerInventoryButtonGlow = () => {
+    const inventoryButton = document.getElementById('inventory-button');
+    if (!inventoryButton) return;
+    inventoryButton.classList.add('inventory-button-glow');
+    if (inventoryGlowTimer) clearTimeout(inventoryGlowTimer);
+    inventoryGlowTimer = setTimeout(() => {
+      inventoryButton.classList.remove('inventory-button-glow');
+    }, 1000);
+  };
+
+  const showPickupToast = (itemId, amount = 1, explicitLabel = '') => {
+    if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
+    if (!pickupToastContainer) {
+      pickupToastContainer = document.createElement('div');
+      pickupToastContainer.id = 'pickup-toast-container';
+      document.body.appendChild(pickupToastContainer);
+    }
+    const entry = itemId === 'coins'
+      ? { name: 'Coins', icon: '' }
+      : ensureCatalogEntry(itemId, inventoryState[itemId]);
+    const label = explicitLabel || entry?.name || itemId;
+    const amountLabel = amount > 1 ? ` x${Math.floor(amount)}` : '';
+    const iconText = getPickupFallbackIcon(itemId);
+    pickupToastContainer.innerHTML = `
+      <div class="pickup-toast">
+        ${entry?.icon ? `<img src="${entry.icon}" alt="" class="pickup-toast-icon">` : `<span class="pickup-toast-icon pickup-toast-icon-fallback">${iconText}</span>`}
+        <span class="pickup-toast-text">Collected ${label}${amountLabel}</span>
+      </div>
+    `;
+    const toast = pickupToastContainer.querySelector('.pickup-toast');
+    const inventoryButton = document.getElementById('inventory-button');
+    if (!toast || !inventoryButton) return;
+    const buttonRect = inventoryButton.getBoundingClientRect();
+    const toastRect = toast.getBoundingClientRect();
+    const targetX = (buttonRect.left + (buttonRect.width / 2)) - (toastRect.width / 2);
+    const targetY = buttonRect.top + (buttonRect.height / 2) - (toastRect.height / 2);
+    const deltaX = targetX - toastRect.left;
+    const deltaY = targetY - toastRect.top;
+    if (pickupToastAnimateTimer) clearTimeout(pickupToastAnimateTimer);
+    pickupToastAnimateTimer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(0.66)`;
+      });
+    }, 2200);
+    if (pickupToastTimer) clearTimeout(pickupToastTimer);
+    pickupToastTimer = setTimeout(() => {
+      pickupToastContainer.innerHTML = '';
+    }, 3050);
+    triggerInventoryButtonGlow();
+  };
 
   function setIceAmmoCount(amount) {
     if (!Number.isFinite(amount)) return;
@@ -4757,12 +4823,14 @@ async function initCore(runtimeContext) {
     if (!Number.isFinite(amount)) return;
     const nextAmount = getIceAmmoCount() + amount;
     setIceAmmoCount(nextAmount);
+    showPickupToast(ICE_AMMO_KEY, amount, 'Ice Ammo');
   }
 
   function addArrowAmmo(amount) {
     if (!Number.isFinite(amount)) return;
     const nextAmount = getArrowAmmoCount() + amount;
     setArrowAmmoCount(nextAmount);
+    showPickupToast(ARROW_AMMO_KEY, amount, 'Arrows');
   }
 
   function addToInventory(itemId, amount = 1, options = {}) {
@@ -4784,6 +4852,7 @@ async function initCore(runtimeContext) {
       }
       addTorchHealths(inventoryState, current, healthsToAdd);
       persistInventoryAndStorage();
+      showPickupToast(itemId, amount);
       return;
     }
     const nextCount = (current?.count || 0) + amount;
@@ -4792,6 +4861,7 @@ async function initCore(runtimeContext) {
       console.log('[inventory] added', itemId, amount, inventoryState[itemId]);
     }
     persistInventoryAndStorage();
+    showPickupToast(itemId, amount);
   }
 
   function removeFromInventory(itemId, amount = 1) {
@@ -8023,6 +8093,7 @@ async function initCore(runtimeContext) {
     setStat('coins', nextCoins, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     showCoinPopup(statsState.coins);
+    showPickupToast('coins', COIN_PICKUP_GAIN);
   }
 
   function spawnIceGunPickup(position) {
@@ -10307,6 +10378,7 @@ async function initCore(runtimeContext) {
       const nextCoins = current + safeDelta;
       setStat('coins', nextCoins, { skipSave: true });
       showCoinPopup(statsState.coins);
+      showPickupToast('coins', safeDelta);
     },
     getCharacterOptions: () => characterOptions,
     getInventory: () => getInventory(),
