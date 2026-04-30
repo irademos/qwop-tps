@@ -3897,7 +3897,7 @@ async function initCore(runtimeContext) {
           && Number.isFinite(options.rotation.z)
           && Number.isFinite(options.rotation.w)) {
           monster.model.quaternion.set(options.rotation.x, options.rotation.y, options.rotation.z, options.rotation.w);
-          monster.body?.setRotation(options.rotation, true);
+          if (canApplyMonsterBodyTransform()) monster.body?.setRotation(options.rotation, true);
         }
         setMonsterForSlot(slotId, monster);
         if (isHost && monsterSnapshotLoaded && !options.skipPersist) {
@@ -3980,12 +3980,12 @@ async function initCore(runtimeContext) {
 
     if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
       existing.model.position.set(position.x, position.y, position.z);
-      existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+      if (canApplyMonsterBodyTransform()) existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
     }
 
     if (rotation && Number.isFinite(rotation.x) && Number.isFinite(rotation.y) && Number.isFinite(rotation.z) && Number.isFinite(rotation.w)) {
       existing.model.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
-      existing.body?.setRotation(rotation, true);
+      if (canApplyMonsterBodyTransform()) existing.body?.setRotation(rotation, true);
     }
 
     existing.applyPersistedState?.({
@@ -4095,12 +4095,12 @@ async function initCore(runtimeContext) {
           );
           if (normalizedPos) {
             monster.model.position.copy(normalizedPos);
-            monster.body?.setTranslation({ x: normalizedPos.x, y: normalizedPos.y, z: normalizedPos.z }, true);
+            if (canApplyMonsterBodyTransform()) monster.body?.setTranslation({ x: normalizedPos.x, y: normalizedPos.y, z: normalizedPos.z }, true);
           }
         }
         if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
           monster.model.quaternion.set(rx, ry, rz, rw);
-          monster.body?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
+          if (canApplyMonsterBodyTransform()) monster.body?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
         }
         if (typeof state.mode === 'string') {
           monster.model.userData.mode = state.mode;
