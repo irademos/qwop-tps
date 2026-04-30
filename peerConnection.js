@@ -26,7 +26,8 @@ const VALID_MESSAGE_TYPES = new Set([
   'dropWorldPickup',
   'dropWeaponPickup',
   'grab',
-  'grabMove'
+  'grabMove',
+  'spawnRequest'
 ]);
 const MAX_PENDING_PAYLOADS = 75;
 const COALESCED_PAYLOAD_TYPES = new Set(['entitySnapshot', 'entityStates']);
