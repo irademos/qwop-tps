@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { formatDistanceForDisplay, getDistanceUnitPreference } from '../distanceUnits.js';
 
 const TAB_KEY = 'settings:lastTab';
 
@@ -63,11 +64,7 @@ function formatTimestamp(ts) {
   return date.toLocaleString();
 }
 
-function formatDistance(distance) {
-  if (typeof distance !== 'number' || Number.isNaN(distance)) return '—';
-  if (distance < 1000) return `${distance.toFixed(0)} m`;
-  return `${(distance / 1000).toFixed(2)} km`;
-}
+function formatDistance(distance) { return formatDistanceForDisplay(distance); }
 
 function formatCoordinate(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—';
@@ -619,6 +616,18 @@ function buildDisplayPanel() {
     performanceSelect.appendChild(option);
   });
   performanceGroup.append(performanceLabel, performanceSelect);
+  const unitsGroup = createElement('div', 'settings-field');
+  const unitsLabel = createElement('label', 'settings-label', 'Distance Units');
+  unitsLabel.setAttribute('for', 'settings-distance-units');
+  const unitsSelect = createElement('select', 'settings-select');
+  unitsSelect.id = 'settings-distance-units';
+  [{ value: 'km', label: 'Kilometers / meters' }, { value: 'miles', label: 'Miles / feet' }].forEach(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    unitsSelect.appendChild(option);
+  });
+  unitsGroup.append(unitsLabel, unitsSelect);
 
   const createRangeField = ({ id, label, min, max, step }) => {
     const field = createElement('div', 'settings-field');
@@ -680,6 +689,7 @@ function buildDisplayPanel() {
   panelEl.append(
     modeGroup,
     performanceGroup,
+    unitsGroup,
     ambientField.field,
     directionalField.field,
     groundField.field,
@@ -691,6 +701,7 @@ function buildDisplayPanel() {
   elements.displayFields = {
     modeSelect,
     performanceSelect,
+    unitsSelect,
     sliders: {
       ambientIntensity: ambientField.input,
       directionalIntensity: directionalField.input,
@@ -1433,6 +1444,13 @@ function bindEvents() {
       context.appState?.setDisplaySetting?.('performanceMode', value);
     });
   }
+  if (elements.displayFields?.unitsSelect) {
+    elements.displayFields.unitsSelect.addEventListener('change', (event) => {
+      context.appState?.setDistanceUnitPreference?.(event.target.value);
+      window.dispatchEvent(new Event('distance-unit-changed'));
+      update();
+    });
+  }
 
   if (elements.displayFields?.sliders) {
     Object.entries(elements.displayFields.sliders).forEach(([key, slider]) => {
@@ -1832,6 +1850,9 @@ export function updateUI() {
       if (elements.displayFields.performanceSelect.value !== displaySettings.performanceMode) {
         elements.displayFields.performanceSelect.value = displaySettings.performanceMode;
       }
+    }
+    if (elements.displayFields.unitsSelect) {
+      elements.displayFields.unitsSelect.value = getDistanceUnitPreference();
     }
     Object.entries(elements.displayFields.sliders || {}).forEach(([key, slider]) => {
       const value = displaySettings?.[key];
