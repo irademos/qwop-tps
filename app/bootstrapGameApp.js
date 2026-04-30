@@ -1382,6 +1382,21 @@ async function initCore(runtimeContext) {
     });
   };
 
+
+  const requestHostSpawnEvent = (spawnEvent) => {
+    if (!multiplayer || multiplayer.isHost || !spawnEvent?.position) return;
+    if (spawnEvent.type !== 'monster') return;
+    const hostId = multiplayer.getHostId?.();
+    if (!hostId) return;
+    const direction = spawnEvent.direction?.clone?.().normalize?.() || null;
+    multiplayer.sendTo(hostId, {
+      type: 'spawnRequest',
+      spawnType: 'monster',
+      position: [spawnEvent.position.x, spawnEvent.position.y, spawnEvent.position.z],
+      direction: direction ? [direction.x, direction.y, direction.z] : undefined
+    });
+  };
+
   const handleMonsterDamage = (monster) => {
     if (!multiplayer?.isHost || !monster) return;
     persistMonsterHp(monster);
@@ -1716,6 +1731,12 @@ async function initCore(runtimeContext) {
       && (payload.attackTypes == null || (Array.isArray(payload.attackTypes) && payload.attackTypes.every(type => typeof type === 'string')))
       && (payload.at == null || isFiniteNumber(payload.at));
 
+    const isSpawnRequestMessage = payload => isObject(payload)
+      && payload.type === 'spawnRequest'
+      && payload.spawnType === 'monster'
+      && isVector3Array(payload.position)
+      && (payload.direction == null || isVector3Array(payload.direction));
+
     if (!isObject(data)) {
       logInvalidPayload('payload', data);
       return;
@@ -1807,6 +1828,22 @@ async function initCore(runtimeContext) {
         const withFriend = window.questManager?.isFriendActive?.() ?? false;
         window.onMonsterKill?.(monster, { withFriend });
       }
+      return;
+    }
+
+
+    if (data.type === 'spawnRequest') {
+      if (!isSpawnRequestMessage(data)) {
+        logInvalidPayload('spawnRequest', data);
+        return;
+      }
+      if (!multiplayer?.isHost) return;
+      const [px, py, pz] = data.position;
+      const [dx = 0, dy = 0, dz = 1] = data.direction || [];
+      const position = new THREE.Vector3(px, py, pz);
+      const direction = new THREE.Vector3(dx, dy, dz);
+      if (direction.lengthSq() > 0.0001) direction.normalize();
+      void handleCharacterSpawnEvent({ type: 'monster', position, direction });
       return;
     }
 
@@ -3398,7 +3435,8 @@ async function initCore(runtimeContext) {
     isHost,
     debug: window.DEBUG_FRIENDLY_PERSIST,
     onSpawnEvent: handleCharacterSpawnEvent,
-    onBeforeSpawn: (...args) => trimTravelSpawnPopulationIfNeeded(...args)
+    onBeforeSpawn: (...args) => trimTravelSpawnPopulationIfNeeded(...args),
+    onRemoteSpawnRequest: requestHostSpawnEvent
   });
   if (multiplayer?.roomId) {
     friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });

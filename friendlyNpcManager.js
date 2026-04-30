@@ -47,7 +47,8 @@ export function createFriendlyNpcManager({
   isHost = false,
   debug = false,
   onSpawnEvent,
-  onBeforeSpawn
+  onBeforeSpawn,
+  onRemoteSpawnRequest
 } = {}) {
   const friendlies = [];
   const records = new Map();
@@ -168,6 +169,15 @@ export function createFriendlyNpcManager({
     records.set(slotId, record);
   };
 
+
+
+  const maybeRequestSpawnFromDistance = () => {
+    if (!playerModel) return;
+    const spawnEvent = characterSpawner.getSpawnEvent();
+    if (!spawnEvent?.position) return;
+    if (spawnEvent.type !== 'monster') return;
+    onRemoteSpawnRequest?.(spawnEvent);
+  };
 
   const setHost = (nextHost) => {
     currentHost = !!nextHost;
@@ -501,6 +511,8 @@ const getHealthForLevel = (level) => {
     const nowMs = Date.now();
     if (isHostNow) {
       maybeSpawnFromDistance();
+    } else {
+      maybeRequestSpawnFromDistance();
     }
     updateActiveFriendlies(!isHostNow);
     friendlies.forEach((friendly) => {
