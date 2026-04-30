@@ -1415,6 +1415,21 @@ async function initCore(runtimeContext) {
     });
   };
 
+
+  const requestHostSpawnEvent = (spawnEvent) => {
+    if (!multiplayer || multiplayer.isHost || !spawnEvent?.position) return;
+    if (spawnEvent.type !== 'monster') return;
+    const hostId = multiplayer.getHostId?.();
+    if (!hostId) return;
+    const direction = spawnEvent.direction?.clone?.().normalize?.() || null;
+    multiplayer.sendTo(hostId, {
+      type: 'spawnRequest',
+      spawnType: 'monster',
+      position: [spawnEvent.position.x, spawnEvent.position.y, spawnEvent.position.z],
+      direction: direction ? [direction.x, direction.y, direction.z] : undefined
+    });
+  };
+
   const handleMonsterDamage = (monster) => {
     if (!multiplayer?.isHost || !monster) return;
     persistMonsterHp(monster);
@@ -1749,6 +1764,12 @@ async function initCore(runtimeContext) {
       && (payload.attackTypes == null || (Array.isArray(payload.attackTypes) && payload.attackTypes.every(type => typeof type === 'string')))
       && (payload.at == null || isFiniteNumber(payload.at));
 
+    const isSpawnRequestMessage = payload => isObject(payload)
+      && payload.type === 'spawnRequest'
+      && payload.spawnType === 'monster'
+      && isVector3Array(payload.position)
+      && (payload.direction == null || isVector3Array(payload.direction));
+
     if (!isObject(data)) {
       logInvalidPayload('payload', data);
       return;
@@ -1840,6 +1861,22 @@ async function initCore(runtimeContext) {
         const withFriend = window.questManager?.isFriendActive?.() ?? false;
         window.onMonsterKill?.(monster, { withFriend });
       }
+      return;
+    }
+
+
+    if (data.type === 'spawnRequest') {
+      if (!isSpawnRequestMessage(data)) {
+        logInvalidPayload('spawnRequest', data);
+        return;
+      }
+      if (!multiplayer?.isHost) return;
+      const [px, py, pz] = data.position;
+      const [dx = 0, dy = 0, dz = 1] = data.direction || [];
+      const position = new THREE.Vector3(px, py, pz);
+      const direction = new THREE.Vector3(dx, dy, dz);
+      if (direction.lengthSq() > 0.0001) direction.normalize();
+      void handleCharacterSpawnEvent({ type: 'monster', position, direction });
       return;
     }
 
@@ -3431,7 +3468,8 @@ async function initCore(runtimeContext) {
     isHost,
     debug: window.DEBUG_FRIENDLY_PERSIST,
     onSpawnEvent: handleCharacterSpawnEvent,
-    onBeforeSpawn: (...args) => trimTravelSpawnPopulationIfNeeded(...args)
+    onBeforeSpawn: (...args) => trimTravelSpawnPopulationIfNeeded(...args),
+    onRemoteSpawnRequest: requestHostSpawnEvent
   });
   if (multiplayer?.roomId) {
     friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
@@ -3830,6 +3868,11 @@ async function initCore(runtimeContext) {
     monster.model = null;
   };
 
+
+  function canApplyMonsterBodyTransform() {
+    return !multiplayer || multiplayer.isHost;
+  }
+
   function setMonsterForSlot(slotId, monster) {
     const existingIndex = monsters.findIndex(entry => entry.id === slotId);
     if (existingIndex >= 0) {
@@ -3892,7 +3935,7 @@ async function initCore(runtimeContext) {
           && Number.isFinite(options.rotation.z)
           && Number.isFinite(options.rotation.w)) {
           monster.model.quaternion.set(options.rotation.x, options.rotation.y, options.rotation.z, options.rotation.w);
-          monster.body?.setRotation(options.rotation, true);
+          if (canApplyMonsterBodyTransform()) monster.body?.setRotation(options.rotation, true);
         }
         setMonsterForSlot(slotId, monster);
         if (isHost && monsterSnapshotLoaded && !options.skipPersist) {
@@ -3975,12 +4018,12 @@ async function initCore(runtimeContext) {
 
     if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
       existing.model.position.set(position.x, position.y, position.z);
-      existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+      if (canApplyMonsterBodyTransform()) existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
     }
 
     if (rotation && Number.isFinite(rotation.x) && Number.isFinite(rotation.y) && Number.isFinite(rotation.z) && Number.isFinite(rotation.w)) {
       existing.model.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
-      existing.body?.setRotation(rotation, true);
+      if (canApplyMonsterBodyTransform()) existing.body?.setRotation(rotation, true);
     }
 
     existing.applyPersistedState?.({
@@ -4018,6 +4061,11 @@ async function initCore(runtimeContext) {
     });
     runtimeContext.entities.monsters = monsters;
   window.monsters = monsters;
+
+    const shouldPopulateMissingSlots = !multiplayer || multiplayer.isHost;
+    if (!shouldPopulateMissingSlots) {
+      return;
+    }
 
     monsterSlotIds.forEach((slotId) => {
       const existing = monsters.find(entry => entry.id === slotId);
@@ -4085,12 +4133,12 @@ async function initCore(runtimeContext) {
           );
           if (normalizedPos) {
             monster.model.position.copy(normalizedPos);
-            monster.body?.setTranslation({ x: normalizedPos.x, y: normalizedPos.y, z: normalizedPos.z }, true);
+            if (canApplyMonsterBodyTransform()) monster.body?.setTranslation({ x: normalizedPos.x, y: normalizedPos.y, z: normalizedPos.z }, true);
           }
         }
         if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
           monster.model.quaternion.set(rx, ry, rz, rw);
-          monster.body?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
+          if (canApplyMonsterBodyTransform()) monster.body?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
         }
         if (typeof state.mode === 'string') {
           monster.model.userData.mode = state.mode;
