@@ -3870,7 +3870,11 @@ async function initCore(runtimeContext) {
 
 
   function canApplyMonsterBodyTransform() {
-    return !multiplayer || multiplayer.isHost;
+    // Monster transforms always come from the host-authoritative state stream.
+    // Even on non-host peers we must keep the Rapier body in sync with the
+    // received transform, otherwise the physics->mesh sync loop will keep
+    // snapping the visual mesh back to stale body poses.
+    return true;
   }
 
   function setMonsterForSlot(slotId, monster) {
