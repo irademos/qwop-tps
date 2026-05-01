@@ -3207,7 +3207,7 @@ export class PlayerControls {
   attemptFireProjectileForHand(hand = 'right') {
     const equippedWeapon = this.getEquippedWeapon(hand);
     if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
-      const direction = this.getAimDirection(true);
+      const direction = this.getAutoAimDirection(equippedWeapon) ?? this.getAimDirection(true);
       const position = this.getProjectileSpawnPosition(direction);
       const fired = this.throwBomb(position, direction);
       if (fired) {
@@ -3220,7 +3220,8 @@ export class PlayerControls {
     const gun = this.getEquippedGun(hand);
     const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
-    const direction = usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow);
+    const autoAimDirection = this.getAutoAimDirection(gun);
+    const direction = autoAimDirection ?? (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow));
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
@@ -3288,7 +3289,7 @@ export class PlayerControls {
 
   shouldHoldToFire(hand = 'right') {
     const weapon = this.getEquippedWeapon(hand);
-    return weapon?.itemId === 'bow' || weapon?.itemId === 'bomb';
+    return weapon?.itemId === 'bow' || weapon?.itemId === 'bomb' || weapon?.itemId === 'iceGun';
   }
 
   isProjectileWeapon(weapon) {
