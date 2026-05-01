@@ -3385,6 +3385,52 @@ export class PlayerControls {
     return baseDirection.normalize();
   }
 
+
+  resolveMonsterActorForAutoAim(monster) {
+    if (!monster || typeof monster !== 'object') return null;
+    if (monster.model?.position) return monster;
+    if (monster.character?.model?.position) return monster.character;
+    if (monster.monster?.model?.position) return monster.monster;
+    if (monster.entity?.model?.position) return monster.entity;
+    return null;
+  }
+
+  collectAutoAimMonsters() {
+    const monsterSources = [
+      appContext?.entities?.monsters,
+      window?.monsters,
+      window?.game?.monsters,
+      window?.runtimeContext?.entities?.monsters
+    ];
+    const normalize = (source, visited = new WeakSet()) => {
+      if (!source) return [];
+      if (Array.isArray(source)) return source.flatMap((entry) => normalize(entry, visited));
+      if (source instanceof Set) return Array.from(source).flatMap((entry) => normalize(entry, visited));
+      if (source instanceof Map) return Array.from(source.values()).flatMap((entry) => normalize(entry, visited));
+      if (typeof source === 'object') {
+        if (visited.has(source)) return [];
+        visited.add(source);
+        if (this.resolveMonsterActorForAutoAim(source)) return [source];
+        return Object.values(source).flatMap((entry) => normalize(entry, visited));
+      }
+      return [];
+    };
+    const out = [];
+    const seen = new Set();
+    for (const source of monsterSources) {
+      for (const raw of normalize(source)) {
+        const monster = this.resolveMonsterActorForAutoAim(raw);
+        const model = monster?.model;
+        if (!model?.position || monster?.isDead) continue;
+        const key = monster.id || model.uuid || model.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(model);
+      }
+    }
+    return out;
+  }
+
   findAutoAimTarget(maxRange) {
     const playerPos = this.playerModel?.position;
     if (!playerPos) return null;
@@ -3403,8 +3449,7 @@ export class PlayerControls {
       return best;
     };
 
-    const monstersRaw = appContext?.entities?.monsters || window?.monsters || [];
-    const monsters = monstersRaw.map((mon) => mon?.model || mon).filter((model) => model?.position);
+    const monsters = this.collectAutoAimMonsters();
     const animalsRaw = appContext?.entities?.animals || window?.animals || [];
     const animals = animalsRaw.map((animal) => animal?.model || animal).filter((model) => model?.position && !model?.userData?.isDead);
     const otherPlayers = Object.values(appContext?.entities?.otherPlayers || window?.otherPlayers || {}).map((entry) => entry?.model).filter((model) => model?.position);
@@ -3639,6 +3684,10 @@ export class PlayerControls {
   }
 
   updateEngagedMode() {
+    if ((this.isAiming || this.isFireHeld) && this.shouldHoldToFire()) {
+      this.setEngaged(false);
+      return;
+    }
     if (!this.playerModel) {
       this.setEngaged(false);
       return;
