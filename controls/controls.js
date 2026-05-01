@@ -122,6 +122,9 @@ const SWORD_SPIN_WINDUP_SPEED = 0.25;
 const MOBILE_EQUIP_HOLD_MS = 1500;
 const GRAB_MOVE_SEND_INTERVAL_MS = 110;
 const GRAB_MOVE_MIN_DELTA_SQ = 0.02 * 0.02;
+const AUTO_AIM_RANGE_M = 50;
+const AUTO_AIM_ICE_RANGE_M = 10;
+const AUTO_AIM_RAMP_SPEED = 4.5;
 
 export class PlayerControls {
   constructor({
@@ -305,6 +308,8 @@ export class PlayerControls {
     this.aimFov = Math.max(40, this.defaultFov - 15);
     this.isAiming = false;
     this.isFireHeld = false;
+    this.autoAimBreakUntilRelease = false;
+    this.autoAimCurrentPitch = 0;
     this.baseCameraOffset = this.cameraOffset.clone();
     this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
     this.weaponCameraOffset = this.baseCameraOffset.clone().add(WEAPON_CAMERA_OFFSET);
@@ -525,6 +530,7 @@ export class PlayerControls {
           const maxPitch = Math.PI / 3;
           const minPitch = -Math.PI / 8;
           this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
+          this.breakAutoAimFromManualCamera();
           this.safePreventDefault(event);
           break;
         }
@@ -999,6 +1005,8 @@ export class PlayerControls {
       const throwItemId = this.mobileThrowAimItemId;
       this.mobileThrowAimItemId = null;
       this.isFireHeld = false;
+    this.autoAimBreakUntilRelease = false;
+    this.autoAimCurrentPitch = 0;
       this.setAiming(false);
       const hand = this.getInventoryItemHand?.(throwItemId) || 'right';
       const direction = this.getAimDirection(true);
@@ -3199,7 +3207,7 @@ export class PlayerControls {
   attemptFireProjectileForHand(hand = 'right') {
     const equippedWeapon = this.getEquippedWeapon(hand);
     if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
-      const direction = this.getAimDirection(true);
+      const direction = this.getAutoAimDirection(equippedWeapon) ?? this.getAimDirection(true);
       const position = this.getProjectileSpawnPosition(direction);
       const fired = this.throwBomb(position, direction);
       if (fired) {
@@ -3212,7 +3220,8 @@ export class PlayerControls {
     const gun = this.getEquippedGun(hand);
     const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
-    const direction = usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow);
+    const autoAimDirection = this.getAutoAimDirection(gun);
+    const direction = autoAimDirection ?? (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow));
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
@@ -3280,7 +3289,7 @@ export class PlayerControls {
 
   shouldHoldToFire(hand = 'right') {
     const weapon = this.getEquippedWeapon(hand);
-    return weapon?.itemId === 'bow' || weapon?.itemId === 'bomb';
+    return weapon?.itemId === 'bow' || weapon?.itemId === 'bomb' || weapon?.itemId === 'iceGun';
   }
 
   isProjectileWeapon(weapon) {
@@ -3295,8 +3304,11 @@ export class PlayerControls {
     }
     if (active) {
       this.aimReleaseHoldUntil = null;
+      this.autoAimBreakUntilRelease = false;
     } else {
       this.aimReleaseHoldUntil = performance.now() + this.aimReleaseDelayMs;
+      this.autoAimBreakUntilRelease = false;
+      this.autoAimCurrentPitch = 0;
     }
   }
 
@@ -3318,8 +3330,131 @@ export class PlayerControls {
     if (!this.isFireHeld || !this.shouldHoldToFire() || this.isWeaponShoulderCameraActive()) return;
     const weapon = this.getEquippedWeapon();
     const invertForBow = weapon?.itemId === 'bow';
-    const direction = this.getAimDirection(invertForBow);
+    const autoAimDirection = this.getAutoAimDirection(weapon);
+    const direction = autoAimDirection ?? this.getAimDirection(invertForBow);
     this.alignPlayerToDirection(direction);
+    if (autoAimDirection) {
+      this.applyAutoAimCameraDirection(autoAimDirection);
+    }
+  }
+
+  applyAutoAimCameraDirection(direction) {
+    if (!direction) return;
+    const d = direction.clone().normalize();
+    this.yaw = Math.atan2(d.x, d.z);
+    this.pitch = Math.asin(THREE.MathUtils.clamp(d.y, -0.95, 0.95));
+  }
+
+  breakAutoAimFromManualCamera() {
+    if (!this.isAiming || !this.isFireHeld) return;
+    this.autoAimBreakUntilRelease = true;
+  }
+
+  getAutoAimDirection(weapon) {
+    if (!weapon || this.autoAimBreakUntilRelease || !this.playerModel) return null;
+    if (!(weapon.itemId === 'bow' || weapon.itemId === 'iceGun' || weapon.itemId === 'bomb')) return null;
+
+    const maxRange = weapon.itemId === 'iceGun' ? AUTO_AIM_ICE_RANGE_M : AUTO_AIM_RANGE_M;
+    const target = this.findAutoAimTarget(maxRange);
+    if (!target) {
+      this.autoAimCurrentPitch = 0;
+      return null;
+    }
+
+    const eyePos = this.playerModel.position.clone().add(new THREE.Vector3(0, 0.9, 0));
+    const targetPos = target.position.clone();
+    const baseDirection = targetPos.sub(eyePos);
+    if (baseDirection.lengthSq() <= 0.0001) return null;
+
+    if (weapon.itemId === 'bow' || weapon.itemId === 'bomb') {
+      const horizontal = Math.hypot(baseDirection.x, baseDirection.z);
+      const targetPitch = Math.atan2(baseDirection.y, Math.max(0.001, horizontal));
+      const lowPitch = targetPitch - 0.2;
+      const highPitch = targetPitch + 0.2;
+      const delta = Math.max(this.deltaSeconds || 0.016, 0.001) * AUTO_AIM_RAMP_SPEED;
+      this.autoAimCurrentPitch = THREE.MathUtils.lerp(this.autoAimCurrentPitch || lowPitch, highPitch, Math.min(delta, 1));
+      const yaw = Math.atan2(baseDirection.x, baseDirection.z);
+      return new THREE.Vector3(
+        Math.sin(yaw) * Math.cos(this.autoAimCurrentPitch),
+        Math.sin(this.autoAimCurrentPitch),
+        Math.cos(yaw) * Math.cos(this.autoAimCurrentPitch)
+      ).normalize();
+    }
+
+    this.autoAimCurrentPitch = 0;
+    return baseDirection.normalize();
+  }
+
+
+  resolveMonsterActorForAutoAim(monster) {
+    if (!monster || typeof monster !== 'object') return null;
+    if (monster.model?.position) return monster;
+    if (monster.character?.model?.position) return monster.character;
+    if (monster.monster?.model?.position) return monster.monster;
+    if (monster.entity?.model?.position) return monster.entity;
+    return null;
+  }
+
+  collectAutoAimMonsters() {
+    const monsterSources = [
+      appContext?.entities?.monsters,
+      window?.monsters,
+      window?.game?.monsters,
+      window?.runtimeContext?.entities?.monsters
+    ];
+    const normalize = (source, visited = new WeakSet()) => {
+      if (!source) return [];
+      if (Array.isArray(source)) return source.flatMap((entry) => normalize(entry, visited));
+      if (source instanceof Set) return Array.from(source).flatMap((entry) => normalize(entry, visited));
+      if (source instanceof Map) return Array.from(source.values()).flatMap((entry) => normalize(entry, visited));
+      if (typeof source === 'object') {
+        if (visited.has(source)) return [];
+        visited.add(source);
+        if (this.resolveMonsterActorForAutoAim(source)) return [source];
+        return Object.values(source).flatMap((entry) => normalize(entry, visited));
+      }
+      return [];
+    };
+    const out = [];
+    const seen = new Set();
+    for (const source of monsterSources) {
+      for (const raw of normalize(source)) {
+        const monster = this.resolveMonsterActorForAutoAim(raw);
+        const model = monster?.model;
+        if (!model?.position || monster?.isDead) continue;
+        const key = monster.id || model.uuid || model.id;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(model);
+      }
+    }
+    return out;
+  }
+
+  findAutoAimTarget(maxRange) {
+    const playerPos = this.playerModel?.position;
+    if (!playerPos) return null;
+    const closestIn = (entries) => {
+      let best = null;
+      let bestDist = maxRange;
+      for (const entry of entries) {
+        const pos = entry?.position;
+        if (!pos) continue;
+        const dist = playerPos.distanceTo(pos);
+        if (dist <= bestDist) {
+          best = entry;
+          bestDist = dist;
+        }
+      }
+      return best;
+    };
+
+    const monsters = this.collectAutoAimMonsters();
+    const animalsRaw = appContext?.entities?.animals || window?.animals || [];
+    const animals = animalsRaw.map((animal) => animal?.model || animal).filter((model) => model?.position && !model?.userData?.isDead);
+    const otherPlayers = Object.values(appContext?.entities?.otherPlayers || window?.otherPlayers || {}).map((entry) => entry?.model).filter((model) => model?.position);
+
+    return closestIn(monsters) || closestIn(animals) || closestIn(otherPlayers);
   }
 
   isWeaponShoulderCameraActive() {
@@ -3532,8 +3667,13 @@ export class PlayerControls {
         const maxPitch = Math.PI / 3;    // ~60° upward
         const minPitch = -Math.PI / 8;   // ~30° downward
         this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
+        this.breakAutoAimFromManualCamera();
       }
     });
+
+    this.domElement.addEventListener('wheel', () => {
+      this.breakAutoAimFromManualCamera();
+    }, { passive: true });
     
   
     document.addEventListener('keydown', (event) => {
@@ -3544,6 +3684,10 @@ export class PlayerControls {
   }
 
   updateEngagedMode() {
+    if ((this.isAiming || this.isFireHeld) && this.shouldHoldToFire()) {
+      this.setEngaged(false);
+      return;
+    }
     if (!this.playerModel) {
       this.setEngaged(false);
       return;
