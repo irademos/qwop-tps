@@ -3330,8 +3330,19 @@ export class PlayerControls {
     if (!this.isFireHeld || !this.shouldHoldToFire() || this.isWeaponShoulderCameraActive()) return;
     const weapon = this.getEquippedWeapon();
     const invertForBow = weapon?.itemId === 'bow';
-    const direction = this.getAutoAimDirection(weapon) ?? this.getAimDirection(invertForBow);
+    const autoAimDirection = this.getAutoAimDirection(weapon);
+    const direction = autoAimDirection ?? this.getAimDirection(invertForBow);
     this.alignPlayerToDirection(direction);
+    if (autoAimDirection) {
+      this.applyAutoAimCameraDirection(autoAimDirection);
+    }
+  }
+
+  applyAutoAimCameraDirection(direction) {
+    if (!direction) return;
+    const d = direction.clone().normalize();
+    this.yaw = Math.atan2(d.x, d.z);
+    this.pitch = Math.asin(THREE.MathUtils.clamp(d.y, -0.95, 0.95));
   }
 
   breakAutoAimFromManualCamera() {
@@ -3614,6 +3625,10 @@ export class PlayerControls {
         this.breakAutoAimFromManualCamera();
       }
     });
+
+    this.domElement.addEventListener('wheel', () => {
+      this.breakAutoAimFromManualCamera();
+    }, { passive: true });
     
   
     document.addEventListener('keydown', (event) => {
