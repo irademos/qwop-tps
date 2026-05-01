@@ -3351,7 +3351,9 @@ export class PlayerControls {
   }
 
   getAutoAimDirection(weapon) {
-    if (!weapon || this.autoAimBreakUntilRelease || !this.playerModel) return null;
+    if (!weapon || !this.playerModel) return null;
+    const shouldRespectManualBreak = this.isAiming || this.isFireHeld;
+    if (shouldRespectManualBreak && this.autoAimBreakUntilRelease) return null;
     if (!(weapon.itemId === 'bow' || weapon.itemId === 'iceGun' || weapon.itemId === 'bomb')) return null;
 
     const maxRange = weapon.itemId === 'iceGun' ? AUTO_AIM_ICE_RANGE_M : AUTO_AIM_RANGE_M;
