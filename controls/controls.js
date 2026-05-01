@@ -744,13 +744,16 @@ export class PlayerControls {
     if (!this.swordSpinChargeActive) return false;
     this.swordSpinChargeActive = false;
     const heldForMs = Math.max(0, performance.now() - this.swordSpinChargeStartAt);
-    const chargeRatio = Math.max(0, Math.min(1, Math.min(SWORD_SPIN_CHARGE_MAX_HOLD_MS, heldForMs) / SWORD_SPIN_CHARGE_MAX_HOLD_MS));
+    const clampedHeldForMs = Math.min(SWORD_SPIN_CHARGE_MAX_HOLD_MS, heldForMs);
+    const chargeRatio = Math.max(0, Math.min(1, clampedHeldForMs / SWORD_SPIN_CHARGE_MAX_HOLD_MS));
     const spinAction = this.playerModel?.userData?.actions?.swordSpin;
     if (spinAction) spinAction.timeScale = 1;
+    const swordSpinBaseHitTimeMs = 800;
+    const swordSpinChargeHitDelayMs = clampedHeldForMs * (1 - SWORD_SPIN_WINDUP_SPEED);
     if (this.playerModel?.userData?.attack?.name === 'swordSpin') {
       this.playerModel.userData.attack.overrides = {
         ...(this.playerModel.userData.attack.overrides || {}),
-        hitTime: 800,
+        hitTime: swordSpinBaseHitTimeMs + swordSpinChargeHitDelayMs,
         hitWindow: 300,
         damage: 3 + (3 * chargeRatio),
         range: 3 + (3 * chargeRatio)

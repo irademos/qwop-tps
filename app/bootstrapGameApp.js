@@ -7678,10 +7678,11 @@ async function initCore(runtimeContext) {
       : activeAttack.name;
     const cfg = ATTACKS[attackName];
     if (!cfg) return;
+    const attackCfg = activeAttack.overrides ? { ...cfg, ...activeAttack.overrides } : cfg;
 
     const elapsed = Date.now() - activeAttack.start;
-    const visualWindowMs = Math.max(cfg.hitWindow * ATTACK_WINDOW_VISUAL_MULTIPLIER, 220);
-    const inHitWindow = elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + visualWindowMs;
+    const visualWindowMs = Math.max(attackCfg.hitWindow * ATTACK_WINDOW_VISUAL_MULTIPLIER, 220);
+    const inHitWindow = elapsed >= attackCfg.hitTime && elapsed <= attackCfg.hitTime + visualWindowMs;
 
     if (!inHitWindow) {
       if (attackWindowMists.length) {
@@ -7696,7 +7697,7 @@ async function initCore(runtimeContext) {
       return;
     }
 
-    const attackRegion = cfg.region || 'around';
+    const attackRegion = attackCfg.region || 'around';
     const expectedShape = attackRegion === 'forward' ? 'box' : 'circle';
 
     if (!attackWindowMists.length || attackWindowMists[0]?.shape !== expectedShape) {
@@ -7730,7 +7731,7 @@ async function initCore(runtimeContext) {
 
     const entry = attackWindowMists[0];
     const mesh = entry.mesh;
-    const range = Math.max(0.4, cfg.range);
+    const range = Math.max(0.4, attackCfg.range);
     mesh.position.copy(playerModel.position);
     mesh.position.y += ATTACK_WINDOW_MIST_HEIGHT * 0.5;
 
