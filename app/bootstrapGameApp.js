@@ -42,6 +42,7 @@ import { createHomeSystem } from '../home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
+import { createStaticBoxColliderForObject, removeStaticBoxCollider, syncStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
 import { configureSpawnAlignment, getSpawnPosition, getSpawnY } from '../spawnUtils.js';
 import { createLocationProvider } from '../location.js';
 import { fetchOSMData } from '../osmClient.js';
@@ -10479,6 +10480,11 @@ async function initCore(runtimeContext) {
     selectedNoteId: null,
     cameraOffset: new THREE.Vector3(0, 4, 8)
   };
+  const buildInteractionBtn = document.createElement('button');
+  buildInteractionBtn.type = 'button';
+  buildInteractionBtn.textContent = 'Read Note';
+  buildInteractionBtn.style.cssText = 'position:fixed;left:50%;bottom:31%;transform:translateX(-50%);z-index:1200;display:none;padding:8px 12px;';
+  document.body.appendChild(buildInteractionBtn);
   const BUILD_BUCKET_PRECISION = 4;
   const buildUi = document.createElement('div');
   buildUi.style.cssText = 'position:fixed;left:50%;bottom:20%;transform:translateX(-50%);z-index:1200;display:none;gap:8px;flex-direction:column;align-items:center;';
@@ -10488,12 +10494,21 @@ async function initCore(runtimeContext) {
   const buildUpBtn = buildUi.querySelector('#build-up-btn');
   const buildDownBtn = buildUi.querySelector('#build-down-btn');
   let buildVerticalInput = 0;
+  const buildHorizontalKeys = new Set();
   window.addEventListener('keydown', (event) => {
     if (!buildState.placing) return;
+    const key = event.key.toLowerCase();
+    if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+      buildHorizontalKeys.add(key);
+    }
     if (event.key === 'ArrowUp') buildVerticalInput = 1;
     if (event.key === 'ArrowDown') buildVerticalInput = -1;
   });
   window.addEventListener('keyup', (event) => {
+    const key = event.key.toLowerCase();
+    if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+      buildHorizontalKeys.delete(key);
+    }
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') buildVerticalInput = 0;
   });
   const toBucketKey = (value) => {
@@ -10517,8 +10532,10 @@ async function initCore(runtimeContext) {
         mesh.userData.buildOwner = record.ownerId || null;
         mesh.userData.buildType = record.type || 'block';
         mesh.userData.noteText = record.noteText || '';
+        const colliderEntry = createStaticBoxColliderForObject(mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
+        mesh.userData.staticColliderEntry = colliderEntry || null;
         scene.add(mesh);
-        buildState.records.set(id, { mesh, ...record });
+        buildState.records.set(id, { mesh, colliderEntry, ...record });
       });
     });
   };
@@ -10535,7 +10552,8 @@ async function initCore(runtimeContext) {
     const p = buildState.placing.mesh.position;
     const record = { type: buildState.placing.type, x: p.x, y: p.y, z: p.z, health: 100, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local' };
     await set(idRef, record);
-    buildState.records.set(idRef.key, { ...record, mesh: buildState.placing.mesh });
+    const colliderEntry = createStaticBoxColliderForObject(buildState.placing.mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
+    buildState.records.set(idRef.key, { ...record, mesh: buildState.placing.mesh, colliderEntry });
     buildState.placing.mesh.userData.buildRecordId = idRef.key;
     buildState.placing.mesh.userData.noteText = record.noteText;
     buildState.placing = null;
@@ -10777,6 +10795,30 @@ async function initCore(runtimeContext) {
   window.loadTerrainStampRegressionScene = () => appState.loadTerrainStampRegressionScene();
   window.setTerrainStampDebugOverlay = (enabled, options) => appState.setTerrainStampDebugOverlay(enabled, options);
   window.getTerrainStampDebugSample = (x, z, options) => appState.getTerrainStampDebugSample(x, z, options);
+  const showNoteInteraction = async () => {
+    if (!buildState.selectedNoteId) return;
+    const record = buildState.records.get(buildState.selectedNoteId);
+    if (!record) return;
+    const isOwner = record.ownerId === (multiplayer?.peer?.id || 'local');
+    window.alert(`Note: ${record.noteText || '(empty)'}`);
+    if (!isOwner) return;
+    const action = window.prompt('Type edit or delete to manage your post');
+    if (action === 'delete') {
+      const fix = getLatestLocationFix?.();
+      if (fix) await remove(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`));
+      scene.remove(record.mesh);
+      removeStaticBoxCollider(record.colliderEntry || record.mesh?.userData?.staticColliderEntry);
+      buildState.records.delete(buildState.selectedNoteId);
+    } else if (action === 'edit') {
+      const text = window.prompt('Edit note', record.noteText || '');
+      if (text != null) {
+        const fix = getLatestLocationFix?.();
+        if (fix) await update(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`), { noteText: text });
+        record.noteText = text;
+      }
+    }
+  };
+  buildInteractionBtn.addEventListener('click', () => { void showNoteInteraction(); });
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -11076,11 +11118,19 @@ async function initCore(runtimeContext) {
     }
     if (buildState.placing) {
       const moveSpeed = 3 * frameDelta;
-      const keys = playerControls?.keysPressed || new Set();
-      if (keys.has('w')) buildState.placing.mesh.position.z += moveSpeed;
-      if (keys.has('s')) buildState.placing.mesh.position.z -= moveSpeed;
-      if (keys.has('a')) buildState.placing.mesh.position.x += moveSpeed;
-      if (keys.has('d')) buildState.placing.mesh.position.x -= moveSpeed;
+      const keys = buildHorizontalKeys;
+      const isMobileStickActive = Number.isFinite(playerControls?.joystickForce) && playerControls.joystickForce > 0.1;
+      if (isMobileStickActive) {
+        const dx = Math.cos(playerControls.joystickAngle || 0) * playerControls.joystickForce;
+        const dz = Math.sin(playerControls.joystickAngle || 0) * playerControls.joystickForce;
+        buildState.placing.mesh.position.x += dx * moveSpeed;
+        buildState.placing.mesh.position.z += dz * moveSpeed;
+      } else {
+        if (keys.has('w')) buildState.placing.mesh.position.z += moveSpeed;
+        if (keys.has('s')) buildState.placing.mesh.position.z -= moveSpeed;
+        if (keys.has('a')) buildState.placing.mesh.position.x += moveSpeed;
+        if (keys.has('d')) buildState.placing.mesh.position.x -= moveSpeed;
+      }
       if (buildVerticalInput !== 0) buildState.placing.mesh.position.y += buildVerticalInput * moveSpeed;
       const followTarget = buildState.placing.mesh.position;
       const desiredCameraPos = followTarget.clone().add(buildState.cameraOffset);
@@ -11089,14 +11139,22 @@ async function initCore(runtimeContext) {
     } else {
       const playerPos = playerModel?.position;
       if (playerPos) {
+        let closestNoteDistance = Number.POSITIVE_INFINITY;
+        let closestInteractDistance = Number.POSITIVE_INFINITY;
+        const closestFriendly = friendlyNpcManager?.getNearestFriendly?.(playerPos);
+        if (closestFriendly?.distance != null) closestInteractDistance = Math.min(closestInteractDistance, closestFriendly.distance);
+        closestInteractDistance = Math.min(closestInteractDistance, 1.2);
         buildState.selectedNoteId = null;
         buildState.records.forEach((record, id) => {
           if (record.type !== 'note' || !record.mesh) return;
           const distance = record.mesh.position.distanceTo(playerPos);
-          if (distance < 3) {
+          if (distance < 3 && distance < closestNoteDistance) {
+            closestNoteDistance = distance;
             buildState.selectedNoteId = id;
           }
         });
+        const shouldShow = Boolean(buildState.selectedNoteId) && closestNoteDistance <= closestInteractDistance;
+        buildInteractionBtn.style.display = shouldShow ? 'block' : 'none';
       }
     }
     if (craftState.swirl?.line) {
@@ -12125,28 +12183,7 @@ async function initCore(runtimeContext) {
   subscribeBuildsForCurrentLocation();
   window.addEventListener('keydown', async (event) => {
     if (event.key.toLowerCase() !== 'e' || !buildState.selectedNoteId) return;
-    const record = buildState.records.get(buildState.selectedNoteId);
-    if (!record) return;
-    const isOwner = record.ownerId === (multiplayer?.peer?.id || 'local');
-    window.alert(`Note: ${record.noteText || '(empty)'}`);
-    if (isOwner) {
-      const action = window.prompt('Type edit or delete to manage your post');
-      if (action === 'delete') {
-        const fix = getLatestLocationFix?.();
-        if (fix) {
-          await remove(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`));
-        }
-        scene.remove(record.mesh);
-        buildState.records.delete(buildState.selectedNoteId);
-      } else if (action === 'edit') {
-        const text = window.prompt('Edit note', record.noteText || '');
-        if (text != null) {
-          const fix = getLatestLocationFix?.();
-          if (fix) await update(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`), { noteText: text });
-          record.noteText = text;
-        }
-      }
-    }
+    await showNoteInteraction();
   });
   animate();
 
