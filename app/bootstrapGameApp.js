@@ -103,6 +103,8 @@ import { getAttackTypes } from '../items/melee.js';
 import { exposeDebugGlobals } from '../src/runtime/exposeDebugGlobals.js';
 import { claimAchievement, getAchievementView, mergeAchievementState, recordAchievementProgress } from '../achievements.js';
 import { getDistanceUnitPreference, setDistanceUnitPreference } from '../distanceUnits.js';
+import { db } from '../firebase-init.js';
+import { onValue, push, ref, remove, set, update } from 'firebase/database';
 
 import {
   clearStoredPin,
@@ -4787,6 +4789,7 @@ async function initCore(runtimeContext) {
     || isSaltItem(itemId)
     || isSauteedMushroomsItem(itemId);
   const isPotionItem = (itemId) => potionItemIds.has(itemId);
+  const buildableItemIds = new Set(['wood']);
   const getInventoryItemActions = (itemId) => {
     if (isFoodItem(itemId)) {
       return ['drop', 'eat'];
@@ -4799,6 +4802,9 @@ async function initCore(runtimeContext) {
     }
     if (isZombieBrainsItem(itemId)) {
       return ['drop', 'info'];
+    }
+    if (buildableItemIds.has(itemId)) {
+      return ['drop', 'build'];
     }
     return ['drop'];
   };
@@ -10465,6 +10471,71 @@ async function initCore(runtimeContext) {
     debugState.lastError = error;
   };
 
+  const buildState = {
+    mode: null,
+    placing: null,
+    records: new Map(),
+    selectedNoteId: null
+  };
+  const BUILD_BUCKET_PRECISION = 4;
+  const buildUi = document.createElement('div');
+  buildUi.style.cssText = 'position:fixed;bottom:88px;right:12px;z-index:1200;display:none;gap:8px;flex-direction:column;';
+  buildUi.innerHTML = '<button id="build-confirm-btn" style="padding:10px 14px;">Build</button><div style="display:flex;gap:6px;"><button id="build-up-btn">⬆</button><button id="build-down-btn">⬇</button></div>';
+  document.body.appendChild(buildUi);
+  const buildConfirmBtn = buildUi.querySelector('#build-confirm-btn');
+  const buildUpBtn = buildUi.querySelector('#build-up-btn');
+  const buildDownBtn = buildUi.querySelector('#build-down-btn');
+  let buildVerticalInput = 0;
+  window.addEventListener('keydown', (event) => {
+    if (!buildState.placing) return;
+    if (event.key === 'ArrowUp') buildVerticalInput = 1;
+    if (event.key === 'ArrowDown') buildVerticalInput = -1;
+  });
+  window.addEventListener('keyup', (event) => {
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') buildVerticalInput = 0;
+  });
+  const onBuildLatLonPath = (lat, lon) => `worldBuilds/${lat.toFixed(BUILD_BUCKET_PRECISION)}_${lon.toFixed(BUILD_BUCKET_PRECISION)}`;
+  const subscribeBuildsForCurrentLocation = () => {
+    const fix = getLatestLocationFix?.();
+    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
+    onValue(ref(db, onBuildLatLonPath(fix.lat, fix.lon)), (snapshot) => {
+      const value = snapshot.val() || {};
+      Object.entries(value).forEach(([id, record]) => {
+        if (buildState.records.has(id) || !record) return;
+        const mesh = record.type === 'note'
+          ? new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.3, 0.15), new THREE.MeshStandardMaterial({ color: 0x8b5a2b }))
+          : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
+        mesh.position.set(record.x || 0, record.y || 0, record.z || 0);
+        mesh.userData.buildRecordId = id;
+        mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : 100;
+        mesh.userData.buildOwner = record.ownerId || null;
+        mesh.userData.buildType = record.type || 'block';
+        mesh.userData.noteText = record.noteText || '';
+        scene.add(mesh);
+        buildState.records.set(id, { mesh, ...record });
+      });
+    });
+  };
+  buildUpBtn?.addEventListener('pointerdown', () => { buildVerticalInput = 1; });
+  buildDownBtn?.addEventListener('pointerdown', () => { buildVerticalInput = -1; });
+  const resetVertical = () => { buildVerticalInput = 0; };
+  buildUpBtn?.addEventListener('pointerup', resetVertical);
+  buildDownBtn?.addEventListener('pointerup', resetVertical);
+  buildConfirmBtn?.addEventListener('click', async () => {
+    if (!buildState.placing) return;
+    const fix = getLatestLocationFix?.();
+    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
+    const idRef = push(ref(db, onBuildLatLonPath(fix.lat, fix.lon)));
+    const p = buildState.placing.mesh.position;
+    const record = { type: buildState.placing.type, x: p.x, y: p.y, z: p.z, health: 100, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local' };
+    await set(idRef, record);
+    buildState.records.set(idRef.key, { ...record, mesh: buildState.placing.mesh });
+    buildState.placing.mesh.userData.buildRecordId = idRef.key;
+    buildState.placing.mesh.userData.noteText = record.noteText;
+    buildState.placing = null;
+    buildUi.style.display = 'none';
+    removeFromInventory('wood', 1);
+  });
   const appState = {
     getPlayerName: () => playerName,
     setPlayerName: (name) => {
@@ -10555,6 +10626,25 @@ async function initCore(runtimeContext) {
     dropInventoryItem: (itemId) => dropInventoryItem(itemId),
     eatInventoryItem: (itemId) => eatInventoryItem(itemId),
     useInventoryItem: (itemId) => useInventoryItem(itemId),
+    startBuildFlow: async (itemId) => {
+      if (itemId !== 'wood') return;
+      const choice = window.prompt('Type "block" to build a block or "note" for Note Post', 'block');
+      if (!choice) return;
+      let noteText = '';
+      const type = choice.toLowerCase().includes('note') ? 'note' : 'block';
+      if (type === 'note') {
+        noteText = window.prompt('Enter note text') || '';
+        if (!noteText.trim()) return;
+      }
+      const pos = playerModel?.position?.clone?.() || new THREE.Vector3();
+      const mesh = type === 'note'
+        ? new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.3, 0.15), new THREE.MeshStandardMaterial({ color: 0x8b5a2b }))
+        : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
+      mesh.position.copy(pos).add(new THREE.Vector3(0, 1.2, 1.2));
+      scene.add(mesh);
+      buildState.placing = { mesh, type, noteText };
+      buildUi.style.display = 'flex';
+    },
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
     storeHomeStorageItem: (itemId) => storeHomeStorageItem(itemId),
@@ -10972,6 +11062,27 @@ async function initCore(runtimeContext) {
       }
       if (!playerControls?.isClimbing) {
         climbedSinceGrounded = false;
+      }
+    }
+    if (buildState.placing) {
+      const moveSpeed = 3 * frameDelta;
+      const keys = playerControls?.keysPressed || new Set();
+      if (keys.has('w')) buildState.placing.mesh.position.z += moveSpeed;
+      if (keys.has('s')) buildState.placing.mesh.position.z -= moveSpeed;
+      if (keys.has('a')) buildState.placing.mesh.position.x += moveSpeed;
+      if (keys.has('d')) buildState.placing.mesh.position.x -= moveSpeed;
+      if (buildVerticalInput !== 0) buildState.placing.mesh.position.y += buildVerticalInput * moveSpeed;
+    } else {
+      const playerPos = playerModel?.position;
+      if (playerPos) {
+        buildState.selectedNoteId = null;
+        buildState.records.forEach((record, id) => {
+          if (record.type !== 'note' || !record.mesh) return;
+          const distance = record.mesh.position.distanceTo(playerPos);
+          if (distance < 3) {
+            buildState.selectedNoteId = id;
+          }
+        });
       }
     }
     if (craftState.swirl?.line) {
@@ -11997,6 +12108,32 @@ async function initCore(runtimeContext) {
   canProcessIncomingPeerData = true;
   processIncomingPeerDataQueue();
 
+  subscribeBuildsForCurrentLocation();
+  window.addEventListener('keydown', async (event) => {
+    if (event.key.toLowerCase() !== 'e' || !buildState.selectedNoteId) return;
+    const record = buildState.records.get(buildState.selectedNoteId);
+    if (!record) return;
+    const isOwner = record.ownerId === (multiplayer?.peer?.id || 'local');
+    window.alert(`Note: ${record.noteText || '(empty)'}`);
+    if (isOwner) {
+      const action = window.prompt('Type edit or delete to manage your post');
+      if (action === 'delete') {
+        const fix = getLatestLocationFix?.();
+        if (fix) {
+          await remove(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`));
+        }
+        scene.remove(record.mesh);
+        buildState.records.delete(buildState.selectedNoteId);
+      } else if (action === 'edit') {
+        const text = window.prompt('Edit note', record.noteText || '');
+        if (text != null) {
+          const fix = getLatestLocationFix?.();
+          if (fix) await update(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`), { noteText: text });
+          record.noteText = text;
+        }
+      }
+    }
+  });
   animate();
 
   return runtimeContext;
