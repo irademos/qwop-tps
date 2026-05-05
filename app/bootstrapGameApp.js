@@ -6630,9 +6630,10 @@ async function initCore(runtimeContext) {
 
   let mapViewEnabled = false;
   let playerDead = false;
+  let isBuildPlacementActive = false;
   const updateControlAvailability = () => {
     if (!playerControls) return;
-    playerControls.enabled = !mapViewEnabled && !playerDead && !levelUpSelectionActive;
+    playerControls.enabled = !mapViewEnabled && !playerDead && !levelUpSelectionActive && !isBuildPlacementActive;
   };
   const updateEnergyEffects = () => {
     if (!playerControls) return;
@@ -10475,11 +10476,12 @@ async function initCore(runtimeContext) {
     mode: null,
     placing: null,
     records: new Map(),
-    selectedNoteId: null
+    selectedNoteId: null,
+    cameraOffset: new THREE.Vector3(0, 4, 8)
   };
   const BUILD_BUCKET_PRECISION = 4;
   const buildUi = document.createElement('div');
-  buildUi.style.cssText = 'position:fixed;bottom:88px;right:12px;z-index:1200;display:none;gap:8px;flex-direction:column;';
+  buildUi.style.cssText = 'position:fixed;left:50%;bottom:20%;transform:translateX(-50%);z-index:1200;display:none;gap:8px;flex-direction:column;align-items:center;';
   buildUi.innerHTML = '<button id="build-confirm-btn" style="padding:10px 14px;">Build</button><div style="display:flex;gap:6px;"><button id="build-up-btn">⬆</button><button id="build-down-btn">⬇</button></div>';
   document.body.appendChild(buildUi);
   const buildConfirmBtn = buildUi.querySelector('#build-confirm-btn');
@@ -10494,7 +10496,11 @@ async function initCore(runtimeContext) {
   window.addEventListener('keyup', (event) => {
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') buildVerticalInput = 0;
   });
-  const onBuildLatLonPath = (lat, lon) => `worldBuilds/${lat.toFixed(BUILD_BUCKET_PRECISION)}_${lon.toFixed(BUILD_BUCKET_PRECISION)}`;
+  const toBucketKey = (value) => {
+    const scaled = Math.round(value * (10 ** BUILD_BUCKET_PRECISION));
+    return scaled < 0 ? `m${Math.abs(scaled)}` : `p${scaled}`;
+  };
+  const onBuildLatLonPath = (lat, lon) => `worldBuilds/${toBucketKey(lat)}_${toBucketKey(lon)}`;
   const subscribeBuildsForCurrentLocation = () => {
     const fix = getLatestLocationFix?.();
     if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
@@ -10533,7 +10539,9 @@ async function initCore(runtimeContext) {
     buildState.placing.mesh.userData.buildRecordId = idRef.key;
     buildState.placing.mesh.userData.noteText = record.noteText;
     buildState.placing = null;
+    isBuildPlacementActive = false;
     buildUi.style.display = 'none';
+    updateControlAvailability();
     removeFromInventory('wood', 1);
   });
   const appState = {
@@ -10643,7 +10651,9 @@ async function initCore(runtimeContext) {
       mesh.position.copy(pos).add(new THREE.Vector3(0, 1.2, 1.2));
       scene.add(mesh);
       buildState.placing = { mesh, type, noteText };
+      isBuildPlacementActive = true;
       buildUi.style.display = 'flex';
+      updateControlAvailability();
     },
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
@@ -11054,7 +11064,7 @@ async function initCore(runtimeContext) {
       updatePickupTiles(playerPosition);
     }
 
-    if (!mapViewEnabled) {
+    if (!mapViewEnabled && !buildState.placing) {
       playerControls.update();
       if (playerControls?.isClimbing && !climbedSinceGrounded) {
         climbedSinceGrounded = true;
@@ -11072,6 +11082,10 @@ async function initCore(runtimeContext) {
       if (keys.has('a')) buildState.placing.mesh.position.x += moveSpeed;
       if (keys.has('d')) buildState.placing.mesh.position.x -= moveSpeed;
       if (buildVerticalInput !== 0) buildState.placing.mesh.position.y += buildVerticalInput * moveSpeed;
+      const followTarget = buildState.placing.mesh.position;
+      const desiredCameraPos = followTarget.clone().add(buildState.cameraOffset);
+      camera.position.lerp(desiredCameraPos, 0.15);
+      camera.lookAt(followTarget);
     } else {
       const playerPos = playerModel?.position;
       if (playerPos) {
