@@ -1366,6 +1366,7 @@ function bindEvents() {
         context.appState?.eatInventoryItem?.(selectedInventoryId);
       } else if (action === 'build') {
         context.appState?.startBuildFlow?.(selectedInventoryId);
+        closeInventoryOverlay();
       } else if (action === 'info') {
         if (selectedInventoryId === 'zombie_brains' && elements.inventoryInfoModal && elements.inventoryInfoText) {
           elements.inventoryInfoText.textContent = 'Zombie Brains are unstable remains from undead creatures. They pulse with strange energy. Maybe you can craft them into something useful at your home crafting table.';
