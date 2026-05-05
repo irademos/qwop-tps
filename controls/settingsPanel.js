@@ -286,7 +286,10 @@ function buildInventoryPanel() {
   const eatButton = createElement('button', 'settings-button', 'Eat');
   eatButton.type = 'button';
   eatButton.dataset.inventoryAction = 'eat';
-  actions.append(dropButton, infoButton, useButton, equipButton, eatButton);
+  const buildButton = createElement('button', 'settings-button', 'Build');
+  buildButton.type = 'button';
+  buildButton.dataset.inventoryAction = 'build';
+  actions.append(dropButton, infoButton, useButton, equipButton, eatButton, buildButton);
   details.append(detailsText, actions);
   panelEl.append(grid, emptyState, details);
 
@@ -317,6 +320,7 @@ function buildInventoryPanel() {
   elements.inventoryUseButton = useButton;
   elements.inventoryEquipButton = equipButton;
   elements.inventoryEatButton = eatButton;
+  elements.inventoryBuildButton = buildButton;
   elements.inventoryInfoModal = infoModal;
   elements.inventoryInfoText = infoText;
 
@@ -1318,6 +1322,10 @@ function renderInventory() {
       const canEat = itemActions.includes('eat');
       elements.inventoryEatButton.style.display = canEat ? 'inline-flex' : 'none';
     }
+    if (elements.inventoryBuildButton) {
+      const canBuild = itemActions.includes('build');
+      elements.inventoryBuildButton.style.display = canBuild ? 'inline-flex' : 'none';
+    }
     if (elements.inventoryDetailsContainer) {
       if (selectedTile && selectedTile.parentElement === elements.inventoryGrid) {
         selectedTile.insertAdjacentElement('afterend', elements.inventoryDetailsContainer);
@@ -1356,6 +1364,8 @@ function bindEvents() {
         context.appState?.unequipInventoryItem?.(selectedInventoryId);
       } else if (action === 'eat') {
         context.appState?.eatInventoryItem?.(selectedInventoryId);
+      } else if (action === 'build') {
+        context.appState?.startBuildFlow?.(selectedInventoryId);
       } else if (action === 'info') {
         if (selectedInventoryId === 'zombie_brains' && elements.inventoryInfoModal && elements.inventoryInfoText) {
           elements.inventoryInfoText.textContent = 'Zombie Brains are unstable remains from undead creatures. They pulse with strange energy. Maybe you can craft them into something useful at your home crafting table.';
