@@ -1015,7 +1015,6 @@ export class PlayerControls {
       this.isFireHeld = false;
       this.autoAimBreakUntilRelease = false;
       this.autoAimCurrentPitch = 0;
-      this.autoAimCameraDirection = null;
       this.setAiming(false);
       const hand = this.getInventoryItemHand?.(throwItemId) || 'right';
       const autoAimDirection = this.getAutoAimDirection({ itemId: throwItemId, type: 'throw' });
@@ -3320,6 +3319,9 @@ export class PlayerControls {
       this.autoAimBreakUntilRelease = false;
       this.autoAimCameraDirection = null;
     } else {
+      if (this.autoAimCameraDirection) {
+        this.syncCameraOrbitToAutoAimDirection(this.autoAimCameraDirection);
+      }
       this.aimReleaseHoldUntil = performance.now() + this.aimReleaseDelayMs;
       this.autoAimBreakUntilRelease = false;
       this.autoAimCurrentPitch = 0;
@@ -3364,7 +3366,23 @@ export class PlayerControls {
     if (!direction) return;
     const d = direction.clone().normalize();
     this.autoAimCameraDirection = d;
-    this.yaw = Math.atan2(d.x, d.z);
+    this.syncCameraOrbitToAutoAimDirection(d);
+  }
+
+  syncCameraOrbitToAutoAimDirection(direction) {
+    if (!direction) return;
+    const d = direction.clone().normalize();
+    this.yaw = Math.atan2(-d.x, -d.z);
+
+    const horizontalAim = Math.max(0.001, Math.hypot(d.x, d.z));
+    const cameraOffset = this.cameraOffset || this.aimCameraOffset || this.baseCameraOffset;
+    const horizontalOffset = Math.max(0.001, Math.hypot(cameraOffset?.x ?? 0, cameraOffset?.z ?? 1));
+    const cameraOffsetY = cameraOffset?.y ?? 0;
+    const desiredVerticalOffset = -horizontalOffset * (d.y / horizontalAim);
+    const pitchRatio = THREE.MathUtils.clamp((desiredVerticalOffset - cameraOffsetY) / 5, -1, 1);
+    const maxPitch = Math.PI / 3;
+    const minPitch = -Math.PI / 8;
+    this.pitch = THREE.MathUtils.clamp(Math.asin(pitchRatio), minPitch, maxPitch);
   }
 
   breakAutoAimFromManualCamera() {
