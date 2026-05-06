@@ -122,7 +122,8 @@ export function updateProjectiles({
   multiplayer,
   monsters,
   sendMonsterAttack,
-  onMonsterHit
+  onMonsterHit,
+  onBuildHit
 }) {
   const localId = multiplayer?.getId?.();
   const isHost = !multiplayer || multiplayer.isHost;
@@ -257,6 +258,22 @@ export function updateProjectiles({
         removeProjectile(i);
         removed = true;
         break;
+      }
+    }
+
+    if (removed) continue;
+
+    if (typeof onBuildHit === 'function' && age >= 80) {
+      const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
+      const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
+      const attackTypes = getAttackTypes(
+        proj.userData.attackLabel || 'bowArrowProjectile',
+        proj.userData.attackTypes || ['projectile']
+      );
+      if (onBuildHit({ projectile: proj, projectileBox: projBox, damage, attackTypes })) {
+        if (proj.userData?.isArrow) playArrowBlockedSFX();
+        removeProjectile(i);
+        removed = true;
       }
     }
 

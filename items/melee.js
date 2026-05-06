@@ -93,6 +93,7 @@ export function updateMeleeAttacks({
   onMonsterHit,
   onSwordHit,
   onTorchHit,
+  onBuildHit,
   onEntityHit
 }) {
   const now = Date.now();
@@ -138,6 +139,15 @@ export function updateMeleeAttacks({
         && attacker.id === 'local'
         && attacker.model.userData?.equippedWeaponType === 'torch') {
         onTorchHit?.({ attacker, range: attackCfg.range });
+      }
+      if (attacker.id === 'local') {
+        hit = onBuildHit?.({
+          attacker,
+          range: attackCfg.range,
+          region: attackCfg.region || 'around',
+          damage: attackDamage,
+          attackTypes
+        }) || hit;
       }
       for (const target of players) {
         if (target === attacker) continue;
