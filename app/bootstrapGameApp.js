@@ -281,11 +281,11 @@ const REMOTE_TELEPORT_THRESHOLD_M = 25;
 const DISPLAY_SETTINGS_KEY = 'settings:display';
 const DISPLAY_PRESETS = {
   day: {
-    ambientIntensity: 0.6,
-    directionalIntensity: 1.1,
-    groundBrightness: 1.05,
-    buildingBrightness: 1.0,
-    skyBrightness: 1.1
+    ambientIntensity: 2.0,
+    directionalIntensity: 2.0,
+    groundBrightness: 1.6,
+    buildingBrightness: 1.6,
+    skyBrightness: 1.6
   },
   night: {
     ambientIntensity: 0.0,
