@@ -3,7 +3,7 @@
   "yOffset": 0.5,
   "materialBrightness": 10.0,
   "monsterProperties": {
-    "moveSpeed": 0.8,
+    "moveSpeed": 1.1,
     "animationSpeed": 0.8,
     "attackRange": 1.5,
     "healthBonusSegments": 0,
