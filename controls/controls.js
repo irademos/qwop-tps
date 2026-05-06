@@ -316,6 +316,7 @@ export class PlayerControls {
     this.isFireHeld = false;
     this.autoAimBreakUntilRelease = false;
     this.autoAimCurrentPitch = 0;
+    this.autoAimCameraDirection = null;
     this.baseCameraOffset = this.cameraOffset.clone();
     this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
     this.weaponCameraOffset = this.baseCameraOffset.clone().add(WEAPON_CAMERA_OFFSET);
@@ -2582,7 +2583,7 @@ export class PlayerControls {
         // this.playerModel.rotation.y = yawAngle;
       }
       if (this.isFireHeld && this.shouldHoldToFire() && !slideMomentumActive) {
-        const aimDirection = this.getAimDirection(true);
+        const aimDirection = this.autoAimCameraDirection ?? this.getAimDirection(true);
         yawAngle = Math.atan2(aimDirection.x, aimDirection.z);
       }
       if (this.engagedDirection) {
@@ -2816,6 +2817,9 @@ export class PlayerControls {
     }
 
     this.camera.position.copy(resolvedCameraPosition);
+    if (this.shouldUseAutoAimCameraDirection()) {
+      cameraLookTarget = resolvedCameraPosition.clone().add(this.autoAimCameraDirection);
+    }
     this.camera.lookAt(cameraLookTarget);
 
     if (this.playerModel && this.playerModel.userData.mixer) {
@@ -3313,10 +3317,15 @@ export class PlayerControls {
     if (active) {
       this.aimReleaseHoldUntil = null;
       this.autoAimBreakUntilRelease = false;
+      this.autoAimCameraDirection = null;
     } else {
+      if (this.autoAimCameraDirection) {
+        this.syncCameraOrbitToAutoAimDirection(this.autoAimCameraDirection);
+      }
       this.aimReleaseHoldUntil = performance.now() + this.aimReleaseDelayMs;
       this.autoAimBreakUntilRelease = false;
       this.autoAimCurrentPitch = 0;
+      this.autoAimCameraDirection = null;
     }
   }
 
@@ -3338,21 +3347,42 @@ export class PlayerControls {
     const weapon = this.mobileThrowAimItemId
       ? { itemId: this.mobileThrowAimItemId, type: 'throw' }
       : this.getEquippedWeapon();
-    if (!this.isFireHeld || (!this.mobileThrowAimItemId && !this.shouldHoldToFire()) || this.isWeaponShoulderCameraActive()) return;
+    if (!this.isFireHeld || (!this.mobileThrowAimItemId && !this.shouldHoldToFire())) {
+      this.autoAimCameraDirection = null;
+      return;
+    }
     const invertForBow = weapon?.itemId === 'bow';
     const autoAimDirection = this.getAutoAimDirection(weapon);
     const direction = autoAimDirection ?? this.getAimDirection(invertForBow);
     this.alignPlayerToDirection(direction);
     if (autoAimDirection) {
       this.applyAutoAimCameraDirection(autoAimDirection);
+    } else {
+      this.autoAimCameraDirection = null;
     }
   }
 
   applyAutoAimCameraDirection(direction) {
     if (!direction) return;
     const d = direction.clone().normalize();
-    this.yaw = Math.atan2(d.x, d.z);
-    this.pitch = Math.asin(THREE.MathUtils.clamp(d.y, -0.95, 0.95));
+    this.autoAimCameraDirection = d;
+    this.syncCameraOrbitToAutoAimDirection(d);
+  }
+
+  syncCameraOrbitToAutoAimDirection(direction) {
+    if (!direction) return;
+    const d = direction.clone().normalize();
+    this.yaw = Math.atan2(-d.x, -d.z);
+
+    const horizontalAim = Math.max(0.001, Math.hypot(d.x, d.z));
+    const cameraOffset = this.cameraOffset || this.aimCameraOffset || this.baseCameraOffset;
+    const horizontalOffset = Math.max(0.001, Math.hypot(cameraOffset?.x ?? 0, cameraOffset?.z ?? 1));
+    const cameraOffsetY = cameraOffset?.y ?? 0;
+    const desiredVerticalOffset = -horizontalOffset * (d.y / horizontalAim);
+    const pitchRatio = THREE.MathUtils.clamp((desiredVerticalOffset - cameraOffsetY) / 5, -1, 1);
+    const maxPitch = Math.PI / 3;
+    const minPitch = -Math.PI / 8;
+    this.pitch = THREE.MathUtils.clamp(Math.asin(pitchRatio), minPitch, maxPitch);
   }
 
   breakAutoAimFromManualCamera() {
@@ -3485,6 +3515,12 @@ export class PlayerControls {
     return !this.isEngaged && !this.isAiming;
   }
 
+  shouldUseAutoAimCameraDirection() {
+    return !!this.autoAimCameraDirection
+      && this.isFireHeld
+      && !this.autoAimBreakUntilRelease
+      && !this.isEngaged;
+  }
 
   alignPlayerToDirection(direction) {
     if (!this.playerModel) return;
