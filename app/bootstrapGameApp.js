@@ -228,11 +228,12 @@ const BOMB_BASE_DAMAGE = 6;
 const BOMB_KNOCKBACK_STRENGTH = 6;
 const BOMB_MIST_LIFETIME_MS = 8000;
 const BOMB_MIST_PARTICLE_COUNT = 35;
-const ATTACK_WINDOW_MIST_OPACITY = 0.52;
-const ATTACK_WINDOW_MIST_HEIGHT = 1.6;
-const ATTACK_WINDOW_VISUAL_MULTIPLIER = 1;
-const HIT_RIBBON_STREAK_COUNT = 9;
-const HIT_RIBBON_LIFETIME_MS = 260;
+const ATTACK_ARC_LIFETIME_MS = 520;
+const ATTACK_TRAIL_POINT_COUNT = 5;
+const ATTACK_TRAIL_STACK_COUNT = 3;
+const ATTACK_TRAIL_SAMPLE_MS = 28;
+const ATTACK_IMPACT_LIFETIME_MS = 220;
+const ATTACK_SHOCKWAVE_LIFETIME_MS = 360;
 const TORCH_ITEM_ID = 'torch';
 const TORCH_HEALTH_KEY = 'healths';
 const DEFAULT_TORCH_HEALTH = 100;
@@ -815,8 +816,13 @@ async function initCore(runtimeContext) {
   const projectiles = [];
   const iceMists = [];
   const bombMists = [];
-  const attackWindowMists = [];
-  const hitRibbonBursts = [];
+  const attackVisualState = {
+    active: null,
+    impacts: [],
+    shockwaves: [],
+    arcTexture: null,
+    impactTexture: null
+  };
   const treeFires = [];
   const ammoPickups = [];
   const droppedAmmoPickups = new Map();
@@ -1468,7 +1474,7 @@ async function initCore(runtimeContext) {
 
   const handleCombatEntityHit = ({ targetPosition }) => {
     if (!targetPosition) return;
-    spawnHitRibbonBurst(scene, targetPosition);
+    spawnImpactBurst(scene, targetPosition);
   };
 
   const removeRemotePlayer = (remoteId, reason = 'unknown') => {
@@ -5845,6 +5851,10 @@ async function initCore(runtimeContext) {
     const centerLocal = tree.userData?.boundsCenterLocal;
     if (centerLocal) {
       tempTreeCenter.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+      spawnImpactBurst(scene, tempTreeCenter);
+    } else {
+      tree.getWorldPosition(tempTreePosition);
+      spawnImpactBurst(scene, tempTreePosition);
     }
     tree.userData.swordHits = (tree.userData.swordHits ?? 0) + 1;
     tempTreeDirection.subVectors(tree.position, attacker.model.position);
@@ -5898,6 +5908,7 @@ async function initCore(runtimeContext) {
     } else {
       tree.getWorldPosition(tempTreePosition);
     }
+    spawnImpactBurst(scene, tempTreePosition);
     const treeFireRadius = Math.max(2.6, tree.userData?.boundsRadius ?? 0);
     const treeFire = createFire({
       particleCount: 36,
@@ -7686,163 +7697,300 @@ async function initCore(runtimeContext) {
     }
   }
 
-  function updateAttackWindowMist({ scene, playerModel }) {
-    if (!scene || !playerModel?.userData) return;
-    const activeAttack = playerModel.userData.attack;
-    if (!activeAttack?.name || !Number.isFinite(activeAttack.start)) {
-      if (attackWindowMists.length) {
-        for (let i = attackWindowMists.length - 1; i >= 0; i--) {
-          const entry = attackWindowMists[i];
-          if (entry?.mesh?.parent) {
-            entry.mesh.parent.remove(entry.mesh);
-          }
-          attackWindowMists.splice(i, 1);
-        }
-      }
-      return;
-    }
-
-    const attackName = activeAttack.name === 'mutantPunch' && playerModel.userData?.equippedWeaponType === 'sword'
-      ? 'swordSlash'
-      : activeAttack.name;
-    const cfg = ATTACKS[attackName];
-    if (!cfg) return;
-    const attackCfg = activeAttack.overrides ? { ...cfg, ...activeAttack.overrides } : cfg;
-
-    const elapsed = Date.now() - activeAttack.start;
-    const visualWindowMs = Math.max(attackCfg.hitWindow * ATTACK_WINDOW_VISUAL_MULTIPLIER, 220);
-    const inHitWindow = elapsed >= attackCfg.hitTime && elapsed <= attackCfg.hitTime + visualWindowMs;
-
-    if (!inHitWindow) {
-      if (attackWindowMists.length) {
-        for (let i = attackWindowMists.length - 1; i >= 0; i--) {
-          const entry = attackWindowMists[i];
-          if (entry?.mesh?.parent) {
-            entry.mesh.parent.remove(entry.mesh);
-          }
-          attackWindowMists.splice(i, 1);
-        }
-      }
-      return;
-    }
-
-    const attackRegion = attackCfg.region || 'around';
-    const expectedShape = attackRegion === 'forward' ? 'box' : 'circle';
-
-    if (!attackWindowMists.length || attackWindowMists[0]?.shape !== expectedShape) {
-      if (attackWindowMists.length) {
-        for (let i = attackWindowMists.length - 1; i >= 0; i--) {
-          const staleEntry = attackWindowMists[i];
-          if (staleEntry?.mesh?.parent) {
-            staleEntry.mesh.parent.remove(staleEntry.mesh);
-          }
-          attackWindowMists.splice(i, 1);
-        }
-      }
-
-      const geometry = expectedShape === 'box'
-        ? new THREE.BoxGeometry(1, ATTACK_WINDOW_MIST_HEIGHT, 1)
-        : new THREE.CylinderGeometry(1, 1, ATTACK_WINDOW_MIST_HEIGHT, 24, 1, true);
-      const material = new THREE.MeshBasicMaterial({
-        color: 0xffdd33,
-        transparent: true,
-        opacity: ATTACK_WINDOW_MIST_OPACITY,
-        depthWrite: false,
-        side: THREE.DoubleSide
-      });
-      const mesh = new THREE.Mesh(geometry, material);
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
-      mesh.userData.skipTerrainCorrection = true;
-      attackWindowMists.push({ mesh, shape: expectedShape });
-      scene.add(mesh);
-    }
-
-    const entry = attackWindowMists[0];
-    const mesh = entry.mesh;
-    const range = Math.max(0.4, attackCfg.range);
-    mesh.position.copy(playerModel.position);
-    mesh.position.y += ATTACK_WINDOW_MIST_HEIGHT * 0.5;
-
-    if (attackRegion === 'forward') {
-      const width = range;
-      mesh.scale.set(width, 1, range);
-      mesh.rotation.set(0, playerModel.rotation.y, 0);
-      playerModel.getWorldDirection(tempAttackMistForward);
-      tempAttackMistForward.y = 0;
-      if (tempAttackMistForward.lengthSq() < 0.0001) {
-        tempAttackMistForward.set(0, 0, 1);
-      } else {
-        tempAttackMistForward.normalize();
-      }
-      mesh.position.addScaledVector(tempAttackMistForward, range * 0.5);
-    } else {
-      mesh.scale.set(range, 1, range);
-      mesh.rotation.set(0, 0, 0);
-    }
+  function createAttackArcTexture() {
+    if (attackVisualState.arcTexture) return attackVisualState.arcTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    gradient.addColorStop(0, 'rgba(210, 238, 255, 0)');
+    gradient.addColorStop(0.18, 'rgba(210, 238, 255, 0.35)');
+    gradient.addColorStop(0.52, 'rgba(255, 255, 245, 0.95)');
+    gradient.addColorStop(1, 'rgba(255, 230, 125, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const verticalFade = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    verticalFade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    verticalFade.addColorStop(0.42, 'rgba(0, 0, 0, 1)');
+    verticalFade.addColorStop(0.58, 'rgba(0, 0, 0, 1)');
+    verticalFade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = verticalFade;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    attackVisualState.arcTexture = new THREE.CanvasTexture(canvas);
+    attackVisualState.arcTexture.colorSpace = THREE.SRGBColorSpace;
+    return attackVisualState.arcTexture;
   }
 
-  function spawnHitRibbonBurst(scene, position) {
+  function createAttackImpactTexture() {
+    if (attackVisualState.impactTexture) return attackVisualState.impactTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    const radial = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    radial.addColorStop(0, 'rgba(255, 255, 245, 1)');
+    radial.addColorStop(0.18, 'rgba(180, 225, 255, 0.88)');
+    radial.addColorStop(0.46, 'rgba(255, 213, 104, 0.42)');
+    radial.addColorStop(1, 'rgba(255, 213, 104, 0)');
+    ctx.fillStyle = radial;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    attackVisualState.impactTexture = new THREE.CanvasTexture(canvas);
+    attackVisualState.impactTexture.colorSpace = THREE.SRGBColorSpace;
+    return attackVisualState.impactTexture;
+  }
+
+  function getAttackHandBone(model, hand = 'right') {
+    const root = model?.userData?.pivot ?? model;
+    if (!root?.traverse) return null;
+    let rightHand = null;
+    let leftHand = null;
+    let anyHand = null;
+    root.traverse(child => {
+      if (!child?.isBone || !child.name) return;
+      const name = child.name.toLowerCase();
+      if (!rightHand && name.includes('righthand')) rightHand = child;
+      if (!leftHand && name.includes('lefthand')) leftHand = child;
+      if (!anyHand && name.includes('hand')) anyHand = child;
+    });
+    return hand === 'left'
+      ? leftHand || anyHand || rightHand || null
+      : rightHand || anyHand || leftHand || null;
+  }
+
+  function disposeAttackVisualEntry(entry) {
+    if (!entry) return;
+    if (entry.arc?.parent) entry.arc.parent.remove(entry.arc);
+    entry.arc?.geometry?.dispose?.();
+    entry.arc?.material?.dispose?.();
+    entry.trails?.forEach((trail) => {
+      if (trail.mesh?.parent) trail.mesh.parent.remove(trail.mesh);
+      trail.mesh?.geometry?.dispose?.();
+      trail.mesh?.material?.dispose?.();
+    });
+  }
+
+  function spawnAttackVisual(scene, playerModel, attackCfg, startTime) {
+    const preferredHand = playerModel?.userData?.currentAction === 'leftPunch' ? 'left' : 'right';
+    const handBone = getAttackHandBone(playerModel, preferredHand);
+    const arcGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+    const arcMaterial = new THREE.MeshBasicMaterial({
+      map: createAttackArcTexture(),
+      color: 0xd8f1ff,
+      transparent: true,
+      opacity: 0.88,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    });
+    const arc = new THREE.Mesh(arcGeometry, arcMaterial);
+    arc.castShadow = false;
+    arc.receiveShadow = false;
+    arc.userData.skipTerrainCorrection = true;
+    arc.position.set(0.15, 0.04, 0.04);
+    arc.rotation.set(0, Math.PI * 0.5, -Math.PI * 0.18);
+    const range = Math.max(0.8, Number.isFinite(attackCfg?.range) ? attackCfg.range : 1.5);
+    arc.scale.set(range * 0.55, range * 0.95, 1);
+    if (handBone) {
+      handBone.add(arc);
+    } else if (scene) {
+      arc.position.copy(playerModel.position).add(new THREE.Vector3(0, 1.15, 0));
+      scene.add(arc);
+    }
+
+    const trailMaterials = [];
+    for (let i = 0; i < ATTACK_TRAIL_STACK_COUNT; i++) {
+      trailMaterials.push(new THREE.MeshBasicMaterial({
+        color: i === 0 ? 0xdff6ff : i === 1 ? 0xffe08a : 0x7ecbff,
+        transparent: true,
+        opacity: 0.22 - i * 0.045,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide
+      }));
+    }
+    const trails = trailMaterials.map((material) => {
+      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
+      mesh.frustumCulled = false;
+      mesh.userData.skipTerrainCorrection = true;
+      scene?.add(mesh);
+      return { mesh };
+    });
+
+    return {
+      key: `${startTime}:${attackCfg?.region || 'around'}:${range}`,
+      arc,
+      trails,
+      points: [],
+      lastTrailSample: 0,
+      startTime,
+      hitFrameDone: false,
+      range,
+      region: attackCfg?.region || 'around',
+      hitTime: Number.isFinite(attackCfg?.hitTime) ? attackCfg.hitTime : 100,
+      hitWindow: Number.isFinite(attackCfg?.hitWindow) ? attackCfg.hitWindow : 220
+    };
+  }
+
+  function sampleAttackHandPosition(entry, playerModel, now) {
+    if (!entry || !playerModel) return;
+    if (now - entry.lastTrailSample < ATTACK_TRAIL_SAMPLE_MS && entry.points.length) return;
+    const preferredHand = playerModel?.userData?.currentAction === 'leftPunch' ? 'left' : 'right';
+    const handBone = getAttackHandBone(playerModel, preferredHand);
+    const position = new THREE.Vector3();
+    if (handBone) {
+      handBone.updateWorldMatrix(true, false);
+      handBone.getWorldPosition(position);
+    } else {
+      position.copy(playerModel.position).add(new THREE.Vector3(0, 1.1, 0));
+    }
+    position.x += (Math.random() - 0.5) * 0.035;
+    position.y += (Math.random() - 0.5) * 0.025;
+    position.z += (Math.random() - 0.5) * 0.035;
+    entry.points.push(position);
+    while (entry.points.length > ATTACK_TRAIL_POINT_COUNT) entry.points.shift();
+    entry.lastTrailSample = now;
+  }
+
+  function updateAttackTrailMeshes(entry, camera) {
+    if (!entry?.trails?.length || entry.points.length < 2) return;
+    const cameraRight = new THREE.Vector3(1, 0, 0);
+    if (camera) {
+      cameraRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    }
+    entry.trails.forEach((trail, stackIndex) => {
+      const positions = [];
+      const indices = [];
+      const width = 0.18 + stackIndex * 0.08;
+      entry.points.forEach((point, pointIndex) => {
+        const t = pointIndex / Math.max(1, entry.points.length - 1);
+        const fadeWidth = width * THREE.MathUtils.lerp(0.25, 1, t);
+        const noise = Math.sin((pointIndex + 1) * 7.13 + stackIndex * 2.4) * 0.025;
+        const offset = cameraRight.clone().multiplyScalar(fadeWidth + noise);
+        positions.push(point.x - offset.x, point.y - offset.y, point.z - offset.z);
+        positions.push(point.x + offset.x, point.y + offset.y, point.z + offset.z);
+        if (pointIndex < entry.points.length - 1) {
+          const base = pointIndex * 2;
+          indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+        }
+      });
+      const geometry = trail.mesh.geometry;
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      geometry.computeBoundingSphere();
+    });
+  }
+
+  function spawnImpactBurst(scene, position) {
     if (!scene || !position) return;
-    const group = new THREE.Group();
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xff3344,
-      emissive: 0xbb0f20,
-      emissiveIntensity: 0.9,
+    const material = new THREE.SpriteMaterial({
+      map: createAttackImpactTexture(),
+      color: 0xdff4ff,
       transparent: true,
       opacity: 0.95,
       depthWrite: false,
-      side: THREE.DoubleSide
+      blending: THREE.AdditiveBlending
     });
-
-    const streaks = [];
-    for (let i = 0; i < HIT_RIBBON_STREAK_COUNT; i++) {
-      const geometry = new THREE.PlaneGeometry(0.08, THREE.MathUtils.lerp(0.5, 0.95, Math.random()));
-      const streak = new THREE.Mesh(geometry, material);
-      const angle = (Math.PI * 2 * i) / HIT_RIBBON_STREAK_COUNT + (Math.random() - 0.5) * 0.45;
-      streak.position.set(0, THREE.MathUtils.lerp(0.15, 0.55, Math.random()), 0);
-      streak.rotation.x = -Math.PI / 2;
-      streak.rotation.z = angle;
-      const direction = new THREE.Vector3(Math.cos(angle), 0.08 + Math.random() * 0.22, Math.sin(angle)).normalize();
-      const speed = THREE.MathUtils.lerp(4.0, 7.2, Math.random());
-      streaks.push({ mesh: streak, velocity: direction.multiplyScalar(speed) });
-      group.add(streak);
-    }
-
-    group.position.copy(position);
-    group.userData.skipTerrainCorrection = true;
-    scene.add(group);
-
-    hitRibbonBursts.push({
-      group,
-      material,
-      streaks,
-      spawnTime: performance.now(),
-      lifetimeMs: HIT_RIBBON_LIFETIME_MS
-    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.copy(position);
+    sprite.position.y += 0.65;
+    sprite.scale.setScalar(0.01);
+    sprite.userData.skipTerrainCorrection = true;
+    scene.add(sprite);
+    attackVisualState.impacts.push({ sprite, material, spawnTime: performance.now(), lifetimeMs: ATTACK_IMPACT_LIFETIME_MS });
   }
 
-  function updateHitRibbonBursts({ scene, deltaSeconds }) {
-    if (!hitRibbonBursts.length) return;
-    const now = performance.now();
+  function spawnShockwaveRing(scene, playerModel, range) {
+    if (!scene || !playerModel?.position) return;
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x8fe7ff,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(new THREE.RingGeometry(0.72, 1, 96), material);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.copy(playerModel.position);
+    mesh.position.y += 0.08;
+    mesh.scale.setScalar(0.05);
+    mesh.userData.skipTerrainCorrection = true;
+    scene.add(mesh);
+    attackVisualState.shockwaves.push({ mesh, material, range: Math.max(1, range), spawnTime: performance.now(), lifetimeMs: ATTACK_SHOCKWAVE_LIFETIME_MS });
+  }
 
-    for (let i = hitRibbonBursts.length - 1; i >= 0; i--) {
-      const burst = hitRibbonBursts[i];
-      const ageMs = now - burst.spawnTime;
-      const progress = Math.min(1, ageMs / burst.lifetimeMs);
-      burst.material.opacity = THREE.MathUtils.lerp(0.95, 0, progress);
-      burst.material.emissiveIntensity = THREE.MathUtils.lerp(0.9, 0.1, progress);
-
-      burst.streaks.forEach(({ mesh, velocity }) => {
-        tempMistMoveStep.copy(velocity).multiplyScalar(deltaSeconds);
-        mesh.position.add(tempMistMoveStep);
-      });
-
-      if (ageMs >= burst.lifetimeMs) {
-        if (burst.group?.parent) {
-          burst.group.parent.remove(burst.group);
+  function updateAttackVisuals({ scene, playerModel, camera, deltaSeconds }) {
+    if (!scene || !playerModel?.userData) return;
+    const activeAttack = playerModel.userData.attack;
+    if (!activeAttack?.name || !Number.isFinite(activeAttack.start)) {
+      disposeAttackVisualEntry(attackVisualState.active);
+      attackVisualState.active = null;
+    } else {
+      const attackName = activeAttack.name === 'mutantPunch' && playerModel.userData?.equippedWeaponType === 'sword'
+        ? 'swordSlash'
+        : activeAttack.name;
+      const cfg = ATTACKS[attackName];
+      if (cfg) {
+        const attackCfg = activeAttack.overrides ? { ...cfg, ...activeAttack.overrides } : cfg;
+        const key = `${activeAttack.start}:${attackName}`;
+        if (!attackVisualState.active || attackVisualState.active.key !== key) {
+          disposeAttackVisualEntry(attackVisualState.active);
+          attackVisualState.active = spawnAttackVisual(scene, playerModel, attackCfg, activeAttack.start);
+          attackVisualState.active.key = key;
         }
-        hitRibbonBursts.splice(i, 1);
+        const entry = attackVisualState.active;
+        const elapsed = Date.now() - activeAttack.start;
+        const progress = Math.min(1, elapsed / Math.max(ATTACK_ARC_LIFETIME_MS, entry.hitTime + entry.hitWindow));
+        entry.arc.material.opacity = THREE.MathUtils.lerp(0.9, 0.08, progress);
+        entry.arc.rotation.z = THREE.MathUtils.lerp(-Math.PI * 0.35, Math.PI * 0.58, progress);
+        const swingScale = 1 + Math.sin(Math.min(Math.PI, progress * Math.PI)) * 0.28;
+        entry.arc.scale.set(entry.range * 0.55 * swingScale, entry.range * 0.95 * (0.82 + progress * 0.35), 1);
+        sampleAttackHandPosition(entry, playerModel, performance.now());
+        updateAttackTrailMeshes(entry, camera);
+        entry.trails?.forEach((trail, stackIndex) => {
+          trail.mesh.material.opacity = (0.24 - stackIndex * 0.05) * (1 - progress * 0.78);
+        });
+        if (!entry.hitFrameDone && elapsed >= entry.hitTime) {
+          if (entry.region === 'around') spawnShockwaveRing(scene, playerModel, entry.range);
+          entry.hitFrameDone = true;
+        }
+        if (elapsed > Math.max(ATTACK_ARC_LIFETIME_MS, entry.hitTime + entry.hitWindow + 120)) {
+          disposeAttackVisualEntry(entry);
+          attackVisualState.active = null;
+        }
+      }
+    }
+
+    const now = performance.now();
+    for (let i = attackVisualState.impacts.length - 1; i >= 0; i--) {
+      const impact = attackVisualState.impacts[i];
+      const progress = Math.min(1, (now - impact.spawnTime) / impact.lifetimeMs);
+      const pulse = progress < 0.45
+        ? THREE.MathUtils.lerp(0.05, 1.5, progress / 0.45)
+        : THREE.MathUtils.lerp(1.5, 1.05, (progress - 0.45) / 0.55);
+      impact.sprite.scale.setScalar(pulse);
+      impact.material.opacity = THREE.MathUtils.lerp(0.95, 0, progress);
+      if (progress >= 1) {
+        impact.sprite.parent?.remove(impact.sprite);
+        impact.material.dispose?.();
+        attackVisualState.impacts.splice(i, 1);
+      }
+    }
+
+    for (let i = attackVisualState.shockwaves.length - 1; i >= 0; i--) {
+      const wave = attackVisualState.shockwaves[i];
+      const progress = Math.min(1, (now - wave.spawnTime) / wave.lifetimeMs);
+      const scale = THREE.MathUtils.lerp(0.08, wave.range, THREE.MathUtils.smoothstep(progress, 0, 1));
+      wave.mesh.scale.setScalar(scale);
+      wave.material.opacity = THREE.MathUtils.lerp(0.72, 0, progress);
+      wave.mesh.rotation.z += deltaSeconds * 2.4;
+      if (progress >= 1) {
+        wave.mesh.parent?.remove(wave.mesh);
+        wave.mesh.geometry?.dispose?.();
+        wave.material.dispose?.();
+        attackVisualState.shockwaves.splice(i, 1);
       }
     }
   }
@@ -10656,6 +10804,9 @@ async function initCore(runtimeContext) {
       }
     });
     if (!closest) return false;
+    if (closest.record?.mesh?.position) {
+      spawnImpactBurst(scene, closest.record.mesh.position);
+    }
     void applyBuildDamage(closest.id, closest.record, damage);
     return true;
   };
@@ -12408,7 +12559,7 @@ async function initCore(runtimeContext) {
       }
     }
 
-    updateAttackWindowMist({ scene, playerModel });
+    updateAttackVisuals({ scene, playerModel, camera, deltaSeconds: frameDelta });
 
     updateMeleeAttacks({
       playerModel,
@@ -12424,7 +12575,6 @@ async function initCore(runtimeContext) {
       onEntityHit: handleCombatEntityHit
     });
 
-    updateHitRibbonBursts({ scene, deltaSeconds: frameDelta });
     terrainStampDebugOverlay?.update?.();
 
     renderer.render(scene, camera);
