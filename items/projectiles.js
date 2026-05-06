@@ -99,6 +99,9 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.isArrow = options.isArrow ?? false;
   mesh.userData.releaseMesh = options.releaseMesh ?? null;
   mesh.userData.onGroundHit = options.onGroundHit ?? null;
+  mesh.userData.onMonsterImpact = typeof options.onMonsterImpact === 'function'
+    ? options.onMonsterImpact
+    : null;
   mesh.userData.damage = Number.isFinite(options.damage) ? options.damage : 1;
   mesh.userData.attackLabel = typeof options.attackLabel === 'string' && options.attackLabel
     ? options.attackLabel
@@ -312,6 +315,18 @@ export function updateProjectiles({
         const monsterBox = getObjectBox(monster?.model);
         if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
+          if (typeof proj.userData.onMonsterImpact === 'function') {
+            const handled = proj.userData.onMonsterImpact({
+              projectile: proj,
+              monster,
+              hitPosition: proj.position.clone()
+            });
+            if (handled) {
+              removeProjectile(i);
+              removed = true;
+              break;
+            }
+          }
           console.log(`💥 Monster was hit`);
           const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
@@ -340,6 +355,18 @@ export function updateProjectiles({
         const monsterBox = getObjectBox(monster?.model);
         if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
+          if (typeof proj.userData.onMonsterImpact === 'function') {
+            const handled = proj.userData.onMonsterImpact({
+              projectile: proj,
+              monster,
+              hitPosition: proj.position.clone()
+            });
+            if (handled) {
+              removeProjectile(i);
+              removed = true;
+              break;
+            }
+          }
           const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
           const attackTypes = getAttackTypes(
