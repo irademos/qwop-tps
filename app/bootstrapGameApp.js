@@ -234,6 +234,9 @@ const ATTACK_TRAIL_STACK_COUNT = 3;
 const ATTACK_TRAIL_SAMPLE_MS = 28;
 const ATTACK_IMPACT_LIFETIME_MS = 220;
 const ATTACK_SHOCKWAVE_LIFETIME_MS = 360;
+const ATTACK_RED_STREAK_COUNT = 9;
+const ATTACK_RED_STREAK_LIFETIME_MS = 260;
+const SWORD_SPIN_CHARGE_WINDUP_SPEED = 0.25;
 const TORCH_ITEM_ID = 'torch';
 const TORCH_HEALTH_KEY = 'healths';
 const DEFAULT_TORCH_HEALTH = 100;
@@ -820,6 +823,8 @@ async function initCore(runtimeContext) {
     active: null,
     impacts: [],
     shockwaves: [],
+    redStreaks: [],
+    completedAttackKey: null,
     arcTexture: null,
     impactTexture: null
   };
@@ -1472,9 +1477,12 @@ async function initCore(runtimeContext) {
     return Math.max(PICKUP_ATTRACT_RADIUS, radius);
   };
 
-  const handleCombatEntityHit = ({ targetPosition }) => {
+  const handleCombatEntityHit = ({ targetPosition, targetType }) => {
     if (!targetPosition) return;
     spawnImpactBurst(scene, targetPosition);
+    if (targetType === 'monster') {
+      spawnRedImpactStreaks(scene, targetPosition);
+    }
   };
 
   const removeRemotePlayer = (remoteId, reason = 'unknown') => {
@@ -7729,13 +7737,32 @@ async function initCore(runtimeContext) {
     canvas.width = 128;
     canvas.height = 128;
     const ctx = canvas.getContext('2d');
-    const radial = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    radial.addColorStop(0, 'rgba(255, 255, 245, 1)');
-    radial.addColorStop(0.18, 'rgba(180, 225, 255, 0.88)');
-    radial.addColorStop(0.46, 'rgba(255, 213, 104, 0.42)');
-    radial.addColorStop(1, 'rgba(255, 213, 104, 0)');
-    ctx.fillStyle = radial;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(64, 64);
+    ctx.beginPath();
+    const spikes = 18;
+    for (let i = 0; i < spikes * 2; i += 1) {
+      const radius = i % 2 === 0 ? 58 : 26 + ((i * 7) % 9);
+      const angle = -Math.PI / 2 + (i / (spikes * 2)) * Math.PI * 2;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    const starGradient = ctx.createRadialGradient(0, 0, 2, 0, 0, 62);
+    starGradient.addColorStop(0, 'rgba(255, 255, 245, 1)');
+    starGradient.addColorStop(0.26, 'rgba(255, 242, 86, 1)');
+    starGradient.addColorStop(0.64, 'rgba(255, 164, 27, 0.82)');
+    starGradient.addColorStop(1, 'rgba(255, 113, 16, 0)');
+    ctx.fillStyle = starGradient;
+    ctx.fill();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(255, 247, 142, 0.92)';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, 17, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 245, 0.96)';
+    ctx.fill();
     attackVisualState.impactTexture = new THREE.CanvasTexture(canvas);
     attackVisualState.impactTexture.colorSpace = THREE.SRGBColorSpace;
     return attackVisualState.impactTexture;
@@ -7901,6 +7928,45 @@ async function initCore(runtimeContext) {
     attackVisualState.impacts.push({ sprite, material, spawnTime: performance.now(), lifetimeMs: ATTACK_IMPACT_LIFETIME_MS });
   }
 
+  function spawnRedImpactStreaks(scene, position) {
+    if (!scene || !position) return;
+    const group = new THREE.Group();
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xff3344,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    });
+    const streaks = [];
+    for (let i = 0; i < ATTACK_RED_STREAK_COUNT; i += 1) {
+      const geometry = new THREE.PlaneGeometry(0.08, THREE.MathUtils.lerp(0.48, 0.95, Math.random()));
+      const mesh = new THREE.Mesh(geometry, material);
+      const angle = (Math.PI * 2 * i) / ATTACK_RED_STREAK_COUNT + (Math.random() - 0.5) * 0.5;
+      mesh.position.set(0, THREE.MathUtils.lerp(0.18, 0.55, Math.random()), 0);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.rotation.z = angle;
+      const velocity = new THREE.Vector3(
+        Math.cos(angle),
+        0.08 + Math.random() * 0.22,
+        Math.sin(angle)
+      ).normalize().multiplyScalar(THREE.MathUtils.lerp(4.0, 7.2, Math.random()));
+      streaks.push({ mesh, velocity });
+      group.add(mesh);
+    }
+    group.position.copy(position);
+    group.userData.skipTerrainCorrection = true;
+    scene.add(group);
+    attackVisualState.redStreaks.push({
+      group,
+      material,
+      streaks,
+      spawnTime: performance.now(),
+      lifetimeMs: ATTACK_RED_STREAK_LIFETIME_MS
+    });
+  }
+
   function spawnShockwaveRing(scene, playerModel, range) {
     if (!scene || !playerModel?.position) return;
     const material = new THREE.MeshBasicMaterial({
@@ -7921,12 +7987,22 @@ async function initCore(runtimeContext) {
     attackVisualState.shockwaves.push({ mesh, material, range: Math.max(1, range), spawnTime: performance.now(), lifetimeMs: ATTACK_SHOCKWAVE_LIFETIME_MS });
   }
 
+  function getAttackVisualHitTime(attackName, activeAttack, attackCfg) {
+    const baseHitTime = Number.isFinite(attackCfg?.hitTime) ? attackCfg.hitTime : 100;
+    if (attackName !== 'swordSpin') return baseHitTime;
+    const heldForMs = activeAttack?.overrides?.swordSpinChargeHeldForMs;
+    if (!Number.isFinite(heldForMs) || heldForMs <= 0) return baseHitTime;
+    const unplayedWindupMs = heldForMs * ((1 / SWORD_SPIN_CHARGE_WINDUP_SPEED) - 1);
+    return 800 + unplayedWindupMs;
+  }
+
   function updateAttackVisuals({ scene, playerModel, camera, deltaSeconds }) {
     if (!scene || !playerModel?.userData) return;
     const activeAttack = playerModel.userData.attack;
     if (!activeAttack?.name || !Number.isFinite(activeAttack.start)) {
       disposeAttackVisualEntry(attackVisualState.active);
       attackVisualState.active = null;
+      attackVisualState.completedAttackKey = null;
     } else {
       const attackName = activeAttack.name === 'mutantPunch' && playerModel.userData?.equippedWeaponType === 'sword'
         ? 'swordSlash'
@@ -7935,30 +8011,45 @@ async function initCore(runtimeContext) {
       if (cfg) {
         const attackCfg = activeAttack.overrides ? { ...cfg, ...activeAttack.overrides } : cfg;
         const key = `${activeAttack.start}:${attackName}`;
-        if (!attackVisualState.active || attackVisualState.active.key !== key) {
+        const elapsed = Date.now() - activeAttack.start;
+        const currentHitTime = getAttackVisualHitTime(attackName, activeAttack, attackCfg);
+        const currentHitWindow = Number.isFinite(attackCfg?.hitWindow) ? attackCfg.hitWindow : 220;
+        const visualEndMs = Math.max(ATTACK_ARC_LIFETIME_MS, currentHitTime + currentHitWindow + 120);
+        if (elapsed <= visualEndMs && attackVisualState.completedAttackKey !== key) {
+          if (!attackVisualState.active || attackVisualState.active.key !== key) {
+            disposeAttackVisualEntry(attackVisualState.active);
+            attackVisualState.active = spawnAttackVisual(scene, playerModel, attackCfg, activeAttack.start);
+            attackVisualState.active.key = key;
+          }
+        } else if (attackVisualState.active?.key === key) {
           disposeAttackVisualEntry(attackVisualState.active);
-          attackVisualState.active = spawnAttackVisual(scene, playerModel, attackCfg, activeAttack.start);
-          attackVisualState.active.key = key;
+          attackVisualState.active = null;
         }
         const entry = attackVisualState.active;
-        const elapsed = Date.now() - activeAttack.start;
-        const progress = Math.min(1, elapsed / Math.max(ATTACK_ARC_LIFETIME_MS, entry.hitTime + entry.hitWindow));
-        entry.arc.material.opacity = THREE.MathUtils.lerp(0.9, 0.08, progress);
-        entry.arc.rotation.z = THREE.MathUtils.lerp(-Math.PI * 0.35, Math.PI * 0.58, progress);
-        const swingScale = 1 + Math.sin(Math.min(Math.PI, progress * Math.PI)) * 0.28;
-        entry.arc.scale.set(entry.range * 0.55 * swingScale, entry.range * 0.95 * (0.82 + progress * 0.35), 1);
-        sampleAttackHandPosition(entry, playerModel, performance.now());
-        updateAttackTrailMeshes(entry, camera);
-        entry.trails?.forEach((trail, stackIndex) => {
-          trail.mesh.material.opacity = (0.24 - stackIndex * 0.05) * (1 - progress * 0.78);
-        });
-        if (!entry.hitFrameDone && elapsed >= entry.hitTime) {
-          if (entry.region === 'around') spawnShockwaveRing(scene, playerModel, entry.range);
-          entry.hitFrameDone = true;
-        }
-        if (elapsed > Math.max(ATTACK_ARC_LIFETIME_MS, entry.hitTime + entry.hitWindow + 120)) {
-          disposeAttackVisualEntry(entry);
-          attackVisualState.active = null;
+        if (entry) {
+          entry.hitTime = currentHitTime;
+          entry.hitWindow = currentHitWindow;
+          entry.range = Math.max(0.8, Number.isFinite(attackCfg?.range) ? attackCfg.range : entry.range);
+          entry.region = attackCfg?.region || entry.region || 'around';
+          const progress = Math.min(1, elapsed / Math.max(ATTACK_ARC_LIFETIME_MS, entry.hitTime + entry.hitWindow));
+          entry.arc.material.opacity = THREE.MathUtils.lerp(0.9, 0.08, progress);
+          entry.arc.rotation.z = THREE.MathUtils.lerp(-Math.PI * 0.35, Math.PI * 0.58, progress);
+          const swingScale = 1 + Math.sin(Math.min(Math.PI, progress * Math.PI)) * 0.28;
+          entry.arc.scale.set(entry.range * 0.55 * swingScale, entry.range * 0.95 * (0.82 + progress * 0.35), 1);
+          sampleAttackHandPosition(entry, playerModel, performance.now());
+          updateAttackTrailMeshes(entry, camera);
+          entry.trails?.forEach((trail, stackIndex) => {
+            trail.mesh.material.opacity = (0.24 - stackIndex * 0.05) * (1 - progress * 0.78);
+          });
+          if (!entry.hitFrameDone && elapsed >= entry.hitTime) {
+            if (entry.region === 'around') spawnShockwaveRing(scene, playerModel, entry.range);
+            entry.hitFrameDone = true;
+          }
+          if (elapsed > visualEndMs) {
+            disposeAttackVisualEntry(entry);
+            attackVisualState.active = null;
+            attackVisualState.completedAttackKey = key;
+          }
         }
       }
     }
@@ -7976,6 +8067,22 @@ async function initCore(runtimeContext) {
         impact.sprite.parent?.remove(impact.sprite);
         impact.material.dispose?.();
         attackVisualState.impacts.splice(i, 1);
+      }
+    }
+
+    for (let i = attackVisualState.redStreaks.length - 1; i >= 0; i -= 1) {
+      const burst = attackVisualState.redStreaks[i];
+      const progress = Math.min(1, (now - burst.spawnTime) / burst.lifetimeMs);
+      burst.material.opacity = THREE.MathUtils.lerp(0.95, 0, progress);
+      burst.streaks.forEach(({ mesh, velocity }) => {
+        tempMistMoveStep.copy(velocity).multiplyScalar(deltaSeconds);
+        mesh.position.add(tempMistMoveStep);
+      });
+      if (progress >= 1) {
+        burst.group?.parent?.remove(burst.group);
+        burst.streaks.forEach(({ mesh }) => mesh.geometry?.dispose?.());
+        burst.material.dispose?.();
+        attackVisualState.redStreaks.splice(i, 1);
       }
     }
 

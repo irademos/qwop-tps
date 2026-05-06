@@ -755,10 +755,11 @@ export class PlayerControls {
     const spinAction = this.playerModel?.userData?.actions?.swordSpin;
     if (spinAction) spinAction.timeScale = 1;
     const swordSpinBaseHitTimeMs = 800;
-    const swordSpinChargeHitDelayMs = clampedHeldForMs * (1 - SWORD_SPIN_WINDUP_SPEED);
+    const swordSpinChargeHitDelayMs = clampedHeldForMs * ((1 / SWORD_SPIN_WINDUP_SPEED) - 1);
     if (this.playerModel?.userData?.attack?.name === 'swordSpin') {
       this.playerModel.userData.attack.overrides = {
         ...(this.playerModel.userData.attack.overrides || {}),
+        swordSpinChargeHeldForMs: clampedHeldForMs,
         hitTime: swordSpinBaseHitTimeMs + swordSpinChargeHitDelayMs,
         hitWindow: 300,
         damage: 3 + (3 * chargeRatio),
