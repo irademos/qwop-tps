@@ -126,6 +126,9 @@ const AUTO_AIM_RANGE_M = 50;
 const AUTO_AIM_ICE_RANGE_M = 10;
 const AUTO_AIM_THROW_RANGE_M = 18;
 const AUTO_AIM_TARGET_CENTER_Y = 0.9;
+const AUTO_AIM_MANUAL_BREAK_THRESHOLD_RAD = 0.2;
+const AUTO_AIM_MANUAL_BREAK_DECAY_MS = 250;
+const AUTO_AIM_WHEEL_BREAK_THRESHOLD = 140;
 const AUTO_AIM_ARC_CONFIG = Object.freeze({
   bow: { nearDistance: 6, farDistance: 45, maxLoftRadians: 0.24 },
   bomb: { nearDistance: 4, farDistance: 36, maxLoftRadians: 0.48 },
@@ -317,6 +320,8 @@ export class PlayerControls {
     this.autoAimBreakUntilRelease = false;
     this.autoAimCurrentPitch = 0;
     this.autoAimCameraDirection = null;
+    this.autoAimManualBreakAmount = 0;
+    this.autoAimLastManualInputAt = 0;
     this.baseCameraOffset = this.cameraOffset.clone();
     this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
     this.weaponCameraOffset = this.baseCameraOffset.clone().add(WEAPON_CAMERA_OFFSET);
@@ -537,7 +542,7 @@ export class PlayerControls {
           const maxPitch = Math.PI / 3;
           const minPitch = -Math.PI / 8;
           this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
-          this.breakAutoAimFromManualCamera();
+          this.breakAutoAimFromManualCamera(Math.hypot(deltaX * this.touchSensitivity, deltaY * this.touchSensitivity));
           this.safePreventDefault(event);
           break;
         }
@@ -1015,6 +1020,8 @@ export class PlayerControls {
       this.isFireHeld = false;
       this.autoAimBreakUntilRelease = false;
       this.autoAimCurrentPitch = 0;
+      this.autoAimManualBreakAmount = 0;
+      this.autoAimLastManualInputAt = 0;
       this.setAiming(false);
       const hand = this.getInventoryItemHand?.(throwItemId) || 'right';
       const autoAimDirection = this.getAutoAimDirection({ itemId: throwItemId, type: 'throw' });
@@ -2665,8 +2672,14 @@ export class PlayerControls {
 
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
     if (!this.isEngaged) {
-      if (this.keys.has('ArrowLeft')) this.yaw += rotateSpeed;
-      if (this.keys.has('ArrowRight')) this.yaw -= rotateSpeed;
+      if (this.keys.has('ArrowLeft')) {
+        this.yaw += rotateSpeed;
+        this.breakAutoAimFromManualCamera(Math.abs(rotateSpeed));
+      }
+      if (this.keys.has('ArrowRight')) {
+        this.yaw -= rotateSpeed;
+        this.breakAutoAimFromManualCamera(Math.abs(rotateSpeed));
+      }
     }
 
     const maxPitch = Math.PI / 3;   // ~60° upward
@@ -2675,9 +2688,11 @@ export class PlayerControls {
     if (!this.isEngaged) {
       if (this.keys.has('ArrowUp')) {
         this.pitch = Math.min(maxPitch, this.pitch + 0.02);
+        this.breakAutoAimFromManualCamera(0.02);
       }
       if (this.keys.has('ArrowDown')) {
         this.pitch = Math.max(minPitch, this.pitch - 0.02);
+        this.breakAutoAimFromManualCamera(0.02);
       }
     }
 
@@ -3318,6 +3333,8 @@ export class PlayerControls {
       this.aimReleaseHoldUntil = null;
       this.autoAimBreakUntilRelease = false;
       this.autoAimCameraDirection = null;
+      this.autoAimManualBreakAmount = 0;
+      this.autoAimLastManualInputAt = 0;
     } else {
       if (this.autoAimCameraDirection) {
         this.syncCameraOrbitToAutoAimDirection(this.autoAimCameraDirection);
@@ -3326,6 +3343,8 @@ export class PlayerControls {
       this.autoAimBreakUntilRelease = false;
       this.autoAimCurrentPitch = 0;
       this.autoAimCameraDirection = null;
+      this.autoAimManualBreakAmount = 0;
+      this.autoAimLastManualInputAt = 0;
     }
   }
 
@@ -3355,7 +3374,7 @@ export class PlayerControls {
     const autoAimDirection = this.getAutoAimDirection(weapon);
     const direction = autoAimDirection ?? this.getAimDirection(invertForBow);
     this.alignPlayerToDirection(direction);
-    if (autoAimDirection) {
+    if (autoAimDirection && !this.isEngaged) {
       this.applyAutoAimCameraDirection(autoAimDirection);
     } else {
       this.autoAimCameraDirection = null;
@@ -3385,9 +3404,25 @@ export class PlayerControls {
     this.pitch = THREE.MathUtils.clamp(Math.asin(pitchRatio), minPitch, maxPitch);
   }
 
-  breakAutoAimFromManualCamera() {
-    if (!this.isAiming || !this.isFireHeld) return;
-    this.autoAimBreakUntilRelease = true;
+  breakAutoAimFromManualCamera(inputAmount = Infinity) {
+    if (!this.isAiming || !this.isFireHeld || this.isEngaged) return;
+    if (this.autoAimBreakUntilRelease) return;
+
+    const amount = Number.isFinite(inputAmount) ? Math.abs(inputAmount) : Infinity;
+    const now = performance.now();
+    if (!Number.isFinite(amount)) {
+      this.autoAimManualBreakAmount = AUTO_AIM_MANUAL_BREAK_THRESHOLD_RAD;
+    } else {
+      if ((now - (this.autoAimLastManualInputAt || 0)) > AUTO_AIM_MANUAL_BREAK_DECAY_MS) {
+        this.autoAimManualBreakAmount = 0;
+      }
+      this.autoAimManualBreakAmount = (this.autoAimManualBreakAmount || 0) + amount;
+      this.autoAimLastManualInputAt = now;
+    }
+
+    if ((this.autoAimManualBreakAmount || 0) >= AUTO_AIM_MANUAL_BREAK_THRESHOLD_RAD) {
+      this.autoAimBreakUntilRelease = true;
+    }
   }
 
   getAutoAimDirection(weapon) {
@@ -3488,6 +3523,11 @@ export class PlayerControls {
   findAutoAimTarget(maxRange) {
     const playerPos = this.playerModel?.position;
     if (!playerPos) return null;
+
+    const engagedModel = this.engagedTarget?.model;
+    if (this.isEngaged && engagedModel?.position && !this.engagedTarget?.isDead && playerPos.distanceTo(engagedModel.position) <= maxRange) {
+      return engagedModel;
+    }
     const closestIn = (entries) => {
       let best = null;
       let bestDist = maxRange;
@@ -3727,12 +3767,15 @@ export class PlayerControls {
         const maxPitch = Math.PI / 3;    // ~60° upward
         const minPitch = -Math.PI / 8;   // ~30° downward
         this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
-        this.breakAutoAimFromManualCamera();
+        this.breakAutoAimFromManualCamera(Math.hypot(event.movementX * sensitivity, event.movementY * sensitivity));
       }
     });
 
-    this.domElement.addEventListener('wheel', () => {
-      this.breakAutoAimFromManualCamera();
+    this.domElement.addEventListener('wheel', (event) => {
+      const wheelAmount = Math.hypot(event.deltaX || 0, event.deltaY || 0, event.deltaZ || 0);
+      if (wheelAmount >= AUTO_AIM_WHEEL_BREAK_THRESHOLD) {
+        this.breakAutoAimFromManualCamera(Infinity);
+      }
     }, { passive: true });
     
   
@@ -3744,10 +3787,6 @@ export class PlayerControls {
   }
 
   updateEngagedMode() {
-    if ((this.isAiming || this.isFireHeld) && this.shouldHoldToFire()) {
-      this.setEngaged(false);
-      return;
-    }
     if (!this.playerModel) {
       this.setEngaged(false);
       return;
