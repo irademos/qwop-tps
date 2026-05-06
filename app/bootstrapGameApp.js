@@ -3472,7 +3472,9 @@ async function initCore(runtimeContext) {
     debug: window.DEBUG_FRIENDLY_PERSIST,
     onSpawnEvent: handleCharacterSpawnEvent,
     onBeforeSpawn: (...args) => trimTravelSpawnPopulationIfNeeded(...args),
-    onRemoteSpawnRequest: requestHostSpawnEvent
+    onRemoteSpawnRequest: requestHostSpawnEvent,
+    getMonsters: () => monsters,
+    onMonsterHit: handleMonsterDamage
   });
   if (multiplayer?.roomId) {
     friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
@@ -12057,6 +12059,11 @@ async function initCore(runtimeContext) {
           friendlyAvoidanceZones.push(merchantFriendly.model.position.clone());
         }
         const roomFriendlies = friendlyNpcManager?.friendlies || [];
+        const combatFriendlies = [...roomFriendlies];
+        const questFriend = questManager?.getQuestFriend?.();
+        if (questFriend?.model && !questFriend.isDead) {
+          combatFriendlies.push(questFriend);
+        }
         roomFriendlies.forEach((friendly) => {
           if (friendly?.isDead || !friendly?.model?.position) return;
           friendlyAvoidanceZones.push(friendly.model.position.clone());
@@ -12104,7 +12111,8 @@ async function initCore(runtimeContext) {
             friendlyAvoidanceZones,
             resolveGroundY,
             walkableSlopeDegrees: 42,
-            groundOffset: 0.9 * (Number.isFinite(monster.sizeScale) ? monster.sizeScale : 1)
+            groundOffset: 0.9 * (Number.isFinite(monster.sizeScale) ? monster.sizeScale : 1),
+            friendlyTargets: combatFriendlies
           };
           const MAX_AI_DELTA_SECONDS = 0.5;
 

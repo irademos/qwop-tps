@@ -16,6 +16,7 @@ const QUEST_FRIEND_DISENGAGE_RADIUS = 8;
 const QUEST_FRIEND_FOLLOW_DISTANCE = 3;
 const QUEST_FRIEND_FOLLOW_START_DISTANCE = 4.5;
 const QUEST_GENERIC_XP = 60;
+const QUEST_FRIEND_RESPAWN_DELAY_MS = 20000;
 
 const TUTORIAL_QUESTS = [
   {
@@ -91,8 +92,9 @@ export class QuestManager {
     this.state = {
       friend: null,
       pendingSpawn: false,
+      respawnAt: 0,
       deltaSeconds: 0,
-      shouldFollowPlayer: false,
+      shouldFollowPlayer: true,
       acceptedQuestIds: [],
       completedQuestIds: [],
       gpsQuestStartFix: null,
@@ -154,19 +156,36 @@ export class QuestManager {
     return this.isQuestFriend(friendly);
   }
 
+  cleanupQuestFriend() {
+    const friend = this.state.friend;
+    if (!friend) return;
+    this.detachPhysics?.(friend);
+    if (friend.model?.parent) {
+      friend.model.parent.remove(friend.model);
+    }
+    friend.model = null;
+    this.state.friend = null;
+  }
+
   ensureQuestFriendSpawned() {
-    if (this.state.friend?.isDead || !this.state.friend?.model) {
-      this.detachPhysics?.(this.state.friend);
-      this.state.friend = null;
+    const now = Date.now();
+    if (this.state.friend?.isDead || (this.state.friend && !this.state.friend.model)) {
+      this.cleanupQuestFriend();
+      this.state.respawnAt = now + QUEST_FRIEND_RESPAWN_DELAY_MS;
     }
     if (this.state.friend || this.state.pendingSpawn) return;
+    if (this.state.respawnAt && now < this.state.respawnAt) return;
     this.state.pendingSpawn = true;
+    this.state.respawnAt = 0;
 
+    const playerPosition = this.getPlayerModel?.()?.position;
     const angle = Math.random() * Math.PI * 2;
     const radius = QUEST_FRIEND_SPAWN_RADIUS_MIN
       + Math.random() * (QUEST_FRIEND_SPAWN_RADIUS_MAX - QUEST_FRIEND_SPAWN_RADIUS_MIN);
-    const spawnX = Math.cos(angle) * radius;
-    const spawnZ = Math.sin(angle) * radius;
+    const originX = Number.isFinite(playerPosition?.x) ? playerPosition.x : 0;
+    const originZ = Number.isFinite(playerPosition?.z) ? playerPosition.z : 0;
+    const spawnX = originX + Math.cos(angle) * radius;
+    const spawnZ = originZ + Math.sin(angle) * radius;
     const terrainHeight = getTerrainHeight(spawnX, spawnZ);
     const spawnY = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : 0.5;
 
@@ -183,7 +202,11 @@ export class QuestManager {
         questFriend.setWanderRadius(QUEST_FRIEND_WANDER_RADIUS);
         questFriend.setEngageRadius(QUEST_FRIEND_ENGAGE_RADIUS);
         questFriend.setDisengageRadius(QUEST_FRIEND_DISENGAGE_RADIUS);
-        questFriend.setFollowTarget(null);
+        questFriend.setFollowTarget(this.state.shouldFollowPlayer ? this.getPlayerModel?.() : null, {
+          followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+          followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+          helpingPlayerFight: this.state.shouldFollowPlayer
+        });
         questFriend.setLevel(1, { preserveHealth: false });
         questFriend.resetHealth();
         questFriend.setPosition(spawnX, spawnY, spawnZ);
@@ -209,10 +232,30 @@ export class QuestManager {
 
   getDialogueForFriendly(friendly, dialoguePool) {
     if (!this.isQuestFriend(friendly)) {
-      if (!Array.isArray(dialoguePool) || dialoguePool.length === 0) {
-        return null;
-      }
-      return dialoguePool[Math.floor(Math.random() * dialoguePool.length)];
+      const baseDialogue = Array.isArray(dialoguePool) && dialoguePool.length > 0
+        ? dialoguePool[Math.floor(Math.random() * dialoguePool.length)]
+        : { blocks: ["Hello, traveler."], responses: [] };
+      const isHelping = !!friendly?.helpingPlayerFight;
+      return {
+        blocks: [
+          ...(Array.isArray(baseDialogue.blocks) ? baseDialogue.blocks : []),
+          isHelping
+            ? "I’m helping you fight monsters. Want me to stop following you?"
+            : "Do you want help fighting monsters?"
+        ],
+        responses: [
+          ...(Array.isArray(baseDialogue.responses) ? baseDialogue.responses : []),
+          {
+            label: isHelping ? "stop helping" : "yes, help fight",
+            reply: isHelping ? "Okay, I’ll stop following you." : "You got it. I’ll follow you and fight nearby monsters.",
+            onSelect: isHelping ? "stopFriendlyMonsterHelp" : "startFriendlyMonsterHelp"
+          },
+          ...(!isHelping ? [{
+            label: "no thanks",
+            reply: "No problem. Stay safe out there."
+          }] : [])
+        ]
+      };
     }
 
     const quest = this.getCurrentSuggestedQuest();
@@ -223,6 +266,11 @@ export class QuestManager {
           "Nice work, adventurer. Keep exploring Street Quest!"
         ],
         responses: [
+          {
+            label: this.state.shouldFollowPlayer ? "stop following me" : "follow me",
+            reply: this.state.shouldFollowPlayer ? "Okay, I’ll stay here and keep watch." : "I’ll stick close and help fight monsters.",
+            onSelect: this.state.shouldFollowPlayer ? "stopFollowingQuestFriend" : "startFollowingQuestFriend"
+          },
           {
             label: "No thanks, see you later.",
             reply: "See you out there."
@@ -266,12 +314,18 @@ export class QuestManager {
             reply: "Okay, I’ll stay here and keep watch.",
             onSelect: "stopFollowingQuestFriend"
           }
-        ] : [])
+        ] : [
+          {
+            label: "follow me",
+            reply: "I’ll stick close and help fight monsters.",
+            onSelect: "startFollowingQuestFriend"
+          }
+        ])
       ]
     };
   }
 
-  handleDialogueOption(option) {
+  handleDialogueOption(option, activeFriendly = null) {
     if (!option?.onSelect) return;
     if (option.onSelect === "acceptTutorialQuest") {
       this.acceptSuggestedQuest();
@@ -279,7 +333,28 @@ export class QuestManager {
     }
     if (option.onSelect === "stopFollowingQuestFriend") {
       this.state.shouldFollowPlayer = false;
-      this.state.friend?.setFollowTarget(null);
+      this.state.friend?.setFollowTarget(null, { helpingPlayerFight: false });
+      return;
+    }
+    if (option.onSelect === "startFollowingQuestFriend") {
+      this.state.shouldFollowPlayer = true;
+      this.state.friend?.setFollowTarget(this.getPlayerModel?.(), {
+        followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+        followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+        helpingPlayerFight: true
+      });
+      return;
+    }
+    if (option.onSelect === "startFriendlyMonsterHelp" && activeFriendly?.setFollowTarget) {
+      activeFriendly.setFollowTarget(this.getPlayerModel?.(), {
+        followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+        followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+        helpingPlayerFight: true
+      });
+      return;
+    }
+    if (option.onSelect === "stopFriendlyMonsterHelp" && activeFriendly?.setFollowTarget) {
+      activeFriendly.setFollowTarget(null, { helpingPlayerFight: false });
     }
   }
 
@@ -293,7 +368,8 @@ export class QuestManager {
     this.state.shouldFollowPlayer = true;
     this.state.friend?.setFollowTarget(this.getPlayerModel?.(), {
       followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
-      followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE
+      followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+      helpingPlayerFight: true
     });
     if (quest.id === "gps-walk-30m") {
       const latestFix = window.latestLocation;
@@ -446,12 +522,14 @@ export class QuestManager {
       if (this.state.shouldFollowPlayer) {
         friend.setFollowTarget(playerModel, {
           followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
-          followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE
+          followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+          helpingPlayerFight: true
         });
       } else {
-        friend.setFollowTarget(null);
+        friend.setFollowTarget(null, { helpingPlayerFight: false });
       }
-      friend.updateAI(this.state.deltaSeconds, playerModel, {});
+      const monsters = Array.isArray(window.monsters) ? window.monsters : [];
+      friend.updateAI(this.state.deltaSeconds, playerModel, {}, monsters);
     }
     this.updateGpsQuestProgress();
     this.updateClimbQuestProgress();

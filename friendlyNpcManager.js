@@ -48,7 +48,9 @@ export function createFriendlyNpcManager({
   debug = false,
   onSpawnEvent,
   onBeforeSpawn,
-  onRemoteSpawnRequest
+  onRemoteSpawnRequest,
+  getMonsters,
+  onMonsterHit
 } = {}) {
   const friendlies = [];
   const records = new Map();
@@ -515,6 +517,8 @@ const getHealthForLevel = (level) => {
       maybeRequestSpawnFromDistance();
     }
     updateActiveFriendlies(!isHostNow);
+    const monsters = typeof getMonsters === 'function' ? (getMonsters() || []) : [];
+    const aiContext = { onMonsterHit };
     friendlies.forEach((friendly) => {
       if (!friendly?.model) return;
       const lastUpdate = friendly.lastAIUpdateMs ?? 0;
@@ -526,7 +530,7 @@ const getHealthForLevel = (level) => {
             lastUpdate > 0 ? elapsedSeconds : (Number.isFinite(delta) ? delta : 0)
           );
           friendly.lastAIUpdateMs = nowMs;
-          friendly.updateAI(aiDeltaSeconds, playerModel, otherPlayers);
+          friendly.updateAI(aiDeltaSeconds, playerModel, otherPlayers, monsters, aiContext);
         }
         persistFriendlyState(friendly);
       } else {

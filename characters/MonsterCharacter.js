@@ -496,11 +496,22 @@ export class MonsterCharacter extends CharacterBase {
       { id: 'local', model: playerModel },
       ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p.model }))
     ].filter(entry => entry.model);
+    const friendlyTargets = Array.isArray(context.friendlyTargets)
+      ? context.friendlyTargets
+        .filter((friendly) => friendly?.model && !friendly.isDead)
+        .map((friendly) => ({
+          id: friendly.id || 'friendly',
+          model: friendly.model,
+          entity: friendly,
+          targetType: 'friendly'
+        }))
+      : [];
+    const combatTargets = allPlayers.concat(friendlyTargets);
 
     let closestPlayer = null;
     let closestDistance = Infinity;
 
-    for (const player of allPlayers) {
+    for (const player of combatTargets) {
       const dist = this.model.position.distanceTo(player.model.position);
       if (dist < closestDistance) {
         closestDistance = dist;
@@ -565,7 +576,7 @@ export class MonsterCharacter extends CharacterBase {
       return;
     }
 
-    this.updateCombatAI(delta, closestPlayer, allPlayers, (player, hitContext = {}) => {
+    this.updateCombatAI(delta, closestPlayer, combatTargets, (player, hitContext = {}) => {
       const damage = Number.isFinite(hitContext.damage)
         ? Math.max(1, Math.round(hitContext.damage))
         : this.attackDamage;
@@ -576,7 +587,18 @@ export class MonsterCharacter extends CharacterBase {
       }
       const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
       const attackTypes = getAttackTypes(null, hitContext.attackTypes || ['melee']);
-      if (player.id === 'local' && !localControls?.isKnocked && !isInvincible) {
+      if (player.targetType === 'friendly') {
+        const friendly = player.entity;
+        if (!friendly?.model || friendly.isDead) return;
+        const killed = friendly.applyDamage?.(damage, { attackTypes });
+        if (!killed) {
+          friendly.applyKnockback?.({
+            direction: this.model.userData.direction.clone(),
+            strength: MONSTER_ATTACK.knockbackStrength
+          });
+        }
+        context.onFriendlyHit?.(friendly, { damage, killed: !!killed, sourceId: this.id, attackTypes });
+      } else if (player.id === 'local' && !localControls?.isKnocked && !isInvincible) {
         window.localHealth = Math.max(0, window.localHealth - damage);
         window.lastHitAttackTypes = attackTypes;
         if (localControls) {
