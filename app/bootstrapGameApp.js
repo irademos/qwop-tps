@@ -4213,13 +4213,13 @@ async function initCore(runtimeContext) {
     title.textContent = 'Walking Summary';
     title.style.margin = '0 0 14px 0';
     const distanceUnit = getDistanceUnitPreference();
-    const convertMilesToDisplay = (miles) => (distanceUnit === 'miles' ? miles : miles * 1.609344);
-    const unitLabel = distanceUnit === 'miles' ? 'miles' : 'km';
+    const convertMilesToDisplay = (miles) => (distanceUnit === 'km' ? miles * 1.609344 : miles);
+    const unitLabel = distanceUnit === 'km' ? 'km' : 'miles';
     const metrics = [
       [`Total ${unitLabel} walked`, convertMilesToDisplay(walkingState.totalMiles)],
       [`Average ${unitLabel} walked per week`, convertMilesToDisplay(avgWeekly)],
-      [`${distanceUnit === 'miles' ? 'Miles' : 'Km'} walked this week`, convertMilesToDisplay(milesThisWeek)],
-      [`${distanceUnit === 'miles' ? 'Miles' : 'Km'} walked today`, convertMilesToDisplay(todayMiles)]
+      [`${distanceUnit === 'km' ? 'Km' : 'Miles'} walked this week`, convertMilesToDisplay(milesThisWeek)],
+      [`${distanceUnit === 'km' ? 'Km' : 'Miles'} walked today`, convertMilesToDisplay(todayMiles)]
     ];
     const list = document.createElement('div');
     metrics.forEach(([label, value]) => {

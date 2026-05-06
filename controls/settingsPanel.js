@@ -73,10 +73,11 @@ function formatCoordinate(value) {
 
 function formatMeters(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  if (getDistanceUnitPreference() === 'miles') {
-    return `${(value * 3.28084).toFixed(2)} ft`;
+  if (getDistanceUnitPreference() === 'km') {
+    return `${value.toFixed(2)} m`;
   }
-  return `${value.toFixed(2)} m`;
+  return `${(value * 3.28084).toFixed(2)} ft`;
+  
 }
 
 function formatStatValue(key, value) {
