@@ -10811,36 +10811,43 @@ async function initCore(runtimeContext) {
   window.getTerrainStampDebugSample = (x, z, options) => appState.getTerrainStampDebugSample(x, z, options);
   const showNoteInteraction = async () => {
     if (!buildState.selectedNoteId) return;
-    const record = buildState.records.get(buildState.selectedNoteId);
+    const selectedNoteId = buildState.selectedNoteId;
+    const record = buildState.records.get(selectedNoteId);
     if (!record) return;
     const isOwner = record.ownerId === (multiplayer?.peer?.id || 'local');
-    noteViewModal.innerHTML = `<div class="build-modal"><h3>Note Post</h3><div class="note-view-text">${record.noteText || '(empty)'}</div><div class="build-modal-actions">${isOwner ? '<button type="button" class="build-cancel-btn" data-note-delete="1">Delete</button><button type="button" class="retro-build-btn" data-note-edit="1">Edit</button>' : ''}<button type="button" class="retro-build-btn" data-note-ok="1">Ok</button></div></div>`;
+    const closeNoteView = () => {
+      noteViewModal.classList.add('hidden');
+      noteViewModal.innerHTML = '';
+      noteViewModal.onclick = null;
+    };
+    noteViewModal.innerHTML = `<div class="build-modal"><h3>Note Post</h3><div class="note-view-text">${escapeBuildModalText(record.noteText || '(empty)')}</div><div class="build-modal-actions">${isOwner ? '<button type="button" class="build-cancel-btn" data-note-delete="1">Delete</button><button type="button" class="retro-build-btn" data-note-edit="1">Edit</button>' : ''}<button type="button" class="retro-build-btn" data-note-ok="1">Ok</button></div></div>`;
     noteViewModal.classList.remove('hidden');
-    noteViewModal.addEventListener('click', async (event) => {
+    noteViewModal.onclick = async (event) => {
       const ok = event.target.closest('[data-note-ok]');
       const edit = event.target.closest('[data-note-edit]');
       const del = event.target.closest('[data-note-delete]');
       if (event.target === noteViewModal || ok) {
-        noteViewModal.classList.add('hidden');
+        closeNoteView();
         return;
       }
       if (del) {
         const fix = getLatestLocationFix?.();
-        if (fix) await remove(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`));
+        if (fix) await remove(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${selectedNoteId}`));
         scene.remove(record.mesh);
         removeStaticBoxCollider(record.colliderEntry || record.mesh?.userData?.staticColliderEntry);
-        buildState.records.delete(buildState.selectedNoteId);
-        noteViewModal.classList.add('hidden');
+        buildState.records.delete(selectedNoteId);
+        closeNoteView();
       } else if (edit) {
+        closeNoteView();
         const text = await openNoteEntryModal(record.noteText || '');
         if (text != null) {
           const fix = getLatestLocationFix?.();
-          if (fix) await update(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`), { noteText: text });
+          if (fix) await update(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${selectedNoteId}`), { noteText: text });
           record.noteText = text;
+          if (record.mesh?.userData) record.mesh.userData.noteText = text;
         }
-        noteViewModal.classList.add('hidden');
       }
-    }, { once: true });
+    };
   };
   buildInteractionBtn.addEventListener('click', () => { void showNoteInteraction(); });
 
@@ -12249,6 +12256,12 @@ export async function bootstrapGameApp() {
 
   return appContext;
 }
+  const escapeBuildModalText = (value) => String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('\"', '&quot;')
+    .replaceAll("'", '&#39;');
   const buildModal = document.createElement('div');
   buildModal.className = 'build-modal-overlay hidden';
   const noteEntryModal = document.createElement('div');
@@ -12262,24 +12275,26 @@ export async function bootstrapGameApp() {
     const close = (value) => {
       buildModal.classList.add('hidden');
       buildModal.innerHTML = '';
+      buildModal.onclick = null;
       resolve(value);
     };
-    buildModal.addEventListener('click', (event) => {
+    buildModal.onclick = (event) => {
       const target = event.target.closest('button');
       if (event.target === buildModal || target?.dataset.buildCancel) return close(null);
       const type = target?.dataset.buildType;
       if (type) close(type);
-    }, { once: true });
+    };
   });
   const openNoteEntryModal = (initialText = '') => new Promise((resolve) => {
-    noteEntryModal.innerHTML = `<div class="build-modal"><h3>Write Your Note</h3><textarea class="note-input" maxlength="280" placeholder="Leave a helpful message...">${initialText}</textarea><div class="build-modal-actions"><button type="button" class="build-cancel-btn" data-note-cancel="1">Cancel</button><button type="button" class="retro-build-btn" data-note-save="1">Save</button></div></div>`;
+    noteEntryModal.innerHTML = `<div class="build-modal"><h3>Write Your Note</h3><textarea class="note-input" maxlength="280" placeholder="Leave a helpful message...">${escapeBuildModalText(initialText)}</textarea><div class="build-modal-actions"><button type="button" class="build-cancel-btn" data-note-cancel="1">Cancel</button><button type="button" class="retro-build-btn" data-note-save="1">Save</button></div></div>`;
     noteEntryModal.classList.remove('hidden');
     const close = (value) => {
       noteEntryModal.classList.add('hidden');
       noteEntryModal.innerHTML = '';
+      noteEntryModal.onclick = null;
       resolve(value);
     };
-    noteEntryModal.addEventListener('click', (event) => {
+    noteEntryModal.onclick = (event) => {
       const saveBtn = event.target.closest('[data-note-save]');
       const cancelBtn = event.target.closest('[data-note-cancel]');
       if (event.target === noteEntryModal || cancelBtn) return close(null);
@@ -12287,6 +12302,6 @@ export async function bootstrapGameApp() {
         const text = noteEntryModal.querySelector('.note-input')?.value || '';
         close(text.trim() || null);
       }
-    }, { once: true });
+    };
     noteEntryModal.querySelector('.note-input')?.focus();
   });
