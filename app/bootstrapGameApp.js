@@ -7355,6 +7355,25 @@ async function initCore(runtimeContext) {
     }
   });
 
+  function getBombExplosionGroundPosition(hitPosition, monster) {
+    const sourcePosition = monster?.model?.position ?? hitPosition;
+    const explosionPosition = sourcePosition?.clone?.() ?? new THREE.Vector3();
+    const groundY = getTerrainHeight(explosionPosition.x, explosionPosition.z);
+    if (Number.isFinite(groundY)) {
+      explosionPosition.y = groundY;
+    } else if (hitPosition?.isVector3 && Number.isFinite(hitPosition.y)) {
+      explosionPosition.y = Math.min(explosionPosition.y, hitPosition.y);
+    }
+    return explosionPosition;
+  }
+
+  function handleBombMonsterImpact({ hitPosition, monster } = {}, shooterId) {
+    const explosionPosition = getBombExplosionGroundPosition(hitPosition, monster);
+    spawnBombMist(scene, bombMists, explosionPosition);
+    applyBombImpactDamage(explosionPosition, shooterId);
+    return true;
+  }
+
   function spawnBombProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
     if (!bomb?.mesh) return;
 
@@ -7370,10 +7389,14 @@ async function initCore(runtimeContext) {
       lifetime: BOMB_THROW_LIFETIME,
       colliderDesc: RAPIER.ColliderDesc.ball(0.18).setRestitution(0.3).setFriction(0.8),
       groundContactOffset: 0.18,
+      damage: getBombDamage(shooterId),
+      attackLabel: 'bombExplosion',
+      attackTypes: ['explosive'],
       onGroundHit: (hitPosition) => {
         spawnBombMist(scene, bombMists, hitPosition);
         applyBombImpactDamage(hitPosition, shooterId);
-      }
+      },
+      onMonsterImpact: (impact) => handleBombMonsterImpact(impact, shooterId)
     });
 
     const latest = list[list.length - 1];
