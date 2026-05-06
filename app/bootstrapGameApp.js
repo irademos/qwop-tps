@@ -10480,6 +10480,21 @@ async function initCore(runtimeContext) {
     selectedNoteId: null,
     cameraOffset: new THREE.Vector3(0, 4, 8)
   };
+  const createNoteMesh = () => {
+    const group = new THREE.Group();
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.09, 1.0, 10),
+      new THREE.MeshStandardMaterial({ color: 0x6b4423 })
+    );
+    pole.position.y = 0.5;
+    const signTop = new THREE.Mesh(
+      new THREE.BoxGeometry(0.82, 0.54, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0xa17242 })
+    );
+    signTop.position.y = 1.04;
+    group.add(pole, signTop);
+    return group;
+  };
   const buildInteractionBtn = document.createElement('button');
   buildInteractionBtn.type = 'button';
   buildInteractionBtn.textContent = 'Read Note';
@@ -10487,8 +10502,8 @@ async function initCore(runtimeContext) {
   document.body.appendChild(buildInteractionBtn);
   const BUILD_BUCKET_PRECISION = 4;
   const buildUi = document.createElement('div');
-  buildUi.style.cssText = 'position:fixed;left:50%;bottom:20%;transform:translateX(-50%);z-index:1200;display:none;gap:8px;flex-direction:column;align-items:center;';
-  buildUi.innerHTML = '<button id="build-confirm-btn" style="padding:10px 14px;">Build</button><div style="display:flex;gap:6px;"><button id="build-up-btn">⬆</button><button id="build-down-btn">⬇</button></div>';
+  buildUi.className = 'build-action-ui';
+  buildUi.innerHTML = '<button id="build-confirm-btn" class="retro-build-btn">Build</button><div class="build-vertical-controls"><button id="build-up-btn" class="retro-build-btn" aria-label="Move build up">▲ Up</button><button id="build-down-btn" class="retro-build-btn" aria-label="Move build down">▼ Down</button></div>';
   document.body.appendChild(buildUi);
   const buildConfirmBtn = buildUi.querySelector('#build-confirm-btn');
   const buildUpBtn = buildUi.querySelector('#build-up-btn');
@@ -10524,7 +10539,7 @@ async function initCore(runtimeContext) {
       Object.entries(value).forEach(([id, record]) => {
         if (buildState.records.has(id) || !record) return;
         const mesh = record.type === 'note'
-          ? new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.3, 0.15), new THREE.MeshStandardMaterial({ color: 0x8b5a2b }))
+          ? createNoteMesh()
           : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
         mesh.position.set(record.x || 0, record.y || 0, record.z || 0);
         mesh.userData.buildRecordId = id;
@@ -10654,17 +10669,16 @@ async function initCore(runtimeContext) {
     useInventoryItem: (itemId) => useInventoryItem(itemId),
     startBuildFlow: async (itemId) => {
       if (itemId !== 'wood') return;
-      const choice = window.prompt('Type "block" to build a block or "note" for Note Post', 'block');
-      if (!choice) return;
+      const type = await openBuildTypePicker();
+      if (!type) return;
       let noteText = '';
-      const type = choice.toLowerCase().includes('note') ? 'note' : 'block';
       if (type === 'note') {
-        noteText = window.prompt('Enter note text') || '';
-        if (!noteText.trim()) return;
+        noteText = await openNoteEntryModal();
+        if (!noteText?.trim()) return;
       }
       const pos = playerModel?.position?.clone?.() || new THREE.Vector3();
       const mesh = type === 'note'
-        ? new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.3, 0.15), new THREE.MeshStandardMaterial({ color: 0x8b5a2b }))
+        ? createNoteMesh()
         : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
       mesh.position.copy(pos).add(new THREE.Vector3(0, 1.2, 1.2));
       scene.add(mesh);
@@ -10800,23 +10814,33 @@ async function initCore(runtimeContext) {
     const record = buildState.records.get(buildState.selectedNoteId);
     if (!record) return;
     const isOwner = record.ownerId === (multiplayer?.peer?.id || 'local');
-    window.alert(`Note: ${record.noteText || '(empty)'}`);
-    if (!isOwner) return;
-    const action = window.prompt('Type edit or delete to manage your post');
-    if (action === 'delete') {
-      const fix = getLatestLocationFix?.();
-      if (fix) await remove(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`));
-      scene.remove(record.mesh);
-      removeStaticBoxCollider(record.colliderEntry || record.mesh?.userData?.staticColliderEntry);
-      buildState.records.delete(buildState.selectedNoteId);
-    } else if (action === 'edit') {
-      const text = window.prompt('Edit note', record.noteText || '');
-      if (text != null) {
-        const fix = getLatestLocationFix?.();
-        if (fix) await update(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`), { noteText: text });
-        record.noteText = text;
+    noteViewModal.innerHTML = `<div class="build-modal"><h3>Note Post</h3><div class="note-view-text">${record.noteText || '(empty)'}</div><div class="build-modal-actions">${isOwner ? '<button type="button" class="build-cancel-btn" data-note-delete="1">Delete</button><button type="button" class="retro-build-btn" data-note-edit="1">Edit</button>' : ''}<button type="button" class="retro-build-btn" data-note-ok="1">Ok</button></div></div>`;
+    noteViewModal.classList.remove('hidden');
+    noteViewModal.addEventListener('click', async (event) => {
+      const ok = event.target.closest('[data-note-ok]');
+      const edit = event.target.closest('[data-note-edit]');
+      const del = event.target.closest('[data-note-delete]');
+      if (event.target === noteViewModal || ok) {
+        noteViewModal.classList.add('hidden');
+        return;
       }
-    }
+      if (del) {
+        const fix = getLatestLocationFix?.();
+        if (fix) await remove(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`));
+        scene.remove(record.mesh);
+        removeStaticBoxCollider(record.colliderEntry || record.mesh?.userData?.staticColliderEntry);
+        buildState.records.delete(buildState.selectedNoteId);
+        noteViewModal.classList.add('hidden');
+      } else if (edit) {
+        const text = await openNoteEntryModal(record.noteText || '');
+        if (text != null) {
+          const fix = getLatestLocationFix?.();
+          if (fix) await update(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${buildState.selectedNoteId}`), { noteText: text });
+          record.noteText = text;
+        }
+        noteViewModal.classList.add('hidden');
+      }
+    }, { once: true });
   };
   buildInteractionBtn.addEventListener('click', () => { void showNoteInteraction(); });
 
@@ -12225,3 +12249,48 @@ export async function bootstrapGameApp() {
 
   return appContext;
 }
+  const buildModal = document.createElement('div');
+  buildModal.className = 'build-modal-overlay hidden';
+  const noteEntryModal = document.createElement('div');
+  noteEntryModal.className = 'build-modal-overlay hidden';
+  const noteViewModal = document.createElement('div');
+  noteViewModal.className = 'build-modal-overlay hidden';
+  document.body.append(buildModal, noteEntryModal, noteViewModal);
+  const openBuildTypePicker = () => new Promise((resolve) => {
+    buildModal.innerHTML = `<div class="build-modal"><h3>Choose Build Type</h3><div class="build-options-list"><button type="button" class="build-option-btn" data-build-type="block"><span>🧱</span>Block</button><button type="button" class="build-option-btn" data-build-type="note"><span>🪧</span>Note Post</button></div><button type="button" class="build-cancel-btn" data-build-cancel="1">Cancel</button></div>`;
+    buildModal.classList.remove('hidden');
+    const handleClick = (event) => {
+      const target = event.target.closest('button');
+      if (event.target === buildModal || target?.dataset.buildCancel) return close(null);
+      const type = target?.dataset.buildType;
+      if (type) close(type);
+    };
+    const close = (value) => {
+      buildModal.classList.add('hidden');
+      buildModal.innerHTML = '';
+      buildModal.removeEventListener('click', handleClick);
+      resolve(value);
+    };
+    buildModal.addEventListener('click', handleClick);
+  });
+  const openNoteEntryModal = (initialText = '') => new Promise((resolve) => {
+    noteEntryModal.innerHTML = `<div class="build-modal"><h3>Write Your Note</h3><textarea class="note-input" maxlength="280" placeholder="Leave a helpful message...">${initialText}</textarea><div class="build-modal-actions"><button type="button" class="build-cancel-btn" data-note-cancel="1">Cancel</button><button type="button" class="retro-build-btn" data-note-save="1">Save</button></div></div>`;
+    noteEntryModal.classList.remove('hidden');
+    const handleClick = (event) => {
+      const saveBtn = event.target.closest('[data-note-save]');
+      const cancelBtn = event.target.closest('[data-note-cancel]');
+      if (event.target === noteEntryModal || cancelBtn) return close(null);
+      if (saveBtn) {
+        const text = noteEntryModal.querySelector('.note-input')?.value || '';
+        close(text.trim() || null);
+      }
+    };
+    const close = (value) => {
+      noteEntryModal.classList.add('hidden');
+      noteEntryModal.innerHTML = '';
+      noteEntryModal.removeEventListener('click', handleClick);
+      resolve(value);
+    };
+    noteEntryModal.addEventListener('click', handleClick);
+    noteEntryModal.querySelector('.note-input')?.focus();
+  });
