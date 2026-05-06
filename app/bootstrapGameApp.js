@@ -7273,6 +7273,14 @@ async function initCore(runtimeContext) {
       }
     }
 
+    buildState.records.forEach((record, id) => {
+      if (!record?.mesh?.position) return;
+      const distance = hitPosition.distanceTo(record.mesh.position);
+      if (distance <= BOMB_DAMAGE_RADIUS + 0.7) {
+        void applyBuildDamage(id, record, damage);
+      }
+    });
+
     if (natureController?.removeRocksInRadius) {
       const removedRockPositions = natureController.removeRocksInRadius(hitPosition, BOMB_DAMAGE_RADIUS);
       if (removedRockPositions.length > 0) {
@@ -7579,7 +7587,8 @@ async function initCore(runtimeContext) {
     playerModel,
     playerControls,
     monsters,
-    multiplayer
+    multiplayer,
+    onBuildHit
   }) {
     if (!mistList.length) return;
     const now = performance.now();
@@ -7617,6 +7626,12 @@ async function initCore(runtimeContext) {
             window.lastHitAttackTypes = getAttackTypes('iceMistProjectile', ['ice']);
             mist.hitTargets.add('local');
           }
+        }
+      }
+
+      if (typeof onBuildHit === 'function' && !mist.hitTargets.has('build')) {
+        if (onBuildHit({ position: mist.group.position, radius: mist.radius + 0.7, damage: 1 })) {
+          mist.hitTargets.add('build');
         }
       }
 
@@ -10473,6 +10488,14 @@ async function initCore(runtimeContext) {
     debugState.lastError = error;
   };
 
+  const BUILD_MAX_HEALTH = 100;
+  const BUILD_HEALTH_BAR_DISPLAY_MS = 1800;
+  const buildHealthBarState = {
+    tempBox: new THREE.Box3(),
+    tempForward: new THREE.Vector3(),
+    tempToTarget: new THREE.Vector3(),
+    tempRight: new THREE.Vector3()
+  };
   const buildState = {
     mode: null,
     placing: null,
@@ -10495,6 +10518,191 @@ async function initCore(runtimeContext) {
     group.add(pole, signTop);
     return group;
   };
+  const createBuildHealthBar = (mesh) => {
+    if (!mesh || mesh.userData.buildHealthBar) return mesh?.userData?.buildHealthBar || null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 18;
+    const context = canvas.getContext('2d');
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(1.25, 0.18, 1);
+    sprite.visible = false;
+    sprite.userData = { canvas, context, texture };
+    mesh.add(sprite);
+    mesh.updateWorldMatrix?.(true, true);
+    buildHealthBarState.tempBox.setFromObject(mesh);
+    const sizeY = Number.isFinite(buildHealthBarState.tempBox.max.y)
+      ? Math.max(1, buildHealthBarState.tempBox.max.y - buildHealthBarState.tempBox.min.y)
+      : 1;
+    sprite.position.set(0, sizeY + 0.35, 0);
+    mesh.userData.buildHealthBar = sprite;
+    return sprite;
+  };
+
+  const updateBuildHealthBarTexture = (mesh) => {
+    const bar = mesh?.userData?.buildHealthBar || createBuildHealthBar(mesh);
+    const context = bar?.userData?.context;
+    const canvas = bar?.userData?.canvas;
+    if (!bar || !context || !canvas) return;
+    const maxHealth = Number.isFinite(mesh.userData.buildMaxHealth) ? mesh.userData.buildMaxHealth : BUILD_MAX_HEALTH;
+    const health = Math.max(0, Math.min(maxHealth, Number.isFinite(mesh.userData.buildHealth) ? mesh.userData.buildHealth : maxHealth));
+    const fillWidth = Math.round((canvas.width - 8) * (health / maxHealth));
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(0, 0, 0, 0.62)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(65, 65, 65, 0.88)';
+    context.fillRect(4, 4, canvas.width - 8, canvas.height - 8);
+    context.fillStyle = health > maxHealth * 0.45 ? 'rgba(76, 175, 80, 0.95)' : health > maxHealth * 0.2 ? 'rgba(255, 193, 7, 0.95)' : 'rgba(214, 53, 60, 0.95)';
+    context.fillRect(4, 4, fillWidth, canvas.height - 8);
+    bar.userData.texture.needsUpdate = true;
+  };
+
+  const showBuildHealthBar = (mesh) => {
+    const bar = mesh?.userData?.buildHealthBar || createBuildHealthBar(mesh);
+    if (!bar) return;
+    updateBuildHealthBarTexture(mesh);
+    bar.visible = true;
+    bar.userData.visibleUntil = Date.now() + BUILD_HEALTH_BAR_DISPLAY_MS;
+  };
+
+  const getCurrentBuildPath = () => {
+    const fix = getLatestLocationFix?.();
+    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return null;
+    return onBuildLatLonPath(fix.lat, fix.lon);
+  };
+
+  const removeBuildRecord = async (id, record, { refundToInventory = false, spawnWoodDrop = false } = {}) => {
+    if (!id || !record) return false;
+    const buildPath = getCurrentBuildPath();
+    if (buildPath) {
+      await remove(ref(db, `${buildPath}/${id}`));
+    }
+    disposeBuildHealthBar(record.mesh);
+    if (record.mesh) {
+      scene.remove(record.mesh);
+    }
+    removeStaticBoxCollider(record.colliderEntry || record.mesh?.userData?.staticColliderEntry);
+    buildState.records.delete(id);
+    if (buildState.selectedNoteId === id) {
+      buildState.selectedNoteId = null;
+      buildInteractionBtn.style.display = 'none';
+    }
+    if (refundToInventory) {
+      addToInventory('wood', 1);
+    } else if (spawnWoodDrop) {
+      const dropPosition = record.mesh?.position?.clone?.() || new THREE.Vector3(record.x || 0, record.y || 0, record.z || 0);
+      spawnWoodPickup(dropPosition);
+    }
+    return true;
+  };
+
+  const applyBuildDamage = async (id, record, damage = 1) => {
+    if (!id || !record?.mesh) return false;
+    const currentHealth = Number.isFinite(record.health)
+      ? record.health
+      : Number.isFinite(record.mesh.userData.buildHealth)
+        ? record.mesh.userData.buildHealth
+        : BUILD_MAX_HEALTH;
+    const nextHealth = Math.max(0, currentHealth - Math.max(1, damage));
+    record.health = nextHealth;
+    record.mesh.userData.buildHealth = nextHealth;
+    showBuildHealthBar(record.mesh);
+    if (nextHealth <= 0) {
+      await removeBuildRecord(id, record, { spawnWoodDrop: true });
+    } else {
+      const buildPath = getCurrentBuildPath();
+      if (buildPath) {
+        await update(ref(db, `${buildPath}/${id}`), { health: nextHealth });
+      }
+    }
+    return true;
+  };
+
+  const handleBuildAttackHit = ({ attacker, range, region, damage } = {}) => {
+    const attackerPosition = attacker?.model?.position;
+    if (!attackerPosition) return false;
+    const effectiveRange = Math.max(0.8, Number.isFinite(range) ? range : 1.5);
+    let closest = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    buildState.records.forEach((record, id) => {
+      if (!record?.mesh?.position) return;
+      buildHealthBarState.tempToTarget.subVectors(record.mesh.position, attackerPosition);
+      buildHealthBarState.tempToTarget.y = 0;
+      const distance = buildHealthBarState.tempToTarget.length();
+      if ((region || 'around') === 'forward') {
+        attacker.model.getWorldDirection(buildHealthBarState.tempForward);
+        buildHealthBarState.tempForward.y = 0;
+        if (buildHealthBarState.tempForward.lengthSq() < 0.0001) {
+          buildHealthBarState.tempForward.set(0, 0, 1);
+        } else {
+          buildHealthBarState.tempForward.normalize();
+        }
+        const forwardDistance = buildHealthBarState.tempToTarget.dot(buildHealthBarState.tempForward);
+        buildHealthBarState.tempRight.set(buildHealthBarState.tempForward.z, 0, -buildHealthBarState.tempForward.x);
+        const lateralDistance = Math.abs(buildHealthBarState.tempToTarget.dot(buildHealthBarState.tempRight));
+        if (forwardDistance < 0 || forwardDistance > effectiveRange + 0.7 || lateralDistance > effectiveRange + 0.7) return;
+      }
+      if (distance <= effectiveRange + 0.7 && distance < closestDistance) {
+        closest = { id, record };
+        closestDistance = distance;
+      }
+    });
+    if (!closest) return false;
+    void applyBuildDamage(closest.id, closest.record, damage);
+    return true;
+  };
+
+  const handleBuildProjectileHit = ({ projectileBox, damage } = {}) => {
+    if (!projectileBox) return false;
+    for (const [id, record] of buildState.records.entries()) {
+      if (!record?.mesh) continue;
+      buildHealthBarState.tempBox.setFromObject(record.mesh);
+      if (projectileBox.intersectsBox(buildHealthBarState.tempBox)) {
+        void applyBuildDamage(id, record, damage);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const handleBuildAreaHit = ({ position, radius, damage } = {}) => {
+    if (!position || !Number.isFinite(radius)) return false;
+    let didHit = false;
+    buildState.records.forEach((record, id) => {
+      if (!record?.mesh?.position) return;
+      if (position.distanceTo(record.mesh.position) <= radius) {
+        didHit = true;
+        void applyBuildDamage(id, record, damage);
+      }
+    });
+    return didHit;
+  };
+
+  const updateBuildHealthBars = () => {
+    const now = Date.now();
+    buildState.records.forEach((record) => {
+      const bar = record?.mesh?.userData?.buildHealthBar;
+      if (bar?.visible && now > (bar.userData.visibleUntil || 0)) {
+        bar.visible = false;
+      }
+    });
+  };
+
+  const disposeBuildHealthBar = (mesh) => {
+    const bar = mesh?.userData?.buildHealthBar;
+    if (!bar) return;
+    bar.parent?.remove(bar);
+    bar.material?.map?.dispose?.();
+    bar.material?.dispose?.();
+    delete mesh.userData.buildHealthBar;
+  };
+
   const buildInteractionBtn = document.createElement('button');
   buildInteractionBtn.type = 'button';
   buildInteractionBtn.textContent = 'Read Note';
@@ -10536,14 +10744,35 @@ async function initCore(runtimeContext) {
     if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
     onValue(ref(db, onBuildLatLonPath(fix.lat, fix.lon)), (snapshot) => {
       const value = snapshot.val() || {};
+      const incomingIds = new Set(Object.keys(value));
+      buildState.records.forEach((existingRecord, existingId) => {
+        if (incomingIds.has(existingId)) return;
+        disposeBuildHealthBar(existingRecord.mesh);
+        if (existingRecord.mesh) scene.remove(existingRecord.mesh);
+        removeStaticBoxCollider(existingRecord.colliderEntry || existingRecord.mesh?.userData?.staticColliderEntry);
+        buildState.records.delete(existingId);
+      });
       Object.entries(value).forEach(([id, record]) => {
-        if (buildState.records.has(id) || !record) return;
+        if (!record) return;
+        const existing = buildState.records.get(id);
+        if (existing) {
+          existing.health = Number.isFinite(record.health) ? record.health : existing.health;
+          existing.noteText = record.noteText || '';
+          existing.ownerId = record.ownerId || null;
+          if (existing.mesh?.userData) {
+            existing.mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
+            existing.mesh.userData.noteText = record.noteText || '';
+          }
+          if (existing.mesh?.userData?.buildHealthBar?.visible) updateBuildHealthBarTexture(existing.mesh);
+          return;
+        }
         const mesh = record.type === 'note'
           ? createNoteMesh()
           : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
         mesh.position.set(record.x || 0, record.y || 0, record.z || 0);
         mesh.userData.buildRecordId = id;
-        mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : 100;
+        mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
+        mesh.userData.buildMaxHealth = BUILD_MAX_HEALTH;
         mesh.userData.buildOwner = record.ownerId || null;
         mesh.userData.buildType = record.type || 'block';
         mesh.userData.noteText = record.noteText || '';
@@ -10565,11 +10794,14 @@ async function initCore(runtimeContext) {
     if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
     const idRef = push(ref(db, onBuildLatLonPath(fix.lat, fix.lon)));
     const p = buildState.placing.mesh.position;
-    const record = { type: buildState.placing.type, x: p.x, y: p.y, z: p.z, health: 100, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local' };
+    const record = { type: buildState.placing.type, x: p.x, y: p.y, z: p.z, health: BUILD_MAX_HEALTH, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local' };
     await set(idRef, record);
     const colliderEntry = createStaticBoxColliderForObject(buildState.placing.mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
     buildState.records.set(idRef.key, { ...record, mesh: buildState.placing.mesh, colliderEntry });
     buildState.placing.mesh.userData.buildRecordId = idRef.key;
+    buildState.placing.mesh.userData.buildHealth = BUILD_MAX_HEALTH;
+    buildState.placing.mesh.userData.buildMaxHealth = BUILD_MAX_HEALTH;
+    buildState.placing.mesh.userData.buildType = record.type;
     buildState.placing.mesh.userData.noteText = record.noteText;
     buildState.placing = null;
     isBuildPlacementActive = false;
@@ -10831,11 +11063,7 @@ async function initCore(runtimeContext) {
         return;
       }
       if (del) {
-        const fix = getLatestLocationFix?.();
-        if (fix) await remove(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${selectedNoteId}`));
-        scene.remove(record.mesh);
-        removeStaticBoxCollider(record.colliderEntry || record.mesh?.userData?.staticColliderEntry);
-        buildState.records.delete(selectedNoteId);
+        await removeBuildRecord(selectedNoteId, record, { refundToInventory: true });
         closeNoteView();
       } else if (edit) {
         closeNoteView();
@@ -11188,6 +11416,7 @@ async function initCore(runtimeContext) {
         buildInteractionBtn.style.display = shouldShow ? 'block' : 'none';
       }
     }
+    updateBuildHealthBars();
     if (craftState.swirl?.line) {
       craftState.swirl.line.rotation.y += frameDelta * 2;
     }
@@ -12137,7 +12366,8 @@ async function initCore(runtimeContext) {
       multiplayer,
       monsters: getDamageableCreatures(),
       sendMonsterAttack: sendMonsterAttackIntent,
-      onMonsterHit: handleMonsterDamage
+      onMonsterHit: handleMonsterDamage,
+      onBuildHit: handleBuildProjectileHit
     });
     handleBombPickupArrowHit();
 
@@ -12148,7 +12378,8 @@ async function initCore(runtimeContext) {
       playerModel,
       playerControls,
       monsters: getDamageableCreatures(),
-      multiplayer
+      multiplayer,
+      onBuildHit: handleBuildAreaHit
     });
 
     updateBombMists({
@@ -12181,6 +12412,7 @@ async function initCore(runtimeContext) {
       onMonsterHit: handleMonsterDamage,
       onSwordHit: handleSwordTreeHit,
       onTorchHit: handleTorchTreeHit,
+      onBuildHit: handleBuildAttackHit,
       onEntityHit: handleCombatEntityHit
     });
 
