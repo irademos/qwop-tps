@@ -259,6 +259,9 @@ const loadMerchantFriendly = ({
     friendly.setLevel(1, { preserveHealth: false });
     friendly.resetHealth();
     friendly.model.userData.npcRole = 'merchant';
+    if (friendly.healthBar) {
+      friendly.healthBar.visible = false;
+    }
     friendly.model.userData.mode = 'engaged';
     const basePosition = merchantSpawnBasePosition.clone().add(MERCHANT_OFFSET);
     const terrainHeight = getTerrainHeight?.(basePosition.x, basePosition.z);

@@ -7,6 +7,8 @@ const DEFAULT_HEALTH = BASE_HEALTH_SEGMENTS;
 const WANDER_CHANGE_MS = 2400;
 const MOVE_FADE = 0.2;
 const IDLE_SPEED_MULTIPLIER = 1.0;
+const FRIENDLY_MONSTER_HELP_RADIUS = 12;
+const FRIENDLY_MONSTER_DAMAGE = 1;
 const DANCE_MIN_INTERVAL_MS = 3200;
 const DANCE_MAX_INTERVAL_MS = 7200;
 const DANCE_MIN_DURATION_MS = 1800;
@@ -29,10 +31,17 @@ export class FriendlyCharacter extends MonsterCharacter {
     this.followTargetModel = null;
     this.followDistance = 3;
     this.followStartDistance = 4.5;
+    this.helpingPlayerFight = false;
+    this.monsterHelpRadius = FRIENDLY_MONSTER_HELP_RADIUS;
+    this.alwaysShowHealthBar = true;
     this.model.userData.mode = "friendly";
+    this.model.userData.helpingPlayerFight = false;
     this.speedMultiplier = 1;
     this.sizeScale = 1;
-    this.attackDamage = 0;
+    this.attackDamage = FRIENDLY_MONSTER_DAMAGE;
+    if (this.healthBar) {
+      this.healthBar.visible = true;
+    }
     this.setLevel(1, { preserveHealth: false });
   }
 
@@ -72,8 +81,12 @@ export class FriendlyCharacter extends MonsterCharacter {
     this.nextDanceAt = now + interval;
   }
 
-  setFollowTarget(model, { followDistance = 3, followStartDistance = 4.5 } = {}) {
+  setFollowTarget(model, { followDistance = 3, followStartDistance = 4.5, helpingPlayerFight = null } = {}) {
     this.followTargetModel = model || null;
+    if (helpingPlayerFight != null) {
+      this.helpingPlayerFight = !!helpingPlayerFight;
+      this.model.userData.helpingPlayerFight = this.helpingPlayerFight;
+    }
     if (Number.isFinite(followDistance)) {
       this.followDistance = Math.max(0, followDistance);
     }
@@ -88,7 +101,7 @@ export class FriendlyCharacter extends MonsterCharacter {
     this.model.userData.level = nextLevel;
     this.sizeScale = 1;
     this.speedMultiplier = 1;
-    this.attackDamage = 0;
+    this.attackDamage = FRIENDLY_MONSTER_DAMAGE;
     this.maxHealth = getMaxHealthSegments(nextLevel);
     this.model.userData.maxHealth = this.maxHealth;
     if (!preserveHealth) {
@@ -106,7 +119,27 @@ export class FriendlyCharacter extends MonsterCharacter {
     super.updateHealthBarScale();
   }
 
-  updateAI(deltaTime, playerModel, otherPlayers) {
+  updateHealthBarVisibility() {
+    if (!this.healthBar) return;
+    this.healthBar.visible = !this.isDead && this.model.userData.npcRole !== 'merchant';
+  }
+
+  findClosestMonster(monsters = []) {
+    if (!this.model?.position || !Array.isArray(monsters)) return null;
+    let closest = null;
+    let closestDistance = Infinity;
+    monsters.forEach((monster) => {
+      if (!monster?.model?.position || monster.isDead) return;
+      const distance = this.model.position.distanceTo(monster.model.position);
+      if (distance <= this.monsterHelpRadius && distance < closestDistance) {
+        closest = monster;
+        closestDistance = distance;
+      }
+    });
+    return closest ? { id: closest.id, model: closest.model, entity: closest, distance: closestDistance } : null;
+  }
+
+  updateAI(deltaTime, playerModel, otherPlayers = {}, monsters = [], context = {}) {
     if (!this.model) return;
     const body = this.body;
     if (!body) return;
@@ -155,6 +188,38 @@ export class FriendlyCharacter extends MonsterCharacter {
     if (this.forceEngaged) {
       this.isEngaged = true;
       this.model.userData.mode = "engaged";
+    }
+
+    const canHelpFightMonsters = this.helpingPlayerFight || this.model.userData.isQuestFriend === true;
+    const closestMonster = canHelpFightMonsters ? this.findClosestMonster(monsters) : null;
+    if (closestMonster) {
+      this.isEngaged = true;
+      this.model.userData.mode = "engaged";
+      this.danceUntil = 0;
+      this.updateCombatAI(delta, closestMonster, [closestMonster], (monsterTarget, hitContext = {}) => {
+        const monster = monsterTarget?.entity;
+        if (!monster?.model || monster.isDead) return;
+        const damage = Number.isFinite(hitContext.damage)
+          ? Math.max(1, Math.round(hitContext.damage))
+          : this.attackDamage;
+        const killed = monster.applyDamage?.(damage, { attackTypes: hitContext.attackTypes || ['friendly', 'melee'] });
+        if (!killed) {
+          monster.applyKnockback?.({
+            direction: monster.model.position.clone().sub(this.model.position).normalize(),
+            strength: hitContext.strength
+          });
+        }
+        context.onMonsterHit?.(monster, {
+          damage,
+          killed: !!killed,
+          sourceId: this.id,
+          attackTypes: hitContext.attackTypes || ['friendly', 'melee']
+        });
+        if (killed) {
+          window.onMonsterKill?.(monster, { withFriend: true });
+        }
+      }, context);
+      return;
     }
 
     if (this.followTargetModel?.position && !this.forceEngaged) {
