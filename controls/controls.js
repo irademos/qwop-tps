@@ -124,7 +124,13 @@ const GRAB_MOVE_SEND_INTERVAL_MS = 110;
 const GRAB_MOVE_MIN_DELTA_SQ = 0.02 * 0.02;
 const AUTO_AIM_RANGE_M = 50;
 const AUTO_AIM_ICE_RANGE_M = 10;
-const AUTO_AIM_RAMP_SPEED = 4.5;
+const AUTO_AIM_THROW_RANGE_M = 18;
+const AUTO_AIM_TARGET_CENTER_Y = 0.9;
+const AUTO_AIM_ARC_CONFIG = Object.freeze({
+  bow: { nearDistance: 6, farDistance: 45, maxLoftRadians: 0.24 },
+  bomb: { nearDistance: 4, farDistance: 36, maxLoftRadians: 0.48 },
+  throw: { nearDistance: 2.5, farDistance: 16, maxLoftRadians: 0.62 }
+});
 
 export class PlayerControls {
   constructor({
@@ -1005,11 +1011,12 @@ export class PlayerControls {
       const throwItemId = this.mobileThrowAimItemId;
       this.mobileThrowAimItemId = null;
       this.isFireHeld = false;
-    this.autoAimBreakUntilRelease = false;
-    this.autoAimCurrentPitch = 0;
+      this.autoAimBreakUntilRelease = false;
+      this.autoAimCurrentPitch = 0;
       this.setAiming(false);
       const hand = this.getInventoryItemHand?.(throwItemId) || 'right';
-      const direction = this.getAimDirection(true);
+      const autoAimDirection = this.getAutoAimDirection({ itemId: throwItemId, type: 'throw' });
+      const direction = autoAimDirection ?? this.getAimDirection(true);
       const position = this.getProjectileSpawnPosition(direction);
       const didThrow = this.throwInventoryItem?.(throwItemId, position, direction);
       if (didThrow) {
@@ -3327,8 +3334,10 @@ export class PlayerControls {
   }
 
   updateAimingRotation() {
-    if (!this.isFireHeld || !this.shouldHoldToFire() || this.isWeaponShoulderCameraActive()) return;
-    const weapon = this.getEquippedWeapon();
+    const weapon = this.mobileThrowAimItemId
+      ? { itemId: this.mobileThrowAimItemId, type: 'throw' }
+      : this.getEquippedWeapon();
+    if (!this.isFireHeld || (!this.mobileThrowAimItemId && !this.shouldHoldToFire()) || this.isWeaponShoulderCameraActive()) return;
     const invertForBow = weapon?.itemId === 'bow';
     const autoAimDirection = this.getAutoAimDirection(weapon);
     const direction = autoAimDirection ?? this.getAimDirection(invertForBow);
@@ -3352,39 +3361,53 @@ export class PlayerControls {
 
   getAutoAimDirection(weapon) {
     if (!weapon || this.autoAimBreakUntilRelease || !this.playerModel) return null;
-    if (!(weapon.itemId === 'bow' || weapon.itemId === 'iceGun' || weapon.itemId === 'bomb')) return null;
 
-    const maxRange = weapon.itemId === 'iceGun' ? AUTO_AIM_ICE_RANGE_M : AUTO_AIM_RANGE_M;
+    const isBow = weapon.itemId === 'bow';
+    const isBomb = weapon.itemId === 'bomb';
+    const isIceGun = weapon.itemId === 'iceGun';
+    const isThrownItem = weapon.type === 'throw' && !isBomb;
+    if (!(isBow || isBomb || isIceGun || isThrownItem)) return null;
+
+    const maxRange = isIceGun
+      ? AUTO_AIM_ICE_RANGE_M
+      : (isThrownItem ? AUTO_AIM_THROW_RANGE_M : AUTO_AIM_RANGE_M);
     const target = this.findAutoAimTarget(maxRange);
     if (!target) {
       this.autoAimCurrentPitch = 0;
       return null;
     }
 
-    const eyePos = this.playerModel.position.clone().add(new THREE.Vector3(0, 0.9, 0));
-    const targetPos = target.position.clone();
+    const eyePos = this.playerModel.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+    const targetPos = target.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
     const baseDirection = targetPos.sub(eyePos);
     if (baseDirection.lengthSq() <= 0.0001) return null;
 
-    if (weapon.itemId === 'bow' || weapon.itemId === 'bomb') {
-      const horizontal = Math.hypot(baseDirection.x, baseDirection.z);
-      const targetPitch = Math.atan2(baseDirection.y, Math.max(0.001, horizontal));
-      const lowPitch = targetPitch - 0.2;
-      const highPitch = targetPitch + 0.2;
-      const delta = Math.max(this.deltaSeconds || 0.016, 0.001) * AUTO_AIM_RAMP_SPEED;
-      this.autoAimCurrentPitch = THREE.MathUtils.lerp(this.autoAimCurrentPitch || lowPitch, highPitch, Math.min(delta, 1));
-      const yaw = Math.atan2(baseDirection.x, baseDirection.z);
-      return new THREE.Vector3(
-        Math.sin(yaw) * Math.cos(this.autoAimCurrentPitch),
-        Math.sin(this.autoAimCurrentPitch),
-        Math.cos(yaw) * Math.cos(this.autoAimCurrentPitch)
-      ).normalize();
+    if (isBow || isBomb || isThrownItem) {
+      const arcType = isBow ? 'bow' : (isBomb ? 'bomb' : 'throw');
+      return this.getDistanceAdjustedArcDirection(baseDirection, arcType);
     }
 
     this.autoAimCurrentPitch = 0;
     return baseDirection.normalize();
   }
 
+  getDistanceAdjustedArcDirection(baseDirection, arcType) {
+    const horizontal = Math.hypot(baseDirection.x, baseDirection.z);
+    const directPitch = Math.atan2(baseDirection.y, Math.max(0.001, horizontal));
+    const config = AUTO_AIM_ARC_CONFIG[arcType] ?? AUTO_AIM_ARC_CONFIG.bow;
+    const range = Math.max(0.001, config.farDistance - config.nearDistance);
+    const distanceT = THREE.MathUtils.clamp((horizontal - config.nearDistance) / range, 0, 1);
+    const easedDistanceT = distanceT * distanceT * (3 - (2 * distanceT));
+    const adjustedPitch = directPitch + (config.maxLoftRadians * easedDistanceT);
+    const yaw = Math.atan2(baseDirection.x, baseDirection.z);
+
+    this.autoAimCurrentPitch = adjustedPitch;
+    return new THREE.Vector3(
+      Math.sin(yaw) * Math.cos(adjustedPitch),
+      Math.sin(adjustedPitch),
+      Math.cos(yaw) * Math.cos(adjustedPitch)
+    ).normalize();
+  }
 
   resolveMonsterActorForAutoAim(monster) {
     if (!monster || typeof monster !== 'object') return null;
