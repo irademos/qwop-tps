@@ -2468,3 +2468,47 @@ body.settings-open #inventory-button {
   background: #3cb85a;
   border-color: #3cb85a;
 }
+
+.build-action-ui {
+  position: fixed;
+  left: 50%;
+  bottom: 20%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: none;
+  gap: 10px;
+  flex-direction: column;
+  align-items: center;
+}
+.retro-build-btn,
+.build-cancel-btn {
+  border: 2px solid #26180a;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #f5cb74 0%, #cb8b36 100%);
+  color: #2e1b08;
+  font-weight: 800;
+  padding: 10px 14px;
+  box-shadow: 0 4px 0 #5f3b14;
+}
+.retro-build-btn:active,
+.build-cancel-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #5f3b14; }
+.build-vertical-controls { display: flex; gap: 8px; }
+.build-modal-overlay {
+  position: fixed; inset: 0; z-index: 1600; display: grid; place-items: center; background: rgba(0,0,0,.5);
+}
+.build-modal-overlay.hidden { display: none; }
+.build-modal {
+  width: min(92vw, 420px); max-height: 70vh; overflow: auto; border: 2px solid #3a220b; border-radius: 10px;
+  background: linear-gradient(180deg, #fff5de 0%, #f0d4a2 100%); padding: 16px;
+}
+.build-options-list { display: grid; gap: 10px; max-height: 40vh; overflow: auto; margin: 12px 0; }
+.build-option-btn {
+  font: inherit; border: 2px solid #3a220b; border-radius: 8px; background: #fff9ea; padding: 12px; display: flex; gap: 8px; align-items: center;
+}
+.note-input {
+  width: 100%; min-height: 140px; margin: 10px 0; border: 2px solid #5f3b14; border-radius: 8px; padding: 10px; font: inherit; resize: vertical;
+}
+.note-view-text {
+  white-space: pre-wrap; max-height: 36vh; overflow: auto; border: 1px solid #8d6430; border-radius: 8px; background: #fff8ea; padding: 10px; margin: 10px 0;
+}
+.build-modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }

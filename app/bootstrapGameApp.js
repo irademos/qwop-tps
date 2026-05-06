@@ -42,6 +42,7 @@ import { createHomeSystem } from '../home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
+import { createStaticBoxColliderForObject, removeStaticBoxCollider, syncStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
 import { configureSpawnAlignment, getSpawnPosition, getSpawnY } from '../spawnUtils.js';
 import { createLocationProvider } from '../location.js';
 import { fetchOSMData } from '../osmClient.js';
@@ -103,6 +104,8 @@ import { getAttackTypes } from '../items/melee.js';
 import { exposeDebugGlobals } from '../src/runtime/exposeDebugGlobals.js';
 import { claimAchievement, getAchievementView, mergeAchievementState, recordAchievementProgress } from '../achievements.js';
 import { getDistanceUnitPreference, setDistanceUnitPreference } from '../distanceUnits.js';
+import { db } from '../firebase-init.js';
+import { onValue, push, ref, remove, set, update } from 'firebase/database';
 
 import {
   clearStoredPin,
@@ -3870,7 +3873,11 @@ async function initCore(runtimeContext) {
 
 
   function canApplyMonsterBodyTransform() {
-    return !multiplayer || multiplayer.isHost;
+    // Monster transforms always come from the host-authoritative state stream.
+    // Even on non-host peers we must keep the Rapier body in sync with the
+    // received transform, otherwise the physics->mesh sync loop will keep
+    // snapping the visual mesh back to stale body poses.
+    return true;
   }
 
   function setMonsterForSlot(slotId, monster) {
@@ -4783,6 +4790,7 @@ async function initCore(runtimeContext) {
     || isSaltItem(itemId)
     || isSauteedMushroomsItem(itemId);
   const isPotionItem = (itemId) => potionItemIds.has(itemId);
+  const buildableItemIds = new Set(['wood']);
   const getInventoryItemActions = (itemId) => {
     if (isFoodItem(itemId)) {
       return ['drop', 'eat'];
@@ -4795,6 +4803,9 @@ async function initCore(runtimeContext) {
     }
     if (isZombieBrainsItem(itemId)) {
       return ['drop', 'info'];
+    }
+    if (buildableItemIds.has(itemId)) {
+      return ['drop', 'build'];
     }
     return ['drop'];
   };
@@ -6620,9 +6631,10 @@ async function initCore(runtimeContext) {
 
   let mapViewEnabled = false;
   let playerDead = false;
+  let isBuildPlacementActive = false;
   const updateControlAvailability = () => {
     if (!playerControls) return;
-    playerControls.enabled = !mapViewEnabled && !playerDead && !levelUpSelectionActive;
+    playerControls.enabled = !mapViewEnabled && !playerDead && !levelUpSelectionActive && !isBuildPlacementActive;
   };
   const updateEnergyEffects = () => {
     if (!playerControls) return;
@@ -7261,6 +7273,14 @@ async function initCore(runtimeContext) {
       }
     }
 
+    buildState.records.forEach((record, id) => {
+      if (!record?.mesh?.position) return;
+      const distance = hitPosition.distanceTo(record.mesh.position);
+      if (distance <= BOMB_DAMAGE_RADIUS + 0.7) {
+        void applyBuildDamage(id, record, damage);
+      }
+    });
+
     if (natureController?.removeRocksInRadius) {
       const removedRockPositions = natureController.removeRocksInRadius(hitPosition, BOMB_DAMAGE_RADIUS);
       if (removedRockPositions.length > 0) {
@@ -7567,7 +7587,8 @@ async function initCore(runtimeContext) {
     playerModel,
     playerControls,
     monsters,
-    multiplayer
+    multiplayer,
+    onBuildHit
   }) {
     if (!mistList.length) return;
     const now = performance.now();
@@ -7605,6 +7626,12 @@ async function initCore(runtimeContext) {
             window.lastHitAttackTypes = getAttackTypes('iceMistProjectile', ['ice']);
             mist.hitTargets.add('local');
           }
+        }
+      }
+
+      if (typeof onBuildHit === 'function' && !mist.hitTargets.has('build')) {
+        if (onBuildHit({ position: mist.group.position, radius: mist.radius + 0.7, damage: 1 })) {
+          mist.hitTargets.add('build');
         }
       }
 
@@ -7678,10 +7705,11 @@ async function initCore(runtimeContext) {
       : activeAttack.name;
     const cfg = ATTACKS[attackName];
     if (!cfg) return;
+    const attackCfg = activeAttack.overrides ? { ...cfg, ...activeAttack.overrides } : cfg;
 
     const elapsed = Date.now() - activeAttack.start;
-    const visualWindowMs = Math.max(cfg.hitWindow * ATTACK_WINDOW_VISUAL_MULTIPLIER, 220);
-    const inHitWindow = elapsed >= cfg.hitTime && elapsed <= cfg.hitTime + visualWindowMs;
+    const visualWindowMs = Math.max(attackCfg.hitWindow * ATTACK_WINDOW_VISUAL_MULTIPLIER, 220);
+    const inHitWindow = elapsed >= attackCfg.hitTime && elapsed <= attackCfg.hitTime + visualWindowMs;
 
     if (!inHitWindow) {
       if (attackWindowMists.length) {
@@ -7696,7 +7724,7 @@ async function initCore(runtimeContext) {
       return;
     }
 
-    const attackRegion = cfg.region || 'around';
+    const attackRegion = attackCfg.region || 'around';
     const expectedShape = attackRegion === 'forward' ? 'box' : 'circle';
 
     if (!attackWindowMists.length || attackWindowMists[0]?.shape !== expectedShape) {
@@ -7730,7 +7758,7 @@ async function initCore(runtimeContext) {
 
     const entry = attackWindowMists[0];
     const mesh = entry.mesh;
-    const range = Math.max(0.4, cfg.range);
+    const range = Math.max(0.4, attackCfg.range);
     mesh.position.copy(playerModel.position);
     mesh.position.y += ATTACK_WINDOW_MIST_HEIGHT * 0.5;
 
@@ -10460,6 +10488,327 @@ async function initCore(runtimeContext) {
     debugState.lastError = error;
   };
 
+  const BUILD_MAX_HEALTH = 100;
+  const BUILD_HEALTH_BAR_DISPLAY_MS = 1800;
+  const buildHealthBarState = {
+    tempBox: new THREE.Box3(),
+    tempForward: new THREE.Vector3(),
+    tempToTarget: new THREE.Vector3(),
+    tempRight: new THREE.Vector3()
+  };
+  const buildState = {
+    mode: null,
+    placing: null,
+    records: new Map(),
+    selectedNoteId: null,
+    cameraOffset: new THREE.Vector3(0, 4, 8)
+  };
+  const createNoteMesh = () => {
+    const group = new THREE.Group();
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.09, 1.0, 10),
+      new THREE.MeshStandardMaterial({ color: 0x6b4423 })
+    );
+    pole.position.y = 0.5;
+    const signTop = new THREE.Mesh(
+      new THREE.BoxGeometry(0.82, 0.54, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0xa17242 })
+    );
+    signTop.position.y = 1.04;
+    group.add(pole, signTop);
+    return group;
+  };
+  const createBuildHealthBar = (mesh) => {
+    if (!mesh || mesh.userData.buildHealthBar) return mesh?.userData?.buildHealthBar || null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 18;
+    const context = canvas.getContext('2d');
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(1.25, 0.18, 1);
+    sprite.visible = false;
+    sprite.userData = { canvas, context, texture };
+    mesh.add(sprite);
+    mesh.updateWorldMatrix?.(true, true);
+    buildHealthBarState.tempBox.setFromObject(mesh);
+    const sizeY = Number.isFinite(buildHealthBarState.tempBox.max.y)
+      ? Math.max(1, buildHealthBarState.tempBox.max.y - buildHealthBarState.tempBox.min.y)
+      : 1;
+    sprite.position.set(0, sizeY + 0.35, 0);
+    mesh.userData.buildHealthBar = sprite;
+    return sprite;
+  };
+
+  const updateBuildHealthBarTexture = (mesh) => {
+    const bar = mesh?.userData?.buildHealthBar || createBuildHealthBar(mesh);
+    const context = bar?.userData?.context;
+    const canvas = bar?.userData?.canvas;
+    if (!bar || !context || !canvas) return;
+    const maxHealth = Number.isFinite(mesh.userData.buildMaxHealth) ? mesh.userData.buildMaxHealth : BUILD_MAX_HEALTH;
+    const health = Math.max(0, Math.min(maxHealth, Number.isFinite(mesh.userData.buildHealth) ? mesh.userData.buildHealth : maxHealth));
+    const fillWidth = Math.round((canvas.width - 8) * (health / maxHealth));
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(0, 0, 0, 0.62)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(65, 65, 65, 0.88)';
+    context.fillRect(4, 4, canvas.width - 8, canvas.height - 8);
+    context.fillStyle = health > maxHealth * 0.45 ? 'rgba(76, 175, 80, 0.95)' : health > maxHealth * 0.2 ? 'rgba(255, 193, 7, 0.95)' : 'rgba(214, 53, 60, 0.95)';
+    context.fillRect(4, 4, fillWidth, canvas.height - 8);
+    bar.userData.texture.needsUpdate = true;
+  };
+
+  const showBuildHealthBar = (mesh) => {
+    const bar = mesh?.userData?.buildHealthBar || createBuildHealthBar(mesh);
+    if (!bar) return;
+    updateBuildHealthBarTexture(mesh);
+    bar.visible = true;
+    bar.userData.visibleUntil = Date.now() + BUILD_HEALTH_BAR_DISPLAY_MS;
+  };
+
+  const getCurrentBuildPath = () => {
+    const fix = getLatestLocationFix?.();
+    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return null;
+    return onBuildLatLonPath(fix.lat, fix.lon);
+  };
+
+  const removeBuildRecord = async (id, record, { refundToInventory = false, spawnWoodDrop = false } = {}) => {
+    if (!id || !record) return false;
+    const buildPath = getCurrentBuildPath();
+    if (buildPath) {
+      await remove(ref(db, `${buildPath}/${id}`));
+    }
+    disposeBuildHealthBar(record.mesh);
+    if (record.mesh) {
+      scene.remove(record.mesh);
+    }
+    removeStaticBoxCollider(record.colliderEntry || record.mesh?.userData?.staticColliderEntry);
+    buildState.records.delete(id);
+    if (buildState.selectedNoteId === id) {
+      buildState.selectedNoteId = null;
+      buildInteractionBtn.style.display = 'none';
+    }
+    if (refundToInventory) {
+      addToInventory('wood', 1);
+    } else if (spawnWoodDrop) {
+      const dropPosition = record.mesh?.position?.clone?.() || new THREE.Vector3(record.x || 0, record.y || 0, record.z || 0);
+      spawnWoodPickup(dropPosition);
+    }
+    return true;
+  };
+
+  const applyBuildDamage = async (id, record, damage = 1) => {
+    if (!id || !record?.mesh) return false;
+    const currentHealth = Number.isFinite(record.health)
+      ? record.health
+      : Number.isFinite(record.mesh.userData.buildHealth)
+        ? record.mesh.userData.buildHealth
+        : BUILD_MAX_HEALTH;
+    const nextHealth = Math.max(0, currentHealth - Math.max(1, damage));
+    record.health = nextHealth;
+    record.mesh.userData.buildHealth = nextHealth;
+    showBuildHealthBar(record.mesh);
+    if (nextHealth <= 0) {
+      await removeBuildRecord(id, record, { spawnWoodDrop: true });
+    } else {
+      const buildPath = getCurrentBuildPath();
+      if (buildPath) {
+        await update(ref(db, `${buildPath}/${id}`), { health: nextHealth });
+      }
+    }
+    return true;
+  };
+
+  const handleBuildAttackHit = ({ attacker, range, region, damage } = {}) => {
+    const attackerPosition = attacker?.model?.position;
+    if (!attackerPosition) return false;
+    const effectiveRange = Math.max(0.8, Number.isFinite(range) ? range : 1.5);
+    let closest = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    buildState.records.forEach((record, id) => {
+      if (!record?.mesh?.position) return;
+      buildHealthBarState.tempToTarget.subVectors(record.mesh.position, attackerPosition);
+      buildHealthBarState.tempToTarget.y = 0;
+      const distance = buildHealthBarState.tempToTarget.length();
+      if ((region || 'around') === 'forward') {
+        attacker.model.getWorldDirection(buildHealthBarState.tempForward);
+        buildHealthBarState.tempForward.y = 0;
+        if (buildHealthBarState.tempForward.lengthSq() < 0.0001) {
+          buildHealthBarState.tempForward.set(0, 0, 1);
+        } else {
+          buildHealthBarState.tempForward.normalize();
+        }
+        const forwardDistance = buildHealthBarState.tempToTarget.dot(buildHealthBarState.tempForward);
+        buildHealthBarState.tempRight.set(buildHealthBarState.tempForward.z, 0, -buildHealthBarState.tempForward.x);
+        const lateralDistance = Math.abs(buildHealthBarState.tempToTarget.dot(buildHealthBarState.tempRight));
+        if (forwardDistance < 0 || forwardDistance > effectiveRange + 0.7 || lateralDistance > effectiveRange + 0.7) return;
+      }
+      if (distance <= effectiveRange + 0.7 && distance < closestDistance) {
+        closest = { id, record };
+        closestDistance = distance;
+      }
+    });
+    if (!closest) return false;
+    void applyBuildDamage(closest.id, closest.record, damage);
+    return true;
+  };
+
+  const handleBuildProjectileHit = ({ projectileBox, damage } = {}) => {
+    if (!projectileBox) return false;
+    for (const [id, record] of buildState.records.entries()) {
+      if (!record?.mesh) continue;
+      buildHealthBarState.tempBox.setFromObject(record.mesh);
+      if (projectileBox.intersectsBox(buildHealthBarState.tempBox)) {
+        void applyBuildDamage(id, record, damage);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const handleBuildAreaHit = ({ position, radius, damage } = {}) => {
+    if (!position || !Number.isFinite(radius)) return false;
+    let didHit = false;
+    buildState.records.forEach((record, id) => {
+      if (!record?.mesh?.position) return;
+      if (position.distanceTo(record.mesh.position) <= radius) {
+        didHit = true;
+        void applyBuildDamage(id, record, damage);
+      }
+    });
+    return didHit;
+  };
+
+  const updateBuildHealthBars = () => {
+    const now = Date.now();
+    buildState.records.forEach((record) => {
+      const bar = record?.mesh?.userData?.buildHealthBar;
+      if (bar?.visible && now > (bar.userData.visibleUntil || 0)) {
+        bar.visible = false;
+      }
+    });
+  };
+
+  const disposeBuildHealthBar = (mesh) => {
+    const bar = mesh?.userData?.buildHealthBar;
+    if (!bar) return;
+    bar.parent?.remove(bar);
+    bar.material?.map?.dispose?.();
+    bar.material?.dispose?.();
+    delete mesh.userData.buildHealthBar;
+  };
+
+  const buildInteractionBtn = document.createElement('button');
+  buildInteractionBtn.type = 'button';
+  buildInteractionBtn.textContent = 'Read Note';
+  buildInteractionBtn.style.cssText = 'position:fixed;left:50%;bottom:31%;transform:translateX(-50%);z-index:1200;display:none;padding:8px 12px;';
+  document.body.appendChild(buildInteractionBtn);
+  const BUILD_BUCKET_PRECISION = 4;
+  const buildUi = document.createElement('div');
+  buildUi.className = 'build-action-ui';
+  buildUi.innerHTML = '<button id="build-confirm-btn" class="retro-build-btn">Build</button><div class="build-vertical-controls"><button id="build-up-btn" class="retro-build-btn" aria-label="Move build up">▲ Up</button><button id="build-down-btn" class="retro-build-btn" aria-label="Move build down">▼ Down</button></div>';
+  document.body.appendChild(buildUi);
+  const buildConfirmBtn = buildUi.querySelector('#build-confirm-btn');
+  const buildUpBtn = buildUi.querySelector('#build-up-btn');
+  const buildDownBtn = buildUi.querySelector('#build-down-btn');
+  let buildVerticalInput = 0;
+  const buildHorizontalKeys = new Set();
+  window.addEventListener('keydown', (event) => {
+    if (!buildState.placing) return;
+    const key = event.key.toLowerCase();
+    if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+      buildHorizontalKeys.add(key);
+    }
+    if (event.key === 'ArrowUp') buildVerticalInput = 1;
+    if (event.key === 'ArrowDown') buildVerticalInput = -1;
+  });
+  window.addEventListener('keyup', (event) => {
+    const key = event.key.toLowerCase();
+    if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+      buildHorizontalKeys.delete(key);
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') buildVerticalInput = 0;
+  });
+  const toBucketKey = (value) => {
+    const scaled = Math.round(value * (10 ** BUILD_BUCKET_PRECISION));
+    return scaled < 0 ? `m${Math.abs(scaled)}` : `p${scaled}`;
+  };
+  const onBuildLatLonPath = (lat, lon) => `worldBuilds/${toBucketKey(lat)}_${toBucketKey(lon)}`;
+  const subscribeBuildsForCurrentLocation = () => {
+    const fix = getLatestLocationFix?.();
+    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
+    onValue(ref(db, onBuildLatLonPath(fix.lat, fix.lon)), (snapshot) => {
+      const value = snapshot.val() || {};
+      const incomingIds = new Set(Object.keys(value));
+      buildState.records.forEach((existingRecord, existingId) => {
+        if (incomingIds.has(existingId)) return;
+        disposeBuildHealthBar(existingRecord.mesh);
+        if (existingRecord.mesh) scene.remove(existingRecord.mesh);
+        removeStaticBoxCollider(existingRecord.colliderEntry || existingRecord.mesh?.userData?.staticColliderEntry);
+        buildState.records.delete(existingId);
+      });
+      Object.entries(value).forEach(([id, record]) => {
+        if (!record) return;
+        const existing = buildState.records.get(id);
+        if (existing) {
+          existing.health = Number.isFinite(record.health) ? record.health : existing.health;
+          existing.noteText = record.noteText || '';
+          existing.ownerId = record.ownerId || null;
+          if (existing.mesh?.userData) {
+            existing.mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
+            existing.mesh.userData.noteText = record.noteText || '';
+          }
+          if (existing.mesh?.userData?.buildHealthBar?.visible) updateBuildHealthBarTexture(existing.mesh);
+          return;
+        }
+        const mesh = record.type === 'note'
+          ? createNoteMesh()
+          : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
+        mesh.position.set(record.x || 0, record.y || 0, record.z || 0);
+        mesh.userData.buildRecordId = id;
+        mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
+        mesh.userData.buildMaxHealth = BUILD_MAX_HEALTH;
+        mesh.userData.buildOwner = record.ownerId || null;
+        mesh.userData.buildType = record.type || 'block';
+        mesh.userData.noteText = record.noteText || '';
+        const colliderEntry = createStaticBoxColliderForObject(mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
+        mesh.userData.staticColliderEntry = colliderEntry || null;
+        scene.add(mesh);
+        buildState.records.set(id, { mesh, colliderEntry, ...record });
+      });
+    });
+  };
+  buildUpBtn?.addEventListener('pointerdown', () => { buildVerticalInput = 1; });
+  buildDownBtn?.addEventListener('pointerdown', () => { buildVerticalInput = -1; });
+  const resetVertical = () => { buildVerticalInput = 0; };
+  buildUpBtn?.addEventListener('pointerup', resetVertical);
+  buildDownBtn?.addEventListener('pointerup', resetVertical);
+  buildConfirmBtn?.addEventListener('click', async () => {
+    if (!buildState.placing) return;
+    const fix = getLatestLocationFix?.();
+    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
+    const idRef = push(ref(db, onBuildLatLonPath(fix.lat, fix.lon)));
+    const p = buildState.placing.mesh.position;
+    const record = { type: buildState.placing.type, x: p.x, y: p.y, z: p.z, health: BUILD_MAX_HEALTH, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local' };
+    await set(idRef, record);
+    const colliderEntry = createStaticBoxColliderForObject(buildState.placing.mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
+    buildState.records.set(idRef.key, { ...record, mesh: buildState.placing.mesh, colliderEntry });
+    buildState.placing.mesh.userData.buildRecordId = idRef.key;
+    buildState.placing.mesh.userData.buildHealth = BUILD_MAX_HEALTH;
+    buildState.placing.mesh.userData.buildMaxHealth = BUILD_MAX_HEALTH;
+    buildState.placing.mesh.userData.buildType = record.type;
+    buildState.placing.mesh.userData.noteText = record.noteText;
+    buildState.placing = null;
+    isBuildPlacementActive = false;
+    buildUi.style.display = 'none';
+    updateControlAvailability();
+    removeFromInventory('wood', 1);
+  });
   const appState = {
     getPlayerName: () => playerName,
     setPlayerName: (name) => {
@@ -10550,6 +10899,26 @@ async function initCore(runtimeContext) {
     dropInventoryItem: (itemId) => dropInventoryItem(itemId),
     eatInventoryItem: (itemId) => eatInventoryItem(itemId),
     useInventoryItem: (itemId) => useInventoryItem(itemId),
+    startBuildFlow: async (itemId) => {
+      if (itemId !== 'wood') return;
+      const type = await openBuildTypePicker();
+      if (!type) return;
+      let noteText = '';
+      if (type === 'note') {
+        noteText = await openNoteEntryModal();
+        if (!noteText?.trim()) return;
+      }
+      const pos = playerModel?.position?.clone?.() || new THREE.Vector3();
+      const mesh = type === 'note'
+        ? createNoteMesh()
+        : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
+      mesh.position.copy(pos).add(new THREE.Vector3(0, 1.2, 1.2));
+      scene.add(mesh);
+      buildState.placing = { mesh, type, noteText };
+      isBuildPlacementActive = true;
+      buildUi.style.display = 'flex';
+      updateControlAvailability();
+    },
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
     storeHomeStorageItem: (itemId) => storeHomeStorageItem(itemId),
@@ -10672,6 +11041,43 @@ async function initCore(runtimeContext) {
   window.loadTerrainStampRegressionScene = () => appState.loadTerrainStampRegressionScene();
   window.setTerrainStampDebugOverlay = (enabled, options) => appState.setTerrainStampDebugOverlay(enabled, options);
   window.getTerrainStampDebugSample = (x, z, options) => appState.getTerrainStampDebugSample(x, z, options);
+  const showNoteInteraction = async () => {
+    if (!buildState.selectedNoteId) return;
+    const selectedNoteId = buildState.selectedNoteId;
+    const record = buildState.records.get(selectedNoteId);
+    if (!record) return;
+    const isOwner = record.ownerId === (multiplayer?.peer?.id || 'local');
+    const closeNoteView = () => {
+      noteViewModal.classList.add('hidden');
+      noteViewModal.innerHTML = '';
+      noteViewModal.onclick = null;
+    };
+    noteViewModal.innerHTML = `<div class="build-modal"><h3>Note Post</h3><div class="note-view-text">${escapeBuildModalText(record.noteText || '(empty)')}</div><div class="build-modal-actions">${isOwner ? '<button type="button" class="build-cancel-btn" data-note-delete="1">Delete</button><button type="button" class="retro-build-btn" data-note-edit="1">Edit</button>' : ''}<button type="button" class="retro-build-btn" data-note-ok="1">Ok</button></div></div>`;
+    noteViewModal.classList.remove('hidden');
+    noteViewModal.onclick = async (event) => {
+      const ok = event.target.closest('[data-note-ok]');
+      const edit = event.target.closest('[data-note-edit]');
+      const del = event.target.closest('[data-note-delete]');
+      if (event.target === noteViewModal || ok) {
+        closeNoteView();
+        return;
+      }
+      if (del) {
+        await removeBuildRecord(selectedNoteId, record, { refundToInventory: true });
+        closeNoteView();
+      } else if (edit) {
+        closeNoteView();
+        const text = await openNoteEntryModal(record.noteText || '');
+        if (text != null) {
+          const fix = getLatestLocationFix?.();
+          if (fix) await update(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${selectedNoteId}`), { noteText: text });
+          record.noteText = text;
+          if (record.mesh?.userData) record.mesh.userData.noteText = text;
+        }
+      }
+    };
+  };
+  buildInteractionBtn.addEventListener('click', () => { void showNoteInteraction(); });
 
   const locationAdapter = {
     getState: () => ({ ...locationState }),
@@ -10959,7 +11365,7 @@ async function initCore(runtimeContext) {
       updatePickupTiles(playerPosition);
     }
 
-    if (!mapViewEnabled) {
+    if (!mapViewEnabled && !buildState.placing) {
       playerControls.update();
       if (playerControls?.isClimbing && !climbedSinceGrounded) {
         climbedSinceGrounded = true;
@@ -10969,6 +11375,48 @@ async function initCore(runtimeContext) {
         climbedSinceGrounded = false;
       }
     }
+    if (buildState.placing) {
+      const moveSpeed = 3 * frameDelta;
+      const keys = buildHorizontalKeys;
+      const isMobileStickActive = Number.isFinite(playerControls?.joystickForce) && playerControls.joystickForce > 0.1;
+      if (isMobileStickActive) {
+        const dx = Math.cos(playerControls.joystickAngle || 0) * playerControls.joystickForce;
+        const dz = Math.sin(playerControls.joystickAngle || 0) * playerControls.joystickForce;
+        buildState.placing.mesh.position.x += dx * moveSpeed;
+        buildState.placing.mesh.position.z += dz * moveSpeed;
+      } else {
+        if (keys.has('w')) buildState.placing.mesh.position.z += moveSpeed;
+        if (keys.has('s')) buildState.placing.mesh.position.z -= moveSpeed;
+        if (keys.has('a')) buildState.placing.mesh.position.x += moveSpeed;
+        if (keys.has('d')) buildState.placing.mesh.position.x -= moveSpeed;
+      }
+      if (buildVerticalInput !== 0) buildState.placing.mesh.position.y += buildVerticalInput * moveSpeed;
+      const followTarget = buildState.placing.mesh.position;
+      const desiredCameraPos = followTarget.clone().add(buildState.cameraOffset);
+      camera.position.lerp(desiredCameraPos, 0.15);
+      camera.lookAt(followTarget);
+    } else {
+      const playerPos = playerModel?.position;
+      if (playerPos) {
+        let closestNoteDistance = Number.POSITIVE_INFINITY;
+        let closestInteractDistance = Number.POSITIVE_INFINITY;
+        const closestFriendly = friendlyNpcManager?.getNearestFriendly?.(playerPos);
+        if (closestFriendly?.distance != null) closestInteractDistance = Math.min(closestInteractDistance, closestFriendly.distance);
+        closestInteractDistance = Math.min(closestInteractDistance, 1.2);
+        buildState.selectedNoteId = null;
+        buildState.records.forEach((record, id) => {
+          if (record.type !== 'note' || !record.mesh) return;
+          const distance = record.mesh.position.distanceTo(playerPos);
+          if (distance < 3 && distance < closestNoteDistance) {
+            closestNoteDistance = distance;
+            buildState.selectedNoteId = id;
+          }
+        });
+        const shouldShow = Boolean(buildState.selectedNoteId) && closestNoteDistance <= closestInteractDistance;
+        buildInteractionBtn.style.display = shouldShow ? 'block' : 'none';
+      }
+    }
+    updateBuildHealthBars();
     if (craftState.swirl?.line) {
       craftState.swirl.line.rotation.y += frameDelta * 2;
     }
@@ -11918,7 +12366,8 @@ async function initCore(runtimeContext) {
       multiplayer,
       monsters: getDamageableCreatures(),
       sendMonsterAttack: sendMonsterAttackIntent,
-      onMonsterHit: handleMonsterDamage
+      onMonsterHit: handleMonsterDamage,
+      onBuildHit: handleBuildProjectileHit
     });
     handleBombPickupArrowHit();
 
@@ -11929,7 +12378,8 @@ async function initCore(runtimeContext) {
       playerModel,
       playerControls,
       monsters: getDamageableCreatures(),
-      multiplayer
+      multiplayer,
+      onBuildHit: handleBuildAreaHit
     });
 
     updateBombMists({
@@ -11962,6 +12412,7 @@ async function initCore(runtimeContext) {
       onMonsterHit: handleMonsterDamage,
       onSwordHit: handleSwordTreeHit,
       onTorchHit: handleTorchTreeHit,
+      onBuildHit: handleBuildAttackHit,
       onEntityHit: handleCombatEntityHit
     });
 
@@ -11992,6 +12443,11 @@ async function initCore(runtimeContext) {
   canProcessIncomingPeerData = true;
   processIncomingPeerDataQueue();
 
+  subscribeBuildsForCurrentLocation();
+  window.addEventListener('keydown', async (event) => {
+    if (event.key.toLowerCase() !== 'e' || !buildState.selectedNoteId) return;
+    await showNoteInteraction();
+  });
   animate();
 
   return runtimeContext;
@@ -12032,3 +12488,52 @@ export async function bootstrapGameApp() {
 
   return appContext;
 }
+  const escapeBuildModalText = (value) => String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('\"', '&quot;')
+    .replaceAll("'", '&#39;');
+  const buildModal = document.createElement('div');
+  buildModal.className = 'build-modal-overlay hidden';
+  const noteEntryModal = document.createElement('div');
+  noteEntryModal.className = 'build-modal-overlay hidden';
+  const noteViewModal = document.createElement('div');
+  noteViewModal.className = 'build-modal-overlay hidden';
+  document.body.append(buildModal, noteEntryModal, noteViewModal);
+  const openBuildTypePicker = () => new Promise((resolve) => {
+    buildModal.innerHTML = `<div class="build-modal"><h3>Choose Build Type</h3><div class="build-options-list"><button type="button" class="build-option-btn" data-build-type="block"><span>🧱</span>Block</button><button type="button" class="build-option-btn" data-build-type="note"><span>🪧</span>Note Post</button></div><button type="button" class="build-cancel-btn" data-build-cancel="1">Cancel</button></div>`;
+    buildModal.classList.remove('hidden');
+    const close = (value) => {
+      buildModal.classList.add('hidden');
+      buildModal.innerHTML = '';
+      buildModal.onclick = null;
+      resolve(value);
+    };
+    buildModal.onclick = (event) => {
+      const target = event.target.closest('button');
+      if (event.target === buildModal || target?.dataset.buildCancel) return close(null);
+      const type = target?.dataset.buildType;
+      if (type) close(type);
+    };
+  });
+  const openNoteEntryModal = (initialText = '') => new Promise((resolve) => {
+    noteEntryModal.innerHTML = `<div class="build-modal"><h3>Write Your Note</h3><textarea class="note-input" maxlength="280" placeholder="Leave a helpful message...">${escapeBuildModalText(initialText)}</textarea><div class="build-modal-actions"><button type="button" class="build-cancel-btn" data-note-cancel="1">Cancel</button><button type="button" class="retro-build-btn" data-note-save="1">Save</button></div></div>`;
+    noteEntryModal.classList.remove('hidden');
+    const close = (value) => {
+      noteEntryModal.classList.add('hidden');
+      noteEntryModal.innerHTML = '';
+      noteEntryModal.onclick = null;
+      resolve(value);
+    };
+    noteEntryModal.onclick = (event) => {
+      const saveBtn = event.target.closest('[data-note-save]');
+      const cancelBtn = event.target.closest('[data-note-cancel]');
+      if (event.target === noteEntryModal || cancelBtn) return close(null);
+      if (saveBtn) {
+        const text = noteEntryModal.querySelector('.note-input')?.value || '';
+        close(text.trim() || null);
+      }
+    };
+    noteEntryModal.querySelector('.note-input')?.focus();
+  });
