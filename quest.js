@@ -23,49 +23,160 @@ const TUTORIAL_QUESTS = [
     id: "gps-walk-30m",
     title: "Walk 30 meters",
     description: "Move your GPS location at least 30 meters in the real world.",
-    faq: "You have to physically move in the real world. The circle around your character is a bounding bubble tied to your real GPS position. Come on, get up off your couch and go for a walk. Welcome to Street Quest!"
+    faq: "You have to physically move in the real world. The circle around your character is a bounding bubble tied to your real GPS position. Come on, get up off your couch and go for a walk. Welcome to Street Quest!",
+    kind: "gps",
+    target: QUEST_FIRST_GPS_TARGET_METERS,
+    xp: QUEST_FIRST_GPS_XP
   },
   {
     id: "collect-mushroom-1",
     title: "Collect 1 mushroom",
     description: "Pick up 1 mushroom so you can practice interacting with nearby items.",
-    faq: "Walk up to a mushroom and press interact. If none are nearby, move around a little and look for them on the ground."
+    faq: "Walk up to a mushroom and press interact. If none are nearby, move around a little and look for them on the ground.",
+    kind: "mushroom",
+    target: QUEST_SECOND_MUSHROOM_TARGET,
+    xp: QUEST_SECOND_MUSHROOM_XP
   },
   {
     id: "climb-a-tree",
     title: "Climb a tree",
     description: "Climb any nearby tree.",
-    faq: "Find a tree, walk up to it, then use climb: press X on desktop or tap the climb prompt on mobile."
+    faq: "Find a tree, walk up to it, then use climb: press X on desktop or tap the climb prompt on mobile.",
+    kind: "climb",
+    xp: QUEST_GENERIC_XP
   },
   {
     id: "kill-zombie",
     title: "Kill a zombie",
     description: "Defeat 1 zombie.",
-    faq: "Use your weapon and keep attacking until the zombie drops."
+    faq: "Use your weapon and keep attacking until the zombie drops.",
+    kind: "zombie",
+    target: 1,
+    xp: QUEST_GENERIC_XP
   },
   {
     id: "trade-with-merchant",
     title: "Buy and sell with the merchant",
     description: "Buy at least one thing and sell at least one thing to the merchant.",
-    faq: "Talk to the merchant, open the shop, buy one item, then sell one item back."
+    faq: "Talk to the merchant, open the shop, buy one item, then sell one item back.",
+    kind: "merchant",
+    xp: QUEST_GENERIC_XP
   },
   {
     id: "kill-deer",
     title: "Kill a deer",
     description: "Defeat 1 deer.",
-    faq: "A deer and a bow with arrows were spawned nearby. Equip the bow and hunt it."
+    faq: "A deer and a bow with arrows were spawned nearby. Equip the bow and hunt it.",
+    kind: "deer",
+    target: 1,
+    xp: QUEST_GENERIC_XP
   },
   {
     id: "blow-up-rock",
     title: "Blow up a rock",
     description: "Use a bomb to blow up a rock.",
-    faq: "A rock and bomb pickup were spawned nearby. Pick up the bomb, equip it, and explode it near the rock."
+    faq: "A rock and bomb pickup were spawned nearby. Pick up the bomb, equip it, and explode it near the rock.",
+    kind: "rock",
+    target: 1,
+    xp: QUEST_GENERIC_XP
   },
   {
     id: "craft-at-table",
     title: "Craft at the crafting table",
     description: "Craft any item at the crafting table.",
-    faq: "Go to your crafting table, open it, choose materials, then press Craft and pick an item."
+    faq: "Go to your crafting table, open it, choose materials, then press Craft and pick an item.",
+    kind: "craft",
+    target: 1,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "forage-mushrooms-3",
+    title: "Forage 3 mushrooms",
+    description: "Pick up 3 mushrooms for a trail snack bundle.",
+    faq: "Mushrooms grow on the ground around the world. Walk close, press interact, and keep exploring if you need more to spawn.",
+    kind: "mushroom",
+    target: 3,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "gps-hike-100m",
+    title: "Take a 100 meter hike",
+    description: "Move your GPS location at least 100 meters from where you accept this quest.",
+    faq: "This measures real GPS movement from your acceptance point. Walk outside or along a safe route until the meter fills.",
+    kind: "gps",
+    target: 100,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "zombie-patrol-3",
+    title: "Clear 3 zombies",
+    description: "Defeat 3 zombies while the quest guy scouts with you.",
+    faq: "Only zombie-type monsters count. Keep your distance, use weapons, and heal before taking on a group.",
+    kind: "zombie",
+    target: 3,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "deer-hunt-2",
+    title: "Hunt 2 deer",
+    description: "Defeat 2 deer using the bow, arrows, or any weapon you prefer.",
+    faq: "Two deer plus a bow and arrows are spawned nearby when you accept. Deer run away, so approach carefully and aim ahead.",
+    kind: "deer",
+    target: 2,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "demolition-practice-3",
+    title: "Demolish 3 rocks",
+    description: "Use bombs to blow up 3 rocks.",
+    faq: "Quest rocks and bomb pickups are spawned nearby. Pick up each bomb, equip it, and detonate it close to a rock.",
+    kind: "rock",
+    target: 3,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "craft-work-order-3",
+    title: "Craft 3 items",
+    description: "Craft any 3 items at the crafting table.",
+    faq: "Open the crafting table, combine materials, and press Craft. Any successful crafted item counts toward this order.",
+    kind: "craft",
+    target: 3,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "merchant-restock",
+    title: "Restock with the merchant",
+    description: "Buy one item and sell one item during another merchant visit.",
+    faq: "A merchant is spawned nearby and you receive enough coins to make a purchase if you are short. Buy once and sell once to finish.",
+    kind: "merchant",
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "mushroom-cache-5",
+    title: "Gather 5 mushrooms",
+    description: "Pick up 5 mushrooms for the quest guy's emergency cache.",
+    faq: "Keep moving through grassy areas and collect every mushroom you see. The counter starts when you accept this quest.",
+    kind: "mushroom",
+    target: 5,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "zombie-sweep-5",
+    title: "Sweep 5 zombies",
+    description: "Defeat 5 zombies to make the nearby streets safer.",
+    faq: "Zombie variants all count as long as their type includes zombie. Fight one at a time when possible and let your companion help.",
+    kind: "zombie",
+    target: 5,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "gps-trek-250m",
+    title: "Complete a 250 meter trek",
+    description: "Move your GPS location at least 250 meters from where you accept this quest.",
+    faq: "This is a longer real-world walk. Choose a safe route, keep the app open, and watch the progress meter climb.",
+    kind: "gps",
+    target: 250,
+    xp: QUEST_GENERIC_XP
   }
 ];
 
@@ -100,6 +211,10 @@ export class QuestManager {
       gpsQuestStartFix: null,
       gpsQuestDistanceMeters: 0,
       mushroomCount: 0,
+      zombieKillCount: 0,
+      deerKillCount: 0,
+      rockBlownUpCount: 0,
+      craftedItemCount: 0,
       merchantBought: false,
       merchantSold: false,
       wasClimbingLastFrame: false
@@ -228,6 +343,29 @@ export class QuestManager {
     const suggested = this.getCurrentSuggestedQuest();
     if (!suggested) return null;
     return this.state.acceptedQuestIds.includes(suggested.id) ? suggested : null;
+  }
+
+  getQuestById(questId) {
+    return TUTORIAL_QUESTS.find((quest) => quest.id === questId) || null;
+  }
+
+  getQuestTarget(quest) {
+    return Number.isFinite(quest?.target) ? Math.max(1, Math.floor(quest.target)) : 1;
+  }
+
+  getQuestXpReward(quest) {
+    return Number.isFinite(quest?.xp) ? Math.max(0, Math.floor(quest.xp)) : QUEST_GENERIC_XP;
+  }
+
+  hasStartedQuestProgress(quest) {
+    if (quest?.kind === "gps") return this.state.gpsQuestDistanceMeters > 0;
+    if (quest?.kind === "mushroom") return this.state.mushroomCount > 0;
+    if (quest?.kind === "zombie") return this.state.zombieKillCount > 0;
+    if (quest?.kind === "deer") return this.state.deerKillCount > 0;
+    if (quest?.kind === "rock") return this.state.rockBlownUpCount > 0;
+    if (quest?.kind === "craft") return this.state.craftedItemCount > 0;
+    if (quest?.kind === "merchant") return this.state.merchantBought || this.state.merchantSold;
+    return false;
   }
 
   getDialogueForFriendly(friendly, dialoguePool) {
@@ -361,7 +499,8 @@ export class QuestManager {
   acceptSuggestedQuest() {
     const quest = this.getCurrentSuggestedQuest();
     if (!quest) return;
-    if (!this.state.acceptedQuestIds.includes(quest.id)) {
+    const wasAccepted = this.state.acceptedQuestIds.includes(quest.id);
+    if (!wasAccepted) {
       this.state.acceptedQuestIds.push(quest.id);
       this.notifyQuestStateChanged();
     }
@@ -371,12 +510,22 @@ export class QuestManager {
       followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
       helpingPlayerFight: true
     });
-    if (quest.id === "gps-walk-30m") {
+
+    if (wasAccepted && this.hasStartedQuestProgress(quest)) return;
+
+    const target = this.getQuestTarget(quest);
+    if (quest.kind === "gps") {
       const latestFix = window.latestLocation;
       this.state.gpsQuestStartFix = hasValidFix(latestFix) ? { lat: latestFix.lat, lon: latestFix.lon } : null;
       this.state.gpsQuestDistanceMeters = 0;
     }
-    if (quest.id === "trade-with-merchant") {
+    if (quest.kind === "mushroom") {
+      this.state.mushroomCount = 0;
+    }
+    if (quest.kind === "zombie") {
+      this.state.zombieKillCount = 0;
+    }
+    if (quest.kind === "merchant") {
       this.state.merchantBought = false;
       this.state.merchantSold = false;
       const coins = window.appState?.getCoins?.() ?? 0;
@@ -385,26 +534,57 @@ export class QuestManager {
       }
       window.spawnTutorialMerchantNearby?.();
     }
-    if (quest.id === "kill-deer") {
-      window.spawnTutorialDeerNearby?.();
+    if (quest.kind === "deer") {
+      this.state.deerKillCount = 0;
+      for (let i = 0; i < target; i += 1) {
+        window.spawnTutorialDeerNearby?.();
+      }
       window.spawnTutorialBowAndArrowsNearby?.();
     }
-    if (quest.id === "blow-up-rock") {
-      window.spawnTutorialRockAndBombNearby?.();
+    if (quest.kind === "rock") {
+      this.state.rockBlownUpCount = 0;
+      for (let i = 0; i < target; i += 1) {
+        window.spawnTutorialRockAndBombNearby?.();
+      }
+    }
+    if (quest.kind === "craft") {
+      this.state.craftedItemCount = 0;
     }
   }
 
   getQuestProgressText(questId) {
-    if (questId === "gps-walk-30m") {
-      const moved = Math.floor(this.state.gpsQuestDistanceMeters);
-      return `(${moved}/${QUEST_FIRST_GPS_TARGET_METERS} m)`;
+    const quest = this.getQuestById(questId);
+    if (!quest) return "";
+    const target = this.getQuestTarget(quest);
+    const isCompleted = this.state.completedQuestIds.includes(questId);
+
+    if (quest.kind === "gps") {
+      const moved = isCompleted ? target : Math.floor(this.state.gpsQuestDistanceMeters);
+      return `(${Math.min(moved, target)}/${target} m)`;
     }
-    if (questId === "collect-mushroom-1") {
-      return `(${this.state.mushroomCount}/${QUEST_SECOND_MUSHROOM_TARGET})`;
+    if (quest.kind === "mushroom") {
+      const count = isCompleted ? target : this.state.mushroomCount;
+      return `(${Math.min(count, target)}/${target})`;
     }
-    if (questId === "trade-with-merchant") {
-      const buyLabel = this.state.merchantBought ? "✅ buy" : "⬜ buy";
-      const sellLabel = this.state.merchantSold ? "✅ sell" : "⬜ sell";
+    if (quest.kind === "zombie") {
+      const count = isCompleted ? target : this.state.zombieKillCount;
+      return `(${Math.min(count, target)}/${target})`;
+    }
+    if (quest.kind === "deer") {
+      const count = isCompleted ? target : this.state.deerKillCount;
+      return `(${Math.min(count, target)}/${target})`;
+    }
+    if (quest.kind === "rock") {
+      const count = isCompleted ? target : this.state.rockBlownUpCount;
+      return `(${Math.min(count, target)}/${target})`;
+    }
+    if (quest.kind === "craft") {
+      const count = isCompleted ? target : this.state.craftedItemCount;
+      return `(${Math.min(count, target)}/${target})`;
+    }
+    if (quest.kind === "merchant") {
+      const buyLabel = isCompleted || this.state.merchantBought ? "✅ buy" : "⬜ buy";
+      const sellLabel = isCompleted || this.state.merchantSold ? "✅ sell" : "⬜ sell";
       return `(${buyLabel}, ${sellLabel})`;
     }
     return "";
@@ -419,54 +599,66 @@ export class QuestManager {
 
   handleMushroomCollected() {
     const activeQuest = this.getActiveQuest();
-    if (!activeQuest || activeQuest.id !== "collect-mushroom-1") return;
+    if (!activeQuest || activeQuest.kind !== "mushroom") return;
     this.state.mushroomCount += 1;
-    if (this.state.mushroomCount >= QUEST_SECOND_MUSHROOM_TARGET) {
-      this.completeQuest("collect-mushroom-1", QUEST_SECOND_MUSHROOM_XP);
+    if (this.state.mushroomCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
     }
   }
 
   handleMonsterKilled(monster) {
     const activeQuest = this.getActiveQuest();
-    if (!activeQuest || activeQuest.id !== "kill-zombie") return;
+    if (!activeQuest || activeQuest.kind !== "zombie") return;
     const label = String(monster?.type || monster?.modelPath || "").toLowerCase();
     if (!label.includes("zombie")) return;
-    this.completeQuest("kill-zombie", QUEST_GENERIC_XP);
+    this.state.zombieKillCount += 1;
+    if (this.state.zombieKillCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
   }
 
   handleAnimalKilled(animal) {
     const activeQuest = this.getActiveQuest();
-    if (!activeQuest || activeQuest.id !== "kill-deer") return;
+    if (!activeQuest || activeQuest.kind !== "deer") return;
     if (String(animal?.type || "").toLowerCase() !== "deer") return;
-    this.completeQuest("kill-deer", QUEST_GENERIC_XP);
+    this.state.deerKillCount += 1;
+    if (this.state.deerKillCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
   }
 
   handleMerchantTransaction(kind) {
     const activeQuest = this.getActiveQuest();
-    if (!activeQuest || activeQuest.id !== "trade-with-merchant") return;
+    if (!activeQuest || activeQuest.kind !== "merchant") return;
     if (kind === "buy") this.state.merchantBought = true;
     if (kind === "sell") this.state.merchantSold = true;
     if (this.state.merchantBought && this.state.merchantSold) {
-      this.completeQuest("trade-with-merchant", QUEST_GENERIC_XP);
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
     }
   }
 
   handleRockBlownUp(count = 1) {
     const activeQuest = this.getActiveQuest();
-    if (!activeQuest || activeQuest.id !== "blow-up-rock") return;
+    if (!activeQuest || activeQuest.kind !== "rock") return;
     if (!Number.isFinite(count) || count <= 0) return;
-    this.completeQuest("blow-up-rock", QUEST_GENERIC_XP);
+    this.state.rockBlownUpCount += count;
+    if (this.state.rockBlownUpCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
   }
 
   handleCraftedItem() {
     const activeQuest = this.getActiveQuest();
-    if (!activeQuest || activeQuest.id !== "craft-at-table") return;
-    this.completeQuest("craft-at-table", QUEST_GENERIC_XP);
+    if (!activeQuest || activeQuest.kind !== "craft") return;
+    this.state.craftedItemCount += 1;
+    if (this.state.craftedItemCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
   }
 
   updateGpsQuestProgress() {
     const activeQuest = this.getActiveQuest();
-    if (!activeQuest || activeQuest.id !== "gps-walk-30m") return;
+    if (!activeQuest || activeQuest.kind !== "gps") return;
 
     const latestFix = window.latestLocation;
     if (!hasValidFix(latestFix)) return;
@@ -485,16 +677,16 @@ export class QuestManager {
     );
     this.state.gpsQuestDistanceMeters = Math.max(0, moved);
 
-    if (moved >= QUEST_FIRST_GPS_TARGET_METERS) {
-      this.completeQuest("gps-walk-30m", QUEST_FIRST_GPS_XP);
+    if (moved >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
     }
   }
 
   updateClimbQuestProgress() {
     const activeQuest = this.getActiveQuest();
     const isClimbing = window.playerControls?.isClimbing === true;
-    if (activeQuest?.id === "climb-a-tree" && isClimbing && !this.state.wasClimbingLastFrame) {
-      this.completeQuest("climb-a-tree", QUEST_GENERIC_XP);
+    if (activeQuest?.kind === "climb" && isClimbing && !this.state.wasClimbingLastFrame) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
     }
     this.state.wasClimbingLastFrame = isClimbing;
   }

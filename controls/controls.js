@@ -828,7 +828,7 @@ export class PlayerControls {
       this.mobileMeleeComboIndex = (this.mobileMeleeComboIndex + 1) % cycle.length;
       return;
     }
-    if (weapon?.itemId === 'autumnSword') {
+    if (weapon?.itemId === 'autumnSword' || weapon?.itemId === 'hammer') {
       const attackAction = this.getNextSwordAttackAction({ advance: false });
       const started = this.playAction(attackAction);
       if (!started) return;
@@ -859,6 +859,7 @@ export class PlayerControls {
       { id: 'bow', label: 'Bow' },
       { id: 'iceGun', label: 'Ice Gun' },
       { id: 'autumnSword', label: 'Sword' },
+      { id: 'hammer', label: 'Hammer' },
       { id: 'lantern', label: 'Lantern' },
       { id: 'torch', label: 'Torch' }
     ];
@@ -1675,6 +1676,7 @@ export class PlayerControls {
     const getWeaponLabel = (weapon) => {
       if (!weapon) return 'weapon';
       if (weapon.type === 'sword') return 'sword';
+      if (weapon.type === 'hammer') return 'hammer';
       if (weapon.type === 'gun') return 'gun';
       if (weapon.type === 'bow') return 'bow';
       if (weapon.type === 'lantern') return 'lantern';
@@ -1944,8 +1946,16 @@ export class PlayerControls {
 
     if (["mutantPunch", "swordSlash", "swordSlashLeft", "swordSpin", "swordFwdSpin", "leftPunch", "hurricaneKick", "mmaKick", "runningKick"].includes(resolvedAction)) {
       const isPunch = resolvedAction === 'mutantPunch' || resolvedAction === 'leftPunch' || swordAttackActions.includes(resolvedAction);
-      const attackName = isPunch && this.getEquippedSword()
-        ? (swordAttackActions.includes(resolvedAction) ? resolvedAction : 'swordSlash')
+      const meleeWeapon = this.getEquippedSword();
+      const swordAction = swordAttackActions.includes(resolvedAction) ? resolvedAction : 'swordSlash';
+      const hammerAttackMap = {
+        swordSlash: 'hammerSlash',
+        swordSlashLeft: 'hammerSlashLeft',
+        swordFwdSpin: 'hammerFwdSpin',
+        swordSpin: 'hammerSpin'
+      };
+      const attackName = isPunch && meleeWeapon
+        ? (meleeWeapon.type === 'hammer' ? (hammerAttackMap[swordAction] || 'hammerSlash') : swordAction)
         : isPunch
           ? 'mutantPunch'
           : resolvedAction;
@@ -2895,7 +2905,7 @@ export class PlayerControls {
     return this.getWeapons().find(
       weapon => weapon.holder === this
         && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')
-        && weapon.type === 'sword'
+        && (weapon.type === 'sword' || weapon.type === 'hammer')
     ) || null;
   }
 
