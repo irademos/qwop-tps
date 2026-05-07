@@ -106,6 +106,7 @@ import { claimAchievement, getAchievementView, mergeAchievementState, recordAchi
 import { getDistanceUnitPreference, setDistanceUnitPreference } from '../distanceUnits.js';
 import { db } from '../firebase-init.js';
 import { onValue, push, ref, remove, set, update } from 'firebase/database';
+import { openPopupDialog } from '../controls/popupDialog.js';
 
 import {
   clearStoredPin,
@@ -118,6 +119,7 @@ import {
   saveCustomization,
   saveQuestState,
   saveAchievementState,
+  saveCompanions,
   saveSleepTimestamp,
   saveWalkingStats,
   saveStatsImmediate,
@@ -3640,6 +3642,12 @@ async function initCore(runtimeContext) {
       return nearest;
     },
     onAnimalRemoved: ({ animal, wasDead, position }) => {
+      const dogCollider = dogColliderEntries.get(animal?.id);
+      if (dogCollider) removeStaticBoxCollider(dogCollider);
+      dogColliderEntries.delete(animal?.id);
+      const label = animalNameLabels.get(animal?.id);
+      label?.parentNode?.removeChild(label);
+      animalNameLabels.delete(animal?.id);
       if (!wasDead || !position) return;
       notifyAchievementProgress('animalsKilled', 1);
       window.questManager?.handleAnimalKilled?.(animal);
@@ -11903,6 +11911,9 @@ async function initCore(runtimeContext) {
   feedDogBtn.textContent = 'Feed Dog';
   feedDogBtn.style.cssText = 'position:fixed;left:50%;bottom:37%;transform:translateX(-50%);z-index:1200;display:none;padding:8px 12px;';
   document.body.appendChild(feedDogBtn);
+  const animalNameLabels = new Map();
+  const dogColliderEntries = new Map();
+  const companionData = { ...(playerProfile?.companions || {}) };
 
   const buildInteractionBtn = document.createElement('button');
   buildInteractionBtn.type = 'button';
@@ -12304,7 +12315,27 @@ async function initCore(runtimeContext) {
       return;
     }
     removeFromInventory(feedItem, 1);
+    const isNewCompanion = !dog.model.userData?.isCompanion;
     animalManager?.feedDog?.(dog, 10);
+    const persistDog = async (name) => {
+      const key = String(dog.id || `${dog.type}-unknown`);
+      companionData[key] = { id: key, type: 'dog', name: name || dog.model.userData?.companionName || 'Companion', health: dog.health || 1, maxHealth: dog.maxHealth || 1 };
+      dog.model.userData.companionName = companionData[key].name;
+      playerProfile = playerProfile || {};
+      playerProfile.companions = { ...companionData };
+      if (profileNameKey) await saveCompanions(profileNameKey, companionData);
+    };
+    if (isNewCompanion) {
+      void openPopupDialog({
+        title: 'New Animal Companion',
+        message: "you've made an animal companion! remember to feed them!",
+        inputLabel: "Name your dog",
+        inputPlaceholder: 'Companion name',
+        confirmText: 'Save Name'
+      }).then((name) => persistDog(name));
+    } else {
+      void persistDog(dog.model.userData?.companionName || 'Companion');
+    }
     showMobileStatusToast('The dog is now your companion!');
   });
 
@@ -13560,6 +13591,27 @@ async function initCore(runtimeContext) {
           nameLabel.style.transform = `translate(-50%, -50%) scale(${scale})`;
           nameLabel.style.opacity = opacity.toFixed(2);
         });
+        (animals || []).forEach((animal) => {
+          if (!animal?.model || !animal.model.userData?.isCompanion) return;
+          const name = animal.model.userData?.companionName;
+          if (!name) return;
+          let label = animalNameLabels.get(animal.id);
+          if (!label) {
+            label = document.createElement('div');
+            label.className = 'name-tag';
+            label.style.cssText = 'position:fixed;z-index:1200;color:white;background:rgba(0,0,0,0.5);padding:2px 6px;border-radius:6px;font-size:12px;pointer-events:none;';
+            document.body.appendChild(label);
+            animalNameLabels.set(animal.id, label);
+          }
+          label.textContent = name;
+          const pos = animal.model.position.clone().add(new THREE.Vector3(0, 2, 0));
+          pos.project(camera);
+          if (pos.z < 0 || pos.z > 1) { label.style.display = 'none'; return; }
+          label.style.display = 'block';
+          label.style.left = `${(pos.x * 0.5 + 0.5) * window.innerWidth}px`;
+          label.style.top = `${(-pos.y * 0.5 + 0.5) * window.innerHeight}px`;
+          label.style.transform = 'translate(-50%, -50%)';
+        });
       });
     }
 
@@ -13625,6 +13677,15 @@ async function initCore(runtimeContext) {
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage,
       onBuildHit: handleBuildProjectileHit
+    });
+    (animals || []).forEach((animal) => {
+      if (!animal?.model || String(animal.type).toLowerCase() !== 'dog') return;
+      if (!dogColliderEntries.has(animal.id)) {
+        const entry = createStaticBoxColliderForObject(animal.model, { rapierWorld, friction: 0.8, restitution: 0.01 });
+        dogColliderEntries.set(animal.id, entry || null);
+      } else {
+        syncStaticBoxColliderForObject(animal.model, dogColliderEntries.get(animal.id));
+      }
     });
     handleBombPickupArrowHit();
 

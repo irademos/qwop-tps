@@ -55,6 +55,7 @@ const DEFAULT_WALKING_STATS = {
   dailyMiles: {},
   updatedAt: null
 };
+const DEFAULT_COMPANIONS = {};
 
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
@@ -101,6 +102,7 @@ function buildProfile(name) {
     quests: mergeQuests(DEFAULT_QUESTS),
     achievements: mergeAchievements(DEFAULT_ACHIEVEMENTS),
     walkingStats: { ...DEFAULT_WALKING_STATS },
+    companions: { ...DEFAULT_COMPANIONS },
     characterModel: null,
     sleepStartedAt: null,
     lastStatUpdateAt: now,
@@ -222,6 +224,7 @@ async function loadProfileForName(profileRef, trimmedName) {
   const mergedAchievements = mergeAchievements(profile.achievements);
   const mergedCharacterModel = typeof profile.characterModel === 'string' ? profile.characterModel : null;
   const mergedWalkingStats = mergeWalkingStats(profile.walkingStats);
+  const mergedCompanions = profile.companions && typeof profile.companions === 'object' ? { ...profile.companions } : { ...DEFAULT_COMPANIONS };
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
   const inventoryMissing = profile.inventory == null;
@@ -234,7 +237,8 @@ async function loadProfileForName(profileRef, trimmedName) {
   const achievementsMissing = profile.achievements == null;
   const characterModelMissing = profile.characterModel !== mergedCharacterModel;
   const walkingStatsMissing = profile.walkingStats == null;
-  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || questsMissing || achievementsMissing || characterModelMissing || walkingStatsMissing) {
+  const companionsMissing = profile.companions == null;
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || questsMissing || achievementsMissing || characterModelMissing || walkingStatsMissing || companionsMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
@@ -290,6 +294,12 @@ async function loadProfileForName(profileRef, trimmedName) {
     } else {
       profile.walkingStats = mergedWalkingStats;
     }
+    if (companionsMissing) {
+      updatePayload.companions = mergedCompanions;
+      profile.companions = mergedCompanions;
+    } else {
+      profile.companions = mergedCompanions;
+    }
     if (!hasLastStatUpdateAt) {
       updatePayload.lastStatUpdateAt = Date.now();
       profile.lastStatUpdateAt = updatePayload.lastStatUpdateAt;
@@ -304,7 +314,8 @@ async function loadProfileForName(profileRef, trimmedName) {
     profile.quests = mergedQuests;
     profile.achievements = mergedAchievements;
     profile.characterModel = mergedCharacterModel;
-    profile.walkingStats = mergedWalkingStats;
+  profile.walkingStats = mergedWalkingStats;
+  profile.companions = mergedCompanions;
   }
 
   console.log('✅ Loaded profile for', trimmedName);
@@ -678,6 +689,18 @@ export async function saveWalkingStats(nameKey, walkingStats) {
     });
   } catch (error) {
     console.error('Failed to save walking stats for', nameKey, error);
+  }
+}
+
+export async function saveCompanions(nameKey, companions) {
+  if (!nameKey) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}`), {
+      companions: companions && typeof companions === 'object' ? companions : {},
+      updatedAt: Date.now()
+    });
+  } catch (error) {
+    console.error('Failed to save companions for', nameKey, error);
   }
 }
 
