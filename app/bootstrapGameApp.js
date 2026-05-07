@@ -908,6 +908,7 @@ async function initCore(runtimeContext) {
   let animals = [];
   runtimeContext.entities.animals = animals;
   window.animals = animals;
+  void animalManager?.spawnDogAt?.();
   const npcVoiceSchedule = new Map();
   const zombieVoiceLoops = new Map();
   const getRandomDelayMs = ([min, max]) => {
@@ -3625,6 +3626,20 @@ async function initCore(runtimeContext) {
     scene,
     getPlayerModel: () => playerModel,
     getTerrainHeight,
+    getNearbyMonster: (origin, maxDistance = 9) => {
+      if (!origin) return null;
+      let nearest = null;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      monsters.forEach((monster) => {
+        if (!monster?.position || monster.userData?.isDead) return;
+        const d = monster.position.distanceTo(origin);
+        if (d <= maxDistance && d < nearestDistance) {
+          nearest = monster;
+          nearestDistance = d;
+        }
+      });
+      return nearest;
+    },
     onAnimalRemoved: ({ animal, wasDead, position }) => {
       if (!wasDead || !position) return;
       notifyAchievementProgress('animalsKilled', 1);
@@ -3639,6 +3654,7 @@ async function initCore(runtimeContext) {
   animals = animalManager.getAnimals();
   runtimeContext.entities.animals = animals;
   window.animals = animals;
+  void animalManager?.spawnDogAt?.();
   let didInitialGpsSnap = false;
   let currentPlayerLevel = 1;
 
@@ -9430,6 +9446,12 @@ async function initCore(runtimeContext) {
     await animalManager?.spawnDeerAt?.(position);
   };
 
+  window.spawnTutorialDogNearby = async () => {
+    const position = getTutorialNearbyPosition(6.5);
+    if (!position) return;
+    await animalManager?.spawnDogAt?.(position);
+  };
+
   window.spawnTutorialBowAndArrowsNearby = () => {
     const bowPos = getTutorialNearbyPosition(4.2);
     if (bowPos) {
@@ -11878,6 +11900,12 @@ async function initCore(runtimeContext) {
     delete mesh.userData.buildHealthBar;
   };
 
+  const feedDogBtn = document.createElement('button');
+  feedDogBtn.type = 'button';
+  feedDogBtn.textContent = 'Feed Dog';
+  feedDogBtn.style.cssText = 'position:fixed;left:50%;bottom:37%;transform:translateX(-50%);z-index:1200;display:none;padding:8px 12px;';
+  document.body.appendChild(feedDogBtn);
+
   const buildInteractionBtn = document.createElement('button');
   buildInteractionBtn.type = 'button';
   buildInteractionBtn.textContent = 'Read Note';
@@ -12266,6 +12294,22 @@ async function initCore(runtimeContext) {
       }
     };
   };
+  feedDogBtn.addEventListener('click', () => {
+    const playerPos = playerModel?.position;
+    const target = animalManager?.getNearestFeedableDog?.(playerPos, 2.5);
+    const dog = target?.animal;
+    if (!dog) return;
+    const mushroomId = Object.keys(inventoryState).find((id) => id?.startsWith?.('mushroom_') && (inventoryState[id]?.count || 0) > 0);
+    const feedItem = (inventoryState[APPLE_ITEM_ID]?.count || 0) > 0 ? APPLE_ITEM_ID : mushroomId;
+    if (!feedItem) {
+      showMobileStatusToast('Need an apple or mushroom to feed the dog.');
+      return;
+    }
+    removeFromInventory(feedItem, 1);
+    animalManager?.feedDog?.(dog, 10);
+    showMobileStatusToast('The dog is now your companion!');
+  });
+
   buildInteractionBtn.addEventListener('click', () => { void showNoteInteraction(); });
 
   const locationAdapter = {
@@ -12603,6 +12647,9 @@ async function initCore(runtimeContext) {
         });
         const shouldShow = Boolean(buildState.selectedNoteId) && closestNoteDistance <= closestInteractDistance;
         buildInteractionBtn.style.display = shouldShow ? 'block' : 'none';
+
+        const nearbyDog = animalManager?.getNearestFeedableDog?.(playerPos, 2.5);
+        feedDogBtn.style.display = nearbyDog ? 'block' : 'none';
       }
     }
     updateBuildHealthBars();
@@ -13245,6 +13292,7 @@ async function initCore(runtimeContext) {
           animals = animalManager.getAnimals();
           runtimeContext.entities.animals = animals;
           window.animals = animals;
+  void animalManager?.spawnDogAt?.();
         }
 
         if (isHostNow) {
