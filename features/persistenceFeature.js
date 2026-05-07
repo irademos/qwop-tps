@@ -9,6 +9,7 @@ export {
   saveCustomization,
   saveQuestState,
   saveAchievementState,
+  saveCompanions,
   saveSleepTimestamp,
   saveWalkingStats,
   saveStatsImmediate,
