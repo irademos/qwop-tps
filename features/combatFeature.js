@@ -25,13 +25,17 @@ export async function loadSpecialWeapons() {
       import('../items/bow.js'),
       import('../items/lantern.js'),
       import('../items/autumnSword.js'),
-      import('../items/bomb.js')
-    ]).then(([iceGunModule, bowModule, lanternModule, autumnSwordModule, bombModule]) => ({
+      import('../items/bomb.js'),
+      import('../items/shield.js')
+    ]).then(([iceGunModule, bowModule, lanternModule, autumnSwordModule, bombModule, shieldModule]) => ({
       IceGun: iceGunModule.IceGun,
       Bow: bowModule.Bow,
       Lantern: lanternModule.Lantern,
       AutumnSword: autumnSwordModule.AutumnSword,
-      Bomb: bombModule.Bomb
+      Bomb: bombModule.Bomb,
+      Shield: shieldModule.Shield,
+      SHIELD_ITEM_ID: shieldModule.SHIELD_ITEM_ID,
+      DEFAULT_SHIELD_HEALTH: shieldModule.DEFAULT_SHIELD_HEALTH
     })).finally(() => {
       hideLoading();
     });

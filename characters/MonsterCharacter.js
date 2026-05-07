@@ -599,6 +599,12 @@ export class MonsterCharacter extends CharacterBase {
         }
         context.onFriendlyHit?.(friendly, { damage, killed: !!killed, sourceId: this.id, attackTypes });
       } else if (player.id === 'local' && !localControls?.isKnocked && !isInvincible) {
+        const blockedByShield = window.tryBlockLocalPlayerHitWithShield?.({
+          attackerModel: this.model,
+          damage,
+          attackTypes
+        });
+        if (blockedByShield) return;
         window.localHealth = Math.max(0, window.localHealth - damage);
         window.lastHitAttackTypes = attackTypes;
         if (localControls) {
