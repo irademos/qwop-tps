@@ -407,7 +407,6 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, o
   });
 
   const spawnDogAt = async (position) => {
-    if (hasLivingDog()) return null;
     const entry = await spawnAnimal({
       scene,
       getPlayerModel,

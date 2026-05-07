@@ -3661,6 +3661,33 @@ async function initCore(runtimeContext) {
   animals = animalManager.getAnimals();
   runtimeContext.entities.animals = animals;
   window.animals = animals;
+  const restoreCompanionDogsFromProfile = async () => {
+    const savedCompanions = playerProfile?.companions && typeof playerProfile.companions === 'object'
+      ? Object.values(playerProfile.companions)
+      : [];
+    const dogCompanions = savedCompanions.filter((entry) => String(entry?.type || '').toLowerCase() === 'dog');
+    if (dogCompanions.length === 0) return;
+    const basePosition = playerModel?.position?.clone?.();
+    if (!basePosition) return;
+    for (let i = 0; i < dogCompanions.length; i += 1) {
+      const companion = dogCompanions[i];
+      const angle = (i / Math.max(1, dogCompanions.length)) * Math.PI * 2;
+      const offset = new THREE.Vector3(Math.cos(angle) * 3, 0, Math.sin(angle) * 3);
+      const spawnPos = basePosition.clone().add(offset);
+      const dog = await animalManager?.spawnDogAt?.(spawnPos);
+      if (!dog?.model) continue;
+      dog.model.userData.isCompanion = true;
+      dog.model.userData.companionName = companion?.name || 'Companion';
+      if (Number.isFinite(companion?.health)) {
+        dog.health = Math.max(1, Math.min(dog.maxHealth || 1, Math.round(companion.health)));
+        dog.model.userData.health = dog.health;
+      }
+      if (companion?.id) {
+        dog.id = companion.id;
+      }
+    }
+  };
+  await restoreCompanionDogsFromProfile();
   let didInitialGpsSnap = false;
   let currentPlayerLevel = 1;
 
