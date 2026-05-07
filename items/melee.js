@@ -185,6 +185,12 @@ export function updateMeleeAttacks({
             attackTypes
           });
           if (target.id === 'local') {
+            const blockedByShield = window.tryBlockLocalPlayerHitWithShield?.({
+              attackerModel: attacker.model,
+              damage: attackDamage,
+              attackTypes
+            });
+            if (blockedByShield) continue;
             window.localHealth = Math.max(0, window.localHealth - attackDamage);
             window.lastHitAttackTypes = attackTypes;
             const playerControls = appContext.systems.playerControls ?? window.playerControls;

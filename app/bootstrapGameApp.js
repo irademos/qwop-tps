@@ -1743,6 +1743,7 @@ async function initCore(runtimeContext) {
         if (!Array.isArray(drop.rotation) || drop.rotation.length !== 4 || !drop.rotation.every(isFiniteNumber)) return false;
         if (drop.quantity != null && !isFiniteNumber(drop.quantity)) return false;
         if (drop.torchHealth != null && !isFiniteNumber(drop.torchHealth)) return false;
+        if (drop.shieldHealth != null && !isFiniteNumber(drop.shieldHealth)) return false;
         return true;
       });
     };
@@ -1760,7 +1761,8 @@ async function initCore(runtimeContext) {
       && typeof payload.dropId === 'string'
       && (payload.itemId == null || typeof payload.itemId === 'string')
       && (payload.quantity == null || isFiniteNumber(payload.quantity))
-      && (payload.torchHealth == null || isFiniteNumber(payload.torchHealth));
+      && (payload.torchHealth == null || isFiniteNumber(payload.torchHealth))
+      && (payload.shieldHealth == null || isFiniteNumber(payload.shieldHealth));
 
     const isGrabMessage = payload => isObject(payload)
       && payload.type === 'grab'
@@ -2288,7 +2290,7 @@ async function initCore(runtimeContext) {
 
     if (previousHostId !== newHostId) {
       clearAllRemoteHeldWeaponMeshes();
-      [iceGun, bow, bomb, autumnSword, hammer, lantern, torch].forEach((weapon) => {
+      [iceGun, bow, bomb, autumnSword, hammer, lantern, torch, shield].forEach((weapon) => {
         if (!weapon) return;
         weapon.remoteHolderId = null;
       });
@@ -2369,6 +2371,7 @@ async function initCore(runtimeContext) {
   let hammer;
   let lantern;
   let torch;
+  let shield;
   let bomb;
   let treasureChest;
   let bed;
@@ -2653,6 +2656,7 @@ async function initCore(runtimeContext) {
     const remoteEquipByType = {
       lantern,
       torch,
+      shield,
       iceGun: iceGun,
       bow,
       bomb,
@@ -2672,6 +2676,7 @@ async function initCore(runtimeContext) {
 
     setRemoteEquipState('lantern', nextLeft === 'lantern');
     setRemoteEquipState('torch', nextLeft === 'torch');
+    setRemoteEquipState('shield', nextLeft === 'shield');
     setRemoteEquipState('iceGun', nextRight === 'iceGun');
     setRemoteEquipState('bow', nextRight === 'bow');
     setRemoteEquipState('bomb', nextRight === 'bomb');
@@ -2685,7 +2690,7 @@ async function initCore(runtimeContext) {
     Array.from(remoteHeldWeaponMeshes.keys()).forEach(disposeRemoteHeldWeaponMesh);
   };
 
-  const { IceGun, Bow, Lantern, AutumnSword, Hammer, Bomb } = await loadSpecialWeapons();
+  const { IceGun, Bow, Lantern, AutumnSword, Hammer, Bomb, Shield, SHIELD_ITEM_ID, DEFAULT_SHIELD_HEALTH } = await loadSpecialWeapons();
 
   const updateWeaponMarker = (weapon, marker, rotationSpeed, offsetY = 1.2) => {
     if (!weapon?.mesh || !marker) return;
@@ -3321,8 +3326,78 @@ async function initCore(runtimeContext) {
     isLocallyControlled: () => torch?.holder === playerControls
   });
 
-  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword, hammer, lantern, torch };
-  window.weapons = { iceGun, bow, bomb, autumnSword, hammer, lantern, torch };
+  shield = new Shield(scene);
+  await shield.load(playerModel.position.clone().add(new THREE.Vector3(2, 0, 2.4)));
+  window.shield = shield;
+  const shieldMarker = createWeaponMarker(0x7a4a20);
+  shield.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(shield, SHIELD_ITEM_ID);
+    if (heldMesh) {
+      shield.useHeldMeshWhenHeld = true;
+      heldMesh.visible = true;
+    }
+    unequipOtherInventoryItems(SHIELD_ITEM_ID);
+    const pickupHealth = normalizeShieldHealth(shield.mesh?.userData?.shieldHealth);
+    addToInventory(SHIELD_ITEM_ID, 1);
+    inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+      ...inventoryState[SHIELD_ITEM_ID],
+      [SHIELD_HEALTH_KEY]: pickupHealth
+    }));
+    shield.localHoldOrigin = 'world';
+  };
+  shield.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    shield.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory(SHIELD_ITEM_ID, 1);
+    }
+  };
+  if (shield.mesh) {
+    shield.mesh.userData.hideInMapView = true;
+    shield.mesh.userData.shieldHealth = DEFAULT_SHIELD_HEALTH;
+    shield.mesh.userData.shieldMaxHealth = DEFAULT_SHIELD_HEALTH;
+    shield.mesh.visible = false;
+  }
+  registerNetworkedEntity('shield', {
+    getState: () => {
+      if (!shield?.mesh) return null;
+      const pos = shield.mesh.position;
+      const q = shield.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (shield.holder === playerControls && shield.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null,
+        shieldHealth: shield.mesh.userData.shieldHealth ?? DEFAULT_SHIELD_HEALTH
+      };
+    },
+    applyState: state => {
+      if (!shield?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        shield.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        shield.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      if (Number.isFinite(state.shieldHealth)) {
+        shield.mesh.userData.shieldHealth = normalizeShieldHealth(state.shieldHealth);
+      }
+      const previousHolderId = shield.remoteHolderId ?? null;
+      shield.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(shield.type);
+      updateRemoteWeaponType(shield, shield.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && shield.holder === playerControls && shield.localHoldOrigin === 'world') {
+        shield.holder = null;
+        shield.localHoldOrigin = null;
+      }
+    },
+    isLocallyControlled: () => shield?.holder === playerControls
+  });
+
+
+  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword, hammer, lantern, torch, shield };
+  window.weapons = { iceGun, bow, bomb, autumnSword, hammer, lantern, torch, shield };
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -4699,6 +4774,25 @@ async function initCore(runtimeContext) {
   const getTorchHealths = (entry) => (
     Array.isArray(entry?.[TORCH_HEALTH_KEY]) ? [...entry[TORCH_HEALTH_KEY]] : []
   );
+  const SHIELD_HEALTH_KEY = 'shieldHealth';
+  const SHIELD_MAX_HEALTH_KEY = 'shieldMaxHealth';
+  const normalizeShieldHealth = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return DEFAULT_SHIELD_HEALTH;
+    }
+    return Math.max(0, Math.min(DEFAULT_SHIELD_HEALTH, numeric));
+  };
+  const normalizeShieldEntry = (entry = {}) => {
+    const countValue = Number.isFinite(entry.count) ? Math.max(0, Math.floor(entry.count)) : 0;
+    const health = normalizeShieldHealth(entry[SHIELD_HEALTH_KEY]);
+    return {
+      ...entry,
+      count: countValue > 0 && health > 0 ? countValue : 0,
+      [SHIELD_HEALTH_KEY]: health,
+      [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+    };
+  };
   const inventoryCatalog = {
     iceGun: {
       name: 'Ice Gun',
@@ -4727,6 +4821,10 @@ async function initCore(runtimeContext) {
     torch: {
       name: 'Torch (Left Hand)',
       icon: '/assets/ui/items/torch.png'
+    },
+    [SHIELD_ITEM_ID]: {
+      name: 'Shield (Left Hand)',
+      icon: ''
     },
     [LIFE_POTION_ITEM_ID]: {
       name: 'Life Potion',
@@ -4783,10 +4881,15 @@ async function initCore(runtimeContext) {
     const catalogEntry = ensureCatalogEntry(itemId, entry);
     const nextEntry = itemId === TORCH_ITEM_ID
       ? normalizeTorchEntry(catalogEntry)
-      : catalogEntry;
+      : itemId === SHIELD_ITEM_ID
+        ? normalizeShieldEntry(catalogEntry)
+        : catalogEntry;
     const healthsChanged = itemId === TORCH_ITEM_ID
       && JSON.stringify(nextEntry[TORCH_HEALTH_KEY]) !== JSON.stringify(entry?.[TORCH_HEALTH_KEY]);
-    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon || healthsChanged) {
+    const shieldHealthChanged = itemId === SHIELD_ITEM_ID
+      && (nextEntry[SHIELD_HEALTH_KEY] !== entry?.[SHIELD_HEALTH_KEY]
+        || nextEntry[SHIELD_MAX_HEALTH_KEY] !== entry?.[SHIELD_MAX_HEALTH_KEY]);
+    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon || healthsChanged || shieldHealthChanged) {
       inventoryDirty = true;
     }
     inventoryState[itemId] = nextEntry;
@@ -4795,10 +4898,15 @@ async function initCore(runtimeContext) {
     const catalogEntry = ensureCatalogEntry(itemId, entry);
     const nextEntry = itemId === TORCH_ITEM_ID
       ? normalizeTorchEntry(catalogEntry)
-      : catalogEntry;
+      : itemId === SHIELD_ITEM_ID
+        ? normalizeShieldEntry(catalogEntry)
+        : catalogEntry;
     const healthsChanged = itemId === TORCH_ITEM_ID
       && JSON.stringify(nextEntry[TORCH_HEALTH_KEY]) !== JSON.stringify(entry?.[TORCH_HEALTH_KEY]);
-    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon || healthsChanged) {
+    const shieldHealthChanged = itemId === SHIELD_ITEM_ID
+      && (nextEntry[SHIELD_HEALTH_KEY] !== entry?.[SHIELD_HEALTH_KEY]
+        || nextEntry[SHIELD_MAX_HEALTH_KEY] !== entry?.[SHIELD_MAX_HEALTH_KEY]);
+    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon || healthsChanged || shieldHealthChanged) {
       homeStorageDirty = true;
     }
     homeStorageState[itemId] = nextEntry;
@@ -4837,6 +4945,13 @@ async function initCore(runtimeContext) {
     };
     inventoryDirty = true;
   }
+  if (inventoryState[SHIELD_ITEM_ID]?.name !== inventoryCatalog[SHIELD_ITEM_ID].name) {
+    inventoryState[SHIELD_ITEM_ID] = normalizeShieldEntry({
+      ...(inventoryState[SHIELD_ITEM_ID] || {}),
+      name: inventoryCatalog[SHIELD_ITEM_ID].name
+    });
+    inventoryDirty = true;
+  }
   if (homeStorageState.lantern?.name !== inventoryCatalog.lantern.name) {
     homeStorageState.lantern = {
       ...(homeStorageState.lantern || {}),
@@ -4855,10 +4970,11 @@ async function initCore(runtimeContext) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
   }
 
-  const equippableItems = new Set(['lantern', 'torch', 'iceGun', 'bow', 'bomb', 'autumnSword', 'hammer']);
+  const equippableItems = new Set(['lantern', 'torch', SHIELD_ITEM_ID, 'iceGun', 'bow', 'bomb', 'autumnSword', 'hammer']);
   const inventoryHandSlots = {
     lantern: 'left',
     torch: 'left',
+    [SHIELD_ITEM_ID]: 'left',
     iceGun: 'right',
     bow: 'right',
     bomb: 'right',
@@ -4962,6 +5078,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'coins') return '🪙';
     if (itemId === ICE_AMMO_KEY || itemId === 'iceGun') return '❄️';
     if (itemId === ARROW_AMMO_KEY || itemId === 'bow') return '🏹';
+    if (itemId === SHIELD_ITEM_ID) return '🛡️';
     if (itemId === APPLE_ITEM_ID) return '🍎';
     if (itemId?.startsWith?.('mushroom_')) return '🍄';
     return '🎒';
@@ -5218,6 +5335,9 @@ async function initCore(runtimeContext) {
     if (itemId === 'torch') {
       return torch?.holder === playerControls;
     }
+    if (itemId === SHIELD_ITEM_ID) {
+      return shield?.holder === playerControls;
+    }
     if (itemId === 'iceGun') {
       return iceGun?.holder === playerControls;
     }
@@ -5240,6 +5360,7 @@ async function initCore(runtimeContext) {
     if (hand === 'left') {
       if (isInventoryItemEquipped('torch')) return 'torch';
       if (isInventoryItemEquipped('lantern')) return 'lantern';
+      if (isInventoryItemEquipped(SHIELD_ITEM_ID)) return SHIELD_ITEM_ID;
       return null;
     }
     if (hand === 'right') {
@@ -5340,6 +5461,30 @@ async function initCore(runtimeContext) {
       setPlayerWeaponType(playerControls, torch.type);
       audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-torch', cooldownMs: 100 });
       audioManager?.startLoopingSFX('torch-loop', 'SFX/Torch/Torch Loop.ogg', 0.32);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === SHIELD_ITEM_ID) {
+      if (!shield?.mesh || !playerControls) return;
+      const entry = normalizeShieldEntry(inventoryState[SHIELD_ITEM_ID]);
+      if (!entry.count || entry[SHIELD_HEALTH_KEY] <= 0) {
+        delete inventoryState[SHIELD_ITEM_ID];
+        persistInventoryAndStorage();
+        return;
+      }
+      inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, entry);
+      const heldMesh = ensureLocalHeldWeaponMesh(shield, SHIELD_ITEM_ID, { forceNew: true });
+      shield.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.userData.shieldHealth = entry[SHIELD_HEALTH_KEY];
+        heldMesh.userData.shieldMaxHealth = entry[SHIELD_MAX_HEALTH_KEY];
+        heldMesh.visible = true;
+      }
+      shield.mesh.userData.shieldHealth = entry[SHIELD_HEALTH_KEY];
+      shield.mesh.userData.shieldMaxHealth = entry[SHIELD_MAX_HEALTH_KEY];
+      shield.mesh.visible = false;
+      shield.localHoldOrigin = 'inventory';
+      shield.holder = playerControls;
       updateSettingsUI();
       return;
     }
@@ -5455,6 +5600,19 @@ async function initCore(runtimeContext) {
       }
       clearPlayerWeaponType(playerControls, torch.type);
       audioManager?.stopLoopingSFX('torch-loop');
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === SHIELD_ITEM_ID) {
+      if (shield?.holder !== playerControls) return;
+      shield.holder = null;
+      shield.localHoldOrigin = null;
+      if (shield.mesh) {
+        shield.mesh.visible = false;
+      }
+      if (shield.heldMesh) {
+        shield.heldMesh.visible = false;
+      }
       updateSettingsUI();
       return;
     }
@@ -6173,6 +6331,7 @@ async function initCore(runtimeContext) {
       quaternion,
       allowHidden = false,
       torchHealth,
+      shieldHealth,
       dropId,
       shouldBroadcastRemoval = true,
       onPickup
@@ -6195,6 +6354,9 @@ async function initCore(runtimeContext) {
     if (itemId === TORCH_ITEM_ID && Number.isFinite(torchHealth)) {
       pickupMesh.userData.torchHealth = normalizeTorchHealth(torchHealth);
     }
+    if (itemId === SHIELD_ITEM_ID && Number.isFinite(shieldHealth)) {
+      pickupMesh.userData.shieldHealth = normalizeShieldHealth(shieldHealth);
+    }
     scene.add(pickupMesh);
     const marker = createWeaponMarker(markerColor);
     const pickup = {
@@ -6205,6 +6367,7 @@ async function initCore(runtimeContext) {
       type: item?.type || itemId,
       holder: null,
       torchHealth: Number.isFinite(torchHealth) ? normalizeTorchHealth(torchHealth) : null,
+      shieldHealth: Number.isFinite(shieldHealth) ? normalizeShieldHealth(shieldHealth) : null,
       markerOffsetY,
       dropId: dropId || null,
       shouldBroadcastRemoval: !!shouldBroadcastRemoval,
@@ -6216,6 +6379,13 @@ async function initCore(runtimeContext) {
           addToInventory(itemId, pickup.quantity, {
             torchHealth: pickup.torchHealth ?? pickupMesh.userData.torchHealth ?? DEFAULT_TORCH_HEALTH
           });
+        } else if (itemId === SHIELD_ITEM_ID) {
+          addToInventory(itemId, pickup.quantity);
+          inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+            ...inventoryState[SHIELD_ITEM_ID],
+            [SHIELD_HEALTH_KEY]: pickup.shieldHealth ?? pickupMesh.userData.shieldHealth ?? DEFAULT_SHIELD_HEALTH
+          }));
+          persistInventoryAndStorage();
         } else {
           addToInventory(itemId, pickup.quantity);
         }
@@ -6231,7 +6401,7 @@ async function initCore(runtimeContext) {
           droppedWeaponPickups.splice(index, 1);
         }
         if (pickup.dropId && pickup.shouldBroadcastRemoval && multiplayer && !multiplayer.isHost) {
-          multiplayer.send({ type: 'dropWeaponPickup', dropId: pickup.dropId, itemId: pickup.itemId, quantity: pickup.quantity, torchHealth: pickup.torchHealth });
+          multiplayer.send({ type: 'dropWeaponPickup', dropId: pickup.dropId, itemId: pickup.itemId, quantity: pickup.quantity, torchHealth: pickup.torchHealth, shieldHealth: pickup.shieldHealth });
         }
         if (pickup.dropId) {
           networkDroppedWeaponPickups.delete(pickup.dropId);
@@ -6663,7 +6833,8 @@ async function initCore(runtimeContext) {
       bomb,
       autumnSword,
       lantern,
-      torch
+      torch,
+      shield
     };
     const item = itemMap[itemId];
     if (!item?.mesh) {
@@ -6678,11 +6849,16 @@ async function initCore(runtimeContext) {
         ? 0xffc26b
         : itemId === TORCH_ITEM_ID
           ? 0xffa54c
+          : itemId === SHIELD_ITEM_ID
+            ? 0x7a4a20
           : itemId === 'bomb'
             ? 0xff4d4d
             : 0xffd400;
       const torchPickupHealth = itemId === TORCH_ITEM_ID
         ? takeTorchHealth(inventoryState)?.health
+        : null;
+      const shieldPickupHealth = itemId === SHIELD_ITEM_ID
+        ? normalizeShieldHealth(inventoryState[SHIELD_ITEM_ID]?.[SHIELD_HEALTH_KEY] ?? item.mesh?.userData?.shieldHealth)
         : null;
       const dropId = createNetworkDropId('weapon');
       const q = playerControls?.playerModel?.quaternion || item.mesh?.quaternion;
@@ -6701,6 +6877,7 @@ async function initCore(runtimeContext) {
         position: dropPosition,
         quaternion: q,
         torchHealth: torchPickupHealth ?? undefined,
+        shieldHealth: shieldPickupHealth ?? undefined,
         dropId,
         allowHidden: true
       });
@@ -6714,7 +6891,8 @@ async function initCore(runtimeContext) {
             position: [pos.x, pos.y, pos.z],
             rotation: [q.x, q.y, q.z, q.w],
             quantity: 1,
-            torchHealth: torchPickupHealth ?? undefined
+            torchHealth: torchPickupHealth ?? undefined,
+            shieldHealth: shieldPickupHealth ?? undefined
           }]
         });
       }
@@ -6729,11 +6907,16 @@ async function initCore(runtimeContext) {
         ? 0xffc26b
         : itemId === TORCH_ITEM_ID
           ? 0xffa54c
+          : itemId === SHIELD_ITEM_ID
+            ? 0x7a4a20
           : itemId === 'bomb'
             ? 0xff4d4d
             : 0xffd400;
       const torchPickupHealth = itemId === TORCH_ITEM_ID
         ? takeTorchHealth(inventoryState)?.health
+        : null;
+      const shieldPickupHealth = itemId === SHIELD_ITEM_ID
+        ? normalizeShieldHealth(inventoryState[SHIELD_ITEM_ID]?.[SHIELD_HEALTH_KEY] ?? item.mesh?.userData?.shieldHealth)
         : null;
       const dropId = createNetworkDropId('weapon');
       createDroppedWeaponPickup(item, {
@@ -6743,6 +6926,7 @@ async function initCore(runtimeContext) {
         position: dropPosition,
         quaternion: playerControls?.playerModel?.quaternion,
         torchHealth: torchPickupHealth ?? undefined,
+        shieldHealth: shieldPickupHealth ?? undefined,
         dropId
       });
       if (multiplayer && !multiplayer.isHost) {
@@ -6756,7 +6940,8 @@ async function initCore(runtimeContext) {
             position: [pos.x, pos.y, pos.z],
             rotation: [q.x, q.y, q.z, q.w],
             quantity: 1,
-            torchHealth: torchPickupHealth ?? undefined
+            torchHealth: torchPickupHealth ?? undefined,
+            shieldHealth: shieldPickupHealth ?? undefined
           }]
         });
       }
@@ -6778,6 +6963,9 @@ async function initCore(runtimeContext) {
         item.mesh.userData.torchHealth = result.health;
       }
       persistInventoryAndStorage();
+    } else if (itemId === SHIELD_ITEM_ID) {
+      item.mesh.userData.shieldHealth = normalizeShieldHealth(inventoryState[SHIELD_ITEM_ID]?.[SHIELD_HEALTH_KEY]);
+      removeFromInventory(itemId, 1);
     } else {
       removeFromInventory(itemId, 1);
     }
@@ -7314,6 +7502,63 @@ async function initCore(runtimeContext) {
     get: () => statsState.health,
     set: value => setStat('health', value)
   });
+
+  const shieldBlockTempForward = new THREE.Vector3();
+  const shieldBlockTempToAttacker = new THREE.Vector3();
+  const isAttackerInShieldBlockArc = (attackerModel) => {
+    if (!attackerModel?.position || !playerModel?.position) return false;
+    shieldBlockTempToAttacker.subVectors(attackerModel.position, playerModel.position);
+    shieldBlockTempToAttacker.y = 0;
+    if (shieldBlockTempToAttacker.lengthSq() < 0.0001) return true;
+    shieldBlockTempToAttacker.normalize();
+    if (typeof playerModel.getWorldDirection === 'function') {
+      playerModel.getWorldDirection(shieldBlockTempForward);
+    } else {
+      shieldBlockTempForward.copy(playerModel.userData?.direction || new THREE.Vector3(0, 0, 1));
+    }
+    shieldBlockTempForward.y = 0;
+    if (shieldBlockTempForward.lengthSq() < 0.0001) {
+      shieldBlockTempForward.copy(playerModel.userData?.direction || new THREE.Vector3(0, 0, 1));
+      shieldBlockTempForward.y = 0;
+    }
+    if (shieldBlockTempForward.lengthSq() < 0.0001) shieldBlockTempForward.set(0, 0, 1);
+    shieldBlockTempForward.normalize();
+    return shieldBlockTempForward.dot(shieldBlockTempToAttacker) > 0.2;
+  };
+
+  const damageEquippedShield = (damage = 1) => {
+    const currentEntry = normalizeShieldEntry(inventoryState[SHIELD_ITEM_ID]);
+    if (!currentEntry.count || currentEntry[SHIELD_HEALTH_KEY] <= 0) return false;
+    const currentHealth = currentEntry[SHIELD_HEALTH_KEY];
+    const nextHealth = Math.max(0, currentHealth - Math.max(1, Math.round(damage)));
+    const nextEntry = normalizeShieldEntry({
+      ...currentEntry,
+      [SHIELD_HEALTH_KEY]: nextHealth
+    });
+    if (shield?.mesh) {
+      shield.mesh.userData.shieldHealth = nextHealth;
+      shield.mesh.userData.shieldMaxHealth = DEFAULT_SHIELD_HEALTH;
+    }
+    if (shield?.heldMesh) {
+      shield.heldMesh.userData.shieldHealth = nextHealth;
+      shield.heldMesh.userData.shieldMaxHealth = DEFAULT_SHIELD_HEALTH;
+    }
+    shield?.showHealthBar?.(nextHealth, DEFAULT_SHIELD_HEALTH);
+    if (nextHealth <= 0) {
+      delete inventoryState[SHIELD_ITEM_ID];
+      unequipInventoryItem(SHIELD_ITEM_ID);
+    } else {
+      inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, nextEntry);
+    }
+    persistInventoryAndStorage();
+    return true;
+  };
+
+  window.tryBlockLocalPlayerHitWithShield = ({ attackerModel, damage } = {}) => {
+    if (shield?.holder !== playerControls || !inventoryState[SHIELD_ITEM_ID]?.count) return false;
+    if (!isAttackerInShieldBlockArc(attackerModel)) return false;
+    return damageEquippedShield(damage);
+  };
 
   Object.defineProperty(window, 'hunger', {
     configurable: true,
@@ -8910,7 +9155,8 @@ async function initCore(runtimeContext) {
       bomb: { item: bomb, markerColor: 0xff4d4d },
       autumnSword: { item: autumnSword, markerColor: 0xffd400 },
       hammer: { item: hammer, markerColor: 0xb08a4a },
-      iceGun: { item: iceGun, markerColor: 0xffd400 }
+      iceGun: { item: iceGun, markerColor: 0xffd400 },
+      shield: { item: shield, markerColor: 0x7a4a20 }
     }[drop.itemId];
     if (!pickupConfig?.item?.mesh) return;
     const amount = Number.isFinite(drop.quantity) ? Math.max(1, Math.floor(drop.quantity)) : 1;
@@ -8927,6 +9173,7 @@ async function initCore(runtimeContext) {
       quaternion: quat,
       allowHidden: true,
       torchHealth: Number.isFinite(drop.torchHealth) ? drop.torchHealth : undefined,
+      shieldHealth: Number.isFinite(drop.shieldHealth) ? drop.shieldHealth : undefined,
       dropId,
       shouldBroadcastRemoval: false
     });
@@ -8949,6 +9196,13 @@ async function initCore(runtimeContext) {
           existing.torchHealth = normalizedHealth;
           if (existing.mesh) {
             existing.mesh.userData.torchHealth = normalizedHealth;
+          }
+        }
+        if (Number.isFinite(drop.shieldHealth)) {
+          const normalizedHealth = normalizeShieldHealth(drop.shieldHealth);
+          existing.shieldHealth = normalizedHealth;
+          if (existing.mesh) {
+            existing.mesh.userData.shieldHealth = normalizedHealth;
           }
         }
         return;
@@ -8981,7 +9235,8 @@ async function initCore(runtimeContext) {
             position: [pos.x, pos.y, pos.z],
             rotation: [q.x, q.y, q.z, q.w],
             quantity: pickup.quantity,
-            torchHealth: pickup.torchHealth
+            torchHealth: pickup.torchHealth,
+            shieldHealth: pickup.shieldHealth
           };
         })
         .filter(Boolean);
@@ -11432,6 +11687,18 @@ async function initCore(runtimeContext) {
       const type = await openBuildTypePicker();
       if (!type) return;
       let noteText = '';
+      if (type === SHIELD_ITEM_ID) {
+        addToInventory(SHIELD_ITEM_ID, 1);
+        inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+          ...inventoryState[SHIELD_ITEM_ID],
+          count: Math.max(1, inventoryState[SHIELD_ITEM_ID]?.count || 1),
+          [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+        }));
+        removeFromInventory('wood', 1);
+        equipInventoryItem(SHIELD_ITEM_ID);
+        persistInventoryAndStorage();
+        return;
+      }
       if (type === 'note') {
         noteText = await openNoteEntryModal();
         if (!noteText?.trim()) return;
@@ -12403,6 +12670,7 @@ async function initCore(runtimeContext) {
     hammer?.update();
     lantern?.update();
     torch?.update();
+    shield?.update();
     syncRemoteHeldWeaponMesh(iceGun);
     syncRemoteHeldWeaponMesh(bow);
     syncRemoteHeldWeaponMesh(bomb);
@@ -12410,6 +12678,7 @@ async function initCore(runtimeContext) {
     syncRemoteHeldWeaponMesh(hammer);
     syncRemoteHeldWeaponMesh(lantern);
     syncRemoteHeldWeaponMesh(torch);
+    syncRemoteHeldWeaponMesh(shield);
     if (bowHeldArrow) {
       const shouldShowArrow = bow?.holder === playerControls && playerControls?.isFireHeld;
       bowHeldArrow.visible = shouldShowArrow;
@@ -12421,7 +12690,8 @@ async function initCore(runtimeContext) {
     updateWeaponMarker(hammer, hammerMarker, 0.03);
     updateWeaponMarker(lantern, lanternMarker, 0.03);
     updateWeaponMarker(torch, torchMarker, 0.03);
-    [iceGun, bow, bomb, autumnSword, hammer, lantern, torch].forEach((weapon) => {
+    updateWeaponMarker(shield, shieldMarker, 0.03);
+    [iceGun, bow, bomb, autumnSword, hammer, lantern, torch, shield].forEach((weapon) => {
       const mesh = weapon?.mesh;
       if (!mesh || weapon?.holder || playerDead) return;
       if (playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {
@@ -12786,7 +13056,9 @@ async function initCore(runtimeContext) {
       }
       payload.equippedLeft = isInventoryItemEquipped('torch')
         ? 'torch'
-        : (isInventoryItemEquipped('lantern') ? 'lantern' : null);
+        : (isInventoryItemEquipped('lantern')
+          ? 'lantern'
+          : (isInventoryItemEquipped(SHIELD_ITEM_ID) ? SHIELD_ITEM_ID : null));
       payload.equippedRight = isInventoryItemEquipped('iceGun')
         ? 'iceGun'
         : (isInventoryItemEquipped('bow')
@@ -13038,7 +13310,7 @@ export async function bootstrapGameApp() {
   noteViewModal.className = 'build-modal-overlay hidden';
   document.body.append(buildModal, noteEntryModal, noteViewModal);
   const openBuildTypePicker = () => new Promise((resolve) => {
-    buildModal.innerHTML = `<div class="build-modal"><h3>Choose Build Type</h3><div class="build-options-list"><button type="button" class="build-option-btn" data-build-type="block"><span>🧱</span>Block</button><button type="button" class="build-option-btn" data-build-type="note"><span>🪧</span>Note Post</button></div><button type="button" class="build-cancel-btn" data-build-cancel="1">Cancel</button></div>`;
+    buildModal.innerHTML = `<div class="build-modal"><h3>Choose Build Type</h3><div class="build-options-list"><button type="button" class="build-option-btn" data-build-type="block"><span>🧱</span>Block</button><button type="button" class="build-option-btn" data-build-type="note"><span>🪧</span>Note Post</button><button type="button" class="build-option-btn" data-build-type="shield"><span>🛡️</span>Shield</button></div><button type="button" class="build-cancel-btn" data-build-cancel="1">Cancel</button></div>`;
     buildModal.classList.remove('hidden');
     const close = (value) => {
       buildModal.classList.add('hidden');

@@ -1206,6 +1206,7 @@ function renderInventory() {
     autumnSword: '🗡️',
     hammer: '🔨',
     lantern: '🏮',
+    shield: '🛡️',
     apple: '🍎',
     wood: '🪵',
     meat: '🥩'
@@ -1295,7 +1296,10 @@ function renderInventory() {
       : selectedInventoryId === 'bow'
         ? ` • Arrows ${Number.isFinite(selectedItem?.['arrow ammo']) ? selectedItem['arrow ammo'] : 0}`
         : '';
-    elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${equippedText}${countText}${ammoText}`;
+    const shieldHealthText = selectedInventoryId === 'shield'
+      ? ` • Health ${Math.max(0, Math.round(Number.isFinite(selectedItem?.shieldHealth) ? selectedItem.shieldHealth : 0))}`
+      : '';
+    elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${equippedText}${countText}${ammoText}${shieldHealthText}`;
     if (elements.inventoryActions) {
       elements.inventoryActions.style.display = 'flex';
     }
