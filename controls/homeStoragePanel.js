@@ -209,6 +209,11 @@ function renderTab(tabId) {
       const ammoLabel = createElement('span', 'inventory-ammo', `Arrows: ${ammoCount}`);
       button.appendChild(ammoLabel);
     }
+    if (itemId === 'bazooka') {
+      const ammoCount = Number.isFinite(item?.missiles) ? item.missiles : 0;
+      const ammoLabel = createElement('span', 'inventory-ammo', `Missiles: ${ammoCount}`);
+      button.appendChild(ammoLabel);
+    }
 
     grid.appendChild(button);
   });
@@ -220,7 +225,9 @@ function renderTab(tabId) {
       ? ` • Ice ammo ${Number.isFinite(selectedItem?.['ice ammo']) ? selectedItem['ice ammo'] : 0}`
       : selectedIds[tabId] === 'bow'
         ? ` • Arrows ${Number.isFinite(selectedItem?.['arrow ammo']) ? selectedItem['arrow ammo'] : 0}`
-        : '';
+        : selectedIds[tabId] === 'bazooka'
+          ? ` • Missiles ${Number.isFinite(selectedItem?.missiles) ? selectedItem.missiles : 0}`
+          : '';
     detailsText.textContent = `${selectedItem.name || selectedIds[tabId]}${countText}${ammoText}`;
     actionButton.disabled = false;
 
