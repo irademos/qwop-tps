@@ -316,7 +316,7 @@ export class PlayerControls {
     window.questManager = this.questManager;
     this.crosshairEl = document.querySelector('.crosshair');
     this.defaultFov = this.camera.fov;
-    this.aimFov = Math.max(40, this.defaultFov - 15);
+    this.aimFov = Math.max(45, this.defaultFov - 8);
     this.isAiming = false;
     this.isFireHeld = false;
     this.autoAimBreakUntilRelease = false;
@@ -325,7 +325,7 @@ export class PlayerControls {
     this.autoAimManualBreakAmount = 0;
     this.autoAimLastManualInputAt = 0;
     this.baseCameraOffset = this.cameraOffset.clone();
-    this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -3.2));
+    this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -2.0));
     this.weaponCameraOffset = this.baseCameraOffset.clone().add(WEAPON_CAMERA_OFFSET);
     this.baseCameraOffsetDesktop = this.baseCameraOffset.clone();
     this.defaultFovDesktop = this.defaultFov;
@@ -1438,9 +1438,9 @@ export class PlayerControls {
     }
 
     this.baseCameraOffset.copy(nextBaseCameraOffset);
-    this.aimCameraOffset.copy(this.baseCameraOffset).add(new THREE.Vector3(0, 0, -3.2));
+    this.aimCameraOffset.copy(this.baseCameraOffset).add(new THREE.Vector3(0, 0, -2.0));
     this.weaponCameraOffset.copy(this.baseCameraOffset).add(WEAPON_CAMERA_OFFSET);
-    this.aimFov = Math.max(40, this.defaultFov - 15);
+    this.aimFov = Math.max(45, this.defaultFov - 8);
   }
 
   handleFriendlyInteractionAction() {
@@ -3582,7 +3582,9 @@ export class PlayerControls {
 
     const monsters = this.collectAutoAimMonsters();
     const animalsRaw = appContext?.entities?.animals || window?.animals || [];
-    const animals = animalsRaw.map((animal) => animal?.model || animal).filter((model) => model?.position && !model?.userData?.isDead);
+    const animals = animalsRaw
+      .map((animal) => animal?.model || animal)
+      .filter((model) => model?.position && !model?.userData?.isDead && !model?.userData?.isCompanion && model?.userData?.behavior !== 'companion');
     const otherPlayers = Object.values(appContext?.entities?.otherPlayers || window?.otherPlayers || {}).map((entry) => entry?.model).filter((model) => model?.position);
 
     return closestIn(monsters) || closestIn(animals) || closestIn(otherPlayers);
