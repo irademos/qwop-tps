@@ -102,6 +102,12 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.onMonsterImpact = typeof options.onMonsterImpact === 'function'
     ? options.onMonsterImpact
     : null;
+  mesh.userData.onBuildImpact = typeof options.onBuildImpact === 'function'
+    ? options.onBuildImpact
+    : null;
+  mesh.userData.onPlayerImpact = typeof options.onPlayerImpact === 'function'
+    ? options.onPlayerImpact
+    : null;
   mesh.userData.damage = Number.isFinite(options.damage) ? options.damage : 1;
   mesh.userData.attackLabel = typeof options.attackLabel === 'string' && options.attackLabel
     ? options.attackLabel
@@ -235,6 +241,14 @@ export function updateProjectiles({
       const playerBox = getObjectBox(model);
       if (!playerBox) continue;
       if (projBox.intersectsBox(playerBox)) {
+        if (typeof proj.userData.onPlayerImpact === 'function') {
+          const handled = proj.userData.onPlayerImpact(proj.position.clone(), proj);
+          if (handled) {
+            removeProjectile(i);
+            removed = true;
+            break;
+          }
+        }
         const player = otherPlayers[id];
         if (player) {
           const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
@@ -274,6 +288,9 @@ export function updateProjectiles({
         proj.userData.attackTypes || ['projectile']
       );
       if (onBuildHit({ projectile: proj, projectileBox: projBox, damage, attackTypes })) {
+        if (typeof proj.userData.onBuildImpact === 'function') {
+          proj.userData.onBuildImpact(proj.position.clone(), proj);
+        }
         if (proj.userData?.isArrow) playArrowBlockedSFX();
         removeProjectile(i);
         removed = true;
@@ -285,6 +302,14 @@ export function updateProjectiles({
     const localBox = getObjectBox(playerModel);
     if (!localBox) continue;
     if (projBox.intersectsBox(localBox) && age >= 80 && proj.userData.shooterId !== localId) {
+      if (typeof proj.userData.onPlayerImpact === 'function') {
+        const handled = proj.userData.onPlayerImpact(proj.position.clone(), proj);
+        if (handled) {
+          removeProjectile(i);
+          removed = true;
+          continue;
+        }
+      }
       console.log(`💥 You were hit`);
       if (proj.userData?.isArrow) playArrowBlockedSFX();
       removeProjectile(i);

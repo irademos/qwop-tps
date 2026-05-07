@@ -17,19 +17,19 @@ export const ACHIEVEMENTS = [
   { id: 'quest_5', title: 'Questing Apprentice', description: 'Complete 5 quests.', metric: 'questsCompleted', target: 5, xp: 120, rewards: { coins: 35, mushroom_amanita: 1 } },
   { id: 'quest_10', title: 'Questing Adept', description: 'Complete 10 quests.', metric: 'questsCompleted', target: 10, xp: 220, rewards: { coins: 80, bomb: 1 } },
   { id: 'quest_20', title: 'Questing Expert', description: 'Complete 20 quests.', metric: 'questsCompleted', target: 20, xp: 360, rewards: { coins: 160, bow: 1 } },
-  { id: 'quest_50', title: 'Questing Legend', description: 'Complete 50 quests.', metric: 'questsCompleted', target: 50, xp: 700, rewards: { coins: 420, autumnSword: 1 } },
+  { id: 'quest_50', title: 'Questing Legend', description: 'Complete 50 quests.', metric: 'questsCompleted', target: 50, xp: 700, rewards: { coins: 420, autumnSword: 1, bazooka: 1, missiles: 10 } },
   { id: 'climb_tree', title: 'Tree Hugger', description: 'Climb a tree once.', metric: 'treesClimbed', target: 1, xp: 40, rewards: { coins: 10 } },
   { id: 'animal_1', title: 'Hunter Initiate', description: 'Kill 1 animal.', metric: 'animalsKilled', target: 1, xp: 45, rewards: { meat: 1 } },
   { id: 'animal_5', title: 'Hunter', description: 'Kill 5 animals.', metric: 'animalsKilled', target: 5, xp: 130, rewards: { meat: 3, coins: 20 } },
   { id: 'zombie_1', title: 'Zombie Down', description: 'Kill 1 zombie.', metric: 'zombiesKilled', target: 1, xp: 70, rewards: { coins: 18 } },
   { id: 'zombie_5', title: 'Zombie Exterminator', description: 'Kill 5 zombies.', metric: 'zombiesKilled', target: 5, xp: 180, rewards: { coins: 70, bomb: 1 } },
   { id: 'monster_1', title: 'Monster Slayer', description: 'Kill 1 monster.', metric: 'monstersKilled', target: 1, xp: 75, rewards: { coins: 20 } },
-  { id: 'golem_1', title: 'Rock Breaker', description: 'Kill a golem monster.', metric: 'golemsKilled', target: 1, xp: 240, rewards: { coins: 120, autumnSword: 1 } },
+  { id: 'golem_1', title: 'Rock Breaker', description: 'Kill a golem monster.', metric: 'golemsKilled', target: 1, xp: 240, rewards: { coins: 120, autumnSword: 1, hammer: 1 } },
   { id: 'mushroom_1', title: 'Forager', description: 'Collect a mushroom.', metric: 'mushroomsCollected', target: 1, xp: 35, rewards: { mushroom_amanita: 1 } },
   { id: 'weapon_1', title: 'Armed and Ready', description: 'Collect a weapon.', metric: 'weaponsCollected', target: 1, xp: 60, rewards: { coins: 25 } },
   { id: 'bow_shot_1', title: 'Bullseye Practice', description: 'Fire a bow and arrow.', metric: 'bowShots', target: 1, xp: 45, rewards: { coins: 12, bow: 1 } },
   { id: 'bomb_throw_1', title: 'Bombs Away', description: 'Throw a bomb.', metric: 'bombsThrown', target: 1, xp: 55, rewards: { coins: 15 } },
-  { id: 'rock_boom_1', title: 'Pebble Pulverizer', description: 'Blow up a rock.', metric: 'rocksBlownUp', target: 1, xp: 95, rewards: { salt: 2, coins: 30 } }
+  { id: 'rock_boom_1', title: 'Pebble Pulverizer', description: 'Blow up a rock.', metric: 'rocksBlownUp', target: 1, xp: 95, rewards: { salt: 2, coins: 30, missiles: 3 } }
 ];
 
 const byId = new Map(ACHIEVEMENTS.map((achievement) => [achievement.id, achievement]));

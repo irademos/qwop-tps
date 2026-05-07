@@ -18,7 +18,8 @@ export const ATTACKS = {
   lanternSwing: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward', types: ['fire'] },
   bombExplosion: { types: ['explosive', 'fire'] },
   bowArrowProjectile: { types: ['arrow'] },
-  iceMistProjectile: { types: ['ice'] }
+  iceMistProjectile: { types: ['ice'] },
+  missileProjectile: { types: ['explosive', 'fire'] }
 };
 
 export function getAttackTypes(attackName, fallback = []) {

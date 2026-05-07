@@ -1203,6 +1203,7 @@ function renderInventory() {
   const fallbackIcons = {
     iceGun: '❄️',
     bow: '🏹',
+    bazooka: '🚀',
     autumnSword: '🗡️',
     hammer: '🔨',
     lantern: '🏮',
@@ -1277,6 +1278,11 @@ function renderInventory() {
       const ammoLabel = createElement('span', 'inventory-ammo', `Arrows: ${ammoCount}`);
       button.appendChild(ammoLabel);
     }
+    if (itemId === 'bazooka') {
+      const ammoCount = Number.isFinite(item?.missiles) ? item.missiles : 0;
+      const ammoLabel = createElement('span', 'inventory-ammo', `Missiles: ${ammoCount}`);
+      button.appendChild(ammoLabel);
+    }
 
     elements.inventoryGrid.appendChild(button);
   });
@@ -1295,7 +1301,9 @@ function renderInventory() {
       ? ` • Ice ammo ${Number.isFinite(selectedItem?.['ice ammo']) ? selectedItem['ice ammo'] : 0}`
       : selectedInventoryId === 'bow'
         ? ` • Arrows ${Number.isFinite(selectedItem?.['arrow ammo']) ? selectedItem['arrow ammo'] : 0}`
-        : '';
+        : selectedInventoryId === 'bazooka'
+          ? ` • Missiles ${Number.isFinite(selectedItem?.missiles) ? selectedItem.missiles : 0}`
+          : '';
     const shieldHealthText = selectedInventoryId === 'shield'
       ? ` • Health ${Math.max(0, Math.round(Number.isFinite(selectedItem?.shieldHealth) ? selectedItem.shieldHealth : 0))}`
       : '';
