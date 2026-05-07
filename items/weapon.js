@@ -30,6 +30,7 @@ export class Weapon {
       ? options.pickupRadius
       : DEFAULT_PICKUP_RADIUS;
     this._scale = Number.isFinite(options.scale) ? options.scale : 0.001;
+    this._recenterModel = Boolean(options.recenterModel);
     this._fallbackSize = options.fallbackSize || new THREE.Vector3(0.6, 0.2, 0.8);
     this._fallbackColor = options.fallbackColor || 0x99ccff;
   }
@@ -51,6 +52,20 @@ export class Weapon {
     }
 
     if (!this.mesh) return;
+
+    if (this._recenterModel && this.mesh.isObject3D) {
+      this.mesh.updateWorldMatrix(true, true);
+      const bounds = new THREE.Box3().setFromObject(this.mesh);
+      if (!bounds.isEmpty()) {
+        const center = new THREE.Vector3();
+        bounds.getCenter(center);
+        this.mesh.position.sub(center);
+        const wrapper = new THREE.Group();
+        wrapper.name = `${this.itemId}-centered`;
+        wrapper.add(this.mesh);
+        this.mesh = wrapper;
+      }
+    }
 
     const targetPos = position.clone();
     const terrainHeight = getTerrainHeight(targetPos.x, targetPos.z);

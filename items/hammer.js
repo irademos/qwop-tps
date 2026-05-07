@@ -8,9 +8,10 @@ export class Hammer extends Weapon {
       type: 'hammer',
       hand: 'right',
       modelUrl: '/assets/props/hammer.glb',
-      scale: 100.0,
-      holdOffset: new THREE.Vector3(0.45, -0.05, 0.0),
+      scale: 0.72,
+      holdOffset: new THREE.Vector3(0.18, 0.02, 0.04),
       fallbackSize: new THREE.Vector3(0.22, 0.85, 0.32),
+      recenterModel: true,
       fallbackColor: 0x8a6a4a
     });
   }

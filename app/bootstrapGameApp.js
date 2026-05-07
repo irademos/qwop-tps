@@ -2464,12 +2464,14 @@ async function initCore(runtimeContext) {
   const setPlayerWeaponType = (controls, weaponType) => {
     if (!controls?.playerModel) return;
     controls.playerModel.userData.equippedWeaponType = weaponType || null;
+    controls.refreshActionButtons?.();
   };
 
   const clearPlayerWeaponType = (controls, weaponType) => {
     if (!controls?.playerModel) return;
     if (!weaponType || controls.playerModel.userData.equippedWeaponType === weaponType) {
       controls.playerModel.userData.equippedWeaponType = null;
+      controls.refreshActionButtons?.();
     }
   };
 
@@ -3482,8 +3484,8 @@ async function initCore(runtimeContext) {
   });
 
 
-  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword, hammer, lantern, torch, shield };
-  window.weapons = { iceGun, bow, bomb, autumnSword, hammer, lantern, torch, shield };
+  runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, lantern, torch, shield };
+  window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, lantern, torch, shield };
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -13062,6 +13064,7 @@ async function initCore(runtimeContext) {
 
     iceGun?.update();
     bow?.update();
+    bazooka?.update();
     bomb?.update();
     autumnSword?.update();
     hammer?.update();
@@ -13070,6 +13073,7 @@ async function initCore(runtimeContext) {
     shield?.update();
     syncRemoteHeldWeaponMesh(iceGun);
     syncRemoteHeldWeaponMesh(bow);
+    syncRemoteHeldWeaponMesh(bazooka);
     syncRemoteHeldWeaponMesh(bomb);
     syncRemoteHeldWeaponMesh(autumnSword);
     syncRemoteHeldWeaponMesh(hammer);
