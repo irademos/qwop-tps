@@ -276,9 +276,40 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   const hitReactLocked = isHitReactPlaying(animal);
 
   if (data.state === 'companionFollow') {
-    const direction = new THREE.Vector3().subVectors(playerModel.position, animal.model.position).setY(0);
+    if (!Number.isFinite(data.followRadius)) {
+      data.followRadius = randomRange(2.8, 6.2);
+    }
+    if (!Number.isFinite(data.followStartPadding)) {
+      data.followStartPadding = randomRange(0.9, 1.8);
+    }
+    if (!Number.isFinite(data.nextFollowRetargetAt)) {
+      data.nextFollowRetargetAt = now;
+    }
+    if (!Number.isFinite(data.followSlotAngle)) {
+      data.followSlotAngle = Math.random() * Math.PI * 2;
+    }
+
+    if (now >= data.nextFollowRetargetAt || !data.followAnchor) {
+      data.followSlotAngle += randomRange(-0.9, 0.9);
+      const offset = new THREE.Vector3(
+        Math.cos(data.followSlotAngle) * data.followRadius,
+        0,
+        Math.sin(data.followSlotAngle) * data.followRadius
+      );
+      data.followAnchor = playerModel.position.clone().add(offset);
+      data.nextFollowRetargetAt = now + randomRange(3000, 10000);
+    }
+
+    const direction = new THREE.Vector3().subVectors(data.followAnchor, animal.model.position).setY(0);
     const distance = direction.length();
-    if (distance > 2.2) {
+    const followStartDistance = data.followRadius + data.followStartPadding;
+    if (distance > followStartDistance) {
+      data.isFollowingAnchor = true;
+    } else if (distance <= data.followRadius) {
+      data.isFollowingAnchor = false;
+    }
+
+    if (data.isFollowingAnchor && distance > 0.0001) {
       direction.normalize();
       animal.model.position.addScaledVector(direction, runSpeed * 0.8 * delta);
       animal.model.lookAt(animal.model.position.clone().add(direction));
