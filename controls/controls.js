@@ -786,7 +786,7 @@ export class PlayerControls {
   getMobileAttackLabel() {
     const weapon = this.getEquippedWeapon('right');
     if (weapon?.itemId === 'bow') return 'Bow';
-    if (weapon?.itemId === 'bazooka') return 'Bazooka';
+    if (weapon?.itemId === 'bazooka') return 'Fire';
     if (weapon?.itemId === 'bomb') return 'Bomb';
     return 'Attack';
   }
