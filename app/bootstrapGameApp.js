@@ -13681,10 +13681,17 @@ async function initCore(runtimeContext) {
     (animals || []).forEach((animal) => {
       if (!animal?.model || String(animal.type).toLowerCase() !== 'dog') return;
       if (!dogColliderEntries.has(animal.id)) {
-        const entry = createStaticBoxColliderForObject(animal.model, { rapierWorld, friction: 0.8, restitution: 0.01 });
+        const entry = createStaticBoxColliderForObject(animal.model, {
+          rapierWorld,
+          friction: 0.8,
+          restitution: 0.01,
+          useObjectPosition: true,
+          centerOffset: [0, 0.4, 0],
+          halfExtents: [0.24, 0.33, 0.5]
+        });
         dogColliderEntries.set(animal.id, entry || null);
       } else {
-        syncStaticBoxColliderForObject(animal.model, dogColliderEntries.get(animal.id));
+        syncStaticBoxColliderForObject(dogColliderEntries.get(animal.id));
       }
     });
     handleBombPickupArrowHit();
