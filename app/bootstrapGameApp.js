@@ -908,7 +908,6 @@ async function initCore(runtimeContext) {
   let animals = [];
   runtimeContext.entities.animals = animals;
   window.animals = animals;
-  void animalManager?.spawnDogAt?.();
   const npcVoiceSchedule = new Map();
   const zombieVoiceLoops = new Map();
   const getRandomDelayMs = ([min, max]) => {
@@ -3654,7 +3653,6 @@ async function initCore(runtimeContext) {
   animals = animalManager.getAnimals();
   runtimeContext.entities.animals = animals;
   window.animals = animals;
-  void animalManager?.spawnDogAt?.();
   let didInitialGpsSnap = false;
   let currentPlayerLevel = 1;
 
@@ -13289,10 +13287,10 @@ async function initCore(runtimeContext) {
         }
         if (animalManager) {
           animalManager.update(mixerDelta);
+          void animalManager.maybeSpawnDogByTravelDistance?.();
           animals = animalManager.getAnimals();
           runtimeContext.entities.animals = animals;
           window.animals = animals;
-  void animalManager?.spawnDogAt?.();
         }
 
         if (isHostNow) {

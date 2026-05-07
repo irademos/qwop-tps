@@ -208,42 +208,6 @@ async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight, forcedPosi
 
   scene.add(animal.model);
 
-  const spawnDogAt = async (position) => {
-    const entry = await spawnAnimal({
-      scene,
-      getPlayerModel,
-      getTerrainHeight,
-      forcedPosition: position || null,
-      forcedType: 'dog'
-    });
-    if (entry) animals.push(entry);
-    return entry?.animal || null;
-  };
-
-  const getNearestFeedableDog = (position, maxDistance = 2.5) => {
-    if (!position) return null;
-    let best = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-    animals.forEach((entry) => {
-      const animal = entry?.animal;
-      if (!animal?.model?.position || animal.isDead) return;
-      if (String(animal.type).toLowerCase() !== 'dog') return;
-      if (animal.model.userData?.isCompanion) return;
-      const dist = animal.model.position.distanceTo(position);
-      if (dist <= maxDistance && dist < bestDistance) { best = animal; bestDistance = dist; }
-    });
-    return best ? { animal: best, distance: bestDistance } : null;
-  };
-
-  const feedDog = (dog, healthGain = 10) => {
-    if (!dog?.model || dog.isDead) return false;
-    dog.health = Math.min(dog.maxHealth || 1, (dog.health || 0) + healthGain);
-    dog.model.userData.health = dog.health;
-    dog.model.userData.isCompanion = true;
-    dog.updateHealthBarTexture?.();
-    return true;
-  };
-
   return { animal, config: template.config };
 }
 
@@ -375,6 +339,8 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
 
 export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, onAnimalRemoved, getNearbyMonster } = {}) {
   const animals = [];
+  let lastDogSpawnPlayerPosition = null;
+  let lastDogSpawnAt = 0;
   const removeAnimal = (entry) => {
     if (!entry?.animal) return;
     const index = animals.indexOf(entry);
@@ -435,7 +401,13 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, o
   };
 
 
+  const hasLivingDog = () => animals.some((entry) => {
+    const animal = entry?.animal;
+    return animal?.model && !animal.isDead && String(animal.type).toLowerCase() === 'dog';
+  });
+
   const spawnDogAt = async (position) => {
+    if (hasLivingDog()) return null;
     const entry = await spawnAnimal({
       scene,
       getPlayerModel,
@@ -443,8 +415,21 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, o
       forcedPosition: position || null,
       forcedType: 'dog'
     });
-    if (entry) animals.push(entry);
+    if (entry) {
+      animals.push(entry);
+      lastDogSpawnPlayerPosition = getPlayerModel?.()?.position?.clone?.() || null;
+      lastDogSpawnAt = Date.now();
+    }
     return entry?.animal || null;
+  };
+
+  const maybeSpawnDogByTravelDistance = async ({ minTravelDistance = 220, minSpawnIntervalMs = 90000 } = {}) => {
+    const playerPosition = getPlayerModel?.()?.position;
+    if (!playerPosition || hasLivingDog()) return null;
+    const now = Date.now();
+    if (now - lastDogSpawnAt < minSpawnIntervalMs) return null;
+    if (lastDogSpawnPlayerPosition && playerPosition.distanceTo(lastDogSpawnPlayerPosition) < minTravelDistance) return null;
+    return spawnDogAt();
   };
 
   const getNearestFeedableDog = (position, maxDistance = 2.5) => {
@@ -478,6 +463,7 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, o
     removeAnimalById,
     spawnDeerAt,
     spawnDogAt,
+    maybeSpawnDogByTravelDistance,
     getNearestFeedableDog,
     feedDog
   };
