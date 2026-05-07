@@ -5851,6 +5851,70 @@ async function initCore(runtimeContext) {
     });
   }
 
+  function getRandomBushDropPositions(origin, count, radius = 0.72) {
+    const positions = [];
+    if (!origin || count <= 0) return positions;
+    for (let i = 0; i < count; i += 1) {
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.45;
+      const distance = radius * (0.55 + Math.random() * 0.45);
+      const dropPosition = origin.clone();
+      dropPosition.x += Math.cos(angle) * distance;
+      dropPosition.z += Math.sin(angle) * distance;
+      positions.push(dropPosition);
+    }
+    return positions;
+  }
+
+  function spawnBushRandomDrop(origin) {
+    if (!origin) return;
+    const roll = Math.random();
+    if (roll < 0.26) {
+      const count = 1 + Math.floor(Math.random() * 10);
+      getRandomBushDropPositions(origin, count, 0.95).forEach((dropPosition) => spawnCoinPickup(dropPosition));
+      return;
+    }
+    if (roll < 0.46) {
+      const count = 1 + Math.floor(Math.random() * 2);
+      getRandomBushDropPositions(origin, count).forEach((dropPosition) => spawnApplePickup(dropPosition));
+      return;
+    }
+    if (roll < 0.66) {
+      const count = 1 + Math.floor(Math.random() * 2);
+      getRandomBushDropPositions(origin, count).forEach((dropPosition) => {
+        const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
+        if (entry?.id) spawnMushroomPickup(entry.id, dropPosition);
+      });
+      return;
+    }
+    if (roll < 0.82) {
+      spawnWoodPickup(origin.clone());
+    }
+  }
+
+  function destroyBush(bush) {
+    if (!bush) return false;
+    const position = natureController?.removeBush?.(bush);
+    if (!position) return false;
+    position.y = getTerrainHeight?.(position.x, position.z) ?? position.y ?? 0;
+    spawnImpactBurst(scene, position);
+    spawnGreenLeafStreaks(scene, position);
+    spawnBushRandomDrop(position);
+    return true;
+  }
+
+  function destroyBushesAtPositions(positions) {
+    if (!Array.isArray(positions) || positions.length === 0) return false;
+    positions.forEach((position) => {
+      const dropOrigin = position.clone?.() ?? asVec3(position);
+      if (!dropOrigin) return;
+      dropOrigin.y = getTerrainHeight?.(dropOrigin.x, dropOrigin.z) ?? dropOrigin.y ?? 0;
+      spawnImpactBurst(scene, dropOrigin);
+      spawnGreenLeafStreaks(scene, dropOrigin);
+      spawnBushRandomDrop(dropOrigin);
+    });
+    return true;
+  }
+
   function handleSwordTreeHit({ attacker, range }) {
     if (!attacker?.model?.position) return;
     const effectiveRange = (Number.isFinite(range) ? range : 0) + TREE_HIT_RANGE_BOOST;
@@ -7302,6 +7366,9 @@ async function initCore(runtimeContext) {
       }
     });
 
+    const removedBushPositions = natureController?.removeBushesInRadius?.(hitPosition, BOMB_DAMAGE_RADIUS) ?? [];
+    destroyBushesAtPositions(removedBushPositions);
+
     if (natureController?.removeRocksInRadius) {
       const removedRockPositions = natureController.removeRocksInRadius(hitPosition, BOMB_DAMAGE_RADIUS);
       if (removedRockPositions.length > 0) {
@@ -7951,11 +8018,11 @@ async function initCore(runtimeContext) {
     attackVisualState.impacts.push({ sprite, material, spawnTime: performance.now(), lifetimeMs: ATTACK_IMPACT_LIFETIME_MS });
   }
 
-  function spawnRedImpactStreaks(scene, position) {
+  function spawnImpactStreaks(scene, position, { color = 0xff3344, count = ATTACK_RED_STREAK_COUNT, lifetimeMs = ATTACK_RED_STREAK_LIFETIME_MS } = {}) {
     if (!scene || !position) return;
     const group = new THREE.Group();
     const material = new THREE.MeshBasicMaterial({
-      color: 0xff3344,
+      color,
       transparent: true,
       opacity: 0.95,
       depthWrite: false,
@@ -7963,10 +8030,10 @@ async function initCore(runtimeContext) {
       side: THREE.DoubleSide
     });
     const streaks = [];
-    for (let i = 0; i < ATTACK_RED_STREAK_COUNT; i += 1) {
+    for (let i = 0; i < count; i += 1) {
       const geometry = new THREE.PlaneGeometry(0.08, THREE.MathUtils.lerp(0.48, 0.95, Math.random()));
       const mesh = new THREE.Mesh(geometry, material);
-      const angle = (Math.PI * 2 * i) / ATTACK_RED_STREAK_COUNT + (Math.random() - 0.5) * 0.5;
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
       mesh.position.set(0, THREE.MathUtils.lerp(0.18, 0.55, Math.random()), 0);
       mesh.rotation.x = -Math.PI / 2;
       mesh.rotation.z = angle;
@@ -7986,7 +8053,19 @@ async function initCore(runtimeContext) {
       material,
       streaks,
       spawnTime: performance.now(),
-      lifetimeMs: ATTACK_RED_STREAK_LIFETIME_MS
+      lifetimeMs
+    });
+  }
+
+  function spawnRedImpactStreaks(scene, position) {
+    spawnImpactStreaks(scene, position);
+  }
+
+  function spawnGreenLeafStreaks(scene, position) {
+    spawnImpactStreaks(scene, position, {
+      color: 0x68ff63,
+      count: 14,
+      lifetimeMs: ATTACK_RED_STREAK_LIFETIME_MS * 1.35
     });
   }
 
@@ -10908,6 +10987,11 @@ async function initCore(runtimeContext) {
     const attackerPosition = attacker?.model?.position;
     if (!attackerPosition) return false;
     const effectiveRange = Math.max(0.8, Number.isFinite(range) ? range : 1.5);
+    const bush = natureController?.getClosestBush?.(attackerPosition, effectiveRange, {
+      attackerModel: attacker?.model,
+      region: region || 'around'
+    });
+    if (bush && destroyBush(bush)) return true;
     let closest = null;
     let closestDistance = Number.POSITIVE_INFINITY;
     buildState.records.forEach((record, id) => {
@@ -10943,6 +11027,8 @@ async function initCore(runtimeContext) {
 
   const handleBuildProjectileHit = ({ projectileBox, damage } = {}) => {
     if (!projectileBox) return false;
+    const removedBushPositions = natureController?.removeBushesIntersectingBox?.(projectileBox) ?? [];
+    if (destroyBushesAtPositions(removedBushPositions)) return true;
     for (const [id, record] of buildState.records.entries()) {
       if (!record?.mesh) continue;
       buildHealthBarState.tempBox.setFromObject(record.mesh);
@@ -10956,7 +11042,9 @@ async function initCore(runtimeContext) {
 
   const handleBuildAreaHit = ({ position, radius, damage } = {}) => {
     if (!position || !Number.isFinite(radius)) return false;
-    let didHit = false;
+    const removedBushPositions = natureController?.removeBushesInRadius?.(position, radius) ?? [];
+    let didHit = destroyBushesAtPositions(removedBushPositions);
+
     buildState.records.forEach((record, id) => {
       if (!record?.mesh?.position) return;
       if (position.distanceTo(record.mesh.position) <= radius) {

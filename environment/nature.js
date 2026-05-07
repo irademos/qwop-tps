@@ -34,6 +34,10 @@ const TREE_TILE_BUFFER = 5;
 const NEAR_TILE_DISTANCE = 1;
 const ROCK_GRID_SPACING = 24;
 const ROCK_SPAWN_CHANCE = 0.28;
+const BUSH_GRID_SPACING = 18;
+const BUSH_SPAWN_CHANCE = 0.22;
+const BUSH_MIN_RADIUS = 0.55;
+const BUSH_MAX_RADIUS = 1.25;
 const ROCK_MIN_RADIUS = 0.45;
 const ROCK_MAX_RADIUS = 1.4;
 const ROCK_COLLIDER_HEIGHT_RATIO = 0.7;
@@ -253,6 +257,13 @@ export async function createNature({
   const rockGeometries = [
     new THREE.DodecahedronGeometry(1, 0),
     new THREE.IcosahedronGeometry(1, 0)
+  ];
+  const bushCoreGeometry = new THREE.DodecahedronGeometry(1, 0);
+  const bushLobeGeometry = new THREE.IcosahedronGeometry(1, 0);
+  const bushMaterials = [
+    new THREE.MeshStandardMaterial({ color: 0x2f7d32, roughness: 0.92, metalness: 0.01, flatShading: true }),
+    new THREE.MeshStandardMaterial({ color: 0x3f9a3e, roughness: 0.9, metalness: 0.01, flatShading: true }),
+    new THREE.MeshStandardMaterial({ color: 0x5da23b, roughness: 0.88, metalness: 0.01, flatShading: true })
   ];
   const treeImpostorTrunkGeometry = new THREE.CylinderGeometry(0.06, 0.08, 0.35, 5);
   const treeImpostorLeafGeometry = new THREE.ConeGeometry(0.28, 0.75, 6);
@@ -553,6 +564,46 @@ export async function createNature({
     return { rb, collider };
   };
 
+  const createBushImpostor = ({ worldX, worldZ, tileKey, radius, rotation, terrainY, variant }) => {
+    const bush = new THREE.Group();
+    bush.name = 'bush-impostor';
+    const material = bushMaterials[variant % bushMaterials.length];
+    const core = new THREE.Mesh(bushCoreGeometry, material);
+    core.castShadow = true;
+    core.receiveShadow = true;
+    core.position.y = radius * 0.42;
+    core.scale.set(radius * 0.95, radius * 0.58, radius * 0.85);
+    bush.add(core);
+
+    const lobeCount = 4 + (variant % 3);
+    for (let i = 0; i < lobeCount; i += 1) {
+      const lobeMaterial = bushMaterials[(variant + i + 1) % bushMaterials.length];
+      const lobe = new THREE.Mesh(bushLobeGeometry, lobeMaterial);
+      const angle = (Math.PI * 2 * i) / lobeCount;
+      const lobeRadius = radius * (0.46 + pseudoRandom2D(worldX + i, worldZ - i, 48.2) * 0.18);
+      lobe.castShadow = true;
+      lobe.receiveShadow = true;
+      lobe.position.set(Math.cos(angle) * radius * 0.44, radius * 0.36, Math.sin(angle) * radius * 0.44);
+      lobe.scale.set(lobeRadius, lobeRadius * 0.58, lobeRadius * 0.82);
+      lobe.rotation.set(
+        pseudoRandom2D(worldX, worldZ, 50 + i) * Math.PI,
+        angle + pseudoRandom2D(worldX, worldZ, 51 + i) * 0.8,
+        pseudoRandom2D(worldX, worldZ, 52 + i) * Math.PI
+      );
+      bush.add(lobe);
+    }
+
+    bush.position.set(worldX, terrainY, worldZ);
+    bush.rotation.y = rotation;
+    bush.userData = {
+      tileKey,
+      isBush: true,
+      interactable: true,
+      boundsRadius: radius * 1.35
+    };
+    return bush;
+  };
+
   const createTreeImpostor = ({
     worldX,
     worldZ,
@@ -624,6 +675,7 @@ export async function createNature({
     const baseZ = tile.y * tileSizeMeters;
     const trees = [];
     const rocks = [];
+    const bushes = [];
     const rockPhysics = [];
     const treePhysics = [];
     const tileClimbAreas = [];
@@ -721,6 +773,38 @@ export async function createNature({
       }
     }
 
+    for (let ix = 0; ix <= tileSizeMeters; ix += BUSH_GRID_SPACING) {
+      for (let iz = 0; iz <= tileSizeMeters; iz += BUSH_GRID_SPACING) {
+        const worldX = baseX + ix + (pseudoRandom2D(baseX + ix, baseZ + iz, 41.1) - 0.5) * BUSH_GRID_SPACING * 0.45;
+        const worldZ = baseZ + iz + (pseudoRandom2D(baseX + ix, baseZ + iz, 41.7) - 0.5) * BUSH_GRID_SPACING * 0.45;
+        if (pseudoRandom2D(worldX, worldZ, 42.3) > BUSH_SPAWN_CHANCE) continue;
+
+        const radius = BUSH_MIN_RADIUS
+          + pseudoRandom2D(worldX, worldZ, 43.9) * (BUSH_MAX_RADIUS - BUSH_MIN_RADIUS);
+        tempPosition.set(worldX, 0, worldZ);
+        const bushBlockerProbe = {
+          position: tempPosition,
+          userData: { boundsRadius: radius * 1.45 }
+        };
+        if (tileBlockers && isTreeBlocked(bushBlockerProbe, tileBlockers)) {
+          continue;
+        }
+
+        const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
+        const bush = createBushImpostor({
+          worldX,
+          worldZ,
+          tileKey,
+          radius,
+          rotation: pseudoRandom2D(worldX, worldZ, 45.1) * Math.PI * 2,
+          terrainY,
+          variant: Math.floor(pseudoRandom2D(worldX, worldZ, 46.8) * 1000)
+        });
+        tileGroup.add(bush);
+        bushes.push(bush);
+      }
+    }
+
     for (let ix = 0; ix <= tileSizeMeters; ix += ROCK_GRID_SPACING) {
       for (let iz = 0; iz <= tileSizeMeters; iz += ROCK_GRID_SPACING) {
         const worldX = baseX + ix;
@@ -776,6 +860,7 @@ export async function createNature({
       group: tileGroup,
       trees,
       rocks,
+      bushes,
       rockPhysics,
       treePhysics
     };
@@ -967,6 +1052,99 @@ export async function createNature({
     return true;
   };
 
+  const getClosestBush = (position, range, { attackerModel, region = 'around' } = {}) => {
+    if (!position || !Number.isFinite(range)) return null;
+    const maxDistance = Math.max(0, range);
+    let closest = null;
+    let closestDistance = Infinity;
+    const forward = new THREE.Vector3();
+    const toBush = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    if (region === 'forward' && attackerModel?.getWorldDirection) {
+      attackerModel.getWorldDirection(forward);
+      forward.y = 0;
+      if (forward.lengthSq() < 0.0001) forward.set(0, 0, 1);
+      else forward.normalize();
+      right.set(forward.z, 0, -forward.x);
+    }
+    for (const entry of treeTiles.values()) {
+      for (const bush of entry.bushes ?? []) {
+        if (!bush?.position || bush.userData?.isRemoved) continue;
+        toBush.subVectors(bush.position, position);
+        toBush.y = 0;
+        const distance = toBush.length();
+        const paddedRange = maxDistance + (bush.userData?.boundsRadius ?? 0.6);
+        if (distance > paddedRange) continue;
+        if (region === 'forward' && forward.lengthSq() > 0) {
+          const forwardDistance = toBush.dot(forward);
+          const lateralDistance = Math.abs(toBush.dot(right));
+          if (forwardDistance < -0.2 || forwardDistance > paddedRange || lateralDistance > paddedRange) continue;
+        }
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closest = bush;
+        }
+      }
+    }
+    return closest;
+  };
+
+  const removeBush = (bush) => {
+    if (!bush) return null;
+    const tileKey = bush.userData?.tileKey;
+    const entry = tileKey ? treeTiles.get(tileKey) : null;
+    if (!entry) return null;
+    const index = (entry.bushes ?? []).indexOf(bush);
+    if (index === -1) return null;
+    entry.bushes.splice(index, 1);
+    bush.userData.isRemoved = true;
+    const position = bush.position?.clone?.() ?? null;
+    entry.group.remove(bush);
+    return position;
+  };
+
+  const removeBushesInRadius = (position, radius = 0) => {
+    if (!position || !Number.isFinite(radius) || radius <= 0) return [];
+    const removed = [];
+    const radiusSq = radius * radius;
+    for (const entry of treeTiles.values()) {
+      if (!Array.isArray(entry?.bushes) || !entry.bushes.length) continue;
+      for (let i = entry.bushes.length - 1; i >= 0; i -= 1) {
+        const bush = entry.bushes[i];
+        if (!bush?.position) continue;
+        const dx = bush.position.x - position.x;
+        const dz = bush.position.z - position.z;
+        const paddedRadius = radius + (bush.userData?.boundsRadius ?? 0.6);
+        if ((dx * dx) + (dz * dz) > Math.max(radiusSq, paddedRadius * paddedRadius)) continue;
+        removed.push(bush.position.clone());
+        bush.userData.isRemoved = true;
+        entry.bushes.splice(i, 1);
+        entry.group.remove(bush);
+      }
+    }
+    return removed;
+  };
+
+  const removeBushesIntersectingBox = (box) => {
+    if (!box) return [];
+    const removed = [];
+    const bushBox = new THREE.Box3();
+    for (const entry of treeTiles.values()) {
+      if (!Array.isArray(entry?.bushes) || !entry.bushes.length) continue;
+      for (let i = entry.bushes.length - 1; i >= 0; i -= 1) {
+        const bush = entry.bushes[i];
+        if (!bush) continue;
+        bushBox.setFromObject(bush);
+        if (!box.intersectsBox(bushBox)) continue;
+        removed.push(bush.position.clone());
+        bush.userData.isRemoved = true;
+        entry.bushes.splice(i, 1);
+        entry.group.remove(bush);
+      }
+    }
+    return removed;
+  };
+
   const removeRocksInRadius = (position, radius = 0) => {
     if (!position || !Number.isFinite(radius) || radius <= 0) return [];
     const removed = [];
@@ -1081,6 +1259,9 @@ export async function createNature({
     refreshClimbableAreas();
     rockGeometries.forEach((geometry) => geometry.dispose());
     rockMaterial.dispose();
+    bushCoreGeometry.dispose();
+    bushLobeGeometry.dispose();
+    bushMaterials.forEach((material) => material.dispose());
     treeImpostorTrunkGeometry.dispose();
     treeImpostorLeafGeometry.dispose();
     treeImpostorTrunkMaterial.dispose();
@@ -1108,7 +1289,11 @@ export async function createNature({
     refreshAll,
     setTileCache,
     getClosestTree,
+    getClosestBush,
     removeTree,
+    removeBush,
+    removeBushesInRadius,
+    removeBushesIntersectingBox,
     removeRocksInRadius,
     spawnQuestRock,
     setTreeColliderEnabled,
