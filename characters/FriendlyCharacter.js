@@ -31,6 +31,7 @@ export class FriendlyCharacter extends MonsterCharacter {
     this.followTargetModel = null;
     this.followDistance = 3;
     this.followStartDistance = 4.5;
+    this.isFollowingTarget = false;
     this.helpingPlayerFight = false;
     this.monsterHelpRadius = FRIENDLY_MONSTER_HELP_RADIUS;
     this.alwaysShowHealthBar = true;
@@ -93,6 +94,7 @@ export class FriendlyCharacter extends MonsterCharacter {
     if (Number.isFinite(followStartDistance)) {
       this.followStartDistance = Math.max(this.followDistance + 0.1, followStartDistance);
     }
+    this.isFollowingTarget = false;
   }
 
   setLevel(level, { preserveHealth = true } = {}) {
@@ -229,6 +231,12 @@ export class FriendlyCharacter extends MonsterCharacter {
       const followDir = followDistance > 0.0001 ? toTarget.clone().multiplyScalar(1 / followDistance) : null;
 
       if (followDistance > this.followStartDistance && followDir) {
+        this.isFollowingTarget = true;
+      } else if (followDistance <= this.followDistance) {
+        this.isFollowingTarget = false;
+      }
+
+      if (this.isFollowingTarget && followDir) {
         this.setDirection(followDir);
         const movement = followDir.clone().multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * IDLE_SPEED_MULTIPLIER);
         body.setLinvel({ x: movement.x, y: 0, z: movement.z }, true);
@@ -249,6 +257,7 @@ export class FriendlyCharacter extends MonsterCharacter {
       this.update(delta);
       return;
     }
+    this.isFollowingTarget = false;
 
     if (this.isEngaged && (closestPlayer || this.forceEngaged)) {
       const targetSource = closestPlayer?.model?.position || this.homePosition;
