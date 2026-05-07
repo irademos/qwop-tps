@@ -220,6 +220,11 @@ const ARROW_PROJECTILE_LIFETIME = 6000;
 const BOMB_THROW_SPEED = 11;
 const BOMB_THROW_LIFETIME = 15000;
 const BOMB_THROW_UPWARD_BIAS = 0.25;
+const MISSILE_PROJECTILE_SPEED = 32;
+const MISSILE_PROJECTILE_LIFETIME = 3500;
+const MISSILE_DAMAGE_RADIUS = 4;
+const MISSILE_BASE_DAMAGE = 4;
+const MISSILE_KNOCKBACK_STRENGTH = 4;
 const INVENTORY_THROW_SPEED = 2;
 const INVENTORY_THROW_LIFETIME = 12000;
 const INVENTORY_THROW_UPWARD_BIAS = 0.22;
@@ -844,8 +849,10 @@ async function initCore(runtimeContext) {
   const AMMO_PICKUP_AMOUNT = 5;
   const ICE_AMMO_KEY = 'ice ammo';
   const ARROW_AMMO_KEY = 'arrow ammo';
+  const MISSILE_AMMO_KEY = 'missiles';
   const DEFAULT_ICE_AMMO = 10;
   const DEFAULT_ARROW_AMMO = 5;
+  const DEFAULT_MISSILE_AMMO = 3;
   const COIN_PICKUP_GAIN = 1;
   const foodPickups = [];
   const healthPickups = [];
@@ -1717,6 +1724,7 @@ async function initCore(runtimeContext) {
         if (typeof drop.id !== 'string') return false;
         if (!isVector3Array(drop.position)) return false;
         if (drop.amount != null && !isFiniteNumber(drop.amount)) return false;
+        if (drop.ammoType != null && typeof drop.ammoType !== 'string') return false;
         return true;
       });
     };
@@ -2059,6 +2067,8 @@ async function initCore(runtimeContext) {
       const direction = new THREE.Vector3(...data.direction);
       if (data.weapon === 'bow') {
         spawnArrowProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      } else if (data.weapon === 'bazooka') {
+        spawnMissileProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
       } else {
         spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
       }
@@ -2144,7 +2154,8 @@ async function initCore(runtimeContext) {
         addDroppedAmmoPickup({
           id: drop.id,
           position: new THREE.Vector3(...drop.position),
-          amount: drop.amount
+          amount: drop.amount,
+          ammoType: drop.ammoType
         });
       });
       return;
@@ -2290,7 +2301,7 @@ async function initCore(runtimeContext) {
 
     if (previousHostId !== newHostId) {
       clearAllRemoteHeldWeaponMeshes();
-      [iceGun, bow, bomb, autumnSword, hammer, lantern, torch, shield].forEach((weapon) => {
+      [iceGun, bow, bazooka, bomb, autumnSword, hammer, lantern, torch, shield].forEach((weapon) => {
         if (!weapon) return;
         weapon.remoteHolderId = null;
       });
@@ -2369,6 +2380,7 @@ async function initCore(runtimeContext) {
   let bow;
   let autumnSword;
   let hammer;
+  let bazooka;
   let lantern;
   let torch;
   let shield;
@@ -2490,7 +2502,7 @@ async function initCore(runtimeContext) {
   };
 
   const dropOtherWeapons = (activeWeapon) => {
-    [iceGun, bow, autumnSword, hammer, bomb].forEach(weapon => {
+    [iceGun, bow, bazooka, autumnSword, hammer, bomb].forEach(weapon => {
       if (!weapon || weapon === activeWeapon) return;
       if (weapon.holder === playerControls) {
         if (weapon.itemId) {
@@ -2661,7 +2673,8 @@ async function initCore(runtimeContext) {
       bow,
       bomb,
       sword: autumnSword,
-      hammer
+      hammer,
+      bazooka
     };
 
     const setRemoteEquipState = (weaponType, isEquipped) => {
@@ -2682,6 +2695,7 @@ async function initCore(runtimeContext) {
     setRemoteEquipState('bomb', nextRight === 'bomb');
     setRemoteEquipState('sword', nextRight === 'sword');
     setRemoteEquipState('hammer', nextRight === 'hammer');
+    setRemoteEquipState('bazooka', nextRight === 'bazooka');
 
     remotePlayer.model.userData.equippedWeaponType = nextRight || nextLeft || null;
   };
@@ -2690,7 +2704,7 @@ async function initCore(runtimeContext) {
     Array.from(remoteHeldWeaponMeshes.keys()).forEach(disposeRemoteHeldWeaponMesh);
   };
 
-  const { IceGun, Bow, Lantern, AutumnSword, Hammer, Bomb, Shield, SHIELD_ITEM_ID, DEFAULT_SHIELD_HEALTH } = await loadSpecialWeapons();
+  const { IceGun, Bow, Lantern, AutumnSword, Hammer, Bazooka, Bomb, Shield, SHIELD_ITEM_ID, DEFAULT_SHIELD_HEALTH } = await loadSpecialWeapons();
 
   const updateWeaponMarker = (weapon, marker, rotationSpeed, offsetY = 1.2) => {
     if (!weapon?.mesh || !marker) return;
@@ -3102,8 +3116,80 @@ async function initCore(runtimeContext) {
     isLocallyControlled: () => hammer?.holder === playerControls
   });
 
-  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword, hammer };
-  window.weapons = { iceGun, bow, bomb, autumnSword, hammer };
+
+  bazooka = new Bazooka(scene);
+  await bazooka.load();
+  window.bazooka = bazooka;
+  const bazookaMarker = createWeaponMarker(0xff3b3b);
+  bazooka.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(bazooka, 'bazooka');
+    bazooka.useHeldMeshWhenHeld = true;
+    if (heldMesh) heldMesh.visible = true;
+    unequipOtherInventoryItems('bazooka');
+    addToInventory('bazooka', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
+    bazooka.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, bazooka.type);
+    playerControls.updateAmmoUI?.(true);
+    playerControls.setAmmo?.(
+      inventoryState.bazooka?.[MISSILE_AMMO_KEY] ?? 0,
+      getAmmoLabelForType('missile'),
+      getAmmoIconForType('missile')
+    );
+  };
+  bazooka.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    bazooka.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('bazooka', 1);
+    }
+    clearPlayerWeaponType(holder, bazooka.type);
+    if (bazooka.heldMesh) {
+      bazooka.heldMesh.visible = false;
+    }
+    bazooka.useHeldMeshWhenHeld = true;
+    playerControls?.updateAmmoUI?.(false);
+  };
+  if (bazooka.mesh) {
+    bazooka.mesh.userData.hideInMapView = true;
+    bazooka.mesh.visible = false;
+  }
+  registerNetworkedEntity('bazooka', {
+    getState: () => {
+      if (!bazooka?.mesh) return null;
+      const pos = bazooka.mesh.position;
+      const q = bazooka.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (bazooka.holder === playerControls && bazooka.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!bazooka?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        bazooka.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        bazooka.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = bazooka.remoteHolderId ?? null;
+      bazooka.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(bazooka.type);
+      updateRemoteWeaponType(bazooka, bazooka.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && bazooka.holder === playerControls && bazooka.localHoldOrigin === 'world') {
+        bazooka.holder = null;
+        bazooka.localHoldOrigin = null;
+        clearPlayerWeaponType(playerControls, bazooka.type);
+      }
+    },
+    isLocallyControlled: () => bazooka?.holder === playerControls
+  });
+
+  runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer };
+  window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer };
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
@@ -3433,6 +3519,14 @@ async function initCore(runtimeContext) {
         apply: () => addToInventory('iceGun', 1)
       },
       {
+        label: 'Bazooka',
+        apply: () => addToInventory('bazooka', 1)
+      },
+      {
+        label: 'Hammer',
+        apply: () => addToInventory('hammer', 1)
+      },
+      {
         label: 'Lantern',
         apply: () => addToInventory('lantern', 1)
       },
@@ -3444,6 +3538,10 @@ async function initCore(runtimeContext) {
             : 0;
           setIceAmmoCount(current + 5);
         }
+      },
+      {
+        label: '5 missiles',
+        apply: () => setMissileAmmoCount(getMissileAmmoCount() + 5)
       },
       {
         label: '5 mushrooms',
@@ -4564,6 +4662,9 @@ async function initCore(runtimeContext) {
       if (itemId === 'coins') {
         setStat('coins', (Number.isFinite(statsState.coins) ? statsState.coins : 0) + amount);
         grants.push(`${amount} coins`);
+      } else if (itemId === MISSILE_AMMO_KEY) {
+        addMissileAmmo(amount);
+        grants.push(`${amount} Missiles`);
       } else {
         addToInventory(itemId, amount);
         const label = inventoryCatalog[itemId]?.name || itemId;
@@ -4798,6 +4899,10 @@ async function initCore(runtimeContext) {
       name: 'Ice Gun',
       icon: '/assets/ui/items/icegun.png'
     },
+    bazooka: {
+      name: 'Bazooka',
+      icon: ''
+    },
     bow: {
       name: 'Bow',
       icon: '/assets/ui/items/bow.png'
@@ -4931,6 +5036,16 @@ async function initCore(runtimeContext) {
     };
     inventoryDirty = true;
   }
+  if (!Number.isFinite(inventoryState.bazooka?.[MISSILE_AMMO_KEY])) {
+    const bazookaEntry = inventoryState.bazooka || {};
+    inventoryState.bazooka = {
+      ...bazookaEntry,
+      [MISSILE_AMMO_KEY]: DEFAULT_MISSILE_AMMO,
+      icon: bazookaEntry.icon || inventoryCatalog.bazooka.icon,
+      name: bazookaEntry.name || inventoryCatalog.bazooka.name
+    };
+    inventoryDirty = true;
+  }
   if (inventoryState.lantern?.name !== inventoryCatalog.lantern.name) {
     inventoryState.lantern = {
       ...(inventoryState.lantern || {}),
@@ -4970,13 +5085,14 @@ async function initCore(runtimeContext) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
   }
 
-  const equippableItems = new Set(['lantern', 'torch', SHIELD_ITEM_ID, 'iceGun', 'bow', 'bomb', 'autumnSword', 'hammer']);
+  const equippableItems = new Set(['lantern', 'torch', SHIELD_ITEM_ID, 'iceGun', 'bow', 'bazooka', 'bomb', 'autumnSword', 'hammer']);
   const inventoryHandSlots = {
     lantern: 'left',
     torch: 'left',
     [SHIELD_ITEM_ID]: 'left',
     iceGun: 'right',
     bow: 'right',
+    bazooka: 'right',
     bomb: 'right',
     autumnSword: 'right',
     hammer: 'right'
@@ -5078,6 +5194,7 @@ async function initCore(runtimeContext) {
     if (itemId === 'coins') return '🪙';
     if (itemId === ICE_AMMO_KEY || itemId === 'iceGun') return '❄️';
     if (itemId === ARROW_AMMO_KEY || itemId === 'bow') return '🏹';
+    if (itemId === MISSILE_AMMO_KEY || itemId === 'bazooka') return '🚀';
     if (itemId === SHIELD_ITEM_ID) return '🛡️';
     if (itemId === APPLE_ITEM_ID) return '🍎';
     if (itemId?.startsWith?.('mushroom_')) return '🍄';
@@ -5174,6 +5291,25 @@ async function initCore(runtimeContext) {
       : 0;
   }
 
+  function setMissileAmmoCount(amount) {
+    if (!Number.isFinite(amount)) return;
+    const normalized = Math.max(0, Math.floor(amount));
+    const current = inventoryState.bazooka || {};
+    inventoryState.bazooka = {
+      ...current,
+      [MISSILE_AMMO_KEY]: normalized,
+      icon: current.icon || inventoryCatalog.bazooka.icon,
+      name: current.name || inventoryCatalog.bazooka.name
+    };
+    persistInventoryAndStorage();
+  }
+
+  function getMissileAmmoCount() {
+    return Number.isFinite(inventoryState.bazooka?.[MISSILE_AMMO_KEY])
+      ? inventoryState.bazooka[MISSILE_AMMO_KEY]
+      : 0;
+  }
+
   function addIceAmmo(amount) {
     if (!Number.isFinite(amount)) return;
     const nextAmount = getIceAmmoCount() + amount;
@@ -5186,6 +5322,13 @@ async function initCore(runtimeContext) {
     const nextAmount = getArrowAmmoCount() + amount;
     setArrowAmmoCount(nextAmount);
     showPickupToast(ARROW_AMMO_KEY, amount, 'Arrows');
+  }
+
+  function addMissileAmmo(amount) {
+    if (!Number.isFinite(amount)) return;
+    const nextAmount = getMissileAmmoCount() + amount;
+    setMissileAmmoCount(nextAmount);
+    showPickupToast(MISSILE_AMMO_KEY, amount, 'Missiles');
   }
 
   function addToInventory(itemId, amount = 1, options = {}) {
@@ -5344,6 +5487,9 @@ async function initCore(runtimeContext) {
     if (itemId === 'bow') {
       return bow?.holder === playerControls;
     }
+    if (itemId === 'bazooka') {
+      return bazooka?.holder === playerControls;
+    }
     if (itemId === 'bomb') {
       return bomb?.holder === playerControls;
     }
@@ -5366,6 +5512,7 @@ async function initCore(runtimeContext) {
     if (hand === 'right') {
       if (isInventoryItemEquipped('iceGun')) return 'iceGun';
       if (isInventoryItemEquipped('bow')) return 'bow';
+      if (isInventoryItemEquipped('bazooka')) return 'bazooka';
       if (isInventoryItemEquipped('bomb')) return 'bomb';
       if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
       if (isInventoryItemEquipped('hammer')) return 'hammer';
@@ -5529,6 +5676,26 @@ async function initCore(runtimeContext) {
       updateSettingsUI();
       return;
     }
+    if (itemId === 'bazooka') {
+      if (!bazooka?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(bazooka, 'bazooka', { forceNew: true });
+      bazooka.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      bazooka.mesh.visible = false;
+      bazooka.localHoldOrigin = 'inventory';
+      bazooka.holder = playerControls;
+      setPlayerWeaponType(playerControls, bazooka.type);
+      playerControls.updateAmmoUI?.(true);
+      playerControls.setAmmo?.(
+        inventoryState.bazooka?.[MISSILE_AMMO_KEY] ?? 0,
+        getAmmoLabelForType('missile'),
+        getAmmoIconForType('missile')
+      );
+      updateSettingsUI();
+      return;
+    }
     if (itemId === 'bomb') {
       if (!bomb?.mesh || !playerControls) return;
       const heldMesh = ensureLocalHeldWeaponMesh(bomb, 'bomb', { forceNew: true });
@@ -5643,6 +5810,22 @@ async function initCore(runtimeContext) {
       bow.useHeldMeshWhenHeld = false;
       audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Put Away 1.ogg', 0.58, { cooldownKey: 'bow-unequip', cooldownMs: 100 });
       clearPlayerWeaponType(playerControls, bow.type);
+      playerControls?.updateAmmoUI?.(false);
+      playerControls?.setAiming?.(false);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'bazooka') {
+      if (bazooka?.holder !== playerControls) return;
+      bazooka.holder = null;
+      bazooka.localHoldOrigin = null;
+      if (bazooka.mesh) {
+        bazooka.mesh.visible = false;
+      }
+      if (bazooka.heldMesh) {
+        bazooka.heldMesh.visible = false;
+      }
+      clearPlayerWeaponType(playerControls, bazooka.type);
       playerControls?.updateAmmoUI?.(false);
       playerControls?.setAiming?.(false);
       updateSettingsUI();
@@ -7033,7 +7216,7 @@ async function initCore(runtimeContext) {
     return `${owner}-${Date.now()}-${index}-${randomSeed}`;
   };
 
-  const createAmmoDrops = (center, totalAmmo) => {
+  const createAmmoDrops = (center, totalAmmo, ammoType = 'ammo') => {
     const drops = [];
     if (!center || !Number.isFinite(totalAmmo) || totalAmmo <= 0) return drops;
     const radius = 1.6;
@@ -7048,7 +7231,8 @@ async function initCore(runtimeContext) {
       drops.push({
         id: createDropId(index),
         position: [x, center.y, z],
-        amount
+        amount,
+        ammoType
       });
       index += 1;
     }
@@ -7077,6 +7261,14 @@ async function initCore(runtimeContext) {
     });
   };
 
+  const spawnBazookaAmmoCluster = (center) => {
+    if (!center) return;
+    const positions = createRingPositions(center, ICE_GUN_AMMO_CLUSTER_COUNT, ICE_GUN_AMMO_CLUSTER_RADIUS);
+    positions.forEach(position => {
+      spawnMissilePickup(position, AMMO_PICKUP_AMOUNT);
+    });
+  };
+
   const clearInventoryState = () => {
     Object.keys(inventoryState).forEach(key => {
       delete inventoryState[key];
@@ -7089,11 +7281,19 @@ async function initCore(runtimeContext) {
     if (!playerModel) return;
     const deathPosition = playerModel.position.clone();
     let ammoCount = 0;
+    let ammoType = 'ammo';
     if (playerControls?.ammoLabel === 'Arrows') {
       ammoCount = Number.isFinite(playerControls?.ammo)
         ? playerControls.ammo
         : (Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
           ? inventoryState.bow[ARROW_AMMO_KEY]
+          : 0);
+    } else if (playerControls?.ammoLabel === 'Missiles') {
+      ammoType = 'missile';
+      ammoCount = Number.isFinite(playerControls?.ammo)
+        ? playerControls.ammo
+        : (Number.isFinite(inventoryState.bazooka?.[MISSILE_AMMO_KEY])
+          ? inventoryState.bazooka[MISSILE_AMMO_KEY]
           : 0);
     } else {
       ammoCount = Number.isFinite(playerControls?.ammo)
@@ -7102,12 +7302,13 @@ async function initCore(runtimeContext) {
           ? inventoryState.iceGun[ICE_AMMO_KEY]
           : 0);
     }
-    const ammoDrops = createAmmoDrops(deathPosition, ammoCount);
+    const ammoDrops = createAmmoDrops(deathPosition, ammoCount, ammoType);
     ammoDrops.forEach(drop => {
       addDroppedAmmoPickup({
         id: drop.id,
         position: new THREE.Vector3(...drop.position),
-        amount: drop.amount
+        amount: drop.amount,
+        ammoType: drop.ammoType
       });
     });
     if (ammoDrops.length > 0 && multiplayer && !multiplayer.isHost) {
@@ -7117,6 +7318,7 @@ async function initCore(runtimeContext) {
     const weaponDrops = [];
     if ((inventoryState.iceGun?.count || 0) > 0) weaponDrops.push('iceGun');
     if ((inventoryState.bow?.count || 0) > 0) weaponDrops.push('bow');
+    if ((inventoryState.bazooka?.count || 0) > 0) weaponDrops.push('bazooka');
     if ((inventoryState.bomb?.count || 0) > 0) weaponDrops.push('bomb');
     if ((inventoryState.autumnSword?.count || 0) > 0) weaponDrops.push('autumnSword');
     if ((inventoryState.hammer?.count || 0) > 0) weaponDrops.push('hammer');
@@ -7129,6 +7331,8 @@ async function initCore(runtimeContext) {
         spawnIceGunPickup(position);
       } else if (weaponId === 'bow') {
         spawnBowPickup(position);
+      } else if (weaponId === 'bazooka') {
+        spawnBazookaPickup(position);
       } else if (weaponId === 'bomb') {
         spawnBombPickup(position);
       } else if (weaponId === 'autumnSword') {
@@ -7607,28 +7811,28 @@ async function initCore(runtimeContext) {
     }
   }
 
-  function getBombDamage(shooterId) {
+  function getExplosiveDamage(shooterId, baseDamage = BOMB_BASE_DAMAGE) {
     if (shooterId && shooterId === multiplayer?.getId?.()) {
       if (typeof window.getPlayerStrength === 'function') {
         const strength = window.getPlayerStrength();
         if (Number.isFinite(strength)) {
           const bonus = convertPointsToSegments(strength, { minimum: 0 });
-          return Math.max(0, BOMB_BASE_DAMAGE + bonus);
+          return Math.max(0, baseDamage + bonus);
         }
       }
     }
-    return BOMB_BASE_DAMAGE;
+    return baseDamage;
   }
 
-  function applyBombImpactDamage(hitPosition, shooterId) {
+  function applyExplosiveImpactDamage(hitPosition, shooterId, { damageRadius = BOMB_DAMAGE_RADIUS, baseDamage = BOMB_BASE_DAMAGE, knockbackStrength = BOMB_KNOCKBACK_STRENGTH, attackLabel = 'bombExplosion' } = {}) {
     if (!hitPosition) return;
     const localId = multiplayer?.getId?.();
     const isHost = !multiplayer || multiplayer.isHost;
-    const damage = getBombDamage(shooterId);
+    const damage = getExplosiveDamage(shooterId, baseDamage);
 
     if (playerModel?.position) {
       const distance = hitPosition.distanceTo(playerModel.position);
-      if (distance <= BOMB_DAMAGE_RADIUS) {
+      if (distance <= damageRadius) {
         const localControls = runtimeContext.systems.playerControls ?? window.playerControls;
         if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
           localControls.isInvincible = false;
@@ -7636,7 +7840,7 @@ async function initCore(runtimeContext) {
         }
         const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
         if (!isInvincible) {
-          const attackTypes = getAttackTypes('bombExplosion', ['explosive']);
+          const attackTypes = getAttackTypes(attackLabel, ['explosive']);
           window.localHealth = Math.max(0, window.localHealth - damage);
           window.lastHitAttackTypes = attackTypes;
           if (localControls) {
@@ -7645,7 +7849,7 @@ async function initCore(runtimeContext) {
               .normalize();
             localControls.applyKnockback({
               direction,
-              strength: BOMB_KNOCKBACK_STRENGTH
+              strength: knockbackStrength
             });
           }
         }
@@ -7655,10 +7859,10 @@ async function initCore(runtimeContext) {
     for (const [id, { model }] of Object.entries(otherPlayers)) {
       if (!model?.position) continue;
       const distance = hitPosition.distanceTo(model.position);
-      if (distance > BOMB_DAMAGE_RADIUS) continue;
+      if (distance > damageRadius) continue;
       const player = otherPlayers[id];
       if (!player) continue;
-      const attackTypes = getAttackTypes('bombExplosion', ['explosive']);
+      const attackTypes = getAttackTypes(attackLabel, ['explosive']);
       const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
       const nextHealth = Math.max(0, previousHealth - damage);
       player.health = nextHealth;
@@ -7679,15 +7883,15 @@ async function initCore(runtimeContext) {
         for (const monster of creatures) {
           if (!monster?.model?.position) continue;
           const distance = hitPosition.distanceTo(monster.model.position);
-          if (distance > BOMB_DAMAGE_RADIUS) continue;
-          const attackTypes = getAttackTypes('bombExplosion', ['explosive']);
+          if (distance > damageRadius) continue;
+          const attackTypes = getAttackTypes(attackLabel, ['explosive']);
           const killed = monster.applyDamage(damage, { attackTypes });
           monster.lastDamageSourceId = shooterId ?? localId ?? null;
           if (!killed) {
             const direction = new THREE.Vector3()
               .subVectors(monster.model.position, hitPosition)
               .normalize();
-            monster.applyKnockback({ direction, strength: BOMB_KNOCKBACK_STRENGTH });
+            monster.applyKnockback({ direction, strength: knockbackStrength });
           }
           handleMonsterDamage?.(monster, { damage, killed, sourceId: shooterId ?? localId, attackTypes });
           if (killed && shooterId && shooterId === localId) {
@@ -7699,12 +7903,12 @@ async function initCore(runtimeContext) {
         for (const monster of creatures) {
           if (!monster?.model?.position) continue;
           const distance = hitPosition.distanceTo(monster.model.position);
-          if (distance > BOMB_DAMAGE_RADIUS) continue;
+          if (distance > damageRadius) continue;
           sendMonsterAttackIntent?.({
             monsterId: monster.id,
             damage,
             sourcePlayerId: shooterId ?? localId,
-            attackTypes: getAttackTypes('bombExplosion', ['explosive']),
+            attackTypes: getAttackTypes(attackLabel, ['explosive']),
             at: Date.now()
           });
         }
@@ -7714,16 +7918,16 @@ async function initCore(runtimeContext) {
     buildState.records.forEach((record, id) => {
       if (!record?.mesh?.position) return;
       const distance = hitPosition.distanceTo(record.mesh.position);
-      if (distance <= BOMB_DAMAGE_RADIUS + 0.7) {
+      if (distance <= damageRadius + 0.7) {
         void applyBuildDamage(id, record, damage);
       }
     });
 
-    const removedBushPositions = natureController?.removeBushesInRadius?.(hitPosition, BOMB_DAMAGE_RADIUS) ?? [];
+    const removedBushPositions = natureController?.removeBushesInRadius?.(hitPosition, damageRadius) ?? [];
     destroyBushesAtPositions(removedBushPositions);
 
     if (natureController?.removeRocksInRadius) {
-      const removedRockPositions = natureController.removeRocksInRadius(hitPosition, BOMB_DAMAGE_RADIUS);
+      const removedRockPositions = natureController.removeRocksInRadius(hitPosition, damageRadius);
       if (removedRockPositions.length > 0) {
         notifyAchievementProgress('rocksBlownUp', removedRockPositions.length);
         window.questManager?.handleRockBlownUp?.(removedRockPositions.length);
@@ -7736,6 +7940,23 @@ async function initCore(runtimeContext) {
         }
       });
     }
+  }
+
+  function getBombDamage(shooterId) {
+    return getExplosiveDamage(shooterId, BOMB_BASE_DAMAGE);
+  }
+
+  function applyBombImpactDamage(hitPosition, shooterId) {
+    applyExplosiveImpactDamage(hitPosition, shooterId);
+  }
+
+  function applyMissileImpactDamage(hitPosition, shooterId) {
+    applyExplosiveImpactDamage(hitPosition, shooterId, {
+      damageRadius: MISSILE_DAMAGE_RADIUS,
+      baseDamage: MISSILE_BASE_DAMAGE,
+      knockbackStrength: MISSILE_KNOCKBACK_STRENGTH,
+      attackLabel: 'missileProjectile'
+    });
   }
 
   function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
@@ -7844,6 +8065,87 @@ async function initCore(runtimeContext) {
     }
   }
 
+
+  function createMissileProjectileMesh(direction) {
+    const group = new THREE.Group();
+    const bodyGeometry = new THREE.CylinderGeometry(0.08, 0.1, 0.75, 12);
+    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x55615a, metalness: 0.35, roughness: 0.45 });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.rotation.x = Math.PI / 2;
+    group.add(body);
+
+    const noseGeometry = new THREE.ConeGeometry(0.1, 0.22, 12);
+    const noseMaterial = new THREE.MeshStandardMaterial({ color: 0xbf2020, emissive: 0x441010, emissiveIntensity: 0.25 });
+    const nose = new THREE.Mesh(noseGeometry, noseMaterial);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = 0.48;
+    group.add(nose);
+
+    const finMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.2, roughness: 0.5 });
+    for (let i = 0; i < 4; i += 1) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.14), finMaterial);
+      fin.position.z = -0.33;
+      fin.rotation.z = (i / 4) * Math.PI * 2;
+      fin.position.x = Math.cos(fin.rotation.z) * 0.1;
+      fin.position.y = Math.sin(fin.rotation.z) * 0.1;
+      group.add(fin);
+    }
+
+    const flame = new THREE.PointLight(0xff5522, 0.8, 1.8);
+    flame.position.z = -0.45;
+    group.add(flame);
+
+    const forward = new THREE.Vector3(0, 0, 1);
+    const missileDirection = direction.clone().normalize();
+    if (missileDirection.lengthSq() > 0.0001) {
+      group.quaternion.setFromUnitVectors(forward, missileDirection);
+    }
+    group.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    return group;
+  }
+
+  function handleMissileImpact(hitPosition, shooterId) {
+    spawnBombMist(scene, bombMists, hitPosition, { particleScale: 0.7, spreadScale: 0.75, lifetimeScale: 0.65 });
+    applyMissileImpactDamage(hitPosition, shooterId);
+  }
+
+  function spawnMissileProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    const missileDirection = direction.clone().normalize();
+    spawnProjectile(scene, list, position, missileDirection, shooterId, {
+      createMesh: () => createMissileProjectileMesh(missileDirection),
+      speed: MISSILE_PROJECTILE_SPEED,
+      lifetime: MISSILE_PROJECTILE_LIFETIME,
+      colliderDesc: RAPIER.ColliderDesc.ball(0.14).setRestitution(0.05).setFriction(0.7),
+      groundContactOffset: 0.12,
+      gravity: 0,
+      damage: getExplosiveDamage(shooterId, MISSILE_BASE_DAMAGE),
+      attackLabel: 'missileProjectile',
+      attackTypes: ['explosive', 'fire'],
+      onGroundHit: (hitPosition) => handleMissileImpact(hitPosition, shooterId),
+      onMonsterImpact: ({ hitPosition }) => {
+        handleMissileImpact(hitPosition, shooterId);
+        return true;
+      },
+      onBuildImpact: (hitPosition) => {
+        handleMissileImpact(hitPosition, shooterId);
+        return true;
+      },
+      onPlayerImpact: (hitPosition) => {
+        handleMissileImpact(hitPosition, shooterId);
+        return true;
+      }
+    });
+
+    const latest = list[list.length - 1];
+    if (latest) {
+      latest.userData.skipTerrainCorrection = true;
+    }
+  }
+
   function spawnInventoryThrowProjectileWithPerfFlags(
     scene,
     list,
@@ -7859,7 +8161,7 @@ async function initCore(runtimeContext) {
     } = {}
   ) {
     if (!itemId) return false;
-    const itemMap = { iceGun, bow, autumnSword, hammer, lantern, torch };
+    const itemMap = { iceGun, bow, bazooka, autumnSword, hammer, lantern, torch };
     const resolvedItem = sourceItem || itemMap[itemId];
     if (!resolvedItem?.mesh) return false;
 
@@ -8020,10 +8322,19 @@ async function initCore(runtimeContext) {
     });
   }
 
-  function spawnBombMist(scene, mistList, position) {
+  function spawnBombMist(scene, mistList, position, options = {}) {
     const pooled = bombMistPool.acquire();
     const mistGroup = pooled.group;
     bombMistPool.setup(pooled);
+    const particleScale = Number.isFinite(options.particleScale) ? options.particleScale : 1;
+    const spreadScale = Number.isFinite(options.spreadScale) ? options.spreadScale : 1;
+    if (particleScale !== 1 || spreadScale !== 1) {
+      mistGroup.children.forEach(child => {
+        if (!child?.isMesh) return;
+        child.position.multiplyScalar(spreadScale);
+        child.scale.multiplyScalar(particleScale);
+      });
+    }
 
     mistGroup.position.copy(position);
     mistGroup.userData.skipTerrainCorrection = true;
@@ -8041,7 +8352,7 @@ async function initCore(runtimeContext) {
       material: pooled.material,
       velocity: drift,
       spawnTime: performance.now(),
-      lifetimeMs: BOMB_MIST_LIFETIME_MS
+      lifetimeMs: BOMB_MIST_LIFETIME_MS * (Number.isFinite(options.lifetimeScale) ? options.lifetimeScale : 1)
     });
   }
 
@@ -8597,8 +8908,8 @@ async function initCore(runtimeContext) {
 
     const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
     const material = options.material || new THREE.MeshStandardMaterial({
-      color: 0x7fd0ff,
-      emissive: 0x225577,
+      color: ammoType === 'missile' ? 0xb72a2a : 0x7fd0ff,
+      emissive: ammoType === 'missile' ? 0x3a0808 : 0x225577,
       emissiveIntensity: 0.4,
       metalness: 0.1,
       roughness: 0.4,
@@ -8658,11 +8969,15 @@ async function initCore(runtimeContext) {
   }
 
   function getAmmoLabelForType(type) {
-    return type === 'arrow' ? 'Arrows' : 'Ice ammo';
+    if (type === 'arrow') return 'Arrows';
+    if (type === 'missile') return 'Missiles';
+    return 'Ice ammo';
   }
 
   function getAmmoIconForType(type) {
-    return type === 'arrow' ? '🏹' : '❄️';
+    if (type === 'arrow') return '🏹';
+    if (type === 'missile') return '🚀';
+    return '❄️';
   }
 
   function addAmmoForType(type, amount) {
@@ -8678,6 +8993,14 @@ async function initCore(runtimeContext) {
       }
       return;
     }
+    if (type === 'missile') {
+      if (bazooka?.holder === playerControls) {
+        playerControls.addAmmo(amount);
+      } else {
+        setMissileAmmoCount(getMissileAmmoCount() + amount);
+      }
+      return;
+    }
     if (iceGun?.holder === playerControls) {
       playerControls.addAmmo(amount);
     } else {
@@ -8688,15 +9011,46 @@ async function initCore(runtimeContext) {
     }
   }
 
-  function spawnDroppedAmmoPickup(position, amount, dropId) {
+
+  function createMissilePickupMesh(amount = 1) {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.08, 0.55, 10),
+      new THREE.MeshStandardMaterial({ color: 0x5d675f, metalness: 0.35, roughness: 0.45 })
+    );
+    body.rotation.x = Math.PI / 2;
+    group.add(body);
+    const nose = new THREE.Mesh(
+      new THREE.ConeGeometry(0.08, 0.16, 10),
+      new THREE.MeshStandardMaterial({ color: 0xb72a2a, emissive: 0x3a0808, emissiveIntensity: 0.25 })
+    );
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = 0.35;
+    group.add(nose);
+    group.rotation.set(0, Math.PI / 2, Math.PI / 2);
+    if (amount > 1) group.scale.multiplyScalar(1.25);
+    return group;
+  }
+
+  function spawnMissilePickup(position, amount = 1, options = {}) {
+    return spawnAmmoPickup(position, amount, {
+      type: 'missile',
+      sparkle: true,
+      noFloat: options.noFloat,
+      groundOffset: options.groundOffset,
+      createMesh: () => createMissilePickupMesh(amount)
+    });
+  }
+
+  function spawnDroppedAmmoPickup(position, amount, dropId, ammoType = 'ammo') {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
     if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
 
     const geometry = new THREE.IcosahedronGeometry(0.25, 0);
     const material = new THREE.MeshStandardMaterial({
-      color: 0x7fd0ff,
-      emissive: 0x225577,
+      color: ammoType === 'missile' ? 0xb72a2a : 0x7fd0ff,
+      emissive: ammoType === 'missile' ? 0x3a0808 : 0x225577,
       emissiveIntensity: 0.4,
       metalness: 0.1,
       roughness: 0.4,
@@ -8713,15 +9067,17 @@ async function initCore(runtimeContext) {
     pickup.userData.isDropped = true;
     pickup.userData.dropId = dropId;
     pickup.userData.amount = amount;
+    pickup.userData.type = ammoType;
+    if (ammoType === 'missile') pickup.rotation.x = Math.PI / 2;
     scene.add(pickup);
     return pickup;
   }
 
-  function addDroppedAmmoPickup({ id, position, amount }) {
+  function addDroppedAmmoPickup({ id, position, amount, ammoType = 'ammo' }) {
     if (!id || !position || droppedAmmoPickups.has(id)) return;
-    const pickup = spawnDroppedAmmoPickup(position, amount, id);
+    const pickup = spawnDroppedAmmoPickup(position, amount, id, ammoType);
     if (!pickup) return;
-    droppedAmmoPickups.set(id, { mesh: pickup, amount });
+    droppedAmmoPickups.set(id, { mesh: pickup, amount, ammoType });
   }
 
   function removeDroppedAmmoPickup(id) {
@@ -8741,7 +9097,8 @@ async function initCore(runtimeContext) {
         addDroppedAmmoPickup({
           id: drop.id,
           position: new THREE.Vector3(...drop.position),
-          amount: drop.amount
+          amount: drop.amount,
+          ammoType: drop.ammoType
         });
       } else {
         const entry = droppedAmmoPickups.get(drop.id);
@@ -8983,6 +9340,19 @@ async function initCore(runtimeContext) {
     iceGun.mesh.visible = true;
     iceGun.holder = null;
     spawnIceGunAmmoCluster(spawnPos);
+  }
+
+  function spawnBazookaPickup(position) {
+    if (!bazooka?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
+    bazooka.mesh.position.copy(spawnPos);
+    bazooka.mesh.quaternion.set(0, 0, 0, 1);
+    bazooka.mesh.visible = true;
+    bazooka.holder = null;
+    spawnBazookaAmmoCluster(spawnPos);
   }
 
   function spawnBowPickup(position) {
@@ -9259,7 +9629,8 @@ async function initCore(runtimeContext) {
         return {
           id,
           position: [pos.x, pos.y, pos.z],
-          amount: entry.amount ?? mesh.userData.amount
+          amount: entry.amount ?? mesh.userData.amount,
+          ammoType: entry.ammoType || mesh.userData.type || 'ammo'
         };
       }).filter(Boolean);
       return { drops };
@@ -9326,6 +9697,7 @@ async function initCore(runtimeContext) {
     },
     spawnProjectile: spawnProjectileWithPerfFlags,
     spawnArrowProjectile: spawnArrowProjectileWithPerfFlags,
+    spawnMissileProjectile: spawnMissileProjectileWithPerfFlags,
     projectiles,
     spawnIceMist,
     iceMists,
@@ -9334,6 +9706,8 @@ async function initCore(runtimeContext) {
     onAmmoChange: (amount) => {
       if (playerControls?.ammoLabel === 'Arrows') {
         setArrowAmmoCount(amount);
+      } else if (playerControls?.ammoLabel === 'Missiles') {
+        setMissileAmmoCount(amount);
       } else {
         setIceAmmoCount(amount);
       }
@@ -9375,7 +9749,7 @@ async function initCore(runtimeContext) {
       return playerControls.throwBomb(position, direction);
     }
 
-    const itemMap = { iceGun, bow, autumnSword, hammer, lantern, torch };
+    const itemMap = { iceGun, bow, bazooka, autumnSword, hammer, lantern, torch };
     const sourceItem = itemMap[itemId];
     if (!sourceItem?.mesh) return false;
 
@@ -9617,6 +9991,13 @@ async function initCore(runtimeContext) {
       groundOffset: 0.5,
     },
     {
+      itemId: 'bazooka',
+      item: bazooka,
+      markerColor: 0xff3b3b,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
+    },
+    {
       itemId: 'bow',
       item: bow,
       markerColor: 0xffc26b,
@@ -9718,6 +10099,15 @@ async function initCore(runtimeContext) {
         }
       }
 
+      const hasBazooka = (inventoryState?.bazooka?.count || 0) > 0;
+      const canSpawnBazooka = bazooka?.mesh && !bazooka.holder && !hasBazooka && !bazooka.mesh.visible;
+      if (canSpawnBazooka) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnBazookaPickup(spawnPos);
+        }
+      }
+
       const hasBomb = (inventoryState?.bomb?.count || 0) > 0;
       const canSpawnBomb = bomb?.mesh && !bomb.holder && !hasBomb && !bomb.mesh.visible;
       if (canSpawnBomb) {
@@ -9765,7 +10155,7 @@ async function initCore(runtimeContext) {
       }
     }
 
-    [iceGun, bow, autumnSword, hammer, bomb].forEach((weapon) => {
+    [iceGun, bow, bazooka, autumnSword, hammer, bomb].forEach((weapon) => {
       if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
       if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
         weapon.mesh.visible = false;
@@ -11670,8 +12060,10 @@ async function initCore(runtimeContext) {
     getInventory: () => getInventory(),
     getIceAmmoCount: () => getIceAmmoCount(),
     getArrowAmmoCount: () => getArrowAmmoCount(),
+    getMissileAmmoCount: () => getMissileAmmoCount(),
     addIceAmmo: (amount) => addIceAmmo(amount),
     addArrowAmmo: (amount) => addArrowAmmo(amount),
+    addMissileAmmo: (amount) => addMissileAmmo(amount),
     getHomeStorage: () => getHomeStorage(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
     getEquippedInventoryItemIds: () => getEquippedInventoryItemIds(),
@@ -12468,9 +12860,13 @@ async function initCore(runtimeContext) {
             ? (bow?.holder === playerControls
               ? playerControls.ammo
               : inventoryState.bow?.[ARROW_AMMO_KEY] ?? amount)
-            : (iceGun?.holder === playerControls
-              ? playerControls.ammo
-              : inventoryState.iceGun?.[ICE_AMMO_KEY] ?? amount);
+            : ammoType === 'missile'
+              ? (bazooka?.holder === playerControls
+                ? playerControls.ammo
+                : inventoryState.bazooka?.[MISSILE_AMMO_KEY] ?? amount)
+              : (iceGun?.holder === playerControls
+                ? playerControls.ammo
+                : inventoryState.iceGun?.[ICE_AMMO_KEY] ?? amount);
           showAmmoPopup(displayAmount, popupLabel);
           disposePickup(pickup);
           ammoPickups.splice(i, 1);
@@ -12499,11 +12895,12 @@ async function initCore(runtimeContext) {
           const amount = Number.isFinite(entry.amount)
             ? entry.amount
             : (Number.isFinite(pickup.userData.amount) ? pickup.userData.amount : AMMO_PICKUP_AMOUNT);
-          addAmmoForType('ammo', amount);
-          const displayAmount = iceGun?.holder === playerControls
-            ? playerControls.ammo
-            : (inventoryState.iceGun?.[ICE_AMMO_KEY] ?? amount);
-          showAmmoPopup(displayAmount, getAmmoLabelForType('ammo'));
+          const ammoType = entry.ammoType || pickup.userData.type || 'ammo';
+          addAmmoForType(ammoType, amount);
+          const displayAmount = ammoType === 'missile'
+            ? (bazooka?.holder === playerControls ? playerControls.ammo : (inventoryState.bazooka?.[MISSILE_AMMO_KEY] ?? amount))
+            : (iceGun?.holder === playerControls ? playerControls.ammo : (inventoryState.iceGun?.[ICE_AMMO_KEY] ?? amount));
+          showAmmoPopup(displayAmount, getAmmoLabelForType(ammoType));
           removeDroppedAmmoPickup(id);
           if (multiplayer && !multiplayer.isHost) {
             pendingDropRemovals.add(id);
@@ -12685,13 +13082,14 @@ async function initCore(runtimeContext) {
     }
     updateWeaponMarker(iceGun, iceGunMarker, 0.03);
     updateWeaponMarker(bow, bowMarker, 0.03);
+    updateWeaponMarker(bazooka, bazookaMarker, 0.03);
     updateWeaponMarker(bomb, bombMarker, 0.03);
     updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
     updateWeaponMarker(hammer, hammerMarker, 0.03);
     updateWeaponMarker(lantern, lanternMarker, 0.03);
     updateWeaponMarker(torch, torchMarker, 0.03);
     updateWeaponMarker(shield, shieldMarker, 0.03);
-    [iceGun, bow, bomb, autumnSword, hammer, lantern, torch, shield].forEach((weapon) => {
+    [iceGun, bow, bazooka, bomb, autumnSword, hammer, lantern, torch, shield].forEach((weapon) => {
       const mesh = weapon?.mesh;
       if (!mesh || weapon?.holder || playerDead) return;
       if (playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {

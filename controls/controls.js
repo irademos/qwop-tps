@@ -146,6 +146,7 @@ export class PlayerControls {
     spawnProjectile,
     projectiles,
     spawnArrowProjectile,
+    spawnMissileProjectile,
     spawnIceMist,
     iceMists,
     audioManager,
@@ -169,6 +170,7 @@ export class PlayerControls {
     this.isMoving = false;
     this.spawnProjectile = spawnProjectile;
     this.spawnArrowProjectile = spawnArrowProjectile;
+    this.spawnMissileProjectile = spawnMissileProjectile;
     this.projectiles = projectiles;
     this.spawnIceMist = spawnIceMist;
     this.iceMists = iceMists;
@@ -784,6 +786,7 @@ export class PlayerControls {
   getMobileAttackLabel() {
     const weapon = this.getEquippedWeapon('right');
     if (weapon?.itemId === 'bow') return 'Bow';
+    if (weapon?.itemId === 'bazooka') return 'Bazooka';
     if (weapon?.itemId === 'bomb') return 'Bomb';
     return 'Attack';
   }
@@ -816,7 +819,7 @@ export class PlayerControls {
 
   handlePrimaryAttackPress() {
     const weapon = this.getEquippedWeapon('right');
-    if (weapon?.itemId === 'bow' || weapon?.itemId === 'bomb') {
+    if (weapon?.itemId === 'bow' || weapon?.itemId === 'bazooka' || weapon?.itemId === 'bomb') {
       this.attemptFireProjectileForHand('right');
       return;
     }
@@ -857,6 +860,7 @@ export class PlayerControls {
     const equipCandidates = [
       { id: 'bomb', label: 'Bomb' },
       { id: 'bow', label: 'Bow' },
+      { id: 'bazooka', label: 'Bazooka' },
       { id: 'iceGun', label: 'Ice Gun' },
       { id: 'autumnSword', label: 'Sword' },
       { id: 'hammer', label: 'Hammer' },
@@ -2897,7 +2901,7 @@ export class PlayerControls {
     return this.getWeapons().find(
       weapon => weapon.holder === this
         && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')
-        && (weapon.type === 'gun' || weapon.type === 'bow')
+        && (weapon.type === 'gun' || weapon.type === 'bow' || weapon.type === 'bazooka')
     ) || null;
   }
 
@@ -3257,6 +3261,7 @@ export class PlayerControls {
     const gun = this.getEquippedGun(hand);
     const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
+    const usesMissile = gun?.itemId === 'bazooka' && typeof this.spawnMissileProjectile === 'function';
     const autoAimDirection = this.getAutoAimDirection(gun);
     const direction = autoAimDirection ?? (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow));
     const position = this.getProjectileSpawnPosition(direction);
@@ -3279,6 +3284,27 @@ export class PlayerControls {
       this.spawnIceMist(
         this.scene,
         this.iceMists,
+        position,
+        direction,
+        this.multiplayer.getId()
+      );
+    } else if (usesMissile) {
+      this.multiplayer.send({
+        type: 'projectile',
+        id: this.multiplayer.getId(),
+        position: position.toArray(),
+        direction: direction.toArray(),
+        weapon: 'bazooka'
+      });
+
+      this.playAction('projectile');
+      this.audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.45, {
+        cooldownKey: 'bazooka-fire',
+        cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+      });
+      this.spawnMissileProjectile(
+        this.scene,
+        this.projectiles,
         position,
         direction,
         this.multiplayer.getId()
@@ -3326,11 +3352,11 @@ export class PlayerControls {
 
   shouldHoldToFire(hand = 'right') {
     const weapon = this.getEquippedWeapon(hand);
-    return weapon?.itemId === 'bow' || weapon?.itemId === 'bomb' || weapon?.itemId === 'iceGun';
+    return weapon?.itemId === 'bow' || weapon?.itemId === 'bazooka' || weapon?.itemId === 'bomb' || weapon?.itemId === 'iceGun';
   }
 
   isProjectileWeapon(weapon) {
-    return !!weapon && (weapon.type === 'gun' || weapon.type === 'bow' || weapon.type === 'bomb');
+    return !!weapon && (weapon.type === 'gun' || weapon.type === 'bow' || weapon.type === 'bazooka' || weapon.type === 'bomb');
   }
 
   setAiming(active) {
@@ -3441,8 +3467,9 @@ export class PlayerControls {
     const isBow = weapon.itemId === 'bow';
     const isBomb = weapon.itemId === 'bomb';
     const isIceGun = weapon.itemId === 'iceGun';
+    const isBazooka = weapon.itemId === 'bazooka';
     const isThrownItem = weapon.type === 'throw' && !isBomb;
-    if (!(isBow || isBomb || isIceGun || isThrownItem)) return null;
+    if (!(isBow || isBomb || isIceGun || isBazooka || isThrownItem)) return null;
 
     const maxRange = isIceGun
       ? AUTO_AIM_ICE_RANGE_M
