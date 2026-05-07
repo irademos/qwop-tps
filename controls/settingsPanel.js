@@ -1204,6 +1204,7 @@ function renderInventory() {
     iceGun: '❄️',
     bow: '🏹',
     autumnSword: '🗡️',
+    hammer: '🔨',
     lantern: '🏮',
     shield: '🛡️',
     apple: '🍎',

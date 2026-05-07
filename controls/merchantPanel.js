@@ -129,6 +129,7 @@ function getFallbackIcon(itemId) {
   if (itemId === 'bow') return '🏹';
   if (itemId === 'arrow ammo') return '🏹';
   if (itemId === 'autumnSword') return '🗡️';
+  if (itemId === 'hammer') return '🔨';
   if (itemId === 'lantern') return '🏮';
   if (itemId === 'shield') return '🛡️';
   if (itemId === 'apple') return '🍎';

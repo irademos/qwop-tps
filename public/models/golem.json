@@ -12,7 +12,9 @@
       "cut": 0.3,
       "ice": 0.2,
       "arrow": 0.2,
-      "melee": 0.2
+      "melee": 0.2,
+      "smash": 4.0,
+      "pummel": 4.0
     },
     "drops": [
       "salt",

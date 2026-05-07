@@ -25,6 +25,7 @@ export async function loadSpecialWeapons() {
       import('../items/bow.js'),
       import('../items/lantern.js'),
       import('../items/autumnSword.js'),
+      import('../items/hammer.js'),
       import('../items/bomb.js'),
       import('../items/shield.js')
     ]).then(([iceGunModule, bowModule, lanternModule, autumnSwordModule, bombModule, shieldModule]) => ({
@@ -32,6 +33,7 @@ export async function loadSpecialWeapons() {
       Bow: bowModule.Bow,
       Lantern: lanternModule.Lantern,
       AutumnSword: autumnSwordModule.AutumnSword,
+      Hammer: hammerModule.Hammer,
       Bomb: bombModule.Bomb,
       Shield: shieldModule.Shield,
       SHIELD_ITEM_ID: shieldModule.SHIELD_ITEM_ID,
