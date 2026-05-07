@@ -2288,7 +2288,7 @@ async function initCore(runtimeContext) {
 
     if (previousHostId !== newHostId) {
       clearAllRemoteHeldWeaponMeshes();
-      [iceGun, bow, bomb, autumnSword, lantern, torch].forEach((weapon) => {
+      [iceGun, bow, bomb, autumnSword, hammer, lantern, torch].forEach((weapon) => {
         if (!weapon) return;
         weapon.remoteHolderId = null;
       });
@@ -2366,6 +2366,7 @@ async function initCore(runtimeContext) {
   let iceGun;
   let bow;
   let autumnSword;
+  let hammer;
   let lantern;
   let torch;
   let bomb;
@@ -2486,7 +2487,7 @@ async function initCore(runtimeContext) {
   };
 
   const dropOtherWeapons = (activeWeapon) => {
-    [iceGun, bow, autumnSword, bomb].forEach(weapon => {
+    [iceGun, bow, autumnSword, hammer, bomb].forEach(weapon => {
       if (!weapon || weapon === activeWeapon) return;
       if (weapon.holder === playerControls) {
         if (weapon.itemId) {
@@ -2655,7 +2656,8 @@ async function initCore(runtimeContext) {
       iceGun: iceGun,
       bow,
       bomb,
-      sword: autumnSword
+      sword: autumnSword,
+      hammer
     };
 
     const setRemoteEquipState = (weaponType, isEquipped) => {
@@ -2674,6 +2676,7 @@ async function initCore(runtimeContext) {
     setRemoteEquipState('bow', nextRight === 'bow');
     setRemoteEquipState('bomb', nextRight === 'bomb');
     setRemoteEquipState('sword', nextRight === 'sword');
+    setRemoteEquipState('hammer', nextRight === 'hammer');
 
     remotePlayer.model.userData.equippedWeaponType = nextRight || nextLeft || null;
   };
@@ -2682,7 +2685,7 @@ async function initCore(runtimeContext) {
     Array.from(remoteHeldWeaponMeshes.keys()).forEach(disposeRemoteHeldWeaponMesh);
   };
 
-  const { IceGun, Bow, Lantern, AutumnSword, Bomb } = await loadSpecialWeapons();
+  const { IceGun, Bow, Lantern, AutumnSword, Hammer, Bomb } = await loadSpecialWeapons();
 
   const updateWeaponMarker = (weapon, marker, rotationSpeed, offsetY = 1.2) => {
     if (!weapon?.mesh || !marker) return;
@@ -3029,8 +3032,73 @@ async function initCore(runtimeContext) {
     isLocallyControlled: () => autumnSword?.holder === playerControls
   });
 
-  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword };
-  window.weapons = { iceGun, bow, bomb, autumnSword };
+
+  hammer = new Hammer(scene);
+  await hammer.load();
+  window.hammer = hammer;
+  const hammerMarker = createWeaponMarker(0xb08a4a);
+  hammer.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(hammer, 'hammer');
+    hammer.useHeldMeshWhenHeld = true;
+    if (heldMesh) heldMesh.visible = true;
+    unequipOtherInventoryItems('hammer');
+    addToInventory('hammer', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
+    hammer.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, hammer.type);
+  };
+  hammer.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    hammer.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('hammer', 1);
+    }
+    clearPlayerWeaponType(holder, hammer.type);
+    if (hammer.heldMesh) {
+      hammer.heldMesh.visible = false;
+    }
+    hammer.useHeldMeshWhenHeld = true;
+  };
+  if (hammer.mesh) {
+    hammer.mesh.userData.hideInMapView = true;
+    hammer.mesh.visible = false;
+  }
+  registerNetworkedEntity('hammer', {
+    getState: () => {
+      if (!hammer?.mesh) return null;
+      const pos = hammer.mesh.position;
+      const q = hammer.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (hammer.holder === playerControls && hammer.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!hammer?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        hammer.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        hammer.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = hammer.remoteHolderId ?? null;
+      hammer.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(hammer.type);
+      updateRemoteWeaponType(hammer, hammer.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && hammer.holder === playerControls && hammer.localHoldOrigin === 'world') {
+        hammer.holder = null;
+        hammer.localHoldOrigin = null;
+        clearPlayerWeaponType(playerControls, hammer.type);
+      }
+    },
+    isLocallyControlled: () => hammer?.holder === playerControls
+  });
+
+  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword, hammer };
+  window.weapons = { iceGun, bow, bomb, autumnSword, hammer };
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
@@ -3253,8 +3321,8 @@ async function initCore(runtimeContext) {
     isLocallyControlled: () => torch?.holder === playerControls
   });
 
-  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
-  window.weapons = { iceGun, bow, bomb, autumnSword, lantern, torch };
+  runtimeContext.entities.weapons = { iceGun, bow, bomb, autumnSword, hammer, lantern, torch };
+  window.weapons = { iceGun, bow, bomb, autumnSword, hammer, lantern, torch };
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -4648,6 +4716,10 @@ async function initCore(runtimeContext) {
       name: 'Autumn Sword',
       icon: '/assets/ui/items/sword.png'
     },
+    hammer: {
+      name: 'Hammer',
+      icon: ''
+    },
     lantern: {
       name: 'Lantern (Left Hand)',
       icon: '/assets/ui/items/lantern.png'
@@ -4783,14 +4855,15 @@ async function initCore(runtimeContext) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
   }
 
-  const equippableItems = new Set(['lantern', 'torch', 'iceGun', 'bow', 'bomb', 'autumnSword']);
+  const equippableItems = new Set(['lantern', 'torch', 'iceGun', 'bow', 'bomb', 'autumnSword', 'hammer']);
   const inventoryHandSlots = {
     lantern: 'left',
     torch: 'left',
     iceGun: 'right',
     bow: 'right',
     bomb: 'right',
-    autumnSword: 'right'
+    autumnSword: 'right',
+    hammer: 'right'
   };
   const getInventoryItemHand = (itemId) => inventoryHandSlots[itemId] || null;
   const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
@@ -5157,6 +5230,9 @@ async function initCore(runtimeContext) {
     if (itemId === 'autumnSword') {
       return autumnSword?.holder === playerControls;
     }
+    if (itemId === 'hammer') {
+      return hammer?.holder === playerControls;
+    }
     return false;
   }
 
@@ -5171,6 +5247,7 @@ async function initCore(runtimeContext) {
       if (isInventoryItemEquipped('bow')) return 'bow';
       if (isInventoryItemEquipped('bomb')) return 'bomb';
       if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
+      if (isInventoryItemEquipped('hammer')) return 'hammer';
     }
     return null;
   }
@@ -5335,6 +5412,20 @@ async function initCore(runtimeContext) {
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'sword-equip', cooldownMs: 100 });
       updateSettingsUI();
     }
+    if (itemId === 'hammer') {
+      if (!hammer?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(hammer, 'hammer', { forceNew: true });
+      hammer.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      hammer.mesh.visible = false;
+      hammer.localHoldOrigin = 'inventory';
+      hammer.holder = playerControls;
+      setPlayerWeaponType(playerControls, hammer.type);
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'hammer-equip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
   }
 
   function unequipInventoryItem(itemId) {
@@ -5426,6 +5517,20 @@ async function initCore(runtimeContext) {
       }
       clearPlayerWeaponType(playerControls, autumnSword.type);
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'sword-unequip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
+    if (itemId === 'hammer') {
+      if (hammer?.holder !== playerControls) return;
+      hammer.holder = null;
+      hammer.localHoldOrigin = null;
+      if (hammer.mesh) {
+        hammer.mesh.visible = false;
+      }
+      if (hammer.heldMesh) {
+        hammer.heldMesh.visible = false;
+      }
+      clearPlayerWeaponType(playerControls, hammer.type);
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'hammer-unequip', cooldownMs: 100 });
       updateSettingsUI();
     }
   }
@@ -6826,6 +6931,7 @@ async function initCore(runtimeContext) {
     if ((inventoryState.bow?.count || 0) > 0) weaponDrops.push('bow');
     if ((inventoryState.bomb?.count || 0) > 0) weaponDrops.push('bomb');
     if ((inventoryState.autumnSword?.count || 0) > 0) weaponDrops.push('autumnSword');
+    if ((inventoryState.hammer?.count || 0) > 0) weaponDrops.push('hammer');
     if ((inventoryState.lantern?.count || 0) > 0) weaponDrops.push('lantern');
     if ((inventoryState[TORCH_ITEM_ID]?.count || 0) > 0) weaponDrops.push(TORCH_ITEM_ID);
     const weaponPositions = createRingPositions(deathPosition, weaponDrops.length, 2.2);
@@ -6839,6 +6945,8 @@ async function initCore(runtimeContext) {
         spawnBombPickup(position);
       } else if (weaponId === 'autumnSword') {
         spawnAutumnSwordPickup(position);
+      } else if (weaponId === 'hammer') {
+        spawnHammerPickup(position);
       } else if (weaponId === 'lantern') {
         spawnLanternPickup(position);
       } else if (weaponId === TORCH_ITEM_ID) {
@@ -7506,7 +7614,7 @@ async function initCore(runtimeContext) {
     } = {}
   ) {
     if (!itemId) return false;
-    const itemMap = { iceGun, bow, autumnSword, lantern, torch };
+    const itemMap = { iceGun, bow, autumnSword, hammer, lantern, torch };
     const resolvedItem = sourceItem || itemMap[itemId];
     if (!resolvedItem?.mesh) return false;
 
@@ -7515,6 +7623,7 @@ async function initCore(runtimeContext) {
       torch: 0xffa54c,
       lantern: 0xffd400,
       autumnSword: 0xffd400,
+      hammer: 0xb08a4a,
       iceGun: 0xffd400
     };
 
@@ -8738,6 +8847,19 @@ async function initCore(runtimeContext) {
     autumnSword.holder = null;
   }
 
+
+  function spawnHammerPickup(position) {
+    if (!hammer?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
+    hammer.mesh.position.copy(spawnPos);
+    hammer.mesh.quaternion.set(0, 0, 0, 1);
+    hammer.mesh.visible = true;
+    hammer.holder = null;
+  }
+
   function spawnLanternPickup(position) {
     if (!lantern?.mesh) return;
     const spawnPos = asVec3(position);
@@ -8787,6 +8909,7 @@ async function initCore(runtimeContext) {
       torch: { item: torch, markerColor: 0xffa54c },
       bomb: { item: bomb, markerColor: 0xff4d4d },
       autumnSword: { item: autumnSword, markerColor: 0xffd400 },
+      hammer: { item: hammer, markerColor: 0xb08a4a },
       iceGun: { item: iceGun, markerColor: 0xffd400 }
     }[drop.itemId];
     if (!pickupConfig?.item?.mesh) return;
@@ -8997,7 +9120,7 @@ async function initCore(runtimeContext) {
       return playerControls.throwBomb(position, direction);
     }
 
-    const itemMap = { iceGun, bow, autumnSword, lantern, torch };
+    const itemMap = { iceGun, bow, autumnSword, hammer, lantern, torch };
     const sourceItem = itemMap[itemId];
     if (!sourceItem?.mesh) return false;
 
@@ -9258,6 +9381,13 @@ async function initCore(runtimeContext) {
       markerColor: 0xffd400,
       markerOffsetY: 1.2,
       groundOffset: 0.5,
+    },
+    {
+      itemId: 'hammer',
+      item: hammer,
+      markerColor: 0xb08a4a,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
     }
   ]);
   const spawnWeaponPickupCopy = (position) => {
@@ -9359,6 +9489,15 @@ async function initCore(runtimeContext) {
           spawnAutumnSwordPickup(spawnPos);
         }
       }
+
+      const hasHammer = (inventoryState?.hammer?.count || 0) > 0;
+      const canSpawnHammer = hammer?.mesh && !hammer.holder && !hasHammer && !hammer.mesh.visible;
+      if (canSpawnHammer) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnHammerPickup(spawnPos);
+        }
+      }
     }
 
     const canSpawnTreasureChest = treasureChest?.mesh
@@ -9371,7 +9510,7 @@ async function initCore(runtimeContext) {
       }
     }
 
-    [iceGun, bow, autumnSword, bomb].forEach((weapon) => {
+    [iceGun, bow, autumnSword, hammer, bomb].forEach((weapon) => {
       if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
       if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
         weapon.mesh.visible = false;
@@ -10983,10 +11122,28 @@ async function initCore(runtimeContext) {
     return true;
   };
 
-  const handleBuildAttackHit = ({ attacker, range, region, damage } = {}) => {
+  const handleBuildAttackHit = ({ attacker, range, region, damage, attackTypes } = {}) => {
     const attackerPosition = attacker?.model?.position;
     if (!attackerPosition) return false;
     const effectiveRange = Math.max(0.8, Number.isFinite(range) ? range : 1.5);
+    const isHammerSmash = Array.isArray(attackTypes)
+      && (attackTypes.includes('smash') || attackTypes.includes('pummel'));
+    if (isHammerSmash && natureController?.removeRocksInRadius) {
+      const removedRockPositions = natureController.removeRocksInRadius(attackerPosition, effectiveRange + 0.7);
+      if (removedRockPositions.length > 0) {
+        notifyAchievementProgress('rocksBlownUp', removedRockPositions.length);
+        window.questManager?.handleRockBlownUp?.(removedRockPositions.length);
+        removedRockPositions.forEach((rockPosition) => {
+          spawnImpactBurst(scene, rockPosition);
+          for (let i = 0; i < 3; i += 1) {
+            const angle = (i / 3) * Math.PI * 2;
+            const offset = new THREE.Vector3(Math.cos(angle) * 0.28, 0, Math.sin(angle) * 0.28);
+            spawnSaltPickup(rockPosition.clone().add(offset));
+          }
+        });
+        return true;
+      }
+    }
     const bush = natureController?.getClosestBush?.(attackerPosition, effectiveRange, {
       attackerModel: attacker?.model,
       region: region || 'around'
@@ -12243,12 +12400,14 @@ async function initCore(runtimeContext) {
     bow?.update();
     bomb?.update();
     autumnSword?.update();
+    hammer?.update();
     lantern?.update();
     torch?.update();
     syncRemoteHeldWeaponMesh(iceGun);
     syncRemoteHeldWeaponMesh(bow);
     syncRemoteHeldWeaponMesh(bomb);
     syncRemoteHeldWeaponMesh(autumnSword);
+    syncRemoteHeldWeaponMesh(hammer);
     syncRemoteHeldWeaponMesh(lantern);
     syncRemoteHeldWeaponMesh(torch);
     if (bowHeldArrow) {
@@ -12259,9 +12418,10 @@ async function initCore(runtimeContext) {
     updateWeaponMarker(bow, bowMarker, 0.03);
     updateWeaponMarker(bomb, bombMarker, 0.03);
     updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
+    updateWeaponMarker(hammer, hammerMarker, 0.03);
     updateWeaponMarker(lantern, lanternMarker, 0.03);
     updateWeaponMarker(torch, torchMarker, 0.03);
-    [iceGun, bow, bomb, autumnSword, lantern, torch].forEach((weapon) => {
+    [iceGun, bow, bomb, autumnSword, hammer, lantern, torch].forEach((weapon) => {
       const mesh = weapon?.mesh;
       if (!mesh || weapon?.holder || playerDead) return;
       if (playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {
@@ -12633,7 +12793,7 @@ async function initCore(runtimeContext) {
           ? 'bow'
           : (isInventoryItemEquipped('bomb')
             ? 'bomb'
-            : (isInventoryItemEquipped('autumnSword') ? 'sword' : null)));
+            : (isInventoryItemEquipped('autumnSword') ? 'sword' : (isInventoryItemEquipped('hammer') ? 'hammer' : null))));
       const dx = payload.x - (lastSentPresenceState.x ?? payload.x);
       const dy = payload.y - (lastSentPresenceState.y ?? payload.y);
       const dz = payload.z - (lastSentPresenceState.z ?? payload.z);

@@ -8,6 +8,10 @@ export const ATTACKS = {
   swordSlashLeft: { damage: 2, range: 2.5, hitTime: 200, hitWindow: 300, knockbackStrength: 3, region: 'forward', types: ['cut'] },
   swordFwdSpin: { damage: 3, range: 2.0, hitTime: 280, hitWindow: 500, knockbackStrength: 5, region: 'forward', types: ['cut'] },
   swordSpin: { damage: 4, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 12, region: 'around', types: ['cut'] },
+  hammerSlash: { damage: 1, range: 2.5, hitTime: 100, hitWindow: 300, knockbackStrength: 7, region: 'forward', types: ['smash'] },
+  hammerSlashLeft: { damage: 1, range: 2.5, hitTime: 200, hitWindow: 300, knockbackStrength: 7, region: 'forward', types: ['pummel'] },
+  hammerFwdSpin: { damage: 2, range: 2.0, hitTime: 280, hitWindow: 500, knockbackStrength: 10, region: 'forward', types: ['smash'] },
+  hammerSpin: { damage: 2, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 18, region: 'around', types: ['pummel'] },
   hurricaneKick: { damage: 1, range: 2.0, hitTime: 280, hitWindow: 800, knockbackStrength: 5, region: 'around', types: ['melee', 'kick'] },
   mmaKick: { damage: 1, range: 1.7, hitTime: 100, hitWindow: 300, knockbackStrength: 8, region: 'forward', types: ['melee', 'kick'] },
   torchSwing: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward', types: ['fire'] },
@@ -28,6 +32,28 @@ export function getAttackTypes(attackName, fallback = []) {
 const tempToTarget = new THREE.Vector3();
 const tempForward = new THREE.Vector3();
 const tempRight = new THREE.Vector3();
+
+function getEquippedMeleeAttackName(attackName, equippedWeaponType) {
+  if (equippedWeaponType === 'hammer') {
+    if (attackName === 'mutantPunch' || attackName === 'swordSlash') return 'hammerSlash';
+    if (attackName === 'swordSlashLeft') return 'hammerSlashLeft';
+    if (attackName === 'swordFwdSpin') return 'hammerFwdSpin';
+    if (attackName === 'swordSpin') return 'hammerSpin';
+  }
+  if (equippedWeaponType === 'sword' && attackName === 'mutantPunch') {
+    return 'swordSlash';
+  }
+  return attackName;
+}
+
+function getAnimationActionForAttack(attackName) {
+  return ({
+    hammerSlash: 'swordSlash',
+    hammerSlashLeft: 'swordSlashLeft',
+    hammerFwdSpin: 'swordFwdSpin',
+    hammerSpin: 'swordSpin'
+  })[attackName] || attackName;
+}
 
 function isTargetInAttackRange(attackerModel, targetPosition, cfg) {
   if (!attackerModel?.position || !targetPosition || !cfg) return false;
@@ -74,9 +100,7 @@ function isAttackInterrupted(attacker, attackName) {
   if (!model?.userData) return true;
   if (model.userData.isKnocked) return true;
   if (model.userData.currentAction === 'hit') return true;
-  const resolved = attackName === 'mutantPunch' && model.userData?.equippedWeaponType === 'sword'
-    ? 'swordSlash'
-    : attackName;
+  const resolved = getAnimationActionForAttack(attackName);
   if (resolved && model.userData.currentAction && model.userData.currentAction !== resolved) {
     return true;
   }
@@ -107,9 +131,7 @@ export function updateMeleeAttacks({
     if (!attacker.model || !attacker.model.userData) continue;
     const info = attacker.model.userData.attack;
     if (!info) continue;
-    const attackName = info.name === 'mutantPunch' && attacker.model.userData?.equippedWeaponType === 'sword'
-      ? 'swordSlash'
-      : info.name;
+    const attackName = getEquippedMeleeAttackName(info.name, attacker.model.userData?.equippedWeaponType);
     const cfg = ATTACKS[attackName];
     if (!cfg) continue;
     const attackCfg = info.overrides ? { ...cfg, ...info.overrides } : cfg;
@@ -126,7 +148,9 @@ export function updateMeleeAttacks({
           ? 'torchSwing'
           : attacker.model.userData?.equippedWeaponType === 'lantern'
             ? 'lanternSwing'
-            : attackName,
+            : attacker.model.userData?.equippedWeaponType === 'hammer'
+              ? attackName
+              : attackName,
         ['melee']
       );
       if (attacker.id === 'local'
