@@ -207,6 +207,7 @@ async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight, forcedPosi
   };
 
   scene.add(animal.model);
+
   return { animal, config: template.config };
 }
 
@@ -221,7 +222,7 @@ function isHitReactPlaying(animal) {
   return !!action?.isRunning?.();
 }
 
-function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight, delta }) {
+function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight, getNearbyMonster, delta }) {
   const playerModel = getPlayerModel?.();
   if (!animal?.model || !playerModel?.position) return;
   if (animal.isDead) {
@@ -239,7 +240,15 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   const distanceToPlayer = animal.model.position.distanceTo(playerModel.position);
   const data = animal.userData || {};
 
-  if (behavior === 'runAway' && distanceToPlayer <= fleeDistance) {
+  const isCompanionBehavior = behavior === 'companion';
+  const isCompanion = !!animal.model?.userData?.isCompanion;
+  const nearbyMonster = isCompanion ? getNearbyMonster?.(animal.model.position, 9) : null;
+
+  if (isCompanionBehavior && isCompanion && nearbyMonster?.position) {
+    data.state = 'companionAttack';
+  } else if (isCompanionBehavior && isCompanion) {
+    data.state = 'companionFollow';
+  } else if (behavior === 'runAway' && distanceToPlayer <= fleeDistance) {
     data.state = 'runAway';
     data.runAwayUntil = now + 1600;
   } else if (behavior === 'attack' && distanceToPlayer <= attackDistance) {
@@ -266,7 +275,33 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
 
   const hitReactLocked = isHitReactPlaying(animal);
 
-  if (data.state === 'runAway') {
+  if (data.state === 'companionFollow') {
+    const direction = new THREE.Vector3().subVectors(playerModel.position, animal.model.position).setY(0);
+    const distance = direction.length();
+    if (distance > 2.2) {
+      direction.normalize();
+      animal.model.position.addScaledVector(direction, runSpeed * 0.8 * delta);
+      animal.model.lookAt(animal.model.position.clone().add(direction));
+      if (!hitReactLocked) animal.playAnimation('Run', 0.12);
+    } else if (!hitReactLocked) {
+      animal.playAnimation('Idle', 0.15);
+    }
+  } else if (data.state === 'companionAttack') {
+    const target = getNearbyMonster?.(animal.model.position, 9);
+    if (target?.position) {
+      const direction = new THREE.Vector3().subVectors(target.position, animal.model.position).setY(0);
+      const distance = direction.length();
+      if (distance > attackDistance) {
+        direction.normalize();
+        animal.model.position.addScaledVector(direction, runSpeed * delta);
+        animal.model.lookAt(animal.model.position.clone().add(direction));
+        if (!hitReactLocked) animal.playAnimation('Run', 0.1);
+      } else if (!hitReactLocked) {
+        animal.playAnimation('Weapon', 0.08);
+        if (!target.userData?.isDead) target.userData.health = Math.max(0, (target.userData.health || 10) - (6 * delta));
+      }
+    }
+  } else if (data.state === 'runAway') {
     const direction = new THREE.Vector3().subVectors(animal.model.position, playerModel.position).setY(0);
     if (direction.lengthSq() < 0.0001) {
       direction.set(Math.random() - 0.5, 0, Math.random() - 0.5);
@@ -302,8 +337,10 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   animal.update(delta);
 }
 
-export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, onAnimalRemoved } = {}) {
+export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, onAnimalRemoved, getNearbyMonster } = {}) {
   const animals = [];
+  let lastDogSpawnPlayerPosition = null;
+  let lastDogSpawnAt = 0;
   const removeAnimal = (entry) => {
     if (!entry?.animal) return;
     const index = animals.indexOf(entry);
@@ -343,7 +380,7 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, o
         removeAnimal(entry);
         continue;
       }
-      updateAnimalMovement({ animal, config: entry.config || {}, getPlayerModel, getTerrainHeight, delta });
+      updateAnimalMovement({ animal, config: entry.config || {}, getPlayerModel, getTerrainHeight, getNearbyMonster, delta });
     }
   };
 
@@ -363,11 +400,71 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, o
     return entry?.animal || null;
   };
 
+
+  const hasLivingDog = () => animals.some((entry) => {
+    const animal = entry?.animal;
+    return animal?.model && !animal.isDead && String(animal.type).toLowerCase() === 'dog';
+  });
+
+  const spawnDogAt = async (position) => {
+    if (hasLivingDog()) return null;
+    const entry = await spawnAnimal({
+      scene,
+      getPlayerModel,
+      getTerrainHeight,
+      forcedPosition: position || null,
+      forcedType: 'dog'
+    });
+    if (entry) {
+      animals.push(entry);
+      lastDogSpawnPlayerPosition = getPlayerModel?.()?.position?.clone?.() || null;
+      lastDogSpawnAt = Date.now();
+    }
+    return entry?.animal || null;
+  };
+
+  const maybeSpawnDogByTravelDistance = async ({ minTravelDistance = 220, minSpawnIntervalMs = 90000 } = {}) => {
+    const playerPosition = getPlayerModel?.()?.position;
+    if (!playerPosition || hasLivingDog()) return null;
+    const now = Date.now();
+    if (now - lastDogSpawnAt < minSpawnIntervalMs) return null;
+    if (lastDogSpawnPlayerPosition && playerPosition.distanceTo(lastDogSpawnPlayerPosition) < minTravelDistance) return null;
+    return spawnDogAt();
+  };
+
+  const getNearestFeedableDog = (position, maxDistance = 2.5) => {
+    if (!position) return null;
+    let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    animals.forEach((entry) => {
+      const animal = entry?.animal;
+      if (!animal?.model?.position || animal.isDead) return;
+      if (String(animal.type).toLowerCase() !== 'dog') return;
+      if (animal.model.userData?.isCompanion) return;
+      const dist = animal.model.position.distanceTo(position);
+      if (dist <= maxDistance && dist < bestDistance) { best = animal; bestDistance = dist; }
+    });
+    return best ? { animal: best, distance: bestDistance } : null;
+  };
+
+  const feedDog = (dog, healthGain = 10) => {
+    if (!dog?.model || dog.isDead) return false;
+    dog.health = Math.min(dog.maxHealth || 1, (dog.health || 0) + healthGain);
+    dog.model.userData.health = dog.health;
+    dog.model.userData.isCompanion = true;
+    dog.updateHealthBarTexture?.();
+    return true;
+  };
+
   return {
     update,
     getAnimals,
     removeAnimal,
     removeAnimalById,
-    spawnDeerAt
+    spawnDeerAt,
+    spawnDogAt,
+    maybeSpawnDogByTravelDistance,
+    getNearestFeedableDog,
+    feedDog
   };
 }
