@@ -2881,6 +2881,13 @@ export class PlayerControls {
   }
 
   handleDialogueOption(option) {
+    if (option?.onSelect === "feedQuestGuy") {
+      const feedResult = window.feedFriendlyWithFood?.(this.activeFriendly);
+      if (feedResult?.status === 'success') {
+        this.showMobileStatusToast(`Fed quest guy a ${feedResult.foodLabel}`);
+      }
+      if (feedResult?.status !== 'success') return;
+    }
     this.questManager?.handleDialogueOption(option, this.activeFriendly);
     if (option?.merchantAction) {
       void import('./merchantPanel.js').then(({ openMerchantPanel }) => openMerchantPanel(option.merchantAction));

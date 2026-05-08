@@ -470,7 +470,6 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, o
       const animal = entry?.animal;
       if (!animal?.model?.position || animal.isDead) return;
       if (String(animal.type).toLowerCase() !== 'dog') return;
-      if (animal.model.userData?.isCompanion) return;
       const dist = animal.model.position.distanceTo(position);
       if (dist <= maxDistance && dist < bestDistance) { best = animal; bestDistance = dist; }
     });

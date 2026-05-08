@@ -8957,6 +8957,7 @@ async function initCore(runtimeContext) {
       return;
     }
 
+    const ammoType = options.type || 'ammo';
     const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
     const material = options.material || new THREE.MeshStandardMaterial({
       color: ammoType === 'missile' ? 0xb72a2a : 0x7fd0ff,
@@ -8977,7 +8978,7 @@ async function initCore(runtimeContext) {
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
     pickup.userData.amount = amount;
-    pickup.userData.type = options.type || 'ammo';
+    pickup.userData.type = ammoType;
     pickup.userData.sparkle = !!options.sparkle;
     pickup.userData.noFloat = !!options.noFloat;
     if (options.sparkle) {
@@ -11941,6 +11942,59 @@ async function initCore(runtimeContext) {
   const animalNameLabels = new Map();
   const dogColliderEntries = new Map();
   const companionData = { ...(playerProfile?.companions || {}) };
+  const DOG_FOOD_HEAL = 10;
+  const MEAT_FEED_HEAL = 30;
+  const showStatusToast = (message) => {
+    if (!message) return;
+    if (typeof playerControls?.showMobileStatusToast === 'function') {
+      playerControls.showMobileStatusToast(message);
+      return;
+    }
+    showTreasurePopup?.(message);
+  };
+  const FRIENDLY_FEED_RESULT = Object.freeze({
+    success: 'success',
+    notHungry: 'notHungry',
+    noFood: 'noFood',
+    invalidTarget: 'invalidTarget'
+  });
+  const getFeedItemFromInventory = () => {
+    const hasApples = (inventoryState[APPLE_ITEM_ID]?.count || 0) > 0;
+    if (hasApples) return { itemId: APPLE_ITEM_ID, healAmount: DOG_FOOD_HEAL };
+    const mushroomId = Object.keys(inventoryState).find((id) => id?.startsWith?.('mushroom_') && (inventoryState[id]?.count || 0) > 0);
+    if (mushroomId) return { itemId: mushroomId, healAmount: DOG_FOOD_HEAL };
+    if ((inventoryState[MEAT_ITEM_ID]?.count || 0) > 0) return { itemId: MEAT_ITEM_ID, healAmount: MEAT_FEED_HEAL };
+    return null;
+  };
+  const consumeFoodAndHealFriendly = (friendly) => {
+    if (!friendly?.model || friendly.isDead) {
+      return { status: FRIENDLY_FEED_RESULT.invalidTarget };
+    }
+    const maxHealth = Math.max(1, Number(friendly.maxHealth || 1));
+    const currentHealth = Math.max(0, Number(friendly.health || 0));
+    if (currentHealth >= maxHealth) {
+      friendly.showHealthBar?.();
+      showStatusToast("They're not hungry right now.");
+      return { status: FRIENDLY_FEED_RESULT.notHungry };
+    }
+    const feedSelection = getFeedItemFromInventory();
+    if (!feedSelection) {
+      showStatusToast("You don't have any food for them.");
+      return { status: FRIENDLY_FEED_RESULT.noFood };
+    }
+    removeFromInventory(feedSelection.itemId, 1);
+    friendly.health = Math.min(maxHealth, currentHealth + feedSelection.healAmount);
+    friendly.model.userData.health = friendly.health;
+    friendly.updateHealthBarTexture?.();
+    friendly.showHealthBar?.();
+    const foodLabel = inventoryCatalog?.[feedSelection.itemId]?.name || feedSelection.itemId;
+    return {
+      status: FRIENDLY_FEED_RESULT.success,
+      itemId: feedSelection.itemId,
+      foodLabel
+    };
+  };
+  window.feedFriendlyWithFood = consumeFoodAndHealFriendly;
 
   const buildInteractionBtn = document.createElement('button');
   buildInteractionBtn.type = 'button';
@@ -12335,15 +12389,24 @@ async function initCore(runtimeContext) {
     const target = animalManager?.getNearestFeedableDog?.(playerPos, 2.5);
     const dog = target?.animal;
     if (!dog) return;
-    const mushroomId = Object.keys(inventoryState).find((id) => id?.startsWith?.('mushroom_') && (inventoryState[id]?.count || 0) > 0);
-    const feedItem = (inventoryState[APPLE_ITEM_ID]?.count || 0) > 0 ? APPLE_ITEM_ID : mushroomId;
-    if (!feedItem) {
-      showMobileStatusToast('Need an apple or mushroom to feed the dog.');
+    const maxHealth = Math.max(1, Number(dog.maxHealth || 1));
+    const currentHealth = Math.max(0, Number(dog.health || 0));
+    if (currentHealth >= maxHealth) {
+      dog.showHealthBar?.();
+      showStatusToast("They're not hungry right now.");
       return;
     }
-    removeFromInventory(feedItem, 1);
+    const feedSelection = getFeedItemFromInventory();
+    if (!feedSelection) {
+      showStatusToast("You don't have any food for them.");
+      return;
+    }
+    removeFromInventory(feedSelection.itemId, 1);
     const isNewCompanion = !dog.model.userData?.isCompanion;
-    animalManager?.feedDog?.(dog, 10);
+    animalManager?.feedDog?.(dog, feedSelection.healAmount);
+    dog.showHealthBar?.();
+    const foodLabel = inventoryCatalog?.[feedSelection.itemId]?.name || feedSelection.itemId;
+    showStatusToast(`Fed dog a ${foodLabel}`);
     const persistDog = async (name) => {
       const key = String(dog.id || `${dog.type}-unknown`);
       companionData[key] = { id: key, type: 'dog', name: name || dog.model.userData?.companionName || 'Companion', health: dog.health || 1, maxHealth: dog.maxHealth || 1 };
@@ -12360,10 +12423,10 @@ async function initCore(runtimeContext) {
         inputPlaceholder: 'Companion name',
         confirmText: 'Save Name'
       }).then((name) => persistDog(name));
+      showStatusToast('The dog is now your companion!');
     } else {
       void persistDog(dog.model.userData?.companionName || 'Companion');
     }
-    showMobileStatusToast('The dog is now your companion!');
   });
 
   buildInteractionBtn.addEventListener('click', () => { void showNoteInteraction(); });
