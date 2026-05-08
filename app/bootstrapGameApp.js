@@ -11391,6 +11391,8 @@ async function initCore(runtimeContext) {
     lastOsmFetchAt: null
   };
 
+  let refreshBuildSubscriptionsForLocation = () => {};
+
   const locationProvider = createLocationProvider({
     onUpdate: (location) => {
       window.latestLocation = location;
@@ -11527,6 +11529,7 @@ async function initCore(runtimeContext) {
       if (shouldUpdatePickupTiles(playerPosition)) {
         updatePickupTiles(playerPosition);
       }
+      refreshBuildSubscriptionsForLocation();
     },
     onError: (error, message) => {
       console.warn('Location error:', message, error);
@@ -11996,6 +11999,8 @@ async function initCore(runtimeContext) {
     mode: null,
     placing: null,
     records: new Map(),
+    subscriptions: new Map(),
+    activePaths: new Set(),
     selectedNoteId: null,
     cameraOffset: new THREE.Vector3(0, 4, 8)
   };
@@ -12073,9 +12078,15 @@ async function initCore(runtimeContext) {
     return onBuildLatLonPath(fix.lat, fix.lon);
   };
 
+  const getBuildRecordPath = (id, record) => {
+    if (record?.buildPath) return record.buildPath;
+    if (Number.isFinite(record?.lat) && Number.isFinite(record?.lon)) return onBuildLatLonPath(record.lat, record.lon);
+    return getCurrentBuildPath();
+  };
+
   const removeBuildRecord = async (id, record, { refundToInventory = false, spawnWoodDrop = false } = {}) => {
     if (!id || !record) return false;
-    const buildPath = getCurrentBuildPath();
+    const buildPath = getBuildRecordPath(id, record);
     if (buildPath) {
       await remove(ref(db, `${buildPath}/${id}`));
     }
@@ -12112,7 +12123,7 @@ async function initCore(runtimeContext) {
     if (nextHealth <= 0) {
       await removeBuildRecord(id, record, { spawnWoodDrop: true });
     } else {
-      const buildPath = getCurrentBuildPath();
+      const buildPath = getBuildRecordPath(id, record);
       if (buildPath) {
         await update(ref(db, `${buildPath}/${id}`), { health: nextHealth });
       }
@@ -12322,55 +12333,129 @@ async function initCore(runtimeContext) {
     }
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') buildVerticalInput = 0;
   });
-  const toBucketKey = (value) => {
-    const scaled = Math.round(value * (10 ** BUILD_BUCKET_PRECISION));
-    return scaled < 0 ? `m${Math.abs(scaled)}` : `p${scaled}`;
+  const BUILD_BUCKET_SCALE = 10 ** BUILD_BUCKET_PRECISION;
+  const toBucketCoord = (value) => Math.round(value * BUILD_BUCKET_SCALE);
+  const bucketCoordToKey = (coord) => coord < 0 ? `m${Math.abs(coord)}` : `p${coord}`;
+  const toBucketKey = (value) => bucketCoordToKey(toBucketCoord(value));
+  const onBuildBucketPath = (latCoord, lonCoord) => `worldBuilds/${bucketCoordToKey(latCoord)}_${bucketCoordToKey(lonCoord)}`;
+  const onBuildLatLonPath = (lat, lon) => onBuildBucketPath(toBucketCoord(lat), toBucketCoord(lon));
+  const getBuildSubscriptionPaths = (lat, lon) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
+    const latCoord = toBucketCoord(lat);
+    const lonCoord = toBucketCoord(lon);
+    const paths = [];
+    for (let dLat = -1; dLat <= 1; dLat += 1) {
+      for (let dLon = -1; dLon <= 1; dLon += 1) {
+        paths.push(onBuildBucketPath(latCoord + dLat, lonCoord + dLon));
+      }
+    }
+    return paths;
   };
-  const onBuildLatLonPath = (lat, lon) => `worldBuilds/${toBucketKey(lat)}_${toBucketKey(lon)}`;
-  const subscribeBuildsForCurrentLocation = () => {
-    const fix = getLatestLocationFix?.();
-    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
-    onValue(ref(db, onBuildLatLonPath(fix.lat, fix.lon)), (snapshot) => {
+  const getLocalPositionForBuildRecord = (record) => {
+    if (Number.isFinite(record?.lat) && Number.isFinite(record?.lon)) {
+      const origin = getLocalMapOrigin();
+      const local = geoToLocalMeters(record.lat, record.lon, origin);
+      if (local) {
+        return new THREE.Vector3(
+          local.x,
+          Number.isFinite(record.y) ? record.y : 0,
+          local.z
+        );
+      }
+    }
+    return new THREE.Vector3(record?.x || 0, record?.y || 0, record?.z || 0);
+  };
+  const setBuildMeshPositionFromRecord = (mesh, record) => {
+    if (!mesh) return;
+    const position = getLocalPositionForBuildRecord(record);
+    mesh.position.copy(position);
+    syncStaticBoxColliderForObject(mesh.userData?.staticColliderEntry);
+  };
+  const removeBuildRecordFromScene = (id, record) => {
+    disposeBuildHealthBar(record?.mesh);
+    if (record?.mesh) scene.remove(record.mesh);
+    removeStaticBoxCollider(record?.colliderEntry || record?.mesh?.userData?.staticColliderEntry);
+    buildState.records.delete(id);
+    if (buildState.selectedNoteId === id) {
+      buildState.selectedNoteId = null;
+      buildInteractionBtn.style.display = 'none';
+    }
+  };
+  const upsertBuildRecordFromSnapshot = (id, record, buildPath) => {
+    if (!record) return;
+    const incomingRecord = { ...record, buildPath };
+    const existing = buildState.records.get(id);
+    if (existing) {
+      existing.health = Number.isFinite(record.health) ? record.health : existing.health;
+      existing.noteText = record.noteText || '';
+      existing.ownerId = record.ownerId || null;
+      existing.lat = Number.isFinite(record.lat) ? record.lat : existing.lat;
+      existing.lon = Number.isFinite(record.lon) ? record.lon : existing.lon;
+      existing.x = Number.isFinite(record.x) ? record.x : existing.x;
+      existing.y = Number.isFinite(record.y) ? record.y : existing.y;
+      existing.z = Number.isFinite(record.z) ? record.z : existing.z;
+      existing.buildPath = buildPath;
+      setBuildMeshPositionFromRecord(existing.mesh, existing);
+      if (existing.mesh?.userData) {
+        existing.mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
+        existing.mesh.userData.noteText = record.noteText || '';
+        existing.mesh.userData.buildOwner = record.ownerId || null;
+        existing.mesh.userData.buildType = record.type || existing.mesh.userData.buildType || 'block';
+      }
+      if (existing.mesh?.userData?.buildHealthBar?.visible) updateBuildHealthBarTexture(existing.mesh);
+      return;
+    }
+    const mesh = record.type === 'note'
+      ? createNoteMesh()
+      : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
+    mesh.userData.buildRecordId = id;
+    mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
+    mesh.userData.buildMaxHealth = BUILD_MAX_HEALTH;
+    mesh.userData.buildOwner = record.ownerId || null;
+    mesh.userData.buildType = record.type || 'block';
+    mesh.userData.noteText = record.noteText || '';
+    setBuildMeshPositionFromRecord(mesh, incomingRecord);
+    const colliderEntry = createStaticBoxColliderForObject(mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
+    mesh.userData.staticColliderEntry = colliderEntry || null;
+    scene.add(mesh);
+    buildState.records.set(id, { ...incomingRecord, mesh, colliderEntry });
+  };
+  const subscribeBuildPath = (buildPath) => {
+    if (buildState.subscriptions.has(buildPath)) return;
+    const unsubscribe = onValue(ref(db, buildPath), (snapshot) => {
       const value = snapshot.val() || {};
       const incomingIds = new Set(Object.keys(value));
       buildState.records.forEach((existingRecord, existingId) => {
-        if (incomingIds.has(existingId)) return;
-        disposeBuildHealthBar(existingRecord.mesh);
-        if (existingRecord.mesh) scene.remove(existingRecord.mesh);
-        removeStaticBoxCollider(existingRecord.colliderEntry || existingRecord.mesh?.userData?.staticColliderEntry);
-        buildState.records.delete(existingId);
+        if (existingRecord?.buildPath !== buildPath || incomingIds.has(existingId)) return;
+        removeBuildRecordFromScene(existingId, existingRecord);
       });
-      Object.entries(value).forEach(([id, record]) => {
-        if (!record) return;
-        const existing = buildState.records.get(id);
-        if (existing) {
-          existing.health = Number.isFinite(record.health) ? record.health : existing.health;
-          existing.noteText = record.noteText || '';
-          existing.ownerId = record.ownerId || null;
-          if (existing.mesh?.userData) {
-            existing.mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
-            existing.mesh.userData.noteText = record.noteText || '';
-          }
-          if (existing.mesh?.userData?.buildHealthBar?.visible) updateBuildHealthBarTexture(existing.mesh);
-          return;
-        }
-        const mesh = record.type === 'note'
-          ? createNoteMesh()
-          : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
-        mesh.position.set(record.x || 0, record.y || 0, record.z || 0);
-        mesh.userData.buildRecordId = id;
-        mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
-        mesh.userData.buildMaxHealth = BUILD_MAX_HEALTH;
-        mesh.userData.buildOwner = record.ownerId || null;
-        mesh.userData.buildType = record.type || 'block';
-        mesh.userData.noteText = record.noteText || '';
-        const colliderEntry = createStaticBoxColliderForObject(mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
-        mesh.userData.staticColliderEntry = colliderEntry || null;
-        scene.add(mesh);
-        buildState.records.set(id, { mesh, colliderEntry, ...record });
-      });
+      Object.entries(value).forEach(([id, record]) => upsertBuildRecordFromSnapshot(id, record, buildPath));
+    });
+    buildState.subscriptions.set(buildPath, unsubscribe);
+  };
+  const refreshBuildRecordPositions = () => {
+    buildState.records.forEach((record) => setBuildMeshPositionFromRecord(record.mesh, record));
+  };
+  const unsubscribeBuildPath = (buildPath) => {
+    const unsubscribe = buildState.subscriptions.get(buildPath);
+    if (unsubscribe) unsubscribe();
+    buildState.subscriptions.delete(buildPath);
+    buildState.records.forEach((record, id) => {
+      if (record?.buildPath === buildPath) removeBuildRecordFromScene(id, record);
     });
   };
+  const subscribeBuildsForCurrentLocation = () => {
+    const fix = getLatestLocationFix?.();
+    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
+    const nextPaths = new Set(getBuildSubscriptionPaths(fix.lat, fix.lon));
+    nextPaths.forEach((buildPath) => subscribeBuildPath(buildPath));
+    Array.from(buildState.subscriptions.keys()).forEach((buildPath) => {
+      if (!nextPaths.has(buildPath)) unsubscribeBuildPath(buildPath);
+    });
+    buildState.activePaths = nextPaths;
+    refreshBuildRecordPositions();
+  };
+  refreshBuildSubscriptionsForLocation = subscribeBuildsForCurrentLocation;
   buildUpBtn?.addEventListener('pointerdown', () => { buildVerticalInput = 1; });
   buildDownBtn?.addEventListener('pointerdown', () => { buildVerticalInput = -1; });
   const resetVertical = () => { buildVerticalInput = 0; };
@@ -12378,17 +12463,19 @@ async function initCore(runtimeContext) {
   buildDownBtn?.addEventListener('pointerup', resetVertical);
   buildConfirmBtn?.addEventListener('click', async () => {
     if (!buildState.placing) return;
-    const fix = getLatestLocationFix?.();
-    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
-    const idRef = push(ref(db, onBuildLatLonPath(fix.lat, fix.lon)));
     const p = buildState.placing.mesh.position;
-    const record = { type: buildState.placing.type, x: p.x, y: p.y, z: p.z, health: BUILD_MAX_HEALTH, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local' };
+    const buildGeo = localMetersToGeo(p.x, p.z, getLocalMapOrigin());
+    if (!buildGeo || !Number.isFinite(buildGeo.lat) || !Number.isFinite(buildGeo.lon)) return;
+    const buildPath = onBuildLatLonPath(buildGeo.lat, buildGeo.lon);
+    const idRef = push(ref(db, buildPath));
+    const record = { type: buildState.placing.type, lat: buildGeo.lat, lon: buildGeo.lon, x: p.x, y: p.y, z: p.z, health: BUILD_MAX_HEALTH, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local', createdAt: Date.now() };
     await set(idRef, record);
     const colliderEntry = createStaticBoxColliderForObject(buildState.placing.mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
-    buildState.records.set(idRef.key, { ...record, mesh: buildState.placing.mesh, colliderEntry });
+    buildState.records.set(idRef.key, { ...record, buildPath, mesh: buildState.placing.mesh, colliderEntry });
     buildState.placing.mesh.userData.buildRecordId = idRef.key;
     buildState.placing.mesh.userData.buildHealth = BUILD_MAX_HEALTH;
     buildState.placing.mesh.userData.buildMaxHealth = BUILD_MAX_HEALTH;
+    buildState.placing.mesh.userData.buildOwner = record.ownerId;
     buildState.placing.mesh.userData.buildType = record.type;
     buildState.placing.mesh.userData.noteText = record.noteText;
     buildState.placing = null;
@@ -12671,8 +12758,8 @@ async function initCore(runtimeContext) {
         closeNoteView();
         const text = await openNoteEntryModal(record.noteText || '');
         if (text != null) {
-          const fix = getLatestLocationFix?.();
-          if (fix) await update(ref(db, `${onBuildLatLonPath(fix.lat, fix.lon)}/${selectedNoteId}`), { noteText: text });
+          const buildPath = getBuildRecordPath(selectedNoteId, record);
+          if (buildPath) await update(ref(db, `${buildPath}/${selectedNoteId}`), { noteText: text });
           record.noteText = text;
           if (record.mesh?.userData) record.mesh.userData.noteText = text;
         }
