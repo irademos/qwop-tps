@@ -368,8 +368,17 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   animal.update(delta);
 }
 
-export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, onAnimalRemoved, getNearbyMonster } = {}) {
+export function createAnimalManager({
+  scene,
+  getPlayerModel,
+  getTerrainHeight,
+  onAnimalRemoved,
+  getNearbyMonster,
+  isHost = false,
+  onRemoteSpawnRequest
+} = {}) {
   const animals = [];
+  let currentHost = !!isHost;
   let lastDogSpawnPlayerPosition = null;
   let lastDogSpawnAt = 0;
   const removeAnimal = (entry) => {
@@ -459,7 +468,20 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, o
     const now = Date.now();
     if (now - lastDogSpawnAt < minSpawnIntervalMs) return null;
     if (lastDogSpawnPlayerPosition && playerPosition.distanceTo(lastDogSpawnPlayerPosition) < minTravelDistance) return null;
+    if (!currentHost) {
+      onRemoteSpawnRequest?.({
+        type: 'companionDog',
+        position: playerPosition.clone()
+      });
+      lastDogSpawnPlayerPosition = playerPosition.clone();
+      lastDogSpawnAt = now;
+      return null;
+    }
     return spawnDogAt();
+  };
+
+  const setHost = (nextHost) => {
+    currentHost = !!nextHost;
   };
 
   const getNearestFeedableDog = (position, maxDistance = 2.5) => {
@@ -493,6 +515,7 @@ export function createAnimalManager({ scene, getPlayerModel, getTerrainHeight, o
     spawnDeerAt,
     spawnDogAt,
     maybeSpawnDogByTravelDistance,
+    setHost,
     getNearestFeedableDog,
     feedDog
   };

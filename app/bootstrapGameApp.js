@@ -1441,13 +1441,20 @@ async function initCore(runtimeContext) {
 
   const requestHostSpawnEvent = (spawnEvent) => {
     if (!multiplayer || multiplayer.isHost || !spawnEvent?.position) return;
-    if (spawnEvent.type !== 'monster') return;
     const hostId = multiplayer.getHostId?.();
     if (!hostId) return;
     const direction = spawnEvent.direction?.clone?.().normalize?.() || null;
+    const spawnTypeMap = {
+      monster: 'monster',
+      friendly: 'friendly',
+      animal: 'animal',
+      companionDog: 'companionDog'
+    };
+    const mappedType = spawnTypeMap[spawnEvent.type];
+    if (!mappedType) return;
     multiplayer.sendTo(hostId, {
       type: 'spawnRequest',
-      spawnType: 'monster',
+      spawnType: mappedType,
       position: [spawnEvent.position.x, spawnEvent.position.y, spawnEvent.position.z],
       direction: direction ? [direction.x, direction.y, direction.z] : undefined
     });
@@ -1795,7 +1802,7 @@ async function initCore(runtimeContext) {
 
     const isSpawnRequestMessage = payload => isObject(payload)
       && payload.type === 'spawnRequest'
-      && payload.spawnType === 'monster'
+      && ['monster', 'friendly', 'animal', 'companionDog'].includes(payload.spawnType)
       && isVector3Array(payload.position)
       && (payload.direction == null || isVector3Array(payload.direction));
 
@@ -1905,7 +1912,12 @@ async function initCore(runtimeContext) {
       const position = new THREE.Vector3(px, py, pz);
       const direction = new THREE.Vector3(dx, dy, dz);
       if (direction.lengthSq() > 0.0001) direction.normalize();
-      void handleCharacterSpawnEvent({ type: 'monster', position, direction });
+      void handleCharacterSpawnEvent({
+        type: data.spawnType,
+        position,
+        direction,
+        requesterId: peerId
+      });
       return;
     }
 
@@ -2281,6 +2293,7 @@ async function initCore(runtimeContext) {
     isHost = !!isCurrentHost;
     setMonsterPersistenceHost(isHost);
     friendlyNpcManager?.setHost(isHost);
+    animalManager?.setHost?.(isHost);
     setMerchantHostFeature(isHost);
     logMonsterPersist('isHost', isHost);
     if (previousHostId && previousHostId === multiplayer.getId() && previousHostId !== newHostId) {
@@ -3641,6 +3654,8 @@ async function initCore(runtimeContext) {
       });
       return nearest;
     },
+    isHost,
+    onRemoteSpawnRequest: requestHostSpawnEvent,
     onAnimalRemoved: ({ animal, wasDead, position }) => {
       const dogCollider = dogColliderEntries.get(animal?.id);
       if (dogCollider) removeStaticBoxCollider(dogCollider);
@@ -3958,9 +3973,23 @@ async function initCore(runtimeContext) {
       spawnEncounterMonster(spawnEvent);
       return;
     }
+    if (spawnEvent.type === 'friendly') {
+      await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
+      friendlyNpcManager?.spawnFriendlyAt?.(spawnEvent.position);
+      return;
+    }
     if (spawnEvent.type === 'animal') {
       await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
       await animalManager?.spawnDeerAt?.(spawnEvent.position);
+      return;
+    }
+    if (spawnEvent.type === 'companionDog') {
+      await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
+      const dog = await animalManager?.spawnDogAt?.(spawnEvent.position);
+      if (dog?.model?.userData) {
+        dog.model.userData.isCompanion = true;
+        dog.model.userData.companionOwnerId = spawnEvent.requesterId || multiplayer?.getId?.() || null;
+      }
       return;
     }
   }
