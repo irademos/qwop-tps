@@ -441,6 +441,11 @@ export class QuestManager {
           reply: "No worries. Come back anytime.",
           onSelect: "declineTutorialQuest"
         },
+        {
+          label: "Here's some food",
+          reply: "Thanks! That really helps.",
+          onSelect: "feedQuestGuy"
+        },
         ...(this.state.shouldFollowPlayer ? [
           {
             label: "why are you following me?",
