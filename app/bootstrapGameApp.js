@@ -11943,6 +11943,12 @@ async function initCore(runtimeContext) {
   const companionData = { ...(playerProfile?.companions || {}) };
   const DOG_FOOD_HEAL = 10;
   const MEAT_FEED_HEAL = 30;
+  const FRIENDLY_FEED_RESULT = Object.freeze({
+    success: 'success',
+    notHungry: 'notHungry',
+    noFood: 'noFood',
+    invalidTarget: 'invalidTarget'
+  });
   const getFeedItemFromInventory = () => {
     const hasApples = (inventoryState[APPLE_ITEM_ID]?.count || 0) > 0;
     if (hasApples) return { itemId: APPLE_ITEM_ID, healAmount: DOG_FOOD_HEAL };
@@ -11952,17 +11958,32 @@ async function initCore(runtimeContext) {
     return null;
   };
   const consumeFoodAndHealFriendly = (friendly) => {
-    if (!friendly?.model || friendly.isDead) return false;
+    if (!friendly?.model || friendly.isDead) {
+      return { status: FRIENDLY_FEED_RESULT.invalidTarget };
+    }
+    const maxHealth = Math.max(1, Number(friendly.maxHealth || 1));
+    const currentHealth = Math.max(0, Number(friendly.health || 0));
+    if (currentHealth >= maxHealth) {
+      friendly.showHealthBar?.();
+      showMobileStatusToast("They're not hungry right now.");
+      return { status: FRIENDLY_FEED_RESULT.notHungry };
+    }
     const feedSelection = getFeedItemFromInventory();
     if (!feedSelection) {
       showMobileStatusToast("You don't have any food for them.");
-      return false;
+      return { status: FRIENDLY_FEED_RESULT.noFood };
     }
     removeFromInventory(feedSelection.itemId, 1);
-    friendly.health = Math.min(friendly.maxHealth || 1, (friendly.health || 0) + feedSelection.healAmount);
+    friendly.health = Math.min(maxHealth, currentHealth + feedSelection.healAmount);
     friendly.model.userData.health = friendly.health;
     friendly.updateHealthBarTexture?.();
-    return true;
+    friendly.showHealthBar?.();
+    const foodLabel = inventoryCatalog?.[feedSelection.itemId]?.name || feedSelection.itemId;
+    return {
+      status: FRIENDLY_FEED_RESULT.success,
+      itemId: feedSelection.itemId,
+      foodLabel
+    };
   };
   window.feedFriendlyWithFood = consumeFoodAndHealFriendly;
 
@@ -12359,6 +12380,13 @@ async function initCore(runtimeContext) {
     const target = animalManager?.getNearestFeedableDog?.(playerPos, 2.5);
     const dog = target?.animal;
     if (!dog) return;
+    const maxHealth = Math.max(1, Number(dog.maxHealth || 1));
+    const currentHealth = Math.max(0, Number(dog.health || 0));
+    if (currentHealth >= maxHealth) {
+      dog.showHealthBar?.();
+      showMobileStatusToast("They're not hungry right now.");
+      return;
+    }
     const feedSelection = getFeedItemFromInventory();
     if (!feedSelection) {
       showMobileStatusToast("You don't have any food for them.");
@@ -12367,6 +12395,9 @@ async function initCore(runtimeContext) {
     removeFromInventory(feedSelection.itemId, 1);
     const isNewCompanion = !dog.model.userData?.isCompanion;
     animalManager?.feedDog?.(dog, feedSelection.healAmount);
+    dog.showHealthBar?.();
+    const foodLabel = inventoryCatalog?.[feedSelection.itemId]?.name || feedSelection.itemId;
+    showMobileStatusToast(`Fed dog a ${foodLabel}`);
     const persistDog = async (name) => {
       const key = String(dog.id || `${dog.type}-unknown`);
       companionData[key] = { id: key, type: 'dog', name: name || dog.model.userData?.companionName || 'Companion', health: dog.health || 1, maxHealth: dog.maxHealth || 1 };
