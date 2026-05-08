@@ -171,13 +171,37 @@ export function createFriendlyNpcManager({
     records.set(slotId, record);
   };
 
+  const spawnFriendlyAt = (position) => {
+    if (!position) return null;
+    const resolved = resolveFriendlyPosition(position);
+    if (!resolved) return null;
+    dropFurthestFriendlyRecord(playerModel?.position?.clone?.() || resolved);
+    spawnedCount += 1;
+    const slotId = `friendly:distance:${spawnedCount}`;
+    const level = getRandomLevel();
+    const hp = getHealthForLevel(level);
+    const modelPath = getRandomFriendlyModel();
+    const angle = Math.random() * Math.PI * 2;
+    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+    const record = {
+      id: slotId,
+      type: modelPath,
+      hp,
+      level,
+      alive: true,
+      pos: { x: resolved.x, y: resolved.y, z: resolved.z },
+      rot: { x: rot.x, y: rot.y, z: rot.z, w: rot.w }
+    };
+    records.set(slotId, record);
+    return slotId;
+  };
+
 
 
   const maybeRequestSpawnFromDistance = () => {
     if (!playerModel) return;
     const spawnEvent = characterSpawner.getSpawnEvent();
     if (!spawnEvent?.position) return;
-    if (spawnEvent.type !== 'monster') return;
     onRemoteSpawnRequest?.(spawnEvent);
   };
 
@@ -545,6 +569,7 @@ const getHealthForLevel = (level) => {
     recordGpsTravel,
     onRoomReady,
     update,
-    removeFriendlyById
+    removeFriendlyById,
+    spawnFriendlyAt
   };
 }
