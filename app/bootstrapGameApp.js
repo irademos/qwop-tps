@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { loadMonsterModel } from "../models/monsterModel.js";
 import { MonsterCharacter } from "../characters/MonsterCharacter.js";
+import { FriendlyCharacter } from "../characters/FriendlyCharacter.js";
 import { createFriendlyNpcManager } from "../friendlyNpcManager.js";
 import {
   clearTerrainStampsForTile,
@@ -797,6 +798,9 @@ async function initCore(runtimeContext) {
   const networkedLocalControlState = new Map();
   const pendingEntityStates = new Map();
   const authoritativeEntityStates = new Map();
+  const localDynamicNetworkedEntities = new Map();
+  const remoteQuestFriends = new Map();
+  const remoteCompanionDogSpawns = new Set();
   let lastEntityBroadcast = 0;
   let lastFullEntityBroadcast = 0;
   let lastControlSend = 0;
@@ -1529,9 +1533,170 @@ async function initCore(runtimeContext) {
     const entry = networkedEntities.get(id);
     if (entry && typeof entry.applyState === 'function') {
       entry.applyState(state);
-    } else {
-      pendingEntityStates.set(id, cloneState(state));
+      return;
     }
+    if (ensureRemoteDynamicNetworkedEntity(id, state)) {
+      return;
+    }
+    pendingEntityStates.set(id, cloneState(state));
+  }
+
+  function applyNetworkTransformToObject(target, state) {
+    if (!target?.model || !state) return;
+    const [px, py, pz] = state.position || [];
+    const [rx, ry, rz, rw] = state.rotation || [];
+    if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+      target.model.position.set(px, py, pz);
+      target.body?.setTranslation?.({ x: px, y: py, z: pz }, true);
+    }
+    if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+      target.model.quaternion.set(rx, ry, rz, rw);
+      target.body?.setRotation?.({ x: rx, y: ry, z: rz, w: rw }, true);
+    }
+    if (Number.isFinite(state.health)) {
+      target.health = state.health;
+      target.model.userData.health = state.health;
+      target.updateHealthBarTexture?.();
+    }
+    if (state.dead && !target.isDead) {
+      target.markDead?.();
+    }
+    if (typeof state.action === 'string' && state.action && target.currentAction !== state.action) {
+      target.playAnimation?.(state.action, 0.12);
+    }
+  }
+
+  function getCharacterNetworkState(character, extra = {}) {
+    if (!character?.model) return null;
+    const pos = character.model.position;
+    const q = character.model.quaternion;
+    return {
+      position: [pos.x, pos.y, pos.z],
+      rotation: [q.x, q.y, q.z, q.w],
+      action: character.currentAction || character.model.userData?.currentAction || null,
+      health: Number.isFinite(character.health) ? character.health : character.model.userData?.health,
+      dead: !!character.isDead,
+      ...extra
+    };
+  }
+
+  function registerLocalDynamicNetworkedEntity(id, character, extraState = {}) {
+    if (!id || !character?.model) return;
+    if (localDynamicNetworkedEntities.get(id) === character) return;
+    localDynamicNetworkedEntities.set(id, character);
+    registerNetworkedEntity(id, {
+      getState: () => getCharacterNetworkState(character, extraState),
+      applyState: state => applyNetworkTransformToObject(character, state),
+      isLocallyControlled: () => !!character?.model && !character.model.userData?.remoteSynced
+    });
+  }
+
+  function ensureRemoteDynamicNetworkedEntity(id, state) {
+    if (typeof id !== 'string') return false;
+    if (id.startsWith('questFriend:')) {
+      ensureRemoteQuestFriend(id, state);
+      return true;
+    }
+    if (id.startsWith('companionDog:')) {
+      ensureRemoteCompanionDog(id, state);
+      return true;
+    }
+    return false;
+  }
+
+  function ensureRemoteQuestFriend(id, state) {
+    const existing = remoteQuestFriends.get(id);
+    if (existing?.model) {
+      applyNetworkTransformToObject(existing, state);
+      return;
+    }
+    if (remoteQuestFriends.has(id)) {
+      pendingEntityStates.set(id, cloneState(state));
+      return;
+    }
+    remoteQuestFriends.set(id, { pending: true });
+    loadMonsterModel('/models/cowboy.fbx', data => {
+      const questFriend = new FriendlyCharacter(data);
+      questFriend.id = id;
+      questFriend.modelPath = '/models/cowboy.fbx';
+      questFriend.type = '/models/cowboy.fbx';
+      questFriend.model.userData.hideInMapView = true;
+      questFriend.model.userData.isQuestFriend = true;
+      questFriend.model.userData.remoteSynced = true;
+      questFriend.enableDanceWhileEngaged = false;
+      questFriend.setNoticeRadius?.(10);
+      questFriend.setWanderRadius?.(5);
+      questFriend.setEngageRadius?.(5);
+      questFriend.setDisengageRadius?.(8);
+      questFriend.setLevel?.(1, { preserveHealth: false });
+      questFriend.resetHealth?.();
+      scene?.add(questFriend.model);
+      attachMonsterPhysics?.(questFriend);
+      remoteQuestFriends.set(id, questFriend);
+      registerNetworkedEntity(id, {
+        getState: () => null,
+        applyState: nextState => applyNetworkTransformToObject(questFriend, nextState),
+        isLocallyControlled: () => false
+      });
+      applyNetworkTransformToObject(questFriend, pendingEntityStates.get(id) || state);
+      pendingEntityStates.delete(id);
+    });
+  }
+
+  async function ensureRemoteCompanionDog(id, state) {
+    if (!animalManager || remoteCompanionDogSpawns.has(id)) {
+      pendingEntityStates.set(id, cloneState(state));
+      return;
+    }
+    const existing = animals.find(animal => animal?.id === id);
+    if (existing?.model) {
+      applyNetworkTransformToObject(existing, state);
+      return;
+    }
+    remoteCompanionDogSpawns.add(id);
+    const [px = playerModel?.position?.x ?? 0, py = playerModel?.position?.y ?? 0, pz = playerModel?.position?.z ?? 0] = state?.position || [];
+    const spawnPosition = new THREE.Vector3(px, py, pz);
+    const dog = await animalManager.spawnDogAt?.(spawnPosition);
+    if (!dog?.model) {
+      remoteCompanionDogSpawns.delete(id);
+      return;
+    }
+    dog.id = id;
+    dog.model.userData.isCompanion = true;
+    dog.model.userData.remoteSynced = true;
+    if (typeof state?.name === 'string') {
+      dog.model.userData.companionName = state.name;
+    }
+    registerNetworkedEntity(id, {
+      getState: () => null,
+      applyState: nextState => applyNetworkTransformToObject(dog, nextState),
+      isLocallyControlled: () => false
+    });
+    applyNetworkTransformToObject(dog, pendingEntityStates.get(id) || state);
+    pendingEntityStates.delete(id);
+  }
+
+  function syncLocalDynamicNetworkedEntities() {
+    const myId = multiplayer?.getId?.();
+    if (!myId) return;
+    const questFriend = window.questManager?.getQuestFriend?.();
+    if (questFriend?.model) {
+      registerLocalDynamicNetworkedEntity(`questFriend:${myId}`, questFriend, { ownerId: myId });
+    }
+    (animals || []).forEach((animal) => {
+      if (!animal?.model || animal.model.userData?.remoteSynced) return;
+      if (String(animal.type).toLowerCase() !== 'dog' || !animal.model.userData?.isCompanion) return;
+      registerLocalDynamicNetworkedEntity(`companionDog:${myId}:${animal.id}`, animal, {
+        ownerId: myId,
+        name: animal.model.userData?.companionName || null
+      });
+    });
+  }
+
+  function updateRemoteDynamicNetworkedEntities(delta) {
+    remoteQuestFriends.forEach((friend) => {
+      if (friend?.model) friend.update?.(delta);
+    });
   }
 
   function registerNetworkedEntity(id, entry) {
@@ -13303,6 +13468,9 @@ async function initCore(runtimeContext) {
       pickup?.tryPickup?.(playerControls);
       updateWeaponMarker(pickup, pickup.marker, 0.03, pickup.markerOffsetY ?? 1.2);
     });
+    syncLocalDynamicNetworkedEntities();
+    updateRemoteDynamicNetworkedEntities(frameDelta);
+
     const localStates = collectLocalControlStates();
 
     if (multiplayer.isHost) {
@@ -13457,7 +13625,7 @@ async function initCore(runtimeContext) {
         }
         const roomFriendlies = friendlyNpcManager?.friendlies || [];
         const combatFriendlies = [...roomFriendlies];
-        const questFriend = questManager?.getQuestFriend?.();
+        const questFriend = window.questManager?.getQuestFriend?.();
         if (questFriend?.model && !questFriend.isDead) {
           combatFriendlies.push(questFriend);
         }

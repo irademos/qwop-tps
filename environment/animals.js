@@ -420,6 +420,10 @@ export function createAnimalManager({
         removeAnimal(entry);
         continue;
       }
+      if (animal.model.userData?.remoteSynced) {
+        animal.update(delta);
+        continue;
+      }
       updateAnimalMovement({ animal, config: entry.config || {}, getPlayerModel, getTerrainHeight, getNearbyMonster, delta });
     }
   };
