@@ -287,6 +287,7 @@ const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
 const PRESENCE_STALE_MS = 5000;
 const PRESENCE_SEND_MS = 350;
+const PRESENCE_HEARTBEAT_MS = 2000;
 const PRESENCE_SWEEP_MS = 250;
 const REMOTE_LERP_ALPHA = 0.15;
 const REMOTE_TELEPORT_THRESHOLD_M = 25;
@@ -801,6 +802,7 @@ async function initCore(runtimeContext) {
   const localDynamicNetworkedEntities = new Map();
   const remoteQuestFriends = new Map();
   const remoteCompanionDogSpawns = new Set();
+  const removedRemotePlayerIds = new Set();
   let lastEntityBroadcast = 0;
   let lastFullEntityBroadcast = 0;
   let lastControlSend = 0;
@@ -824,7 +826,8 @@ async function initCore(runtimeContext) {
     y: null,
     z: null,
     rotation: null,
-    action: null
+    action: null,
+    sentAt: 0
   };
   const lastSentEntityControlStates = new Map();
   const projectiles = [];
@@ -1517,6 +1520,7 @@ async function initCore(runtimeContext) {
       delete otherPlayers[remoteId];
     }
     clearRemoteHeldWeaponsForHolder(remoteId);
+    cleanupRemoteDynamicNetworkedEntitiesForPlayer(remoteId);
     remotePresenceEquipment.delete(remoteId);
     if (remotePresenceMeta[remoteId]) {
       delete remotePresenceMeta[remoteId];
@@ -1604,6 +1608,13 @@ async function initCore(runtimeContext) {
     return false;
   }
 
+  function getRemoteDynamicOwnerId(id) {
+    if (typeof id !== 'string') return null;
+    if (id.startsWith('questFriend:')) return id.slice('questFriend:'.length) || null;
+    if (id.startsWith('companionDog:')) return id.slice('companionDog:'.length).split(':')[0] || null;
+    return null;
+  }
+
   function ensureRemoteQuestFriend(id, state) {
     const existing = remoteQuestFriends.get(id);
     if (existing?.model) {
@@ -1616,6 +1627,11 @@ async function initCore(runtimeContext) {
     }
     remoteQuestFriends.set(id, { pending: true });
     loadMonsterModel('/models/cowboy.fbx', data => {
+      const ownerId = getRemoteDynamicOwnerId(id);
+      if (ownerId && removedRemotePlayerIds.has(ownerId)) {
+        remoteQuestFriends.delete(id);
+        return;
+      }
       const questFriend = new FriendlyCharacter(data);
       questFriend.id = id;
       questFriend.modelPath = '/models/cowboy.fbx';
@@ -1657,6 +1673,15 @@ async function initCore(runtimeContext) {
     const [px = playerModel?.position?.x ?? 0, py = playerModel?.position?.y ?? 0, pz = playerModel?.position?.z ?? 0] = state?.position || [];
     const spawnPosition = new THREE.Vector3(px, py, pz);
     const dog = await animalManager.spawnDogAt?.(spawnPosition);
+    const ownerId = getRemoteDynamicOwnerId(id);
+    if (ownerId && removedRemotePlayerIds.has(ownerId)) {
+      if (dog?.model) {
+        dog.id = id;
+        animalManager?.removeAnimalById?.(id);
+      }
+      remoteCompanionDogSpawns.delete(id);
+      return;
+    }
     if (!dog?.model) {
       remoteCompanionDogSpawns.delete(id);
       return;
@@ -1697,6 +1722,42 @@ async function initCore(runtimeContext) {
     remoteQuestFriends.forEach((friend) => {
       if (friend?.model) friend.update?.(delta);
     });
+  }
+
+  function cleanupRemoteDynamicNetworkedEntitiesForPlayer(playerId) {
+    if (!playerId) return;
+    removedRemotePlayerIds.add(playerId);
+    const prefixes = [`questFriend:${playerId}`, `companionDog:${playerId}:`];
+    const matchesPlayerEntity = id => prefixes.some(prefix => id === prefix || id.startsWith(prefix));
+
+    remoteQuestFriends.forEach((friend, id) => {
+      if (!matchesPlayerEntity(id)) return;
+      detachNpcPhysics?.(friend);
+      friend?.model?.userData?.mixer?.stopAllAction?.();
+      if (friend?.model?.parent) {
+        friend.model.parent.remove(friend.model);
+      }
+      remoteQuestFriends.delete(id);
+    });
+
+    for (const id of Array.from(remoteCompanionDogSpawns)) {
+      if (!matchesPlayerEntity(id)) continue;
+      animalManager?.removeAnimalById?.(id);
+      remoteCompanionDogSpawns.delete(id);
+    }
+
+    for (const id of Array.from(networkedEntities.keys())) {
+      if (matchesPlayerEntity(id)) networkedEntities.delete(id);
+    }
+    for (const id of Array.from(pendingEntityStates.keys())) {
+      if (matchesPlayerEntity(id)) pendingEntityStates.delete(id);
+    }
+    for (const id of Array.from(authoritativeEntityStates.keys())) {
+      if (matchesPlayerEntity(id)) authoritativeEntityStates.delete(id);
+    }
+    for (const id of Array.from(localDynamicNetworkedEntities.keys())) {
+      if (matchesPlayerEntity(id)) localDynamicNetworkedEntities.delete(id);
+    }
   }
 
   function registerNetworkedEntity(id, entry) {
@@ -2092,6 +2153,7 @@ async function initCore(runtimeContext) {
         return;
       }
       const remoteId = data.id || peerId;
+      removedRemotePlayerIds.delete(remoteId);
       if (remoteId === multiplayer.getId()) {
         return;
       }
@@ -13838,13 +13900,15 @@ async function initCore(runtimeContext) {
       const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > POSITION_DEADBAND_SQ;
       const rotated = Math.abs(wrapDeltaRad((payload.rotation ?? 0) - (lastSentPresenceState.rotation ?? 0))) >= ROTATION_DEADBAND_RAD;
       const actionChanged = payload.action !== lastSentPresenceState.action;
-      if (lastSentPresenceState.x == null || moved || rotated || actionChanged) {
+      const heartbeatDue = now - (lastSentPresenceState.sentAt || 0) >= PRESENCE_HEARTBEAT_MS;
+      if (lastSentPresenceState.x == null || moved || rotated || actionChanged || heartbeatDue) {
         queueNetMessage(payload, 'presence:self');
         lastSentPresenceState.x = payload.x;
         lastSentPresenceState.y = payload.y;
         lastSentPresenceState.z = payload.z;
         lastSentPresenceState.rotation = payload.rotation ?? 0;
         lastSentPresenceState.action = payload.action ?? null;
+        lastSentPresenceState.sentAt = now;
       } else {
         netStats.dropped += 1;
       }
