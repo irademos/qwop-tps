@@ -1545,11 +1545,34 @@ async function initCore(runtimeContext) {
     pendingEntityStates.set(id, cloneState(state));
   }
 
+  function resolveNetworkStatePosition(state) {
+    if (!state) return null;
+    const [px, py, pz] = state.position || [];
+    let x = Number.isFinite(px) ? px : null;
+    const y = Number.isFinite(py) ? py : null;
+    let z = Number.isFinite(pz) ? pz : null;
+
+    if (Number.isFinite(state.lat) && Number.isFinite(state.lon)) {
+      const mapOrigin = getLocalMapOrigin?.();
+      const local = mapOrigin ? geoToLocalMeters(state.lat, state.lon, mapOrigin) : null;
+      if (local) {
+        x = local.x;
+        z = local.z;
+      }
+    }
+
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return null;
+    }
+    return { x, y, z };
+  }
+
   function applyNetworkTransformToObject(target, state) {
     if (!target?.model || !state) return;
-    const [px, py, pz] = state.position || [];
+    const resolvedPosition = resolveNetworkStatePosition(state);
     const [rx, ry, rz, rw] = state.rotation || [];
-    if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+    if (resolvedPosition) {
+      const { x: px, y: py, z: pz } = resolvedPosition;
       target.model.position.set(px, py, pz);
       target.body?.setTranslation?.({ x: px, y: py, z: pz }, true);
     }
@@ -1574,7 +1597,9 @@ async function initCore(runtimeContext) {
     if (!character?.model) return null;
     const pos = character.model.position;
     const q = character.model.quaternion;
-    return {
+    const mapOrigin = getLocalMapOrigin?.();
+    const geo = mapOrigin ? localMetersToGeo(pos.x, pos.z, mapOrigin) : null;
+    const state = {
       position: [pos.x, pos.y, pos.z],
       rotation: [q.x, q.y, q.z, q.w],
       action: character.currentAction || character.model.userData?.currentAction || null,
@@ -1582,6 +1607,17 @@ async function initCore(runtimeContext) {
       dead: !!character.isDead,
       ...extra
     };
+    if (geo) {
+      state.lat = geo.lat;
+      state.lon = geo.lon;
+    }
+    if (mapOrigin) {
+      state.worldAnchor = {
+        centerLat: mapOrigin.centerLat,
+        centerLon: mapOrigin.centerLon
+      };
+    }
+    return state;
   }
 
   function registerLocalDynamicNetworkedEntity(id, character, extraState = {}) {
@@ -1670,8 +1706,11 @@ async function initCore(runtimeContext) {
       return;
     }
     remoteCompanionDogSpawns.add(id);
-    const [px = playerModel?.position?.x ?? 0, py = playerModel?.position?.y ?? 0, pz = playerModel?.position?.z ?? 0] = state?.position || [];
-    const spawnPosition = new THREE.Vector3(px, py, pz);
+    const resolvedPosition = resolveNetworkStatePosition(state);
+    const [fallbackX = playerModel?.position?.x ?? 0, fallbackY = playerModel?.position?.y ?? 0, fallbackZ = playerModel?.position?.z ?? 0] = state?.position || [];
+    const spawnPosition = resolvedPosition
+      ? new THREE.Vector3(resolvedPosition.x, resolvedPosition.y, resolvedPosition.z)
+      : new THREE.Vector3(fallbackX, fallbackY, fallbackZ);
     const dog = await animalManager.spawnDogAt?.(spawnPosition);
     const ownerId = getRemoteDynamicOwnerId(id);
     if (ownerId && removedRemotePlayerIds.has(ownerId)) {
@@ -2169,7 +2208,7 @@ async function initCore(runtimeContext) {
         remotePresenceMeta[remoteId].lastLat = data.lat;
         remotePresenceMeta[remoteId].lastLon = data.lon;
       }
-      if (data.worldAnchor?.centerLat && data.worldAnchor?.centerLon) {
+      if (Number.isFinite(data.worldAnchor?.centerLat) && Number.isFinite(data.worldAnchor?.centerLon)) {
         remotePresenceMeta[remoteId].worldAnchor = {
           centerLat: data.worldAnchor.centerLat,
           centerLon: data.worldAnchor.centerLon
@@ -2180,7 +2219,7 @@ async function initCore(runtimeContext) {
       const mapOrigin = getLocalMapOrigin();
       
       // Adopt remote world anchor if we don't have one yet
-      if (!getLocalMapOrigin() && data.worldAnchor?.centerLat && data.worldAnchor?.centerLon) {
+      if (!getLocalMapOrigin() && Number.isFinite(data.worldAnchor?.centerLat) && Number.isFinite(data.worldAnchor?.centerLon)) {
         setWorldOrigin({
           lat: data.worldAnchor.centerLat,
           lon: data.worldAnchor.centerLon
@@ -13556,18 +13595,20 @@ async function initCore(runtimeContext) {
     } else if (localStates.size > 0 && now - lastControlSend >= controlSendIntervalMs) {
       localStates.forEach(({ state, sourceId }, id) => {
         const prev = lastSentEntityControlStates.get(id);
-        const dx = (state.x ?? 0) - (prev?.x ?? 0);
-        const dy = (state.y ?? 0) - (prev?.y ?? 0);
-        const dz = (state.z ?? 0) - (prev?.z ?? 0);
+        const [stateX = 0, stateY = 0, stateZ = 0] = state.position || [];
+        const stateRotation = Array.isArray(state.rotation) ? state.rotation[1] ?? 0 : state.rotation ?? 0;
+        const dx = stateX - (prev?.x ?? stateX);
+        const dy = stateY - (prev?.y ?? stateY);
+        const dz = stateZ - (prev?.z ?? stateZ);
         const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > POSITION_DEADBAND_SQ;
-        const rotDelta = Math.abs(wrapDeltaRad((state.rotation ?? 0) - (prev?.rotation ?? 0)));
+        const rotDelta = Math.abs(wrapDeltaRad(stateRotation - (prev?.rotation ?? stateRotation)));
         const changedAction = (state.action ?? null) !== (prev?.action ?? null);
         if (!prev || moved || rotDelta >= ROTATION_DEADBAND_RAD || changedAction) {
           lastSentEntityControlStates.set(id, {
-            x: state.x ?? 0,
-            y: state.y ?? 0,
-            z: state.z ?? 0,
-            rotation: state.rotation ?? 0,
+            x: stateX,
+            y: stateY,
+            z: stateZ,
+            rotation: stateRotation,
             action: state.action ?? null
           });
           queueNetMessage({ type: 'entityControl', id, state, sourceId }, `entityControl:${id}`);
@@ -13942,10 +13983,17 @@ async function initCore(runtimeContext) {
           nameLabel.style.transform = `translate(-50%, -50%) scale(${scale})`;
           nameLabel.style.opacity = opacity.toFixed(2);
         });
+        const activeCompanionAnimalIds = new Set();
         (animals || []).forEach((animal) => {
-          if (!animal?.model || !animal.model.userData?.isCompanion) return;
+          if (!animal?.id || !animal?.model || !animal.model.userData?.isCompanion) return;
+          activeCompanionAnimalIds.add(animal.id);
           const name = animal.model.userData?.companionName;
-          if (!name) return;
+          if (!name) {
+            const staleLabel = animalNameLabels.get(animal.id);
+            staleLabel?.parentNode?.removeChild(staleLabel);
+            animalNameLabels.delete(animal.id);
+            return;
+          }
           let label = animalNameLabels.get(animal.id);
           if (!label) {
             label = document.createElement('div');
@@ -13962,6 +14010,11 @@ async function initCore(runtimeContext) {
           label.style.left = `${(pos.x * 0.5 + 0.5) * window.innerWidth}px`;
           label.style.top = `${(-pos.y * 0.5 + 0.5) * window.innerHeight}px`;
           label.style.transform = 'translate(-50%, -50%)';
+        });
+        animalNameLabels.forEach((label, animalId) => {
+          if (activeCompanionAnimalIds.has(animalId)) return;
+          label?.parentNode?.removeChild(label);
+          animalNameLabels.delete(animalId);
         });
       });
     }

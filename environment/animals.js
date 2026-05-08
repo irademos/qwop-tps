@@ -394,9 +394,7 @@ export function createAnimalManager({
       model.parent.remove(model);
     }
     model?.userData?.mixer?.stopAllAction?.();
-    if (wasDead) {
-      onAnimalRemoved?.({ animal: entry.animal, wasDead, position: lastPosition });
-    }
+    onAnimalRemoved?.({ animal: entry.animal, wasDead, position: lastPosition });
   };
 
   const removeAnimalById = (animalId) => {
