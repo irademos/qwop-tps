@@ -13983,10 +13983,17 @@ async function initCore(runtimeContext) {
           nameLabel.style.transform = `translate(-50%, -50%) scale(${scale})`;
           nameLabel.style.opacity = opacity.toFixed(2);
         });
+        const activeCompanionAnimalIds = new Set();
         (animals || []).forEach((animal) => {
-          if (!animal?.model || !animal.model.userData?.isCompanion) return;
+          if (!animal?.id || !animal?.model || !animal.model.userData?.isCompanion) return;
+          activeCompanionAnimalIds.add(animal.id);
           const name = animal.model.userData?.companionName;
-          if (!name) return;
+          if (!name) {
+            const staleLabel = animalNameLabels.get(animal.id);
+            staleLabel?.parentNode?.removeChild(staleLabel);
+            animalNameLabels.delete(animal.id);
+            return;
+          }
           let label = animalNameLabels.get(animal.id);
           if (!label) {
             label = document.createElement('div');
@@ -14003,6 +14010,11 @@ async function initCore(runtimeContext) {
           label.style.left = `${(pos.x * 0.5 + 0.5) * window.innerWidth}px`;
           label.style.top = `${(-pos.y * 0.5 + 0.5) * window.innerHeight}px`;
           label.style.transform = 'translate(-50%, -50%)';
+        });
+        animalNameLabels.forEach((label, animalId) => {
+          if (activeCompanionAnimalIds.has(animalId)) return;
+          label?.parentNode?.removeChild(label);
+          animalNameLabels.delete(animalId);
         });
       });
     }
