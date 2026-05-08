@@ -12423,10 +12423,10 @@ async function initCore(runtimeContext) {
         inputPlaceholder: 'Companion name',
         confirmText: 'Save Name'
       }).then((name) => persistDog(name));
+      showStatusToast('The dog is now your companion!');
     } else {
       void persistDog(dog.model.userData?.companionName || 'Companion');
     }
-    showStatusToast('The dog is now your companion!');
   });
 
   buildInteractionBtn.addEventListener('click', () => { void showNoteInteraction(); });
