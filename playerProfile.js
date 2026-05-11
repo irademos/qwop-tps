@@ -53,6 +53,7 @@ const DEFAULT_ACHIEVEMENTS = {
 const DEFAULT_WALKING_STATS = {
   totalMiles: 0,
   dailyMiles: {},
+  dailyResetMiles: {},
   updatedAt: null
 };
 const DEFAULT_COMPANIONS = {};
@@ -101,7 +102,7 @@ function buildProfile(name) {
     spells: { ...DEFAULT_SPELLS },
     quests: mergeQuests(DEFAULT_QUESTS),
     achievements: mergeAchievements(DEFAULT_ACHIEVEMENTS),
-    walkingStats: { ...DEFAULT_WALKING_STATS },
+    walkingStats: mergeWalkingStats(DEFAULT_WALKING_STATS),
     companions: { ...DEFAULT_COMPANIONS },
     characterModel: null,
     sleepStartedAt: null,
@@ -136,8 +137,16 @@ function mergeWalkingStats(walkingStats) {
     if (!Number.isFinite(parsed) || parsed <= 0) continue;
     dailyMiles[date] = parsed;
   }
+  const sourceDailyReset = walkingStats?.dailyResetMiles && typeof walkingStats.dailyResetMiles === 'object' ? walkingStats.dailyResetMiles : {};
+  const dailyResetMiles = {};
+  for (const [date, miles] of Object.entries(sourceDailyReset)) {
+    const parsed = Number(miles);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    dailyResetMiles[date] = parsed;
+  }
   const updatedAt = Number.isFinite(walkingStats?.updatedAt) ? walkingStats.updatedAt : null;
-  return { totalMiles, dailyMiles, updatedAt };
+  return { totalMiles, dailyMiles, dailyResetMiles, updatedAt };
 }
 
 function mergeAchievements(achievements) {
