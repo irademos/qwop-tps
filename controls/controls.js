@@ -46,6 +46,10 @@ const ENGAGED_CAMERA_OFFSET = {
   right: 0.65,
   up: 0.4
 };
+const AUTO_AIM_CAMERA_OFFSET = {
+  right: 0.75,
+  up: 0.35
+};
 const BED_SLEEP_PROMPT = "click or press 'x' to sleep";
 const BED_WAKE_PROMPT = "click or press 'x' to wake";
 const FRIENDLY_DIALOGUE_POOL = [
@@ -323,6 +327,7 @@ export class PlayerControls {
     this.autoAimBreakUntilRelease = false;
     this.autoAimCurrentPitch = 0;
     this.autoAimCameraDirection = null;
+    this.autoAimTargetModel = null;
     this.autoAimManualBreakAmount = 0;
     this.autoAimLastManualInputAt = 0;
     this.baseCameraOffset = this.cameraOffset.clone();
@@ -2780,10 +2785,14 @@ export class PlayerControls {
     let desiredCameraPosition;
     let cameraLookTarget = orbitCenter;
     const engagedTargetPosition = this.engagedTarget?.model?.position;
+    const autoAimTargetPosition = this.autoAimTargetModel?.position;
     const hasValidEngagedTarget = this.isEngaged
       && this.engagedDirection
       && Number.isFinite(engagedTargetPosition?.x)
       && Number.isFinite(engagedTargetPosition?.z);
+    const hasValidAutoAimTarget = this.shouldUseAutoAimCameraDirection()
+      && Number.isFinite(autoAimTargetPosition?.x)
+      && Number.isFinite(autoAimTargetPosition?.z);
     if (hasValidEngagedTarget) {
       const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
       this.yaw = engagedYaw;
@@ -2797,7 +2806,26 @@ export class PlayerControls {
         .add(new THREE.Vector3(0, cameraHeight + ENGAGED_CAMERA_OFFSET.up, 0))
         .add(behindOffset)
         .addScaledVector(engagedRight, ENGAGED_CAMERA_OFFSET.right);
-    } else {
+    } else if (hasValidAutoAimTarget) {
+      const targetLookPosition = autoAimTargetPosition.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+      const autoAimFacing = targetLookPosition.clone().sub(orbitCenter);
+      autoAimFacing.y = 0;
+      if (autoAimFacing.lengthSq() > 0.0001) {
+        autoAimFacing.normalize();
+        this.yaw = Math.atan2(autoAimFacing.x, autoAimFacing.z);
+        const shoulderOffset = this.weaponCameraOffset || this.aimCameraOffset || this.baseCameraOffset || this.cameraOffset;
+        const cameraDistance = Math.max(2.5, Math.abs(shoulderOffset?.z ?? this.cameraOffset.z));
+        const cameraHeight = shoulderOffset?.y ?? this.cameraOffset.y ?? 1;
+        const behindOffset = autoAimFacing.clone().multiplyScalar(-cameraDistance);
+        const autoAimRight = new THREE.Vector3(-autoAimFacing.z, 0, autoAimFacing.x).normalize();
+        desiredCameraPosition = orbitCenter.clone()
+          .add(new THREE.Vector3(0, cameraHeight + AUTO_AIM_CAMERA_OFFSET.up, 0))
+          .add(behindOffset)
+          .addScaledVector(autoAimRight, AUTO_AIM_CAMERA_OFFSET.right);
+        cameraLookTarget = targetLookPosition;
+      }
+    }
+    if (!desiredCameraPosition) {
       const rotatedOffset = new THREE.Vector3(
         offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
         offset.y + 5 * Math.sin(this.pitch),
@@ -2862,7 +2890,7 @@ export class PlayerControls {
     }
 
     this.camera.position.copy(resolvedCameraPosition);
-    if (this.shouldUseAutoAimCameraDirection()) {
+    if (this.shouldUseAutoAimCameraDirection() && !hasValidAutoAimTarget) {
       cameraLookTarget = resolvedCameraPosition.clone().add(this.autoAimCameraDirection);
     }
     this.camera.lookAt(cameraLookTarget);
@@ -3408,16 +3436,18 @@ export class PlayerControls {
       this.aimReleaseHoldUntil = null;
       this.autoAimBreakUntilRelease = false;
       this.autoAimCameraDirection = null;
+      this.autoAimTargetModel = null;
       this.autoAimManualBreakAmount = 0;
       this.autoAimLastManualInputAt = 0;
     } else {
       if (this.autoAimCameraDirection) {
-        this.syncCameraOrbitToAutoAimDirection(this.autoAimCameraDirection);
+        this.syncCameraOrbitToCameraDirection();
       }
       this.aimReleaseHoldUntil = performance.now() + this.aimReleaseDelayMs;
       this.autoAimBreakUntilRelease = false;
       this.autoAimCurrentPitch = 0;
       this.autoAimCameraDirection = null;
+      this.autoAimTargetModel = null;
       this.autoAimManualBreakAmount = 0;
       this.autoAimLastManualInputAt = 0;
     }
@@ -3443,6 +3473,7 @@ export class PlayerControls {
       : this.getEquippedWeapon();
     if (!this.isFireHeld || (!this.mobileThrowAimItemId && !this.shouldHoldToFire())) {
       this.autoAimCameraDirection = null;
+      this.autoAimTargetModel = null;
       return;
     }
     const invertForBow = weapon?.itemId === 'bow';
@@ -3453,6 +3484,7 @@ export class PlayerControls {
       this.applyAutoAimCameraDirection(autoAimDirection);
     } else {
       this.autoAimCameraDirection = null;
+      this.autoAimTargetModel = null;
     }
   }
 
@@ -3477,6 +3509,15 @@ export class PlayerControls {
     const maxPitch = Math.PI / 3;
     const minPitch = -Math.PI / 8;
     this.pitch = THREE.MathUtils.clamp(Math.asin(pitchRatio), minPitch, maxPitch);
+  }
+
+
+  syncCameraOrbitToCameraDirection() {
+    if (!this.camera) return;
+    const d = new THREE.Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion);
+    if (d.lengthSq() <= 0.0001) return;
+    d.normalize();
+    this.syncCameraOrbitToAutoAimDirection(d);
   }
 
   breakAutoAimFromManualCamera(inputAmount = Infinity) {
@@ -3516,13 +3557,18 @@ export class PlayerControls {
     const target = this.findAutoAimTarget(maxRange);
     if (!target) {
       this.autoAimCurrentPitch = 0;
+      this.autoAimTargetModel = null;
       return null;
     }
+    this.autoAimTargetModel = target;
 
     const eyePos = this.playerModel.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
     const targetPos = target.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
     const baseDirection = targetPos.sub(eyePos);
-    if (baseDirection.lengthSq() <= 0.0001) return null;
+    if (baseDirection.lengthSq() <= 0.0001) {
+      this.autoAimTargetModel = null;
+      return null;
+    }
 
     if (isBow || isBomb || isThrownItem) {
       const arcType = isBow ? 'bow' : (isBomb ? 'bomb' : 'throw');
@@ -3635,6 +3681,7 @@ export class PlayerControls {
 
   shouldUseAutoAimCameraDirection() {
     return !!this.autoAimCameraDirection
+      && !!this.autoAimTargetModel?.position
       && this.isFireHeld
       && !this.autoAimBreakUntilRelease
       && !this.isEngaged;
