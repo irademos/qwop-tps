@@ -29,6 +29,7 @@ const GROUND_DOWNWARD_CORRECTION_MAX_VERTICAL_SPEED = 0.18;
 const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const STEEP_SLOPE_SPEED_MULTIPLIER = 0.55;
 const FRIENDLY_INTERACT_RANGE = 6;
+const QUEST_FRIEND_INTERACT_RANGE = 2.5;
 const MUSHROOM_INTERACT_RANGE = 1.2;
 const APPLE_INTERACT_RANGE = 3;
 const WOOD_INTERACT_RANGE = 3;
@@ -1444,7 +1445,7 @@ export class PlayerControls {
   }
 
   handleFriendlyInteractionAction() {
-    if (!this.enabled || this.isSleeping) return;
+    if (!this.enabled || this.isSleeping || this.areInteractionOverlaysBlocked()) return;
 
     if (this.isInteracting) {
       this.advanceFriendlyDialogue();
@@ -1459,7 +1460,7 @@ export class PlayerControls {
   }
 
   handleClimbAction() {
-    if (!this.enabled || this.isSleeping || this.vehicle || this.isInteracting) return false;
+    if (!this.enabled || this.isSleeping || this.vehicle || this.isInteracting || this.areInteractionOverlaysBlocked()) return false;
     if (this.isClimbing) return false;
     if (!this.playerModel) return false;
 
@@ -1476,7 +1477,7 @@ export class PlayerControls {
   }
 
   handlePickupAction() {
-    if (!this.enabled && !this.isSleeping) return;
+    if ((!this.enabled && !this.isSleeping) || this.areInteractionOverlaysBlocked()) return;
 
     if (this.isSleeping) {
       this.wakeFromSleep();
@@ -1502,6 +1503,7 @@ export class PlayerControls {
     }
 
     if (closest.type === 'friendly') {
+      if (this.isQuestFriend(closest.friendly)) return;
       this.startFriendlyInteraction(closest.friendly);
       return;
     }
@@ -1561,6 +1563,14 @@ export class PlayerControls {
     }
   }
 
+  getFriendlyInteractionRange(friendly) {
+    return this.isQuestFriend(friendly) ? QUEST_FRIEND_INTERACT_RANGE : FRIENDLY_INTERACT_RANGE;
+  }
+
+  isQuestFriend(friendly) {
+    return !!friendly && (this.questManager?.isQuestFriend?.(friendly) || friendly?.model?.userData?.isQuestFriend === true);
+  }
+
   getClosestFriendly(maxDistance) {
     if (!this.playerModel) return null;
     const friendlies = Array.isArray(window.friendlies) ? window.friendlies : [];
@@ -1569,7 +1579,8 @@ export class PlayerControls {
     friendlies.forEach((friendly) => {
       if (!friendly?.model || friendly.isDead) return;
       const dist = this.playerModel.position.distanceTo(friendly.model.position);
-      if (dist <= maxDistance && dist < closestDistance) {
+      const interactRange = Math.min(maxDistance, this.getFriendlyInteractionRange(friendly));
+      if (dist <= interactRange && dist < closestDistance) {
         closestDistance = dist;
         closest = friendly;
       }
@@ -1577,7 +1588,8 @@ export class PlayerControls {
     const merchant = window.merchantFriendly;
     if (merchant?.model && !merchant.isDead) {
       const dist = this.playerModel.position.distanceTo(merchant.model.position);
-      if (dist <= maxDistance && dist < closestDistance) {
+      const interactRange = Math.min(maxDistance, this.getFriendlyInteractionRange(merchant));
+      if (dist <= interactRange && dist < closestDistance) {
         closestDistance = dist;
         closest = merchant;
       }
@@ -1585,7 +1597,8 @@ export class PlayerControls {
     const questFriend = this.questManager?.getQuestFriend();
     if (questFriend?.model && !questFriend.isDead) {
       const dist = this.playerModel.position.distanceTo(questFriend.model.position);
-      if (dist <= maxDistance && dist < closestDistance) {
+      const interactRange = Math.min(maxDistance, this.getFriendlyInteractionRange(questFriend));
+      if (dist <= interactRange && dist < closestDistance) {
         closestDistance = dist;
         closest = questFriend;
       }
@@ -1884,15 +1897,16 @@ export class PlayerControls {
   }
 
   updateFriendlyInteractionUI() {
-    if (this.isSleeping) {
+    if (this.isSleeping || this.areInteractionOverlaysBlocked()) {
       this.friendlyInteractButton?.classList.add('hidden');
-      this.friendlyDialogueEl?.classList.add('hidden');
+      if (!this.isInteracting) this.friendlyDialogueEl?.classList.add('hidden');
       return;
     }
     if (!this.friendlyInteractButton) return;
 
     if (this.isInteracting) {
-      if (this.activeFriendly && !this.isFriendlyWithinRange(this.activeFriendly, FRIENDLY_INTERACT_RANGE * 1.6)) {
+      const activeRange = this.getFriendlyInteractionRange(this.activeFriendly) * 1.6;
+      if (this.activeFriendly && !this.isFriendlyWithinRange(this.activeFriendly, activeRange)) {
         this.endFriendlyInteraction();
         return;
       }
@@ -1912,7 +1926,9 @@ export class PlayerControls {
     if (nearby?.friendly && closest?.type === 'friendly' && closest.friendly === nearby.friendly) {
       this.friendlyInteractButton.classList.remove('hidden');
       this.friendlyInteractButton.disabled = false;
-      this.friendlyInteractButton.textContent = this.isMobile ? 'Talk' : 'Interact (X)';
+      this.friendlyInteractButton.textContent = this.isQuestFriend(nearby.friendly)
+        ? (this.isMobile ? 'Talk' : 'Interact')
+        : (this.isMobile ? 'Talk' : 'Interact (X)');
       return;
     }
 
@@ -2922,7 +2938,7 @@ export class PlayerControls {
 
   updateClimbOverlay() {
     if (!this.climbOverlayEl || !this.playerModel) return;
-    if (this.isClimbing || this.isSleeping || this.vehicle || this.isInteracting) {
+    if (this.isClimbing || this.isSleeping || this.vehicle || this.isInteracting || this.areInteractionOverlaysBlocked()) {
       this.climbOverlayEl.classList.add('hidden');
       return;
     }
@@ -2944,6 +2960,11 @@ export class PlayerControls {
 
   updateInteractionPrompt() {
     if (!this.interactionPromptEl || !this.playerModel) return;
+    if (this.areInteractionOverlaysBlocked()) {
+      this.interactionPromptEl.classList.remove('visible');
+      this.interactionPromptEl.textContent = '';
+      return;
+    }
 
     let promptText = '';
     let visible = false;
@@ -2978,6 +2999,17 @@ export class PlayerControls {
       this.interactionPromptEl.classList.remove('visible');
       this.interactionPromptEl.textContent = '';
     }
+  }
+
+  areInteractionOverlaysBlocked() {
+    if (window.mapViewEnabled === true || document.body?.classList?.contains('map-open')) return true;
+    const blockingOverlayIds = ['settings-overlay', 'inventory-overlay', 'merchant-overlay'];
+    return blockingOverlayIds.some((id) => {
+      const overlay = document.getElementById(id);
+      if (!overlay) return false;
+      if (overlay.getAttribute('aria-hidden') === 'false') return true;
+      return overlay.style?.display && overlay.style.display !== 'none';
+    });
   }
 
   formatInteractionPrompt(text) {
