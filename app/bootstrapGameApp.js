@@ -7537,6 +7537,7 @@ async function initCore(runtimeContext) {
   }
 
   let mapViewEnabled = false;
+  window.mapViewEnabled = mapViewEnabled;
   let playerDead = false;
   let isBuildPlacementActive = false;
   const updateControlAvailability = () => {
@@ -10089,6 +10090,10 @@ async function initCore(runtimeContext) {
     if ((inventoryState.bomb?.count || 0) <= 0) return false;
     const shooterId = multiplayer?.getId?.();
     spawnBombProjectileWithPerfFlags(scene, projectiles, position, direction, shooterId);
+    audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.45, {
+      cooldownKey: 'bomb-throw',
+      cooldownMs: audioManager?.performanceProfile?.attackCooldownMs ?? 120
+    });
     unequipInventoryItem('bomb');
     removeFromInventory('bomb', 1);
     notifyAchievementProgress('bombsThrown', 1);
@@ -10194,6 +10199,8 @@ async function initCore(runtimeContext) {
 
   mapToggleButton.addEventListener('click', () => {
     mapViewEnabled = !mapViewEnabled;
+    window.mapViewEnabled = mapViewEnabled;
+    document.body.classList.toggle('map-open', mapViewEnabled);
     void setMapViewEnabledFeature(mapViewEnabled);
     updateControlAvailability();
     mapToggleButton.classList.toggle('active', mapViewEnabled);
@@ -12246,6 +12253,16 @@ async function initCore(runtimeContext) {
   feedDogBtn.style.cssText = 'position:fixed;left:50%;bottom:37%;transform:translateX(-50%);z-index:1200;display:none;padding:8px 12px;';
   document.body.appendChild(feedDogBtn);
   const animalNameLabels = new Map();
+  const areInteractionLabelsBlocked = () => {
+    if (window.mapViewEnabled === true || document.body.classList.contains('map-open')) return true;
+    const blockingOverlayIds = ['settings-overlay', 'inventory-overlay', 'merchant-overlay'];
+    return blockingOverlayIds.some((id) => {
+      const overlay = document.getElementById(id);
+      if (!overlay) return false;
+      if (overlay.getAttribute('aria-hidden') === 'false') return true;
+      return overlay.style?.display && overlay.style.display !== 'none';
+    });
+  };
   const dogColliderEntries = new Map();
   const companionData = { ...(playerProfile?.companions || {}) };
   const DOG_FOOD_HEAL = 10;
@@ -13146,10 +13163,11 @@ async function initCore(runtimeContext) {
             buildState.selectedNoteId = id;
           }
         });
-        const shouldShow = Boolean(buildState.selectedNoteId) && closestNoteDistance <= closestInteractDistance;
+        const labelsBlocked = areInteractionLabelsBlocked();
+        const shouldShow = !labelsBlocked && Boolean(buildState.selectedNoteId) && closestNoteDistance <= closestInteractDistance;
         buildInteractionBtn.style.display = shouldShow ? 'block' : 'none';
 
-        const nearbyDog = animalManager?.getNearestFeedableDog?.(playerPos, 2.5);
+        const nearbyDog = labelsBlocked ? null : animalManager?.getNearestFeedableDog?.(playerPos, 2.5);
         feedDogBtn.style.display = nearbyDog ? 'block' : 'none';
       }
     }
@@ -14073,6 +14091,11 @@ async function initCore(runtimeContext) {
         const activeCompanionAnimalIds = new Set();
         (animals || []).forEach((animal) => {
           if (!animal?.id || !animal?.model || !animal.model.userData?.isCompanion) return;
+          if (areInteractionLabelsBlocked()) {
+            const label = animalNameLabels.get(animal.id);
+            if (label) label.style.display = 'none';
+            return;
+          }
           activeCompanionAnimalIds.add(animal.id);
           const name = animal.model.userData?.companionName;
           if (!name) {
