@@ -212,6 +212,47 @@ async function spawnAnimal({ scene, getPlayerModel, getTerrainHeight, forcedPosi
 }
 
 
+function getCombatTargetPosition(target) {
+  if (!target) return null;
+  if (target.model?.position) return target.model.position;
+  if (target.position) return target.position;
+  return null;
+}
+
+function isCombatTargetDead(target) {
+  if (!target) return true;
+  if (target.isDead || target.model?.userData?.isDead || target.userData?.isDead) return true;
+  const health = target.model?.userData?.health ?? target.userData?.health ?? target.health;
+  return Number.isFinite(health) && health <= 0;
+}
+
+function applyCompanionDamageToMonster(target, damage, { animal, onMonsterAttack } = {}) {
+  if (!target || isCombatTargetDead(target) || !Number.isFinite(damage) || damage <= 0) return false;
+  const attackTypes = ['companion', 'dog', 'melee'];
+  let killed = false;
+  if (typeof target.applyDamage === 'function') {
+    killed = !!target.applyDamage(damage, { attackTypes });
+    if (!killed && typeof target.applyKnockback === 'function' && animal?.model?.position && target.model?.position) {
+      const direction = target.model.position.clone().sub(animal.model.position).setY(0);
+      if (direction.lengthSq() > 0.0001) {
+        target.applyKnockback({ direction: direction.normalize(), strength: 1.1 });
+      }
+    }
+  } else if (target.userData) {
+    target.userData.health = Math.max(0, (target.userData.health || 10) - damage);
+    killed = target.userData.health <= 0;
+    target.userData.isDead = killed || target.userData.isDead;
+  }
+  onMonsterAttack?.(target, {
+    damage,
+    killed,
+    sourceId: animal?.id || null,
+    attackTypes,
+    at: Date.now()
+  });
+  return killed;
+}
+
 function isHitReactPlaying(animal) {
   if (!animal?.currentAction || !animal?.actions) return false;
   if (animal.currentAction === 'Hit') {
@@ -222,7 +263,7 @@ function isHitReactPlaying(animal) {
   return !!action?.isRunning?.();
 }
 
-function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight, getNearbyMonster, delta }) {
+function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight, getNearbyMonster, onMonsterAttack, delta }) {
   const playerModel = getPlayerModel?.();
   if (!animal?.model || !playerModel?.position) return;
   if (animal.isDead) {
@@ -236,17 +277,39 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   const walkSpeed = Number.isFinite(config.walkSpeed) ? config.walkSpeed : 1.2;
   const runSpeed = Number.isFinite(config.runSpeed) ? config.runSpeed : 4.8;
   const attackDistance = Number.isFinite(config.attackDistance) ? config.attackDistance : 2.3;
+  const monsterAttackRange = Number.isFinite(config.attackRange) ? Math.max(0.5, config.attackRange) : attackDistance;
+  const monsterDetectRange = Number.isFinite(config.monsterDetectRange) ? Math.max(monsterAttackRange, config.monsterDetectRange) : 9;
+  const ownerReturnDistance = Number.isFinite(config.ownerReturnDistance) ? Math.max(1, config.ownerReturnDistance) : 18;
+  const companionAttackDamage = Number.isFinite(config.attackDamage) ? Math.max(1, config.attackDamage) : 3;
 
   const distanceToPlayer = animal.model.position.distanceTo(playerModel.position);
   const data = animal.userData || {};
 
   const isCompanionBehavior = behavior === 'companion';
   const isCompanion = !!animal.model?.userData?.isCompanion;
-  const nearbyMonster = isCompanion ? getNearbyMonster?.(animal.model.position, 9) : null;
+  let nearbyMonster = null;
+  if (isCompanion) {
+    const currentTarget = data.companionAttackTarget;
+    const currentTargetPosition = getCombatTargetPosition(currentTarget);
+    if (currentTargetPosition
+      && !isCombatTargetDead(currentTarget)
+      && currentTargetPosition.distanceTo(animal.model.position) <= monsterDetectRange * 1.5
+      && distanceToPlayer <= ownerReturnDistance) {
+      nearbyMonster = currentTarget;
+    } else {
+      data.companionAttackTarget = null;
+      nearbyMonster = getNearbyMonster?.(animal.model.position, monsterDetectRange) || null;
+    }
+  }
 
-  if (isCompanionBehavior && isCompanion && nearbyMonster?.position) {
+  if (isCompanionBehavior && isCompanion && nearbyMonster && distanceToPlayer <= ownerReturnDistance) {
     data.state = 'companionAttack';
+    data.companionAttackTarget = nearbyMonster;
   } else if (isCompanionBehavior && isCompanion) {
+    data.companionAttackTarget = null;
+    data.companionAttackPhase = null;
+    data.companionAttackHasHit = false;
+
     data.state = 'companionFollow';
   } else if (behavior === 'runAway' && distanceToPlayer <= fleeDistance) {
     data.state = 'runAway';
@@ -318,18 +381,79 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
       animal.playAnimation('Idle', 0.15);
     }
   } else if (data.state === 'companionAttack') {
-    const target = getNearbyMonster?.(animal.model.position, 9);
-    if (target?.position) {
-      const direction = new THREE.Vector3().subVectors(target.position, animal.model.position).setY(0);
+    const target = data.companionAttackTarget || getNearbyMonster?.(animal.model.position, monsterDetectRange);
+    const targetPosition = getCombatTargetPosition(target);
+    if (!targetPosition || isCombatTargetDead(target) || distanceToPlayer > ownerReturnDistance) {
+      data.companionAttackTarget = null;
+      data.companionAttackPhase = null;
+      data.companionAttackHasHit = false;
+      data.state = 'companionFollow';
+      if (!hitReactLocked) animal.playAnimation('Idle', 0.12);
+    } else {
+      data.companionAttackTarget = target;
+      const direction = new THREE.Vector3().subVectors(targetPosition, animal.model.position).setY(0);
       const distance = direction.length();
-      if (distance > attackDistance) {
-        direction.normalize();
+      if (direction.lengthSq() < 0.0001) {
+        direction.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+      }
+      direction.normalize();
+      const nowMs = now;
+      const standoffDistance = Math.max(monsterAttackRange + 0.45, 1.4);
+      const canStartAttack = nowMs >= (data.nextCompanionAttackAt || 0);
+
+      if (!data.companionAttackPhase && distance <= standoffDistance && canStartAttack) {
+        data.companionAttackPhase = 'retreat';
+        data.companionAttackPhaseUntil = nowMs + 1000;
+        data.companionAttackHasHit = false;
+      }
+
+      if (data.companionAttackPhase === 'retreat') {
+        const retreatDirection = direction.clone().multiplyScalar(-1);
+        animal.model.position.addScaledVector(retreatDirection, walkSpeed * 0.9 * delta);
+        animal.model.lookAt(animal.model.position.clone().add(direction));
+        if (!hitReactLocked) animal.playAnimation('Walk', 0.12);
+        if (nowMs >= (data.companionAttackPhaseUntil || 0)) {
+          data.companionAttackPhase = 'lunge';
+          data.companionAttackPhaseStartedAt = nowMs;
+          data.companionAttackPhaseUntil = nowMs + 520;
+          data.companionAttackHasHit = false;
+          animal.currentAction = animal.currentAction === 'Weapon' ? null : animal.currentAction;
+        }
+      } else if (data.companionAttackPhase === 'lunge') {
+        animal.model.position.addScaledVector(direction, (runSpeed + 1.2) * delta);
+        animal.model.lookAt(animal.model.position.clone().add(direction));
+        if (!hitReactLocked) animal.playAnimation('Weapon', 0.08);
+        const elapsed = nowMs - (data.companionAttackPhaseStartedAt || nowMs);
+        if (!data.companionAttackHasHit && elapsed >= 180) {
+          const latestTargetPosition = getCombatTargetPosition(target);
+          const latestDistance = latestTargetPosition
+            ? animal.model.position.distanceTo(latestTargetPosition)
+            : Number.POSITIVE_INFINITY;
+          if (latestDistance <= monsterAttackRange) {
+            const killed = applyCompanionDamageToMonster(target, companionAttackDamage, { animal, onMonsterAttack });
+            if (killed) {
+              data.companionAttackTarget = null;
+            }
+          }
+          data.companionAttackHasHit = true;
+        }
+        if (nowMs >= (data.companionAttackPhaseUntil || 0)) {
+          data.companionAttackPhase = null;
+          data.nextCompanionAttackAt = nowMs + 1000;
+          if (!hitReactLocked) animal.playAnimation('Run', 0.08);
+        }
+      } else if (distance > standoffDistance) {
         animal.model.position.addScaledVector(direction, runSpeed * delta);
         animal.model.lookAt(animal.model.position.clone().add(direction));
         if (!hitReactLocked) animal.playAnimation('Run', 0.1);
-      } else if (!hitReactLocked) {
-        animal.playAnimation('Weapon', 0.08);
-        if (!target.userData?.isDead) target.userData.health = Math.max(0, (target.userData.health || 10) - (6 * delta));
+      } else if (!canStartAttack) {
+        animal.model.lookAt(animal.model.position.clone().add(direction));
+        if (distance < monsterAttackRange * 0.75) {
+          animal.model.position.addScaledVector(direction, -walkSpeed * 0.7 * delta);
+          if (!hitReactLocked) animal.playAnimation('Walk', 0.12);
+        } else if (!hitReactLocked) {
+          animal.playAnimation('Idle', 0.12);
+        }
       }
     }
   } else if (data.state === 'runAway') {
@@ -374,6 +498,7 @@ export function createAnimalManager({
   getTerrainHeight,
   onAnimalRemoved,
   getNearbyMonster,
+  onMonsterAttack,
   isHost = false,
   onRemoteSpawnRequest
 } = {}) {
@@ -422,7 +547,7 @@ export function createAnimalManager({
         animal.update(delta);
         continue;
       }
-      updateAnimalMovement({ animal, config: entry.config || {}, getPlayerModel, getTerrainHeight, getNearbyMonster, delta });
+      updateAnimalMovement({ animal, config: entry.config || {}, getPlayerModel, getTerrainHeight, getNearbyMonster, onMonsterAttack, delta });
     }
   };
 
