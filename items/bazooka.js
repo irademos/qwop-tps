@@ -11,7 +11,7 @@ export class Bazooka extends Weapon {
       fallbackColor: 0x3f5f3f,
       fallbackSize: new THREE.Vector3(0.9, 0.28, 0.28),
       recenterModel: true,
-      holdOffset: new THREE.Vector3(-0.05, 0.12, 0.08),
+      holdOffset: new THREE.Vector3(0.0, 0.3, 0.3),
       holdRotation: new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ')
     });
   }
