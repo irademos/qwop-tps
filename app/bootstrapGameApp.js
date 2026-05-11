@@ -5083,7 +5083,7 @@ async function initCore(runtimeContext) {
   let killPopupTimer = null;
   const showMonsterKillPopup = (totalKills) => {
     const displayCount = Number.isFinite(totalKills) ? Math.max(0, Math.floor(totalKills)) : 0;
-    killPopup.textContent = `☠️ x${displayCount} kills +1`;
+    killPopup.textContent = `☠️ ${displayCount} kills +1`;
     killPopup.classList.add('visible');
     if (killPopupTimer) {
       clearTimeout(killPopupTimer);
