@@ -3911,14 +3911,33 @@ async function initCore(runtimeContext) {
       let nearest = null;
       let nearestDistance = Number.POSITIVE_INFINITY;
       monsters.forEach((monster) => {
-        if (!monster?.position || monster.userData?.isDead) return;
-        const d = monster.position.distanceTo(origin);
+        const monsterPosition = monster?.model?.position || monster?.position;
+        if (!monsterPosition || monster?.isDead || monster?.model?.userData?.isDead || monster?.userData?.isDead) return;
+        const d = monsterPosition.distanceTo(origin);
         if (d <= maxDistance && d < nearestDistance) {
           nearest = monster;
           nearestDistance = d;
         }
       });
       return nearest;
+    },
+    onMonsterAttack: (monster, { damage, killed, sourceId, attackTypes, at } = {}) => {
+      const monsterId = monster?.id || monster?.model?.userData?.id || monster?.userData?.id;
+      if (!monsterId || !Number.isFinite(damage)) return;
+      if (multiplayer && !multiplayer.isHost) {
+        sendMonsterAttackIntent({
+          monsterId,
+          damage,
+          sourcePlayerId: multiplayer.getId?.(),
+          attackTypes,
+          at
+        });
+        return;
+      }
+      handleMonsterDamage?.(monster, { damage, killed, sourceId, attackTypes });
+      if (killed) {
+        window.onMonsterKill?.(monster, { withFriend: true });
+      }
     },
     isHost,
     onRemoteSpawnRequest: requestHostSpawnEvent,
