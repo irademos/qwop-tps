@@ -1202,7 +1202,7 @@ async function initCore(runtimeContext) {
   const getAutoMode = () => {
     const now = new Date();
     const minutes = now.getHours() * 60 + now.getMinutes();
-    if (minutes >= 17 * 60 + 30 || minutes < 8 * 60) {
+    if (minutes >= 21 * 60 || minutes < 6 * 60) {
       return 'night';
     }
     return 'day';
