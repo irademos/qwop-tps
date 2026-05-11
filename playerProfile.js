@@ -1,4 +1,4 @@
-import { ref, get, set, update, runTransaction } from 'firebase/database';
+import { ref, get, set, update, runTransaction, query, orderByChild, limitToLast } from 'firebase/database';
 import { db } from './firebase-init.js';
 import { getCookie, setCookie } from './utils.js';
 import { BASE_HEALTH_SEGMENTS, normalizeHealthSegments } from './healthUtils.js';
@@ -29,6 +29,7 @@ const DEFAULT_STATS = {
   charm: 5,
   luck: 5,
   xp: 0,
+  monsterKills: 0,
   coins: 0
 };
 const DEFAULT_INVENTORY = {};
@@ -168,7 +169,7 @@ function normalizeStatValue(key, value) {
   if (key === 'level') {
     return Math.max(1, Math.floor(numeric));
   }
-  if (key === 'xp' || key === 'coins') {
+  if (key === 'xp' || key === 'monsterKills' || key === 'coins') {
     return Math.max(0, Math.floor(numeric));
   }
   if (['maxHealthSegments', 'maxHungerSegments', 'maxMagicSegments'].includes(key)) {
@@ -212,6 +213,43 @@ function mergeCustomization(customization) {
 
 function mergeSpells(spells) {
   return { ...DEFAULT_SPELLS, ...(spells || {}) };
+}
+
+
+function normalizeLeaderboardEntry(nameKey, profile, metric) {
+  const stats = profile?.stats && typeof profile.stats === 'object' ? profile.stats : {};
+  const value = Number(stats[metric]);
+  return {
+    id: nameKey,
+    name: typeof profile?.name === 'string' && profile.name.trim() ? profile.name.trim() : nameKey,
+    value: Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+  };
+}
+
+async function loadLeaderboard(metric, limit = 10) {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(50, Math.floor(limit))) : 10;
+  const leaderboardQuery = query(
+    ref(db, 'profiles'),
+    orderByChild(`stats/${metric}`),
+    limitToLast(safeLimit)
+  );
+  const snapshot = await get(leaderboardQuery);
+  const entries = [];
+  snapshot.forEach((child) => {
+    entries.push(normalizeLeaderboardEntry(child.key, child.val(), metric));
+  });
+  return entries
+    .filter((entry) => entry.value > 0)
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+    .slice(0, safeLimit);
+}
+
+export async function loadLeaderboards(limit = 10) {
+  const [topKills, topXp] = await Promise.all([
+    loadLeaderboard('monsterKills', limit),
+    loadLeaderboard('xp', limit)
+  ]);
+  return { topKills, topXp };
 }
 
 async function loadProfileForName(profileRef, trimmedName) {

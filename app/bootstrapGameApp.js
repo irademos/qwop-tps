@@ -114,6 +114,7 @@ import {
   deleteProfileData,
   getStoredPinHash,
   getSleepTimestamp,
+  loadLeaderboards,
   loadOrCreateWithPin,
   renameProfile,
   saveCharacterModel,
@@ -4970,6 +4971,7 @@ async function initCore(runtimeContext) {
     charm: playerProfile.stats.charm,
     luck: playerProfile.stats.luck,
     xp: playerProfile.stats.xp,
+    monsterKills: playerProfile.stats.monsterKills,
     coins: playerProfile.stats.coins
   };
   statsState.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
@@ -5072,6 +5074,24 @@ async function initCore(runtimeContext) {
       treasurePopup.classList.remove('visible');
       treasurePopupTimer = null;
     }, 2000);
+  };
+  const killPopup = document.createElement('div');
+  killPopup.id = 'monster-kill-popup';
+  killPopup.setAttribute('aria-live', 'polite');
+  killPopup.setAttribute('aria-atomic', 'true');
+  document.body.appendChild(killPopup);
+  let killPopupTimer = null;
+  const showMonsterKillPopup = (totalKills) => {
+    const displayCount = Number.isFinite(totalKills) ? Math.max(0, Math.floor(totalKills)) : 0;
+    killPopup.textContent = `☠️ x${displayCount} kills +1`;
+    killPopup.classList.add('visible');
+    if (killPopupTimer) {
+      clearTimeout(killPopupTimer);
+    }
+    killPopupTimer = setTimeout(() => {
+      killPopup.classList.remove('visible');
+      killPopupTimer = null;
+    }, 1500);
   };
   const achievementBanner = document.createElement('div');
   achievementBanner.className = 'achievement-banner hidden';
@@ -7903,7 +7923,7 @@ async function initCore(runtimeContext) {
       if (!Number.isFinite(num)) return BASE_MAGIC_SEGMENTS;
       return Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, Math.round(num)));
     }
-    if (key === 'xp') {
+    if (key === 'xp' || key === 'monsterKills') {
       const num = Number(value);
       if (!Number.isFinite(num)) {
         return 0;
@@ -8132,6 +8152,9 @@ async function initCore(runtimeContext) {
   window.getMonsterXpForLevel = getMonsterXpForLevel;
 
   window.onMonsterKill = (monster, { withFriend = false } = {}) => {
+    const currentKills = Number.isFinite(statsState.monsterKills) ? statsState.monsterKills : 0;
+    setStat('monsterKills', currentKills + 1, { skipSave: true });
+    showMonsterKillPopup(statsState.monsterKills);
     const monsterLevel = Number.isFinite(monster?.level) ? monster.level : 1;
     const baseXp = getMonsterXpForLevel(monsterLevel);
     const bonusXp = withFriend ? 50 : 0;
@@ -12661,6 +12684,7 @@ async function initCore(runtimeContext) {
       }
     },
     getPlayerStats: () => ({ ...statsState }),
+    getLeaderboards: (limit = 10) => loadLeaderboards(limit),
     getQuestLog: () => window.questManager?.getQuestLog?.() || [],
     getAchievements: () => getAchievementView(achievementState),
     claimAchievementReward: (achievementId) => {

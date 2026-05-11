@@ -3,6 +3,7 @@ export {
   deleteProfileData,
   getStoredPinHash,
   getSleepTimestamp,
+  loadLeaderboards,
   loadOrCreateWithPin,
   renameProfile,
   saveCharacterModel,
