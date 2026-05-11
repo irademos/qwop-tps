@@ -18,6 +18,7 @@ const TABS = [
 const CHARACTER_STATS = [
   { key: 'level', label: 'Level' },
   { key: 'xp', label: 'XP' },
+  { key: 'monsterKills', label: 'Monster Kills' },
   { key: 'strength', label: 'Strength' },
   { key: 'agility', label: 'Agility' },
   { key: 'smarts', label: 'Smarts' },
@@ -31,6 +32,8 @@ let overlay;
 let panel;
 let inventoryOverlay;
 let inventoryPanel;
+let leaderboardOverlay;
+let leaderboardPanel;
 let context = {};
 let elements = {};
 let activeTab = 'character';
@@ -239,6 +242,10 @@ function buildMultiplayerPanel() {
   const playersList = createElement('ul', 'settings-list');
   playersList.dataset.field = 'players';
 
+  const leaderboardButton = createElement('button', 'settings-button', 'Leaderboard');
+  leaderboardButton.type = 'button';
+  leaderboardButton.dataset.action = 'open-leaderboard';
+
   const reconnectButton = createElement('button', 'settings-button', 'Reconnect');
   reconnectButton.type = 'button';
   reconnectButton.dataset.action = 'reconnect';
@@ -248,12 +255,13 @@ function buildMultiplayerPanel() {
   errorText.dataset.field = 'connection-error';
   errorText.textContent = 'None';
 
-  panelEl.append(statusRow, pingRow, playersTitle, playersList, reconnectButton, errorTitle, errorText);
+  panelEl.append(statusRow, pingRow, playersTitle, playersList, leaderboardButton, reconnectButton, errorTitle, errorText);
 
   elements.connectionStatus = statusRow.querySelector('[data-field="connection-status"]');
   elements.ping = pingRow.querySelector('[data-field="ping"]');
   elements.playersList = playersList;
   elements.connectionError = errorText;
+  elements.leaderboardButton = leaderboardButton;
 
   return panelEl;
 }
@@ -904,6 +912,134 @@ function buildPanels() {
   return body;
 }
 
+
+function buildLeaderboardOverlay() {
+  leaderboardOverlay = document.getElementById('leaderboard-overlay');
+  if (!leaderboardOverlay) {
+    leaderboardOverlay = createElement('div', 'settings-overlay');
+    leaderboardOverlay.id = 'leaderboard-overlay';
+    leaderboardOverlay.style.display = 'none';
+    document.body.appendChild(leaderboardOverlay);
+  }
+  leaderboardOverlay.setAttribute('aria-hidden', 'true');
+
+  leaderboardPanel = createElement('div', 'settings-shell leaderboard-shell');
+  leaderboardPanel.id = 'leaderboard-panel';
+  leaderboardPanel.setAttribute('role', 'dialog');
+  leaderboardPanel.setAttribute('aria-modal', 'true');
+  leaderboardPanel.setAttribute('aria-labelledby', 'leaderboard-title');
+  leaderboardPanel.tabIndex = -1;
+
+  const header = createElement('div', 'settings-header');
+  const title = createElement('h2', 'settings-title', 'Leaderboard');
+  title.id = 'leaderboard-title';
+  const closeButton = createElement('button', 'settings-close', '✕');
+  closeButton.type = 'button';
+  closeButton.dataset.leaderboardAction = 'close';
+  closeButton.setAttribute('aria-label', 'Close leaderboard');
+  header.append(title, closeButton);
+
+  const tabs = createElement('div', 'leaderboard-tabs');
+  tabs.setAttribute('role', 'tablist');
+  const killsTab = createElement('button', 'leaderboard-tab is-active', 'Top Kills');
+  killsTab.type = 'button';
+  killsTab.dataset.leaderboardTab = 'kills';
+  killsTab.setAttribute('role', 'tab');
+  killsTab.setAttribute('aria-selected', 'true');
+  const xpTab = createElement('button', 'leaderboard-tab', 'Top XP');
+  xpTab.type = 'button';
+  xpTab.dataset.leaderboardTab = 'xp';
+  xpTab.setAttribute('role', 'tab');
+  xpTab.setAttribute('aria-selected', 'false');
+  tabs.append(killsTab, xpTab);
+
+  const body = createElement('div', 'leaderboard-body');
+  const status = createElement('div', 'settings-muted', 'Loading leaderboard...');
+  const list = createElement('ol', 'leaderboard-list');
+  body.append(status, list);
+
+  const actions = createElement('div', 'leaderboard-actions');
+  const okButton = createElement('button', 'settings-button', 'OK');
+  okButton.type = 'button';
+  okButton.dataset.leaderboardAction = 'close';
+  actions.append(okButton);
+
+  leaderboardPanel.append(header, tabs, body, actions);
+  leaderboardOverlay.replaceChildren(leaderboardPanel);
+
+  elements.leaderboardTabs = { kills: killsTab, xp: xpTab };
+  elements.leaderboardList = list;
+  elements.leaderboardStatus = status;
+  elements.leaderboardActiveTab = 'kills';
+  elements.leaderboardData = { topKills: [], topXp: [] };
+}
+
+function setLeaderboardTab(tabId) {
+  const safeTab = tabId === 'xp' ? 'xp' : 'kills';
+  elements.leaderboardActiveTab = safeTab;
+  Object.entries(elements.leaderboardTabs || {}).forEach(([id, button]) => {
+    const active = id === safeTab;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  renderLeaderboard();
+}
+
+function renderLeaderboard() {
+  if (!elements.leaderboardList || !elements.leaderboardStatus) return;
+  const activeTab = elements.leaderboardActiveTab === 'xp' ? 'xp' : 'kills';
+  const rows = activeTab === 'xp'
+    ? (elements.leaderboardData?.topXp || [])
+    : (elements.leaderboardData?.topKills || []);
+  const valueLabel = activeTab === 'xp' ? 'XP' : 'kills';
+  elements.leaderboardList.innerHTML = '';
+  if (!rows.length) {
+    elements.leaderboardStatus.textContent = 'No scores yet.';
+    elements.leaderboardStatus.hidden = false;
+    return;
+  }
+  elements.leaderboardStatus.hidden = true;
+  rows.forEach((entry, index) => {
+    const item = createElement('li', 'leaderboard-row');
+    const rank = createElement('span', 'leaderboard-rank', `#${index + 1}`);
+    const name = createElement('span', 'leaderboard-name', entry.name || 'Unknown Player');
+    const value = createElement('span', 'leaderboard-value', `${Math.max(0, Math.floor(entry.value || 0)).toLocaleString()} ${valueLabel}`);
+    item.append(rank, name, value);
+    elements.leaderboardList.appendChild(item);
+  });
+}
+
+async function openLeaderboardOverlay() {
+  if (!leaderboardOverlay || !leaderboardPanel) return;
+  closeOverlay();
+  leaderboardOverlay.style.display = 'flex';
+  leaderboardOverlay.setAttribute('aria-hidden', 'false');
+  syncOverlayBodyState();
+  leaderboardPanel.focus?.();
+  elements.leaderboardStatus.hidden = false;
+  elements.leaderboardStatus.textContent = 'Loading leaderboard...';
+  elements.leaderboardList.innerHTML = '';
+  setLeaderboardTab(elements.leaderboardActiveTab || 'kills');
+  try {
+    if (!context.appState?.getLeaderboards) {
+      throw new Error('Leaderboards unavailable');
+    }
+    elements.leaderboardData = await context.appState.getLeaderboards(10);
+    renderLeaderboard();
+  } catch (error) {
+    console.warn('Failed to load leaderboard:', error);
+    elements.leaderboardStatus.hidden = false;
+    elements.leaderboardStatus.textContent = 'Failed to load leaderboard.';
+  }
+}
+
+function closeLeaderboardOverlay() {
+  if (!leaderboardOverlay) return;
+  leaderboardOverlay.style.display = 'none';
+  leaderboardOverlay.setAttribute('aria-hidden', 'true');
+  syncOverlayBodyState();
+}
+
 function buildInventoryOverlay() {
   if (!inventoryPanel) return;
   inventoryPanel.innerHTML = '';
@@ -1011,7 +1147,8 @@ function closeInventoryOverlay() {
 function syncOverlayBodyState() {
   const isSettingsOpen = overlay?.getAttribute('aria-hidden') === 'false';
   const isInventoryOpen = inventoryOverlay?.getAttribute('aria-hidden') === 'false';
-  document.body.classList.toggle('settings-open', isSettingsOpen || isInventoryOpen);
+  const isLeaderboardOpen = leaderboardOverlay?.getAttribute('aria-hidden') === 'false';
+  document.body.classList.toggle('settings-open', isSettingsOpen || isInventoryOpen || isLeaderboardOpen);
 }
 
 async function handleAction(target) {
@@ -1023,6 +1160,8 @@ async function handleAction(target) {
     if (isMobileView) {
       setListView(true);
     }
+  } else if (action === 'open-leaderboard') {
+    await openLeaderboardOverlay();
   } else if (action === 'reconnect') {
     context.multiplayer?.reconnect?.();
   } else if (action === 'location-retry') {
@@ -1361,10 +1500,23 @@ function bindEvents() {
       closeInventoryOverlay();
     }
   });
+  leaderboardOverlay?.addEventListener('click', (event) => {
+    if (event.target === leaderboardOverlay) {
+      closeLeaderboardOverlay();
+    }
+  });
 
   const handlePanelClick = (event) => {
     const button = event.target.closest('button');
     if (!button) return;
+    if (button.dataset.leaderboardAction === 'close') {
+      closeLeaderboardOverlay();
+      return;
+    }
+    if (button.dataset.leaderboardTab) {
+      setLeaderboardTab(button.dataset.leaderboardTab);
+      return;
+    }
     if (button.dataset.inventoryAction) {
       const action = button.dataset.inventoryAction;
       if (!selectedInventoryId && action !== 'close-info') return;
@@ -1947,6 +2099,7 @@ export function initSettingsPanel({ appState, multiplayer, location, player } = 
   const body = buildPanels();
   panel.append(header, tabs, body);
   buildInventoryOverlay();
+  buildLeaderboardOverlay();
 
   updateCharacterOptions();
   refreshLayout();
