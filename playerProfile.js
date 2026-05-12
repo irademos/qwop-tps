@@ -245,11 +245,29 @@ async function loadLeaderboard(metric, limit = 10) {
 }
 
 export async function loadLeaderboards(limit = 10) {
-  const [topKills, topXp] = await Promise.all([
+  const [killsResult, xpResult] = await Promise.allSettled([
     loadLeaderboard('monsterKills', limit),
     loadLeaderboard('xp', limit)
   ]);
-  return { topKills, topXp };
+
+  if (killsResult.status === 'rejected') {
+    console.warn('Failed to load monster-kill leaderboard:', killsResult.reason);
+  }
+  if (xpResult.status === 'rejected') {
+    console.warn('Failed to load XP leaderboard:', xpResult.reason);
+  }
+
+  if (killsResult.status === 'rejected' && xpResult.status === 'rejected') {
+    throw new AggregateError(
+      [killsResult.reason, xpResult.reason],
+      'Failed to load leaderboards'
+    );
+  }
+
+  return {
+    topKills: killsResult.status === 'fulfilled' ? killsResult.value : [],
+    topXp: xpResult.status === 'fulfilled' ? xpResult.value : []
+  };
 }
 
 async function loadProfileForName(profileRef, trimmedName) {

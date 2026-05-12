@@ -1573,6 +1573,7 @@ function bindEvents() {
 
   panel.addEventListener('click', handlePanelClick);
   inventoryPanel?.addEventListener('click', handlePanelClick);
+  leaderboardPanel?.addEventListener('click', handlePanelClick);
 
   elements.nameInput.addEventListener('input', () => {
     setNameStatus('');
