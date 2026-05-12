@@ -91,6 +91,10 @@ body {
   cursor: not-allowed;
 }
 
+body.map-open #friendly-interact {
+  display: none !important;
+}
+
 .friendly-dialogue {
   position: absolute;
   left: 50%;
