@@ -10725,6 +10725,21 @@ async function initCore(runtimeContext) {
     const lowEndStep = Math.max(1, lowEndBase + adaptiveDegradeLevel);
     return isLowEndTier(currentPerformanceTier) ? lowEndStep : Math.max(1, 1 + adaptiveDegradeLevel);
   };
+  const bucketDeltaSeconds = new Map();
+  const accumulateBucketDeltas = (deltaSeconds) => {
+    if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return;
+    Object.keys(LOW_END_BUCKET_INTERVALS).forEach((bucket) => {
+      bucketDeltaSeconds.set(bucket, (bucketDeltaSeconds.get(bucket) || 0) + deltaSeconds);
+    });
+  };
+  const consumeBucketDelta = (bucket, fallbackDeltaSeconds = 0) => {
+    const accumulated = bucketDeltaSeconds.get(bucket);
+    bucketDeltaSeconds.set(bucket, 0);
+    if (Number.isFinite(accumulated) && accumulated > 0) {
+      return accumulated;
+    }
+    return Number.isFinite(fallbackDeltaSeconds) && fallbackDeltaSeconds > 0 ? fallbackDeltaSeconds : 0;
+  };
   const shouldRunBucket = (bucket) => (frameIndex % getAdaptiveInterval(bucket)) === 0;
   const processIncomingPeerDataQueue = () => withSubsystemTiming('incomingQueue', () => {
     if (!canProcessIncomingPeerData || pendingIncomingPeerData.length === 0) {
@@ -13158,6 +13173,7 @@ async function initCore(runtimeContext) {
     const frameDelta = clock.getDelta();
     frameIndex += 1;
     lastFrameDurationMs = frameDelta * 1000;
+    accumulateBucketDeltas(frameDelta);
     if (mapViewEnabled && playerControls?.body && playerModel) {
       const { x, y, z } = playerModel.position;
       playerControls.body.setTranslation({ x, y, z }, true);
@@ -13467,6 +13483,7 @@ async function initCore(runtimeContext) {
 
     if (shouldRunBucket('pickups')) {
       withSubsystemTiming('pickups', () => {
+        const pickupDeltaSeconds = consumeBucketDelta('pickups', frameDelta);
         const pickupTime = performance.now() * 0.002;
         const shouldCheckPickups = !PERF.throttlePickups || now - lastPickupCheckMs >= PICKUP_CHECK_INTERVAL_MS;
         if (shouldCheckPickups) {
@@ -13544,7 +13561,7 @@ async function initCore(runtimeContext) {
         }
         const pickupAttractRadius = getPickupAttractRadius();
         if (!playerDead && playerModel.position.distanceTo(pickup.position) <= pickupAttractRadius) {
-          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
         }
 
         if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
@@ -13586,7 +13603,7 @@ async function initCore(runtimeContext) {
         }
         const pickupAttractRadius = getPickupAttractRadius();
         if (!playerDead && playerModel.position.distanceTo(pickup.position) <= pickupAttractRadius) {
-          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
         }
 
         if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
@@ -13657,7 +13674,7 @@ async function initCore(runtimeContext) {
         const phase = pickup.userData.phase ?? 0;
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
         if (!playerDead && playerModel.position.distanceTo(pickup.position) <= getPickupAttractRadius()) {
-          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
         }
 
         if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
@@ -13680,10 +13697,10 @@ async function initCore(runtimeContext) {
           const pickupPosition = pickupMesh?.position || pickup.position;
           const shouldHome = pickup.homeTargetModel || (pickupPosition && playerModel.position.distanceTo(pickupPosition) <= getPickupAttractRadius());
           if (shouldHome && pickupMesh) {
-            attractPickupToPlayer(pickupMesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
+            attractPickupToPlayer(pickupMesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
           } else if (shouldHome && pickup.position) {
             const nextPosition = pickup.position.clone();
-            attractPickupToPlayer(nextPosition, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
+            attractPickupToPlayer(nextPosition, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
             mushroomController?.updatePickupPosition?.(pickup, nextPosition);
           }
         }
@@ -13707,7 +13724,7 @@ async function initCore(runtimeContext) {
         if (targetModel && !playerDead) {
           const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= getPickupAttractRadius();
           if (shouldHome) {
-            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
+            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
           }
         }
         if (shouldCheckPickups && pickupWood(pickup)) continue;
@@ -13719,7 +13736,7 @@ async function initCore(runtimeContext) {
           continue;
         }
         if (!playerDead) {
-          attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+          attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
         }
         if (shouldCheckPickups && pickupMeat(pickup)) continue;
       }
@@ -13732,7 +13749,7 @@ async function initCore(runtimeContext) {
         pickup.mesh.rotation.y += 0.02;
         const targetModel = pickup.homeTargetModel || playerModel;
         if (targetModel && !playerDead) {
-          attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
+          attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
         }
         if (shouldCheckPickups && pickupZombieBrains(pickup)) continue;
       }
@@ -13750,7 +13767,7 @@ async function initCore(runtimeContext) {
         pickup.mesh.position.y = pickup.mesh.userData.baseY + Math.sin(pickupTime + phase) * 0.08;
         const targetModel = pickup.homeTargetModel || playerModel;
         if (targetModel && !playerDead) {
-          attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, frameDelta);
+          attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
         }
         if (shouldCheckPickups && pickupSalt(pickup)) continue;
       }
@@ -13921,6 +13938,7 @@ async function initCore(runtimeContext) {
     const isHostNow = !multiplayer || multiplayer.isHost;
     if (shouldRunBucket('ai')) {
       withSubsystemTiming('ai', () => {
+        const aiBucketDeltaSeconds = consumeBucketDelta('ai', mixerDelta);
         const aiNowMs = Date.now();
         let removedDeadMonsters = false;
         monsters = monsters.filter(monster => {
@@ -13942,7 +13960,7 @@ async function initCore(runtimeContext) {
           window.monsters = monsters;
         }
         if (animalManager) {
-          animalManager.update(mixerDelta);
+          animalManager.update(aiBucketDeltaSeconds);
           void animalManager.maybeSpawnDogByTravelDistance?.();
           animals = animalManager.getAnimals();
           runtimeContext.entities.animals = animals;
@@ -14027,13 +14045,13 @@ async function initCore(runtimeContext) {
                 const elapsedAiSeconds = Math.max(0, (aiNowMs - lastAIUpdateMs) / 1000);
                 const aiDeltaSeconds = Math.min(
                   MAX_AI_DELTA_SECONDS,
-                  lastAIUpdateMs > 0 ? elapsedAiSeconds : mixerDelta
+                  lastAIUpdateMs > 0 ? elapsedAiSeconds : aiBucketDeltaSeconds
                 );
                 monster.lastAIUpdateMs = aiNowMs;
                 monster.updateAI(aiDeltaSeconds, playerModel, otherPlayers, aiContext);
               }
             } else {
-              monster.updateAI(mixerDelta, playerModel, otherPlayers, aiContext);
+              monster.updateAI(aiBucketDeltaSeconds, playerModel, otherPlayers, aiContext);
             }
             return;
           }
@@ -14044,7 +14062,7 @@ async function initCore(runtimeContext) {
               const elapsedAiSeconds = Math.max(0, (aiNowMs - lastBackgroundAi) / 1000);
               const aiDelta = Math.min(
                 MAX_AI_DELTA_SECONDS,
-                lastBackgroundAi > 0 ? elapsedAiSeconds : mixerDelta
+                lastBackgroundAi > 0 ? elapsedAiSeconds : aiBucketDeltaSeconds
               );
               monster.lastBackgroundAIUpdateMs = aiNowMs;
               monster.updateAI(aiDelta, playerModel, otherPlayers, aiContext);
@@ -14055,14 +14073,14 @@ async function initCore(runtimeContext) {
       }
         } else {
           // non-host prediction
-          monsters.forEach(monster => monster?.update?.(mixerDelta));
+          monsters.forEach(monster => monster?.update?.(aiBucketDeltaSeconds));
         }
 
         // Friendlies: same idea—do NOT pass 0 deltas
-        friendlyNpcManager?.update({ delta: mixerDelta, isHost: isHostNow });
+        friendlyNpcManager?.update({ delta: aiBucketDeltaSeconds, isHost: isHostNow });
         const merchantFriendly = getMerchantFriendlyFeature();
         if (merchantFriendly?.updateAI) {
-          merchantFriendly.updateAI(mixerDelta, playerModel, otherPlayers);
+          merchantFriendly.updateAI(aiBucketDeltaSeconds, playerModel, otherPlayers);
         }
       });
     }
