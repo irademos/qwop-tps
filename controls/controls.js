@@ -134,6 +134,7 @@ const AUTO_AIM_TARGET_CENTER_Y = 0.9;
 const AUTO_AIM_MANUAL_BREAK_THRESHOLD_RAD = 0.2;
 const AUTO_AIM_MANUAL_BREAK_DECAY_MS = 250;
 const AUTO_AIM_WHEEL_BREAK_THRESHOLD = 140;
+const AUTO_AIM_CAMERA_LINGER_MS = 3000;
 const AUTO_AIM_ARC_CONFIG = Object.freeze({
   bow: { nearDistance: 6, farDistance: 45, maxLoftRadians: 0.24 },
   bomb: { nearDistance: 4, farDistance: 36, maxLoftRadians: 0.48 },
@@ -328,6 +329,10 @@ export class PlayerControls {
     this.autoAimCurrentPitch = 0;
     this.autoAimCameraDirection = null;
     this.autoAimTargetModel = null;
+    this.autoAimCameraLingerUntil = 0;
+    this.autoAimCameraLingerDirection = null;
+    this.autoAimCameraLingerTargetModel = null;
+    this.autoAimCameraLingerTargetPosition = null;
     this.autoAimManualBreakAmount = 0;
     this.autoAimLastManualInputAt = 0;
     this.baseCameraOffset = this.cameraOffset.clone();
@@ -1041,6 +1046,7 @@ export class PlayerControls {
       const didThrow = this.throwInventoryItem?.(throwItemId, position, direction);
       if (didThrow) {
         this.playAction(hand === 'left' ? 'throwLeft' : 'throw');
+        this.startAutoAimCameraLinger(autoAimDirection);
       }
       this.mobileActionState = 'default';
       this.refreshActionButtons();
@@ -2785,14 +2791,14 @@ export class PlayerControls {
     let desiredCameraPosition;
     let cameraLookTarget = orbitCenter;
     const engagedTargetPosition = this.engagedTarget?.model?.position;
-    const autoAimTargetPosition = this.autoAimTargetModel?.position;
+    const autoAimLookPosition = this.getAutoAimCameraLookPosition(now);
     const hasValidEngagedTarget = this.isEngaged
       && this.engagedDirection
       && Number.isFinite(engagedTargetPosition?.x)
       && Number.isFinite(engagedTargetPosition?.z);
-    const hasValidAutoAimTarget = this.shouldUseAutoAimCameraDirection()
-      && Number.isFinite(autoAimTargetPosition?.x)
-      && Number.isFinite(autoAimTargetPosition?.z);
+    const hasValidAutoAimTarget = this.shouldUseAutoAimCameraDirection(now)
+      && Number.isFinite(autoAimLookPosition?.x)
+      && Number.isFinite(autoAimLookPosition?.z);
     if (hasValidEngagedTarget) {
       const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
       this.yaw = engagedYaw;
@@ -2807,7 +2813,7 @@ export class PlayerControls {
         .add(behindOffset)
         .addScaledVector(engagedRight, ENGAGED_CAMERA_OFFSET.right);
     } else if (hasValidAutoAimTarget) {
-      const targetLookPosition = autoAimTargetPosition.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+      const targetLookPosition = autoAimLookPosition.clone();
       const autoAimFacing = targetLookPosition.clone().sub(orbitCenter);
       autoAimFacing.y = 0;
       if (autoAimFacing.lengthSq() > 0.0001) {
@@ -2890,8 +2896,9 @@ export class PlayerControls {
     }
 
     this.camera.position.copy(resolvedCameraPosition);
-    if (this.shouldUseAutoAimCameraDirection() && !hasValidAutoAimTarget) {
-      cameraLookTarget = resolvedCameraPosition.clone().add(this.autoAimCameraDirection);
+    if (this.shouldUseAutoAimCameraDirection(now) && !hasValidAutoAimTarget) {
+      const fallbackAutoAimDirection = this.autoAimCameraDirection || this.autoAimCameraLingerDirection;
+      cameraLookTarget = resolvedCameraPosition.clone().add(fallbackAutoAimDirection);
     }
     this.camera.lookAt(cameraLookTarget);
 
@@ -3315,11 +3322,13 @@ export class PlayerControls {
   attemptFireProjectileForHand(hand = 'right') {
     const equippedWeapon = this.getEquippedWeapon(hand);
     if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
-      const direction = this.getAutoAimDirection(equippedWeapon) ?? this.getAimDirection(true);
+      const autoAimDirection = this.getAutoAimDirection(equippedWeapon);
+      const direction = autoAimDirection ?? this.getAimDirection(true);
       const position = this.getProjectileSpawnPosition(direction);
       const fired = this.throwBomb(position, direction);
       if (fired) {
         this.playAction('throw');
+        this.startAutoAimCameraLinger(autoAimDirection);
       }
       return fired;
     }
@@ -3414,6 +3423,7 @@ export class PlayerControls {
         this.multiplayer.getId()
       );
     }
+    this.startAutoAimCameraLinger(autoAimDirection);
     return true;
   }
 
@@ -3435,6 +3445,7 @@ export class PlayerControls {
     if (active) {
       this.aimReleaseHoldUntil = null;
       this.autoAimBreakUntilRelease = false;
+      this.clearAutoAimCameraLinger();
       this.autoAimCameraDirection = null;
       this.autoAimTargetModel = null;
       this.autoAimManualBreakAmount = 0;
@@ -3472,6 +3483,7 @@ export class PlayerControls {
       ? { itemId: this.mobileThrowAimItemId, type: 'throw' }
       : this.getEquippedWeapon();
     if (!this.isFireHeld || (!this.mobileThrowAimItemId && !this.shouldHoldToFire())) {
+      if (this.isAutoAimCameraLingerActive()) return;
       this.autoAimCameraDirection = null;
       this.autoAimTargetModel = null;
       return;
@@ -3493,6 +3505,48 @@ export class PlayerControls {
     const d = direction.clone().normalize();
     this.autoAimCameraDirection = d;
     this.syncCameraOrbitToAutoAimDirection(d);
+  }
+
+  startAutoAimCameraLinger(direction) {
+    if (!direction || !this.autoAimTargetModel?.position || this.isEngaged) return;
+    const d = direction.clone().normalize();
+    const now = performance.now();
+    const lingerUntil = now + AUTO_AIM_CAMERA_LINGER_MS;
+    this.autoAimCameraDirection = d;
+    this.autoAimCameraLingerDirection = d.clone();
+    this.autoAimCameraLingerTargetModel = this.autoAimTargetModel;
+    this.autoAimCameraLingerTargetPosition = this.autoAimTargetModel.position
+      .clone()
+      .add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+    this.autoAimCameraLingerUntil = lingerUntil;
+    this.aimReleaseHoldUntil = Math.max(this.aimReleaseHoldUntil || 0, lingerUntil);
+    this.syncCameraOrbitToAutoAimDirection(d);
+  }
+
+  clearAutoAimCameraLinger() {
+    this.autoAimCameraLingerUntil = 0;
+    this.autoAimCameraLingerDirection = null;
+    this.autoAimCameraLingerTargetModel = null;
+    this.autoAimCameraLingerTargetPosition = null;
+  }
+
+  isAutoAimCameraLingerActive(now = performance.now()) {
+    return !!this.autoAimCameraLingerDirection
+      && !!this.autoAimCameraLingerTargetPosition
+      && now < (this.autoAimCameraLingerUntil || 0);
+  }
+
+  getAutoAimCameraLookPosition(now = performance.now()) {
+    if (this.isAutoAimCameraLingerActive(now) && !this.isFireHeld) {
+      return this.autoAimCameraLingerTargetPosition.clone();
+    }
+    if (this.autoAimTargetModel?.position) {
+      return this.autoAimTargetModel.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+    }
+    if (this.isAutoAimCameraLingerActive(now)) {
+      return this.autoAimCameraLingerTargetPosition.clone();
+    }
+    return null;
   }
 
   syncCameraOrbitToAutoAimDirection(direction) {
@@ -3570,7 +3624,15 @@ export class PlayerControls {
   }
 
   breakAutoAimFromManualCamera(inputAmount = Infinity) {
-    if (!this.isAiming || !this.isFireHeld || this.isEngaged) return;
+    if (this.isEngaged) return;
+    if (!this.isAiming || !this.isFireHeld) {
+      if (this.isAutoAimCameraLingerActive()) {
+        this.clearAutoAimCameraLinger();
+        this.autoAimCameraDirection = null;
+        this.autoAimTargetModel = null;
+      }
+      return;
+    }
     if (this.autoAimBreakUntilRelease) return;
 
     const amount = Number.isFinite(inputAmount) ? Math.abs(inputAmount) : Infinity;
@@ -3728,10 +3790,13 @@ export class PlayerControls {
     return !this.isEngaged && !this.isAiming;
   }
 
-  shouldUseAutoAimCameraDirection() {
-    return !!this.autoAimCameraDirection
-      && !!this.autoAimTargetModel?.position
-      && this.isFireHeld
+  shouldUseAutoAimCameraDirection(now = performance.now()) {
+    const lingering = this.isAutoAimCameraLingerActive(now);
+    const hasDirection = !!this.autoAimCameraDirection || !!this.autoAimCameraLingerDirection;
+    const hasTarget = !!this.autoAimTargetModel?.position || !!this.autoAimCameraLingerTargetPosition;
+    return hasDirection
+      && hasTarget
+      && (this.isFireHeld || lingering)
       && !this.autoAimBreakUntilRelease
       && !this.isEngaged;
   }
