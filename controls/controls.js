@@ -3441,7 +3441,7 @@ export class PlayerControls {
       this.autoAimLastManualInputAt = 0;
     } else {
       if (this.autoAimCameraDirection) {
-        this.syncCameraOrbitToCameraDirection();
+        this.syncCameraOrbitToCurrentCameraPosition();
       }
       this.aimReleaseHoldUntil = performance.now() + this.aimReleaseDelayMs;
       this.autoAimBreakUntilRelease = false;
@@ -3512,9 +3512,47 @@ export class PlayerControls {
   }
 
 
+  getPlayerOrbitCenter() {
+    if (this.playerModel?.position) {
+      return this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
+    }
+    if (this.controls?.target) {
+      return this.controls.target.clone();
+    }
+    return null;
+  }
+
+  syncCameraOrbitToCurrentCameraPosition() {
+    if (!this.camera) return;
+    const orbitCenter = this.getPlayerOrbitCenter();
+    if (!orbitCenter) {
+      this.syncCameraOrbitToCameraDirection();
+      return;
+    }
+
+    // Auto-aim cameras can look past the player toward a target, so deriving the
+    // restored orbit from the camera's facing direction can choose the opposite
+    // side of the player.  Preserve the actual camera side instead.
+    const cameraDelta = this.camera.position.clone().sub(orbitCenter);
+    const horizontalDistance = Math.hypot(cameraDelta.x, cameraDelta.z);
+    if (horizontalDistance <= 0.0001) {
+      this.syncCameraOrbitToCameraDirection();
+      return;
+    }
+
+    this.yaw = Math.atan2(cameraDelta.x, cameraDelta.z);
+
+    const cameraOffset = this.cameraOffset || this.aimCameraOffset || this.baseCameraOffset;
+    const cameraOffsetY = cameraOffset?.y ?? 0;
+    const pitchRatio = THREE.MathUtils.clamp((cameraDelta.y - cameraOffsetY) / 5, -1, 1);
+    const maxPitch = Math.PI / 3;
+    const minPitch = -Math.PI / 8;
+    this.pitch = THREE.MathUtils.clamp(Math.asin(pitchRatio), minPitch, maxPitch);
+  }
+
   syncCameraOrbitToCameraDirection() {
     if (!this.camera) return;
-    const d = new THREE.Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion);
+    const d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
     if (d.lengthSq() <= 0.0001) return;
     d.normalize();
     this.syncCameraOrbitToAutoAimDirection(d);
