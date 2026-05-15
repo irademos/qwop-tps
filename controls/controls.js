@@ -3512,7 +3512,7 @@ export class PlayerControls {
   }
 
 
-  getPlayerOrbitCenter() {
+  getPlayerOrbitBaseCenter() {
     if (this.playerModel?.position) {
       return this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
     }
@@ -3524,27 +3524,38 @@ export class PlayerControls {
 
   syncCameraOrbitToCurrentCameraPosition() {
     if (!this.camera) return;
-    const orbitCenter = this.getPlayerOrbitCenter();
-    if (!orbitCenter) {
+    const orbitBaseCenter = this.getPlayerOrbitBaseCenter();
+    if (!orbitBaseCenter) {
       this.syncCameraOrbitToCameraDirection();
       return;
     }
 
     // Auto-aim cameras can look past the player toward a target, so deriving the
     // restored orbit from the camera's facing direction can choose the opposite
-    // side of the player.  Preserve the actual camera side instead.
-    const cameraDelta = this.camera.position.clone().sub(orbitCenter);
+    // side of the player. Preserve the camera's actual world-space side instead.
+    const cameraDelta = this.camera.position.clone().sub(orbitBaseCenter);
     const horizontalDistance = Math.hypot(cameraDelta.x, cameraDelta.z);
     if (horizontalDistance <= 0.0001) {
       this.syncCameraOrbitToCameraDirection();
       return;
     }
 
-    this.yaw = Math.atan2(cameraDelta.x, cameraDelta.z);
+    // Normal camera placement rotates both the look-target offset and camera
+    // offset by yaw. Invert that same transform rather than assuming a zero-X
+    // offset; otherwise shoulder/aim offsets restore about 90 degrees off.
+    const cameraOffset = this.cameraOffset || this.aimCameraOffset || this.baseCameraOffset || new THREE.Vector3(0, 0, 1);
+    const targetOffset = this.cameraTargetOffset || this.aimCameraTargetOffset || this.baseCameraTargetOffset || new THREE.Vector3();
+    const combinedOffsetX = (cameraOffset.x ?? 0) + (targetOffset.x ?? 0);
+    const combinedOffsetZ = (cameraOffset.z ?? 0) + (targetOffset.z ?? 0);
+    const combinedHorizontalDistance = Math.hypot(combinedOffsetX, combinedOffsetZ);
+    if (combinedHorizontalDistance <= 0.0001) {
+      this.yaw = Math.atan2(-cameraDelta.x, cameraDelta.z);
+    } else {
+      this.yaw = Math.atan2(cameraDelta.z, cameraDelta.x) - Math.atan2(combinedOffsetZ, combinedOffsetX);
+    }
 
-    const cameraOffset = this.cameraOffset || this.aimCameraOffset || this.baseCameraOffset;
-    const cameraOffsetY = cameraOffset?.y ?? 0;
-    const pitchRatio = THREE.MathUtils.clamp((cameraDelta.y - cameraOffsetY) / 5, -1, 1);
+    const combinedOffsetY = (cameraOffset.y ?? 0) + (targetOffset.y ?? 0);
+    const pitchRatio = THREE.MathUtils.clamp((cameraDelta.y - combinedOffsetY) / 5, -1, 1);
     const maxPitch = Math.PI / 3;
     const minPitch = -Math.PI / 8;
     this.pitch = THREE.MathUtils.clamp(Math.asin(pitchRatio), minPitch, maxPitch);
