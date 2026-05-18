@@ -140,6 +140,8 @@ export function createFriendlyNpcManager({
       rot: { x: rot.x, y: rot.y, z: rot.z, w: rot.w },
       llamaSpeech: 'Ready to grind XP.',
       llamaInventory: {},
+      llamaDialogueHistory: [],
+      llamaCoins: 0,
       llamaHunger: LLAMA_MAX_HUNGER_SEGMENTS,
       llamaMaxHunger: LLAMA_MAX_HUNGER_SEGMENTS,
       updatedAt: Date.now(),
@@ -1076,6 +1078,8 @@ const getHealthForLevel = (level) => {
           friendly.model.userData.llamaEquipped = record.llamaEquipped || 'sword';
           friendly.model.userData.llamaInventory = normalizeLlamaInventory(record.llamaInventory);
           friendly.model.userData.llamaMaxHunger = Number.isFinite(record.llamaMaxHunger) ? record.llamaMaxHunger : LLAMA_MAX_HUNGER_SEGMENTS;
+          friendly.model.userData.llamaDialogueHistory = Array.isArray(record.llamaDialogueHistory) ? record.llamaDialogueHistory : [];
+          friendly.model.userData.llamaCoins = Number.isFinite(record.llamaCoins) ? record.llamaCoins : 0;
           setLlamaHunger(friendly, Number.isFinite(record.llamaHunger) ? record.llamaHunger : friendly.model.userData.llamaMaxHunger);
           friendly.enableDanceWhileEngaged = false;
           friendly.alwaysShowHealthBar = true;
@@ -1324,6 +1328,36 @@ const getHealthForLevel = (level) => {
     });
   };
 
+
+  const getLlamaFriendly = () => friendlies.find((entry) => isLlamaId(entry?.id) && entry?.model) || null;
+
+  const getLlamaDialogueHistory = () => {
+    const llama = getLlamaFriendly();
+    return Array.isArray(llama?.model?.userData?.llamaDialogueHistory) ? llama.model.userData.llamaDialogueHistory : [];
+  };
+
+  const pushLlamaDialogueHistory = (entry) => {
+    const llama = getLlamaFriendly();
+    if (!llama?.model?.userData || !entry) return;
+    const history = getLlamaDialogueHistory().slice(-19);
+    history.push(entry);
+    llama.model.userData.llamaDialogueHistory = history;
+    persistFriendlyState(llama, { force: true });
+  };
+
+  const getLlamaCoins = () => {
+    const llama = getLlamaFriendly();
+    return Number.isFinite(llama?.model?.userData?.llamaCoins) ? llama.model.userData.llamaCoins : 0;
+  };
+
+  const adjustLlamaCoins = (delta = 0) => {
+    const llama = getLlamaFriendly();
+    if (!llama?.model?.userData) return 0;
+    const next = Math.max(0, (Number.isFinite(llama.model.userData.llamaCoins) ? llama.model.userData.llamaCoins : 0) + Math.round(Number(delta) || 0));
+    llama.model.userData.llamaCoins = next;
+    persistFriendlyState(llama, { force: true });
+    return next;
+  };
   return {
     friendlies,
     setHost,
@@ -1331,6 +1365,12 @@ const getHealthForLevel = (level) => {
     onRoomReady,
     update,
     removeFriendlyById,
-    spawnFriendlyAt
+    spawnFriendlyAt,
+    getLlamaFriendly,
+    getLlamaDialogueHistory,
+    pushLlamaDialogueHistory,
+    getLlamaCoins,
+    adjustLlamaCoins,
+    getLlamaInventory
   };
 }

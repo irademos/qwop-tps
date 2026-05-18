@@ -4097,6 +4097,7 @@ async function initCore(runtimeContext) {
     onFoodPickupCollected: (target, actorPosition) => collectPickupForLlama(target, actorPosition),
     onMonsterHit: handleMonsterDamage
   });
+  window.friendlyNpcManager = friendlyNpcManager;
   if (multiplayer?.roomId) {
     friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
   }

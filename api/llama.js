@@ -245,6 +245,29 @@ export default async function handler(req, res) {
   }
 
   const body = readJsonBody(req.body);
+  if (body.interactionMode === 'greeting' || body.interactionMode === 'request') {
+    const system = body.interactionMode === 'greeting'
+      ? 'Return JSON only. For first meeting, produce poetic intro as Llama. For history, produce exactly 2 greeting sentences.'
+      : 'Return JSON only with keys reply and status where status is complete or incomplete.';
+    const user = body.interactionMode === 'greeting'
+      ? `History: ${JSON.stringify(body.history || [])}`
+      : `History: ${JSON.stringify(body.history || [])}
+Player: ${body.player || 'Player'}
+Request: ${body.request || ''}
+Decide if complete or incomplete.`;
+    const controller2 = new AbortController();
+    const timeout2 = setTimeout(() => controller2.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const upstream = await fetch(GROQ_CHAT_COMPLETIONS_URL, { method:'POST', headers:{ Authorization:`Bearer ${apiKey}`, 'Content-Type':'application/json' }, body: JSON.stringify({ model:GROQ_MODEL, temperature:0.7, max_tokens:220, response_format:{type:'json_object'}, messages:[{role:'system',content:system},{role:'user',content:user}] }), signal: controller2.signal });
+      const data = upstream.ok ? await upstream.json() : null;
+      const content = data?.choices?.[0]?.message?.content || '{}';
+      let parsed = {};
+      try { parsed = JSON.parse(content); } catch {}
+      return res.status(200).json({ interaction: { greeting: sanitizeText(parsed.greeting || parsed.reply || '', 220), reply: sanitizeText(parsed.reply || parsed.greeting || '', 220), status: (sanitizeText(parsed.status, 20).toLowerCase()==='complete'?'complete':'incomplete') } });
+    } catch (e) {
+      return res.status(200).json({ interaction: { greeting: 'I am Llama, vessel of a higher ember.', reply: 'Your request remains incomplete, but I am listening.', status: 'incomplete' } });
+    } finally { clearTimeout(timeout2); }
+  }
   const prompt = buildPrompt(body.state || {}, body);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
