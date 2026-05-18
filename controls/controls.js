@@ -1838,6 +1838,8 @@ export class PlayerControls {
   startFriendlyInteraction(friendly) {
     if (!friendly) return;
     const isMerchant = friendly?.model?.userData?.npcRole === 'merchant';
+    const isLlama = friendly?.model?.userData?.npcKind === 'llama';
+    if (isLlama) { this.startLlamaInteraction(friendly); return; }
     const choice = isMerchant
       ? MERCHANT_DIALOGUE
       : this.questManager?.getDialogueForFriendly(friendly, FRIENDLY_DIALOGUE_POOL) || null;
@@ -1851,6 +1853,30 @@ export class PlayerControls {
     this.updateFriendlyInteractionUI();
   }
 
+
+  async startLlamaInteraction(friendly) {
+    this.isInteracting = true;
+    this.activeFriendly = friendly;
+    const manager = window.friendlyNpcManager;
+    const history = manager?.getLlamaDialogueHistory?.() || [];
+    const prompt = history.length
+      ? `History: ${JSON.stringify(history.slice(-12))}. Respond with JSON {greeting:"2 sentences"}.`
+      : 'No history yet. Respond with JSON {greeting:"Introduce yourself as Llama, poetic warlock who draws wisdom from a superior being"}';
+    let greeting = 'The wind carries old names. I am Llama.';
+    try {
+      const res = await fetch('/api/llama', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ interactionMode:'greeting', prompt, history }) });
+      const data = await res.json();
+      greeting = data?.interaction?.greeting || data?.decision?.speak || greeting;
+    } catch {}
+    manager?.pushLlamaDialogueHistory?.({ type:'greeting', text:greeting, at:Date.now() });
+    this.activeDialogue = { blocks:[greeting], responses:[
+      { label:'Can I help you', llamaAction:'help' },
+      { label:'Do you have anything to trade', llamaAction:'trade' },
+      { label:'Goodbye', reply:'Walk in strange light.' }
+    ]};
+    this.dialogueIndex=0; this.awaitingResponse=true; this.awaitingExit=false;
+    this.renderFriendlyDialogue(); this.updateFriendlyInteractionUI();
+  }
   advanceFriendlyDialogue() {
     if (!this.isInteracting) return;
     if (this.awaitingExit) {
@@ -2943,8 +2969,38 @@ export class PlayerControls {
     if (option?.merchantAction) {
       void import('./merchantPanel.js').then(({ openMerchantPanel }) => openMerchantPanel(option.merchantAction));
     }
+    if (option?.llamaAction === 'trade') {
+      void import('./llamaPanel.js').then(({ openLlamaTradePanel }) => openLlamaTradePanel());
+    }
+    if (option?.llamaAction === 'help') {
+      const request = window.prompt('What request do you have for Llama?');
+      if (request) {
+        this.sendLlamaHelpRequest(request);
+      }
+    }
   }
 
+
+  async sendLlamaHelpRequest(requestText) {
+    const manager = window.friendlyNpcManager;
+    const history = manager?.getLlamaDialogueHistory?.() || [];
+    const payload = {
+      interactionMode: 'request',
+      history,
+      player: window.playerName || 'Player',
+      request: requestText,
+      requestStatus: 'incomplete'
+    };
+    let reply = 'I will consider your request beneath the old stars.';
+    try {
+      const res = await fetch('/api/llama', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const data = await res.json();
+      reply = data?.interaction?.reply || data?.decision?.speak || reply;
+      const status = data?.interaction?.status || 'incomplete';
+      manager?.pushLlamaDialogueHistory?.({ type:'request', player: payload.player, request: requestText, status, reply, at: Date.now() });
+    } catch {}
+    this.friendlyDialogueTextEl.textContent = reply;
+  }
   getWeapons() {
     const weapons = Object.values(appContext.entities.weapons || window.weapons || {}).filter(Boolean);
     const pickups = Array.isArray(window.weaponPickups) ? window.weaponPickups : [];

@@ -67,6 +67,9 @@ export function createEntityPersistence({
       payload.llamaInventory = userData.llamaInventory;
     }
     if (Number.isFinite(userData.llamaHunger)) payload.llamaHunger = userData.llamaHunger;
+
+    if (Array.isArray(userData.llamaDialogueHistory)) payload.llamaDialogueHistory = userData.llamaDialogueHistory;
+    if (Number.isFinite(userData.llamaCoins)) payload.llamaCoins = userData.llamaCoins;
     if (Number.isFinite(userData.llamaMaxHunger)) payload.llamaMaxHunger = userData.llamaMaxHunger;
 
     if (includeTransform && entity.model) {
