@@ -17,6 +17,15 @@ import { createCharacterSpawner } from "./characters/CharacterSpawn.js";
 const FRIENDLY_MODELS = [
   "/models/cowboy.fbx"
 ];
+const LLAMA_ID = "friendly:llama";
+const LLAMA_NAME = "Llama";
+const LLAMA_MODEL = "/models/Chimpanzee.fbx";
+const LLAMA_DECISION_INTERVAL_MS = 10_000;
+const LLAMA_REQUEST_TIMEOUT_MS = 5_000;
+const LLAMA_ACTION_DURATION_MS = 3_000;
+const LLAMA_SPEECH_MAX_CHARS = 96;
+const LLAMA_PROMPT_NEARBY_RADIUS = 32;
+const LLAMA_DRIFT_STOP_DISTANCE = 3.25;
 const FRIENDLY_MAX_ACTIVE = 6;
 const FRIENDLY_ACTIVE_RADIUS = 360;
 const FRIENDLY_PLAYER_SPAWN_BLOCK_RADIUS = 32;
@@ -60,6 +69,11 @@ export function createFriendlyNpcManager({
   let unsubscribeUpdates = null;
   let currentHost = !!isHost;
   let spawnedCount = 0;
+  let llamaRequestInFlight = false;
+  let llamaLastRequestAt = 0;
+  let llamaDecision = null;
+  let llamaActionStartedAt = 0;
+  let llamaActionTargetId = null;
   const getSpawnNearPlayerPosition = (position) => {
     return getSpawnPosition(position);
   };
@@ -73,6 +87,398 @@ export function createFriendlyNpcManager({
     characterSpawner.recordGpsTravel(sample);
   };
 
+
+  const isLlamaId = (id) => id === LLAMA_ID;
+
+  const sanitizeLlamaSpeech = (text) => {
+    if (typeof text !== "string") return "";
+    return text.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, LLAMA_SPEECH_MAX_CHARS);
+  };
+
+  const getLlamaSpawnPosition = () => {
+    const base = playerModel?.position?.clone?.() || new THREE.Vector3(0, 0, 0);
+    const angle = Math.random() * Math.PI * 2;
+    const offset = new THREE.Vector3(Math.sin(angle) * 3, 0, Math.cos(angle) * 3);
+    const resolved = resolveFriendlyPosition(base.clone().add(offset));
+    return resolved || base.add(offset);
+  };
+
+  const createLlamaRecord = (position = getLlamaSpawnPosition()) => {
+    const pos = resolveFriendlyPosition(position) || position || new THREE.Vector3(0, 0, 0);
+    const angle = Math.random() * Math.PI * 2;
+    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
+    return {
+      id: LLAMA_ID,
+      type: LLAMA_MODEL,
+      npcKind: 'llama',
+      name: LLAMA_NAME,
+      hp: FRIENDLY_BASE_HEALTH,
+      level: 1,
+      alive: true,
+      pos: { x: pos.x, y: pos.y, z: pos.z },
+      rot: { x: rot.x, y: rot.y, z: rot.z, w: rot.w },
+      llamaSpeech: 'Ready to grind XP.',
+      updatedAt: Date.now(),
+      version: Date.now()
+    };
+  };
+
+  const ensureLlamaRecord = () => {
+    if (!currentHost) return;
+    const existing = records.get(LLAMA_ID);
+    const shouldRespawn = !existing || existing.alive === false || (Number.isFinite(existing.hp) && existing.hp <= 0);
+    if (!shouldRespawn) return;
+    const respawnNear = getLlamaSpawnPosition();
+    const record = createLlamaRecord(respawnNear);
+    records.set(LLAMA_ID, record);
+  };
+
+  const createLlamaSpeechBubble = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const context = canvas.getContext('2d');
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(0, 2.85, 0);
+    sprite.scale.set(2.8, 0.7, 1);
+    sprite.visible = false;
+    sprite.userData = { canvas, context, texture, text: '', visibleUntil: 0 };
+    return sprite;
+  };
+
+  const setLlamaSpeech = (friendly, speech, { durationMs = 11_000 } = {}) => {
+    if (!friendly?.model) return;
+    const text = sanitizeLlamaSpeech(speech);
+    if (!text) return;
+    let bubble = friendly.model.userData.llamaSpeechBubble;
+    if (!bubble) {
+      bubble = createLlamaSpeechBubble();
+      friendly.model.userData.llamaSpeechBubble = bubble;
+      friendly.model.add(bubble);
+    }
+    const { canvas, context, texture } = bubble.userData;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(12, 18, 28, 0.78)';
+    context.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    context.lineWidth = 4;
+    context.beginPath();
+    context.roundRect?.(10, 16, canvas.width - 20, canvas.height - 32, 20);
+    if (!context.roundRect) {
+      context.rect(10, 16, canvas.width - 20, canvas.height - 32);
+    }
+    context.fill();
+    context.stroke();
+    context.fillStyle = '#ffffff';
+    context.font = 'bold 30px sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    const words = text.split(' ');
+    const lines = [];
+    let line = '';
+    words.forEach((word) => {
+      const test = line ? `${line} ${word}` : word;
+      if (context.measureText(test).width > canvas.width - 64 && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = test;
+      }
+    });
+    if (line) lines.push(line);
+    const visibleLines = lines.slice(0, 3);
+    const startY = canvas.height / 2 - (visibleLines.length - 1) * 18;
+    visibleLines.forEach((lineText, index) => context.fillText(lineText, canvas.width / 2, startY + index * 36));
+    texture.needsUpdate = true;
+    bubble.visible = true;
+    bubble.userData.text = text;
+    bubble.userData.visibleUntil = Date.now() + durationMs;
+    friendly.model.userData.llamaSpeech = text;
+    friendly.model.userData.llamaSpeechAt = Date.now();
+  };
+
+  const updateLlamaSpeechBubble = (friendly) => {
+    const bubble = friendly?.model?.userData?.llamaSpeechBubble;
+    if (!bubble) return;
+    bubble.visible = Date.now() <= (bubble.userData.visibleUntil || 0);
+  };
+
+  const getAllPlayersForLlama = () => [
+    { id: 'host', name: 'Host player', model: playerModel, level: 1, hp: FRIENDLY_BASE_HEALTH },
+    ...Object.entries(otherPlayers || {}).map(([id, player]) => ({
+      id,
+      name: player?.name || 'Player',
+      model: player?.model,
+      level: Number.isFinite(player?.level) ? player.level : 1,
+      hp: Number.isFinite(player?.health) ? player.health : FRIENDLY_BASE_HEALTH
+    }))
+  ].filter((entry) => entry.model?.position);
+
+  const describeDirection = (from, to) => {
+    const dx = to.x - from.x;
+    const dz = to.z - from.z;
+    if (Math.abs(dx) > Math.abs(dz)) return dx >= 0 ? 'east' : 'west';
+    return dz >= 0 ? 'south' : 'north';
+  };
+
+  const collectLlamaNearby = (llama) => {
+    if (!llama?.model?.position) return [];
+    const origin = llama.model.position;
+    const nearby = [];
+    const monsters = typeof getMonsters === 'function' ? (getMonsters() || []) : [];
+    monsters.forEach((monster) => {
+      if (!monster?.model?.position || monster.isDead) return;
+      const distance = origin.distanceTo(monster.model.position);
+      if (distance > LLAMA_PROMPT_NEARBY_RADIUS) return;
+      nearby.push({
+        type: 'Monster',
+        id: monster.id || null,
+        distance: Math.round(distance),
+        direction: describeDirection(origin, monster.model.position),
+        level: Number.isFinite(monster.level) ? monster.level : 1,
+        hp: Number.isFinite(monster.health) ? monster.health : null
+      });
+    });
+    getAllPlayersForLlama().forEach((player) => {
+      const distance = origin.distanceTo(player.model.position);
+      if (distance > LLAMA_PROMPT_NEARBY_RADIUS) return;
+      nearby.push({
+        type: 'Player',
+        id: player.id,
+        distance: Math.round(distance),
+        direction: describeDirection(origin, player.model.position),
+        level: player.level,
+        hp: player.hp
+      });
+    });
+    nearby.sort((a, b) => a.distance - b.distance);
+    return nearby.slice(0, 10);
+  };
+
+  const normalizeLlamaDecision = (raw) => {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    const actions = Array.isArray(source.actions)
+      ? source.actions
+      : (source.action ? [{ type: source.action, ...source }] : []);
+    const normalized = actions
+      .filter((action) => action && typeof action === 'object')
+      .map((action) => ({ ...action, type: String(action.type || action.action || '').toLowerCase() }))
+      .filter((action) => ['move', 'attack', 'equip', 'jump', 'interact', 'fly', 'shield'].includes(action.type));
+    const spell = typeof source.spell === 'string' ? source.spell.toLowerCase() : null;
+    if (spell === 'fly' || spell === 'shield') normalized.push({ type: spell });
+    return {
+      speak: sanitizeLlamaSpeech(source.speak || source.say || source.message || 'Still hunting XP.'),
+      actions: normalized.slice(0, 3)
+    };
+  };
+
+  const requestLlamaDecision = (llama) => {
+    if (!currentHost || llamaRequestInFlight || !llama?.model || llama.isDead) return;
+    const now = Date.now();
+    if (now - llamaLastRequestAt < LLAMA_DECISION_INTERVAL_MS) return;
+    llamaRequestInFlight = true;
+    llamaLastRequestAt = now;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), LLAMA_REQUEST_TIMEOUT_MS);
+    const payload = {
+      state: {
+        hp: llama.health,
+        maxHp: llama.maxHealth,
+        hunger: 40,
+        magic: Number.isFinite(llama.model.userData.magic) ? llama.model.userData.magic : 30,
+        level: llama.level,
+        equipped: llama.model.userData.llamaEquipped || 'sword',
+        nearby: collectLlamaNearby(llama)
+      }
+    };
+    fetch('/api/llama', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`Groq llama status ${response.status}`))))
+      .then((data) => {
+        const decision = normalizeLlamaDecision(data?.decision || data);
+        llamaDecision = decision;
+        llamaActionStartedAt = 0;
+        llamaActionTargetId = null;
+        setLlamaSpeech(llama, decision.speak || 'For XP and survival!');
+      })
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          console.warn('Llama Groq decision failed:', error);
+        }
+      })
+      .finally(() => {
+        clearTimeout(timeoutId);
+        llamaRequestInFlight = false;
+      });
+  };
+
+  const getClosestPlayerForLlama = (llama) => {
+    if (!llama?.model?.position) return null;
+    let closest = null;
+    let closestDistance = Infinity;
+    getAllPlayersForLlama().forEach((player) => {
+      const distance = llama.model.position.distanceTo(player.model.position);
+      if (distance < closestDistance) {
+        closest = player;
+        closestDistance = distance;
+      }
+    });
+    return closest ? { ...closest, distance: closestDistance } : null;
+  };
+
+  const getMonsterForLlamaAction = (llama, action = {}) => {
+    const monsters = typeof getMonsters === 'function' ? (getMonsters() || []) : [];
+    const requestedId = typeof action.targetId === 'string' ? action.targetId : (typeof action.target === 'string' ? action.target : null);
+    if (requestedId) {
+      const exact = monsters.find((monster) => monster?.id === requestedId && !monster.isDead && monster.model?.position);
+      if (exact) return exact;
+    }
+    let closest = null;
+    let closestDistance = Infinity;
+    monsters.forEach((monster) => {
+      if (!monster?.model?.position || monster.isDead) return;
+      const distance = llama.model.position.distanceTo(monster.model.position);
+      if (distance < closestDistance) {
+        closest = monster;
+        closestDistance = distance;
+      }
+    });
+    return closest;
+  };
+
+  const moveLlama = (llama, direction, delta) => {
+    if (!llama?.model) return;
+    const dir = direction?.clone?.() || new THREE.Vector3();
+    dir.y = 0;
+    if (dir.lengthSq() <= 0.0001) return;
+    dir.normalize();
+    llama.setDirection(dir);
+    llama.setHorizontalMovement?.(dir, 3.2, delta, { resolveGroundY: getTerrainHeight, groundOffset: FRIENDLY_GROUND_OFFSET });
+    llama.faceDirection?.(dir);
+    llama.playAnimation('Run', 0.15);
+    llama.update(delta);
+  };
+
+  const directionFromAction = (action = {}) => {
+    const text = `${action.direction || ''} ${action.target || ''}`.toLowerCase();
+    if (text.includes('north')) return new THREE.Vector3(0, 0, -1);
+    if (text.includes('south')) return new THREE.Vector3(0, 0, 1);
+    if (text.includes('east')) return new THREE.Vector3(1, 0, 0);
+    if (text.includes('west')) return new THREE.Vector3(-1, 0, 0);
+    if (Array.isArray(action.vector) && action.vector.length >= 3) {
+      const [x, y, z] = action.vector;
+      if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) return new THREE.Vector3(x, y, z);
+    }
+    return null;
+  };
+
+  const idleDriftLlama = (llama, delta) => {
+    const closest = getClosestPlayerForLlama(llama);
+    if (!closest?.model?.position || !llama?.model?.position) {
+      llama.update(delta);
+      return;
+    }
+    const toPlayer = closest.model.position.clone().sub(llama.model.position);
+    toPlayer.y = 0;
+    const distance = toPlayer.length();
+    if (distance <= LLAMA_DRIFT_STOP_DISTANCE || distance <= 0.0001) {
+      llama.body?.setLinvel?.({ x: 0, y: 0, z: 0 }, true);
+      llama.playAnimation('Idle', 0.2);
+      llama.update(delta);
+      return;
+    }
+    moveLlama(llama, toPlayer, delta);
+  };
+
+  const executeLlamaDecision = (llama, delta, context = {}) => {
+    updateLlamaSpeechBubble(llama);
+    requestLlamaDecision(llama);
+    if (!llamaDecision?.actions?.length) {
+      idleDriftLlama(llama, delta);
+      return;
+    }
+    const now = Date.now();
+    if (!llamaActionStartedAt) {
+      llamaActionStartedAt = now;
+    }
+    if (now - llamaActionStartedAt > LLAMA_ACTION_DURATION_MS) {
+      llamaDecision.actions.shift();
+      llamaActionStartedAt = 0;
+      llamaActionTargetId = null;
+      if (!llamaDecision.actions.length) {
+        idleDriftLlama(llama, delta);
+      }
+      return;
+    }
+
+    const action = llamaDecision.actions[0];
+    if (!action) {
+      idleDriftLlama(llama, delta);
+      return;
+    }
+
+    if (action.type === 'move') {
+      const direction = directionFromAction(action) || (() => {
+        const closest = getClosestPlayerForLlama(llama);
+        return closest?.model?.position ? closest.model.position.clone().sub(llama.model.position) : new THREE.Vector3(0, 0, 1);
+      })();
+      moveLlama(llama, direction, delta);
+      return;
+    }
+
+    if (action.type === 'attack') {
+      const monster = llamaActionTargetId
+        ? (typeof getMonsters === 'function' ? (getMonsters() || []) : []).find((entry) => entry?.id === llamaActionTargetId)
+        : getMonsterForLlamaAction(llama, action);
+      if (!monster?.model || monster.isDead) {
+        llamaDecision.actions.shift();
+        llamaActionStartedAt = 0;
+        llamaActionTargetId = null;
+        idleDriftLlama(llama, delta);
+        return;
+      }
+      llamaActionTargetId = monster.id || null;
+      llama.updateCombatAI(delta, { id: monster.id, model: monster.model, entity: monster }, [{ id: monster.id, model: monster.model, entity: monster }], (monsterTarget, hitContext = {}) => {
+        const entity = monsterTarget?.entity;
+        if (!entity?.model || entity.isDead) return;
+        const damage = Number.isFinite(hitContext.damage) ? Math.max(1, Math.round(hitContext.damage)) : llama.attackDamage;
+        const killed = entity.applyDamage?.(damage, { attackTypes: hitContext.attackTypes || ['llama', 'melee'] });
+        context.onMonsterHit?.(entity, { damage, killed: !!killed, sourceId: LLAMA_ID, attackTypes: hitContext.attackTypes || ['llama', 'melee'] });
+        if (killed) window.onMonsterKill?.(entity, { withFriend: true });
+      }, context);
+      return;
+    }
+
+    if (action.type === 'equip') {
+      llama.model.userData.llamaEquipped = sanitizeLlamaSpeech(action.item || action.target || 'sword') || 'sword';
+      llamaDecision.actions.shift();
+      llamaActionStartedAt = 0;
+      idleDriftLlama(llama, delta);
+      return;
+    }
+
+    if (action.type === 'jump') {
+      llama.body?.applyImpulse?.({ x: 0, y: 4.5, z: 0 }, true);
+      llama.playAnimation('JumpAttack', 0.1);
+      llama.update(delta);
+      return;
+    }
+
+    if (action.type === 'fly' || action.type === 'shield') {
+      llama.model.userData[`llamaSpell_${action.type}`] = Date.now() + 10_000;
+      llamaDecision.actions.shift();
+      llamaActionStartedAt = 0;
+      idleDriftLlama(llama, delta);
+      return;
+    }
+
+    idleDriftLlama(llama, delta);
+  };
 
   const refreshSpawnCounterFromRecords = () => {
     let maxSpawnedId = 0;
@@ -89,7 +495,7 @@ export function createFriendlyNpcManager({
   };
 
   const removeFriendlyById = (friendlyId) => {
-    if (!friendlyId) return false;
+    if (!friendlyId || isLlamaId(friendlyId)) return false;
     records.delete(friendlyId);
     removeFriendlyRecord(friendlyId);
     const index = friendlies.findIndex(entry => entry?.id === friendlyId);
@@ -107,6 +513,7 @@ export function createFriendlyNpcManager({
     let furthestId = null;
     let furthestDistance = -Infinity;
     records.forEach((record, id) => {
+      if (isLlamaId(id)) return;
       const pos = record?.pos;
       if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) return;
       const distance = originPosition.distanceTo(new THREE.Vector3(pos.x, pos.y, pos.z));
@@ -352,6 +759,14 @@ const getHealthForLevel = (level) => {
         friendly.id = slotId;
         friendly.modelPath = modelPath;
         friendly.type = modelPath;
+        if (isLlamaId(slotId) || record.npcKind === 'llama') {
+          friendly.name = LLAMA_NAME;
+          friendly.model.userData.npcKind = 'llama';
+          friendly.model.userData.displayName = LLAMA_NAME;
+          friendly.model.userData.llamaEquipped = record.llamaEquipped || 'sword';
+          friendly.enableDanceWhileEngaged = false;
+          friendly.alwaysShowHealthBar = true;
+        }
         if (Number.isFinite(record.version)) {
           friendly.version = record.version;
         }
@@ -362,7 +777,7 @@ const getHealthForLevel = (level) => {
         friendly.setEngageRadius(FRIENDLY_ENGAGE_RADIUS);
         friendly.setDisengageRadius(FRIENDLY_DISENGAGE_RADIUS);
         friendly.lastAIUpdateMs = 0;
-        const level = Number.isFinite(record.level) ? record.level : getRandomLevel();
+        const level = isLlamaId(slotId) ? 1 : (Number.isFinite(record.level) ? record.level : getRandomLevel());
         friendly.setLevel(level, { preserveHealth: false });
         friendly.resetHealth();
 
@@ -384,7 +799,11 @@ const getHealthForLevel = (level) => {
           friendly.model.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
         }
         friendly.setHomePosition(friendly.model.position.clone());
-        ensureFriendlyRoadLight(friendly, friendly.model.position.clone());
+        if (isLlamaId(slotId)) {
+          setLlamaSpeech(friendly, record.llamaSpeech || 'Ready to grind XP.');
+        } else {
+          ensureFriendlyRoadLight(friendly, friendly.model.position.clone());
+        }
         cleanupFriendly(existing);
         scene?.add(friendly.model);
         attachPhysics?.(friendly);
@@ -407,12 +826,17 @@ const getHealthForLevel = (level) => {
       friendly.model.position.copy(resolvedPosition);
       friendly.body?.setTranslation({ x: resolvedPosition.x, y: resolvedPosition.y, z: resolvedPosition.z }, true);
       friendly.setHomePosition(friendly.model.position);
-      syncFriendlyRoadLight(friendly, friendly.model.position.clone());
+      if (!isLlamaId(friendly.id)) {
+        syncFriendlyRoadLight(friendly, friendly.model.position.clone());
+      }
     }
     if (rotation && Number.isFinite(rotation.x) && Number.isFinite(rotation.y)
       && Number.isFinite(rotation.z) && Number.isFinite(rotation.w)) {
       friendly.model.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
       friendly.body?.setRotation(rotation, true);
+    }
+    if (isLlamaId(friendly.id) && record.llamaSpeech && record.llamaSpeech !== friendly.model.userData.llamaSpeech) {
+      setLlamaSpeech(friendly, record.llamaSpeech);
     }
     friendly.applyPersistedState?.({
       hp: record.hp,
@@ -430,12 +854,16 @@ const getHealthForLevel = (level) => {
       const pos = record.pos;
       if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) return;
       const dist = playerModel.position.distanceTo(new THREE.Vector3(pos.x, pos.y, pos.z));
-      if (dist <= FRIENDLY_ACTIVE_RADIUS) {
+      if (isLlamaId(id) || dist <= FRIENDLY_ACTIVE_RADIUS) {
         activeEntries.push({ id, record, dist });
       }
     });
     activeEntries.sort((a, b) => a.dist - b.dist);
-    const limitedEntries = activeEntries.slice(0, FRIENDLY_MAX_ACTIVE);
+    const llamaEntries = activeEntries.filter((entry) => isLlamaId(entry.id));
+    const limitedEntries = [
+      ...llamaEntries,
+      ...activeEntries.filter((entry) => !isLlamaId(entry.id)).slice(0, FRIENDLY_MAX_ACTIVE)
+    ];
     const activeIds = new Set(limitedEntries.map(entry => entry.id));
 
     for (let i = friendlies.length - 1; i >= 0; i -= 1) {
@@ -536,6 +964,7 @@ const getHealthForLevel = (level) => {
     if (!snapshotLoaded) return;
     const nowMs = Date.now();
     if (isHostNow) {
+      ensureLlamaRecord();
       maybeSpawnFromDistance();
     } else {
       maybeRequestSpawnFromDistance();
@@ -547,6 +976,15 @@ const getHealthForLevel = (level) => {
       if (!friendly?.model) return;
       const lastUpdate = friendly.lastAIUpdateMs ?? 0;
       if (isHostNow) {
+        if (isLlamaId(friendly.id) && friendly.isDead) {
+          const respawn = getLlamaSpawnPosition();
+          friendly.setLevel(1, { preserveHealth: false });
+          friendly.resetHealth();
+          friendly.setPosition(respawn.x, respawn.y, respawn.z);
+          friendly.syncBodyFromTransform?.();
+          friendly.setHomePosition(respawn.clone());
+          setLlamaSpeech(friendly, 'Back to level 1. XP grind resumes.');
+        }
         if (nowMs - lastUpdate > FRIENDLY_ANIM_MIN_INTERVAL_MS) {
           const elapsedSeconds = Math.max(0, (nowMs - lastUpdate) / 1000);
           const aiDeltaSeconds = Math.min(
@@ -554,10 +992,15 @@ const getHealthForLevel = (level) => {
             lastUpdate > 0 ? elapsedSeconds : (Number.isFinite(delta) ? delta : 0)
           );
           friendly.lastAIUpdateMs = nowMs;
-          friendly.updateAI(aiDeltaSeconds, playerModel, otherPlayers, monsters, aiContext);
+          if (isLlamaId(friendly.id)) {
+            executeLlamaDecision(friendly, aiDeltaSeconds, aiContext);
+          } else {
+            friendly.updateAI(aiDeltaSeconds, playerModel, otherPlayers, monsters, aiContext);
+          }
         }
         persistFriendlyState(friendly);
       } else {
+        updateLlamaSpeechBubble(friendly);
         friendly.update(delta);
       }
     });
