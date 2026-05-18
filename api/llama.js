@@ -34,16 +34,121 @@ function formatNearby(nearby = []) {
   }).join('\n');
 }
 
-function buildPrompt(state = {}) {
+function formatActions(actions = []) {
+  if (!Array.isArray(actions) || actions.length === 0) return 'none';
+  return actions.map((action) => {
+    if (!action || typeof action !== 'object') return '';
+    if (action.type === 'move') return `move:${action.direction || 'vector'}`;
+    if (action.type === 'attack') return `attack:${action.targetId || 'nearest monster'}`;
+    if (action.type === 'interact') return `interact:${action.targetId || 'target'}`;
+    if (action.type === 'equip') return `equip:${action.item || 'item'}`;
+    return action.type || '';
+  }).filter(Boolean).join(' > ') || 'none';
+}
+
+function formatHistory(history = []) {
+  if (!Array.isArray(history) || history.length === 0) return '- No recent turns yet';
+  return history.slice(-5).map((entry) => {
+    const turn = Number.isFinite(entry?.turn) ? `turn ${entry.turn}` : 'recent turn';
+    const mode = typeof entry?.behaviorMode === 'string' && entry.behaviorMode ? entry.behaviorMode : 'unspecified';
+    const speak = sanitizeText(entry?.speak, MAX_SPEAK_CHARS) || '(no speech)';
+    const actions = formatActions(entry?.actions);
+    const outcome = sanitizeText(entry?.outcome, 80) || 'unknown outcome';
+    return `- ${turn} [${mode}] said: "${speak}" actions: ${actions}; outcome: ${outcome}`;
+  }).join('\n');
+}
+
+function formatGoal(goal) {
+  if (!goal || typeof goal !== 'object') return 'none';
+  const text = sanitizeText(goal.text, 120);
+  return text ? `${text} (started turn ${Number.isFinite(goal.startedTurn) ? goal.startedTurn : '?'})` : 'none';
+}
+
+function formatGoalHistory(goalHistory = []) {
+  if (!Array.isArray(goalHistory) || goalHistory.length === 0) return '- No completed or failed goals yet';
+  return goalHistory.slice(-8).map((goal) => {
+    const text = sanitizeText(goal?.text, 120) || '(untitled goal)';
+    const status = sanitizeText(goal?.status, 20) || 'unknown';
+    const note = sanitizeText(goal?.note, 80);
+    return `- ${text}: ${status}${note ? ` (${note})` : ''}`;
+  }).join('\n');
+}
+
+function buildPrompt(state = {}, meta = {}) {
   const hp = clampNumber(state.hp, 0);
   const hunger = clampNumber(state.hunger, 40);
   const magic = clampNumber(state.magic, 30);
   const equipped = typeof state.equipped === 'string' && state.equipped.trim() ? state.equipped.trim() : 'sword';
   const nearby = formatNearby(state.nearby);
+  const history = formatHistory(meta.history);
+  const currentGoal = formatGoal(meta.currentGoal);
+  const goalHistory = formatGoalHistory(meta.goalHistory);
+  const turnNumber = Number.isFinite(meta.turnNumber) ? meta.turnNumber : 1;
+  const shouldSetGoal = !!meta.shouldSetGoal;
 
-  return `You are controlling an RPG character named Llama.\n\nGoal:\nmaximize XP and survive.\n\nState:\nHP: ${hp}\nHunger: ${hunger}\nMagic: ${magic}\nEquipped: ${equipped}\n\nNearby:\n${nearby}\n\nReturn ONLY JSON. Include a speak string every time.\n\nAvailable actions:\nmove\nattack\nequip\njump\ninteract\nspeak\nspells: fly (magic cost), shield (magic cost)\n\nJSON template:\n{\n  "speak": "short in-character sentence",\n  "actions": [\n    { "type": "move", "direction": "north|south|east|west" },\n    { "type": "attack", "targetId": "id from nearby if known" },\n    { "type": "equip", "item": "sword|ice gun|best available" },\n    { "type": "jump" },\n    { "type": "interact", "targetId": "id from nearby if known" },\n    { "type": "shield" },\n    { "type": "fly" }\n  ]\n}\nChoose at most 2 non-speak actions.`;
+  return `You are controlling an RPG character named Llama.
+
+Primary objective:
+maximize XP and survive.
+
+State:
+HP: ${hp}
+Hunger: ${hunger}
+Magic: ${magic}
+Equipped: ${equipped}
+Turn: ${turnNumber}
+Current 5-turn goal: ${currentGoal}
+Must choose a new 5-turn goal this turn: ${shouldSetGoal ? 'yes' : 'no'}
+
+Nearby:
+${nearby}
+
+Recent history (last 5 turns):
+${history}
+
+Goal history:
+${goalHistory}
+
+Rules:
+- Return ONLY JSON. Include a speak string every time.
+- Do NOT repeat any speak string from recent history.
+- Speak must be unique and context-specific each turn.
+- Avoid repeating an identical action sequence from the previous turn.
+- Choose a behaviorMode each turn: cautious | aggressive | exploratory | playful | tactical.
+- behaviorMode must influence both speak and actions.
+- Include one new observation or interpretation in speak each turn.
+- If Must choose a new 5-turn goal is yes, include a concrete "goal" string that can be completed by attacking a Monster or interacting with Food.
+- If Must choose a new 5-turn goal is no, keep pursuing the current 5-turn goal and omit "goal" unless the old goal is impossible.
+- Players are allies; never attack Player ids such as host. Attack only Monster ids.
+- To get food, interact with a Food targetId when nearby; do not merely say you will find food.
+- To fight successfully, attack a nearby Monster targetId; do not claim to attack a Player.
+
+Available actions:
+move
+attack (Monster only)
+equip
+jump
+interact (Food pickup or other target)
+speak
+spells: fly (magic cost), shield (magic cost)
+
+JSON template:
+{
+  "speak": "short in-character sentence with a fresh observation",
+  "behaviorMode": "cautious|aggressive|exploratory|playful|tactical",
+  "goal": "only on new-goal turns: concrete 5-turn goal",
+  "actions": [
+    { "type": "move", "direction": "north|south|east|west" },
+    { "type": "attack", "targetId": "Monster id from nearby" },
+    { "type": "equip", "item": "sword|ice gun|best available" },
+    { "type": "jump" },
+    { "type": "interact", "targetId": "Food id from nearby" },
+    { "type": "shield" },
+    { "type": "fly" }
+  ]
 }
-
+Choose at most 2 non-speak actions.`;
+}
 
 const ACTION_TYPES = new Set(['move', 'attack', 'equip', 'jump', 'interact', 'fly', 'shield']);
 const DIRECTIONS = new Set(['north', 'south', 'east', 'west']);
@@ -114,6 +219,8 @@ function normalizeDecision(value) {
 
   return {
     speak: sanitizeText(value.speak || value.say || value.message, MAX_SPEAK_CHARS) || base.speak,
+    behaviorMode: sanitizeText(value.behaviorMode || value.mode, 24).toLowerCase(),
+    goal: sanitizeText(typeof value.goal === 'string' ? value.goal : (value.goal?.text || value.nextGoal), 120),
     actions
   };
 }
@@ -138,7 +245,7 @@ export default async function handler(req, res) {
   }
 
   const body = readJsonBody(req.body);
-  const prompt = buildPrompt(body.state || {});
+  const prompt = buildPrompt(body.state || {}, body);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -151,8 +258,8 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: GROQ_MODEL,
-        temperature: 0.3,
-        max_tokens: 120,
+        temperature: 0.75,
+        max_tokens: 180,
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: 'Return only valid JSON for the RPG character controller. The JSON must always include speak.' },

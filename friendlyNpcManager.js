@@ -22,7 +22,7 @@ const LLAMA_NAME = "Llama";
 const LLAMA_MODEL = "/models/Chimpanzee.fbx";
 const LLAMA_DECISION_INTERVAL_MS = 10_000;
 const LLAMA_REQUEST_TIMEOUT_MS = 5_000;
-const LLAMA_ACTION_DURATION_MS = 3_000;
+const LLAMA_ACTION_DURATION_MS = 6_000;
 const LLAMA_SPEECH_MAX_CHARS = 96;
 const LLAMA_PROMPT_NEARBY_RADIUS = 32;
 const LLAMA_DRIFT_STOP_DISTANCE = 3.25;
@@ -30,6 +30,10 @@ const LLAMA_ALLOWED_ACTION_TYPES = new Set(['move', 'attack', 'equip', 'jump', '
 const LLAMA_ALLOWED_DIRECTIONS = new Set(['north', 'south', 'east', 'west']);
 const LLAMA_MAX_ACTIONS = 2;
 const LLAMA_TEXT_FIELD_MAX_CHARS = 80;
+const LLAMA_HISTORY_LIMIT = 5;
+const LLAMA_GOAL_INTERVAL_TURNS = 5;
+const LLAMA_GOAL_HISTORY_LIMIT = 8;
+const LLAMA_FOOD_INTERACT_DISTANCE = 1.1;
 const FRIENDLY_MAX_ACTIVE = 6;
 const FRIENDLY_ACTIVE_RADIUS = 360;
 const FRIENDLY_PLAYER_SPAWN_BLOCK_RADIUS = 32;
@@ -63,6 +67,8 @@ export function createFriendlyNpcManager({
   onBeforeSpawn,
   onRemoteSpawnRequest,
   getMonsters,
+  getFoodPickups,
+  onFoodPickupCollected,
   onMonsterHit
 } = {}) {
   const friendlies = [];
@@ -78,6 +84,11 @@ export function createFriendlyNpcManager({
   let llamaDecision = null;
   let llamaActionStartedAt = 0;
   let llamaActionTargetId = null;
+  let llamaTurnNumber = 0;
+  let llamaCurrentGoal = null;
+  const llamaGoalHistory = [];
+  const llamaRecentHistory = [];
+  const llamaNearbyTargets = new Map();
   const getSpawnNearPlayerPosition = (position) => {
     return getSpawnPosition(position);
   };
@@ -226,6 +237,56 @@ export function createFriendlyNpcManager({
     return dz >= 0 ? 'south' : 'north';
   };
 
+  const getPickupPosition = (pickup) => {
+    const source = pickup?.mesh || pickup;
+    if (source?.getWorldPosition) return source.getWorldPosition(new THREE.Vector3());
+    return (pickup?.position || pickup?.mesh?.position || null)?.clone?.() || null;
+  };
+
+  const collectFoodTargetsForLlama = (llama, origin) => {
+    if (typeof getFoodPickups !== 'function') return [];
+    return (getFoodPickups() || []).map((entry, index) => {
+      const pickup = entry?.pickup || entry;
+      const position = entry?.position?.clone?.() || getPickupPosition(pickup);
+      if (!pickup || !position) return null;
+      const type = sanitizeLlamaActionField(entry?.type || pickup?.id || 'food', 24) || 'food';
+      const id = sanitizeLlamaActionField(entry?.id, 60) || `food:${type}:${index}`;
+      return {
+        type,
+        id,
+        pickup,
+        position,
+        distance: origin.distanceTo(position)
+      };
+    }).filter(Boolean).filter((entry) => entry.distance <= LLAMA_PROMPT_NEARBY_RADIUS);
+  };
+
+  const getLlamaActionSignature = (actions = []) => actions
+    .map((action) => {
+      if (!action?.type) return '';
+      if (action.type === 'move') return `${action.type}:${action.direction || (Array.isArray(action.vector) ? action.vector.map((n) => Math.round(n * 10) / 10).join(',') : '')}`;
+      return `${action.type}:${action.targetId || action.item || ''}`;
+    })
+    .filter(Boolean)
+    .join(' > ');
+
+  const rememberLlamaHistory = (entry) => {
+    llamaRecentHistory.push({ ...entry, turn: llamaTurnNumber });
+    while (llamaRecentHistory.length > LLAMA_HISTORY_LIMIT) llamaRecentHistory.shift();
+  };
+
+  const finishLlamaGoal = (status, note = '') => {
+    if (!llamaCurrentGoal) return;
+    llamaGoalHistory.push({ ...llamaCurrentGoal, status, note, endedTurn: llamaTurnNumber });
+    while (llamaGoalHistory.length > LLAMA_GOAL_HISTORY_LIMIT) llamaGoalHistory.shift();
+    llamaCurrentGoal = null;
+  };
+
+  const updateLatestLlamaOutcome = (outcome) => {
+    const latest = llamaRecentHistory[llamaRecentHistory.length - 1];
+    if (latest) latest.outcome = outcome;
+  };
+
   const collectLlamaNearby = (llama) => {
     if (!llama?.model?.position) return [];
     const origin = llama.model.position;
@@ -248,12 +309,24 @@ export function createFriendlyNpcManager({
       const distance = origin.distanceTo(player.model.position);
       if (distance > LLAMA_PROMPT_NEARBY_RADIUS) return;
       nearby.push({
-        type: 'Player',
+        type: 'Player (ally - do not attack)',
         id: player.id,
         distance: Math.round(distance),
         direction: describeDirection(origin, player.model.position),
         level: player.level,
         hp: player.hp
+      });
+    });
+    llamaNearbyTargets.clear();
+    collectFoodTargetsForLlama(llama, origin).forEach((food) => {
+      llamaNearbyTargets.set(food.id, food);
+      nearby.push({
+        type: `Food:${food.type}`,
+        id: food.id,
+        distance: Math.round(food.distance),
+        direction: describeDirection(origin, food.position),
+        level: null,
+        hp: null
       });
     });
     nearby.sort((a, b) => a.distance - b.distance);
@@ -317,6 +390,11 @@ export function createFriendlyNpcManager({
     }
     return {
       speak: sanitizeLlamaSpeech(source.speak || source.say || source.message || 'Still hunting XP.'),
+      behaviorMode: sanitizeLlamaActionField(source.behaviorMode || source.mode, 24).toLowerCase(),
+      goal: sanitizeLlamaActionField(
+        typeof source.goal === 'string' ? source.goal : (source.goal?.text || source.nextGoal || ''),
+        120
+      ),
       actions: normalized
     };
   };
@@ -329,7 +407,13 @@ export function createFriendlyNpcManager({
     llamaLastRequestAt = now;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), LLAMA_REQUEST_TIMEOUT_MS);
+    const nextTurn = llamaTurnNumber + 1;
     const payload = {
+      history: llamaRecentHistory,
+      currentGoal: llamaCurrentGoal,
+      goalHistory: llamaGoalHistory,
+      turnNumber: nextTurn,
+      shouldSetGoal: ((nextTurn - 1) % LLAMA_GOAL_INTERVAL_TURNS) === 0,
       state: {
         hp: llama.health,
         maxHp: llama.maxHealth,
@@ -355,9 +439,22 @@ export function createFriendlyNpcManager({
       .then((data) => {
         console.log('[Llama] decision response', data);
         const decision = normalizeLlamaDecision(data?.decision || data);
+        llamaTurnNumber = nextTurn;
+        if (payload.shouldSetGoal && decision.goal) {
+          finishLlamaGoal('failed', 'replaced by a new 5-turn goal');
+          llamaCurrentGoal = { text: decision.goal, startedTurn: llamaTurnNumber, status: 'active' };
+        }
         llamaDecision = decision;
         llamaActionStartedAt = 0;
         llamaActionTargetId = null;
+        rememberLlamaHistory({
+          speak: decision.speak,
+          behaviorMode: decision.behaviorMode || 'unspecified',
+          actions: decision.actions,
+          actionSignature: getLlamaActionSignature(decision.actions),
+          goal: llamaCurrentGoal?.text || null,
+          outcome: 'started'
+        });
         setLlamaSpeech(llama, decision.speak || 'For XP and survival!');
       })
       .catch((error) => {
@@ -461,6 +558,7 @@ export function createFriendlyNpcManager({
       llamaActionStartedAt = now;
     }
     if (now - llamaActionStartedAt > LLAMA_ACTION_DURATION_MS) {
+      updateLatestLlamaOutcome(`timed out during ${llamaDecision.actions[0]?.type || 'action'}`);
       llamaDecision.actions.shift();
       llamaActionStartedAt = 0;
       llamaActionTargetId = null;
@@ -503,8 +601,39 @@ export function createFriendlyNpcManager({
         const damage = Number.isFinite(hitContext.damage) ? Math.max(1, Math.round(hitContext.damage)) : llama.attackDamage;
         const killed = entity.applyDamage?.(damage, { attackTypes: hitContext.attackTypes || ['llama', 'melee'] });
         context.onMonsterHit?.(entity, { damage, killed: !!killed, sourceId: LLAMA_ID, attackTypes: hitContext.attackTypes || ['llama', 'melee'] });
-        if (killed) window.onMonsterKill?.(entity, { withFriend: true });
+        updateLatestLlamaOutcome(`hit monster for ${damage}`);
+        if (killed) {
+          window.onMonsterKill?.(entity, { withFriend: true });
+          updateLatestLlamaOutcome('completed attack: monster defeated');
+          finishLlamaGoal('completed', 'defeated a monster');
+        }
       }, context);
+      return;
+    }
+
+    if (action.type === 'interact') {
+      const foodTarget = llamaNearbyTargets.get(action.targetId);
+      if (!foodTarget?.pickup || !foodTarget.position) {
+        llamaDecision.actions.shift();
+        llamaActionStartedAt = 0;
+        updateLatestLlamaOutcome('failed interact: target unavailable');
+        idleDriftLlama(llama, delta);
+        return;
+      }
+      const toFood = foodTarget.position.clone().sub(llama.model.position);
+      toFood.y = 0;
+      if (toFood.length() > LLAMA_FOOD_INTERACT_DISTANCE) {
+        moveLlama(llama, toFood, delta);
+        return;
+      }
+      const collected = typeof onFoodPickupCollected === 'function'
+        ? onFoodPickupCollected(foodTarget, llama.model.position.clone())
+        : false;
+      llamaDecision.actions.shift();
+      llamaActionStartedAt = 0;
+      updateLatestLlamaOutcome(collected ? `collected ${foodTarget.type}` : `failed to collect ${foodTarget.type}`);
+      if (collected) finishLlamaGoal('completed', `collected ${foodTarget.type}`);
+      idleDriftLlama(llama, delta);
       return;
     }
 
