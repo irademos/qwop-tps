@@ -146,11 +146,10 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-const ROAD_LIGHT_RING_COUNT = 12;
-const ROAD_LIGHT_SIDE_OFFSET_METERS = 6;
-const ROAD_LIGHT_MIN_SPACING_METERS = 10;
-const ROAD_LIGHT_TARGET_SPACING_METERS = 10;
-const ROAD_LIGHT_MIN_DISTANCE_FROM_PLAYER_METERS = 30;
+const ROAD_LIGHT_GRID_SIZE = 4;
+const ROAD_LIGHT_GRID_COUNT = ROAD_LIGHT_GRID_SIZE * ROAD_LIGHT_GRID_SIZE;
+const ROAD_LIGHT_GRID_SPACING_METERS = 20;
+const ROAD_LIGHT_SHIFT_DISTANCE_METERS = ROAD_LIGHT_GRID_SPACING_METERS * 1.25;
 const ROAD_LIGHT_MODEL_URL = '/assets/props/road_light.glb';
 const ROAD_LIGHT_POINT_LIGHT_CONFIG = Object.freeze({
   color: 0xfff1c1,
@@ -13258,11 +13257,9 @@ async function initCore(runtimeContext) {
   const roadLightPool = [];
   const roadLightScratch = {
     playerPos: new THREE.Vector3(),
-    tangent: new THREE.Vector3(),
-    samplePos: new THREE.Vector3(),
-    toPlayer: new THREE.Vector3(),
-    side: new THREE.Vector3(),
-    spawnPos: new THREE.Vector3()
+    playerMove: new THREE.Vector3(),
+    spawnPos: new THREE.Vector3(),
+    lastPlayerPos: null
   };
 
   const isNightDisplayMode = () => {
@@ -13295,16 +13292,6 @@ async function initCore(runtimeContext) {
     return roadLightTemplatePromise;
   };
 
-  const getRoadStamps = () => {
-    const stamps = [];
-    mapRenderer?.group?.traverse?.((child) => {
-      const stamp = child?.userData?.roadStamp;
-      if (!stamp?.points || stamp.points.length < 2) return;
-      stamps.push(stamp);
-    });
-    return stamps;
-  };
-
   const updateRoadLightsNearPlayer = () => {
     if (!scene || !playerModel?.position || !isNightDisplayMode()) {
       clearRoadLightPool();
@@ -13315,67 +13302,38 @@ async function initCore(runtimeContext) {
       void ensureRoadLightTemplate();
       return;
     }
-    const stamps = getRoadStamps();
-    if (!stamps.length) {
-      clearRoadLightPool();
-      return;
-    }
     const playerPos = roadLightScratch.playerPos.copy(playerModel.position);
-    const side = roadLightScratch.side;
-    const toPlayer = roadLightScratch.toPlayer;
-    const tangent = roadLightScratch.tangent;
-    const samplePos = roadLightScratch.samplePos;
     const spawnPos = roadLightScratch.spawnPos;
-    const sampled = [];
-    for (const stamp of stamps) {
-      const points = stamp.points;
-      for (let i = 0; i < points.length - 1; i += 1) {
-        const start = points[i];
-        const end = points[i + 1];
-        tangent.set(end.x - start.x, 0, end.z - start.z);
-        const segmentLength = tangent.length();
-        if (segmentLength < 0.001) continue;
-        tangent.divideScalar(segmentLength);
-        for (let distance = 0; distance <= segmentLength; distance += ROAD_LIGHT_TARGET_SPACING_METERS) {
-          samplePos.set(start.x + tangent.x * distance, 0, start.z + tangent.z * distance);
-          const terrainY = getTerrainHeight(samplePos.x, samplePos.z);
-          samplePos.y = Number.isFinite(terrainY) ? terrainY : playerPos.y;
-          const distToPlayer = samplePos.distanceTo(playerPos);
-          if (distToPlayer < ROAD_LIGHT_MIN_DISTANCE_FROM_PLAYER_METERS) continue;
-          sampled.push({
-            center: samplePos.clone(),
-            tangent: tangent.clone(),
-            distanceToPlayer: distToPlayer
-          });
-        }
-      }
+    const playerMove = roadLightScratch.playerMove;
+    if (roadLightScratch.lastPlayerPos) {
+      playerMove.copy(playerPos).sub(roadLightScratch.lastPlayerPos).setY(0);
+    } else {
+      playerMove.set(0, 0, 0);
     }
-    if (!sampled.length) {
-      clearRoadLightPool();
-      return;
+    if (playerMove.lengthSq() > 0.0001) {
+      playerMove.normalize();
     }
-    sampled.sort((a, b) => a.distanceToPlayer - b.distanceToPlayer);
-    const selected = [];
-    for (const entry of sampled) {
-      const isTooClose = selected.some((existing) => existing.center.distanceTo(entry.center) < ROAD_LIGHT_MIN_SPACING_METERS);
-      if (isTooClose) continue;
-      selected.push(entry);
-      if (selected.length >= ROAD_LIGHT_RING_COUNT / 2) break;
+    if (!roadLightScratch.lastPlayerPos) {
+      roadLightScratch.lastPlayerPos = playerPos.clone();
     }
-    if (!selected.length) {
-      clearRoadLightPool();
-      return;
-    }
+    roadLightScratch.lastPlayerPos.copy(playerPos);
+
+    // Shift the grid one cell in the movement direction once player crosses threshold.
+    const shouldShiftForward = playerMove.lengthSq() > 0.01;
+    const shiftOffsetX = shouldShiftForward ? playerMove.x * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
+    const shiftOffsetZ = shouldShiftForward ? playerMove.z * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
+    const gridCenterX = Math.round((playerPos.x + shiftOffsetX) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
+    const gridCenterZ = Math.round((playerPos.z + shiftOffsetZ) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
+    const halfSpan = ((ROAD_LIGHT_GRID_SIZE - 1) * ROAD_LIGHT_GRID_SPACING_METERS) * 0.5;
 
     let poolIndex = 0;
-    for (const entry of selected) {
-      toPlayer.copy(playerPos).sub(entry.center);
-      const sideSign = Math.sign(entry.tangent.x * toPlayer.z - entry.tangent.z * toPlayer.x) || 1;
-      side.set(-entry.tangent.z, 0, entry.tangent.x);
-      for (const offsetSign of [sideSign, -sideSign]) {
-        spawnPos.copy(entry.center).addScaledVector(side, ROAD_LIGHT_SIDE_OFFSET_METERS * offsetSign);
+    for (let row = 0; row < ROAD_LIGHT_GRID_SIZE; row += 1) {
+      for (let col = 0; col < ROAD_LIGHT_GRID_SIZE; col += 1) {
+        const x = gridCenterX + (col * ROAD_LIGHT_GRID_SPACING_METERS - halfSpan);
+        const z = gridCenterZ + (row * ROAD_LIGHT_GRID_SPACING_METERS - halfSpan);
+        spawnPos.set(x, 0, z);
         const spawnTerrain = getTerrainHeight(spawnPos.x, spawnPos.z);
-        spawnPos.y = Number.isFinite(spawnTerrain) ? spawnTerrain : entry.center.y;
+        spawnPos.y = Number.isFinite(spawnTerrain) ? spawnTerrain : playerPos.y;
         let roadLight = roadLightPool[poolIndex];
         if (!roadLight) {
           const model = template.clone(true);
@@ -13394,11 +13352,8 @@ async function initCore(runtimeContext) {
         }
         roadLight.model.visible = true;
         roadLight.model.position.copy(spawnPos);
-        roadLight.model.rotation.y = Math.atan2(entry.tangent.x, entry.tangent.z);
         poolIndex += 1;
-        if (poolIndex >= ROAD_LIGHT_RING_COUNT) break;
       }
-      if (poolIndex >= ROAD_LIGHT_RING_COUNT) break;
     }
 
     for (let i = poolIndex; i < roadLightPool.length; i += 1) {
