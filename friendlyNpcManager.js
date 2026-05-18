@@ -34,6 +34,12 @@ const LLAMA_HISTORY_LIMIT = 5;
 const LLAMA_GOAL_INTERVAL_TURNS = 5;
 const LLAMA_GOAL_HISTORY_LIMIT = 8;
 const LLAMA_FOOD_INTERACT_DISTANCE = 1.1;
+const LLAMA_MAX_HUNGER_SEGMENTS = 40;
+const LLAMA_FOOD_RECOVERY = Object.freeze({
+  mushroom: { health: 1, hunger: 3 },
+  apple: { health: 1, hunger: 2 },
+  meat: { health: 4, hunger: 16 }
+});
 const FRIENDLY_MAX_ACTIVE = 6;
 const FRIENDLY_ACTIVE_RADIUS = 360;
 const FRIENDLY_PLAYER_SPAWN_BLOCK_RADIUS = 32;
@@ -133,6 +139,9 @@ export function createFriendlyNpcManager({
       pos: { x: pos.x, y: pos.y, z: pos.z },
       rot: { x: rot.x, y: rot.y, z: rot.z, w: rot.w },
       llamaSpeech: 'Ready to grind XP.',
+      llamaInventory: {},
+      llamaHunger: LLAMA_MAX_HUNGER_SEGMENTS,
+      llamaMaxHunger: LLAMA_MAX_HUNGER_SEGMENTS,
       updatedAt: Date.now(),
       version: Date.now()
     };
@@ -218,6 +227,108 @@ export function createFriendlyNpcManager({
     if (!bubble) return;
     bubble.visible = Date.now() <= (bubble.userData.visibleUntil || 0);
   };
+
+
+  const normalizeLlamaInventory = (inventory) => {
+    if (!inventory || typeof inventory !== 'object' || Array.isArray(inventory)) return {};
+    return Object.entries(inventory).reduce((result, [itemId, entry]) => {
+      const id = sanitizeLlamaActionField(itemId, 80);
+      if (!id) return result;
+      const count = Math.max(0, Math.floor(Number(entry?.count ?? entry)) || 0);
+      if (!count) return result;
+      result[id] = {
+        count,
+        type: sanitizeLlamaActionField(entry?.type || '', 24)
+      };
+      return result;
+    }, {});
+  };
+
+  const getLlamaInventory = (llama) => {
+    if (!llama?.model?.userData) return {};
+    const normalized = normalizeLlamaInventory(llama.model.userData.llamaInventory);
+    llama.model.userData.llamaInventory = normalized;
+    return normalized;
+  };
+
+  const getLlamaHunger = (llama) => Math.max(0, Math.min(
+    Number.isFinite(llama?.model?.userData?.llamaMaxHunger) ? llama.model.userData.llamaMaxHunger : LLAMA_MAX_HUNGER_SEGMENTS,
+    Number.isFinite(llama?.model?.userData?.llamaHunger) ? llama.model.userData.llamaHunger : LLAMA_MAX_HUNGER_SEGMENTS
+  ));
+
+  const setLlamaHunger = (llama, value) => {
+    if (!llama?.model?.userData) return;
+    const maxHunger = Number.isFinite(llama.model.userData.llamaMaxHunger)
+      ? llama.model.userData.llamaMaxHunger
+      : LLAMA_MAX_HUNGER_SEGMENTS;
+    llama.model.userData.llamaMaxHunger = maxHunger;
+    llama.model.userData.llamaHunger = Math.max(0, Math.min(maxHunger, Math.round(Number(value) || 0)));
+  };
+
+  const addLlamaInventoryItem = (llama, itemId, amount = 1, type = '') => {
+    const id = sanitizeLlamaActionField(itemId, 80);
+    const count = Math.max(1, Math.floor(Number(amount) || 1));
+    if (!id || !llama?.model?.userData) return null;
+    const inventory = getLlamaInventory(llama);
+    const current = inventory[id] || { count: 0, type: sanitizeLlamaActionField(type, 24) };
+    inventory[id] = {
+      ...current,
+      count: Math.max(0, Math.floor(current.count || 0)) + count,
+      type: sanitizeLlamaActionField(type || current.type || '', 24)
+    };
+    llama.model.userData.llamaInventory = inventory;
+    return id;
+  };
+
+  const removeLlamaInventoryItem = (llama, itemId, amount = 1) => {
+    const id = sanitizeLlamaActionField(itemId, 80);
+    if (!id || !llama?.model?.userData) return;
+    const inventory = getLlamaInventory(llama);
+    const current = inventory[id];
+    if (!current) return;
+    const nextCount = Math.max(0, Math.floor(current.count || 0) - Math.max(1, Math.floor(Number(amount) || 1)));
+    if (nextCount > 0) {
+      inventory[id] = { ...current, count: nextCount };
+    } else {
+      delete inventory[id];
+    }
+    llama.model.userData.llamaInventory = inventory;
+  };
+
+  const getLlamaFoodRecovery = (type, collected = {}) => {
+    const fallback = LLAMA_FOOD_RECOVERY[type] || { health: 0, hunger: 0 };
+    return {
+      health: Number.isFinite(collected.healthGain) ? collected.healthGain : fallback.health,
+      hunger: Number.isFinite(collected.hungerGain) ? collected.hungerGain : fallback.hunger
+    };
+  };
+
+  const maybeLlamaEatCollectedFood = (llama, itemId, type, collected = {}) => {
+    if (!llama?.model || !itemId) return false;
+    const maxHealth = Math.max(1, Number(llama.maxHealth || FRIENDLY_BASE_HEALTH));
+    const maxHunger = Number.isFinite(llama.model.userData.llamaMaxHunger)
+      ? llama.model.userData.llamaMaxHunger
+      : LLAMA_MAX_HUNGER_SEGMENTS;
+    llama.model.userData.llamaMaxHunger = maxHunger;
+    const currentHunger = getLlamaHunger(llama);
+    if ((llama.health || 0) >= maxHealth && currentHunger >= maxHunger) return false;
+    const recovery = getLlamaFoodRecovery(type, collected);
+    removeLlamaInventoryItem(llama, itemId, 1);
+    if (recovery.health > 0) {
+      llama.health = Math.min(maxHealth, Math.max(0, Number(llama.health || 0)) + recovery.health);
+      llama.model.userData.health = llama.health;
+      llama.updateHealthBarTexture?.();
+      llama.showHealthBar?.();
+    }
+    if (recovery.hunger > 0) {
+      setLlamaHunger(llama, currentHunger + recovery.hunger);
+    }
+    return true;
+  };
+
+  const summarizeLlamaInventory = (llama) => Object.entries(getLlamaInventory(llama))
+    .map(([itemId, entry]) => `${itemId} x${entry.count}`)
+    .slice(0, 8);
 
   const getAllPlayersForLlama = () => [
     { id: 'host', name: 'Host player', model: playerModel, level: 1, hp: FRIENDLY_BASE_HEALTH },
@@ -417,7 +528,9 @@ export function createFriendlyNpcManager({
       state: {
         hp: llama.health,
         maxHp: llama.maxHealth,
-        hunger: 40,
+        hunger: getLlamaHunger(llama),
+        maxHunger: Number.isFinite(llama.model.userData.llamaMaxHunger) ? llama.model.userData.llamaMaxHunger : LLAMA_MAX_HUNGER_SEGMENTS,
+        inventory: summarizeLlamaInventory(llama),
         magic: Number.isFinite(llama.model.userData.magic) ? llama.model.userData.magic : 30,
         level: llama.level,
         equipped: llama.model.userData.llamaEquipped || 'sword',
@@ -627,12 +740,24 @@ export function createFriendlyNpcManager({
         return;
       }
       const collected = typeof onFoodPickupCollected === 'function'
-        ? onFoodPickupCollected(foodTarget, llama.model.position.clone())
+        ? onFoodPickupCollected(foodTarget, llama.model.position.clone(), llama)
         : false;
+      const wasCollected = !!(collected?.collected ?? collected);
+      if (wasCollected) {
+        const itemId = addLlamaInventoryItem(
+          llama,
+          collected?.itemId || foodTarget.pickup?.id || foodTarget.type,
+          collected?.amount || 1,
+          foodTarget.type
+        );
+        const ateImmediately = maybeLlamaEatCollectedFood(llama, itemId, foodTarget.type, collected);
+        persistFriendlyState(llama, { force: true });
+        if (ateImmediately) setLlamaSpeech(llama, `Ate ${foodTarget.type} to recover.`);
+      }
       llamaDecision.actions.shift();
       llamaActionStartedAt = 0;
-      updateLatestLlamaOutcome(collected ? `collected ${foodTarget.type}` : `failed to collect ${foodTarget.type}`);
-      if (collected) finishLlamaGoal('completed', `collected ${foodTarget.type}`);
+      updateLatestLlamaOutcome(wasCollected ? `collected ${foodTarget.type}` : `failed to collect ${foodTarget.type}`);
+      if (wasCollected) finishLlamaGoal('completed', `collected ${foodTarget.type}`);
       idleDriftLlama(llama, delta);
       return;
     }
@@ -949,6 +1074,9 @@ const getHealthForLevel = (level) => {
           friendly.model.userData.npcKind = 'llama';
           friendly.model.userData.displayName = LLAMA_NAME;
           friendly.model.userData.llamaEquipped = record.llamaEquipped || 'sword';
+          friendly.model.userData.llamaInventory = normalizeLlamaInventory(record.llamaInventory);
+          friendly.model.userData.llamaMaxHunger = Number.isFinite(record.llamaMaxHunger) ? record.llamaMaxHunger : LLAMA_MAX_HUNGER_SEGMENTS;
+          setLlamaHunger(friendly, Number.isFinite(record.llamaHunger) ? record.llamaHunger : friendly.model.userData.llamaMaxHunger);
           friendly.enableDanceWhileEngaged = false;
           friendly.alwaysShowHealthBar = true;
         }
@@ -1020,8 +1148,13 @@ const getHealthForLevel = (level) => {
       friendly.model.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
       friendly.body?.setRotation(rotation, true);
     }
-    if (isLlamaId(friendly.id) && record.llamaSpeech && record.llamaSpeech !== friendly.model.userData.llamaSpeech) {
-      setLlamaSpeech(friendly, record.llamaSpeech);
+    if (isLlamaId(friendly.id)) {
+      if (record.llamaSpeech && record.llamaSpeech !== friendly.model.userData.llamaSpeech) {
+        setLlamaSpeech(friendly, record.llamaSpeech);
+      }
+      friendly.model.userData.llamaInventory = normalizeLlamaInventory(record.llamaInventory);
+      friendly.model.userData.llamaMaxHunger = Number.isFinite(record.llamaMaxHunger) ? record.llamaMaxHunger : LLAMA_MAX_HUNGER_SEGMENTS;
+      setLlamaHunger(friendly, Number.isFinite(record.llamaHunger) ? record.llamaHunger : friendly.model.userData.llamaMaxHunger);
     }
     friendly.applyPersistedState?.({
       hp: record.hp,

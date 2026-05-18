@@ -4094,12 +4094,7 @@ async function initCore(runtimeContext) {
       ...applePickups.map((pickup, index) => ({ id: `food:apple:${pickup?.id || index}:${index}`, type: 'apple', pickup, position: pickup?.mesh?.getWorldPosition?.(new THREE.Vector3()) || pickup?.mesh?.position })),
       ...meatPickups.map((pickup, index) => ({ id: `food:meat:${pickup?.id || index}:${index}`, type: 'meat', pickup, position: pickup?.mesh?.position }))
     ].filter((entry) => entry.pickup && entry.position && (entry.pickup.active !== false) && (!entry.pickup.mesh || entry.pickup.mesh.visible !== false)),
-    onFoodPickupCollected: (target, actorPosition) => {
-      if (target?.type === 'mushroom') return pickupMushroom(target.pickup, actorPosition);
-      if (target?.type === 'apple') return pickupApple(target.pickup, actorPosition);
-      if (target?.type === 'meat') return pickupMeat(target.pickup, actorPosition);
-      return false;
-    },
+    onFoodPickupCollected: (target, actorPosition) => collectPickupForLlama(target, actorPosition),
     onMonsterHit: handleMonsterDamage
   });
   if (multiplayer?.roomId) {
@@ -6428,6 +6423,74 @@ async function initCore(runtimeContext) {
       pendingWorldDropRemovals.add(dropId);
       multiplayer.send({ type: 'dropWorldPickup', dropId });
     }
+  }
+
+
+  function buildLlamaPickupResult(pickup, type, amount = 1) {
+    const result = {
+      collected: true,
+      itemId: pickup?.id || type,
+      amount: Math.max(1, Math.floor(Number(amount) || 1)),
+      type
+    };
+    if (type === 'mushroom') {
+      result.healthGain = MUSHROOM_HEALTH_SEGMENTS;
+      result.hungerGain = MUSHROOM_HUNGER_GAIN;
+    } else if (type === 'apple') {
+      result.healthGain = APPLE_HEALTH_SEGMENTS;
+      result.hungerGain = APPLE_HUNGER_GAIN;
+    } else if (type === 'meat') {
+      result.healthGain = MEAT_HEALTH_SEGMENTS;
+      result.hungerGain = MEAT_HUNGER_GAIN;
+    }
+    return result;
+  }
+
+  function isActorNearPickup(actorPosition, pickupPosition, radius) {
+    if (!actorPosition || !pickupPosition) return true;
+    const horizontalDistance = Math.hypot(
+      actorPosition.x - pickupPosition.x,
+      actorPosition.z - pickupPosition.z
+    );
+    return horizontalDistance <= radius;
+  }
+
+  function collectPickupForLlama(target, actorPosition = null) {
+    const pickup = target?.pickup;
+    if (!pickup) return { collected: false };
+    if (target?.type === 'mushroom') {
+      if (!pickup.active) return { collected: false };
+      const pickupPosition = pickup.position || pickup.mesh?.position;
+      if (!isActorNearPickup(actorPosition, pickupPosition, PICKUP_RADIUS)) return { collected: false };
+      disposeMushroomPickup(pickup);
+      const index = mushroomPickups.indexOf(pickup);
+      if (index >= 0) mushroomPickups.splice(index, 1);
+      mushroomPickupGrid.remove(pickup);
+      handleDroppedWorldPickupCollected(pickup);
+      return buildLlamaPickupResult(pickup, 'mushroom');
+    }
+    if (target?.type === 'apple') {
+      if (!pickup.mesh) return { collected: false };
+      const applePosition = pickup.mesh.getWorldPosition
+        ? pickup.mesh.getWorldPosition(tempTreePosition)
+        : pickup.mesh.position;
+      if (!isActorNearPickup(actorPosition, applePosition, APPLE_PICKUP_RADIUS)) return { collected: false };
+      disposeApplePickup(pickup);
+      const index = applePickups.indexOf(pickup);
+      if (index >= 0) applePickups.splice(index, 1);
+      handleDroppedWorldPickupCollected(pickup);
+      return buildLlamaPickupResult(pickup, 'apple');
+    }
+    if (target?.type === 'meat') {
+      if (!pickup.mesh) return { collected: false };
+      if (!isActorNearPickup(actorPosition, pickup.mesh.position, MEAT_PICKUP_RADIUS)) return { collected: false };
+      disposeWoodPickup(pickup);
+      const index = meatPickups.indexOf(pickup);
+      if (index >= 0) meatPickups.splice(index, 1);
+      handleDroppedWorldPickupCollected(pickup);
+      return buildLlamaPickupResult(pickup, 'meat');
+    }
+    return { collected: false };
   }
 
   function pickupMushroom(pickup, actorPosition = playerControls?.playerModel?.position) {

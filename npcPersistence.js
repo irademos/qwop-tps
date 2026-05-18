@@ -63,6 +63,12 @@ export function createEntityPersistence({
     if (userData.llamaSpeech) payload.llamaSpeech = userData.llamaSpeech;
     if (userData.llamaEquipped) payload.llamaEquipped = userData.llamaEquipped;
 
+    if (userData.llamaInventory && typeof userData.llamaInventory === 'object' && !Array.isArray(userData.llamaInventory)) {
+      payload.llamaInventory = userData.llamaInventory;
+    }
+    if (Number.isFinite(userData.llamaHunger)) payload.llamaHunger = userData.llamaHunger;
+    if (Number.isFinite(userData.llamaMaxHunger)) payload.llamaMaxHunger = userData.llamaMaxHunger;
+
     if (includeTransform && entity.model) {
       const pos = entity.model.position;
       const rot = entity.model.quaternion;
@@ -144,7 +150,7 @@ export function createEntityPersistence({
     logDebug('persist hp', entity.id, payload.version);
   }
 
-  function persistState(entity) {
+  function persistState(entity, { force = false } = {}) {
     if (!state.isHost || !entity?.model) return;
     const entityRef = getEntityRef(entity?.id);
     if (!entityRef) return;
@@ -163,7 +169,7 @@ export function createEntityPersistence({
       movedFar = dist >= POSITION_DISTANCE_THRESHOLD;
     }
 
-    if (!movedFar && now - meta.lastPersistAt < POSITION_THROTTLE_MS) {
+    if (!force && !movedFar && now - meta.lastPersistAt < POSITION_THROTTLE_MS) {
       return;
     }
 
