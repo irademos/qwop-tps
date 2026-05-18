@@ -26,6 +26,10 @@ const LLAMA_ACTION_DURATION_MS = 3_000;
 const LLAMA_SPEECH_MAX_CHARS = 96;
 const LLAMA_PROMPT_NEARBY_RADIUS = 32;
 const LLAMA_DRIFT_STOP_DISTANCE = 3.25;
+const LLAMA_ALLOWED_ACTION_TYPES = new Set(['move', 'attack', 'equip', 'jump', 'interact', 'fly', 'shield']);
+const LLAMA_ALLOWED_DIRECTIONS = new Set(['north', 'south', 'east', 'west']);
+const LLAMA_MAX_ACTIONS = 2;
+const LLAMA_TEXT_FIELD_MAX_CHARS = 80;
 const FRIENDLY_MAX_ACTIVE = 6;
 const FRIENDLY_ACTIVE_RADIUS = 360;
 const FRIENDLY_PLAYER_SPAWN_BLOCK_RADIUS = 32;
@@ -256,20 +260,64 @@ export function createFriendlyNpcManager({
     return nearby.slice(0, 10);
   };
 
+  const sanitizeLlamaActionField = (value, maxChars = LLAMA_TEXT_FIELD_MAX_CHARS) => {
+    if (typeof value !== 'string') return '';
+    return value.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxChars);
+  };
+
+  const normalizeLlamaAction = (action) => {
+    if (!action || typeof action !== 'object' || Array.isArray(action)) return null;
+    const type = sanitizeLlamaActionField(action.type || action.action, 20).toLowerCase();
+    if (!LLAMA_ALLOWED_ACTION_TYPES.has(type)) return null;
+
+    if (type === 'move') {
+      const direction = sanitizeLlamaActionField(action.direction, 12).toLowerCase();
+      if (LLAMA_ALLOWED_DIRECTIONS.has(direction)) return { type, direction };
+      if (Array.isArray(action.vector) && action.vector.length >= 3) {
+        const vector = action.vector.slice(0, 3).map(Number);
+        if (vector.every(Number.isFinite) && vector.some((value) => Math.abs(value) > 0.0001)) {
+          return { type, vector };
+        }
+      }
+      return null;
+    }
+
+    if (type === 'attack') {
+      const targetId = sanitizeLlamaActionField(action.targetId || action.target);
+      return targetId ? { type, targetId } : { type };
+    }
+
+    if (type === 'equip') {
+      const item = sanitizeLlamaActionField(action.item || action.target, 40);
+      if (!item) return null;
+      return { type, item };
+    }
+
+    if (type === 'interact') {
+      const targetId = sanitizeLlamaActionField(action.targetId || action.target);
+      if (!targetId) return null;
+      return { type, targetId };
+    }
+
+    return { type };
+  };
+
   const normalizeLlamaDecision = (raw) => {
-    const source = raw && typeof raw === 'object' ? raw : {};
+    const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
     const actions = Array.isArray(source.actions)
       ? source.actions
-      : (source.action ? [{ type: source.action, ...source }] : []);
+      : (source.action ? [{ ...source, type: source.action }] : []);
     const normalized = actions
-      .filter((action) => action && typeof action === 'object')
-      .map((action) => ({ ...action, type: String(action.type || action.action || '').toLowerCase() }))
-      .filter((action) => ['move', 'attack', 'equip', 'jump', 'interact', 'fly', 'shield'].includes(action.type));
-    const spell = typeof source.spell === 'string' ? source.spell.toLowerCase() : null;
-    if (spell === 'fly' || spell === 'shield') normalized.push({ type: spell });
+      .map(normalizeLlamaAction)
+      .filter(Boolean)
+      .slice(0, LLAMA_MAX_ACTIONS);
+    const spell = sanitizeLlamaActionField(source.spell, 20).toLowerCase();
+    if ((spell === 'fly' || spell === 'shield') && normalized.length < LLAMA_MAX_ACTIONS) {
+      normalized.push({ type: spell });
+    }
     return {
       speak: sanitizeLlamaSpeech(source.speak || source.say || source.message || 'Still hunting XP.'),
-      actions: normalized.slice(0, 3)
+      actions: normalized
     };
   };
 
@@ -289,7 +337,12 @@ export function createFriendlyNpcManager({
         magic: Number.isFinite(llama.model.userData.magic) ? llama.model.userData.magic : 30,
         level: llama.level,
         equipped: llama.model.userData.llamaEquipped || 'sword',
-        nearby: collectLlamaNearby(llama)
+        nearby: collectLlamaNearby(llama),
+        position: {
+          x: Math.round(llama.model.position.x * 100) / 100,
+          y: Math.round(llama.model.position.y * 100) / 100,
+          z: Math.round(llama.model.position.z * 100) / 100
+        }
       }
     };
     fetch('/api/llama', {
@@ -300,6 +353,7 @@ export function createFriendlyNpcManager({
     })
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`Groq llama status ${response.status}`))))
       .then((data) => {
+        console.log('[Llama] decision response', data);
         const decision = normalizeLlamaDecision(data?.decision || data);
         llamaDecision = decision;
         llamaActionStartedAt = 0;
@@ -466,6 +520,8 @@ export function createFriendlyNpcManager({
       llama.body?.applyImpulse?.({ x: 0, y: 4.5, z: 0 }, true);
       llama.playAnimation('JumpAttack', 0.1);
       llama.update(delta);
+      llamaDecision.actions.shift();
+      llamaActionStartedAt = 0;
       return;
     }
 
@@ -777,7 +833,7 @@ const getHealthForLevel = (level) => {
         friendly.setEngageRadius(FRIENDLY_ENGAGE_RADIUS);
         friendly.setDisengageRadius(FRIENDLY_DISENGAGE_RADIUS);
         friendly.lastAIUpdateMs = 0;
-        const level = isLlamaId(slotId) ? 1 : (Number.isFinite(record.level) ? record.level : getRandomLevel());
+        const level = Number.isFinite(record.level) ? record.level : (isLlamaId(slotId) ? 1 : getRandomLevel());
         friendly.setLevel(level, { preserveHealth: false });
         friendly.resetHealth();
 

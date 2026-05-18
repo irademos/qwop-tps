@@ -44,10 +44,77 @@ function buildPrompt(state = {}) {
   return `You are controlling an RPG character named Llama.\n\nGoal:\nmaximize XP and survive.\n\nState:\nHP: ${hp}\nHunger: ${hunger}\nMagic: ${magic}\nEquipped: ${equipped}\n\nNearby:\n${nearby}\n\nReturn ONLY JSON. Include a speak string every time.\n\nAvailable actions:\nmove\nattack\nequip\njump\ninteract\nspeak\nspells: fly (magic cost), shield (magic cost)\n\nJSON template:\n{\n  "speak": "short in-character sentence",\n  "actions": [\n    { "type": "move", "direction": "north|south|east|west" },\n    { "type": "attack", "targetId": "id from nearby if known" },\n    { "type": "equip", "item": "sword|ice gun|best available" },\n    { "type": "jump" },\n    { "type": "interact", "targetId": "id from nearby if known" },\n    { "type": "shield" },\n    { "type": "fly" }\n  ]\n}\nChoose at most 2 non-speak actions.`;
 }
 
+
+const ACTION_TYPES = new Set(['move', 'attack', 'equip', 'jump', 'interact', 'fly', 'shield']);
+const DIRECTIONS = new Set(['north', 'south', 'east', 'west']);
+const MAX_ACTIONS = 2;
+const MAX_SPEAK_CHARS = 96;
+const MAX_ITEM_CHARS = 40;
+const MAX_TARGET_ID_CHARS = 80;
+
+function sanitizeText(value, maxChars) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxChars);
+}
+
 function fallbackDecision() {
   return {
     speak: 'Thinking fast, staying alive.',
-    actions: [{ type: 'move', direction: 'north' }]
+    actions: []
+  };
+}
+
+function normalizeAction(action) {
+  if (!action || typeof action !== 'object' || Array.isArray(action)) return null;
+  const type = sanitizeText(action.type || action.action, 20).toLowerCase();
+  if (!ACTION_TYPES.has(type)) return null;
+
+  if (type === 'move') {
+    const direction = sanitizeText(action.direction, 12).toLowerCase();
+    if (!DIRECTIONS.has(direction)) return null;
+    return { type, direction };
+  }
+
+  if (type === 'attack') {
+    const targetId = sanitizeText(action.targetId || action.target, MAX_TARGET_ID_CHARS);
+    return targetId ? { type, targetId } : { type };
+  }
+
+  if (type === 'equip') {
+    const item = sanitizeText(action.item || action.target, MAX_ITEM_CHARS);
+    if (!item) return null;
+    return { type, item };
+  }
+
+  if (type === 'interact') {
+    const targetId = sanitizeText(action.targetId || action.target, MAX_TARGET_ID_CHARS);
+    if (!targetId) return null;
+    return { type, targetId };
+  }
+
+  return { type };
+}
+
+function normalizeDecision(value) {
+  const base = fallbackDecision();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return base;
+
+  const rawActions = Array.isArray(value.actions)
+    ? value.actions
+    : (value.action ? [{ ...value, type: value.action }] : []);
+  const actions = rawActions
+    .map(normalizeAction)
+    .filter(Boolean)
+    .slice(0, MAX_ACTIONS);
+
+  const spell = sanitizeText(value.spell, 20).toLowerCase();
+  if ((spell === 'fly' || spell === 'shield') && actions.length < MAX_ACTIONS) {
+    actions.push({ type: spell });
+  }
+
+  return {
+    speak: sanitizeText(value.speak || value.say || value.message, MAX_SPEAK_CHARS) || base.speak,
+    actions
   };
 }
 
@@ -110,13 +177,7 @@ export default async function handler(req, res) {
         decision = fallbackDecision();
       }
     }
-    if (!decision || typeof decision !== 'object') {
-      decision = fallbackDecision();
-    }
-    if (typeof decision.speak !== 'string' || !decision.speak.trim()) {
-      decision.speak = fallbackDecision().speak;
-    }
-    return res.status(200).json({ decision });
+    return res.status(200).json({ decision: normalizeDecision(decision) });
   } catch (error) {
     return res.status(200).json({
       decision: fallbackDecision(),
