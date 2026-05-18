@@ -146,10 +146,11 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-const ROAD_LIGHT_GRID_SIZE = 4;
+const ROAD_LIGHT_GRID_SIZE = 3;
 const ROAD_LIGHT_GRID_COUNT = ROAD_LIGHT_GRID_SIZE * ROAD_LIGHT_GRID_SIZE;
-const ROAD_LIGHT_GRID_SPACING_METERS = 20;
+const ROAD_LIGHT_GRID_SPACING_METERS = 40;
 const ROAD_LIGHT_SHIFT_DISTANCE_METERS = ROAD_LIGHT_GRID_SPACING_METERS * 1.25;
+const ROAD_LIGHT_REPOSITION_INTERVAL_MS = 7000;
 const ROAD_LIGHT_MODEL_URL = '/assets/props/road_light.glb';
 const ROAD_LIGHT_POINT_LIGHT_CONFIG = Object.freeze({
   color: 0xfff1c1,
@@ -13259,7 +13260,10 @@ async function initCore(runtimeContext) {
     playerPos: new THREE.Vector3(),
     playerMove: new THREE.Vector3(),
     spawnPos: new THREE.Vector3(),
-    lastPlayerPos: null
+    lastPlayerPos: null,
+    gridCenterX: null,
+    gridCenterZ: null,
+    nextRepositionAtMs: 0
   };
 
   const isNightDisplayMode = () => {
@@ -13303,6 +13307,7 @@ async function initCore(runtimeContext) {
       return;
     }
     const playerPos = roadLightScratch.playerPos.copy(playerModel.position);
+    const nowMs = performance.now();
     const spawnPos = roadLightScratch.spawnPos;
     const playerMove = roadLightScratch.playerMove;
     if (roadLightScratch.lastPlayerPos) {
@@ -13318,12 +13323,22 @@ async function initCore(runtimeContext) {
     }
     roadLightScratch.lastPlayerPos.copy(playerPos);
 
-    // Shift the grid one cell in the movement direction once player crosses threshold.
-    const shouldShiftForward = playerMove.lengthSq() > 0.01;
-    const shiftOffsetX = shouldShiftForward ? playerMove.x * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
-    const shiftOffsetZ = shouldShiftForward ? playerMove.z * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
-    const gridCenterX = Math.round((playerPos.x + shiftOffsetX) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
-    const gridCenterZ = Math.round((playerPos.z + shiftOffsetZ) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
+    if (
+      roadLightScratch.gridCenterX == null
+      || roadLightScratch.gridCenterZ == null
+      || nowMs >= roadLightScratch.nextRepositionAtMs
+    ) {
+      const shouldShiftForward = playerMove.lengthSq() > 0.01;
+      const shiftOffsetX = shouldShiftForward ? playerMove.x * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
+      const shiftOffsetZ = shouldShiftForward ? playerMove.z * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
+      roadLightScratch.gridCenterX =
+        Math.round((playerPos.x + shiftOffsetX) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
+      roadLightScratch.gridCenterZ =
+        Math.round((playerPos.z + shiftOffsetZ) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
+      roadLightScratch.nextRepositionAtMs = nowMs + ROAD_LIGHT_REPOSITION_INTERVAL_MS;
+    }
+    const gridCenterX = roadLightScratch.gridCenterX;
+    const gridCenterZ = roadLightScratch.gridCenterZ;
     const halfSpan = ((ROAD_LIGHT_GRID_SIZE - 1) * ROAD_LIGHT_GRID_SPACING_METERS) * 0.5;
 
     let poolIndex = 0;
