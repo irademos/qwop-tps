@@ -57,6 +57,12 @@ export function createEntityPersistence({
       version: bumpVersion(entity)
     };
 
+    const userData = entity?.model?.userData || {};
+    if (userData.npcKind) payload.npcKind = userData.npcKind;
+    if (userData.displayName) payload.name = userData.displayName;
+    if (userData.llamaSpeech) payload.llamaSpeech = userData.llamaSpeech;
+    if (userData.llamaEquipped) payload.llamaEquipped = userData.llamaEquipped;
+
     if (includeTransform && entity.model) {
       const pos = entity.model.position;
       const rot = entity.model.quaternion;
