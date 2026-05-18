@@ -146,6 +146,20 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+const ROAD_LIGHT_RING_COUNT = 12;
+const ROAD_LIGHT_SIDE_OFFSET_METERS = 6;
+const ROAD_LIGHT_MIN_SPACING_METERS = 10;
+const ROAD_LIGHT_TARGET_SPACING_METERS = 10;
+const ROAD_LIGHT_MIN_DISTANCE_FROM_PLAYER_METERS = 30;
+const ROAD_LIGHT_MODEL_URL = '/assets/props/road_light.glb';
+const ROAD_LIGHT_POINT_LIGHT_CONFIG = Object.freeze({
+  color: 0xfff1c1,
+  intensity: 2.6,
+  distance: 40,
+  decay: 0.5,
+  yOffset: 3.4
+});
+
 const DEFAULT_CHARACTER_MODEL = "/models/base_character_2.fbx";
 const MAX_MONSTERS_TOTAL = 24;
 const MAX_TRAVEL_SPAWN_CHARACTERS_TOTAL = 32;
@@ -13238,6 +13252,160 @@ async function initCore(runtimeContext) {
     }
   };
 
+  const roadLightLoader = new GLTFLoader();
+  let roadLightTemplate = null;
+  let roadLightTemplatePromise = null;
+  const roadLightPool = [];
+  const roadLightScratch = {
+    playerPos: new THREE.Vector3(),
+    tangent: new THREE.Vector3(),
+    samplePos: new THREE.Vector3(),
+    toPlayer: new THREE.Vector3(),
+    side: new THREE.Vector3(),
+    spawnPos: new THREE.Vector3()
+  };
+
+  const isNightDisplayMode = () => {
+    const effectiveMode = displaySettings.mode === 'auto'
+      ? (lastAutoMode || getAutoMode())
+      : displaySettings.mode;
+    return effectiveMode === 'night';
+  };
+
+  const clearRoadLightPool = () => {
+    roadLightPool.forEach((entry) => {
+      if (!entry?.model) return;
+      entry.model.visible = false;
+    });
+  };
+
+  const ensureRoadLightTemplate = async () => {
+    if (roadLightTemplate) return roadLightTemplate;
+    if (!roadLightTemplatePromise) {
+      roadLightTemplatePromise = roadLightLoader.loadAsync(ROAD_LIGHT_MODEL_URL)
+        .then((gltf) => {
+          roadLightTemplate = gltf?.scene || null;
+          return roadLightTemplate;
+        })
+        .catch((error) => {
+          console.warn('Failed to load road light template.', error);
+          return null;
+        });
+    }
+    return roadLightTemplatePromise;
+  };
+
+  const getRoadStamps = () => {
+    const stamps = [];
+    mapRenderer?.group?.traverse?.((child) => {
+      const stamp = child?.userData?.roadStamp;
+      if (!stamp?.points || stamp.points.length < 2) return;
+      stamps.push(stamp);
+    });
+    return stamps;
+  };
+
+  const updateRoadLightsNearPlayer = () => {
+    if (!scene || !playerModel?.position || !isNightDisplayMode()) {
+      clearRoadLightPool();
+      return;
+    }
+    const template = roadLightTemplate;
+    if (!template) {
+      void ensureRoadLightTemplate();
+      return;
+    }
+    const stamps = getRoadStamps();
+    if (!stamps.length) {
+      clearRoadLightPool();
+      return;
+    }
+    const playerPos = roadLightScratch.playerPos.copy(playerModel.position);
+    const side = roadLightScratch.side;
+    const toPlayer = roadLightScratch.toPlayer;
+    const tangent = roadLightScratch.tangent;
+    const samplePos = roadLightScratch.samplePos;
+    const spawnPos = roadLightScratch.spawnPos;
+    const sampled = [];
+    for (const stamp of stamps) {
+      const points = stamp.points;
+      for (let i = 0; i < points.length - 1; i += 1) {
+        const start = points[i];
+        const end = points[i + 1];
+        tangent.set(end.x - start.x, 0, end.z - start.z);
+        const segmentLength = tangent.length();
+        if (segmentLength < 0.001) continue;
+        tangent.divideScalar(segmentLength);
+        for (let distance = 0; distance <= segmentLength; distance += ROAD_LIGHT_TARGET_SPACING_METERS) {
+          samplePos.set(start.x + tangent.x * distance, 0, start.z + tangent.z * distance);
+          const terrainY = getTerrainHeight(samplePos.x, samplePos.z);
+          samplePos.y = Number.isFinite(terrainY) ? terrainY : playerPos.y;
+          const distToPlayer = samplePos.distanceTo(playerPos);
+          if (distToPlayer < ROAD_LIGHT_MIN_DISTANCE_FROM_PLAYER_METERS) continue;
+          sampled.push({
+            center: samplePos.clone(),
+            tangent: tangent.clone(),
+            distanceToPlayer: distToPlayer
+          });
+        }
+      }
+    }
+    if (!sampled.length) {
+      clearRoadLightPool();
+      return;
+    }
+    sampled.sort((a, b) => a.distanceToPlayer - b.distanceToPlayer);
+    const selected = [];
+    for (const entry of sampled) {
+      const isTooClose = selected.some((existing) => existing.center.distanceTo(entry.center) < ROAD_LIGHT_MIN_SPACING_METERS);
+      if (isTooClose) continue;
+      selected.push(entry);
+      if (selected.length >= ROAD_LIGHT_RING_COUNT / 2) break;
+    }
+    if (!selected.length) {
+      clearRoadLightPool();
+      return;
+    }
+
+    let poolIndex = 0;
+    for (const entry of selected) {
+      toPlayer.copy(playerPos).sub(entry.center);
+      const sideSign = Math.sign(entry.tangent.x * toPlayer.z - entry.tangent.z * toPlayer.x) || 1;
+      side.set(-entry.tangent.z, 0, entry.tangent.x);
+      for (const offsetSign of [sideSign, -sideSign]) {
+        spawnPos.copy(entry.center).addScaledVector(side, ROAD_LIGHT_SIDE_OFFSET_METERS * offsetSign);
+        const spawnTerrain = getTerrainHeight(spawnPos.x, spawnPos.z);
+        spawnPos.y = Number.isFinite(spawnTerrain) ? spawnTerrain : entry.center.y;
+        let roadLight = roadLightPool[poolIndex];
+        if (!roadLight) {
+          const model = template.clone(true);
+          model.scale.setScalar(1);
+          const lampLight = new THREE.PointLight(
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.color,
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.intensity,
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.distance,
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.decay
+          );
+          lampLight.position.set(0, ROAD_LIGHT_POINT_LIGHT_CONFIG.yOffset, 0);
+          model.add(lampLight);
+          scene.add(model);
+          roadLight = { model };
+          roadLightPool[poolIndex] = roadLight;
+        }
+        roadLight.model.visible = true;
+        roadLight.model.position.copy(spawnPos);
+        roadLight.model.rotation.y = Math.atan2(entry.tangent.x, entry.tangent.z);
+        poolIndex += 1;
+        if (poolIndex >= ROAD_LIGHT_RING_COUNT) break;
+      }
+      if (poolIndex >= ROAD_LIGHT_RING_COUNT) break;
+    }
+
+    for (let i = poolIndex; i < roadLightPool.length; i += 1) {
+      roadLightPool[i].model.visible = false;
+    }
+  };
+
   function animate() {
     requestAnimationFrame(animate);
     const frameStartMs = performance.now();
@@ -13332,6 +13500,7 @@ async function initCore(runtimeContext) {
     homeSystem?.syncHomePlacement?.();
     updateGroundTiles(playerPosition);
     natureController?.update(playerPosition);
+    updateRoadLightsNearPlayer();
     if (shouldUpdatePickupTiles(playerPosition)) {
       updatePickupTiles(playerPosition);
     }
