@@ -146,6 +146,20 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+const ROAD_LIGHT_GRID_SIZE = 3;
+const ROAD_LIGHT_GRID_COUNT = ROAD_LIGHT_GRID_SIZE * ROAD_LIGHT_GRID_SIZE;
+const ROAD_LIGHT_GRID_SPACING_METERS = 40;
+const ROAD_LIGHT_SHIFT_DISTANCE_METERS = ROAD_LIGHT_GRID_SPACING_METERS * 1.25;
+const ROAD_LIGHT_REPOSITION_INTERVAL_MS = 7000;
+const ROAD_LIGHT_MODEL_URL = '/assets/props/road_light.glb';
+const ROAD_LIGHT_POINT_LIGHT_CONFIG = Object.freeze({
+  color: 0xfff1c1,
+  intensity: 2.6,
+  distance: 40,
+  decay: 0.5,
+  yOffset: 3.4
+});
+
 const DEFAULT_CHARACTER_MODEL = "/models/base_character_2.fbx";
 const MAX_MONSTERS_TOTAL = 24;
 const MAX_TRAVEL_SPAWN_CHARACTERS_TOTAL = 32;
@@ -13239,6 +13253,130 @@ async function initCore(runtimeContext) {
     }
   };
 
+  const roadLightLoader = new GLTFLoader();
+  let roadLightTemplate = null;
+  let roadLightTemplatePromise = null;
+  const roadLightPool = [];
+  const roadLightScratch = {
+    playerPos: new THREE.Vector3(),
+    playerMove: new THREE.Vector3(),
+    spawnPos: new THREE.Vector3(),
+    lastPlayerPos: null,
+    gridCenterX: null,
+    gridCenterZ: null,
+    nextRepositionAtMs: 0
+  };
+
+  const isNightDisplayMode = () => {
+    const effectiveMode = displaySettings.mode === 'auto'
+      ? (lastAutoMode || getAutoMode())
+      : displaySettings.mode;
+    return effectiveMode === 'night';
+  };
+
+  const clearRoadLightPool = () => {
+    roadLightPool.forEach((entry) => {
+      if (!entry?.model) return;
+      entry.model.visible = false;
+    });
+  };
+
+  const ensureRoadLightTemplate = async () => {
+    if (roadLightTemplate) return roadLightTemplate;
+    if (!roadLightTemplatePromise) {
+      roadLightTemplatePromise = roadLightLoader.loadAsync(ROAD_LIGHT_MODEL_URL)
+        .then((gltf) => {
+          roadLightTemplate = gltf?.scene || null;
+          return roadLightTemplate;
+        })
+        .catch((error) => {
+          console.warn('Failed to load road light template.', error);
+          return null;
+        });
+    }
+    return roadLightTemplatePromise;
+  };
+
+  const updateRoadLightsNearPlayer = () => {
+    if (!scene || !playerModel?.position || !isNightDisplayMode()) {
+      clearRoadLightPool();
+      return;
+    }
+    const template = roadLightTemplate;
+    if (!template) {
+      void ensureRoadLightTemplate();
+      return;
+    }
+    const playerPos = roadLightScratch.playerPos.copy(playerModel.position);
+    const nowMs = performance.now();
+    const spawnPos = roadLightScratch.spawnPos;
+    const playerMove = roadLightScratch.playerMove;
+    if (roadLightScratch.lastPlayerPos) {
+      playerMove.copy(playerPos).sub(roadLightScratch.lastPlayerPos).setY(0);
+    } else {
+      playerMove.set(0, 0, 0);
+    }
+    if (playerMove.lengthSq() > 0.0001) {
+      playerMove.normalize();
+    }
+    if (!roadLightScratch.lastPlayerPos) {
+      roadLightScratch.lastPlayerPos = playerPos.clone();
+    }
+    roadLightScratch.lastPlayerPos.copy(playerPos);
+
+    if (
+      roadLightScratch.gridCenterX == null
+      || roadLightScratch.gridCenterZ == null
+      || nowMs >= roadLightScratch.nextRepositionAtMs
+    ) {
+      const shouldShiftForward = playerMove.lengthSq() > 0.01;
+      const shiftOffsetX = shouldShiftForward ? playerMove.x * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
+      const shiftOffsetZ = shouldShiftForward ? playerMove.z * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
+      roadLightScratch.gridCenterX =
+        Math.round((playerPos.x + shiftOffsetX) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
+      roadLightScratch.gridCenterZ =
+        Math.round((playerPos.z + shiftOffsetZ) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
+      roadLightScratch.nextRepositionAtMs = nowMs + ROAD_LIGHT_REPOSITION_INTERVAL_MS;
+    }
+    const gridCenterX = roadLightScratch.gridCenterX;
+    const gridCenterZ = roadLightScratch.gridCenterZ;
+    const halfSpan = ((ROAD_LIGHT_GRID_SIZE - 1) * ROAD_LIGHT_GRID_SPACING_METERS) * 0.5;
+
+    let poolIndex = 0;
+    for (let row = 0; row < ROAD_LIGHT_GRID_SIZE; row += 1) {
+      for (let col = 0; col < ROAD_LIGHT_GRID_SIZE; col += 1) {
+        const x = gridCenterX + (col * ROAD_LIGHT_GRID_SPACING_METERS - halfSpan);
+        const z = gridCenterZ + (row * ROAD_LIGHT_GRID_SPACING_METERS - halfSpan);
+        spawnPos.set(x, 0, z);
+        const spawnTerrain = getTerrainHeight(spawnPos.x, spawnPos.z);
+        spawnPos.y = Number.isFinite(spawnTerrain) ? spawnTerrain : playerPos.y;
+        let roadLight = roadLightPool[poolIndex];
+        if (!roadLight) {
+          const model = template.clone(true);
+          model.scale.setScalar(1);
+          const lampLight = new THREE.PointLight(
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.color,
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.intensity,
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.distance,
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.decay
+          );
+          lampLight.position.set(0, ROAD_LIGHT_POINT_LIGHT_CONFIG.yOffset, 0);
+          model.add(lampLight);
+          scene.add(model);
+          roadLight = { model };
+          roadLightPool[poolIndex] = roadLight;
+        }
+        roadLight.model.visible = true;
+        roadLight.model.position.copy(spawnPos);
+        poolIndex += 1;
+      }
+    }
+
+    for (let i = poolIndex; i < roadLightPool.length; i += 1) {
+      roadLightPool[i].model.visible = false;
+    }
+  };
+
   function animate() {
     requestAnimationFrame(animate);
     const frameStartMs = performance.now();
@@ -13333,6 +13471,7 @@ async function initCore(runtimeContext) {
     homeSystem?.syncHomePlacement?.();
     updateGroundTiles(playerPosition);
     natureController?.update(playerPosition);
+    updateRoadLightsNearPlayer();
     if (shouldUpdatePickupTiles(playerPosition)) {
       updatePickupTiles(playerPosition);
     }
