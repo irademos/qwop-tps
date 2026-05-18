@@ -4089,6 +4089,17 @@ async function initCore(runtimeContext) {
     onBeforeSpawn: (...args) => trimTravelSpawnPopulationIfNeeded(...args),
     onRemoteSpawnRequest: requestHostSpawnEvent,
     getMonsters: () => monsters,
+    getFoodPickups: () => [
+      ...mushroomPickups.map((pickup, index) => ({ id: `food:mushroom:${pickup?.id || index}:${index}`, type: 'mushroom', pickup, position: pickup?.position || pickup?.mesh?.position })),
+      ...applePickups.map((pickup, index) => ({ id: `food:apple:${pickup?.id || index}:${index}`, type: 'apple', pickup, position: pickup?.mesh?.getWorldPosition?.(new THREE.Vector3()) || pickup?.mesh?.position })),
+      ...meatPickups.map((pickup, index) => ({ id: `food:meat:${pickup?.id || index}:${index}`, type: 'meat', pickup, position: pickup?.mesh?.position }))
+    ].filter((entry) => entry.pickup && entry.position && (entry.pickup.active !== false) && (!entry.pickup.mesh || entry.pickup.mesh.visible !== false)),
+    onFoodPickupCollected: (target, actorPosition) => {
+      if (target?.type === 'mushroom') return pickupMushroom(target.pickup, actorPosition);
+      if (target?.type === 'apple') return pickupApple(target.pickup, actorPosition);
+      if (target?.type === 'meat') return pickupMeat(target.pickup, actorPosition);
+      return false;
+    },
     onMonsterHit: handleMonsterDamage
   });
   if (multiplayer?.roomId) {
@@ -6419,12 +6430,12 @@ async function initCore(runtimeContext) {
     }
   }
 
-  function pickupMushroom(pickup) {
+  function pickupMushroom(pickup, actorPosition = playerControls?.playerModel?.position) {
     if (!pickup?.active) return false;
     const pickupPosition = pickup.position || pickup.mesh?.position;
     if (!pickupPosition) return false;
-    if (playerControls?.playerModel) {
-      const playerPosition = playerControls.playerModel.position;
+    if (actorPosition) {
+      const playerPosition = actorPosition;
       const horizontalDistance = Math.hypot(
         playerPosition.x - pickupPosition.x,
         playerPosition.z - pickupPosition.z
@@ -6444,10 +6455,10 @@ async function initCore(runtimeContext) {
     return true;
   }
 
-  function pickupApple(pickup) {
+  function pickupApple(pickup, actorPosition = playerControls?.playerModel?.position) {
     if (!pickup?.mesh) return false;
-    if (playerControls?.playerModel) {
-      const playerPosition = playerControls.playerModel.position;
+    if (actorPosition) {
+      const playerPosition = actorPosition;
       const applePosition = pickup.mesh.getWorldPosition
         ? pickup.mesh.getWorldPosition(tempTreePosition)
         : pickup.mesh.position;
@@ -6486,10 +6497,10 @@ async function initCore(runtimeContext) {
   }
 
 
-  function pickupMeat(pickup) {
+  function pickupMeat(pickup, actorPosition = playerControls?.playerModel?.position) {
     if (!pickup?.mesh) return false;
-    if (playerControls?.playerModel) {
-      const playerPosition = playerControls.playerModel.position;
+    if (actorPosition) {
+      const playerPosition = actorPosition;
       const meatPosition = pickup.mesh.position;
       const horizontalDistance = Math.hypot(
         playerPosition.x - meatPosition.x,
