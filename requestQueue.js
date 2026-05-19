@@ -48,12 +48,15 @@ class RequestQueue {
     rateLimitMs = DEFAULT_RATE_LIMIT_MS,
     backoffMs = DEFAULT_BACKOFF_MS,
     maxRetries = DEFAULT_MAX_RETRIES,
+    maxConcurrent = 1,
   } = {}) {
     this.rateLimitMs = rateLimitMs;
     this.backoffMs = backoffMs;
     this.maxRetries = maxRetries;
+    this.maxConcurrent = Math.max(1, Math.floor(maxConcurrent));
     this.queue = [];
-    this.processing = false;
+    this.inFlightCount = 0;
+    this.processingScheduled = false;
     this.lastRequestStartedAt = 0;
     this.globalNextAllowedAt = 0;
     this.latestLocation = null;
@@ -98,23 +101,29 @@ class RequestQueue {
     return promise;
   }
 
-  async processQueue() {
-    if (this.processing) {
+  processQueue() {
+    if (this.processingScheduled) {
       return;
     }
-    this.processing = true;
+    this.processingScheduled = true;
+    queueMicrotask(() => {
+      this.processingScheduled = false;
+      this.pumpQueue();
+    });
+  }
 
-    while (this.queue.length > 0) {
+  pumpQueue() {
+    while (this.inFlightCount < this.maxConcurrent && this.queue.length > 0) {
       const entry = this.queue.shift();
-      try {
-        const response = await this.executeWithRetry(entry);
-        entry.resolve(response);
-      } catch (error) {
-        entry.reject(error);
-      }
+      this.inFlightCount += 1;
+      this.executeWithRetry(entry)
+        .then((response) => entry.resolve(response))
+        .catch((error) => entry.reject(error))
+        .finally(() => {
+          this.inFlightCount = Math.max(0, this.inFlightCount - 1);
+          this.processQueue();
+        });
     }
-
-    this.processing = false;
   }
 
   isStale(entry) {
@@ -135,11 +144,17 @@ class RequestQueue {
   }
 
   async waitForRateLimit() {
-    const elapsed = Date.now() - this.lastRequestStartedAt;
-    const baseWaitMs = Math.max(0, this.rateLimitMs - elapsed);
-    const globalWaitMs = Math.max(0, this.globalNextAllowedAt - Date.now());
-    const waitMs = Math.max(baseWaitMs, globalWaitMs);
-    if (waitMs > 0) {
+    // Re-evaluate in a loop so concurrent workers don't all wake at once and violate spacing.
+    while (true) {
+      const now = Date.now();
+      const elapsed = now - this.lastRequestStartedAt;
+      const baseWaitMs = Math.max(0, this.rateLimitMs - elapsed);
+      const globalWaitMs = Math.max(0, this.globalNextAllowedAt - now);
+      const waitMs = Math.max(baseWaitMs, globalWaitMs);
+      if (waitMs <= 0) {
+        this.lastRequestStartedAt = Date.now();
+        return;
+      }
       await sleep(waitMs);
     }
   }
@@ -154,7 +169,6 @@ class RequestQueue {
       }
 
       await this.waitForRateLimit();
-      this.lastRequestStartedAt = Date.now();
 
       try {
         const response = await entry.requestFn();
@@ -190,5 +204,17 @@ class RequestQueue {
   }
 }
 
-export const overpassRequestQueue = new RequestQueue();
+function parseQueueNumber(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const overpassQueueDefaults = {
+  maxConcurrent: parseQueueNumber(import.meta.env.VITE_OVERPASS_MAX_CONCURRENT, 2),
+  rateLimitMs: parseQueueNumber(import.meta.env.VITE_OVERPASS_RATE_LIMIT_MS, DEFAULT_RATE_LIMIT_MS),
+  backoffMs: parseQueueNumber(import.meta.env.VITE_OVERPASS_BACKOFF_MS, DEFAULT_BACKOFF_MS),
+  maxRetries: parseQueueNumber(import.meta.env.VITE_OVERPASS_MAX_RETRIES, DEFAULT_MAX_RETRIES),
+};
+
+export const overpassRequestQueue = new RequestQueue(overpassQueueDefaults);
 export { RequestQueue, StaleRequestError };
