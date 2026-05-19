@@ -1,4 +1,4 @@
-import { overpassRequestQueue } from "./requestQueue.js";
+import { RequestThrottleError, overpassRequestQueue } from "./requestQueue.js";
 import { overpassToGeoJSON } from "./osmGeoJson.js";
 
 const OVERPASS_ENDPOINTS = import.meta.env.PROD
@@ -10,6 +10,20 @@ const OVERPASS_ENDPOINTS = import.meta.env.PROD
     ];
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_STALE_DISTANCE_METERS = 600;
+const EMPTY_OVERPASS_PAYLOAD = Object.freeze({ version: 0.6, generator: "fallback", elements: [] });
+
+class OverpassHttpError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = "OverpassHttpError";
+    this.code = "OVERPASS_HTTP_ERROR";
+    this.status = details.status ?? null;
+    this.endpoint = details.endpoint ?? null;
+    this.retryAfterMs = details.retryAfterMs ?? null;
+    this.isRateLimited = this.status === 429;
+    this.details = details;
+  }
+}
 
 const HIGHWAY_TAGS = [
   "footway",
@@ -77,6 +91,7 @@ async function performOverpassRequest(body) {
         body,
         signal: controller.signal,
       });
+      response.overpassEndpoint = endpoint;
       if (response.status !== 429) {
         return response;
       }
@@ -111,6 +126,24 @@ export async function fetchOSMData(lat, lon, radiusMeters, options = {}) {
     requestFn: () => performOverpassRequest(new URLSearchParams({ data: query })),
   });
 
+  if (!response?.ok) {
+    const status = Number.isFinite(response?.status) ? response.status : null;
+    const retryAfterRaw = response?.headers?.get?.("retry-after");
+    const retryAfterMs = retryAfterRaw ? Number.parseFloat(retryAfterRaw) * 1000 : null;
+    const details = {
+      status,
+      statusText: response?.statusText ?? null,
+      retryAfterMs: Number.isFinite(retryAfterMs) ? retryAfterMs : null
+    };
+    if (options.fallbackOnNonOk === true) {
+      return EMPTY_OVERPASS_PAYLOAD;
+    }
+    throw new OverpassHttpError(
+      `Overpass response non-OK: ${status ?? "unknown"} ${response?.statusText ?? ""}`.trim(),
+      details
+    );
+  }
+
   return response.json();
 }
 
@@ -118,6 +151,16 @@ export async function fetchOSMFeatures(lat, lon, radiusMeters, options = {}) {
   const data = await fetchOSMData(lat, lon, radiusMeters, options);
   return overpassToGeoJSON(data);
 }
+
+export function isOverpassThrottleError(error) {
+  if (!error) return false;
+  return error instanceof RequestThrottleError
+    || error instanceof OverpassHttpError && error.status === 429
+    || error?.code === "OVERPASS_RATE_LIMITED"
+    || error?.status === 429;
+}
+
+export { OverpassHttpError, EMPTY_OVERPASS_PAYLOAD };
 
 // Minimal usage example:
 // fetchOSMFeatures(37.7749, -122.4194, 500)

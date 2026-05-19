@@ -46,7 +46,7 @@ import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 import { createStaticBoxColliderForObject, removeStaticBoxCollider, syncStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
 import { configureSpawnAlignment, getSpawnPosition, getSpawnY } from '../spawnUtils.js';
 import { createLocationProvider } from '../location.js';
-import { fetchOSMData } from '../osmClient.js';
+import { fetchOSMData, isOverpassThrottleError } from '../osmClient.js';
 import { overpassToGeoJSON } from '../osmGeoJson.js';
 import { createMapRenderer } from '../environment/mapRender.js';
 import { createBuildingsRenderer } from '../environment/buildingsRender.js';
@@ -10974,6 +10974,8 @@ async function initCore(runtimeContext) {
     return false;
   };
   const mapFetchInFlight = new Set();
+  const tileRetryTimeouts = new Map();
+  let mapRateLimitedUntil = 0;
   const debugPerf = {
     monsters: 0,
     ammoPickups: 0,
@@ -11771,6 +11773,7 @@ async function initCore(runtimeContext) {
 
     mapFetchInFlight.add(tileKey);
     let geojson;
+    const priorGeojson = tileCache.cache.get(tileKey)?.geojson ?? renderedTileGeojson.get(tileKey) ?? null;
     try {
       const overpassData = await fetchOSMData(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS, {
         staleDistanceMeters: TILE_SIZE_METERS * 2,
@@ -11784,6 +11787,30 @@ async function initCore(runtimeContext) {
         geojson = prefilterGeojson(overpassToGeoJSON(overpassData));
       }
     } catch (error) {
+      const isThrottle = isOverpassThrottleError(error);
+      if (isThrottle) {
+        const baseDelayMs = Number.isFinite(error?.retryAfterMs) && error.retryAfterMs > 0
+          ? error.retryAfterMs
+          : 4000;
+        const jitterMs = Math.floor(Math.random() * 1500);
+        const retryDelayMs = baseDelayMs + jitterMs;
+        mapRateLimitedUntil = Math.max(mapRateLimitedUntil, Date.now() + retryDelayMs);
+        locationState.state = 'rate_limited';
+        locationState.message = 'map data temporarily rate-limited';
+        if (tileRetryTimeouts.has(tileKey)) {
+          clearTimeout(tileRetryTimeouts.get(tileKey));
+        }
+        const timeoutId = setTimeout(() => {
+          tileRetryTimeouts.delete(tileKey);
+          if (!PERF.disableMapUpdates) {
+            void requestMapUpdate(location);
+          }
+        }, retryDelayMs);
+        tileRetryTimeouts.set(tileKey, timeoutId);
+        if (priorGeojson) {
+          updateTileMeshes(tileKey, priorGeojson);
+        }
+      }
       console.warn('OSM fetch failed:', error);
       debugState.lastError = {
         message: error?.message || 'OSM fetch failed',
@@ -11803,6 +11830,10 @@ async function initCore(runtimeContext) {
         console.warn('Failed to persist tile cache:', error);
       });
       updateTileMeshes(tileKey, geojson);
+      if (Date.now() >= mapRateLimitedUntil && locationState.state === 'rate_limited') {
+        locationState.state = 'found';
+        locationState.message = null;
+      }
     } catch (error) {
       console.warn('OSM render failed:', error);
       debugState.lastError = {
