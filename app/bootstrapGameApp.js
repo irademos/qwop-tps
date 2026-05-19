@@ -847,13 +847,25 @@ async function initCore(runtimeContext) {
   let presenceSendIntervalMs = PRESENCE_SEND_MS;
   const POSITION_DEADBAND_SQ = 0.03 * 0.03;
   const ROTATION_DEADBAND_RAD = 0.045;
-  const netSendQueue = new Map();
+  const netSendQueue = {
+    critical: [],
+    high: new Map(),
+    normal: []
+  };
+  const NET_SEND_BUDGETS = Object.freeze({
+    high: { maxMessages: 12, maxBytes: 14000 },
+    mid: { maxMessages: 9, maxBytes: 9000 },
+    low: { maxMessages: 6, maxBytes: 5000 }
+  });
   const netStats = {
     sentInWindow: 0,
     windowStartMs: performance.now(),
     messagesPerSecond: 0,
     coalesced: 0,
-    dropped: 0
+    dropped: 0,
+    deferred: 0,
+    laneDropped: { critical: 0, high: 0, normal: 0 },
+    laneDeferred: { critical: 0, high: 0, normal: 0 }
   };
   const lastSentPresenceState = {
     x: null,
@@ -996,28 +1008,98 @@ async function initCore(runtimeContext) {
   const recordNetSent = (count = 1) => {
     netStats.sentInWindow += count;
   };
+  const getNetQueueDepth = () => (
+    netSendQueue.critical.length
+    + netSendQueue.high.size
+    + netSendQueue.normal.length
+  );
+  const estimatePayloadBytes = (payload) => {
+    if (!payload) return 0;
+    try {
+      return JSON.stringify(payload).length;
+    } catch {
+      return 0;
+    }
+  };
+  const getMessageLane = (payload) => {
+    const type = payload?.type;
+    if (type === 'attackMonster' || type === 'spawnRequest' || type === 'projectile' || type === 'inventoryThrowProjectile' || type === 'grab') {
+      return 'critical';
+    }
+    if (type === 'entityControl' || type === 'entityStates') return 'high';
+    return 'normal';
+  };
   const queueNetMessage = (payload, coalesceKey = null) => {
     if (!multiplayer || !payload) {
       netStats.dropped += 1;
+      netStats.laneDropped.normal += 1;
       return false;
     }
-    if (!coalesceKey) {
-      sendNetworkPayload(payload);
-      recordNetSent(1);
+    const lane = getMessageLane(payload);
+    const canCoalesce = lane === 'high' && (coalesceKey?.startsWith('entityControl:') || coalesceKey?.startsWith('entityStates:'));
+    if (canCoalesce) {
+      if (netSendQueue.high.has(coalesceKey)) {
+        netStats.coalesced += 1;
+      }
+      netSendQueue.high.set(coalesceKey, payload);
       return true;
     }
-    if (netSendQueue.has(coalesceKey)) {
-      netStats.coalesced += 1;
+    if (lane === 'critical') {
+      netSendQueue.critical.push(payload);
+      return true;
     }
-    netSendQueue.set(coalesceKey, payload);
+    netSendQueue.normal.push(payload);
     return true;
   };
   const flushNetSendQueue = () => {
-    if (!multiplayer || netSendQueue.size === 0) return;
-    const pending = Array.from(netSendQueue.values());
-    netSendQueue.clear();
-    pending.forEach((payload) => sendNetworkPayload(payload));
-    recordNetSent(pending.length);
+    if (!multiplayer) return;
+    const depth = getNetQueueDepth();
+    if (depth === 0) return;
+    const tier = getNetworkTier();
+    const budget = NET_SEND_BUDGETS[tier] || NET_SEND_BUDGETS.high;
+    let sent = 0;
+    let sentBytes = 0;
+
+    while (netSendQueue.critical.length > 0) {
+      const payload = netSendQueue.critical.shift();
+      if (sendNetworkPayload(payload)) {
+        sent += 1;
+      }
+    }
+
+    const highEntries = Array.from(netSendQueue.high.entries());
+    let highSent = 0;
+    for (const [key, payload] of highEntries) {
+      if (sent >= budget.maxMessages || sentBytes >= budget.maxBytes) break;
+      const payloadBytes = estimatePayloadBytes(payload);
+      if ((sent + 1) > budget.maxMessages || (sentBytes + payloadBytes) > budget.maxBytes) break;
+      if (sendNetworkPayload(payload)) {
+        sent += 1;
+        highSent += 1;
+        sentBytes += payloadBytes;
+        netSendQueue.high.delete(key);
+      }
+    }
+
+    while (netSendQueue.normal.length > 0) {
+      if (sent >= budget.maxMessages || sentBytes >= budget.maxBytes) break;
+      const payload = netSendQueue.normal[0];
+      const payloadBytes = estimatePayloadBytes(payload);
+      if ((sent + 1) > budget.maxMessages || (sentBytes + payloadBytes) > budget.maxBytes) break;
+      netSendQueue.normal.shift();
+      if (sendNetworkPayload(payload)) {
+        sent += 1;
+        sentBytes += payloadBytes;
+      }
+    }
+
+    const deferredHigh = netSendQueue.high.size;
+    const deferredNormal = netSendQueue.normal.length;
+    if (deferredHigh > 0) netStats.laneDeferred.high += deferredHigh;
+    if (deferredNormal > 0) netStats.laneDeferred.normal += deferredNormal;
+    netStats.deferred += deferredHigh + deferredNormal;
+
+    recordNetSent(sent);
   };
   const sendNetworkPayload = (payload) => {
     if (!multiplayer || !payload) return false;
@@ -1042,7 +1124,10 @@ async function initCore(runtimeContext) {
       rttMs: Number.isFinite(multiplayer?.lastPingMs) ? multiplayer.lastPingMs : null,
       coalesced: netStats.coalesced,
       dropped: netStats.dropped,
-      queueDepth: netSendQueue.size,
+      queueDepth: getNetQueueDepth(),
+      deferred: netStats.deferred,
+      deferredByLane: { ...netStats.laneDeferred },
+      droppedByLane: { ...netStats.laneDropped },
       topologyMode: NETWORK_TOPOLOGY_MODE,
       intervals: {
         presenceSendIntervalMs,
@@ -14105,6 +14190,7 @@ async function initCore(runtimeContext) {
           queueNetMessage({ type: 'entityControl', id, state, sourceId }, `entityControl:${id}`);
         } else {
           netStats.dropped += 1;
+          netStats.laneDropped.high += 1;
         }
       });
       lastControlSend = now;
@@ -14444,6 +14530,7 @@ async function initCore(runtimeContext) {
         lastSentPresenceState.sentAt = now;
       } else {
         netStats.dropped += 1;
+        netStats.laneDropped.normal += 1;
       }
       lastPresenceSend = now;
     }
