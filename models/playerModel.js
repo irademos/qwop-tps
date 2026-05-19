@@ -216,9 +216,17 @@ export function createPlayerModel(
             console.error('While stripping FBX lights:', err);
           }
 
+          let loggedSkinningExportHint = false;
           model.traverse(o => {
             if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
             if (o.material?.skinning === true) o.material.skinning = true;
+            if (o.isSkinnedMesh && typeof o.normalizeSkinWeights === 'function') {
+              o.normalizeSkinWeights();
+              if (!loggedSkinningExportHint) {
+                console.info('[FBX] Applied runtime skin-weight normalization. For clean imports, re-export rigs with max 4 weights/vertex and normalized weights.');
+                loggedSkinningExportHint = true;
+              }
+            }
           });
 
 
@@ -355,6 +363,9 @@ export function createPlayerModel(
                   lodModel.traverse(o => {
                     if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
                     if (o.material?.skinning === true) o.material.skinning = true;
+                    if (o.isSkinnedMesh && typeof o.normalizeSkinWeights === 'function') {
+                      o.normalizeSkinWeights();
+                    }
                   });
 
                   lodModel.scale.set(scale, scale, scale);

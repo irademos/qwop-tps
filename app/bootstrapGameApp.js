@@ -2953,7 +2953,7 @@ async function initCore(runtimeContext) {
 
 
   // --- RAPIER INIT ---
-  await RAPIER.init();
+  await RAPIER.init({});
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   runtimeContext.systems.rapierWorld = rapierWorld;
   window.rapierWorld = rapierWorld;
