@@ -3395,7 +3395,12 @@ export class PlayerControls {
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
     const usesMissile = gun?.itemId === 'bazooka' && typeof this.spawnMissileProjectile === 'function';
     const autoAimDirection = this.getAutoAimDirection(gun);
-    const direction = autoAimDirection ?? (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow));
+    const baseDirection = autoAimDirection ?? (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow));
+    const direction = baseDirection.clone();
+    if (usesMissile && !autoAimDirection) {
+      direction.y = Math.max(direction.y, 0.14);
+      direction.normalize();
+    }
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
@@ -3864,9 +3869,10 @@ export class PlayerControls {
   }
 
   getProjectileSpawnPosition(direction) {
-    const offsetDistance = 0.6;
-    const normalizedDirection = direction.clone().normalize();
     const gun = this.getEquippedGun();
+    const isBazooka = gun?.itemId === 'bazooka';
+    const offsetDistance = isBazooka ? 0.78 : 0.6;
+    const normalizedDirection = direction.clone().normalize();
 
     const activeGunMesh = gun?.useHeldMeshWhenHeld && gun?.heldMesh
       ? gun.heldMesh
@@ -3875,12 +3881,16 @@ export class PlayerControls {
     if (activeGunMesh) {
       const gunPosition = new THREE.Vector3();
       activeGunMesh.getWorldPosition(gunPosition);
+      if (isBazooka) {
+        gunPosition.y += 0.12;
+      }
       return gunPosition.add(normalizedDirection.clone().multiplyScalar(offsetDistance));
     }
 
+    const baseHeight = isBazooka ? 0.86 : 0.7;
     return this.playerModel.position
       .clone()
-      .add(new THREE.Vector3(0, 0.7, 0))
+      .add(new THREE.Vector3(0, baseHeight, 0))
       .add(normalizedDirection.clone().multiplyScalar(offsetDistance));
   }
 
