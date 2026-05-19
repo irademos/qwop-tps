@@ -3395,7 +3395,7 @@ export class PlayerControls {
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
     const usesMissile = gun?.itemId === 'bazooka' && typeof this.spawnMissileProjectile === 'function';
     const autoAimDirection = this.getAutoAimDirection(gun);
-    const baseDirection = autoAimDirection ?? (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow));
+    const baseDirection = autoAimDirection ?? (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow || usesMissile));
     const direction = baseDirection.clone();
     if (usesMissile && !autoAimDirection) {
       direction.y = Math.max(direction.y, 0.14);
