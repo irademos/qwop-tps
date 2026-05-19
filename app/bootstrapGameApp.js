@@ -11341,6 +11341,7 @@ async function initCore(runtimeContext) {
   const tileRenderBounds = new Map();
   const renderedTileGeojson = new Map();
   const tilePlaceholders = new Map();
+  const tilePlaceholderOps = new Map();
   const isSameRenderOrigin = (nextOrigin, prevOrigin) => {
     if (!nextOrigin || !prevOrigin) {
       return nextOrigin === prevOrigin;
@@ -11408,18 +11409,36 @@ async function initCore(runtimeContext) {
     const placeholder = createPlaceholderTileMesh(tile);
     if (!placeholder) return;
     placeholder.name = `tile-placeholder-${tileKey}`;
-    scene.add(placeholder);
-    tilePlaceholders.set(tileKey, placeholder);
+    tilePlaceholderOps.set(tileKey, { type: 'add', mesh: placeholder });
+    requestAnimationFrame(() => {
+      const op = tilePlaceholderOps.get(tileKey);
+      if (!op || op.type !== 'add' || op.mesh !== placeholder) return;
+      tilePlaceholderOps.delete(tileKey);
+      scene.add(placeholder);
+      tilePlaceholders.set(tileKey, placeholder);
+    });
   };
 
   const removeTilePlaceholder = (tileKey) => {
     if (!tileKey) return;
+    const pendingOp = tilePlaceholderOps.get(tileKey);
+    if (pendingOp?.type === 'add') {
+      pendingOp.mesh?.geometry?.dispose?.();
+      pendingOp.mesh?.material?.dispose?.();
+      tilePlaceholderOps.delete(tileKey);
+    }
     const placeholder = tilePlaceholders.get(tileKey);
     if (!placeholder) return;
-    scene.remove(placeholder);
-    placeholder.geometry?.dispose?.();
-    placeholder.material?.dispose?.();
-    tilePlaceholders.delete(tileKey);
+    tilePlaceholderOps.set(tileKey, { type: 'remove', mesh: placeholder });
+    requestAnimationFrame(() => {
+      const op = tilePlaceholderOps.get(tileKey);
+      if (!op || op.type !== 'remove' || op.mesh !== placeholder) return;
+      tilePlaceholderOps.delete(tileKey);
+      scene.remove(placeholder);
+      placeholder.geometry?.dispose?.();
+      placeholder.material?.dispose?.();
+      tilePlaceholders.delete(tileKey);
+    });
   };
 
   const updateTileRenderBounds = (tileKey, geojson) => {
