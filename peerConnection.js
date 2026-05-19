@@ -31,6 +31,7 @@ const VALID_MESSAGE_TYPES = new Set([
 ]);
 const MAX_PENDING_PAYLOADS = 75;
 const COALESCED_PAYLOAD_TYPES = new Set(['entitySnapshot', 'entityStates']);
+const NETWORK_TOPOLOGY_MODE = (import.meta.env.VITE_NETWORK_TOPOLOGY_MODE || 'star').toLowerCase();
 
 export class Multiplayer {
   constructor(playerName, onPeerData) {
@@ -59,6 +60,7 @@ export class Multiplayer {
     this.unsubscribeRoomListener = null;
     this.hostRecalcTimer = null;
     this.roomPeerIds = [];
+    this.networkTopologyMode = NETWORK_TOPOLOGY_MODE === 'mesh' ? 'mesh' : 'star';
     
     this.initPeer(); // Start async setup
   }
@@ -268,11 +270,22 @@ export class Multiplayer {
       }
     }
 
-    for (const peerId of orderedPeerIds) {
+    const desiredConnections = this.getDesiredPeerConnections(orderedPeerIds, hostPeerId);
+    for (const peerId of desiredConnections) {
       if (peerId !== this.id && !this.connections[peerId] && this.shouldAttemptConnection(peerId)) {
         this.connectToPeer(peerId);
       }
     }
+  }
+  getDesiredPeerConnections(orderedPeerIds, hostPeerId) {
+    if (!Array.isArray(orderedPeerIds)) return [];
+    if (this.networkTopologyMode === 'mesh') {
+      return orderedPeerIds.filter(peerId => peerId !== this.id);
+    }
+    if (!hostPeerId || hostPeerId === this.id) {
+      return orderedPeerIds.filter(peerId => peerId !== this.id);
+    }
+    return [hostPeerId];
   }
 
   resetRealtimeListeners() {
@@ -482,6 +495,10 @@ export class Multiplayer {
 
   getHostId() {
     return this.currentHostId;
+  }
+
+  getTopologyMode() {
+    return this.networkTopologyMode;
   }
 
   sendTo(peerId, data) {
