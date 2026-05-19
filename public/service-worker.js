@@ -22,14 +22,23 @@ const CORE_ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CORE_CACHE)
-      .then((cache) => cache.addAll(CORE_ASSETS))
-      .catch((error) => {
-        console.warn('Core cache prefetch failed:', error);
+  event.waitUntil((async () => {
+    const cache = await caches.open(CORE_CACHE);
+    await Promise.all(
+      CORE_ASSETS.map(async (assetUrl) => {
+        try {
+          const response = await fetch(new Request(assetUrl, { cache: 'no-cache' }));
+          if (!shouldCacheResponse(response)) {
+            console.warn('[service-worker] install-prefetch skipped non-cacheable response:', assetUrl);
+            return;
+          }
+          await cache.put(assetUrl, response.clone());
+        } catch (error) {
+          console.warn('[service-worker] install-prefetch failed:', assetUrl, error);
+        }
       })
-  );
+    );
+  })());
   self.skipWaiting();
 });
 
@@ -165,7 +174,11 @@ self.addEventListener('fetch', (event) => {
         await putWithLimits(CDN_CACHE, request, networkResponse, MAX_CDN_ENTRIES);
         return networkResponse;
       })
-      .catch(() => caches.match(request));
+      .catch(async (error) => {
+        console.warn('[service-worker] fetch failure (cdn-script):', request.url, error);
+        const cachedResponse = await caches.match(request);
+        return cachedResponse || new Response('', { status: 503, statusText: 'Offline' });
+      });
 
     event.respondWith(
       caches.match(request).then((cachedResponse) => {
@@ -192,7 +205,11 @@ self.addEventListener('fetch', (event) => {
             await putWithLimits(CORE_CACHE, request, networkResponse, MAX_STATIC_ENTRIES);
             return networkResponse;
           })
-          .catch(() => caches.match('/index.html'));
+          .catch(async (error) => {
+            console.warn('[service-worker] fetch failure (app-shell):', request.url, error);
+            const fallback = await caches.match('/index.html');
+            return fallback || new Response('', { status: 503, statusText: 'Offline' });
+          });
       })
     );
     return;
@@ -205,7 +222,11 @@ self.addEventListener('fetch', (event) => {
           await putWithLimits(DYNAMIC_CACHE, request, networkResponse, MAX_DYNAMIC_ENTRIES);
           return networkResponse;
         })
-        .catch(() => caches.match(request))
+        .catch(async (error) => {
+          console.warn('[service-worker] fetch failure (dynamic-media):', request.url, error);
+          const cachedResponse = await caches.match(request);
+          return cachedResponse || new Response('', { status: 503, statusText: 'Offline' });
+        })
     );
     return;
   }
@@ -219,7 +240,10 @@ self.addEventListener('fetch', (event) => {
       await putWithLimits(STATIC_CACHE, request, networkResponse, MAX_STATIC_ENTRIES);
       return networkResponse;
     })
-    .catch(() => undefined);
+    .catch((error) => {
+      console.warn('[service-worker] fetch failure (static-asset):', request.url, error);
+      return undefined;
+    });
 
   event.respondWith(
     caches.match(request).then((cachedResponse) => {
