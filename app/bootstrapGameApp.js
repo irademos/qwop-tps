@@ -12720,10 +12720,11 @@ async function initCore(runtimeContext) {
     delete mesh.userData.buildHealthBar;
   };
 
+  const DOG_INTERACT_DISTANCE = 2.5;
   const feedDogBtn = document.createElement('button');
   feedDogBtn.type = 'button';
   feedDogBtn.textContent = 'Feed Dog';
-  feedDogBtn.style.cssText = 'position:fixed;left:50%;bottom:37%;transform:translateX(-50%);z-index:1200;display:none;padding:8px 12px;';
+  feedDogBtn.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%, -50%);z-index:1200;display:none;padding:8px 12px;';
   document.body.appendChild(feedDogBtn);
   const animalNameLabels = new Map();
   const areInteractionLabelsBlocked = () => {
@@ -13259,7 +13260,7 @@ async function initCore(runtimeContext) {
   };
   feedDogBtn.addEventListener('click', () => {
     const playerPos = playerModel?.position;
-    const target = animalManager?.getNearestFeedableDog?.(playerPos, 2.5);
+    const target = animalManager?.getNearestFeedableDog?.(playerPos, DOG_INTERACT_DISTANCE);
     const dog = target?.animal;
     if (!dog) return;
     const maxHealth = Math.max(1, Number(dog.maxHealth || 1));
@@ -13767,8 +13768,22 @@ async function initCore(runtimeContext) {
         const shouldShow = !labelsBlocked && Boolean(buildState.selectedNoteId) && closestNoteDistance <= closestInteractDistance;
         buildInteractionBtn.style.display = shouldShow ? 'block' : 'none';
 
-        const nearbyDog = labelsBlocked ? null : animalManager?.getNearestFeedableDog?.(playerPos, 2.5);
-        feedDogBtn.style.display = nearbyDog ? 'block' : 'none';
+        const nearbyDog = labelsBlocked ? null : animalManager?.getNearestFeedableDog?.(playerPos, DOG_INTERACT_DISTANCE);
+        if (nearbyDog?.animal?.model) {
+          const buttonAnchor = nearbyDog.animal.model.position.clone().add(new THREE.Vector3(0, 2, 0));
+          buttonAnchor.project(camera);
+          if (buttonAnchor.z < 0 || buttonAnchor.z > 1) {
+            feedDogBtn.style.display = 'none';
+          } else {
+            const x = (buttonAnchor.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (-buttonAnchor.y * 0.5 + 0.5) * window.innerHeight;
+            feedDogBtn.style.display = 'block';
+            feedDogBtn.style.left = `${x}px`;
+            feedDogBtn.style.top = `${y + 24}px`;
+          }
+        } else {
+          feedDogBtn.style.display = 'none';
+        }
       }
     }
     updateBuildHealthBars();
@@ -14722,6 +14737,11 @@ async function initCore(runtimeContext) {
             animalNameLabels.set(animal.id, label);
           }
           label.textContent = name;
+          const distanceToPlayer = playerModel?.position?.distanceTo?.(animal.model.position) ?? Number.POSITIVE_INFINITY;
+          if (distanceToPlayer > DOG_INTERACT_DISTANCE) {
+            label.style.display = 'none';
+            return;
+          }
           const pos = animal.model.position.clone().add(new THREE.Vector3(0, 2, 0));
           pos.project(camera);
           if (pos.z < 0 || pos.z > 1) { label.style.display = 'none'; return; }

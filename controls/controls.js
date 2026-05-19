@@ -1582,6 +1582,12 @@ export class PlayerControls {
     return !!friendly && (this.questManager?.isQuestFriend?.(friendly) || friendly?.model?.userData?.isQuestFriend === true);
   }
 
+  getFriendlyPromptLabel(friendly) {
+    if (this.isQuestFriend(friendly)) return 'Talk to Quest Guy';
+    if (friendly?.model?.userData?.npcRole === 'merchant') return 'Talk to Merchant';
+    return 'Talk to Friendly';
+  }
+
   getClosestFriendly(maxDistance) {
     if (!this.playerModel) return null;
     const friendlies = Array.isArray(window.friendlies) ? window.friendlies : [];
@@ -1963,9 +1969,7 @@ export class PlayerControls {
     if (nearby?.friendly && closest?.type === 'friendly' && closest.friendly === nearby.friendly) {
       this.friendlyInteractButton.classList.remove('hidden');
       this.friendlyInteractButton.disabled = false;
-      this.friendlyInteractButton.textContent = this.isQuestFriend(nearby.friendly)
-        ? (this.isMobile ? 'Talk' : 'Interact')
-        : (this.isMobile ? 'Talk' : 'Interact (X)');
+      this.friendlyInteractButton.textContent = this.getFriendlyPromptLabel(nearby.friendly);
       return;
     }
 
