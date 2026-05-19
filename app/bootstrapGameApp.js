@@ -208,6 +208,17 @@ const LOW_END_BUCKET_INTERVALS = Object.freeze({
   remoteLabels: 2,
   audio: 3
 });
+const NETWORK_TOPOLOGY_MODE = (import.meta.env.VITE_NETWORK_TOPOLOGY_MODE || 'star').toLowerCase() === 'mesh'
+  ? 'mesh'
+  : 'star';
+const HOST_CRITICAL_MESSAGE_TYPES = new Set([
+  'entityControl',
+  'entityStates',
+  'attackMonster',
+  'spawnRequest',
+  'projectile',
+  'inventoryThrowProjectile'
+]);
 
 appContext.debugFlags.PERF = PERF;
 appContext.debugFlags.DEBUG_CONSOLE = false;
@@ -991,7 +1002,7 @@ async function initCore(runtimeContext) {
       return false;
     }
     if (!coalesceKey) {
-      multiplayer.send(payload);
+      sendNetworkPayload(payload);
       recordNetSent(1);
       return true;
     }
@@ -1005,8 +1016,20 @@ async function initCore(runtimeContext) {
     if (!multiplayer || netSendQueue.size === 0) return;
     const pending = Array.from(netSendQueue.values());
     netSendQueue.clear();
-    pending.forEach((payload) => multiplayer.send(payload));
+    pending.forEach((payload) => sendNetworkPayload(payload));
     recordNetSent(pending.length);
+  };
+  const sendNetworkPayload = (payload) => {
+    if (!multiplayer || !payload) return false;
+    const isHostCritical = NETWORK_TOPOLOGY_MODE === 'star'
+      && HOST_CRITICAL_MESSAGE_TYPES.has(payload.type);
+    const hostId = multiplayer.getHostId?.();
+    if (!multiplayer.isHost && isHostCritical && hostId) {
+      multiplayer.sendTo(hostId, payload);
+      return true;
+    }
+    multiplayer.send(payload);
+    return true;
   };
   const tickNetStats = (nowMs) => {
     const elapsed = nowMs - netStats.windowStartMs;
@@ -1016,9 +1039,11 @@ async function initCore(runtimeContext) {
     netStats.windowStartMs = nowMs;
     window.netRuntimeStats = {
       msgsPerSecond: Number(netStats.messagesPerSecond.toFixed(2)),
+      rttMs: Number.isFinite(multiplayer?.lastPingMs) ? multiplayer.lastPingMs : null,
       coalesced: netStats.coalesced,
       dropped: netStats.dropped,
       queueDepth: netSendQueue.size,
+      topologyMode: NETWORK_TOPOLOGY_MODE,
       intervals: {
         presenceSendIntervalMs,
         entityBroadcastIntervalMs,
