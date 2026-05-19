@@ -2,11 +2,26 @@ const DEFAULT_RATE_LIMIT_MS = 5000;
 const DEFAULT_BACKOFF_MS = 1250;
 const DEFAULT_MAX_RETRIES = 5;
 const RETRYABLE_STATUS = new Set([429, 504]);
+const MAX_429_STORM_COUNT = 6;
+const COOLDOWN_JITTER_MS = 350;
 
 class StaleRequestError extends Error {
   constructor(message = "Request became stale before execution.") {
     super(message);
     this.name = "StaleRequestError";
+  }
+}
+
+class RequestThrottleError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = "RequestThrottleError";
+    this.code = "OVERPASS_RATE_LIMITED";
+    this.status = Number.isFinite(details.status) ? details.status : 429;
+    this.endpoint = details.endpoint ?? null;
+    this.attempt = Number.isFinite(details.attempt) ? details.attempt : null;
+    this.retryAfterMs = Number.isFinite(details.retryAfterMs) ? details.retryAfterMs : null;
+    this.diagnostics = details;
   }
 }
 
@@ -61,6 +76,7 @@ class RequestQueue {
     this.globalNextAllowedAt = 0;
     this.latestLocation = null;
     this.pendingByKey = new Map();
+    this.recent429Count = 0;
   }
 
   enqueue({ lat, lon, staleDistanceMeters, requestFn, dedupeKey = null }) {
@@ -159,6 +175,17 @@ class RequestQueue {
     }
   }
 
+  buildDiagnostics(entry, details = {}) {
+    return {
+      endpoint: details.endpoint ?? entry.endpoint ?? null,
+      dedupeKey: entry.dedupeKey ?? null,
+      attempt: Number.isFinite(details.attempt) ? details.attempt : null,
+      retryAfterMs: Number.isFinite(details.retryAfterMs) ? details.retryAfterMs : null,
+      status: Number.isFinite(details.status) ? details.status : null,
+      nextAllowedAt: this.globalNextAllowedAt || null
+    };
+  }
+
   async executeWithRetry(entry) {
     let attempt = 0;
     let lastError;
@@ -173,18 +200,32 @@ class RequestQueue {
       try {
         const response = await entry.requestFn();
         if (response.ok) {
+          this.recent429Count = 0;
           return response;
         }
         if (RETRYABLE_STATUS.has(response.status)) {
           attempt += 1;
-          lastError = new Error(`Overpass request failed: ${response.status} ${response.statusText}`);
+          const retryAfterMs = parseRetryAfterMs(response.headers?.get("retry-after"));
+          const diagnostics = this.buildDiagnostics(entry, {
+            attempt,
+            retryAfterMs,
+            status: response.status,
+            endpoint: response.overpassEndpoint ?? null
+          });
+          console.warn("[RequestQueue] retryable response", diagnostics);
+          lastError = response.status === 429
+            ? new RequestThrottleError(`Overpass request failed: ${response.status} ${response.statusText}`, diagnostics)
+            : new Error(`Overpass request failed: ${response.status} ${response.statusText}`);
           if (attempt >= this.maxRetries) {
             break;
           }
-          const retryAfterMs = parseRetryAfterMs(response.headers?.get("retry-after"));
           const expBackoffMs = this.backoffMs * 2 ** (attempt - 1);
-          const jitterMs = Math.floor(Math.random() * 350);
-          const cooldownMs = Math.max(retryAfterMs ?? 0, expBackoffMs) + jitterMs;
+          if (response.status === 429) {
+            this.recent429Count = Math.min(MAX_429_STORM_COUNT, this.recent429Count + 1);
+          }
+          const stormMultiplier = response.status === 429 ? Math.max(1, this.recent429Count) : 1;
+          const jitterMs = Math.floor(Math.random() * COOLDOWN_JITTER_MS);
+          const cooldownMs = Math.max(retryAfterMs ?? 0, expBackoffMs) * stormMultiplier + jitterMs;
           this.globalNextAllowedAt = Math.max(this.globalNextAllowedAt, Date.now() + cooldownMs);
           await sleep(cooldownMs);
           continue;
@@ -210,11 +251,11 @@ function parseQueueNumber(value, fallback) {
 }
 
 const overpassQueueDefaults = {
-  maxConcurrent: parseQueueNumber(import.meta.env.VITE_OVERPASS_MAX_CONCURRENT, 2),
+  maxConcurrent: parseQueueNumber(import.meta.env.VITE_OVERPASS_MAX_CONCURRENT, 1),
   rateLimitMs: parseQueueNumber(import.meta.env.VITE_OVERPASS_RATE_LIMIT_MS, DEFAULT_RATE_LIMIT_MS),
   backoffMs: parseQueueNumber(import.meta.env.VITE_OVERPASS_BACKOFF_MS, DEFAULT_BACKOFF_MS),
   maxRetries: parseQueueNumber(import.meta.env.VITE_OVERPASS_MAX_RETRIES, DEFAULT_MAX_RETRIES),
 };
 
 export const overpassRequestQueue = new RequestQueue(overpassQueueDefaults);
-export { RequestQueue, StaleRequestError };
+export { RequestQueue, StaleRequestError, RequestThrottleError };
