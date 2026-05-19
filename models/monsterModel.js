@@ -57,6 +57,9 @@ function configureMeshCulling(model) {
   const skinnedMeshes = [];
   model.traverse((obj) => {
     if (obj.material?.skinning === true) obj.material.skinning = true;
+    if (obj.isSkinnedMesh && typeof obj.normalizeSkinWeights === 'function') {
+      obj.normalizeSkinWeights();
+    }
     if (!obj.isMesh) return;
     obj.frustumCulled = true;
     if (obj.geometry) {
