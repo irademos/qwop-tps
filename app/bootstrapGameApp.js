@@ -847,6 +847,37 @@ async function initCore(runtimeContext) {
   let presenceSendIntervalMs = PRESENCE_SEND_MS;
   const POSITION_DEADBAND_SQ = 0.03 * 0.03;
   const ROTATION_DEADBAND_RAD = 0.045;
+  const NETWORK_BASE_PROFILE = Object.freeze({
+    high: Object.freeze({ presenceMs: 350, entityMs: 260, controlMs: 200 }),
+    mid: Object.freeze({ presenceMs: 420, entityMs: 300, controlMs: 240 }),
+    low: Object.freeze({ presenceMs: 550, entityMs: 380, controlMs: 320 })
+  });
+  const NETWORK_ADAPTIVE_PROFILE = Object.freeze({
+    backlogWarn: 40,
+    backlogCritical: 140,
+    processSaturated: INCOMING_QUEUE_MAX_PER_FRAME,
+    overrunWarnStreak: 4,
+    overrunCriticalStreak: 10,
+    recoveryStableFrames: 150,
+    restoreStepMs: 12,
+    logWindowMs: 3000,
+    presenceDeadbandMul: 0.75,
+    rotationDeadbandMul: 0.7
+  });
+  const CRITICAL_PAYLOAD_TYPES = new Set([
+    'entityControl',
+    'entityStates',
+    'attackMonster',
+    'spawnRequest',
+    'projectile',
+    'inventoryThrowProjectile',
+    'grab',
+    'grabMove'
+  ]);
+  const MIN_POSITION_DEADBAND_SQ = (0.008 * 0.008);
+  const MIN_ROTATION_DEADBAND_RAD = 0.012;
+  let runtimePositionDeadbandSq = POSITION_DEADBAND_SQ;
+  let runtimeRotationDeadbandRad = ROTATION_DEADBAND_RAD;
   const netSendQueue = {
     critical: [],
     high: new Map(),
@@ -948,6 +979,12 @@ async function initCore(runtimeContext) {
   let adaptiveDegradeLevel = 0;
   let frameOverrunStreak = 0;
   let frameRecoverStreak = 0;
+  let adaptiveNetworkPressureLevel = 0;
+  let networkRecoveryStableFrames = 0;
+  let adaptiveIntervalOffsetMs = 0;
+  let onlyCriticalPayloadClasses = false;
+  let lastNetworkProfileLogAt = 0;
+  let lastNetworkProfileLogKey = '';
   const remotePresenceMeta = {};
   let lastPresenceSend = 0;
   let lastPresenceSweep = 0;
@@ -987,23 +1024,71 @@ async function initCore(runtimeContext) {
     if (deviceTier === 'mid' || (Number.isFinite(pingMs) && pingMs >= 120)) return 'mid';
     return 'high';
   };
-  const applyRuntimeNetworkProfile = () => {
+  const applyRuntimeNetworkProfile = ({
+    incomingBacklog = lastIncomingBacklog,
+    incomingProcessCount = lastIncomingProcessCount,
+    overrunStreak = frameOverrunStreak,
+    recoverStreak = frameRecoverStreak
+  } = {}) => {
     const tier = getNetworkTier();
-    if (tier === 'low') {
-      presenceSendIntervalMs = 550;
-      entityBroadcastIntervalMs = 380;
-      controlSendIntervalMs = 320;
-      return;
+    const tierProfile = NETWORK_BASE_PROFILE[tier] || NETWORK_BASE_PROFILE.high;
+    const backlog = Number.isFinite(incomingBacklog) ? incomingBacklog : 0;
+    const processCount = Number.isFinite(incomingProcessCount) ? incomingProcessCount : 0;
+    const safeOverrun = Number.isFinite(overrunStreak) ? overrunStreak : 0;
+    const safeRecover = Number.isFinite(recoverStreak) ? recoverStreak : 0;
+
+    const pressureCritical = backlog >= NETWORK_ADAPTIVE_PROFILE.backlogCritical
+      || safeOverrun >= NETWORK_ADAPTIVE_PROFILE.overrunCriticalStreak;
+    const pressureWarn = backlog >= NETWORK_ADAPTIVE_PROFILE.backlogWarn
+      || processCount >= NETWORK_ADAPTIVE_PROFILE.processSaturated
+      || safeOverrun >= NETWORK_ADAPTIVE_PROFILE.overrunWarnStreak;
+
+    const previousPressure = adaptiveNetworkPressureLevel;
+    if (pressureCritical) {
+      adaptiveNetworkPressureLevel = 2;
+      networkRecoveryStableFrames = 0;
+      adaptiveIntervalOffsetMs = Math.min(220, adaptiveIntervalOffsetMs + 28);
+    } else if (pressureWarn) {
+      adaptiveNetworkPressureLevel = 1;
+      networkRecoveryStableFrames = 0;
+      adaptiveIntervalOffsetMs = Math.min(160, adaptiveIntervalOffsetMs + 16);
+    } else {
+      adaptiveNetworkPressureLevel = Math.max(0, adaptiveNetworkPressureLevel - (safeRecover >= 4 ? 1 : 0));
+      networkRecoveryStableFrames += 1;
+      if (networkRecoveryStableFrames >= NETWORK_ADAPTIVE_PROFILE.recoveryStableFrames) {
+        adaptiveIntervalOffsetMs = Math.max(0, adaptiveIntervalOffsetMs - NETWORK_ADAPTIVE_PROFILE.restoreStepMs);
+      }
     }
-    if (tier === 'mid') {
-      presenceSendIntervalMs = 420;
-      entityBroadcastIntervalMs = 300;
-      controlSendIntervalMs = 240;
-      return;
+
+    onlyCriticalPayloadClasses = adaptiveNetworkPressureLevel >= 2;
+    presenceSendIntervalMs = tierProfile.presenceMs + Math.round(adaptiveIntervalOffsetMs * 0.65);
+    entityBroadcastIntervalMs = tierProfile.entityMs + adaptiveIntervalOffsetMs;
+    controlSendIntervalMs = tierProfile.controlMs + adaptiveIntervalOffsetMs;
+
+    const positionDeadbandMul = adaptiveNetworkPressureLevel > 0 ? NETWORK_ADAPTIVE_PROFILE.presenceDeadbandMul : 1;
+    const rotationDeadbandMul = adaptiveNetworkPressureLevel > 0 ? NETWORK_ADAPTIVE_PROFILE.rotationDeadbandMul : 1;
+    runtimePositionDeadbandSq = Math.max(MIN_POSITION_DEADBAND_SQ, POSITION_DEADBAND_SQ * positionDeadbandMul * positionDeadbandMul);
+    runtimeRotationDeadbandRad = Math.max(MIN_ROTATION_DEADBAND_RAD, ROTATION_DEADBAND_RAD * rotationDeadbandMul);
+
+    const now = performance.now();
+    const logKey = `${tier}:${adaptiveNetworkPressureLevel}:${Math.round(adaptiveIntervalOffsetMs / 10)}:${onlyCriticalPayloadClasses ? 'critical' : 'mixed'}`;
+    if (logKey !== lastNetworkProfileLogKey && (now - lastNetworkProfileLogAt) >= NETWORK_ADAPTIVE_PROFILE.logWindowMs) {
+      console.debug('[net-profile]', {
+        tier,
+        pressureLevel: adaptiveNetworkPressureLevel,
+        previousPressure,
+        backlog,
+        processCount,
+        overrunStreak: safeOverrun,
+        recoverStreak: safeRecover,
+        presenceSendIntervalMs,
+        entityBroadcastIntervalMs,
+        controlSendIntervalMs,
+        onlyCriticalPayloadClasses
+      });
+      lastNetworkProfileLogAt = now;
+      lastNetworkProfileLogKey = logKey;
     }
-    presenceSendIntervalMs = 350;
-    entityBroadcastIntervalMs = 260;
-    controlSendIntervalMs = 200;
   };
   const recordNetSent = (count = 1) => {
     netStats.sentInWindow += count;
@@ -1023,6 +1108,9 @@ async function initCore(runtimeContext) {
   };
   const getMessageLane = (payload) => {
     const type = payload?.type;
+    if (onlyCriticalPayloadClasses && !CRITICAL_PAYLOAD_TYPES.has(type)) {
+      return 'normal';
+    }
     if (type === 'attackMonster' || type === 'spawnRequest' || type === 'projectile' || type === 'inventoryThrowProjectile' || type === 'grab') {
       return 'critical';
     }
@@ -1036,6 +1124,11 @@ async function initCore(runtimeContext) {
       return false;
     }
     const lane = getMessageLane(payload);
+    if (onlyCriticalPayloadClasses && lane === 'normal') {
+      netStats.deferred += 1;
+      netStats.laneDeferred.normal += 1;
+      return false;
+    }
     const canCoalesce = lane === 'high' && (coalesceKey?.startsWith('entityControl:') || coalesceKey?.startsWith('entityStates:'));
     if (canCoalesce) {
       if (netSendQueue.high.has(coalesceKey)) {
@@ -2686,7 +2779,12 @@ async function initCore(runtimeContext) {
   };
   multiplayer.getNetRuntimeStats = () => ({ ...window.netRuntimeStats });
   multiplayer.onPingUpdate = () => {
-    applyRuntimeNetworkProfile();
+    applyRuntimeNetworkProfile({
+      incomingBacklog: lastIncomingBacklog,
+      incomingProcessCount: lastIncomingProcessCount,
+      overrunStreak: frameOverrunStreak,
+      recoverStreak: frameRecoverStreak
+    });
   };
   multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
     isHost = !!isCurrentHost;
@@ -14176,10 +14274,10 @@ async function initCore(runtimeContext) {
         const dx = stateX - (prev?.x ?? stateX);
         const dy = stateY - (prev?.y ?? stateY);
         const dz = stateZ - (prev?.z ?? stateZ);
-        const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > POSITION_DEADBAND_SQ;
+        const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > runtimePositionDeadbandSq;
         const rotDelta = Math.abs(wrapDeltaRad(stateRotation - (prev?.rotation ?? stateRotation)));
         const changedAction = (state.action ?? null) !== (prev?.action ?? null);
-        if (!prev || moved || rotDelta >= ROTATION_DEADBAND_RAD || changedAction) {
+        if (!prev || moved || rotDelta >= runtimeRotationDeadbandRad || changedAction) {
           lastSentEntityControlStates.set(id, {
             x: stateX,
             y: stateY,
@@ -14516,8 +14614,8 @@ async function initCore(runtimeContext) {
       const dx = payload.x - (lastSentPresenceState.x ?? payload.x);
       const dy = payload.y - (lastSentPresenceState.y ?? payload.y);
       const dz = payload.z - (lastSentPresenceState.z ?? payload.z);
-      const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > POSITION_DEADBAND_SQ;
-      const rotated = Math.abs(wrapDeltaRad((payload.rotation ?? 0) - (lastSentPresenceState.rotation ?? 0))) >= ROTATION_DEADBAND_RAD;
+      const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > runtimePositionDeadbandSq;
+      const rotated = Math.abs(wrapDeltaRad((payload.rotation ?? 0) - (lastSentPresenceState.rotation ?? 0))) >= runtimeRotationDeadbandRad;
       const actionChanged = payload.action !== lastSentPresenceState.action;
       const heartbeatDue = now - (lastSentPresenceState.sentAt || 0) >= PRESENCE_HEARTBEAT_MS;
       if (lastSentPresenceState.x == null || moved || rotated || actionChanged || heartbeatDue) {
@@ -14534,7 +14632,12 @@ async function initCore(runtimeContext) {
       }
       lastPresenceSend = now;
     }
-    applyRuntimeNetworkProfile();
+    applyRuntimeNetworkProfile({
+      incomingBacklog: lastIncomingBacklog,
+      incomingProcessCount: lastIncomingProcessCount,
+      overrunStreak: frameOverrunStreak,
+      recoverStreak: frameRecoverStreak
+    });
     flushNetSendQueue();
     tickNetStats(now);
 
