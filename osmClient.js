@@ -99,12 +99,15 @@ export async function fetchOSMData(lat, lon, radiusMeters, options = {}) {
   const staleDistanceMeters = Number.isFinite(options.staleDistanceMeters)
     ? options.staleDistanceMeters
     : DEFAULT_STALE_DISTANCE_METERS;
+  const dedupeKeyOverride = typeof options.dedupeKeyOverride === "string" && options.dedupeKeyOverride.length > 0
+    ? options.dedupeKeyOverride
+    : null;
 
   const response = await overpassRequestQueue.enqueue({
     lat,
     lon,
     staleDistanceMeters,
-    dedupeKey: buildDedupeKey(lat, lon, radiusMeters),
+    dedupeKey: dedupeKeyOverride ?? buildDedupeKey(lat, lon, radiusMeters),
     requestFn: () => performOverpassRequest(new URLSearchParams({ data: query })),
   });
 

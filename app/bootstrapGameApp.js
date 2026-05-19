@@ -11773,7 +11773,8 @@ async function initCore(runtimeContext) {
     let geojson;
     try {
       const overpassData = await fetchOSMData(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS, {
-        staleDistanceMeters: TILE_SIZE_METERS * 2
+        staleDistanceMeters: TILE_SIZE_METERS * 2,
+        dedupeKeyOverride: tileKey
       });
       debugState.lastOsmFetchAt = Date.now();
       try {
