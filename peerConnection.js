@@ -32,6 +32,18 @@ const VALID_MESSAGE_TYPES = new Set([
 const MAX_PENDING_PAYLOADS = 75;
 const COALESCED_PAYLOAD_TYPES = new Set(['entitySnapshot', 'entityStates']);
 const NETWORK_TOPOLOGY_MODE = (import.meta.env.VITE_NETWORK_TOPOLOGY_MODE || 'star').toLowerCase();
+const PEER_LOG_THROTTLE_MS = 30000;
+
+const isVerboseNetDebugEnabled = () => {
+  if (typeof window === 'undefined') return false;
+  return Boolean(window.DEBUG_NET_VERBOSE);
+};
+
+const debugNetLog = (...args) => {
+  if (isVerboseNetDebugEnabled()) {
+    console.log(...args);
+  }
+};
 
 export class Multiplayer {
   constructor(playerName, onPeerData) {
@@ -118,7 +130,7 @@ export class Multiplayer {
           const peersInRoom = Object.keys(rooms[roomName]);
           if (peersInRoom.length < 20) {
             assignedRoom = roomName;
-            console.log("Entered room: ", assignedRoom)
+            debugNetLog("Entered room: ", assignedRoom);
             break;
           }
           roomIndex++;
@@ -235,9 +247,9 @@ export class Multiplayer {
 
     const peerLogKey = `${this.id}|${orderedPeerIds.join(',')}`;
     const nowMs = Date.now();
-    if (peerLogKey !== this.lastPeerLogKey || nowMs - this.lastPeerLogAt > 10000) {
-      console.log("My ID:", this.id);
-      console.log("Valid Peers (oldest first):", orderedPeerIds);
+    if (isVerboseNetDebugEnabled() && (peerLogKey !== this.lastPeerLogKey || nowMs - this.lastPeerLogAt > PEER_LOG_THROTTLE_MS)) {
+      debugNetLog("My ID:", this.id);
+      debugNetLog("Valid Peers (oldest first):", orderedPeerIds);
       this.lastPeerLogKey = peerLogKey;
       this.lastPeerLogAt = nowMs;
     }
@@ -250,12 +262,12 @@ export class Multiplayer {
     this.currentHostId = hostPeerId;
     this.isHost = (hostPeerId === this.id);
 
-    if (this.isHost && this.lastHostLogId !== this.id) {
-      console.log("👑 I am the host player");
+    if (this.isHost && this.lastHostLogId !== this.id && isVerboseNetDebugEnabled()) {
+      debugNetLog("👑 I am the host player");
       this.lastHostLogId = this.id;
     }
-    if (previousHostId !== hostPeerId && hostPeerId) {
-      console.log("Host selected (stable):", hostPeerId);
+    if (previousHostId !== hostPeerId && hostPeerId && isVerboseNetDebugEnabled()) {
+      debugNetLog("Host selected (stable):", hostPeerId);
     }
 
     if (previousHostId !== hostPeerId && typeof this.onHostChange === 'function') {
@@ -358,7 +370,7 @@ export class Multiplayer {
         clearTimeout(this.pendingConnectionRetries.get(conn.peer));
         this.pendingConnectionRetries.delete(conn.peer);
       }
-      console.log("Connected to peer:", conn.peer);
+      debugNetLog("Connected to peer:", conn.peer);
       const queuedPayloads = this.pendingPayloads.get(conn.peer);
       if (queuedPayloads?.length) {
         queuedPayloads.forEach(payload => conn.send(payload));
@@ -391,53 +403,16 @@ export class Multiplayer {
         this.onPeerData(conn.peer, data);
       });
   
-      // Attempt to access the internal peer connection
-      try {
-        conn.statsIntervalId = setInterval(async () => {
-          try {
-            // PeerJS sometimes delays access to the connection internals
-            const pc = conn._pc || conn.peerConnection || conn._connection?.peerConnection;
-            if (!pc) {
-              console.warn("RTCPeerConnection not ready for", conn.peer);
-              return;
-            }
-            if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
-              clearInterval(conn.statsIntervalId);
-              conn.statsIntervalId = null;
-              return;
-            }
-            if (pc.connectionState === 'connected') {
-              clearInterval(conn.statsIntervalId);
-              conn.statsIntervalId = null;
-  
-              const stats = await pc.getStats();
-              stats.forEach(report => {
-                if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                  console.log(`🎯 Connected to peer ${conn.peer}`);
-                  console.log('Selected candidate pair:');
-                  console.log(`🔹 Local: ${report.localCandidateId}`);
-                  console.log(`🔸 Remote: ${report.remoteCandidateId}`);
-                }
-              });
-            }
-          } catch (err) {
-            clearInterval(conn.statsIntervalId);
-            conn.statsIntervalId = null;
-            console.warn(`Could not access RTCPeerConnection stats for peer ${conn.peer}`, err);
-          }
-        }, 1000);
-      } catch (err) {
-        console.warn(`Could not access RTCPeerConnection for peer ${conn.peer}`, err);
-      }
+      this.runOneShotConnectionDiagnostics(conn);
 
       this.startPingLoop(conn);
     });
   
     conn.on('close', () => {
       this.stopPingLoop(conn.peer);
-      if (conn.statsIntervalId) {
-        clearInterval(conn.statsIntervalId);
-        conn.statsIntervalId = null;
+      if (conn.diagnosticsTimeoutId) {
+        clearTimeout(conn.diagnosticsTimeoutId);
+        conn.diagnosticsTimeoutId = null;
       }
       delete this.connections[conn.peer];
       this.pendingConnections.delete(conn.peer);
@@ -451,9 +426,9 @@ export class Multiplayer {
     conn.on('error', err => {
       console.error('Peer error:', err);
       this.recordError(err);
-      if (conn.statsIntervalId) {
-        clearInterval(conn.statsIntervalId);
-        conn.statsIntervalId = null;
+      if (conn.diagnosticsTimeoutId) {
+        clearTimeout(conn.diagnosticsTimeoutId);
+        conn.diagnosticsTimeoutId = null;
       }
       if (conn?.peer) {
         this.pendingConnections.delete(conn.peer);
@@ -585,6 +560,44 @@ export class Multiplayer {
     if (typeof this.onConnectionError === 'function') {
       this.onConnectionError(this.lastError);
     }
+  }
+
+  runOneShotConnectionDiagnostics(conn) {
+    if (!isVerboseNetDebugEnabled()) return;
+    const maxAttempts = 6;
+    const attemptDelayMs = 1000;
+    let attempts = 0;
+
+    const runDiagnostics = async () => {
+      attempts += 1;
+      try {
+        const pc = conn._pc || conn.peerConnection || conn._connection?.peerConnection;
+        if (!pc) {
+          if (attempts < maxAttempts) {
+            conn.diagnosticsTimeoutId = setTimeout(runDiagnostics, attemptDelayMs);
+          } else {
+            debugNetLog("RTCPeerConnection not ready for", conn.peer);
+          }
+          return;
+        }
+        if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+          return;
+        }
+        const stats = await pc.getStats();
+        stats.forEach(report => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+            debugNetLog(`🎯 Connected to peer ${conn.peer}`);
+            debugNetLog('Selected candidate pair:');
+            debugNetLog(`🔹 Local: ${report.localCandidateId}`);
+            debugNetLog(`🔸 Remote: ${report.remoteCandidateId}`);
+          }
+        });
+      } catch (err) {
+        console.warn(`Could not access RTCPeerConnection stats for peer ${conn.peer}`, err);
+      }
+    };
+
+    conn.diagnosticsTimeoutId = setTimeout(runDiagnostics, attemptDelayMs);
   }
 
   startPingLoop(conn) {
