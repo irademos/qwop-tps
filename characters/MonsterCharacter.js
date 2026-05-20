@@ -74,7 +74,7 @@ export class MonsterCharacter extends CharacterBase {
     this.speedMultiplier = 1;
     this.attackDamage = MONSTER_ATTACK.damage;
     this.monsterProperties = this.resolveMonsterProperties(monsterConfig);
-    this.type = null;
+    this.type = String(this.model?.userData?.type || this.model?.userData?.monsterType || '').trim() || null;
     this.version = 0;
     this.isDead = false;
     this.deathTime = null;
@@ -300,7 +300,8 @@ export class MonsterCharacter extends CharacterBase {
     } else {
       this.playAnimation('Hit', MOVE_FADE);
     }
-    const isCrab = String(this.type || '').toLowerCase() === 'crab';
+    const resolvedType = String(this.type || this.model?.userData?.type || this.model?.userData?.monsterType || '').toLowerCase();
+    const isCrab = resolvedType.includes('crab');
     if (isCrab && this.pivot?.rotation) {
       this.pivot.rotation.z = Math.PI;
     }
