@@ -12777,6 +12777,36 @@ async function initCore(runtimeContext) {
   feedDogBtn.textContent = 'Feed Dog';
   feedDogBtn.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%, -50%);z-index:1200;display:none;padding:8px 12px;';
   document.body.appendChild(feedDogBtn);
+  const monsterTargetButtons = new Map();
+  const WEAPON_TARGET_MAX_DISTANCE = 15;
+  const TARGET_BTN_SIZE = 32;
+  const clearMonsterTargetButtons = () => {
+    monsterTargetButtons.forEach((entry) => entry?.button?.remove());
+    monsterTargetButtons.clear();
+  };
+  const isTargetableWeaponEquipped = () => {
+    const weapon = playerControls?.getEquippedWeapon?.('right');
+    return weapon?.itemId === 'bomb' || weapon?.itemId === 'bow' || weapon?.itemId === 'bazooka';
+  };
+  const getMonsterTargetKey = (monster) => monster?.id || monster?.model?.uuid || String(Math.random());
+  const getOrCreateMonsterTargetButton = (monster) => {
+    const key = getMonsterTargetKey(monster);
+    if (monsterTargetButtons.has(key)) return monsterTargetButtons.get(key);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = '🎯';
+    button.setAttribute('aria-label', 'Target monster');
+    button.style.cssText = `position:fixed;z-index:1200;display:none;width:${TARGET_BTN_SIZE}px;height:${TARGET_BTN_SIZE}px;border-radius:999px;padding:0;font-size:18px;line-height:1;`;
+    button.addEventListener('click', () => {
+      const model = monster?.model;
+      if (!model?.position) return;
+      playerControls?.fireProjectileAtTarget?.(model, 'right');
+    });
+    document.body.appendChild(button);
+    const entry = { key, monster, button };
+    monsterTargetButtons.set(key, entry);
+    return entry;
+  };
   const animalNameLabels = new Map();
   const areInteractionLabelsBlocked = () => {
     if (window.mapViewEnabled === true || document.body.classList.contains('map-open')) return true;
@@ -13834,6 +13864,32 @@ async function initCore(runtimeContext) {
           }
         } else {
           feedDogBtn.style.display = 'none';
+        }
+        if (labelsBlocked || !isTargetableWeaponEquipped()) {
+          clearMonsterTargetButtons();
+        } else {
+          const visibleMonsterKeys = new Set();
+          monsters.forEach((monster) => {
+            if (!monster?.model?.position || monster.isDead) return;
+            const distance = playerPos.distanceTo(monster.model.position);
+            if (distance > WEAPON_TARGET_MAX_DISTANCE) return;
+            const buttonAnchor = monster.model.position.clone().add(new THREE.Vector3(0, 2.3, 0));
+            buttonAnchor.project(camera);
+            if (buttonAnchor.z < 0 || buttonAnchor.z > 1) return;
+            if (Math.abs(buttonAnchor.x) > 1 || Math.abs(buttonAnchor.y) > 1) return;
+            const entry = getOrCreateMonsterTargetButton(monster);
+            visibleMonsterKeys.add(entry.key);
+            const x = (buttonAnchor.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (-buttonAnchor.y * 0.5 + 0.5) * window.innerHeight;
+            entry.button.style.display = 'block';
+            entry.button.style.left = `${x - (TARGET_BTN_SIZE / 2)}px`;
+            entry.button.style.top = `${y + 10}px`;
+          });
+          monsterTargetButtons.forEach((entry, key) => {
+            if (!visibleMonsterKeys.has(key)) {
+              entry.button.style.display = 'none';
+            }
+          });
         }
       }
     }

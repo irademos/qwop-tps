@@ -138,6 +138,7 @@ const AUTO_AIM_CAMERA_LINGER_MS = 3000;
 const AUTO_AIM_ARC_CONFIG = Object.freeze({
   bow: { nearDistance: 6, farDistance: 45, maxLoftRadians: 0.24 },
   bomb: { nearDistance: 4, farDistance: 36, maxLoftRadians: 0.48 },
+  bazooka: { nearDistance: 5, farDistance: 50, maxLoftRadians: 0.2 },
   throw: { nearDistance: 2.5, farDistance: 16, maxLoftRadians: 0.62 }
 });
 
@@ -3379,16 +3380,31 @@ export class PlayerControls {
     return this.attemptFireProjectileForHand('right');
   }
 
-  attemptFireProjectileForHand(hand = 'right') {
+  fireProjectileAtTarget(targetModel, hand = 'right') {
+    if (!targetModel?.position || !this.playerModel) return false;
+    const weapon = this.getEquippedWeapon(hand);
+    const weaponId = weapon?.itemId;
+    if (weaponId !== 'bow' && weaponId !== 'bomb' && weaponId !== 'bazooka') return false;
+
+    const eyePos = this.playerModel.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+    const targetPos = targetModel.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+    const baseDirection = targetPos.sub(eyePos);
+    if (baseDirection.lengthSq() <= 0.0001) return false;
+
+    const direction = this.getDistanceAdjustedArcDirection(baseDirection, weaponId);
+    return this.attemptFireProjectileForHand(hand, { manualDirection: direction, skipAutoAimLinger: true });
+  }
+
+  attemptFireProjectileForHand(hand = 'right', { manualDirection = null, skipAutoAimLinger = false } = {}) {
     const equippedWeapon = this.getEquippedWeapon(hand);
     if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
-      const autoAimDirection = this.getAutoAimDirection(equippedWeapon);
-      const direction = autoAimDirection ?? this.getAimDirection(true);
+      const autoAimDirection = manualDirection ? null : this.getAutoAimDirection(equippedWeapon);
+      const direction = (manualDirection?.clone?.() || autoAimDirection || this.getAimDirection(true)).normalize();
       const position = this.getProjectileSpawnPosition(direction);
       const fired = this.throwBomb(position, direction);
       if (fired) {
         this.playAction('throw');
-        this.startAutoAimCameraLinger(autoAimDirection);
+        if (!skipAutoAimLinger) this.startAutoAimCameraLinger(autoAimDirection);
       }
       return fired;
     }
@@ -3398,8 +3414,8 @@ export class PlayerControls {
     const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
     const usesMissile = gun?.itemId === 'bazooka' && typeof this.spawnMissileProjectile === 'function';
-    const autoAimDirection = this.getAutoAimDirection(gun);
-    const baseDirection = autoAimDirection ?? (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow || usesMissile));
+    const autoAimDirection = manualDirection ? null : this.getAutoAimDirection(gun);
+    const baseDirection = manualDirection?.clone?.() || autoAimDirection || (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow || usesMissile));
     const direction = baseDirection.clone();
     if (usesMissile && !autoAimDirection) {
       direction.y = Math.max(direction.y, 0.14);
@@ -3488,7 +3504,7 @@ export class PlayerControls {
         this.multiplayer.getId()
       );
     }
-    this.startAutoAimCameraLinger(autoAimDirection);
+    if (!skipAutoAimLinger) this.startAutoAimCameraLinger(autoAimDirection);
     return true;
   }
 
