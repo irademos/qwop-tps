@@ -300,6 +300,16 @@ export class MonsterCharacter extends CharacterBase {
     } else {
       this.playAnimation('Hit', MOVE_FADE);
     }
+    const isCrab = String(this.type || '').toLowerCase() === 'crab';
+    if (isCrab && this.pivot?.rotation) {
+      this.pivot.rotation.z = Math.PI;
+    }
+    if (isCrab) {
+      const hitDirection = options?.hitDirection;
+      if (hitDirection?.lengthSq?.() > 0.000001) {
+        this.applyKnockback({ direction: hitDirection, strength: options?.knockbackStrength });
+      }
+    }
     return false;
   }
 

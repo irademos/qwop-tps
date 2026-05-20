@@ -224,11 +224,15 @@ export function updateMeleeAttacks({
           if (!monster?.model?.position) continue;
           if (isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
             hit = true;
-            const killed = monster.applyDamage(attackDamage, { attackTypes });
+            const dir = new THREE.Vector3()
+              .subVectors(monster.model.position, attacker.model.position)
+              .normalize();
+            const killed = monster.applyDamage(attackDamage, {
+              attackTypes,
+              hitDirection: dir,
+              knockbackStrength: attackCfg.knockbackStrength
+            });
             if (!killed) {
-              const dir = new THREE.Vector3()
-                .subVectors(monster.model.position, attacker.model.position)
-                .normalize();
               monster.applyKnockback({ direction: dir, strength: attackCfg.knockbackStrength });
             }
             onMonsterHit?.(monster, { damage: attackDamage, killed, sourceId: attacker.id, attackTypes });

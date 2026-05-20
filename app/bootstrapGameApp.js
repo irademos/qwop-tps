@@ -4178,6 +4178,9 @@ async function initCore(runtimeContext) {
       const dogCollider = dogColliderEntries.get(animal?.id);
       if (dogCollider) removeStaticBoxCollider(dogCollider);
       dogColliderEntries.delete(animal?.id);
+      const crabCollider = crabColliderEntries.get(animal?.id);
+      if (crabCollider) removeStaticBoxCollider(crabCollider);
+      crabColliderEntries.delete(animal?.id);
       const label = animalNameLabels.get(animal?.id);
       label?.parentNode?.removeChild(label);
       animalNameLabels.delete(animal?.id);
@@ -8661,12 +8664,16 @@ async function initCore(runtimeContext) {
           const distance = hitPosition.distanceTo(monster.model.position);
           if (distance > damageRadius) continue;
           const attackTypes = getAttackTypes(attackLabel, ['explosive']);
-          const killed = monster.applyDamage(damage, { attackTypes });
+          const direction = new THREE.Vector3()
+            .subVectors(monster.model.position, hitPosition)
+            .normalize();
+          const killed = monster.applyDamage(damage, {
+            attackTypes,
+            hitDirection: direction,
+            knockbackStrength
+          });
           monster.lastDamageSourceId = shooterId ?? localId ?? null;
           if (!killed) {
-            const direction = new THREE.Vector3()
-              .subVectors(monster.model.position, hitPosition)
-              .normalize();
             monster.applyKnockback({ direction, strength: knockbackStrength });
           }
           handleMonsterDamage?.(monster, { damage, killed, sourceId: shooterId ?? localId, attackTypes });
@@ -12823,6 +12830,7 @@ async function initCore(runtimeContext) {
     });
   };
   const dogColliderEntries = new Map();
+  const crabColliderEntries = new Map();
   const companionData = { ...(playerProfile?.companions || {}) };
   const DOG_FOOD_HEAL = 10;
   const MEAT_FEED_HEAL = 30;
@@ -14946,6 +14954,22 @@ async function initCore(runtimeContext) {
         dogColliderEntries.set(animal.id, entry || null);
       } else {
         syncStaticBoxColliderForObject(dogColliderEntries.get(animal.id));
+      }
+    });
+    (animals || []).forEach((animal) => {
+      if (!animal?.model || String(animal.type).toLowerCase() !== 'crab' || animal?.isDead) return;
+      if (!crabColliderEntries.has(animal.id)) {
+        const entry = createStaticBoxColliderForObject(animal.model, {
+          rapierWorld,
+          friction: 1.1,
+          restitution: 0,
+          useObjectPosition: true,
+          centerOffset: [0, 0.25, 0],
+          halfExtents: [0.42, 0.22, 0.42]
+        });
+        crabColliderEntries.set(animal.id, entry || null);
+      } else {
+        syncStaticBoxColliderForObject(crabColliderEntries.get(animal.id));
       }
     });
     handleBombPickupArrowHit();
