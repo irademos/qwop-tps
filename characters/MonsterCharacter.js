@@ -285,8 +285,19 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.isProvoked = true;
     this.model.userData.mode = "enemy";
     this.showHealthBar();
+    const isCrab = String(this.type || '').toLowerCase() === 'crab';
+    const hitDirection = options?.hitDirection;
+    const canApplyCrabKnockback = isCrab && hitDirection?.lengthSq?.() > 0.000001;
+
+    if (isCrab && this.pivot?.rotation) {
+      this.pivot.rotation.z = Math.PI;
+    }
+    if (canApplyCrabKnockback) {
+      this.applyKnockback({ direction: hitDirection, strength: options?.knockbackStrength });
+    }
+
     if (this.health <= 0) {
-      this.markDead();
+      this.markDead({ preserveHorizontalVelocity: canApplyCrabKnockback });
       return true;
     }
     const requestedHitAnimation = typeof options?.hitAnimationName === 'string'
@@ -299,16 +310,6 @@ export class MonsterCharacter extends CharacterBase {
       this.playAnimation(resolvedHitAnimation, MOVE_FADE);
     } else {
       this.playAnimation('Hit', MOVE_FADE);
-    }
-    const isCrab = String(this.type || '').toLowerCase() === 'crab';
-    if (isCrab && this.pivot?.rotation) {
-      this.pivot.rotation.z = Math.PI;
-    }
-    if (isCrab) {
-      const hitDirection = options?.hitDirection;
-      if (hitDirection?.lengthSq?.() > 0.000001) {
-        this.applyKnockback({ direction: hitDirection, strength: options?.knockbackStrength });
-      }
     }
     return false;
   }
@@ -324,7 +325,7 @@ export class MonsterCharacter extends CharacterBase {
     return Date.now() < (this.freezeEndTime || 0);
   }
 
-  markDead() {
+  markDead({ preserveHorizontalVelocity = false } = {}) {
     if (this.isDead) return;
     this.isDead = true;
     this.deathTime = Date.now();
@@ -333,7 +334,11 @@ export class MonsterCharacter extends CharacterBase {
     const body = this.body;
     if (body) {
       const vel = body.linvel();
-      body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
+      body.setLinvel({
+        x: preserveHorizontalVelocity ? vel.x : 0,
+        y: vel.y,
+        z: preserveHorizontalVelocity ? vel.z : 0
+      }, true);
     }
   }
 
