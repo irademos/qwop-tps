@@ -17,6 +17,7 @@ const CRAB_CONTACT_PUSH_BOX_HALF_DEPTH = 0.5;
 const CRAB_CONTACT_PUSH_STRENGTH = 1.8;
 const CRAB_CONTACT_DAMAGE = 1;
 const CRAB_CONTACT_DAMAGE_COOLDOWN_MS = 850;
+const CRAB_CONTACT_KNOCKBACK_STRENGTH = 1.8;
 
 const loader = new GLTFLoader();
 const animalTemplateCache = new Map();
@@ -312,6 +313,14 @@ function applyCrabContactEffects(animal, playerModel) {
   const isInvincible = localControls?.isInvincible && now < (localControls.invincibleUntil || 0);
   if (!isInvincible && Number.isFinite(window.localHealth)) {
     window.localHealth = Math.max(0, window.localHealth - CRAB_CONTACT_DAMAGE);
+    const knockbackDirection = away.clone();
+    const playerControls = window.playerControls;
+    if (playerControls && !playerControls.isKnocked) {
+      playerControls.applyKnockback?.({
+        direction: knockbackDirection,
+        strength: CRAB_CONTACT_KNOCKBACK_STRENGTH
+      });
+    }
   }
   animal.userData.nextCrabContactDamageAt = now + CRAB_CONTACT_DAMAGE_COOLDOWN_MS;
 }

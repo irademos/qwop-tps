@@ -359,9 +359,13 @@ export function updateProjectiles({
             proj.userData.attackLabel || 'bowArrowProjectile',
             proj.userData.attackTypes || ['projectile']
           );
-          const killed = monster.applyDamage(damage, { attackTypes });
+          const direction = vel.clone();
+          const killed = monster.applyDamage(damage, {
+            attackTypes,
+            hitDirection: direction,
+            knockbackStrength: 3
+          });
           if (!killed) {
-            const direction = vel.clone();
             monster.applyKnockback({ direction, strength: 3 });
           }
           onMonsterHit?.(monster, { damage, killed, sourceId: proj.userData.shooterId, attackTypes });
