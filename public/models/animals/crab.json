@@ -1,0 +1,19 @@
+{
+  "name": "Crab",
+  "behavior": "idle",
+  "scale": 1.0,
+  "yOffset": -0.4,
+  "health": 8,
+  "fleeDistance": 9,
+  "walkSpeed": 1.3,
+  "runSpeed": 5.6,
+  "attackDistance": 2.2,
+  "animations": {
+    "Idle": "Idle",
+    "Walk": "Walk"
+  },
+  "availableAnimations": [
+    "Walk",
+    "Idle"
+  ]
+}
