@@ -7766,8 +7766,20 @@ async function initCore(runtimeContext) {
     const availableWood = Math.max(0, Math.floor(inventoryState.wood?.count || 0));
     const craftCount = Math.min(availableWood, totalQuantity);
     if (craftCount <= 0) return false;
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+      craftState.craftTimeout = null;
+    }
+    clearCraftMaterials();
+    clearCraftSwirl();
     const basePos = playerModel?.position?.clone?.() || new THREE.Vector3();
-    basePos.add(new THREE.Vector3(0, 1.2, 1.2));
+    const forward = new THREE.Vector3(0, 0, 1);
+    playerModel?.getWorldDirection?.(forward);
+    forward.y = 0;
+    if (forward.lengthSq() < 0.0001) forward.set(0, 0, 1);
+    forward.normalize();
+    basePos.add(forward.multiplyScalar(1.0));
+    applySpawnY(basePos, 0.08, { allowOnBuildings: true });
     const temporaryMaterials = [];
     for (let i = 0; i < craftCount; i += 1) {
       const mesh = createCraftMaterialMesh('wood');
@@ -7781,9 +7793,9 @@ async function initCore(runtimeContext) {
       scene.add(mesh);
       temporaryMaterials.push(mesh);
     }
-    const swirl = createCraftSwirl(basePos);
+    craftState.swirl = createCraftSwirl(basePos);
     removeFromInventory('wood', craftCount);
-    setTimeout(() => {
+    craftState.craftTimeout = setTimeout(() => {
       temporaryMaterials.forEach((mesh) => {
         if (!mesh) return;
         if (mesh.parent) mesh.parent.remove(mesh);
@@ -7794,7 +7806,8 @@ async function initCore(runtimeContext) {
           else child.material?.dispose?.();
         });
       });
-      if (swirl?.group?.parent) swirl.group.parent.remove(swirl.group);
+      craftState.materials = [];
+      clearCraftSwirl();
       const bundleCount = Math.min(craftCount, 5);
       const baseAmount = Math.floor(craftCount / bundleCount);
       const remainder = craftCount % bundleCount;
@@ -7806,6 +7819,7 @@ async function initCore(runtimeContext) {
         spawnCraftedPickup(itemId, basePos.clone().add(offset), bundleAmount);
       }
       window.questManager?.handleCraftedItem?.();
+      craftState.craftTimeout = null;
     }, 4000);
     return true;
   };
