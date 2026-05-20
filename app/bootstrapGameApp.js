@@ -254,6 +254,7 @@ const MISSILE_PROJECTILE_LIFETIME = 3500;
 const MISSILE_DAMAGE_RADIUS = 4;
 const MISSILE_BASE_DAMAGE = 4;
 const MISSILE_KNOCKBACK_STRENGTH = 4;
+const MISSILE_LAUNCH_UPWARD_BIAS = 0.18;
 const INVENTORY_THROW_SPEED = 2;
 const INVENTORY_THROW_LIFETIME = 12000;
 const INVENTORY_THROW_UPWARD_BIAS = 0.22;
@@ -8837,6 +8838,47 @@ async function initCore(runtimeContext) {
   }
 
 
+  function createMissileTrailTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 192;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
+    gradient.addColorStop(0, 'rgba(255, 60, 30, 0.9)');
+    gradient.addColorStop(0.45, 'rgba(255, 20, 20, 0.42)');
+    gradient.addColorStop(1, 'rgba(255, 20, 20, 0.0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  function createMissileTrailMesh() {
+    const trailMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff4433,
+      map: createMissileTrailTexture(),
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const trailGroup = new THREE.Group();
+    const trailA = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 2.4), trailMaterial.clone());
+    trailA.position.z = -1.25;
+    trailGroup.add(trailA);
+
+    const trailB = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 2.4), trailMaterial.clone());
+    trailB.rotation.z = Math.PI / 2;
+    trailB.position.z = -1.25;
+    trailGroup.add(trailB);
+
+    trailGroup.userData.trailPlanes = [trailA, trailB];
+    return trailGroup;
+  }
+
+
   function createMissileProjectileMesh(direction) {
     const group = new THREE.Group();
     const bodyGeometry = new THREE.CylinderGeometry(0.08, 0.1, 0.75, 12);
@@ -8862,9 +8904,13 @@ async function initCore(runtimeContext) {
       group.add(fin);
     }
 
-    const flame = new THREE.PointLight(0xff5522, 0.8, 1.8);
+    const flame = new THREE.PointLight(0xff5522, 1.5, 2.8);
     flame.position.z = -0.45;
     group.add(flame);
+
+    const trail = createMissileTrailMesh();
+    group.add(trail);
+    group.userData.missileTrail = trail;
 
     const forward = new THREE.Vector3(0, 0, 1);
     const missileDirection = direction.clone().normalize();
@@ -8886,6 +8932,8 @@ async function initCore(runtimeContext) {
 
   function spawnMissileProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
     const missileDirection = direction.clone().normalize();
+    missileDirection.y = Math.max(missileDirection.y, MISSILE_LAUNCH_UPWARD_BIAS);
+    missileDirection.normalize();
     spawnProjectile(scene, list, position, missileDirection, shooterId, {
       createMesh: () => createMissileProjectileMesh(missileDirection),
       speed: MISSILE_PROJECTILE_SPEED,
@@ -8914,6 +8962,9 @@ async function initCore(runtimeContext) {
     const latest = list[list.length - 1];
     if (latest) {
       latest.userData.skipTerrainCorrection = true;
+      const trail = latest.userData?.missileTrail;
+      const speedScale = THREE.MathUtils.clamp(MISSILE_PROJECTILE_SPEED / 26, 1, 1.45);
+      trail?.scale?.set(1.15, 1.25 * speedScale, 1.15);
     }
   }
 
