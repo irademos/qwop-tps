@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MonsterCharacter } from '../characters/MonsterCharacter.js';
 
-const ANIMAL_TYPES = ['Deer', 'Crab'];
+const ANIMAL_TYPES = ['Deer', 'crab'];
 const SPAWN_MIN_RADIUS = 10;
 const SPAWN_MAX_RADIUS = 26;
 const SPAWN_ATTEMPTS = 10;
@@ -18,6 +18,17 @@ const animalTemplateCache = new Map();
 let animalSpawnCursor = 0;
 
 const randomRange = (min, max) => min + Math.random() * (max - min);
+
+
+const resolveAnimalAssetBaseName = (typeName) => {
+  const raw = String(typeName || '').trim();
+  if (!raw) return '';
+  const lowered = raw.toLowerCase();
+  if (lowered === 'crab') return 'crab';
+  if (lowered === 'deer') return 'Deer';
+  if (lowered === 'dog') return 'dog';
+  return raw;
+};
 
 function getModelBounds(modelRoot) {
   if (!modelRoot) return null;
@@ -53,8 +64,9 @@ async function loadAnimalTemplate(typeName) {
   const cached = animalTemplateCache.get(typeName);
   if (cached) return cached;
 
-  const configPath = `/models/animals/${encodeURIComponent(typeName)}.json`;
-  const modelPath = `/models/animals/${encodeURIComponent(typeName)}.glb`;
+  const assetBaseName = resolveAnimalAssetBaseName(typeName);
+  const configPath = `/models/animals/${encodeURIComponent(assetBaseName)}.json`;
+  const modelPath = `/models/animals/${encodeURIComponent(assetBaseName)}.glb`;
   const config = await fetch(configPath)
     .then(res => (res.ok ? res.json() : {}))
     .catch(() => ({}));
@@ -557,7 +569,7 @@ export function createAnimalManager({
 
   const getAnimals = () => animals.map(entry => entry.animal).filter(Boolean);
 
-  const pickWildAnimalType = () => (Math.random() < 0.8 ? 'Crab' : 'Deer');
+  const pickWildAnimalType = () => (Math.random() < 0.8 ? 'crab' : 'Deer');
 
   const spawnWildAnimalAt = async (position) => {
     const entry = await spawnAnimal({
