@@ -7761,6 +7761,69 @@ async function initCore(runtimeContext) {
     }, 4000);
   };
 
+  const startWoodBuildCraftingFlow = (itemId, quantity) => {
+    const totalQuantity = Math.max(1, Math.floor(Number.isFinite(quantity) ? quantity : 1));
+    const availableWood = Math.max(0, Math.floor(inventoryState.wood?.count || 0));
+    const craftCount = Math.min(availableWood, totalQuantity);
+    if (craftCount <= 0) return false;
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+      craftState.craftTimeout = null;
+    }
+    clearCraftMaterials();
+    clearCraftSwirl();
+    const basePos = playerModel?.position?.clone?.() || new THREE.Vector3();
+    const forward = new THREE.Vector3(0, 0, 1);
+    playerModel?.getWorldDirection?.(forward);
+    forward.y = 0;
+    if (forward.lengthSq() < 0.0001) forward.set(0, 0, 1);
+    forward.normalize();
+    basePos.add(forward.multiplyScalar(1.0));
+    applySpawnY(basePos, 0.08, { allowOnBuildings: true });
+    const temporaryMaterials = [];
+    for (let i = 0; i < craftCount; i += 1) {
+      const mesh = createCraftMaterialMesh('wood');
+      if (!mesh) continue;
+      const angle = (i / Math.max(craftCount, 1)) * Math.PI * 2;
+      const radius = craftCount > 5 ? 0.35 : 0.28;
+      const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+      mesh.position.copy(basePos).add(offset);
+      mesh.userData.skipTerrainCorrection = true;
+      applyOptionalShadowState(mesh, optionalShadowsEnabled);
+      scene.add(mesh);
+      temporaryMaterials.push(mesh);
+    }
+    craftState.swirl = createCraftSwirl(basePos);
+    removeFromInventory('wood', craftCount);
+    craftState.craftTimeout = setTimeout(() => {
+      temporaryMaterials.forEach((mesh) => {
+        if (!mesh) return;
+        if (mesh.parent) mesh.parent.remove(mesh);
+        mesh.traverse?.((child) => {
+          if (!child?.isMesh) return;
+          child.geometry?.dispose?.();
+          if (Array.isArray(child.material)) child.material.forEach((material) => material?.dispose?.());
+          else child.material?.dispose?.();
+        });
+      });
+      craftState.materials = [];
+      clearCraftSwirl();
+      const bundleCount = Math.min(craftCount, 5);
+      const baseAmount = Math.floor(craftCount / bundleCount);
+      const remainder = craftCount % bundleCount;
+      const radius = 0.4;
+      for (let i = 0; i < bundleCount; i += 1) {
+        const bundleAmount = baseAmount + (i < remainder ? 1 : 0);
+        const angle = (i / Math.max(bundleCount, 1)) * Math.PI * 2;
+        const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+        spawnCraftedPickup(itemId, basePos.clone().add(offset), bundleAmount);
+      }
+      window.questManager?.handleCraftedItem?.();
+      craftState.craftTimeout = null;
+    }, 4000);
+    return true;
+  };
+
   function dropInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
     if (isFoodItem(itemId) || isWoodItem(itemId) || isZombieBrainsItem(itemId)) {
@@ -13163,8 +13226,15 @@ async function initCore(runtimeContext) {
     useInventoryItem: (itemId) => useInventoryItem(itemId),
     startBuildFlow: async (itemId) => {
       if (itemId !== 'wood') return;
-      const type = await openBuildTypePicker();
+      const availableWoodCount = Math.max(0, Math.floor(inventoryState.wood?.count || 0));
+      const buildChoice = await openBuildTypePicker(availableWoodCount);
+      const type = typeof buildChoice === 'string' ? buildChoice : buildChoice?.type;
+      const quantity = Math.max(1, Math.floor(Number.isFinite(buildChoice?.quantity) ? buildChoice.quantity : 1));
       if (!type) return;
+      if (type === 'arrow' || type === 'torch') {
+        startWoodBuildCraftingFlow(type, quantity);
+        return;
+      }
       let noteText = '';
       if (type === SHIELD_ITEM_ID) {
         addToInventory(SHIELD_ITEM_ID, 1);
@@ -15103,9 +15173,31 @@ export async function bootstrapGameApp() {
   const noteViewModal = document.createElement('div');
   noteViewModal.className = 'build-modal-overlay hidden';
   document.body.append(buildModal, noteEntryModal, noteViewModal);
-  const openBuildTypePicker = () => new Promise((resolve) => {
-    buildModal.innerHTML = `<div class="build-modal"><h3>Choose Build Type</h3><div class="build-options-list"><button type="button" class="build-option-btn" data-build-type="block"><span>🧱</span>Block</button><button type="button" class="build-option-btn" data-build-type="note"><span>🪧</span>Note Post</button><button type="button" class="build-option-btn" data-build-type="shield"><span>🛡️</span>Shield</button></div><button type="button" class="build-cancel-btn" data-build-cancel="1">Cancel</button></div>`;
+  const openBuildTypePicker = (availableWoodCount = 0) => new Promise((resolve) => {
+    buildModal.innerHTML = `<div class="build-modal"><h3>Choose Build Type</h3><div class="build-options-list"><button type="button" class="build-option-btn" data-build-type="block"><span>🧱</span>Block</button><button type="button" class="build-option-btn" data-build-type="note"><span>🪧</span>Note Post</button><button type="button" class="build-option-btn" data-build-type="shield"><span>🛡️</span>Shield</button><div class="build-option-btn" data-build-batch-row="arrow"><span>🏹</span>Arrow <button type="button" class="craft-adjust" data-build-adjust="decrease" data-build-quantity-type="arrow">−</button><span data-build-quantity-label="arrow">1</span><button type="button" class="craft-adjust" data-build-adjust="increase" data-build-quantity-type="arrow">+</button><button type="button" class="retro-build-btn" data-build-craft="arrow">Build</button></div><div class="build-option-btn" data-build-batch-row="torch"><span>🔥</span>Torch <button type="button" class="craft-adjust" data-build-adjust="decrease" data-build-quantity-type="torch">−</button><span data-build-quantity-label="torch">1</span><button type="button" class="craft-adjust" data-build-adjust="increase" data-build-quantity-type="torch">+</button><button type="button" class="retro-build-btn" data-build-craft="torch">Build</button></div></div><button type="button" class="build-cancel-btn" data-build-cancel="1">Cancel</button></div>`;
     buildModal.classList.remove('hidden');
+    const craftQuantities = {
+      arrow: 1,
+      torch: 1
+    };
+    const refreshCraftQuantities = () => {
+      ['arrow', 'torch'].forEach((type) => {
+        const label = buildModal.querySelector(`[data-build-quantity-label="${type}"]`);
+        if (label) label.textContent = String(craftQuantities[type]);
+      });
+      const maxQuantity = Math.max(1, Math.floor(Number.isFinite(availableWoodCount) ? availableWoodCount : 0));
+      buildModal.querySelectorAll('[data-build-quantity-type]').forEach((button) => {
+        const type = button.dataset.buildQuantityType;
+        const adjust = button.dataset.buildAdjust;
+        if (!craftQuantities[type]) return;
+        if (adjust === 'decrease') {
+          button.disabled = craftQuantities[type] <= 1;
+        } else if (adjust === 'increase') {
+          button.disabled = craftQuantities[type] >= maxQuantity;
+        }
+      });
+    };
+    refreshCraftQuantities();
     const close = (value) => {
       buildModal.classList.add('hidden');
       buildModal.innerHTML = '';
@@ -15115,8 +15207,25 @@ export async function bootstrapGameApp() {
     buildModal.onclick = (event) => {
       const target = event.target.closest('button');
       if (event.target === buildModal || target?.dataset.buildCancel) return close(null);
+      if (target?.dataset.buildAdjust && target?.dataset.buildQuantityType) {
+        const quantityType = target.dataset.buildQuantityType;
+        const maxQuantity = Math.max(1, Math.floor(Number.isFinite(availableWoodCount) ? availableWoodCount : 0));
+        if (target.dataset.buildAdjust === 'decrease') {
+          craftQuantities[quantityType] = Math.max(1, (craftQuantities[quantityType] || 1) - 1);
+        } else if (target.dataset.buildAdjust === 'increase') {
+          craftQuantities[quantityType] = Math.min(maxQuantity, (craftQuantities[quantityType] || 1) + 1);
+        }
+        refreshCraftQuantities();
+        return;
+      }
+      if (target?.dataset.buildCraft) {
+        const craftType = target.dataset.buildCraft;
+        const quantity = Math.max(1, Math.floor(craftQuantities[craftType] || 1));
+        close({ type: craftType, quantity });
+        return;
+      }
       const type = target?.dataset.buildType;
-      if (type) close(type);
+      if (type) close({ type, quantity: 1 });
     };
   });
   const openNoteEntryModal = (initialText = '') => new Promise((resolve) => {
