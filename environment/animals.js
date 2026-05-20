@@ -12,6 +12,11 @@ const DEER_HIT_REACT_ANIMATIONS = [
   'AnimalArmature|Idle_HitReact_Left',
   'AnimalArmature|Idle_HitReact_Right'
 ];
+const CRAB_CONTACT_PUSH_BOX_HALF_WIDTH = 0.8;
+const CRAB_CONTACT_PUSH_BOX_HALF_DEPTH = 0.7;
+const CRAB_CONTACT_PUSH_STRENGTH = 1.8;
+const CRAB_CONTACT_DAMAGE = 1;
+const CRAB_CONTACT_DAMAGE_COOLDOWN_MS = 850;
 
 const loader = new GLTFLoader();
 const animalTemplateCache = new Map();
@@ -275,6 +280,42 @@ function isHitReactPlaying(animal) {
   return !!action?.isRunning?.();
 }
 
+function applyCrabContactEffects(animal, playerModel) {
+  if (!animal?.model?.position || !playerModel?.position) return;
+  if (String(animal.type || '').toLowerCase() !== 'crab') return;
+  if (animal.isDead) return;
+
+  const deltaX = playerModel.position.x - animal.model.position.x;
+  const deltaZ = playerModel.position.z - animal.model.position.z;
+  const overlappingX = Math.abs(deltaX) <= CRAB_CONTACT_PUSH_BOX_HALF_WIDTH;
+  const overlappingZ = Math.abs(deltaZ) <= CRAB_CONTACT_PUSH_BOX_HALF_DEPTH;
+  if (!overlappingX || !overlappingZ) return;
+
+  const away = new THREE.Vector3(deltaX, 0, deltaZ);
+  if (away.lengthSq() <= 0.0001) {
+    away.set(Math.random() > 0.5 ? 1 : -1, 0, Math.random() > 0.5 ? 1 : -1);
+  }
+  away.normalize();
+  playerModel.position.addScaledVector(away, CRAB_CONTACT_PUSH_STRENGTH * (1 / 60));
+
+  const now = Date.now();
+  const nextDamageAt = Number.isFinite(animal.userData?.nextCrabContactDamageAt)
+    ? animal.userData.nextCrabContactDamageAt
+    : 0;
+  if (now < nextDamageAt) return;
+
+  const localControls = window.playerControls;
+  if (localControls?.isInvincible && now >= (localControls.invincibleUntil || 0)) {
+    localControls.isInvincible = false;
+    localControls.invincibleUntil = 0;
+  }
+  const isInvincible = localControls?.isInvincible && now < (localControls.invincibleUntil || 0);
+  if (!isInvincible && Number.isFinite(window.localHealth)) {
+    window.localHealth = Math.max(0, window.localHealth - CRAB_CONTACT_DAMAGE);
+  }
+  animal.userData.nextCrabContactDamageAt = now + CRAB_CONTACT_DAMAGE_COOLDOWN_MS;
+}
+
 function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight, getNearbyMonster, onMonsterAttack, delta }) {
   const playerModel = getPlayerModel?.();
   if (!animal?.model || !playerModel?.position) return;
@@ -504,6 +545,7 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   if (Number.isFinite(terrain)) {
     animal.model.position.y = terrain + 0.4;
   }
+  applyCrabContactEffects(animal, playerModel);
 
   animal.update(delta);
 }
