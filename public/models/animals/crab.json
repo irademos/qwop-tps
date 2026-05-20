@@ -1,7 +1,7 @@
 {
   "name": "Crab",
   "behavior": "idle",
-  "scale": 1.0,
+  "scale": 0.4,
   "yOffset": -0.4,
   "health": 2,
   "walkSpeed": 1.3,
