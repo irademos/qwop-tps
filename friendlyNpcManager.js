@@ -104,8 +104,17 @@ export function createFriendlyNpcManager({
     getSpawnPosition: getSpawnNearPlayerPosition
   });
 
+  const animalSpawner = createCharacterSpawner({
+    getPlayerPosition: () => playerModel?.position?.clone?.() ?? null,
+    getSpawnPosition: getSpawnNearPlayerPosition,
+    spawnTypeWeights: [{ type: 'animal', weight: 1 }],
+    travelMinDistance: 10,
+    travelMaxDistance: 10
+  });
+
   const recordGpsTravel = (sample) => {
     characterSpawner.recordGpsTravel(sample);
+    animalSpawner.recordGpsTravel(sample);
   };
 
 
@@ -846,11 +855,19 @@ export function createFriendlyNpcManager({
       window.friendlies = friendlies;
     }
   };
+  const maybeSpawnAnimalsFromDistance = () => {
+    if (!playerModel) return;
+    const spawnEvent = animalSpawner.getSpawnEvent();
+    if (!spawnEvent?.position) return;
+    onSpawnEvent?.({ ...spawnEvent, type: 'animal' });
+  };
+
   const maybeSpawnFromDistance = () => {
     if (!playerModel) return;
     const spawnEvent = characterSpawner.getSpawnEvent();
     if (!spawnEvent?.position) return;
 
+    maybeSpawnAnimalsFromDistance();
     const currentPos = playerModel.position.clone();
     const playerIsNearFriendly = Array.from(records.values()).some((record) => {
       if (!record?.alive) return false;
@@ -929,6 +946,7 @@ export function createFriendlyNpcManager({
     setFriendlyPersistenceHost(nextHost);
     if (currentHost) {
       characterSpawner.reset();
+      animalSpawner.reset();
     }
   };
 

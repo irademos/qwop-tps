@@ -961,7 +961,8 @@ async function initCore(runtimeContext) {
   const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
   const appleItemIds = new Set([APPLE_ITEM_ID]);
   const woodItemIds = new Set([WOOD_ITEM_ID]);
-  const meatItemIds = new Set([MEAT_ITEM_ID]);
+  const CRAB_MEAT_ITEM_ID = 'crab_meat';
+  const meatItemIds = new Set([MEAT_ITEM_ID, CRAB_MEAT_ITEM_ID]);
   const zombieBrainsItemIds = new Set([ZOMBIE_BRAINS_ITEM_ID]);
   const saltItemIds = new Set([SALT_ITEM_ID]);
   const sauteedMushroomsItemIds = new Set([SAUTEED_MUSHROOMS_ITEM_ID]);
@@ -4183,10 +4184,13 @@ async function initCore(runtimeContext) {
       if (!wasDead || !position) return;
       notifyAchievementProgress('animalsKilled', 1);
       window.questManager?.handleAnimalKilled?.(animal);
+      const isCrab = String(animal?.type || '').toLowerCase() === 'crab';
       for (let i = 0; i < 2; i += 1) {
         const angle = (i / 2) * Math.PI * 2;
         const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
-        spawnMeatPickup(position.clone().add(offset));
+        spawnMeatPickup(position.clone().add(offset), isCrab
+          ? { itemId: 'crab_meat', color: 0xb22222 }
+          : undefined);
       }
     }
   });
@@ -4504,7 +4508,7 @@ async function initCore(runtimeContext) {
     }
     if (spawnEvent.type === 'animal') {
       await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
-      await animalManager?.spawnDeerAt?.(spawnEvent.position);
+      await animalManager?.spawnWildAnimalAt?.(spawnEvent.position);
       return;
     }
     if (spawnEvent.type === 'companionDog') {
@@ -6904,13 +6908,13 @@ async function initCore(runtimeContext) {
   }
 
 
-  function spawnMeatPickup(position) {
+  function spawnMeatPickup(position, { itemId = MEAT_ITEM_ID, color = 0x6b3f23 } = {}) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return null;
     applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
     const geometry = new THREE.BoxGeometry(1.1, 0.45, 0.7);
     const material = new THREE.MeshStandardMaterial({
-      color: 0x6b3f23,
+      color,
       roughness: 0.85,
       metalness: 0.02
     });
@@ -6920,7 +6924,7 @@ async function initCore(runtimeContext) {
     mesh.position.copy(spawnPos);
     mesh.rotation.y = Math.random() * Math.PI * 2;
     scene.add(mesh);
-    const pickup = { id: MEAT_ITEM_ID, mesh };
+    const pickup = { id: itemId, mesh };
     meatPickups.push(pickup);
     return pickup;
   }
