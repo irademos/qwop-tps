@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MonsterCharacter } from '../characters/MonsterCharacter.js';
 
-const ANIMAL_TYPES = ['Deer'];
+const ANIMAL_TYPES = ['Deer', 'Crab'];
 const SPAWN_MIN_RADIUS = 10;
 const SPAWN_MAX_RADIUS = 26;
 const SPAWN_ATTEMPTS = 10;
@@ -317,6 +317,10 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   } else if (behavior === 'attack' && distanceToPlayer <= attackDistance) {
     data.state = 'attack';
     data.stateUntil = now + 900;
+  } else if (behavior === 'idle') {
+    if (data.state === 'runAway' || data.state === 'attack') {
+      data.state = 'idle';
+    }
   } else if (data.state === 'runAway' && now > (data.runAwayUntil || 0)) {
     data.state = 'idle';
     data.stateUntil = now + randomRange(1000, 2200);
@@ -553,6 +557,20 @@ export function createAnimalManager({
 
   const getAnimals = () => animals.map(entry => entry.animal).filter(Boolean);
 
+  const pickWildAnimalType = () => (Math.random() < 0.8 ? 'Crab' : 'Deer');
+
+  const spawnWildAnimalAt = async (position) => {
+    const entry = await spawnAnimal({
+      scene,
+      getPlayerModel,
+      getTerrainHeight,
+      forcedPosition: position || null,
+      forcedType: pickWildAnimalType()
+    });
+    if (entry) animals.push(entry);
+    return entry?.animal || null;
+  };
+
   const spawnDeerAt = async (position) => {
     const entry = await spawnAnimal({
       scene,
@@ -640,6 +658,7 @@ export function createAnimalManager({
     removeAnimal,
     removeAnimalById,
     spawnDeerAt,
+    spawnWildAnimalAt,
     spawnDogAt,
     maybeSpawnDogByTravelDistance,
     setHost,

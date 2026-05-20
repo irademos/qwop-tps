@@ -65,7 +65,7 @@ const getSpawnPositionFromDirection = ({ basePosition, travelDirection, getSpawn
   return getSpawnPosition(predictedPos);
 };
 
-export function createCharacterSpawner({ getPlayerPosition, getSpawnPosition, spawnTypeWeights } = {}) {
+export function createCharacterSpawner({ getPlayerPosition, getSpawnPosition, spawnTypeWeights, travelMinDistance = SPAWN_TRAVEL_MIN_DISTANCE, travelMaxDistance = SPAWN_TRAVEL_MAX_DISTANCE } = {}) {
   let nextSpawnDistance = 0;
   let travelStartPosition = null;
   let lastSpawnAtMs = 0;
@@ -103,7 +103,7 @@ export function createCharacterSpawner({ getPlayerPosition, getSpawnPosition, sp
     if (!currentPos) return null;
 
     if (!Number.isFinite(nextSpawnDistance) || nextSpawnDistance <= 0) {
-      nextSpawnDistance = getNextSpawnDistance();
+      nextSpawnDistance = travelMinDistance + Math.random() * Math.max(0, travelMaxDistance - travelMinDistance);
     }
 
     if (!travelStartPosition) {
@@ -139,7 +139,7 @@ export function createCharacterSpawner({ getPlayerPosition, getSpawnPosition, sp
     gpsDistanceAccum = 0;
     lastSpawnAtMs = now;
     travelStartPosition = currentPos.clone();
-    nextSpawnDistance = getNextSpawnDistance();
+    nextSpawnDistance = travelMinDistance + Math.random() * Math.max(0, travelMaxDistance - travelMinDistance);
 
     return event;
   };
