@@ -5181,7 +5181,7 @@ async function initCore(runtimeContext) {
     walkingTrackerButton = document.createElement('button');
     walkingTrackerButton.type = 'button';
     walkingTrackerButton.setAttribute('aria-label', 'Open distance traveled summary');
-    walkingTrackerButton.style.cssText = 'position:fixed;left:12px;top:12px;z-index:9500;border:1px solid rgba(255,255,255,.45);border-radius:999px;background:rgba(8,16,32,.76);color:#fff;padding:7px 11px;font:700 14px/1 Arial,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.35);backdrop-filter:blur(6px);cursor:pointer;';
+    walkingTrackerButton.style.cssText = 'position:fixed;left:12px;top:128px;z-index:9500;border:1px solid rgba(255,255,255,.45);border-radius:999px;background:rgba(8,16,32,.76);color:#fff;padding:7px 11px;font:700 14px/1 Arial,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.35);backdrop-filter:blur(6px);cursor:pointer;';
     walkingTrackerButton.addEventListener('click', showWalkingSummaryOverlay);
     document.body.appendChild(walkingTrackerButton);
     updateWalkingTrackerButton();
