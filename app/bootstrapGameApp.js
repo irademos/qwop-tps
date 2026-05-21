@@ -8676,7 +8676,7 @@ async function initCore(runtimeContext) {
     const isHost = !multiplayer || multiplayer.isHost;
     const damage = getExplosiveDamage(shooterId, baseDamage);
 
-    if (playerModel?.position) {
+    if (playerModel?.position && !isPlayerOwnExplosiveTarget(shooterId, localId)) {
       const distance = hitPosition.distanceTo(playerModel.position);
       if (distance <= damageRadius) {
         const localControls = runtimeContext.systems.playerControls ?? window.playerControls;
@@ -8704,6 +8704,7 @@ async function initCore(runtimeContext) {
 
     for (const [id, { model }] of Object.entries(otherPlayers)) {
       if (!model?.position) continue;
+      if (isPlayerOwnExplosiveTarget(shooterId, id)) continue;
       const distance = hitPosition.distanceTo(model.position);
       if (distance > damageRadius) continue;
       const player = otherPlayers[id];
@@ -8728,6 +8729,7 @@ async function initCore(runtimeContext) {
       if (isHost) {
         for (const monster of creatures) {
           if (!monster?.model?.position) continue;
+          if (shouldIgnoreExplosiveCreatureDamage(monster, shooterId ?? localId)) continue;
           const distance = hitPosition.distanceTo(monster.model.position);
           if (distance > damageRadius) continue;
           const attackTypes = getAttackTypes(attackLabel, ['explosive']);
@@ -8752,6 +8754,7 @@ async function initCore(runtimeContext) {
       } else {
         for (const monster of creatures) {
           if (!monster?.model?.position) continue;
+          if (shouldIgnoreExplosiveCreatureDamage(monster, shooterId ?? localId)) continue;
           const distance = hitPosition.distanceTo(monster.model.position);
           if (distance > damageRadius) continue;
           sendMonsterAttackIntent?.({
@@ -8790,6 +8793,31 @@ async function initCore(runtimeContext) {
         }
       });
     }
+  }
+
+  function isPlayerOwnExplosiveTarget(shooterId, targetPlayerId) {
+    return !!shooterId && !!targetPlayerId && shooterId === targetPlayerId;
+  }
+
+  function getCompanionOwnerId(animal) {
+    if (!animal) return null;
+    const rawId = String(animal.id || '');
+    if (rawId.startsWith('companionDog:')) {
+      return rawId.slice('companionDog:'.length).split(':')[0] || null;
+    }
+    if (animal?.model?.userData?.isCompanion && !animal?.model?.userData?.remoteSynced) {
+      return multiplayer?.getId?.() || null;
+    }
+    return null;
+  }
+
+  function shouldIgnoreExplosiveCreatureDamage(creature, shooterId) {
+    if (!creature || !shooterId) return false;
+    const creatureId = String(creature.id || '');
+    if (creatureId === `questFriend:${shooterId}`) return true;
+    const companionOwnerId = getCompanionOwnerId(creature);
+    if (companionOwnerId && companionOwnerId === shooterId) return true;
+    return false;
   }
 
   function getBombDamage(shooterId) {
