@@ -335,6 +335,12 @@ const DISPLAY_PRESETS = {
     skyBrightness: 0.25
   }
 };
+const HIGH_CONTRAST_PRESET = {
+  ambientIntensity: 2.0,
+  directionalIntensity: 2.0,
+  groundBrightness: 2.0,
+  buildingBrightness: 2.0
+};
 const PERFORMANCE_MODES = new Set(['auto', 'quality', 'balanced', 'performance']);
 const PERFORMANCE_PROFILE_CAPS = {
   low: 1.0,
@@ -1379,6 +1385,8 @@ async function initCore(runtimeContext) {
   const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
   const pickupEmissiveMaterials = new Set();
   let pickupEmissiveBrightness = 1;
+  const highContrastSkyDay = new THREE.Color(0x051024);
+  const highContrastSkyNight = new THREE.Color(0x000000);
   const captureMaterialBase = (material) => {
     if (!material) return null;
     const color = material.color?.clone ? material.color.clone() : new THREE.Color(0xffffff);
@@ -1426,6 +1434,49 @@ async function initCore(runtimeContext) {
     }
     material.emissiveIntensity = base.emissiveIntensity * clamped;
     material.needsUpdate = true;
+  };
+  const applyHighContrastMaterialState = (material, enabled) => {
+    if (!material || !material.isMaterial) return;
+    material.userData = material.userData || {};
+    if (!material.userData.baseHighContrastState) {
+      material.userData.baseHighContrastState = {
+        toneMapped: material.toneMapped,
+        color: material.color?.clone ? material.color.clone() : null,
+        emissive: material.emissive?.clone ? material.emissive.clone() : null,
+        emissiveIntensity: typeof material.emissiveIntensity === 'number' ? material.emissiveIntensity : null
+      };
+    }
+    const base = material.userData.baseHighContrastState;
+    if (!enabled) {
+      material.toneMapped = base.toneMapped;
+      if (base.color && material.color?.copy) material.color.copy(base.color);
+      if (base.emissive && material.emissive?.copy) material.emissive.copy(base.emissive);
+      if (typeof base.emissiveIntensity === 'number') material.emissiveIntensity = base.emissiveIntensity;
+      material.needsUpdate = true;
+      return;
+    }
+    material.toneMapped = false;
+    if (material.color?.copy && base.color) {
+      const luminance = base.color.r * 0.2126 + base.color.g * 0.7152 + base.color.b * 0.0722;
+      const contrastBoost = luminance > 0.45 ? 1 : 0.08;
+      material.color.copy(base.color).multiplyScalar(contrastBoost);
+      material.color.offsetHSL(0, 0.4, luminance > 0.45 ? 0.15 : -0.03);
+    }
+    if (material.emissive?.copy && base.emissive) {
+      material.emissive.copy(base.emissive).multiplyScalar(2.6);
+    }
+    if (typeof material.emissiveIntensity === 'number' && typeof base.emissiveIntensity === 'number') {
+      material.emissiveIntensity = Math.max(1.2, base.emissiveIntensity * 2.4);
+    }
+    material.needsUpdate = true;
+  };
+  const applyHighContrastToScene = (enabled) => {
+    if (!scene) return;
+    scene.traverse((child) => {
+      if (!child?.isMesh) return;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach((material) => applyHighContrastMaterialState(material, enabled));
+    });
   };
   const getAutoMode = () => {
     const now = new Date();
@@ -1491,7 +1542,7 @@ async function initCore(runtimeContext) {
   };
 
   const loadDisplaySettings = () => {
-    const defaults = { mode: 'auto', performanceMode: 'auto', ...DISPLAY_PRESETS.day };
+    const defaults = { mode: 'auto', performanceMode: 'auto', highContrastMode: false, ...DISPLAY_PRESETS.day };
     const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
     if (!raw) return defaults;
     try {
@@ -1524,6 +1575,9 @@ async function initCore(runtimeContext) {
   if (!PERFORMANCE_MODES.has(displaySettings.performanceMode)) {
     displaySettings.performanceMode = 'auto';
   }
+  if (typeof displaySettings.highContrastMode !== 'boolean') {
+    displaySettings.highContrastMode = false;
+  }
   if (displaySettings.mode === 'auto') {
     lastAutoMode = getAutoMode();
     applyPresetForMode(lastAutoMode);
@@ -1539,22 +1593,36 @@ async function initCore(runtimeContext) {
       1
     );
     pickupEmissiveBrightness = pickupBrightness;
+    const highContrastEnabled = Boolean(displaySettings.highContrastMode);
     if (scene) {
       if (effectiveMode === 'night') {
-        scene.background = new THREE.Color(0x000000);
+        scene.background = highContrastEnabled ? highContrastSkyNight : new THREE.Color(0x000000);
       } else {
-        scene.background = skyboxTexture;
+        scene.background = highContrastEnabled ? highContrastSkyDay : skyboxTexture;
       }
     }
+    const ambientIntensity = highContrastEnabled
+      ? HIGH_CONTRAST_PRESET.ambientIntensity
+      : displaySettings.ambientIntensity;
+    const directionalIntensity = highContrastEnabled
+      ? HIGH_CONTRAST_PRESET.directionalIntensity
+      : displaySettings.directionalIntensity;
+    const groundBrightness = highContrastEnabled
+      ? HIGH_CONTRAST_PRESET.groundBrightness
+      : displaySettings.groundBrightness;
+    const buildingBrightness = highContrastEnabled
+      ? HIGH_CONTRAST_PRESET.buildingBrightness
+      : displaySettings.buildingBrightness;
     if (ambientLight) {
-      ambientLight.intensity = clampValue(displaySettings.ambientIntensity, 0, 2);
+      ambientLight.intensity = clampValue(ambientIntensity, 0, 2);
     }
     if (dirLight) {
-      dirLight.intensity = clampValue(displaySettings.directionalIntensity, 0, 2);
+      dirLight.intensity = clampValue(directionalIntensity, 0, 2);
     }
-    applyMaterialBrightness(groundTiles?.material, groundMaterialBase, displaySettings.groundBrightness);
-    applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, displaySettings.buildingBrightness);
-    applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, displaySettings.buildingBrightness);
+    applyMaterialBrightness(groundTiles?.material, groundMaterialBase, groundBrightness);
+    applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, buildingBrightness);
+    applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, buildingBrightness);
+    applyHighContrastToScene(highContrastEnabled);
     mapRenderer?.setBrightness?.(pickupBrightness);
     for (const material of pickupEmissiveMaterials) {
       if (!material || typeof material.emissiveIntensity !== 'number') continue;
@@ -1637,6 +1705,13 @@ async function initCore(runtimeContext) {
       displaySettings.performanceMode = value;
       saveDisplaySettings();
       applyRendererPerformanceSettings();
+      updateSettingsUI();
+      return;
+    }
+    if (key === 'highContrastMode') {
+      displaySettings.highContrastMode = Boolean(value);
+      saveDisplaySettings();
+      applyDisplaySettings();
       updateSettingsUI();
       return;
     }

@@ -644,6 +644,15 @@ function buildDisplayPanel() {
     unitsSelect.appendChild(option);
   });
   unitsGroup.append(unitsLabel, unitsSelect);
+  const highContrastGroup = createElement('div', 'settings-field');
+  const highContrastLabel = createElement('label', 'settings-label', 'High Contrast Mode');
+  highContrastLabel.setAttribute('for', 'settings-display-high-contrast');
+  const highContrastToggle = createElement('input', 'settings-checkbox');
+  highContrastToggle.id = 'settings-display-high-contrast';
+  highContrastToggle.type = 'checkbox';
+  const highContrastHint = createElement('div', 'settings-muted');
+  highContrastHint.textContent = 'Boosts object contrast and lighting for better daytime phone visibility.';
+  highContrastGroup.append(highContrastLabel, highContrastToggle, highContrastHint);
 
   const createRangeField = ({ id, label, min, max, step }) => {
     const field = createElement('div', 'settings-field');
@@ -706,6 +715,7 @@ function buildDisplayPanel() {
     modeGroup,
     performanceGroup,
     unitsGroup,
+    highContrastGroup,
     ambientField.field,
     directionalField.field,
     groundField.field,
@@ -718,6 +728,7 @@ function buildDisplayPanel() {
     modeSelect,
     performanceSelect,
     unitsSelect,
+    highContrastToggle,
     sliders: {
       ambientIntensity: ambientField.input,
       directionalIntensity: directionalField.input,
@@ -1636,6 +1647,11 @@ function bindEvents() {
       update();
     });
   }
+  if (elements.displayFields?.highContrastToggle) {
+    elements.displayFields.highContrastToggle.addEventListener('change', (event) => {
+      context.appState?.setDisplaySetting?.('highContrastMode', event.target.checked);
+    });
+  }
 
   if (elements.displayFields?.sliders) {
     Object.entries(elements.displayFields.sliders).forEach(([key, slider]) => {
@@ -2038,6 +2054,9 @@ export function updateUI() {
     }
     if (elements.displayFields.unitsSelect) {
       elements.displayFields.unitsSelect.value = getDistanceUnitPreference();
+    }
+    if (elements.displayFields.highContrastToggle) {
+      elements.displayFields.highContrastToggle.checked = Boolean(displaySettings?.highContrastMode);
     }
     Object.entries(elements.displayFields.sliders || {}).forEach(([key, slider]) => {
       const value = displaySettings?.[key];
