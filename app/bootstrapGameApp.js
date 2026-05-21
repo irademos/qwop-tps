@@ -14576,7 +14576,7 @@ async function initCore(runtimeContext) {
     monsterAnimFrustum.setFromProjectionMatrix(monsterAnimProjMatrix);
 
     for (const monster of monsters) {
-      const model = entity?.model;
+      const model = monster?.model;
       const mixer = model?.userData?.mixer;
       if (!mixer || !model) continue;
 
