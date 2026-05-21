@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { MonsterCharacter } from '../characters/MonsterCharacter.js';
 
-const ANIMAL_TYPES = ['Deer', 'crab'];
+const ANIMAL_TYPES = ['Deer', 'crab', 'fish'];
 const SPAWN_MIN_RADIUS = 10;
 const SPAWN_MAX_RADIUS = 26;
 const SPAWN_ATTEMPTS = 10;
@@ -18,6 +18,8 @@ const CRAB_CONTACT_PUSH_STRENGTH = 1.8;
 const CRAB_CONTACT_DAMAGE = 1;
 const CRAB_CONTACT_DAMAGE_COOLDOWN_MS = 850;
 const CRAB_CONTACT_KNOCKBACK_STRENGTH = 1.8;
+const FISH_BUBBLE_RADIUS = 0.55;
+const FISH_BUBBLE_FLOAT_HEIGHT = 0.5;
 
 const loader = new GLTFLoader();
 const animalTemplateCache = new Map();
@@ -33,6 +35,7 @@ const resolveAnimalAssetBaseName = (typeName) => {
   if (lowered === 'crab') return 'crab';
   if (lowered === 'deer') return 'Deer';
   if (lowered === 'dog') return 'dog';
+  if (lowered === 'fish') return 'fish';
   return raw;
 };
 
@@ -335,6 +338,57 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
 
   const now = Date.now();
   const behavior = config.behavior || 'runAway';
+  if (behavior === 'waterBubble') {
+    const bubbleData = animal.userData?.bubbleData;
+    const terrain = getTerrainHeight?.(animal.model.position.x, animal.model.position.z);
+    if (!bubbleData) {
+      animal.playAnimation('Idle', 0.12);
+      animal.update(delta);
+      return;
+    }
+    if (!bubbleData.popped) {
+      bubbleData.moveTimeRemaining = (bubbleData.moveTimeRemaining || 0) - delta;
+      if (bubbleData.moveTimeRemaining <= 0 || !bubbleData.driftDirection) {
+        const angle = Math.random() * Math.PI * 2;
+        bubbleData.driftDirection = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+        bubbleData.moveTimeRemaining = randomRange(1.4, 4.4);
+      }
+      const driftSpeed = Number.isFinite(config.walkSpeed) ? Math.max(0.15, config.walkSpeed * 0.3) : 0.36;
+      animal.model.position.addScaledVector(bubbleData.driftDirection, driftSpeed * delta);
+      const floatBaseY = Number.isFinite(terrain) ? terrain + FISH_BUBBLE_FLOAT_HEIGHT : animal.model.position.y;
+      bubbleData.floatPhase = (bubbleData.floatPhase || 0) + delta * 1.5;
+      animal.model.position.y = floatBaseY + Math.sin(bubbleData.floatPhase) * 0.05;
+      if (bubbleData.group?.position) {
+        bubbleData.group.position.copy(animal.model.position);
+      }
+      bubbleData.swimTime = (bubbleData.swimTime || 0) + delta;
+      const swimRadius = FISH_BUBBLE_RADIUS * 0.55;
+      const swimX = Math.cos(bubbleData.swimTime * 1.7) * swimRadius * 0.45;
+      const swimY = Math.sin(bubbleData.swimTime * 2.1) * swimRadius * 0.35;
+      const swimZ = Math.sin(bubbleData.swimTime * 1.2) * swimRadius * 0.6;
+      const pivot = animal.model.userData?.pivot;
+      if (pivot?.position) {
+        pivot.position.set(swimX, swimY, swimZ);
+      }
+      animal.playAnimation('Idle', 0.1);
+      animal.update(delta);
+      return;
+    }
+    if (bubbleData.group?.position) {
+      bubbleData.group.position.copy(animal.model.position);
+    }
+    if (Number.isFinite(terrain)) {
+      const floorY = terrain + 0.4;
+      const fallSpeed = 1.8;
+      animal.model.position.y = Math.max(floorY, animal.model.position.y - fallSpeed * delta);
+      if (animal.model.position.y <= floorY + 0.01) {
+        bubbleData.landed = true;
+      }
+    }
+    animal.playAnimation('Idle', 0.12);
+    animal.update(delta);
+    return;
+  }
   const fleeDistance = Number.isFinite(config.fleeDistance) ? config.fleeDistance : 8;
   const walkSpeed = Number.isFinite(config.walkSpeed) ? config.walkSpeed : 1.2;
   const runSpeed = Number.isFinite(config.runSpeed) ? config.runSpeed : 4.8;
@@ -567,7 +621,8 @@ export function createAnimalManager({
   getNearbyMonster,
   onMonsterAttack,
   isHost = false,
-  onRemoteSpawnRequest
+  onRemoteSpawnRequest,
+  onBubblePopped
 } = {}) {
   const animals = [];
   let currentHost = !!isHost;
@@ -586,6 +641,10 @@ export function createAnimalManager({
       model.parent.remove(model);
     }
     model?.userData?.mixer?.stopAllAction?.();
+    const bubbleData = entry.animal?.userData?.bubbleData;
+    if (bubbleData?.group?.parent) {
+      bubbleData.group.parent.remove(bubbleData.group);
+    }
     onAnimalRemoved?.({ animal: entry.animal, wasDead, position: lastPosition });
   };
 
@@ -620,7 +679,12 @@ export function createAnimalManager({
 
   const getAnimals = () => animals.map(entry => entry.animal).filter(Boolean);
 
-  const pickWildAnimalType = () => (Math.random() < 0.8 ? 'crab' : 'Deer');
+  const pickWildAnimalType = () => {
+    const roll = Math.random();
+    if (roll < 0.5) return 'crab';
+    if (roll < 0.82) return 'Deer';
+    return 'fish';
+  };
 
   const spawnWildAnimalAt = async (position) => {
     const entry = await spawnAnimal({
@@ -631,7 +695,64 @@ export function createAnimalManager({
       forcedType: pickWildAnimalType()
     });
     if (entry) animals.push(entry);
-    return entry?.animal || null;
+    const animal = entry?.animal;
+    if (animal?.model && entry?.config?.behavior === 'waterBubble') {
+      const bubbleGroup = new THREE.Group();
+      const bubbleMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(FISH_BUBBLE_RADIUS, 24, 20),
+        new THREE.MeshStandardMaterial({
+          color: 0x66c8ff,
+          transparent: true,
+          opacity: 0.35,
+          roughness: 0.15,
+          metalness: 0.02
+        })
+      );
+      bubbleMesh.receiveShadow = false;
+      bubbleGroup.add(bubbleMesh);
+      bubbleGroup.position.copy(animal.model.position);
+      scene.add(bubbleGroup);
+      animal.userData.bubbleData = {
+        group: bubbleGroup,
+        mesh: bubbleMesh,
+        popped: false,
+        landed: false,
+        floatPhase: Math.random() * Math.PI * 2,
+        driftDirection: null,
+        moveTimeRemaining: 0,
+        swimTime: Math.random() * Math.PI * 2
+      };
+      animal.model.userData.onBubblePop = () => {
+        const data = animal.userData?.bubbleData;
+        data?.mesh?.parent?.remove(data.mesh);
+        for (let i = 0; i < 18; i += 1) {
+          const droplet = new THREE.Mesh(
+            new THREE.SphereGeometry(0.04 + Math.random() * 0.02, 8, 8),
+            new THREE.MeshStandardMaterial({ color: 0x9fe4ff, transparent: true, opacity: 0.8 })
+          );
+          const direction = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5).normalize();
+          droplet.position.copy(animal.model.position);
+          scene.add(droplet);
+          const startedAt = Date.now();
+          const duration = 420 + Math.random() * 220;
+          const updateSpray = () => {
+            const elapsed = Date.now() - startedAt;
+            const t = elapsed / duration;
+            if (t >= 1) {
+              droplet.parent?.remove(droplet);
+              return;
+            }
+            droplet.position.addScaledVector(direction, 0.03);
+            droplet.position.y -= 0.012;
+            droplet.material.opacity = Math.max(0, 0.8 * (1 - t));
+            requestAnimationFrame(updateSpray);
+          };
+          requestAnimationFrame(updateSpray);
+        }
+        onBubblePopped?.({ animal, position: animal.model.position.clone() });
+      };
+    }
+    return animal || null;
   };
 
   const spawnDeerAt = async (position) => {
