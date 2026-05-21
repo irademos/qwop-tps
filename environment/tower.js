@@ -48,6 +48,7 @@ const makeSwirlColumn = (color, phase) => {
 const createGeneratedTower = () => {
   const tower = new THREE.Group();
   tower.name = 'generated-swirl-tower';
+  
 
   const core = new THREE.Mesh(
     new THREE.CylinderGeometry(CORE_RADIUS, CORE_RADIUS + 0.6, TOWER_HEIGHT, 36, 1, false),
@@ -63,11 +64,12 @@ const createGeneratedTower = () => {
   const stairCount = Math.floor(TOWER_HEIGHT / STAIR_RISE);
   const stairMaterial = new THREE.MeshStandardMaterial({ color: 0x8f98ad, roughness: 0.75, metalness: 0.15 });
   const stepGeometry = new THREE.BoxGeometry(STAIR_WIDTH, STAIR_THICKNESS, 1.8);
+  const stairMeshes = [];
   for (let i = 0; i < stairCount; i += 1) {
     const step = new THREE.Mesh(stepGeometry, stairMaterial);
     const t = i / stairCount;
     const angle = t * Math.PI * 2 * SPIRAL_TURNS;
-    const radius = TOWER_RADIUS - 0.9;
+    const radius = TOWER_RADIUS + 1.2;
     step.position.set(
       Math.cos(angle) * radius,
       0.9 + (i * STAIR_RISE),
@@ -75,7 +77,9 @@ const createGeneratedTower = () => {
     );
     step.rotation.y = angle + Math.PI * 0.5;
     tower.add(step);
+    stairMeshes.push(step);
   }
+  tower.userData.stairMeshes = stairMeshes;
 
   const topPlatform = new THREE.Mesh(
     new THREE.CylinderGeometry(PLATFORM_RADIUS, PLATFORM_RADIUS + 0.7, 1.2, 40),
@@ -164,6 +168,36 @@ const addTowerCollider = ({ tower, rapierWorld, rapier }) => {
   return rb;
 };
 
+const addTowerStairColliders = ({ stairMeshes, rapierWorld, rapier }) => {
+  if (!stairMeshes || !rapierWorld || !rapier) return;
+
+  stairMeshes.forEach((step) => {
+    step.updateWorldMatrix(true, false);
+
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+
+    step.getWorldPosition(worldPos);
+    step.getWorldQuaternion(worldQuat);
+
+    const rb = rapierWorld.createRigidBody(
+      rapier.RigidBodyDesc.fixed()
+        .setTranslation(worldPos.x, worldPos.y, worldPos.z)
+        .setRotation(worldQuat)
+    );
+
+    const collider = rapier.ColliderDesc.cuboid(
+      STAIR_WIDTH * 0.5,
+      STAIR_THICKNESS * 0.5,
+      0.9 // half of step depth (1.8)
+    )
+      .setFriction(1.2)
+      .setRestitution(0);
+
+    rapierWorld.createCollider(collider, rb);
+  });
+};
+
 export async function createTower({ scene, getTerrainHeight, rapierWorld, rapier } = {}) {
   if (!scene) return null;
   const tower = createGeneratedTower();
@@ -173,9 +207,17 @@ export async function createTower({ scene, getTerrainHeight, rapierWorld, rapier
   const y = Number.isFinite(terrainY) ? terrainY : TOWER_POSITION.y;
   tower.position.set(x, y, z);
   tower.updateWorldMatrix(true, true);
-  const climbArea = buildClimbArea(tower);
-  if (climbArea) setClimbableAreas('tower', [climbArea]);
-  addTowerCollider({ tower, rapierWorld, rapier });
+  tower.position.set(x, y, z);
+  tower.updateWorldMatrix(true, true);
+
+  addTowerStairColliders({
+    stairMeshes: tower.userData.stairMeshes,
+    rapierWorld,
+    rapier
+  });
+  // const climbArea = buildClimbArea(tower);
+  // if (climbArea) setClimbableAreas('tower', [climbArea]);
+  // addTowerCollider({ tower, rapierWorld, rapier });
   scene.add(tower);
   return tower;
 }
