@@ -4174,6 +4174,10 @@ async function initCore(runtimeContext) {
     },
     isHost,
     onRemoteSpawnRequest: requestHostSpawnEvent,
+    onBubblePopped: ({ animal, position }) => {
+      if (String(animal?.type || '').toLowerCase() !== 'fish' || !position) return;
+      spawnMeatPickup(position.clone(), { itemId: MEAT_ITEM_ID, color: 0x4aa3c7 });
+    },
     onAnimalRemoved: ({ animal, wasDead, position }) => {
       const dogCollider = dogColliderEntries.get(animal?.id);
       if (dogCollider) removeStaticBoxCollider(dogCollider);
@@ -13970,7 +13974,7 @@ async function initCore(runtimeContext) {
           (animals || []).forEach((animal) => {
             if (!animal?.model?.position || animal.isDead) return;
             const animalType = String(animal?.type || '').toLowerCase();
-            if (animalType !== 'deer' && animalType !== 'crab') return;
+            if (animalType !== 'deer' && animalType !== 'crab' && animalType !== 'fish') return;
             const distance = playerPos.distanceTo(animal.model.position);
             if (distance > WEAPON_TARGET_MAX_DISTANCE) return;
             const buttonAnchor = animal.model.position.clone().add(new THREE.Vector3(0, 2.1, 0));
