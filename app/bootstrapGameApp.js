@@ -8671,10 +8671,29 @@ async function initCore(runtimeContext) {
     const localId = multiplayer?.getId?.();
     const isHost = !multiplayer || multiplayer.isHost;
     const damage = getExplosiveDamage(shooterId, baseDamage);
+    const isShooterLocalPlayer = !!(shooterId && localId && shooterId === localId);
+    const resolveCompanionOwnerId = (animal) => {
+      if (!animal) return null;
+      const explicitOwner = animal.model?.userData?.companionOwnerId;
+      if (typeof explicitOwner === 'string' && explicitOwner.length > 0) {
+        return explicitOwner;
+      }
+      const rawId = String(animal.id || '');
+      if (rawId.startsWith('companionDog:')) {
+        return rawId.slice('companionDog:'.length).split(':')[0] || null;
+      }
+      return null;
+    };
+    const isShooterCompanion = (animal) => {
+      if (!animal?.model?.userData?.isCompanion) return false;
+      const ownerId = resolveCompanionOwnerId(animal);
+      if (ownerId && shooterId) return ownerId === shooterId;
+      return isShooterLocalPlayer;
+    };
 
     if (playerModel?.position) {
       const distance = hitPosition.distanceTo(playerModel.position);
-      if (distance <= damageRadius) {
+      if (distance <= damageRadius && !isShooterLocalPlayer) {
         const localControls = runtimeContext.systems.playerControls ?? window.playerControls;
         if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
           localControls.isInvincible = false;
@@ -8700,6 +8719,7 @@ async function initCore(runtimeContext) {
 
     for (const [id, { model }] of Object.entries(otherPlayers)) {
       if (!model?.position) continue;
+      if (shooterId && id === shooterId) continue;
       const distance = hitPosition.distanceTo(model.position);
       if (distance > damageRadius) continue;
       const player = otherPlayers[id];
@@ -8724,6 +8744,7 @@ async function initCore(runtimeContext) {
       if (isHost) {
         for (const monster of creatures) {
           if (!monster?.model?.position) continue;
+          if (isShooterCompanion(monster)) continue;
           const distance = hitPosition.distanceTo(monster.model.position);
           if (distance > damageRadius) continue;
           const attackTypes = getAttackTypes(attackLabel, ['explosive']);
@@ -8748,6 +8769,7 @@ async function initCore(runtimeContext) {
       } else {
         for (const monster of creatures) {
           if (!monster?.model?.position) continue;
+          if (isShooterCompanion(monster)) continue;
           const distance = hitPosition.distanceTo(monster.model.position);
           if (distance > damageRadius) continue;
           sendMonsterAttackIntent?.({
