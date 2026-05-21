@@ -94,6 +94,7 @@ export class MonsterCharacter extends CharacterBase {
     this.healthBar = this.createHealthBar();
     this.healthBarVisibleUntil = 0;
     this.backgroundMode = false;
+    this.colliderHandles = [];
     this.isProvoked = false;
     this.model.userData.monsterProperties = this.monsterProperties;
     this.model.userData.lastHitAttackTypes = [];
@@ -103,6 +104,14 @@ export class MonsterCharacter extends CharacterBase {
 
   get body() {
     return this.model?.userData?.rb ?? null;
+  }
+
+  setColliderHandles(handles) {
+    if (!Array.isArray(handles)) {
+      this.colliderHandles = [];
+      return;
+    }
+    this.colliderHandles = handles.filter((handle) => Number.isInteger(handle));
   }
 
   setMode(mode) {
@@ -142,17 +151,9 @@ export class MonsterCharacter extends CharacterBase {
     const resolver = context?.resolveGroundY;
     if (typeof resolver !== 'function') return null;
     const referenceY = Number.isFinite(context?.referenceY) ? context.referenceY : this.model?.position?.y;
-    const body = this.body;
-    const excludedColliderHandles = [];
-    if (body && typeof body.numColliders === 'function' && typeof body.collider === 'function') {
-      const colliderCount = body.numColliders();
-      for (let i = 0; i < colliderCount; i += 1) {
-        const collider = body.collider(i);
-        if (typeof collider?.handle === 'number') {
-          excludedColliderHandles.push(collider.handle);
-        }
-      }
-    }
+    const excludedColliderHandles = Array.isArray(this.colliderHandles)
+      ? this.colliderHandles.filter((handle) => Number.isInteger(handle))
+      : [];
     const result = resolver(
       x,
       Number.isFinite(referenceY) ? referenceY + 4 : 4,
