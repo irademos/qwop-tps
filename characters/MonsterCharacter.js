@@ -274,6 +274,19 @@ export class MonsterCharacter extends CharacterBase {
 
   applyDamage(amount, options = {}) {
     if (this.isDead) return;
+    const bubbleData = this.userData?.bubbleData;
+    const behavior = String(this.model?.userData?.behavior || '').toLowerCase();
+    if (behavior === 'waterbubble' && bubbleData && !bubbleData.popped) {
+      bubbleData.popped = true;
+      const onBubblePop = this.model?.userData?.onBubblePop;
+      if (typeof onBubblePop === 'function') {
+        onBubblePop({
+          animal: this,
+          hitDirection: options?.hitDirection?.clone?.() || null
+        });
+      }
+      return false;
+    }
     const incomingDamage = Number.isFinite(amount) ? Math.max(0, amount) : 0;
     const attackTypes = getAttackTypes(null, options?.attackTypes || []);
     const damageMultiplier = this.getDamageMultiplierForAttackTypes(attackTypes);

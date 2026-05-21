@@ -722,40 +722,34 @@ export function createAnimalManager({
         moveTimeRemaining: 0,
         swimTime: Math.random() * Math.PI * 2
       };
-      const originalApplyDamage = animal.applyDamage.bind(animal);
-      animal.applyDamage = (amount, options = {}) => {
-        const bubbleData = animal.userData?.bubbleData;
-        if (bubbleData && !bubbleData.popped) {
-          bubbleData.popped = true;
-          bubbleData.mesh?.parent?.remove(bubbleData.mesh);
-          for (let i = 0; i < 18; i += 1) {
-            const droplet = new THREE.Mesh(
-              new THREE.SphereGeometry(0.04 + Math.random() * 0.02, 8, 8),
-              new THREE.MeshStandardMaterial({ color: 0x9fe4ff, transparent: true, opacity: 0.8 })
-            );
-            const direction = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5).normalize();
-            droplet.position.copy(animal.model.position);
-            scene.add(droplet);
-            const startedAt = Date.now();
-            const duration = 420 + Math.random() * 220;
-            const updateSpray = () => {
-              const elapsed = Date.now() - startedAt;
-              const t = elapsed / duration;
-              if (t >= 1) {
-                droplet.parent?.remove(droplet);
-                return;
-              }
-              droplet.position.addScaledVector(direction, 0.03);
-              droplet.position.y -= 0.012;
-              droplet.material.opacity = Math.max(0, 0.8 * (1 - t));
-              requestAnimationFrame(updateSpray);
-            };
+      animal.model.userData.onBubblePop = () => {
+        const data = animal.userData?.bubbleData;
+        data?.mesh?.parent?.remove(data.mesh);
+        for (let i = 0; i < 18; i += 1) {
+          const droplet = new THREE.Mesh(
+            new THREE.SphereGeometry(0.04 + Math.random() * 0.02, 8, 8),
+            new THREE.MeshStandardMaterial({ color: 0x9fe4ff, transparent: true, opacity: 0.8 })
+          );
+          const direction = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5).normalize();
+          droplet.position.copy(animal.model.position);
+          scene.add(droplet);
+          const startedAt = Date.now();
+          const duration = 420 + Math.random() * 220;
+          const updateSpray = () => {
+            const elapsed = Date.now() - startedAt;
+            const t = elapsed / duration;
+            if (t >= 1) {
+              droplet.parent?.remove(droplet);
+              return;
+            }
+            droplet.position.addScaledVector(direction, 0.03);
+            droplet.position.y -= 0.012;
+            droplet.material.opacity = Math.max(0, 0.8 * (1 - t));
             requestAnimationFrame(updateSpray);
-          }
-          onBubblePopped?.({ animal, position: animal.model.position.clone() });
-          return false;
+          };
+          requestAnimationFrame(updateSpray);
         }
-        return originalApplyDamage(amount, options);
+        onBubblePopped?.({ animal, position: animal.model.position.clone() });
       };
     }
     return animal || null;
