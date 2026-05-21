@@ -3729,8 +3729,9 @@ async function initCore(runtimeContext) {
     const rb = rapierWorld.createRigidBody(rbDesc);
     rb.setEnabledRotations(false, true, false, true);
     const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
-    rapierWorld.createCollider(colDesc, rb);
+    const collider = rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
+    monster.setColliderHandles?.(typeof collider?.handle === 'number' ? [collider.handle] : []);
     rbToMesh.set(rb, model);
     if (monster.syncBodyFromTransform) {
       monster.syncBodyFromTransform({ zeroVelocity: true });
@@ -3749,6 +3750,7 @@ async function initCore(runtimeContext) {
       removeRigidBodySafely(rapierWorld, body);
     }
     monster.model.userData.rb = null;
+    monster.setColliderHandles?.([]);
     monster.setBackgroundMode?.(true);
   }
 
