@@ -67,6 +67,10 @@ export function getTerrainHeight(x = 0, z = 0) {
   return getTerrainHeightAt(x, z);
 }
 
+export function getTerrainHeightWithoutResolvers(_x = 0, _z = 0) {
+  return FLAT_TERRAIN_HEIGHT;
+}
+
 export function registerTerrainHeightResolver(resolver) {
   if (typeof resolver !== "function") return () => {};
   extraHeightResolvers.add(resolver);

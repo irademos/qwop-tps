@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { setClimbableAreas } from '../controls/climb.js';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
-import { registerTerrainHeightResolver } from './terrainHeight.js';
+import { registerTerrainHeightResolver, getTerrainHeightWithoutResolvers } from './terrainHeight.js';
 import * as BufferGeometryUtils from
   'three/examples/jsm/utils/BufferGeometryUtils.js';
 
@@ -346,6 +346,12 @@ export async function createNature({
     return Math.max(1, Math.ceil(evictRadius / 2));
   };
   let tileBuffer = getTreeTileBuffer(activeTileCache);
+  const getWorldGenerationTerrainHeight = (x, z) => {
+    const sampler = typeof getTerrainHeightWithoutResolvers === 'function'
+      ? getTerrainHeightWithoutResolvers
+      : getTerrainHeight;
+    return sampler?.(x, z) ?? 0;
+  };
 
   const getTileKey = (tile) => `${tile.x},${tile.y}`;
   const getTileFromKey = (tileKey) => {
@@ -591,7 +597,7 @@ export async function createNature({
       0.3,
       0.75
     );
-    const terrainY = getTerrainHeight?.(centerX, centerZ) ?? tree.position.y;
+    const terrainY = getWorldGenerationTerrainHeight(centerX, centerZ) ?? tree.position.y;
     const rbDesc = rapier.RigidBodyDesc.fixed().setTranslation(centerX, terrainY + halfHeight, centerZ);
     const rb = rapierWorld.createRigidBody(rbDesc);
     const colliderDesc = rapier.ColliderDesc.cylinder(halfHeight, colliderRadius)
@@ -900,7 +906,7 @@ export async function createNature({
         const scale =
           TREE_SCALE_MIN +
           pseudoRandom2D(worldX, worldZ, 7.7) * (TREE_SCALE_MAX - TREE_SCALE_MIN);
-        const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
+        const terrainY = getWorldGenerationTerrainHeight(worldX, worldZ) ?? 0;
         const tree = createTreeImpostor({
           worldX,
           worldZ,
@@ -990,7 +996,7 @@ export async function createNature({
           continue;
         }
 
-        const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
+        const terrainY = getWorldGenerationTerrainHeight(worldX, worldZ) ?? 0;
         const bush = createBushImpostor({
           worldX,
           worldZ,
@@ -1018,7 +1024,7 @@ export async function createNature({
           userData: { boundsRadius: footprint * 0.6 }
         };
         if (tileBlockers && isTreeBlocked(mountainProbe, tileBlockers)) continue;
-        const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
+        const terrainY = getWorldGenerationTerrainHeight(worldX, worldZ) ?? 0;
         const mountainHeight = MOUNTAIN_MIN_HEIGHT
           + pseudoRandom2D(worldX, worldZ, 63.5) * (MOUNTAIN_MAX_HEIGHT - MOUNTAIN_MIN_HEIGHT);
         const mountain = createMountainImpostor({
@@ -1066,7 +1072,7 @@ export async function createNature({
         const rock = new THREE.Mesh(rockGeometries[geometryIndex], rockMaterial);
         rock.castShadow = true;
         rock.receiveShadow = true;
-        const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
+        const terrainY = getWorldGenerationTerrainHeight(worldX, worldZ) ?? 0;
         rock.position.set(worldX, terrainY + radius * 0.36, worldZ);
         const uniformScale = radius * (1.5 + pseudoRandom2D(worldX, worldZ, 26.1) * 0.5);
         rock.scale.set(
@@ -1435,7 +1441,7 @@ export async function createNature({
     const rock = new THREE.Mesh(rockGeometries[geometryIndex], rockMaterial);
     rock.castShadow = true;
     rock.receiveShadow = true;
-    const terrainY = getTerrainHeight?.(position.x, position.z) ?? position.y ?? 0;
+    const terrainY = getWorldGenerationTerrainHeight(position.x, position.z) ?? position.y ?? 0;
     rock.position.set(position.x, terrainY + radius * 0.36, position.z);
     const uniformScale = radius * 1.8;
     rock.scale.set(uniformScale, uniformScale * 0.85, uniformScale * 0.95);
