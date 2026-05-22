@@ -2024,6 +2024,7 @@ async function initCore(runtimeContext) {
       questFriend.model.userData.hideInMapView = true;
       questFriend.model.userData.isQuestFriend = true;
       questFriend.model.userData.remoteSynced = true;
+      questFriend.alwaysShowHealthBar = false;
       questFriend.enableDanceWhileEngaged = false;
       questFriend.setNoticeRadius?.(10);
       questFriend.setWanderRadius?.(5);
@@ -2031,6 +2032,10 @@ async function initCore(runtimeContext) {
       questFriend.setDisengageRadius?.(8);
       questFriend.setLevel?.(1, { preserveHealth: false });
       questFriend.resetHealth?.();
+      questFriend.healthBarVisibleUntil = 0;
+      if (questFriend.healthBar) {
+        questFriend.healthBar.visible = false;
+      }
       scene?.add(questFriend.model);
       attachMonsterPhysics?.(questFriend);
       remoteQuestFriends.set(id, questFriend);
