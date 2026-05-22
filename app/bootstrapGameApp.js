@@ -1385,8 +1385,32 @@ async function initCore(runtimeContext) {
   const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
   const pickupEmissiveMaterials = new Set();
   let pickupEmissiveBrightness = 1;
-  const highContrastSkyDay = new THREE.Color(0x051024);
-  const highContrastSkyNight = new THREE.Color(0x000000);
+  const highContrastSkyDay = new THREE.Color(0xffffff);
+  const highContrastSkyNight = new THREE.Color(0xffffff);
+  const createHighContrastCheckerTexture = () => {
+    const size = 128;
+    const cells = 8;
+    const cellSize = size / cells;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    for (let row = 0; row < cells; row += 1) {
+      for (let col = 0; col < cells; col += 1) {
+        context.fillStyle = (row + col) % 2 === 0 ? '#ffffff' : '#000000';
+        context.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+      }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(24, 24);
+    texture.anisotropy = 4;
+    texture.needsUpdate = true;
+    return texture;
+  };
+  const highContrastGroundTexture = createHighContrastCheckerTexture();
   const captureMaterialBase = (material) => {
     if (!material) return null;
     const color = material.color?.clone ? material.color.clone() : new THREE.Color(0xffffff);
@@ -1620,6 +1644,20 @@ async function initCore(runtimeContext) {
       dirLight.intensity = clampValue(directionalIntensity, 0, 2);
     }
     applyMaterialBrightness(groundTiles?.material, groundMaterialBase, groundBrightness);
+    if (groundTiles?.material) {
+      const material = groundTiles.material;
+      material.userData = material.userData || {};
+      if (!Object.prototype.hasOwnProperty.call(material.userData, 'baseGroundMap')) {
+        material.userData.baseGroundMap = material.map ?? null;
+      }
+      if (highContrastEnabled) {
+        if (material.color?.setHex) material.color.setHex(0xffffff);
+        if (highContrastGroundTexture) material.map = highContrastGroundTexture;
+      } else {
+        material.map = material.userData.baseGroundMap ?? null;
+      }
+      material.needsUpdate = true;
+    }
     applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, buildingBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, buildingBrightness);
     applyHighContrastToScene(highContrastEnabled);
