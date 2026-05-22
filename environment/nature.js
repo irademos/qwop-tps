@@ -781,7 +781,7 @@ export async function createNature({
     const leaves = new THREE.Mesh(treeImpostorLeafGeometry, leafMaterial);
     leaves.castShadow = false;
     leaves.receiveShadow = true;
-    leaves.position.y = 0.8;
+    leaves.position.y = 0.7;
     impostor.add(leaves);
 
     impostor.position.set(worldX, terrainY - groundAnchorOffset, worldZ);
