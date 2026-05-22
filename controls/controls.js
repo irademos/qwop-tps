@@ -13,6 +13,7 @@ import { loadNippleJs } from '../externalDeps.js';
 const SWIM_SPEED = 2;
 const ENERGY_DEPLETED_SPEED_MULTIPLIER = 1.2;
 const JUMP_FORCE = 4;
+const DEFAULT_PLAYER_SCALE = 1;
 const FLY_JUMP_FORCE_MULTIPLIER = 2;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
@@ -218,6 +219,8 @@ export class PlayerControls {
     this.geoBoundHalfSizeM = 8;
     this.geoEdgeEpsM = 0.75;
     this.geoBoundsDebug = null;
+    this.jumpForceMultiplier = 1;
+    this.lowGravityEnabled = false;
     this.geoBoundsDebugArrow = null;
     this.geoBoundsLastMoveDirection = new THREE.Vector3(0, 0, 1);
     this.geoBoundsDebugHeight = 2;
@@ -3308,6 +3311,22 @@ export class PlayerControls {
     return this.playerModel;
   }
 
+  setJumpForceMultiplier(multiplier = 1) {
+    this.jumpForceMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  }
+
+  setLowGravityEnabled(enabled = false) {
+    this.lowGravityEnabled = !!enabled;
+    if (this.body?.setGravityScale) {
+      this.body.setGravityScale(this.lowGravityEnabled ? 0.2 : 1, true);
+    }
+  }
+
+  setPlayerScale(scale = DEFAULT_PLAYER_SCALE) {
+    const safeScale = Number.isFinite(scale) && scale > 0 ? scale : DEFAULT_PLAYER_SCALE;
+    this.playerModel?.scale?.setScalar?.(safeScale);
+  }
+
   /**
    * Trigger a jump action programmatically.
    * Useful for alternative input methods like voice commands.
@@ -3321,7 +3340,8 @@ export class PlayerControls {
     if (!this.body) return false;
 
     const isFlyActive = this.flySpellActive && Date.now() < (this.flySpellEndsAt || 0);
-    const jumpForce = isFlyActive ? JUMP_FORCE * FLY_JUMP_FORCE_MULTIPLIER : JUMP_FORCE;
+    const baseJumpForce = isFlyActive ? JUMP_FORCE * FLY_JUMP_FORCE_MULTIPLIER : JUMP_FORCE;
+    const jumpForce = baseJumpForce * (Number.isFinite(this.jumpForceMultiplier) ? this.jumpForceMultiplier : 1);
 
     if (this.isClimbing) {
       this.stopClimbing();

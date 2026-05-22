@@ -1701,7 +1701,7 @@ async function initCore(runtimeContext) {
         }
       });
     }
-  };
+  }
 
 
   syncBackgroundLoopForDisplayMode = () => {
@@ -8119,12 +8119,70 @@ async function initCore(runtimeContext) {
     updateSettingsUI();
   }
 
+  const POWERUP_DURATION_MS = 60_000;
+  const MUSHROOM_8_ID = MUSHROOM_ENTRIES.find((entry) => entry.name === 'Mushroom 8')?.id;
+  const MUSHROOM_13_ID = MUSHROOM_ENTRIES.find((entry) => entry.name === 'Mushroom 13')?.id;
+  const MUSHROOM_15_ID = MUSHROOM_ENTRIES.find((entry) => entry.name === 'Mushroom 15')?.id;
+  const playerPowerups = {
+    giantUntil: 0,
+    lowGravityUntil: 0,
+    strengthUntil: 0,
+    cloneUntil: 0,
+    cleanupTimer: null,
+    clones: []
+  };
+
+  const clearPlayerCopies = () => {
+    (playerPowerups.clones || []).forEach((clone) => clone?.mesh?.parent?.remove?.(clone.mesh));
+    playerPowerups.clones = [];
+  };
+
+  const spawnPlayerCopies = (count = 7) => {
+    clearPlayerCopies();
+    if (!playerModel?.parent) return;
+    for (let i = 0; i < count; i += 1) {
+      const cloneMesh = playerModel.clone(true);
+      cloneMesh.scale.setScalar(0.55);
+      cloneMesh.userData.isPlayerCopy = true;
+      cloneMesh.userData.health = 20;
+      cloneMesh.userData.dead = false;
+      playerModel.parent.add(cloneMesh);
+      playerPowerups.clones.push({ mesh: cloneMesh, angle: (i / count) * Math.PI * 2, radius: 1.8 + (i % 2) * 0.6 });
+    }
+  };
+
+  const updatePowerupCleanup = () => {
+    if (playerPowerups.cleanupTimer) clearTimeout(playerPowerups.cleanupTimer);
+    playerPowerups.cleanupTimer = setTimeout(() => {
+      const now = Date.now();
+      if (now >= playerPowerups.giantUntil) playerControls?.setPlayerScale?.(1);
+      if (now >= playerPowerups.lowGravityUntil) {
+        playerControls?.setJumpForceMultiplier?.(1);
+        playerControls?.setLowGravityEnabled?.(false);
+      }
+      if (now >= playerPowerups.cloneUntil) clearPlayerCopies();
+    }, POWERUP_DURATION_MS + 200);
+  };
+
   function eatInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
     if (!isFoodItem(itemId)) return;
     if (isMushroomItem(itemId)) {
       setStat('health', statsState.health + MUSHROOM_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
+      if (itemId === MUSHROOM_13_ID) {
+        playerPowerups.lowGravityUntil = Date.now() + POWERUP_DURATION_MS;
+        playerControls?.setJumpForceMultiplier?.(5);
+        playerControls?.setLowGravityEnabled?.(true);
+      } else if (itemId === MUSHROOM_15_ID) {
+        playerPowerups.giantUntil = Date.now() + POWERUP_DURATION_MS;
+        playerPowerups.strengthUntil = Date.now() + POWERUP_DURATION_MS;
+        playerControls?.setPlayerScale?.(3);
+      } else if (itemId === MUSHROOM_8_ID) {
+        playerPowerups.cloneUntil = Date.now() + POWERUP_DURATION_MS;
+        spawnPlayerCopies(7);
+      }
+      updatePowerupCleanup();
     } else if (isAppleItem(itemId)) {
       setStat('health', statsState.health + APPLE_HEALTH_SEGMENTS, { skipSave: true });
       setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
@@ -8451,6 +8509,7 @@ async function initCore(runtimeContext) {
       updateHungerUI();
       statsState.energy = statsState.hunger;
       updateEnergyEffects();
+    updatePlayerCopies();
     }
     if (key === 'magic') {
       updateMagicUI();
@@ -8582,7 +8641,10 @@ async function initCore(runtimeContext) {
   };
 
   window.setStat = setStat;
-  window.getPlayerStrength = () => (Number.isFinite(statsState.strength) ? statsState.strength : 0);
+  window.getPlayerStrength = () => {
+    const base = Number.isFinite(statsState.strength) ? statsState.strength : 0;
+    return Date.now() < playerPowerups.strengthUntil ? base * 3 : base;
+  };
 
   const getPowerUpsForLevel = (level) => {
     const safeLevel = Math.max(1, Math.round(level || 1));
@@ -15478,3 +15540,22 @@ export async function bootstrapGameApp() {
     };
     noteEntryModal.querySelector('.note-input')?.focus();
   });
+
+  function updatePlayerCopies() {
+    const now = Date.now();
+    if (now >= playerPowerups.cloneUntil) return;
+    const basePos = playerModel?.position;
+    if (!basePos) return;
+    playerPowerups.clones.forEach((clone, idx) => {
+      if (!clone?.mesh || clone.mesh.userData.dead) return;
+      const angle = clone.angle + now * 0.0015;
+      clone.mesh.position.set(basePos.x + Math.cos(angle) * clone.radius, basePos.y, basePos.z + Math.sin(angle) * clone.radius);
+      clone.mesh.quaternion.copy(playerModel.quaternion);
+      if (clone.mesh.userData.health <= 0) {
+        clone.mesh.visible = false;
+        clone.mesh.userData.dead = true;
+      }
+    });
+  };
+
+
