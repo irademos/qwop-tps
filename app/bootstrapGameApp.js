@@ -8153,7 +8153,9 @@ async function initCore(runtimeContext) {
 
     for (let i = 0; i < count; i += 1) {
       const cloneMesh = SkeletonUtils.clone(playerModel);
-      cloneMesh.userData = { ...(cloneMesh.userData || {}) };
+      cloneMesh.userData = cloneMesh.userData || {};
+      delete cloneMesh.userData.mixer;
+      delete cloneMesh.userData.actions;
       cloneMesh.userData.isPlayerCopy = true;
       cloneMesh.userData.health = 20;
       cloneMesh.userData.dead = false;
