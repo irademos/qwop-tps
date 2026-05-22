@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { setClimbableAreas } from '../controls/climb.js';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
+import { registerTerrainHeightResolver } from './terrainHeight.js';
 import * as BufferGeometryUtils from
   'three/examples/jsm/utils/BufferGeometryUtils.js';
 
@@ -254,6 +255,27 @@ export async function createNature({
   scene.add(group);
 
   const treeTiles = new Map();
+  const activeMountains = new Set();
+  const mountainRaycaster = new THREE.Raycaster();
+  const mountainRayOrigin = new THREE.Vector3();
+  const mountainRayDirection = new THREE.Vector3(0, -1, 0);
+  const unregisterMountainHeightResolver = registerTerrainHeightResolver((x, z, currentHeight = 0) => {
+    let bestHeight = currentHeight;
+    for (const mountain of activeMountains) {
+      const radius = Number(mountain?.userData?.boundsRadius) || 0;
+      if (radius <= 0) continue;
+      const dx = x - mountain.position.x;
+      const dz = z - mountain.position.z;
+      if (dx * dx + dz * dz > (radius * 1.2) * (radius * 1.2)) continue;
+      mountainRayOrigin.set(x, mountain.position.y + (mountain.userData?.mountainHeight ?? 0) + 12, z);
+      mountainRaycaster.set(mountainRayOrigin, mountainRayDirection);
+      const hits = mountainRaycaster.intersectObject(mountain, true);
+      if (hits.length > 0 && Number.isFinite(hits[0].point.y) && hits[0].point.y > bestHeight) {
+        bestHeight = hits[0].point.y;
+      }
+    }
+    return bestHeight;
+  });
   const climbableAreasByTile = new Map();
   const applePickupsByTile = new Map();
   let treeCollidersEnabled = true;
@@ -1011,9 +1033,8 @@ export async function createNature({
         tileGroup.add(mountain);
         mountains.push(mountain);
 
-        const mountainAreas = buildTreeClimbAreas(mountain);
-        mountain.userData.climbAreas = mountainAreas;
-        tileClimbAreas.push(...mountainAreas);
+        mountain.userData.climbAreas = [];
+        activeMountains.add(mountain);
 
         const physics = createMountainCollider(mountain);
         if (physics) {
@@ -1453,6 +1474,7 @@ export async function createNature({
         if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
       }
       disposeMountains(entry.mountains);
+      for (const mountain of entry.mountains ?? []) activeMountains.delete(mountain);
     }
     treeTiles.clear();
     climbableAreasByTile.clear();
@@ -1482,6 +1504,7 @@ export async function createNature({
         if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
       }
       disposeMountains(entry.mountains);
+      for (const mountain of entry.mountains ?? []) activeMountains.delete(mountain);
     }
     treeTiles.clear();
     climbableAreasByTile.clear();
@@ -1502,6 +1525,8 @@ export async function createNature({
     treeImpostorTrunkMaterial.dispose();
     treeImpostorLeafMaterials.forEach((material) => material.dispose());
     mountainMaterials.forEach((material) => material.dispose());
+    activeMountains.clear();
+    unregisterMountainHeightResolver?.();
     group.clear();
     scene?.remove(group);
   };
