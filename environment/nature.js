@@ -51,11 +51,11 @@ const TREE_BASE_COLLIDER_RADIUS_FACTOR = 0.24;
 const TREE_BASE_COLLIDER_HALF_HEIGHT = 1.5;
 const MOUNTAIN_GRID_SPACING = 24;
 const MOUNTAIN_SPAWN_CHANCE_RATIO = 0.25;
-const MOUNTAIN_MIN_FOOTPRINT_METERS = 3.0;
-const MOUNTAIN_MAX_FOOTPRINT_METERS = 7.0;
+const MOUNTAIN_MIN_FOOTPRINT_METERS = 7.0;
+const MOUNTAIN_MAX_FOOTPRINT_METERS = 10.0;
 const MOUNTAIN_MIN_HEIGHT = 10.0;
 const MOUNTAIN_MAX_HEIGHT = 35.0;
-const MOUNTAIN_SIDE_SEGMENTS = 6;
+const MOUNTAIN_SIDE_SEGMENTS = 10;
 const MOUNTAIN_CLIMB_TOP_RATIO = 0.16;
 const MOUNTAIN_COLLIDER_RADIUS_FACTOR = 0.42;
 const MOUNTAIN_COLLIDER_HEIGHT_FACTOR = 0.5;
@@ -289,6 +289,12 @@ export async function createNature({
     metalness: 0.01,
     flatShading: true
   }));
+  const mountainMaterials = [
+    new THREE.MeshStandardMaterial({ color: 0x7b5a3a, roughness: 0.97, metalness: 0.02, flatShading: true }),
+    new THREE.MeshStandardMaterial({ color: 0x8b6745, roughness: 0.97, metalness: 0.02, flatShading: true }),
+    new THREE.MeshStandardMaterial({ color: 0x6a4d33, roughness: 0.97, metalness: 0.02, flatShading: true }),
+    new THREE.MeshStandardMaterial({ color: 0x9a744f, roughness: 0.97, metalness: 0.02, flatShading: true })
+  ];
   const tempPosition = new THREE.Vector3();
   const tempBox = new THREE.Box3();
   const tempCenter = new THREE.Vector3();
@@ -594,13 +600,27 @@ export async function createNature({
     const groupMesh = new THREE.Group();
     groupMesh.name = 'mountain-impostor';
     const halfFootprint = footprint * 0.5;
-    const topRadius = Math.max(0.25, halfFootprint * MOUNTAIN_CLIMB_TOP_RATIO);
-    const geometry = new THREE.CylinderGeometry(halfFootprint, topRadius, height, MOUNTAIN_SIDE_SEGMENTS, 1);
-    const mesh = new THREE.Mesh(geometry, rockMaterial);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.position.y = height * 0.5;
-    groupMesh.add(mesh);
+    const topRadius = Math.max(0.45, halfFootprint * MOUNTAIN_CLIMB_TOP_RATIO);
+    const material = mountainMaterials[Math.floor(pseudoRandom2D(worldX, worldZ, 65.3) * mountainMaterials.length) % mountainMaterials.length];
+    const core = new THREE.Mesh(
+      new THREE.CylinderGeometry(topRadius, halfFootprint, height, MOUNTAIN_SIDE_SEGMENTS, 3),
+      material
+    );
+    core.castShadow = true;
+    core.receiveShadow = true;
+    core.position.y = height * 0.5;
+    groupMesh.add(core);
+    const shoulder = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), material);
+    shoulder.castShadow = true;
+    shoulder.receiveShadow = true;
+    shoulder.position.y = height * 0.54;
+    shoulder.scale.set(halfFootprint * 0.95, Math.max(1.8, height * 0.16), halfFootprint * 0.95);
+    shoulder.rotation.set(
+      pseudoRandom2D(worldX, worldZ, 66.1) * Math.PI,
+      pseudoRandom2D(worldX, worldZ, 66.7) * Math.PI * 2,
+      pseudoRandom2D(worldX, worldZ, 67.3) * Math.PI
+    );
+    groupMesh.add(shoulder);
     groupMesh.position.set(worldX, terrainY, worldZ);
     groupMesh.rotation.y = rotation;
     groupMesh.userData = {
@@ -609,7 +629,8 @@ export async function createNature({
       interactable: true,
       footprintMeters: footprint,
       mountainHeight: height,
-      boundsRadius: halfFootprint * 0.95
+      boundsRadius: halfFootprint * 0.95,
+      gameplayScaleFactor: 1
     };
     return groupMesh;
   };
@@ -1383,6 +1404,7 @@ export async function createNature({
     treeImpostorLeafGeometry.dispose();
     treeImpostorTrunkMaterial.dispose();
     treeImpostorLeafMaterials.forEach((material) => material.dispose());
+    mountainMaterials.forEach((material) => material.dispose());
     group.clear();
     scene?.remove(group);
   };
