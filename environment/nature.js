@@ -608,56 +608,6 @@ export async function createNature({
     return { rb, collider };
   };
 
-  const createMountainCollider = (mountain) => {
-    if (!mountain || !rapier || !rapierWorld) return null;
-
-    let sourceMesh = null;
-
-    mountain.traverse((child) => {
-      if (child.isMesh && !sourceMesh) {
-        sourceMesh = child;
-      }
-    });
-
-    if (!sourceMesh?.geometry) return null;
-
-    // Clone so we don't mutate render geometry
-    let geometry = sourceMesh.geometry.clone();
-
-    // Ensure indexed geometry for Rapier trimesh
-    if (!geometry.index) {
-      geometry = BufferGeometryUtils.mergeVertices(geometry);
-    }
-
-    // Bake mesh transform into geometry
-    geometry.applyMatrix4(sourceMesh.matrixWorld);
-
-    const vertices = geometry.attributes.position.array;
-    const indices = geometry.index.array;
-
-    const rbDesc = rapier.RigidBodyDesc.fixed();
-
-    const rb = rapierWorld.createRigidBody(rbDesc);
-
-    const colliderDesc = rapier.ColliderDesc.trimesh(
-      vertices,
-      indices
-    )
-      .setFriction(1.0)
-      .setRestitution(0.0);
-
-    const collider = rapierWorld.createCollider(
-      colliderDesc,
-      rb
-    );
-
-    collider.setSensor(!treeCollidersEnabled);
-
-    geometry.dispose();
-
-    return { rb, collider };
-  };
-
   const createMountainImpostor = ({ worldX, worldZ, tileKey, terrainY, footprint, height, rotation }) => {
     const groupMesh = new THREE.Group();
     groupMesh.name = 'mountain-impostor';
@@ -1041,12 +991,6 @@ export async function createNature({
 
         mountain.userData.climbAreas = [];
         activeMountains.add(mountain);
-
-        const physics = createMountainCollider(mountain);
-        if (physics) {
-          mountainPhysics.push(physics);
-          mountain.userData.physics = physics;
-        }
       }
     }
 
