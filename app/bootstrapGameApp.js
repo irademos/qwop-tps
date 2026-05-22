@@ -8164,6 +8164,27 @@ async function initCore(runtimeContext) {
     }, POWERUP_DURATION_MS + 200);
   };
 
+
+  const updatePlayerCopies = () => {
+    const now = Date.now();
+    if (now >= playerPowerups.cloneUntil) return;
+    const basePos = playerModel?.position;
+    if (!basePos) return;
+    playerPowerups.clones.forEach((clone) => {
+      if (!clone?.mesh || clone.mesh.userData.dead) return;
+      const angle = clone.angle + now * 0.0015;
+      clone.mesh.position.set(
+        basePos.x + Math.cos(angle) * clone.radius,
+        basePos.y,
+        basePos.z + Math.sin(angle) * clone.radius
+      );
+      clone.mesh.quaternion.copy(playerModel.quaternion);
+      if (clone.mesh.userData.health <= 0) {
+        clone.mesh.visible = false;
+        clone.mesh.userData.dead = true;
+      }
+    });
+  };
   function eatInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
     if (!isFoodItem(itemId)) return;
@@ -15452,110 +15473,3 @@ export async function bootstrapGameApp() {
 
   return appContext;
 }
-  const escapeBuildModalText = (value) => String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('\"', '&quot;')
-    .replaceAll("'", '&#39;');
-  const buildModal = document.createElement('div');
-  buildModal.className = 'build-modal-overlay hidden';
-  const noteEntryModal = document.createElement('div');
-  noteEntryModal.className = 'build-modal-overlay hidden';
-  const noteViewModal = document.createElement('div');
-  noteViewModal.className = 'build-modal-overlay hidden';
-  document.body.append(buildModal, noteEntryModal, noteViewModal);
-  const openBuildTypePicker = (availableWoodCount = 0) => new Promise((resolve) => {
-    buildModal.innerHTML = `<div class="build-modal"><h3>Choose Build Type</h3><div class="build-options-list"><button type="button" class="build-option-btn" data-build-type="block"><span>🧱</span>Block</button><button type="button" class="build-option-btn" data-build-type="note"><span>🪧</span>Note Post</button><button type="button" class="build-option-btn" data-build-type="shield"><span>🛡️</span>Shield</button><div class="build-option-btn" data-build-batch-row="arrow"><span>🏹</span>Arrow <button type="button" class="craft-adjust" data-build-adjust="decrease" data-build-quantity-type="arrow">−</button><span data-build-quantity-label="arrow">1</span><button type="button" class="craft-adjust" data-build-adjust="increase" data-build-quantity-type="arrow">+</button><button type="button" class="retro-build-btn" data-build-craft="arrow">Build</button></div><div class="build-option-btn" data-build-batch-row="torch"><span>🔥</span>Torch <button type="button" class="craft-adjust" data-build-adjust="decrease" data-build-quantity-type="torch">−</button><span data-build-quantity-label="torch">1</span><button type="button" class="craft-adjust" data-build-adjust="increase" data-build-quantity-type="torch">+</button><button type="button" class="retro-build-btn" data-build-craft="torch">Build</button></div></div><button type="button" class="build-cancel-btn" data-build-cancel="1">Cancel</button></div>`;
-    buildModal.classList.remove('hidden');
-    const craftQuantities = {
-      arrow: 1,
-      torch: 1
-    };
-    const refreshCraftQuantities = () => {
-      ['arrow', 'torch'].forEach((type) => {
-        const label = buildModal.querySelector(`[data-build-quantity-label="${type}"]`);
-        if (label) label.textContent = String(craftQuantities[type]);
-      });
-      const maxQuantity = Math.max(1, Math.floor(Number.isFinite(availableWoodCount) ? availableWoodCount : 0));
-      buildModal.querySelectorAll('[data-build-quantity-type]').forEach((button) => {
-        const type = button.dataset.buildQuantityType;
-        const adjust = button.dataset.buildAdjust;
-        if (!craftQuantities[type]) return;
-        if (adjust === 'decrease') {
-          button.disabled = craftQuantities[type] <= 1;
-        } else if (adjust === 'increase') {
-          button.disabled = craftQuantities[type] >= maxQuantity;
-        }
-      });
-    };
-    refreshCraftQuantities();
-    const close = (value) => {
-      buildModal.classList.add('hidden');
-      buildModal.innerHTML = '';
-      buildModal.onclick = null;
-      resolve(value);
-    };
-    buildModal.onclick = (event) => {
-      const target = event.target.closest('button');
-      if (event.target === buildModal || target?.dataset.buildCancel) return close(null);
-      if (target?.dataset.buildAdjust && target?.dataset.buildQuantityType) {
-        const quantityType = target.dataset.buildQuantityType;
-        const maxQuantity = Math.max(1, Math.floor(Number.isFinite(availableWoodCount) ? availableWoodCount : 0));
-        if (target.dataset.buildAdjust === 'decrease') {
-          craftQuantities[quantityType] = Math.max(1, (craftQuantities[quantityType] || 1) - 1);
-        } else if (target.dataset.buildAdjust === 'increase') {
-          craftQuantities[quantityType] = Math.min(maxQuantity, (craftQuantities[quantityType] || 1) + 1);
-        }
-        refreshCraftQuantities();
-        return;
-      }
-      if (target?.dataset.buildCraft) {
-        const craftType = target.dataset.buildCraft;
-        const quantity = Math.max(1, Math.floor(craftQuantities[craftType] || 1));
-        close({ type: craftType, quantity });
-        return;
-      }
-      const type = target?.dataset.buildType;
-      if (type) close({ type, quantity: 1 });
-    };
-  });
-  const openNoteEntryModal = (initialText = '') => new Promise((resolve) => {
-    noteEntryModal.innerHTML = `<div class="build-modal"><h3>Write Your Note</h3><textarea class="note-input" maxlength="280" placeholder="Leave a helpful message...">${escapeBuildModalText(initialText)}</textarea><div class="build-modal-actions"><button type="button" class="build-cancel-btn" data-note-cancel="1">Cancel</button><button type="button" class="retro-build-btn" data-note-save="1">Save</button></div></div>`;
-    noteEntryModal.classList.remove('hidden');
-    const close = (value) => {
-      noteEntryModal.classList.add('hidden');
-      noteEntryModal.innerHTML = '';
-      noteEntryModal.onclick = null;
-      resolve(value);
-    };
-    noteEntryModal.onclick = (event) => {
-      const saveBtn = event.target.closest('[data-note-save]');
-      const cancelBtn = event.target.closest('[data-note-cancel]');
-      if (event.target === noteEntryModal || cancelBtn) return close(null);
-      if (saveBtn) {
-        const text = noteEntryModal.querySelector('.note-input')?.value || '';
-        close(text.trim() || null);
-      }
-    };
-    noteEntryModal.querySelector('.note-input')?.focus();
-  });
-
-  function updatePlayerCopies() {
-    const now = Date.now();
-    if (now >= playerPowerups.cloneUntil) return;
-    const basePos = playerModel?.position;
-    if (!basePos) return;
-    playerPowerups.clones.forEach((clone, idx) => {
-      if (!clone?.mesh || clone.mesh.userData.dead) return;
-      const angle = clone.angle + now * 0.0015;
-      clone.mesh.position.set(basePos.x + Math.cos(angle) * clone.radius, basePos.y, basePos.z + Math.sin(angle) * clone.radius);
-      clone.mesh.quaternion.copy(playerModel.quaternion);
-      if (clone.mesh.userData.health <= 0) {
-        clone.mesh.visible = false;
-        clone.mesh.userData.dead = true;
-      }
-    });
-  };
-
-
