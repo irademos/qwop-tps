@@ -3318,13 +3318,19 @@ export class PlayerControls {
   setLowGravityEnabled(enabled = false) {
     this.lowGravityEnabled = !!enabled;
     if (this.body?.setGravityScale) {
-      this.body.setGravityScale(this.lowGravityEnabled ? 0.2 : 1, true);
+      this.body.setGravityScale(this.lowGravityEnabled ? 0.65 : 1, true);
     }
   }
 
   setPlayerScale(scale = DEFAULT_PLAYER_SCALE) {
     const safeScale = Number.isFinite(scale) && scale > 0 ? scale : DEFAULT_PLAYER_SCALE;
-    this.playerModel?.scale?.setScalar?.(safeScale);
+    if (!this.playerModel?.scale?.setScalar) return;
+    const currentScale = Number.isFinite(this.playerModel.scale.x) ? this.playerModel.scale.x : DEFAULT_PLAYER_SCALE;
+    this.playerModel.scale.setScalar(safeScale);
+    if (this.playerModel?.position) {
+      const yLiftPerScale = 0.55;
+      this.playerModel.position.y += (safeScale - currentScale) * yLiftPerScale;
+    }
   }
 
   /**

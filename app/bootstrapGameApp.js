@@ -8141,8 +8141,12 @@ async function initCore(runtimeContext) {
     clearPlayerCopies();
     if (!playerModel?.parent) return;
     for (let i = 0; i < count; i += 1) {
-      const cloneMesh = playerModel.clone(true);
-      cloneMesh.scale.setScalar(0.55);
+      const cloneMesh = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.15, 0.5, 4, 8),
+        new THREE.MeshStandardMaterial({ color: 0x9fb8ff, transparent: true, opacity: 0.9, roughness: 0.7, metalness: 0.05 })
+      );
+      cloneMesh.castShadow = true;
+      cloneMesh.receiveShadow = true;
       cloneMesh.userData.isPlayerCopy = true;
       cloneMesh.userData.health = 20;
       cloneMesh.userData.dead = false;
@@ -8193,7 +8197,7 @@ async function initCore(runtimeContext) {
       setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
       if (itemId === MUSHROOM_13_ID) {
         playerPowerups.lowGravityUntil = Date.now() + POWERUP_DURATION_MS;
-        playerControls?.setJumpForceMultiplier?.(5);
+        playerControls?.setJumpForceMultiplier?.(1.6);
         playerControls?.setLowGravityEnabled?.(true);
       } else if (itemId === MUSHROOM_15_ID) {
         playerPowerups.giantUntil = Date.now() + POWERUP_DURATION_MS;
