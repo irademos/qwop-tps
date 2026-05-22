@@ -1360,7 +1360,10 @@ function renderInventory() {
     shield: '🛡️',
     apple: '🍎',
     wood: '🪵',
-    meat: '🥩'
+    meat: '🥩',
+    crab_meat: '🦀',
+    Salt: '🪨',
+    zombie_brains: '🧠'
   };
 
   elements.inventoryGrid.innerHTML = '';
