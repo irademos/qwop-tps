@@ -55,8 +55,9 @@ const MOUNTAIN_MIN_FOOTPRINT_METERS = 7.0;
 const MOUNTAIN_MAX_FOOTPRINT_METERS = 10.0;
 const MOUNTAIN_MIN_HEIGHT = 10.0;
 const MOUNTAIN_MAX_HEIGHT = 35.0;
-const MOUNTAIN_SIDE_SEGMENTS = 10;
-const MOUNTAIN_CLIMB_TOP_RATIO = 0.16;
+const MOUNTAIN_SIDE_SEGMENTS = 12;
+const MOUNTAIN_HEIGHT_SEGMENTS = 7;
+const MOUNTAIN_CLIMB_TOP_RATIO = 0.18;
 const MOUNTAIN_COLLIDER_RADIUS_FACTOR = 0.42;
 const MOUNTAIN_COLLIDER_HEIGHT_FACTOR = 0.5;
 const METERS_PER_DEGREE_LAT = 111_132.92;
@@ -600,27 +601,51 @@ export async function createNature({
     const groupMesh = new THREE.Group();
     groupMesh.name = 'mountain-impostor';
     const halfFootprint = footprint * 0.5;
-    const topRadius = Math.max(0.45, halfFootprint * MOUNTAIN_CLIMB_TOP_RATIO);
+    const topRadius = Math.max(0.55, halfFootprint * MOUNTAIN_CLIMB_TOP_RATIO);
     const material = mountainMaterials[Math.floor(pseudoRandom2D(worldX, worldZ, 65.3) * mountainMaterials.length) % mountainMaterials.length];
-    const core = new THREE.Mesh(
-      new THREE.CylinderGeometry(topRadius, halfFootprint, height, MOUNTAIN_SIDE_SEGMENTS, 3),
-      material
+
+    const baseGeometry = new THREE.ConeGeometry(
+      halfFootprint,
+      height,
+      MOUNTAIN_SIDE_SEGMENTS,
+      MOUNTAIN_HEIGHT_SEGMENTS
     );
+    baseGeometry.translate(0, height * 0.5, 0);
+    const nonIndexed = baseGeometry.toNonIndexed();
+    baseGeometry.dispose();
+    const pos = nonIndexed.attributes.position;
+    const vertex = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i += 1) {
+      vertex.fromBufferAttribute(pos, i);
+      const normalizedHeight = THREE.MathUtils.clamp(vertex.y / height, 0, 1);
+      const horizontalStrength = (1 - normalizedHeight) * (footprint * 0.2);
+      const verticalStrength = height * 0.02;
+      const jitterX = (pseudoRandom2D(worldX + i * 0.37, worldZ - i * 0.29, 70.1) - 0.5) * 2;
+      const jitterZ = (pseudoRandom2D(worldX - i * 0.41, worldZ + i * 0.31, 71.7) - 0.5) * 2;
+      const jitterY = (pseudoRandom2D(worldX + i * 0.17, worldZ + i * 0.23, 72.9) - 0.5) * 2;
+      vertex.x += jitterX * horizontalStrength;
+      vertex.z += jitterZ * horizontalStrength;
+      vertex.y += jitterY * verticalStrength;
+      const taper = 1 - normalizedHeight * 0.12;
+      vertex.x *= taper;
+      vertex.z *= taper;
+      pos.setXYZ(i, vertex.x, vertex.y, vertex.z);
+    }
+    nonIndexed.computeVertexNormals();
+
+    const core = new THREE.Mesh(nonIndexed, material);
     core.castShadow = true;
     core.receiveShadow = true;
-    core.position.y = height * 0.5;
     groupMesh.add(core);
-    const shoulder = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 0), material);
-    shoulder.castShadow = true;
-    shoulder.receiveShadow = true;
-    shoulder.position.y = height * 0.54;
-    shoulder.scale.set(halfFootprint * 0.95, Math.max(1.8, height * 0.16), halfFootprint * 0.95);
-    shoulder.rotation.set(
-      pseudoRandom2D(worldX, worldZ, 66.1) * Math.PI,
-      pseudoRandom2D(worldX, worldZ, 66.7) * Math.PI * 2,
-      pseudoRandom2D(worldX, worldZ, 67.3) * Math.PI
+
+    const cap = new THREE.Mesh(
+      new THREE.CylinderGeometry(topRadius * 0.92, topRadius, Math.max(0.9, height * 0.08), MOUNTAIN_SIDE_SEGMENTS, 1),
+      material
     );
-    groupMesh.add(shoulder);
+    cap.castShadow = true;
+    cap.receiveShadow = true;
+    cap.position.y = Math.max(1, height * 0.95);
+    groupMesh.add(cap);
     groupMesh.position.set(worldX, terrainY, worldZ);
     groupMesh.rotation.y = rotation;
     groupMesh.userData = {
