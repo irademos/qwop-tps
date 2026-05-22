@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { setClimbableAreas } from '../controls/climb.js';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
+import * as BufferGeometryUtils from
+  'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const TREE_SCALE_REFERENCE = 0.016;
 const TREE_SCALE_MIN = 0.012;
@@ -51,15 +53,12 @@ const TREE_BASE_COLLIDER_RADIUS_FACTOR = 0.24;
 const TREE_BASE_COLLIDER_HALF_HEIGHT = 1.5;
 const MOUNTAIN_GRID_SPACING = 24;
 const MOUNTAIN_SPAWN_CHANCE_RATIO = 0.25;
-const MOUNTAIN_MIN_FOOTPRINT_METERS = 7.0;
-const MOUNTAIN_MAX_FOOTPRINT_METERS = 10.0;
-const MOUNTAIN_MIN_HEIGHT = 10.0;
-const MOUNTAIN_MAX_HEIGHT = 35.0;
+const MOUNTAIN_MIN_FOOTPRINT_METERS = 21.0;
+const MOUNTAIN_MAX_FOOTPRINT_METERS = 30.0;
+const MOUNTAIN_MIN_HEIGHT = 5.0;
+const MOUNTAIN_MAX_HEIGHT = 35;
 const MOUNTAIN_SIDE_SEGMENTS = 12;
-const MOUNTAIN_HEIGHT_SEGMENTS = 7;
-const MOUNTAIN_CLIMB_TOP_RATIO = 0.18;
-const MOUNTAIN_COLLIDER_RADIUS_FACTOR = 0.42;
-const MOUNTAIN_COLLIDER_HEIGHT_FACTOR = 0.5;
+const MOUNTAIN_HEIGHT_SEGMENTS = 4;
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const ROAD_WIDTHS = {
   footway: 0.4,
@@ -583,17 +582,51 @@ export async function createNature({
 
   const createMountainCollider = (mountain) => {
     if (!mountain || !rapier || !rapierWorld) return null;
-    const footprint = mountain.userData?.footprintMeters ?? MOUNTAIN_MIN_FOOTPRINT_METERS;
-    const radius = Math.max(0.75, (footprint * 0.5) * MOUNTAIN_COLLIDER_RADIUS_FACTOR);
-    const halfHeight = Math.max(2.5, (mountain.userData?.mountainHeight ?? MOUNTAIN_MIN_HEIGHT) * MOUNTAIN_COLLIDER_HEIGHT_FACTOR);
-    const center = mountain.position;
-    const rbDesc = rapier.RigidBodyDesc.fixed().setTranslation(center.x, center.y + halfHeight, center.z);
+
+    let sourceMesh = null;
+
+    mountain.traverse((child) => {
+      if (child.isMesh && !sourceMesh) {
+        sourceMesh = child;
+      }
+    });
+
+    if (!sourceMesh?.geometry) return null;
+
+    // Clone so we don't mutate render geometry
+    let geometry = sourceMesh.geometry.clone();
+
+    // Ensure indexed geometry for Rapier trimesh
+    if (!geometry.index) {
+      geometry = BufferGeometryUtils.mergeVertices(geometry);
+    }
+
+    // Bake mesh transform into geometry
+    geometry.applyMatrix4(sourceMesh.matrixWorld);
+
+    const vertices = geometry.attributes.position.array;
+    const indices = geometry.index.array;
+
+    const rbDesc = rapier.RigidBodyDesc.fixed();
+
     const rb = rapierWorld.createRigidBody(rbDesc);
-    const colliderDesc = rapier.ColliderDesc.cylinder(halfHeight, radius)
-      .setFriction(0.95)
-      .setRestitution(0.02);
-    const collider = rapierWorld.createCollider(colliderDesc, rb);
+
+    const colliderDesc = rapier.ColliderDesc.trimesh(
+      vertices,
+      indices
+    )
+      .setFriction(1.0)
+      .setRestitution(0.0);
+
+    const collider = rapierWorld.createCollider(
+      colliderDesc,
+      rb
+    );
+
     collider.setSensor(!treeCollidersEnabled);
+
+    geometry.dispose();
+
     return { rb, collider };
   };
 
@@ -601,7 +634,6 @@ export async function createNature({
     const groupMesh = new THREE.Group();
     groupMesh.name = 'mountain-impostor';
     const halfFootprint = footprint * 0.5;
-    const topRadius = Math.max(0.55, halfFootprint * MOUNTAIN_CLIMB_TOP_RATIO);
     const material = mountainMaterials[Math.floor(pseudoRandom2D(worldX, worldZ, 65.3) * mountainMaterials.length) % mountainMaterials.length];
 
     const baseGeometry = new THREE.ConeGeometry(
@@ -610,42 +642,82 @@ export async function createNature({
       MOUNTAIN_SIDE_SEGMENTS,
       MOUNTAIN_HEIGHT_SEGMENTS
     );
+
     baseGeometry.translate(0, height * 0.5, 0);
-    const nonIndexed = baseGeometry.toNonIndexed();
-    baseGeometry.dispose();
-    const pos = nonIndexed.attributes.position;
+
+    const pos = baseGeometry.attributes.position;
     const vertex = new THREE.Vector3();
+
     for (let i = 0; i < pos.count; i += 1) {
       vertex.fromBufferAttribute(pos, i);
+
       const normalizedHeight = THREE.MathUtils.clamp(vertex.y / height, 0, 1);
-      const horizontalStrength = (1 - normalizedHeight) * (footprint * 0.2);
-      const verticalStrength = height * 0.02;
-      const jitterX = (pseudoRandom2D(worldX + i * 0.37, worldZ - i * 0.29, 70.1) - 0.5) * 2;
-      const jitterZ = (pseudoRandom2D(worldX - i * 0.41, worldZ + i * 0.31, 71.7) - 0.5) * 2;
-      const jitterY = (pseudoRandom2D(worldX + i * 0.17, worldZ + i * 0.23, 72.9) - 0.5) * 2;
-      vertex.x += jitterX * horizontalStrength;
-      vertex.z += jitterZ * horizontalStrength;
-      vertex.y += jitterY * verticalStrength;
-      const taper = 1 - normalizedHeight * 0.12;
+
+      // Stronger deformation near base
+      const radialStrength =
+        (1 - normalizedHeight) * footprint * 0.24;
+
+      // Slight vertical breakup
+      const verticalStrength =
+        height * 0.025 * (1 - normalizedHeight * 0.7);
+
+      // Direction away from center
+      const angle = Math.atan2(vertex.z, vertex.x);
+
+      // Layered noise
+      const noiseA =
+        pseudoRandom2D(
+          Math.cos(angle) * 10 + normalizedHeight * 5,
+          Math.sin(angle) * 10 + normalizedHeight * 5,
+          70.1
+        ) - 0.5;
+
+      const noiseB =
+        pseudoRandom2D(
+          vertex.x * 0.2,
+          vertex.z * 0.2,
+          71.7
+        ) - 0.5;
+
+      const combinedNoise = noiseA * 0.7 + noiseB * 0.3;
+
+      // Push outward/inward radially
+      const currentRadius = Math.sqrt(
+        vertex.x * vertex.x +
+        vertex.z * vertex.z
+      );
+
+      if (currentRadius > 0.001) {
+        const scale =
+          1 + (combinedNoise * radialStrength) / currentRadius;
+
+        vertex.x *= scale;
+        vertex.z *= scale;
+      }
+
+      // Height breakup
+      vertex.y += combinedNoise * verticalStrength;
+
+      // Make top narrower
+      const taper = 1 - normalizedHeight * 0.04;
       vertex.x *= taper;
       vertex.z *= taper;
+
       pos.setXYZ(i, vertex.x, vertex.y, vertex.z);
     }
-    nonIndexed.computeVertexNormals();
 
-    const core = new THREE.Mesh(nonIndexed, material);
+    // IMPORTANT
+    baseGeometry.computeVertexNormals();
+
+    const core = new THREE.Mesh(baseGeometry, material);
+
+    core.material.flatShading = true;
+    core.material.needsUpdate = true;
+
     core.castShadow = true;
     core.receiveShadow = true;
-    groupMesh.add(core);
 
-    const cap = new THREE.Mesh(
-      new THREE.CylinderGeometry(topRadius * 0.92, topRadius, Math.max(0.9, height * 0.08), MOUNTAIN_SIDE_SEGMENTS, 1),
-      material
-    );
-    cap.castShadow = true;
-    cap.receiveShadow = true;
-    cap.position.y = Math.max(1, height * 0.95);
-    groupMesh.add(cap);
+    groupMesh.add(core);
     groupMesh.position.set(worldX, terrainY, worldZ);
     groupMesh.rotation.y = rotation;
     groupMesh.userData = {
