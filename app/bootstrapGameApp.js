@@ -1620,6 +1620,10 @@ async function initCore(runtimeContext) {
       dirLight.intensity = clampValue(directionalIntensity, 0, 2);
     }
     applyMaterialBrightness(groundTiles?.material, groundMaterialBase, groundBrightness);
+    if (highContrastEnabled && groundTiles?.material?.color?.setHex) {
+      groundTiles.material.color.setHex(0xffffff);
+      groundTiles.material.needsUpdate = true;
+    }
     applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, buildingBrightness);
     applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, buildingBrightness);
     applyHighContrastToScene(highContrastEnabled);
