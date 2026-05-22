@@ -32,7 +32,7 @@ const BASE_MERCHANT_ITEMS = {
   iceGun: { name: 'Ice Gun', price: 30, count: 1, icon: '/assets/ui/items/icegun.png' },
   autumnSword: { name: 'Autumn Sword', price: 30, count: 1, icon: '/assets/ui/items/sword.png' },
   hammer: { name: 'Hammer', price: 25, count: 1 },
-  bazooka: { name: 'Bazooka', price: 45, count: 1 },
+  bazooka: { name: 'Bazooka', price: 45, count: 1, icon: '/assets/ui/items/bazooka.png' },
   bow: { name: 'Bow', price: 30, count: 1, icon: '/assets/ui/items/bow.png' },
   bomb: { name: 'Bombs', price: 10, count: 5, icon: '/assets/ui/items/bomb.png' },
   lantern: { name: 'Lantern', price: 20, count: 1, icon: '/assets/ui/items/lantern.png' },
