@@ -17,6 +17,7 @@ const QUEST_FRIEND_FOLLOW_DISTANCE = 3;
 const QUEST_FRIEND_FOLLOW_START_DISTANCE = 4.5;
 const QUEST_GENERIC_XP = 60;
 const QUEST_FRIEND_RESPAWN_DELAY_MS = 20000;
+const QUEST_FRIEND_GROUND_OFFSET = 0.9;
 
 const TUTORIAL_QUESTS = [
   {
@@ -302,7 +303,17 @@ export class QuestManager {
     const spawnX = originX + Math.cos(angle) * radius;
     const spawnZ = originZ + Math.sin(angle) * radius;
     const terrainHeight = getTerrainHeight(spawnX, spawnZ);
-    const spawnY = Number.isFinite(terrainHeight) ? terrainHeight + 0.5 : 0.5;
+    let spawnY = Number.isFinite(terrainHeight) ? terrainHeight + QUEST_FRIEND_GROUND_OFFSET : QUEST_FRIEND_GROUND_OFFSET;
+    const resolveGroundY = window.resolveGroundY;
+    if (typeof resolveGroundY === "function") {
+      const sampledGround = resolveGroundY(spawnX, spawnY + 4, spawnZ, {
+        includeSolidHit: true,
+        walkableSlopeDegrees: 42
+      });
+      if (Number.isFinite(sampledGround?.groundY)) {
+        spawnY = sampledGround.groundY + QUEST_FRIEND_GROUND_OFFSET;
+      }
+    }
 
     loadMonsterModel(QUEST_FRIEND_MODEL, (data) => {
       try {
@@ -312,6 +323,7 @@ export class QuestManager {
         questFriend.type = QUEST_FRIEND_MODEL;
         questFriend.model.userData.hideInMapView = true;
         questFriend.model.userData.isQuestFriend = true;
+        questFriend.alwaysShowHealthBar = false;
         questFriend.enableDanceWhileEngaged = false;
         questFriend.setNoticeRadius(10);
         questFriend.setWanderRadius(QUEST_FRIEND_WANDER_RADIUS);
@@ -324,6 +336,10 @@ export class QuestManager {
         });
         questFriend.setLevel(1, { preserveHealth: false });
         questFriend.resetHealth();
+        questFriend.healthBarVisibleUntil = 0;
+        if (questFriend.healthBar) {
+          questFriend.healthBar.visible = false;
+        }
         questFriend.setPosition(spawnX, spawnY, spawnZ);
         questFriend.setHomePosition(new THREE.Vector3(spawnX, spawnY, spawnZ));
         this.scene?.add(questFriend.model);
