@@ -4,6 +4,7 @@ const stampDebugOptions = {
   showPriority: false,
   showInfluenceRadii: false
 };
+const extraHeightResolvers = new Set();
 
 export function getBaseTerrainHeight() {
   return FLAT_TERRAIN_HEIGHT;
@@ -62,6 +63,29 @@ export function getTerrainStampDebugSample(x, z) {
   };
 }
 
-export function getTerrainHeight() {
+export function getTerrainHeight(x = 0, z = 0) {
+  return getTerrainHeightAt(x, z);
+}
+
+export function getTerrainHeightWithoutResolvers(_x = 0, _z = 0) {
   return FLAT_TERRAIN_HEIGHT;
+}
+
+export function registerTerrainHeightResolver(resolver) {
+  if (typeof resolver !== "function") return () => {};
+  extraHeightResolvers.add(resolver);
+  return () => {
+    extraHeightResolvers.delete(resolver);
+  };
+}
+
+export function getTerrainHeightAt(x = 0, z = 0) {
+  let height = FLAT_TERRAIN_HEIGHT;
+  for (const resolver of extraHeightResolvers) {
+    const resolved = resolver(x, z, height);
+    if (Number.isFinite(resolved) && resolved > height) {
+      height = resolved;
+    }
+  }
+  return height;
 }
