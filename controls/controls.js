@@ -3326,10 +3326,17 @@ export class PlayerControls {
     const safeScale = Number.isFinite(scale) && scale > 0 ? scale : DEFAULT_PLAYER_SCALE;
     if (!this.playerModel?.scale?.setScalar) return;
     const currentScale = Number.isFinite(this.playerModel.scale.x) ? this.playerModel.scale.x : DEFAULT_PLAYER_SCALE;
+
+    const bounds = new THREE.Box3().setFromObject(this.playerModel);
+    const currentHeight = Math.max(0, bounds.max.y - bounds.min.y);
+
     this.playerModel.scale.setScalar(safeScale);
+
     if (this.playerModel?.position) {
-      const yLiftPerScale = 0.55;
-      this.playerModel.position.y += (safeScale - currentScale) * yLiftPerScale;
+      const yLiftFromHeight = ((safeScale / Math.max(currentScale, 0.001)) - 1) * currentHeight * 0.5;
+      const yLiftFallback = (safeScale - currentScale) * 0.55;
+      const yLift = Number.isFinite(yLiftFromHeight) && yLiftFromHeight > 0 ? yLiftFromHeight : yLiftFallback;
+      this.playerModel.position.y += yLift;
     }
   }
 

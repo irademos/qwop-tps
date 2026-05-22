@@ -41,6 +41,7 @@ import { createAnimalManager } from '../environment/animals.js';
 import { createApples, APPLE_ITEM_ID } from '../items/apple.js';
 import { createHomeSystem } from '../home.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 import { createStaticBoxColliderForObject, removeStaticBoxCollider, syncStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
@@ -8133,25 +8134,74 @@ async function initCore(runtimeContext) {
   };
 
   const clearPlayerCopies = () => {
-    (playerPowerups.clones || []).forEach((clone) => clone?.mesh?.parent?.remove?.(clone.mesh));
+    (playerPowerups.clones || []).forEach((clone) => {
+      if (clone?.actions) {
+        Object.values(clone.actions).forEach((action) => action?.stop?.());
+      }
+      clone?.mixer?.stopAllAction?.();
+      clone?.mesh?.parent?.remove?.(clone.mesh);
+    });
     playerPowerups.clones = [];
+  };
+
+
+  const clonePlayerModelForPowerup = () => {
+    if (!playerModel) return null;
+    const originalUserData = playerModel.userData || {};
+    const cloneUserData = { ...originalUserData };
+    delete cloneUserData.mixer;
+    delete cloneUserData.actions;
+    delete cloneUserData.attack;
+    playerModel.userData = cloneUserData;
+
+    let cloneMesh = null;
+    try {
+      cloneMesh = SkeletonUtils.clone(playerModel);
+    } finally {
+      playerModel.userData = originalUserData;
+    }
+    return cloneMesh;
   };
 
   const spawnPlayerCopies = (count = 7) => {
     clearPlayerCopies();
     if (!playerModel?.parent) return;
+
+    const sourceActions = playerModel?.userData?.actions || {};
+    const actionEntries = Object.entries(sourceActions).filter(([, action]) => action?.getClip);
+
     for (let i = 0; i < count; i += 1) {
-      const cloneMesh = new THREE.Mesh(
-        new THREE.CapsuleGeometry(0.15, 0.5, 4, 8),
-        new THREE.MeshStandardMaterial({ color: 0x9fb8ff, transparent: true, opacity: 0.9, roughness: 0.7, metalness: 0.05 })
-      );
-      cloneMesh.castShadow = true;
-      cloneMesh.receiveShadow = true;
+      const cloneMesh = clonePlayerModelForPowerup();
+      if (!cloneMesh) continue;
+      cloneMesh.userData = cloneMesh.userData || {};
+      delete cloneMesh.userData.mixer;
+      delete cloneMesh.userData.actions;
       cloneMesh.userData.isPlayerCopy = true;
       cloneMesh.userData.health = 20;
       cloneMesh.userData.dead = false;
+
+      cloneMesh.traverse((child) => {
+        if (!child?.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+
+      const mixer = new THREE.AnimationMixer(cloneMesh);
+      const actions = {};
+      actionEntries.forEach(([key, action]) => {
+        const clip = action?.getClip?.();
+        if (!clip) return;
+        actions[key] = mixer.clipAction(clip);
+      });
+
       playerModel.parent.add(cloneMesh);
-      playerPowerups.clones.push({ mesh: cloneMesh, angle: (i / count) * Math.PI * 2, radius: 1.8 + (i % 2) * 0.6 });
+      playerPowerups.clones.push({
+        mesh: cloneMesh,
+        mixer,
+        actions,
+        angle: (i / count) * Math.PI * 2,
+        radius: 1.8 + (i % 2) * 0.6
+      });
     }
   };
 
@@ -8169,7 +8219,7 @@ async function initCore(runtimeContext) {
   };
 
 
-  const updatePlayerCopies = () => {
+  const updatePlayerCopies = (deltaSeconds = 0) => {
     const now = Date.now();
     if (now >= playerPowerups.cloneUntil) return;
     const basePos = playerModel?.position;
@@ -8183,6 +8233,24 @@ async function initCore(runtimeContext) {
         basePos.z + Math.sin(angle) * clone.radius
       );
       clone.mesh.quaternion.copy(playerModel.quaternion);
+
+      const currentActionName = playerModel?.userData?.currentAction;
+      const sourceAction = currentActionName ? playerModel?.userData?.actions?.[currentActionName] : null;
+      const cloneAction = currentActionName ? clone?.actions?.[currentActionName] : null;
+      if (cloneAction) {
+        if (!clone.currentAction || clone.currentAction !== currentActionName) {
+          clone.actions?.[clone.currentAction]?.fadeOut?.(0.1);
+          cloneAction.reset().fadeIn(0.1).play();
+          clone.currentAction = currentActionName;
+        }
+        if (sourceAction && Number.isFinite(sourceAction.time)) {
+          const clipDuration = cloneAction.getClip?.()?.duration || 0;
+          cloneAction.time = clipDuration > 0 ? (sourceAction.time % clipDuration) : sourceAction.time;
+          cloneAction.timeScale = Number.isFinite(sourceAction.timeScale) ? sourceAction.timeScale : 1;
+          cloneAction.paused = !!sourceAction.paused;
+        }
+      }
+      clone.mixer?.update?.(deltaSeconds);
       if (clone.mesh.userData.health <= 0) {
         clone.mesh.visible = false;
         clone.mesh.userData.dead = true;
@@ -8534,7 +8602,6 @@ async function initCore(runtimeContext) {
       updateHungerUI();
       statsState.energy = statsState.hunger;
       updateEnergyEffects();
-    updatePlayerCopies();
     }
     if (key === 'magic') {
       updateMagicUI();
@@ -14864,6 +14931,7 @@ async function initCore(runtimeContext) {
     }
 
     const mixerDelta = mixerClock.getDelta();
+    updatePlayerCopies(mixerDelta);
 
     // 1) Always advance animation mixers (every frame)
     Object.values(otherPlayers).forEach(p => {
