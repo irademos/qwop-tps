@@ -8435,11 +8435,15 @@ async function initCore(runtimeContext) {
   };
 
   function setStat(key, value, { skipSave = false } = {}) {
+    const prevValue = statsState[key];
     if (key === 'energy') {
       setStat('hunger', value, { skipSave });
       return;
     }
     statsState[key] = clampStat(key, value);
+    if (key === 'health') {
+      triggerPlayerHurtFlash(prevValue, statsState[key]);
+    }
     if (key === 'health') {
       updateHealthUI();
     }
@@ -8485,6 +8489,57 @@ async function initCore(runtimeContext) {
     startHealth: null,
     startHunger: null,
     bed: null
+  };
+
+  const PLAYER_HURT_FLASH_DURATION_MS = 280;
+  const PLAYER_HURT_FLASH_MAX_ALPHA = 0.92;
+  const playerHurtFlashState = {
+    activeUntil: 0,
+    pulseAt: 0,
+    ring: null
+  };
+  const ensurePlayerHurtFlashRing = () => {
+    if (playerHurtFlashState.ring || !playerModel) return;
+    const ringGeometry = new THREE.RingGeometry(0.6, 1.35, 48);
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff2f2f,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(0, 0.1, 0);
+    ring.visible = false;
+    playerModel.add(ring);
+    playerHurtFlashState.ring = ring;
+  };
+  const triggerPlayerHurtFlash = (previousHealth, nextHealth) => {
+    if (!Number.isFinite(previousHealth) || !Number.isFinite(nextHealth)) return;
+    if (nextHealth >= previousHealth) return;
+    ensurePlayerHurtFlashRing();
+    const now = performance.now();
+    playerHurtFlashState.activeUntil = now + PLAYER_HURT_FLASH_DURATION_MS;
+    playerHurtFlashState.pulseAt = now;
+  };
+  const updatePlayerHurtFlash = () => {
+    ensurePlayerHurtFlashRing();
+    const ring = playerHurtFlashState.ring;
+    if (!ring) return;
+    const now = performance.now();
+    if (now >= playerHurtFlashState.activeUntil) {
+      ring.visible = false;
+      ring.material.opacity = 0;
+      return;
+    }
+    const elapsed = now - playerHurtFlashState.pulseAt;
+    const progress = THREE.MathUtils.clamp(elapsed / PLAYER_HURT_FLASH_DURATION_MS, 0, 1);
+    const opacity = (1 - progress) * PLAYER_HURT_FLASH_MAX_ALPHA;
+    const scale = 1 + (0.28 * progress);
+    ring.visible = true;
+    ring.material.opacity = opacity;
+    ring.scale.setScalar(scale);
   };
 
   const getSleepRecoveryValue = (key, startValue, elapsedSeconds) => {
@@ -12731,6 +12786,8 @@ async function initCore(runtimeContext) {
     player = newPlayer;
     playerModel = newModel;
     window.playerModel = playerModel;
+    playerHurtFlashState.ring = null;
+    ensurePlayerHurtFlashRing();
     playerControls?.setPlayerModel(playerModel);
     void initMapViewFeature({ camera, scene, player: playerModel });
   }
@@ -14044,6 +14101,7 @@ async function initCore(runtimeContext) {
         climbedSinceGrounded = false;
       }
     }
+    updatePlayerHurtFlash();
     if (buildState.placing) {
       const moveSpeed = 3 * frameDelta;
       const keys = buildHorizontalKeys;
