@@ -135,6 +135,9 @@ function getFallbackIcon(itemId) {
   if (itemId === 'shield') return '🛡️';
   if (itemId === 'apple') return '🍎';
   if (itemId === 'wood') return '🪵';
+  if (itemId === 'meat' || itemId === 'crab_meat') return '🦀';
+  if (itemId === 'Salt') return '🪨';
+  if (itemId === 'zombie_brains') return '🧠';
   if (itemId.startsWith('mushroom_')) return '🍄';
   return '🎒';
 }
