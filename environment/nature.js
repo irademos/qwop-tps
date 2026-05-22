@@ -49,6 +49,16 @@ const TREE_BASE_COLLIDER_RADIUS_MIN = 0.18;
 const TREE_BASE_COLLIDER_RADIUS_MAX = 0.8;
 const TREE_BASE_COLLIDER_RADIUS_FACTOR = 0.24;
 const TREE_BASE_COLLIDER_HALF_HEIGHT = 1.5;
+const MOUNTAIN_GRID_SPACING = 24;
+const MOUNTAIN_SPAWN_CHANCE_RATIO = 0.25;
+const MOUNTAIN_MIN_FOOTPRINT_METERS = 3.0;
+const MOUNTAIN_MAX_FOOTPRINT_METERS = 7.0;
+const MOUNTAIN_MIN_HEIGHT = 10.0;
+const MOUNTAIN_MAX_HEIGHT = 35.0;
+const MOUNTAIN_SIDE_SEGMENTS = 6;
+const MOUNTAIN_CLIMB_TOP_RATIO = 0.16;
+const MOUNTAIN_COLLIDER_RADIUS_FACTOR = 0.42;
+const MOUNTAIN_COLLIDER_HEIGHT_FACTOR = 0.5;
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const ROAD_WIDTHS = {
   footway: 0.4,
@@ -564,6 +574,54 @@ export async function createNature({
     return { rb, collider };
   };
 
+  const createMountainCollider = (mountain) => {
+    if (!mountain || !rapier || !rapierWorld) return null;
+    const footprint = mountain.userData?.footprintMeters ?? MOUNTAIN_MIN_FOOTPRINT_METERS;
+    const radius = Math.max(0.75, (footprint * 0.5) * MOUNTAIN_COLLIDER_RADIUS_FACTOR);
+    const halfHeight = Math.max(2.5, (mountain.userData?.mountainHeight ?? MOUNTAIN_MIN_HEIGHT) * MOUNTAIN_COLLIDER_HEIGHT_FACTOR);
+    const center = mountain.position;
+    const rbDesc = rapier.RigidBodyDesc.fixed().setTranslation(center.x, center.y + halfHeight, center.z);
+    const rb = rapierWorld.createRigidBody(rbDesc);
+    const colliderDesc = rapier.ColliderDesc.cylinder(halfHeight, radius)
+      .setFriction(0.95)
+      .setRestitution(0.02);
+    const collider = rapierWorld.createCollider(colliderDesc, rb);
+    collider.setSensor(!treeCollidersEnabled);
+    return { rb, collider };
+  };
+
+  const createMountainImpostor = ({ worldX, worldZ, tileKey, terrainY, footprint, height, rotation }) => {
+    const groupMesh = new THREE.Group();
+    groupMesh.name = 'mountain-impostor';
+    const halfFootprint = footprint * 0.5;
+    const topRadius = Math.max(0.25, halfFootprint * MOUNTAIN_CLIMB_TOP_RATIO);
+    const geometry = new THREE.CylinderGeometry(halfFootprint, topRadius, height, MOUNTAIN_SIDE_SEGMENTS, 1);
+    const mesh = new THREE.Mesh(geometry, rockMaterial);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.position.y = height * 0.5;
+    groupMesh.add(mesh);
+    groupMesh.position.set(worldX, terrainY, worldZ);
+    groupMesh.rotation.y = rotation;
+    groupMesh.userData = {
+      tileKey,
+      isMountain: true,
+      interactable: true,
+      footprintMeters: footprint,
+      mountainHeight: height,
+      boundsRadius: halfFootprint * 0.95
+    };
+    return groupMesh;
+  };
+
+  const disposeMountains = (mountains = []) => {
+    for (const mountain of mountains) {
+      mountain?.traverse?.((node) => {
+        if (node?.isMesh && node.geometry) node.geometry.dispose();
+      });
+    }
+  };
+
   const createBushImpostor = ({ worldX, worldZ, tileKey, radius, rotation, terrainY, variant }) => {
     const bush = new THREE.Group();
     bush.name = 'bush-impostor';
@@ -675,9 +733,11 @@ export async function createNature({
     const baseZ = tile.y * tileSizeMeters;
     const trees = [];
     const rocks = [];
+    const mountains = [];
     const bushes = [];
     const rockPhysics = [];
     const treePhysics = [];
+    const mountainPhysics = [];
     const tileClimbAreas = [];
     const tileApplePickups = [];
     const tileBlockers = buildTileBlockers(tile, tileKey);
@@ -805,6 +865,46 @@ export async function createNature({
       }
     }
 
+    for (let ix = 0; ix <= tileSizeMeters; ix += MOUNTAIN_GRID_SPACING) {
+      for (let iz = 0; iz <= tileSizeMeters; iz += MOUNTAIN_GRID_SPACING) {
+        const worldX = baseX + ix + (pseudoRandom2D(baseX + ix, baseZ + iz, 61.1) - 0.5) * MOUNTAIN_GRID_SPACING * 0.5;
+        const worldZ = baseZ + iz + (pseudoRandom2D(baseX + ix, baseZ + iz, 61.7) - 0.5) * MOUNTAIN_GRID_SPACING * 0.5;
+        if (pseudoRandom2D(worldX, worldZ, 62.3) > treeSpawnChance * MOUNTAIN_SPAWN_CHANCE_RATIO) continue;
+        const footprint = MOUNTAIN_MIN_FOOTPRINT_METERS
+          + pseudoRandom2D(worldX, worldZ, 62.9) * (MOUNTAIN_MAX_FOOTPRINT_METERS - MOUNTAIN_MIN_FOOTPRINT_METERS);
+        tempPosition.set(worldX, 0, worldZ);
+        const mountainProbe = {
+          position: tempPosition,
+          userData: { boundsRadius: footprint * 0.6 }
+        };
+        if (tileBlockers && isTreeBlocked(mountainProbe, tileBlockers)) continue;
+        const terrainY = getTerrainHeight?.(worldX, worldZ) ?? 0;
+        const mountainHeight = MOUNTAIN_MIN_HEIGHT
+          + pseudoRandom2D(worldX, worldZ, 63.5) * (MOUNTAIN_MAX_HEIGHT - MOUNTAIN_MIN_HEIGHT);
+        const mountain = createMountainImpostor({
+          worldX,
+          worldZ,
+          tileKey,
+          terrainY,
+          footprint,
+          height: mountainHeight,
+          rotation: pseudoRandom2D(worldX, worldZ, 64.1) * Math.PI * 2
+        });
+        tileGroup.add(mountain);
+        mountains.push(mountain);
+
+        const mountainAreas = buildTreeClimbAreas(mountain);
+        mountain.userData.climbAreas = mountainAreas;
+        tileClimbAreas.push(...mountainAreas);
+
+        const physics = createMountainCollider(mountain);
+        if (physics) {
+          mountainPhysics.push(physics);
+          mountain.userData.physics = physics;
+        }
+      }
+    }
+
     for (let ix = 0; ix <= tileSizeMeters; ix += ROCK_GRID_SPACING) {
       for (let iz = 0; iz <= tileSizeMeters; iz += ROCK_GRID_SPACING) {
         const worldX = baseX + ix;
@@ -861,8 +961,10 @@ export async function createNature({
       trees,
       rocks,
       bushes,
+      mountains,
       rockPhysics,
-      treePhysics
+      treePhysics,
+      mountainPhysics
     };
     treeTiles.set(tileKey, entry);
     climbableAreasByTile.set(tileKey, tileClimbAreas);
@@ -886,6 +988,11 @@ export async function createNature({
       if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
       if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
     }
+    for (const physics of entry.mountainPhysics ?? []) {
+      if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
+      if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
+    }
+    disposeMountains(entry.mountains);
     treeTiles.delete(tileKey);
     climbableAreasByTile.delete(tileKey);
     const tilePickups = applePickupsByTile.get(tileKey) ?? [];
@@ -1223,6 +1330,11 @@ export async function createNature({
         if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
         if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
       }
+      for (const physics of entry.mountainPhysics ?? []) {
+        if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
+        if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
+      }
+      disposeMountains(entry.mountains);
     }
     treeTiles.clear();
     climbableAreasByTile.clear();
@@ -1247,6 +1359,11 @@ export async function createNature({
         if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
         if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
       }
+      for (const physics of entry.mountainPhysics ?? []) {
+        if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
+        if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
+      }
+      disposeMountains(entry.mountains);
     }
     treeTiles.clear();
     climbableAreasByTile.clear();
