@@ -1651,10 +1651,17 @@ async function initCore(runtimeContext) {
         material.userData.baseGroundMap = material.map ?? null;
       }
       if (highContrastEnabled) {
+        const currentMap = material.map ?? null;
+        if (currentMap !== highContrastGroundTexture) {
+          material.userData.preHighContrastGroundMap = currentMap;
+        }
         if (material.color?.setHex) material.color.setHex(0xffffff);
         if (highContrastGroundTexture) material.map = highContrastGroundTexture;
       } else {
-        material.map = material.userData.baseGroundMap ?? null;
+        const restoredMap = Object.prototype.hasOwnProperty.call(material.userData, 'preHighContrastGroundMap')
+          ? material.userData.preHighContrastGroundMap
+          : material.userData.baseGroundMap;
+        material.map = restoredMap ?? null;
       }
       material.needsUpdate = true;
     }
