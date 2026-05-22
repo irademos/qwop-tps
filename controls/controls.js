@@ -870,6 +870,7 @@ export class PlayerControls {
     const appState = appContext.uiState.appState ?? window.appState;
     const inventory = appState?.getInventory?.() || {};
     const equipCandidates = [
+      { id: 'shield', label: 'Shield' },
       { id: 'bomb', label: 'Bomb' },
       { id: 'bow', label: 'Bow' },
       { id: 'bazooka', label: 'Bazooka' },
