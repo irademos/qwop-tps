@@ -5734,7 +5734,7 @@ async function initCore(runtimeContext) {
     },
     bazooka: {
       name: 'Bazooka',
-      icon: ''
+      icon: '/assets/ui/items/bazooka.png'
     },
     bow: {
       name: 'Bow',

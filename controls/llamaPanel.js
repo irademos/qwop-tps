@@ -18,10 +18,10 @@ function getLlamaInventory() {
 }
 
 function getFallbackIcon(itemId) {
-  if (itemId === 'iceGun') return '❄️';
+  if (itemId === 'iceGun') return '🔫';
   if (itemId === 'ice ammo') return '❄️';
   if (itemId === 'bow') return '🏹';
-  if (itemId === 'arrow ammo') return '🏹';
+  if (itemId === 'arrow ammo') return '➶';
   if (itemId === 'bazooka' || itemId === 'missiles') return '🚀';
   if (itemId === 'autumnSword') return '🗡️';
   if (itemId === 'hammer') return '🔨';
