@@ -8144,6 +8144,25 @@ async function initCore(runtimeContext) {
     playerPowerups.clones = [];
   };
 
+
+  const clonePlayerModelForPowerup = () => {
+    if (!playerModel) return null;
+    const originalUserData = playerModel.userData || {};
+    const cloneUserData = { ...originalUserData };
+    delete cloneUserData.mixer;
+    delete cloneUserData.actions;
+    delete cloneUserData.attack;
+    playerModel.userData = cloneUserData;
+
+    let cloneMesh = null;
+    try {
+      cloneMesh = SkeletonUtils.clone(playerModel);
+    } finally {
+      playerModel.userData = originalUserData;
+    }
+    return cloneMesh;
+  };
+
   const spawnPlayerCopies = (count = 7) => {
     clearPlayerCopies();
     if (!playerModel?.parent) return;
@@ -8152,7 +8171,8 @@ async function initCore(runtimeContext) {
     const actionEntries = Object.entries(sourceActions).filter(([, action]) => action?.getClip);
 
     for (let i = 0; i < count; i += 1) {
-      const cloneMesh = SkeletonUtils.clone(playerModel);
+      const cloneMesh = clonePlayerModelForPowerup();
+      if (!cloneMesh) continue;
       cloneMesh.userData = cloneMesh.userData || {};
       delete cloneMesh.userData.mixer;
       delete cloneMesh.userData.actions;
