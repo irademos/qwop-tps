@@ -742,7 +742,11 @@ export class QuestManager {
         friend.setFollowTarget(null, { helpingPlayerFight: false });
       }
       const monsters = Array.isArray(window.monsters) ? window.monsters : [];
-      friend.updateAI(this.state.deltaSeconds, playerModel, {}, monsters);
+      friend.updateAI(this.state.deltaSeconds, playerModel, {}, monsters, {
+        resolveGroundY: typeof window.resolveGroundY === "function" ? window.resolveGroundY : null,
+        walkableSlopeDegrees: 42,
+        groundOffset: QUEST_FRIEND_GROUND_OFFSET
+      });
     }
     this.updateGpsQuestProgress();
     this.updateClimbQuestProgress();

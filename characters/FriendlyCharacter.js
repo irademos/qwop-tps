@@ -123,7 +123,17 @@ export class FriendlyCharacter extends MonsterCharacter {
 
   updateHealthBarVisibility() {
     if (!this.healthBar) return;
-    this.healthBar.visible = !this.isDead && this.model.userData.npcRole !== 'merchant';
+    if (this.isDead || this.model.userData.npcRole === 'merchant') {
+      this.healthBar.visible = false;
+      return;
+    }
+    if (this.alwaysShowHealthBar) {
+      this.healthBar.visible = true;
+      return;
+    }
+    if (this.healthBar.visible && Date.now() > this.healthBarVisibleUntil) {
+      this.healthBar.visible = false;
+    }
   }
 
   findClosestMonster(monsters = []) {
@@ -238,19 +248,19 @@ export class FriendlyCharacter extends MonsterCharacter {
 
       if (this.isFollowingTarget && followDir) {
         this.setDirection(followDir);
-        const movement = followDir.clone().multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * IDLE_SPEED_MULTIPLIER);
-        body.setLinvel({ x: movement.x, y: 0, z: movement.z }, true);
-        const angle = Math.atan2(followDir.x, followDir.z);
-        const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-        body.setRotation(rot, true);
+        this.setHorizontalMovement(
+          followDir,
+          CHARACTER_MOVEMENT.walkSpeed * IDLE_SPEED_MULTIPLIER,
+          delta,
+          context
+        );
+        this.faceDirection(followDir);
         this.playAnimation("Walk", MOVE_FADE);
       } else {
-        body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        this.setHorizontalMovement(new THREE.Vector3(), 0, delta, context);
         if (followDir) {
           this.setDirection(followDir);
-          const angle = Math.atan2(followDir.x, followDir.z);
-          const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-          body.setRotation(rot, true);
+          this.faceDirection(followDir);
         }
         this.playAnimation("Idle", MOVE_FADE);
       }
@@ -264,10 +274,8 @@ export class FriendlyCharacter extends MonsterCharacter {
       const targetPos = targetSource.clone();
       const faceDir = targetPos.sub(this.model.position).normalize();
       this.setDirection(faceDir);
-      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-      const angle = Math.atan2(faceDir.x, faceDir.z);
-      const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-      body.setRotation(rot, true);
+      this.setHorizontalMovement(new THREE.Vector3(), 0, delta, context);
+      this.faceDirection(faceDir);
 
       if (this.enableDanceWhileEngaged && now >= this.danceUntil && now >= this.nextDanceAt) {
         const duration = DANCE_MIN_DURATION_MS
@@ -298,10 +306,13 @@ export class FriendlyCharacter extends MonsterCharacter {
     const movement = this.model.userData.direction
       .clone()
       .multiplyScalar(CHARACTER_MOVEMENT.walkSpeed * IDLE_SPEED_MULTIPLIER);
-    body.setLinvel({ x: movement.x, y: 0, z: movement.z }, true);
-    const angle = Math.atan2(this.model.userData.direction.x, this.model.userData.direction.z);
-    const rot = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, angle, 0));
-    body.setRotation(rot, true);
+    this.setHorizontalMovement(
+      this.model.userData.direction,
+      CHARACTER_MOVEMENT.walkSpeed * IDLE_SPEED_MULTIPLIER,
+      delta,
+      context
+    );
+    this.faceDirection(this.model.userData.direction);
     if (movement.lengthSq() > 0.0001) {
       this.playAnimation("Walk", MOVE_FADE);
     } else {
