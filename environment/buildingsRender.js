@@ -584,6 +584,12 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     cameraTeleportDistanceMeters: BUILDING_PROMOTION_DEFAULTS.cameraTeleportDistanceMeters,
     burstSoftCap: BUILDING_PROMOTION_DEFAULTS.burstSoftCap
   };
+  const payloadLoadState = new Map();
+  const payloadLoadDefaults = {
+    timeoutMs: 2500,
+    maxRetries: 2,
+    retryBackoffMs: 400
+  };
 
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
@@ -652,6 +658,48 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     return (visibleWeight * 1000) + (centerWeight * 200) + (1 / dist);
   }
 
+  function getEntityLoadState(entityId) {
+    let state = payloadLoadState.get(entityId);
+    if (!state) {
+      state = { status: "idle", requestId: 0, retries: 0, priority: 0, targetLOD: BUILDING_LOD.LOD0_PROXY };
+      payloadLoadState.set(entityId, state);
+    }
+    return state;
+  }
+
+  function cancelPayloadLoad(entityId) {
+    const state = payloadLoadState.get(entityId);
+    if (!state) return;
+    state.requestId += 1;
+    state.status = "idle";
+    state.targetLOD = BUILDING_LOD.LOD0_PROXY;
+    payloadLoadState.set(entityId, state);
+  }
+
+  function requestPayloadLoad(entityId, targetLOD, priority = 0) {
+    const state = getEntityLoadState(entityId);
+    if (state.status === "loaded" && state.targetLOD === targetLOD) return;
+    state.targetLOD = targetLOD;
+    state.priority = Math.max(state.priority ?? 0, priority);
+    if (state.status === "loading") return;
+    state.status = "queued";
+    payloadLoadState.set(entityId, state);
+  }
+
+  function simulatePayloadLoad(entityId, state) {
+    const requestId = (state.requestId ?? 0) + 1;
+    state.requestId = requestId;
+    state.status = "loading";
+    payloadLoadState.set(entityId, state);
+    const startedAt = performance.now();
+    const jitterMs = 20 + Math.random() * 80;
+    return new Promise((resolve) => setTimeout(() => {
+      const timedOut = performance.now() - startedAt > payloadLoadDefaults.timeoutMs;
+      const failed = Math.random() < 0.03;
+      resolve({ entityId, requestId, timedOut, failed });
+    }, jitterMs));
+  }
+
   function enqueuePromotion(entry) {
     if (!entry?.id) return;
     const queuedAt = performance.now();
@@ -689,16 +737,58 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       promotionQueueById.delete(next.id);
       const state = tileLODState.get(next.id);
       if (!state) continue;
-      if (state.currentLOD === next.targetLOD) continue;
-      state.currentLOD = next.targetLOD;
-      tileLODState.set(next.id, state);
-      lodDebugStats.transitions += 1;
+      if (next.targetLOD === BUILDING_LOD.LOD0_PROXY) {
+        cancelPayloadLoad(next.id);
+        if (state.currentLOD !== BUILDING_LOD.LOD0_PROXY) {
+          state.currentLOD = BUILDING_LOD.LOD0_PROXY;
+          tileLODState.set(next.id, state);
+          lodDebugStats.transitions += 1;
+        }
+        continue;
+      }
+      requestPayloadLoad(next.id, next.targetLOD, next.score);
       lodDebugStats.promotionsApplied += 1;
       const latency = performance.now() - next.queuedAt;
       lodDebugStats.promotionLatencyMsMax = Math.max(lodDebugStats.promotionLatencyMsMax, latency);
       const n = lodDebugStats.promotionsApplied;
       lodDebugStats.promotionLatencyMsAvg = ((lodDebugStats.promotionLatencyMsAvg * (n - 1)) + latency) / n;
       processed += 1;
+    }
+    const queuedLoads = [...payloadLoadState.entries()]
+      .filter(([, value]) => value.status === "queued")
+      .sort((a, b) => (b[1].priority ?? 0) - (a[1].priority ?? 0))
+      .slice(0, promotionLimits.maxPromotionsPerFrame);
+    for (const [entityId, loadState] of queuedLoads) {
+      simulatePayloadLoad(entityId, loadState).then(({ entityId: doneId, requestId, timedOut, failed }) => {
+        const currentLoadState = payloadLoadState.get(doneId);
+        if (!currentLoadState || currentLoadState.requestId !== requestId) return;
+        if (timedOut || failed) {
+          currentLoadState.status = "failed";
+          const nextRetry = (currentLoadState.retries ?? 0) + 1;
+          currentLoadState.retries = nextRetry;
+          payloadLoadState.set(doneId, currentLoadState);
+          if (nextRetry <= payloadLoadDefaults.maxRetries) {
+            const backoff = payloadLoadDefaults.retryBackoffMs * nextRetry;
+            setTimeout(() => {
+              const latest = payloadLoadState.get(doneId);
+              if (!latest || latest.requestId !== requestId || latest.targetLOD === BUILDING_LOD.LOD0_PROXY) return;
+              latest.status = "queued";
+              payloadLoadState.set(doneId, latest);
+            }, backoff);
+          }
+          return;
+        }
+        currentLoadState.status = "loaded";
+        currentLoadState.retries = 0;
+        payloadLoadState.set(doneId, currentLoadState);
+        const tileState = tileLODState.get(doneId);
+        if (!tileState) return;
+        if (tileState.currentLOD !== currentLoadState.targetLOD) {
+          tileState.currentLOD = currentLoadState.targetLOD;
+          tileLODState.set(doneId, tileState);
+          lodDebugStats.transitions += 1;
+        }
+      });
     }
     lodDebugStats.queueDepth = promotionQueue.length;
     if (initialDepth > promotionLimits.burstSoftCap) {
@@ -790,7 +880,11 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
           screenCenterDistance: centerDistance,
           isVisible
         });
+      } else {
+        cancelPayloadLoad(entityId);
       }
+      const loadState = payloadLoadState.get(entityId);
+      const appliedLOD = loadState?.status === "loaded" ? (tileLODState.get(entityId)?.currentLOD ?? BUILDING_LOD.LOD0_PROXY) : BUILDING_LOD.LOD0_PROXY;
       buildingEntities.push({
         id: entityId,
         worldPosition: { x: centroid.x, y: buildingGrade, z: -centroid.y },
@@ -799,7 +893,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
           max: { x: shapeBounds.max.x, y: buildingGrade + height, z: -shapeBounds.min.y }
         },
         desiredTargetLOD: targetLOD,
-        effectiveLOD
+        effectiveLOD: appliedLOD
       });
       buildingIndex += 1;
 
