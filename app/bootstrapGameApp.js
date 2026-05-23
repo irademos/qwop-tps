@@ -7897,35 +7897,76 @@ async function initCore(runtimeContext) {
   const openBuildTypePicker = async (availableWoodCount = 0) => {
     const safeWoodCount = Math.max(0, Math.floor(Number.isFinite(availableWoodCount) ? availableWoodCount : 0));
     if (safeWoodCount <= 0) return null;
-    const choice = window.prompt(
-      `Build with wood (${safeWoodCount} available). Choose: arrow, torch, shield, note`,
-      'arrow'
-    );
-    if (!choice) return null;
-    const normalizedChoice = choice.trim().toLowerCase();
-    const aliasMap = {
-      arrows: 'arrow',
-      torches: 'torch',
-      notes: 'note',
-      shields: SHIELD_ITEM_ID
-    };
-    const type = aliasMap[normalizedChoice] || normalizedChoice;
-    const supportedTypes = new Set(['arrow', 'torch', SHIELD_ITEM_ID, 'note']);
-    if (!supportedTypes.has(type)) return null;
-    if (type === SHIELD_ITEM_ID || type === 'note') {
-      return { type, quantity: 1 };
-    }
-    const qtyPrompt = window.prompt(`How many ${type}s? (1-${safeWoodCount})`, '1');
-    if (!qtyPrompt) return null;
-    const quantity = Math.max(1, Math.min(safeWoodCount, Math.floor(Number(qtyPrompt) || 1)));
-    return { type, quantity };
+
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'build-modal-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:1800;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+
+      const modal = document.createElement('div');
+      modal.className = 'build-modal';
+      modal.style.maxWidth = '460px';
+      modal.style.width = '100%';
+      modal.innerHTML = `
+        <h3>Build with Wood</h3>
+        <p style="margin:0 0 10px 0;">You have ${safeWoodCount} wood. Choose what to build.</p>
+        <div class="build-type-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px;">
+          <button type="button" class="retro-build-btn" data-build-choice="arrow">Arrow</button>
+          <button type="button" class="retro-build-btn" data-build-choice="torch">Torch</button>
+          <button type="button" class="retro-build-btn" data-build-choice="shield">Shield</button>
+          <button type="button" class="retro-build-btn" data-build-choice="note">Note</button>
+        </div>
+        <label style="display:block;font-weight:600;margin-bottom:6px;">Quantity (for arrows/torches)</label>
+        <input type="number" min="1" max="${safeWoodCount}" step="1" class="settings-input" data-build-quantity style="width:100%;margin-bottom:12px;" value="1" />
+        <div class="build-modal-actions">
+          <button type="button" class="build-cancel-btn" data-build-cancel="1">Cancel</button>
+        </div>
+      `;
+
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+
+      const qtyInput = modal.querySelector('[data-build-quantity]');
+      const close = (value) => {
+        overlay.remove();
+        resolve(value);
+      };
+
+      const parseQuantity = () => {
+        const raw = Number(qtyInput?.value);
+        return Math.max(1, Math.min(safeWoodCount, Math.floor(Number.isFinite(raw) ? raw : 1)));
+      };
+
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) close(null);
+      });
+      modal.querySelector('[data-build-cancel]')?.addEventListener('click', () => close(null));
+      modal.querySelectorAll('[data-build-choice]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const type = button.dataset.buildChoice;
+          if (!type) {
+            close(null);
+            return;
+          }
+          if (type === SHIELD_ITEM_ID || type === 'note') {
+            close({ type, quantity: 1 });
+            return;
+          }
+          close({ type, quantity: parseQuantity() });
+        });
+      });
+    });
   };
 
-  const openNoteEntryModal = async (initialText = '') => {
-    const noteText = window.prompt('Enter note text to place in the world.', String(initialText || ''));
-    if (noteText == null) return '';
-    return noteText.trim();
-  };
+  const openNoteEntryModal = async (initialText = '') => openPopupDialog({
+    title: 'Write Note',
+    message: 'Enter note text to place in the world.',
+    inputLabel: 'Note text',
+    inputValue: String(initialText || ''),
+    inputPlaceholder: 'Type your note...',
+    confirmText: 'Save note',
+    cancelText: 'Cancel'
+  });
 
   const startWoodBuildCraftingFlow = (itemId, quantity) => {
     const totalQuantity = Math.max(1, Math.floor(Number.isFinite(quantity) ? quantity : 1));
