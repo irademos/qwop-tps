@@ -22,9 +22,16 @@ const ROOF_THICKNESS = 0.05;
 // --- building texture ---
 const QUALITY_TIER_OPTIONS = ["low", "medium", "high"];
 const BUILDING_LOD = Object.freeze({
-  proxy: "proxy",
-  detailed: "detailed",
-  flat: "flat"
+  LOD0_PROXY: "LOD0_PROXY",
+  LOD1_MID: "LOD1_MID",
+  LOD2_FULL: "LOD2_FULL"
+});
+
+const BUILDING_LOD_CONFIG = Object.freeze({
+  thresholds: Object.freeze({
+    LOD2_FULL: Object.freeze({ enter: EXTRUDE_DISTANCE * 0.9, exit: EXTRUDE_DISTANCE * 1.15 }),
+    LOD1_MID: Object.freeze({ enter: EXTRUDE_DISTANCE * 1.5, exit: EXTRUDE_DISTANCE * 1.8 })
+  })
 });
 
 function getRingWinding(points) {
@@ -549,6 +556,18 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
   const flatMaterial = new THREE.MeshStandardMaterial({ color: 0x8b6b4c, roughness: 1.0, metalness: 0.0 });
 
   const tileMeshes = new Map();
+  const tileLODState = new Map();
+  const lodDebugStats = {
+    counts: { [BUILDING_LOD.LOD0_PROXY]: 0, [BUILDING_LOD.LOD1_MID]: 0, [BUILDING_LOD.LOD2_FULL]: 0 },
+    transitions: 0,
+    transitionsPerSecond: 0,
+    _lastTransitionsSampleMs: performance.now(),
+    _lastTransitionsSampleCount: 0
+  };
+
+  const frustum = new THREE.Frustum();
+  const projScreenMatrix = new THREE.Matrix4();
+
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
   }
@@ -592,6 +611,24 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     return entry;
   }
 
+  function chooseLODWithHysteresis(entity, distanceMeters, inFrustum) {
+    const prev = entity.currentLOD ?? BUILDING_LOD.LOD0_PROXY;
+    if (!inFrustum) return BUILDING_LOD.LOD0_PROXY;
+    const { LOD2_FULL, LOD1_MID } = BUILDING_LOD_CONFIG.thresholds;
+    if (prev === BUILDING_LOD.LOD2_FULL) {
+      if (distanceMeters <= LOD2_FULL.exit) return BUILDING_LOD.LOD2_FULL;
+      return distanceMeters <= LOD1_MID.enter ? BUILDING_LOD.LOD1_MID : BUILDING_LOD.LOD0_PROXY;
+    }
+    if (prev === BUILDING_LOD.LOD1_MID) {
+      if (distanceMeters <= LOD2_FULL.enter) return BUILDING_LOD.LOD2_FULL;
+      if (distanceMeters <= LOD1_MID.exit) return BUILDING_LOD.LOD1_MID;
+      return BUILDING_LOD.LOD0_PROXY;
+    }
+    if (distanceMeters <= LOD2_FULL.enter) return BUILDING_LOD.LOD2_FULL;
+    if (distanceMeters <= LOD1_MID.enter) return BUILDING_LOD.LOD1_MID;
+    return BUILDING_LOD.LOD0_PROXY;
+  }
+
   function updateTileBuildings(tileKey, geojson, boundsOverride) {
     if (!tileKey) return null;
     const tileEntry = ensureTile(tileKey);
@@ -629,6 +666,12 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     const lonScale = metersPerDegreeLon(bounds.centerLat);
     const cameraPos = camera?.position ?? new THREE.Vector3();
+    if (camera) {
+      camera.updateMatrix();
+      camera.updateMatrixWorld();
+      projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+      frustum.setFromProjectionMatrix(projScreenMatrix);
+    }
 
     const flatGeometries = [];
     const extrudedResults = [];
@@ -661,9 +704,14 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
       const isFullDetail = distance <= qualitySettings.fullDetailDistance;
       const isSimpleDetail = !isFullDetail && distance <= qualitySettings.simpleDetailDistance;
-      const targetLOD = isFullDetail ? BUILDING_LOD.detailed : (isSimpleDetail ? BUILDING_LOD.detailed : BUILDING_LOD.flat);
+      const targetLOD = isFullDetail ? BUILDING_LOD.LOD2_FULL : (isSimpleDetail ? BUILDING_LOD.LOD1_MID : BUILDING_LOD.LOD0_PROXY);
       const entityId = polygon.properties?.id ?? polygon.properties?.["@id"] ?? `${tileKey}-${buildingIndex}`;
       const shapeBounds = new THREE.Box2().setFromPoints(shape.getPoints());
+      const inFrustum = frustum.intersectsBox(new THREE.Box3(
+        new THREE.Vector3(shapeBounds.min.x, buildingGrade, -shapeBounds.max.y),
+        new THREE.Vector3(shapeBounds.max.x, buildingGrade + height, -shapeBounds.min.y)
+      ));
+      const effectiveLOD = chooseLODWithHysteresis({ currentLOD: tileLODState.get(entityId)?.currentLOD }, distance, inFrustum);
       buildingEntities.push({
         id: entityId,
         worldPosition: { x: centroid.x, y: buildingGrade, z: -centroid.y },
@@ -671,7 +719,9 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
           min: { x: shapeBounds.min.x, y: buildingGrade, z: -shapeBounds.max.y },
           max: { x: shapeBounds.max.x, y: buildingGrade + height, z: -shapeBounds.min.y }
         },
-        desiredTargetLOD: targetLOD
+        desiredTargetLOD: targetLOD,
+        effectiveLOD,
+        inFrustum
       });
       buildingIndex += 1;
 
@@ -684,13 +734,13 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
         continue;
       }
 
-      if (isFullDetail || isSimpleDetail) {
+      if (effectiveLOD !== BUILDING_LOD.LOD0_PROXY && !PROXY_ON_STARTUP) {
         let geom = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
         geom.rotateX(-Math.PI / 2);
         geom.translate(0, buildingGrade, 0);
         geom.computeBoundingBox();
 
-        if (isFullDetail && qualitySettings.enableHollow) {
+        if (effectiveLOD === BUILDING_LOD.LOD2_FULL && qualitySettings.enableHollow) {
           geom = hollowExtrudedGeometry(geom, shape, {
             wall: WALL_THICKNESS,
             floor: FLOOR_THICKNESS,
@@ -700,7 +750,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
           if (!geom.boundingBox) geom.computeBoundingBox();
         }
 
-        if (isFullDetail && qualitySettings.enableCsg) {
+        if (effectiveLOD === BUILDING_LOD.LOD2_FULL && qualitySettings.enableCsg) {
           const cutters = buildDoorCuttersFromShape(shape, {
             doorW: 3.0,
             doorH: 3.0,
@@ -726,6 +776,26 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     setBuildingStampsForTile(tileKey, buildingStamps);
     tileEntry.group.userData.buildingEntities = buildingEntities;
+    lodDebugStats.counts[BUILDING_LOD.LOD0_PROXY] = 0;
+    lodDebugStats.counts[BUILDING_LOD.LOD1_MID] = 0;
+    lodDebugStats.counts[BUILDING_LOD.LOD2_FULL] = 0;
+    for (const entity of buildingEntities) {
+      const prev = tileLODState.get(entity.id)?.currentLOD;
+      tileLODState.set(entity.id, { currentLOD: entity.effectiveLOD, ready: true });
+      lodDebugStats.counts[entity.effectiveLOD] += 1;
+      if (prev && prev !== entity.effectiveLOD) lodDebugStats.transitions += 1;
+    }
+    const now = performance.now();
+    const elapsed = Math.max(1, now - lodDebugStats._lastTransitionsSampleMs);
+    if (elapsed >= 1000) {
+      const delta = lodDebugStats.transitions - lodDebugStats._lastTransitionsSampleCount;
+      lodDebugStats.transitionsPerSecond = (delta * 1000) / elapsed;
+      lodDebugStats._lastTransitionsSampleCount = lodDebugStats.transitions;
+      lodDebugStats._lastTransitionsSampleMs = now;
+    }
+    if (typeof window !== "undefined") {
+      window.__buildingLODStats = { ...lodDebugStats, counts: { ...lodDebugStats.counts } };
+    }
 
     disposeGeometry(extrudedMesh);
     disposeGeometry(flatMesh);
@@ -820,6 +890,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     removeTile,
     clearTiles,
     getCollisionMesh: () => group,
+    getLodDebugStats: () => ({ ...lodDebugStats, counts: { ...lodDebugStats.counts } }),
     getCollisionMeshes: () => {
       const meshes = [];
       for (const entry of tileMeshes.values()) {
