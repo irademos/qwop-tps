@@ -7893,6 +7893,40 @@ async function initCore(runtimeContext) {
     }, 4000);
   };
 
+
+  const openBuildTypePicker = async (availableWoodCount = 0) => {
+    const safeWoodCount = Math.max(0, Math.floor(Number.isFinite(availableWoodCount) ? availableWoodCount : 0));
+    if (safeWoodCount <= 0) return null;
+    const choice = window.prompt(
+      `Build with wood (${safeWoodCount} available). Choose: arrow, torch, shield, note`,
+      'arrow'
+    );
+    if (!choice) return null;
+    const normalizedChoice = choice.trim().toLowerCase();
+    const aliasMap = {
+      arrows: 'arrow',
+      torches: 'torch',
+      notes: 'note',
+      shields: SHIELD_ITEM_ID
+    };
+    const type = aliasMap[normalizedChoice] || normalizedChoice;
+    const supportedTypes = new Set(['arrow', 'torch', SHIELD_ITEM_ID, 'note']);
+    if (!supportedTypes.has(type)) return null;
+    if (type === SHIELD_ITEM_ID || type === 'note') {
+      return { type, quantity: 1 };
+    }
+    const qtyPrompt = window.prompt(`How many ${type}s? (1-${safeWoodCount})`, '1');
+    if (!qtyPrompt) return null;
+    const quantity = Math.max(1, Math.min(safeWoodCount, Math.floor(Number(qtyPrompt) || 1)));
+    return { type, quantity };
+  };
+
+  const openNoteEntryModal = async (initialText = '') => {
+    const noteText = window.prompt('Enter note text to place in the world.', String(initialText || ''));
+    if (noteText == null) return '';
+    return noteText.trim();
+  };
+
   const startWoodBuildCraftingFlow = (itemId, quantity) => {
     const totalQuantity = Math.max(1, Math.floor(Number.isFinite(quantity) ? quantity : 1));
     const availableWood = Math.max(0, Math.floor(inventoryState.wood?.count || 0));
