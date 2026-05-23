@@ -565,9 +565,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     _lastTransitionsSampleCount: 0
   };
 
-  const frustum = new THREE.Frustum();
-  const projScreenMatrix = new THREE.Matrix4();
-
   function disposeGeometry(mesh) {
     if (mesh.geometry) mesh.geometry.dispose();
   }
@@ -611,9 +608,8 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     return entry;
   }
 
-  function chooseLODWithHysteresis(entity, distanceMeters, inFrustum) {
+  function chooseLODWithHysteresis(entity, distanceMeters) {
     const prev = entity.currentLOD ?? BUILDING_LOD.LOD0_PROXY;
-    if (!inFrustum) return BUILDING_LOD.LOD0_PROXY;
     const { LOD2_FULL, LOD1_MID } = BUILDING_LOD_CONFIG.thresholds;
     if (prev === BUILDING_LOD.LOD2_FULL) {
       if (distanceMeters <= LOD2_FULL.exit) return BUILDING_LOD.LOD2_FULL;
@@ -666,12 +662,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     const lonScale = metersPerDegreeLon(bounds.centerLat);
     const cameraPos = camera?.position ?? new THREE.Vector3();
-    if (camera) {
-      camera.updateMatrix();
-      camera.updateMatrixWorld();
-      projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-      frustum.setFromProjectionMatrix(projScreenMatrix);
-    }
 
     const flatGeometries = [];
     const extrudedResults = [];
@@ -707,11 +697,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       const targetLOD = isFullDetail ? BUILDING_LOD.LOD2_FULL : (isSimpleDetail ? BUILDING_LOD.LOD1_MID : BUILDING_LOD.LOD0_PROXY);
       const entityId = polygon.properties?.id ?? polygon.properties?.["@id"] ?? `${tileKey}-${buildingIndex}`;
       const shapeBounds = new THREE.Box2().setFromPoints(shape.getPoints());
-      const inFrustum = frustum.intersectsBox(new THREE.Box3(
-        new THREE.Vector3(shapeBounds.min.x, buildingGrade, -shapeBounds.max.y),
-        new THREE.Vector3(shapeBounds.max.x, buildingGrade + height, -shapeBounds.min.y)
-      ));
-      const effectiveLOD = chooseLODWithHysteresis({ currentLOD: tileLODState.get(entityId)?.currentLOD }, distance, inFrustum);
+      const effectiveLOD = chooseLODWithHysteresis({ currentLOD: tileLODState.get(entityId)?.currentLOD }, distance);
       buildingEntities.push({
         id: entityId,
         worldPosition: { x: centroid.x, y: buildingGrade, z: -centroid.y },
@@ -720,8 +706,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
           max: { x: shapeBounds.max.x, y: buildingGrade + height, z: -shapeBounds.min.y }
         },
         desiredTargetLOD: targetLOD,
-        effectiveLOD,
-        inFrustum
+        effectiveLOD
       });
       buildingIndex += 1;
 
