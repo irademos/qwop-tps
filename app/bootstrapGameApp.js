@@ -3044,6 +3044,12 @@ async function initCore(runtimeContext) {
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   mapRenderer = createMapRenderer({ scene, renderer });
   buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
+  buildingsRenderer?.setPromotionLimits?.({
+    maxPromotionsPerFrame: window?.gameSettings?.render?.buildings?.maxPromotionsPerFrame,
+    maxPromotionCpuMs: window?.gameSettings?.render?.buildings?.promotionCpuBudgetMs,
+    cameraTeleportDistanceMeters: window?.gameSettings?.render?.buildings?.promotionTeleportDistanceMeters,
+    burstSoftCap: window?.gameSettings?.render?.buildings?.promotionBurstSoftCap
+  });
   runtimeContext.systems.mapRenderer = mapRenderer;
   window.mapRenderer = mapRenderer;
   runtimeContext.systems.buildingsRenderer = buildingsRenderer;
@@ -14158,6 +14164,7 @@ async function initCore(runtimeContext) {
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
     const frameDelta = clock.getDelta();
+    buildingsRenderer?.processFrame?.();
     frameIndex += 1;
     lastFrameDurationMs = frameDelta * 1000;
     accumulateBucketDeltas(frameDelta);
