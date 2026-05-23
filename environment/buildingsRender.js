@@ -21,6 +21,11 @@ const FLOOR_THICKNESS = 0.05;
 const ROOF_THICKNESS = 0.05;
 // --- building texture ---
 const QUALITY_TIER_OPTIONS = ["low", "medium", "high"];
+const BUILDING_LOD = Object.freeze({
+  proxy: "proxy",
+  detailed: "detailed",
+  flat: "flat"
+});
 
 function getRingWinding(points) {
   let sum = 0;
@@ -50,6 +55,26 @@ function resolveBuildingQualityTier() {
 }
 
 const BUILDING_QUALITY = resolveBuildingQualityTier();
+const PROXY_ON_STARTUP = resolveProxyOnStartup();
+
+function resolveProxyOnStartup() {
+  if (typeof window === "undefined") return true;
+  const override =
+    window?.gameSettings?.render?.buildings?.proxy_on_startup ??
+    window?.gameSettings?.render?.buildings?.proxyOnStartup ??
+    window?.localStorage?.getItem("render.buildings.proxy_on_startup") ??
+    window?.render?.buildings?.proxy_on_startup;
+
+  if (typeof override === "boolean") return override;
+  if (typeof override === "string") {
+    const normalized = override.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off"].includes(normalized)) return false;
+  }
+
+  return true;
+}
+
 const BUILDING_QUALITY_SETTINGS = {
   high: {
     useNormalRoughness: true,
@@ -337,6 +362,62 @@ function hollowExtrudedGeometry(outerGeom, originalShape2D, {
   return csgSubtractGeom(outerGeom, [innerGeom]);
 }
 
+function createBuildingLODProxyGeometry(localRings, height, buildingGrade) {
+  const outer = localRings?.[0] ?? [];
+  if (outer.length < 3) return null;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+
+  for (const point of outer) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minZ = Math.min(minZ, point.z);
+    maxZ = Math.max(maxZ, point.z);
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minZ)) return null;
+
+  const width = Math.max(0.5, maxX - minX);
+  const depth = Math.max(0.5, maxZ - minZ);
+  const h = Math.max(0.5, height);
+  const centerX = (minX + maxX) * 0.5;
+  const centerZ = (minZ + maxZ) * 0.5;
+  const topY = buildingGrade + h;
+
+  const top = new THREE.PlaneGeometry(width, depth);
+  top.rotateX(-Math.PI / 2);
+  top.translate(centerX, topY, centerZ);
+
+  const north = new THREE.PlaneGeometry(width, h);
+  north.translate(centerX, buildingGrade + h * 0.5, minZ);
+
+  const south = new THREE.PlaneGeometry(width, h);
+  south.rotateY(Math.PI);
+  south.translate(centerX, buildingGrade + h * 0.5, maxZ);
+
+  const west = new THREE.PlaneGeometry(depth, h);
+  west.rotateY(-Math.PI / 2);
+  west.translate(minX, buildingGrade + h * 0.5, centerZ);
+
+  const east = new THREE.PlaneGeometry(depth, h);
+  east.rotateY(Math.PI / 2);
+  east.translate(maxX, buildingGrade + h * 0.5, centerZ);
+
+  const merged = mergeGeometries([top, north, south, west, east], false);
+  top.dispose();
+  north.dispose();
+  south.dispose();
+  west.dispose();
+  east.dispose();
+
+  merged.computeBoundingBox();
+  merged.computeBoundingSphere();
+  return merged;
+}
+
 function buildDoorCuttersFromShape(shape2D, {
   doorW = 3.0,
   doorH = 2.2,
@@ -435,7 +516,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
   extrudedMaterial.needsUpdate = true;
 
-  const flatMaterial = new THREE.MeshStandardMaterial({ /* ... */ });
+  const flatMaterial = new THREE.MeshStandardMaterial({ color: 0x8b6b4c, roughness: 1.0, metalness: 0.0 });
 
   const tileMeshes = new Map();
   function disposeGeometry(mesh) {
@@ -521,7 +602,10 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     const flatGeometries = [];
     const extrudedResults = [];
+    const proxyResults = [];
     const buildingStamps = [];
+    const buildingEntities = [];
+    let buildingIndex = 0;
     for (const polygon of polygons) {
       const localRings = polygonRingsToLocalMeters(polygon.rings, bounds, lonScale);
       const shape = makeShapeFromLocalRings(localRings);
@@ -546,6 +630,25 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
       const isFullDetail = distance <= qualitySettings.fullDetailDistance;
       const isSimpleDetail = !isFullDetail && distance <= qualitySettings.simpleDetailDistance;
+      const targetLOD = isFullDetail ? BUILDING_LOD.detailed : (isSimpleDetail ? BUILDING_LOD.detailed : BUILDING_LOD.flat);
+      const entityId = polygon.properties?.id ?? polygon.properties?.["@id"] ?? `${tileKey}-${buildingIndex}`;
+      const shapeBounds = new THREE.Box2().setFromPoints(shape.getPoints());
+      buildingEntities.push({
+        id: entityId,
+        worldPosition: { x: centroid.x, y: buildingGrade, z: -centroid.y },
+        bounds: {
+          min: { x: shapeBounds.min.x, y: buildingGrade, z: -shapeBounds.max.y },
+          max: { x: shapeBounds.max.x, y: buildingGrade + height, z: -shapeBounds.min.y }
+        },
+        desiredTargetLOD: targetLOD
+      });
+      buildingIndex += 1;
+
+      if (PROXY_ON_STARTUP) {
+        const proxyGeom = createBuildingLODProxyGeometry(localRings, height, buildingGrade);
+        if (proxyGeom) proxyResults.push(proxyGeom);
+        continue;
+      }
 
       if (isFullDetail || isSimpleDetail) {
         let geom = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
@@ -588,11 +691,23 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     }
 
     setBuildingStampsForTile(tileKey, buildingStamps);
+    tileEntry.group.userData.buildingEntities = buildingEntities;
 
     disposeGeometry(extrudedMesh);
     disposeGeometry(flatMesh);
 
-    if (extrudedResults.length > 0) {
+    if (PROXY_ON_STARTUP && proxyResults.length > 0) {
+      const merged = mergeGeometries(proxyResults, false);
+      merged.computeBoundingSphere();
+
+      extrudedMesh.geometry = merged;
+      extrudedColliderMesh.geometry = merged.clone();
+
+      extrudedMesh.visible = true;
+      extrudedColliderMesh.visible = false;
+
+      for (const g of proxyResults) g.dispose();
+    } else if (extrudedResults.length > 0) {
       const merged = mergeGeometries(extrudedResults, false);
       merged.computeBoundingSphere();
 
