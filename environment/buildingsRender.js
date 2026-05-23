@@ -418,6 +418,36 @@ function createBuildingLODProxyGeometry(localRings, height, buildingGrade) {
   return merged;
 }
 
+
+function createBuildingColliderGeometry(localRings, height, buildingGrade) {
+  const outer = localRings?.[0] ?? [];
+  if (outer.length < 3) return null;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const point of outer) {
+    minX = Math.min(minX, point.x);
+    maxX = Math.max(maxX, point.x);
+    minZ = Math.min(minZ, point.z);
+    maxZ = Math.max(maxZ, point.z);
+  }
+  if (!Number.isFinite(minX) || !Number.isFinite(minZ)) return null;
+
+  const width = Math.max(0.5, maxX - minX);
+  const depth = Math.max(0.5, maxZ - minZ);
+  const h = Math.max(0.5, height);
+  const centerX = (minX + maxX) * 0.5;
+  const centerZ = (minZ + maxZ) * 0.5;
+
+  const collider = new THREE.BoxGeometry(width, h, depth);
+  collider.translate(centerX, buildingGrade + h * 0.5, centerZ);
+  collider.computeBoundingBox();
+  collider.computeBoundingSphere();
+  return collider;
+}
+
 function buildDoorCuttersFromShape(shape2D, {
   doorW = 3.0,
   doorH = 2.2,
@@ -603,6 +633,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     const flatGeometries = [];
     const extrudedResults = [];
     const proxyResults = [];
+    const colliderResults = [];
     const buildingStamps = [];
     const buildingEntities = [];
     let buildingIndex = 0;
@@ -643,6 +674,9 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
         desiredTargetLOD: targetLOD
       });
       buildingIndex += 1;
+
+      const colliderGeom = createBuildingColliderGeometry(localRings, height, buildingGrade);
+      if (colliderGeom) colliderResults.push(colliderGeom);
 
       if (PROXY_ON_STARTUP) {
         const proxyGeom = createBuildingLODProxyGeometry(localRings, height, buildingGrade);
@@ -695,13 +729,13 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
     disposeGeometry(extrudedMesh);
     disposeGeometry(flatMesh);
+    disposeGeometry(extrudedColliderMesh);
 
     if (PROXY_ON_STARTUP && proxyResults.length > 0) {
       const merged = mergeGeometries(proxyResults, false);
       merged.computeBoundingSphere();
 
       extrudedMesh.geometry = merged;
-      extrudedColliderMesh.geometry = merged.clone();
 
       extrudedMesh.visible = true;
       extrudedColliderMesh.visible = false;
@@ -712,7 +746,6 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       merged.computeBoundingSphere();
 
       extrudedMesh.geometry = merged;               // render
-      extrudedColliderMesh.geometry = merged.clone(); // collision (clone to avoid shared dispose issues)
 
       extrudedMesh.visible = true;
       extrudedColliderMesh.visible = false;
@@ -722,6 +755,16 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedMesh.geometry = new THREE.BufferGeometry();
       extrudedColliderMesh.geometry = new THREE.BufferGeometry();
       extrudedMesh.visible = false;
+    }
+
+
+    if (colliderResults.length > 0) {
+      const mergedCollider = mergeGeometries(colliderResults, false);
+      mergedCollider.computeBoundingSphere();
+      extrudedColliderMesh.geometry = mergedCollider;
+      for (const g of colliderResults) g.dispose();
+    } else {
+      extrudedColliderMesh.geometry = new THREE.BufferGeometry();
     }
 
 
