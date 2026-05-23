@@ -1,0 +1,16 @@
+{
+  "name": "Bird",
+  "behavior": "idleFly",
+  "scale": 0.4,
+  "yOffset": -0.4,
+  "health": 1,
+  "walkSpeed": 1.3,
+  "attackDistance": 2.2,
+  "animations": {
+    "Idle": "Take 001",
+    "Walk": "Take 001"
+  },
+  "availableAnimations": [
+    "Take 001"
+  ]
+}
