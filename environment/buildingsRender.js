@@ -33,6 +33,12 @@ const BUILDING_LOD_CONFIG = Object.freeze({
     LOD1_MID: Object.freeze({ enter: EXTRUDE_DISTANCE * 1.5, exit: EXTRUDE_DISTANCE * 1.8 })
   })
 });
+const BUILDING_PROMOTION_DEFAULTS = Object.freeze({
+  maxPromotionsPerFrame: 8,
+  maxPromotionCpuMs: 1.5,
+  cameraTeleportDistanceMeters: 140,
+  burstSoftCap: 48
+});
 
 function getRingWinding(points) {
   let sum = 0;
@@ -557,12 +563,26 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
 
   const tileMeshes = new Map();
   const tileLODState = new Map();
+  const promotionQueue = [];
+  const promotionQueueById = new Map();
+  let lastCameraPosition = null;
   const lodDebugStats = {
     counts: { [BUILDING_LOD.LOD0_PROXY]: 0, [BUILDING_LOD.LOD1_MID]: 0, [BUILDING_LOD.LOD2_FULL]: 0 },
     transitions: 0,
     transitionsPerSecond: 0,
     _lastTransitionsSampleMs: performance.now(),
-    _lastTransitionsSampleCount: 0
+    _lastTransitionsSampleCount: 0,
+    queueDepth: 0,
+    promotionsApplied: 0,
+    promotionLatencyMsAvg: 0,
+    promotionLatencyMsMax: 0,
+    promotionsDeferredBurst: 0
+  };
+  const promotionLimits = {
+    maxPromotionsPerFrame: BUILDING_PROMOTION_DEFAULTS.maxPromotionsPerFrame,
+    maxPromotionCpuMs: BUILDING_PROMOTION_DEFAULTS.maxPromotionCpuMs,
+    cameraTeleportDistanceMeters: BUILDING_PROMOTION_DEFAULTS.cameraTeleportDistanceMeters,
+    burstSoftCap: BUILDING_PROMOTION_DEFAULTS.burstSoftCap
   };
 
   function disposeGeometry(mesh) {
@@ -623,6 +643,67 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     if (distanceMeters <= LOD2_FULL.enter) return BUILDING_LOD.LOD2_FULL;
     if (distanceMeters <= LOD1_MID.enter) return BUILDING_LOD.LOD1_MID;
     return BUILDING_LOD.LOD0_PROXY;
+  }
+
+  function scorePromotion(entry) {
+    const dist = Math.max(1, entry.distanceToCamera ?? Number.POSITIVE_INFINITY);
+    const centerWeight = Math.max(0, 1 - Math.min(1, entry.screenCenterDistance ?? 1.5));
+    const visibleWeight = entry.isVisible ? 1 : 0;
+    return (visibleWeight * 1000) + (centerWeight * 200) + (1 / dist);
+  }
+
+  function enqueuePromotion(entry) {
+    if (!entry?.id) return;
+    const queuedAt = performance.now();
+    const existing = promotionQueueById.get(entry.id);
+    if (existing) {
+      Object.assign(existing, entry, { queuedAt: existing.queuedAt ?? queuedAt, score: scorePromotion(entry) });
+      return;
+    }
+    const wrapped = { ...entry, queuedAt, score: scorePromotion(entry) };
+    promotionQueue.push(wrapped);
+    promotionQueueById.set(entry.id, wrapped);
+  }
+
+  function processPromotionQueue() {
+    if (promotionQueue.length === 0) return;
+    const frameStart = performance.now();
+    promotionQueue.sort((a, b) => b.score - a.score);
+    const initialDepth = promotionQueue.length;
+    const cameraPos = camera?.position ?? new THREE.Vector3();
+    if (lastCameraPosition && cameraPos.distanceTo(lastCameraPosition) > promotionLimits.cameraTeleportDistanceMeters) {
+      while (promotionQueue.length > promotionLimits.burstSoftCap) {
+        const dropped = promotionQueue.pop();
+        if (!dropped) break;
+        promotionQueueById.delete(dropped.id);
+        lodDebugStats.promotionsDeferredBurst += 1;
+      }
+    }
+    lastCameraPosition = cameraPos.clone();
+    let processed = 0;
+    while (promotionQueue.length > 0 && processed < promotionLimits.maxPromotionsPerFrame) {
+      const elapsed = performance.now() - frameStart;
+      if (Number.isFinite(promotionLimits.maxPromotionCpuMs) && promotionLimits.maxPromotionCpuMs > 0 && elapsed >= promotionLimits.maxPromotionCpuMs) break;
+      const next = promotionQueue.shift();
+      if (!next) break;
+      promotionQueueById.delete(next.id);
+      const state = tileLODState.get(next.id);
+      if (!state) continue;
+      if (state.currentLOD === next.targetLOD) continue;
+      state.currentLOD = next.targetLOD;
+      tileLODState.set(next.id, state);
+      lodDebugStats.transitions += 1;
+      lodDebugStats.promotionsApplied += 1;
+      const latency = performance.now() - next.queuedAt;
+      lodDebugStats.promotionLatencyMsMax = Math.max(lodDebugStats.promotionLatencyMsMax, latency);
+      const n = lodDebugStats.promotionsApplied;
+      lodDebugStats.promotionLatencyMsAvg = ((lodDebugStats.promotionLatencyMsAvg * (n - 1)) + latency) / n;
+      processed += 1;
+    }
+    lodDebugStats.queueDepth = promotionQueue.length;
+    if (initialDepth > promotionLimits.burstSoftCap) {
+      lodDebugStats.promotionsDeferredBurst += Math.max(0, initialDepth - promotionLimits.burstSoftCap);
+    }
   }
 
   function updateTileBuildings(tileKey, geojson, boundsOverride) {
@@ -698,6 +779,18 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       const entityId = polygon.properties?.id ?? polygon.properties?.["@id"] ?? `${tileKey}-${buildingIndex}`;
       const shapeBounds = new THREE.Box2().setFromPoints(shape.getPoints());
       const effectiveLOD = chooseLODWithHysteresis({ currentLOD: tileLODState.get(entityId)?.currentLOD }, distance);
+      if (effectiveLOD !== BUILDING_LOD.LOD0_PROXY) {
+        const projected = new THREE.Vector3(centroid.x, buildingGrade + Math.max(2, height * 0.5), -centroid.y).project(camera);
+        const isVisible = projected.z >= 0 && projected.z <= 1 && Math.abs(projected.x) <= 1 && Math.abs(projected.y) <= 1;
+        const centerDistance = Math.hypot(projected.x, projected.y);
+        enqueuePromotion({
+          id: entityId,
+          targetLOD: effectiveLOD,
+          distanceToCamera: distance,
+          screenCenterDistance: centerDistance,
+          isVisible
+        });
+      }
       buildingEntities.push({
         id: entityId,
         worldPosition: { x: centroid.x, y: buildingGrade, z: -centroid.y },
@@ -872,6 +965,21 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       flat: flatMaterial
     },
     updateTileBuildings,
+    processFrame: processPromotionQueue,
+    setPromotionLimits: (limits = {}) => {
+      if (Number.isFinite(limits.maxPromotionsPerFrame)) promotionLimits.maxPromotionsPerFrame = Math.max(1, Math.floor(limits.maxPromotionsPerFrame));
+      if (limits.maxPromotionCpuMs == null) {
+        promotionLimits.maxPromotionCpuMs = null;
+      } else if (Number.isFinite(limits.maxPromotionCpuMs)) {
+        promotionLimits.maxPromotionCpuMs = Math.max(0, limits.maxPromotionCpuMs);
+      }
+      if (Number.isFinite(limits.cameraTeleportDistanceMeters)) {
+        promotionLimits.cameraTeleportDistanceMeters = Math.max(1, limits.cameraTeleportDistanceMeters);
+      }
+      if (Number.isFinite(limits.burstSoftCap)) {
+        promotionLimits.burstSoftCap = Math.max(1, Math.floor(limits.burstSoftCap));
+      }
+    },
     removeTile,
     clearTiles,
     getCollisionMesh: () => group,
