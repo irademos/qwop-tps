@@ -1,16 +1,11 @@
 import { RequestThrottleError, overpassRequestQueue } from "./requestQueue.js";
 import { overpassToGeoJSON } from "./osmGeoJson.js";
 
-const OVERPASS_ENDPOINTS = [
-  "/api/overpass",
-  "https://overpass-api.de/api/interpreter",
-  "https://overpass.kumi.systems/api/interpreter",
-  "https://lz4.overpass-api.de/api/interpreter",
-];
+const OVERPASS_ENDPOINTS = ["/api/overpass"];
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_STALE_DISTANCE_METERS = 600;
 const EMPTY_OVERPASS_PAYLOAD = Object.freeze({ version: 0.6, generator: "fallback", elements: [] });
-const MAPTILER_VECTOR_TILESET = "v3";
+const MAPTILER_VECTOR_TILESET = "v3-openmaptiles";
 
 class OverpassHttpError extends Error {
   constructor(message, details = {}) {

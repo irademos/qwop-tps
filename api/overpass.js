@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
 ];
 const REQUEST_TIMEOUT_MS = 10_000;
 const RETRYABLE_STATUS = new Set([406, 429, 502, 503, 504]);
