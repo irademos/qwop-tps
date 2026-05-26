@@ -1,13 +1,12 @@
 import { RequestThrottleError, overpassRequestQueue } from "./requestQueue.js";
 import { overpassToGeoJSON } from "./osmGeoJson.js";
 
-const OVERPASS_ENDPOINTS = import.meta.env.PROD
-  ? ["/api/overpass"]
-  : [
-      "https://overpass-api.de/api/interpreter",
-      "https://overpass.kumi.systems/api/interpreter",
-      "https://lz4.overpass-api.de/api/interpreter",
-    ];
+const OVERPASS_ENDPOINTS = [
+  "/api/overpass",
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
+];
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_STALE_DISTANCE_METERS = 600;
 const EMPTY_OVERPASS_PAYLOAD = Object.freeze({ version: 0.6, generator: "fallback", elements: [] });
@@ -93,10 +92,14 @@ async function performOverpassRequest(body) {
         signal: controller.signal,
       });
       response.overpassEndpoint = endpoint;
-      if (response.status !== 429) {
+      if (response.ok || (response.status !== 429 && response.status < 500)) {
         return response;
       }
       lastResponse = response;
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        throw error;
+      }
     } finally {
       clearTimeout(timeoutId);
     }
@@ -183,6 +186,20 @@ function maptilerFeatureToGeojsonFeature(feature) {
   };
 }
 
+let vectorTileDecoderPromise = null;
+async function loadVectorTileDecoder() {
+  if (!vectorTileDecoderPromise) {
+    vectorTileDecoderPromise = Promise.all([
+      import("https://esm.sh/@mapbox/vector-tile@2.0.4"),
+      import("https://esm.sh/pbf@4.0.1"),
+    ]).then(([vectorTileMod, pbfMod]) => ({
+      VectorTile: vectorTileMod.VectorTile,
+      Pbf: pbfMod.default,
+    }));
+  }
+  return vectorTileDecoderPromise;
+}
+
 export async function fetchMapTilerFeatures(lat, lon, zoom = 16) {
   const key = import.meta.env.VITE_MAPTILER_KEY;
   if (!key) {
@@ -190,14 +207,24 @@ export async function fetchMapTilerFeatures(lat, lon, zoom = 16) {
   }
   const x = lonToTileX(lon, zoom);
   const y = latToTileY(lat, zoom);
-  const endpoint = `https://api.maptiler.com/tiles/${MAPTILER_VECTOR_TILESET}/${zoom}/${x}/${y}.json?key=${encodeURIComponent(key)}`;
+  const endpoint = `https://api.maptiler.com/tiles/${MAPTILER_VECTOR_TILESET}/${zoom}/${x}/${y}.pbf?key=${encodeURIComponent(key)}`;
   const response = await fetch(endpoint);
   if (!response.ok) {
     throw new Error(`MapTiler fallback failed: ${response.status} ${response.statusText || ""}`.trim());
   }
-  const payload = await response.json();
-  const rawFeatures = Array.isArray(payload?.features) ? payload.features : [];
-  const features = rawFeatures.map(maptilerFeatureToGeojsonFeature).filter(Boolean);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const { VectorTile, Pbf } = await loadVectorTileDecoder();
+  const tile = new VectorTile(new Pbf(bytes));
+  const features = [];
+  for (const layerName of Object.keys(tile.layers || {})) {
+    const layer = tile.layers[layerName];
+    for (let index = 0; index < layer.length; index += 1) {
+      const feature = layer.feature(index).toGeoJSON(x, y, zoom);
+      feature.properties = { ...feature.properties, layer: layerName };
+      const normalized = maptilerFeatureToGeojsonFeature(feature);
+      if (normalized) features.push(normalized);
+    }
+  }
   return {
     type: "FeatureCollection",
     features
