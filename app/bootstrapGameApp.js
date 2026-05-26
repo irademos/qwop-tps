@@ -47,7 +47,7 @@ import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 import { createStaticBoxColliderForObject, removeStaticBoxCollider, syncStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
 import { configureSpawnAlignment, getSpawnPosition, getSpawnY } from '../spawnUtils.js';
 import { createLocationProvider } from '../location.js';
-import { fetchOSMData, isOverpassThrottleError } from '../osmClient.js';
+import { fetchMapTilerFeatures, fetchOSMData, isOverpassThrottleError } from '../osmClient.js';
 import { overpassToGeoJSON } from '../osmGeoJson.js';
 import { createMapRenderer } from '../environment/mapRender.js';
 import { createBuildingsRenderer } from '../environment/buildingsRender.js';
@@ -12361,6 +12361,18 @@ async function initCore(runtimeContext) {
         geojson = prefilterGeojson(overpassToGeoJSON(overpassData));
       }
     } catch (error) {
+      let usedMapTilerFallback = false;
+      try {
+        geojson = await fetchMapTilerFeatures(tileCenter.lat, tileCenter.lon);
+        geojson = prefilterGeojson(geojson);
+        usedMapTilerFallback = true;
+        console.warn('Overpass fetch failed; using MapTiler fallback.', error);
+      } catch (mapTilerError) {
+        console.warn('MapTiler fallback failed:', mapTilerError);
+      }
+      if (usedMapTilerFallback) {
+        debugState.lastOsmFetchAt = Date.now();
+      } else {
       const isThrottle = isOverpassThrottleError(error);
       if (isThrottle) {
         const baseDelayMs = Number.isFinite(error?.retryAfterMs) && error.retryAfterMs > 0
@@ -12392,6 +12404,7 @@ async function initCore(runtimeContext) {
       };
       mapFetchInFlight.delete(tileKey);
       return;
+      }
     }
 
     try {

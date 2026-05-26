@@ -1,16 +1,11 @@
 import { RequestThrottleError, overpassRequestQueue } from "./requestQueue.js";
 import { overpassToGeoJSON } from "./osmGeoJson.js";
 
-const OVERPASS_ENDPOINTS = import.meta.env.PROD
-  ? ["/api/overpass"]
-  : [
-      "https://overpass-api.de/api/interpreter",
-      "https://overpass.kumi.systems/api/interpreter",
-      "https://lz4.overpass-api.de/api/interpreter",
-    ];
+const OVERPASS_ENDPOINTS = ["/api/overpass"];
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_STALE_DISTANCE_METERS = 600;
 const EMPTY_OVERPASS_PAYLOAD = Object.freeze({ version: 0.6, generator: "fallback", elements: [] });
+const MAPTILER_VECTOR_TILESET = "v3";
 
 class OverpassHttpError extends Error {
   constructor(message, details = {}) {
@@ -88,14 +83,26 @@ async function performOverpassRequest(body) {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
+        headers: {
+          "Content-Type": "text/plain",
+          Accept: "application/json",
+        },
         body,
         signal: controller.signal,
       });
       response.overpassEndpoint = endpoint;
-      if (response.status !== 429) {
+      if (response.ok) {
         return response;
       }
-      lastResponse = response;
+      if (response.status === 429 || response.status >= 500) {
+        lastResponse = response;
+        continue;
+      }
+      return response;
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        throw error;
+      }
     } finally {
       clearTimeout(timeoutId);
     }
@@ -150,6 +157,97 @@ export async function fetchOSMData(lat, lon, radiusMeters, options = {}) {
 export async function fetchOSMFeatures(lat, lon, radiusMeters, options = {}) {
   const data = await fetchOSMData(lat, lon, radiusMeters, options);
   return overpassToGeoJSON(data);
+}
+
+function lonToTileX(lon, zoom) {
+  return Math.floor(((lon + 180) / 360) * 2 ** zoom);
+}
+
+function latToTileY(lat, zoom) {
+  const latRad = (lat * Math.PI) / 180;
+  const n = Math.PI - Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+  return Math.floor((n / Math.PI) / 2 * 2 ** zoom);
+}
+
+function maptilerFeatureToGeojsonFeature(feature) {
+  if (!feature?.geometry || !feature?.properties) return null;
+  const kind = String(feature.properties.class || feature.properties.type || "").toLowerCase();
+  const layer = String(feature.properties.layer || "").toLowerCase();
+  const isRoad = layer.includes("transport") || layer.includes("road")
+    || kind.includes("road") || kind.includes("street")
+    || kind.includes("highway") || kind.includes("path");
+  const isBuilding = layer.includes("building") || kind.includes("building");
+  if (!isRoad && !isBuilding) return null;
+  return {
+    type: "Feature",
+    properties: {
+      ...feature.properties,
+      ...(isRoad ? { highway: feature.properties.highway || feature.properties.class || "road" } : {}),
+      ...(isBuilding ? { building: feature.properties.building || "yes" } : {}),
+    },
+    geometry: feature.geometry,
+  };
+}
+
+let vectorTileDecoderPromise = null;
+async function loadVectorTileDecoder() {
+  if (!vectorTileDecoderPromise) {
+    vectorTileDecoderPromise = (async () => {
+      try {
+        const vectorTileSpecifier = "@mapbox/vector-tile";
+        const pbfSpecifier = "pbf";
+        const [vectorTileMod, pbfMod] = await Promise.all([
+          import(/* @vite-ignore */ vectorTileSpecifier),
+          import(/* @vite-ignore */ pbfSpecifier),
+        ]);
+        return {
+          VectorTile: vectorTileMod.VectorTile,
+          Pbf: pbfMod.default,
+        };
+      } catch {
+        const [vectorTileMod, pbfMod] = await Promise.all([
+          import("https://esm.sh/@mapbox/vector-tile@2.0.4"),
+          import("https://esm.sh/pbf@4.0.1"),
+        ]);
+        return {
+          VectorTile: vectorTileMod.VectorTile,
+          Pbf: pbfMod.default,
+        };
+      }
+    })();
+  }
+  return vectorTileDecoderPromise;
+}
+
+export async function fetchMapTilerFeatures(lat, lon, zoom = 16) {
+  const key = import.meta.env.VITE_MAPTILER_KEY;
+  if (!key) {
+    throw new Error("VITE_MAPTILER_KEY is required for MapTiler fallback.");
+  }
+  const x = lonToTileX(lon, zoom);
+  const y = latToTileY(lat, zoom);
+  const endpoint = `https://api.maptiler.com/tiles/${MAPTILER_VECTOR_TILESET}/${zoom}/${x}/${y}.pbf?key=${encodeURIComponent(key)}`;
+  const response = await fetch(endpoint);
+  if (!response.ok) {
+    throw new Error(`MapTiler fallback failed: ${response.status} ${response.statusText || ""}`.trim());
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const { VectorTile, Pbf } = await loadVectorTileDecoder();
+  const tile = new VectorTile(new Pbf(bytes));
+  const features = [];
+  for (const layerName of Object.keys(tile.layers || {})) {
+    const layer = tile.layers[layerName];
+    for (let index = 0; index < layer.length; index += 1) {
+      const feature = layer.feature(index).toGeoJSON(x, y, zoom);
+      feature.properties = { ...feature.properties, layer: layerName };
+      const normalized = maptilerFeatureToGeojsonFeature(feature);
+      if (normalized) features.push(normalized);
+    }
+  }
+  return {
+    type: "FeatureCollection",
+    features
+  };
 }
 
 export function isOverpassThrottleError(error) {

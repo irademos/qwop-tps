@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
 ];
 const REQUEST_TIMEOUT_MS = 10_000;
 const RETRYABLE_STATUS = new Set([406, 429, 502, 503, 504]);
@@ -133,10 +134,11 @@ async function fetchFromOverpass(body, signal) {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          Accept: "application/json, text/plain;q=0.9, */*;q=0.8",
+          "Content-Type": "text/plain",
+          Accept: "application/json",
+          "User-Agent": "StreetQuest/1.0",
         },
-        body,
+        body: readDataParam(body),
         signal,
       });
 
