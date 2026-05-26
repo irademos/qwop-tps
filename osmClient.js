@@ -11,6 +11,7 @@ const OVERPASS_ENDPOINTS = import.meta.env.PROD
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_STALE_DISTANCE_METERS = 600;
 const EMPTY_OVERPASS_PAYLOAD = Object.freeze({ version: 0.6, generator: "fallback", elements: [] });
+const MAPTILER_VECTOR_TILESET = "v3";
 
 class OverpassHttpError extends Error {
   constructor(message, details = {}) {
@@ -150,6 +151,57 @@ export async function fetchOSMData(lat, lon, radiusMeters, options = {}) {
 export async function fetchOSMFeatures(lat, lon, radiusMeters, options = {}) {
   const data = await fetchOSMData(lat, lon, radiusMeters, options);
   return overpassToGeoJSON(data);
+}
+
+function lonToTileX(lon, zoom) {
+  return Math.floor(((lon + 180) / 360) * 2 ** zoom);
+}
+
+function latToTileY(lat, zoom) {
+  const latRad = (lat * Math.PI) / 180;
+  const n = Math.PI - Math.log(Math.tan(Math.PI / 4 + latRad / 2));
+  return Math.floor((n / Math.PI) / 2 * 2 ** zoom);
+}
+
+function maptilerFeatureToGeojsonFeature(feature) {
+  if (!feature?.geometry || !feature?.properties) return null;
+  const kind = String(feature.properties.class || feature.properties.type || "").toLowerCase();
+  const layer = String(feature.properties.layer || "").toLowerCase();
+  const isRoad = layer.includes("transport") || layer.includes("road")
+    || kind.includes("road") || kind.includes("street")
+    || kind.includes("highway") || kind.includes("path");
+  const isBuilding = layer.includes("building") || kind.includes("building");
+  if (!isRoad && !isBuilding) return null;
+  return {
+    type: "Feature",
+    properties: {
+      ...feature.properties,
+      ...(isRoad ? { highway: feature.properties.highway || feature.properties.class || "road" } : {}),
+      ...(isBuilding ? { building: feature.properties.building || "yes" } : {}),
+    },
+    geometry: feature.geometry,
+  };
+}
+
+export async function fetchMapTilerFeatures(lat, lon, zoom = 16) {
+  const key = import.meta.env.VITE_MAPTILER_KEY;
+  if (!key) {
+    throw new Error("VITE_MAPTILER_KEY is required for MapTiler fallback.");
+  }
+  const x = lonToTileX(lon, zoom);
+  const y = latToTileY(lat, zoom);
+  const endpoint = `https://api.maptiler.com/tiles/${MAPTILER_VECTOR_TILESET}/${zoom}/${x}/${y}.json?key=${encodeURIComponent(key)}`;
+  const response = await fetch(endpoint);
+  if (!response.ok) {
+    throw new Error(`MapTiler fallback failed: ${response.status} ${response.statusText || ""}`.trim());
+  }
+  const payload = await response.json();
+  const rawFeatures = Array.isArray(payload?.features) ? payload.features : [];
+  const features = rawFeatures.map(maptilerFeatureToGeojsonFeature).filter(Boolean);
+  return {
+    type: "FeatureCollection",
+    features
+  };
 }
 
 export function isOverpassThrottleError(error) {
