@@ -1,6 +1,4 @@
-import { appContext } from '../src/runtime/appContext.js';
-import * as THREE from 'three';
-import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from '../healthUtils.js';
+import { convertPointsToSegments } from '../healthUtils.js';
 
 export const ATTACKS = {
   mutantPunch: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward', types: ['melee', 'punch'] },
@@ -174,54 +172,13 @@ export function updateMeleeAttacks({
           attackTypes
         }) || hit;
       }
-      for (const target of players) {
-        if (target === attacker) continue;
-        if (!target.model || !target.model.position) continue;
-        if (isTargetInAttackRange(attacker.model, target.model.position, attackCfg)) {
-          hit = true;
-          onEntityHit?.({
-            targetType: target.id === 'local' ? 'player' : 'remotePlayer',
-            targetId: target.id,
-            targetPosition: target.model.position.clone(),
-            attackTypes
-          });
-          if (target.id === 'local') {
-            const blockedByShield = window.tryBlockLocalPlayerHitWithShield?.({
-              attackerModel: attacker.model,
-              damage: attackDamage,
-              attackTypes
-            });
-            if (blockedByShield) continue;
-            window.localHealth = Math.max(0, window.localHealth - attackDamage);
-            window.lastHitAttackTypes = attackTypes;
-            const playerControls = appContext.systems.playerControls ?? window.playerControls;
-            if (playerControls) {
-              const dir = new THREE.Vector3().subVectors(target.model.position, attacker.model.position).normalize();
-              playerControls.applyKnockback({ direction: dir, strength: attackCfg.knockbackStrength });
-            }
-          } else {
-            const tp = otherPlayers[target.id];
-            if (tp) {
-              const previousHealth = Number.isFinite(tp.health) ? tp.health : BASE_HEALTH_SEGMENTS;
-              const nextHealth = Math.max(0, previousHealth - attackDamage);
-              tp.health = nextHealth;
-              tp.lastHitAttackTypes = attackTypes;
-              if (nextHealth <= 0 && previousHealth > 0) {
-                tp.isDead = true;
-                if (attacker.id === 'local') {
-                  window.onPlayerKill?.(target.id);
-                }
-              } else if (nextHealth > 0 && tp.isDead) {
-                tp.isDead = false;
-              }
-            }
-          }
-        }
-      }
+      // PvP is disabled: melee attacks should not damage players.
 
       if (isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
           if (!monster?.model?.position) continue;
+          const behavior = String(monster.model?.userData?.behavior || '').toLowerCase();
+          if (behavior === 'companion' || behavior === 'friendly') continue;
           if (isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
             hit = true;
             const dir = new THREE.Vector3()
@@ -246,6 +203,8 @@ export function updateMeleeAttacks({
       } else if (!isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
           if (!monster?.model?.position) continue;
+          const behavior = String(monster.model?.userData?.behavior || '').toLowerCase();
+          if (behavior === 'companion' || behavior === 'friendly') continue;
           if (isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
             hit = true;
             sendMonsterAttack?.({

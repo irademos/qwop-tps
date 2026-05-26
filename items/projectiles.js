@@ -1,8 +1,7 @@
-import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 import { updateArrowProjectile } from "./arrow.js";
-import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../healthUtils.js";
+import { convertPointsToSegments } from "../healthUtils.js";
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { getAttackTypes } from './melee.js';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
@@ -235,48 +234,7 @@ export function updateProjectiles({
       continue;
     }
 
-    for (const [id, { model }] of Object.entries(otherPlayers)) {
-      if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
-      if (age < 80) continue;
-      const playerBox = getObjectBox(model);
-      if (!playerBox) continue;
-      if (projBox.intersectsBox(playerBox)) {
-        if (typeof proj.userData.onPlayerImpact === 'function') {
-          const handled = proj.userData.onPlayerImpact(proj.position.clone(), proj);
-          if (handled) {
-            removeProjectile(i);
-            removed = true;
-            break;
-          }
-        }
-        const player = otherPlayers[id];
-        if (player) {
-          const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
-          const attackTypes = getAttackTypes(
-            proj.userData.attackLabel || 'bowArrowProjectile',
-            proj.userData.attackTypes || ['projectile']
-          );
-          const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
-          const nextHealth = Math.max(0, previousHealth - damage);
-          player.health = nextHealth;
-          player.lastHitAttackTypes = attackTypes;
-          if (nextHealth <= 0 && previousHealth > 0) {
-            player.isDead = true;
-            if (proj.userData.shooterId === localId) {
-              window.onPlayerKill?.(id);
-            }
-          } else if (nextHealth > 0 && player.isDead) {
-            player.isDead = false;
-          }
-          console.log(`💥 Hit player: ${id}, Health: ${player.health}`);
-        }
-        if (proj.userData?.isArrow) playArrowBlockedSFX();
-        removeProjectile(i);
-        removed = true;
-        break;
-      }
-    }
+    // PvP is disabled: projectiles do not collide with or damage other players.
 
     if (removed) continue;
 
@@ -299,39 +257,7 @@ export function updateProjectiles({
 
     if (removed) continue;
 
-    const localBox = getObjectBox(playerModel);
-    if (!localBox) continue;
-    if (projBox.intersectsBox(localBox) && age >= 80 && proj.userData.shooterId !== localId) {
-      if (typeof proj.userData.onPlayerImpact === 'function') {
-        const handled = proj.userData.onPlayerImpact(proj.position.clone(), proj);
-        if (handled) {
-          removeProjectile(i);
-          removed = true;
-          continue;
-        }
-      }
-      console.log(`💥 You were hit`);
-      if (proj.userData?.isArrow) playArrowBlockedSFX();
-      removeProjectile(i);
-      removed = true;
-
-      if (typeof window.localHealth === 'number') {
-        const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
-        const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
-        const attackTypes = getAttackTypes(
-          proj.userData.attackLabel || 'bowArrowProjectile',
-          proj.userData.attackTypes || ['projectile']
-        );
-        window.localHealth = Math.max(0, window.localHealth - damage);
-        window.lastHitAttackTypes = attackTypes;
-        console.log(`❤️ Your Health: ${window.localHealth}`);
-      }
-
-      const playerControls = appContext.systems.playerControls ?? window.playerControls;
-      if (playerControls) {
-        playerControls.applyKnockback({ direction: vel, strength: 3 });
-      }
-    }
+    // PvP is disabled: projectiles do not collide with or damage the local player.
 
     if (removed) continue;
 
@@ -339,6 +265,8 @@ export function updateProjectiles({
       for (const monster of monsters) {
         const monsterBox = getObjectBox(monster?.model);
         if (!monsterBox) continue;
+        const behavior = String(monster?.model?.userData?.behavior || "").toLowerCase();
+        if (behavior === "companion" || behavior === "friendly") continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           if (typeof proj.userData.onMonsterImpact === 'function') {
             const handled = proj.userData.onMonsterImpact({
@@ -383,6 +311,8 @@ export function updateProjectiles({
       for (const monster of monsters) {
         const monsterBox = getObjectBox(monster?.model);
         if (!monsterBox) continue;
+        const behavior = String(monster?.model?.userData?.behavior || "").toLowerCase();
+        if (behavior === "companion" || behavior === "friendly") continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
           if (typeof proj.userData.onMonsterImpact === 'function') {
             const handled = proj.userData.onMonsterImpact({
