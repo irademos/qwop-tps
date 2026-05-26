@@ -1081,6 +1081,9 @@ export async function createNature({
       if (physics?.collider) rapierWorld?.removeCollider(physics.collider, true);
       if (physics?.rb) removeRigidBodySafely(rapierWorld, physics.rb);
     }
+    for (const mountain of entry.mountains ?? []) {
+      activeMountains.delete(mountain);
+    }
     disposeMountains(entry.mountains);
     treeTiles.delete(tileKey);
     climbableAreasByTile.delete(tileKey);
