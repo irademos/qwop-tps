@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { convertPointsToSegments } from '../healthUtils.js';
 
 export const ATTACKS = {
