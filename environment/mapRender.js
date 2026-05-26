@@ -1,6 +1,5 @@
 import * as THREE from "three";
 
-import { getTerrainHeight } from "./terrainHeight.js";
 import { resolveRoadWidth } from "./roadWidths.js";
 const DEFAULT_COLOR = 0x2f2f2f;
 const DEFAULT_ELEVATION = 0.01;
@@ -154,16 +153,16 @@ export function createMapRenderer({
       const length = Math.hypot(dx, dz);
       if (length <= Number.EPSILON) {
         vertices[vertexOffset++] = start.x;
-        vertices[vertexOffset++] = getTerrainHeight(start.x, start.z) + elevationOffset;
+        vertices[vertexOffset++] = elevationOffset;
         vertices[vertexOffset++] = start.z;
         vertices[vertexOffset++] = start.x;
-        vertices[vertexOffset++] = getTerrainHeight(start.x, start.z) + elevationOffset;
+        vertices[vertexOffset++] = elevationOffset;
         vertices[vertexOffset++] = start.z;
         vertices[vertexOffset++] = end.x;
-        vertices[vertexOffset++] = getTerrainHeight(end.x, end.z) + elevationOffset;
+        vertices[vertexOffset++] = elevationOffset;
         vertices[vertexOffset++] = end.z;
         vertices[vertexOffset++] = end.x;
-        vertices[vertexOffset++] = getTerrainHeight(end.x, end.z) + elevationOffset;
+        vertices[vertexOffset++] = elevationOffset;
         vertices[vertexOffset++] = end.z;
         indices[indexOffset++] = baseIndex;
         indices[indexOffset++] = baseIndex + 2;
@@ -187,16 +186,16 @@ export function createMapRenderer({
       const r1x = end.x - nx * halfWidth;
       const r1z = end.z - nz * halfWidth;
       vertices[vertexOffset++] = l0x;
-      vertices[vertexOffset++] = getTerrainHeight(l0x, l0z) + elevationOffset;
+      vertices[vertexOffset++] = elevationOffset;
       vertices[vertexOffset++] = l0z;
       vertices[vertexOffset++] = r0x;
-      vertices[vertexOffset++] = getTerrainHeight(r0x, r0z) + elevationOffset;
+      vertices[vertexOffset++] = elevationOffset;
       vertices[vertexOffset++] = r0z;
       vertices[vertexOffset++] = l1x;
-      vertices[vertexOffset++] = getTerrainHeight(l1x, l1z) + elevationOffset;
+      vertices[vertexOffset++] = elevationOffset;
       vertices[vertexOffset++] = l1z;
       vertices[vertexOffset++] = r1x;
-      vertices[vertexOffset++] = getTerrainHeight(r1x, r1z) + elevationOffset;
+      vertices[vertexOffset++] = elevationOffset;
       vertices[vertexOffset++] = r1z;
       indices[indexOffset++] = baseIndex;
       indices[indexOffset++] = baseIndex + 2;

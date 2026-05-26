@@ -900,13 +900,11 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       const colliderGeom = createBuildingColliderGeometry(localRings, height, buildingGrade);
       if (colliderGeom) colliderResults.push(colliderGeom);
 
-      if (PROXY_ON_STARTUP) {
+      const shouldUseProxy = PROXY_ON_STARTUP && loadState?.status !== "loaded";
+      if (shouldUseProxy) {
         const proxyGeom = createBuildingLODProxyGeometry(localRings, height, buildingGrade);
         if (proxyGeom) proxyResults.push(proxyGeom);
-        continue;
-      }
-
-      if (effectiveLOD !== BUILDING_LOD.LOD0_PROXY && !PROXY_ON_STARTUP) {
+      } else if (effectiveLOD !== BUILDING_LOD.LOD0_PROXY) {
         let geom = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
         geom.rotateX(-Math.PI / 2);
         geom.translate(0, buildingGrade, 0);
@@ -973,17 +971,7 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     disposeGeometry(flatMesh);
     disposeGeometry(extrudedColliderMesh);
 
-    if (PROXY_ON_STARTUP && proxyResults.length > 0) {
-      const merged = mergeGeometries(proxyResults, false);
-      merged.computeBoundingSphere();
-
-      extrudedMesh.geometry = merged;
-
-      extrudedMesh.visible = true;
-      extrudedColliderMesh.visible = false;
-
-      for (const g of proxyResults) g.dispose();
-    } else if (extrudedResults.length > 0) {
+    if (extrudedResults.length > 0) {
       const merged = mergeGeometries(extrudedResults, false);
       merged.computeBoundingSphere();
 
@@ -993,6 +981,16 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
       extrudedColliderMesh.visible = false;
 
       for (const g of extrudedResults) g.dispose();
+    } else if (proxyResults.length > 0) {
+      const merged = mergeGeometries(proxyResults, false);
+      merged.computeBoundingSphere();
+
+      extrudedMesh.geometry = merged;
+
+      extrudedMesh.visible = true;
+      extrudedColliderMesh.visible = false;
+
+      for (const g of proxyResults) g.dispose();
     } else {
       extrudedMesh.geometry = new THREE.BufferGeometry();
       extrudedColliderMesh.geometry = new THREE.BufferGeometry();
