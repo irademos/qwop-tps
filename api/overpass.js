@@ -134,10 +134,11 @@ async function fetchFromOverpass(body, signal) {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          Accept: "application/json, text/plain;q=0.9, */*;q=0.8",
+          "Content-Type": "text/plain",
+          Accept: "application/json",
+          "User-Agent": "StreetQuest/1.0",
         },
-        body,
+        body: readDataParam(body),
         signal,
       });
 

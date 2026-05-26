@@ -5,7 +5,7 @@ const OVERPASS_ENDPOINTS = ["/api/overpass"];
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_STALE_DISTANCE_METERS = 600;
 const EMPTY_OVERPASS_PAYLOAD = Object.freeze({ version: 0.6, generator: "fallback", elements: [] });
-const MAPTILER_VECTOR_TILESET = "v3-openmaptiles";
+const MAPTILER_VECTOR_TILESET = "v3";
 
 class OverpassHttpError extends Error {
   constructor(message, details = {}) {
@@ -83,14 +83,22 @@ async function performOverpassRequest(body) {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
+        headers: {
+          "Content-Type": "text/plain",
+          Accept: "application/json",
+        },
         body,
         signal: controller.signal,
       });
       response.overpassEndpoint = endpoint;
-      if (response.ok || (response.status !== 429 && response.status < 500)) {
+      if (response.ok) {
         return response;
       }
-      lastResponse = response;
+      if (response.status === 429 || response.status >= 500) {
+        lastResponse = response;
+        continue;
+      }
+      return response;
     } catch (error) {
       if (error?.name !== "AbortError") {
         throw error;
@@ -184,13 +192,29 @@ function maptilerFeatureToGeojsonFeature(feature) {
 let vectorTileDecoderPromise = null;
 async function loadVectorTileDecoder() {
   if (!vectorTileDecoderPromise) {
-    vectorTileDecoderPromise = Promise.all([
-      import("https://esm.sh/@mapbox/vector-tile@2.0.4"),
-      import("https://esm.sh/pbf@4.0.1"),
-    ]).then(([vectorTileMod, pbfMod]) => ({
-      VectorTile: vectorTileMod.VectorTile,
-      Pbf: pbfMod.default,
-    }));
+    vectorTileDecoderPromise = (async () => {
+      try {
+        const vectorTileSpecifier = "@mapbox/vector-tile";
+        const pbfSpecifier = "pbf";
+        const [vectorTileMod, pbfMod] = await Promise.all([
+          import(/* @vite-ignore */ vectorTileSpecifier),
+          import(/* @vite-ignore */ pbfSpecifier),
+        ]);
+        return {
+          VectorTile: vectorTileMod.VectorTile,
+          Pbf: pbfMod.default,
+        };
+      } catch {
+        const [vectorTileMod, pbfMod] = await Promise.all([
+          import("https://esm.sh/@mapbox/vector-tile@2.0.4"),
+          import("https://esm.sh/pbf@4.0.1"),
+        ]);
+        return {
+          VectorTile: vectorTileMod.VectorTile,
+          Pbf: pbfMod.default,
+        };
+      }
+    })();
   }
   return vectorTileDecoderPromise;
 }
