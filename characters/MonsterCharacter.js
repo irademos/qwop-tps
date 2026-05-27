@@ -770,8 +770,11 @@ export class MonsterCharacter extends CharacterBase {
           : this.attackDamage;
         hitTargets.forEach((target) => {
           if (!target?.model) return;
-          const dist = this.model.position.distanceTo(target.model.position);
-          if (dist <= attackRange) {
+          const verticalScale = String(this.model?.userData?.behavior || "").toLowerCase() === "companion" ? 3 : 1;
+          const delta = target.model.position.clone().sub(this.model.position);
+          const horizontalDist = Math.hypot(delta.x, delta.z);
+          const verticalDist = Math.abs(delta.y);
+          if (horizontalDist <= attackRange && verticalDist <= attackRange * verticalScale) {
             onHit?.(target, {
               direction: this.model.userData.direction.clone(),
               strength: MONSTER_ATTACK.knockbackStrength,
