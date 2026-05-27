@@ -7917,6 +7917,7 @@ async function initCore(runtimeContext) {
         <h3>Build with Wood</h3>
         <p style="margin:0 0 10px 0;">You have ${safeWoodCount} wood. Choose what to build.</p>
         <div class="build-type-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px;">
+          <button type="button" class="retro-build-btn" data-build-choice="block">Block</button>
           <button type="button" class="retro-build-btn" data-build-choice="arrow">Arrow</button>
           <button type="button" class="retro-build-btn" data-build-choice="torch">Torch</button>
           <button type="button" class="retro-build-btn" data-build-choice="shield">Shield</button>
@@ -13426,6 +13427,9 @@ async function initCore(runtimeContext) {
   const buildConfirmBtn = buildUi.querySelector('#build-confirm-btn');
   const buildUpBtn = buildUi.querySelector('#build-up-btn');
   const buildDownBtn = buildUi.querySelector('#build-down-btn');
+  const noteViewModal = document.createElement('div');
+  noteViewModal.className = 'build-modal-overlay hidden';
+  document.body.appendChild(noteViewModal);
   let buildVerticalInput = 0;
   const buildHorizontalKeys = new Set();
   window.addEventListener('keydown', (event) => {
