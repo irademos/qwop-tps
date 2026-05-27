@@ -15171,13 +15171,21 @@ async function initCore(runtimeContext) {
             detachMonsterPhysics(monster);
           }
 
+          const playerHeadingDirection = Number.isFinite(locationState.heading)
+            ? new THREE.Vector3(
+              -Math.sin(THREE.MathUtils.degToRad(locationState.heading)),
+              0,
+              Math.cos(THREE.MathUtils.degToRad(locationState.heading))
+            )
+            : null;
           const aiContext = {
             enableFriendlyDrift: true,
             friendlyAvoidanceZones,
             resolveGroundY,
             walkableSlopeDegrees: 42,
             groundOffset: 0.9 * (Number.isFinite(monster.sizeScale) ? monster.sizeScale : 1),
-            friendlyTargets: combatFriendlies
+            friendlyTargets: combatFriendlies,
+            playerHeadingDirection
           };
           const MAX_AI_DELTA_SECONDS = 0.5;
 

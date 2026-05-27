@@ -50,6 +50,8 @@ const FRIENDLY_DRIFT_AVOID_HARD_RADIUS = 3;
 const FRIENDLY_DRIFT_AVOID_MIN_FACTOR = 0.02;
 const ENEMY_DISENGAGE_RADIUS = 22;
 const MONSTER_MAX_WALKABLE_SLOPE_DEGREES = 42;
+const INTERCEPT_AHEAD_DISTANCE = 2.2;
+const INTERCEPT_LATERAL_VARIANCE = 1.8;
 
 export class MonsterCharacter extends CharacterBase {
   constructor({ model, mixer, actions, monsterConfig = {} }) {
@@ -99,6 +101,7 @@ export class MonsterCharacter extends CharacterBase {
     this.model.userData.monsterProperties = this.monsterProperties;
     this.model.userData.lastHitAttackTypes = [];
     this.model.userData.isProvoked = false;
+    this.interceptLateralOffset = THREE.MathUtils.randFloatSpread(INTERCEPT_LATERAL_VARIANCE);
     this.setLevel(1, { preserveHealth: false });
   }
 
@@ -690,6 +693,18 @@ export class MonsterCharacter extends CharacterBase {
     }
 
     const targetPos = primaryTarget.model.position.clone();
+    const headingDirection = context?.playerHeadingDirection;
+    const canInterceptHeading = primaryTarget.id === 'local'
+      && headingDirection?.isVector3
+      && headingDirection.lengthSq() > 0.0001;
+    if (canInterceptHeading) {
+      const normalizedHeading = headingDirection.clone().setY(0).normalize();
+      const lateral = new THREE.Vector3(-normalizedHeading.z, 0, normalizedHeading.x)
+        .multiplyScalar(this.interceptLateralOffset || 0);
+      targetPos
+        .addScaledVector(normalizedHeading, INTERCEPT_AHEAD_DISTANCE)
+        .add(lateral);
+    }
     const distance = this.model.position.distanceTo(targetPos);
     const attackRange = this.getAttackRange();
     const canAttack = !this.attackStartTime && now >= this.nextAttackTime;
