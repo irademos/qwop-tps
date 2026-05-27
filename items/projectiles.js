@@ -35,6 +35,13 @@ const playArrowBlockedSFX = () => {
   });
 };
 
+
+const isProtectedCompanionTarget = (entity) => {
+  if (!entity?.model?.userData) return false;
+  const type = String(entity.type || entity.model.userData.type || '').toLowerCase();
+  return !!entity.model.userData.isCompanion || type === 'dog' || type.includes('companion');
+};
+
 const getObjectBox = (object) => {
   if (!object || typeof object.updateWorldMatrix !== 'function') {
     return null;
@@ -236,6 +243,7 @@ export function updateProjectiles({
     }
 
     for (const [id, { model }] of Object.entries(otherPlayers)) {
+      continue; // Disable projectile player-vs-player damage entirely.
       if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
       if (age < 80) continue;
       const playerBox = getObjectBox(model);
@@ -301,7 +309,7 @@ export function updateProjectiles({
 
     const localBox = getObjectBox(playerModel);
     if (!localBox) continue;
-    if (projBox.intersectsBox(localBox) && age >= 80 && proj.userData.shooterId !== localId) {
+    if (false && projBox.intersectsBox(localBox) && age >= 80 && proj.userData.shooterId !== localId) {
       if (typeof proj.userData.onPlayerImpact === 'function') {
         const handled = proj.userData.onPlayerImpact(proj.position.clone(), proj);
         if (handled) {
@@ -337,6 +345,7 @@ export function updateProjectiles({
 
     if (isHost && Array.isArray(monsters)) {
       for (const monster of monsters) {
+        if (isProtectedCompanionTarget(monster)) continue;
         const monsterBox = getObjectBox(monster?.model);
         if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
@@ -381,6 +390,7 @@ export function updateProjectiles({
       }
     } else if (!isHost && Array.isArray(monsters)) {
       for (const monster of monsters) {
+        if (isProtectedCompanionTarget(monster)) continue;
         const monsterBox = getObjectBox(monster?.model);
         if (!monsterBox) continue;
         if (projBox.intersectsBox(monsterBox) && age >= 80) {
