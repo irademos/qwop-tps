@@ -7975,6 +7975,13 @@ async function initCore(runtimeContext) {
     cancelText: 'Cancel'
   });
 
+  const escapeBuildModalText = (value) => String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
   const startWoodBuildCraftingFlow = (itemId, quantity) => {
     const totalQuantity = Math.max(1, Math.floor(Number.isFinite(quantity) ? quantity : 1));
     const availableWood = Math.max(0, Math.floor(inventoryState.wood?.count || 0));
