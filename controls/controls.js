@@ -13,6 +13,7 @@ import { loadNippleJs } from '../externalDeps.js';
 const SWIM_SPEED = 2;
 const ENERGY_DEPLETED_SPEED_MULTIPLIER = 1.2;
 const JUMP_FORCE = 4;
+const JUMP_HEIGHT_MULTIPLIER = 2;
 const DEFAULT_PLAYER_SCALE = 1;
 const FLY_JUMP_FORCE_MULTIPLIER = 2;
 const PLAYER_RADIUS = 0.3;
@@ -3354,7 +3355,7 @@ export class PlayerControls {
 
     const isFlyActive = this.flySpellActive && Date.now() < (this.flySpellEndsAt || 0);
     const baseJumpForce = isFlyActive ? JUMP_FORCE * FLY_JUMP_FORCE_MULTIPLIER : JUMP_FORCE;
-    const jumpForce = baseJumpForce * (Number.isFinite(this.jumpForceMultiplier) ? this.jumpForceMultiplier : 1);
+    const jumpForce = baseJumpForce * (Number.isFinite(this.jumpForceMultiplier) ? this.jumpForceMultiplier : 1) * JUMP_HEIGHT_MULTIPLIER;
 
     if (this.isClimbing) {
       this.stopClimbing();
@@ -3381,7 +3382,7 @@ export class PlayerControls {
     }
 
     if (!this.hasDoubleJumped) {
-      this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3), z: 0 }, true);
+      this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3) * JUMP_HEIGHT_MULTIPLIER, z: 0 }, true);
       this.hasDoubleJumped = true;
       this.playAction('hurricaneKick');
       return true;
