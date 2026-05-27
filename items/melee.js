@@ -96,6 +96,13 @@ function getStrengthDamage(attackerId, baseDamage) {
   return baseDamage;
 }
 
+
+function isProtectedCompanionTarget(entity) {
+  if (!entity?.model?.userData) return false;
+  const type = String(entity.type || entity.model.userData.type || '').toLowerCase();
+  return !!entity.model.userData.isCompanion || type === 'dog' || type.includes('companion');
+}
+
 function isAttackInterrupted(attacker, attackName) {
   const model = attacker?.model;
   if (!model?.userData) return true;
@@ -175,7 +182,7 @@ export function updateMeleeAttacks({
         }) || hit;
       }
       for (const target of players) {
-        if (target === attacker) continue;
+        continue; // Disable player-vs-player melee damage entirely.
         if (!target.model || !target.model.position) continue;
         if (isTargetInAttackRange(attacker.model, target.model.position, attackCfg)) {
           hit = true;
@@ -221,7 +228,7 @@ export function updateMeleeAttacks({
 
       if (isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
-          if (!monster?.model?.position) continue;
+          if (!monster?.model?.position || isProtectedCompanionTarget(monster)) continue;
           if (isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
             hit = true;
             const dir = new THREE.Vector3()
@@ -245,7 +252,7 @@ export function updateMeleeAttacks({
         }
       } else if (!isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
-          if (!monster?.model?.position) continue;
+          if (!monster?.model?.position || isProtectedCompanionTarget(monster)) continue;
           if (isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
             hit = true;
             sendMonsterAttack?.({

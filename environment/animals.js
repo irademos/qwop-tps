@@ -393,7 +393,9 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   const walkSpeed = Number.isFinite(config.walkSpeed) ? config.walkSpeed : 1.2;
   const runSpeed = Number.isFinite(config.runSpeed) ? config.runSpeed : 4.8;
   const attackDistance = Number.isFinite(config.attackDistance) ? config.attackDistance : 2.3;
-  const monsterAttackRange = Number.isFinite(config.attackRange) ? Math.max(0.5, config.attackRange) : attackDistance;
+  const isCompanionBehavior = behavior === 'companion';
+  const rawMonsterAttackRange = Number.isFinite(config.attackRange) ? Math.max(0.5, config.attackRange) : attackDistance;
+  const monsterAttackRange = isCompanionBehavior ? rawMonsterAttackRange * 3 : rawMonsterAttackRange;
   const monsterDetectRange = Number.isFinite(config.monsterDetectRange) ? Math.max(monsterAttackRange, config.monsterDetectRange) : 9;
   const ownerReturnDistance = Number.isFinite(config.ownerReturnDistance) ? Math.max(1, config.ownerReturnDistance) : 18;
   const companionAttackDamage = Number.isFinite(config.attackDamage) ? Math.max(1, config.attackDamage) : 3;
@@ -401,7 +403,6 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
   const distanceToPlayer = animal.model.position.distanceTo(playerModel.position);
   const data = animal.userData || {};
 
-  const isCompanionBehavior = behavior === 'companion';
   const isCompanion = !!animal.model?.userData?.isCompanion;
   let nearbyMonster = null;
   if (isCompanion) {
@@ -549,7 +550,9 @@ function updateAnimalMovement({ animal, config, getPlayerModel, getTerrainHeight
           const latestDistance = latestTargetPosition
             ? animal.model.position.distanceTo(latestTargetPosition)
             : Number.POSITIVE_INFINITY;
-          if (latestDistance <= monsterAttackRange) {
+          const verticalReachAllowance = isCompanionBehavior ? 5.5 : 0;
+          const verticalDelta = latestTargetPosition ? Math.abs(latestTargetPosition.y - animal.model.position.y) : Number.POSITIVE_INFINITY;
+          if (latestDistance <= monsterAttackRange || (verticalDelta <= verticalReachAllowance && latestDistance <= monsterAttackRange * 1.25)) {
             const killed = applyCompanionDamageToMonster(target, companionAttackDamage, { animal, onMonsterAttack });
             if (killed) {
               data.companionAttackTarget = null;
