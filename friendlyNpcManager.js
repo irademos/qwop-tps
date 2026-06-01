@@ -112,9 +112,9 @@ export function createFriendlyNpcManager({
     travelMaxDistance: 10
   });
 
-  const recordGpsTravel = (sample) => {
-    characterSpawner.recordGpsTravel(sample);
-    animalSpawner.recordGpsTravel(sample);
+  const recordWorldTravel = (sample) => {
+    characterSpawner.recordWorldTravel(sample);
+    animalSpawner.recordWorldTravel(sample);
   };
 
 
@@ -1379,7 +1379,7 @@ const getHealthForLevel = (level) => {
   return {
     friendlies,
     setHost,
-    recordGpsTravel,
+    recordWorldTravel,
     onRoomReady,
     update,
     removeFriendlyById,

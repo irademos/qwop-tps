@@ -2,8 +2,7 @@ import * as THREE from 'three';
 
 const SPAWN_TRAVEL_MIN_DISTANCE = 30;
 const SPAWN_TRAVEL_MAX_DISTANCE = 70;
-const SPAWN_MIN_GPS_ACCURACY_METERS = 15;
-const SPAWN_MAX_GPS_STEP_DISTANCE = 25;
+const SPAWN_MAX_WORLD_STEP_DISTANCE = 25;
 const SPAWN_MIN_INTERVAL_MS = 7_000;
 const SPAWN_NEARBY_MIN_DISTANCE = 24;
 const SPAWN_NEARBY_MAX_DISTANCE = 42;
@@ -18,13 +17,10 @@ const DEFAULT_TYPE_WEIGHTS = [
   { type: 'friendly', weight: 0.20 }
 ];
 
-const haversineMeters = (lat1, lon1, lat2, lon2) => {
-  const toRad = (value) => value * (Math.PI / 180);
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * 6_371_000 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+const worldDistanceMeters = (a, b) => {
+  if (!a || !b) return null;
+  if (![a.x, a.z, b.x, b.z].every(Number.isFinite)) return null;
+  return Math.hypot(b.x - a.x, b.z - a.z);
 };
 
 const getNextSpawnDistance = () => {
@@ -69,33 +65,31 @@ export function createCharacterSpawner({ getPlayerPosition, getSpawnPosition, sp
   let nextSpawnDistance = 0;
   let travelStartPosition = null;
   let lastSpawnAtMs = 0;
-  let gpsDistanceAccum = 0;
-  let lastGpsSample = null;
+  let worldDistanceAccum = 0;
+  let lastWorldSample = null;
 
-  const recordGpsTravel = ({ lat, lon, accuracyMeters, timestampMs } = {}) => {
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    if (!Number.isFinite(accuracyMeters)) {       // || accuracyMeters > SPAWN_MIN_GPS_ACCURACY_METERS) {
-      return;
-    }
+  const recordWorldTravel = ({ x, y = 0, z, timestampMs } = {}) => {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
 
     const sample = {
-      lat,
-      lon,
+      x,
+      y: Number.isFinite(y) ? y : 0,
+      z,
       timestampMs: Number.isFinite(timestampMs) ? timestampMs : Date.now()
     };
 
-    if (!lastGpsSample) {
-      lastGpsSample = sample;
+    if (!lastWorldSample) {
+      lastWorldSample = sample;
       return;
     }
 
-    const stepDistance = haversineMeters(lastGpsSample.lat, lastGpsSample.lon, sample.lat, sample.lon);
-    lastGpsSample = sample;
-    if (!Number.isFinite(stepDistance) || stepDistance <= 0 || stepDistance > SPAWN_MAX_GPS_STEP_DISTANCE) {
+    const stepDistance = worldDistanceMeters(lastWorldSample, sample);
+    lastWorldSample = sample;
+    if (!Number.isFinite(stepDistance) || stepDistance <= 0 || stepDistance > SPAWN_MAX_WORLD_STEP_DISTANCE) {
       return;
     }
 
-    gpsDistanceAccum += stepDistance;
+    worldDistanceAccum += stepDistance;
   };
 
   const getSpawnEvent = () => {
@@ -111,7 +105,7 @@ export function createCharacterSpawner({ getPlayerPosition, getSpawnPosition, sp
       return null;
     }
 
-    if (gpsDistanceAccum < nextSpawnDistance) {
+    if (worldDistanceAccum < nextSpawnDistance) {
       return null;
     }
 
@@ -136,7 +130,7 @@ export function createCharacterSpawner({ getPlayerPosition, getSpawnPosition, sp
       timestampMs: now
     };
 
-    gpsDistanceAccum = 0;
+    worldDistanceAccum = 0;
     lastSpawnAtMs = now;
     travelStartPosition = currentPos.clone();
     nextSpawnDistance = travelMinDistance + Math.random() * Math.max(0, travelMaxDistance - travelMinDistance);
@@ -148,12 +142,12 @@ export function createCharacterSpawner({ getPlayerPosition, getSpawnPosition, sp
     nextSpawnDistance = 0;
     travelStartPosition = null;
     lastSpawnAtMs = 0;
-    gpsDistanceAccum = 0;
-    lastGpsSample = null;
+    worldDistanceAccum = 0;
+    lastWorldSample = null;
   };
 
   return {
-    recordGpsTravel,
+    recordWorldTravel,
     getSpawnEvent,
     reset
   };

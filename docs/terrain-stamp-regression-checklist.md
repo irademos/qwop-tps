@@ -12,7 +12,7 @@ window.loadTerrainStampRegressionScene();
 
 This does the following:
 - Forces terrain seed: `terrain-stamp-regression-v1`
-- Sets debug location to `lat=37.7749, lon=-122.4194`
+- Places the player at world coordinates `x=0, z=0`
 - Enables terrain stamp debug overlay + heatmap
 
 ## Debug instrumentation

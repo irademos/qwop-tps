@@ -9,7 +9,7 @@ const TABS = [
   { id: 'quests', label: 'Quests' },
   { id: 'achievements', label: 'Achievements' },
   { id: 'multiplayer', label: 'Multiplayer' },
-  { id: 'location', label: 'Location' },
+  { id: 'location', label: 'World' },
   { id: 'display', label: 'Display' },
   { id: 'about', label: 'About' },
   { id: 'account', label: 'Account' },
@@ -383,12 +383,12 @@ function buildLocationPanel() {
   const rows = [
     ['Status', 'location-status'],
     ['Source', 'location-source'],
-    ['Accuracy', 'location-accuracy'],
-    ['Latitude', 'location-lat'],
-    ['Longitude', 'location-lon'],
+    ['World X', 'location-x'],
+    ['World Y', 'location-y'],
+    ['World Z', 'location-z'],
     ['Heading', 'location-heading'],
     ['Speed', 'location-speed'],
-    ['Last Fix', 'location-time']
+    ['Last Update', 'location-time']
   ];
 
   rows.forEach(([label, field]) => {
@@ -413,9 +413,9 @@ function buildLocationPanel() {
   elements.locationFields = {
     status: panelEl.querySelector('[data-field="location-status"]'),
     source: panelEl.querySelector('[data-field="location-source"]'),
-    accuracy: panelEl.querySelector('[data-field="location-accuracy"]'),
-    lat: panelEl.querySelector('[data-field="location-lat"]'),
-    lon: panelEl.querySelector('[data-field="location-lon"]'),
+    x: panelEl.querySelector('[data-field="location-x"]'),
+    y: panelEl.querySelector('[data-field="location-y"]'),
+    z: panelEl.querySelector('[data-field="location-z"]'),
     heading: panelEl.querySelector('[data-field="location-heading"]'),
     speed: panelEl.querySelector('[data-field="location-speed"]'),
     time: panelEl.querySelector('[data-field="location-time"]'),
@@ -455,10 +455,10 @@ function buildDeveloperPanel() {
   const clearServerStatus = createElement('div', 'settings-muted');
   clearServerStatus.textContent = 'Clears server-side rooms, sessions, and caches.';
 
-  const debugLocationTitle = createElement('h3', 'settings-section-title', 'Debug Location');
+  const debugLocationTitle = createElement('h3', 'settings-section-title', 'Debug World Position');
 
   const debugToggleRow = createElement('div', 'settings-row');
-  const debugToggleLabel = createElement('label', 'settings-label', 'Enable Debug Location');
+  const debugToggleLabel = createElement('label', 'settings-label', 'Enable Debug World Position');
   debugToggleLabel.setAttribute('for', 'debug-location-toggle');
   const debugToggle = createElement('input', 'settings-checkbox');
   debugToggle.type = 'checkbox';
@@ -467,20 +467,20 @@ function buildDeveloperPanel() {
 
   const debugLocationGrid = createElement('div', 'settings-debug-grid');
   const debugLatGroup = createElement('div', 'settings-field');
-  const debugLatLabel = createElement('label', 'settings-label', 'Latitude');
-  debugLatLabel.setAttribute('for', 'debug-location-lat');
+  const debugLatLabel = createElement('label', 'settings-label', 'World X');
+  debugLatLabel.setAttribute('for', 'debug-location-x');
   const debugLatInput = createElement('input', 'settings-input');
-  debugLatInput.id = 'debug-location-lat';
+  debugLatInput.id = 'debug-location-x';
   debugLatInput.type = 'number';
   debugLatInput.step = '0.000001';
   debugLatInput.inputMode = 'decimal';
   debugLatGroup.append(debugLatLabel, debugLatInput);
 
   const debugLonGroup = createElement('div', 'settings-field');
-  const debugLonLabel = createElement('label', 'settings-label', 'Longitude');
-  debugLonLabel.setAttribute('for', 'debug-location-lon');
+  const debugLonLabel = createElement('label', 'settings-label', 'World Z');
+  debugLonLabel.setAttribute('for', 'debug-location-z');
   const debugLonInput = createElement('input', 'settings-input');
-  debugLonInput.id = 'debug-location-lon';
+  debugLonInput.id = 'debug-location-z';
   debugLonInput.type = 'number';
   debugLonInput.step = '0.000001';
   debugLonInput.inputMode = 'decimal';
@@ -499,9 +499,9 @@ function buildDeveloperPanel() {
 
   debugLocationGrid.append(debugLatGroup, debugLonGroup, debugAccuracyGroup);
 
-  const debugApplyButton = createElement('button', 'settings-button', 'Apply Debug Location');
+  const debugApplyButton = createElement('button', 'settings-button', 'Apply Debug World Position');
   debugApplyButton.type = 'button';
-  debugApplyButton.dataset.action = 'apply-debug-location';
+  debugApplyButton.dataset.action = 'apply-debug-position';
 
   const debugStepRow = createElement('div', 'settings-debug-step');
   const debugStepLabel = createElement('label', 'settings-label', 'Step (m)');
@@ -574,8 +574,8 @@ function buildDeveloperPanel() {
   elements.clearServerStatus = clearServerStatus;
   elements.debugLocationFields = {
     toggle: debugToggle,
-    lat: debugLatInput,
-    lon: debugLonInput,
+    x: debugLatInput,
+    z: debugLonInput,
     accuracy: debugAccuracyInput,
     step: debugStepInput
   };
@@ -1254,10 +1254,10 @@ async function handleAction(target) {
     } finally {
       clearServerButton.disabled = false;
     }
-  } else if (action === 'apply-debug-location') {
-    const lat = parseFloat(elements.debugLocationFields?.lat?.value);
-    const lon = parseFloat(elements.debugLocationFields?.lon?.value);
-    context.location?.setDebugLocation?.({ lat, lon });
+  } else if (action === 'apply-debug-position') {
+    const x = parseFloat(elements.debugLocationFields?.x?.value);
+    const z = parseFloat(elements.debugLocationFields?.z?.value);
+    context.location?.setDebugLocation?.({ x, z });
   } else if (action === 'step-debug') {
     const stepValue = parseFloat(elements.debugLocationFields?.step?.value);
     const stepMeters = Number.isFinite(stepValue) ? stepValue : 0;
@@ -1786,9 +1786,9 @@ function collectDebugInfo() {
   const lastError = context.appState?.getLastError?.();
   const version = context.appState?.getAppVersion?.() ?? 'unknown';
   const viewport = `${window.innerWidth}x${window.innerHeight}`;
-  const originText = `${formatCoordinate(locationState.originLat)}, ${formatCoordinate(locationState.originLon)}`;
-  const currentText = `${formatCoordinate(locationState.lat)}, ${formatCoordinate(locationState.lon)}`;
-  const playerText = `${formatMeters(locationState.playerX)}, ${formatMeters(locationState.playerZ)}`;
+  const originText = `${formatMeters(locationState.originX)}, ${formatMeters(locationState.originZ)}`;
+  const currentText = `${formatMeters(locationState.x)}, ${formatMeters(locationState.z)}`;
+  const playerText = `${formatMeters(locationState.x)}, ${formatMeters(locationState.z)}`;
   const tileText = locationState.tile ? `${locationState.tile.x},${locationState.tile.y}` : '—';
   const info = [
     `version: ${version}`,
@@ -1796,7 +1796,7 @@ function collectDebugInfo() {
     `viewport: ${viewport}`,
     `connectionStatus: ${connectionStatus}`,
     `lastPing: ${typeof lastPing === 'number' ? `${lastPing} ms` : 'N/A'}`,
-    `locationStatus: ${locationState.state || 'unknown'}`,
+    `worldStatus: ${locationState.state || 'unknown'}`,
     `origin: ${originText}`,
     `current: ${currentText}`,
     `playerXZ: ${playerText}`,
@@ -1975,17 +1975,15 @@ export function updateUI() {
     const state = context.location.getState();
     elements.locationFields.status.textContent = state.state ? state.state : '—';
     if (elements.locationFields.source) {
-      const sourceLabel = state.source === 'debug' ? 'DEBUG' : state.source === 'gps' ? 'GPS' : '—';
+      const sourceLabel = state.source === 'world' ? 'World' : (state.source || '—');
       elements.locationFields.source.textContent = sourceLabel;
       if (elements.locationSourceRow) {
-        elements.locationSourceRow.classList.toggle('is-debug', state.source === 'debug');
+        elements.locationSourceRow.classList.toggle('is-debug', state.source === 'world');
       }
     }
-    elements.locationFields.accuracy.textContent = typeof state.accuracyMeters === 'number'
-      ? `±${Math.round(state.accuracyMeters)} m`
-      : '—';
-    elements.locationFields.lat.textContent = formatCoordinate(state.lat);
-    elements.locationFields.lon.textContent = formatCoordinate(state.lon);
+    elements.locationFields.x.textContent = formatMeters(state.x);
+    elements.locationFields.y.textContent = formatMeters(state.y);
+    elements.locationFields.z.textContent = formatMeters(state.z);
     elements.locationFields.heading.textContent = typeof state.heading === 'number'
       ? `${state.heading.toFixed(1)}°`
       : '—';
@@ -1993,18 +1991,14 @@ export function updateUI() {
       ? `${state.speed.toFixed(1)} m/s`
       : '—';
     elements.locationFields.time.textContent = state.timestamp ? formatTimestamp(state.timestamp) : '—';
-    if (state.permissionDenied) {
-      elements.locationFields.guidance.textContent = 'Permission denied. Enable Location access in your mobile browser settings and reload the page.';
-    } else {
-      elements.locationFields.guidance.textContent = state.message || '';
-    }
+    elements.locationFields.guidance.textContent = state.message || '';
   }
 
   if (elements.debugFields && context.location?.getState) {
     const state = context.location.getState();
-    const originText = `${formatCoordinate(state.originLat)}, ${formatCoordinate(state.originLon)}`;
-    const currentText = `${formatCoordinate(state.lat)}, ${formatCoordinate(state.lon)}`;
-    const playerText = `${formatMeters(state.playerX)}, ${formatMeters(state.playerZ)}`;
+    const originText = `${formatMeters(state.originX)}, ${formatMeters(state.originZ)}`;
+    const currentText = `${formatMeters(state.x)}, ${formatMeters(state.z)}`;
+    const playerText = `${formatMeters(state.x)}, ${formatMeters(state.z)}`;
     const tileText = state.tile ? `${state.tile.x}, ${state.tile.y}` : '—';
     elements.debugFields.origin.textContent = originText;
     elements.debugFields.current.textContent = currentText;
@@ -2017,19 +2011,19 @@ export function updateUI() {
     if (elements.debugLocationFields.toggle) {
       elements.debugLocationFields.toggle.checked = Boolean(debugState.enabled);
     }
-    if (elements.debugLocationFields.lat) {
-      const latInput = elements.debugLocationFields.lat;
-      if (document.activeElement !== latInput) {
-        latInput.value = Number.isFinite(debugState.lat)
-          ? debugState.lat.toFixed(6)
+    if (elements.debugLocationFields.x) {
+      const xInput = elements.debugLocationFields.x;
+      if (document.activeElement !== xInput) {
+        xInput.value = Number.isFinite(debugState.x)
+          ? debugState.x.toFixed(6)
           : '';
       }
     }
-    if (elements.debugLocationFields.lon) {
-      const lonInput = elements.debugLocationFields.lon;
-      if (document.activeElement !== lonInput) {
-        lonInput.value = Number.isFinite(debugState.lon)
-          ? debugState.lon.toFixed(6)
+    if (elements.debugLocationFields.z) {
+      const zInput = elements.debugLocationFields.z;
+      if (document.activeElement !== zInput) {
+        zInput.value = Number.isFinite(debugState.z)
+          ? debugState.z.toFixed(6)
           : '';
       }
     }

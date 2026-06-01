@@ -30,6 +30,9 @@ export function createTileCache({
   };
 
   const getLocalMeters = (location) => {
+    if (location && Number.isFinite(location.x) && Number.isFinite(location.z)) {
+      return { x: location.x, z: location.z };
+    }
     const base = ensureOrigin(location);
     if (!base) return null;
     const lonScale = metersPerDegreeLon(base.lat);

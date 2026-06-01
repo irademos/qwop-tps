@@ -214,19 +214,19 @@ export class PlayerControls {
     this.onSleepStart = typeof onSleepStart === 'function' ? onSleepStart : null;
     this.onSleepEnd = typeof onSleepEnd === 'function' ? onSleepEnd : null;
 
-    this.geoCenterLatLon = null;
-    this.geoBoundsCenterXZ = null;
-    this.geoBoundsShiftMeters = { x: 0, z: 0 };
-    this.geoBoundHalfSizeM = 8;
-    this.geoEdgeEpsM = 0.75;
-    this.geoBoundsDebug = null;
+    this.worldCenterXZ = null;
+    this.worldBoundsCenterXZ = null;
+    this.worldBoundsShiftMeters = { x: 0, z: 0 };
+    this.worldBoundHalfSizeM = 8;
+    this.worldEdgeEpsM = 0.75;
+    this.worldBoundsDebug = null;
     this.jumpForceMultiplier = 1;
     this.lowGravityEnabled = false;
-    this.geoBoundsDebugArrow = null;
-    this.geoBoundsLastMoveDirection = new THREE.Vector3(0, 0, 1);
-    this.geoBoundsDebugHeight = 2;
-    this.gpsMoveTarget = null;
-    this.gpsMoveEpsilon = 0.35;
+    this.worldBoundsDebugArrow = null;
+    this.worldBoundsLastMoveDirection = new THREE.Vector3(0, 0, 1);
+    this.worldBoundsDebugHeight = 2;
+    this.worldMoveTarget = null;
+    this.worldMoveEpsilon = 0.35;
     this.groundOverrideY = null;
     this.smoothedGroundExpectedY = null;
     this.lastGroundResolution = null;
@@ -2503,8 +2503,8 @@ export class PlayerControls {
       movement.copy(moveDirection);
     }
     const hasPlayerInput = moveDirection.length() > 0;
-    if (hasPlayerInput && this.gpsMoveTarget) {
-      this.clearGpsMoveTarget();
+    if (hasPlayerInput && this.worldMoveTarget) {
+      this.clearWorldMoveTarget();
     }
     if (movementLocked && !freezeActive) {
       movement.copy(this.slideMomentum);
@@ -2538,10 +2538,10 @@ export class PlayerControls {
         });
       }
     }
-    const gpsMove = this.getGpsMoveDirection(position);
-    const allowGpsMove = this.isOutsideGeoBounds(position);
-    if (gpsMove && allowGpsMove && !movementLocked && !this.isClimbing && !this.isKnocked) {
-      movement.copy(gpsMove.direction);
+    const worldMove = this.getWorldMoveDirection(position);
+    const allowWorldMove = this.isOutsideWorldBounds(position);
+    if (worldMove && allowWorldMove && !movementLocked && !this.isClimbing && !this.isKnocked) {
+      movement.copy(worldMove.direction);
       this.lastMoveDirection.copy(movement);
     }
     if (this.isKnocked) {
@@ -2573,25 +2573,25 @@ export class PlayerControls {
 
     const sink = this.isInWater ? newY - surfaceY : 0;
 
-    let pushedByGeo = false;
-    let clampedByGeo = false;
-    const gpsMoveActive = !!this.gpsMoveTarget;
+    let pushedByWorldBounds = false;
+    let clampedByWorldBounds = false;
+    const worldMoveActive = !!this.worldMoveTarget;
 
-    if (gpsMoveActive && this.geoBoundsShiftMeters) {
-      this.geoBoundsShiftMeters.x = 0;
-      this.geoBoundsShiftMeters.z = 0;
+    if (worldMoveActive && this.worldBoundsShiftMeters) {
+      this.worldBoundsShiftMeters.x = 0;
+      this.worldBoundsShiftMeters.z = 0;
     }
 
-    if (this.geoBoundsCenterXZ && !gpsMoveActive) {
-      const radius = this.geoBoundHalfSizeM;
+    if (this.worldBoundsCenterXZ && !worldMoveActive) {
+      const radius = this.worldBoundHalfSizeM;
 
-      const shiftX = this.geoBoundsShiftMeters?.x ?? 0;
-      const shiftZ = this.geoBoundsShiftMeters?.z ?? 0;
+      const shiftX = this.worldBoundsShiftMeters?.x ?? 0;
+      const shiftZ = this.worldBoundsShiftMeters?.z ?? 0;
 
-      const prevCenterX = this.geoBoundsCenterXZ.x - shiftX;
-      const prevCenterZ = this.geoBoundsCenterXZ.z - shiftZ;
+      const prevCenterX = this.worldBoundsCenterXZ.x - shiftX;
+      const prevCenterZ = this.worldBoundsCenterXZ.z - shiftZ;
 
-      const edgeEps = this.geoEdgeEpsM;
+      const edgeEps = this.worldEdgeEpsM;
 
       let targetX = newX;
       let targetZ = newZ;
@@ -2603,24 +2603,24 @@ export class PlayerControls {
       if (prevDistance >= radius - edgeEps) {
         targetX += shiftX;
         targetZ += shiftZ;
-        pushedByGeo = (shiftX !== 0) || (shiftZ !== 0);
+        pushedByWorldBounds = (shiftX !== 0) || (shiftZ !== 0);
       }
 
-      const centerDx = targetX - this.geoBoundsCenterXZ.x;
-      const centerDz = targetZ - this.geoBoundsCenterXZ.z;
+      const centerDx = targetX - this.worldBoundsCenterXZ.x;
+      const centerDz = targetZ - this.worldBoundsCenterXZ.z;
       const centerDistance = Math.hypot(centerDx, centerDz);
 
       let clampedX = targetX;
       let clampedZ = targetZ;
       if (centerDistance > radius) {
         const scale = radius / Math.max(centerDistance, 1e-6);
-        clampedX = this.geoBoundsCenterXZ.x + centerDx * scale;
-        clampedZ = this.geoBoundsCenterXZ.z + centerDz * scale;
+        clampedX = this.worldBoundsCenterXZ.x + centerDx * scale;
+        clampedZ = this.worldBoundsCenterXZ.z + centerDz * scale;
       }
 
-      clampedByGeo = (clampedX !== targetX) || (clampedZ !== targetZ);
+      clampedByWorldBounds = (clampedX !== targetX) || (clampedZ !== targetZ);
 
-      if (clampedByGeo || clampedX !== newX || clampedZ !== newZ) {
+      if (clampedByWorldBounds || clampedX !== newX || clampedZ !== newZ) {
         // Cancel outward velocity into the boundary wall.
         const v = this.body.linvel();
         let vx = v.x, vz = v.z;
@@ -2641,15 +2641,15 @@ export class PlayerControls {
         newZ = clampedZ;
       }
 
-      this.geoBoundsShiftMeters.x = 0;
-      this.geoBoundsShiftMeters.z = 0;
+      this.worldBoundsShiftMeters.x = 0;
+      this.worldBoundsShiftMeters.z = 0;
     }
-    if (clampedByGeo && this.gpsMoveTarget) {
-      this.clearGpsMoveTarget();
+    if (clampedByWorldBounds && this.worldMoveTarget) {
+      this.clearWorldMoveTarget();
     }
 
 
-    const isMovingNow = movement.length() > 0 || pushedByGeo;
+    const isMovingNow = movement.length() > 0 || pushedByWorldBounds;
     this.isMoving = isMovingNow;
     if (isMovingNow && this.canJump) {
       this.audioManager?.playFootstep();
@@ -2718,10 +2718,10 @@ export class PlayerControls {
         this.lastPosition.set(newX, displayY, newZ);
         this.wasMoving = this.isMoving;
       }
-      this.updateGeoBoundsDebug(this.playerModel.position);
+      this.updateWorldBoundsDebug(this.playerModel.position);
     } else {
       this.camera.position.set(newX, newY + 1.2, newZ);
-      this.updateGeoBoundsDebug(new THREE.Vector3(newX, newY, newZ));
+      this.updateWorldBoundsDebug(new THREE.Vector3(newX, newY, newZ));
     }
     if (this.isMobile && this.controls) {
       this.controls.target.set(newX, newY + 1, newZ);
@@ -3184,99 +3184,93 @@ export class PlayerControls {
     this.sleepData = null;
   }
 
-  setGeoCenter({ lat, lon }) {
-    if (typeof lat !== 'number' || typeof lon !== 'number') return;
-    if (!this.geoCenterLatLon) {
-      const currentPos = this.body?.translation?.() ?? this.playerModel?.position ?? { x: this.playerX, z: this.playerZ };
-      this.geoCenterLatLon = { lat, lon };
-      this.geoBoundsCenterXZ = new THREE.Vector3(currentPos.x, 0, currentPos.z);
-      this.geoBoundsShiftMeters = { x: 0, z: 0 };
+  setWorldCenter({ x, z } = {}) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+    const nextCenter = { x, z };
+    if (!this.worldCenterXZ) {
+      this.worldCenterXZ = nextCenter;
+      this.worldBoundsCenterXZ = new THREE.Vector3(x, 0, z);
+      this.worldBoundsShiftMeters = { x: 0, z: 0 };
       return;
     }
 
-    const prevLat = this.geoCenterLatLon.lat;
-    const prevLon = this.geoCenterLatLon.lon;
-    const deltaLat = lat - prevLat;
-    const deltaLon = lon - prevLon;
-    const lonScale = 111_412.84 * Math.cos((prevLat * Math.PI) / 180);
-    const dxMeters = -deltaLon * lonScale;
-    const dzMeters = deltaLat * 111_132.92; // north => -z
-
-    this.geoCenterLatLon = { lat, lon };
-    if (!this.geoBoundsCenterXZ) {
-      const currentPos = this.body?.translation?.() ?? this.playerModel?.position ?? { x: this.playerX, z: this.playerZ };
-      this.geoBoundsCenterXZ = new THREE.Vector3(currentPos.x, 0, currentPos.z);
+    const dxMeters = x - this.worldCenterXZ.x;
+    const dzMeters = z - this.worldCenterXZ.z;
+    this.worldCenterXZ = nextCenter;
+    if (!this.worldBoundsCenterXZ) {
+      this.worldBoundsCenterXZ = new THREE.Vector3(x, 0, z);
+    } else {
+      this.worldBoundsCenterXZ.x += dxMeters;
+      this.worldBoundsCenterXZ.z += dzMeters;
     }
-    this.geoBoundsCenterXZ.x += dxMeters;
-    this.geoBoundsCenterXZ.z += dzMeters;
     const moveDistance = Math.hypot(dxMeters, dzMeters);
     if (moveDistance > 1e-4) {
-      this.geoBoundsLastMoveDirection.set(dxMeters / moveDistance, 0, dzMeters / moveDistance);
+      this.worldBoundsLastMoveDirection.set(dxMeters / moveDistance, 0, dzMeters / moveDistance);
     }
-    this.geoBoundsShiftMeters.x += dxMeters;
-    this.geoBoundsShiftMeters.z += dzMeters;
+    this.worldBoundsShiftMeters.x += dxMeters;
+    this.worldBoundsShiftMeters.z += dzMeters;
   }
 
-  setGpsMoveTarget(target) {
+  setWorldMoveTarget(target) {
     if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.z)) return;
     const nextY = Number.isFinite(target.y) ? target.y : this.playerY ?? 0;
-    if (!this.gpsMoveTarget) {
-      this.gpsMoveTarget = new THREE.Vector3();
+    if (!this.worldMoveTarget) {
+      this.worldMoveTarget = new THREE.Vector3();
     }
-    this.gpsMoveTarget.set(target.x, nextY, target.z);
+    this.worldMoveTarget.set(target.x, nextY, target.z);
   }
 
-  clearGpsMoveTarget() {
-    this.gpsMoveTarget = null;
+  clearWorldMoveTarget() {
+    this.worldMoveTarget = null;
   }
 
-  isOutsideGeoBounds(position) {
-    if (!position || !this.geoBoundsCenterXZ || !Number.isFinite(this.geoBoundHalfSizeM)) {
+  isOutsideWorldBounds(position) {
+    if (!position || !this.worldBoundsCenterXZ || !Number.isFinite(this.worldBoundHalfSizeM)) {
       return true;
     }
-    const dx = position.x - this.geoBoundsCenterXZ.x;
-    const dz = position.z - this.geoBoundsCenterXZ.z;
-    return Math.hypot(dx, dz) > this.geoBoundHalfSizeM;
+    const dx = position.x - this.worldBoundsCenterXZ.x;
+    const dz = position.z - this.worldBoundsCenterXZ.z;
+    return Math.hypot(dx, dz) > this.worldBoundHalfSizeM;
   }
 
-  getGpsMoveDirection(position) {
-    if (!this.gpsMoveTarget || !position) return null;
-    const dx = this.gpsMoveTarget.x - position.x;
-    const dz = this.gpsMoveTarget.z - position.z;
+  getWorldMoveDirection(position) {
+    if (!this.worldMoveTarget || !position) return null;
+    const dx = this.worldMoveTarget.x - position.x;
+    const dz = this.worldMoveTarget.z - position.z;
     const distance = Math.hypot(dx, dz);
-    if (!Number.isFinite(distance) || distance <= this.gpsMoveEpsilon) {
-      this.gpsMoveTarget = null;
+    if (!Number.isFinite(distance) || distance <= this.worldMoveEpsilon) {
+      this.worldMoveTarget = null;
       return null;
     }
     return { direction: new THREE.Vector3(dx / distance, 0, dz / distance), distance };
   }
 
-  updateGeoBoundsDebug(position) {
+  updateWorldBoundsDebug(position) {
     if (!this.scene) return;
-    if (!this.geoBoundsCenterXZ || !Number.isFinite(this.geoBoundHalfSizeM)) {
-      if (this.geoBoundsDebug) {
-        this.geoBoundsDebug.visible = false;
+    if (!this.worldBoundsCenterXZ || !Number.isFinite(this.worldBoundHalfSizeM)) {
+      if (this.worldBoundsDebug) {
+        this.worldBoundsDebug.visible = false;
       }
-      if (this.geoBoundsDebugArrow) {
-        this.geoBoundsDebugArrow.visible = false;
+      if (this.worldBoundsDebugArrow) {
+        this.worldBoundsDebugArrow.visible = false;
       }
       return;
     }
-    if (!this.geoBoundsDebug) {
+    if (!this.worldBoundsDebug) {
       const geometry = new THREE.BufferGeometry().setFromPoints(
         new THREE.EllipseCurve(0, 0, 1, 1, 0, Math.PI * 2, false, 0)
           .getPoints(64)
           .map((point) => new THREE.Vector3(point.x, point.y, 0))
       );
       const material = new THREE.LineBasicMaterial({ color: 0x1e90ff });
-      this.geoBoundsDebug = new THREE.LineLoop(geometry, material);
-      this.geoBoundsDebug.name = 'geo-bounds-debug-circle';
-      this.geoBoundsDebug.frustumCulled = false;
-      this.geoBoundsDebug.rotation.x = Math.PI / 2;
-      this.scene.add(this.geoBoundsDebug);
+      this.worldBoundsDebug = new THREE.LineLoop(geometry, material);
+      this.worldBoundsDebug.name = 'world-bounds-debug-circle';
+      this.worldBoundsDebug.frustumCulled = false;
+      this.worldBoundsDebug.rotation.x = Math.PI / 2;
+      this.scene.add(this.worldBoundsDebug);
     }
-    if (!this.geoBoundsDebugArrow) {
-      this.geoBoundsDebugArrow = new THREE.ArrowHelper(
+    if (!this.worldBoundsDebugArrow) {
+      this.worldBoundsDebugArrow = new THREE.ArrowHelper(
         new THREE.Vector3(0, 0, 1),
         new THREE.Vector3(),
         1.6,
@@ -3284,24 +3278,24 @@ export class PlayerControls {
         0.55,
         0.35
       );
-      this.geoBoundsDebugArrow.name = 'geo-bounds-debug-arrow';
-      this.geoBoundsDebugArrow.frustumCulled = false;
-      this.scene.add(this.geoBoundsDebugArrow);
+      this.worldBoundsDebugArrow.name = 'world-bounds-debug-arrow';
+      this.worldBoundsDebugArrow.frustumCulled = false;
+      this.scene.add(this.worldBoundsDebugArrow);
     }
-    const radius = this.geoBoundHalfSizeM;
+    const radius = this.worldBoundHalfSizeM;
     const centerY = (position?.y ?? 0) + 0.1;
-    this.geoBoundsDebug.scale.set(radius, radius, 1);
-    this.geoBoundsDebug.position.set(this.geoBoundsCenterXZ.x, centerY, this.geoBoundsCenterXZ.z);
-    this.geoBoundsDebug.visible = true;
+    this.worldBoundsDebug.scale.set(radius, radius, 1);
+    this.worldBoundsDebug.position.set(this.worldBoundsCenterXZ.x, centerY, this.worldBoundsCenterXZ.z);
+    this.worldBoundsDebug.visible = true;
 
-    const hasDirection = !!this.geoBoundsLastMoveDirection && this.geoBoundsLastMoveDirection.lengthSq() > 0;
+    const hasDirection = !!this.worldBoundsLastMoveDirection && this.worldBoundsLastMoveDirection.lengthSq() > 0;
     const dir = hasDirection
-      ? this.geoBoundsLastMoveDirection.clone().normalize()
+      ? this.worldBoundsLastMoveDirection.clone().normalize()
       : new THREE.Vector3(0, 0, 1);
-    this.geoBoundsDebugArrow.setDirection(dir);
-    this.geoBoundsDebugArrow.setLength(Math.max(1.2, radius * 0.45), 0.55, 0.35);
-    this.geoBoundsDebugArrow.position.set(this.geoBoundsCenterXZ.x, centerY + 0.02, this.geoBoundsCenterXZ.z);
-    this.geoBoundsDebugArrow.visible = true;
+    this.worldBoundsDebugArrow.setDirection(dir);
+    this.worldBoundsDebugArrow.setLength(Math.max(1.2, radius * 0.45), 0.55, 0.35);
+    this.worldBoundsDebugArrow.position.set(this.worldBoundsCenterXZ.x, centerY + 0.02, this.worldBoundsCenterXZ.z);
+    this.worldBoundsDebugArrow.visible = true;
   }
   
   getCamera() {

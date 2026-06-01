@@ -24,18 +24,12 @@ export class HomeSystem {
     playerModel,
     playerControls,
     profileNameKey,
-    initialHome,
-    getLocalOrigin,
-    localMetersToGeo,
-    geoToLocal
+    initialHome
   }) {
     this.scene = scene;
     this.playerModel = playerModel;
     this.playerControls = playerControls;
     this.profileNameKey = profileNameKey;
-    this.getLocalOrigin = getLocalOrigin;
-    this.localMetersToGeo = localMetersToGeo;
-    this.geoToLocal = geoToLocal;
 
     this.homeData = initialHome || null;
     this.isInsideHome = false;
@@ -137,30 +131,14 @@ export class HomeSystem {
 
   getHomeLocalPosition() {
     if (!this.homeData) return null;
-    if (Number.isFinite(this.homeData.lat) && Number.isFinite(this.homeData.lon)) {
-      const origin = this.getLocalOrigin?.();
-      if (!origin || !this.geoToLocal) return null;
-      const local = this.geoToLocal(this.homeData.lat, this.homeData.lon, origin);
-      if (!local) return null;
-      return new THREE.Vector3(local.x, 0, local.z);
-    }
     if (Number.isFinite(this.homeData.localX) && Number.isFinite(this.homeData.localZ)) {
       return new THREE.Vector3(this.homeData.localX, 0, this.homeData.localZ);
     }
     return null;
   }
 
-  getHomeGeo() {
-    if (!this.homeData) return null;
-    if (Number.isFinite(this.homeData.lat) && Number.isFinite(this.homeData.lon)) {
-      return { lat: this.homeData.lat, lon: this.homeData.lon };
-    }
-    const local = this.getHomeLocalPosition();
-    const origin = this.getLocalOrigin?.();
-    if (!local || !origin || !this.localMetersToGeo) return null;
-    const geo = this.localMetersToGeo(local.x, local.z, origin);
-    if (!geo || !Number.isFinite(geo.lat) || !Number.isFinite(geo.lon)) return null;
-    return { lat: geo.lat, lon: geo.lon };
+  getHomeWorldPosition() {
+    return this.getHomeLocalPosition();
   }
 
   getGroundY(x, z) {
@@ -247,19 +225,11 @@ export class HomeSystem {
   async selectHome() {
     if (!this.playerModel) return;
     const position = this.playerModel.position;
-    const origin = this.getLocalOrigin?.();
     const nextHome = {
       localX: position.x,
       localZ: position.z,
       selectedAt: Date.now()
     };
-    if (origin && this.localMetersToGeo) {
-      const geo = this.localMetersToGeo(position.x, position.z, origin);
-      if (geo) {
-        nextHome.lat = geo.lat;
-        nextHome.lon = geo.lon;
-      }
-    }
     this.homeData = nextHome;
     this.syncHomePlacement();
     await this.persistHome(nextHome);
