@@ -13,6 +13,7 @@ const LEVEL_HEIGHT = 3;
 const EXTRUDE_DISTANCE = 250;
 const BUILDING_PERIMETER_FALLOFF_METERS = 8;
 const CLIPPER_SCALE = 10000;
+const LOCATION_BUILDING_RENDERING_ENABLED = false;
 
 // Shell params
 const WALL_THICKNESS = 0.5;
@@ -796,39 +797,41 @@ export function createBuildingsRenderer({ scene, camera, renderer } = {}) {
     }
   }
 
+  function clearTileBuildings(tileEntry, tileKey) {
+    const { extrudedMesh, flatMesh, extrudedColliderMesh } = tileEntry;
+    setBuildingStampsForTile(tileKey, []);
+    tileEntry.group.userData.buildingEntities = [];
+    disposeGeometry(extrudedMesh);
+    disposeGeometry(flatMesh);
+    disposeGeometry(extrudedColliderMesh);
+    extrudedMesh.geometry = new THREE.BufferGeometry();
+    flatMesh.geometry = new THREE.BufferGeometry();
+    extrudedColliderMesh.geometry = new THREE.BufferGeometry();
+    extrudedMesh.visible = false;
+    flatMesh.visible = false;
+    extrudedColliderMesh.visible = false;
+    return tileEntry;
+  }
+
   function updateTileBuildings(tileKey, geojson, boundsOverride) {
     if (!tileKey) return null;
     const tileEntry = ensureTile(tileKey);
     const { extrudedMesh, flatMesh, extrudedColliderMesh } = tileEntry;
 
+    if (!LOCATION_BUILDING_RENDERING_ENABLED) {
+      return clearTileBuildings(tileEntry, tileKey);
+    }
+
     setBuildingStampsForTile(tileKey, []);
 
     const polygons = collectBuildingPolygons(geojson);
     if (polygons.length === 0) {
-      disposeGeometry(extrudedMesh);
-      disposeGeometry(flatMesh);
-      disposeGeometry(extrudedColliderMesh);
-      extrudedMesh.geometry = new THREE.BufferGeometry();
-      flatMesh.geometry = new THREE.BufferGeometry();
-      extrudedColliderMesh.geometry = new THREE.BufferGeometry();
-      extrudedMesh.visible = false;
-      flatMesh.visible = false;
-      extrudedColliderMesh.visible = false;
-      return tileEntry;
+      return clearTileBuildings(tileEntry, tileKey);
     }
 
     const bounds = boundsOverride ?? computeBoundsFromPolygons(polygons);
     if (!bounds) {
-      disposeGeometry(extrudedMesh);
-      disposeGeometry(flatMesh);
-      disposeGeometry(extrudedColliderMesh);
-      extrudedMesh.geometry = new THREE.BufferGeometry();
-      flatMesh.geometry = new THREE.BufferGeometry();
-      extrudedColliderMesh.geometry = new THREE.BufferGeometry();
-      extrudedMesh.visible = false;
-      flatMesh.visible = false;
-      extrudedColliderMesh.visible = false;
-      return tileEntry;
+      return clearTileBuildings(tileEntry, tileKey);
     }
 
     const lonScale = metersPerDegreeLon(bounds.centerLat);
