@@ -214,19 +214,8 @@ export class PlayerControls {
     this.onSleepStart = typeof onSleepStart === 'function' ? onSleepStart : null;
     this.onSleepEnd = typeof onSleepEnd === 'function' ? onSleepEnd : null;
 
-    this.worldCenterXZ = null;
-    this.worldBoundsCenterXZ = null;
-    this.worldBoundsShiftMeters = { x: 0, z: 0 };
-    this.worldBoundHalfSizeM = 8;
-    this.worldEdgeEpsM = 0.75;
-    this.worldBoundsDebug = null;
     this.jumpForceMultiplier = 1;
     this.lowGravityEnabled = false;
-    this.worldBoundsDebugArrow = null;
-    this.worldBoundsLastMoveDirection = new THREE.Vector3(0, 0, 1);
-    this.worldBoundsDebugHeight = 2;
-    this.worldMoveTarget = null;
-    this.worldMoveEpsilon = 0.35;
     this.groundOverrideY = null;
     this.smoothedGroundExpectedY = null;
     this.lastGroundResolution = null;
@@ -2502,10 +2491,6 @@ export class PlayerControls {
     } else {
       movement.copy(moveDirection);
     }
-    const hasPlayerInput = moveDirection.length() > 0;
-    if (hasPlayerInput && this.worldMoveTarget) {
-      this.clearWorldMoveTarget();
-    }
     if (movementLocked && !freezeActive) {
       movement.copy(this.slideMomentum);
       this.slideMomentum.multiplyScalar(0.97);
@@ -2538,12 +2523,6 @@ export class PlayerControls {
         });
       }
     }
-    const worldMove = this.getWorldMoveDirection(position);
-    const allowWorldMove = this.isOutsideWorldBounds(position);
-    if (worldMove && allowWorldMove && !movementLocked && !this.isClimbing && !this.isKnocked) {
-      movement.copy(worldMove.direction);
-      this.lastMoveDirection.copy(movement);
-    }
     if (this.isKnocked) {
       if (Date.now() >= this.knockbackEndTime) {
         this.isKnocked = false;
@@ -2567,89 +2546,13 @@ export class PlayerControls {
         ? STEEP_SLOPE_SPEED_MULTIPLIER
         : 1;
       this.body.setLinvel({ x: movement.x * speed * slopeSpeedMultiplier, y: vel.y, z: movement.z * speed * slopeSpeedMultiplier }, true);
-      }
-      
+    }
+
     let { x: newX, y: newY, z: newZ } = this.body.translation();
 
     const sink = this.isInWater ? newY - surfaceY : 0;
 
-    let pushedByWorldBounds = false;
-    let clampedByWorldBounds = false;
-    const worldMoveActive = !!this.worldMoveTarget;
-
-    if (worldMoveActive && this.worldBoundsShiftMeters) {
-      this.worldBoundsShiftMeters.x = 0;
-      this.worldBoundsShiftMeters.z = 0;
-    }
-
-    if (this.worldBoundsCenterXZ && !worldMoveActive) {
-      const radius = this.worldBoundHalfSizeM;
-
-      const shiftX = this.worldBoundsShiftMeters?.x ?? 0;
-      const shiftZ = this.worldBoundsShiftMeters?.z ?? 0;
-
-      const prevCenterX = this.worldBoundsCenterXZ.x - shiftX;
-      const prevCenterZ = this.worldBoundsCenterXZ.z - shiftZ;
-
-      const edgeEps = this.worldEdgeEpsM;
-
-      let targetX = newX;
-      let targetZ = newZ;
-
-      // "Conveyor" push only if player was near the OLD boundary edge
-      const prevDx = newX - prevCenterX;
-      const prevDz = newZ - prevCenterZ;
-      const prevDistance = Math.hypot(prevDx, prevDz);
-      if (prevDistance >= radius - edgeEps) {
-        targetX += shiftX;
-        targetZ += shiftZ;
-        pushedByWorldBounds = (shiftX !== 0) || (shiftZ !== 0);
-      }
-
-      const centerDx = targetX - this.worldBoundsCenterXZ.x;
-      const centerDz = targetZ - this.worldBoundsCenterXZ.z;
-      const centerDistance = Math.hypot(centerDx, centerDz);
-
-      let clampedX = targetX;
-      let clampedZ = targetZ;
-      if (centerDistance > radius) {
-        const scale = radius / Math.max(centerDistance, 1e-6);
-        clampedX = this.worldBoundsCenterXZ.x + centerDx * scale;
-        clampedZ = this.worldBoundsCenterXZ.z + centerDz * scale;
-      }
-
-      clampedByWorldBounds = (clampedX !== targetX) || (clampedZ !== targetZ);
-
-      if (clampedByWorldBounds || clampedX !== newX || clampedZ !== newZ) {
-        // Cancel outward velocity into the boundary wall.
-        const v = this.body.linvel();
-        let vx = v.x, vz = v.z;
-        if (centerDistance > 1e-6) {
-          const outwardX = centerDx / centerDistance;
-          const outwardZ = centerDz / centerDistance;
-          const outwardVel = vx * outwardX + vz * outwardZ;
-          if (outwardVel > 0) {
-            vx -= outwardX * outwardVel;
-            vz -= outwardZ * outwardVel;
-          }
-        }
-
-        this.body.setLinvel({ x: vx, y: v.y, z: vz }, true);
-        this.body.setTranslation({ x: clampedX, y: newY, z: clampedZ }, true);
-
-        newX = clampedX;
-        newZ = clampedZ;
-      }
-
-      this.worldBoundsShiftMeters.x = 0;
-      this.worldBoundsShiftMeters.z = 0;
-    }
-    if (clampedByWorldBounds && this.worldMoveTarget) {
-      this.clearWorldMoveTarget();
-    }
-
-
-    const isMovingNow = movement.length() > 0 || pushedByWorldBounds;
+    const isMovingNow = movement.length() > 0;
     this.isMoving = isMovingNow;
     if (isMovingNow && this.canJump) {
       this.audioManager?.playFootstep();
@@ -2718,10 +2621,8 @@ export class PlayerControls {
         this.lastPosition.set(newX, displayY, newZ);
         this.wasMoving = this.isMoving;
       }
-      this.updateWorldBoundsDebug(this.playerModel.position);
     } else {
       this.camera.position.set(newX, newY + 1.2, newZ);
-      this.updateWorldBoundsDebug(new THREE.Vector3(newX, newY, newZ));
     }
     if (this.isMobile && this.controls) {
       this.controls.target.set(newX, newY + 1, newZ);
@@ -3184,120 +3085,6 @@ export class PlayerControls {
     this.sleepData = null;
   }
 
-  setWorldCenter({ x, z } = {}) {
-    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
-    const nextCenter = { x, z };
-    if (!this.worldCenterXZ) {
-      this.worldCenterXZ = nextCenter;
-      this.worldBoundsCenterXZ = new THREE.Vector3(x, 0, z);
-      this.worldBoundsShiftMeters = { x: 0, z: 0 };
-      return;
-    }
-
-    const dxMeters = x - this.worldCenterXZ.x;
-    const dzMeters = z - this.worldCenterXZ.z;
-    this.worldCenterXZ = nextCenter;
-    if (!this.worldBoundsCenterXZ) {
-      this.worldBoundsCenterXZ = new THREE.Vector3(x, 0, z);
-    } else {
-      this.worldBoundsCenterXZ.x += dxMeters;
-      this.worldBoundsCenterXZ.z += dzMeters;
-    }
-    const moveDistance = Math.hypot(dxMeters, dzMeters);
-    if (moveDistance > 1e-4) {
-      this.worldBoundsLastMoveDirection.set(dxMeters / moveDistance, 0, dzMeters / moveDistance);
-    }
-    this.worldBoundsShiftMeters.x += dxMeters;
-    this.worldBoundsShiftMeters.z += dzMeters;
-  }
-
-  setWorldMoveTarget(target) {
-    if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.z)) return;
-    const nextY = Number.isFinite(target.y) ? target.y : this.playerY ?? 0;
-    if (!this.worldMoveTarget) {
-      this.worldMoveTarget = new THREE.Vector3();
-    }
-    this.worldMoveTarget.set(target.x, nextY, target.z);
-  }
-
-  clearWorldMoveTarget() {
-    this.worldMoveTarget = null;
-  }
-
-  isOutsideWorldBounds(position) {
-    if (!position || !this.worldBoundsCenterXZ || !Number.isFinite(this.worldBoundHalfSizeM)) {
-      return true;
-    }
-    const dx = position.x - this.worldBoundsCenterXZ.x;
-    const dz = position.z - this.worldBoundsCenterXZ.z;
-    return Math.hypot(dx, dz) > this.worldBoundHalfSizeM;
-  }
-
-  getWorldMoveDirection(position) {
-    if (!this.worldMoveTarget || !position) return null;
-    const dx = this.worldMoveTarget.x - position.x;
-    const dz = this.worldMoveTarget.z - position.z;
-    const distance = Math.hypot(dx, dz);
-    if (!Number.isFinite(distance) || distance <= this.worldMoveEpsilon) {
-      this.worldMoveTarget = null;
-      return null;
-    }
-    return { direction: new THREE.Vector3(dx / distance, 0, dz / distance), distance };
-  }
-
-  updateWorldBoundsDebug(position) {
-    if (!this.scene) return;
-    if (!this.worldBoundsCenterXZ || !Number.isFinite(this.worldBoundHalfSizeM)) {
-      if (this.worldBoundsDebug) {
-        this.worldBoundsDebug.visible = false;
-      }
-      if (this.worldBoundsDebugArrow) {
-        this.worldBoundsDebugArrow.visible = false;
-      }
-      return;
-    }
-    if (!this.worldBoundsDebug) {
-      const geometry = new THREE.BufferGeometry().setFromPoints(
-        new THREE.EllipseCurve(0, 0, 1, 1, 0, Math.PI * 2, false, 0)
-          .getPoints(64)
-          .map((point) => new THREE.Vector3(point.x, point.y, 0))
-      );
-      const material = new THREE.LineBasicMaterial({ color: 0x1e90ff });
-      this.worldBoundsDebug = new THREE.LineLoop(geometry, material);
-      this.worldBoundsDebug.name = 'world-bounds-debug-circle';
-      this.worldBoundsDebug.frustumCulled = false;
-      this.worldBoundsDebug.rotation.x = Math.PI / 2;
-      this.scene.add(this.worldBoundsDebug);
-    }
-    if (!this.worldBoundsDebugArrow) {
-      this.worldBoundsDebugArrow = new THREE.ArrowHelper(
-        new THREE.Vector3(0, 0, 1),
-        new THREE.Vector3(),
-        1.6,
-        0x1e90ff,
-        0.55,
-        0.35
-      );
-      this.worldBoundsDebugArrow.name = 'world-bounds-debug-arrow';
-      this.worldBoundsDebugArrow.frustumCulled = false;
-      this.scene.add(this.worldBoundsDebugArrow);
-    }
-    const radius = this.worldBoundHalfSizeM;
-    const centerY = (position?.y ?? 0) + 0.1;
-    this.worldBoundsDebug.scale.set(radius, radius, 1);
-    this.worldBoundsDebug.position.set(this.worldBoundsCenterXZ.x, centerY, this.worldBoundsCenterXZ.z);
-    this.worldBoundsDebug.visible = true;
-
-    const hasDirection = !!this.worldBoundsLastMoveDirection && this.worldBoundsLastMoveDirection.lengthSq() > 0;
-    const dir = hasDirection
-      ? this.worldBoundsLastMoveDirection.clone().normalize()
-      : new THREE.Vector3(0, 0, 1);
-    this.worldBoundsDebugArrow.setDirection(dir);
-    this.worldBoundsDebugArrow.setLength(Math.max(1.2, radius * 0.45), 0.55, 0.35);
-    this.worldBoundsDebugArrow.position.set(this.worldBoundsCenterXZ.x, centerY + 0.02, this.worldBoundsCenterXZ.z);
-    this.worldBoundsDebugArrow.visible = true;
-  }
-  
   getCamera() {
     return this.camera;
   }

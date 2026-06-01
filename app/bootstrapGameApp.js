@@ -1835,10 +1835,7 @@ async function initCore(runtimeContext) {
     return false;
   };
 
-  const getPickupAttractRadius = () => {
-    const radius = Number.isFinite(playerControls?.worldBoundHalfSizeM) ? playerControls.worldBoundHalfSizeM : PICKUP_ATTRACT_RADIUS;
-    return Math.max(PICKUP_ATTRACT_RADIUS, radius);
-  };
+  const getPickupAttractRadius = () => PICKUP_ATTRACT_RADIUS;
 
   const handleCombatEntityHit = ({ targetPosition, targetType }) => {
     if (!targetPosition) return;
@@ -12297,10 +12294,6 @@ async function initCore(runtimeContext) {
         z: location.z,
         timestampMs: location.timestamp
       });
-      if (!homeSystem?.isInsideHome) {
-        playerControls?.setWorldCenter?.({ x: location.x, z: location.z });
-      }
-
       locationState.state = 'found';
       locationState.x = location.x;
       locationState.y = location.y;
