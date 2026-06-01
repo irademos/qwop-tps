@@ -295,7 +295,7 @@ const ZOMBIE_VOICE_CLIPS = [
 const MERCHANT_LOOP_CLIP = 'NPC Sounds/merchant_loop.ogg';
 const TERRAIN_STAMP_REGRESSION_SCENE = Object.freeze({
   seed: 'terrain-stamp-regression-v1',
-  location: { lat: 37.7749, lon: -122.4194 }
+  position: { x: 0, y: 0, z: 0 }
 });
 
 
@@ -311,6 +311,7 @@ let arrowTemplatePromise = null;
 let manaPotionTemplate = null;
 let manaPotionTemplatePromise = null;
 const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
+const DEFAULT_WORLD_ORIGIN = Object.freeze({ lat: 37.7749, lon: -122.4194 });
 const METERS_PER_DEGREE_LAT = 111_132.92;
 const PLAYER_VISIBILITY_RADIUS_M = 200;
 const PRESENCE_STALE_MS = 5000;
@@ -392,16 +393,6 @@ function mergeWalkingStats(walkingStats) {
   return { totalMiles, dailyMiles, dailyResetMiles, updatedAt: Number.isFinite(walkingStats?.updatedAt) ? walkingStats.updatedAt : null };
 }
 
-function distanceMeters(lat1, lon1, lat2, lon2) {
-  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return null;
-  const toRad = value => (value * Math.PI) / 180;
-  const R = 6371000;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 function createArcadeOverlay(startOverlay) {
   const message = startOverlay.querySelector('[data-arcade-message]');
@@ -1845,7 +1836,7 @@ async function initCore(runtimeContext) {
   };
 
   const getPickupAttractRadius = () => {
-    const radius = Number.isFinite(playerControls?.geoBoundHalfSizeM) ? playerControls.geoBoundHalfSizeM : PICKUP_ATTRACT_RADIUS;
+    const radius = Number.isFinite(playerControls?.worldBoundHalfSizeM) ? playerControls.worldBoundHalfSizeM : PICKUP_ATTRACT_RADIUS;
     return Math.max(PICKUP_ATTRACT_RADIUS, radius);
   };
 
@@ -1901,14 +1892,6 @@ async function initCore(runtimeContext) {
     const y = Number.isFinite(py) ? py : null;
     let z = Number.isFinite(pz) ? pz : null;
 
-    if (Number.isFinite(state.lat) && Number.isFinite(state.lon)) {
-      const mapOrigin = getLocalMapOrigin?.();
-      const local = mapOrigin ? geoToLocalMeters(state.lat, state.lon, mapOrigin) : null;
-      if (local) {
-        x = local.x;
-        z = local.z;
-      }
-    }
 
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
       return null;
@@ -1946,8 +1929,6 @@ async function initCore(runtimeContext) {
     if (!character?.model) return null;
     const pos = character.model.position;
     const q = character.model.quaternion;
-    const mapOrigin = getLocalMapOrigin?.();
-    const geo = mapOrigin ? localMetersToGeo(pos.x, pos.z, mapOrigin) : null;
     const state = {
       position: [pos.x, pos.y, pos.z],
       rotation: [q.x, q.y, q.z, q.w],
@@ -1956,16 +1937,6 @@ async function initCore(runtimeContext) {
       dead: !!character.isDead,
       ...extra
     };
-    if (geo) {
-      state.lat = geo.lat;
-      state.lon = geo.lon;
-    }
-    if (mapOrigin) {
-      state.worldAnchor = {
-        centerLat: mapOrigin.centerLat,
-        centerLon: mapOrigin.centerLon
-      };
-    }
     return state;
   }
 
@@ -2258,16 +2229,6 @@ async function initCore(runtimeContext) {
     queueNetMessage({ type: 'entityControl', id, state, sourceId: myId }, `entityControl:${id}`);
   }
 
-  const worldAnchorMatchesLocal = (anchor) => {
-    if (!anchor) return false;
-    const mapOrigin = getLocalMapOrigin();
-    if (!mapOrigin) return false;
-    const { centerLat, centerLon } = anchor;
-    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) return false;
-    const dist = distanceMeters(mapOrigin.centerLat, mapOrigin.centerLon, centerLat, centerLon);
-    return dist != null && dist <= 50;
-  };
-
   function processIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
     const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -2287,14 +2248,8 @@ async function initCore(runtimeContext) {
       if (payload.action != null && typeof payload.action !== 'string') return false;
       if (payload.equippedLeft != null && typeof payload.equippedLeft !== 'string') return false;
       if (payload.equippedRight != null && typeof payload.equippedRight !== 'string') return false;
-      const numberFields = ['lat', 'lon', 'x', 'y', 'z', 'rotation', 'heading'];
+      const numberFields = ['x', 'y', 'z', 'rotation', 'heading'];
       if (numberFields.some(field => payload[field] != null && !isFiniteNumber(payload[field]))) return false;
-      if (payload.worldAnchor != null) {
-        if (!isObject(payload.worldAnchor)) return false;
-        const { centerLat, centerLon } = payload.worldAnchor;
-        if (centerLat != null && !isFiniteNumber(centerLat)) return false;
-        if (centerLon != null && !isFiniteNumber(centerLon)) return false;
-      }
       return true;
     };
 
@@ -2553,39 +2508,21 @@ async function initCore(runtimeContext) {
       const desiredModel = data.model || DEFAULT_CHARACTER_MODEL;
       const now = performance.now();
       if (!remotePresenceMeta[remoteId]) {
-        remotePresenceMeta[remoteId] = { lastSeenMs: now, lastLat: null, lastLon: null };
+        remotePresenceMeta[remoteId] = { lastSeenMs: now, lastX: null, lastZ: null };
       } else {
         remotePresenceMeta[remoteId].lastSeenMs = now;
       }
 
-      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
-        remotePresenceMeta[remoteId].lastLat = data.lat;
-        remotePresenceMeta[remoteId].lastLon = data.lon;
-      }
-      if (Number.isFinite(data.worldAnchor?.centerLat) && Number.isFinite(data.worldAnchor?.centerLon)) {
-        remotePresenceMeta[remoteId].worldAnchor = {
-          centerLat: data.worldAnchor.centerLat,
-          centerLon: data.worldAnchor.centerLon
-        };
+      if (Number.isFinite(data.x) && Number.isFinite(data.z)) {
+        remotePresenceMeta[remoteId].lastX = data.x;
+        remotePresenceMeta[remoteId].lastZ = data.z;
       }
 
       const localFix = getLatestLocationFix();
-      const mapOrigin = getLocalMapOrigin();
-      
-      // Adopt remote world anchor if we don't have one yet
-      if (!getLocalMapOrigin() && Number.isFinite(data.worldAnchor?.centerLat) && Number.isFinite(data.worldAnchor?.centerLon)) {
-        setWorldOrigin({
-          lat: data.worldAnchor.centerLat,
-          lon: data.worldAnchor.centerLon
-        });
-        rebuildMapFromCache();
-      }
-
-      if (localFix && mapOrigin && Number.isFinite(data.lat) && Number.isFinite(data.lon)
-        && worldAnchorMatchesLocal(data.worldAnchor)) {
-        const dist = distanceMeters(localFix.lat, localFix.lon, data.lat, data.lon);
+      if (localFix && Number.isFinite(data.x) && Number.isFinite(data.z)) {
+        const dist = Math.hypot(data.x - localFix.x, data.z - localFix.z);
         remotePresenceMeta[remoteId].lastDistance = dist;
-        if (dist != null && dist > PLAYER_VISIBILITY_RADIUS_M) {
+        if (dist > PLAYER_VISIBILITY_RADIUS_M) {
           removeRemotePlayer(remoteId, 'out-of-range');
           return;
         }
@@ -2627,19 +2564,8 @@ async function initCore(runtimeContext) {
         player.nameLabel.innerText = data.name;
       }
 
-      let targetX = null;
-      let targetZ = null;
-      if (Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
-        const local = mapOrigin ? geoToLocalMeters(data.lat, data.lon, mapOrigin) : null;
-        if (local) {
-          targetX = local.x;
-          targetZ = local.z;
-        }
-      }
-      if (targetX == null && targetZ == null && Number.isFinite(data.x) && Number.isFinite(data.z)) {
-        targetX = data.x;
-        targetZ = data.z;
-      }
+      let targetX = Number.isFinite(data.x) ? data.x : null;
+      let targetZ = Number.isFinite(data.z) ? data.z : null;
 
       if (targetX == null || targetZ == null) {
         return;
@@ -4214,7 +4140,7 @@ async function initCore(runtimeContext) {
     reward?.apply?.();
     showTreasurePopup(`You received a ${reward?.label ?? 'treasure'}`);
   };
-  const getTreeGeoForLocal = (position) => {
+  const getTreeMapLocationForLocal = (position) => {
     if (!position) return null;
     const origin = worldOrigin
       ? { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon }
@@ -4244,7 +4170,7 @@ async function initCore(runtimeContext) {
     getTerrainHeight,
     mapRenderer,
     buildingsRenderer,
-    getGeoForLocal: getTreeGeoForLocal,
+    getGeoForLocal: getTreeMapLocationForLocal,
     tileCache,
     rapier: RAPIER,
     rapierWorld,
@@ -4365,7 +4291,7 @@ async function initCore(runtimeContext) {
     }
   };
   await restoreCompanionDogsFromProfile();
-  let didInitialGpsSnap = false;
+  let didInitialWorldSync = false;
   let currentPlayerLevel = 1;
 
   const getRandomMonsterModel = () => {
@@ -11669,125 +11595,30 @@ async function initCore(runtimeContext) {
   }
 
   function resetWorldOrigin() {
-    worldOrigin = null;
+    worldOrigin = { ...DEFAULT_WORLD_ORIGIN };
     localStorage.removeItem(WORLD_ORIGIN_STORAGE_KEY);
     if (tileCache) {
-      tileCache.setOrigin(null);
+      tileCache.setOrigin(worldOrigin);
     } else {
       pendingMapRebuild = true;
     }
-    refreshRenderOriginFromBounds();
+    currentRenderOrigin = { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
   }
 
-  const GPS_SNAP_DISTANCE_METERS = 20;
-  const GPS_TARGET_EPSILON_METERS = 0.35;
-  const GPS_PATH_EPSILON_METERS = 0.05;
-  const ORIGIN_RESET_WINDOW_MS = 3 * 60 * 1000;
-  const ORIGIN_RESET_MAX_ACCURACY_METERS = 15;
-  const ORIGIN_RESET_JUMP_DISTANCE_METERS = 200;
-  const appStartedAtMs = Date.now();
+  const getPlayerWorldPosition = () => {
+    const pos = playerControls?.body?.translation?.() ?? playerModel?.position;
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.z)) return null;
+    return { x: pos.x, y: Number.isFinite(pos.y) ? pos.y : 0, z: pos.z };
+  };
+
   let originWasAutoReset = false;
-
-  const computePlayerMeters = (location) => {
-    if (!worldOrigin || !location) return null;
-    if (!Number.isFinite(location.lat) || !Number.isFinite(location.lon)) return null;
-    const lonScale = metersPerDegreeLon(worldOrigin.lat);
-    return {
-      x: -(location.lon - worldOrigin.lon) * lonScale,
-      z: (location.lat - worldOrigin.lat) * METERS_PER_DEGREE_LAT
-    };
-  };
-
-  const isGpsPathBlocked = (from, to) => {
-    if (!rapierWorld || !playerControls?.body) return false;
-    if (!Number.isFinite(from?.x) || !Number.isFinite(from?.z)) return false;
-    if (!Number.isFinite(to?.x) || !Number.isFinite(to?.z)) return false;
-    const dx = to.x - from.x;
-    const dz = to.z - from.z;
-    const distance = Math.hypot(dx, dz);
-    if (!Number.isFinite(distance) || distance <= GPS_TARGET_EPSILON_METERS) return false;
-    const direction = new THREE.Vector3(dx / distance, 0, dz / distance);
-    const ray = new RAPIER.Ray(
-      { x: from.x, y: from.y ?? playerModel?.position?.y ?? 0, z: from.z },
-      { x: direction.x, y: direction.y, z: direction.z }
-    );
-    const excludedColliderHandles = new Set();
-    const body = playerControls.body;
-    if (body && typeof body.numColliders === 'function' && typeof body.collider === 'function') {
-      const colliderCount = body.numColliders();
-      for (let i = 0; i < colliderCount; i += 1) {
-        const collider = body.collider(i);
-        if (typeof collider?.handle === 'number') {
-          excludedColliderHandles.add(collider.handle);
-        }
-      }
-    }
-    const hit = rapierWorld.castRay(
-      ray,
-      distance,
-      true,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      excludedColliderHandles.size ? (collider) => !excludedColliderHandles.has(collider?.handle) : undefined
-    );
-    if (!hit) return false;
-    const hitDistance = hit.toi ?? hit.timeOfImpact ?? distance;
-    return hitDistance < distance - GPS_PATH_EPSILON_METERS;
-  };
-
-  const getClosestPointWithinGeoBounds = (position) => {
-    if (!position || !playerControls?.geoBoundsCenterXZ) return null;
-    const radius = playerControls.geoBoundHalfSizeM;
-    if (!Number.isFinite(radius)) return null;
-    if (!Number.isFinite(position.x) || !Number.isFinite(position.z)) return null;
-    const dx = position.x - playerControls.geoBoundsCenterXZ.x;
-    const dz = position.z - playerControls.geoBoundsCenterXZ.z;
-    const distance = Math.hypot(dx, dz);
-    if (!Number.isFinite(distance) || distance <= radius) return null;
-    const scale = radius / Math.max(distance, 1e-6);
-    return {
-      x: playerControls.geoBoundsCenterXZ.x + dx * scale,
-      y: position.y ?? playerModel?.position?.y ?? 0,
-      z: playerControls.geoBoundsCenterXZ.z + dz * scale
-    };
-  };
-
-  function getLocalMapOrigin() {
-    if (worldOrigin) {
-      return { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
-    }
-    return currentRenderOrigin;
-  }
-
-  const geoToLocalMeters = (lat, lon, origin) => {
-    if (!origin || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-    const lonScale = metersPerDegreeLon(origin.centerLat);
-    return {
-      x: -(lon - origin.centerLon) * lonScale,
-      z: (lat - origin.centerLat) * METERS_PER_DEGREE_LAT
-    };
-  };
-
-  const localMetersToGeo = (x, z, origin) => {
-    if (!origin || !Number.isFinite(x) || !Number.isFinite(z)) return null;
-    const lonScale = metersPerDegreeLon(origin.centerLat);
-    return {
-      lat: origin.centerLat + z / METERS_PER_DEGREE_LAT,
-      lon: origin.centerLon - x / lonScale
-    };
-  };
 
   homeSystem = createHomeSystem({
     scene,
     playerModel,
     playerControls,
     profileNameKey,
-    initialHome: playerProfile?.home ?? null,
-    getLocalOrigin: getLocalMapOrigin,
-    localMetersToGeo,
-    geoToLocal: geoToLocalMeters
+    initialHome: playerProfile?.home ?? null
   });
   void homeSystem.loadStorageChest?.();
   window.homeSystem = homeSystem;
@@ -11843,38 +11674,17 @@ async function initCore(runtimeContext) {
 
   function getLatestLocationFix() {
     const latest = window.latestLocation;
-    if (!latest || !Number.isFinite(latest.lat) || !Number.isFinite(latest.lon)) {
+    if (!latest || !Number.isFinite(latest.x) || !Number.isFinite(latest.z)) {
       return null;
     }
     return latest;
   }
 
-  const applyPlayerMeters = (playerMeters) => {
-    if (!playerMeters || !playerModel || !playerControls) return;
-    const nextY = playerModel.position.y;
-    playerModel.position.set(playerMeters.x, nextY, playerMeters.z);
-    playerControls.playerX = playerMeters.x;
-    playerControls.playerY = nextY;
-    playerControls.playerZ = playerMeters.z;
-    playerControls.lastPosition.set(playerMeters.x, nextY, playerMeters.z);
-    if (playerControls.body) {
-      playerControls.body.setTranslation({ x: playerMeters.x, y: nextY, z: playerMeters.z }, true);
-    }
-    if (playerControls.geoBoundsCenterXZ) {
-      playerControls.geoBoundsCenterXZ.set(playerMeters.x, 0, playerMeters.z);
-    }
-    if (playerControls.geoBoundsShiftMeters) {
-      playerControls.geoBoundsShiftMeters.x = 0;
-      playerControls.geoBoundsShiftMeters.z = 0;
-    }
-    playerControls.clearGpsMoveTarget?.();
 
-  };
 
-  worldOrigin = loadWorldOrigin();
-  if (worldOrigin) {
-    tileCache.setOrigin(worldOrigin);
-  }
+  worldOrigin = loadWorldOrigin() || { ...DEFAULT_WORLD_ORIGIN };
+  tileCache.setOrigin(worldOrigin);
+  currentRenderOrigin = { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
 
   const computeGeojsonBounds = (geojson) => {
     let minLon = Infinity;
@@ -12441,24 +12251,21 @@ async function initCore(runtimeContext) {
   };
 
   const locationState = {
-    state: 'requesting',
-    accuracyMeters: null,
-    lat: null,
-    lon: null,
+    state: 'tracking',
+    accuracyMeters: 0,
+    x: null,
+    y: null,
+    z: null,
     source: null,
-    originLat: worldOrigin?.lat ?? null,
-    originLon: worldOrigin?.lon ?? null,
-    playerX: null,
-    playerZ: null,
+    originX: 0,
+    originZ: 0,
     tile: null,
     heading: null,
     speed: null,
     timestamp: null,
     message: null,
-    permissionDenied: false,
     originWasReset: false
   };
-
   const debugState = {
     lastError: null,
     lastOsmFetchAt: null
@@ -12467,138 +12274,51 @@ async function initCore(runtimeContext) {
   let refreshBuildSubscriptionsForLocation = () => {};
 
   const locationProvider = createLocationProvider({
+    getWorldPosition: getPlayerWorldPosition,
     onUpdate: (location) => {
       window.latestLocation = location;
-      const prevLat = locationState.lat;
-      const prevLon = locationState.lon;
-      const prevTs = Number.isFinite(locationState.timestamp) ? locationState.timestamp : null;
-      if (Number.isFinite(prevLat) && Number.isFinite(prevLon) && prevTs != null) {
-        const elapsedMs = Math.max(0, location.timestamp - prevTs);
-        const movedMeters = distanceMeters(prevLat, prevLon, location.lat, location.lon);
-        const maxReasonableMeters = Math.max(30, elapsedMs * (3.2 / 1000));
-        if (Number.isFinite(movedMeters) && movedMeters > 1 && movedMeters <= maxReasonableMeters) {
-          const miles = toMiles(movedMeters);
-          walkingState.totalMiles += miles;
-          const dayKey = getUtcDateString(location.timestamp);
-          walkingState.dailyMiles[dayKey] = (walkingState.dailyMiles[dayKey] || 0) + miles;
-          walkingState.updatedAt = Date.now();
-          updateWalkingTrackerButton();
-          refreshWalkingSummaryOverlay();
-          if (profileNameKey) {
-            void saveWalkingStats(profileNameKey, walkingState);
-          }
+      const movedMeters = Number.isFinite(location.distanceMeters) ? location.distanceMeters : 0;
+      if (movedMeters > 1) {
+        const miles = toMiles(movedMeters);
+        walkingState.totalMiles += miles;
+        const dayKey = getUtcDateString(location.timestamp);
+        walkingState.dailyMiles[dayKey] = (walkingState.dailyMiles[dayKey] || 0) + miles;
+        walkingState.updatedAt = Date.now();
+        updateWalkingTrackerButton();
+        refreshWalkingSummaryOverlay();
+        if (profileNameKey) {
+          void saveWalkingStats(profileNameKey, walkingState);
         }
       }
 
-      friendlyNpcManager?.recordGpsTravel?.({
-        lat: location.lat,
-        lon: location.lon,
-        accuracyMeters: location.accuracyMeters,
+      friendlyNpcManager?.recordWorldTravel?.({
+        x: location.x,
+        y: location.y,
+        z: location.z,
         timestampMs: location.timestamp
       });
       if (!homeSystem?.isInsideHome) {
-        playerControls?.setGeoCenter({ lat: location.lat, lon: location.lon });
+        playerControls?.setWorldCenter?.({ x: location.x, z: location.z });
       }
-      if (!worldOrigin && Number.isFinite(location.accuracyMeters) && location.accuracyMeters <= 50) {
-        setWorldOrigin({ lat: location.lat, lon: location.lon });
-        rebuildMapFromCache();
-      }
-      const withinOriginResetWindow = Date.now() - appStartedAtMs <= ORIGIN_RESET_WINDOW_MS;
-      const canEvaluateOriginReset = !originWasAutoReset
-        && withinOriginResetWindow
-        && worldOrigin
-        && Number.isFinite(location.accuracyMeters)
-        && location.accuracyMeters <= ORIGIN_RESET_MAX_ACCURACY_METERS;
-      if (canEvaluateOriginReset) {
-        const originDeltaMeters = distanceMeters(worldOrigin.lat, worldOrigin.lon, location.lat, location.lon);
-        if (Number.isFinite(originDeltaMeters) && originDeltaMeters >= ORIGIN_RESET_JUMP_DISTANCE_METERS) {
-          setWorldOrigin({ lat: location.lat, lon: location.lon });
-          rebuildMapFromCache();
-          didInitialGpsSnap = false;
-          originWasAutoReset = true;
-        }
-      }
+
       locationState.state = 'found';
-      locationState.lat = location.lat;
-      locationState.lon = location.lon;
-      locationState.accuracyMeters = location.accuracyMeters;
-      locationState.source = location.source || null;
-      locationState.originLat = worldOrigin?.lat ?? null;
-      locationState.originLon = worldOrigin?.lon ?? null;
+      locationState.x = location.x;
+      locationState.y = location.y;
+      locationState.z = location.z;
+      locationState.accuracyMeters = 0;
+      locationState.source = location.source || 'world';
+      locationState.originX = 0;
+      locationState.originZ = 0;
       locationState.heading = location.heading;
       locationState.speed = location.speed;
       locationState.timestamp = location.timestamp;
       locationState.message = null;
-      locationState.permissionDenied = false;
       locationState.originWasReset = originWasAutoReset;
-      const playerMeters = computePlayerMeters(location);
-      if (playerMeters) {
-        locationState.playerX = playerMeters.x;
-        locationState.playerZ = playerMeters.z;
 
-        let allowGpsSnap = !homeSystem?.isInsideHome;
-        if (homeSystem?.isInsideHome) {
-          const homeGeo = homeSystem.getHomeGeo?.();
-          const homeDistance = homeGeo
-            ? distanceMeters(location.lat, location.lon, homeGeo.lat, homeGeo.lon)
-            : null;
-          if (location.source !== 'debug' && homeDistance != null && homeDistance > 50) {
-            homeSystem.exitHome();
-            allowGpsSnap = true;
-          } else {
-            allowGpsSnap = false;
-          }
-        }
-
-        if (allowGpsSnap) {
-          if (mapViewEnabled) {
-            applyPlayerMeters(playerMeters);
-            didInitialGpsSnap = true;
-            playerControls?.clearGpsMoveTarget?.();
-          } else if (!didInitialGpsSnap) {
-            applyPlayerMeters(playerMeters);
-            didInitialGpsSnap = true;
-          } else if (playerControls && playerModel) {
-            const currentPos = playerControls.body?.translation?.() ?? playerModel.position;
-            if (currentPos && Number.isFinite(currentPos.x) && Number.isFinite(currentPos.z)) {
-              const dx = playerMeters.x - currentPos.x;
-              const dz = playerMeters.z - currentPos.z;
-              const distance = Math.hypot(dx, dz);
-              if (distance > GPS_SNAP_DISTANCE_METERS) {
-                playerControls.clearGpsMoveTarget?.();
-                applyPlayerMeters(playerMeters);
-              } else if (distance > GPS_TARGET_EPSILON_METERS) {
-                const outsideGeoBounds = playerControls.isOutsideGeoBounds?.(currentPos) ?? true;
-                const closestWithinBounds = outsideGeoBounds
-                  ? getClosestPointWithinGeoBounds(currentPos)
-                  : null;
-                const gpsTarget = {
-                  x: playerMeters.x,
-                  y: currentPos.y ?? playerModel.position.y,
-                  z: playerMeters.z
-                };
-                const moveTarget = closestWithinBounds ?? gpsTarget;
-                const blocked = isGpsPathBlocked(currentPos, moveTarget);
-                if (blocked) {
-                  playerControls.clearGpsMoveTarget?.();
-                } else {
-                  playerControls.setGpsMoveTarget?.(moveTarget);
-                }
-              } else {
-                playerControls.clearGpsMoveTarget?.();
-              }
-            }
-          }
-        }
-      } else {
-        locationState.playerX = null;
-        locationState.playerZ = null;
-      }
-
-      const localMeters = tileCache.getLocalMeters(location);
+      const localMeters = { x: location.x, z: location.z };
       locationState.tile = tileCache.getTileCoords(localMeters);
-      if (shouldRequestMapUpdate(location)) {
-        requestMapUpdate(location);
+      if (shouldRequestMapUpdate(localMeters)) {
+        requestMapUpdate(localMeters);
       }
       const playerPosition = playerModel?.position;
       if (shouldUpdatePickupTiles(playerPosition)) {
@@ -12607,22 +12327,20 @@ async function initCore(runtimeContext) {
       refreshBuildSubscriptionsForLocation();
     },
     onError: (error, message) => {
-      console.warn('Location error:', message, error);
+      console.warn('World position error:', message, error);
       locationState.state = 'error';
       locationState.message = message;
-      locationState.permissionDenied = error?.code === error?.PERMISSION_DENIED;
       debugState.lastError = { message, timestamp: Date.now() };
     },
     onStatus: (status) => {
       locationState.state = status.state;
       locationState.message = status.message || null;
-      locationState.accuracyMeters = status.accuracy ?? locationState.accuracyMeters;
+      locationState.accuracyMeters = 0;
       if (status.source) {
         locationState.source = status.source;
       }
       if (status.state === 'requesting' || status.state === 'found') {
-        locationState.permissionDenied = false;
-      }
+        }
     }
   });
 
@@ -13151,13 +12869,13 @@ async function initCore(runtimeContext) {
 
   const getCurrentBuildPath = () => {
     const fix = getLatestLocationFix?.();
-    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return null;
-    return onBuildLatLonPath(fix.lat, fix.lon);
+    if (!fix || !Number.isFinite(fix.x) || !Number.isFinite(fix.z)) return null;
+    return onBuildWorldPath(fix.x, fix.z);
   };
 
   const getBuildRecordPath = (id, record) => {
     if (record?.buildPath) return record.buildPath;
-    if (Number.isFinite(record?.lat) && Number.isFinite(record?.lon)) return onBuildLatLonPath(record.lat, record.lon);
+    if (Number.isFinite(record?.x) && Number.isFinite(record?.z)) return onBuildWorldPath(record.x, record.z);
     return getCurrentBuildPath();
   };
 
@@ -13459,34 +13177,21 @@ async function initCore(runtimeContext) {
   const toBucketCoord = (value) => Math.round(value * BUILD_BUCKET_SCALE);
   const bucketCoordToKey = (coord) => coord < 0 ? `m${Math.abs(coord)}` : `p${coord}`;
   const toBucketKey = (value) => bucketCoordToKey(toBucketCoord(value));
-  const onBuildBucketPath = (latCoord, lonCoord) => `worldBuilds/${bucketCoordToKey(latCoord)}_${bucketCoordToKey(lonCoord)}`;
-  const onBuildLatLonPath = (lat, lon) => onBuildBucketPath(toBucketCoord(lat), toBucketCoord(lon));
-  const getBuildSubscriptionPaths = (lat, lon) => {
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return [];
-    const latCoord = toBucketCoord(lat);
-    const lonCoord = toBucketCoord(lon);
+  const onBuildBucketPath = (xCoord, zCoord) => `worldBuilds/${bucketCoordToKey(xCoord)}_${bucketCoordToKey(zCoord)}`;
+  const onBuildWorldPath = (x, z) => onBuildBucketPath(toBucketCoord(x), toBucketCoord(z));
+  const getBuildSubscriptionPaths = (x, z) => {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return [];
+    const xCoord = toBucketCoord(x);
+    const zCoord = toBucketCoord(z);
     const paths = [];
-    for (let dLat = -1; dLat <= 1; dLat += 1) {
-      for (let dLon = -1; dLon <= 1; dLon += 1) {
-        paths.push(onBuildBucketPath(latCoord + dLat, lonCoord + dLon));
+    for (let dX = -1; dX <= 1; dX += 1) {
+      for (let dZ = -1; dZ <= 1; dZ += 1) {
+        paths.push(onBuildBucketPath(xCoord + dX, zCoord + dZ));
       }
     }
     return paths;
   };
-  const getLocalPositionForBuildRecord = (record) => {
-    if (Number.isFinite(record?.lat) && Number.isFinite(record?.lon)) {
-      const origin = getLocalMapOrigin();
-      const local = geoToLocalMeters(record.lat, record.lon, origin);
-      if (local) {
-        return new THREE.Vector3(
-          local.x,
-          Number.isFinite(record.y) ? record.y : 0,
-          local.z
-        );
-      }
-    }
-    return new THREE.Vector3(record?.x || 0, record?.y || 0, record?.z || 0);
-  };
+  const getLocalPositionForBuildRecord = (record) => new THREE.Vector3(record?.x || 0, record?.y || 0, record?.z || 0);
   const setBuildMeshPositionFromRecord = (mesh, record) => {
     if (!mesh) return;
     const position = getLocalPositionForBuildRecord(record);
@@ -13511,8 +13216,6 @@ async function initCore(runtimeContext) {
       existing.health = Number.isFinite(record.health) ? record.health : existing.health;
       existing.noteText = record.noteText || '';
       existing.ownerId = record.ownerId || null;
-      existing.lat = Number.isFinite(record.lat) ? record.lat : existing.lat;
-      existing.lon = Number.isFinite(record.lon) ? record.lon : existing.lon;
       existing.x = Number.isFinite(record.x) ? record.x : existing.x;
       existing.y = Number.isFinite(record.y) ? record.y : existing.y;
       existing.z = Number.isFinite(record.z) ? record.z : existing.z;
@@ -13568,8 +13271,8 @@ async function initCore(runtimeContext) {
   };
   const subscribeBuildsForCurrentLocation = () => {
     const fix = getLatestLocationFix?.();
-    if (!fix || !Number.isFinite(fix.lat) || !Number.isFinite(fix.lon)) return;
-    const nextPaths = new Set(getBuildSubscriptionPaths(fix.lat, fix.lon));
+    if (!fix || !Number.isFinite(fix.x) || !Number.isFinite(fix.z)) return;
+    const nextPaths = new Set(getBuildSubscriptionPaths(fix.x, fix.z));
     nextPaths.forEach((buildPath) => subscribeBuildPath(buildPath));
     Array.from(buildState.subscriptions.keys()).forEach((buildPath) => {
       if (!nextPaths.has(buildPath)) unsubscribeBuildPath(buildPath);
@@ -13586,11 +13289,9 @@ async function initCore(runtimeContext) {
   buildConfirmBtn?.addEventListener('click', async () => {
     if (!buildState.placing) return;
     const p = buildState.placing.mesh.position;
-    const buildGeo = localMetersToGeo(p.x, p.z, getLocalMapOrigin());
-    if (!buildGeo || !Number.isFinite(buildGeo.lat) || !Number.isFinite(buildGeo.lon)) return;
-    const buildPath = onBuildLatLonPath(buildGeo.lat, buildGeo.lon);
+    const buildPath = onBuildWorldPath(p.x, p.z);
     const idRef = push(ref(db, buildPath));
-    const record = { type: buildState.placing.type, lat: buildGeo.lat, lon: buildGeo.lon, x: p.x, y: p.y, z: p.z, health: BUILD_MAX_HEALTH, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local', createdAt: Date.now() };
+    const record = { type: buildState.placing.type, x: p.x, y: p.y, z: p.z, health: BUILD_MAX_HEALTH, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local', createdAt: Date.now() };
     await set(idRef, record);
     const colliderEntry = createStaticBoxColliderForObject(buildState.placing.mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
     buildState.records.set(idRef.key, { ...record, buildPath, mesh: buildState.placing.mesh, colliderEntry });
@@ -13750,8 +13451,8 @@ async function initCore(runtimeContext) {
       Object.keys(connections).forEach((id) => {
         const other = otherPlayers[id];
         let distance = remotePresenceMeta[id]?.lastDistance ?? null;
-        if (distance == null && localFix && Number.isFinite(remotePresenceMeta[id]?.lastLat) && Number.isFinite(remotePresenceMeta[id]?.lastLon)) {
-          distance = distanceMeters(localFix.lat, localFix.lon, remotePresenceMeta[id].lastLat, remotePresenceMeta[id].lastLon);
+        if (distance == null && localFix && Number.isFinite(remotePresenceMeta[id]?.lastX) && Number.isFinite(remotePresenceMeta[id]?.lastZ)) {
+          distance = Math.hypot(remotePresenceMeta[id].lastX - localFix.x, remotePresenceMeta[id].lastZ - localFix.z);
         }
         if (distance == null && other?.model && playerPos) {
           distance = playerPos.distanceTo(other.model.position);
@@ -13781,9 +13482,9 @@ async function initCore(runtimeContext) {
     },
     getTerrainStampDebugOverlayState: () => terrainStampDebugOverlay?.getState?.() ?? null,
     loadTerrainStampRegressionScene: () => {
-      locationProvider.setDebugLocation(TERRAIN_STAMP_REGRESSION_SCENE.location);
-      locationProvider.setDebugAccuracy(5);
-      locationProvider.setDebugEnabled(true);
+      const pos = TERRAIN_STAMP_REGRESSION_SCENE.position;
+      playerModel?.position?.set?.(pos.x, pos.y, pos.z);
+      playerControls?.body?.setTranslation?.(pos, true);
       terrainStampDebugOverlay?.setOptions?.({ showHeatmap: true });
       terrainStampDebugOverlay?.setEnabled?.(true);
       return { ...TERRAIN_STAMP_REGRESSION_SCENE, debugLocationEnabled: true };
@@ -13803,13 +13504,13 @@ async function initCore(runtimeContext) {
     setDistanceUnitPreference: (unit) => setDistanceUnitPreference(unit),
     resetWorldOrigin: () => {
       resetWorldOrigin();
-      locationState.originLat = null;
-      locationState.originLon = null;
+      locationState.originX = 0;
+      locationState.originZ = 0;
       locationState.playerX = null;
       locationState.playerZ = null;
       locationState.tile = null;
       rebuildMapFromCache();
-      didInitialGpsSnap = false;
+      didInitialWorldSync = false;
       window.clearTileCache?.();
     },
     clearHomeLocation: async () => {
@@ -13946,11 +13647,7 @@ async function initCore(runtimeContext) {
   const locationAdapter = {
     getState: () => ({ ...locationState }),
     retry: () => locationProvider.retry(),
-    getDebugState: () => locationProvider.getDebugState(),
-    setDebugEnabled: (enabled) => locationProvider.setDebugEnabled(enabled),
-    setDebugLocation: (coords) => locationProvider.setDebugLocation(coords),
-    setDebugAccuracy: (accuracyMeters) => locationProvider.setDebugAccuracy(accuracyMeters),
-    stepDebugLocation: (delta) => locationProvider.stepDebugLocation(delta)
+    getDebugState: () => locationProvider.getDebugState()
   };
 
   initSettingsPanel({
@@ -15244,7 +14941,6 @@ async function initCore(runtimeContext) {
     if (now - lastPresenceSweep >= PRESENCE_SWEEP_MS) {
       lastPresenceSweep = now;
       const localFix = getLatestLocationFix();
-      const mapOrigin = getLocalMapOrigin();
       Object.entries(remotePresenceMeta).forEach(([remoteId, meta]) => {
         if (!meta) return;
         if (now - meta.lastSeenMs > PRESENCE_STALE_MS) {
@@ -15252,16 +14948,7 @@ async function initCore(runtimeContext) {
           return;
         }
         const player = otherPlayers[remoteId];
-        if (!localFix || !mapOrigin) {
-          if (player?.model) {
-            player.model.visible = true;
-          }
-          if (player?.nameLabel) {
-            player.nameLabel.style.display = 'block';
-          }
-          return;
-        }
-        if (!worldAnchorMatchesLocal(meta.worldAnchor)) {
+        if (!localFix) {
           if (player?.model) {
             player.model.visible = true;
           }
@@ -15271,8 +14958,8 @@ async function initCore(runtimeContext) {
           return;
         }
         let dist = null;
-        if (Number.isFinite(meta.lastLat) && Number.isFinite(meta.lastLon)) {
-          dist = distanceMeters(localFix.lat, localFix.lon, meta.lastLat, meta.lastLon);
+        if (Number.isFinite(meta.lastX) && Number.isFinite(meta.lastZ)) {
+          dist = Math.hypot(meta.lastX - localFix.x, meta.lastZ - localFix.z);
         } else if (player?.model && playerModel) {
           dist = playerModel.position.distanceTo(player.model.position);
         }
@@ -15300,7 +14987,6 @@ async function initCore(runtimeContext) {
 
     if (now - lastPresenceSend >= presenceSendIntervalMs) {
       const localFix = getLatestLocationFix();
-      const mapOrigin = getLocalMapOrigin();
       const payload = {
         type: "presence",
         id: multiplayer.getId(),
@@ -15312,24 +14998,8 @@ async function initCore(runtimeContext) {
         rotation: playerModel.rotation.y,
         action: playerModel.userData.currentAction
       };
-      const derivedGeo = mapOrigin
-        ? localMetersToGeo(playerModel.position.x, playerModel.position.z, mapOrigin)
-        : null;
-      if (derivedGeo) {
-        payload.lat = derivedGeo.lat;
-        payload.lon = derivedGeo.lon;
-      } else if (localFix) {
-        payload.lat = localFix.lat;
-        payload.lon = localFix.lon;
-      }
       if (Number.isFinite(localFix?.heading)) {
         payload.heading = localFix.heading;
-      }
-      if (mapOrigin) {
-        payload.worldAnchor = {
-          centerLat: mapOrigin.centerLat,
-          centerLon: mapOrigin.centerLon
-        };
       }
       payload.equippedLeft = isInventoryItemEquipped('torch')
         ? 'torch'

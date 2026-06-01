@@ -6,8 +6,8 @@ import { getTerrainHeight } from "./environment/terrainHeight.js";
 const QUEST_FRIEND_MODEL = "/models/cowboy.fbx";
 const QUEST_FRIEND_SPAWN_RADIUS_MIN = 3;
 const QUEST_FRIEND_SPAWN_RADIUS_MAX = 6;
-const QUEST_FIRST_GPS_TARGET_METERS = 30;
-const QUEST_FIRST_GPS_XP = 60;
+const QUEST_FIRST_WORLD_TARGET_METERS = 30;
+const QUEST_FIRST_WORLD_XP = 60;
 const QUEST_SECOND_MUSHROOM_TARGET = 1;
 const QUEST_SECOND_MUSHROOM_XP = 35;
 const QUEST_FRIEND_WANDER_RADIUS = 5;
@@ -21,13 +21,13 @@ const QUEST_FRIEND_GROUND_OFFSET = 0.9;
 
 const TUTORIAL_QUESTS = [
   {
-    id: "gps-walk-30m",
+    id: "world-walk-30m",
     title: "Walk 30 meters",
-    description: "Move your GPS location at least 30 meters in the real world.",
-    faq: "You have to physically move in the real world. The circle around your character is a bounding bubble tied to your real GPS position. Come on, get up off your couch and go for a walk. Welcome to Street Quest!",
-    kind: "gps",
-    target: QUEST_FIRST_GPS_TARGET_METERS,
-    xp: QUEST_FIRST_GPS_XP
+    description: "Walk your player at least 30 meters through the world.",
+    faq: "Walk your player around the world until you have covered 30 meters. Welcome to Street Quest!",
+    kind: "world",
+    target: QUEST_FIRST_WORLD_TARGET_METERS,
+    xp: QUEST_FIRST_WORLD_XP
   },
   {
     id: "collect-mushroom-1",
@@ -100,11 +100,11 @@ const TUTORIAL_QUESTS = [
     xp: QUEST_GENERIC_XP
   },
   {
-    id: "gps-hike-100m",
+    id: "world-hike-100m",
     title: "Take a 100 meter hike",
-    description: "Move your GPS location at least 100 meters from where you accept this quest.",
-    faq: "This measures real GPS movement from your acceptance point. Walk outside or along a safe route until the meter fills.",
-    kind: "gps",
+    description: "Walk your player at least 100 meters from where you accept this quest.",
+    faq: "This measures your player’s world-coordinate movement from the acceptance point. Keep walking until the meter fills.",
+    kind: "world",
     target: 100,
     xp: QUEST_GENERIC_XP
   },
@@ -171,28 +171,22 @@ const TUTORIAL_QUESTS = [
     xp: QUEST_GENERIC_XP
   },
   {
-    id: "gps-trek-250m",
+    id: "world-trek-250m",
     title: "Complete a 250 meter trek",
-    description: "Move your GPS location at least 250 meters from where you accept this quest.",
-    faq: "This is a longer real-world walk. Choose a safe route, keep the app open, and watch the progress meter climb.",
-    kind: "gps",
+    description: "Walk your player at least 250 meters from where you accept this quest.",
+    faq: "This is a longer world-coordinate walk. Keep moving your player and watch the progress meter climb.",
+    kind: "world",
     target: 250,
     xp: QUEST_GENERIC_XP
   }
 ];
 
-const distanceMeters = (lat1, lon1, lat2, lon2) => {
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const earthRadius = 6371000;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return earthRadius * c;
+const distanceMeters = (a, b) => {
+  if (!hasValidFix(a) || !hasValidFix(b)) return 0;
+  return Math.hypot(b.x - a.x, b.z - a.z);
 };
 
-const hasValidFix = (fix) => Number.isFinite(fix?.lat) && Number.isFinite(fix?.lon);
+const hasValidFix = (fix) => Number.isFinite(fix?.x) && Number.isFinite(fix?.z);
 
 export class QuestManager {
   constructor({ scene, getPlayerModel, attachPhysics, detachPhysics, addXp }) {
@@ -209,8 +203,8 @@ export class QuestManager {
       shouldFollowPlayer: true,
       acceptedQuestIds: [],
       completedQuestIds: [],
-      gpsQuestStartFix: null,
-      gpsQuestDistanceMeters: 0,
+      worldQuestStartPosition: null,
+      worldQuestDistanceMeters: 0,
       mushroomCount: 0,
       zombieKillCount: 0,
       deerKillCount: 0,
@@ -374,7 +368,7 @@ export class QuestManager {
   }
 
   hasStartedQuestProgress(quest) {
-    if (quest?.kind === "gps") return this.state.gpsQuestDistanceMeters > 0;
+    if (quest?.kind === "world") return this.state.worldQuestDistanceMeters > 0;
     if (quest?.kind === "mushroom") return this.state.mushroomCount > 0;
     if (quest?.kind === "zombie") return this.state.zombieKillCount > 0;
     if (quest?.kind === "deer") return this.state.deerKillCount > 0;
@@ -435,8 +429,8 @@ export class QuestManager {
 
     const questAccepted = this.state.acceptedQuestIds.includes(quest.id);
     const progressText = this.getQuestProgressText(quest.id);
-    const intro = quest.id === "gps-walk-30m"
-      ? "Welcome to Street Quest! First quest: move your GPS location 30 meters. You have to physically move in the real world. The circle around your character is a bounding bubble tied to your real GPS location. Come on, get up off your couch and go for a walk."
+    const intro = quest.id === "world-walk-30m"
+      ? "Welcome to Street Quest! First quest: walk your player 30 meters through the world."
       : `Next quest: ${quest.title}.`;
 
     return {
@@ -535,10 +529,10 @@ export class QuestManager {
     if (wasAccepted && this.hasStartedQuestProgress(quest)) return;
 
     const target = this.getQuestTarget(quest);
-    if (quest.kind === "gps") {
+    if (quest.kind === "world") {
       const latestFix = window.latestLocation;
-      this.state.gpsQuestStartFix = hasValidFix(latestFix) ? { lat: latestFix.lat, lon: latestFix.lon } : null;
-      this.state.gpsQuestDistanceMeters = 0;
+      this.state.worldQuestStartPosition = hasValidFix(latestFix) ? { x: latestFix.x, z: latestFix.z } : null;
+      this.state.worldQuestDistanceMeters = 0;
     }
     if (quest.kind === "mushroom") {
       this.state.mushroomCount = 0;
@@ -579,8 +573,8 @@ export class QuestManager {
     const target = this.getQuestTarget(quest);
     const isCompleted = this.state.completedQuestIds.includes(questId);
 
-    if (quest.kind === "gps") {
-      const moved = isCompleted ? target : Math.floor(this.state.gpsQuestDistanceMeters);
+    if (quest.kind === "world") {
+      const moved = isCompleted ? target : Math.floor(this.state.worldQuestDistanceMeters);
       return `(${Math.min(moved, target)}/${target} m)`;
     }
     if (quest.kind === "mushroom") {
@@ -677,26 +671,21 @@ export class QuestManager {
     }
   }
 
-  updateGpsQuestProgress() {
+  updateWorldQuestProgress() {
     const activeQuest = this.getActiveQuest();
-    if (!activeQuest || activeQuest.kind !== "gps") return;
+    if (!activeQuest || activeQuest.kind !== "world") return;
 
     const latestFix = window.latestLocation;
     if (!hasValidFix(latestFix)) return;
 
-    if (!hasValidFix(this.state.gpsQuestStartFix)) {
-      this.state.gpsQuestStartFix = { lat: latestFix.lat, lon: latestFix.lon };
-      this.state.gpsQuestDistanceMeters = 0;
+    if (!hasValidFix(this.state.worldQuestStartPosition)) {
+      this.state.worldQuestStartPosition = { x: latestFix.x, z: latestFix.z };
+      this.state.worldQuestDistanceMeters = 0;
       return;
     }
 
-    const moved = distanceMeters(
-      this.state.gpsQuestStartFix.lat,
-      this.state.gpsQuestStartFix.lon,
-      latestFix.lat,
-      latestFix.lon
-    );
-    this.state.gpsQuestDistanceMeters = Math.max(0, moved);
+    const moved = distanceMeters(this.state.worldQuestStartPosition, latestFix);
+    this.state.worldQuestDistanceMeters = Math.max(0, moved);
 
     if (moved >= this.getQuestTarget(activeQuest)) {
       this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
@@ -748,7 +737,7 @@ export class QuestManager {
         groundOffset: QUEST_FRIEND_GROUND_OFFSET
       });
     }
-    this.updateGpsQuestProgress();
+    this.updateWorldQuestProgress();
     this.updateClimbQuestProgress();
   }
 }
