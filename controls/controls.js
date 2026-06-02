@@ -1987,12 +1987,34 @@ export class PlayerControls {
     return this.slideMomentum.length() > 0.01;
   }
 
+  getAnimationAction(actionName) {
+    if (!actionName || !this.playerModel?.userData?.actions) return null;
+    const action = this.playerModel.userData.actions[actionName];
+    return action && typeof action.reset === 'function' ? action : null;
+  }
+
+  setMovementAction(actionName, fadeDuration = 0.2) {
+    if (!this.playerModel?.userData || !actionName) return false;
+    const action = this.getAnimationAction(actionName);
+    if (!action) return false;
+
+    const current = this.playerModel.userData.currentAction;
+    if (current === actionName) return true;
+
+    const currentAction = this.getAnimationAction(current);
+    currentAction?.fadeOut(fadeDuration);
+    action.reset().fadeIn(fadeDuration).play();
+    this.playerModel.userData.currentAction = actionName;
+    return true;
+  }
+
   playAction(actionName, options = {}) {
     if (!this.playerModel) return false;
     const resolvedAction = actionName === 'mutantPunch' && this.getEquippedSword() ? 'swordSlash' : actionName;
     const swordAttackActions = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
     const actions = this.playerModel.userData.actions;
-    if (!actions || !actions[resolvedAction]) return false;
+    const action = this.getAnimationAction(resolvedAction);
+    if (!actions || !action) return false;
     if (ACTION_LOCKED_ATTACKS.includes(resolvedAction) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return false;
 
     if (this.runningKickTimer) {
@@ -2005,8 +2027,7 @@ export class PlayerControls {
     }
 
     const current = this.playerModel.userData.currentAction;
-    const action = actions[resolvedAction];
-    actions[current]?.fadeOut(0.1);
+    this.getAnimationAction(current)?.fadeOut(0.1);
     action.reset().fadeIn(0.1).play();
     this.playerModel.userData.currentAction = resolvedAction;
     this.currentSpecialAction = resolvedAction;
@@ -2631,9 +2652,7 @@ export class PlayerControls {
         }
         const current = this.playerModel.userData.currentAction;
         if (actionName && current !== actionName) {
-          actions[current]?.fadeOut(0.2);
-          actions[actionName].reset().fadeIn(0.2).play();
-          this.playerModel.userData.currentAction = actionName;
+          this.setMovementAction(actionName, 0.2);
         }
       }
       const newTarget = new THREE.Vector3(this.playerModel.position.x, this.playerModel.position.y + 1, this.playerModel.position.z);
