@@ -380,6 +380,7 @@ const QWOP_ARROW_INPUTS = Object.freeze({
 });
 const TORSO_MAX_TWIST = Math.PI / 2;
 const TARGET_NUDGE_SPEED = 2.4;
+const LEG_LIFT_SPEED = 2.8;
 const TARGET_RETURN_SPEED = 1.35;
 const TARGET_FOLLOW_SPEED = 11;
 
@@ -432,9 +433,17 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   for (const name of selectedParts) {
     const part = rig.parts[name];
     const spec = specs[name];
-    if (!part || !spec || !hasArrowInput) continue;
+    if (!part || !spec) continue;
 
     const target = ensurePartControlTarget(part);
+
+    if (name === 'leftLeg' || name === 'rightLeg') {
+      target.x = THREE.MathUtils.clamp(target.x - LEG_LIFT_SPEED * dt, spec.min, spec.max);
+      continue;
+    }
+
+    if (!hasArrowInput) continue;
+
     const nudge = TARGET_NUDGE_SPEED * dt;
     if (arrows.up) target.x -= nudge;
     if (arrows.down) target.x += nudge;
@@ -462,8 +471,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const target = ensurePartControlTarget(part);
     const isSelected = selectedSet.has(name);
 
-    if (!isSelected) {
-      target.x = dampToward(target.x, spec.rest, TARGET_RETURN_SPEED, dt);
+    if (!isSelected && name !== 'torso') {
       target.y = dampToward(target.y, spec.restY, TARGET_RETURN_SPEED, dt);
       target.z = dampToward(target.z, spec.restZ, TARGET_RETURN_SPEED, dt);
     }
@@ -471,8 +479,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const angle = part.group.rotation.x;
     const weightFall = spec.gravity * physics.mass * 0.025 * Math.sin(angle - spec.rest);
     const holdTorque = isSelected ? (target.x - angle) * spec.torque : 0;
-    const passiveTorque = !isSelected ? (spec.rest - angle) * spec.gravity * 0.35 : 0;
-    physics.angularVelocity += (holdTorque + passiveTorque - weightFall) * dt;
+    physics.angularVelocity += (holdTorque - weightFall) * dt;
     physics.angularVelocity *= Math.exp(-spec.damping * dt);
     part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
 
