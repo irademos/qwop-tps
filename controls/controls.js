@@ -31,7 +31,6 @@ const PLAYER_GROUND_DRAG = 7;
 const PLAYER_AIR_DRAG = 0.35;
 const PLAYER_MAX_HORIZONTAL_SPEED = 5;
 const PLAYER_FALL_TORQUE = 8;
-const PLAYER_FALL_RESTORE_TORQUE = 5;
 const PLAYER_FALL_DAMPING = 4.5;
 const PLAYER_FALL_MOMENTUM_LEAN = 0.08;
 const PLAYER_FALL_MAX_PITCH = 1.35;
@@ -2644,7 +2643,7 @@ export class PlayerControls {
       const fallThreshold = this.canJump ? PLAYER_FALL_BASE_THRESHOLD : PLAYER_FALL_BASE_THRESHOLD * 0.35;
       const fallTorque = Math.abs(fallInput) > fallThreshold
         ? (fallInput - Math.sign(fallInput) * fallThreshold) * PLAYER_FALL_TORQUE
-        : -this.fallPitch * PLAYER_FALL_RESTORE_TORQUE;
+        : 0;
       this.fallAngularVelocity += fallTorque * deltaSeconds;
       this.fallAngularVelocity *= Math.exp(-PLAYER_FALL_DAMPING * deltaSeconds);
       this.fallPitch = THREE.MathUtils.clamp(
@@ -2652,8 +2651,7 @@ export class PlayerControls {
         -PLAYER_FALL_MAX_PITCH,
         PLAYER_FALL_MAX_PITCH
       );
-      if (this.canJump && Math.abs(this.fallPitch) < 0.01 && Math.abs(fallInput) <= fallThreshold) {
-        this.fallPitch = 0;
+      if (Math.abs(this.fallAngularVelocity) < 0.0001 && Math.abs(fallInput) <= fallThreshold) {
         this.fallAngularVelocity = 0;
       }
       this.playerModel.rotation.set(this.fallPitch, yawAngle, 0);
