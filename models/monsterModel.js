@@ -1,322 +1,117 @@
 // /models/monsterModel.js
 import * as THREE from "three";
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { createProceduralBody } from './playerModel.js';
 
-const animationFiles = {
-  Idle: 'Breathing Idle.fbx',
-  Walk: 'Old Man Walk.fbx',
-  Run: 'Drunk Run Forward.fbx',
-  Weapon: 'Mutant Punch.fbx',
-  JumpAttack: 'Jump Attack.fbx',
-  Death: 'Dying.fbx',
-  Hit: 'Flying Back Death.fbx',
-  TwistDance: 'Twist Dance.fbx'
-};
+const AUTUMN_SWORD_MODEL_URL = '/assets/props/autumn_sword.glb';
+const AUTUMN_SWORD_SCALE = 2.0;
+const AUTUMN_SWORD_HOLD_OFFSET = new THREE.Vector3(0.75, 0, 0);
+const AUTUMN_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
+const AUTUMN_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(AUTUMN_SWORD_HOLD_ROTATION);
+let autumnSwordTemplatePromise = null;
 
-const animationClipCache = new Map();
-const missingAnimationLogs = new Set();
-const DEFAULT_MATERIAL_BRIGHTNESS = 1;
-const BOUNDS_REFRESH_INTERVAL_MS = 250;
-const CONSERVATIVE_BOUNDS_PADDING = 1.15;
-
-function applyMaterialBrightness(model, brightness) {
-  if (!Number.isFinite(brightness) || brightness === DEFAULT_MATERIAL_BRIGHTNESS) return;
-  const clamped = THREE.MathUtils.clamp(brightness, 0, 2);
-  const processedMaterials = new Set();
-  model.traverse((obj) => {
-    if (!obj.isMesh || !obj.material) return;
-    const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-    materials.forEach((material) => {
-      if (!material || processedMaterials.has(material)) return;
-      processedMaterials.add(material);
-      if (material?.color?.multiplyScalar) {
-        material.color.multiplyScalar(clamped);
-      }
-      if (typeof material?.emissiveIntensity === 'number') {
-        material.emissiveIntensity *= clamped;
-      }
-      material.needsUpdate = true;
-    });
-  });
-}
-
-function normalizeLodConfigs(config) {
-  if (!Array.isArray(config?.lods)) return [];
-  return config.lods
-    .filter((lod) => lod && typeof lod.path === 'string' && lod.path.trim())
-    .map((lod) => ({
-      path: lod.path,
-      distance: Number.isFinite(lod.distance) ? lod.distance : null,
-    }))
-    .filter((lod) => lod.distance !== null && lod.distance > 0)
-    .sort((a, b) => a.distance - b.distance)
-    .filter((lod, index, lods) => index === 0 || lod.distance > lods[index - 1].distance);
-}
-
-function configureMeshCulling(model) {
-  const skinnedMeshes = [];
-  model.traverse((obj) => {
-    if (obj.material?.skinning === true) obj.material.skinning = true;
-    if (obj.isSkinnedMesh && typeof obj.normalizeSkinWeights === 'function') {
-      obj.normalizeSkinWeights();
-    }
-    if (!obj.isMesh) return;
-    obj.frustumCulled = true;
-    if (obj.geometry) {
-      if (!obj.geometry.boundingBox) {
-        obj.geometry.computeBoundingBox();
-      }
-      if (!obj.geometry.boundingSphere) {
-        obj.geometry.computeBoundingSphere();
-      }
-    }
-    if (!obj.isSkinnedMesh) return;
-    skinnedMeshes.push(obj);
-
-    const boundingSphere = obj.geometry?.boundingSphere;
-    if (boundingSphere) {
-      boundingSphere.radius *= CONSERVATIVE_BOUNDS_PADDING;
-    }
-    const boundingBox = obj.geometry?.boundingBox;
-    if (boundingBox) {
-      const padding = boundingBox.getSize(new THREE.Vector3()).length() * 0.08;
-      boundingBox.expandByScalar(padding);
+function findProceduralHand(root, hand = 'right') {
+  let match = null;
+  const wanted = hand === 'left' ? 'left' : 'right';
+  root?.traverse?.((child) => {
+    if (match) return;
+    const name = String(child.name || '').toLowerCase();
+    if (child.userData?.proceduralHand === wanted || name === `${wanted}armhand`) {
+      match = child;
     }
   });
-  return skinnedMeshes;
+  return match;
 }
 
-function createSkinnedBoundsUpdater(skinnedMeshes) {
-  if (!Array.isArray(skinnedMeshes) || skinnedMeshes.length === 0) {
-    return () => {};
+function createFallbackAutumnSword() {
+  const group = new THREE.Group();
+  group.name = 'monsterAutumnSwordFallback';
+  const blade = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.8, 0.2),
+    new THREE.MeshStandardMaterial({ color: 0xe2b14b, roughness: 0.45, metalness: 0.35 })
+  );
+  blade.name = 'autumnSwordBlade';
+  blade.castShadow = true;
+  blade.receiveShadow = true;
+  group.add(blade);
+  return group;
+}
+
+async function loadAutumnSwordTemplate() {
+  if (!autumnSwordTemplatePromise) {
+    const loader = new GLTFLoader();
+    autumnSwordTemplatePromise = loader.loadAsync(AUTUMN_SWORD_MODEL_URL)
+      .then((gltf) => gltf?.scene || createFallbackAutumnSword())
+      .catch((error) => {
+        console.warn('Failed to load monster autumn sword model, using placeholder.', error);
+        return createFallbackAutumnSword();
+      });
   }
-  let lastUpdateTime = -Infinity;
-
-  return () => {
-    const now = performance.now();
-    if (now - lastUpdateTime < BOUNDS_REFRESH_INTERVAL_MS) return;
-    lastUpdateTime = now;
-
-    for (const mesh of skinnedMeshes) {
-      if (!mesh?.isSkinnedMesh) continue;
-      mesh.computeBoundingBox();
-      mesh.computeBoundingSphere();
-      if (mesh.boundingSphere) {
-        mesh.boundingSphere.radius *= 1.05;
-      }
-    }
-  };
+  return autumnSwordTemplatePromise;
 }
 
-function bindSkinnedMeshesToBaseSkeleton(baseModel, lodModel) {
-  const baseBoneMap = new Map();
-  baseModel.traverse((obj) => {
-    if (obj.isBone && obj.name) {
-      baseBoneMap.set(obj.name, obj);
-    }
+function configureSwordMesh(mesh) {
+  mesh.name = 'monsterAutumnSword';
+  mesh.scale.setScalar(AUTUMN_SWORD_SCALE);
+  mesh.position.copy(AUTUMN_SWORD_HOLD_OFFSET);
+  mesh.quaternion.copy(AUTUMN_SWORD_HOLD_QUATERNION);
+  mesh.traverse?.((child) => {
+    if (!child.isMesh) return;
+    child.castShadow = true;
+    child.receiveShadow = true;
   });
-
-  if (baseBoneMap.size === 0) return;
-
-  lodModel.traverse((obj) => {
-    if (!obj.isSkinnedMesh || !obj.skeleton) return;
-    const bones = obj.skeleton.bones.map((bone) => baseBoneMap.get(bone.name) ?? bone);
-    const skeleton = new THREE.Skeleton(bones, obj.skeleton.boneInverses);
-    skeleton.calculateInverses();
-    obj.bind(skeleton, obj.bindMatrix);
-    obj.skeleton = skeleton;
-  });
+  return mesh;
 }
 
-function stripEmbeddedLights(model) {
-  const lightsToRemove = [];
-  model.traverse((obj) => {
-    if (obj.isLight) {
-      lightsToRemove.push(obj);
-      return;
-    }
+function attachAutumnSword(monsterGroup) {
+  const rightHand = findProceduralHand(monsterGroup, 'right');
+  if (!rightHand) return;
+  const fallback = configureSwordMesh(createFallbackAutumnSword());
+  rightHand.add(fallback);
+  monsterGroup.userData.equippedWeaponType = 'sword';
+  monsterGroup.userData.weaponHitMesh = fallback;
+  monsterGroup.userData.weaponHand = 'right';
+  monsterGroup.userData.swordHitCooldowns = new Map();
 
-    if (obj.isMesh) {
-      obj.castShadow = false;
-      obj.receiveShadow = false;
-    }
+  loadAutumnSwordTemplate().then((template) => {
+    if (!rightHand.parent) return;
+    const sword = configureSwordMesh(template.clone(true));
+    rightHand.remove(fallback);
+    rightHand.add(sword);
+    monsterGroup.userData.weaponHitMesh = sword;
   });
-
-  for (const light of lightsToRemove) {
-    if (light.parent) light.parent.remove(light);
-  }
-}
-
-function logMissingAnimation(name, modelPath) {
-  const key = `${modelPath}:${name}`;
-  if (missingAnimationLogs.has(key)) return;
-  missingAnimationLogs.add(key);
-  console.warn(`Missing monster animation clip "${name}" for model ${modelPath}. Falling back to Idle.`);
 }
 
 export function loadMonsterModel(modelPath, callback) {
-  const loader = new FBXLoader();
-  const configPath = modelPath.replace(/\.[^/.]+$/, '.json');
-  fetch(configPath)
-    .then((res) => (res.ok ? res.json() : {}))
-    .catch(() => ({}))
-    .then((config) => {
-      loader.load(
-        modelPath,
-        (fbx) => {
-          if (!fbx || typeof fbx.traverse !== 'function') {
-            console.warn('FBXLoader returned an unexpected result:', fbx);
-            return;
-          }
+  const monsterGroup = new THREE.Group();
+  monsterGroup.name = 'ProceduralQwopMonster';
 
-          const model = fbx;
-          const lodConfigs = normalizeLodConfigs(config);
+  const { root: bodyRoot, parts } = createProceduralBody(THREE);
+  monsterGroup.add(bodyRoot);
+  monsterGroup.userData.pivot = bodyRoot;
+  monsterGroup.userData.modelRoot = bodyRoot;
+  monsterGroup.userData.monsterConfig = {};
+  monsterGroup.userData.qwopRig = {
+    parts,
+    bodyRoot,
+    forwardIntent: 0,
+    balance: 0,
+    modelPath,
+    description: 'Procedural weighted QWOP-style monster body'
+  };
+  monsterGroup.userData.currentAction = 'Idle';
+  monsterGroup.userData.actions = {};
+  monsterGroup.userData.mixer = null;
+  monsterGroup.userData.updateSkinnedBounds = () => {};
 
-          stripEmbeddedLights(model);
+  attachAutumnSword(monsterGroup);
 
-          const skinnedMeshes = configureMeshCulling(model);
-
-          const scale = config.scale ?? 1;
-          const materialBrightness = config.materialBrightness ?? DEFAULT_MATERIAL_BRIGHTNESS;
-          model.scale.set(scale, scale, scale);
-          applyMaterialBrightness(model, materialBrightness);
-
-          model.updateMatrixWorld(true);
-          const box = new THREE.Box3().setFromObject(model);
-          const center = box.getCenter(new THREE.Vector3());
-
-          const monsterGroup = lodConfigs.length ? new THREE.LOD() : new THREE.Group();
-          const pivot = new THREE.Group();
-          const yOffset = (config.yOffset ?? 0) - box.min.y;
-          pivot.position.set(-center.x, yOffset, -center.z - (config.zOffset ?? 0));
-          pivot.add(model);
-          if (monsterGroup.isLOD) {
-            monsterGroup.addLevel(pivot, 0);
-          } else {
-            monsterGroup.add(pivot);
-          }
-          monsterGroup.userData.pivot = pivot;
-          monsterGroup.userData.modelRoot = model;
-          monsterGroup.userData.monsterConfig = config?.monsterProperties || {};
-
-          const mixer = new THREE.AnimationMixer(model);
-          const actions = {};
-          const fbxLoader = new FBXLoader();
-          const lodLoader = new FBXLoader();
-
-          const promises = Object.entries(animationFiles).map(([name, file]) => {
-            return new Promise((resolve, reject) => {
-              const cachedClip = animationClipCache.get(file);
-              if (cachedClip) {
-                const action = mixer.clipAction(cachedClip);
-                if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
-                  action.loop = THREE.LoopOnce;
-                  action.clampWhenFinished = true;
-                }
-                actions[name] = action;
-                resolve();
-                return;
-              }
-
-              fbxLoader.load(
-                `/models/animations/${encodeURIComponent(file)}`,
-                (anim) => {
-                  const clip = anim?.animations?.[0];
-                  if (!clip) {
-                    resolve();
-                    return;
-                  }
-                  animationClipCache.set(file, clip);
-                  const action = mixer.clipAction(clip);
-                  if (['Weapon', 'JumpAttack', 'Death', 'Hit'].includes(name)) {
-                    action.loop = THREE.LoopOnce;
-                    action.clampWhenFinished = true;
-                  }
-                  actions[name] = action;
-                  resolve();
-                },
-                undefined,
-                reject
-              );
-            });
-          });
-
-          const lodPromises = lodConfigs.map((lod) => {
-            return new Promise((resolve) => {
-              lodLoader.load(
-                lod.path,
-                (lodFbx) => {
-                  if (!lodFbx || typeof lodFbx.traverse !== 'function') {
-                    console.warn('LOD FBXLoader returned an unexpected result:', lodFbx);
-                    resolve();
-                    return;
-                  }
-                  const lodModel = lodFbx;
-                  stripEmbeddedLights(lodModel);
-                  skinnedMeshes.push(...configureMeshCulling(lodModel));
-
-                  lodModel.scale.set(scale, scale, scale);
-                  applyMaterialBrightness(lodModel, materialBrightness);
-                  bindSkinnedMeshesToBaseSkeleton(model, lodModel);
-                  lodModel.updateMatrixWorld(true);
-                  const lodBox = new THREE.Box3().setFromObject(lodModel);
-                  const lodCenter = lodBox.getCenter(new THREE.Vector3());
-                  const lodPivot = new THREE.Group();
-                  const lodYOffset = (config.yOffset ?? 0) - lodBox.min.y;
-                  lodPivot.position.set(
-                    -lodCenter.x,
-                    lodYOffset,
-                    -lodCenter.z - (config.zOffset ?? 0)
-                  );
-                  lodPivot.add(lodModel);
-                  if (monsterGroup.isLOD) {
-                    monsterGroup.addLevel(lodPivot, lod.distance);
-                  } else {
-                    monsterGroup.add(lodPivot);
-                  }
-                  resolve();
-                },
-                undefined,
-                (err) => {
-                  console.warn('Failed to load monster LOD model:', lod.path, err);
-                  resolve();
-                }
-              );
-            });
-          });
-
-          Promise.all([...promises, ...lodPromises]).then(() => {
-            if (!actions.Idle) {
-              logMissingAnimation('Idle', modelPath);
-            }
-            Object.keys(animationFiles).forEach((name) => {
-              if (!actions[name]) {
-                logMissingAnimation(name, modelPath);
-                if (actions.Idle) {
-                  actions[name] = actions.Idle;
-                }
-              }
-            });
-
-            actions.Idle?.play();
-            monsterGroup.userData.currentAction = 'Idle';
-            monsterGroup.userData.mixer = mixer;
-            monsterGroup.userData.actions = actions;
-            monsterGroup.userData.updateSkinnedBounds = createSkinnedBoundsUpdater(skinnedMeshes);
-            callback({
-              model: monsterGroup,
-              mixer,
-              actions,
-              pivot,
-              modelRoot: model,
-              monsterConfig: config?.monsterProperties || {}
-            });
-          });
-        },
-        undefined,
-        (err) => {
-          console.error("Failed to load monster model:", err);
-        }
-      );
-    });
+  queueMicrotask(() => callback?.({
+    model: monsterGroup,
+    mixer: null,
+    actions: {},
+    pivot: bodyRoot,
+    modelRoot: bodyRoot,
+    monsterConfig: {}
+  }));
 }

@@ -205,7 +205,7 @@ function createLimbSegment(THREE, name, { length, radius, color, mass, shape = '
   return { group, mesh, length, mass, restRotation: 0, angularVelocity: 0 };
 }
 
-function createProceduralBody(THREE) {
+export function createProceduralBody(THREE) {
   const root = new THREE.Group();
   root.name = 'ProceduralQwopPlayerBody';
 
@@ -237,6 +237,7 @@ function createProceduralBody(THREE) {
 
   const neck = new THREE.Group();
   neck.name = 'neck';
+  neck.userData.mass = 2;
   neck.position.y = torso.length + 0.08;
   torso.group.add(neck);
 
@@ -311,6 +312,7 @@ function createProceduralBody(THREE) {
       new THREE.MeshStandardMaterial({ color: materials.skin, roughness: 0.8 })
     );
     hand.name = `${arm.group.name}Hand`;
+    hand.userData.proceduralHand = arm.group.name === 'leftArm' ? 'left' : 'right';
     hand.castShadow = true;
     hand.receiveShadow = true;
     hand.position.y = -arm.length - 0.03;
@@ -334,9 +336,21 @@ function createProceduralBody(THREE) {
     angularVelocity: 0
   };
 
+  const headPart = {
+    group: neck,
+    mesh: head,
+    length: 0.28,
+    mass: 2,
+    restRotation: 0,
+    restRotationY: 0,
+    restRotationZ: 0,
+    angularVelocity: 0
+  };
+
   const parts = {
     hips: hipsPart,
     torso,
+    head: headPart,
     leftLeg,
     rightLeg,
     leftArm,
@@ -531,6 +545,70 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   return { forwardIntent: rig.forwardIntent, balance: rig.balance, forwardWeight };
 }
 
+
+export function updateProceduralMonsterRig(monsterGroup, options = {}, deltaSeconds = 0) {
+  const rig = monsterGroup?.userData?.qwopRig;
+  if (!rig) return { forwardIntent: 0, balance: 0 };
+
+  const dt = THREE.MathUtils.clamp(Number.isFinite(deltaSeconds) ? deltaSeconds : 0, 0, 0.08);
+  const now = options.now ?? performance.now();
+  const movementAmount = THREE.MathUtils.clamp(Number.isFinite(options.movementAmount) ? options.movementAmount : 0, 0, 1);
+  const attacking = Boolean(options.attacking);
+  const attackPhase = THREE.MathUtils.clamp(Number.isFinite(options.attackPhase) ? options.attackPhase : 0, 0, 1);
+  const strafe = THREE.MathUtils.clamp(Number.isFinite(options.strafe) ? options.strafe : 0, -1, 1);
+  const targetYaw = THREE.MathUtils.clamp(Number.isFinite(options.targetYaw) ? options.targetYaw : 0, -TORSO_MAX_TWIST, TORSO_MAX_TWIST);
+  const gaitPhase = (rig.gaitPhase || 0) + dt * (attacking ? 7.5 : 5.2) * Math.max(0.25, movementAmount);
+  rig.gaitPhase = gaitPhase;
+
+  const setTarget = (name, x, y = 0, z = 0) => {
+    const part = rig.parts[name];
+    if (!part) return;
+    const target = ensurePartControlTarget(part);
+    target.x = x;
+    target.y = y;
+    target.z = z;
+  };
+
+  const stride = Math.sin(gaitPhase) * movementAmount;
+  const counterStride = Math.sin(gaitPhase + Math.PI) * movementAmount;
+  setTarget('leftLeg', 0.25 - stride * 0.95, 0, strafe * -0.18);
+  setTarget('rightLeg', 0.25 - counterStride * 0.95, 0, strafe * 0.18);
+  setTarget('hips', movementAmount > 0.05 ? Math.sin(gaitPhase * 2) * 0.08 : 0, 0, strafe * 0.12);
+  setTarget('torso', attacking ? -0.22 + Math.sin(attackPhase * Math.PI) * 0.2 : -0.05 * movementAmount, targetYaw * 0.55, strafe * 0.12);
+  setTarget('head', attacking ? -0.05 : 0, targetYaw * 0.35, strafe * 0.08);
+
+  if (attacking) {
+    const windup = Math.sin(attackPhase * Math.PI);
+    setTarget('rightArm', -1.2 + windup * 0.8, 0, -0.2 + windup * 0.75);
+    setTarget('leftArm', 0.45 - windup * 0.35, 0, -0.25);
+  } else {
+    setTarget('rightArm', 0.65 - counterStride * 0.45, 0, -0.15);
+    setTarget('leftArm', 0.65 - stride * 0.45, 0, 0.15);
+  }
+
+  const specs = {
+    hips: { min: -0.5, max: 0.5, sideMin: -0.45, sideMax: 0.45, twistMin: -0.8, twistMax: 0.8 },
+    leftLeg: { min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, twistMin: -0.5, twistMax: 0.5 },
+    rightLeg: { min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, twistMin: -0.5, twistMax: 0.5 },
+    leftArm: { min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, twistMin: -0.8, twistMax: 0.8 },
+    rightArm: { min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, twistMin: -0.8, twistMax: 0.8 },
+    torso: { min: -0.95, max: 0.95, sideMin: -0.35, sideMax: 0.35, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST },
+    head: { min: -0.45, max: 0.45, sideMin: -0.55, sideMax: 0.55, twistMin: -0.9, twistMax: 0.9 }
+  };
+
+  Object.entries(rig.parts).forEach(([name, part]) => {
+    const spec = specs[name];
+    if (!part || !spec) return;
+    const target = ensurePartControlTarget(part);
+    part.group.rotation.x = dampToward(part.group.rotation.x, THREE.MathUtils.clamp(target.x, spec.min, spec.max), TARGET_FOLLOW_SPEED, dt);
+    part.group.rotation.y = dampToward(part.group.rotation.y, THREE.MathUtils.clamp(target.y, spec.twistMin, spec.twistMax), TARGET_FOLLOW_SPEED, dt);
+    part.group.rotation.z = dampToward(part.group.rotation.z, THREE.MathUtils.clamp(target.z, spec.sideMin, spec.sideMax), TARGET_FOLLOW_SPEED, dt);
+  });
+
+  monsterGroup.userData.currentAction = attacking ? 'swordSlash' : movementAmount > 0.08 ? 'qwop' : 'idle';
+  return { forwardIntent: movementAmount, balance: 0 };
+}
+
 export function createPlayerModel(
   THREE,
   username,
@@ -544,6 +622,7 @@ export function createPlayerModel(
   playerGroup.add(bodyRoot);
   playerGroup.userData.qwopRig = {
     parts,
+    bodyRoot,
     forwardIntent: 0,
     balance: 0,
     modelPath,
