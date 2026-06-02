@@ -136,6 +136,10 @@ export class Weapon {
         activeMesh.quaternion.copy(player.quaternion);
       }
     }
+    if (previousHolder?.playerModel?.userData?.weaponHitMesh === activeMesh) {
+      previousHolder.playerModel.userData.weaponHitMesh = null;
+      previousHolder.playerModel.userData.weaponHand = null;
+    }
     this.holder = null;
     this.mesh.visible = true;
     if (usingHeldMesh) {
@@ -169,6 +173,8 @@ export class Weapon {
         this.mesh.position.copy(activeMesh.position);
         this.mesh.quaternion.copy(activeMesh.quaternion);
       }
+      player.userData.weaponHitMesh = activeMesh;
+      player.userData.weaponHand = this.hand;
       return;
     }
 
@@ -180,6 +186,8 @@ export class Weapon {
       this.mesh.position.copy(activeMesh.position);
       this.mesh.quaternion.copy(activeMesh.quaternion);
     }
+    player.userData.weaponHitMesh = activeMesh;
+    player.userData.weaponHand = this.hand;
   }
 
   _getHandBone(playerModel) {
@@ -198,8 +206,15 @@ export class Weapon {
     let anyHandBone = null;
 
     root.traverse(child => {
-      if ((!child.isBone || !child.name)) return;
+      if (!child?.name) return;
       const name = child.name.toLowerCase();
+      if (!rightHandBone && (child.userData?.proceduralHand === 'right' || name === 'rightarmhand')) {
+        rightHandBone = child;
+      }
+      if (!leftHandBone && (child.userData?.proceduralHand === 'left' || name === 'leftarmhand')) {
+        leftHandBone = child;
+      }
+      if ((!child.isBone && !child.userData?.proceduralHand && !name.endsWith('armhand'))) return;
       if (!rightHandBone && name.includes('righthand')) {
         rightHandBone = child;
       }

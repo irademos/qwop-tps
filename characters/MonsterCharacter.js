@@ -1,18 +1,19 @@
 import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
-import { ATTACKS, getAttackTypes } from "../items/melee.js";
+import { ATTACKS, canApplySwordContactHit, getAttackTypes, isSwordTouchingTarget } from "../items/melee.js";
+import { updateProceduralMonsterRig } from "../models/playerModel.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from "../healthUtils.js";
 
 const AGGRO_RADIUS = 12;
 const WANDER_CHANGE_MS = 2000;
-const ATTACK_NAME = 'Weapon';
-const JUMP_ATTACK_NAME = 'JumpAttack';
+const ATTACK_NAME = 'swordSlash';
+const JUMP_ATTACK_NAME = 'swordFwdSpin';
 const MOVE_FADE = 0.2;
 const ATTACK_FADE = 0.1;
 const DEFAULT_HEALTH = BASE_HEALTH_SEGMENTS;
-const MONSTER_ATTACK = ATTACKS.mutantPunch;
+const MONSTER_ATTACK = ATTACKS.swordSlash;
 const DEFAULT_MONSTER_PROPERTIES = Object.freeze({
   moveSpeed: 1,
   animationSpeed: 1,
@@ -98,6 +99,7 @@ export class MonsterCharacter extends CharacterBase {
     this.isProvoked = false;
     this.model.userData.monsterProperties = this.monsterProperties;
     this.model.userData.lastHitAttackTypes = [];
+    this.model.userData.equippedWeaponType = 'sword';
     this.model.userData.isProvoked = false;
     this.setLevel(1, { preserveHealth: false });
   }
@@ -505,6 +507,7 @@ export class MonsterCharacter extends CharacterBase {
         body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
       }
       this.playAnimation("Idle", MOVE_FADE);
+      this.updateProceduralPose(delta);
       this.update(delta);
       return;
     }
@@ -550,6 +553,7 @@ export class MonsterCharacter extends CharacterBase {
 
     if (!closestPlayer) {
       this.playAnimation("Idle", MOVE_FADE);
+      this.updateProceduralPose(delta);
       this.update(delta);
       return;
     }
@@ -601,6 +605,7 @@ export class MonsterCharacter extends CharacterBase {
       );
       this.faceDirection(this.model.userData.direction);
       this.playAnimation("Walk", MOVE_FADE);
+      this.updateProceduralPose(delta, { movementAmount: 0.35 });
       this.update(delta);
       return;
     }
@@ -653,6 +658,33 @@ export class MonsterCharacter extends CharacterBase {
     }, context);
   }
 
+
+  playAnimation(name, fadeDuration = MOVE_FADE) {
+    if (!name) return;
+    if (!this.actions?.[name]) {
+      this.currentAction = name;
+      if (this.model?.userData) this.model.userData.currentAction = name;
+      return;
+    }
+    super.playAnimation(name, fadeDuration);
+  }
+
+  updateProceduralPose(delta, options = {}) {
+    const movementAmount = Number.isFinite(options.movementAmount) ? options.movementAmount : 0;
+    const attacking = Boolean(this.attackStartTime || options.attacking);
+    const attackPhase = this.attackStartTime
+      ? (Date.now() - this.attackStartTime) / Math.max(1, MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow)
+      : 0;
+    const targetYaw = Number.isFinite(options.targetYaw) ? options.targetYaw : 0;
+    updateProceduralMonsterRig(this.model, {
+      movementAmount,
+      attacking,
+      attackPhase,
+      strafe: options.strafe || 0,
+      targetYaw
+    }, delta);
+  }
+
   updateCombatAI(deltaTime, primaryTarget, targets, onHit, context = {}) {
     const now = Date.now();
     if (!this.model) return;
@@ -667,6 +699,7 @@ export class MonsterCharacter extends CharacterBase {
     if (this.isFrozen()) {
       this.setHorizontalMovement(new THREE.Vector3(), 0, delta);
       this.playAnimation("Idle", MOVE_FADE);
+      this.updateProceduralPose(delta);
       this.update(delta);
       return;
     }
@@ -685,6 +718,7 @@ export class MonsterCharacter extends CharacterBase {
 
     if (!primaryTarget?.model) {
       this.playAnimation("Idle", MOVE_FADE);
+      this.updateProceduralPose(delta);
       this.update(delta);
       return;
     }
@@ -709,12 +743,14 @@ export class MonsterCharacter extends CharacterBase {
         this.setHorizontalMovement(new THREE.Vector3(), 0, delta, context);
       }
       this.faceDirection(this.attackDirection);
+      this.updateProceduralPose(delta, { attacking: true, movementAmount: now < this.attackLungeEndTime ? 0.45 : 0 });
     } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
       const direction = targetPos.sub(this.model.position).normalize();
       this.setDirection(direction);
       this.setHorizontalMovement(this.model.userData.direction, runSpeed, delta, context);
       this.faceDirection(this.model.userData.direction);
       this.playAnimation("Run", MOVE_FADE);
+      this.updateProceduralPose(delta, { movementAmount: 1 });
     } else {
       const faceDir = targetPos.sub(this.model.position).normalize();
       this.setDirection(faceDir);
@@ -738,6 +774,7 @@ export class MonsterCharacter extends CharacterBase {
         const useJumpAttack = this.actions?.[JUMP_ATTACK_NAME] && Math.random() < JUMP_ATTACK_CHANCE;
         this.attackAnimationName = useJumpAttack ? JUMP_ATTACK_NAME : ATTACK_NAME;
         this.playAnimation(this.attackAnimationName, ATTACK_FADE);
+        this.model.userData.attack = { name: this.attackAnimationName, start: now, hasHit: false };
         this.lastAttackTime = now;
         this.attackStartTime = now;
         this.attackHasHit = false;
@@ -745,6 +782,7 @@ export class MonsterCharacter extends CharacterBase {
         this.nextAttackTime = now + THREE.MathUtils.randInt(...ATTACK_COOLDOWN_RANGE_MS);
       } else {
         this.playAnimation("Walk", MOVE_FADE);
+        this.updateProceduralPose(delta, { movementAmount: 0.45, strafe: strafeOffset });
       }
     }
 
@@ -771,13 +809,15 @@ export class MonsterCharacter extends CharacterBase {
         hitTargets.forEach((target) => {
           if (!target?.model) return;
           const dist = this.model.position.distanceTo(target.model.position);
-          if (dist <= attackRange) {
+          const swordContact = isSwordTouchingTarget(this.model, target.model) && canApplySwordContactHit(this.model, target, now);
+          const canRangeHit = this.model.userData?.equippedWeaponType !== 'sword' && dist <= attackRange;
+          if (swordContact || canRangeHit) {
             onHit?.(target, {
               direction: this.model.userData.direction.clone(),
               strength: MONSTER_ATTACK.knockbackStrength,
               damage: hitDamage,
               attackName: currentAction,
-              attackTypes: getAttackTypes('mutantPunch', ['melee'])
+              attackTypes: getAttackTypes('swordSlash', ['cut'])
             });
           }
         });
@@ -787,6 +827,7 @@ export class MonsterCharacter extends CharacterBase {
         this.attackStartTime = null;
         this.attackHasHit = false;
         this.attackAnimationName = ATTACK_NAME;
+        if (this.model?.userData?.attack) this.model.userData.attack = null;
       }
     }
   }

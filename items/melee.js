@@ -85,6 +85,50 @@ function isTargetInAttackRange(attackerModel, targetPosition, cfg) {
   return Math.abs(lateralDistance) <= range;
 }
 
+
+const SWORD_CONTACT_COOLDOWN_MS = 2000;
+const swordBox = new THREE.Box3();
+const targetBodyBox = new THREE.Box3();
+
+function getBodyObject(model) {
+  return model?.userData?.qwopRig?.bodyRoot || model?.userData?.modelRoot || model;
+}
+
+function getSwordHitKey(attackerModel, target) {
+  return target?.id || target?.model?.uuid || target?.uuid || 'target';
+}
+
+export function isSwordTouchingTarget(attackerModel, targetModel) {
+  const swordMesh = attackerModel?.userData?.weaponHitMesh;
+  const bodyObject = getBodyObject(targetModel);
+  if (!swordMesh || !bodyObject) return false;
+  swordMesh.updateWorldMatrix?.(true, true);
+  bodyObject.updateWorldMatrix?.(true, true);
+  swordBox.setFromObject(swordMesh);
+  targetBodyBox.setFromObject(bodyObject);
+  if (swordBox.isEmpty() || targetBodyBox.isEmpty()) return false;
+  targetBodyBox.expandByScalar(0.08);
+  return swordBox.intersectsBox(targetBodyBox);
+}
+
+export function canApplySwordContactHit(attackerModel, target, now = Date.now()) {
+  if (!attackerModel?.userData) return false;
+  if (!(attackerModel.userData.swordHitCooldowns instanceof Map)) {
+    attackerModel.userData.swordHitCooldowns = new Map();
+  }
+  const key = getSwordHitKey(attackerModel, target);
+  const nextAllowed = attackerModel.userData.swordHitCooldowns.get(key) || 0;
+  if (now < nextAllowed) return false;
+  attackerModel.userData.swordHitCooldowns.set(key, now + SWORD_CONTACT_COOLDOWN_MS);
+  return true;
+}
+
+function isSwordContactHit(attackerModel, target, now) {
+  return attackerModel?.userData?.equippedWeaponType === 'sword'
+    && isSwordTouchingTarget(attackerModel, target?.model || target)
+    && canApplySwordContactHit(attackerModel, target, now);
+}
+
 function getStrengthDamage(attackerId, baseDamage) {
   if (attackerId === 'local' && typeof window.getPlayerStrength === 'function') {
     const strength = window.getPlayerStrength();
@@ -229,7 +273,7 @@ export function updateMeleeAttacks({
       if (isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
           if (!monster?.model?.position || isProtectedCompanionTarget(monster)) continue;
-          if (isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
+          if (attacker.model.userData?.equippedWeaponType === 'sword' ? isSwordContactHit(attacker.model, monster, now) : isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
             hit = true;
             const dir = new THREE.Vector3()
               .subVectors(monster.model.position, attacker.model.position)
@@ -253,7 +297,7 @@ export function updateMeleeAttacks({
       } else if (!isHost && Array.isArray(monsters)) {
         for (const monster of monsters) {
           if (!monster?.model?.position || isProtectedCompanionTarget(monster)) continue;
-          if (isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
+          if (attacker.model.userData?.equippedWeaponType === 'sword' ? isSwordContactHit(attacker.model, monster, now) : isTargetInAttackRange(attacker.model, monster.model.position, attackCfg)) {
             hit = true;
             sendMonsterAttack?.({
               monsterId: monster.id,
