@@ -7,6 +7,7 @@ import { getSpawnPosition } from '../spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { QuestManager } from "../quest.js";
+import { updateProceduralPlayerRig } from '../models/playerModel.js';
 import { loadNippleJs } from '../externalDeps.js';
 
 // Movement constants
@@ -121,6 +122,7 @@ const MERCHANT_DIALOGUE = {
     }
   ]
 };
+const QWOP_CONTROL_KEYS = new Set(['a', 'd', 'w', 's', 'q', 'e']);
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 const SWORD_COMBO_ACTIONS = ['swordSlash', 'swordSlashLeft', 'swordFwdSpin'];
 const SWORD_SPIN_CHARGE_START_MS = 1000;
@@ -1259,6 +1261,11 @@ export class PlayerControls {
       if (!this.enabled && !this.isSleeping) return;
       const key = e.key.toLowerCase();
       this.keysPressed.add(key);
+      const usingQwopRig = !!this.playerModel?.userData?.qwopRig;
+
+      if (usingQwopRig && QWOP_CONTROL_KEYS.has(key)) {
+        this.safePreventDefault(e);
+      }
 
       if (this.isSleeping) {
         if (key === 'x') {
@@ -1301,6 +1308,10 @@ export class PlayerControls {
           return;
         }
         this.handlePickupAction();
+        return;
+      }
+
+      if (usingQwopRig && QWOP_CONTROL_KEYS.has(key)) {
         return;
       }
 
@@ -2469,6 +2480,16 @@ export class PlayerControls {
           moveDirection.addScaledVector(cameraForward, dz * this.joystickForce);
           moveDirection.addScaledVector(cameraRight, dx * this.joystickForce);
         }
+      } else if (this.playerModel?.userData?.qwopRig) {
+        const rig = this.playerModel.userData.qwopRig;
+        const alternatingStride = Math.abs(
+          (rig.parts?.leftLeg?.group?.rotation?.x ?? 0) -
+          (rig.parts?.rightLeg?.group?.rotation?.x ?? 0)
+        );
+        const strideEfficiency = THREE.MathUtils.clamp(alternatingStride * 0.7, 0, 1);
+        const forwardIntent = (rig.forwardIntent || 0) * (0.45 + strideEfficiency * 0.55);
+        if (forwardIntent > 0.04) moveDirection.z = forwardIntent;
+        moveDirection.x = THREE.MathUtils.clamp(rig.balance || 0, -0.45, 0.45);
       } else {
         if (this.keysPressed.has("w")) moveDirection.z = 1;
         if (this.keysPressed.has("s")) moveDirection.z = -1;
@@ -2476,7 +2497,7 @@ export class PlayerControls {
         if (this.keysPressed.has("d")) moveDirection.x = -1;
       }
     }
-    if (!this.isMobile && moveDirection.length() > 0) moveDirection.normalize();
+    if (!this.isMobile && moveDirection.length() > 0 && !this.playerModel?.userData?.qwopRig) moveDirection.normalize();
     const cameraDirection = new THREE.Vector3();
     this.camera.getWorldDirection(cameraDirection);
     cameraDirection.y = 0;
@@ -2539,9 +2560,11 @@ export class PlayerControls {
     } else if (!this.isClimbing) {
       const speed = this.isInWater
         ? SWIM_SPEED
-        : (this.energyDepleted
-          ? CHARACTER_MOVEMENT.walkSpeed * ENERGY_DEPLETED_SPEED_MULTIPLIER
-          : CHARACTER_MOVEMENT.runSpeed);
+        : this.playerModel?.userData?.qwopRig
+          ? CHARACTER_MOVEMENT.walkSpeed * 0.85
+          : (this.energyDepleted
+            ? CHARACTER_MOVEMENT.walkSpeed * ENERGY_DEPLETED_SPEED_MULTIPLIER
+            : CHARACTER_MOVEMENT.runSpeed);
       const slopeSpeedMultiplier = !this.isInWater && !groundResolution.metadata.walkable
         ? STEEP_SLOPE_SPEED_MULTIPLIER
         : 1;
@@ -2647,6 +2670,7 @@ export class PlayerControls {
     this.deltaSeconds = delta;
 
     this.updateEngagedMode();
+    updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
 
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
     if (!this.isEngaged) {

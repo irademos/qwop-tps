@@ -182,6 +182,223 @@ function stripRootTranslationTracks(clip, rootName) {
   return new THREE.AnimationClip(clip.name, clip.duration, tracks);
 }
 
+function createLimbSegment(THREE, name, { length, radius, color, mass, shape = 'capsule' }) {
+  const group = new THREE.Group();
+  group.name = name;
+  group.userData.mass = mass;
+
+  const material = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.75,
+    metalness: 0.05
+  });
+  const geometry = shape === 'box'
+    ? new THREE.BoxGeometry(radius * 2, length, radius * 2)
+    : new THREE.CapsuleGeometry(radius, Math.max(0.01, length - radius * 2), 6, 12);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = `${name}Mesh`;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.position.y = -length / 2;
+  group.add(mesh);
+
+  return { group, mesh, length, mass, restRotation: 0, angularVelocity: 0 };
+}
+
+function createProceduralBody(THREE) {
+  const root = new THREE.Group();
+  root.name = 'ProceduralQwopPlayerBody';
+
+  const materials = {
+    shirt: 0x2e86de,
+    shorts: 0x1f2d3d,
+    skin: 0xf1c27d,
+    shoe: 0x222222
+  };
+
+  const hips = new THREE.Group();
+  hips.name = 'hips';
+  hips.position.y = 0.9;
+  root.add(hips);
+
+  const torso = createLimbSegment(THREE, 'torso', {
+    length: 0.78,
+    radius: 0.24,
+    color: materials.shirt,
+    mass: 12,
+    shape: 'box'
+  });
+  torso.group.position.y = 0.05;
+  torso.mesh.position.y = torso.length / 2;
+  torso.mesh.scale.x = 1.35;
+  hips.add(torso.group);
+
+  const neck = new THREE.Group();
+  neck.name = 'neck';
+  neck.position.y = torso.length + 0.08;
+  torso.group.add(neck);
+
+  const headGeometry = new THREE.SphereGeometry(0.18, 20, 16);
+  const headMaterial = new THREE.MeshStandardMaterial({ color: materials.skin, roughness: 0.8 });
+  const head = new THREE.Mesh(headGeometry, headMaterial);
+  head.name = 'head';
+  head.castShadow = true;
+  head.receiveShadow = true;
+  head.position.y = 0.14;
+  neck.add(head);
+
+  const face = new THREE.Mesh(
+    new THREE.SphereGeometry(0.025, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0x111111 })
+  );
+  face.name = 'faceDirectionDot';
+  face.position.set(0, 0.14, 0.165);
+  neck.add(face);
+
+  const leftLeg = createLimbSegment(THREE, 'leftLeg', {
+    length: 0.82,
+    radius: 0.095,
+    color: materials.shorts,
+    mass: 7
+  });
+  leftLeg.group.position.set(-0.14, 0, 0);
+  hips.add(leftLeg.group);
+
+  const rightLeg = createLimbSegment(THREE, 'rightLeg', {
+    length: 0.82,
+    radius: 0.095,
+    color: materials.shorts,
+    mass: 7
+  });
+  rightLeg.group.position.set(0.14, 0, 0);
+  hips.add(rightLeg.group);
+
+  for (const leg of [leftLeg, rightLeg]) {
+    const shoe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.08, 0.28),
+      new THREE.MeshStandardMaterial({ color: materials.shoe, roughness: 0.7 })
+    );
+    shoe.name = `${leg.group.name}Shoe`;
+    shoe.castShadow = true;
+    shoe.receiveShadow = true;
+    shoe.position.set(0, -leg.length - 0.02, 0.06);
+    leg.group.add(shoe);
+  }
+
+  const leftArm = createLimbSegment(THREE, 'leftArm', {
+    length: 0.64,
+    radius: 0.075,
+    color: materials.skin,
+    mass: 4
+  });
+  leftArm.group.position.set(-0.38, 0.64, 0);
+  torso.group.add(leftArm.group);
+
+  const rightArm = createLimbSegment(THREE, 'rightArm', {
+    length: 0.64,
+    radius: 0.075,
+    color: materials.skin,
+    mass: 4
+  });
+  rightArm.group.position.set(0.38, 0.64, 0);
+  torso.group.add(rightArm.group);
+
+  for (const arm of [leftArm, rightArm]) {
+    const hand = new THREE.Mesh(
+      new THREE.SphereGeometry(0.085, 12, 10),
+      new THREE.MeshStandardMaterial({ color: materials.skin, roughness: 0.8 })
+    );
+    hand.name = `${arm.group.name}Hand`;
+    hand.castShadow = true;
+    hand.receiveShadow = true;
+    hand.position.y = -arm.length - 0.03;
+    arm.group.add(hand);
+  }
+
+  torso.restRotation = 0;
+  leftLeg.restRotation = 0.18;
+  rightLeg.restRotation = 0.18;
+  leftArm.restRotation = -0.18;
+  rightArm.restRotation = -0.18;
+
+  const parts = {
+    torso,
+    leftLeg,
+    rightLeg,
+    leftArm,
+    rightArm
+  };
+
+  Object.values(parts).forEach((part) => {
+    part.group.rotation.x = part.restRotation;
+    part.group.userData.physics = {
+      mass: part.mass,
+      angularVelocity: 0,
+      gravityScale: 1,
+      groundLimit: part.group.name.includes('Leg') ? 0.95 : 1.25
+    };
+  });
+
+  return { root, parts };
+}
+
+export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds) {
+  const rig = playerGroup?.userData?.qwopRig;
+  if (!rig) return { forwardIntent: 0, balance: 0 };
+
+  const dt = THREE.MathUtils.clamp(Number.isFinite(deltaSeconds) ? deltaSeconds : 0, 0, 0.05);
+  const pressed = (key) => keysPressed?.has?.(key);
+  const controls = {
+    leftLeg: pressed('a'),
+    rightLeg: pressed('d'),
+    torsoForward: pressed('w'),
+    torsoBackward: pressed('s'),
+    leftArm: pressed('q'),
+    rightArm: pressed('e')
+  };
+
+  const specs = {
+    leftLeg: { lift: -1.05, rest: 0.55, gravity: 6.2, damping: 5.2, torque: 13 },
+    rightLeg: { lift: -1.05, rest: 0.55, gravity: 6.2, damping: 5.2, torque: 13 },
+    leftArm: { lift: -1.25, rest: 0.9, gravity: 5.4, damping: 4.8, torque: 12 },
+    rightArm: { lift: -1.25, rest: 0.9, gravity: 5.4, damping: 4.8, torque: 12 },
+    torso: { lift: -0.42, back: 0.48, rest: 0.05, gravity: 3.4, damping: 5.8, torque: 9 }
+  };
+
+  const stepPart = (name, target, isActive) => {
+    const part = rig.parts[name];
+    if (!part) return;
+    const spec = specs[name];
+    const physics = part.group.userData.physics;
+    const angle = part.group.rotation.x;
+    const weightFall = spec.gravity * physics.mass * 0.025 * Math.sin(angle - spec.rest);
+    const holdTorque = isActive ? (target - angle) * spec.torque : 0;
+    const passiveTorque = !isActive ? (spec.rest - angle) * spec.gravity * 0.35 : 0;
+    physics.angularVelocity += (holdTorque + passiveTorque - weightFall) * dt;
+    physics.angularVelocity *= Math.exp(-spec.damping * dt);
+    part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, -1.45, 1.35);
+  };
+
+  stepPart('leftLeg', specs.leftLeg.lift, controls.leftLeg);
+  stepPart('rightLeg', specs.rightLeg.lift, controls.rightLeg);
+  stepPart('leftArm', specs.leftArm.lift, controls.leftArm);
+  stepPart('rightArm', specs.rightArm.lift, controls.rightArm);
+
+  const torsoTarget = controls.torsoForward ? specs.torso.lift : controls.torsoBackward ? specs.torso.back : specs.torso.rest;
+  stepPart('torso', torsoTarget, controls.torsoForward || controls.torsoBackward);
+
+  const leftLeg = rig.parts.leftLeg.group.rotation.x;
+  const rightLeg = rig.parts.rightLeg.group.rotation.x;
+  const torso = rig.parts.torso.group.rotation.x;
+  const armCounterBalance = (rig.parts.rightArm.group.rotation.x - rig.parts.leftArm.group.rotation.x) * 0.08;
+  rig.balance = THREE.MathUtils.clamp((-torso * 0.9) + armCounterBalance, -1, 1);
+  rig.forwardIntent = THREE.MathUtils.clamp(Math.max(0, -leftLeg, -rightLeg) * (0.35 + Math.max(0, -torso)), 0, 1);
+  rig.lastControls = controls;
+
+  playerGroup.userData.currentAction = rig.forwardIntent > 0.08 ? 'qwop' : 'idle';
+  return { forwardIntent: rig.forwardIntent, balance: rig.balance };
+}
+
 export function createPlayerModel(
   THREE,
   username,
@@ -189,229 +406,24 @@ export function createPlayerModel(
   modelPath = '/models/cowboy.fbx'
 ) {
   const playerGroup = new THREE.Group();
-  const loader = new FBXLoader();
+  playerGroup.name = 'ProceduralQwopPlayer';
 
-  const configPath = modelPath.replace(/\.[^/.]+$/, '.json');
-  fetch(configPath)
-    .then((res) => (res.ok ? res.json() : {}))
-    .catch(() => ({}))
-    .then((config) => {
-      loader.load(
-        modelPath,
-        (fbx) => {
-          // Guard: make sure we actually got an Object3D
-          if (!fbx || typeof fbx.traverse !== 'function') {
-            console.warn('FBXLoader returned an unexpected result:', fbx);
-            return;
-          }
+  const { root: bodyRoot, parts } = createProceduralBody(THREE);
+  playerGroup.add(bodyRoot);
+  playerGroup.userData.qwopRig = {
+    parts,
+    forwardIntent: 0,
+    balance: 0,
+    modelPath,
+    description: 'Procedural weighted QWOP-style player body'
+  };
+  playerGroup.userData.currentAction = 'idle';
+  playerGroup.userData.actions = {};
+  playerGroup.userData.mixer = null;
 
-          const model = fbx;
-          const lodConfigs = normalizeLodConfigs(config);
-          const materialBrightness = config.materialBrightness ?? DEFAULT_MATERIAL_BRIGHTNESS;
-
-          try {
-            stripEmbeddedLights(model);
-            console.log('✅ FBX lights stripped (no in-traverse mutations)');
-          } catch (err) {
-            console.error('While stripping FBX lights:', err);
-          }
-
-          let loggedSkinningExportHint = false;
-          model.traverse(o => {
-            if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
-            if (o.material?.skinning === true) o.material.skinning = true;
-            if (o.isSkinnedMesh && typeof o.normalizeSkinWeights === 'function') {
-              o.normalizeSkinWeights();
-              if (!loggedSkinningExportHint) {
-                console.info('[FBX] Applied runtime skin-weight normalization. For clean imports, re-export rigs with max 4 weights/vertex and normalized weights.');
-                loggedSkinningExportHint = true;
-              }
-            }
-          });
-
-
-          // Scale and center the model so it rotates around its midpoint
-          const scale = config.scale ?? 1;
-          model.scale.set(scale, scale, scale);
-          applyMaterialBrightness(model, materialBrightness);
-
-          // Center the FBX so rotations pivot around the model itself
-          model.updateMatrixWorld(true);
-          const box = new THREE.Box3().setFromObject(model);
-          const center = box.getCenter(new THREE.Vector3());
-
-          // Offset the model inside a pivot group instead of shifting the mesh directly
-          const lodGroup = lodConfigs.length ? new THREE.LOD() : new THREE.Group();
-          playerGroup.add(lodGroup);
-          const pivot = new THREE.Group();
-          const yOffset = (config.yOffset ?? 0) - box.min.y;
-          pivot.position.set(-center.x, yOffset, -center.z - (config.zOffset ?? 0));
-          pivot.add(model);
-          if (lodGroup.isLOD) {
-            lodGroup.addLevel(pivot, 0);
-          } else {
-            lodGroup.add(pivot);
-          }
-          playerGroup.userData.pivot = pivot;
-
-          const mixer = new THREE.AnimationMixer(model);
-          const actions = {};
-
-          // Load Mixamo animations
-          const fbxLoader = new FBXLoader();
-          const lodLoader = new FBXLoader();
-          const animationFiles = {
-            idle: 'Breathing Idle.fbx',
-            walk: 'Old Man Walk.fbx',
-            run: 'Drunk Run Forward.fbx',
-            jump: 'Joyful Jump.fbx',
-            hit: 'Flying Back Death.fbx',
-            mutantPunch: 'Mutant Punch.fbx',
-            swordSlash: 'Sword Slash.fbx',
-            swordSlashLeft: 'Sword Slash Left.fbx',
-            swordSpin: 'Sword Spin.fbx',
-            swordFwdSpin: 'Sword Fwd Spin.fbx',
-            leftPunch: 'Left Punch.fbx',
-            mmaKick: 'Mma Kick.fbx',
-            runningKick: 'Stand To Roll.fbx',
-            hurricaneKick: 'Hurricane Kick.fbx',
-            throw: 'Throw.fbx',
-            throwLeft: 'Throw Left.fbx',
-            projectile: 'Projectile.fbx',
-            die: 'Dying.fbx',
-            float: 'Floating.fbx',
-            swim: 'Swimming.fbx',
-            sit: 'Sitting Rubbing Arm.fbx',
-            climb: 'Climbing Up Wall.fbx'
-          };
-
-          const promises = Object.entries(animationFiles).map(([name, file]) => {
-            return new Promise((resolve, reject) => {
-              const cachedClip = animationClipCache.get(file);
-              if (cachedClip) {
-                const rootName = model.name || 'Root';
-                const clean = stripRootTranslationTracks(cachedClip, rootName);
-                const action = mixer.clipAction(clean);
-                if (name === 'walk') {
-                  action.setEffectiveTimeScale(1.8);
-                }
-                if (
-                  ['jump', 'hit', 'mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'throw', 'throwLeft', 'projectile', 'die'].includes(name)
-                ) {
-                  action.loop = THREE.LoopOnce;
-                  action.clampWhenFinished = true;
-                }
-                if (name === 'climb') {
-                  action.loop = THREE.LoopRepeat;
-                }
-                actions[name] = action;
-                resolve();
-                return;
-              }
-
-              fbxLoader.load(
-                `/models/animations/${encodeURIComponent(file)}`,
-                (anim) => {
-                  const clip = anim.animations[0];
-                  if (!clip) {
-                    resolve();
-                    return;
-                  }
-                  const rootName = model.name || 'Root';
-                  const cleanClip = stripRootTranslationTracks(clip, rootName);
-                  animationClipCache.set(file, cleanClip);
-                  const action = mixer.clipAction(cleanClip);
-                  if (name === 'walk') {
-                    action.setEffectiveTimeScale(1.8);
-                  }
-                  if (
-                    ['jump', 'hit', 'mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'hurricaneKick', 'throw', 'throwLeft', 'projectile', 'die'].includes(name)
-                  ) {
-                    action.loop = THREE.LoopOnce;
-                    action.clampWhenFinished = true;
-                  }
-                  if (name === 'climb') {
-                    action.loop = THREE.LoopRepeat;
-                  }
-                  actions[name] = action;
-                  resolve();
-                },
-                undefined,
-                reject
-              );
-            });
-          });
-
-          const lodPromises = lodConfigs.map((lod) => {
-            return new Promise((resolve) => {
-              lodLoader.load(
-                lod.path,
-                (lodFbx) => {
-                  if (!lodFbx || typeof lodFbx.traverse !== 'function') {
-                    console.warn('LOD FBXLoader returned an unexpected result:', lodFbx);
-                    resolve();
-                    return;
-                  }
-
-                  const lodModel = lodFbx;
-                  try {
-                    stripEmbeddedLights(lodModel);
-                  } catch (err) {
-                    console.error('While stripping LOD FBX lights:', err);
-                  }
-
-                  lodModel.traverse(o => {
-                    if (o.isSkinnedMesh || o.isMesh) o.frustumCulled = false;
-                    if (o.material?.skinning === true) o.material.skinning = true;
-                    if (o.isSkinnedMesh && typeof o.normalizeSkinWeights === 'function') {
-                      o.normalizeSkinWeights();
-                    }
-                  });
-
-                  lodModel.scale.set(scale, scale, scale);
-                  applyMaterialBrightness(lodModel, materialBrightness);
-                  bindSkinnedMeshesToBaseSkeleton(model, lodModel);
-                  lodModel.updateMatrixWorld(true);
-                  const lodBox = new THREE.Box3().setFromObject(lodModel);
-                  const lodCenter = lodBox.getCenter(new THREE.Vector3());
-                  const lodPivot = new THREE.Group();
-                  const lodYOffset = (config.yOffset ?? 0) - lodBox.min.y;
-                  lodPivot.position.set(
-                    -lodCenter.x,
-                    lodYOffset,
-                    -lodCenter.z - (config.zOffset ?? 0)
-                  );
-                  lodPivot.add(lodModel);
-                  if (lodGroup.isLOD) {
-                    lodGroup.addLevel(lodPivot, lod.distance);
-                  } else {
-                    lodGroup.add(lodPivot);
-                  }
-                  resolve();
-                },
-                undefined,
-                (err) => {
-                  console.warn('Failed to load player LOD model:', lod.path, err);
-                  resolve();
-                }
-              );
-            });
-          });
-
-          Promise.all([...promises, ...lodPromises]).then(() => {
-            actions.idle.play();
-            playerGroup.userData.currentAction = 'idle';
-            playerGroup.userData.mixer = mixer;
-            playerGroup.userData.actions = actions;
-            if (onLoad) onLoad({ mixer, actions });
-          });
-        },
-        undefined,
-        (err) => {
-          console.error('Failed to load player model:', err);
-        }
-      );
-    });
+  if (onLoad) {
+    queueMicrotask(() => onLoad({ mixer: null, actions: {} }));
+  }
 
   const canvas = document.createElement('canvas');
   canvas.width = 256;
