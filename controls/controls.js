@@ -129,7 +129,8 @@ const MERCHANT_DIALOGUE = {
     }
   ]
 };
-const QWOP_CONTROL_KEYS = new Set(['a', 'd', 'w', 's', 'q', 'e']);
+const QWOP_PART_SELECT_KEYS = new Set(['a', 'd', 'w', 's', 'q', 'e']);
+const QWOP_CONTROL_KEYS = new Set([...QWOP_PART_SELECT_KEYS, 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 const SWORD_COMBO_ACTIONS = ['swordSlash', 'swordSlashLeft', 'swordFwdSpin'];
 const SWORD_SPIN_CHARGE_START_MS = 1000;
@@ -2725,7 +2726,9 @@ export class PlayerControls {
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
 
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
-    if (!this.isEngaged) {
+    const qwopPartSelectionActive = !!this.playerModel?.userData?.qwopRig
+      && [...QWOP_PART_SELECT_KEYS].some((key) => this.keysPressed.has(key));
+    if (!this.isEngaged && !qwopPartSelectionActive) {
       if (this.keys.has('ArrowLeft')) {
         this.yaw += rotateSpeed;
         this.breakAutoAimFromManualCamera(Math.abs(rotateSpeed));
@@ -2739,7 +2742,7 @@ export class PlayerControls {
     const maxPitch = Math.PI / 3;   // ~60° upward
     const minPitch = -Math.PI / 8;  // ~30° downward
 
-    if (!this.isEngaged) {
+    if (!this.isEngaged && !qwopPartSelectionActive) {
       if (this.keys.has('ArrowUp')) {
         this.pitch = Math.min(maxPitch, this.pitch + 0.02);
         this.breakAutoAimFromManualCamera(0.02);

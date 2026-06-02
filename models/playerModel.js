@@ -323,7 +323,19 @@ function createProceduralBody(THREE) {
   leftArm.restRotation = -0.18;
   rightArm.restRotation = -0.18;
 
+  const hipsPart = {
+    group: hips,
+    mesh: null,
+    length: 0,
+    mass: 10,
+    restRotation: 0,
+    restRotationY: 0,
+    restRotationZ: 0,
+    angularVelocity: 0
+  };
+
   const parts = {
+    hips: hipsPart,
     torso,
     leftLeg,
     rightLeg,
@@ -333,15 +345,61 @@ function createProceduralBody(THREE) {
 
   Object.values(parts).forEach((part) => {
     part.group.rotation.x = part.restRotation;
+    part.group.rotation.y = part.restRotationY || 0;
+    part.group.rotation.z = part.restRotationZ || 0;
     part.group.userData.physics = {
       mass: part.mass,
       angularVelocity: 0,
       gravityScale: 1,
       groundLimit: part.group.name.includes('Leg') ? 0.95 : 1.25
     };
+    part.group.userData.qwopTarget = {
+      x: part.group.rotation.x,
+      y: part.group.rotation.y,
+      z: part.group.rotation.z
+    };
   });
 
   return { root, parts };
+}
+
+
+const QWOP_PART_SELECTORS = Object.freeze({
+  q: 'leftArm',
+  w: 'torso',
+  e: 'rightArm',
+  a: 'leftLeg',
+  s: 'hips',
+  d: 'rightLeg'
+});
+const QWOP_ARROW_INPUTS = Object.freeze({
+  up: ['arrowup', 'ArrowUp'],
+  down: ['arrowdown', 'ArrowDown'],
+  left: ['arrowleft', 'ArrowLeft'],
+  right: ['arrowright', 'ArrowRight']
+});
+const TORSO_MAX_TWIST = Math.PI / 2;
+const TARGET_NUDGE_SPEED = 2.4;
+const TARGET_RETURN_SPEED = 1.35;
+const TARGET_FOLLOW_SPEED = 11;
+
+function hasAnyKey(keysPressed, keys) {
+  return keys.some((key) => keysPressed?.has?.(key));
+}
+
+function ensurePartControlTarget(part) {
+  if (!part.group.userData.qwopTarget) {
+    part.group.userData.qwopTarget = {
+      x: part.group.rotation.x || 0,
+      y: part.group.rotation.y || 0,
+      z: part.group.rotation.z || 0
+    };
+  }
+  return part.group.userData.qwopTarget;
+}
+
+function dampToward(current, target, speed, dt) {
+  return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-speed * dt));
 }
 
 export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds) {
@@ -350,51 +408,92 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
 
   const dt = THREE.MathUtils.clamp(Number.isFinite(deltaSeconds) ? deltaSeconds : 0, 0, 0.05);
   const pressed = (key) => keysPressed?.has?.(key);
-  const controls = {
-    leftLeg: pressed('a'),
-    rightLeg: pressed('d'),
-    torsoForward: pressed('w'),
-    torsoBackward: pressed('s'),
-    leftArm: pressed('q'),
-    rightArm: pressed('e')
+  const selectedParts = Object.entries(QWOP_PART_SELECTORS)
+    .filter(([key]) => pressed(key))
+    .map(([, partName]) => partName);
+  const selectedSet = new Set(selectedParts);
+  const arrows = {
+    up: hasAnyKey(keysPressed, QWOP_ARROW_INPUTS.up),
+    down: hasAnyKey(keysPressed, QWOP_ARROW_INPUTS.down),
+    left: hasAnyKey(keysPressed, QWOP_ARROW_INPUTS.left),
+    right: hasAnyKey(keysPressed, QWOP_ARROW_INPUTS.right)
   };
+  const hasArrowInput = arrows.up || arrows.down || arrows.left || arrows.right;
 
   const specs = {
-    leftLeg: { lift: -1.05, rest: 0.55, gravity: 6.2, damping: 5.2, torque: 13 },
-    rightLeg: { lift: -1.05, rest: 0.55, gravity: 6.2, damping: 5.2, torque: 13 },
-    leftArm: { lift: -1.25, rest: 0.9, gravity: 5.4, damping: 4.8, torque: 12 },
-    rightArm: { lift: -1.25, rest: 0.9, gravity: 5.4, damping: 4.8, torque: 12 },
-    torso: { lift: -0.42, back: 0.48, rest: 0.05, gravity: 3.4, damping: 5.8, torque: 9 }
+    hips: { rest: 0, restY: 0, restZ: 0, min: -0.5, max: 0.5, sideMin: -0.45, sideMax: 0.45, gravity: 3.2, damping: 6.2, torque: 10 },
+    leftLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 6.2, damping: 5.2, torque: 13 },
+    rightLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 6.2, damping: 5.2, torque: 13 },
+    leftArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 5.4, damping: 4.8, torque: 12 },
+    rightArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 5.4, damping: 4.8, torque: 12 },
+    torso: { rest: 0.05, restY: 0, restZ: 0, min: -0.95, max: 0.95, sideMin: -0.35, sideMax: 0.35, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, gravity: 3.4, damping: 5.8, torque: 9 }
   };
 
-  const stepPart = (name, target, isActive) => {
+  for (const name of selectedParts) {
+    const part = rig.parts[name];
+    const spec = specs[name];
+    if (!part || !spec || !hasArrowInput) continue;
+
+    const target = ensurePartControlTarget(part);
+    const nudge = TARGET_NUDGE_SPEED * dt;
+    if (arrows.up) target.x -= nudge;
+    if (arrows.down) target.x += nudge;
+
+    if (name === 'torso') {
+      if (arrows.left) target.y += nudge;
+      if (arrows.right) target.y -= nudge;
+      target.y = THREE.MathUtils.clamp(target.y, spec.twistMin, spec.twistMax);
+      target.z = dampToward(target.z, spec.restZ, TARGET_RETURN_SPEED, dt);
+    } else {
+      if (arrows.left) target.z += nudge;
+      if (arrows.right) target.z -= nudge;
+      target.y = dampToward(target.y, spec.restY, TARGET_RETURN_SPEED, dt);
+      target.z = THREE.MathUtils.clamp(target.z, spec.sideMin, spec.sideMax);
+    }
+
+    target.x = THREE.MathUtils.clamp(target.x, spec.min, spec.max);
+  }
+
+  const stepPart = (name) => {
     const part = rig.parts[name];
     if (!part) return;
     const spec = specs[name];
     const physics = part.group.userData.physics;
+    const target = ensurePartControlTarget(part);
+    const isSelected = selectedSet.has(name);
+
+    if (!isSelected) {
+      target.x = dampToward(target.x, spec.rest, TARGET_RETURN_SPEED, dt);
+      target.y = dampToward(target.y, spec.restY, TARGET_RETURN_SPEED, dt);
+      target.z = dampToward(target.z, spec.restZ, TARGET_RETURN_SPEED, dt);
+    }
+
     const angle = part.group.rotation.x;
     const weightFall = spec.gravity * physics.mass * 0.025 * Math.sin(angle - spec.rest);
-    const holdTorque = isActive ? (target - angle) * spec.torque : 0;
-    const passiveTorque = !isActive ? (spec.rest - angle) * spec.gravity * 0.35 : 0;
+    const holdTorque = isSelected ? (target.x - angle) * spec.torque : 0;
+    const passiveTorque = !isSelected ? (spec.rest - angle) * spec.gravity * 0.35 : 0;
     physics.angularVelocity += (holdTorque + passiveTorque - weightFall) * dt;
     physics.angularVelocity *= Math.exp(-spec.damping * dt);
-    part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, -1.45, 1.35);
+    part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
+
+    const lateralFollowSpeed = isSelected ? TARGET_FOLLOW_SPEED : TARGET_RETURN_SPEED;
+    part.group.rotation.y = dampToward(part.group.rotation.y, target.y, lateralFollowSpeed, dt);
+    part.group.rotation.z = dampToward(part.group.rotation.z, target.z, lateralFollowSpeed, dt);
   };
 
-  stepPart('leftLeg', specs.leftLeg.lift, controls.leftLeg);
-  stepPart('rightLeg', specs.rightLeg.lift, controls.rightLeg);
-  stepPart('leftArm', specs.leftArm.lift, controls.leftArm);
-  stepPart('rightArm', specs.rightArm.lift, controls.rightArm);
-
-  const torsoTarget = controls.torsoForward ? specs.torso.lift : controls.torsoBackward ? specs.torso.back : specs.torso.rest;
-  stepPart('torso', torsoTarget, controls.torsoForward || controls.torsoBackward);
+  stepPart('hips');
+  stepPart('leftLeg');
+  stepPart('rightLeg');
+  stepPart('leftArm');
+  stepPart('rightArm');
+  stepPart('torso');
 
   const leftLeg = rig.parts.leftLeg.group.rotation.x;
   const rightLeg = rig.parts.rightLeg.group.rotation.x;
   const torso = rig.parts.torso.group.rotation.x;
   const armCounterBalance = (rig.parts.rightArm.group.rotation.x - rig.parts.leftArm.group.rotation.x) * 0.08;
   const legStride = Math.abs(leftLeg - rightLeg);
-  const anyLegDriving = controls.leftLeg || controls.rightLeg;
+  const anyLegDriving = selectedSet.has('leftLeg') || selectedSet.has('rightLeg');
   const forwardWeight = THREE.MathUtils.clamp(
     (-torso * 0.55)
       + Math.max(0, -leftLeg) * 0.2
@@ -404,13 +503,22 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     1
   );
   rig.balance = THREE.MathUtils.clamp((-torso * 0.9) + armCounterBalance, -1, 1);
-  // Only active leg input can produce forward drive. Resting limb pose should not
+  // Only active leg selection can produce forward drive. Resting limb pose should not
   // generate constant translation; otherwise the player drifts without physics input.
   rig.forwardIntent = anyLegDriving
     ? THREE.MathUtils.clamp(Math.max(0, -leftLeg, -rightLeg) * legStride * (0.35 + Math.max(0, -torso)), 0, 1)
     : 0;
   rig.forwardWeight = forwardWeight;
-  rig.lastControls = controls;
+  rig.lastControls = {
+    selectedParts,
+    arrows,
+    leftLeg: selectedSet.has('leftLeg'),
+    rightLeg: selectedSet.has('rightLeg'),
+    torso: selectedSet.has('torso'),
+    leftArm: selectedSet.has('leftArm'),
+    rightArm: selectedSet.has('rightArm'),
+    hips: selectedSet.has('hips')
+  };
 
   playerGroup.userData.currentAction = rig.forwardIntent > 0.08 ? 'qwop' : 'idle';
   return { forwardIntent: rig.forwardIntent, balance: rig.balance, forwardWeight };
