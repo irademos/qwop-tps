@@ -26,9 +26,16 @@ const CLIMB_ENTRY_BUFFER_Y = 0.4;
 const GROUND_SMOOTH_ALPHA = 0.2;
 const GROUND_SMOOTH_SNAP_DELTA = 0.45;
 const GROUND_SMOOTH_SURFACE_SWITCH_SNAP_DELTA = 0.2;
-const GROUND_DOWNWARD_CORRECTION_THRESHOLD = 0.08;
-const GROUND_DOWNWARD_CORRECTION_MAX_RATE = 2.5;
-const GROUND_DOWNWARD_CORRECTION_MAX_VERTICAL_SPEED = 0.18;
+const PLAYER_INPUT_ACCELERATION = 22;
+const PLAYER_GROUND_DRAG = 7;
+const PLAYER_AIR_DRAG = 0.35;
+const PLAYER_MAX_HORIZONTAL_SPEED = 5;
+const PLAYER_FALL_TORQUE = 8;
+const PLAYER_FALL_RESTORE_TORQUE = 5;
+const PLAYER_FALL_DAMPING = 4.5;
+const PLAYER_FALL_MOMENTUM_LEAN = 0.08;
+const PLAYER_FALL_MAX_PITCH = 1.35;
+const PLAYER_FALL_BASE_THRESHOLD = 0.12;
 const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const STEEP_SLOPE_SPEED_MULTIPLIER = 0.55;
 const FRIENDLY_INTERACT_RANGE = 6;
@@ -221,6 +228,8 @@ export class PlayerControls {
     this.groundOverrideY = null;
     this.smoothedGroundExpectedY = null;
     this.lastGroundResolution = null;
+    this.fallPitch = 0;
+    this.fallAngularVelocity = 0;
 
     // Player state
     this.canJump = true;
@@ -264,13 +273,14 @@ export class PlayerControls {
       this.playerModel.position.set(this.playerX, this.playerY, this.playerZ);
       this.lastPosition.set(this.playerX, this.playerY, this.playerZ);
       this.playerModel.userData.isKnocked = false;
+      this.playerModel.rotation.x = 0;
     }
     
     const world = window.rapierWorld;
     if (world) {
       const rbDesc = RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(this.playerX, this.playerY, this.playerZ)
-        .setLinearDamping(0.9)
+        .setLinearDamping(0.2)
         .setAngularDamping(0.9);
       this.body = world.createRigidBody(rbDesc);
       const colDesc = RAPIER.ColliderDesc
@@ -2464,26 +2474,6 @@ export class PlayerControls {
         this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
       }
       t.y = groundExpectedY;
-    } else {
-      const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
-        ? this.deltaSeconds
-        : 0.016;
-      const aboveGroundDelta = t.y - groundExpectedY;
-      const isTryingToJump = this.keysPressed.has(" ");
-      const canApplyDownwardCorrection = canStandOnGround
-        && !this.isInWater
-        && !this.isClimbing
-        && !isTryingToJump
-        && Math.abs(vel.y) <= GROUND_DOWNWARD_CORRECTION_MAX_VERTICAL_SPEED;
-      if (canApplyDownwardCorrection && aboveGroundDelta > GROUND_DOWNWARD_CORRECTION_THRESHOLD) {
-        const maxStep = GROUND_DOWNWARD_CORRECTION_MAX_RATE * deltaSeconds;
-        const correctedY = t.y - Math.min(aboveGroundDelta, maxStep);
-        this.body.setTranslation({ x: t.x, y: correctedY, z: t.z }, true);
-        if (vel.y > 0) {
-          this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
-        }
-        t.y = correctedY;
-      }
     }
     const moveDirection = new THREE.Vector3(0, 0, 0);
     const movementLocked = freezeActive || ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
@@ -2510,7 +2500,7 @@ export class PlayerControls {
         const strideEfficiency = THREE.MathUtils.clamp(alternatingStride * 0.7, 0, 1);
         const forwardIntent = (rig.forwardIntent || 0) * (0.45 + strideEfficiency * 0.55);
         if (forwardIntent > 0.04) moveDirection.z = forwardIntent;
-        moveDirection.x = THREE.MathUtils.clamp(rig.balance || 0, -0.45, 0.45);
+        // Balance shifts should topple the body, not translate it sideways.
       } else {
         if (this.keysPressed.has("w")) moveDirection.z = 1;
         if (this.keysPressed.has("s")) moveDirection.z = -1;
@@ -2579,6 +2569,9 @@ export class PlayerControls {
         this.body.setLinvel({ x: this.knockbackVelocity.x, y: vel.y, z: this.knockbackVelocity.z }, true);
       }
     } else if (!this.isClimbing) {
+      const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
+        ? this.deltaSeconds
+        : 0.016;
       const speed = this.isInWater
         ? SWIM_SPEED
         : this.playerModel?.userData?.qwopRig
@@ -2589,7 +2582,24 @@ export class PlayerControls {
       const slopeSpeedMultiplier = !this.isInWater && !groundResolution.metadata.walkable
         ? STEEP_SLOPE_SPEED_MULTIPLIER
         : 1;
-      this.body.setLinvel({ x: movement.x * speed * slopeSpeedMultiplier, y: vel.y, z: movement.z * speed * slopeSpeedMultiplier }, true);
+      const targetHorizontal = movement.clone().multiplyScalar(speed * slopeSpeedMultiplier);
+      const currentHorizontal = new THREE.Vector3(vel.x, 0, vel.z);
+      const maxDeltaV = PLAYER_INPUT_ACCELERATION * deltaSeconds;
+      if (movement.lengthSq() > 0.0001) {
+        const desiredDelta = targetHorizontal.sub(currentHorizontal);
+        if (desiredDelta.length() > maxDeltaV) desiredDelta.setLength(maxDeltaV);
+        this.body.applyImpulse({ x: desiredDelta.x, y: 0, z: desiredDelta.z }, true);
+      } else {
+        const drag = grounded ? PLAYER_GROUND_DRAG : PLAYER_AIR_DRAG;
+        const dragScale = Math.max(0, 1 - drag * deltaSeconds);
+        this.body.setLinvel({ x: vel.x * dragScale, y: vel.y, z: vel.z * dragScale }, true);
+      }
+      const limitedVel = this.body.linvel();
+      const horizontalSpeed = Math.hypot(limitedVel.x, limitedVel.z);
+      if (horizontalSpeed > PLAYER_MAX_HORIZONTAL_SPEED) {
+        const scale = PLAYER_MAX_HORIZONTAL_SPEED / horizontalSpeed;
+        this.body.setLinvel({ x: limitedVel.x * scale, y: limitedVel.y, z: limitedVel.z * scale }, true);
+      }
     }
 
     let { x: newX, y: newY, z: newZ } = this.body.translation();
@@ -2622,7 +2632,30 @@ export class PlayerControls {
       }
 
       
-      this.playerModel.rotation.set(0, yawAngle, 0);
+      const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
+        ? this.deltaSeconds
+        : 0.016;
+      const latestVelocity = this.body?.linvel?.() ?? { x: 0, y: 0, z: 0 };
+      const facing = new THREE.Vector3(Math.sin(yawAngle), 0, Math.cos(yawAngle));
+      const forwardSpeed = latestVelocity.x * facing.x + latestVelocity.z * facing.z;
+      const rigForwardWeight = THREE.MathUtils.clamp(this.playerModel.userData.qwopRig?.forwardWeight || 0, -1, 1);
+      const fallInput = rigForwardWeight + forwardSpeed * PLAYER_FALL_MOMENTUM_LEAN;
+      const fallThreshold = this.canJump ? PLAYER_FALL_BASE_THRESHOLD : PLAYER_FALL_BASE_THRESHOLD * 0.35;
+      const fallTorque = Math.abs(fallInput) > fallThreshold
+        ? (fallInput - Math.sign(fallInput) * fallThreshold) * PLAYER_FALL_TORQUE
+        : -this.fallPitch * PLAYER_FALL_RESTORE_TORQUE;
+      this.fallAngularVelocity += fallTorque * deltaSeconds;
+      this.fallAngularVelocity *= Math.exp(-PLAYER_FALL_DAMPING * deltaSeconds);
+      this.fallPitch = THREE.MathUtils.clamp(
+        this.fallPitch + this.fallAngularVelocity * deltaSeconds,
+        -PLAYER_FALL_MAX_PITCH,
+        PLAYER_FALL_MAX_PITCH
+      );
+      if (this.canJump && Math.abs(this.fallPitch) < 0.01 && Math.abs(fallInput) <= fallThreshold) {
+        this.fallPitch = 0;
+        this.fallAngularVelocity = 0;
+      }
+      this.playerModel.rotation.set(this.fallPitch, yawAngle, 0);
       this.playerModel.up.set(0, 1, 0);
       this.camera.up.set(0, 1, 0);
       

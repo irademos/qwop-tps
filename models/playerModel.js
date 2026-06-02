@@ -218,7 +218,9 @@ function createProceduralBody(THREE) {
 
   const hips = new THREE.Group();
   hips.name = 'hips';
-  hips.position.y = 0.9;
+  // The player group is positioned at the physics capsule center. Keep the hips
+  // near that origin so the legs reach the ground instead of hovering above it.
+  hips.position.y = 0;
   root.add(hips);
 
   const torso = createLimbSegment(THREE, 'torso', {
@@ -391,12 +393,27 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const rightLeg = rig.parts.rightLeg.group.rotation.x;
   const torso = rig.parts.torso.group.rotation.x;
   const armCounterBalance = (rig.parts.rightArm.group.rotation.x - rig.parts.leftArm.group.rotation.x) * 0.08;
+  const legStride = Math.abs(leftLeg - rightLeg);
+  const anyLegDriving = controls.leftLeg || controls.rightLeg;
+  const forwardWeight = THREE.MathUtils.clamp(
+    (-torso * 0.55)
+      + Math.max(0, -leftLeg) * 0.2
+      + Math.max(0, -rightLeg) * 0.2
+      - Math.max(0, torso) * 0.65,
+    -1,
+    1
+  );
   rig.balance = THREE.MathUtils.clamp((-torso * 0.9) + armCounterBalance, -1, 1);
-  rig.forwardIntent = THREE.MathUtils.clamp(Math.max(0, -leftLeg, -rightLeg) * (0.35 + Math.max(0, -torso)), 0, 1);
+  // Only active leg input can produce forward drive. Resting limb pose should not
+  // generate constant translation; otherwise the player drifts without physics input.
+  rig.forwardIntent = anyLegDriving
+    ? THREE.MathUtils.clamp(Math.max(0, -leftLeg, -rightLeg) * legStride * (0.35 + Math.max(0, -torso)), 0, 1)
+    : 0;
+  rig.forwardWeight = forwardWeight;
   rig.lastControls = controls;
 
   playerGroup.userData.currentAction = rig.forwardIntent > 0.08 ? 'qwop' : 'idle';
-  return { forwardIntent: rig.forwardIntent, balance: rig.balance };
+  return { forwardIntent: rig.forwardIntent, balance: rig.balance, forwardWeight };
 }
 
 export function createPlayerModel(
