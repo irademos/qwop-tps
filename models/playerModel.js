@@ -259,33 +259,60 @@ export function createProceduralBody(THREE) {
   neck.add(face);
 
   const leftLeg = createLimbSegment(THREE, 'leftLeg', {
-    length: 0.82,
+    length: 0.44,
     radius: 0.095,
     color: materials.shorts,
-    mass: 7
+    mass: 5
   });
   leftLeg.group.position.set(-0.14, 0, 0);
   hips.add(leftLeg.group);
 
   const rightLeg = createLimbSegment(THREE, 'rightLeg', {
-    length: 0.82,
+    length: 0.44,
     radius: 0.095,
     color: materials.shorts,
-    mass: 7
+    mass: 5
   });
   rightLeg.group.position.set(0.14, 0, 0);
   hips.add(rightLeg.group);
 
-  for (const leg of [leftLeg, rightLeg]) {
+  const leftCalf = createLimbSegment(THREE, 'leftCalf', {
+    length: 0.42,
+    radius: 0.08,
+    color: materials.skin,
+    mass: 4
+  });
+  leftCalf.group.position.y = -leftLeg.length;
+  leftLeg.group.add(leftCalf.group);
+
+  const rightCalf = createLimbSegment(THREE, 'rightCalf', {
+    length: 0.42,
+    radius: 0.08,
+    color: materials.skin,
+    mass: 4
+  });
+  rightCalf.group.position.y = -rightLeg.length;
+  rightLeg.group.add(rightCalf.group);
+
+  for (const calf of [leftCalf, rightCalf]) {
+    const knee = new THREE.Mesh(
+      new THREE.SphereGeometry(0.095, 14, 10),
+      new THREE.MeshStandardMaterial({ color: materials.shorts, roughness: 0.75 })
+    );
+    knee.name = `${calf.group.name}Knee`;
+    knee.castShadow = true;
+    knee.receiveShadow = true;
+    calf.group.add(knee);
+
     const shoe = new THREE.Mesh(
       new THREE.BoxGeometry(0.18, 0.08, 0.28),
       new THREE.MeshStandardMaterial({ color: materials.shoe, roughness: 0.7 })
     );
-    shoe.name = `${leg.group.name}Shoe`;
+    shoe.name = `${calf.group.name}Shoe`;
     shoe.castShadow = true;
     shoe.receiveShadow = true;
-    shoe.position.set(0, -leg.length - 0.02, 0.06);
-    leg.group.add(shoe);
+    shoe.position.set(0, -calf.length - 0.02, 0.06);
+    calf.group.add(shoe);
   }
 
   const leftArm = createLimbSegment(THREE, 'leftArm', {
@@ -322,6 +349,8 @@ export function createProceduralBody(THREE) {
   torso.restRotation = 0;
   leftLeg.restRotation = 0.18;
   rightLeg.restRotation = 0.18;
+  leftCalf.restRotation = 0.1;
+  rightCalf.restRotation = 0.1;
   leftArm.restRotation = -0.18;
   rightArm.restRotation = -0.18;
 
@@ -353,6 +382,8 @@ export function createProceduralBody(THREE) {
     head: headPart,
     leftLeg,
     rightLeg,
+    leftCalf,
+    rightCalf,
     leftArm,
     rightArm
   };
@@ -394,7 +425,7 @@ const QWOP_ARROW_INPUTS = Object.freeze({
 });
 const TORSO_MAX_TWIST = Math.PI / 2;
 const TARGET_NUDGE_SPEED = 2.4;
-const LEG_LIFT_SPEED = 2.8;
+const LEG_LIFT_SPEED = 4.6;
 const TARGET_RETURN_SPEED = 1.35;
 const TARGET_FOLLOW_SPEED = 11;
 
@@ -437,8 +468,10 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
 
   const specs = {
     hips: { rest: 0, restY: 0, restZ: 0, min: -0.5, max: 0.5, sideMin: -0.45, sideMax: 0.45, gravity: 3.2, damping: 6.2, torque: 10 },
-    leftLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 6.2, damping: 5.2, torque: 13 },
-    rightLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 6.2, damping: 5.2, torque: 13 },
+    leftLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 10.5, damping: 4.8, torque: 18 },
+    rightLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 10.5, damping: 4.8, torque: 18 },
+    leftCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 12.5, damping: 3.4, torque: 0, parent: 'leftLeg' },
+    rightCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 12.5, damping: 3.4, torque: 0, parent: 'rightLeg' },
     leftArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 5.4, damping: 4.8, torque: 12 },
     rightArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 5.4, damping: 4.8, torque: 12 },
     torso: { rest: 0.05, restY: 0, restZ: 0, min: -0.95, max: 0.95, sideMin: -0.35, sideMax: 0.35, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, gravity: 3.4, damping: 5.8, torque: 9 }
@@ -491,8 +524,10 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     }
 
     const angle = part.group.rotation.x;
-    const weightFall = spec.gravity * physics.mass * 0.025 * Math.sin(angle - spec.rest);
-    const holdTorque = isSelected ? (target.x - angle) * spec.torque : 0;
+    const parentAngle = spec.parent ? rig.parts[spec.parent]?.group.rotation.x || 0 : 0;
+    const gravityAngle = angle + parentAngle;
+    const weightFall = spec.gravity * physics.mass * 0.025 * Math.sin(gravityAngle - spec.rest);
+    const holdTorque = isSelected && spec.torque ? (target.x - angle) * spec.torque : 0;
     physics.angularVelocity += (holdTorque - weightFall) * dt;
     physics.angularVelocity *= Math.exp(-spec.damping * dt);
     part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
@@ -505,6 +540,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   stepPart('hips');
   stepPart('leftLeg');
   stepPart('rightLeg');
+  stepPart('leftCalf');
+  stepPart('rightCalf');
   stepPart('leftArm');
   stepPart('rightArm');
   stepPart('torso');
