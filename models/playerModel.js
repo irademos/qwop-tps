@@ -262,7 +262,7 @@ export function createProceduralBody(THREE) {
     length: 0.44,
     radius: 0.095,
     color: materials.shorts,
-    mass: 5
+    mass: 10
   });
   leftLeg.group.position.set(-0.14, 0, 0);
   hips.add(leftLeg.group);
@@ -271,7 +271,7 @@ export function createProceduralBody(THREE) {
     length: 0.44,
     radius: 0.095,
     color: materials.shorts,
-    mass: 5
+    mass: 10
   });
   rightLeg.group.position.set(0.14, 0, 0);
   hips.add(rightLeg.group);
@@ -280,7 +280,7 @@ export function createProceduralBody(THREE) {
     length: 0.42,
     radius: 0.08,
     color: materials.skin,
-    mass: 4
+    mass: 8
   });
   leftCalf.group.position.y = -leftLeg.length;
   leftLeg.group.add(leftCalf.group);
@@ -289,7 +289,7 @@ export function createProceduralBody(THREE) {
     length: 0.42,
     radius: 0.08,
     color: materials.skin,
-    mass: 4
+    mass: 8
   });
   rightCalf.group.position.y = -rightLeg.length;
   rightLeg.group.add(rightCalf.group);
@@ -427,7 +427,7 @@ const TORSO_MAX_TWIST = Math.PI / 2;
 const TARGET_NUDGE_SPEED = 2.4;
 const LEG_LIFT_SPEED = 4.6;
 const TARGET_RETURN_SPEED = 1.35;
-const TARGET_FOLLOW_SPEED = 11;
+const TARGET_FOLLOW_SPEED = 15;
 
 function hasAnyKey(keysPressed, keys) {
   return keys.some((key) => keysPressed?.has?.(key));
@@ -467,14 +467,14 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const hasArrowInput = arrows.up || arrows.down || arrows.left || arrows.right;
 
   const specs = {
-    hips: { rest: 0, restY: 0, restZ: 0, min: -0.5, max: 0.5, sideMin: -0.45, sideMax: 0.45, gravity: 3.2, damping: 6.2, torque: 10 },
-    leftLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 10.5, damping: 4.8, torque: 18 },
-    rightLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 10.5, damping: 4.8, torque: 18 },
-    leftCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 12.5, damping: 3.4, torque: 0, parent: 'leftLeg' },
-    rightCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 12.5, damping: 3.4, torque: 0, parent: 'rightLeg' },
-    leftArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 5.4, damping: 4.8, torque: 12 },
-    rightArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 5.4, damping: 4.8, torque: 12 },
-    torso: { rest: 0.05, restY: 0, restZ: 0, min: -0.95, max: 0.95, sideMin: -0.35, sideMax: 0.35, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, gravity: 3.4, damping: 5.8, torque: 9 }
+    hips: { rest: 0, restY: 0, restZ: 0, min: -0.5, max: 0.5, sideMin: -0.45, sideMax: 0.45, gravity: 6, damping: 2.5, torque: 10 },
+    leftLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 30, damping: 2.0, torque: 18 },
+    rightLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 30, damping: 2.0, torque: 18 },
+    leftCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 40, damping: 1.5, torque: 0, parent: 'leftLeg' },
+    rightCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 40, damping: 1.5, torque: 0, parent: 'rightLeg' },
+    leftArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 10, damping: 2.0, torque: 12 },
+    rightArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 10, damping: 2.0, torque: 12 },
+    torso: { rest: 0.05, restY: 0, restZ: 0, min: -0.95, max: 0.95, sideMin: -0.35, sideMax: 0.35, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, gravity: 8, damping: 2.5, torque: 9 }
   };
 
   for (const name of selectedParts) {
