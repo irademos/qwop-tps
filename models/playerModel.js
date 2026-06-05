@@ -414,7 +414,6 @@ const QWOP_PART_SELECTORS = Object.freeze({
   w: 'torso',
   e: 'rightArm',
   a: 'leftLeg',
-  s: 'hips',
   d: 'rightLeg'
 });
 const QWOP_ARROW_INPUTS = Object.freeze({
@@ -426,6 +425,10 @@ const QWOP_ARROW_INPUTS = Object.freeze({
 const TORSO_MAX_TWIST = Math.PI / 2;
 const TARGET_NUDGE_SPEED = 2.4;
 const LEG_LIFT_SPEED = 4.6;
+const CROUCH_LEG_TARGET = 0.95;
+const CROUCH_CALF_TARGET = -1.25;
+const CROUCH_BODY_LOWER = -0.28;
+const SINGLE_LEG_STEP_INTENT = 0.72;
 const TARGET_RETURN_SPEED = 1.35;
 const TARGET_FOLLOW_SPEED = 15;
 
@@ -465,17 +468,42 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     right: hasAnyKey(keysPressed, QWOP_ARROW_INPUTS.right)
   };
   const hasArrowInput = arrows.up || arrows.down || arrows.left || arrows.right;
+  const leftLegPressed = selectedSet.has('leftLeg');
+  const rightLegPressed = selectedSet.has('rightLeg');
+  const crouching = leftLegPressed && rightLegPressed;
+
+  if (rig.bodyRoot) {
+    const targetBodyY = crouching ? CROUCH_BODY_LOWER : 0;
+    rig.bodyRoot.position.y = dampToward(rig.bodyRoot.position.y, targetBodyY, TARGET_FOLLOW_SPEED, dt);
+  }
 
   const specs = {
     hips: { rest: 0, restY: 0, restZ: 0, min: -0.5, max: 0.5, sideMin: -0.45, sideMax: 0.45, gravity: 6, damping: 2.5, torque: 10 },
     leftLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 30, damping: 2.0, torque: 18 },
     rightLeg: { rest: 0.55, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -0.65, sideMax: 0.65, gravity: 30, damping: 2.0, torque: 18 },
-    leftCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 40, damping: 1.5, torque: 0, parent: 'leftLeg' },
-    rightCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 40, damping: 1.5, torque: 0, parent: 'rightLeg' },
+    leftCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 40, damping: 1.5, torque: 12, parent: 'leftLeg' },
+    rightCalf: { rest: 0.18, restY: 0, restZ: 0, min: -1.25, max: 1.45, sideMin: -0.35, sideMax: 0.35, gravity: 40, damping: 1.5, torque: 12, parent: 'rightLeg' },
     leftArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 10, damping: 2.0, torque: 12 },
     rightArm: { rest: 0.9, restY: 0, restZ: 0, min: -1.45, max: 1.35, sideMin: -1.1, sideMax: 1.1, gravity: 10, damping: 2.0, torque: 12 },
     torso: { rest: 0.05, restY: 0, restZ: 0, min: -0.95, max: 0.95, sideMin: -0.35, sideMax: 0.35, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, gravity: 8, damping: 2.5, torque: 9 }
   };
+
+  if (crouching) {
+    selectedSet.add('leftCalf');
+    selectedSet.add('rightCalf');
+    for (const name of ['leftLeg', 'rightLeg']) {
+      const part = rig.parts[name];
+      const spec = specs[name];
+      if (!part || !spec) continue;
+      ensurePartControlTarget(part).x = THREE.MathUtils.clamp(CROUCH_LEG_TARGET, spec.min, spec.max);
+    }
+    for (const name of ['leftCalf', 'rightCalf']) {
+      const part = rig.parts[name];
+      const spec = specs[name];
+      if (!part || !spec) continue;
+      ensurePartControlTarget(part).x = THREE.MathUtils.clamp(CROUCH_CALF_TARGET, spec.min, spec.max);
+    }
+  }
 
   for (const name of selectedParts) {
     const part = rig.parts[name];
@@ -485,22 +513,29 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const target = ensurePartControlTarget(part);
 
     if (name === 'leftLeg' || name === 'rightLeg') {
-      target.x = THREE.MathUtils.clamp(target.x - LEG_LIFT_SPEED * dt, spec.min, spec.max);
+      if (!crouching) {
+        target.x = THREE.MathUtils.clamp(target.x - LEG_LIFT_SPEED * dt, spec.min, spec.max);
+      }
       continue;
     }
 
     if (!hasArrowInput) continue;
 
     const nudge = TARGET_NUDGE_SPEED * dt;
-    if (arrows.up) target.x -= nudge;
-    if (arrows.down) target.x += nudge;
 
     if (name === 'torso') {
       if (arrows.left) target.y += nudge;
       if (arrows.right) target.y -= nudge;
       target.y = THREE.MathUtils.clamp(target.y, spec.twistMin, spec.twistMax);
+      target.x = spec.rest;
       target.z = dampToward(target.z, spec.restZ, TARGET_RETURN_SPEED, dt);
     } else {
+      if (name === 'leftArm' || name === 'rightArm') {
+        if (arrows.up) target.x -= nudge;
+        if (arrows.down) target.x += nudge;
+      } else {
+        target.x = spec.rest;
+      }
       if (arrows.left) target.z += nudge;
       if (arrows.right) target.z -= nudge;
       target.y = dampToward(target.y, spec.restY, TARGET_RETURN_SPEED, dt);
@@ -520,17 +555,24 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
 
     if (!isSelected && name !== 'torso') {
       target.y = dampToward(target.y, spec.restY, TARGET_RETURN_SPEED, dt);
+      target.x = spec.rest;
       target.z = dampToward(target.z, spec.restZ, TARGET_RETURN_SPEED, dt);
     }
 
-    const angle = part.group.rotation.x;
-    const parentAngle = spec.parent ? rig.parts[spec.parent]?.group.rotation.x || 0 : 0;
-    const gravityAngle = angle + parentAngle;
-    const weightFall = spec.gravity * physics.mass * 0.025 * Math.sin(gravityAngle - spec.rest);
-    const holdTorque = isSelected && spec.torque ? (target.x - angle) * spec.torque : 0;
-    physics.angularVelocity += (holdTorque - weightFall) * dt;
-    physics.angularVelocity *= Math.exp(-spec.damping * dt);
-    part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
+    if (name === 'torso') {
+      target.x = spec.rest;
+      physics.angularVelocity = 0;
+      part.group.rotation.x = dampToward(part.group.rotation.x, spec.rest, TARGET_FOLLOW_SPEED, dt);
+    } else {
+      const angle = part.group.rotation.x;
+      const parentAngle = spec.parent ? rig.parts[spec.parent]?.group.rotation.x || 0 : 0;
+      const gravityAngle = angle + parentAngle;
+      const weightFall = spec.gravity * physics.mass * 0.025 * Math.sin(gravityAngle - spec.rest);
+      const holdTorque = isSelected && spec.torque ? (target.x - angle) * spec.torque : 0;
+      physics.angularVelocity += (holdTorque - weightFall) * dt;
+      physics.angularVelocity *= Math.exp(-spec.damping * dt);
+      part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
+    }
 
     const lateralFollowSpeed = isSelected ? TARGET_FOLLOW_SPEED : TARGET_RETURN_SPEED;
     part.group.rotation.y = dampToward(part.group.rotation.y, target.y, lateralFollowSpeed, dt);
@@ -548,25 +590,13 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
 
   const leftLeg = rig.parts.leftLeg.group.rotation.x;
   const rightLeg = rig.parts.rightLeg.group.rotation.x;
-  const torso = rig.parts.torso.group.rotation.x;
-  const armCounterBalance = (rig.parts.rightArm.group.rotation.x - rig.parts.leftArm.group.rotation.x) * 0.08;
   const legStride = Math.abs(leftLeg - rightLeg);
-  const anyLegDriving = selectedSet.has('leftLeg') || selectedSet.has('rightLeg');
-  const forwardWeight = THREE.MathUtils.clamp(
-    (-torso * 0.55)
-      + Math.max(0, -leftLeg) * 0.2
-      + Math.max(0, -rightLeg) * 0.2
-      - Math.max(0, torso) * 0.65,
-    -1,
-    1
-  );
-  rig.balance = THREE.MathUtils.clamp((-torso * 0.9) + armCounterBalance, -1, 1);
-  // Only active leg selection can produce forward drive. Resting limb pose should not
-  // generate constant translation; otherwise the player drifts without physics input.
-  rig.forwardIntent = anyLegDriving
-    ? THREE.MathUtils.clamp(Math.max(0, -leftLeg, -rightLeg) * legStride * (0.35 + Math.max(0, -torso)), 0, 1)
+  const singleLegDriving = (leftLegPressed || rightLegPressed) && !crouching;
+  rig.balance = 0;
+  rig.forwardIntent = singleLegDriving
+    ? THREE.MathUtils.clamp(SINGLE_LEG_STEP_INTENT + legStride * 0.2, 0, 1)
     : 0;
-  rig.forwardWeight = forwardWeight;
+  rig.forwardWeight = 0;
   rig.lastControls = {
     selectedParts,
     arrows,
@@ -575,11 +605,11 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     torso: selectedSet.has('torso'),
     leftArm: selectedSet.has('leftArm'),
     rightArm: selectedSet.has('rightArm'),
-    hips: selectedSet.has('hips')
+    crouching
   };
 
   playerGroup.userData.currentAction = rig.forwardIntent > 0.08 ? 'qwop' : 'idle';
-  return { forwardIntent: rig.forwardIntent, balance: rig.balance, forwardWeight };
+  return { forwardIntent: rig.forwardIntent, balance: rig.balance, forwardWeight: rig.forwardWeight };
 }
 
 

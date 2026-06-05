@@ -128,8 +128,11 @@ const MERCHANT_DIALOGUE = {
     }
   ]
 };
-const QWOP_PART_SELECT_KEYS = new Set(['a', 'd', 'w', 's', 'q', 'e']);
+const QWOP_PART_SELECT_KEYS = new Set(['a', 'd', 'w', 'q', 'e']);
 const QWOP_CONTROL_KEYS = new Set([...QWOP_PART_SELECT_KEYS, 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
+const QWOP_CROUCH_JUMP_MIN_MULTIPLIER = 1.01;
+const QWOP_CROUCH_JUMP_MAX_MULTIPLIER = 1.27;
+const QWOP_CROUCH_JUMP_CHARGE_MS = 1800;
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 const SWORD_COMBO_ACTIONS = ['swordSlash', 'swordSlashLeft', 'swordFwdSpin'];
 const SWORD_SPIN_CHARGE_START_MS = 1000;
@@ -224,6 +227,7 @@ export class PlayerControls {
     this.onSleepEnd = typeof onSleepEnd === 'function' ? onSleepEnd : null;
 
     this.jumpForceMultiplier = 1;
+    this.qwopCrouchStartedAt = null;
     this.lowGravityEnabled = false;
     this.groundOverrideY = null;
     this.smoothedGroundExpectedY = null;
@@ -1273,6 +1277,10 @@ export class PlayerControls {
       this.keysPressed.add(key);
       const usingQwopRig = !!this.playerModel?.userData?.qwopRig;
 
+      if (usingQwopRig && (key === 'a' || key === 'd')) {
+        this.updateQwopCrouchCharge();
+      }
+
       if (usingQwopRig && QWOP_CONTROL_KEYS.has(key)) {
         this.safePreventDefault(e);
       }
@@ -1400,7 +1408,16 @@ export class PlayerControls {
 
     document.addEventListener("keyup", (e) => {
       const key = e.key.toLowerCase();
+      const usingQwopRig = !!this.playerModel?.userData?.qwopRig;
+      const shouldReleaseQwopCrouch = usingQwopRig && (key === 'a' || key === 'd');
+      const crouchJumpMultiplier = shouldReleaseQwopCrouch ? this.consumeQwopCrouchJumpMultiplier() : 0;
       this.keysPressed.delete(key);
+      if (crouchJumpMultiplier > 0) {
+        this.triggerQwopCrouchJump(crouchJumpMultiplier);
+      }
+      if (usingQwopRig && QWOP_CONTROL_KEYS.has(key)) {
+        return;
+      }
       if (key === 'e') {
         if (this.releaseSwordSpinCharge()) return;
         if (this.getEquippedSword() && (performance.now() - this.swordSpinChargeStartAt) < SWORD_SPIN_CHARGE_START_MS) {
@@ -2638,8 +2655,9 @@ export class PlayerControls {
       const latestVelocity = this.body?.linvel?.() ?? { x: 0, y: 0, z: 0 };
       const facing = new THREE.Vector3(Math.sin(yawAngle), 0, Math.cos(yawAngle));
       const forwardSpeed = latestVelocity.x * facing.x + latestVelocity.z * facing.z;
-      const rigForwardWeight = THREE.MathUtils.clamp(this.playerModel.userData.qwopRig?.forwardWeight || 0, -1, 1);
-      const fallInput = rigForwardWeight + forwardSpeed * PLAYER_FALL_MOMENTUM_LEAN;
+      const usingQwopRig = !!this.playerModel?.userData?.qwopRig;
+      const rigForwardWeight = usingQwopRig ? 0 : THREE.MathUtils.clamp(this.playerModel.userData.qwopRig?.forwardWeight || 0, -1, 1);
+      const fallInput = usingQwopRig ? 0 : rigForwardWeight + forwardSpeed * PLAYER_FALL_MOMENTUM_LEAN;
       const fallThreshold = this.canJump ? PLAYER_FALL_BASE_THRESHOLD : PLAYER_FALL_BASE_THRESHOLD * 0.35;
       const fallTorque = Math.abs(fallInput) > fallThreshold
         ? (fallInput - Math.sign(fallInput) * fallThreshold) * PLAYER_FALL_TORQUE
@@ -2652,6 +2670,10 @@ export class PlayerControls {
         PLAYER_FALL_MAX_PITCH
       );
       if (Math.abs(this.fallAngularVelocity) < 0.0001 && Math.abs(fallInput) <= fallThreshold) {
+        this.fallAngularVelocity = 0;
+      }
+      if (usingQwopRig) {
+        this.fallPitch = 0;
         this.fallAngularVelocity = 0;
       }
       this.playerModel.rotation.set(this.fallPitch, yawAngle, 0);
@@ -2726,7 +2748,7 @@ export class PlayerControls {
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
     const qwopPartSelectionActive = !!this.playerModel?.userData?.qwopRig
       && [...QWOP_PART_SELECT_KEYS].some((key) => this.keysPressed.has(key));
-    if (!this.isEngaged && !qwopPartSelectionActive) {
+    if (!this.isEngaged && !this.playerModel?.userData?.qwopRig && !qwopPartSelectionActive) {
       if (this.keys.has('ArrowLeft')) {
         this.yaw += rotateSpeed;
         this.breakAutoAimFromManualCamera(Math.abs(rotateSpeed));
@@ -2740,7 +2762,7 @@ export class PlayerControls {
     const maxPitch = Math.PI / 3;   // ~60° upward
     const minPitch = -Math.PI / 8;  // ~30° downward
 
-    if (!this.isEngaged && !qwopPartSelectionActive) {
+    if (!this.isEngaged && !this.playerModel?.userData?.qwopRig && !qwopPartSelectionActive) {
       if (this.keys.has('ArrowUp')) {
         this.pitch = Math.min(maxPitch, this.pitch + 0.02);
         this.breakAutoAimFromManualCamera(0.02);
@@ -3172,6 +3194,35 @@ export class PlayerControls {
 
   setJumpForceMultiplier(multiplier = 1) {
     this.jumpForceMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  }
+
+  updateQwopCrouchCharge(now = performance.now()) {
+    if (!this.keysPressed.has('a') || !this.keysPressed.has('d')) {
+      this.qwopCrouchStartedAt = null;
+      return;
+    }
+    if (this.qwopCrouchStartedAt == null) {
+      this.qwopCrouchStartedAt = now;
+    }
+  }
+
+  consumeQwopCrouchJumpMultiplier(now = performance.now()) {
+    if (this.qwopCrouchStartedAt == null || !this.keysPressed.has('a') || !this.keysPressed.has('d')) {
+      this.qwopCrouchStartedAt = null;
+      return 0;
+    }
+
+    const charge = THREE.MathUtils.clamp((now - this.qwopCrouchStartedAt) / QWOP_CROUCH_JUMP_CHARGE_MS, 0, 1);
+    this.qwopCrouchStartedAt = null;
+    return THREE.MathUtils.lerp(QWOP_CROUCH_JUMP_MIN_MULTIPLIER, QWOP_CROUCH_JUMP_MAX_MULTIPLIER, charge);
+  }
+
+  triggerQwopCrouchJump(multiplier) {
+    const previousMultiplier = this.jumpForceMultiplier;
+    this.jumpForceMultiplier = previousMultiplier * multiplier;
+    const jumped = this.tryJump();
+    this.jumpForceMultiplier = previousMultiplier;
+    return jumped;
   }
 
   setLowGravityEnabled(enabled = false) {
