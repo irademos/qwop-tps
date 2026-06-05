@@ -128,10 +128,10 @@ const MERCHANT_DIALOGUE = {
     }
   ]
 };
-const QWOP_PART_SELECT_KEYS = new Set(['a', 'd', 'w']);
+const QWOP_PART_SELECT_KEYS = new Set(['a', 'd', 'w', 'q', 'e']);
 const QWOP_CONTROL_KEYS = new Set([...QWOP_PART_SELECT_KEYS, 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
-const QWOP_CROUCH_JUMP_MIN_MULTIPLIER = 1.05;
-const QWOP_CROUCH_JUMP_MAX_MULTIPLIER = 2.35;
+const QWOP_CROUCH_JUMP_MIN_MULTIPLIER = 1.01;
+const QWOP_CROUCH_JUMP_MAX_MULTIPLIER = 1.27;
 const QWOP_CROUCH_JUMP_CHARGE_MS = 1800;
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 const SWORD_COMBO_ACTIONS = ['swordSlash', 'swordSlashLeft', 'swordFwdSpin'];
@@ -1414,6 +1414,9 @@ export class PlayerControls {
       this.keysPressed.delete(key);
       if (crouchJumpMultiplier > 0) {
         this.triggerQwopCrouchJump(crouchJumpMultiplier);
+      }
+      if (usingQwopRig && QWOP_CONTROL_KEYS.has(key)) {
+        return;
       }
       if (key === 'e') {
         if (this.releaseSwordSpinCharge()) return;

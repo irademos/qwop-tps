@@ -410,7 +410,9 @@ export function createProceduralBody(THREE) {
 
 
 const QWOP_PART_SELECTORS = Object.freeze({
+  q: 'leftArm',
   w: 'torso',
+  e: 'rightArm',
   a: 'leftLeg',
   d: 'rightLeg'
 });
@@ -423,8 +425,9 @@ const QWOP_ARROW_INPUTS = Object.freeze({
 const TORSO_MAX_TWIST = Math.PI / 2;
 const TARGET_NUDGE_SPEED = 2.4;
 const LEG_LIFT_SPEED = 4.6;
-const CROUCH_LEG_TARGET = 1.15;
-const CROUCH_CALF_TARGET = -1.05;
+const CROUCH_LEG_TARGET = 0.95;
+const CROUCH_CALF_TARGET = -1.25;
+const CROUCH_BODY_LOWER = -0.28;
 const SINGLE_LEG_STEP_INTENT = 0.72;
 const TARGET_RETURN_SPEED = 1.35;
 const TARGET_FOLLOW_SPEED = 15;
@@ -468,6 +471,11 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const leftLegPressed = selectedSet.has('leftLeg');
   const rightLegPressed = selectedSet.has('rightLeg');
   const crouching = leftLegPressed && rightLegPressed;
+
+  if (rig.bodyRoot) {
+    const targetBodyY = crouching ? CROUCH_BODY_LOWER : 0;
+    rig.bodyRoot.position.y = dampToward(rig.bodyRoot.position.y, targetBodyY, TARGET_FOLLOW_SPEED, dt);
+  }
 
   const specs = {
     hips: { rest: 0, restY: 0, restZ: 0, min: -0.5, max: 0.5, sideMin: -0.45, sideMax: 0.45, gravity: 6, damping: 2.5, torque: 10 },
@@ -522,9 +530,14 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       target.x = spec.rest;
       target.z = dampToward(target.z, spec.restZ, TARGET_RETURN_SPEED, dt);
     } else {
+      if (name === 'leftArm' || name === 'rightArm') {
+        if (arrows.up) target.x -= nudge;
+        if (arrows.down) target.x += nudge;
+      } else {
+        target.x = spec.rest;
+      }
       if (arrows.left) target.z += nudge;
       if (arrows.right) target.z -= nudge;
-      target.x = spec.rest;
       target.y = dampToward(target.y, spec.restY, TARGET_RETURN_SPEED, dt);
       target.z = THREE.MathUtils.clamp(target.z, spec.sideMin, spec.sideMax);
     }
@@ -590,6 +603,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     leftLeg: selectedSet.has('leftLeg'),
     rightLeg: selectedSet.has('rightLeg'),
     torso: selectedSet.has('torso'),
+    leftArm: selectedSet.has('leftArm'),
+    rightArm: selectedSet.has('rightArm'),
     crouching
   };
 
