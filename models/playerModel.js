@@ -224,10 +224,10 @@ export function createProceduralBody(THREE) {
   root.add(hips);
 
   const torso = createLimbSegment(THREE, 'torso', {
-    length: 0.78,
-    radius: 0.24,
+    length: 0.74,
+    radius: 0.23,
     color: materials.shirt,
-    mass: 12,
+    mass: 7,
     shape: 'box'
   });
   torso.group.position.y = 0.05;
@@ -237,17 +237,17 @@ export function createProceduralBody(THREE) {
 
   const neck = new THREE.Group();
   neck.name = 'neck';
-  neck.userData.mass = 2;
-  neck.position.y = torso.length + 0.08;
+  neck.userData.mass = 7;
+  neck.position.y = torso.length + 0.1;
   torso.group.add(neck);
 
-  const headGeometry = new THREE.SphereGeometry(0.18, 20, 16);
+  const headGeometry = new THREE.SphereGeometry(0.24, 22, 18);
   const headMaterial = new THREE.MeshStandardMaterial({ color: materials.skin, roughness: 0.8 });
   const head = new THREE.Mesh(headGeometry, headMaterial);
   head.name = 'head';
   head.castShadow = true;
   head.receiveShadow = true;
-  head.position.y = 0.14;
+  head.position.y = 0.18;
   neck.add(head);
 
   const face = new THREE.Mesh(
@@ -255,7 +255,7 @@ export function createProceduralBody(THREE) {
     new THREE.MeshBasicMaterial({ color: 0x111111 })
   );
   face.name = 'faceDirectionDot';
-  face.position.set(0, 0.14, 0.165);
+  face.position.set(0, 0.18, 0.225);
   neck.add(face);
 
   const leftLeg = createLimbSegment(THREE, 'leftLeg', {
@@ -358,7 +358,7 @@ export function createProceduralBody(THREE) {
     group: hips,
     mesh: null,
     length: 0,
-    mass: 10,
+    mass: 5,
     restRotation: 0,
     restRotationY: 0,
     restRotationZ: 0,
@@ -368,8 +368,8 @@ export function createProceduralBody(THREE) {
   const headPart = {
     group: neck,
     mesh: head,
-    length: 0.28,
-    mass: 2,
+    length: 0.36,
+    mass: 7,
     restRotation: 0,
     restRotationY: 0,
     restRotationZ: 0,
@@ -403,6 +403,11 @@ export function createProceduralBody(THREE) {
       y: part.group.rotation.y,
       z: part.group.rotation.z
     };
+    part.group.userData.qwopDesiredTarget = {
+      x: part.group.rotation.x,
+      y: part.group.rotation.y,
+      z: part.group.rotation.z
+    };
   });
 
   return { root, parts };
@@ -413,30 +418,40 @@ const TORSO_MAX_TWIST = Math.PI / 2;
 const TARGET_RETURN_SPEED = 1.35;
 const TARGET_FOLLOW_SPEED = 15;
 
-const GANG_BEASTS_STEP_SWITCH_SECONDS = 0.34;
-const GANG_BEASTS_STEP_LENGTH = 0.44;
+const GANG_BEASTS_STEP_SWITCH_SECONDS = 0.28;
+const GANG_BEASTS_STEP_LENGTH = 0.5;
 const GANG_BEASTS_STEP_WIDTH = 0.22;
-const GANG_BEASTS_SUPPORT_LIMIT = 0.18;
+const GANG_BEASTS_SUPPORT_LIMIT = 0.15;
+const GANG_BEASTS_MOTOR_LAG_SPEED = 4.2;
 
 function getRigFootPlants(rig) {
   if (!rig.footPlants) {
     rig.footPlants = {
-      left: { planted: true, anchor: new THREE.Vector2(-GANG_BEASTS_STEP_WIDTH, 0.04), age: 0, swing: 0 },
-      right: { planted: true, anchor: new THREE.Vector2(GANG_BEASTS_STEP_WIDTH, -0.04), age: GANG_BEASTS_STEP_SWITCH_SECONDS * 0.5, swing: 0 },
+      left: { planted: true, anchor: new THREE.Vector2(-GANG_BEASTS_STEP_WIDTH, 0.04), age: 0, swing: 0, seed: 1.7, stuckTimer: 0 },
+      right: { planted: true, anchor: new THREE.Vector2(GANG_BEASTS_STEP_WIDTH, -0.04), age: GANG_BEASTS_STEP_SWITCH_SECONDS * 0.5, swing: 0, seed: 4.9, stuckTimer: 0 },
       nextFoot: 'left'
     };
   }
   return rig.footPlants;
 }
 
-function updateFootPlant(foot, desiredAnchor, shouldPlant, dt) {
+function updateFootPlant(foot, desiredAnchor, shouldPlant, dt, moving = false, fallPressure = 0, flopTime = 0) {
   foot.age = (foot.age || 0) + dt;
+  foot.stuckTimer = Math.max(0, (foot.stuckTimer || 0) - dt);
+  const stumbleNoise = Math.sin(flopTime * (3.1 + (foot.seed || 1)) + (foot.seed || 0));
+  if (moving && foot.planted && foot.age > 0.18 && foot.stuckTimer <= 0 && stumbleNoise > 0.965 - fallPressure * 0.04) {
+    foot.stuckTimer = 0.12 + Math.abs(stumbleNoise) * 0.18;
+  }
+  if (foot.stuckTimer > 0) shouldPlant = true;
+  const messyAnchor = desiredAnchor.clone();
+  messyAnchor.x += Math.sin(flopTime * 7.3 + (foot.seed || 0)) * 0.035 * (moving ? 1 : 0.25);
+  messyAnchor.y *= 1 + Math.sin(flopTime * 4.7 + (foot.seed || 0)) * 0.18;
   if (shouldPlant) {
     if (!foot.planted) {
-      foot.anchor.copy(desiredAnchor);
+      foot.anchor.copy(messyAnchor);
       foot.age = 0;
     } else {
-      foot.anchor.lerp(desiredAnchor, 1 - Math.exp(-2.8 * dt));
+      foot.anchor.lerp(messyAnchor, 1 - Math.exp((foot.stuckTimer > 0 ? -0.45 : -1.7) * dt));
     }
     foot.planted = true;
     foot.swing = dampToward(foot.swing || 0, 0, 12, dt);
@@ -444,7 +459,7 @@ function updateFootPlant(foot, desiredAnchor, shouldPlant, dt) {
   }
 
   foot.planted = false;
-  foot.anchor.lerp(desiredAnchor, 1 - Math.exp(-13 * dt));
+  foot.anchor.lerp(messyAnchor, 1 - Math.exp(-8.5 * dt));
   foot.swing = dampToward(foot.swing || 0, 1, 10, dt);
 }
 
@@ -467,6 +482,18 @@ function ensurePartControlTarget(part) {
     };
   }
   return part.group.userData.qwopTarget;
+}
+
+
+function ensurePartDesiredTarget(part) {
+  if (!part.group.userData.qwopDesiredTarget) {
+    part.group.userData.qwopDesiredTarget = {
+      x: part.group.rotation.x || 0,
+      y: part.group.rotation.y || 0,
+      z: part.group.rotation.z || 0
+    };
+  }
+  return part.group.userData.qwopDesiredTarget;
 }
 
 function dampToward(current, target, speed, dt) {
@@ -497,7 +524,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
 
   const footPlants = getRigFootPlants(rig);
   const stepCycle = rig.gaitPhase / (Math.PI * 2);
-  const leftStep = Math.sin(rig.gaitPhase) > 0;
+  const leftStep = (footPlants.left.age || 0) > (footPlants.right.age || 0) + Math.sin(rig.flopTime * 2.9) * 0.11;
   const desiredStep = moving ? (leftStep ? 'left' : 'right') : null;
   const supportFoot = moving ? (desiredStep === 'left' ? footPlants.right : footPlants.left) : null;
   const supportAnchor = supportFoot?.anchor ?? new THREE.Vector2(0, 0);
@@ -523,17 +550,18 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const setTarget = (name, x, y = 0, z = 0) => {
     const part = rig.parts[name];
     if (!part) return;
-    const target = ensurePartControlTarget(part);
+    const target = ensurePartDesiredTarget(part);
     target.x = x;
     target.y = y;
     target.z = z;
   };
 
-  const balanceCorrection = THREE.MathUtils.clamp(fallPressure * 0.22, 0, 0.34);
-  const sideLean = THREE.MathUtils.clamp(moveX * 0.12 - supportError.x * 0.55, -0.34, 0.34);
+  const balanceCorrection = THREE.MathUtils.clamp(fallPressure * 0.12, 0, 0.22);
+  const headLag = rig.parts.head?.group.rotation.x || 0;
+  const sideLean = THREE.MathUtils.clamp(moveX * 0.18 - supportError.x * 0.34 + Math.sin(rig.flopTime * 2.1) * 0.04, -0.42, 0.42);
   const forwardLean = moving
-    ? THREE.MathUtils.clamp(-0.08 - moveZ * 0.22 - supportError.y * 0.42, -0.42, 0.24)
-    : THREE.MathUtils.clamp(-supportError.y * 0.18, -0.12, 0.12);
+    ? THREE.MathUtils.clamp(-0.16 - moveZ * 0.34 - supportError.y * 0.26 + headLag * 0.18, -0.62, 0.28)
+    : THREE.MathUtils.clamp(-supportError.y * 0.1 + Math.sin(rig.flopTime * 1.7) * 0.035, -0.16, 0.16);
   const idleFlop = Math.sin(rig.flopTime * 2.3) * (0.035 + (1 - (rig.recoveryFactor || 1)) * 0.08);
   const punchArc = Math.sin(attackPhase * Math.PI);
   const punchWindup = Math.sin(Math.min(attackPhase, 0.45) / 0.45 * Math.PI);
@@ -543,10 +571,10 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const rightDesiredAnchor = new THREE.Vector2(GANG_BEASTS_STEP_WIDTH + stepSide, -0.02 + stepForward + supportError.y * 0.7);
   const canSwitchStep = Math.max(footPlants.left.age || 0, footPlants.right.age || 0) > GANG_BEASTS_STEP_SWITCH_SECONDS;
 
-  if (moving && canSwitchStep) footPlants.nextFoot = desiredStep;
-  updateFootPlant(footPlants.left, leftDesiredAnchor, !moving || footPlants.nextFoot !== 'left', dt);
-  updateFootPlant(footPlants.right, rightDesiredAnchor, !moving || footPlants.nextFoot !== 'right', dt);
-  if (moving && footPlants[footPlants.nextFoot]?.swing > 0.78) {
+  if (moving && canSwitchStep && Math.sin(rig.flopTime * 5.1 + fallPressure) > -0.55) footPlants.nextFoot = desiredStep;
+  updateFootPlant(footPlants.left, leftDesiredAnchor, !moving || footPlants.nextFoot !== 'left', dt, moving, fallPressure, rig.flopTime);
+  updateFootPlant(footPlants.right, rightDesiredAnchor, !moving || footPlants.nextFoot !== 'right', dt, moving, fallPressure, rig.flopTime);
+  if (moving && footPlants[footPlants.nextFoot]?.swing > 0.86 && Math.sin(rig.flopTime * 3.7) > -0.25) {
     footPlants.nextFoot = footPlants.nextFoot === 'left' ? 'right' : 'left';
   }
   const leftPose = anchorToLegPose(footPlants.left.anchor, sideLean, footPlants.left.swing || 0);
@@ -579,27 +607,27 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     setTarget('rightArm', 0.44 - armCounter * 0.32 - fallPressure * 0.08, 0, -0.22 + sideLean * 0.35);
 
     if (leftPunch) {
-      setTarget('leftArm', -1.05 + punchWindup * 0.35, 0.15, 0.15 + punchArc * 0.9);
-      setTarget('torso', forwardLean - punchArc * 0.15, 0.18 * punchArc, sideLean + 0.12 * punchArc);
+      setTarget('leftArm', 0.48 - punchArc * 1.72 + punchWindup * 0.22, 0.2 * punchArc, 0.2 + punchArc * 0.38);
+      setTarget('torso', forwardLean - punchArc * 0.14, 0.2 * punchArc, sideLean + 0.1 * punchArc);
     }
     if (rightPunch) {
-      setTarget('rightArm', -1.05 + punchWindup * 0.35, -0.15, -0.15 - punchArc * 0.9);
-      setTarget('torso', forwardLean - punchArc * 0.15, -0.18 * punchArc, sideLean - 0.12 * punchArc);
+      setTarget('rightArm', 0.48 - punchArc * 1.72 + punchWindup * 0.22, -0.2 * punchArc, -0.2 - punchArc * 0.38);
+      setTarget('torso', forwardLean - punchArc * 0.14, -0.2 * punchArc, sideLean - 0.1 * punchArc);
     }
   }
 
-  const motorStrength = knocked ? 0.28 : 0.42 + (rig.recoveryFactor || 1) * 0.58;
-  const torsoMotorStrength = knocked ? 0.18 : 0.34 + (rig.recoveryFactor || 1) * 0.66;
+  const motorStrength = knocked ? 0.18 : 0.22 + (rig.recoveryFactor || 1) * 0.34;
+  const torsoMotorStrength = knocked ? 0.12 : 0.18 + (rig.recoveryFactor || 1) * 0.3;
   const specs = {
-    hips: { min: -0.65, max: 0.65, sideMin: -0.55, sideMax: 0.55, twistMin: -0.7, twistMax: 0.7, stiffness: 5.8 * motorStrength, damping: 1.9 + motorStrength * 0.45, gravity: 5 },
-    leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.4 * motorStrength, damping: 1.7 + motorStrength * 0.55, gravity: 20 },
-    rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.4 * motorStrength, damping: 1.7 + motorStrength * 0.55, gravity: 20 },
-    leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 1.5 + motorStrength * 0.55, gravity: 22, parent: 'leftLeg' },
-    rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 1.5 + motorStrength * 0.55, gravity: 22, parent: 'rightLeg' },
-    leftArm: { min: -1.55, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 6.2 * motorStrength, damping: 1.35 + motorStrength * 0.35, gravity: 10 },
-    rightArm: { min: -1.55, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 6.2 * motorStrength, damping: 1.35 + motorStrength * 0.35, gravity: 10 },
-    torso: { min: -1.25, max: 0.75, sideMin: -0.65, sideMax: 0.65, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: 4.8 * torsoMotorStrength, damping: knocked ? 0.8 : 1.35 + torsoMotorStrength * 0.35, gravity: knocked ? 31 : 8.5 },
-    head: { min: -0.8, max: 0.65, sideMin: -0.65, sideMax: 0.65, twistMin: -0.9, twistMax: 0.9, stiffness: 4.4 * torsoMotorStrength, damping: knocked ? 0.75 : 1.15 + torsoMotorStrength * 0.25, gravity: knocked ? 18 : 6 }
+    hips: { min: -0.65, max: 0.65, sideMin: -0.55, sideMax: 0.55, twistMin: -0.7, twistMax: 0.7, stiffness: 3.1 * motorStrength, damping: 0.9 + motorStrength * 0.25, gravity: 7.5, lag: 3.2 },
+    leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 5.6 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 24, lag: 4.7 },
+    rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 5.6 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 24, lag: 4.3 },
+    leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 6.4 * motorStrength, damping: 0.85 + motorStrength * 0.35, gravity: 26, parent: 'leftLeg', lag: 5.1 },
+    rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 6.4 * motorStrength, damping: 0.85 + motorStrength * 0.35, gravity: 26, parent: 'rightLeg', lag: 4.8 },
+    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 3.9 * motorStrength, damping: 0.75 + motorStrength * 0.25, gravity: 13, lag: 3.8 },
+    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 3.9 * motorStrength, damping: 0.75 + motorStrength * 0.25, gravity: 13, lag: 3.8 },
+    torso: { min: -1.25, max: 0.75, sideMin: -0.75, sideMax: 0.75, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: 2.7 * torsoMotorStrength, damping: knocked ? 0.55 : 0.75 + torsoMotorStrength * 0.25, gravity: knocked ? 34 : 13, lag: 2.7 },
+    head: { min: -1.05, max: 0.8, sideMin: -0.85, sideMax: 0.85, twistMin: -1.05, twistMax: 1.05, stiffness: 1.6 * torsoMotorStrength, damping: knocked ? 0.45 : 0.55 + torsoMotorStrength * 0.18, gravity: knocked ? 30 : 22, lag: 2.1 }
   };
 
   Object.entries(rig.parts).forEach(([name, part]) => {
@@ -607,16 +635,21 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     if (!part || !spec) return;
     const physics = part.group.userData.physics || (part.group.userData.physics = { angularVelocity: 0 });
     const target = ensurePartControlTarget(part);
+    const desired = ensurePartDesiredTarget(part);
+    const lag = spec.lag || GANG_BEASTS_MOTOR_LAG_SPEED;
+    target.x = dampToward(target.x, desired.x, lag, dt);
+    target.y = dampToward(target.y, desired.y, lag * 0.85, dt);
+    target.z = dampToward(target.z, desired.z, lag * 0.85, dt);
     const angle = part.group.rotation.x;
     const parentAngle = spec.parent ? rig.parts[spec.parent]?.group.rotation.x || 0 : 0;
     const gravityPull = Math.sin(angle + parentAngle - (part.restRotation || 0)) * spec.gravity * 0.08;
     const spring = (THREE.MathUtils.clamp(target.x, spec.min, spec.max) - angle) * spec.stiffness;
-    const noise = Math.sin(rig.flopTime * (name.length + 2.7)) * (knocked ? 0.35 : 0.08);
+    const noise = Math.sin(rig.flopTime * (name.length + 2.7)) * (knocked ? 0.35 : 0.14);
     physics.angularVelocity = (physics.angularVelocity || 0) + (spring - gravityPull + noise) * dt;
     physics.angularVelocity *= Math.exp(-spec.damping * dt);
     part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
-    part.group.rotation.y = dampToward(part.group.rotation.y, THREE.MathUtils.clamp(target.y, spec.twistMin, spec.twistMax), knocked ? 4 : 10, dt);
-    part.group.rotation.z = dampToward(part.group.rotation.z, THREE.MathUtils.clamp(target.z, spec.sideMin, spec.sideMax), knocked ? 3 : 8, dt);
+    part.group.rotation.y = dampToward(part.group.rotation.y, THREE.MathUtils.clamp(target.y, spec.twistMin, spec.twistMax), knocked ? 2.5 : 5.5, dt);
+    part.group.rotation.z = dampToward(part.group.rotation.z, THREE.MathUtils.clamp(target.z, spec.sideMin, spec.sideMax), knocked ? 2.2 : 4.8, dt);
   });
 
   rig.balance = sideLean;

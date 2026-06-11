@@ -27,8 +27,10 @@ const GROUND_SMOOTH_ALPHA = 0.2;
 const GROUND_SMOOTH_SNAP_DELTA = 0.45;
 const GROUND_SMOOTH_SURFACE_SWITCH_SNAP_DELTA = 0.2;
 const PLAYER_INPUT_ACCELERATION = 22;
-const GANG_BEASTS_INPUT_ACCELERATION = 11;
-const GANG_BEASTS_BALANCE_PUSH = 3.8;
+const GANG_BEASTS_INPUT_ACCELERATION = 2.4;
+const GANG_BEASTS_BALANCE_PUSH = 1.35;
+const GANG_BEASTS_DIRECT_CONTROL_RATIO = 0.12;
+const GANG_BEASTS_LEAN_DRIVE_ACCELERATION = 13.5;
 const PLAYER_GROUND_DRAG = 7;
 const PLAYER_AIR_DRAG = 0.35;
 const PLAYER_MAX_HORIZONTAL_SPEED = 5;
@@ -2017,14 +2019,13 @@ export class PlayerControls {
       };
       const attackName = isPunch && meleeWeapon
         ? (meleeWeapon.type === 'hammer' ? (hammerAttackMap[swordAction] || 'hammerSlash') : swordAction)
-        : isPunch
-          ? 'mutantPunch'
-          : resolvedAction;
+        : resolvedAction;
       this.playerModel.userData.attack = {
         name: attackName,
         start: Date.now(),
         hasHit: false,
         overrides: options.attackOverrides || null,
+        hand: resolvedAction === 'leftPunch' || resolvedAction === 'swordSlashLeft' ? 'left' : 'right',
       };
     }
 
@@ -2569,7 +2570,9 @@ export class PlayerControls {
               .addScaledVector(right, THREE.MathUtils.clamp(balanceError.x, -0.35, 0.35))
               .multiplyScalar(GANG_BEASTS_BALANCE_PUSH * deltaSeconds);
           }
-          desiredDelta.multiplyScalar(0.62).add(balancePush);
+          const leanAmount = THREE.MathUtils.clamp(-(rig.forwardWeight || 0) - 0.04, 0, 0.75);
+          const leanDrive = movement.clone().normalize().multiplyScalar(leanAmount * GANG_BEASTS_LEAN_DRIVE_ACCELERATION * deltaSeconds);
+          desiredDelta.multiplyScalar(GANG_BEASTS_DIRECT_CONTROL_RATIO).add(balancePush).add(leanDrive);
         }
         if (desiredDelta.length() > maxDeltaV) desiredDelta.setLength(maxDeltaV);
         this.body.applyImpulse({ x: desiredDelta.x, y: 0, z: desiredDelta.z }, true);
@@ -2623,8 +2626,8 @@ export class PlayerControls {
       const facing = new THREE.Vector3(Math.sin(yawAngle), 0, Math.cos(yawAngle));
       const forwardSpeed = latestVelocity.x * facing.x + latestVelocity.z * facing.z;
       const usingQwopRig = !!this.playerModel?.userData?.qwopRig;
-      const rigForwardWeight = usingQwopRig ? 0 : THREE.MathUtils.clamp(this.playerModel.userData.qwopRig?.forwardWeight || 0, -1, 1);
-      const fallInput = usingQwopRig ? 0 : rigForwardWeight + forwardSpeed * PLAYER_FALL_MOMENTUM_LEAN;
+      const rigForwardWeight = usingQwopRig ? THREE.MathUtils.clamp(this.playerModel.userData.qwopRig?.forwardWeight || 0, -1, 1) : 0;
+      const fallInput = usingQwopRig ? rigForwardWeight * 0.35 : rigForwardWeight + forwardSpeed * PLAYER_FALL_MOMENTUM_LEAN;
       const fallThreshold = this.canJump ? PLAYER_FALL_BASE_THRESHOLD : PLAYER_FALL_BASE_THRESHOLD * 0.35;
       const fallTorque = Math.abs(fallInput) > fallThreshold
         ? (fallInput - Math.sign(fallInput) * fallThreshold) * PLAYER_FALL_TORQUE
@@ -2640,8 +2643,7 @@ export class PlayerControls {
         this.fallAngularVelocity = 0;
       }
       if (usingQwopRig) {
-        this.fallPitch = THREE.MathUtils.lerp(this.fallPitch || 0, 0, 1 - Math.exp(-8 * deltaSeconds));
-        this.fallAngularVelocity = 0;
+        this.fallPitch = THREE.MathUtils.clamp(this.fallPitch, -0.22, 0.22);
       }
       this.playerModel.rotation.set(this.fallPitch, yawAngle, 0);
       this.playerModel.up.set(0, 1, 0);

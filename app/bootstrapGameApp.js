@@ -3786,6 +3786,7 @@ async function initCore(runtimeContext) {
     const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
     const collider = rapierWorld.createCollider(colDesc, rb);
     model.userData.rb = rb;
+    model.userData.physicsMode = isKinematic ? 'kinematic' : 'dynamic';
     monster.setColliderHandles?.(typeof collider?.handle === 'number' ? [collider.handle] : []);
     rbToMesh.set(rb, model);
     if (monster.syncBodyFromTransform) {
@@ -3805,6 +3806,7 @@ async function initCore(runtimeContext) {
       removeRigidBodySafely(rapierWorld, body);
     }
     monster.model.userData.rb = null;
+    monster.model.userData.physicsMode = null;
     monster.setColliderHandles?.([]);
     monster.setBackgroundMode?.(true);
   }
@@ -3814,8 +3816,9 @@ async function initCore(runtimeContext) {
     const body = monster.body;
     const wantsDynamic = mode === 'dynamic';
     const wantsKinematic = mode === 'kinematic';
-    const isDynamic = !!body?.isDynamic?.();
-    const isKinematic = !!body?.isKinematic?.();
+    const currentMode = monster.model.userData.physicsMode || null;
+    const isDynamic = !!body && currentMode === 'dynamic';
+    const isKinematic = !!body && currentMode === 'kinematic';
     if (wantsDynamic && isDynamic) {
       monster.setBackgroundMode?.(false);
       monster.syncBodyFromTransform?.({ zeroVelocity: false });
@@ -3834,6 +3837,10 @@ async function initCore(runtimeContext) {
     if (body && rapierWorld?.getRigidBody(body.handle)) {
       rbToMesh.delete(body);
       removeRigidBodySafely(rapierWorld, body);
+    }
+    if (npc?.model?.userData?.rb === body) {
+      npc.model.userData.rb = null;
+      npc.model.userData.physicsMode = null;
     }
   };
 
@@ -4796,6 +4803,9 @@ async function initCore(runtimeContext) {
     }
     if (monster.model?.userData?.rb) {
       monster.model.userData.rb = null;
+    }
+    if (monster.model?.userData) {
+      monster.model.userData.physicsMode = null;
     }
     monster.model = null;
   };
@@ -14031,6 +14041,10 @@ async function initCore(runtimeContext) {
       if (mesh.position.y < -50) {
         disposeSceneObject(mesh);
         rbToMesh.delete(rb);
+        if (mesh.userData?.rb === rb) {
+          mesh.userData.rb = null;
+          mesh.userData.physicsMode = null;
+        }
         removeRigidBodySafely(rapierWorld, rb);
       }
     }

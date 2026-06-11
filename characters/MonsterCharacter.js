@@ -4,6 +4,7 @@ import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
 import { ATTACKS, canApplySwordContactHit, getAttackTypes, isSwordTouchingTarget } from "../items/melee.js";
 import { updateProceduralMonsterRig } from "../models/playerModel.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
+import { getLiveRigidBody } from "../physics/rapierSafety.js";
 import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from "../healthUtils.js";
 
 const AGGRO_RADIUS = 12;
@@ -105,7 +106,17 @@ export class MonsterCharacter extends CharacterBase {
   }
 
   get body() {
-    return this.model?.userData?.rb ?? null;
+    const body = this.model?.userData?.rb ?? null;
+    if (!body) return null;
+    const liveBody = getLiveRigidBody(globalThis.window?.rapierWorld, body);
+    if (!liveBody) {
+      if (this.model?.userData?.rb === body) {
+        this.model.userData.rb = null;
+        this.model.userData.physicsMode = null;
+      }
+      return null;
+    }
+    return liveBody;
   }
 
   setColliderHandles(handles) {
@@ -186,7 +197,8 @@ export class MonsterCharacter extends CharacterBase {
     });
 
     const body = this.body;
-    if (body?.isDynamic?.()) {
+    const physicsMode = this.model?.userData?.physicsMode;
+    if (body && physicsMode !== 'kinematic') {
       const vel = body.linvel();
       body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
       return;
@@ -494,7 +506,7 @@ export class MonsterCharacter extends CharacterBase {
     const now = Date.now();
     if (!this.model) return;
     const body = this.body;
-    if (!body) return;
+    if (!body && !this.backgroundMode) return;
 
     const delta = Number.isFinite(deltaTime) ? deltaTime : 0;
     if (this.isDead) {
