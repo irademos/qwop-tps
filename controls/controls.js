@@ -128,11 +128,9 @@ const MERCHANT_DIALOGUE = {
     }
   ]
 };
-const QWOP_PART_SELECT_KEYS = new Set(['a', 'd', 'w', 'q', 'e']);
-const QWOP_CONTROL_KEYS = new Set([...QWOP_PART_SELECT_KEYS, 'arrowup', 'arrowdown', 'arrowleft', 'arrowright']);
-const QWOP_CROUCH_JUMP_MIN_MULTIPLIER = 1.01;
-const QWOP_CROUCH_JUMP_MAX_MULTIPLIER = 1.27;
-const QWOP_CROUCH_JUMP_CHARGE_MS = 1800;
+const GANG_BEASTS_PUNCH_KEYS = new Set(['q', 'e']);
+const GANG_BEASTS_ATTACK_DURATION_MS = 420;
+const GANG_BEASTS_PARALYSIS_MS = 1000;
 const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
 const SWORD_COMBO_ACTIONS = ['swordSlash', 'swordSlashLeft', 'swordFwdSpin'];
 const SWORD_SPIN_CHARGE_START_MS = 1000;
@@ -227,7 +225,6 @@ export class PlayerControls {
     this.onSleepEnd = typeof onSleepEnd === 'function' ? onSleepEnd : null;
 
     this.jumpForceMultiplier = 1;
-    this.qwopCrouchStartedAt = null;
     this.lowGravityEnabled = false;
     this.groundOverrideY = null;
     this.smoothedGroundExpectedY = null;
@@ -1275,13 +1272,9 @@ export class PlayerControls {
       if (!this.enabled && !this.isSleeping) return;
       const key = e.key.toLowerCase();
       this.keysPressed.add(key);
-      const usingQwopRig = !!this.playerModel?.userData?.qwopRig;
+      const usingGangBeastsRig = !!this.playerModel?.userData?.qwopRig;
 
-      if (usingQwopRig && (key === 'a' || key === 'd')) {
-        this.updateQwopCrouchCharge();
-      }
-
-      if (usingQwopRig && QWOP_CONTROL_KEYS.has(key)) {
+      if (usingGangBeastsRig && (key === 'w' || key === 'a' || key === 's' || key === 'd' || key === ' ' || GANG_BEASTS_PUNCH_KEYS.has(key))) {
         this.safePreventDefault(e);
       }
 
@@ -1329,10 +1322,6 @@ export class PlayerControls {
         return;
       }
 
-      if (usingQwopRig && QWOP_CONTROL_KEYS.has(key)) {
-        return;
-      }
-
       if (e.key === " ") {
         if (e.repeat) return;
         if (this.parachute) {
@@ -1345,46 +1334,11 @@ export class PlayerControls {
         if (e.repeat) return;
         if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
         if (this.isInWater) return;
-        if (this.isMoving && !this.isSlideMomentumActive()) {
-          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
-        }
-        const sword = this.getEquippedSword();
-        if (sword) {
-          this.swordSpinChargeStartAt = performance.now();
-          this.swordSpinChargeActive = false;
-          setTimeout(() => {
-            if (!this.keysPressed.has('e')) return;
-            this.startSwordSpinCharge();
-          }, SWORD_SPIN_CHARGE_START_MS);
-          return;
-        }
-        const attackAction = 'mutantPunch';
-        const started = this.playAction(attackAction);
-        if (!started) return;
-        if (attackAction === 'swordSlash' || attackAction === 'swordSlashLeft') {
-          this.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg', 0.6, {
-            cooldownKey: 'sword-attack',
-            cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
-          });
-        } else {
-          this.audioManager?.playAttack();
-        }
+        this.handleGangBeastsPunchGrab('right');
       } else if (key === 'q') {
+        if (e.repeat) return;
         if (this.isInWater) return;
-        if (this.isMoving && !this.isSlideMomentumActive()) {
-          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(0.35);
-        }
-        const started = this.playAction('leftPunch');
-        if (!started) return;
-        const leftHandItem = this.getEquippedWeapon('left')?.itemId;
-        if (leftHandItem === 'torch' || leftHandItem === 'lantern') {
-          this.audioManager?.playSFX('SFX/Torch/Torch Attack Strike 1.ogg', 0.65, {
-            cooldownKey: 'torch-strike',
-            cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
-          });
-        } else {
-          this.audioManager?.playAttack();
-        }
+        this.handleGangBeastsPunchGrab('left');
       } else if (key === 'r') {
         if (this.isInWater) return;
         if (this.isMoving && !this.isSlideMomentumActive()) {
@@ -1408,23 +1362,12 @@ export class PlayerControls {
 
     document.addEventListener("keyup", (e) => {
       const key = e.key.toLowerCase();
-      const usingQwopRig = !!this.playerModel?.userData?.qwopRig;
-      const shouldReleaseQwopCrouch = usingQwopRig && (key === 'a' || key === 'd');
-      const crouchJumpMultiplier = shouldReleaseQwopCrouch ? this.consumeQwopCrouchJumpMultiplier() : 0;
       this.keysPressed.delete(key);
-      if (crouchJumpMultiplier > 0) {
-        this.triggerQwopCrouchJump(crouchJumpMultiplier);
-      }
-      if (usingQwopRig && QWOP_CONTROL_KEYS.has(key)) {
-        return;
+      if (GANG_BEASTS_PUNCH_KEYS.has(key) && this.grabbedTarget) {
+        this.releaseGrab();
       }
       if (key === 'e') {
-        if (this.releaseSwordSpinCharge()) return;
-        if (this.getEquippedSword() && (performance.now() - this.swordSpinChargeStartAt) < SWORD_SPIN_CHARGE_START_MS) {
-          const attackAction = this.getNextSwordAttackAction({ advance: false });
-          const started = this.playAction(attackAction);
-          if (started) this.swordComboIndex = (this.swordComboIndex + 1) % SWORD_COMBO_ACTIONS.length;
-        }
+        this.releaseSwordSpinCharge();
       }
     });
     
@@ -2041,7 +1984,8 @@ export class PlayerControls {
     const swordAttackActions = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
     const actions = this.playerModel.userData.actions;
     const action = this.getAnimationAction(resolvedAction);
-    if (!actions || !action) return false;
+    const usingProceduralRig = !!this.playerModel.userData.qwopRig;
+    if (!action && !usingProceduralRig) return false;
     if (ACTION_LOCKED_ATTACKS.includes(resolvedAction) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return false;
 
     if (this.runningKickTimer) {
@@ -2055,7 +1999,7 @@ export class PlayerControls {
 
     const current = this.playerModel.userData.currentAction;
     this.getAnimationAction(current)?.fadeOut(0.1);
-    action.reset().fadeIn(0.1).play();
+    action?.reset?.().fadeIn(0.1).play();
     this.playerModel.userData.currentAction = resolvedAction;
     this.currentSpecialAction = resolvedAction;
 
@@ -2083,13 +2027,24 @@ export class PlayerControls {
     }
 
     const mixer = this.playerModel.userData.mixer;
-    const onFinished = (e) => {
-      if (e.action === action) {
-        mixer.removeEventListener("finished", onFinished);
-        this.currentSpecialAction = null;
-      }
-    };
-    mixer.addEventListener("finished", onFinished);
+    if (mixer && action) {
+      const onFinished = (e) => {
+        if (e.action === action) {
+          mixer.removeEventListener("finished", onFinished);
+          this.currentSpecialAction = null;
+        }
+      };
+      mixer.addEventListener("finished", onFinished);
+    } else {
+      setTimeout(() => {
+        if (this.currentSpecialAction === resolvedAction) {
+          this.currentSpecialAction = null;
+        }
+        if (this.playerModel?.userData?.currentAction === resolvedAction) {
+          this.playerModel.userData.currentAction = 'idle';
+        }
+      }, GANG_BEASTS_ATTACK_DURATION_MS);
+    }
     return true;
   }
 
@@ -2109,9 +2064,14 @@ export class PlayerControls {
     this.isKnocked = true;
     this.playerModel.userData.isKnocked = true;
     const now = Date.now();
-    this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + profile.recoveryMs);
+    const recoveryMs = this.playerModel.userData.qwopRig ? GANG_BEASTS_PARALYSIS_MS : profile.recoveryMs;
+    this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + recoveryMs);
     this.knockbackRestYaw = this.playerModel.rotation.y;
     this.playerModel.userData.attack = null;
+    if (this.playerModel.userData.qwopRig) {
+      this.playerModel.userData.qwopRig.knockedUntil = this.knockbackEndTime;
+      this.playerModel.userData.qwopRig.knockDirection = direction.clone?.() || null;
+    }
     const actions = this.playerModel.userData.actions;
     const current = this.playerModel.userData.currentAction;
     const hitAction = actions?.hit;
@@ -2119,8 +2079,8 @@ export class PlayerControls {
     if (hitAction) {
       actions[current]?.fadeOut(0.1);
       hitAction.reset().fadeIn(0.1).play();
-      this.playerModel.userData.currentAction = 'hit';
     }
+    this.playerModel.userData.currentAction = 'hit';
   }
 
   getClimbInput(moveDirection, cameraDirection) {
@@ -2493,7 +2453,7 @@ export class PlayerControls {
       t.y = groundExpectedY;
     }
     const moveDirection = new THREE.Vector3(0, 0, 0);
-    const movementLocked = freezeActive || ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
+    const movementLocked = freezeActive || ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
     const position = new THREE.Vector3(t.x, t.y, t.z);
     if (!movementLocked) {
       if (this.isMobile) {
@@ -2508,16 +2468,6 @@ export class PlayerControls {
           moveDirection.addScaledVector(cameraForward, dz * this.joystickForce);
           moveDirection.addScaledVector(cameraRight, dx * this.joystickForce);
         }
-      } else if (this.playerModel?.userData?.qwopRig) {
-        const rig = this.playerModel.userData.qwopRig;
-        const alternatingStride = Math.abs(
-          (rig.parts?.leftLeg?.group?.rotation?.x ?? 0) -
-          (rig.parts?.rightLeg?.group?.rotation?.x ?? 0)
-        );
-        const strideEfficiency = THREE.MathUtils.clamp(alternatingStride * 0.7, 0, 1);
-        const forwardIntent = (rig.forwardIntent || 0) * (0.45 + strideEfficiency * 0.55);
-        if (forwardIntent > 0.04) moveDirection.z = forwardIntent;
-        // Balance shifts should topple the body, not translate it sideways.
       } else {
         if (this.keysPressed.has("w")) moveDirection.z = 1;
         if (this.keysPressed.has("s")) moveDirection.z = -1;
@@ -2525,7 +2475,7 @@ export class PlayerControls {
         if (this.keysPressed.has("d")) moveDirection.x = -1;
       }
     }
-    if (!this.isMobile && moveDirection.length() > 0 && !this.playerModel?.userData?.qwopRig) moveDirection.normalize();
+    if (!this.isMobile && moveDirection.length() > 0) moveDirection.normalize();
     const cameraDirection = new THREE.Vector3();
     this.camera.getWorldDirection(cameraDirection);
     cameraDirection.y = 0;
@@ -2592,7 +2542,7 @@ export class PlayerControls {
       const speed = this.isInWater
         ? SWIM_SPEED
         : this.playerModel?.userData?.qwopRig
-          ? CHARACTER_MOVEMENT.walkSpeed * 0.85
+          ? CHARACTER_MOVEMENT.walkSpeed * 1.05
           : (this.energyDepleted
             ? CHARACTER_MOVEMENT.walkSpeed * ENERGY_DEPLETED_SPEED_MULTIPLIER
             : CHARACTER_MOVEMENT.runSpeed);
@@ -2673,7 +2623,7 @@ export class PlayerControls {
         this.fallAngularVelocity = 0;
       }
       if (usingQwopRig) {
-        this.fallPitch = 0;
+        this.fallPitch = THREE.MathUtils.lerp(this.fallPitch || 0, 0, 1 - Math.exp(-8 * deltaSeconds));
         this.fallAngularVelocity = 0;
       }
       this.playerModel.rotation.set(this.fallPitch, yawAngle, 0);
@@ -2746,9 +2696,7 @@ export class PlayerControls {
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
 
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
-    const qwopPartSelectionActive = !!this.playerModel?.userData?.qwopRig
-      && [...QWOP_PART_SELECT_KEYS].some((key) => this.keysPressed.has(key));
-    if (!this.isEngaged && !this.playerModel?.userData?.qwopRig && !qwopPartSelectionActive) {
+    if (!this.isEngaged) {
       if (this.keys.has('ArrowLeft')) {
         this.yaw += rotateSpeed;
         this.breakAutoAimFromManualCamera(Math.abs(rotateSpeed));
@@ -2762,7 +2710,7 @@ export class PlayerControls {
     const maxPitch = Math.PI / 3;   // ~60° upward
     const minPitch = -Math.PI / 8;  // ~30° downward
 
-    if (!this.isEngaged && !this.playerModel?.userData?.qwopRig && !qwopPartSelectionActive) {
+    if (!this.isEngaged) {
       if (this.keys.has('ArrowUp')) {
         this.pitch = Math.min(maxPitch, this.pitch + 0.02);
         this.breakAutoAimFromManualCamera(0.02);
@@ -3196,33 +3144,14 @@ export class PlayerControls {
     this.jumpForceMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
   }
 
-  updateQwopCrouchCharge(now = performance.now()) {
-    if (!this.keysPressed.has('a') || !this.keysPressed.has('d')) {
-      this.qwopCrouchStartedAt = null;
-      return;
-    }
-    if (this.qwopCrouchStartedAt == null) {
-      this.qwopCrouchStartedAt = now;
-    }
-  }
-
-  consumeQwopCrouchJumpMultiplier(now = performance.now()) {
-    if (this.qwopCrouchStartedAt == null || !this.keysPressed.has('a') || !this.keysPressed.has('d')) {
-      this.qwopCrouchStartedAt = null;
-      return 0;
-    }
-
-    const charge = THREE.MathUtils.clamp((now - this.qwopCrouchStartedAt) / QWOP_CROUCH_JUMP_CHARGE_MS, 0, 1);
-    this.qwopCrouchStartedAt = null;
-    return THREE.MathUtils.lerp(QWOP_CROUCH_JUMP_MIN_MULTIPLIER, QWOP_CROUCH_JUMP_MAX_MULTIPLIER, charge);
-  }
-
-  triggerQwopCrouchJump(multiplier) {
-    const previousMultiplier = this.jumpForceMultiplier;
-    this.jumpForceMultiplier = previousMultiplier * multiplier;
-    const jumped = this.tryJump();
-    this.jumpForceMultiplier = previousMultiplier;
-    return jumped;
+  handleGangBeastsPunchGrab(hand = 'right') {
+    if (!this.enabled || this.isKnocked) return false;
+    const actionName = hand === 'left' ? 'leftPunch' : 'mutantPunch';
+    const started = this.playAction(actionName);
+    if (!started) return false;
+    this.attemptGrab(hand);
+    this.audioManager?.playAttack();
+    return true;
   }
 
   setLowGravityEnabled(enabled = false) {
@@ -3287,13 +3216,6 @@ export class PlayerControls {
       this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
       this.hasDoubleJumped = false;
       this.onFlyJump?.();
-      return true;
-    }
-
-    if (!this.hasDoubleJumped) {
-      this.body.applyImpulse({ x: 0, y: (JUMP_FORCE - 3) * JUMP_HEIGHT_MULTIPLIER, z: 0 }, true);
-      this.hasDoubleJumped = true;
-      this.playAction('hurricaneKick');
       return true;
     }
 
