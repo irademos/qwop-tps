@@ -27,6 +27,8 @@ const GROUND_SMOOTH_ALPHA = 0.2;
 const GROUND_SMOOTH_SNAP_DELTA = 0.45;
 const GROUND_SMOOTH_SURFACE_SWITCH_SNAP_DELTA = 0.2;
 const PLAYER_INPUT_ACCELERATION = 22;
+const GANG_BEASTS_INPUT_ACCELERATION = 11;
+const GANG_BEASTS_BALANCE_PUSH = 3.8;
 const PLAYER_GROUND_DRAG = 7;
 const PLAYER_AIR_DRAG = 0.35;
 const PLAYER_MAX_HORIZONTAL_SPEED = 5;
@@ -2549,11 +2551,26 @@ export class PlayerControls {
       const slopeSpeedMultiplier = !this.isInWater && !groundResolution.metadata.walkable
         ? STEEP_SLOPE_SPEED_MULTIPLIER
         : 1;
+      const usingGangBeastsRig = !!this.playerModel?.userData?.qwopRig;
       const targetHorizontal = movement.clone().multiplyScalar(speed * slopeSpeedMultiplier);
       const currentHorizontal = new THREE.Vector3(vel.x, 0, vel.z);
-      const maxDeltaV = PLAYER_INPUT_ACCELERATION * deltaSeconds;
+      const maxDeltaV = (usingGangBeastsRig ? GANG_BEASTS_INPUT_ACCELERATION : PLAYER_INPUT_ACCELERATION) * deltaSeconds;
       if (movement.lengthSq() > 0.0001) {
         const desiredDelta = targetHorizontal.sub(currentHorizontal);
+        if (usingGangBeastsRig) {
+          const rig = this.playerModel.userData.qwopRig;
+          const balanceError = rig.balanceError;
+          const balancePush = new THREE.Vector3();
+          if (balanceError && Number.isFinite(balanceError.x) && Number.isFinite(balanceError.y)) {
+            const forward = movement.clone().normalize();
+            const right = new THREE.Vector3().crossVectors(this.camera.up, forward).normalize();
+            balancePush
+              .addScaledVector(forward, THREE.MathUtils.clamp(balanceError.y, -0.35, 0.35))
+              .addScaledVector(right, THREE.MathUtils.clamp(balanceError.x, -0.35, 0.35))
+              .multiplyScalar(GANG_BEASTS_BALANCE_PUSH * deltaSeconds);
+          }
+          desiredDelta.multiplyScalar(0.62).add(balancePush);
+        }
         if (desiredDelta.length() > maxDeltaV) desiredDelta.setLength(maxDeltaV);
         this.body.applyImpulse({ x: desiredDelta.x, y: 0, z: desiredDelta.z }, true);
       } else {

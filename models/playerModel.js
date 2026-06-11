@@ -413,6 +413,51 @@ const TORSO_MAX_TWIST = Math.PI / 2;
 const TARGET_RETURN_SPEED = 1.35;
 const TARGET_FOLLOW_SPEED = 15;
 
+const GANG_BEASTS_STEP_SWITCH_SECONDS = 0.34;
+const GANG_BEASTS_STEP_LENGTH = 0.44;
+const GANG_BEASTS_STEP_WIDTH = 0.22;
+const GANG_BEASTS_SUPPORT_LIMIT = 0.18;
+
+function getRigFootPlants(rig) {
+  if (!rig.footPlants) {
+    rig.footPlants = {
+      left: { planted: true, anchor: new THREE.Vector2(-GANG_BEASTS_STEP_WIDTH, 0.04), age: 0, swing: 0 },
+      right: { planted: true, anchor: new THREE.Vector2(GANG_BEASTS_STEP_WIDTH, -0.04), age: GANG_BEASTS_STEP_SWITCH_SECONDS * 0.5, swing: 0 },
+      nextFoot: 'left'
+    };
+  }
+  return rig.footPlants;
+}
+
+function updateFootPlant(foot, desiredAnchor, shouldPlant, dt) {
+  foot.age = (foot.age || 0) + dt;
+  if (shouldPlant) {
+    if (!foot.planted) {
+      foot.anchor.copy(desiredAnchor);
+      foot.age = 0;
+    } else {
+      foot.anchor.lerp(desiredAnchor, 1 - Math.exp(-2.8 * dt));
+    }
+    foot.planted = true;
+    foot.swing = dampToward(foot.swing || 0, 0, 12, dt);
+    return;
+  }
+
+  foot.planted = false;
+  foot.anchor.lerp(desiredAnchor, 1 - Math.exp(-13 * dt));
+  foot.swing = dampToward(foot.swing || 0, 1, 10, dt);
+}
+
+function anchorToLegPose(anchor, sideLean, swingLift = 0) {
+  const foreAft = THREE.MathUtils.clamp(anchor.y, -0.42, 0.42);
+  const side = THREE.MathUtils.clamp(anchor.x, -0.42, 0.42);
+  return {
+    upper: THREE.MathUtils.clamp(0.14 - foreAft * 1.85 + swingLift * 0.16, -1.25, 1.18),
+    calf: THREE.MathUtils.clamp(-0.22 + Math.abs(foreAft) * 0.78 + swingLift * 0.52, -0.85, 0.86),
+    side: THREE.MathUtils.clamp(sideLean + side * 0.62, -0.55, 0.55)
+  };
+}
+
 function ensurePartControlTarget(part) {
   if (!part.group.userData.qwopTarget) {
     part.group.userData.qwopTarget = {
@@ -447,12 +492,32 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const rightPunch = currentAction === 'mutantPunch' || attackName === 'mutantPunch' || attackName === 'swordSlash' || attackName === 'hammerSlash';
   const knocked = Boolean(playerGroup.userData.isKnocked || (rig.knockedUntil && Date.now() < rig.knockedUntil));
 
-  rig.gaitPhase = (rig.gaitPhase || 0) + dt * (moving ? 9.5 : 2.2);
+  rig.gaitPhase = (rig.gaitPhase || 0) + dt * (moving ? 5.4 + movementAmount * 3.1 : 1.1);
   rig.flopTime = (rig.flopTime || 0) + dt;
 
+  const footPlants = getRigFootPlants(rig);
+  const stepCycle = rig.gaitPhase / (Math.PI * 2);
+  const leftStep = Math.sin(rig.gaitPhase) > 0;
+  const desiredStep = moving ? (leftStep ? 'left' : 'right') : null;
+  const supportFoot = moving ? (desiredStep === 'left' ? footPlants.right : footPlants.left) : null;
+  const supportAnchor = supportFoot?.anchor ?? new THREE.Vector2(0, 0);
+  const rawComOffset = new THREE.Vector2(
+    moveX * 0.16 + (rig.parts.torso?.group.rotation.z || 0) * 0.38,
+    moveZ * 0.24 - (rig.parts.torso?.group.rotation.x || 0) * 0.44
+  );
+  const supportError = rawComOffset.clone().sub(supportAnchor);
+  const fallPressure = THREE.MathUtils.clamp(supportError.length() / GANG_BEASTS_SUPPORT_LIMIT, 0, 1.8);
+  const nowMs = Date.now();
+  const recoveryElapsedMs = Math.max(0, nowMs - (rig.knockedUntil || 0));
+  const recoveryFactor = knocked
+    ? 0
+    : (rig.knockedUntil ? THREE.MathUtils.clamp(recoveryElapsedMs / 1100, 0.28, 1) : 1);
+  rig.recoveryFactor = dampToward(rig.recoveryFactor ?? recoveryFactor, recoveryFactor, knocked ? 2.5 : 5, dt);
+  rig.balanceError = supportError;
+
   if (rig.bodyRoot) {
-    const bob = moving && !knocked ? Math.sin(rig.gaitPhase * 2) * 0.025 : 0;
-    rig.bodyRoot.position.y = dampToward(rig.bodyRoot.position.y, bob, moving ? 10 : 5, dt);
+    const stumbleBob = moving && !knocked ? Math.sin(stepCycle * Math.PI * 4) * 0.018 - fallPressure * 0.012 : 0;
+    rig.bodyRoot.position.y = dampToward(rig.bodyRoot.position.y, stumbleBob, moving ? 8 : 4, dt);
   }
 
   const setTarget = (name, x, y = 0, z = 0) => {
@@ -464,13 +529,28 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     target.z = z;
   };
 
-  const stride = Math.sin(rig.gaitPhase) * movementAmount;
-  const counterStride = Math.sin(rig.gaitPhase + Math.PI) * movementAmount;
-  const sideLean = THREE.MathUtils.clamp(moveX, -1, 1) * 0.16;
-  const forwardLean = moving ? -0.12 - Math.abs(moveZ) * 0.08 : 0;
-  const idleFlop = Math.sin(rig.flopTime * 2.3) * 0.035;
+  const balanceCorrection = THREE.MathUtils.clamp(fallPressure * 0.22, 0, 0.34);
+  const sideLean = THREE.MathUtils.clamp(moveX * 0.12 - supportError.x * 0.55, -0.34, 0.34);
+  const forwardLean = moving
+    ? THREE.MathUtils.clamp(-0.08 - moveZ * 0.22 - supportError.y * 0.42, -0.42, 0.24)
+    : THREE.MathUtils.clamp(-supportError.y * 0.18, -0.12, 0.12);
+  const idleFlop = Math.sin(rig.flopTime * 2.3) * (0.035 + (1 - (rig.recoveryFactor || 1)) * 0.08);
   const punchArc = Math.sin(attackPhase * Math.PI);
   const punchWindup = Math.sin(Math.min(attackPhase, 0.45) / 0.45 * Math.PI);
+  const stepForward = THREE.MathUtils.clamp(moveZ || movementAmount, -1, 1) * GANG_BEASTS_STEP_LENGTH;
+  const stepSide = THREE.MathUtils.clamp(moveX, -1, 1) * 0.18;
+  const leftDesiredAnchor = new THREE.Vector2(-GANG_BEASTS_STEP_WIDTH + stepSide, 0.02 + stepForward + supportError.y * 0.7);
+  const rightDesiredAnchor = new THREE.Vector2(GANG_BEASTS_STEP_WIDTH + stepSide, -0.02 + stepForward + supportError.y * 0.7);
+  const canSwitchStep = Math.max(footPlants.left.age || 0, footPlants.right.age || 0) > GANG_BEASTS_STEP_SWITCH_SECONDS;
+
+  if (moving && canSwitchStep) footPlants.nextFoot = desiredStep;
+  updateFootPlant(footPlants.left, leftDesiredAnchor, !moving || footPlants.nextFoot !== 'left', dt);
+  updateFootPlant(footPlants.right, rightDesiredAnchor, !moving || footPlants.nextFoot !== 'right', dt);
+  if (moving && footPlants[footPlants.nextFoot]?.swing > 0.78) {
+    footPlants.nextFoot = footPlants.nextFoot === 'left' ? 'right' : 'left';
+  }
+  const leftPose = anchorToLegPose(footPlants.left.anchor, sideLean, footPlants.left.swing || 0);
+  const rightPose = anchorToLegPose(footPlants.right.anchor, sideLean, footPlants.right.swing || 0);
 
   if (knocked) {
     setTarget('hips', -0.18, 0, 0);
@@ -483,18 +563,20 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     setTarget('leftCalf', -0.85, 0, 0.08);
     setTarget('rightCalf', -0.85, 0, -0.08);
   } else {
-    setTarget('hips', moving ? Math.sin(rig.gaitPhase * 2) * 0.06 : idleFlop, 0, sideLean);
-    setTarget('torso', forwardLean + idleFlop, 0, sideLean * 0.75);
-    setTarget('head', -forwardLean * 0.35, 0, sideLean * 0.45);
+    setTarget('hips', (moving ? -supportError.y * 0.22 : idleFlop) + balanceCorrection, 0, sideLean - supportError.x * 0.35);
+    setTarget('torso', forwardLean + idleFlop, -supportError.x * 0.16, sideLean * 0.55 - supportError.x * 0.25);
+    setTarget('head', -forwardLean * 0.28, supportError.x * 0.1, sideLean * 0.35);
 
-    // Loose walking gait: feet swing automatically from WASD instead of direct limb controls.
-    setTarget('leftLeg', 0.18 - stride * 0.82, 0, sideLean - Math.max(0, moveX) * 0.18);
-    setTarget('rightLeg', 0.18 - counterStride * 0.82, 0, sideLean + Math.min(0, moveX) * 0.18);
-    setTarget('leftCalf', -0.16 + Math.max(0, stride) * 0.72, 0, sideLean * 0.25);
-    setTarget('rightCalf', -0.16 + Math.max(0, counterStride) * 0.72, 0, sideLean * 0.25);
+    // Foot planting drives the gait: planted feet lag and push against the pelvis,
+    // while the off-balance foot swings toward the next support point.
+    setTarget('leftLeg', leftPose.upper, 0, leftPose.side);
+    setTarget('rightLeg', rightPose.upper, 0, rightPose.side);
+    setTarget('leftCalf', leftPose.calf, 0, sideLean * 0.18);
+    setTarget('rightCalf', rightPose.calf, 0, sideLean * 0.18);
 
-    setTarget('leftArm', 0.45 - counterStride * 0.42, 0, 0.22 + sideLean * 0.4);
-    setTarget('rightArm', 0.45 - stride * 0.42, 0, -0.22 + sideLean * 0.4);
+    const armCounter = (footPlants.left.swing || 0) - (footPlants.right.swing || 0);
+    setTarget('leftArm', 0.44 + armCounter * 0.32 - fallPressure * 0.08, 0, 0.22 + sideLean * 0.35);
+    setTarget('rightArm', 0.44 - armCounter * 0.32 - fallPressure * 0.08, 0, -0.22 + sideLean * 0.35);
 
     if (leftPunch) {
       setTarget('leftArm', -1.05 + punchWindup * 0.35, 0.15, 0.15 + punchArc * 0.9);
@@ -506,16 +588,18 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     }
   }
 
+  const motorStrength = knocked ? 0.28 : 0.42 + (rig.recoveryFactor || 1) * 0.58;
+  const torsoMotorStrength = knocked ? 0.18 : 0.34 + (rig.recoveryFactor || 1) * 0.66;
   const specs = {
-    hips: { min: -0.65, max: 0.65, sideMin: -0.55, sideMax: 0.55, twistMin: -0.7, twistMax: 0.7, stiffness: 8, damping: 3.2, gravity: 3 },
-    leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 10, damping: 2.4, gravity: 18 },
-    rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 10, damping: 2.4, gravity: 18 },
-    leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 12, damping: 2.2, gravity: 20, parent: 'leftLeg' },
-    rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 12, damping: 2.2, gravity: 20, parent: 'rightLeg' },
-    leftArm: { min: -1.55, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 7, damping: 1.8, gravity: 9 },
-    rightArm: { min: -1.55, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 7, damping: 1.8, gravity: 9 },
-    torso: { min: -1.25, max: 0.75, sideMin: -0.65, sideMax: 0.65, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: knocked ? 3 : 9, damping: knocked ? 1.2 : 3.2, gravity: knocked ? 28 : 5 },
-    head: { min: -0.8, max: 0.65, sideMin: -0.65, sideMax: 0.65, twistMin: -0.9, twistMax: 0.9, stiffness: knocked ? 3 : 8, damping: 1.6, gravity: knocked ? 16 : 4 }
+    hips: { min: -0.65, max: 0.65, sideMin: -0.55, sideMax: 0.55, twistMin: -0.7, twistMax: 0.7, stiffness: 5.8 * motorStrength, damping: 1.9 + motorStrength * 0.45, gravity: 5 },
+    leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.4 * motorStrength, damping: 1.7 + motorStrength * 0.55, gravity: 20 },
+    rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.4 * motorStrength, damping: 1.7 + motorStrength * 0.55, gravity: 20 },
+    leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 1.5 + motorStrength * 0.55, gravity: 22, parent: 'leftLeg' },
+    rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 1.5 + motorStrength * 0.55, gravity: 22, parent: 'rightLeg' },
+    leftArm: { min: -1.55, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 6.2 * motorStrength, damping: 1.35 + motorStrength * 0.35, gravity: 10 },
+    rightArm: { min: -1.55, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 6.2 * motorStrength, damping: 1.35 + motorStrength * 0.35, gravity: 10 },
+    torso: { min: -1.25, max: 0.75, sideMin: -0.65, sideMax: 0.65, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: 4.8 * torsoMotorStrength, damping: knocked ? 0.8 : 1.35 + torsoMotorStrength * 0.35, gravity: knocked ? 31 : 8.5 },
+    head: { min: -0.8, max: 0.65, sideMin: -0.65, sideMax: 0.65, twistMin: -0.9, twistMax: 0.9, stiffness: 4.4 * torsoMotorStrength, damping: knocked ? 0.75 : 1.15 + torsoMotorStrength * 0.25, gravity: knocked ? 18 : 6 }
   };
 
   Object.entries(rig.parts).forEach(([name, part]) => {
