@@ -418,7 +418,7 @@ const TORSO_MAX_TWIST = Math.PI / 2;
 const TARGET_RETURN_SPEED = 1.35;
 const TARGET_FOLLOW_SPEED = 15;
 
-const GANG_BEASTS_STEP_SWITCH_SECONDS = 0.28;
+const GANG_BEASTS_STEP_SWITCH_SECONDS = 0.18;
 const GANG_BEASTS_STEP_LENGTH = 0.5;
 const GANG_BEASTS_STEP_WIDTH = 0.22;
 const GANG_BEASTS_SUPPORT_LIMIT = 0.15;
@@ -444,31 +444,33 @@ function updateFootPlant(foot, desiredAnchor, shouldPlant, dt, moving = false, f
   }
   if (foot.stuckTimer > 0) shouldPlant = true;
   const messyAnchor = desiredAnchor.clone();
-  messyAnchor.x += Math.sin(flopTime * 7.3 + (foot.seed || 0)) * 0.035 * (moving ? 1 : 0.25);
-  messyAnchor.y *= 1 + Math.sin(flopTime * 4.7 + (foot.seed || 0)) * 0.18;
+  messyAnchor.x += Math.sin(flopTime * 7.3 + (foot.seed || 0)) * 0.025 * (moving ? 1 : 0.18);
+  messyAnchor.y *= 1 + Math.sin(flopTime * 4.7 + (foot.seed || 0)) * 0.12;
   if (shouldPlant) {
     if (!foot.planted) {
       foot.anchor.copy(messyAnchor);
       foot.age = 0;
     } else {
-      foot.anchor.lerp(messyAnchor, 1 - Math.exp((foot.stuckTimer > 0 ? -0.45 : -1.7) * dt));
+      // Very low drift when planted — foot stays firmly on the ground spot.
+      foot.anchor.lerp(messyAnchor, 1 - Math.exp((foot.stuckTimer > 0 ? -0.25 : -0.6) * dt));
     }
     foot.planted = true;
-    foot.swing = dampToward(foot.swing || 0, 0, 12, dt);
+    foot.swing = dampToward(foot.swing || 0, 0, 18, dt);
     return;
   }
 
   foot.planted = false;
-  foot.anchor.lerp(messyAnchor, 1 - Math.exp(-8.5 * dt));
-  foot.swing = dampToward(foot.swing || 0, 1, 10, dt);
+  // Swing foot quickly to desired position so it plants ahead of the body.
+  foot.anchor.lerp(messyAnchor, 1 - Math.exp(-16 * dt));
+  foot.swing = dampToward(foot.swing || 0, 1, 18, dt);
 }
 
 function anchorToLegPose(anchor, sideLean, swingLift = 0) {
   const foreAft = THREE.MathUtils.clamp(anchor.y, -0.42, 0.42);
   const side = THREE.MathUtils.clamp(anchor.x, -0.42, 0.42);
   return {
-    upper: THREE.MathUtils.clamp(0.14 - foreAft * 1.85 + swingLift * 0.16, -1.25, 1.18),
-    calf: THREE.MathUtils.clamp(-0.22 + Math.abs(foreAft) * 0.78 + swingLift * 0.52, -0.85, 0.86),
+    upper: THREE.MathUtils.clamp(0.14 - foreAft * 1.85 + swingLift * 0.28, -1.25, 1.18),
+    calf: THREE.MathUtils.clamp(-0.22 + Math.abs(foreAft) * 0.78 + swingLift * 0.72, -0.85, 0.86),
     side: THREE.MathUtils.clamp(sideLean + side * 0.62, -0.55, 0.55)
   };
 }
@@ -610,14 +612,16 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const eHeld = pressed('e') && !leftPunch;
 
     if (leftPunch) {
-      setTarget('leftArm', 0.48 - punchArc * 2.1 + punchWindup * 0.12, 0.05 * punchArc, 0.1 + punchArc * 0.12);
-      setTarget('torso', forwardLean - punchArc * 0.22, 0.15 * punchArc, sideLean + 0.07 * punchArc);
+      // Swing arm from ~+0.48 (down) to ~-1.65 (fully forward) over first half, retract over second half.
+      // punchArc peaks at 1 mid-punch. Total swing is ~2.13 rad (~122 deg) — snappy forward punch.
+      setTarget('leftArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, 0.05 * punchArc, 0.1 + punchArc * 0.12);
+      setTarget('torso', forwardLean - punchArc * 0.28, 0.18 * punchArc, sideLean + 0.1 * punchArc);
     } else if (eHeld) {
       setTarget('leftArm', -1.35, 0, 0.1);
     }
     if (rightPunch) {
-      setTarget('rightArm', 0.48 - punchArc * 2.1 + punchWindup * 0.12, -0.05 * punchArc, -0.1 - punchArc * 0.12);
-      setTarget('torso', forwardLean - punchArc * 0.22, -0.15 * punchArc, sideLean - 0.07 * punchArc);
+      setTarget('rightArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, -0.05 * punchArc, -0.1 - punchArc * 0.12);
+      setTarget('torso', forwardLean - punchArc * 0.28, -0.18 * punchArc, sideLean - 0.1 * punchArc);
     } else if (qHeld) {
       setTarget('rightArm', -1.35, 0, -0.1);
     }
@@ -625,14 +629,20 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
 
   const motorStrength = knocked ? 0.18 : 0.22 + (rig.recoveryFactor || 1) * 0.34;
   const torsoMotorStrength = knocked ? 0.12 : 0.18 + (rig.recoveryFactor || 1) * 0.3;
+  // During a punch the arm must snap forward ~90 deg in ~200ms — bypass the desire→target
+  // lag by cranking lag and stiffness way up for the active punching arm.
+  const punchingLeft = leftPunch && attackPhase > 0 && attackPhase < 1;
+  const punchingRight = rightPunch && attackPhase > 0 && attackPhase < 1;
+  const armPunchLag = 28;
+  const armPunchStiffness = 14 * motorStrength;
   const specs = {
     hips: { min: -0.65, max: 0.65, sideMin: -0.55, sideMax: 0.55, twistMin: -0.7, twistMax: 0.7, stiffness: 3.1 * motorStrength, damping: 0.9 + motorStrength * 0.25, gravity: 7.5, lag: 3.2 },
-    leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 5.6 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 24, lag: 4.7 },
-    rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 5.6 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 24, lag: 4.3 },
-    leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 6.4 * motorStrength, damping: 0.85 + motorStrength * 0.35, gravity: 26, parent: 'leftLeg', lag: 5.1 },
-    rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 6.4 * motorStrength, damping: 0.85 + motorStrength * 0.35, gravity: 26, parent: 'rightLeg', lag: 4.8 },
-    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 3.9 * motorStrength, damping: 0.75 + motorStrength * 0.25, gravity: 13, lag: 3.8 },
-    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: 3.9 * motorStrength, damping: 0.75 + motorStrength * 0.25, gravity: 13, lag: 3.8 },
+    leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 13 },
+    rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 12 },
+    leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'leftLeg', lag: 14 },
+    rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'rightLeg', lag: 13 },
+    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingLeft ? armPunchStiffness : 3.9 * motorStrength, damping: 0.75 + motorStrength * 0.25, gravity: 13, lag: punchingLeft ? armPunchLag : 3.8 },
+    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingRight ? armPunchStiffness : 3.9 * motorStrength, damping: 0.75 + motorStrength * 0.25, gravity: 13, lag: punchingRight ? armPunchLag : 3.8 },
     torso: { min: -1.25, max: 0.75, sideMin: -0.75, sideMax: 0.75, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: 2.7 * torsoMotorStrength, damping: knocked ? 0.55 : 0.75 + torsoMotorStrength * 0.25, gravity: knocked ? 34 : 13, lag: 2.7 },
     head: { min: -1.05, max: 0.8, sideMin: -0.85, sideMax: 0.85, twistMin: -1.05, twistMax: 1.05, stiffness: 1.6 * torsoMotorStrength, damping: knocked ? 0.45 : 0.55 + torsoMotorStrength * 0.18, gravity: knocked ? 30 : 22, lag: 2.1 }
   };
