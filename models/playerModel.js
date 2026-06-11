@@ -606,13 +606,20 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     setTarget('leftArm', 0.44 + armCounter * 0.32 - fallPressure * 0.08, 0, 0.22 + sideLean * 0.35);
     setTarget('rightArm', 0.44 - armCounter * 0.32 - fallPressure * 0.08, 0, -0.22 + sideLean * 0.35);
 
+    const qHeld = pressed('q') && !rightPunch;
+    const eHeld = pressed('e') && !leftPunch;
+
     if (leftPunch) {
-      setTarget('leftArm', 0.48 - punchArc * 1.72 + punchWindup * 0.22, 0.2 * punchArc, 0.2 + punchArc * 0.38);
-      setTarget('torso', forwardLean - punchArc * 0.14, 0.2 * punchArc, sideLean + 0.1 * punchArc);
+      setTarget('leftArm', 0.48 - punchArc * 2.1 + punchWindup * 0.12, 0.05 * punchArc, 0.1 + punchArc * 0.12);
+      setTarget('torso', forwardLean - punchArc * 0.22, 0.15 * punchArc, sideLean + 0.07 * punchArc);
+    } else if (eHeld) {
+      setTarget('leftArm', -1.35, 0, 0.1);
     }
     if (rightPunch) {
-      setTarget('rightArm', 0.48 - punchArc * 1.72 + punchWindup * 0.22, -0.2 * punchArc, -0.2 - punchArc * 0.38);
-      setTarget('torso', forwardLean - punchArc * 0.14, -0.2 * punchArc, sideLean - 0.1 * punchArc);
+      setTarget('rightArm', 0.48 - punchArc * 2.1 + punchWindup * 0.12, -0.05 * punchArc, -0.1 - punchArc * 0.12);
+      setTarget('torso', forwardLean - punchArc * 0.22, -0.15 * punchArc, sideLean - 0.07 * punchArc);
+    } else if (qHeld) {
+      setTarget('rightArm', -1.35, 0, -0.1);
     }
   }
 
@@ -700,10 +707,16 @@ export function updateProceduralMonsterRig(monsterGroup, options = {}, deltaSeco
   setTarget('torso', attacking ? -0.22 + Math.sin(attackPhase * Math.PI) * 0.2 : -0.05 * movementAmount, targetYaw * 0.55, strafe * 0.12);
   setTarget('head', attacking ? -0.05 : 0, targetYaw * 0.35, strafe * 0.08);
 
+  const leftPunchActive = monsterGroup.userData.currentAction === 'leftPunch';
   if (attacking) {
     const windup = Math.sin(attackPhase * Math.PI);
-    setTarget('rightArm', -1.2 + windup * 0.8, 0, -0.2 + windup * 0.75);
-    setTarget('leftArm', 0.45 - windup * 0.35, 0, -0.25);
+    if (leftPunchActive) {
+      setTarget('leftArm', -1.2 + windup * 0.8, 0, 0.2 - windup * 0.75);
+      setTarget('rightArm', 0.45 - windup * 0.35, 0, 0.25);
+    } else {
+      setTarget('rightArm', -1.2 + windup * 0.8, 0, -0.2 + windup * 0.75);
+      setTarget('leftArm', 0.45 - windup * 0.35, 0, -0.25);
+    }
   } else {
     setTarget('rightArm', 0.65 - counterStride * 0.45, 0, -0.15);
     setTarget('leftArm', 0.65 - stride * 0.45, 0, 0.15);
@@ -728,7 +741,9 @@ export function updateProceduralMonsterRig(monsterGroup, options = {}, deltaSeco
     part.group.rotation.z = dampToward(part.group.rotation.z, THREE.MathUtils.clamp(target.z, spec.sideMin, spec.sideMax), TARGET_FOLLOW_SPEED, dt);
   });
 
-  monsterGroup.userData.currentAction = attacking ? 'swordSlash' : movementAmount > 0.08 ? 'qwop' : 'idle';
+  if (!attacking) {
+    monsterGroup.userData.currentAction = movementAmount > 0.08 ? 'qwop' : 'idle';
+  }
   return { forwardIntent: movementAmount, balance: 0 };
 }
 

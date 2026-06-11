@@ -1,7 +1,7 @@
 import { appContext } from '../src/runtime/appContext.js';
 import * as THREE from "three";
 import { CharacterBase, CHARACTER_MOVEMENT } from "./CharacterBase.js";
-import { ATTACKS, canApplySwordContactHit, getAttackTypes, isSwordTouchingTarget } from "../items/melee.js";
+import { ATTACKS, getAttackTypes } from "../items/melee.js";
 import { updateProceduralMonsterRig } from "../models/playerModel.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { getLiveRigidBody } from "../physics/rapierSafety.js";
@@ -9,12 +9,12 @@ import { BASE_HEALTH_SEGMENTS, clampHealthSegments, getMaxHealthSegments } from 
 
 const AGGRO_RADIUS = 12;
 const WANDER_CHANGE_MS = 2000;
-const ATTACK_NAME = 'swordSlash';
-const JUMP_ATTACK_NAME = 'swordFwdSpin';
+const ATTACK_NAME = 'mutantPunch';
+const ALT_ATTACK_NAME = 'leftPunch';
 const MOVE_FADE = 0.2;
 const ATTACK_FADE = 0.1;
 const DEFAULT_HEALTH = BASE_HEALTH_SEGMENTS;
-const MONSTER_ATTACK = ATTACKS.swordSlash;
+const MONSTER_ATTACK = ATTACKS.mutantPunch;
 const DEFAULT_MONSTER_PROPERTIES = Object.freeze({
   moveSpeed: 1,
   animationSpeed: 1,
@@ -29,8 +29,10 @@ const STANDOFF_BUFFER = 0.35;
 const STRAFE_SPEED = 1.1;
 const STRAFE_OSCILLATION = 0.004;
 const ATTACK_LUNGE_DURATION_MS = 280;
-const JUMP_ATTACK_CHANCE = 0.22;
-const JUMP_ATTACK_DAMAGE_MULTIPLIER = 2.75;
+const ALT_ATTACK_CHANCE = 0.45;
+const GRAB_CHANCE = 0.25;
+const GRAB_DURATION_MS = 1200;
+const JUMP_ATTACK_DAMAGE_MULTIPLIER = 1.5;
 const JUMP_ATTACK_CONTACT_WINDOW = [0.7, 0.9];
 const STANDOFF_RETREAT_INTERVAL_MS = 2000;
 const HEALTH_BAR_HEIGHT = 14;
@@ -100,8 +102,12 @@ export class MonsterCharacter extends CharacterBase {
     this.isProvoked = false;
     this.model.userData.monsterProperties = this.monsterProperties;
     this.model.userData.lastHitAttackTypes = [];
-    this.model.userData.equippedWeaponType = 'sword';
+    this.model.userData.equippedWeaponType = null;
+    this.model.userData.itemEquipped = null;
     this.model.userData.isProvoked = false;
+    this.grabTarget = null;
+    this.grabEndTime = 0;
+    this.lastPunchHand = 'right';
     this.setLevel(1, { preserveHealth: false });
   }
 
@@ -142,6 +148,8 @@ export class MonsterCharacter extends CharacterBase {
       this.attackStartTime = null;
       this.attackHasHit = false;
       this.attackAnimationName = ATTACK_NAME;
+      this.grabTarget = null;
+      this.grabEndTime = 0;
     }
   }
 
@@ -688,6 +696,9 @@ export class MonsterCharacter extends CharacterBase {
       ? (Date.now() - this.attackStartTime) / Math.max(1, MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow)
       : 0;
     const targetYaw = Number.isFinite(options.targetYaw) ? options.targetYaw : 0;
+    if (attacking && this.attackAnimationName) {
+      this.model.userData.currentAction = this.attackAnimationName;
+    }
     updateProceduralMonsterRig(this.model, {
       movementAmount,
       attacking,
@@ -783,14 +794,21 @@ export class MonsterCharacter extends CharacterBase {
       if (canAttack && distance <= STANDOFF_DISTANCE + 0.5) {
         this.attackDirection.copy(faceDir);
         this.setDirection(this.attackDirection);
-        const useJumpAttack = this.actions?.[JUMP_ATTACK_NAME] && Math.random() < JUMP_ATTACK_CHANCE;
-        this.attackAnimationName = useJumpAttack ? JUMP_ATTACK_NAME : ATTACK_NAME;
-        this.playAnimation(this.attackAnimationName, ATTACK_FADE);
-        this.model.userData.attack = { name: this.attackAnimationName, start: now, hasHit: false };
-        this.lastAttackTime = now;
-        this.attackStartTime = now;
-        this.attackHasHit = false;
-        this.attackLungeEndTime = now + ATTACK_LUNGE_DURATION_MS;
+        // Occasionally grab instead of punch
+        if (Math.random() < GRAB_CHANCE) {
+          this.grabTarget = primaryTarget;
+          this.grabEndTime = now + GRAB_DURATION_MS;
+        } else {
+          // Alternate left/right punch
+          this.lastPunchHand = this.lastPunchHand === 'right' ? 'left' : 'right';
+          this.attackAnimationName = this.lastPunchHand === 'right' ? ATTACK_NAME : ALT_ATTACK_NAME;
+          this.playAnimation(this.attackAnimationName, ATTACK_FADE);
+          this.model.userData.attack = { name: this.attackAnimationName, start: now, hasHit: false };
+          this.lastAttackTime = now;
+          this.attackStartTime = now;
+          this.attackHasHit = false;
+          this.attackLungeEndTime = now + ATTACK_LUNGE_DURATION_MS;
+        }
         this.nextAttackTime = now + THREE.MathUtils.randInt(...ATTACK_COOLDOWN_RANGE_MS);
       } else {
         this.playAnimation("Walk", MOVE_FADE);
@@ -800,36 +818,41 @@ export class MonsterCharacter extends CharacterBase {
 
     this.update(delta);
 
+    // Handle grab behavior
+    if (this.grabTarget && now < this.grabEndTime) {
+      const grabTargetModel = this.grabTarget?.model;
+      if (grabTargetModel) {
+        const grabDist = this.model.position.distanceTo(grabTargetModel.position);
+        if (grabDist < STANDOFF_DISTANCE + 1.0) {
+          // Pull grabbed target toward monster
+          const pullDir = this.model.position.clone().sub(grabTargetModel.position).normalize();
+          this.grabTarget.applyKnockback?.({ direction: pullDir, strength: 1 });
+        }
+      }
+      // Pose arms forward when grabbing
+      this.updateProceduralPose(delta, { attacking: true, movementAmount: 0 });
+    } else if (this.grabTarget && now >= this.grabEndTime) {
+      this.grabTarget = null;
+    }
+
     if (this.attackStartTime) {
       const elapsed = now - this.attackStartTime;
       const currentAction = this.attackAnimationName || ATTACK_NAME;
-      const actionClip = this.actions?.[currentAction]?.getClip?.();
-      const durationMs = Number.isFinite(actionClip?.duration) ? actionClip.duration * 1000 : 0;
-      const isJumpAttack = currentAction === JUMP_ATTACK_NAME;
-      const hitStart = isJumpAttack && durationMs > 0
-        ? durationMs * JUMP_ATTACK_CONTACT_WINDOW[0]
-        : MONSTER_ATTACK.hitTime;
-      const hitEnd = isJumpAttack && durationMs > 0
-        ? durationMs * JUMP_ATTACK_CONTACT_WINDOW[1]
-        : MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow;
+      const hitStart = MONSTER_ATTACK.hitTime;
+      const hitEnd = MONSTER_ATTACK.hitTime + MONSTER_ATTACK.hitWindow;
 
       if (!this.attackHasHit && elapsed >= hitStart && elapsed <= hitEnd) {
         const hitTargets = Array.isArray(targets) && targets.length ? targets : [primaryTarget];
-        const hitDamage = isJumpAttack
-          ? this.attackDamage * JUMP_ATTACK_DAMAGE_MULTIPLIER
-          : this.attackDamage;
         hitTargets.forEach((target) => {
           if (!target?.model) return;
           const dist = this.model.position.distanceTo(target.model.position);
-          const swordContact = isSwordTouchingTarget(this.model, target.model) && canApplySwordContactHit(this.model, target, now);
-          const canRangeHit = this.model.userData?.equippedWeaponType !== 'sword' && dist <= attackRange;
-          if (swordContact || canRangeHit) {
+          if (dist <= attackRange) {
             onHit?.(target, {
               direction: this.model.userData.direction.clone(),
               strength: MONSTER_ATTACK.knockbackStrength,
-              damage: hitDamage,
+              damage: this.attackDamage,
               attackName: currentAction,
-              attackTypes: getAttackTypes('swordSlash', ['cut'])
+              attackTypes: getAttackTypes(currentAction, ['melee', 'punch'])
             });
           }
         });

@@ -103,8 +103,8 @@ export function loadMonsterModel(modelPath, callback) {
   monsterGroup.userData.actions = {};
   monsterGroup.userData.mixer = null;
   monsterGroup.userData.updateSkinnedBounds = () => {};
-
-  attachAutumnSword(monsterGroup);
+  monsterGroup.userData.itemEquipped = null;
+  monsterGroup.userData.equippedWeaponType = null;
 
   queueMicrotask(() => callback?.({
     model: monsterGroup,

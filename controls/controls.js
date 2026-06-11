@@ -1338,11 +1338,11 @@ export class PlayerControls {
         if (e.repeat) return;
         if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
         if (this.isInWater) return;
-        this.handleGangBeastsPunchGrab('right');
+        this.handleGangBeastsPunchGrab('left');
       } else if (key === 'q') {
         if (e.repeat) return;
         if (this.isInWater) return;
-        this.handleGangBeastsPunchGrab('left');
+        this.handleGangBeastsPunchGrab('right');
       } else if (key === 'r') {
         if (this.isInWater) return;
         if (this.isMoving && !this.isSlideMomentumActive()) {
@@ -2917,6 +2917,14 @@ export class PlayerControls {
       this.updateGrabbedTarget();
     }
 
+    // Hold Q/E: keep arm extended and grab whatever hand touches
+    if (this.keysPressed.has('q') && !this.grabbedTarget) {
+      this.attemptHandGrab('right');
+    }
+    if (this.keysPressed.has('e') && !this.grabbedTarget) {
+      this.attemptHandGrab('left');
+    }
+
     // Always update controls even when movement is disabled
     if (this.controls) {
       this.controls.update();
@@ -3882,6 +3890,55 @@ export class PlayerControls {
       target.object.position.copy(targetPos);
       if (target.object.userData?.rb) {
         target.object.userData.rb.setTranslation(targetPos, true);
+      }
+    }
+  }
+
+  attemptHandGrab(hand = 'right') {
+    if (!this.playerModel) return;
+    const rig = this.playerModel.userData?.qwopRig;
+    const armName = hand === 'left' ? 'leftArm' : 'rightArm';
+    const armPart = rig?.parts?.[armName];
+    let handPos;
+    if (armPart?.group) {
+      const handMesh = armPart.group.getObjectByName(`${armName}Hand`);
+      if (handMesh) {
+        handPos = new THREE.Vector3();
+        handMesh.getWorldPosition(handPos);
+      }
+    }
+    if (!handPos) {
+      handPos = this.playerModel.position.clone();
+      handPos.y += 0.8;
+    }
+
+    let closest = null;
+    let minDist = 1.2;
+
+    const others = appContext.entities.otherPlayers || window.otherPlayers || {};
+    for (const [id, p] of Object.entries(others)) {
+      const dist = handPos.distanceTo(p.model.position);
+      if (dist < minDist) {
+        closest = { type: 'player', id, model: p.model };
+        minDist = dist;
+      }
+    }
+
+    const monsterList = appContext.entities.monsters || window.monsters || [];
+    for (const mon of monsterList) {
+      const model = mon?.model || mon;
+      if (!model) continue;
+      const dist = handPos.distanceTo(model.position);
+      if (dist < minDist) {
+        closest = { type: 'monster', model, monster: mon };
+        minDist = dist;
+      }
+    }
+
+    if (closest) {
+      this.grabbedTarget = closest;
+      if (closest.type === 'player') {
+        this.multiplayer.send({ type: 'grab', from: this.multiplayer.getId(), target: closest.id, active: true });
       }
     }
   }
