@@ -645,8 +645,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 12 },
     leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'leftLeg', lag: 14 },
     rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'rightLeg', lag: 13 },
-    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingLeft ? armPunchStiffness : (eHeldSpec ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingLeft ? armPunchLag : (eHeldSpec ? armGrabLag : 3.8) },
-    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingRight ? armPunchStiffness : (qHeldSpec ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingRight ? armPunchLag : (qHeldSpec ? armGrabLag : 3.8) },
+    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingLeft ? armPunchStiffness : (eHeldSpec ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingLeft ? armPunchLag : (eHeldSpec ? armGrabLag : 3.8), noInertia: true },
+    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingRight ? armPunchStiffness : (qHeldSpec ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingRight ? armPunchLag : (qHeldSpec ? armGrabLag : 3.8), noInertia: true },
     torso: { min: -1.25, max: 0.75, sideMin: -0.75, sideMax: 0.75, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: 2.7 * torsoMotorStrength, damping: knocked ? 0.55 : 0.75 + torsoMotorStrength * 0.25, gravity: knocked ? 34 : 13, lag: 2.7 },
     head: { min: -1.05, max: 0.8, sideMin: -0.85, sideMax: 0.85, twistMin: -1.05, twistMax: 1.05, stiffness: 1.6 * torsoMotorStrength, damping: knocked ? 0.45 : 0.55 + torsoMotorStrength * 0.18, gravity: knocked ? 30 : 22, lag: 2.1 }
   };
@@ -662,13 +662,18 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     target.y = dampToward(target.y, desired.y, lag * 0.85, dt);
     target.z = dampToward(target.z, desired.z, lag * 0.85, dt);
     const angle = part.group.rotation.x;
-    const parentAngle = spec.parent ? rig.parts[spec.parent]?.group.rotation.x || 0 : 0;
-    const gravityPull = Math.sin(angle + parentAngle - (part.restRotation || 0)) * spec.gravity * 0.08;
-    const spring = (THREE.MathUtils.clamp(target.x, spec.min, spec.max) - angle) * spec.stiffness;
-    const noise = Math.sin(rig.flopTime * (name.length + 2.7)) * (knocked ? 0.35 : 0.14);
-    physics.angularVelocity = (physics.angularVelocity || 0) + (spring - gravityPull + noise) * dt;
-    physics.angularVelocity *= Math.exp(-spec.damping * dt);
-    part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
+    if (spec.noInertia) {
+      physics.angularVelocity = 0;
+      part.group.rotation.x = THREE.MathUtils.clamp(dampToward(angle, target.x, spec.lag || GANG_BEASTS_MOTOR_LAG_SPEED, dt), spec.min, spec.max);
+    } else {
+      const parentAngle = spec.parent ? rig.parts[spec.parent]?.group.rotation.x || 0 : 0;
+      const gravityPull = Math.sin(angle + parentAngle - (part.restRotation || 0)) * spec.gravity * 0.08;
+      const spring = (THREE.MathUtils.clamp(target.x, spec.min, spec.max) - angle) * spec.stiffness;
+      const noise = Math.sin(rig.flopTime * (name.length + 2.7)) * (knocked ? 0.35 : 0.14);
+      physics.angularVelocity = (physics.angularVelocity || 0) + (spring - gravityPull + noise) * dt;
+      physics.angularVelocity *= Math.exp(-spec.damping * dt);
+      part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
+    }
     part.group.rotation.y = dampToward(part.group.rotation.y, THREE.MathUtils.clamp(target.y, spec.twistMin, spec.twistMax), knocked ? 2.5 : 5.5, dt);
     part.group.rotation.z = dampToward(part.group.rotation.z, THREE.MathUtils.clamp(target.z, spec.sideMin, spec.sideMax), knocked ? 2.2 : 4.8, dt);
   });
