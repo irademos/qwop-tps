@@ -3895,6 +3895,9 @@ export class PlayerControls {
     } else if (target.type === 'monster') {
       target.model.position.copy(targetPos);
       target.model.userData.rb?.setTranslation(targetPos, true);
+    } else if (target.type === 'friendly') {
+      target.model.position.copy(targetPos);
+      target.model.userData.rb?.setTranslation(targetPos, true);
     } else if (target.type === 'object') {
       target.object.position.copy(targetPos);
       if (target.object.userData?.rb) {
@@ -3947,6 +3950,17 @@ export class PlayerControls {
       }
     }
 
+    const friendlyList = [...(Array.isArray(window.friendlies) ? window.friendlies : [])];
+    if (window.merchantFriendly?.model) friendlyList.push(window.merchantFriendly);
+    for (const friendly of friendlyList) {
+      if (!friendly?.model || friendly.isDead) continue;
+      const dist = handPos.distanceTo(friendly.model.position);
+      if (dist < minDist) {
+        closest = { type: 'friendly', model: friendly.model, friendly };
+        minDist = dist;
+      }
+    }
+
     if (closest) {
       this.grabbedTarget = closest;
       this.grabbedHand = hand;
@@ -3977,6 +3991,17 @@ export class PlayerControls {
       const dist = playerPos.distanceTo(model.position);
       if (dist < minDist) {
         closest = { type: 'monster', model };
+        minDist = dist;
+      }
+    }
+
+    const friendlyList = [...(Array.isArray(window.friendlies) ? window.friendlies : [])];
+    if (window.merchantFriendly?.model) friendlyList.push(window.merchantFriendly);
+    for (const friendly of friendlyList) {
+      if (!friendly?.model || friendly.isDead) continue;
+      const dist = playerPos.distanceTo(friendly.model.position);
+      if (dist < minDist) {
+        closest = { type: 'friendly', model: friendly.model, friendly };
         minDist = dist;
       }
     }

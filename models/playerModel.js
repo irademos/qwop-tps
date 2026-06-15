@@ -560,9 +560,9 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
 
   const balanceCorrection = THREE.MathUtils.clamp(fallPressure * 0.12, 0, 0.22);
   const headLag = rig.parts.head?.group.rotation.x || 0;
-  const sideLean = THREE.MathUtils.clamp(moveX * 0.18 - supportError.x * 0.34 + Math.sin(rig.flopTime * 2.1) * 0.04, -0.42, 0.42);
+  const sideLean = THREE.MathUtils.clamp(-supportError.x * 0.34 + Math.sin(rig.flopTime * 2.1) * 0.04, -0.42, 0.42);
   const forwardLean = moving
-    ? THREE.MathUtils.clamp(-0.16 - moveZ * 0.34 - supportError.y * 0.26 + headLag * 0.18, -0.62, 0.28)
+    ? THREE.MathUtils.clamp(-0.16 - movementAmount * 0.34 - supportError.y * 0.26 + headLag * 0.18, -0.62, 0.28)
     : THREE.MathUtils.clamp(-supportError.y * 0.1 + Math.sin(rig.flopTime * 1.7) * 0.035, -0.16, 0.16);
   const idleFlop = Math.sin(rig.flopTime * 2.3) * (0.035 + (1 - (rig.recoveryFactor || 1)) * 0.08);
   const punchArc = Math.sin(attackPhase * Math.PI);
