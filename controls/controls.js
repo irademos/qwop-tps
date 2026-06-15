@@ -1372,6 +1372,10 @@ export class PlayerControls {
       }
       if (key === 'e') {
         this.releaseSwordSpinCharge();
+        if (this.grabbedHand === 'left' && this.grabbedTarget) this.releaseGrab();
+      }
+      if (key === 'q') {
+        if (this.grabbedHand === 'right' && this.grabbedTarget) this.releaseGrab();
       }
     });
     
@@ -2066,6 +2070,7 @@ export class PlayerControls {
     this.knockbackVelocity.copy(velocity);
     this.isKnocked = true;
     this.playerModel.userData.isKnocked = true;
+    if (this.grabbedTarget) this.releaseGrab();
     const now = Date.now();
     const recoveryMs = this.playerModel.userData.qwopRig ? GANG_BEASTS_PARALYSIS_MS : profile.recoveryMs;
     this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + recoveryMs);
@@ -3856,8 +3861,12 @@ export class PlayerControls {
 
   updateGrabbedTarget() {
     if (!this.grabbedTarget || !this.playerModel) return;
-    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
-    const targetPos = this.playerModel.position.clone().addScaledVector(forward, 1);
+    const targetPos = this.grabbedHand
+      ? this._getHandWorldPos(this.grabbedHand)
+      : (() => {
+          const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
+          return this.playerModel.position.clone().addScaledVector(forward, 1);
+        })();
     const target = this.grabbedTarget;
     if (target.type === 'player') {
       target.model.position.copy(targetPos);
@@ -3894,23 +3903,26 @@ export class PlayerControls {
     }
   }
 
-  attemptHandGrab(hand = 'right') {
-    if (!this.playerModel) return;
-    const rig = this.playerModel.userData?.qwopRig;
+  _getHandWorldPos(hand) {
+    const rig = this.playerModel?.userData?.qwopRig;
     const armName = hand === 'left' ? 'leftArm' : 'rightArm';
     const armPart = rig?.parts?.[armName];
-    let handPos;
     if (armPart?.group) {
       const handMesh = armPart.group.getObjectByName(`${armName}Hand`);
       if (handMesh) {
-        handPos = new THREE.Vector3();
-        handMesh.getWorldPosition(handPos);
+        const pos = new THREE.Vector3();
+        handMesh.getWorldPosition(pos);
+        return pos;
       }
     }
-    if (!handPos) {
-      handPos = this.playerModel.position.clone();
-      handPos.y += 0.8;
-    }
+    const fallback = this.playerModel.position.clone();
+    fallback.y += 0.8;
+    return fallback;
+  }
+
+  attemptHandGrab(hand = 'right') {
+    if (!this.playerModel) return;
+    const handPos = this._getHandWorldPos(hand);
 
     let closest = null;
     let minDist = 1.2;
@@ -3937,6 +3949,7 @@ export class PlayerControls {
 
     if (closest) {
       this.grabbedTarget = closest;
+      this.grabbedHand = hand;
       if (closest.type === 'player') {
         this.multiplayer.send({ type: 'grab', from: this.multiplayer.getId(), target: closest.id, active: true });
       }
@@ -3981,6 +3994,7 @@ export class PlayerControls {
       this.multiplayer.send({ type: 'grab', from: this.multiplayer.getId(), target: this.grabbedTarget.id, active: false });
     }
     this.grabbedTarget = null;
+    this.grabbedHand = null;
     this.lastGrabMoveSentAt = 0;
     this.lastGrabMoveSentPos = null;
   }
