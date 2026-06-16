@@ -143,6 +143,19 @@ const SWORD_SPIN_WINDUP_SPEED = 0.25;
 const MOBILE_EQUIP_HOLD_MS = 1500;
 const GRAB_MOVE_SEND_INTERVAL_MS = 110;
 const GRAB_MOVE_MIN_DELTA_SQ = 0.02 * 0.02;
+const GRAB_SPRING = 45;
+const GRAB_DAMPING = 10;
+const GRAB_FORCE_MAX = 200;
+const GRAB_SELF_SPEED_LIMIT = 1.8;
+const GRAB_BODY_PART_OFFSETS = {
+  head:     { x: 0,    y: 1.05, z: 0 },
+  torso:    { x: 0,    y: 0.55, z: 0 },
+  leftArm:  { x: -0.4, y: 0.65, z: 0 },
+  rightArm: { x: 0.4,  y: 0.65, z: 0 },
+  hips:     { x: 0,    y: 0.0,  z: 0 },
+  leftLeg:  { x: -0.2, y: -0.3, z: 0 },
+  rightLeg: { x: 0.2,  y: -0.3, z: 0 },
+};
 const AUTO_AIM_RANGE_M = 50;
 const AUTO_AIM_ICE_RANGE_M = 10;
 const AUTO_AIM_THROW_RANGE_M = 18;
@@ -2380,13 +2393,35 @@ export class PlayerControls {
     this.isInWater = this.waterDepth > SWIM_DEPTH_THRESHOLD && t.y < floatTargetY;
 
     if (this.isGrabbed) {
-      // Freeze movement and follow externally provided position
-      this.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
-      if (this.externalGrabPos) {
-        t.x = this.externalGrabPos.x;
-        t.y = this.externalGrabPos.y;
-        t.z = this.externalGrabPos.z;
-        this.body.setTranslation(this.externalGrabPos, true);
+      if (this.externalGrabPos && this.body) {
+        // Compute world position of the grabbed body part on this player
+        const bodyPartOff = GRAB_BODY_PART_OFFSETS[this.externalGrabBodyPart || 'torso']
+          || GRAB_BODY_PART_OFFSETS.torso;
+        const localOff = new THREE.Vector3(bodyPartOff.x, bodyPartOff.y, bodyPartOff.z);
+        if (this.playerModel) {
+          localOff.applyEuler(new THREE.Euler(0, this.playerModel.rotation.y, 0));
+        }
+        const grabWorldPos = { x: t.x + localOff.x, y: t.y + localOff.y, z: t.z + localOff.z };
+
+        const target = this.externalGrabPos;
+        const clamp = (v) => Math.max(-GRAB_FORCE_MAX, Math.min(GRAB_FORCE_MAX, v));
+        const force = {
+          x: clamp((target.x - grabWorldPos.x) * GRAB_SPRING - vel.x * GRAB_DAMPING),
+          y: clamp((target.y - grabWorldPos.y) * GRAB_SPRING - vel.y * GRAB_DAMPING),
+          z: clamp((target.z - grabWorldPos.z) * GRAB_SPRING - vel.z * GRAB_DAMPING),
+        };
+        try {
+          this.body.addForceAtPoint(force, grabWorldPos, true);
+        } catch (_) {
+          this.body.addForce(force, true);
+        }
+
+        // Cap the grabbed player's own horizontal movement so they can be dragged
+        const horizSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+        if (horizSpeed > GRAB_SELF_SPEED_LIMIT) {
+          const f = GRAB_SELF_SPEED_LIMIT / horizSpeed;
+          this.body.setLinvel({ x: vel.x * f, y: vel.y, z: vel.z * f }, false);
+        }
       }
       if (this.playerModel) {
         this.playerModel.position.set(t.x, t.y, t.z);
@@ -3861,47 +3896,82 @@ export class PlayerControls {
 
   updateGrabbedTarget() {
     if (!this.grabbedTarget || !this.playerModel) return;
-    const targetPos = this.grabbedHand
+    const handPos = this.grabbedHand
       ? this._getHandWorldPos(this.grabbedHand)
       : (() => {
           const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
           return this.playerModel.position.clone().addScaledVector(forward, 1);
         })();
     const target = this.grabbedTarget;
+    const bodyPart = this.grabbedBodyPart || 'torso';
+
+    // World position of the grabbed body part (the point the arm connects to on the target)
+    const grabPartPos = this._getBodyPartWorldPos(bodyPart, target.model);
+
+    // Point the grabbing arm toward the grabbed body part
+    if (this.playerModel.userData) {
+      this.playerModel.userData.grabArmTarget = {
+        hand: this.grabbedHand || 'right',
+        worldPos: grabPartPos.clone()
+      };
+    }
+
     if (target.type === 'player') {
-      target.model.position.copy(targetPos);
+      // Send the hand world position so the grabbed player can spring toward it
       const now = performance.now();
-      if (now - this.lastGrabMoveSentAt < GRAB_MOVE_SEND_INTERVAL_MS) {
-        return;
-      }
-      const lastPos = this.lastGrabMoveSentPos;
-      if (lastPos) {
-        const dx = targetPos.x - lastPos.x;
-        const dy = targetPos.y - lastPos.y;
-        const dz = targetPos.z - lastPos.z;
-        if (((dx * dx) + (dy * dy) + (dz * dz)) < GRAB_MOVE_MIN_DELTA_SQ) {
-          return;
+      if (now - this.lastGrabMoveSentAt >= GRAB_MOVE_SEND_INTERVAL_MS) {
+        const lastPos = this.lastGrabMoveSentPos;
+        const dSq = lastPos ? handPos.distanceToSquared(lastPos) : Infinity;
+        if (dSq >= GRAB_MOVE_MIN_DELTA_SQ) {
+          const payload = {
+            type: 'grabMove',
+            from: this.multiplayer.getId(),
+            target: target.id,
+            position: handPos.toArray(),
+            bodyPart
+          };
+          const sendHighFrequency = this.multiplayer?.sendHighFrequency;
+          if (typeof sendHighFrequency === 'function') {
+            sendHighFrequency(payload, 'grabMove', target.id);
+          } else {
+            this.multiplayer.send(payload);
+          }
+          this.lastGrabMoveSentAt = now;
+          this.lastGrabMoveSentPos = handPos.clone();
         }
       }
-      const payload = { type: 'grabMove', from: this.multiplayer.getId(), target: target.id, position: targetPos.toArray() };
-      const sendHighFrequency = this.multiplayer?.sendHighFrequency;
-      if (typeof sendHighFrequency === 'function') {
-        sendHighFrequency(payload, 'grabMove', target.id);
+    } else if (target.type === 'monster' || target.type === 'friendly') {
+      const rb = target.model.userData.rb;
+      if (rb) {
+        const vel = rb.linvel();
+        const displacement = handPos.clone().sub(grabPartPos);
+        const clamp = (v) => Math.max(-GRAB_FORCE_MAX, Math.min(GRAB_FORCE_MAX, v));
+        const force = {
+          x: clamp(displacement.x * GRAB_SPRING - vel.x * GRAB_DAMPING),
+          y: clamp(displacement.y * GRAB_SPRING - vel.y * GRAB_DAMPING),
+          z: clamp(displacement.z * GRAB_SPRING - vel.z * GRAB_DAMPING),
+        };
+        try {
+          rb.addForceAtPoint(force, { x: grabPartPos.x, y: grabPartPos.y, z: grabPartPos.z }, true);
+        } catch (_) {
+          rb.addForce(force, true);
+        }
       } else {
-        this.multiplayer.send(payload);
+        target.model.position.copy(handPos);
       }
-      this.lastGrabMoveSentAt = now;
-      this.lastGrabMoveSentPos = targetPos.clone();
-    } else if (target.type === 'monster') {
-      target.model.position.copy(targetPos);
-      target.model.userData.rb?.setTranslation(targetPos, true);
-    } else if (target.type === 'friendly') {
-      target.model.position.copy(targetPos);
-      target.model.userData.rb?.setTranslation(targetPos, true);
     } else if (target.type === 'object') {
-      target.object.position.copy(targetPos);
-      if (target.object.userData?.rb) {
-        target.object.userData.rb.setTranslation(targetPos, true);
+      const rb = target.object.userData?.rb;
+      if (rb) {
+        const objPos = target.object.position;
+        const vel = rb.linvel();
+        const clamp = (v) => Math.max(-GRAB_FORCE_MAX, Math.min(GRAB_FORCE_MAX, v));
+        rb.addForce({
+          x: clamp((handPos.x - objPos.x) * GRAB_SPRING - vel.x * GRAB_DAMPING),
+          y: clamp((handPos.y - objPos.y) * GRAB_SPRING - vel.y * GRAB_DAMPING),
+          z: clamp((handPos.z - objPos.z) * GRAB_SPRING - vel.z * GRAB_DAMPING),
+        }, true);
+      } else {
+        target.object.position.copy(handPos);
       }
     }
   }
@@ -3921,6 +3991,25 @@ export class PlayerControls {
     const fallback = this.playerModel.position.clone();
     fallback.y += 0.8;
     return fallback;
+  }
+
+  _getBodyPartWorldPos(partName, model) {
+    const off = GRAB_BODY_PART_OFFSETS[partName] || GRAB_BODY_PART_OFFSETS.torso;
+    const localOffset = new THREE.Vector3(off.x, off.y, off.z);
+    // Rotate offset by model yaw so arm/leg sides stay correct when player turns
+    localOffset.applyEuler(new THREE.Euler(0, model.rotation.y, 0));
+    return model.position.clone().add(localOffset);
+  }
+
+  _detectGrabbedBodyPart(handPos, targetModel) {
+    let closest = 'torso';
+    let minDist = Infinity;
+    for (const [name] of Object.entries(GRAB_BODY_PART_OFFSETS)) {
+      const worldPos = this._getBodyPartWorldPos(name, targetModel);
+      const d = handPos.distanceTo(worldPos);
+      if (d < minDist) { minDist = d; closest = name; }
+    }
+    return closest;
   }
 
   attemptHandGrab(hand = 'right') {
@@ -3964,6 +4053,7 @@ export class PlayerControls {
     if (closest) {
       this.grabbedTarget = closest;
       this.grabbedHand = hand;
+      this.grabbedBodyPart = this._detectGrabbedBodyPart(handPos, closest.model);
       if (closest.type === 'player') {
         this.multiplayer.send({ type: 'grab', from: this.multiplayer.getId(), target: closest.id, active: true });
       }
@@ -4020,8 +4110,12 @@ export class PlayerControls {
     }
     this.grabbedTarget = null;
     this.grabbedHand = null;
+    this.grabbedBodyPart = null;
     this.lastGrabMoveSentAt = 0;
     this.lastGrabMoveSentPos = null;
+    if (this.playerModel?.userData) {
+      this.playerModel.userData.grabArmTarget = null;
+    }
   }
 
   setGrabbed(active, grabberId = null) {
@@ -4029,11 +4123,13 @@ export class PlayerControls {
     this.grabberId = grabberId;
     if (!active) {
       this.externalGrabPos = null;
+      this.externalGrabBodyPart = null;
     }
   }
 
-  updateGrabbedPosition(pos) {
+  updateGrabbedPosition(pos, bodyPart) {
     this.externalGrabPos = new THREE.Vector3(...pos);
+    this.externalGrabBodyPart = bodyPart || 'torso';
   }
 
   deployParachute() {
