@@ -616,6 +616,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const leftPose = anchorToLegPose(footPlants.left.anchor, sideLean, footPlants.left.swing || 0);
   const rightPose = anchorToLegPose(footPlants.right.anchor, sideLean, footPlants.right.swing || 0);
 
+  const grabArmTarget = playerGroup.userData.grabArmTarget;
+
   if (knocked) {
     setTarget('hips', -0.18, 0, 0);
     setTarget('torso', -1.18, 0, rig.knockDirection?.x ? THREE.MathUtils.clamp(-rig.knockDirection.x * 0.45, -0.55, 0.55) : 0.35);
@@ -644,16 +646,16 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
 
     const qHeld = pressed('q') && !rightPunch;
     const eHeld = pressed('e') && !leftPunch;
-
-    const grabArmTarget = playerGroup.userData.grabArmTarget;
+    const leftGrabActive = grabArmTarget?.hand === 'left';
+    const rightGrabActive = grabArmTarget?.hand === 'right';
 
     if (leftPunch) {
       // Swing arm from ~+0.48 (down) to ~-1.65 (fully forward) over first half, retract over second half.
       // punchArc peaks at 1 mid-punch. Total swing is ~2.13 rad (~122 deg) — snappy forward punch.
       setTarget('leftArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, 0.05 * punchArc, 0.1 + punchArc * 0.12);
       setTarget('torso', forwardLean - punchArc * 0.28, 0.18 * punchArc, sideLean + 0.1 * punchArc);
-    } else if (eHeld) {
-      const ikAngles = grabArmTarget?.hand === 'left'
+    } else if (eHeld || leftGrabActive) {
+      const ikAngles = leftGrabActive
         ? computeArmAnglesForWorldTarget('left', rig, playerGroup, grabArmTarget.worldPos)
         : null;
       setTarget('leftArm',
@@ -664,8 +666,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     if (rightPunch) {
       setTarget('rightArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, -0.05 * punchArc, -0.1 - punchArc * 0.12);
       setTarget('torso', forwardLean - punchArc * 0.28, -0.18 * punchArc, sideLean - 0.1 * punchArc);
-    } else if (qHeld) {
-      const ikAngles = grabArmTarget?.hand === 'right'
+    } else if (qHeld || rightGrabActive) {
+      const ikAngles = rightGrabActive
         ? computeArmAnglesForWorldTarget('right', rig, playerGroup, grabArmTarget.worldPos)
         : null;
       setTarget('rightArm',
@@ -685,6 +687,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const armPunchStiffness = 14 * motorStrength;
   const qHeldSpec = pressed('q') && !rightPunch;
   const eHeldSpec = pressed('e') && !leftPunch;
+  const leftArmGrabbing = grabArmTarget?.hand === 'left';
+  const rightArmGrabbing = grabArmTarget?.hand === 'right';
   const armGrabLag = 22;
   const armGrabStiffness = 10 * motorStrength;
   const specs = {
@@ -693,8 +697,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 12 },
     leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'leftLeg', lag: 14 },
     rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'rightLeg', lag: 13 },
-    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingLeft ? armPunchStiffness : (eHeldSpec ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingLeft ? armPunchLag : (eHeldSpec ? armGrabLag : 3.8), noInertia: true },
-    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingRight ? armPunchStiffness : (qHeldSpec ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingRight ? armPunchLag : (qHeldSpec ? armGrabLag : 3.8), noInertia: true },
+    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingLeft ? armPunchStiffness : ((eHeldSpec || leftArmGrabbing) ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingLeft ? armPunchLag : ((eHeldSpec || leftArmGrabbing) ? armGrabLag : 3.8), noInertia: true },
+    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingRight ? armPunchStiffness : ((qHeldSpec || rightArmGrabbing) ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingRight ? armPunchLag : ((qHeldSpec || rightArmGrabbing) ? armGrabLag : 3.8), noInertia: true },
     torso: { min: -1.25, max: 0.75, sideMin: -0.75, sideMax: 0.75, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: 2.7 * torsoMotorStrength, damping: knocked ? 0.55 : 0.75 + torsoMotorStrength * 0.25, gravity: knocked ? 34 : 13, lag: 2.7 },
     head: { min: -1.05, max: 0.8, sideMin: -0.85, sideMax: 0.85, twistMin: -1.05, twistMax: 1.05, stiffness: 1.6 * torsoMotorStrength, damping: knocked ? 0.45 : 0.55 + torsoMotorStrength * 0.18, gravity: knocked ? 30 : 22, lag: 2.1 }
   };
