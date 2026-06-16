@@ -418,6 +418,40 @@ const TORSO_MAX_TWIST = Math.PI / 2;
 const TARGET_RETURN_SPEED = 1.35;
 const TARGET_FOLLOW_SPEED = 15;
 
+// Compute Euler rotation angles (x = pitch, z = roll) so the arm group points
+// from its shoulder attachment toward a world-space target position.
+// Returns null if the rig isn't ready or the target is too close to compute.
+function computeArmAnglesForWorldTarget(side, rig, playerGroup, worldTargetPos) {
+  const armName = side === 'right' ? 'rightArm' : 'leftArm';
+  const armPart = rig?.parts?.[armName];
+  if (!armPart?.group) return null;
+
+  const shoulderWorldPos = new THREE.Vector3();
+  armPart.group.getWorldPosition(shoulderWorldPos);
+
+  const toTarget = new THREE.Vector3().subVectors(worldTargetPos, shoulderWorldPos);
+  if (toTarget.length() < 0.05) return null;
+  toTarget.normalize();
+
+  // Convert world direction to the arm parent's (torso's) local space
+  const parentWorldQuat = new THREE.Quaternion();
+  (armPart.group.parent || playerGroup).getWorldQuaternion(parentWorldQuat);
+  const localDir = toTarget.clone().applyQuaternion(parentWorldQuat.clone().invert());
+
+  // Arm local -Y is the "pointing" axis.
+  // rotation.x = θ  →  arm direction: (0, -cos θ, -sin θ)
+  // rotation.z = φ  →  arm direction: (sin φ, -cos φ, 0)
+  // Independent decomposition (good approximation for normal reach ranges):
+  const rotX = Math.atan2(-localDir.z, -localDir.y);
+  const rotZ = Math.atan2(localDir.x, -localDir.y);
+
+  return {
+    x: THREE.MathUtils.clamp(rotX, -1.65, 1.35),
+    y: 0,
+    z: THREE.MathUtils.clamp(rotZ, -1.2, 1.2),
+  };
+}
+
 const GANG_BEASTS_STEP_SWITCH_SECONDS = 0.18;
 const GANG_BEASTS_STEP_LENGTH = 0.5;
 const GANG_BEASTS_STEP_WIDTH = 0.22;
@@ -611,19 +645,33 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const qHeld = pressed('q') && !rightPunch;
     const eHeld = pressed('e') && !leftPunch;
 
+    const grabArmTarget = playerGroup.userData.grabArmTarget;
+
     if (leftPunch) {
       // Swing arm from ~+0.48 (down) to ~-1.65 (fully forward) over first half, retract over second half.
       // punchArc peaks at 1 mid-punch. Total swing is ~2.13 rad (~122 deg) — snappy forward punch.
       setTarget('leftArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, 0.05 * punchArc, 0.1 + punchArc * 0.12);
       setTarget('torso', forwardLean - punchArc * 0.28, 0.18 * punchArc, sideLean + 0.1 * punchArc);
     } else if (eHeld) {
-      setTarget('leftArm', -1.35, 0, 0.1);
+      const ikAngles = grabArmTarget?.hand === 'left'
+        ? computeArmAnglesForWorldTarget('left', rig, playerGroup, grabArmTarget.worldPos)
+        : null;
+      setTarget('leftArm',
+        ikAngles ? ikAngles.x : -1.35,
+        ikAngles ? ikAngles.y : 0,
+        ikAngles ? ikAngles.z : 0.1);
     }
     if (rightPunch) {
       setTarget('rightArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, -0.05 * punchArc, -0.1 - punchArc * 0.12);
       setTarget('torso', forwardLean - punchArc * 0.28, -0.18 * punchArc, sideLean - 0.1 * punchArc);
     } else if (qHeld) {
-      setTarget('rightArm', -1.35, 0, -0.1);
+      const ikAngles = grabArmTarget?.hand === 'right'
+        ? computeArmAnglesForWorldTarget('right', rig, playerGroup, grabArmTarget.worldPos)
+        : null;
+      setTarget('rightArm',
+        ikAngles ? ikAngles.x : -1.35,
+        ikAngles ? ikAngles.y : 0,
+        ikAngles ? ikAngles.z : -0.1);
     }
   }
 

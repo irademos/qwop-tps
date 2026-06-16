@@ -2804,7 +2804,7 @@ async function initCore(runtimeContext) {
       }
       const pos = new THREE.Vector3(...data.position);
       if (data.target === multiplayer.getId()) {
-        playerControls?.updateGrabbedPosition(data.position);
+        playerControls?.updateGrabbedPosition(data.position, data.bodyPart);
       } else {
         const targetPlayer = otherPlayers[data.target];
         if (targetPlayer) {
