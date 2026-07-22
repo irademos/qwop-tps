@@ -31,6 +31,10 @@ export default defineConfig({
             return 'vendor-rapier';
           }
 
+          if (id.includes('@mediapipe/tasks-vision')) {
+            return 'vendor-mediapipe';
+          }
+
           if (id.includes('/firebase/')) {
             return 'vendor-firebase';
           }

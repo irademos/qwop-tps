@@ -27,6 +27,7 @@
   "dependencies": {
     "@dimforge/rapier3d": "^0.18.2",
     "@dimforge/rapier3d-compat": "^0.18.2",
+    "@mediapipe/tasks-vision": "^0.10.35",
     "canvas": "^3.2.0",
     "clipper-lib": "^6.4.2",
     "firebase": "^11.6.1",
