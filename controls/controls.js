@@ -2650,11 +2650,10 @@ export class PlayerControls {
         displayY -= FLOAT_IDLE_DISPLAY_OFFSET;
       }
       this.playerModel.position.set(newX, displayY, newZ);
-      let yawAngle = this.playerModel.rotation.y;
+      let yawAngle = this.yaw;
       const slideMomentumActive = movementLocked && this.isSlideMomentumActive();
       if (movement.length() > 0 && !slideMomentumActive) {
         yawAngle = Math.atan2(movement.x, movement.z);
-        // this.playerModel.rotation.y = yawAngle;
       }
       if (this.isFireHeld && this.shouldHoldToFire() && !slideMomentumActive) {
         const aimDirection = this.autoAimCameraDirection ?? this.getAimDirection(true);
