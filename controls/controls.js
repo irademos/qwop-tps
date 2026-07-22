@@ -2894,7 +2894,10 @@ export class PlayerControls {
       this.camera.position.copy(eyePosition);
       this.camera.lookAt(eyePosition.clone().add(lookDirection));
       if (this.playerModel) {
-        this.playerModel.visible = false;
+        // Hide the body but keep floating hands/arms (direct playerGroup children) visible
+        const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
+        if (bodyRoot) bodyRoot.visible = false;
+        else this.playerModel.visible = false;
       }
     } else {
       // Third-person view: pull camera back behind and above the player
@@ -2908,7 +2911,9 @@ export class PlayerControls {
       );
       this.camera.lookAt(tpCenter);
       if (this.playerModel) {
-        this.playerModel.visible = true;
+        const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
+        if (bodyRoot) bodyRoot.visible = true;
+        else this.playerModel.visible = true;
       }
     }
 

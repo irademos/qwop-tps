@@ -326,38 +326,6 @@ export function createProceduralBody(THREE) {
   rightShoulderAnchor.position.set(0.38, 0.64, 0);
   torso.group.add(rightShoulderAnchor);
 
-  // Floating hand spheres — live in root space, positioned directly from tracking data
-  const handMaterial = new THREE.MeshStandardMaterial({ color: materials.skin, roughness: 0.8 });
-  const leftFloatingHand = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), handMaterial);
-  leftFloatingHand.name = 'leftFloatingHand';
-  leftFloatingHand.userData.proceduralHand = 'left';
-  leftFloatingHand.castShadow = true;
-  leftFloatingHand.receiveShadow = true;
-  leftFloatingHand.position.set(-0.5, 0.65, 0.25);
-  root.add(leftFloatingHand);
-
-  const rightFloatingHand = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), handMaterial);
-  rightFloatingHand.name = 'rightFloatingHand';
-  rightFloatingHand.userData.proceduralHand = 'right';
-  rightFloatingHand.castShadow = true;
-  rightFloatingHand.receiveShadow = true;
-  rightFloatingHand.position.set(0.5, 0.65, 0.25);
-  root.add(rightFloatingHand);
-
-  // Elastic arm cylinders — live in root space, stretched each frame from shoulder to hand
-  const elasticArmMaterial = new THREE.MeshStandardMaterial({ color: materials.skin, roughness: 0.8 });
-  const leftElasticArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), elasticArmMaterial);
-  leftElasticArm.name = 'leftElasticArm';
-  leftElasticArm.castShadow = true;
-  leftElasticArm.receiveShadow = true;
-  root.add(leftElasticArm);
-
-  const rightElasticArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), elasticArmMaterial);
-  rightElasticArm.name = 'rightElasticArm';
-  rightElasticArm.castShadow = true;
-  rightElasticArm.receiveShadow = true;
-  root.add(rightElasticArm);
-
   torso.restRotation = 0;
   leftLeg.restRotation = 0.18;
   rightLeg.restRotation = 0.18;
@@ -421,8 +389,6 @@ export function createProceduralBody(THREE) {
   return {
     root,
     parts,
-    floatingHands: { left: leftFloatingHand, right: rightFloatingHand },
-    elasticArms: { left: leftElasticArm, right: rightElasticArm },
     shoulderAnchors: { left: leftShoulderAnchor, right: rightShoulderAnchor }
   };
 }
@@ -554,9 +520,9 @@ function dampToward(current, target, speed, dt) {
 // palmX: 0=left edge of raw camera frame, 1=right edge (user's right appears on left for front camera)
 // palmY: 0=top, 1=bottom
 function palmToLocalHandPos(palmX, palmY) {
-  // Mirror x so 0=user's left, 1=user's right → player's +x is player's right
-  const mx = 1 - palmX;
-  const x = (mx - 0.5) * 1.5;
+  // palmX: 0=left of raw camera frame (user's right for front-facing camera)
+  // No mirror — raw palmX maps directly to player's local X
+  const x = (palmX - 0.5) * 1.5;
   const y = (1 - palmY) * 1.1 + 0.25;
   return new THREE.Vector3(x, y, 0.35);
 }
@@ -760,7 +726,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       const targetPos = trackData ? palmToLocalHandPos(trackData.x, trackData.y) : defaultPos;
       // Smooth hand position for left but direct for right (or both can be smooth)
       floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
-      updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, rig.bodyRoot);
+      updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
     }
   }
 
@@ -847,13 +813,46 @@ export function createPlayerModel(
   const playerGroup = new THREE.Group();
   playerGroup.name = 'ProceduralGangBeastsPlayer';
 
-  const { root: bodyRoot, parts, floatingHands, elasticArms, shoulderAnchors } = createProceduralBody(THREE);
+  const { root: bodyRoot, parts, shoulderAnchors } = createProceduralBody(THREE);
   playerGroup.add(bodyRoot);
+
+  // Floating hands and elastic arms are direct children of playerGroup so they remain
+  // visible in first-person even when bodyRoot is hidden.
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8 });
+  const leftFloatingHand = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), skinMat);
+  leftFloatingHand.name = 'leftFloatingHand';
+  leftFloatingHand.userData.proceduralHand = 'left';
+  leftFloatingHand.castShadow = true;
+  leftFloatingHand.receiveShadow = true;
+  leftFloatingHand.position.set(-0.5, 0.65, 0.25);
+  playerGroup.add(leftFloatingHand);
+
+  const rightFloatingHand = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), skinMat.clone());
+  rightFloatingHand.name = 'rightFloatingHand';
+  rightFloatingHand.userData.proceduralHand = 'right';
+  rightFloatingHand.castShadow = true;
+  rightFloatingHand.receiveShadow = true;
+  rightFloatingHand.position.set(0.5, 0.65, 0.25);
+  playerGroup.add(rightFloatingHand);
+
+  const elasticMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8 });
+  const leftElasticArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), elasticMat);
+  leftElasticArm.name = 'leftElasticArm';
+  leftElasticArm.castShadow = true;
+  leftElasticArm.receiveShadow = true;
+  playerGroup.add(leftElasticArm);
+
+  const rightElasticArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), elasticMat.clone());
+  rightElasticArm.name = 'rightElasticArm';
+  rightElasticArm.castShadow = true;
+  rightElasticArm.receiveShadow = true;
+  playerGroup.add(rightElasticArm);
+
   playerGroup.userData.qwopRig = {
     parts,
     bodyRoot,
-    floatingHands,
-    elasticArms,
+    floatingHands: { left: leftFloatingHand, right: rightFloatingHand },
+    elasticArms: { left: leftElasticArm, right: rightElasticArm },
     shoulderAnchors,
     forwardIntent: 0,
     balance: 0,
