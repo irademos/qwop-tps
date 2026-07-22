@@ -76,6 +76,16 @@ export function updateFloatingHands(handData, playerPos, yaw, rig) {
 
   function update(side, handMesh, armMesh) {
     const pd = handData?.[side];
+    const armPartName = side === 'left' ? 'leftArm' : 'rightArm';
+    const armPart = rig?.parts?.[armPartName];
+
+    // Hide the procedural hand-tip sphere so it doesn't double up.
+    if (armPart?.group) {
+      armPart.group.traverse((child) => {
+        if (child.userData?.proceduralHand) child.visible = false;
+      });
+    }
+
     if (!pd) {
       handMesh.visible = false;
       armMesh.visible  = false;
@@ -87,8 +97,6 @@ export function updateFloatingHands(handData, playerPos, yaw, rig) {
     handMesh.visible = true;
     result[side] = worldPos;
 
-    const armPartName = side === 'left' ? 'leftArm' : 'rightArm';
-    const armPart = rig?.parts?.[armPartName];
     if (armPart?.group) {
       const shoulder = new _THREE.Vector3();
       armPart.group.getWorldPosition(shoulder);
