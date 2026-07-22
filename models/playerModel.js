@@ -516,15 +516,17 @@ function dampToward(current, target, speed, dt) {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-speed * dt));
 }
 
-// Map normalized camera palm position to a 3D position in playerGroup local space.
+// Map normalized camera palm position + hand size to a 3D position in playerGroup local space.
 // palmX: 0=left edge of raw camera frame, 1=right edge (user's right appears on left for front camera)
 // palmY: 0=top, 1=bottom
-function palmToLocalHandPos(palmX, palmY) {
-  // palmX: 0=left of raw camera frame (user's right for front-facing camera)
-  // No mirror — raw palmX maps directly to player's local X
+// handSize: wrist-to-middletip distance in normalized coords; small = far = hands pulled back
+function palmToLocalHandPos(palmX, palmY, handSize) {
   const x = (palmX - 0.5) * 1.5;
   const y = (1 - palmY) * 1.1 + 0.25;
-  return new THREE.Vector3(x, y, 0.35);
+  // Map hand size [0.10, 0.45] → z [0.0, 0.65]: small hands near body, large hands outstretched
+  const sizeNorm = THREE.MathUtils.clamp((handSize - 0.10) / (0.45 - 0.10), 0, 1);
+  const z = sizeNorm * 0.65;
+  return new THREE.Vector3(x, y, z);
 }
 
 const _sWorld = new THREE.Vector3();
@@ -723,7 +725,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       const floatingHand = rig.floatingHands[side];
       const defaultX = side === 'left' ? -0.5 : 0.5;
       const defaultPos = new THREE.Vector3(defaultX, 0.65, 0.25);
-      const targetPos = trackData ? palmToLocalHandPos(trackData.x, trackData.y) : defaultPos;
+      const targetPos = trackData ? palmToLocalHandPos(trackData.x, trackData.y, trackData.size ?? 0.20) : defaultPos;
       // Smooth hand position for left but direct for right (or both can be smooth)
       floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
       updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
