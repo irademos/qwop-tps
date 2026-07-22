@@ -19,6 +19,7 @@ const DEFAULT_PLAYER_SCALE = 1;
 const FLY_JUMP_FORCE_MULTIPLIER = 2;
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
+const FIRST_PERSON_EYE_HEIGHT = 1.65;
 const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
 const CLIMB_SPEED = 1.6;
 const CLIMB_SNAP_DISTANCE = 0.6;
@@ -2874,76 +2875,18 @@ export class PlayerControls {
         cameraLookTarget = targetLookPosition;
       }
     }
-    if (!desiredCameraPosition) {
-      const rotatedOffset = new THREE.Vector3(
-        offset.x * Math.cos(this.yaw) - offset.z * Math.sin(this.yaw),
-        offset.y + 5 * Math.sin(this.pitch),
-        offset.x * Math.sin(this.yaw) + offset.z * Math.cos(this.yaw)
-      );
-      desiredCameraPosition = orbitCenter.clone().add(rotatedOffset);
+    // First-person view: place camera at player's eye and look in yaw/pitch direction
+    const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(0, FIRST_PERSON_EYE_HEIGHT, 0));
+    const lookDirection = new THREE.Vector3(
+      Math.sin(this.yaw) * Math.cos(this.pitch),
+      Math.sin(this.pitch),
+      Math.cos(this.yaw) * Math.cos(this.pitch)
+    );
+    this.camera.position.copy(eyePosition);
+    this.camera.lookAt(eyePosition.clone().add(lookDirection));
+    if (this.playerModel) {
+      this.playerModel.visible = false;
     }
-    const occlusionEpsilon = 0.02;
-    const occlusionEpsilonSq = occlusionEpsilon * occlusionEpsilon;
-    const yawPitchEpsilon = 0.0005;
-    const shouldRaycast = (() => {
-      if (!this.lastOcclusionOrbitCenter || !this.lastOcclusionDesiredPosition) return true;
-      if (this.lastOcclusionOrbitCenter.distanceToSquared(orbitCenter) > occlusionEpsilonSq) return true;
-      if (this.lastOcclusionDesiredPosition.distanceToSquared(desiredCameraPosition) > occlusionEpsilonSq) return true;
-      if (this.lastOcclusionYaw === null || this.lastOcclusionPitch === null) return true;
-      if (Math.abs(this.yaw - this.lastOcclusionYaw) > yawPitchEpsilon) return true;
-      if (Math.abs(this.pitch - this.lastOcclusionPitch) > yawPitchEpsilon) return true;
-      return false;
-    })();
-
-    let resolvedCameraPosition = desiredCameraPosition;
-    if (this.isClimbing) {
-      this.lastOcclusionOrbitCenter = null;
-      this.lastOcclusionDesiredPosition = null;
-      this.lastOcclusionPosition = null;
-      this.lastOcclusionDistance = null;
-      this.lastOcclusionYaw = null;
-      this.lastOcclusionPitch = null;
-    } else if (shouldRaycast && this.getCameraOccluders) {
-      const occluders = this.getCameraOccluders() || [];
-      const direction = desiredCameraPosition.clone().sub(orbitCenter);
-      const distance = direction.length();
-      let resolvedDistance = distance;
-      if (distance > 0.0001 && occluders.length) {
-        direction.normalize();
-        this.cameraRaycaster.set(orbitCenter, direction);
-        this.cameraRaycaster.far = distance;
-        const intersections = this.cameraRaycaster.intersectObjects(occluders, true);
-        if (intersections.length) {
-          const padding = 0.3;
-          resolvedDistance = Math.max(intersections[0].distance - padding, 0.05);
-          resolvedCameraPosition = orbitCenter.clone().addScaledVector(direction, resolvedDistance);
-        }
-      }
-
-      this.lastOcclusionOrbitCenter = orbitCenter.clone();
-      this.lastOcclusionDesiredPosition = desiredCameraPosition.clone();
-      this.lastOcclusionPosition = resolvedCameraPosition.clone();
-      this.lastOcclusionDistance = resolvedDistance;
-      this.lastOcclusionYaw = this.yaw;
-      this.lastOcclusionPitch = this.pitch;
-    } else if (this.lastOcclusionDistance !== null) {
-      const direction = desiredCameraPosition.clone().sub(orbitCenter);
-      const distance = direction.length();
-      if (distance > 0.0001) {
-        direction.normalize();
-        const clampedDistance = Math.min(this.lastOcclusionDistance, distance);
-        resolvedCameraPosition = orbitCenter.clone().addScaledVector(direction, clampedDistance);
-      }
-    } else if (this.lastOcclusionPosition) {
-      resolvedCameraPosition = this.lastOcclusionPosition.clone();
-    }
-
-    this.camera.position.copy(resolvedCameraPosition);
-    if (this.shouldUseAutoAimCameraDirection(now) && !hasValidAutoAimTarget) {
-      const fallbackAutoAimDirection = this.autoAimCameraDirection || this.autoAimCameraLingerDirection;
-      cameraLookTarget = resolvedCameraPosition.clone().add(fallbackAutoAimDirection);
-    }
-    this.camera.lookAt(cameraLookTarget);
 
     if (this.playerModel && this.playerModel.userData.mixer) {
       this.playerModel.userData.mixer.update(delta);
