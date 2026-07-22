@@ -649,6 +649,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const leftGrabActive = grabArmTarget?.hand === 'left';
     const rightGrabActive = grabArmTarget?.hand === 'right';
 
+    const handTracking = playerGroup.userData.handTrackingArms;
+
     if (leftPunch) {
       // Swing arm from ~+0.48 (down) to ~-1.65 (fully forward) over first half, retract over second half.
       // punchArc peaks at 1 mid-punch. Total swing is ~2.13 rad (~122 deg) — snappy forward punch.
@@ -662,6 +664,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         ikAngles ? ikAngles.x : -1.35,
         ikAngles ? ikAngles.y : 0,
         ikAngles ? ikAngles.z : 0.1);
+    } else if (handTracking?.left) {
+      setTarget('leftArm', handTracking.left.x, 0, handTracking.left.z);
     }
     if (rightPunch) {
       setTarget('rightArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, -0.05 * punchArc, -0.1 - punchArc * 0.12);
@@ -674,6 +678,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         ikAngles ? ikAngles.x : -1.35,
         ikAngles ? ikAngles.y : 0,
         ikAngles ? ikAngles.z : -0.1);
+    } else if (handTracking?.right) {
+      setTarget('rightArm', handTracking.right.x, 0, handTracking.right.z);
     }
   }
 
@@ -691,14 +697,17 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const rightArmGrabbing = grabArmTarget?.hand === 'right';
   const armGrabLag = 22;
   const armGrabStiffness = 10 * motorStrength;
+  const handTracking = playerGroup.userData.handTrackingArms;
+  const leftHandTracked = !leftPunch && !eHeldSpec && !leftArmGrabbing && !!handTracking?.left;
+  const rightHandTracked = !rightPunch && !qHeldSpec && !rightArmGrabbing && !!handTracking?.right;
   const specs = {
     hips: { min: -0.65, max: 0.65, sideMin: -0.55, sideMax: 0.55, twistMin: -0.7, twistMax: 0.7, stiffness: 3.1 * motorStrength, damping: 0.9 + motorStrength * 0.25, gravity: 7.5, lag: 3.2 },
     leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 13 },
     rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 12 },
     leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'leftLeg', lag: 14 },
     rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'rightLeg', lag: 13 },
-    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingLeft ? armPunchStiffness : ((eHeldSpec || leftArmGrabbing) ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingLeft ? armPunchLag : ((eHeldSpec || leftArmGrabbing) ? armGrabLag : 3.8), noInertia: true },
-    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingRight ? armPunchStiffness : ((qHeldSpec || rightArmGrabbing) ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingRight ? armPunchLag : ((qHeldSpec || rightArmGrabbing) ? armGrabLag : 3.8), noInertia: true },
+    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingLeft ? armPunchStiffness : ((eHeldSpec || leftArmGrabbing || leftHandTracked) ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingLeft ? armPunchLag : ((eHeldSpec || leftArmGrabbing || leftHandTracked) ? armGrabLag : 3.8), noInertia: true },
+    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingRight ? armPunchStiffness : ((qHeldSpec || rightArmGrabbing || rightHandTracked) ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingRight ? armPunchLag : ((qHeldSpec || rightArmGrabbing || rightHandTracked) ? armGrabLag : 3.8), noInertia: true },
     torso: { min: -1.25, max: 0.75, sideMin: -0.75, sideMax: 0.75, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: 2.7 * torsoMotorStrength, damping: knocked ? 0.55 : 0.75 + torsoMotorStrength * 0.25, gravity: knocked ? 34 : 13, lag: 2.7 },
     head: { min: -1.05, max: 0.8, sideMin: -0.85, sideMax: 0.85, twistMin: -1.05, twistMax: 1.05, stiffness: 1.6 * torsoMotorStrength, damping: knocked ? 0.45 : 0.55 + torsoMotorStrength * 0.18, gravity: knocked ? 30 : 22, lag: 2.1 }
   };

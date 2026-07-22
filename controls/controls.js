@@ -9,6 +9,7 @@ import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { QuestManager } from "../quest.js";
 import { updateProceduralPlayerRig } from '../models/playerModel.js';
 import { loadNippleJs } from '../externalDeps.js';
+import { initHandTracking, updateHandTracking, getHandTrackingData } from '../mediapipe/handTrackingManager.js';
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -489,6 +490,9 @@ export class PlayerControls {
     } else {
       // this.setupPointerLock(); // leave pointer lock in PlayerControls
     }
+    initHandTracking().catch((err) => {
+      console.warn('[Controls] Hand tracking init failed:', err);
+    });
   }
   
   safePreventDefault(event) {
@@ -2753,6 +2757,10 @@ export class PlayerControls {
     this.deltaSeconds = delta;
 
     this.updateEngagedMode();
+    updateHandTracking();
+    if (this.playerModel) {
+      this.playerModel.userData.handTrackingArms = getHandTrackingData();
+    }
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
 
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
