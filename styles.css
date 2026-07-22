@@ -224,6 +224,35 @@ body.map-open #friendly-interact {
   justify-content: center;
 }
 
+#gyro-button {
+  position: fixed;
+  bottom: 110px;
+  right: 20px;
+  width: 80px;
+  height: 52px;
+  background-color: rgba(255, 255, 255, 0.45);
+  border-radius: 8px;
+  display: none;
+  z-index: 1000;
+  touch-action: none;
+  text-align: center;
+  line-height: 1;
+  font-size: 13px;
+  font-weight: bold;
+  color: #333;
+  user-select: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 2px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+#gyro-button.active {
+  background-color: rgba(80, 200, 120, 0.65);
+  color: #fff;
+}
+
 #action-buttons {
   position: fixed;
   bottom: 20px;
@@ -2086,6 +2115,7 @@ body.settings-open #inventory-button {
   body.settings-open #action-buttons,
   body.settings-open #joystick-container,
   body.settings-open #jump-button,
+  body.settings-open #gyro-button,
   body.settings-open .map-controls,
   body.settings-open #camera-controls,
   body.settings-open #interaction-tooltip,
@@ -2345,6 +2375,15 @@ body.settings-open #inventory-button {
     border-radius: 8px;
   }
 
+  #gyro-button {
+    --mobile-grid-size: clamp(44px, 8vw, 64px);
+    width: var(--mobile-grid-size);
+    height: calc(var(--mobile-grid-size) * 0.65);
+    font-size: 12px;
+    bottom: calc(16px + var(--mobile-grid-size) + 8px);
+    right: 16px;
+  }
+
   .interaction-tooltip.visible {
     pointer-events: auto;
     cursor: pointer;
@@ -2358,6 +2397,10 @@ body.settings-open #inventory-button {
   }
 
   #jump-button {
+    display: flex;
+  }
+
+  #gyro-button {
     display: flex;
   }
 
@@ -2377,6 +2420,12 @@ body.settings-open #inventory-button {
     left: auto;
     right: 20px;
     bottom: 20px;
+  }
+
+  #gyro-button {
+    left: auto;
+    right: 20px;
+    bottom: 90px;
   }
 
   #action-buttons {
