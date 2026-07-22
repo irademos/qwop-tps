@@ -644,6 +644,17 @@ function buildDisplayPanel() {
     unitsSelect.appendChild(option);
   });
   unitsGroup.append(unitsLabel, unitsSelect);
+  const firstPersonGroup = createElement('div', 'settings-field');
+  const firstPersonLabel = createElement('label', 'settings-label', 'First Person View');
+  firstPersonLabel.setAttribute('for', 'settings-display-first-person');
+  const firstPersonToggle = createElement('input', 'settings-checkbox');
+  firstPersonToggle.id = 'settings-display-first-person';
+  firstPersonToggle.type = 'checkbox';
+  firstPersonToggle.checked = true;
+  const firstPersonHint = createElement('div', 'settings-muted');
+  firstPersonHint.textContent = 'Uncheck to switch to third-person view (camera pulls back to show the player).';
+  firstPersonGroup.append(firstPersonLabel, firstPersonToggle, firstPersonHint);
+
   const highContrastGroup = createElement('div', 'settings-field');
   const highContrastLabel = createElement('label', 'settings-label', 'High Contrast Mode');
   highContrastLabel.setAttribute('for', 'settings-display-high-contrast');
@@ -715,6 +726,7 @@ function buildDisplayPanel() {
     modeGroup,
     performanceGroup,
     unitsGroup,
+    firstPersonGroup,
     highContrastGroup,
     ambientField.field,
     directionalField.field,
@@ -728,6 +740,7 @@ function buildDisplayPanel() {
     modeSelect,
     performanceSelect,
     unitsSelect,
+    firstPersonToggle,
     highContrastToggle,
     sliders: {
       ambientIntensity: ambientField.input,
@@ -1650,6 +1663,14 @@ function bindEvents() {
       update();
     });
   }
+  if (elements.displayFields?.firstPersonToggle) {
+    elements.displayFields.firstPersonToggle.addEventListener('change', (event) => {
+      if (window.playerControls) {
+        window.playerControls.firstPersonView = event.target.checked;
+      }
+    });
+  }
+
   if (elements.displayFields?.highContrastToggle) {
     elements.displayFields.highContrastToggle.addEventListener('change', (event) => {
       context.appState?.setDisplaySetting?.('highContrastMode', event.target.checked);

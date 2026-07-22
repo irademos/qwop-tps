@@ -375,6 +375,7 @@ export class PlayerControls {
     this.aimZoomOutSpeed = 3;
     this.aimReleaseDelayMs = 500;
     this.aimReleaseHoldUntil = null;
+    this.firstPersonView = true;
     this.cameraRaycaster = new THREE.Raycaster();
     this.lastOcclusionOrbitCenter = null;
     this.lastOcclusionDesiredPosition = null;
@@ -2883,17 +2884,33 @@ export class PlayerControls {
         cameraLookTarget = targetLookPosition;
       }
     }
-    // First-person view: place camera at player's eye and look in yaw/pitch direction
-    const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(0, FIRST_PERSON_EYE_HEIGHT, 0));
     const lookDirection = new THREE.Vector3(
       Math.sin(this.yaw) * Math.cos(this.pitch),
       Math.sin(this.pitch),
       Math.cos(this.yaw) * Math.cos(this.pitch)
     );
-    this.camera.position.copy(eyePosition);
-    this.camera.lookAt(eyePosition.clone().add(lookDirection));
-    if (this.playerModel) {
-      this.playerModel.visible = false;
+    if (this.firstPersonView) {
+      // First-person view: place camera at player's eye and look in yaw/pitch direction
+      const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(0, FIRST_PERSON_EYE_HEIGHT, 0));
+      this.camera.position.copy(eyePosition);
+      this.camera.lookAt(eyePosition.clone().add(lookDirection));
+      if (this.playerModel) {
+        this.playerModel.visible = false;
+      }
+    } else {
+      // Third-person view: pull camera back behind and above the player
+      const TP_DISTANCE = 6;
+      const TP_HEIGHT = 2.5;
+      const tpCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
+      this.camera.position.set(
+        tpCenter.x - Math.sin(this.yaw) * TP_DISTANCE,
+        tpCenter.y + TP_HEIGHT,
+        tpCenter.z - Math.cos(this.yaw) * TP_DISTANCE
+      );
+      this.camera.lookAt(tpCenter);
+      if (this.playerModel) {
+        this.playerModel.visible = true;
+      }
     }
 
     if (this.playerModel && this.playerModel.userData.mixer) {
