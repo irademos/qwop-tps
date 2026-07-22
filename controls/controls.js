@@ -10,6 +10,8 @@ import { QuestManager } from "../quest.js";
 import { updateProceduralPlayerRig } from '../models/playerModel.js';
 import { loadNippleJs } from '../externalDeps.js';
 import { initHandTracking, updateHandTracking, getHandTrackingData } from '../mediapipe/handTrackingManager.js';
+import { initFloatingHands, updateFloatingHands, hideFloatingHands } from '../mediapipe/floatingHands.js';
+import { isFirstPersonView } from '../features/cameraMode.js';
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -493,6 +495,7 @@ export class PlayerControls {
     initHandTracking().catch((err) => {
       console.warn('[Controls] Hand tracking init failed:', err);
     });
+    initFloatingHands(this.scene, THREE);
   }
   
   safePreventDefault(event) {
@@ -2758,8 +2761,15 @@ export class PlayerControls {
 
     this.updateEngagedMode();
     updateHandTracking();
+    const handData = getHandTrackingData();
     if (this.playerModel) {
-      this.playerModel.userData.handTrackingArms = getHandTrackingData();
+      const rig = this.playerModel.userData.procedural;
+      const playerPos = this.playerModel.position;
+      const worldPositions = updateFloatingHands(handData, playerPos, this.yaw, rig);
+      this.playerModel.userData.handTrackingArms = {
+        left:  worldPositions.left  ? { worldPos: worldPositions.left  } : null,
+        right: worldPositions.right ? { worldPos: worldPositions.right } : null,
+      };
     }
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
 
@@ -2883,17 +2893,34 @@ export class PlayerControls {
         cameraLookTarget = targetLookPosition;
       }
     }
-    // First-person view: place camera at player's eye and look in yaw/pitch direction
-    const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(0, FIRST_PERSON_EYE_HEIGHT, 0));
-    const lookDirection = new THREE.Vector3(
-      Math.sin(this.yaw) * Math.cos(this.pitch),
-      Math.sin(this.pitch),
-      Math.cos(this.yaw) * Math.cos(this.pitch)
-    );
-    this.camera.position.copy(eyePosition);
-    this.camera.lookAt(eyePosition.clone().add(lookDirection));
-    if (this.playerModel) {
-      this.playerModel.visible = false;
+    if (isFirstPersonView()) {
+      // First-person: camera at player eye, player model hidden
+      const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(0, FIRST_PERSON_EYE_HEIGHT, 0));
+      const lookDirection = new THREE.Vector3(
+        Math.sin(this.yaw) * Math.cos(this.pitch),
+        Math.sin(this.pitch),
+        Math.cos(this.yaw) * Math.cos(this.pitch)
+      );
+      this.camera.position.copy(eyePosition);
+      this.camera.lookAt(eyePosition.clone().add(lookDirection));
+      if (this.playerModel) {
+        this.playerModel.visible = false;
+      }
+    } else {
+      // Third-person: use orbit camera behind the player, player model visible
+      if (!desiredCameraPosition) {
+        const rotatedOffset = new THREE.Vector3(
+          this.cameraOffset.x * Math.cos(this.yaw) - this.cameraOffset.z * Math.sin(this.yaw),
+          this.cameraOffset.y,
+          this.cameraOffset.x * Math.sin(this.yaw) + this.cameraOffset.z * Math.cos(this.yaw)
+        );
+        desiredCameraPosition = orbitCenter.clone().add(rotatedOffset);
+      }
+      this.camera.position.lerp(desiredCameraPosition, 0.12);
+      this.camera.lookAt(cameraLookTarget);
+      if (this.playerModel) {
+        this.playerModel.visible = true;
+      }
     }
 
     if (this.playerModel && this.playerModel.userData.mixer) {
