@@ -116,7 +116,7 @@ function palmToArmAngles(palmX, palmY, gameSide) {
   // For left arm: right of screen → arm inward (negative z), left → arm outward (positive z)
   // For right arm: right of screen → arm outward (negative z), left → arm inward (positive z)
   const lateral = (mx - 0.5) * 2.4; // -1.2 to +1.2
-  const rotZ = gameSide === 'left' ? lateral : -lateral;
+  const rotZ = lateral; // same direction for both arms
 
   return {
     x: clamp(rotX, -1.65, 1.35),

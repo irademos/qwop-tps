@@ -97,11 +97,12 @@ export function updateFPArms(handData) {
   if (!_leftArm || !_rightArm || !_THREE) return;
   const THREE = _THREE;
 
-  const hw = DEPTH * 0.45; // rough half-width at DEPTH
-  const hy = DEPTH * 0.35; // rough half-height at DEPTH
+  const hw = DEPTH * 0.45;
+  const hy = DEPTH * 0.35;
 
-  const leftShoulder = new THREE.Vector3(-hw * 0.8, -hy * 1.1, -DEPTH);
-  const rightShoulder = new THREE.Vector3(hw * 0.8, -hy * 1.1, -DEPTH);
+  // Shoulders sit near the camera origin (z ≈ 0) so the arm extends forward.
+  const leftShoulder = new THREE.Vector3(-hw * 0.55, -hy * 0.9, -0.08);
+  const rightShoulder = new THREE.Vector3(hw * 0.55, -hy * 0.9, -0.08);
 
   updateArm(_leftArm, leftShoulder, handData?.left, THREE);
   updateArm(_rightArm, rightShoulder, handData?.right, THREE);
