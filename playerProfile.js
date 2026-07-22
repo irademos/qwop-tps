@@ -1,5 +1,5 @@
 import { ref, get, set, update, runTransaction, query, orderByChild, limitToLast } from 'firebase/database';
-import { db, authReady } from './firebase-init.js';
+import { db } from './firebase-init.js';
 import { getCookie, setCookie } from './utils.js';
 import { BASE_HEALTH_SEGMENTS, normalizeHealthSegments } from './healthUtils.js';
 import {
@@ -498,7 +498,6 @@ export async function renameProfile(currentName, currentNameKey, nextName) {
 }
 
 export async function loadOrCreateWithPin(playerName, options = {}) {
-  await authReady;
   const trimmedName = playerName.trim();
   const nameKey = normalizeNameKey(trimmedName);
   if (!nameKey) {
