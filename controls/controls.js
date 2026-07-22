@@ -10,7 +10,7 @@ import { QuestManager } from "../quest.js";
 import { updateProceduralPlayerRig } from '../models/playerModel.js';
 import { loadNippleJs } from '../externalDeps.js';
 import { initHandTracking, updateHandTracking, getHandTrackingData } from '../mediapipe/handTrackingManager.js';
-import { initFPArms, updateFPArms, hideFPArms } from '../mediapipe/fpArms.js';
+import { initFloatingHands, updateFloatingHands, hideFloatingHands } from '../mediapipe/floatingHands.js';
 import { isFirstPersonView } from '../features/cameraMode.js';
 
 // Movement constants
@@ -495,7 +495,7 @@ export class PlayerControls {
     initHandTracking().catch((err) => {
       console.warn('[Controls] Hand tracking init failed:', err);
     });
-    initFPArms(this.camera, THREE);
+    initFloatingHands(this.scene, THREE);
   }
   
   safePreventDefault(event) {
@@ -2763,12 +2763,13 @@ export class PlayerControls {
     updateHandTracking();
     const handData = getHandTrackingData();
     if (this.playerModel) {
-      this.playerModel.userData.handTrackingArms = handData;
-    }
-    if (isFirstPersonView()) {
-      updateFPArms(handData);
-    } else {
-      hideFPArms();
+      const rig = this.playerModel.userData.procedural;
+      const playerPos = this.playerModel.position;
+      const worldPositions = updateFloatingHands(handData, playerPos, this.yaw, rig);
+      this.playerModel.userData.handTrackingArms = {
+        left:  worldPositions.left  ? { worldPos: worldPositions.left  } : null,
+        right: worldPositions.right ? { worldPos: worldPositions.right } : null,
+      };
     }
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
 

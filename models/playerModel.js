@@ -421,7 +421,7 @@ const TARGET_FOLLOW_SPEED = 15;
 // Compute Euler rotation angles (x = pitch, z = roll) so the arm group points
 // from its shoulder attachment toward a world-space target position.
 // Returns null if the rig isn't ready or the target is too close to compute.
-function computeArmAnglesForWorldTarget(side, rig, playerGroup, worldTargetPos) {
+export function computeArmAnglesForWorldTarget(side, rig, playerGroup, worldTargetPos) {
   const armName = side === 'right' ? 'rightArm' : 'leftArm';
   const armPart = rig?.parts?.[armName];
   if (!armPart?.group) return null;
@@ -664,8 +664,9 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         ikAngles ? ikAngles.x : -1.35,
         ikAngles ? ikAngles.y : 0,
         ikAngles ? ikAngles.z : 0.1);
-    } else if (handTracking?.left) {
-      setTarget('leftArm', handTracking.left.x, 0, handTracking.left.z);
+    } else if (handTracking?.left?.worldPos) {
+      const ik = computeArmAnglesForWorldTarget('left', rig, playerGroup, handTracking.left.worldPos);
+      if (ik) setTarget('leftArm', ik.x, ik.y, ik.z);
     }
     if (rightPunch) {
       setTarget('rightArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, -0.05 * punchArc, -0.1 - punchArc * 0.12);
@@ -678,8 +679,9 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         ikAngles ? ikAngles.x : -1.35,
         ikAngles ? ikAngles.y : 0,
         ikAngles ? ikAngles.z : -0.1);
-    } else if (handTracking?.right) {
-      setTarget('rightArm', handTracking.right.x, 0, handTracking.right.z);
+    } else if (handTracking?.right?.worldPos) {
+      const ik = computeArmAnglesForWorldTarget('right', rig, playerGroup, handTracking.right.worldPos);
+      if (ik) setTarget('rightArm', ik.x, ik.y, ik.z);
     }
   }
 
@@ -698,8 +700,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const armGrabLag = 22;
   const armGrabStiffness = 10 * motorStrength;
   const handTracking = playerGroup.userData.handTrackingArms;
-  const leftHandTracked = !leftPunch && !eHeldSpec && !leftArmGrabbing && !!handTracking?.left;
-  const rightHandTracked = !rightPunch && !qHeldSpec && !rightArmGrabbing && !!handTracking?.right;
+  const leftHandTracked = !leftPunch && !eHeldSpec && !leftArmGrabbing && !!handTracking?.left?.worldPos;
+  const rightHandTracked = !rightPunch && !qHeldSpec && !rightArmGrabbing && !!handTracking?.right?.worldPos;
   const specs = {
     hips: { min: -0.65, max: 0.65, sideMin: -0.55, sideMax: 0.55, twistMin: -0.7, twistMax: 0.7, stiffness: 3.1 * motorStrength, damping: 0.9 + motorStrength * 0.25, gravity: 7.5, lag: 3.2 },
     leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 13 },
