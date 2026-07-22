@@ -100,36 +100,11 @@ async function startCamera() {
   });
 }
 
-// Map a single-hand palm position (normalized camera coords) to arm rotation targets.
-// x: 0=left edge of raw camera frame, 1=right edge
+// Returns raw normalized palm position from the camera frame.
+// x: 0=left edge of raw camera frame, 1=right edge (NOT mirrored here)
 // y: 0=top, 1=bottom
-// Front-facing camera: MediaPipe "Left" hand = user's right hand, "Right" = user's left hand.
-// gameSide is already corrected by the caller.
-function palmToArmAngles(palmX, palmY, gameSide) {
-  // Mirror x to match mirrored camera view (what the user naturally sees)
-  const mx = 1 - palmX;
-
-  // Pitch (rotation.x): top of frame → arm up (-1.5), mid → natural rest (0.44), bottom → arm down (1.35)
-  const rotX = THREE_lerp(-1.5, 1.35, palmY);
-
-  // Roll (rotation.z): lateral offset from center
-  // For left arm: right of screen → arm inward (negative z), left → arm outward (positive z)
-  // For right arm: right of screen → arm outward (negative z), left → arm inward (positive z)
-  const lateral = (mx - 0.5) * 2.4; // -1.2 to +1.2
-  const rotZ = gameSide === 'left' ? lateral : -lateral;
-
-  return {
-    x: clamp(rotX, -1.65, 1.35),
-    z: clamp(rotZ, -1.2, 1.2),
-  };
-}
-
-function THREE_lerp(a, b, t) {
-  return a + (b - a) * Math.max(0, Math.min(1, t));
-}
-
-function clamp(v, min, max) {
-  return Math.max(min, Math.min(max, v));
+function palmToNormalized(palmX, palmY) {
+  return { x: palmX, y: palmY };
 }
 
 export function updateHandTracking() {
@@ -162,7 +137,7 @@ export function updateHandTracking() {
       // MediaPipe handedness from camera view: "Left" appears on the left side of the raw
       // (non-mirrored) frame → that's the user's RIGHT hand in a front-facing camera.
       const gameSide = handedness === 'Left' ? 'right' : 'left';
-      newData[gameSide] = palmToArmAngles(palmX, palmY, gameSide);
+      newData[gameSide] = palmToNormalized(palmX, palmY);
     }
     setStatus('✓', '#4f4');
   } else {

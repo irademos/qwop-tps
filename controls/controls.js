@@ -3945,15 +3945,11 @@ export class PlayerControls {
 
   _getHandWorldPos(hand) {
     const rig = this.playerModel?.userData?.qwopRig;
-    const armName = hand === 'left' ? 'leftArm' : 'rightArm';
-    const armPart = rig?.parts?.[armName];
-    if (armPart?.group) {
-      const handMesh = armPart.group.getObjectByName(`${armName}Hand`);
-      if (handMesh) {
-        const pos = new THREE.Vector3();
-        handMesh.getWorldPosition(pos);
-        return pos;
-      }
+    const floatingHand = rig?.floatingHands?.[hand];
+    if (floatingHand) {
+      const pos = new THREE.Vector3();
+      floatingHand.getWorldPosition(pos);
+      return pos;
     }
     const fallback = this.playerModel.position.clone();
     fallback.y += 0.8;
