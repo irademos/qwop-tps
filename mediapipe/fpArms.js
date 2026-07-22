@@ -88,6 +88,11 @@ function updateArm(armGroup, shoulderPos, palmData, THREE) {
   armGroup.visible = true;
 }
 
+export function hideFPArms() {
+  if (_leftArm) _leftArm.visible = false;
+  if (_rightArm) _rightArm.visible = false;
+}
+
 export function updateFPArms(handData) {
   if (!_leftArm || !_rightArm || !_THREE) return;
   const THREE = _THREE;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { formatDistanceForDisplay, getDistanceUnitPreference, setDistanceUnitPreference } from '../distanceUnits.js';
+import { setFirstPersonView, isFirstPersonView } from '../features/cameraMode.js';
 
 const TAB_KEY = 'settings:lastTab';
 
@@ -708,6 +709,15 @@ function buildDisplayPanel() {
     step: 0.05
   });
 
+  const firstPersonGroup = createElement('div', 'settings-field');
+  const firstPersonLabel = createElement('label', 'settings-label', 'First-Person View');
+  firstPersonLabel.setAttribute('for', 'settings-display-first-person');
+  const firstPersonToggle = createElement('input', 'settings-checkbox');
+  firstPersonToggle.id = 'settings-display-first-person';
+  firstPersonToggle.type = 'checkbox';
+  firstPersonToggle.checked = true;
+  firstPersonGroup.append(firstPersonLabel, firstPersonToggle);
+
   const hint = createElement('div', 'settings-muted');
   hint.textContent = 'Auto mode uses local time to switch between day and night lighting.';
 
@@ -716,6 +726,7 @@ function buildDisplayPanel() {
     performanceGroup,
     unitsGroup,
     highContrastGroup,
+    firstPersonGroup,
     ambientField.field,
     directionalField.field,
     groundField.field,
@@ -729,6 +740,7 @@ function buildDisplayPanel() {
     performanceSelect,
     unitsSelect,
     highContrastToggle,
+    firstPersonToggle,
     sliders: {
       ambientIntensity: ambientField.input,
       directionalIntensity: directionalField.input,
@@ -1656,6 +1668,12 @@ function bindEvents() {
     });
   }
 
+  if (elements.displayFields?.firstPersonToggle) {
+    elements.displayFields.firstPersonToggle.addEventListener('change', (event) => {
+      setFirstPersonView(event.target.checked);
+    });
+  }
+
   if (elements.displayFields?.sliders) {
     Object.entries(elements.displayFields.sliders).forEach(([key, slider]) => {
       slider.addEventListener('input', (event) => {
@@ -2054,6 +2072,9 @@ export function updateUI() {
     }
     if (elements.displayFields.highContrastToggle) {
       elements.displayFields.highContrastToggle.checked = Boolean(displaySettings?.highContrastMode);
+    }
+    if (elements.displayFields.firstPersonToggle) {
+      elements.displayFields.firstPersonToggle.checked = isFirstPersonView();
     }
     Object.entries(elements.displayFields.sliders || {}).forEach(([key, slider]) => {
       const value = displaySettings?.[key];
