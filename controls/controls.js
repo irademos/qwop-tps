@@ -2894,7 +2894,10 @@ export class PlayerControls {
       this.camera.position.copy(eyePosition);
       this.camera.lookAt(eyePosition.clone().add(lookDirection));
       if (this.playerModel) {
-        this.playerModel.visible = false;
+        // Hide the body but keep floating hands/arms (direct playerGroup children) visible
+        const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
+        if (bodyRoot) bodyRoot.visible = false;
+        else this.playerModel.visible = false;
       }
     } else {
       // Third-person view: pull camera back behind and above the player
@@ -2908,7 +2911,9 @@ export class PlayerControls {
       );
       this.camera.lookAt(tpCenter);
       if (this.playerModel) {
-        this.playerModel.visible = true;
+        const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
+        if (bodyRoot) bodyRoot.visible = true;
+        else this.playerModel.visible = true;
       }
     }
 
@@ -3945,15 +3950,11 @@ export class PlayerControls {
 
   _getHandWorldPos(hand) {
     const rig = this.playerModel?.userData?.qwopRig;
-    const armName = hand === 'left' ? 'leftArm' : 'rightArm';
-    const armPart = rig?.parts?.[armName];
-    if (armPart?.group) {
-      const handMesh = armPart.group.getObjectByName(`${armName}Hand`);
-      if (handMesh) {
-        const pos = new THREE.Vector3();
-        handMesh.getWorldPosition(pos);
-        return pos;
-      }
+    const floatingHand = rig?.floatingHands?.[hand];
+    if (floatingHand) {
+      const pos = new THREE.Vector3();
+      floatingHand.getWorldPosition(pos);
+      return pos;
     }
     const fallback = this.playerModel.position.clone();
     fallback.y += 0.8;

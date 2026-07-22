@@ -315,44 +315,22 @@ export function createProceduralBody(THREE) {
     calf.group.add(shoe);
   }
 
-  const leftArm = createLimbSegment(THREE, 'leftArm', {
-    length: 0.64,
-    radius: 0.075,
-    color: materials.skin,
-    mass: 4
-  });
-  leftArm.group.position.set(-0.38, 0.64, 0);
-  torso.group.add(leftArm.group);
+  // Shoulder anchors — invisible groups attached to torso, used to get world-space shoulder origin
+  const leftShoulderAnchor = new THREE.Group();
+  leftShoulderAnchor.name = 'leftShoulderAnchor';
+  leftShoulderAnchor.position.set(-0.38, 0.64, 0);
+  torso.group.add(leftShoulderAnchor);
 
-  const rightArm = createLimbSegment(THREE, 'rightArm', {
-    length: 0.64,
-    radius: 0.075,
-    color: materials.skin,
-    mass: 4
-  });
-  rightArm.group.position.set(0.38, 0.64, 0);
-  torso.group.add(rightArm.group);
-
-  for (const arm of [leftArm, rightArm]) {
-    const hand = new THREE.Mesh(
-      new THREE.SphereGeometry(0.085, 12, 10),
-      new THREE.MeshStandardMaterial({ color: materials.skin, roughness: 0.8 })
-    );
-    hand.name = `${arm.group.name}Hand`;
-    hand.userData.proceduralHand = arm.group.name === 'leftArm' ? 'left' : 'right';
-    hand.castShadow = true;
-    hand.receiveShadow = true;
-    hand.position.y = -arm.length - 0.03;
-    arm.group.add(hand);
-  }
+  const rightShoulderAnchor = new THREE.Group();
+  rightShoulderAnchor.name = 'rightShoulderAnchor';
+  rightShoulderAnchor.position.set(0.38, 0.64, 0);
+  torso.group.add(rightShoulderAnchor);
 
   torso.restRotation = 0;
   leftLeg.restRotation = 0.18;
   rightLeg.restRotation = 0.18;
   leftCalf.restRotation = 0.1;
   rightCalf.restRotation = 0.1;
-  leftArm.restRotation = -0.18;
-  rightArm.restRotation = -0.18;
 
   const hipsPart = {
     group: hips,
@@ -383,9 +361,7 @@ export function createProceduralBody(THREE) {
     leftLeg,
     rightLeg,
     leftCalf,
-    rightCalf,
-    leftArm,
-    rightArm
+    rightCalf
   };
 
   Object.values(parts).forEach((part) => {
@@ -410,7 +386,11 @@ export function createProceduralBody(THREE) {
     };
   });
 
-  return { root, parts };
+  return {
+    root,
+    parts,
+    shoulderAnchors: { left: leftShoulderAnchor, right: rightShoulderAnchor }
+  };
 }
 
 
@@ -536,6 +516,43 @@ function dampToward(current, target, speed, dt) {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-speed * dt));
 }
 
+// Map normalized camera palm position to a 3D position in playerGroup local space.
+// palmX: 0=left edge of raw camera frame, 1=right edge (user's right appears on left for front camera)
+// palmY: 0=top, 1=bottom
+function palmToLocalHandPos(palmX, palmY) {
+  // palmX: 0=left of raw camera frame (user's right for front-facing camera)
+  // No mirror — raw palmX maps directly to player's local X
+  const x = (palmX - 0.5) * 1.5;
+  const y = (1 - palmY) * 1.1 + 0.25;
+  return new THREE.Vector3(x, y, 0.35);
+}
+
+const _sWorld = new THREE.Vector3();
+const _hWorld = new THREE.Vector3();
+const _upAxis = new THREE.Vector3(0, 1, 0);
+const _rootQ = new THREE.Quaternion();
+const _armQ = new THREE.Quaternion();
+
+function updateElasticArm(armMesh, shoulderAnchor, handMesh, root) {
+  shoulderAnchor.getWorldPosition(_sWorld);
+  handMesh.getWorldPosition(_hWorld);
+
+  const dist = _sWorld.distanceTo(_hWorld);
+  if (dist < 0.01) return;
+
+  const midX = (_sWorld.x + _hWorld.x) * 0.5;
+  const midY = (_sWorld.y + _hWorld.y) * 0.5;
+  const midZ = (_sWorld.z + _hWorld.z) * 0.5;
+  const mid = new THREE.Vector3(midX, midY, midZ);
+  armMesh.position.copy(root.worldToLocal(mid));
+  armMesh.scale.set(1, dist, 1);
+
+  const dir = _hWorld.clone().sub(_sWorld).normalize();
+  root.getWorldQuaternion(_rootQ);
+  _armQ.setFromUnitVectors(_upAxis, dir);
+  armMesh.quaternion.copy(_rootQ.clone().invert().multiply(_armQ));
+}
+
 export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds) {
   const rig = playerGroup?.userData?.qwopRig;
   if (!rig) return { forwardIntent: 0, balance: 0 };
@@ -616,14 +633,10 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   const leftPose = anchorToLegPose(footPlants.left.anchor, sideLean, footPlants.left.swing || 0);
   const rightPose = anchorToLegPose(footPlants.right.anchor, sideLean, footPlants.right.swing || 0);
 
-  const grabArmTarget = playerGroup.userData.grabArmTarget;
-
   if (knocked) {
     setTarget('hips', -0.18, 0, 0);
     setTarget('torso', -1.18, 0, rig.knockDirection?.x ? THREE.MathUtils.clamp(-rig.knockDirection.x * 0.45, -0.55, 0.55) : 0.35);
     setTarget('head', -0.65, 0, 0.25);
-    setTarget('leftArm', -1.15, 0.15, 0.8);
-    setTarget('rightArm', -1.15, -0.15, -0.8);
     setTarget('leftLeg', 0.45, 0, 0.22);
     setTarget('rightLeg', 0.45, 0, -0.22);
     setTarget('leftCalf', -0.85, 0, 0.08);
@@ -640,74 +653,22 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     setTarget('leftCalf', leftPose.calf, 0, sideLean * 0.18);
     setTarget('rightCalf', rightPose.calf, 0, sideLean * 0.18);
 
-    const armCounter = (footPlants.left.swing || 0) - (footPlants.right.swing || 0);
-    setTarget('leftArm', 0.44 + armCounter * 0.32 - fallPressure * 0.08, 0, 0.22 + sideLean * 0.35);
-    setTarget('rightArm', 0.44 - armCounter * 0.32 - fallPressure * 0.08, 0, -0.22 + sideLean * 0.35);
-
-    const qHeld = pressed('q') && !rightPunch;
-    const eHeld = pressed('e') && !leftPunch;
-    const leftGrabActive = grabArmTarget?.hand === 'left';
-    const rightGrabActive = grabArmTarget?.hand === 'right';
-
-    const handTracking = playerGroup.userData.handTrackingArms;
-
     if (leftPunch) {
-      // Swing arm from ~+0.48 (down) to ~-1.65 (fully forward) over first half, retract over second half.
-      // punchArc peaks at 1 mid-punch. Total swing is ~2.13 rad (~122 deg) — snappy forward punch.
-      setTarget('leftArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, 0.05 * punchArc, 0.1 + punchArc * 0.12);
       setTarget('torso', forwardLean - punchArc * 0.28, 0.18 * punchArc, sideLean + 0.1 * punchArc);
-    } else if (eHeld || leftGrabActive) {
-      const ikAngles = leftGrabActive
-        ? computeArmAnglesForWorldTarget('left', rig, playerGroup, grabArmTarget.worldPos)
-        : null;
-      setTarget('leftArm',
-        ikAngles ? ikAngles.x : -1.35,
-        ikAngles ? ikAngles.y : 0,
-        ikAngles ? ikAngles.z : 0.1);
-    } else if (handTracking?.left) {
-      setTarget('leftArm', handTracking.left.x, 0, handTracking.left.z);
     }
     if (rightPunch) {
-      setTarget('rightArm', 0.48 - punchArc * 2.13 + punchWindup * 0.12, -0.05 * punchArc, -0.1 - punchArc * 0.12);
       setTarget('torso', forwardLean - punchArc * 0.28, -0.18 * punchArc, sideLean - 0.1 * punchArc);
-    } else if (qHeld || rightGrabActive) {
-      const ikAngles = rightGrabActive
-        ? computeArmAnglesForWorldTarget('right', rig, playerGroup, grabArmTarget.worldPos)
-        : null;
-      setTarget('rightArm',
-        ikAngles ? ikAngles.x : -1.35,
-        ikAngles ? ikAngles.y : 0,
-        ikAngles ? ikAngles.z : -0.1);
-    } else if (handTracking?.right) {
-      setTarget('rightArm', handTracking.right.x, 0, handTracking.right.z);
     }
   }
 
   const motorStrength = knocked ? 0.18 : 0.22 + (rig.recoveryFactor || 1) * 0.34;
   const torsoMotorStrength = knocked ? 0.12 : 0.18 + (rig.recoveryFactor || 1) * 0.3;
-  // During a punch the arm must snap forward ~90 deg in ~200ms — bypass the desire→target
-  // lag by cranking lag and stiffness way up for the active punching arm.
-  const punchingLeft = leftPunch && attackPhase > 0 && attackPhase < 1;
-  const punchingRight = rightPunch && attackPhase > 0 && attackPhase < 1;
-  const armPunchLag = 28;
-  const armPunchStiffness = 14 * motorStrength;
-  const qHeldSpec = pressed('q') && !rightPunch;
-  const eHeldSpec = pressed('e') && !leftPunch;
-  const leftArmGrabbing = grabArmTarget?.hand === 'left';
-  const rightArmGrabbing = grabArmTarget?.hand === 'right';
-  const armGrabLag = 22;
-  const armGrabStiffness = 10 * motorStrength;
-  const handTracking = playerGroup.userData.handTrackingArms;
-  const leftHandTracked = !leftPunch && !eHeldSpec && !leftArmGrabbing && !!handTracking?.left;
-  const rightHandTracked = !rightPunch && !qHeldSpec && !rightArmGrabbing && !!handTracking?.right;
   const specs = {
     hips: { min: -0.65, max: 0.65, sideMin: -0.55, sideMax: 0.55, twistMin: -0.7, twistMax: 0.7, stiffness: 3.1 * motorStrength, damping: 0.9 + motorStrength * 0.25, gravity: 7.5, lag: 3.2 },
     leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 13 },
     rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 12 },
     leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'leftLeg', lag: 14 },
     rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'rightLeg', lag: 13 },
-    leftArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingLeft ? armPunchStiffness : ((eHeldSpec || leftArmGrabbing || leftHandTracked) ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingLeft ? armPunchLag : ((eHeldSpec || leftArmGrabbing || leftHandTracked) ? armGrabLag : 3.8), noInertia: true },
-    rightArm: { min: -1.65, max: 1.35, sideMin: -1.2, sideMax: 1.2, twistMin: -0.9, twistMax: 0.9, stiffness: punchingRight ? armPunchStiffness : ((qHeldSpec || rightArmGrabbing || rightHandTracked) ? armGrabStiffness : 3.9 * motorStrength), damping: 0.75 + motorStrength * 0.25, gravity: 0, lag: punchingRight ? armPunchLag : ((qHeldSpec || rightArmGrabbing || rightHandTracked) ? armGrabLag : 3.8), noInertia: true },
     torso: { min: -1.25, max: 0.75, sideMin: -0.75, sideMax: 0.75, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: 2.7 * torsoMotorStrength, damping: knocked ? 0.55 : 0.75 + torsoMotorStrength * 0.25, gravity: knocked ? 34 : 13, lag: 2.7 },
     head: { min: -1.05, max: 0.8, sideMin: -0.85, sideMax: 0.85, twistMin: -1.05, twistMax: 1.05, stiffness: 1.6 * torsoMotorStrength, damping: knocked ? 0.45 : 0.55 + torsoMotorStrength * 0.18, gravity: knocked ? 30 : 22, lag: 2.1 }
   };
@@ -753,6 +714,22 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   if (!playerGroup.userData.isKnocked && !leftPunch && !rightPunch) {
     playerGroup.userData.currentAction = moving ? 'walk' : 'idle';
   }
+
+  // Update floating hands and elastic arms from hand tracking data
+  if (rig.floatingHands && rig.elasticArms && rig.shoulderAnchors) {
+    const handTracking = playerGroup.userData.handTrackingArms;
+    for (const side of ['left', 'right']) {
+      const trackData = handTracking?.[side];
+      const floatingHand = rig.floatingHands[side];
+      const defaultX = side === 'left' ? -0.5 : 0.5;
+      const defaultPos = new THREE.Vector3(defaultX, 0.65, 0.25);
+      const targetPos = trackData ? palmToLocalHandPos(trackData.x, trackData.y) : defaultPos;
+      // Smooth hand position for left but direct for right (or both can be smooth)
+      floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
+      updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
+    }
+  }
+
   return { forwardIntent: rig.forwardIntent, balance: rig.balance, forwardWeight: rig.forwardWeight };
 }
 
@@ -836,11 +813,47 @@ export function createPlayerModel(
   const playerGroup = new THREE.Group();
   playerGroup.name = 'ProceduralGangBeastsPlayer';
 
-  const { root: bodyRoot, parts } = createProceduralBody(THREE);
+  const { root: bodyRoot, parts, shoulderAnchors } = createProceduralBody(THREE);
   playerGroup.add(bodyRoot);
+
+  // Floating hands and elastic arms are direct children of playerGroup so they remain
+  // visible in first-person even when bodyRoot is hidden.
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8 });
+  const leftFloatingHand = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), skinMat);
+  leftFloatingHand.name = 'leftFloatingHand';
+  leftFloatingHand.userData.proceduralHand = 'left';
+  leftFloatingHand.castShadow = true;
+  leftFloatingHand.receiveShadow = true;
+  leftFloatingHand.position.set(-0.5, 0.65, 0.25);
+  playerGroup.add(leftFloatingHand);
+
+  const rightFloatingHand = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), skinMat.clone());
+  rightFloatingHand.name = 'rightFloatingHand';
+  rightFloatingHand.userData.proceduralHand = 'right';
+  rightFloatingHand.castShadow = true;
+  rightFloatingHand.receiveShadow = true;
+  rightFloatingHand.position.set(0.5, 0.65, 0.25);
+  playerGroup.add(rightFloatingHand);
+
+  const elasticMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8 });
+  const leftElasticArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), elasticMat);
+  leftElasticArm.name = 'leftElasticArm';
+  leftElasticArm.castShadow = true;
+  leftElasticArm.receiveShadow = true;
+  playerGroup.add(leftElasticArm);
+
+  const rightElasticArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), elasticMat.clone());
+  rightElasticArm.name = 'rightElasticArm';
+  rightElasticArm.castShadow = true;
+  rightElasticArm.receiveShadow = true;
+  playerGroup.add(rightElasticArm);
+
   playerGroup.userData.qwopRig = {
     parts,
     bodyRoot,
+    floatingHands: { left: leftFloatingHand, right: rightFloatingHand },
+    elasticArms: { left: leftElasticArm, right: rightElasticArm },
+    shoulderAnchors,
     forwardIntent: 0,
     balance: 0,
     modelPath,
