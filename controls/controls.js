@@ -54,6 +54,7 @@ const ENGAGED_MODE_DISTANCE = 7;
 const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
 const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
 const WEAPON_CAMERA_FOV_DELTA = 8;
+const GYRO_LERP_SPEED = 12; // rad/s convergence for gyroscope smoothing
 const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 2.1;
 const MOBILE_PORTRAIT_CAMERA_HEIGHT_BONUS = 0.8;
 const MOBILE_PORTRAIT_CAMERA_FOV_BONUS = 14;
@@ -277,6 +278,25 @@ export class PlayerControls {
     this.moveForward = 0;
     this.moveRight = 0;
     this.deltaSeconds = 0;
+
+    // Gyroscope state
+    this.gyroActive = false;
+    this.gyroLastAlpha = null;
+    this.gyroLastBeta = null;
+    this.gyroLastGamma = null;
+    this.gyroCalibQ = null;
+    this.gyroCalibYaw = 0;
+    this.gyroCalibPitch = 0;
+    this._gyroDeviceQ = new THREE.Quaternion();
+    this._gyroRelQ = new THREE.Quaternion();
+    this._gyroTempQ = new THREE.Quaternion();
+    this._gyroQ1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+    this._gyroQ0 = new THREE.Quaternion();
+    this._gyroZee = new THREE.Vector3(0, 0, 1);
+    this._gyroEuler = new THREE.Euler();
+    this._gyroForwardRef = new THREE.Vector3();
+    this._gyroForwardCur = new THREE.Vector3();
+    this._gyroOrientHandler = null;
     
     // Initial player position
     const spawn = getSpawnPosition();
@@ -557,10 +577,10 @@ export class PlayerControls {
     // Touch camera control
     this.cameraTouchId = null;
     this.domElement.addEventListener('touchstart', (event) => {
-      if (!this.enabled || this.isEngaged) return;
+      if (!this.enabled || this.isEngaged || this.gyroActive) return;
       for (const touch of event.changedTouches) {
         const target = document.elementFromPoint(touch.clientX, touch.clientY);
-        if (target && !target.closest('#joystick-container') && !target.closest('#jump-button') && !target.closest('#action-buttons')) {
+        if (target && !target.closest('#joystick-container') && !target.closest('#jump-button') && !target.closest('#action-buttons') && !target.closest('#gyro-button')) {
           this.cameraTouchId = touch.identifier;
           this.touchStartX = touch.clientX;
           this.touchStartY = touch.clientY;
@@ -571,7 +591,7 @@ export class PlayerControls {
     }, { passive: false });
 
     this.domElement.addEventListener('touchmove', (event) => {
-      if (!this.enabled || this.isEngaged || this.cameraTouchId === null) return;
+      if (!this.enabled || this.isEngaged || this.cameraTouchId === null || this.gyroActive) return;
       for (const touch of event.changedTouches) {
         if (touch.identifier === this.cameraTouchId) {
           const deltaX = touch.clientX - this.touchStartX;
@@ -600,6 +620,161 @@ export class PlayerControls {
         }
       }
     });
+
+    // Gyroscope button
+    let gyroButton = document.getElementById('gyro-button');
+    if (!gyroButton) {
+      gyroButton = document.createElement('div');
+      gyroButton.id = 'gyro-button';
+      document.body.appendChild(gyroButton);
+    }
+    const updateGyroButtonLabel = () => {
+      gyroButton.innerHTML = this.gyroActive
+        ? '<span style="font-size:18px">⟳</span><span>RECAL</span>'
+        : '<span style="font-size:18px">⟳</span><span>GYRO</span>';
+      gyroButton.classList.toggle('active', this.gyroActive);
+    };
+    updateGyroButtonLabel();
+
+    let gyroLongPressTimer = null;
+    gyroButton.addEventListener('touchstart', async (event) => {
+      this.safePreventDefault(event);
+      gyroLongPressTimer = setTimeout(() => {
+        gyroLongPressTimer = null;
+        if (this.gyroActive) {
+          this.disableGyroscope();
+          updateGyroButtonLabel();
+        }
+      }, 600);
+
+      if (!this.gyroActive) {
+        gyroButton.innerHTML = '<span>...</span>';
+        const ok = await this.initGyroscope();
+        if (ok) {
+          updateGyroButtonLabel();
+        } else {
+          gyroButton.innerHTML = '<span style="font-size:18px">⟳</span><span>GYRO</span>';
+          gyroButton.classList.remove('active');
+        }
+      }
+    }, { passive: false });
+
+    gyroButton.addEventListener('touchend', (event) => {
+      this.safePreventDefault(event);
+      if (gyroLongPressTimer !== null) {
+        clearTimeout(gyroLongPressTimer);
+        gyroLongPressTimer = null;
+        // Short tap while active = recalibrate
+        if (this.gyroActive) {
+          this.calibrateGyroscope();
+        }
+      }
+    }, { passive: false });
+  }
+
+  // Compute device-orientation quaternion using the Three.js DeviceOrientationControls approach
+  _computeDeviceOrientationQ(alpha, beta, gamma) {
+    const DEG2RAD = Math.PI / 180;
+    this._gyroEuler.set(beta * DEG2RAD, alpha * DEG2RAD, -gamma * DEG2RAD, 'YXZ');
+    this._gyroDeviceQ.setFromEuler(this._gyroEuler);
+    this._gyroDeviceQ.multiply(this._gyroQ1);
+    const screenAngle = ((window.screen.orientation?.angle) ?? 0) * DEG2RAD;
+    this._gyroQ0.setFromAxisAngle(this._gyroZee, -screenAngle);
+    this._gyroDeviceQ.multiply(this._gyroQ0);
+  }
+
+  // Store current phone orientation as the neutral "looking forward" pose
+  calibrateGyroscope() {
+    if (this.gyroLastAlpha === null) return;
+    this._computeDeviceOrientationQ(this.gyroLastAlpha, this.gyroLastBeta, this.gyroLastGamma);
+    this.gyroCalibQ = this._gyroDeviceQ.clone();
+    this.gyroCalibYaw = this.yaw;
+    this.gyroCalibPitch = this.pitch;
+  }
+
+  async initGyroscope() {
+    if (typeof DeviceOrientationEvent === 'undefined') {
+      console.warn('[Gyro] DeviceOrientationEvent not supported on this device.');
+      return false;
+    }
+    // iOS 13+ requires explicit permission request from a user gesture
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const permission = await DeviceOrientationEvent.requestPermission();
+        if (permission !== 'granted') return false;
+      } catch (e) {
+        console.warn('[Gyro] Permission denied:', e);
+        return false;
+      }
+    }
+
+    // Remove any previous listener
+    if (this._gyroOrientHandler) {
+      window.removeEventListener('deviceorientation', this._gyroOrientHandler, true);
+    }
+
+    this._gyroOrientHandler = (event) => {
+      if (event.alpha === null) return;
+      this.gyroLastAlpha = event.alpha;
+      this.gyroLastBeta = event.beta;
+      this.gyroLastGamma = event.gamma;
+    };
+    window.addEventListener('deviceorientation', this._gyroOrientHandler, true);
+
+    // Wait for first sensor reading, then calibrate
+    await new Promise((resolve) => {
+      const once = (event) => {
+        if (event.alpha === null) return;
+        window.removeEventListener('deviceorientation', once, true);
+        resolve();
+      };
+      window.addEventListener('deviceorientation', once, true);
+    });
+
+    this.calibrateGyroscope();
+    this.gyroActive = true;
+    return true;
+  }
+
+  disableGyroscope() {
+    this.gyroActive = false;
+    if (this._gyroOrientHandler) {
+      window.removeEventListener('deviceorientation', this._gyroOrientHandler, true);
+      this._gyroOrientHandler = null;
+    }
+  }
+
+  // Called each frame to slerp camera yaw/pitch toward the gyroscope target
+  _applyGyroUpdate(delta) {
+    if (!this.gyroActive || !this.gyroCalibQ || this.gyroLastAlpha === null) return;
+    if (this.isEngaged) return; // engaged/auto-aim mode overrides
+
+    this._computeDeviceOrientationQ(this.gyroLastAlpha, this.gyroLastBeta, this.gyroLastGamma);
+
+    // Relative rotation from calibration pose to current pose
+    this._gyroTempQ.copy(this.gyroCalibQ).invert();
+    this._gyroRelQ.copy(this._gyroTempQ).multiply(this._gyroDeviceQ);
+
+    // Apply relative rotation to the reference forward direction (at calibration time)
+    this._gyroForwardRef.set(
+      Math.sin(this.gyroCalibYaw) * Math.cos(this.gyroCalibPitch),
+      Math.sin(this.gyroCalibPitch),
+      Math.cos(this.gyroCalibYaw) * Math.cos(this.gyroCalibPitch)
+    );
+    this._gyroForwardCur.copy(this._gyroForwardRef).applyQuaternion(this._gyroRelQ);
+
+    const targetYaw = Math.atan2(this._gyroForwardCur.x, this._gyroForwardCur.z);
+    const targetPitch = Math.asin(Math.max(-1, Math.min(1, this._gyroForwardCur.y)));
+
+    const maxPitch = Math.PI / 3;
+    const minPitch = -Math.PI / 8;
+    const clampedPitch = Math.max(minPitch, Math.min(maxPitch, targetPitch));
+
+    const lerpFactor = 1 - Math.exp(-GYRO_LERP_SPEED * delta);
+    // Shortest-path yaw lerp (handles 0/360 wraparound)
+    const yawDelta = ((targetYaw - this.yaw + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+    this.yaw += yawDelta * lerpFactor;
+    this.pitch += (clampedPitch - this.pitch) * lerpFactor;
   }
 
   initializeActionButtons() {
@@ -2788,6 +2963,9 @@ export class PlayerControls {
         this.breakAutoAimFromManualCamera(0.02);
       }
     }
+
+    // Gyroscope: smoothly slerp yaw/pitch toward device orientation target
+    this._applyGyroUpdate(delta);
 
     const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
     const aimingActive = !this.isEngaged && (this.isAiming || shouldHoldAim);
