@@ -162,7 +162,7 @@ export function updateHandTracking() {
       // MediaPipe handedness from camera view: "Left" appears on the left side of the raw
       // (non-mirrored) frame → that's the user's RIGHT hand in a front-facing camera.
       const gameSide = handedness === 'Left' ? 'right' : 'left';
-      newData[gameSide] = palmToArmAngles(palmX, palmY, gameSide);
+      newData[gameSide] = { ...palmToArmAngles(palmX, palmY, gameSide), palmX, palmY };
     }
     setStatus('✓', '#4f4');
   } else {

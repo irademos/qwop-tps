@@ -10,6 +10,7 @@ import { QuestManager } from "../quest.js";
 import { updateProceduralPlayerRig } from '../models/playerModel.js';
 import { loadNippleJs } from '../externalDeps.js';
 import { initHandTracking, updateHandTracking, getHandTrackingData } from '../mediapipe/handTrackingManager.js';
+import { initFPArms, updateFPArms } from '../mediapipe/fpArms.js';
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -493,6 +494,7 @@ export class PlayerControls {
     initHandTracking().catch((err) => {
       console.warn('[Controls] Hand tracking init failed:', err);
     });
+    initFPArms(this.camera, THREE);
   }
   
   safePreventDefault(event) {
@@ -2758,9 +2760,11 @@ export class PlayerControls {
 
     this.updateEngagedMode();
     updateHandTracking();
+    const handData = getHandTrackingData();
     if (this.playerModel) {
-      this.playerModel.userData.handTrackingArms = getHandTrackingData();
+      this.playerModel.userData.handTrackingArms = handData;
     }
+    updateFPArms(handData);
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
 
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;

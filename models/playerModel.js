@@ -316,7 +316,7 @@ export function createProceduralBody(THREE) {
   }
 
   const leftArm = createLimbSegment(THREE, 'leftArm', {
-    length: 0.64,
+    length: 0.82,
     radius: 0.075,
     color: materials.skin,
     mass: 4
@@ -325,7 +325,7 @@ export function createProceduralBody(THREE) {
   torso.group.add(leftArm.group);
 
   const rightArm = createLimbSegment(THREE, 'rightArm', {
-    length: 0.64,
+    length: 0.82,
     radius: 0.075,
     color: materials.skin,
     mass: 4
