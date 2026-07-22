@@ -134,10 +134,19 @@ export function updateHandTracking() {
       const palmX = (wrist.x + middleMCP.x) / 2;
       const palmY = (wrist.y + middleMCP.y) / 2;
 
+      // Hand size = distance from wrist to middle fingertip (landmark 12) in normalized coords.
+      // Larger = closer to camera = hands outstretched in game.
+      const middleTip = landmarks[12];
+      const dx = middleTip.x - wrist.x;
+      const dy = middleTip.y - wrist.y;
+      const handSize = Math.sqrt(dx * dx + dy * dy);
+
       // MediaPipe handedness from camera view: "Left" appears on the left side of the raw
       // (non-mirrored) frame → that's the user's RIGHT hand in a front-facing camera.
       const gameSide = handedness === 'Left' ? 'right' : 'left';
-      newData[gameSide] = palmToNormalized(palmX, palmY);
+      const norm = palmToNormalized(palmX, palmY);
+      norm.size = handSize;
+      newData[gameSide] = norm;
     }
     setStatus('✓', '#4f4');
   } else {
