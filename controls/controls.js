@@ -3659,7 +3659,9 @@ export class PlayerControls {
   // center position (0.5, 0.5) so the gun fires forward.
   getHandAimDirection(hand = 'right') {
     if (!isHandTrackingEnabled()) return null;
-    const hd = getHandTrackingData()?.[hand];
+    // Back-camera mapping swaps slots: user's right hand is in 'left', left hand in 'right'.
+    const trackingSlot = hand === 'right' ? 'left' : 'right';
+    const hd = getHandTrackingData()?.[trackingSlot];
     // Use detected hand position, or default to center when no hand visible
     const palmX = hd?.x ?? 0.5;
     const palmY = hd?.y ?? 0.5;
@@ -3684,7 +3686,8 @@ export class PlayerControls {
   updateCrosshairPosition() {
     if (!this.crosshairEl) return;
     if (!isHandTrackingEnabled()) return;
-    const hd = getHandTrackingData()?.right;
+    // Back-camera mapping stores user's right hand in the 'left' slot.
+    const hd = getHandTrackingData()?.left;
     if (!hd) return;
     const x = hd.x * window.innerWidth;
     const y = hd.y * window.innerHeight;
