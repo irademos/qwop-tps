@@ -9,7 +9,7 @@ import { getKnockbackImpulse, getKnockbackMotion } from "../knockback.js";
 import { QuestManager } from "../quest.js";
 import { updateProceduralPlayerRig } from '../models/playerModel.js';
 import { loadNippleJs } from '../externalDeps.js';
-import { initHandTracking, updateHandTracking, getHandTrackingData } from '../mediapipe/handTrackingManager.js';
+import { initHandTracking, updateHandTracking, getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
 
 // Movement constants
 const SWIM_SPEED = 2;
@@ -1247,7 +1247,7 @@ export class PlayerControls {
       this.setAiming(false);
       const hand = this.getInventoryItemHand?.(throwItemId) || 'right';
       const autoAimDirection = this.getAutoAimDirection({ itemId: throwItemId, type: 'throw' });
-      const direction = autoAimDirection ?? this.getAimDirection(true);
+      const direction = autoAimDirection ?? this.getHandAimDirection(hand) ?? this.getAimDirection(true);
       const position = this.getProjectileSpawnPosition(direction);
       const didThrow = this.throwInventoryItem?.(throwItemId, position, direction);
       if (didThrow) {
@@ -3482,7 +3482,7 @@ export class PlayerControls {
     const equippedWeapon = this.getEquippedWeapon(hand);
     if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
       const autoAimDirection = manualDirection ? null : this.getAutoAimDirection(equippedWeapon);
-      const direction = (manualDirection?.clone?.() || autoAimDirection || this.getAimDirection(true)).normalize();
+      const direction = (manualDirection?.clone?.() || autoAimDirection || this.getHandAimDirection(hand) || this.getAimDirection(true)).normalize();
       const position = this.getProjectileSpawnPosition(direction);
       const fired = this.throwBomb(position, direction);
       if (fired) {
@@ -3498,7 +3498,7 @@ export class PlayerControls {
     const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
     const usesMissile = gun?.itemId === 'bazooka' && typeof this.spawnMissileProjectile === 'function';
     const autoAimDirection = manualDirection ? null : this.getAutoAimDirection(gun);
-    const baseDirection = manualDirection?.clone?.() || autoAimDirection || (usesIceMist ? this.getPlayerFacingDirection() : this.getAimDirection(usesArrow || usesMissile));
+    const baseDirection = manualDirection?.clone?.() || autoAimDirection || (usesIceMist ? this.getPlayerFacingDirection() : (this.getHandAimDirection(hand) || this.getAimDirection(usesArrow || usesMissile)));
     const direction = baseDirection.clone();
     if (usesMissile && !autoAimDirection) {
       direction.y = Math.max(direction.y, 0.14);
@@ -3637,6 +3637,27 @@ export class PlayerControls {
     return direction;
   }
 
+  // Returns an aim direction driven by the MediaPipe hand position when hand
+  // tracking is active, mapping horizontal/vertical hand position to yaw/pitch
+  // offsets from the current camera direction. Returns null when unavailable.
+  getHandAimDirection(hand = 'right') {
+    if (!isHandTrackingEnabled()) return null;
+    const hd = getHandTrackingData()?.[hand];
+    if (!hd) return null;
+    const { palmX, palmY } = hd;
+    // palmX: 0=left edge, 1=right edge; palmY: 0=top, 1=bottom (both normalised)
+    const YAW_RANGE = Math.PI * 0.6;   // ±54° total across the full hand travel range
+    const PITCH_RANGE = Math.PI * 0.5; // ±45° total across the full hand travel range
+    const yawOffset = (palmX - 0.5) * YAW_RANGE;
+    const pitch = (0.5 - palmY) * PITCH_RANGE;
+    const totalYaw = this.yaw + yawOffset;
+    return new THREE.Vector3(
+      Math.sin(totalYaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(totalYaw) * Math.cos(pitch)
+    ).normalize();
+  }
+
   getPlayerFacingDirection() {
     if (!this.playerModel) return new THREE.Vector3(0, 0, 1);
     return new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
@@ -3654,7 +3675,8 @@ export class PlayerControls {
     }
     const invertForBow = weapon?.itemId === 'bow';
     const autoAimDirection = this.getAutoAimDirection(weapon);
-    const direction = autoAimDirection ?? this.getAimDirection(invertForBow);
+    const handAimDirection = autoAimDirection ? null : this.getHandAimDirection('right');
+    const direction = autoAimDirection ?? handAimDirection ?? this.getAimDirection(invertForBow);
     this.alignPlayerToDirection(direction);
     if (autoAimDirection && !this.isEngaged) {
       this.applyAutoAimCameraDirection(autoAimDirection);
