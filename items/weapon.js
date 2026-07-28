@@ -19,7 +19,7 @@ export class Weapon {
     this.heldMesh = null;
     this.useHeldMeshWhenHeld = false;
     this._holdOffset = options.holdOffset || new THREE.Vector3(-0.05, 0.15, 0.08);
-    this._holdRotation = options.holdRotation || new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
+    this._holdRotation = options.holdRotation || new THREE.Euler(0, Math.PI, 0, 'YXZ');
     this._holdQuaternion = new THREE.Quaternion().setFromEuler(this._holdRotation);
     this._handBones = new WeakMap();
     this._tempPosition = new THREE.Vector3();
@@ -227,12 +227,12 @@ export class Weapon {
     });
 
     const resolved = this.hand === 'left'
-      ? leftHandBone || anyHandBone || rightHandBone
-      : rightHandBone || anyHandBone || leftHandBone;
+      ? rightHandBone || anyHandBone || leftHandBone
+      : leftHandBone || anyHandBone || rightHandBone;
 
     this._handBones.set(playerModel, {
-      left: leftHandBone || anyHandBone || null,
-      right: rightHandBone || anyHandBone || null,
+      left: rightHandBone || anyHandBone || null,
+      right: leftHandBone || anyHandBone || null,
       any: anyHandBone || null
     });
     return resolved || null;
