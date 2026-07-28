@@ -28,8 +28,9 @@ export async function loadSpecialWeapons() {
       import('../items/hammer.js'),
       import('../items/bazooka.js'),
       import('../items/bomb.js'),
-      import('../items/shield.js')
-    ]).then(([iceGunModule, bowModule, lanternModule, autumnSwordModule, hammerModule, bazookaModule, bombModule, shieldModule]) => ({
+      import('../items/shield.js'),
+      import('../items/pistol.js')
+    ]).then(([iceGunModule, bowModule, lanternModule, autumnSwordModule, hammerModule, bazookaModule, bombModule, shieldModule, pistolModule]) => ({
       IceGun: iceGunModule.IceGun,
       Bow: bowModule.Bow,
       Lantern: lanternModule.Lantern,
@@ -39,7 +40,8 @@ export async function loadSpecialWeapons() {
       Bomb: bombModule.Bomb,
       Shield: shieldModule.Shield,
       SHIELD_ITEM_ID: shieldModule.SHIELD_ITEM_ID,
-      DEFAULT_SHIELD_HEALTH: shieldModule.DEFAULT_SHIELD_HEALTH
+      DEFAULT_SHIELD_HEALTH: shieldModule.DEFAULT_SHIELD_HEALTH,
+      Pistol: pistolModule.Pistol
     })).finally(() => {
       hideLoading();
     });

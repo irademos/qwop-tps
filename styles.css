@@ -161,6 +161,7 @@ body.map-open #friendly-interact {
   pointer-events: none;
   z-index: 1000;
   display: none; /* Hidden until aiming */
+  transition: top 0.05s, left 0.05s;
 }
 
 .crosshair.visible {

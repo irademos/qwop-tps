@@ -3,8 +3,8 @@ import * as THREE from "three";
 import { BASE_HEALTH_SEGMENTS } from "../healthUtils.js";
 
 export const CHARACTER_MOVEMENT = {
-  walkSpeed: 2,
-  runSpeed: 5,
+  walkSpeed: 4,
+  runSpeed: 10,
   turnRate: 0.03
 };
 
