@@ -59,7 +59,7 @@ function setStatus(text, color = '#4f4') {
 
 async function startCamera() {
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } }
+    video: { facingMode: 'environment', width: { ideal: 320 }, height: { ideal: 240 } }
   });
   _video.srcObject = stream;
   return new Promise((resolve, reject) => {
@@ -111,9 +111,8 @@ export function updateHandTracking() {
       const dy = middleTip.y - wrist.y;
       const handSize = Math.sqrt(dx * dx + dy * dy);
 
-      // MediaPipe handedness from camera view: "Left" appears on the left side of the raw
-      // (non-mirrored) frame → that's the user's RIGHT hand in a front-facing camera.
-      const gameSide = handedness === 'Left' ? 'right' : 'left';
+      // Back camera: "Left" in the raw frame is the user's LEFT hand (no mirror flip).
+      const gameSide = handedness === 'Left' ? 'left' : 'right';
       const norm = palmToNormalized(palmX, palmY);
       norm.size = handSize;
       newData[gameSide] = norm;

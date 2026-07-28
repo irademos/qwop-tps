@@ -517,11 +517,13 @@ function dampToward(current, target, speed, dt) {
 }
 
 // Map normalized camera palm position + hand size to a 3D position in playerGroup local space.
-// palmX: 0=left edge of raw camera frame, 1=right edge (user's right appears on left for front camera)
+// palmX: 0=left edge of raw camera frame, 1=right edge (back camera: user's right is on the right)
 // palmY: 0=top, 1=bottom
 // handSize: wrist-to-middletip distance in normalized coords; small = far = hands pulled back
 function palmToLocalHandPos(palmX, palmY, handSize) {
-  const x = (palmX - 0.5) * 1.5;
+  // Back camera is not mirrored, so flip x to match the front-camera coordinate convention
+  // that the rest of the rig expects (user's right hand → negative x in local space).
+  const x = (0.5 - palmX) * 1.5;
   const y = (1 - palmY) * 1.1 + 0.25;
   // Map hand size [0.10, 0.45] → z [0.0, 0.65]: small hands near body, large hands outstretched
   const sizeNorm = THREE.MathUtils.clamp((handSize - 0.10) / (0.45 - 0.10), 0, 1);
