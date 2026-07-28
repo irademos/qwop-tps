@@ -13044,36 +13044,6 @@ async function initCore(runtimeContext) {
   feedDogBtn.textContent = 'Feed Dog';
   feedDogBtn.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%, -50%);z-index:1200;display:none;padding:8px 12px;';
   document.body.appendChild(feedDogBtn);
-  const combatTargetButtons = new Map();
-  const WEAPON_TARGET_MAX_DISTANCE = 15;
-  const TARGET_BTN_SIZE = 32;
-  const clearCombatTargetButtons = () => {
-    combatTargetButtons.forEach((entry) => entry?.button?.remove());
-    combatTargetButtons.clear();
-  };
-  const isTargetableWeaponEquipped = () => {
-    const weapon = playerControls?.getEquippedWeapon?.('right');
-    return weapon?.itemId === 'bomb' || weapon?.itemId === 'bow' || weapon?.itemId === 'bazooka';
-  };
-  const getCombatTargetKey = (entity, type = 'monster') => `${type}:${entity?.id || entity?.model?.uuid || Math.random()}`;
-  const getOrCreateCombatTargetButton = (entity, type = 'monster') => {
-    const key = getCombatTargetKey(entity, type);
-    if (combatTargetButtons.has(key)) return combatTargetButtons.get(key);
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = '🎯';
-    button.setAttribute('aria-label', type === 'animal' ? 'Target animal' : 'Target monster');
-    button.style.cssText = `position:fixed;z-index:1200;display:none;width:${TARGET_BTN_SIZE}px;height:${TARGET_BTN_SIZE}px;border-radius:999px;padding:0;font-size:18px;line-height:1;`;
-    button.addEventListener('click', () => {
-      const model = entity?.model;
-      if (!model?.position) return;
-      playerControls?.fireProjectileAtTarget?.(model, 'right');
-    });
-    document.body.appendChild(button);
-    const entry = { key, entity, button, type };
-    combatTargetButtons.set(key, entry);
-    return entry;
-  };
   const animalNameLabels = new Map();
   const areInteractionLabelsBlocked = () => {
     if (window.mapViewEnabled === true || document.body.classList.contains('map-open')) return true;
@@ -14127,50 +14097,6 @@ async function initCore(runtimeContext) {
           }
         } else {
           feedDogBtn.style.display = 'none';
-        }
-        if (labelsBlocked || !isTargetableWeaponEquipped()) {
-          clearCombatTargetButtons();
-        } else {
-          const visibleTargetKeys = new Set();
-          monsters.forEach((monster) => {
-            if (!monster?.model?.position || monster.isDead) return;
-            const distance = playerPos.distanceTo(monster.model.position);
-            if (distance > WEAPON_TARGET_MAX_DISTANCE) return;
-            const buttonAnchor = monster.model.position.clone().add(new THREE.Vector3(0, 2.3, 0));
-            buttonAnchor.project(camera);
-            if (buttonAnchor.z < 0 || buttonAnchor.z > 1) return;
-            if (Math.abs(buttonAnchor.x) > 1 || Math.abs(buttonAnchor.y) > 1) return;
-            const entry = getOrCreateCombatTargetButton(monster, 'monster');
-            visibleTargetKeys.add(entry.key);
-            const x = (buttonAnchor.x * 0.5 + 0.5) * window.innerWidth;
-            const y = (-buttonAnchor.y * 0.5 + 0.5) * window.innerHeight;
-            entry.button.style.display = 'block';
-            entry.button.style.left = `${x - (TARGET_BTN_SIZE / 2)}px`;
-            entry.button.style.top = `${y + 10}px`;
-          });
-          (animals || []).forEach((animal) => {
-            if (!animal?.model?.position || animal.isDead) return;
-            const animalType = String(animal?.type || '').toLowerCase();
-            if (animalType !== 'deer' && animalType !== 'crab' && animalType !== 'fish') return;
-            const distance = playerPos.distanceTo(animal.model.position);
-            if (distance > WEAPON_TARGET_MAX_DISTANCE) return;
-            const buttonAnchor = animal.model.position.clone().add(new THREE.Vector3(0, 2.1, 0));
-            buttonAnchor.project(camera);
-            if (buttonAnchor.z < 0 || buttonAnchor.z > 1) return;
-            if (Math.abs(buttonAnchor.x) > 1 || Math.abs(buttonAnchor.y) > 1) return;
-            const entry = getOrCreateCombatTargetButton(animal, 'animal');
-            visibleTargetKeys.add(entry.key);
-            const x = (buttonAnchor.x * 0.5 + 0.5) * window.innerWidth;
-            const y = (-buttonAnchor.y * 0.5 + 0.5) * window.innerHeight;
-            entry.button.style.display = 'block';
-            entry.button.style.left = `${x - (TARGET_BTN_SIZE / 2)}px`;
-            entry.button.style.top = `${y + 10}px`;
-          });
-          combatTargetButtons.forEach((entry, key) => {
-            if (!visibleTargetKeys.has(key)) {
-              entry.button.style.display = 'none';
-            }
-          });
         }
       }
     }
