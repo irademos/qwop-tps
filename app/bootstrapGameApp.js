@@ -5922,6 +5922,9 @@ async function initCore(runtimeContext) {
     if (isPotionItem(itemId)) {
       return ['drop', 'use'];
     }
+    if (itemId === 'pistol') {
+      return ['equip'];
+    }
     if (equippableItems.has(itemId)) {
       return ['drop', 'equip'];
     }
