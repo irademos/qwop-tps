@@ -24,56 +24,26 @@ function createCameraUI() {
   container.id = 'hand-tracking-container';
   container.style.cssText = `
     position: fixed;
-    bottom: 16px;
-    right: 16px;
-    width: 160px;
-    height: 130px;
-    border-radius: 8px;
+    width: 0;
+    height: 0;
     overflow: hidden;
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    z-index: 1000;
-    background: #111;
     pointer-events: none;
-    display: flex;
-    flex-direction: column;
   `;
 
   const video = document.createElement('video');
   video.style.cssText = `
-    width: 100%;
-    flex: 1;
-    object-fit: cover;
-    transform: scaleX(-1);
+    width: 320px;
+    height: 240px;
     display: block;
   `;
   video.autoplay = true;
   video.playsInline = true;
   video.muted = true;
 
-  const label = document.createElement('div');
-  label.style.cssText = `
-    background: rgba(0,0,0,0.65);
-    color: #aef;
-    font: 10px/1.4 monospace;
-    text-align: center;
-    padding: 2px 0;
-    letter-spacing: 0.04em;
-  `;
-  label.textContent = '🤚 hand tracking';
-
   _statusEl = document.createElement('div');
-  _statusEl.style.cssText = `
-    position: absolute;
-    top: 4px;
-    left: 6px;
-    color: #fa0;
-    font: bold 10px monospace;
-  `;
-  _statusEl.textContent = 'loading…';
+  _statusEl.style.display = 'none';
 
   container.appendChild(video);
-  container.appendChild(label);
-  container.appendChild(_statusEl);
   document.body.appendChild(container);
 
   _video = video;
