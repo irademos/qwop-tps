@@ -6305,6 +6305,9 @@ async function initCore(runtimeContext) {
     if (itemId === 'hammer') {
       return hammer?.holder === playerControls;
     }
+    if (itemId === 'pistol') {
+      return pistol?.holder === playerControls;
+    }
     return false;
   }
 
@@ -6322,6 +6325,7 @@ async function initCore(runtimeContext) {
       if (isInventoryItemEquipped('bomb')) return 'bomb';
       if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
       if (isInventoryItemEquipped('hammer')) return 'hammer';
+      if (isInventoryItemEquipped('pistol')) return 'pistol';
     }
     return null;
   }
@@ -14624,6 +14628,7 @@ async function initCore(runtimeContext) {
     bomb?.update();
     autumnSword?.update();
     hammer?.update();
+    pistol?.update();
     lantern?.update();
     torch?.update();
     shield?.update();

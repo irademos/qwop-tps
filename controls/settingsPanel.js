@@ -1392,6 +1392,7 @@ function renderInventory() {
     iceGun: '❄️',
     bow: '🏹',
     bazooka: '🚀',
+    pistol: '🔫',
     autumnSword: '🗡️',
     hammer: '🔨',
     lantern: '🏮',

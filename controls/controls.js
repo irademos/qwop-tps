@@ -1004,6 +1004,7 @@ export class PlayerControls {
     if (weapon?.itemId === 'bow') return 'Bow';
     if (weapon?.itemId === 'bazooka') return 'Fire';
     if (weapon?.itemId === 'bomb') return 'Bomb';
+    if (weapon?.itemId === 'pistol') return 'Fire';
     return 'Attack';
   }
 
