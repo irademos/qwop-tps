@@ -58,15 +58,34 @@ function setStatus(text, color = '#4f4') {
 }
 
 async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'environment', width: { ideal: 320 }, height: { ideal: 240 } }
-  });
+  const stream = await _openBackCamera();
   _video.srcObject = stream;
   return new Promise((resolve, reject) => {
     _video.onloadedmetadata = () => {
       _video.play().then(resolve).catch(reject);
     };
     _video.onerror = reject;
+  });
+}
+
+async function _openBackCamera() {
+  // Try to find the 0.5x ultra-wide back camera by label.
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const ultraWide = devices.find(
+      d => d.kind === 'videoinput' && /ultra|wide|0\.5/i.test(d.label)
+    );
+    if (ultraWide) {
+      return await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: ultraWide.deviceId }, width: { ideal: 320 }, height: { ideal: 240 } }
+      });
+    }
+  } catch {
+    // fall through
+  }
+  // Fallback: regular back camera.
+  return navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 320 }, height: { ideal: 240 } }
   });
 }
 
