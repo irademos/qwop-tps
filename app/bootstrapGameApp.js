@@ -2948,6 +2948,7 @@ async function initCore(runtimeContext) {
   let torch;
   let shield;
   let bomb;
+  let pistol;
   let treasureChest;
   let bed;
   let craftTable;
@@ -3275,7 +3276,7 @@ async function initCore(runtimeContext) {
     Array.from(remoteHeldWeaponMeshes.keys()).forEach(disposeRemoteHeldWeaponMesh);
   };
 
-  const { IceGun, Bow, Lantern, AutumnSword, Hammer, Bazooka, Bomb, Shield, SHIELD_ITEM_ID, DEFAULT_SHIELD_HEALTH } = await loadSpecialWeapons();
+  const { IceGun, Bow, Lantern, AutumnSword, Hammer, Bazooka, Bomb, Shield, SHIELD_ITEM_ID, DEFAULT_SHIELD_HEALTH, Pistol } = await loadSpecialWeapons();
 
   const updateWeaponMarker = (weapon, marker, rotationSpeed, offsetY = 1.2) => {
     if (!weapon?.mesh || !marker) return;
@@ -3759,8 +3760,18 @@ async function initCore(runtimeContext) {
     isLocallyControlled: () => bazooka?.holder === playerControls
   });
 
-  runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer };
-  window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer };
+  pistol = new Pistol(scene);
+  await pistol.load();
+  window.pistol = pistol;
+  if (pistol.mesh) {
+    pistol.mesh.visible = false;
+    pistol.mesh.userData.hideInMapView = true;
+  }
+  pistol.onPickup = () => {};
+  pistol.onDrop = () => {};
+
+  runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol };
+  window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol };
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
@@ -4062,8 +4073,8 @@ async function initCore(runtimeContext) {
   });
 
 
-  runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, lantern, torch, shield };
-  window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, lantern, torch, shield };
+  runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol, lantern, torch, shield };
+  window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol, lantern, torch, shield };
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -5697,6 +5708,10 @@ async function initCore(runtimeContext) {
       name: 'Hammer',
       icon: ''
     },
+    pistol: {
+      name: 'Pistol',
+      icon: ''
+    },
     lantern: {
       name: 'Lantern (Left Hand)',
       icon: '/assets/ui/items/lantern.png'
@@ -5859,11 +5874,20 @@ async function initCore(runtimeContext) {
     };
     homeStorageDirty = true;
   }
+  // Pistol is always in inventory with infinite ammo
+  if (!inventoryState.pistol) {
+    inventoryState.pistol = {
+      count: 1,
+      icon: inventoryCatalog.pistol.icon,
+      name: inventoryCatalog.pistol.name
+    };
+    inventoryDirty = true;
+  }
   if (inventoryDirty || homeStorageDirty) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
   }
 
-  const equippableItems = new Set(['lantern', 'torch', SHIELD_ITEM_ID, 'iceGun', 'bow', 'bazooka', 'bomb', 'autumnSword', 'hammer']);
+  const equippableItems = new Set(['lantern', 'torch', SHIELD_ITEM_ID, 'iceGun', 'bow', 'bazooka', 'bomb', 'autumnSword', 'hammer', 'pistol']);
   const inventoryHandSlots = {
     lantern: 'left',
     torch: 'left',
@@ -5873,7 +5897,8 @@ async function initCore(runtimeContext) {
     bazooka: 'right',
     bomb: 'right',
     autumnSword: 'right',
-    hammer: 'right'
+    hammer: 'right',
+    pistol: 'right'
   };
   const getInventoryItemHand = (itemId) => inventoryHandSlots[itemId] || null;
   const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
@@ -6516,6 +6541,20 @@ async function initCore(runtimeContext) {
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'hammer-equip', cooldownMs: 100 });
       updateSettingsUI();
     }
+    if (itemId === 'pistol') {
+      if (!pistol?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(pistol, 'pistol', { forceNew: true });
+      pistol.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      pistol.mesh.visible = false;
+      pistol.localHoldOrigin = 'inventory';
+      pistol.holder = playerControls;
+      setPlayerWeaponType(playerControls, pistol.type);
+      playerControls.updateAmmoUI?.(false);
+      updateSettingsUI();
+    }
   }
 
   function unequipInventoryItem(itemId) {
@@ -6650,6 +6689,20 @@ async function initCore(runtimeContext) {
       }
       clearPlayerWeaponType(playerControls, hammer.type);
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'hammer-unequip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
+    if (itemId === 'pistol') {
+      if (pistol?.holder !== playerControls) return;
+      pistol.holder = null;
+      pistol.localHoldOrigin = null;
+      if (pistol.mesh) {
+        pistol.mesh.visible = false;
+      }
+      if (pistol.heldMesh) {
+        pistol.heldMesh.visible = false;
+      }
+      clearPlayerWeaponType(playerControls, pistol.type);
+      playerControls?.updateAmmoUI?.(false);
       updateSettingsUI();
     }
   }
@@ -11117,6 +11170,10 @@ async function initCore(runtimeContext) {
   updateControlAvailability();
   updateEnergyEffects();
 
+  // Auto-equip pistol if no other right-hand weapon is already held
+  if (pistol?.mesh && !playerControls.getEquippedWeapon?.('right')) {
+    equipInventoryItem('pistol');
+  }
 
   await initMapViewFeature({ camera, scene, player: playerModel });
 

@@ -12,7 +12,7 @@ import { loadNippleJs } from '../externalDeps.js';
 import { initHandTracking, updateHandTracking, getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
 
 // Movement constants
-const SWIM_SPEED = 2;
+const SWIM_SPEED = 4;
 const ENERGY_DEPLETED_SPEED_MULTIPLIER = 1.2;
 const JUMP_FORCE = 4;
 const JUMP_HEIGHT_MULTIPLIER = 2;
@@ -35,7 +35,7 @@ const GANG_BEASTS_DIRECT_CONTROL_RATIO = 0.12;
 const GANG_BEASTS_LEAN_DRIVE_ACCELERATION = 13.5;
 const PLAYER_GROUND_DRAG = 7;
 const PLAYER_AIR_DRAG = 0.35;
-const PLAYER_MAX_HORIZONTAL_SPEED = 5;
+const PLAYER_MAX_HORIZONTAL_SPEED = 10;
 const PLAYER_FALL_TORQUE = 8;
 const PLAYER_FALL_DAMPING = 4.5;
 const PLAYER_FALL_MOMENTUM_LEAN = 0.08;
@@ -3450,10 +3450,14 @@ export class PlayerControls {
 
   canFireProjectile(hand = 'right') {
     const gun = this.getEquippedGun(hand);
-    return !!gun && this.ammo > 0 && this.playerModel;
+    if (!gun || !this.playerModel) return false;
+    if (gun.infiniteAmmo) return true;
+    return this.ammo > 0;
   }
 
   consumeAmmo() {
+    const gun = this.getEquippedGun();
+    if (gun?.infiniteAmmo) return true;
     if (this.ammo <= 0) return false;
     this.setAmmo(this.ammo - 1);
     return true;
@@ -3579,12 +3583,23 @@ export class PlayerControls {
       });
 
       this.playAction('projectile');
+      const isPistol = gun?.itemId === 'pistol';
+      const projectileOptions = isPistol
+        ? {
+            geometry: new THREE.SphereGeometry(0.08, 8, 8),
+            colliderDesc: RAPIER.ColliderDesc.ball(0.08).setRestitution(0.3).setFriction(0.5),
+            color: new THREE.Color(0xffee44),
+            speed: 28,
+            lifetime: 2500
+          }
+        : undefined;
       this.spawnProjectile(
         this.scene,
         this.projectiles,
         position,
         direction,
-        this.multiplayer.getId()
+        this.multiplayer.getId(),
+        projectileOptions
       );
     }
     if (!skipAutoAimLinger) this.startAutoAimCameraLinger(autoAimDirection);
@@ -3639,12 +3654,15 @@ export class PlayerControls {
 
   // Returns an aim direction driven by the MediaPipe hand position when hand
   // tracking is active, mapping horizontal/vertical hand position to yaw/pitch
-  // offsets from the current camera direction. Returns null when unavailable.
+  // offsets from the current camera direction. Returns null when hand tracking
+  // is not enabled. When enabled but no hand is detected, uses the default
+  // center position (0.5, 0.5) so the gun fires forward.
   getHandAimDirection(hand = 'right') {
     if (!isHandTrackingEnabled()) return null;
     const hd = getHandTrackingData()?.[hand];
-    if (!hd) return null;
-    const { palmX, palmY } = hd;
+    // Use detected hand position, or default to center when no hand visible
+    const palmX = hd?.x ?? 0.5;
+    const palmY = hd?.y ?? 0.5;
     // palmX: 0=left edge, 1=right edge; palmY: 0=top, 1=bottom (both normalised)
     const YAW_RANGE = Math.PI * 0.6;   // ±54° total across the full hand travel range
     const PITCH_RANGE = Math.PI * 0.5; // ±45° total across the full hand travel range
@@ -3663,7 +3681,19 @@ export class PlayerControls {
     return new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
   }
 
+  updateCrosshairPosition() {
+    if (!this.crosshairEl) return;
+    if (!isHandTrackingEnabled()) return;
+    const hd = getHandTrackingData()?.right;
+    if (!hd) return;
+    const x = hd.x * window.innerWidth;
+    const y = hd.y * window.innerHeight;
+    this.crosshairEl.style.left = `${x}px`;
+    this.crosshairEl.style.top = `${y}px`;
+  }
+
   updateAimingRotation() {
+    this.updateCrosshairPosition();
     const weapon = this.mobileThrowAimItemId
       ? { itemId: this.mobileThrowAimItemId, type: 'throw' }
       : this.getEquippedWeapon();
