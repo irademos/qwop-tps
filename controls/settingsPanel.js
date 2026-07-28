@@ -655,6 +655,26 @@ function buildDisplayPanel() {
   firstPersonHint.textContent = 'Uncheck to switch to third-person view (camera pulls back to show the player).';
   firstPersonGroup.append(firstPersonLabel, firstPersonToggle, firstPersonHint);
 
+  const gyroGroup = createElement('div', 'settings-field');
+  const gyroLabel = createElement('label', 'settings-label', 'Gyroscope Camera');
+  gyroLabel.setAttribute('for', 'settings-display-gyro');
+  const gyroToggle = createElement('input', 'settings-checkbox');
+  gyroToggle.id = 'settings-display-gyro';
+  gyroToggle.type = 'checkbox';
+  gyroToggle.checked = false;
+  const gyroRecalGroup = createElement('div', 'settings-field');
+  gyroRecalGroup.style.paddingTop = '0';
+  gyroRecalGroup.hidden = true;
+  const gyroRecalBtn = createElement('button', 'settings-button settings-button-secondary', 'Recalibrate');
+  gyroRecalBtn.id = 'settings-gyro-recal';
+  gyroRecalBtn.type = 'button';
+  const gyroRecalHint = createElement('div', 'settings-muted');
+  gyroRecalHint.textContent = 'Resets the neutral orientation to your current device position.';
+  gyroRecalGroup.append(gyroRecalBtn, gyroRecalHint);
+  const gyroHint = createElement('div', 'settings-muted');
+  gyroHint.textContent = 'Use device orientation to control the camera direction.';
+  gyroGroup.append(gyroLabel, gyroToggle, gyroHint);
+
   const highContrastGroup = createElement('div', 'settings-field');
   const highContrastLabel = createElement('label', 'settings-label', 'High Contrast Mode');
   highContrastLabel.setAttribute('for', 'settings-display-high-contrast');
@@ -727,6 +747,8 @@ function buildDisplayPanel() {
     performanceGroup,
     unitsGroup,
     firstPersonGroup,
+    gyroGroup,
+    gyroRecalGroup,
     highContrastGroup,
     ambientField.field,
     directionalField.field,
@@ -741,6 +763,9 @@ function buildDisplayPanel() {
     performanceSelect,
     unitsSelect,
     firstPersonToggle,
+    gyroToggle,
+    gyroRecalBtn,
+    gyroRecalGroup,
     highContrastToggle,
     sliders: {
       ambientIntensity: ambientField.input,
@@ -1671,6 +1696,33 @@ function bindEvents() {
     });
   }
 
+  if (elements.displayFields?.gyroToggle) {
+    elements.displayFields.gyroToggle.addEventListener('change', async (event) => {
+      const controls = window.playerControls;
+      if (!controls) return;
+      if (event.target.checked) {
+        event.target.disabled = true;
+        const ok = await controls.initGyroscope();
+        event.target.disabled = false;
+        if (!ok) {
+          event.target.checked = false;
+        }
+      } else {
+        controls.disableGyroscope();
+      }
+      const active = controls.gyroActive;
+      if (elements.displayFields?.gyroRecalGroup) {
+        elements.displayFields.gyroRecalGroup.hidden = !active;
+      }
+    });
+  }
+
+  if (elements.displayFields?.gyroRecalBtn) {
+    elements.displayFields.gyroRecalBtn.addEventListener('click', () => {
+      window.playerControls?.calibrateGyroscope?.();
+    });
+  }
+
   if (elements.displayFields?.highContrastToggle) {
     elements.displayFields.highContrastToggle.addEventListener('change', (event) => {
       context.appState?.setDisplaySetting?.('highContrastMode', event.target.checked);
@@ -2075,6 +2127,13 @@ export function updateUI() {
     }
     if (elements.displayFields.highContrastToggle) {
       elements.displayFields.highContrastToggle.checked = Boolean(displaySettings?.highContrastMode);
+    }
+    if (elements.displayFields.gyroToggle && !elements.displayFields.gyroToggle.disabled) {
+      const gyroActive = Boolean(window.playerControls?.gyroActive);
+      elements.displayFields.gyroToggle.checked = gyroActive;
+      if (elements.displayFields.gyroRecalGroup) {
+        elements.displayFields.gyroRecalGroup.hidden = !gyroActive;
+      }
     }
     Object.entries(elements.displayFields.sliders || {}).forEach(([key, slider]) => {
       const value = displaySettings?.[key];
