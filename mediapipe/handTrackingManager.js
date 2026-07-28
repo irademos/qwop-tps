@@ -130,8 +130,8 @@ export function updateHandTracking() {
       const dy = middleTip.y - wrist.y;
       const handSize = Math.sqrt(dx * dx + dy * dy);
 
-      // Back camera: "Left" in the raw frame is the user's RIGHT hand.
-      const gameSide = handedness === 'Left' ? 'right' : 'left';
+      // Back camera is not mirrored, so handedness maps directly.
+      const gameSide = handedness === 'Left' ? 'left' : 'right';
       const norm = palmToNormalized(palmX, palmY);
       norm.size = handSize;
       newData[gameSide] = norm;
