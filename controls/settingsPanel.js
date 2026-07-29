@@ -742,6 +742,59 @@ function buildDisplayPanel() {
   const hint = createElement('div', 'settings-muted');
   hint.textContent = 'Auto mode uses local time to switch between day and night lighting.';
 
+  const cameraPreviewGroup = createElement('div', 'settings-field');
+  const cameraPreviewLabel = createElement('label', 'settings-label', 'Camera Feed');
+  const cameraPreviewBtn = createElement('button', 'settings-button settings-button-secondary', 'View Camera Feed');
+  cameraPreviewBtn.id = 'settings-camera-preview-btn';
+  cameraPreviewBtn.type = 'button';
+  const cameraPreviewHint = createElement('div', 'settings-muted');
+  cameraPreviewHint.textContent = 'Preview the camera feed used for hand tracking.';
+  cameraPreviewGroup.append(cameraPreviewLabel, cameraPreviewBtn, cameraPreviewHint);
+
+  cameraPreviewBtn.addEventListener('click', () => {
+    const videoEl = document.querySelector('#hand-tracking-container video');
+    if (!videoEl) {
+      alert('Camera feed is not active. Enable hand tracking first.');
+      return;
+    }
+
+    const overlay = createElement('div', '');
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 10000;
+      background: rgba(0,0,0,0.85);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px;
+    `;
+
+    const previewVideo = document.createElement('video');
+    previewVideo.srcObject = videoEl.srcObject;
+    previewVideo.autoplay = true;
+    previewVideo.playsInline = true;
+    previewVideo.muted = true;
+    previewVideo.style.cssText = `
+      max-width: 90vw; max-height: 70vh;
+      border-radius: 8px; background: #000;
+      transform: scaleX(-1);
+    `;
+
+    const closeBtn = createElement('button', 'settings-button', 'Close');
+    closeBtn.style.cssText = 'min-width: 120px;';
+    closeBtn.addEventListener('click', () => {
+      previewVideo.srcObject = null;
+      overlay.remove();
+    });
+
+    overlay.append(previewVideo, closeBtn);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        previewVideo.srcObject = null;
+        overlay.remove();
+      }
+    });
+    document.body.appendChild(overlay);
+  });
+
   panelEl.append(
     modeGroup,
     performanceGroup,
@@ -750,6 +803,7 @@ function buildDisplayPanel() {
     gyroGroup,
     gyroRecalGroup,
     highContrastGroup,
+    cameraPreviewGroup,
     ambientField.field,
     directionalField.field,
     groundField.field,
