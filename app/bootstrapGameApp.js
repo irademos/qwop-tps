@@ -2965,7 +2965,7 @@ async function initCore(runtimeContext) {
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
 
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
   mapRenderer = createMapRenderer({ scene, renderer });
   buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
   buildingsRenderer?.setPromotionLimits?.({
