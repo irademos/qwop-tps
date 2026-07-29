@@ -584,6 +584,13 @@ function setupGLBHandBones(scene) {
   scene.updateWorldMatrix(true, true);
   const boneData = new Map(); // key → { bone, restLocalQuat, restLocalDir, landmarks }
 
+  // Debug: log all bones found to identify naming
+  const allBones = [];
+  scene.traverse(obj => {
+    if (obj.isBone) allBones.push(obj.name);
+  });
+  console.log('[HandModel] bones in scene:', allBones);
+
   scene.traverse(obj => {
     if (!obj.isBone) return;
     const key = boneNameToKey(obj.name);
@@ -603,6 +610,7 @@ function setupGLBHandBones(scene) {
     });
   });
 
+  console.log('[HandModel] driven bones mapped:', [...boneData.keys()]);
   scene.userData.handBoneData = boneData;
   return boneData;
 }
