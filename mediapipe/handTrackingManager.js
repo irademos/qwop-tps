@@ -9,6 +9,14 @@ let _initialized = false;
 let _uiContainer = null;
 let _statusEl = null;
 
+// Handedness confirmation buffer: track[slot] = { confirmedSide, pendingSide, pendingCount }
+// A new gameSide must appear HANDEDNESS_CONFIRM_FRAMES consecutive frames before it's accepted.
+const HANDEDNESS_CONFIRM_FRAMES = 7;
+const _handednessBuffer = [
+  { confirmedSide: null, pendingSide: null, pendingCount: 0 },
+  { confirmedSide: null, pendingSide: null, pendingCount: 0 },
+];
+
 export function getHandTrackingData() {
   return _handData;
 }
@@ -143,7 +151,27 @@ export function updateHandTracking() {
       const isFist = curledCount >= 3;
 
       // Back camera: "Left" in the raw frame is the user's RIGHT hand.
-      const gameSide = handedness === 'Left' ? 'right' : 'left';
+      const rawSide = handedness === 'Left' ? 'right' : 'left';
+
+      // Require HANDEDNESS_CONFIRM_FRAMES consecutive frames of the same label before
+      // switching, so brief misclassifications don't flip the displayed side.
+      const buf = _handednessBuffer[i];
+      if (rawSide === buf.confirmedSide) {
+        buf.pendingSide = null;
+        buf.pendingCount = 0;
+      } else if (rawSide === buf.pendingSide) {
+        buf.pendingCount++;
+        if (buf.pendingCount >= HANDEDNESS_CONFIRM_FRAMES) {
+          buf.confirmedSide = rawSide;
+          buf.pendingSide = null;
+          buf.pendingCount = 0;
+        }
+      } else {
+        buf.pendingSide = rawSide;
+        buf.pendingCount = 1;
+      }
+      const gameSide = buf.confirmedSide ?? rawSide;
+
       const norm = palmToNormalized(palmX, palmY);
       norm.size = palmSize;
       norm.isFist = isFist;
@@ -153,6 +181,12 @@ export function updateHandTracking() {
     setStatus('✓', '#4f4');
   } else {
     setStatus('–', '#aaa');
+    // Reset confirmation buffers when no hands are visible.
+    for (const buf of _handednessBuffer) {
+      buf.confirmedSide = null;
+      buf.pendingSide = null;
+      buf.pendingCount = 0;
+    }
   }
 
   _handData = newData;
