@@ -563,6 +563,8 @@ function createHandGroup(mat, side) {
   const palmMesh = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 6), mat);
   palmMesh.castShadow = true;
   palmMesh.receiveShadow = true;
+  // Offset ball slightly above the arm endpoint so it doesn't sit inside the arm
+  palmMesh.position.y = 0.07;
   group.add(palmMesh);
 
   const segments = [];
@@ -589,6 +591,8 @@ function updateHandFingers(handGroup, landmarks, palmSize) {
 
   const wrist = landmarks[0];
   const wrist3d = palmToLocalHandPos(wrist.x, wrist.y, palmSize);
+  // Shift wrist reference up to match the visual ball offset from the arm endpoint
+  wrist3d.y += 0.07;
   const scale = 0.085 / Math.max(palmSize, 0.05);
 
   const pts = landmarks.map(lm => new THREE.Vector3(
@@ -596,6 +600,18 @@ function updateHandFingers(handGroup, landmarks, palmSize) {
     wrist3d.y - (lm.y - wrist.y) * scale,
     wrist3d.z - (lm.z - wrist.z) * scale * 2
   ));
+
+  // Orbit offset: push the entire finger assembly in the direction the fingers are
+  // pointing so they surround the ball rather than sitting inside it.
+  const tipIndices = [8, 12, 16, 20];
+  const avgTip = new THREE.Vector3();
+  for (const idx of tipIndices) avgTip.add(pts[idx]);
+  avgTip.divideScalar(tipIndices.length);
+  const orbitDir = avgTip.clone().sub(pts[0]);
+  if (orbitDir.length() > 0.01) {
+    orbitDir.normalize().multiplyScalar(0.06);
+    for (const pt of pts) pt.add(orbitDir);
+  }
 
   // Segment positions are in playerGroup local space; handGroup has only a position offset
   const gp = handGroup.position;
