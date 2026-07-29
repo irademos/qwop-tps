@@ -123,17 +123,30 @@ export function updateHandTracking() {
       const palmX = (wrist.x + middleMCP.x) / 2;
       const palmY = (wrist.y + middleMCP.y) / 2;
 
-      // Hand size = distance from wrist to middle fingertip (landmark 12) in normalized coords.
-      // Larger = closer to camera = hands outstretched in game.
-      const middleTip = landmarks[12];
-      const dx = middleTip.x - wrist.x;
-      const dy = middleTip.y - wrist.y;
-      const handSize = Math.sqrt(dx * dx + dy * dy);
+      // Palm size: wrist (0) to middle MCP (9) — stable across fist/open, used for depth.
+      // Larger = hand closer to camera = arms pulled back; smaller = far = arms outstretched.
+      const pdx = middleMCP.x - wrist.x;
+      const pdy = middleMCP.y - wrist.y;
+      const palmSize = Math.sqrt(pdx * pdx + pdy * pdy);
+
+      // Fist detection: check how many fingertips are curled toward the palm.
+      // Compare each tip's distance to wrist against palm size — curled tips stay close.
+      const FINGER_TIPS = [8, 12, 16, 20]; // index, middle, ring, pinky
+      let curledCount = 0;
+      for (const tipIdx of FINGER_TIPS) {
+        const tip = landmarks[tipIdx];
+        const tdx = tip.x - wrist.x;
+        const tdy = tip.y - wrist.y;
+        const tipDist = Math.sqrt(tdx * tdx + tdy * tdy);
+        if (tipDist / palmSize < 1.5) curledCount++;
+      }
+      const isFist = curledCount >= 3;
 
       // Back camera: "Left" in the raw frame is the user's RIGHT hand.
       const gameSide = handedness === 'Left' ? 'right' : 'left';
       const norm = palmToNormalized(palmX, palmY);
-      norm.size = handSize;
+      norm.size = palmSize;
+      norm.isFist = isFist;
       newData[gameSide] = norm;
     }
     setStatus('✓', '#4f4');
