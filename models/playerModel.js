@@ -643,7 +643,13 @@ async function initGLBHands(leftGroup, rightGroup) {
   // --- Right hand ---
   const rightScene = SkeletonUtils.clone(gltf.scene);
   rightScene.scale.setScalar(HAND_MODEL_SCALE);
+  rightScene.position.set(0, 0, 0); // strip any origin offset baked into the GLB
+  rightScene.rotation.set(0, 0, 0);
   rightGroup.add(rightScene);
+  // Also zero out any armature-level offset on direct children
+  rightScene.children.forEach(child => {
+    if (!child.isMesh) { child.position.set(0, 0, 0); child.rotation.set(0, 0, 0); }
+  });
   rightScene.updateWorldMatrix(true, true);
   setupGLBHandBones(rightScene);
   rightScene.traverse(obj => {
@@ -658,7 +664,12 @@ async function initGLBHands(leftGroup, rightGroup) {
   // --- Left hand (mirror of right) ---
   const leftScene = SkeletonUtils.clone(gltf.scene);
   leftScene.scale.set(-HAND_MODEL_SCALE, HAND_MODEL_SCALE, HAND_MODEL_SCALE); // mirror on X
+  leftScene.position.set(0, 0, 0);
+  leftScene.rotation.set(0, 0, 0);
   leftGroup.add(leftScene);
+  leftScene.children.forEach(child => {
+    if (!child.isMesh) { child.position.set(0, 0, 0); child.rotation.set(0, 0, 0); }
+  });
   leftScene.updateWorldMatrix(true, true);
   setupGLBHandBones(leftScene);
   leftScene.traverse(obj => {
