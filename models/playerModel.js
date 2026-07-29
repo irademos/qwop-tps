@@ -525,9 +525,10 @@ function palmToLocalHandPos(palmX, palmY, handSize) {
   // that the rest of the rig expects (user's right hand → negative x in local space).
   const x = (0.5 - palmX) * 1.5;
   const y = (1 - palmY) * 1.1 + 0.25;
-  // Map hand size [0.10, 0.45] → z [0.0, 0.65]: small hands near body, large hands outstretched
-  const sizeNorm = THREE.MathUtils.clamp((handSize - 0.10) / (0.45 - 0.10), 0, 1);
-  const z = sizeNorm * 0.65;
+  // Map palm size (wrist→middleMCP) [0.05, 0.20] → z [0.65, 0.0]:
+  // small = hand far from camera = arms outstretched; large = close = arms pulled back.
+  const sizeNorm = THREE.MathUtils.clamp((handSize - 0.05) / (0.20 - 0.05), 0, 1);
+  const z = (1 - sizeNorm) * 0.65;
   return new THREE.Vector3(x, y, z);
 }
 

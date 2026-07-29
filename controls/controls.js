@@ -371,6 +371,7 @@ export class PlayerControls {
     this.aimFov = Math.max(45, this.defaultFov - 8);
     this.isAiming = false;
     this.isFireHeld = false;
+    this._fistState = { left: false, right: false }; // tracking slot → fist active
     this.autoAimBreakUntilRelease = false;
     this.autoAimCurrentPitch = 0;
     this.autoAimCameraDirection = null;
@@ -2938,6 +2939,12 @@ export class PlayerControls {
     if (this.playerModel) {
       this.playerModel.userData.handTrackingArms = getHandTrackingData();
     }
+    if (isHandTrackingEnabled()) {
+      const htd = getHandTrackingData();
+      // 'left' slot = in-game right hand; 'right' slot = in-game left hand (back-camera swap)
+      this._processHandFistAttack('left', htd?.left?.isFist);
+      this._processHandFistAttack('right', htd?.right?.isFist);
+    }
     updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
 
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
@@ -3448,6 +3455,38 @@ export class PlayerControls {
   triggerFire() {
     if (!this.enabled) return;
     this.attemptFireProjectile();
+  }
+
+  /**
+   * Process fist state for one MediaPipe tracking slot.
+   * trackingSlot 'left' corresponds to the in-game RIGHT hand (and vice versa)
+   * because the back-camera swaps the slots.
+   */
+  _processHandFistAttack(trackingSlot, isFist) {
+    if (!this._fistState) this._fistState = { left: false, right: false };
+    const wasFist = this._fistState[trackingSlot] ?? false;
+    this._fistState[trackingSlot] = !!isFist;
+
+    const gameHand = trackingSlot === 'left' ? 'right' : 'left';
+
+    if (isFist && !wasFist) {
+      // Fist just closed — trigger attack or start charge
+      if (!this.enabled || this.isInWater) return;
+      if (this.shouldHoldToFire(gameHand)) {
+        // Hold-to-fire weapons (bow, bazooka, bomb, iceGun): begin charge on close
+        this.isFireHeld = true;
+        this.setAiming(true);
+      } else {
+        this.performAttackForSlot(gameHand);
+      }
+    } else if (!isFist && wasFist) {
+      // Fist just opened — release hold-to-fire weapons
+      if (this.isFireHeld && this.shouldHoldToFire(gameHand)) {
+        this.isFireHeld = false;
+        this.setAiming(false);
+        this.attemptFireProjectileForHand(gameHand);
+      }
+    }
   }
 
   canFireProjectile(hand = 'right') {
