@@ -537,6 +537,87 @@ const _hWorld = new THREE.Vector3();
 const _upAxis = new THREE.Vector3(0, 1, 0);
 const _rootQ = new THREE.Quaternion();
 const _armQ = new THREE.Quaternion();
+const _fingerDir = new THREE.Vector3();
+
+// Landmark index pairs for the 15 finger segments (thumb + 4 fingers, 3 segments each)
+const FINGER_SEGS = [
+  [1,2],[2,3],[3,4],       // thumb
+  [5,6],[6,7],[7,8],       // index
+  [9,10],[10,11],[11,12],  // middle
+  [13,14],[14,15],[15,16], // ring
+  [17,18],[18,19],[19,20], // pinky
+];
+const FINGER_RADII = [
+  0.021, 0.018, 0.015,
+  0.017, 0.015, 0.013,
+  0.017, 0.015, 0.013,
+  0.015, 0.013, 0.011,
+  0.013, 0.011, 0.009,
+];
+
+function createHandGroup(mat, side) {
+  const group = new THREE.Group();
+  group.name = side + 'FloatingHand';
+  group.userData.proceduralHand = side;
+
+  const palmMesh = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 6), mat);
+  palmMesh.castShadow = true;
+  palmMesh.receiveShadow = true;
+  group.add(palmMesh);
+
+  const segments = [];
+  for (let i = 0; i < FINGER_SEGS.length; i++) {
+    const r = FINGER_RADII[i];
+    const seg = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 5), mat);
+    seg.castShadow = true;
+    seg.visible = false;
+    group.add(seg);
+    segments.push(seg);
+  }
+  group.userData.fingerSegments = segments;
+  return group;
+}
+
+function updateHandFingers(handGroup, landmarks, palmSize) {
+  const segments = handGroup.userData.fingerSegments;
+  if (!segments) return;
+
+  if (!landmarks || landmarks.length < 21) {
+    for (const s of segments) s.visible = false;
+    return;
+  }
+
+  const wrist = landmarks[0];
+  const wrist3d = palmToLocalHandPos(wrist.x, wrist.y, palmSize);
+  const scale = 0.085 / Math.max(palmSize, 0.05);
+
+  const pts = landmarks.map(lm => new THREE.Vector3(
+    wrist3d.x - (lm.x - wrist.x) * scale,
+    wrist3d.y - (lm.y - wrist.y) * scale,
+    wrist3d.z - (lm.z - wrist.z) * scale * 2
+  ));
+
+  // Segment positions are in playerGroup local space; handGroup has only a position offset
+  const gp = handGroup.position;
+
+  for (let i = 0; i < FINGER_SEGS.length; i++) {
+    const [a, b] = FINGER_SEGS[i];
+    const p1 = pts[a];
+    const p2 = pts[b];
+    const dist = p1.distanceTo(p2);
+    if (dist < 0.002) { segments[i].visible = false; continue; }
+
+    segments[i].visible = true;
+    segments[i].position.set(
+      (p1.x + p2.x) * 0.5 - gp.x,
+      (p1.y + p2.y) * 0.5 - gp.y,
+      (p1.z + p2.z) * 0.5 - gp.z
+    );
+    segments[i].scale.y = dist;
+    _fingerDir.set(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z).normalize();
+    segments[i].quaternion.setFromUnitVectors(_upAxis, _fingerDir);
+  }
+}
 
 function updateElasticArm(armMesh, shoulderAnchor, handMesh, root) {
   shoulderAnchor.getWorldPosition(_sWorld);
@@ -729,9 +810,9 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       const defaultX = side === 'left' ? -0.5 : 0.5;
       const defaultPos = new THREE.Vector3(defaultX, 0.65, 0.25);
       const targetPos = trackData ? palmToLocalHandPos(trackData.x, trackData.y, trackData.size ?? 0.20) : defaultPos;
-      // Smooth hand position for left but direct for right (or both can be smooth)
       floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
       updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
+      updateHandFingers(floatingHand, trackData?.landmarks, trackData?.size ?? 0.20);
     }
   }
 
@@ -823,24 +904,17 @@ export function createPlayerModel(
 
   // Floating hands and elastic arms are direct children of playerGroup so they remain
   // visible in first-person even when bodyRoot is hidden.
-  const skinMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8 });
-  const leftFloatingHand = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), skinMat);
-  leftFloatingHand.name = 'leftFloatingHand';
-  leftFloatingHand.userData.proceduralHand = 'left';
-  leftFloatingHand.castShadow = true;
-  leftFloatingHand.receiveShadow = true;
+  const skinMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8, transparent: true, opacity: 0.70 });
+
+  const leftFloatingHand = createHandGroup(skinMat, 'left');
   leftFloatingHand.position.set(-0.5, 0.65, 0.25);
   playerGroup.add(leftFloatingHand);
 
-  const rightFloatingHand = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 10), skinMat.clone());
-  rightFloatingHand.name = 'rightFloatingHand';
-  rightFloatingHand.userData.proceduralHand = 'right';
-  rightFloatingHand.castShadow = true;
-  rightFloatingHand.receiveShadow = true;
+  const rightFloatingHand = createHandGroup(skinMat.clone(), 'right');
   rightFloatingHand.position.set(0.5, 0.65, 0.25);
   playerGroup.add(rightFloatingHand);
 
-  const elasticMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8 });
+  const elasticMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8, transparent: true, opacity: 0.70 });
   const leftElasticArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), elasticMat);
   leftElasticArm.name = 'leftElasticArm';
   leftElasticArm.castShadow = true;

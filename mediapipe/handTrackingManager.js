@@ -147,6 +147,7 @@ export function updateHandTracking() {
       const norm = palmToNormalized(palmX, palmY);
       norm.size = palmSize;
       norm.isFist = isFist;
+      norm.landmarks = landmarks;
       newData[gameSide] = norm;
     }
     setStatus('✓', '#4f4');
