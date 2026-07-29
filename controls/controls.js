@@ -3709,7 +3709,7 @@ export class PlayerControls {
     // palmX: 0=left edge, 1=right edge; palmY: 0=top, 1=bottom (both normalised)
     const YAW_RANGE = Math.PI * 0.6;   // ±54° total across the full hand travel range
     const PITCH_RANGE = Math.PI * 0.5; // ±45° total across the full hand travel range
-    const yawOffset = (palmX - 0.5) * YAW_RANGE;
+    const yawOffset = (0.5 - palmX) * YAW_RANGE;
     const pitch = (0.5 - palmY) * PITCH_RANGE;
     const totalYaw = this.yaw + yawOffset;
     return new THREE.Vector3(
