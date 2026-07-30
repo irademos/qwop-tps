@@ -694,6 +694,53 @@ const _bvEnd   = new THREE.Vector3();
 const _bvDir   = new THREE.Vector3();
 const _parentMatInv = new THREE.Matrix4();
 
+// Scratch objects for scene-level hand orientation
+const _bqSceneTarget = new THREE.Quaternion();
+const _bvFinger      = new THREE.Vector3();
+const _bvAcross      = new THREE.Vector3();
+const _bvNormal      = new THREE.Vector3();
+const _bvHandRight   = new THREE.Vector3();
+const _sceneM4       = new THREE.Matrix4();
+
+/**
+ * Rotate the GLB scene root to match the overall hand orientation derived from
+ * mediapipe landmarks, so the whole hand (not just fingers) tracks rotation.
+ *
+ * Coordinate mapping (derived from Q_rest = Euler(-π/2, π, 0)):
+ *   GLB +X  →  pts-space "across palm" axis  (pinky→index for right, index→pinky for left)
+ *   GLB +Y  →  pts-space "finger" axis        (wrist → middle MCP)
+ *   GLB +Z  →  pts-space "palm normal" axis   (out of palm, upward when palm faces sky)
+ */
+function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
+  // Finger direction: wrist (lm 0) → middle finger MCP (lm 9)
+  _bvFinger.subVectors(pts[9], pts[0]);
+  if (_bvFinger.lengthSq() < 1e-8) return;
+  _bvFinger.normalize();
+
+  // Across-palm: for right hand pts[5]→pts[17] gives ≈(-1,0,0) at rest;
+  // for left hand negate so both reference axes point the same way (matching the mirrored GLB).
+  const s = side === 'right' ? 1 : -1;
+  _bvAcross.subVectors(pts[5], pts[17]).multiplyScalar(s);
+  if (_bvAcross.lengthSq() < 1e-8) return;
+  _bvAcross.normalize();
+
+  // Palm normal = cross(across, finger) → +Y when palm faces sky at rest
+  _bvNormal.crossVectors(_bvAcross, _bvFinger);
+  if (_bvNormal.lengthSq() < 1e-8) return;
+  _bvNormal.normalize();
+
+  // Re-orthogonalize across ("right" of hand frame)
+  _bvHandRight.crossVectors(_bvNormal, _bvFinger).normalize();
+
+  // Build rotation matrix: makeBasis(xCol, yCol, zCol) maps GLB local axes to world
+  _sceneM4.makeBasis(_bvHandRight, _bvFinger, _bvNormal);
+  _bqSceneTarget.setFromRotationMatrix(_sceneM4);
+
+  // Smooth toward target orientation
+  glbScene.quaternion.slerp(_bqSceneTarget, 1 - Math.exp(-14 * dt));
+  glbScene.updateWorldMatrix(true, true);
+}
+
 /**
  * Drive the loaded GLB hand bones from mediapipe landmarks each frame.
  * pts[i] must be 21 THREE.Vector3 positions in playerGroup local space (same as
@@ -947,7 +994,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
       updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
 
-      // Drive GLB hand bones from mediapipe landmarks
+      // Drive GLB hand bones and overall hand rotation from mediapipe landmarks
       if (floatingHand.userData.glbReady && landmarks?.length >= 21) {
         const wrist = landmarks[0];
         const wrist3d = palmToLocalHandPos(wrist.x, wrist.y, palmSize);
@@ -957,6 +1004,9 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
           wrist3d.y - (lm.y - wrist.y) * lmScale,
           wrist3d.z - (lm.z - wrist.z) * lmScale * 2
         ));
+        // Rotate the scene root to match overall hand orientation before driving bones
+        const glbScene = floatingHand.userData.glbScene;
+        if (glbScene) updateGLBHandSceneRotation(glbScene, pts, side, dt);
         updateGLBHandBones(floatingHand, pts, playerGroup);
       }
     }
