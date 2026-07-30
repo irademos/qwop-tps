@@ -1,5 +1,7 @@
 // /models/playerModel.js
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
 
 const EPSILON = 1e-4;
@@ -537,101 +539,203 @@ const _hWorld = new THREE.Vector3();
 const _upAxis = new THREE.Vector3(0, 1, 0);
 const _rootQ = new THREE.Quaternion();
 const _armQ = new THREE.Quaternion();
-const _fingerDir = new THREE.Vector3();
 
-// Landmark index pairs for the 15 finger segments (thumb + 4 fingers, 3 segments each)
-const FINGER_SEGS = [
-  [1,2],[2,3],[3,4],       // thumb
-  [5,6],[6,7],[7,8],       // index
-  [9,10],[10,11],[11,12],  // middle
-  [13,14],[14,15],[15,16], // ring
-  [17,18],[18,19],[19,20], // pinky
-];
-const FINGER_RADII = [
-  0.021, 0.018, 0.015,
-  0.017, 0.015, 0.013,
-  0.017, 0.015, 0.013,
-  0.015, 0.013, 0.011,
-  0.013, 0.011, 0.009,
-];
+// === GLB HAND MODEL SUPPORT ===
+
+// Uniform scale applied to the loaded right_hand.glb model.
+// Adjust if the hand appears too large or small.
+const HAND_MODEL_SCALE = 0.7;
+
+// Maps bone name prefix (e.g. "Bone.005") → [startLandmark, endLandmark].
+// Bones 004/008/012/016 are metacarpals with no direct mediapipe data – left at rest.
+// Bones are listed root→tip so the Map iteration order matches FK dependency order.
+const HAND_BONE_DRIVE = new Map([
+  ['Bone.001', [1, 2]],   // thumb CMC → MCP
+  ['Bone.002', [2, 3]],   // thumb MCP → IP
+  ['Bone.003', [3, 4]],   // thumb IP  → tip
+  ['Bone.005', [5, 6]],   // index  MCP → PIP
+  ['Bone.006', [6, 7]],   // index  PIP → DIP
+  ['Bone.007', [7, 8]],   // index  DIP → tip
+  ['Bone.009', [9, 10]],  // middle MCP → PIP
+  ['Bone.010', [10, 11]], // middle PIP → DIP
+  ['Bone.011', [11, 12]], // middle DIP → tip
+  ['Bone.013', [13, 14]], // ring   MCP → PIP
+  ['Bone.014', [14, 15]], // ring   PIP → DIP
+  ['Bone.015', [15, 16]], // ring   DIP → tip
+  ['Bone.017', [17, 18]], // pinky  MCP → PIP
+  ['Bone.018', [18, 19]], // pinky  PIP → DIP
+  ['Bone.019', [19, 20]], // pinky  DIP → tip
+]);
+
+// Resolve the canonical drive-key from a bone's scene name (handles "Bone.003_Armature" etc.)
+function boneNameToKey(name) {
+  // Handles both "Bone.001_Armature" and "Bone001_Armature" naming conventions
+  const m = name.match(/Bone\.?(\d+)/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return `Bone.${String(n).padStart(3, '0')}`;
+}
+
+/**
+ * After scene.updateWorldMatrix(true,true), walk every bone in the scene and
+ * build a Map of { bone, restLocalQuat, restLocalDir } for each driven bone.
+ * restLocalDir is the direction the bone points in its parent's local space at rest.
+ */
+function setupGLBHandBones(scene) {
+  scene.updateWorldMatrix(true, true);
+  const boneData = new Map(); // key → { bone, restLocalQuat, restLocalDir, landmarks }
+
+  scene.traverse(obj => {
+    if (!obj.isBone) return;
+    const key = boneNameToKey(obj.name);
+    if (!key || !HAND_BONE_DRIVE.has(key)) return;
+
+    const restLocalQuat = obj.quaternion.clone();
+
+    // The bone's pointing direction in its parent's local space at rest:
+    // rotate the bone's natural +Y axis by restLocalQuat.
+    const restLocalDir = new THREE.Vector3(0, 1, 0).applyQuaternion(restLocalQuat);
+
+    boneData.set(key, {
+      bone: obj,
+      restLocalQuat,
+      restLocalDir,
+      landmarks: HAND_BONE_DRIVE.get(key),
+    });
+  });
+
+  scene.userData.handBoneData = boneData;
+  return boneData;
+}
+
+const _glbLoader = new GLTFLoader();
+let _glbHandPromise = null;
+
+function getGLBHandGLTF() {
+  if (!_glbHandPromise) {
+    _glbHandPromise = new Promise((resolve, reject) =>
+      _glbLoader.load('/models/hands/right_hand.glb', resolve, undefined, reject)
+    );
+  }
+  return _glbHandPromise;
+}
 
 function createHandGroup(mat, side) {
   const group = new THREE.Group();
   group.name = side + 'FloatingHand';
-  group.userData.proceduralHand = side;
-
-  const palmMesh = new THREE.Mesh(new THREE.SphereGeometry(0.048, 8, 6), mat);
-  palmMesh.castShadow = true;
-  palmMesh.receiveShadow = true;
-  // Offset ball slightly above the arm endpoint so it doesn't sit inside the arm
-  palmMesh.position.y = 0.07;
-  group.add(palmMesh);
-
-  const segments = [];
-  for (let i = 0; i < FINGER_SEGS.length; i++) {
-    const r = FINGER_RADII[i];
-    const seg = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1, 5), mat);
-    seg.castShadow = true;
-    seg.visible = false;
-    group.add(seg);
-    segments.push(seg);
-  }
-  group.userData.fingerSegments = segments;
+  group.userData.glbHandSide = side;
+  group.userData.glbReady = false;
   return group;
 }
 
-function updateHandFingers(handGroup, landmarks, palmSize) {
-  const segments = handGroup.userData.fingerSegments;
-  if (!segments) return;
-
-  if (!landmarks || landmarks.length < 21) {
-    for (const s of segments) s.visible = false;
+/**
+ * Async: loads the GLB and populates both hand groups with the skinned mesh + bones.
+ * Called once from createPlayerModel; both groups are patched when ready.
+ */
+async function initGLBHands(leftGroup, rightGroup) {
+  let gltf;
+  try {
+    gltf = await getGLBHandGLTF();
+  } catch (e) {
+    console.warn('[HandModel] Failed to load right_hand.glb:', e);
     return;
   }
 
-  const wrist = landmarks[0];
-  const wrist3d = palmToLocalHandPos(wrist.x, wrist.y, palmSize);
-  // Shift wrist reference up to match the visual ball offset from the arm endpoint
-  wrist3d.y += 0.07;
-  const scale = 0.085 / Math.max(palmSize, 0.05);
+  // --- Right hand ---
+  const rightScene = SkeletonUtils.clone(gltf.scene);
+  rightScene.scale.setScalar(HAND_MODEL_SCALE);
+  rightScene.position.set(0, 0, 0); // strip any origin offset baked into the GLB
+  rightScene.rotation.set(0, 0, 0);
+  rightGroup.add(rightScene);
+  // Also zero out any armature-level offset on direct children
+  rightScene.children.forEach(child => {
+    if (!child.isMesh) { child.position.set(0, 0, 0); child.rotation.set(0, 0, 0); }
+  });
+  rightScene.updateWorldMatrix(true, true);
+  setupGLBHandBones(rightScene);
+  rightScene.traverse(obj => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+    }
+  });
+  rightGroup.userData.glbScene = rightScene;
+  rightGroup.userData.glbReady = true;
 
-  const pts = landmarks.map(lm => new THREE.Vector3(
-    wrist3d.x - (lm.x - wrist.x) * scale,
-    wrist3d.y - (lm.y - wrist.y) * scale,
-    wrist3d.z - (lm.z - wrist.z) * scale * 2
-  ));
+  // --- Left hand (mirror of right) ---
+  const leftScene = SkeletonUtils.clone(gltf.scene);
+  leftScene.scale.set(-HAND_MODEL_SCALE, HAND_MODEL_SCALE, HAND_MODEL_SCALE); // mirror on X
+  leftScene.position.set(0, 0, 0);
+  leftScene.rotation.set(0, 0, 0);
+  leftGroup.add(leftScene);
+  leftScene.children.forEach(child => {
+    if (!child.isMesh) { child.position.set(0, 0, 0); child.rotation.set(0, 0, 0); }
+  });
+  leftScene.updateWorldMatrix(true, true);
+  setupGLBHandBones(leftScene);
+  leftScene.traverse(obj => {
+    if (obj.isMesh) {
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+      // Negative X scale flips winding; DoubleSide corrects the lighting.
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(m => { if (m) m.side = THREE.DoubleSide; });
+    }
+  });
+  leftGroup.userData.glbScene = leftScene;
+  leftGroup.userData.glbReady = true;
+}
 
-  // Orbit offset: push the entire finger assembly in the direction the fingers are
-  // pointing so they surround the ball rather than sitting inside it.
-  const tipIndices = [8, 12, 16, 20];
-  const avgTip = new THREE.Vector3();
-  for (const idx of tipIndices) avgTip.add(pts[idx]);
-  avgTip.divideScalar(tipIndices.length);
-  const orbitDir = avgTip.clone().sub(pts[0]);
-  if (orbitDir.length() > 0.01) {
-    orbitDir.normalize().multiplyScalar(0.06);
-    for (const pt of pts) pt.add(orbitDir);
-  }
+// Reusable scratch objects for updateGLBHandBones
+const _bqDelta = new THREE.Quaternion();
+const _bqNew   = new THREE.Quaternion();
+const _bvStart = new THREE.Vector3();
+const _bvEnd   = new THREE.Vector3();
+const _bvDir   = new THREE.Vector3();
+const _parentMatInv = new THREE.Matrix4();
 
-  // Segment positions are in playerGroup local space; handGroup has only a position offset
-  const gp = handGroup.position;
+/**
+ * Drive the loaded GLB hand bones from mediapipe landmarks each frame.
+ * pts[i] must be 21 THREE.Vector3 positions in playerGroup local space (same as
+ * the existing landmark mapping used for the procedural hand segments).
+ */
+function updateGLBHandBones(handGroup, pts, playerGroup) {
+  if (!handGroup.userData.glbReady) return;
+  const glbScene = handGroup.userData.glbScene;
+  const boneData = glbScene?.userData?.handBoneData;
+  if (!boneData || boneData.size === 0) return;
 
-  for (let i = 0; i < FINGER_SEGS.length; i++) {
-    const [a, b] = FINGER_SEGS[i];
-    const p1 = pts[a];
-    const p2 = pts[b];
-    const dist = p1.distanceTo(p2);
-    if (dist < 0.002) { segments[i].visible = false; continue; }
+  // Ensure bone world matrices are current before starting
+  glbScene.updateWorldMatrix(true, true);
 
-    segments[i].visible = true;
-    segments[i].position.set(
-      (p1.x + p2.x) * 0.5 - gp.x,
-      (p1.y + p2.y) * 0.5 - gp.y,
-      (p1.z + p2.z) * 0.5 - gp.z
-    );
-    segments[i].scale.y = dist;
-    _fingerDir.set(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z).normalize();
-    segments[i].quaternion.setFromUnitVectors(_upAxis, _fingerDir);
+  const playerMat = playerGroup.matrixWorld;
+
+  for (const [, data] of boneData) {
+    const { bone, restLocalQuat, restLocalDir, landmarks: [a, b] } = data;
+
+    // pts are in playerGroup local space; transform to world space
+    _bvStart.copy(pts[a]).applyMatrix4(playerMat);
+    _bvEnd.copy(pts[b]).applyMatrix4(playerMat);
+    _bvDir.subVectors(_bvEnd, _bvStart);
+    if (_bvDir.lengthSq() < 1e-6) continue;
+    _bvDir.normalize();
+
+    // Express targetDir in the parent bone's local space
+    bone.parent.updateWorldMatrix(true, false);
+    _parentMatInv.copy(bone.parent.matrixWorld).invert();
+    _bvDir.transformDirection(_parentMatInv);
+    if (_bvDir.lengthSq() < 1e-6) continue;
+    _bvDir.normalize();
+
+    // Delta rotation: from rest local direction to target local direction
+    _bqDelta.setFromUnitVectors(restLocalDir, _bvDir);
+
+    // New local quaternion: delta applied on top of rest
+    _bqNew.multiplyQuaternions(_bqDelta, restLocalQuat);
+    bone.quaternion.copy(_bqNew);
+
+    // Propagate this bone's updated matrix so child bones see correct parent
+    bone.updateWorldMatrix(false, false);
   }
 }
 
@@ -825,10 +929,36 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       const floatingHand = rig.floatingHands[side];
       const defaultX = side === 'left' ? -0.5 : 0.5;
       const defaultPos = new THREE.Vector3(defaultX, 0.65, 0.25);
-      const targetPos = trackData ? palmToLocalHandPos(trackData.x, trackData.y, trackData.size ?? 0.20) : defaultPos;
+
+      // Use wrist landmark (lm 0) for hand group position so the GLB armature
+      // root sits at the wrist; fall back to palm-centre when no landmarks.
+      const landmarks = trackData?.landmarks;
+      const palmSize  = trackData?.size ?? 0.20;
+      let targetPos;
+      if (landmarks?.length >= 1) {
+        const wlm = landmarks[0];
+        targetPos = palmToLocalHandPos(wlm.x, wlm.y, palmSize);
+      } else if (trackData) {
+        targetPos = palmToLocalHandPos(trackData.x, trackData.y, palmSize);
+      } else {
+        targetPos = defaultPos;
+      }
+
       floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
       updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
-      updateHandFingers(floatingHand, trackData?.landmarks, trackData?.size ?? 0.20);
+
+      // Drive GLB hand bones from mediapipe landmarks
+      if (floatingHand.userData.glbReady && landmarks?.length >= 21) {
+        const wrist = landmarks[0];
+        const wrist3d = palmToLocalHandPos(wrist.x, wrist.y, palmSize);
+        const lmScale = 0.085 / Math.max(palmSize, 0.05);
+        const pts = landmarks.map(lm => new THREE.Vector3(
+          wrist3d.x - (lm.x - wrist.x) * lmScale,
+          wrist3d.y - (lm.y - wrist.y) * lmScale,
+          wrist3d.z - (lm.z - wrist.z) * lmScale * 2
+        ));
+        updateGLBHandBones(floatingHand, pts, playerGroup);
+      }
     }
   }
 
@@ -929,6 +1059,11 @@ export function createPlayerModel(
   const rightFloatingHand = createHandGroup(skinMat.clone(), 'right');
   rightFloatingHand.position.set(0.5, 0.65, 0.25);
   playerGroup.add(rightFloatingHand);
+
+  // Kick off async GLB load; groups are patched in-place when the model arrives.
+  initGLBHands(leftFloatingHand, rightFloatingHand).catch(e =>
+    console.warn('[HandModel] initGLBHands error:', e)
+  );
 
   const elasticMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8, transparent: true, opacity: 0.70 });
   const leftElasticArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), elasticMat);
