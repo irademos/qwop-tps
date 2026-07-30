@@ -736,6 +736,9 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   _sceneM4.makeBasis(_bvHandRight, _bvFinger, _bvNormal);
   _bqSceneTarget.setFromRotationMatrix(_sceneM4);
 
+  // Ensure slerp always takes the short arc (prevent hemisphere-flip pop)
+  if (glbScene.quaternion.dot(_bqSceneTarget) < 0) _bqSceneTarget.negate();
+
   // Smooth toward target orientation
   glbScene.quaternion.slerp(_bqSceneTarget, 1 - Math.exp(-14 * dt));
   glbScene.updateWorldMatrix(true, true);
