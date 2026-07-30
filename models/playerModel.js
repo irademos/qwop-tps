@@ -715,18 +715,19 @@ const _sceneM4       = new THREE.Matrix4();
  *   GLB +Z  →  pts-space "palm normal" axis   (out of palm, upward when palm faces sky)
  */
 function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
-  // Finger direction: wrist (lm 0) → middle finger MCP (lm 9)
-  _bvFinger.subVectors(pts[9], pts[0]);
+  // Finger direction — landmark indices tunable in debug panel
+  const { fingerLmA, fingerLmB, acrossLmA, acrossLmB } = handRotConfig;
+  _bvFinger.subVectors(pts[fingerLmB], pts[fingerLmA]);
   if (_bvFinger.lengthSq() < 1e-8) return;
   _bvFinger.normalize();
 
-  // Across-palm direction; sign controlled by debug config (and mirrored for left hand)
+  // Across-palm direction — landmark indices and sign tunable in debug panel
   const s = (side === 'right' ? 1 : -1) * handRotConfig.acrossSign;
-  _bvAcross.subVectors(pts[17], pts[5]).multiplyScalar(s);
+  _bvAcross.subVectors(pts[acrossLmA], pts[acrossLmB]).multiplyScalar(s);
   if (_bvAcross.lengthSq() < 1e-8) return;
   _bvAcross.normalize();
 
-  // Palm normal — cross order is a tunable debug param
+  // Palm normal — cross order tunable; optional normal flip
   if (handRotConfig.crossOrder === 'across_x_finger') {
     _bvNormal.crossVectors(_bvAcross, _bvFinger);
   } else {
@@ -734,6 +735,7 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   }
   if (_bvNormal.lengthSq() < 1e-8) return;
   _bvNormal.normalize();
+  if (handRotConfig.flipNormal) _bvNormal.negate();
 
   // Re-orthogonalize across ("right" of hand frame)
   _bvHandRight.crossVectors(_bvNormal, _bvFinger).normalize();
