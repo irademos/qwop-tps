@@ -738,6 +738,10 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   // then post-multiply a 90° tilt so fingers point forward rather than down
   _sceneM4.makeBasis(_bvHandRight, _bvFinger, _bvNormal);
   _bqSceneTarget.setFromRotationMatrix(_sceneM4).multiply(_handTiltOffset);
+  // The pts-space x-axis is mirrored (camera flip), which reverses chirality.
+  // Correcting for a mirror about X: negate the y and z quaternion components.
+  _bqSceneTarget.y *= -1;
+  _bqSceneTarget.z *= -1;
 
   // Ensure slerp always takes the short arc (prevent hemisphere-flip pop)
   if (glbScene.quaternion.dot(_bqSceneTarget) < 0) _bqSceneTarget.negate();
