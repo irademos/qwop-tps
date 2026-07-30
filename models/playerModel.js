@@ -3,6 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
+import { initHandRotationDebug, handRotConfig, getOffsetQuaternion } from './handRotationDebug.js';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
@@ -661,6 +662,7 @@ async function initGLBHands(leftGroup, rightGroup) {
   });
   rightGroup.userData.glbScene = rightScene;
   rightGroup.userData.glbReady = true;
+  initHandRotationDebug();
 
   // --- Left hand (mirror of right) ---
   const leftScene = SkeletonUtils.clone(gltf.scene);
@@ -701,8 +703,7 @@ const _bvAcross      = new THREE.Vector3();
 const _bvNormal      = new THREE.Vector3();
 const _bvHandRight   = new THREE.Vector3();
 const _sceneM4       = new THREE.Matrix4();
-// 90° offset around the GLB's local X axis so fingers point forward rather than down
-const _handTiltOffset = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+// (tilt offset is now read live from handRotConfig via getOffsetQuaternion())
 
 /**
  * Rotate the GLB scene root to match the overall hand orientation derived from
@@ -719,35 +720,39 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   if (_bvFinger.lengthSq() < 1e-8) return;
   _bvFinger.normalize();
 
-  // Across-palm: for right hand pts[17]→pts[5] gives ≈(+1,0,0) at rest;
-  // for left hand negate so both reference axes point the same way (matching the mirrored GLB).
-  const s = side === 'right' ? 1 : -1;
+  // Across-palm direction; sign controlled by debug config (and mirrored for left hand)
+  const s = (side === 'right' ? 1 : -1) * handRotConfig.acrossSign;
   _bvAcross.subVectors(pts[17], pts[5]).multiplyScalar(s);
   if (_bvAcross.lengthSq() < 1e-8) return;
   _bvAcross.normalize();
 
-  // Palm normal = cross(across, finger) → +Y when palm faces sky at rest
-  _bvNormal.crossVectors(_bvAcross, _bvFinger);
+  // Palm normal — cross order is a tunable debug param
+  if (handRotConfig.crossOrder === 'across_x_finger') {
+    _bvNormal.crossVectors(_bvAcross, _bvFinger);
+  } else {
+    _bvNormal.crossVectors(_bvFinger, _bvAcross);
+  }
   if (_bvNormal.lengthSq() < 1e-8) return;
   _bvNormal.normalize();
 
   // Re-orthogonalize across ("right" of hand frame)
   _bvHandRight.crossVectors(_bvNormal, _bvFinger).normalize();
 
-  // Build rotation matrix: makeBasis(xCol, yCol, zCol) maps GLB local axes to world
-  // then post-multiply a 90° tilt so fingers point forward rather than down
+  // Build rotation matrix then apply live Euler offset from debug panel
   _sceneM4.makeBasis(_bvHandRight, _bvFinger, _bvNormal);
-  _bqSceneTarget.setFromRotationMatrix(_sceneM4).multiply(_handTiltOffset);
-  // The pts-space x-axis is mirrored (camera flip), which reverses chirality.
-  // Correcting for a mirror about X: negate the y and z quaternion components.
-  _bqSceneTarget.y *= -1;
-  _bqSceneTarget.z *= -1;
+  _bqSceneTarget.setFromRotationMatrix(_sceneM4).multiply(getOffsetQuaternion());
+
+  // Apply per-component sign corrections (tunable in debug panel)
+  _bqSceneTarget.w *= handRotConfig.signW;
+  _bqSceneTarget.x *= handRotConfig.signX;
+  _bqSceneTarget.y *= handRotConfig.signY;
+  _bqSceneTarget.z *= handRotConfig.signZ;
 
   // Ensure slerp always takes the short arc (prevent hemisphere-flip pop)
   if (glbScene.quaternion.dot(_bqSceneTarget) < 0) _bqSceneTarget.negate();
 
   // Smooth toward target orientation
-  glbScene.quaternion.slerp(_bqSceneTarget, 1 - Math.exp(-14 * dt));
+  glbScene.quaternion.slerp(_bqSceneTarget, 1 - Math.exp(-handRotConfig.smoothing * dt));
   glbScene.updateWorldMatrix(true, true);
 }
 
