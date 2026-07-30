@@ -701,6 +701,8 @@ const _bvAcross      = new THREE.Vector3();
 const _bvNormal      = new THREE.Vector3();
 const _bvHandRight   = new THREE.Vector3();
 const _sceneM4       = new THREE.Matrix4();
+// 90° offset around the GLB's local X axis so fingers point forward rather than down
+const _handTiltOffset = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
 
 /**
  * Rotate the GLB scene root to match the overall hand orientation derived from
@@ -733,8 +735,9 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   _bvHandRight.crossVectors(_bvNormal, _bvFinger).normalize();
 
   // Build rotation matrix: makeBasis(xCol, yCol, zCol) maps GLB local axes to world
+  // then post-multiply a 90° tilt so fingers point forward rather than down
   _sceneM4.makeBasis(_bvHandRight, _bvFinger, _bvNormal);
-  _bqSceneTarget.setFromRotationMatrix(_sceneM4);
+  _bqSceneTarget.setFromRotationMatrix(_sceneM4).multiply(_handTiltOffset);
 
   // Ensure slerp always takes the short arc (prevent hemisphere-flip pop)
   if (glbScene.quaternion.dot(_bqSceneTarget) < 0) _bqSceneTarget.negate();
