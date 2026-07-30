@@ -717,10 +717,10 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   if (_bvFinger.lengthSq() < 1e-8) return;
   _bvFinger.normalize();
 
-  // Across-palm: for right hand pts[5]→pts[17] gives ≈(-1,0,0) at rest;
+  // Across-palm: for right hand pts[17]→pts[5] gives ≈(+1,0,0) at rest;
   // for left hand negate so both reference axes point the same way (matching the mirrored GLB).
   const s = side === 'right' ? 1 : -1;
-  _bvAcross.subVectors(pts[5], pts[17]).multiplyScalar(s);
+  _bvAcross.subVectors(pts[17], pts[5]).multiplyScalar(s);
   if (_bvAcross.lengthSq() < 1e-8) return;
   _bvAcross.normalize();
 
