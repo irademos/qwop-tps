@@ -569,7 +569,8 @@ const HAND_BONE_DRIVE = new Map([
 
 // Resolve the canonical drive-key from a bone's scene name (handles "Bone.003_Armature" etc.)
 function boneNameToKey(name) {
-  const m = name.match(/Bone\.(\d+)/i);
+  // Handles both "Bone.001_Armature" and "Bone001_Armature" naming conventions
+  const m = name.match(/Bone\.?(\d+)/i);
   if (!m) return null;
   const n = parseInt(m[1], 10);
   return `Bone.${String(n).padStart(3, '0')}`;
@@ -583,13 +584,6 @@ function boneNameToKey(name) {
 function setupGLBHandBones(scene) {
   scene.updateWorldMatrix(true, true);
   const boneData = new Map(); // key → { bone, restLocalQuat, restLocalDir, landmarks }
-
-  // Debug: log all bones found to identify naming
-  const allBones = [];
-  scene.traverse(obj => {
-    if (obj.isBone) allBones.push(obj.name);
-  });
-  console.log('[HandModel] bones in scene:', allBones);
 
   scene.traverse(obj => {
     if (!obj.isBone) return;
@@ -610,7 +604,6 @@ function setupGLBHandBones(scene) {
     });
   });
 
-  console.log('[HandModel] driven bones mapped:', [...boneData.keys()]);
   scene.userData.handBoneData = boneData;
   return boneData;
 }
