@@ -3,7 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
-import { initHandRotationDebug, handRotConfig, handPosOffset, getOffsetQuaternion } from './handRotationDebug.js';
+import { initHandRotationDebug, handRotConfig, handPosOffset, armConfig, getOffsetQuaternion } from './handRotationDebug.js';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
@@ -821,7 +821,7 @@ function updateElasticArm(armMesh, shoulderAnchor, handMesh, root) {
   const midZ = (_sWorld.z + _hWorld.z) * 0.5;
   const mid = new THREE.Vector3(midX, midY, midZ);
   armMesh.position.copy(root.worldToLocal(mid));
-  armMesh.scale.set(1, dist, 1);
+  armMesh.scale.set(armConfig.thickness, dist, armConfig.thickness);
 
   const dir = _hWorld.clone().sub(_sWorld).normalize();
   root.getWorldQuaternion(_rootQ);

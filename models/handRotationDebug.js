@@ -76,6 +76,9 @@ export function getOffsetQuaternion() {
 // ── hand position offset (applied on top of tracked wrist position) ───────────
 export const handPosOffset = { x: 0, y: 0, z: 0 };
 
+// ── arm thickness scale (1 = default radius of 0.065) ────────────────────────
+export const armConfig = { thickness: 1.0 };
+
 // ── DOM panel ─────────────────────────────────────────────────────────────────
 export function initHandRotationDebug() {
   if (document.getElementById('hand-pos-debug')) return;
@@ -119,19 +122,44 @@ function sliderRow(id, label, min, max, step, val) {
 // ── HTML ──────────────────────────────────────────────────────────────────────
 function buildHTML() {
   const p = handPosOffset;
+  const a = armConfig;
   return `
-<div style="font-size:13px;font-weight:bold;color:#5af;margin-bottom:6px">Hand Position Offset</div>
+<div style="font-size:13px;font-weight:bold;color:#5af;margin-bottom:6px">Hand / Arm Debug</div>
+<div style="color:#888;font-size:11px;margin-bottom:4px">Hand offset</div>
 ${sliderRow('hpo-x', 'X', -0.5, 0.5, 0.01, p.x)}
 ${sliderRow('hpo-y', 'Y', -0.5, 0.5, 0.01, p.y)}
-${sliderRow('hpo-z', 'Z', -0.5, 0.5, 0.01, p.z)}`;
+${sliderRow('hpo-z', 'Z', -0.5, 0.5, 0.01, p.z)}
+<div style="color:#888;font-size:11px;margin:6px 0 4px">Arm</div>
+${sliderRow('hpo-arm', 'thickness', 0.1, 4.0, 0.05, a.thickness)}
+<button id="hpo-copy"
+  style="margin-top:8px;width:100%;padding:4px;background:#335;border:1px solid #55a;border-radius:5px;color:#adf;cursor:pointer;font-family:monospace;font-size:12px">
+  Copy values
+</button>
+<div id="hpo-copied" style="color:#5f5;font-size:11px;text-align:center;height:14px;margin-top:2px"></div>`;
 }
 
 // ── event wiring ──────────────────────────────────────────────────────────────
 function wireEvents(panel) {
   const q = id => panel.querySelector(`#${id}`);
+
   for (const [id, key] of [['hpo-x','x'], ['hpo-y','y'], ['hpo-z','z']]) {
     const range = q(id), num = q(`${id}-num`);
     range.addEventListener('input', () => { handPosOffset[key] = +range.value; num.value = range.value; });
     num.addEventListener('change', () => { handPosOffset[key] = +num.value; range.value = num.value; });
   }
+
+  const armRange = q('hpo-arm'), armNum = q('hpo-arm-num');
+  armRange.addEventListener('input', () => { armConfig.thickness = +armRange.value; armNum.value = armRange.value; });
+  armNum.addEventListener('change', () => { armConfig.thickness = +armNum.value; armRange.value = armNum.value; });
+
+  q('hpo-copy').addEventListener('click', () => {
+    const p = handPosOffset, a = armConfig;
+    const out =
+`handPosOffset: { x: ${p.x}, y: ${p.y}, z: ${p.z} }
+armThickness: ${a.thickness}`;
+    navigator.clipboard.writeText(out).then(() => {
+      q('hpo-copied').textContent = 'Copied!';
+      setTimeout(() => { q('hpo-copied').textContent = ''; }, 1800);
+    });
+  });
 }
