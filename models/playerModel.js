@@ -1014,9 +1014,6 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         targetPos = defaultPos;
       }
 
-      targetPos.x += handPosOffset.x;
-      targetPos.y += handPosOffset.y;
-      targetPos.z += handPosOffset.z;
       floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
       updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
 
@@ -1032,8 +1029,12 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         ));
         // Rotate the scene root to match overall hand orientation before driving bones
         const glbScene = floatingHand.userData.glbScene;
+        if (glbScene) glbScene.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
         if (glbScene) updateGLBHandSceneRotation(glbScene, pts, side, dt);
         updateGLBHandBones(floatingHand, pts, playerGroup);
+      } else if (floatingHand.userData.glbReady) {
+        const glbScene = floatingHand.userData.glbScene;
+        if (glbScene) glbScene.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
       }
     }
   }
