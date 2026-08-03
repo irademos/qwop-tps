@@ -12,7 +12,7 @@ import * as THREE from 'three';
 export const handRotConfig = {
   // Euler offset post-multiplied onto the computed orientation (degrees).
   offsetX: 180,
-  offsetY: -180,
+  offsetY: 0,
   offsetZ: 0,
   offsetOrder: 'XYZ',
 
@@ -21,11 +21,13 @@ export const handRotConfig = {
   palmAxisDeg: 0,
 
   // Flip the computed palm normal before deriving the right axis.
-  // Equivalent to rotating 180° around the finger axis — try this first
-  // when palm faces camera instead of forward.
-  flipNormal: false,
+  // true = normal points OUT OF the palm (correct for front-camera / mirrored setup).
+  // false = normal points out the back of the hand.
+  flipNormal: true,
 
   // Signs applied to the final quaternion components (1 or -1).
+  // Avoid using these for orientation fixes — they break at orientation boundaries.
+  // Use flipNormal / acrossSign / crossOrder instead.
   signW: 1,
   signX: 1,
   signY: 1,
@@ -178,9 +180,9 @@ function buildHTML() {
 <div style="font-size:13px;font-weight:bold;color:#5af;margin-bottom:4px">✋ Hand Rotation Debug</div>
 
 ${section('Global Euler offset', 'Post-multiplied onto the computed orientation')}
-${sliderRow('hrd-ox', 'offset X', -180, 180, 1, c.offsetX)}
-${sliderRow('hrd-oy', 'offset Y', -180, 180, 1, c.offsetY)}
-${sliderRow('hrd-oz', 'offset Z', -180, 180, 1, c.offsetZ)}
+${sliderRow('hrd-ox', 'offset X', -360, 360, 1, c.offsetX)}
+${sliderRow('hrd-oy', 'offset Y', -360, 360, 1, c.offsetY)}
+${sliderRow('hrd-oz', 'offset Z', -360, 360, 1, c.offsetZ)}
 ${selectRow('hrd-order', 'Euler order', ['XYZ','XZY','YXZ','YZX','ZXY','ZYX'], c.offsetOrder)}
 
 ${section('Palm facing fix',
