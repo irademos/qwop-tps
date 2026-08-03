@@ -1,5 +1,6 @@
 // app.js
 import { getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
+import { Weapon } from '../items/weapon.js';
 import * as THREE from "three";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { loadMonsterModel } from "../models/monsterModel.js";
