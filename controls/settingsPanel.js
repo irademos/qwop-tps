@@ -738,6 +738,13 @@ function buildDisplayPanel() {
     max: 1.6,
     step: 0.05
   });
+  const terrainBlendField = createRangeField({
+    id: 'settings-display-terrain-blend',
+    label: 'Terrain Color Blend',
+    min: 0,
+    max: 1,
+    step: 0.05
+  });
 
   const hint = createElement('div', 'settings-muted');
   hint.textContent = 'Auto mode uses local time to switch between day and night lighting.';
@@ -809,6 +816,7 @@ function buildDisplayPanel() {
     groundField.field,
     buildingField.field,
     skyField.field,
+    terrainBlendField.field,
     hint
   );
 
@@ -826,14 +834,16 @@ function buildDisplayPanel() {
       directionalIntensity: directionalField.input,
       groundBrightness: groundField.input,
       buildingBrightness: buildingField.input,
-      skyBrightness: skyField.input
+      skyBrightness: skyField.input,
+      terrainColorBlend: terrainBlendField.input
     },
     values: {
       ambientIntensity: ambientField.valueLabel,
       directionalIntensity: directionalField.valueLabel,
       groundBrightness: groundField.valueLabel,
       buildingBrightness: buildingField.valueLabel,
-      skyBrightness: skyField.valueLabel
+      skyBrightness: skyField.valueLabel,
+      terrainColorBlend: terrainBlendField.valueLabel
     }
   };
 
