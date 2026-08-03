@@ -3,7 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
-import { initHandRotationDebug, handRotConfig, getOffsetQuaternion } from './handRotationDebug.js';
+import { initHandRotationDebug, handRotConfig, handPosOffset, getOffsetQuaternion } from './handRotationDebug.js';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
@@ -658,6 +658,10 @@ async function initGLBHands(leftGroup, rightGroup) {
     if (obj.isMesh) {
       obj.castShadow = true;
       obj.receiveShadow = true;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(m => {
+        if (m) { m.color.setHex(0xf1c27d); m.roughness = 0.8; m.transparent = true; m.opacity = 0.70; }
+      });
     }
   });
   rightGroup.userData.glbScene = rightScene;
@@ -681,7 +685,9 @@ async function initGLBHands(leftGroup, rightGroup) {
       obj.receiveShadow = true;
       // Negative X scale flips winding; DoubleSide corrects the lighting.
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      mats.forEach(m => { if (m) m.side = THREE.DoubleSide; });
+      mats.forEach(m => {
+        if (m) { m.side = THREE.DoubleSide; m.color.setHex(0xf1c27d); m.roughness = 0.8; m.transparent = true; m.opacity = 0.70; }
+      });
     }
   });
   leftGroup.userData.glbScene = leftScene;
@@ -1008,6 +1014,9 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         targetPos = defaultPos;
       }
 
+      targetPos.x += handPosOffset.x;
+      targetPos.y += handPosOffset.y;
+      targetPos.z += handPosOffset.z;
       floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
       updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
 
