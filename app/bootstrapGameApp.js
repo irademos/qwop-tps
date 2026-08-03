@@ -2060,7 +2060,7 @@ async function initCore(runtimeContext) {
     const spawnPosition = resolvedPosition
       ? new THREE.Vector3(resolvedPosition.x, resolvedPosition.y, resolvedPosition.z)
       : new THREE.Vector3(fallbackX, fallbackY, fallbackZ);
-    const dog = await animalManager.spawnDogAt?.(spawnPosition);
+    const dog = await animalManager?.spawnDogAt?.(spawnPosition);
     const ownerId = getRemoteDynamicOwnerId(id);
     if (ownerId && removedRemotePlayerIds.has(ownerId)) {
       if (dog?.model) {
@@ -4430,7 +4430,7 @@ async function initCore(runtimeContext) {
       }
     }
   });
-  animals = animalManager.getAnimals();
+  animals = animalManager?.getAnimals() ?? [];
   runtimeContext.entities.animals = animals;
   window.animals = animals;
   const restoreCompanionDogsFromProfile = async () => {
@@ -14967,7 +14967,7 @@ async function initCore(runtimeContext) {
         if (animalManager) {
           animalManager.update(aiBucketDeltaSeconds);
           void animalManager.maybeSpawnDogByTravelDistance?.();
-          animals = animalManager.getAnimals();
+          animals = animalManager?.getAnimals() ?? [];
           runtimeContext.entities.animals = animals;
           window.animals = animals;
         }
