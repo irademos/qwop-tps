@@ -150,6 +150,15 @@ export function updateHandTracking() {
       }
       const isFist = curledCount >= 3;
 
+      // Pinch detection: index fingertip (8) close to thumb tip (4).
+      const thumbTip = landmarks[4];
+      const indexTip = landmarks[8];
+      const pdxP = indexTip.x - thumbTip.x;
+      const pdyP = indexTip.y - thumbTip.y;
+      const pdzP = (indexTip.z || 0) - (thumbTip.z || 0);
+      const pinchDist = Math.sqrt(pdxP * pdxP + pdyP * pdyP + pdzP * pdzP);
+      const isPinch = pinchDist / palmSize < 0.45;
+
       // Back camera: "Left" in the raw frame is the user's RIGHT hand.
       const rawSide = handedness === 'Left' ? 'right' : 'left';
 
@@ -175,6 +184,7 @@ export function updateHandTracking() {
       const norm = palmToNormalized(palmX, palmY);
       norm.size = palmSize;
       norm.isFist = isFist;
+      norm.isPinch = isPinch;
       norm.landmarks = landmarks;
       newData[gameSide] = norm;
     }

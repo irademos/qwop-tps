@@ -1,4 +1,6 @@
 // app.js
+import { getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
+import { Weapon } from '../items/weapon.js';
 import * as THREE from "three";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { loadMonsterModel } from "../models/monsterModel.js";
@@ -408,8 +410,11 @@ function createArcadeOverlay(startOverlay) {
   const signupButton = startOverlay.querySelector('[data-arcade-signup]');
   const backButton = startOverlay.querySelector('[data-arcade-back]');
   const startButton = startOverlay.querySelector('[data-arcade-start]');
+  const modeSelectEl = startOverlay.querySelector('[data-arcade-mode-select]');
+  const modeBtns = startOverlay.querySelectorAll('[data-mode-btn]');
 
   let mode = 'login';
+  let pendingAuthResult = null;
   let currentName = '';
   let authInProgress = false;
   let authToken = 0;
@@ -466,10 +471,18 @@ function createArcadeOverlay(startOverlay) {
     }
   };
 
+  const showModeSelect = (authResult) => {
+    pendingAuthResult = authResult;
+    form?.classList.add('hidden');
+    startButton?.classList.add('hidden');
+    modeSelectEl?.classList.remove('hidden');
+  };
+
   const showLoginForm = ({ name, preserveMessage = false } = {}) => {
     form?.classList.remove('hidden');
     welcomeSection?.classList.add('hidden');
     startButton?.classList.add('hidden');
+    modeSelectEl?.classList.add('hidden');
     setMode('login');
     if (!preserveMessage) {
       setMessage('');
@@ -483,8 +496,10 @@ function createArcadeOverlay(startOverlay) {
     welcomeText.textContent = `Welcome back ${name}`;
     welcomeSection?.classList.remove('hidden');
     form?.classList.add('hidden');
-    startButton?.classList.remove('hidden');
-    startButton.disabled = !ready;
+    startButton?.classList.add('hidden');
+    if (ready) {
+      showModeSelect(null);
+    }
   };
 
   const hideOverlay = () => {
@@ -527,14 +542,11 @@ function createArcadeOverlay(startOverlay) {
       currentName = result.profile?.name || name;
       setMessage('');
       if (autoStart) {
-        if (startHandler) {
-          startHandler();
-        }
-        hideOverlay();
+        showWelcome(currentName, { ready: true });
+        showModeSelect(result);
       } else {
         showWelcome(currentName, { ready: true });
       }
-      resolveAuth?.(result);
     } catch (err) {
       if (token !== authToken) return;
       authInProgress = false;
@@ -658,6 +670,20 @@ function createArcadeOverlay(startOverlay) {
     hideOverlay();
   });
 
+  modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const chosenMode = btn.dataset.modeBtn;
+      window.gameMode = chosenMode;
+      if (startHandler) startHandler();
+      hideOverlay();
+      if (pendingAuthResult && resolveAuth) {
+        resolveAuth(pendingAuthResult);
+      } else if (resolveAuth) {
+        resolveAuth({});
+      }
+    });
+  });
+
   return {
     async authenticate({ initialName, hasStoredPin, loadProfile }) {
       if (loadProfile) {
@@ -671,7 +697,9 @@ function createArcadeOverlay(startOverlay) {
       }
       if (initialName && hasStoredPin) {
         currentName = initialName;
-        showWelcome(initialName, { ready: false });
+        welcomeText.textContent = `Welcome back ${initialName}`;
+        welcomeSection?.classList.remove('hidden');
+        form?.classList.add('hidden');
         startAuthFlow(initialName, { autoStart: false });
       } else {
         showLoginForm({ name: initialName });
@@ -2033,7 +2061,7 @@ async function initCore(runtimeContext) {
     const spawnPosition = resolvedPosition
       ? new THREE.Vector3(resolvedPosition.x, resolvedPosition.y, resolvedPosition.z)
       : new THREE.Vector3(fallbackX, fallbackY, fallbackZ);
-    const dog = await animalManager.spawnDogAt?.(spawnPosition);
+    const dog = await animalManager?.spawnDogAt?.(spawnPosition);
     const ownerId = getRemoteDynamicOwnerId(id);
     if (ownerId && removedRemotePlayerIds.has(ownerId)) {
       if (dog?.model) {
@@ -3773,6 +3801,99 @@ async function initCore(runtimeContext) {
   runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol };
   window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol };
 
+  // --- 3D Painter mode: paintbrush ---
+  // Extends Weapon so hand-bone attachment uses the exact same path as pistol/bow/etc.
+  class PaintBrush extends Weapon {
+    constructor(sc) {
+      super(sc, {
+        type: 'paintbrush',
+        itemId: 'paintbrush',
+        hand: 'right',
+        holdOffset: new THREE.Vector3(0, 0.05, 0.05),
+        holdRotation: new THREE.Euler(Math.PI * 0.15, 0, 0, 'YXZ'),
+      });
+      this._tipMarker = null;
+    }
+
+    async load() {
+      const brushGroup = new THREE.Group();
+
+      // Black cylinder handle
+      const handleGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.22, 8);
+      const handleMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+      const handleMesh = new THREE.Mesh(handleGeo, handleMat);
+      handleMesh.castShadow = true;
+      brushGroup.add(handleMesh);
+
+      // Red pyramid tip (4-sided cone) at the top of the handle
+      const tipGeo = new THREE.ConeGeometry(0.018, 0.055, 4);
+      const tipMat = new THREE.MeshStandardMaterial({ color: 0xdd1111, roughness: 0.5 });
+      const tipMesh = new THREE.Mesh(tipGeo, tipMat);
+      tipMesh.position.y = 0.138;
+      tipMesh.castShadow = true;
+      brushGroup.add(tipMesh);
+
+      // Invisible marker at the very tip of the pyramid
+      this._tipMarker = new THREE.Object3D();
+      this._tipMarker.position.y = 0.138 + 0.0275;
+      brushGroup.add(this._tipMarker);
+
+      this.mesh = brushGroup;
+      this.scene.add(this.mesh);
+    }
+
+    getTipWorldPosition() {
+      if (!this._tipMarker) return null;
+      this._tipMarker.updateWorldMatrix(true, false);
+      const pos = new THREE.Vector3();
+      this._tipMarker.getWorldPosition(pos);
+      return pos;
+    }
+  }
+
+  let paintBrush = null;
+  const paintStrokes = [];
+  let _painterPinchWas = false;
+  let _lastPaintPos = null;
+  const PAINT_MIN_DIST = 0.015;
+
+  if (window.gameMode === '3d_painter') {
+    paintBrush = new PaintBrush(scene);
+    await paintBrush.load();
+  }
+
+  function spawnPaintSphere(position) {
+    const geo = new THREE.SphereGeometry(0.04, 8, 6);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xdd1111, roughness: 0.6, metalness: 0.1 });
+    const sphere = new THREE.Mesh(geo, mat);
+    sphere.castShadow = true;
+    sphere.position.copy(position);
+    scene.add(sphere);
+    paintStrokes.push(sphere);
+  }
+
+  function processPainterPinch() {
+    if (!paintBrush || !isHandTrackingEnabled()) return;
+    const htd = getHandTrackingData();
+    // Back-camera swap: 'left' tracking slot = right in-game hand (where brush is)
+    const isPinching = !!(htd?.left?.isPinch);
+    const tipPos = paintBrush.getTipWorldPosition();
+    if (!tipPos) { _painterPinchWas = isPinching; return; }
+
+    if (isPinching) {
+      if (!_painterPinchWas) {
+        spawnPaintSphere(tipPos);
+        _lastPaintPos = tipPos.clone();
+      } else if (_lastPaintPos && tipPos.distanceTo(_lastPaintPos) >= PAINT_MIN_DIST) {
+        spawnPaintSphere(tipPos);
+        _lastPaintPos.copy(tipPos);
+      }
+    } else {
+      _lastPaintPos = null;
+    }
+    _painterPinchWas = isPinching;
+  }
+
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
     const model = monster?.model;
     if (!model || !rapierWorld) return null;
@@ -4167,50 +4288,54 @@ async function initCore(runtimeContext) {
       lon: origin.centerLon - position.x / lonScale
     };
   };
-  appleController = await createApples({
-    scene,
-    getTerrainHeight,
-    spawnPositions: [],
-    allowDefaultPositions: false
-  });
+  if (window.gameMode !== '3d_painter') {
+    appleController = await createApples({
+      scene,
+      getTerrainHeight,
+      spawnPositions: [],
+      allowDefaultPositions: false
+    });
+  }
   applePickups = appleController?.pickups || [];
   window.applePickups = applePickups;
   window.woodPickups = woodPickups;
   window.meatPickups = meatPickups;
   window.zombieBrainsPickups = zombieBrainsPickups;
   window.saltPickups = saltPickups;
-  natureController = await createNature({
-    scene,
-    playerModel,
-    getTerrainHeight,
-    mapRenderer,
-    buildingsRenderer,
-    getGeoForLocal: getTreeMapLocationForLocal,
-    tileCache,
-    rapier: RAPIER,
-    rapierWorld,
-    spawnApplePickup: appleController?.spawnPickup,
-    removeApplePickup: appleController?.removePickup
-  });
-  window.natureController = natureController;
-  natureController?.update(playerModel?.position);
-  // await createCabin({ scene, getTerrainHeight });
-  mushroomController = await createMushrooms({
-    scene,
-    getTerrainHeight,
-    scatterCenter: playerModel?.position,
-    scatterRadius: PICKUP_SPAWN_RADIUS
-  });
-  await createTower({ scene, getTerrainHeight, rapierWorld, rapier: RAPIER });
-  mushroomPickups = mushroomController?.pickups || [];
-  mushroomPickups.forEach((pickup) => {
-    const pickupPosition = pickup?.mesh?.position || pickup?.position;
-    if (pickup?.active && pickupPosition) {
-      mushroomPickupGrid.add(pickup, pickupPosition);
-    }
-  });
-  window.mushroomPickups = mushroomPickups;
-  animalManager = createAnimalManager({
+  if (window.gameMode !== '3d_painter') {
+    natureController = await createNature({
+      scene,
+      playerModel,
+      getTerrainHeight,
+      mapRenderer,
+      buildingsRenderer,
+      getGeoForLocal: getTreeMapLocationForLocal,
+      tileCache,
+      rapier: RAPIER,
+      rapierWorld,
+      spawnApplePickup: appleController?.spawnPickup,
+      removeApplePickup: appleController?.removePickup
+    });
+    window.natureController = natureController;
+    natureController?.update(playerModel?.position);
+    // await createCabin({ scene, getTerrainHeight });
+    mushroomController = await createMushrooms({
+      scene,
+      getTerrainHeight,
+      scatterCenter: playerModel?.position,
+      scatterRadius: PICKUP_SPAWN_RADIUS
+    });
+    await createTower({ scene, getTerrainHeight, rapierWorld, rapier: RAPIER });
+    mushroomPickups = mushroomController?.pickups || [];
+    mushroomPickups.forEach((pickup) => {
+      const pickupPosition = pickup?.mesh?.position || pickup?.position;
+      if (pickup?.active && pickupPosition) {
+        mushroomPickupGrid.add(pickup, pickupPosition);
+      }
+    });
+    window.mushroomPickups = mushroomPickups;
+  }
+  if (window.gameMode !== '3d_painter') animalManager = createAnimalManager({
     scene,
     getPlayerModel: () => playerModel,
     getTerrainHeight,
@@ -4276,7 +4401,7 @@ async function initCore(runtimeContext) {
       }
     }
   });
-  animals = animalManager.getAnimals();
+  animals = animalManager?.getAnimals() ?? [];
   runtimeContext.entities.animals = animals;
   window.animals = animals;
   const restoreCompanionDogsFromProfile = async () => {
@@ -4384,7 +4509,7 @@ async function initCore(runtimeContext) {
 
   window.lightSources = [];
 
-  friendlyNpcManager = createFriendlyNpcManager({
+  if (window.gameMode !== '3d_painter') friendlyNpcManager = createFriendlyNpcManager({
     scene,
     playerModel,
     otherPlayers,
@@ -4407,7 +4532,7 @@ async function initCore(runtimeContext) {
     onMonsterHit: handleMonsterDamage
   });
   window.friendlyNpcManager = friendlyNpcManager;
-  if (multiplayer?.roomId) {
+  if (multiplayer?.roomId && friendlyNpcManager) {
     friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
   }
 
@@ -4993,6 +5118,7 @@ async function initCore(runtimeContext) {
 
 
   const ensureMonsters = () => {
+    if (window.gameMode === '3d_painter') return;
     if (PERF.disableMonsters) {
       monsters.forEach(monster => cleanupMonster(monster));
       monsters = [];
@@ -11166,6 +11292,10 @@ async function initCore(runtimeContext) {
 
   runtimeContext.systems.playerControls = playerControls;
   window.playerControls = playerControls;
+
+  if (paintBrush) {
+    paintBrush.holder = playerControls;
+  }
   await initSpellsFeature({
     playerControls,
     getPlayerModel: () => playerModel,
@@ -14629,6 +14759,7 @@ async function initCore(runtimeContext) {
     autumnSword?.update();
     hammer?.update();
     pistol?.update();
+    paintBrush?.update();
     lantern?.update();
     torch?.update();
     shield?.update();
@@ -14812,7 +14943,7 @@ async function initCore(runtimeContext) {
         if (animalManager) {
           animalManager.update(aiBucketDeltaSeconds);
           void animalManager.maybeSpawnDogByTravelDistance?.();
-          animals = animalManager.getAnimals();
+          animals = animalManager?.getAnimals() ?? [];
           runtimeContext.entities.animals = animals;
           window.animals = animals;
         }
@@ -15254,6 +15385,10 @@ async function initCore(runtimeContext) {
     });
 
     terrainStampDebugOverlay?.update?.();
+
+    if (window.gameMode === '3d_painter') {
+      processPainterPinch();
+    }
 
     renderer.render(scene, camera);
     const frameTotalMs = performance.now() - frameStartMs;
