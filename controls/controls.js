@@ -2939,7 +2939,7 @@ export class PlayerControls {
     if (this.playerModel) {
       this.playerModel.userData.handTrackingArms = getHandTrackingData();
     }
-    if (isHandTrackingEnabled()) {
+    if (isHandTrackingEnabled() && window.gameMode !== '3d_painter') {
       const htd = getHandTrackingData();
       // 'left' slot = in-game right hand; 'right' slot = in-game left hand (back-camera swap)
       this._processHandFistAttack('left', htd?.left?.isFist);

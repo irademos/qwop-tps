@@ -2312,8 +2312,36 @@ body.settings-open #inventory-button {
 .arcade-confirm.hidden,
 .arcade-welcome.hidden,
 .arcade-button.hidden,
-.arcade-form.hidden {
+.arcade-form.hidden,
+.arcade-mode-select.hidden {
   display: none;
+}
+
+.arcade-mode-select {
+  display: grid;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.arcade-mode-label {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 10px;
+  color: #e2e8f0;
+  text-align: center;
+}
+
+.arcade-mode-buttons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.arcade-mode-btn {
+  font-size: 10px;
+  padding: 12px 14px;
+  flex: 1;
+  min-width: 100px;
 }
 
 #level-builder-sidebar {
