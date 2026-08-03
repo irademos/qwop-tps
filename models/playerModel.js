@@ -3,6 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
+import { initHandRotationDebug, handRotConfig, getOffsetQuaternion } from './handRotationDebug.js';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
@@ -661,6 +662,7 @@ async function initGLBHands(leftGroup, rightGroup) {
   });
   rightGroup.userData.glbScene = rightScene;
   rightGroup.userData.glbReady = true;
+  initHandRotationDebug();
 
   // --- Left hand (mirror of right) ---
   const leftScene = SkeletonUtils.clone(gltf.scene);
@@ -693,6 +695,68 @@ const _bvStart = new THREE.Vector3();
 const _bvEnd   = new THREE.Vector3();
 const _bvDir   = new THREE.Vector3();
 const _parentMatInv = new THREE.Matrix4();
+
+// Scratch objects for scene-level hand orientation
+const _bqSceneTarget = new THREE.Quaternion();
+const _bvFinger      = new THREE.Vector3();
+const _bvAcross      = new THREE.Vector3();
+const _bvNormal      = new THREE.Vector3();
+const _bvHandRight   = new THREE.Vector3();
+const _sceneM4       = new THREE.Matrix4();
+// (tilt offset is now read live from handRotConfig via getOffsetQuaternion())
+
+/**
+ * Rotate the GLB scene root to match the overall hand orientation derived from
+ * mediapipe landmarks, so the whole hand (not just fingers) tracks rotation.
+ *
+ * Coordinate mapping (derived from Q_rest = Euler(-π/2, π, 0)):
+ *   GLB +X  →  pts-space "across palm" axis  (pinky→index for right, index→pinky for left)
+ *   GLB +Y  →  pts-space "finger" axis        (wrist → middle MCP)
+ *   GLB +Z  →  pts-space "palm normal" axis   (out of palm, upward when palm faces sky)
+ */
+function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
+  // Finger direction — landmark indices tunable in debug panel
+  const { fingerLmA, fingerLmB, acrossLmA, acrossLmB } = handRotConfig;
+  _bvFinger.subVectors(pts[fingerLmB], pts[fingerLmA]);
+  if (_bvFinger.lengthSq() < 1e-8) return;
+  _bvFinger.normalize();
+
+  // Across-palm direction — landmark indices and sign tunable in debug panel
+  const s = (side === 'right' ? 1 : -1) * handRotConfig.acrossSign;
+  _bvAcross.subVectors(pts[acrossLmA], pts[acrossLmB]).multiplyScalar(s);
+  if (_bvAcross.lengthSq() < 1e-8) return;
+  _bvAcross.normalize();
+
+  // Palm normal — cross order tunable; optional normal flip
+  if (handRotConfig.crossOrder === 'across_x_finger') {
+    _bvNormal.crossVectors(_bvAcross, _bvFinger);
+  } else {
+    _bvNormal.crossVectors(_bvFinger, _bvAcross);
+  }
+  if (_bvNormal.lengthSq() < 1e-8) return;
+  _bvNormal.normalize();
+  if (handRotConfig.flipNormal) _bvNormal.negate();
+
+  // Re-orthogonalize across ("right" of hand frame)
+  _bvHandRight.crossVectors(_bvNormal, _bvFinger).normalize();
+
+  // Build rotation matrix then apply live Euler offset from debug panel
+  _sceneM4.makeBasis(_bvHandRight, _bvFinger, _bvNormal);
+  _bqSceneTarget.setFromRotationMatrix(_sceneM4).multiply(getOffsetQuaternion());
+
+  // Apply per-component sign corrections (tunable in debug panel)
+  _bqSceneTarget.w *= handRotConfig.signW;
+  _bqSceneTarget.x *= handRotConfig.signX;
+  _bqSceneTarget.y *= handRotConfig.signY;
+  _bqSceneTarget.z *= handRotConfig.signZ;
+
+  // Ensure slerp always takes the short arc (prevent hemisphere-flip pop)
+  if (glbScene.quaternion.dot(_bqSceneTarget) < 0) _bqSceneTarget.negate();
+
+  // Smooth toward target orientation
+  glbScene.quaternion.slerp(_bqSceneTarget, 1 - Math.exp(-handRotConfig.smoothing * dt));
+  glbScene.updateWorldMatrix(true, true);
+}
 
 /**
  * Drive the loaded GLB hand bones from mediapipe landmarks each frame.
@@ -947,7 +1011,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
       updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
 
-      // Drive GLB hand bones from mediapipe landmarks
+      // Drive GLB hand bones and overall hand rotation from mediapipe landmarks
       if (floatingHand.userData.glbReady && landmarks?.length >= 21) {
         const wrist = landmarks[0];
         const wrist3d = palmToLocalHandPos(wrist.x, wrist.y, palmSize);
@@ -957,6 +1021,9 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
           wrist3d.y - (lm.y - wrist.y) * lmScale,
           wrist3d.z - (lm.z - wrist.z) * lmScale * 2
         ));
+        // Rotate the scene root to match overall hand orientation before driving bones
+        const glbScene = floatingHand.userData.glbScene;
+        if (glbScene) updateGLBHandSceneRotation(glbScene, pts, side, dt);
         updateGLBHandBones(floatingHand, pts, playerGroup);
       }
     }
