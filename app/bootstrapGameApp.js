@@ -3801,84 +3801,64 @@ async function initCore(runtimeContext) {
   window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol };
 
   // --- 3D Painter mode: paintbrush ---
-  let paintBrushGroup = null;
-  let paintBrushTipMarker = null;
-  const paintStrokes = []; // red sphere meshes painted in the scene
-  let _painterPinchState = { left: false, right: false };
+  // Extends Weapon so hand-bone attachment uses the exact same path as pistol/bow/etc.
+  class PaintBrush extends Weapon {
+    constructor(sc) {
+      super(sc, {
+        type: 'paintbrush',
+        itemId: 'paintbrush',
+        hand: 'right',
+        holdOffset: new THREE.Vector3(0, 0.05, 0.05),
+        holdRotation: new THREE.Euler(Math.PI * 0.15, 0, 0, 'YXZ'),
+      });
+      this._tipMarker = null;
+    }
+
+    async load() {
+      const brushGroup = new THREE.Group();
+
+      // Black cylinder handle
+      const handleGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.22, 8);
+      const handleMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+      const handleMesh = new THREE.Mesh(handleGeo, handleMat);
+      handleMesh.castShadow = true;
+      brushGroup.add(handleMesh);
+
+      // Red pyramid tip (4-sided cone) at the top of the handle
+      const tipGeo = new THREE.ConeGeometry(0.018, 0.055, 4);
+      const tipMat = new THREE.MeshStandardMaterial({ color: 0xdd1111, roughness: 0.5 });
+      const tipMesh = new THREE.Mesh(tipGeo, tipMat);
+      tipMesh.position.y = 0.138;
+      tipMesh.castShadow = true;
+      brushGroup.add(tipMesh);
+
+      // Invisible marker at the very tip of the pyramid
+      this._tipMarker = new THREE.Object3D();
+      this._tipMarker.position.y = 0.138 + 0.0275;
+      brushGroup.add(this._tipMarker);
+
+      this.mesh = brushGroup;
+      this.scene.add(this.mesh);
+    }
+
+    getTipWorldPosition() {
+      if (!this._tipMarker) return null;
+      this._tipMarker.updateWorldMatrix(true, false);
+      const pos = new THREE.Vector3();
+      this._tipMarker.getWorldPosition(pos);
+      return pos;
+    }
+  }
+
+  let paintBrush = null;
+  const paintStrokes = [];
+  let _painterPinchWas = false;
   let _lastPaintPos = null;
-  const PAINT_MIN_DIST = 0.015; // min distance between paint spheres for a continuous stroke
+  const PAINT_MIN_DIST = 0.015;
 
   if (window.gameMode === '3d_painter') {
-    paintBrushGroup = new THREE.Group();
-
-    // Black cylinder handle
-    const handleGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.22, 8);
-    const handleMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
-    const handleMesh = new THREE.Mesh(handleGeo, handleMat);
-    handleMesh.castShadow = true;
-    paintBrushGroup.add(handleMesh);
-
-    // Red pyramid tip (cone with 4 sides) at the top of the handle
-    const tipGeo = new THREE.ConeGeometry(0.018, 0.055, 4);
-    const tipMat = new THREE.MeshStandardMaterial({ color: 0xdd1111, roughness: 0.5 });
-    const tipMesh = new THREE.Mesh(tipGeo, tipMat);
-    tipMesh.position.y = 0.138; // top of handle (0.11) + half of tip (0.0275)
-    tipMesh.castShadow = true;
-    paintBrushGroup.add(tipMesh);
-
-    // Invisible marker at the very tip of the pyramid
-    paintBrushTipMarker = new THREE.Object3D();
-    paintBrushTipMarker.position.y = 0.138 + 0.0275; // top of cone
-    paintBrushGroup.add(paintBrushTipMarker);
-
-    scene.add(paintBrushGroup);
-  }
-
-  // Shared temp objects for paintbrush positioning
-  const _brushTempPos = new THREE.Vector3();
-  const _brushTempQuat = new THREE.Quaternion();
-  const _brushHoldOffset = new THREE.Vector3(0, 0.06, 0.0);
-  const _brushHoldQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0, 'YXZ'));
-  const _brushHandBones = new WeakMap();
-
-  function getPaintBrushHandBone(playerMdl) {
-    if (!playerMdl) return null;
-    if (_brushHandBones.has(playerMdl)) return _brushHandBones.get(playerMdl);
-    const root = playerMdl.userData?.pivot ?? playerMdl;
-    let bone = null;
-    root.traverse(child => {
-      if (bone) return;
-      const name = (child.name || '').toLowerCase();
-      if (child.userData?.proceduralHand === 'right' || name === 'rightarmhand') bone = child;
-      if (!bone && name.includes('righthand')) bone = child;
-    });
-    // Also try left-labeled (back-camera swap: 'left' bone = right hand in-game)
-    if (!bone) {
-      root.traverse(child => {
-        if (bone) return;
-        const name = (child.name || '').toLowerCase();
-        if (child.userData?.proceduralHand === 'left' || name === 'leftarmhand') bone = child;
-        if (!bone && name.includes('lefthand')) bone = child;
-      });
-    }
-    _brushHandBones.set(playerMdl, bone);
-    return bone;
-  }
-
-  function updatePaintBrush() {
-    if (!paintBrushGroup || !playerModel) return;
-    const handBone = getPaintBrushHandBone(playerModel);
-    if (handBone) {
-      handBone.updateWorldMatrix(true, false);
-      handBone.getWorldPosition(_brushTempPos);
-      handBone.getWorldQuaternion(_brushTempQuat);
-    } else {
-      _brushTempPos.copy(playerModel.position).add(new THREE.Vector3(0.3, 1.2, -0.3));
-      _brushTempQuat.copy(playerModel.quaternion);
-    }
-    const offset = _brushHoldOffset.clone().applyQuaternion(_brushTempQuat);
-    paintBrushGroup.position.copy(_brushTempPos).add(offset);
-    paintBrushGroup.quaternion.copy(_brushTempQuat).multiply(_brushHoldQuat);
+    paintBrush = new PaintBrush(scene);
+    await paintBrush.load();
   }
 
   function spawnPaintSphere(position) {
@@ -3892,35 +3872,25 @@ async function initCore(runtimeContext) {
   }
 
   function processPainterPinch() {
-    if (!paintBrushGroup || !isHandTrackingEnabled()) return;
+    if (!paintBrush || !isHandTrackingEnabled()) return;
     const htd = getHandTrackingData();
-    // Back-camera swap: 'left' tracking slot = right hand in-game (where paintbrush is)
+    // Back-camera swap: 'left' tracking slot = right in-game hand (where brush is)
     const isPinching = !!(htd?.left?.isPinch);
-    const trackingSlot = 'left';
-    const wasPinching = _painterPinchState[trackingSlot];
-    _painterPinchState[trackingSlot] = isPinching;
-
-    if (!paintBrushTipMarker) return;
-    paintBrushTipMarker.updateWorldMatrix(true, false);
-    const tipPos = new THREE.Vector3();
-    paintBrushTipMarker.getWorldPosition(tipPos);
+    const tipPos = paintBrush.getTipWorldPosition();
+    if (!tipPos) { _painterPinchWas = isPinching; return; }
 
     if (isPinching) {
-      if (!wasPinching) {
-        // Fresh pinch — always paint a point
+      if (!_painterPinchWas) {
         spawnPaintSphere(tipPos);
         _lastPaintPos = tipPos.clone();
-      } else if (_lastPaintPos) {
-        // Continuing pinch — paint if moved enough
-        const dist = tipPos.distanceTo(_lastPaintPos);
-        if (dist >= PAINT_MIN_DIST) {
-          spawnPaintSphere(tipPos);
-          _lastPaintPos.copy(tipPos);
-        }
+      } else if (_lastPaintPos && tipPos.distanceTo(_lastPaintPos) >= PAINT_MIN_DIST) {
+        spawnPaintSphere(tipPos);
+        _lastPaintPos.copy(tipPos);
       }
     } else {
       _lastPaintPos = null;
     }
+    _painterPinchWas = isPinching;
   }
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
@@ -11321,6 +11291,10 @@ async function initCore(runtimeContext) {
 
   runtimeContext.systems.playerControls = playerControls;
   window.playerControls = playerControls;
+
+  if (paintBrush) {
+    paintBrush.holder = playerControls;
+  }
   await initSpellsFeature({
     playerControls,
     getPlayerModel: () => playerModel,
@@ -14784,6 +14758,7 @@ async function initCore(runtimeContext) {
     autumnSword?.update();
     hammer?.update();
     pistol?.update();
+    paintBrush?.update();
     lantern?.update();
     torch?.update();
     shield?.update();
@@ -15411,7 +15386,6 @@ async function initCore(runtimeContext) {
     terrainStampDebugOverlay?.update?.();
 
     if (window.gameMode === '3d_painter') {
-      updatePaintBrush();
       processPainterPinch();
     }
 
