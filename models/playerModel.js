@@ -3,7 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
-import { initHandRotationDebug, handRotConfig, getOffsetQuaternion } from './handRotationDebug.js';
+import { initHandRotationDebug, handRotConfig, handPosOffset, armConfig, getOffsetQuaternion } from './handRotationDebug.js';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
@@ -658,6 +658,10 @@ async function initGLBHands(leftGroup, rightGroup) {
     if (obj.isMesh) {
       obj.castShadow = true;
       obj.receiveShadow = true;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach(m => {
+        if (m) { m.color.setHex(0xf1c27d); m.roughness = 0.8; m.transparent = true; m.opacity = 0.70; }
+      });
     }
   });
   rightGroup.userData.glbScene = rightScene;
@@ -681,7 +685,9 @@ async function initGLBHands(leftGroup, rightGroup) {
       obj.receiveShadow = true;
       // Negative X scale flips winding; DoubleSide corrects the lighting.
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      mats.forEach(m => { if (m) m.side = THREE.DoubleSide; });
+      mats.forEach(m => {
+        if (m) { m.side = THREE.DoubleSide; m.color.setHex(0xf1c27d); m.roughness = 0.8; m.transparent = true; m.opacity = 0.70; }
+      });
     }
   });
   leftGroup.userData.glbScene = leftScene;
@@ -815,7 +821,7 @@ function updateElasticArm(armMesh, shoulderAnchor, handMesh, root) {
   const midZ = (_sWorld.z + _hWorld.z) * 0.5;
   const mid = new THREE.Vector3(midX, midY, midZ);
   armMesh.position.copy(root.worldToLocal(mid));
-  armMesh.scale.set(1, dist, 1);
+  armMesh.scale.set(armConfig.thickness, dist, armConfig.thickness);
 
   const dir = _hWorld.clone().sub(_sWorld).normalize();
   root.getWorldQuaternion(_rootQ);
@@ -1023,8 +1029,12 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         ));
         // Rotate the scene root to match overall hand orientation before driving bones
         const glbScene = floatingHand.userData.glbScene;
+        if (glbScene) glbScene.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
         if (glbScene) updateGLBHandSceneRotation(glbScene, pts, side, dt);
         updateGLBHandBones(floatingHand, pts, playerGroup);
+      } else if (floatingHand.userData.glbReady) {
+        const glbScene = floatingHand.userData.glbScene;
+        if (glbScene) glbScene.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
       }
     }
   }
