@@ -32,6 +32,48 @@ export function createGroundTiles({
     emissive: 0x1f1f1f,
     emissiveIntensity: 0.25
   });
+
+  // Inject height-based color blending into the standard material shader.
+  // uTerrainBlend controls transition sharpness: 0 = hard bands, 1 = wide smooth gradients.
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTerrainBlend = { value: 0.5 };
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <color_pars_vertex>',
+      `#include <color_pars_vertex>
+varying float vTerrainHeight;`
+    );
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+vTerrainHeight = position.z;`
+    );
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_pars_fragment>',
+      `#include <color_pars_fragment>
+varying float vTerrainHeight;
+uniform float uTerrainBlend;`
+    );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+{
+  float blendWidth = max(0.01, uTerrainBlend) * 5.0;
+  vec3 lowColor  = vec3(0.45, 0.60, 0.32); // grass green
+  vec3 midColor  = vec3(0.58, 0.46, 0.30); // earthy brown
+  vec3 highColor = vec3(0.82, 0.82, 0.80); // rocky grey / snow
+  float t1 = smoothstep(3.0, 3.0 + blendWidth, vTerrainHeight);
+  float t2 = smoothstep(8.0, 8.0 + blendWidth, vTerrainHeight);
+  vec3 heightTint = mix(mix(lowColor, midColor, t1), highColor, t2);
+  diffuseColor.rgb *= heightTint;
+}`
+    );
+
+    material.userData.terrainShader = shader;
+  };
+  material.customProgramCacheKey = () => 'groundTilesTerrain';
+
   const state = { texture: null };
 
   const ktx2Loader = getKtx2Loader(renderer);

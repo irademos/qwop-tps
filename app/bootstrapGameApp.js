@@ -1586,7 +1586,7 @@ async function initCore(runtimeContext) {
   };
 
   const loadDisplaySettings = () => {
-    const defaults = { mode: 'auto', performanceMode: 'auto', highContrastMode: false, ...DISPLAY_PRESETS.day };
+    const defaults = { mode: 'auto', performanceMode: 'auto', highContrastMode: false, terrainColorBlend: 0.5, ...DISPLAY_PRESETS.day };
     const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
     if (!raw) return defaults;
     try {
@@ -1664,6 +1664,12 @@ async function initCore(runtimeContext) {
       dirLight.intensity = clampValue(directionalIntensity, 0, 2);
     }
     applyMaterialBrightness(groundTiles?.material, groundMaterialBase, groundBrightness);
+    if (groundTiles?.material?.userData?.terrainShader) {
+      const blendValue = typeof displaySettings.terrainColorBlend === 'number'
+        ? displaySettings.terrainColorBlend
+        : 0.5;
+      groundTiles.material.userData.terrainShader.uniforms.uTerrainBlend.value = blendValue;
+    }
     if (groundTiles?.material) {
       const material = groundTiles.material;
       material.userData = material.userData || {};
