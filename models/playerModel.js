@@ -869,10 +869,8 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     ? 0
     : (rig.knockedUntil ? THREE.MathUtils.clamp(recoveryElapsedMs / 1100, 0.28, 1) : 1);
   rig.recoveryFactor = dampToward(rig.recoveryFactor ?? recoveryFactor, recoveryFactor, knocked ? 2.5 : 5, dt);
-  rig.balanceError = supportError;
-
   if (rig.bodyRoot) {
-    const stumbleBob = moving && !knocked ? Math.sin(stepCycle * Math.PI * 4) * 0.018 - fallPressure * 0.012 : 0;
+    const stumbleBob = moving && !knocked ? Math.sin(stepCycle * Math.PI * 4) * 0.018 : 0;
     rig.bodyRoot.position.y = dampToward(rig.bodyRoot.position.y, stumbleBob, moving ? 8 : 4, dt);
   }
 
@@ -885,24 +883,22 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     target.z = z;
   };
 
-  const balanceCorrection = THREE.MathUtils.clamp(fallPressure * 0.12, 0, 0.22);
   const headLag = rig.parts.head?.group.rotation.x || 0;
-  const sideLean = THREE.MathUtils.clamp(-supportError.x * 0.34 + Math.sin(rig.flopTime * 2.1) * 0.04, -0.42, 0.42);
+  const sideLean = 0;
   const forwardLean = moving
-    ? THREE.MathUtils.clamp(-0.16 - movementAmount * 0.34 - supportError.y * 0.26 + headLag * 0.18, -0.62, 0.28)
-    : THREE.MathUtils.clamp(-supportError.y * 0.1 + Math.sin(rig.flopTime * 1.7) * 0.035, -0.16, 0.16);
-  const idleFlop = Math.sin(rig.flopTime * 2.3) * (0.035 + (1 - (rig.recoveryFactor || 1)) * 0.08);
+    ? THREE.MathUtils.clamp(-0.16 - movementAmount * 0.34 + headLag * 0.18, -0.62, 0.28)
+    : 0;
   const punchArc = Math.sin(attackPhase * Math.PI);
   const punchWindup = Math.sin(Math.min(attackPhase, 0.45) / 0.45 * Math.PI);
   const stepForward = THREE.MathUtils.clamp(moveZ || movementAmount, -1, 1) * GANG_BEASTS_STEP_LENGTH;
   const stepSide = THREE.MathUtils.clamp(moveX, -1, 1) * 0.18;
-  const leftDesiredAnchor = new THREE.Vector2(-GANG_BEASTS_STEP_WIDTH + stepSide, 0.02 + stepForward + supportError.y * 0.7);
-  const rightDesiredAnchor = new THREE.Vector2(GANG_BEASTS_STEP_WIDTH + stepSide, -0.02 + stepForward + supportError.y * 0.7);
+  const leftDesiredAnchor = new THREE.Vector2(-GANG_BEASTS_STEP_WIDTH + stepSide, 0.02 + stepForward);
+  const rightDesiredAnchor = new THREE.Vector2(GANG_BEASTS_STEP_WIDTH + stepSide, -0.02 + stepForward);
   const canSwitchStep = Math.max(footPlants.left.age || 0, footPlants.right.age || 0) > GANG_BEASTS_STEP_SWITCH_SECONDS;
 
-  if (moving && canSwitchStep && Math.sin(rig.flopTime * 5.1 + fallPressure) > -0.55) footPlants.nextFoot = desiredStep;
-  updateFootPlant(footPlants.left, leftDesiredAnchor, !moving || footPlants.nextFoot !== 'left', dt, moving, fallPressure, rig.flopTime);
-  updateFootPlant(footPlants.right, rightDesiredAnchor, !moving || footPlants.nextFoot !== 'right', dt, moving, fallPressure, rig.flopTime);
+  if (moving && canSwitchStep && Math.sin(rig.flopTime * 5.1) > -0.55) footPlants.nextFoot = desiredStep;
+  updateFootPlant(footPlants.left, leftDesiredAnchor, !moving || footPlants.nextFoot !== 'left', dt, moving, 0, rig.flopTime);
+  updateFootPlant(footPlants.right, rightDesiredAnchor, !moving || footPlants.nextFoot !== 'right', dt, moving, 0, rig.flopTime);
   if (moving && footPlants[footPlants.nextFoot]?.swing > 0.86 && Math.sin(rig.flopTime * 3.7) > -0.25) {
     footPlants.nextFoot = footPlants.nextFoot === 'left' ? 'right' : 'left';
   }
@@ -918,16 +914,14 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     setTarget('leftCalf', -0.85, 0, 0.08);
     setTarget('rightCalf', -0.85, 0, -0.08);
   } else {
-    setTarget('hips', (moving ? -supportError.y * 0.22 : idleFlop) + balanceCorrection, 0, sideLean - supportError.x * 0.35);
-    setTarget('torso', forwardLean + idleFlop, -supportError.x * 0.16, sideLean * 0.55 - supportError.x * 0.25);
-    setTarget('head', -forwardLean * 0.28, supportError.x * 0.1, sideLean * 0.35);
+    setTarget('hips', 0, 0, 0);
+    setTarget('torso', forwardLean, 0, 0);
+    setTarget('head', -forwardLean * 0.28, 0, 0);
 
-    // Foot planting drives the gait: planted feet lag and push against the pelvis,
-    // while the off-balance foot swings toward the next support point.
     setTarget('leftLeg', leftPose.upper, 0, leftPose.side);
     setTarget('rightLeg', rightPose.upper, 0, rightPose.side);
-    setTarget('leftCalf', leftPose.calf, 0, sideLean * 0.18);
-    setTarget('rightCalf', rightPose.calf, 0, sideLean * 0.18);
+    setTarget('leftCalf', leftPose.calf, 0, 0);
+    setTarget('rightCalf', rightPose.calf, 0, 0);
 
     if (leftPunch) {
       setTarget('torso', forwardLean - punchArc * 0.28, 0.18 * punchArc, sideLean + 0.1 * punchArc);
@@ -967,7 +961,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       const parentAngle = spec.parent ? rig.parts[spec.parent]?.group.rotation.x || 0 : 0;
       const gravityPull = Math.sin(angle + parentAngle - (part.restRotation || 0)) * spec.gravity * 0.08;
       const spring = (THREE.MathUtils.clamp(target.x, spec.min, spec.max) - angle) * spec.stiffness;
-      const noise = Math.sin(rig.flopTime * (name.length + 2.7)) * (knocked ? 0.35 : 0.14);
+      const noise = knocked ? Math.sin(rig.flopTime * (name.length + 2.7)) * 0.35 : 0;
       physics.angularVelocity = (physics.angularVelocity || 0) + (spring - gravityPull + noise) * dt;
       physics.angularVelocity *= Math.exp(-spec.damping * dt);
       part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
