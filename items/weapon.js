@@ -214,7 +214,7 @@ export class Weapon {
       if (!leftHandBone && (child.userData?.proceduralHand === 'left' || name === 'leftarmhand')) {
         leftHandBone = child;
       }
-      if ((!child.isBone && !child.userData?.proceduralHand && !name.endsWith('armhand'))) return;
+      if (!child.isBone && !child.userData?.proceduralHand && !name.includes('hand')) return;
       if (!rightHandBone && name.includes('righthand')) {
         rightHandBone = child;
       }
