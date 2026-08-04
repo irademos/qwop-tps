@@ -212,186 +212,33 @@ export function createProceduralBody(THREE) {
   const root = new THREE.Group();
   root.name = 'ProceduralGangBeastsPlayerBody';
 
-  const materials = {
-    shirt: 0x2e86de,
-    shorts: 0x1f2d3d,
-    skin: 0xf1c27d,
-    shoe: 0x222222
-  };
+  // Simple upright capsule body — no legs, no head, no physics simulation
+  const CAPSULE_RADIUS = 0.28;
+  const CAPSULE_HEIGHT = 1.0; // total height including rounded ends
+  const capsuleMat = new THREE.MeshStandardMaterial({ color: 0x2e86de, roughness: 0.75, metalness: 0.05 });
+  const capsuleGeo = new THREE.CapsuleGeometry(CAPSULE_RADIUS, CAPSULE_HEIGHT - CAPSULE_RADIUS * 2, 8, 16);
+  const capsuleMesh = new THREE.Mesh(capsuleGeo, capsuleMat);
+  capsuleMesh.name = 'bodyCapsulemesh';
+  capsuleMesh.castShadow = true;
+  capsuleMesh.receiveShadow = true;
+  // Center the capsule so its bottom is at y=0 and top at y=CAPSULE_HEIGHT
+  capsuleMesh.position.y = CAPSULE_HEIGHT / 2;
+  root.add(capsuleMesh);
 
-  const hips = new THREE.Group();
-  hips.name = 'hips';
-  // The player group is positioned at the physics capsule center. Keep the hips
-  // near that origin so the legs reach the ground instead of hovering above it.
-  hips.position.y = 0;
-  root.add(hips);
-
-  const torso = createLimbSegment(THREE, 'torso', {
-    length: 0.74,
-    radius: 0.23,
-    color: materials.shirt,
-    mass: 7,
-    shape: 'box'
-  });
-  torso.group.position.y = 0.05;
-  torso.mesh.position.y = torso.length / 2;
-  torso.mesh.scale.x = 1.35;
-  hips.add(torso.group);
-
-  const neck = new THREE.Group();
-  neck.name = 'neck';
-  neck.userData.mass = 7;
-  neck.position.y = torso.length + 0.1;
-  torso.group.add(neck);
-
-  const headGeometry = new THREE.SphereGeometry(0.24, 22, 18);
-  const headMaterial = new THREE.MeshStandardMaterial({ color: materials.skin, roughness: 0.8 });
-  const head = new THREE.Mesh(headGeometry, headMaterial);
-  head.name = 'head';
-  head.castShadow = true;
-  head.receiveShadow = true;
-  head.position.y = 0.18;
-  neck.add(head);
-
-  const face = new THREE.Mesh(
-    new THREE.SphereGeometry(0.025, 8, 8),
-    new THREE.MeshBasicMaterial({ color: 0x111111 })
-  );
-  face.name = 'faceDirectionDot';
-  face.position.set(0, 0.18, 0.225);
-  neck.add(face);
-
-  const leftLeg = createLimbSegment(THREE, 'leftLeg', {
-    length: 0.44,
-    radius: 0.095,
-    color: materials.shorts,
-    mass: 10
-  });
-  leftLeg.group.position.set(-0.14, 0, 0);
-  hips.add(leftLeg.group);
-
-  const rightLeg = createLimbSegment(THREE, 'rightLeg', {
-    length: 0.44,
-    radius: 0.095,
-    color: materials.shorts,
-    mass: 10
-  });
-  rightLeg.group.position.set(0.14, 0, 0);
-  hips.add(rightLeg.group);
-
-  const leftCalf = createLimbSegment(THREE, 'leftCalf', {
-    length: 0.42,
-    radius: 0.08,
-    color: materials.skin,
-    mass: 8
-  });
-  leftCalf.group.position.y = -leftLeg.length;
-  leftLeg.group.add(leftCalf.group);
-
-  const rightCalf = createLimbSegment(THREE, 'rightCalf', {
-    length: 0.42,
-    radius: 0.08,
-    color: materials.skin,
-    mass: 8
-  });
-  rightCalf.group.position.y = -rightLeg.length;
-  rightLeg.group.add(rightCalf.group);
-
-  for (const calf of [leftCalf, rightCalf]) {
-    const knee = new THREE.Mesh(
-      new THREE.SphereGeometry(0.095, 14, 10),
-      new THREE.MeshStandardMaterial({ color: materials.shorts, roughness: 0.75 })
-    );
-    knee.name = `${calf.group.name}Knee`;
-    knee.castShadow = true;
-    knee.receiveShadow = true;
-    calf.group.add(knee);
-
-    const shoe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.18, 0.08, 0.28),
-      new THREE.MeshStandardMaterial({ color: materials.shoe, roughness: 0.7 })
-    );
-    shoe.name = `${calf.group.name}Shoe`;
-    shoe.castShadow = true;
-    shoe.receiveShadow = true;
-    shoe.position.set(0, -calf.length - 0.02, 0.06);
-    calf.group.add(shoe);
-  }
-
-  // Shoulder anchors — invisible groups attached to torso, used to get world-space shoulder origin
+  // Shoulder anchors attached directly to root at shoulder height
   const leftShoulderAnchor = new THREE.Group();
   leftShoulderAnchor.name = 'leftShoulderAnchor';
-  leftShoulderAnchor.position.set(-0.38, 0.64, 0);
-  torso.group.add(leftShoulderAnchor);
+  leftShoulderAnchor.position.set(-CAPSULE_RADIUS - 0.08, CAPSULE_HEIGHT * 0.82, 0);
+  root.add(leftShoulderAnchor);
 
   const rightShoulderAnchor = new THREE.Group();
   rightShoulderAnchor.name = 'rightShoulderAnchor';
-  rightShoulderAnchor.position.set(0.38, 0.64, 0);
-  torso.group.add(rightShoulderAnchor);
-
-  torso.restRotation = 0;
-  leftLeg.restRotation = 0.18;
-  rightLeg.restRotation = 0.18;
-  leftCalf.restRotation = 0.1;
-  rightCalf.restRotation = 0.1;
-
-  const hipsPart = {
-    group: hips,
-    mesh: null,
-    length: 0,
-    mass: 5,
-    restRotation: 0,
-    restRotationY: 0,
-    restRotationZ: 0,
-    angularVelocity: 0
-  };
-
-  const headPart = {
-    group: neck,
-    mesh: head,
-    length: 0.36,
-    mass: 7,
-    restRotation: 0,
-    restRotationY: 0,
-    restRotationZ: 0,
-    angularVelocity: 0
-  };
-
-  const parts = {
-    hips: hipsPart,
-    torso,
-    head: headPart,
-    leftLeg,
-    rightLeg,
-    leftCalf,
-    rightCalf
-  };
-
-  Object.values(parts).forEach((part) => {
-    part.group.rotation.x = part.restRotation;
-    part.group.rotation.y = part.restRotationY || 0;
-    part.group.rotation.z = part.restRotationZ || 0;
-    part.group.userData.physics = {
-      mass: part.mass,
-      angularVelocity: 0,
-      gravityScale: 1,
-      groundLimit: part.group.name.includes('Leg') ? 0.95 : 1.25
-    };
-    part.group.userData.qwopTarget = {
-      x: part.group.rotation.x,
-      y: part.group.rotation.y,
-      z: part.group.rotation.z
-    };
-    part.group.userData.qwopDesiredTarget = {
-      x: part.group.rotation.x,
-      y: part.group.rotation.y,
-      z: part.group.rotation.z
-    };
-  });
+  rightShoulderAnchor.position.set(CAPSULE_RADIUS + 0.08, CAPSULE_HEIGHT * 0.82, 0);
+  root.add(rightShoulderAnchor);
 
   return {
     root,
-    parts,
+    parts: {},
     shoulderAnchors: { left: leftShoulderAnchor, right: rightShoulderAnchor }
   };
 }
@@ -865,156 +712,6 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   if (!rig) return { forwardIntent: 0, balance: 0 };
 
   const dt = THREE.MathUtils.clamp(Number.isFinite(deltaSeconds) ? deltaSeconds : 0, 0, 0.05);
-  const pressed = (key) => keysPressed?.has?.(key);
-  const moveX = (pressed('a') ? 1 : 0) + (pressed('d') ? -1 : 0);
-  const moveZ = (pressed('w') ? 1 : 0) + (pressed('s') ? -1 : 0);
-  const movementAmount = THREE.MathUtils.clamp(Math.hypot(moveX, moveZ), 0, 1);
-  const moving = movementAmount > 0.05;
-  const attack = playerGroup.userData.attack;
-  const currentAction = playerGroup.userData.currentAction;
-  const attackName = attack?.name || currentAction;
-  const attackElapsed = attack?.start ? Math.max(0, Date.now() - attack.start) : 0;
-  const attackPhase = attack?.start ? THREE.MathUtils.clamp(attackElapsed / 420, 0, 1) : 0;
-  const leftPunch = currentAction === 'leftPunch' || attackName === 'leftPunch';
-  const rightPunch = currentAction === 'mutantPunch' || attackName === 'mutantPunch' || attackName === 'swordSlash' || attackName === 'hammerSlash';
-  const knocked = Boolean(playerGroup.userData.isKnocked || (rig.knockedUntil && Date.now() < rig.knockedUntil));
-
-  rig.gaitPhase = (rig.gaitPhase || 0) + dt * (moving ? 5.4 + movementAmount * 3.1 : 1.1);
-  rig.flopTime = (rig.flopTime || 0) + dt;
-
-  const footPlants = getRigFootPlants(rig);
-  const stepCycle = rig.gaitPhase / (Math.PI * 2);
-  const leftStep = (footPlants.left.age || 0) > (footPlants.right.age || 0) + Math.sin(rig.flopTime * 2.9) * 0.11;
-  const desiredStep = moving ? (leftStep ? 'left' : 'right') : null;
-  const supportFoot = moving ? (desiredStep === 'left' ? footPlants.right : footPlants.left) : null;
-  const supportAnchor = supportFoot?.anchor ?? new THREE.Vector2(0, 0);
-  const rawComOffset = new THREE.Vector2(
-    moveX * 0.16 + (rig.parts.torso?.group.rotation.z || 0) * 0.38,
-    moveZ * 0.24 - (rig.parts.torso?.group.rotation.x || 0) * 0.44
-  );
-  const supportError = rawComOffset.clone().sub(supportAnchor);
-  const fallPressure = THREE.MathUtils.clamp(supportError.length() / GANG_BEASTS_SUPPORT_LIMIT, 0, 1.8);
-  const nowMs = Date.now();
-  const recoveryElapsedMs = Math.max(0, nowMs - (rig.knockedUntil || 0));
-  const recoveryFactor = knocked
-    ? 0
-    : (rig.knockedUntil ? THREE.MathUtils.clamp(recoveryElapsedMs / 1100, 0.28, 1) : 1);
-  rig.recoveryFactor = dampToward(rig.recoveryFactor ?? recoveryFactor, recoveryFactor, knocked ? 2.5 : 5, dt);
-  if (rig.bodyRoot) {
-    const stumbleBob = moving && !knocked ? Math.sin(stepCycle * Math.PI * 4) * 0.018 : 0;
-    rig.bodyRoot.position.y = dampToward(rig.bodyRoot.position.y, stumbleBob, moving ? 8 : 4, dt);
-  }
-
-  const setTarget = (name, x, y = 0, z = 0) => {
-    const part = rig.parts[name];
-    if (!part) return;
-    const target = ensurePartDesiredTarget(part);
-    target.x = x;
-    target.y = y;
-    target.z = z;
-  };
-
-  const headLag = rig.parts.head?.group.rotation.x || 0;
-  const sideLean = 0;
-  const forwardLean = moving
-    ? THREE.MathUtils.clamp(-0.16 - movementAmount * 0.34 + headLag * 0.18, -0.62, 0.28)
-    : 0;
-  const punchArc = Math.sin(attackPhase * Math.PI);
-  const punchWindup = Math.sin(Math.min(attackPhase, 0.45) / 0.45 * Math.PI);
-  const stepForward = THREE.MathUtils.clamp(moveZ || movementAmount, -1, 1) * GANG_BEASTS_STEP_LENGTH;
-  const stepSide = THREE.MathUtils.clamp(moveX, -1, 1) * 0.18;
-  const leftDesiredAnchor = new THREE.Vector2(-GANG_BEASTS_STEP_WIDTH + stepSide, 0.02 + stepForward);
-  const rightDesiredAnchor = new THREE.Vector2(GANG_BEASTS_STEP_WIDTH + stepSide, -0.02 + stepForward);
-  const canSwitchStep = Math.max(footPlants.left.age || 0, footPlants.right.age || 0) > GANG_BEASTS_STEP_SWITCH_SECONDS;
-
-  if (moving && canSwitchStep && Math.sin(rig.flopTime * 5.1) > -0.55) footPlants.nextFoot = desiredStep;
-  updateFootPlant(footPlants.left, leftDesiredAnchor, !moving || footPlants.nextFoot !== 'left', dt, moving, 0, rig.flopTime);
-  updateFootPlant(footPlants.right, rightDesiredAnchor, !moving || footPlants.nextFoot !== 'right', dt, moving, 0, rig.flopTime);
-  if (moving && footPlants[footPlants.nextFoot]?.swing > 0.86 && Math.sin(rig.flopTime * 3.7) > -0.25) {
-    footPlants.nextFoot = footPlants.nextFoot === 'left' ? 'right' : 'left';
-  }
-  const leftPose = anchorToLegPose(footPlants.left.anchor, sideLean, footPlants.left.swing || 0);
-  const rightPose = anchorToLegPose(footPlants.right.anchor, sideLean, footPlants.right.swing || 0);
-
-  if (knocked) {
-    setTarget('hips', -0.18, 0, 0);
-    setTarget('torso', -1.18, 0, rig.knockDirection?.x ? THREE.MathUtils.clamp(-rig.knockDirection.x * 0.45, -0.55, 0.55) : 0.35);
-    setTarget('head', -0.65, 0, 0.25);
-    setTarget('leftLeg', 0.45, 0, 0.22);
-    setTarget('rightLeg', 0.45, 0, -0.22);
-    setTarget('leftCalf', -0.85, 0, 0.08);
-    setTarget('rightCalf', -0.85, 0, -0.08);
-  } else {
-    setTarget('hips', 0, 0, 0);
-    setTarget('torso', forwardLean, 0, 0);
-    setTarget('head', -forwardLean * 0.28, 0, 0);
-
-    setTarget('leftLeg', leftPose.upper, 0, leftPose.side);
-    setTarget('rightLeg', rightPose.upper, 0, rightPose.side);
-    setTarget('leftCalf', leftPose.calf, 0, 0);
-    setTarget('rightCalf', rightPose.calf, 0, 0);
-
-    if (leftPunch) {
-      setTarget('torso', forwardLean - punchArc * 0.28, 0.18 * punchArc, sideLean + 0.1 * punchArc);
-    }
-    if (rightPunch) {
-      setTarget('torso', forwardLean - punchArc * 0.28, -0.18 * punchArc, sideLean - 0.1 * punchArc);
-    }
-  }
-
-  const motorStrength = knocked ? 0.18 : 0.22 + (rig.recoveryFactor || 1) * 0.34;
-  const torsoMotorStrength = knocked ? 0.12 : 0.18 + (rig.recoveryFactor || 1) * 0.3;
-  const specs = {
-    hips: { min: -0.65, max: 0.65, sideMin: -0.55, sideMax: 0.55, twistMin: -0.7, twistMax: 0.7, stiffness: 3.1 * motorStrength, damping: 0.9 + motorStrength * 0.25, gravity: 7.5, lag: 3.2 },
-    leftLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 13 },
-    rightLeg: { min: -1.45, max: 1.25, sideMin: -0.8, sideMax: 0.8, twistMin: -0.55, twistMax: 0.55, stiffness: 9.5 * motorStrength, damping: 1.05 + motorStrength * 0.35, gravity: 24, lag: 12 },
-    leftCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'leftLeg', lag: 14 },
-    rightCalf: { min: -1.15, max: 1.25, sideMin: -0.45, sideMax: 0.45, twistMin: -0.35, twistMax: 0.35, stiffness: 10.5 * motorStrength, damping: 0.95 + motorStrength * 0.35, gravity: 26, parent: 'rightLeg', lag: 13 },
-    torso: { min: -1.25, max: 0.75, sideMin: -0.75, sideMax: 0.75, twistMin: -TORSO_MAX_TWIST, twistMax: TORSO_MAX_TWIST, stiffness: 2.7 * torsoMotorStrength, damping: knocked ? 0.55 : 0.75 + torsoMotorStrength * 0.25, gravity: knocked ? 34 : 13, lag: 2.7 },
-    head: { min: -1.05, max: 0.8, sideMin: -0.85, sideMax: 0.85, twistMin: -1.05, twistMax: 1.05, stiffness: 1.6 * torsoMotorStrength, damping: knocked ? 0.45 : 0.55 + torsoMotorStrength * 0.18, gravity: knocked ? 30 : 22, lag: 2.1 }
-  };
-
-  Object.entries(rig.parts).forEach(([name, part]) => {
-    const spec = specs[name];
-    if (!part || !spec) return;
-    const physics = part.group.userData.physics || (part.group.userData.physics = { angularVelocity: 0 });
-    const target = ensurePartControlTarget(part);
-    const desired = ensurePartDesiredTarget(part);
-    const lag = spec.lag || GANG_BEASTS_MOTOR_LAG_SPEED;
-    target.x = dampToward(target.x, desired.x, lag, dt);
-    target.y = dampToward(target.y, desired.y, lag * 0.85, dt);
-    target.z = dampToward(target.z, desired.z, lag * 0.85, dt);
-    const angle = part.group.rotation.x;
-    if (spec.noInertia) {
-      physics.angularVelocity = 0;
-      part.group.rotation.x = THREE.MathUtils.clamp(dampToward(angle, target.x, spec.lag || GANG_BEASTS_MOTOR_LAG_SPEED, dt), spec.min, spec.max);
-    } else {
-      const parentAngle = spec.parent ? rig.parts[spec.parent]?.group.rotation.x || 0 : 0;
-      const gravityPull = Math.sin(angle + parentAngle - (part.restRotation || 0)) * spec.gravity * 0.08;
-      const spring = (THREE.MathUtils.clamp(target.x, spec.min, spec.max) - angle) * spec.stiffness;
-      const noise = knocked ? Math.sin(rig.flopTime * (name.length + 2.7)) * 0.35 : 0;
-      physics.angularVelocity = (physics.angularVelocity || 0) + (spring - gravityPull + noise) * dt;
-      physics.angularVelocity *= Math.exp(-spec.damping * dt);
-      part.group.rotation.x = THREE.MathUtils.clamp(angle + physics.angularVelocity * dt, spec.min, spec.max);
-    }
-    part.group.rotation.y = dampToward(part.group.rotation.y, THREE.MathUtils.clamp(target.y, spec.twistMin, spec.twistMax), knocked ? 2.5 : 5.5, dt);
-    part.group.rotation.z = dampToward(part.group.rotation.z, THREE.MathUtils.clamp(target.z, spec.sideMin, spec.sideMax), knocked ? 2.2 : 4.8, dt);
-  });
-
-  rig.balance = sideLean;
-  rig.forwardIntent = movementAmount;
-  rig.forwardWeight = forwardLean;
-  rig.lastControls = {
-    mode: 'gang-beasts',
-    movementAmount,
-    leftPunch,
-    rightPunch,
-    knocked
-  };
-
-  if (!playerGroup.userData.isKnocked && !leftPunch && !rightPunch) {
-    playerGroup.userData.currentAction = moving ? 'walk' : 'idle';
-  }
 
   // Update floating hands and elastic arms from hand tracking data
   if (rig.floatingHands && rig.elasticArms && rig.shoulderAnchors) {
@@ -1023,7 +720,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       const trackData = handTracking?.[side];
       const floatingHand = rig.floatingHands[side];
       const defaultX = side === 'left' ? -0.5 : 0.5;
-      const defaultPos = new THREE.Vector3(defaultX, 0.65, 0.25);
+      const defaultPos = new THREE.Vector3(defaultX, 0.82, 0.25);
 
       // Use wrist landmark (lm 0) for hand group position so the GLB armature
       // root sits at the wrist; fall back to palm-centre when no landmarks.
@@ -1066,7 +763,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     }
   }
 
-  return { forwardIntent: rig.forwardIntent, balance: rig.balance, forwardWeight: rig.forwardWeight };
+  return { forwardIntent: 0, balance: 0, forwardWeight: 0 };
 }
 
 export function updateProceduralMonsterRig(monsterGroup, options = {}, deltaSeconds = 0) {
@@ -1157,11 +854,11 @@ export function createPlayerModel(
   const skinMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8, transparent: true, opacity: 0.70 });
 
   const leftFloatingHand = createHandGroup(skinMat, 'left');
-  leftFloatingHand.position.set(-0.5, 0.65, 0.25);
+  leftFloatingHand.position.set(-0.5, 0.82, 0.25);
   playerGroup.add(leftFloatingHand);
 
   const rightFloatingHand = createHandGroup(skinMat.clone(), 'right');
-  rightFloatingHand.position.set(0.5, 0.65, 0.25);
+  rightFloatingHand.position.set(0.5, 0.82, 0.25);
   playerGroup.add(rightFloatingHand);
 
   // Kick off async GLB load; groups are patched in-place when the model arrives.
