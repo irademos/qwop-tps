@@ -1997,6 +1997,7 @@ async function initCore(runtimeContext) {
   }
 
   function ensureRemoteQuestFriend(id, state) {
+    if (window.gameMode === '3d_painter') return;
     const existing = remoteQuestFriends.get(id);
     if (existing?.model) {
       applyNetworkTransformToObject(existing, state);
@@ -4196,6 +4197,7 @@ async function initCore(runtimeContext) {
 
   runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol, lantern, torch, shield };
   window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol, lantern, torch, shield };
+  if (window.gameMode !== '3d_painter') {
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -4276,6 +4278,7 @@ async function initCore(runtimeContext) {
     reward?.apply?.();
     showTreasurePopup(`You received a ${reward?.label ?? 'treasure'}`);
   };
+  } // end if (window.gameMode !== '3d_painter') treasureChest
   const getTreeMapLocationForLocal = (position) => {
     if (!position) return null;
     const origin = worldOrigin
@@ -4965,6 +4968,7 @@ async function initCore(runtimeContext) {
   };
 
   function spawnMonsterInSlot(slotId, modelPath, oldMonster = null, options = {}) {
+    if (window.gameMode === '3d_painter') return;
     if (PERF.disableMonsters) return;
     if (spawningSlots.has(slotId)) return;
     spawningSlots.add(slotId);
@@ -11536,13 +11540,14 @@ async function initCore(runtimeContext) {
   };
   const updatePickupTiles = (position) => {
     if (!position) return;
+    const isPainterMode = window.gameMode === '3d_painter';
     const center = position.clone();
-    removePickupOutsideRadius(ammoPickups, center, PICKUP_SPAWN_RADIUS);
+    if (!isPainterMode) removePickupOutsideRadius(ammoPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(foodPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(healthPickups, center, PICKUP_SPAWN_RADIUS);
-    removePickupOutsideRadius(coinPickups, center, PICKUP_SPAWN_RADIUS);
+    if (!isPainterMode) removePickupOutsideRadius(coinPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(zombieBrainsPickups, center, PICKUP_SPAWN_RADIUS);
-    removeDroppedWeaponPickupsOutsideRadius(droppedWeaponPickups, center, PICKUP_SPAWN_RADIUS);
+    if (!isPainterMode) removeDroppedWeaponPickupsOutsideRadius(droppedWeaponPickups, center, PICKUP_SPAWN_RADIUS);
 
     const now = Date.now();
     if (now - lastPickupStockAt < PICKUP_STOCK_COOLDOWN_MS) {
@@ -11550,7 +11555,7 @@ async function initCore(runtimeContext) {
     }
     lastPickupStockAt = now;
 
-    spawnScatteredPickups({
+    if (!isPainterMode) spawnScatteredPickups({
       center,
       count: TILE_STOCK_AMMO_COUNT,
       maxTotal: () => ammoPickups.length < MAX_AMMO_PICKUPS,
@@ -11568,13 +11573,13 @@ async function initCore(runtimeContext) {
       maxTotal: () => healthPickups.length < MAX_HEALTH_PICKUPS,
       spawnFn: spawnHealthPickup
     });
-    spawnScatteredPickups({
+    if (!isPainterMode) spawnScatteredPickups({
       center,
       count: TILE_STOCK_COIN_COUNT,
       maxTotal: () => coinPickups.length < MAX_COIN_PICKUPS,
       spawnFn: spawnCoinPickup
     });
-    spawnScatteredPickups({
+    if (!isPainterMode) spawnScatteredPickups({
       center,
       count: TILE_STOCK_WEAPON_COUNT,
       maxTotal: () => droppedWeaponPickups.length < MAX_WEAPON_PICKUPS,
@@ -11582,7 +11587,7 @@ async function initCore(runtimeContext) {
     });
 
     const isHost = !multiplayer || multiplayer.isHost;
-    if (isHost && TILE_STOCK_WEAPON_COUNT > 0) {
+    if (!isPainterMode && isHost && TILE_STOCK_WEAPON_COUNT > 0) {
       const hasIceGun = (inventoryState?.iceGun?.count || 0) > 0;
       const canSpawnIceGun = iceGun?.mesh && !iceGun.holder && !hasIceGun && !iceGun.mesh.visible;
       if (canSpawnIceGun) {
@@ -11638,25 +11643,29 @@ async function initCore(runtimeContext) {
       }
     }
 
-    const canSpawnTreasureChest = treasureChest?.mesh
-      && !treasureChest.isOpen
-      && !treasureChest.mesh.visible;
-    if (canSpawnTreasureChest) {
-      const spawnPos = getRandomPickupPosition(center);
-      if (spawnPos) {
-        spawnTreasureChestPickup(spawnPos);
+    if (!isPainterMode) {
+      const canSpawnTreasureChest = treasureChest?.mesh
+        && !treasureChest.isOpen
+        && !treasureChest.mesh.visible;
+      if (canSpawnTreasureChest) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnTreasureChestPickup(spawnPos);
+        }
       }
     }
 
-    [iceGun, bow, bazooka, autumnSword, hammer, bomb].forEach((weapon) => {
-      if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
-      if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
-        weapon.mesh.visible = false;
-      }
-    });
-    if (treasureChest?.mesh && !treasureChest.isOpen && treasureChest.mesh.visible) {
-      if (center.distanceTo(treasureChest.mesh.position) > PICKUP_SPAWN_RADIUS) {
-        treasureChest.mesh.visible = false;
+    if (!isPainterMode) {
+      [iceGun, bow, bazooka, autumnSword, hammer, bomb].forEach((weapon) => {
+        if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
+        if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
+          weapon.mesh.visible = false;
+        }
+      });
+      if (treasureChest?.mesh && !treasureChest.isOpen && treasureChest.mesh.visible) {
+        if (center.distanceTo(treasureChest.mesh.position) > PICKUP_SPAWN_RADIUS) {
+          treasureChest.mesh.visible = false;
+        }
       }
     }
   };
@@ -11814,48 +11823,52 @@ async function initCore(runtimeContext) {
 
   let originWasAutoReset = false;
 
-  homeSystem = createHomeSystem({
-    scene,
-    playerModel,
-    playerControls,
-    profileNameKey,
-    initialHome: playerProfile?.home ?? null
-  });
-  void homeSystem.loadStorageChest?.();
-  window.homeSystem = homeSystem;
+  if (window.gameMode !== '3d_painter') {
+    homeSystem = createHomeSystem({
+      scene,
+      playerModel,
+      playerControls,
+      profileNameKey,
+      initialHome: playerProfile?.home ?? null
+    });
+    void homeSystem.loadStorageChest?.();
+    window.homeSystem = homeSystem;
+  }
   const interiorScene = homeSystem?.interiorGroup ?? scene;
-  bed = new Bed(interiorScene, {
-    position: new THREE.Vector3(-3, 0.5, 3),
-    useTerrainHeight: false
-  });
-  await bed.load();
-  window.bed = bed;
+  if (window.gameMode !== '3d_painter') {
+    bed = new Bed(interiorScene, {
+      position: new THREE.Vector3(-3, 0.5, 3),
+      useTerrainHeight: false
+    });
+    await bed.load();
+    window.bed = bed;
 
-  craftTable = new CraftTable(interiorScene, {
-    position: new THREE.Vector3(2.5, 0.5, -2.5),
-    useTerrainHeight: false
-  });
-  await craftTable.load();
-  window.craftTable = craftTable;
-  homeSystem?.registerPlacedObjects?.({ bed, craftTable });
-  if (rapierWorld && craftTable?.mesh) {
-    if (craftTableColliderBody && rapierWorld.getRigidBody(craftTableColliderBody.handle)) {
-      removeRigidBodySafely(rapierWorld, craftTableColliderBody);
-      craftTableColliderBody = null;
+    craftTable = new CraftTable(interiorScene, {
+      position: new THREE.Vector3(2.5, 0.5, -2.5),
+      useTerrainHeight: false
+    });
+    await craftTable.load();
+    window.craftTable = craftTable;
+    homeSystem?.registerPlacedObjects?.({ bed, craftTable });
+    if (rapierWorld && craftTable?.mesh) {
+      if (craftTableColliderBody && rapierWorld.getRigidBody(craftTableColliderBody.handle)) {
+        removeRigidBodySafely(rapierWorld, craftTableColliderBody);
+        craftTableColliderBody = null;
+      }
+      const bounds = new THREE.Box3().setFromObject(craftTable.mesh);
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      bounds.getSize(size);
+      bounds.getCenter(center);
+      const half = size.multiplyScalar(0.5);
+      const rbDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(center.x, center.y, center.z);
+      craftTableColliderBody = rapierWorld.createRigidBody(rbDesc);
+      const colDesc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
+        .setRestitution(0.05)
+        .setFriction(0.9);
+      rapierWorld.createCollider(colDesc, craftTableColliderBody);
+      craftTableColliderLastCenter = center.clone();
     }
-    const bounds = new THREE.Box3().setFromObject(craftTable.mesh);
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    bounds.getSize(size);
-    bounds.getCenter(center);
-    const half = size.multiplyScalar(0.5);
-    const rbDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(center.x, center.y, center.z);
-    craftTableColliderBody = rapierWorld.createRigidBody(rbDesc);
-    const colDesc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
-      .setRestitution(0.05)
-      .setFriction(0.9);
-    rapierWorld.createCollider(colDesc, craftTableColliderBody);
-    craftTableColliderLastCenter = center.clone();
   }
 
   const syncCraftTableCollider = () => {
