@@ -2776,28 +2776,11 @@ export class PlayerControls {
       const slopeSpeedMultiplier = !this.isInWater && !groundResolution.metadata.walkable
         ? STEEP_SLOPE_SPEED_MULTIPLIER
         : 1;
-      const usingGangBeastsRig = !!this.playerModel?.userData?.qwopRig;
       const targetHorizontal = movement.clone().multiplyScalar(speed * slopeSpeedMultiplier);
       const currentHorizontal = new THREE.Vector3(vel.x, 0, vel.z);
-      const maxDeltaV = (usingGangBeastsRig ? GANG_BEASTS_INPUT_ACCELERATION : PLAYER_INPUT_ACCELERATION) * deltaSeconds;
+      const maxDeltaV = PLAYER_INPUT_ACCELERATION * deltaSeconds;
       if (movement.lengthSq() > 0.0001) {
         const desiredDelta = targetHorizontal.sub(currentHorizontal);
-        if (usingGangBeastsRig) {
-          const rig = this.playerModel.userData.qwopRig;
-          const balanceError = rig.balanceError;
-          const balancePush = new THREE.Vector3();
-          if (balanceError && Number.isFinite(balanceError.x) && Number.isFinite(balanceError.y)) {
-            const forward = movement.clone().normalize();
-            const right = new THREE.Vector3().crossVectors(this.camera.up, forward).normalize();
-            balancePush
-              .addScaledVector(forward, THREE.MathUtils.clamp(balanceError.y, -0.35, 0.35))
-              .addScaledVector(right, THREE.MathUtils.clamp(balanceError.x, -0.35, 0.35))
-              .multiplyScalar(GANG_BEASTS_BALANCE_PUSH * deltaSeconds);
-          }
-          const leanAmount = THREE.MathUtils.clamp(-(rig.forwardWeight || 0) - 0.04, 0, 0.75);
-          const leanDrive = movement.clone().normalize().multiplyScalar(leanAmount * GANG_BEASTS_LEAN_DRIVE_ACCELERATION * deltaSeconds);
-          desiredDelta.multiplyScalar(GANG_BEASTS_DIRECT_CONTROL_RATIO).add(balancePush).add(leanDrive);
-        }
         if (desiredDelta.length() > maxDeltaV) desiredDelta.setLength(maxDeltaV);
         this.body.applyImpulse({ x: desiredDelta.x, y: 0, z: desiredDelta.z }, true);
       } else {
@@ -2848,9 +2831,7 @@ export class PlayerControls {
       const latestVelocity = this.body?.linvel?.() ?? { x: 0, y: 0, z: 0 };
       const facing = new THREE.Vector3(Math.sin(yawAngle), 0, Math.cos(yawAngle));
       const forwardSpeed = latestVelocity.x * facing.x + latestVelocity.z * facing.z;
-      const usingQwopRig = !!this.playerModel?.userData?.qwopRig;
-      const rigForwardWeight = usingQwopRig ? THREE.MathUtils.clamp(this.playerModel.userData.qwopRig?.forwardWeight || 0, -1, 1) : 0;
-      const fallInput = usingQwopRig ? rigForwardWeight * 0.35 : rigForwardWeight + forwardSpeed * PLAYER_FALL_MOMENTUM_LEAN;
+      const fallInput = forwardSpeed * PLAYER_FALL_MOMENTUM_LEAN;
       const fallThreshold = this.canJump ? PLAYER_FALL_BASE_THRESHOLD : PLAYER_FALL_BASE_THRESHOLD * 0.35;
       const fallTorque = Math.abs(fallInput) > fallThreshold
         ? (fallInput - Math.sign(fallInput) * fallThreshold) * PLAYER_FALL_TORQUE
@@ -2864,9 +2845,6 @@ export class PlayerControls {
       );
       if (Math.abs(this.fallAngularVelocity) < 0.0001 && Math.abs(fallInput) <= fallThreshold) {
         this.fallAngularVelocity = 0;
-      }
-      if (usingQwopRig) {
-        this.fallPitch = THREE.MathUtils.clamp(this.fallPitch, -0.22, 0.22);
       }
       this.playerModel.rotation.set(this.fallPitch, yawAngle, 0);
       this.playerModel.up.set(0, 1, 0);
