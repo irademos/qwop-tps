@@ -2611,9 +2611,6 @@ export class PlayerControls {
       if (this.playerModel) {
         this.playerModel.position.set(newX, newY, newZ);
         let yawAngle = this.yaw;
-        if (movement.length() > 0) {
-          yawAngle = Math.atan2(movement.x, movement.z);
-        }
         if (this.engagedDirection) {
           yawAngle = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
         }
