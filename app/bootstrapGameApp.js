@@ -1,6 +1,7 @@
 // app.js
 import { getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
 import { Weapon } from '../items/weapon.js';
+import { setPainterDebugBrush, brushConfig } from '../models/handRotationDebug.js';
 import * as THREE from "three";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { loadMonsterModel } from "../models/monsterModel.js";
@@ -3861,6 +3862,11 @@ async function initCore(runtimeContext) {
   if (window.gameMode === '3d_painter') {
     paintBrush = new PaintBrush(scene);
     await paintBrush.load();
+    setPainterDebugBrush(paintBrush);
+    // Sync brush to initial brushConfig values
+    paintBrush._holdOffset.set(brushConfig.offsetX, brushConfig.offsetY, brushConfig.offsetZ);
+    const _initBrushE = new THREE.Euler(brushConfig.rotX, brushConfig.rotY, brushConfig.rotZ, 'YXZ');
+    paintBrush._holdQuaternion.setFromEuler(_initBrushE);
   }
 
   function spawnPaintSphere(position) {
