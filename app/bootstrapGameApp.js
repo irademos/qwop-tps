@@ -4557,13 +4557,19 @@ async function initCore(runtimeContext) {
   const rebuildBuildingColliders = () => {
     if (!rapierWorld) return;
 
-    if (buildingColliderBody && rapierWorld.getRigidBody(buildingColliderBody.handle)) {
-      removeRigidBodySafely(rapierWorld, buildingColliderBody);
-      buildingColliderBody = null;
-    }
+    // Stash the old body so we can hot-swap: create the new collider first,
+    // then remove the old one.  This avoids a one-frame gap where the player
+    // can drift inside a wall and get ejected when the new collider appears.
+    const oldBody = buildingColliderBody;
+    buildingColliderBody = null;
 
     const meshes = buildingsRenderer?.getCollisionMeshes?.() ?? [];
-    if (!meshes.length) return;
+    if (!meshes.length) {
+      if (oldBody && rapierWorld.getRigidBody(oldBody.handle)) {
+        removeRigidBodySafely(rapierWorld, oldBody);
+      }
+      return;
+    }
 
     // ensure transforms are current
     for (const m of meshes) m.updateMatrixWorld(true);
@@ -4600,7 +4606,12 @@ async function initCore(runtimeContext) {
       vertOffset += posAttr.count;
     }
 
-    if (allVerts.length === 0 || allIndices.length === 0) return;
+    if (allVerts.length === 0 || allIndices.length === 0) {
+      if (oldBody && rapierWorld.getRigidBody(oldBody.handle)) {
+        removeRigidBodySafely(rapierWorld, oldBody);
+      }
+      return;
+    }
 
     const vertices = new Float32Array(allVerts);
     const indices = new Uint32Array(allIndices);
@@ -4614,6 +4625,11 @@ async function initCore(runtimeContext) {
 
     const collider = rapierWorld.createCollider(colDesc, buildingColliderBody);
     console.log('building collider created', String(collider.handle), 'verts', vertices.length / 3, 'idx', indices.length);
+
+    // Remove the old body after the new one is live so there is no gap.
+    if (oldBody && rapierWorld.getRigidBody(oldBody.handle)) {
+      removeRigidBodySafely(rapierWorld, oldBody);
+    }
   };
   window.rebuildBuildingColliders = rebuildBuildingColliders;
 
@@ -15332,22 +15348,8 @@ async function initCore(runtimeContext) {
       onMonsterHit: handleMonsterDamage,
       onBuildHit: handleBuildProjectileHit
     });
-    (animals || []).forEach((animal) => {
-      if (!animal?.model || String(animal.type).toLowerCase() !== 'dog') return;
-      if (!dogColliderEntries.has(animal.id)) {
-        const entry = createStaticBoxColliderForObject(animal.model, {
-          rapierWorld,
-          friction: 0.8,
-          restitution: 0.01,
-          useObjectPosition: true,
-          centerOffset: [0, 0.4, 0],
-          halfExtents: [0.24, 0.33, 0.5]
-        });
-        dogColliderEntries.set(animal.id, entry || null);
-      } else {
-        syncStaticBoxColliderForObject(dogColliderEntries.get(animal.id));
-      }
-    });
+    // Dog companions intentionally have no static Rapier body — a teleporting fixed
+    // collider pushed the player when the dog walked to its follow anchor.
     (animals || []).forEach((animal) => {
       if (!animal?.model || String(animal.type).toLowerCase() !== 'crab' || animal?.isDead) return;
       if (!crabColliderEntries.has(animal.id)) {
