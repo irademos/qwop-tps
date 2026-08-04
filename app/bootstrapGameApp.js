@@ -3851,6 +3851,20 @@ async function initCore(runtimeContext) {
       this._tipMarker.getWorldPosition(pos);
       return pos;
     }
+
+    _getHandBone(playerModel) {
+      if (this._handBones.has(playerModel)) {
+        const cached = this._handBones.get(playerModel);
+        if (cached?.indexMcp) return cached.indexMcp;
+      }
+      const root = playerModel.userData?.pivot ?? playerModel;
+      let found = null;
+      root.traverse(obj => {
+        if (!found && obj.isBone && /Bone\.?005/i.test(obj.name)) found = obj;
+      });
+      this._handBones.set(playerModel, { indexMcp: found });
+      return found;
+    }
   }
 
   let paintBrush = null;
