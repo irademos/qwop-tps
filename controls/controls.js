@@ -3444,6 +3444,7 @@ export class PlayerControls {
    */
   _processHandFistAttack(trackingSlot, isFist) {
     if (!this._fistState) this._fistState = { left: false, right: false };
+    if (!this._fistAttackCooldown) this._fistAttackCooldown = { left: 0, right: 0 };
     const wasFist = this._fistState[trackingSlot] ?? false;
     this._fistState[trackingSlot] = !!isFist;
 
@@ -3452,11 +3453,16 @@ export class PlayerControls {
     if (isFist && !wasFist) {
       // Fist just closed — trigger attack or start charge
       if (!this.enabled || this.isInWater) return;
+      const now = performance.now();
       if (this.shouldHoldToFire(gameHand)) {
         // Hold-to-fire weapons (bow, bazooka, bomb, iceGun): begin charge on close
         this.isFireHeld = true;
         this.setAiming(true);
       } else {
+        // Guard against false-positive fist detections re-triggering attacks too rapidly.
+        // A 900ms cooldown per hand prevents movement-lock spam from mediapipe noise.
+        if (now < this._fistAttackCooldown[trackingSlot]) return;
+        this._fistAttackCooldown[trackingSlot] = now + 900;
         this.performAttackForSlot(gameHand);
       }
     } else if (!isFist && wasFist) {
