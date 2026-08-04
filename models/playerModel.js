@@ -647,12 +647,28 @@ async function initGLBHands(leftGroup, rightGroup) {
   rightScene.scale.setScalar(HAND_MODEL_SCALE);
   rightScene.position.set(0, 0, 0); // strip any origin offset baked into the GLB
   rightScene.rotation.set(-Math.PI / 2, Math.PI, 0);
-  rightGroup.add(rightScene);
-  // Also zero out any armature-level offset on direct children
+  // Zero out any armature-level offset on direct children (e.g. Armature_rootJoint)
   rightScene.children.forEach(child => {
     if (!child.isMesh) { child.position.set(0, 0, 0); child.rotation.set(0, 0, 0); }
   });
+
+  // Wrap in a pivot group so rotations happen around Bone_Armature (the wrist joint).
+  // Offset rightScene within the pivot so Bone_Armature lands at the pivot's origin,
+  // which coincides with the floatingHand group origin (= wrist landmark position).
+  const rightPivot = new THREE.Group();
+  rightPivot.name = 'rightHandPivot';
+  rightPivot.add(rightScene);
+  rightGroup.add(rightPivot);
   rightScene.updateWorldMatrix(true, true);
+  const rightWristBone = rightScene.getObjectByName('Bone_Armature');
+  if (rightWristBone) {
+    const _bonePos = new THREE.Vector3();
+    rightWristBone.getWorldPosition(_bonePos);
+    rightPivot.worldToLocal(_bonePos);
+    rightScene.position.sub(_bonePos);
+    rightScene.updateWorldMatrix(true, true);
+  }
+
   setupGLBHandBones(rightScene);
   rightScene.traverse(obj => {
     if (obj.isMesh) {
@@ -664,7 +680,8 @@ async function initGLBHands(leftGroup, rightGroup) {
       });
     }
   });
-  rightGroup.userData.glbScene = rightScene;
+  rightGroup.userData.glbScene = rightScene;  // bone data lives here
+  rightGroup.userData.glbPivot = rightPivot;  // rotation/position pivot (wrist joint)
   rightGroup.userData.glbReady = true;
   initHandRotationDebug();
 
@@ -673,11 +690,24 @@ async function initGLBHands(leftGroup, rightGroup) {
   leftScene.scale.set(-HAND_MODEL_SCALE, HAND_MODEL_SCALE, HAND_MODEL_SCALE); // mirror on X
   leftScene.position.set(0, 0, 0);
   leftScene.rotation.set(-Math.PI / 2, Math.PI, 0);
-  leftGroup.add(leftScene);
   leftScene.children.forEach(child => {
     if (!child.isMesh) { child.position.set(0, 0, 0); child.rotation.set(0, 0, 0); }
   });
+
+  const leftPivot = new THREE.Group();
+  leftPivot.name = 'leftHandPivot';
+  leftPivot.add(leftScene);
+  leftGroup.add(leftPivot);
   leftScene.updateWorldMatrix(true, true);
+  const leftWristBone = leftScene.getObjectByName('Bone_Armature');
+  if (leftWristBone) {
+    const _bonePos = new THREE.Vector3();
+    leftWristBone.getWorldPosition(_bonePos);
+    leftPivot.worldToLocal(_bonePos);
+    leftScene.position.sub(_bonePos);
+    leftScene.updateWorldMatrix(true, true);
+  }
+
   setupGLBHandBones(leftScene);
   leftScene.traverse(obj => {
     if (obj.isMesh) {
@@ -690,7 +720,8 @@ async function initGLBHands(leftGroup, rightGroup) {
       });
     }
   });
-  leftGroup.userData.glbScene = leftScene;
+  leftGroup.userData.glbScene = leftScene;  // bone data lives here
+  leftGroup.userData.glbPivot = leftPivot;  // rotation/position pivot (wrist joint)
   leftGroup.userData.glbReady = true;
 }
 
@@ -1021,14 +1052,16 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
           wrist3d.y - (lm.y - wrist.y) * lmScale,
           wrist3d.z - (lm.z - wrist.z) * lmScale * 2
         ));
-        // Rotate the scene root to match overall hand orientation before driving bones
-        const glbScene = floatingHand.userData.glbScene;
-        if (glbScene) glbScene.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
-        if (glbScene) updateGLBHandSceneRotation(glbScene, pts, side, dt);
+        // Rotate the pivot (wrist joint) to match overall hand orientation before driving bones.
+        // glbPivot is the rotation root centered at Bone_Armature; fall back to glbScene for
+        // setups that predate the pivot (shouldn't occur in practice).
+        const glbPivot = floatingHand.userData.glbPivot ?? floatingHand.userData.glbScene;
+        if (glbPivot) glbPivot.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
+        if (glbPivot) updateGLBHandSceneRotation(glbPivot, pts, side, dt);
         updateGLBHandBones(floatingHand, pts, playerGroup);
       } else if (floatingHand.userData.glbReady) {
-        const glbScene = floatingHand.userData.glbScene;
-        if (glbScene) glbScene.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
+        const glbPivot = floatingHand.userData.glbPivot ?? floatingHand.userData.glbScene;
+        if (glbPivot) glbPivot.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
       }
     }
   }
