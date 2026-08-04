@@ -74,7 +74,7 @@ export function getOffsetQuaternion() {
 }
 
 // ── hand position offset (applied on top of tracked wrist position) ───────────
-export const handPosOffset = { x: 0.01, y: 0.09, z: -0.05 };
+export const handPosOffset = { x: 0.0140, y: -0.0050, z: -0.0050 };
 
 export const armConfig = { thickness: 0.4 };
 

@@ -3810,8 +3810,8 @@ async function initCore(runtimeContext) {
         type: 'paintbrush',
         itemId: 'paintbrush',
         hand: 'right',
-        holdOffset: new THREE.Vector3(0, 0.05, 0.05),
-        holdRotation: new THREE.Euler(Math.PI * 0.15, 0, 0, 'YXZ'),
+        holdOffset: new THREE.Vector3(-0.0090, 0.0050, 0.0420),
+        holdRotation: new THREE.Euler(1.0123, -1.3090, -0.1484, 'YXZ'),
       });
       this._tipMarker = null;
     }
@@ -3849,6 +3849,20 @@ async function initCore(runtimeContext) {
       const pos = new THREE.Vector3();
       this._tipMarker.getWorldPosition(pos);
       return pos;
+    }
+
+    _getHandBone(playerModel) {
+      if (this._handBones.has(playerModel)) {
+        const cached = this._handBones.get(playerModel);
+        if (cached?.indexMcp) return cached.indexMcp;
+      }
+      const root = playerModel.userData?.pivot ?? playerModel;
+      let found = null;
+      root.traverse(obj => {
+        if (!found && obj.isBone && /Bone\.?005/i.test(obj.name)) found = obj;
+      });
+      this._handBones.set(playerModel, { indexMcp: found });
+      return found;
     }
   }
 
