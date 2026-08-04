@@ -357,15 +357,17 @@ export class PlayerControls {
     this.dialogueIndex = 0;
     this.awaitingResponse = false;
     this.awaitingExit = false;
-    this.questManager = new QuestManager({
-      scene: this.scene,
-      getPlayerModel: () => this.playerModel,
-      attachPhysics: (npc) => window.attachMonsterPhysics?.(npc),
-      detachPhysics: (npc) => window.detachNpcPhysics?.(npc),
-      addXp: (amount) => window.addPlayerXp?.(amount),
-      getMonsterXpForLevel: (level) => window.getMonsterXpForLevel?.(level)
-    });
-    window.questManager = this.questManager;
+    if (window.gameMode !== '3d_painter') {
+      this.questManager = new QuestManager({
+        scene: this.scene,
+        getPlayerModel: () => this.playerModel,
+        attachPhysics: (npc) => window.attachMonsterPhysics?.(npc),
+        detachPhysics: (npc) => window.detachNpcPhysics?.(npc),
+        addXp: (amount) => window.addPlayerXp?.(amount),
+        getMonsterXpForLevel: (level) => window.getMonsterXpForLevel?.(level)
+      });
+      window.questManager = this.questManager;
+    }
     this.crosshairEl = document.querySelector('.crosshair');
     this.defaultFov = this.camera.fov;
     this.aimFov = Math.max(45, this.defaultFov - 8);

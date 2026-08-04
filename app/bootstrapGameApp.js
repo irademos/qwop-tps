@@ -1997,6 +1997,7 @@ async function initCore(runtimeContext) {
   }
 
   function ensureRemoteQuestFriend(id, state) {
+    if (window.gameMode === '3d_painter') return;
     const existing = remoteQuestFriends.get(id);
     if (existing?.model) {
       applyNetworkTransformToObject(existing, state);
@@ -4967,6 +4968,7 @@ async function initCore(runtimeContext) {
   };
 
   function spawnMonsterInSlot(slotId, modelPath, oldMonster = null, options = {}) {
+    if (window.gameMode === '3d_painter') return;
     if (PERF.disableMonsters) return;
     if (spawningSlots.has(slotId)) return;
     spawningSlots.add(slotId);
