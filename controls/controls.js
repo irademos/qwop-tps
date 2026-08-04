@@ -316,19 +316,7 @@ export class PlayerControls {
       this.playerModel.rotation.x = 0;
     }
     
-    const world = window.rapierWorld;
-    if (world) {
-      const rbDesc = RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(this.playerX, this.playerY, this.playerZ)
-        .setLinearDamping(0.2)
-        .setAngularDamping(0.9);
-      this.body = world.createRigidBody(rbDesc);
-      const colDesc = RAPIER.ColliderDesc
-        .capsule(PLAYER_HALF_HEIGHT, PLAYER_RADIUS)
-        .setRestitution(0)
-        .setFriction(1);
-      world.createCollider(colDesc, this.body);
-    }
+    // No physics collider — simple direct position movement
 
     // Set camera to third-person perspective
     this.camera.position.set(this.playerX, this.playerY + 2, this.playerZ + 5);
@@ -2568,123 +2556,10 @@ export class PlayerControls {
       }
     }
 
-    if (!this.body) return;
-    this.updateAimingRotation();
-    const t = this.body.translation();
-    const vel = this.body.linvel();
-
-    this.waterDepth = getWaterDepth(t.x, t.z);
-    const surfaceY = 0;
-    const floatTargetY = surfaceY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
-    this.isInWater = this.waterDepth > SWIM_DEPTH_THRESHOLD && t.y < floatTargetY;
-
-    if (this.isGrabbed) {
-      if (this.externalGrabPos && this.body) {
-        // Compute world position of the grabbed body part on this player
-        const bodyPartOff = GRAB_BODY_PART_OFFSETS[this.externalGrabBodyPart || 'torso']
-          || GRAB_BODY_PART_OFFSETS.torso;
-        const localOff = new THREE.Vector3(bodyPartOff.x, bodyPartOff.y, bodyPartOff.z);
-        if (this.playerModel) {
-          localOff.applyEuler(new THREE.Euler(0, this.playerModel.rotation.y, 0));
-        }
-        const grabWorldPos = { x: t.x + localOff.x, y: t.y + localOff.y, z: t.z + localOff.z };
-
-        const target = this.externalGrabPos;
-        const clamp = (v) => Math.max(-GRAB_FORCE_MAX, Math.min(GRAB_FORCE_MAX, v));
-        const force = {
-          x: clamp((target.x - grabWorldPos.x) * GRAB_SPRING - vel.x * GRAB_DAMPING),
-          y: clamp((target.y - grabWorldPos.y) * GRAB_SPRING - vel.y * GRAB_DAMPING),
-          z: clamp((target.z - grabWorldPos.z) * GRAB_SPRING - vel.z * GRAB_DAMPING),
-        };
-        try {
-          this.body.addForceAtPoint(force, grabWorldPos, true);
-        } catch (_) {
-          this.body.addForce(force, true);
-        }
-
-        // Cap the grabbed player's own horizontal movement so they can be dragged
-        const horizSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
-        if (horizSpeed > GRAB_SELF_SPEED_LIMIT) {
-          const f = GRAB_SELF_SPEED_LIMIT / horizSpeed;
-          this.body.setLinvel({ x: vel.x * f, y: vel.y, z: vel.z * f }, false);
-        }
-      }
-      if (this.playerModel) {
-        this.playerModel.position.set(t.x, t.y, t.z);
-      }
-      return;
-    }
-
-    const freezeActive = this.isFrozen();
-    if (freezeActive) {
-      this.body.setLinvel({ x: 0, y: vel.y, z: 0 }, true);
-      if (this.isClimbing) {
-        this.stopClimbing();
-      }
-      this.wasFrozen = true;
-    } else if (this.wasFrozen) {
-      if (this.playerModel?.userData) {
-        this.playerModel.userData.currentAction = null;
-      }
-      this.wasFrozen = false;
-    }
-
-    const previousGroundResolution = this.lastGroundResolution;
-    const groundResolution = this.resolveGroundY(t.x, t.y, t.z);
-    this.lastGroundResolution = groundResolution;
-    const canStandOnGround = groundResolution.metadata.walkable;
-    const selectedGroundY = canStandOnGround
-      ? groundResolution.groundY
-      : groundResolution.terrainHeight;
-    const rawGroundExpectedY = selectedGroundY + PLAYER_HALF_HEIGHT + PLAYER_RADIUS;
-    if (!Number.isFinite(this.smoothedGroundExpectedY)) {
-      this.smoothedGroundExpectedY = rawGroundExpectedY;
-    } else {
-      const groundDelta = Math.abs(rawGroundExpectedY - this.smoothedGroundExpectedY);
-      const previousSurfaceType = previousGroundResolution?.metadata?.surfaceType;
-      const currentSurfaceType = groundResolution?.metadata?.surfaceType;
-      const terrainStampTransition = previousSurfaceType && currentSurfaceType
-        && previousSurfaceType !== currentSurfaceType;
-      if (groundDelta > GROUND_SMOOTH_SNAP_DELTA
-        || (terrainStampTransition && groundDelta > GROUND_SMOOTH_SURFACE_SWITCH_SNAP_DELTA)) {
-        this.smoothedGroundExpectedY = rawGroundExpectedY;
-      } else {
-        this.smoothedGroundExpectedY += (rawGroundExpectedY - this.smoothedGroundExpectedY) * GROUND_SMOOTH_ALPHA;
-      }
-    }
-    const groundExpectedY = this.smoothedGroundExpectedY;
-    const grounded = !this.isInWater && canStandOnGround && t.y <= groundExpectedY + 0.05;
-    if (grounded) {
-      this.canJump = true;
-      this.hasDoubleJumped = false;
-    } else {
-      this.canJump = false;
-    }
-    if (this.isInWater) {
-      if (this.keysPressed.has(" ")) {
-        const newY = t.y - 0.2;
-        this.body.setTranslation({ x: t.x, y: newY, z: t.z }, true);
-        this.body.setLinvel({ x: vel.x, y: -1, z: vel.z }, true);
-        t.y = newY;
-      } else if (t.y < floatTargetY) {
-        const newY = t.y + (floatTargetY - t.y) * 0.1;
-        this.body.setTranslation({ x: t.x, y: newY, z: t.z }, true);
-        if (vel.y < 0) {
-          this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
-        }
-        t.y = newY;
-      }
-    } else if (t.y < groundExpectedY) {
-      this.body.setTranslation({ x: t.x, y: groundExpectedY, z: t.z }, true);
-      if (vel.y < 0) {
-        this.body.setLinvel({ x: vel.x, y: 0, z: vel.z }, true);
-      }
-      t.y = groundExpectedY;
-    }
-    const moveDirection = new THREE.Vector3(0, 0, 0);
-    const movementLocked = freezeActive || ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'mmaKick', 'runningKick'].includes(this.currentSpecialAction);
-    const position = new THREE.Vector3(t.x, t.y, t.z);
-    if (!movementLocked) {
+    // Simple direct position movement — no physics, no gravity, no collider
+    {
+      // Build move direction from WASD or joystick
+      const moveDirection = new THREE.Vector3(0, 0, 0);
       if (this.isMobile) {
         if (this.joystickForce > 0.1) {
           const cameraForward = new THREE.Vector3();
@@ -2703,200 +2578,66 @@ export class PlayerControls {
         if (this.keysPressed.has("a")) moveDirection.x = 1;
         if (this.keysPressed.has("d")) moveDirection.x = -1;
       }
-    }
-    if (!this.isMobile && moveDirection.length() > 0) moveDirection.normalize();
-    const cameraDirection = new THREE.Vector3();
-    this.camera.getWorldDirection(cameraDirection);
-    cameraDirection.y = 0;
-    cameraDirection.normalize();
-    const rightVector = new THREE.Vector3();
-    rightVector.crossVectors(this.camera.up, cameraDirection).normalize();
-    const movement = new THREE.Vector3();
-    if (!this.isMobile) {
-      if (moveDirection.z !== 0) movement.add(cameraDirection.clone().multiplyScalar(moveDirection.z));
-      if (moveDirection.x !== 0) movement.add(rightVector.clone().multiplyScalar(moveDirection.x));
-      if (movement.length() > 0) movement.normalize();
-    } else {
-      movement.copy(moveDirection);
-    }
-    if (movementLocked && !freezeActive) {
-      movement.copy(this.slideMomentum);
-      this.slideMomentum.multiplyScalar(0.97);
-      if (this.slideMomentum.length() < 0.01) this.slideMomentum.set(0, 0, 0);
-    } else if (freezeActive) {
-      movement.set(0, 0, 0);
-      this.slideMomentum.set(0, 0, 0);
-    } else if (movement.length() > 0) {
-      this.lastMoveDirection.copy(movement);
-    } else if (this.isSlideMomentumActive()) {
-      this.slideMomentum.multiplyScalar(0.9);
-      if (this.slideMomentum.length() < 0.01) this.slideMomentum.set(0, 0, 0);
-    }
-    if (this.isClimbing) {
-      movement.set(0, 0, 0);
-    }
 
-    const climbInput = this.getClimbInput(moveDirection, cameraDirection);
-    const climbArea = this.findClimbableArea(position);
-    if (this.isClimbing) {
-      if (!climbArea) {
-        this.stopClimbing();
+      const cameraDirection = new THREE.Vector3();
+      this.camera.getWorldDirection(cameraDirection);
+      cameraDirection.y = 0;
+      cameraDirection.normalize();
+      const rightVector = new THREE.Vector3().crossVectors(this.camera.up, cameraDirection).normalize();
+
+      const movement = new THREE.Vector3();
+      if (!this.isMobile) {
+        if (moveDirection.z !== 0) movement.add(cameraDirection.clone().multiplyScalar(moveDirection.z));
+        if (moveDirection.x !== 0) movement.add(rightVector.clone().multiplyScalar(moveDirection.x));
+        if (movement.length() > 0) movement.normalize();
       } else {
-        this.updateClimbing({
-          area: climbArea,
-          climbInput,
-          position,
-          velocity: vel,
-          groundExpectedY
-        });
+        movement.copy(moveDirection);
       }
-    }
-    if (this.isKnocked) {
-      if (Date.now() >= this.knockbackEndTime) {
-        this.isKnocked = false;
-        this.playerModel.userData.isKnocked = false;
-        this.knockbackVelocity.set(0, 0, 0);
-        this.playerModel.rotation.set(0, this.knockbackRestYaw || this.playerModel.rotation.y, 0);
-        const actions = this.playerModel.userData.actions;
-        actions?.hit?.fadeOut(0.2);
-        actions?.idle?.reset().fadeIn(0.2).play();
-        this.playerModel.userData.currentAction = 'idle';
-      } else {
-        this.body.setLinvel({ x: this.knockbackVelocity.x, y: vel.y, z: this.knockbackVelocity.z }, true);
-      }
-    } else if (!this.isClimbing) {
+
       const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
         ? this.deltaSeconds
         : 0.016;
-      const speed = this.isInWater
-        ? SWIM_SPEED
-        : this.playerModel?.userData?.qwopRig
-          ? CHARACTER_MOVEMENT.walkSpeed * 1.05
-          : (this.energyDepleted
-            ? CHARACTER_MOVEMENT.walkSpeed * ENERGY_DEPLETED_SPEED_MULTIPLIER
-            : CHARACTER_MOVEMENT.runSpeed);
-      const slopeSpeedMultiplier = !this.isInWater && !groundResolution.metadata.walkable
-        ? STEEP_SLOPE_SPEED_MULTIPLIER
-        : 1;
-      const targetHorizontal = movement.clone().multiplyScalar(speed * slopeSpeedMultiplier);
-      const currentHorizontal = new THREE.Vector3(vel.x, 0, vel.z);
-      const maxDeltaV = PLAYER_INPUT_ACCELERATION * deltaSeconds;
-      if (movement.lengthSq() > 0.0001) {
-        const desiredDelta = targetHorizontal.sub(currentHorizontal);
-        if (desiredDelta.length() > maxDeltaV) desiredDelta.setLength(maxDeltaV);
-        this.body.applyImpulse({ x: desiredDelta.x, y: 0, z: desiredDelta.z }, true);
+      const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05;
+
+      this.playerX += movement.x * speed * deltaSeconds;
+      this.playerZ += movement.z * speed * deltaSeconds;
+
+      const newX = this.playerX;
+      const newY = this.playerY;
+      const newZ = this.playerZ;
+      const isMovingNow = movement.length() > 0;
+      this.isMoving = isMovingNow;
+
+      if (this.playerModel) {
+        this.playerModel.position.set(newX, newY, newZ);
+        let yawAngle = this.yaw;
+        if (movement.length() > 0) {
+          yawAngle = Math.atan2(movement.x, movement.z);
+        }
+        if (this.engagedDirection) {
+          yawAngle = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
+        }
+        this.playerModel.rotation.set(0, yawAngle, 0);
+        this.playerModel.up.set(0, 1, 0);
+        this.camera.up.set(0, 1, 0);
+
+        const newTarget = new THREE.Vector3(newX, newY + 1, newZ);
+        if (this.controls) {
+          this.controls.target.copy(newTarget);
+        }
+        if (this.multiplayer && (Math.abs(this.lastPosition.x - newX) > 0.01 || Math.abs(this.lastPosition.z - newZ) > 0.01 || this.isMoving !== this.wasMoving)) {
+          this.lastPosition.set(newX, newY, newZ);
+          this.wasMoving = this.isMoving;
+        }
       } else {
-        const drag = grounded ? PLAYER_GROUND_DRAG : PLAYER_AIR_DRAG;
-        const dragScale = Math.max(0, 1 - drag * deltaSeconds);
-        this.body.setLinvel({ x: vel.x * dragScale, y: vel.y, z: vel.z * dragScale }, true);
+        this.camera.position.set(newX, newY + 1.2, newZ);
       }
-      const limitedVel = this.body.linvel();
-      const horizontalSpeed = Math.hypot(limitedVel.x, limitedVel.z);
-      if (horizontalSpeed > PLAYER_MAX_HORIZONTAL_SPEED) {
-        const scale = PLAYER_MAX_HORIZONTAL_SPEED / horizontalSpeed;
-        this.body.setLinvel({ x: limitedVel.x * scale, y: limitedVel.y, z: limitedVel.z * scale }, true);
+      if (this.isMobile && this.controls) {
+        this.controls.target.set(newX, newY + 1, newZ);
+        this.controls.update();
+      } else if (!this.isMobile && this.controls) {
+        this.controls.update();
       }
-    }
-
-    let { x: newX, y: newY, z: newZ } = this.body.translation();
-
-    const sink = this.isInWater ? newY - surfaceY : 0;
-
-    const isMovingNow = movement.length() > 0;
-    this.isMoving = isMovingNow;
-    if (isMovingNow && this.canJump) {
-      this.audioManager?.playFootstep();
-    }
-    if (this.playerModel) {
-      let displayY = newY - sink;
-      if (this.isInWater && !isMovingNow && !this.vehicle) {
-        displayY -= FLOAT_IDLE_DISPLAY_OFFSET;
-      }
-      this.playerModel.position.set(newX, displayY, newZ);
-      let yawAngle = this.yaw;
-      const slideMomentumActive = movementLocked && this.isSlideMomentumActive();
-      if (movement.length() > 0 && !slideMomentumActive) {
-        yawAngle = Math.atan2(movement.x, movement.z);
-      }
-      if (this.isFireHeld && this.shouldHoldToFire() && !slideMomentumActive) {
-        const aimDirection = this.autoAimCameraDirection ?? this.getAimDirection(true);
-        yawAngle = Math.atan2(aimDirection.x, aimDirection.z);
-      }
-      if (this.engagedDirection) {
-        yawAngle = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
-      }
-
-      
-      const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
-        ? this.deltaSeconds
-        : 0.016;
-      const latestVelocity = this.body?.linvel?.() ?? { x: 0, y: 0, z: 0 };
-      const facing = new THREE.Vector3(Math.sin(yawAngle), 0, Math.cos(yawAngle));
-      const forwardSpeed = latestVelocity.x * facing.x + latestVelocity.z * facing.z;
-      const fallInput = forwardSpeed * PLAYER_FALL_MOMENTUM_LEAN;
-      const fallThreshold = this.canJump ? PLAYER_FALL_BASE_THRESHOLD : PLAYER_FALL_BASE_THRESHOLD * 0.35;
-      const fallTorque = Math.abs(fallInput) > fallThreshold
-        ? (fallInput - Math.sign(fallInput) * fallThreshold) * PLAYER_FALL_TORQUE
-        : 0;
-      this.fallAngularVelocity += fallTorque * deltaSeconds;
-      this.fallAngularVelocity *= Math.exp(-PLAYER_FALL_DAMPING * deltaSeconds);
-      this.fallPitch = THREE.MathUtils.clamp(
-        this.fallPitch + this.fallAngularVelocity * deltaSeconds,
-        -PLAYER_FALL_MAX_PITCH,
-        PLAYER_FALL_MAX_PITCH
-      );
-      if (Math.abs(this.fallAngularVelocity) < 0.0001 && Math.abs(fallInput) <= fallThreshold) {
-        this.fallAngularVelocity = 0;
-      }
-      this.playerModel.rotation.set(this.fallPitch, yawAngle, 0);
-      this.playerModel.up.set(0, 1, 0);
-      this.camera.up.set(0, 1, 0);
-      
-      const actions = this.playerModel.userData.actions;
-      if (actions && !this.isKnocked && !this.currentSpecialAction && !this.isClimbing) {
-        let actionName;
-        const moveAction = this.energyDepleted ? 'walk' : 'run';
-        if (this.vehicle && this.vehicle.type === 'surfboard') {
-          if (this.isInWater) {
-            actionName = isMovingNow ? 'swim' : 'sit';
-            if (this.vehicle.standing) {
-              actionName = 'idle';
-            }
-          } else {
-            actionName = 'idle';
-            if (!this.canJump) actionName = 'jump';
-            else if (isMovingNow) actionName = moveAction;
-          }
-        } else {
-          if (this.isInWater) {
-            actionName = isMovingNow ? 'swim' : 'float';
-          } else {
-            actionName = 'idle';
-            if (!this.canJump) actionName = 'jump';
-            else if (isMovingNow) actionName = moveAction;
-          }
-        }
-        const current = this.playerModel.userData.currentAction;
-        if (actionName && current !== actionName) {
-          this.setMovementAction(actionName, 0.2);
-        }
-      }
-      const newTarget = new THREE.Vector3(this.playerModel.position.x, this.playerModel.position.y + 1, this.playerModel.position.z);
-      if (this.controls) {
-        this.controls.target.copy(newTarget);
-      }
-      if (this.multiplayer && (Math.abs(this.lastPosition.x - newX) > 0.01 || Math.abs(this.lastPosition.y - displayY) > 0.01 || Math.abs(this.lastPosition.z - newZ) > 0.01 || this.isMoving !== this.wasMoving)) {
-        this.lastPosition.set(newX, displayY, newZ);
-        this.wasMoving = this.isMoving;
-      }
-    } else {
-      this.camera.position.set(newX, newY + 1.2, newZ);
-    }
-    if (this.isMobile && this.controls) {
-      this.controls.target.set(newX, newY + 1, newZ);
-      this.controls.update();
-    } else if (!this.isMobile && this.controls) {
-      this.controls.update();
     }
   }
   
