@@ -71,6 +71,7 @@ import {
 import { createTileCache } from '../tileCache.js';
 import { createGroundTiles } from '../environment/groundTiles.js';
 import { createTerrainStampDebugOverlay } from '../environment/terrainStampDebugOverlay.js';
+import { MapLoader } from '../environment/MapLoader.ts';
 import { clearCache, getCachedTile, setCachedTile } from '../idbCache.js';
 import {
   initHomeStoragePanel,
@@ -2994,6 +2995,12 @@ async function initCore(runtimeContext) {
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
 
+  const mapGroup = await new MapLoader().load('/map/map.mappack', {
+    renderer,
+    transcoderPath: '/basis/',
+  });
+  scene.add(mapGroup);
+
   const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
   mapRenderer = createMapRenderer({ scene, renderer });
   buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
@@ -4448,21 +4455,6 @@ async function initCore(runtimeContext) {
   window.zombieBrainsPickups = zombieBrainsPickups;
   window.saltPickups = saltPickups;
   if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
-    natureController = await createNature({
-      scene,
-      playerModel,
-      getTerrainHeight,
-      mapRenderer,
-      buildingsRenderer,
-      getGeoForLocal: getTreeMapLocationForLocal,
-      tileCache,
-      rapier: RAPIER,
-      rapierWorld,
-      spawnApplePickup: appleController?.spawnPickup,
-      removeApplePickup: appleController?.removePickup
-    });
-    window.natureController = natureController;
-    natureController?.update(playerModel?.position);
     // await createCabin({ scene, getTerrainHeight });
     mushroomController = await createMushrooms({
       scene,
@@ -11527,18 +11519,10 @@ async function initCore(runtimeContext) {
   if (pendingMapRebuild) {
     rebuildMapFromCache();
   }
-  groundTiles = createGroundTiles({
-    scene,
-    renderer,
-    tileSizeMeters: TILE_SIZE_METERS,
-    terrainSeed: TERRAIN_STAMP_REGRESSION_SCENE.seed
-  });
   terrainStampDebugOverlay = createTerrainStampDebugOverlay({
     scene,
     getTargetPosition: () => playerModel?.position ?? null
   });
-  window.groundTiles = groundTiles.tiles;
-  groundMaterialBase = captureMaterialBase(groundTiles.material);
   applyDisplaySettings();
   const getRandomPickupPosition = (center) => {
     if (!center) return null;
@@ -11577,6 +11561,7 @@ async function initCore(runtimeContext) {
     };
   };
   const updateGroundTiles = (position) => {
+    if (!groundTiles) return;
     const centerTile = getGroundTileCoords(position);
     if (!centerTile) return;
     const centerKey = `${centerTile.x},${centerTile.y}`;
@@ -12321,7 +12306,7 @@ async function initCore(runtimeContext) {
 
   window.clearTileCache = () => {
     tileCache.cache.clear();
-    groundTiles.clear();
+    groundTiles?.clear();
     clearCache().catch((error) => console.warn('Failed to clear persistent tile cache:', error));
     rebuildMapFromCache();
   };
