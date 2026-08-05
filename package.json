@@ -33,6 +33,7 @@
     "firebase": "^11.6.1",
     "fs-extra": "^11.3.1",
     "jsdom": "^26.1.0",
+    "jszip": "^3.10.1",
     "three": "^0.176.0",
     "three-bvh-csg": "^0.0.17",
     "three-stdlib": "^2.36.0"
