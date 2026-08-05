@@ -1997,7 +1997,7 @@ async function initCore(runtimeContext) {
   }
 
   function ensureRemoteQuestFriend(id, state) {
-    if (window.gameMode === '3d_painter') return;
+    if (window.gameMode === '3d_painter' || window.gameMode === 'horde') return;
     const existing = remoteQuestFriends.get(id);
     if (existing?.model) {
       applyNetworkTransformToObject(existing, state);
@@ -3799,6 +3799,47 @@ async function initCore(runtimeContext) {
   pistol.onPickup = () => {};
   pistol.onDrop = () => {};
 
+  // Horde mode: replace the pistol's box fallback with a gun-shaped procedural mesh
+  if (window.gameMode === 'horde' && pistol.mesh) {
+    scene.remove(pistol.mesh);
+    const _darkMetal = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.38, metalness: 0.85 });
+    const _lightMetal = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.5, metalness: 0.7 });
+    const hordeGunGroup = new THREE.Group();
+    hordeGunGroup.name = 'horde-pistol';
+    // Slide (top body)
+    const slideMesh = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, 0.18), _darkMetal.clone());
+    slideMesh.position.set(0, 0.01, 0);
+    slideMesh.castShadow = true;
+    hordeGunGroup.add(slideMesh);
+    // Barrel
+    const barrelGeo = new THREE.CylinderGeometry(0.009, 0.009, 0.07, 8);
+    barrelGeo.rotateX(Math.PI / 2);
+    const barrelMesh = new THREE.Mesh(barrelGeo, _darkMetal.clone());
+    barrelMesh.position.set(0, 0.004, -0.125);
+    barrelMesh.castShadow = true;
+    hordeGunGroup.add(barrelMesh);
+    // Frame / grip
+    const frameMesh = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.095, 0.068), _lightMetal.clone());
+    frameMesh.position.set(0, -0.065, 0.042);
+    frameMesh.castShadow = true;
+    hordeGunGroup.add(frameMesh);
+    // Trigger guard (half-torus)
+    const guardGeo = new THREE.TorusGeometry(0.018, 0.004, 6, 12, Math.PI);
+    const guardMesh = new THREE.Mesh(guardGeo, _lightMetal.clone());
+    guardMesh.position.set(0, -0.02, -0.01);
+    guardMesh.rotation.set(0, 0, Math.PI / 2);
+    guardMesh.castShadow = true;
+    hordeGunGroup.add(guardMesh);
+    // Sight (tiny nub on top)
+    const sightMesh = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.01, 0.006), _darkMetal.clone());
+    sightMesh.position.set(0, 0.042, -0.075);
+    hordeGunGroup.add(sightMesh);
+    hordeGunGroup.visible = false;
+    hordeGunGroup.userData.hideInMapView = true;
+    scene.add(hordeGunGroup);
+    pistol.mesh = hordeGunGroup;
+  }
+
   runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol };
   window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol };
 
@@ -3907,6 +3948,97 @@ async function initCore(runtimeContext) {
       _lastPaintPos = null;
     }
     _painterPinchWas = isPinching;
+  }
+
+  // --- Horde mode: gesture-based equipment ---
+  // Tracking slot 'left' corresponds to the in-game right hand (back-camera swap).
+  let _hordeEquipped = null; // 'pistol' | 'shield' | null
+  let _hordePendingGesture = 'none';
+  let _hordePendingFrames = 0;
+  const HORDE_GESTURE_CONFIRM = 6; // frames gesture must hold before switching
+  let _hordeFlickPrevY = null;
+  let _hordeFlickPrevThumbY = null;
+  let _hordeFlickLastFire = 0;
+  const HORDE_FLICK_Y_DELTA = 0.06; // normalized y drop per frame = flick up
+  const HORDE_FIRE_COOLDOWN_MS = 380;
+
+  function _classifyRightHandGesture(landmarks, palmSize) {
+    if (!landmarks || !palmSize || palmSize < 0.001) return 'none';
+    const wrist = landmarks[0];
+    function normDist(idx) {
+      const tip = landmarks[idx];
+      const dx = tip.x - wrist.x;
+      const dy = tip.y - wrist.y;
+      return Math.sqrt(dx * dx + dy * dy) / palmSize;
+    }
+    const EXT = 1.75;
+    const CURL = 1.45;
+    const thumbOut  = normDist(4)  > EXT;
+    const indexOut  = normDist(8)  > EXT;
+    const middleOut = normDist(12) > EXT;
+    const ringOut   = normDist(16) > EXT;
+    const pinkyOut  = normDist(20) > EXT;
+    const middleCurled = normDist(12) < CURL;
+    const ringCurled   = normDist(16) < CURL;
+    const pinkyCurled  = normDist(20) < CURL;
+    // Open hand: all five fingers extended
+    if (thumbOut && indexOut && middleOut && ringOut && pinkyOut) return 'open';
+    // Gun gesture: thumb + index extended, other three curled
+    if (thumbOut && indexOut && middleCurled && ringCurled && pinkyCurled) return 'gun';
+    return 'none';
+  }
+
+  function processHordeGestures() {
+    if (!isHandTrackingEnabled()) return;
+    const htd = getHandTrackingData();
+    // Tracking slot 'left' = right in-game hand (back-camera swap)
+    const rightSlot = htd?.left;
+    const rawGesture = rightSlot
+      ? _classifyRightHandGesture(rightSlot.landmarks, rightSlot.size)
+      : 'none';
+
+    // Debounce: require HORDE_GESTURE_CONFIRM consecutive frames before switching
+    if (rawGesture === _hordePendingGesture) {
+      _hordePendingFrames++;
+    } else {
+      _hordePendingGesture = rawGesture;
+      _hordePendingFrames = 1;
+    }
+
+    if (_hordePendingFrames >= HORDE_GESTURE_CONFIRM) {
+      // Map gesture name → item name so the comparison is in the same space
+      const gestureItemMap = { gun: 'pistol', open: 'shield' };
+      const confirmedItem = gestureItemMap[_hordePendingGesture] ?? null;
+      if (confirmedItem !== _hordeEquipped) {
+        // Unequip whatever is currently held
+        if (_hordeEquipped) unequipInventoryItem(_hordeEquipped);
+        // Equip the new item (null = nothing equipped)
+        if (confirmedItem) equipInventoryItem(confirmedItem);
+        _hordeEquipped = confirmedItem;
+      }
+    }
+
+    // Flick-to-fire: detect rapid upward flick of index tip while gun is equipped
+    if (_hordeEquipped === 'pistol' && rightSlot?.landmarks) {
+      const indexTip = rightSlot.landmarks[8];
+      const thumbTip = rightSlot.landmarks[4];
+      if (_hordeFlickPrevY !== null) {
+        // y decreasing = moving upward in camera frame = flick up
+        const indexDelta = _hordeFlickPrevY - indexTip.y;
+        const thumbDelta = (_hordeFlickPrevThumbY ?? thumbTip.y) - thumbTip.y;
+        const now = performance.now();
+        if ((indexDelta > HORDE_FLICK_Y_DELTA || thumbDelta > HORDE_FLICK_Y_DELTA)
+            && now - _hordeFlickLastFire > HORDE_FIRE_COOLDOWN_MS) {
+          _hordeFlickLastFire = now;
+          playerControls?.triggerFire?.();
+        }
+      }
+      _hordeFlickPrevY = indexTip.y;
+      _hordeFlickPrevThumbY = thumbTip.y;
+    } else {
+      _hordeFlickPrevY = null;
+      _hordeFlickPrevThumbY = null;
+    }
   }
 
   function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
@@ -4211,7 +4343,7 @@ async function initCore(runtimeContext) {
 
   runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol, lantern, torch, shield };
   window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol, lantern, torch, shield };
-  if (window.gameMode !== '3d_painter') {
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
   treasureChest = new TreasureChest(scene);
   await treasureChest.load();
   window.treasureChest = treasureChest;
@@ -4305,7 +4437,7 @@ async function initCore(runtimeContext) {
       lon: origin.centerLon - position.x / lonScale
     };
   };
-  if (window.gameMode !== '3d_painter') {
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
     appleController = await createApples({
       scene,
       getTerrainHeight,
@@ -4319,7 +4451,7 @@ async function initCore(runtimeContext) {
   window.meatPickups = meatPickups;
   window.zombieBrainsPickups = zombieBrainsPickups;
   window.saltPickups = saltPickups;
-  if (window.gameMode !== '3d_painter') {
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
     natureController = await createNature({
       scene,
       playerModel,
@@ -4352,7 +4484,7 @@ async function initCore(runtimeContext) {
     });
     window.mushroomPickups = mushroomPickups;
   }
-  if (window.gameMode !== '3d_painter') animalManager = createAnimalManager({
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') animalManager = createAnimalManager({
     scene,
     getPlayerModel: () => playerModel,
     getTerrainHeight,
@@ -4526,7 +4658,7 @@ async function initCore(runtimeContext) {
 
   window.lightSources = [];
 
-  if (window.gameMode !== '3d_painter') friendlyNpcManager = createFriendlyNpcManager({
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') friendlyNpcManager = createFriendlyNpcManager({
     scene,
     playerModel,
     otherPlayers,
@@ -4982,7 +5114,7 @@ async function initCore(runtimeContext) {
   };
 
   function spawnMonsterInSlot(slotId, modelPath, oldMonster = null, options = {}) {
-    if (window.gameMode === '3d_painter') return;
+    if (window.gameMode === '3d_painter' || window.gameMode === 'horde') return;
     if (PERF.disableMonsters) return;
     if (spawningSlots.has(slotId)) return;
     spawningSlots.add(slotId);
@@ -5136,7 +5268,7 @@ async function initCore(runtimeContext) {
 
 
   const ensureMonsters = () => {
-    if (window.gameMode === '3d_painter') return;
+    if (window.gameMode === '3d_painter' || window.gameMode === 'horde') return;
     if (PERF.disableMonsters) {
       monsters.forEach(monster => cleanupMonster(monster));
       monsters = [];
@@ -5865,7 +5997,7 @@ async function initCore(runtimeContext) {
       icon: '/assets/ui/items/torch.png'
     },
     [SHIELD_ITEM_ID]: {
-      name: 'Shield (Left Hand)',
+      name: 'Shield',
       icon: ''
     },
     [LIFE_POTION_ITEM_ID]: {
@@ -6035,7 +6167,7 @@ async function initCore(runtimeContext) {
   const inventoryHandSlots = {
     lantern: 'left',
     torch: 'left',
-    [SHIELD_ITEM_ID]: 'left',
+    [SHIELD_ITEM_ID]: 'right',
     iceGun: 'right',
     bow: 'right',
     bazooka: 'right',
@@ -11325,9 +11457,25 @@ async function initCore(runtimeContext) {
   updateControlAvailability();
   updateEnergyEffects();
 
-  // Auto-equip pistol if no other right-hand weapon is already held
-  if (pistol?.mesh && !playerControls.getEquippedWeapon?.('right')) {
+  // Auto-equip pistol if no other right-hand weapon is already held (non-horde modes)
+  if (window.gameMode !== 'horde' && pistol?.mesh && !playerControls.getEquippedWeapon?.('right')) {
     equipInventoryItem('pistol');
+  }
+
+  // Horde mode: seed inventory with pistol and shield so gesture equip can work immediately.
+  // Write directly to inventoryState to avoid triggering persistInventoryAndStorage during
+  // bootstrap (UI panels may not be fully initialised yet).
+  if (window.gameMode === 'horde') {
+    if (!(inventoryState['pistol']?.count > 0)) {
+      inventoryState['pistol'] = ensureCatalogEntry('pistol', { count: 1 });
+    }
+    if (!(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
+      inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+        count: 1,
+        [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
+        [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+      }));
+    }
   }
 
   await initMapViewFeature({ camera, scene, player: playerModel });
@@ -11554,7 +11702,7 @@ async function initCore(runtimeContext) {
   };
   const updatePickupTiles = (position) => {
     if (!position) return;
-    const isPainterMode = window.gameMode === '3d_painter';
+    const isPainterMode = window.gameMode === '3d_painter' || window.gameMode === 'horde';
     const center = position.clone();
     if (!isPainterMode) removePickupOutsideRadius(ammoPickups, center, PICKUP_SPAWN_RADIUS);
     removePickupOutsideRadius(foodPickups, center, PICKUP_SPAWN_RADIUS);
@@ -11837,7 +11985,7 @@ async function initCore(runtimeContext) {
 
   let originWasAutoReset = false;
 
-  if (window.gameMode !== '3d_painter') {
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
     homeSystem = createHomeSystem({
       scene,
       playerModel,
@@ -11849,7 +11997,7 @@ async function initCore(runtimeContext) {
     window.homeSystem = homeSystem;
   }
   const interiorScene = homeSystem?.interiorGroup ?? scene;
-  if (window.gameMode !== '3d_painter') {
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
     bed = new Bed(interiorScene, {
       position: new THREE.Vector3(-3, 0.5, 3),
       useTerrainHeight: false
@@ -15415,6 +15563,9 @@ async function initCore(runtimeContext) {
 
     if (window.gameMode === '3d_painter') {
       processPainterPinch();
+    }
+    if (window.gameMode === 'horde') {
+      processHordeGestures();
     }
 
     renderer.render(scene, camera);
