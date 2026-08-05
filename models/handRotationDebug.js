@@ -86,7 +86,7 @@ export function initHandRotationDebug() {
   panel.id = 'hand-rot-debug';
   panel.style.cssText = `
     position: fixed;
-    top: 8px;
+    top: 56px;
     right: 8px;
     background: rgba(0,0,0,0.82);
     color: #eee;
