@@ -2602,6 +2602,14 @@ export class PlayerControls {
       this.playerX += movement.x * speed * deltaSeconds;
       this.playerZ += movement.z * speed * deltaSeconds;
 
+      const { groundY } = this.resolveGroundY(
+        this.playerX,
+        this.playerY + PLAYER_HALF_HEIGHT,
+        this.playerZ,
+        { includeSolidHit: false }
+      );
+      this.playerY = groundY;
+
       const newX = this.playerX;
       const newY = this.playerY;
       const newZ = this.playerZ;

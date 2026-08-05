@@ -29,6 +29,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js'
 import JSZip from 'jszip'
+import { registerTerrainHeightResolver } from './terrainHeight.js'
 
 // ── Exported constants ─────────────────────────────────────────────────────
 // These define the fixed terrain resolution used by both editor and runtime.
@@ -729,6 +730,13 @@ export class MapLoader {
 
     const root = new THREE.Group()
     root.name  = 'map'
+
+    // Register this map's heightmap so the player snaps to terrain surface.
+    const worldSize = manifest.terrain.worldSize
+    const unregisterHeightResolver = registerTerrainHeightResolver((wx: number, wz: number) =>
+      sampleBilinear(heights, wx, wz, gW, gH, worldSize)
+    )
+    root.userData.disposeTerrainHeightResolver = unregisterHeightResolver
 
     // Load KTX2 textures when renderer is provided and textures are bundled
     let textureMap: Map<string, THREE.Texture> | null = null
