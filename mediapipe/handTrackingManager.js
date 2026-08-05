@@ -12,7 +12,7 @@ let _statusEl = null;
 // Pinch/pointer detection config — mutated by debug sliders.
 export const pinchConfig = {
   // Ratio of pinch distance to palm size below which isPinch is true.
-  distanceThreshold: 0.45,
+  distanceThreshold: 0.2,
   // Milliseconds a state change must persist before being accepted (debounce buffer).
   bufferMs: 0,
 };
