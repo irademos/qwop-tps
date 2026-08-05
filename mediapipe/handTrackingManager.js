@@ -9,6 +9,17 @@ let _initialized = false;
 let _uiContainer = null;
 let _statusEl = null;
 
+// Pinch/pointer detection config — mutated by debug sliders.
+export const pinchConfig = {
+  // Ratio of pinch distance to palm size below which isPinch is true.
+  distanceThreshold: 0.45,
+  // Milliseconds a state change must persist before being accepted (debounce buffer).
+  bufferMs: 0,
+};
+let _pinchState = false;
+let _pinchPendingState = false;
+let _pinchPendingSince = 0;
+
 // Handedness confirmation buffer: track[slot] = { confirmedSide, pendingSide, pendingCount }
 // A new gameSide must appear HANDEDNESS_CONFIRM_FRAMES consecutive frames before it's accepted.
 const HANDEDNESS_CONFIRM_FRAMES = 7;
@@ -157,7 +168,18 @@ export function updateHandTracking() {
       const pdyP = indexTip.y - thumbTip.y;
       const pdzP = (indexTip.z || 0) - (thumbTip.z || 0);
       const pinchDist = Math.sqrt(pdxP * pdxP + pdyP * pdyP + pdzP * pdzP);
-      const isPinch = pinchDist / palmSize < 0.45;
+      const rawPinch = pinchDist / palmSize < pinchConfig.distanceThreshold;
+
+      // Apply millisecond buffer: a state change is only accepted after it persists for bufferMs.
+      const now = performance.now();
+      if (rawPinch !== _pinchPendingState) {
+        _pinchPendingState = rawPinch;
+        _pinchPendingSince = now;
+      }
+      if (_pinchPendingState !== _pinchState && (now - _pinchPendingSince) >= pinchConfig.bufferMs) {
+        _pinchState = _pinchPendingState;
+      }
+      const isPinch = _pinchState;
 
       // Back camera: "Left" in the raw frame is the user's RIGHT hand.
       const rawSide = handedness === 'Left' ? 'right' : 'left';
