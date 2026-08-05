@@ -755,7 +755,7 @@ export class PlayerControls {
     this._gyroForwardCur.copy(this._gyroForwardRef).applyQuaternion(this._gyroRelQ);
 
     const targetYaw = Math.atan2(this._gyroForwardCur.x, this._gyroForwardCur.z);
-    const targetPitch = Math.asin(Math.max(-1, Math.min(1, this._gyroForwardCur.y)));
+    const targetPitch = -Math.asin(Math.max(-1, Math.min(1, this._gyroForwardCur.y)));
 
     const maxPitch = Math.PI / 3;
     const minPitch = -Math.PI / 8;
