@@ -3957,9 +3957,8 @@ async function initCore(runtimeContext) {
   let _hordePendingFrames = 0;
   const HORDE_GESTURE_CONFIRM = 6; // frames gesture must hold before switching
   let _hordeFlickPrevY = null;
-  let _hordeFlickPrevThumbY = null;
   let _hordeFlickLastFire = 0;
-  const HORDE_FLICK_Y_DELTA = 0.06; // normalized y drop per frame = flick up
+  const HORDE_FLICK_Y_DELTA = 0.04; // normalized y drop per frame = flick up (lower = more sensitive)
   const HORDE_FIRE_COOLDOWN_MS = 380;
 
   function _classifyRightHandGesture(landmarks, palmSize) {
@@ -3983,8 +3982,10 @@ async function initCore(runtimeContext) {
     const pinkyCurled  = normDist(20) < CURL;
     // Open hand: all five fingers extended
     if (thumbOut && indexOut && middleOut && ringOut && pinkyOut) return 'open';
-    // Gun gesture: thumb + index extended, other three curled
-    if (thumbOut && indexOut && middleCurled && ringCurled && pinkyCurled) return 'gun';
+    // Sword gesture: pointer + middle extended, ring + pinky curled (thumb optional)
+    if (indexOut && middleOut && ringCurled && pinkyCurled) return 'sword';
+    // Gun gesture: index extended, middle/ring/pinky curled (thumb optional)
+    if (indexOut && middleCurled && ringCurled && pinkyCurled) return 'gun';
     return 'none';
   }
 
@@ -4007,7 +4008,7 @@ async function initCore(runtimeContext) {
 
     if (_hordePendingFrames >= HORDE_GESTURE_CONFIRM) {
       // Map gesture name → item name so the comparison is in the same space
-      const gestureItemMap = { gun: 'pistol', open: 'shield' };
+      const gestureItemMap = { gun: 'pistol', open: 'shield', sword: 'autumnSword' };
       const confirmedItem = gestureItemMap[_hordePendingGesture] ?? null;
       if (confirmedItem !== _hordeEquipped) {
         // Unequip whatever is currently held
@@ -4018,26 +4019,21 @@ async function initCore(runtimeContext) {
       }
     }
 
-    // Flick-to-fire: detect rapid upward flick of index tip while gun is equipped
+    // Flick-to-fire: detect rapid upward flick of index tip while pistol is equipped
     if (_hordeEquipped === 'pistol' && rightSlot?.landmarks) {
       const indexTip = rightSlot.landmarks[8];
-      const thumbTip = rightSlot.landmarks[4];
       if (_hordeFlickPrevY !== null) {
         // y decreasing = moving upward in camera frame = flick up
         const indexDelta = _hordeFlickPrevY - indexTip.y;
-        const thumbDelta = (_hordeFlickPrevThumbY ?? thumbTip.y) - thumbTip.y;
         const now = performance.now();
-        if ((indexDelta > HORDE_FLICK_Y_DELTA || thumbDelta > HORDE_FLICK_Y_DELTA)
-            && now - _hordeFlickLastFire > HORDE_FIRE_COOLDOWN_MS) {
+        if (indexDelta > HORDE_FLICK_Y_DELTA && now - _hordeFlickLastFire > HORDE_FIRE_COOLDOWN_MS) {
           _hordeFlickLastFire = now;
           playerControls?.triggerFire?.();
         }
       }
       _hordeFlickPrevY = indexTip.y;
-      _hordeFlickPrevThumbY = thumbTip.y;
     } else {
       _hordeFlickPrevY = null;
-      _hordeFlickPrevThumbY = null;
     }
   }
 
@@ -11462,7 +11458,7 @@ async function initCore(runtimeContext) {
     equipInventoryItem('pistol');
   }
 
-  // Horde mode: seed inventory with pistol and shield so gesture equip can work immediately.
+  // Horde mode: seed inventory with pistol, shield, and autumnSword so gesture equip can work immediately.
   // Write directly to inventoryState to avoid triggering persistInventoryAndStorage during
   // bootstrap (UI panels may not be fully initialised yet).
   if (window.gameMode === 'horde') {
@@ -11475,6 +11471,9 @@ async function initCore(runtimeContext) {
         [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
         [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
       }));
+    }
+    if (!(inventoryState['autumnSword']?.count > 0)) {
+      inventoryState['autumnSword'] = ensureCatalogEntry('autumnSword', { count: 1 });
     }
   }
 
