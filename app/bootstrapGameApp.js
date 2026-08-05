@@ -6795,6 +6795,15 @@ async function initCore(runtimeContext) {
       autumnSword.localHoldOrigin = 'inventory';
       autumnSword.holder = playerControls;
       setPlayerWeaponType(playerControls, autumnSword.type);
+      // Sword: depth varies by horizontal position — further when centered, closer when to the sides
+      if (playerControls.playerModel) {
+        playerControls.playerModel.userData.handDepthOverride = {
+          left: (palmX) => {
+            const sideAmount = Math.abs(palmX - 0.5) * 2; // 0=center, 1=side
+            return THREE.MathUtils.lerp(0.45, 0.1, sideAmount);
+          }
+        };
+      }
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'sword-equip', cooldownMs: 100 });
       updateSettingsUI();
     }
@@ -6823,6 +6832,10 @@ async function initCore(runtimeContext) {
       pistol.localHoldOrigin = 'inventory';
       pistol.holder = playerControls;
       setPlayerWeaponType(playerControls, pistol.type);
+      // Pistol: fixed depth regardless of hand size
+      if (playerControls.playerModel) {
+        playerControls.playerModel.userData.handDepthOverride = { left: 0.3 };
+      }
       playerControls.updateAmmoUI?.(false);
       updateSettingsUI();
     }
@@ -6944,6 +6957,9 @@ async function initCore(runtimeContext) {
       if (autumnSword.heldMesh) {
         autumnSword.heldMesh.visible = false;
       }
+      if (playerControls.playerModel) {
+        delete playerControls.playerModel.userData.handDepthOverride;
+      }
       clearPlayerWeaponType(playerControls, autumnSword.type);
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'sword-unequip', cooldownMs: 100 });
       updateSettingsUI();
@@ -6971,6 +6987,9 @@ async function initCore(runtimeContext) {
       }
       if (pistol.heldMesh) {
         pistol.heldMesh.visible = false;
+      }
+      if (playerControls.playerModel) {
+        delete playerControls.playerModel.userData.handDepthOverride;
       }
       clearPlayerWeaponType(playerControls, pistol.type);
       playerControls?.updateAmmoUI?.(false);

@@ -736,6 +736,13 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         targetPos = defaultPos;
       }
 
+      const depthOverride = playerGroup.userData.handDepthOverride?.[side];
+      if (depthOverride !== undefined) {
+        const palmX = landmarks?.[0]?.x ?? trackData?.x ?? 0.5;
+        targetPos = targetPos.clone();
+        targetPos.z = typeof depthOverride === 'function' ? depthOverride(palmX) : depthOverride;
+      }
+
       floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
       updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
 
