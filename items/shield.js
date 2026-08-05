@@ -16,7 +16,7 @@ export class Shield extends Weapon {
     super(scene, {
       itemId: SHIELD_ITEM_ID,
       type: SHIELD_ITEM_ID,
-      hand: 'left',
+      hand: 'right',
       scale: 1,
       fallbackColor: SHIELD_COLOR,
       holdOffset: new THREE.Vector3(-0.18, 0.2, 0.2),

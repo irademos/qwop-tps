@@ -4006,24 +4006,15 @@ async function initCore(runtimeContext) {
     }
 
     if (_hordePendingFrames >= HORDE_GESTURE_CONFIRM) {
-      const confirmed = _hordePendingGesture;
-      if (confirmed !== _hordeEquipped) {
-        // Unequip current item
-        if (_hordeEquipped === 'pistol') {
-          unequipInventoryItem('pistol');
-        } else if (_hordeEquipped === 'shield') {
-          unequipInventoryItem('shield');
-        }
-        // Equip new item
-        if (confirmed === 'gun') {
-          equipInventoryItem('pistol');
-          _hordeEquipped = 'pistol';
-        } else if (confirmed === 'open') {
-          equipInventoryItem('shield');
-          _hordeEquipped = 'shield';
-        } else {
-          _hordeEquipped = null;
-        }
+      // Map gesture name → item name so the comparison is in the same space
+      const gestureItemMap = { gun: 'pistol', open: 'shield' };
+      const confirmedItem = gestureItemMap[_hordePendingGesture] ?? null;
+      if (confirmedItem !== _hordeEquipped) {
+        // Unequip whatever is currently held
+        if (_hordeEquipped) unequipInventoryItem(_hordeEquipped);
+        // Equip the new item (null = nothing equipped)
+        if (confirmedItem) equipInventoryItem(confirmedItem);
+        _hordeEquipped = confirmedItem;
       }
     }
 
@@ -6006,7 +5997,7 @@ async function initCore(runtimeContext) {
       icon: '/assets/ui/items/torch.png'
     },
     [SHIELD_ITEM_ID]: {
-      name: 'Shield (Left Hand)',
+      name: 'Shield',
       icon: ''
     },
     [LIFE_POTION_ITEM_ID]: {
@@ -6176,7 +6167,7 @@ async function initCore(runtimeContext) {
   const inventoryHandSlots = {
     lantern: 'left',
     torch: 'left',
-    [SHIELD_ITEM_ID]: 'left',
+    [SHIELD_ITEM_ID]: 'right',
     iceGun: 'right',
     bow: 'right',
     bazooka: 'right',
@@ -11471,18 +11462,18 @@ async function initCore(runtimeContext) {
     equipInventoryItem('pistol');
   }
 
-  // Horde mode: seed inventory with pistol and shield so gesture equip can work immediately
+  // Horde mode: seed inventory with pistol and shield so gesture equip can work immediately.
+  // Write directly to inventoryState to avoid triggering persistInventoryAndStorage during
+  // bootstrap (UI panels may not be fully initialised yet).
   if (window.gameMode === 'horde') {
-    // Pistol — always available (infinite ammo)
-    if (!inventoryState['pistol']) {
-      addToInventory('pistol', 1);
+    if (!(inventoryState['pistol']?.count > 0)) {
+      inventoryState['pistol'] = ensureCatalogEntry('pistol', { count: 1 });
     }
-    // Shield — grant a full-health shield
-    if (!inventoryState[SHIELD_ITEM_ID]?.count) {
-      addToInventory(SHIELD_ITEM_ID, 1);
+    if (!(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
       inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
-        ...inventoryState[SHIELD_ITEM_ID],
-        [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+        count: 1,
+        [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
+        [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
       }));
     }
   }
