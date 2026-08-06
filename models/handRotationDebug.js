@@ -68,8 +68,8 @@ export const foamSwordConfig = {
   // Per-axis gains (deg): how much each euler axis rotates per unit sideAmount.
   // Positive = one direction, negative = reversed. Use these instead of a single
   // rotAxis+range so you can mix axes and flip directions independently.
-  gainX: 0,
-  gainY: 90,
+  gainX: 360,
+  gainY: 0,
   gainZ: 0,
 
   // Invert the hand coordinate direction
