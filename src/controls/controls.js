@@ -1,0 +1,4140 @@
+import { appContext } from '../core/appContext.js';
+import * as THREE from "three";
+import RAPIER from "@dimforge/rapier3d-compat";
+import { getWaterDepth, SWIM_DEPTH_THRESHOLD } from '../environment/water.js';
+import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { getSpawnPosition } from '../map/spawnUtils.js';
+import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
+import { getKnockbackImpulse, getKnockbackMotion } from "../combat/knockback.js";
+import { QuestManager } from "../npc/quest.js";
+import { updateProceduralPlayerRig } from '../models/playerModel.js';
+import { loadNippleJs } from '../core/externalDeps.js';
+import { initHandTracking, updateHandTracking, getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
+
+// Movement constants
+const SWIM_SPEED = 4;
+const ENERGY_DEPLETED_SPEED_MULTIPLIER = 1.2;
+const JUMP_FORCE = 4;
+const JUMP_HEIGHT_MULTIPLIER = 2;
+const DEFAULT_PLAYER_SCALE = 1;
+const FLY_JUMP_FORCE_MULTIPLIER = 2;
+const PLAYER_RADIUS = 0.3;
+const PLAYER_HALF_HEIGHT = 0.6;
+const FIRST_PERSON_EYE_HEIGHT = 0.7;
+const FLOAT_IDLE_DISPLAY_OFFSET = 0.2;
+const CLIMB_SPEED = 1.6;
+const CLIMB_SNAP_DISTANCE = 0.6;
+const CLIMB_ENTRY_BUFFER_Y = 0.4;
+const GROUND_SMOOTH_ALPHA = 0.2;
+const GROUND_SMOOTH_SNAP_DELTA = 0.45;
+const GROUND_SMOOTH_SURFACE_SWITCH_SNAP_DELTA = 0.2;
+const PLAYER_INPUT_ACCELERATION = 22;
+const GANG_BEASTS_INPUT_ACCELERATION = 2.4;
+const GANG_BEASTS_BALANCE_PUSH = 1.35;
+const GANG_BEASTS_DIRECT_CONTROL_RATIO = 0.12;
+const GANG_BEASTS_LEAN_DRIVE_ACCELERATION = 13.5;
+const PLAYER_GROUND_DRAG = 7;
+const PLAYER_AIR_DRAG = 0.35;
+const PLAYER_MAX_HORIZONTAL_SPEED = 10;
+const PLAYER_FALL_TORQUE = 8;
+const PLAYER_FALL_DAMPING = 4.5;
+const PLAYER_FALL_MOMENTUM_LEAN = 0.08;
+const PLAYER_FALL_MAX_PITCH = 1.35;
+const PLAYER_FALL_BASE_THRESHOLD = 0.12;
+const MAX_WALKABLE_SLOPE_DEGREES = 42;
+const STEEP_SLOPE_SPEED_MULTIPLIER = 0.55;
+const FRIENDLY_INTERACT_RANGE = 6;
+const QUEST_FRIEND_INTERACT_RANGE = 2.5;
+const MUSHROOM_INTERACT_RANGE = 1.2;
+const APPLE_INTERACT_RANGE = 3;
+const WOOD_INTERACT_RANGE = 3;
+const MEAT_INTERACT_RANGE = 3;
+const SALT_INTERACT_RANGE = 3;
+const ENGAGED_MODE_DISTANCE = 7;
+const WEAPON_CAMERA_OFFSET = new THREE.Vector3(0, 0, -1.8);
+const WEAPON_CAMERA_TARGET_OFFSET = new THREE.Vector3(0.75, 0, 0);
+const WEAPON_CAMERA_FOV_DELTA = 8;
+const GYRO_LERP_SPEED = 12; // rad/s convergence for gyroscope smoothing
+const MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER = 2.1;
+const MOBILE_PORTRAIT_CAMERA_HEIGHT_BONUS = 0.8;
+const MOBILE_PORTRAIT_CAMERA_FOV_BONUS = 20;
+const ENGAGED_CAMERA_OFFSET = {
+  right: 0.65,
+  up: 0.4
+};
+const AUTO_AIM_CAMERA_OFFSET = {
+  right: 0.75,
+  up: 0.35
+};
+const BED_SLEEP_PROMPT = "click or press 'x' to sleep";
+const BED_WAKE_PROMPT = "click or press 'x' to wake";
+const FRIENDLY_DIALOGUE_POOL = [
+  {
+    blocks: [
+      "Hey friend! It's nice to see another traveler out here.",
+      "If you get lost, just follow the glowing towers. They always lead somewhere safe."
+    ],
+    responses: [
+      {
+        label: "Any survival tips?",
+        reply: "Stay light on your feet and keep an eye on the waterline."
+      },
+      {
+        label: "Heard any rumors?",
+        reply: "People say a sky ship drifts near the old ridge every dusk."
+      }
+    ]
+  },
+  {
+    blocks: [
+      "You're closer than the wind. I like that.",
+      "I'm keeping watch while I dance away the boredom."
+    ],
+    responses: [
+      {
+        label: "Need company?",
+        reply: "Just a quick hello keeps me smiling."
+      },
+      {
+        label: "Anything to trade?",
+        reply: "Not yet, but come back later and I might have something shiny."
+      }
+    ]
+  },
+  {
+    blocks: [
+      "The forest is calmer today. Perfect for a wander.",
+      "If you hear splashing, it's probably just the fish playing."
+    ],
+    responses: [
+      {
+        label: "Thanks for the heads-up.",
+        reply: "Anytime. Stay curious!"
+      },
+      {
+        label: "I'll keep moving.",
+        reply: "Safe travels, friend."
+      }
+    ]
+  }
+];
+const MERCHANT_DIALOGUE = {
+  blocks: [
+    "Welcome! Looking to trade?"
+  ],
+  responses: [
+    {
+      label: "Buy items",
+      reply: "Here's what I have for sale.",
+      merchantAction: "buy"
+    },
+    {
+      label: "Sell items",
+      reply: "Let's see what you've got.",
+      merchantAction: "sell"
+    }
+  ]
+};
+const GANG_BEASTS_PUNCH_KEYS = new Set(['q', 'e']);
+const GANG_BEASTS_ATTACK_DURATION_MS = 420;
+const GANG_BEASTS_PARALYSIS_MS = 1000;
+const ACTION_LOCKED_ATTACKS = ['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'mmaKick', 'runningKick', 'roll'];
+const SWORD_COMBO_ACTIONS = ['swordSlash', 'swordSlashLeft', 'swordFwdSpin'];
+const SWORD_SPIN_CHARGE_START_MS = 1000;
+const SWORD_SPIN_CHARGE_MAX_HOLD_MS = 3200;
+const SWORD_SPIN_WINDUP_SPEED = 0.25;
+const MOBILE_EQUIP_HOLD_MS = 1500;
+const GRAB_MOVE_SEND_INTERVAL_MS = 110;
+const GRAB_MOVE_MIN_DELTA_SQ = 0.02 * 0.02;
+const GRAB_SPRING = 45;
+const GRAB_DAMPING = 10;
+const GRAB_FORCE_MAX = 200;
+const GRAB_SELF_SPEED_LIMIT = 1.8;
+const GRAB_BODY_PART_OFFSETS = {
+  head:     { x: 0,    y: 1.05, z: 0 },
+  torso:    { x: 0,    y: 0.55, z: 0 },
+  leftArm:  { x: -0.4, y: 0.65, z: 0 },
+  rightArm: { x: 0.4,  y: 0.65, z: 0 },
+  hips:     { x: 0,    y: 0.0,  z: 0 },
+  leftLeg:  { x: -0.2, y: -0.3, z: 0 },
+  rightLeg: { x: 0.2,  y: -0.3, z: 0 },
+};
+const AUTO_AIM_RANGE_M = 50;
+const AUTO_AIM_ICE_RANGE_M = 10;
+const AUTO_AIM_THROW_RANGE_M = 18;
+const AUTO_AIM_TARGET_CENTER_Y = 0.9;
+const AUTO_AIM_MANUAL_BREAK_THRESHOLD_RAD = 0.2;
+const AUTO_AIM_MANUAL_BREAK_DECAY_MS = 250;
+const AUTO_AIM_WHEEL_BREAK_THRESHOLD = 140;
+const AUTO_AIM_CAMERA_LINGER_MS = 3000;
+const AUTO_AIM_ARC_CONFIG = Object.freeze({
+  bow: { nearDistance: 6, farDistance: 45, maxLoftRadians: 0.24 },
+  bomb: { nearDistance: 4, farDistance: 36, maxLoftRadians: 0.48 },
+  bazooka: { nearDistance: 5, farDistance: 50, maxLoftRadians: 0.2 },
+  throw: { nearDistance: 2.5, farDistance: 16, maxLoftRadians: 0.62 }
+});
+
+export class PlayerControls {
+  constructor({
+    scene,
+    camera,
+    playerModel,
+    renderer,
+    multiplayer,
+    getCameraOccluders,
+    spawnProjectile,
+    projectiles,
+    spawnArrowProjectile,
+    spawnMissileProjectile,
+    spawnIceMist,
+    iceMists,
+    audioManager,
+    initialAmmo,
+    onAmmoChange,
+    onSleepStart,
+    onSleepEnd
+  }) {
+    this.yaw = 0;
+    this.pitch = 0;
+    this.pointerLocked = false;
+    this.renderer = renderer;
+    this.domElement = this.renderer.domElement;
+    this.scene = scene;
+    this.playerModel = playerModel;
+    this.camera = camera;
+    this.multiplayer = multiplayer;
+    this.getCameraOccluders = getCameraOccluders || null;
+    this.lastPosition = new THREE.Vector3();
+    this.wasMoving = false;
+    this.isMoving = false;
+    this.spawnProjectile = spawnProjectile;
+    this.spawnArrowProjectile = spawnArrowProjectile;
+    this.spawnMissileProjectile = spawnMissileProjectile;
+    this.projectiles = projectiles;
+    this.spawnIceMist = spawnIceMist;
+    this.iceMists = iceMists;
+    this.audioManager = audioManager;
+    this.isKnocked = false;
+    this.knockbackRestYaw = 0;
+    this.knockbackEndTime = 0;
+    this.knockbackVelocity = new THREE.Vector3();
+    this.freezeEndTime = 0;
+    this.wasFrozen = false;
+    this.isInvincible = false;
+    this.invincibleUntil = 0;
+    this.slideMomentum = new THREE.Vector3();
+    this.lastMoveDirection = new THREE.Vector3();
+    this.grabbedTarget = null;
+    this.isGrabbed = false;
+    this.grabberId = null;
+    this.externalGrabPos = null;
+    this.lastGrabMoveSentAt = 0;
+    this.lastGrabMoveSentPos = null;
+    this.isClimbing = false;
+    this.activeClimbArea = null;
+
+    this.vehicle = null;
+
+    this.isInWater = false;
+    this.waterDepth = 0;
+
+    this.parachute = null;
+    this.isSleeping = false;
+    this.sleepData = null;
+    this.onSleepStart = typeof onSleepStart === 'function' ? onSleepStart : null;
+    this.onSleepEnd = typeof onSleepEnd === 'function' ? onSleepEnd : null;
+
+    this.jumpForceMultiplier = 1;
+    this.lowGravityEnabled = false;
+    this.groundOverrideY = null;
+    this.smoothedGroundExpectedY = null;
+    this.lastGroundResolution = null;
+    this.fallPitch = 0;
+    this.fallAngularVelocity = 0;
+
+    // Player state
+    this.canJump = true;
+    this.keysPressed = new Set();
+    this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    this.hasDoubleJumped = false;
+    this.flySpellActive = false;
+    this.flySpellEndsAt = 0;
+    this.onFlyJump = null;
+    this.currentSpecialAction = null;
+    this.runningKickTimer = null;
+    this.runningKickOriginalY = 0;
+    this.energyDepleted = false;
+    this.swordComboIndex = 0;
+    this.swordSpinChargeStartAt = 0;
+    this.swordSpinChargeActive = false;
+    
+    // Mobile control variables
+    this.joystick = null;
+    this.touchStartX = 0;
+    this.touchStartY = 0;
+    this.touchSensitivity = 0.006;
+    this.moveVector = { x: 0, z: 0 };
+    this.jumpButtonPressed = false;
+    this.moveForward = 0;
+    this.moveRight = 0;
+    this.deltaSeconds = 0;
+
+    // Gyroscope state
+    this.gyroActive = false;
+    this.gyroLastAlpha = null;
+    this.gyroLastBeta = null;
+    this.gyroLastGamma = null;
+    this.gyroCalibQ = null;
+    this.gyroCalibYaw = 0;
+    this.gyroCalibPitch = 0;
+    this._gyroDeviceQ = new THREE.Quaternion();
+    this._gyroRelQ = new THREE.Quaternion();
+    this._gyroTempQ = new THREE.Quaternion();
+    this._gyroQ1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+    this._gyroQ0 = new THREE.Quaternion();
+    this._gyroZee = new THREE.Vector3(0, 0, 1);
+    this._gyroEuler = new THREE.Euler();
+    this._gyroForwardRef = new THREE.Vector3();
+    this._gyroForwardCur = new THREE.Vector3();
+    this._gyroOrientHandler = null;
+    
+    // Initial player position
+    const spawn = getSpawnPosition();
+    const spawnX = Number.isFinite(spawn?.x) ? spawn.x : 0;
+    const spawnY = Number.isFinite(spawn?.y) ? spawn.y : 0.9;
+    const spawnZ = Number.isFinite(spawn?.z) ? spawn.z : 0;
+    this.playerX = spawnX;
+    this.playerY = spawnY;
+    this.playerZ = spawnZ;
+
+    
+    // Set initial player model position if it exists
+    if (this.playerModel) {
+      this.playerModel.position.set(this.playerX, this.playerY, this.playerZ);
+      this.lastPosition.set(this.playerX, this.playerY, this.playerZ);
+      this.playerModel.userData.isKnocked = false;
+      this.playerModel.rotation.x = 0;
+    }
+    
+    // No physics collider — simple direct position movement
+
+    // Set camera to third-person perspective
+    this.camera.position.set(this.playerX, this.playerY + 2, this.playerZ + 5);
+    this.camera.lookAt(this.playerX, this.playerY + 1, this.playerZ);
+    // Store the initial camera offset (relative to player's target position)
+    this.cameraOffset = new THREE.Vector3();
+    this.cameraOffset.copy(this.camera.position).sub(new THREE.Vector3(this.playerX, this.playerY + 1, this.playerZ));
+
+    // Initialize controls based on device
+    this.initializeControls();
+
+    // Setup event listeners
+    this.setupEventListeners();
+
+    this.enabled = true; // Add enabled flag for chat input
+
+    this.interactionPromptEl = document.getElementById('interaction-tooltip');
+    this.climbOverlayEl = document.getElementById('climb-overlay');
+    this.friendlyInteractButton = document.getElementById('friendly-interact');
+    this.friendlyDialogueEl = document.getElementById('friendly-dialogue');
+    this.friendlyDialogueTextEl = this.friendlyDialogueEl?.querySelector('.friendly-dialogue-text') || null;
+    this.friendlyDialogueOptionsEl = this.friendlyDialogueEl?.querySelector('.friendly-dialogue-options') || null;
+    this.activeFriendly = null;
+    this.isInteracting = false;
+    this.activeDialogue = null;
+    this.dialogueIndex = 0;
+    this.awaitingResponse = false;
+    this.awaitingExit = false;
+    if (window.gameMode !== '3d_painter') {
+      this.questManager = new QuestManager({
+        scene: this.scene,
+        getPlayerModel: () => this.playerModel,
+        attachPhysics: (npc) => window.attachMonsterPhysics?.(npc),
+        detachPhysics: (npc) => window.detachNpcPhysics?.(npc),
+        addXp: (amount) => window.addPlayerXp?.(amount),
+        getMonsterXpForLevel: (level) => window.getMonsterXpForLevel?.(level)
+      });
+      window.questManager = this.questManager;
+    }
+    this.crosshairEl = document.querySelector('.crosshair');
+    this.defaultFov = this.camera.fov;
+    this.aimFov = Math.max(45, this.defaultFov - 8);
+    this.isAiming = false;
+    this.isFireHeld = false;
+    this._fistState = { left: false, right: false }; // tracking slot → fist active
+    this.autoAimBreakUntilRelease = false;
+    this.autoAimCurrentPitch = 0;
+    this.autoAimCameraDirection = null;
+    this.autoAimTargetModel = null;
+    this.autoAimCameraLingerUntil = 0;
+    this.autoAimCameraLingerDirection = null;
+    this.autoAimCameraLingerTargetModel = null;
+    this.autoAimCameraLingerTargetPosition = null;
+    this.autoAimManualBreakAmount = 0;
+    this.autoAimLastManualInputAt = 0;
+    this.baseCameraOffset = this.cameraOffset.clone();
+    this.aimCameraOffset = this.baseCameraOffset.clone().add(new THREE.Vector3(0, 0, -2.0));
+    this.weaponCameraOffset = this.baseCameraOffset.clone().add(WEAPON_CAMERA_OFFSET);
+    this.baseCameraOffsetDesktop = this.baseCameraOffset.clone();
+    this.defaultFovDesktop = this.defaultFov;
+    this.applyMobilePortraitCameraTuning();
+    this.baseCameraTargetOffset = new THREE.Vector3();
+    this.aimCameraTargetOffset = new THREE.Vector3(1.3, 0, 0);
+    this.weaponCameraTargetOffset = WEAPON_CAMERA_TARGET_OFFSET.clone();
+    this.cameraTargetOffset = new THREE.Vector3();
+    this.aimZoomInSpeed = 6;
+    this.aimZoomOutSpeed = 3;
+    this.aimReleaseDelayMs = 500;
+    this.aimReleaseHoldUntil = null;
+    this.firstPersonView = true;
+    this.cameraRaycaster = new THREE.Raycaster();
+    this.lastOcclusionOrbitCenter = null;
+    this.lastOcclusionDesiredPosition = null;
+    this.lastOcclusionPosition = null;
+    this.lastOcclusionDistance = null;
+    this.lastOcclusionYaw = null;
+    this.lastOcclusionPitch = null;
+    this.isEngaged = false;
+    this.engagedTarget = null;
+    this.engagedDirection = null;
+    this.freeYaw = null;
+    this.freePitch = null;
+
+    if (this.interactionPromptEl) {
+      const activateInteraction = (event) => {
+        if (!this.interactionPromptEl.classList.contains('visible')) return;
+        this.safePreventDefault(event);
+        this.handlePickupAction();
+      };
+      if (this.isMobile) {
+        this.interactionPromptEl.addEventListener('touchstart', activateInteraction, { passive: false });
+      }
+      this.interactionPromptEl.addEventListener('click', activateInteraction);
+    }
+
+    if (this.climbOverlayEl) {
+      const activateClimb = (event) => {
+        if (this.climbOverlayEl.classList.contains('hidden')) return;
+        this.safePreventDefault(event);
+        this.handleClimbAction();
+      };
+      this.climbOverlayEl.addEventListener('click', activateClimb);
+      this.climbOverlayEl.addEventListener('touchstart', activateClimb, { passive: false });
+    }
+
+    if (this.friendlyInteractButton) {
+      const activateFriendly = (event) => {
+        if (this.friendlyInteractButton.classList.contains('hidden')) return;
+        this.safePreventDefault(event);
+        this.handleFriendlyInteractionAction();
+      };
+      this.friendlyInteractButton.addEventListener('click', activateFriendly);
+      this.friendlyInteractButton.addEventListener('touchstart', activateFriendly, { passive: false });
+    }
+
+    this.onAmmoChange = typeof onAmmoChange === 'function' ? onAmmoChange : null;
+    this.ammo = Number.isFinite(initialAmmo) ? Math.max(0, Math.floor(initialAmmo)) : 10;
+    this.maxAmmo = 30;
+    this.ammoContainerEl = document.getElementById('ammo-display');
+    this.ammoCountEl = document.getElementById('ammo-count');
+    this.ammoIconEl = document.getElementById('ammo-icon');
+    this.ammoLabel = 'Ice ammo';
+    this.ammoIcon = '❄️';
+    this.lastAmmoValue = null;
+    this.lastAmmoEmpty = null;
+    this.lastHasGun = null;
+    if (this.ammoIconEl) {
+      this.ammoIconEl.textContent = this.ammoIcon;
+    }
+    this.updateAmmoUI(!!this.getEquippedGun());
+    this.onAmmoChange?.(this.ammo);
+  }
+
+  setEnergyDepleted(value) {
+    this.energyDepleted = Boolean(value);
+  }
+
+  applyFreeze(durationMs = 5000) {
+    const duration = Number.isFinite(durationMs) ? durationMs : 5000;
+    const now = Date.now();
+    this.freezeEndTime = Math.max(this.freezeEndTime || 0, now + duration);
+    if (this.playerModel?.userData?.actions) {
+      const actions = this.playerModel.userData.actions;
+      const current = this.playerModel.userData.currentAction;
+      if (current && current !== 'idle') {
+        actions[current]?.fadeOut(0.1);
+      }
+      actions?.idle?.reset().fadeIn(0.1).play();
+      this.playerModel.userData.currentAction = 'idle';
+    }
+  }
+
+  isFrozen() {
+    return Date.now() < (this.freezeEndTime || 0);
+  }
+
+  setPlayerModel(newModel) {
+    if (this.parachute && this.playerModel && this.parachute.parent === this.playerModel) {
+      this.playerModel.remove(this.parachute);
+    }
+
+    this.playerModel = newModel;
+
+    if (this.parachute && this.playerModel) {
+      this.playerModel.add(this.parachute);
+    }
+
+    if (this.playerModel) {
+      if (this.body && typeof this.body.translation === 'function') {
+        const t = this.body.translation();
+        this.playerModel.position.set(t.x, t.y, t.z);
+      }
+      this.lastPosition.copy(this.playerModel.position);
+    }
+  }
+
+  initializeControls() {
+    this.initializeActionButtons();
+    if (this.isMobile) {
+      this.initializeMobileControls().catch((error) => {
+        console.warn('Mobile controls failed to initialize.', error);
+      });
+    } else {
+      // this.setupPointerLock(); // leave pointer lock in PlayerControls
+    }
+    initHandTracking().catch((err) => {
+      console.warn('[Controls] Hand tracking init failed:', err);
+    });
+  }
+  
+  safePreventDefault(event) {
+    if (event?.cancelable) {
+      event.preventDefault();
+    }
+  }
+
+  async initializeMobileControls() {
+    const nipplejs = await loadNippleJs();
+    // Add joystick container for mobile
+    const joystickContainer = document.getElementById('joystick-container');
+    if (!joystickContainer) {
+      const newJoystickContainer = document.createElement('div');
+      newJoystickContainer.id = 'joystick-container';
+      document.body.appendChild(newJoystickContainer);
+    }
+
+    // Add jump button for mobile
+    const jumpButton = document.getElementById('jump-button');
+    if (!jumpButton) {
+      const newJumpButton = document.createElement('div');
+      newJumpButton.id = 'jump-button';
+      newJumpButton.innerText = 'JUMP';
+      document.body.appendChild(newJumpButton);
+    }
+
+    // Jump button event listeners
+    document.getElementById('jump-button').addEventListener('touchstart', (event) => {
+      if (!this.enabled || this.isInWater) return;
+      this.jumpButtonPressed = true;
+      this.tryJump();
+      this.safePreventDefault(event);
+    });
+
+    document.getElementById('jump-button').addEventListener('touchend', (event) => {
+      if (!this.enabled || this.isInWater) return;
+      this.jumpButtonPressed = false;
+      this.safePreventDefault(event);
+    });
+
+    // Initialize joystick with improved behavior
+    this.joystick = nipplejs.create({
+      zone: document.getElementById('joystick-container'),
+      mode: 'static',
+      position: { left: '50%', top: '50%' },
+      color: 'rgba(255, 255, 255, 0.5)',
+      size: 100
+    });
+
+    this.joystick.on('move', (evt, data) => {
+      const angle = data.angle.radian;
+      this.joystickAngle = angle;
+      this.joystickForce = Math.min(data.force, 1);
+    });
+
+    this.joystick.on('end', () => {
+      this.joystickForce = 0;
+    });
+
+    // Touch camera control
+    this.cameraTouchId = null;
+    this.domElement.addEventListener('touchstart', (event) => {
+      if (!this.enabled || this.isEngaged || this.gyroActive) return;
+      for (const touch of event.changedTouches) {
+        const target = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (target && !target.closest('#joystick-container') && !target.closest('#jump-button') && !target.closest('#action-buttons') && !target.closest('#gyro-button')) {
+          this.cameraTouchId = touch.identifier;
+          this.touchStartX = touch.clientX;
+          this.touchStartY = touch.clientY;
+          this.safePreventDefault(event);
+          break;
+        }
+      }
+    }, { passive: false });
+
+    this.domElement.addEventListener('touchmove', (event) => {
+      if (!this.enabled || this.isEngaged || this.cameraTouchId === null || this.gyroActive) return;
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === this.cameraTouchId) {
+          const deltaX = touch.clientX - this.touchStartX;
+          const deltaY = touch.clientY - this.touchStartY;
+          this.touchStartX = touch.clientX;
+          this.touchStartY = touch.clientY;
+
+          this.yaw -= deltaX * this.touchSensitivity;
+          this.pitch -= deltaY * this.touchSensitivity;
+
+          const maxPitch = Math.PI / 3;
+          const minPitch = -Math.PI / 8;
+          this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
+          this.breakAutoAimFromManualCamera(Math.hypot(deltaX * this.touchSensitivity, deltaY * this.touchSensitivity));
+          this.safePreventDefault(event);
+          break;
+        }
+      }
+    }, { passive: false });
+
+    this.domElement.addEventListener('touchend', (event) => {
+      for (const touch of event.changedTouches) {
+        if (touch.identifier === this.cameraTouchId) {
+          this.cameraTouchId = null;
+          break;
+        }
+      }
+    });
+
+    // Gyroscope button
+    let gyroButton = document.getElementById('gyro-button');
+    if (!gyroButton) {
+      gyroButton = document.createElement('div');
+      gyroButton.id = 'gyro-button';
+      document.body.appendChild(gyroButton);
+    }
+    const updateGyroButtonLabel = () => {
+      gyroButton.innerHTML = this.gyroActive
+        ? '<span style="font-size:18px">⟳</span><span>RECAL</span>'
+        : '<span style="font-size:18px">⟳</span><span>GYRO</span>';
+      gyroButton.classList.toggle('active', this.gyroActive);
+    };
+    updateGyroButtonLabel();
+
+    let gyroLongPressTimer = null;
+    gyroButton.addEventListener('touchstart', async (event) => {
+      this.safePreventDefault(event);
+      gyroLongPressTimer = setTimeout(() => {
+        gyroLongPressTimer = null;
+        if (this.gyroActive) {
+          this.disableGyroscope();
+          updateGyroButtonLabel();
+        }
+      }, 600);
+
+      if (!this.gyroActive) {
+        gyroButton.innerHTML = '<span>...</span>';
+        const ok = await this.initGyroscope();
+        if (ok) {
+          updateGyroButtonLabel();
+        } else {
+          gyroButton.innerHTML = '<span style="font-size:18px">⟳</span><span>GYRO</span>';
+          gyroButton.classList.remove('active');
+        }
+      }
+    }, { passive: false });
+
+    gyroButton.addEventListener('touchend', (event) => {
+      this.safePreventDefault(event);
+      if (gyroLongPressTimer !== null) {
+        clearTimeout(gyroLongPressTimer);
+        gyroLongPressTimer = null;
+        // Short tap while active = recalibrate
+        if (this.gyroActive) {
+          this.calibrateGyroscope();
+        }
+      }
+    }, { passive: false });
+  }
+
+  // Compute device-orientation quaternion using the Three.js DeviceOrientationControls approach
+  _computeDeviceOrientationQ(alpha, beta, gamma) {
+    const DEG2RAD = Math.PI / 180;
+    this._gyroEuler.set(beta * DEG2RAD, alpha * DEG2RAD, -gamma * DEG2RAD, 'YXZ');
+    this._gyroDeviceQ.setFromEuler(this._gyroEuler);
+    this._gyroDeviceQ.multiply(this._gyroQ1);
+    const screenAngle = ((window.screen.orientation?.angle) ?? 0) * DEG2RAD;
+    this._gyroQ0.setFromAxisAngle(this._gyroZee, -screenAngle);
+    this._gyroDeviceQ.multiply(this._gyroQ0);
+  }
+
+  // Store current phone orientation as the neutral "looking forward" pose
+  calibrateGyroscope() {
+    if (this.gyroLastAlpha === null) return;
+    this._computeDeviceOrientationQ(this.gyroLastAlpha, this.gyroLastBeta, this.gyroLastGamma);
+    this.gyroCalibQ = this._gyroDeviceQ.clone();
+    this.gyroCalibYaw = this.yaw;
+    this.gyroCalibPitch = this.pitch;
+  }
+
+  async initGyroscope() {
+    if (typeof DeviceOrientationEvent === 'undefined') {
+      console.warn('[Gyro] DeviceOrientationEvent not supported on this device.');
+      return false;
+    }
+    // iOS 13+ requires explicit permission request from a user gesture
+    if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+      try {
+        const permission = await DeviceOrientationEvent.requestPermission();
+        if (permission !== 'granted') return false;
+      } catch (e) {
+        console.warn('[Gyro] Permission denied:', e);
+        return false;
+      }
+    }
+
+    // Remove any previous listener
+    if (this._gyroOrientHandler) {
+      window.removeEventListener('deviceorientation', this._gyroOrientHandler, true);
+    }
+
+    this._gyroOrientHandler = (event) => {
+      if (event.alpha === null) return;
+      this.gyroLastAlpha = event.alpha;
+      this.gyroLastBeta = event.beta;
+      this.gyroLastGamma = event.gamma;
+    };
+    window.addEventListener('deviceorientation', this._gyroOrientHandler, true);
+
+    // Wait for first sensor reading, then calibrate
+    await new Promise((resolve) => {
+      const once = (event) => {
+        if (event.alpha === null) return;
+        window.removeEventListener('deviceorientation', once, true);
+        resolve();
+      };
+      window.addEventListener('deviceorientation', once, true);
+    });
+
+    this.calibrateGyroscope();
+    this.gyroActive = true;
+    return true;
+  }
+
+  disableGyroscope() {
+    this.gyroActive = false;
+    if (this._gyroOrientHandler) {
+      window.removeEventListener('deviceorientation', this._gyroOrientHandler, true);
+      this._gyroOrientHandler = null;
+    }
+  }
+
+  // Called each frame to slerp camera yaw/pitch toward the gyroscope target
+  _applyGyroUpdate(delta) {
+    if (!this.gyroActive || !this.gyroCalibQ || this.gyroLastAlpha === null) return;
+    if (this.isEngaged) return; // engaged/auto-aim mode overrides
+
+    this._computeDeviceOrientationQ(this.gyroLastAlpha, this.gyroLastBeta, this.gyroLastGamma);
+
+    // Relative rotation from calibration pose to current pose
+    this._gyroTempQ.copy(this.gyroCalibQ).invert();
+    this._gyroRelQ.copy(this._gyroTempQ).multiply(this._gyroDeviceQ);
+
+    // Apply relative rotation to the reference forward direction (at calibration time)
+    this._gyroForwardRef.set(
+      Math.sin(this.gyroCalibYaw) * Math.cos(this.gyroCalibPitch),
+      Math.sin(this.gyroCalibPitch),
+      Math.cos(this.gyroCalibYaw) * Math.cos(this.gyroCalibPitch)
+    );
+    this._gyroForwardCur.copy(this._gyroForwardRef).applyQuaternion(this._gyroRelQ);
+
+    const targetYaw = Math.atan2(this._gyroForwardCur.x, this._gyroForwardCur.z);
+    const targetPitch = -Math.asin(Math.max(-1, Math.min(1, this._gyroForwardCur.y)));
+
+    const maxPitch = Math.PI / 3;
+    const minPitch = -Math.PI / 8;
+    const clampedPitch = Math.max(minPitch, Math.min(maxPitch, targetPitch));
+
+    const lerpFactor = 1 - Math.exp(-GYRO_LERP_SPEED * delta);
+    // Shortest-path yaw lerp (handles 0/360 wraparound)
+    const yawDelta = ((targetYaw - this.yaw + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+    this.yaw += yawDelta * lerpFactor;
+    this.pitch += (clampedPitch - this.pitch) * lerpFactor;
+  }
+
+  initializeActionButtons() {
+    const actionContainer = document.getElementById('action-buttons');
+    if (!actionContainer) return;
+
+    actionContainer.innerHTML = '';
+
+    const createButton = (id, className, label) => {
+      const button = document.createElement('button');
+      button.id = id;
+      button.className = `action-button ${className}`;
+      button.textContent = label;
+      actionContainer.appendChild(button);
+      return button;
+    };
+
+    this.punchButton = createButton('punch-button', 'mobile-primary-action', 'Attack');
+    this.spellsButton = createButton('spells-button', 'mobile-primary-action', 'Spells');
+    this.equipButton = createButton('equip-button', 'mobile-primary-action', 'EQUIP');
+    this.optionLeftButton = createButton('left-punch-button', 'mobile-option-action', 'Shield');
+    this.optionCenterButton = createButton('punch-kick-button', 'mobile-option-action', '🎤');
+    this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', '—');
+
+    this.mobileEquipButtons = [];
+    this.mobileItemActionButtons = [];
+    this.mobileEquipHoldTimer = null;
+    this.mobileEquipHoldTriggered = false;
+    this.mobileEquipHeldItemId = null;
+    this.mobileThrowAimItemId = null;
+    this.mobileActionState = 'default';
+    this.mobileMeleeComboIndex = 0;
+    this.mobileStatusToastTimer = null;
+    this.mobileAttackHoldActive = false;
+    this.mobileAttackPressStartedAt = 0;
+    this.mobileAttackPressActive = false;
+    this.lastTouchButtonTime = 0;
+
+    const bindActionPress = (button, { onPressStart = null, onPressEnd = null }) => {
+      if (!button) return;
+
+      const canRunMouseHandler = () => (performance.now() - this.lastTouchButtonTime) > 550;
+
+      button.addEventListener('touchstart', (event) => {
+        this.lastTouchButtonTime = performance.now();
+        if (onPressStart) onPressStart(event);
+        this.safePreventDefault(event);
+      }, { passive: false });
+
+      button.addEventListener('touchend', (event) => {
+        this.lastTouchButtonTime = performance.now();
+        if (onPressEnd) onPressEnd(event);
+        this.safePreventDefault(event);
+      }, { passive: false });
+
+      button.addEventListener('touchcancel', (event) => {
+        this.lastTouchButtonTime = performance.now();
+        if (onPressEnd) onPressEnd(event);
+        this.safePreventDefault(event);
+      }, { passive: false });
+
+      button.addEventListener('mousedown', (event) => {
+        if (!canRunMouseHandler()) return;
+        if (onPressStart) onPressStart(event);
+      });
+
+      button.addEventListener('mouseup', (event) => {
+        if (!canRunMouseHandler()) return;
+        if (onPressEnd) onPressEnd(event);
+      });
+
+      button.addEventListener('mouseleave', (event) => {
+        if (!canRunMouseHandler()) return;
+        if (onPressEnd) onPressEnd(event);
+      });
+
+      button.addEventListener('click', (event) => event.preventDefault());
+    };
+
+    const onAttackPressStart = (event) => {
+      if (!this.enabled) return;
+      this.mobileAttackPressStartedAt = performance.now();
+      this.mobileAttackPressActive = true;
+      if (this.shouldHoldToFire()) {
+        this.mobileAttackHoldActive = true;
+        this.isFireHeld = true;
+        this.setAiming(true);
+      } else if (this.getEquippedSword()) {
+        this.swordSpinChargeStartAt = performance.now();
+        this.swordSpinChargeActive = false;
+        setTimeout(() => {
+          if (!this.mobileAttackPressActive) return;
+          this.startSwordSpinCharge();
+        }, SWORD_SPIN_CHARGE_START_MS);
+      }
+      if (event) this.safePreventDefault(event);
+    };
+
+    const onAttackPressEnd = (event) => {
+      if (!this.enabled) return;
+      if (!this.mobileAttackPressActive) return;
+      this.mobileAttackPressActive = false;
+      if (this.mobileAttackHoldActive) {
+        this.mobileAttackHoldActive = false;
+        this.isFireHeld = false;
+        this.setAiming(false);
+        this.attemptFireProjectile();
+      } else if (this.releaseSwordSpinCharge()) {
+        // charge release handled above
+      } else {
+        this.handlePrimaryAttackPress();
+      }
+      if (event) this.safePreventDefault(event);
+    };
+
+    bindActionPress(this.punchButton, {
+      onPressStart: onAttackPressStart,
+      onPressEnd: onAttackPressEnd
+    });
+
+    const onSpellsToggle = (event) => {
+      if (!this.enabled) return;
+      this.mobileActionState = this.mobileActionState === 'spell-options' ? 'default' : 'spell-options';
+      this.refreshActionButtons();
+      if (event) this.safePreventDefault(event);
+    };
+    bindActionPress(this.spellsButton, {
+      onPressStart: onSpellsToggle
+    });
+
+    const openEquip = (event) => {
+      if (!this.enabled) return;
+      this.showMobileEquipMenu();
+      if (event) this.safePreventDefault(event);
+    };
+    bindActionPress(this.equipButton, {
+      onPressStart: openEquip
+    });
+
+    const handleOptionPick = (slot) => (event) => {
+      if (!this.enabled) return;
+      if (this.mobileActionState === 'spell-options') {
+        if (slot === 'left') {
+          const casted = this.castSpellById?.('shield');
+          if (casted) {
+            this.mobileActionState = 'default';
+          }
+        } else if (slot === 'right') {
+          const casted = this.castSpellById?.('fly');
+          if (casted) {
+            this.mobileActionState = 'default';
+          }
+        } else if (slot === 'kick') {
+          if (this.isVoiceListening?.()) {
+            this.stopVoiceListening?.();
+            this.mobileActionState = 'default';
+          } else {
+            this.handleVoiceMicPress?.();
+          }
+          if (event) this.safePreventDefault(event);
+        }
+      } else if (this.mobileActionState === 'freeze') {
+        this.attemptFireProjectileForHand('right');
+      } else {
+        this.handlePrimaryAttackPress();
+      }
+      this.refreshActionButtons();
+      if (event) this.safePreventDefault(event);
+    };
+
+    bindActionPress(this.optionLeftButton, { onPressStart: handleOptionPick('left') });
+    bindActionPress(this.optionCenterButton, { onPressStart: handleOptionPick('kick') });
+    bindActionPress(this.optionRightButton, { onPressStart: handleOptionPick('right') });
+
+    this.refreshActionButtons();
+  }
+
+
+  getNextSwordAttackAction({ advance = true } = {}) {
+    const action = SWORD_COMBO_ACTIONS[this.swordComboIndex % SWORD_COMBO_ACTIONS.length];
+    if (advance) {
+      this.swordComboIndex = (this.swordComboIndex + 1) % SWORD_COMBO_ACTIONS.length;
+    }
+    return action;
+  }
+
+
+  startSwordSpinCharge() {
+    if (!this.enabled || this.isInWater || this.swordSpinChargeActive) return false;
+    if (!this.getEquippedSword()) return false;
+    const started = this.playAction('swordSpin', {
+      attackOverrides: { hitTime: SWORD_SPIN_CHARGE_MAX_HOLD_MS, hitWindow: 300, damage: 3, range: 3.0 }
+    });
+    if (!started) return false;
+    this.swordSpinChargeStartAt = performance.now();
+    this.swordSpinChargeActive = true;
+    const spinAction = this.playerModel?.userData?.actions?.swordSpin;
+    if (spinAction) spinAction.timeScale = SWORD_SPIN_WINDUP_SPEED;
+    return true;
+  }
+
+  releaseSwordSpinCharge() {
+    if (!this.swordSpinChargeActive) return false;
+    this.swordSpinChargeActive = false;
+    const heldForMs = Math.max(0, performance.now() - this.swordSpinChargeStartAt);
+    const clampedHeldForMs = Math.min(SWORD_SPIN_CHARGE_MAX_HOLD_MS, heldForMs);
+    const chargeRatio = Math.max(0, Math.min(1, clampedHeldForMs / SWORD_SPIN_CHARGE_MAX_HOLD_MS));
+    const spinAction = this.playerModel?.userData?.actions?.swordSpin;
+    if (spinAction) spinAction.timeScale = 1;
+    const swordSpinBaseHitTimeMs = 800;
+    const swordSpinChargeHitDelayMs = clampedHeldForMs * ((1 / SWORD_SPIN_WINDUP_SPEED) - 1);
+    if (this.playerModel?.userData?.attack?.name === 'swordSpin') {
+      this.playerModel.userData.attack.overrides = {
+        ...(this.playerModel.userData.attack.overrides || {}),
+        swordSpinChargeHeldForMs: clampedHeldForMs,
+        hitTime: swordSpinBaseHitTimeMs + swordSpinChargeHitDelayMs,
+        hitWindow: 300,
+        damage: 3 + (3 * chargeRatio),
+        range: 3 + (3 * chargeRatio)
+      };
+    }
+    return true;
+  }
+
+  getMobileAttackLabel() {
+    const weapon = this.getEquippedWeapon('right');
+    if (weapon?.itemId === 'bow') return 'Bow';
+    if (weapon?.itemId === 'bazooka') return 'Fire';
+    if (weapon?.itemId === 'bomb') return 'Bomb';
+    if (weapon?.itemId === 'pistol') return 'Fire';
+    return 'Attack';
+  }
+
+  performAttackForSlot(slot) {
+    if (!this.enabled || this.isInWater) return false;
+    if (slot === 'kick') {
+      return this.playAction('mmaKick');
+    }
+
+    const hand = slot === 'left' ? 'left' : 'right';
+    const weapon = this.getEquippedWeapon(hand);
+    if (this.isProjectileWeapon(weapon)) {
+      if (this.shouldHoldToFire(hand)) {
+        this.isFireHeld = true;
+        this.setAiming(true);
+        setTimeout(() => {
+          this.isFireHeld = false;
+          this.setAiming(false);
+          this.attemptFireProjectileForHand(hand);
+        }, 150);
+      } else {
+        this.attemptFireProjectileForHand(hand);
+      }
+      return true;
+    }
+
+    return this.playAction(hand === 'left' ? 'leftPunch' : 'mutantPunch');
+  }
+
+  handlePrimaryAttackPress() {
+    const weapon = this.getEquippedWeapon('right');
+    if (weapon?.itemId === 'bow' || weapon?.itemId === 'bazooka' || weapon?.itemId === 'bomb') {
+      this.attemptFireProjectileForHand('right');
+      return;
+    }
+    if (weapon?.itemId === 'iceGun') {
+      const cycle = ['left', 'kick'];
+      const slot = cycle[this.mobileMeleeComboIndex % cycle.length];
+      const started = this.performAttackForSlot(slot);
+      if (!started) return;
+      this.mobileMeleeComboIndex = (this.mobileMeleeComboIndex + 1) % cycle.length;
+      return;
+    }
+    if (weapon?.itemId === 'autumnSword' || weapon?.itemId === 'hammer') {
+      const attackAction = this.getNextSwordAttackAction({ advance: false });
+      const started = this.playAction(attackAction);
+      if (!started) return;
+      this.swordComboIndex = (this.swordComboIndex + 1) % SWORD_COMBO_ACTIONS.length;
+      if (attackAction === 'swordSlash' || attackAction === 'swordSlashLeft') {
+        this.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg', 0.6, {
+          cooldownKey: 'sword-attack',
+          cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+        });
+      }
+      return;
+    }
+    const cycle = ['right', 'left', 'kick'];
+    const slot = cycle[this.mobileMeleeComboIndex % cycle.length];
+    const started = this.performAttackForSlot(slot);
+    if (!started) return;
+    this.mobileMeleeComboIndex = (this.mobileMeleeComboIndex + 1) % cycle.length;
+  }
+
+  showMobileEquipMenu() {
+    const actionContainer = document.getElementById('action-buttons');
+    if (!actionContainer) return;
+
+    const appState = appContext.uiState.appState ?? window.appState;
+    const inventory = appState?.getInventory?.() || {};
+    const equipCandidates = [
+      { id: 'pistol', label: 'Pistol' },
+      { id: 'shield', label: 'Shield' },
+      { id: 'bomb', label: 'Bomb' },
+      { id: 'bow', label: 'Bow' },
+      { id: 'bazooka', label: 'Bazooka' },
+      { id: 'iceGun', label: 'Ice Gun' },
+      { id: 'autumnSword', label: 'Sword' },
+      { id: 'hammer', label: 'Hammer' },
+      { id: 'lantern', label: 'Lantern' },
+      { id: 'torch', label: 'Torch' }
+    ];
+
+    this.mobileEquipButtons.forEach(button => button.remove());
+    this.mobileEquipButtons = [];
+    this.mobileItemActionButtons.forEach(button => button.remove());
+    this.mobileItemActionButtons = [];
+
+    const hasInventoryItem = (itemId) => {
+      const entry = inventory[itemId];
+      const count = Number(entry?.count);
+      return Number.isFinite(count) && count > 0;
+    };
+
+    const itemsToShow = equipCandidates.filter(item => hasInventoryItem(item.id));
+    if (!itemsToShow.length) {
+      this.mobileActionState = 'default';
+      this.refreshActionButtons();
+      this.showMobileStatusToast('No items in inventory!');
+      return;
+    }
+
+    this.mobileActionState = 'equip';
+
+    const clearEquipHold = () => {
+      if (this.mobileEquipHoldTimer) {
+        clearTimeout(this.mobileEquipHoldTimer);
+        this.mobileEquipHoldTimer = null;
+      }
+      this.mobileEquipHoldTriggered = false;
+      this.mobileEquipHeldItemId = null;
+    };
+
+    const equipAndOpenActions = (itemId) => {
+      if (!this.enabled) return;
+      if (!appState?.isInventoryItemEquipped?.(itemId)) {
+        appState?.equipInventoryItem?.(itemId);
+      }
+      this.showMobileItemActionMenu(itemId);
+    };
+
+    itemsToShow.forEach((item) => {
+      const button = document.createElement('button');
+      button.className = 'action-button mobile-equip-action';
+      button.textContent = item.label;
+
+      const onEquipTap = (event) => {
+        if (!this.enabled) return;
+        const isEquipped = appState?.isInventoryItemEquipped?.(item.id);
+        if (isEquipped) appState?.unequipInventoryItem?.(item.id);
+        else appState?.equipInventoryItem?.(item.id);
+        this.mobileActionState = 'default';
+        this.refreshActionButtons();
+        if (event) this.safePreventDefault(event);
+      };
+
+      const onPressStart = (event) => {
+        if (!this.enabled) return;
+        clearEquipHold();
+        this.mobileEquipHeldItemId = item.id;
+        this.mobileEquipHoldTimer = setTimeout(() => {
+          if (this.mobileEquipHeldItemId !== item.id) return;
+          this.mobileEquipHoldTriggered = true;
+          equipAndOpenActions(item.id);
+        }, MOBILE_EQUIP_HOLD_MS);
+        if (event) this.safePreventDefault(event);
+      };
+
+      const onPressEnd = (event) => {
+        if (!this.enabled) return;
+        const holdTriggered = this.mobileEquipHoldTriggered;
+        const heldItemId = this.mobileEquipHeldItemId;
+        clearEquipHold();
+        if (!holdTriggered && heldItemId === item.id) {
+          onEquipTap(event);
+          return;
+        }
+        if (event) this.safePreventDefault(event);
+      };
+
+      button.addEventListener('touchstart', (event) => {
+        this.lastTouchButtonTime = performance.now();
+        onPressStart(event);
+      }, { passive: false });
+      button.addEventListener('touchend', (event) => {
+        this.lastTouchButtonTime = performance.now();
+        onPressEnd(event);
+      }, { passive: false });
+      button.addEventListener('touchcancel', (event) => {
+        this.lastTouchButtonTime = performance.now();
+        clearEquipHold();
+        if (event) this.safePreventDefault(event);
+      }, { passive: false });
+      button.addEventListener('mousedown', (event) => {
+        if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+        onPressStart(event);
+      });
+      button.addEventListener('mouseup', (event) => {
+        if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+        onPressEnd(event);
+      });
+      button.addEventListener('mouseleave', (event) => {
+        if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+        clearEquipHold();
+        if (event) this.safePreventDefault(event);
+      });
+      button.addEventListener('click', (event) => event.preventDefault());
+      this.mobileEquipButtons.push(button);
+      actionContainer.appendChild(button);
+    });
+
+    this.refreshActionButtons();
+  }
+
+  showMobileItemActionMenu(itemId) {
+    const actionContainer = document.getElementById('action-buttons');
+    if (!actionContainer || !itemId) return;
+    const appState = appContext.uiState.appState ?? window.appState;
+
+    this.mobileEquipButtons.forEach(button => button.remove());
+    this.mobileEquipButtons = [];
+    this.mobileItemActionButtons.forEach(button => button.remove());
+    this.mobileItemActionButtons = [];
+
+    this.mobileActionState = 'equip';
+
+    const dropButton = document.createElement('button');
+    dropButton.className = 'action-button mobile-equip-action';
+    dropButton.textContent = 'Drop';
+    const onDrop = (event) => {
+      if (!this.enabled) return;
+      appState?.dropInventoryItem?.(itemId);
+      this.mobileActionState = 'default';
+      this.refreshActionButtons();
+      if (event) this.safePreventDefault(event);
+    };
+    dropButton.addEventListener('touchstart', onDrop, { passive: false });
+    dropButton.addEventListener('mousedown', (event) => {
+      if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+      onDrop(event);
+    });
+    dropButton.addEventListener('click', (event) => event.preventDefault());
+
+    const throwButton = document.createElement('button');
+    throwButton.className = 'action-button mobile-equip-action';
+    throwButton.textContent = 'Throw';
+    const onThrowStart = (event) => {
+      if (!this.enabled) return;
+      this.mobileThrowAimItemId = itemId;
+      this.isFireHeld = true;
+      this.setAiming(true);
+      if (event) this.safePreventDefault(event);
+    };
+    const onThrowEnd = (event) => {
+      if (!this.enabled || !this.mobileThrowAimItemId) return;
+      const throwItemId = this.mobileThrowAimItemId;
+      this.mobileThrowAimItemId = null;
+      this.isFireHeld = false;
+      this.autoAimBreakUntilRelease = false;
+      this.autoAimCurrentPitch = 0;
+      this.autoAimManualBreakAmount = 0;
+      this.autoAimLastManualInputAt = 0;
+      this.setAiming(false);
+      const hand = this.getInventoryItemHand?.(throwItemId) || 'right';
+      const autoAimDirection = this.getAutoAimDirection({ itemId: throwItemId, type: 'throw' });
+      const direction = autoAimDirection ?? this.getHandAimDirection(hand) ?? this.getAimDirection(true);
+      const position = this.getProjectileSpawnPosition(direction);
+      const didThrow = this.throwInventoryItem?.(throwItemId, position, direction);
+      if (didThrow) {
+        this.playAction(hand === 'left' ? 'throwLeft' : 'throw');
+        this.startAutoAimCameraLinger(autoAimDirection);
+      }
+      this.mobileActionState = 'default';
+      this.refreshActionButtons();
+      if (event) this.safePreventDefault(event);
+    };
+    throwButton.addEventListener('touchstart', (event) => {
+      this.lastTouchButtonTime = performance.now();
+      onThrowStart(event);
+    }, { passive: false });
+    throwButton.addEventListener('touchend', (event) => {
+      this.lastTouchButtonTime = performance.now();
+      onThrowEnd(event);
+    }, { passive: false });
+    throwButton.addEventListener('touchcancel', (event) => {
+      this.lastTouchButtonTime = performance.now();
+      onThrowEnd(event);
+    }, { passive: false });
+    throwButton.addEventListener('mousedown', (event) => {
+      if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+      onThrowStart(event);
+    });
+    throwButton.addEventListener('mouseup', (event) => {
+      if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+      onThrowEnd(event);
+    });
+    throwButton.addEventListener('mouseleave', (event) => {
+      if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+      onThrowEnd(event);
+    });
+    throwButton.addEventListener('click', (event) => event.preventDefault());
+
+    this.mobileItemActionButtons.push(dropButton, throwButton);
+    actionContainer.appendChild(dropButton);
+    actionContainer.appendChild(throwButton);
+    this.refreshActionButtons();
+  }
+
+  showMobileStatusToast(message) {
+    if (!message) return;
+
+    let toast = document.getElementById('mobile-action-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'mobile-action-toast';
+      document.body.appendChild(toast);
+    }
+
+    toast.textContent = message;
+    toast.classList.add('visible');
+
+    if (this.mobileStatusToastTimer) {
+      clearTimeout(this.mobileStatusToastTimer);
+    }
+
+    this.mobileStatusToastTimer = setTimeout(() => {
+      toast.classList.remove('visible');
+    }, 1400);
+  }
+
+  refreshActionButtons() {
+    const actionContainer = document.getElementById('action-buttons');
+    if (!actionContainer || !this.punchButton) return;
+
+    const voiceState = this.getVoiceMicState?.() || { disabled: false, remainingSeconds: 0 };
+    const rightWeapon = this.getEquippedWeapon('right');
+    const isIceGunEquipped = rightWeapon?.itemId === 'iceGun';
+
+    let state = this.mobileActionState || 'default';
+    if (state === 'freeze' && !isIceGunEquipped) {
+      state = 'default';
+      this.mobileActionState = 'default';
+    }
+
+    if (state === 'default' && isIceGunEquipped) {
+      state = 'freeze';
+      this.mobileActionState = 'freeze';
+    }
+
+    actionContainer.classList.toggle('mobile-spell-options', state === 'spell-options');
+    actionContainer.classList.toggle('mobile-equip-mode', state === 'equip');
+    actionContainer.classList.toggle('mobile-freeze-mode', state === 'freeze');
+
+    this.punchButton.textContent = this.getMobileAttackLabel();
+    this.spellsButton.textContent = 'Spells';
+    this.spellsButton.disabled = false;
+
+    this.optionLeftButton.textContent = isIceGunEquipped ? 'Freeze' : 'Shield';
+    this.optionLeftButton.disabled = false;
+    this.optionCenterButton.textContent = '🎤';
+    this.optionCenterButton.disabled = false;
+    this.optionRightButton.textContent = 'Fly';
+    this.optionRightButton.disabled = false;
+
+    this.punchButton.style.display = '';
+
+    if (state === 'spell-options') {
+      const shieldState = this.getSpellStateById?.('shield') || { disabled: true, remainingSeconds: 0 };
+      const flyState = this.getSpellStateById?.('fly') || { disabled: true, remainingSeconds: 0 };
+      this.optionLeftButton.textContent = shieldState.remainingSeconds > 0 ? `Shield ${shieldState.remainingSeconds}s` : 'Shield';
+      this.optionLeftButton.disabled = !!shieldState.disabled;
+      this.optionRightButton.textContent = flyState.remainingSeconds > 0 ? `Fly ${flyState.remainingSeconds}s` : 'Fly';
+      this.optionRightButton.disabled = !!flyState.disabled;
+
+      if (this.isVoiceListening?.()) {
+        this.optionCenterButton.textContent = '■';
+      } else {
+        this.optionCenterButton.textContent = voiceState.remainingSeconds > 0 ? `🎤 ${voiceState.remainingSeconds}s` : '🎤';
+        this.optionCenterButton.disabled = !!voiceState.disabled;
+      }
+    } else if (state === 'freeze') {
+      this.optionCenterButton.disabled = true;
+      this.optionRightButton.disabled = true;
+    }
+
+    if (state !== 'equip') {
+      this.mobileEquipButtons.forEach(button => button.remove());
+      this.mobileEquipButtons = [];
+      this.mobileItemActionButtons.forEach(button => button.remove());
+      this.mobileItemActionButtons = [];
+    }
+
+    this.layoutMobileActionButtons(state);
+  }
+
+  getMobileActionSlots(buttonCount) {
+    if (buttonCount <= 0) return [];
+    const slots = [
+      // btn1, btn2, btn3 map to Equip, Spells, Attack positions.
+      { x: 1, y: 1 },
+      { x: 0, y: 1 },
+      { x: 1, y: 0 }
+    ];
+
+    if (buttonCount <= slots.length) return slots.slice(0, buttonCount);
+
+    // Layer expansion:
+    // 1) Fill the new top row above current area (excluding the new left column),
+    // 2) Then fill the new left column from bottom to top.
+    for (let layer = 2; slots.length < buttonCount; layer += 1) {
+      for (let x = layer - 1; x >= 0; x -= 1) {
+        slots.push({ x, y: layer });
+        if (slots.length >= buttonCount) return slots.slice(0, buttonCount);
+      }
+
+      for (let y = 0; y <= layer; y += 1) {
+        slots.push({ x: layer, y });
+        if (slots.length >= buttonCount) return slots.slice(0, buttonCount);
+      }
+    }
+
+    return slots.slice(0, buttonCount);
+  }
+
+  applyMobileButtonPosition(button, slot) {
+    if (!button || !slot) return;
+    button.style.setProperty('--mobile-grid-x', String(slot.x));
+    button.style.setProperty('--mobile-grid-y', String(slot.y));
+  }
+
+  layoutMobileActionButtons(state) {
+    const clearButtonPos = (button) => {
+      button?.style?.removeProperty('--mobile-grid-x');
+      button?.style?.removeProperty('--mobile-grid-y');
+    };
+
+    [
+      this.punchButton,
+      this.spellsButton,
+      this.equipButton,
+      this.optionLeftButton,
+      this.optionCenterButton,
+      this.optionRightButton,
+      ...(this.mobileEquipButtons || []),
+      ...(this.mobileItemActionButtons || [])
+    ].forEach(clearButtonPos);
+
+    if (state === 'spell-options') {
+      this.applyMobileButtonPosition(this.optionLeftButton, { x: 1, y: 1 });
+      this.applyMobileButtonPosition(this.optionCenterButton, { x: 0, y: 1 });
+      this.applyMobileButtonPosition(this.optionRightButton, { x: 1, y: 0 });
+      return;
+    }
+
+    if (state === 'freeze') {
+      // Keep the core layout visible and add Freeze as an extra row above.
+      this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
+      this.applyMobileButtonPosition(this.spellsButton, { x: 0, y: 1 });
+      this.applyMobileButtonPosition(this.equipButton, { x: 1, y: 1 });
+      this.applyMobileButtonPosition(this.optionLeftButton, { x: 1, y: 2 });
+      this.applyMobileButtonPosition(this.optionCenterButton, { x: 0, y: 2 });
+      this.applyMobileButtonPosition(this.optionRightButton, { x: 0, y: 0 });
+      return;
+    }
+
+    if (state === 'equip') {
+      const actionButtons = [
+        ...(this.mobileEquipButtons || []),
+        ...(this.mobileItemActionButtons || [])
+      ];
+      const slots = this.getMobileActionSlots(actionButtons.length);
+      actionButtons.forEach((button, index) => {
+        this.applyMobileButtonPosition(button, slots[index]);
+      });
+      return;
+    }
+
+    this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
+    this.applyMobileButtonPosition(this.spellsButton, { x: 0, y: 1 });
+    this.applyMobileButtonPosition(this.equipButton, { x: 1, y: 1 });
+  }
+
+  setupEventListeners() {
+    // Listen for key events (for desktop controls)
+    document.addEventListener("keydown", (e) => {
+      if (!this.enabled && !this.isSleeping) return;
+      const key = e.key.toLowerCase();
+      this.keysPressed.add(key);
+      const usingGangBeastsRig = !!this.playerModel?.userData?.qwopRig;
+
+      if (usingGangBeastsRig && (key === 'w' || key === 'a' || key === 's' || key === 'd' || key === ' ' || GANG_BEASTS_PUNCH_KEYS.has(key))) {
+        this.safePreventDefault(e);
+      }
+
+      if (this.isSleeping) {
+        if (key === 'x') {
+          this.wakeFromSleep();
+        }
+        return;
+      }
+
+      if (this.vehicle) {
+        if (key === 'x') {
+          this.vehicle.dismount();
+          return;
+        }
+
+        const boatControls = this.vehicle.type === 'rowboat' ||
+          (this.vehicle.type === 'surfboard' && this.vehicle.usesBoatControls?.());
+
+        if (boatControls) {
+          if (e.repeat) return;
+          if (key === 'z') {
+            this.vehicle.paddleLeft?.();
+            return;
+          } else if (key === 'c') {
+            this.vehicle.paddleRight?.();
+            return;
+          }
+          if (this.vehicle.type === 'rowboat') {
+            return;
+          }
+        }
+
+        if (this.vehicle.type !== 'surfboard') {
+          return;
+        }
+
+      }
+
+      if (key === 'x') {
+        if (this.handleClimbAction()) {
+          return;
+        }
+        this.handlePickupAction();
+        return;
+      }
+
+      if (e.key === " ") {
+        if (e.repeat) return;
+        if (this.parachute) {
+          this.removeParachute();
+          return;
+        }
+        if (this.isInWater) return;
+        this.tryJump();
+      } else if (key === 'e') {
+        if (e.repeat) return;
+        if (this.vehicle) if (this.vehicle.type === 'surfboard') this.vehicle.toggleStand();
+        if (this.isInWater) return;
+        this.handleGangBeastsPunchGrab('left');
+      } else if (key === 'q') {
+        if (e.repeat) return;
+        if (this.isInWater) return;
+        this.handleGangBeastsPunchGrab('right');
+      } else if (key === 'r') {
+        if (this.isInWater) return;
+        if (this.isMoving && !this.isSlideMomentumActive()) {
+          this.slideMomentum.copy(this.lastMoveDirection).multiplyScalar(1.1);
+          const started = this.playAction('runningKick');
+          if (!started) return;
+          this.audioManager?.playAttack();
+        } else {
+          const started = this.playAction('mmaKick');
+          if (!started) return;
+          this.audioManager?.playAttack();
+        }
+      } else if (key === 'g') {
+        if (this.grabbedTarget) {
+          this.releaseGrab();
+        } else {
+          this.attemptGrab();
+        }
+      }
+    });
+
+    document.addEventListener("keyup", (e) => {
+      const key = e.key.toLowerCase();
+      this.keysPressed.delete(key);
+      if (GANG_BEASTS_PUNCH_KEYS.has(key) && this.grabbedTarget) {
+        this.releaseGrab();
+      }
+      if (key === 'e') {
+        this.releaseSwordSpinCharge();
+        if (this.grabbedHand === 'left' && this.grabbedTarget) this.releaseGrab();
+      }
+      if (key === 'q') {
+        if (this.grabbedHand === 'right' && this.grabbedTarget) this.releaseGrab();
+      }
+    });
+    
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      this.applyMobilePortraitCameraTuning();
+      this.camera.aspect = window.innerWidth / window.innerHeight;
+      this.camera.updateProjectionMatrix();
+      if (this.renderer) {
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+    });
+
+    window.addEventListener('orientationchange', () => {
+      this.applyMobilePortraitCameraTuning();
+    });
+
+    this.domElement.addEventListener('mousedown', (event) => {
+      if (!this.enabled || this.isMobile) return;
+      if (event.button !== 0) return;
+      if (this.shouldHoldToFire()) {
+        this.isFireHeld = true;
+        this.setAiming(true);
+      }
+    });
+
+    this.domElement.addEventListener('mouseup', (event) => {
+      if (!this.enabled || this.isMobile) return;
+      if (event.button !== 0) return;
+      if (this.isFireHeld) {
+        this.isFireHeld = false;
+        this.setAiming(false);
+        this.attemptFireProjectile();
+      }
+    });
+
+    this.domElement.addEventListener("click", (event) => {
+      // Don't fire if chat or settings are open
+      if (!this.enabled || this.isMobile) return;
+      if (this.shouldHoldToFire()) return;
+      this.attemptFireProjectile();
+    });
+  }
+
+  applyMobilePortraitCameraTuning() {
+    const isPortraitMobile = this.isMobile && window.innerHeight > window.innerWidth;
+    const nextBaseCameraOffset = this.baseCameraOffsetDesktop.clone();
+    const nextDefaultFov = this.defaultFovDesktop;
+
+    if (isPortraitMobile) {
+      nextBaseCameraOffset.z *= MOBILE_PORTRAIT_CAMERA_DISTANCE_MULTIPLIER;
+      nextBaseCameraOffset.y += MOBILE_PORTRAIT_CAMERA_HEIGHT_BONUS;
+      this.defaultFov = nextDefaultFov + MOBILE_PORTRAIT_CAMERA_FOV_BONUS;
+    } else {
+      this.defaultFov = nextDefaultFov;
+    }
+
+    this.baseCameraOffset.copy(nextBaseCameraOffset);
+    this.aimCameraOffset.copy(this.baseCameraOffset).add(new THREE.Vector3(0, 0, -2.0));
+    this.weaponCameraOffset.copy(this.baseCameraOffset).add(WEAPON_CAMERA_OFFSET);
+    this.aimFov = Math.max(45, this.defaultFov - 8);
+  }
+
+  handleFriendlyInteractionAction() {
+    if (!this.enabled || this.isSleeping || this.areInteractionOverlaysBlocked()) return;
+
+    if (this.isInteracting) {
+      this.advanceFriendlyDialogue();
+      return;
+    }
+
+    const nearbyFriendly = this.getClosestFriendly(FRIENDLY_INTERACT_RANGE);
+    if (nearbyFriendly?.friendly) {
+      this.startFriendlyInteraction(nearbyFriendly.friendly);
+      return;
+    }
+  }
+
+  handleClimbAction() {
+    if (!this.enabled || this.isSleeping || this.vehicle || this.isInteracting || this.areInteractionOverlaysBlocked()) return false;
+    if (this.isClimbing) return false;
+    if (!this.playerModel) return false;
+
+    const position = this.playerModel.position;
+    const climbArea = this.findClimbableArea(position);
+    if (!climbArea) return false;
+
+    const nearEntry = this.isWithinClimbEntry(climbArea, position);
+    const movement = this.lastMoveDirection?.length?.() > 0 ? this.lastMoveDirection : null;
+    if (!nearEntry && !this.isMovingTowardClimbArea(climbArea, movement)) return false;
+
+    this.startClimbing(climbArea);
+    return true;
+  }
+
+  handlePickupAction() {
+    if ((!this.enabled && !this.isSleeping) || this.areInteractionOverlaysBlocked()) return;
+
+    if (this.isSleeping) {
+      this.wakeFromSleep();
+      return;
+    }
+
+    if (this.isInteracting) {
+      this.advanceFriendlyDialogue();
+      return;
+    }
+
+    if (this.vehicle) {
+      this.vehicle.dismount?.();
+      return;
+    }
+
+    const closest = this.getClosestInteractionTarget();
+    if (!closest) return;
+
+    if (closest.type?.startsWith?.('home-')) {
+      window.homeSystem?.handleInteraction?.(closest);
+      return;
+    }
+
+    if (closest.type === 'friendly') {
+      if (this.isQuestFriend(closest.friendly)) return;
+      this.startFriendlyInteraction(closest.friendly);
+      return;
+    }
+
+    if (closest.type === 'weapon') {
+      closest.weapon.tryPickup?.(this);
+      return;
+    }
+
+    if (closest.type === 'treasureChest') {
+      closest.treasureChest.tryOpen?.(this);
+      return;
+    }
+    
+    if (closest.type === 'mushroom') {
+      window.pickupMushroom?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'apple') {
+      window.pickupApple?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'wood') {
+      window.pickupWood?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'meat') {
+      window.pickupMeat?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'salt') {
+      window.pickupSalt?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'zombie-brains') {
+      window.pickupZombieBrains?.(closest.pickup);
+      return;
+    }
+
+    if (closest.type === 'craft-table') {
+      window.openCraftPanel?.();
+      return;
+    }
+
+    if (closest.type === 'bed') {
+      this.startSleep(closest.bed);
+      return;
+    }
+
+    if (closest.type === 'vehicle') {
+      closest.vehicle.tryMount?.(this);
+    }
+  }
+
+  getFriendlyInteractionRange(friendly) {
+    return this.isQuestFriend(friendly) ? QUEST_FRIEND_INTERACT_RANGE : FRIENDLY_INTERACT_RANGE;
+  }
+
+  isQuestFriend(friendly) {
+    return !!friendly && (this.questManager?.isQuestFriend?.(friendly) || friendly?.model?.userData?.isQuestFriend === true);
+  }
+
+  getFriendlyPromptLabel(friendly) {
+    if (this.isQuestFriend(friendly)) return 'Talk to Quest Guy';
+    if (friendly?.model?.userData?.npcRole === 'merchant') return 'Talk to Merchant';
+    return 'Talk to Friendly';
+  }
+
+  getClosestFriendly(maxDistance) {
+    if (!this.playerModel) return null;
+    const friendlies = Array.isArray(window.friendlies) ? window.friendlies : [];
+    let closest = null;
+    let closestDistance = Infinity;
+    friendlies.forEach((friendly) => {
+      if (!friendly?.model || friendly.isDead) return;
+      const dist = this.playerModel.position.distanceTo(friendly.model.position);
+      const interactRange = Math.min(maxDistance, this.getFriendlyInteractionRange(friendly));
+      if (dist <= interactRange && dist < closestDistance) {
+        closestDistance = dist;
+        closest = friendly;
+      }
+    });
+    const merchant = window.merchantFriendly;
+    if (merchant?.model && !merchant.isDead) {
+      const dist = this.playerModel.position.distanceTo(merchant.model.position);
+      const interactRange = Math.min(maxDistance, this.getFriendlyInteractionRange(merchant));
+      if (dist <= interactRange && dist < closestDistance) {
+        closestDistance = dist;
+        closest = merchant;
+      }
+    }
+    const questFriend = this.questManager?.getQuestFriend();
+    if (questFriend?.model && !questFriend.isDead) {
+      const dist = this.playerModel.position.distanceTo(questFriend.model.position);
+      const interactRange = Math.min(maxDistance, this.getFriendlyInteractionRange(questFriend));
+      if (dist <= interactRange && dist < closestDistance) {
+        closestDistance = dist;
+        closest = questFriend;
+      }
+    }
+    return closest ? { friendly: closest, distance: closestDistance } : null;
+  }
+
+  getClosestInteractionTarget() {
+    if (!this.playerModel) return null;
+    const playerPos = this.playerModel.position;
+    let closest = null;
+    let closestDistance = Infinity;
+    let closestDistanceSq = Infinity;
+
+    const homeTarget = window.homeSystem?.getInteractionTarget?.(playerPos, this.isMobile);
+    const homeEnterTarget = homeTarget?.type === 'home-enter' ? homeTarget : null;
+    if (homeTarget && !homeEnterTarget) {
+      return homeTarget;
+    }
+
+    const consider = (distance, data) => {
+      if (distance <= data.maxDistance && distance < closestDistance) {
+        closestDistance = distance;
+        closestDistanceSq = distance * distance;
+        closest = { ...data, distance };
+      }
+    };
+
+    const considerSquared = (distanceSq, data) => {
+      const maxDistanceSq = data.maxDistance * data.maxDistance;
+      if (distanceSq <= maxDistanceSq && distanceSq < closestDistanceSq) {
+        closestDistanceSq = distanceSq;
+        closestDistance = Math.sqrt(distanceSq);
+        closest = { ...data, distance: closestDistance };
+      }
+    };
+
+    const nearbyFriendly = this.getClosestFriendly(FRIENDLY_INTERACT_RANGE);
+    if (nearbyFriendly?.friendly) {
+      consider(nearbyFriendly.distance, {
+        type: 'friendly',
+        friendly: nearbyFriendly.friendly,
+        maxDistance: FRIENDLY_INTERACT_RANGE,
+        promptText: "'x' interact"
+      });
+    }
+
+    const bed = window.bed;
+    if (bed?.mesh) {
+      const bedPosition = bed.getWorldPosition?.(new THREE.Vector3()) ?? bed.mesh.position;
+      const dist = playerPos.distanceTo(bedPosition);
+      const maxDistance = bed.getInteractionDistance?.() ?? 2.5;
+      consider(dist, {
+        type: 'bed',
+        bed,
+        maxDistance,
+        promptText: BED_SLEEP_PROMPT
+      });
+    }
+
+    const craftTable = window.craftTable;
+    if (craftTable?.mesh) {
+      const tablePosition = craftTable.getWorldPosition?.(new THREE.Vector3()) ?? craftTable.mesh.position;
+      const dist = playerPos.distanceTo(tablePosition);
+      const maxDistance = craftTable.getInteractionDistance?.() ?? 3;
+      const promptText = this.isMobile
+        ? 'click to craft'
+        : "Press 'x' to craft";
+      consider(dist, {
+        type: 'craft-table',
+        craftTable,
+        maxDistance,
+        promptText
+      });
+    }
+
+    const vehicles = [
+      { vehicle: window.spaceship, maxDistance: 10, promptText: "'x' enter spaceship" },
+      { vehicle: window.rowBoat, maxDistance: 4, promptText: "'x' enter rowboat" },
+      { vehicle: window.surfboard, maxDistance: 3, promptText: "'x' enter surfboard" }
+    ];
+
+    vehicles.forEach(({ vehicle, maxDistance, promptText }) => {
+      if (!vehicle) return;
+      const target = vehicle.mesh || vehicle;
+      if (!target?.position) return;
+      if (vehicle.occupant) return;
+      const dist = playerPos.distanceTo(target.position);
+      consider(dist, { type: 'vehicle', vehicle, maxDistance, promptText });
+    });
+
+    const getWeaponLabel = (weapon) => {
+      if (!weapon) return 'weapon';
+      if (weapon.type === 'sword') return 'sword';
+      if (weapon.type === 'hammer') return 'hammer';
+      if (weapon.type === 'gun') return 'gun';
+      if (weapon.type === 'bow') return 'bow';
+      if (weapon.type === 'lantern') return 'lantern';
+      return 'weapon';
+    };
+
+    this.getWeapons().forEach((weapon) => {
+      if (!weapon || weapon.holder) return;
+      if (weapon.mesh && !weapon.mesh.visible) return;
+      const target = weapon.mesh || weapon;
+      if (!target?.position) return;
+      const dist = playerPos.distanceTo(target.position);
+      const weaponLabel = getWeaponLabel(weapon);
+      consider(dist, {
+        type: 'weapon',
+        weapon,
+        maxDistance: 3,
+        promptText: `'x' pick up ${weaponLabel}`
+      });
+    });
+
+    const treasureChest = window.treasureChest;
+    if (treasureChest?.mesh && !treasureChest.isOpen) {
+      const target = treasureChest.mesh;
+      if (target?.position) {
+        const dist = playerPos.distanceTo(target.position);
+        const promptText = this.isMobile
+          ? 'click to open chest'
+          : "press 'x' to open chest";
+        consider(dist, {
+          type: 'treasureChest',
+          treasureChest,
+          maxDistance: 3,
+          promptText
+        });
+      }
+    }
+    
+    const mushroomPickupGrid = window.mushroomPickupGrid;
+    const mushroomCandidates = mushroomPickupGrid?.queryNearby
+      ? mushroomPickupGrid.queryNearby(playerPos.x, playerPos.z, MUSHROOM_INTERACT_RANGE)
+      : (Array.isArray(window.mushroomPickups) ? window.mushroomPickups : []);
+    const mushroomInteractRangeSq = MUSHROOM_INTERACT_RANGE * MUSHROOM_INTERACT_RANGE;
+    mushroomCandidates.forEach((pickup) => {
+      if (!pickup?.active) return;
+      const pickupPosition = pickup.mesh?.position || pickup.position;
+      if (!pickupPosition) return;
+      if (pickup.mesh && !pickup.mesh.visible) return;
+      const dx = playerPos.x - pickupPosition.x;
+      const dz = playerPos.z - pickupPosition.z;
+      const distSq = (dx * dx) + (dz * dz);
+      if (distSq > mushroomInteractRangeSq) return;
+      considerSquared(distSq, {
+        type: 'mushroom',
+        pickup,
+        maxDistance: MUSHROOM_INTERACT_RANGE,
+        promptText: "'x' pick up mushroom"
+      });
+    });
+
+    const applePickups = Array.isArray(window.applePickups) ? window.applePickups : [];
+    applePickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const pickupPosition = pickup.mesh.getWorldPosition?.(new THREE.Vector3()) ?? pickup.mesh.position;
+      const dist = playerPos.distanceTo(pickupPosition);
+      consider(dist, {
+        type: 'apple',
+        pickup,
+        maxDistance: APPLE_INTERACT_RANGE,
+        promptText: "'x' pick up apple"
+      });
+    });
+
+    const woodPickups = Array.isArray(window.woodPickups) ? window.woodPickups : [];
+    woodPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'wood',
+        pickup,
+        maxDistance: WOOD_INTERACT_RANGE,
+        promptText: "'x' pick up wood"
+      });
+    });
+
+    const meatPickups = Array.isArray(window.meatPickups) ? window.meatPickups : [];
+    meatPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'meat',
+        pickup,
+        maxDistance: MEAT_INTERACT_RANGE,
+        promptText: "'x' pick up meat"
+      });
+    });
+
+    const saltPickups = Array.isArray(window.saltPickups) ? window.saltPickups : [];
+    saltPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      const isSauteed = pickup.id === 'sauteed_mushrooms';
+      consider(dist, {
+        type: 'salt',
+        pickup,
+        maxDistance: SALT_INTERACT_RANGE,
+        promptText: isSauteed ? "press x to pickup sauteed mushrooms" : "'x' pick up salt"
+      });
+    });
+
+    const zombieBrainsPickups = Array.isArray(window.zombieBrainsPickups) ? window.zombieBrainsPickups : [];
+    zombieBrainsPickups.forEach((pickup) => {
+      if (!pickup?.mesh || !pickup.mesh.visible) return;
+      const dist = playerPos.distanceTo(pickup.mesh.position);
+      consider(dist, {
+        type: 'zombie-brains',
+        pickup,
+        maxDistance: MEAT_INTERACT_RANGE,
+        promptText: "'x' pick up zombie brains"
+      });
+    });
+
+    return closest ?? homeEnterTarget;
+  }
+
+  isFriendlyWithinRange(friendly, range) {
+    if (!friendly?.model || !this.playerModel) return false;
+    return this.playerModel.position.distanceTo(friendly.model.position) <= range;
+  }
+
+  startFriendlyInteraction(friendly) {
+    if (!friendly) return;
+    const isMerchant = friendly?.model?.userData?.npcRole === 'merchant';
+    const isLlama = friendly?.model?.userData?.npcKind === 'llama';
+    if (isLlama) { this.startLlamaInteraction(friendly); return; }
+    const choice = isMerchant
+      ? MERCHANT_DIALOGUE
+      : this.questManager?.getDialogueForFriendly(friendly, FRIENDLY_DIALOGUE_POOL) || null;
+    this.isInteracting = true;
+    this.activeFriendly = friendly;
+    this.activeDialogue = choice;
+    this.dialogueIndex = 0;
+    this.awaitingResponse = false;
+    this.awaitingExit = false;
+    this.renderFriendlyDialogue();
+    this.updateFriendlyInteractionUI();
+  }
+
+
+  async startLlamaInteraction(friendly) {
+    this.isInteracting = true;
+    this.activeFriendly = friendly;
+    const manager = window.friendlyNpcManager;
+    const history = manager?.getLlamaDialogueHistory?.() || [];
+    const prompt = history.length
+      ? `History: ${JSON.stringify(history.slice(-12))}. Respond with JSON {greeting:"2 sentences"}.`
+      : 'No history yet. Respond with JSON {greeting:"Introduce yourself as Llama, poetic warlock who draws wisdom from a superior being"}';
+    let greeting = 'The wind carries old names. I am Llama.';
+    try {
+      const res = await fetch('/api/llama', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ interactionMode:'greeting', prompt, history }) });
+      const data = await res.json();
+      greeting = data?.interaction?.greeting || data?.decision?.speak || greeting;
+    } catch {}
+    manager?.pushLlamaDialogueHistory?.({ type:'greeting', text:greeting, at:Date.now() });
+    this.activeDialogue = { blocks:[greeting], responses:[
+      { label:'Can I help you', llamaAction:'help' },
+      { label:'Do you have anything to trade', llamaAction:'trade' },
+      { label:'Goodbye', reply:'Walk in strange light.' }
+    ]};
+    this.dialogueIndex=0; this.awaitingResponse=true; this.awaitingExit=false;
+    this.renderFriendlyDialogue(); this.updateFriendlyInteractionUI();
+  }
+  advanceFriendlyDialogue() {
+    if (!this.isInteracting) return;
+    if (this.awaitingExit) {
+      this.endFriendlyInteraction();
+      return;
+    }
+    if (this.awaitingResponse || !this.activeDialogue) return;
+    const blocks = this.activeDialogue.blocks || [];
+    if (this.dialogueIndex < blocks.length - 1) {
+      this.dialogueIndex += 1;
+      this.renderFriendlyDialogue();
+      return;
+    }
+    this.awaitingResponse = true;
+    this.renderFriendlyDialogue();
+  }
+
+  endFriendlyInteraction() {
+    this.isInteracting = false;
+    this.activeFriendly = null;
+    this.activeDialogue = null;
+    this.dialogueIndex = 0;
+    this.awaitingResponse = false;
+    this.awaitingExit = false;
+    if (this.friendlyDialogueEl) {
+      this.friendlyDialogueEl.classList.add('hidden');
+    }
+    this.updateFriendlyInteractionUI();
+  }
+
+  renderFriendlyDialogue() {
+    if (!this.friendlyDialogueTextEl || !this.friendlyDialogueOptionsEl || !this.activeDialogue) return;
+    const blocks = this.activeDialogue.blocks || [];
+    const message = blocks[this.dialogueIndex] || '';
+    this.friendlyDialogueTextEl.textContent = message;
+    this.friendlyDialogueOptionsEl.innerHTML = '';
+
+    if (this.awaitingResponse) {
+      const responses = this.activeDialogue.responses || [];
+      responses.forEach((option) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = option.label;
+        button.addEventListener('click', () => {
+          this.friendlyDialogueOptionsEl.innerHTML = '';
+          this.friendlyDialogueTextEl.textContent = option.reply;
+          this.awaitingResponse = false;
+          this.awaitingExit = true;
+          this.handleDialogueOption(option);
+          this.updateFriendlyInteractionUI();
+        });
+        this.friendlyDialogueOptionsEl.appendChild(button);
+      });
+    }
+  }
+
+  updateFriendlyInteractionUI() {
+    if (this.isSleeping || this.areInteractionOverlaysBlocked()) {
+      this.friendlyInteractButton?.classList.add('hidden');
+      if (!this.isInteracting) this.friendlyDialogueEl?.classList.add('hidden');
+      return;
+    }
+    if (!this.friendlyInteractButton) return;
+
+    if (this.isInteracting) {
+      const activeRange = this.getFriendlyInteractionRange(this.activeFriendly) * 1.6;
+      if (this.activeFriendly && !this.isFriendlyWithinRange(this.activeFriendly, activeRange)) {
+        this.endFriendlyInteraction();
+        return;
+      }
+      this.friendlyInteractButton.classList.remove('hidden');
+      this.friendlyInteractButton.disabled = this.awaitingResponse;
+      this.friendlyInteractButton.textContent = this.awaitingResponse
+        ? 'Choose Reply'
+        : this.awaitingExit
+          ? 'Close'
+          : 'Next';
+      this.friendlyDialogueEl?.classList.remove('hidden');
+      return;
+    }
+
+    const nearby = this.getClosestFriendly(FRIENDLY_INTERACT_RANGE);
+    const closest = this.getClosestInteractionTarget();
+    if (nearby?.friendly && closest?.type === 'friendly' && closest.friendly === nearby.friendly) {
+      this.friendlyInteractButton.classList.remove('hidden');
+      this.friendlyInteractButton.disabled = false;
+      this.friendlyInteractButton.textContent = this.getFriendlyPromptLabel(nearby.friendly);
+      return;
+    }
+
+    this.friendlyInteractButton.classList.add('hidden');
+    this.friendlyDialogueEl?.classList.add('hidden');
+  }
+
+  isSlideMomentumActive() {
+    return this.slideMomentum.length() > 0.01;
+  }
+
+  getAnimationAction(actionName) {
+    if (!actionName || !this.playerModel?.userData?.actions) return null;
+    const action = this.playerModel.userData.actions[actionName];
+    return action && typeof action.reset === 'function' ? action : null;
+  }
+
+  setMovementAction(actionName, fadeDuration = 0.2) {
+    if (!this.playerModel?.userData || !actionName) return false;
+    const action = this.getAnimationAction(actionName);
+    if (!action) return false;
+
+    const current = this.playerModel.userData.currentAction;
+    if (current === actionName) return true;
+
+    const currentAction = this.getAnimationAction(current);
+    currentAction?.fadeOut(fadeDuration);
+    action.reset().fadeIn(fadeDuration).play();
+    this.playerModel.userData.currentAction = actionName;
+    return true;
+  }
+
+  playAction(actionName, options = {}) {
+    if (!this.playerModel) return false;
+    const resolvedAction = actionName === 'mutantPunch' && this.getEquippedSword() ? 'swordSlash' : actionName;
+    const swordAttackActions = ['swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin'];
+    const actions = this.playerModel.userData.actions;
+    const action = this.getAnimationAction(resolvedAction);
+    const usingProceduralRig = !!this.playerModel.userData.qwopRig;
+    if (!action && !usingProceduralRig) return false;
+    if (ACTION_LOCKED_ATTACKS.includes(resolvedAction) && ACTION_LOCKED_ATTACKS.includes(this.currentSpecialAction)) return false;
+
+    if (this.runningKickTimer) {
+      clearTimeout(this.runningKickTimer);
+      this.runningKickTimer = null;
+      const pivot = this.playerModel.userData.pivot;
+      if (pivot) {
+        pivot.rotation.y = this.runningKickOriginalY;
+      }
+    }
+
+    const current = this.playerModel.userData.currentAction;
+    this.getAnimationAction(current)?.fadeOut(0.1);
+    action?.reset?.().fadeIn(0.1).play();
+    this.playerModel.userData.currentAction = resolvedAction;
+    this.currentSpecialAction = resolvedAction;
+
+    if (["mutantPunch", "swordSlash", "swordSlashLeft", "swordSpin", "swordFwdSpin", "leftPunch", "hurricaneKick", "mmaKick", "runningKick"].includes(resolvedAction)) {
+      const isPunch = resolvedAction === 'mutantPunch' || resolvedAction === 'leftPunch' || swordAttackActions.includes(resolvedAction);
+      const meleeWeapon = this.getEquippedSword();
+      const swordAction = swordAttackActions.includes(resolvedAction) ? resolvedAction : 'swordSlash';
+      const hammerAttackMap = {
+        swordSlash: 'hammerSlash',
+        swordSlashLeft: 'hammerSlashLeft',
+        swordFwdSpin: 'hammerFwdSpin',
+        swordSpin: 'hammerSpin'
+      };
+      const attackName = isPunch && meleeWeapon
+        ? (meleeWeapon.type === 'hammer' ? (hammerAttackMap[swordAction] || 'hammerSlash') : swordAction)
+        : resolvedAction;
+      this.playerModel.userData.attack = {
+        name: attackName,
+        start: Date.now(),
+        hasHit: false,
+        overrides: options.attackOverrides || null,
+        hand: resolvedAction === 'leftPunch' || resolvedAction === 'swordSlashLeft' ? 'left' : 'right',
+      };
+    }
+
+    const mixer = this.playerModel.userData.mixer;
+    if (mixer && action) {
+      const onFinished = (e) => {
+        if (e.action === action) {
+          mixer.removeEventListener("finished", onFinished);
+          this.currentSpecialAction = null;
+        }
+      };
+      mixer.addEventListener("finished", onFinished);
+    } else {
+      setTimeout(() => {
+        if (this.currentSpecialAction === resolvedAction) {
+          this.currentSpecialAction = null;
+        }
+        if (this.playerModel?.userData?.currentAction === resolvedAction) {
+          this.playerModel.userData.currentAction = 'idle';
+        }
+      }, GANG_BEASTS_ATTACK_DURATION_MS);
+    }
+    return true;
+  }
+
+  applyKnockback({ direction, strength } = {}) {
+    if (!direction || !this.playerModel) return;
+    if (this.isClimbing) {
+      this.stopClimbing();
+    }
+    const { impulse, profile } = getKnockbackImpulse(direction, strength);
+    const { velocity } = getKnockbackMotion(direction, strength);
+    if (this.body) {
+      this.body.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
+      const vel = this.body.linvel();
+      this.body.setLinvel({ x: velocity.x, y: vel.y, z: velocity.z }, true);
+    }
+    this.knockbackVelocity.copy(velocity);
+    this.isKnocked = true;
+    this.playerModel.userData.isKnocked = true;
+    if (this.grabbedTarget) this.releaseGrab();
+    const now = Date.now();
+    const recoveryMs = this.playerModel.userData.qwopRig ? GANG_BEASTS_PARALYSIS_MS : profile.recoveryMs;
+    this.knockbackEndTime = Math.max(this.knockbackEndTime || 0, now + recoveryMs);
+    this.knockbackRestYaw = this.playerModel.rotation.y;
+    this.playerModel.userData.attack = null;
+    if (this.playerModel.userData.qwopRig) {
+      this.playerModel.userData.qwopRig.knockedUntil = this.knockbackEndTime;
+      this.playerModel.userData.qwopRig.knockDirection = direction.clone?.() || null;
+    }
+    const actions = this.playerModel.userData.actions;
+    const current = this.playerModel.userData.currentAction;
+    const hitAction = actions?.hit;
+    this.currentSpecialAction = null;
+    if (hitAction) {
+      actions[current]?.fadeOut(0.1);
+      hitAction.reset().fadeIn(0.1).play();
+    }
+    this.playerModel.userData.currentAction = 'hit';
+  }
+
+  getClimbInput(moveDirection, cameraDirection) {
+    if (this.isMobile) {
+      if (this.joystickForce > 0.1 && moveDirection.length() > 0) {
+        const forwardDot = moveDirection.dot(cameraDirection);
+        if (forwardDot > 0.25) return 1;
+        if (forwardDot < -0.25) return -1;
+      }
+      return 0;
+    }
+    if (this.keysPressed.has("w")) return 1;
+    if (this.keysPressed.has("s")) return -1;
+    return 0;
+  }
+
+  getClimbLocalPosition(area, position) {
+    if (!area?.center) return null;
+    const local = position.clone().sub(area.center);
+    local.applyAxisAngle(new THREE.Vector3(0, 1, 0), -(area.rotationY ?? 0));
+    return local;
+  }
+
+  isWithinClimbEntry(area, position) {
+    if (!area?.entryCenter || !Number.isFinite(area.entryRadius)) return false;
+    const dx = position.x - area.entryCenter.x;
+    const dz = position.z - area.entryCenter.z;
+    const horizontalDist = Math.hypot(dx, dz);
+    if (horizontalDist > area.entryRadius) return false;
+    const minY = (area.minY ?? area.entryCenter.y) - CLIMB_ENTRY_BUFFER_Y;
+    const entryHeight = area.entryHeight ?? CLIMB_SNAP_DISTANCE * 2;
+    const maxY = minY + entryHeight + CLIMB_ENTRY_BUFFER_Y;
+    return position.y >= minY && position.y <= maxY;
+  }
+
+  findClimbableArea(position) {
+    const areas = window.climbableAreas || [];
+    if (!areas.length) return null;
+    let closest = null;
+    let closestDist = Infinity;
+    for (const area of areas) {
+      if (!area?.center) continue;
+      const local = this.getClimbLocalPosition(area, position);
+      if (!local) continue;
+      const halfWidth = area.halfWidth ?? 0;
+      const halfDepth = area.halfDepth ?? 0;
+      const halfHeight = area.halfHeight ?? 0;
+      const withinWidth = Math.abs(local.x) <= halfWidth + CLIMB_SNAP_DISTANCE;
+      const withinHeight = local.y >= -halfHeight - CLIMB_SNAP_DISTANCE && local.y <= halfHeight + CLIMB_SNAP_DISTANCE;
+      const minDepth = halfDepth - CLIMB_SNAP_DISTANCE;
+      const maxDepth = halfDepth + CLIMB_SNAP_DISTANCE + PLAYER_RADIUS;
+      const withinDepth = local.z >= minDepth && local.z <= maxDepth;
+      const withinEntry = this.isWithinClimbEntry(area, position);
+      if (!withinWidth || !withinHeight || (!withinDepth && !withinEntry)) continue;
+      const dist = area.center?.distanceTo(position) ?? 0;
+      if (dist < closestDist) {
+        closest = area;
+        closestDist = dist;
+      }
+    }
+    return closest;
+  }
+
+  startClimbing(area) {
+    this.isClimbing = true;
+    this.activeClimbArea = area;
+    this.canJump = false;
+    this.currentSpecialAction = null;
+    window.natureController?.setTreeColliderEnabled?.(false);
+  }
+
+  stopClimbing() {
+    if (!this.isClimbing) return;
+    const actions = this.playerModel?.userData?.actions;
+    if (actions?.climb) {
+      actions.climb.paused = false;
+      actions.climb.timeScale = 1;
+      if (this.playerModel?.userData?.currentAction === 'climb') {
+        actions.climb.fadeOut(0.1);
+        this.playerModel.userData.currentAction = null;
+      }
+    }
+    this.isClimbing = false;
+    this.activeClimbArea = null;
+    window.natureController?.setTreeColliderEnabled?.(true);
+  }
+
+  isMovingTowardClimbArea(area, movement) {
+    if (!area?.normal) return false;
+    if (!movement || movement.length() === 0) return false;
+    const moveDir = movement.clone().normalize();
+    return moveDir.dot(area.normal) < -0.2;
+  }
+
+  getClimbSnapPosition(area, position) {
+    const local = this.getClimbLocalPosition(area, position);
+    if (!local) return position.clone();
+    const maxX = Math.max(0.01, (area.halfWidth ?? 0) - PLAYER_RADIUS * 0.5);
+    const clampedX = THREE.MathUtils.clamp(local.x, -maxX, maxX);
+    local.x = clampedX;
+    local.z = (area.halfDepth ?? 0) + PLAYER_RADIUS * 0.1;
+    local.applyAxisAngle(new THREE.Vector3(0, 1, 0), area.rotationY ?? 0);
+    return local.add(area.center);
+  }
+
+  updateClimbing({ area, climbInput, position, velocity, groundExpectedY }) {
+    const actions = this.playerModel?.userData?.actions;
+    if (actions?.climb) {
+      const current = this.playerModel.userData.currentAction;
+      if (current !== 'climb') {
+        actions[current]?.fadeOut(0.1);
+        actions.climb.reset().fadeIn(0.1).play();
+        this.playerModel.userData.currentAction = 'climb';
+      }
+      if (climbInput !== 0) {
+        actions.climb.paused = false;
+        actions.climb.timeScale = climbInput > 0 ? 1 : -1;
+        const clipDuration = actions.climb.getClip()?.duration ?? 0;
+        if (climbInput < 0 && actions.climb.time <= 0.05 && clipDuration) {
+          actions.climb.time = clipDuration;
+        }
+      } else {
+        actions.climb.paused = true;
+      }
+    }
+
+    const delta = this.deltaSeconds || 0.016;
+    const direction = climbInput === 0 ? 0 : climbInput > 0 ? 1 : -1;
+    let newY = position.y + direction * CLIMB_SPEED * delta;
+    const minY = Math.max(groundExpectedY, area.minY ?? groundExpectedY);
+    const maxY = area.maxY ?? position.y;
+    if (position.y > maxY + 0.05) {
+      this.stopClimbing();
+      return;
+    }
+    if (direction > 0 && newY >= maxY) {
+      newY = maxY;
+    } else if (direction < 0 && newY <= minY) {
+      newY = minY;
+    }
+
+    const snapped = this.getClimbSnapPosition(area, position);
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setTranslation({ x: snapped.x, y: newY, z: snapped.z }, true);
+
+    if (direction < 0 && newY <= minY + 0.01) {
+      this.stopClimbing();
+    }
+    if (direction > 0 && newY >= maxY - 0.01) {
+      this.stopClimbing();
+    }
+  }
+
+  resolveGroundY(x, y, z, options = {}) {
+    const {
+      includeSolidHit = true,
+      maxRayDistance = 12,
+      walkableSlopeDegrees = MAX_WALKABLE_SLOPE_DEGREES,
+      fallbackGroundY = Number.isFinite(y) ? y - (PLAYER_HALF_HEIGHT + PLAYER_RADIUS) : 0,
+      excludedColliderHandles = null
+    } = options;
+
+    const metadata = {
+      surfaceType: 'terrain',
+      slopeDegrees: 0,
+      walkable: true
+    };
+
+    let terrainHeight = Number.isFinite(this.groundOverrideY) ? this.groundOverrideY : NaN;
+    if (!Number.isFinite(terrainHeight)) {
+      terrainHeight = getTerrainHeight(x, z);
+    }
+    if (!Number.isFinite(terrainHeight)) {
+      terrainHeight = fallbackGroundY;
+      metadata.surfaceType = 'fallback';
+    }
+
+    let groundY = terrainHeight;
+    const world = window.rapierWorld;
+    if (includeSolidHit && world && !Number.isFinite(this.groundOverrideY)) {
+      const ray = new RAPIER.Ray({ x, y, z }, { x: 0, y: -1, z: 0 });
+      const blockedColliderHandles = new Set();
+      if (this.body && typeof this.body.numColliders === 'function' && typeof this.body.collider === 'function') {
+        const colliderCount = this.body.numColliders();
+        for (let i = 0; i < colliderCount; i += 1) {
+          const collider = this.body.collider(i);
+          if (typeof collider?.handle === 'number') {
+            blockedColliderHandles.add(collider.handle);
+          }
+        }
+      }
+      if (excludedColliderHandles) {
+        const handles = Array.isArray(excludedColliderHandles)
+          ? excludedColliderHandles
+          : Array.from(excludedColliderHandles);
+        handles.forEach((handle) => {
+          if (typeof handle === 'number') {
+            blockedColliderHandles.add(handle);
+          }
+        });
+      }
+      const excludeSelfCollider = blockedColliderHandles.size
+        ? (collider) => !blockedColliderHandles.has(collider?.handle)
+        : undefined;
+      const rayHit = world.castRayAndGetNormal
+        ? world.castRayAndGetNormal(
+          ray,
+          maxRayDistance,
+          true,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          excludeSelfCollider
+        )
+        : null;
+      const simpleHit = rayHit
+        ? null
+        : world.castRay(
+          ray,
+          maxRayDistance,
+          true,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          excludeSelfCollider
+        );
+      const hitDistance = rayHit?.toi ?? rayHit?.timeOfImpact ?? simpleHit?.toi ?? simpleHit?.timeOfImpact;
+      if (Number.isFinite(hitDistance)) {
+        const hitY = y - hitDistance;
+        if (hitY > groundY) {
+          groundY = hitY;
+          metadata.surfaceType = 'solid';
+        }
+      }
+
+      const normal = rayHit?.normal;
+      if (normal && Number.isFinite(normal.y)) {
+        const upDot = Math.min(Math.max(normal.y, -1), 1);
+        metadata.slopeDegrees = THREE.MathUtils.radToDeg(Math.acos(upDot));
+      }
+    }
+
+    if (!Number.isFinite(groundY)) {
+      groundY = fallbackGroundY;
+      metadata.surfaceType = 'fallback';
+    }
+
+    metadata.walkable = metadata.slopeDegrees <= walkableSlopeDegrees;
+
+    return {
+      groundY,
+      terrainHeight,
+      metadata
+    };
+  }
+
+  processMovement() {
+    if (!this.enabled) return;
+
+    if (this.vehicle && this.vehicle.type === 'spaceship') {
+      const yaw = (this.keysPressed.has("a") ? 1 : 0) + (this.keysPressed.has("d") ? -1 : 0);
+      const thrust = this.keysPressed.has(" ");
+      const pitch = thrust ? (this.keysPressed.has("w") ? 1 : 0) + (this.keysPressed.has("s") ? -1 : 0) : 0;
+      this.vehicle.applyInput({ thrust, yaw, pitch });
+      this.isMoving = thrust;
+      return;
+    }
+
+    if (this.vehicle) {
+      const boatControls = this.vehicle.type === 'rowboat' ||
+        (this.vehicle.type === 'surfboard' && this.vehicle.usesBoatControls?.());
+      if (boatControls) {
+        this.isMoving = false;
+        this.vehicle.alignOccupant?.();
+        return;
+      }
+    }
+
+    // Simple direct position movement — no physics, no gravity, no collider
+    {
+      // Build move direction from WASD or joystick
+      const moveDirection = new THREE.Vector3(0, 0, 0);
+      if (this.isMobile) {
+        if (this.joystickForce > 0.1) {
+          const cameraForward = new THREE.Vector3();
+          this.camera.getWorldDirection(cameraForward);
+          cameraForward.y = 0;
+          cameraForward.normalize();
+          const cameraRight = new THREE.Vector3().crossVectors(cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
+          const dx = Math.cos(this.joystickAngle);
+          const dz = Math.sin(this.joystickAngle);
+          moveDirection.addScaledVector(cameraForward, dz * this.joystickForce);
+          moveDirection.addScaledVector(cameraRight, dx * this.joystickForce);
+        }
+      } else {
+        if (this.keysPressed.has("w")) moveDirection.z = 1;
+        if (this.keysPressed.has("s")) moveDirection.z = -1;
+        if (this.keysPressed.has("a")) moveDirection.x = 1;
+        if (this.keysPressed.has("d")) moveDirection.x = -1;
+      }
+
+      const cameraDirection = new THREE.Vector3();
+      this.camera.getWorldDirection(cameraDirection);
+      cameraDirection.y = 0;
+      cameraDirection.normalize();
+      const rightVector = new THREE.Vector3().crossVectors(this.camera.up, cameraDirection).normalize();
+
+      const movement = new THREE.Vector3();
+      if (!this.isMobile) {
+        if (moveDirection.z !== 0) movement.add(cameraDirection.clone().multiplyScalar(moveDirection.z));
+        if (moveDirection.x !== 0) movement.add(rightVector.clone().multiplyScalar(moveDirection.x));
+        if (movement.length() > 0) movement.normalize();
+      } else {
+        movement.copy(moveDirection);
+      }
+
+      const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
+        ? this.deltaSeconds
+        : 0.016;
+      const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05;
+
+      this.playerX += movement.x * speed * deltaSeconds;
+      this.playerZ += movement.z * speed * deltaSeconds;
+
+      const { groundY } = this.resolveGroundY(
+        this.playerX,
+        this.playerY + PLAYER_HALF_HEIGHT,
+        this.playerZ,
+        { includeSolidHit: false }
+      );
+      this.playerY = groundY;
+
+      const newX = this.playerX;
+      const newY = this.playerY;
+      const newZ = this.playerZ;
+      const isMovingNow = movement.length() > 0;
+      this.isMoving = isMovingNow;
+
+      if (this.playerModel) {
+        this.playerModel.position.set(newX, newY, newZ);
+        let yawAngle = this.yaw;
+        if (this.engagedDirection) {
+          yawAngle = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
+        }
+        this.playerModel.rotation.set(0, yawAngle, 0);
+        this.playerModel.up.set(0, 1, 0);
+        this.camera.up.set(0, 1, 0);
+
+        const newTarget = new THREE.Vector3(newX, newY + 1, newZ);
+        if (this.controls) {
+          this.controls.target.copy(newTarget);
+        }
+        if (this.multiplayer && (Math.abs(this.lastPosition.x - newX) > 0.01 || Math.abs(this.lastPosition.z - newZ) > 0.01 || this.isMoving !== this.wasMoving)) {
+          this.lastPosition.set(newX, newY, newZ);
+          this.wasMoving = this.isMoving;
+        }
+      } else {
+        this.camera.position.set(newX, newY + 1.2, newZ);
+      }
+      if (this.isMobile && this.controls) {
+        this.controls.target.set(newX, newY + 1, newZ);
+        this.controls.update();
+      } else if (!this.isMobile && this.controls) {
+        this.controls.update();
+      }
+    }
+  }
+  
+  update() {
+    if (!this.keys) {
+      this.keys = new Set();
+      document.addEventListener('keydown', (e) => this.keys.add(e.key));
+      document.addEventListener('keyup', (e) => this.keys.delete(e.key));
+    }
+
+    const now = performance.now();
+    if (!this.lastUpdate) this.lastUpdate = now;
+    const delta = (now - this.lastUpdate) / 1000;
+    this.lastUpdate = now;
+    this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
+    this.deltaSeconds = delta;
+
+    this.updateEngagedMode();
+    updateHandTracking();
+    if (this.playerModel) {
+      this.playerModel.userData.handTrackingArms = getHandTrackingData();
+    }
+    if (isHandTrackingEnabled() && window.gameMode !== '3d_painter') {
+      const htd = getHandTrackingData();
+      // 'left' slot = in-game right hand; 'right' slot = in-game left hand (back-camera swap)
+      this._processHandFistAttack('left', htd?.left?.isFist);
+      this._processHandFistAttack('right', htd?.right?.isFist);
+    }
+    updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
+
+    const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
+    if (!this.isEngaged) {
+      if (this.keys.has('ArrowLeft')) {
+        this.yaw += rotateSpeed;
+        this.breakAutoAimFromManualCamera(Math.abs(rotateSpeed));
+      }
+      if (this.keys.has('ArrowRight')) {
+        this.yaw -= rotateSpeed;
+        this.breakAutoAimFromManualCamera(Math.abs(rotateSpeed));
+      }
+    }
+
+    const maxPitch = Math.PI / 3;   // ~60° upward
+    const minPitch = -Math.PI / 8;  // ~30° downward
+
+    if (!this.isEngaged) {
+      if (this.keys.has('ArrowUp')) {
+        this.pitch = Math.min(maxPitch, this.pitch + 0.02);
+        this.breakAutoAimFromManualCamera(0.02);
+      }
+      if (this.keys.has('ArrowDown')) {
+        this.pitch = Math.max(minPitch, this.pitch - 0.02);
+        this.breakAutoAimFromManualCamera(0.02);
+      }
+    }
+
+    // Gyroscope: smoothly slerp yaw/pitch toward device orientation target
+    this._applyGyroUpdate(delta);
+
+    const shouldHoldAim = !this.isAiming && this.aimReleaseHoldUntil && now < this.aimReleaseHoldUntil;
+    const aimingActive = !this.isEngaged && (this.isAiming || shouldHoldAim);
+    const engagedCameraActive = this.isEngaged;
+    const weaponCameraActive = !engagedCameraActive && !aimingActive;
+    const closeCameraActive = aimingActive || weaponCameraActive || engagedCameraActive;
+    const aimLerpSpeed = closeCameraActive ? this.aimZoomInSpeed : this.aimZoomOutSpeed;
+    const aimLerpFactor = 1 - Math.exp(-aimLerpSpeed * this.deltaSeconds);
+    const targetOffset = aimingActive
+      ? this.aimCameraOffset
+      : weaponCameraActive
+        ? this.weaponCameraOffset
+        : this.baseCameraOffset;
+    const shoulderFov = Math.max(45, this.defaultFov - WEAPON_CAMERA_FOV_DELTA);
+    const targetFov = aimingActive
+      ? this.aimFov
+      : (weaponCameraActive || engagedCameraActive)
+        ? shoulderFov
+        : this.defaultFov;
+    this.cameraOffset.lerp(targetOffset, aimLerpFactor);
+    const targetCameraTargetOffset = aimingActive
+      ? this.aimCameraTargetOffset
+      : weaponCameraActive
+        ? this.weaponCameraTargetOffset
+        : this.baseCameraTargetOffset;
+    this.cameraTargetOffset.lerp(targetCameraTargetOffset, aimLerpFactor);
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, aimLerpFactor);
+    this.camera.updateProjectionMatrix();
+
+    let orbitCenter;
+    let offset;
+    if (this.vehicle && this.vehicle.mesh && this.vehicle.type !== 'surfboard') {
+      const size = this.vehicle.boundingSize;
+      const centerOffset = this.vehicle.boundingCenterOffset || new THREE.Vector3();
+      orbitCenter = this.vehicle.mesh.position.clone().add(centerOffset);
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const fov = THREE.MathUtils.degToRad(this.camera.fov);
+      const distance = (maxDim * 0.5) / Math.tan(fov / 2) + maxDim * 0.5;
+      offset = new THREE.Vector3(0, maxDim * 0.5, distance);
+    } else {
+      orbitCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
+      const targetOffset = this.cameraTargetOffset;
+      if (targetOffset.lengthSq() > 0) {
+        const rotatedTargetOffset = new THREE.Vector3(
+          targetOffset.x * Math.cos(this.yaw) - targetOffset.z * Math.sin(this.yaw),
+          targetOffset.y,
+          targetOffset.x * Math.sin(this.yaw) + targetOffset.z * Math.cos(this.yaw)
+        );
+        orbitCenter.add(rotatedTargetOffset);
+      }
+      offset = this.cameraOffset;
+    }
+    let desiredCameraPosition;
+    let cameraLookTarget = orbitCenter;
+    const engagedTargetPosition = this.engagedTarget?.model?.position;
+    const autoAimLookPosition = this.getAutoAimCameraLookPosition(now);
+    const hasValidEngagedTarget = this.isEngaged
+      && this.engagedDirection
+      && Number.isFinite(engagedTargetPosition?.x)
+      && Number.isFinite(engagedTargetPosition?.z);
+    const hasValidAutoAimTarget = this.shouldUseAutoAimCameraDirection(now)
+      && Number.isFinite(autoAimLookPosition?.x)
+      && Number.isFinite(autoAimLookPosition?.z);
+    if (hasValidEngagedTarget) {
+      const engagedYaw = Math.atan2(this.engagedDirection.x, this.engagedDirection.z);
+      this.yaw = engagedYaw;
+      this.pitch = 0;
+      const shoulderOffset = this.weaponCameraOffset || this.baseCameraOffset || this.cameraOffset;
+      const cameraDistance = Math.max(2.5, Math.abs(shoulderOffset?.z ?? this.cameraOffset.z));
+      const cameraHeight = shoulderOffset?.y ?? this.cameraOffset.y ?? 1;
+      const behindOffset = this.engagedDirection.clone().multiplyScalar(-cameraDistance);
+      const engagedRight = new THREE.Vector3(-this.engagedDirection.z, 0, this.engagedDirection.x).normalize();
+      desiredCameraPosition = orbitCenter.clone()
+        .add(new THREE.Vector3(0, cameraHeight + ENGAGED_CAMERA_OFFSET.up, 0))
+        .add(behindOffset)
+        .addScaledVector(engagedRight, ENGAGED_CAMERA_OFFSET.right);
+    } else if (hasValidAutoAimTarget) {
+      const targetLookPosition = autoAimLookPosition.clone();
+      const autoAimFacing = targetLookPosition.clone().sub(orbitCenter);
+      autoAimFacing.y = 0;
+      if (autoAimFacing.lengthSq() > 0.0001) {
+        autoAimFacing.normalize();
+        this.yaw = Math.atan2(autoAimFacing.x, autoAimFacing.z);
+        const shoulderOffset = this.weaponCameraOffset || this.aimCameraOffset || this.baseCameraOffset || this.cameraOffset;
+        const cameraDistance = Math.max(2.5, Math.abs(shoulderOffset?.z ?? this.cameraOffset.z));
+        const cameraHeight = shoulderOffset?.y ?? this.cameraOffset.y ?? 1;
+        const behindOffset = autoAimFacing.clone().multiplyScalar(-cameraDistance);
+        const autoAimRight = new THREE.Vector3(-autoAimFacing.z, 0, autoAimFacing.x).normalize();
+        desiredCameraPosition = orbitCenter.clone()
+          .add(new THREE.Vector3(0, cameraHeight + AUTO_AIM_CAMERA_OFFSET.up, 0))
+          .add(behindOffset)
+          .addScaledVector(autoAimRight, AUTO_AIM_CAMERA_OFFSET.right);
+        cameraLookTarget = targetLookPosition;
+      }
+    }
+    const lookDirection = new THREE.Vector3(
+      Math.sin(this.yaw) * Math.cos(this.pitch),
+      Math.sin(this.pitch),
+      Math.cos(this.yaw) * Math.cos(this.pitch)
+    );
+    if (this.firstPersonView) {
+      // First-person view: place camera at player's eye and look in yaw/pitch direction
+      const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(0, FIRST_PERSON_EYE_HEIGHT, 0));
+      this.camera.position.copy(eyePosition);
+      this.camera.lookAt(eyePosition.clone().add(lookDirection));
+      if (this.playerModel) {
+        // Hide the body but keep floating hands/arms (direct playerGroup children) visible
+        const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
+        if (bodyRoot) bodyRoot.visible = false;
+        else this.playerModel.visible = false;
+      }
+    } else {
+      // Third-person view: pull camera back behind and above the player
+      const TP_DISTANCE = 6;
+      const TP_HEIGHT = 2.5;
+      const tpCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
+      this.camera.position.set(
+        tpCenter.x - Math.sin(this.yaw) * TP_DISTANCE,
+        tpCenter.y + TP_HEIGHT,
+        tpCenter.z - Math.cos(this.yaw) * TP_DISTANCE
+      );
+      this.camera.lookAt(tpCenter);
+      if (this.playerModel) {
+        const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
+        if (bodyRoot) bodyRoot.visible = true;
+        else this.playerModel.visible = true;
+      }
+    }
+
+    if (this.playerModel && this.playerModel.userData.mixer) {
+      this.playerModel.userData.mixer.update(delta);
+    }
+    this.updateFlyWingsAnimation?.(delta);
+
+    if (this.enabled && !this.isSleeping) {
+      this.processMovement();
+    }
+    if (this.grabbedTarget) {
+      this.updateGrabbedTarget();
+    }
+
+    // Hold Q/E: keep arm extended and grab whatever hand touches
+    if (this.keysPressed.has('q') && !this.grabbedTarget) {
+      this.attemptHandGrab('right');
+    }
+    if (this.keysPressed.has('e') && !this.grabbedTarget) {
+      this.attemptHandGrab('left');
+    }
+
+    // Always update controls even when movement is disabled
+    if (this.controls) {
+      this.controls.update();
+    }
+
+    this.questManager?.setDeltaSeconds(this.deltaSeconds);
+    this.questManager?.update();
+    this.updateFriendlyInteractionUI();
+    this.updateInteractionPrompt();
+    this.updateClimbOverlay();
+
+    const hasGun = !!this.getEquippedGun();
+    if (hasGun !== this.lastHasGun) {
+      this.updateAmmoUI(hasGun);
+    }
+  }
+
+  handleDialogueOption(option) {
+    if (option?.onSelect === "feedQuestGuy") {
+      const feedResult = window.feedFriendlyWithFood?.(this.activeFriendly);
+      if (feedResult?.status === 'success') {
+        this.showMobileStatusToast(`Fed quest guy a ${feedResult.foodLabel}`);
+      }
+      if (feedResult?.status !== 'success') return;
+    }
+    this.questManager?.handleDialogueOption(option, this.activeFriendly);
+    if (option?.merchantAction) {
+      void import('./merchantPanel.js').then(({ openMerchantPanel }) => openMerchantPanel(option.merchantAction));
+    }
+    if (option?.llamaAction === 'trade') {
+      void import('./llamaPanel.js').then(({ openLlamaTradePanel }) => openLlamaTradePanel());
+    }
+    if (option?.llamaAction === 'help') {
+      const request = window.prompt('What request do you have for Llama?');
+      if (request) {
+        this.sendLlamaHelpRequest(request);
+      }
+    }
+  }
+
+
+  async sendLlamaHelpRequest(requestText) {
+    const manager = window.friendlyNpcManager;
+    const history = manager?.getLlamaDialogueHistory?.() || [];
+    const payload = {
+      interactionMode: 'request',
+      history,
+      player: window.playerName || 'Player',
+      request: requestText,
+      requestStatus: 'incomplete'
+    };
+    let reply = 'I will consider your request beneath the old stars.';
+    try {
+      const res = await fetch('/api/llama', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      const data = await res.json();
+      reply = data?.interaction?.reply || data?.decision?.speak || reply;
+      const status = data?.interaction?.status || 'incomplete';
+      manager?.pushLlamaDialogueHistory?.({ type:'request', player: payload.player, request: requestText, status, reply, at: Date.now() });
+    } catch {}
+    this.friendlyDialogueTextEl.textContent = reply;
+  }
+  getWeapons() {
+    const weapons = Object.values(appContext.entities.weapons || window.weapons || {}).filter(Boolean);
+    const pickups = Array.isArray(window.weaponPickups) ? window.weaponPickups : [];
+    return weapons.concat(pickups);
+  }
+
+  getEquippedWeapon(hand = 'right') {
+    return this.getWeapons().find(weapon => weapon.holder === this && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')) || null;
+  }
+
+  getEquippedGun(hand = 'right') {
+    return this.getWeapons().find(
+      weapon => weapon.holder === this
+        && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')
+        && (weapon.type === 'gun' || weapon.type === 'bow' || weapon.type === 'bazooka')
+    ) || null;
+  }
+
+  getEquippedSword(hand = 'right') {
+    return this.getWeapons().find(
+      weapon => weapon.holder === this
+        && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')
+        && (weapon.type === 'sword' || weapon.type === 'hammer')
+    ) || null;
+  }
+
+  updateClimbOverlay() {
+    if (!this.climbOverlayEl || !this.playerModel) return;
+    if (this.isClimbing || this.isSleeping || this.vehicle || this.isInteracting || this.areInteractionOverlaysBlocked()) {
+      this.climbOverlayEl.classList.add('hidden');
+      return;
+    }
+
+    const position = this.playerModel.position;
+    const climbArea = this.findClimbableArea(position);
+    const nearEntry = climbArea && this.isWithinClimbEntry(climbArea, position);
+    const movement = this.lastMoveDirection?.length?.() > 0 ? this.lastMoveDirection : null;
+    const movingToward = climbArea && this.isMovingTowardClimbArea(climbArea, movement);
+    const canStartClimbing = !!climbArea && (nearEntry || movingToward);
+
+    if (canStartClimbing) {
+      this.climbOverlayEl.textContent = this.isMobile ? 'Tap to climb' : "Press X to climb";
+      this.climbOverlayEl.classList.remove('hidden');
+    } else {
+      this.climbOverlayEl.classList.add('hidden');
+    }
+  }
+
+  updateInteractionPrompt() {
+    if (!this.interactionPromptEl || !this.playerModel) return;
+    if (this.areInteractionOverlaysBlocked()) {
+      this.interactionPromptEl.classList.remove('visible');
+      this.interactionPromptEl.textContent = '';
+      return;
+    }
+
+    let promptText = '';
+    let visible = false;
+
+    if (this.isSleeping) {
+      promptText = BED_WAKE_PROMPT;
+      visible = true;
+    } else if (this.vehicle) {
+      const type = this.vehicle.type;
+      if (type === 'spaceship') {
+        promptText = "'x' exit spaceship";
+      } else if (type === 'rowboat') {
+        promptText = "'x' exit rowboat";
+      } else if (type === 'surfboard') {
+        promptText = "'x' exit surfboard";
+      }
+      visible = !!promptText;
+    } else {
+      const closest = this.getClosestInteractionTarget();
+      if (closest?.promptText) {
+        if (closest.type !== 'friendly' || !this.friendlyInteractButton) {
+          promptText = closest.promptText;
+          visible = true;
+        }
+      }
+    }
+
+    if (visible) {
+      this.interactionPromptEl.textContent = this.formatInteractionPrompt(promptText);
+      this.interactionPromptEl.classList.add('visible');
+    } else {
+      this.interactionPromptEl.classList.remove('visible');
+      this.interactionPromptEl.textContent = '';
+    }
+  }
+
+  areInteractionOverlaysBlocked() {
+    if (window.mapViewEnabled === true || document.body?.classList?.contains('map-open')) return true;
+    const blockingOverlayIds = ['settings-overlay', 'inventory-overlay', 'merchant-overlay'];
+    return blockingOverlayIds.some((id) => {
+      const overlay = document.getElementById(id);
+      if (!overlay) return false;
+      if (overlay.getAttribute('aria-hidden') === 'false') return true;
+      return overlay.style?.display && overlay.style.display !== 'none';
+    });
+  }
+
+  formatInteractionPrompt(text) {
+    if (!text || !this.isMobile) return text;
+    return text.replace(/^'x'\s*/i, 'touch ');
+  }
+
+  startSleep(bed) {
+    if (this.isSleeping || !bed?.mesh || !this.playerModel) return;
+    const maxDistance = bed.getInteractionDistance?.() ?? 2.5;
+    const bedPosition = bed.getWorldPosition?.(new THREE.Vector3()) ?? bed.mesh.position;
+    const distance = this.playerModel.position.distanceTo(bedPosition);
+    if (distance > maxDistance) return;
+
+    const sleepPosition = bed.getSleepPosition?.();
+    if (!sleepPosition) return;
+
+    this.sleepData = {
+      bed,
+      previousQuaternion: this.playerModel.quaternion.clone(),
+      previousYaw: this.playerModel.rotation.y
+    };
+    this.isSleeping = true;
+    this.isMoving = false;
+    this.keysPressed.clear();
+    this.setAiming(false);
+    if (this.playerModel.userData?.actions) {
+      Object.values(this.playerModel.userData.actions).forEach(action => action?.stop?.());
+    }
+    this.playerModel.userData.currentAction = null;
+
+    const bedQuaternion = new THREE.Quaternion();
+    bed.mesh.getWorldQuaternion(bedQuaternion);
+    const bedYaw = new THREE.Euler().setFromQuaternion(bedQuaternion, 'YXZ').y;
+
+    this.playerModel.position.copy(sleepPosition);
+    this.playerModel.quaternion.setFromEuler(new THREE.Euler(Math.PI / 2, bedYaw - Math.PI / 2, 0, 'YXZ')); // Math.PI / 2, bedYaw, 0
+
+    if (this.body) {
+      this.body.setTranslation({ x: sleepPosition.x, y: sleepPosition.y, z: sleepPosition.z }, true);
+      this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+
+    this.onSleepStart?.({ bed });
+  }
+
+  wakeFromSleep() {
+    if (!this.isSleeping) return;
+    const bed = this.sleepData?.bed;
+    const wakePosition = bed?.getWakePosition?.();
+    if (wakePosition && this.playerModel) {
+      this.playerModel.position.copy(wakePosition);
+      const yaw = this.sleepData?.previousYaw ?? this.playerModel.rotation.y;
+      this.playerModel.rotation.set(0, yaw, 0);
+      const actions = this.playerModel.userData?.actions;
+      if (actions?.idle) {
+        actions.idle.reset().fadeIn(0.2).play();
+        this.playerModel.userData.currentAction = 'idle';
+      }
+      if (this.body) {
+        this.body.setTranslation({ x: wakePosition.x, y: wakePosition.y, z: wakePosition.z }, true);
+        this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      }
+    }
+
+    this.isSleeping = false;
+    this.keysPressed.clear();
+    this.onSleepEnd?.({ bed });
+    this.sleepData = null;
+  }
+
+  getCamera() {
+    return this.camera;
+  }
+  
+  getPlayerModel() {
+    return this.playerModel;
+  }
+
+  setJumpForceMultiplier(multiplier = 1) {
+    this.jumpForceMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  }
+
+  handleGangBeastsPunchGrab(hand = 'right') {
+    if (!this.enabled || this.isKnocked) return false;
+    const actionName = hand === 'left' ? 'leftPunch' : 'mutantPunch';
+    const started = this.playAction(actionName);
+    if (!started) return false;
+    this.attemptGrab(hand);
+    this.audioManager?.playAttack();
+    return true;
+  }
+
+  setLowGravityEnabled(enabled = false) {
+    this.lowGravityEnabled = !!enabled;
+    if (this.body?.setGravityScale) {
+      this.body.setGravityScale(this.lowGravityEnabled ? 0.65 : 1, true);
+    }
+  }
+
+  setPlayerScale(scale = DEFAULT_PLAYER_SCALE) {
+    const safeScale = Number.isFinite(scale) && scale > 0 ? scale : DEFAULT_PLAYER_SCALE;
+    if (!this.playerModel?.scale?.setScalar) return;
+    const currentScale = Number.isFinite(this.playerModel.scale.x) ? this.playerModel.scale.x : DEFAULT_PLAYER_SCALE;
+
+    const bounds = new THREE.Box3().setFromObject(this.playerModel);
+    const currentHeight = Math.max(0, bounds.max.y - bounds.min.y);
+
+    this.playerModel.scale.setScalar(safeScale);
+
+    if (this.playerModel?.position) {
+      const yLiftFromHeight = ((safeScale / Math.max(currentScale, 0.001)) - 1) * currentHeight * 0.5;
+      const yLiftFallback = (safeScale - currentScale) * 0.55;
+      const yLift = Number.isFinite(yLiftFromHeight) && yLiftFromHeight > 0 ? yLiftFromHeight : yLiftFallback;
+      this.playerModel.position.y += yLift;
+    }
+  }
+
+  /**
+   * Trigger a jump action programmatically.
+   * Useful for alternative input methods like voice commands.
+   */
+  triggerJump() {
+    if (!this.enabled || !this.body) return;
+    this.tryJump();
+  }
+
+  tryJump() {
+    if (!this.body) return false;
+
+    const isFlyActive = this.flySpellActive && Date.now() < (this.flySpellEndsAt || 0);
+    const baseJumpForce = isFlyActive ? JUMP_FORCE * FLY_JUMP_FORCE_MULTIPLIER : JUMP_FORCE;
+    const jumpForce = baseJumpForce * (Number.isFinite(this.jumpForceMultiplier) ? this.jumpForceMultiplier : 1) * JUMP_HEIGHT_MULTIPLIER;
+
+    if (this.isClimbing) {
+      this.stopClimbing();
+      this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
+      this.canJump = false;
+      this.hasDoubleJumped = false;
+      if (isFlyActive) this.onFlyJump?.();
+      return true;
+    }
+
+    if (this.canJump) {
+      this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
+      this.canJump = false;
+      this.hasDoubleJumped = false;
+      if (isFlyActive) this.onFlyJump?.();
+      return true;
+    }
+
+    if (isFlyActive) {
+      this.body.applyImpulse({ x: 0, y: jumpForce, z: 0 }, true);
+      this.hasDoubleJumped = false;
+      this.onFlyJump?.();
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Trigger a projectile fire action programmatically.
+   * Useful for alternative input methods like voice commands.
+   */
+  triggerFire() {
+    if (!this.enabled) return;
+    this.attemptFireProjectile();
+  }
+
+  /**
+   * Process fist state for one MediaPipe tracking slot.
+   * trackingSlot 'left' corresponds to the in-game RIGHT hand (and vice versa)
+   * because the back-camera swaps the slots.
+   */
+  _processHandFistAttack(trackingSlot, isFist) {
+    if (!this._fistState) this._fistState = { left: false, right: false };
+    const wasFist = this._fistState[trackingSlot] ?? false;
+    this._fistState[trackingSlot] = !!isFist;
+
+    const gameHand = trackingSlot === 'left' ? 'right' : 'left';
+
+    if (isFist && !wasFist) {
+      // Fist just closed — trigger attack or start charge
+      if (!this.enabled || this.isInWater) return;
+      if (this.shouldHoldToFire(gameHand)) {
+        // Hold-to-fire weapons (bow, bazooka, bomb, iceGun): begin charge on close
+        this.isFireHeld = true;
+        this.setAiming(true);
+      } else {
+        this.performAttackForSlot(gameHand);
+      }
+    } else if (!isFist && wasFist) {
+      // Fist just opened — release hold-to-fire weapons
+      if (this.isFireHeld && this.shouldHoldToFire(gameHand)) {
+        this.isFireHeld = false;
+        this.setAiming(false);
+        this.attemptFireProjectileForHand(gameHand);
+      }
+    }
+  }
+
+  canFireProjectile(hand = 'right') {
+    const gun = this.getEquippedGun(hand);
+    if (!gun || !this.playerModel) return false;
+    if (gun.infiniteAmmo) return true;
+    return this.ammo > 0;
+  }
+
+  consumeAmmo() {
+    const gun = this.getEquippedGun();
+    if (gun?.infiniteAmmo) return true;
+    if (this.ammo <= 0) return false;
+    this.setAmmo(this.ammo - 1);
+    return true;
+  }
+
+  attemptFireProjectile() {
+    return this.attemptFireProjectileForHand('right');
+  }
+
+  fireProjectileAtTarget(targetModel, hand = 'right') {
+    if (!targetModel?.position || !this.playerModel) return false;
+    const weapon = this.getEquippedWeapon(hand);
+    const weaponId = weapon?.itemId;
+    if (weaponId !== 'bow' && weaponId !== 'bomb' && weaponId !== 'bazooka') return false;
+
+    const eyePos = this.playerModel.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+    const targetPos = targetModel.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+    const baseDirection = targetPos.sub(eyePos);
+    if (baseDirection.lengthSq() <= 0.0001) return false;
+
+    const direction = this.getDistanceAdjustedArcDirection(baseDirection, weaponId);
+    return this.attemptFireProjectileForHand(hand, { manualDirection: direction, skipAutoAimLinger: true });
+  }
+
+  attemptFireProjectileForHand(hand = 'right', { manualDirection = null, skipAutoAimLinger = false } = {}) {
+    const equippedWeapon = this.getEquippedWeapon(hand);
+    if (equippedWeapon?.itemId === 'bomb' && typeof this.throwBomb === 'function') {
+      const autoAimDirection = manualDirection ? null : this.getAutoAimDirection(equippedWeapon);
+      const direction = (manualDirection?.clone?.() || autoAimDirection || this.getHandAimDirection(hand) || this.getAimDirection(true)).normalize();
+      const position = this.getProjectileSpawnPosition(direction);
+      const fired = this.throwBomb(position, direction);
+      if (fired) {
+        this.playAction('throw');
+        if (!skipAutoAimLinger) this.startAutoAimCameraLinger(autoAimDirection);
+      }
+      return fired;
+    }
+    if (!this.canFireProjectile(hand)) return false;
+
+    const gun = this.getEquippedGun(hand);
+    const usesIceMist = gun?.itemId === 'iceGun' && typeof this.spawnIceMist === 'function';
+    const usesArrow = gun?.itemId === 'bow' && typeof this.spawnArrowProjectile === 'function';
+    const usesMissile = gun?.itemId === 'bazooka' && typeof this.spawnMissileProjectile === 'function';
+    const autoAimDirection = manualDirection ? null : this.getAutoAimDirection(gun);
+    const baseDirection = manualDirection?.clone?.() || autoAimDirection || (usesIceMist ? this.getPlayerFacingDirection() : (this.getHandAimDirection(hand) || this.getAimDirection(usesArrow || usesMissile)));
+    const direction = baseDirection.clone();
+    if (usesMissile && !autoAimDirection) {
+      direction.y = Math.max(direction.y, 0.14);
+      direction.normalize();
+    }
+    const position = this.getProjectileSpawnPosition(direction);
+
+    this.consumeAmmo();
+
+    if (usesIceMist) {
+      this.multiplayer.send({
+        type: 'iceMist',
+        id: this.multiplayer.getId(),
+        position: position.toArray(),
+        direction: direction.toArray()
+      });
+
+      this.playAction('projectile');
+      this.audioManager?.playSFX('SFX/Spells/Waterspray 1.ogg', 0.55, {
+        cooldownKey: 'ice-mist-fire',
+        cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+      });
+      this.spawnIceMist(
+        this.scene,
+        this.iceMists,
+        position,
+        direction,
+        this.multiplayer.getId()
+      );
+    } else if (usesMissile) {
+      this.multiplayer.send({
+        type: 'projectile',
+        id: this.multiplayer.getId(),
+        position: position.toArray(),
+        direction: direction.toArray(),
+        weapon: 'bazooka'
+      });
+
+      this.playAction('projectile');
+      this.audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.45, {
+        cooldownKey: 'bazooka-fire',
+        cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+      });
+      this.spawnMissileProjectile(
+        this.scene,
+        this.projectiles,
+        position,
+        direction,
+        this.multiplayer.getId()
+      );
+    } else if (usesArrow) {
+      this.multiplayer.send({
+        type: 'projectile',
+        id: this.multiplayer.getId(),
+        position: position.toArray(),
+        direction: direction.toArray(),
+        weapon: 'bow'
+      });
+
+      this.playAction('projectile');
+      this.audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Attack 2.ogg', 0.6, {
+        cooldownKey: 'bow-fire',
+        cooldownMs: this.audioManager?.performanceProfile?.attackCooldownMs ?? 120
+      });
+      this.spawnArrowProjectile(
+        this.scene,
+        this.projectiles,
+        position,
+        direction,
+        this.multiplayer.getId()
+      );
+    } else {
+      this.multiplayer.send({
+        type: 'projectile',
+        id: this.multiplayer.getId(),
+        position: position.toArray(),
+        direction: direction.toArray()
+      });
+
+      this.playAction('projectile');
+      const isPistol = gun?.itemId === 'pistol';
+      const projectileOptions = isPistol
+        ? {
+            geometry: new THREE.SphereGeometry(0.08, 8, 8),
+            colliderDesc: RAPIER.ColliderDesc.ball(0.08).setRestitution(0.3).setFriction(0.5),
+            color: new THREE.Color(0xffee44),
+            speed: 28,
+            lifetime: 2500
+          }
+        : undefined;
+      this.spawnProjectile(
+        this.scene,
+        this.projectiles,
+        position,
+        direction,
+        this.multiplayer.getId(),
+        projectileOptions
+      );
+    }
+    if (!skipAutoAimLinger) this.startAutoAimCameraLinger(autoAimDirection);
+    return true;
+  }
+
+  shouldHoldToFire(hand = 'right') {
+    const weapon = this.getEquippedWeapon(hand);
+    return weapon?.itemId === 'bow' || weapon?.itemId === 'bazooka' || weapon?.itemId === 'bomb' || weapon?.itemId === 'iceGun';
+  }
+
+  isProjectileWeapon(weapon) {
+    return !!weapon && (weapon.type === 'gun' || weapon.type === 'bow' || weapon.type === 'bazooka' || weapon.type === 'bomb');
+  }
+
+  setAiming(active) {
+    if (this.isAiming === active) return;
+    this.isAiming = active;
+    if (this.crosshairEl) {
+      this.crosshairEl.classList.toggle('visible', active);
+    }
+    if (active) {
+      this.aimReleaseHoldUntil = null;
+      this.autoAimBreakUntilRelease = false;
+      this.clearAutoAimCameraLinger();
+      this.autoAimCameraDirection = null;
+      this.autoAimTargetModel = null;
+      this.autoAimManualBreakAmount = 0;
+      this.autoAimLastManualInputAt = 0;
+    } else {
+      if (this.autoAimCameraDirection) {
+        this.syncCameraOrbitToCurrentCameraPosition();
+      }
+      this.aimReleaseHoldUntil = performance.now() + this.aimReleaseDelayMs;
+      this.autoAimBreakUntilRelease = false;
+      this.autoAimCurrentPitch = 0;
+      this.autoAimCameraDirection = null;
+      this.autoAimTargetModel = null;
+      this.autoAimManualBreakAmount = 0;
+      this.autoAimLastManualInputAt = 0;
+    }
+  }
+
+  getAimDirection(invertForBow = false) {
+    const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
+    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
+    if (invertForBow) {
+      direction.multiplyScalar(-1);
+    }
+    return direction;
+  }
+
+  // Returns an aim direction driven by the MediaPipe hand position when hand
+  // tracking is active, mapping horizontal/vertical hand position to yaw/pitch
+  // offsets from the current camera direction. Returns null when hand tracking
+  // is not enabled. When enabled but no hand is detected, uses the default
+  // center position (0.5, 0.5) so the gun fires forward.
+  getHandAimDirection(hand = 'right') {
+    if (!isHandTrackingEnabled()) return null;
+    // Back-camera mapping swaps slots: user's right hand is in 'left', left hand in 'right'.
+    const trackingSlot = hand === 'right' ? 'left' : 'right';
+    const hd = getHandTrackingData()?.[trackingSlot];
+    // Use detected hand position, or default to center when no hand visible
+    const palmX = hd?.x ?? 0.5;
+    const palmY = hd?.y ?? 0.5;
+    // palmX: 0=left edge, 1=right edge; palmY: 0=top, 1=bottom (both normalised)
+    const YAW_RANGE = Math.PI * 0.6;   // ±54° total across the full hand travel range
+    const PITCH_RANGE = Math.PI * 0.5; // ±45° total across the full hand travel range
+    const yawOffset = (0.5 - palmX) * YAW_RANGE;
+    const pitch = (0.5 - palmY) * PITCH_RANGE;
+    const totalYaw = this.yaw + yawOffset;
+    return new THREE.Vector3(
+      Math.sin(totalYaw) * Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(totalYaw) * Math.cos(pitch)
+    ).normalize();
+  }
+
+  getPlayerFacingDirection() {
+    if (!this.playerModel) return new THREE.Vector3(0, 0, 1);
+    return new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
+  }
+
+  updateCrosshairPosition() {
+    if (!this.crosshairEl) return;
+    if (!isHandTrackingEnabled()) return;
+    // Back-camera mapping stores user's right hand in the 'left' slot.
+    const hd = getHandTrackingData()?.left;
+    if (!hd) return;
+    const x = hd.x * window.innerWidth;
+    const y = hd.y * window.innerHeight;
+    this.crosshairEl.style.left = `${x}px`;
+    this.crosshairEl.style.top = `${y}px`;
+  }
+
+  updateAimingRotation() {
+    this.updateCrosshairPosition();
+    const weapon = this.mobileThrowAimItemId
+      ? { itemId: this.mobileThrowAimItemId, type: 'throw' }
+      : this.getEquippedWeapon();
+    if (!this.isFireHeld || (!this.mobileThrowAimItemId && !this.shouldHoldToFire())) {
+      if (this.isAutoAimCameraLingerActive()) return;
+      this.autoAimCameraDirection = null;
+      this.autoAimTargetModel = null;
+      return;
+    }
+    const invertForBow = weapon?.itemId === 'bow';
+    const autoAimDirection = this.getAutoAimDirection(weapon);
+    const handAimDirection = autoAimDirection ? null : this.getHandAimDirection('right');
+    const direction = autoAimDirection ?? handAimDirection ?? this.getAimDirection(invertForBow);
+    this.alignPlayerToDirection(direction);
+    if (autoAimDirection && !this.isEngaged) {
+      this.applyAutoAimCameraDirection(autoAimDirection);
+    } else {
+      this.autoAimCameraDirection = null;
+      this.autoAimTargetModel = null;
+    }
+  }
+
+  applyAutoAimCameraDirection(direction) {
+    if (!direction) return;
+    const d = direction.clone().normalize();
+    this.autoAimCameraDirection = d;
+    this.syncCameraOrbitToAutoAimDirection(d);
+  }
+
+  startAutoAimCameraLinger(direction) {
+    if (!direction || !this.autoAimTargetModel?.position || this.isEngaged) return;
+    const d = direction.clone().normalize();
+    const now = performance.now();
+    const lingerUntil = now + AUTO_AIM_CAMERA_LINGER_MS;
+    this.autoAimCameraDirection = d;
+    this.autoAimCameraLingerDirection = d.clone();
+    this.autoAimCameraLingerTargetModel = this.autoAimTargetModel;
+    this.autoAimCameraLingerTargetPosition = this.autoAimTargetModel.position
+      .clone()
+      .add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+    this.autoAimCameraLingerUntil = lingerUntil;
+    this.aimReleaseHoldUntil = Math.max(this.aimReleaseHoldUntil || 0, lingerUntil);
+    this.syncCameraOrbitToAutoAimDirection(d);
+  }
+
+  clearAutoAimCameraLinger() {
+    this.autoAimCameraLingerUntil = 0;
+    this.autoAimCameraLingerDirection = null;
+    this.autoAimCameraLingerTargetModel = null;
+    this.autoAimCameraLingerTargetPosition = null;
+  }
+
+  isAutoAimCameraLingerActive(now = performance.now()) {
+    return !!this.autoAimCameraLingerDirection
+      && !!this.autoAimCameraLingerTargetPosition
+      && now < (this.autoAimCameraLingerUntil || 0);
+  }
+
+  getAutoAimCameraLookPosition(now = performance.now()) {
+    if (this.isAutoAimCameraLingerActive(now) && !this.isFireHeld) {
+      return this.autoAimCameraLingerTargetPosition.clone();
+    }
+    if (this.autoAimTargetModel?.position) {
+      return this.autoAimTargetModel.position.clone().add(new THREE.Vector3(0, AUTO_AIM_TARGET_CENTER_Y, 0));
+    }
+    if (this.isAutoAimCameraLingerActive(now)) {
+      return this.autoAimCameraLingerTargetPosition.clone();
+    }
+    return null;
+  }
+
+  syncCameraOrbitToAutoAimDirection(direction) {
+    if (!direction) return;
+    const d = direction.clone().normalize();
+    this.yaw = Math.atan2(-d.x, -d.z);
+
+    const horizontalAim = Math.max(0.001, Math.hypot(d.x, d.z));
+    const cameraOffset = this.cameraOffset || this.aimCameraOffset || this.baseCameraOffset;
+    const horizontalOffset = Math.max(0.001, Math.hypot(cameraOffset?.x ?? 0, cameraOffset?.z ?? 1));
+    const cameraOffsetY = cameraOffset?.y ?? 0;
+    const desiredVerticalOffset = -horizontalOffset * (d.y / horizontalAim);
+    const pitchRatio = THREE.MathUtils.clamp((desiredVerticalOffset - cameraOffsetY) / 5, -1, 1);
+    const maxPitch = Math.PI / 3;
+    const minPitch = -Math.PI / 8;
+    this.pitch = THREE.MathUtils.clamp(Math.asin(pitchRatio), minPitch, maxPitch);
+  }
+
+
+  getPlayerOrbitBaseCenter() {
+    if (this.playerModel?.position) {
+      return this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
+    }
+    if (this.controls?.target) {
+      return this.controls.target.clone();
+    }
+    return null;
+  }
+
+  syncCameraOrbitToCurrentCameraPosition() {
+    if (!this.camera) return;
+    const orbitBaseCenter = this.getPlayerOrbitBaseCenter();
+    if (!orbitBaseCenter) {
+      this.syncCameraOrbitToCameraDirection();
+      return;
+    }
+
+    // Auto-aim cameras can look past the player toward a target, so deriving the
+    // restored orbit from the camera's facing direction can choose the opposite
+    // side of the player. Preserve the camera's actual world-space side instead.
+    const cameraDelta = this.camera.position.clone().sub(orbitBaseCenter);
+    const horizontalDistance = Math.hypot(cameraDelta.x, cameraDelta.z);
+    if (horizontalDistance <= 0.0001) {
+      this.syncCameraOrbitToCameraDirection();
+      return;
+    }
+
+    // Normal camera placement rotates both the look-target offset and camera
+    // offset by yaw. Invert that same transform rather than assuming a zero-X
+    // offset; otherwise shoulder/aim offsets restore about 90 degrees off.
+    const cameraOffset = this.cameraOffset || this.aimCameraOffset || this.baseCameraOffset || new THREE.Vector3(0, 0, 1);
+    const targetOffset = this.cameraTargetOffset || this.aimCameraTargetOffset || this.baseCameraTargetOffset || new THREE.Vector3();
+    const combinedOffsetX = (cameraOffset.x ?? 0) + (targetOffset.x ?? 0);
+    const combinedOffsetZ = (cameraOffset.z ?? 0) + (targetOffset.z ?? 0);
+    const combinedHorizontalDistance = Math.hypot(combinedOffsetX, combinedOffsetZ);
+    if (combinedHorizontalDistance <= 0.0001) {
+      this.yaw = Math.atan2(-cameraDelta.x, cameraDelta.z);
+    } else {
+      this.yaw = Math.atan2(cameraDelta.z, cameraDelta.x) - Math.atan2(combinedOffsetZ, combinedOffsetX);
+    }
+
+    const combinedOffsetY = (cameraOffset.y ?? 0) + (targetOffset.y ?? 0);
+    const pitchRatio = THREE.MathUtils.clamp((cameraDelta.y - combinedOffsetY) / 5, -1, 1);
+    const maxPitch = Math.PI / 3;
+    const minPitch = -Math.PI / 8;
+    this.pitch = THREE.MathUtils.clamp(Math.asin(pitchRatio), minPitch, maxPitch);
+  }
+
+  syncCameraOrbitToCameraDirection() {
+    if (!this.camera) return;
+    const d = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    if (d.lengthSq() <= 0.0001) return;
+    d.normalize();
+    this.syncCameraOrbitToAutoAimDirection(d);
+  }
+
+  breakAutoAimFromManualCamera(inputAmount = Infinity) {
+    if (this.isEngaged) return;
+    if (!this.isAiming || !this.isFireHeld) {
+      if (this.isAutoAimCameraLingerActive()) {
+        this.clearAutoAimCameraLinger();
+        this.autoAimCameraDirection = null;
+        this.autoAimTargetModel = null;
+      }
+      return;
+    }
+    if (this.autoAimBreakUntilRelease) return;
+
+    const amount = Number.isFinite(inputAmount) ? Math.abs(inputAmount) : Infinity;
+    const now = performance.now();
+    if (!Number.isFinite(amount)) {
+      this.autoAimManualBreakAmount = AUTO_AIM_MANUAL_BREAK_THRESHOLD_RAD;
+    } else {
+      if ((now - (this.autoAimLastManualInputAt || 0)) > AUTO_AIM_MANUAL_BREAK_DECAY_MS) {
+        this.autoAimManualBreakAmount = 0;
+      }
+      this.autoAimManualBreakAmount = (this.autoAimManualBreakAmount || 0) + amount;
+      this.autoAimLastManualInputAt = now;
+    }
+
+    if ((this.autoAimManualBreakAmount || 0) >= AUTO_AIM_MANUAL_BREAK_THRESHOLD_RAD) {
+      this.autoAimBreakUntilRelease = true;
+    }
+  }
+
+  getAutoAimDirection(_weapon) {
+    return null;
+  }
+
+  isWeaponShoulderCameraActive() {
+    return !this.isEngaged && !this.isAiming;
+  }
+
+  shouldUseAutoAimCameraDirection(now = performance.now()) {
+    const lingering = this.isAutoAimCameraLingerActive(now);
+    const hasDirection = !!this.autoAimCameraDirection || !!this.autoAimCameraLingerDirection;
+    const hasTarget = !!this.autoAimTargetModel?.position || !!this.autoAimCameraLingerTargetPosition;
+    return hasDirection
+      && hasTarget
+      && (this.isFireHeld || lingering)
+      && !this.autoAimBreakUntilRelease
+      && !this.isEngaged;
+  }
+
+  alignPlayerToDirection(direction) {
+    if (!this.playerModel) return;
+    const yaw = Math.atan2(direction.x, direction.z);
+    this.playerModel.rotation.set(0, yaw, 0);
+  }
+
+  getProjectileSpawnPosition(direction) {
+    const gun = this.getEquippedGun();
+    const isBazooka = gun?.itemId === 'bazooka';
+    const offsetDistance = isBazooka ? 0.78 : 0.6;
+    const normalizedDirection = direction.clone().normalize();
+
+    const activeGunMesh = gun?.useHeldMeshWhenHeld && gun?.heldMesh
+      ? gun.heldMesh
+      : gun?.mesh;
+
+    if (activeGunMesh) {
+      const gunPosition = new THREE.Vector3();
+      activeGunMesh.getWorldPosition(gunPosition);
+      if (isBazooka) {
+        gunPosition.y += 0.12;
+      }
+      return gunPosition.add(normalizedDirection.clone().multiplyScalar(offsetDistance));
+    }
+
+    const baseHeight = isBazooka ? 0.86 : 0.7;
+    return this.playerModel.position
+      .clone()
+      .add(new THREE.Vector3(0, baseHeight, 0))
+      .add(normalizedDirection.clone().multiplyScalar(offsetDistance));
+  }
+
+  addAmmo(amount) {
+    if (typeof amount !== 'number' || amount <= 0) return;
+    const normalized = Math.floor(amount);
+    if (normalized <= 0) return;
+    const nextAmmo = Math.min(this.maxAmmo, this.ammo + normalized);
+    this.setAmmo(nextAmmo);
+  }
+
+  setAmmo(value, label = this.ammoLabel, icon = this.ammoIcon) {
+    const nextAmmo = Math.max(0, Math.floor(value));
+    if (label) {
+      this.ammoLabel = label;
+    }
+    if (icon) {
+      this.ammoIcon = icon;
+      if (this.ammoIconEl) {
+        this.ammoIconEl.textContent = icon;
+      }
+    }
+    if (nextAmmo === this.ammo) return;
+    this.ammo = nextAmmo;
+    this.updateAmmoUI(!!this.getEquippedGun());
+    this.onAmmoChange?.(this.ammo);
+  }
+
+  updateAmmoUI(hasGun = !!this.getEquippedGun()) {
+    if (this.ammoCountEl && this.lastAmmoValue !== this.ammo) {
+      this.ammoCountEl.textContent = `${this.ammo}`;
+      this.lastAmmoValue = this.ammo;
+    }
+
+    if (this.ammoContainerEl) {
+      // Hide completely unless a gun is equipped
+      if (this.lastHasGun !== hasGun) {
+        this.ammoContainerEl.classList.toggle('hidden', !hasGun);
+      }
+
+      const isEmpty = this.ammo === 0;
+      if (this.lastAmmoEmpty !== isEmpty) {
+        this.ammoContainerEl.classList.toggle('empty', isEmpty);
+        this.lastAmmoEmpty = isEmpty;
+      }
+    }
+
+    this.lastHasGun = hasGun;
+  }
+
+  updateGrabbedTarget() {
+    if (!this.grabbedTarget || !this.playerModel) return;
+    const handPos = this.grabbedHand
+      ? this._getHandWorldPos(this.grabbedHand)
+      : (() => {
+          const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.playerModel.quaternion).normalize();
+          return this.playerModel.position.clone().addScaledVector(forward, 1);
+        })();
+    const target = this.grabbedTarget;
+    const bodyPart = this.grabbedBodyPart || 'torso';
+
+    // World position of the grabbed body part (the point the arm connects to on the target)
+    const grabPartPos = this._getBodyPartWorldPos(bodyPart, target.model);
+
+    // Point the grabbing arm toward the grabbed body part
+    if (this.playerModel.userData) {
+      this.playerModel.userData.grabArmTarget = {
+        hand: this.grabbedHand || 'right',
+        worldPos: grabPartPos.clone()
+      };
+    }
+
+    if (target.type === 'player') {
+      // Send the hand world position so the grabbed player can spring toward it
+      const now = performance.now();
+      if (now - this.lastGrabMoveSentAt >= GRAB_MOVE_SEND_INTERVAL_MS) {
+        const lastPos = this.lastGrabMoveSentPos;
+        const dSq = lastPos ? handPos.distanceToSquared(lastPos) : Infinity;
+        if (dSq >= GRAB_MOVE_MIN_DELTA_SQ) {
+          const payload = {
+            type: 'grabMove',
+            from: this.multiplayer.getId(),
+            target: target.id,
+            position: handPos.toArray(),
+            bodyPart
+          };
+          const sendHighFrequency = this.multiplayer?.sendHighFrequency;
+          if (typeof sendHighFrequency === 'function') {
+            sendHighFrequency(payload, 'grabMove', target.id);
+          } else {
+            this.multiplayer.send(payload);
+          }
+          this.lastGrabMoveSentAt = now;
+          this.lastGrabMoveSentPos = handPos.clone();
+        }
+      }
+    } else if (target.type === 'monster' || target.type === 'friendly') {
+      const rb = target.model.userData.rb;
+      if (rb) {
+        const vel = rb.linvel();
+        const displacement = handPos.clone().sub(grabPartPos);
+        const clamp = (v) => Math.max(-GRAB_FORCE_MAX, Math.min(GRAB_FORCE_MAX, v));
+        const force = {
+          x: clamp(displacement.x * GRAB_SPRING - vel.x * GRAB_DAMPING),
+          y: clamp(displacement.y * GRAB_SPRING - vel.y * GRAB_DAMPING),
+          z: clamp(displacement.z * GRAB_SPRING - vel.z * GRAB_DAMPING),
+        };
+        try {
+          rb.addForceAtPoint(force, { x: grabPartPos.x, y: grabPartPos.y, z: grabPartPos.z }, true);
+        } catch (_) {
+          rb.addForce(force, true);
+        }
+      } else {
+        target.model.position.copy(handPos);
+      }
+    } else if (target.type === 'object') {
+      const rb = target.object.userData?.rb;
+      if (rb) {
+        const objPos = target.object.position;
+        const vel = rb.linvel();
+        const clamp = (v) => Math.max(-GRAB_FORCE_MAX, Math.min(GRAB_FORCE_MAX, v));
+        rb.addForce({
+          x: clamp((handPos.x - objPos.x) * GRAB_SPRING - vel.x * GRAB_DAMPING),
+          y: clamp((handPos.y - objPos.y) * GRAB_SPRING - vel.y * GRAB_DAMPING),
+          z: clamp((handPos.z - objPos.z) * GRAB_SPRING - vel.z * GRAB_DAMPING),
+        }, true);
+      } else {
+        target.object.position.copy(handPos);
+      }
+    }
+  }
+
+  _getHandWorldPos(hand) {
+    const rig = this.playerModel?.userData?.qwopRig;
+    const floatingHand = rig?.floatingHands?.[hand];
+    if (floatingHand) {
+      const pos = new THREE.Vector3();
+      floatingHand.getWorldPosition(pos);
+      return pos;
+    }
+    const fallback = this.playerModel.position.clone();
+    fallback.y += 0.8;
+    return fallback;
+  }
+
+  _getBodyPartWorldPos(partName, model) {
+    const off = GRAB_BODY_PART_OFFSETS[partName] || GRAB_BODY_PART_OFFSETS.torso;
+    const localOffset = new THREE.Vector3(off.x, off.y, off.z);
+    // Rotate offset by model yaw so arm/leg sides stay correct when player turns
+    localOffset.applyEuler(new THREE.Euler(0, model.rotation.y, 0));
+    return model.position.clone().add(localOffset);
+  }
+
+  _detectGrabbedBodyPart(handPos, targetModel) {
+    let closest = 'torso';
+    let minDist = Infinity;
+    for (const [name] of Object.entries(GRAB_BODY_PART_OFFSETS)) {
+      const worldPos = this._getBodyPartWorldPos(name, targetModel);
+      const d = handPos.distanceTo(worldPos);
+      if (d < minDist) { minDist = d; closest = name; }
+    }
+    return closest;
+  }
+
+  attemptHandGrab(hand = 'right') {
+    if (!this.playerModel) return;
+    const handPos = this._getHandWorldPos(hand);
+
+    let closest = null;
+    let minDist = 1.2;
+
+    const others = appContext.entities.otherPlayers || window.otherPlayers || {};
+    for (const [id, p] of Object.entries(others)) {
+      const dist = handPos.distanceTo(p.model.position);
+      if (dist < minDist) {
+        closest = { type: 'player', id, model: p.model };
+        minDist = dist;
+      }
+    }
+
+    const monsterList = appContext.entities.monsters || window.monsters || [];
+    for (const mon of monsterList) {
+      const model = mon?.model || mon;
+      if (!model) continue;
+      const dist = handPos.distanceTo(model.position);
+      if (dist < minDist) {
+        closest = { type: 'monster', model, monster: mon };
+        minDist = dist;
+      }
+    }
+
+    const friendlyList = [...(Array.isArray(window.friendlies) ? window.friendlies : [])];
+    if (window.merchantFriendly?.model) friendlyList.push(window.merchantFriendly);
+    for (const friendly of friendlyList) {
+      if (!friendly?.model || friendly.isDead) continue;
+      const dist = handPos.distanceTo(friendly.model.position);
+      if (dist < minDist) {
+        closest = { type: 'friendly', model: friendly.model, friendly };
+        minDist = dist;
+      }
+    }
+
+    if (closest) {
+      this.grabbedTarget = closest;
+      this.grabbedHand = hand;
+      this.grabbedBodyPart = this._detectGrabbedBodyPart(handPos, closest.model);
+      if (closest.type === 'player') {
+        this.multiplayer.send({ type: 'grab', from: this.multiplayer.getId(), target: closest.id, active: true });
+      }
+    }
+  }
+
+  attemptGrab() {
+    const playerPos = this.playerModel.position;
+    let closest = null;
+    let minDist = 1.5;
+
+    const others = appContext.entities.otherPlayers || window.otherPlayers || {};
+    for (const [id, p] of Object.entries(others)) {
+      const dist = playerPos.distanceTo(p.model.position);
+      if (dist < minDist) {
+        closest = { type: 'player', id, model: p.model };
+        minDist = dist;
+      }
+    }
+
+    const monsterList = appContext.entities.monsters || window.monsters || [];
+    for (const mon of monsterList) {
+      const model = mon?.model || mon;
+      if (!model) continue;
+      const dist = playerPos.distanceTo(model.position);
+      if (dist < minDist) {
+        closest = { type: 'monster', model };
+        minDist = dist;
+      }
+    }
+
+    const friendlyList = [...(Array.isArray(window.friendlies) ? window.friendlies : [])];
+    if (window.merchantFriendly?.model) friendlyList.push(window.merchantFriendly);
+    for (const friendly of friendlyList) {
+      if (!friendly?.model || friendly.isDead) continue;
+      const dist = playerPos.distanceTo(friendly.model.position);
+      if (dist < minDist) {
+        closest = { type: 'friendly', model: friendly.model, friendly };
+        minDist = dist;
+      }
+    }
+
+    if (closest) {
+      this.grabbedTarget = closest;
+      if (closest.type === 'player') {
+        this.multiplayer.send({ type: 'grab', from: this.multiplayer.getId(), target: closest.id, active: true });
+      }
+    }
+  }
+
+  releaseGrab() {
+    if (this.grabbedTarget && this.grabbedTarget.type === 'player') {
+      this.multiplayer.send({ type: 'grab', from: this.multiplayer.getId(), target: this.grabbedTarget.id, active: false });
+    }
+    this.grabbedTarget = null;
+    this.grabbedHand = null;
+    this.grabbedBodyPart = null;
+    this.lastGrabMoveSentAt = 0;
+    this.lastGrabMoveSentPos = null;
+    if (this.playerModel?.userData) {
+      this.playerModel.userData.grabArmTarget = null;
+    }
+  }
+
+  setGrabbed(active, grabberId = null) {
+    this.isGrabbed = active;
+    this.grabberId = grabberId;
+    if (!active) {
+      this.externalGrabPos = null;
+      this.externalGrabBodyPart = null;
+    }
+  }
+
+  updateGrabbedPosition(pos, bodyPart) {
+    this.externalGrabPos = new THREE.Vector3(...pos);
+    this.externalGrabBodyPart = bodyPart || 'torso';
+  }
+
+  deployParachute() {
+    if (!this.playerModel || this.parachute) return;
+    const geom = new THREE.SphereGeometry(1.5, 16, 8, 0, Math.PI * 2, Math.PI/2, Math.PI / 2);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xff0000, side: THREE.DoubleSide });
+    const chute = new THREE.Mesh(geom, mat);
+    chute.rotation.x = Math.PI;
+    chute.position.set(0, 3, 0);
+    this.playerModel.add(chute);
+    this.parachute = chute;
+  }
+
+  removeParachute() {
+    if (this.parachute) {
+      this.parachute.parent.remove(this.parachute);
+      this.parachute = null;
+    }
+  }
+
+  setupPointerLock() {
+    this.domElement.addEventListener('click', () => {
+      this.domElement.requestPointerLock();
+    });
+  
+    document.addEventListener('pointerlockchange', () => {
+      this.pointerLocked = document.pointerLockElement === this.domElement;
+    });
+  
+    document.addEventListener('mousemove', (event) => {
+      if (this.pointerLocked && !this.isEngaged) {
+        const sensitivity = 0.0025;
+        this.yaw -= event.movementX * sensitivity;
+        this.pitch -= event.movementY * sensitivity;
+    
+        // Clamp pitch to stay above ground
+        const maxPitch = Math.PI / 3;    // ~60° upward
+        const minPitch = -Math.PI / 8;   // ~30° downward
+        this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
+        this.breakAutoAimFromManualCamera(Math.hypot(event.movementX * sensitivity, event.movementY * sensitivity));
+      }
+    });
+
+    this.domElement.addEventListener('wheel', (event) => {
+      const wheelAmount = Math.hypot(event.deltaX || 0, event.deltaY || 0, event.deltaZ || 0);
+      if (wheelAmount >= AUTO_AIM_WHEEL_BREAK_THRESHOLD) {
+        this.breakAutoAimFromManualCamera(Infinity);
+      }
+    }, { passive: true });
+    
+  
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        document.exitPointerLock();
+      }
+    });
+  }
+
+  updateEngagedMode() {
+    if (!this.playerModel) {
+      this.setEngaged(false);
+      return;
+    }
+    const monsterSources = [
+      appContext?.entities?.monsters,
+      window?.monsters,
+      window?.game?.monsters,
+      window?.runtimeContext?.entities?.monsters
+    ];
+    const resolveMonsterActor = (monster) => {
+      if (!monster || typeof monster !== 'object') return null;
+      if (monster.model?.position) return monster;
+      if (monster.character?.model?.position) return monster.character;
+      if (monster.monster?.model?.position) return monster.monster;
+      if (monster.entity?.model?.position) return monster.entity;
+      return null;
+    };
+    const normalizeMonsters = (source, visited = new WeakSet()) => {
+      if (!source) return [];
+      if (Array.isArray(source)) return source.flatMap((entry) => normalizeMonsters(entry, visited));
+      if (source instanceof Set) return Array.from(source).flatMap((entry) => normalizeMonsters(entry, visited));
+      if (source instanceof Map) return Array.from(source.values()).flatMap((entry) => normalizeMonsters(entry, visited));
+      if (typeof source === 'object') {
+        if (visited.has(source)) return [];
+        visited.add(source);
+        if (resolveMonsterActor(source)) return [source];
+        return Object.values(source).flatMap((entry) => normalizeMonsters(entry, visited));
+      }
+      return [];
+    };
+    const dedupe = new Set();
+    const monsters = [];
+    for (const source of monsterSources) {
+      for (const entry of normalizeMonsters(source)) {
+        const monster = resolveMonsterActor(entry);
+        if (!monster) continue;
+        const dedupeKey = monster.id || monster.model?.uuid || monster.model?.id || monster;
+        if (dedupe.has(dedupeKey)) continue;
+        dedupe.add(dedupeKey);
+        monsters.push(monster);
+      }
+    }
+    const getMonsterDistance = (monster) => {
+      if (!monster || monster.isDead) return Infinity;
+      const targetX = monster.model.position?.x;
+      const targetZ = monster.model.position?.z;
+      if (!Number.isFinite(targetX) || !Number.isFinite(targetZ)) return Infinity;
+      const dx = targetX - this.playerModel.position.x;
+      const dz = targetZ - this.playerModel.position.z;
+      return Math.hypot(dx, dz);
+    };
+
+    const RETARGET_HYSTERESIS = 1.2;
+    let selectedTarget = this.engagedTarget;
+    let selectedDistance = getMonsterDistance(selectedTarget);
+    if (!(selectedDistance <= ENGAGED_MODE_DISTANCE * RETARGET_HYSTERESIS)) {
+      selectedTarget = null;
+      selectedDistance = Infinity;
+    }
+
+    let closest = null;
+    let closestDistance = Infinity;
+    for (const monster of monsters) {
+      const distance = getMonsterDistance(monster);
+      if (!(distance < closestDistance)) continue;
+      closest = monster;
+      closestDistance = distance;
+    }
+
+    if (!selectedTarget && closest) {
+      selectedTarget = closest;
+      selectedDistance = closestDistance;
+    }
+    const shouldEngage = selectedTarget && selectedDistance <= ENGAGED_MODE_DISTANCE;
+    if (shouldEngage) {
+      if (!this.isEngaged) {
+        this.freeYaw = this.yaw;
+        this.freePitch = this.pitch;
+        this.cameraTouchId = null;
+      }
+      this.isEngaged = true;
+      this.engagedTarget = selectedTarget;
+      this.engagedDirection = selectedTarget.model.position.clone().sub(this.playerModel.position);
+      this.engagedDirection.y = 0;
+      if (this.engagedDirection.lengthSq() > 0) {
+        this.engagedDirection.normalize();
+      }
+    } else {
+      this.setEngaged(false);
+    }
+  }
+
+  setEngaged(active) {
+    if (active) return;
+    if (this.isEngaged) {
+      if (Number.isFinite(this.freeYaw)) {
+        this.yaw = this.freeYaw;
+      }
+      if (Number.isFinite(this.freePitch)) {
+        this.pitch = this.freePitch;
+      }
+    }
+    this.isEngaged = false;
+    this.engagedTarget = null;
+    this.engagedDirection = null;
+    this.freeYaw = null;
+    this.freePitch = null;
+  }
+
+}

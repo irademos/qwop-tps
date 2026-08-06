@@ -1,0 +1,15804 @@
+// app.js
+import { getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
+import { Weapon } from '../items/weapon.js';
+import * as THREE from "three";
+import { PlayerCharacter } from "../characters/PlayerCharacter.js";
+import { loadMonsterModel } from "../models/monsterModel.js";
+import { MonsterCharacter } from "../characters/MonsterCharacter.js";
+import { FriendlyCharacter } from "../characters/FriendlyCharacter.js";
+import { createFriendlyNpcManager } from "../npc/friendlyNpcManager.js";
+import {
+  clearTerrainStampsForTile,
+  consumeDirtyTerrainChunks,
+  getTerrainHeight,
+  getTerrainStampDebugSample,
+  setTerrainStampsForTile
+} from '../environment/terrainHeight.js';
+import { createFire } from '../environment/fire.js';
+import { Multiplayer } from '../multiplayer/peerConnection.js';
+import { PlayerControls } from '../controls/controls.js';
+import { getCookie, setCookie } from '../core/utils.js';
+import { PickupSpatialGrid } from '../combat/pickupSpatialGrid.js';
+import { initSpeechCommands } from '../controls/speechCommands.js';
+import { createAudioManager } from '../features/audioFeature.js';
+import {
+  spawnProjectile,
+  updateProjectiles,
+  removeProjectileAt,
+  spawnArrowProjectile,
+  ATTACKS,
+  updateMeleeAttacks,
+  Torch,
+  TORCH_PICKUP_LOCATION,
+  loadSpecialWeapons
+} from '../features/combatFeature.js';
+import { TreasureChest } from '../items/treasure_chest.js';
+import { Bed } from '../items/bed.js';
+import { CraftTable } from '../items/craft_table.js';
+import { createNature } from '../environment/nature.js';
+import { createCabin } from '../environment/cabin.js';
+import { createTower } from '../environment/tower.js';
+import { createMushrooms, MUSHROOM_ENTRIES } from '../environment/mushrooms.js';
+import { createAnimalManager } from '../environment/animals.js';
+import { createApples, APPLE_ITEM_ID } from '../items/apple.js';
+import { createHomeSystem } from '../player/home.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import RAPIER from '@dimforge/rapier3d-compat';
+import { removeRigidBodySafely } from '../physics/rapierSafety.js';
+import { createStaticBoxColliderForObject, removeStaticBoxCollider, syncStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
+import { configureSpawnAlignment, getSpawnPosition, getSpawnY } from '../map/spawnUtils.js';
+import { createLocationProvider } from '../map/location.js';
+import { fetchMapTilerFeatures, fetchOSMData, isOverpassThrottleError } from '../map/osmClient.js';
+import { overpassToGeoJSON } from '../map/osmGeoJson.js';
+import { createMapRenderer } from '../environment/mapRender.js';
+import { createBuildingsRenderer } from '../environment/buildingsRender.js';
+import {
+  BASE_HEALTH_SEGMENTS,
+  HEALTH_SEGMENT_VALUE,
+  clampHealthSegments,
+  convertPointsToSegments,
+  normalizeHealthSegments
+} from '../player/healthUtils.js';
+import {
+  BASE_HUNGER_SEGMENTS,
+  BASE_MAGIC_SEGMENTS,
+  HUNGER_MAX_SEGMENTS,
+  MAGIC_MAX_SEGMENTS,
+  clampHungerSegments,
+  clampMagicSegments
+} from '../player/statSegments.js';
+import { createTileCache } from '../map/tileCache.js';
+import { createGroundTiles } from '../environment/groundTiles.js';
+import { createTerrainStampDebugOverlay } from '../environment/terrainStampDebugOverlay.js';
+import { MapLoader } from '../environment/MapLoader.ts';
+import { clearCache, getCachedTile, setCachedTile } from '../map/idbCache.js';
+import {
+  initHomeStoragePanel,
+  openHomeStorage,
+  updateHomeStorageUI,
+  initSettingsPanel,
+  openSettings,
+  openInventory,
+  updateSettingsUI,
+  getCraftRecipes,
+  initCraftPanelFeature,
+  openCraftPanelFeature,
+  updateCraftUIFeature,
+  initMerchantPanelFeature,
+  updateMerchantUIFeature,
+  initMerchantFeature,
+  spawnMerchantAtFeature,
+  clearMerchantSpawnFeature,
+  getMerchantFriendlyFeature,
+  setMerchantHostFeature,
+  setMerchantRoomFeature,
+  initCustomizeUIFeature,
+  initSpellsFeature
+} from '../features/uiPanelsFeature.js';
+import {
+  initMapViewFeature,
+  setMapViewEnabledFeature,
+  updateMapViewFeature,
+  isMapViewTransitionActiveFeature,
+  zoomInMapFeature,
+  zoomOutMapFeature
+} from '../features/mapFeature.js';
+import { appContext } from '../core/appContext.js';
+import { getAttackTypes } from '../items/melee.js';
+import { exposeDebugGlobals } from '../core/exposeDebugGlobals.js';
+import { claimAchievement, getAchievementView, mergeAchievementState, recordAchievementProgress } from '../player/achievements.js';
+import { getDistanceUnitPreference, setDistanceUnitPreference } from '../player/distanceUnits.js';
+import { db } from '../core/firebase-init.js';
+import { onValue, push, ref, remove, set, update } from 'firebase/database';
+import { openPopupDialog } from '../controls/popupDialog.js';
+import { EnemyPlayer } from '../characters/EnemyPlayer.js';
+
+import {
+  clearStoredPin,
+  deleteProfileData,
+  getStoredPinHash,
+  getSleepTimestamp,
+  loadLeaderboards,
+  loadOrCreateWithPin,
+  renameProfile,
+  saveCharacterModel,
+  saveCustomization,
+  saveQuestState,
+  saveAchievementState,
+  saveCompanions,
+  saveSleepTimestamp,
+  saveWalkingStats,
+  saveStatsImmediate,
+  saveStatsThrottled,
+  initMonsterPersistence,
+  loadMonstersSnapshot,
+  subscribeMonsterUpdates,
+  ensureMonsterRecord,
+  persistMonsterHp,
+  persistMonsterState,
+  removeMonsterRecord,
+  setMonsterPersistenceHost
+} from '../features/persistenceFeature.js';
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    if (location.hostname !== 'localhost') {
+      navigator.serviceWorker.register('/service-worker.js').catch((error) => {
+        console.error('Service worker registration failed:', error);
+      });
+    }
+  });
+}
+
+const ROAD_LIGHT_GRID_SIZE = 3;
+const ROAD_LIGHT_GRID_COUNT = ROAD_LIGHT_GRID_SIZE * ROAD_LIGHT_GRID_SIZE;
+const ROAD_LIGHT_GRID_SPACING_METERS = 40;
+const ROAD_LIGHT_SHIFT_DISTANCE_METERS = ROAD_LIGHT_GRID_SPACING_METERS * 1.25;
+const ROAD_LIGHT_REPOSITION_INTERVAL_MS = 7000;
+const ROAD_LIGHT_MODEL_URL = '/assets/props/road_light.glb';
+const ROAD_LIGHT_POINT_LIGHT_CONFIG = Object.freeze({
+  color: 0xfff1c1,
+  intensity: 2.6,
+  distance: 40,
+  decay: 0.5,
+  yOffset: 3.4
+});
+
+const DEFAULT_CHARACTER_MODEL = "/models/base_character_2.fbx";
+const MAX_MONSTERS_TOTAL = 24;
+const MAX_TRAVEL_SPAWN_CHARACTERS_TOTAL = 32;
+const MONSTER_CLUSTER_MAX_SIZE = 5;
+const MAX_MONSTERS_ACTIVE = 8;
+const MONSTER_COMBAT_RADIUS = 26;
+const MONSTER_BACKGROUND_RADIUS = 70;
+const MONSTER_BACKGROUND_AI_INTERVAL_MS = 700;
+const MONSTER_SPAWN_GROUND_OFFSET = 0.9;
+const MONSTER_MODELS = [
+  "/models/zombie.fbx",
+  "/models/zombie_boy.fbx",
+  "/models/zombie_green.fbx",
+  "/models/golem.fbx"
+];
+const MONSTER_SPAWN_MIN_RADIUS = 25;
+const MONSTER_SPAWN_MAX_RADIUS = 160;
+const MONSTER_RESPAWN_DELAY_RANGE_MS = [3000, 5000];
+const MONSTER_SPAWN_ATTEMPTS = 12;
+const MONSTER_SNAPSHOT_TIMEOUT_MS = 6000;
+const MONSTER_LEVEL_WEIGHTS = [
+  { level: 1, weight: 0.55 },
+  { level: 2, weight: 0.25 },
+  { level: 3, weight: 0.15 },
+  { level: 4, weight: 0.05 }
+];
+
+const PERF = {
+  throttleAI: true,
+  throttlePickups: true,
+  throttleUI: true,
+  disableMonsters: false,
+  disablePickups: false,
+  disableMapUpdates: false
+};
+
+const FRAME_TIME_DEGRADE_THRESHOLD_MS = 25;
+const FRAME_TIME_RECOVER_THRESHOLD_MS = 18;
+const FRAME_TIME_DEGRADE_MAX_LEVEL = 2;
+const INCOMING_QUEUE_MAX_PER_FRAME = 40;
+const INCOMING_QUEUE_BUDGET_MS = 3;
+const INCOMING_QUEUE_MAX_BACKLOG = 400;
+const LOW_END_BUCKET_INTERVALS = Object.freeze({
+  ai: 2,
+  pickups: 2,
+  remoteLabels: 2,
+  audio: 3
+});
+const NETWORK_TOPOLOGY_MODE = (import.meta.env.VITE_NETWORK_TOPOLOGY_MODE || 'star').toLowerCase() === 'mesh'
+  ? 'mesh'
+  : 'star';
+const HOST_CRITICAL_MESSAGE_TYPES = new Set([
+  'entityControl',
+  'entityStates',
+  'attackMonster',
+  'spawnRequest',
+  'projectile',
+  'inventoryThrowProjectile'
+]);
+
+appContext.debugFlags.PERF = PERF;
+appContext.debugFlags.DEBUG_CONSOLE = false;
+exposeDebugGlobals({
+  enableDebugMirror: appContext.debugFlags.DEBUG_CONSOLE === true,
+  enableCompatibilityShims: true
+});
+
+const clock = new THREE.Clock();
+const mixerClock = new THREE.Clock();
+const REMOTE_ANIM_FPS = 8;
+const REMOTE_ANIM_INTERVAL = 1 / REMOTE_ANIM_FPS;
+const MONSTER_ANIM_FPS = 8;
+const MONSTER_ANIM_INTERVAL = 1 / MONSTER_ANIM_FPS;
+const MONSTER_ANIM_MID_FPS = 4;
+const MONSTER_ANIM_MID_INTERVAL_MS = 1000 / MONSTER_ANIM_MID_FPS;
+const MONSTER_SWORD_MODEL_URL = '/assets/props/autumn_sword.glb';
+const MONSTER_SWORD_SCALE = 0.16;
+const MONSTER_SWORD_HOLD_OFFSET = new THREE.Vector3(-0.05, 0.15, 0.08);
+const MONSTER_SWORD_HOLD_ROTATION = new THREE.Euler(-Math.PI / 2, Math.PI, 0, 'YXZ');
+const MONSTER_SWORD_HOLD_QUATERNION = new THREE.Quaternion().setFromEuler(MONSTER_SWORD_HOLD_ROTATION);
+const ARROW_MODEL_URL = '/assets/props/arrow.glb';
+const MANA_POTION_MODEL_URL = '/assets/props/mana_potion.glb';
+const MANA_POTION_SCALE = 8.0;
+const ARROW_PROJECTILE_SCALE = 2.2;
+const ARROW_PROJECTILE_SPEED = 55;
+const ARROW_PROJECTILE_LIFETIME = 6000;
+const BOMB_THROW_SPEED = 11;
+const BOMB_THROW_LIFETIME = 15000;
+const BOMB_THROW_UPWARD_BIAS = 0.25;
+const MISSILE_PROJECTILE_SPEED = 32;
+const MISSILE_PROJECTILE_LIFETIME = 3500;
+const MISSILE_DAMAGE_RADIUS = 4;
+const MISSILE_BASE_DAMAGE = 4;
+const MISSILE_KNOCKBACK_STRENGTH = 4;
+const MISSILE_LAUNCH_UPWARD_BIAS = 0.18;
+const INVENTORY_THROW_SPEED = 2;
+const INVENTORY_THROW_LIFETIME = 12000;
+const INVENTORY_THROW_UPWARD_BIAS = 0.22;
+const BOMB_DAMAGE_RADIUS = 5;
+const BOMB_BASE_DAMAGE = 6;
+const BOMB_KNOCKBACK_STRENGTH = 6;
+const BOMB_MIST_LIFETIME_MS = 8000;
+const BOMB_MIST_PARTICLE_COUNT = 35;
+const ATTACK_ARC_LIFETIME_MS = 520;
+const ATTACK_TRAIL_POINT_COUNT = 5;
+const ATTACK_TRAIL_STACK_COUNT = 3;
+const ATTACK_TRAIL_SAMPLE_MS = 28;
+const ATTACK_IMPACT_LIFETIME_MS = 220;
+const ATTACK_SHOCKWAVE_LIFETIME_MS = 360;
+const ATTACK_RED_STREAK_COUNT = 9;
+const ATTACK_RED_STREAK_LIFETIME_MS = 260;
+const SWORD_SPIN_CHARGE_WINDUP_SPEED = 0.25;
+const TORCH_ITEM_ID = 'torch';
+const TORCH_HEALTH_KEY = 'healths';
+const DEFAULT_TORCH_HEALTH = 100;
+const TORCH_HEALTH_DECAY_PER_SECOND = 0.6;
+const NPC_AUDIO_HEAR_RADIUS = 30;
+const FRIENDLY_VOICE_MAX_VOLUME = 0.35;
+const ZOMBIE_VOICE_MAX_VOLUME = 0.4;
+const MERCHANT_LOOP_MAX_VOLUME = 0.38;
+const FRIENDLY_VOICE_INTERVAL_MS = [5000, 11000];
+const FRIENDLY_VOICE_CLIPS = [
+  'NPC Sounds/friendly_sound_1.ogg',
+  'NPC Sounds/friendly_sound_2.ogg',
+  'NPC Sounds/friendly_sound_3.ogg',
+  'NPC Sounds/friendly_sound_4.ogg'
+];
+const ZOMBIE_VOICE_CLIPS = [
+  'NPC Sounds/zombie_sound_1.ogg',
+  'NPC Sounds/zombie_sound_2.ogg'
+];
+const MERCHANT_LOOP_CLIP = 'NPC Sounds/merchant_loop.ogg';
+const TERRAIN_STAMP_REGRESSION_SCENE = Object.freeze({
+  seed: 'terrain-stamp-regression-v1',
+  position: { x: 0, y: 0, z: 0 }
+});
+
+
+// --- Rapier demo state ---
+let rapierWorld;
+const rbToMesh = new Map(); // RigidBody -> THREE.Mesh
+let physicsAccumulator = 0;
+const FIXED_DT = 1 / 60;
+let monsterSwordTemplate = null;
+let monsterSwordTemplatePromise = null;
+let arrowTemplate = null;
+let arrowTemplatePromise = null;
+let manaPotionTemplate = null;
+let manaPotionTemplatePromise = null;
+const WORLD_ORIGIN_STORAGE_KEY = 'worldOrigin';
+const DEFAULT_WORLD_ORIGIN = Object.freeze({ lat: 37.7749, lon: -122.4194 });
+const METERS_PER_DEGREE_LAT = 111_132.92;
+const PLAYER_VISIBILITY_RADIUS_M = 200;
+const PRESENCE_STALE_MS = 5000;
+const PRESENCE_SEND_MS = 350;
+const PRESENCE_HEARTBEAT_MS = 2000;
+const PRESENCE_SWEEP_MS = 250;
+const REMOTE_LERP_ALPHA = 0.15;
+const REMOTE_TELEPORT_THRESHOLD_M = 25;
+const DISPLAY_SETTINGS_KEY = 'settings:display';
+const DISPLAY_PRESETS = {
+  day: {
+    ambientIntensity: 2.0,
+    directionalIntensity: 2.0,
+    groundBrightness: 1.6,
+    buildingBrightness: 1.6,
+    skyBrightness: 1.6
+  },
+  night: {
+    ambientIntensity: 0.0,
+    directionalIntensity: 0.0,
+    groundBrightness: 0.6,
+    buildingBrightness: 0.65,
+    skyBrightness: 0.25
+  }
+};
+const HIGH_CONTRAST_PRESET = {
+  ambientIntensity: 2.0,
+  directionalIntensity: 2.0,
+  groundBrightness: 2.0,
+  buildingBrightness: 2.0
+};
+const PERFORMANCE_MODES = new Set(['auto', 'quality', 'balanced', 'performance']);
+const PERFORMANCE_PROFILE_CAPS = {
+  low: 1.0,
+  mid: 1.5,
+  high: 2.0
+};
+
+function metersPerDegreeLon(latDeg) {
+  return 111_412.84 * Math.cos((latDeg * Math.PI) / 180);
+}
+
+function getUtcDateString(timestampMs) {
+  return new Date(timestampMs).toISOString().slice(0, 10);
+}
+
+function toMiles(meters) {
+  return meters / 1609.344;
+}
+
+function getStartOfUtcWeek(timestampMs) {
+  const d = new Date(timestampMs);
+  const day = d.getUTCDay();
+  const diff = (day + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - diff);
+  d.setUTCHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function mergeWalkingStats(walkingStats) {
+  const totalMilesRaw = Number(walkingStats?.totalMiles);
+  const totalMiles = Number.isFinite(totalMilesRaw) && totalMilesRaw >= 0 ? totalMilesRaw : 0;
+  const sourceDaily = walkingStats?.dailyMiles && typeof walkingStats.dailyMiles === 'object' ? walkingStats.dailyMiles : {};
+  const dailyMiles = {};
+  for (const [date, miles] of Object.entries(sourceDaily)) {
+    const parsed = Number(miles);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    dailyMiles[date] = parsed;
+  }
+  const sourceDailyReset = walkingStats?.dailyResetMiles && typeof walkingStats.dailyResetMiles === 'object' ? walkingStats.dailyResetMiles : {};
+  const dailyResetMiles = {};
+  for (const [date, miles] of Object.entries(sourceDailyReset)) {
+    const parsed = Number(miles);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    if (!Number.isFinite(parsed) || parsed <= 0) continue;
+    dailyResetMiles[date] = parsed;
+  }
+  return { totalMiles, dailyMiles, dailyResetMiles, updatedAt: Number.isFinite(walkingStats?.updatedAt) ? walkingStats.updatedAt : null };
+}
+
+
+function createArcadeOverlay(startOverlay) {
+  const message = startOverlay.querySelector('[data-arcade-message]');
+  const welcomeSection = startOverlay.querySelector('[data-arcade-welcome]');
+  const welcomeText = startOverlay.querySelector('[data-arcade-welcome-text]');
+  const switchButton = startOverlay.querySelector('[data-arcade-switch]');
+  const form = startOverlay.querySelector('[data-arcade-form]');
+  const nameInput = startOverlay.querySelector('[data-arcade-name]');
+  const pinInput = startOverlay.querySelector('[data-arcade-pin]');
+  const confirmField = startOverlay.querySelector('[data-arcade-confirm-field]');
+  const confirmInput = startOverlay.querySelector('[data-arcade-confirm]');
+  const loginButton = startOverlay.querySelector('[data-arcade-login]');
+  const signupButton = startOverlay.querySelector('[data-arcade-signup]');
+  const backButton = startOverlay.querySelector('[data-arcade-back]');
+  const startButton = startOverlay.querySelector('[data-arcade-start]');
+  const modeSelectEl = startOverlay.querySelector('[data-arcade-mode-select]');
+  const modeBtns = startOverlay.querySelectorAll('[data-mode-btn]');
+
+  let mode = 'login';
+  let pendingAuthResult = null;
+  let currentName = '';
+  let authInProgress = false;
+  let authToken = 0;
+  let resolveAuth = null;
+  let startHandler = null;
+  let activeLoadProfile = loadOrCreateWithPin;
+
+  const createWaiter = () => {
+    const queue = [];
+    let resolver = null;
+    return {
+      push(value) {
+        if (resolver) {
+          resolver(value);
+          resolver = null;
+          return;
+        }
+        queue.push(value);
+      },
+      wait() {
+        return new Promise(resolve => {
+          if (queue.length > 0) {
+            resolve(queue.shift());
+          } else {
+            resolver = resolve;
+          }
+        });
+      }
+    };
+  };
+
+  const loginWaiter = createWaiter();
+  const signupWaiter = createWaiter();
+
+  const setMessage = text => {
+    if (!message) return;
+    message.textContent = text || '';
+  };
+
+  const setMode = nextMode => {
+    mode = nextMode;
+    if (mode === 'signup') {
+      confirmField?.classList.remove('hidden');
+      loginButton?.classList.add('hidden');
+      backButton?.classList.remove('hidden');
+      signupButton?.classList.remove('arcade-secondary');
+      confirmInput.value = '';
+    } else {
+      confirmField?.classList.add('hidden');
+      loginButton?.classList.remove('hidden');
+      backButton?.classList.add('hidden');
+      signupButton?.classList.add('arcade-secondary');
+      confirmInput.value = '';
+    }
+  };
+
+  const showModeSelect = (authResult) => {
+    pendingAuthResult = authResult;
+    form?.classList.add('hidden');
+    startButton?.classList.add('hidden');
+    modeSelectEl?.classList.remove('hidden');
+  };
+
+  const showLoginForm = ({ name, preserveMessage = false } = {}) => {
+    form?.classList.remove('hidden');
+    welcomeSection?.classList.add('hidden');
+    startButton?.classList.add('hidden');
+    modeSelectEl?.classList.add('hidden');
+    setMode('login');
+    if (!preserveMessage) {
+      setMessage('');
+    }
+    nameInput.value = name || '';
+    pinInput.value = '';
+    confirmInput.value = '';
+  };
+
+  const showWelcome = (name, { ready = false } = {}) => {
+    welcomeText.textContent = `Welcome back ${name}`;
+    welcomeSection?.classList.remove('hidden');
+    form?.classList.add('hidden');
+    startButton?.classList.add('hidden');
+    if (ready) {
+      showModeSelect(null);
+    }
+  };
+
+  const hideOverlay = () => {
+    startOverlay.setAttribute('aria-hidden', 'true');
+    startOverlay.classList.add('hidden');
+    startOverlay.style.display = 'none';
+  };
+
+  const requestLoginPin = async name => {
+    showLoginForm({ name, preserveMessage: true });
+    return loginWaiter.wait();
+  };
+
+  const requestNewPin = async name => {
+    showLoginForm({ name, preserveMessage: true });
+    setMode('signup');
+    return signupWaiter.wait();
+  };
+
+  const startAuthFlow = async (name, { autoStart = false } = {}) => {
+    if (!name) return;
+    const token = ++authToken;
+    authInProgress = true;
+    setMessage('Checking your save...');
+    try {
+      const result = await activeLoadProfile(name, {
+        requestLoginPin,
+        requestNewPin,
+        onIncorrectPin: () => setMessage('Incorrect PIN. Try again.'),
+        onInvalidPin: () => setMessage('PIN must be 4–6 digits.'),
+        useAlerts: false
+      });
+      if (token !== authToken) return;
+      authInProgress = false;
+      if (result?.canceled) {
+        setMessage('Login canceled.');
+        showLoginForm({ name: nameInput.value });
+        return;
+      }
+      currentName = result.profile?.name || name;
+      setMessage('');
+      showWelcome(currentName, { ready: true });
+      showModeSelect(result);
+    } catch (err) {
+      if (token !== authToken) return;
+      authInProgress = false;
+      setMessage('Login failed. Try again.');
+      showLoginForm({ name: nameInput.value });
+      console.warn('Login flow failed', err);
+    }
+  };
+
+  const handleLoginSubmit = event => {
+    event.preventDefault();
+    if (mode !== 'login') return;
+    const name = nameInput.value.trim();
+    const pin = pinInput.value.trim();
+    if (!name) {
+      setMessage('Enter your name to continue.');
+      return false;
+    }
+    if (!pin) {
+      setMessage('Enter your PIN to continue.');
+      return false;
+    }
+    if (authInProgress && name !== currentName) {
+      setMessage('Switch user to log in with a different name.');
+      return false;
+    }
+    currentName = name;
+    loginWaiter.push(pin);
+    return true;
+  };
+
+  const handleSignupSubmit = event => {
+    event.preventDefault();
+    if (mode !== 'signup') {
+      setMode('signup');
+      setMessage('');
+      return false;
+    }
+    const name = nameInput.value.trim();
+    const pin = pinInput.value.trim();
+    const confirm = confirmInput.value.trim();
+    if (!name) {
+      setMessage('Enter your name to continue.');
+      return false;
+    }
+    if (!pin || !confirm) {
+      setMessage('Enter and confirm your PIN.');
+      return false;
+    }
+    if (pin !== confirm) {
+      setMessage('PINs do not match.');
+      return false;
+    }
+    if (authInProgress && name !== currentName) {
+      setMessage('Switch user to sign up with a different name.');
+      return false;
+    }
+    currentName = name;
+    signupWaiter.push(pin);
+    return true;
+  };
+
+  const handleBackToLogin = event => {
+    event.preventDefault();
+    setMode('login');
+    setMessage('');
+  };
+
+  const handleSwitchUser = () => {
+    authToken += 1;
+    authInProgress = false;
+    if (currentName) {
+      clearStoredPin(currentName);
+      setCookie('playerName', '', -1);
+      localStorage.removeItem('playerName');
+    }
+    currentName = '';
+    showLoginForm();
+    setMessage('Enter a new name to continue.');
+  };
+
+  loginButton?.addEventListener('click', event => {
+    const queued = handleLoginSubmit(event);
+    if (queued && !authInProgress && nameInput.value.trim()) {
+      startAuthFlow(nameInput.value.trim(), { autoStart: true });
+    }
+  });
+
+  form?.addEventListener('submit', event => {
+    if (mode === 'login') {
+      const queued = handleLoginSubmit(event);
+      if (queued && !authInProgress && nameInput.value.trim()) {
+        startAuthFlow(nameInput.value.trim(), { autoStart: true });
+      }
+    } else if (mode === 'signup') {
+      const queued = handleSignupSubmit(event);
+      if (queued && !authInProgress && nameInput.value.trim()) {
+        startAuthFlow(nameInput.value.trim(), { autoStart: true });
+      }
+    }
+  });
+
+  signupButton?.addEventListener('click', event => {
+    if (mode === 'login') {
+      handleSignupSubmit(event);
+      return;
+    }
+    const queued = handleSignupSubmit(event);
+    if (queued && !authInProgress && nameInput.value.trim()) {
+      startAuthFlow(nameInput.value.trim(), { autoStart: true });
+    }
+  });
+
+  backButton?.addEventListener('click', handleBackToLogin);
+  switchButton?.addEventListener('click', handleSwitchUser);
+
+  startButton?.addEventListener('click', () => {
+    if (startHandler) {
+      startHandler();
+    }
+    hideOverlay();
+  });
+
+  modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const chosenMode = btn.dataset.modeBtn;
+      window.gameMode = chosenMode;
+      if (startHandler) startHandler();
+      hideOverlay();
+      if (pendingAuthResult && resolveAuth) {
+        resolveAuth(pendingAuthResult);
+      } else if (resolveAuth) {
+        resolveAuth({});
+      }
+    });
+  });
+
+  return {
+    async authenticate({ initialName, hasStoredPin, loadProfile }) {
+      if (loadProfile) {
+        activeLoadProfile = loadProfile;
+      }
+      const authPromise = new Promise(resolve => {
+        resolveAuth = resolve;
+      });
+      if (initialName) {
+        nameInput.value = initialName;
+      }
+      if (initialName && hasStoredPin) {
+        currentName = initialName;
+        welcomeText.textContent = `Welcome back ${initialName}`;
+        welcomeSection?.classList.remove('hidden');
+        form?.classList.add('hidden');
+        startAuthFlow(initialName, { autoStart: false });
+      } else {
+        showLoginForm({ name: initialName });
+      }
+      return authPromise;
+    },
+    setStartHandler(handler) {
+      startHandler = handler;
+    },
+    hideOverlay
+  };
+}
+
+async function initCore(runtimeContext) {
+  document.body.addEventListener('touchstart', () => {}, { once: true });
+
+  const audioManager = createAudioManager();
+  runtimeContext.systems.audioManager = audioManager;
+  window.audioManager = audioManager;
+  let syncBackgroundLoopForDisplayMode = () => {
+    audioManager.playBGS('Forest Day/Forest Day.ogg');
+  };
+  const startOverlay = document.getElementById('start-overlay');
+  const arcadeOverlay = createArcadeOverlay(startOverlay);
+  let hasStartedAudio = false;
+
+  const resumeAudioContext = async () => {
+    const context = THREE.AudioContext?.getContext?.();
+    if (context?.state === 'suspended') {
+      try {
+        await context.resume();
+      } catch (err) {
+        console.warn('AudioContext resume failed', err);
+      }
+    }
+  };
+
+  const focusGameCanvas = () => {
+    const canvas = document.querySelector('#game-container canvas');
+    if (canvas) {
+      canvas.tabIndex = 0;
+      canvas.focus();
+    } else {
+      document.body?.focus?.();
+    }
+  };
+
+  const startAudioAndGameOnce = async () => {
+    if (hasStartedAudio) return;
+    hasStartedAudio = true;
+    await resumeAudioContext();
+    syncBackgroundLoopForDisplayMode();
+    focusGameCanvas?.();
+  };
+
+  arcadeOverlay.setStartHandler(startAudioAndGameOnce);
+
+  let playerName = localStorage.getItem('playerName') || getCookie("playerName");
+  const hasStoredPin = !!getStoredPinHash(playerName);
+  const profileResult = await arcadeOverlay.authenticate({
+    initialName: playerName,
+    hasStoredPin,
+    loadProfile: loadOrCreateWithPin
+  });
+  playerName = profileResult.profile?.name || playerName;
+  let { nameKey: profileNameKey, profile: playerProfile } = profileResult;
+
+  setCookie("playerName", playerName);
+  localStorage.setItem('playerName', playerName);
+
+  let characterModel = DEFAULT_CHARACTER_MODEL;
+  const storedCharacterModel = playerProfile?.characterModel
+    || localStorage.getItem('characterModel')
+    || getCookie("characterModel")
+    || DEFAULT_CHARACTER_MODEL;
+  characterModel = storedCharacterModel;
+  if (profileNameKey && playerProfile?.characterModel !== storedCharacterModel) {
+    playerProfile = playerProfile || {};
+    playerProfile.characterModel = storedCharacterModel;
+    await saveCharacterModel(profileNameKey, storedCharacterModel);
+  }
+
+  let updatePlayerInfoUI = () => {};
+
+  const FOOD_HUNGER_GAIN = 8;
+  const HEALTH_PICKUP_SEGMENTS = 2;
+  const MUSHROOM_HEALTH_SEGMENTS = 1;
+  const MUSHROOM_HUNGER_GAIN = 3;
+  const APPLE_HEALTH_SEGMENTS = 1;
+  const APPLE_HUNGER_GAIN = 2;
+  const APPLE_DROP_LIFT = 0.25;
+  const HUNGER_DECAY_PER_HOUR = 1.6;
+  const ENERGY_DECAY_PER_SECOND_WHILE_MOVING = 0.09;
+  const HUNGER_HEALTH_DECAY_PER_SECOND = 0.2;
+  const SLEEP_RECOVERY_PER_SECOND = HUNGER_MAX_SEGMENTS / 3600;
+  const HUNGER_HEALTH_DECAY_SEGMENTS_PER_SECOND = HUNGER_HEALTH_DECAY_PER_SECOND / HEALTH_SEGMENT_VALUE;
+  const SLEEP_RECOVERY_SEGMENTS_PER_SECOND = SLEEP_RECOVERY_PER_SECOND / HEALTH_SEGMENT_VALUE;
+  const PICKUP_RADIUS = 1.2;
+  const PICKUP_ATTRACT_RADIUS = 8;
+  const PICKUP_ATTRACT_SPEED = 7.5;
+  const MONSTER_DROP_ATTRACT_SPEED = 9.5;
+  const APPLE_PICKUP_RADIUS = 3;
+  const WOOD_ITEM_ID = 'wood';
+  const MEAT_ITEM_ID = 'meat';
+  const ZOMBIE_BRAINS_ITEM_ID = 'zombie_brains';
+  const LIFE_POTION_ITEM_ID = 'life_potion';
+  const MANA_POTION_ITEM_ID = 'mana_potion';
+  const SALT_ITEM_ID = 'salt';
+  const SAUTEED_MUSHROOMS_ITEM_ID = 'sauteed_mushrooms';
+  const WOOD_PICKUP_RADIUS = 3;
+  const MEAT_PICKUP_RADIUS = 3;
+  const SALT_PICKUP_RADIUS = 3;
+  const MEAT_HEALTH_SEGMENTS = 4;
+  const MEAT_HUNGER_GAIN = 16;
+  const SALT_HEALTH_SEGMENTS = 1;
+  const SALT_HUNGER_GAIN = 2;
+  const SAUTEED_MUSHROOMS_HEALTH_SEGMENTS = 12;
+  const SAUTEED_MUSHROOMS_HUNGER_GAIN = 28;
+  const WOOD_DROP_LIFT = 0.12;
+  const TREE_HITS_TO_CUT = 3;
+  const TREE_SWING_TILT_STEP = 0.08;
+  const TREE_HIT_RANGE_BOOST = 3.5;
+  const MAX_AMMO_PICKUPS = 60;
+  const MAX_FOOD_PICKUPS = 0;
+  const MAX_HEALTH_PICKUPS = 0;
+  const MAX_COIN_PICKUPS = 160;
+  const MAX_WEAPON_PICKUPS = 24;
+  const TILE_STOCK_AMMO_COUNT = 0;
+  const TILE_STOCK_FOOD_COUNT = 0;
+  const TILE_STOCK_HEALTH_COUNT = 0;
+  const TILE_STOCK_COIN_COUNT = 1000;
+  const TILE_STOCK_WEAPON_COUNT = 24;
+  const PICKUP_SPAWN_RADIUS = 225;
+  const PICKUP_STOCK_COOLDOWN_MS = 1 * 5 * 1000;
+  const ICE_GUN_AMMO_CLUSTER_COUNT = 3;
+  const ICE_GUN_AMMO_CLUSTER_RADIUS = 1.4;
+
+  let multiplayer = null;
+  let isHost = false;
+  var playerControls = null;
+  let friendlyNpcManager = null;
+  let homeSystem = null;
+  let scene = null;
+  let mapRenderer = null;
+  let buildingsRenderer = null;
+  let natureController = null;
+  let groundTiles = null;
+  let ambientLight = null;
+  let dirLight = null;
+  let tileCache = null;
+  let worldOrigin = null;
+  let currentRenderOrigin = null;
+  let lastRenderOrigin = null;
+  let activeTileKey = null;
+  let pendingMapRebuild = false;
+  let mapRebuildToken = 0;
+  const networkedEntities = new Map();
+  const networkedLocalControlState = new Map();
+  const pendingEntityStates = new Map();
+  const authoritativeEntityStates = new Map();
+  const localDynamicNetworkedEntities = new Map();
+  const remoteQuestFriends = new Map();
+  const remoteCompanionDogSpawns = new Set();
+  const removedRemotePlayerIds = new Set();
+  let lastEntityBroadcast = 0;
+  let lastFullEntityBroadcast = 0;
+  let lastControlSend = 0;
+  let entityBroadcastIntervalMs = 260;
+  const ENTITY_STATE_DIRTY_THRESHOLD = 0.01;
+  const ENTITY_FULL_SNAPSHOT_INTERVAL = 5000;
+  let controlSendIntervalMs = 220;
+  let presenceSendIntervalMs = PRESENCE_SEND_MS;
+  const POSITION_DEADBAND_SQ = 0.03 * 0.03;
+  const ROTATION_DEADBAND_RAD = 0.045;
+  const NETWORK_BASE_PROFILE = Object.freeze({
+    high: Object.freeze({ presenceMs: 350, entityMs: 260, controlMs: 200 }),
+    mid: Object.freeze({ presenceMs: 420, entityMs: 300, controlMs: 240 }),
+    low: Object.freeze({ presenceMs: 550, entityMs: 380, controlMs: 320 })
+  });
+  const NETWORK_ADAPTIVE_PROFILE = Object.freeze({
+    backlogWarn: 40,
+    backlogCritical: 140,
+    processSaturated: INCOMING_QUEUE_MAX_PER_FRAME,
+    overrunWarnStreak: 4,
+    overrunCriticalStreak: 10,
+    recoveryStableFrames: 150,
+    restoreStepMs: 12,
+    logWindowMs: 3000,
+    presenceDeadbandMul: 0.75,
+    rotationDeadbandMul: 0.7
+  });
+  const CRITICAL_PAYLOAD_TYPES = new Set([
+    'entityControl',
+    'entityStates',
+    'attackMonster',
+    'spawnRequest',
+    'projectile',
+    'inventoryThrowProjectile',
+    'grab',
+    'grabMove'
+  ]);
+  const MIN_POSITION_DEADBAND_SQ = (0.008 * 0.008);
+  const MIN_ROTATION_DEADBAND_RAD = 0.012;
+  let runtimePositionDeadbandSq = POSITION_DEADBAND_SQ;
+  let runtimeRotationDeadbandRad = ROTATION_DEADBAND_RAD;
+  const netSendQueue = {
+    critical: [],
+    high: new Map(),
+    normal: []
+  };
+  const NET_SEND_BUDGETS = Object.freeze({
+    high: { maxMessages: 12, maxBytes: 14000 },
+    mid: { maxMessages: 9, maxBytes: 9000 },
+    low: { maxMessages: 6, maxBytes: 5000 }
+  });
+  const netStats = {
+    sentInWindow: 0,
+    windowStartMs: performance.now(),
+    messagesPerSecond: 0,
+    coalesced: 0,
+    dropped: 0,
+    deferred: 0,
+    laneDropped: { critical: 0, high: 0, normal: 0 },
+    laneDeferred: { critical: 0, high: 0, normal: 0 }
+  };
+  const lastSentPresenceState = {
+    x: null,
+    y: null,
+    z: null,
+    rotation: null,
+    action: null,
+    sentAt: 0
+  };
+  const lastSentEntityControlStates = new Map();
+  const projectiles = [];
+  const iceMists = [];
+  const bombMists = [];
+  const attackVisualState = {
+    active: null,
+    impacts: [],
+    shockwaves: [],
+    redStreaks: [],
+    completedAttackKey: null,
+    arcTexture: null,
+    impactTexture: null
+  };
+  const treeFires = [];
+  const ammoPickups = [];
+  const droppedAmmoPickups = new Map();
+  const pendingDropRemovals = new Set();
+  const droppedWorldPickups = new Map();
+  const pendingWorldDropRemovals = new Set();
+  const localHeldWeaponMeshes = new Map();
+  const remoteHeldWeaponMeshes = new Map();
+  const remotePresenceEquipment = new Map();
+  const remoteHoldTempPosition = new THREE.Vector3();
+  const remoteHoldTempQuaternion = new THREE.Quaternion();
+  const remoteHoldTempOffset = new THREE.Vector3();
+  const tempVector3A = new THREE.Vector3();
+  const AMMO_PICKUP_AMOUNT = 5;
+  const ICE_AMMO_KEY = 'ice ammo';
+  const ARROW_AMMO_KEY = 'arrow ammo';
+  const MISSILE_AMMO_KEY = 'missiles';
+  const DEFAULT_ICE_AMMO = 10;
+  const DEFAULT_ARROW_AMMO = 5;
+  const DEFAULT_MISSILE_AMMO = 3;
+  const COIN_PICKUP_GAIN = 1;
+  const foodPickups = [];
+  const healthPickups = [];
+  const coinPickups = [];
+  let mushroomController = null;
+  let mushroomPickups = [];
+  const mushroomPickupGrid = new PickupSpatialGrid(4);
+  window.mushroomPickupGrid = mushroomPickupGrid;
+  window.pickupSpatialIndices = {
+    ...(window.pickupSpatialIndices || {}),
+    mushrooms: mushroomPickupGrid
+  };
+  let appleController = null;
+  let applePickups = [];
+  let woodPickups = [];
+  let meatPickups = [];
+  let zombieBrainsPickups = [];
+  let saltPickups = [];
+  const mushroomItemIds = new Set(MUSHROOM_ENTRIES.map((entry) => entry.id));
+  const appleItemIds = new Set([APPLE_ITEM_ID]);
+  const woodItemIds = new Set([WOOD_ITEM_ID]);
+  const CRAB_MEAT_ITEM_ID = 'crab_meat';
+  const meatItemIds = new Set([MEAT_ITEM_ID, CRAB_MEAT_ITEM_ID]);
+  const zombieBrainsItemIds = new Set([ZOMBIE_BRAINS_ITEM_ID]);
+  const saltItemIds = new Set([SALT_ITEM_ID]);
+  const sauteedMushroomsItemIds = new Set([SAUTEED_MUSHROOMS_ITEM_ID]);
+  const potionItemIds = new Set([LIFE_POTION_ITEM_ID, MANA_POTION_ITEM_ID]);
+  const PICKUP_CHECK_INTERVAL_MS = 250;
+  let lastPickupCheckMs = 0;
+
+  const otherPlayers = {};
+  runtimeContext.entities.otherPlayers = otherPlayers;
+  window.otherPlayers = otherPlayers;
+  const pendingIncomingPeerData = [];
+  let canProcessIncomingPeerData = false;
+  let lastIncomingProcessCount = 0;
+  let lastIncomingBacklog = 0;
+  let frameIndex = 0;
+  let adaptiveDegradeLevel = 0;
+  let frameOverrunStreak = 0;
+  let frameRecoverStreak = 0;
+  let adaptiveNetworkPressureLevel = 0;
+  let networkRecoveryStableFrames = 0;
+  let adaptiveIntervalOffsetMs = 0;
+  let onlyCriticalPayloadClasses = false;
+  let lastNetworkProfileLogAt = 0;
+  let lastNetworkProfileLogKey = '';
+  const remotePresenceMeta = {};
+  let lastPresenceSend = 0;
+  let lastPresenceSweep = 0;
+  let remoteAnimAccumulator = 0;
+  let monsterAnimAccumulator = 0;
+  const monsterAnimFrustum = new THREE.Frustum();
+  const monsterAnimProjMatrix = new THREE.Matrix4();
+
+  let monsters = [];
+  runtimeContext.entities.monsters = monsters;
+  window.monsters = monsters;
+  let animalManager = null;
+  let animals = [];
+  runtimeContext.entities.animals = animals;
+  window.animals = animals;
+  const npcVoiceSchedule = new Map();
+  const zombieVoiceLoops = new Map();
+  const getRandomDelayMs = ([min, max]) => {
+    const safeMin = Number.isFinite(min) ? min : 0;
+    const safeMax = Number.isFinite(max) ? max : safeMin;
+    if (safeMax <= safeMin) return safeMin;
+    return safeMin + Math.random() * (safeMax - safeMin);
+  };
+  const wrapDeltaRad = (value) => {
+    let wrapped = value;
+    while (wrapped > Math.PI) wrapped -= Math.PI * 2;
+    while (wrapped < -Math.PI) wrapped += Math.PI * 2;
+    return wrapped;
+  };
+  const getNetworkTier = () => {
+    const pingMs = multiplayer?.lastPingMs;
+    const pingAgeMs = Number.isFinite(multiplayer?.lastPingAt) ? (Date.now() - multiplayer.lastPingAt) : Infinity;
+    const hasLag = Number.isFinite(pingMs) && pingMs >= 220;
+    const stalePing = pingAgeMs > 20000;
+    const deviceTier = getDevicePerformanceProfile().tier;
+    if (deviceTier === 'low' || hasLag || stalePing) return 'low';
+    if (deviceTier === 'mid' || (Number.isFinite(pingMs) && pingMs >= 120)) return 'mid';
+    return 'high';
+  };
+  const applyRuntimeNetworkProfile = ({
+    incomingBacklog = lastIncomingBacklog,
+    incomingProcessCount = lastIncomingProcessCount,
+    overrunStreak = frameOverrunStreak,
+    recoverStreak = frameRecoverStreak
+  } = {}) => {
+    const tier = getNetworkTier();
+    const tierProfile = NETWORK_BASE_PROFILE[tier] || NETWORK_BASE_PROFILE.high;
+    const backlog = Number.isFinite(incomingBacklog) ? incomingBacklog : 0;
+    const processCount = Number.isFinite(incomingProcessCount) ? incomingProcessCount : 0;
+    const safeOverrun = Number.isFinite(overrunStreak) ? overrunStreak : 0;
+    const safeRecover = Number.isFinite(recoverStreak) ? recoverStreak : 0;
+
+    const pressureCritical = backlog >= NETWORK_ADAPTIVE_PROFILE.backlogCritical
+      || safeOverrun >= NETWORK_ADAPTIVE_PROFILE.overrunCriticalStreak;
+    const pressureWarn = backlog >= NETWORK_ADAPTIVE_PROFILE.backlogWarn
+      || processCount >= NETWORK_ADAPTIVE_PROFILE.processSaturated
+      || safeOverrun >= NETWORK_ADAPTIVE_PROFILE.overrunWarnStreak;
+
+    const previousPressure = adaptiveNetworkPressureLevel;
+    if (pressureCritical) {
+      adaptiveNetworkPressureLevel = 2;
+      networkRecoveryStableFrames = 0;
+      adaptiveIntervalOffsetMs = Math.min(220, adaptiveIntervalOffsetMs + 28);
+    } else if (pressureWarn) {
+      adaptiveNetworkPressureLevel = 1;
+      networkRecoveryStableFrames = 0;
+      adaptiveIntervalOffsetMs = Math.min(160, adaptiveIntervalOffsetMs + 16);
+    } else {
+      adaptiveNetworkPressureLevel = Math.max(0, adaptiveNetworkPressureLevel - (safeRecover >= 4 ? 1 : 0));
+      networkRecoveryStableFrames += 1;
+      if (networkRecoveryStableFrames >= NETWORK_ADAPTIVE_PROFILE.recoveryStableFrames) {
+        adaptiveIntervalOffsetMs = Math.max(0, adaptiveIntervalOffsetMs - NETWORK_ADAPTIVE_PROFILE.restoreStepMs);
+      }
+    }
+
+    onlyCriticalPayloadClasses = adaptiveNetworkPressureLevel >= 2;
+    presenceSendIntervalMs = tierProfile.presenceMs + Math.round(adaptiveIntervalOffsetMs * 0.65);
+    entityBroadcastIntervalMs = tierProfile.entityMs + adaptiveIntervalOffsetMs;
+    controlSendIntervalMs = tierProfile.controlMs + adaptiveIntervalOffsetMs;
+
+    const positionDeadbandMul = adaptiveNetworkPressureLevel > 0 ? NETWORK_ADAPTIVE_PROFILE.presenceDeadbandMul : 1;
+    const rotationDeadbandMul = adaptiveNetworkPressureLevel > 0 ? NETWORK_ADAPTIVE_PROFILE.rotationDeadbandMul : 1;
+    runtimePositionDeadbandSq = Math.max(MIN_POSITION_DEADBAND_SQ, POSITION_DEADBAND_SQ * positionDeadbandMul * positionDeadbandMul);
+    runtimeRotationDeadbandRad = Math.max(MIN_ROTATION_DEADBAND_RAD, ROTATION_DEADBAND_RAD * rotationDeadbandMul);
+
+    const now = performance.now();
+    const logKey = `${tier}:${adaptiveNetworkPressureLevel}:${Math.round(adaptiveIntervalOffsetMs / 10)}:${onlyCriticalPayloadClasses ? 'critical' : 'mixed'}`;
+    if (logKey !== lastNetworkProfileLogKey && (now - lastNetworkProfileLogAt) >= NETWORK_ADAPTIVE_PROFILE.logWindowMs) {
+      console.debug('[net-profile]', {
+        tier,
+        pressureLevel: adaptiveNetworkPressureLevel,
+        previousPressure,
+        backlog,
+        processCount,
+        overrunStreak: safeOverrun,
+        recoverStreak: safeRecover,
+        presenceSendIntervalMs,
+        entityBroadcastIntervalMs,
+        controlSendIntervalMs,
+        onlyCriticalPayloadClasses
+      });
+      lastNetworkProfileLogAt = now;
+      lastNetworkProfileLogKey = logKey;
+    }
+  };
+  const recordNetSent = (count = 1) => {
+    netStats.sentInWindow += count;
+  };
+  const getNetQueueDepth = () => (
+    netSendQueue.critical.length
+    + netSendQueue.high.size
+    + netSendQueue.normal.length
+  );
+  const estimatePayloadBytes = (payload) => {
+    if (!payload) return 0;
+    try {
+      return JSON.stringify(payload).length;
+    } catch {
+      return 0;
+    }
+  };
+  const getMessageLane = (payload) => {
+    const type = payload?.type;
+    if (onlyCriticalPayloadClasses && !CRITICAL_PAYLOAD_TYPES.has(type)) {
+      return 'normal';
+    }
+    if (type === 'attackMonster' || type === 'spawnRequest' || type === 'projectile' || type === 'inventoryThrowProjectile' || type === 'grab') {
+      return 'critical';
+    }
+    if (type === 'entityControl' || type === 'entityStates') return 'high';
+    return 'normal';
+  };
+  const queueNetMessage = (payload, coalesceKey = null) => {
+    if (!multiplayer || !payload) {
+      netStats.dropped += 1;
+      netStats.laneDropped.normal += 1;
+      return false;
+    }
+    const lane = getMessageLane(payload);
+    if (onlyCriticalPayloadClasses && lane === 'normal') {
+      netStats.deferred += 1;
+      netStats.laneDeferred.normal += 1;
+      return false;
+    }
+    const canCoalesce = lane === 'high' && (coalesceKey?.startsWith('entityControl:') || coalesceKey?.startsWith('entityStates:'));
+    if (canCoalesce) {
+      if (netSendQueue.high.has(coalesceKey)) {
+        netStats.coalesced += 1;
+      }
+      netSendQueue.high.set(coalesceKey, payload);
+      return true;
+    }
+    if (lane === 'critical') {
+      netSendQueue.critical.push(payload);
+      return true;
+    }
+    netSendQueue.normal.push(payload);
+    return true;
+  };
+  const flushNetSendQueue = () => {
+    if (!multiplayer) return;
+    const depth = getNetQueueDepth();
+    if (depth === 0) return;
+    const tier = getNetworkTier();
+    const budget = NET_SEND_BUDGETS[tier] || NET_SEND_BUDGETS.high;
+    let sent = 0;
+    let sentBytes = 0;
+
+    while (netSendQueue.critical.length > 0) {
+      const payload = netSendQueue.critical.shift();
+      if (sendNetworkPayload(payload)) {
+        sent += 1;
+      }
+    }
+
+    const highEntries = Array.from(netSendQueue.high.entries());
+    let highSent = 0;
+    for (const [key, payload] of highEntries) {
+      if (sent >= budget.maxMessages || sentBytes >= budget.maxBytes) break;
+      const payloadBytes = estimatePayloadBytes(payload);
+      if ((sent + 1) > budget.maxMessages || (sentBytes + payloadBytes) > budget.maxBytes) break;
+      if (sendNetworkPayload(payload)) {
+        sent += 1;
+        highSent += 1;
+        sentBytes += payloadBytes;
+        netSendQueue.high.delete(key);
+      }
+    }
+
+    while (netSendQueue.normal.length > 0) {
+      if (sent >= budget.maxMessages || sentBytes >= budget.maxBytes) break;
+      const payload = netSendQueue.normal[0];
+      const payloadBytes = estimatePayloadBytes(payload);
+      if ((sent + 1) > budget.maxMessages || (sentBytes + payloadBytes) > budget.maxBytes) break;
+      netSendQueue.normal.shift();
+      if (sendNetworkPayload(payload)) {
+        sent += 1;
+        sentBytes += payloadBytes;
+      }
+    }
+
+    const deferredHigh = netSendQueue.high.size;
+    const deferredNormal = netSendQueue.normal.length;
+    if (deferredHigh > 0) netStats.laneDeferred.high += deferredHigh;
+    if (deferredNormal > 0) netStats.laneDeferred.normal += deferredNormal;
+    netStats.deferred += deferredHigh + deferredNormal;
+
+    recordNetSent(sent);
+  };
+  const sendNetworkPayload = (payload) => {
+    if (!multiplayer || !payload) return false;
+    const isHostCritical = NETWORK_TOPOLOGY_MODE === 'star'
+      && HOST_CRITICAL_MESSAGE_TYPES.has(payload.type);
+    const hostId = multiplayer.getHostId?.();
+    if (!multiplayer.isHost && isHostCritical && hostId) {
+      multiplayer.sendTo(hostId, payload);
+      return true;
+    }
+    multiplayer.send(payload);
+    return true;
+  };
+  const tickNetStats = (nowMs) => {
+    const elapsed = nowMs - netStats.windowStartMs;
+    if (elapsed < 1000) return;
+    netStats.messagesPerSecond = (netStats.sentInWindow * 1000) / elapsed;
+    netStats.sentInWindow = 0;
+    netStats.windowStartMs = nowMs;
+    window.netRuntimeStats = {
+      msgsPerSecond: Number(netStats.messagesPerSecond.toFixed(2)),
+      rttMs: Number.isFinite(multiplayer?.lastPingMs) ? multiplayer.lastPingMs : null,
+      coalesced: netStats.coalesced,
+      dropped: netStats.dropped,
+      queueDepth: getNetQueueDepth(),
+      deferred: netStats.deferred,
+      deferredByLane: { ...netStats.laneDeferred },
+      droppedByLane: { ...netStats.laneDropped },
+      topologyMode: NETWORK_TOPOLOGY_MODE,
+      intervals: {
+        presenceSendIntervalMs,
+        entityBroadcastIntervalMs,
+        controlSendIntervalMs
+      }
+    };
+  };
+  const getVolumeByDistance = (distance, maxDistance, maxVolume) => {
+    if (!Number.isFinite(distance) || !Number.isFinite(maxDistance) || maxDistance <= 0) return 0;
+    if (distance >= maxDistance) return 0;
+    const normalized = 1 - (distance / maxDistance);
+    return Math.max(0, Math.min(1, maxVolume * normalized));
+  };
+  const maybePlayNpcVoice = ({
+    entityId,
+    position,
+    now,
+    intervalRange,
+    clips,
+    maxVolume,
+    playerPosition,
+    cooldownPrefix
+  }) => {
+    if (!entityId || !position || !clips?.length || !playerPosition || !audioManager) return;
+    const distance = playerPosition.distanceTo(position);
+    const volume = getVolumeByDistance(distance, NPC_AUDIO_HEAR_RADIUS, maxVolume);
+    if (volume <= 0.01) {
+      npcVoiceSchedule.delete(entityId);
+      return;
+    }
+
+    const nextAt = npcVoiceSchedule.get(entityId) ?? 0;
+    if (now < nextAt) return;
+
+    const clip = clips[Math.floor(Math.random() * clips.length)];
+    audioManager.playSFX(clip, volume, {
+      cooldownKey: `${cooldownPrefix}:${entityId}`,
+      cooldownMs: 800
+    });
+    npcVoiceSchedule.set(entityId, now + getRandomDelayMs(intervalRange));
+  };
+  const isZombieMonsterType = (monster) => {
+    const typeLabel = String(monster?.type || monster?.modelPath || '').toLowerCase();
+    return typeLabel.includes('zombie');
+  };
+  const updateMerchantLoopVoice = ({ merchant, playerPosition }) => {
+    const loopId = 'merchant-voice-loop';
+    if (!merchant?.model?.position || !playerPosition || !audioManager) {
+      audioManager?.stopLoopingSFX(loopId);
+      return;
+    }
+    const distance = playerPosition.distanceTo(merchant.model.position);
+    const volume = getVolumeByDistance(distance, NPC_AUDIO_HEAR_RADIUS, MERCHANT_LOOP_MAX_VOLUME);
+    if (volume <= 0.01) {
+      audioManager.stopLoopingSFX(loopId);
+      return;
+    }
+    audioManager.startLoopingSFX(loopId, MERCHANT_LOOP_CLIP, volume);
+    audioManager.setLoopingSFXVolume(loopId, volume);
+  };
+  const stopZombieLoopVoice = (monsterId) => {
+    if (!monsterId || !audioManager) return;
+    const loopId = zombieVoiceLoops.get(monsterId);
+    if (!loopId) return;
+    audioManager.stopLoopingSFX(loopId);
+    zombieVoiceLoops.delete(monsterId);
+  };
+  const updateZombieLoopVoice = ({ monster, playerPosition }) => {
+    const monsterId = monster?.id;
+    if (!monsterId || !audioManager || !playerPosition || !isZombieMonsterType(monster) || monster?.isDead || !monster?.model?.position) {
+      stopZombieLoopVoice(monsterId);
+      return;
+    }
+
+    const distance = playerPosition.distanceTo(monster.model.position);
+    const volume = getVolumeByDistance(distance, NPC_AUDIO_HEAR_RADIUS, ZOMBIE_VOICE_MAX_VOLUME);
+    if (volume <= 0.01) {
+      stopZombieLoopVoice(monsterId);
+      return;
+    }
+
+    let loopId = zombieVoiceLoops.get(monsterId);
+    if (!loopId) {
+      const randomClip = ZOMBIE_VOICE_CLIPS[Math.floor(Math.random() * ZOMBIE_VOICE_CLIPS.length)] || ZOMBIE_VOICE_CLIPS[0];
+      loopId = `zombie-voice-loop:${monsterId}`;
+      zombieVoiceLoops.set(monsterId, loopId);
+      audioManager.startLoopingSFX(loopId, randomClip, volume);
+    }
+    audioManager.setLoopingSFXVolume(loopId, volume);
+  };
+  const monsterSlotIds = Array.from({ length: MAX_MONSTERS_TOTAL }, (_, index) => `monster:${index}`);
+  const spawningSlots = new Set();
+  const respawnTimers = new Map();
+  let monstersSeeded = false;
+  let monsterSnapshotLoaded = false;
+  let monsterSnapshotTimeout = null;
+  let unsubscribeMonsterUpdates = null;
+  const recentMonsterHits = new Map();
+  const damageableCreaturesBuffer = [];
+
+  const refillCombinedList = (target, first, second) => {
+    target.length = 0;
+    if (Array.isArray(first) && first.length > 0) {
+      target.push(...first);
+    }
+    if (Array.isArray(second) && second.length > 0) {
+      target.push(...second);
+    }
+    return target;
+  };
+
+  const getDamageableCreatures = () => refillCombinedList(damageableCreaturesBuffer, monsters, animals);
+  const findDamageableCreatureById = (id) => {
+    if (!id) return null;
+    if (Array.isArray(monsters)) {
+      for (const monster of monsters) {
+        if (monster?.id === id) return monster;
+      }
+    }
+    if (Array.isArray(animals)) {
+      for (const animal of animals) {
+        if (animal?.id === id) return animal;
+      }
+    }
+    return null;
+  };
+
+  scene = new THREE.Scene();
+  const rotateSkyboxFaceClockwise = (image) => {
+    if (!image) return image;
+    const canvas = document.createElement('canvas');
+    canvas.width = image.height;
+    canvas.height = image.width;
+    const context = canvas.getContext('2d');
+    if (!context) return image;
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate(Math.PI / 2);
+    context.drawImage(image, -image.width / 2, -image.height / 2);
+    return canvas;
+  };
+  const skyboxTexture = new THREE.CubeTextureLoader()
+    .setPath('/assets/textures/sky/')
+    .load(
+      ['px.jpg', 'nx.jpg', 'py.jpg', 'ny.jpg', 'pz.jpg', 'nz.jpg'],
+      (texture) => {
+        texture.image[2] = rotateSkyboxFaceClockwise(texture.image[2]);
+        texture.needsUpdate = true;
+      }
+    );
+  scene.background = skyboxTexture;
+
+  const DISPLAY_MODES = new Set(['auto', 'day', 'night']);
+  const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
+  const pickupEmissiveMaterials = new Set();
+  let pickupEmissiveBrightness = 1;
+  const highContrastSkyDay = new THREE.Color(0xffffff);
+  const highContrastSkyNight = new THREE.Color(0xffffff);
+  const createHighContrastCheckerTexture = () => {
+    const size = 128;
+    const cells = 8;
+    const cellSize = size / cells;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    for (let row = 0; row < cells; row += 1) {
+      for (let col = 0; col < cells; col += 1) {
+        context.fillStyle = (row + col) % 2 === 0 ? '#ffffff' : '#000000';
+        context.fillRect(col * cellSize, row * cellSize, cellSize, cellSize);
+      }
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(24, 24);
+    texture.anisotropy = 4;
+    texture.needsUpdate = true;
+    return texture;
+  };
+  const highContrastGroundTexture = createHighContrastCheckerTexture();
+  const captureMaterialBase = (material) => {
+    if (!material) return null;
+    const color = material.color?.clone ? material.color.clone() : new THREE.Color(0xffffff);
+    const emissiveIntensity = typeof material.emissiveIntensity === 'number' ? material.emissiveIntensity : 0;
+    return { color, emissiveIntensity };
+  };
+  const registerPickupEmissiveMaterials = (target) => {
+    const registerMaterial = (material) => {
+      if (!material || typeof material.emissiveIntensity !== 'number') return;
+      material.userData = material.userData || {};
+      if (typeof material.userData.baseEmissiveIntensity !== 'number') {
+        material.userData.baseEmissiveIntensity = material.emissiveIntensity;
+      }
+      pickupEmissiveMaterials.add(material);
+      material.emissiveIntensity = material.userData.baseEmissiveIntensity * pickupEmissiveBrightness;
+      material.needsUpdate = true;
+    };
+    if (!target) return;
+    if (Array.isArray(target)) {
+      target.forEach(registerMaterial);
+      return;
+    }
+    if (target.isMaterial) {
+      registerMaterial(target);
+      return;
+    }
+    if (target.isMesh) {
+      const materials = Array.isArray(target.material) ? target.material : [target.material];
+      materials.forEach(registerMaterial);
+      return;
+    }
+    if (typeof target.traverse === 'function') {
+      target.traverse((child) => {
+        if (!child.isMesh) return;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach(registerMaterial);
+      });
+    }
+  };
+  const applyMaterialBrightness = (material, base, brightness) => {
+    if (!material || !base) return;
+    const clamped = clampValue(brightness, 0, 2);
+    if (material.color?.copy) {
+      material.color.copy(base.color).multiplyScalar(clamped);
+    }
+    material.emissiveIntensity = base.emissiveIntensity * clamped;
+    material.needsUpdate = true;
+  };
+  const applyHighContrastMaterialState = (material, enabled) => {
+    if (!material || !material.isMaterial) return;
+    material.userData = material.userData || {};
+    if (!material.userData.baseHighContrastState) {
+      material.userData.baseHighContrastState = {
+        toneMapped: material.toneMapped,
+        color: material.color?.clone ? material.color.clone() : null,
+        emissive: material.emissive?.clone ? material.emissive.clone() : null,
+        emissiveIntensity: typeof material.emissiveIntensity === 'number' ? material.emissiveIntensity : null
+      };
+    }
+    const base = material.userData.baseHighContrastState;
+    if (!enabled) {
+      material.toneMapped = base.toneMapped;
+      if (base.color && material.color?.copy) material.color.copy(base.color);
+      if (base.emissive && material.emissive?.copy) material.emissive.copy(base.emissive);
+      if (typeof base.emissiveIntensity === 'number') material.emissiveIntensity = base.emissiveIntensity;
+      material.needsUpdate = true;
+      return;
+    }
+    material.toneMapped = false;
+    if (material.color?.copy && base.color) {
+      const luminance = base.color.r * 0.2126 + base.color.g * 0.7152 + base.color.b * 0.0722;
+      const contrastBoost = luminance > 0.45 ? 1 : 0.08;
+      material.color.copy(base.color).multiplyScalar(contrastBoost);
+      material.color.offsetHSL(0, 0.4, luminance > 0.45 ? 0.15 : -0.03);
+    }
+    if (material.emissive?.copy && base.emissive) {
+      material.emissive.copy(base.emissive).multiplyScalar(2.6);
+    }
+    if (typeof material.emissiveIntensity === 'number' && typeof base.emissiveIntensity === 'number') {
+      material.emissiveIntensity = Math.max(1.2, base.emissiveIntensity * 2.4);
+    }
+    material.needsUpdate = true;
+  };
+  const applyHighContrastToScene = (enabled) => {
+    if (!scene) return;
+    scene.traverse((child) => {
+      if (!child?.isMesh) return;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach((material) => applyHighContrastMaterialState(material, enabled));
+    });
+  };
+  const getAutoMode = () => {
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    if (minutes >= 21 * 60 || minutes < 6 * 60) {
+      return 'night';
+    }
+    return 'day';
+  };
+  const getDevicePerformanceProfile = () => {
+    const hardwareConcurrency = Number.isFinite(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 4;
+    const memory = Number.isFinite(navigator.deviceMemory) ? navigator.deviceMemory : 4;
+    const shortestSide = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+    const isTouchCapable = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+    const mobileUA = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent || '');
+    const isMobileLike = mobileUA || (isTouchCapable && shortestSide > 0 && shortestSide <= 900);
+
+    const severeConstraint = hardwareConcurrency <= 4 || memory <= 4 || shortestSide <= 720;
+    const moderateConstraint = hardwareConcurrency <= 6 || memory <= 6 || shortestSide <= 1080;
+    if (isMobileLike && severeConstraint) {
+      return { tier: 'low', isMobileLike };
+    }
+    if (severeConstraint || (isMobileLike && moderateConstraint)) {
+      return { tier: 'mid', isMobileLike };
+    }
+    return { tier: 'high', isMobileLike };
+  };
+
+  const resolvePerformanceTier = (mode) => {
+    if (mode === 'performance') return 'low';
+    if (mode === 'quality') return 'high';
+    const profile = getDevicePerformanceProfile();
+    if (mode === 'balanced') {
+      return profile.tier === 'high' ? 'mid' : profile.tier;
+    }
+    return profile.tier;
+  };
+
+  const getPixelRatioCapForTier = (tier) => PERFORMANCE_PROFILE_CAPS[tier] ?? PERFORMANCE_PROFILE_CAPS.mid;
+  const isLowEndTier = (tier) => tier === 'low';
+  const markOptionalShadow = (target) => {
+    if (!target) return;
+    target.userData = target.userData || {};
+    target.userData.shadowProfileManaged = true;
+    target.userData.shadowImportance = 'optional';
+  };
+  const applyOptionalShadowState = (target, allowOptionalShadows) => {
+    if (!target) return;
+    markOptionalShadow(target);
+    if (typeof target.traverse === 'function') {
+      target.traverse((child) => {
+        if (!child?.isMesh) return;
+        child.userData = child.userData || {};
+        child.userData.shadowProfileManaged = true;
+        child.userData.shadowImportance = 'optional';
+        child.castShadow = !!allowOptionalShadows;
+      });
+      return;
+    }
+    if (target.isMesh) {
+      target.castShadow = !!allowOptionalShadows;
+    }
+  };
+
+  const loadDisplaySettings = () => {
+    const defaults = { mode: 'auto', performanceMode: 'auto', highContrastMode: false, ...DISPLAY_PRESETS.day };
+    const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
+    if (!raw) return defaults;
+    try {
+      const parsed = JSON.parse(raw);
+      return { ...defaults, ...parsed };
+    } catch (error) {
+      console.warn('Failed to parse display settings, using defaults.', error);
+      return defaults;
+    }
+  };
+  const saveDisplaySettings = () => {
+    localStorage.setItem(DISPLAY_SETTINGS_KEY, JSON.stringify(displaySettings));
+  };
+  const applyPresetForMode = (mode) => {
+    const preset = DISPLAY_PRESETS[mode] || DISPLAY_PRESETS.day;
+    displaySettings = { ...displaySettings, ...preset };
+  };
+
+  let displaySettings = loadDisplaySettings();
+  let lastAutoMode = null;
+  let groundMaterialBase = null;
+  let buildingMaterialBase = null;
+  let renderer = null;
+  let currentPerformanceTier = resolvePerformanceTier(displaySettings.performanceMode);
+  let optionalShadowsEnabled = !isLowEndTier(currentPerformanceTier);
+
+  if (!DISPLAY_MODES.has(displaySettings.mode)) {
+    displaySettings.mode = 'auto';
+  }
+  if (!PERFORMANCE_MODES.has(displaySettings.performanceMode)) {
+    displaySettings.performanceMode = 'auto';
+  }
+  if (typeof displaySettings.highContrastMode !== 'boolean') {
+    displaySettings.highContrastMode = false;
+  }
+  if (displaySettings.mode === 'auto') {
+    lastAutoMode = getAutoMode();
+    applyPresetForMode(lastAutoMode);
+  }
+
+  const applyDisplaySettings = () => {
+    const effectiveMode = displaySettings.mode === 'auto'
+      ? (lastAutoMode || getAutoMode())
+      : displaySettings.mode;
+    const pickupBrightness = clampValue(
+      (displaySettings.ambientIntensity + displaySettings.directionalIntensity) / 2,
+      0,
+      1
+    );
+    pickupEmissiveBrightness = pickupBrightness;
+    const highContrastEnabled = Boolean(displaySettings.highContrastMode);
+    if (scene) {
+      if (effectiveMode === 'night') {
+        scene.background = highContrastEnabled ? highContrastSkyNight : new THREE.Color(0x000000);
+      } else {
+        scene.background = highContrastEnabled ? highContrastSkyDay : skyboxTexture;
+      }
+    }
+    const ambientIntensity = highContrastEnabled
+      ? HIGH_CONTRAST_PRESET.ambientIntensity
+      : displaySettings.ambientIntensity;
+    const directionalIntensity = highContrastEnabled
+      ? HIGH_CONTRAST_PRESET.directionalIntensity
+      : displaySettings.directionalIntensity;
+    const groundBrightness = highContrastEnabled
+      ? HIGH_CONTRAST_PRESET.groundBrightness
+      : displaySettings.groundBrightness;
+    const buildingBrightness = highContrastEnabled
+      ? HIGH_CONTRAST_PRESET.buildingBrightness
+      : displaySettings.buildingBrightness;
+    if (ambientLight) {
+      ambientLight.intensity = clampValue(ambientIntensity, 0, 2);
+    }
+    if (dirLight) {
+      dirLight.intensity = clampValue(directionalIntensity, 0, 2);
+    }
+    applyMaterialBrightness(groundTiles?.material, groundMaterialBase, groundBrightness);
+    if (groundTiles?.material) {
+      const material = groundTiles.material;
+      material.userData = material.userData || {};
+      if (!Object.prototype.hasOwnProperty.call(material.userData, 'baseGroundMap')) {
+        material.userData.baseGroundMap = material.map ?? null;
+      }
+      if (highContrastEnabled) {
+        const currentMap = material.map ?? null;
+        if (currentMap !== highContrastGroundTexture) {
+          material.userData.preHighContrastGroundMap = currentMap;
+        }
+        if (material.color?.setHex) material.color.setHex(0xffffff);
+        if (highContrastGroundTexture) material.map = highContrastGroundTexture;
+      } else {
+        const restoredMap = Object.prototype.hasOwnProperty.call(material.userData, 'preHighContrastGroundMap')
+          ? material.userData.preHighContrastGroundMap
+          : material.userData.baseGroundMap;
+        material.map = restoredMap ?? null;
+      }
+      material.needsUpdate = true;
+    }
+    applyMaterialBrightness(buildingsRenderer?.materials?.extruded, buildingMaterialBase?.extruded, buildingBrightness);
+    applyMaterialBrightness(buildingsRenderer?.materials?.flat, buildingMaterialBase?.flat, buildingBrightness);
+    applyHighContrastToScene(highContrastEnabled);
+    mapRenderer?.setBrightness?.(pickupBrightness);
+    for (const material of pickupEmissiveMaterials) {
+      if (!material || typeof material.emissiveIntensity !== 'number') continue;
+      const base = material.userData?.baseEmissiveIntensity ?? material.emissiveIntensity;
+      material.emissiveIntensity = base * pickupBrightness;
+      material.needsUpdate = true;
+    }
+  };
+
+  const applyRendererPerformanceSettings = () => {
+    const nextTier = resolvePerformanceTier(displaySettings.performanceMode);
+    currentPerformanceTier = nextTier;
+    optionalShadowsEnabled = !isLowEndTier(nextTier);
+    if (renderer) {
+      const pixelRatioCap = getPixelRatioCapForTier(nextTier);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap));
+      const lowEnd = isLowEndTier(nextTier);
+      renderer.shadowMap.enabled = !lowEnd;
+      renderer.shadowMap.type = lowEnd ? THREE.BasicShadowMap : (nextTier === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap);
+    }
+    if (dirLight) {
+      const lowEnd = isLowEndTier(nextTier);
+      dirLight.castShadow = !lowEnd;
+      dirLight.shadow.mapSize.set(lowEnd ? 512 : 1024, lowEnd ? 512 : 1024);
+    }
+    if (scene) {
+      scene.traverse((child) => {
+        if (!child?.isMesh) return;
+        if (child.userData?.shadowProfileManaged && child.userData?.shadowImportance === 'optional') {
+          child.castShadow = optionalShadowsEnabled;
+        }
+      });
+    }
+  }
+
+
+  syncBackgroundLoopForDisplayMode = () => {
+    const effectiveMode = displaySettings.mode === 'auto'
+      ? (lastAutoMode || getAutoMode())
+      : displaySettings.mode;
+    if (effectiveMode === 'night') {
+      audioManager.playBGS('Interior Night/Inside Night.ogg');
+      return;
+    }
+    audioManager.playBGS('Forest Day/Forest Day.ogg');
+  };
+
+  const updateAutoDisplayMode = () => {
+    if (displaySettings.mode !== 'auto') return;
+    const nextMode = getAutoMode();
+    if (nextMode === lastAutoMode) return;
+    lastAutoMode = nextMode;
+    applyPresetForMode(nextMode);
+    saveDisplaySettings();
+    applyDisplaySettings();
+    syncBackgroundLoopForDisplayMode();
+    updateSettingsUI();
+  };
+
+  const setDisplayMode = (mode) => {
+    if (!DISPLAY_MODES.has(mode)) return;
+    displaySettings.mode = mode;
+    if (mode === 'auto') {
+      lastAutoMode = getAutoMode();
+      applyPresetForMode(lastAutoMode);
+    } else {
+      lastAutoMode = mode;
+      applyPresetForMode(mode);
+    }
+    saveDisplaySettings();
+    applyRendererPerformanceSettings();
+    applyDisplaySettings();
+    syncBackgroundLoopForDisplayMode();
+    updateSettingsUI();
+  };
+
+  const setDisplaySetting = (key, value) => {
+    if (key === 'performanceMode') {
+      if (!PERFORMANCE_MODES.has(value)) return;
+      displaySettings.performanceMode = value;
+      saveDisplaySettings();
+      applyRendererPerformanceSettings();
+      updateSettingsUI();
+      return;
+    }
+    if (key === 'highContrastMode') {
+      displaySettings.highContrastMode = Boolean(value);
+      saveDisplaySettings();
+      applyDisplaySettings();
+      updateSettingsUI();
+      return;
+    }
+    if (!Number.isFinite(value)) return;
+    displaySettings[key] = value;
+    saveDisplaySettings();
+    applyRendererPerformanceSettings();
+    applyDisplaySettings();
+  };
+
+  const logNet = (...args) => {
+    if (window.DEBUG_NET) {
+      console.log('[net]', ...args);
+    }
+  };
+
+  const logMonsterPersist = (...args) => {
+    if (window.DEBUG_MONSTER_PERSIST) {
+      console.log('[monsterPersist]', ...args);
+    }
+  };
+
+  const sendMonsterAttackIntent = ({ monsterId, damage, sourcePlayerId, attackTypes, at }) => {
+    if (!multiplayer || multiplayer.isHost) return;
+    const hostId = multiplayer.getHostId?.();
+    if (!hostId || !monsterId || !Number.isFinite(damage)) return;
+    multiplayer.sendTo(hostId, {
+      type: 'attackMonster',
+      monsterId,
+      damage,
+      sourcePlayerId: sourcePlayerId ?? multiplayer.getId?.(),
+      attackTypes: getAttackTypes(null, attackTypes || []),
+      at: at ?? Date.now()
+    });
+  };
+
+
+  const requestHostSpawnEvent = (spawnEvent) => {
+    if (!multiplayer || multiplayer.isHost || !spawnEvent?.position) return;
+    const hostId = multiplayer.getHostId?.();
+    if (!hostId) return;
+    const direction = spawnEvent.direction?.clone?.().normalize?.() || null;
+    const spawnTypeMap = {
+      monster: 'monster',
+      friendly: 'friendly',
+      animal: 'animal',
+      companionDog: 'companionDog'
+    };
+    const mappedType = spawnTypeMap[spawnEvent.type];
+    if (!mappedType) return;
+    multiplayer.sendTo(hostId, {
+      type: 'spawnRequest',
+      spawnType: mappedType,
+      position: [spawnEvent.position.x, spawnEvent.position.y, spawnEvent.position.z],
+      direction: direction ? [direction.x, direction.y, direction.z] : undefined
+    });
+  };
+
+  const handleMonsterDamage = (monster) => {
+    if (!multiplayer?.isHost || !monster) return;
+    persistMonsterHp(monster);
+  };
+
+  const getPlayerModelForId = (playerId) => {
+    if (!playerId) return null;
+    const localId = multiplayer?.getId?.();
+    if (playerId === localId) return playerModel || null;
+    return otherPlayers[playerId]?.model || null;
+  };
+
+  const attractPickupToPlayer = (meshOrPosition, targetModel, speed, deltaSeconds) => {
+    const sourcePosition = meshOrPosition?.isVector3 ? meshOrPosition : meshOrPosition?.position;
+    if (!sourcePosition || !targetModel?.position || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return false;
+    const toTarget = tempVector3A.subVectors(targetModel.position, sourcePosition);
+    const distance = toTarget.length();
+    if (!Number.isFinite(distance) || distance <= 0.001) return true;
+    const maxStep = Math.max(0, speed) * deltaSeconds;
+    if (distance <= maxStep) {
+      sourcePosition.copy(targetModel.position);
+      return true;
+    }
+    toTarget.multiplyScalar(maxStep / distance);
+    sourcePosition.add(toTarget);
+    return false;
+  };
+
+  const getPickupAttractRadius = () => PICKUP_ATTRACT_RADIUS;
+
+  const handleCombatEntityHit = ({ targetPosition, targetType }) => {
+    if (!targetPosition) return;
+    spawnImpactBurst(scene, targetPosition);
+    if (targetType === 'monster') {
+      spawnRedImpactStreaks(scene, targetPosition);
+    }
+  };
+
+  const removeRemotePlayer = (remoteId, reason = 'unknown') => {
+    const existing = otherPlayers[remoteId];
+    if (existing) {
+      if (existing.model && existing.model.parent) {
+        existing.model.parent.remove(existing.model);
+      }
+      if (existing.nameLabel && existing.nameLabel.parentNode) {
+        existing.nameLabel.parentNode.removeChild(existing.nameLabel);
+      }
+      delete otherPlayers[remoteId];
+    }
+    clearRemoteHeldWeaponsForHolder(remoteId);
+    cleanupRemoteDynamicNetworkedEntitiesForPlayer(remoteId);
+    remotePresenceEquipment.delete(remoteId);
+    if (remotePresenceMeta[remoteId]) {
+      delete remotePresenceMeta[remoteId];
+    }
+    logNet('despawn', remoteId, reason);
+  };
+
+  function cloneState(state) {
+    return state ? JSON.parse(JSON.stringify(state)) : state;
+  }
+
+  function applyNetworkedState(id, state) {
+    if (!state) return;
+    const entry = networkedEntities.get(id);
+    if (entry && typeof entry.applyState === 'function') {
+      entry.applyState(state);
+      return;
+    }
+    if (ensureRemoteDynamicNetworkedEntity(id, state)) {
+      return;
+    }
+    pendingEntityStates.set(id, cloneState(state));
+  }
+
+  function resolveNetworkStatePosition(state) {
+    if (!state) return null;
+    const [px, py, pz] = state.position || [];
+    let x = Number.isFinite(px) ? px : null;
+    const y = Number.isFinite(py) ? py : null;
+    let z = Number.isFinite(pz) ? pz : null;
+
+
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      return null;
+    }
+    return { x, y, z };
+  }
+
+  function applyNetworkTransformToObject(target, state) {
+    if (!target?.model || !state) return;
+    const resolvedPosition = resolveNetworkStatePosition(state);
+    const [rx, ry, rz, rw] = state.rotation || [];
+    if (resolvedPosition) {
+      const { x: px, y: py, z: pz } = resolvedPosition;
+      target.model.position.set(px, py, pz);
+      target.body?.setTranslation?.({ x: px, y: py, z: pz }, true);
+    }
+    if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+      target.model.quaternion.set(rx, ry, rz, rw);
+      target.body?.setRotation?.({ x: rx, y: ry, z: rz, w: rw }, true);
+    }
+    if (Number.isFinite(state.health)) {
+      target.health = state.health;
+      target.model.userData.health = state.health;
+      target.updateHealthBarTexture?.();
+    }
+    if (state.dead && !target.isDead) {
+      target.markDead?.();
+    }
+    if (typeof state.action === 'string' && state.action && target.currentAction !== state.action) {
+      target.playAnimation?.(state.action, 0.12);
+    }
+  }
+
+  function getCharacterNetworkState(character, extra = {}) {
+    if (!character?.model) return null;
+    const pos = character.model.position;
+    const q = character.model.quaternion;
+    const state = {
+      position: [pos.x, pos.y, pos.z],
+      rotation: [q.x, q.y, q.z, q.w],
+      action: character.currentAction || character.model.userData?.currentAction || null,
+      health: Number.isFinite(character.health) ? character.health : character.model.userData?.health,
+      dead: !!character.isDead,
+      ...extra
+    };
+    return state;
+  }
+
+  function registerLocalDynamicNetworkedEntity(id, character, extraState = {}) {
+    if (!id || !character?.model) return;
+    if (localDynamicNetworkedEntities.get(id) === character) return;
+    localDynamicNetworkedEntities.set(id, character);
+    registerNetworkedEntity(id, {
+      getState: () => getCharacterNetworkState(character, extraState),
+      applyState: state => applyNetworkTransformToObject(character, state),
+      isLocallyControlled: () => !!character?.model && !character.model.userData?.remoteSynced
+    });
+  }
+
+  function ensureRemoteDynamicNetworkedEntity(id, state) {
+    if (typeof id !== 'string') return false;
+    if (id.startsWith('questFriend:')) {
+      ensureRemoteQuestFriend(id, state);
+      return true;
+    }
+    if (id.startsWith('companionDog:')) {
+      ensureRemoteCompanionDog(id, state);
+      return true;
+    }
+    return false;
+  }
+
+  function getRemoteDynamicOwnerId(id) {
+    if (typeof id !== 'string') return null;
+    if (id.startsWith('questFriend:')) return id.slice('questFriend:'.length) || null;
+    if (id.startsWith('companionDog:')) return id.slice('companionDog:'.length).split(':')[0] || null;
+    return null;
+  }
+
+  function ensureRemoteQuestFriend(id, state) {
+    if (window.gameMode === '3d_painter' || window.gameMode === 'horde') return;
+    const existing = remoteQuestFriends.get(id);
+    if (existing?.model) {
+      applyNetworkTransformToObject(existing, state);
+      return;
+    }
+    if (remoteQuestFriends.has(id)) {
+      pendingEntityStates.set(id, cloneState(state));
+      return;
+    }
+    remoteQuestFriends.set(id, { pending: true });
+    loadMonsterModel('/models/cowboy.fbx', data => {
+      const ownerId = getRemoteDynamicOwnerId(id);
+      if (ownerId && removedRemotePlayerIds.has(ownerId)) {
+        remoteQuestFriends.delete(id);
+        return;
+      }
+      const questFriend = new FriendlyCharacter(data);
+      questFriend.id = id;
+      questFriend.modelPath = '/models/cowboy.fbx';
+      questFriend.type = '/models/cowboy.fbx';
+      questFriend.model.userData.hideInMapView = true;
+      questFriend.model.userData.isQuestFriend = true;
+      questFriend.model.userData.remoteSynced = true;
+      questFriend.alwaysShowHealthBar = false;
+      questFriend.enableDanceWhileEngaged = false;
+      questFriend.setNoticeRadius?.(10);
+      questFriend.setWanderRadius?.(5);
+      questFriend.setEngageRadius?.(5);
+      questFriend.setDisengageRadius?.(8);
+      questFriend.setLevel?.(1, { preserveHealth: false });
+      questFriend.resetHealth?.();
+      questFriend.healthBarVisibleUntil = 0;
+      if (questFriend.healthBar) {
+        questFriend.healthBar.visible = false;
+      }
+      scene?.add(questFriend.model);
+      attachMonsterPhysics?.(questFriend);
+      remoteQuestFriends.set(id, questFriend);
+      registerNetworkedEntity(id, {
+        getState: () => null,
+        applyState: nextState => applyNetworkTransformToObject(questFriend, nextState),
+        isLocallyControlled: () => false
+      });
+      applyNetworkTransformToObject(questFriend, pendingEntityStates.get(id) || state);
+      pendingEntityStates.delete(id);
+    });
+  }
+
+  async function ensureRemoteCompanionDog(id, state) {
+    if (!animalManager || remoteCompanionDogSpawns.has(id)) {
+      pendingEntityStates.set(id, cloneState(state));
+      return;
+    }
+    const existing = animals.find(animal => animal?.id === id);
+    if (existing?.model) {
+      applyNetworkTransformToObject(existing, state);
+      return;
+    }
+    remoteCompanionDogSpawns.add(id);
+    const resolvedPosition = resolveNetworkStatePosition(state);
+    const [fallbackX = playerModel?.position?.x ?? 0, fallbackY = playerModel?.position?.y ?? 0, fallbackZ = playerModel?.position?.z ?? 0] = state?.position || [];
+    const spawnPosition = resolvedPosition
+      ? new THREE.Vector3(resolvedPosition.x, resolvedPosition.y, resolvedPosition.z)
+      : new THREE.Vector3(fallbackX, fallbackY, fallbackZ);
+    const dog = await animalManager?.spawnDogAt?.(spawnPosition);
+    const ownerId = getRemoteDynamicOwnerId(id);
+    if (ownerId && removedRemotePlayerIds.has(ownerId)) {
+      if (dog?.model) {
+        dog.id = id;
+        animalManager?.removeAnimalById?.(id);
+      }
+      remoteCompanionDogSpawns.delete(id);
+      return;
+    }
+    if (!dog?.model) {
+      remoteCompanionDogSpawns.delete(id);
+      return;
+    }
+    dog.id = id;
+    dog.model.userData.isCompanion = true;
+    dog.model.userData.remoteSynced = true;
+    if (typeof state?.name === 'string') {
+      dog.model.userData.companionName = state.name;
+    }
+    registerNetworkedEntity(id, {
+      getState: () => null,
+      applyState: nextState => applyNetworkTransformToObject(dog, nextState),
+      isLocallyControlled: () => false
+    });
+    applyNetworkTransformToObject(dog, pendingEntityStates.get(id) || state);
+    pendingEntityStates.delete(id);
+  }
+
+  function syncLocalDynamicNetworkedEntities() {
+    const myId = multiplayer?.getId?.();
+    if (!myId) return;
+    const questFriend = window.questManager?.getQuestFriend?.();
+    if (questFriend?.model) {
+      registerLocalDynamicNetworkedEntity(`questFriend:${myId}`, questFriend, { ownerId: myId });
+    }
+    (animals || []).forEach((animal) => {
+      if (!animal?.model || animal.model.userData?.remoteSynced) return;
+      if (String(animal.type).toLowerCase() !== 'dog' || !animal.model.userData?.isCompanion) return;
+      registerLocalDynamicNetworkedEntity(`companionDog:${myId}:${animal.id}`, animal, {
+        ownerId: myId,
+        name: animal.model.userData?.companionName || null
+      });
+    });
+  }
+
+  function updateRemoteDynamicNetworkedEntities(delta) {
+    remoteQuestFriends.forEach((friend) => {
+      if (friend?.model) friend.update?.(delta);
+    });
+  }
+
+  function cleanupRemoteDynamicNetworkedEntitiesForPlayer(playerId) {
+    if (!playerId) return;
+    removedRemotePlayerIds.add(playerId);
+    const prefixes = [`questFriend:${playerId}`, `companionDog:${playerId}:`];
+    const matchesPlayerEntity = id => prefixes.some(prefix => id === prefix || id.startsWith(prefix));
+
+    remoteQuestFriends.forEach((friend, id) => {
+      if (!matchesPlayerEntity(id)) return;
+      detachNpcPhysics?.(friend);
+      friend?.model?.userData?.mixer?.stopAllAction?.();
+      if (friend?.model?.parent) {
+        friend.model.parent.remove(friend.model);
+      }
+      remoteQuestFriends.delete(id);
+    });
+
+    for (const id of Array.from(remoteCompanionDogSpawns)) {
+      if (!matchesPlayerEntity(id)) continue;
+      animalManager?.removeAnimalById?.(id);
+      remoteCompanionDogSpawns.delete(id);
+    }
+
+    for (const id of Array.from(networkedEntities.keys())) {
+      if (matchesPlayerEntity(id)) networkedEntities.delete(id);
+    }
+    for (const id of Array.from(pendingEntityStates.keys())) {
+      if (matchesPlayerEntity(id)) pendingEntityStates.delete(id);
+    }
+    for (const id of Array.from(authoritativeEntityStates.keys())) {
+      if (matchesPlayerEntity(id)) authoritativeEntityStates.delete(id);
+    }
+    for (const id of Array.from(localDynamicNetworkedEntities.keys())) {
+      if (matchesPlayerEntity(id)) localDynamicNetworkedEntities.delete(id);
+    }
+  }
+
+  function registerNetworkedEntity(id, entry) {
+    networkedEntities.set(id, entry);
+    if (pendingEntityStates.has(id)) {
+      const pending = pendingEntityStates.get(id);
+      pendingEntityStates.delete(id);
+      entry.applyState?.(pending);
+    }
+  }
+
+  function updateAuthoritativeState(id, state, sourceId) {
+    const copy = cloneState(state);
+    const existing = authoritativeEntityStates.get(id);
+    const baselineState = existing?.lastSentState ?? existing?.state;
+    const isDirty = !existing
+      || isStateDifferent(baselineState, copy)
+      || existing.sourceId !== sourceId;
+    authoritativeEntityStates.set(id, {
+      state: copy,
+      lastSentState: existing?.lastSentState ?? cloneState(copy),
+      sourceId,
+      timestamp: performance.now(),
+      dirty: existing?.dirty || isDirty
+    });
+    applyNetworkedState(id, copy);
+  }
+
+  function isStateDifferent(previous, next) {
+    if (previous === next) return false;
+    if (previous == null || next == null) return previous !== next;
+    if (typeof previous !== typeof next) return true;
+    if (typeof previous === 'number' && typeof next === 'number') {
+      if (!Number.isFinite(previous) || !Number.isFinite(next)) {
+        return previous !== next;
+      }
+      return Math.abs(previous - next) > ENTITY_STATE_DIRTY_THRESHOLD;
+    }
+    if (Array.isArray(previous) || Array.isArray(next)) {
+      if (!Array.isArray(previous) || !Array.isArray(next)) return true;
+      if (previous.length !== next.length) return true;
+      return previous.some((value, index) => isStateDifferent(value, next[index]));
+    }
+    if (typeof previous === 'object') {
+      const previousKeys = Object.keys(previous);
+      const nextKeys = Object.keys(next);
+      if (previousKeys.length !== nextKeys.length) return true;
+      return previousKeys.some(key => !Object.prototype.hasOwnProperty.call(next, key)
+        || isStateDifferent(previous[key], next[key]));
+    }
+    return previous !== next;
+  }
+
+  function serializeDirtyAuthoritativeStates() {
+    const payload = {};
+    authoritativeEntityStates.forEach((entry, id) => {
+      if (!entry.dirty) return;
+      payload[id] = { ...cloneState(entry.state), sourceId: entry.sourceId };
+      entry.lastSentState = cloneState(entry.state);
+      entry.dirty = false;
+    });
+    return payload;
+  }
+
+  function serializeFullAuthoritativeStates() {
+    const payload = {};
+    authoritativeEntityStates.forEach((entry, id) => {
+      payload[id] = { ...cloneState(entry.state), sourceId: entry.sourceId };
+      entry.lastSentState = cloneState(entry.state);
+      entry.dirty = false;
+    });
+    return payload;
+  }
+
+  function collectLocalControlStates() {
+    const result = new Map();
+    const myId = multiplayer?.getId?.();
+    if (!myId) return result;
+    networkedEntities.forEach((entry, id) => {
+      const isLocallyControlled = typeof entry.isLocallyControlled === 'function' && entry.isLocallyControlled();
+      const wasLocallyControlled = networkedLocalControlState.get(id) === true;
+      if (!isLocallyControlled && !wasLocallyControlled) {
+        return;
+      }
+      const state = entry.getState?.();
+      if (state) {
+        result.set(id, { state, sourceId: myId });
+      }
+      networkedLocalControlState.set(id, isLocallyControlled);
+    });
+    return result;
+  }
+
+  function sendImmediateEntityControl(id) {
+    if (!id || !multiplayer) return;
+    const entry = networkedEntities.get(id);
+    const myId = multiplayer.getId?.();
+    if (!entry || !myId) return;
+    const state = entry.getState?.();
+    if (!state) return;
+    if (multiplayer.isHost) {
+      updateAuthoritativeState(id, state, myId);
+      return;
+    }
+    queueNetMessage({ type: 'entityControl', id, state, sourceId: myId }, `entityControl:${id}`);
+  }
+
+  function processIncomingData(peerId, data) {
+    // console.log('📡 Incoming data:', data);
+    const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
+    const isFiniteNumber = value => Number.isFinite(value);
+    const isVector3Array = value => Array.isArray(value)
+      && value.length === 3
+      && value.every(isFiniteNumber);
+
+    const logInvalidPayload = (typeLabel, payload) => {
+      console.warn(`[net] Dropping invalid ${typeLabel} payload`, payload);
+    };
+
+    const isPresenceMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'presence') return false;
+      if (typeof payload.name !== 'string' || typeof payload.model !== 'string') return false;
+      if (payload.id != null && typeof payload.id !== 'string') return false;
+      if (payload.action != null && typeof payload.action !== 'string') return false;
+      if (payload.equippedLeft != null && typeof payload.equippedLeft !== 'string') return false;
+      if (payload.equippedRight != null && typeof payload.equippedRight !== 'string') return false;
+      const numberFields = ['x', 'y', 'z', 'rotation', 'heading'];
+      if (numberFields.some(field => payload[field] != null && !isFiniteNumber(payload[field]))) return false;
+      return true;
+    };
+
+    const isEntityControlMessage = payload => isObject(payload)
+      && payload.type === 'entityControl'
+      && typeof payload.id === 'string'
+      && typeof payload.sourceId === 'string'
+      && isObject(payload.state);
+
+    const isEntityStatesMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'entityStates' || !isObject(payload.states)) return false;
+      return Object.entries(payload.states).every(([, entry]) => {
+        if (!isObject(entry)) return false;
+        return entry.sourceId == null || typeof entry.sourceId === 'string';
+      });
+    };
+
+    const isEntitySnapshotMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'entitySnapshot' || !isObject(payload.states)) return false;
+      return Object.entries(payload.states).every(([, entry]) => {
+        if (!isObject(entry)) return false;
+        return entry.sourceId == null || typeof entry.sourceId === 'string';
+      });
+    };
+
+    const isEntityStateRequestMessage = payload => isObject(payload)
+      && payload.type === 'entityStateRequest'
+      && typeof payload.requesterId === 'string'
+      && typeof payload.previousHostId === 'string';
+
+    const isProjectileMessage = payload => isObject(payload)
+      && payload.type === 'projectile'
+      && typeof payload.id === 'string'
+      && isVector3Array(payload.position)
+      && isVector3Array(payload.direction)
+      && (payload.weapon == null || typeof payload.weapon === 'string');
+
+    const isIceMistMessage = payload => isObject(payload)
+      && payload.type === 'iceMist'
+      && typeof payload.id === 'string'
+      && isVector3Array(payload.position)
+      && isVector3Array(payload.direction);
+
+    const isInventoryThrowProjectileMessage = payload => isObject(payload)
+      && payload.type === 'inventoryThrowProjectile'
+      && typeof payload.id === 'string'
+      && typeof payload.itemId === 'string'
+      && isVector3Array(payload.position)
+      && isVector3Array(payload.direction);
+
+    const isInventoryDropMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'inventoryDrop' || !Array.isArray(payload.drops)) return false;
+      return payload.drops.every(drop => {
+        if (!isObject(drop)) return false;
+        if (typeof drop.id !== 'string') return false;
+        if (!isVector3Array(drop.position)) return false;
+        if (drop.amount != null && !isFiniteNumber(drop.amount)) return false;
+        if (drop.ammoType != null && typeof drop.ammoType !== 'string') return false;
+        return true;
+      });
+    };
+
+    const isInventoryWorldDropMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'inventoryWorldDrop' || !Array.isArray(payload.drops)) return false;
+      return payload.drops.every(drop => {
+        if (!isObject(drop)) return false;
+        if (typeof drop.id !== 'string') return false;
+        if (typeof drop.itemId !== 'string') return false;
+        if (!isVector3Array(drop.position)) return false;
+        if (drop.amount != null && !isFiniteNumber(drop.amount)) return false;
+        return true;
+      });
+    };
+
+    const isInventoryWeaponDropMessage = payload => {
+      if (!isObject(payload) || payload.type !== 'inventoryWeaponDrop' || !Array.isArray(payload.drops)) return false;
+      return payload.drops.every(drop => {
+        if (!isObject(drop)) return false;
+        if (typeof drop.id !== 'string') return false;
+        if (typeof drop.itemId !== 'string') return false;
+        if (!isVector3Array(drop.position)) return false;
+        if (!Array.isArray(drop.rotation) || drop.rotation.length !== 4 || !drop.rotation.every(isFiniteNumber)) return false;
+        if (drop.quantity != null && !isFiniteNumber(drop.quantity)) return false;
+        if (drop.torchHealth != null && !isFiniteNumber(drop.torchHealth)) return false;
+        if (drop.shieldHealth != null && !isFiniteNumber(drop.shieldHealth)) return false;
+        return true;
+      });
+    };
+
+    const isDropPickupMessage = payload => isObject(payload)
+      && payload.type === 'dropPickup'
+      && typeof payload.dropId === 'string';
+
+    const isDropWorldPickupMessage = payload => isObject(payload)
+      && payload.type === 'dropWorldPickup'
+      && typeof payload.dropId === 'string';
+
+    const isDropWeaponPickupMessage = payload => isObject(payload)
+      && payload.type === 'dropWeaponPickup'
+      && typeof payload.dropId === 'string'
+      && (payload.itemId == null || typeof payload.itemId === 'string')
+      && (payload.quantity == null || isFiniteNumber(payload.quantity))
+      && (payload.torchHealth == null || isFiniteNumber(payload.torchHealth))
+      && (payload.shieldHealth == null || isFiniteNumber(payload.shieldHealth));
+
+    const isGrabMessage = payload => isObject(payload)
+      && payload.type === 'grab'
+      && typeof payload.target === 'string'
+      && typeof payload.active === 'boolean'
+      && (payload.from == null || typeof payload.from === 'string');
+
+    const isGrabMoveMessage = payload => isObject(payload)
+      && payload.type === 'grabMove'
+      && typeof payload.target === 'string'
+      && isVector3Array(payload.position);
+
+    const isAttackMonsterMessage = payload => isObject(payload)
+      && payload.type === 'attackMonster'
+      && typeof payload.monsterId === 'string'
+      && isFiniteNumber(payload.damage)
+      && (payload.sourcePlayerId == null || typeof payload.sourcePlayerId === 'string')
+      && (payload.attackTypes == null || (Array.isArray(payload.attackTypes) && payload.attackTypes.every(type => typeof type === 'string')))
+      && (payload.at == null || isFiniteNumber(payload.at));
+
+    const isSpawnRequestMessage = payload => isObject(payload)
+      && payload.type === 'spawnRequest'
+      && ['monster', 'friendly', 'animal', 'companionDog'].includes(payload.spawnType)
+      && isVector3Array(payload.position)
+      && (payload.direction == null || isVector3Array(payload.direction));
+
+    if (!isObject(data)) {
+      logInvalidPayload('payload', data);
+      return;
+    }
+
+    if (data.type === 'entityControl') {
+      if (!isEntityControlMessage(data)) {
+        logInvalidPayload('entityControl', data);
+        return;
+      }
+      if (multiplayer?.isHost && data.id && data.state && data.sourceId) {
+        updateAuthoritativeState(data.id, data.state, data.sourceId);
+      }
+      return;
+    }
+
+    if (data.type === 'entityStates') {
+      if (!isEntityStatesMessage(data)) {
+        logInvalidPayload('entityStates', data);
+        return;
+      }
+      Object.entries(data.states).forEach(([id, entry]) => {
+        if (!entry) return;
+        const { sourceId, ...state } = entry;
+        if (sourceId && sourceId === multiplayer?.getId?.()) {
+          const localEntry = networkedEntities.get(id);
+          if (localEntry?.isLocallyControlled?.()) {
+            updateAuthoritativeState(id, state, sourceId);
+            return;
+          }
+        }
+        updateAuthoritativeState(id, state, sourceId ?? null);
+      });
+      return;
+    }
+
+    if (data.type === 'entitySnapshot' && multiplayer?.isHost) {
+      if (!isEntitySnapshotMessage(data)) {
+        logInvalidPayload('entitySnapshot', data);
+        return;
+      }
+      authoritativeEntityStates.clear();
+      Object.entries(data.states).forEach(([id, entry]) => {
+        if (!entry) return;
+        const { sourceId, ...state } = entry;
+        updateAuthoritativeState(id, state, sourceId ?? null);
+      });
+      lastEntityBroadcast = 0;
+      return;
+    }
+
+    if (data.type === 'entityStateRequest') {
+      if (!isEntityStateRequestMessage(data)) {
+        logInvalidPayload('entityStateRequest', data);
+        return;
+      }
+      if (data.previousHostId !== multiplayer?.getId?.()) {
+        return;
+      }
+      const snapshot = serializeFullAuthoritativeStates();
+      if (Object.keys(snapshot).length > 0) {
+        multiplayer.sendTo(data.requesterId, { type: 'entitySnapshot', states: snapshot });
+      }
+      return;
+    }
+
+    if (data.type === 'attackMonster') {
+      if (!isAttackMonsterMessage(data)) {
+        logInvalidPayload('attackMonster', data);
+        return;
+      }
+      if (!multiplayer?.isHost) return;
+      const monsterId = data.monsterId;
+      const monster = findDamageableCreatureById(monsterId);
+      if (!monster) return;
+      const sourceId = data.sourcePlayerId || peerId;
+      const nowMs = Date.now();
+      const eventAt = Number.isFinite(data.at) ? data.at : nowMs;
+      const key = `${sourceId}:${monsterId}`;
+      const lastHitAt = recentMonsterHits.get(key) || 0;
+      if (eventAt - lastHitAt < 250) return;
+      recentMonsterHits.set(key, eventAt);
+      logMonsterPersist('attack intent', { monsterId, damage: data.damage, sourceId });
+      const attackTypes = getAttackTypes(null, data.attackTypes || []);
+      const killed = monster.applyDamage(data.damage, { attackTypes });
+      monster.lastDamageSourceId = sourceId;
+      persistMonsterHp(monster);
+      if (killed && sourceId === multiplayer.getId()) {
+        const withFriend = window.questManager?.isFriendActive?.() ?? false;
+        window.onMonsterKill?.(monster, { withFriend });
+      }
+      return;
+    }
+
+
+    if (data.type === 'spawnRequest') {
+      if (!isSpawnRequestMessage(data)) {
+        logInvalidPayload('spawnRequest', data);
+        return;
+      }
+      if (!multiplayer?.isHost) return;
+      const [px, py, pz] = data.position;
+      const [dx = 0, dy = 0, dz = 1] = data.direction || [];
+      const position = new THREE.Vector3(px, py, pz);
+      const direction = new THREE.Vector3(dx, dy, dz);
+      if (direction.lengthSq() > 0.0001) direction.normalize();
+      void handleCharacterSpawnEvent({
+        type: data.spawnType,
+        position,
+        direction,
+        requesterId: peerId
+      });
+      return;
+    }
+
+    if (data.type === 'presence') {
+      if (!isPresenceMessage(data)) {
+        logInvalidPayload('presence', data);
+        return;
+      }
+      const remoteId = data.id || peerId;
+      removedRemotePlayerIds.delete(remoteId);
+      if (remoteId === multiplayer.getId()) {
+        return;
+      }
+      const desiredModel = data.model || DEFAULT_CHARACTER_MODEL;
+      const now = performance.now();
+      if (!remotePresenceMeta[remoteId]) {
+        remotePresenceMeta[remoteId] = { lastSeenMs: now, lastX: null, lastZ: null };
+      } else {
+        remotePresenceMeta[remoteId].lastSeenMs = now;
+      }
+
+      if (Number.isFinite(data.x) && Number.isFinite(data.z)) {
+        remotePresenceMeta[remoteId].lastX = data.x;
+        remotePresenceMeta[remoteId].lastZ = data.z;
+      }
+
+      const localFix = getLatestLocationFix();
+      if (localFix && Number.isFinite(data.x) && Number.isFinite(data.z)) {
+        const dist = Math.hypot(data.x - localFix.x, data.z - localFix.z);
+        remotePresenceMeta[remoteId].lastDistance = dist;
+        if (dist > PLAYER_VISIBILITY_RADIUS_M) {
+          removeRemotePlayer(remoteId, 'out-of-range');
+          return;
+        }
+      }
+
+      const existing = otherPlayers[remoteId];
+      if (!existing || existing.modelPath !== desiredModel) {
+        if (existing) {
+          if (existing.model && existing.model.parent) {
+            existing.model.parent.remove(existing.model);
+          }
+          if (existing.nameLabel && existing.nameLabel.parentNode) {
+            existing.nameLabel.parentNode.removeChild(existing.nameLabel);
+          }
+        }
+
+        const other = new PlayerCharacter(data.name, desiredModel);
+        other.model.userData.hideInMapView = true;
+        scene.add(other.model);
+        document.body.appendChild(other.nameLabel);
+        otherPlayers[remoteId] = {
+          model: other.model,
+          nameLabel: other.nameLabel,
+          name: data.name,
+          health: existing?.health ?? BASE_HEALTH_SEGMENTS,
+          modelPath: desiredModel,
+          targetPos: new THREE.Vector3(),
+          targetQuat: new THREE.Quaternion(),
+          targetRotY: 0
+        };
+        logNet('spawn', remoteId, data.name);
+      }
+
+      const player = otherPlayers[remoteId];
+      player.name = data.name;
+      player.modelPath = desiredModel;
+      syncPresenceRemoteEquipment(remoteId, data);
+      if (player.nameLabel) {
+        player.nameLabel.innerText = data.name;
+      }
+
+      let targetX = Number.isFinite(data.x) ? data.x : null;
+      let targetZ = Number.isFinite(data.z) ? data.z : null;
+
+      if (targetX == null || targetZ == null) {
+        return;
+      }
+
+      const hasAuthoritativeY = Number.isFinite(data.y);
+      const resolvedNetworkY = getSpawnY(targetX, targetZ, 0.6, { allowOnBuildings: true });
+      const targetY = hasAuthoritativeY ? data.y : (Number.isFinite(resolvedNetworkY) ? resolvedNetworkY : getTerrainHeight(targetX, targetZ));
+
+      if (!player.targetPos) {
+        player.targetPos = new THREE.Vector3(targetX, targetY, targetZ);
+      } else {
+        player.targetPos.set(targetX, targetY, targetZ);
+      }
+
+      const targetRotY = Number.isFinite(data.rotation)
+        ? data.rotation
+        : Number.isFinite(data.heading)
+          ? THREE.MathUtils.degToRad(data.heading)
+          : player.model.rotation.y;
+      player.targetRotY = targetRotY;
+      if (!player.targetQuat) {
+        player.targetQuat = new THREE.Quaternion();
+      }
+      player.targetQuat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetRotY);
+
+      if (!player.model.visible) {
+        player.model.visible = true;
+      }
+
+      // Sync animation state if provided
+      const actions = player.model.userData.actions;
+      const current = player.model.userData.currentAction;
+      if (actions && data.action && current !== data.action) {
+        actions[current]?.fadeOut(0.2);
+        actions[data.action]?.reset().fadeIn(0.2).play();
+        player.model.userData.currentAction = data.action;
+        if (['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'hurricaneKick', 'mmaKick'].includes(data.action)) {
+          const attackName = data.action === 'leftPunch'
+            ? 'mutantPunch'
+            : data.action;
+          player.model.userData.attack = {
+            name: attackName,
+            start: Date.now(),
+            hasHit: false
+          };
+        }
+      }
+
+      return;
+    }
+
+    if (data.type === 'projectile') {
+      if (!isProjectileMessage(data)) {
+        logInvalidPayload('projectile', data);
+        return;
+      }
+      const position = new THREE.Vector3(...data.position);
+      const direction = new THREE.Vector3(...data.direction);
+      if (data.weapon === 'bow') {
+        spawnArrowProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      } else if (data.weapon === 'bazooka') {
+        spawnMissileProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      } else {
+        spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
+      }
+
+      const shooter = otherPlayers[data.id];
+      if (shooter) {
+        const actions = shooter.model.userData.actions;
+        const current = shooter.model.userData.currentAction;
+        const projAction = actions?.projectile;
+        if (projAction) {
+          actions[current]?.fadeOut(0.1);
+          projAction.reset().fadeIn(0.1).play();
+          shooter.model.userData.currentAction = 'projectile';
+        }
+      }
+      return;
+    }
+
+    if (data.type === 'iceMist') {
+      if (!isIceMistMessage(data)) {
+        logInvalidPayload('iceMist', data);
+        return;
+      }
+      const position = new THREE.Vector3(...data.position);
+      const direction = new THREE.Vector3(...data.direction);
+      spawnIceMist(scene, iceMists, position, direction, data.id);
+
+      const shooter = otherPlayers[data.id];
+      if (shooter) {
+        const actions = shooter.model.userData.actions;
+        const current = shooter.model.userData.currentAction;
+        const projAction = actions?.projectile;
+        if (projAction) {
+          actions[current]?.fadeOut(0.1);
+          projAction.reset().fadeIn(0.1).play();
+          shooter.model.userData.currentAction = 'projectile';
+        }
+      }
+      return;
+    }
+
+    if (data.type === 'inventoryThrowProjectile') {
+      if (!isInventoryThrowProjectileMessage(data)) {
+        logInvalidPayload('inventoryThrowProjectile', data);
+        return;
+      }
+      const position = new THREE.Vector3(...data.position);
+      const direction = new THREE.Vector3(...data.direction);
+      spawnInventoryThrowProjectileWithPerfFlags(scene, projectiles, position, direction, data.id, {
+        itemId: data.itemId,
+        createPickupOnGround: false
+      });
+
+      const shooter = otherPlayers[data.id];
+      if (shooter) {
+        const actions = shooter.model.userData.actions;
+        const current = shooter.model.userData.currentAction;
+        const hand = getInventoryItemHand(data.itemId) || 'right';
+        const actionName = hand === 'left' ? 'throwLeft' : 'throw';
+        const throwAction = actions?.[actionName] || actions?.throw;
+        if (throwAction) {
+          actions[current]?.fadeOut(0.1);
+          throwAction.reset().fadeIn(0.1).play();
+          shooter.model.userData.currentAction = actionName;
+        }
+      }
+      return;
+    }
+
+    if (data.type === 'monster') {
+      // Legacy messages handled by networked system; ignore to avoid conflicts.
+      return;
+    }
+
+    if (data.type === 'inventoryDrop' && multiplayer?.isHost) {
+      if (!isInventoryDropMessage(data)) {
+        logInvalidPayload('inventoryDrop', data);
+        return;
+      }
+      const drops = Array.isArray(data.drops) ? data.drops : [];
+      drops.forEach(drop => {
+        if (!drop?.id || !Array.isArray(drop.position)) return;
+        addDroppedAmmoPickup({
+          id: drop.id,
+          position: new THREE.Vector3(...drop.position),
+          amount: drop.amount,
+          ammoType: drop.ammoType
+        });
+      });
+      return;
+    }
+
+    if (data.type === 'inventoryWorldDrop' && multiplayer?.isHost) {
+      if (!isInventoryWorldDropMessage(data)) {
+        logInvalidPayload('inventoryWorldDrop', data);
+        return;
+      }
+      const drops = Array.isArray(data.drops) ? data.drops : [];
+      drops.forEach(drop => {
+        if (!drop?.id || !drop?.itemId || !Array.isArray(drop.position)) return;
+        addDroppedWorldPickup({
+          id: drop.id,
+          itemId: drop.itemId,
+          position: new THREE.Vector3(...drop.position),
+          amount: drop.amount
+        });
+      });
+      return;
+    }
+
+    if (data.type === 'dropWorldPickup' && multiplayer?.isHost) {
+      if (!isDropWorldPickupMessage(data)) {
+        logInvalidPayload('dropWorldPickup', data);
+        return;
+      }
+      if (data.dropId) {
+        removeDroppedWorldPickup(data.dropId);
+      }
+      return;
+    }
+
+    if (data.type === 'inventoryWeaponDrop' && multiplayer?.isHost) {
+      if (!isInventoryWeaponDropMessage(data)) {
+        logInvalidPayload('inventoryWeaponDrop', data);
+        return;
+      }
+      const drops = Array.isArray(data.drops) ? data.drops : [];
+      drops.forEach(drop => {
+        addDroppedWeaponPickupFromState(drop);
+      });
+      return;
+    }
+
+    if (data.type === 'dropPickup' && multiplayer?.isHost) {
+      if (!isDropPickupMessage(data)) {
+        logInvalidPayload('dropPickup', data);
+        return;
+      }
+      if (data.dropId) {
+        removeDroppedAmmoPickup(data.dropId);
+      }
+      return;
+    }
+
+    if (data.type === 'dropWeaponPickup' && multiplayer?.isHost) {
+      if (!isDropWeaponPickupMessage(data)) {
+        logInvalidPayload('dropWeaponPickup', data);
+        return;
+      }
+      if (data.dropId) {
+        removeDroppedWeaponPickupById(data.dropId);
+      }
+      return;
+    }
+
+    if (data.type === 'grab') {
+      if (!isGrabMessage(data)) {
+        logInvalidPayload('grab', data);
+        return;
+      }
+      if (data.target === multiplayer.getId()) {
+        playerControls?.setGrabbed(data.active, data.from);
+      } else {
+        const targetPlayer = otherPlayers[data.target];
+        if (targetPlayer) {
+          targetPlayer.grabbed = data.active;
+        }
+      }
+      return;
+    }
+
+    if (data.type === 'grabMove') {
+      if (!isGrabMoveMessage(data)) {
+        logInvalidPayload('grabMove', data);
+        return;
+      }
+      const pos = new THREE.Vector3(...data.position);
+      if (data.target === multiplayer.getId()) {
+        playerControls?.updateGrabbedPosition(data.position, data.bodyPart);
+      } else {
+        const targetPlayer = otherPlayers[data.target];
+        if (targetPlayer) {
+          targetPlayer.model.position.copy(pos);
+        }
+      }
+      return;
+    }
+  }
+  function handleIncomingData(peerId, data) {
+    pendingIncomingPeerData.push([peerId, data]);
+    if (pendingIncomingPeerData.length > INCOMING_QUEUE_MAX_BACKLOG) {
+      pendingIncomingPeerData.shift();
+    }
+  }
+
+  multiplayer = new Multiplayer(playerName, handleIncomingData);
+  window.multiplayer = multiplayer;
+  multiplayer.queueCoalesced = (payload, key) => queueNetMessage(payload, key);
+  multiplayer.sendHighFrequency = (payload, typeKey, targetKey = 'global') => {
+    const key = `${typeKey}:${targetKey}`;
+    return queueNetMessage(payload, key);
+  };
+  multiplayer.getNetRuntimeStats = () => ({ ...window.netRuntimeStats });
+  multiplayer.onPingUpdate = () => {
+    applyRuntimeNetworkProfile({
+      incomingBacklog: lastIncomingBacklog,
+      incomingProcessCount: lastIncomingProcessCount,
+      overrunStreak: frameOverrunStreak,
+      recoverStreak: frameRecoverStreak
+    });
+  };
+  multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
+    isHost = !!isCurrentHost;
+    setMonsterPersistenceHost(isHost);
+    friendlyNpcManager?.setHost(isHost);
+    animalManager?.setHost?.(isHost);
+    setMerchantHostFeature(isHost);
+    logMonsterPersist('isHost', isHost);
+    if (previousHostId && previousHostId === multiplayer.getId() && previousHostId !== newHostId) {
+      const snapshot = serializeFullAuthoritativeStates();
+      if (newHostId) {
+        multiplayer.sendTo(newHostId, { type: 'entitySnapshot', states: snapshot });
+      }
+    }
+
+    if (isCurrentHost) {
+      lastEntityBroadcast = 0;
+      if (previousHostId && previousHostId !== multiplayer.getId()) {
+        multiplayer.sendTo(previousHostId, {
+          type: 'entityStateRequest',
+          requesterId: multiplayer.getId(),
+          previousHostId
+        });
+      }
+    }
+
+    if (previousHostId !== newHostId) {
+      clearAllRemoteHeldWeaponMeshes();
+      [iceGun, bow, bazooka, bomb, autumnSword, foamSword, hammer, lantern, torch, shield].forEach((weapon) => {
+        if (!weapon) return;
+        weapon.remoteHolderId = null;
+      });
+    }
+  };
+  multiplayer.onReady = async ({ roomId }) => {
+    if (!roomId) {
+      monstersSeeded = true;
+      monsterSnapshotLoaded = true;
+      if (monsterSnapshotTimeout) {
+        clearTimeout(monsterSnapshotTimeout);
+        monsterSnapshotTimeout = null;
+      }
+      friendlyNpcManager?.onRoomReady({ roomId: null, isHost: multiplayer.isHost });
+      await setMerchantRoomFeature({ roomId: null, isHost: multiplayer.isHost });
+      return;
+    }
+    initMonsterPersistence({
+      roomId,
+      isHost: multiplayer.isHost,
+      debug: window.DEBUG_MONSTER_PERSIST
+    });
+    isHost = !!multiplayer.isHost;
+    setMonsterPersistenceHost(isHost);
+    logMonsterPersist('isHost', isHost);
+    monstersSeeded = false;
+    monsterSnapshotLoaded = false;
+    if (monsterSnapshotTimeout) {
+      clearTimeout(monsterSnapshotTimeout);
+    }
+    monsterSnapshotTimeout = setTimeout(() => {
+      if (monsterSnapshotLoaded) return;
+      console.warn('Monster snapshot load timed out, seeding defaults.');
+      monsterSnapshotLoaded = true;
+      monstersSeeded = true;
+    }, MONSTER_SNAPSHOT_TIMEOUT_MS);
+    friendlyNpcManager?.onRoomReady({ roomId, isHost: multiplayer.isHost });
+    await setMerchantRoomFeature({ roomId, isHost: multiplayer.isHost });
+    try {
+      const snapshot = await loadMonstersSnapshot();
+      const snapshotEntries = Object.entries(snapshot || {});
+      snapshotEntries.forEach(([id, record]) => {
+        applyMonsterRecord(record, id, { applyTransform: true });
+      });
+      monsterSnapshotLoaded = true;
+      monstersSeeded = true;
+      if (monsterSnapshotTimeout) {
+        clearTimeout(monsterSnapshotTimeout);
+        monsterSnapshotTimeout = null;
+      }
+      if (unsubscribeMonsterUpdates) {
+        unsubscribeMonsterUpdates();
+      }
+      unsubscribeMonsterUpdates = subscribeMonsterUpdates(records => {
+        Object.entries(records || {}).forEach(([id, record]) => {
+          if (!record) return;
+          if (!monsters.find(entry => entry.id === (record.id || id))) {
+            applyMonsterRecord(record, id, { applyTransform: true });
+          } else {
+            applyMonsterRecord(record, id, { applyTransform: false });
+          }
+        });
+      });
+    } catch (err) {
+      console.warn('Failed to load monster snapshot', err);
+      monsterSnapshotLoaded = true;
+      monstersSeeded = true;
+      if (monsterSnapshotTimeout) {
+        clearTimeout(monsterSnapshotTimeout);
+        monsterSnapshotTimeout = null;
+      }
+    }
+  };
+
+  let iceGun;
+  let bow;
+  let autumnSword;
+  let foamSword;
+  let hammer;
+  let bazooka;
+  let lantern;
+  let torch;
+  let shield;
+  let bomb;
+  let pistol;
+  let treasureChest;
+  let bed;
+  let craftTable;
+  let craftTableColliderBody;
+  let craftTableColliderLastCenter = null;
+  const craftTableColliderBounds = new THREE.Box3();
+  const craftTableColliderCenter = new THREE.Vector3();
+
+  const initialTier = resolvePerformanceTier(displaySettings.performanceMode);
+  renderer = new THREE.WebGLRenderer({ antialias: !isLowEndTier(initialTier) });
+  currentPerformanceTier = initialTier;
+  optionalShadowsEnabled = !isLowEndTier(initialTier);
+  applyRendererPerformanceSettings();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.getElementById('game-container').appendChild(renderer.domElement);
+
+  const mapGroup = await new MapLoader().load('/map/map.mappack', {
+    renderer,
+    transcoderPath: '/basis/',
+  });
+  scene.add(mapGroup);
+
+  const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
+  mapRenderer = createMapRenderer({ scene, renderer });
+  buildingsRenderer = createBuildingsRenderer({ scene, camera, renderer });
+  buildingsRenderer?.setPromotionLimits?.({
+    maxPromotionsPerFrame: window?.gameSettings?.render?.buildings?.maxPromotionsPerFrame,
+    maxPromotionCpuMs: window?.gameSettings?.render?.buildings?.promotionCpuBudgetMs,
+    cameraTeleportDistanceMeters: window?.gameSettings?.render?.buildings?.promotionTeleportDistanceMeters,
+    burstSoftCap: window?.gameSettings?.render?.buildings?.promotionBurstSoftCap
+  });
+  runtimeContext.systems.mapRenderer = mapRenderer;
+  window.mapRenderer = mapRenderer;
+  runtimeContext.systems.buildingsRenderer = buildingsRenderer;
+  window.buildingsRenderer = buildingsRenderer;
+  if (buildingsRenderer?.materials) {
+    buildingMaterialBase = {
+      extruded: captureMaterialBase(buildingsRenderer.materials.extruded),
+      flat: captureMaterialBase(buildingsRenderer.materials.flat)
+    };
+  }
+  if (pendingMapRebuild) {
+    rebuildMapFromCache();
+  }
+
+  const handleResize = () => {
+    applyRendererPerformanceSettings();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    mapRenderer.setResolution(window.innerWidth, window.innerHeight);
+  };
+  window.addEventListener('resize', handleResize);
+  handleResize();
+
+  ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(ambientLight);
+
+  dirLight = new THREE.DirectionalLight(0xffffff, 1);
+  dirLight.position.set(5, 10, 5);
+  dirLight.castShadow = true;
+  scene.add(dirLight);
+  applyRendererPerformanceSettings();
+  applyDisplaySettings();
+
+
+
+  // --- RAPIER INIT ---
+  await RAPIER.init({});
+  rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+  runtimeContext.systems.rapierWorld = rapierWorld;
+  window.rapierWorld = rapierWorld;
+  runtimeContext.systems.rbToMesh = rbToMesh;
+  window.rbToMesh = rbToMesh;
+
+  // Ground collider
+  {
+    const groundRb = rapierWorld.createRigidBody(
+      RAPIER.RigidBodyDesc.fixed().setTranslation(0, -1, 0)
+    );
+    rapierWorld.createCollider(
+      RAPIER.ColliderDesc.cuboid(200, 1, 200),
+      groundRb
+    );
+  }
+
+  // Prime with an initial distant wave
+
+  const setPlayerWeaponType = (controls, weaponType) => {
+    if (!controls?.playerModel) return;
+    controls.playerModel.userData.equippedWeaponType = weaponType || null;
+    controls.refreshActionButtons?.();
+  };
+
+  const clearPlayerWeaponType = (controls, weaponType) => {
+    if (!controls?.playerModel) return;
+    if (!weaponType || controls.playerModel.userData.equippedWeaponType === weaponType) {
+      controls.playerModel.userData.equippedWeaponType = null;
+      controls.refreshActionButtons?.();
+    }
+  };
+
+  const updateRemoteWeaponType = (weapon, holderId, previousHolderId) => {
+    const localId = multiplayer?.getId?.();
+    if (previousHolderId && previousHolderId !== localId) {
+      clearRemoteHeldWeaponFor(weapon.type, previousHolderId);
+      const previousHolder = otherPlayers[previousHolderId];
+      if (previousHolder?.model?.userData?.equippedWeaponType === weapon.type) {
+        previousHolder.model.userData.equippedWeaponType = null;
+      }
+    }
+    if (holderId && holderId !== localId) {
+      const nextHolder = otherPlayers[holderId];
+      if (nextHolder?.model) {
+        nextHolder.model.userData.equippedWeaponType = weapon.type;
+      }
+    }
+  };
+
+  const getPresenceHolderForWeaponType = (weaponType) => {
+    if (!weaponType) return null;
+    for (const [remoteId, equipState] of remotePresenceEquipment.entries()) {
+      if (!equipState) continue;
+      if (equipState.left === weaponType || equipState.right === weaponType) {
+        return remoteId;
+      }
+    }
+    return null;
+  };
+
+  const dropOtherWeapons = (activeWeapon) => {
+    [iceGun, bow, bazooka, autumnSword, foamSword, hammer, bomb].forEach(weapon => {
+      if (!weapon || weapon === activeWeapon) return;
+      if (weapon.holder === playerControls) {
+        if (weapon.itemId) {
+          unequipInventoryItem(weapon.itemId);
+        }
+      }
+    });
+  };
+
+  const createWeaponMarker = (color = 0xffd400) => {
+    const geometry = new THREE.ConeGeometry(0.25, 0.5, 4);
+    const material = new THREE.MeshStandardMaterial({ color });
+    const marker = new THREE.Mesh(geometry, material);
+    marker.rotation.x = Math.PI;
+    marker.castShadow = false;
+    marker.receiveShadow = false;
+    marker.visible = false;
+    scene.add(marker);
+    return marker;
+  };
+
+  const droppedWeaponPickups = [];
+  const networkDroppedWeaponPickups = new Map();
+  window.weaponPickups = droppedWeaponPickups;
+
+  const disposeLocalHeldWeaponMesh = (key) => {
+    const mesh = localHeldWeaponMeshes.get(key);
+    if (!mesh) return;
+    scene.remove(mesh);
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+    localHeldWeaponMeshes.delete(key);
+  };
+
+  const ensureLocalHeldWeaponMesh = (weapon, key = weapon?.type, options = {}) => {
+    const { forceNew = false } = options;
+    if (!weapon?.mesh || !key) return null;
+    if (forceNew && localHeldWeaponMeshes.has(key)) {
+      disposeLocalHeldWeaponMesh(key);
+    }
+    if (localHeldWeaponMeshes.has(key)) return localHeldWeaponMeshes.get(key);
+    const heldMesh = weapon.mesh.clone(true);
+    heldMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    heldMesh.visible = false;
+    heldMesh.userData.hideInMapView = true;
+    scene.add(heldMesh);
+    localHeldWeaponMeshes.set(key, heldMesh);
+    weapon.heldMesh = heldMesh;
+    return heldMesh;
+  };
+
+  const makeRemoteHeldKey = (weaponType, holderId) => `${weaponType}:${holderId}`;
+
+  const disposeRemoteHeldWeaponMesh = (key) => {
+    const entry = remoteHeldWeaponMeshes.get(key);
+    if (!entry) return;
+    scene.remove(entry.mesh);
+    entry.mesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+    remoteHeldWeaponMeshes.delete(key);
+  };
+
+  const clearRemoteHeldWeaponFor = (weaponType, holderId) => {
+    if (!weaponType || !holderId) return;
+    disposeRemoteHeldWeaponMesh(makeRemoteHeldKey(weaponType, holderId));
+  };
+
+  const clearRemoteHeldWeaponsForHolder = (holderId) => {
+    if (!holderId) return;
+    Array.from(remoteHeldWeaponMeshes.keys()).forEach((key) => {
+      if (key.endsWith(`:${holderId}`)) {
+        disposeRemoteHeldWeaponMesh(key);
+      }
+    });
+  };
+
+  const ensureRemoteHeldWeaponMesh = (weapon, holderId) => {
+    if (!weapon?.mesh || !holderId) return null;
+    const key = makeRemoteHeldKey(weapon.type, holderId);
+    if (remoteHeldWeaponMeshes.has(key)) {
+      return remoteHeldWeaponMeshes.get(key).mesh;
+    }
+    const mesh = weapon.mesh.clone(true);
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    mesh.visible = true;
+    mesh.userData.hideInMapView = true;
+    mesh.userData.isRemoteEquipped = true;
+    scene.add(mesh);
+    remoteHeldWeaponMeshes.set(key, { mesh, weaponType: weapon.type, holderId });
+    return mesh;
+  };
+
+  const syncRemoteHeldWeaponMesh = (weapon) => {
+    if (!weapon?.mesh) return;
+    const localId = multiplayer?.getId?.();
+    const holderId = weapon.remoteHolderId ?? null;
+    if (!holderId || holderId === localId) {
+      clearRemoteHeldWeaponFor(weapon.type, holderId);
+      return;
+    }
+    const remotePlayer = otherPlayers[holderId];
+    const remoteModel = remotePlayer?.model;
+    if (!remoteModel) {
+      clearRemoteHeldWeaponFor(weapon.type, holderId);
+      return;
+    }
+    const remoteHeldMesh = ensureRemoteHeldWeaponMesh(weapon, holderId);
+    if (!remoteHeldMesh) return;
+    const handBone = weapon._getHandBone?.(remoteModel);
+    const holdQuaternion = weapon._holdQuaternion || new THREE.Quaternion();
+    const holdOffset = weapon._holdOffset || new THREE.Vector3();
+    if (handBone) {
+      handBone.updateWorldMatrix(true, false);
+      handBone.getWorldPosition(remoteHoldTempPosition);
+      handBone.getWorldQuaternion(remoteHoldTempQuaternion);
+      remoteHeldMesh.position.copy(remoteHoldTempPosition);
+      remoteHoldTempOffset.copy(holdOffset).applyQuaternion(remoteHoldTempQuaternion);
+      remoteHeldMesh.position.add(remoteHoldTempOffset);
+      remoteHeldMesh.quaternion.copy(remoteHoldTempQuaternion).multiply(holdQuaternion);
+    } else {
+      const quaternion = remoteModel.quaternion;
+      remoteHoldTempOffset.copy(holdOffset).applyQuaternion(quaternion);
+      remoteHeldMesh.position.copy(remoteModel.position).add(remoteHoldTempOffset);
+      remoteHeldMesh.quaternion.copy(quaternion).multiply(holdQuaternion);
+    }
+    weapon.mesh.visible = false;
+  };
+
+  const syncPresenceRemoteEquipment = (remoteId, payload) => {
+    if (!remoteId || !payload) return;
+    const localId = multiplayer?.getId?.();
+    if (!remoteId || remoteId === localId) return;
+    const remotePlayer = otherPlayers[remoteId];
+    if (!remotePlayer?.model) return;
+
+    const nextLeft = typeof payload.equippedLeft === 'string' ? payload.equippedLeft : null;
+    const nextRight = typeof payload.equippedRight === 'string' ? payload.equippedRight : null;
+
+    remotePresenceEquipment.set(remoteId, { left: nextLeft, right: nextRight });
+
+    const remoteEquipByType = {
+      lantern,
+      torch,
+      shield,
+      iceGun: iceGun,
+      bow,
+      bomb,
+      sword: autumnSword,
+      hammer,
+      bazooka
+    };
+
+    const setRemoteEquipState = (weaponType, isEquipped) => {
+      const weapon = remoteEquipByType[weaponType];
+      if (!weapon) return;
+      const previousHolderId = weapon.remoteHolderId ?? null;
+      const nextHolderId = isEquipped ? remoteId : null;
+      if (previousHolderId === nextHolderId) return;
+      weapon.remoteHolderId = nextHolderId;
+      updateRemoteWeaponType(weapon, nextHolderId, previousHolderId);
+    };
+
+    setRemoteEquipState('lantern', nextLeft === 'lantern');
+    setRemoteEquipState('torch', nextLeft === 'torch');
+    setRemoteEquipState('shield', nextLeft === 'shield');
+    setRemoteEquipState('iceGun', nextRight === 'iceGun');
+    setRemoteEquipState('bow', nextRight === 'bow');
+    setRemoteEquipState('bomb', nextRight === 'bomb');
+    setRemoteEquipState('sword', nextRight === 'sword');
+    setRemoteEquipState('hammer', nextRight === 'hammer');
+    setRemoteEquipState('bazooka', nextRight === 'bazooka');
+
+    remotePlayer.model.userData.equippedWeaponType = nextRight || nextLeft || null;
+  };
+
+  const clearAllRemoteHeldWeaponMeshes = () => {
+    Array.from(remoteHeldWeaponMeshes.keys()).forEach(disposeRemoteHeldWeaponMesh);
+  };
+
+  const { IceGun, Bow, Lantern, AutumnSword, FoamSword, FOAM_SWORD_ITEM_ID, Hammer, Bazooka, Bomb, Shield, SHIELD_ITEM_ID, DEFAULT_SHIELD_HEALTH, Pistol } = await loadSpecialWeapons();
+
+  const updateWeaponMarker = (weapon, marker, rotationSpeed, offsetY = 1.2) => {
+    if (!weapon?.mesh || !marker) return;
+    const shouldShow = weapon.mesh.visible && !weapon.holder;
+    marker.visible = shouldShow;
+    if (!shouldShow) return;
+    marker.position.copy(weapon.mesh.position);
+    marker.position.y += offsetY;
+    marker.rotation.y += rotationSpeed;
+  };
+
+  iceGun = new IceGun(scene);
+  await iceGun.load();
+  window.iceGun = iceGun;
+  const iceGunMarker = createWeaponMarker(0xffd400);
+  iceGun.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(iceGun, 'iceGun');
+    iceGun.useHeldMeshWhenHeld = true;
+    if (heldMesh) heldMesh.visible = true;
+    if (lantern?.holder === playerControls) {
+      iceGun.holder = null;
+      iceGun.localHoldOrigin = null;
+      return;
+    }
+    dropOtherWeapons(iceGun);
+    addToInventory('iceGun', 1);
+    iceGun.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, iceGun.type);
+    playerControls.updateAmmoUI?.(true);
+    playerControls.setAmmo?.(
+      inventoryState.iceGun?.[ICE_AMMO_KEY] ?? 0,
+      getAmmoLabelForType('ammo'),
+      getAmmoIconForType('ammo')
+    );
+  };
+  iceGun.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    iceGun.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('iceGun', 1);
+    }
+    clearPlayerWeaponType(holder, iceGun.type);
+    if (iceGun.heldMesh) {
+      iceGun.heldMesh.visible = false;
+    }
+    iceGun.useHeldMeshWhenHeld = true;
+    playerControls?.updateAmmoUI?.(false);
+  };
+  if (iceGun.mesh) {
+    iceGun.mesh.userData.hideInMapView = true;
+    iceGun.mesh.visible = false;
+  }
+  registerNetworkedEntity('icegun', {
+    getState: () => {
+      if (!iceGun?.mesh) return null;
+      const pos = iceGun.mesh.position;
+      const q = iceGun.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (iceGun.holder === playerControls && iceGun.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!iceGun?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        iceGun.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        iceGun.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = iceGun.remoteHolderId ?? null;
+      iceGun.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(iceGun.type);
+      updateRemoteWeaponType(iceGun, iceGun.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && iceGun.holder === playerControls && iceGun.localHoldOrigin === 'world') {
+        iceGun.holder = null;
+        iceGun.localHoldOrigin = null;
+        clearPlayerWeaponType(playerControls, iceGun.type);
+      }
+    },
+    isLocallyControlled: () => iceGun?.holder === playerControls
+  });
+
+  bow = new Bow(scene);
+  await bow.load();
+  window.bow = bow;
+  await loadArrowTemplate();
+  await loadManaPotionTemplate();
+  let bowHeldArrow = null;
+  let bowHeldMesh = null;
+  const ensureBowHeldMesh = ({ forceNew = false } = {}) => {
+    if (!bow?.mesh) return bowHeldMesh;
+    if (forceNew && bowHeldMesh) {
+      scene.remove(bowHeldMesh);
+      bowHeldMesh.traverse(child => {
+        if (!child.isMesh) return;
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(material => material?.dispose?.());
+        } else {
+          child.material?.dispose?.();
+        }
+      });
+      bowHeldMesh = null;
+      bow.heldMesh = null;
+    }
+    if (bowHeldMesh) return bowHeldMesh;
+    bowHeldMesh = bow.mesh.clone(true);
+    bowHeldMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    bowHeldMesh.visible = false;
+    bowHeldMesh.userData.hideInMapView = true;
+    scene.add(bowHeldMesh);
+    bow.heldMesh = bowHeldMesh;
+    return bowHeldMesh;
+  };
+  const ensureBowHeldArrow = () => {
+    if (bowHeldArrow || !arrowTemplate) return bowHeldArrow;
+    bowHeldArrow = cloneArrowMesh(arrowTemplate, 0.12);
+    if (!bowHeldArrow) return null;
+    bowHeldArrow.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    bowHeldArrow.visible = false;
+    bowHeldArrow.userData.hideInMapView = true;
+    return bowHeldArrow;
+  };
+  const attachBowHeldArrow = (targetMesh) => {
+    const heldArrow = ensureBowHeldArrow();
+    if (!heldArrow || !targetMesh) return;
+    if (heldArrow.parent === targetMesh) return;
+    heldArrow.parent?.remove(heldArrow);
+    targetMesh.add(heldArrow);
+    heldArrow.position.set(0, 0, 0);
+    heldArrow.quaternion.identity();
+  };
+  const bowMarker = createWeaponMarker(0xffc26b);
+  bow.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    unequipOtherInventoryItems('bow');
+    bow.useHeldMeshWhenHeld = false;
+    if (bowHeldMesh) {
+      bowHeldMesh.visible = false;
+    }
+    addToInventory('bow', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
+    bow.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, bow.type);
+    playerControls.updateAmmoUI?.(true);
+    playerControls.setAmmo?.(
+      inventoryState.bow?.[ARROW_AMMO_KEY] ?? 0,
+      getAmmoLabelForType('arrow'),
+      getAmmoIconForType('arrow')
+    );
+    attachBowHeldArrow(bow.mesh);
+  };
+  bow.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    bow.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('bow', 1);
+    }
+    clearPlayerWeaponType(holder, bow.type);
+    playerControls?.updateAmmoUI?.(false);
+    playerControls?.setAiming?.(false);
+    if (bowHeldArrow) {
+      bowHeldArrow.visible = false;
+    }
+    bow.useHeldMeshWhenHeld = false;
+    if (bowHeldMesh) {
+      bowHeldMesh.visible = false;
+    }
+  };
+  if (bow.mesh) {
+    bow.mesh.userData.hideInMapView = true;
+    bow.mesh.visible = false;
+  }
+  registerNetworkedEntity('bow', {
+    getState: () => {
+      if (!bow?.mesh) return null;
+      const pos = bow.mesh.position;
+      const q = bow.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (bow.holder === playerControls && bow.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!bow?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        bow.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        bow.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = bow.remoteHolderId ?? null;
+      bow.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(bow.type);
+      updateRemoteWeaponType(bow, bow.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && bow.holder === playerControls && bow.localHoldOrigin === 'world') {
+        bow.holder = null;
+        bow.localHoldOrigin = null;
+        clearPlayerWeaponType(playerControls, bow.type);
+      }
+    },
+    isLocallyControlled: () => bow?.holder === playerControls
+  });
+
+  bomb = new Bomb(scene);
+  await bomb.load();
+  window.bomb = bomb;
+  const bombMarker = createWeaponMarker(0xff4d4d);
+  bomb.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(bomb, 'bomb');
+    bomb.useHeldMeshWhenHeld = true;
+    if (heldMesh) heldMesh.visible = true;
+    unequipOtherInventoryItems('bomb');
+    addToInventory('bomb', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
+    bomb.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, bomb.type);
+  };
+  bomb.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    bomb.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('bomb', 1);
+    }
+    clearPlayerWeaponType(holder, bomb.type);
+    if (bomb.heldMesh) {
+      bomb.heldMesh.visible = false;
+    }
+    bomb.useHeldMeshWhenHeld = true;
+  };
+  if (bomb.mesh) {
+    bomb.mesh.userData.hideInMapView = true;
+    bomb.mesh.visible = false;
+  }
+  registerNetworkedEntity('bomb', {
+    getState: () => {
+      if (!bomb?.mesh) return null;
+      const pos = bomb.mesh.position;
+      const q = bomb.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (bomb.holder === playerControls && bomb.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!bomb?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        bomb.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        bomb.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = bomb.remoteHolderId ?? null;
+      bomb.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(bomb.type);
+      updateRemoteWeaponType(bomb, bomb.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && bomb.holder === playerControls && bomb.localHoldOrigin === 'world') {
+        bomb.holder = null;
+        bomb.localHoldOrigin = null;
+        clearPlayerWeaponType(playerControls, bomb.type);
+      }
+    },
+    isLocallyControlled: () => bomb?.holder === playerControls
+  });
+
+  autumnSword = new AutumnSword(scene);
+  await autumnSword.load();
+  window.autumnSword = autumnSword;
+  const autumnSwordMarker = createWeaponMarker(0xffd400);
+  autumnSword.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(autumnSword, 'autumnSword');
+    autumnSword.useHeldMeshWhenHeld = true;
+    if (heldMesh) heldMesh.visible = true;
+    unequipOtherInventoryItems('autumnSword');
+    addToInventory('autumnSword', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
+    autumnSword.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, autumnSword.type);
+  };
+  autumnSword.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    autumnSword.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('autumnSword', 1);
+    }
+    clearPlayerWeaponType(holder, autumnSword.type);
+    if (autumnSword.heldMesh) {
+      autumnSword.heldMesh.visible = false;
+    }
+    autumnSword.useHeldMeshWhenHeld = true;
+  };
+  if (autumnSword.mesh) {
+    autumnSword.mesh.userData.hideInMapView = true;
+    autumnSword.mesh.visible = false;
+  }
+  registerNetworkedEntity('autumnsword', {
+    getState: () => {
+      if (!autumnSword?.mesh) return null;
+      const pos = autumnSword.mesh.position;
+      const q = autumnSword.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (autumnSword.holder === playerControls && autumnSword.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!autumnSword?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        autumnSword.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        autumnSword.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = autumnSword.remoteHolderId ?? null;
+      autumnSword.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(autumnSword.type);
+      updateRemoteWeaponType(autumnSword, autumnSword.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && autumnSword.holder === playerControls && autumnSword.localHoldOrigin === 'world') {
+        autumnSword.holder = null;
+        autumnSword.localHoldOrigin = null;
+        clearPlayerWeaponType(playerControls, autumnSword.type);
+      }
+    },
+    isLocallyControlled: () => autumnSword?.holder === playerControls
+  });
+
+  foamSword = new FoamSword(scene);
+  await foamSword.load();
+  window.foamSword = foamSword;
+  foamSword.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(foamSword, FOAM_SWORD_ITEM_ID);
+    foamSword.useHeldMeshWhenHeld = true;
+    if (heldMesh) heldMesh.visible = true;
+    unequipOtherInventoryItems(FOAM_SWORD_ITEM_ID);
+    addToInventory(FOAM_SWORD_ITEM_ID, 1);
+    foamSword.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, foamSword.type);
+  };
+  foamSword.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    foamSword.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory(FOAM_SWORD_ITEM_ID, 1);
+    }
+    clearPlayerWeaponType(holder, foamSword.type);
+    if (foamSword.heldMesh) {
+      foamSword.heldMesh.visible = false;
+    }
+    foamSword.useHeldMeshWhenHeld = true;
+  };
+  if (foamSword.mesh) {
+    foamSword.mesh.userData.hideInMapView = true;
+    foamSword.mesh.visible = false;
+  }
+
+  hammer = new Hammer(scene);
+  await hammer.load();
+  window.hammer = hammer;
+  const hammerMarker = createWeaponMarker(0xb08a4a);
+  hammer.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(hammer, 'hammer');
+    hammer.useHeldMeshWhenHeld = true;
+    if (heldMesh) heldMesh.visible = true;
+    unequipOtherInventoryItems('hammer');
+    addToInventory('hammer', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
+    hammer.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, hammer.type);
+  };
+  hammer.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    hammer.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('hammer', 1);
+    }
+    clearPlayerWeaponType(holder, hammer.type);
+    if (hammer.heldMesh) {
+      hammer.heldMesh.visible = false;
+    }
+    hammer.useHeldMeshWhenHeld = true;
+  };
+  if (hammer.mesh) {
+    hammer.mesh.userData.hideInMapView = true;
+    hammer.mesh.visible = false;
+  }
+  registerNetworkedEntity('hammer', {
+    getState: () => {
+      if (!hammer?.mesh) return null;
+      const pos = hammer.mesh.position;
+      const q = hammer.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (hammer.holder === playerControls && hammer.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!hammer?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        hammer.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        hammer.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = hammer.remoteHolderId ?? null;
+      hammer.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(hammer.type);
+      updateRemoteWeaponType(hammer, hammer.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && hammer.holder === playerControls && hammer.localHoldOrigin === 'world') {
+        hammer.holder = null;
+        hammer.localHoldOrigin = null;
+        clearPlayerWeaponType(playerControls, hammer.type);
+      }
+    },
+    isLocallyControlled: () => hammer?.holder === playerControls
+  });
+
+
+  bazooka = new Bazooka(scene);
+  await bazooka.load();
+  window.bazooka = bazooka;
+  const bazookaMarker = createWeaponMarker(0xff3b3b);
+  bazooka.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(bazooka, 'bazooka');
+    bazooka.useHeldMeshWhenHeld = true;
+    if (heldMesh) heldMesh.visible = true;
+    unequipOtherInventoryItems('bazooka');
+    addToInventory('bazooka', 1);
+    notifyAchievementProgress('weaponsCollected', 1);
+    bazooka.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, bazooka.type);
+    playerControls.updateAmmoUI?.(true);
+    playerControls.setAmmo?.(
+      inventoryState.bazooka?.[MISSILE_AMMO_KEY] ?? 0,
+      getAmmoLabelForType('missile'),
+      getAmmoIconForType('missile')
+    );
+  };
+  bazooka.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    bazooka.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('bazooka', 1);
+    }
+    clearPlayerWeaponType(holder, bazooka.type);
+    if (bazooka.heldMesh) {
+      bazooka.heldMesh.visible = false;
+    }
+    bazooka.useHeldMeshWhenHeld = true;
+    playerControls?.updateAmmoUI?.(false);
+  };
+  if (bazooka.mesh) {
+    bazooka.mesh.userData.hideInMapView = true;
+    bazooka.mesh.visible = false;
+  }
+  registerNetworkedEntity('bazooka', {
+    getState: () => {
+      if (!bazooka?.mesh) return null;
+      const pos = bazooka.mesh.position;
+      const q = bazooka.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (bazooka.holder === playerControls && bazooka.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!bazooka?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        bazooka.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        bazooka.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = bazooka.remoteHolderId ?? null;
+      bazooka.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(bazooka.type);
+      updateRemoteWeaponType(bazooka, bazooka.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && bazooka.holder === playerControls && bazooka.localHoldOrigin === 'world') {
+        bazooka.holder = null;
+        bazooka.localHoldOrigin = null;
+        clearPlayerWeaponType(playerControls, bazooka.type);
+      }
+    },
+    isLocallyControlled: () => bazooka?.holder === playerControls
+  });
+
+  pistol = new Pistol(scene);
+  await pistol.load();
+  window.pistol = pistol;
+  if (pistol.mesh) {
+    pistol.mesh.visible = false;
+    pistol.mesh.userData.hideInMapView = true;
+  }
+  pistol.onPickup = () => {};
+  pistol.onDrop = () => {};
+
+  // Horde mode: replace the pistol's box fallback with a gun-shaped procedural mesh
+  if (window.gameMode === 'horde' && pistol.mesh) {
+    scene.remove(pistol.mesh);
+    const _darkMetal = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.38, metalness: 0.85 });
+    const _lightMetal = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.5, metalness: 0.7 });
+    const hordeGunGroup = new THREE.Group();
+    hordeGunGroup.name = 'horde-pistol';
+    // Slide (top body)
+    const slideMesh = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.055, 0.18), _darkMetal.clone());
+    slideMesh.position.set(0, 0.01, 0);
+    slideMesh.castShadow = true;
+    hordeGunGroup.add(slideMesh);
+    // Barrel
+    const barrelGeo = new THREE.CylinderGeometry(0.009, 0.009, 0.07, 8);
+    barrelGeo.rotateX(Math.PI / 2);
+    const barrelMesh = new THREE.Mesh(barrelGeo, _darkMetal.clone());
+    barrelMesh.position.set(0, 0.004, -0.125);
+    barrelMesh.castShadow = true;
+    hordeGunGroup.add(barrelMesh);
+    // Frame / grip
+    const frameMesh = new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.095, 0.068), _lightMetal.clone());
+    frameMesh.position.set(0, -0.065, 0.042);
+    frameMesh.castShadow = true;
+    hordeGunGroup.add(frameMesh);
+    // Trigger guard (half-torus)
+    const guardGeo = new THREE.TorusGeometry(0.018, 0.004, 6, 12, Math.PI);
+    const guardMesh = new THREE.Mesh(guardGeo, _lightMetal.clone());
+    guardMesh.position.set(0, -0.02, -0.01);
+    guardMesh.rotation.set(0, 0, Math.PI / 2);
+    guardMesh.castShadow = true;
+    hordeGunGroup.add(guardMesh);
+    // Sight (tiny nub on top)
+    const sightMesh = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.01, 0.006), _darkMetal.clone());
+    sightMesh.position.set(0, 0.042, -0.075);
+    hordeGunGroup.add(sightMesh);
+    hordeGunGroup.visible = false;
+    hordeGunGroup.userData.hideInMapView = true;
+    scene.add(hordeGunGroup);
+    pistol.mesh = hordeGunGroup;
+  }
+
+  runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol };
+  window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol };
+
+  // --- 3D Painter mode: paintbrush ---
+  // Extends Weapon so hand-bone attachment uses the exact same path as pistol/bow/etc.
+  class PaintBrush extends Weapon {
+    constructor(sc) {
+      super(sc, {
+        type: 'paintbrush',
+        itemId: 'paintbrush',
+        hand: 'right',
+        holdOffset: new THREE.Vector3(-0.0090, 0.0050, 0.0420),
+        holdRotation: new THREE.Euler(1.0123, -1.3090, -0.1484, 'YXZ'),
+      });
+      this._tipMarker = null;
+    }
+
+    async load() {
+      const brushGroup = new THREE.Group();
+
+      // Black cylinder handle
+      const handleGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.22, 8);
+      const handleMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+      const handleMesh = new THREE.Mesh(handleGeo, handleMat);
+      handleMesh.castShadow = true;
+      brushGroup.add(handleMesh);
+
+      // Red pyramid tip (4-sided cone) at the top of the handle
+      const tipGeo = new THREE.ConeGeometry(0.018, 0.055, 4);
+      const tipMat = new THREE.MeshStandardMaterial({ color: 0xdd1111, roughness: 0.5 });
+      const tipMesh = new THREE.Mesh(tipGeo, tipMat);
+      tipMesh.position.y = 0.138;
+      tipMesh.castShadow = true;
+      brushGroup.add(tipMesh);
+
+      // Invisible marker at the very tip of the pyramid
+      this._tipMarker = new THREE.Object3D();
+      this._tipMarker.position.y = 0.138 + 0.0275;
+      brushGroup.add(this._tipMarker);
+
+      this.mesh = brushGroup;
+      this.scene.add(this.mesh);
+    }
+
+    getTipWorldPosition() {
+      if (!this._tipMarker) return null;
+      this._tipMarker.updateWorldMatrix(true, false);
+      const pos = new THREE.Vector3();
+      this._tipMarker.getWorldPosition(pos);
+      return pos;
+    }
+
+    _getHandBone(playerModel) {
+      if (this._handBones.has(playerModel)) {
+        const cached = this._handBones.get(playerModel);
+        if (cached?.indexMcp) return cached.indexMcp;
+      }
+      const root = playerModel.userData?.pivot ?? playerModel;
+      let found = null;
+      root.traverse(obj => {
+        if (!found && obj.isBone && /Bone\.?005/i.test(obj.name)) found = obj;
+      });
+      this._handBones.set(playerModel, { indexMcp: found });
+      return found;
+    }
+  }
+
+  let paintBrush = null;
+  const paintStrokes = [];
+  let _painterPinchWas = false;
+  let _lastPaintPos = null;
+  const PAINT_MIN_DIST = 0.015;
+
+  if (window.gameMode === '3d_painter') {
+    paintBrush = new PaintBrush(scene);
+    await paintBrush.load();
+  }
+
+  function spawnPaintSphere(position) {
+    const geo = new THREE.SphereGeometry(0.04, 8, 6);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xdd1111, roughness: 0.6, metalness: 0.1 });
+    const sphere = new THREE.Mesh(geo, mat);
+    sphere.castShadow = true;
+    sphere.position.copy(position);
+    scene.add(sphere);
+    paintStrokes.push(sphere);
+  }
+
+  function processPainterPinch() {
+    if (!paintBrush || !isHandTrackingEnabled()) return;
+    const htd = getHandTrackingData();
+    // Back-camera swap: 'left' tracking slot = right in-game hand (where brush is)
+    const isPinching = !!(htd?.left?.isPinch);
+    const tipPos = paintBrush.getTipWorldPosition();
+    if (!tipPos) { _painterPinchWas = isPinching; return; }
+
+    if (isPinching) {
+      if (!_painterPinchWas) {
+        spawnPaintSphere(tipPos);
+        _lastPaintPos = tipPos.clone();
+      } else if (_lastPaintPos && tipPos.distanceTo(_lastPaintPos) >= PAINT_MIN_DIST) {
+        spawnPaintSphere(tipPos);
+        _lastPaintPos.copy(tipPos);
+      }
+    } else {
+      _lastPaintPos = null;
+    }
+    _painterPinchWas = isPinching;
+  }
+
+  // --- Horde mode: gesture-based equipment ---
+  // Tracking slot 'left' corresponds to the in-game right hand (back-camera swap).
+  let _hordeEquipped = null; // 'pistol' | 'shield' | null
+  let _hordePendingGesture = 'none';
+  let _hordePendingFrames = 0;
+  const HORDE_GESTURE_CONFIRM = 6; // frames gesture must hold before switching
+  let _hordeFlickPrevY = null;
+  let _hordeFlickLastFire = 0;
+  const HORDE_FLICK_Y_DELTA = 0.04; // normalized y drop per frame = flick up (lower = more sensitive)
+  const HORDE_FIRE_COOLDOWN_MS = 380;
+
+  function _classifyRightHandGesture(landmarks, palmSize) {
+    if (!landmarks || !palmSize || palmSize < 0.001) return 'none';
+    const wrist = landmarks[0];
+    function normDist(idx) {
+      const tip = landmarks[idx];
+      const dx = tip.x - wrist.x;
+      const dy = tip.y - wrist.y;
+      return Math.sqrt(dx * dx + dy * dy) / palmSize;
+    }
+    const EXT = 1.75;
+    const CURL = 1.45;
+    const thumbOut  = normDist(4)  > EXT;
+    const indexOut  = normDist(8)  > EXT;
+    const middleOut = normDist(12) > EXT;
+    const ringOut   = normDist(16) > EXT;
+    const pinkyOut  = normDist(20) > EXT;
+    const middleCurled = normDist(12) < CURL;
+    const ringCurled   = normDist(16) < CURL;
+    const pinkyCurled  = normDist(20) < CURL;
+    // Open hand: all five fingers extended
+    if (thumbOut && indexOut && middleOut && ringOut && pinkyOut) return 'open';
+    // Sword gesture: pointer + middle extended, ring + pinky curled (thumb optional)
+    if (indexOut && middleOut && ringCurled && pinkyCurled) return 'sword';
+    // Gun gesture: index extended, middle/ring/pinky curled (thumb optional)
+    if (indexOut && middleCurled && ringCurled && pinkyCurled) return 'gun';
+    return 'none';
+  }
+
+  function processHordeGestures() {
+    if (!isHandTrackingEnabled()) return;
+    const htd = getHandTrackingData();
+    // Tracking slot 'left' = right in-game hand (back-camera swap)
+    const rightSlot = htd?.left;
+    const rawGesture = rightSlot
+      ? _classifyRightHandGesture(rightSlot.landmarks, rightSlot.size)
+      : 'none';
+
+    // Debounce: require HORDE_GESTURE_CONFIRM consecutive frames before switching
+    if (rawGesture === _hordePendingGesture) {
+      _hordePendingFrames++;
+    } else {
+      _hordePendingGesture = rawGesture;
+      _hordePendingFrames = 1;
+    }
+
+    if (_hordePendingFrames >= HORDE_GESTURE_CONFIRM) {
+      // Map gesture name → item name so the comparison is in the same space
+      const gestureItemMap = { gun: 'pistol', open: 'shield', sword: FOAM_SWORD_ITEM_ID };
+      const confirmedItem = gestureItemMap[_hordePendingGesture] ?? null;
+      if (confirmedItem !== _hordeEquipped) {
+        // Unequip whatever is currently held
+        if (_hordeEquipped) unequipInventoryItem(_hordeEquipped);
+        // Equip the new item (null = nothing equipped)
+        if (confirmedItem) equipInventoryItem(confirmedItem);
+        _hordeEquipped = confirmedItem;
+      }
+    }
+
+    // Flick-to-fire: detect rapid upward flick of index tip while pistol is equipped
+    if (_hordeEquipped === 'pistol' && rightSlot?.landmarks) {
+      const indexTip = rightSlot.landmarks[8];
+      if (_hordeFlickPrevY !== null) {
+        // y decreasing = moving upward in camera frame = flick up
+        const indexDelta = _hordeFlickPrevY - indexTip.y;
+        const now = performance.now();
+        if (indexDelta > HORDE_FLICK_Y_DELTA && now - _hordeFlickLastFire > HORDE_FIRE_COOLDOWN_MS) {
+          _hordeFlickLastFire = now;
+          playerControls?.triggerFire?.();
+        }
+      }
+      _hordeFlickPrevY = indexTip.y;
+    } else {
+      _hordeFlickPrevY = null;
+    }
+  }
+
+  function attachMonsterPhysics(monster, { mode = 'dynamic' } = {}) {
+    const model = monster?.model;
+    if (!model || !rapierWorld) return null;
+    const existingBody = monster.body;
+    if (existingBody && rapierWorld.getRigidBody(existingBody.handle)) {
+      rbToMesh.delete(existingBody);
+      removeRigidBodySafely(rapierWorld, existingBody);
+      model.userData.rb = null;
+    }
+
+    const scale = monster.sizeScale || 1;
+    const isKinematic = mode === 'kinematic';
+    const rbDesc = isKinematic
+      ? RAPIER.RigidBodyDesc.kinematicPositionBased()
+      : RAPIER.RigidBodyDesc.dynamic();
+    rbDesc
+      .setTranslation(model.position.x, model.position.y, model.position.z)
+      .setLinearDamping(0.5)
+      .setAngularDamping(0.5);
+    const rb = rapierWorld.createRigidBody(rbDesc);
+    rb.setEnabledRotations(false, true, false, true);
+    const colDesc = RAPIER.ColliderDesc.capsule(0.6 * scale, 0.3 * scale);
+    const collider = rapierWorld.createCollider(colDesc, rb);
+    model.userData.rb = rb;
+    model.userData.physicsMode = isKinematic ? 'kinematic' : 'dynamic';
+    monster.setColliderHandles?.(typeof collider?.handle === 'number' ? [collider.handle] : []);
+    rbToMesh.set(rb, model);
+    if (monster.syncBodyFromTransform) {
+      monster.syncBodyFromTransform({ zeroVelocity: true });
+    }
+    if (monster.setBackgroundMode) {
+      monster.setBackgroundMode(isKinematic);
+    }
+    return rb;
+  }
+
+  function detachMonsterPhysics(monster) {
+    if (!monster?.model) return;
+    const body = monster.body;
+    if (body && rapierWorld?.getRigidBody(body.handle)) {
+      rbToMesh.delete(body);
+      removeRigidBodySafely(rapierWorld, body);
+    }
+    monster.model.userData.rb = null;
+    monster.model.userData.physicsMode = null;
+    monster.setColliderHandles?.([]);
+    monster.setBackgroundMode?.(true);
+  }
+
+  function setMonsterPhysicsMode(monster, mode = 'dynamic') {
+    if (!monster?.model || !rapierWorld) return;
+    const body = monster.body;
+    const wantsDynamic = mode === 'dynamic';
+    const wantsKinematic = mode === 'kinematic';
+    const currentMode = monster.model.userData.physicsMode || null;
+    const isDynamic = !!body && currentMode === 'dynamic';
+    const isKinematic = !!body && currentMode === 'kinematic';
+    if (wantsDynamic && isDynamic) {
+      monster.setBackgroundMode?.(false);
+      monster.syncBodyFromTransform?.({ zeroVelocity: false });
+      return;
+    }
+    if (wantsKinematic && isKinematic) {
+      monster.setBackgroundMode?.(true);
+      monster.syncBodyFromTransform?.({ zeroVelocity: true });
+      return;
+    }
+    attachMonsterPhysics(monster, { mode });
+  }
+
+  const detachNpcPhysics = (npc) => {
+    const body = npc?.body;
+    if (body && rapierWorld?.getRigidBody(body.handle)) {
+      rbToMesh.delete(body);
+      removeRigidBodySafely(rapierWorld, body);
+    }
+    if (npc?.model?.userData?.rb === body) {
+      npc.model.userData.rb = null;
+      npc.model.userData.physicsMode = null;
+    }
+  };
+
+  window.attachMonsterPhysics = attachMonsterPhysics;
+  window.detachNpcPhysics = detachNpcPhysics;
+  window.setMonsterPhysicsMode = setMonsterPhysicsMode;
+
+
+
+  let player = new PlayerCharacter(playerName, characterModel);
+  let playerModel = player.model;
+  playerModel.userData.hideInMapView = true;
+  scene.add(playerModel);
+  window.playerModel = playerModel;
+  lantern = new Lantern(scene);
+  await lantern.load(playerModel.position.clone().add(new THREE.Vector3(2.5, 0, 2)));
+  window.lantern = lantern;
+  const lanternMarker = createWeaponMarker(0xffd400);
+  lantern.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(lantern, 'lantern');
+    if (heldMesh) {
+      lantern.useHeldMeshWhenHeld = true;
+      heldMesh.visible = true;
+    }
+    unequipOtherInventoryItems('lantern');
+    addToInventory('lantern', 1);
+    lantern.localHoldOrigin = 'world';
+  };
+  lantern.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    lantern.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory('lantern', 1);
+    }
+  };
+  if (lantern.mesh) {
+    lantern.mesh.userData.hideInMapView = true;
+    lantern.mesh.visible = false;
+  }
+  registerNetworkedEntity('lantern', {
+    getState: () => {
+      if (!lantern?.mesh) return null;
+      const pos = lantern.mesh.position;
+      const q = lantern.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (lantern.holder === playerControls && lantern.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null
+      };
+    },
+    applyState: state => {
+      if (!lantern?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        lantern.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        lantern.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      const previousHolderId = lantern.remoteHolderId ?? null;
+      lantern.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(lantern.type);
+      updateRemoteWeaponType(lantern, lantern.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && lantern.holder === playerControls && lantern.localHoldOrigin === 'world') {
+        lantern.holder = null;
+        lantern.localHoldOrigin = null;
+      }
+    },
+    isLocallyControlled: () => lantern?.holder === playerControls
+  });
+
+  torch = new Torch(scene);
+  await torch.load(TORCH_PICKUP_LOCATION.clone());
+  window.torch = torch;
+  const torchMarker = createWeaponMarker(0xffa54c);
+  torch.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(torch, 'torch');
+    if (heldMesh) {
+      torch.useHeldMeshWhenHeld = true;
+      heldMesh.visible = true;
+    }
+    if (lantern?.holder === holder) {
+      unequipInventoryItem('lantern');
+    }
+    unequipOtherInventoryItems(TORCH_ITEM_ID);
+    const pickupHealth = normalizeTorchHealth(torch.mesh?.userData?.torchHealth);
+    addToInventory(TORCH_ITEM_ID, 1, { torchHealth: pickupHealth });
+    torch.localHoldOrigin = 'world';
+    const torchEntry = inventoryState[TORCH_ITEM_ID];
+    const healths = getTorchHealths(torchEntry);
+    equippedTorchIndex = healths.length ? healths.length - 1 : null;
+    torch.mesh.userData.torchHealth = pickupHealth;
+    setPlayerWeaponType(holder, torch.type);
+  };
+  torch.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    torch.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      const result = takeTorchHealth(inventoryState, equippedTorchIndex);
+      if (result?.health != null) {
+        torch.mesh.userData.torchHealth = result.health;
+      }
+      equippedTorchIndex = null;
+      persistInventoryAndStorage();
+    }
+    clearPlayerWeaponType(holder, torch.type);
+  };
+  if (torch.mesh) {
+    torch.mesh.userData.hideInMapView = true;
+    torch.mesh.userData.torchHealth = DEFAULT_TORCH_HEALTH;
+    torch.mesh.visible = false;
+  }
+  registerNetworkedEntity('torch', {
+    getState: () => {
+      if (!torch?.mesh) return null;
+      const pos = torch.mesh.position;
+      const q = torch.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (torch.holder === playerControls && torch.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null,
+        torchHealth: torch.mesh.userData.torchHealth ?? DEFAULT_TORCH_HEALTH
+      };
+    },
+    applyState: state => {
+      if (!torch?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        torch.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        torch.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      if (Number.isFinite(state.torchHealth)) {
+        torch.mesh.userData.torchHealth = normalizeTorchHealth(state.torchHealth);
+      }
+      const previousHolderId = torch.remoteHolderId ?? null;
+      torch.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(torch.type);
+      updateRemoteWeaponType(torch, torch.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && torch.holder === playerControls && torch.localHoldOrigin === 'world') {
+        torch.holder = null;
+        torch.localHoldOrigin = null;
+        clearPlayerWeaponType(playerControls, torch.type);
+      }
+    },
+    isLocallyControlled: () => torch?.holder === playerControls
+  });
+
+  shield = new Shield(scene);
+  await shield.load(playerModel.position.clone().add(new THREE.Vector3(2, 0, 2.4)));
+  window.shield = shield;
+  const shieldMarker = createWeaponMarker(0x7a4a20);
+  shield.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(shield, SHIELD_ITEM_ID);
+    if (heldMesh) {
+      shield.useHeldMeshWhenHeld = true;
+      heldMesh.visible = true;
+    }
+    unequipOtherInventoryItems(SHIELD_ITEM_ID);
+    const pickupHealth = normalizeShieldHealth(shield.mesh?.userData?.shieldHealth);
+    addToInventory(SHIELD_ITEM_ID, 1);
+    inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+      ...inventoryState[SHIELD_ITEM_ID],
+      [SHIELD_HEALTH_KEY]: pickupHealth
+    }));
+    shield.localHoldOrigin = 'world';
+  };
+  shield.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    shield.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory(SHIELD_ITEM_ID, 1);
+    }
+  };
+  if (shield.mesh) {
+    shield.mesh.userData.hideInMapView = true;
+    shield.mesh.userData.shieldHealth = DEFAULT_SHIELD_HEALTH;
+    shield.mesh.userData.shieldMaxHealth = DEFAULT_SHIELD_HEALTH;
+    shield.mesh.visible = false;
+  }
+  registerNetworkedEntity('shield', {
+    getState: () => {
+      if (!shield?.mesh) return null;
+      const pos = shield.mesh.position;
+      const q = shield.mesh.quaternion;
+      return {
+        position: [pos.x, pos.y, pos.z],
+        rotation: [q.x, q.y, q.z, q.w],
+        holderId: (shield.holder === playerControls && shield.localHoldOrigin === 'world') ? multiplayer?.getId?.() : null,
+        shieldHealth: shield.mesh.userData.shieldHealth ?? DEFAULT_SHIELD_HEALTH
+      };
+    },
+    applyState: state => {
+      if (!shield?.mesh || !state) return;
+      const [px, py, pz] = state.position || [];
+      const [rx, ry, rz, rw] = state.rotation || [];
+      if (Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz)) {
+        shield.mesh.position.set(px, py, pz);
+      }
+      if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+        shield.mesh.quaternion.set(rx, ry, rz, rw);
+      }
+      if (Number.isFinite(state.shieldHealth)) {
+        shield.mesh.userData.shieldHealth = normalizeShieldHealth(state.shieldHealth);
+      }
+      const previousHolderId = shield.remoteHolderId ?? null;
+      shield.remoteHolderId = state.holderId ?? getPresenceHolderForWeaponType(shield.type);
+      updateRemoteWeaponType(shield, shield.remoteHolderId, previousHolderId);
+      if (state.holderId !== multiplayer?.getId?.() && shield.holder === playerControls && shield.localHoldOrigin === 'world') {
+        shield.holder = null;
+        shield.localHoldOrigin = null;
+      }
+    },
+    isLocallyControlled: () => shield?.holder === playerControls
+  });
+
+
+  runtimeContext.entities.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol, lantern, torch, shield };
+  window.weapons = { iceGun, bow, bazooka, bomb, autumnSword, hammer, pistol, lantern, torch, shield };
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
+  treasureChest = new TreasureChest(scene);
+  await treasureChest.load();
+  window.treasureChest = treasureChest;
+  if (treasureChest.mesh) {
+    treasureChest.mesh.visible = false;
+  }
+  treasureChest.onOpen = (holder) => {
+    if (holder !== playerControls) return;
+    audioManager?.playSFX('SFX/Doors Gates and Chests/Door Open 1.ogg', 0.65, {
+      cooldownKey: 'door-open-chest',
+      cooldownMs: 120
+    });
+    const rewards = [
+      {
+        label: '5 arrows',
+        apply: () => {
+          const current = Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
+            ? inventoryState.bow[ARROW_AMMO_KEY]
+            : 0;
+          setArrowAmmoCount(current + 5);
+        }
+      },
+      {
+        label: 'Autumn Sword',
+        apply: () => addToInventory('autumnSword', 1)
+      },
+      {
+        label: 'Bow',
+        apply: () => addToInventory('bow', 1)
+      },
+      {
+        label: 'Ice Gun',
+        apply: () => addToInventory('iceGun', 1)
+      },
+      {
+        label: 'Bazooka',
+        apply: () => addToInventory('bazooka', 1)
+      },
+      {
+        label: 'Hammer',
+        apply: () => addToInventory('hammer', 1)
+      },
+      {
+        label: 'Lantern',
+        apply: () => addToInventory('lantern', 1)
+      },
+      {
+        label: '5 ice ammo',
+        apply: () => {
+          const current = Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+            ? inventoryState.iceGun[ICE_AMMO_KEY]
+            : 0;
+          setIceAmmoCount(current + 5);
+        }
+      },
+      {
+        label: '5 missiles',
+        apply: () => setMissileAmmoCount(getMissileAmmoCount() + 5)
+      },
+      {
+        label: '5 mushrooms',
+        apply: () => {
+          const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
+          addToInventory(entry.id, 5);
+        }
+      },
+      {
+        label: '20 coins',
+        apply: () => {
+          const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + 20;
+          setStat('coins', nextCoins, { skipSave: true });
+          showCoinPopup(statsState.coins);
+          showPickupToast('coins', 20);
+        }
+      }
+    ];
+    const reward = rewards[Math.floor(Math.random() * rewards.length)];
+    reward?.apply?.();
+    showTreasurePopup(`You received a ${reward?.label ?? 'treasure'}`);
+  };
+  } // end if (window.gameMode !== '3d_painter') treasureChest
+  const getTreeMapLocationForLocal = (position) => {
+    if (!position) return null;
+    const origin = worldOrigin
+      ? { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon }
+      : currentRenderOrigin;
+    if (!origin) return null;
+    const lonScale = metersPerDegreeLon(origin.centerLat);
+    return {
+      lat: origin.centerLat + position.z / METERS_PER_DEGREE_LAT,
+      lon: origin.centerLon - position.x / lonScale
+    };
+  };
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
+    appleController = await createApples({
+      scene,
+      getTerrainHeight,
+      spawnPositions: [],
+      allowDefaultPositions: false
+    });
+  }
+  applePickups = appleController?.pickups || [];
+  window.applePickups = applePickups;
+  window.woodPickups = woodPickups;
+  window.meatPickups = meatPickups;
+  window.zombieBrainsPickups = zombieBrainsPickups;
+  window.saltPickups = saltPickups;
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
+    // await createCabin({ scene, getTerrainHeight });
+    mushroomController = await createMushrooms({
+      scene,
+      getTerrainHeight,
+      scatterCenter: playerModel?.position,
+      scatterRadius: PICKUP_SPAWN_RADIUS
+    });
+    await createTower({ scene, getTerrainHeight, rapierWorld, rapier: RAPIER });
+    mushroomPickups = mushroomController?.pickups || [];
+    mushroomPickups.forEach((pickup) => {
+      const pickupPosition = pickup?.mesh?.position || pickup?.position;
+      if (pickup?.active && pickupPosition) {
+        mushroomPickupGrid.add(pickup, pickupPosition);
+      }
+    });
+    window.mushroomPickups = mushroomPickups;
+  }
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') animalManager = createAnimalManager({
+    scene,
+    getPlayerModel: () => playerModel,
+    getTerrainHeight,
+    getNearbyMonster: (origin, maxDistance = 9) => {
+      if (!origin) return null;
+      let nearest = null;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      monsters.forEach((monster) => {
+        const monsterPosition = monster?.model?.position || monster?.position;
+        if (!monsterPosition || monster?.isDead || monster?.model?.userData?.isDead || monster?.userData?.isDead) return;
+        const d = monsterPosition.distanceTo(origin);
+        if (d <= maxDistance && d < nearestDistance) {
+          nearest = monster;
+          nearestDistance = d;
+        }
+      });
+      return nearest;
+    },
+    onMonsterAttack: (monster, { damage, killed, sourceId, attackTypes, at } = {}) => {
+      const monsterId = monster?.id || monster?.model?.userData?.id || monster?.userData?.id;
+      if (!monsterId || !Number.isFinite(damage)) return;
+      if (multiplayer && !multiplayer.isHost) {
+        sendMonsterAttackIntent({
+          monsterId,
+          damage,
+          sourcePlayerId: multiplayer.getId?.(),
+          attackTypes,
+          at
+        });
+        return;
+      }
+      handleMonsterDamage?.(monster, { damage, killed, sourceId, attackTypes });
+      if (killed) {
+        window.onMonsterKill?.(monster, { withFriend: true });
+      }
+    },
+    isHost,
+    onRemoteSpawnRequest: requestHostSpawnEvent,
+    onBubblePopped: ({ animal, position }) => {
+      if (String(animal?.type || '').toLowerCase() !== 'fish' || !position) return;
+      spawnMeatPickup(position.clone(), { itemId: MEAT_ITEM_ID, color: 0x4aa3c7 });
+    },
+    onAnimalRemoved: ({ animal, wasDead, position }) => {
+      const dogCollider = dogColliderEntries.get(animal?.id);
+      if (dogCollider) removeStaticBoxCollider(dogCollider);
+      dogColliderEntries.delete(animal?.id);
+      const crabCollider = crabColliderEntries.get(animal?.id);
+      if (crabCollider) removeStaticBoxCollider(crabCollider);
+      crabColliderEntries.delete(animal?.id);
+      const label = animalNameLabels.get(animal?.id);
+      label?.parentNode?.removeChild(label);
+      animalNameLabels.delete(animal?.id);
+      if (!wasDead || !position) return;
+      notifyAchievementProgress('animalsKilled', 1);
+      window.questManager?.handleAnimalKilled?.(animal);
+      const isCrab = String(animal?.type || '').toLowerCase() === 'crab';
+      for (let i = 0; i < 2; i += 1) {
+        const angle = (i / 2) * Math.PI * 2;
+        const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
+        spawnMeatPickup(position.clone().add(offset), isCrab
+          ? { itemId: 'crab_meat', color: 0xb22222 }
+          : undefined);
+      }
+    }
+  });
+  animals = animalManager?.getAnimals() ?? [];
+  runtimeContext.entities.animals = animals;
+  window.animals = animals;
+  const restoreCompanionDogsFromProfile = async () => {
+    const savedCompanions = playerProfile?.companions && typeof playerProfile.companions === 'object'
+      ? Object.values(playerProfile.companions)
+      : [];
+    const dogCompanions = savedCompanions.filter((entry) => String(entry?.type || '').toLowerCase() === 'dog');
+    if (dogCompanions.length === 0) return;
+    const basePosition = playerModel?.position?.clone?.();
+    if (!basePosition) return;
+    for (let i = 0; i < dogCompanions.length; i += 1) {
+      const companion = dogCompanions[i];
+      const angle = (i / Math.max(1, dogCompanions.length)) * Math.PI * 2;
+      const offset = new THREE.Vector3(Math.cos(angle) * 3, 0, Math.sin(angle) * 3);
+      const spawnPos = basePosition.clone().add(offset);
+      const dog = await animalManager?.spawnDogAt?.(spawnPos);
+      if (!dog?.model) continue;
+      dog.model.userData.isCompanion = true;
+      dog.model.userData.companionName = companion?.name || 'Companion';
+      if (Number.isFinite(companion?.health)) {
+        dog.health = Math.max(1, Math.min(dog.maxHealth || 1, Math.round(companion.health)));
+        dog.model.userData.health = dog.health;
+      }
+      if (companion?.id) {
+        dog.id = companion.id;
+      }
+    }
+  };
+  await restoreCompanionDogsFromProfile();
+  let didInitialWorldSync = false;
+  let currentPlayerLevel = 1;
+
+  const getRandomMonsterModel = () => {
+    const index = Math.floor(Math.random() * MONSTER_MODELS.length);
+    return MONSTER_MODELS[index];
+  };
+
+  const getRandomMonsterLevel = (playerLevel = currentPlayerLevel) => {
+    const safePlayerLevel = Math.max(1, Math.round(playerLevel || 1));
+    const cap = Math.max(1, Math.min(8, safePlayerLevel + 1));
+    const weighted = MONSTER_LEVEL_WEIGHTS
+      .map((entry) => {
+        const baseWeight = Math.max(0, Number(entry.weight) || 0);
+        if (entry.level > cap) return null;
+        const distanceFromPlayer = Math.abs(entry.level - safePlayerLevel);
+        const closenessBoost = 1 + Math.max(0, safePlayerLevel - distanceFromPlayer) * 0.15;
+        const highLevelBias = 1 + Math.max(0, safePlayerLevel - 1) * (entry.level / cap) * 0.08;
+        return { level: entry.level, weight: baseWeight * closenessBoost * highLevelBias };
+      })
+      .filter(Boolean);
+    const totalWeight = weighted.reduce((sum, entry) => sum + entry.weight, 0);
+    if (totalWeight <= 0) return 1;
+    let pick = Math.random() * totalWeight;
+    for (const entry of weighted) {
+      pick -= entry.weight;
+      if (pick <= 0) {
+        return entry.level;
+      }
+    }
+    return weighted[0]?.level ?? 1;
+  };
+
+  const getMonsterClusterSizeForLevel = (playerLevel = currentPlayerLevel) => {
+    const safePlayerLevel = Math.max(1, Math.round(playerLevel || 1));
+    const guaranteed = 1 + Math.floor((safePlayerLevel - 1) / 4);
+    const bonusChance = Math.min(0.75, (safePlayerLevel - 1) * 0.08);
+    const withBonus = guaranteed + (Math.random() < bonusChance ? 1 : 0);
+    return Math.max(1, Math.min(MONSTER_CLUSTER_MAX_SIZE, withBonus));
+  };
+
+  const BUILDING_RAYCAST_HEIGHT = 200;
+  const BUILDING_LIFT_EPSILON = 0.05;
+  const buildingRaycaster = new THREE.Raycaster();
+  const buildingRayDirection = new THREE.Vector3(0, -1, 0);
+
+  const getBuildingIntersection = (position) => {
+    const buildingsGroup = buildingsRenderer?.group;
+    if (!buildingsGroup) return null;
+    const terrainY = getTerrainHeight(position.x, position.z) ?? position.y;
+    const rayOrigin = new THREE.Vector3(
+      position.x,
+      Math.max(position.y, terrainY) + BUILDING_RAYCAST_HEIGHT,
+      position.z
+    );
+    buildingRaycaster.set(rayOrigin, buildingRayDirection);
+    const intersections = buildingRaycaster.intersectObjects(buildingsGroup.children, true);
+    for (const intersection of intersections) {
+      if (intersection.object?.userData?.isBuildingSolid) {
+        return intersection;
+      }
+    }
+    return null;
+  };
+
+  const liftPositionToBuildingTop = (position, heightOffset = 0.6) => {
+    const intersection = getBuildingIntersection(position);
+    if (!intersection) return false;
+    const targetY = intersection.point.y + heightOffset;
+    if (targetY <= position.y + BUILDING_LIFT_EPSILON) return false;
+    position.y = targetY;
+    return true;
+  };
+
+  configureSpawnAlignment({ liftPositionToBuildingTop });
+
+  window.lightSources = [];
+
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') friendlyNpcManager = createFriendlyNpcManager({
+    scene,
+    playerModel,
+    otherPlayers,
+    attachPhysics: attachMonsterPhysics,
+    detachPhysics: detachMonsterPhysics,
+    getTerrainHeight,
+    liftPositionToBuildingTop,
+    isHost,
+    debug: window.DEBUG_FRIENDLY_PERSIST,
+    onSpawnEvent: handleCharacterSpawnEvent,
+    onBeforeSpawn: (...args) => trimTravelSpawnPopulationIfNeeded(...args),
+    onRemoteSpawnRequest: requestHostSpawnEvent,
+    getMonsters: () => monsters,
+    getFoodPickups: () => [
+      ...mushroomPickups.map((pickup, index) => ({ id: `food:mushroom:${pickup?.id || index}:${index}`, type: 'mushroom', pickup, position: pickup?.position || pickup?.mesh?.position })),
+      ...applePickups.map((pickup, index) => ({ id: `food:apple:${pickup?.id || index}:${index}`, type: 'apple', pickup, position: pickup?.mesh?.getWorldPosition?.(new THREE.Vector3()) || pickup?.mesh?.position })),
+      ...meatPickups.map((pickup, index) => ({ id: `food:meat:${pickup?.id || index}:${index}`, type: 'meat', pickup, position: pickup?.mesh?.position }))
+    ].filter((entry) => entry.pickup && entry.position && (entry.pickup.active !== false) && (!entry.pickup.mesh || entry.pickup.mesh.visible !== false)),
+    onFoodPickupCollected: (target, actorPosition) => collectPickupForLlama(target, actorPosition),
+    onMonsterHit: handleMonsterDamage
+  });
+  window.friendlyNpcManager = friendlyNpcManager;
+  if (multiplayer?.roomId && friendlyNpcManager) {
+    friendlyNpcManager.onRoomReady({ roomId: multiplayer.roomId, isHost: multiplayer.isHost });
+  }
+
+  let buildingColliderBody = null;
+  const rebuildBuildingColliders = () => {
+    if (!rapierWorld) return;
+
+    if (buildingColliderBody && rapierWorld.getRigidBody(buildingColliderBody.handle)) {
+      removeRigidBodySafely(rapierWorld, buildingColliderBody);
+      buildingColliderBody = null;
+    }
+
+    const meshes = buildingsRenderer?.getCollisionMeshes?.() ?? [];
+    if (!meshes.length) return;
+
+    // ensure transforms are current
+    for (const m of meshes) m.updateMatrixWorld(true);
+
+    const allVerts = [];
+    const allIndices = [];
+    let vertOffset = 0;
+    const tmpV = new THREE.Vector3();
+
+    for (const obj of meshes) {
+      if (!obj?.isMesh) continue;
+      const geom = obj.geometry;
+      const posAttr = geom?.attributes?.position;
+      if (!posAttr || posAttr.count === 0) continue;
+
+      // verts
+      for (let i = 0; i < posAttr.count; i++) {
+        tmpV.fromBufferAttribute(posAttr, i).applyMatrix4(obj.matrixWorld);
+        allVerts.push(tmpV.x, tmpV.y, tmpV.z);
+      }
+
+      // indices
+      const indexAttr = geom.index;
+      if (indexAttr?.array?.length) {
+        const idx = indexAttr.array;
+        for (let i = 0; i < idx.length; i++) allIndices.push(vertOffset + idx[i]);
+      } else {
+        if (posAttr.count % 3 !== 0) continue; // not triangles
+        for (let i = 0; i < posAttr.count; i += 3) {
+          allIndices.push(vertOffset + i, vertOffset + i + 1, vertOffset + i + 2);
+        }
+      }
+
+      vertOffset += posAttr.count;
+    }
+
+    if (allVerts.length === 0 || allIndices.length === 0) return;
+
+    const vertices = new Float32Array(allVerts);
+    const indices = new Uint32Array(allIndices);
+
+    const rbDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0);
+    buildingColliderBody = rapierWorld.createRigidBody(rbDesc);
+
+    const colDesc = RAPIER.ColliderDesc.trimesh(vertices, indices)
+      .setRestitution(0)
+      .setFriction(1);
+
+    const collider = rapierWorld.createCollider(colDesc, buildingColliderBody);
+    console.log('building collider created', String(collider.handle), 'verts', vertices.length / 3, 'idx', indices.length);
+  };
+  window.rebuildBuildingColliders = rebuildBuildingColliders;
+
+  const removeMonsterById = (monsterId) => {
+    const index = monsters.findIndex((entry) => entry?.id === monsterId);
+    if (index < 0) return false;
+    const [monster] = monsters.splice(index, 1);
+    stopZombieLoopVoice(monsterId);
+    cleanupMonster(monster);
+    runtimeContext.entities.monsters = monsters;
+  window.monsters = monsters;
+    return true;
+  };
+
+  const countSpawnedTravelCharacters = () => {
+    const livingMonsters = monsters.filter((monster) => monster?.model && !monster?.isDead).length;
+    const livingFriendlies = (friendlyNpcManager?.friendlies || []).filter((friendly) => friendly?.model && !friendly?.isDead).length;
+    const livingAnimals = (animals || []).filter((animal) => animal?.model && !animal?.isDead).length;
+    const merchantCount = getMerchantFriendlyFeature()?.model ? 1 : 0;
+    return livingMonsters + livingFriendlies + livingAnimals + merchantCount;
+  };
+
+  const trimTravelSpawnPopulationIfNeeded = async (incomingCount = 1, originPosition = playerModel?.position) => {
+    const targetOrigin = originPosition?.clone?.() || playerModel?.position?.clone?.();
+    if (!targetOrigin) return;
+    let total = countSpawnedTravelCharacters();
+    while (total + incomingCount > MAX_TRAVEL_SPAWN_CHARACTERS_TOTAL) {
+      const candidates = [];
+      monsters.forEach((monster) => {
+        if (!monster?.model || monster?.isDead) return;
+        candidates.push({ type: 'monster', id: monster.id, distance: monster.model.position.distanceTo(targetOrigin) });
+      });
+      (friendlyNpcManager?.friendlies || []).forEach((friendly) => {
+        if (!friendly?.model || friendly?.isDead) return;
+        candidates.push({ type: 'friendly', id: friendly.id, distance: friendly.model.position.distanceTo(targetOrigin) });
+      });
+      (animals || []).forEach((animal) => {
+        if (!animal?.model || animal?.isDead) return;
+        candidates.push({ type: 'animal', id: animal.id, distance: animal.model.position.distanceTo(targetOrigin) });
+      });
+      const merchantFriendly = getMerchantFriendlyFeature();
+      if (merchantFriendly?.model) {
+        candidates.push({ type: 'merchant', distance: merchantFriendly.model.position.distanceTo(targetOrigin) });
+      }
+      if (!candidates.length) return;
+      candidates.sort((a, b) => b.distance - a.distance);
+      const furthest = candidates[0];
+      if (!furthest) return;
+      if (furthest.type === 'monster') {
+        removeMonsterById(furthest.id);
+      } else if (furthest.type === 'friendly') {
+        friendlyNpcManager?.removeFriendlyById?.(furthest.id);
+      } else if (furthest.type === 'animal') {
+        animalManager?.removeAnimalById?.(furthest.id);
+      } else if (furthest.type === 'merchant') {
+        await clearMerchantSpawnFeature?.();
+      }
+      total = countSpawnedTravelCharacters();
+    }
+  };
+
+  function spawnEncounterMonster(spawnEvent) {
+    if (!spawnEvent?.position) return;
+    const playerLevel = currentPlayerLevel;
+    const clusterSize = getMonsterClusterSizeForLevel(playerLevel);
+    const yaw = Math.atan2(spawnEvent.direction?.x || 0, spawnEvent.direction?.z || 1);
+    const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yaw, 0));
+    void trimTravelSpawnPopulationIfNeeded(clusterSize, spawnEvent.position).then(() => {
+      for (let index = 0; index < clusterSize; index += 1) {
+        const slotId = monsterSlotIds.find((id) => (
+          !monsters.some((monster) => monster?.id === id)
+          && !spawningSlots.has(id)
+          && !respawnTimers.has(id)
+        ));
+        if (!slotId) continue;
+        const modelPath = getRandomMonsterModel();
+        const offsetAngle = Math.random() * Math.PI * 2;
+        const offsetRadius = index === 0 ? 0 : THREE.MathUtils.randFloat(1.5, 5.5);
+        const clusterPosition = spawnEvent.position.clone().add(new THREE.Vector3(
+          Math.cos(offsetAngle) * offsetRadius,
+          0,
+          Math.sin(offsetAngle) * offsetRadius
+        ));
+        applySpawnY(clusterPosition, 0.5, { allowOnBuildings: true });
+        spawnMonsterInSlot(slotId, modelPath, null, {
+          position: clusterPosition,
+          rotation,
+          level: getRandomMonsterLevel(playerLevel),
+          skipPersist: false
+        });
+      }
+    });
+  }
+
+  async function handleCharacterSpawnEvent(spawnEvent) {
+    if (!spawnEvent?.position) return;
+    if (spawnEvent.type === 'merchant') {
+      await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
+      await spawnMerchantAtFeature({
+        position: spawnEvent.position,
+        scene,
+        attachPhysics: attachMonsterPhysics,
+        getTerrainHeight,
+        liftPositionToBuildingTop
+      });
+      return;
+    }
+    if (spawnEvent.type === 'monster') {
+      spawnEncounterMonster(spawnEvent);
+      return;
+    }
+    if (spawnEvent.type === 'friendly') {
+      await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
+      friendlyNpcManager?.spawnFriendlyAt?.(spawnEvent.position);
+      return;
+    }
+    if (spawnEvent.type === 'animal') {
+      await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
+      await animalManager?.spawnWildAnimalAt?.(spawnEvent.position);
+      return;
+    }
+    if (spawnEvent.type === 'companionDog') {
+      await trimTravelSpawnPopulationIfNeeded(1, spawnEvent.position);
+      const dog = await animalManager?.spawnDogAt?.(spawnEvent.position);
+      if (dog?.model?.userData) {
+        dog.model.userData.isCompanion = true;
+        dog.model.userData.companionOwnerId = spawnEvent.requesterId || multiplayer?.getId?.() || null;
+      }
+      return;
+    }
+  }
+
+
+  function getMonsterGroundOffset(monsterLikeOrLevel = null) {
+    if (monsterLikeOrLevel && Number.isFinite(monsterLikeOrLevel.sizeScale)) {
+      return MONSTER_SPAWN_GROUND_OFFSET * Math.max(0.75, monsterLikeOrLevel.sizeScale);
+    }
+    if (Number.isFinite(monsterLikeOrLevel)) {
+      const level = Math.max(1, Math.round(monsterLikeOrLevel));
+      const estimatedScale = 1 + (0.5 * (level - 1));
+      return MONSTER_SPAWN_GROUND_OFFSET * Math.max(0.75, estimatedScale);
+    }
+    return MONSTER_SPAWN_GROUND_OFFSET;
+  }
+
+  function getMonsterSpawnPosition(monsterLikeOrLevel = null) {
+    const groundOffset = getMonsterGroundOffset(monsterLikeOrLevel);
+    for (let attempt = 0; attempt < MONSTER_SPAWN_ATTEMPTS; attempt += 1) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = THREE.MathUtils.randFloat(MONSTER_SPAWN_MIN_RADIUS, MONSTER_SPAWN_MAX_RADIUS);
+      const spawnPos = new THREE.Vector3(
+        playerModel.position.x + Math.cos(angle) * radius,
+        0,
+        playerModel.position.z + Math.sin(angle) * radius
+      );
+      const spawnY = getSpawnY(spawnPos.x, spawnPos.z, groundOffset, { allowOnBuildings: true });
+      spawnPos.y = Number.isFinite(spawnY) ? spawnY : 0.5;
+      if (spawnPos.distanceTo(playerModel.position) < MONSTER_SPAWN_MIN_RADIUS) {
+        continue;
+      }
+      return spawnPos;
+    }
+    const fallback = playerModel.position.clone();
+    fallback.x += MONSTER_SPAWN_MIN_RADIUS;
+    const fallbackY = getSpawnY(fallback.x, fallback.z, groundOffset, { allowOnBuildings: true });
+    fallback.y = Number.isFinite(fallbackY) ? fallbackY : fallback.y;
+    return fallback;
+  }
+
+  const disposeWeaponMesh = (mesh) => {
+    if (!mesh) return;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    }
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      if (child.geometry) {
+        child.geometry.dispose();
+      }
+      const materials = Array.isArray(child.material)
+        ? child.material
+        : [child.material];
+      materials.forEach(material => material?.dispose?.());
+    });
+  };
+
+  const disposeSceneObject = (object) => {
+    if (!object) return;
+    if (object.parent) {
+      object.parent.remove(object);
+    }
+    object.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      materials.forEach(material => material?.dispose?.());
+    });
+  };
+
+  const loadMonsterSwordTemplate = async () => {
+    if (monsterSwordTemplate) return monsterSwordTemplate;
+    if (!monsterSwordTemplatePromise) {
+      const loader = new GLTFLoader();
+      monsterSwordTemplatePromise = loader.loadAsync(MONSTER_SWORD_MODEL_URL)
+        .then(gltf => {
+          monsterSwordTemplate = gltf.scene;
+          return monsterSwordTemplate;
+        })
+        .catch(error => {
+          console.warn('Failed to load monster sword model.', error);
+          monsterSwordTemplate = null;
+          return null;
+        })
+        .finally(() => {
+          monsterSwordTemplatePromise = null;
+        });
+    }
+    return monsterSwordTemplatePromise;
+  };
+
+  const cloneMonsterSwordMesh = (template) => {
+    if (!template) return null;
+    const swordMesh = template.clone(true);
+    swordMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry = child.geometry?.clone?.() ?? child.geometry;
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map(material => material?.clone?.() ?? material);
+      } else {
+        child.material = child.material?.clone?.() ?? child.material;
+      }
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    swordMesh.scale.setScalar(MONSTER_SWORD_SCALE);
+    return swordMesh;
+  };
+
+  async function loadArrowTemplate() {
+    if (arrowTemplate) return arrowTemplate;
+    if (!arrowTemplatePromise) {
+      const loader = new GLTFLoader();
+      arrowTemplatePromise = loader.loadAsync(ARROW_MODEL_URL)
+        .then(gltf => {
+          arrowTemplate = gltf.scene;
+          return arrowTemplate;
+        })
+        .catch(error => {
+          console.warn('Failed to load arrow model.', error);
+          arrowTemplate = null;
+          return null;
+        })
+        .finally(() => {
+          arrowTemplatePromise = null;
+        });
+    }
+    return arrowTemplatePromise;
+  }
+
+  function cloneArrowMesh(template, scale = ARROW_PROJECTILE_SCALE) {
+    if (!template) return null;
+    const arrowMesh = template.clone(true);
+    arrowMesh.visible = true;
+    arrowMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.visible = true;
+      child.geometry = child.geometry?.clone?.() ?? child.geometry;
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map(material => material?.clone?.() ?? material);
+      } else {
+        child.material = child.material?.clone?.() ?? child.material;
+      }
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    arrowMesh.scale.setScalar(scale);
+    return arrowMesh;
+  }
+
+  async function loadManaPotionTemplate() {
+    if (manaPotionTemplate) return manaPotionTemplate;
+    if (!manaPotionTemplatePromise) {
+      const loader = new GLTFLoader();
+      manaPotionTemplatePromise = loader.loadAsync(MANA_POTION_MODEL_URL)
+        .then(gltf => {
+          manaPotionTemplate = gltf.scene;
+          return manaPotionTemplate;
+        })
+        .catch(error => {
+          console.warn('Failed to load mana potion model.', error);
+          manaPotionTemplate = null;
+          return null;
+        })
+        .finally(() => {
+          manaPotionTemplatePromise = null;
+        });
+    }
+    return manaPotionTemplatePromise;
+  }
+
+  function cloneManaPotionMesh(template, scale = MANA_POTION_SCALE) {
+    if (!template) return null;
+    const potionMesh = template.clone(true);
+    potionMesh.visible = true;
+    potionMesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.visible = true;
+      child.geometry = child.geometry?.clone?.() ?? child.geometry;
+      if (Array.isArray(child.material)) {
+        child.material = child.material.map(material => material?.clone?.() ?? material);
+      } else {
+        child.material = child.material?.clone?.() ?? child.material;
+      }
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    potionMesh.scale.setScalar(scale);
+    return potionMesh;
+  }
+
+  function cleanupMonster(monster) {
+    if (!monster) return;
+    monster.model?.userData?.mixer?.stopAllAction?.();
+    if (monster.weaponMesh) {
+      disposeWeaponMesh(monster.weaponMesh);
+      monster.weaponMesh = null;
+      monster.weaponType = null;
+      monster.weaponBaseScale = null;
+    }
+    if (monster.model?.userData?.equippedWeaponType) {
+      monster.model.userData.equippedWeaponType = null;
+    }
+    if (monster.model?.parent) {
+      monster.model.parent.remove(monster.model);
+    }
+    const body = monster.body;
+    if (body && rapierWorld?.getRigidBody(body.handle)) {
+      rbToMesh.delete(body);
+      removeRigidBodySafely(rapierWorld, body);
+    }
+    if (monster.model?.userData?.rb) {
+      monster.model.userData.rb = null;
+    }
+    if (monster.model?.userData) {
+      monster.model.userData.physicsMode = null;
+    }
+    monster.model = null;
+  };
+
+
+  function canApplyMonsterBodyTransform() {
+    // Monster transforms always come from the host-authoritative state stream.
+    // Even on non-host peers we must keep the Rapier body in sync with the
+    // received transform, otherwise the physics->mesh sync loop will keep
+    // snapping the visual mesh back to stale body poses.
+    return true;
+  }
+
+  function setMonsterForSlot(slotId, monster) {
+    const existingIndex = monsters.findIndex(entry => entry.id === slotId);
+    if (existingIndex >= 0) {
+      monsters[existingIndex] = monster;
+    } else {
+      monsters.push(monster);
+    }
+  };
+
+  function spawnMonsterInSlot(slotId, modelPath, oldMonster = null, options = {}) {
+    if (window.gameMode === '3d_painter' || window.gameMode === 'horde') return;
+    if (PERF.disableMonsters) return;
+    if (spawningSlots.has(slotId)) return;
+    spawningSlots.add(slotId);
+    loadMonsterModel(modelPath, data => {
+      try {
+        const monster = new MonsterCharacter(data);
+        monster.id = slotId;
+        monster.modelPath = modelPath;
+        monster.type = options.type ?? modelPath;
+        if (Number.isFinite(options.version)) {
+          monster.version = options.version;
+        }
+        monster.model.userData.hideInMapView = true;
+        monster.setMode("friendly");
+        monster.setDirection(new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize());
+        monster.lastDirectionChange = Date.now();
+        monster.lastAIUpdateMs = 0;
+        monster.lastAnimUpdateMs = 0;
+        const level = Number.isFinite(options.level) ? options.level : getRandomMonsterLevel();
+        monster.setLevel(level, { preserveHealth: false });
+        monster.resetHealth();
+
+        if (Number.isFinite(options.health)) {
+          monster.health = normalizeHealthSegments(options.health, monster.level);
+          monster.model.userData.health = monster.health;
+        }
+        if (options.alive === false || (Number.isFinite(options.health) && options.health <= 0)) {
+          monster.markDead();
+        }
+
+        const spawnPos = options.position
+          && Number.isFinite(options.position.x)
+          && Number.isFinite(options.position.z)
+          ? normalizeNetworkSpawnPosition(
+            options.position,
+            getMonsterGroundOffset(monster),
+            { allowOnBuildings: true }
+          ) || getMonsterSpawnPosition(monster)
+          : getMonsterSpawnPosition(monster);
+        monster.setPosition(spawnPos.x, spawnPos.y, spawnPos.z);
+
+        cleanupMonster(oldMonster);
+        scene.add(monster.model);
+        if (rapierWorld) {
+          attachMonsterPhysics(monster);
+        }
+        if (options.rotation
+          && Number.isFinite(options.rotation.x)
+          && Number.isFinite(options.rotation.y)
+          && Number.isFinite(options.rotation.z)
+          && Number.isFinite(options.rotation.w)) {
+          monster.model.quaternion.set(options.rotation.x, options.rotation.y, options.rotation.z, options.rotation.w);
+          if (canApplyMonsterBodyTransform()) monster.body?.setRotation(options.rotation, true);
+        }
+        setMonsterForSlot(slotId, monster);
+        if (isHost && monsterSnapshotLoaded && !options.skipPersist) {
+          ensureMonsterRecord(monster);
+        }
+      } finally {
+        spawningSlots.delete(slotId);
+      }
+    });
+  };
+
+
+  function resolvePersistedMonsterModelPath(record, fallbackModelPath = null) {
+    const modelPath = typeof record?.modelPath === 'string' ? record.modelPath.trim() : '';
+    if (modelPath) return modelPath;
+
+    const legacyType = typeof record?.type === 'string' ? record.type.trim() : '';
+    if (legacyType.startsWith('/models/')) return legacyType;
+
+    return fallbackModelPath;
+  }
+
+  function applyMonsterRecord(record, recordId, { applyTransform = false } = {}) {
+    if (!record) return;
+    const slotId = record.id || recordId;
+    if (!slotId) return;
+
+    const recordIsDead = record.alive === false
+      || (Number.isFinite(record.hp) && record.hp <= 0);
+    if (recordIsDead && isHost) {
+      const existing = monsters.find(entry => entry.id === slotId);
+      if (existing) {
+        existing.applyPersistedState?.({
+          hp: record.hp,
+          alive: false,
+          level: record.level,
+          version: Number.isFinite(record.version) ? record.version : null
+        });
+        if (!existing.isDead) {
+          existing.markDead?.();
+        }
+      }
+      return;
+    }
+
+    const incomingVersion = Number.isFinite(record.version) ? record.version : null;
+    const existing = monsters.find(entry => entry.id === slotId);
+    const existingVersion = Number.isFinite(existing?.version) ? existing.version : -Infinity;
+
+    if (incomingVersion != null && incomingVersion < existingVersion) return;
+
+    const modelPath = resolvePersistedMonsterModelPath(record, existing?.modelPath);
+    if (!modelPath) return;
+
+    const needsSpawn = !existing || existing.modelPath !== modelPath;
+    const rotation = applyTransform ? record.rot : null;
+    const position = applyTransform ? record.pos : null;
+
+    if (needsSpawn) {
+      if (!existing || (incomingVersion != null && incomingVersion > existingVersion)) {
+        spawnMonsterInSlot(slotId, modelPath, existing, {
+          position,
+          rotation,
+          health: record.hp,
+          alive: record.alive,
+          level: record.level,
+          version: incomingVersion,
+          type: record.type,
+          skipPersist: true
+        });
+      }
+      return;
+    }
+
+    if (!existing?.model) return;
+
+    if (Number.isFinite(record.level)) {
+      existing.setLevel(record.level, { preserveHealth: true });
+    }
+
+    if (position && Number.isFinite(position.x) && Number.isFinite(position.y) && Number.isFinite(position.z)) {
+      existing.model.position.set(position.x, position.y, position.z);
+      if (canApplyMonsterBodyTransform()) existing.body?.setTranslation({ x: position.x, y: position.y, z: position.z }, true);
+    }
+
+    if (rotation && Number.isFinite(rotation.x) && Number.isFinite(rotation.y) && Number.isFinite(rotation.z) && Number.isFinite(rotation.w)) {
+      existing.model.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+      if (canApplyMonsterBodyTransform()) existing.body?.setRotation(rotation, true);
+    }
+
+    existing.applyPersistedState?.({
+      hp: record.hp,
+      alive: record.alive,
+      level: record.level,
+      version: incomingVersion
+    });
+  }
+
+
+  const ensureMonsters = () => {
+    if (window.gameMode === '3d_painter' || window.gameMode === 'horde') return;
+    if (PERF.disableMonsters) {
+      monsters.forEach(monster => cleanupMonster(monster));
+      monsters = [];
+      runtimeContext.entities.monsters = monsters;
+  window.monsters = monsters;
+      respawnTimers.forEach((timer) => clearTimeout(timer));
+      respawnTimers.clear();
+      return;
+    }
+    const seenSlots = new Set();
+    monsters = monsters.filter((monster) => {
+      if (!monster) return false;
+      if (!monsterSlotIds.includes(monster.id)) {
+        cleanupMonster(monster);
+        return false;
+      }
+      if (seenSlots.has(monster.id)) {
+        cleanupMonster(monster);
+        return false;
+      }
+      seenSlots.add(monster.id);
+      return true;
+    });
+    runtimeContext.entities.monsters = monsters;
+  window.monsters = monsters;
+
+    const shouldPopulateMissingSlots = !multiplayer || multiplayer.isHost;
+    if (!shouldPopulateMissingSlots) {
+      return;
+    }
+
+    monsterSlotIds.forEach((slotId) => {
+      const existing = monsters.find(entry => entry.id === slotId);
+      if (!existing && !spawningSlots.has(slotId) && !respawnTimers.has(slotId)) {
+        spawnMonsterInSlot(slotId, getRandomMonsterModel());
+      }
+    });
+  };
+
+  monsterSlotIds.forEach((slotId) => {
+    registerNetworkedEntity(slotId, {
+      getState: () => {
+        const monster = monsters.find(entry => entry.id === slotId);
+        if (!monster) return null;
+        try {
+          if (!monster.model) return null;
+        }
+        catch {
+          return null;
+        }
+        const pos = monster.model.position;
+        const q = monster.model.quaternion;
+        return {
+          position: [pos.x, pos.y, pos.z],
+          rotation: [q.x, q.y, q.z, q.w],
+          mode: monster.model.userData.mode,
+          action: monster.model.userData.currentAction,
+          health: monster.model.userData.health,
+          level: monster.level,
+          modelPath: monster.modelPath,
+          version: monster.version
+        };
+      },
+      applyState: state => {
+        if (!state) return;
+        const [px, py, pz] = state.position || [];
+        const [rx, ry, rz, rw] = state.rotation || [];
+        const current = monsters.find(entry => entry.id === slotId);
+        const currentVersion = Number.isFinite(current?.version) ? current.version : -Infinity;
+        const incomingVersion = Number.isFinite(state.version) ? state.version : null;
+        if (incomingVersion != null && incomingVersion < currentVersion) {
+          return;
+        }
+        if (state.modelPath && (!current || current.modelPath !== state.modelPath)) {
+          if (!current || (incomingVersion != null && incomingVersion > currentVersion)) {
+            spawnMonsterInSlot(slotId, state.modelPath, current, {
+              level: state.level,
+              version: incomingVersion,
+              type: state.modelPath,
+              skipPersist: true
+            });
+          }
+          return;
+        }
+        const monster = monsters.find(entry => entry.id === slotId);
+        if (!monster?.model) return;
+        if (Number.isFinite(state.level)) {
+          monster.setLevel(state.level, { preserveHealth: true });
+        }
+        if (Number.isFinite(px) && Number.isFinite(pz)) {
+          const normalizedPos = normalizeNetworkSpawnPosition(
+            { x: px, y: py, z: pz },
+            getMonsterGroundOffset(monster),
+            { allowOnBuildings: true }
+          );
+          if (normalizedPos) {
+            monster.model.position.copy(normalizedPos);
+            if (canApplyMonsterBodyTransform()) monster.body?.setTranslation({ x: normalizedPos.x, y: normalizedPos.y, z: normalizedPos.z }, true);
+          }
+        }
+        if (Number.isFinite(rx) && Number.isFinite(ry) && Number.isFinite(rz) && Number.isFinite(rw)) {
+          monster.model.quaternion.set(rx, ry, rz, rw);
+          if (canApplyMonsterBodyTransform()) monster.body?.setRotation({ x: rx, y: ry, z: rz, w: rw }, true);
+        }
+        if (typeof state.mode === 'string') {
+          monster.model.userData.mode = state.mode;
+        }
+        if (typeof state.health === 'number') {
+          monster.health = normalizeHealthSegments(state.health, monster.level);
+          monster.model.userData.health = monster.health;
+        }
+        const aliveFlag = typeof state.mode === 'string' ? state.mode !== 'dead' : undefined;
+        monster.applyPersistedState?.({
+          hp: state.health,
+          alive: aliveFlag,
+          level: state.level,
+          version: incomingVersion
+        });
+        if (state.action && monster.model.userData.currentAction !== state.action) {
+          const fade = state.action === 'Weapon' ? 0.1 : 0.2;
+          monster.playAnimation(state.action, fade);
+        }
+      },
+      isLocallyControlled: () => multiplayer?.isHost && monsters.some(entry => entry.id === slotId)
+    });
+  });
+
+
+  function applyOfflineHungerDecay(profile) {
+    const now = Date.now();
+    const lastUpdate = Number.isFinite(profile?.lastStatUpdateAt) ? profile.lastStatUpdateAt : now;
+    const elapsedSeconds = Math.max(0, (now - lastUpdate) / 1000);
+    const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
+    const currentHunger = Number.isFinite(profile?.stats?.hunger) ? profile.stats.hunger : 0;
+    const nextHunger = clampHungerSegments(currentHunger - hungerDecay);
+    const updatedStats = { ...profile.stats, hunger: nextHunger, energy: nextHunger };
+    const changed = nextHunger !== currentHunger || !Number.isFinite(profile?.lastStatUpdateAt);
+    return {
+      stats: updatedStats,
+      lastStatUpdateAt: now,
+      changed
+    };
+  }
+
+  const offlineDecay = applyOfflineHungerDecay(playerProfile);
+  playerProfile.stats = offlineDecay.stats;
+  let lastStatUpdateAt = offlineDecay.lastStatUpdateAt;
+
+  const walkingState = mergeWalkingStats(playerProfile.walkingStats);
+
+  function getDisplayedTodayMiles(timestampMs = Date.now()) {
+    const dayKey = getUtcDateString(timestampMs);
+    const todayMiles = walkingState.dailyMiles[dayKey] || 0;
+    const resetMiles = walkingState.dailyResetMiles?.[dayKey] || 0;
+    return Math.max(0, todayMiles - resetMiles);
+  }
+
+  function formatTrackerMiles(miles) {
+    const safeMiles = Number.isFinite(miles) && miles > 0 ? miles : 0;
+    if (getDistanceUnitPreference() === 'km') {
+      return `${(safeMiles * 1.609344).toFixed(1)} km`;
+    }
+    return `${safeMiles.toFixed(1)} mi`;
+  }
+
+  function createWalkingMetricRow(label, valueText) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;justify-content:space-between;gap:16px;align-items:baseline;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.16);';
+    const labelEl = document.createElement('span');
+    labelEl.textContent = label;
+    const valueEl = document.createElement('strong');
+    valueEl.textContent = valueText;
+    row.append(labelEl, valueEl);
+    return row;
+  }
+
+  let walkingTrackerButton = null;
+  let walkingSummaryOverlay = null;
+
+  function getWalkingSummaryMetrics() {
+    const today = Date.now();
+    const startWeek = getStartOfUtcWeek(today);
+    let milesThisWeek = 0;
+    let firstDayTs = null;
+    for (const [date, miles] of Object.entries(walkingState.dailyMiles)) {
+      const ts = Date.parse(`${date}T00:00:00.000Z`);
+      if (!Number.isFinite(ts)) continue;
+      if (firstDayTs == null || ts < firstDayTs) firstDayTs = ts;
+      if (ts >= startWeek) milesThisWeek += miles;
+    }
+    const weeks = firstDayTs == null ? 1 : Math.max(1, Math.ceil((today - firstDayTs + 1) / (7 * 24 * 60 * 60 * 1000)));
+    return {
+      totalMiles: walkingState.totalMiles,
+      weekMiles: milesThisWeek,
+      averageWeeklyMiles: walkingState.totalMiles / weeks,
+      todayMiles: getDisplayedTodayMiles(today)
+    };
+  }
+
+  function updateWalkingTrackerButton() {
+    if (!walkingTrackerButton) return;
+    walkingTrackerButton.textContent = formatTrackerMiles(getDisplayedTodayMiles());
+  }
+
+  function refreshWalkingSummaryOverlay() {
+    if (!walkingSummaryOverlay) return;
+    const list = walkingSummaryOverlay.querySelector('[data-walking-summary-list]');
+    if (!list) return;
+    const metrics = getWalkingSummaryMetrics();
+    list.textContent = '';
+    list.append(
+      createWalkingMetricRow('Total distance traveled', formatTrackerMiles(metrics.totalMiles)),
+      createWalkingMetricRow('This week\'s distance', formatTrackerMiles(metrics.weekMiles)),
+      createWalkingMetricRow('Average weekly', formatTrackerMiles(metrics.averageWeeklyMiles)),
+      createWalkingMetricRow('Today\'s distance traveled', formatTrackerMiles(metrics.todayMiles))
+    );
+  }
+
+  function showWalkingSummaryOverlay() {
+    if (walkingSummaryOverlay) {
+      refreshWalkingSummaryOverlay();
+      return;
+    }
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:12000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const panel = document.createElement('div');
+    panel.style.cssText = 'position:relative;width:min(460px,100%);background:#111;color:#fff;border:2px solid #39f;border-radius:12px;padding:20px 18px 18px;font-family:Arial,sans-serif;box-shadow:0 18px 48px rgba(0,0,0,.45);';
+    const exitBtn = document.createElement('button');
+    exitBtn.textContent = '✕';
+    exitBtn.setAttribute('aria-label', 'Close distance tracker');
+    exitBtn.style.cssText = 'position:absolute;right:10px;top:8px;background:transparent;border:0;color:#fff;font-size:22px;cursor:pointer;';
+    const title = document.createElement('h2');
+    title.textContent = 'Distance Traveled';
+    title.style.margin = '0 0 14px 0';
+    const list = document.createElement('div');
+    list.dataset.walkingSummaryList = 'true';
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset Today';
+    resetBtn.style.cssText = 'margin-top:16px;width:100%;padding:10px;border-radius:8px;border:1px solid #f59e0b;background:#8a4b00;color:#fff;font-weight:700;cursor:pointer;';
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'Ok';
+    okBtn.style.cssText = 'margin-top:10px;width:100%;padding:10px;border-radius:8px;border:1px solid #39f;background:#1f3cff;color:#fff;font-weight:700;cursor:pointer;';
+    const close = () => {
+      overlay.remove();
+      walkingSummaryOverlay = null;
+    };
+    resetBtn.addEventListener('click', () => {
+      const todayKey = getUtcDateString(Date.now());
+      walkingState.dailyResetMiles = walkingState.dailyResetMiles || {};
+      walkingState.dailyResetMiles[todayKey] = walkingState.dailyMiles[todayKey] || 0;
+      walkingState.updatedAt = Date.now();
+      if (profileNameKey) {
+        void saveWalkingStats(profileNameKey, walkingState);
+      }
+      updateWalkingTrackerButton();
+      refreshWalkingSummaryOverlay();
+    });
+    okBtn.addEventListener('click', close);
+    exitBtn.addEventListener('click', close);
+    panel.append(exitBtn, title, list, resetBtn, okBtn);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    walkingSummaryOverlay = overlay;
+    refreshWalkingSummaryOverlay();
+  }
+
+  function initWalkingTrackerButton() {
+    walkingTrackerButton = document.createElement('button');
+    walkingTrackerButton.type = 'button';
+    walkingTrackerButton.setAttribute('aria-label', 'Open distance traveled summary');
+    walkingTrackerButton.style.cssText = 'position:fixed;left:12px;top:128px;z-index:9500;border:1px solid rgba(255,255,255,.45);border-radius:999px;background:rgba(8,16,32,.76);color:#fff;padding:7px 11px;font:700 14px/1 Arial,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.35);backdrop-filter:blur(6px);cursor:pointer;';
+    walkingTrackerButton.addEventListener('click', showWalkingSummaryOverlay);
+    document.body.appendChild(walkingTrackerButton);
+    updateWalkingTrackerButton();
+  }
+
+  initWalkingTrackerButton();
+  window.addEventListener('distance-unit-changed', () => {
+    updateWalkingTrackerButton();
+    refreshWalkingSummaryOverlay();
+  });
+
+  const statsState = {
+    health: playerProfile.stats.health,
+    hunger: playerProfile.stats.hunger,
+    energy: playerProfile.stats.hunger,
+    magic: playerProfile.stats.magic,
+    maxHealthSegments: playerProfile.stats.maxHealthSegments,
+    maxHungerSegments: playerProfile.stats.maxHungerSegments,
+    maxMagicSegments: playerProfile.stats.maxMagicSegments,
+    level: playerProfile.stats.level,
+    strength: playerProfile.stats.strength,
+    agility: playerProfile.stats.agility,
+    smarts: playerProfile.stats.smarts,
+    charm: playerProfile.stats.charm,
+    luck: playerProfile.stats.luck,
+    xp: playerProfile.stats.xp,
+    monsterKills: playerProfile.stats.monsterKills,
+    coins: playerProfile.stats.coins
+  };
+  statsState.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
+  statsState.maxHungerSegments = Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(statsState.maxHungerSegments || BASE_HUNGER_SEGMENTS)));
+  statsState.maxMagicSegments = Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, Math.round(statsState.maxMagicSegments || BASE_MAGIC_SEGMENTS)));
+  statsState.health = normalizeHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
+  statsState.hunger = clampHungerSegments(statsState.hunger, statsState.maxHungerSegments);
+  statsState.energy = statsState.hunger;
+  statsState.magic = clampMagicSegments(statsState.magic, statsState.maxMagicSegments);
+  currentPlayerLevel = Math.max(1, Math.round(statsState.level || 1));
+  const spellsAvailable = { ...(playerProfile?.spells || {}) };
+  const playerNameDisplay = document.getElementById('player-name-display');
+  const playerLevelDisplay = document.getElementById('player-level');
+  const levelPopup = document.getElementById('level-popup');
+  const levelUpPanel = document.getElementById('level-up-panel');
+  const levelUpTitle = document.getElementById('level-up-title');
+  const levelUpSubtitle = document.getElementById('level-up-subtitle');
+  const levelUpRemaining = document.getElementById('level-up-remaining');
+  const levelUpStrengthButton = document.getElementById('level-up-strength');
+  const levelUpMagicButton = document.getElementById('level-up-magic');
+  const levelUpHungerButton = document.getElementById('level-up-hunger');
+  const levelUpHealthButton = document.getElementById('level-up-health');
+  const xpBar = document.getElementById('xp-bar');
+  const xpBarFill = document.getElementById('xp-bar-fill');
+  const xpGainText = document.getElementById('xp-gain');
+  const xpLevelUpText = document.getElementById('xp-level-up');
+  const ammoPopup = document.getElementById('ammo-popup');
+  const coinPopup = document.getElementById('coin-popup');
+  const treasurePopup = document.getElementById('treasure-popup');
+  let levelPopupTimer = null;
+  let ammoPopupTimer = null;
+  let coinPopupTimer = null;
+  let treasurePopupTimer = null;
+  let xpBarHideTimer = null;
+  let xpGainTimer = null;
+  let xpLevelUpTimer = null;
+  let xpAnimationRunning = false;
+  let xpAnimationQueue = [];
+  let displayedLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
+  let displayedXp = Number.isFinite(statsState.xp) ? statsState.xp : 0;
+  let pendingLevelUpChoices = 0;
+  let pendingLevelUpLevel = displayedLevel;
+  let levelUpSelectionActive = false;
+  updatePlayerInfoUI = () => {
+    if (playerNameDisplay) {
+      playerNameDisplay.textContent = playerName;
+    }
+    if (playerLevelDisplay) {
+      const levelValue = Number.isFinite(displayedLevel) ? displayedLevel : 1;
+      playerLevelDisplay.textContent = levelValue;
+    }
+  };
+  const showLevelPopup = level => {
+    if (!levelPopup) return;
+    levelPopup.textContent = `You've reached level ${level}!`;
+    levelPopup.classList.add('visible');
+    if (levelPopupTimer) {
+      clearTimeout(levelPopupTimer);
+    }
+    levelPopupTimer = setTimeout(() => {
+      levelPopup.classList.remove('visible');
+      levelPopupTimer = null;
+    }, 2200);
+  };
+  const showAmmoPopup = (ammoCount, label) => {
+    if (!ammoPopup) return;
+    const displayCount = Number.isFinite(ammoCount) ? Math.max(0, Math.floor(ammoCount)) : 0;
+    const safeLabel = label || 'Ammo';
+    ammoPopup.textContent = `${safeLabel}: ${displayCount}`;
+    ammoPopup.classList.add('visible');
+    if (ammoPopupTimer) {
+      clearTimeout(ammoPopupTimer);
+    }
+    ammoPopupTimer = setTimeout(() => {
+      ammoPopup.classList.remove('visible');
+      ammoPopupTimer = null;
+    }, 1600);
+  };
+  const showCoinPopup = totalCoins => {
+    if (!coinPopup) return;
+    const displayCount = Number.isFinite(totalCoins) ? Math.max(0, Math.floor(totalCoins)) : 0;
+    coinPopup.textContent = `Coins: ${displayCount}`;
+    coinPopup.classList.add('visible');
+    if (coinPopupTimer) {
+      clearTimeout(coinPopupTimer);
+    }
+    coinPopupTimer = setTimeout(() => {
+      coinPopup.classList.remove('visible');
+      coinPopupTimer = null;
+    }, 1600);
+  };
+  const showTreasurePopup = (message) => {
+    if (!treasurePopup) return;
+    treasurePopup.textContent = message;
+    treasurePopup.classList.add('visible');
+    if (treasurePopupTimer) {
+      clearTimeout(treasurePopupTimer);
+    }
+    treasurePopupTimer = setTimeout(() => {
+      treasurePopup.classList.remove('visible');
+      treasurePopupTimer = null;
+    }, 2000);
+  };
+  const killPopup = document.createElement('div');
+  killPopup.id = 'monster-kill-popup';
+  killPopup.setAttribute('aria-live', 'polite');
+  killPopup.setAttribute('aria-atomic', 'true');
+  document.body.appendChild(killPopup);
+  let killPopupTimer = null;
+  const showMonsterKillPopup = (totalKills) => {
+    const displayCount = Number.isFinite(totalKills) ? Math.max(0, Math.floor(totalKills)) : 0;
+    killPopup.textContent = `☠️ ${displayCount} kills +1`;
+    killPopup.classList.add('visible');
+    if (killPopupTimer) {
+      clearTimeout(killPopupTimer);
+    }
+    killPopupTimer = setTimeout(() => {
+      killPopup.classList.remove('visible');
+      killPopupTimer = null;
+    }, 1500);
+  };
+  const achievementBanner = document.createElement('div');
+  achievementBanner.className = 'achievement-banner hidden';
+  achievementBanner.setAttribute('aria-live', 'polite');
+  achievementBanner.setAttribute('aria-atomic', 'true');
+  achievementBanner.innerHTML = '<div class="achievement-banner-title"></div><div class="achievement-banner-subtitle"></div>';
+  document.body.appendChild(achievementBanner);
+  const achievementBannerTitle = achievementBanner.querySelector('.achievement-banner-title');
+  const achievementBannerSubtitle = achievementBanner.querySelector('.achievement-banner-subtitle');
+  let achievementBannerTimer = null;
+  const achievementState = mergeAchievementState(playerProfile?.achievements);
+  let questCompletionsTracked = Array.isArray(playerProfile?.quests?.completedQuestIds)
+    ? playerProfile.quests.completedQuestIds.length
+    : 0;
+  let climbedSinceGrounded = false;
+  const showAchievementBanner = (title, xpAmount) => {
+    if (!achievementBannerTitle || !achievementBannerSubtitle) return;
+    achievementBannerTitle.textContent = `Achievement Unlocked: ${title}`;
+    achievementBannerSubtitle.textContent = `+${Math.max(0, Math.floor(xpAmount || 0))} XP`;
+    achievementBanner.classList.remove('hidden');
+    if (achievementBannerTimer) {
+      clearTimeout(achievementBannerTimer);
+    }
+    achievementBannerTimer = setTimeout(() => {
+      achievementBanner.classList.add('hidden');
+      achievementBannerTimer = null;
+    }, 2200);
+  };
+  const persistAchievementProgress = () => {
+    if (!profileNameKey) return;
+    void saveAchievementState(profileNameKey, achievementState);
+  };
+  const applyAchievementRewards = (rewards = {}) => {
+    const grants = [];
+    Object.entries(rewards).forEach(([itemId, value]) => {
+      const amount = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+      if (!amount) return;
+      if (itemId === 'coins') {
+        setStat('coins', (Number.isFinite(statsState.coins) ? statsState.coins : 0) + amount);
+        grants.push(`${amount} coins`);
+      } else if (itemId === MISSILE_AMMO_KEY) {
+        addMissileAmmo(amount);
+        grants.push(`${amount} Missiles`);
+      } else {
+        addToInventory(itemId, amount);
+        const label = inventoryCatalog[itemId]?.name || itemId;
+        grants.push(`${amount} ${label}`);
+      }
+    });
+    if (grants.length) {
+      showTreasurePopup(`Reward claimed: ${grants.join(', ')}`);
+    }
+    return grants;
+  };
+  const notifyAchievementProgress = (metric, amount = 1) => {
+    const unlocked = recordAchievementProgress(achievementState, metric, amount);
+    if (!unlocked.length) return;
+    unlocked.forEach((achievement) => {
+      addPlayerXp(achievement.xp);
+      showAchievementBanner(achievement.title, achievement.xp);
+    });
+    persistAchievementProgress();
+    updateSettingsUI();
+  };
+  const XP_GAIN_DISPLAY_MS = 900;
+  const XP_LEVEL_UP_DISPLAY_MS = 900;
+  const XP_BAR_HIDE_DELAY_MS = 1400;
+  const XP_SEGMENT_MIN_MS = 260;
+  const XP_SEGMENT_MAX_MS = 1200;
+  const XP_SEGMENT_SPEED = 6;
+
+  const getTotalXpForLevel = (level) => {
+    const safeLevel = Math.max(1, Math.floor(level || 1));
+    return 50 * safeLevel * (safeLevel - 1);
+  };
+
+  const getLevelForXp = (totalXp) => {
+    const safeXp = Math.max(0, Math.floor(totalXp || 0));
+    const rawLevel = (1 + Math.sqrt(1 + safeXp / 12.5)) / 2;
+    return Math.max(1, Math.floor(rawLevel));
+  };
+
+  const getXpProgress = (totalXp, level) => {
+    const levelStart = getTotalXpForLevel(level);
+    const levelEnd = getTotalXpForLevel(level + 1);
+    const span = Math.max(1, levelEnd - levelStart);
+    const progress = Math.max(0, Math.min(1, (totalXp - levelStart) / span));
+    return { progress, levelStart, levelEnd };
+  };
+
+  const setXpBarProgress = (totalXp, level) => {
+    if (!xpBarFill) return;
+    const { progress } = getXpProgress(totalXp, level);
+    xpBarFill.style.width = `${Math.round(progress * 1000) / 10}%`;
+  };
+
+  const showXpGain = (amount) => {
+    if (!xpGainText) return;
+    xpGainText.textContent = `+${amount} XP`;
+    xpGainText.classList.add('visible');
+    if (xpGainTimer) {
+      clearTimeout(xpGainTimer);
+    }
+    xpGainTimer = setTimeout(() => {
+      xpGainText.classList.remove('visible');
+      xpGainTimer = null;
+    }, XP_GAIN_DISPLAY_MS);
+  };
+
+  const showXpLevelUp = () => {
+    if (!xpLevelUpText) return;
+    xpLevelUpText.classList.add('visible');
+    if (xpLevelUpTimer) {
+      clearTimeout(xpLevelUpTimer);
+    }
+    xpLevelUpTimer = setTimeout(() => {
+      xpLevelUpText.classList.remove('visible');
+      xpLevelUpTimer = null;
+    }, XP_LEVEL_UP_DISPLAY_MS);
+  };
+
+  const showXpBar = () => {
+    if (!xpBar) return;
+    xpBar.classList.remove('hidden');
+    if (xpBarHideTimer) {
+      clearTimeout(xpBarHideTimer);
+      xpBarHideTimer = null;
+    }
+  };
+
+  const hideXpBarLater = () => {
+    if (!xpBar) return;
+    if (xpBarHideTimer) {
+      clearTimeout(xpBarHideTimer);
+    }
+    xpBarHideTimer = setTimeout(() => {
+      xpBar.classList.add('hidden');
+      xpBarHideTimer = null;
+    }, XP_BAR_HIDE_DELAY_MS);
+  };
+
+  const animateXpSegment = (startXp, endXp, level) => new Promise(resolve => {
+    const delta = Math.max(0, endXp - startXp);
+    if (delta === 0) {
+      setXpBarProgress(endXp, level);
+      resolve();
+      return;
+    }
+    const duration = Math.min(
+      XP_SEGMENT_MAX_MS,
+      Math.max(XP_SEGMENT_MIN_MS, delta * XP_SEGMENT_SPEED)
+    );
+    const startTime = performance.now();
+    const tick = (now) => {
+      const elapsed = now - startTime;
+      const t = Math.min(1, elapsed / duration);
+      const currentXp = startXp + delta * t;
+      setXpBarProgress(currentXp, level);
+      if (t < 1) {
+        requestAnimationFrame(tick);
+      } else {
+        resolve();
+      }
+    };
+    requestAnimationFrame(tick);
+  });
+
+  const queueXpAnimation = (amount) => {
+    xpAnimationQueue.push(amount);
+    if (!xpAnimationRunning) {
+      runXpAnimationQueue();
+    }
+  };
+
+  const runXpAnimationQueue = async () => {
+    xpAnimationRunning = true;
+    while (xpAnimationQueue.length > 0) {
+      const amount = xpAnimationQueue.shift();
+      if (!Number.isFinite(amount) || amount <= 0) {
+        continue;
+      }
+      showXpBar();
+      showXpGain(amount);
+      let segmentStartXp = displayedXp;
+      const targetXp = displayedXp + amount;
+      let segmentLevel = getLevelForXp(segmentStartXp);
+      while (segmentStartXp < targetXp) {
+        const nextLevelXp = getTotalXpForLevel(segmentLevel + 1);
+        const segmentEndXp = Math.min(targetXp, nextLevelXp);
+        await animateXpSegment(segmentStartXp, segmentEndXp, segmentLevel);
+        segmentStartXp = segmentEndXp;
+        displayedXp = segmentStartXp;
+        if (segmentStartXp >= nextLevelXp && segmentStartXp < targetXp) {
+          segmentLevel += 1;
+          displayedLevel = segmentLevel;
+          updatePlayerInfoUI();
+          showLevelPopup(segmentLevel);
+          showXpLevelUp();
+          setXpBarProgress(segmentStartXp, segmentLevel);
+          await new Promise(resolve => setTimeout(resolve, 320));
+        }
+      }
+      displayedXp = targetXp;
+      setXpBarProgress(displayedXp, segmentLevel);
+    }
+    xpAnimationRunning = false;
+    hideXpBarLater();
+  };
+  const initialXp = Number.isFinite(statsState.xp) ? statsState.xp : 0;
+  const initialLevel = getLevelForXp(initialXp);
+  let statsNeedsSave = false;
+  if (initialXp !== statsState.xp) {
+    statsState.xp = initialXp;
+    statsNeedsSave = true;
+  }
+  if (initialLevel !== statsState.level) {
+    statsState.level = initialLevel;
+    statsNeedsSave = true;
+  }
+  if (statsNeedsSave) {
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+  displayedLevel = initialLevel;
+  displayedXp = initialXp;
+  setXpBarProgress(displayedXp, displayedLevel);
+  updatePlayerInfoUI();
+  const normalizeTorchHealth = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return DEFAULT_TORCH_HEALTH;
+    }
+    return Math.max(0, Math.min(DEFAULT_TORCH_HEALTH, numeric));
+  };
+  const normalizeTorchEntry = (entry = {}) => {
+    const countValue = Number.isFinite(entry.count) ? Math.max(0, Math.floor(entry.count)) : 0;
+    const healths = Array.isArray(entry[TORCH_HEALTH_KEY])
+      ? entry[TORCH_HEALTH_KEY].map(normalizeTorchHealth).filter(health => health > 0)
+      : [];
+    while (healths.length < countValue) {
+      healths.push(DEFAULT_TORCH_HEALTH);
+    }
+    if (healths.length > countValue) {
+      healths.length = countValue;
+    }
+    return {
+      ...entry,
+      count: healths.length,
+      [TORCH_HEALTH_KEY]: healths
+    };
+  };
+  const getTorchHealths = (entry) => (
+    Array.isArray(entry?.[TORCH_HEALTH_KEY]) ? [...entry[TORCH_HEALTH_KEY]] : []
+  );
+  const SHIELD_HEALTH_KEY = 'shieldHealth';
+  const SHIELD_MAX_HEALTH_KEY = 'shieldMaxHealth';
+  const normalizeShieldHealth = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return DEFAULT_SHIELD_HEALTH;
+    }
+    return Math.max(0, Math.min(DEFAULT_SHIELD_HEALTH, numeric));
+  };
+  const normalizeShieldEntry = (entry = {}) => {
+    const countValue = Number.isFinite(entry.count) ? Math.max(0, Math.floor(entry.count)) : 0;
+    const health = normalizeShieldHealth(entry[SHIELD_HEALTH_KEY]);
+    return {
+      ...entry,
+      count: countValue > 0 && health > 0 ? countValue : 0,
+      [SHIELD_HEALTH_KEY]: health,
+      [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+    };
+  };
+  const inventoryCatalog = {
+    iceGun: {
+      name: 'Ice Gun',
+      icon: '/assets/ui/items/icegun.png'
+    },
+    bazooka: {
+      name: 'Bazooka',
+      icon: '/assets/ui/items/bazooka.png'
+    },
+    bow: {
+      name: 'Bow',
+      icon: '/assets/ui/items/bow.png'
+    },
+    bomb: {
+      name: 'Bomb',
+      icon: '/assets/ui/items/bomb.png'
+    },
+    autumnSword: {
+      name: 'Autumn Sword',
+      icon: '/assets/ui/items/sword.png'
+    },
+    [FOAM_SWORD_ITEM_ID]: {
+      name: 'Foam Sword',
+      icon: '/assets/ui/items/sword.png'
+    },
+    hammer: {
+      name: 'Hammer',
+      icon: ''
+    },
+    pistol: {
+      name: 'Pistol',
+      icon: ''
+    },
+    lantern: {
+      name: 'Lantern (Left Hand)',
+      icon: '/assets/ui/items/lantern.png'
+    },
+    torch: {
+      name: 'Torch (Left Hand)',
+      icon: '/assets/ui/items/torch.png'
+    },
+    [SHIELD_ITEM_ID]: {
+      name: 'Shield',
+      icon: ''
+    },
+    [LIFE_POTION_ITEM_ID]: {
+      name: 'Life Potion',
+      icon: '/assets/ui/items/life_potion.png'
+    },
+    [MANA_POTION_ITEM_ID]: {
+      name: 'Mana Potion',
+      icon: '/assets/ui/items/mana_potion.png'
+    }
+  };
+  inventoryCatalog[APPLE_ITEM_ID] = {
+    name: 'Apple',
+    icon: ''
+  };
+  inventoryCatalog[WOOD_ITEM_ID] = {
+    name: 'Wood',
+    icon: ''
+  };
+  inventoryCatalog[MEAT_ITEM_ID] = {
+    name: 'Meat',
+    icon: ''
+  };
+  inventoryCatalog[ZOMBIE_BRAINS_ITEM_ID] = {
+    name: 'Zombie Brains',
+    icon: ''
+  };
+  inventoryCatalog[SALT_ITEM_ID] = {
+    name: 'Salt',
+    icon: ''
+  };
+  inventoryCatalog[SAUTEED_MUSHROOMS_ITEM_ID] = {
+    name: 'Sauteed Mushrooms',
+    icon: ''
+  };
+  MUSHROOM_ENTRIES.forEach((entry) => {
+    inventoryCatalog[entry.id] = {
+      name: entry.name,
+      icon: '/assets/ui/items/{entry.icon_name}.png'.replace('{entry.icon_name}', entry.icon_name)
+    };
+  });
+  const ensureCatalogEntry = (itemId, entry) => {
+    const itemConfig = inventoryCatalog[itemId] || {};
+    return {
+      ...entry,
+      icon: entry?.icon || itemConfig.icon || '',
+      name: entry?.name || itemConfig.name || itemId
+    };
+  };
+  const inventoryState = { ...(playerProfile.inventory || {}) };
+  const homeStorageState = { ...(playerProfile.homeStorage || {}) };
+  let inventoryDirty = false;
+  let homeStorageDirty = false;
+  Object.entries(inventoryState).forEach(([itemId, entry]) => {
+    const catalogEntry = ensureCatalogEntry(itemId, entry);
+    const nextEntry = itemId === TORCH_ITEM_ID
+      ? normalizeTorchEntry(catalogEntry)
+      : itemId === SHIELD_ITEM_ID
+        ? normalizeShieldEntry(catalogEntry)
+        : catalogEntry;
+    const healthsChanged = itemId === TORCH_ITEM_ID
+      && JSON.stringify(nextEntry[TORCH_HEALTH_KEY]) !== JSON.stringify(entry?.[TORCH_HEALTH_KEY]);
+    const shieldHealthChanged = itemId === SHIELD_ITEM_ID
+      && (nextEntry[SHIELD_HEALTH_KEY] !== entry?.[SHIELD_HEALTH_KEY]
+        || nextEntry[SHIELD_MAX_HEALTH_KEY] !== entry?.[SHIELD_MAX_HEALTH_KEY]);
+    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon || healthsChanged || shieldHealthChanged) {
+      inventoryDirty = true;
+    }
+    inventoryState[itemId] = nextEntry;
+  });
+  Object.entries(homeStorageState).forEach(([itemId, entry]) => {
+    const catalogEntry = ensureCatalogEntry(itemId, entry);
+    const nextEntry = itemId === TORCH_ITEM_ID
+      ? normalizeTorchEntry(catalogEntry)
+      : itemId === SHIELD_ITEM_ID
+        ? normalizeShieldEntry(catalogEntry)
+        : catalogEntry;
+    const healthsChanged = itemId === TORCH_ITEM_ID
+      && JSON.stringify(nextEntry[TORCH_HEALTH_KEY]) !== JSON.stringify(entry?.[TORCH_HEALTH_KEY]);
+    const shieldHealthChanged = itemId === SHIELD_ITEM_ID
+      && (nextEntry[SHIELD_HEALTH_KEY] !== entry?.[SHIELD_HEALTH_KEY]
+        || nextEntry[SHIELD_MAX_HEALTH_KEY] !== entry?.[SHIELD_MAX_HEALTH_KEY]);
+    if (nextEntry.name !== entry?.name || nextEntry.icon !== entry?.icon || healthsChanged || shieldHealthChanged) {
+      homeStorageDirty = true;
+    }
+    homeStorageState[itemId] = nextEntry;
+  });
+  if (!Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])) {
+    const iceGunEntry = inventoryState.iceGun || {};
+    inventoryState.iceGun = {
+      ...iceGunEntry,
+      [ICE_AMMO_KEY]: DEFAULT_ICE_AMMO,
+      icon: iceGunEntry.icon || inventoryCatalog.iceGun.icon,
+      name: iceGunEntry.name || inventoryCatalog.iceGun.name
+    };
+    inventoryDirty = true;
+  }
+  if (!Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])) {
+    const bowEntry = inventoryState.bow || {};
+    inventoryState.bow = {
+      ...bowEntry,
+      [ARROW_AMMO_KEY]: DEFAULT_ARROW_AMMO,
+      icon: bowEntry.icon || inventoryCatalog.bow.icon,
+      name: bowEntry.name || inventoryCatalog.bow.name
+    };
+    inventoryDirty = true;
+  }
+  if (!Number.isFinite(inventoryState.bazooka?.[MISSILE_AMMO_KEY])) {
+    const bazookaEntry = inventoryState.bazooka || {};
+    inventoryState.bazooka = {
+      ...bazookaEntry,
+      [MISSILE_AMMO_KEY]: DEFAULT_MISSILE_AMMO,
+      icon: bazookaEntry.icon || inventoryCatalog.bazooka.icon,
+      name: bazookaEntry.name || inventoryCatalog.bazooka.name
+    };
+    inventoryDirty = true;
+  }
+  if (inventoryState.lantern?.name !== inventoryCatalog.lantern.name) {
+    inventoryState.lantern = {
+      ...(inventoryState.lantern || {}),
+      name: inventoryCatalog.lantern.name
+    };
+    inventoryDirty = true;
+  }
+  if (inventoryState[TORCH_ITEM_ID]?.name !== inventoryCatalog.torch.name) {
+    inventoryState[TORCH_ITEM_ID] = {
+      ...(inventoryState[TORCH_ITEM_ID] || {}),
+      name: inventoryCatalog.torch.name
+    };
+    inventoryDirty = true;
+  }
+  if (inventoryState[SHIELD_ITEM_ID]?.name !== inventoryCatalog[SHIELD_ITEM_ID].name) {
+    inventoryState[SHIELD_ITEM_ID] = normalizeShieldEntry({
+      ...(inventoryState[SHIELD_ITEM_ID] || {}),
+      name: inventoryCatalog[SHIELD_ITEM_ID].name
+    });
+    inventoryDirty = true;
+  }
+  if (homeStorageState.lantern?.name !== inventoryCatalog.lantern.name) {
+    homeStorageState.lantern = {
+      ...(homeStorageState.lantern || {}),
+      name: inventoryCatalog.lantern.name
+    };
+    homeStorageDirty = true;
+  }
+  if (homeStorageState[TORCH_ITEM_ID]?.name !== inventoryCatalog.torch.name) {
+    homeStorageState[TORCH_ITEM_ID] = {
+      ...(homeStorageState[TORCH_ITEM_ID] || {}),
+      name: inventoryCatalog.torch.name
+    };
+    homeStorageDirty = true;
+  }
+  // Pistol is always in inventory with infinite ammo
+  if (!inventoryState.pistol) {
+    inventoryState.pistol = {
+      count: 1,
+      icon: inventoryCatalog.pistol.icon,
+      name: inventoryCatalog.pistol.name
+    };
+    inventoryDirty = true;
+  }
+  if (inventoryDirty || homeStorageDirty) {
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
+  }
+
+  const equippableItems = new Set(['lantern', 'torch', SHIELD_ITEM_ID, 'iceGun', 'bow', 'bazooka', 'bomb', 'autumnSword', FOAM_SWORD_ITEM_ID, 'hammer', 'pistol']);
+  const inventoryHandSlots = {
+    lantern: 'left',
+    torch: 'left',
+    [SHIELD_ITEM_ID]: 'right',
+    iceGun: 'right',
+    bow: 'right',
+    bazooka: 'right',
+    bomb: 'right',
+    autumnSword: 'right',
+    hammer: 'right',
+    pistol: 'right'
+  };
+  const getInventoryItemHand = (itemId) => inventoryHandSlots[itemId] || null;
+  const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
+  const isAppleItem = (itemId) => appleItemIds.has(itemId);
+  const isWoodItem = (itemId) => woodItemIds.has(itemId);
+  const isMeatItem = (itemId) => meatItemIds.has(itemId);
+  const isSaltItem = (itemId) => saltItemIds.has(itemId);
+  const isSauteedMushroomsItem = (itemId) => sauteedMushroomsItemIds.has(itemId);
+  const isZombieBrainsItem = (itemId) => zombieBrainsItemIds.has(itemId);
+  const isFoodItem = (itemId) => isMushroomItem(itemId)
+    || isAppleItem(itemId)
+    || isMeatItem(itemId)
+    || isSaltItem(itemId)
+    || isSauteedMushroomsItem(itemId);
+  const isPotionItem = (itemId) => potionItemIds.has(itemId);
+  const buildableItemIds = new Set(['wood']);
+  const getInventoryItemActions = (itemId) => {
+    if (isFoodItem(itemId)) {
+      return ['drop', 'eat'];
+    }
+    if (isPotionItem(itemId)) {
+      return ['drop', 'use'];
+    }
+    if (itemId === 'pistol') {
+      return ['equip'];
+    }
+    if (equippableItems.has(itemId)) {
+      return ['drop', 'equip'];
+    }
+    if (isZombieBrainsItem(itemId)) {
+      return ['drop', 'info'];
+    }
+    if (buildableItemIds.has(itemId)) {
+      return ['drop', 'build'];
+    }
+    return ['drop'];
+  };
+
+  function getInventory() {
+    return inventoryState;
+  }
+
+  function getHomeStorage() {
+    return homeStorageState;
+  }
+
+  function persistInventoryAndStorage() {
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
+    updateSettingsUI();
+    updateHomeStorageUI();
+  }
+
+  let equippedTorchIndex = null;
+  let torchHealthDirty = false;
+  let lastTorchHealthSaveAt = 0;
+
+  const updateTorchEntry = (state, entry) => {
+    if (!entry || !entry.count || !Array.isArray(entry[TORCH_HEALTH_KEY]) || !entry[TORCH_HEALTH_KEY].length) {
+      delete state[TORCH_ITEM_ID];
+      return;
+    }
+    state[TORCH_ITEM_ID] = ensureCatalogEntry(TORCH_ITEM_ID, entry);
+  };
+
+  const applyTorchHealths = (state, entry, healths) => {
+    const nextEntry = {
+      ...(entry || {}),
+      count: healths.length,
+      [TORCH_HEALTH_KEY]: healths
+    };
+    updateTorchEntry(state, nextEntry);
+  };
+
+  const takeTorchHealth = (state, preferredIndex = null) => {
+    const entry = state[TORCH_ITEM_ID];
+    if (!entry) return null;
+    const healths = getTorchHealths(entry);
+    if (!healths.length) return null;
+    let index = Number.isInteger(preferredIndex) ? preferredIndex : healths.length - 1;
+    if (index < 0 || index >= healths.length) {
+      index = healths.length - 1;
+    }
+    const [health] = healths.splice(index, 1);
+    applyTorchHealths(state, entry, healths);
+    return { health, index };
+  };
+
+  const addTorchHealths = (state, entry, healthsToAdd) => {
+    const healths = getTorchHealths(entry);
+    healths.push(...healthsToAdd);
+    applyTorchHealths(state, entry, healths);
+  };
+  let pickupToastContainer = null;
+  let pickupToastTimer = null;
+  let pickupToastAnimateTimer = null;
+  let inventoryGlowTimer = null;
+
+  const getPickupFallbackIcon = (itemId) => {
+    if (itemId === 'coins') return '🪙';
+    if (itemId === ICE_AMMO_KEY || itemId === 'iceGun') return '❄️';
+    if (itemId === ARROW_AMMO_KEY || itemId === 'bow') return '🏹';
+    if (itemId === MISSILE_AMMO_KEY || itemId === 'bazooka') return '🚀';
+    if (itemId === SHIELD_ITEM_ID) return '🛡️';
+    if (itemId === APPLE_ITEM_ID) return '🍎';
+    if (itemId?.startsWith?.('mushroom_')) return '🍄';
+    return '🎒';
+  };
+
+  const triggerInventoryButtonGlow = () => {
+    const inventoryButton = document.getElementById('inventory-button');
+    if (!inventoryButton) return;
+    inventoryButton.classList.add('inventory-button-glow');
+    if (inventoryGlowTimer) clearTimeout(inventoryGlowTimer);
+    inventoryGlowTimer = setTimeout(() => {
+      inventoryButton.classList.remove('inventory-button-glow');
+    }, 1000);
+  };
+
+  const showPickupToast = (itemId, amount = 1, explicitLabel = '') => {
+    if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
+    if (!pickupToastContainer) {
+      pickupToastContainer = document.createElement('div');
+      pickupToastContainer.id = 'pickup-toast-container';
+      document.body.appendChild(pickupToastContainer);
+    }
+    const entry = itemId === 'coins'
+      ? { name: 'Coins', icon: '' }
+      : ensureCatalogEntry(itemId, inventoryState[itemId]);
+    const label = explicitLabel || entry?.name || itemId;
+    const amountLabel = amount > 1 ? ` x${Math.floor(amount)}` : '';
+    const iconText = getPickupFallbackIcon(itemId);
+    pickupToastContainer.innerHTML = `
+      <div class="pickup-toast">
+        ${entry?.icon ? `<img src="${entry.icon}" alt="" class="pickup-toast-icon">` : `<span class="pickup-toast-icon pickup-toast-icon-fallback">${iconText}</span>`}
+        <span class="pickup-toast-text">Collected ${label}${amountLabel}</span>
+      </div>
+    `;
+    const toast = pickupToastContainer.querySelector('.pickup-toast');
+    const inventoryButton = document.getElementById('inventory-button');
+    if (!toast || !inventoryButton) return;
+    const buttonRect = inventoryButton.getBoundingClientRect();
+    const toastRect = toast.getBoundingClientRect();
+    const targetX = (buttonRect.left + (buttonRect.width / 2)) - (toastRect.width / 2);
+    const targetY = buttonRect.top + (buttonRect.height / 2) - (toastRect.height / 2);
+    const deltaX = targetX - toastRect.left;
+    const deltaY = targetY - toastRect.top;
+    if (pickupToastAnimateTimer) clearTimeout(pickupToastAnimateTimer);
+    pickupToastAnimateTimer = setTimeout(() => {
+      requestAnimationFrame(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(0.66)`;
+      });
+    }, 2200);
+    if (pickupToastTimer) clearTimeout(pickupToastTimer);
+    pickupToastTimer = setTimeout(() => {
+      pickupToastContainer.innerHTML = '';
+    }, 3050);
+    triggerInventoryButtonGlow();
+  };
+
+  function setIceAmmoCount(amount) {
+    if (!Number.isFinite(amount)) return;
+    const normalized = Math.max(0, Math.floor(amount));
+    const current = inventoryState.iceGun || {};
+    inventoryState.iceGun = {
+      ...current,
+      [ICE_AMMO_KEY]: normalized,
+      icon: current.icon || inventoryCatalog.iceGun.icon,
+      name: current.name || inventoryCatalog.iceGun.name
+    };
+    persistInventoryAndStorage();
+  }
+
+  function setArrowAmmoCount(amount) {
+    if (!Number.isFinite(amount)) return;
+    const normalized = Math.max(0, Math.floor(amount));
+    const current = inventoryState.bow || {};
+    inventoryState.bow = {
+      ...current,
+      [ARROW_AMMO_KEY]: normalized,
+      icon: current.icon || inventoryCatalog.bow.icon,
+      name: current.name || inventoryCatalog.bow.name
+    };
+    persistInventoryAndStorage();
+  }
+
+  function getIceAmmoCount() {
+    return Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+      ? inventoryState.iceGun[ICE_AMMO_KEY]
+      : 0;
+  }
+
+  function getArrowAmmoCount() {
+    return Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
+      ? inventoryState.bow[ARROW_AMMO_KEY]
+      : 0;
+  }
+
+  function setMissileAmmoCount(amount) {
+    if (!Number.isFinite(amount)) return;
+    const normalized = Math.max(0, Math.floor(amount));
+    const current = inventoryState.bazooka || {};
+    inventoryState.bazooka = {
+      ...current,
+      [MISSILE_AMMO_KEY]: normalized,
+      icon: current.icon || inventoryCatalog.bazooka.icon,
+      name: current.name || inventoryCatalog.bazooka.name
+    };
+    persistInventoryAndStorage();
+  }
+
+  function getMissileAmmoCount() {
+    return Number.isFinite(inventoryState.bazooka?.[MISSILE_AMMO_KEY])
+      ? inventoryState.bazooka[MISSILE_AMMO_KEY]
+      : 0;
+  }
+
+  function addIceAmmo(amount) {
+    if (!Number.isFinite(amount)) return;
+    const nextAmount = getIceAmmoCount() + amount;
+    setIceAmmoCount(nextAmount);
+    showPickupToast(ICE_AMMO_KEY, amount, 'Ice Ammo');
+  }
+
+  function addArrowAmmo(amount) {
+    if (!Number.isFinite(amount)) return;
+    const nextAmount = getArrowAmmoCount() + amount;
+    setArrowAmmoCount(nextAmount);
+    showPickupToast(ARROW_AMMO_KEY, amount, 'Arrows');
+  }
+
+  function addMissileAmmo(amount) {
+    if (!Number.isFinite(amount)) return;
+    const nextAmount = getMissileAmmoCount() + amount;
+    setMissileAmmoCount(nextAmount);
+    showPickupToast(MISSILE_AMMO_KEY, amount, 'Missiles');
+  }
+
+  function addToInventory(itemId, amount = 1, options = {}) {
+    if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
+    const current = inventoryState[itemId];
+    if (itemId === TORCH_ITEM_ID) {
+      const healthsToAdd = Array.isArray(options.torchHealths)
+        ? options.torchHealths.map(normalizeTorchHealth)
+        : [];
+      const singleHealth = Number.isFinite(options.torchHealth)
+        ? normalizeTorchHealth(options.torchHealth)
+        : null;
+      while (healthsToAdd.length < amount) {
+        if (singleHealth != null && healthsToAdd.length === 0) {
+          healthsToAdd.push(singleHealth);
+        } else {
+          healthsToAdd.push(DEFAULT_TORCH_HEALTH);
+        }
+      }
+      addTorchHealths(inventoryState, current, healthsToAdd);
+      persistInventoryAndStorage();
+      showPickupToast(itemId, amount);
+      return;
+    }
+    const nextCount = (current?.count || 0) + amount;
+    inventoryState[itemId] = ensureCatalogEntry(itemId, { ...current, count: nextCount });
+    if (window.DEBUG_INVENTORY) {
+      console.log('[inventory] added', itemId, amount, inventoryState[itemId]);
+    }
+    persistInventoryAndStorage();
+    showPickupToast(itemId, amount);
+  }
+
+  function removeFromInventory(itemId, amount = 1) {
+    if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
+    const current = inventoryState[itemId];
+    if (!current) return;
+    if (itemId === TORCH_ITEM_ID) {
+      const healths = getTorchHealths(current);
+      const nextHealths = healths.slice(0, Math.max(0, healths.length - amount));
+      applyTorchHealths(inventoryState, current, nextHealths);
+      if (equippedTorchIndex != null && equippedTorchIndex >= nextHealths.length) {
+        equippedTorchIndex = nextHealths.length ? nextHealths.length - 1 : null;
+      }
+      persistInventoryAndStorage();
+      return;
+    }
+    const nextCount = current.count - amount;
+    if (nextCount > 0) {
+      inventoryState[itemId] = { ...current, count: nextCount };
+    } else {
+      if (itemId === 'iceGun' && Number.isFinite(current?.[ICE_AMMO_KEY])) {
+        const { count, ...rest } = current;
+        inventoryState[itemId] = rest;
+      } else if (itemId === 'bow' && Number.isFinite(current?.[ARROW_AMMO_KEY])) {
+        const { count, ...rest } = current;
+        inventoryState[itemId] = rest;
+      } else {
+        delete inventoryState[itemId];
+      }
+    }
+    if (window.DEBUG_INVENTORY) {
+      console.log('[inventory] removed', itemId, amount, inventoryState[itemId]);
+    }
+    persistInventoryAndStorage();
+  }
+
+  function storeHomeStorageItem(itemId) {
+    if (!itemId) return;
+    if (itemId === TORCH_ITEM_ID) {
+      const current = inventoryState[itemId];
+      if (!current || !current.count) return;
+      const preferredIndex = isInventoryItemEquipped(itemId) ? equippedTorchIndex : null;
+      const result = takeTorchHealth(inventoryState, preferredIndex);
+      if (!result) return;
+      if (isInventoryItemEquipped(itemId) && result.index === equippedTorchIndex) {
+        equippedTorchIndex = null;
+        unequipInventoryItem(itemId);
+      }
+      const existingStorage = homeStorageState[itemId];
+      addTorchHealths(homeStorageState, existingStorage, [result.health]);
+      persistInventoryAndStorage();
+      return;
+    }
+    const current = inventoryState[itemId];
+    if (!current || !current.count) return;
+
+    const nextCount = current.count - 1;
+    if (nextCount > 0) {
+      inventoryState[itemId] = { ...current, count: nextCount };
+    } else {
+      if (isInventoryItemEquipped(itemId)) {
+        unequipInventoryItem(itemId);
+      }
+      delete inventoryState[itemId];
+    }
+
+    const existingStorage = homeStorageState[itemId];
+    const storageCount = (existingStorage?.count || 0) + 1;
+    homeStorageState[itemId] = ensureCatalogEntry(itemId, {
+      ...existingStorage,
+      ...current,
+      count: storageCount
+    });
+
+    persistInventoryAndStorage();
+  }
+
+  function takeOutHomeStorageItem(itemId) {
+    if (!itemId) return;
+    if (itemId === TORCH_ITEM_ID) {
+      const current = homeStorageState[itemId];
+      if (!current || !current.count) return;
+      const result = takeTorchHealth(homeStorageState);
+      if (!result) return;
+      const inventoryEntry = inventoryState[itemId];
+      addTorchHealths(inventoryState, inventoryEntry, [result.health]);
+      persistInventoryAndStorage();
+      return;
+    }
+    const current = homeStorageState[itemId];
+    if (!current || !current.count) return;
+
+    const nextStorageCount = current.count - 1;
+    if (nextStorageCount > 0) {
+      homeStorageState[itemId] = { ...current, count: nextStorageCount };
+    } else {
+      delete homeStorageState[itemId];
+    }
+
+    const inventoryEntry = inventoryState[itemId] || {};
+    const nextInventoryCount = (inventoryEntry.count || 0) + 1;
+    const mergedEntry = ensureCatalogEntry(itemId, {
+      ...inventoryEntry,
+      ...current,
+      count: nextInventoryCount
+    });
+    inventoryState[itemId] = mergedEntry;
+
+    persistInventoryAndStorage();
+  }
+
+  function isInventoryItemEquipped(itemId) {
+    if (itemId === 'lantern') {
+      return lantern?.holder === playerControls;
+    }
+    if (itemId === 'torch') {
+      return torch?.holder === playerControls;
+    }
+    if (itemId === SHIELD_ITEM_ID) {
+      return shield?.holder === playerControls;
+    }
+    if (itemId === 'iceGun') {
+      return iceGun?.holder === playerControls;
+    }
+    if (itemId === 'bow') {
+      return bow?.holder === playerControls;
+    }
+    if (itemId === 'bazooka') {
+      return bazooka?.holder === playerControls;
+    }
+    if (itemId === 'bomb') {
+      return bomb?.holder === playerControls;
+    }
+    if (itemId === 'autumnSword') {
+      return autumnSword?.holder === playerControls;
+    }
+    if (itemId === FOAM_SWORD_ITEM_ID) {
+      return foamSword?.holder === playerControls;
+    }
+    if (itemId === 'hammer') {
+      return hammer?.holder === playerControls;
+    }
+    if (itemId === 'pistol') {
+      return pistol?.holder === playerControls;
+    }
+    return false;
+  }
+
+  function getEquippedInventoryItemIdForHand(hand) {
+    if (hand === 'left') {
+      if (isInventoryItemEquipped('torch')) return 'torch';
+      if (isInventoryItemEquipped('lantern')) return 'lantern';
+      if (isInventoryItemEquipped(SHIELD_ITEM_ID)) return SHIELD_ITEM_ID;
+      return null;
+    }
+    if (hand === 'right') {
+      if (isInventoryItemEquipped('iceGun')) return 'iceGun';
+      if (isInventoryItemEquipped('bow')) return 'bow';
+      if (isInventoryItemEquipped('bazooka')) return 'bazooka';
+      if (isInventoryItemEquipped('bomb')) return 'bomb';
+      if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
+      if (isInventoryItemEquipped(FOAM_SWORD_ITEM_ID)) return FOAM_SWORD_ITEM_ID;
+      if (isInventoryItemEquipped('hammer')) return 'hammer';
+      if (isInventoryItemEquipped('pistol')) return 'pistol';
+    }
+    return null;
+  }
+
+  function getEquippedInventoryItemIds() {
+    const equipped = [];
+    const left = getEquippedInventoryItemIdForHand('left');
+    const right = getEquippedInventoryItemIdForHand('right');
+    if (left) equipped.push(left);
+    if (right) equipped.push(right);
+    return equipped;
+  }
+
+  function getEquippedInventoryItemId() {
+    return getEquippedInventoryItemIdForHand('right')
+      || getEquippedInventoryItemIdForHand('left');
+  }
+
+  function unequipOtherInventoryItems(nextItemId) {
+    const hand = getInventoryItemHand(nextItemId);
+    if (!hand) return;
+    const equippedId = getEquippedInventoryItemIdForHand(hand);
+    if (equippedId && equippedId !== nextItemId) {
+      unequipInventoryItem(equippedId);
+    }
+  }
+
+  function equipInventoryItem(itemId) {
+    if (!itemId || !inventoryState[itemId]) return;
+    unequipOtherInventoryItems(itemId);
+    if (itemId === 'lantern') {
+      if (!lantern?.mesh || !playerControls) return;
+      const shouldDuplicateDrop = lantern.mesh.visible && lantern.holder !== playerControls;
+      if (shouldDuplicateDrop) {
+        createDroppedWeaponPickup(lantern, {
+          itemId: 'lantern',
+          markerColor: 0xffd400,
+          markerOffsetY: 1.2
+        });
+      }
+      const heldMesh = ensureLocalHeldWeaponMesh(lantern, 'lantern', { forceNew: true });
+      lantern.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      lantern.mesh.visible = false;
+      lantern.localHoldOrigin = 'inventory';
+      lantern.holder = playerControls;
+      audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-lantern', cooldownMs: 100 });
+      audioManager?.startLoopingSFX('torch-loop', 'SFX/Torch/Torch Loop.ogg', 0.32);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === TORCH_ITEM_ID) {
+      if (!torch?.mesh || !playerControls) return;
+      const entry = inventoryState[TORCH_ITEM_ID];
+      const healths = getTorchHealths(entry);
+      if (!healths.length) {
+        updateTorchEntry(inventoryState, null);
+        persistInventoryAndStorage();
+        return;
+      }
+      if (!Number.isInteger(equippedTorchIndex) || equippedTorchIndex >= healths.length) {
+        equippedTorchIndex = healths.findIndex(health => health > 0);
+      }
+      if (equippedTorchIndex < 0) {
+        updateTorchEntry(inventoryState, null);
+        persistInventoryAndStorage();
+        return;
+      }
+      const shouldDuplicateDrop = torch.mesh.visible && torch.holder !== playerControls;
+      if (shouldDuplicateDrop) {
+        createDroppedWeaponPickup(torch, {
+          itemId: TORCH_ITEM_ID,
+          markerColor: 0xffa54c,
+          markerOffsetY: 1.2,
+          torchHealth: healths[equippedTorchIndex]
+        });
+      }
+      torch.mesh.userData.torchHealth = healths[equippedTorchIndex];
+      const heldMesh = ensureLocalHeldWeaponMesh(torch, 'torch', { forceNew: true });
+      torch.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.userData.torchHealth = healths[equippedTorchIndex];
+        heldMesh.visible = true;
+      }
+      torch.mesh.visible = false;
+      torch.localHoldOrigin = 'inventory';
+      torch.holder = playerControls;
+      setPlayerWeaponType(playerControls, torch.type);
+      audioManager?.playSFX('SFX/Torch/Light Torch 1.ogg', 0.6, { cooldownKey: 'light-torch', cooldownMs: 100 });
+      audioManager?.startLoopingSFX('torch-loop', 'SFX/Torch/Torch Loop.ogg', 0.32);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === SHIELD_ITEM_ID) {
+      if (!shield?.mesh || !playerControls) return;
+      const entry = normalizeShieldEntry(inventoryState[SHIELD_ITEM_ID]);
+      if (!entry.count || entry[SHIELD_HEALTH_KEY] <= 0) {
+        delete inventoryState[SHIELD_ITEM_ID];
+        persistInventoryAndStorage();
+        return;
+      }
+      inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, entry);
+      const heldMesh = ensureLocalHeldWeaponMesh(shield, SHIELD_ITEM_ID, { forceNew: true });
+      shield.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.userData.shieldHealth = entry[SHIELD_HEALTH_KEY];
+        heldMesh.userData.shieldMaxHealth = entry[SHIELD_MAX_HEALTH_KEY];
+        heldMesh.visible = true;
+      }
+      shield.mesh.userData.shieldHealth = entry[SHIELD_HEALTH_KEY];
+      shield.mesh.userData.shieldMaxHealth = entry[SHIELD_MAX_HEALTH_KEY];
+      shield.mesh.visible = false;
+      shield.localHoldOrigin = 'inventory';
+      shield.holder = playerControls;
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'iceGun') {
+      if (!iceGun?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(iceGun, 'iceGun', { forceNew: true });
+      iceGun.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      iceGun.mesh.visible = false;
+      iceGun.localHoldOrigin = 'inventory';
+      iceGun.holder = playerControls;
+      setPlayerWeaponType(playerControls, iceGun.type);
+      playerControls.updateAmmoUI?.(true);
+      playerControls.setAmmo?.(
+        inventoryState.iceGun?.[ICE_AMMO_KEY] ?? 0,
+        getAmmoLabelForType('ammo'),
+        getAmmoIconForType('ammo')
+      );
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'bow') {
+      if (!bow?.mesh || !playerControls) return;
+      const heldMesh = ensureBowHeldMesh({ forceNew: true });
+      if (!heldMesh) return;
+      bow.useHeldMeshWhenHeld = true;
+      heldMesh.visible = true;
+      bow.mesh.visible = false;
+      bow.localHoldOrigin = 'inventory';
+      bow.holder = playerControls;
+      audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Take Out 1.ogg', 0.6, { cooldownKey: 'bow-equip', cooldownMs: 100 });
+      setPlayerWeaponType(playerControls, bow.type);
+      playerControls.updateAmmoUI?.(true);
+      playerControls.setAmmo?.(
+        inventoryState.bow?.[ARROW_AMMO_KEY] ?? 0,
+        getAmmoLabelForType('arrow'),
+        getAmmoIconForType('arrow')
+      );
+      attachBowHeldArrow(heldMesh);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'bazooka') {
+      if (!bazooka?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(bazooka, 'bazooka', { forceNew: true });
+      bazooka.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      bazooka.mesh.visible = false;
+      bazooka.localHoldOrigin = 'inventory';
+      bazooka.holder = playerControls;
+      setPlayerWeaponType(playerControls, bazooka.type);
+      playerControls.updateAmmoUI?.(true);
+      playerControls.setAmmo?.(
+        inventoryState.bazooka?.[MISSILE_AMMO_KEY] ?? 0,
+        getAmmoLabelForType('missile'),
+        getAmmoIconForType('missile')
+      );
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'bomb') {
+      if (!bomb?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(bomb, 'bomb', { forceNew: true });
+      bomb.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      bomb.mesh.visible = false;
+      bomb.localHoldOrigin = 'inventory';
+      bomb.holder = playerControls;
+      setPlayerWeaponType(playerControls, bomb.type);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'autumnSword') {
+      if (!autumnSword?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(autumnSword, 'autumnSword', { forceNew: true });
+      autumnSword.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      autumnSword.mesh.visible = false;
+      autumnSword.localHoldOrigin = 'inventory';
+      autumnSword.holder = playerControls;
+      setPlayerWeaponType(playerControls, autumnSword.type);
+      // Sword: depth varies by horizontal position — further when centered, closer when to the sides
+      if (playerControls.playerModel) {
+        playerControls.playerModel.userData.handDepthOverride = {
+          left: (palmX) => {
+            const sideAmount = Math.abs(palmX - 0.5) * 2; // 0=center, 1=side
+            return THREE.MathUtils.lerp(0.45, 0.1, sideAmount);
+          }
+        };
+      }
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'sword-equip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
+    if (itemId === FOAM_SWORD_ITEM_ID) {
+      if (!foamSword?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(foamSword, FOAM_SWORD_ITEM_ID, { forceNew: true });
+      foamSword.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      foamSword.mesh.visible = false;
+      foamSword.localHoldOrigin = 'inventory';
+      foamSword.holder = playerControls;
+      setPlayerWeaponType(playerControls, foamSword.type);
+      if (playerControls.playerModel) {
+        playerControls.playerModel.userData.handDepthOverride = {
+          left: (palmX) => {
+            const sideAmount = Math.abs(palmX - 0.5) * 2;
+            return THREE.MathUtils.lerp(0.45, 0.1, sideAmount);
+          }
+        };
+      }
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'sword-equip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
+    if (itemId === 'hammer') {
+      if (!hammer?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(hammer, 'hammer', { forceNew: true });
+      hammer.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      hammer.mesh.visible = false;
+      hammer.localHoldOrigin = 'inventory';
+      hammer.holder = playerControls;
+      setPlayerWeaponType(playerControls, hammer.type);
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'hammer-equip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
+    if (itemId === 'pistol') {
+      if (!pistol?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(pistol, 'pistol', { forceNew: true });
+      pistol.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      pistol.mesh.visible = false;
+      pistol.localHoldOrigin = 'inventory';
+      pistol.holder = playerControls;
+      setPlayerWeaponType(playerControls, pistol.type);
+      // Pistol: fixed depth regardless of hand size
+      if (playerControls.playerModel) {
+        playerControls.playerModel.userData.handDepthOverride = { left: 0.3 };
+      }
+      playerControls.updateAmmoUI?.(false);
+      updateSettingsUI();
+    }
+  }
+
+  function unequipInventoryItem(itemId) {
+    if (itemId === 'lantern') {
+      if (lantern?.holder !== playerControls) return;
+      lantern.holder = null;
+      lantern.localHoldOrigin = null;
+      if (lantern.mesh) {
+        lantern.mesh.visible = false;
+      }
+      if (lantern.heldMesh) {
+        lantern.heldMesh.visible = false;
+      }
+      audioManager?.stopLoopingSFX('torch-loop');
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === TORCH_ITEM_ID) {
+      if (torch?.holder !== playerControls) return;
+      torch.holder = null;
+      torch.localHoldOrigin = null;
+      if (torch.mesh) {
+        torch.mesh.visible = false;
+      }
+      if (torch.heldMesh) {
+        torch.heldMesh.visible = false;
+      }
+      clearPlayerWeaponType(playerControls, torch.type);
+      audioManager?.stopLoopingSFX('torch-loop');
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === SHIELD_ITEM_ID) {
+      if (shield?.holder !== playerControls) return;
+      shield.holder = null;
+      shield.localHoldOrigin = null;
+      if (shield.mesh) {
+        shield.mesh.visible = false;
+      }
+      if (shield.heldMesh) {
+        shield.heldMesh.visible = false;
+      }
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'iceGun') {
+      if (iceGun?.holder !== playerControls) return;
+      iceGun.holder = null;
+      iceGun.localHoldOrigin = null;
+      if (iceGun.mesh) {
+        iceGun.mesh.visible = false;
+      }
+      if (iceGun.heldMesh) {
+        iceGun.heldMesh.visible = false;
+      }
+      clearPlayerWeaponType(playerControls, iceGun.type);
+      playerControls?.updateAmmoUI?.(false);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'bow') {
+      if (bow?.holder !== playerControls) return;
+      bow.holder = null;
+      bow.localHoldOrigin = null;
+      if (bow.useHeldMeshWhenHeld && bowHeldMesh) {
+        bowHeldMesh.visible = false;
+      } else if (bow.mesh) {
+        bow.mesh.visible = false;
+      }
+      bow.useHeldMeshWhenHeld = false;
+      audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Put Away 1.ogg', 0.58, { cooldownKey: 'bow-unequip', cooldownMs: 100 });
+      clearPlayerWeaponType(playerControls, bow.type);
+      playerControls?.updateAmmoUI?.(false);
+      playerControls?.setAiming?.(false);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'bazooka') {
+      if (bazooka?.holder !== playerControls) return;
+      bazooka.holder = null;
+      bazooka.localHoldOrigin = null;
+      if (bazooka.mesh) {
+        bazooka.mesh.visible = false;
+      }
+      if (bazooka.heldMesh) {
+        bazooka.heldMesh.visible = false;
+      }
+      clearPlayerWeaponType(playerControls, bazooka.type);
+      playerControls?.updateAmmoUI?.(false);
+      playerControls?.setAiming?.(false);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'bomb') {
+      if (bomb?.holder !== playerControls) return;
+      bomb.holder = null;
+      bomb.localHoldOrigin = null;
+      if (bomb.mesh) {
+        bomb.mesh.visible = false;
+      }
+      if (bomb.heldMesh) {
+        bomb.heldMesh.visible = false;
+      }
+      clearPlayerWeaponType(playerControls, bomb.type);
+      playerControls?.setAiming?.(false);
+      updateSettingsUI();
+      return;
+    }
+    if (itemId === 'autumnSword') {
+      if (autumnSword?.holder !== playerControls) return;
+      autumnSword.holder = null;
+      autumnSword.localHoldOrigin = null;
+      if (autumnSword.mesh) {
+        autumnSword.mesh.visible = false;
+      }
+      if (autumnSword.heldMesh) {
+        autumnSword.heldMesh.visible = false;
+      }
+      if (playerControls.playerModel) {
+        delete playerControls.playerModel.userData.handDepthOverride;
+      }
+      clearPlayerWeaponType(playerControls, autumnSword.type);
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'sword-unequip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
+    if (itemId === FOAM_SWORD_ITEM_ID) {
+      if (foamSword?.holder !== playerControls) return;
+      foamSword.holder = null;
+      foamSword.localHoldOrigin = null;
+      if (foamSword.mesh) {
+        foamSword.mesh.visible = false;
+      }
+      if (foamSword.heldMesh) {
+        foamSword.heldMesh.visible = false;
+      }
+      if (playerControls.playerModel) {
+        delete playerControls.playerModel.userData.handDepthOverride;
+      }
+      clearPlayerWeaponType(playerControls, foamSword.type);
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'sword-unequip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
+    if (itemId === 'hammer') {
+      if (hammer?.holder !== playerControls) return;
+      hammer.holder = null;
+      hammer.localHoldOrigin = null;
+      if (hammer.mesh) {
+        hammer.mesh.visible = false;
+      }
+      if (hammer.heldMesh) {
+        hammer.heldMesh.visible = false;
+      }
+      clearPlayerWeaponType(playerControls, hammer.type);
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'hammer-unequip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
+    if (itemId === 'pistol') {
+      if (pistol?.holder !== playerControls) return;
+      pistol.holder = null;
+      pistol.localHoldOrigin = null;
+      if (pistol.mesh) {
+        pistol.mesh.visible = false;
+      }
+      if (pistol.heldMesh) {
+        pistol.heldMesh.visible = false;
+      }
+      if (playerControls.playerModel) {
+        delete playerControls.playerModel.userData.handDepthOverride;
+      }
+      clearPlayerWeaponType(playerControls, pistol.type);
+      playerControls?.updateAmmoUI?.(false);
+      updateSettingsUI();
+    }
+  }
+
+  function createNetworkDropId(prefix = 'drop') {
+    const owner = multiplayer?.getId?.() || 'local';
+    return `${prefix}-${owner}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  function getInventoryDropPosition() {
+    if (!playerControls?.playerModel) return null;
+    const dropPosition = playerControls.playerModel.position.clone();
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 1.2;
+    dropPosition.x += Math.cos(angle) * radius;
+    dropPosition.z += Math.sin(angle) * radius;
+    if (!applySpawnY(dropPosition, 0.5, { allowOnBuildings: true })) {
+      return null;
+    }
+    return dropPosition;
+  }
+
+  function disposeMushroomPickup(pickup) {
+    if (!pickup) return;
+    mushroomController?.removePickup?.(pickup);
+    if (!pickup.mesh) return;
+    const mesh = pickup.mesh;
+    mesh.visible = false;
+  }
+
+  function disposeApplePickup(pickup) {
+    if (!pickup?.mesh) return;
+    const mesh = pickup.mesh;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
+    mesh.traverse(child => {
+      if (!child.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+  }
+
+  function disposeWoodPickup(pickup) {
+    if (!pickup?.mesh) return;
+    const mesh = pickup.mesh;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
+    mesh.geometry?.dispose?.();
+    if (Array.isArray(mesh.material)) {
+      mesh.material.forEach(material => material?.dispose?.());
+    } else {
+      mesh.material?.dispose?.();
+    }
+  }
+
+  function handleDroppedWorldPickupCollected(pickup) {
+    const dropId = pickup?.dropId;
+    if (!dropId) return;
+    droppedWorldPickups.delete(dropId);
+    if (multiplayer && !multiplayer.isHost) {
+      pendingWorldDropRemovals.add(dropId);
+      multiplayer.send({ type: 'dropWorldPickup', dropId });
+    }
+  }
+
+
+  function buildLlamaPickupResult(pickup, type, amount = 1) {
+    const result = {
+      collected: true,
+      itemId: pickup?.id || type,
+      amount: Math.max(1, Math.floor(Number(amount) || 1)),
+      type
+    };
+    if (type === 'mushroom') {
+      result.healthGain = MUSHROOM_HEALTH_SEGMENTS;
+      result.hungerGain = MUSHROOM_HUNGER_GAIN;
+    } else if (type === 'apple') {
+      result.healthGain = APPLE_HEALTH_SEGMENTS;
+      result.hungerGain = APPLE_HUNGER_GAIN;
+    } else if (type === 'meat') {
+      result.healthGain = MEAT_HEALTH_SEGMENTS;
+      result.hungerGain = MEAT_HUNGER_GAIN;
+    }
+    return result;
+  }
+
+  function isActorNearPickup(actorPosition, pickupPosition, radius) {
+    if (!actorPosition || !pickupPosition) return true;
+    const horizontalDistance = Math.hypot(
+      actorPosition.x - pickupPosition.x,
+      actorPosition.z - pickupPosition.z
+    );
+    return horizontalDistance <= radius;
+  }
+
+  function collectPickupForLlama(target, actorPosition = null) {
+    const pickup = target?.pickup;
+    if (!pickup) return { collected: false };
+    if (target?.type === 'mushroom') {
+      if (!pickup.active) return { collected: false };
+      const pickupPosition = pickup.position || pickup.mesh?.position;
+      if (!isActorNearPickup(actorPosition, pickupPosition, PICKUP_RADIUS)) return { collected: false };
+      disposeMushroomPickup(pickup);
+      const index = mushroomPickups.indexOf(pickup);
+      if (index >= 0) mushroomPickups.splice(index, 1);
+      mushroomPickupGrid.remove(pickup);
+      handleDroppedWorldPickupCollected(pickup);
+      return buildLlamaPickupResult(pickup, 'mushroom');
+    }
+    if (target?.type === 'apple') {
+      if (!pickup.mesh) return { collected: false };
+      const applePosition = pickup.mesh.getWorldPosition
+        ? pickup.mesh.getWorldPosition(tempTreePosition)
+        : pickup.mesh.position;
+      if (!isActorNearPickup(actorPosition, applePosition, APPLE_PICKUP_RADIUS)) return { collected: false };
+      disposeApplePickup(pickup);
+      const index = applePickups.indexOf(pickup);
+      if (index >= 0) applePickups.splice(index, 1);
+      handleDroppedWorldPickupCollected(pickup);
+      return buildLlamaPickupResult(pickup, 'apple');
+    }
+    if (target?.type === 'meat') {
+      if (!pickup.mesh) return { collected: false };
+      if (!isActorNearPickup(actorPosition, pickup.mesh.position, MEAT_PICKUP_RADIUS)) return { collected: false };
+      disposeWoodPickup(pickup);
+      const index = meatPickups.indexOf(pickup);
+      if (index >= 0) meatPickups.splice(index, 1);
+      handleDroppedWorldPickupCollected(pickup);
+      return buildLlamaPickupResult(pickup, 'meat');
+    }
+    return { collected: false };
+  }
+
+  function pickupMushroom(pickup, actorPosition = playerControls?.playerModel?.position) {
+    if (!pickup?.active) return false;
+    const pickupPosition = pickup.position || pickup.mesh?.position;
+    if (!pickupPosition) return false;
+    if (actorPosition) {
+      const playerPosition = actorPosition;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - pickupPosition.x,
+        playerPosition.z - pickupPosition.z
+      );
+      if (horizontalDistance > PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeMushroomPickup(pickup);
+    const index = mushroomPickups.indexOf(pickup);
+    if (index >= 0) {
+      mushroomPickups.splice(index, 1);
+    }
+    mushroomPickupGrid.remove(pickup);
+    handleDroppedWorldPickupCollected(pickup);
+    window.questManager?.handleMushroomCollected?.(pickup);
+    notifyAchievementProgress('mushroomsCollected', 1);
+    return true;
+  }
+
+  function pickupApple(pickup, actorPosition = playerControls?.playerModel?.position) {
+    if (!pickup?.mesh) return false;
+    if (actorPosition) {
+      const playerPosition = actorPosition;
+      const applePosition = pickup.mesh.getWorldPosition
+        ? pickup.mesh.getWorldPosition(tempTreePosition)
+        : pickup.mesh.position;
+      const appleDistance = playerPosition.distanceTo(applePosition);
+      if (appleDistance > APPLE_PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeApplePickup(pickup);
+    const index = applePickups.indexOf(pickup);
+    if (index >= 0) {
+      applePickups.splice(index, 1);
+    }
+    handleDroppedWorldPickupCollected(pickup);
+    return true;
+  }
+
+  function pickupWood(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const playerPosition = playerControls.playerModel.position;
+      const woodPosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - woodPosition.x,
+        playerPosition.z - woodPosition.z
+      );
+      if (horizontalDistance > WOOD_PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeWoodPickup(pickup);
+    const index = woodPickups.indexOf(pickup);
+    if (index >= 0) {
+      woodPickups.splice(index, 1);
+    }
+    handleDroppedWorldPickupCollected(pickup);
+    return true;
+  }
+
+
+  function pickupMeat(pickup, actorPosition = playerControls?.playerModel?.position) {
+    if (!pickup?.mesh) return false;
+    if (actorPosition) {
+      const playerPosition = actorPosition;
+      const meatPosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - meatPosition.x,
+        playerPosition.z - meatPosition.z
+      );
+      if (horizontalDistance > MEAT_PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeWoodPickup(pickup);
+    const index = meatPickups.indexOf(pickup);
+    if (index >= 0) {
+      meatPickups.splice(index, 1);
+    }
+    handleDroppedWorldPickupCollected(pickup);
+    return true;
+  }
+
+  function disposeSaltPickup(pickup) {
+    if (!pickup?.mesh) return;
+    const mesh = pickup.mesh;
+    if (mesh.parent) {
+      mesh.parent.remove(mesh);
+    } else {
+      scene.remove(mesh);
+    }
+    mesh.visible = false;
+    mesh.traverse?.((child) => {
+      if (!child?.isMesh) return;
+      child.geometry?.dispose?.();
+      if (Array.isArray(child.material)) {
+        child.material.forEach(material => material?.dispose?.());
+      } else {
+        child.material?.dispose?.();
+      }
+    });
+  }
+
+  function pickupSalt(pickup) {
+    if (!pickup?.mesh || !pickup?.id) return false;
+    if (playerControls?.playerModel) {
+      const playerPosition = playerControls.playerModel.position;
+      const pickupPosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - pickupPosition.x,
+        playerPosition.z - pickupPosition.z
+      );
+      if (horizontalDistance > SALT_PICKUP_RADIUS) return false;
+    }
+    const amount = Math.max(1, Math.floor(Number.isFinite(pickup.amount) ? pickup.amount : 1));
+    addToInventory(pickup.id, amount);
+    disposeSaltPickup(pickup);
+    const index = saltPickups.indexOf(pickup);
+    if (index >= 0) {
+      saltPickups.splice(index, 1);
+    }
+    handleDroppedWorldPickupCollected(pickup);
+    return true;
+  }
+
+  function pickupZombieBrains(pickup) {
+    if (!pickup?.mesh) return false;
+    if (playerControls?.playerModel) {
+      const playerPosition = playerControls.playerModel.position;
+      const brainPosition = pickup.mesh.position;
+      const horizontalDistance = Math.hypot(
+        playerPosition.x - brainPosition.x,
+        playerPosition.z - brainPosition.z
+      );
+      if (horizontalDistance > MEAT_PICKUP_RADIUS) return false;
+    }
+    addToInventory(pickup.id, 1);
+    disposeWoodPickup(pickup);
+    const index = zombieBrainsPickups.indexOf(pickup);
+    if (index >= 0) {
+      zombieBrainsPickups.splice(index, 1);
+    }
+    handleDroppedWorldPickupCollected(pickup);
+    return true;
+  }
+
+  function spawnMushroomPickup(itemId, position) {
+    if (!mushroomController?.spawnPickup || !position) return null;
+    const pickup = mushroomController.spawnPickup(itemId, position);
+    if (pickup?.mesh?.position) {
+      mushroomPickupGrid.add(pickup, pickup.mesh.position);
+    }
+    return pickup;
+  }
+
+  function spawnApplePickup(position) {
+    if (!appleController?.spawnPickup || !position) return null;
+    return appleController.spawnPickup(position);
+  }
+
+  function spawnWoodPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
+    const geometry = new THREE.BoxGeometry(3.0, 0.36, 0.6);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x8b5a2b,
+      roughness: 0.7,
+      metalness: 0.05
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.position.copy(spawnPos);
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(mesh);
+    const pickup = { id: WOOD_ITEM_ID, mesh };
+    woodPickups.push(pickup);
+    return pickup;
+  }
+
+
+  function spawnMeatPickup(position, { itemId = MEAT_ITEM_ID, color = 0x6b3f23 } = {}) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
+    const geometry = new THREE.BoxGeometry(1.1, 0.45, 0.7);
+    const material = new THREE.MeshStandardMaterial({
+      color,
+      roughness: 0.85,
+      metalness: 0.02
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.position.copy(spawnPos);
+    mesh.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(mesh);
+    const pickup = { id: itemId, mesh };
+    meatPickups.push(pickup);
+    return pickup;
+  }
+
+  function spawnSaltPickup(position, { itemId = SALT_ITEM_ID, amount = 1, groupedMushrooms = 0, useTerrainHeight = true } = {}) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    if (useTerrainHeight) {
+      applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
+    }
+    const group = new THREE.Group();
+    const pieces = groupedMushrooms > 0 ? groupedMushrooms : 3;
+    for (let i = 0; i < pieces; i += 1) {
+      const isMushroomCluster = itemId === SAUTEED_MUSHROOMS_ITEM_ID;
+      const mesh = isMushroomCluster
+        ? mushroomController?.createProjectileMesh?.(MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)]?.id)
+        : new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.16 + Math.random() * 0.05, 0),
+          new THREE.MeshStandardMaterial({
+            color: 0xd9d9d9,
+            emissive: 0x4a4a4a,
+            emissiveIntensity: 0.25,
+            roughness: 0.35,
+            metalness: 0.45
+          })
+        );
+      if (!mesh) continue;
+      mesh.position.set((Math.random() - 0.5) * 0.42, 0.1 + Math.random() * 0.14, (Math.random() - 0.5) * 0.42);
+      mesh.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      applyOptionalShadowState(mesh, optionalShadowsEnabled);
+      mesh.receiveShadow = true;
+      group.add(mesh);
+    }
+    group.position.copy(spawnPos);
+    group.userData.baseY = spawnPos.y;
+    group.userData.phase = Math.random() * Math.PI * 2;
+    group.userData.type = itemId;
+    scene.add(group);
+    const pickup = { id: itemId, mesh: group, amount: Math.max(1, Math.floor(amount)) };
+    saltPickups.push(pickup);
+    return pickup;
+  }
+
+  function createZombieBrainsGroup() {
+    const brainGroup = new THREE.Group();
+    const lobeMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff8ccf,
+      emissive: 0x5a1f49,
+      emissiveIntensity: 0.28,
+      roughness: 0.78,
+      metalness: 0.02,
+      flatShading: true
+    });
+    const stemMaterial = new THREE.MeshStandardMaterial({
+      color: 0xe46bb6,
+      emissive: 0x4b1537,
+      emissiveIntensity: 0.24,
+      roughness: 0.82,
+      metalness: 0.01,
+      flatShading: true
+    });
+
+    const leftLobe = new THREE.Mesh(new THREE.IcosahedronGeometry(0.26, 0), lobeMaterial);
+    const rightLobe = new THREE.Mesh(new THREE.IcosahedronGeometry(0.26, 0), lobeMaterial.clone());
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.22, 6), stemMaterial);
+
+    leftLobe.position.set(-0.18, 0, 0);
+    rightLobe.position.set(0.18, 0, 0);
+    stem.position.set(0, -0.18, 0);
+
+    brainGroup.add(leftLobe, rightLobe, stem);
+    brainGroup.traverse((child) => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    return brainGroup;
+  }
+
+  function spawnZombieBrainsPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    applySpawnY(spawnPos, WOOD_DROP_LIFT, { allowOnBuildings: true });
+
+    const brainGroup = createZombieBrainsGroup();
+    brainGroup.position.copy(spawnPos);
+    brainGroup.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(brainGroup);
+
+    const pickup = { id: ZOMBIE_BRAINS_ITEM_ID, mesh: brainGroup };
+    zombieBrainsPickups.push(pickup);
+    return pickup;
+  }
+
+  function spawnMonsterDrops(monster) {
+    if (!monster?.model?.position) return;
+    const configuredDrops = monster.monsterProperties?.drops;
+    if (!Array.isArray(configuredDrops) || configuredDrops.length === 0) return;
+    const dropOrigin = monster.model.position.clone();
+    const dropCount = configuredDrops.length;
+    const dropPositions = createRingPositions(dropOrigin, dropCount, 0.65);
+    const collectorModel = getPlayerModelForId(monster.lastDamageSourceId);
+    configuredDrops.forEach((itemId, index) => {
+      const dropPosition = dropPositions[index] || dropOrigin;
+      if (isZombieBrainsItem(itemId)) {
+        const pickup = spawnZombieBrainsPickup(dropPosition);
+        if (pickup && collectorModel) pickup.homeTargetModel = collectorModel;
+        return;
+      }
+      if (isMushroomItem(itemId)) {
+        const pickup = spawnMushroomPickup(itemId, dropPosition);
+        if (pickup && collectorModel) pickup.homeTargetModel = collectorModel;
+        return;
+      }
+      if (isSaltItem(itemId) || itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
+        const pickup = spawnSaltPickup(dropPosition, { itemId });
+        if (pickup && collectorModel) pickup.homeTargetModel = collectorModel;
+      }
+    });
+  }
+
+  const tempTreePosition = new THREE.Vector3();
+  const tempTreeDirection = new THREE.Vector3();
+  const tempTreeCenter = new THREE.Vector3();
+  const tempTreeCenterNext = new THREE.Vector3();
+
+  function dropTreeApples(tree) {
+    if (!tree) return;
+    const apples = tree.userData?.applePickups ?? [];
+    if (!apples.length) return;
+    const appleParent = appleController?.group || scene;
+    apples.forEach((pickup) => {
+      if (!pickup?.mesh) return;
+      const mesh = pickup.mesh;
+      mesh.getWorldPosition(tempTreePosition);
+      appleParent.add(mesh);
+      mesh.position.copy(tempTreePosition);
+      if (applySpawnY(mesh.position, APPLE_DROP_LIFT, { allowOnBuildings: true })) {
+        mesh.userData.baseY = mesh.position.y;
+      }
+      mesh.rotation.y = Math.random() * Math.PI * 2;
+    });
+  }
+
+  function getRandomBushDropPositions(origin, count, radius = 0.72) {
+    const positions = [];
+    if (!origin || count <= 0) return positions;
+    for (let i = 0; i < count; i += 1) {
+      const angle = (Math.PI * 2 * i) / count + Math.random() * 0.45;
+      const distance = radius * (0.55 + Math.random() * 0.45);
+      const dropPosition = origin.clone();
+      dropPosition.x += Math.cos(angle) * distance;
+      dropPosition.z += Math.sin(angle) * distance;
+      positions.push(dropPosition);
+    }
+    return positions;
+  }
+
+  function spawnBushRandomDrop(origin) {
+    if (!origin) return;
+    const roll = Math.random();
+    if (roll < 0.26) {
+      const count = 1 + Math.floor(Math.random() * 10);
+      getRandomBushDropPositions(origin, count, 0.95).forEach((dropPosition) => spawnCoinPickup(dropPosition));
+      return;
+    }
+    if (roll < 0.46) {
+      const count = 1 + Math.floor(Math.random() * 2);
+      getRandomBushDropPositions(origin, count).forEach((dropPosition) => spawnApplePickup(dropPosition));
+      return;
+    }
+    if (roll < 0.66) {
+      const count = 1 + Math.floor(Math.random() * 2);
+      getRandomBushDropPositions(origin, count).forEach((dropPosition) => {
+        const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
+        if (entry?.id) spawnMushroomPickup(entry.id, dropPosition);
+      });
+      return;
+    }
+    if (roll < 0.82) {
+      spawnWoodPickup(origin.clone());
+    }
+  }
+
+  function destroyBush(bush) {
+    if (!bush) return false;
+    const position = natureController?.removeBush?.(bush);
+    if (!position) return false;
+    position.y = getTerrainHeight?.(position.x, position.z) ?? position.y ?? 0;
+    spawnImpactBurst(scene, position);
+    spawnGreenLeafStreaks(scene, position);
+    spawnBushRandomDrop(position);
+    return true;
+  }
+
+  function destroyBushesAtPositions(positions) {
+    if (!Array.isArray(positions) || positions.length === 0) return false;
+    positions.forEach((position) => {
+      const dropOrigin = position.clone?.() ?? asVec3(position);
+      if (!dropOrigin) return;
+      dropOrigin.y = getTerrainHeight?.(dropOrigin.x, dropOrigin.z) ?? dropOrigin.y ?? 0;
+      spawnImpactBurst(scene, dropOrigin);
+      spawnGreenLeafStreaks(scene, dropOrigin);
+      spawnBushRandomDrop(dropOrigin);
+    });
+    return true;
+  }
+
+  function handleSwordTreeHit({ attacker, range }) {
+    if (!attacker?.model?.position) return;
+    const effectiveRange = (Number.isFinite(range) ? range : 0) + TREE_HIT_RANGE_BOOST;
+    const tree = natureController?.getClosestTree?.(attacker.model.position, effectiveRange);
+    if (!tree || tree.userData?.isCutDown) return;
+    const centerLocal = tree.userData?.boundsCenterLocal;
+    if (centerLocal) {
+      tempTreeCenter.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+      spawnImpactBurst(scene, tempTreeCenter);
+    } else {
+      tree.getWorldPosition(tempTreePosition);
+      spawnImpactBurst(scene, tempTreePosition);
+    }
+    tree.userData.swordHits = (tree.userData.swordHits ?? 0) + 1;
+    tempTreeDirection.subVectors(tree.position, attacker.model.position);
+    tempTreeDirection.y = 0;
+    if (tempTreeDirection.lengthSq() === 0) {
+      tempTreeDirection.set(0, 0, 1);
+    }
+    tempTreeDirection.normalize();
+    const tiltX = (tree.userData.tiltX ?? tree.rotation.x) + tempTreeDirection.z * TREE_SWING_TILT_STEP;
+    const tiltZ = (tree.userData.tiltZ ?? tree.rotation.z) + -tempTreeDirection.x * TREE_SWING_TILT_STEP;
+    tree.userData.tiltX = tiltX;
+    tree.userData.tiltZ = tiltZ;
+    tree.rotation.x = tiltX;
+    tree.rotation.z = tiltZ;
+    if (centerLocal) {
+      tree.updateWorldMatrix(true, true);
+      tempTreeCenterNext.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+      tempTreePosition.subVectors(tempTreeCenter, tempTreeCenterNext);
+      tree.position.add(tempTreePosition);
+      tree.updateWorldMatrix(true, true);
+    }
+    if (tree.userData.swordHits >= TREE_HITS_TO_CUT) {
+      tree.userData.isCutDown = true;
+      dropTreeApples(tree);
+      tree.getWorldPosition(tempTreePosition);
+      if (centerLocal) {
+        tempTreePosition.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+      }
+      for (let i = 0; i < 3; i += 1) {
+        const angle = (i / 3) * Math.PI * 2 + Math.random() * 0.4;
+        const radius = 0.6 + Math.random() * 0.2;
+        const dropPosition = tempTreePosition.clone();
+        dropPosition.x += Math.cos(angle) * radius;
+        dropPosition.z += Math.sin(angle) * radius;
+        spawnWoodPickup(dropPosition);
+      }
+      natureController?.removeTree?.(tree);
+    }
+  }
+
+  function handleTorchTreeHit({ attacker, range }) {
+    if (!attacker?.model?.position) return;
+    const effectiveRange = (Number.isFinite(range) ? range : 0) + TREE_HIT_RANGE_BOOST;
+    const tree = natureController?.getClosestTree?.(attacker.model.position, effectiveRange);
+    if (!tree || tree.userData?.isCutDown || !tree.userData?.isFlammable) return;
+    if (tree.userData?.isBurning) return;
+    tree.userData.isBurning = true;
+    const centerLocal = tree.userData?.boundsCenterLocal;
+    if (centerLocal) {
+      tempTreePosition.copy(centerLocal).applyMatrix4(tree.matrixWorld);
+    } else {
+      tree.getWorldPosition(tempTreePosition);
+    }
+    spawnImpactBurst(scene, tempTreePosition);
+    const treeFireRadius = Math.max(2.6, tree.userData?.boundsRadius ?? 0);
+    const treeFire = createFire({
+      particleCount: 36,
+      spread: treeFireRadius * 1.1,
+      sizeRange: [0.4, 1.1],
+      lightSettings: {
+        color: 0xffc077,
+        intensity: 4.5,
+        distance: 70,
+        decay: 1.1
+      },
+      lightOffset: new THREE.Vector3(0, treeFireRadius * 0.9, 0),
+      pulse: {
+        base: 0.8,
+        variance: 0.2,
+        opacityRange: [0.4, 1],
+        emissiveRange: [0.4, 1.2],
+        lightIntensityRange: [0.8, 1.35]
+      }
+    });
+    if (treeFire?.group) {
+      treeFire.group.position.copy(tempTreePosition);
+      treeFire.group.position.y += -6.0;//treeFireRadius * 0.7 - 11.0;
+      treeFire.group.userData.skipTerrainCorrection = true;
+      scene.add(treeFire.group);
+      tree.userData.fireEffect = treeFire;
+      treeFires.push({ tree, fire: treeFire });
+    }
+    tree.userData.burnTimeout = setTimeout(() => {
+      if (!tree.userData?.isBurning) return;
+      const fireEffect = tree.userData?.fireEffect;
+      if (fireEffect?.group) {
+        scene.remove(fireEffect.group);
+        fireEffect.dispose?.();
+      }
+      if (fireEffect) {
+        const fireIndex = treeFires.findIndex(entry => entry.fire === fireEffect);
+        if (fireIndex >= 0) {
+          treeFires.splice(fireIndex, 1);
+        }
+      }
+      natureController?.removeTree?.(tree);
+    }, BOMB_MIST_LIFETIME_MS);
+  }
+
+  function removeDroppedWeaponPickupById(dropId) {
+    if (!dropId) return;
+    const index = droppedWeaponPickups.findIndex(pickup => pickup?.dropId === dropId);
+    if (index === -1) return;
+    const [pickup] = droppedWeaponPickups.splice(index, 1);
+    disposeDroppedWeaponPickup(pickup);
+    networkDroppedWeaponPickups.delete(dropId);
+  }
+
+  function disposeDroppedWeaponPickup(pickup) {
+    if (!pickup) return;
+    const mesh = pickup.mesh;
+    if (mesh) {
+      scene.remove(mesh);
+      mesh.traverse(child => {
+        if (!child.isMesh) return;
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(material => material?.dispose?.());
+        } else {
+          child.material?.dispose?.();
+        }
+      });
+    }
+    if (pickup.marker) {
+      scene.remove(pickup.marker);
+      pickup.marker.geometry?.dispose?.();
+      pickup.marker.material?.dispose?.();
+    }
+  }
+
+  function createDroppedWeaponPickup(
+    item,
+    {
+      itemId,
+      quantity = 1,
+      markerColor,
+      markerOffsetY,
+      position,
+      quaternion,
+      allowHidden = false,
+      torchHealth,
+      shieldHealth,
+      dropId,
+      shouldBroadcastRemoval = true,
+      onPickup
+    } = {}
+  ) {
+    if (!item?.mesh || (!allowHidden && !item.mesh.visible)) return;
+    const pickupMesh = item.mesh.clone(true);
+    if (position) {
+      pickupMesh.position.copy(position);
+    } else {
+      pickupMesh.position.copy(item.mesh.position);
+    }
+    if (quaternion) {
+      pickupMesh.quaternion.copy(quaternion);
+    } else {
+      pickupMesh.quaternion.copy(item.mesh.quaternion);
+    }
+    pickupMesh.visible = true;
+    pickupMesh.userData.hideInMapView = item.mesh.userData?.hideInMapView;
+    if (itemId === TORCH_ITEM_ID && Number.isFinite(torchHealth)) {
+      pickupMesh.userData.torchHealth = normalizeTorchHealth(torchHealth);
+    }
+    if (itemId === SHIELD_ITEM_ID && Number.isFinite(shieldHealth)) {
+      pickupMesh.userData.shieldHealth = normalizeShieldHealth(shieldHealth);
+    }
+    scene.add(pickupMesh);
+    const marker = createWeaponMarker(markerColor);
+    const pickup = {
+      mesh: pickupMesh,
+      marker,
+      itemId,
+      quantity: Number.isFinite(quantity) ? Math.max(1, Math.floor(quantity)) : 1,
+      type: item?.type || itemId,
+      holder: null,
+      torchHealth: Number.isFinite(torchHealth) ? normalizeTorchHealth(torchHealth) : null,
+      shieldHealth: Number.isFinite(shieldHealth) ? normalizeShieldHealth(shieldHealth) : null,
+      markerOffsetY,
+      dropId: dropId || null,
+      shouldBroadcastRemoval: !!shouldBroadcastRemoval,
+      tryPickup: (playerControls) => {
+        if (!pickupMesh?.visible || !playerControls?.playerModel) return;
+        const distance = playerControls.playerModel.position.distanceTo(pickupMesh.position);
+        if (distance > 3) return;
+        if (itemId === TORCH_ITEM_ID) {
+          addToInventory(itemId, pickup.quantity, {
+            torchHealth: pickup.torchHealth ?? pickupMesh.userData.torchHealth ?? DEFAULT_TORCH_HEALTH
+          });
+        } else if (itemId === SHIELD_ITEM_ID) {
+          addToInventory(itemId, pickup.quantity);
+          inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+            ...inventoryState[SHIELD_ITEM_ID],
+            [SHIELD_HEALTH_KEY]: pickup.shieldHealth ?? pickupMesh.userData.shieldHealth ?? DEFAULT_SHIELD_HEALTH
+          }));
+          persistInventoryAndStorage();
+        } else {
+          addToInventory(itemId, pickup.quantity);
+        }
+        const pickupHand = getInventoryItemHand(itemId);
+        const equippedInPickupHand = pickupHand
+          ? getEquippedInventoryItemIdForHand(pickupHand)
+          : null;
+        if (!equippedInPickupHand) {
+          equipInventoryItem(itemId);
+        }
+        const index = droppedWeaponPickups.indexOf(pickup);
+        if (index !== -1) {
+          droppedWeaponPickups.splice(index, 1);
+        }
+        if (pickup.dropId && pickup.shouldBroadcastRemoval && multiplayer && !multiplayer.isHost) {
+          multiplayer.send({ type: 'dropWeaponPickup', dropId: pickup.dropId, itemId: pickup.itemId, quantity: pickup.quantity, torchHealth: pickup.torchHealth, shieldHealth: pickup.shieldHealth });
+        }
+        if (pickup.dropId) {
+          networkDroppedWeaponPickups.delete(pickup.dropId);
+        }
+        disposeDroppedWeaponPickup(pickup);
+        if (typeof onPickup === 'function') {
+          onPickup(pickup);
+        }
+      }
+    };
+    droppedWeaponPickups.push(pickup);
+    return pickup;
+  }
+
+  const craftState = {
+    materials: [],
+    selection: null,
+    swirl: null,
+    craftTimeout: null
+  };
+  const craftRecipes = await getCraftRecipes();
+  const craftRecipeMap = new Map(craftRecipes.map((recipe) => [recipe.id, recipe]));
+
+  const getCraftMaterialKey = (itemId) => {
+    if (itemId === WOOD_ITEM_ID) return 'wood';
+    if (itemId === APPLE_ITEM_ID) return 'apples';
+    if (itemId?.startsWith?.('mushroom_')) return 'mushrooms';
+    if (itemId === ZOMBIE_BRAINS_ITEM_ID) return 'zombie_brains';
+    if (itemId === SALT_ITEM_ID) return 'salt';
+    return null;
+  };
+
+  const getSelectionMaterialCounts = (selection) => {
+    const totals = { wood: 0, apples: 0, mushrooms: 0, zombie_brains: 0, salt: 0 };
+    if (!selection) return totals;
+    Object.entries(selection).forEach(([itemId, count]) => {
+      const key = getCraftMaterialKey(itemId);
+      if (!key) return;
+      totals[key] += count;
+    });
+    return totals;
+  };
+
+  const computeCraftCount = (recipe, selection) => {
+    if (!recipe) return 0;
+    const totals = getSelectionMaterialCounts(selection);
+    const limits = Object.entries(recipe.materials).map(([key, amount]) => (
+      amount > 0 ? Math.floor((totals[key] || 0) / amount) : 0
+    ));
+    if (!limits.length) return 0;
+    return Math.max(0, Math.min(...limits));
+  };
+
+  const returnUnusedCraftMaterials = (selection, recipe, craftCount) => {
+    if (!selection) return;
+    const required = {};
+    if (recipe?.materials) {
+      Object.entries(recipe.materials).forEach(([key, amount]) => {
+        required[key] = (required[key] || 0) + amount * craftCount;
+      });
+    }
+    Object.entries(selection).forEach(([itemId, count]) => {
+      if (!count) return;
+      const key = getCraftMaterialKey(itemId);
+      let used = 0;
+      if (key && required[key] > 0) {
+        used = Math.min(count, required[key]);
+        required[key] -= used;
+      }
+      const leftover = count - used;
+      if (leftover > 0) {
+        addToInventory(itemId, leftover);
+      }
+    });
+  };
+
+  const clearCraftSwirl = () => {
+    if (!craftState.swirl) return;
+    scene.remove(craftState.swirl.line);
+    craftState.swirl.geometry?.dispose?.();
+    craftState.swirl.material?.dispose?.();
+    craftState.swirl = null;
+  };
+
+  const clearCraftMaterials = () => {
+    craftState.materials.forEach((entry) => {
+      if (!entry?.mesh) return;
+      scene.remove(entry.mesh);
+      entry.mesh.traverse?.((child) => {
+        if (!child?.isMesh) return;
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(material => material?.dispose?.());
+        } else {
+          child.material?.dispose?.();
+        }
+      });
+      entry.mesh.geometry?.dispose?.();
+      if (Array.isArray(entry.mesh.material)) {
+        entry.mesh.material.forEach(material => material?.dispose?.());
+      } else {
+        entry.mesh.material?.dispose?.();
+      }
+    });
+    craftState.materials = [];
+  };
+
+  const restoreCraftInventory = () => {
+    if (!craftState.selection) return;
+    Object.entries(craftState.selection).forEach(([itemId, count]) => {
+      if (count > 0) {
+        addToInventory(itemId, count);
+      }
+    });
+    craftState.selection = null;
+  };
+
+  const createCraftMaterialMesh = (itemId) => {
+    if (itemId === APPLE_ITEM_ID) {
+      const geometry = new THREE.SphereGeometry(0.18, 16, 16);
+      const material = new THREE.MeshStandardMaterial({ color: 0xd73a3a });
+      return new THREE.Mesh(geometry, material);
+    }
+    if (itemId.startsWith('mushroom_')) {
+      const randomEntry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)]?.id;
+      const mushroomMesh = randomEntry ? mushroomController?.createProjectileMesh?.(randomEntry) : null;
+      if (mushroomMesh) {
+        mushroomMesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
+        return mushroomMesh;
+      }
+      const geometry = new THREE.CylinderGeometry(0.12, 0.16, 0.28, 10);
+      const material = new THREE.MeshStandardMaterial({ color: 0xc98b4a });
+      return new THREE.Mesh(geometry, material);
+    }
+    if (itemId === WOOD_ITEM_ID) {
+      const geometry = new THREE.BoxGeometry(0.35, 0.14, 0.2);
+      const material = new THREE.MeshStandardMaterial({ color: 0x8b5a2b });
+      return new THREE.Mesh(geometry, material);
+    }
+    if (itemId === ZOMBIE_BRAINS_ITEM_ID) {
+      return createZombieBrainsGroup();
+    }
+    if (itemId === SALT_ITEM_ID) {
+      const group = new THREE.Group();
+      for (let i = 0; i < 3; i += 1) {
+        const crystal = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.11 + Math.random() * 0.03, 0),
+          new THREE.MeshStandardMaterial({
+            color: 0xd9d9d9,
+            emissive: 0x3a3a3a,
+            emissiveIntensity: 0.25,
+            roughness: 0.45,
+            metalness: 0.35
+          })
+        );
+        crystal.position.set((Math.random() - 0.5) * 0.22, 0.1 + Math.random() * 0.12, (Math.random() - 0.5) * 0.22);
+        applyOptionalShadowState(crystal, optionalShadowsEnabled);
+        crystal.receiveShadow = true;
+        group.add(crystal);
+      }
+      return group;
+    }
+    return null;
+  };
+
+  const createManaPotionDisplayMesh = () => {
+    const group = new THREE.Group();
+    const bottle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.14, 0.3, 14),
+      new THREE.MeshStandardMaterial({
+        color: 0x5f8bff,
+        transparent: true,
+        opacity: 0.85,
+        roughness: 0.2,
+        metalness: 0.1
+      })
+    );
+    applyOptionalShadowState(bottle, optionalShadowsEnabled);
+    bottle.receiveShadow = true;
+    const cork = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.06, 0.08, 12),
+      new THREE.MeshStandardMaterial({ color: 0x7a5b39, roughness: 0.9 })
+    );
+    cork.position.y = 0.19;
+    applyOptionalShadowState(cork, optionalShadowsEnabled);
+    cork.receiveShadow = true;
+    group.add(bottle, cork);
+    group.scale.setScalar(1.15);
+    group.rotation.x = Math.PI * 0.04;
+    return group;
+  };
+
+  const createCraftSwirl = (position) => {
+    if (!position) return null;
+    const points = [];
+    const loops = 3;
+    const radius = 0.6;
+    const height = 0.6;
+    const segments = 80;
+    for (let i = 0; i <= segments; i += 1) {
+      const t = i / segments;
+      const angle = t * Math.PI * 2 * loops;
+      const y = t * height;
+      points.push(new THREE.Vector3(
+        Math.cos(angle) * radius,
+        y,
+        Math.sin(angle) * radius
+      ));
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({ color: 0x7fd0ff, transparent: true, opacity: 0.8 });
+    const line = new THREE.Line(geometry, material);
+    line.position.copy(position);
+    line.userData.skipTerrainCorrection = true;
+    scene.add(line);
+    return { line, geometry, material };
+  };
+
+  const spawnCraftArrowPickup = (position) => {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const arrowMesh = cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE);
+    const pickupMesh = arrowMesh || new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.05, 0.6, 8),
+      new THREE.MeshStandardMaterial({
+        color: 0x7b5530,
+        emissive: 0x2b1a0a,
+        emissiveIntensity: 0.35
+      })
+    );
+    pickupMesh.rotation.set(0, Math.PI / 2, Math.PI / 2);
+    registerPickupEmissiveMaterials(pickupMesh);
+    pickupMesh.position.copy(spawnPos);
+    applyOptionalShadowState(pickupMesh, optionalShadowsEnabled);
+    pickupMesh.userData.skipTerrainCorrection = true;
+    pickupMesh.userData.baseY = spawnPos.y;
+    pickupMesh.userData.phase = Math.random() * Math.PI * 2;
+    pickupMesh.userData.amount = 1;
+    pickupMesh.userData.type = 'arrow';
+    pickupMesh.userData.sparkle = true;
+    pickupMesh.userData.noFloat = true;
+    const light = new THREE.PointLight(0xfff2a8, 0.6, 2);
+    light.position.set(0, 0.4, 0);
+    pickupMesh.add(light);
+    pickupMesh.userData.sparkleLight = light;
+    scene.add(pickupMesh);
+    ammoPickups.push(pickupMesh);
+    return pickupMesh;
+  };
+
+  const spawnCraftedPickup = (itemId, position, amount = 1) => {
+    if (!itemId || !position) return;
+    const dropPos = position.clone().add(new THREE.Vector3(0, 0.4, 0));
+    if (itemId === 'arrow') {
+      const pickup = spawnCraftArrowPickup(dropPos);
+      if (pickup) {
+        pickup.userData.amount = Math.max(1, Math.floor(amount));
+      }
+      return;
+    }
+    if (itemId === MANA_POTION_ITEM_ID) {
+      const potionMesh = cloneManaPotionMesh(manaPotionTemplate, MANA_POTION_SCALE);
+      if (!potionMesh) return;
+      potionMesh.position.copy(dropPos);
+      potionMesh.userData.skipTerrainCorrection = true;
+      createDroppedWeaponPickup(
+        { mesh: potionMesh, type: MANA_POTION_ITEM_ID },
+        {
+          itemId: MANA_POTION_ITEM_ID,
+          quantity: amount,
+          markerColor: 0x7f7dff,
+          markerOffsetY: 1.0,
+          position: dropPos,
+          allowHidden: true
+        }
+      );
+      return;
+    }
+    if (itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
+      const pickup = spawnSaltPickup(dropPos, { itemId: SAUTEED_MUSHROOMS_ITEM_ID, amount, groupedMushrooms: 3, useTerrainHeight: false });
+      if (pickup?.mesh) {
+        pickup.mesh.position.copy(dropPos);
+        pickup.mesh.userData.baseY = dropPos.y;
+      }
+      return;
+    }
+    const pickupConfig = {
+      bow: { item: bow, itemId: 'bow', markerColor: 0xffc26b },
+      lantern: { item: lantern, itemId: 'lantern', markerColor: 0xffd400 },
+      torch: {
+        item: torch,
+        itemId: TORCH_ITEM_ID,
+        markerColor: 0xffa54c,
+        torchHealth: DEFAULT_TORCH_HEALTH
+      }
+    }[itemId];
+    if (pickupConfig?.item?.mesh) {
+      const dropId = createNetworkDropId('weapon');
+      createDroppedWeaponPickup(pickupConfig.item, {
+        itemId: pickupConfig.itemId,
+        quantity: amount,
+        markerColor: pickupConfig.markerColor,
+        markerOffsetY: 1.2,
+        position: dropPos,
+        allowHidden: true,
+        torchHealth: pickupConfig.torchHealth,
+        dropId
+      });
+      if (multiplayer && !multiplayer.isHost) {
+        multiplayer.send({
+          type: 'inventoryWeaponDrop',
+          drops: [{
+            id: dropId,
+            itemId: pickupConfig.itemId,
+            position: [dropPos.x, dropPos.y, dropPos.z],
+            rotation: [pickupConfig.item.mesh.quaternion.x, pickupConfig.item.mesh.quaternion.y, pickupConfig.item.mesh.quaternion.z, pickupConfig.item.mesh.quaternion.w],
+            quantity: Math.max(1, Math.floor(amount)),
+            torchHealth: pickupConfig.torchHealth
+          }]
+        });
+      }
+    }
+  };
+
+  const placeCraftMaterials = (selection) => {
+    if (!selection || !craftTable?.mesh) return;
+    clearCraftMaterials();
+    clearCraftSwirl();
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+      craftState.craftTimeout = null;
+    }
+    craftState.selection = { ...selection };
+    const entries = Object.entries(selection).filter(([, count]) => count > 0);
+    const basePos = craftTable.getCraftSurfacePosition?.() || craftTable.mesh.position.clone();
+    entries.forEach(([itemId], index) => {
+      const mesh = createCraftMaterialMesh(itemId);
+      if (!mesh) return;
+      const angle = (index / Math.max(entries.length, 1)) * Math.PI * 2;
+      const offset = new THREE.Vector3(Math.cos(angle) * 0.35, 0, Math.sin(angle) * 0.35);
+      mesh.position.copy(basePos).add(offset);
+      applyOptionalShadowState(mesh, optionalShadowsEnabled);
+      mesh.receiveShadow = true;
+      mesh.userData.skipTerrainCorrection = true;
+      scene.add(mesh);
+      craftState.materials.push({ itemId, mesh });
+    });
+  };
+
+  const cancelCrafting = ({ restoreInventory = false } = {}) => {
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+      craftState.craftTimeout = null;
+    }
+    clearCraftSwirl();
+    clearCraftMaterials();
+    if (restoreInventory) {
+      restoreCraftInventory();
+    } else {
+      craftState.selection = null;
+    }
+  };
+
+  const craftItem = (itemId) => {
+    if (!craftState.selection || !craftTable?.mesh) return;
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+    }
+    const recipe = craftRecipeMap.get(itemId);
+    const craftCount = computeCraftCount(recipe, craftState.selection);
+    if (craftCount <= 0) {
+      returnUnusedCraftMaterials(craftState.selection, recipe, 0);
+      craftState.selection = null;
+      clearCraftMaterials();
+      clearCraftSwirl();
+      return;
+    }
+    const basePos = craftTable.getCraftSurfacePosition?.() || craftTable.mesh.position.clone();
+    craftState.swirl = createCraftSwirl(basePos);
+    craftState.craftTimeout = setTimeout(() => {
+      clearCraftMaterials();
+      clearCraftSwirl();
+      if (craftCount > 0) {
+        const bundleCount = Math.min(craftCount, 5);
+        const bundleBaseAmount = Math.floor(craftCount / bundleCount);
+        const bundleRemainder = craftCount % bundleCount;
+        const radius = 0.4;
+        for (let i = 0; i < bundleCount; i += 1) {
+          const bundleAmount = bundleBaseAmount + (i < bundleRemainder ? 1 : 0);
+          const angle = (i / Math.max(bundleCount, 1)) * Math.PI * 2;
+          const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+          spawnCraftedPickup(itemId, basePos.clone().add(offset), bundleAmount);
+        }
+        window.questManager?.handleCraftedItem?.();
+      }
+      returnUnusedCraftMaterials(craftState.selection, recipe, craftCount);
+      craftState.selection = null;
+      craftState.craftTimeout = null;
+    }, 4000);
+  };
+
+
+  const openBuildTypePicker = async (availableWoodCount = 0) => {
+    const safeWoodCount = Math.max(0, Math.floor(Number.isFinite(availableWoodCount) ? availableWoodCount : 0));
+    if (safeWoodCount <= 0) return null;
+
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'build-modal-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:1800;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+
+      const modal = document.createElement('div');
+      modal.className = 'build-modal';
+      modal.style.maxWidth = '460px';
+      modal.style.width = '100%';
+      modal.innerHTML = `
+        <h3>Build with Wood</h3>
+        <p style="margin:0 0 10px 0;">You have ${safeWoodCount} wood. Choose what to build.</p>
+        <div class="build-type-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px;">
+          <button type="button" class="retro-build-btn" data-build-choice="block">Block</button>
+          <button type="button" class="retro-build-btn" data-build-choice="arrow">Arrow</button>
+          <button type="button" class="retro-build-btn" data-build-choice="torch">Torch</button>
+          <button type="button" class="retro-build-btn" data-build-choice="shield">Shield</button>
+          <button type="button" class="retro-build-btn" data-build-choice="note">Note</button>
+        </div>
+        <label style="display:block;font-weight:600;margin-bottom:6px;">Quantity (for arrows/torches)</label>
+        <input type="number" min="1" max="${safeWoodCount}" step="1" class="settings-input" data-build-quantity style="width:100%;margin-bottom:12px;" value="1" />
+        <div class="build-modal-actions">
+          <button type="button" class="build-cancel-btn" data-build-cancel="1">Cancel</button>
+        </div>
+      `;
+
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+
+      const qtyInput = modal.querySelector('[data-build-quantity]');
+      const close = (value) => {
+        overlay.remove();
+        resolve(value);
+      };
+
+      const parseQuantity = () => {
+        const raw = Number(qtyInput?.value);
+        return Math.max(1, Math.min(safeWoodCount, Math.floor(Number.isFinite(raw) ? raw : 1)));
+      };
+
+      overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) close(null);
+      });
+      modal.querySelector('[data-build-cancel]')?.addEventListener('click', () => close(null));
+      modal.querySelectorAll('[data-build-choice]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const type = button.dataset.buildChoice;
+          if (!type) {
+            close(null);
+            return;
+          }
+          if (type === SHIELD_ITEM_ID || type === 'note') {
+            close({ type, quantity: 1 });
+            return;
+          }
+          close({ type, quantity: parseQuantity() });
+        });
+      });
+    });
+  };
+
+  const openNoteEntryModal = async (initialText = '') => openPopupDialog({
+    title: 'Write Note',
+    message: 'Enter note text to place in the world.',
+    inputLabel: 'Note text',
+    inputValue: String(initialText || ''),
+    inputPlaceholder: 'Type your note...',
+    confirmText: 'Save note',
+    cancelText: 'Cancel'
+  });
+
+  const escapeBuildModalText = (value) => String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
+  const startWoodBuildCraftingFlow = (itemId, quantity) => {
+    const totalQuantity = Math.max(1, Math.floor(Number.isFinite(quantity) ? quantity : 1));
+    const availableWood = Math.max(0, Math.floor(inventoryState.wood?.count || 0));
+    const craftCount = Math.min(availableWood, totalQuantity);
+    if (craftCount <= 0) return false;
+    if (craftState.craftTimeout) {
+      clearTimeout(craftState.craftTimeout);
+      craftState.craftTimeout = null;
+    }
+    clearCraftMaterials();
+    clearCraftSwirl();
+    const basePos = playerModel?.position?.clone?.() || new THREE.Vector3();
+    const forward = new THREE.Vector3(0, 0, 1);
+    playerModel?.getWorldDirection?.(forward);
+    forward.y = 0;
+    if (forward.lengthSq() < 0.0001) forward.set(0, 0, 1);
+    forward.normalize();
+    basePos.add(forward.multiplyScalar(1.0));
+    applySpawnY(basePos, 0.08, { allowOnBuildings: true });
+    const temporaryMaterials = [];
+    for (let i = 0; i < craftCount; i += 1) {
+      const mesh = createCraftMaterialMesh('wood');
+      if (!mesh) continue;
+      const angle = (i / Math.max(craftCount, 1)) * Math.PI * 2;
+      const radius = craftCount > 5 ? 0.35 : 0.28;
+      const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+      mesh.position.copy(basePos).add(offset);
+      mesh.userData.skipTerrainCorrection = true;
+      applyOptionalShadowState(mesh, optionalShadowsEnabled);
+      scene.add(mesh);
+      temporaryMaterials.push(mesh);
+    }
+    craftState.swirl = createCraftSwirl(basePos);
+    removeFromInventory('wood', craftCount);
+    craftState.craftTimeout = setTimeout(() => {
+      temporaryMaterials.forEach((mesh) => {
+        if (!mesh) return;
+        if (mesh.parent) mesh.parent.remove(mesh);
+        mesh.traverse?.((child) => {
+          if (!child?.isMesh) return;
+          child.geometry?.dispose?.();
+          if (Array.isArray(child.material)) child.material.forEach((material) => material?.dispose?.());
+          else child.material?.dispose?.();
+        });
+      });
+      craftState.materials = [];
+      clearCraftSwirl();
+      const bundleCount = Math.min(craftCount, 5);
+      const baseAmount = Math.floor(craftCount / bundleCount);
+      const remainder = craftCount % bundleCount;
+      const radius = 0.4;
+      for (let i = 0; i < bundleCount; i += 1) {
+        const bundleAmount = baseAmount + (i < remainder ? 1 : 0);
+        const angle = (i / Math.max(bundleCount, 1)) * Math.PI * 2;
+        const offset = new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+        spawnCraftedPickup(itemId, basePos.clone().add(offset), bundleAmount);
+      }
+      window.questManager?.handleCraftedItem?.();
+      craftState.craftTimeout = null;
+    }, 4000);
+    return true;
+  };
+
+  function dropInventoryItem(itemId) {
+    if (!itemId || !inventoryState[itemId]) return;
+    if (isFoodItem(itemId) || isWoodItem(itemId) || isZombieBrainsItem(itemId)) {
+      const dropPosition = getInventoryDropPosition();
+      if (!dropPosition) return;
+      const dropId = createNetworkDropId('world');
+      if (multiplayer && !multiplayer.isHost) {
+        multiplayer.send({
+          type: 'inventoryWorldDrop',
+          drops: [{
+            id: dropId,
+            itemId,
+            position: [dropPosition.x, dropPosition.y, dropPosition.z],
+            amount: 1
+          }]
+        });
+      } else {
+        addDroppedWorldPickup({ id: dropId, itemId, position: dropPosition, amount: 1 });
+      }
+      removeFromInventory(itemId, 1);
+      return;
+    }
+    const dropPosition = getInventoryDropPosition();
+    if (!dropPosition) return;
+    const itemMap = {
+      iceGun,
+      bow,
+      bomb,
+      autumnSword,
+      lantern,
+      torch,
+      shield
+    };
+    const item = itemMap[itemId];
+    if (!item?.mesh) {
+      removeFromInventory(itemId, 1);
+      updateSettingsUI();
+      return;
+    }
+    const shouldDuplicatePickup = item.mesh.visible
+      && item.holder !== playerControls;
+    if (item.holder === playerControls) {
+      const markerColor = itemId === 'bow'
+        ? 0xffc26b
+        : itemId === TORCH_ITEM_ID
+          ? 0xffa54c
+          : itemId === SHIELD_ITEM_ID
+            ? 0x7a4a20
+          : itemId === 'bomb'
+            ? 0xff4d4d
+            : 0xffd400;
+      const torchPickupHealth = itemId === TORCH_ITEM_ID
+        ? takeTorchHealth(inventoryState)?.health
+        : null;
+      const shieldPickupHealth = itemId === SHIELD_ITEM_ID
+        ? normalizeShieldHealth(inventoryState[SHIELD_ITEM_ID]?.[SHIELD_HEALTH_KEY] ?? item.mesh?.userData?.shieldHealth)
+        : null;
+      const dropId = createNetworkDropId('weapon');
+      const q = playerControls?.playerModel?.quaternion || item.mesh?.quaternion;
+      item.mesh?.position?.copy?.(dropPosition);
+      if (q && item.mesh?.quaternion) {
+        item.mesh.quaternion.copy(q);
+      }
+      item.drop({ removeFromInventory: true });
+      if (item.mesh) {
+        item.mesh.visible = false;
+      }
+      createDroppedWeaponPickup(item, {
+        itemId,
+        markerColor,
+        markerOffsetY: 1.2,
+        position: dropPosition,
+        quaternion: q,
+        torchHealth: torchPickupHealth ?? undefined,
+        shieldHealth: shieldPickupHealth ?? undefined,
+        dropId,
+        allowHidden: true
+      });
+      if (multiplayer && !multiplayer.isHost) {
+        const pos = dropPosition;
+        multiplayer.send({
+          type: 'inventoryWeaponDrop',
+          drops: [{
+            id: dropId,
+            itemId,
+            position: [pos.x, pos.y, pos.z],
+            rotation: [q.x, q.y, q.z, q.w],
+            quantity: 1,
+            torchHealth: torchPickupHealth ?? undefined,
+            shieldHealth: shieldPickupHealth ?? undefined
+          }]
+        });
+      }
+      if (itemId === TORCH_ITEM_ID) {
+        persistInventoryAndStorage();
+      }
+      updateSettingsUI();
+      return;
+    }
+    if (shouldDuplicatePickup) {
+      const markerColor = itemId === 'bow'
+        ? 0xffc26b
+        : itemId === TORCH_ITEM_ID
+          ? 0xffa54c
+          : itemId === SHIELD_ITEM_ID
+            ? 0x7a4a20
+          : itemId === 'bomb'
+            ? 0xff4d4d
+            : 0xffd400;
+      const torchPickupHealth = itemId === TORCH_ITEM_ID
+        ? takeTorchHealth(inventoryState)?.health
+        : null;
+      const shieldPickupHealth = itemId === SHIELD_ITEM_ID
+        ? normalizeShieldHealth(inventoryState[SHIELD_ITEM_ID]?.[SHIELD_HEALTH_KEY] ?? item.mesh?.userData?.shieldHealth)
+        : null;
+      const dropId = createNetworkDropId('weapon');
+      createDroppedWeaponPickup(item, {
+        itemId,
+        markerColor,
+        markerOffsetY: 1.2,
+        position: dropPosition,
+        quaternion: playerControls?.playerModel?.quaternion,
+        torchHealth: torchPickupHealth ?? undefined,
+        shieldHealth: shieldPickupHealth ?? undefined,
+        dropId
+      });
+      if (multiplayer && !multiplayer.isHost) {
+        const pos = dropPosition;
+        const q = playerControls?.playerModel?.quaternion || item.mesh.quaternion;
+        multiplayer.send({
+          type: 'inventoryWeaponDrop',
+          drops: [{
+            id: dropId,
+            itemId,
+            position: [pos.x, pos.y, pos.z],
+            rotation: [q.x, q.y, q.z, q.w],
+            quantity: 1,
+            torchHealth: torchPickupHealth ?? undefined,
+            shieldHealth: shieldPickupHealth ?? undefined
+          }]
+        });
+      }
+      if (itemId === TORCH_ITEM_ID) {
+        persistInventoryAndStorage();
+      }
+      updateSettingsUI();
+      return;
+    }
+    item.holder = null;
+    item.mesh.visible = true;
+    item.mesh.position.copy(dropPosition);
+    if (playerControls?.playerModel?.quaternion) {
+      item.mesh.quaternion.copy(playerControls.playerModel.quaternion);
+    }
+    if (itemId === TORCH_ITEM_ID) {
+      const result = takeTorchHealth(inventoryState);
+      if (result?.health != null) {
+        item.mesh.userData.torchHealth = result.health;
+      }
+      persistInventoryAndStorage();
+    } else if (itemId === SHIELD_ITEM_ID) {
+      item.mesh.userData.shieldHealth = normalizeShieldHealth(inventoryState[SHIELD_ITEM_ID]?.[SHIELD_HEALTH_KEY]);
+      removeFromInventory(itemId, 1);
+    } else {
+      removeFromInventory(itemId, 1);
+    }
+    updateSettingsUI();
+  }
+
+  const POWERUP_DURATION_MS = 60_000;
+  const MUSHROOM_8_ID = MUSHROOM_ENTRIES.find((entry) => entry.name === 'Mushroom 8')?.id;
+  const MUSHROOM_13_ID = MUSHROOM_ENTRIES.find((entry) => entry.name === 'Mushroom 13')?.id;
+  const MUSHROOM_15_ID = MUSHROOM_ENTRIES.find((entry) => entry.name === 'Mushroom 15')?.id;
+  const playerPowerups = {
+    giantUntil: 0,
+    lowGravityUntil: 0,
+    strengthUntil: 0,
+    cloneUntil: 0,
+    cleanupTimer: null,
+    clones: []
+  };
+
+  const clearPlayerCopies = () => {
+    (playerPowerups.clones || []).forEach((clone) => {
+      if (clone?.actions) {
+        Object.values(clone.actions).forEach((action) => action?.stop?.());
+      }
+      clone?.mixer?.stopAllAction?.();
+      clone?.mesh?.parent?.remove?.(clone.mesh);
+    });
+    playerPowerups.clones = [];
+  };
+
+
+  const clonePlayerModelForPowerup = () => {
+    if (!playerModel) return null;
+    const originalUserData = playerModel.userData || {};
+    const cloneUserData = { ...originalUserData };
+    delete cloneUserData.mixer;
+    delete cloneUserData.actions;
+    delete cloneUserData.attack;
+    playerModel.userData = cloneUserData;
+
+    let cloneMesh = null;
+    try {
+      cloneMesh = SkeletonUtils.clone(playerModel);
+    } finally {
+      playerModel.userData = originalUserData;
+    }
+    return cloneMesh;
+  };
+
+  const spawnPlayerCopies = (count = 7) => {
+    clearPlayerCopies();
+    if (!playerModel?.parent) return;
+
+    const sourceActions = playerModel?.userData?.actions || {};
+    const actionEntries = Object.entries(sourceActions).filter(([, action]) => action?.getClip);
+
+    for (let i = 0; i < count; i += 1) {
+      const cloneMesh = clonePlayerModelForPowerup();
+      if (!cloneMesh) continue;
+      cloneMesh.userData = cloneMesh.userData || {};
+      delete cloneMesh.userData.mixer;
+      delete cloneMesh.userData.actions;
+      cloneMesh.userData.isPlayerCopy = true;
+      cloneMesh.userData.health = 20;
+      cloneMesh.userData.dead = false;
+
+      cloneMesh.traverse((child) => {
+        if (!child?.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+
+      const mixer = new THREE.AnimationMixer(cloneMesh);
+      const actions = {};
+      actionEntries.forEach(([key, action]) => {
+        const clip = action?.getClip?.();
+        if (!clip) return;
+        actions[key] = mixer.clipAction(clip);
+      });
+
+      playerModel.parent.add(cloneMesh);
+      playerPowerups.clones.push({
+        mesh: cloneMesh,
+        mixer,
+        actions,
+        angle: (i / count) * Math.PI * 2,
+        radius: 1.8 + (i % 2) * 0.6
+      });
+    }
+  };
+
+  const updatePowerupCleanup = () => {
+    if (playerPowerups.cleanupTimer) clearTimeout(playerPowerups.cleanupTimer);
+    playerPowerups.cleanupTimer = setTimeout(() => {
+      const now = Date.now();
+      if (now >= playerPowerups.giantUntil) playerControls?.setPlayerScale?.(1);
+      if (now >= playerPowerups.lowGravityUntil) {
+        playerControls?.setJumpForceMultiplier?.(1);
+        playerControls?.setLowGravityEnabled?.(false);
+      }
+      if (now >= playerPowerups.cloneUntil) clearPlayerCopies();
+    }, POWERUP_DURATION_MS + 200);
+  };
+
+
+  const updatePlayerCopies = (deltaSeconds = 0) => {
+    const now = Date.now();
+    if (now >= playerPowerups.cloneUntil) return;
+    const basePos = playerModel?.position;
+    if (!basePos) return;
+    playerPowerups.clones.forEach((clone) => {
+      if (!clone?.mesh || clone.mesh.userData.dead) return;
+      const angle = clone.angle + now * 0.0015;
+      clone.mesh.position.set(
+        basePos.x + Math.cos(angle) * clone.radius,
+        basePos.y,
+        basePos.z + Math.sin(angle) * clone.radius
+      );
+      clone.mesh.quaternion.copy(playerModel.quaternion);
+
+      const currentActionName = playerModel?.userData?.currentAction;
+      const sourceAction = currentActionName ? playerModel?.userData?.actions?.[currentActionName] : null;
+      const cloneAction = currentActionName ? clone?.actions?.[currentActionName] : null;
+      if (cloneAction) {
+        if (!clone.currentAction || clone.currentAction !== currentActionName) {
+          clone.actions?.[clone.currentAction]?.fadeOut?.(0.1);
+          cloneAction.reset().fadeIn(0.1).play();
+          clone.currentAction = currentActionName;
+        }
+        if (sourceAction && Number.isFinite(sourceAction.time)) {
+          const clipDuration = cloneAction.getClip?.()?.duration || 0;
+          cloneAction.time = clipDuration > 0 ? (sourceAction.time % clipDuration) : sourceAction.time;
+          cloneAction.timeScale = Number.isFinite(sourceAction.timeScale) ? sourceAction.timeScale : 1;
+          cloneAction.paused = !!sourceAction.paused;
+        }
+      }
+      clone.mixer?.update?.(deltaSeconds);
+      if (clone.mesh.userData.health <= 0) {
+        clone.mesh.visible = false;
+        clone.mesh.userData.dead = true;
+      }
+    });
+  };
+  function eatInventoryItem(itemId) {
+    if (!itemId || !inventoryState[itemId]) return;
+    if (!isFoodItem(itemId)) return;
+    if (isMushroomItem(itemId)) {
+      setStat('health', statsState.health + MUSHROOM_HEALTH_SEGMENTS, { skipSave: true });
+      setStat('hunger', statsState.hunger + MUSHROOM_HUNGER_GAIN, { skipSave: true });
+      if (itemId === MUSHROOM_13_ID) {
+        playerPowerups.lowGravityUntil = Date.now() + POWERUP_DURATION_MS;
+        playerControls?.setJumpForceMultiplier?.(1.6);
+        playerControls?.setLowGravityEnabled?.(true);
+      } else if (itemId === MUSHROOM_15_ID) {
+        playerPowerups.giantUntil = Date.now() + POWERUP_DURATION_MS;
+        playerPowerups.strengthUntil = Date.now() + POWERUP_DURATION_MS;
+        playerControls?.setPlayerScale?.(3);
+      } else if (itemId === MUSHROOM_8_ID) {
+        playerPowerups.cloneUntil = Date.now() + POWERUP_DURATION_MS;
+        spawnPlayerCopies(7);
+      }
+      updatePowerupCleanup();
+    } else if (isAppleItem(itemId)) {
+      setStat('health', statsState.health + APPLE_HEALTH_SEGMENTS, { skipSave: true });
+      setStat('hunger', statsState.hunger + APPLE_HUNGER_GAIN, { skipSave: true });
+    } else if (isMeatItem(itemId)) {
+      setStat('health', statsState.health + MEAT_HEALTH_SEGMENTS, { skipSave: true });
+      setStat('hunger', statsState.hunger + MEAT_HUNGER_GAIN, { skipSave: true });
+    } else if (isSaltItem(itemId)) {
+      setStat('health', statsState.health + SALT_HEALTH_SEGMENTS, { skipSave: true });
+      setStat('hunger', statsState.hunger + SALT_HUNGER_GAIN, { skipSave: true });
+    } else if (isSauteedMushroomsItem(itemId)) {
+      setStat('health', statsState.health + SAUTEED_MUSHROOMS_HEALTH_SEGMENTS, { skipSave: true });
+      setStat('hunger', statsState.hunger + SAUTEED_MUSHROOMS_HUNGER_GAIN, { skipSave: true });
+    }
+    lastStatUpdateAt = Date.now();
+    removeFromInventory(itemId, 1);
+  }
+
+  function useInventoryItem(itemId) {
+    if (!itemId || !inventoryState[itemId]) return;
+    if (!isPotionItem(itemId)) return;
+    if (itemId === LIFE_POTION_ITEM_ID) {
+      setStat('health', statsState.maxHealthSegments, { skipSave: true });
+    }
+    if (itemId === MANA_POTION_ITEM_ID) {
+      setStat('magic', statsState.maxMagicSegments, { skipSave: true });
+    }
+    removeFromInventory(itemId, 1);
+  }
+
+  let mapViewEnabled = false;
+  window.mapViewEnabled = mapViewEnabled;
+  let playerDead = false;
+  let isBuildPlacementActive = false;
+  const updateControlAvailability = () => {
+    if (!playerControls) return;
+    playerControls.enabled = !mapViewEnabled && !playerDead && !levelUpSelectionActive && !isBuildPlacementActive;
+  };
+  const updateEnergyEffects = () => {
+    if (!playerControls) return;
+    const energyDepleted = statsState.hunger <= 0;
+    playerControls.setEnergyDepleted?.(energyDepleted);
+  };
+
+  const healthBar = document.getElementById('health-bar');
+  const healthLabel = document.getElementById('health-label');
+  const hungerBar = document.getElementById('hunger-bar');
+  const magicBar = document.getElementById('magic-bar');
+  const hungerWarning = document.getElementById('hunger-warning');
+  let hungerWarningTimer = null;
+
+  const createDropId = (index = 0) => {
+    const owner = multiplayer?.getId?.() || 'local';
+    const randomSeed = Math.floor(Math.random() * 10000);
+    return `${owner}-${Date.now()}-${index}-${randomSeed}`;
+  };
+
+  const createAmmoDrops = (center, totalAmmo, ammoType = 'ammo') => {
+    const drops = [];
+    if (!center || !Number.isFinite(totalAmmo) || totalAmmo <= 0) return drops;
+    const radius = 1.6;
+    let remaining = totalAmmo;
+    let index = 0;
+    while (remaining > 0) {
+      const amount = Math.min(AMMO_PICKUP_AMOUNT, remaining);
+      remaining -= amount;
+      const angle = (index / Math.max(1, Math.ceil(totalAmmo / AMMO_PICKUP_AMOUNT))) * Math.PI * 2;
+      const x = center.x + Math.cos(angle) * radius;
+      const z = center.z + Math.sin(angle) * radius;
+      drops.push({
+        id: createDropId(index),
+        position: [x, center.y, z],
+        amount,
+        ammoType
+      });
+      index += 1;
+    }
+    return drops;
+  };
+
+  const createRingPositions = (center, count, radius = 1.6) => {
+    const positions = [];
+    if (!center || !Number.isFinite(count) || count <= 0) return positions;
+    for (let index = 0; index < count; index += 1) {
+      const angle = (index / count) * Math.PI * 2;
+      positions.push(new THREE.Vector3(
+        center.x + Math.cos(angle) * radius,
+        center.y,
+        center.z + Math.sin(angle) * radius
+      ));
+    }
+    return positions;
+  };
+
+  const spawnIceGunAmmoCluster = (center) => {
+    if (!center) return;
+    const positions = createRingPositions(center, ICE_GUN_AMMO_CLUSTER_COUNT, ICE_GUN_AMMO_CLUSTER_RADIUS);
+    positions.forEach(position => {
+      spawnAmmoPickup(position, AMMO_PICKUP_AMOUNT);
+    });
+  };
+
+  const spawnBazookaAmmoCluster = (center) => {
+    if (!center) return;
+    const positions = createRingPositions(center, ICE_GUN_AMMO_CLUSTER_COUNT, ICE_GUN_AMMO_CLUSTER_RADIUS);
+    positions.forEach(position => {
+      spawnMissilePickup(position, AMMO_PICKUP_AMOUNT);
+    });
+  };
+
+  const clearInventoryState = () => {
+    Object.keys(inventoryState).forEach(key => {
+      delete inventoryState[key];
+    });
+    persistInventoryAndStorage();
+    playerControls?.updateAmmoUI?.(false);
+  };
+
+  const dropInventoryOnDeath = () => {
+    if (!playerModel) return;
+    const deathPosition = playerModel.position.clone();
+    let ammoCount = 0;
+    let ammoType = 'ammo';
+    if (playerControls?.ammoLabel === 'Arrows') {
+      ammoCount = Number.isFinite(playerControls?.ammo)
+        ? playerControls.ammo
+        : (Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
+          ? inventoryState.bow[ARROW_AMMO_KEY]
+          : 0);
+    } else if (playerControls?.ammoLabel === 'Missiles') {
+      ammoType = 'missile';
+      ammoCount = Number.isFinite(playerControls?.ammo)
+        ? playerControls.ammo
+        : (Number.isFinite(inventoryState.bazooka?.[MISSILE_AMMO_KEY])
+          ? inventoryState.bazooka[MISSILE_AMMO_KEY]
+          : 0);
+    } else {
+      ammoCount = Number.isFinite(playerControls?.ammo)
+        ? playerControls.ammo
+        : (Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+          ? inventoryState.iceGun[ICE_AMMO_KEY]
+          : 0);
+    }
+    const ammoDrops = createAmmoDrops(deathPosition, ammoCount, ammoType);
+    ammoDrops.forEach(drop => {
+      addDroppedAmmoPickup({
+        id: drop.id,
+        position: new THREE.Vector3(...drop.position),
+        amount: drop.amount,
+        ammoType: drop.ammoType
+      });
+    });
+    if (ammoDrops.length > 0 && multiplayer && !multiplayer.isHost) {
+      multiplayer.send({ type: 'inventoryDrop', drops: ammoDrops });
+    }
+
+    const weaponDrops = [];
+    if ((inventoryState.iceGun?.count || 0) > 0) weaponDrops.push('iceGun');
+    if ((inventoryState.bow?.count || 0) > 0) weaponDrops.push('bow');
+    if ((inventoryState.bazooka?.count || 0) > 0) weaponDrops.push('bazooka');
+    if ((inventoryState.bomb?.count || 0) > 0) weaponDrops.push('bomb');
+    if ((inventoryState.autumnSword?.count || 0) > 0) weaponDrops.push('autumnSword');
+    if ((inventoryState[FOAM_SWORD_ITEM_ID]?.count || 0) > 0) weaponDrops.push(FOAM_SWORD_ITEM_ID);
+    if ((inventoryState.hammer?.count || 0) > 0) weaponDrops.push('hammer');
+    if ((inventoryState.lantern?.count || 0) > 0) weaponDrops.push('lantern');
+    if ((inventoryState[TORCH_ITEM_ID]?.count || 0) > 0) weaponDrops.push(TORCH_ITEM_ID);
+    const weaponPositions = createRingPositions(deathPosition, weaponDrops.length, 2.2);
+    weaponDrops.forEach((weaponId, index) => {
+      const position = weaponPositions[index] || deathPosition;
+      if (weaponId === 'iceGun') {
+        spawnIceGunPickup(position);
+      } else if (weaponId === 'bow') {
+        spawnBowPickup(position);
+      } else if (weaponId === 'bazooka') {
+        spawnBazookaPickup(position);
+      } else if (weaponId === 'bomb') {
+        spawnBombPickup(position);
+      } else if (weaponId === 'autumnSword') {
+        spawnAutumnSwordPickup(position);
+      } else if (weaponId === 'hammer') {
+        spawnHammerPickup(position);
+      } else if (weaponId === 'lantern') {
+        spawnLanternPickup(position);
+      } else if (weaponId === TORCH_ITEM_ID) {
+        const torchEntry = inventoryState[TORCH_ITEM_ID];
+        const torchHealth = getTorchHealths(torchEntry)[0] ?? DEFAULT_TORCH_HEALTH;
+        spawnTorchPickup(position, torchHealth);
+      }
+    });
+
+    playerControls?.setAmmo?.(0);
+    clearInventoryState();
+  };
+
+  function updateHealthUI() {
+    if (!healthBar) return;
+    const maxSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
+    const currentSegments = clampHealthSegments(statsState.health, statsState.level, maxSegments);
+    const healthRatio = maxSegments > 0 ? currentSegments / maxSegments : 0;
+    if (healthBar.childElementCount !== maxSegments) {
+      healthBar.innerHTML = '';
+      for (let i = 0; i < maxSegments; i += 1) {
+        const segment = document.createElement('span');
+        segment.className = 'health-segment';
+        healthBar.appendChild(segment);
+      }
+    }
+    Array.from(healthBar.children).forEach((segment, index) => {
+      segment.classList.toggle('filled', index < currentSegments);
+    });
+    if (healthRatio > 0.75) {
+      healthBar.dataset.healthLevel = 'high';
+    } else if (healthRatio > 0.5) {
+      healthBar.dataset.healthLevel = 'mid';
+    } else if (healthRatio > 0.25) {
+      healthBar.dataset.healthLevel = 'low';
+    } else {
+      healthBar.dataset.healthLevel = 'critical';
+    }
+    if (healthLabel) {
+      healthLabel.textContent = 'Health';
+    }
+  }
+
+  function updateSegmentedBar(barElement, maxSegments, currentSegments, filledClass = 'filled') {
+    if (!barElement) return;
+    if (barElement.childElementCount !== maxSegments) {
+      barElement.innerHTML = '';
+      for (let i = 0; i < maxSegments; i += 1) {
+        const segment = document.createElement('span');
+        segment.className = 'stat-segment';
+        barElement.appendChild(segment);
+      }
+    }
+    Array.from(barElement.children).forEach((segment, index) => {
+      segment.classList.toggle(filledClass, index < currentSegments);
+    });
+  }
+
+  function updateHungerUI() {
+    updateSegmentedBar(hungerBar, statsState.maxHungerSegments, clampHungerSegments(statsState.hunger, statsState.maxHungerSegments));
+  }
+
+  function updateMagicUI() {
+    updateSegmentedBar(magicBar, statsState.maxMagicSegments, clampMagicSegments(statsState.magic, statsState.maxMagicSegments));
+  }
+
+  const showHungerWarning = () => {
+    if (!hungerWarning) return;
+    hungerWarning.classList.add('visible');
+    if (hungerWarningTimer) {
+      clearTimeout(hungerWarningTimer);
+    }
+    hungerWarningTimer = setTimeout(() => {
+      hungerWarning.classList.remove('visible');
+    }, 3500);
+  };
+
+  const clampStat = (key, value) => {
+    if (['health', 'hunger', 'energy', 'magic'].includes(key)) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return 0;
+      }
+      if (key === 'health') {
+        return clampHealthSegments(num, statsState.level, statsState.maxHealthSegments);
+      }
+      if (key === 'magic') {
+        return clampMagicSegments(num, statsState.maxMagicSegments);
+      }
+      return clampHungerSegments(num, statsState.maxHungerSegments);
+    }
+    if (key === 'level') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return 1;
+      }
+      return Math.max(1, Math.round(num));
+    }
+    if (key === 'maxHealthSegments') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return BASE_HEALTH_SEGMENTS;
+      return Math.max(BASE_HEALTH_SEGMENTS, Math.round(num));
+    }
+    if (key === 'maxHungerSegments') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return BASE_HUNGER_SEGMENTS;
+      return Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(num)));
+    }
+    if (key === 'maxMagicSegments') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return BASE_MAGIC_SEGMENTS;
+      return Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, Math.round(num)));
+    }
+    if (key === 'xp' || key === 'monsterKills') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return 0;
+      }
+      return Math.max(0, Math.floor(num));
+    }
+    if (key === 'coins') {
+      const num = Number(value);
+      if (!Number.isFinite(num)) {
+        return 0;
+      }
+      return Math.max(0, Math.floor(num));
+    }
+    return value;
+  };
+
+  function setStat(key, value, { skipSave = false } = {}) {
+    const prevValue = statsState[key];
+    if (key === 'energy') {
+      setStat('hunger', value, { skipSave });
+      return;
+    }
+    statsState[key] = clampStat(key, value);
+    if (key === 'health') {
+      triggerPlayerHurtFlash(prevValue, statsState[key]);
+    }
+    if (key === 'health') {
+      updateHealthUI();
+    }
+    if (key === 'hunger') {
+      updateHungerUI();
+      statsState.energy = statsState.hunger;
+      updateEnergyEffects();
+    }
+    if (key === 'magic') {
+      updateMagicUI();
+    }
+    if (key === 'level') {
+      currentPlayerLevel = statsState.level;
+      updatePlayerInfoUI();
+      statsState.health = clampHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
+      updateHealthUI();
+    }
+    if (key === 'maxHealthSegments') {
+      statsState.health = clampHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
+      updateHealthUI();
+    }
+    if (key === 'maxHungerSegments') {
+      statsState.hunger = clampHungerSegments(statsState.hunger, statsState.maxHungerSegments);
+      statsState.energy = statsState.hunger;
+      updateHungerUI();
+      updateEnergyEffects();
+    }
+    if (key === 'maxMagicSegments') {
+      statsState.magic = clampMagicSegments(statsState.magic, statsState.maxMagicSegments);
+      updateMagicUI();
+    }
+    if (!skipSave) {
+      if (key === 'hunger') {
+        lastStatUpdateAt = Date.now();
+      }
+      saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+    }
+  }
+
+  const sleepState = {
+    active: false,
+    startedAt: null,
+    startHealth: null,
+    startHunger: null,
+    bed: null
+  };
+
+  const PLAYER_HURT_FLASH_DURATION_MS = 280;
+  const PLAYER_HURT_FLASH_MAX_ALPHA = 0.92;
+  const playerHurtFlashState = {
+    activeUntil: 0,
+    pulseAt: 0,
+    ring: null
+  };
+  const ensurePlayerHurtFlashRing = () => {
+    if (playerHurtFlashState.ring || !playerModel) return;
+    const ringGeometry = new THREE.RingGeometry(0.6, 1.35, 48);
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff2f2f,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(0, 0.1, 0);
+    ring.visible = false;
+    playerModel.add(ring);
+    playerHurtFlashState.ring = ring;
+  };
+  const triggerPlayerHurtFlash = (previousHealth, nextHealth) => {
+    if (!Number.isFinite(previousHealth) || !Number.isFinite(nextHealth)) return;
+    if (nextHealth >= previousHealth) return;
+    ensurePlayerHurtFlashRing();
+    const now = performance.now();
+    playerHurtFlashState.activeUntil = now + PLAYER_HURT_FLASH_DURATION_MS;
+    playerHurtFlashState.pulseAt = now;
+  };
+  const updatePlayerHurtFlash = () => {
+    ensurePlayerHurtFlashRing();
+    const ring = playerHurtFlashState.ring;
+    if (!ring) return;
+    const now = performance.now();
+    if (now >= playerHurtFlashState.activeUntil) {
+      ring.visible = false;
+      ring.material.opacity = 0;
+      return;
+    }
+    const elapsed = now - playerHurtFlashState.pulseAt;
+    const progress = THREE.MathUtils.clamp(elapsed / PLAYER_HURT_FLASH_DURATION_MS, 0, 1);
+    const opacity = (1 - progress) * PLAYER_HURT_FLASH_MAX_ALPHA;
+    const scale = 1 + (0.28 * progress);
+    ring.visible = true;
+    ring.material.opacity = opacity;
+    ring.scale.setScalar(scale);
+  };
+
+  const getSleepRecoveryValue = (key, startValue, elapsedSeconds) => {
+    const base = Number.isFinite(startValue) ? startValue : 0;
+    if (key === 'health') {
+      return clampStat(key, base + elapsedSeconds * SLEEP_RECOVERY_SEGMENTS_PER_SECOND);
+    }
+    return clampStat(key, base + elapsedSeconds * SLEEP_RECOVERY_PER_SECOND);
+  };
+
+  const startSleepSession = ({ bed } = {}) => {
+    if (sleepState.active) return;
+    const startedAt = Date.now();
+    sleepState.active = true;
+    sleepState.startedAt = startedAt;
+    sleepState.startHealth = statsState.health;
+    sleepState.startHunger = statsState.hunger;
+    sleepState.bed = bed || null;
+    if (profileNameKey) {
+      playerProfile.sleepStartedAt = startedAt;
+      void saveSleepTimestamp(profileNameKey, startedAt);
+    }
+  };
+
+  const endSleepSession = async () => {
+    if (!sleepState.active) return;
+    sleepState.active = false;
+    const now = Date.now();
+    const storedStart = profileNameKey ? await getSleepTimestamp(profileNameKey) : null;
+    const startAt = Number.isFinite(storedStart) ? storedStart : sleepState.startedAt;
+    const elapsedSeconds = startAt ? Math.max(0, (now - startAt) / 1000) : 0;
+    const expectedHealth = getSleepRecoveryValue('health', sleepState.startHealth ?? statsState.health, elapsedSeconds);
+    const expectedHunger = getSleepRecoveryValue('hunger', sleepState.startHunger ?? statsState.hunger, elapsedSeconds);
+    const nextHealth = Math.max(statsState.health, expectedHealth);
+    const nextHunger = Math.max(statsState.hunger, expectedHunger);
+    setStat('health', nextHealth, { skipSave: true });
+    setStat('hunger', nextHunger, { skipSave: true });
+    lastStatUpdateAt = Date.now();
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  };
+
+  window.setStat = setStat;
+  window.getPlayerStrength = () => {
+    const base = Number.isFinite(statsState.strength) ? statsState.strength : 0;
+    return Date.now() < playerPowerups.strengthUntil ? base * 3 : base;
+  };
+
+  const getPowerUpsForLevel = (level) => {
+    const safeLevel = Math.max(1, Math.round(level || 1));
+    if (safeLevel >= 15) return 4;
+    if (safeLevel >= 10) return 3;
+    if (safeLevel >= 5) return 2;
+    return 1;
+  };
+
+  const updateLevelUpPanelUI = () => {
+    if (!levelUpPanel) return;
+    if (levelUpTitle) {
+      levelUpTitle.textContent = `You've reached Level ${pendingLevelUpLevel}`;
+    }
+    if (levelUpSubtitle) {
+      levelUpSubtitle.textContent = 'Choose your power ups / stat increases.';
+    }
+    if (levelUpRemaining) {
+      levelUpRemaining.textContent = `You have ${pendingLevelUpChoices} power ups to choose.`;
+    }
+  };
+
+  const closeLevelUpPanel = () => {
+    pendingLevelUpChoices = 0;
+    levelUpSelectionActive = false;
+    if (levelUpPanel) {
+      levelUpPanel.classList.add('hidden');
+    }
+    updateControlAvailability();
+  };
+
+  const openLevelUpPanel = () => {
+    if (!levelUpPanel) return;
+    levelUpSelectionActive = pendingLevelUpChoices > 0;
+    updateLevelUpPanelUI();
+    levelUpPanel.classList.remove('hidden');
+    updateControlAvailability();
+  };
+
+  const applyLevelUpChoice = (choiceKey) => {
+    if (pendingLevelUpChoices <= 0) {
+      closeLevelUpPanel();
+      return;
+    }
+    if (choiceKey === 'strength') {
+      setStat('strength', (Number.isFinite(statsState.strength) ? statsState.strength : 0) + 1, { skipSave: true });
+    }
+    if (choiceKey === 'health') {
+      setStat('maxHealthSegments', statsState.maxHealthSegments + 1, { skipSave: true });
+      setStat('health', statsState.health + 1, { skipSave: true });
+    }
+    if (choiceKey === 'hunger') {
+      setStat('maxHungerSegments', statsState.maxHungerSegments + 1, { skipSave: true });
+      setStat('hunger', statsState.hunger + 1, { skipSave: true });
+    }
+    if (choiceKey === 'magic') {
+      setStat('maxMagicSegments', statsState.maxMagicSegments + 1, { skipSave: true });
+      setStat('magic', statsState.magic + 1, { skipSave: true });
+    }
+    pendingLevelUpChoices = Math.max(0, pendingLevelUpChoices - 1);
+    if (pendingLevelUpChoices <= 0) {
+      void saveStatsImmediate(profileNameKey, statsState, lastStatUpdateAt);
+      closeLevelUpPanel();
+      return;
+    }
+    updateLevelUpPanelUI();
+    void saveStatsImmediate(profileNameKey, statsState, lastStatUpdateAt);
+  };
+
+  levelUpStrengthButton?.addEventListener('click', () => applyLevelUpChoice('strength'));
+  levelUpMagicButton?.addEventListener('click', () => applyLevelUpChoice('magic'));
+  levelUpHungerButton?.addEventListener('click', () => applyLevelUpChoice('hunger'));
+  levelUpHealthButton?.addEventListener('click', () => applyLevelUpChoice('health'));
+
+  const queueLevelUpChoices = (fromLevel, toLevel) => {
+    if (!Number.isFinite(fromLevel) || !Number.isFinite(toLevel) || toLevel <= fromLevel) {
+      return;
+    }
+    for (let level = fromLevel + 1; level <= toLevel; level += 1) {
+      pendingLevelUpChoices += getPowerUpsForLevel(level);
+      pendingLevelUpLevel = level;
+    }
+    if (pendingLevelUpChoices > 0) {
+      openLevelUpPanel();
+    }
+  };
+
+  const getMonsterXpForLevel = (level) => {
+    const safeLevel = Math.max(1, Math.round(level || 1));
+    return 50 + (safeLevel - 1) * 25;
+  };
+  const addPlayerXp = (amount) => {
+    const normalized = clampStat('xp', amount);
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      return;
+    }
+    const previousTotalXp = Number.isFinite(statsState.xp) ? statsState.xp : 0;
+    const nextTotalXp = clampStat('xp', previousTotalXp + normalized);
+    if (nextTotalXp === previousTotalXp) {
+      return;
+    }
+    const previousLevel = getLevelForXp(previousTotalXp);
+    const nextLevel = getLevelForXp(nextTotalXp);
+    statsState.xp = nextTotalXp;
+    if (nextLevel !== statsState.level) {
+      const currentLevel = Number.isFinite(statsState.level) ? statsState.level : previousLevel;
+      if (nextLevel > currentLevel) {
+        queueLevelUpChoices(currentLevel, nextLevel);
+      }
+      setStat('level', nextLevel, { skipSave: true });
+    }
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+    queueXpAnimation(normalized);
+  };
+  window.addPlayerXp = addPlayerXp;
+  window.getMonsterXpForLevel = getMonsterXpForLevel;
+
+  window.onMonsterKill = (monster, { withFriend = false } = {}) => {
+    const currentKills = Number.isFinite(statsState.monsterKills) ? statsState.monsterKills : 0;
+    setStat('monsterKills', currentKills + 1, { skipSave: true });
+    showMonsterKillPopup(statsState.monsterKills);
+    const monsterLevel = Number.isFinite(monster?.level) ? monster.level : 1;
+    const baseXp = getMonsterXpForLevel(monsterLevel);
+    const bonusXp = withFriend ? 50 : 0;
+    addPlayerXp(baseXp + bonusXp);
+    notifyAchievementProgress('monstersKilled', 1);
+    if (isZombieMonsterType(monster)) {
+      notifyAchievementProgress('zombiesKilled', 1);
+    }
+    window.questManager?.handleMonsterKilled?.(monster);
+    const typeLabel = String(monster?.type || monster?.modelPath || '').toLowerCase();
+    if (typeLabel.includes('golem')) {
+      notifyAchievementProgress('golemsKilled', 1);
+    }
+  };
+  window.onPlayerKill = () => {
+    const currentLevel = Number.isFinite(statsState.level) ? statsState.level : 1;
+    addPlayerXp(currentLevel * 100);
+  };
+  window.onPlayerDeath = () => {};
+
+  Object.defineProperty(window, 'localHealth', {
+    configurable: true,
+    get: () => statsState.health,
+    set: value => setStat('health', value)
+  });
+
+  const shieldBlockTempForward = new THREE.Vector3();
+  const shieldBlockTempToAttacker = new THREE.Vector3();
+  const isAttackerInShieldBlockArc = (attackerModel) => {
+    if (!attackerModel?.position || !playerModel?.position) return false;
+    shieldBlockTempToAttacker.subVectors(attackerModel.position, playerModel.position);
+    shieldBlockTempToAttacker.y = 0;
+    if (shieldBlockTempToAttacker.lengthSq() < 0.0001) return true;
+    shieldBlockTempToAttacker.normalize();
+    if (typeof playerModel.getWorldDirection === 'function') {
+      playerModel.getWorldDirection(shieldBlockTempForward);
+    } else {
+      shieldBlockTempForward.copy(playerModel.userData?.direction || new THREE.Vector3(0, 0, 1));
+    }
+    shieldBlockTempForward.y = 0;
+    if (shieldBlockTempForward.lengthSq() < 0.0001) {
+      shieldBlockTempForward.copy(playerModel.userData?.direction || new THREE.Vector3(0, 0, 1));
+      shieldBlockTempForward.y = 0;
+    }
+    if (shieldBlockTempForward.lengthSq() < 0.0001) shieldBlockTempForward.set(0, 0, 1);
+    shieldBlockTempForward.normalize();
+    return shieldBlockTempForward.dot(shieldBlockTempToAttacker) > 0.2;
+  };
+
+  const damageEquippedShield = (damage = 1) => {
+    const currentEntry = normalizeShieldEntry(inventoryState[SHIELD_ITEM_ID]);
+    if (!currentEntry.count || currentEntry[SHIELD_HEALTH_KEY] <= 0) return false;
+    const currentHealth = currentEntry[SHIELD_HEALTH_KEY];
+    const nextHealth = Math.max(0, currentHealth - Math.max(1, Math.round(damage)));
+    const nextEntry = normalizeShieldEntry({
+      ...currentEntry,
+      [SHIELD_HEALTH_KEY]: nextHealth
+    });
+    if (shield?.mesh) {
+      shield.mesh.userData.shieldHealth = nextHealth;
+      shield.mesh.userData.shieldMaxHealth = DEFAULT_SHIELD_HEALTH;
+    }
+    if (shield?.heldMesh) {
+      shield.heldMesh.userData.shieldHealth = nextHealth;
+      shield.heldMesh.userData.shieldMaxHealth = DEFAULT_SHIELD_HEALTH;
+    }
+    shield?.showHealthBar?.(nextHealth, DEFAULT_SHIELD_HEALTH);
+    if (nextHealth <= 0) {
+      delete inventoryState[SHIELD_ITEM_ID];
+      unequipInventoryItem(SHIELD_ITEM_ID);
+    } else {
+      inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, nextEntry);
+    }
+    persistInventoryAndStorage();
+    return true;
+  };
+
+  window.tryBlockLocalPlayerHitWithShield = ({ attackerModel, damage } = {}) => {
+    if (shield?.holder !== playerControls || !inventoryState[SHIELD_ITEM_ID]?.count) return false;
+    if (!isAttackerInShieldBlockArc(attackerModel)) return false;
+    return damageEquippedShield(damage);
+  };
+
+  Object.defineProperty(window, 'hunger', {
+    configurable: true,
+    get: () => statsState.hunger,
+    set: value => setStat('hunger', value)
+  });
+
+  Object.defineProperty(window, 'energy', {
+    configurable: true,
+    get: () => statsState.energy,
+    set: value => setStat('energy', value)
+  });
+  Object.defineProperty(window, 'magic', {
+    configurable: true,
+    get: () => statsState.magic,
+    set: value => setStat('magic', value)
+  });
+
+  updateHealthUI();
+  updateHungerUI();
+  updateMagicUI();
+  updateEnergyEffects();
+
+  const getHungerWarningThresholdSegments = () => {
+    const maxSegments = clampHungerSegments(statsState.maxHungerSegments, statsState.maxHungerSegments);
+    return Math.max(1, Math.ceil(maxSegments * 0.25));
+  };
+
+  const HUNGER_WARNING_INTERVAL_MS = 3 * 60 * 1000;
+  setInterval(() => {
+    const threshold = getHungerWarningThresholdSegments();
+    if (statsState.hunger <= threshold) {
+      showHungerWarning();
+    }
+  }, HUNGER_WARNING_INTERVAL_MS);
+
+  if (offlineDecay.changed) {
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+
+  function spawnProjectileWithPerfFlags(...args) {
+    spawnProjectile(...args);
+    const latest = projectiles[projectiles.length - 1];
+    if (latest) {
+      latest.userData.skipTerrainCorrection = true;
+    }
+  }
+
+  function getExplosiveDamage(shooterId, baseDamage = BOMB_BASE_DAMAGE) {
+    if (shooterId && shooterId === multiplayer?.getId?.()) {
+      if (typeof window.getPlayerStrength === 'function') {
+        const strength = window.getPlayerStrength();
+        if (Number.isFinite(strength)) {
+          const bonus = convertPointsToSegments(strength, { minimum: 0 });
+          return Math.max(0, baseDamage + bonus);
+        }
+      }
+    }
+    return baseDamage;
+  }
+
+  function applyExplosiveImpactDamage(hitPosition, shooterId, { damageRadius = BOMB_DAMAGE_RADIUS, baseDamage = BOMB_BASE_DAMAGE, knockbackStrength = BOMB_KNOCKBACK_STRENGTH, attackLabel = 'bombExplosion' } = {}) {
+    if (!hitPosition) return;
+    const localId = multiplayer?.getId?.();
+    const isHost = !multiplayer || multiplayer.isHost;
+    const damage = getExplosiveDamage(shooterId, baseDamage);
+
+    if (playerModel?.position && !isPlayerOwnExplosiveTarget(shooterId, localId)) {
+      const distance = hitPosition.distanceTo(playerModel.position);
+      if (distance <= damageRadius) {
+        const localControls = runtimeContext.systems.playerControls ?? window.playerControls;
+        if (localControls?.isInvincible && Date.now() >= (localControls.invincibleUntil || 0)) {
+          localControls.isInvincible = false;
+          localControls.invincibleUntil = 0;
+        }
+        const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
+        if (!isInvincible) {
+          const attackTypes = getAttackTypes(attackLabel, ['explosive']);
+          window.localHealth = Math.max(0, window.localHealth - damage);
+          window.lastHitAttackTypes = attackTypes;
+          if (localControls) {
+            const direction = new THREE.Vector3()
+              .subVectors(playerModel.position, hitPosition)
+              .normalize();
+            localControls.applyKnockback({
+              direction,
+              strength: knockbackStrength
+            });
+          }
+        }
+      }
+    }
+
+    for (const [id, { model }] of Object.entries(otherPlayers)) {
+      if (!model?.position) continue;
+      if (isPlayerOwnExplosiveTarget(shooterId, id)) continue;
+      const distance = hitPosition.distanceTo(model.position);
+      if (distance > damageRadius) continue;
+      const player = otherPlayers[id];
+      if (!player) continue;
+      const attackTypes = getAttackTypes(attackLabel, ['explosive']);
+      const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
+      const nextHealth = Math.max(0, previousHealth - damage);
+      player.health = nextHealth;
+      player.lastHitAttackTypes = attackTypes;
+      if (nextHealth <= 0 && previousHealth > 0) {
+        player.isDead = true;
+        if (shooterId && shooterId === localId) {
+          window.onPlayerKill?.(id);
+        }
+      } else if (nextHealth > 0 && player.isDead) {
+        player.isDead = false;
+      }
+    }
+
+    const creatures = getDamageableCreatures();
+    if (Array.isArray(creatures) && creatures.length) {
+      if (isHost) {
+        for (const monster of creatures) {
+          if (!monster?.model?.position) continue;
+          if (shouldIgnoreExplosiveCreatureDamage(monster, shooterId ?? localId)) continue;
+          const distance = hitPosition.distanceTo(monster.model.position);
+          if (distance > damageRadius) continue;
+          const attackTypes = getAttackTypes(attackLabel, ['explosive']);
+          const direction = new THREE.Vector3()
+            .subVectors(monster.model.position, hitPosition)
+            .normalize();
+          const killed = monster.applyDamage(damage, {
+            attackTypes,
+            hitDirection: direction,
+            knockbackStrength
+          });
+          monster.lastDamageSourceId = shooterId ?? localId ?? null;
+          if (!killed) {
+            monster.applyKnockback({ direction, strength: knockbackStrength });
+          }
+          handleMonsterDamage?.(monster, { damage, killed, sourceId: shooterId ?? localId, attackTypes });
+          if (killed && shooterId && shooterId === localId) {
+            const withFriend = window.questManager?.isFriendActive?.() ?? false;
+            window.onMonsterKill?.(monster, { withFriend });
+          }
+        }
+      } else {
+        for (const monster of creatures) {
+          if (!monster?.model?.position) continue;
+          if (shouldIgnoreExplosiveCreatureDamage(monster, shooterId ?? localId)) continue;
+          const distance = hitPosition.distanceTo(monster.model.position);
+          if (distance > damageRadius) continue;
+          sendMonsterAttackIntent?.({
+            monsterId: monster.id,
+            damage,
+            sourcePlayerId: shooterId ?? localId,
+            attackTypes: getAttackTypes(attackLabel, ['explosive']),
+            at: Date.now()
+          });
+        }
+      }
+    }
+
+    buildState.records.forEach((record, id) => {
+      if (!record?.mesh?.position) return;
+      const distance = hitPosition.distanceTo(record.mesh.position);
+      if (distance <= damageRadius + 0.7) {
+        void applyBuildDamage(id, record, damage);
+      }
+    });
+
+    const removedBushPositions = natureController?.removeBushesInRadius?.(hitPosition, damageRadius) ?? [];
+    destroyBushesAtPositions(removedBushPositions);
+
+    if (natureController?.removeRocksInRadius) {
+      const removedRockPositions = natureController.removeRocksInRadius(hitPosition, damageRadius);
+      if (removedRockPositions.length > 0) {
+        notifyAchievementProgress('rocksBlownUp', removedRockPositions.length);
+        window.questManager?.handleRockBlownUp?.(removedRockPositions.length);
+      }
+      removedRockPositions.forEach((rockPosition) => {
+        for (let i = 0; i < 3; i += 1) {
+          const angle = (i / 3) * Math.PI * 2;
+          const offset = new THREE.Vector3(Math.cos(angle) * 0.28, 0, Math.sin(angle) * 0.28);
+          spawnSaltPickup(rockPosition.clone().add(offset));
+        }
+      });
+    }
+  }
+
+  function isPlayerOwnExplosiveTarget(shooterId, targetPlayerId) {
+    return !!shooterId && !!targetPlayerId && shooterId === targetPlayerId;
+  }
+
+  function getCompanionOwnerId(animal) {
+    if (!animal) return null;
+    const rawId = String(animal.id || '');
+    if (rawId.startsWith('companionDog:')) {
+      return rawId.slice('companionDog:'.length).split(':')[0] || null;
+    }
+    if (animal?.model?.userData?.isCompanion && !animal?.model?.userData?.remoteSynced) {
+      return multiplayer?.getId?.() || null;
+    }
+    return null;
+  }
+
+  function shouldIgnoreExplosiveCreatureDamage(creature, shooterId) {
+    if (!creature || !shooterId) return false;
+    const creatureId = String(creature.id || '');
+    if (creatureId === `questFriend:${shooterId}`) return true;
+    const companionOwnerId = getCompanionOwnerId(creature);
+    if (companionOwnerId && companionOwnerId === shooterId) return true;
+    return false;
+  }
+
+  function getBombDamage(shooterId) {
+    return getExplosiveDamage(shooterId, BOMB_BASE_DAMAGE);
+  }
+
+  function applyBombImpactDamage(hitPosition, shooterId) {
+    applyExplosiveImpactDamage(hitPosition, shooterId);
+  }
+
+  function applyMissileImpactDamage(hitPosition, shooterId) {
+    applyExplosiveImpactDamage(hitPosition, shooterId, {
+      damageRadius: MISSILE_DAMAGE_RADIUS,
+      baseDamage: MISSILE_BASE_DAMAGE,
+      knockbackStrength: MISSILE_KNOCKBACK_STRENGTH,
+      attackLabel: 'missileProjectile'
+    });
+  }
+
+  function spawnArrowProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    const latest = spawnArrowProjectile({
+      scene,
+      list,
+      position,
+      direction,
+      shooterId,
+      template: arrowTemplate,
+      cloneArrowMesh,
+      scale: ARROW_PROJECTILE_SCALE,
+      speed: ARROW_PROJECTILE_SPEED,
+      lifetime: ARROW_PROJECTILE_LIFETIME,
+      spawnProjectile,
+      spawnPickup: (pickupPosition, amount) => spawnArrowPickup(pickupPosition, amount, { noFloat: true })
+    });
+    if (latest) {
+      latest.userData.skipTerrainCorrection = true;
+      const localId = multiplayer?.getId?.();
+      if (!shooterId || (localId && shooterId === localId)) {
+        notifyAchievementProgress('bowShots', 1);
+      }
+    }
+  }
+
+  const createMeshPool = ({ create }) => {
+    const available = [];
+    return {
+      acquire() {
+        const mesh = available.pop();
+        if (mesh) {
+          mesh.visible = true;
+          return mesh;
+        }
+        return create();
+      },
+      release(mesh) {
+        if (!mesh) return;
+        mesh.visible = false;
+        available.push(mesh);
+      }
+    };
+  };
+
+  const bombProjectileMeshPool = createMeshPool({
+    create: () => {
+      const clone = bomb.mesh.clone(true);
+      clone.traverse(child => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+      clone.visible = true;
+      return clone;
+    }
+  });
+
+  function getBombExplosionGroundPosition(hitPosition, monster) {
+    const sourcePosition = monster?.model?.position ?? hitPosition;
+    const explosionPosition = sourcePosition?.clone?.() ?? new THREE.Vector3();
+    const groundY = getTerrainHeight(explosionPosition.x, explosionPosition.z);
+    if (Number.isFinite(groundY)) {
+      explosionPosition.y = groundY;
+    } else if (hitPosition?.isVector3 && Number.isFinite(hitPosition.y)) {
+      explosionPosition.y = Math.min(explosionPosition.y, hitPosition.y);
+    }
+    return explosionPosition;
+  }
+
+  function handleBombMonsterImpact({ hitPosition, monster } = {}, shooterId) {
+    const explosionPosition = getBombExplosionGroundPosition(hitPosition, monster);
+    spawnBombMist(scene, bombMists, explosionPosition);
+    applyBombImpactDamage(explosionPosition, shooterId);
+    return true;
+  }
+
+  function spawnBombProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    if (!bomb?.mesh) return;
+
+    // const lobDirection = direction.clone().multiplyScalar(-1).normalize();
+    tempLobDirection.copy(direction).normalize();
+    tempLobDirection.y += BOMB_THROW_UPWARD_BIAS;
+    tempLobDirection.normalize();
+
+    spawnProjectile(scene, list, position, tempLobDirection, shooterId, {
+      createMesh: () => bombProjectileMeshPool.acquire(),
+      releaseMesh: (mesh) => bombProjectileMeshPool.release(mesh),
+      speed: BOMB_THROW_SPEED,
+      lifetime: BOMB_THROW_LIFETIME,
+      colliderDesc: RAPIER.ColliderDesc.ball(0.18).setRestitution(0.3).setFriction(0.8),
+      groundContactOffset: 0.18,
+      damage: getBombDamage(shooterId),
+      attackLabel: 'bombExplosion',
+      attackTypes: ['explosive'],
+      onGroundHit: (hitPosition) => {
+        spawnBombMist(scene, bombMists, hitPosition);
+        applyBombImpactDamage(hitPosition, shooterId);
+      },
+      onMonsterImpact: (impact) => handleBombMonsterImpact(impact, shooterId)
+    });
+
+    const latest = list[list.length - 1];
+    if (latest) {
+      latest.userData.skipTerrainCorrection = true;
+    }
+  }
+
+
+  function createMissileTrailTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 192;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
+    gradient.addColorStop(0, 'rgba(255, 60, 30, 0.9)');
+    gradient.addColorStop(0.45, 'rgba(255, 20, 20, 0.42)');
+    gradient.addColorStop(1, 'rgba(255, 20, 20, 0.0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  function createMissileTrailMesh() {
+    const trailMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff4433,
+      map: createMissileTrailTexture(),
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+
+    const trailGroup = new THREE.Group();
+    const trailA = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 2.4), trailMaterial.clone());
+    trailA.position.z = -1.25;
+    trailGroup.add(trailA);
+
+    const trailB = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 2.4), trailMaterial.clone());
+    trailB.rotation.z = Math.PI / 2;
+    trailB.position.z = -1.25;
+    trailGroup.add(trailB);
+
+    trailGroup.userData.trailPlanes = [trailA, trailB];
+    return trailGroup;
+  }
+
+
+  function createMissileProjectileMesh(direction) {
+    const group = new THREE.Group();
+    const bodyGeometry = new THREE.CylinderGeometry(0.08, 0.1, 0.75, 12);
+    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x55615a, metalness: 0.35, roughness: 0.45 });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.rotation.x = Math.PI / 2;
+    group.add(body);
+
+    const noseGeometry = new THREE.ConeGeometry(0.1, 0.22, 12);
+    const noseMaterial = new THREE.MeshStandardMaterial({ color: 0xbf2020, emissive: 0x441010, emissiveIntensity: 0.25 });
+    const nose = new THREE.Mesh(noseGeometry, noseMaterial);
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = 0.48;
+    group.add(nose);
+
+    const finMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.2, roughness: 0.5 });
+    for (let i = 0; i < 4; i += 1) {
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.16, 0.14), finMaterial);
+      fin.position.z = -0.33;
+      fin.rotation.z = (i / 4) * Math.PI * 2;
+      fin.position.x = Math.cos(fin.rotation.z) * 0.1;
+      fin.position.y = Math.sin(fin.rotation.z) * 0.1;
+      group.add(fin);
+    }
+
+    const flame = new THREE.PointLight(0xff5522, 1.5, 2.8);
+    flame.position.z = -0.45;
+    group.add(flame);
+
+    const trail = createMissileTrailMesh();
+    group.add(trail);
+    group.userData.missileTrail = trail;
+
+    const forward = new THREE.Vector3(0, 0, 1);
+    const missileDirection = direction.clone().normalize();
+    if (missileDirection.lengthSq() > 0.0001) {
+      group.quaternion.setFromUnitVectors(forward, missileDirection);
+    }
+    group.traverse(child => {
+      if (!child.isMesh) return;
+      child.castShadow = true;
+      child.receiveShadow = true;
+    });
+    return group;
+  }
+
+  function handleMissileImpact(hitPosition, shooterId) {
+    spawnBombMist(scene, bombMists, hitPosition, { particleScale: 0.7, spreadScale: 0.75, lifetimeScale: 0.65 });
+    applyMissileImpactDamage(hitPosition, shooterId);
+  }
+
+  function spawnMissileProjectileWithPerfFlags(scene, list, position, direction, shooterId) {
+    const missileDirection = direction.clone().normalize();
+    missileDirection.y = Math.max(missileDirection.y, MISSILE_LAUNCH_UPWARD_BIAS);
+    missileDirection.normalize();
+    spawnProjectile(scene, list, position, missileDirection, shooterId, {
+      createMesh: () => createMissileProjectileMesh(missileDirection),
+      speed: MISSILE_PROJECTILE_SPEED,
+      lifetime: MISSILE_PROJECTILE_LIFETIME,
+      colliderDesc: RAPIER.ColliderDesc.ball(0.14).setRestitution(0.05).setFriction(0.7),
+      groundContactOffset: 0.12,
+      gravity: 0,
+      damage: getExplosiveDamage(shooterId, MISSILE_BASE_DAMAGE),
+      attackLabel: 'missileProjectile',
+      attackTypes: ['explosive', 'fire'],
+      onGroundHit: (hitPosition) => handleMissileImpact(hitPosition, shooterId),
+      onMonsterImpact: ({ hitPosition }) => {
+        handleMissileImpact(hitPosition, shooterId);
+        return true;
+      },
+      onBuildImpact: (hitPosition) => {
+        handleMissileImpact(hitPosition, shooterId);
+        return true;
+      },
+      onPlayerImpact: (hitPosition) => {
+        handleMissileImpact(hitPosition, shooterId);
+        return true;
+      }
+    });
+
+    const latest = list[list.length - 1];
+    if (latest) {
+      latest.userData.skipTerrainCorrection = true;
+      const trail = latest.userData?.missileTrail;
+      const speedScale = THREE.MathUtils.clamp(MISSILE_PROJECTILE_SPEED / 26, 1, 1.45);
+      trail?.scale?.set(1.15, 1.25 * speedScale, 1.15);
+    }
+  }
+
+  function spawnInventoryThrowProjectileWithPerfFlags(
+    scene,
+    list,
+    position,
+    direction,
+    shooterId,
+    {
+      itemId,
+      sourceItem,
+      damage,
+      thrownTorchHealth,
+      createPickupOnGround = true
+    } = {}
+  ) {
+    if (!itemId) return false;
+    const itemMap = { iceGun, bow, bazooka, autumnSword, [FOAM_SWORD_ITEM_ID]: foamSword, hammer, lantern, torch };
+    const resolvedItem = sourceItem || itemMap[itemId];
+    if (!resolvedItem?.mesh) return false;
+
+    const markerColorMap = {
+      bow: 0xffc26b,
+      torch: 0xffa54c,
+      lantern: 0xffd400,
+      autumnSword: 0xffd400,
+      hammer: 0xb08a4a,
+      iceGun: 0xffd400
+    };
+
+    tempLobDirection.copy(direction).normalize();
+    tempLobDirection.y += INVENTORY_THROW_UPWARD_BIAS;
+    tempLobDirection.normalize();
+
+    spawnProjectile(scene, list, position, tempLobDirection, shooterId, {
+      createMesh: () => {
+        const clone = resolvedItem.mesh.clone(true);
+        clone.visible = true;
+        return clone;
+      },
+      speed: INVENTORY_THROW_SPEED,
+      lifetime: INVENTORY_THROW_LIFETIME,
+      gravity: 9.8,
+      colliderDesc: RAPIER.ColliderDesc.ball(0.2).setRestitution(0.25).setFriction(0.8),
+      groundContactOffset: 0.2,
+      damage: Number.isFinite(damage) ? damage : (itemId === 'autumnSword' || itemId === FOAM_SWORD_ITEM_ID ? 2 : 1),
+      attackLabel: 'thrownItemProjectile',
+      attackTypes: ['projectile', 'throw'],
+      onGroundHit: createPickupOnGround ? (hitPosition) => {
+        createDroppedWeaponPickup(resolvedItem, {
+          itemId,
+          quantity: 1,
+          markerColor: markerColorMap[itemId] ?? 0xffd400,
+          markerOffsetY: 1.2,
+          position: hitPosition,
+          allowHidden: true,
+          torchHealth: itemId === TORCH_ITEM_ID ? thrownTorchHealth : undefined
+        });
+      } : null
+    });
+
+    return true;
+  }
+
+  const ICE_MIST_RANGE = 5;
+  const ICE_MIST_SPEED = 3.2;
+  const ICE_MIST_LIFETIME_MS = (ICE_MIST_RANGE / ICE_MIST_SPEED) * 1000;
+  const ICE_MIST_PARTICLE_COUNT = 7;
+  const ICE_MIST_FREEZE_MS = 5000;
+  const ICE_MIST_RADIUS = 0.9;
+  const tempLobDirection = new THREE.Vector3();
+  const tempMistDirection = new THREE.Vector3();
+  const tempMistMoveStep = new THREE.Vector3();
+  const tempAttackMistForward = new THREE.Vector3();
+
+  const createMistPool = ({ particleCount, color, emissive, opacity, emissiveIntensity, spread, yRandom, sizeRange }) => {
+    const available = [];
+    const sphereGeometry = new THREE.SphereGeometry(1, 10, 8);
+    return {
+      acquire() {
+        const pooled = available.pop();
+        if (pooled) {
+          pooled.group.visible = true;
+          return pooled;
+        }
+        const group = new THREE.Group();
+        const material = new THREE.MeshStandardMaterial({
+          color,
+          transparent: true,
+          opacity,
+          emissive,
+          emissiveIntensity,
+          depthWrite: false
+        });
+        for (let i = 0; i < particleCount; i++) {
+          const particle = new THREE.Mesh(sphereGeometry, material);
+          particle.castShadow = false;
+          particle.receiveShadow = false;
+          group.add(particle);
+        }
+        return { group, material };
+      },
+      setup(entry) {
+        entry.material.opacity = opacity;
+        entry.material.emissiveIntensity = emissiveIntensity;
+        entry.group.children.forEach((particle) => {
+          const size = THREE.MathUtils.lerp(sizeRange[0], sizeRange[1], Math.random());
+          particle.scale.setScalar(size);
+          particle.position.set(
+            (Math.random() - 0.5) * spread,
+            Math.random() * yRandom,
+            (Math.random() - 0.5) * spread
+          );
+        });
+      },
+      release(entry) {
+        if (!entry) return;
+        entry.group.visible = false;
+        available.push(entry);
+      }
+    };
+  };
+
+  const iceMistPool = createMistPool({
+    particleCount: ICE_MIST_PARTICLE_COUNT,
+    color: 0x66ccff,
+    emissive: 0x3aa5ff,
+    opacity: 0.65,
+    emissiveIntensity: 0.6,
+    spread: 0.35,
+    yRandom: 0.35,
+    sizeRange: [0.2, 0.45]
+  });
+
+  const bombMistPool = createMistPool({
+    particleCount: BOMB_MIST_PARTICLE_COUNT,
+    color: 0xd94b4b,
+    emissive: 0x7a1010,
+    opacity: 0.7,
+    emissiveIntensity: 0.5,
+    spread: 8.0,
+    yRandom: 0.4,
+    sizeRange: [0.25, 0.6]
+  });
+
+  function spawnIceMist(scene, mistList, position, direction, shooterId) {
+    const pooled = iceMistPool.acquire();
+    const mistGroup = pooled.group;
+    iceMistPool.setup(pooled);
+
+    mistGroup.position.copy(position);
+    mistGroup.userData.skipTerrainCorrection = true;
+    scene.add(mistGroup);
+
+    tempMistDirection.copy(direction).normalize();
+    const speed = ICE_MIST_SPEED * THREE.MathUtils.lerp(0.9, 1.15, Math.random());
+    const drift = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.3,
+      Math.random() * 0.2,
+      (Math.random() - 0.5) * 0.3
+    );
+    const velocity = new THREE.Vector3().copy(tempMistDirection).multiplyScalar(speed).add(drift);
+
+    mistList.push({
+      pooled,
+      group: mistGroup,
+      material: pooled.material,
+      velocity,
+      spawnTime: performance.now(),
+      lifetimeMs: ICE_MIST_LIFETIME_MS,
+      traveled: 0,
+      maxDistance: ICE_MIST_RANGE,
+      radius: ICE_MIST_RADIUS,
+      hitTargets: new Set(),
+      shooterId
+    });
+  }
+
+  function spawnBombMist(scene, mistList, position, options = {}) {
+    const pooled = bombMistPool.acquire();
+    const mistGroup = pooled.group;
+    bombMistPool.setup(pooled);
+    const particleScale = Number.isFinite(options.particleScale) ? options.particleScale : 1;
+    const spreadScale = Number.isFinite(options.spreadScale) ? options.spreadScale : 1;
+    if (particleScale !== 1 || spreadScale !== 1) {
+      mistGroup.children.forEach(child => {
+        if (!child?.isMesh) return;
+        child.position.multiplyScalar(spreadScale);
+        child.scale.multiplyScalar(particleScale);
+      });
+    }
+
+    mistGroup.position.copy(position);
+    mistGroup.userData.skipTerrainCorrection = true;
+    scene.add(mistGroup);
+
+    const drift = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.12,
+      0.15 + Math.random() * 0.2,
+      (Math.random() - 0.5) * 0.12
+    );
+
+    mistList.push({
+      pooled,
+      group: mistGroup,
+      material: pooled.material,
+      velocity: drift,
+      spawnTime: performance.now(),
+      lifetimeMs: BOMB_MIST_LIFETIME_MS * (Number.isFinite(options.lifetimeScale) ? options.lifetimeScale : 1)
+    });
+  }
+
+  function updateIceMists({
+    scene,
+    mistList,
+    deltaSeconds,
+    playerModel,
+    playerControls,
+    monsters,
+    multiplayer,
+    onBuildHit
+  }) {
+    if (!mistList.length) return;
+    const now = performance.now();
+    const isHost = !multiplayer || multiplayer.isHost;
+    const localId = multiplayer?.getId?.();
+
+    const removeMist = (index) => {
+      const mist = mistList[index];
+      if (!mist) return;
+      if (mist.group) {
+        scene.remove(mist.group);
+      }
+      iceMistPool.release(mist.pooled);
+      mistList.splice(index, 1);
+    };
+
+    for (let i = mistList.length - 1; i >= 0; i--) {
+      const mist = mistList[i];
+      tempMistMoveStep.copy(mist.velocity).multiplyScalar(deltaSeconds);
+      mist.group.position.add(tempMistMoveStep);
+      mist.traveled += tempMistMoveStep.length();
+
+      const ageMs = now - mist.spawnTime;
+      const progress = Math.min(1, ageMs / mist.lifetimeMs);
+      mist.material.opacity = THREE.MathUtils.lerp(0.65, 0, progress);
+      mist.material.emissiveIntensity = THREE.MathUtils.lerp(0.6, 0, progress);
+
+      if (playerModel && playerControls && !mist.hitTargets.has('local')) {
+        if (mist.shooterId && localId && mist.shooterId === localId) {
+          mist.hitTargets.add('local');
+        } else {
+          const distance = mist.group.position.distanceTo(playerModel.position);
+          if (distance <= mist.radius + 0.6) {
+            playerControls.applyFreeze(ICE_MIST_FREEZE_MS);
+            window.lastHitAttackTypes = getAttackTypes('iceMistProjectile', ['ice']);
+            mist.hitTargets.add('local');
+          }
+        }
+      }
+
+      if (typeof onBuildHit === 'function' && !mist.hitTargets.has('build')) {
+        if (onBuildHit({ position: mist.group.position, radius: mist.radius + 0.7, damage: 1 })) {
+          mist.hitTargets.add('build');
+        }
+      }
+
+      if (isHost && Array.isArray(monsters)) {
+        for (const monster of monsters) {
+          if (!monster || !monster.model) continue;
+          if (mist.hitTargets.has(monster.id)) continue;
+          const distance = mist.group.position.distanceTo(monster.model.position);
+          if (distance <= mist.radius + 0.8) {
+            monster.applyFreeze?.(ICE_MIST_FREEZE_MS);
+            monster.model.userData.lastHitAttackTypes = getAttackTypes('iceMistProjectile', ['ice']);
+            mist.hitTargets.add(monster.id);
+          }
+        }
+      }
+
+      if (ageMs >= mist.lifetimeMs || mist.traveled >= mist.maxDistance) {
+        removeMist(i);
+      }
+    }
+  }
+
+  function updateBombMists({ scene, mistList, deltaSeconds }) {
+    if (!mistList.length) return;
+    const now = performance.now();
+
+    const removeMist = (index) => {
+      const mist = mistList[index];
+      if (!mist) return;
+      if (mist.group) {
+        scene.remove(mist.group);
+      }
+      bombMistPool.release(mist.pooled);
+      mistList.splice(index, 1);
+    };
+
+    for (let i = mistList.length - 1; i >= 0; i--) {
+      const mist = mistList[i];
+      if (mist.velocity) {
+        tempMistMoveStep.copy(mist.velocity).multiplyScalar(deltaSeconds);
+        mist.group.position.add(tempMistMoveStep);
+      }
+      const ageMs = now - mist.spawnTime;
+      const progress = Math.min(1, ageMs / mist.lifetimeMs);
+      mist.material.opacity = THREE.MathUtils.lerp(0.7, 0, progress);
+      mist.material.emissiveIntensity = THREE.MathUtils.lerp(0.5, 0, progress);
+      if (ageMs >= mist.lifetimeMs) {
+        removeMist(i);
+      }
+    }
+  }
+
+  function createAttackArcTexture() {
+    if (attackVisualState.arcTexture) return attackVisualState.arcTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    gradient.addColorStop(0, 'rgba(210, 238, 255, 0)');
+    gradient.addColorStop(0.18, 'rgba(210, 238, 255, 0.35)');
+    gradient.addColorStop(0.52, 'rgba(255, 255, 245, 0.95)');
+    gradient.addColorStop(1, 'rgba(255, 230, 125, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const verticalFade = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    verticalFade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    verticalFade.addColorStop(0.42, 'rgba(0, 0, 0, 1)');
+    verticalFade.addColorStop(0.58, 'rgba(0, 0, 0, 1)');
+    verticalFade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = verticalFade;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    attackVisualState.arcTexture = new THREE.CanvasTexture(canvas);
+    attackVisualState.arcTexture.colorSpace = THREE.SRGBColorSpace;
+    return attackVisualState.arcTexture;
+  }
+
+  function createAttackImpactTexture() {
+    if (attackVisualState.impactTexture) return attackVisualState.impactTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.translate(64, 64);
+    ctx.beginPath();
+    const spikes = 18;
+    for (let i = 0; i < spikes * 2; i += 1) {
+      const radius = i % 2 === 0 ? 58 : 26 + ((i * 7) % 9);
+      const angle = -Math.PI / 2 + (i / (spikes * 2)) * Math.PI * 2;
+      const x = Math.cos(angle) * radius;
+      const y = Math.sin(angle) * radius;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    const starGradient = ctx.createRadialGradient(0, 0, 2, 0, 0, 62);
+    starGradient.addColorStop(0, 'rgba(255, 255, 245, 1)');
+    starGradient.addColorStop(0.26, 'rgba(255, 242, 86, 1)');
+    starGradient.addColorStop(0.64, 'rgba(255, 164, 27, 0.82)');
+    starGradient.addColorStop(1, 'rgba(255, 113, 16, 0)');
+    ctx.fillStyle = starGradient;
+    ctx.fill();
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = 'rgba(255, 247, 142, 0.92)';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, 17, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 245, 0.96)';
+    ctx.fill();
+    attackVisualState.impactTexture = new THREE.CanvasTexture(canvas);
+    attackVisualState.impactTexture.colorSpace = THREE.SRGBColorSpace;
+    return attackVisualState.impactTexture;
+  }
+
+  function getAttackHandBone(model, hand = 'right') {
+    const root = model?.userData?.pivot ?? model;
+    if (!root?.traverse) return null;
+    let rightHand = null;
+    let leftHand = null;
+    let anyHand = null;
+    root.traverse(child => {
+      if (!child?.isBone || !child.name) return;
+      const name = child.name.toLowerCase();
+      if (!rightHand && name.includes('righthand')) rightHand = child;
+      if (!leftHand && name.includes('lefthand')) leftHand = child;
+      if (!anyHand && name.includes('hand')) anyHand = child;
+    });
+    return hand === 'left'
+      ? leftHand || anyHand || rightHand || null
+      : rightHand || anyHand || leftHand || null;
+  }
+
+  function disposeAttackVisualEntry(entry) {
+    if (!entry) return;
+    if (entry.arc?.parent) entry.arc.parent.remove(entry.arc);
+    entry.arc?.geometry?.dispose?.();
+    entry.arc?.material?.dispose?.();
+    entry.trails?.forEach((trail) => {
+      if (trail.mesh?.parent) trail.mesh.parent.remove(trail.mesh);
+      trail.mesh?.geometry?.dispose?.();
+      trail.mesh?.material?.dispose?.();
+    });
+  }
+
+  function spawnAttackVisual(scene, playerModel, attackCfg, startTime) {
+    const preferredHand = playerModel?.userData?.currentAction === 'leftPunch' ? 'left' : 'right';
+    const handBone = getAttackHandBone(playerModel, preferredHand);
+    const arcGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+    const arcMaterial = new THREE.MeshBasicMaterial({
+      map: createAttackArcTexture(),
+      color: 0xd8f1ff,
+      transparent: true,
+      opacity: 0.88,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    });
+    const arc = new THREE.Mesh(arcGeometry, arcMaterial);
+    arc.castShadow = false;
+    arc.receiveShadow = false;
+    arc.userData.skipTerrainCorrection = true;
+    arc.position.set(0.15, 0.04, 0.04);
+    arc.rotation.set(0, Math.PI * 0.5, -Math.PI * 0.18);
+    const range = Math.max(0.8, Number.isFinite(attackCfg?.range) ? attackCfg.range : 1.5);
+    arc.scale.set(range * 0.55, range * 0.95, 1);
+    if (handBone) {
+      handBone.add(arc);
+    } else if (scene) {
+      arc.position.copy(playerModel.position).add(new THREE.Vector3(0, 1.15, 0));
+      scene.add(arc);
+    }
+
+    const trailMaterials = [];
+    for (let i = 0; i < ATTACK_TRAIL_STACK_COUNT; i++) {
+      trailMaterials.push(new THREE.MeshBasicMaterial({
+        color: i === 0 ? 0xdff6ff : i === 1 ? 0xffe08a : 0x7ecbff,
+        transparent: true,
+        opacity: 0.22 - i * 0.045,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide
+      }));
+    }
+    const trails = trailMaterials.map((material) => {
+      const mesh = new THREE.Mesh(new THREE.BufferGeometry(), material);
+      mesh.frustumCulled = false;
+      mesh.userData.skipTerrainCorrection = true;
+      scene?.add(mesh);
+      return { mesh };
+    });
+
+    return {
+      key: `${startTime}:${attackCfg?.region || 'around'}:${range}`,
+      arc,
+      trails,
+      points: [],
+      lastTrailSample: 0,
+      startTime,
+      hitFrameDone: false,
+      range,
+      region: attackCfg?.region || 'around',
+      hitTime: Number.isFinite(attackCfg?.hitTime) ? attackCfg.hitTime : 100,
+      hitWindow: Number.isFinite(attackCfg?.hitWindow) ? attackCfg.hitWindow : 220
+    };
+  }
+
+  function sampleAttackHandPosition(entry, playerModel, now) {
+    if (!entry || !playerModel) return;
+    if (now - entry.lastTrailSample < ATTACK_TRAIL_SAMPLE_MS && entry.points.length) return;
+    const preferredHand = playerModel?.userData?.currentAction === 'leftPunch' ? 'left' : 'right';
+    const handBone = getAttackHandBone(playerModel, preferredHand);
+    const position = new THREE.Vector3();
+    if (handBone) {
+      handBone.updateWorldMatrix(true, false);
+      handBone.getWorldPosition(position);
+    } else {
+      position.copy(playerModel.position).add(new THREE.Vector3(0, 1.1, 0));
+    }
+    position.x += (Math.random() - 0.5) * 0.035;
+    position.y += (Math.random() - 0.5) * 0.025;
+    position.z += (Math.random() - 0.5) * 0.035;
+    entry.points.push(position);
+    while (entry.points.length > ATTACK_TRAIL_POINT_COUNT) entry.points.shift();
+    entry.lastTrailSample = now;
+  }
+
+  function updateAttackTrailMeshes(entry, camera) {
+    if (!entry?.trails?.length || entry.points.length < 2) return;
+    const cameraRight = new THREE.Vector3(1, 0, 0);
+    if (camera) {
+      cameraRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    }
+    entry.trails.forEach((trail, stackIndex) => {
+      const positions = [];
+      const indices = [];
+      const width = 0.18 + stackIndex * 0.08;
+      entry.points.forEach((point, pointIndex) => {
+        const t = pointIndex / Math.max(1, entry.points.length - 1);
+        const fadeWidth = width * THREE.MathUtils.lerp(0.25, 1, t);
+        const noise = Math.sin((pointIndex + 1) * 7.13 + stackIndex * 2.4) * 0.025;
+        const offset = cameraRight.clone().multiplyScalar(fadeWidth + noise);
+        positions.push(point.x - offset.x, point.y - offset.y, point.z - offset.z);
+        positions.push(point.x + offset.x, point.y + offset.y, point.z + offset.z);
+        if (pointIndex < entry.points.length - 1) {
+          const base = pointIndex * 2;
+          indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
+        }
+      });
+      const geometry = trail.mesh.geometry;
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geometry.setIndex(indices);
+      geometry.computeBoundingSphere();
+    });
+  }
+
+  function spawnImpactBurst(scene, position) {
+    if (!scene || !position) return;
+    const material = new THREE.SpriteMaterial({
+      map: createAttackImpactTexture(),
+      color: 0xdff4ff,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.copy(position);
+    sprite.position.y += 0.65;
+    sprite.scale.setScalar(0.01);
+    sprite.userData.skipTerrainCorrection = true;
+    scene.add(sprite);
+    attackVisualState.impacts.push({ sprite, material, spawnTime: performance.now(), lifetimeMs: ATTACK_IMPACT_LIFETIME_MS });
+  }
+
+  function spawnImpactStreaks(scene, position, { color = 0xff3344, count = ATTACK_RED_STREAK_COUNT, lifetimeMs = ATTACK_RED_STREAK_LIFETIME_MS } = {}) {
+    if (!scene || !position) return;
+    const group = new THREE.Group();
+    const material = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    });
+    const streaks = [];
+    for (let i = 0; i < count; i += 1) {
+      const geometry = new THREE.PlaneGeometry(0.08, THREE.MathUtils.lerp(0.48, 0.95, Math.random()));
+      const mesh = new THREE.Mesh(geometry, material);
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
+      mesh.position.set(0, THREE.MathUtils.lerp(0.18, 0.55, Math.random()), 0);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.rotation.z = angle;
+      const velocity = new THREE.Vector3(
+        Math.cos(angle),
+        0.08 + Math.random() * 0.22,
+        Math.sin(angle)
+      ).normalize().multiplyScalar(THREE.MathUtils.lerp(4.0, 7.2, Math.random()));
+      streaks.push({ mesh, velocity });
+      group.add(mesh);
+    }
+    group.position.copy(position);
+    group.userData.skipTerrainCorrection = true;
+    scene.add(group);
+    attackVisualState.redStreaks.push({
+      group,
+      material,
+      streaks,
+      spawnTime: performance.now(),
+      lifetimeMs
+    });
+  }
+
+  function spawnRedImpactStreaks(scene, position) {
+    spawnImpactStreaks(scene, position);
+  }
+
+  function spawnGreenLeafStreaks(scene, position) {
+    spawnImpactStreaks(scene, position, {
+      color: 0x68ff63,
+      count: 14,
+      lifetimeMs: ATTACK_RED_STREAK_LIFETIME_MS * 1.35
+    });
+  }
+
+  function spawnShockwaveRing(scene, playerModel, range) {
+    if (!scene || !playerModel?.position) return;
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x8fe7ff,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(new THREE.RingGeometry(0.72, 1, 96), material);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.copy(playerModel.position);
+    mesh.position.y += 0.08;
+    mesh.scale.setScalar(0.05);
+    mesh.userData.skipTerrainCorrection = true;
+    scene.add(mesh);
+    attackVisualState.shockwaves.push({ mesh, material, range: Math.max(1, range), spawnTime: performance.now(), lifetimeMs: ATTACK_SHOCKWAVE_LIFETIME_MS });
+  }
+
+  function getAttackVisualHitTime(attackName, activeAttack, attackCfg) {
+    const baseHitTime = Number.isFinite(attackCfg?.hitTime) ? attackCfg.hitTime : 100;
+    if (attackName !== 'swordSpin') return baseHitTime;
+    const heldForMs = activeAttack?.overrides?.swordSpinChargeHeldForMs;
+    if (!Number.isFinite(heldForMs) || heldForMs <= 0) return baseHitTime;
+    const unplayedWindupMs = heldForMs * ((1 / SWORD_SPIN_CHARGE_WINDUP_SPEED) - 1);
+    return 800 + unplayedWindupMs;
+  }
+
+  function updateAttackVisuals({ scene, playerModel, camera, deltaSeconds }) {
+    if (!scene || !playerModel?.userData) return;
+    const activeAttack = playerModel.userData.attack;
+    if (!activeAttack?.name || !Number.isFinite(activeAttack.start)) {
+      disposeAttackVisualEntry(attackVisualState.active);
+      attackVisualState.active = null;
+      attackVisualState.completedAttackKey = null;
+    } else {
+      const attackName = activeAttack.name === 'mutantPunch' && playerModel.userData?.equippedWeaponType === 'sword'
+        ? 'swordSlash'
+        : activeAttack.name;
+      const cfg = ATTACKS[attackName];
+      if (cfg) {
+        const attackCfg = activeAttack.overrides ? { ...cfg, ...activeAttack.overrides } : cfg;
+        const key = `${activeAttack.start}:${attackName}`;
+        const elapsed = Date.now() - activeAttack.start;
+        const currentHitTime = getAttackVisualHitTime(attackName, activeAttack, attackCfg);
+        const currentHitWindow = Number.isFinite(attackCfg?.hitWindow) ? attackCfg.hitWindow : 220;
+        const visualEndMs = Math.max(ATTACK_ARC_LIFETIME_MS, currentHitTime + currentHitWindow + 120);
+        if (elapsed <= visualEndMs && attackVisualState.completedAttackKey !== key) {
+          if (!attackVisualState.active || attackVisualState.active.key !== key) {
+            disposeAttackVisualEntry(attackVisualState.active);
+            attackVisualState.active = spawnAttackVisual(scene, playerModel, attackCfg, activeAttack.start);
+            attackVisualState.active.key = key;
+          }
+        } else if (attackVisualState.active?.key === key) {
+          disposeAttackVisualEntry(attackVisualState.active);
+          attackVisualState.active = null;
+        }
+        const entry = attackVisualState.active;
+        if (entry) {
+          entry.hitTime = currentHitTime;
+          entry.hitWindow = currentHitWindow;
+          entry.range = Math.max(0.8, Number.isFinite(attackCfg?.range) ? attackCfg.range : entry.range);
+          entry.region = attackCfg?.region || entry.region || 'around';
+          const progress = Math.min(1, elapsed / Math.max(ATTACK_ARC_LIFETIME_MS, entry.hitTime + entry.hitWindow));
+          entry.arc.material.opacity = THREE.MathUtils.lerp(0.9, 0.08, progress);
+          entry.arc.rotation.z = THREE.MathUtils.lerp(-Math.PI * 0.35, Math.PI * 0.58, progress);
+          const swingScale = 1 + Math.sin(Math.min(Math.PI, progress * Math.PI)) * 0.28;
+          entry.arc.scale.set(entry.range * 0.55 * swingScale, entry.range * 0.95 * (0.82 + progress * 0.35), 1);
+          sampleAttackHandPosition(entry, playerModel, performance.now());
+          updateAttackTrailMeshes(entry, camera);
+          entry.trails?.forEach((trail, stackIndex) => {
+            trail.mesh.material.opacity = (0.24 - stackIndex * 0.05) * (1 - progress * 0.78);
+          });
+          if (!entry.hitFrameDone && elapsed >= entry.hitTime) {
+            if (entry.region === 'around') spawnShockwaveRing(scene, playerModel, entry.range);
+            entry.hitFrameDone = true;
+          }
+          if (elapsed > visualEndMs) {
+            disposeAttackVisualEntry(entry);
+            attackVisualState.active = null;
+            attackVisualState.completedAttackKey = key;
+          }
+        }
+      }
+    }
+
+    const now = performance.now();
+    for (let i = attackVisualState.impacts.length - 1; i >= 0; i--) {
+      const impact = attackVisualState.impacts[i];
+      const progress = Math.min(1, (now - impact.spawnTime) / impact.lifetimeMs);
+      const pulse = progress < 0.45
+        ? THREE.MathUtils.lerp(0.05, 1.5, progress / 0.45)
+        : THREE.MathUtils.lerp(1.5, 1.05, (progress - 0.45) / 0.55);
+      impact.sprite.scale.setScalar(pulse);
+      impact.material.opacity = THREE.MathUtils.lerp(0.95, 0, progress);
+      if (progress >= 1) {
+        impact.sprite.parent?.remove(impact.sprite);
+        impact.material.dispose?.();
+        attackVisualState.impacts.splice(i, 1);
+      }
+    }
+
+    for (let i = attackVisualState.redStreaks.length - 1; i >= 0; i -= 1) {
+      const burst = attackVisualState.redStreaks[i];
+      const progress = Math.min(1, (now - burst.spawnTime) / burst.lifetimeMs);
+      burst.material.opacity = THREE.MathUtils.lerp(0.95, 0, progress);
+      burst.streaks.forEach(({ mesh, velocity }) => {
+        tempMistMoveStep.copy(velocity).multiplyScalar(deltaSeconds);
+        mesh.position.add(tempMistMoveStep);
+      });
+      if (progress >= 1) {
+        burst.group?.parent?.remove(burst.group);
+        burst.streaks.forEach(({ mesh }) => mesh.geometry?.dispose?.());
+        burst.material.dispose?.();
+        attackVisualState.redStreaks.splice(i, 1);
+      }
+    }
+
+    for (let i = attackVisualState.shockwaves.length - 1; i >= 0; i--) {
+      const wave = attackVisualState.shockwaves[i];
+      const progress = Math.min(1, (now - wave.spawnTime) / wave.lifetimeMs);
+      const scale = THREE.MathUtils.lerp(0.08, wave.range, THREE.MathUtils.smoothstep(progress, 0, 1));
+      wave.mesh.scale.setScalar(scale);
+      wave.material.opacity = THREE.MathUtils.lerp(0.72, 0, progress);
+      wave.mesh.rotation.z += deltaSeconds * 2.4;
+      if (progress >= 1) {
+        wave.mesh.parent?.remove(wave.mesh);
+        wave.mesh.geometry?.dispose?.();
+        wave.material.dispose?.();
+        attackVisualState.shockwaves.splice(i, 1);
+      }
+    }
+  }
+
+  function asVec3(p) {
+    return p?.isVector3 ? p.clone()
+      : p && Number.isFinite(p.x) && Number.isFinite(p.z) ? new THREE.Vector3(p.x, p.y ?? 0, p.z)
+      : null;
+  }
+
+  function resolveSpawnY(position, offset, { allowOnBuildings = false } = {}) {
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.z)) return null;
+    return getSpawnY(position.x, position.z, offset, { allowOnBuildings });
+  }
+
+  function applySpawnY(position, offset, { allowOnBuildings = false } = {}) {
+    const resolvedY = resolveSpawnY(position, offset, { allowOnBuildings });
+    if (!Number.isFinite(resolvedY)) return false;
+    position.y = resolvedY;
+    return true;
+  }
+
+  function normalizeNetworkSpawnPosition(position, offset, { allowOnBuildings = false } = {}) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    const resolvedY = resolveSpawnY(spawnPos, offset, { allowOnBuildings });
+    if (!Number.isFinite(resolvedY)) return null;
+    spawnPos.y = resolvedY;
+    return spawnPos;
+  }
+
+  function spawnAmmoPickup(position, amount = AMMO_PICKUP_AMOUNT, options = {}) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+    if (options.noFloat) {
+      const groundOffset = Number.isFinite(options.groundOffset) ? options.groundOffset : 0.08;
+      if (!applySpawnY(spawnPos, groundOffset, { allowOnBuildings: true })) return;
+    } else if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) {
+      return;
+    }
+
+    const ammoType = options.type || 'ammo';
+    const geometry = options.geometry || new THREE.IcosahedronGeometry(0.25, 0);
+    const material = options.material || new THREE.MeshStandardMaterial({
+      color: ammoType === 'missile' ? 0xb72a2a : 0x7fd0ff,
+      emissive: ammoType === 'missile' ? 0x3a0808 : 0x225577,
+      emissiveIntensity: 0.4,
+      metalness: 0.1,
+      roughness: 0.4,
+    });
+
+    let pickup = options.createMesh ? options.createMesh() : null;
+    if (!pickup) {
+      pickup = new THREE.Mesh(geometry, material);
+    }
+    registerPickupEmissiveMaterials(pickup);
+    pickup.position.copy(spawnPos);
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
+    pickup.userData.skipTerrainCorrection = true;
+    pickup.userData.baseY = spawnPos.y;
+    pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.amount = amount;
+    pickup.userData.type = ammoType;
+    pickup.userData.sparkle = !!options.sparkle;
+    pickup.userData.noFloat = !!options.noFloat;
+    if (options.sparkle) {
+      const light = new THREE.PointLight(0xfff2a8, 0.6, 2);
+      light.position.set(0, 0.4, 0);
+      pickup.add(light);
+      pickup.userData.sparkleLight = light;
+    }
+    scene.add(pickup);
+    ammoPickups.push(pickup);
+    return pickup;
+  }
+
+  function spawnArrowPickup(position, amount = 1, options = {}) {
+    return spawnAmmoPickup(position, amount, {
+      type: 'arrow',
+      sparkle: true,
+      noFloat: options.noFloat,
+      groundOffset: options.groundOffset,
+      createMesh: () => {
+        const arrowMesh = cloneArrowMesh(arrowTemplate, ARROW_PROJECTILE_SCALE);
+        if (arrowMesh) {
+          if (amount > 1) {
+            arrowMesh.scale.multiplyScalar(1.3);
+          }
+          arrowMesh.rotation.set(0, Math.PI / 2, Math.PI / 2);
+          return arrowMesh;
+        }
+        const geometry = new THREE.CylinderGeometry(0.04, 0.05, 0.6, 8);
+        const material = new THREE.MeshStandardMaterial({
+          color: 0x7b5530,
+          emissive: 0x2b1a0a,
+          emissiveIntensity: 0.35
+        });
+        const fallback = new THREE.Mesh(geometry, material);
+        fallback.rotation.x = Math.PI / 2;
+        return fallback;
+      }
+    });
+  }
+
+  function getAmmoLabelForType(type) {
+    if (type === 'arrow') return 'Arrows';
+    if (type === 'missile') return 'Missiles';
+    return 'Ice ammo';
+  }
+
+  function getAmmoIconForType(type) {
+    if (type === 'arrow') return '🏹';
+    if (type === 'missile') return '🚀';
+    return '❄️';
+  }
+
+  function addAmmoForType(type, amount) {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    if (type === 'arrow') {
+      if (bow?.holder === playerControls) {
+        playerControls.addAmmo(amount);
+      } else {
+        const current = Number.isFinite(inventoryState.bow?.[ARROW_AMMO_KEY])
+          ? inventoryState.bow[ARROW_AMMO_KEY]
+          : 0;
+        setArrowAmmoCount(current + amount);
+      }
+      return;
+    }
+    if (type === 'missile') {
+      if (bazooka?.holder === playerControls) {
+        playerControls.addAmmo(amount);
+      } else {
+        setMissileAmmoCount(getMissileAmmoCount() + amount);
+      }
+      return;
+    }
+    if (iceGun?.holder === playerControls) {
+      playerControls.addAmmo(amount);
+    } else {
+      const current = Number.isFinite(inventoryState.iceGun?.[ICE_AMMO_KEY])
+        ? inventoryState.iceGun[ICE_AMMO_KEY]
+        : 0;
+      setIceAmmoCount(current + amount);
+    }
+  }
+
+
+  function createMissilePickupMesh(amount = 1) {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.08, 0.55, 10),
+      new THREE.MeshStandardMaterial({ color: 0x5d675f, metalness: 0.35, roughness: 0.45 })
+    );
+    body.rotation.x = Math.PI / 2;
+    group.add(body);
+    const nose = new THREE.Mesh(
+      new THREE.ConeGeometry(0.08, 0.16, 10),
+      new THREE.MeshStandardMaterial({ color: 0xb72a2a, emissive: 0x3a0808, emissiveIntensity: 0.25 })
+    );
+    nose.rotation.x = Math.PI / 2;
+    nose.position.z = 0.35;
+    group.add(nose);
+    group.rotation.set(0, Math.PI / 2, Math.PI / 2);
+    if (amount > 1) group.scale.multiplyScalar(1.25);
+    return group;
+  }
+
+  function spawnMissilePickup(position, amount = 1, options = {}) {
+    return spawnAmmoPickup(position, amount, {
+      type: 'missile',
+      sparkle: true,
+      noFloat: options.noFloat,
+      groundOffset: options.groundOffset,
+      createMesh: () => createMissilePickupMesh(amount)
+    });
+  }
+
+  function spawnDroppedAmmoPickup(position, amount, dropId, ammoType = 'ammo') {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return null;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
+
+    const geometry = new THREE.IcosahedronGeometry(0.25, 0);
+    const material = new THREE.MeshStandardMaterial({
+      color: ammoType === 'missile' ? 0xb72a2a : 0x7fd0ff,
+      emissive: ammoType === 'missile' ? 0x3a0808 : 0x225577,
+      emissiveIntensity: 0.4,
+      metalness: 0.1,
+      roughness: 0.4,
+    });
+
+    const pickup = new THREE.Mesh(geometry, material);
+    registerPickupEmissiveMaterials(pickup);
+    pickup.position.copy(spawnPos);
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
+    pickup.userData.skipTerrainCorrection = true;
+    pickup.userData.baseY = spawnPos.y;
+    pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.noFloat = true;
+    pickup.userData.isDropped = true;
+    pickup.userData.dropId = dropId;
+    pickup.userData.amount = amount;
+    pickup.userData.type = ammoType;
+    if (ammoType === 'missile') pickup.rotation.x = Math.PI / 2;
+    scene.add(pickup);
+    return pickup;
+  }
+
+  function addDroppedAmmoPickup({ id, position, amount, ammoType = 'ammo' }) {
+    if (!id || !position || droppedAmmoPickups.has(id)) return;
+    const pickup = spawnDroppedAmmoPickup(position, amount, id, ammoType);
+    if (!pickup) return;
+    droppedAmmoPickups.set(id, { mesh: pickup, amount, ammoType });
+  }
+
+  function removeDroppedAmmoPickup(id) {
+    const entry = droppedAmmoPickups.get(id);
+    if (!entry) return;
+    disposePickup(entry.mesh);
+    droppedAmmoPickups.delete(id);
+  }
+
+  function syncDroppedAmmoState(stateDrops = []) {
+    const seen = new Set();
+    stateDrops.forEach(drop => {
+      if (!drop?.id || !Array.isArray(drop.position)) return;
+      if (pendingDropRemovals.has(drop.id)) return;
+      seen.add(drop.id);
+      if (!droppedAmmoPickups.has(drop.id)) {
+        addDroppedAmmoPickup({
+          id: drop.id,
+          position: new THREE.Vector3(...drop.position),
+          amount: drop.amount,
+          ammoType: drop.ammoType
+        });
+      } else {
+        const entry = droppedAmmoPickups.get(drop.id);
+        const mesh = entry?.mesh;
+        const [x, y, z] = drop.position;
+        if (mesh && Number.isFinite(x) && Number.isFinite(z)) {
+          const normalizedPos = normalizeNetworkSpawnPosition({ x, y, z }, 0.6, { allowOnBuildings: true });
+          if (normalizedPos) {
+            mesh.position.copy(normalizedPos);
+            mesh.userData.baseY = normalizedPos.y;
+          }
+        }
+      }
+    });
+
+    Array.from(droppedAmmoPickups.keys()).forEach(id => {
+      if (!seen.has(id)) {
+        removeDroppedAmmoPickup(id);
+      }
+    });
+
+    Array.from(pendingDropRemovals).forEach(id => {
+      if (!seen.has(id)) {
+        pendingDropRemovals.delete(id);
+      }
+    });
+  }
+
+
+  function removeSpecificPickup(list, pickup) {
+    const index = list.indexOf(pickup);
+    if (index >= 0) {
+      list.splice(index, 1);
+    }
+  }
+
+  function spawnDroppedWorldPickup(itemId, position, amount, dropId) {
+    const normalizedAmount = Number.isFinite(amount) ? Math.max(1, Math.floor(amount)) : 1;
+    let pickup = null;
+    if (isMushroomItem(itemId)) {
+      pickup = spawnMushroomPickup(itemId, position);
+    } else if (isAppleItem(itemId)) {
+      pickup = spawnApplePickup(position);
+    } else if (isMeatItem(itemId)) {
+      pickup = spawnMeatPickup(position);
+    } else if (isWoodItem(itemId)) {
+      pickup = spawnWoodPickup(position);
+    } else if (isZombieBrainsItem(itemId)) {
+      pickup = spawnZombieBrainsPickup(position);
+    } else if (isSaltItem(itemId) || itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
+      pickup = spawnSaltPickup(position, { itemId, amount: normalizedAmount });
+    }
+    if (!pickup) return null;
+    pickup.dropId = dropId;
+    pickup.networkDropped = true;
+    return pickup;
+  }
+
+  function addDroppedWorldPickup({ id, itemId, position, amount }) {
+    if (!id || !itemId || !position || droppedWorldPickups.has(id)) return;
+    const pickup = spawnDroppedWorldPickup(itemId, position, amount, id);
+    if (!pickup) return;
+    droppedWorldPickups.set(id, {
+      id,
+      itemId,
+      amount: Number.isFinite(amount) ? Math.max(1, Math.floor(amount)) : 1,
+      pickup
+    });
+  }
+
+  function removeDroppedWorldPickup(id) {
+    const entry = droppedWorldPickups.get(id);
+    if (!entry) return;
+    const pickup = entry.pickup;
+    if (pickup) {
+      if (isMushroomItem(entry.itemId)) {
+        disposeMushroomPickup(pickup);
+        removeSpecificPickup(mushroomPickups, pickup);
+        mushroomPickupGrid.remove(pickup);
+      } else if (isAppleItem(entry.itemId)) {
+        disposeApplePickup(pickup);
+        removeSpecificPickup(applePickups, pickup);
+      } else if (isMeatItem(entry.itemId)) {
+        disposeWoodPickup(pickup);
+        removeSpecificPickup(meatPickups, pickup);
+      } else if (isWoodItem(entry.itemId)) {
+        disposeWoodPickup(pickup);
+        removeSpecificPickup(woodPickups, pickup);
+      } else if (isZombieBrainsItem(entry.itemId)) {
+        disposeWoodPickup(pickup);
+        removeSpecificPickup(zombieBrainsPickups, pickup);
+      } else if (isSaltItem(entry.itemId) || entry.itemId === SAUTEED_MUSHROOMS_ITEM_ID) {
+        disposeSaltPickup(pickup);
+        removeSpecificPickup(saltPickups, pickup);
+      }
+    }
+    droppedWorldPickups.delete(id);
+  }
+
+  function syncDroppedWorldState(stateDrops = []) {
+    const seen = new Set();
+    stateDrops.forEach(drop => {
+      if (!drop?.id || typeof drop.itemId !== 'string' || !Array.isArray(drop.position)) return;
+      if (pendingWorldDropRemovals.has(drop.id)) return;
+      seen.add(drop.id);
+      if (!droppedWorldPickups.has(drop.id)) {
+        addDroppedWorldPickup({
+          id: drop.id,
+          itemId: drop.itemId,
+          position: new THREE.Vector3(...drop.position),
+          amount: drop.amount
+        });
+      }
+    });
+
+    Array.from(droppedWorldPickups.keys()).forEach((id) => {
+      if (!seen.has(id)) {
+        removeDroppedWorldPickup(id);
+      }
+    });
+
+    Array.from(pendingWorldDropRemovals).forEach((id) => {
+      if (!seen.has(id)) {
+        pendingWorldDropRemovals.delete(id);
+      }
+    });
+  }
+
+  function spawnFoodPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
+
+    const geometry = new THREE.IcosahedronGeometry(0.25, 0);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xc7a77a,
+      emissive: 0x2a1a0a,
+      emissiveIntensity: 0.2,
+      metalness: 0.05,
+      roughness: 0.8
+    });
+
+    const pickup = new THREE.Mesh(geometry, material);
+    registerPickupEmissiveMaterials(pickup);
+    pickup.position.copy(spawnPos);
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
+    pickup.userData.skipTerrainCorrection = true;
+    pickup.userData.baseY = spawnPos.y;
+    pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.type = 'food';
+    scene.add(pickup);
+    foodPickups.push(pickup);
+    return pickup;
+  }
+
+  function spawnHealthPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
+
+    const geometry = new THREE.IcosahedronGeometry(0.25, 0);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xff5a5a,
+      emissive: 0x5a1111,
+      emissiveIntensity: 0.4,
+      metalness: 0.05,
+      roughness: 0.7
+    });
+
+    const pickup = new THREE.Mesh(geometry, material);
+    registerPickupEmissiveMaterials(pickup);
+    pickup.position.copy(spawnPos);
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
+    pickup.userData.skipTerrainCorrection = true;
+    pickup.userData.baseY = spawnPos.y;
+    pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.type = 'health';
+    scene.add(pickup);
+    healthPickups.push(pickup);
+    return pickup;
+  }
+
+  function spawnCoinPickup(position) {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
+
+    const geometry = new THREE.CylinderGeometry(0.2, 0.2, 0.06, 24);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xf8cf45,
+      emissive: 0x7a5a00,
+      emissiveIntensity: 0.45,
+      metalness: 0.7,
+      roughness: 0.25
+    });
+
+    const pickup = new THREE.Mesh(geometry, material);
+    registerPickupEmissiveMaterials(pickup);
+    pickup.position.copy(spawnPos);
+    applyOptionalShadowState(pickup, optionalShadowsEnabled);
+    pickup.userData.skipTerrainCorrection = true;
+    pickup.userData.baseY = spawnPos.y;
+    pickup.userData.phase = Math.random() * Math.PI * 2;
+    pickup.userData.type = 'coin';
+    pickup.rotation.x = Math.PI / 2;
+    scene.add(pickup);
+    coinPickups.push(pickup);
+    return pickup;
+  }
+
+  function applyFoodPickupEffects() {
+    setStat('hunger', statsState.hunger + FOOD_HUNGER_GAIN, { skipSave: true });
+    lastStatUpdateAt = Date.now();
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+
+  function applyHealthPickupEffects() {
+    setStat('health', statsState.health + HEALTH_PICKUP_SEGMENTS, { skipSave: true });
+    lastStatUpdateAt = Date.now();
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+  }
+
+  function applyCoinPickupEffects() {
+    const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + COIN_PICKUP_GAIN;
+    setStat('coins', nextCoins, { skipSave: true });
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+    showCoinPopup(statsState.coins);
+    showPickupToast('coins', COIN_PICKUP_GAIN);
+  }
+
+  function spawnIceGunPickup(position) {
+    if (!iceGun?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
+    iceGun.mesh.position.copy(spawnPos);
+    iceGun.mesh.quaternion.set(0, 0, 0, 1);
+    iceGun.mesh.visible = true;
+    iceGun.holder = null;
+    spawnIceGunAmmoCluster(spawnPos);
+  }
+
+  function spawnBazookaPickup(position) {
+    if (!bazooka?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
+    bazooka.mesh.position.copy(spawnPos);
+    bazooka.mesh.quaternion.set(0, 0, 0, 1);
+    bazooka.mesh.visible = true;
+    bazooka.holder = null;
+    spawnBazookaAmmoCluster(spawnPos);
+  }
+
+  function spawnBowPickup(position) {
+    if (!bow?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
+    bow.mesh.position.copy(spawnPos);
+    bow.mesh.quaternion.set(0, 0, 0, 1);
+    bow.mesh.visible = true;
+    bow.holder = null;
+    scatterArrowPickups(spawnPos);
+  }
+
+  const scatterArrowPickups = (center) => {
+    if (!center) return;
+    const offsets = [
+      new THREE.Vector3(1.2, 0, 0.6),
+      new THREE.Vector3(-1.1, 0, 0.9),
+      new THREE.Vector3(0.8, 0, -1.2),
+      new THREE.Vector3(-0.7, 0, -1.0),
+      new THREE.Vector3(1.0, 0, -0.4)
+    ];
+    const shuffled = offsets
+      .map(offset => ({ offset, order: Math.random() }))
+      .sort((a, b) => a.order - b.order);
+    const amounts = [1, 1, 3];
+    shuffled.slice(0, amounts.length).forEach((entry, index) => {
+      const arrowPos = center.clone().add(entry.offset);
+      spawnArrowPickup(arrowPos, amounts[index]);
+    });
+  };
+
+  function spawnBombPickup(position) {
+    if (!bomb?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.4, { allowOnBuildings: true })) return;
+    bomb.mesh.position.copy(spawnPos);
+    bomb.mesh.quaternion.set(0, 0, 0, 1);
+    bomb.mesh.visible = true;
+    bomb.holder = null;
+  }
+
+
+
+  const getTutorialNearbyPosition = (radius = 4.5) => {
+    if (!playerModel?.position) return null;
+    const angle = Math.random() * Math.PI * 2;
+    const x = playerModel.position.x + Math.cos(angle) * radius;
+    const z = playerModel.position.z + Math.sin(angle) * radius;
+    const y = (getTerrainHeight?.(x, z) ?? playerModel.position.y) + 0.3;
+    return new THREE.Vector3(x, y, z);
+  };
+
+  window.spawnTutorialMerchantNearby = async () => {
+    const position = getTutorialNearbyPosition(5.5);
+    if (!position) return;
+    await spawnMerchantAtFeature({
+      position,
+      scene,
+      attachPhysics: attachMonsterPhysics,
+      getTerrainHeight,
+      liftPositionToBuildingTop
+    });
+  };
+
+  window.spawnTutorialDeerNearby = async () => {
+    const position = getTutorialNearbyPosition(6.5);
+    if (!position) return;
+    await animalManager?.spawnDeerAt?.(position);
+  };
+
+  window.spawnTutorialDogNearby = async () => {
+    const position = getTutorialNearbyPosition(6.5);
+    if (!position) return;
+    await animalManager?.spawnDogAt?.(position);
+  };
+
+  window.spawnTutorialBowAndArrowsNearby = () => {
+    const bowPos = getTutorialNearbyPosition(4.2);
+    if (bowPos) {
+      spawnBowPickup(bowPos);
+    }
+    const arrowPos = getTutorialNearbyPosition(3.6);
+    if (arrowPos) {
+      spawnArrowPickup(arrowPos, 18);
+    }
+  };
+
+  window.spawnTutorialRockAndBombNearby = () => {
+    const rockPos = getTutorialNearbyPosition(6.2);
+    if (rockPos) {
+      natureController?.spawnQuestRock?.(rockPos);
+    }
+    const bombPos = getTutorialNearbyPosition(4.6);
+    if (bombPos) {
+      spawnBombPickup(bombPos);
+    }
+  };
+
+  function spawnAutumnSwordPickup(position) {
+    if (!autumnSword?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
+    autumnSword.mesh.position.copy(spawnPos);
+    autumnSword.mesh.quaternion.set(0, 0, 0, 1);
+    autumnSword.mesh.visible = true;
+    autumnSword.holder = null;
+  }
+
+
+  function spawnHammerPickup(position) {
+    if (!hammer?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.5, { allowOnBuildings: true })) return;
+    hammer.mesh.position.copy(spawnPos);
+    hammer.mesh.quaternion.set(0, 0, 0, 1);
+    hammer.mesh.visible = true;
+    hammer.holder = null;
+  }
+
+  function spawnLanternPickup(position) {
+    if (!lantern?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.2, { allowOnBuildings: true })) return;
+    lantern.mesh.position.copy(spawnPos);
+    lantern.mesh.quaternion.set(0, 0, 0, 1);
+    lantern.mesh.visible = true;
+    lantern.holder = null;
+  }
+
+  function spawnTorchPickup(position, torchHealth = DEFAULT_TORCH_HEALTH) {
+    if (!torch?.mesh) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0.2, { allowOnBuildings: true })) return;
+    torch.mesh.position.copy(spawnPos);
+    torch.mesh.quaternion.set(0, 0, 0, 1);
+    torch.mesh.visible = true;
+    torch.mesh.userData.torchHealth = normalizeTorchHealth(torchHealth);
+    torch.holder = null;
+  }
+
+  function spawnTreasureChestPickup(position) {
+    if (!treasureChest?.mesh || treasureChest.isOpen) return;
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+
+    if (!applySpawnY(spawnPos, 0, { allowOnBuildings: true })) return;
+    treasureChest.mesh.position.copy(spawnPos);
+    treasureChest.mesh.visible = true;
+    treasureChest.syncCollider?.();
+  }
+
+  function addDroppedWeaponPickupFromState(drop) {
+    if (!drop?.id || typeof drop.itemId !== 'string') return;
+    const dropId = drop.id;
+    if (droppedWeaponPickups.some(pickup => pickup?.dropId === dropId)) {
+      networkDroppedWeaponPickups.set(dropId, true);
+      return;
+    }
+    const pickupConfig = {
+      bow: { item: bow, markerColor: 0xffc26b },
+      lantern: { item: lantern, markerColor: 0xffd400 },
+      torch: { item: torch, markerColor: 0xffa54c },
+      bomb: { item: bomb, markerColor: 0xff4d4d },
+      autumnSword: { item: autumnSword, markerColor: 0xffd400 },
+      hammer: { item: hammer, markerColor: 0xb08a4a },
+      iceGun: { item: iceGun, markerColor: 0xffd400 },
+      shield: { item: shield, markerColor: 0x7a4a20 }
+    }[drop.itemId];
+    if (!pickupConfig?.item?.mesh) return;
+    const amount = Number.isFinite(drop.quantity) ? Math.max(1, Math.floor(drop.quantity)) : 1;
+    const pos = Array.isArray(drop.position) ? new THREE.Vector3(...drop.position) : null;
+    const quat = Array.isArray(drop.rotation) && drop.rotation.length === 4
+      ? new THREE.Quaternion(drop.rotation[0], drop.rotation[1], drop.rotation[2], drop.rotation[3])
+      : undefined;
+    createDroppedWeaponPickup(pickupConfig.item, {
+      itemId: drop.itemId,
+      quantity: amount,
+      markerColor: pickupConfig.markerColor,
+      markerOffsetY: 1.2,
+      position: pos,
+      quaternion: quat,
+      allowHidden: true,
+      torchHealth: Number.isFinite(drop.torchHealth) ? drop.torchHealth : undefined,
+      shieldHealth: Number.isFinite(drop.shieldHealth) ? drop.shieldHealth : undefined,
+      dropId,
+      shouldBroadcastRemoval: false
+    });
+    networkDroppedWeaponPickups.set(dropId, true);
+  }
+
+  function syncDroppedWeaponState(stateDrops = []) {
+    const seen = new Set();
+    stateDrops.forEach(drop => {
+      if (!drop?.id || typeof drop.itemId !== 'string') return;
+      const dropId = drop.id;
+      seen.add(dropId);
+      const existing = droppedWeaponPickups.find(pickup => pickup?.dropId === dropId);
+      const amount = Number.isFinite(drop.quantity) ? Math.max(1, Math.floor(drop.quantity)) : 1;
+      if (existing) {
+        networkDroppedWeaponPickups.set(dropId, true);
+        existing.quantity = amount;
+        if (Number.isFinite(drop.torchHealth)) {
+          const normalizedHealth = normalizeTorchHealth(drop.torchHealth);
+          existing.torchHealth = normalizedHealth;
+          if (existing.mesh) {
+            existing.mesh.userData.torchHealth = normalizedHealth;
+          }
+        }
+        if (Number.isFinite(drop.shieldHealth)) {
+          const normalizedHealth = normalizeShieldHealth(drop.shieldHealth);
+          existing.shieldHealth = normalizedHealth;
+          if (existing.mesh) {
+            existing.mesh.userData.shieldHealth = normalizedHealth;
+          }
+        }
+        return;
+      }
+      addDroppedWeaponPickupFromState(drop);
+    });
+
+    for (let i = droppedWeaponPickups.length - 1; i >= 0; i -= 1) {
+      const pickup = droppedWeaponPickups[i];
+      const dropId = pickup?.dropId;
+      if (!dropId || !networkDroppedWeaponPickups.has(dropId)) continue;
+      if (seen.has(dropId)) continue;
+      droppedWeaponPickups.splice(i, 1);
+      disposeDroppedWeaponPickup(pickup);
+      networkDroppedWeaponPickups.delete(dropId);
+    }
+  }
+
+  registerNetworkedEntity('droppedWeapons', {
+    getState: () => {
+      const drops = droppedWeaponPickups
+        .filter(pickup => pickup?.dropId)
+        .map(pickup => {
+          const pos = pickup.mesh?.position;
+          const q = pickup.mesh?.quaternion;
+          if (!pos || !q) return null;
+          return {
+            id: pickup.dropId,
+            itemId: pickup.itemId,
+            position: [pos.x, pos.y, pos.z],
+            rotation: [q.x, q.y, q.z, q.w],
+            quantity: pickup.quantity,
+            torchHealth: pickup.torchHealth,
+            shieldHealth: pickup.shieldHealth
+          };
+        })
+        .filter(Boolean);
+      return { drops };
+    },
+    applyState: state => {
+      if (!state) return;
+      const drops = Array.isArray(state.drops) ? state.drops : [];
+      syncDroppedWeaponState(drops);
+    },
+    isLocallyControlled: () => multiplayer?.isHost
+  });
+
+  registerNetworkedEntity('droppedAmmo', {
+    getState: () => {
+      const drops = Array.from(droppedAmmoPickups.entries()).map(([id, entry]) => {
+        const mesh = entry?.mesh;
+        if (!mesh) return null;
+        const pos = mesh.position;
+        return {
+          id,
+          position: [pos.x, pos.y, pos.z],
+          amount: entry.amount ?? mesh.userData.amount,
+          ammoType: entry.ammoType || mesh.userData.type || 'ammo'
+        };
+      }).filter(Boolean);
+      return { drops };
+    },
+    applyState: state => {
+      if (!state) return;
+      const drops = Array.isArray(state.drops) ? state.drops : [];
+      syncDroppedAmmoState(drops);
+    },
+    isLocallyControlled: () => multiplayer?.isHost
+  });
+
+
+  registerNetworkedEntity('droppedWorld', {
+    getState: () => {
+      const drops = Array.from(droppedWorldPickups.entries()).map(([id, entry]) => {
+        const pickup = entry?.pickup;
+        const pos = pickup?.mesh?.position || pickup?.position;
+        if (!pos || typeof entry?.itemId !== 'string') return null;
+        return {
+          id,
+          itemId: entry.itemId,
+          position: [pos.x, pos.y, pos.z],
+          amount: entry.amount
+        };
+      }).filter(Boolean);
+      return { drops };
+    },
+    applyState: state => {
+      if (!state) return;
+      const drops = Array.isArray(state.drops) ? state.drops : [];
+      syncDroppedWorldState(drops);
+    },
+    isLocallyControlled: () => multiplayer?.isHost
+  });
+
+  let statDecayAccumulator = 0;
+  let healthRecoveryRemainder = 0;
+  let healthDecayRemainder = 0;
+  let hungerRecoveryRemainder = 0;
+  let hungerDecayRemainder = 0;
+  let movementHungerDecayRemainder = 0;
+
+  playerControls = new PlayerControls({
+    scene,
+    camera,
+    playerModel,
+    renderer,
+    multiplayer,
+    getCameraOccluders: () => {
+      const occluders = [];
+      if (buildingsRenderer?.getCollisionMeshes) {
+        occluders.push(...buildingsRenderer.getCollisionMeshes());
+      } else if (buildingsRenderer?.group) {
+        occluders.push(buildingsRenderer.group);
+      }
+      if (natureController?.group) {
+        occluders.push(natureController.group);
+      }
+      if (homeSystem?.isInsideHome && homeSystem?.interiorGroup) {
+        occluders.push(homeSystem.interiorGroup);
+      }
+      return occluders;
+    },
+    spawnProjectile: spawnProjectileWithPerfFlags,
+    spawnArrowProjectile: spawnArrowProjectileWithPerfFlags,
+    spawnMissileProjectile: spawnMissileProjectileWithPerfFlags,
+    projectiles,
+    spawnIceMist,
+    iceMists,
+    audioManager,
+    initialAmmo: inventoryState.iceGun?.[ICE_AMMO_KEY],
+    onAmmoChange: (amount) => {
+      if (playerControls?.ammoLabel === 'Arrows') {
+        setArrowAmmoCount(amount);
+      } else if (playerControls?.ammoLabel === 'Missiles') {
+        setMissileAmmoCount(amount);
+      } else {
+        setIceAmmoCount(amount);
+      }
+    },
+    onSleepStart: startSleepSession,
+    onSleepEnd: endSleepSession
+  });
+  window.questManager?.hydratePersistentState?.(playerProfile?.quests);
+  window.questManager?.setQuestStateChangeListener?.((questState) => {
+    const completedCount = Array.isArray(questState?.completedQuestIds)
+      ? questState.completedQuestIds.length
+      : 0;
+    const newlyCompleted = Math.max(0, completedCount - questCompletionsTracked);
+    if (newlyCompleted > 0) {
+      notifyAchievementProgress('questsCompleted', newlyCompleted);
+      questCompletionsTracked = completedCount;
+    }
+    playerProfile = playerProfile || {};
+    playerProfile.quests = questState;
+    if (profileNameKey) {
+      void saveQuestState(profileNameKey, questState);
+    }
+  });
+  playerControls.throwBomb = (position, direction) => {
+    if (!bomb?.mesh || bomb.holder !== playerControls) return false;
+    if ((inventoryState.bomb?.count || 0) <= 0) return false;
+    const shooterId = multiplayer?.getId?.();
+    spawnBombProjectileWithPerfFlags(scene, projectiles, position, direction, shooterId);
+    audioManager?.playSFX('SFX/Explosions/Explosion 1.ogg', 0.45, {
+      cooldownKey: 'bomb-throw',
+      cooldownMs: audioManager?.performanceProfile?.attackCooldownMs ?? 120
+    });
+    unequipInventoryItem('bomb');
+    removeFromInventory('bomb', 1);
+    notifyAchievementProgress('bombsThrown', 1);
+    return true;
+  };
+  playerControls.getInventoryItemHand = (itemId) => getInventoryItemHand(itemId);
+  playerControls.throwInventoryItem = (itemId, position, direction) => {
+    if (!itemId || !position || !direction) return false;
+    if ((inventoryState[itemId]?.count || 0) <= 0) return false;
+    if (itemId === 'bomb') {
+      return playerControls.throwBomb(position, direction);
+    }
+
+    const itemMap = { iceGun, bow, bazooka, autumnSword, [FOAM_SWORD_ITEM_ID]: foamSword, hammer, lantern, torch };
+    const sourceItem = itemMap[itemId];
+    if (!sourceItem?.mesh) return false;
+
+    let thrownTorchHealth = null;
+    if (itemId === TORCH_ITEM_ID) {
+      const torchTakeResult = takeTorchHealth(inventoryState, equippedTorchIndex);
+      thrownTorchHealth = normalizeTorchHealth(
+        torchTakeResult?.health ?? torch?.mesh?.userData?.torchHealth ?? DEFAULT_TORCH_HEALTH
+      );
+      equippedTorchIndex = null;
+      persistInventoryAndStorage();
+    } else {
+      removeFromInventory(itemId, 1);
+    }
+
+    if (isInventoryItemEquipped(itemId)) {
+      unequipInventoryItem(itemId);
+    }
+
+    const shooterId = multiplayer?.getId?.();
+    if (typeof shooterId === 'string') {
+      multiplayer?.send?.({
+        type: 'inventoryThrowProjectile',
+        id: shooterId,
+        itemId,
+        position: position.toArray(),
+        direction: direction.toArray()
+      });
+    }
+
+    return spawnInventoryThrowProjectileWithPerfFlags(scene, projectiles, position, direction, shooterId, {
+      itemId,
+      sourceItem,
+      damage: (itemId === 'autumnSword' || itemId === FOAM_SWORD_ITEM_ID) ? 2 : 1,
+      thrownTorchHealth,
+      createPickupOnGround: true
+    });
+  };
+  const voiceMicState = {
+    listening: false,
+    lastTranscript: '',
+    pendingSpellResolution: false,
+    pendingSpellTimeout: null,
+    cooldownUntil: 0,
+    transcriptTimer: null
+  };
+  const VOICE_COOLDOWN_MS = 60_000;
+
+  playerControls.handleVoiceMicPress = () => {
+    startVoiceListening();
+  };
+  playerControls.stopVoiceListening = () => {
+    stopVoiceListening();
+  };
+  playerControls.isVoiceListening = () => voiceMicState.listening;
+  playerControls.getVoiceMicState = () => getVoiceMicState();
+
+  runtimeContext.systems.playerControls = playerControls;
+  window.playerControls = playerControls;
+
+  // ── Player physics collider ────────────────────────────────────────────────
+  // Kinematic body that follows the visual model; impulse hits are handled
+  // visually via playerKnockbackVelocity in the horde update.
+  if (rapierWorld) {
+    const playerPos = playerModel.position;
+    const playerRbDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
+      .setTranslation(playerPos.x, playerPos.y + 0.6, playerPos.z);
+    const playerRb = rapierWorld.createRigidBody(playerRbDesc);
+    const playerColDesc = RAPIER.ColliderDesc.capsule(0.6, 0.28)
+      .setFriction(0.5)
+      .setRestitution(0.1);
+    rapierWorld.createCollider(playerColDesc, playerRb);
+    playerControls.body = playerRb;
+    window.playerRigidBody = playerRb;
+  }
+  // Knockback velocity applied directly to player position in the horde loop
+  const _playerKnockback = { vx: 0, vy: 0, vz: 0, endTime: 0 };
+
+  if (paintBrush) {
+    paintBrush.holder = playerControls;
+  }
+  await initSpellsFeature({
+    playerControls,
+    getPlayerModel: () => playerModel,
+    getCharacterModel: () => characterModel,
+    spellsAvailable,
+    getMagic: () => statsState.magic,
+    setMagic: (value) => setStat('magic', value)
+  });
+  updateControlAvailability();
+  updateEnergyEffects();
+
+  // Auto-equip pistol if no other right-hand weapon is already held (non-horde modes)
+  if (window.gameMode !== 'horde' && pistol?.mesh && !playerControls.getEquippedWeapon?.('right')) {
+    equipInventoryItem('pistol');
+  }
+
+  // Horde mode: seed inventory with pistol, shield, and autumnSword so gesture equip can work immediately.
+  // Write directly to inventoryState to avoid triggering persistInventoryAndStorage during
+  // bootstrap (UI panels may not be fully initialised yet).
+  if (window.gameMode === 'horde') {
+    if (!(inventoryState['pistol']?.count > 0)) {
+      inventoryState['pistol'] = ensureCatalogEntry('pistol', { count: 1 });
+    }
+    if (!(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
+      inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+        count: 1,
+        [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
+        [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+      }));
+    }
+    if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
+      inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+    }
+  }
+
+  // ── Horde-mode enemy player ────────────────────────────────────────────────
+  let hordeEnemy = null;
+  if (window.gameMode === 'horde' && rapierWorld) {
+    const spawnOffset = new THREE.Vector3(6, 0, 0);
+    hordeEnemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
+      position: playerModel.position.clone().add(spawnOffset)
+    });
+    hordeEnemy._camera = camera;
+    window.hordeEnemy = hordeEnemy;
+  }
+
+  await initMapViewFeature({ camera, scene, player: playerModel });
+
+  const mapControls = document.createElement('div');
+  mapControls.className = 'map-controls';
+  const mapToggleButton = document.createElement('button');
+  mapToggleButton.className = 'map-control-button map-toggle-button';
+  mapToggleButton.textContent = 'Map';
+  const zoomInButton = document.createElement('button');
+  zoomInButton.className = 'map-control-button map-zoom-button';
+  zoomInButton.textContent = '+';
+  const zoomOutButton = document.createElement('button');
+  zoomOutButton.className = 'map-control-button map-zoom-button';
+  zoomOutButton.textContent = '–';
+  mapControls.appendChild(mapToggleButton);
+  mapControls.appendChild(zoomInButton);
+  mapControls.appendChild(zoomOutButton);
+  document.body.appendChild(mapControls);
+
+  mapToggleButton.addEventListener('click', () => {
+    mapViewEnabled = !mapViewEnabled;
+    window.mapViewEnabled = mapViewEnabled;
+    document.body.classList.toggle('map-open', mapViewEnabled);
+    void setMapViewEnabledFeature(mapViewEnabled);
+    updateControlAvailability();
+    mapToggleButton.classList.toggle('active', mapViewEnabled);
+    mapControls.classList.toggle('map-enabled', mapViewEnabled);
+  });
+
+  zoomInButton.addEventListener('click', () => {
+    void zoomInMapFeature();
+  });
+  zoomOutButton.addEventListener('click', () => {
+    void zoomOutMapFeature();
+  });
+
+  const TILE_SIZE_METERS = 300;
+  let terrainStampDebugOverlay = null;
+  const TILE_EVICT_RADIUS = 2;
+  const GROUND_TILE_RADIUS = 2;
+  const TILE_FETCH_RADIUS_METERS = TILE_SIZE_METERS * Math.SQRT2 * 0.5;
+  const TILE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  tileCache = createTileCache({
+    tileSizeMeters: TILE_SIZE_METERS,
+    evictRadiusTiles: TILE_EVICT_RADIUS
+  });
+  natureController?.setTileCache?.(tileCache);
+  natureController?.refreshAll?.();
+  if (pendingMapRebuild) {
+    rebuildMapFromCache();
+  }
+  terrainStampDebugOverlay = createTerrainStampDebugOverlay({
+    scene,
+    getTargetPosition: () => playerModel?.position ?? null
+  });
+  applyDisplaySettings();
+  const getRandomPickupPosition = (center) => {
+    if (!center) return null;
+    const radius = PICKUP_SPAWN_RADIUS * Math.sqrt(Math.random());
+    const angle = Math.random() * Math.PI * 2;
+    const x = center.x + Math.cos(angle) * radius;
+    const z = center.z + Math.sin(angle) * radius;
+    return new THREE.Vector3(x, 0, z);
+  };
+  const spawnScatteredPickups = ({ center, count, maxTotal, spawnFn }) => {
+    let spawned = 0;
+    let attempts = 0;
+    const maxAttempts = count * 6;
+    while (spawned < count && attempts < maxAttempts && maxTotal()) {
+      attempts += 1;
+      const spawnPos = getRandomPickupPosition(center);
+      if (!spawnPos) continue;
+      const terrainHeight = getTerrainHeight(spawnPos.x, spawnPos.z);
+      if (!Number.isFinite(terrainHeight)) continue;
+      spawnFn(spawnPos);
+      spawned += 1;
+    }
+    return spawned;
+  };
+  let lastPickupStockAt = 0;
+  let activeGroundTileKey = null;
+  let lastPickupTilesUpdateAt = 0;
+  let lastPickupTilesPosition = null;
+  const PICKUP_TILE_UPDATE_COOLDOWN_MS = 1000;
+  const PICKUP_TILE_UPDATE_DISTANCE_METERS = 10;
+  const getGroundTileCoords = (position) => {
+    if (!position) return null;
+    return {
+      x: Math.floor(position.x / TILE_SIZE_METERS),
+      y: Math.floor(-position.z / TILE_SIZE_METERS)
+    };
+  };
+  const updateGroundTiles = (position) => {
+    if (!groundTiles) return;
+    const centerTile = getGroundTileCoords(position);
+    if (!centerTile) return;
+    const centerKey = `${centerTile.x},${centerTile.y}`;
+    if (centerKey === activeGroundTileKey && groundTiles.tiles.size > 0) {
+      return;
+    }
+    activeGroundTileKey = centerKey;
+    const desiredKeys = new Set();
+    for (let dx = -GROUND_TILE_RADIUS; dx <= GROUND_TILE_RADIUS; dx += 1) {
+      for (let dy = -GROUND_TILE_RADIUS; dy <= GROUND_TILE_RADIUS; dy += 1) {
+        const tile = {
+          x: centerTile.x + dx,
+          y: centerTile.y + dy
+        };
+        const key = `${tile.x},${tile.y}`;
+        desiredKeys.add(key);
+        groundTiles.ensureTile(tile, key);
+      }
+    }
+    for (const key of Array.from(groundTiles.tiles.keys())) {
+      if (!desiredKeys.has(key)) {
+        groundTiles.removeTile(key);
+      }
+    }
+  };
+  const disposePickup = (pickup) => {
+    scene.remove(pickup);
+    pickup.geometry?.dispose();
+    pickup.material?.dispose();
+  };
+  const removePickupOutsideRadius = (pickups, center, radius) => {
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      const pickup = pickups[i];
+      if (!pickup) continue;
+      const pickupMesh = pickup?.position ? pickup : pickup?.mesh;
+      if (!pickupMesh?.position) {
+        pickups.splice(i, 1);
+        continue;
+      }
+      if (center.distanceTo(pickupMesh.position) > radius) {
+        if (pickupMesh === pickup) {
+          disposePickup(pickupMesh);
+        } else {
+          disposeWoodPickup(pickup);
+        }
+        pickups.splice(i, 1);
+      }
+    }
+  };
+  const removeDroppedWeaponPickupsOutsideRadius = (pickups, center, radius) => {
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      const pickup = pickups[i];
+      const mesh = pickup?.mesh;
+      if (!mesh) {
+        pickups.splice(i, 1);
+        continue;
+      }
+      if (center.distanceTo(mesh.position) > radius) {
+        disposeDroppedWeaponPickup(pickup);
+        pickups.splice(i, 1);
+      }
+    }
+  };
+  const getWeaponPickupConfigs = () => ([
+    {
+      itemId: 'iceGun',
+      item: iceGun,
+      markerColor: 0xffd400,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
+    },
+    {
+      itemId: 'bazooka',
+      item: bazooka,
+      markerColor: 0xff3b3b,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
+    },
+    {
+      itemId: 'bow',
+      item: bow,
+      markerColor: 0xffc26b,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
+    },
+    {
+      itemId: 'bomb',
+      item: bomb,
+      markerColor: 0xff4d4d,
+      markerOffsetY: 1.2,
+      groundOffset: 0.4,
+    },
+    {
+      itemId: 'autumnSword',
+      item: autumnSword,
+      markerColor: 0xffd400,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
+    },
+    {
+      itemId: 'hammer',
+      item: hammer,
+      markerColor: 0xb08a4a,
+      markerOffsetY: 1.2,
+      groundOffset: 0.5,
+    }
+  ]);
+  const spawnWeaponPickupCopy = (position) => {
+    const spawnPos = asVec3(position);
+    if (!spawnPos) return;
+    const configs = getWeaponPickupConfigs().filter(config => config.item?.mesh);
+    if (configs.length === 0) return;
+    const config = configs[Math.floor(Math.random() * configs.length)];
+    if (!applySpawnY(spawnPos, config.groundOffset, { allowOnBuildings: true })) return;
+    createDroppedWeaponPickup(config.item, {
+      itemId: config.itemId,
+      markerColor: config.markerColor,
+      markerOffsetY: config.markerOffsetY,
+      position: spawnPos,
+      allowHidden: true
+    });
+  };
+  const updatePickupTiles = (position) => {
+    if (!position) return;
+    const isPainterMode = window.gameMode === '3d_painter' || window.gameMode === 'horde';
+    const center = position.clone();
+    if (!isPainterMode) removePickupOutsideRadius(ammoPickups, center, PICKUP_SPAWN_RADIUS);
+    removePickupOutsideRadius(foodPickups, center, PICKUP_SPAWN_RADIUS);
+    removePickupOutsideRadius(healthPickups, center, PICKUP_SPAWN_RADIUS);
+    if (!isPainterMode) removePickupOutsideRadius(coinPickups, center, PICKUP_SPAWN_RADIUS);
+    removePickupOutsideRadius(zombieBrainsPickups, center, PICKUP_SPAWN_RADIUS);
+    if (!isPainterMode) removeDroppedWeaponPickupsOutsideRadius(droppedWeaponPickups, center, PICKUP_SPAWN_RADIUS);
+
+    const now = Date.now();
+    if (now - lastPickupStockAt < PICKUP_STOCK_COOLDOWN_MS) {
+      return;
+    }
+    lastPickupStockAt = now;
+
+    if (!isPainterMode) spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_AMMO_COUNT,
+      maxTotal: () => ammoPickups.length < MAX_AMMO_PICKUPS,
+      spawnFn: spawnAmmoPickup
+    });
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_FOOD_COUNT,
+      maxTotal: () => foodPickups.length < MAX_FOOD_PICKUPS,
+      spawnFn: spawnFoodPickup
+    });
+    spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_HEALTH_COUNT,
+      maxTotal: () => healthPickups.length < MAX_HEALTH_PICKUPS,
+      spawnFn: spawnHealthPickup
+    });
+    if (!isPainterMode) spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_COIN_COUNT,
+      maxTotal: () => coinPickups.length < MAX_COIN_PICKUPS,
+      spawnFn: spawnCoinPickup
+    });
+    if (!isPainterMode) spawnScatteredPickups({
+      center,
+      count: TILE_STOCK_WEAPON_COUNT,
+      maxTotal: () => droppedWeaponPickups.length < MAX_WEAPON_PICKUPS,
+      spawnFn: spawnWeaponPickupCopy
+    });
+
+    const isHost = !multiplayer || multiplayer.isHost;
+    if (!isPainterMode && isHost && TILE_STOCK_WEAPON_COUNT > 0) {
+      const hasIceGun = (inventoryState?.iceGun?.count || 0) > 0;
+      const canSpawnIceGun = iceGun?.mesh && !iceGun.holder && !hasIceGun && !iceGun.mesh.visible;
+      if (canSpawnIceGun) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnIceGunPickup(spawnPos);
+        }
+      }
+
+      const hasBazooka = (inventoryState?.bazooka?.count || 0) > 0;
+      const canSpawnBazooka = bazooka?.mesh && !bazooka.holder && !hasBazooka && !bazooka.mesh.visible;
+      if (canSpawnBazooka) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnBazookaPickup(spawnPos);
+        }
+      }
+
+      const hasBomb = (inventoryState?.bomb?.count || 0) > 0;
+      const canSpawnBomb = bomb?.mesh && !bomb.holder && !hasBomb && !bomb.mesh.visible;
+      if (canSpawnBomb) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnBombPickup(spawnPos);
+        }
+      }
+
+      const hasBow = (inventoryState?.bow?.count || 0) > 0;
+      const canSpawnBow = bow?.mesh && !bow.holder && !hasBow && !bow.mesh.visible;
+      if (canSpawnBow) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnBowPickup(spawnPos);
+        }
+      }
+
+      const hasSword = (inventoryState?.autumnSword?.count || 0) > 0;
+      const canSpawnSword = autumnSword?.mesh && !autumnSword.holder && !hasSword && !autumnSword.mesh.visible;
+      if (canSpawnSword) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnAutumnSwordPickup(spawnPos);
+        }
+      }
+
+      const hasHammer = (inventoryState?.hammer?.count || 0) > 0;
+      const canSpawnHammer = hammer?.mesh && !hammer.holder && !hasHammer && !hammer.mesh.visible;
+      if (canSpawnHammer) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnHammerPickup(spawnPos);
+        }
+      }
+    }
+
+    if (!isPainterMode) {
+      const canSpawnTreasureChest = treasureChest?.mesh
+        && !treasureChest.isOpen
+        && !treasureChest.mesh.visible;
+      if (canSpawnTreasureChest) {
+        const spawnPos = getRandomPickupPosition(center);
+        if (spawnPos) {
+          spawnTreasureChestPickup(spawnPos);
+        }
+      }
+    }
+
+    if (!isPainterMode) {
+      [iceGun, bow, bazooka, autumnSword, hammer, bomb].forEach((weapon) => {
+        if (!weapon?.mesh || weapon.holder || !weapon.mesh.visible) return;
+        if (center.distanceTo(weapon.mesh.position) > PICKUP_SPAWN_RADIUS) {
+          weapon.mesh.visible = false;
+        }
+      });
+      if (treasureChest?.mesh && !treasureChest.isOpen && treasureChest.mesh.visible) {
+        if (center.distanceTo(treasureChest.mesh.position) > PICKUP_SPAWN_RADIUS) {
+          treasureChest.mesh.visible = false;
+        }
+      }
+    }
+  };
+  const shouldUpdatePickupTiles = (position) => {
+    if (!position) return false;
+    const now = Date.now();
+    if (lastPickupTilesUpdateAt === 0) {
+      lastPickupTilesUpdateAt = now;
+      lastPickupTilesPosition = { x: position.x, z: position.z };
+      return true;
+    }
+    const elapsed = now - lastPickupTilesUpdateAt;
+    let movedEnough = false;
+    if (lastPickupTilesPosition) {
+      const dx = position.x - lastPickupTilesPosition.x;
+      const dz = position.z - lastPickupTilesPosition.z;
+      movedEnough = Math.hypot(dx, dz) >= PICKUP_TILE_UPDATE_DISTANCE_METERS;
+    }
+    if (movedEnough || elapsed >= PICKUP_TILE_UPDATE_COOLDOWN_MS) {
+      lastPickupTilesUpdateAt = now;
+      lastPickupTilesPosition = { x: position.x, z: position.z };
+      return true;
+    }
+    return false;
+  };
+  const mapFetchInFlight = new Set();
+  const tileRetryTimeouts = new Map();
+  let mapRateLimitedUntil = 0;
+  const debugPerf = {
+    monsters: 0,
+    ammoPickups: 0,
+    foodPickups: 0,
+    healthPickups: 0,
+    coinPickups: 0,
+    tileCacheSize: 0,
+    incomingBacklog: 0,
+    incomingProcessedPerFrame: 0,
+    adaptiveDegradeLevel: 0
+  };
+  const subsystemPerf = {
+    incomingQueue: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
+    ai: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
+    pickups: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
+    remoteLabels: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
+    audio: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 }
+  };
+  window.debugPerf = debugPerf;
+  let lastPerfUpdateMs = 0;
+  let lastMapUpdateAt = 0;
+  let lastMapUpdateTileKey = null;
+  const MAP_UPDATE_THROTTLE_MS = 1500;
+  const MAP_FRAME_BUDGET_MS = 18;
+  const MAP_DEFER_TIMEOUT_MS = 200;
+  const MAP_DEFER_MAX_WAIT_MS = 900;
+  let lastFrameDurationMs = 0;
+  const withSubsystemTiming = (name, fn) => {
+    const tracker = subsystemPerf[name];
+    if (!tracker) {
+      return fn();
+    }
+    const startedAt = performance.now();
+    const result = fn();
+    const elapsed = performance.now() - startedAt;
+    tracker.totalMs += elapsed;
+    tracker.calls += 1;
+    tracker.lastMs = elapsed;
+    if (elapsed > tracker.maxMs) {
+      tracker.maxMs = elapsed;
+    }
+    return result;
+  };
+  const getAdaptiveInterval = (bucket) => {
+    const lowEndBase = LOW_END_BUCKET_INTERVALS[bucket] ?? 1;
+    const lowEndStep = Math.max(1, lowEndBase + adaptiveDegradeLevel);
+    return isLowEndTier(currentPerformanceTier) ? lowEndStep : Math.max(1, 1 + adaptiveDegradeLevel);
+  };
+  const bucketDeltaSeconds = new Map();
+  const accumulateBucketDeltas = (deltaSeconds) => {
+    if (!Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return;
+    Object.keys(LOW_END_BUCKET_INTERVALS).forEach((bucket) => {
+      bucketDeltaSeconds.set(bucket, (bucketDeltaSeconds.get(bucket) || 0) + deltaSeconds);
+    });
+  };
+  const consumeBucketDelta = (bucket, fallbackDeltaSeconds = 0) => {
+    const accumulated = bucketDeltaSeconds.get(bucket);
+    bucketDeltaSeconds.set(bucket, 0);
+    if (Number.isFinite(accumulated) && accumulated > 0) {
+      return accumulated;
+    }
+    return Number.isFinite(fallbackDeltaSeconds) && fallbackDeltaSeconds > 0 ? fallbackDeltaSeconds : 0;
+  };
+  const shouldRunBucket = (bucket) => (frameIndex % getAdaptiveInterval(bucket)) === 0;
+  const processIncomingPeerDataQueue = () => withSubsystemTiming('incomingQueue', () => {
+    if (!canProcessIncomingPeerData || pendingIncomingPeerData.length === 0) {
+      lastIncomingProcessCount = 0;
+      lastIncomingBacklog = pendingIncomingPeerData.length;
+      return;
+    }
+    const startedAt = performance.now();
+    let processed = 0;
+    while (pendingIncomingPeerData.length > 0 && processed < INCOMING_QUEUE_MAX_PER_FRAME) {
+      if (performance.now() - startedAt >= INCOMING_QUEUE_BUDGET_MS) {
+        break;
+      }
+      const next = pendingIncomingPeerData.shift();
+      if (!next) continue;
+      processIncomingData(next[0], next[1]);
+      processed += 1;
+    }
+    lastIncomingProcessCount = processed;
+    lastIncomingBacklog = pendingIncomingPeerData.length;
+  });
+
+  function loadWorldOrigin() {
+    try {
+      const stored = localStorage.getItem(WORLD_ORIGIN_STORAGE_KEY);
+      if (!stored) return null;
+      const parsed = JSON.parse(stored);
+      if (!Number.isFinite(parsed?.lat) || !Number.isFinite(parsed?.lon)) return null;
+      return { lat: parsed.lat, lon: parsed.lon };
+    } catch (error) {
+      console.warn('Failed to parse stored world origin:', error);
+      return null;
+    }
+  }
+
+  function setWorldOrigin(origin) {
+    if (!origin || !Number.isFinite(origin.lat) || !Number.isFinite(origin.lon)) return;
+    worldOrigin = { lat: origin.lat, lon: origin.lon };
+    localStorage.setItem(WORLD_ORIGIN_STORAGE_KEY, JSON.stringify(worldOrigin));
+    if (tileCache) {
+      tileCache.setOrigin(worldOrigin);
+    } else {
+      pendingMapRebuild = true;
+    }
+    currentRenderOrigin = { centerLat: origin.lat, centerLon: origin.lon };
+  }
+
+  function resetWorldOrigin() {
+    worldOrigin = { ...DEFAULT_WORLD_ORIGIN };
+    localStorage.removeItem(WORLD_ORIGIN_STORAGE_KEY);
+    if (tileCache) {
+      tileCache.setOrigin(worldOrigin);
+    } else {
+      pendingMapRebuild = true;
+    }
+    currentRenderOrigin = { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
+  }
+
+  const getPlayerWorldPosition = () => {
+    const pos = playerControls?.body?.translation?.() ?? playerModel?.position;
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.z)) return null;
+    return { x: pos.x, y: Number.isFinite(pos.y) ? pos.y : 0, z: pos.z };
+  };
+
+  let originWasAutoReset = false;
+
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
+    homeSystem = createHomeSystem({
+      scene,
+      playerModel,
+      playerControls,
+      profileNameKey,
+      initialHome: playerProfile?.home ?? null
+    });
+    void homeSystem.loadStorageChest?.();
+    window.homeSystem = homeSystem;
+  }
+  const interiorScene = homeSystem?.interiorGroup ?? scene;
+  if (window.gameMode !== '3d_painter' && window.gameMode !== 'horde') {
+    bed = new Bed(interiorScene, {
+      position: new THREE.Vector3(-3, 0.5, 3),
+      useTerrainHeight: false
+    });
+    await bed.load();
+    window.bed = bed;
+
+    craftTable = new CraftTable(interiorScene, {
+      position: new THREE.Vector3(2.5, 0.5, -2.5),
+      useTerrainHeight: false
+    });
+    await craftTable.load();
+    window.craftTable = craftTable;
+    homeSystem?.registerPlacedObjects?.({ bed, craftTable });
+    if (rapierWorld && craftTable?.mesh) {
+      if (craftTableColliderBody && rapierWorld.getRigidBody(craftTableColliderBody.handle)) {
+        removeRigidBodySafely(rapierWorld, craftTableColliderBody);
+        craftTableColliderBody = null;
+      }
+      const bounds = new THREE.Box3().setFromObject(craftTable.mesh);
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      bounds.getSize(size);
+      bounds.getCenter(center);
+      const half = size.multiplyScalar(0.5);
+      const rbDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(center.x, center.y, center.z);
+      craftTableColliderBody = rapierWorld.createRigidBody(rbDesc);
+      const colDesc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
+        .setRestitution(0.05)
+        .setFriction(0.9);
+      rapierWorld.createCollider(colDesc, craftTableColliderBody);
+      craftTableColliderLastCenter = center.clone();
+    }
+  }
+
+  const syncCraftTableCollider = () => {
+    if (!craftTable?.mesh || !craftTableColliderBody) return;
+    craftTableColliderBounds.setFromObject(craftTable.mesh);
+    craftTableColliderBounds.getCenter(craftTableColliderCenter);
+    if (craftTableColliderLastCenter?.equals?.(craftTableColliderCenter)) return;
+    craftTableColliderBody.setTranslation(
+      { x: craftTableColliderCenter.x, y: craftTableColliderCenter.y, z: craftTableColliderCenter.z },
+      true
+    );
+    if (!craftTableColliderLastCenter) {
+      craftTableColliderLastCenter = new THREE.Vector3();
+    }
+    craftTableColliderLastCenter.copy(craftTableColliderCenter);
+  };
+
+  function getLatestLocationFix() {
+    const latest = window.latestLocation;
+    if (!latest || !Number.isFinite(latest.x) || !Number.isFinite(latest.z)) {
+      return null;
+    }
+    return latest;
+  }
+
+
+
+  worldOrigin = loadWorldOrigin() || { ...DEFAULT_WORLD_ORIGIN };
+  tileCache.setOrigin(worldOrigin);
+  currentRenderOrigin = { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
+
+  const computeGeojsonBounds = (geojson) => {
+    let minLon = Infinity;
+    let maxLon = -Infinity;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let count = 0;
+
+    const updateBounds = (coord) => {
+      if (!coord || coord.length < 2) return;
+      const [lon, lat] = coord;
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+      minLon = Math.min(minLon, lon);
+      maxLon = Math.max(maxLon, lon);
+      minLat = Math.min(minLat, lat);
+      maxLat = Math.max(maxLat, lat);
+      count += 1;
+    };
+
+    for (const feature of geojson?.features ?? []) {
+      const geometry = feature?.geometry;
+      if (!geometry) continue;
+      if (geometry.type === "LineString") {
+        geometry.coordinates.forEach(updateBounds);
+      } else if (geometry.type === "MultiLineString") {
+        geometry.coordinates.flat().forEach(updateBounds);
+      } else if (geometry.type === "Polygon") {
+        geometry.coordinates.flat().forEach(updateBounds);
+      } else if (geometry.type === "MultiPolygon") {
+        geometry.coordinates.flat(2).forEach(updateBounds);
+      }
+    }
+
+    if (!Number.isFinite(minLon) || count === 0) {
+      return null;
+    }
+
+    return {
+      minLon,
+      maxLon,
+      minLat,
+      maxLat,
+      centerLon: (minLon + maxLon) / 2,
+      centerLat: (minLat + maxLat) / 2
+    };
+  };
+
+  const tileRenderBounds = new Map();
+  const renderedTileGeojson = new Map();
+  const isSameRenderOrigin = (nextOrigin, prevOrigin) => {
+    if (!nextOrigin || !prevOrigin) {
+      return nextOrigin === prevOrigin;
+    }
+    return nextOrigin.centerLat === prevOrigin.centerLat
+      && nextOrigin.centerLon === prevOrigin.centerLon;
+  };
+
+  const refreshRenderOriginFromBounds = () => {
+    if (worldOrigin) {
+      currentRenderOrigin = { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
+      return currentRenderOrigin;
+    }
+    let minLon = Infinity;
+    let maxLon = -Infinity;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let count = 0;
+    for (const bounds of tileRenderBounds.values()) {
+      if (!bounds) continue;
+      minLon = Math.min(minLon, bounds.minLon);
+      maxLon = Math.max(maxLon, bounds.maxLon);
+      minLat = Math.min(minLat, bounds.minLat);
+      maxLat = Math.max(maxLat, bounds.maxLat);
+      count += 1;
+    }
+    if (count === 0 || !Number.isFinite(minLon)) {
+      currentRenderOrigin = null;
+      return null;
+    }
+    currentRenderOrigin = {
+      centerLat: (minLat + maxLat) / 2,
+      centerLon: (minLon + maxLon) / 2
+    };
+    return currentRenderOrigin;
+  };
+
+  const updateTileRenderBounds = (tileKey, geojson) => {
+    if (!tileKey) return;
+    if (worldOrigin) {
+      currentRenderOrigin = { centerLat: worldOrigin.lat, centerLon: worldOrigin.lon };
+      return;
+    }
+    const bounds = computeGeojsonBounds(geojson);
+    if (bounds) {
+      tileRenderBounds.set(tileKey, bounds);
+    } else {
+      tileRenderBounds.delete(tileKey);
+    }
+  };
+
+  const prefilterGeojson = (geojson) => {
+    if (!geojson) return geojson;
+    const highways = [];
+    const buildings = [];
+    const features = geojson?.features ?? [];
+    for (const feature of features) {
+      const props = feature?.properties;
+      if (!props) continue;
+      if (props.highway) {
+        highways.push(feature);
+      }
+      if (props.building) {
+        buildings.push(feature);
+      }
+    }
+    geojson.prefiltered = { highways, buildings };
+    return geojson;
+  };
+
+  const osmWorkerPending = new Map();
+  let osmWorkerRequestId = 0;
+  let osmWorker = null;
+
+  const disableOsmWorker = (error) => {
+    if (!osmWorker) return;
+    console.warn('Disabling OSM worker due to error:', error);
+    osmWorker.terminate();
+    osmWorker = null;
+    for (const { reject } of osmWorkerPending.values()) {
+      reject(error);
+    }
+    osmWorkerPending.clear();
+  };
+
+  const initOsmWorker = () => {
+    if (typeof Worker === "undefined") {
+      return;
+    }
+    try {
+      osmWorker = new Worker(new URL("../workers/osmWorker.js", import.meta.url), { type: "module" });
+      osmWorker.addEventListener("message", (event) => {
+        const { id, geojson, prefiltered, error } = event.data || {};
+        if (id == null) return;
+        const pending = osmWorkerPending.get(id);
+        if (!pending) return;
+        osmWorkerPending.delete(id);
+        if (error) {
+          pending.reject(new Error(error));
+        } else {
+          if (geojson && prefiltered) {
+            geojson.prefiltered = prefiltered;
+          }
+          pending.resolve(geojson);
+        }
+      });
+      osmWorker.addEventListener("error", (event) => disableOsmWorker(event));
+    } catch (error) {
+      console.warn('Failed to initialize OSM worker, falling back to main thread parsing.', error);
+      osmWorker = null;
+    }
+  };
+
+  const parseOverpassData = async (data) => {
+    if (!osmWorker) {
+      return prefilterGeojson(overpassToGeoJSON(data));
+    }
+    const requestId = osmWorkerRequestId += 1;
+    return new Promise((resolve, reject) => {
+      osmWorkerPending.set(requestId, { resolve, reject });
+      try {
+        osmWorker.postMessage({ id: requestId, data });
+      } catch (error) {
+        osmWorkerPending.delete(requestId);
+        reject(error);
+      }
+    });
+  };
+
+  initOsmWorker();
+
+  function rebuildMapFromCache() {
+    if (!tileCache || !mapRenderer || !buildingsRenderer) {
+      pendingMapRebuild = true;
+      return;
+    }
+    pendingMapRebuild = false;
+    mapRebuildToken += 1;
+    const rebuildId = mapRebuildToken;
+    const desiredKeys = new Set();
+    const changedTileKeys = new Set();
+    let boundsDirty = false;
+
+    for (const [tileKey, entry] of tileCache.cache.entries()) {
+      desiredKeys.add(tileKey);
+      if (!entry.geojson) continue;
+      const previousGeojson = renderedTileGeojson.get(tileKey);
+      if (previousGeojson === entry.geojson) continue;
+      renderedTileGeojson.set(tileKey, entry.geojson);
+      updateTileRenderBounds(tileKey, entry.geojson);
+      boundsDirty = true;
+      changedTileKeys.add(tileKey);
+    }
+
+    for (const tileKey of Array.from(renderedTileGeojson.keys())) {
+      if (desiredKeys.has(tileKey)) continue;
+      renderedTileGeojson.delete(tileKey);
+      tileRenderBounds.delete(tileKey);
+      mapRenderer.removeTile?.(tileKey);
+      buildingsRenderer.removeTile?.(tileKey);
+      clearTerrainStampsForTile(tileKey);
+      boundsDirty = true;
+      changedTileKeys.add(tileKey);
+    }
+
+    if (boundsDirty) {
+      refreshRenderOriginFromBounds();
+      rebuildGroundTilesForDirtyTerrainChunks();
+    }
+    const originChanged = !isSameRenderOrigin(currentRenderOrigin, lastRenderOrigin);
+    if (originChanged) {
+      for (const tileKey of desiredKeys) {
+        const entry = tileCache.cache.get(tileKey);
+        if (entry?.geojson) {
+          changedTileKeys.add(tileKey);
+        }
+      }
+    }
+
+    const bounds = currentRenderOrigin;
+    for (const tileKey of changedTileKeys) {
+      const entry = tileCache.cache.get(tileKey);
+      if (!entry?.geojson) continue;
+      setTerrainStampsForTile(tileKey, entry.geojson, bounds);
+      mapRenderer.updateTileHighways?.(tileKey, entry.geojson, bounds);
+      buildingsRenderer.updateTileBuildings?.(tileKey, entry.geojson, bounds);
+    }
+    rebuildGroundTilesForDirtyTerrainChunks();
+
+    const finishBuildingRender = () => {
+      if (rebuildId !== mapRebuildToken) return;
+      if (changedTileKeys.size === 0) return;
+      scheduleBuildingRefresh();
+      if (typeof natureController?.refreshTile === "function") {
+        for (const tileKey of changedTileKeys) {
+          natureController.refreshTile(tileKey);
+        }
+      } else {
+        natureController?.refreshAll?.();
+      }
+    };
+
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(finishBuildingRender, { timeout: 200 });
+    } else {
+      finishBuildingRender();
+    }
+    lastRenderOrigin = bounds ?? null;
+  }
+
+  window.clearTileCache = () => {
+    tileCache.cache.clear();
+    groundTiles?.clear();
+    clearCache().catch((error) => console.warn('Failed to clear persistent tile cache:', error));
+    rebuildMapFromCache();
+  };
+
+  const deferredTileUpdates = new Map();
+  let deferredMapWorkHandle = null;
+  let deferredMapWorkQueuedAt = 0;
+  let deferredBuildingRefresh = false;
+
+  const shouldDeferMapWork = () => {
+    if (mapFetchInFlight.size > 0) return true;
+    if (!Number.isFinite(lastFrameDurationMs) || lastFrameDurationMs <= 0) return false;
+    return lastFrameDurationMs > MAP_FRAME_BUDGET_MS;
+  };
+
+  const scheduleDeferredMapWork = () => {
+    if (deferredMapWorkHandle) return;
+    if (!deferredMapWorkQueuedAt) {
+      deferredMapWorkQueuedAt = performance.now();
+    }
+    const runDeferred = (deadline) => {
+      deferredMapWorkHandle = null;
+      const now = performance.now();
+      const waitedMs = deferredMapWorkQueuedAt ? now - deferredMapWorkQueuedAt : 0;
+      const canRun = !shouldDeferMapWork()
+        || deadline?.didTimeout
+        || waitedMs >= MAP_DEFER_MAX_WAIT_MS;
+      if (!canRun) {
+        scheduleDeferredMapWork();
+        return;
+      }
+      deferredMapWorkQueuedAt = 0;
+      const queuedUpdates = Array.from(deferredTileUpdates.entries());
+      deferredTileUpdates.clear();
+      for (const [tileKey, geojson] of queuedUpdates) {
+        if (!tileCache.hasTile(tileKey)) {
+          continue;
+        }
+        updateTileMeshes(tileKey, geojson, { force: true });
+      }
+      if (deferredBuildingRefresh) {
+        deferredBuildingRefresh = false;
+        scheduleBuildingRefresh({ force: true });
+      }
+    };
+    if (typeof requestIdleCallback === "function") {
+      deferredMapWorkHandle = requestIdleCallback(runDeferred, { timeout: MAP_DEFER_TIMEOUT_MS });
+    } else {
+      deferredMapWorkHandle = setTimeout(() => runDeferred({ didTimeout: true }), 0);
+    }
+  };
+
+  const queueTileUpdate = (tileKey, geojson) => {
+    deferredTileUpdates.set(tileKey, geojson);
+    scheduleDeferredMapWork();
+  };
+
+  let buildingRefreshPending = false;
+  const scheduleBuildingRefresh = ({ force = false } = {}) => {
+    if (!force && shouldDeferMapWork()) {
+      deferredBuildingRefresh = true;
+      scheduleDeferredMapWork();
+      return;
+    }
+    if (buildingRefreshPending) return;
+    buildingRefreshPending = true;
+    const refresh = () => {
+      buildingRefreshPending = false;
+      rebuildBuildingColliders();
+    };
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(refresh, { timeout: 200 });
+    } else {
+      setTimeout(refresh, 0);
+    }
+  };
+
+  const rebuildGroundTilesForDirtyTerrainChunks = () => {
+    const dirtyChunks = consumeDirtyTerrainChunks();
+    if (dirtyChunks.length === 0) return 0;
+    return groundTiles?.rebuildTilesForChunks?.(dirtyChunks) ?? 0;
+  };
+
+  const updateTileMeshesImmediate = (tileKey, geojson) => {
+    if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
+    const previousGeojson = renderedTileGeojson.get(tileKey);
+    if (previousGeojson === geojson) return;
+    renderedTileGeojson.set(tileKey, geojson);
+    updateTileRenderBounds(tileKey, geojson);
+    const bounds = refreshRenderOriginFromBounds();
+    const originChanged = !isSameRenderOrigin(bounds, lastRenderOrigin);
+    const tilesToUpdate = new Set();
+    if (originChanged) {
+      for (const [key, entry] of tileCache.cache.entries()) {
+        if (entry?.geojson) {
+          tilesToUpdate.add(key);
+        }
+      }
+    } else {
+      tilesToUpdate.add(tileKey);
+    }
+
+    for (const key of tilesToUpdate) {
+      const entry = tileCache.cache.get(key);
+      if (!entry?.geojson) continue;
+      setTerrainStampsForTile(key, entry.geojson, bounds);
+      mapRenderer.updateTileHighways?.(key, entry.geojson, bounds);
+    }
+
+    const finishBuildingRender = () => {
+      if (tilesToUpdate.size === 0) return;
+      for (const key of tilesToUpdate) {
+        const entry = tileCache.cache.get(key);
+        if (!entry?.geojson) continue;
+        buildingsRenderer.updateTileBuildings?.(key, entry.geojson, bounds);
+      }
+      rebuildGroundTilesForDirtyTerrainChunks();
+      scheduleBuildingRefresh();
+      if (typeof natureController?.refreshTilesForCacheTile === "function") {
+        for (const key of tilesToUpdate) {
+          natureController.refreshTilesForCacheTile(key);
+        }
+      } else if (typeof natureController?.refreshTile === "function") {
+        for (const key of tilesToUpdate) {
+          natureController.refreshTile(key);
+        }
+      } else {
+        natureController?.refreshAll?.();
+      }
+    };
+
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(finishBuildingRender, { timeout: 200 });
+    } else {
+      finishBuildingRender();
+    }
+    lastRenderOrigin = bounds ?? null;
+  };
+
+  const updateTileMeshes = (tileKey, geojson, { force = false } = {}) => {
+    if (!tileKey || !geojson || !mapRenderer || !buildingsRenderer) return;
+    if (!force && shouldDeferMapWork()) {
+      queueTileUpdate(tileKey, geojson);
+      return;
+    }
+    updateTileMeshesImmediate(tileKey, geojson);
+  };
+
+  const shouldRequestMapUpdate = (location) => {
+    if (!location || PERF.disableMapUpdates) return false;
+    const localMeters = tileCache.getLocalMeters(location);
+    const tile = tileCache.getTileCoords(localMeters);
+    if (!tile) return false;
+    const tileKey = tileCache.getTileKey(tile);
+    const now = Date.now();
+    if (lastMapUpdateAt === 0) {
+      lastMapUpdateAt = now;
+      lastMapUpdateTileKey = tileKey;
+      return true;
+    }
+    const elapsed = now - lastMapUpdateAt;
+    const tileChanged = tileKey !== lastMapUpdateTileKey;
+    if (tileChanged || elapsed >= MAP_UPDATE_THROTTLE_MS) {
+      lastMapUpdateAt = now;
+      lastMapUpdateTileKey = tileKey;
+      return true;
+    }
+    return false;
+  };
+
+  const requestMapUpdate = async (location) => {
+    if (!location || PERF.disableMapUpdates) return;
+    const localMeters = tileCache.getLocalMeters(location);
+    const tile = tileCache.getTileCoords(localMeters);
+    if (!tile) return;
+
+    const tileKey = tileCache.getTileKey(tile);
+    if (tileKey === activeTileKey && (tileCache.hasTile(tileKey) || mapFetchInFlight.has(tileKey))) {
+      return;
+    }
+    activeTileKey = tileKey;
+
+    const evictedKeys = tileCache.evictTiles(tile);
+    if (evictedKeys.length) {
+      for (const key of evictedKeys) {
+        mapRenderer.removeTile?.(key);
+        buildingsRenderer.removeTile?.(key);
+        clearTerrainStampsForTile(key);
+        renderedTileGeojson.delete(key);
+        tileRenderBounds.delete(key);
+        deferredTileUpdates.delete(key);
+      }
+      rebuildGroundTilesForDirtyTerrainChunks();
+      scheduleBuildingRefresh();
+    }
+
+    if (tileCache.hasTile(tileKey) || mapFetchInFlight.has(tileKey)) {
+      return;
+    }
+
+    const cachedTile = await getCachedTile(tileKey);
+    if (cachedTile?.geojson) {
+      tileCache.setTile(tile, {
+        geojson: cachedTile.geojson,
+        meshes: { highways: null, buildings: null },
+        fetchedAt: cachedTile.fetchedAt
+      });
+      updateTileMeshes(tileKey, cachedTile.geojson);
+      if (Date.now() - cachedTile.fetchedAt < TILE_CACHE_MAX_AGE_MS) {
+        return;
+      }
+    }
+
+    const tileCenter = tileCache.getTileCenterLocation(tile);
+    if (!tileCenter) return;
+
+    mapFetchInFlight.add(tileKey);
+    let geojson;
+    const priorGeojson = tileCache.cache.get(tileKey)?.geojson ?? renderedTileGeojson.get(tileKey) ?? null;
+    try {
+      const overpassData = await fetchOSMData(tileCenter.lat, tileCenter.lon, TILE_FETCH_RADIUS_METERS, {
+        staleDistanceMeters: TILE_SIZE_METERS * 2,
+        dedupeKeyOverride: tileKey
+      });
+      debugState.lastOsmFetchAt = Date.now();
+      try {
+        geojson = await parseOverpassData(overpassData);
+      } catch (parseError) {
+        console.warn('OSM worker parse failed, falling back to main thread:', parseError);
+        geojson = prefilterGeojson(overpassToGeoJSON(overpassData));
+      }
+    } catch (error) {
+      let usedMapTilerFallback = false;
+      try {
+        geojson = await fetchMapTilerFeatures(tileCenter.lat, tileCenter.lon);
+        geojson = prefilterGeojson(geojson);
+        usedMapTilerFallback = true;
+        console.warn('Overpass fetch failed; using MapTiler fallback.', error);
+      } catch (mapTilerError) {
+        console.warn('MapTiler fallback failed:', mapTilerError);
+      }
+      if (usedMapTilerFallback) {
+        debugState.lastOsmFetchAt = Date.now();
+      } else {
+      const isThrottle = isOverpassThrottleError(error);
+      if (isThrottle) {
+        const baseDelayMs = Number.isFinite(error?.retryAfterMs) && error.retryAfterMs > 0
+          ? error.retryAfterMs
+          : 4000;
+        const jitterMs = Math.floor(Math.random() * 1500);
+        const retryDelayMs = baseDelayMs + jitterMs;
+        mapRateLimitedUntil = Math.max(mapRateLimitedUntil, Date.now() + retryDelayMs);
+        locationState.state = 'rate_limited';
+        locationState.message = 'map data temporarily rate-limited';
+        if (tileRetryTimeouts.has(tileKey)) {
+          clearTimeout(tileRetryTimeouts.get(tileKey));
+        }
+        const timeoutId = setTimeout(() => {
+          tileRetryTimeouts.delete(tileKey);
+          if (!PERF.disableMapUpdates) {
+            void requestMapUpdate(location);
+          }
+        }, retryDelayMs);
+        tileRetryTimeouts.set(tileKey, timeoutId);
+        if (priorGeojson) {
+          updateTileMeshes(tileKey, priorGeojson);
+        }
+      }
+      console.warn('OSM fetch failed:', error);
+      debugState.lastError = {
+        message: error?.message || 'OSM fetch failed',
+        timestamp: Date.now()
+      };
+      mapFetchInFlight.delete(tileKey);
+      return;
+      }
+    }
+
+    try {
+      tileCache.setTile(tile, {
+        geojson,
+        meshes: { highways: null, buildings: null },
+        fetchedAt: Date.now()
+      });
+      setCachedTile(tileKey, geojson).catch((error) => {
+        console.warn('Failed to persist tile cache:', error);
+      });
+      updateTileMeshes(tileKey, geojson);
+      if (Date.now() >= mapRateLimitedUntil && locationState.state === 'rate_limited') {
+        locationState.state = 'found';
+        locationState.message = null;
+      }
+    } catch (error) {
+      console.warn('OSM render failed:', error);
+      debugState.lastError = {
+        message: error?.message || 'OSM render failed',
+        timestamp: Date.now()
+      };
+    } finally {
+      mapFetchInFlight.delete(tileKey);
+    }
+  };
+
+  const locationState = {
+    state: 'tracking',
+    accuracyMeters: 0,
+    x: null,
+    y: null,
+    z: null,
+    source: null,
+    originX: 0,
+    originZ: 0,
+    tile: null,
+    heading: null,
+    speed: null,
+    timestamp: null,
+    message: null,
+    originWasReset: false
+  };
+  const debugState = {
+    lastError: null,
+    lastOsmFetchAt: null
+  };
+
+  let refreshBuildSubscriptionsForLocation = () => {};
+
+  const locationProvider = createLocationProvider({
+    getWorldPosition: getPlayerWorldPosition,
+    onUpdate: (location) => {
+      window.latestLocation = location;
+      const movedMeters = Number.isFinite(location.distanceMeters) ? location.distanceMeters : 0;
+      if (movedMeters > 1) {
+        const miles = toMiles(movedMeters);
+        walkingState.totalMiles += miles;
+        const dayKey = getUtcDateString(location.timestamp);
+        walkingState.dailyMiles[dayKey] = (walkingState.dailyMiles[dayKey] || 0) + miles;
+        walkingState.updatedAt = Date.now();
+        updateWalkingTrackerButton();
+        refreshWalkingSummaryOverlay();
+        if (profileNameKey) {
+          void saveWalkingStats(profileNameKey, walkingState);
+        }
+      }
+
+      friendlyNpcManager?.recordWorldTravel?.({
+        x: location.x,
+        y: location.y,
+        z: location.z,
+        timestampMs: location.timestamp
+      });
+      locationState.state = 'found';
+      locationState.x = location.x;
+      locationState.y = location.y;
+      locationState.z = location.z;
+      locationState.accuracyMeters = 0;
+      locationState.source = location.source || 'world';
+      locationState.originX = 0;
+      locationState.originZ = 0;
+      locationState.heading = location.heading;
+      locationState.speed = location.speed;
+      locationState.timestamp = location.timestamp;
+      locationState.message = null;
+      locationState.originWasReset = originWasAutoReset;
+
+      const localMeters = { x: location.x, z: location.z };
+      locationState.tile = tileCache.getTileCoords(localMeters);
+      if (shouldRequestMapUpdate(localMeters)) {
+        requestMapUpdate(localMeters);
+      }
+      const playerPosition = playerModel?.position;
+      if (shouldUpdatePickupTiles(playerPosition)) {
+        updatePickupTiles(playerPosition);
+      }
+      refreshBuildSubscriptionsForLocation();
+    },
+    onError: (error, message) => {
+      console.warn('World position error:', message, error);
+      locationState.state = 'error';
+      locationState.message = message;
+      debugState.lastError = { message, timestamp: Date.now() };
+    },
+    onStatus: (status) => {
+      locationState.state = status.state;
+      locationState.message = status.message || null;
+      locationState.accuracyMeters = 0;
+      if (status.source) {
+        locationState.source = status.source;
+      }
+      if (status.state === 'requesting' || status.state === 'found') {
+        }
+    }
+  });
+
+  homeSystem?.setLocationProvider?.(locationProvider);
+  locationProvider.start();
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      locationProvider.stop();
+    } else {
+      locationProvider.start();
+    }
+  });
+  window.addEventListener('beforeunload', () => locationProvider.stop());
+
+  // --- RAPIER HELPERS ---
+  function spawnBlock({
+    pos = new THREE.Vector3(0, 5, 0),
+    half = new THREE.Vector3(0.25, 0.25, 0.25),
+    linvel = new THREE.Vector3(),
+    angvel = new THREE.Vector3(Math.random(), Math.random(), Math.random()),
+    color = 0x66ccff,
+  } = {}) {
+    // Three mesh
+    const geom = new THREE.BoxGeometry(half.x * 2, half.y * 2, half.z * 2);
+    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.0 });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.skipTerrainCorrection = true;
+    mesh.position.copy(pos);
+    scene.add(mesh);
+
+    // Rapier body + collider
+    const rbDesc = RAPIER.RigidBodyDesc.dynamic()
+      .setTranslation(pos.x, pos.y, pos.z)
+      .setLinearDamping(0.02)
+      .setAngularDamping(0.02);
+    const rb = rapierWorld.createRigidBody(rbDesc);
+
+    // Give it a fun impulse/velocity
+    rb.setLinvel({ x: linvel.x, y: linvel.y, z: linvel.z }, true);
+    rb.setAngvel({ x: angvel.x, y: angvel.y, z: angvel.z }, true);
+
+    const colDesc = RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
+      .setRestitution(0.2)
+      .setFriction(0.6);
+    rapierWorld.createCollider(colDesc, rb);
+
+    rbToMesh.set(rb, mesh);
+    return rb;
+  }
+
+  function shootBlockFromPlayer(speed = 18) {
+    const origin = playerModel.position.clone().add(new THREE.Vector3(0, 0, 0));
+
+    // forward from camera so it goes where you're looking
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+    const linvel = dir.multiplyScalar(speed);
+
+    spawnBlock({
+      pos: origin.add(dir.clone().multiplyScalar(1.2)),
+      linvel,
+      color: 0xff8855,
+      half: new THREE.Vector3(0.3, 0.3, 0.3),
+    });
+  }
+
+  // Little “machine gun” for fun
+  let burstInterval = null;
+  function startBurst() {
+    if (burstInterval) return;
+    burstInterval = setInterval(() => shootBlockFromPlayer(22), 120);
+  }
+  function stopBurst() {
+    if (!burstInterval) return;
+    clearInterval(burstInterval);
+    burstInterval = null;
+  }
+
+  // Keyboard shortcuts
+  window.addEventListener('keydown', (e) => {
+    
+    if (e.code === 'KeyB') {
+      shootBlockFromPlayer(); // tap B to fire one block
+      console.log("b key pressed");
+    }
+    if (e.code === 'KeyN') startBurst();          // hold N to start burst
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'KeyN') stopBurst();
+  });
+
+  // Expose for console testing
+  window.spawnBlock = spawnBlock;
+  window.shootBlockFromPlayer = shootBlockFromPlayer;
+
+
+
+  // Game Over UI elements
+  const gameOverOverlay = document.getElementById('game-over-overlay');
+  const gameOverMessage = document.getElementById('game-over-message');
+  const continueSection = document.getElementById('continue-section');
+  const countdownEl = document.getElementById('countdown');
+  const yesBtn = document.getElementById('continue-yes');
+  const noBtn = document.getElementById('continue-no');
+
+  function showGameOver() {
+    gameOverOverlay.classList.remove('hidden');
+    continueSection.classList.add('hidden');
+    gameOverMessage.style.opacity = 0;
+    gameOverMessage.classList.remove('hidden');
+    setTimeout(() => {
+      gameOverMessage.style.opacity = 1;
+      setTimeout(() => {
+        gameOverMessage.style.opacity = 0;
+        setTimeout(() => {
+          gameOverMessage.classList.add('hidden');
+          showContinue();
+        }, 1000);
+      }, 1500);
+    }, 50);
+  }
+
+  function showContinue() {
+    continueSection.classList.remove('hidden');
+    let countdown = 9;
+    countdownEl.textContent = countdown;
+    const interval = setInterval(() => {
+      countdown--;
+      countdownEl.textContent = countdown;
+      if (countdown <= 0) {
+        clearInterval(interval);
+        hideGameOver();
+      }
+    }, 1000);
+
+    yesBtn.onclick = () => {
+      clearInterval(interval);
+      hideGameOver();
+      respawnPlayer();
+    };
+
+    noBtn.onclick = () => {
+      clearInterval(interval);
+      hideGameOver();
+    };
+  }
+
+  function hideGameOver() {
+    gameOverOverlay.classList.add('hidden');
+    continueSection.classList.add('hidden');
+    gameOverMessage.classList.add('hidden');
+    gameOverMessage.style.opacity = 0;
+  }
+
+  function respawnPlayer() {
+    setStat('health', statsState.maxHealthSegments);
+    setStat('hunger', statsState.maxHungerSegments);
+    setStat('magic', statsState.maxMagicSegments);
+    const spawn = getSpawnPosition({ allowOnBuildings: true });
+    playerModel.position.set(spawn.x, spawn.y, spawn.z);
+    playerControls.playerX = spawn.x;
+    playerControls.playerY = spawn.y;
+    playerControls.playerZ = spawn.z;
+    playerControls.lastPosition.set(spawn.x, spawn.y, spawn.z);
+    if (playerControls.body) {
+      playerControls.body.setTranslation({ x: spawn.x, y: spawn.y, z: spawn.z }, true);
+      playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+    playerDead = false;
+    updateControlAvailability();
+    const actions = playerModel.userData.actions;
+    const current = playerModel.userData.currentAction;
+    actions?.[current]?.fadeOut(0.2);
+    actions?.idle?.reset().fadeIn(0.2).play();
+    playerModel.userData.currentAction = 'idle';
+  }
+
+  const voiceTranscript = document.getElementById('voice-transcript');
+
+  const showVoiceTranscript = (text) => {
+    if (!voiceTranscript) return;
+    voiceTranscript.textContent = text;
+    voiceTranscript.classList.add('visible');
+    if (voiceMicState.transcriptTimer) {
+      clearTimeout(voiceMicState.transcriptTimer);
+    }
+    voiceMicState.transcriptTimer = setTimeout(() => {
+      voiceTranscript.classList.remove('visible');
+    }, 2500);
+  };
+
+  const voiceSpellDefs = {
+    apples: { magicCost: 4 },
+    mushrooms: { magicCost: 4 },
+    bombs: { magicCost: 9 },
+    freeze: { magicCost: 2 }
+  };
+
+  const getVoiceSpellFromTranscript = (transcript) => {
+    const normalized = String(transcript || '').trim().toLowerCase();
+    if (!normalized) return null;
+    if (normalized.includes('apple')) return 'apples';
+    if (normalized.includes('mushroom')) return 'mushrooms';
+    if (normalized.includes('bomb')) return 'bombs';
+    if (normalized.includes('freeze')) return 'freeze';
+    return null;
+  };
+
+  const castVoiceSpellFromTranscript = (transcript) => {
+    const spellId = getVoiceSpellFromTranscript(transcript);
+    if (!spellId || !playerControls || !playerModel) return false;
+
+    const spellDef = voiceSpellDefs[spellId];
+    const currentMagic = Number.isFinite(statsState.magic) ? statsState.magic : 0;
+    if (currentMagic < spellDef.magicCost) {
+      showVoiceTranscript('Not enough magic for that spell.');
+      return false;
+    }
+
+    // Use the same camera-relative direction convention as bomb throwing.
+    const aimDirection = playerControls.getAimDirection(true);
+    playerControls.alignPlayerToDirection(aimDirection);
+    playerControls.playAction('projectile');
+
+    const origin = playerControls.getProjectileSpawnPosition(aimDirection);
+    const sprinkleDirection = () => {
+      const d = aimDirection.clone();
+      d.x += (Math.random() - 0.5) * 0.25;
+      d.y += (Math.random() - 0.5) * 0.15;
+      d.z += (Math.random() - 0.5) * 0.25;
+      return d.normalize();
+    };
+
+    const createAppleProjectileMesh = () => {
+      const source = applePickups.find(entry => entry?.mesh)?.mesh;
+      if (!source) return null;
+      const mesh = source.clone(true);
+      mesh.visible = true;
+      mesh.traverse((child) => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+      });
+      return mesh;
+    };
+
+    const createMushroomProjectileMesh = (itemId) => {
+      const mesh = mushroomController?.createProjectileMesh?.(itemId);
+      if (!mesh) return null;
+      mesh.visible = true;
+      return mesh;
+    };
+
+    const launchProduceProjectile = ({ direction, spawnPickup, createMesh, color = 0xd9d9d9 }) => {
+      const shooterId = multiplayer?.getId?.();
+      spawnProjectile(scene, projectiles, origin.clone(), direction, shooterId, {
+        color,
+        createMesh,
+        speed: BOMB_THROW_SPEED * 0.45,
+        lifetime: Math.floor(BOMB_THROW_LIFETIME * 0.75),
+        pickupOnRest: true,
+        pickupAmount: 1,
+        spawnPickup,
+        colliderDesc: RAPIER.ColliderDesc.ball(0.11).setRestitution(0.25).setFriction(0.8)
+      });
+    };
+
+    if (spellId === 'apples') {
+      for (let i = 0; i < 10; i++) {
+        const d = sprinkleDirection();
+        launchProduceProjectile({
+          direction: d,
+          color: 0xd14b33,
+          createMesh: createAppleProjectileMesh,
+          spawnPickup: (pickupPosition) => {
+            spawnApplePickup(pickupPosition);
+          }
+        });
+      }
+    } else if (spellId === 'mushrooms') {
+      for (let i = 0; i < 10; i++) {
+        const entry = MUSHROOM_ENTRIES[Math.floor(Math.random() * MUSHROOM_ENTRIES.length)];
+        if (!entry?.id) continue;
+        const d = sprinkleDirection();
+        launchProduceProjectile({
+          direction: d,
+          color: 0x8f6ad9,
+          createMesh: () => createMushroomProjectileMesh(entry.id),
+          spawnPickup: (pickupPosition) => {
+            spawnMushroomPickup(entry.id, pickupPosition);
+          }
+        });
+      }
+    } else if (spellId === 'bombs') {
+      const shooterId = multiplayer?.getId?.();
+      for (let i = 0; i < 5; i++) {
+        const d = sprinkleDirection();
+        spawnBombProjectileWithPerfFlags(scene, projectiles, origin.clone(), d, shooterId);
+      }
+    } else if (spellId === 'freeze') {
+      const shooterId = multiplayer?.getId?.();
+      for (let i = 0; i < 3; i++) {
+        const d = sprinkleDirection();
+        spawnIceMist(scene, iceMists, origin.clone(), d, shooterId);
+      }
+    }
+
+    setStat('magic', Math.max(0, currentMagic - spellDef.magicCost));
+    return true;
+  };
+
+  function getVoiceMicState() {
+    const remainingMs = Math.max(0, voiceMicState.cooldownUntil - Date.now());
+    return {
+      disabled: voiceMicState.listening || remainingMs > 0,
+      remainingSeconds: remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0
+    };
+  }
+
+  const stopVoiceListening = () => {
+    if (!voiceMicState.listening) return;
+    voiceMicState.listening = false;
+    speech.stop();
+
+    const finalizeTranscript = (text) => {
+      if (!text) return;
+      showVoiceTranscript(text);
+      castVoiceSpellFromTranscript(text);
+    };
+
+    if (voiceMicState.lastTranscript) {
+      finalizeTranscript(voiceMicState.lastTranscript);
+    } else {
+      voiceMicState.pendingSpellResolution = true;
+      if (voiceMicState.pendingSpellTimeout) {
+        clearTimeout(voiceMicState.pendingSpellTimeout);
+      }
+      voiceMicState.pendingSpellTimeout = setTimeout(() => {
+        voiceMicState.pendingSpellResolution = false;
+      }, 1200);
+    }
+
+    voiceMicState.cooldownUntil = Date.now() + VOICE_COOLDOWN_MS;
+    playerControls?.refreshActionButtons?.();
+  };
+
+  const startVoiceListening = () => {
+    const state = getVoiceMicState();
+    if (state.disabled) return false;
+    voiceMicState.lastTranscript = '';
+    voiceMicState.pendingSpellResolution = false;
+    if (voiceMicState.pendingSpellTimeout) {
+      clearTimeout(voiceMicState.pendingSpellTimeout);
+      voiceMicState.pendingSpellTimeout = null;
+    }
+    voiceMicState.listening = true;
+    speech.start();
+    playerControls?.refreshActionButtons?.();
+    return true;
+  };
+
+  // Initialize speech-to-text overlay for voice input
+  const speech = initSpeechCommands({
+    onTranscript: (text) => {
+      voiceMicState.lastTranscript = text;
+      if (voiceMicState.pendingSpellResolution) {
+        voiceMicState.pendingSpellResolution = false;
+        if (voiceMicState.pendingSpellTimeout) {
+          clearTimeout(voiceMicState.pendingSpellTimeout);
+          voiceMicState.pendingSpellTimeout = null;
+        }
+        showVoiceTranscript(text);
+        castVoiceSpellFromTranscript(text);
+      } else if (!voiceMicState.listening) {
+        showVoiceTranscript(text);
+      }
+    }
+  });
+
+  setInterval(() => {
+    playerControls?.refreshActionButtons?.();
+  }, 250);
+
+
+  function swapPlayerCharacter(newModelPath) {
+    if (!newModelPath) {
+      return;
+    }
+
+    const previousModel = playerModel;
+    const previousLabel = player?.nameLabel;
+    const currentPosition = previousModel ? previousModel.position.clone() : new THREE.Vector3();
+    const currentRotation = previousModel ? previousModel.rotation.clone() : new THREE.Euler();
+    const currentUp = previousModel ? previousModel.up.clone() : new THREE.Vector3(0, 1, 0);
+
+    if (playerControls?.parachute && previousModel && playerControls.parachute.parent === previousModel) {
+      previousModel.remove(playerControls.parachute);
+    }
+
+    const newPlayer = new PlayerCharacter(playerName, newModelPath);
+    const newModel = newPlayer.model;
+    newModel.userData.hideInMapView = true;
+    newModel.position.copy(currentPosition);
+    newModel.rotation.copy(currentRotation);
+    newModel.up.copy(currentUp);
+
+    scene.add(newModel);
+
+    if (playerControls?.parachute) {
+      newModel.add(playerControls.parachute);
+    }
+
+    if (previousModel?.parent) {
+      previousModel.parent.remove(previousModel);
+    }
+    if (previousLabel?.parentNode) {
+      previousLabel.parentNode.removeChild(previousLabel);
+    }
+
+    player = newPlayer;
+    playerModel = newModel;
+    window.playerModel = playerModel;
+    playerHurtFlashState.ring = null;
+    ensurePlayerHurtFlashRing();
+    playerControls?.setPlayerModel(playerModel);
+    void initMapViewFeature({ camera, scene, player: playerModel });
+  }
+
+  const settingsBtn = document.getElementById('settings-button');
+  const inventoryBtn = document.getElementById('inventory-button');
+  const characterOptions = ['base_character_2', 'cowboy', 'Chimpanzee', 'seagull'].map(name => ({
+    label: name,
+    value: `/models/${name}.fbx`
+  }));
+
+  multiplayer.onConnectionError = (error) => {
+    debugState.lastError = error;
+  };
+
+  const BUILD_MAX_HEALTH = 100;
+  const BUILD_HEALTH_BAR_DISPLAY_MS = 1800;
+  const buildHealthBarState = {
+    tempBox: new THREE.Box3(),
+    tempForward: new THREE.Vector3(),
+    tempToTarget: new THREE.Vector3(),
+    tempRight: new THREE.Vector3()
+  };
+  const buildState = {
+    mode: null,
+    placing: null,
+    records: new Map(),
+    subscriptions: new Map(),
+    activePaths: new Set(),
+    selectedNoteId: null,
+    cameraOffset: new THREE.Vector3(0, 4, 8)
+  };
+  const createNoteMesh = () => {
+    const group = new THREE.Group();
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.09, 1.0, 10),
+      new THREE.MeshStandardMaterial({ color: 0x6b4423 })
+    );
+    pole.position.y = 0.5;
+    const signTop = new THREE.Mesh(
+      new THREE.BoxGeometry(0.82, 0.54, 0.12),
+      new THREE.MeshStandardMaterial({ color: 0xa17242 })
+    );
+    signTop.position.y = 1.04;
+    group.add(pole, signTop);
+    return group;
+  };
+  const createBuildHealthBar = (mesh) => {
+    if (!mesh || mesh.userData.buildHealthBar) return mesh?.userData?.buildHealthBar || null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 18;
+    const context = canvas.getContext('2d');
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(1.25, 0.18, 1);
+    sprite.visible = false;
+    sprite.userData = { canvas, context, texture };
+    mesh.add(sprite);
+    mesh.updateWorldMatrix?.(true, true);
+    buildHealthBarState.tempBox.setFromObject(mesh);
+    const sizeY = Number.isFinite(buildHealthBarState.tempBox.max.y)
+      ? Math.max(1, buildHealthBarState.tempBox.max.y - buildHealthBarState.tempBox.min.y)
+      : 1;
+    sprite.position.set(0, sizeY + 0.35, 0);
+    mesh.userData.buildHealthBar = sprite;
+    return sprite;
+  };
+
+  const updateBuildHealthBarTexture = (mesh) => {
+    const bar = mesh?.userData?.buildHealthBar || createBuildHealthBar(mesh);
+    const context = bar?.userData?.context;
+    const canvas = bar?.userData?.canvas;
+    if (!bar || !context || !canvas) return;
+    const maxHealth = Number.isFinite(mesh.userData.buildMaxHealth) ? mesh.userData.buildMaxHealth : BUILD_MAX_HEALTH;
+    const health = Math.max(0, Math.min(maxHealth, Number.isFinite(mesh.userData.buildHealth) ? mesh.userData.buildHealth : maxHealth));
+    const fillWidth = Math.round((canvas.width - 8) * (health / maxHealth));
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(0, 0, 0, 0.62)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = 'rgba(65, 65, 65, 0.88)';
+    context.fillRect(4, 4, canvas.width - 8, canvas.height - 8);
+    context.fillStyle = health > maxHealth * 0.45 ? 'rgba(76, 175, 80, 0.95)' : health > maxHealth * 0.2 ? 'rgba(255, 193, 7, 0.95)' : 'rgba(214, 53, 60, 0.95)';
+    context.fillRect(4, 4, fillWidth, canvas.height - 8);
+    bar.userData.texture.needsUpdate = true;
+  };
+
+  const showBuildHealthBar = (mesh) => {
+    const bar = mesh?.userData?.buildHealthBar || createBuildHealthBar(mesh);
+    if (!bar) return;
+    updateBuildHealthBarTexture(mesh);
+    bar.visible = true;
+    bar.userData.visibleUntil = Date.now() + BUILD_HEALTH_BAR_DISPLAY_MS;
+  };
+
+  const getCurrentBuildPath = () => {
+    const fix = getLatestLocationFix?.();
+    if (!fix || !Number.isFinite(fix.x) || !Number.isFinite(fix.z)) return null;
+    return onBuildWorldPath(fix.x, fix.z);
+  };
+
+  const getBuildRecordPath = (id, record) => {
+    if (record?.buildPath) return record.buildPath;
+    if (Number.isFinite(record?.x) && Number.isFinite(record?.z)) return onBuildWorldPath(record.x, record.z);
+    return getCurrentBuildPath();
+  };
+
+  const removeBuildRecord = async (id, record, { refundToInventory = false, spawnWoodDrop = false } = {}) => {
+    if (!id || !record) return false;
+    const buildPath = getBuildRecordPath(id, record);
+    if (buildPath) {
+      await remove(ref(db, `${buildPath}/${id}`));
+    }
+    disposeBuildHealthBar(record.mesh);
+    if (record.mesh) {
+      scene.remove(record.mesh);
+    }
+    removeStaticBoxCollider(record.colliderEntry || record.mesh?.userData?.staticColliderEntry);
+    buildState.records.delete(id);
+    if (buildState.selectedNoteId === id) {
+      buildState.selectedNoteId = null;
+      buildInteractionBtn.style.display = 'none';
+    }
+    if (refundToInventory) {
+      addToInventory('wood', 1);
+    } else if (spawnWoodDrop) {
+      const dropPosition = record.mesh?.position?.clone?.() || new THREE.Vector3(record.x || 0, record.y || 0, record.z || 0);
+      spawnWoodPickup(dropPosition);
+    }
+    return true;
+  };
+
+  const applyBuildDamage = async (id, record, damage = 1) => {
+    if (!id || !record?.mesh) return false;
+    const currentHealth = Number.isFinite(record.health)
+      ? record.health
+      : Number.isFinite(record.mesh.userData.buildHealth)
+        ? record.mesh.userData.buildHealth
+        : BUILD_MAX_HEALTH;
+    const nextHealth = Math.max(0, currentHealth - Math.max(1, damage));
+    record.health = nextHealth;
+    record.mesh.userData.buildHealth = nextHealth;
+    showBuildHealthBar(record.mesh);
+    if (nextHealth <= 0) {
+      await removeBuildRecord(id, record, { spawnWoodDrop: true });
+    } else {
+      const buildPath = getBuildRecordPath(id, record);
+      if (buildPath) {
+        await update(ref(db, `${buildPath}/${id}`), { health: nextHealth });
+      }
+    }
+    return true;
+  };
+
+  const handleBuildAttackHit = ({ attacker, range, region, damage, attackTypes } = {}) => {
+    const attackerPosition = attacker?.model?.position;
+    if (!attackerPosition) return false;
+    const effectiveRange = Math.max(0.8, Number.isFinite(range) ? range : 1.5);
+    const isHammerSmash = Array.isArray(attackTypes)
+      && (attackTypes.includes('smash') || attackTypes.includes('pummel'));
+    if (isHammerSmash && natureController?.removeRocksInRadius) {
+      const removedRockPositions = natureController.removeRocksInRadius(attackerPosition, effectiveRange + 0.7);
+      if (removedRockPositions.length > 0) {
+        notifyAchievementProgress('rocksBlownUp', removedRockPositions.length);
+        window.questManager?.handleRockBlownUp?.(removedRockPositions.length);
+        removedRockPositions.forEach((rockPosition) => {
+          spawnImpactBurst(scene, rockPosition);
+          for (let i = 0; i < 3; i += 1) {
+            const angle = (i / 3) * Math.PI * 2;
+            const offset = new THREE.Vector3(Math.cos(angle) * 0.28, 0, Math.sin(angle) * 0.28);
+            spawnSaltPickup(rockPosition.clone().add(offset));
+          }
+        });
+        return true;
+      }
+    }
+    const bush = natureController?.getClosestBush?.(attackerPosition, effectiveRange, {
+      attackerModel: attacker?.model,
+      region: region || 'around'
+    });
+    if (bush && destroyBush(bush)) return true;
+    let closest = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    buildState.records.forEach((record, id) => {
+      if (!record?.mesh?.position) return;
+      buildHealthBarState.tempToTarget.subVectors(record.mesh.position, attackerPosition);
+      buildHealthBarState.tempToTarget.y = 0;
+      const distance = buildHealthBarState.tempToTarget.length();
+      if ((region || 'around') === 'forward') {
+        attacker.model.getWorldDirection(buildHealthBarState.tempForward);
+        buildHealthBarState.tempForward.y = 0;
+        if (buildHealthBarState.tempForward.lengthSq() < 0.0001) {
+          buildHealthBarState.tempForward.set(0, 0, 1);
+        } else {
+          buildHealthBarState.tempForward.normalize();
+        }
+        const forwardDistance = buildHealthBarState.tempToTarget.dot(buildHealthBarState.tempForward);
+        buildHealthBarState.tempRight.set(buildHealthBarState.tempForward.z, 0, -buildHealthBarState.tempForward.x);
+        const lateralDistance = Math.abs(buildHealthBarState.tempToTarget.dot(buildHealthBarState.tempRight));
+        if (forwardDistance < 0 || forwardDistance > effectiveRange + 0.7 || lateralDistance > effectiveRange + 0.7) return;
+      }
+      if (distance <= effectiveRange + 0.7 && distance < closestDistance) {
+        closest = { id, record };
+        closestDistance = distance;
+      }
+    });
+    if (!closest) return false;
+    if (closest.record?.mesh?.position) {
+      spawnImpactBurst(scene, closest.record.mesh.position);
+    }
+    void applyBuildDamage(closest.id, closest.record, damage);
+    return true;
+  };
+
+  const handleBuildProjectileHit = ({ projectileBox, damage } = {}) => {
+    if (!projectileBox) return false;
+    const removedBushPositions = natureController?.removeBushesIntersectingBox?.(projectileBox) ?? [];
+    if (destroyBushesAtPositions(removedBushPositions)) return true;
+    for (const [id, record] of buildState.records.entries()) {
+      if (!record?.mesh) continue;
+      buildHealthBarState.tempBox.setFromObject(record.mesh);
+      if (projectileBox.intersectsBox(buildHealthBarState.tempBox)) {
+        void applyBuildDamage(id, record, damage);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const handleBuildAreaHit = ({ position, radius, damage } = {}) => {
+    if (!position || !Number.isFinite(radius)) return false;
+    const removedBushPositions = natureController?.removeBushesInRadius?.(position, radius) ?? [];
+    let didHit = destroyBushesAtPositions(removedBushPositions);
+
+    buildState.records.forEach((record, id) => {
+      if (!record?.mesh?.position) return;
+      if (position.distanceTo(record.mesh.position) <= radius) {
+        didHit = true;
+        void applyBuildDamage(id, record, damage);
+      }
+    });
+    return didHit;
+  };
+
+  const updateBuildHealthBars = () => {
+    const now = Date.now();
+    buildState.records.forEach((record) => {
+      const bar = record?.mesh?.userData?.buildHealthBar;
+      if (bar?.visible && now > (bar.userData.visibleUntil || 0)) {
+        bar.visible = false;
+      }
+    });
+  };
+
+  const disposeBuildHealthBar = (mesh) => {
+    const bar = mesh?.userData?.buildHealthBar;
+    if (!bar) return;
+    bar.parent?.remove(bar);
+    bar.material?.map?.dispose?.();
+    bar.material?.dispose?.();
+    delete mesh.userData.buildHealthBar;
+  };
+
+  const DOG_INTERACT_DISTANCE = 2.5;
+  const feedDogBtn = document.createElement('button');
+  feedDogBtn.type = 'button';
+  feedDogBtn.textContent = 'Feed Dog';
+  feedDogBtn.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%, -50%);z-index:1200;display:none;padding:8px 12px;';
+  document.body.appendChild(feedDogBtn);
+  const animalNameLabels = new Map();
+  const areInteractionLabelsBlocked = () => {
+    if (window.mapViewEnabled === true || document.body.classList.contains('map-open')) return true;
+    const blockingOverlayIds = ['settings-overlay', 'inventory-overlay', 'merchant-overlay'];
+    return blockingOverlayIds.some((id) => {
+      const overlay = document.getElementById(id);
+      if (!overlay) return false;
+      if (overlay.getAttribute('aria-hidden') === 'false') return true;
+      return overlay.style?.display && overlay.style.display !== 'none';
+    });
+  };
+  const dogColliderEntries = new Map();
+  const crabColliderEntries = new Map();
+  const companionData = { ...(playerProfile?.companions || {}) };
+  const DOG_FOOD_HEAL = 10;
+  const MEAT_FEED_HEAL = 30;
+  const showStatusToast = (message) => {
+    if (!message) return;
+    if (typeof playerControls?.showMobileStatusToast === 'function') {
+      playerControls.showMobileStatusToast(message);
+      return;
+    }
+    showTreasurePopup?.(message);
+  };
+  const FRIENDLY_FEED_RESULT = Object.freeze({
+    success: 'success',
+    notHungry: 'notHungry',
+    noFood: 'noFood',
+    invalidTarget: 'invalidTarget'
+  });
+  const getFeedItemFromInventory = () => {
+    const hasApples = (inventoryState[APPLE_ITEM_ID]?.count || 0) > 0;
+    if (hasApples) return { itemId: APPLE_ITEM_ID, healAmount: DOG_FOOD_HEAL };
+    const mushroomId = Object.keys(inventoryState).find((id) => id?.startsWith?.('mushroom_') && (inventoryState[id]?.count || 0) > 0);
+    if (mushroomId) return { itemId: mushroomId, healAmount: DOG_FOOD_HEAL };
+    if ((inventoryState[MEAT_ITEM_ID]?.count || 0) > 0) return { itemId: MEAT_ITEM_ID, healAmount: MEAT_FEED_HEAL };
+    return null;
+  };
+  const consumeFoodAndHealFriendly = (friendly) => {
+    if (!friendly?.model || friendly.isDead) {
+      return { status: FRIENDLY_FEED_RESULT.invalidTarget };
+    }
+    const maxHealth = Math.max(1, Number(friendly.maxHealth || 1));
+    const currentHealth = Math.max(0, Number(friendly.health || 0));
+    if (currentHealth >= maxHealth) {
+      friendly.showHealthBar?.();
+      showStatusToast("They're not hungry right now.");
+      return { status: FRIENDLY_FEED_RESULT.notHungry };
+    }
+    const feedSelection = getFeedItemFromInventory();
+    if (!feedSelection) {
+      showStatusToast("You don't have any food for them.");
+      return { status: FRIENDLY_FEED_RESULT.noFood };
+    }
+    removeFromInventory(feedSelection.itemId, 1);
+    friendly.health = Math.min(maxHealth, currentHealth + feedSelection.healAmount);
+    friendly.model.userData.health = friendly.health;
+    friendly.updateHealthBarTexture?.();
+    friendly.showHealthBar?.();
+    const foodLabel = inventoryCatalog?.[feedSelection.itemId]?.name || feedSelection.itemId;
+    return {
+      status: FRIENDLY_FEED_RESULT.success,
+      itemId: feedSelection.itemId,
+      foodLabel
+    };
+  };
+  window.feedFriendlyWithFood = consumeFoodAndHealFriendly;
+
+  const buildInteractionBtn = document.createElement('button');
+  buildInteractionBtn.type = 'button';
+  buildInteractionBtn.textContent = 'Read Note';
+  buildInteractionBtn.style.cssText = 'position:fixed;left:50%;bottom:31%;transform:translateX(-50%);z-index:1200;display:none;padding:8px 12px;';
+  document.body.appendChild(buildInteractionBtn);
+  const BUILD_BUCKET_PRECISION = 4;
+  const buildUi = document.createElement('div');
+  buildUi.className = 'build-action-ui';
+  buildUi.innerHTML = '<button id="build-confirm-btn" class="retro-build-btn">Build</button><div class="build-vertical-controls"><button id="build-up-btn" class="retro-build-btn" aria-label="Move build up">▲ Up</button><button id="build-down-btn" class="retro-build-btn" aria-label="Move build down">▼ Down</button></div>';
+  document.body.appendChild(buildUi);
+  const buildConfirmBtn = buildUi.querySelector('#build-confirm-btn');
+  const buildUpBtn = buildUi.querySelector('#build-up-btn');
+  const buildDownBtn = buildUi.querySelector('#build-down-btn');
+  const noteViewModal = document.createElement('div');
+  noteViewModal.className = 'build-modal-overlay hidden';
+  document.body.appendChild(noteViewModal);
+  let buildVerticalInput = 0;
+  const buildHorizontalKeys = new Set();
+  window.addEventListener('keydown', (event) => {
+    if (!buildState.placing) return;
+    const key = event.key.toLowerCase();
+    if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+      buildHorizontalKeys.add(key);
+    }
+    if (event.key === 'ArrowUp') buildVerticalInput = 1;
+    if (event.key === 'ArrowDown') buildVerticalInput = -1;
+  });
+  window.addEventListener('keyup', (event) => {
+    const key = event.key.toLowerCase();
+    if (key === 'w' || key === 'a' || key === 's' || key === 'd') {
+      buildHorizontalKeys.delete(key);
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') buildVerticalInput = 0;
+  });
+  const BUILD_BUCKET_SCALE = 10 ** BUILD_BUCKET_PRECISION;
+  const toBucketCoord = (value) => Math.round(value * BUILD_BUCKET_SCALE);
+  const bucketCoordToKey = (coord) => coord < 0 ? `m${Math.abs(coord)}` : `p${coord}`;
+  const toBucketKey = (value) => bucketCoordToKey(toBucketCoord(value));
+  const onBuildBucketPath = (xCoord, zCoord) => `worldBuilds/${bucketCoordToKey(xCoord)}_${bucketCoordToKey(zCoord)}`;
+  const onBuildWorldPath = (x, z) => onBuildBucketPath(toBucketCoord(x), toBucketCoord(z));
+  const getBuildSubscriptionPaths = (x, z) => {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return [];
+    const xCoord = toBucketCoord(x);
+    const zCoord = toBucketCoord(z);
+    const paths = [];
+    for (let dX = -1; dX <= 1; dX += 1) {
+      for (let dZ = -1; dZ <= 1; dZ += 1) {
+        paths.push(onBuildBucketPath(xCoord + dX, zCoord + dZ));
+      }
+    }
+    return paths;
+  };
+  const getLocalPositionForBuildRecord = (record) => new THREE.Vector3(record?.x || 0, record?.y || 0, record?.z || 0);
+  const setBuildMeshPositionFromRecord = (mesh, record) => {
+    if (!mesh) return;
+    const position = getLocalPositionForBuildRecord(record);
+    mesh.position.copy(position);
+    syncStaticBoxColliderForObject(mesh.userData?.staticColliderEntry);
+  };
+  const removeBuildRecordFromScene = (id, record) => {
+    disposeBuildHealthBar(record?.mesh);
+    if (record?.mesh) scene.remove(record.mesh);
+    removeStaticBoxCollider(record?.colliderEntry || record?.mesh?.userData?.staticColliderEntry);
+    buildState.records.delete(id);
+    if (buildState.selectedNoteId === id) {
+      buildState.selectedNoteId = null;
+      buildInteractionBtn.style.display = 'none';
+    }
+  };
+  const upsertBuildRecordFromSnapshot = (id, record, buildPath) => {
+    if (!record) return;
+    const incomingRecord = { ...record, buildPath };
+    const existing = buildState.records.get(id);
+    if (existing) {
+      existing.health = Number.isFinite(record.health) ? record.health : existing.health;
+      existing.noteText = record.noteText || '';
+      existing.ownerId = record.ownerId || null;
+      existing.x = Number.isFinite(record.x) ? record.x : existing.x;
+      existing.y = Number.isFinite(record.y) ? record.y : existing.y;
+      existing.z = Number.isFinite(record.z) ? record.z : existing.z;
+      existing.buildPath = buildPath;
+      setBuildMeshPositionFromRecord(existing.mesh, existing);
+      if (existing.mesh?.userData) {
+        existing.mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
+        existing.mesh.userData.noteText = record.noteText || '';
+        existing.mesh.userData.buildOwner = record.ownerId || null;
+        existing.mesh.userData.buildType = record.type || existing.mesh.userData.buildType || 'block';
+      }
+      if (existing.mesh?.userData?.buildHealthBar?.visible) updateBuildHealthBarTexture(existing.mesh);
+      return;
+    }
+    const mesh = record.type === 'note'
+      ? createNoteMesh()
+      : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
+    mesh.userData.buildRecordId = id;
+    mesh.userData.buildHealth = Number.isFinite(record.health) ? record.health : BUILD_MAX_HEALTH;
+    mesh.userData.buildMaxHealth = BUILD_MAX_HEALTH;
+    mesh.userData.buildOwner = record.ownerId || null;
+    mesh.userData.buildType = record.type || 'block';
+    mesh.userData.noteText = record.noteText || '';
+    setBuildMeshPositionFromRecord(mesh, incomingRecord);
+    const colliderEntry = createStaticBoxColliderForObject(mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
+    mesh.userData.staticColliderEntry = colliderEntry || null;
+    scene.add(mesh);
+    buildState.records.set(id, { ...incomingRecord, mesh, colliderEntry });
+  };
+  const subscribeBuildPath = (buildPath) => {
+    if (buildState.subscriptions.has(buildPath)) return;
+    const unsubscribe = onValue(ref(db, buildPath), (snapshot) => {
+      const value = snapshot.val() || {};
+      const incomingIds = new Set(Object.keys(value));
+      buildState.records.forEach((existingRecord, existingId) => {
+        if (existingRecord?.buildPath !== buildPath || incomingIds.has(existingId)) return;
+        removeBuildRecordFromScene(existingId, existingRecord);
+      });
+      Object.entries(value).forEach(([id, record]) => upsertBuildRecordFromSnapshot(id, record, buildPath));
+    });
+    buildState.subscriptions.set(buildPath, unsubscribe);
+  };
+  const refreshBuildRecordPositions = () => {
+    buildState.records.forEach((record) => setBuildMeshPositionFromRecord(record.mesh, record));
+  };
+  const unsubscribeBuildPath = (buildPath) => {
+    const unsubscribe = buildState.subscriptions.get(buildPath);
+    if (unsubscribe) unsubscribe();
+    buildState.subscriptions.delete(buildPath);
+    buildState.records.forEach((record, id) => {
+      if (record?.buildPath === buildPath) removeBuildRecordFromScene(id, record);
+    });
+  };
+  const subscribeBuildsForCurrentLocation = () => {
+    const fix = getLatestLocationFix?.();
+    if (!fix || !Number.isFinite(fix.x) || !Number.isFinite(fix.z)) return;
+    const nextPaths = new Set(getBuildSubscriptionPaths(fix.x, fix.z));
+    nextPaths.forEach((buildPath) => subscribeBuildPath(buildPath));
+    Array.from(buildState.subscriptions.keys()).forEach((buildPath) => {
+      if (!nextPaths.has(buildPath)) unsubscribeBuildPath(buildPath);
+    });
+    buildState.activePaths = nextPaths;
+    refreshBuildRecordPositions();
+  };
+  refreshBuildSubscriptionsForLocation = subscribeBuildsForCurrentLocation;
+  buildUpBtn?.addEventListener('pointerdown', () => { buildVerticalInput = 1; });
+  buildDownBtn?.addEventListener('pointerdown', () => { buildVerticalInput = -1; });
+  const resetVertical = () => { buildVerticalInput = 0; };
+  buildUpBtn?.addEventListener('pointerup', resetVertical);
+  buildDownBtn?.addEventListener('pointerup', resetVertical);
+  buildConfirmBtn?.addEventListener('click', async () => {
+    if (!buildState.placing) return;
+    const p = buildState.placing.mesh.position;
+    const buildPath = onBuildWorldPath(p.x, p.z);
+    const idRef = push(ref(db, buildPath));
+    const record = { type: buildState.placing.type, x: p.x, y: p.y, z: p.z, health: BUILD_MAX_HEALTH, noteText: buildState.placing.noteText || '', ownerId: multiplayer?.peer?.id || 'local', createdAt: Date.now() };
+    await set(idRef, record);
+    const colliderEntry = createStaticBoxColliderForObject(buildState.placing.mesh, { rapierWorld, friction: 0.95, restitution: 0.01 });
+    buildState.records.set(idRef.key, { ...record, buildPath, mesh: buildState.placing.mesh, colliderEntry });
+    buildState.placing.mesh.userData.buildRecordId = idRef.key;
+    buildState.placing.mesh.userData.buildHealth = BUILD_MAX_HEALTH;
+    buildState.placing.mesh.userData.buildMaxHealth = BUILD_MAX_HEALTH;
+    buildState.placing.mesh.userData.buildOwner = record.ownerId;
+    buildState.placing.mesh.userData.buildType = record.type;
+    buildState.placing.mesh.userData.noteText = record.noteText;
+    buildState.placing = null;
+    isBuildPlacementActive = false;
+    buildUi.style.display = 'none';
+    updateControlAvailability();
+    removeFromInventory('wood', 1);
+  });
+  const appState = {
+    getPlayerName: () => playerName,
+    setPlayerName: (name) => {
+      if (!name) return;
+      playerName = name;
+      if (player?.nameLabel) {
+        player.nameLabel.innerText = playerName;
+      }
+      updatePlayerInfoUI();
+      setCookie("playerName", playerName);
+      localStorage.setItem('playerName', playerName);
+      if (multiplayer) {
+        multiplayer.playerName = playerName;
+      }
+    },
+    savePlayerName: async (nextName) => {
+      const trimmedName = nextName?.trim();
+      if (!trimmedName) {
+        return { status: 'invalid' };
+      }
+      if (trimmedName === playerName) {
+        return { status: 'unchanged' };
+      }
+      try {
+        const result = await renameProfile(playerName, profileNameKey, trimmedName);
+        if (result.status === 'ok') {
+          profileNameKey = result.nameKey;
+          playerProfile.name = result.profile?.name || trimmedName;
+          appState.setPlayerName(result.profile?.name || trimmedName);
+          if (homeSystem) {
+            homeSystem.profileNameKey = profileNameKey;
+          }
+        }
+        return result;
+      } catch (error) {
+        console.error('Failed to rename profile:', error);
+        return { status: 'error' };
+      }
+    },
+    getCharacterModel: () => characterModel,
+    setCharacterModel: (modelPath) => {
+      if (!modelPath || modelPath === characterModel) return;
+      getEquippedInventoryItemIds().forEach((equippedItemId) => {
+        unequipInventoryItem(equippedItemId);
+      });
+      swapPlayerCharacter(modelPath);
+      characterModel = modelPath;
+      playerProfile = playerProfile || {};
+      playerProfile.characterModel = modelPath;
+      if (profileNameKey) {
+        void saveCharacterModel(profileNameKey, modelPath);
+      }
+    },
+    getPlayerStats: () => ({ ...statsState }),
+    getLeaderboards: (limit = 10) => loadLeaderboards(limit),
+    getQuestLog: () => window.questManager?.getQuestLog?.() || [],
+    getAchievements: () => getAchievementView(achievementState),
+    claimAchievementReward: (achievementId) => {
+      const claimed = claimAchievement(achievementState, achievementId);
+      if (!claimed) return { status: 'unavailable' };
+      const grants = applyAchievementRewards(claimed.rewards);
+      persistAchievementProgress();
+      updateSettingsUI();
+      return { status: 'ok', achievement: claimed, grants };
+    },
+    getCoins: () => (Number.isFinite(statsState.coins) ? statsState.coins : 0),
+    addCoins: (delta) => {
+      const safeDelta = Number.isFinite(delta) ? delta : 0;
+      if (safeDelta === 0) return;
+      const current = Number.isFinite(statsState.coins) ? statsState.coins : 0;
+      const nextCoins = current + safeDelta;
+      setStat('coins', nextCoins, { skipSave: true });
+      showCoinPopup(statsState.coins);
+      showPickupToast('coins', safeDelta);
+    },
+    getCharacterOptions: () => characterOptions,
+    getInventory: () => getInventory(),
+    getIceAmmoCount: () => getIceAmmoCount(),
+    getArrowAmmoCount: () => getArrowAmmoCount(),
+    getMissileAmmoCount: () => getMissileAmmoCount(),
+    addIceAmmo: (amount) => addIceAmmo(amount),
+    addArrowAmmo: (amount) => addArrowAmmo(amount),
+    addMissileAmmo: (amount) => addMissileAmmo(amount),
+    getHomeStorage: () => getHomeStorage(),
+    getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
+    getEquippedInventoryItemIds: () => getEquippedInventoryItemIds(),
+    isInventoryItemEquipped: (itemId) => isInventoryItemEquipped(itemId),
+    getInventoryItemActions: (itemId) => getInventoryItemActions(itemId),
+    equipInventoryItem: (itemId) => equipInventoryItem(itemId),
+    unequipInventoryItem: (itemId) => unequipInventoryItem(itemId),
+    dropInventoryItem: (itemId) => dropInventoryItem(itemId),
+    eatInventoryItem: (itemId) => eatInventoryItem(itemId),
+    useInventoryItem: (itemId) => useInventoryItem(itemId),
+    startBuildFlow: async (itemId) => {
+      if (itemId !== 'wood') return;
+      const availableWoodCount = Math.max(0, Math.floor(inventoryState.wood?.count || 0));
+      const buildChoice = await openBuildTypePicker(availableWoodCount);
+      const type = typeof buildChoice === 'string' ? buildChoice : buildChoice?.type;
+      const quantity = Math.max(1, Math.floor(Number.isFinite(buildChoice?.quantity) ? buildChoice.quantity : 1));
+      if (!type) return;
+      if (type === 'arrow' || type === 'torch') {
+        startWoodBuildCraftingFlow(type, quantity);
+        return;
+      }
+      let noteText = '';
+      if (type === SHIELD_ITEM_ID) {
+        addToInventory(SHIELD_ITEM_ID, 1);
+        inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+          ...inventoryState[SHIELD_ITEM_ID],
+          count: Math.max(1, inventoryState[SHIELD_ITEM_ID]?.count || 1),
+          [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+        }));
+        removeFromInventory('wood', 1);
+        equipInventoryItem(SHIELD_ITEM_ID);
+        persistInventoryAndStorage();
+        return;
+      }
+      if (type === 'note') {
+        noteText = await openNoteEntryModal();
+        if (!noteText?.trim()) return;
+      }
+      const pos = playerModel?.position?.clone?.() || new THREE.Vector3();
+      const mesh = type === 'note'
+        ? createNoteMesh()
+        : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b4423 }));
+      mesh.position.copy(pos).add(new THREE.Vector3(0, 1.2, 1.2));
+      scene.add(mesh);
+      buildState.placing = { mesh, type, noteText };
+      isBuildPlacementActive = true;
+      buildUi.style.display = 'flex';
+      updateControlAvailability();
+    },
+    addToInventory: (itemId, amount) => addToInventory(itemId, amount),
+    removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
+    storeHomeStorageItem: (itemId) => storeHomeStorageItem(itemId),
+    takeOutHomeStorageItem: (itemId) => takeOutHomeStorageItem(itemId),
+    getConnectedPlayers: () => {
+      const players = [];
+      const playerPos = playerModel?.position;
+      const localFix = getLatestLocationFix();
+      const connections = multiplayer?.connections || {};
+      Object.keys(connections).forEach((id) => {
+        const other = otherPlayers[id];
+        let distance = remotePresenceMeta[id]?.lastDistance ?? null;
+        if (distance == null && localFix && Number.isFinite(remotePresenceMeta[id]?.lastX) && Number.isFinite(remotePresenceMeta[id]?.lastZ)) {
+          distance = Math.hypot(remotePresenceMeta[id].lastX - localFix.x, remotePresenceMeta[id].lastZ - localFix.z);
+        }
+        if (distance == null && other?.model && playerPos) {
+          distance = playerPos.distanceTo(other.model.position);
+        }
+        players.push({
+          id,
+          name: other?.name || `Player ${id.slice(0, 4)}`,
+          distance
+        });
+      });
+      return players;
+    },
+    getConnectionStatus: () => {
+      if (!multiplayer?.peer) return 'Connecting';
+      if (multiplayer.peer.destroyed) return 'Disconnected';
+      if (multiplayer.peer.disconnected) return 'Disconnected';
+      if (multiplayer.peer.open) return 'Connected';
+      return 'Connecting';
+    },
+    getLastPing: () => multiplayer?.lastPingMs,
+    getLastOsmFetch: () => debugState.lastOsmFetchAt,
+    getTerrainStampDebugSample: (x, z, options) => getTerrainStampDebugSample(x, z, options),
+    setTerrainStampDebugOverlay: (enabled, options = {}) => {
+      terrainStampDebugOverlay?.setOptions?.(options);
+      terrainStampDebugOverlay?.setEnabled?.(enabled);
+      return terrainStampDebugOverlay?.getState?.() ?? null;
+    },
+    getTerrainStampDebugOverlayState: () => terrainStampDebugOverlay?.getState?.() ?? null,
+    loadTerrainStampRegressionScene: () => {
+      const pos = TERRAIN_STAMP_REGRESSION_SCENE.position;
+      playerModel?.position?.set?.(pos.x, pos.y, pos.z);
+      playerControls?.body?.setTranslation?.(pos, true);
+      terrainStampDebugOverlay?.setOptions?.({ showHeatmap: true });
+      terrainStampDebugOverlay?.setEnabled?.(true);
+      return { ...TERRAIN_STAMP_REGRESSION_SCENE, debugLocationEnabled: true };
+    },
+    getLastError: () => {
+      const networkError = multiplayer?.lastError;
+      const generalError = debugState.lastError;
+      if (!networkError) return generalError;
+      if (!generalError) return networkError;
+      return (networkError.timestamp || 0) >= (generalError.timestamp || 0) ? networkError : generalError;
+    },
+    getAppVersion: () => import.meta.env?.VITE_APP_VERSION || import.meta.env?.VITE_GIT_COMMIT || 'unknown',
+    getDisplaySettings: () => ({ ...displaySettings }),
+    setDisplayMode: (mode) => setDisplayMode(mode),
+    setDisplaySetting: (key, value) => setDisplaySetting(key, value),
+    getDistanceUnitPreference: () => getDistanceUnitPreference(),
+    setDistanceUnitPreference: (unit) => setDistanceUnitPreference(unit),
+    resetWorldOrigin: () => {
+      resetWorldOrigin();
+      locationState.originX = 0;
+      locationState.originZ = 0;
+      locationState.playerX = null;
+      locationState.playerZ = null;
+      locationState.tile = null;
+      rebuildMapFromCache();
+      didInitialWorldSync = false;
+      window.clearTileCache?.();
+    },
+    clearHomeLocation: async () => {
+      if (!homeSystem?.clearHomeSelection) {
+        return { status: 'unavailable' };
+      }
+      const result = await homeSystem.clearHomeSelection();
+      if (playerProfile) {
+        playerProfile.home = null;
+      }
+      return result;
+    },
+    deleteAccount: async () => {
+      if (!profileNameKey) {
+        return { status: 'missing-key' };
+      }
+      const result = await deleteProfileData(profileNameKey, playerName);
+      if (result.status === 'ok') {
+        localStorage.removeItem('playerName');
+        localStorage.removeItem('characterModel');
+        setCookie('playerName', '', -1);
+        setCookie('characterModel', '', -1);
+        clearStoredPin(playerName);
+        window.location.reload();
+      }
+      return result;
+    }
+  };
+
+  runtimeContext.uiState.appState = appState;
+  window.appState = appState;
+  window.getInventory = getInventory;
+  window.addToInventory = addToInventory;
+  window.removeFromInventory = removeFromInventory;
+  window.openHomeStorage = openHomeStorage;
+  window.openCraftPanel = () => void openCraftPanelFeature();
+  window.craftTableActions = {
+    placeMaterials: placeCraftMaterials,
+    cancelCrafting,
+    craftItem
+  };
+  window.pickupMushroom = pickupMushroom;
+  window.pickupApple = pickupApple;
+  window.pickupWood = pickupWood;
+  window.pickupMeat = pickupMeat;
+  window.pickupSalt = pickupSalt;
+  window.pickupZombieBrains = pickupZombieBrains;
+  window.loadTerrainStampRegressionScene = () => appState.loadTerrainStampRegressionScene();
+  window.setTerrainStampDebugOverlay = (enabled, options) => appState.setTerrainStampDebugOverlay(enabled, options);
+  window.getTerrainStampDebugSample = (x, z, options) => appState.getTerrainStampDebugSample(x, z, options);
+  const showNoteInteraction = async () => {
+    if (!buildState.selectedNoteId) return;
+    const selectedNoteId = buildState.selectedNoteId;
+    const record = buildState.records.get(selectedNoteId);
+    if (!record) return;
+    const isOwner = record.ownerId === (multiplayer?.peer?.id || 'local');
+    const closeNoteView = () => {
+      noteViewModal.classList.add('hidden');
+      noteViewModal.innerHTML = '';
+      noteViewModal.onclick = null;
+    };
+    noteViewModal.innerHTML = `<div class="build-modal"><h3>Note Post</h3><div class="note-view-text">${escapeBuildModalText(record.noteText || '(empty)')}</div><div class="build-modal-actions">${isOwner ? '<button type="button" class="build-cancel-btn" data-note-delete="1">Delete</button><button type="button" class="retro-build-btn" data-note-edit="1">Edit</button>' : ''}<button type="button" class="retro-build-btn" data-note-ok="1">Ok</button></div></div>`;
+    noteViewModal.classList.remove('hidden');
+    noteViewModal.onclick = async (event) => {
+      const ok = event.target.closest('[data-note-ok]');
+      const edit = event.target.closest('[data-note-edit]');
+      const del = event.target.closest('[data-note-delete]');
+      if (event.target === noteViewModal || ok) {
+        closeNoteView();
+        return;
+      }
+      if (del) {
+        await removeBuildRecord(selectedNoteId, record, { refundToInventory: true });
+        closeNoteView();
+      } else if (edit) {
+        closeNoteView();
+        const text = await openNoteEntryModal(record.noteText || '');
+        if (text != null) {
+          const buildPath = getBuildRecordPath(selectedNoteId, record);
+          if (buildPath) await update(ref(db, `${buildPath}/${selectedNoteId}`), { noteText: text });
+          record.noteText = text;
+          if (record.mesh?.userData) record.mesh.userData.noteText = text;
+        }
+      }
+    };
+  };
+  feedDogBtn.addEventListener('click', () => {
+    const playerPos = playerModel?.position;
+    const target = animalManager?.getNearestFeedableDog?.(playerPos, DOG_INTERACT_DISTANCE);
+    const dog = target?.animal;
+    if (!dog) return;
+    const maxHealth = Math.max(1, Number(dog.maxHealth || 1));
+    const currentHealth = Math.max(0, Number(dog.health || 0));
+    if (currentHealth >= maxHealth) {
+      dog.showHealthBar?.();
+      showStatusToast("They're not hungry right now.");
+      return;
+    }
+    const feedSelection = getFeedItemFromInventory();
+    if (!feedSelection) {
+      showStatusToast("You don't have any food for them.");
+      return;
+    }
+    removeFromInventory(feedSelection.itemId, 1);
+    const isNewCompanion = !dog.model.userData?.isCompanion;
+    animalManager?.feedDog?.(dog, feedSelection.healAmount);
+    dog.showHealthBar?.();
+    const foodLabel = inventoryCatalog?.[feedSelection.itemId]?.name || feedSelection.itemId;
+    showStatusToast(`Fed dog a ${foodLabel}`);
+    const persistDog = async (name) => {
+      const key = String(dog.id || `${dog.type}-unknown`);
+      companionData[key] = { id: key, type: 'dog', name: name || dog.model.userData?.companionName || 'Companion', health: dog.health || 1, maxHealth: dog.maxHealth || 1 };
+      dog.model.userData.companionName = companionData[key].name;
+      playerProfile = playerProfile || {};
+      playerProfile.companions = { ...companionData };
+      if (profileNameKey) await saveCompanions(profileNameKey, companionData);
+    };
+    if (isNewCompanion) {
+      void openPopupDialog({
+        title: 'New Animal Companion',
+        message: "you've made an animal companion! remember to feed them!",
+        inputLabel: "Name your dog",
+        inputPlaceholder: 'Companion name',
+        confirmText: 'Save Name'
+      }).then((name) => persistDog(name));
+      showStatusToast('The dog is now your companion!');
+    } else {
+      void persistDog(dog.model.userData?.companionName || 'Companion');
+    }
+  });
+
+  buildInteractionBtn.addEventListener('click', () => { void showNoteInteraction(); });
+
+  const locationAdapter = {
+    getState: () => ({ ...locationState }),
+    retry: () => locationProvider.retry(),
+    getDebugState: () => locationProvider.getDebugState()
+  };
+
+  initSettingsPanel({
+    appState,
+    multiplayer,
+    location: locationAdapter,
+    player
+  });
+  await initCustomizeUIFeature({
+    getPlayerModel: () => playerModel,
+    getPlayerControls: () => playerControls,
+    initialCustomization: playerProfile?.customization,
+    onSaveCustomization: async (customization) => {
+      playerProfile.customization = customization;
+      if (!profileNameKey) return;
+      await saveCustomization(profileNameKey, customization);
+    }
+  });
+  initHomeStoragePanel({ appState });
+  await initMerchantPanelFeature({ appState });
+  await initCraftPanelFeature({ appState });
+  void initMerchantFeature({
+    scene,
+    attachPhysics: attachMonsterPhysics,
+    getTerrainHeight,
+    liftPositionToBuildingTop,
+    appState,
+    roomId: multiplayer?.roomId,
+    isHost
+  });
+
+  settingsBtn.addEventListener('click', () => {
+    openSettings();
+  });
+  inventoryBtn?.addEventListener('click', () => {
+    openInventory();
+  });
+
+  const settingsOverlay = document.getElementById('settings-overlay');
+  const inventoryOverlay = document.getElementById('inventory-overlay');
+  const homeStorageOverlay = document.getElementById('home-storage-overlay');
+  const merchantOverlay = document.getElementById('merchant-overlay');
+  const craftOverlay = document.getElementById('craft-overlay');
+  const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
+
+  setInterval(() => {
+    if (isOverlayVisible(settingsOverlay)) {
+      updateSettingsUI();
+    }
+    if (isOverlayVisible(inventoryOverlay)) {
+      updateSettingsUI();
+    }
+    if (isOverlayVisible(homeStorageOverlay)) {
+      updateHomeStorageUI();
+    }
+    if (isOverlayVisible(merchantOverlay)) {
+      void updateMerchantUIFeature();
+    }
+    if (isOverlayVisible(craftOverlay)) {
+      void updateCraftUIFeature();
+    }
+  }, 1000);
+  updateAutoDisplayMode();
+  setInterval(() => {
+    updateAutoDisplayMode();
+  }, 60 * 1000);
+
+  const consoleDiv = document.getElementById("console-log");
+  if (runtimeContext.debugFlags.DEBUG_CONSOLE === true) {
+    (function() {
+      const originalLog = console.log;
+      console.log = function(...args) {
+        originalLog(...args);
+        if (!consoleDiv) return;
+        const msg = document.createElement("div");
+        msg.textContent = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(" ");
+        consoleDiv.appendChild(msg);
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+      };
+    })();
+  }
+
+  const getMeshWorldBounds = (mesh) => {
+    const geometry = mesh.geometry;
+    const userData = mesh.userData ?? {};
+    mesh.userData = userData;
+    if (!userData.boundsState) {
+      userData.boundsState = {
+        worldBox: new THREE.Box3(),
+        tempBox: new THREE.Box3(),
+        lastPosition: new THREE.Vector3(),
+        lastQuaternion: new THREE.Quaternion()
+      };
+      userData.boundsDirty = true;
+    }
+    const { boundsState } = userData;
+    if (userData.boundsHasSkinned == null) {
+      let hasSkinned = false;
+      mesh.traverse((child) => {
+        if (child.isSkinnedMesh) {
+          hasSkinned = true;
+        }
+      });
+      userData.boundsHasSkinned = hasSkinned;
+    }
+    const hasMoved = !boundsState.lastPosition.equals(mesh.position)
+      || !boundsState.lastQuaternion.equals(mesh.quaternion);
+    if (hasMoved) {
+      userData.boundsDirty = true;
+    }
+    if (!userData.boundsDirty && !userData.boundsAlwaysDirty && !userData.boundsHasSkinned) {
+      return boundsState.worldBox;
+    }
+    if (userData.boundsHasSkinned) {
+      mesh.updateMatrixWorld(true);
+      boundsState.worldBox.setFromObject(mesh);
+      boundsState.lastPosition.copy(mesh.position);
+      boundsState.lastQuaternion.copy(mesh.quaternion);
+      userData.boundsDirty = false;
+      return boundsState.worldBox;
+    }
+    if (geometry && !geometry.boundingBox && typeof geometry.computeBoundingBox === 'function') {
+      geometry.computeBoundingBox();
+    }
+    if (!geometry || !geometry.boundingBox) {
+      if (!mesh.isGroup && !mesh.isLOD && !mesh.isObject3D) {
+        return null;
+      }
+      mesh.updateMatrixWorld(true);
+      let hasChildBounds = false;
+      boundsState.worldBox.makeEmpty();
+      mesh.traverse((child) => {
+        if (!child.isMesh || !child.geometry) {
+          return;
+        }
+        if (!child.geometry.boundingBox && typeof child.geometry.computeBoundingBox === 'function') {
+          child.geometry.computeBoundingBox();
+        }
+        if (!child.geometry.boundingBox) {
+          return;
+        }
+        boundsState.tempBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+        boundsState.worldBox.union(boundsState.tempBox);
+        hasChildBounds = true;
+      });
+      if (!hasChildBounds) {
+        boundsState.worldBox.setFromObject(mesh);
+      }
+    } else {
+      mesh.updateMatrixWorld();
+      boundsState.worldBox.copy(geometry.boundingBox).applyMatrix4(mesh.matrixWorld);
+    }
+    boundsState.lastPosition.copy(mesh.position);
+    boundsState.lastQuaternion.copy(mesh.quaternion);
+    userData.boundsDirty = false;
+    return boundsState.worldBox;
+  };
+
+  const handleBombPickupArrowHit = () => {
+    if (!bomb?.mesh || bomb.holder || !bomb.mesh.visible) return;
+    const bombBounds = getMeshWorldBounds(bomb.mesh);
+    if (!bombBounds) return;
+    for (let i = projectiles.length - 1; i >= 0; i -= 1) {
+      const projectile = projectiles[i];
+      if (!projectile?.userData?.isArrow) continue;
+      const projectileBounds = getMeshWorldBounds(projectile);
+      if (!projectileBounds) continue;
+      if (!projectileBounds.intersectsBox(bombBounds)) continue;
+      const hitPosition = bomb.mesh.position.clone();
+      spawnBombMist(scene, bombMists, hitPosition);
+      applyBombImpactDamage(hitPosition, projectile.userData?.shooterId);
+      bomb.mesh.visible = false;
+      bomb.holder = null;
+      bomb.localHoldOrigin = null;
+      sendImmediateEntityControl('bomb');
+      audioManager?.playSFX('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Blocked 1.ogg', 0.58, { cooldownKey: 'bow-blocked', cooldownMs: 60 });
+      removeProjectileAt(projectiles, i);
+      break;
+    }
+  };
+
+  const roadLightLoader = new GLTFLoader();
+  let roadLightTemplate = null;
+  let roadLightTemplatePromise = null;
+  const roadLightPool = [];
+  const roadLightScratch = {
+    playerPos: new THREE.Vector3(),
+    playerMove: new THREE.Vector3(),
+    spawnPos: new THREE.Vector3(),
+    lastPlayerPos: null,
+    gridCenterX: null,
+    gridCenterZ: null,
+    nextRepositionAtMs: 0
+  };
+
+  const isNightDisplayMode = () => {
+    const effectiveMode = displaySettings.mode === 'auto'
+      ? (lastAutoMode || getAutoMode())
+      : displaySettings.mode;
+    return effectiveMode === 'night';
+  };
+
+  const clearRoadLightPool = () => {
+    roadLightPool.forEach((entry) => {
+      if (!entry?.model) return;
+      entry.model.visible = false;
+    });
+  };
+
+  const ensureRoadLightTemplate = async () => {
+    if (roadLightTemplate) return roadLightTemplate;
+    if (!roadLightTemplatePromise) {
+      roadLightTemplatePromise = roadLightLoader.loadAsync(ROAD_LIGHT_MODEL_URL)
+        .then((gltf) => {
+          roadLightTemplate = gltf?.scene || null;
+          return roadLightTemplate;
+        })
+        .catch((error) => {
+          console.warn('Failed to load road light template.', error);
+          return null;
+        });
+    }
+    return roadLightTemplatePromise;
+  };
+
+  const updateRoadLightsNearPlayer = () => {
+    if (!scene || !playerModel?.position || !isNightDisplayMode()) {
+      clearRoadLightPool();
+      return;
+    }
+    const template = roadLightTemplate;
+    if (!template) {
+      void ensureRoadLightTemplate();
+      return;
+    }
+    const playerPos = roadLightScratch.playerPos.copy(playerModel.position);
+    const nowMs = performance.now();
+    const spawnPos = roadLightScratch.spawnPos;
+    const playerMove = roadLightScratch.playerMove;
+    if (roadLightScratch.lastPlayerPos) {
+      playerMove.copy(playerPos).sub(roadLightScratch.lastPlayerPos).setY(0);
+    } else {
+      playerMove.set(0, 0, 0);
+    }
+    if (playerMove.lengthSq() > 0.0001) {
+      playerMove.normalize();
+    }
+    if (!roadLightScratch.lastPlayerPos) {
+      roadLightScratch.lastPlayerPos = playerPos.clone();
+    }
+    roadLightScratch.lastPlayerPos.copy(playerPos);
+
+    if (
+      roadLightScratch.gridCenterX == null
+      || roadLightScratch.gridCenterZ == null
+      || nowMs >= roadLightScratch.nextRepositionAtMs
+    ) {
+      const shouldShiftForward = playerMove.lengthSq() > 0.01;
+      const shiftOffsetX = shouldShiftForward ? playerMove.x * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
+      const shiftOffsetZ = shouldShiftForward ? playerMove.z * ROAD_LIGHT_SHIFT_DISTANCE_METERS : 0;
+      roadLightScratch.gridCenterX =
+        Math.round((playerPos.x + shiftOffsetX) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
+      roadLightScratch.gridCenterZ =
+        Math.round((playerPos.z + shiftOffsetZ) / ROAD_LIGHT_GRID_SPACING_METERS) * ROAD_LIGHT_GRID_SPACING_METERS;
+      roadLightScratch.nextRepositionAtMs = nowMs + ROAD_LIGHT_REPOSITION_INTERVAL_MS;
+    }
+    const gridCenterX = roadLightScratch.gridCenterX;
+    const gridCenterZ = roadLightScratch.gridCenterZ;
+    const halfSpan = ((ROAD_LIGHT_GRID_SIZE - 1) * ROAD_LIGHT_GRID_SPACING_METERS) * 0.5;
+
+    let poolIndex = 0;
+    for (let row = 0; row < ROAD_LIGHT_GRID_SIZE; row += 1) {
+      for (let col = 0; col < ROAD_LIGHT_GRID_SIZE; col += 1) {
+        const x = gridCenterX + (col * ROAD_LIGHT_GRID_SPACING_METERS - halfSpan);
+        const z = gridCenterZ + (row * ROAD_LIGHT_GRID_SPACING_METERS - halfSpan);
+        spawnPos.set(x, 0, z);
+        const spawnTerrain = getTerrainHeight(spawnPos.x, spawnPos.z);
+        spawnPos.y = Number.isFinite(spawnTerrain) ? spawnTerrain : playerPos.y;
+        let roadLight = roadLightPool[poolIndex];
+        if (!roadLight) {
+          const model = template.clone(true);
+          model.scale.setScalar(1);
+          const lampLight = new THREE.PointLight(
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.color,
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.intensity,
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.distance,
+            ROAD_LIGHT_POINT_LIGHT_CONFIG.decay
+          );
+          lampLight.position.set(0, ROAD_LIGHT_POINT_LIGHT_CONFIG.yOffset, 0);
+          model.add(lampLight);
+          scene.add(model);
+          roadLight = { model };
+          roadLightPool[poolIndex] = roadLight;
+        }
+        roadLight.model.visible = true;
+        roadLight.model.position.copy(spawnPos);
+        poolIndex += 1;
+      }
+    }
+
+    for (let i = poolIndex; i < roadLightPool.length; i += 1) {
+      roadLightPool[i].model.visible = false;
+    }
+  };
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const frameStartMs = performance.now();
+
+    // --- RAPIER FIXED-STEP & SYNC ---
+    // Accumulate variable rAF time into fixed physics steps
+    const frameDelta = clock.getDelta();
+    buildingsRenderer?.processFrame?.();
+    frameIndex += 1;
+    lastFrameDurationMs = frameDelta * 1000;
+    accumulateBucketDeltas(frameDelta);
+    if (mapViewEnabled && playerControls?.body && playerModel) {
+      const { x, y, z } = playerModel.position;
+      playerControls.body.setTranslation({ x, y, z }, true);
+      playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+    physicsAccumulator += frameDelta;
+    while (physicsAccumulator >= FIXED_DT) {
+      // applyGlobalGravity(rapierWorld, window.moon);
+      rapierWorld.step();
+      physicsAccumulator -= FIXED_DT;
+    }
+    syncCraftTableCollider();
+
+    // Sync Rapier bodies -> Three meshes
+    const resolveGroundY = playerControls?.resolveGroundY?.bind(playerControls);
+    for (const [rb, mesh] of rbToMesh.entries()) {
+      {
+        const t = rb.translation();
+        mesh.position.set(t.x, t.y, t.z);
+      }
+      {
+        const r = rb.rotation();
+        mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      }
+
+      const isStaticBody = typeof rb.isFixed === 'function' && rb.isFixed();
+      if (!mesh.userData?.isTerrain && !mesh.userData?.skipTerrainCorrection && !isStaticBody) {
+        const bbox = getMeshWorldBounds(mesh);
+        if (bbox) {
+          let excludedColliderHandles = null;
+          if (typeof rb.numColliders === 'function' && typeof rb.collider === 'function') {
+            excludedColliderHandles = [];
+            const colliderCount = rb.numColliders();
+            for (let i = 0; i < colliderCount; i += 1) {
+              const collider = rb.collider(i);
+              if (typeof collider?.handle === 'number') {
+                excludedColliderHandles.push(collider.handle);
+              }
+            }
+          }
+          const groundResolution = resolveGroundY
+            ? resolveGroundY(mesh.position.x, Math.max(mesh.position.y, bbox.max.y + 0.05), mesh.position.z, {
+              excludedColliderHandles
+            })
+            : null;
+          const resolvedGroundY = groundResolution?.groundY ?? getTerrainHeight(mesh.position.x, mesh.position.z);
+          const isDeadEntity = mesh.userData?.mode === 'dead';
+          const belowResolvedGround = Number.isFinite(resolvedGroundY) && bbox.min.y < resolvedGroundY - 0.01;
+          const shouldSnapToGround = isDeadEntity ? belowResolvedGround : belowResolvedGround;
+          if (shouldSnapToGround) {
+            const correction = resolvedGroundY - bbox.min.y;
+            mesh.position.y += correction;
+            rb.setTranslation({ x: mesh.position.x, y: mesh.position.y, z: mesh.position.z }, true);
+            let shouldClampDownwardVelocity = false;
+            let clampVelocityX = 0;
+            let clampVelocityZ = 0;
+            {
+              const lv = rb.linvel();
+              shouldClampDownwardVelocity = lv.y < 0;
+              clampVelocityX = lv.x;
+              clampVelocityZ = lv.z;
+            }
+            if (shouldClampDownwardVelocity) {
+              rb.setLinvel({ x: clampVelocityX, y: 0, z: clampVelocityZ }, true);
+            }
+          }
+        }
+      }
+
+      // Simple cleanup: remove if it falls far below the world
+      if (mesh.position.y < -50) {
+        disposeSceneObject(mesh);
+        rbToMesh.delete(rb);
+        if (mesh.userData?.rb === rb) {
+          mesh.userData.rb = null;
+          mesh.userData.physicsMode = null;
+        }
+        removeRigidBodySafely(rapierWorld, rb);
+      }
+    }
+
+
+
+    const playerPosition = playerModel?.position;
+    homeSystem?.syncHomePlacement?.();
+    updateGroundTiles(playerPosition);
+    natureController?.update(playerPosition);
+    updateRoadLightsNearPlayer();
+    if (shouldUpdatePickupTiles(playerPosition)) {
+      updatePickupTiles(playerPosition);
+    }
+
+    if (!mapViewEnabled && !buildState.placing) {
+      playerControls.update();
+      if (playerControls?.isClimbing && !climbedSinceGrounded) {
+        climbedSinceGrounded = true;
+        notifyAchievementProgress('treesClimbed', 1);
+      }
+      if (!playerControls?.isClimbing) {
+        climbedSinceGrounded = false;
+      }
+    }
+    updatePlayerHurtFlash();
+    if (buildState.placing) {
+      const moveSpeed = 3 * frameDelta;
+      const keys = buildHorizontalKeys;
+      const isMobileStickActive = Number.isFinite(playerControls?.joystickForce) && playerControls.joystickForce > 0.1;
+      if (isMobileStickActive) {
+        const dx = Math.cos(playerControls.joystickAngle || 0) * playerControls.joystickForce;
+        const dz = Math.sin(playerControls.joystickAngle || 0) * playerControls.joystickForce;
+        buildState.placing.mesh.position.x += dx * moveSpeed;
+        buildState.placing.mesh.position.z += dz * moveSpeed;
+      } else {
+        if (keys.has('w')) buildState.placing.mesh.position.z += moveSpeed;
+        if (keys.has('s')) buildState.placing.mesh.position.z -= moveSpeed;
+        if (keys.has('a')) buildState.placing.mesh.position.x += moveSpeed;
+        if (keys.has('d')) buildState.placing.mesh.position.x -= moveSpeed;
+      }
+      if (buildVerticalInput !== 0) buildState.placing.mesh.position.y += buildVerticalInput * moveSpeed;
+      const followTarget = buildState.placing.mesh.position;
+      const desiredCameraPos = followTarget.clone().add(buildState.cameraOffset);
+      camera.position.lerp(desiredCameraPos, 0.15);
+      camera.lookAt(followTarget);
+    } else {
+      const playerPos = playerModel?.position;
+      if (playerPos) {
+        let closestNoteDistance = Number.POSITIVE_INFINITY;
+        let closestInteractDistance = Number.POSITIVE_INFINITY;
+        const closestFriendly = friendlyNpcManager?.getNearestFriendly?.(playerPos);
+        if (closestFriendly?.distance != null) closestInteractDistance = Math.min(closestInteractDistance, closestFriendly.distance);
+        closestInteractDistance = Math.min(closestInteractDistance, 1.2);
+        buildState.selectedNoteId = null;
+        buildState.records.forEach((record, id) => {
+          if (record.type !== 'note' || !record.mesh) return;
+          const distance = record.mesh.position.distanceTo(playerPos);
+          if (distance < 3 && distance < closestNoteDistance) {
+            closestNoteDistance = distance;
+            buildState.selectedNoteId = id;
+          }
+        });
+        const labelsBlocked = areInteractionLabelsBlocked();
+        const shouldShow = !labelsBlocked && Boolean(buildState.selectedNoteId) && closestNoteDistance <= closestInteractDistance;
+        buildInteractionBtn.style.display = shouldShow ? 'block' : 'none';
+
+        const nearbyDog = labelsBlocked ? null : animalManager?.getNearestFeedableDog?.(playerPos, DOG_INTERACT_DISTANCE);
+        if (nearbyDog?.animal?.model) {
+          const buttonAnchor = nearbyDog.animal.model.position.clone().add(new THREE.Vector3(0, 2, 0));
+          buttonAnchor.project(camera);
+          if (buttonAnchor.z < 0 || buttonAnchor.z > 1) {
+            feedDogBtn.style.display = 'none';
+          } else {
+            const x = (buttonAnchor.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (-buttonAnchor.y * 0.5 + 0.5) * window.innerHeight;
+            feedDogBtn.style.display = 'block';
+            feedDogBtn.style.left = `${x}px`;
+            feedDogBtn.style.top = `${y + 24}px`;
+          }
+        } else {
+          feedDogBtn.style.display = 'none';
+        }
+      }
+    }
+    updateBuildHealthBars();
+    if (craftState.swirl?.line) {
+      craftState.swirl.line.rotation.y += frameDelta * 2;
+    }
+    const homePosition = homeSystem?.getHomeLocalPosition?.();
+    const homeEnterDistance = homeSystem?.getHomeEnterDistance?.();
+    const mapMerchantFriendly = getMerchantFriendlyFeature();
+    const mapTreasureChests = treasureChest?.mesh?.visible ? [treasureChest.mesh] : [];
+    const mapMerchants = mapMerchantFriendly?.model ? [mapMerchantFriendly.model] : [];
+    if (mapViewEnabled || isMapViewTransitionActiveFeature()) {
+      void updateMapViewFeature(frameDelta, {
+        monsters,
+        animals,
+        friendlies: friendlyNpcManager?.friendlies,
+        weapons: droppedWeaponPickups,
+        ammoItems: ammoPickups,
+        woodItems: woodPickups,
+        treasureChests: mapTreasureChests,
+        merchants: mapMerchants,
+        otherPlayers,
+        homePosition,
+        homeEnterDistance
+      });
+    }
+
+    const now = performance.now();
+    processIncomingPeerDataQueue();
+    if (now - lastPerfUpdateMs >= 1000) {
+      debugPerf.monsters = monsters.length;
+      debugPerf.ammoPickups = ammoPickups.length;
+      debugPerf.foodPickups = foodPickups.length;
+      debugPerf.healthPickups = healthPickups.length;
+      debugPerf.coinPickups = coinPickups.length;
+      debugPerf.tileCacheSize = tileCache.cache.size;
+      debugPerf.incomingBacklog = lastIncomingBacklog;
+      debugPerf.incomingProcessedPerFrame = lastIncomingProcessCount;
+      debugPerf.adaptiveDegradeLevel = adaptiveDegradeLevel;
+      Object.entries(subsystemPerf).forEach(([name, tracker]) => {
+        const avgMs = tracker.calls > 0 ? tracker.totalMs / tracker.calls : 0;
+        debugPerf[`${name}AvgMs`] = Number(avgMs.toFixed(3));
+        debugPerf[`${name}MaxMs`] = Number(tracker.maxMs.toFixed(3));
+        debugPerf[`${name}LastMs`] = Number(tracker.lastMs.toFixed(3));
+        tracker.totalMs = 0;
+        tracker.calls = 0;
+        tracker.maxMs = 0;
+      });
+      lastPerfUpdateMs = now;
+    }
+    statDecayAccumulator += frameDelta;
+    if (statDecayAccumulator >= 1) {
+      const elapsedSeconds = statDecayAccumulator;
+      statDecayAccumulator = 0;
+      let statsChanged = false;
+      const isSleeping = playerControls?.isSleeping;
+
+      if (isSleeping) {
+        const recovery = SLEEP_RECOVERY_PER_SECOND * elapsedSeconds;
+        if (recovery > 0) {
+          hungerRecoveryRemainder += recovery;
+          const segments = Math.floor(hungerRecoveryRemainder);
+          if (segments > 0) {
+            setStat('hunger', statsState.hunger + segments, { skipSave: true });
+            hungerRecoveryRemainder -= segments;
+            statsChanged = true;
+          }
+        }
+        const healthRecovery = SLEEP_RECOVERY_SEGMENTS_PER_SECOND * elapsedSeconds;
+        if (healthRecovery > 0) {
+          healthRecoveryRemainder += healthRecovery;
+          const segments = Math.floor(healthRecoveryRemainder);
+          if (segments > 0) {
+            setStat('health', statsState.health + segments, { skipSave: true });
+            healthRecoveryRemainder -= segments;
+            statsChanged = true;
+          }
+        }
+      } else {
+        if (statsState.hunger > 0) {
+          const hungerDecay = HUNGER_DECAY_PER_HOUR * (elapsedSeconds / 3600);
+          if (hungerDecay > 0) {
+            hungerDecayRemainder += hungerDecay;
+            const segments = Math.floor(hungerDecayRemainder);
+            if (segments > 0) {
+              setStat('hunger', statsState.hunger - segments, { skipSave: true });
+              hungerDecayRemainder -= segments;
+              statsChanged = true;
+            }
+          }
+        }
+
+        const isMoving = playerControls?.isMoving;
+        if (isMoving && statsState.hunger > 0) {
+          const energyDecay = ENERGY_DECAY_PER_SECOND_WHILE_MOVING * elapsedSeconds;
+          if (energyDecay > 0) {
+            movementHungerDecayRemainder += energyDecay;
+            const segments = Math.floor(movementHungerDecayRemainder);
+            if (segments > 0) {
+              setStat('hunger', statsState.hunger - segments, { skipSave: true });
+              movementHungerDecayRemainder -= segments;
+              statsChanged = true;
+            }
+          }
+        }
+
+        if (statsState.hunger <= 0 && statsState.health > 0) {
+          const healthDecay = HUNGER_HEALTH_DECAY_SEGMENTS_PER_SECOND * elapsedSeconds;
+          if (healthDecay > 0) {
+            healthDecayRemainder += healthDecay;
+            const segments = Math.floor(healthDecayRemainder);
+            if (segments > 0) {
+              setStat('health', statsState.health - segments, { skipSave: true });
+              healthDecayRemainder -= segments;
+              statsChanged = true;
+            }
+          }
+        }
+      }
+
+      if (statsChanged) {
+        lastStatUpdateAt = Date.now();
+        saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+      }
+    }
+    if (torch?.holder === playerControls) {
+      const entry = inventoryState[TORCH_ITEM_ID];
+      const healths = getTorchHealths(entry);
+      if (!healths.length) {
+        equippedTorchIndex = null;
+        unequipInventoryItem(TORCH_ITEM_ID);
+      } else {
+        if (!Number.isInteger(equippedTorchIndex) || equippedTorchIndex >= healths.length) {
+          equippedTorchIndex = healths.findIndex(health => health > 0);
+        }
+        if (equippedTorchIndex < 0) {
+          equippedTorchIndex = null;
+          applyTorchHealths(inventoryState, entry, []);
+          unequipInventoryItem(TORCH_ITEM_ID);
+        } else {
+          const currentHealth = healths[equippedTorchIndex];
+          const nextHealth = Math.max(0, currentHealth - TORCH_HEALTH_DECAY_PER_SECOND * frameDelta);
+          if (nextHealth <= 0) {
+            healths.splice(equippedTorchIndex, 1);
+            equippedTorchIndex = null;
+            applyTorchHealths(inventoryState, entry, healths);
+            torch.mesh.userData.torchHealth = 0;
+            unequipInventoryItem(TORCH_ITEM_ID);
+            persistInventoryAndStorage();
+            torchHealthDirty = false;
+            lastTorchHealthSaveAt = now;
+          } else if (nextHealth !== currentHealth) {
+            healths[equippedTorchIndex] = nextHealth;
+            applyTorchHealths(inventoryState, entry, healths);
+            torch.mesh.userData.torchHealth = nextHealth;
+            torchHealthDirty = true;
+          }
+        }
+      }
+    }
+    if (torchHealthDirty && now - lastTorchHealthSaveAt >= 1000) {
+      persistInventoryAndStorage();
+      torchHealthDirty = false;
+      lastTorchHealthSaveAt = now;
+    }
+
+    if (shouldRunBucket('pickups')) {
+      withSubsystemTiming('pickups', () => {
+        const pickupDeltaSeconds = consumeBucketDelta('pickups', frameDelta);
+        const pickupTime = performance.now() * 0.002;
+        const shouldCheckPickups = !PERF.throttlePickups || now - lastPickupCheckMs >= PICKUP_CHECK_INTERVAL_MS;
+        if (shouldCheckPickups) {
+          lastPickupCheckMs = now;
+        }
+
+        if (PERF.disablePickups) {
+      for (let i = ammoPickups.length - 1; i >= 0; i--) {
+        const pickup = ammoPickups[i];
+        if (!pickup) continue;
+        disposePickup(pickup);
+        ammoPickups.splice(i, 1);
+      }
+      droppedAmmoPickups.forEach((entry, id) => {
+        if (!entry?.mesh) return;
+        disposePickup(entry.mesh);
+        droppedAmmoPickups.delete(id);
+      });
+      droppedWorldPickups.forEach((entry, id) => {
+        removeDroppedWorldPickup(id);
+      });
+      for (let i = foodPickups.length - 1; i >= 0; i--) {
+        const pickup = foodPickups[i];
+        if (!pickup) continue;
+        disposePickup(pickup);
+        foodPickups.splice(i, 1);
+      }
+      for (let i = healthPickups.length - 1; i >= 0; i--) {
+        const pickup = healthPickups[i];
+        if (!pickup) continue;
+        disposePickup(pickup);
+        healthPickups.splice(i, 1);
+      }
+      for (let i = coinPickups.length - 1; i >= 0; i--) {
+        const pickup = coinPickups[i];
+        if (!pickup) continue;
+        disposePickup(pickup);
+        coinPickups.splice(i, 1);
+      }
+      for (let i = zombieBrainsPickups.length - 1; i >= 0; i--) {
+        const pickup = zombieBrainsPickups[i];
+        if (!pickup?.mesh) continue;
+        disposeWoodPickup(pickup);
+        zombieBrainsPickups.splice(i, 1);
+      }
+      for (let i = mushroomPickups.length - 1; i >= 0; i--) {
+        const pickup = mushroomPickups[i];
+        if (!pickup) continue;
+        disposeMushroomPickup(pickup);
+        mushroomPickupGrid.remove(pickup);
+        mushroomPickups.splice(i, 1);
+      }
+      for (let i = applePickups.length - 1; i >= 0; i--) {
+        const pickup = applePickups[i];
+        if (!pickup) continue;
+        disposeApplePickup(pickup);
+        applePickups.splice(i, 1);
+      }
+        } else {
+      for (let i = ammoPickups.length - 1; i >= 0; i--) {
+        const pickup = ammoPickups[i];
+        if (!pickup) continue;
+
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        const phase = pickup.userData.phase ?? 0;
+        if (!pickup.userData.noFloat) {
+          pickup.rotation.y += 0.03;
+          pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        }
+        if (pickup.userData.sparkle && pickup.userData.sparkleLight) {
+          pickup.userData.sparkleLight.intensity = 0.4 + Math.sin(pickupTime * 2 + phase) * 0.3;
+        }
+        const pickupAttractRadius = getPickupAttractRadius();
+        if (!playerDead && playerModel.position.distanceTo(pickup.position) <= pickupAttractRadius) {
+          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+        }
+
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
+          const ammoType = pickup.userData.type || 'ammo';
+          const amount = Number.isFinite(pickup.userData.amount)
+            ? pickup.userData.amount
+            : AMMO_PICKUP_AMOUNT;
+          addAmmoForType(ammoType, amount);
+          const popupLabel = getAmmoLabelForType(ammoType);
+          const displayAmount = ammoType === 'arrow'
+            ? (bow?.holder === playerControls
+              ? playerControls.ammo
+              : inventoryState.bow?.[ARROW_AMMO_KEY] ?? amount)
+            : ammoType === 'missile'
+              ? (bazooka?.holder === playerControls
+                ? playerControls.ammo
+                : inventoryState.bazooka?.[MISSILE_AMMO_KEY] ?? amount)
+              : (iceGun?.holder === playerControls
+                ? playerControls.ammo
+                : inventoryState.iceGun?.[ICE_AMMO_KEY] ?? amount);
+          showAmmoPopup(displayAmount, popupLabel);
+          disposePickup(pickup);
+          ammoPickups.splice(i, 1);
+        }
+      }
+
+      droppedAmmoPickups.forEach((entry, id) => {
+        const pickup = entry?.mesh;
+        if (!pickup) return;
+
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        if (!pickup.userData.noFloat) {
+          pickup.rotation.y += 0.03;
+          const phase = pickup.userData.phase ?? 0;
+          pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        }
+        const pickupAttractRadius = getPickupAttractRadius();
+        if (!playerDead && playerModel.position.distanceTo(pickup.position) <= pickupAttractRadius) {
+          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+        }
+
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < 1.2) {
+          const amount = Number.isFinite(entry.amount)
+            ? entry.amount
+            : (Number.isFinite(pickup.userData.amount) ? pickup.userData.amount : AMMO_PICKUP_AMOUNT);
+          const ammoType = entry.ammoType || pickup.userData.type || 'ammo';
+          addAmmoForType(ammoType, amount);
+          const displayAmount = ammoType === 'missile'
+            ? (bazooka?.holder === playerControls ? playerControls.ammo : (inventoryState.bazooka?.[MISSILE_AMMO_KEY] ?? amount))
+            : (iceGun?.holder === playerControls ? playerControls.ammo : (inventoryState.iceGun?.[ICE_AMMO_KEY] ?? amount));
+          showAmmoPopup(displayAmount, getAmmoLabelForType(ammoType));
+          removeDroppedAmmoPickup(id);
+          if (multiplayer && !multiplayer.isHost) {
+            pendingDropRemovals.add(id);
+            multiplayer.send({ type: 'dropPickup', dropId: id });
+          }
+        }
+      });
+
+      for (let i = foodPickups.length - 1; i >= 0; i--) {
+        const pickup = foodPickups[i];
+        if (!pickup) continue;
+
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        pickup.rotation.y += 0.03;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+          applyFoodPickupEffects();
+          disposePickup(pickup);
+          foodPickups.splice(i, 1);
+        }
+      }
+
+      for (let i = healthPickups.length - 1; i >= 0; i--) {
+        const pickup = healthPickups[i];
+        if (!pickup) continue;
+
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        pickup.rotation.y += 0.03;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+          applyHealthPickupEffects();
+          disposePickup(pickup);
+          healthPickups.splice(i, 1);
+        }
+      }
+
+      for (let i = coinPickups.length - 1; i >= 0; i--) {
+        const pickup = coinPickups[i];
+        if (!pickup) continue;
+
+        if (pickup.userData.baseY === undefined) {
+          pickup.userData.baseY = pickup.position.y;
+        }
+
+        pickup.rotation.z += 0.10;
+        const phase = pickup.userData.phase ?? 0;
+        pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
+        if (!playerDead && playerModel.position.distanceTo(pickup.position) <= getPickupAttractRadius()) {
+          attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+        }
+
+        if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
+          applyCoinPickupEffects();
+          disposePickup(pickup);
+          coinPickups.splice(i, 1);
+        }
+      }
+
+      for (let i = mushroomPickups.length - 1; i >= 0; i--) {
+        const pickup = mushroomPickups[i];
+        if (!pickup?.active) {
+          mushroomPickupGrid.remove(pickup);
+          mushroomPickups.splice(i, 1);
+          continue;
+        }
+        const pickupMesh = pickup.mesh;
+        const targetModel = pickup.homeTargetModel || playerModel;
+        if (targetModel && !playerDead) {
+          const pickupPosition = pickupMesh?.position || pickup.position;
+          const shouldHome = pickup.homeTargetModel || (pickupPosition && playerModel.position.distanceTo(pickupPosition) <= getPickupAttractRadius());
+          if (shouldHome && pickupMesh) {
+            attractPickupToPlayer(pickupMesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+          } else if (shouldHome && pickup.position) {
+            const nextPosition = pickup.position.clone();
+            attractPickupToPlayer(nextPosition, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+            mushroomController?.updatePickupPosition?.(pickup, nextPosition);
+          }
+        }
+        if (shouldCheckPickups && pickupMushroom(pickup)) continue;
+      }
+      for (let i = applePickups.length - 1; i >= 0; i--) {
+        const pickup = applePickups[i];
+        if (!pickup?.mesh) {
+          applePickups.splice(i, 1);
+          continue;
+        }
+        if (shouldCheckPickups && pickupApple(pickup)) continue;
+      }
+      for (let i = woodPickups.length - 1; i >= 0; i--) {
+        const pickup = woodPickups[i];
+        if (!pickup?.mesh) {
+          woodPickups.splice(i, 1);
+          continue;
+        }
+        const targetModel = pickup.homeTargetModel || playerModel;
+        if (targetModel && !playerDead) {
+          const shouldHome = pickup.homeTargetModel || playerModel.position.distanceTo(pickup.mesh.position) <= getPickupAttractRadius();
+          if (shouldHome) {
+            attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+          }
+        }
+        if (shouldCheckPickups && pickupWood(pickup)) continue;
+      }
+      for (let i = meatPickups.length - 1; i >= 0; i--) {
+        const pickup = meatPickups[i];
+        if (!pickup?.mesh) {
+          meatPickups.splice(i, 1);
+          continue;
+        }
+        if (!playerDead) {
+          attractPickupToPlayer(pickup.mesh, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+        }
+        if (shouldCheckPickups && pickupMeat(pickup)) continue;
+      }
+      for (let i = zombieBrainsPickups.length - 1; i >= 0; i--) {
+        const pickup = zombieBrainsPickups[i];
+        if (!pickup?.mesh) {
+          zombieBrainsPickups.splice(i, 1);
+          continue;
+        }
+        pickup.mesh.rotation.y += 0.02;
+        const targetModel = pickup.homeTargetModel || playerModel;
+        if (targetModel && !playerDead) {
+          attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+        }
+        if (shouldCheckPickups && pickupZombieBrains(pickup)) continue;
+      }
+      for (let i = saltPickups.length - 1; i >= 0; i--) {
+        const pickup = saltPickups[i];
+        if (!pickup?.mesh) {
+          saltPickups.splice(i, 1);
+          continue;
+        }
+        pickup.mesh.rotation.y += 0.028;
+        if (pickup.mesh.userData.baseY === undefined) {
+          pickup.mesh.userData.baseY = pickup.mesh.position.y;
+        }
+        const phase = pickup.mesh.userData.phase ?? 0;
+        pickup.mesh.position.y = pickup.mesh.userData.baseY + Math.sin(pickupTime + phase) * 0.08;
+        const targetModel = pickup.homeTargetModel || playerModel;
+        if (targetModel && !playerDead) {
+          attractPickupToPlayer(pickup.mesh, targetModel, pickup.homeTargetModel ? MONSTER_DROP_ATTRACT_SPEED : PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+        }
+        if (shouldCheckPickups && pickupSalt(pickup)) continue;
+      }
+        }
+      });
+    }
+
+    iceGun?.update();
+    bow?.update();
+    bazooka?.update();
+    bomb?.update();
+    autumnSword?.update();
+    foamSword?.update();
+    hammer?.update();
+    pistol?.update();
+    paintBrush?.update();
+    lantern?.update();
+    torch?.update();
+    shield?.update();
+
+    // ── Horde enemy update ─────────────────────────────────────────────────
+    if (hordeEnemy) {
+      // Sync kinematic player body to visual position each frame
+      if (playerControls?.body) {
+        playerControls.body.setNextKinematicTranslation({
+          x: playerModel.position.x,
+          y: playerModel.position.y + 0.6,
+          z: playerModel.position.z
+        });
+      }
+
+      // Apply and decay visual knockback on the player
+      const _nowMs = Date.now();
+      if (_nowMs < _playerKnockback.endTime) {
+        const decay = Math.exp(-5 * frameDelta);
+        _playerKnockback.vx *= decay;
+        _playerKnockback.vz *= decay;
+        playerControls.playerX = (playerControls.playerX || playerModel.position.x) + _playerKnockback.vx * frameDelta;
+        playerControls.playerZ = (playerControls.playerZ || playerModel.position.z) + _playerKnockback.vz * frameDelta;
+      }
+
+      if (!hordeEnemy.isDead) {
+        const shieldEquipped = shield?.holder === playerControls &&
+          !!(inventoryState[SHIELD_ITEM_ID]?.count > 0);
+        hordeEnemy.update(frameDelta, playerModel, playerControls, shieldEquipped);
+
+        // Intercept hit from enemy: instead of controls.applyKnockback (which needs
+        // a dynamic body), apply velocity directly to playerX/Z
+        hordeEnemy._onHitPlayer = (direction) => {
+          const speed = 4.5;
+          _playerKnockback.vx = direction.x * speed;
+          _playerKnockback.vz = direction.z * speed;
+          _playerKnockback.endTime = Date.now() + 800;
+        };
+
+        // ── Player's foam sword hitting the enemy ──────────────────────────
+        if (!hordeEnemy._playerSwordLastHit) hordeEnemy._playerSwordLastHit = 0;
+        const swordMesh = foamSword?.holder === playerControls && foamSword?.useHeldMeshWhenHeld && foamSword?.heldMesh
+          ? foamSword.heldMesh
+          : (foamSword?.holder === playerControls ? foamSword?.mesh : null);
+
+        if (swordMesh?.visible && (Date.now() - hordeEnemy._playerSwordLastHit) > 1000) {
+          const _tipOffset = new THREE.Vector3(0, 0, 0.69).applyQuaternion(swordMesh.quaternion);
+          const _tipWorld = swordMesh.position.clone().add(_tipOffset);
+          const _enemyCenter = hordeEnemy.getCenterWorldPos();
+          if (_tipWorld.distanceTo(_enemyCenter) < 0.65) {
+            const _hitDir = new THREE.Vector3()
+              .subVectors(hordeEnemy.group.position, playerModel.position)
+              .normalize();
+            hordeEnemy.applyDamage(2);
+            hordeEnemy.applyKnockback({ direction: _hitDir, strength: 2 });
+            hordeEnemy._playerSwordLastHit = Date.now();
+          }
+        }
+      }
+    }
+    syncRemoteHeldWeaponMesh(iceGun);
+    syncRemoteHeldWeaponMesh(bow);
+    syncRemoteHeldWeaponMesh(bazooka);
+    syncRemoteHeldWeaponMesh(bomb);
+    syncRemoteHeldWeaponMesh(autumnSword);
+    syncRemoteHeldWeaponMesh(hammer);
+    syncRemoteHeldWeaponMesh(lantern);
+    syncRemoteHeldWeaponMesh(torch);
+    syncRemoteHeldWeaponMesh(shield);
+    if (bowHeldArrow) {
+      const shouldShowArrow = bow?.holder === playerControls && playerControls?.isFireHeld;
+      bowHeldArrow.visible = shouldShowArrow;
+    }
+    updateWeaponMarker(iceGun, iceGunMarker, 0.03);
+    updateWeaponMarker(bow, bowMarker, 0.03);
+    updateWeaponMarker(bazooka, bazookaMarker, 0.03);
+    updateWeaponMarker(bomb, bombMarker, 0.03);
+    updateWeaponMarker(autumnSword, autumnSwordMarker, 0.03);
+    updateWeaponMarker(hammer, hammerMarker, 0.03);
+    updateWeaponMarker(lantern, lanternMarker, 0.03);
+    updateWeaponMarker(torch, torchMarker, 0.03);
+    updateWeaponMarker(shield, shieldMarker, 0.03);
+    [iceGun, bow, bazooka, bomb, autumnSword, hammer, lantern, torch, shield].forEach((weapon) => {
+      const mesh = weapon?.mesh;
+      if (!mesh || weapon?.holder || playerDead) return;
+      if (playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {
+        attractPickupToPlayer(mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+      }
+    });
+    droppedWeaponPickups.forEach(pickup => {
+      const mesh = pickup?.mesh;
+      if (mesh && !playerDead && playerModel.position.distanceTo(mesh.position) <= getPickupAttractRadius()) {
+        attractPickupToPlayer(mesh, playerModel, PICKUP_ATTRACT_SPEED, frameDelta);
+      }
+      pickup?.tryPickup?.(playerControls);
+      updateWeaponMarker(pickup, pickup.marker, 0.03, pickup.markerOffsetY ?? 1.2);
+    });
+    syncLocalDynamicNetworkedEntities();
+    updateRemoteDynamicNetworkedEntities(frameDelta);
+
+    const localStates = collectLocalControlStates();
+
+    if (multiplayer.isHost) {
+      localStates.forEach(({ state, sourceId }, id) => {
+        updateAuthoritativeState(id, state, sourceId);
+      });
+
+      if (now - lastEntityBroadcast >= entityBroadcastIntervalMs) {
+        const shouldSendFull = now - lastFullEntityBroadcast >= ENTITY_FULL_SNAPSHOT_INTERVAL;
+        const payload = shouldSendFull
+          ? serializeFullAuthoritativeStates()
+          : serializeDirtyAuthoritativeStates();
+        if (Object.keys(payload).length > 0) {
+          queueNetMessage({ type: 'entityStates', states: payload }, 'entityStates:host');
+          if (shouldSendFull) {
+            lastFullEntityBroadcast = now;
+          }
+        }
+        lastEntityBroadcast = now;
+      }
+    } else if (localStates.size > 0 && now - lastControlSend >= controlSendIntervalMs) {
+      localStates.forEach(({ state, sourceId }, id) => {
+        const prev = lastSentEntityControlStates.get(id);
+        const [stateX = 0, stateY = 0, stateZ = 0] = state.position || [];
+        const stateRotation = Array.isArray(state.rotation) ? state.rotation[1] ?? 0 : state.rotation ?? 0;
+        const dx = stateX - (prev?.x ?? stateX);
+        const dy = stateY - (prev?.y ?? stateY);
+        const dz = stateZ - (prev?.z ?? stateZ);
+        const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > runtimePositionDeadbandSq;
+        const rotDelta = Math.abs(wrapDeltaRad(stateRotation - (prev?.rotation ?? stateRotation)));
+        const changedAction = (state.action ?? null) !== (prev?.action ?? null);
+        if (!prev || moved || rotDelta >= runtimeRotationDeadbandRad || changedAction) {
+          lastSentEntityControlStates.set(id, {
+            x: stateX,
+            y: stateY,
+            z: stateZ,
+            rotation: stateRotation,
+            action: state.action ?? null
+          });
+          queueNetMessage({ type: 'entityControl', id, state, sourceId }, `entityControl:${id}`);
+        } else {
+          netStats.dropped += 1;
+          netStats.laneDropped.high += 1;
+        }
+      });
+      lastControlSend = now;
+    }
+
+    if (window.localHealth <= 0 && !playerDead) {
+      playerDead = true;
+      window.onPlayerDeath?.();
+      dropInventoryOnDeath();
+      updateControlAvailability();
+      const actions = playerModel.userData.actions;
+      const current = playerModel.userData.currentAction;
+      const die = actions?.die;
+      if (die) {
+        actions[current]?.fadeOut(0.2);
+        die.reset().fadeIn(0.2).play();
+        playerModel.userData.currentAction = 'die';
+      }
+      showGameOver();
+    }
+
+    const mixerDelta = mixerClock.getDelta();
+    updatePlayerCopies(mixerDelta);
+
+    // 1) Always advance animation mixers (every frame)
+    Object.values(otherPlayers).forEach(p => {
+      p.model?.userData?.mixer?.update(mixerDelta);
+    });
+
+    camera.updateMatrixWorld();
+    monsterAnimProjMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    monsterAnimFrustum.setFromProjectionMatrix(monsterAnimProjMatrix);
+
+    for (const monster of monsters) {
+      const model = monster?.model;
+      const mixer = model?.userData?.mixer;
+      if (!mixer || !model) continue;
+
+      const mode = model.userData?.mode;
+      const distanceToCamera = camera.position.distanceTo(model.position);
+      const isVisible = monsterAnimFrustum.containsPoint(model.position);
+      const isActiveOrNear = mode !== 'friendly' || distanceToCamera <= MONSTER_COMBAT_RADIUS;
+
+      if (isActiveOrNear) {
+        mixer.update(mixerDelta);
+        monster.lastAnimUpdateMs = now;
+        continue;
+      }
+
+      const isMidDistance = distanceToCamera <= MONSTER_BACKGROUND_RADIUS && isVisible;
+      if (!isMidDistance) {
+        continue;
+      }
+
+      const lastAnimUpdateMs = Number.isFinite(monster.lastAnimUpdateMs) ? monster.lastAnimUpdateMs : 0;
+      if (lastAnimUpdateMs > 0 && now - lastAnimUpdateMs < MONSTER_ANIM_MID_INTERVAL_MS) {
+        continue;
+      }
+
+      const deltaSeconds = lastAnimUpdateMs > 0
+        ? (now - lastAnimUpdateMs) / 1000
+        : mixerDelta;
+      mixer.update(deltaSeconds);
+      monster.lastAnimUpdateMs = now;
+    }
+    for (const animal of animals) {
+      animal?.model?.userData?.mixer?.update(mixerDelta);
+    }
+
+    // 2) AI can still be throttled, but pass a real delta when you DO run it
+    const isHostNow = !multiplayer || multiplayer.isHost;
+    if (shouldRunBucket('ai')) {
+      withSubsystemTiming('ai', () => {
+        const aiBucketDeltaSeconds = consumeBucketDelta('ai', mixerDelta);
+        const aiNowMs = Date.now();
+        let removedDeadMonsters = false;
+        monsters = monsters.filter(monster => {
+          if (!monster?.model) return true;
+          if (!monster.shouldRemoveAfterDeath?.(aiNowMs)) return true;
+          if (isHostNow && monster.isDead && !monster.hasDroppedConfiguredDrops) {
+            spawnMonsterDrops(monster);
+            monster.hasDroppedConfiguredDrops = true;
+          }
+          cleanupMonster(monster);
+          if (isHostNow && monster.id) {
+            removeMonsterRecord(monster.id);
+          }
+          removedDeadMonsters = true;
+          return false;
+        });
+        if (removedDeadMonsters) {
+          runtimeContext.entities.monsters = monsters;
+          window.monsters = monsters;
+        }
+        if (animalManager) {
+          animalManager.update(aiBucketDeltaSeconds);
+          void animalManager.maybeSpawnDogByTravelDistance?.();
+          animals = animalManager?.getAnimals() ?? [];
+          runtimeContext.entities.animals = animals;
+          window.animals = animals;
+        }
+
+        if (isHostNow) {
+      if (monstersSeeded) {
+        const livingMonsters = monsters.filter(monster => monster?.model && !monster.isDead);
+        const activePlayers = [
+          { id: 'local', model: playerModel },
+          ...Object.entries(otherPlayers).map(([id, p]) => ({ id, model: p?.model }))
+        ].filter((entry) => entry.model);
+        const friendlyAvoidanceZones = [];
+        const merchantFriendly = getMerchantFriendlyFeature();
+        if (merchantFriendly?.model?.position) {
+          friendlyAvoidanceZones.push(merchantFriendly.model.position.clone());
+        }
+        const roomFriendlies = friendlyNpcManager?.friendlies || [];
+        const combatFriendlies = [...roomFriendlies];
+        const questFriend = window.questManager?.getQuestFriend?.();
+        if (questFriend?.model && !questFriend.isDead) {
+          combatFriendlies.push(questFriend);
+        }
+        roomFriendlies.forEach((friendly) => {
+          if (friendly?.isDead || !friendly?.model?.position) return;
+          friendlyAvoidanceZones.push(friendly.model.position.clone());
+        });
+
+        let activeMonsterCount = 0;
+        monsters.forEach(monster => {
+          if (!monster || !monster.model) return;
+
+          if (monster.isDead) return; // your respawn logic here...
+
+          let nearestPlayerDistance = Infinity;
+          for (const player of activePlayers) {
+            const dist = monster.model.position.distanceTo(player.model.position);
+            if (dist < nearestPlayerDistance) {
+              nearestPlayerDistance = dist;
+            }
+          }
+
+          const withinCombatRadius = nearestPlayerDistance <= MONSTER_COMBAT_RADIUS;
+          const withinBackgroundRadius = nearestPlayerDistance <= MONSTER_BACKGROUND_RADIUS;
+
+          let monsterTier = 'dormant';
+          if (withinCombatRadius && activeMonsterCount < MAX_MONSTERS_ACTIVE) {
+            monsterTier = 'active';
+            activeMonsterCount += 1;
+          } else if (withinBackgroundRadius) {
+            monsterTier = 'background';
+          }
+
+          const previousTier = monster.activityTier;
+          monster.activityTier = monsterTier;
+          monster.model.visible = monsterTier !== 'dormant';
+
+          if (monsterTier === 'active') {
+            setMonsterPhysicsMode(monster, 'dynamic');
+          } else if (monsterTier === 'background') {
+            setMonsterPhysicsMode(monster, 'kinematic');
+          } else {
+            detachMonsterPhysics(monster);
+          }
+
+          const aiContext = {
+            enableFriendlyDrift: true,
+            friendlyAvoidanceZones,
+            resolveGroundY,
+            walkableSlopeDegrees: 42,
+            groundOffset: 0.9 * (Number.isFinite(monster.sizeScale) ? monster.sizeScale : 1),
+            friendlyTargets: combatFriendlies
+          };
+          const MAX_AI_DELTA_SECONDS = 0.5;
+
+          if (monsterTier === 'active') {
+            monster.syncBodyFromTransform?.({ zeroVelocity: false });
+            if (PERF.throttleAI) {
+              const lastAIUpdateMs = monster.lastAIUpdateMs ?? 0;
+              if (aiNowMs - lastAIUpdateMs > 150) {
+                const elapsedAiSeconds = Math.max(0, (aiNowMs - lastAIUpdateMs) / 1000);
+                const aiDeltaSeconds = Math.min(
+                  MAX_AI_DELTA_SECONDS,
+                  lastAIUpdateMs > 0 ? elapsedAiSeconds : aiBucketDeltaSeconds
+                );
+                monster.lastAIUpdateMs = aiNowMs;
+                monster.updateAI(aiDeltaSeconds, playerModel, otherPlayers, aiContext);
+              }
+            } else {
+              monster.updateAI(aiBucketDeltaSeconds, playerModel, otherPlayers, aiContext);
+            }
+            return;
+          }
+
+          if (monsterTier === 'background') {
+            const lastBackgroundAi = monster.lastBackgroundAIUpdateMs ?? 0;
+            if (previousTier !== 'background' || aiNowMs - lastBackgroundAi > MONSTER_BACKGROUND_AI_INTERVAL_MS) {
+              const elapsedAiSeconds = Math.max(0, (aiNowMs - lastBackgroundAi) / 1000);
+              const aiDelta = Math.min(
+                MAX_AI_DELTA_SECONDS,
+                lastBackgroundAi > 0 ? elapsedAiSeconds : aiBucketDeltaSeconds
+              );
+              monster.lastBackgroundAIUpdateMs = aiNowMs;
+              monster.updateAI(aiDelta, playerModel, otherPlayers, aiContext);
+            }
+            return;
+          }
+        });
+      }
+        } else {
+          // non-host prediction
+          monsters.forEach(monster => monster?.update?.(aiBucketDeltaSeconds));
+        }
+
+        // Friendlies: same idea—do NOT pass 0 deltas
+        friendlyNpcManager?.update({ delta: aiBucketDeltaSeconds, isHost: isHostNow });
+        const merchantFriendly = getMerchantFriendlyFeature();
+        if (merchantFriendly?.updateAI) {
+          merchantFriendly.updateAI(aiBucketDeltaSeconds, playerModel, otherPlayers);
+        }
+      });
+    }
+
+
+    if (now - lastPresenceSweep >= PRESENCE_SWEEP_MS) {
+      lastPresenceSweep = now;
+      const localFix = getLatestLocationFix();
+      Object.entries(remotePresenceMeta).forEach(([remoteId, meta]) => {
+        if (!meta) return;
+        if (now - meta.lastSeenMs > PRESENCE_STALE_MS) {
+          removeRemotePlayer(remoteId, 'stale');
+          return;
+        }
+        const player = otherPlayers[remoteId];
+        if (!localFix) {
+          if (player?.model) {
+            player.model.visible = true;
+          }
+          if (player?.nameLabel) {
+            player.nameLabel.style.display = 'block';
+          }
+          return;
+        }
+        let dist = null;
+        if (Number.isFinite(meta.lastX) && Number.isFinite(meta.lastZ)) {
+          dist = Math.hypot(meta.lastX - localFix.x, meta.lastZ - localFix.z);
+        } else if (player?.model && playerModel) {
+          dist = playerModel.position.distanceTo(player.model.position);
+        }
+        meta.lastDistance = dist;
+        logNet('distance', remoteId, dist);
+        if (dist != null && dist > PLAYER_VISIBILITY_RADIUS_M) {
+          removeRemotePlayer(remoteId, 'out-of-range');
+        } else if (player?.model) {
+          player.model.visible = true;
+        }
+      });
+    }
+
+    Object.values(otherPlayers).forEach(player => {
+      if (!player?.model || !player?.targetPos || !player?.targetQuat) return;
+      const currentPos = player.model.position;
+      const distance = currentPos.distanceTo(player.targetPos);
+      if (distance > REMOTE_TELEPORT_THRESHOLD_M) {
+        currentPos.copy(player.targetPos);
+      } else {
+        currentPos.lerp(player.targetPos, REMOTE_LERP_ALPHA);
+      }
+      player.model.quaternion.slerp(player.targetQuat, REMOTE_LERP_ALPHA);
+    });
+
+    if (now - lastPresenceSend >= presenceSendIntervalMs) {
+      const localFix = getLatestLocationFix();
+      const payload = {
+        type: "presence",
+        id: multiplayer.getId(),
+        name: playerName,
+        model: characterModel,
+        x: playerModel.position.x,
+        y: playerModel.position.y,
+        z: playerModel.position.z,
+        rotation: playerModel.rotation.y,
+        action: playerModel.userData.currentAction
+      };
+      if (Number.isFinite(localFix?.heading)) {
+        payload.heading = localFix.heading;
+      }
+      payload.equippedLeft = isInventoryItemEquipped('torch')
+        ? 'torch'
+        : (isInventoryItemEquipped('lantern')
+          ? 'lantern'
+          : (isInventoryItemEquipped(SHIELD_ITEM_ID) ? SHIELD_ITEM_ID : null));
+      payload.equippedRight = isInventoryItemEquipped('iceGun')
+        ? 'iceGun'
+        : (isInventoryItemEquipped('bow')
+          ? 'bow'
+          : (isInventoryItemEquipped('bomb')
+            ? 'bomb'
+            : ((isInventoryItemEquipped('autumnSword') || isInventoryItemEquipped(FOAM_SWORD_ITEM_ID)) ? 'sword' : (isInventoryItemEquipped('hammer') ? 'hammer' : null))));
+      const dx = payload.x - (lastSentPresenceState.x ?? payload.x);
+      const dy = payload.y - (lastSentPresenceState.y ?? payload.y);
+      const dz = payload.z - (lastSentPresenceState.z ?? payload.z);
+      const moved = ((dx * dx) + (dy * dy) + (dz * dz)) > runtimePositionDeadbandSq;
+      const rotated = Math.abs(wrapDeltaRad((payload.rotation ?? 0) - (lastSentPresenceState.rotation ?? 0))) >= runtimeRotationDeadbandRad;
+      const actionChanged = payload.action !== lastSentPresenceState.action;
+      const heartbeatDue = now - (lastSentPresenceState.sentAt || 0) >= PRESENCE_HEARTBEAT_MS;
+      if (lastSentPresenceState.x == null || moved || rotated || actionChanged || heartbeatDue) {
+        queueNetMessage(payload, 'presence:self');
+        lastSentPresenceState.x = payload.x;
+        lastSentPresenceState.y = payload.y;
+        lastSentPresenceState.z = payload.z;
+        lastSentPresenceState.rotation = payload.rotation ?? 0;
+        lastSentPresenceState.action = payload.action ?? null;
+        lastSentPresenceState.sentAt = now;
+      } else {
+        netStats.dropped += 1;
+        netStats.laneDropped.normal += 1;
+      }
+      lastPresenceSend = now;
+    }
+    applyRuntimeNetworkProfile({
+      incomingBacklog: lastIncomingBacklog,
+      incomingProcessCount: lastIncomingProcessCount,
+      overrunStreak: frameOverrunStreak,
+      recoverStreak: frameRecoverStreak
+    });
+    flushNetSendQueue();
+    tickNetStats(now);
+
+    if (shouldRunBucket('remoteLabels')) {
+      withSubsystemTiming('remoteLabels', () => {
+        Object.entries(otherPlayers).forEach(([id, { model, nameLabel }]) => {
+          if (!model.visible) {
+            nameLabel.style.display = "none";
+            return;
+          }
+          const pos = model.position.clone().add(new THREE.Vector3(0, 2, 0));
+          pos.project(camera);
+          if (pos.z < 0 || pos.z > 1) {
+            nameLabel.style.display = "none";
+            return;
+          }
+          const x = (pos.x * 0.5 + 0.5) * window.innerWidth;
+          const y = (-pos.y * 0.5 + 0.5) * window.innerHeight;
+          const cameraDist = camera.position.distanceTo(model.position);
+          const scale = Math.max(0.5, 1.5 - cameraDist / 30);
+          const opacity = Math.max(0, 1 - cameraDist / 40);
+          nameLabel.style.display = "block";
+          nameLabel.style.left = `${x}px`;
+          nameLabel.style.top = `${y}px`;
+          nameLabel.style.transform = `translate(-50%, -50%) scale(${scale})`;
+          nameLabel.style.opacity = opacity.toFixed(2);
+        });
+        const activeCompanionAnimalIds = new Set();
+        (animals || []).forEach((animal) => {
+          if (!animal?.id || !animal?.model || !animal.model.userData?.isCompanion) return;
+          if (areInteractionLabelsBlocked()) {
+            const label = animalNameLabels.get(animal.id);
+            if (label) label.style.display = 'none';
+            return;
+          }
+          activeCompanionAnimalIds.add(animal.id);
+          const name = animal.model.userData?.companionName;
+          if (!name) {
+            const staleLabel = animalNameLabels.get(animal.id);
+            staleLabel?.parentNode?.removeChild(staleLabel);
+            animalNameLabels.delete(animal.id);
+            return;
+          }
+          let label = animalNameLabels.get(animal.id);
+          if (!label) {
+            label = document.createElement('div');
+            label.className = 'name-tag';
+            label.style.cssText = 'position:fixed;z-index:1200;color:white;background:rgba(0,0,0,0.5);padding:2px 6px;border-radius:6px;font-size:12px;pointer-events:none;';
+            document.body.appendChild(label);
+            animalNameLabels.set(animal.id, label);
+          }
+          label.textContent = name;
+          const distanceToPlayer = playerModel?.position?.distanceTo?.(animal.model.position) ?? Number.POSITIVE_INFINITY;
+          if (distanceToPlayer > DOG_INTERACT_DISTANCE) {
+            label.style.display = 'none';
+            return;
+          }
+          const pos = animal.model.position.clone().add(new THREE.Vector3(0, 2, 0));
+          pos.project(camera);
+          if (pos.z < 0 || pos.z > 1) { label.style.display = 'none'; return; }
+          label.style.display = 'block';
+          label.style.left = `${(pos.x * 0.5 + 0.5) * window.innerWidth}px`;
+          label.style.top = `${(-pos.y * 0.5 + 0.5) * window.innerHeight}px`;
+          label.style.transform = 'translate(-50%, -50%)';
+        });
+        animalNameLabels.forEach((label, animalId) => {
+          if (activeCompanionAnimalIds.has(animalId)) return;
+          label?.parentNode?.removeChild(label);
+          animalNameLabels.delete(animalId);
+        });
+      });
+    }
+
+
+    const localPlayerPosition = playerModel?.position;
+    if (localPlayerPosition && audioManager && shouldRunBucket('audio')) {
+      withSubsystemTiming('audio', () => {
+        const merchantFriendly = getMerchantFriendlyFeature();
+        updateMerchantLoopVoice({ merchant: merchantFriendly, playerPosition: localPlayerPosition });
+
+        const playNearFootstepsFor = (entityId, position, isMoving) => {
+          if (!position || !isMoving) return;
+          const distance = localPlayerPosition.distanceTo(position);
+          if (!Number.isFinite(distance) || distance > 18) return;
+          const volume = Math.max(0.04, 0.28 * (1 - (distance / 18)));
+          audioManager.playFootstepAt(entityId, volume);
+        };
+
+        Object.entries(otherPlayers).forEach(([id, remote]) => {
+          const action = remote?.model?.userData?.currentAction;
+          const isMoving = action === 'run' || action === 'walk' || action === 'swim';
+          playNearFootstepsFor(`remote:${id}`, remote?.model?.position, isMoving);
+        });
+
+        (friendlyNpcManager?.friendlies || []).forEach((friendly) => {
+          maybePlayNpcVoice({
+            entityId: `friendly-voice:${friendly?.id || 'unknown'}`,
+            position: friendly?.model?.position,
+            now,
+            intervalRange: FRIENDLY_VOICE_INTERVAL_MS,
+            clips: FRIENDLY_VOICE_CLIPS,
+            maxVolume: FRIENDLY_VOICE_MAX_VOLUME,
+            playerPosition: localPlayerPosition,
+            cooldownPrefix: 'friendly-voice'
+          });
+          const action = friendly?.model?.userData?.currentAction;
+          const isMoving = action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk';
+          playNearFootstepsFor(`friendly:${friendly?.id || 'unknown'}`, friendly?.model?.position, isMoving);
+        });
+
+        (animals || []).forEach((animal) => {
+          const action = animal?.model?.userData?.currentAction;
+          const isMoving = action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk';
+          playNearFootstepsFor(`animal:${animal?.id || 'unknown'}`, animal?.model?.position, isMoving);
+        });
+
+        (monsters || []).forEach((monster) => {
+          updateZombieLoopVoice({ monster, playerPosition: localPlayerPosition });
+          const action = monster?.model?.userData?.currentAction;
+          const isMoving = action === 'Weapon' ? false : (action === 'Run' || action === 'Walk' || action === 'run' || action === 'walk');
+          playNearFootstepsFor(`monster:${monster?.id || 'unknown'}`, monster?.model?.position, isMoving);
+        });
+      });
+    }
+
+    updateProjectiles({
+      scene,
+      projectiles,
+      playerModel,
+      otherPlayers,
+      multiplayer,
+      monsters: getDamageableCreatures(),
+      sendMonsterAttack: sendMonsterAttackIntent,
+      onMonsterHit: handleMonsterDamage,
+      onBuildHit: handleBuildProjectileHit
+    });
+    (animals || []).forEach((animal) => {
+      if (!animal?.model || String(animal.type).toLowerCase() !== 'dog') return;
+      if (!dogColliderEntries.has(animal.id)) {
+        const entry = createStaticBoxColliderForObject(animal.model, {
+          rapierWorld,
+          friction: 0.8,
+          restitution: 0.01,
+          useObjectPosition: true,
+          centerOffset: [0, 0.4, 0],
+          halfExtents: [0.24, 0.33, 0.5]
+        });
+        dogColliderEntries.set(animal.id, entry || null);
+      } else {
+        syncStaticBoxColliderForObject(dogColliderEntries.get(animal.id));
+      }
+    });
+    (animals || []).forEach((animal) => {
+      if (!animal?.model || String(animal.type).toLowerCase() !== 'crab' || animal?.isDead) return;
+      if (!crabColliderEntries.has(animal.id)) {
+        const entry = createStaticBoxColliderForObject(animal.model, {
+          rapierWorld,
+          friction: 1.1,
+          restitution: 0,
+          useObjectPosition: true,
+          centerOffset: [0, 0.25, 0],
+          halfExtents: [0.42, 0.22, 0.42]
+        });
+        crabColliderEntries.set(animal.id, entry || null);
+      } else {
+        syncStaticBoxColliderForObject(crabColliderEntries.get(animal.id));
+      }
+    });
+    handleBombPickupArrowHit();
+
+    updateIceMists({
+      scene,
+      mistList: iceMists,
+      deltaSeconds: frameDelta,
+      playerModel,
+      playerControls,
+      monsters: getDamageableCreatures(),
+      multiplayer,
+      onBuildHit: handleBuildAreaHit
+    });
+
+    updateBombMists({
+      scene,
+      mistList: bombMists,
+      deltaSeconds: frameDelta
+    });
+
+    if (treeFires.length) {
+      const fireTime = performance.now();
+      for (let i = treeFires.length - 1; i >= 0; i -= 1) {
+        const entry = treeFires[i];
+        if (!entry?.fire?.group) {
+          treeFires.splice(i, 1);
+          continue;
+        }
+        entry.fire.update?.(fireTime);
+      }
+    }
+
+    updateAttackVisuals({ scene, playerModel, camera, deltaSeconds: frameDelta });
+
+    updateMeleeAttacks({
+      playerModel,
+      otherPlayers,
+      monsters: getDamageableCreatures(),
+      audioManager,
+      multiplayer,
+      sendMonsterAttack: sendMonsterAttackIntent,
+      onMonsterHit: handleMonsterDamage,
+      onSwordHit: handleSwordTreeHit,
+      onTorchHit: handleTorchTreeHit,
+      onBuildHit: handleBuildAttackHit,
+      onEntityHit: handleCombatEntityHit
+    });
+
+    terrainStampDebugOverlay?.update?.();
+
+    if (window.gameMode === '3d_painter') {
+      processPainterPinch();
+    }
+    if (window.gameMode === 'horde') {
+      processHordeGestures();
+    }
+
+    renderer.render(scene, camera);
+    const frameTotalMs = performance.now() - frameStartMs;
+    if (frameTotalMs > FRAME_TIME_DEGRADE_THRESHOLD_MS) {
+      frameOverrunStreak += 1;
+      frameRecoverStreak = 0;
+    } else if (frameTotalMs < FRAME_TIME_RECOVER_THRESHOLD_MS) {
+      frameRecoverStreak += 1;
+      frameOverrunStreak = 0;
+    } else {
+      frameOverrunStreak = 0;
+      frameRecoverStreak = 0;
+    }
+    if (frameOverrunStreak >= 6) {
+      adaptiveDegradeLevel = Math.min(FRAME_TIME_DEGRADE_MAX_LEVEL, adaptiveDegradeLevel + 1);
+      frameOverrunStreak = 0;
+    } else if (frameRecoverStreak >= 30) {
+      adaptiveDegradeLevel = Math.max(0, adaptiveDegradeLevel - 1);
+      frameRecoverStreak = 0;
+    }
+  }
+
+  canProcessIncomingPeerData = true;
+  processIncomingPeerDataQueue();
+
+  subscribeBuildsForCurrentLocation();
+  window.addEventListener('keydown', async (event) => {
+    if (event.key.toLowerCase() !== 'e' || !buildState.selectedNoteId) return;
+    await showNoteInteraction();
+  });
+  animate();
+
+  return runtimeContext;
+}
+
+async function initWorld(runtimeContext) {
+  runtimeContext.settings.startupPhases = runtimeContext.settings.startupPhases || [];
+  runtimeContext.settings.startupPhases.push('world');
+  return runtimeContext;
+}
+
+async function initActors(runtimeContext) {
+  runtimeContext.settings.startupPhases = runtimeContext.settings.startupPhases || [];
+  runtimeContext.settings.startupPhases.push('actors');
+  return runtimeContext;
+}
+
+async function initUI(runtimeContext) {
+  runtimeContext.settings.startupPhases = runtimeContext.settings.startupPhases || [];
+  runtimeContext.settings.startupPhases.push('ui');
+  return runtimeContext;
+}
+
+async function initNetworkingAndPersistence(runtimeContext) {
+  runtimeContext.settings.startupPhases = runtimeContext.settings.startupPhases || [];
+  runtimeContext.settings.startupPhases.push('networking-and-persistence');
+  return runtimeContext;
+}
+
+export async function bootstrapGameApp() {
+  appContext.settings.startupPhases = [];
+
+  await initCore(appContext);
+  await initWorld(appContext);
+  await initActors(appContext);
+  await initUI(appContext);
+  await initNetworkingAndPersistence(appContext);
+
+  return appContext;
+}
