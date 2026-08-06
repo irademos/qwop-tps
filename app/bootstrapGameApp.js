@@ -2890,7 +2890,7 @@ async function initCore(runtimeContext) {
 
     if (previousHostId !== newHostId) {
       clearAllRemoteHeldWeaponMeshes();
-      [iceGun, bow, bazooka, bomb, autumnSword, hammer, lantern, torch, shield].forEach((weapon) => {
+      [iceGun, bow, bazooka, bomb, autumnSword, foamSword, hammer, lantern, torch, shield].forEach((weapon) => {
         if (!weapon) return;
         weapon.remoteHolderId = null;
       });
@@ -2968,6 +2968,7 @@ async function initCore(runtimeContext) {
   let iceGun;
   let bow;
   let autumnSword;
+  let foamSword;
   let hammer;
   let bazooka;
   let lantern;
@@ -3106,7 +3107,7 @@ async function initCore(runtimeContext) {
   };
 
   const dropOtherWeapons = (activeWeapon) => {
-    [iceGun, bow, bazooka, autumnSword, hammer, bomb].forEach(weapon => {
+    [iceGun, bow, bazooka, autumnSword, foamSword, hammer, bomb].forEach(weapon => {
       if (!weapon || weapon === activeWeapon) return;
       if (weapon.holder === playerControls) {
         if (weapon.itemId) {
@@ -3308,7 +3309,7 @@ async function initCore(runtimeContext) {
     Array.from(remoteHeldWeaponMeshes.keys()).forEach(disposeRemoteHeldWeaponMesh);
   };
 
-  const { IceGun, Bow, Lantern, AutumnSword, Hammer, Bazooka, Bomb, Shield, SHIELD_ITEM_ID, DEFAULT_SHIELD_HEALTH, Pistol } = await loadSpecialWeapons();
+  const { IceGun, Bow, Lantern, AutumnSword, FoamSword, FOAM_SWORD_ITEM_ID, Hammer, Bazooka, Bomb, Shield, SHIELD_ITEM_ID, DEFAULT_SHIELD_HEALTH, Pistol } = await loadSpecialWeapons();
 
   const updateWeaponMarker = (weapon, marker, rotationSpeed, offsetY = 1.2) => {
     if (!weapon?.mesh || !marker) return;
@@ -3655,6 +3656,35 @@ async function initCore(runtimeContext) {
     isLocallyControlled: () => autumnSword?.holder === playerControls
   });
 
+  foamSword = new FoamSword(scene);
+  await foamSword.load();
+  window.foamSword = foamSword;
+  foamSword.onPickup = (holder) => {
+    if (holder !== playerControls) return;
+    const heldMesh = ensureLocalHeldWeaponMesh(foamSword, FOAM_SWORD_ITEM_ID);
+    foamSword.useHeldMeshWhenHeld = true;
+    if (heldMesh) heldMesh.visible = true;
+    unequipOtherInventoryItems(FOAM_SWORD_ITEM_ID);
+    addToInventory(FOAM_SWORD_ITEM_ID, 1);
+    foamSword.localHoldOrigin = 'world';
+    setPlayerWeaponType(holder, foamSword.type);
+  };
+  foamSword.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
+    if (holder !== playerControls) return;
+    foamSword.localHoldOrigin = null;
+    if (shouldRemoveFromInventory) {
+      removeFromInventory(FOAM_SWORD_ITEM_ID, 1);
+    }
+    clearPlayerWeaponType(holder, foamSword.type);
+    if (foamSword.heldMesh) {
+      foamSword.heldMesh.visible = false;
+    }
+    foamSword.useHeldMeshWhenHeld = true;
+  };
+  if (foamSword.mesh) {
+    foamSword.mesh.userData.hideInMapView = true;
+    foamSword.mesh.visible = false;
+  }
 
   hammer = new Hammer(scene);
   await hammer.load();
@@ -4011,7 +4041,7 @@ async function initCore(runtimeContext) {
 
     if (_hordePendingFrames >= HORDE_GESTURE_CONFIRM) {
       // Map gesture name → item name so the comparison is in the same space
-      const gestureItemMap = { gun: 'pistol', open: 'shield', sword: 'autumnSword' };
+      const gestureItemMap = { gun: 'pistol', open: 'shield', sword: FOAM_SWORD_ITEM_ID };
       const confirmedItem = gestureItemMap[_hordePendingGesture] ?? null;
       if (confirmedItem !== _hordeEquipped) {
         // Unequip whatever is currently held
@@ -5964,6 +5994,10 @@ async function initCore(runtimeContext) {
       name: 'Autumn Sword',
       icon: '/assets/ui/items/sword.png'
     },
+    [FOAM_SWORD_ITEM_ID]: {
+      name: 'Foam Sword',
+      icon: '/assets/ui/items/sword.png'
+    },
     hammer: {
       name: 'Hammer',
       icon: ''
@@ -6147,7 +6181,7 @@ async function initCore(runtimeContext) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState, homeStorageState);
   }
 
-  const equippableItems = new Set(['lantern', 'torch', SHIELD_ITEM_ID, 'iceGun', 'bow', 'bazooka', 'bomb', 'autumnSword', 'hammer', 'pistol']);
+  const equippableItems = new Set(['lantern', 'torch', SHIELD_ITEM_ID, 'iceGun', 'bow', 'bazooka', 'bomb', 'autumnSword', FOAM_SWORD_ITEM_ID, 'hammer', 'pistol']);
   const inventoryHandSlots = {
     lantern: 'left',
     torch: 'left',
@@ -6562,6 +6596,9 @@ async function initCore(runtimeContext) {
     if (itemId === 'autumnSword') {
       return autumnSword?.holder === playerControls;
     }
+    if (itemId === FOAM_SWORD_ITEM_ID) {
+      return foamSword?.holder === playerControls;
+    }
     if (itemId === 'hammer') {
       return hammer?.holder === playerControls;
     }
@@ -6584,6 +6621,7 @@ async function initCore(runtimeContext) {
       if (isInventoryItemEquipped('bazooka')) return 'bazooka';
       if (isInventoryItemEquipped('bomb')) return 'bomb';
       if (isInventoryItemEquipped('autumnSword')) return 'autumnSword';
+      if (isInventoryItemEquipped(FOAM_SWORD_ITEM_ID)) return FOAM_SWORD_ITEM_ID;
       if (isInventoryItemEquipped('hammer')) return 'hammer';
       if (isInventoryItemEquipped('pistol')) return 'pistol';
     }
@@ -6803,6 +6841,28 @@ async function initCore(runtimeContext) {
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'sword-equip', cooldownMs: 100 });
       updateSettingsUI();
     }
+    if (itemId === FOAM_SWORD_ITEM_ID) {
+      if (!foamSword?.mesh || !playerControls) return;
+      const heldMesh = ensureLocalHeldWeaponMesh(foamSword, FOAM_SWORD_ITEM_ID, { forceNew: true });
+      foamSword.useHeldMeshWhenHeld = true;
+      if (heldMesh) {
+        heldMesh.visible = true;
+      }
+      foamSword.mesh.visible = false;
+      foamSword.localHoldOrigin = 'inventory';
+      foamSword.holder = playerControls;
+      setPlayerWeaponType(playerControls, foamSword.type);
+      if (playerControls.playerModel) {
+        playerControls.playerModel.userData.handDepthOverride = {
+          left: (palmX) => {
+            const sideAmount = Math.abs(palmX - 0.5) * 2;
+            return THREE.MathUtils.lerp(0.45, 0.1, sideAmount);
+          }
+        };
+      }
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.62, { cooldownKey: 'sword-equip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
     if (itemId === 'hammer') {
       if (!hammer?.mesh || !playerControls) return;
       const heldMesh = ensureLocalHeldWeaponMesh(hammer, 'hammer', { forceNew: true });
@@ -6957,6 +7017,23 @@ async function initCore(runtimeContext) {
         delete playerControls.playerModel.userData.handDepthOverride;
       }
       clearPlayerWeaponType(playerControls, autumnSword.type);
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'sword-unequip', cooldownMs: 100 });
+      updateSettingsUI();
+    }
+    if (itemId === FOAM_SWORD_ITEM_ID) {
+      if (foamSword?.holder !== playerControls) return;
+      foamSword.holder = null;
+      foamSword.localHoldOrigin = null;
+      if (foamSword.mesh) {
+        foamSword.mesh.visible = false;
+      }
+      if (foamSword.heldMesh) {
+        foamSword.heldMesh.visible = false;
+      }
+      if (playerControls.playerModel) {
+        delete playerControls.playerModel.userData.handDepthOverride;
+      }
+      clearPlayerWeaponType(playerControls, foamSword.type);
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg', 0.58, { cooldownKey: 'sword-unequip', cooldownMs: 100 });
       updateSettingsUI();
     }
@@ -8803,6 +8880,7 @@ async function initCore(runtimeContext) {
     if ((inventoryState.bazooka?.count || 0) > 0) weaponDrops.push('bazooka');
     if ((inventoryState.bomb?.count || 0) > 0) weaponDrops.push('bomb');
     if ((inventoryState.autumnSword?.count || 0) > 0) weaponDrops.push('autumnSword');
+    if ((inventoryState[FOAM_SWORD_ITEM_ID]?.count || 0) > 0) weaponDrops.push(FOAM_SWORD_ITEM_ID);
     if ((inventoryState.hammer?.count || 0) > 0) weaponDrops.push('hammer');
     if ((inventoryState.lantern?.count || 0) > 0) weaponDrops.push('lantern');
     if ((inventoryState[TORCH_ITEM_ID]?.count || 0) > 0) weaponDrops.push(TORCH_ITEM_ID);
@@ -9786,7 +9864,7 @@ async function initCore(runtimeContext) {
     } = {}
   ) {
     if (!itemId) return false;
-    const itemMap = { iceGun, bow, bazooka, autumnSword, hammer, lantern, torch };
+    const itemMap = { iceGun, bow, bazooka, autumnSword, [FOAM_SWORD_ITEM_ID]: foamSword, hammer, lantern, torch };
     const resolvedItem = sourceItem || itemMap[itemId];
     if (!resolvedItem?.mesh) return false;
 
@@ -9814,7 +9892,7 @@ async function initCore(runtimeContext) {
       gravity: 9.8,
       colliderDesc: RAPIER.ColliderDesc.ball(0.2).setRestitution(0.25).setFriction(0.8),
       groundContactOffset: 0.2,
-      damage: Number.isFinite(damage) ? damage : (itemId === 'autumnSword' ? 2 : 1),
+      damage: Number.isFinite(damage) ? damage : (itemId === 'autumnSword' || itemId === FOAM_SWORD_ITEM_ID ? 2 : 1),
       attackLabel: 'thrownItemProjectile',
       attackTypes: ['projectile', 'throw'],
       onGroundHit: createPickupOnGround ? (hitPosition) => {
@@ -11385,7 +11463,7 @@ async function initCore(runtimeContext) {
       return playerControls.throwBomb(position, direction);
     }
 
-    const itemMap = { iceGun, bow, bazooka, autumnSword, hammer, lantern, torch };
+    const itemMap = { iceGun, bow, bazooka, autumnSword, [FOAM_SWORD_ITEM_ID]: foamSword, hammer, lantern, torch };
     const sourceItem = itemMap[itemId];
     if (!sourceItem?.mesh) return false;
 
@@ -11419,7 +11497,7 @@ async function initCore(runtimeContext) {
     return spawnInventoryThrowProjectileWithPerfFlags(scene, projectiles, position, direction, shooterId, {
       itemId,
       sourceItem,
-      damage: itemId === 'autumnSword' ? 2 : 1,
+      damage: (itemId === 'autumnSword' || itemId === FOAM_SWORD_ITEM_ID) ? 2 : 1,
       thrownTorchHealth,
       createPickupOnGround: true
     });
@@ -11479,8 +11557,8 @@ async function initCore(runtimeContext) {
         [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
       }));
     }
-    if (!(inventoryState['autumnSword']?.count > 0)) {
-      inventoryState['autumnSword'] = ensureCatalogEntry('autumnSword', { count: 1 });
+    if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
+      inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
     }
   }
 
@@ -14931,6 +15009,7 @@ async function initCore(runtimeContext) {
     bazooka?.update();
     bomb?.update();
     autumnSword?.update();
+    foamSword?.update();
     hammer?.update();
     pistol?.update();
     paintBrush?.update();
@@ -15315,7 +15394,7 @@ async function initCore(runtimeContext) {
           ? 'bow'
           : (isInventoryItemEquipped('bomb')
             ? 'bomb'
-            : (isInventoryItemEquipped('autumnSword') ? 'sword' : (isInventoryItemEquipped('hammer') ? 'hammer' : null))));
+            : ((isInventoryItemEquipped('autumnSword') || isInventoryItemEquipped(FOAM_SWORD_ITEM_ID)) ? 'sword' : (isInventoryItemEquipped('hammer') ? 'hammer' : null))));
       const dx = payload.x - (lastSentPresenceState.x ?? payload.x);
       const dy = payload.y - (lastSentPresenceState.y ?? payload.y);
       const dz = payload.z - (lastSentPresenceState.z ?? payload.z);

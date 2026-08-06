@@ -29,12 +29,15 @@ export async function loadSpecialWeapons() {
       import('../items/bazooka.js'),
       import('../items/bomb.js'),
       import('../items/shield.js'),
-      import('../items/pistol.js')
-    ]).then(([iceGunModule, bowModule, lanternModule, autumnSwordModule, hammerModule, bazookaModule, bombModule, shieldModule, pistolModule]) => ({
+      import('../items/pistol.js'),
+      import('../items/foamSword.js')
+    ]).then(([iceGunModule, bowModule, lanternModule, autumnSwordModule, hammerModule, bazookaModule, bombModule, shieldModule, pistolModule, foamSwordModule]) => ({
       IceGun: iceGunModule.IceGun,
       Bow: bowModule.Bow,
       Lantern: lanternModule.Lantern,
       AutumnSword: autumnSwordModule.AutumnSword,
+      FoamSword: foamSwordModule.FoamSword,
+      FOAM_SWORD_ITEM_ID: foamSwordModule.FOAM_SWORD_ITEM_ID,
       Hammer: hammerModule.Hammer,
       Bazooka: bazookaModule.Bazooka,
       Bomb: bombModule.Bomb,
