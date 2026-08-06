@@ -29,7 +29,7 @@ export const handRotConfig = {
   signY: -1,
   signZ: 1,
 
-  // Across-palm axis: +1 → pts[17]-pts[5], -1 → pts[5]-pts[17]
+  // Across-palm axis used for pitch/yaw basis: +1 → pts[17]-pts[5], -1 → pts[5]-pts[17]
   acrossSign: 1,
 
   // Palm normal cross product order
@@ -43,11 +43,13 @@ export const handRotConfig = {
   acrossLmA: 17,
   acrossLmB: 5,
 
-  // Use thumb CMC (landmark 1) projected perpendicular to the finger axis for
-  // wrist roll detection instead of the pinky/index MCP pair. The thumb visibly
-  // crosses to the opposite side of the palm as the wrist pronates, making roll
-  // detectable from 2D landmark positions without needing accurate z depth.
-  useThumbRoll: true,
+  // Dynamic wrist roll: computed each frame from thumb tip (lm 4) angle around
+  // the finger axis and added to offsetZ before applying the offset quaternion.
+  // rollGain scales the detected angle (negative to invert); rollBase subtracts
+  // a calibration offset so neutral hand position gives roll = 0.
+  wristRollDeg: 0,   // written each frame by playerModel — do not set manually
+  rollGain: 1.0,
+  rollBase: 0,
 
   // Smoothing speed (1=slow, 40=instant)
   smoothing: 14,
@@ -60,10 +62,12 @@ const _palmAxisQ  = new THREE.Quaternion();
 const _palmAxisV  = new THREE.Vector3(0, 1, 0); // GLB local Y = finger axis
 
 export function getOffsetQuaternion() {
+  const totalZ = handRotConfig.offsetZ +
+    (handRotConfig.wristRollDeg - handRotConfig.rollBase) * handRotConfig.rollGain;
   _offsetE.set(
     handRotConfig.offsetX * (Math.PI / 180),
     handRotConfig.offsetY * (Math.PI / 180),
-    handRotConfig.offsetZ * (Math.PI / 180),
+    totalZ * (Math.PI / 180),
     handRotConfig.offsetOrder,
   );
   _offsetQ.setFromEuler(_offsetE);
@@ -199,33 +203,19 @@ export function initHandRotationDebug() {
   addSlider(body, 'posOffset Y', handPosOffset, 'y', -0.1, 0.1, 0.001);
   addSlider(body, 'posOffset Z', handPosOffset, 'z', -0.1, 0.1, 0.001);
 
-  addSection(body, '— Wrist Roll —');
-  {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px;';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = handRotConfig.useThumbRoll;
-    cb.addEventListener('change', () => { handRotConfig.useThumbRoll = cb.checked; });
-    const lbl = document.createElement('label');
-    lbl.textContent = 'Thumb tip roll (lm 4)';
-    lbl.style.cssText = 'font-size:11px;cursor:pointer;';
-    lbl.prepend(cb);
-    row.appendChild(lbl);
-    body.appendChild(row);
-  }
-  addSlider(body, 'acrossSign (±1)', handRotConfig, 'acrossSign', -1, 1, 2);
+  addSection(body, '— Wrist Roll (thumb tip → offsetZ) —');
+  addSlider(body, 'rollGain (neg=invert)', handRotConfig, 'rollGain', -5, 5, 0.1);
+  addSlider(body, 'rollBase (neutral °)', handRotConfig, 'rollBase', -180, 180, 1);
 
   // Live roll diagnostics — updated each frame by playerModel
   {
     const diagRow = document.createElement('div');
     diagRow.style.cssText = 'font-size:10px;color:#fa8;margin-top:3px;font-family:monospace;';
-    diagRow.textContent = 'across: — (no data)';
+    diagRow.textContent = 'roll: — (no data)';
     body.appendChild(diagRow);
-    // Refresh at ~10 Hz
     setInterval(() => {
       diagRow.textContent =
-        `across x=${handRollDiag.acrossX.toFixed(2)} z=${handRollDiag.acrossZ.toFixed(2)}  roll≈${handRollDiag.rollDeg.toFixed(0)}°`;
+        `thumbAngle≈${handRollDiag.rollDeg.toFixed(0)}°  applied≈${((handRollDiag.rollDeg - handRotConfig.rollBase) * handRotConfig.rollGain).toFixed(0)}°`;
     }, 100);
   }
 

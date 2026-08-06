@@ -606,28 +606,27 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   if (_bvFinger.lengthSq() < 1e-8) return;
   _bvFinger.normalize();
 
-  // Across-palm / wrist-roll direction.
-  // Thumb-roll mode: project wrist→thumbTip (landmark 4) onto the plane perpendicular
-  // to the finger axis. The thumb tip travels the farthest in 2D camera space when the
-  // wrist pronates/supinates and visibly crosses to the opposite side — CMC (lm 1) is
-  // too close to the wrist joint to give a reliable signal. Projecting out the finger
-  // component isolates the roll-sensitive portion. Fallback: use tunable landmark pair.
+  // Across-palm direction (for pitch/yaw basis only — roll is handled separately below).
   const s = (side === 'right' ? 1 : -1) * handRotConfig.acrossSign;
-  if (handRotConfig.useThumbRoll) {
-    _bvThumb.subVectors(pts[4], pts[0]); // wrist → thumb tip (maximum roll displacement)
-    const proj = _bvThumb.dot(_bvFinger);
-    _bvAcross.copy(_bvThumb).addScaledVector(_bvFinger, -proj); // project perp to finger axis
-    _bvAcross.multiplyScalar(s);
-  } else {
-    _bvAcross.subVectors(pts[acrossLmA], pts[acrossLmB]).multiplyScalar(s);
-  }
+  _bvAcross.subVectors(pts[acrossLmA], pts[acrossLmB]).multiplyScalar(s);
   if (_bvAcross.lengthSq() < 1e-8) return;
   _bvAcross.normalize();
 
-  // Diagnostics: export the across direction for the debug panel.
-  handRollDiag.acrossX = _bvAcross.x;
-  handRollDiag.acrossZ = _bvAcross.z;
-  handRollDiag.rollDeg = Math.atan2(_bvAcross.z, _bvAcross.x) * (180 / Math.PI);
+  // Wrist roll from thumb tip (landmark 4): project wrist→thumbTip onto the plane
+  // perpendicular to the finger axis. In pts space x comes from camera 2D (reliable)
+  // and z from MediaPipe depth (noisier). atan2(z, x) gives the roll angle in that
+  // plane; this is added to offsetZ inside getOffsetQuaternion() each frame.
+  _bvThumb.subVectors(pts[4], pts[0]);
+  const thumbProj = _bvThumb.dot(_bvFinger);
+  const tpX = _bvThumb.x - thumbProj * _bvFinger.x;
+  const tpZ = _bvThumb.z - thumbProj * _bvFinger.z;
+  const rollDeg = Math.atan2(tpZ, tpX) * (180 / Math.PI);
+  handRotConfig.wristRollDeg = rollDeg;
+
+  // Diagnostics for the debug panel.
+  handRollDiag.rollDeg = rollDeg;
+  handRollDiag.acrossX = tpX;
+  handRollDiag.acrossZ = tpZ;
 
   // Palm normal — cross order tunable; optional normal flip
   if (handRotConfig.crossOrder === 'across_x_finger') {
