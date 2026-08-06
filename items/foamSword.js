@@ -96,11 +96,10 @@ export class FoamSword extends Weapon {
       const coord = foamSwordConfig.handCoord === 'y' ? palmY : palmX;
       const sign = foamSwordConfig.invert ? -1 : 1;
       const sideAmount = (foamSwordConfig.handCenter - coord) * 2 * sign;
-      const dynDeg = sideAmount * foamSwordConfig.range + foamSwordConfig.dynOffset;
 
-      const ex = foamSwordConfig.defaultX * DEG + (foamSwordConfig.rotAxis === 'x' ? dynDeg * DEG : 0);
-      const ey = foamSwordConfig.defaultY * DEG + (foamSwordConfig.rotAxis === 'y' ? dynDeg * DEG : 0);
-      const ez = foamSwordConfig.defaultZ * DEG + (foamSwordConfig.rotAxis === 'z' ? dynDeg * DEG : 0);
+      const ex = (foamSwordConfig.defaultX + sideAmount * foamSwordConfig.gainX + foamSwordConfig.dynOffset) * DEG;
+      const ey = (foamSwordConfig.defaultY + sideAmount * foamSwordConfig.gainY) * DEG;
+      const ez = (foamSwordConfig.defaultZ + sideAmount * foamSwordConfig.gainZ) * DEG;
       _foamEuler.set(ex, ey, ez, 'YXZ');
       this._holdQuaternion.setFromEuler(_foamEuler);
     }

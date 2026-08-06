@@ -65,19 +65,20 @@ export const foamSwordConfig = {
   // Which hand screen coordinate drives the rotation: 'x' or 'y'
   handCoord: 'x',
 
-  // Which Euler axis the hand coord rotates: 'x', 'y', or 'z'
-  rotAxis: 'y',
+  // Per-axis gains (deg): how much each euler axis rotates per unit sideAmount.
+  // Positive = one direction, negative = reversed. Use these instead of a single
+  // rotAxis+range so you can mix axes and flip directions independently.
+  gainX: 0,
+  gainY: 90,
+  gainZ: 0,
 
-  // Range in degrees: at the edge of screen, sword rotates this far from default
-  range: 90,
-
-  // Invert the hand coordinate direction (true = pointing away from center)
+  // Invert the hand coordinate direction
   invert: true,
 
   // Where "center" is on the [0,1] normalized screen coord
   handCenter: 0.5,
 
-  // Constant offset added to the dynamic rotation (degrees)
+  // Constant offset (deg) added to the dynamic rotation on top of the gains
   dynOffset: 0,
 };
 
@@ -271,21 +272,28 @@ export function initHandRotationDebug() {
   // ── Foam Sword Dynamic Rotation ───────────────────────────────────────────
   addSection(body, '— Dynamic Rotation (hand position) —');
   addSelect(body, 'hand coord (x/y)', foamSwordConfig, 'handCoord', ['x', 'y']);
-  addSelect(body, 'rotation axis (x/y/z)', foamSwordConfig, 'rotAxis', ['x', 'y', 'z']);
-  addSlider(body, 'range (deg)', foamSwordConfig, 'range', -360, 360, 1);
+  addSlider(body, 'gainX (deg/side)', foamSwordConfig, 'gainX', -360, 360, 1);
+  addSlider(body, 'gainY (deg/side)', foamSwordConfig, 'gainY', -360, 360, 1);
+  addSlider(body, 'gainZ (deg/side)', foamSwordConfig, 'gainZ', -360, 360, 1);
   addSlider(body, 'hand center', foamSwordConfig, 'handCenter', 0, 1, 0.01);
   addSlider(body, 'dynOffset (deg)', foamSwordConfig, 'dynOffset', -180, 180, 1);
   addToggle(body, 'invert direction', foamSwordConfig, 'invert');
 
-  // Live readout of current dynamic rotation amount
+  // Live readout: shows the actual resulting euler angles each frame
   {
     const readout = document.createElement('div');
-    readout.style.cssText = 'font-size:10px;color:#fa8;margin-top:3px;font-family:monospace;';
-    readout.textContent = 'dyn: —';
+    readout.style.cssText = 'font-size:10px;color:#fa8;margin-top:4px;font-family:monospace;line-height:1.5;';
     body.appendChild(readout);
     setInterval(() => {
       const sign = foamSwordConfig.invert ? -1 : 1;
-      readout.textContent = `dyn axis: ${foamSwordConfig.rotAxis}  center: ${foamSwordConfig.handCenter.toFixed(2)}  invert: ${foamSwordConfig.invert}`;
+      // sideAmount at left edge (coord=0)
+      const sideAtEdge = (foamSwordConfig.handCenter - 0) * 2 * sign;
+      const ex = foamSwordConfig.defaultX + sideAtEdge * foamSwordConfig.gainX + foamSwordConfig.dynOffset;
+      const ey = foamSwordConfig.defaultY + sideAtEdge * foamSwordConfig.gainY;
+      const ez = foamSwordConfig.defaultZ + sideAtEdge * foamSwordConfig.gainZ;
+      readout.textContent =
+        `@ left edge  X:${ex.toFixed(0)}° Y:${ey.toFixed(0)}° Z:${ez.toFixed(0)}°\n` +
+        `@ center     X:${foamSwordConfig.defaultX}° Y:${foamSwordConfig.defaultY}° Z:${foamSwordConfig.defaultZ}°`;
     }, 100);
   }
 
