@@ -12,7 +12,7 @@ import { pinchConfig } from '../mediapipe/handTrackingManager.js';
 // ── shared config object (mutated by UI, read by rotation code) ──────────────
 export const handRotConfig = {
   // Euler offset post-multiplied onto the computed orientation (degrees).
-  offsetX: 180,
+  offsetX: 240,
   offsetY: -180,
   offsetZ: 0,
   offsetOrder: 'XYZ',
@@ -48,7 +48,7 @@ export const handRotConfig = {
   // rollGain scales the detected angle (negative to invert); rollBase subtracts
   // a calibration offset so neutral hand position gives roll = 0.
   wristRollDeg: 0,   // written each frame by playerModel — do not set manually
-  rollGain: 1.0,
+  rollGain: -1.0,
   rollBase: 0,
 
   // Smoothing speed (1=slow, 40=instant)
