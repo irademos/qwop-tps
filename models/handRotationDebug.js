@@ -58,9 +58,9 @@ export const handRotConfig = {
 // ── foam sword tuning config (mutated by UI, read by FoamSword.update()) ─────
 export const foamSwordConfig = {
   // Default (rest) rotation in degrees
-  defaultX: 0,
-  defaultY: 180,
-  defaultZ: 0,
+  defaultX: 360,
+  defaultY: 90,
+  defaultZ: -90,
 
   // Which hand screen coordinate drives the rotation: 'x' or 'y'
   handCoord: 'x',
@@ -70,6 +70,15 @@ export const foamSwordConfig = {
 
   // Range in degrees: at the edge of screen, sword rotates this far from default
   range: 90,
+
+  // Invert the hand coordinate direction (true = pointing away from center)
+  invert: true,
+
+  // Where "center" is on the [0,1] normalized screen coord
+  handCenter: 0.5,
+
+  // Constant offset added to the dynamic rotation (degrees)
+  dynOffset: 0,
 };
 
 // ── cached THREE objects (no allocation in hot path) ─────────────────────────
@@ -202,6 +211,29 @@ export function initHandRotationDebug() {
     container.appendChild(h);
   }
 
+  // ── checkbox factory ──────────────────────────────────────────────────────
+  function addToggle(container, label, obj, key) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:5px;margin-bottom:3px;cursor:pointer;';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = obj[key];
+    cb.style.cssText = 'cursor:pointer;';
+
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'font-size:11px;cursor:pointer;';
+    lbl.textContent = label;
+
+    cb.addEventListener('change', () => { obj[key] = cb.checked; });
+    lbl.addEventListener('click', () => { cb.checked = !cb.checked; obj[key] = cb.checked; });
+
+    row.appendChild(cb);
+    row.appendChild(lbl);
+    container.appendChild(row);
+    return cb;
+  }
+
   // ── select factory (for axis pickers) ─────────────────────────────────────
   function addSelect(container, label, obj, key, options) {
     const row = document.createElement('div');
@@ -241,6 +273,21 @@ export function initHandRotationDebug() {
   addSelect(body, 'hand coord (x/y)', foamSwordConfig, 'handCoord', ['x', 'y']);
   addSelect(body, 'rotation axis (x/y/z)', foamSwordConfig, 'rotAxis', ['x', 'y', 'z']);
   addSlider(body, 'range (deg)', foamSwordConfig, 'range', -360, 360, 1);
+  addSlider(body, 'hand center', foamSwordConfig, 'handCenter', 0, 1, 0.01);
+  addSlider(body, 'dynOffset (deg)', foamSwordConfig, 'dynOffset', -180, 180, 1);
+  addToggle(body, 'invert direction', foamSwordConfig, 'invert');
+
+  // Live readout of current dynamic rotation amount
+  {
+    const readout = document.createElement('div');
+    readout.style.cssText = 'font-size:10px;color:#fa8;margin-top:3px;font-family:monospace;';
+    readout.textContent = 'dyn: —';
+    body.appendChild(readout);
+    setInterval(() => {
+      const sign = foamSwordConfig.invert ? -1 : 1;
+      readout.textContent = `dyn axis: ${foamSwordConfig.rotAxis}  center: ${foamSwordConfig.handCenter.toFixed(2)}  invert: ${foamSwordConfig.invert}`;
+    }, 100);
+  }
 
   // ── Copy button ───────────────────────────────────────────────────────────
   const copyBtn = document.createElement('button');

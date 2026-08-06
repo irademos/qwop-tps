@@ -94,9 +94,9 @@ export class FoamSword extends Weapon {
       const palmY = slot?.landmarks?.[0]?.y ?? slot?.y ?? 0.5;
 
       const coord = foamSwordConfig.handCoord === 'y' ? palmY : palmX;
-      // Map [0,1] screen coord to [-1,1], negate so left side of screen = positive
-      const sideAmount = (0.5 - coord) * 2;
-      const dynDeg = sideAmount * foamSwordConfig.range;
+      const sign = foamSwordConfig.invert ? -1 : 1;
+      const sideAmount = (foamSwordConfig.handCenter - coord) * 2 * sign;
+      const dynDeg = sideAmount * foamSwordConfig.range + foamSwordConfig.dynOffset;
 
       const ex = foamSwordConfig.defaultX * DEG + (foamSwordConfig.rotAxis === 'x' ? dynDeg * DEG : 0);
       const ey = foamSwordConfig.defaultY * DEG + (foamSwordConfig.rotAxis === 'y' ? dynDeg * DEG : 0);
