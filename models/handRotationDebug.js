@@ -43,6 +43,12 @@ export const handRotConfig = {
   acrossLmA: 17,
   acrossLmB: 5,
 
+  // Use thumb CMC (landmark 1) projected perpendicular to the finger axis for
+  // wrist roll detection instead of the pinky/index MCP pair. The thumb visibly
+  // crosses to the opposite side of the palm as the wrist pronates, making roll
+  // detectable from 2D landmark positions without needing accurate z depth.
+  useThumbRoll: true,
+
   // Smoothing speed (1=slow, 40=instant)
   smoothing: 14,
 };
@@ -189,6 +195,23 @@ export function initHandRotationDebug() {
   addSlider(body, 'posOffset X', handPosOffset, 'x', -0.1, 0.1, 0.001);
   addSlider(body, 'posOffset Y', handPosOffset, 'y', -0.1, 0.1, 0.001);
   addSlider(body, 'posOffset Z', handPosOffset, 'z', -0.1, 0.1, 0.001);
+
+  addSection(body, '— Wrist Roll —');
+  {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = handRotConfig.useThumbRoll;
+    cb.addEventListener('change', () => { handRotConfig.useThumbRoll = cb.checked; });
+    const lbl = document.createElement('label');
+    lbl.textContent = 'Thumb-based roll (rec.)';
+    lbl.style.cssText = 'font-size:11px;cursor:pointer;';
+    lbl.prepend(cb);
+    row.appendChild(lbl);
+    body.appendChild(row);
+  }
+  addSlider(body, 'acrossSign (±1)', handRotConfig, 'acrossSign', -1, 1, 2);
 
   addSection(body, '— Pointer↔Thumb (Pinch) —');
   addSlider(body, 'distance threshold (ratio)', pinchConfig, 'distanceThreshold', 0.1, 1.0, 0.01);

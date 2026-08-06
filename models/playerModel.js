@@ -584,6 +584,7 @@ const _parentMatInv = new THREE.Matrix4();
 const _bqSceneTarget = new THREE.Quaternion();
 const _bvFinger      = new THREE.Vector3();
 const _bvAcross      = new THREE.Vector3();
+const _bvThumb       = new THREE.Vector3();
 const _bvNormal      = new THREE.Vector3();
 const _bvHandRight   = new THREE.Vector3();
 const _sceneM4       = new THREE.Matrix4();
@@ -605,9 +606,20 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   if (_bvFinger.lengthSq() < 1e-8) return;
   _bvFinger.normalize();
 
-  // Across-palm direction — landmark indices and sign tunable in debug panel
+  // Across-palm / wrist-roll direction.
+  // Thumb-roll mode: project the wrist→thumbCMC vector (landmark 1) onto the plane
+  // perpendicular to the finger axis. The thumb visibly crosses sides when the wrist
+  // pronates, so this detects roll from 2D landmark positions without needing
+  // accurate MediaPipe z depth. Fallback: use the tunable landmark pair instead.
   const s = (side === 'right' ? 1 : -1) * handRotConfig.acrossSign;
-  _bvAcross.subVectors(pts[acrossLmA], pts[acrossLmB]).multiplyScalar(s);
+  if (handRotConfig.useThumbRoll) {
+    _bvThumb.subVectors(pts[1], pts[0]); // wrist → thumb CMC
+    const proj = _bvThumb.dot(_bvFinger);
+    _bvAcross.copy(_bvThumb).addScaledVector(_bvFinger, -proj); // remove finger component
+    _bvAcross.multiplyScalar(s);
+  } else {
+    _bvAcross.subVectors(pts[acrossLmA], pts[acrossLmB]).multiplyScalar(s);
+  }
   if (_bvAcross.lengthSq() < 1e-8) return;
   _bvAcross.normalize();
 
