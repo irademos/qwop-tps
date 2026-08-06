@@ -112,6 +112,7 @@ import { getDistanceUnitPreference, setDistanceUnitPreference } from '../distanc
 import { db } from '../firebase-init.js';
 import { onValue, push, ref, remove, set, update } from 'firebase/database';
 import { openPopupDialog } from '../controls/popupDialog.js';
+import { EnemyPlayer } from '../characters/EnemyPlayer.js';
 
 import {
   clearStoredPin,
@@ -11524,6 +11525,24 @@ async function initCore(runtimeContext) {
   runtimeContext.systems.playerControls = playerControls;
   window.playerControls = playerControls;
 
+  // ── Player physics collider ────────────────────────────────────────────────
+  // Kinematic body that follows the visual model; impulse hits are handled
+  // visually via playerKnockbackVelocity in the horde update.
+  if (rapierWorld) {
+    const playerPos = playerModel.position;
+    const playerRbDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
+      .setTranslation(playerPos.x, playerPos.y + 0.6, playerPos.z);
+    const playerRb = rapierWorld.createRigidBody(playerRbDesc);
+    const playerColDesc = RAPIER.ColliderDesc.capsule(0.6, 0.28)
+      .setFriction(0.5)
+      .setRestitution(0.1);
+    rapierWorld.createCollider(playerColDesc, playerRb);
+    playerControls.body = playerRb;
+    window.playerRigidBody = playerRb;
+  }
+  // Knockback velocity applied directly to player position in the horde loop
+  const _playerKnockback = { vx: 0, vy: 0, vz: 0, endTime: 0 };
+
   if (paintBrush) {
     paintBrush.holder = playerControls;
   }
@@ -11560,6 +11579,17 @@ async function initCore(runtimeContext) {
     if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
       inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
     }
+  }
+
+  // ── Horde-mode enemy player ────────────────────────────────────────────────
+  let hordeEnemy = null;
+  if (window.gameMode === 'horde' && rapierWorld) {
+    const spawnOffset = new THREE.Vector3(6, 0, 0);
+    hordeEnemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
+      position: playerModel.position.clone().add(spawnOffset)
+    });
+    hordeEnemy._camera = camera;
+    window.hordeEnemy = hordeEnemy;
   }
 
   await initMapViewFeature({ camera, scene, player: playerModel });
@@ -15016,6 +15046,63 @@ async function initCore(runtimeContext) {
     lantern?.update();
     torch?.update();
     shield?.update();
+
+    // ── Horde enemy update ─────────────────────────────────────────────────
+    if (hordeEnemy) {
+      // Sync kinematic player body to visual position each frame
+      if (playerControls?.body) {
+        playerControls.body.setNextKinematicTranslation({
+          x: playerModel.position.x,
+          y: playerModel.position.y + 0.6,
+          z: playerModel.position.z
+        });
+      }
+
+      // Apply and decay visual knockback on the player
+      const _nowMs = Date.now();
+      if (_nowMs < _playerKnockback.endTime) {
+        const decay = Math.exp(-5 * frameDelta);
+        _playerKnockback.vx *= decay;
+        _playerKnockback.vz *= decay;
+        playerControls.playerX = (playerControls.playerX || playerModel.position.x) + _playerKnockback.vx * frameDelta;
+        playerControls.playerZ = (playerControls.playerZ || playerModel.position.z) + _playerKnockback.vz * frameDelta;
+      }
+
+      if (!hordeEnemy.isDead) {
+        const shieldEquipped = shield?.holder === playerControls &&
+          !!(inventoryState[SHIELD_ITEM_ID]?.count > 0);
+        hordeEnemy.update(frameDelta, playerModel, playerControls, shieldEquipped);
+
+        // Intercept hit from enemy: instead of controls.applyKnockback (which needs
+        // a dynamic body), apply velocity directly to playerX/Z
+        hordeEnemy._onHitPlayer = (direction) => {
+          const speed = 4.5;
+          _playerKnockback.vx = direction.x * speed;
+          _playerKnockback.vz = direction.z * speed;
+          _playerKnockback.endTime = Date.now() + 800;
+        };
+
+        // ── Player's foam sword hitting the enemy ──────────────────────────
+        if (!hordeEnemy._playerSwordLastHit) hordeEnemy._playerSwordLastHit = 0;
+        const swordMesh = foamSword?.holder === playerControls && foamSword?.useHeldMeshWhenHeld && foamSword?.heldMesh
+          ? foamSword.heldMesh
+          : (foamSword?.holder === playerControls ? foamSword?.mesh : null);
+
+        if (swordMesh?.visible && (Date.now() - hordeEnemy._playerSwordLastHit) > 1000) {
+          const _tipOffset = new THREE.Vector3(0, 0, 0.69).applyQuaternion(swordMesh.quaternion);
+          const _tipWorld = swordMesh.position.clone().add(_tipOffset);
+          const _enemyCenter = hordeEnemy.getCenterWorldPos();
+          if (_tipWorld.distanceTo(_enemyCenter) < 0.65) {
+            const _hitDir = new THREE.Vector3()
+              .subVectors(hordeEnemy.group.position, playerModel.position)
+              .normalize();
+            hordeEnemy.applyDamage(2);
+            hordeEnemy.applyKnockback({ direction: _hitDir, strength: 2 });
+            hordeEnemy._playerSwordLastHit = Date.now();
+          }
+        }
+      }
+    }
     syncRemoteHeldWeaponMesh(iceGun);
     syncRemoteHeldWeaponMesh(bow);
     syncRemoteHeldWeaponMesh(bazooka);
