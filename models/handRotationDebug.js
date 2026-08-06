@@ -75,6 +75,9 @@ export function getOffsetQuaternion() {
   return _offsetQ;
 }
 
+// ── live diagnostics written each frame by playerModel, read by the debug panel ──
+export const handRollDiag = { rollDeg: 0, acrossX: 0, acrossZ: 0 };
+
 // ── hand position offset (applied on top of tracked wrist position) ───────────
 export const handPosOffset = { x: 0.0140, y: -0.0050, z: -0.0050 };
 
@@ -205,13 +208,26 @@ export function initHandRotationDebug() {
     cb.checked = handRotConfig.useThumbRoll;
     cb.addEventListener('change', () => { handRotConfig.useThumbRoll = cb.checked; });
     const lbl = document.createElement('label');
-    lbl.textContent = 'Thumb-based roll (rec.)';
+    lbl.textContent = 'Thumb tip roll (lm 4)';
     lbl.style.cssText = 'font-size:11px;cursor:pointer;';
     lbl.prepend(cb);
     row.appendChild(lbl);
     body.appendChild(row);
   }
   addSlider(body, 'acrossSign (±1)', handRotConfig, 'acrossSign', -1, 1, 2);
+
+  // Live roll diagnostics — updated each frame by playerModel
+  {
+    const diagRow = document.createElement('div');
+    diagRow.style.cssText = 'font-size:10px;color:#fa8;margin-top:3px;font-family:monospace;';
+    diagRow.textContent = 'across: — (no data)';
+    body.appendChild(diagRow);
+    // Refresh at ~10 Hz
+    setInterval(() => {
+      diagRow.textContent =
+        `across x=${handRollDiag.acrossX.toFixed(2)} z=${handRollDiag.acrossZ.toFixed(2)}  roll≈${handRollDiag.rollDeg.toFixed(0)}°`;
+    }, 100);
+  }
 
   addSection(body, '— Pointer↔Thumb (Pinch) —');
   addSlider(body, 'distance threshold (ratio)', pinchConfig, 'distanceThreshold', 0.1, 1.0, 0.01);

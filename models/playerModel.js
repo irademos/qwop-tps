@@ -3,7 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
-import { initHandRotationDebug, handRotConfig, handPosOffset, armConfig, getOffsetQuaternion } from './handRotationDebug.js';
+import { initHandRotationDebug, handRotConfig, handPosOffset, armConfig, getOffsetQuaternion, handRollDiag } from './handRotationDebug.js';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
@@ -607,21 +607,27 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   _bvFinger.normalize();
 
   // Across-palm / wrist-roll direction.
-  // Thumb-roll mode: project the wrist→thumbCMC vector (landmark 1) onto the plane
-  // perpendicular to the finger axis. The thumb visibly crosses sides when the wrist
-  // pronates, so this detects roll from 2D landmark positions without needing
-  // accurate MediaPipe z depth. Fallback: use the tunable landmark pair instead.
+  // Thumb-roll mode: project wrist→thumbTip (landmark 4) onto the plane perpendicular
+  // to the finger axis. The thumb tip travels the farthest in 2D camera space when the
+  // wrist pronates/supinates and visibly crosses to the opposite side — CMC (lm 1) is
+  // too close to the wrist joint to give a reliable signal. Projecting out the finger
+  // component isolates the roll-sensitive portion. Fallback: use tunable landmark pair.
   const s = (side === 'right' ? 1 : -1) * handRotConfig.acrossSign;
   if (handRotConfig.useThumbRoll) {
-    _bvThumb.subVectors(pts[1], pts[0]); // wrist → thumb CMC
+    _bvThumb.subVectors(pts[4], pts[0]); // wrist → thumb tip (maximum roll displacement)
     const proj = _bvThumb.dot(_bvFinger);
-    _bvAcross.copy(_bvThumb).addScaledVector(_bvFinger, -proj); // remove finger component
+    _bvAcross.copy(_bvThumb).addScaledVector(_bvFinger, -proj); // project perp to finger axis
     _bvAcross.multiplyScalar(s);
   } else {
     _bvAcross.subVectors(pts[acrossLmA], pts[acrossLmB]).multiplyScalar(s);
   }
   if (_bvAcross.lengthSq() < 1e-8) return;
   _bvAcross.normalize();
+
+  // Diagnostics: export the across direction for the debug panel.
+  handRollDiag.acrossX = _bvAcross.x;
+  handRollDiag.acrossZ = _bvAcross.z;
+  handRollDiag.rollDeg = Math.atan2(_bvAcross.z, _bvAcross.x) * (180 / Math.PI);
 
   // Palm normal — cross order tunable; optional normal flip
   if (handRotConfig.crossOrder === 'across_x_finger') {
