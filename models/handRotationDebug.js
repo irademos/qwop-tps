@@ -62,12 +62,11 @@ const _palmAxisQ  = new THREE.Quaternion();
 const _palmAxisV  = new THREE.Vector3(0, 1, 0); // GLB local Y = finger axis
 
 export function getOffsetQuaternion() {
-  const totalZ = handRotConfig.offsetZ +
-    (handRotConfig.wristRollDeg - handRotConfig.rollBase) * handRotConfig.rollGain;
+  const dynamicRoll = (handRotConfig.wristRollDeg - handRotConfig.rollBase) * handRotConfig.rollGain;
   _offsetE.set(
     handRotConfig.offsetX * (Math.PI / 180),
-    handRotConfig.offsetY * (Math.PI / 180),
-    totalZ * (Math.PI / 180),
+    (handRotConfig.offsetY + dynamicRoll) * (Math.PI / 180),
+    handRotConfig.offsetZ * (Math.PI / 180),
     handRotConfig.offsetOrder,
   );
   _offsetQ.setFromEuler(_offsetE);
