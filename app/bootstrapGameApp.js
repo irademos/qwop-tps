@@ -542,12 +542,8 @@ function createArcadeOverlay(startOverlay) {
       }
       currentName = result.profile?.name || name;
       setMessage('');
-      if (autoStart) {
-        showWelcome(currentName, { ready: true });
-        showModeSelect(result);
-      } else {
-        showWelcome(currentName, { ready: true });
-      }
+      showWelcome(currentName, { ready: true });
+      showModeSelect(result);
     } catch (err) {
       if (token !== authToken) return;
       authInProgress = false;
