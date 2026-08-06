@@ -1,5 +1,5 @@
 /**
- * Debug panel for tuning GLB hand rotation mapping and pinch detection.
+ * Debug panel for tuning GLB hand rotation mapping and foam sword behavior.
  * Import and call initHandRotationDebug() once; then read handRotConfig
  * each frame from updateGLBHandSceneRotation.
  *
@@ -53,6 +53,23 @@ export const handRotConfig = {
 
   // Smoothing speed (1=slow, 40=instant)
   smoothing: 14,
+};
+
+// ── foam sword tuning config (mutated by UI, read by FoamSword.update()) ─────
+export const foamSwordConfig = {
+  // Default (rest) rotation in degrees
+  defaultX: 0,
+  defaultY: 180,
+  defaultZ: 0,
+
+  // Which hand screen coordinate drives the rotation: 'x' or 'y'
+  handCoord: 'x',
+
+  // Which Euler axis the hand coord rotates: 'x', 'y', or 'z'
+  rotAxis: 'y',
+
+  // Range in degrees: at the edge of screen, sword rotates this far from default
+  range: 90,
 };
 
 // ── cached THREE objects (no allocation in hot path) ─────────────────────────
@@ -118,7 +135,7 @@ export function initHandRotationDebug() {
   header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;cursor:default;';
 
   const title = document.createElement('span');
-  title.textContent = '🖐 Hand Debug';
+  title.textContent = '🗡 Foam Sword Debug';
   title.style.fontWeight = 'bold';
 
   const minBtn = document.createElement('button');
@@ -151,6 +168,7 @@ export function initHandRotationDebug() {
     const lbl = document.createElement('label');
     lbl.style.cssText = 'flex:0 0 130px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
     lbl.title = label;
+    lbl.textContent = label;
 
     const slider = document.createElement('input');
     slider.type = 'range';
@@ -164,14 +182,11 @@ export function initHandRotationDebug() {
     valDisplay.style.cssText = 'flex:0 0 46px;text-align:right;font-size:11px;';
     valDisplay.textContent = Number(obj[key]).toFixed(step < 0.01 ? 3 : step < 1 ? 2 : 0);
 
-    const update = () => {
+    slider.addEventListener('input', () => {
       const v = parseFloat(slider.value);
       obj[key] = v;
       valDisplay.textContent = v.toFixed(step < 0.01 ? 3 : step < 1 ? 2 : 0);
-      lbl.textContent = label;
-    };
-    slider.addEventListener('input', update);
-    lbl.textContent = label;
+    });
 
     row.appendChild(lbl);
     row.appendChild(slider);
@@ -180,47 +195,76 @@ export function initHandRotationDebug() {
     return slider;
   }
 
-  function addSection(container, title) {
+  function addSection(container, text) {
     const h = document.createElement('div');
     h.style.cssText = 'margin:7px 0 3px;font-size:11px;color:#adf;font-weight:bold;letter-spacing:.5px;';
-    h.textContent = title;
+    h.textContent = text;
     container.appendChild(h);
   }
 
-  // ── GLB default rotation sliders ──────────────────────────────────────────
-  addSection(body, '— GLB Rotation Offset (deg) —');
-  addSlider(body, 'offsetX', handRotConfig, 'offsetX', -360, 360, 1);
-  addSlider(body, 'offsetY', handRotConfig, 'offsetY', -360, 360, 1);
-  addSlider(body, 'offsetZ', handRotConfig, 'offsetZ', -360, 360, 1);
-  addSlider(body, 'palmAxisDeg', handRotConfig, 'palmAxisDeg', -180, 180, 1);
+  // ── select factory (for axis pickers) ─────────────────────────────────────
+  function addSelect(container, label, obj, key, options) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:5px;margin-bottom:3px;';
 
-  addSection(body, '— Smoothing —');
-  addSlider(body, 'smoothing (1=slow 40=fast)', handRotConfig, 'smoothing', 1, 40, 0.5);
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'flex:0 0 130px;font-size:11px;';
+    lbl.textContent = label;
 
-  addSection(body, '— Hand Position Offset —');
-  addSlider(body, 'posOffset X', handPosOffset, 'x', -0.1, 0.1, 0.001);
-  addSlider(body, 'posOffset Y', handPosOffset, 'y', -0.1, 0.1, 0.001);
-  addSlider(body, 'posOffset Z', handPosOffset, 'z', -0.1, 0.1, 0.001);
+    const sel = document.createElement('select');
+    sel.style.cssText = 'flex:1;background:#222;color:#eee;border:1px solid #555;border-radius:3px;font-size:11px;padding:1px 2px;';
 
-  addSection(body, '— Wrist Roll (thumb tip → offsetZ) —');
-  addSlider(body, 'rollGain (neg=invert)', handRotConfig, 'rollGain', -5, 5, 0.1);
-  addSlider(body, 'rollBase (neutral °)', handRotConfig, 'rollBase', -180, 180, 1);
+    options.forEach(opt => {
+      const el = document.createElement('option');
+      el.value = opt;
+      el.textContent = opt;
+      if (opt === obj[key]) el.selected = true;
+      sel.appendChild(el);
+    });
 
-  // Live roll diagnostics — updated each frame by playerModel
-  {
-    const diagRow = document.createElement('div');
-    diagRow.style.cssText = 'font-size:10px;color:#fa8;margin-top:3px;font-family:monospace;';
-    diagRow.textContent = 'roll: — (no data)';
-    body.appendChild(diagRow);
-    setInterval(() => {
-      diagRow.textContent =
-        `thumbAngle≈${handRollDiag.rollDeg.toFixed(0)}°  applied≈${((handRollDiag.rollDeg - handRotConfig.rollBase) * handRotConfig.rollGain).toFixed(0)}°`;
-    }, 100);
+    sel.addEventListener('change', () => { obj[key] = sel.value; });
+
+    row.appendChild(lbl);
+    row.appendChild(sel);
+    container.appendChild(row);
+    return sel;
   }
 
-  addSection(body, '— Pointer↔Thumb (Pinch) —');
-  addSlider(body, 'distance threshold (ratio)', pinchConfig, 'distanceThreshold', 0.1, 1.0, 0.01);
-  addSlider(body, 'buffer (ms)', pinchConfig, 'bufferMs', 0, 500, 10);
+  // ── Foam Sword Default Rotation ───────────────────────────────────────────
+  addSection(body, '— Default Rotation (deg) —');
+  addSlider(body, 'defaultX', foamSwordConfig, 'defaultX', -360, 360, 1);
+  addSlider(body, 'defaultY', foamSwordConfig, 'defaultY', -360, 360, 1);
+  addSlider(body, 'defaultZ', foamSwordConfig, 'defaultZ', -360, 360, 1);
+
+  // ── Foam Sword Dynamic Rotation ───────────────────────────────────────────
+  addSection(body, '— Dynamic Rotation (hand position) —');
+  addSelect(body, 'hand coord (x/y)', foamSwordConfig, 'handCoord', ['x', 'y']);
+  addSelect(body, 'rotation axis (x/y/z)', foamSwordConfig, 'rotAxis', ['x', 'y', 'z']);
+  addSlider(body, 'range (deg)', foamSwordConfig, 'range', -360, 360, 1);
+
+  // ── Copy button ───────────────────────────────────────────────────────────
+  const copyBtn = document.createElement('button');
+  copyBtn.textContent = '📋 Copy Values';
+  copyBtn.style.cssText = `
+    margin-top: 8px;
+    width: 100%;
+    background: #2a5; color: #fff; border: none; border-radius: 4px;
+    cursor: pointer; font-size: 12px; padding: 4px 0;
+  `;
+  copyBtn.addEventListener('click', () => {
+    const vals = {
+      foamSwordConfig: { ...foamSwordConfig },
+    };
+    const text = JSON.stringify(vals, null, 2);
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.textContent = '✓ Copied!';
+      setTimeout(() => { copyBtn.textContent = '📋 Copy Values'; }, 1500);
+    }).catch(() => {
+      copyBtn.textContent = '✗ Failed';
+      setTimeout(() => { copyBtn.textContent = '📋 Copy Values'; }, 1500);
+    });
+  });
+  body.appendChild(copyBtn);
 
   document.body.appendChild(panel);
 }

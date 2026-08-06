@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { Weapon } from './weapon.js';
+import { foamSwordConfig } from '../models/handRotationDebug.js';
 
 export const FOAM_SWORD_ITEM_ID = 'foamSword';
 
@@ -10,7 +11,8 @@ const GUARD_COLOR   = 0xcc2222;
 const HANDLE_COLOR  = 0xdd3333;
 const POMMEL_COLOR  = 0xaa1111;
 
-const _foamYawEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _foamEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const DEG = Math.PI / 180;
 
 export class FoamSword extends Weapon {
   constructor(scene) {
@@ -89,10 +91,18 @@ export class FoamSword extends Weapon {
       // Tracking slot 'left' = right physical hand (back-camera swap)
       const slot = htd?.left;
       const palmX = slot?.landmarks?.[0]?.x ?? slot?.x ?? 0.5;
-      // Match autumnSword rotation: center → forward, sides → rotate outward
-      const sideAmount = (0.5 - palmX) * 2;
-      _foamYawEuler.set(0, Math.PI + sideAmount * Math.PI / 2, 0, 'YXZ');
-      this._holdQuaternion.setFromEuler(_foamYawEuler);
+      const palmY = slot?.landmarks?.[0]?.y ?? slot?.y ?? 0.5;
+
+      const coord = foamSwordConfig.handCoord === 'y' ? palmY : palmX;
+      // Map [0,1] screen coord to [-1,1], negate so left side of screen = positive
+      const sideAmount = (0.5 - coord) * 2;
+      const dynDeg = sideAmount * foamSwordConfig.range;
+
+      const ex = foamSwordConfig.defaultX * DEG + (foamSwordConfig.rotAxis === 'x' ? dynDeg * DEG : 0);
+      const ey = foamSwordConfig.defaultY * DEG + (foamSwordConfig.rotAxis === 'y' ? dynDeg * DEG : 0);
+      const ez = foamSwordConfig.defaultZ * DEG + (foamSwordConfig.rotAxis === 'z' ? dynDeg * DEG : 0);
+      _foamEuler.set(ex, ey, ez, 'YXZ');
+      this._holdQuaternion.setFromEuler(_foamEuler);
     }
     super.update();
   }
