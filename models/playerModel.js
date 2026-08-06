@@ -3,7 +3,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
-import { initHandRotationDebug, handRotConfig, handPosOffset, armConfig, getOffsetQuaternion } from './handRotationDebug.js';
+import { initHandRotationDebug, handRotConfig, handPosOffset, armConfig, getOffsetQuaternion, handRollDiag } from './handRotationDebug.js';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
@@ -584,6 +584,7 @@ const _parentMatInv = new THREE.Matrix4();
 const _bqSceneTarget = new THREE.Quaternion();
 const _bvFinger      = new THREE.Vector3();
 const _bvAcross      = new THREE.Vector3();
+const _bvThumb       = new THREE.Vector3();
 const _bvNormal      = new THREE.Vector3();
 const _bvHandRight   = new THREE.Vector3();
 const _sceneM4       = new THREE.Matrix4();
@@ -605,11 +606,27 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   if (_bvFinger.lengthSq() < 1e-8) return;
   _bvFinger.normalize();
 
-  // Across-palm direction — landmark indices and sign tunable in debug panel
+  // Across-palm direction (for pitch/yaw basis only — roll is handled separately below).
   const s = (side === 'right' ? 1 : -1) * handRotConfig.acrossSign;
   _bvAcross.subVectors(pts[acrossLmA], pts[acrossLmB]).multiplyScalar(s);
   if (_bvAcross.lengthSq() < 1e-8) return;
   _bvAcross.normalize();
+
+  // Wrist roll from thumb tip (landmark 4): project wrist→thumbTip onto the plane
+  // perpendicular to the finger axis. In pts space x comes from camera 2D (reliable)
+  // and z from MediaPipe depth (noisier). atan2(z, x) gives the roll angle in that
+  // plane; this is added to offsetZ inside getOffsetQuaternion() each frame.
+  _bvThumb.subVectors(pts[4], pts[0]);
+  const thumbProj = _bvThumb.dot(_bvFinger);
+  const tpX = _bvThumb.x - thumbProj * _bvFinger.x;
+  const tpZ = _bvThumb.z - thumbProj * _bvFinger.z;
+  const rollDeg = Math.atan2(tpZ, tpX) * (180 / Math.PI);
+  handRotConfig.wristRollDeg = rollDeg;
+
+  // Diagnostics for the debug panel.
+  handRollDiag.rollDeg = rollDeg;
+  handRollDiag.acrossX = tpX;
+  handRollDiag.acrossZ = tpZ;
 
   // Palm normal — cross order tunable; optional normal flip
   if (handRotConfig.crossOrder === 'across_x_finger') {

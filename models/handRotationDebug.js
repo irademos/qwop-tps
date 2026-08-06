@@ -29,7 +29,7 @@ export const handRotConfig = {
   signY: -1,
   signZ: 1,
 
-  // Across-palm axis: +1 → pts[17]-pts[5], -1 → pts[5]-pts[17]
+  // Across-palm axis used for pitch/yaw basis: +1 → pts[17]-pts[5], -1 → pts[5]-pts[17]
   acrossSign: 1,
 
   // Palm normal cross product order
@@ -43,6 +43,14 @@ export const handRotConfig = {
   acrossLmA: 17,
   acrossLmB: 5,
 
+  // Dynamic wrist roll: computed each frame from thumb tip (lm 4) angle around
+  // the finger axis and added to offsetZ before applying the offset quaternion.
+  // rollGain scales the detected angle (negative to invert); rollBase subtracts
+  // a calibration offset so neutral hand position gives roll = 0.
+  wristRollDeg: 0,   // written each frame by playerModel — do not set manually
+  rollGain: 1.0,
+  rollBase: 0,
+
   // Smoothing speed (1=slow, 40=instant)
   smoothing: 14,
 };
@@ -54,9 +62,10 @@ const _palmAxisQ  = new THREE.Quaternion();
 const _palmAxisV  = new THREE.Vector3(0, 1, 0); // GLB local Y = finger axis
 
 export function getOffsetQuaternion() {
+  const dynamicRoll = (handRotConfig.wristRollDeg - handRotConfig.rollBase) * handRotConfig.rollGain;
   _offsetE.set(
     handRotConfig.offsetX * (Math.PI / 180),
-    handRotConfig.offsetY * (Math.PI / 180),
+    (handRotConfig.offsetY + dynamicRoll) * (Math.PI / 180),
     handRotConfig.offsetZ * (Math.PI / 180),
     handRotConfig.offsetOrder,
   );
@@ -68,6 +77,9 @@ export function getOffsetQuaternion() {
   }
   return _offsetQ;
 }
+
+// ── live diagnostics written each frame by playerModel, read by the debug panel ──
+export const handRollDiag = { rollDeg: 0, acrossX: 0, acrossZ: 0 };
 
 // ── hand position offset (applied on top of tracked wrist position) ───────────
 export const handPosOffset = { x: 0.0140, y: -0.0050, z: -0.0050 };
@@ -189,6 +201,22 @@ export function initHandRotationDebug() {
   addSlider(body, 'posOffset X', handPosOffset, 'x', -0.1, 0.1, 0.001);
   addSlider(body, 'posOffset Y', handPosOffset, 'y', -0.1, 0.1, 0.001);
   addSlider(body, 'posOffset Z', handPosOffset, 'z', -0.1, 0.1, 0.001);
+
+  addSection(body, '— Wrist Roll (thumb tip → offsetZ) —');
+  addSlider(body, 'rollGain (neg=invert)', handRotConfig, 'rollGain', -5, 5, 0.1);
+  addSlider(body, 'rollBase (neutral °)', handRotConfig, 'rollBase', -180, 180, 1);
+
+  // Live roll diagnostics — updated each frame by playerModel
+  {
+    const diagRow = document.createElement('div');
+    diagRow.style.cssText = 'font-size:10px;color:#fa8;margin-top:3px;font-family:monospace;';
+    diagRow.textContent = 'roll: — (no data)';
+    body.appendChild(diagRow);
+    setInterval(() => {
+      diagRow.textContent =
+        `thumbAngle≈${handRollDiag.rollDeg.toFixed(0)}°  applied≈${((handRollDiag.rollDeg - handRotConfig.rollBase) * handRotConfig.rollGain).toFixed(0)}°`;
+    }, 100);
+  }
 
   addSection(body, '— Pointer↔Thumb (Pinch) —');
   addSlider(body, 'distance threshold (ratio)', pinchConfig, 'distanceThreshold', 0.1, 1.0, 0.01);
