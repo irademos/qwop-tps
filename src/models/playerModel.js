@@ -530,8 +530,6 @@ async function initGLBHands(leftGroup, rightGroup) {
   rightGroup.userData.glbScene = rightScene;  // bone data lives here
   rightGroup.userData.glbPivot = rightPivot;  // rotation/position pivot (wrist joint)
   rightGroup.userData.glbReady = true;
-  initHandRotationDebug();
-
   // --- Left hand (mirror of right) ---
   const leftScene = SkeletonUtils.clone(gltf.scene);
   leftScene.scale.set(-HAND_MODEL_SCALE, HAND_MODEL_SCALE, HAND_MODEL_SCALE); // mirror on X
