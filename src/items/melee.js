@@ -4,10 +4,10 @@ import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from '../player/healthU
 
 export const ATTACKS = {
   mutantPunch: { damage: 1, range: 1.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward', types: ['melee', 'punch'] },
-  swordSlash: { damage: 2, range: 2.5, hitTime: 100, hitWindow: 300, knockbackStrength: 3, region: 'forward', types: ['cut'] },
-  swordSlashLeft: { damage: 2, range: 2.5, hitTime: 200, hitWindow: 300, knockbackStrength: 3, region: 'forward', types: ['cut'] },
+  swordSlash: { damage: 2, range: 2.5, hitTime: 100, hitWindow: 300, knockbackStrength: 2, region: 'forward', types: ['cut'] },
+  swordSlashLeft: { damage: 2, range: 2.5, hitTime: 200, hitWindow: 300, knockbackStrength: 2, region: 'forward', types: ['cut'] },
   swordFwdSpin: { damage: 3, range: 2.0, hitTime: 280, hitWindow: 500, knockbackStrength: 5, region: 'forward', types: ['cut'] },
-  swordSpin: { damage: 4, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 12, region: 'around', types: ['cut'] },
+  swordSpin: { damage: 4, range: 4.0, hitTime: 800, hitWindow: 300, knockbackStrength: 10, region: 'around', types: ['cut'] },
   hammerSlash: { damage: 1, range: 2.5, hitTime: 100, hitWindow: 300, knockbackStrength: 7, region: 'forward', types: ['smash'] },
   hammerSlashLeft: { damage: 1, range: 2.5, hitTime: 200, hitWindow: 300, knockbackStrength: 7, region: 'forward', types: ['pummel'] },
   hammerFwdSpin: { damage: 2, range: 2.0, hitTime: 280, hitWindow: 500, knockbackStrength: 10, region: 'forward', types: ['smash'] },

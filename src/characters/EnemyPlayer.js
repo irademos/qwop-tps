@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js';
+import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -103,6 +103,9 @@ export class EnemyPlayer {
     this._lastHitTime  = 0;        // timestamp of last sword hit on player
     this._aiState      = 'chase';  // 'chase' | 'attack'
     this._prevRightHandWorldPos = new THREE.Vector3();
+
+    this._isRagdoll    = false;
+    this._ragdollTimeout = null;
 
     // Sword quaternion (updated each frame)
     this._swordQuaternion = new THREE.Quaternion().setFromEuler(REST_SWORD_EULER);
@@ -365,6 +368,18 @@ export class EnemyPlayer {
     const t = this.rigidBody.translation();
     this.group.position.set(t.x, t.y - CAPSULE_HEIGHT / 2, t.z);
 
+    // ── Ragdoll: sync full rotation from physics body ──────────────────────
+    if (this._isRagdoll) {
+      const rot = this.rigidBody.rotation();
+      this.group.quaternion.set(rot.x, rot.y, rot.z, rot.w);
+      // Still update arms/sword visuals but skip AI
+      this._updateHandPositions(dt, Infinity);
+      this._updateElasticArm(this._leftArm,  this._leftShoulder,  this._leftHandGroup);
+      this._updateElasticArm(this._rightArm, this._rightShoulder, this._rightHandGroup);
+      this._updateSword(dt);
+      return;
+    }
+
     // ── Face the player ────────────────────────────────────────────────────
     if (targetModel) {
       _toTarget.subVectors(targetModel.position, this.group.position);
@@ -580,13 +595,54 @@ export class EnemyPlayer {
     if (!direction || !this.rigidBody) return;
     const { impulse } = getKnockbackImpulse(direction, strength);
     const { velocity } = getKnockbackMotion(direction, strength);
-    this.rigidBody.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
+
+    // Add an upward pop proportional to hit strength so the body lifts off the ground
+    const upwardVelocity = strength * 0.6;
+    this.rigidBody.applyImpulse({ x: impulse.x, y: impulse.y + strength * 0.8, z: impulse.z }, true);
     const vel = this.rigidBody.linvel();
-    this.rigidBody.setLinvel({ x: velocity.x, y: vel.y, z: velocity.z }, true);
+    this.rigidBody.setLinvel({ x: velocity.x, y: vel.y + upwardVelocity, z: velocity.z }, true);
+
+    if (strength >= RAGDOLL_STRENGTH_THRESHOLD) {
+      this._startRagdoll(direction, strength);
+    }
+  }
+
+  _startRagdoll(direction, strength) {
+    if (this._ragdollTimeout) clearTimeout(this._ragdollTimeout);
+    this._isRagdoll = true;
+
+    // Unlock all rotations so the capsule can tumble freely
+    this.rigidBody.setEnabledRotations(true, true, true, true);
+
+    // Apply a spin torque perpendicular to the hit direction for a dramatic tumble
+    const torqueAxis = new THREE.Vector3(-direction.z, 0.3, direction.x).normalize();
+    const torqueMag = strength * 10;
+    this.rigidBody.applyTorqueImpulse(
+      { x: torqueAxis.x * torqueMag, y: torqueAxis.y * torqueMag, z: torqueAxis.z * torqueMag },
+      true
+    );
+
+    const durationMs = 1800 + (strength - RAGDOLL_STRENGTH_THRESHOLD) * 150;
+    this._ragdollTimeout = setTimeout(() => this._endRagdoll(), durationMs);
+  }
+
+  _endRagdoll() {
+    if (!this.rigidBody || this.isDead) return;
+    this._isRagdoll = false;
+
+    // Re-lock pitch and roll so the capsule stands upright again
+    this.rigidBody.setEnabledRotations(false, true, false, true);
+
+    // Zero out any remaining angular velocity and snap visual rotation upright
+    this.rigidBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.group.rotation.x = 0;
+    this.group.rotation.z = 0;
   }
 
   _die() {
     this.isDead = true;
+    if (this._ragdollTimeout) { clearTimeout(this._ragdollTimeout); this._ragdollTimeout = null; }
+    this._isRagdoll = false;
     // Tip capsule over on death
     this.group.rotation.z = Math.PI / 2;
     this._capsuleMesh.material.color.setHex(0x333333);
@@ -606,6 +662,7 @@ export class EnemyPlayer {
    * Call when the enemy should be fully removed from the scene.
    */
   destroy() {
+    if (this._ragdollTimeout) { clearTimeout(this._ragdollTimeout); this._ragdollTimeout = null; }
     if (this._swordGroup.parent) this.scene.remove(this._swordGroup);
     if (this.group.parent)       this.scene.remove(this.group);
     if (this.rigidBody && this.rapierWorld?.getRigidBody?.(this.rigidBody.handle)) {
