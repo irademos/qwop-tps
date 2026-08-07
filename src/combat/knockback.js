@@ -1,12 +1,15 @@
 const MIN_STRENGTH = 1;
-const MAX_STRENGTH = 5;
-const MIN_RECOVERY_MS = 1000;
-const MAX_RECOVERY_MS = 5000;
-const MIN_PUSH_SCALE = 0.04;
-const MAX_PUSH_SCALE = 0.18;
-const VERTICAL_IMPULSE_SCALE = 0.2;
-const MIN_TRAVEL_DISTANCE = 0.8;
-const MAX_TRAVEL_DISTANCE = 3.6;
+const MAX_STRENGTH = 10;
+const MIN_RECOVERY_MS = 600;
+const MAX_RECOVERY_MS = 3500;
+const MIN_PUSH_SCALE = 4.0;
+const MAX_PUSH_SCALE = 22.0;
+const VERTICAL_IMPULSE_SCALE = 0.5;
+const MIN_TRAVEL_DISTANCE = 1.0;
+const MAX_TRAVEL_DISTANCE = 5.0;
+
+// Hits at or above this strength trigger a ragdoll tumble on EnemyPlayer
+export const RAGDOLL_STRENGTH_THRESHOLD = 8;
 
 const lerp = (start, end, amount) => start + (end - start) * amount;
 
