@@ -325,6 +325,9 @@ export class PlayerControls {
     this.cameraOffset = new THREE.Vector3();
     this.cameraOffset.copy(this.camera.position).sub(new THREE.Vector3(this.playerX, this.playerY + 1, this.playerZ));
 
+    this.firstPersonView = true;
+    this.tpConfig = { distance: 6, height: 2.5, lookTargetHeight: 1.0, capsuleOpacity: 1.0 };
+
     // Initialize controls based on device
     this.initializeControls();
 
@@ -388,8 +391,6 @@ export class PlayerControls {
     this.aimZoomOutSpeed = 3;
     this.aimReleaseDelayMs = 500;
     this.aimReleaseHoldUntil = null;
-    this.firstPersonView = true;
-    this.tpConfig = { distance: 6, height: 2.5, lookTargetHeight: 1.0, capsuleOpacity: 1.0 };
     this.cameraRaycaster = new THREE.Raycaster();
     this.lastOcclusionOrbitCenter = null;
     this.lastOcclusionDesiredPosition = null;
