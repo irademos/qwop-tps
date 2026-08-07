@@ -25,6 +25,8 @@ const HAND_MODEL_SCALE = 0.7;
 const CHASE_SPEED   = 3.2;   // m/s while chasing
 const ATTACK_RANGE  = 2.8;   // switch to attack mode when this close
 const CHASE_RANGE   = 0.9;   // stop moving closer when this close (during attack)
+const BACKOFF_SPEED = 1.6;   // m/s retreat speed when yielding attack slot
+const BACKOFF_DIST  = 3.8;   // target distance while backing off
 
 // Sword tip distance threshold for registering a hit
 const SWORD_TIP_HIT_RADIUS  = 0.55;
@@ -360,8 +362,9 @@ export class EnemyPlayer {
    * @param {THREE.Object3D} targetModel – the player's Three.js group
    * @param {object|null}   targetControls – PlayerControls (for applyKnockback / applyDamage)
    * @param {boolean}       shieldActive – whether the player has shield equipped and facing us
+   * @param {boolean}       allowAttack  – if false, yield attack slot: retreat and hold idle pose
    */
-  update(dt, targetModel, targetControls, shieldActive) {
+  update(dt, targetModel, targetControls, shieldActive, allowAttack = true) {
     if (this.isDead || !this.rigidBody) return;
 
     // ── Sync visual group from physics ──────────────────────────────────────
@@ -397,14 +400,27 @@ export class EnemyPlayer {
       : Infinity;
 
     // ── AI state ───────────────────────────────────────────────────────────
-    if (distToTarget < ATTACK_RANGE) {
+    if (!allowAttack && distToTarget < BACKOFF_DIST) {
+      this._aiState = 'backoff';
+    } else if (distToTarget < ATTACK_RANGE && allowAttack) {
       this._aiState = 'attack';
     } else {
       this._aiState = 'chase';
     }
 
     // ── Movement ───────────────────────────────────────────────────────────
-    if (this._aiState === 'chase' || distToTarget > CHASE_RANGE * 1.5) {
+    if (this._aiState === 'backoff') {
+      // Retreat away from player until we reach BACKOFF_DIST
+      if (targetModel) {
+        _toTarget.subVectors(this.group.position, targetModel.position);
+        _toTarget.y = 0;
+        if (_toTarget.lengthSq() > 0.001) {
+          _toTarget.normalize().multiplyScalar(BACKOFF_SPEED);
+          const vel = this.rigidBody.linvel();
+          this.rigidBody.setLinvel({ x: _toTarget.x, y: vel.y, z: _toTarget.z }, true);
+        }
+      }
+    } else if (this._aiState === 'chase' || distToTarget > CHASE_RANGE * 1.5) {
       if (targetModel && distToTarget > CHASE_RANGE) {
         _toTarget.subVectors(targetModel.position, this.group.position);
         _toTarget.y = 0;
@@ -463,7 +479,8 @@ export class EnemyPlayer {
       );
       this._handTargetL.set(-0.35, 0.65, 0.2);
     } else {
-      const gait = Math.sin(Date.now() * 0.004);
+      // idle / chase / backoff — arms at sides, no swing
+      const gait = this._aiState === 'backoff' ? 0 : Math.sin(Date.now() * 0.004);
       this._handTargetR.set( 0.4,  0.75 + gait * 0.06, 0.2);
       this._handTargetL.set(-0.4,  0.75 - gait * 0.06, 0.2);
       this._swingT = 0;

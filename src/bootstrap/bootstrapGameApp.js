@@ -15173,6 +15173,15 @@ async function initCore(runtimeContext) {
       const _tipOffset = swordMesh ? new THREE.Vector3(0, 0, 0.69).applyQuaternion(swordMesh.quaternion) : null;
       const _tipWorld  = swordMesh ? swordMesh.position.clone().add(_tipOffset) : null;
 
+      // Determine which enemies get an attack slot (closest 1–2 alive enemies)
+      const _MAX_ATTACKERS = 2;
+      const _liveEnemies = hordeEnemies.filter(e => !e.isDead);
+      _liveEnemies.sort((a, b) =>
+        a.group.position.distanceTo(playerModel.position) -
+        b.group.position.distanceTo(playerModel.position)
+      );
+      const _attackSlotSet = new Set(_liveEnemies.slice(0, _MAX_ATTACKERS));
+
       let _justDied = 0;
       for (let _hi = hordeEnemies.length - 1; _hi >= 0; _hi--) {
         const _he = hordeEnemies[_hi];
@@ -15185,7 +15194,8 @@ async function initCore(runtimeContext) {
           continue;
         }
 
-        _he.update(frameDelta, playerModel, playerControls, shieldEquipped);
+        const _allowAttack = _attackSlotSet.has(_he);
+        _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack);
 
         _he._onHitPlayer = (direction) => {
           const speed = 4.5;
