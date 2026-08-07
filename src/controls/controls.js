@@ -331,6 +331,8 @@ export class PlayerControls {
     // Setup event listeners
     this.setupEventListeners();
 
+    this.initThirdPersonDebugPanel();
+
     this.enabled = true; // Add enabled flag for chat input
 
     this.interactionPromptEl = document.getElementById('interaction-tooltip');
@@ -387,6 +389,7 @@ export class PlayerControls {
     this.aimReleaseDelayMs = 500;
     this.aimReleaseHoldUntil = null;
     this.firstPersonView = true;
+    this.tpConfig = { distance: 6, height: 2.5, lookTargetHeight: 1.0, capsuleOpacity: 1.0 };
     this.cameraRaycaster = new THREE.Raycaster();
     this.lastOcclusionOrbitCenter = null;
     this.lastOcclusionDesiredPosition = null;
@@ -491,6 +494,197 @@ export class PlayerControls {
       }
       this.lastPosition.copy(this.playerModel.position);
     }
+  }
+
+  initThirdPersonDebugPanel() {
+    if (document.getElementById('tp-debug-panel')) return;
+    const panel = document.createElement('div');
+    panel.id = 'tp-debug-panel';
+    panel.style.cssText = `
+      position:fixed;bottom:12px;right:12px;z-index:99999;
+      background:rgba(0,0,0,0.82);color:#eee;font:12px/1.5 monospace;
+      padding:10px 14px;border-radius:8px;min-width:240px;
+      border:1px solid rgba(255,255,255,0.15);user-select:none;
+      pointer-events:all;
+    `;
+
+    // header
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:pointer;font-weight:bold;font-size:13px;';
+    header.innerHTML = '<span>📷 3rd Person Debug</span><span id="tp-chevron">▲</span>';
+    panel.appendChild(header);
+
+    const body = document.createElement('div');
+    body.id = 'tp-body';
+    panel.appendChild(body);
+
+    let collapsed = false;
+    header.addEventListener('click', () => {
+      collapsed = !collapsed;
+      body.style.display = collapsed ? 'none' : '';
+      document.getElementById('tp-chevron').textContent = collapsed ? '▼' : '▲';
+    });
+
+    const cfg = this.tpConfig;
+    const camera = this.camera;
+    const controls = this;
+
+    // helper: slider row
+    const addSlider = (label, obj, key, min, max, step, onChange) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'margin-bottom:6px;';
+      const top = document.createElement('div');
+      top.style.cssText = 'display:flex;justify-content:space-between;font-size:11px;';
+      const lbl = document.createElement('span');
+      lbl.textContent = label;
+      const val = document.createElement('span');
+      val.id = `tp-val-${key}`;
+      val.textContent = Number(obj[key]).toFixed(step < 1 ? 2 : 1);
+      top.append(lbl, val);
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = min; slider.max = max; slider.step = step;
+      slider.value = obj[key];
+      slider.style.cssText = 'width:100%;accent-color:#4af;margin-top:2px;';
+      slider.addEventListener('input', () => {
+        obj[key] = parseFloat(slider.value);
+        val.textContent = Number(obj[key]).toFixed(step < 1 ? 2 : 1);
+        onChange?.();
+      });
+      wrap.append(top, slider);
+      body.appendChild(wrap);
+    };
+
+    // First-person checkbox
+    const fpWrap = document.createElement('div');
+    fpWrap.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;';
+    const fpCb = document.createElement('input');
+    fpCb.type = 'checkbox';
+    fpCb.id = 'tp-debug-fp-cb';
+    fpCb.checked = this.firstPersonView;
+    fpCb.style.cursor = 'pointer';
+    const fpLbl = document.createElement('label');
+    fpLbl.htmlFor = 'tp-debug-fp-cb';
+    fpLbl.textContent = 'First Person View';
+    fpLbl.style.cssText = 'font-size:12px;cursor:pointer;';
+    fpWrap.append(fpCb, fpLbl);
+    body.appendChild(fpWrap);
+
+    fpCb.addEventListener('change', () => {
+      controls.firstPersonView = fpCb.checked;
+      // sync the settings panel checkbox if it exists
+      const settingsCb = document.getElementById('settings-display-first-person');
+      if (settingsCb) settingsCb.checked = fpCb.checked;
+      updateTpSlidersVisibility();
+    });
+
+    // Keep in sync when settings panel changes it
+    const settingsCb = document.getElementById('settings-display-first-person');
+    if (settingsCb) {
+      settingsCb.addEventListener('change', () => {
+        fpCb.checked = settingsCb.checked;
+        updateTpSlidersVisibility();
+      });
+    }
+
+    // Separator
+    const sep = document.createElement('div');
+    sep.style.cssText = 'border-top:1px solid rgba(255,255,255,0.15);margin:6px 0 8px;';
+    body.appendChild(sep);
+
+    // Camera sliders (third-person only)
+    const tpSection = document.createElement('div');
+    tpSection.id = 'tp-cam-section';
+    body.appendChild(tpSection);
+
+    const addTpSlider = (label, key, min, max, step) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'margin-bottom:6px;';
+      const top = document.createElement('div');
+      top.style.cssText = 'display:flex;justify-content:space-between;font-size:11px;';
+      const lbl = document.createElement('span');
+      lbl.textContent = label;
+      const val = document.createElement('span');
+      val.id = `tp-val-${key}`;
+      val.textContent = Number(cfg[key]).toFixed(step < 1 ? 2 : 1);
+      top.append(lbl, val);
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = min; slider.max = max; slider.step = step;
+      slider.value = cfg[key];
+      slider.style.cssText = 'width:100%;accent-color:#4af;margin-top:2px;';
+      slider.addEventListener('input', () => {
+        cfg[key] = parseFloat(slider.value);
+        val.textContent = Number(cfg[key]).toFixed(step < 1 ? 2 : 1);
+      });
+      wrap.append(top, slider);
+      tpSection.appendChild(wrap);
+    };
+
+    addTpSlider('Camera distance', 'distance', 1, 20, 0.5);
+    addTpSlider('Camera height', 'height', -2, 10, 0.25);
+    addTpSlider('Look target height', 'lookTargetHeight', 0, 3, 0.1);
+    addTpSlider('Capsule opacity', 'capsuleOpacity', 0, 1, 0.05);
+
+    // FOV / fisheye slider (always visible)
+    const sep2 = document.createElement('div');
+    sep2.style.cssText = 'border-top:1px solid rgba(255,255,255,0.15);margin:6px 0 8px;';
+    body.appendChild(sep2);
+
+    const fovWrap = document.createElement('div');
+    fovWrap.style.cssText = 'margin-bottom:6px;';
+    const fovTop = document.createElement('div');
+    fovTop.style.cssText = 'display:flex;justify-content:space-between;font-size:11px;';
+    const fovLbl = document.createElement('span');
+    fovLbl.textContent = 'FOV (fisheye)';
+    const fovVal = document.createElement('span');
+    fovVal.id = 'tp-val-fov';
+    fovVal.textContent = camera.fov.toFixed(0);
+    fovTop.append(fovLbl, fovVal);
+    const fovSlider = document.createElement('input');
+    fovSlider.type = 'range';
+    fovSlider.min = 30; fovSlider.max = 160; fovSlider.step = 1;
+    fovSlider.value = camera.fov;
+    fovSlider.style.cssText = 'width:100%;accent-color:#4af;margin-top:2px;';
+    fovSlider.addEventListener('input', () => {
+      camera.fov = parseFloat(fovSlider.value);
+      camera.updateProjectionMatrix();
+      fovVal.textContent = fovSlider.value;
+    });
+    fovWrap.append(fovTop, fovSlider);
+    body.appendChild(fovWrap);
+
+    // Gyro button clone / reference
+    const gyroWrap = document.createElement('div');
+    gyroWrap.style.cssText = 'margin-top:8px;';
+    const gyroBtn = document.createElement('button');
+    gyroBtn.id = 'tp-debug-gyro-btn';
+    gyroBtn.style.cssText = `
+      width:100%;padding:5px 0;background:#224;color:#8df;
+      border:1px solid #46a;border-radius:4px;cursor:pointer;font:12px monospace;
+    `;
+    const updateGyroBtnLabel = () => {
+      gyroBtn.textContent = controls.gyroActive ? '⟳ GYRO: ON' : '⟳ GYRO: OFF';
+      gyroBtn.style.background = controls.gyroActive ? '#145' : '#224';
+    };
+    updateGyroBtnLabel();
+    gyroBtn.addEventListener('click', () => {
+      // Delegate to the real gyro button if it exists
+      const realBtn = document.getElementById('gyro-button');
+      if (realBtn) { realBtn.click(); }
+      else if (!controls.gyroActive) { controls.enableGyroscope?.(); }
+      else { controls.disableGyroscope?.(); }
+      setTimeout(updateGyroBtnLabel, 200);
+    });
+    gyroWrap.appendChild(gyroBtn);
+    body.appendChild(gyroWrap);
+
+    const updateTpSlidersVisibility = () => {
+      tpSection.style.display = controls.firstPersonView ? 'none' : '';
+    };
+    updateTpSlidersVisibility();
+
+    document.body.appendChild(panel);
   }
 
   initializeControls() {
@@ -2813,20 +3007,28 @@ export class PlayerControls {
         else this.playerModel.visible = false;
       }
     } else {
-      // Third-person view: pull camera back behind and above the player
-      const TP_DISTANCE = 6;
-      const TP_HEIGHT = 2.5;
-      const tpCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, 1, 0));
+      // Third-person view: orbit camera around player using yaw + pitch
+      const { distance, height, lookTargetHeight, capsuleOpacity } = this.tpConfig;
+      const tpCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, lookTargetHeight, 0));
+      const pitchClamped = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pitch));
+      const horizontalDist = distance * Math.cos(pitchClamped);
+      const verticalOffset = height + distance * Math.sin(pitchClamped);
       this.camera.position.set(
-        tpCenter.x - Math.sin(this.yaw) * TP_DISTANCE,
-        tpCenter.y + TP_HEIGHT,
-        tpCenter.z - Math.cos(this.yaw) * TP_DISTANCE
+        tpCenter.x - Math.sin(this.yaw) * horizontalDist,
+        tpCenter.y + verticalOffset,
+        tpCenter.z - Math.cos(this.yaw) * horizontalDist
       );
       this.camera.lookAt(tpCenter);
       if (this.playerModel) {
         const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
         if (bodyRoot) bodyRoot.visible = true;
         else this.playerModel.visible = true;
+      }
+      // apply capsule opacity
+      const capsuleMesh = this.playerModel.getObjectByName('bodyCapsulemesh');
+      if (capsuleMesh) {
+        capsuleMesh.material.transparent = capsuleOpacity < 1.0;
+        capsuleMesh.material.opacity = capsuleOpacity;
       }
     }
 
