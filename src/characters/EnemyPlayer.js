@@ -596,9 +596,10 @@ export class EnemyPlayer {
     const { impulse } = getKnockbackImpulse(direction, strength);
     const { velocity } = getKnockbackMotion(direction, strength);
 
-    // Add an upward pop proportional to hit strength so the body lifts off the ground
-    const upwardVelocity = strength * 0.6;
-    this.rigidBody.applyImpulse({ x: impulse.x, y: impulse.y + strength * 0.8, z: impulse.z }, true);
+    // Small upward pop that grows with strength — strong enough to feel physical, not
+    // enough to send the enemy straight into the sky.
+    const upwardVelocity = Math.max(0, (strength - 2) * 0.3);
+    this.rigidBody.applyImpulse({ x: impulse.x, y: impulse.y, z: impulse.z }, true);
     const vel = this.rigidBody.linvel();
     this.rigidBody.setLinvel({ x: velocity.x, y: vel.y + upwardVelocity, z: velocity.z }, true);
 
@@ -615,7 +616,7 @@ export class EnemyPlayer {
     this.rigidBody.setEnabledRotations(true, true, true, true);
 
     // Apply a spin torque perpendicular to the hit direction for a dramatic tumble
-    const torqueAxis = new THREE.Vector3(-direction.z, 0.3, direction.x).normalize();
+    const torqueAxis = new THREE.Vector3(-direction.z, 0.1, direction.x).normalize();
     const torqueMag = strength * 10;
     this.rigidBody.applyTorqueImpulse(
       { x: torqueAxis.x * torqueMag, y: torqueAxis.y * torqueMag, z: torqueAxis.z * torqueMag },

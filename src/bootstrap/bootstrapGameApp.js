@@ -15093,11 +15093,19 @@ async function initCore(runtimeContext) {
           const _tipWorld = swordMesh.position.clone().add(_tipOffset);
           const _enemyCenter = hordeEnemy.getCenterWorldPos();
           if (_tipWorld.distanceTo(_enemyCenter) < 0.65) {
+            // Horizontal-only direction so the enemy flies away, not upward
             const _hitDir = new THREE.Vector3()
-              .subVectors(hordeEnemy.group.position, playerModel.position)
-              .normalize();
+              .subVectors(hordeEnemy.group.position, playerModel.position);
+            _hitDir.y = 0;
+            if (_hitDir.lengthSq() < 0.0001) _hitDir.set(0, 0, 1);
+            _hitDir.normalize();
+            // Use the active attack's knockback strength instead of a flat value
+            const _activeAttack = playerModel.userData.attack;
+            const _kbStrength = _activeAttack?.overrides?.knockbackStrength
+              ?? _activeAttack?.knockbackStrength
+              ?? 3;
             hordeEnemy.applyDamage(2);
-            hordeEnemy.applyKnockback({ direction: _hitDir, strength: 2 });
+            hordeEnemy.applyKnockback({ direction: _hitDir, strength: _kbStrength });
             hordeEnemy._playerSwordLastHit = Date.now();
           }
         }
