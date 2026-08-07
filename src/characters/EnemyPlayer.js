@@ -362,7 +362,7 @@ export class EnemyPlayer {
    * @param {boolean}       shieldActive – whether the player has shield equipped and facing us
    */
   update(dt, targetModel, targetControls, shieldActive) {
-    if (this.isDead) return;
+    if (this.isDead || !this.rigidBody) return;
 
     // ── Sync visual group from physics ──────────────────────────────────────
     const t = this.rigidBody.translation();
@@ -599,11 +599,15 @@ export class EnemyPlayer {
     if (ragdoll) {
       if (this._ragdollTimeout) clearTimeout(this._ragdollTimeout);
       this._isRagdoll = true;
-      this.rigidBody.setEnabledRotations(true, true, true, true);
-      const torqueAxis = new THREE.Vector3(-direction.z, 0.1, direction.x).normalize();
-      this.rigidBody.applyTorqueImpulse(
-        { x: torqueAxis.x * torqueMag, y: torqueAxis.y * torqueMag, z: torqueAxis.z * torqueMag }, true
-      );
+      try {
+        this.rigidBody.setEnabledRotations(true, true, true, true);
+        const torqueAxis = new THREE.Vector3(-direction.z, 0.1, direction.x).normalize();
+        this.rigidBody.applyTorqueImpulse(
+          { x: torqueAxis.x * torqueMag, y: torqueAxis.y * torqueMag, z: torqueAxis.z * torqueMag }, true
+        );
+      } catch (e) {
+        console.warn('[EnemyPlayer] direct ragdoll error:', e);
+      }
       this._ragdollTimeout = setTimeout(() => this._endRagdoll(), 2000);
     }
   }
@@ -628,18 +632,17 @@ export class EnemyPlayer {
   _startRagdoll(direction, strength) {
     if (this._ragdollTimeout) clearTimeout(this._ragdollTimeout);
     this._isRagdoll = true;
-
-    // Unlock all rotations so the capsule can tumble freely
-    this.rigidBody.setEnabledRotations(true, true, true, true);
-
-    // Apply a spin torque perpendicular to the hit direction for a dramatic tumble
-    const torqueAxis = new THREE.Vector3(-direction.z, 0.1, direction.x).normalize();
-    const torqueMag = strength * 10;
-    this.rigidBody.applyTorqueImpulse(
-      { x: torqueAxis.x * torqueMag, y: torqueAxis.y * torqueMag, z: torqueAxis.z * torqueMag },
-      true
-    );
-
+    try {
+      this.rigidBody.setEnabledRotations(true, true, true, true);
+      const torqueAxis = new THREE.Vector3(-direction.z, 0.1, direction.x).normalize();
+      const torqueMag = strength * 10;
+      this.rigidBody.applyTorqueImpulse(
+        { x: torqueAxis.x * torqueMag, y: torqueAxis.y * torqueMag, z: torqueAxis.z * torqueMag },
+        true
+      );
+    } catch (e) {
+      console.warn('[EnemyPlayer] ragdoll start error:', e);
+    }
     const durationMs = 1800 + (strength - RAGDOLL_STRENGTH_THRESHOLD) * 150;
     this._ragdollTimeout = setTimeout(() => this._endRagdoll(), durationMs);
   }
@@ -647,12 +650,12 @@ export class EnemyPlayer {
   _endRagdoll() {
     if (!this.rigidBody || this.isDead) return;
     this._isRagdoll = false;
-
-    // Re-lock pitch and roll so the capsule stands upright again
-    this.rigidBody.setEnabledRotations(false, true, false, true);
-
-    // Zero out any remaining angular velocity and snap visual rotation upright
-    this.rigidBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    try {
+      this.rigidBody.setEnabledRotations(false, true, false, true);
+      this.rigidBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    } catch (e) {
+      console.warn('[EnemyPlayer] ragdoll end error:', e);
+    }
     this.group.rotation.x = 0;
     this.group.rotation.z = 0;
   }

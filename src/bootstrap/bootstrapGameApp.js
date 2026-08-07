@@ -11592,7 +11592,7 @@ async function initCore(runtimeContext) {
     window.hordeEnemy = hordeEnemy;
 
     // ── Knockback debug panel ──────────────────────────────────────────────
-    window._hordeKB = { horizSpeed: 8, upVelocity: 2.5, torqueMag: 100, ragdoll: true };
+    window._hordeKB = { horizSpeed: 12.5, upVelocity: 0, torqueMag: 10, ragdoll: true };
     (function injectKBDebugPanel() {
       const params = window._hordeKB;
       const panel = document.createElement('div');
@@ -15162,7 +15162,7 @@ async function initCore(runtimeContext) {
             _hitDir.y = 0;
             if (_hitDir.lengthSq() < 0.0001) _hitDir.set(0, 0, 1);
             _hitDir.normalize();
-            const _kb = window._hordeKB ?? { horizSpeed: 8, upVelocity: 2.5, torqueMag: 100, ragdoll: true };
+            const _kb = window._hordeKB ?? { horizSpeed: 12.5, upVelocity: 0, torqueMag: 10, ragdoll: true };
             hordeEnemy.applyDamage(2);
             hordeEnemy.applyDirectKnockback({ direction: _hitDir, ..._kb });
             hordeEnemy._playerSwordLastHit = Date.now();
