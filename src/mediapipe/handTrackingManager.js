@@ -9,6 +9,13 @@ let _initialized = false;
 let _uiContainer = null;
 let _statusEl = null;
 
+// Position smoothing: retain last known position per hand so brief dropouts and
+// large jumps don't teleport the hand. A "jump" is treated as a dropout.
+const HAND_JUMP_THRESHOLD = 0.25;  // normalized units; larger = hand teleport ignored
+const HAND_DROPOUT_HOLD_MS = 400;  // how long to hold last position after losing hand
+const _lastKnownHand = { left: null, right: null };
+const _lastHandTime = { left: 0, right: 0 };
+
 // Pinch/pointer detection config — mutated by debug sliders.
 export const pinchConfig = {
   // Ratio of pinch distance to palm size below which isPinch is true.
@@ -208,6 +215,21 @@ export function updateHandTracking() {
       norm.isFist = isFist;
       norm.isPinch = isPinch;
       norm.landmarks = landmarks;
+
+      // Reject large position jumps (treat as dropout — keep last known instead).
+      const prev = _lastKnownHand[gameSide];
+      if (prev) {
+        const dx = norm.x - prev.x;
+        const dy = norm.y - prev.y;
+        if (Math.sqrt(dx * dx + dy * dy) > HAND_JUMP_THRESHOLD) {
+          // Jump too large — skip this frame for position but keep gesture data.
+          newData[gameSide] = { ...prev, isFist, isPinch, landmarks };
+          continue;
+        }
+      }
+
+      _lastKnownHand[gameSide] = norm;
+      _lastHandTime[gameSide] = performance.now();
       newData[gameSide] = norm;
     }
     setStatus('✓', '#4f4');
@@ -218,6 +240,14 @@ export function updateHandTracking() {
       buf.confirmedSide = null;
       buf.pendingSide = null;
       buf.pendingCount = 0;
+    }
+  }
+
+  // For hands not seen this frame, hold last known position during dropout window.
+  const now = performance.now();
+  for (const side of ['left', 'right']) {
+    if (!newData[side] && _lastKnownHand[side] && (now - _lastHandTime[side]) < HAND_DROPOUT_HOLD_MS) {
+      newData[side] = { ..._lastKnownHand[side], isFist: false, isPinch: false };
     }
   }
 

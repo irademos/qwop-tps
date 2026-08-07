@@ -3989,7 +3989,10 @@ async function initCore(runtimeContext) {
   let _hordeEquipped = null; // 'pistol' | 'shield' | null
   let _hordePendingGesture = 'none';
   let _hordePendingFrames = 0;
-  const HORDE_GESTURE_CONFIRM = 6; // frames gesture must hold before switching
+  const HORDE_GESTURE_CONFIRM = 6; // frames new gesture must hold before becoming candidate
+  // How long (ms) the current equip must be absent before we switch away from it.
+  const HORDE_EQUIP_HOLD_MS = 600;
+  let _hordeEquipHoldSince = 0; // timestamp when current item stopped matching gesture
   let _hordeFlickPrevY = null;
   let _hordeFlickLastFire = 0;
   const HORDE_FLICK_Y_DELTA = 0.04; // normalized y drop per frame = flick up (lower = more sensitive)
@@ -4016,10 +4019,10 @@ async function initCore(runtimeContext) {
     const pinkyCurled  = normDist(20) < CURL;
     // Open hand: all five fingers extended
     if (thumbOut && indexOut && middleOut && ringOut && pinkyOut) return 'open';
-    // Sword gesture: pointer + middle extended, ring + pinky curled (thumb optional)
-    if (indexOut && middleOut && ringCurled && pinkyCurled) return 'sword';
-    // Gun gesture: index extended, middle/ring/pinky curled (thumb optional)
-    if (indexOut && middleCurled && ringCurled && pinkyCurled) return 'gun';
+    // Gun gesture: index + middle extended, ring + pinky curled (thumb optional)
+    if (indexOut && middleOut && ringCurled && pinkyCurled) return 'gun';
+    // Sword gesture: index only extended, middle/ring/pinky curled (thumb optional)
+    if (indexOut && middleCurled && ringCurled && pinkyCurled) return 'sword';
     return 'none';
   }
 
@@ -4042,14 +4045,24 @@ async function initCore(runtimeContext) {
 
     if (_hordePendingFrames >= HORDE_GESTURE_CONFIRM) {
       // Map gesture name → item name so the comparison is in the same space
-      const gestureItemMap = { gun: 'pistol', open: 'shield', sword: FOAM_SWORD_ITEM_ID };
+      // sword = index only → foam sword; gun = index+middle → pistol
+      const gestureItemMap = { sword: FOAM_SWORD_ITEM_ID, gun: 'pistol', open: 'shield' };
       const confirmedItem = gestureItemMap[_hordePendingGesture] ?? null;
       if (confirmedItem !== _hordeEquipped) {
-        // Unequip whatever is currently held
-        if (_hordeEquipped) unequipInventoryItem(_hordeEquipped);
-        // Equip the new item (null = nothing equipped)
-        if (confirmedItem) equipInventoryItem(confirmedItem);
-        _hordeEquipped = confirmedItem;
+        const now = performance.now();
+        if (_hordeEquipHoldSince === 0) {
+          // Start the hold timer the first frame the gesture disagrees with equipped item
+          _hordeEquipHoldSince = now;
+        } else if (now - _hordeEquipHoldSince >= HORDE_EQUIP_HOLD_MS) {
+          // Gesture has disagreed long enough — switch
+          _hordeEquipHoldSince = 0;
+          if (_hordeEquipped) unequipInventoryItem(_hordeEquipped);
+          if (confirmedItem) equipInventoryItem(confirmedItem);
+          _hordeEquipped = confirmedItem;
+        }
+      } else {
+        // Gesture matches current equip — reset hold timer
+        _hordeEquipHoldSince = 0;
       }
     }
 
