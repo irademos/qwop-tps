@@ -326,7 +326,7 @@ export class PlayerControls {
     this.cameraOffset.copy(this.camera.position).sub(new THREE.Vector3(this.playerX, this.playerY + 1, this.playerZ));
 
     this.firstPersonView = true;
-    this.tpConfig = { distance: 6, height: 2.5, lookTargetHeight: 1.0, capsuleOpacity: 1.0 };
+    this.tpConfig = { distance: 1.0, height: 0.0, lookTargetHeight: 1.5, capsuleOpacity: 1.0 };
 
     // Initialize controls based on device
     this.initializeControls();
@@ -648,8 +648,13 @@ export class PlayerControls {
     fovSlider.value = camera.fov;
     fovSlider.style.cssText = 'width:100%;accent-color:#4af;margin-top:2px;';
     fovSlider.addEventListener('input', () => {
-      camera.fov = parseFloat(fovSlider.value);
+      const v = parseFloat(fovSlider.value);
+      camera.fov = v;
       camera.updateProjectionMatrix();
+      // update the lerp targets so the aim/weapon FOV system doesn't fight this
+      controls.defaultFov = v;
+      controls.defaultFovDesktop = v;
+      controls.aimFov = Math.max(45, v - 8);
       fovVal.textContent = fovSlider.value;
     });
     fovWrap.append(fovTop, fovSlider);
@@ -3028,8 +3033,13 @@ export class PlayerControls {
       // apply capsule opacity
       const capsuleMesh = this.playerModel.getObjectByName('bodyCapsulemesh');
       if (capsuleMesh) {
-        capsuleMesh.material.transparent = capsuleOpacity < 1.0;
-        capsuleMesh.material.opacity = capsuleOpacity;
+        const mat = capsuleMesh.material;
+        const wantsTransparent = capsuleOpacity < 1.0;
+        if (mat.transparent !== wantsTransparent) {
+          mat.transparent = wantsTransparent;
+          mat.needsUpdate = true;
+        }
+        mat.opacity = capsuleOpacity;
       }
     }
 
