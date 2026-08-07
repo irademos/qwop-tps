@@ -11594,15 +11594,23 @@ async function initCore(runtimeContext) {
     }
   }
 
-  // ── Horde-mode enemy player ────────────────────────────────────────────────
-  let hordeEnemy = null;
-  if (window.gameMode === 'horde' && rapierWorld) {
-    const spawnOffset = new THREE.Vector3(6, 0, 0);
-    hordeEnemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
+  // ── Horde-mode enemy players ───────────────────────────────────────────────
+  const hordeEnemies = [];
+  const _spawnHordeEnemy = () => {
+    const angle = Math.random() * Math.PI * 2;
+    const dist  = 5 + Math.random() * 4;
+    const spawnOffset = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+    const enemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
       position: playerModel.position.clone().add(spawnOffset)
     });
-    hordeEnemy._camera = camera;
-    window.hordeEnemy = hordeEnemy;
+    enemy._camera = camera;
+    hordeEnemies.push(enemy);
+    return enemy;
+  };
+  if (window.gameMode === 'horde' && rapierWorld) {
+    const initialCount = 6 + Math.floor(Math.random() * 6); // 6–11
+    for (let i = 0; i < initialCount; i++) _spawnHordeEnemy();
+    window.hordeEnemies = hordeEnemies;
 
     // ── Knockback debug panel ──────────────────────────────────────────────
     window._hordeKB = { horizSpeed: 12.5, upVelocity: 0, torqueMag: 10, ragdoll: true };
@@ -11621,7 +11629,11 @@ async function initCore(runtimeContext) {
         { key: 'upVelocity',  label: 'Up velocity (m/s)', min: 0, max: 15,  step: 0.25 },
         { key: 'torqueMag',   label: 'Torque mag',        min: 0, max: 400, step: 5 },
       ];
-      let html = '<div style="font-weight:bold;margin-bottom:8px;font-size:13px">⚔️ Knockback debug</div>';
+      let html = `
+        <div id="kb-header" style="font-weight:bold;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span>⚔️ Knockback debug</span><span id="kb-chevron">▲</span>
+        </div>
+        <div id="kb-body">`;
       defs.forEach(({ key, label, min, max, step }) => {
         html += `
           <div style="margin-bottom:6px">
@@ -11634,18 +11646,27 @@ async function initCore(runtimeContext) {
           </div>`;
       });
       html += `
-        <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
-          <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-            <input type="checkbox" id="kb-ragdoll" ${params.ragdoll ? 'checked' : ''}>
-            Ragdoll
-          </label>
-        </div>
-        <button id="kb-copy" style="
-          width:100%;padding:5px 0;background:#4af;color:#000;
-          border:none;border-radius:4px;cursor:pointer;font:bold 12px monospace
-        ">Copy values</button>`;
+          <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="checkbox" id="kb-ragdoll" ${params.ragdoll ? 'checked' : ''}>
+              Ragdoll
+            </label>
+          </div>
+          <button id="kb-copy" style="
+            width:100%;padding:5px 0;background:#4af;color:#000;
+            border:none;border-radius:4px;cursor:pointer;font:bold 12px monospace
+          ">Copy values</button>
+        </div>`;
       panel.innerHTML = html;
       document.body.appendChild(panel);
+
+      // collapse/expand
+      let _kbCollapsed = false;
+      document.getElementById('kb-header').addEventListener('click', () => {
+        _kbCollapsed = !_kbCollapsed;
+        document.getElementById('kb-body').style.display = _kbCollapsed ? 'none' : '';
+        document.getElementById('kb-chevron').textContent = _kbCollapsed ? '▼' : '▲';
+      });
 
       defs.forEach(({ key }) => {
         const slider = document.getElementById(`kb-${key}`);
@@ -15124,7 +15145,7 @@ async function initCore(runtimeContext) {
     shield?.update();
 
     // ── Horde enemy update ─────────────────────────────────────────────────
-    if (hordeEnemy) {
+    if (window.gameMode === 'horde' && hordeEnemies.length > 0) {
       // Sync kinematic player body to visual position each frame
       if (playerControls?.body) {
         playerControls.body.setNextKinematicTranslation({
@@ -15144,14 +15165,29 @@ async function initCore(runtimeContext) {
         playerControls.playerZ = (playerControls.playerZ || playerModel.position.z) + _playerKnockback.vz * frameDelta;
       }
 
-      if (!hordeEnemy.isDead) {
-        const shieldEquipped = shield?.holder === playerControls &&
-          !!(inventoryState[SHIELD_ITEM_ID]?.count > 0);
-        hordeEnemy.update(frameDelta, playerModel, playerControls, shieldEquipped);
+      const shieldEquipped = shield?.holder === playerControls &&
+        !!(inventoryState[SHIELD_ITEM_ID]?.count > 0);
+      const swordMesh = foamSword?.holder === playerControls && foamSword?.useHeldMeshWhenHeld && foamSword?.heldMesh
+        ? foamSword.heldMesh
+        : (foamSword?.holder === playerControls ? foamSword?.mesh : null);
+      const _tipOffset = swordMesh ? new THREE.Vector3(0, 0, 0.69).applyQuaternion(swordMesh.quaternion) : null;
+      const _tipWorld  = swordMesh ? swordMesh.position.clone().add(_tipOffset) : null;
 
-        // Intercept hit from enemy: instead of controls.applyKnockback (which needs
-        // a dynamic body), apply velocity directly to playerX/Z
-        hordeEnemy._onHitPlayer = (direction) => {
+      let _justDied = 0;
+      for (let _hi = hordeEnemies.length - 1; _hi >= 0; _hi--) {
+        const _he = hordeEnemies[_hi];
+        if (_he.isDead) {
+          // Remove from array once the Three.js group has been removed from scene
+          if (!_he.group.parent) {
+            hordeEnemies.splice(_hi, 1);
+            _justDied++;
+          }
+          continue;
+        }
+
+        _he.update(frameDelta, playerModel, playerControls, shieldEquipped);
+
+        _he._onHitPlayer = (direction) => {
           const speed = 4.5;
           _playerKnockback.vx = direction.x * speed;
           _playerKnockback.vz = direction.z * speed;
@@ -15159,28 +15195,27 @@ async function initCore(runtimeContext) {
         };
 
         // ── Player's foam sword hitting the enemy ──────────────────────────
-        if (!hordeEnemy._playerSwordLastHit) hordeEnemy._playerSwordLastHit = 0;
-        const swordMesh = foamSword?.holder === playerControls && foamSword?.useHeldMeshWhenHeld && foamSword?.heldMesh
-          ? foamSword.heldMesh
-          : (foamSword?.holder === playerControls ? foamSword?.mesh : null);
-
-        if (swordMesh?.visible && (Date.now() - hordeEnemy._playerSwordLastHit) > 1000) {
-          const _tipOffset = new THREE.Vector3(0, 0, 0.69).applyQuaternion(swordMesh.quaternion);
-          const _tipWorld = swordMesh.position.clone().add(_tipOffset);
-          const _enemyCenter = hordeEnemy.getCenterWorldPos();
+        if (!_he._playerSwordLastHit) _he._playerSwordLastHit = 0;
+        if (swordMesh?.visible && (Date.now() - _he._playerSwordLastHit) > 1000) {
+          const _enemyCenter = _he.getCenterWorldPos();
           if (_tipWorld.distanceTo(_enemyCenter) < 0.65) {
-            // Horizontal-only direction so the enemy flies away, not upward
             const _hitDir = new THREE.Vector3()
-              .subVectors(hordeEnemy.group.position, playerModel.position);
+              .subVectors(_he.group.position, playerModel.position);
             _hitDir.y = 0;
             if (_hitDir.lengthSq() < 0.0001) _hitDir.set(0, 0, 1);
             _hitDir.normalize();
             const _kb = window._hordeKB ?? { horizSpeed: 12.5, upVelocity: 0, torqueMag: 10, ragdoll: true };
-            hordeEnemy.applyDamage(2);
-            hordeEnemy.applyDirectKnockback({ direction: _hitDir, ..._kb });
-            hordeEnemy._playerSwordLastHit = Date.now();
+            _he.applyDamage(2);
+            _he.applyDirectKnockback({ direction: _hitDir, ..._kb });
+            _he._playerSwordLastHit = Date.now();
           }
         }
+      }
+
+      // Spawn 1-2 replacements for each enemy that just died
+      if (_justDied > 0 && rapierWorld) {
+        const toSpawn = _justDied * (1 + Math.floor(Math.random() * 2));
+        for (let _s = 0; _s < toSpawn; _s++) _spawnHordeEnemy();
       }
     }
     syncRemoteHeldWeaponMesh(iceGun);
