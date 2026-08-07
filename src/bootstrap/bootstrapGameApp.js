@@ -11590,6 +11590,69 @@ async function initCore(runtimeContext) {
     });
     hordeEnemy._camera = camera;
     window.hordeEnemy = hordeEnemy;
+
+    // ── Knockback debug panel ──────────────────────────────────────────────
+    window._hordeKB = { horizSpeed: 8, upVelocity: 2.5, torqueMag: 100, ragdoll: true };
+    (function injectKBDebugPanel() {
+      const params = window._hordeKB;
+      const panel = document.createElement('div');
+      panel.id = 'kb-debug-panel';
+      panel.style.cssText = `
+        position:fixed;bottom:12px;right:12px;z-index:99999;
+        background:rgba(0,0,0,0.82);color:#fff;font:12px/1.5 monospace;
+        padding:12px 14px;border-radius:8px;min-width:220px;
+        border:1px solid rgba(255,255,255,0.15);user-select:none;
+      `;
+      const defs = [
+        { key: 'horizSpeed',  label: 'Horiz speed (m/s)', min: 0, max: 40,  step: 0.5 },
+        { key: 'upVelocity',  label: 'Up velocity (m/s)', min: 0, max: 15,  step: 0.25 },
+        { key: 'torqueMag',   label: 'Torque mag',        min: 0, max: 400, step: 5 },
+      ];
+      let html = '<div style="font-weight:bold;margin-bottom:8px;font-size:13px">⚔️ Knockback debug</div>';
+      defs.forEach(({ key, label, min, max, step }) => {
+        html += `
+          <div style="margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between">
+              <span>${label}</span><span id="kb-val-${key}">${params[key]}</span>
+            </div>
+            <input type="range" id="kb-${key}" min="${min}" max="${max}" step="${step}"
+              value="${params[key]}"
+              style="width:100%;accent-color:#4af;margin-top:2px">
+          </div>`;
+      });
+      html += `
+        <div style="margin-bottom:8px;display:flex;align-items:center;gap:8px">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="kb-ragdoll" ${params.ragdoll ? 'checked' : ''}>
+            Ragdoll
+          </label>
+        </div>
+        <button id="kb-copy" style="
+          width:100%;padding:5px 0;background:#4af;color:#000;
+          border:none;border-radius:4px;cursor:pointer;font:bold 12px monospace
+        ">Copy values</button>`;
+      panel.innerHTML = html;
+      document.body.appendChild(panel);
+
+      defs.forEach(({ key }) => {
+        const slider = document.getElementById(`kb-${key}`);
+        const label  = document.getElementById(`kb-val-${key}`);
+        slider.addEventListener('input', () => {
+          params[key] = parseFloat(slider.value);
+          label.textContent = slider.value;
+        });
+      });
+      document.getElementById('kb-ragdoll').addEventListener('change', e => {
+        params.ragdoll = e.target.checked;
+      });
+      document.getElementById('kb-copy').addEventListener('click', () => {
+        const text = `horizSpeed: ${params.horizSpeed}, upVelocity: ${params.upVelocity}, torqueMag: ${params.torqueMag}, ragdoll: ${params.ragdoll}`;
+        navigator.clipboard.writeText(text).catch(() => {});
+        const btn = document.getElementById('kb-copy');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy values'; }, 1200);
+      });
+    })();
   }
 
   await initMapViewFeature({ camera, scene, player: playerModel });
@@ -15099,13 +15162,9 @@ async function initCore(runtimeContext) {
             _hitDir.y = 0;
             if (_hitDir.lengthSq() < 0.0001) _hitDir.set(0, 0, 1);
             _hitDir.normalize();
-            // Use the active attack's knockback strength instead of a flat value
-            const _activeAttack = playerModel.userData.attack;
-            const _kbStrength = _activeAttack?.overrides?.knockbackStrength
-              ?? _activeAttack?.knockbackStrength
-              ?? 3;
+            const _kb = window._hordeKB ?? { horizSpeed: 8, upVelocity: 2.5, torqueMag: 100, ragdoll: true };
             hordeEnemy.applyDamage(2);
-            hordeEnemy.applyKnockback({ direction: _hitDir, strength: _kbStrength });
+            hordeEnemy.applyDirectKnockback({ direction: _hitDir, ..._kb });
             hordeEnemy._playerSwordLastHit = Date.now();
           }
         }

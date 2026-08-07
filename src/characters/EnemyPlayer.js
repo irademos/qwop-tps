@@ -591,6 +591,23 @@ export class EnemyPlayer {
     return false;
   }
 
+  // Direct knockback — bypasses the strength/profile system for easy tuning.
+  applyDirectKnockback({ direction, horizSpeed = 6, upVelocity = 2, torqueMag = 80, ragdoll = false } = {}) {
+    if (!direction || !this.rigidBody) return;
+    const vel = this.rigidBody.linvel();
+    this.rigidBody.setLinvel({ x: direction.x * horizSpeed, y: vel.y + upVelocity, z: direction.z * horizSpeed }, true);
+    if (ragdoll) {
+      if (this._ragdollTimeout) clearTimeout(this._ragdollTimeout);
+      this._isRagdoll = true;
+      this.rigidBody.setEnabledRotations(true, true, true, true);
+      const torqueAxis = new THREE.Vector3(-direction.z, 0.1, direction.x).normalize();
+      this.rigidBody.applyTorqueImpulse(
+        { x: torqueAxis.x * torqueMag, y: torqueAxis.y * torqueMag, z: torqueAxis.z * torqueMag }, true
+      );
+      this._ragdollTimeout = setTimeout(() => this._endRagdoll(), 2000);
+    }
+  }
+
   applyKnockback({ direction, strength = 2 } = {}) {
     if (!direction || !this.rigidBody) return;
     const { impulse } = getKnockbackImpulse(direction, strength);
