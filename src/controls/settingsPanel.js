@@ -1,0 +1,2267 @@
+import * as THREE from 'three';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { formatDistanceForDisplay, getDistanceUnitPreference, setDistanceUnitPreference } from '../player/distanceUnits.js';
+
+const TAB_KEY = 'settings:lastTab';
+
+const TABS = [
+  { id: 'character', label: 'Character' },
+  { id: 'quests', label: 'Quests' },
+  { id: 'achievements', label: 'Achievements' },
+  { id: 'multiplayer', label: 'Multiplayer' },
+  { id: 'location', label: 'World' },
+  { id: 'display', label: 'Display' },
+  { id: 'about', label: 'About' },
+  { id: 'account', label: 'Account' },
+  { id: 'developer', label: 'Developer' }
+];
+const CHARACTER_STATS = [
+  { key: 'level', label: 'Level' },
+  { key: 'xp', label: 'XP' },
+  { key: 'monsterKills', label: 'Monster Kills' },
+  { key: 'strength', label: 'Strength' },
+  { key: 'agility', label: 'Agility' },
+  { key: 'smarts', label: 'Smarts' },
+  { key: 'charm', label: 'Charm' },
+  { key: 'luck', label: 'Luck' },
+  { key: 'coins', label: 'Coins' }
+];
+const PERCENT_STATS = new Set(['health', 'hunger', 'energy']);
+
+let overlay;
+let panel;
+let inventoryOverlay;
+let inventoryPanel;
+let leaderboardOverlay;
+let leaderboardPanel;
+let context = {};
+let elements = {};
+let activeTab = 'character';
+let lastFocusedElement = null;
+let isMobileView = false;
+let isListView = false;
+let selectedInventoryId = null;
+let isEditingName = false;
+let previewState = {
+  active: false,
+  renderer: null,
+  scene: null,
+  camera: null,
+  model: null,
+  frameId: null,
+  loadingToken: null,
+  resizeObserver: null
+};
+
+function createElement(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text) el.textContent = text;
+  return el;
+}
+
+function formatTimestamp(ts) {
+  if (!ts) return '—';
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString();
+}
+
+function formatDistance(distance) { return formatDistanceForDisplay(distance); }
+
+function formatCoordinate(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  return value.toFixed(6);
+}
+
+function formatMeters(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  if (getDistanceUnitPreference() === 'km') {
+    return `${value.toFixed(2)} m`;
+  }
+  return `${(value * 3.28084).toFixed(2)} ft`;
+  
+}
+
+function formatStatValue(key, value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  if (PERCENT_STATS.has(key)) {
+    return `${Math.round(value)}%`;
+  }
+  if (key === 'level') {
+    return `${Math.max(1, Math.round(value))}`;
+  }
+  return `${Math.round(value)}`;
+}
+
+function formatRangeValue(value, decimals = 2) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  return value.toFixed(decimals);
+}
+
+function setNameStatus(message, tone = 'error') {
+  if (!elements.nameStatus) return;
+  if (!message) {
+    elements.nameStatus.textContent = '';
+    elements.nameStatus.hidden = true;
+    elements.nameStatus.classList.remove('is-error');
+    return;
+  }
+  elements.nameStatus.textContent = message;
+  elements.nameStatus.hidden = false;
+  elements.nameStatus.classList.toggle('is-error', tone === 'error');
+}
+
+function updateNameSaveState() {
+  if (!elements.nameInput || !elements.nameSaveButton) return;
+  const currentName = context.appState?.getPlayerName?.() ?? '';
+  const proposedName = elements.nameInput.value.trim();
+  const hasChange = proposedName && proposedName !== currentName;
+  elements.nameSaveButton.disabled = !hasChange;
+}
+
+function buildHeader() {
+  const header = createElement('div', 'settings-header');
+  const backButton = createElement('button', 'settings-back', 'Back');
+  backButton.type = 'button';
+  backButton.dataset.action = 'back';
+  backButton.setAttribute('aria-label', 'Back to settings list');
+  const title = createElement('h2', 'settings-title', 'Settings');
+  title.id = 'settings-title';
+  title.tabIndex = 0;
+  const closeButton = createElement('button', 'settings-close', '✕');
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', 'Close settings');
+  closeButton.dataset.action = 'close';
+  header.append(backButton, title, closeButton);
+  elements.backButton = backButton;
+  elements.title = title;
+  elements.closeButton = closeButton;
+  return header;
+}
+
+function buildTabs() {
+  const tablist = createElement('div', 'settings-tabs');
+  tablist.setAttribute('role', 'tablist');
+  elements.tabs = {};
+
+  TABS.forEach(tab => {
+    const button = createElement('button', 'settings-tab', tab.label);
+    button.type = 'button';
+    button.id = `tab-${tab.id}`;
+    button.dataset.tab = tab.id;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', 'false');
+    button.setAttribute('aria-controls', `panel-${tab.id}`);
+    tablist.appendChild(button);
+    elements.tabs[tab.id] = button;
+  });
+
+  return tablist;
+}
+
+function buildCharacterPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-character';
+  panelEl.dataset.panel = 'character';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-character');
+
+  const nameGroup = createElement('div', 'settings-field');
+  const nameLabel = createElement('label', 'settings-label', 'Name');
+  nameLabel.setAttribute('for', 'settings-name-input');
+  const nameRow = createElement('div', 'settings-name-row');
+  const nameInput = createElement('input', 'settings-input');
+  nameInput.id = 'settings-name-input';
+  nameInput.type = 'text';
+  nameInput.autocomplete = 'nickname';
+  const nameSaveButton = createElement('button', 'settings-button', 'Save');
+  nameSaveButton.type = 'button';
+  nameSaveButton.dataset.action = 'save-name';
+  const nameStatus = createElement('div', 'settings-name-status');
+  nameStatus.hidden = true;
+  nameRow.append(nameInput, nameSaveButton);
+  nameGroup.append(nameLabel, nameRow, nameStatus);
+
+  const characterGroup = createElement('div', 'settings-field');
+  const characterLabel = createElement('label', 'settings-label', 'Character');
+  characterLabel.setAttribute('for', 'settings-character-select');
+  const characterSelect = createElement('select', 'settings-select');
+  characterSelect.id = 'settings-character-select';
+  characterGroup.append(characterLabel, characterSelect);
+
+  const previewWrapper = createElement('div', 'character-preview');
+  const previewCanvas = document.createElement('canvas');
+  previewCanvas.className = 'character-preview-canvas';
+  const previewFallback = createElement('div', 'character-preview-fallback', 'Preview unavailable');
+  previewWrapper.append(previewCanvas, previewFallback);
+
+  const customizeButton = createElement('button', 'settings-button', 'Customize');
+  customizeButton.type = 'button';
+  customizeButton.dataset.action = 'customize';
+
+  const statsTitle = createElement('h3', 'settings-section-title', 'Stats');
+  const statsGrid = createElement('div', 'settings-stats-grid');
+  elements.characterStatFields = {};
+  CHARACTER_STATS.forEach(({ key, label }) => {
+    const statRow = createElement('div', 'settings-stat');
+    const statLabel = createElement('span', 'settings-stat-label', label);
+    const statValue = createElement('span', 'settings-stat-value', '—');
+    statValue.dataset.field = `stat-${key}`;
+    statRow.append(statLabel, statValue);
+    statsGrid.appendChild(statRow);
+    elements.characterStatFields[key] = statValue;
+  });
+
+  panelEl.append(nameGroup, characterGroup, previewWrapper, customizeButton, statsTitle, statsGrid);
+
+  elements.nameInput = nameInput;
+  elements.nameSaveButton = nameSaveButton;
+  elements.nameStatus = nameStatus;
+  elements.characterSelect = characterSelect;
+  elements.previewCanvas = previewCanvas;
+  elements.previewFallback = previewFallback;
+  elements.customizeButton = customizeButton;
+
+  return panelEl;
+}
+
+function buildMultiplayerPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-multiplayer';
+  panelEl.dataset.panel = 'multiplayer';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-multiplayer');
+
+  const statusRow = createElement('div', 'settings-row');
+  statusRow.innerHTML = '<span>Connection Status</span><span data-field="connection-status">—</span>';
+  const pingRow = createElement('div', 'settings-row');
+  pingRow.innerHTML = '<span>Ping</span><span data-field="ping">N/A</span>';
+
+  const playersTitle = createElement('h3', 'settings-section-title', 'Connected Players');
+  const playersList = createElement('ul', 'settings-list');
+  playersList.dataset.field = 'players';
+
+  const leaderboardButton = createElement('button', 'settings-button', 'Leaderboard');
+  leaderboardButton.type = 'button';
+  leaderboardButton.dataset.action = 'open-leaderboard';
+
+  const reconnectButton = createElement('button', 'settings-button', 'Reconnect');
+  reconnectButton.type = 'button';
+  reconnectButton.dataset.action = 'reconnect';
+
+  const errorTitle = createElement('h3', 'settings-section-title', 'Connection Issues');
+  const errorText = createElement('div', 'settings-muted');
+  errorText.dataset.field = 'connection-error';
+  errorText.textContent = 'None';
+
+  panelEl.append(statusRow, pingRow, playersTitle, playersList, leaderboardButton, reconnectButton, errorTitle, errorText);
+
+  elements.connectionStatus = statusRow.querySelector('[data-field="connection-status"]');
+  elements.ping = pingRow.querySelector('[data-field="ping"]');
+  elements.playersList = playersList;
+  elements.connectionError = errorText;
+  elements.leaderboardButton = leaderboardButton;
+
+  return panelEl;
+}
+
+function buildInventoryPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-inventory';
+  panelEl.dataset.panel = 'inventory';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-inventory');
+
+  const grid = createElement('div', 'inventory-grid');
+  const emptyState = createElement('div', 'settings-muted');
+  emptyState.classList.add('inventory-empty');
+  emptyState.textContent = 'Empty';
+  const details = createElement('div', 'inventory-details');
+  const detailsText = createElement('div', 'inventory-details-text', 'Select an item to see details.');
+  const actions = createElement('div', 'inventory-actions');
+  const dropButton = createElement('button', 'settings-button', 'Drop');
+  dropButton.type = 'button';
+  dropButton.dataset.inventoryAction = 'drop';
+  const infoButton = createElement('button', 'settings-button', 'Info');
+  infoButton.type = 'button';
+  infoButton.dataset.inventoryAction = 'info';
+  const useButton = createElement('button', 'settings-button', 'Use');
+  useButton.type = 'button';
+  useButton.dataset.inventoryAction = 'use';
+  const equipButton = createElement('button', 'settings-button', 'Equip');
+  equipButton.type = 'button';
+  equipButton.dataset.inventoryAction = 'equip';
+  const eatButton = createElement('button', 'settings-button', 'Eat');
+  eatButton.type = 'button';
+  eatButton.dataset.inventoryAction = 'eat';
+  const buildButton = createElement('button', 'settings-button', 'Build');
+  buildButton.type = 'button';
+  buildButton.dataset.inventoryAction = 'build';
+  actions.append(dropButton, infoButton, useButton, equipButton, eatButton, buildButton);
+  details.append(detailsText, actions);
+  panelEl.append(grid, emptyState, details);
+
+  const infoModal = createElement('div', 'inventory-info-modal hidden');
+  infoModal.setAttribute('role', 'dialog');
+  infoModal.setAttribute('aria-modal', 'true');
+  const infoCard = createElement('div', 'inventory-info-card');
+  const infoHeader = createElement('div', 'inventory-info-header');
+  const infoClose = createElement('button', 'settings-close', '✕');
+  infoClose.type = 'button';
+  infoClose.dataset.inventoryAction = 'close-info';
+  infoClose.setAttribute('aria-label', 'Close item info');
+  const infoTitle = createElement('h3', 'settings-section-title', 'Item Info');
+  infoHeader.append(infoTitle, infoClose);
+  const infoText = createElement('div', 'settings-muted');
+  infoText.textContent = '';
+  infoCard.append(infoHeader, infoText);
+  infoModal.append(infoCard);
+  panelEl.append(infoModal);
+
+  elements.inventoryGrid = grid;
+  elements.inventoryEmpty = emptyState;
+  elements.inventoryDetails = detailsText;
+  elements.inventoryDetailsContainer = details;
+  elements.inventoryActions = actions;
+  elements.inventoryDropButton = dropButton;
+  elements.inventoryInfoButton = infoButton;
+  elements.inventoryUseButton = useButton;
+  elements.inventoryEquipButton = equipButton;
+  elements.inventoryEatButton = eatButton;
+  elements.inventoryBuildButton = buildButton;
+  elements.inventoryInfoModal = infoModal;
+  elements.inventoryInfoText = infoText;
+
+  return panelEl;
+}
+
+
+function buildQuestsPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-quests';
+  panelEl.dataset.panel = 'quests';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-quests');
+
+  const title = createElement('h3', 'settings-section-title', 'Accepted Quests');
+  const list = createElement('ul', 'settings-list');
+  const emptyState = createElement('div', 'settings-muted', 'Accept a quest by talking to the tutorial friendly near the origin.');
+
+  panelEl.append(title, list, emptyState);
+
+  elements.questList = list;
+  elements.questEmpty = emptyState;
+
+  return panelEl;
+}
+
+function buildAchievementsPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-achievements';
+  panelEl.dataset.panel = 'achievements';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-achievements');
+
+  const title = createElement('h3', 'settings-section-title', 'Achievements');
+  const list = createElement('div', 'achievement-list');
+  const emptyState = createElement('div', 'settings-muted', 'No achievements yet.');
+  panelEl.append(title, list, emptyState);
+
+  elements.achievementList = list;
+  elements.achievementEmpty = emptyState;
+  return panelEl;
+}
+
+function buildLocationPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-location';
+  panelEl.dataset.panel = 'location';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-location');
+
+  const rows = [
+    ['Status', 'location-status'],
+    ['Source', 'location-source'],
+    ['World X', 'location-x'],
+    ['World Y', 'location-y'],
+    ['World Z', 'location-z'],
+    ['Heading', 'location-heading'],
+    ['Speed', 'location-speed'],
+    ['Last Update', 'location-time']
+  ];
+
+  rows.forEach(([label, field]) => {
+    const row = createElement('div', 'settings-row');
+    row.innerHTML = `<span>${label}</span><span data-field="${field}">—</span>`;
+    panelEl.appendChild(row);
+    if (field === 'location-source') {
+      elements.locationSourceRow = row;
+    }
+  });
+
+  const guidance = createElement('div', 'settings-muted');
+  guidance.dataset.field = 'location-guidance';
+  guidance.textContent = '';
+
+  const retryButton = createElement('button', 'settings-button', 'Retry');
+  retryButton.type = 'button';
+  retryButton.dataset.action = 'location-retry';
+
+  panelEl.append(guidance, retryButton);
+
+  elements.locationFields = {
+    status: panelEl.querySelector('[data-field="location-status"]'),
+    source: panelEl.querySelector('[data-field="location-source"]'),
+    x: panelEl.querySelector('[data-field="location-x"]'),
+    y: panelEl.querySelector('[data-field="location-y"]'),
+    z: panelEl.querySelector('[data-field="location-z"]'),
+    heading: panelEl.querySelector('[data-field="location-heading"]'),
+    speed: panelEl.querySelector('[data-field="location-speed"]'),
+    time: panelEl.querySelector('[data-field="location-time"]'),
+    guidance
+  };
+
+  return panelEl;
+}
+
+function buildDeveloperPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-developer';
+  panelEl.dataset.panel = 'developer';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-developer');
+
+  const consoleButton = createElement('button', 'settings-button', 'Show Console');
+  consoleButton.type = 'button';
+  consoleButton.dataset.action = 'toggle-console';
+
+  const copyDebugButton = createElement('button', 'settings-button', 'Copy Debug Info');
+  copyDebugButton.type = 'button';
+  copyDebugButton.dataset.action = 'copy-debug';
+
+  const resetOriginButton = createElement('button', 'settings-button', 'Reset Origin');
+  resetOriginButton.type = 'button';
+  resetOriginButton.dataset.action = 'reset-origin';
+
+  const levelBuilderButton = createElement('button', 'settings-button', 'Level Builder');
+  levelBuilderButton.type = 'button';
+  levelBuilderButton.id = 'level-builder-button';
+
+  const serverToolsTitle = createElement('h3', 'settings-section-title', 'Server Tools');
+  const clearServerButton = createElement('button', 'settings-button', 'Clear Rooms/Sessions Cache');
+  clearServerButton.type = 'button';
+  clearServerButton.dataset.action = 'clear-server-state';
+  const clearServerStatus = createElement('div', 'settings-muted');
+  clearServerStatus.textContent = 'Clears server-side rooms, sessions, and caches.';
+
+  const debugLocationTitle = createElement('h3', 'settings-section-title', 'Debug World Position');
+
+  const debugToggleRow = createElement('div', 'settings-row');
+  const debugToggleLabel = createElement('label', 'settings-label', 'Enable Debug World Position');
+  debugToggleLabel.setAttribute('for', 'debug-location-toggle');
+  const debugToggle = createElement('input', 'settings-checkbox');
+  debugToggle.type = 'checkbox';
+  debugToggle.id = 'debug-location-toggle';
+  debugToggleRow.append(debugToggleLabel, debugToggle);
+
+  const debugLocationGrid = createElement('div', 'settings-debug-grid');
+  const debugLatGroup = createElement('div', 'settings-field');
+  const debugLatLabel = createElement('label', 'settings-label', 'World X');
+  debugLatLabel.setAttribute('for', 'debug-location-x');
+  const debugLatInput = createElement('input', 'settings-input');
+  debugLatInput.id = 'debug-location-x';
+  debugLatInput.type = 'number';
+  debugLatInput.step = '0.000001';
+  debugLatInput.inputMode = 'decimal';
+  debugLatGroup.append(debugLatLabel, debugLatInput);
+
+  const debugLonGroup = createElement('div', 'settings-field');
+  const debugLonLabel = createElement('label', 'settings-label', 'World Z');
+  debugLonLabel.setAttribute('for', 'debug-location-z');
+  const debugLonInput = createElement('input', 'settings-input');
+  debugLonInput.id = 'debug-location-z';
+  debugLonInput.type = 'number';
+  debugLonInput.step = '0.000001';
+  debugLonInput.inputMode = 'decimal';
+  debugLonGroup.append(debugLonLabel, debugLonInput);
+
+  const debugAccuracyGroup = createElement('div', 'settings-field');
+  const debugAccuracyLabel = createElement('label', 'settings-label', 'Accuracy (m)');
+  debugAccuracyLabel.setAttribute('for', 'debug-location-accuracy');
+  const debugAccuracyInput = createElement('input', 'settings-input');
+  debugAccuracyInput.id = 'debug-location-accuracy';
+  debugAccuracyInput.type = 'number';
+  debugAccuracyInput.step = '0.5';
+  debugAccuracyInput.min = '0.5';
+  debugAccuracyInput.inputMode = 'decimal';
+  debugAccuracyGroup.append(debugAccuracyLabel, debugAccuracyInput);
+
+  debugLocationGrid.append(debugLatGroup, debugLonGroup, debugAccuracyGroup);
+
+  const debugApplyButton = createElement('button', 'settings-button', 'Apply Debug World Position');
+  debugApplyButton.type = 'button';
+  debugApplyButton.dataset.action = 'apply-debug-position';
+
+  const debugStepRow = createElement('div', 'settings-debug-step');
+  const debugStepLabel = createElement('label', 'settings-label', 'Step (m)');
+  debugStepLabel.setAttribute('for', 'debug-location-step');
+  const debugStepInput = createElement('input', 'settings-input');
+  debugStepInput.id = 'debug-location-step';
+  debugStepInput.type = 'number';
+  debugStepInput.step = '1';
+  debugStepInput.min = '1';
+  debugStepInput.value = '5';
+  debugStepInput.inputMode = 'decimal';
+  debugStepRow.append(debugStepLabel, debugStepInput);
+
+  const debugStepButtons = createElement('div', 'settings-debug-buttons');
+  const stepNorthButton = createElement('button', 'settings-button', 'Step North');
+  stepNorthButton.type = 'button';
+  stepNorthButton.dataset.action = 'step-debug';
+  stepNorthButton.dataset.direction = 'north';
+  const stepSouthButton = createElement('button', 'settings-button', 'Step South');
+  stepSouthButton.type = 'button';
+  stepSouthButton.dataset.action = 'step-debug';
+  stepSouthButton.dataset.direction = 'south';
+  const stepEastButton = createElement('button', 'settings-button', 'Step East');
+  stepEastButton.type = 'button';
+  stepEastButton.dataset.action = 'step-debug';
+  stepEastButton.dataset.direction = 'east';
+  const stepWestButton = createElement('button', 'settings-button', 'Step West');
+  stepWestButton.type = 'button';
+  stepWestButton.dataset.action = 'step-debug';
+  stepWestButton.dataset.direction = 'west';
+  debugStepButtons.append(stepNorthButton, stepSouthButton, stepEastButton, stepWestButton);
+
+  const originSection = createElement('div', 'settings-section');
+  const originRows = [
+    ['Origin', 'debug-origin'],
+    ['Current', 'debug-current'],
+    ['Player (x,z)', 'debug-player'],
+    ['Tile', 'debug-tile']
+  ];
+  originRows.forEach(([label, field]) => {
+    const row = createElement('div', 'settings-row');
+    row.innerHTML = `<span>${label}</span><span data-field="${field}">—</span>`;
+    originSection.appendChild(row);
+  });
+
+  const consoleLog = createElement('div', 'settings-console');
+  consoleLog.id = 'console-log';
+  consoleLog.style.display = 'none';
+
+  panelEl.append(
+    consoleButton,
+    copyDebugButton,
+    resetOriginButton,
+    serverToolsTitle,
+    clearServerButton,
+    clearServerStatus,
+    debugLocationTitle,
+    debugToggleRow,
+    debugLocationGrid,
+    debugApplyButton,
+    debugStepRow,
+    debugStepButtons,
+    levelBuilderButton,
+    originSection,
+    consoleLog
+  );
+  elements.consoleButton = consoleButton;
+  elements.consoleLog = consoleLog;
+  elements.clearServerButton = clearServerButton;
+  elements.clearServerStatus = clearServerStatus;
+  elements.debugLocationFields = {
+    toggle: debugToggle,
+    x: debugLatInput,
+    z: debugLonInput,
+    accuracy: debugAccuracyInput,
+    step: debugStepInput
+  };
+  elements.debugFields = {
+    origin: originSection.querySelector('[data-field="debug-origin"]'),
+    current: originSection.querySelector('[data-field="debug-current"]'),
+    player: originSection.querySelector('[data-field="debug-player"]'),
+    tile: originSection.querySelector('[data-field="debug-tile"]')
+  };
+
+  return panelEl;
+}
+
+function buildDisplayPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-display';
+  panelEl.dataset.panel = 'display';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-display');
+
+  const modeGroup = createElement('div', 'settings-field');
+  const modeLabel = createElement('label', 'settings-label', 'Day/Night Mode');
+  modeLabel.setAttribute('for', 'settings-display-mode');
+  const modeSelect = createElement('select', 'settings-select');
+  modeSelect.id = 'settings-display-mode';
+  const modeOptions = [
+    { value: 'auto', label: 'Auto (8:00am / 5:30pm)' },
+    { value: 'day', label: 'Day' },
+    { value: 'night', label: 'Night' }
+  ];
+  modeOptions.forEach(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    modeSelect.appendChild(option);
+  });
+  modeGroup.append(modeLabel, modeSelect);
+
+  const performanceGroup = createElement('div', 'settings-field');
+  const performanceLabel = createElement('label', 'settings-label', 'Performance Mode');
+  performanceLabel.setAttribute('for', 'settings-performance-mode');
+  const performanceSelect = createElement('select', 'settings-select');
+  performanceSelect.id = 'settings-performance-mode';
+  const performanceOptions = [
+    { value: 'auto', label: 'Auto (device tuned)' },
+    { value: 'quality', label: 'Quality' },
+    { value: 'balanced', label: 'Balanced' },
+    { value: 'performance', label: 'Performance' }
+  ];
+  performanceOptions.forEach(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    performanceSelect.appendChild(option);
+  });
+  performanceGroup.append(performanceLabel, performanceSelect);
+  const unitsGroup = createElement('div', 'settings-field');
+  const unitsLabel = createElement('label', 'settings-label', 'Distance Units');
+  unitsLabel.setAttribute('for', 'settings-distance-units');
+  const unitsSelect = createElement('select', 'settings-select');
+  unitsSelect.id = 'settings-distance-units';
+  [{ value: 'km', label: 'Kilometers / meters' }, { value: 'miles', label: 'Miles / feet' }].forEach(({ value, label }) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    unitsSelect.appendChild(option);
+  });
+  unitsGroup.append(unitsLabel, unitsSelect);
+  const firstPersonGroup = createElement('div', 'settings-field');
+  const firstPersonLabel = createElement('label', 'settings-label', 'First Person View');
+  firstPersonLabel.setAttribute('for', 'settings-display-first-person');
+  const firstPersonToggle = createElement('input', 'settings-checkbox');
+  firstPersonToggle.id = 'settings-display-first-person';
+  firstPersonToggle.type = 'checkbox';
+  firstPersonToggle.checked = true;
+  const firstPersonHint = createElement('div', 'settings-muted');
+  firstPersonHint.textContent = 'Uncheck to switch to third-person view (camera pulls back to show the player).';
+  firstPersonGroup.append(firstPersonLabel, firstPersonToggle, firstPersonHint);
+
+  const gyroGroup = createElement('div', 'settings-field');
+  const gyroLabel = createElement('label', 'settings-label', 'Gyroscope Camera');
+  gyroLabel.setAttribute('for', 'settings-display-gyro');
+  const gyroToggle = createElement('input', 'settings-checkbox');
+  gyroToggle.id = 'settings-display-gyro';
+  gyroToggle.type = 'checkbox';
+  gyroToggle.checked = false;
+  const gyroRecalGroup = createElement('div', 'settings-field');
+  gyroRecalGroup.style.paddingTop = '0';
+  gyroRecalGroup.hidden = true;
+  const gyroRecalBtn = createElement('button', 'settings-button settings-button-secondary', 'Recalibrate');
+  gyroRecalBtn.id = 'settings-gyro-recal';
+  gyroRecalBtn.type = 'button';
+  const gyroRecalHint = createElement('div', 'settings-muted');
+  gyroRecalHint.textContent = 'Resets the neutral orientation to your current device position.';
+  gyroRecalGroup.append(gyroRecalBtn, gyroRecalHint);
+  const gyroHint = createElement('div', 'settings-muted');
+  gyroHint.textContent = 'Use device orientation to control the camera direction.';
+  gyroGroup.append(gyroLabel, gyroToggle, gyroHint);
+
+  const highContrastGroup = createElement('div', 'settings-field');
+  const highContrastLabel = createElement('label', 'settings-label', 'High Contrast Mode');
+  highContrastLabel.setAttribute('for', 'settings-display-high-contrast');
+  const highContrastToggle = createElement('input', 'settings-checkbox');
+  highContrastToggle.id = 'settings-display-high-contrast';
+  highContrastToggle.type = 'checkbox';
+  const highContrastHint = createElement('div', 'settings-muted');
+  highContrastHint.textContent = 'Boosts object contrast and lighting for better daytime phone visibility.';
+  highContrastGroup.append(highContrastLabel, highContrastToggle, highContrastHint);
+
+  const createRangeField = ({ id, label, min, max, step }) => {
+    const field = createElement('div', 'settings-field');
+    const labelRow = createElement('div', 'settings-range-row');
+    const fieldLabel = createElement('label', 'settings-label', label);
+    fieldLabel.setAttribute('for', id);
+    const valueLabel = createElement('span', 'settings-range-value', '—');
+    valueLabel.dataset.valueFor = id;
+    labelRow.append(fieldLabel, valueLabel);
+    const input = createElement('input', 'settings-range');
+    input.type = 'range';
+    input.id = id;
+    input.min = `${min}`;
+    input.max = `${max}`;
+    input.step = `${step}`;
+    field.append(labelRow, input);
+    return { field, input, valueLabel };
+  };
+
+  const ambientField = createRangeField({
+    id: 'settings-display-ambient',
+    label: 'Ambient Light',
+    min: 0,
+    max: 2,
+    step: 0.05
+  });
+  const directionalField = createRangeField({
+    id: 'settings-display-directional',
+    label: 'Direct Light',
+    min: 0,
+    max: 2,
+    step: 0.05
+  });
+  const groundField = createRangeField({
+    id: 'settings-display-ground',
+    label: 'Ground Brightness',
+    min: 0.2,
+    max: 1.6,
+    step: 0.05
+  });
+  const buildingField = createRangeField({
+    id: 'settings-display-building',
+    label: 'Building Brightness',
+    min: 0.2,
+    max: 1.6,
+    step: 0.05
+  });
+  const skyField = createRangeField({
+    id: 'settings-display-sky',
+    label: 'Sky Brightness',
+    min: 0.1,
+    max: 1.6,
+    step: 0.05
+  });
+
+  const hint = createElement('div', 'settings-muted');
+  hint.textContent = 'Auto mode uses local time to switch between day and night lighting.';
+
+  const cameraPreviewGroup = createElement('div', 'settings-field');
+  const cameraPreviewLabel = createElement('label', 'settings-label', 'Camera Feed');
+  const cameraPreviewBtn = createElement('button', 'settings-button settings-button-secondary', 'View Camera Feed');
+  cameraPreviewBtn.id = 'settings-camera-preview-btn';
+  cameraPreviewBtn.type = 'button';
+  const cameraPreviewHint = createElement('div', 'settings-muted');
+  cameraPreviewHint.textContent = 'Preview the camera feed used for hand tracking.';
+  cameraPreviewGroup.append(cameraPreviewLabel, cameraPreviewBtn, cameraPreviewHint);
+
+  cameraPreviewBtn.addEventListener('click', () => {
+    const videoEl = document.querySelector('#hand-tracking-container video');
+    if (!videoEl) {
+      alert('Camera feed is not active. Enable hand tracking first.');
+      return;
+    }
+
+    const overlay = createElement('div', '');
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 10000;
+      background: rgba(0,0,0,0.85);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px;
+    `;
+
+    const previewVideo = document.createElement('video');
+    previewVideo.srcObject = videoEl.srcObject;
+    previewVideo.autoplay = true;
+    previewVideo.playsInline = true;
+    previewVideo.muted = true;
+    previewVideo.style.cssText = `
+      max-width: 90vw; max-height: 70vh;
+      border-radius: 8px; background: #000;
+      transform: scaleX(-1);
+    `;
+
+    const closeBtn = createElement('button', 'settings-button', 'Close');
+    closeBtn.style.cssText = 'min-width: 120px;';
+    closeBtn.addEventListener('click', () => {
+      previewVideo.srcObject = null;
+      overlay.remove();
+    });
+
+    overlay.append(previewVideo, closeBtn);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        previewVideo.srcObject = null;
+        overlay.remove();
+      }
+    });
+    document.body.appendChild(overlay);
+  });
+
+  panelEl.append(
+    modeGroup,
+    performanceGroup,
+    unitsGroup,
+    firstPersonGroup,
+    gyroGroup,
+    gyroRecalGroup,
+    highContrastGroup,
+    cameraPreviewGroup,
+    ambientField.field,
+    directionalField.field,
+    groundField.field,
+    buildingField.field,
+    skyField.field,
+    hint
+  );
+
+  elements.displayFields = {
+    modeSelect,
+    performanceSelect,
+    unitsSelect,
+    firstPersonToggle,
+    gyroToggle,
+    gyroRecalBtn,
+    gyroRecalGroup,
+    highContrastToggle,
+    sliders: {
+      ambientIntensity: ambientField.input,
+      directionalIntensity: directionalField.input,
+      groundBrightness: groundField.input,
+      buildingBrightness: buildingField.input,
+      skyBrightness: skyField.input
+    },
+    values: {
+      ambientIntensity: ambientField.valueLabel,
+      directionalIntensity: directionalField.valueLabel,
+      groundBrightness: groundField.valueLabel,
+      buildingBrightness: buildingField.valueLabel,
+      skyBrightness: skyField.valueLabel
+    }
+  };
+
+  return panelEl;
+}
+
+const CREDITS_PATH = `${import.meta.env.BASE_URL ?? '/'}credits.json`;
+
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function buildCreditsMarkup(entries) {
+  if (!entries.length) {
+    return '<strong>Credits</strong><br><br>No credits found.';
+  }
+
+  const blocks = entries.map((entry) => {
+    const sourceText = escapeHtml(entry.source);
+    const licenseText = escapeHtml(entry.licenseLabel);
+    return `“${escapeHtml(entry.title)}” by ${escapeHtml(entry.author)}
+  <br>Source: <a href="${escapeHtml(entry.source)}" target="_blank" rel="noreferrer noopener">${sourceText}</a>
+  <br>License: <a href="${escapeHtml(entry.license)}" target="_blank" rel="noreferrer noopener">${licenseText}</a>`;
+  });
+
+  return `<strong>Credits</strong><br><br>${blocks.join('<br><br>')}`;
+}
+
+function normalizeCredits(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null;
+      const title = typeof entry.title === 'string' ? entry.title.trim() : '';
+      const source = typeof entry.source === 'string' ? entry.source.trim() : '';
+      const author = typeof entry.author === 'string' ? entry.author.trim() : '';
+      const license = typeof entry.license === 'string' ? entry.license.trim() : '';
+      if (!title || !source || !author || !license) return null;
+      return {
+        title,
+        source,
+        author,
+        license,
+        licenseLabel: license.includes('/4.0') ? 'CC BY 4.0' : license
+      };
+    })
+    .filter(Boolean);
+}
+
+async function loadCredits(textEl) {
+  try {
+    const response = await fetch(CREDITS_PATH, { cache: 'no-cache' });
+    if (!response.ok) {
+      throw new Error(`Failed to load credits: ${response.status}`);
+    }
+    const rawJson = await response.json();
+    const entries = normalizeCredits(rawJson);
+    textEl.innerHTML = buildCreditsMarkup(entries);
+  } catch (error) {
+    textEl.innerHTML = '<strong>Credits</strong><br><br>Unable to load credits right now.';
+  }
+}
+
+function buildAboutPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-about';
+  panelEl.dataset.panel = 'about';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-about');
+
+  const title = createElement('h3', 'settings-section-title', 'About');
+  const text = createElement('div', 'settings-muted');
+  text.style.whiteSpace = 'pre-wrap';
+  text.innerHTML = '<strong>Credits</strong><br><br>Loading credits...';
+  loadCredits(text);
+
+  panelEl.append(title, text);
+  return panelEl;
+}
+
+
+function buildAccountPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-account';
+  panelEl.dataset.panel = 'account';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-account');
+
+  const homeDescription = createElement(
+    'div',
+    'settings-muted',
+    'Clear your home location to select a new home while standing in a building.'
+  );
+
+  const clearHomeButton = createElement('button', 'settings-button', 'Clear Home Location');
+  clearHomeButton.type = 'button';
+  clearHomeButton.dataset.action = 'clear-home-location';
+
+  const clearHomeStatus = createElement('div', 'settings-muted');
+  clearHomeStatus.dataset.field = 'clear-home-status';
+
+  const description = createElement(
+    'div',
+    'settings-muted',
+    'Deleting your account permanently removes your profile data from Firebase.'
+  );
+
+  const deleteButton = createElement('button', 'settings-button settings-button-danger', 'Delete Account');
+  deleteButton.type = 'button';
+  deleteButton.dataset.action = 'delete-account';
+
+  const confirm = createElement('div', 'settings-confirmation');
+  confirm.hidden = true;
+
+  const confirmText = createElement('div', 'settings-confirmation-text', 'Are you sure?');
+  const confirmActions = createElement('div', 'settings-confirmation-actions');
+  const confirmYes = createElement('button', 'settings-button settings-button-danger', 'Yes');
+  confirmYes.type = 'button';
+  confirmYes.dataset.action = 'confirm-delete-account';
+  const confirmCancel = createElement('button', 'settings-button settings-button-secondary', 'Cancel');
+  confirmCancel.type = 'button';
+  confirmCancel.dataset.action = 'cancel-delete-account';
+
+  confirmActions.append(confirmYes, confirmCancel);
+  confirm.append(confirmText, confirmActions);
+
+  const status = createElement('div', 'settings-muted');
+  status.dataset.field = 'delete-account-status';
+
+  panelEl.append(
+    homeDescription,
+    clearHomeButton,
+    clearHomeStatus,
+    description,
+    deleteButton,
+    confirm,
+    status
+  );
+
+  elements.clearHomeButton = clearHomeButton;
+  elements.clearHomeStatus = clearHomeStatus;
+  elements.deleteAccountButton = deleteButton;
+  elements.deleteAccountConfirm = confirm;
+  elements.deleteAccountConfirmYes = confirmYes;
+  elements.deleteAccountConfirmCancel = confirmCancel;
+  elements.deleteAccountStatus = status;
+
+  return panelEl;
+}
+
+function buildPanels() {
+  const body = createElement('div', 'settings-body');
+  const characterPanel = buildCharacterPanel();
+  const multiplayerPanel = buildMultiplayerPanel();
+  const questsPanel = buildQuestsPanel();
+  const achievementsPanel = buildAchievementsPanel();
+  const locationPanel = buildLocationPanel();
+  const displayPanel = buildDisplayPanel();
+  const aboutPanel = buildAboutPanel();
+  const accountPanel = buildAccountPanel();
+  const developerPanel = buildDeveloperPanel();
+  body.append(characterPanel, questsPanel, achievementsPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel);
+  elements.panels = {
+    character: characterPanel,
+    multiplayer: multiplayerPanel,
+    quests: questsPanel,
+    achievements: achievementsPanel,
+    location: locationPanel,
+    display: displayPanel,
+    about: aboutPanel,
+    account: accountPanel,
+    developer: developerPanel
+  };
+  return body;
+}
+
+
+function buildLeaderboardOverlay() {
+  leaderboardOverlay = document.getElementById('leaderboard-overlay');
+  if (!leaderboardOverlay) {
+    leaderboardOverlay = createElement('div', 'settings-overlay');
+    leaderboardOverlay.id = 'leaderboard-overlay';
+    leaderboardOverlay.style.display = 'none';
+    document.body.appendChild(leaderboardOverlay);
+  }
+  leaderboardOverlay.setAttribute('aria-hidden', 'true');
+
+  leaderboardPanel = createElement('div', 'settings-shell leaderboard-shell');
+  leaderboardPanel.id = 'leaderboard-panel';
+  leaderboardPanel.setAttribute('role', 'dialog');
+  leaderboardPanel.setAttribute('aria-modal', 'true');
+  leaderboardPanel.setAttribute('aria-labelledby', 'leaderboard-title');
+  leaderboardPanel.tabIndex = -1;
+
+  const header = createElement('div', 'settings-header');
+  const title = createElement('h2', 'settings-title', 'Leaderboard');
+  title.id = 'leaderboard-title';
+  const closeButton = createElement('button', 'settings-close', '✕');
+  closeButton.type = 'button';
+  closeButton.dataset.leaderboardAction = 'close';
+  closeButton.setAttribute('aria-label', 'Close leaderboard');
+  header.append(title, closeButton);
+
+  const tabs = createElement('div', 'leaderboard-tabs');
+  tabs.setAttribute('role', 'tablist');
+  const killsTab = createElement('button', 'leaderboard-tab is-active', 'Top Kills');
+  killsTab.type = 'button';
+  killsTab.dataset.leaderboardTab = 'kills';
+  killsTab.setAttribute('role', 'tab');
+  killsTab.setAttribute('aria-selected', 'true');
+  const xpTab = createElement('button', 'leaderboard-tab', 'Top XP');
+  xpTab.type = 'button';
+  xpTab.dataset.leaderboardTab = 'xp';
+  xpTab.setAttribute('role', 'tab');
+  xpTab.setAttribute('aria-selected', 'false');
+  tabs.append(killsTab, xpTab);
+
+  const body = createElement('div', 'leaderboard-body');
+  const status = createElement('div', 'settings-muted', 'Loading leaderboard...');
+  const list = createElement('ol', 'leaderboard-list');
+  body.append(status, list);
+
+  const actions = createElement('div', 'leaderboard-actions');
+  const okButton = createElement('button', 'settings-button', 'OK');
+  okButton.type = 'button';
+  okButton.dataset.leaderboardAction = 'close';
+  actions.append(okButton);
+
+  leaderboardPanel.append(header, tabs, body, actions);
+  leaderboardOverlay.replaceChildren(leaderboardPanel);
+
+  elements.leaderboardTabs = { kills: killsTab, xp: xpTab };
+  elements.leaderboardList = list;
+  elements.leaderboardStatus = status;
+  elements.leaderboardActiveTab = 'kills';
+  elements.leaderboardData = { topKills: [], topXp: [] };
+}
+
+function setLeaderboardTab(tabId) {
+  const safeTab = tabId === 'xp' ? 'xp' : 'kills';
+  elements.leaderboardActiveTab = safeTab;
+  Object.entries(elements.leaderboardTabs || {}).forEach(([id, button]) => {
+    const active = id === safeTab;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  renderLeaderboard();
+}
+
+function renderLeaderboard() {
+  if (!elements.leaderboardList || !elements.leaderboardStatus) return;
+  const activeTab = elements.leaderboardActiveTab === 'xp' ? 'xp' : 'kills';
+  const rows = activeTab === 'xp'
+    ? (elements.leaderboardData?.topXp || [])
+    : (elements.leaderboardData?.topKills || []);
+  const valueLabel = activeTab === 'xp' ? 'XP' : 'kills';
+  elements.leaderboardList.innerHTML = '';
+  if (!rows.length) {
+    elements.leaderboardStatus.textContent = 'No scores yet.';
+    elements.leaderboardStatus.hidden = false;
+    return;
+  }
+  elements.leaderboardStatus.hidden = true;
+  rows.forEach((entry, index) => {
+    const item = createElement('li', 'leaderboard-row');
+    const rank = createElement('span', 'leaderboard-rank', `#${index + 1}`);
+    const name = createElement('span', 'leaderboard-name', entry.name || 'Unknown Player');
+    const value = createElement('span', 'leaderboard-value', `${Math.max(0, Math.floor(entry.value || 0)).toLocaleString()} ${valueLabel}`);
+    item.append(rank, name, value);
+    elements.leaderboardList.appendChild(item);
+  });
+}
+
+async function openLeaderboardOverlay() {
+  if (!leaderboardOverlay || !leaderboardPanel) return;
+  closeOverlay();
+  leaderboardOverlay.style.display = 'flex';
+  leaderboardOverlay.setAttribute('aria-hidden', 'false');
+  syncOverlayBodyState();
+  leaderboardPanel.focus?.();
+  elements.leaderboardStatus.hidden = false;
+  elements.leaderboardStatus.textContent = 'Loading leaderboard...';
+  elements.leaderboardList.innerHTML = '';
+  setLeaderboardTab(elements.leaderboardActiveTab || 'kills');
+  try {
+    if (!context.appState?.getLeaderboards) {
+      throw new Error('Leaderboards unavailable');
+    }
+    elements.leaderboardData = await context.appState.getLeaderboards(10);
+    renderLeaderboard();
+  } catch (error) {
+    console.warn('Failed to load leaderboard:', error);
+    elements.leaderboardStatus.hidden = false;
+    elements.leaderboardStatus.textContent = 'Failed to load leaderboard.';
+  }
+}
+
+function closeLeaderboardOverlay() {
+  if (!leaderboardOverlay) return;
+  leaderboardOverlay.style.display = 'none';
+  leaderboardOverlay.setAttribute('aria-hidden', 'true');
+  syncOverlayBodyState();
+}
+
+function buildInventoryOverlay() {
+  if (!inventoryPanel) return;
+  inventoryPanel.innerHTML = '';
+  inventoryPanel.classList.add('settings-shell', 'inventory-shell');
+  inventoryPanel.setAttribute('role', 'dialog');
+  inventoryPanel.setAttribute('aria-modal', 'true');
+  inventoryPanel.setAttribute('aria-labelledby', 'inventory-title');
+  inventoryPanel.tabIndex = -1;
+
+  const header = createElement('div', 'settings-header');
+  const title = createElement('h2', 'settings-title', 'Inventory');
+  title.id = 'inventory-title';
+  const closeButton = createElement('button', 'settings-close', '✕');
+  closeButton.type = 'button';
+  closeButton.setAttribute('aria-label', 'Close inventory');
+  closeButton.dataset.action = 'close-inventory';
+  header.append(title, closeButton);
+
+  const body = createElement('div', 'settings-body inventory-body');
+  const inventoryBodyPanel = buildInventoryPanel();
+  inventoryBodyPanel.hidden = false;
+  body.append(inventoryBodyPanel);
+  inventoryPanel.append(header, body);
+}
+
+function setActiveTab(tabId) {
+  const newTab = elements.tabs?.[tabId];
+  const newPanel = elements.panels?.[tabId];
+  if (!newTab || !newPanel) return;
+  activeTab = tabId;
+  localStorage.setItem(TAB_KEY, tabId);
+
+  Object.entries(elements.tabs).forEach(([id, button]) => {
+    const isActive = id === tabId;
+    button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    button.classList.toggle('is-active', isActive);
+  });
+
+  Object.entries(elements.panels).forEach(([id, panelEl]) => {
+    const isActive = id === tabId;
+    panelEl.hidden = !isActive;
+  });
+
+  if (isMobileView) {
+    setListView(false);
+  }
+
+  if (tabId === 'character') {
+    startPreview();
+  } else {
+    stopPreview();
+  }
+}
+
+function openOverlay() {
+  if (!overlay) return;
+  lastFocusedElement = document.activeElement;
+  overlay.style.display = 'flex';
+  overlay.setAttribute('aria-hidden', 'false');
+  syncOverlayBodyState();
+  refreshLayout();
+  if (isMobileView) {
+    setListView(true);
+  } else {
+    panel?.focus?.();
+  }
+  if (activeTab === 'character') {
+    startPreview();
+  }
+  updateUI();
+}
+
+function closeOverlay() {
+  if (!overlay) return;
+  overlay.style.display = 'none';
+  overlay.setAttribute('aria-hidden', 'true');
+  syncOverlayBodyState();
+  stopPreview();
+  if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+    lastFocusedElement.focus();
+  }
+}
+
+function openInventoryOverlay() {
+  if (!inventoryOverlay) return;
+  lastFocusedElement = document.activeElement;
+  inventoryOverlay.style.display = 'flex';
+  inventoryOverlay.setAttribute('aria-hidden', 'false');
+  syncOverlayBodyState();
+  inventoryPanel?.focus?.();
+  updateUI();
+}
+
+function closeInventoryOverlay() {
+  if (!inventoryOverlay) return;
+  inventoryOverlay.style.display = 'none';
+  inventoryOverlay.setAttribute('aria-hidden', 'true');
+  elements.inventoryInfoModal?.classList.add('hidden');
+  syncOverlayBodyState();
+  if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
+    lastFocusedElement.focus();
+  }
+}
+
+function syncOverlayBodyState() {
+  const isSettingsOpen = overlay?.getAttribute('aria-hidden') === 'false';
+  const isInventoryOpen = inventoryOverlay?.getAttribute('aria-hidden') === 'false';
+  const isLeaderboardOpen = leaderboardOverlay?.getAttribute('aria-hidden') === 'false';
+  document.body.classList.toggle('settings-open', isSettingsOpen || isInventoryOpen || isLeaderboardOpen);
+}
+
+async function handleAction(target) {
+  const action = target.dataset.action;
+  if (!action) return;
+  if (action === 'close') {
+    closeOverlay();
+  } else if (action === 'back') {
+    if (isMobileView) {
+      setListView(true);
+    }
+  } else if (action === 'open-leaderboard') {
+    await openLeaderboardOverlay();
+  } else if (action === 'reconnect') {
+    context.multiplayer?.reconnect?.();
+  } else if (action === 'location-retry') {
+    context.location?.retry?.();
+  } else if (action === 'customize') {
+    closeOverlay();
+    void import('./customize.js').then(({ openCustomizeUI }) => openCustomizeUI());
+  } else if (action === 'toggle-console') {
+    const visible = elements.consoleLog.style.display === 'block';
+    elements.consoleLog.style.display = visible ? 'none' : 'block';
+    elements.consoleButton.textContent = visible ? 'Show Console' : 'Hide Console';
+  } else if (action === 'copy-debug') {
+    const info = collectDebugInfo();
+    navigator.clipboard?.writeText?.(info);
+  } else if (action === 'reset-origin') {
+    context.appState?.resetWorldOrigin?.();
+  } else if (action === 'save-name') {
+    if (!elements.nameInput) return;
+    const desiredName = elements.nameInput.value.trim();
+    if (!desiredName) {
+      elements.nameInput.value = context.appState?.getPlayerName?.() ?? '';
+      updateNameSaveState();
+      return;
+    }
+    if (!context.appState?.savePlayerName) {
+      setNameStatus('Name changes are unavailable right now.', 'error');
+      return;
+    }
+    const button = elements.nameSaveButton;
+    if (button) {
+      button.disabled = true;
+    }
+    setNameStatus('');
+    try {
+      const result = await context.appState.savePlayerName(desiredName);
+      if (result?.status === 'taken') {
+        setNameStatus('Name is taken! Choose another one.', 'error');
+      } else if (result?.status === 'invalid') {
+        setNameStatus('Enter a valid name before saving.', 'error');
+      } else if (result?.status === 'missing-pin') {
+        setNameStatus('Unable to verify name ownership. Please re-login.', 'error');
+      } else if (result?.status === 'error') {
+        setNameStatus('Failed to save name. Try again.', 'error');
+      } else {
+        setNameStatus('');
+      }
+    } catch (error) {
+      console.warn('Failed to save name:', error);
+      setNameStatus('Failed to save name. Try again.', 'error');
+    } finally {
+      if (button) {
+        button.disabled = false;
+      }
+      updateNameSaveState();
+    }
+  } else if (action === 'clear-server-state') {
+    const { clearServerButton, clearServerStatus } = elements;
+    if (!context.multiplayer?.clearServerState) {
+      clearServerStatus.textContent = 'Server clear unavailable in this build.';
+      return;
+    }
+    const confirmed = window.confirm(
+      'Clear server-side rooms, sessions, and caches? This will disconnect players.'
+    );
+    if (!confirmed) return;
+    clearServerButton.disabled = true;
+    clearServerStatus.textContent = 'Clearing server-side state...';
+    try {
+      const result = await context.multiplayer.clearServerState();
+      if (result.failed.length) {
+        const failedList = result.failed.map(item => item.path).join(', ');
+        clearServerStatus.textContent = `Cleared: ${result.cleared.join(', ')}. Failed: ${failedList}.`;
+      } else {
+        clearServerStatus.textContent = `Cleared: ${result.cleared.join(', ')}.`;
+      }
+    } catch (error) {
+      console.warn('Failed to clear server-side state:', error);
+      clearServerStatus.textContent = 'Failed to clear server-side state. Check console.';
+    } finally {
+      clearServerButton.disabled = false;
+    }
+  } else if (action === 'apply-debug-position') {
+    const x = parseFloat(elements.debugLocationFields?.x?.value);
+    const z = parseFloat(elements.debugLocationFields?.z?.value);
+    context.location?.setDebugLocation?.({ x, z });
+  } else if (action === 'step-debug') {
+    const stepValue = parseFloat(elements.debugLocationFields?.step?.value);
+    const stepMeters = Number.isFinite(stepValue) ? stepValue : 0;
+    const direction = target.dataset.direction;
+    if (!stepMeters || !direction) return;
+    const delta = { northMeters: 0, eastMeters: 0 };
+    if (direction === 'north') delta.northMeters = stepMeters;
+    if (direction === 'south') delta.northMeters = -stepMeters;
+    if (direction === 'east') delta.eastMeters = stepMeters;
+    if (direction === 'west') delta.eastMeters = -stepMeters;
+    context.location?.stepDebugLocation?.(delta);
+  } else if (action === 'clear-home-location') {
+    const { clearHomeButton, clearHomeStatus } = elements;
+    if (!context.appState?.clearHomeLocation) {
+      if (clearHomeStatus) {
+        clearHomeStatus.textContent = 'Home clearing is unavailable right now.';
+      }
+      return;
+    }
+    if (clearHomeStatus) {
+      clearHomeStatus.textContent = 'Clearing home location...';
+    }
+    if (clearHomeButton) {
+      clearHomeButton.disabled = true;
+    }
+    try {
+      const result = await context.appState.clearHomeLocation();
+      if (clearHomeStatus) {
+        clearHomeStatus.textContent = result?.status === 'ok'
+          ? 'Home location cleared.'
+          : 'Failed to clear home location.';
+      }
+    } catch (error) {
+      console.warn('Failed to clear home location:', error);
+      if (clearHomeStatus) {
+        clearHomeStatus.textContent = 'Failed to clear home location.';
+      }
+    } finally {
+      if (clearHomeButton) {
+        clearHomeButton.disabled = false;
+      }
+    }
+  } else if (action === 'delete-account') {
+    if (elements.deleteAccountConfirm) {
+      elements.deleteAccountConfirm.hidden = false;
+    }
+  } else if (action === 'cancel-delete-account') {
+    if (elements.deleteAccountConfirm) {
+      elements.deleteAccountConfirm.hidden = true;
+    }
+  } else if (action === 'confirm-delete-account') {
+    const { deleteAccountButton, deleteAccountConfirm, deleteAccountStatus } = elements;
+    if (deleteAccountConfirm) {
+      deleteAccountConfirm.hidden = true;
+    }
+    if (!context.appState?.deleteAccount) {
+      if (deleteAccountStatus) {
+        deleteAccountStatus.textContent = 'Account deletion is unavailable.';
+      }
+      return;
+    }
+    if (deleteAccountStatus) {
+      deleteAccountStatus.textContent = 'Deleting account...';
+    }
+    if (deleteAccountButton) {
+      deleteAccountButton.disabled = true;
+    }
+    try {
+      const result = await context.appState.deleteAccount();
+      if (deleteAccountStatus) {
+        deleteAccountStatus.textContent = result?.status === 'ok'
+          ? 'Account deleted.'
+          : 'Failed to delete account. Try again.';
+      }
+    } catch (error) {
+      console.warn('Failed to delete account:', error);
+      if (deleteAccountStatus) {
+        deleteAccountStatus.textContent = 'Failed to delete account. Try again.';
+      }
+    } finally {
+      if (deleteAccountButton) {
+        deleteAccountButton.disabled = false;
+      }
+    }
+  }
+}
+
+function renderInventory() {
+  if (!elements.inventoryGrid) return;
+  const inventory = context.appState?.getInventory?.() || {};
+  const entries = Object.entries(inventory).filter(([, item]) => (item?.count || 0) > 0);
+  const equippedItems = new Set(context.appState?.getEquippedInventoryItemIds?.() || []);
+  const fallbackIcons = {
+    iceGun: '❄️',
+    bow: '🏹',
+    bazooka: '🚀',
+    pistol: '🔫',
+    autumnSword: '🗡️',
+    hammer: '🔨',
+    lantern: '🏮',
+    shield: '🛡️',
+    apple: '🍎',
+    wood: '🪵',
+    meat: '🥩',
+    crab_meat: '🦀',
+    Salt: '🪨',
+    zombie_brains: '🧠'
+  };
+
+  elements.inventoryGrid.innerHTML = '';
+  if (!entries.length) {
+    elements.inventoryEmpty.style.display = 'block';
+    elements.inventoryDetails.textContent = 'Inventory is empty.';
+    if (elements.inventoryActions) {
+      elements.inventoryActions.style.display = 'none';
+    }
+    elements.inventoryDetailsContainer?.remove();
+    selectedInventoryId = null;
+    return;
+  }
+
+  elements.inventoryEmpty.style.display = 'none';
+  if (!selectedInventoryId || !inventory[selectedInventoryId]) {
+    selectedInventoryId = entries[0][0];
+  }
+
+  let selectedTile = null;
+  entries.forEach(([itemId, item]) => {
+    const button = createElement('button', 'inventory-tile');
+    button.type = 'button';
+    button.dataset.inventoryId = itemId;
+    button.setAttribute('aria-selected', itemId === selectedInventoryId ? 'true' : 'false');
+    button.classList.toggle('is-selected', itemId === selectedInventoryId);
+    button.classList.toggle('is-equipped', equippedItems.has(itemId));
+    if (itemId === selectedInventoryId) {
+      selectedTile = button;
+    }
+
+    const iconWrapper = createElement('div', 'inventory-icon-wrapper');
+    const fallbackIcon = fallbackIcons[itemId] || (itemId.startsWith('mushroom_') ? '🍄' : '🎒');
+    if (item.icon) {
+      const img = document.createElement('img');
+      img.className = 'inventory-icon';
+      img.alt = item.name || itemId;
+      img.loading = 'lazy';
+      img.src = item.icon;
+      img.addEventListener('error', () => {
+        img.remove();
+        const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcon);
+        iconWrapper.appendChild(fallback);
+      }, { once: true });
+      iconWrapper.appendChild(img);
+    } else {
+      const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcon);
+      iconWrapper.appendChild(fallback);
+    }
+
+    button.appendChild(iconWrapper);
+
+    if (item.count && item.count > 1) {
+      const badge = createElement('span', 'inventory-badge', `${item.count}`);
+      button.appendChild(badge);
+    }
+
+    if (itemId === 'iceGun') {
+      const ammoCount = Number.isFinite(item?.['ice ammo']) ? item['ice ammo'] : 0;
+      const ammoLabel = createElement('span', 'inventory-ammo', `Ice ammo: ${ammoCount}`);
+      button.appendChild(ammoLabel);
+    }
+    if (itemId === 'bow') {
+      const ammoCount = Number.isFinite(item?.['arrow ammo']) ? item['arrow ammo'] : 0;
+      const ammoLabel = createElement('span', 'inventory-ammo', `Arrows: ${ammoCount}`);
+      button.appendChild(ammoLabel);
+    }
+    if (itemId === 'bazooka') {
+      const ammoCount = Number.isFinite(item?.missiles) ? item.missiles : 0;
+      const ammoLabel = createElement('span', 'inventory-ammo', `Missiles: ${ammoCount}`);
+      button.appendChild(ammoLabel);
+    }
+
+    elements.inventoryGrid.appendChild(button);
+  });
+
+  const selectedItem = inventory[selectedInventoryId];
+  if (elements.inventoryInfoModal && selectedInventoryId !== 'zombie_brains') {
+    elements.inventoryInfoModal.classList.add('hidden');
+  }
+
+  if (selectedItem) {
+    const itemActions = context.appState?.getInventoryItemActions?.(selectedInventoryId) || ['drop', 'equip'];
+    const isEquipped = equippedItems.has(selectedInventoryId);
+    const equippedText = isEquipped ? ' • Equipped' : '';
+    const countText = selectedItem.count ? ` • Qty ${selectedItem.count}` : '';
+    const ammoText = selectedInventoryId === 'iceGun'
+      ? ` • Ice ammo ${Number.isFinite(selectedItem?.['ice ammo']) ? selectedItem['ice ammo'] : 0}`
+      : selectedInventoryId === 'bow'
+        ? ` • Arrows ${Number.isFinite(selectedItem?.['arrow ammo']) ? selectedItem['arrow ammo'] : 0}`
+        : selectedInventoryId === 'bazooka'
+          ? ` • Missiles ${Number.isFinite(selectedItem?.missiles) ? selectedItem.missiles : 0}`
+          : '';
+    const shieldHealthText = selectedInventoryId === 'shield'
+      ? ` • Health ${Math.max(0, Math.round(Number.isFinite(selectedItem?.shieldHealth) ? selectedItem.shieldHealth : 0))}`
+      : '';
+    elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${equippedText}${countText}${ammoText}${shieldHealthText}`;
+    if (elements.inventoryActions) {
+      elements.inventoryActions.style.display = 'flex';
+    }
+    if (elements.inventoryEquipButton) {
+      const canEquip = itemActions.includes('equip');
+      elements.inventoryEquipButton.style.display = canEquip ? 'inline-flex' : 'none';
+      if (canEquip) {
+        elements.inventoryEquipButton.textContent = isEquipped ? 'Unequip' : 'Equip';
+        elements.inventoryEquipButton.dataset.inventoryAction =
+          isEquipped ? 'unequip' : 'equip';
+      }
+    }
+    if (elements.inventoryDropButton) {
+      const canDrop = itemActions.includes('drop');
+      elements.inventoryDropButton.style.display = canDrop ? 'inline-flex' : 'none';
+    }
+    if (elements.inventoryUseButton) {
+      const canUse = itemActions.includes('use');
+      elements.inventoryUseButton.style.display = canUse ? 'inline-flex' : 'none';
+    }
+    if (elements.inventoryInfoButton) {
+      const canInfo = itemActions.includes('info');
+      elements.inventoryInfoButton.style.display = canInfo ? 'inline-flex' : 'none';
+    }
+    if (elements.inventoryEatButton) {
+      const canEat = itemActions.includes('eat');
+      elements.inventoryEatButton.style.display = canEat ? 'inline-flex' : 'none';
+    }
+    if (elements.inventoryBuildButton) {
+      const canBuild = itemActions.includes('build');
+      elements.inventoryBuildButton.style.display = canBuild ? 'inline-flex' : 'none';
+    }
+    if (elements.inventoryDetailsContainer) {
+      if (selectedTile && selectedTile.parentElement === elements.inventoryGrid) {
+        selectedTile.insertAdjacentElement('afterend', elements.inventoryDetailsContainer);
+      } else {
+        elements.inventoryGrid.appendChild(elements.inventoryDetailsContainer);
+      }
+    }
+  }
+}
+
+function bindEvents() {
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) {
+      closeOverlay();
+    }
+  });
+  inventoryOverlay?.addEventListener('click', (event) => {
+    if (event.target === inventoryOverlay) {
+      closeInventoryOverlay();
+    }
+  });
+  leaderboardOverlay?.addEventListener('click', (event) => {
+    if (event.target === leaderboardOverlay) {
+      closeLeaderboardOverlay();
+    }
+  });
+
+  const handlePanelClick = (event) => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.dataset.leaderboardAction === 'close') {
+      closeLeaderboardOverlay();
+      return;
+    }
+    if (button.dataset.leaderboardTab) {
+      setLeaderboardTab(button.dataset.leaderboardTab);
+      return;
+    }
+    if (button.dataset.inventoryAction) {
+      const action = button.dataset.inventoryAction;
+      if (!selectedInventoryId && action !== 'close-info') return;
+      if (action === 'drop') {
+        context.appState?.dropInventoryItem?.(selectedInventoryId);
+      } else if (action === 'use') {
+        context.appState?.useInventoryItem?.(selectedInventoryId);
+      } else if (action === 'equip') {
+        context.appState?.equipInventoryItem?.(selectedInventoryId);
+      } else if (action === 'unequip') {
+        context.appState?.unequipInventoryItem?.(selectedInventoryId);
+      } else if (action === 'eat') {
+        context.appState?.eatInventoryItem?.(selectedInventoryId);
+      } else if (action === 'build') {
+        context.appState?.startBuildFlow?.(selectedInventoryId);
+        closeInventoryOverlay();
+      } else if (action === 'info') {
+        if (selectedInventoryId === 'zombie_brains' && elements.inventoryInfoModal && elements.inventoryInfoText) {
+          elements.inventoryInfoText.textContent = 'Zombie Brains are unstable remains from undead creatures. They pulse with strange energy. Maybe you can craft them into something useful at your home crafting table.';
+          elements.inventoryInfoModal.classList.remove('hidden');
+        }
+      } else if (action === 'close-info') {
+        elements.inventoryInfoModal?.classList.add('hidden');
+      }
+      renderInventory();
+      return;
+    }
+    if (button.dataset.achievementAction === 'claim') {
+      const achievementId = button.dataset.achievementId;
+      if (achievementId) {
+        context.appState?.claimAchievementReward?.(achievementId);
+        updateUI();
+      }
+      return;
+    }
+    if (button.dataset.inventoryId) {
+      selectedInventoryId = button.dataset.inventoryId;
+      elements.inventoryInfoModal?.classList.add('hidden');
+      renderInventory();
+      return;
+    }
+    if (button.dataset.tab) {
+      setTab(button.dataset.tab);
+      return;
+    }
+    if (button.dataset.action) {
+      if (button.dataset.action === 'close-inventory') {
+        closeInventoryOverlay();
+        return;
+      }
+      void handleAction(button);
+    }
+  };
+
+  panel.addEventListener('click', handlePanelClick);
+  inventoryPanel?.addEventListener('click', handlePanelClick);
+  leaderboardPanel?.addEventListener('click', handlePanelClick);
+
+  elements.nameInput.addEventListener('input', () => {
+    setNameStatus('');
+    updateNameSaveState();
+  });
+
+  elements.nameInput.addEventListener('focus', () => {
+    isEditingName = true;
+  });
+
+  elements.nameInput.addEventListener('blur', (event) => {
+    isEditingName = false;
+    if (!event.target.value.trim()) {
+      event.target.value = context.appState?.getPlayerName?.() ?? '';
+    }
+    updateNameSaveState();
+  });
+
+  elements.characterSelect.addEventListener('change', (event) => {
+    const value = event.target.value;
+    context.appState?.setCharacterModel?.(value);
+    loadPreviewModel(value);
+  });
+
+  if (elements.debugLocationFields?.toggle) {
+    elements.debugLocationFields.toggle.addEventListener('change', (event) => {
+      context.location?.setDebugEnabled?.(event.target.checked);
+      updateUI();
+    });
+  }
+
+  if (elements.debugLocationFields?.accuracy) {
+    elements.debugLocationFields.accuracy.addEventListener('change', (event) => {
+      const value = parseFloat(event.target.value);
+      context.location?.setDebugAccuracy?.(value);
+    });
+  }
+
+  if (elements.displayFields?.modeSelect) {
+    elements.displayFields.modeSelect.addEventListener('change', (event) => {
+      const value = event.target.value;
+      context.appState?.setDisplayMode?.(value);
+    });
+  }
+
+  if (elements.displayFields?.performanceSelect) {
+    elements.displayFields.performanceSelect.addEventListener('change', (event) => {
+      const value = event.target.value;
+      context.appState?.setDisplaySetting?.('performanceMode', value);
+    });
+  }
+  if (elements.displayFields?.unitsSelect) {
+    elements.displayFields.unitsSelect.addEventListener('change', (event) => {
+      const selectedUnit = event.target.value;
+      const appliedUnit = context.appState?.setDistanceUnitPreference?.(selectedUnit) ?? setDistanceUnitPreference(selectedUnit);
+      if (elements.displayFields?.unitsSelect) {
+        elements.displayFields.unitsSelect.value = appliedUnit;
+      }
+      window.dispatchEvent(new Event('distance-unit-changed'));
+      update();
+    });
+  }
+  if (elements.displayFields?.firstPersonToggle) {
+    elements.displayFields.firstPersonToggle.addEventListener('change', (event) => {
+      if (window.playerControls) {
+        window.playerControls.firstPersonView = event.target.checked;
+      }
+    });
+  }
+
+  if (elements.displayFields?.gyroToggle) {
+    elements.displayFields.gyroToggle.addEventListener('change', async (event) => {
+      const controls = window.playerControls;
+      if (!controls) return;
+      if (event.target.checked) {
+        event.target.disabled = true;
+        const ok = await controls.initGyroscope();
+        event.target.disabled = false;
+        if (!ok) {
+          event.target.checked = false;
+        }
+      } else {
+        controls.disableGyroscope();
+      }
+      const active = controls.gyroActive;
+      if (elements.displayFields?.gyroRecalGroup) {
+        elements.displayFields.gyroRecalGroup.hidden = !active;
+      }
+    });
+  }
+
+  if (elements.displayFields?.gyroRecalBtn) {
+    elements.displayFields.gyroRecalBtn.addEventListener('click', () => {
+      window.playerControls?.calibrateGyroscope?.();
+    });
+  }
+
+  if (elements.displayFields?.highContrastToggle) {
+    elements.displayFields.highContrastToggle.addEventListener('change', (event) => {
+      context.appState?.setDisplaySetting?.('highContrastMode', event.target.checked);
+    });
+  }
+
+  if (elements.displayFields?.sliders) {
+    Object.entries(elements.displayFields.sliders).forEach(([key, slider]) => {
+      slider.addEventListener('input', (event) => {
+        const value = parseFloat(event.target.value);
+        if (elements.displayFields?.values?.[key]) {
+          elements.displayFields.values[key].textContent = formatRangeValue(value);
+        }
+        context.appState?.setDisplaySetting?.(key, value);
+      });
+    });
+  }
+
+  window.addEventListener('resize', () => {
+    refreshLayout();
+  });
+}
+
+function initPreview() {
+  if (previewState.renderer) return;
+  try {
+    previewState.renderer = new THREE.WebGLRenderer({
+      canvas: elements.previewCanvas,
+      alpha: true,
+      antialias: true
+    });
+  } catch (error) {
+    elements.previewFallback.textContent = 'Preview unavailable';
+    elements.previewFallback.style.display = 'flex';
+    return;
+  }
+  previewState.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  previewState.scene = new THREE.Scene();
+  previewState.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+  previewState.camera.position.set(0, 1, 3);
+  previewState.scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+  dir.position.set(2, 2, 2);
+  previewState.scene.add(dir);
+
+  previewState.resizeObserver = new ResizeObserver(() => {
+    resizePreview();
+  });
+  previewState.resizeObserver.observe(elements.previewCanvas.parentElement);
+  resizePreview();
+}
+
+function resizePreview() {
+  if (!previewState.renderer || !previewState.camera) return;
+  const rect = elements.previewCanvas.parentElement.getBoundingClientRect();
+  const width = Math.max(rect.width, 1);
+  const height = Math.max(rect.height, 1);
+  previewState.renderer.setSize(width, height, false);
+  previewState.camera.aspect = width / height;
+  previewState.camera.updateProjectionMatrix();
+}
+
+function loadPreviewModel(modelPath) {
+  if (!modelPath) return;
+  initPreview();
+  if (!previewState.renderer) return;
+  const loader = new FBXLoader();
+  const token = Symbol('preview');
+  previewState.loadingToken = token;
+  loader.load(
+    modelPath,
+    (model) => {
+      if (previewState.loadingToken !== token) return;
+      if (previewState.model) {
+        previewState.scene.remove(previewState.model);
+      }
+      previewState.model = model;
+      previewState.scene.add(model);
+
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      model.position.sub(center);
+      const maxDim = Math.max(size.x, size.y, size.z, 0.001);
+      const scale = 1.2 / maxDim;
+      model.scale.setScalar(scale);
+
+      previewState.camera.position.set(0, size.y * scale * 0.6 + 0.4, maxDim * scale * 2.3 + 1);
+      previewState.camera.lookAt(0, size.y * scale * 0.3, 0);
+      elements.previewFallback.style.display = 'none';
+    },
+    undefined,
+    () => {
+      elements.previewFallback.style.display = 'flex';
+    }
+  );
+}
+
+function startPreview() {
+  if (!previewState.renderer) {
+    initPreview();
+    loadPreviewModel(context.appState?.getCharacterModel?.());
+  }
+  if (!previewState.renderer) return;
+  previewState.active = true;
+  if (previewState.frameId) return;
+  const render = () => {
+    if (!previewState.active) {
+      previewState.frameId = null;
+      return;
+    }
+    if (previewState.model) {
+      previewState.model.rotation.y += 0.005;
+    }
+    previewState.renderer.render(previewState.scene, previewState.camera);
+    previewState.frameId = requestAnimationFrame(render);
+  };
+  previewState.frameId = requestAnimationFrame(render);
+}
+
+function stopPreview() {
+  previewState.active = false;
+  if (previewState.frameId) {
+    cancelAnimationFrame(previewState.frameId);
+    previewState.frameId = null;
+  }
+}
+
+function collectDebugInfo() {
+  const connectionStatus = context.appState?.getConnectionStatus?.() ?? 'Unknown';
+  const lastPing = context.appState?.getLastPing?.();
+  const locationState = context.location?.getState?.() ?? {};
+  const lastOsmFetch = context.appState?.getLastOsmFetch?.();
+  const lastError = context.appState?.getLastError?.();
+  const version = context.appState?.getAppVersion?.() ?? 'unknown';
+  const viewport = `${window.innerWidth}x${window.innerHeight}`;
+  const originText = `${formatMeters(locationState.originX)}, ${formatMeters(locationState.originZ)}`;
+  const currentText = `${formatMeters(locationState.x)}, ${formatMeters(locationState.z)}`;
+  const playerText = `${formatMeters(locationState.x)}, ${formatMeters(locationState.z)}`;
+  const tileText = locationState.tile ? `${locationState.tile.x},${locationState.tile.y}` : '—';
+  const info = [
+    `version: ${version}`,
+    `userAgent: ${navigator.userAgent}`,
+    `viewport: ${viewport}`,
+    `connectionStatus: ${connectionStatus}`,
+    `lastPing: ${typeof lastPing === 'number' ? `${lastPing} ms` : 'N/A'}`,
+    `worldStatus: ${locationState.state || 'unknown'}`,
+    `origin: ${originText}`,
+    `current: ${currentText}`,
+    `playerXZ: ${playerText}`,
+    `tile: ${tileText}`,
+    `lastOsmFetch: ${lastOsmFetch ? formatTimestamp(lastOsmFetch) : '—'}`,
+    `lastError: ${lastError ? `${lastError.message} @ ${formatTimestamp(lastError.timestamp)}` : '—'}`
+  ];
+  return info.join('\n');
+}
+
+function renderAchievements() {
+  if (!elements.achievementList) return;
+  const achievementExpiryMs = 10 * 60 * 1000;
+  const now = Date.now();
+  const achievements = (context.appState?.getAchievements?.() || []).filter((achievement) => {
+    if (!achievement.claimedAt) return true;
+    return (now - achievement.claimedAt) < achievementExpiryMs;
+  });
+  elements.achievementList.innerHTML = '';
+  if (elements.achievementEmpty) {
+    elements.achievementEmpty.style.display = achievements.length ? 'none' : 'block';
+  }
+  achievements.forEach((achievement) => {
+    const row = createElement('div', 'achievement-row');
+    const isLocked = !achievement.unlockedAt;
+    const text = createElement('div', 'achievement-text');
+    const title = createElement('div', 'achievement-title', achievement.title);
+    const sub = createElement(
+      'div',
+      'achievement-subtitle',
+      `${achievement.description} (${achievement.progress}/${achievement.target})`
+    );
+    text.append(title, sub);
+    const button = createElement('button', 'settings-button achievement-claim-button');
+    button.type = 'button';
+    button.dataset.achievementAction = 'claim';
+    button.dataset.achievementId = achievement.id;
+    if (achievement.pendingClaim) {
+      button.textContent = 'Claim reward';
+      button.classList.add('claimable');
+    } else if (achievement.claimedAt) {
+      button.textContent = 'Claimed';
+      button.disabled = true;
+    } else if (!achievement.unlockedAt) {
+      button.textContent = 'Locked';
+      button.disabled = true;
+    } else {
+      button.textContent = 'Unavailable';
+      button.disabled = true;
+    }
+    if (isLocked) {
+      row.classList.add('locked');
+    }
+    row.append(text, button);
+    elements.achievementList.appendChild(row);
+  });
+}
+
+function updateCharacterOptions() {
+  const options = context.appState?.getCharacterOptions?.() ?? [];
+  elements.characterSelect.innerHTML = '';
+  options.forEach((option) => {
+    const opt = document.createElement('option');
+    opt.value = option.value;
+    opt.textContent = option.label;
+    elements.characterSelect.appendChild(opt);
+  });
+}
+
+function refreshLayout() {
+  if (!panel) return;
+  isMobileView = window.matchMedia('(max-width: 720px)').matches;
+  panel.classList.toggle('is-mobile', isMobileView);
+  panel.classList.toggle('is-desktop', !isMobileView);
+  if (!isMobileView) {
+    setListView(false);
+    if (elements.backButton) {
+      elements.backButton.style.display = 'none';
+    }
+  } else if (elements.backButton && isListView) {
+    elements.backButton.style.display = 'none';
+  }
+}
+
+function setListView(enabled) {
+  isListView = enabled;
+  panel.classList.toggle('show-tab-list', enabled);
+  panel.classList.toggle('show-tab-panel', !enabled);
+  if (elements.backButton) {
+    elements.backButton.style.display = enabled ? 'none' : 'inline-flex';
+  }
+  if (enabled) {
+    stopPreview();
+  } else if (activeTab === 'character') {
+    startPreview();
+  }
+}
+
+export function updateUI() {
+  if (!panel) return;
+  if (elements.nameInput && context.appState?.getPlayerName && !isEditingName) {
+    const name = context.appState.getPlayerName();
+    if (elements.nameInput.value !== name) {
+      elements.nameInput.value = name;
+    }
+    updateNameSaveState();
+  }
+  if (elements.characterSelect && context.appState?.getCharacterModel) {
+    const model = context.appState.getCharacterModel();
+    if (elements.characterSelect.value !== model) {
+      elements.characterSelect.value = model;
+      if (activeTab === 'character') {
+        loadPreviewModel(model);
+      }
+    }
+  }
+  if (elements.characterStatFields && context.appState?.getPlayerStats) {
+    const stats = context.appState.getPlayerStats() || {};
+    Object.entries(elements.characterStatFields).forEach(([key, node]) => {
+      node.textContent = formatStatValue(key, stats[key]);
+    });
+  }
+
+
+  if (elements.questList) {
+    const quests = context.appState?.getQuestLog?.() ?? [];
+    elements.questList.innerHTML = '';
+    const hasQuests = quests.length > 0;
+    if (elements.questEmpty) {
+      elements.questEmpty.style.display = hasQuests ? 'none' : 'block';
+    }
+    quests.forEach((quest) => {
+      const item = createElement('li', 'settings-list-item');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = Boolean(quest.completed);
+      checkbox.disabled = true;
+      checkbox.setAttribute('aria-label', `${quest.title} completed`);
+      const label = createElement('span', '', `${quest.title} ${quest.progress || ''}`.trim());
+      item.append(checkbox, label);
+      elements.questList.appendChild(item);
+    });
+  }
+  renderAchievements();
+
+  if (elements.connectionStatus) {
+    elements.connectionStatus.textContent = context.appState?.getConnectionStatus?.() ?? 'Connecting';
+  }
+  if (elements.ping) {
+    const ping = context.appState?.getLastPing?.();
+    elements.ping.textContent = typeof ping === 'number' ? `${ping} ms` : 'N/A';
+  }
+  if (elements.playersList) {
+    const players = context.appState?.getConnectedPlayers?.() ?? [];
+    elements.playersList.innerHTML = '';
+    if (!players.length) {
+      const empty = createElement('li', 'settings-muted', 'No active connections.');
+      elements.playersList.appendChild(empty);
+    } else {
+      players.forEach((player) => {
+        const item = createElement('li', 'settings-list-item');
+        const distance = player.distance != null ? ` • ${formatDistance(player.distance)}` : '';
+        item.textContent = `${player.name} (${player.id})${distance}`;
+        elements.playersList.appendChild(item);
+      });
+    }
+  }
+  if (elements.connectionError) {
+    const lastError = context.appState?.getLastError?.();
+    elements.connectionError.textContent = lastError
+      ? `${lastError.message} (${formatTimestamp(lastError.timestamp)})`
+      : 'None';
+  }
+
+  if (elements.locationFields && context.location?.getState) {
+    const state = context.location.getState();
+    elements.locationFields.status.textContent = state.state ? state.state : '—';
+    if (elements.locationFields.source) {
+      const sourceLabel = state.source === 'world' ? 'World' : (state.source || '—');
+      elements.locationFields.source.textContent = sourceLabel;
+      if (elements.locationSourceRow) {
+        elements.locationSourceRow.classList.toggle('is-debug', state.source === 'world');
+      }
+    }
+    elements.locationFields.x.textContent = formatMeters(state.x);
+    elements.locationFields.y.textContent = formatMeters(state.y);
+    elements.locationFields.z.textContent = formatMeters(state.z);
+    elements.locationFields.heading.textContent = typeof state.heading === 'number'
+      ? `${state.heading.toFixed(1)}°`
+      : '—';
+    elements.locationFields.speed.textContent = typeof state.speed === 'number'
+      ? `${state.speed.toFixed(1)} m/s`
+      : '—';
+    elements.locationFields.time.textContent = state.timestamp ? formatTimestamp(state.timestamp) : '—';
+    elements.locationFields.guidance.textContent = state.message || '';
+  }
+
+  if (elements.debugFields && context.location?.getState) {
+    const state = context.location.getState();
+    const originText = `${formatMeters(state.originX)}, ${formatMeters(state.originZ)}`;
+    const currentText = `${formatMeters(state.x)}, ${formatMeters(state.z)}`;
+    const playerText = `${formatMeters(state.x)}, ${formatMeters(state.z)}`;
+    const tileText = state.tile ? `${state.tile.x}, ${state.tile.y}` : '—';
+    elements.debugFields.origin.textContent = originText;
+    elements.debugFields.current.textContent = currentText;
+    elements.debugFields.player.textContent = playerText;
+    elements.debugFields.tile.textContent = tileText;
+  }
+
+  if (elements.debugLocationFields && context.location?.getDebugState) {
+    const debugState = context.location.getDebugState();
+    if (elements.debugLocationFields.toggle) {
+      elements.debugLocationFields.toggle.checked = Boolean(debugState.enabled);
+    }
+    if (elements.debugLocationFields.x) {
+      const xInput = elements.debugLocationFields.x;
+      if (document.activeElement !== xInput) {
+        xInput.value = Number.isFinite(debugState.x)
+          ? debugState.x.toFixed(6)
+          : '';
+      }
+    }
+    if (elements.debugLocationFields.z) {
+      const zInput = elements.debugLocationFields.z;
+      if (document.activeElement !== zInput) {
+        zInput.value = Number.isFinite(debugState.z)
+          ? debugState.z.toFixed(6)
+          : '';
+      }
+    }
+    if (elements.debugLocationFields.accuracy) {
+      const accuracyInput = elements.debugLocationFields.accuracy;
+      if (document.activeElement !== accuracyInput) {
+        accuracyInput.value = Number.isFinite(debugState.accuracyMeters)
+          ? debugState.accuracyMeters.toFixed(1)
+          : '';
+      }
+    }
+  }
+
+  if (elements.displayFields && context.appState?.getDisplaySettings) {
+    const displaySettings = context.appState.getDisplaySettings();
+    if (displaySettings?.mode && elements.displayFields.modeSelect) {
+      if (elements.displayFields.modeSelect.value !== displaySettings.mode) {
+        elements.displayFields.modeSelect.value = displaySettings.mode;
+      }
+    }
+    if (displaySettings?.performanceMode && elements.displayFields.performanceSelect) {
+      if (elements.displayFields.performanceSelect.value !== displaySettings.performanceMode) {
+        elements.displayFields.performanceSelect.value = displaySettings.performanceMode;
+      }
+    }
+    if (elements.displayFields.unitsSelect) {
+      elements.displayFields.unitsSelect.value = getDistanceUnitPreference();
+    }
+    if (elements.displayFields.highContrastToggle) {
+      elements.displayFields.highContrastToggle.checked = Boolean(displaySettings?.highContrastMode);
+    }
+    if (elements.displayFields.gyroToggle && !elements.displayFields.gyroToggle.disabled) {
+      const gyroActive = Boolean(window.playerControls?.gyroActive);
+      elements.displayFields.gyroToggle.checked = gyroActive;
+      if (elements.displayFields.gyroRecalGroup) {
+        elements.displayFields.gyroRecalGroup.hidden = !gyroActive;
+      }
+    }
+    Object.entries(elements.displayFields.sliders || {}).forEach(([key, slider]) => {
+      const value = displaySettings?.[key];
+      if (typeof value !== 'number' || Number.isNaN(value)) return;
+      if (document.activeElement !== slider) {
+        slider.value = `${value}`;
+      }
+      if (elements.displayFields?.values?.[key]) {
+        elements.displayFields.values[key].textContent = formatRangeValue(value);
+      }
+    });
+  }
+
+  renderInventory();
+}
+
+export function setTab(tabId) {
+  if (!tabId) return;
+  setActiveTab(tabId);
+}
+
+export function openSettings() {
+  openOverlay();
+}
+
+export function closeSettings() {
+  closeOverlay();
+}
+
+export function openInventory() {
+  openInventoryOverlay();
+}
+
+export function closeInventory() {
+  closeInventoryOverlay();
+}
+
+export function initSettingsPanel({ appState, multiplayer, location, player } = {}) {
+  context = { appState, multiplayer, location, player };
+  overlay = document.getElementById('settings-overlay');
+  panel = document.getElementById('settings-panel');
+  inventoryOverlay = document.getElementById('inventory-overlay');
+  inventoryPanel = document.getElementById('inventory-panel');
+  if (!overlay || !panel || !inventoryOverlay || !inventoryPanel) {
+    throw new Error('Settings or inventory overlay not found.');
+  }
+  overlay.setAttribute('aria-hidden', 'true');
+  inventoryOverlay.setAttribute('aria-hidden', 'true');
+  inventoryPanel.innerHTML = '';
+  panel.innerHTML = '';
+  panel.classList.add('settings-shell');
+  panel.classList.add('show-tab-panel');
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-labelledby', 'settings-title');
+  panel.tabIndex = -1;
+
+  const header = buildHeader();
+  const tabs = buildTabs();
+  const body = buildPanels();
+  panel.append(header, tabs, body);
+  buildInventoryOverlay();
+  buildLeaderboardOverlay();
+
+  updateCharacterOptions();
+  refreshLayout();
+
+  const storedTab = localStorage.getItem(TAB_KEY);
+  setActiveTab(storedTab && elements.tabs[storedTab] ? storedTab : 'character');
+
+  bindEvents();
+  const savedTab = localStorage.getItem(TAB_KEY) || 'character';
+  setActiveTab(savedTab);
+  loadPreviewModel(context.appState?.getCharacterModel?.());
+  updateUI();
+}

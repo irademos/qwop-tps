@@ -1,0 +1,743 @@
+import * as THREE from "three";
+import { loadMonsterModel } from "../models/monsterModel.js";
+import { FriendlyCharacter } from "../characters/FriendlyCharacter.js";
+import { getTerrainHeight } from "../environment/terrainHeight.js";
+
+const QUEST_FRIEND_MODEL = "/models/cowboy.fbx";
+const QUEST_FRIEND_SPAWN_RADIUS_MIN = 3;
+const QUEST_FRIEND_SPAWN_RADIUS_MAX = 6;
+const QUEST_FIRST_WORLD_TARGET_METERS = 30;
+const QUEST_FIRST_WORLD_XP = 60;
+const QUEST_SECOND_MUSHROOM_TARGET = 1;
+const QUEST_SECOND_MUSHROOM_XP = 35;
+const QUEST_FRIEND_WANDER_RADIUS = 5;
+const QUEST_FRIEND_ENGAGE_RADIUS = 5;
+const QUEST_FRIEND_DISENGAGE_RADIUS = 8;
+const QUEST_FRIEND_FOLLOW_DISTANCE = 3;
+const QUEST_FRIEND_FOLLOW_START_DISTANCE = 4.5;
+const QUEST_GENERIC_XP = 60;
+const QUEST_FRIEND_RESPAWN_DELAY_MS = 20000;
+const QUEST_FRIEND_GROUND_OFFSET = 0.9;
+
+const TUTORIAL_QUESTS = [
+  {
+    id: "world-walk-30m",
+    title: "Walk 30 meters",
+    description: "Walk your player at least 30 meters through the world.",
+    faq: "Walk your player around the world until you have covered 30 meters. Welcome to Street Quest!",
+    kind: "world",
+    target: QUEST_FIRST_WORLD_TARGET_METERS,
+    xp: QUEST_FIRST_WORLD_XP
+  },
+  {
+    id: "collect-mushroom-1",
+    title: "Collect 1 mushroom",
+    description: "Pick up 1 mushroom so you can practice interacting with nearby items.",
+    faq: "Walk up to a mushroom and press interact. If none are nearby, move around a little and look for them on the ground.",
+    kind: "mushroom",
+    target: QUEST_SECOND_MUSHROOM_TARGET,
+    xp: QUEST_SECOND_MUSHROOM_XP
+  },
+  {
+    id: "climb-a-tree",
+    title: "Climb a tree",
+    description: "Climb any nearby tree.",
+    faq: "Find a tree, walk up to it, then use climb: press X on desktop or tap the climb prompt on mobile.",
+    kind: "climb",
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "kill-zombie",
+    title: "Kill a zombie",
+    description: "Defeat 1 zombie.",
+    faq: "Use your weapon and keep attacking until the zombie drops.",
+    kind: "zombie",
+    target: 1,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "trade-with-merchant",
+    title: "Buy and sell with the merchant",
+    description: "Buy at least one thing and sell at least one thing to the merchant.",
+    faq: "Talk to the merchant, open the shop, buy one item, then sell one item back.",
+    kind: "merchant",
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "kill-deer",
+    title: "Kill a deer",
+    description: "Defeat 1 deer.",
+    faq: "A deer and a bow with arrows were spawned nearby. Equip the bow and hunt it.",
+    kind: "deer",
+    target: 1,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "blow-up-rock",
+    title: "Blow up a rock",
+    description: "Use a bomb to blow up a rock.",
+    faq: "A rock and bomb pickup were spawned nearby. Pick up the bomb, equip it, and explode it near the rock.",
+    kind: "rock",
+    target: 1,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "craft-at-table",
+    title: "Craft at the crafting table",
+    description: "Craft any item at the crafting table.",
+    faq: "Go to your crafting table, open it, choose materials, then press Craft and pick an item.",
+    kind: "craft",
+    target: 1,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "forage-mushrooms-3",
+    title: "Forage 3 mushrooms",
+    description: "Pick up 3 mushrooms for a trail snack bundle.",
+    faq: "Mushrooms grow on the ground around the world. Walk close, press interact, and keep exploring if you need more to spawn.",
+    kind: "mushroom",
+    target: 3,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "world-hike-100m",
+    title: "Take a 100 meter hike",
+    description: "Walk your player at least 100 meters from where you accept this quest.",
+    faq: "This measures your player’s world-coordinate movement from the acceptance point. Keep walking until the meter fills.",
+    kind: "world",
+    target: 100,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "zombie-patrol-3",
+    title: "Clear 3 zombies",
+    description: "Defeat 3 zombies while the quest guy scouts with you.",
+    faq: "Only zombie-type monsters count. Keep your distance, use weapons, and heal before taking on a group.",
+    kind: "zombie",
+    target: 3,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "deer-hunt-2",
+    title: "Hunt 2 deer",
+    description: "Defeat 2 deer using the bow, arrows, or any weapon you prefer.",
+    faq: "Two deer plus a bow and arrows are spawned nearby when you accept. Deer run away, so approach carefully and aim ahead.",
+    kind: "deer",
+    target: 2,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "demolition-practice-3",
+    title: "Demolish 3 rocks",
+    description: "Use bombs to blow up 3 rocks.",
+    faq: "Quest rocks and bomb pickups are spawned nearby. Pick up each bomb, equip it, and detonate it close to a rock.",
+    kind: "rock",
+    target: 3,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "craft-work-order-3",
+    title: "Craft 3 items",
+    description: "Craft any 3 items at the crafting table.",
+    faq: "Open the crafting table, combine materials, and press Craft. Any successful crafted item counts toward this order.",
+    kind: "craft",
+    target: 3,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "merchant-restock",
+    title: "Restock with the merchant",
+    description: "Buy one item and sell one item during another merchant visit.",
+    faq: "A merchant is spawned nearby and you receive enough coins to make a purchase if you are short. Buy once and sell once to finish.",
+    kind: "merchant",
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "mushroom-cache-5",
+    title: "Gather 5 mushrooms",
+    description: "Pick up 5 mushrooms for the quest guy's emergency cache.",
+    faq: "Keep moving through grassy areas and collect every mushroom you see. The counter starts when you accept this quest.",
+    kind: "mushroom",
+    target: 5,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "zombie-sweep-5",
+    title: "Sweep 5 zombies",
+    description: "Defeat 5 zombies to make the nearby streets safer.",
+    faq: "Zombie variants all count as long as their type includes zombie. Fight one at a time when possible and let your companion help.",
+    kind: "zombie",
+    target: 5,
+    xp: QUEST_GENERIC_XP
+  },
+  {
+    id: "world-trek-250m",
+    title: "Complete a 250 meter trek",
+    description: "Walk your player at least 250 meters from where you accept this quest.",
+    faq: "This is a longer world-coordinate walk. Keep moving your player and watch the progress meter climb.",
+    kind: "world",
+    target: 250,
+    xp: QUEST_GENERIC_XP
+  }
+];
+
+const distanceMeters = (a, b) => {
+  if (!hasValidFix(a) || !hasValidFix(b)) return 0;
+  return Math.hypot(b.x - a.x, b.z - a.z);
+};
+
+const hasValidFix = (fix) => Number.isFinite(fix?.x) && Number.isFinite(fix?.z);
+
+export class QuestManager {
+  constructor({ scene, getPlayerModel, attachPhysics, detachPhysics, addXp }) {
+    this.scene = scene;
+    this.getPlayerModel = getPlayerModel;
+    this.attachPhysics = attachPhysics;
+    this.detachPhysics = detachPhysics;
+    this.addXp = addXp;
+    this.state = {
+      friend: null,
+      pendingSpawn: false,
+      respawnAt: 0,
+      deltaSeconds: 0,
+      shouldFollowPlayer: true,
+      acceptedQuestIds: [],
+      completedQuestIds: [],
+      worldQuestStartPosition: null,
+      worldQuestDistanceMeters: 0,
+      mushroomCount: 0,
+      zombieKillCount: 0,
+      deerKillCount: 0,
+      rockBlownUpCount: 0,
+      craftedItemCount: 0,
+      merchantBought: false,
+      merchantSold: false,
+      wasClimbingLastFrame: false
+    };
+    this.onQuestStateChange = null;
+  }
+
+  setQuestStateChangeListener(listener) {
+    this.onQuestStateChange = typeof listener === "function" ? listener : null;
+  }
+
+  getPersistentState() {
+    return {
+      acceptedQuestIds: [...this.state.acceptedQuestIds],
+      completedQuestIds: [...this.state.completedQuestIds]
+    };
+  }
+
+  hydratePersistentState(savedState) {
+    const accepted = Array.isArray(savedState?.acceptedQuestIds)
+      ? savedState.acceptedQuestIds.filter((id) => typeof id === "string" && id.trim())
+      : [];
+    const completed = Array.isArray(savedState?.completedQuestIds)
+      ? savedState.completedQuestIds.filter((id) => typeof id === "string" && id.trim())
+      : [];
+    const acceptedSet = new Set(accepted);
+    completed.forEach((id) => acceptedSet.add(id));
+    this.state.acceptedQuestIds = Array.from(acceptedSet);
+    this.state.completedQuestIds = Array.from(new Set(completed));
+  }
+
+  notifyQuestStateChanged() {
+    if (!this.onQuestStateChange) return;
+    this.onQuestStateChange(this.getPersistentState());
+  }
+
+  setDeltaSeconds(deltaSeconds) {
+    this.state.deltaSeconds = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+  }
+
+  getQuestFriend() {
+    return this.state.friend;
+  }
+
+  isQuestFriend(friendly) {
+    return this.state.friend === friendly;
+  }
+
+  isFriendActive() {
+    return Boolean(this.getActiveQuest());
+  }
+
+  shouldOfferQuest(friendly) {
+    return this.isQuestFriend(friendly);
+  }
+
+  cleanupQuestFriend() {
+    const friend = this.state.friend;
+    if (!friend) return;
+    this.detachPhysics?.(friend);
+    if (friend.model?.parent) {
+      friend.model.parent.remove(friend.model);
+    }
+    friend.model = null;
+    this.state.friend = null;
+  }
+
+  ensureQuestFriendSpawned() {
+    const now = Date.now();
+    if (this.state.friend?.isDead || (this.state.friend && !this.state.friend.model)) {
+      this.cleanupQuestFriend();
+      this.state.respawnAt = now + QUEST_FRIEND_RESPAWN_DELAY_MS;
+    }
+    if (this.state.friend || this.state.pendingSpawn) return;
+    if (this.state.respawnAt && now < this.state.respawnAt) return;
+    this.state.pendingSpawn = true;
+    this.state.respawnAt = 0;
+
+    const playerPosition = this.getPlayerModel?.()?.position;
+    const angle = Math.random() * Math.PI * 2;
+    const radius = QUEST_FRIEND_SPAWN_RADIUS_MIN
+      + Math.random() * (QUEST_FRIEND_SPAWN_RADIUS_MAX - QUEST_FRIEND_SPAWN_RADIUS_MIN);
+    const originX = Number.isFinite(playerPosition?.x) ? playerPosition.x : 0;
+    const originZ = Number.isFinite(playerPosition?.z) ? playerPosition.z : 0;
+    const spawnX = originX + Math.cos(angle) * radius;
+    const spawnZ = originZ + Math.sin(angle) * radius;
+    const terrainHeight = getTerrainHeight(spawnX, spawnZ);
+    let spawnY = Number.isFinite(terrainHeight) ? terrainHeight + QUEST_FRIEND_GROUND_OFFSET : QUEST_FRIEND_GROUND_OFFSET;
+    const resolveGroundY = window.resolveGroundY;
+    if (typeof resolveGroundY === "function") {
+      const sampledGround = resolveGroundY(spawnX, spawnY + 4, spawnZ, {
+        includeSolidHit: true,
+        walkableSlopeDegrees: 42
+      });
+      if (Number.isFinite(sampledGround?.groundY)) {
+        spawnY = sampledGround.groundY + QUEST_FRIEND_GROUND_OFFSET;
+      }
+    }
+
+    loadMonsterModel(QUEST_FRIEND_MODEL, (data) => {
+      try {
+        const questFriend = new FriendlyCharacter(data);
+        questFriend.id = "quest-friendly-tutorial";
+        questFriend.modelPath = QUEST_FRIEND_MODEL;
+        questFriend.type = QUEST_FRIEND_MODEL;
+        questFriend.model.userData.hideInMapView = true;
+        questFriend.model.userData.isQuestFriend = true;
+        questFriend.alwaysShowHealthBar = false;
+        questFriend.enableDanceWhileEngaged = false;
+        questFriend.setNoticeRadius(10);
+        questFriend.setWanderRadius(QUEST_FRIEND_WANDER_RADIUS);
+        questFriend.setEngageRadius(QUEST_FRIEND_ENGAGE_RADIUS);
+        questFriend.setDisengageRadius(QUEST_FRIEND_DISENGAGE_RADIUS);
+        questFriend.setFollowTarget(this.state.shouldFollowPlayer ? this.getPlayerModel?.() : null, {
+          followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+          followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+          helpingPlayerFight: this.state.shouldFollowPlayer
+        });
+        questFriend.setLevel(1, { preserveHealth: false });
+        questFriend.resetHealth();
+        questFriend.healthBarVisibleUntil = 0;
+        if (questFriend.healthBar) {
+          questFriend.healthBar.visible = false;
+        }
+        questFriend.setPosition(spawnX, spawnY, spawnZ);
+        questFriend.setHomePosition(new THREE.Vector3(spawnX, spawnY, spawnZ));
+        this.scene?.add(questFriend.model);
+        this.attachPhysics?.(questFriend);
+        this.state.friend = questFriend;
+      } finally {
+        this.state.pendingSpawn = false;
+      }
+    });
+  }
+
+  getCurrentSuggestedQuest() {
+    return TUTORIAL_QUESTS.find((quest) => !this.state.completedQuestIds.includes(quest.id)) || null;
+  }
+
+  getActiveQuest() {
+    const suggested = this.getCurrentSuggestedQuest();
+    if (!suggested) return null;
+    return this.state.acceptedQuestIds.includes(suggested.id) ? suggested : null;
+  }
+
+  getQuestById(questId) {
+    return TUTORIAL_QUESTS.find((quest) => quest.id === questId) || null;
+  }
+
+  getQuestTarget(quest) {
+    return Number.isFinite(quest?.target) ? Math.max(1, Math.floor(quest.target)) : 1;
+  }
+
+  getQuestXpReward(quest) {
+    return Number.isFinite(quest?.xp) ? Math.max(0, Math.floor(quest.xp)) : QUEST_GENERIC_XP;
+  }
+
+  hasStartedQuestProgress(quest) {
+    if (quest?.kind === "world") return this.state.worldQuestDistanceMeters > 0;
+    if (quest?.kind === "mushroom") return this.state.mushroomCount > 0;
+    if (quest?.kind === "zombie") return this.state.zombieKillCount > 0;
+    if (quest?.kind === "deer") return this.state.deerKillCount > 0;
+    if (quest?.kind === "rock") return this.state.rockBlownUpCount > 0;
+    if (quest?.kind === "craft") return this.state.craftedItemCount > 0;
+    if (quest?.kind === "merchant") return this.state.merchantBought || this.state.merchantSold;
+    return false;
+  }
+
+  getDialogueForFriendly(friendly, dialoguePool) {
+    if (!this.isQuestFriend(friendly)) {
+      const baseDialogue = Array.isArray(dialoguePool) && dialoguePool.length > 0
+        ? dialoguePool[Math.floor(Math.random() * dialoguePool.length)]
+        : { blocks: ["Hello, traveler."], responses: [] };
+      const isHelping = !!friendly?.helpingPlayerFight;
+      return {
+        blocks: [
+          ...(Array.isArray(baseDialogue.blocks) ? baseDialogue.blocks : []),
+          isHelping
+            ? "I’m helping you fight monsters. Want me to stop following you?"
+            : "Do you want help fighting monsters?"
+        ],
+        responses: [
+          ...(Array.isArray(baseDialogue.responses) ? baseDialogue.responses : []),
+          {
+            label: isHelping ? "stop helping" : "yes, help fight",
+            reply: isHelping ? "Okay, I’ll stop following you." : "You got it. I’ll follow you and fight nearby monsters.",
+            onSelect: isHelping ? "stopFriendlyMonsterHelp" : "startFriendlyMonsterHelp"
+          },
+          ...(!isHelping ? [{
+            label: "no thanks",
+            reply: "No problem. Stay safe out there."
+          }] : [])
+        ]
+      };
+    }
+
+    const quest = this.getCurrentSuggestedQuest();
+    if (!quest) {
+      return {
+        blocks: [
+          "You finished every tutorial quest in my queue.",
+          "Nice work, adventurer. Keep exploring Street Quest!"
+        ],
+        responses: [
+          {
+            label: this.state.shouldFollowPlayer ? "stop following me" : "follow me",
+            reply: this.state.shouldFollowPlayer ? "Okay, I’ll stay here and keep watch." : "I’ll stick close and help fight monsters.",
+            onSelect: this.state.shouldFollowPlayer ? "stopFollowingQuestFriend" : "startFollowingQuestFriend"
+          },
+          {
+            label: "No thanks, see you later.",
+            reply: "See you out there."
+          }
+        ]
+      };
+    }
+
+    const questAccepted = this.state.acceptedQuestIds.includes(quest.id);
+    const progressText = this.getQuestProgressText(quest.id);
+    const intro = quest.id === "world-walk-30m"
+      ? "Welcome to Street Quest! First quest: walk your player 30 meters through the world."
+      : `Next quest: ${quest.title}.`;
+
+    return {
+      blocks: [intro, `${quest.description} ${progressText}`.trim()],
+      responses: [
+        {
+          label: questAccepted ? "I already accepted it" : "Accept quest",
+          reply: questAccepted ? "You're already on it. Keep going!" : `Awesome. ${quest.title} is now in your quest list.`,
+          onSelect: "acceptTutorialQuest"
+        },
+        {
+          label: "FAQ",
+          reply: quest.faq,
+          onSelect: "tutorialFaq"
+        },
+        {
+          label: "No thanks, see you later.",
+          reply: "No worries. Come back anytime.",
+          onSelect: "declineTutorialQuest"
+        },
+        {
+          label: "Here's some food",
+          reply: "Thanks! That really helps.",
+          onSelect: "feedQuestGuy"
+        },
+        ...(this.state.shouldFollowPlayer ? [
+          {
+            label: "why are you following me?",
+            reply: "I’m scared of the zombies out there, so I feel safer sticking close to you.",
+            onSelect: "askWhyFollowing"
+          },
+          {
+            label: "stop following me",
+            reply: "Okay, I’ll stay here and keep watch.",
+            onSelect: "stopFollowingQuestFriend"
+          }
+        ] : [
+          {
+            label: "follow me",
+            reply: "I’ll stick close and help fight monsters.",
+            onSelect: "startFollowingQuestFriend"
+          }
+        ])
+      ]
+    };
+  }
+
+  handleDialogueOption(option, activeFriendly = null) {
+    if (!option?.onSelect) return;
+    if (option.onSelect === "acceptTutorialQuest") {
+      this.acceptSuggestedQuest();
+      return;
+    }
+    if (option.onSelect === "stopFollowingQuestFriend") {
+      this.state.shouldFollowPlayer = false;
+      this.state.friend?.setFollowTarget(null, { helpingPlayerFight: false });
+      return;
+    }
+    if (option.onSelect === "startFollowingQuestFriend") {
+      this.state.shouldFollowPlayer = true;
+      this.state.friend?.setFollowTarget(this.getPlayerModel?.(), {
+        followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+        followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+        helpingPlayerFight: true
+      });
+      return;
+    }
+    if (option.onSelect === "startFriendlyMonsterHelp" && activeFriendly?.setFollowTarget) {
+      activeFriendly.setFollowTarget(this.getPlayerModel?.(), {
+        followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+        followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+        helpingPlayerFight: true
+      });
+      return;
+    }
+    if (option.onSelect === "stopFriendlyMonsterHelp" && activeFriendly?.setFollowTarget) {
+      activeFriendly.setFollowTarget(null, { helpingPlayerFight: false });
+    }
+  }
+
+  acceptSuggestedQuest() {
+    const quest = this.getCurrentSuggestedQuest();
+    if (!quest) return;
+    const wasAccepted = this.state.acceptedQuestIds.includes(quest.id);
+    if (!wasAccepted) {
+      this.state.acceptedQuestIds.push(quest.id);
+      this.notifyQuestStateChanged();
+    }
+    this.state.shouldFollowPlayer = true;
+    this.state.friend?.setFollowTarget(this.getPlayerModel?.(), {
+      followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+      followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+      helpingPlayerFight: true
+    });
+
+    if (wasAccepted && this.hasStartedQuestProgress(quest)) return;
+
+    const target = this.getQuestTarget(quest);
+    if (quest.kind === "world") {
+      const latestFix = window.latestLocation;
+      this.state.worldQuestStartPosition = hasValidFix(latestFix) ? { x: latestFix.x, z: latestFix.z } : null;
+      this.state.worldQuestDistanceMeters = 0;
+    }
+    if (quest.kind === "mushroom") {
+      this.state.mushroomCount = 0;
+    }
+    if (quest.kind === "zombie") {
+      this.state.zombieKillCount = 0;
+    }
+    if (quest.kind === "merchant") {
+      this.state.merchantBought = false;
+      this.state.merchantSold = false;
+      const coins = window.appState?.getCoins?.() ?? 0;
+      if (coins < 30) {
+        window.appState?.addCoins?.(30 - coins);
+      }
+      window.spawnTutorialMerchantNearby?.();
+    }
+    if (quest.kind === "deer") {
+      this.state.deerKillCount = 0;
+      for (let i = 0; i < target; i += 1) {
+        window.spawnTutorialDeerNearby?.();
+      }
+      window.spawnTutorialBowAndArrowsNearby?.();
+    }
+    if (quest.kind === "rock") {
+      this.state.rockBlownUpCount = 0;
+      for (let i = 0; i < target; i += 1) {
+        window.spawnTutorialRockAndBombNearby?.();
+      }
+    }
+    if (quest.kind === "craft") {
+      this.state.craftedItemCount = 0;
+    }
+  }
+
+  getQuestProgressText(questId) {
+    const quest = this.getQuestById(questId);
+    if (!quest) return "";
+    const target = this.getQuestTarget(quest);
+    const isCompleted = this.state.completedQuestIds.includes(questId);
+
+    if (quest.kind === "world") {
+      const moved = isCompleted ? target : Math.floor(this.state.worldQuestDistanceMeters);
+      return `(${Math.min(moved, target)}/${target} m)`;
+    }
+    if (quest.kind === "mushroom") {
+      const count = isCompleted ? target : this.state.mushroomCount;
+      return `(${Math.min(count, target)}/${target})`;
+    }
+    if (quest.kind === "zombie") {
+      const count = isCompleted ? target : this.state.zombieKillCount;
+      return `(${Math.min(count, target)}/${target})`;
+    }
+    if (quest.kind === "deer") {
+      const count = isCompleted ? target : this.state.deerKillCount;
+      return `(${Math.min(count, target)}/${target})`;
+    }
+    if (quest.kind === "rock") {
+      const count = isCompleted ? target : this.state.rockBlownUpCount;
+      return `(${Math.min(count, target)}/${target})`;
+    }
+    if (quest.kind === "craft") {
+      const count = isCompleted ? target : this.state.craftedItemCount;
+      return `(${Math.min(count, target)}/${target})`;
+    }
+    if (quest.kind === "merchant") {
+      const buyLabel = isCompleted || this.state.merchantBought ? "✅ buy" : "⬜ buy";
+      const sellLabel = isCompleted || this.state.merchantSold ? "✅ sell" : "⬜ sell";
+      return `(${buyLabel}, ${sellLabel})`;
+    }
+    return "";
+  }
+
+  completeQuest(questId, xpReward) {
+    if (this.state.completedQuestIds.includes(questId)) return;
+    this.state.completedQuestIds.push(questId);
+    this.notifyQuestStateChanged();
+    this.addXp?.(xpReward);
+  }
+
+  handleMushroomCollected() {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.kind !== "mushroom") return;
+    this.state.mushroomCount += 1;
+    if (this.state.mushroomCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
+  }
+
+  handleMonsterKilled(monster) {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.kind !== "zombie") return;
+    const label = String(monster?.type || monster?.modelPath || "").toLowerCase();
+    if (!label.includes("zombie")) return;
+    this.state.zombieKillCount += 1;
+    if (this.state.zombieKillCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
+  }
+
+  handleAnimalKilled(animal) {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.kind !== "deer") return;
+    if (String(animal?.type || "").toLowerCase() !== "deer") return;
+    this.state.deerKillCount += 1;
+    if (this.state.deerKillCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
+  }
+
+  handleMerchantTransaction(kind) {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.kind !== "merchant") return;
+    if (kind === "buy") this.state.merchantBought = true;
+    if (kind === "sell") this.state.merchantSold = true;
+    if (this.state.merchantBought && this.state.merchantSold) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
+  }
+
+  handleRockBlownUp(count = 1) {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.kind !== "rock") return;
+    if (!Number.isFinite(count) || count <= 0) return;
+    this.state.rockBlownUpCount += count;
+    if (this.state.rockBlownUpCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
+  }
+
+  handleCraftedItem() {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.kind !== "craft") return;
+    this.state.craftedItemCount += 1;
+    if (this.state.craftedItemCount >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
+  }
+
+  updateWorldQuestProgress() {
+    const activeQuest = this.getActiveQuest();
+    if (!activeQuest || activeQuest.kind !== "world") return;
+
+    const latestFix = window.latestLocation;
+    if (!hasValidFix(latestFix)) return;
+
+    if (!hasValidFix(this.state.worldQuestStartPosition)) {
+      this.state.worldQuestStartPosition = { x: latestFix.x, z: latestFix.z };
+      this.state.worldQuestDistanceMeters = 0;
+      return;
+    }
+
+    const moved = distanceMeters(this.state.worldQuestStartPosition, latestFix);
+    this.state.worldQuestDistanceMeters = Math.max(0, moved);
+
+    if (moved >= this.getQuestTarget(activeQuest)) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
+  }
+
+  updateClimbQuestProgress() {
+    const activeQuest = this.getActiveQuest();
+    const isClimbing = window.playerControls?.isClimbing === true;
+    if (activeQuest?.kind === "climb" && isClimbing && !this.state.wasClimbingLastFrame) {
+      this.completeQuest(activeQuest.id, this.getQuestXpReward(activeQuest));
+    }
+    this.state.wasClimbingLastFrame = isClimbing;
+  }
+
+  getQuestLog() {
+    return this.state.acceptedQuestIds.map((questId) => {
+      const quest = TUTORIAL_QUESTS.find((entry) => entry.id === questId);
+      if (!quest) return null;
+      const completed = this.state.completedQuestIds.includes(questId);
+      return {
+        id: quest.id,
+        title: quest.title,
+        description: quest.description,
+        completed,
+        progress: this.getQuestProgressText(quest.id)
+      };
+    }).filter(Boolean);
+  }
+
+  update() {
+    this.ensureQuestFriendSpawned();
+    const friend = this.state.friend;
+    const playerModel = this.getPlayerModel?.();
+    if (friend?.model && playerModel) {
+      if (this.state.shouldFollowPlayer) {
+        friend.setFollowTarget(playerModel, {
+          followDistance: QUEST_FRIEND_FOLLOW_DISTANCE,
+          followStartDistance: QUEST_FRIEND_FOLLOW_START_DISTANCE,
+          helpingPlayerFight: true
+        });
+      } else {
+        friend.setFollowTarget(null, { helpingPlayerFight: false });
+      }
+      const monsters = Array.isArray(window.monsters) ? window.monsters : [];
+      friend.updateAI(this.state.deltaSeconds, playerModel, {}, monsters, {
+        resolveGroundY: typeof window.resolveGroundY === "function" ? window.resolveGroundY : null,
+        walkableSlopeDegrees: 42,
+        groundOffset: QUEST_FRIEND_GROUND_OFFSET
+      });
+    }
+    this.updateWorldQuestProgress();
+    this.updateClimbQuestProgress();
+  }
+}

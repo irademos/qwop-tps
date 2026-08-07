@@ -1,4 +1,4 @@
-import { bootstrapGameApp } from './app/bootstrapGameApp.js';
+import { bootstrapGameApp } from './src/bootstrap/bootstrapGameApp.js';
 
 window.addEventListener('DOMContentLoaded', async () => {
   try {
