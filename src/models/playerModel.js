@@ -651,8 +651,19 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
   _bqSceneTarget.y *= handRotConfig.signY;
   _bqSceneTarget.z *= handRotConfig.signZ;
 
-  // Ensure slerp always takes the short arc (prevent hemisphere-flip pop)
-  if (glbScene.quaternion.dot(_bqSceneTarget) < 0) _bqSceneTarget.negate();
+  // Ensure slerp always takes the short arc (prevent hemisphere-flip pop).
+  // Use manual dot + component negation instead of Quaternion.dot()/.negate()
+  // to avoid runtime errors on Three.js builds that lack those prototype methods.
+  const _qdot = glbScene.quaternion.w * _bqSceneTarget.w
+              + glbScene.quaternion.x * _bqSceneTarget.x
+              + glbScene.quaternion.y * _bqSceneTarget.y
+              + glbScene.quaternion.z * _bqSceneTarget.z;
+  if (_qdot < 0) {
+    _bqSceneTarget.w *= -1;
+    _bqSceneTarget.x *= -1;
+    _bqSceneTarget.y *= -1;
+    _bqSceneTarget.z *= -1;
+  }
 
   // Smooth toward target orientation
   glbScene.quaternion.slerp(_bqSceneTarget, 1 - Math.exp(-handRotConfig.smoothing * dt));
