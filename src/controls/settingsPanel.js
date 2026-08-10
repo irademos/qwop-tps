@@ -650,9 +650,9 @@ function buildDisplayPanel() {
   const firstPersonToggle = createElement('input', 'settings-checkbox');
   firstPersonToggle.id = 'settings-display-first-person';
   firstPersonToggle.type = 'checkbox';
-  firstPersonToggle.checked = true;
+  firstPersonToggle.checked = false;
   const firstPersonHint = createElement('div', 'settings-muted');
-  firstPersonHint.textContent = 'Uncheck to switch to third-person view (camera pulls back to show the player).';
+  firstPersonHint.textContent = 'Check to switch to first-person view.';
   firstPersonGroup.append(firstPersonLabel, firstPersonToggle, firstPersonHint);
 
   const gyroGroup = createElement('div', 'settings-field');
@@ -795,6 +795,18 @@ function buildDisplayPanel() {
     document.body.appendChild(overlay);
   });
 
+  const tpCameraLabel = createElement('label', 'settings-label', '3rd Person Camera');
+  const tpCameraHint = createElement('div', 'settings-muted');
+  tpCameraHint.textContent = 'Adjust the third-person camera position and capsule transparency.';
+  const tpCameraHeaderGroup = createElement('div', 'settings-field');
+  tpCameraHeaderGroup.append(tpCameraLabel, tpCameraHint);
+
+  const cameraDistField = createRangeField({ id: 'settings-display-cam-distance', label: 'Camera Distance', min: 1, max: 20, step: 0.5 });
+  const cameraHeightField = createRangeField({ id: 'settings-display-cam-height', label: 'Camera Height', min: -2, max: 10, step: 0.25 });
+  const lookTargetField = createRangeField({ id: 'settings-display-cam-look-target', label: 'Look Target Height', min: 0, max: 3, step: 0.1 });
+  const capsuleOpacityField = createRangeField({ id: 'settings-display-capsule-opacity', label: 'Capsule Opacity', min: 0, max: 1, step: 0.05 });
+  const fovField = createRangeField({ id: 'settings-display-fov', label: 'Field of View', min: 30, max: 160, step: 1 });
+
   panelEl.append(
     modeGroup,
     performanceGroup,
@@ -804,6 +816,12 @@ function buildDisplayPanel() {
     gyroRecalGroup,
     highContrastGroup,
     cameraPreviewGroup,
+    tpCameraHeaderGroup,
+    cameraDistField.field,
+    cameraHeightField.field,
+    lookTargetField.field,
+    capsuleOpacityField.field,
+    fovField.field,
     ambientField.field,
     directionalField.field,
     groundField.field,
@@ -821,6 +839,16 @@ function buildDisplayPanel() {
     gyroRecalBtn,
     gyroRecalGroup,
     highContrastToggle,
+    camDistanceSlider: cameraDistField.input,
+    camDistanceValue: cameraDistField.valueLabel,
+    camHeightSlider: cameraHeightField.input,
+    camHeightValue: cameraHeightField.valueLabel,
+    lookTargetSlider: lookTargetField.input,
+    lookTargetValue: lookTargetField.valueLabel,
+    capsuleOpacitySlider: capsuleOpacityField.input,
+    capsuleOpacityValue: capsuleOpacityField.valueLabel,
+    fovSlider: fovField.input,
+    fovValue: fovField.valueLabel,
     sliders: {
       ambientIntensity: ambientField.input,
       directionalIntensity: directionalField.input,
@@ -1749,6 +1777,65 @@ function bindEvents() {
         window.playerControls.firstPersonView = event.target.checked;
       }
     });
+  }
+
+  const _wireTpSlider = (sliderKey, valueKey, tpConfigKey, format) => {
+    const slider = elements.displayFields?.[sliderKey];
+    if (!slider) return;
+    const syncFromControls = () => {
+      const cfg = window.playerControls?.tpConfig;
+      if (cfg && tpConfigKey in cfg) {
+        slider.value = cfg[tpConfigKey];
+        if (elements.displayFields?.[valueKey]) {
+          elements.displayFields[valueKey].textContent = format(cfg[tpConfigKey]);
+        }
+      }
+    };
+    slider.addEventListener('input', (event) => {
+      const value = parseFloat(event.target.value);
+      if (window.playerControls?.tpConfig) {
+        window.playerControls.tpConfig[tpConfigKey] = value;
+      }
+      if (elements.displayFields?.[valueKey]) {
+        elements.displayFields[valueKey].textContent = format(value);
+      }
+    });
+    syncFromControls();
+    window.addEventListener('playercontrols-ready', syncFromControls, { once: true });
+  };
+
+  _wireTpSlider('camDistanceSlider', 'camDistanceValue', 'distance', v => v.toFixed(1));
+  _wireTpSlider('camHeightSlider', 'camHeightValue', 'height', v => v.toFixed(2));
+  _wireTpSlider('lookTargetSlider', 'lookTargetValue', 'lookTargetHeight', v => v.toFixed(1));
+  _wireTpSlider('capsuleOpacitySlider', 'capsuleOpacityValue', 'capsuleOpacity', v => v.toFixed(2));
+
+  if (elements.displayFields?.fovSlider) {
+    const fovSlider = elements.displayFields.fovSlider;
+    const syncFov = () => {
+      const cam = window.playerControls?.camera;
+      if (cam) {
+        fovSlider.value = cam.fov;
+        if (elements.displayFields?.fovValue) {
+          elements.displayFields.fovValue.textContent = Math.round(cam.fov);
+        }
+      }
+    };
+    fovSlider.addEventListener('input', (event) => {
+      const v = parseFloat(event.target.value);
+      const controls = window.playerControls;
+      if (controls) {
+        controls.camera.fov = v;
+        controls.camera.updateProjectionMatrix();
+        controls.defaultFov = v;
+        controls.defaultFovDesktop = v;
+        controls.aimFov = Math.max(45, v - 8);
+      }
+      if (elements.displayFields?.fovValue) {
+        elements.displayFields.fovValue.textContent = Math.round(v);
+      }
+    });
+    syncFov();
+    window.addEventListener('playercontrols-ready', syncFov, { once: true });
   }
 
   if (elements.displayFields?.gyroToggle) {
