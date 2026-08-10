@@ -14,6 +14,23 @@ const POMMEL_COLOR  = 0xaa1111;
 const _foamEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const DEG = Math.PI / 180;
 
+// Scratch objects for directional mode (no per-frame allocation)
+const _fsq_default  = new THREE.Quaternion();
+const _fsq_delta    = new THREE.Quaternion();
+const _fsv_default  = new THREE.Vector3();
+const _fsv_target   = new THREE.Vector3();
+const _fsEulerDef   = new THREE.Euler(0, 0, 0, 'YXZ');
+
+// Normalizer: expected max 2D distance (normalized coords) for a fully lateral finger point.
+const FS_MAX_LATERAL  = 0.15;
+// How far the hands spread from center in player-local units at max lateral.
+const FS_HAND_SPREAD  = 0.75;
+// Vertical range added to center height per FS_MAX_LATERAL of upward finger movement.
+const FS_HAND_HEIGHT_GAIN = 0.4;
+// Default center position of hands in foam sword directional mode.
+const FS_HAND_CENTER_Y = 0.82;
+const FS_HAND_Z        = 0.50;
+
 export class FoamSword extends Weapon {
   constructor(scene) {
     super(scene, {
@@ -87,21 +104,80 @@ export class FoamSword extends Weapon {
 
   update() {
     if (this.holder?.playerModel) {
-      const htd = this.holder.playerModel.userData.handTrackingArms;
+      const pm = this.holder.playerModel;
+      const htd = pm.userData.handTrackingArms;
       // Tracking slot 'left' = right physical hand (back-camera swap)
       const slot = htd?.left;
-      const palmX = slot?.landmarks?.[0]?.x ?? slot?.x ?? 0.5;
-      const palmY = slot?.landmarks?.[0]?.y ?? slot?.y ?? 0.5;
+      const landmarks = slot?.landmarks;
 
-      const coord = foamSwordConfig.handCoord === 'y' ? palmY : palmX;
-      const sign = foamSwordConfig.invert ? -1 : 1;
-      const sideAmount = (foamSwordConfig.handCenter - coord) * 2 * sign;
+      if (landmarks && landmarks.length >= 9) {
+        // --- Directional mode: index finger direction drives position + rotation ---
+        const idx5 = landmarks[5]; // index MCP (base of index finger)
+        const idx8 = landmarks[8]; // index tip
+        // Direction vector in camera normalized space
+        const dirX = idx8.x - idx5.x;
+        const dirY = idx8.y - idx5.y;
 
-      const ex = (foamSwordConfig.defaultX + sideAmount * foamSwordConfig.gainX + foamSwordConfig.dynOffset) * DEG;
-      const ey = (foamSwordConfig.defaultY + sideAmount * foamSwordConfig.gainY) * DEG;
-      const ez = (foamSwordConfig.defaultZ + sideAmount * foamSwordConfig.gainZ) * DEG;
-      _foamEuler.set(ex, ey, ez, 'YXZ');
-      this._holdQuaternion.setFromEuler(_foamEuler);
+        // Convert to player-local 2D direction.
+        // Back camera x is mirrored vs player-local x (camera-left = player-right),
+        // same flip used by palmToLocalHandPos: Δlocal_x = -Δcamera_x.
+        // Camera y is also inverted: up in camera (neg y) = up in player space.
+        const pdx = -dirX; // positive = player's right
+        const pdy = -dirY; // positive = player's up
+
+        // Normalize lateral component onto [0,1] range
+        const lateralDist = Math.sqrt(pdx * pdx + pdy * pdy);
+        const lateralNorm = Math.min(1, lateralDist / FS_MAX_LATERAL);
+
+        // Desired sword direction on the unit hemisphere in player-local space.
+        // Small lateralDist (pointing straight out) → (0, 0, 1) = forward.
+        // Large lateral component → direction follows the finger.
+        let nx = 0, ny = 0, nz = 1;
+        if (lateralDist > 0.001) {
+          nx = (pdx / lateralDist) * lateralNorm;
+          ny = (pdy / lateralDist) * lateralNorm;
+          nz = Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+        }
+
+        // Build holdQuaternion: rotate the default "straight out" orientation so
+        // the blade points toward (nx, ny, nz).
+        _fsEulerDef.set(
+          foamSwordConfig.defaultX * DEG,
+          foamSwordConfig.defaultY * DEG,
+          foamSwordConfig.defaultZ * DEG,
+          'YXZ'
+        );
+        _fsq_default.setFromEuler(_fsEulerDef);
+        // Where the blade points (+Z) under the default quaternion
+        _fsv_default.set(0, 0, 1).applyQuaternion(_fsq_default);
+        _fsv_target.set(nx, ny, nz);
+        _fsq_delta.setFromUnitVectors(_fsv_default, _fsv_target);
+        // New holdQuaternion preserves the guard orientation of the default, then
+        // rotates it to point the blade in the desired direction.
+        this._holdQuaternion.copy(_fsq_delta).multiply(_fsq_default);
+
+        // Signal playerModel to override hand positioning and lock bones to rest/fist.
+        pm.userData.foamSwordMode = true;
+        if (!pm.userData.foamSwordHandTarget) {
+          pm.userData.foamSwordHandTarget = { x: 0, y: FS_HAND_CENTER_Y, z: FS_HAND_Z };
+        }
+        const tgt = pm.userData.foamSwordHandTarget;
+        tgt.x = THREE.MathUtils.clamp(pdx * (FS_HAND_SPREAD / FS_MAX_LATERAL), -1.2, 1.2);
+        tgt.y = THREE.MathUtils.clamp(FS_HAND_CENTER_Y + pdy * (FS_HAND_HEIGHT_GAIN / FS_MAX_LATERAL), 0.2, 1.6);
+        tgt.z = FS_HAND_Z;
+      } else {
+        // Fallback when no landmarks: use existing palm-position-based rotation
+        const palmX = slot?.x ?? 0.5;
+        const palmY = slot?.y ?? 0.5;
+        const coord = foamSwordConfig.handCoord === 'y' ? palmY : palmX;
+        const sign = foamSwordConfig.invert ? -1 : 1;
+        const sideAmount = (foamSwordConfig.handCenter - coord) * 2 * sign;
+        const ex = (foamSwordConfig.defaultX + sideAmount * foamSwordConfig.gainX + foamSwordConfig.dynOffset) * DEG;
+        const ey = (foamSwordConfig.defaultY + sideAmount * foamSwordConfig.gainY) * DEG;
+        const ez = (foamSwordConfig.defaultZ + sideAmount * foamSwordConfig.gainZ) * DEG;
+        _foamEuler.set(ex, ey, ez, 'YXZ');
+        this._holdQuaternion.setFromEuler(_foamEuler);
+      }
     }
     super.update();
   }
