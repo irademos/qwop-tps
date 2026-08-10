@@ -11650,7 +11650,6 @@ async function initCore(runtimeContext) {
     const phoneSwordQrStatus = document.getElementById('phone-sword-qr-status');
     const phoneSwordQrDismiss = document.getElementById('phone-sword-qr-dismiss');
     const phoneSwordQrCopy = document.getElementById('phone-sword-qr-copy');
-    const phoneSwordGyroPanel = document.getElementById('phone-sword-gyro-panel');
     const phoneSwordCalibModal = document.getElementById('phone-sword-calib-modal');
     const phoneSwordConnectCalib = document.getElementById('phone-sword-connect-calib');
 
@@ -11772,34 +11771,6 @@ async function initCore(runtimeContext) {
       phoneSwordConnectCalib?.classList.add('hidden');
     });
 
-    // Sword direction debug panel toggle
-    document.getElementById('phone-sword-dir-toggle')?.addEventListener('click', () => {
-      const panel = document.getElementById('phone-sword-dir-panel');
-      const nowHidden = panel?.classList.toggle('hidden');
-      const btn = document.getElementById('phone-sword-dir-toggle');
-      if (btn) btn.textContent = `🗡️ Sword Direction ${nowHidden ? '▼' : '▲'}`;
-    });
-
-    // Copy current sword direction values to clipboard
-    document.getElementById('psw-dir-copy')?.addEventListener('click', () => {
-      const d = window.phoneSwordDir ?? { x: 0, y: 0, z: 0 };
-      const text = `x=${d.x.toFixed(3)} (left/right)  y=${d.y.toFixed(3)} (up/down)  z=${d.z.toFixed(3)} (forward)`;
-      navigator.clipboard?.writeText(text).catch(() => {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.cssText = 'position:fixed;opacity:0';
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-      });
-      const btn = document.getElementById('psw-dir-copy');
-      if (btn) {
-        btn.textContent = '✅ Copied!';
-        setTimeout(() => { btn.textContent = '📋 Copy Values'; }, 2000);
-      }
-    });
-
     // Create a dedicated PeerJS peer for receiving gyro data
     const { loadPeerJs: _loadPeerJs } = await import('../core/externalDeps.js');
     try {
@@ -11833,8 +11804,6 @@ async function initCore(runtimeContext) {
           phoneSwordConnectCalib?.classList.remove('hidden');
         }, 1800);
 
-        // Show gyro HUD
-        phoneSwordGyroPanel.classList.remove('hidden');
         window.phoneSwordGyro.connected = true;
 
         conn.on('data', (data) => {
@@ -11847,8 +11816,6 @@ async function initCore(runtimeContext) {
 
         conn.on('close', () => {
           window.phoneSwordGyro.connected = false;
-          document.getElementById('phone-sword-gyro-status').textContent = 'Disconnected';
-          document.getElementById('phone-sword-gyro-status').style.color = '#f87171';
         });
       });
 
@@ -16087,36 +16054,6 @@ async function initCore(runtimeContext) {
     }
     if (window.gameMode === 'horde' && !window.phoneSwordMode) {
       processHordeGestures();
-    }
-
-    // Phone Sword: update gyro HUD each frame
-    if (window.phoneSwordMode && window.phoneSwordGyro) {
-      const _g = window.phoneSwordGyro;
-      const _fmt = v => (v !== null && v !== undefined) ? v.toFixed(1) + '°' : '—';
-      const _alphaEl = document.getElementById('phone-sword-gyro-alpha');
-      const _betaEl = document.getElementById('phone-sword-gyro-beta');
-      const _gammaEl = document.getElementById('phone-sword-gyro-gamma');
-      if (_alphaEl) _alphaEl.textContent = 'α ' + _fmt(_g.alpha);
-      if (_betaEl) _betaEl.textContent = 'β ' + _fmt(_g.beta);
-      if (_gammaEl) _gammaEl.textContent = 'γ ' + _fmt(_g.gamma);
-
-      // Update sword direction debug bars
-      if (window.phoneSwordDir && !document.getElementById('phone-sword-dir-panel')?.classList.contains('hidden')) {
-        const _d = window.phoneSwordDir;
-        const _setBar = (barId, valId, v) => {
-          const bar = document.getElementById(barId);
-          const val = document.getElementById(valId);
-          if (bar) {
-            // Map [-1,1] → bar position: left=0%, center=50%, right=100%
-            bar.style.left = `${((v + 1) / 2 * 100).toFixed(1)}%`;
-            bar.style.width = `${(Math.abs(v) * 50).toFixed(1)}%`;
-          }
-          if (val) val.textContent = v.toFixed(2);
-        };
-        _setBar('psw-dir-x-bar', 'psw-dir-x-val', _d.x);
-        _setBar('psw-dir-y-bar', 'psw-dir-y-val', _d.y);
-        _setBar('psw-dir-z-bar', 'psw-dir-z-val', _d.z);
-      }
     }
 
     renderer.render(scene, camera);
