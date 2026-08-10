@@ -13013,6 +13013,11 @@ async function initCore(runtimeContext) {
       playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
     playerDead = false;
+    // Reset gesture equip state so gestures can re-equip after respawn
+    _hordeEquipped = null;
+    _hordePendingGesture = 'none';
+    _hordePendingFrames = 0;
+    _hordeEquipHoldSince = 0;
     updateControlAvailability();
     const actions = playerModel.userData.actions;
     const current = playerModel.userData.currentAction;
