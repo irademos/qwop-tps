@@ -190,13 +190,17 @@
 
       setStatus('Connecting to game…');
 
-      peer = new Peer({
-        config: {
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' }
-          ]
+      // Fetch TURN credentials from the game server so NAT traversal works
+      let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+      try {
+        const turnRes = await fetch('/api/turn-credentials');
+        if (turnRes.ok) {
+          const list = await turnRes.json();
+          if (Array.isArray(list) && list.length) iceServers = list;
         }
-      });
+      } catch (_) { /* fall through to STUN-only */ }
+
+      peer = new Peer({ config: { iceServers } });
 
       peer.on('error', (err) => {
         setError('Connection error: ' + err.message);
@@ -205,7 +209,7 @@
       });
 
       peer.on('open', () => {
-        conn = peer.connect(hostPeerId, { reliable: false, serialization: 'json' });
+        conn = peer.connect(hostPeerId, { serialization: 'json' });
 
         conn.on('open', () => {
           setStatus('Connected! Move your phone like a sword.');

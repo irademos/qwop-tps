@@ -11665,8 +11665,19 @@ async function initCore(runtimeContext) {
     const { loadPeerJs: _loadPeerJs } = await import('../core/externalDeps.js');
     try {
       const PeerClass = await _loadPeerJs();
+
+      // Fetch TURN credentials so NAT traversal works across different networks
+      let _gyroIceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+      try {
+        const _turnRes = await fetch('/api/turn-credentials');
+        if (_turnRes.ok) {
+          const _turnList = await _turnRes.json();
+          if (Array.isArray(_turnList) && _turnList.length) _gyroIceServers = _turnList;
+        }
+      } catch (_) { /* fall back to STUN-only */ }
+
       const gyroPeer = new PeerClass({
-        config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+        config: { iceServers: _gyroIceServers }
       });
 
       gyroPeer.on('open', (id) => {
