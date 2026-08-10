@@ -13013,6 +13013,27 @@ async function initCore(runtimeContext) {
       playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
     playerDead = false;
+    // Reset gesture equip state so gestures can re-equip after respawn
+    _hordeEquipped = null;
+    _hordePendingGesture = 'none';
+    _hordePendingFrames = 0;
+    _hordeEquipHoldSince = 0;
+    // Re-seed horde inventory (cleared by dropInventoryOnDeath) so gesture equip works again
+    if (window.gameMode === 'horde') {
+      if (!(inventoryState['pistol']?.count > 0)) {
+        inventoryState['pistol'] = ensureCatalogEntry('pistol', { count: 1 });
+      }
+      if (!(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
+        inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+          count: 1,
+          [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
+          [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+        }));
+      }
+      if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
+        inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+      }
+    }
     updateControlAvailability();
     const actions = playerModel.userData.actions;
     const current = playerModel.userData.currentAction;
