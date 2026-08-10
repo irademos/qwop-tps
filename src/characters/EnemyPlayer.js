@@ -104,6 +104,11 @@ export class EnemyPlayer {
     this._swingT       = 0;        // oscillation time accumulator
     this._lastHitTime  = 0;        // timestamp of last sword hit on player
     this._aiState      = 'chase';  // 'chase' | 'attack'
+
+    // Attack phase state machine
+    this._attackPhase    = 'hold_left'; // current phase of the attack sequence
+    this._attackPhaseT   = 0;           // time elapsed in current phase (seconds)
+    this._attackPhaseDur = 1 + Math.random() * 2; // duration of current phase
     this._prevRightHandWorldPos = new THREE.Vector3();
 
     this._isRagdoll    = false;
@@ -468,22 +473,83 @@ export class EnemyPlayer {
     const lerpL = 1 - Math.exp(-8 * dt);
 
     if (this._aiState === 'attack') {
-      this._swingT += dt * SWING_FREQ;
-      const sinT = Math.sin(this._swingT);
-      const cosT = Math.cos(this._swingT * 0.7);
+      this._attackPhaseT += dt;
 
-      this._handTargetR.set(
-        sinT * SWING_AMP_X * 0.5 + 0.6,
-        SWING_OFFSET_Y + cosT * 0.1,
-        sinT * SWING_AMP_Z * 0.5 + 0.3
-      );
-      this._handTargetL.set(-0.35, 0.65, 0.2);
+      // Advance through attack phases when the current one expires
+      if (this._attackPhaseT >= this._attackPhaseDur) {
+        this._attackPhaseT = 0;
+        switch (this._attackPhase) {
+          case 'hold_left':
+            this._attackPhase    = 'swipe_right';
+            this._attackPhaseDur = 0.35;
+            break;
+          case 'swipe_right':
+            this._attackPhase    = 'shift';
+            this._attackPhaseDur = 2 + Math.random() * 2;
+            break;
+          case 'shift':
+            this._attackPhase    = 'hold_up';
+            this._attackPhaseDur = 1 + Math.random() * 2;
+            break;
+          case 'hold_up':
+            this._attackPhase    = 'swipe_down';
+            this._attackPhaseDur = 0.35;
+            break;
+          case 'swipe_down':
+            this._attackPhase    = 'hold_left';
+            this._attackPhaseDur = 1 + Math.random() * 2;
+            break;
+        }
+      }
+
+      const p = Math.min(this._attackPhaseT / this._attackPhaseDur, 1); // 0→1 within phase
+
+      switch (this._attackPhase) {
+        case 'hold_left':
+          // Sword held to the left, slightly forward
+          this._handTargetR.set(-0.7, 0.9, 0.35);
+          this._handTargetL.set(-0.35, 0.65, 0.2);
+          break;
+
+        case 'swipe_right': {
+          // Fast sweep from left to right
+          const eased = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p; // ease-in-out
+          this._handTargetR.set(-0.7 + eased * 1.6, 0.9 - eased * 0.1, 0.35);
+          this._handTargetL.set(-0.35, 0.65, 0.2);
+          break;
+        }
+
+        case 'shift': {
+          // Gentle left/right oscillation
+          const sway = Math.sin(this._attackPhaseT * 4.5) * 0.4;
+          this._handTargetR.set(0.5 + sway, 0.85, 0.35);
+          this._handTargetL.set(-0.35, 0.65, 0.2);
+          break;
+        }
+
+        case 'hold_up':
+          // Sword raised straight up
+          this._handTargetR.set(0.25, 1.45, 0.2);
+          this._handTargetL.set(-0.35, 0.65, 0.2);
+          break;
+
+        case 'swipe_down': {
+          // Slam downward
+          const eased = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p;
+          this._handTargetR.set(0.25 + eased * 0.1, 1.45 - eased * 0.9, 0.2 + eased * 0.3);
+          this._handTargetL.set(-0.35, 0.65, 0.2);
+          break;
+        }
+      }
     } else {
-      // idle / chase / backoff — arms at sides, no swing
+      // idle / chase / backoff — arms at sides, reset attack phase
       const gait = this._aiState === 'backoff' ? 0 : Math.sin(Date.now() * 0.004);
       this._handTargetR.set( 0.4,  0.75 + gait * 0.06, 0.2);
       this._handTargetL.set(-0.4,  0.75 - gait * 0.06, 0.2);
       this._swingT = 0;
+      this._attackPhase    = 'hold_left';
+      this._attackPhaseT   = 0;
+      this._attackPhaseDur = 1 + Math.random() * 2;
     }
 
     this._rightHandGroup.position.lerp(this._handTargetR, lerpR);
