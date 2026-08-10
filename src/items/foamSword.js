@@ -15,6 +15,7 @@ const _foamEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const DEG = Math.PI / 180;
 
 // Scratch objects for directional mode (no per-frame allocation)
+const _fsSwordDir   = new THREE.Vector3();
 const _fsq_default  = new THREE.Quaternion();
 const _fsq_delta    = new THREE.Quaternion();
 const _fsv_default  = new THREE.Vector3();
@@ -103,19 +104,33 @@ export class FoamSword extends Weapon {
   }
 
   update() {
-    // In Phone Sword mode: gyro loop owns _holdQuaternion; lock hands to a fixed grip point
-    // so both hands appear to hold the sword handle regardless of blade orientation.
+    // In Phone Sword mode: gyro loop owns _holdQuaternion; position hands to match where
+    // the sword is pointing so they feel like they're gripping the handle at that angle.
     if (window.phoneSwordMode) {
       if (this.holder?.playerModel) {
         const pm = this.holder.playerModel;
         pm.userData.foamSwordMode = true;
+
+        // Derive where the blade points (+Z axis of sword in player-local space)
+        _fsSwordDir.set(0, 0, 1).applyQuaternion(this._holdQuaternion);
+
+        // Expose for the debug direction HUD
+        if (!window.phoneSwordDir) window.phoneSwordDir = { x: 0, y: 0, z: 0 };
+        window.phoneSwordDir.x = _fsSwordDir.x;
+        window.phoneSwordDir.y = _fsSwordDir.y;
+        window.phoneSwordDir.z = _fsSwordDir.z;
+
         if (!pm.userData.foamSwordHandTarget) {
-          pm.userData.foamSwordHandTarget = { x: 0, y: 0.85, z: 0.48 };
-        } else {
-          pm.userData.foamSwordHandTarget.x = 0;
-          pm.userData.foamSwordHandTarget.y = 0.85;
-          pm.userData.foamSwordHandTarget.z = 0.48;
+          pm.userData.foamSwordHandTarget = { x: 0, y: FS_HAND_CENTER_Y, z: FS_HAND_Z };
         }
+        const tgt = pm.userData.foamSwordHandTarget;
+        // Lateral: sword right → hands right, sword left → hands left
+        tgt.x = THREE.MathUtils.clamp(_fsSwordDir.x * FS_HAND_SPREAD, -1.2, 1.2);
+        // Vertical: sword up → hands up, sword down → hands down
+        tgt.y = THREE.MathUtils.clamp(FS_HAND_CENTER_Y + _fsSwordDir.y * FS_HAND_HEIGHT_GAIN, 0.2, 1.6);
+        // Depth: sword straight forward (z≈1) → hands extended toward camera (small z);
+        // sword tilted away → hands pulled back slightly.
+        tgt.z = THREE.MathUtils.clamp(FS_HAND_Z - (_fsSwordDir.z - 0.2) * 0.35, 0.15, 0.7);
       }
       super.update();
       return;

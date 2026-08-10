@@ -2968,6 +2968,48 @@ body.settings-open #inventory-button {
   color: #94a3b8;
 }
 
+/* Sword direction debug bars */
+.psw-dir-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 3px 0;
+  font-size: 0.65rem;
+  color: #94a3b8;
+}
+.psw-dir-label {
+  width: 44px;
+  flex-shrink: 0;
+  font-size: 0.6rem;
+  color: #64748b;
+}
+.psw-dir-bar-wrap {
+  flex: 1;
+  height: 8px;
+  background: #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.psw-dir-bar {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  height: 100%;
+  background: #3b82f6;
+  transform: translateX(-50%);
+  width: 4px;
+  border-radius: 2px;
+  transition: left 0.05s, width 0.05s;
+}
+.psw-dir-val {
+  width: 34px;
+  text-align: right;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+}
+
 /* Calibration modal */
 .phone-sword-calib-modal {
   position: fixed;
