@@ -176,6 +176,7 @@
       <p class="phone-sword-qr-desc">Scan with your phone to connect your gyroscope as a sword controller</p>
       <canvas id="phone-sword-qr-canvas"></canvas>
       <div id="phone-sword-qr-url" class="phone-sword-qr-url"></div>
+      <button id="phone-sword-qr-copy" class="phone-sword-qr-copy">📋 Copy URL</button>
       <div id="phone-sword-qr-status" class="phone-sword-qr-status">Waiting for phone…</div>
       <button id="phone-sword-qr-dismiss" class="phone-sword-qr-dismiss">Play without phone</button>
     </div>
@@ -188,6 +189,49 @@
     <div id="phone-sword-gyro-beta">β —</div>
     <div id="phone-sword-gyro-gamma">γ —</div>
     <div id="phone-sword-gyro-status" class="phone-sword-gyro-conn">Connected</div>
+    <button id="phone-sword-calibrate-btn" class="phone-sword-calibrate-btn">⚙️ Calibrate</button>
+    <div class="phone-sword-debug-section">
+      <button id="phone-sword-debug-toggle" class="phone-sword-debug-toggle">🔧 Rotation Offsets ▼</button>
+      <div id="phone-sword-debug-sliders" class="phone-sword-debug-sliders hidden">
+        <label class="psw-slider-row">
+          <span class="psw-slider-label">X <span class="psw-slider-desc">(pitch)</span></span>
+          <input type="range" id="psw-offset-x" min="-180" max="180" value="0" step="1">
+          <span class="psw-slider-val" id="psw-offset-x-val">0°</span>
+        </label>
+        <label class="psw-slider-row">
+          <span class="psw-slider-label">Y <span class="psw-slider-desc">(yaw)</span></span>
+          <input type="range" id="psw-offset-y" min="-180" max="180" value="0" step="1">
+          <span class="psw-slider-val" id="psw-offset-y-val">0°</span>
+        </label>
+        <label class="psw-slider-row">
+          <span class="psw-slider-label">Z <span class="psw-slider-desc">(roll)</span></span>
+          <input type="range" id="psw-offset-z" min="-180" max="180" value="0" step="1">
+          <span class="psw-slider-val" id="psw-offset-z-val">0°</span>
+        </label>
+        <button id="psw-offset-reset" class="psw-offset-reset">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phone Sword: gyro calibration modal -->
+  <div id="phone-sword-calib-modal" class="phone-sword-calib-modal hidden">
+    <div class="phone-sword-calib-inner">
+      <div class="phone-sword-calib-title">⚔️ Calibrate Sword</div>
+      <p class="phone-sword-calib-desc">Hold your phone in the position that should be the sword's resting position, then tap <strong>Set Neutral</strong>.</p>
+      <div class="phone-sword-calib-live" id="phone-sword-calib-live">
+        <span id="phone-sword-calib-alpha">α —</span>
+        <span id="phone-sword-calib-beta">β —</span>
+        <span id="phone-sword-calib-gamma">γ —</span>
+      </div>
+      <div class="phone-sword-calib-presets">
+        <div class="phone-sword-calib-preset-label">Quick presets:</div>
+        <button class="phone-sword-calib-preset" data-preset="flat">📱 Phone flat (tip forward)</button>
+        <button class="phone-sword-calib-preset" data-preset="upright">📱 Phone upright</button>
+        <button class="phone-sword-calib-preset" data-preset="guard">⚔️ Guard (diagonal)</button>
+      </div>
+      <button id="phone-sword-calib-set" class="phone-sword-calib-set">✅ Set Neutral</button>
+      <button id="phone-sword-calib-close" class="phone-sword-calib-close">Close</button>
+    </div>
   </div>
 
   <script src="app.js" type="module"></script>

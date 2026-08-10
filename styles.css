@@ -2779,6 +2779,28 @@ body.settings-open #inventory-button {
   color: #4ade80;
 }
 
+.phone-sword-qr-copy {
+  background: #3730a3;
+  color: #e0e7ff;
+  border: 1px solid #6366f1;
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  width: 100%;
+}
+
+.phone-sword-qr-copy:hover {
+  background: #4338ca;
+}
+
+.phone-sword-qr-copy.copied {
+  background: #166534;
+  border-color: #4ade80;
+  color: #bbf7d0;
+}
+
 .phone-sword-qr-dismiss {
   background: transparent;
   color: #94a3b8;
@@ -2830,4 +2852,236 @@ body.settings-open #inventory-button {
   color: #4ade80;
   font-size: 0.72rem;
   margin-top: 4px;
+}
+
+.phone-sword-gyro-panel {
+  pointer-events: auto;
+}
+
+.phone-sword-calibrate-btn {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  background: #312e81;
+  color: #c7d2fe;
+  border: 1px solid #6366f1;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.phone-sword-calibrate-btn:hover {
+  background: #3730a3;
+}
+
+.phone-sword-debug-section {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.phone-sword-debug-toggle {
+  display: block;
+  width: 100%;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: #64748b;
+  font-size: 0.68rem;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.phone-sword-debug-toggle:hover {
+  color: #94a3b8;
+  border-color: #475569;
+}
+
+.phone-sword-debug-sliders {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.phone-sword-debug-sliders.hidden {
+  display: none;
+}
+
+.psw-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: #7dd3fc;
+  cursor: default;
+}
+
+.psw-slider-label {
+  width: 44px;
+  flex-shrink: 0;
+  font-family: monospace;
+}
+
+.psw-slider-desc {
+  color: #475569;
+  font-size: 0.62rem;
+}
+
+.psw-slider-row input[type="range"] {
+  flex: 1;
+  height: 3px;
+  accent-color: #6366f1;
+  cursor: pointer;
+}
+
+.psw-slider-val {
+  width: 32px;
+  text-align: right;
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: #a5b4fc;
+  flex-shrink: 0;
+}
+
+.psw-offset-reset {
+  background: transparent;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  color: #475569;
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  cursor: pointer;
+  margin-top: 2px;
+  align-self: flex-end;
+  transition: color 0.15s;
+}
+
+.psw-offset-reset:hover {
+  color: #94a3b8;
+}
+
+/* Calibration modal */
+.phone-sword-calib-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.80);
+  z-index: 9100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.phone-sword-calib-modal.hidden {
+  display: none;
+}
+
+.phone-sword-calib-inner {
+  background: #1e293b;
+  border: 2px solid #6366f1;
+  border-radius: 16px;
+  padding: 24px 28px;
+  text-align: center;
+  max-width: 320px;
+  width: 90%;
+  box-shadow: 0 8px 40px rgba(99, 102, 241, 0.3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.phone-sword-calib-title {
+  font-family: 'Press Start 2P', sans-serif;
+  font-size: 0.9rem;
+  color: #a5b4fc;
+}
+
+.phone-sword-calib-desc {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.phone-sword-calib-live {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: #7dd3fc;
+  display: flex;
+  gap: 16px;
+  width: 100%;
+  justify-content: center;
+}
+
+.phone-sword-calib-presets {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.phone-sword-calib-preset-label {
+  font-size: 0.72rem;
+  color: #64748b;
+  text-align: left;
+}
+
+.phone-sword-calib-preset {
+  background: #1e293b;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  padding: 6px 12px;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.phone-sword-calib-preset:hover {
+  border-color: #818cf8;
+  color: #e2e8f0;
+}
+
+.phone-sword-calib-set {
+  background: #166534;
+  border: 1px solid #4ade80;
+  border-radius: 8px;
+  padding: 8px 20px;
+  color: #bbf7d0;
+  font-size: 0.85rem;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.15s;
+}
+
+.phone-sword-calib-set:hover {
+  background: #15803d;
+}
+
+.phone-sword-calib-close {
+  background: transparent;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  padding: 6px 16px;
+  color: #64748b;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.phone-sword-calib-close:hover {
+  color: #94a3b8;
 }
