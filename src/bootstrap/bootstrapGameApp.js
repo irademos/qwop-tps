@@ -11652,7 +11652,7 @@ async function initCore(runtimeContext) {
     const phoneSwordQrCopy = document.getElementById('phone-sword-qr-copy');
     const phoneSwordGyroPanel = document.getElementById('phone-sword-gyro-panel');
     const phoneSwordCalibModal = document.getElementById('phone-sword-calib-modal');
-    const phoneSwordCalibrateBtn = document.getElementById('phone-sword-calibrate-btn');
+    const phoneSwordConnectCalib = document.getElementById('phone-sword-connect-calib');
 
     const showPhoneSwordQr = async (peerId) => {
       const phoneUrl = `${location.origin}/phone-sword.html?host=${encodeURIComponent(peerId)}`;
@@ -11711,7 +11711,6 @@ async function initCore(runtimeContext) {
     const openCalibModal = () => phoneSwordCalibModal.classList.remove('hidden');
     const closeCalibModal = () => phoneSwordCalibModal.classList.add('hidden');
 
-    phoneSwordCalibrateBtn.addEventListener('click', openCalibModal);
     document.getElementById('phone-sword-calib-close').addEventListener('click', closeCalibModal);
 
     // Live readout in calibration modal
@@ -11764,39 +11763,13 @@ async function initCore(runtimeContext) {
       });
     });
 
-    // ── Debug rotation offset sliders ────────────────────────────────────────
-    const _debugToggleBtn = document.getElementById('phone-sword-debug-toggle');
-    const _debugSliders = document.getElementById('phone-sword-debug-sliders');
-    _debugToggleBtn?.addEventListener('click', () => {
-      const hidden = _debugSliders.classList.toggle('hidden');
-      _debugToggleBtn.textContent = `🔧 Rotation Offsets ${hidden ? '▼' : '▲'}`;
-    });
-
-    const _makeSlider = (id, valId, key) => {
-      const el = document.getElementById(id);
-      const valEl = document.getElementById(valId);
-      if (!el || !valEl) return;
-      el.addEventListener('input', () => {
-        const v = parseInt(el.value, 10);
-        window.phoneSwordConfig[key] = v;
-        valEl.textContent = v + '°';
-      });
-    };
-    _makeSlider('psw-offset-x', 'psw-offset-x-val', 'offsetX');
-    _makeSlider('psw-offset-y', 'psw-offset-y-val', 'offsetY');
-    _makeSlider('psw-offset-z', 'psw-offset-z-val', 'offsetZ');
-
-    document.getElementById('psw-offset-reset')?.addEventListener('click', () => {
-      const _defaults = { x: 90, y: 180, z: 0 };
-      window.phoneSwordConfig.offsetX = _defaults.x;
-      window.phoneSwordConfig.offsetY = _defaults.y;
-      window.phoneSwordConfig.offsetZ = _defaults.z;
-      ['x', 'y', 'z'].forEach(a => {
-        const el = document.getElementById(`psw-offset-${a}`);
-        const valEl = document.getElementById(`psw-offset-${a}-val`);
-        if (el) el.value = _defaults[a];
-        if (valEl) valEl.textContent = _defaults[a] + '°';
-      });
+    // ── Post-connect calibration popup ──────────────────────────────────────
+    document.getElementById('phone-sword-connect-calib-ok')?.addEventListener('click', () => {
+      const g = window.phoneSwordGyro;
+      if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
+      if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
+      if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+      phoneSwordConnectCalib?.classList.add('hidden');
     });
 
     // Sword direction debug panel toggle
@@ -11854,27 +11827,21 @@ async function initCore(runtimeContext) {
         phoneSwordQrStatus.textContent = 'Phone connected!';
         phoneSwordQrStatus.classList.add('connected');
 
-        // Auto-dismiss QR modal after short delay
-        setTimeout(() => phoneSwordQrModal.classList.add('hidden'), 1800);
+        // Auto-dismiss QR modal after short delay, then show calibration popup
+        setTimeout(() => {
+          phoneSwordQrModal.classList.add('hidden');
+          phoneSwordConnectCalib?.classList.remove('hidden');
+        }, 1800);
 
-        // Show gyro HUD (which now includes calibrate button)
+        // Show gyro HUD
         phoneSwordGyroPanel.classList.remove('hidden');
         window.phoneSwordGyro.connected = true;
-
-        // Auto-calibrate to the first reading so sword starts at rest
-        let _firstReading = true;
 
         conn.on('data', (data) => {
           if (data && data.type === 'gyro') {
             window.phoneSwordGyro.alpha = data.alpha;
             window.phoneSwordGyro.beta = data.beta;
             window.phoneSwordGyro.gamma = data.gamma;
-            if (_firstReading && data.alpha !== null) {
-              window.phoneSwordCalib.alpha = data.alpha;
-              window.phoneSwordCalib.beta = data.beta ?? 0;
-              window.phoneSwordCalib.gamma = data.gamma ?? 0;
-              _firstReading = false;
-            }
           }
         });
 
