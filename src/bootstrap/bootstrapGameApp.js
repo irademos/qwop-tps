@@ -11586,6 +11586,15 @@ async function initCore(runtimeContext) {
     equipInventoryItem('pistol');
   }
 
+  // Phone Sword mode: always start with foam sword equipped immediately.
+  if (window.phoneSwordMode) {
+    if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
+      inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+    }
+    equipInventoryItem(FOAM_SWORD_ITEM_ID);
+    _hordeEquipped = FOAM_SWORD_ITEM_ID;
+  }
+
   // Horde mode: seed inventory with pistol, shield, and autumnSword so gesture equip can work immediately.
   // Write directly to inventoryState to avoid triggering persistInventoryAndStorage during
   // bootstrap (UI panels may not be fully initialised yet).
@@ -13234,6 +13243,11 @@ async function initCore(runtimeContext) {
       }
       if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
         inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+      }
+      // Phone Sword: always re-equip foam sword after respawn, skip gesture equip
+      if (window.phoneSwordMode) {
+        equipInventoryItem(FOAM_SWORD_ITEM_ID);
+        _hordeEquipped = FOAM_SWORD_ITEM_ID;
       }
     }
     updateControlAvailability();
@@ -16032,7 +16046,7 @@ async function initCore(runtimeContext) {
     if (window.gameMode === '3d_painter') {
       processPainterPinch();
     }
-    if (window.gameMode === 'horde') {
+    if (window.gameMode === 'horde' && !window.phoneSwordMode) {
       processHordeGestures();
     }
 

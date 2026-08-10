@@ -103,6 +103,11 @@ export class FoamSword extends Weapon {
   }
 
   update() {
+    // In Phone Sword mode the gyro loop owns _holdQuaternion — skip mediapipe entirely.
+    if (window.phoneSwordMode) {
+      super.update();
+      return;
+    }
     if (this.holder?.playerModel) {
       const pm = this.holder.playerModel;
       const htd = pm.userData.handTrackingArms;
