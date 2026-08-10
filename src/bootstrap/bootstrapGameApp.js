@@ -8922,6 +8922,9 @@ async function initCore(runtimeContext) {
         spawnBombPickup(position);
       } else if (weaponId === 'autumnSword') {
         spawnAutumnSwordPickup(position);
+      } else if (weaponId === FOAM_SWORD_ITEM_ID) {
+        // foamSword has no world pickup; just unequip it cleanly so respawn can re-equip
+        unequipInventoryItem(FOAM_SWORD_ITEM_ID);
       } else if (weaponId === 'hammer') {
         spawnHammerPickup(position);
       } else if (weaponId === 'lantern') {
@@ -11638,6 +11641,8 @@ async function initCore(runtimeContext) {
     window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false };
     // Calibration: these are the "neutral" angles subtracted from live readings
     window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
+    // Config: additional rotation offsets (degrees) applied on top of gyro delta
+    window.phoneSwordConfig = { offsetX: 0, offsetY: 0, offsetZ: 0 };
 
     const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
     const phoneSwordQrCanvas = document.getElementById('phone-sword-qr-canvas');
@@ -11756,6 +11761,40 @@ async function initCore(runtimeContext) {
           window.phoneSwordCalib.alpha = window.phoneSwordGyro.alpha ?? 0;
         }
         closeCalibModal();
+      });
+    });
+
+    // ── Debug rotation offset sliders ────────────────────────────────────────
+    const _debugToggleBtn = document.getElementById('phone-sword-debug-toggle');
+    const _debugSliders = document.getElementById('phone-sword-debug-sliders');
+    _debugToggleBtn?.addEventListener('click', () => {
+      const hidden = _debugSliders.classList.toggle('hidden');
+      _debugToggleBtn.textContent = `🔧 Rotation Offsets ${hidden ? '▼' : '▲'}`;
+    });
+
+    const _makeSlider = (id, valId, key) => {
+      const el = document.getElementById(id);
+      const valEl = document.getElementById(valId);
+      if (!el || !valEl) return;
+      el.addEventListener('input', () => {
+        const v = parseInt(el.value, 10);
+        window.phoneSwordConfig[key] = v;
+        valEl.textContent = v + '°';
+      });
+    };
+    _makeSlider('psw-offset-x', 'psw-offset-x-val', 'offsetX');
+    _makeSlider('psw-offset-y', 'psw-offset-y-val', 'offsetY');
+    _makeSlider('psw-offset-z', 'psw-offset-z-val', 'offsetZ');
+
+    document.getElementById('psw-offset-reset')?.addEventListener('click', () => {
+      window.phoneSwordConfig.offsetX = 0;
+      window.phoneSwordConfig.offsetY = 0;
+      window.phoneSwordConfig.offsetZ = 0;
+      ['x', 'y', 'z'].forEach(a => {
+        const el = document.getElementById(`psw-offset-${a}`);
+        const valEl = document.getElementById(`psw-offset-${a}-val`);
+        if (el) el.value = 0;
+        if (valEl) valEl.textContent = '0°';
       });
     });
 
@@ -15297,10 +15336,11 @@ async function initCore(runtimeContext) {
     bow?.update();
     bazooka?.update();
     bomb?.update();
-    // Phone Sword: apply gyro data to the held sword's rotation
+    // Phone Sword: apply gyro data + config offsets to the held sword's rotation
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
       const _g = window.phoneSwordGyro;
       const _c = window.phoneSwordCalib;
+      const _cfg = window.phoneSwordConfig || { offsetX: 0, offsetY: 0, offsetZ: 0 };
       if (_g.beta !== null && _g.gamma !== null) {
         const DEG = Math.PI / 180;
         // Compute delta from calibration; handle alpha wrap-around
@@ -15309,19 +15349,22 @@ async function initCore(runtimeContext) {
         if (_dAlpha < -180) _dAlpha += 360;
         const _dBeta = _g.beta - _c.beta;
         const _dGamma = _g.gamma - _c.gamma;
-        // beta → pitch (X), gamma → roll (Z), alpha → yaw (Y)
-        _phoneSwordEuler.set(_dBeta * DEG, _dAlpha * DEG, _dGamma * DEG, 'YXZ');
+        // beta → pitch (X) + offsetX, gamma → roll (Z) + offsetZ, alpha → yaw (Y) + offsetY
+        _phoneSwordEuler.set(
+          (_dBeta + _cfg.offsetX) * DEG,
+          (_dAlpha + _cfg.offsetY) * DEG,
+          (_dGamma + _cfg.offsetZ) * DEG,
+          'YXZ'
+        );
         _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
-        // Apply gyro rotation to whichever sword the local player holds
+        // Apply to whichever sword the local player holds
         for (const _sw of [autumnSword, foamSword]) {
           if (_sw?.holder === playerControls) {
-            // Save base hold quaternion once
             if (!_sw._baseHoldQuaternion) {
               _sw._baseHoldQuaternion = _sw._holdQuaternion.clone();
             }
             _sw._holdQuaternion.copy(_phoneSwordGyroQ).multiply(_sw._baseHoldQuaternion);
           } else if (_sw?._baseHoldQuaternion && _sw?.holder !== playerControls) {
-            // Restore base when not held by player
             _sw._holdQuaternion.copy(_sw._baseHoldQuaternion);
           }
         }

@@ -103,8 +103,20 @@ export class FoamSword extends Weapon {
   }
 
   update() {
-    // In Phone Sword mode the gyro loop owns _holdQuaternion — skip mediapipe entirely.
+    // In Phone Sword mode: gyro loop owns _holdQuaternion; lock hands to a fixed grip point
+    // so both hands appear to hold the sword handle regardless of blade orientation.
     if (window.phoneSwordMode) {
+      if (this.holder?.playerModel) {
+        const pm = this.holder.playerModel;
+        pm.userData.foamSwordMode = true;
+        if (!pm.userData.foamSwordHandTarget) {
+          pm.userData.foamSwordHandTarget = { x: 0, y: 0.85, z: 0.48 };
+        } else {
+          pm.userData.foamSwordHandTarget.x = 0;
+          pm.userData.foamSwordHandTarget.y = 0.85;
+          pm.userData.foamSwordHandTarget.z = 0.48;
+        }
+      }
       super.update();
       return;
     }

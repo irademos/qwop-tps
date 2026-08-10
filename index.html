@@ -190,6 +190,27 @@
     <div id="phone-sword-gyro-gamma">γ —</div>
     <div id="phone-sword-gyro-status" class="phone-sword-gyro-conn">Connected</div>
     <button id="phone-sword-calibrate-btn" class="phone-sword-calibrate-btn">⚙️ Calibrate</button>
+    <div class="phone-sword-debug-section">
+      <button id="phone-sword-debug-toggle" class="phone-sword-debug-toggle">🔧 Rotation Offsets ▼</button>
+      <div id="phone-sword-debug-sliders" class="phone-sword-debug-sliders hidden">
+        <label class="psw-slider-row">
+          <span class="psw-slider-label">X <span class="psw-slider-desc">(pitch)</span></span>
+          <input type="range" id="psw-offset-x" min="-180" max="180" value="0" step="1">
+          <span class="psw-slider-val" id="psw-offset-x-val">0°</span>
+        </label>
+        <label class="psw-slider-row">
+          <span class="psw-slider-label">Y <span class="psw-slider-desc">(yaw)</span></span>
+          <input type="range" id="psw-offset-y" min="-180" max="180" value="0" step="1">
+          <span class="psw-slider-val" id="psw-offset-y-val">0°</span>
+        </label>
+        <label class="psw-slider-row">
+          <span class="psw-slider-label">Z <span class="psw-slider-desc">(roll)</span></span>
+          <input type="range" id="psw-offset-z" min="-180" max="180" value="0" step="1">
+          <span class="psw-slider-val" id="psw-offset-z-val">0°</span>
+        </label>
+        <button id="psw-offset-reset" class="psw-offset-reset">Reset</button>
+      </div>
+    </div>
   </div>
 
   <!-- Phone Sword: gyro calibration modal -->

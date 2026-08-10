@@ -2876,6 +2876,98 @@ body.settings-open #inventory-button {
   background: #3730a3;
 }
 
+.phone-sword-debug-section {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.phone-sword-debug-toggle {
+  display: block;
+  width: 100%;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: #64748b;
+  font-size: 0.68rem;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.phone-sword-debug-toggle:hover {
+  color: #94a3b8;
+  border-color: #475569;
+}
+
+.phone-sword-debug-sliders {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.phone-sword-debug-sliders.hidden {
+  display: none;
+}
+
+.psw-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: #7dd3fc;
+  cursor: default;
+}
+
+.psw-slider-label {
+  width: 44px;
+  flex-shrink: 0;
+  font-family: monospace;
+}
+
+.psw-slider-desc {
+  color: #475569;
+  font-size: 0.62rem;
+}
+
+.psw-slider-row input[type="range"] {
+  flex: 1;
+  height: 3px;
+  accent-color: #6366f1;
+  cursor: pointer;
+}
+
+.psw-slider-val {
+  width: 32px;
+  text-align: right;
+  font-family: monospace;
+  font-size: 0.7rem;
+  color: #a5b4fc;
+  flex-shrink: 0;
+}
+
+.psw-offset-reset {
+  background: transparent;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  color: #475569;
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  cursor: pointer;
+  margin-top: 2px;
+  align-self: flex-end;
+  transition: color 0.15s;
+}
+
+.psw-offset-reset:hover {
+  color: #94a3b8;
+}
+
 /* Calibration modal */
 .phone-sword-calib-modal {
   position: fixed;
