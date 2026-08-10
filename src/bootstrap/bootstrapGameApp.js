@@ -11642,7 +11642,7 @@ async function initCore(runtimeContext) {
     // Calibration: these are the "neutral" angles subtracted from live readings
     window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
     // Config: additional rotation offsets (degrees) applied on top of gyro delta
-    window.phoneSwordConfig = { offsetX: 0, offsetY: 0, offsetZ: 0 };
+    window.phoneSwordConfig = { offsetX: 90, offsetY: 180, offsetZ: 0 };
 
     const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
     const phoneSwordQrCanvas = document.getElementById('phone-sword-qr-canvas');
@@ -11787,14 +11787,15 @@ async function initCore(runtimeContext) {
     _makeSlider('psw-offset-z', 'psw-offset-z-val', 'offsetZ');
 
     document.getElementById('psw-offset-reset')?.addEventListener('click', () => {
-      window.phoneSwordConfig.offsetX = 0;
-      window.phoneSwordConfig.offsetY = 0;
-      window.phoneSwordConfig.offsetZ = 0;
+      const _defaults = { x: 90, y: 180, z: 0 };
+      window.phoneSwordConfig.offsetX = _defaults.x;
+      window.phoneSwordConfig.offsetY = _defaults.y;
+      window.phoneSwordConfig.offsetZ = _defaults.z;
       ['x', 'y', 'z'].forEach(a => {
         const el = document.getElementById(`psw-offset-${a}`);
         const valEl = document.getElementById(`psw-offset-${a}-val`);
-        if (el) el.value = 0;
-        if (valEl) valEl.textContent = '0°';
+        if (el) el.value = _defaults[a];
+        if (valEl) valEl.textContent = _defaults[a] + '°';
       });
     });
 
