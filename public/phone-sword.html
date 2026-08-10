@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Phone Sword Controller</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      text-align: center;
+      user-select: none;
+    }
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #f8fafc;
+    }
+    .subtitle {
+      color: #94a3b8;
+      font-size: 0.95rem;
+      margin-bottom: 32px;
+    }
+    #status {
+      font-size: 1rem;
+      margin-bottom: 24px;
+      min-height: 1.5em;
+      padding: 10px 20px;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      width: 100%;
+      max-width: 320px;
+    }
+    #connect-btn {
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      padding: 16px 40px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      margin-bottom: 24px;
+      letter-spacing: 0.05em;
+    }
+    #connect-btn:active { transform: scale(0.96); }
+    #connect-btn:hover { background: #4f46e5; }
+    #connect-btn:disabled { background: #475569; cursor: not-allowed; }
+    #gyro-display {
+      display: none;
+      font-size: 0.85rem;
+      color: #94a3b8;
+      font-family: monospace;
+      line-height: 1.8;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      padding: 12px 20px;
+      width: 100%;
+      max-width: 320px;
+    }
+    .connected-icon {
+      font-size: 3rem;
+      margin-bottom: 12px;
+      display: none;
+    }
+    #error-msg {
+      color: #f87171;
+      font-size: 0.9rem;
+      margin-top: 16px;
+      min-height: 1.4em;
+    }
+    .sword-icon {
+      font-size: 4rem;
+      margin-bottom: 16px;
+      filter: drop-shadow(0 0 12px #6366f1);
+    }
+  </style>
+</head>
+<body>
+  <div class="sword-icon">⚔️</div>
+  <h1>Phone Sword</h1>
+  <p class="subtitle">Turn your phone into a sword controller</p>
+
+  <div id="status">Tap Connect to start</div>
+  <button id="connect-btn">Connect</button>
+  <div class="connected-icon" id="connected-icon">🗡️</div>
+  <div id="gyro-display">
+    <div id="gyro-alpha">α (compass): —</div>
+    <div id="gyro-beta">β (tilt fwd/back): —</div>
+    <div id="gyro-gamma">γ (tilt left/right): —</div>
+  </div>
+  <div id="error-msg"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const hostPeerId = params.get('host');
+
+    const statusEl = document.getElementById('status');
+    const connectBtn = document.getElementById('connect-btn');
+    const gyroDisplay = document.getElementById('gyro-display');
+    const connectedIcon = document.getElementById('connected-icon');
+    const errorMsg = document.getElementById('error-msg');
+    const gyroAlpha = document.getElementById('gyro-alpha');
+    const gyroBeta = document.getElementById('gyro-beta');
+    const gyroGamma = document.getElementById('gyro-gamma');
+
+    let peer = null;
+    let conn = null;
+    let gyroEnabled = false;
+    let sendInterval = null;
+    let lastGyro = { alpha: null, beta: null, gamma: null };
+
+    if (!hostPeerId) {
+      statusEl.textContent = 'No host ID in URL. Scan the QR code from the game.';
+      connectBtn.disabled = true;
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function setError(text) {
+      errorMsg.textContent = text;
+    }
+
+    async function requestGyroPermission() {
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const result = await DeviceOrientationEvent.requestPermission();
+        if (result !== 'granted') throw new Error('Gyroscope permission denied');
+      }
+    }
+
+    function startGyro() {
+      window.addEventListener('deviceorientation', (e) => {
+        lastGyro.alpha = e.alpha;
+        lastGyro.beta = e.beta;
+        lastGyro.gamma = e.gamma;
+        gyroAlpha.textContent = `α (compass): ${e.alpha !== null ? e.alpha.toFixed(1) + '°' : '—'}`;
+        gyroBeta.textContent = `β (tilt fwd/back): ${e.beta !== null ? e.beta.toFixed(1) + '°' : '—'}`;
+        gyroGamma.textContent = `γ (tilt left/right): ${e.gamma !== null ? e.gamma.toFixed(1) + '°' : '—'}`;
+      }, true);
+      gyroEnabled = true;
+    }
+
+    function startSendLoop() {
+      // Send at ~30 Hz
+      sendInterval = setInterval(() => {
+        if (conn && conn.open && gyroEnabled) {
+          try {
+            conn.send({
+              type: 'gyro',
+              alpha: lastGyro.alpha,
+              beta: lastGyro.beta,
+              gamma: lastGyro.gamma,
+              ts: Date.now()
+            });
+          } catch (_) { /* ignore */ }
+        }
+      }, 33);
+    }
+
+    connectBtn.addEventListener('click', async () => {
+      if (!hostPeerId) return;
+      connectBtn.disabled = true;
+      setStatus('Requesting permissions…');
+      setError('');
+
+      try {
+        await requestGyroPermission();
+      } catch (e) {
+        setError(e.message);
+        setStatus('Permission required to use gyroscope');
+        connectBtn.disabled = false;
+        return;
+      }
+
+      setStatus('Connecting to game…');
+
+      // Fetch TURN credentials from the game server so NAT traversal works
+      let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+      try {
+        const turnRes = await fetch('/api/turn-credentials');
+        if (turnRes.ok) {
+          const list = await turnRes.json();
+          if (Array.isArray(list) && list.length) iceServers = list;
+        }
+      } catch (_) { /* fall through to STUN-only */ }
+
+      peer = new Peer({ config: { iceServers } });
+
+      peer.on('error', (err) => {
+        setError('Connection error: ' + err.message);
+        setStatus('Failed to connect');
+        connectBtn.disabled = false;
+      });
+
+      peer.on('open', () => {
+        conn = peer.connect(hostPeerId, { serialization: 'json' });
+
+        conn.on('open', () => {
+          setStatus('Connected! Move your phone like a sword.');
+          connectedIcon.style.display = 'block';
+          gyroDisplay.style.display = 'block';
+          connectBtn.style.display = 'none';
+          startGyro();
+          startSendLoop();
+          conn.send({ type: 'gyro_hello', msg: 'Phone Sword connected!' });
+        });
+
+        conn.on('close', () => {
+          setStatus('Disconnected from game');
+          connectedIcon.style.display = 'none';
+          if (sendInterval) clearInterval(sendInterval);
+          connectBtn.disabled = false;
+          connectBtn.style.display = '';
+        });
+
+        conn.on('error', (err) => {
+          setError('Data channel error: ' + err.message);
+          if (sendInterval) clearInterval(sendInterval);
+          connectBtn.disabled = false;
+          connectBtn.style.display = '';
+        });
+      });
+    });
+  </script>
+</body>
+</html>

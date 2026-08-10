@@ -765,6 +765,13 @@ async function initCore(runtimeContext) {
   playerName = profileResult.profile?.name || playerName;
   let { nameKey: profileNameKey, profile: playerProfile } = profileResult;
 
+  // Normalize phone_sword → horde so all horde checks work unchanged.
+  // window.phoneSwordMode = true signals the gyro-receiver UI.
+  if (window.gameMode === 'phone_sword') {
+    window.phoneSwordMode = true;
+    window.gameMode = 'horde';
+  }
+
   setCookie("playerName", playerName);
   localStorage.setItem('playerName', playerName);
 
@@ -11611,7 +11618,104 @@ async function initCore(runtimeContext) {
     const initialCount = 6 + Math.floor(Math.random() * 6); // 6–11
     for (let i = 0; i < initialCount; i++) _spawnHordeEnemy();
     window.hordeEnemies = hordeEnemies;
+  }
 
+  // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
+  if (window.phoneSwordMode) {
+    window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false };
+
+    const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
+    const phoneSwordQrCanvas = document.getElementById('phone-sword-qr-canvas');
+    const phoneSwordQrUrl = document.getElementById('phone-sword-qr-url');
+    const phoneSwordQrStatus = document.getElementById('phone-sword-qr-status');
+    const phoneSwordQrDismiss = document.getElementById('phone-sword-qr-dismiss');
+    const phoneSwordGyroPanel = document.getElementById('phone-sword-gyro-panel');
+
+    const showPhoneSwordQr = async (peerId) => {
+      const phoneUrl = `${location.origin}/phone-sword.html?host=${encodeURIComponent(peerId)}`;
+      phoneSwordQrUrl.textContent = phoneUrl;
+
+      // Load QRCode library from CDN and render
+      try {
+        await new Promise((resolve, reject) => {
+          if (window.QRCode) { resolve(); return; }
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+        await window.QRCode.toCanvas(phoneSwordQrCanvas, phoneUrl, {
+          width: 200,
+          margin: 1,
+          color: { dark: '#000000', light: '#ffffff' }
+        });
+      } catch (_) {
+        phoneSwordQrCanvas.style.display = 'none';
+      }
+
+      phoneSwordQrModal.classList.remove('hidden');
+    };
+
+    phoneSwordQrDismiss.addEventListener('click', () => {
+      phoneSwordQrModal.classList.add('hidden');
+    });
+
+    // Create a dedicated PeerJS peer for receiving gyro data
+    const { loadPeerJs: _loadPeerJs } = await import('../core/externalDeps.js');
+    try {
+      const PeerClass = await _loadPeerJs();
+
+      // Fetch TURN credentials so NAT traversal works across different networks
+      let _gyroIceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+      try {
+        const _turnRes = await fetch('/api/turn-credentials');
+        if (_turnRes.ok) {
+          const _turnList = await _turnRes.json();
+          if (Array.isArray(_turnList) && _turnList.length) _gyroIceServers = _turnList;
+        }
+      } catch (_) { /* fall back to STUN-only */ }
+
+      const gyroPeer = new PeerClass({
+        config: { iceServers: _gyroIceServers }
+      });
+
+      gyroPeer.on('open', (id) => {
+        showPhoneSwordQr(id);
+      });
+
+      gyroPeer.on('connection', (conn) => {
+        phoneSwordQrStatus.textContent = 'Phone connected!';
+        phoneSwordQrStatus.classList.add('connected');
+
+        // Auto-dismiss QR modal after short delay
+        setTimeout(() => phoneSwordQrModal.classList.add('hidden'), 1800);
+
+        // Show gyro HUD
+        phoneSwordGyroPanel.classList.remove('hidden');
+        window.phoneSwordGyro.connected = true;
+
+        conn.on('data', (data) => {
+          if (data && data.type === 'gyro') {
+            window.phoneSwordGyro.alpha = data.alpha;
+            window.phoneSwordGyro.beta = data.beta;
+            window.phoneSwordGyro.gamma = data.gamma;
+          }
+        });
+
+        conn.on('close', () => {
+          window.phoneSwordGyro.connected = false;
+          document.getElementById('phone-sword-gyro-status').textContent = 'Disconnected';
+          document.getElementById('phone-sword-gyro-status').style.color = '#f87171';
+        });
+      });
+
+      gyroPeer.on('error', (err) => {
+        console.warn('[PhoneSword] PeerJS error:', err.message);
+      });
+    } catch (err) {
+      console.warn('[PhoneSword] Failed to init PeerJS:', err);
+    }
   }
 
   await initMapViewFeature({ camera, scene, player: playerModel });
@@ -15802,6 +15906,18 @@ async function initCore(runtimeContext) {
     }
     if (window.gameMode === 'horde') {
       processHordeGestures();
+    }
+
+    // Phone Sword: update gyro HUD each frame
+    if (window.phoneSwordMode && window.phoneSwordGyro) {
+      const _g = window.phoneSwordGyro;
+      const _fmt = v => (v !== null && v !== undefined) ? v.toFixed(1) + '°' : '—';
+      const _alphaEl = document.getElementById('phone-sword-gyro-alpha');
+      const _betaEl = document.getElementById('phone-sword-gyro-beta');
+      const _gammaEl = document.getElementById('phone-sword-gyro-gamma');
+      if (_alphaEl) _alphaEl.textContent = 'α ' + _fmt(_g.alpha);
+      if (_betaEl) _betaEl.textContent = 'β ' + _fmt(_g.beta);
+      if (_gammaEl) _gammaEl.textContent = 'γ ' + _fmt(_g.gamma);
     }
 
     renderer.render(scene, camera);

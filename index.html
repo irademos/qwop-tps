@@ -54,6 +54,7 @@
             <button class="arcade-button arcade-mode-btn" type="button" data-mode-btn="rpg">RPG</button>
             <button class="arcade-button arcade-secondary arcade-mode-btn" type="button" data-mode-btn="3d_painter">3D Painter</button>
             <button class="arcade-button arcade-secondary arcade-mode-btn" type="button" data-mode-btn="horde">Horde</button>
+            <button class="arcade-button arcade-secondary arcade-mode-btn" type="button" data-mode-btn="phone_sword">Phone Sword</button>
           </div>
         </div>
       </div>
@@ -166,6 +167,27 @@
     <button data-mode="translate">⇄</button>
     <button data-mode="rotate">⟳</button>
     <button data-mode="scale">⤢</button>
+  </div>
+
+  <!-- Phone Sword: QR code modal shown on game start -->
+  <div id="phone-sword-qr-modal" class="phone-sword-qr-modal hidden">
+    <div class="phone-sword-qr-inner">
+      <div class="phone-sword-qr-title">⚔️ Phone Sword</div>
+      <p class="phone-sword-qr-desc">Scan with your phone to connect your gyroscope as a sword controller</p>
+      <canvas id="phone-sword-qr-canvas"></canvas>
+      <div id="phone-sword-qr-url" class="phone-sword-qr-url"></div>
+      <div id="phone-sword-qr-status" class="phone-sword-qr-status">Waiting for phone…</div>
+      <button id="phone-sword-qr-dismiss" class="phone-sword-qr-dismiss">Play without phone</button>
+    </div>
+  </div>
+
+  <!-- Phone Sword: gyro HUD panel shown once phone is connected -->
+  <div id="phone-sword-gyro-panel" class="phone-sword-gyro-panel hidden">
+    <div class="phone-sword-gyro-title">⚔️ Gyro</div>
+    <div id="phone-sword-gyro-alpha">α —</div>
+    <div id="phone-sword-gyro-beta">β —</div>
+    <div id="phone-sword-gyro-gamma">γ —</div>
+    <div id="phone-sword-gyro-status" class="phone-sword-gyro-conn">Connected</div>
   </div>
 
   <script src="app.js" type="module"></script>
