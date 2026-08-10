@@ -1,4 +1,5 @@
 // app.js
+import QRCode from 'qrcode';
 import { getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
 import { Weapon } from '../items/weapon.js';
 import * as THREE from "three";
@@ -963,6 +964,9 @@ async function initCore(runtimeContext) {
   const remoteHoldTempPosition = new THREE.Vector3();
   const remoteHoldTempQuaternion = new THREE.Quaternion();
   const remoteHoldTempOffset = new THREE.Vector3();
+  // Phone Sword gyro scratch objects
+  const _phoneSwordGyroQ = new THREE.Quaternion();
+  const _phoneSwordEuler = new THREE.Euler();
   const tempVector3A = new THREE.Vector3();
   const AMMO_PICKUP_AMOUNT = 5;
   const ICE_AMMO_KEY = 'ice ammo';
@@ -11623,33 +11627,32 @@ async function initCore(runtimeContext) {
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
   if (window.phoneSwordMode) {
     window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false };
+    // Calibration: these are the "neutral" angles subtracted from live readings
+    window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
 
     const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
     const phoneSwordQrCanvas = document.getElementById('phone-sword-qr-canvas');
     const phoneSwordQrUrl = document.getElementById('phone-sword-qr-url');
     const phoneSwordQrStatus = document.getElementById('phone-sword-qr-status');
     const phoneSwordQrDismiss = document.getElementById('phone-sword-qr-dismiss');
+    const phoneSwordQrCopy = document.getElementById('phone-sword-qr-copy');
     const phoneSwordGyroPanel = document.getElementById('phone-sword-gyro-panel');
+    const phoneSwordCalibModal = document.getElementById('phone-sword-calib-modal');
+    const phoneSwordCalibrateBtn = document.getElementById('phone-sword-calibrate-btn');
 
     const showPhoneSwordQr = async (peerId) => {
       const phoneUrl = `${location.origin}/phone-sword.html?host=${encodeURIComponent(peerId)}`;
       phoneSwordQrUrl.textContent = phoneUrl;
+      phoneSwordQrUrl.dataset.url = phoneUrl;
 
-      // Load QRCode library from CDN and render
+      // Render QR code using bundled qrcode package
       try {
-        await new Promise((resolve, reject) => {
-          if (window.QRCode) { resolve(); return; }
-          const s = document.createElement('script');
-          s.src = 'https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js';
-          s.onload = resolve;
-          s.onerror = reject;
-          document.head.appendChild(s);
-        });
-        await window.QRCode.toCanvas(phoneSwordQrCanvas, phoneUrl, {
+        await QRCode.toCanvas(phoneSwordQrCanvas, phoneUrl, {
           width: 200,
           margin: 1,
           color: { dark: '#000000', light: '#ffffff' }
         });
+        phoneSwordQrCanvas.style.display = '';
       } catch (_) {
         phoneSwordQrCanvas.style.display = 'none';
       }
@@ -11657,8 +11660,94 @@ async function initCore(runtimeContext) {
       phoneSwordQrModal.classList.remove('hidden');
     };
 
+    // Copy URL to clipboard
+    phoneSwordQrCopy.addEventListener('click', () => {
+      const url = phoneSwordQrUrl.dataset.url || phoneSwordQrUrl.textContent;
+      navigator.clipboard.writeText(url).then(() => {
+        phoneSwordQrCopy.textContent = '✅ Copied!';
+        phoneSwordQrCopy.classList.add('copied');
+        setTimeout(() => {
+          phoneSwordQrCopy.textContent = '📋 Copy URL';
+          phoneSwordQrCopy.classList.remove('copied');
+        }, 2000);
+      }).catch(() => {
+        // Fallback: select text
+        const ta = document.createElement('textarea');
+        ta.value = url;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        phoneSwordQrCopy.textContent = '✅ Copied!';
+        phoneSwordQrCopy.classList.add('copied');
+        setTimeout(() => {
+          phoneSwordQrCopy.textContent = '📋 Copy URL';
+          phoneSwordQrCopy.classList.remove('copied');
+        }, 2000);
+      });
+    });
+
     phoneSwordQrDismiss.addEventListener('click', () => {
       phoneSwordQrModal.classList.add('hidden');
+    });
+
+    // ── Calibration modal ────────────────────────────────────────────────────
+    const openCalibModal = () => phoneSwordCalibModal.classList.remove('hidden');
+    const closeCalibModal = () => phoneSwordCalibModal.classList.add('hidden');
+
+    phoneSwordCalibrateBtn.addEventListener('click', openCalibModal);
+    document.getElementById('phone-sword-calib-close').addEventListener('click', closeCalibModal);
+
+    // Live readout in calibration modal
+    const _calibAlphaEl = document.getElementById('phone-sword-calib-alpha');
+    const _calibBetaEl = document.getElementById('phone-sword-calib-beta');
+    const _calibGammaEl = document.getElementById('phone-sword-calib-gamma');
+
+    const _updateCalibLive = () => {
+      const g = window.phoneSwordGyro;
+      const fmt = v => v !== null ? v.toFixed(1) + '°' : '—';
+      if (_calibAlphaEl) _calibAlphaEl.textContent = 'α ' + fmt(g.alpha);
+      if (_calibBetaEl) _calibBetaEl.textContent = 'β ' + fmt(g.beta);
+      if (_calibGammaEl) _calibGammaEl.textContent = 'γ ' + fmt(g.gamma);
+    };
+    // Update live values in calib modal at ~10 Hz
+    setInterval(() => {
+      if (!phoneSwordCalibModal.classList.contains('hidden')) _updateCalibLive();
+    }, 100);
+
+    // "Set Neutral" — capture current gyro as calibration reference
+    document.getElementById('phone-sword-calib-set').addEventListener('click', () => {
+      const g = window.phoneSwordGyro;
+      if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
+      if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
+      if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+      closeCalibModal();
+    });
+
+    // Quick presets — these set fixed calibration offsets for common phone holds
+    document.querySelectorAll('.phone-sword-calib-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const preset = btn.dataset.preset;
+        if (preset === 'flat') {
+          // Phone lying flat pointing forward: beta≈0, gamma≈0
+          window.phoneSwordCalib.beta = 0;
+          window.phoneSwordCalib.gamma = 0;
+          window.phoneSwordCalib.alpha = window.phoneSwordGyro.alpha ?? 0;
+        } else if (preset === 'upright') {
+          // Phone held upright like a wand: beta≈90
+          window.phoneSwordCalib.beta = 90;
+          window.phoneSwordCalib.gamma = 0;
+          window.phoneSwordCalib.alpha = window.phoneSwordGyro.alpha ?? 0;
+        } else if (preset === 'guard') {
+          // Diagonal guard position: beta≈45, gamma≈-30
+          window.phoneSwordCalib.beta = 45;
+          window.phoneSwordCalib.gamma = -30;
+          window.phoneSwordCalib.alpha = window.phoneSwordGyro.alpha ?? 0;
+        }
+        closeCalibModal();
+      });
     });
 
     // Create a dedicated PeerJS peer for receiving gyro data
@@ -11691,15 +11780,24 @@ async function initCore(runtimeContext) {
         // Auto-dismiss QR modal after short delay
         setTimeout(() => phoneSwordQrModal.classList.add('hidden'), 1800);
 
-        // Show gyro HUD
+        // Show gyro HUD (which now includes calibrate button)
         phoneSwordGyroPanel.classList.remove('hidden');
         window.phoneSwordGyro.connected = true;
+
+        // Auto-calibrate to the first reading so sword starts at rest
+        let _firstReading = true;
 
         conn.on('data', (data) => {
           if (data && data.type === 'gyro') {
             window.phoneSwordGyro.alpha = data.alpha;
             window.phoneSwordGyro.beta = data.beta;
             window.phoneSwordGyro.gamma = data.gamma;
+            if (_firstReading && data.alpha !== null) {
+              window.phoneSwordCalib.alpha = data.alpha;
+              window.phoneSwordCalib.beta = data.beta ?? 0;
+              window.phoneSwordCalib.gamma = data.gamma ?? 0;
+              _firstReading = false;
+            }
           }
         });
 
@@ -15185,6 +15283,36 @@ async function initCore(runtimeContext) {
     bow?.update();
     bazooka?.update();
     bomb?.update();
+    // Phone Sword: apply gyro data to the held sword's rotation
+    if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
+      const _g = window.phoneSwordGyro;
+      const _c = window.phoneSwordCalib;
+      if (_g.beta !== null && _g.gamma !== null) {
+        const DEG = Math.PI / 180;
+        // Compute delta from calibration; handle alpha wrap-around
+        let _dAlpha = (_g.alpha ?? _c.alpha) - _c.alpha;
+        if (_dAlpha > 180) _dAlpha -= 360;
+        if (_dAlpha < -180) _dAlpha += 360;
+        const _dBeta = _g.beta - _c.beta;
+        const _dGamma = _g.gamma - _c.gamma;
+        // beta → pitch (X), gamma → roll (Z), alpha → yaw (Y)
+        _phoneSwordEuler.set(_dBeta * DEG, _dAlpha * DEG, _dGamma * DEG, 'YXZ');
+        _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
+        // Apply gyro rotation to whichever sword the local player holds
+        for (const _sw of [autumnSword, foamSword]) {
+          if (_sw?.holder === playerControls) {
+            // Save base hold quaternion once
+            if (!_sw._baseHoldQuaternion) {
+              _sw._baseHoldQuaternion = _sw._holdQuaternion.clone();
+            }
+            _sw._holdQuaternion.copy(_phoneSwordGyroQ).multiply(_sw._baseHoldQuaternion);
+          } else if (_sw?._baseHoldQuaternion && _sw?.holder !== playerControls) {
+            // Restore base when not held by player
+            _sw._holdQuaternion.copy(_sw._baseHoldQuaternion);
+          }
+        }
+      }
+    }
     autumnSword?.update();
     foamSword?.update();
     hammer?.update();
