@@ -712,13 +712,6 @@ function createArcadeOverlay(startOverlay) {
 }
 
 async function initCore(runtimeContext) {
-  // Normalize phone_sword → horde so all horde checks work unchanged.
-  // window.phoneSwordMode = true signals the gyro-receiver UI.
-  if (window.gameMode === 'phone_sword') {
-    window.phoneSwordMode = true;
-    window.gameMode = 'horde';
-  }
-
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
   const audioManager = createAudioManager();
@@ -771,6 +764,13 @@ async function initCore(runtimeContext) {
   });
   playerName = profileResult.profile?.name || playerName;
   let { nameKey: profileNameKey, profile: playerProfile } = profileResult;
+
+  // Normalize phone_sword → horde so all horde checks work unchanged.
+  // window.phoneSwordMode = true signals the gyro-receiver UI.
+  if (window.gameMode === 'phone_sword') {
+    window.phoneSwordMode = true;
+    window.gameMode = 'horde';
+  }
 
   setCookie("playerName", playerName);
   localStorage.setItem('playerName', playerName);
