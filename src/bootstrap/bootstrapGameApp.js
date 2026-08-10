@@ -11642,7 +11642,7 @@ async function initCore(runtimeContext) {
     // Calibration: these are the "neutral" angles subtracted from live readings
     window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
     // Config: additional rotation offsets (degrees) applied on top of gyro delta
-    window.phoneSwordConfig = { offsetX: 0, offsetY: 0, offsetZ: 0 };
+    window.phoneSwordConfig = { offsetX: 90, offsetY: 180, offsetZ: 0 };
 
     const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
     const phoneSwordQrCanvas = document.getElementById('phone-sword-qr-canvas');
@@ -11787,15 +11787,44 @@ async function initCore(runtimeContext) {
     _makeSlider('psw-offset-z', 'psw-offset-z-val', 'offsetZ');
 
     document.getElementById('psw-offset-reset')?.addEventListener('click', () => {
-      window.phoneSwordConfig.offsetX = 0;
-      window.phoneSwordConfig.offsetY = 0;
-      window.phoneSwordConfig.offsetZ = 0;
+      const _defaults = { x: 90, y: 180, z: 0 };
+      window.phoneSwordConfig.offsetX = _defaults.x;
+      window.phoneSwordConfig.offsetY = _defaults.y;
+      window.phoneSwordConfig.offsetZ = _defaults.z;
       ['x', 'y', 'z'].forEach(a => {
         const el = document.getElementById(`psw-offset-${a}`);
         const valEl = document.getElementById(`psw-offset-${a}-val`);
-        if (el) el.value = 0;
-        if (valEl) valEl.textContent = '0°';
+        if (el) el.value = _defaults[a];
+        if (valEl) valEl.textContent = _defaults[a] + '°';
       });
+    });
+
+    // Sword direction debug panel toggle
+    document.getElementById('phone-sword-dir-toggle')?.addEventListener('click', () => {
+      const panel = document.getElementById('phone-sword-dir-panel');
+      const nowHidden = panel?.classList.toggle('hidden');
+      const btn = document.getElementById('phone-sword-dir-toggle');
+      if (btn) btn.textContent = `🗡️ Sword Direction ${nowHidden ? '▼' : '▲'}`;
+    });
+
+    // Copy current sword direction values to clipboard
+    document.getElementById('psw-dir-copy')?.addEventListener('click', () => {
+      const d = window.phoneSwordDir ?? { x: 0, y: 0, z: 0 };
+      const text = `x=${d.x.toFixed(3)} (left/right)  y=${d.y.toFixed(3)} (up/down)  z=${d.z.toFixed(3)} (forward)`;
+      navigator.clipboard?.writeText(text).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      });
+      const btn = document.getElementById('psw-dir-copy');
+      if (btn) {
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = '📋 Copy Values'; }, 2000);
+      }
     });
 
     // Create a dedicated PeerJS peer for receiving gyro data
@@ -16103,6 +16132,24 @@ async function initCore(runtimeContext) {
       if (_alphaEl) _alphaEl.textContent = 'α ' + _fmt(_g.alpha);
       if (_betaEl) _betaEl.textContent = 'β ' + _fmt(_g.beta);
       if (_gammaEl) _gammaEl.textContent = 'γ ' + _fmt(_g.gamma);
+
+      // Update sword direction debug bars
+      if (window.phoneSwordDir && !document.getElementById('phone-sword-dir-panel')?.classList.contains('hidden')) {
+        const _d = window.phoneSwordDir;
+        const _setBar = (barId, valId, v) => {
+          const bar = document.getElementById(barId);
+          const val = document.getElementById(valId);
+          if (bar) {
+            // Map [-1,1] → bar position: left=0%, center=50%, right=100%
+            bar.style.left = `${((v + 1) / 2 * 100).toFixed(1)}%`;
+            bar.style.width = `${(Math.abs(v) * 50).toFixed(1)}%`;
+          }
+          if (val) val.textContent = v.toFixed(2);
+        };
+        _setBar('psw-dir-x-bar', 'psw-dir-x-val', _d.x);
+        _setBar('psw-dir-y-bar', 'psw-dir-y-val', _d.y);
+        _setBar('psw-dir-z-bar', 'psw-dir-z-val', _d.z);
+      }
     }
 
     renderer.render(scene, camera);
