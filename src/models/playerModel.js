@@ -387,6 +387,7 @@ const _hWorld = new THREE.Vector3();
 const _upAxis = new THREE.Vector3(0, 1, 0);
 const _rootQ = new THREE.Quaternion();
 const _armQ = new THREE.Quaternion();
+const _fsHandTarget = new THREE.Vector3();
 
 // === GLB HAND MODEL SUPPORT ===
 
@@ -669,6 +670,20 @@ function updateGLBHandSceneRotation(glbScene, pts, side, dt) {
 }
 
 /**
+ * Reset all driven GLB hand bones to their rest pose (stored at setup time).
+ * Call this instead of updateGLBHandBones when the hands should hold a fixed pose.
+ */
+function resetGLBHandBonesToRest(handGroup) {
+  if (!handGroup.userData.glbReady) return;
+  const glbScene = handGroup.userData.glbScene;
+  const boneData = glbScene?.userData?.handBoneData;
+  if (!boneData) return;
+  for (const [, data] of boneData) {
+    data.bone.quaternion.copy(data.restLocalQuat);
+  }
+}
+
+/**
  * Drive the loaded GLB hand bones from mediapipe landmarks each frame.
  * pts[i] must be 21 THREE.Vector3 positions in playerGroup local space (same as
  * the existing landmark mapping used for the procedural hand segments).
@@ -742,56 +757,80 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   // Update floating hands and elastic arms from hand tracking data
   if (rig.floatingHands && rig.elasticArms && rig.shoulderAnchors) {
     const handTracking = playerGroup.userData.handTrackingArms;
-    for (const side of ['left', 'right']) {
-      const trackData = handTracking?.[side];
-      const floatingHand = rig.floatingHands[side];
-      const defaultX = side === 'left' ? -0.5 : 0.5;
-      const defaultPos = new THREE.Vector3(defaultX, 0.82, 0.25);
 
-      // Use wrist landmark (lm 0) for hand group position so the GLB armature
-      // root sits at the wrist; fall back to palm-centre when no landmarks.
-      const landmarks = trackData?.landmarks;
-      const palmSize  = trackData?.size ?? 0.20;
-      let targetPos;
-      if (landmarks?.length >= 1) {
-        const wlm = landmarks[0];
-        targetPos = palmToLocalHandPos(wlm.x, wlm.y, palmSize);
-      } else if (trackData) {
-        targetPos = palmToLocalHandPos(trackData.x, trackData.y, palmSize);
-      } else {
-        targetPos = defaultPos;
+    // Foam sword directional mode: FoamSword.update() sets foamSwordMode=true and writes
+    // foamSwordHandTarget with the desired hand position derived from index-finger direction.
+    // In this mode we skip mediapipe bone animation and lock the hands to a rest/fist pose.
+    if (playerGroup.userData.foamSwordMode) {
+      playerGroup.userData.foamSwordMode = false; // consume the flag
+      const fst = playerGroup.userData.foamSwordHandTarget;
+      if (fst) {
+        for (const side of ['left', 'right']) {
+          const floatingHand = rig.floatingHands[side];
+          // Right tracking slot (support hand) sits slightly lower on the handle
+          const yOff = side === 'right' ? -0.08 : 0;
+          _fsHandTarget.set(fst.x, fst.y + yOff, fst.z);
+          floatingHand.position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
+          updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
+          if (floatingHand.userData.glbReady) {
+            const glbPivot = floatingHand.userData.glbPivot ?? floatingHand.userData.glbScene;
+            if (glbPivot) glbPivot.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
+            resetGLBHandBonesToRest(floatingHand);
+          }
+        }
       }
+    } else {
+      for (const side of ['left', 'right']) {
+        const trackData = handTracking?.[side];
+        const floatingHand = rig.floatingHands[side];
+        const defaultX = side === 'left' ? -0.5 : 0.5;
+        const defaultPos = new THREE.Vector3(defaultX, 0.82, 0.25);
 
-      const depthOverride = playerGroup.userData.handDepthOverride?.[side];
-      if (depthOverride !== undefined) {
-        const palmX = landmarks?.[0]?.x ?? trackData?.x ?? 0.5;
-        targetPos = targetPos.clone();
-        targetPos.z = typeof depthOverride === 'function' ? depthOverride(palmX) : depthOverride;
-      }
+        // Use wrist landmark (lm 0) for hand group position so the GLB armature
+        // root sits at the wrist; fall back to palm-centre when no landmarks.
+        const landmarks = trackData?.landmarks;
+        const palmSize  = trackData?.size ?? 0.20;
+        let targetPos;
+        if (landmarks?.length >= 1) {
+          const wlm = landmarks[0];
+          targetPos = palmToLocalHandPos(wlm.x, wlm.y, palmSize);
+        } else if (trackData) {
+          targetPos = palmToLocalHandPos(trackData.x, trackData.y, palmSize);
+        } else {
+          targetPos = defaultPos;
+        }
 
-      floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
-      updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
+        const depthOverride = playerGroup.userData.handDepthOverride?.[side];
+        if (depthOverride !== undefined) {
+          const palmX = landmarks?.[0]?.x ?? trackData?.x ?? 0.5;
+          targetPos = targetPos.clone();
+          targetPos.z = typeof depthOverride === 'function' ? depthOverride(palmX) : depthOverride;
+        }
 
-      // Drive GLB hand bones and overall hand rotation from mediapipe landmarks
-      if (floatingHand.userData.glbReady && landmarks?.length >= 21) {
-        const wrist = landmarks[0];
-        const wrist3d = palmToLocalHandPos(wrist.x, wrist.y, palmSize);
-        const lmScale = 0.085 / Math.max(palmSize, 0.05);
-        const pts = landmarks.map(lm => new THREE.Vector3(
-          wrist3d.x - (lm.x - wrist.x) * lmScale,
-          wrist3d.y - (lm.y - wrist.y) * lmScale,
-          wrist3d.z - (lm.z - wrist.z) * lmScale * 2
-        ));
-        // Rotate the pivot (wrist joint) to match overall hand orientation before driving bones.
-        // glbPivot is the rotation root centered at Bone_Armature; fall back to glbScene for
-        // setups that predate the pivot (shouldn't occur in practice).
-        const glbPivot = floatingHand.userData.glbPivot ?? floatingHand.userData.glbScene;
-        if (glbPivot) glbPivot.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
-        if (glbPivot) updateGLBHandSceneRotation(glbPivot, pts, side, dt);
-        updateGLBHandBones(floatingHand, pts, playerGroup);
-      } else if (floatingHand.userData.glbReady) {
-        const glbPivot = floatingHand.userData.glbPivot ?? floatingHand.userData.glbScene;
-        if (glbPivot) glbPivot.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
+        floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
+        updateElasticArm(rig.elasticArms[side], rig.shoulderAnchors[side], floatingHand, playerGroup);
+
+        // Drive GLB hand bones and overall hand rotation from mediapipe landmarks
+        if (floatingHand.userData.glbReady && landmarks?.length >= 21) {
+          const wrist = landmarks[0];
+          const wrist3d = palmToLocalHandPos(wrist.x, wrist.y, palmSize);
+          const lmScale = 0.085 / Math.max(palmSize, 0.05);
+          const pts = landmarks.map(lm => new THREE.Vector3(
+            wrist3d.x - (lm.x - wrist.x) * lmScale,
+            wrist3d.y - (lm.y - wrist.y) * lmScale,
+            wrist3d.z - (lm.z - wrist.z) * lmScale * 2
+          ));
+          // Rotate the pivot (wrist joint) to match overall hand orientation before driving bones.
+          // glbPivot is the rotation root centered at Bone_Armature; fall back to glbScene for
+          // setups that predate the pivot (shouldn't occur in practice).
+          const glbPivot = floatingHand.userData.glbPivot ?? floatingHand.userData.glbScene;
+          if (glbPivot) glbPivot.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
+          if (glbPivot) updateGLBHandSceneRotation(glbPivot, pts, side, dt);
+          updateGLBHandBones(floatingHand, pts, playerGroup);
+        } else if (floatingHand.userData.glbReady) {
+          const glbPivot = floatingHand.userData.glbPivot ?? floatingHand.userData.glbScene;
+          if (glbPivot) glbPivot.position.set(handPosOffset.x, handPosOffset.y, handPosOffset.z);
+        }
       }
     }
   }
