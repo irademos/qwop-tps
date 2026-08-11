@@ -985,7 +985,7 @@ async function initCore(runtimeContext) {
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
-    speedThreshold: 150, // deg/s — minimum angular speed to count as a swing
+    speedThreshold: 800, // deg/s — minimum angular speed to count as a swing
     exaggerAngle: 70,    // deg — extra rotation applied in swing direction
     holdDuration: 0.35,  // seconds — how long exaggerated pose is held
     trailDuration: 0.45, // seconds — how long the trail persists after swing
