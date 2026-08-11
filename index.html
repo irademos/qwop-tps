@@ -213,6 +213,153 @@
     </div>
   </div>
 
+  <!-- Phone Sword: gyro swing debug panel (visible only in phoneSwordMode) -->
+  <div id="psw-debug-panel" style="
+    display:none;
+    position:fixed;
+    top:10px;right:10px;
+    z-index:9999;
+    font-family:monospace;
+    font-size:12px;
+    color:#fff;
+    user-select:none;
+  ">
+    <div id="psw-debug-header" style="
+      background:rgba(0,0,0,0.75);
+      border:1px solid #555;
+      border-radius:6px 6px 0 0;
+      padding:6px 10px;
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    ">
+      <span>⚔️ Swing Debug</span>
+      <span id="psw-debug-arrow" style="margin-left:auto">▼</span>
+    </div>
+    <div id="psw-debug-body" style="
+      background:rgba(0,0,0,0.8);
+      border:1px solid #555;
+      border-top:none;
+      border-radius:0 0 6px 6px;
+      padding:10px;
+      width:260px;
+    ">
+      <div id="psw-debug-speed" style="margin-bottom:8px;color:#aef;font-size:11px">Angular speed: —</div>
+
+      <label style="display:block;margin-bottom:6px">
+        Speed threshold (deg/s): <span id="psw-lbl-threshold">150</span>
+        <input type="range" min="20" max="600" step="5" value="150" id="psw-threshold"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Exaggeration angle (deg): <span id="psw-lbl-exagg">70</span>
+        <input type="range" min="0" max="180" step="5" value="70" id="psw-exagg"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Hold duration (s): <span id="psw-lbl-hold">0.35</span>
+        <input type="range" min="0.05" max="2" step="0.05" value="0.35" id="psw-hold"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Trail duration (s): <span id="psw-lbl-trail">0.45</span>
+        <input type="range" min="0.05" max="2" step="0.05" value="0.45" id="psw-trail"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Trail opacity: <span id="psw-lbl-opacity">0.75</span>
+        <input type="range" min="0" max="1" step="0.05" value="0.75" id="psw-opacity"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Trail line count: <span id="psw-lbl-linecount">3</span>
+        <input type="range" min="1" max="7" step="1" value="3" id="psw-linecount"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Trail line spread: <span id="psw-lbl-spread">0.04</span>
+        <input type="range" min="0" max="0.2" step="0.005" value="0.04" id="psw-spread"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Trail color (hex): <span id="psw-lbl-color">#88ddff</span>
+        <input type="color" value="#88ddff" id="psw-color"
+          style="width:100%;display:block;margin-top:2px;height:28px">
+      </label>
+    </div>
+  </div>
+  <script>
+    // Phone Sword debug panel — wires sliders to window.phoneSwordSwingCfg
+    (function () {
+      function bind(id, lblId, key, parse) {
+        const el = document.getElementById(id);
+        const lbl = document.getElementById(lblId);
+        if (!el) return;
+        el.addEventListener('input', function () {
+          const v = parse(this.value);
+          lbl.textContent = this.value;
+          if (window.phoneSwordSwingCfg) window.phoneSwordSwingCfg[key] = v;
+        });
+      }
+      bind('psw-threshold', 'psw-lbl-threshold', 'speedThreshold', Number);
+      bind('psw-exagg',     'psw-lbl-exagg',     'exaggerAngle',   Number);
+      bind('psw-hold',      'psw-lbl-hold',       'holdDuration',   Number);
+      bind('psw-trail',     'psw-lbl-trail',      'trailDuration',  Number);
+      bind('psw-opacity',   'psw-lbl-opacity',    'trailOpacity',   Number);
+      bind('psw-linecount', 'psw-lbl-linecount',  'trailLineCount', Number);
+      bind('psw-spread',    'psw-lbl-spread',     'trailLineSpread',Number);
+
+      const colorEl = document.getElementById('psw-color');
+      if (colorEl) {
+        colorEl.addEventListener('input', function () {
+          document.getElementById('psw-lbl-color').textContent = this.value;
+          if (window.phoneSwordSwingCfg)
+            window.phoneSwordSwingCfg.trailColor = parseInt(this.value.replace('#',''), 16);
+        });
+      }
+
+      // Collapse / expand
+      const header = document.getElementById('psw-debug-header');
+      const body   = document.getElementById('psw-debug-body');
+      const arrow  = document.getElementById('psw-debug-arrow');
+      let open = true;
+      if (header) header.addEventListener('click', function () {
+        open = !open;
+        body.style.display  = open ? 'block' : 'none';
+        arrow.textContent   = open ? '▼' : '▶';
+      });
+
+      // Show panel and update live speed readout once phoneSwordMode is detected
+      function tryShow() {
+        if (window.phoneSwordMode) {
+          document.getElementById('psw-debug-panel').style.display = 'block';
+          // Live angular speed display — hook into game loop via rAF
+          (function tick() {
+            const cfg = window.phoneSwordSwingCfg;
+            const psw = window._pswDebugSpeed;
+            if (cfg && psw !== undefined) {
+              document.getElementById('psw-debug-speed').textContent =
+                'Angular speed: ' + (psw | 0) + ' deg/s' +
+                (psw > cfg.speedThreshold ? ' 🗡️ SWING' : '');
+            }
+            requestAnimationFrame(tick);
+          })();
+        } else {
+          setTimeout(tryShow, 500);
+        }
+      }
+      tryShow();
+    })();
+  </script>
+
   <script src="app.js" type="module"></script>
 </body>
 </html>

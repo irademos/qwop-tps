@@ -969,6 +969,32 @@ async function initCore(runtimeContext) {
   const _phoneSwordEuler = new THREE.Euler();
   // Foam sword default hold orientation (Euler 0, π, 0) — applied after gyro rotation
   const _phoneSwordBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0, 'YXZ'));
+
+  // Phone Sword: gyro swing detection & trail state
+  const _psw = {
+    prevBeta: null, prevGamma: null, prevAlpha: null,
+    prevTime: null,
+    swingActive: false,
+    swingEndTime: 0,
+    swingExaggerQ: new THREE.Quaternion(),
+    trail: [],          // {pos: THREE.Vector3, t: number}[]
+    trailLines: [],     // THREE.Line[] added to scene
+    _tipDir: new THREE.Vector3(),
+    _swingAxis: new THREE.Vector3(),
+    _extraQ: new THREE.Quaternion(),
+  };
+  // Default swing config — overridden live by the debug panel
+  window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
+    speedThreshold: 150, // deg/s — minimum angular speed to count as a swing
+    exaggerAngle: 70,    // deg — extra rotation applied in swing direction
+    holdDuration: 0.35,  // seconds — how long exaggerated pose is held
+    trailDuration: 0.45, // seconds — how long the trail persists after swing
+    trailOpacity: 0.75,
+    trailColor: 0x88ddff,
+    trailLineCount: 3,   // number of parallel lines (width illusion)
+    trailLineSpread: 0.04, // world-space spread between parallel lines
+  };
+
   const tempVector3A = new THREE.Vector3();
   const AMMO_PICKUP_AMOUNT = 5;
   const ICE_AMMO_KEY = 'ice ammo';
@@ -15351,19 +15377,71 @@ async function initCore(runtimeContext) {
     bow?.update();
     bazooka?.update();
     bomb?.update();
-    // Phone Sword: compute gyro quaternion and write to _holdQuaternion for hand positioning
+    // Phone Sword: compute gyro quaternion, detect swings, apply exaggerated pose + trail
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
       const _g = window.phoneSwordGyro;
       const _c = window.phoneSwordCalib;
       const _cfg = window.phoneSwordConfig || { offsetX: 0, offsetY: 0, offsetZ: 0 };
+      const _swCfg = window.phoneSwordSwingCfg;
       const _beta = _g.beta, _gamma = _g.gamma;
       if (Number.isFinite(_beta) && Number.isFinite(_gamma)) {
         const DEG = Math.PI / 180;
+        const nowSec = performance.now() / 1000;
+
         let _dAlpha = (Number.isFinite(_g.alpha) ? _g.alpha : _c.alpha) - _c.alpha;
         if (_dAlpha > 180) _dAlpha -= 360;
         if (_dAlpha < -180) _dAlpha += 360;
         const _dBeta = _beta - _c.beta;
         const _dGamma = _gamma - _c.gamma;
+
+        // Compute angular velocity (deg/s) for swing detection
+        if (_psw.prevBeta !== null && _psw.prevTime !== null) {
+          const dt = Math.max(nowSec - _psw.prevTime, 0.001);
+          let vBeta  = (_dBeta  - _psw.prevBeta)  / dt;
+          let vGamma = (_dGamma - _psw.prevGamma) / dt;
+          let vAlpha = (_dAlpha - _psw.prevAlpha) / dt;
+          // shortest-path wrap for alpha velocity
+          if (vAlpha >  180) vAlpha -= 360;
+          if (vAlpha < -180) vAlpha += 360;
+          const angSpeed = Math.sqrt(vBeta * vBeta + vGamma * vGamma + vAlpha * vAlpha);
+          window._pswDebugSpeed = angSpeed; // exposed for debug panel live readout
+
+          if (!_psw.swingActive && angSpeed > _swCfg.speedThreshold) {
+            // Swing detected — compute exaggerated quaternion in swing direction
+            _psw.swingActive = true;
+            _psw.swingEndTime = nowSec + _swCfg.holdDuration;
+            _psw.trail = [];
+
+            // Normalised swing velocity direction (beta/gamma/alpha)
+            const mag = angSpeed || 1;
+            const nB = vBeta / mag, nG = vGamma / mag, nA = vAlpha / mag;
+            const extraRad = _swCfg.exaggerAngle * DEG;
+
+            // Extra rotation: apply swing-direction Euler on top of current gyro Q
+            _psw._extraQ.setFromEuler(
+              new THREE.Euler(nB * extraRad, nA * extraRad, nG * extraRad, 'YXZ')
+            );
+            _psw.swingExaggerQ.copy(_phoneSwordGyroQ).multiply(_psw._extraQ);
+          }
+        }
+        _psw.prevBeta  = _dBeta;
+        _psw.prevGamma = _dGamma;
+        _psw.prevAlpha = _dAlpha;
+        _psw.prevTime  = nowSec;
+
+        // Choose which quaternion drives the sword this frame
+        let activeGyroQ;
+        if (_psw.swingActive) {
+          if (nowSec >= _psw.swingEndTime) {
+            _psw.swingActive = false;
+            activeGyroQ = _phoneSwordGyroQ;
+          } else {
+            activeGyroQ = _psw.swingExaggerQ;
+          }
+        } else {
+          activeGyroQ = _phoneSwordGyroQ;
+        }
+
         _phoneSwordEuler.set(
           (_dBeta + _cfg.offsetX) * DEG,
           (_dAlpha + _cfg.offsetY) * DEG,
@@ -15371,20 +15449,92 @@ async function initCore(runtimeContext) {
           'YXZ'
         );
         _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
-        // Write gyro+base to _holdQuaternion so foamSword.update() reads the correct blade direction
+
+        // Write to _holdQuaternion so foamSword.update() reads correct blade direction
         if (foamSword?.holder === playerControls) {
-          foamSword._holdQuaternion.copy(_phoneSwordGyroQ).multiply(_phoneSwordBaseQ);
+          foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
         }
       }
     }
     autumnSword?.update();
     foamSword?.update();
     // Phone Sword: after foamSword.update() positions the mesh via hand bone, directly override
-    // the mesh quaternion using player world rotation + gyro — this removes any dependence on
-    // hand bone animation state (which changes on death/respawn and breaks calibration).
+    // the mesh quaternion using player world rotation + active gyro Q (swing-exaggerated or normal).
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
-      foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_phoneSwordGyroQ).multiply(_phoneSwordBaseQ);
+      const _activeQ = _psw.swingActive ? _psw.swingExaggerQ : _phoneSwordGyroQ;
+      foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
+
+      // ── Sword trail ──────────────────────────────────────────────────────────
+      const _swCfg2 = window.phoneSwordSwingCfg;
+      const nowSec2 = performance.now() / 1000;
+
+      // Sample sword tip world position while swing is active
+      if (_psw.swingActive || (nowSec2 - _psw.swingEndTime) < _swCfg2.trailDuration) {
+        // Sword tip is ~0.655 along local +Z of the blade mesh
+        const tipLocal = new THREE.Vector3(0, 0, 0.655);
+        const tipWorld = tipLocal.applyQuaternion(foamSword.mesh.quaternion).add(foamSword.mesh.position);
+        _psw.trail.push({ pos: tipWorld, t: nowSec2 });
+      }
+
+      // Expire old trail points
+      const trailCutoff = nowSec2 - _swCfg2.trailDuration;
+      _psw.trail = _psw.trail.filter(p => p.t >= trailCutoff);
+
+      // Remove stale trail lines from scene
+      while (_psw.trailLines.length > _swCfg2.trailLineCount) {
+        const old = _psw.trailLines.pop();
+        scene.remove(old);
+        old.geometry.dispose();
+        old.material.dispose();
+      }
+
+      if (_psw.trail.length >= 2) {
+        const pts = _psw.trail.map(p => p.pos);
+        const age = nowSec2 - _psw.swingEndTime; // negative while swinging
+        const fadeT = _psw.swingActive ? 1.0 : Math.max(0, 1 - age / _swCfg2.trailDuration);
+        const baseOpacity = _swCfg2.trailOpacity * fadeT;
+
+        // Compute camera-right for spreading parallel lines
+        const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+
+        // Rebuild one Line per trail layer
+        for (let li = 0; li < _swCfg2.trailLineCount; li++) {
+          const spread = (li - (_swCfg2.trailLineCount - 1) / 2) * _swCfg2.trailLineSpread;
+          const offset = camRight.clone().multiplyScalar(spread);
+          const positions = new Float32Array(pts.length * 3);
+          for (let pi = 0; pi < pts.length; pi++) {
+            positions[pi * 3]     = pts[pi].x + offset.x;
+            positions[pi * 3 + 1] = pts[pi].y + offset.y;
+            positions[pi * 3 + 2] = pts[pi].z + offset.z;
+          }
+
+          let line = _psw.trailLines[li];
+          if (!line) {
+            const geom = new THREE.BufferGeometry();
+            const mat = new THREE.LineBasicMaterial({
+              color: _swCfg2.trailColor,
+              transparent: true,
+              depthWrite: false,
+              blending: THREE.AdditiveBlending,
+            });
+            line = new THREE.Line(geom, mat);
+            scene.add(line);
+            _psw.trailLines[li] = line;
+          }
+          line.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+          line.geometry.setDrawRange(0, pts.length);
+          line.geometry.attributes.position.needsUpdate = true;
+          // Outer lines are slightly more transparent
+          const layerFade = 1 - Math.abs(li - (_swCfg2.trailLineCount - 1) / 2) / _swCfg2.trailLineCount * 0.5;
+          line.material.opacity = baseOpacity * layerFade;
+          line.material.color.setHex(_swCfg2.trailColor);
+          line.visible = pts.length >= 2;
+        }
+      } else {
+        // Hide all trail lines when no points
+        for (const l of _psw.trailLines) l.visible = false;
+      }
     }
     hammer?.update();
     pistol?.update();
