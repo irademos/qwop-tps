@@ -8922,9 +8922,12 @@ async function initCore(runtimeContext) {
         spawnBombPickup(position);
       } else if (weaponId === 'autumnSword') {
         spawnAutumnSwordPickup(position);
+        if (autumnSword) autumnSword._baseHoldQuaternion = null;
       } else if (weaponId === FOAM_SWORD_ITEM_ID) {
         // foamSword has no world pickup; just unequip it cleanly so respawn can re-equip
         unequipInventoryItem(FOAM_SWORD_ITEM_ID);
+        // Clear cached base so gyro re-captures it fresh after respawn
+        if (foamSword) foamSword._baseHoldQuaternion = null;
       } else if (weaponId === 'hammer') {
         spawnHammerPickup(position);
       } else if (weaponId === 'lantern') {
