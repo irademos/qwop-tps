@@ -976,28 +976,35 @@ async function initCore(runtimeContext) {
     prevTime: null,
     swingActive: false,
     swingEndTime: 0,
-    suppressUntil: 0,   // don't detect swings until this timestamp (blocks snap-back trigger)
+    suppressUntil: 0,     // don't detect swings until this timestamp
+    returning: false,     // true while smoothly lerping back to live gyro after swing
+    returnStartTime: 0,
+    returnStartQ: new THREE.Quaternion(),
     swingExaggerQ: new THREE.Quaternion(),
-    trail: [],          // {pos: THREE.Vector3, t: number}[]
-    trailLines: [],     // THREE.Line[] added to scene
+    trail: [],            // {pos: THREE.Vector3, t: number}[]
+    trailLines: [],       // THREE.Line[] added to scene
     _tipDir: new THREE.Vector3(),
     _swingAxis: new THREE.Vector3(),
     _extraQ: new THREE.Quaternion(),
-    // Rolling window: store last ~200ms of per-frame angle deltas to measure total arc swept
-    deltaHistory: [],   // {dB, dG, dA, t}[]
+    // Rolling window for arc-length check
+    deltaHistory: [],     // {dB, dG, dA, t}[]
     deltaWindowSec: 0.2,
+    // Rolling window for swing direction averaging
+    velHistory: [],       // {vB, vG, vA, t}[]
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
-    speedThreshold: 800, // deg/s — minimum angular speed to count as a swing
-    minSwingDelta: 30,   // deg — minimum total arc swept in last 200ms to count as a swing
-    exaggerAngle: 70,    // deg — extra rotation applied in swing direction
-    holdDuration: 0.35,  // seconds — how long exaggerated pose is held
-    trailDuration: 0.45, // seconds — how long the trail persists after swing
+    speedThreshold: 5420,  // deg/s
+    minSwingDelta: 30,     // deg — total arc in last 200ms required
+    exaggerAngle: 180,     // deg — extra rotation in swing direction
+    holdDuration: 0.5,     // seconds — how long exaggerated pose is held
+    returnDuration: 0.3,   // seconds — how long to smoothly return to gyro after hold
+    dirAvgWindow: 0.08,    // seconds — velocity history to average for swing direction
+    trailDuration: 0.15,   // seconds
     trailOpacity: 0.75,
     trailColor: 0x88ddff,
-    trailLineCount: 3,   // number of parallel lines (width illusion)
-    trailLineSpread: 0.04, // world-space spread between parallel lines
+    trailLineCount: 3,
+    trailLineSpread: 0.04,
   };
 
   const tempVector3A = new THREE.Vector3();
@@ -15399,7 +15406,7 @@ async function initCore(runtimeContext) {
         const _dBeta = _beta - _c.beta;
         const _dGamma = _gamma - _c.gamma;
 
-        // Compute per-frame angle deltas and accumulate rolling history for arc-length check
+        // Compute per-frame angle deltas
         let frameDeltaB = 0, frameDeltaG = 0, frameDeltaA = 0;
         if (_psw.prevBeta !== null) {
           frameDeltaB = _dBeta  - _psw.prevBeta;
@@ -15408,22 +15415,16 @@ async function initCore(runtimeContext) {
           if (frameDeltaA >  180) frameDeltaA -= 360;
           if (frameDeltaA < -180) frameDeltaA += 360;
         }
+
+        // Rolling arc-length history (200ms window)
         _psw.deltaHistory.push({ dB: frameDeltaB, dG: frameDeltaG, dA: frameDeltaA, t: nowSec });
-        // Expire history older than the rolling window
         const windowCutoff = nowSec - _psw.deltaWindowSec;
-        while (_psw.deltaHistory.length > 0 && _psw.deltaHistory[0].t < windowCutoff) {
-          _psw.deltaHistory.shift();
-        }
-        // Total arc swept in window (sum of absolute per-frame deltas)
+        while (_psw.deltaHistory.length > 0 && _psw.deltaHistory[0].t < windowCutoff) _psw.deltaHistory.shift();
         let arcBeta = 0, arcGamma = 0, arcAlpha = 0;
-        for (const h of _psw.deltaHistory) {
-          arcBeta  += Math.abs(h.dB);
-          arcGamma += Math.abs(h.dG);
-          arcAlpha += Math.abs(h.dA);
-        }
+        for (const h of _psw.deltaHistory) { arcBeta += Math.abs(h.dB); arcGamma += Math.abs(h.dG); arcAlpha += Math.abs(h.dA); }
         const totalArc = Math.sqrt(arcBeta * arcBeta + arcGamma * arcGamma + arcAlpha * arcAlpha);
 
-        // Compute angular velocity (deg/s) for swing detection
+        // Angular velocity + swing direction averaging
         let angSpeed = 0;
         if (_psw.prevBeta !== null && _psw.prevTime !== null) {
           const dt = Math.max(nowSec - _psw.prevTime, 0.001);
@@ -15433,26 +15434,32 @@ async function initCore(runtimeContext) {
           if (vAlpha >  180) vAlpha -= 360;
           if (vAlpha < -180) vAlpha += 360;
           angSpeed = Math.sqrt(vBeta * vBeta + vGamma * vGamma + vAlpha * vAlpha);
-          window._pswDebugSpeed = angSpeed; // exposed for debug panel live readout
+          window._pswDebugSpeed = angSpeed;
+
+          // Accumulate velocity history for averaged swing direction
+          _psw.velHistory.push({ vB: vBeta, vG: vGamma, vA: vAlpha, t: nowSec });
+          const velCutoff = nowSec - (_swCfg.dirAvgWindow || 0.08);
+          while (_psw.velHistory.length > 0 && _psw.velHistory[0].t < velCutoff) _psw.velHistory.shift();
 
           const suppressed = nowSec < _psw.suppressUntil;
-          if (!_psw.swingActive && !suppressed &&
+          if (!_psw.swingActive && !_psw.returning && !suppressed &&
               angSpeed > _swCfg.speedThreshold &&
               totalArc > _swCfg.minSwingDelta) {
-            // Swing detected — compute exaggerated quaternion in swing direction
             _psw.swingActive = true;
+            _psw.returning = false;
             _psw.swingEndTime = nowSec + _swCfg.holdDuration;
             _psw.trail = [];
 
-            // Normalised swing velocity direction (beta/gamma/alpha)
-            const mag = angSpeed || 1;
-            const nB = vBeta / mag, nG = vGamma / mag, nA = vAlpha / mag;
+            // Average velocity over dirAvgWindow for a smoother swing direction
+            let avgB = 0, avgG = 0, avgA = 0;
+            for (const v of _psw.velHistory) { avgB += v.vB; avgG += v.vG; avgA += v.vA; }
+            const n = _psw.velHistory.length || 1;
+            avgB /= n; avgG /= n; avgA /= n;
+            const mag = Math.sqrt(avgB * avgB + avgG * avgG + avgA * avgA) || 1;
+            const nB = avgB / mag, nG = avgG / mag, nA = avgA / mag;
             const extraRad = _swCfg.exaggerAngle * DEG;
 
-            // Extra rotation: apply swing-direction Euler on top of current gyro Q
-            _psw._extraQ.setFromEuler(
-              new THREE.Euler(nB * extraRad, nA * extraRad, nG * extraRad, 'YXZ')
-            );
+            _psw._extraQ.setFromEuler(new THREE.Euler(nB * extraRad, nA * extraRad, nG * extraRad, 'YXZ'));
             _psw.swingExaggerQ.copy(_phoneSwordGyroQ).multiply(_psw._extraQ);
           }
         }
@@ -15465,15 +15472,29 @@ async function initCore(runtimeContext) {
         let activeGyroQ;
         if (_psw.swingActive) {
           if (nowSec >= _psw.swingEndTime) {
+            // Hold ended — begin smooth return to live gyro
             _psw.swingActive = false;
-            // Suppress swing detection briefly so the snap-back to gyro doesn't re-trigger.
-            // Also clear prev* so the velocity isn't computed against the exaggerated pose.
-            _psw.suppressUntil = nowSec + 0.25;
+            _psw.returning = true;
+            _psw.returnStartTime = nowSec;
+            _psw.returnStartQ.copy(_psw.swingExaggerQ);
+            // Suppress detection for the full return duration + a small buffer
+            _psw.suppressUntil = nowSec + (_swCfg.returnDuration || 0.3) + 0.15;
             _psw.prevBeta = _psw.prevGamma = _psw.prevAlpha = null;
             _psw.deltaHistory = [];
-            activeGyroQ = _phoneSwordGyroQ;
+            _psw.velHistory = [];
+            activeGyroQ = _psw.swingExaggerQ; // will be overridden below during lerp
           } else {
             activeGyroQ = _psw.swingExaggerQ;
+          }
+        } else if (_psw.returning) {
+          const elapsed = nowSec - _psw.returnStartTime;
+          const t = Math.min(elapsed / Math.max(_swCfg.returnDuration || 0.3, 0.01), 1);
+          if (t >= 1) {
+            _psw.returning = false;
+            activeGyroQ = _phoneSwordGyroQ;
+          } else {
+            // Slerp from the frozen exaggerated pose toward live gyro
+            activeGyroQ = new THREE.Quaternion().slerpQuaternions(_psw.returnStartQ, _phoneSwordGyroQ, t);
           }
         } else {
           activeGyroQ = _phoneSwordGyroQ;
@@ -15499,15 +15520,26 @@ async function initCore(runtimeContext) {
     // the mesh quaternion using player world rotation + active gyro Q (swing-exaggerated or normal).
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
-      const _activeQ = _psw.swingActive ? _psw.swingExaggerQ : _phoneSwordGyroQ;
+      // activeGyroQ computed above (exaggerated / lerping / live); re-derive here for mesh override
+      const _isSwinging = _psw.swingActive || _psw.returning;
+      let _activeQ;
+      if (_psw.swingActive) {
+        _activeQ = _psw.swingExaggerQ;
+      } else if (_psw.returning) {
+        const _elapsed = performance.now() / 1000 - _psw.returnStartTime;
+        const _t = Math.min(_elapsed / Math.max(window.phoneSwordSwingCfg.returnDuration || 0.3, 0.01), 1);
+        _activeQ = new THREE.Quaternion().slerpQuaternions(_psw.returnStartQ, _phoneSwordGyroQ, _t);
+      } else {
+        _activeQ = _phoneSwordGyroQ;
+      }
       foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
 
       // ── Sword trail ──────────────────────────────────────────────────────────
       const _swCfg2 = window.phoneSwordSwingCfg;
       const nowSec2 = performance.now() / 1000;
 
-      // Sample sword tip world position while swing is active
-      if (_psw.swingActive || (nowSec2 - _psw.swingEndTime) < _swCfg2.trailDuration) {
+      // Sample sword tip world position while swing is active or trail is still fading
+      if (_psw.swingActive || _psw.returning || (nowSec2 - _psw.swingEndTime) < _swCfg2.trailDuration) {
         // Sword tip is ~0.655 along local +Z of the blade mesh
         const tipLocal = new THREE.Vector3(0, 0, 0.655);
         const tipWorld = tipLocal.applyQuaternion(foamSword.mesh.quaternion).add(foamSword.mesh.position);
