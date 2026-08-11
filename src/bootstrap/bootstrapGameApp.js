@@ -15480,7 +15480,15 @@ async function initCore(runtimeContext) {
             const curEZ = (_dGamma + _cfg.offsetZ) * DEG;
             const curGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(curEX, curEY, curEZ, 'YXZ'));
             const oppGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-curEX, -curEY, -curEZ, 'YXZ'));
-            _psw.swingExaggerQ.slerpQuaternions(curGyroQ, oppGyroQ, _swCfg.oppositeStrength);
+            // Always swing a fixed angular arc (~150°) so the sword fully crosses the body
+            // regardless of where it starts. When starting near center the negated angles are
+            // small and the raw slerp target is too close; extend past it to reach the full arc.
+            const _SWING_TARGET_ANGLE = 2.6; // radians ≈ 149°
+            const _rawAngle = curGyroQ.angleTo(oppGyroQ);
+            const _swingT = _rawAngle > 0.01
+              ? (_SWING_TARGET_ANGLE / _rawAngle) * _swCfg.oppositeStrength
+              : _swCfg.oppositeStrength;
+            _psw.swingExaggerQ.slerpQuaternions(curGyroQ, oppGyroQ, _swingT);
           }
         }
         _psw.prevBeta  = _dBeta;
