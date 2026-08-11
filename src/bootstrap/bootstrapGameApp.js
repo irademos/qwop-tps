@@ -11776,6 +11776,16 @@ async function initCore(runtimeContext) {
       phoneSwordConnectCalib?.classList.add('hidden');
     });
 
+    // Derive a stable peer ID from the player profile so the phone-sword URL never changes.
+    // Uses SHA-256 of the profile key so IDs are short, URL-safe, and unique per account.
+    let _fixedPeerId = null;
+    try {
+      const _idSource = 'sqsword:' + (profileNameKey || playerName || 'anon');
+      const _hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(_idSource));
+      const _hashHex = Array.from(new Uint8Array(_hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+      _fixedPeerId = 'sq-' + _hashHex.slice(0, 24);
+    } catch (_) { /* fall back to random ID */ }
+
     // Create a dedicated PeerJS peer for receiving gyro data
     const { loadPeerJs: _loadPeerJs } = await import('../core/externalDeps.js');
     try {
@@ -11791,15 +11801,26 @@ async function initCore(runtimeContext) {
         }
       } catch (_) { /* fall back to STUN-only */ }
 
-      const gyroPeer = new PeerClass({
-        config: { iceServers: _gyroIceServers }
-      });
+      const _peerOpts = { config: { iceServers: _gyroIceServers } };
+      // Use fixed ID if available; PeerJS accepts it as first argument
+      const gyroPeer = _fixedPeerId
+        ? new PeerClass(_fixedPeerId, _peerOpts)
+        : new PeerClass(_peerOpts);
+
+      let _autoConnectTimer = null;
 
       gyroPeer.on('open', (id) => {
-        showPhoneSwordQr(id);
+        // Give the phone 3 seconds to auto-reconnect (if it has the URL bookmarked)
+        // before showing the QR modal.
+        _autoConnectTimer = setTimeout(() => {
+          if (!window.phoneSwordGyro.connected) {
+            showPhoneSwordQr(id);
+          }
+        }, 3000);
       });
 
       gyroPeer.on('connection', (conn) => {
+        clearTimeout(_autoConnectTimer);
         phoneSwordQrStatus.textContent = 'Phone connected!';
         phoneSwordQrStatus.classList.add('connected');
 
@@ -11825,7 +11846,33 @@ async function initCore(runtimeContext) {
       });
 
       gyroPeer.on('error', (err) => {
-        console.warn('[PhoneSword] PeerJS error:', err.message);
+        // If our fixed ID is already taken (stale session), fall back to a random ID
+        if (err.type === 'unavailable-id' && _fixedPeerId) {
+          console.warn('[PhoneSword] Fixed peer ID taken, falling back to random ID');
+          _fixedPeerId = null;
+          const fallbackPeer = new PeerClass(_peerOpts);
+          fallbackPeer.on('open', (id) => showPhoneSwordQr(id));
+          fallbackPeer.on('connection', (conn) => {
+            phoneSwordQrStatus.textContent = 'Phone connected!';
+            phoneSwordQrStatus.classList.add('connected');
+            setTimeout(() => {
+              phoneSwordQrModal.classList.add('hidden');
+              phoneSwordConnectCalib?.classList.remove('hidden');
+            }, 1800);
+            window.phoneSwordGyro.connected = true;
+            conn.on('data', (data) => {
+              if (data && data.type === 'gyro') {
+                window.phoneSwordGyro.alpha = data.alpha;
+                window.phoneSwordGyro.beta = data.beta;
+                window.phoneSwordGyro.gamma = data.gamma;
+              }
+            });
+            conn.on('close', () => { window.phoneSwordGyro.connected = false; });
+          });
+          fallbackPeer.on('error', (e) => console.warn('[PhoneSword] PeerJS error:', e.message));
+        } else {
+          console.warn('[PhoneSword] PeerJS error:', err.message);
+        }
       });
     } catch (err) {
       console.warn('[PhoneSword] Failed to init PeerJS:', err);
