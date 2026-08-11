@@ -11870,11 +11870,13 @@ async function initCore(runtimeContext) {
             window.phoneSwordGyro.alpha = data.alpha;
             window.phoneSwordGyro.beta = data.beta;
             window.phoneSwordGyro.gamma = data.gamma;
+            window.phoneSwordGyro.blocking = !!data.blocking;
           }
         });
 
         conn.on('close', () => {
           window.phoneSwordGyro.connected = false;
+          window.phoneSwordGyro.blocking = false;
         });
       });
 
@@ -11898,9 +11900,10 @@ async function initCore(runtimeContext) {
                 window.phoneSwordGyro.alpha = data.alpha;
                 window.phoneSwordGyro.beta = data.beta;
                 window.phoneSwordGyro.gamma = data.gamma;
+                window.phoneSwordGyro.blocking = !!data.blocking;
               }
             });
-            conn.on('close', () => { window.phoneSwordGyro.connected = false; });
+            conn.on('close', () => { window.phoneSwordGyro.connected = false; window.phoneSwordGyro.blocking = false; });
           });
           fallbackPeer.on('error', (e) => console.warn('[PhoneSword] PeerJS error:', e.message));
         } else {

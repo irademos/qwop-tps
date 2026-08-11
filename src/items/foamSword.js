@@ -124,13 +124,14 @@ export class FoamSword extends Weapon {
           pm.userData.foamSwordHandTarget = { x: 0, y: FS_HAND_CENTER_Y, z: FS_HAND_Z };
         }
         const tgt = pm.userData.foamSwordHandTarget;
-        // Lateral: sword right → hands right, sword left → hands left
-        tgt.x = THREE.MathUtils.clamp(_fsSwordDir.x * FS_HAND_SPREAD, -1.2, 1.2);
-        // Vertical: sword up → hands up, sword down → hands down
-        tgt.y = THREE.MathUtils.clamp(FS_HAND_CENTER_Y + _fsSwordDir.y * FS_HAND_HEIGHT_GAIN, 0.2, 1.6);
-        // Depth: sword straight forward (z≈1) → hands extended toward camera (small z);
-        // sword tilted away → hands pulled back slightly.
-        tgt.z = THREE.MathUtils.clamp(FS_HAND_Z - (_fsSwordDir.z - 0.2) * 0.35, 0.15, 0.7);
+        const blocking = !!window.phoneSwordGyro?.blocking;
+        const blockSign = blocking ? -1 : 1;
+        // Lateral: sword right → hands right (inverted in blocking mode)
+        tgt.x = THREE.MathUtils.clamp(_fsSwordDir.x * FS_HAND_SPREAD * blockSign, -1.2, 1.2);
+        // Vertical: sword up → hands up (inverted in blocking mode)
+        tgt.y = THREE.MathUtils.clamp(FS_HAND_CENTER_Y + _fsSwordDir.y * FS_HAND_HEIGHT_GAIN * blockSign, 0.2, 1.6);
+        // Depth: mirrored in blocking mode
+        tgt.z = THREE.MathUtils.clamp(FS_HAND_Z - (_fsSwordDir.z - 0.2) * 0.35 * blockSign, 0.15, 0.7);
       }
       super.update();
       return;

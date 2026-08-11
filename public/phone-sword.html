@@ -86,6 +86,32 @@
       margin-bottom: 16px;
       filter: drop-shadow(0 0 12px #6366f1);
     }
+    #block-btn {
+      display: none;
+      position: fixed;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 220px;
+      height: 80px;
+      background: #dc2626;
+      color: #fff;
+      border: none;
+      border-radius: 20px;
+      font-size: 2rem;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      box-shadow: 0 6px 32px rgba(220,38,38,0.5);
+      transition: background 0.1s, transform 0.08s, box-shadow 0.1s;
+      touch-action: none;
+      z-index: 100;
+    }
+    #block-btn.blocking {
+      background: #991b1b;
+      transform: translateX(-50%) scale(0.95);
+      box-shadow: 0 2px 12px rgba(220,38,38,0.8);
+    }
   </style>
 </head>
 <body>
@@ -102,6 +128,7 @@
     <div id="gyro-gamma">γ (tilt left/right): —</div>
   </div>
   <div id="error-msg"></div>
+  <button id="block-btn">🛡️ BLOCK</button>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script>
@@ -122,6 +149,17 @@
     let gyroEnabled = false;
     let sendInterval = null;
     let lastGyro = { alpha: null, beta: null, gamma: null };
+    let isBlocking = false;
+
+    const blockBtn = document.getElementById('block-btn');
+    const setBlocking = (val) => {
+      isBlocking = val;
+      blockBtn.classList.toggle('blocking', val);
+    };
+    blockBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); setBlocking(true); });
+    blockBtn.addEventListener('pointerup', () => setBlocking(false));
+    blockBtn.addEventListener('pointercancel', () => setBlocking(false));
+    blockBtn.addEventListener('pointerleave', () => setBlocking(false));
 
     if (!hostPeerId) {
       statusEl.textContent = 'No host ID in URL. Scan the QR code from the game.';
@@ -166,6 +204,7 @@
               alpha: lastGyro.alpha,
               beta: lastGyro.beta,
               gamma: lastGyro.gamma,
+              blocking: isBlocking,
               ts: Date.now()
             });
           } catch (_) { /* ignore */ }
@@ -216,6 +255,7 @@
           connectedIcon.style.display = 'block';
           gyroDisplay.style.display = 'block';
           connectBtn.style.display = 'none';
+          blockBtn.style.display = 'block';
           startGyro();
           startSendLoop();
           conn.send({ type: 'gyro_hello', msg: 'Phone Sword connected!' });
@@ -224,6 +264,8 @@
         conn.on('close', () => {
           setStatus('Disconnected from game');
           connectedIcon.style.display = 'none';
+          blockBtn.style.display = 'none';
+          setBlocking(false);
           if (sendInterval) clearInterval(sendInterval);
           connectBtn.disabled = false;
           connectBtn.style.display = '';
