@@ -11649,6 +11649,17 @@ async function initCore(runtimeContext) {
     // Config: additional rotation offsets (degrees) applied on top of gyro delta
     window.phoneSwordConfig = { offsetX: 90, offsetY: 180, offsetZ: 0 };
 
+    // Recalibrate: snapshot current gyro as neutral AND clear cached base quaternions
+    // so the gyro loop re-initializes them cleanly from the weapon's _holdRotation.
+    window.phoneSwordRecalibrate = () => {
+      const g = window.phoneSwordGyro;
+      if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
+      if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
+      if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+      if (foamSword) foamSword._baseHoldQuaternion = null;
+      if (autumnSword) autumnSword._baseHoldQuaternion = null;
+    };
+
     const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
     const phoneSwordQrCanvas = document.getElementById('phone-sword-qr-canvas');
     const phoneSwordQrUrl = document.getElementById('phone-sword-qr-url');
@@ -11734,12 +11745,9 @@ async function initCore(runtimeContext) {
       if (!phoneSwordCalibModal.classList.contains('hidden')) _updateCalibLive();
     }, 100);
 
-    // "Set Neutral" — capture current gyro as calibration reference
+    // "Set Neutral" — capture current gyro as calibration reference + clear base quaternions
     document.getElementById('phone-sword-calib-set').addEventListener('click', () => {
-      const g = window.phoneSwordGyro;
-      if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
-      if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
-      if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+      window.phoneSwordRecalibrate?.();
       closeCalibModal();
     });
 
@@ -11769,10 +11777,7 @@ async function initCore(runtimeContext) {
 
     // ── Post-connect calibration popup ──────────────────────────────────────
     document.getElementById('phone-sword-connect-calib-ok')?.addEventListener('click', () => {
-      const g = window.phoneSwordGyro;
-      if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
-      if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
-      if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+      window.phoneSwordRecalibrate?.();
       phoneSwordConnectCalib?.classList.add('hidden');
     });
 

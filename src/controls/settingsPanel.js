@@ -749,10 +749,16 @@ function buildDisplayPanel() {
   phoneSwordRecalBtn.id = 'settings-phone-sword-recal';
   phoneSwordRecalBtn.type = 'button';
   phoneSwordRecalBtn.addEventListener('click', () => {
-    document.getElementById('phone-sword-calib-modal')?.classList.remove('hidden');
+    if (window.phoneSwordRecalibrate) {
+      window.phoneSwordRecalibrate();
+      phoneSwordRecalBtn.textContent = '✅ Calibrated!';
+      setTimeout(() => { phoneSwordRecalBtn.textContent = 'Recalibrate Sword'; }, 1500);
+    } else {
+      document.getElementById('phone-sword-calib-modal')?.classList.remove('hidden');
+    }
   });
   const phoneSwordRecalHint = createElement('div', 'settings-muted');
-  phoneSwordRecalHint.textContent = 'Reset the resting position of the phone sword.';
+  phoneSwordRecalHint.textContent = 'Hold the phone in its resting position, then tap to set neutral. Resets all calibration state.';
   phoneSwordRecalGroup.append(phoneSwordRecalLabel, phoneSwordRecalBtn, phoneSwordRecalHint);
 
   const cameraPreviewGroup = createElement('div', 'settings-field');
