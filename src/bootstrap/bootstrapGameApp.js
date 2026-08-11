@@ -990,16 +990,16 @@ async function initCore(runtimeContext) {
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
-    speedThreshold: 5420,   // deg/s
-    minSwingDelta: 30,      // deg — total arc in last 200ms required
+    speedThreshold: 5470,   // deg/s
+    minSwingDelta: 15,      // deg — total arc in last 200ms required
     oppositeStrength: 1.0,  // 0=no swing, 1=full opposite, >1=overshoot
     holdDuration: 0.5,      // seconds — how long opposite pose is held
     returnDuration: 0.3,    // seconds — how long to smoothly return to gyro after hold
-    trailDuration: 0.15,    // seconds — how long trail history is kept/shown
+    trailDuration: 0.4,     // seconds — how long trail history is kept/shown
     trailOpacity: 0.75,
-    trailColor: 0x88ddff,
+    trailColor: 0xff4986,
     trailLineCount: 3,
-    trailLineSpread: 0.04,
+    trailLineSpread: 0.005,
   };
 
   const tempVector3A = new THREE.Vector3();
