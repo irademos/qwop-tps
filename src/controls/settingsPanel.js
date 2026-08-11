@@ -742,6 +742,19 @@ function buildDisplayPanel() {
   const hint = createElement('div', 'settings-muted');
   hint.textContent = 'Auto mode uses local time to switch between day and night lighting.';
 
+  const phoneSwordRecalGroup = createElement('div', 'settings-field');
+  phoneSwordRecalGroup.hidden = !window.phoneSwordMode;
+  const phoneSwordRecalLabel = createElement('label', 'settings-label', 'Phone Sword');
+  const phoneSwordRecalBtn = createElement('button', 'settings-button settings-button-secondary', 'Recalibrate Sword');
+  phoneSwordRecalBtn.id = 'settings-phone-sword-recal';
+  phoneSwordRecalBtn.type = 'button';
+  phoneSwordRecalBtn.addEventListener('click', () => {
+    document.getElementById('phone-sword-calib-modal')?.classList.remove('hidden');
+  });
+  const phoneSwordRecalHint = createElement('div', 'settings-muted');
+  phoneSwordRecalHint.textContent = 'Reset the resting position of the phone sword.';
+  phoneSwordRecalGroup.append(phoneSwordRecalLabel, phoneSwordRecalBtn, phoneSwordRecalHint);
+
   const cameraPreviewGroup = createElement('div', 'settings-field');
   const cameraPreviewLabel = createElement('label', 'settings-label', 'Camera Feed');
   const cameraPreviewBtn = createElement('button', 'settings-button settings-button-secondary', 'View Camera Feed');
@@ -815,6 +828,7 @@ function buildDisplayPanel() {
     gyroGroup,
     gyroRecalGroup,
     highContrastGroup,
+    phoneSwordRecalGroup,
     cameraPreviewGroup,
     tpCameraHeaderGroup,
     cameraDistField.field,

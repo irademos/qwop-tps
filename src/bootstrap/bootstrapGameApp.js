@@ -7032,6 +7032,7 @@ async function initCore(runtimeContext) {
       if (autumnSword?.holder !== playerControls) return;
       autumnSword.holder = null;
       autumnSword.localHoldOrigin = null;
+      autumnSword._baseHoldQuaternion = null;
       if (autumnSword.mesh) {
         autumnSword.mesh.visible = false;
       }
@@ -7049,6 +7050,7 @@ async function initCore(runtimeContext) {
       if (foamSword?.holder !== playerControls) return;
       foamSword.holder = null;
       foamSword.localHoldOrigin = null;
+      foamSword._baseHoldQuaternion = null;
       if (foamSword.mesh) {
         foamSword.mesh.visible = false;
       }
@@ -15327,11 +15329,13 @@ async function initCore(runtimeContext) {
         for (const _sw of [autumnSword, foamSword]) {
           if (_sw?.holder === playerControls) {
             if (!_sw._baseHoldQuaternion) {
-              _sw._baseHoldQuaternion = _sw._holdQuaternion.clone();
+              // Always derive from _holdRotation, never from the gyro-mutated _holdQuaternion
+              _sw._baseHoldQuaternion = new THREE.Quaternion().setFromEuler(_sw._holdRotation);
             }
             _sw._holdQuaternion.copy(_phoneSwordGyroQ).multiply(_sw._baseHoldQuaternion);
-          } else if (_sw?._baseHoldQuaternion && _sw?.holder !== playerControls) {
+          } else if (_sw?.holder !== playerControls && _sw?._baseHoldQuaternion) {
             _sw._holdQuaternion.copy(_sw._baseHoldQuaternion);
+            _sw._baseHoldQuaternion = null; // clear so next equip re-initializes cleanly
           }
         }
       }
