@@ -981,26 +981,21 @@ async function initCore(runtimeContext) {
     returnStartTime: 0,
     returnStartQ: new THREE.Quaternion(),
     swingExaggerQ: new THREE.Quaternion(),
-    trail: [],            // {pos: THREE.Vector3, t: number}[]
+    trail: [],            // {pos: THREE.Vector3, t: number}[] — always sampled, shown during swings
     trailLines: [],       // THREE.Line[] added to scene
-    _tipDir: new THREE.Vector3(),
-    _swingAxis: new THREE.Vector3(),
     _extraQ: new THREE.Quaternion(),
     // Rolling window for arc-length check
     deltaHistory: [],     // {dB, dG, dA, t}[]
     deltaWindowSec: 0.2,
-    // Rolling window for swing direction averaging
-    velHistory: [],       // {vB, vG, vA, t}[]
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
-    speedThreshold: 5420,  // deg/s
-    minSwingDelta: 30,     // deg — total arc in last 200ms required
-    exaggerAngle: 180,     // deg — extra rotation in swing direction
-    holdDuration: 0.5,     // seconds — how long exaggerated pose is held
-    returnDuration: 0.3,   // seconds — how long to smoothly return to gyro after hold
-    dirAvgWindow: 0.08,    // seconds — velocity history to average for swing direction
-    trailDuration: 0.15,   // seconds
+    speedThreshold: 5420,   // deg/s
+    minSwingDelta: 30,      // deg — total arc in last 200ms required
+    oppositeStrength: 1.0,  // 0=no swing, 1=full opposite, >1=overshoot
+    holdDuration: 0.5,      // seconds — how long opposite pose is held
+    returnDuration: 0.3,    // seconds — how long to smoothly return to gyro after hold
+    trailDuration: 0.15,    // seconds — how long trail history is kept/shown
     trailOpacity: 0.75,
     trailColor: 0x88ddff,
     trailLineCount: 3,
@@ -15424,7 +15419,7 @@ async function initCore(runtimeContext) {
         for (const h of _psw.deltaHistory) { arcBeta += Math.abs(h.dB); arcGamma += Math.abs(h.dG); arcAlpha += Math.abs(h.dA); }
         const totalArc = Math.sqrt(arcBeta * arcBeta + arcGamma * arcGamma + arcAlpha * arcAlpha);
 
-        // Angular velocity + swing direction averaging
+        // Angular velocity for speed detection
         let angSpeed = 0;
         if (_psw.prevBeta !== null && _psw.prevTime !== null) {
           const dt = Math.max(nowSec - _psw.prevTime, 0.001);
@@ -15436,11 +15431,6 @@ async function initCore(runtimeContext) {
           angSpeed = Math.sqrt(vBeta * vBeta + vGamma * vGamma + vAlpha * vAlpha);
           window._pswDebugSpeed = angSpeed;
 
-          // Accumulate velocity history for averaged swing direction
-          _psw.velHistory.push({ vB: vBeta, vG: vGamma, vA: vAlpha, t: nowSec });
-          const velCutoff = nowSec - (_swCfg.dirAvgWindow || 0.08);
-          while (_psw.velHistory.length > 0 && _psw.velHistory[0].t < velCutoff) _psw.velHistory.shift();
-
           const suppressed = nowSec < _psw.suppressUntil;
           if (!_psw.swingActive && !_psw.returning && !suppressed &&
               angSpeed > _swCfg.speedThreshold &&
@@ -15448,19 +15438,16 @@ async function initCore(runtimeContext) {
             _psw.swingActive = true;
             _psw.returning = false;
             _psw.swingEndTime = nowSec + _swCfg.holdDuration;
-            _psw.trail = [];
+            // Trail NOT cleared here — pre-swing tip positions already in buffer show the arc
 
-            // Average velocity over dirAvgWindow for a smoother swing direction
-            let avgB = 0, avgG = 0, avgA = 0;
-            for (const v of _psw.velHistory) { avgB += v.vB; avgG += v.vG; avgA += v.vA; }
-            const n = _psw.velHistory.length || 1;
-            avgB /= n; avgG /= n; avgA /= n;
-            const mag = Math.sqrt(avgB * avgB + avgG * avgG + avgA * avgA) || 1;
-            const nB = avgB / mag, nG = avgG / mag, nA = avgA / mag;
-            const extraRad = _swCfg.exaggerAngle * DEG;
-
-            _psw._extraQ.setFromEuler(new THREE.Euler(nB * extraRad, nA * extraRad, nG * extraRad, 'YXZ'));
-            _psw.swingExaggerQ.copy(_phoneSwordGyroQ).multiply(_psw._extraQ);
+            // Swing direction: opposite of where the sword currently points.
+            // Negate the calibration-relative euler angles so e.g. "up" becomes "down".
+            const curEX = (_dBeta  + _cfg.offsetX) * DEG;
+            const curEY = (_dAlpha + _cfg.offsetY) * DEG;
+            const curEZ = (_dGamma + _cfg.offsetZ) * DEG;
+            const curGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(curEX, curEY, curEZ, 'YXZ'));
+            const oppGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-curEX, -curEY, -curEZ, 'YXZ'));
+            _psw.swingExaggerQ.slerpQuaternions(curGyroQ, oppGyroQ, _swCfg.oppositeStrength);
           }
         }
         _psw.prevBeta  = _dBeta;
@@ -15477,12 +15464,11 @@ async function initCore(runtimeContext) {
             _psw.returning = true;
             _psw.returnStartTime = nowSec;
             _psw.returnStartQ.copy(_psw.swingExaggerQ);
-            // Suppress detection for the full return duration + a small buffer
+            // Suppress detection for the full return duration + buffer
             _psw.suppressUntil = nowSec + (_swCfg.returnDuration || 0.3) + 0.15;
             _psw.prevBeta = _psw.prevGamma = _psw.prevAlpha = null;
             _psw.deltaHistory = [];
-            _psw.velHistory = [];
-            activeGyroQ = _psw.swingExaggerQ; // will be overridden below during lerp
+            activeGyroQ = _psw.swingExaggerQ;
           } else {
             activeGyroQ = _psw.swingExaggerQ;
           }
@@ -15493,7 +15479,6 @@ async function initCore(runtimeContext) {
             _psw.returning = false;
             activeGyroQ = _phoneSwordGyroQ;
           } else {
-            // Slerp from the frozen exaggerated pose toward live gyro
             activeGyroQ = new THREE.Quaternion().slerpQuaternions(_psw.returnStartQ, _phoneSwordGyroQ, t);
           }
         } else {
@@ -15538,9 +15523,9 @@ async function initCore(runtimeContext) {
       const _swCfg2 = window.phoneSwordSwingCfg;
       const nowSec2 = performance.now() / 1000;
 
-      // Sample sword tip world position while swing is active or trail is still fading
-      if (_psw.swingActive || _psw.returning || (nowSec2 - _psw.swingEndTime) < _swCfg2.trailDuration) {
-        // Sword tip is ~0.655 along local +Z of the blade mesh
+      // Always sample sword tip so pre-swing positions are already in the buffer when a swing fires.
+      // The expiry below keeps only the last trailDuration seconds, so memory stays bounded.
+      {
         const tipLocal = new THREE.Vector3(0, 0, 0.655);
         const tipWorld = tipLocal.applyQuaternion(foamSword.mesh.quaternion).add(foamSword.mesh.position);
         _psw.trail.push({ pos: tipWorld, t: nowSec2 });
@@ -15550,6 +15535,10 @@ async function initCore(runtimeContext) {
       const trailCutoff = nowSec2 - _swCfg2.trailDuration;
       _psw.trail = _psw.trail.filter(p => p.t >= trailCutoff);
 
+      // Determine whether the trail should be visible this frame
+      const trailVisible = _psw.swingActive || _psw.returning ||
+        (nowSec2 - _psw.swingEndTime) < _swCfg2.trailDuration;
+
       // Remove stale trail lines from scene
       while (_psw.trailLines.length > _swCfg2.trailLineCount) {
         const old = _psw.trailLines.pop();
@@ -15558,10 +15547,16 @@ async function initCore(runtimeContext) {
         old.material.dispose();
       }
 
-      if (_psw.trail.length >= 2) {
+      if (trailVisible && _psw.trail.length >= 2) {
         const pts = _psw.trail.map(p => p.pos);
-        const age = nowSec2 - _psw.swingEndTime; // negative while swinging
-        const fadeT = _psw.swingActive ? 1.0 : Math.max(0, 1 - age / _swCfg2.trailDuration);
+        // Fade: full during swing hold and return; fade out after return ends
+        let fadeT;
+        if (_psw.swingActive || _psw.returning) {
+          fadeT = 1.0;
+        } else {
+          const age = nowSec2 - _psw.swingEndTime;
+          fadeT = Math.max(0, 1 - age / _swCfg2.trailDuration);
+        }
         const baseOpacity = _swCfg2.trailOpacity * fadeT;
 
         // Compute camera-right for spreading parallel lines
@@ -15601,7 +15596,6 @@ async function initCore(runtimeContext) {
           line.visible = pts.length >= 2;
         }
       } else {
-        // Hide all trail lines when no points
         for (const l of _psw.trailLines) l.visible = false;
       }
     }
