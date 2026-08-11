@@ -7032,7 +7032,6 @@ async function initCore(runtimeContext) {
       if (autumnSword?.holder !== playerControls) return;
       autumnSword.holder = null;
       autumnSword.localHoldOrigin = null;
-      autumnSword._baseHoldQuaternion = null;
       if (autumnSword.mesh) {
         autumnSword.mesh.visible = false;
       }
@@ -7050,7 +7049,6 @@ async function initCore(runtimeContext) {
       if (foamSword?.holder !== playerControls) return;
       foamSword.holder = null;
       foamSword.localHoldOrigin = null;
-      foamSword._baseHoldQuaternion = null;
       if (foamSword.mesh) {
         foamSword.mesh.visible = false;
       }
@@ -8924,12 +8922,9 @@ async function initCore(runtimeContext) {
         spawnBombPickup(position);
       } else if (weaponId === 'autumnSword') {
         spawnAutumnSwordPickup(position);
-        if (autumnSword) autumnSword._baseHoldQuaternion = null;
       } else if (weaponId === FOAM_SWORD_ITEM_ID) {
         // foamSword has no world pickup; just unequip it cleanly so respawn can re-equip
         unequipInventoryItem(FOAM_SWORD_ITEM_ID);
-        // Clear cached base so gyro re-captures it fresh after respawn
-        if (foamSword) foamSword._baseHoldQuaternion = null;
       } else if (weaponId === 'hammer') {
         spawnHammerPickup(position);
       } else if (weaponId === 'lantern') {
@@ -11656,8 +11651,6 @@ async function initCore(runtimeContext) {
       if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
       if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
       if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
-      if (foamSword) foamSword._baseHoldQuaternion = null;
-      if (autumnSword) autumnSword._baseHoldQuaternion = null;
     };
 
     const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
@@ -15309,20 +15302,19 @@ async function initCore(runtimeContext) {
     bow?.update();
     bazooka?.update();
     bomb?.update();
-    // Phone Sword: apply gyro data + config offsets to the held sword's rotation
+    // Phone Sword: compute gyro quaternion and write to _holdQuaternion for hand positioning
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
       const _g = window.phoneSwordGyro;
       const _c = window.phoneSwordCalib;
       const _cfg = window.phoneSwordConfig || { offsetX: 0, offsetY: 0, offsetZ: 0 };
-      if (_g.beta !== null && _g.gamma !== null) {
+      const _beta = _g.beta, _gamma = _g.gamma;
+      if (Number.isFinite(_beta) && Number.isFinite(_gamma)) {
         const DEG = Math.PI / 180;
-        // Compute delta from calibration; handle alpha wrap-around
-        let _dAlpha = (_g.alpha ?? _c.alpha) - _c.alpha;
+        let _dAlpha = (Number.isFinite(_g.alpha) ? _g.alpha : _c.alpha) - _c.alpha;
         if (_dAlpha > 180) _dAlpha -= 360;
         if (_dAlpha < -180) _dAlpha += 360;
-        const _dBeta = _g.beta - _c.beta;
-        const _dGamma = _g.gamma - _c.gamma;
-        // beta → pitch (X) + offsetX, gamma → roll (Z) + offsetZ, alpha → yaw (Y) + offsetY
+        const _dBeta = _beta - _c.beta;
+        const _dGamma = _gamma - _c.gamma;
         _phoneSwordEuler.set(
           (_dBeta + _cfg.offsetX) * DEG,
           (_dAlpha + _cfg.offsetY) * DEG,
@@ -15330,23 +15322,21 @@ async function initCore(runtimeContext) {
           'YXZ'
         );
         _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
-        // Apply to whichever sword the local player holds
-        for (const _sw of [autumnSword, foamSword]) {
-          if (_sw?.holder === playerControls) {
-            if (!_sw._baseHoldQuaternion) {
-              // Always derive from _holdRotation, never from the gyro-mutated _holdQuaternion
-              _sw._baseHoldQuaternion = new THREE.Quaternion().setFromEuler(_sw._holdRotation);
-            }
-            _sw._holdQuaternion.copy(_phoneSwordGyroQ).multiply(_sw._baseHoldQuaternion);
-          } else if (_sw?.holder !== playerControls && _sw?._baseHoldQuaternion) {
-            _sw._holdQuaternion.copy(_sw._baseHoldQuaternion);
-            _sw._baseHoldQuaternion = null; // clear so next equip re-initializes cleanly
-          }
+        // Write gyro quaternion to _holdQuaternion so foamSword.update() can read hand direction
+        if (foamSword?.holder === playerControls) {
+          foamSword._holdQuaternion.copy(_phoneSwordGyroQ);
         }
       }
     }
     autumnSword?.update();
     foamSword?.update();
+    // Phone Sword: after foamSword.update() positions the mesh via hand bone, directly override
+    // the mesh quaternion using player world rotation + gyro — this removes any dependence on
+    // hand bone animation state (which changes on death/respawn and breaks calibration).
+    if (window.phoneSwordMode && window.phoneSwordGyro?.connected &&
+        foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
+      foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_phoneSwordGyroQ);
+    }
     hammer?.update();
     pistol?.update();
     paintBrush?.update();
