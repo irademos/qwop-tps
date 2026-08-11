@@ -11870,11 +11870,13 @@ async function initCore(runtimeContext) {
             window.phoneSwordGyro.alpha = data.alpha;
             window.phoneSwordGyro.beta = data.beta;
             window.phoneSwordGyro.gamma = data.gamma;
+            window.phoneSwordGyro.blocking = !!data.blocking;
           }
         });
 
         conn.on('close', () => {
           window.phoneSwordGyro.connected = false;
+          window.phoneSwordGyro.blocking = false;
         });
       });
 
@@ -11898,9 +11900,10 @@ async function initCore(runtimeContext) {
                 window.phoneSwordGyro.alpha = data.alpha;
                 window.phoneSwordGyro.beta = data.beta;
                 window.phoneSwordGyro.gamma = data.gamma;
+                window.phoneSwordGyro.blocking = !!data.blocking;
               }
             });
-            conn.on('close', () => { window.phoneSwordGyro.connected = false; });
+            conn.on('close', () => { window.phoneSwordGyro.connected = false; window.phoneSwordGyro.blocking = false; });
           });
           fallbackPeer.on('error', (e) => console.warn('[PhoneSword] PeerJS error:', e.message));
         } else {
@@ -15386,6 +15389,13 @@ async function initCore(runtimeContext) {
     bomb?.update();
     // Phone Sword: compute gyro quaternion, detect swings, apply exaggerated pose + trail
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
+      // Cancel any in-progress swing immediately when the player starts blocking
+      if (window.phoneSwordGyro.blocking && (_psw.swingActive || _psw.returning)) {
+        _psw.swingActive = false;
+        _psw.returning = false;
+        _psw.deltaHistory = [];
+        _psw.suppressUntil = 0;
+      }
       const _g = window.phoneSwordGyro;
       const _c = window.phoneSwordCalib;
       const _cfg = window.phoneSwordConfig || { offsetX: 0, offsetY: 0, offsetZ: 0 };
@@ -15432,7 +15442,8 @@ async function initCore(runtimeContext) {
           window._pswDebugSpeed = angSpeed;
 
           const suppressed = nowSec < _psw.suppressUntil;
-          if (!_psw.swingActive && !_psw.returning && !suppressed &&
+          const blocking = !!window.phoneSwordGyro?.blocking;
+          if (!_psw.swingActive && !_psw.returning && !suppressed && !blocking &&
               angSpeed > _swCfg.speedThreshold &&
               totalArc > _swCfg.minSwingDelta) {
             _psw.swingActive = true;
