@@ -976,16 +976,21 @@ async function initCore(runtimeContext) {
     prevTime: null,
     swingActive: false,
     swingEndTime: 0,
+    suppressUntil: 0,   // don't detect swings until this timestamp (blocks snap-back trigger)
     swingExaggerQ: new THREE.Quaternion(),
     trail: [],          // {pos: THREE.Vector3, t: number}[]
     trailLines: [],     // THREE.Line[] added to scene
     _tipDir: new THREE.Vector3(),
     _swingAxis: new THREE.Vector3(),
     _extraQ: new THREE.Quaternion(),
+    // Rolling window: store last ~200ms of per-frame angle deltas to measure total arc swept
+    deltaHistory: [],   // {dB, dG, dA, t}[]
+    deltaWindowSec: 0.2,
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
     speedThreshold: 800, // deg/s — minimum angular speed to count as a swing
+    minSwingDelta: 30,   // deg — minimum total arc swept in last 200ms to count as a swing
     exaggerAngle: 70,    // deg — extra rotation applied in swing direction
     holdDuration: 0.35,  // seconds — how long exaggerated pose is held
     trailDuration: 0.45, // seconds — how long the trail persists after swing
@@ -15394,19 +15399,46 @@ async function initCore(runtimeContext) {
         const _dBeta = _beta - _c.beta;
         const _dGamma = _gamma - _c.gamma;
 
+        // Compute per-frame angle deltas and accumulate rolling history for arc-length check
+        let frameDeltaB = 0, frameDeltaG = 0, frameDeltaA = 0;
+        if (_psw.prevBeta !== null) {
+          frameDeltaB = _dBeta  - _psw.prevBeta;
+          frameDeltaG = _dGamma - _psw.prevGamma;
+          frameDeltaA = _dAlpha - _psw.prevAlpha;
+          if (frameDeltaA >  180) frameDeltaA -= 360;
+          if (frameDeltaA < -180) frameDeltaA += 360;
+        }
+        _psw.deltaHistory.push({ dB: frameDeltaB, dG: frameDeltaG, dA: frameDeltaA, t: nowSec });
+        // Expire history older than the rolling window
+        const windowCutoff = nowSec - _psw.deltaWindowSec;
+        while (_psw.deltaHistory.length > 0 && _psw.deltaHistory[0].t < windowCutoff) {
+          _psw.deltaHistory.shift();
+        }
+        // Total arc swept in window (sum of absolute per-frame deltas)
+        let arcBeta = 0, arcGamma = 0, arcAlpha = 0;
+        for (const h of _psw.deltaHistory) {
+          arcBeta  += Math.abs(h.dB);
+          arcGamma += Math.abs(h.dG);
+          arcAlpha += Math.abs(h.dA);
+        }
+        const totalArc = Math.sqrt(arcBeta * arcBeta + arcGamma * arcGamma + arcAlpha * arcAlpha);
+
         // Compute angular velocity (deg/s) for swing detection
+        let angSpeed = 0;
         if (_psw.prevBeta !== null && _psw.prevTime !== null) {
           const dt = Math.max(nowSec - _psw.prevTime, 0.001);
-          let vBeta  = (_dBeta  - _psw.prevBeta)  / dt;
-          let vGamma = (_dGamma - _psw.prevGamma) / dt;
-          let vAlpha = (_dAlpha - _psw.prevAlpha) / dt;
-          // shortest-path wrap for alpha velocity
+          let vBeta  = frameDeltaB / dt;
+          let vGamma = frameDeltaG / dt;
+          let vAlpha = frameDeltaA / dt;
           if (vAlpha >  180) vAlpha -= 360;
           if (vAlpha < -180) vAlpha += 360;
-          const angSpeed = Math.sqrt(vBeta * vBeta + vGamma * vGamma + vAlpha * vAlpha);
+          angSpeed = Math.sqrt(vBeta * vBeta + vGamma * vGamma + vAlpha * vAlpha);
           window._pswDebugSpeed = angSpeed; // exposed for debug panel live readout
 
-          if (!_psw.swingActive && angSpeed > _swCfg.speedThreshold) {
+          const suppressed = nowSec < _psw.suppressUntil;
+          if (!_psw.swingActive && !suppressed &&
+              angSpeed > _swCfg.speedThreshold &&
+              totalArc > _swCfg.minSwingDelta) {
             // Swing detected — compute exaggerated quaternion in swing direction
             _psw.swingActive = true;
             _psw.swingEndTime = nowSec + _swCfg.holdDuration;
@@ -15434,6 +15466,11 @@ async function initCore(runtimeContext) {
         if (_psw.swingActive) {
           if (nowSec >= _psw.swingEndTime) {
             _psw.swingActive = false;
+            // Suppress swing detection briefly so the snap-back to gyro doesn't re-trigger.
+            // Also clear prev* so the velocity isn't computed against the exaggerated pose.
+            _psw.suppressUntil = nowSec + 0.25;
+            _psw.prevBeta = _psw.prevGamma = _psw.prevAlpha = null;
+            _psw.deltaHistory = [];
             activeGyroQ = _phoneSwordGyroQ;
           } else {
             activeGyroQ = _psw.swingExaggerQ;

@@ -249,7 +249,13 @@
 
       <label style="display:block;margin-bottom:6px">
         Speed threshold (deg/s): <span id="psw-lbl-threshold">800</span>
-        <input type="range" min="20" max="3000" step="25" value="800" id="psw-threshold"
+        <input type="range" min="20" max="10000" step="50" value="800" id="psw-threshold"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Min arc swept (deg): <span id="psw-lbl-mindelta">30</span>
+        <input type="range" min="0" max="180" step="5" value="30" id="psw-mindelta"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
@@ -294,6 +300,13 @@
         <input type="color" value="#88ddff" id="psw-color"
           style="width:100%;display:block;margin-top:2px;height:28px">
       </label>
+
+      <button id="psw-copy-btn" style="
+        margin-top:6px;width:100%;padding:6px;
+        background:#334;border:1px solid #667;border-radius:4px;
+        color:#cdf;font-family:monospace;font-size:11px;cursor:pointer;
+      ">📋 Copy values to clipboard</button>
+      <div id="psw-copy-confirm" style="font-size:10px;color:#7f7;margin-top:3px;height:14px"></div>
     </div>
   </div>
   <script>
@@ -310,6 +323,7 @@
         });
       }
       bind('psw-threshold', 'psw-lbl-threshold', 'speedThreshold', Number);
+      bind('psw-mindelta',  'psw-lbl-mindelta',  'minSwingDelta',  Number);
       bind('psw-exagg',     'psw-lbl-exagg',     'exaggerAngle',   Number);
       bind('psw-hold',      'psw-lbl-hold',       'holdDuration',   Number);
       bind('psw-trail',     'psw-lbl-trail',      'trailDuration',  Number);
@@ -325,6 +339,27 @@
             window.phoneSwordSwingCfg.trailColor = parseInt(this.value.replace('#',''), 16);
         });
       }
+
+      // Copy to clipboard
+      const copyBtn = document.getElementById('psw-copy-btn');
+      const copyConfirm = document.getElementById('psw-copy-confirm');
+      if (copyBtn) copyBtn.addEventListener('click', function () {
+        const cfg = window.phoneSwordSwingCfg || {};
+        const text = JSON.stringify(cfg, null, 2);
+        navigator.clipboard.writeText(text).then(function () {
+          copyConfirm.textContent = '✓ Copied!';
+          setTimeout(() => { copyConfirm.textContent = ''; }, 2000);
+        }).catch(function () {
+          // Fallback for browsers that block clipboard
+          const ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          copyConfirm.textContent = '✓ Copied!';
+          setTimeout(() => { copyConfirm.textContent = ''; }, 2000);
+        });
+      });
 
       // Collapse / expand
       const header = document.getElementById('psw-debug-header');
