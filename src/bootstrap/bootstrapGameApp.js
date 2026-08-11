@@ -981,12 +981,17 @@ async function initCore(runtimeContext) {
     returnStartTime: 0,
     returnStartQ: new THREE.Quaternion(),
     swingExaggerQ: new THREE.Quaternion(),
+    swingStartQ: new THREE.Quaternion(), // gyro orientation captured at swing start, used for parry reversal
     trail: [],            // {pos: THREE.Vector3, t: number}[] — always sampled, shown during swings
     trailLines: [],       // THREE.Line[] added to scene
     _extraQ: new THREE.Quaternion(),
     // Rolling window for arc-length check
     deltaHistory: [],     // {dB, dG, dA, t}[]
     deltaWindowSec: 0.2,
+    // Parry: swing cancelled because it is perpendicular to the blocker's sword direction
+    parryActive: false,
+    parryStartTime: 0,
+    parryQ: new THREE.Quaternion(), // reversed pose held during parry (no trail, 1 s hold)
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
@@ -15389,8 +15394,23 @@ async function initCore(runtimeContext) {
     bomb?.update();
     // Phone Sword: compute gyro quaternion, detect swings, apply exaggerated pose + trail
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
-      // Cancel any in-progress swing immediately when the player starts blocking
+      // Cancel any in-progress swing when blocking starts; check for perpendicular parry first.
       if (window.phoneSwordGyro.blocking && (_psw.swingActive || _psw.returning)) {
+        // Parry: if the swing direction is perpendicular to the blocking sword direction (±40°),
+        // reverse the sword back to its start pose for 1 s with no trailing lines.
+        if (_psw.swingActive && !_psw.parryActive) {
+          const _swDir = new THREE.Vector3(0, 0, 1).applyQuaternion(_psw.swingExaggerQ);
+          const _blDir = new THREE.Vector3(0, 0, 1).applyQuaternion(_phoneSwordGyroQ);
+          _swDir.y = 0; if (_swDir.lengthSq() > 1e-4) _swDir.normalize();
+          _blDir.y = 0; if (_blDir.lengthSq() > 1e-4) _blDir.normalize();
+          // Perpendicular ±40° means |dot| < sin(40°) ≈ 0.643
+          if (Math.abs(_swDir.dot(_blDir)) < Math.sin(40 * Math.PI / 180)) {
+            _psw.parryActive = true;
+            _psw.parryStartTime = performance.now() / 1000;
+            _psw.swingEndTime = 0; // prevent trail fade-out during parry hold
+            _psw.parryQ.copy(_psw.swingStartQ); // sword snaps back to pre-swing orientation
+          }
+        }
         _psw.swingActive = false;
         _psw.returning = false;
         _psw.deltaHistory = [];
@@ -15448,7 +15468,9 @@ async function initCore(runtimeContext) {
               totalArc > _swCfg.minSwingDelta) {
             _psw.swingActive = true;
             _psw.returning = false;
+            _psw.parryActive = false;
             _psw.swingEndTime = nowSec + _swCfg.holdDuration;
+            _psw.swingStartQ.copy(_phoneSwordGyroQ); // snapshot pre-swing orientation for parry reversal
             // Trail NOT cleared here — pre-swing tip positions already in buffer show the arc
 
             // Swing direction: opposite of where the sword currently points.
@@ -15466,9 +15488,20 @@ async function initCore(runtimeContext) {
         _psw.prevAlpha = _dAlpha;
         _psw.prevTime  = nowSec;
 
+        // Expire parry after 1 second hold
+        if (_psw.parryActive) {
+          if (nowSec - _psw.parryStartTime >= 1.0) {
+            _psw.parryActive = false;
+            _psw.suppressUntil = nowSec + 0.15;
+            _psw.prevBeta = _psw.prevGamma = _psw.prevAlpha = null;
+          }
+        }
+
         // Choose which quaternion drives the sword this frame
         let activeGyroQ;
-        if (_psw.swingActive) {
+        if (_psw.parryActive) {
+          activeGyroQ = _psw.parryQ;
+        } else if (_psw.swingActive) {
           if (nowSec >= _psw.swingEndTime) {
             // Hold ended — begin smooth return to live gyro
             _psw.swingActive = false;
@@ -15519,7 +15552,9 @@ async function initCore(runtimeContext) {
       // activeGyroQ computed above (exaggerated / lerping / live); re-derive here for mesh override
       const _isSwinging = _psw.swingActive || _psw.returning;
       let _activeQ;
-      if (_psw.swingActive) {
+      if (_psw.parryActive) {
+        _activeQ = _psw.parryQ;
+      } else if (_psw.swingActive) {
         _activeQ = _psw.swingExaggerQ;
       } else if (_psw.returning) {
         const _elapsed = performance.now() / 1000 - _psw.returnStartTime;
@@ -15546,9 +15581,12 @@ async function initCore(runtimeContext) {
       const trailCutoff = nowSec2 - _swCfg2.trailDuration;
       _psw.trail = _psw.trail.filter(p => p.t >= trailCutoff);
 
-      // Determine whether the trail should be visible this frame
-      const trailVisible = _psw.swingActive || _psw.returning ||
-        (nowSec2 - _psw.swingEndTime) < _swCfg2.trailDuration;
+      // Determine whether the trail should be visible this frame.
+      // Parry hold never shows a trail — the sword reverses without visual arc.
+      const trailVisible = !_psw.parryActive && (
+        _psw.swingActive || _psw.returning ||
+        (nowSec2 - _psw.swingEndTime) < _swCfg2.trailDuration
+      );
 
       // Remove stale trail lines from scene
       while (_psw.trailLines.length > _swCfg2.trailLineCount) {
@@ -15678,8 +15716,13 @@ async function initCore(runtimeContext) {
         };
 
         // ── Player's foam sword hitting the enemy ──────────────────────────
+        // In phone sword mode, hits only register during an active swing (trailing lines visible).
+        // Simply touching the enemy with the sword while idle or blocking deals no damage.
         if (!_he._playerSwordLastHit) _he._playerSwordLastHit = 0;
-        if (swordMesh?.visible && (Date.now() - _he._playerSwordLastHit) > 1000) {
+        const _canSwordHit = swordMesh?.visible &&
+          (!window.phoneSwordMode || _psw.swingActive) &&
+          (Date.now() - _he._playerSwordLastHit) > 1000;
+        if (_canSwordHit) {
           const _enemyCenter = _he.getCenterWorldPos();
           if (_tipWorld.distanceTo(_enemyCenter) < 0.65) {
             const _hitDir = new THREE.Vector3()
