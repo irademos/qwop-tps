@@ -967,6 +967,8 @@ async function initCore(runtimeContext) {
   // Phone Sword gyro scratch objects
   const _phoneSwordGyroQ = new THREE.Quaternion();
   const _phoneSwordEuler = new THREE.Euler();
+  // Foam sword default hold orientation (Euler 0, π, 0) — applied after gyro rotation
+  const _phoneSwordBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0, 'YXZ'));
   const tempVector3A = new THREE.Vector3();
   const AMMO_PICKUP_AMOUNT = 5;
   const ICE_AMMO_KEY = 'ice ammo';
@@ -11644,6 +11646,15 @@ async function initCore(runtimeContext) {
     // Config: additional rotation offsets (degrees) applied on top of gyro delta
     window.phoneSwordConfig = { offsetX: 90, offsetY: 180, offsetZ: 0 };
 
+    // Recalibrate: snapshot current gyro as neutral AND clear cached base quaternions
+    // so the gyro loop re-initializes them cleanly from the weapon's _holdRotation.
+    window.phoneSwordRecalibrate = () => {
+      const g = window.phoneSwordGyro;
+      if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
+      if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
+      if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+    };
+
     const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
     const phoneSwordQrCanvas = document.getElementById('phone-sword-qr-canvas');
     const phoneSwordQrUrl = document.getElementById('phone-sword-qr-url');
@@ -11729,12 +11740,9 @@ async function initCore(runtimeContext) {
       if (!phoneSwordCalibModal.classList.contains('hidden')) _updateCalibLive();
     }, 100);
 
-    // "Set Neutral" — capture current gyro as calibration reference
+    // "Set Neutral" — capture current gyro as calibration reference + clear base quaternions
     document.getElementById('phone-sword-calib-set').addEventListener('click', () => {
-      const g = window.phoneSwordGyro;
-      if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
-      if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
-      if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+      window.phoneSwordRecalibrate?.();
       closeCalibModal();
     });
 
@@ -11764,10 +11772,7 @@ async function initCore(runtimeContext) {
 
     // ── Post-connect calibration popup ──────────────────────────────────────
     document.getElementById('phone-sword-connect-calib-ok')?.addEventListener('click', () => {
-      const g = window.phoneSwordGyro;
-      if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
-      if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
-      if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+      window.phoneSwordRecalibrate?.();
       phoneSwordConnectCalib?.classList.add('hidden');
     });
 
@@ -15299,20 +15304,19 @@ async function initCore(runtimeContext) {
     bow?.update();
     bazooka?.update();
     bomb?.update();
-    // Phone Sword: apply gyro data + config offsets to the held sword's rotation
+    // Phone Sword: compute gyro quaternion and write to _holdQuaternion for hand positioning
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
       const _g = window.phoneSwordGyro;
       const _c = window.phoneSwordCalib;
       const _cfg = window.phoneSwordConfig || { offsetX: 0, offsetY: 0, offsetZ: 0 };
-      if (_g.beta !== null && _g.gamma !== null) {
+      const _beta = _g.beta, _gamma = _g.gamma;
+      if (Number.isFinite(_beta) && Number.isFinite(_gamma)) {
         const DEG = Math.PI / 180;
-        // Compute delta from calibration; handle alpha wrap-around
-        let _dAlpha = (_g.alpha ?? _c.alpha) - _c.alpha;
+        let _dAlpha = (Number.isFinite(_g.alpha) ? _g.alpha : _c.alpha) - _c.alpha;
         if (_dAlpha > 180) _dAlpha -= 360;
         if (_dAlpha < -180) _dAlpha += 360;
-        const _dBeta = _g.beta - _c.beta;
-        const _dGamma = _g.gamma - _c.gamma;
-        // beta → pitch (X) + offsetX, gamma → roll (Z) + offsetZ, alpha → yaw (Y) + offsetY
+        const _dBeta = _beta - _c.beta;
+        const _dGamma = _gamma - _c.gamma;
         _phoneSwordEuler.set(
           (_dBeta + _cfg.offsetX) * DEG,
           (_dAlpha + _cfg.offsetY) * DEG,
@@ -15320,21 +15324,21 @@ async function initCore(runtimeContext) {
           'YXZ'
         );
         _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
-        // Apply to whichever sword the local player holds
-        for (const _sw of [autumnSword, foamSword]) {
-          if (_sw?.holder === playerControls) {
-            if (!_sw._baseHoldQuaternion) {
-              _sw._baseHoldQuaternion = _sw._holdQuaternion.clone();
-            }
-            _sw._holdQuaternion.copy(_phoneSwordGyroQ).multiply(_sw._baseHoldQuaternion);
-          } else if (_sw?._baseHoldQuaternion && _sw?.holder !== playerControls) {
-            _sw._holdQuaternion.copy(_sw._baseHoldQuaternion);
-          }
+        // Write gyro+base to _holdQuaternion so foamSword.update() reads the correct blade direction
+        if (foamSword?.holder === playerControls) {
+          foamSword._holdQuaternion.copy(_phoneSwordGyroQ).multiply(_phoneSwordBaseQ);
         }
       }
     }
     autumnSword?.update();
     foamSword?.update();
+    // Phone Sword: after foamSword.update() positions the mesh via hand bone, directly override
+    // the mesh quaternion using player world rotation + gyro — this removes any dependence on
+    // hand bone animation state (which changes on death/respawn and breaks calibration).
+    if (window.phoneSwordMode && window.phoneSwordGyro?.connected &&
+        foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
+      foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_phoneSwordGyroQ).multiply(_phoneSwordBaseQ);
+    }
     hammer?.update();
     pistol?.update();
     paintBrush?.update();
@@ -15517,7 +15521,7 @@ async function initCore(runtimeContext) {
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
       window.onPlayerDeath?.();
-      dropInventoryOnDeath();
+      if (!window.phoneSwordMode) dropInventoryOnDeath();
       updateControlAvailability();
       const actions = playerModel.userData.actions;
       const current = playerModel.userData.currentAction;
