@@ -487,9 +487,10 @@ export class EnemyPlayer {
       this.group.quaternion.set(rot.x, rot.y, rot.z, rot.w);
       // Still update arms/sword visuals but skip AI
       this._updateHandPositions(dt, Infinity);
-      this._updateElasticArm(this._leftArm,  this._leftShoulder,  this._leftHandGroup);
       this._updateElasticArm(this._rightArm, this._rightShoulder, this._rightHandGroup);
       this._updateSword(dt);
+      this._updateLeftHandToPommel(dt);
+      this._updateElasticArm(this._leftArm, this._leftShoulder, this._leftHandGroup);
       this._updateTrailMeshes(Date.now());
       return;
     }
@@ -549,20 +550,21 @@ export class EnemyPlayer {
       this.rigidBody.setLinvel({ x: vel.x * 0.8, y: vel.y, z: vel.z * 0.8 }, true);
     }
 
-    // ── Animate hands ──────────────────────────────────────────────────────
+    // ── Right hand (drives sword position) ────────────────────────────────
     this._updateHandPositions(dt, distToTarget);
-
-    // ── Update elastic arms ────────────────────────────────────────────────
-    this._updateElasticArm(this._leftArm,  this._leftShoulder,  this._leftHandGroup);
     this._updateElasticArm(this._rightArm, this._rightShoulder, this._rightHandGroup);
+
+    // ── Sword (orientation depends on right hand) ──────────────────────────
+    this._updateSword(dt);
+
+    // ── Left hand grips pommel (depends on sword orientation) ─────────────
+    this._updateLeftHandToPommel(dt);
+    this._updateElasticArm(this._leftArm, this._leftShoulder, this._leftHandGroup);
 
     // ── Billboard health bar toward camera ─────────────────────────────────
     if (this._camera) {
       this._hpPlane.lookAt(this._camera.position);
     }
-
-    // ── Position + orient sword at right hand tip ──────────────────────────
-    this._updateSword(dt);
 
     // ── Update sword swing trail ───────────────────────────────────────────
     this._updateTrailMeshes(Date.now());
@@ -599,7 +601,6 @@ export class EnemyPlayer {
       this._handTargetL = new THREE.Vector3();
     }
     const lerpR = 1 - Math.exp(-12 * dt);
-    const lerpL = 1 - Math.exp(-8 * dt);
 
     if (this._aiState === 'attack') {
       this._attackPhaseT += dt;
@@ -643,8 +644,6 @@ export class EnemyPlayer {
             this._blockBasePos.y + wy,
             this._blockBasePos.z
           );
-          // Left hand slightly raised in guard
-          this._handTargetL.set(-0.28, 0.90, 0.35);
           break;
         }
 
@@ -653,7 +652,6 @@ export class EnemyPlayer {
           // Subtle tension wobble while winding up
           const wob = Math.sin(t * 5.0) * 0.025;
           this._handTargetR.set(hold.x + wob, hold.y, hold.z);
-          this._handTargetL.set(-0.35, 0.70, 0.25);
           break;
         }
 
@@ -667,7 +665,6 @@ export class EnemyPlayer {
             hold.y + (tgt.y - hold.y) * eased,
             hold.z + (tgt.z - hold.z) * eased
           );
-          this._handTargetL.set(-0.35, 0.70, 0.25);
           // Sample trail tip this frame
           this._sampleTrail(Date.now());
           break;
@@ -675,21 +672,42 @@ export class EnemyPlayer {
 
         default:
           this._handTargetR.set(0.4, 0.85, 0.35);
-          this._handTargetL.set(-0.35, 0.70, 0.25);
       }
 
     } else {
       // idle / chase / backoff — arms at sides, reset attack phase
       const gait = this._aiState === 'backoff' ? 0 : Math.sin(Date.now() * 0.004);
       this._handTargetR.set( 0.4,  0.75 + gait * 0.06, 0.2);
-      this._handTargetL.set(-0.4,  0.75 - gait * 0.06, 0.2);
       this._swingT       = 0;
       this._attackPhase  = 'decide';
       this._attackPhaseT = 0;
     }
 
     this._rightHandGroup.position.lerp(this._handTargetR, lerpR);
-    this._leftHandGroup.position.lerp(this._handTargetL, lerpL);
+  }
+
+  /**
+   * Position the left hand at the sword pommel so both hands grip the sword.
+   * Must be called AFTER _updateSword() so the sword quaternion is current.
+   */
+  _updateLeftHandToPommel(dt) {
+    if (this._aiState !== 'attack') {
+      // Idle/chase: natural arm swing at the side
+      const gait = this._aiState === 'backoff' ? 0 : Math.sin(Date.now() * 0.004);
+      this._handTargetL.set(-0.4, 0.75 - gait * 0.06, 0.2);
+      this._leftHandGroup.position.lerp(this._handTargetL, 1 - Math.exp(-8 * dt));
+      return;
+    }
+
+    // Pommel is at z = -0.175 in sword-local space; map to world then body-local
+    _tmpV.set(0, 0, -0.175)
+      .applyQuaternion(this._swordGroup.quaternion)
+      .add(this._swordGroup.position);
+    this.group.worldToLocal(_tmpV);
+    this._handTargetL.copy(_tmpV);
+    // Fast lerp during swing, a bit slower during block/hold so it feels natural
+    const speed = this._attackPhase === 'swing_execute' ? 22 : 12;
+    this._leftHandGroup.position.lerp(this._handTargetL, 1 - Math.exp(-speed * dt));
   }
 
   _updateElasticArm(armMesh, shoulderGroup, handGroup) {
