@@ -15521,7 +15521,7 @@ async function initCore(runtimeContext) {
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
       window.onPlayerDeath?.();
-      dropInventoryOnDeath();
+      if (!window.phoneSwordMode) dropInventoryOnDeath();
       updateControlAvailability();
       const actions = playerModel.userData.actions;
       const current = playerModel.userData.currentAction;
