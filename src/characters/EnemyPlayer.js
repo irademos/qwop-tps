@@ -135,13 +135,13 @@ export class EnemyPlayer {
     // Swing state
     this._swingPreset    = null;          // chosen SWING_PRESETS entry
     this._swingStartR    = new THREE.Vector3(); // hand position at swing start
+    this._swingStartSwordQ = new THREE.Quaternion(); // sword quaternion captured at swing start
 
     // Trail state (sampled during swing_execute, fades afterwards)
     this._trailPoints    = [];            // { pos: THREE.Vector3, t: number }[]
     this._trailLines     = [];            // THREE.Line objects in scene
     this._trailFadeStart = -1;            // ms timestamp when fade began
 
-    this._prevRightHandWorldPos = new THREE.Vector3();
 
     this._isRagdoll    = false;
     this._ragdollTimeout = null;
@@ -600,7 +600,7 @@ export class EnemyPlayer {
       this._handTargetR = new THREE.Vector3();
       this._handTargetL = new THREE.Vector3();
     }
-    const lerpR = 1 - Math.exp(-12 * dt);
+    const lerpR = 1 - Math.exp(-(this._attackPhase === 'swing_execute' ? 22 : 12) * dt);
 
     if (this._aiState === 'attack') {
       this._attackPhaseT += dt;
@@ -610,10 +610,12 @@ export class EnemyPlayer {
         if (this._attackPhase === 'swing_hold') {
           // Move to swing execute
           this._attackPhase    = 'swing_execute';
-          this._attackPhaseDur = 0.28 + Math.random() * 0.10;
+          this._attackPhaseDur = 0.32 + Math.random() * 0.10;
           this._attackPhaseT   = 0;
           // Record right hand position at start of swing for lerping
           this._swingStartR.copy(this._rightHandGroup.position);
+          // Capture sword quaternion so swing rotation starts from current pose
+          this._swingStartSwordQ.copy(this._swordQuaternion);
           // Clear old trail points, start fresh
           this._trailPoints    = [];
           this._trailFadeStart = -1;
@@ -748,17 +750,17 @@ export class EnemyPlayer {
       this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-8 * dt));
 
     } else if (this._attackPhase === 'swing_execute') {
-      // ── Swing: orient blade along hand velocity for dynamic trail look ─────
-      const prevPos = this._prevRightHandWorldPos;
-      const vx = _tmpV.x - prevPos.x;
-      const vy = _tmpV.y - prevPos.y;
-      const vz = _tmpV.z - prevPos.z;
-      const velLen = Math.sqrt(vx * vx + vy * vy + vz * vz);
-      if (velLen > 0.0003) {
-        _handVelDir.set(vx / velLen, vy / velLen, vz / velLen);
-        _tmpQ.setFromUnitVectors(_fwdAxis, _handVelDir);
-        this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-18 * dt));
-      }
+      // ── Swing: rotate blade in sync with hand motion using the same eased progress ──
+      const p = Math.min(this._attackPhaseT / Math.max(0.001, this._attackPhaseDur), 1);
+      const eased = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p;
+      const hold = this._swingPreset.hold;
+      const tgt  = this._swingPreset.swing;
+      // Swing direction in body-local space → world space
+      this.group.getWorldQuaternion(_rootQ);
+      _handVelDir.set(tgt.x - hold.x, tgt.y - hold.y, tgt.z - hold.z).normalize()
+        .applyQuaternion(_rootQ);
+      _tmpQ.setFromUnitVectors(_fwdAxis, _handVelDir);
+      this._swordQuaternion.slerpQuaternions(this._swingStartSwordQ, _tmpQ, eased);
 
     } else if (this._attackPhase === 'swing_hold') {
       // ── Windup: tilt blade toward target direction before swing ───────────
@@ -782,7 +784,6 @@ export class EnemyPlayer {
       this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-4 * dt));
     }
 
-    this._prevRightHandWorldPos.copy(_tmpV);
     this._swordGroup.position.copy(_tmpV);
     this._swordGroup.quaternion.copy(this._swordQuaternion);
   }
