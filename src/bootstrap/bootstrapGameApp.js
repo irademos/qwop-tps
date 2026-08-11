@@ -967,6 +967,8 @@ async function initCore(runtimeContext) {
   // Phone Sword gyro scratch objects
   const _phoneSwordGyroQ = new THREE.Quaternion();
   const _phoneSwordEuler = new THREE.Euler();
+  // Foam sword default hold orientation (Euler 0, π, 0) — applied after gyro rotation
+  const _phoneSwordBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0, 'YXZ'));
   const tempVector3A = new THREE.Vector3();
   const AMMO_PICKUP_AMOUNT = 5;
   const ICE_AMMO_KEY = 'ice ammo';
@@ -15322,9 +15324,9 @@ async function initCore(runtimeContext) {
           'YXZ'
         );
         _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
-        // Write gyro quaternion to _holdQuaternion so foamSword.update() can read hand direction
+        // Write gyro+base to _holdQuaternion so foamSword.update() reads the correct blade direction
         if (foamSword?.holder === playerControls) {
-          foamSword._holdQuaternion.copy(_phoneSwordGyroQ);
+          foamSword._holdQuaternion.copy(_phoneSwordGyroQ).multiply(_phoneSwordBaseQ);
         }
       }
     }
@@ -15335,7 +15337,7 @@ async function initCore(runtimeContext) {
     // hand bone animation state (which changes on death/respawn and breaks calibration).
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
-      foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_phoneSwordGyroQ);
+      foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_phoneSwordGyroQ).multiply(_phoneSwordBaseQ);
     }
     hammer?.update();
     pistol?.update();
