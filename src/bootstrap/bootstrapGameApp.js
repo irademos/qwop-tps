@@ -995,8 +995,8 @@ async function initCore(runtimeContext) {
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
-    speedThreshold: 5470,   // deg/s
-    minSwingDelta: 15,      // deg — total arc in last 200ms required
+    speedThreshold: 4370,   // deg/s
+    minSwingDelta: 25,      // deg — total arc in last 200ms required
     oppositeStrength: 1.0,  // 0=no swing, 1=full opposite, >1=overshoot
     holdDuration: 0.5,      // seconds — how long opposite pose is held
     returnDuration: 0.3,    // seconds — how long to smoothly return to gyro after hold
