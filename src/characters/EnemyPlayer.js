@@ -14,6 +14,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
+import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -173,7 +174,7 @@ export class EnemyPlayer {
   // ─── body / arms ───────────────────────────────────────────────────────────
 
   _buildBody() {
-    // Capsule — red/orange to distinguish from blue player
+    // Capsule — kept as physics reference but hidden; replaced by GLB character below
     const capsuleMat = new THREE.MeshStandardMaterial({ color: 0xcc3300, roughness: 0.75, metalness: 0.05 });
     const capsuleGeo = new THREE.CapsuleGeometry(CAPSULE_RADIUS, CAPSULE_HEIGHT - CAPSULE_RADIUS * 2, 8, 16);
     const capsuleMesh = new THREE.Mesh(capsuleGeo, capsuleMat);
@@ -181,8 +182,19 @@ export class EnemyPlayer {
     capsuleMesh.castShadow = true;
     capsuleMesh.receiveShadow = true;
     capsuleMesh.position.y = CAPSULE_HEIGHT / 2;
+    capsuleMesh.visible = false;
     this.group.add(capsuleMesh);
     this._capsuleMesh = capsuleMesh;
+
+    // GLB character — loaded async
+    this._glbMixer = null;
+    this._glbWalkAction = null;
+    this._glbIsWalking = false;
+    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT }).then(({ container, mixer, walkAction }) => {
+      this.group.add(container);
+      this._glbMixer = mixer;
+      this._glbWalkAction = walkAction;
+    }).catch(e => console.warn('[EnemyPlayer] GLB character load failed:', e));
 
     // Shoulder anchors
     const shoulderY = CAPSULE_HEIGHT * SHOULDER_Y_FRAC;
@@ -548,6 +560,19 @@ export class EnemyPlayer {
       // Slow to a stop horizontally
       const vel = this.rigidBody.linvel();
       this.rigidBody.setLinvel({ x: vel.x * 0.8, y: vel.y, z: vel.z * 0.8 }, true);
+    }
+
+    // ── GLB character walk animation ──────────────────────────────────────
+    if (this._glbMixer) {
+      this._glbMixer.update(dt);
+      const isMoving = this._aiState === 'chase' || this._aiState === 'backoff';
+      if (isMoving && !this._glbIsWalking) {
+        this._glbWalkAction?.reset().fadeIn(0.15).play();
+        this._glbIsWalking = true;
+      } else if (!isMoving && this._glbIsWalking) {
+        this._glbWalkAction?.fadeOut(0.15);
+        this._glbIsWalking = false;
+      }
     }
 
     // ── Right hand (drives sword position) ────────────────────────────────

@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
 import { initHandRotationDebug, handRotConfig, handPosOffset, armConfig, getOffsetQuaternion, handRollDiag } from './handRotationDebug.js';
+import { createGLBCharacterInstance } from './glbCharacterModel.js';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
@@ -960,11 +961,25 @@ export function createPlayerModel(
     forwardIntent: 0,
     balance: 0,
     modelPath,
-    description: 'Procedural floppy Gang Beasts-style player body'
+    description: 'Procedural floppy Gang Beasts-style player body',
+    glbMixer: null,
+    glbWalkAction: null,
+    glbIsWalking: false,
   };
   playerGroup.userData.currentAction = 'idle';
   playerGroup.userData.actions = {};
   playerGroup.userData.mixer = null;
+
+  // Hide the capsule and load the GLB character in its place
+  const capsuleMesh = bodyRoot.getObjectByName('bodyCapsulemesh');
+  if (capsuleMesh) capsuleMesh.visible = false;
+
+  createGLBCharacterInstance({ targetHeight: 1.0 }).then(({ container, mixer, walkAction }) => {
+    bodyRoot.add(container);
+    const rig = playerGroup.userData.qwopRig;
+    rig.glbMixer = mixer;
+    rig.glbWalkAction = walkAction;
+  }).catch(e => console.warn('[PlayerModel] GLB character load failed:', e));
 
   if (onLoad) {
     queueMicrotask(() => onLoad({ mixer: null, actions: {} }));
