@@ -53,12 +53,37 @@ function retargetClip(clip, scene) {
     'Hips', 'mixamorig:Hips', 'Root', 'mixamorig:Root', 'Armature',
   ]);
 
-  const tracks = clip.tracks.filter(track => {
+  const filtered = clip.tracks.filter(track => {
     const boneName = track.name.split('.')[0];
     if (!existingNames.has(boneName)) return false;
-    // Strip position tracks on root-like bones to avoid lateral drift
     if (track.name.endsWith('.position') && ROOT_CANDIDATES.has(boneName)) return false;
     return true;
+  });
+
+  // The animation was authored for a skeleton facing +Z, but the GLB faces -Z.
+  // Mirror across the sagittal plane (YZ) so left/right bone movements are
+  // correct when viewed from the front of the character.
+  //
+  // Conjugating by Ry(180°): Ry * q * Ry^-1 => (-qx, qy, -qz, qw)
+  // Position tracks under 180° Y rotation: (x,y,z) => (-x, y, -z)
+  const tracks = filtered.map(track => {
+    if (track.name.endsWith('.quaternion')) {
+      const vals = new Float32Array(track.values);
+      for (let i = 0; i < vals.length; i += 4) {
+        vals[i]     = -vals[i];      // negate qx
+        vals[i + 2] = -vals[i + 2]; // negate qz
+      }
+      return new THREE.QuaternionKeyframeTrack(track.name, track.times, vals);
+    }
+    if (track.name.endsWith('.position')) {
+      const vals = new Float32Array(track.values);
+      for (let i = 0; i < vals.length; i += 3) {
+        vals[i]     = -vals[i];      // negate x
+        vals[i + 2] = -vals[i + 2]; // negate z
+      }
+      return new THREE.VectorKeyframeTrack(track.name, track.times, vals);
+    }
+    return track;
   });
 
   return new THREE.AnimationClip(clip.name, clip.duration, tracks);
@@ -107,10 +132,6 @@ export async function createGLBCharacterInstance(opts = {}) {
       obj.receiveShadow = true;
     }
   });
-
-  // Rotate 180° on Y so the animation's left/right bone directions align with
-  // the GLB skeleton's coordinate frame (common Blender/FBX handedness fix).
-  scene.rotation.y = Math.PI;
 
   const container = new THREE.Group();
   container.name = 'GLBCharacterContainer';
