@@ -5,6 +5,7 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
 import { initHandRotationDebug, handRotConfig, handPosOffset, armConfig, getOffsetQuaternion, handRollDiag } from './handRotationDebug.js';
 import { createGLBCharacterInstance } from './glbCharacterModel.js';
+import { initFbxAnimDebugPanel } from './fbxAnimDebug.js';
 
 const EPSILON = 1e-4;
 const animationClipCache = new Map();
@@ -974,7 +975,18 @@ export function createPlayerModel(
   const capsuleMesh = bodyRoot.getObjectByName('bodyCapsulemesh');
   if (capsuleMesh) capsuleMesh.visible = false;
 
-  createGLBCharacterInstance({ targetHeight: 1.0 }).then(({ container, mixer, walkAction }) => {
+  initFbxAnimDebugPanel();
+
+  createGLBCharacterInstance({
+    targetHeight: 1.0,
+    onRebuild: (newWalkAction) => {
+      const rig = playerGroup.userData.qwopRig;
+      if (!rig) return;
+      rig.glbWalkAction = newWalkAction;
+      // Re-play if was walking
+      if (rig.glbIsWalking) newWalkAction.reset().fadeIn(0.15).play();
+    },
+  }).then(({ container, mixer, walkAction }) => {
     bodyRoot.add(container);
     const rig = playerGroup.userData.qwopRig;
     rig.glbMixer = mixer;
