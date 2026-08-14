@@ -747,7 +747,7 @@ export class EnemyPlayer {
     const mid = _sWorld.clone().add(_hWorld).multiplyScalar(0.5);
     // Express mid in group-local space for the mesh position
     armMesh.position.copy(this.group.worldToLocal(mid.clone()));
-    armMesh.scale.set(1, dist, 1);
+    armMesh.scale.set(0.4, dist, 0.4);
 
     const dir = _hWorld.clone().sub(_sWorld).normalize();
     this.group.getWorldQuaternion(_rootQ);
