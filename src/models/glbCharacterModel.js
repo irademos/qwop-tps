@@ -1,20 +1,31 @@
 /**
  * Loads the shared GLB character and retargets FBX animations onto its skeleton.
- * The FBX animation bone names are expected to match the GLB bone names directly.
+ *
+ * Two retargeting modes (selected via fbxAnimConfig.retargetMode):
+ *
+ *  'direct'   – maps FBX tracks to GLB bones by name, with optional per-bone
+ *               quaternion component flips + euler offsets.
+ *
+ *  'bindPose' – additionally pre-multiplies each keyframe by the delta between
+ *               the FBX rest pose and the GLB rest pose for that bone:
+ *                 correctedQ = glbRestInv * fbxRest * rawQ
+ *               This compensates for bones that are oriented differently in the
+ *               two skeletons — the root cause of "upside-down legs" artifacts.
  */
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { fbxAnimConfig } from './fbxAnimDebug.js';
+import { fbxAnimConfig, boneInfoRegistry } from './fbxAnimDebug.js';
 
 const _gltfLoader = new GLTFLoader();
 const _fbxLoader = new FBXLoader();
 
-// Cached promises — the source assets are loaded once and cloned per instance
 let _glbPromise = null;
 let _walkClipPromise = null;
+// Also cache the raw FBX group (for rest-pose extraction)
+let _fbxGroupPromise = null;
 
 function getGLBGltf() {
   if (!_glbPromise) {
@@ -25,60 +36,113 @@ function getGLBGltf() {
   return _glbPromise;
 }
 
+function getFbxGroup() {
+  if (!_fbxGroupPromise) {
+    _fbxGroupPromise = new Promise((resolve, reject) => {
+      _fbxLoader.load('/models/animations/Old Man Walk.fbx', resolve, undefined, reject);
+    });
+  }
+  return _fbxGroupPromise;
+}
+
 function getWalkClip() {
   if (!_walkClipPromise) {
-    _walkClipPromise = new Promise((resolve, reject) => {
-      _fbxLoader.load('/models/animations/Old Man Walk.fbx', (fbx) => {
-        const clip = fbx.animations?.[0];
-        if (!clip) {
-          reject(new Error('[GLBCharacter] No animations found in Old Man Walk.fbx'));
-          return;
-        }
-        resolve(clip);
-      }, undefined, reject);
+    _walkClipPromise = getFbxGroup().then(fbx => {
+      const clip = fbx.animations?.[0];
+      if (!clip) throw new Error('[GLBCharacter] No animations found in Old Man Walk.fbx');
+      return clip;
     });
   }
   return _walkClipPromise;
 }
 
+// ── Rest-pose helpers ──────────────────────────────────────────────────────
+
+/** Build boneName → world-space quaternion map from a scene graph. */
+function buildRestPoseMap(root) {
+  root.updateWorldMatrix(true, true);
+  const map = new Map();
+  root.traverse(obj => {
+    if (obj.isBone || obj.type === 'Bone' || obj.name) {
+      map.set(obj.name, obj.quaternion.clone());
+    }
+  });
+  return map;
+}
+
 /**
- * Filters and corrects an AnimationClip based on the current fbxAnimConfig.
- *
- * - Removes tracks whose target bone doesn't exist in `scene`
- * - Optionally strips position/quaternion/scale tracks
- * - Optionally strips root-bone position to prevent drift
- * - Optionally applies per-axis quaternion flips to fix upside-down limbs
- * - Optionally applies per-bone euler rotation corrections to every keyframe
+ * Populate boneInfoRegistry with GLB rest poses and FBX rest poses,
+ * and mark which bones actually have animation tracks.
  */
-function retargetClip(clip, scene) {
+function populateBoneInfo(glbScene, fbxGroup, trackedBoneNames) {
+  glbScene.traverse(obj => {
+    if (!obj.name) return;
+    if (!boneInfoRegistry[obj.name]) boneInfoRegistry[obj.name] = {};
+    boneInfoRegistry[obj.name].glbRest = obj.quaternion.clone();
+    boneInfoRegistry[obj.name].tracked = trackedBoneNames.has(obj.name);
+  });
+  if (fbxGroup) {
+    fbxGroup.traverse(obj => {
+      if (!obj.name) return;
+      if (!boneInfoRegistry[obj.name]) boneInfoRegistry[obj.name] = {};
+      boneInfoRegistry[obj.name].fbxRest = obj.quaternion.clone();
+    });
+  }
+}
+
+// ── Clip retargeting ───────────────────────────────────────────────────────
+
+/**
+ * Build a corrected AnimationClip from `rawClip` targeting `scene`.
+ * Reads all settings from fbxAnimConfig at call time.
+ */
+function retargetClip(rawClip, scene, fbxGroup) {
+  // Which bones exist in the GLB?
   const existingNames = new Set();
-  scene.traverse(o => existingNames.add(o.name));
+  scene.traverse(o => { if (o.name) existingNames.add(o.name); });
 
   const ROOT_CANDIDATES = new Set([
     'Hips', 'mixamorig:Hips', 'Root', 'mixamorig:Root', 'Armature',
   ]);
 
-  // Pre-build quaternion correction from flip flags
-  const flipQ = new THREE.Quaternion();
-  const euler = new THREE.Euler(
+  // Collect bone names that have tracks (for boneInfoRegistry)
+  const trackedBones = new Set(
+    rawClip.tracks
+      .map(t => { const d = t.name.lastIndexOf('.'); return d !== -1 ? t.name.slice(0, d) : t.name; })
+      .filter(n => existingNames.has(n))
+  );
+
+  // Populate registry once
+  populateBoneInfo(scene, fbxGroup, trackedBones);
+  // Refresh panel rest-pose hints if available
+  try { window.__fbxAnimDebug?.refreshPanel(); } catch (_) {}
+
+  // Build rest-pose correction maps for bindPose mode
+  let glbRestMap = null;
+  let fbxRestMap = null;
+  if (fbxAnimConfig.retargetMode === 'bindPose') {
+    glbRestMap = buildRestPoseMap(scene);
+    fbxRestMap = fbxGroup ? buildRestPoseMap(fbxGroup) : null;
+  }
+
+  // Global flip quaternion
+  const globalFlip = new THREE.Quaternion().setFromEuler(new THREE.Euler(
     fbxAnimConfig.flipCorrectX ? Math.PI : 0,
     fbxAnimConfig.flipCorrectY ? Math.PI : 0,
     fbxAnimConfig.flipCorrectZ ? Math.PI : 0,
-  );
-  flipQ.setFromEuler(euler);
-  const hasFlip = fbxAnimConfig.flipCorrectX || fbxAnimConfig.flipCorrectY || fbxAnimConfig.flipCorrectZ;
+  ));
+  const hasGlobalFlip = fbxAnimConfig.flipCorrectX || fbxAnimConfig.flipCorrectY || fbxAnimConfig.flipCorrectZ;
 
   const tracks = [];
+  const q = new THREE.Quaternion();
 
-  for (const track of clip.tracks) {
+  for (const track of rawClip.tracks) {
     const dotIdx = track.name.lastIndexOf('.');
     const boneName = dotIdx !== -1 ? track.name.slice(0, dotIdx) : track.name;
     const prop = dotIdx !== -1 ? track.name.slice(dotIdx + 1) : '';
 
-    // Bone must exist in the scene
     if (!existingNames.has(boneName)) continue;
 
-    // Track type filtering
     if (prop === 'position') {
       if (!fbxAnimConfig.keepPosition) continue;
       if (fbxAnimConfig.stripRootPosition && ROOT_CANDIDATES.has(boneName)) continue;
@@ -86,42 +150,60 @@ function retargetClip(clip, scene) {
     if (prop === 'quaternion' && !fbxAnimConfig.keepQuaternion) continue;
     if (prop === 'scale' && !fbxAnimConfig.keepScale) continue;
 
-    // Quaternion corrections: per-axis flip + per-bone euler offset
     if (prop === 'quaternion') {
-      const correction = fbxAnimConfig.boneCorrections[boneName];
-      const hasBoneCorrection = correction &&
-        (correction.x !== 0 || correction.y !== 0 || correction.z !== 0);
+      const boneCfg = fbxAnimConfig.boneCorrections[boneName];
 
-      if (hasFlip || hasBoneCorrection) {
-        // Clone so we don't mutate the cached source clip
+      // Build bind-pose correction delta for this bone (bindPose mode only)
+      let bindDelta = null;
+      if (fbxAnimConfig.retargetMode === 'bindPose' && glbRestMap && fbxRestMap) {
+        const glbRest = glbRestMap.get(boneName);
+        const fbxRest = fbxRestMap.get(boneName);
+        if (glbRest && fbxRest) {
+          // delta = glbRestInv * fbxRest
+          bindDelta = glbRest.clone().invert().multiply(fbxRest);
+        }
+      }
+
+      // Build bone euler correction quaternion
+      let eulerQ = null;
+      if (boneCfg && (boneCfg.ex !== 0 || boneCfg.ey !== 0 || boneCfg.ez !== 0)) {
+        eulerQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+          THREE.MathUtils.degToRad(boneCfg.ex),
+          THREE.MathUtils.degToRad(boneCfg.ey),
+          THREE.MathUtils.degToRad(boneCfg.ez),
+        ));
+      }
+
+      const needsMod = hasGlobalFlip || bindDelta || eulerQ ||
+        (boneCfg && (boneCfg.flipX || boneCfg.flipY || boneCfg.flipZ));
+
+      if (needsMod) {
         const values = track.values.slice();
-
-        const boneEuler = hasBoneCorrection
-          ? new THREE.Euler(
-              THREE.MathUtils.degToRad(correction.x),
-              THREE.MathUtils.degToRad(correction.y),
-              THREE.MathUtils.degToRad(correction.z),
-            )
-          : null;
-        const boneQ = boneEuler ? new THREE.Quaternion().setFromEuler(boneEuler) : null;
-
-        const q = new THREE.Quaternion();
         for (let i = 0; i < values.length; i += 4) {
           q.set(values[i], values[i + 1], values[i + 2], values[i + 3]);
-          if (hasFlip) q.premultiply(flipQ);
-          if (boneQ) q.multiply(boneQ);
-          values[i] = q.x;
-          values[i + 1] = q.y;
-          values[i + 2] = q.z;
-          values[i + 3] = q.w;
-        }
 
-        const correctedTrack = new THREE.QuaternionKeyframeTrack(
-          track.name,
-          track.times.slice(),
-          values,
-        );
-        tracks.push(correctedTrack);
+          // 1. Global flip
+          if (hasGlobalFlip) q.premultiply(globalFlip);
+
+          // 2. bindPose rest-delta correction
+          if (bindDelta) q.premultiply(bindDelta);
+
+          // 3. Per-bone axis component negation (manual sign flip)
+          if (boneCfg) {
+            if (boneCfg.flipX) q.x = -q.x;
+            if (boneCfg.flipY) q.y = -q.y;
+            if (boneCfg.flipZ) q.z = -q.z;
+            // Re-normalise after sign flip to keep it a valid unit quaternion
+            if (boneCfg.flipX || boneCfg.flipY || boneCfg.flipZ) q.normalize();
+          }
+
+          // 4. Per-bone euler offset (local, post-multiply)
+          if (eulerQ) q.multiply(eulerQ);
+
+          values[i] = q.x; values[i + 1] = q.y;
+          values[i + 2] = q.z; values[i + 3] = q.w;
+        }
+        tracks.push(new THREE.QuaternionKeyframeTrack(track.name, track.times.slice(), values));
         continue;
       }
     }
@@ -129,18 +211,15 @@ function retargetClip(clip, scene) {
     tracks.push(track);
   }
 
-  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+  return new THREE.AnimationClip(rawClip.name, rawClip.duration, tracks);
 }
 
-/**
- * Translates the scene so its bounding-box bottom sits at y=0, scales it to
- * `targetHeight`, then applies the multiplier and Y offset from fbxAnimConfig.
- */
+// ── Scene normalization ────────────────────────────────────────────────────
+
 function normalizeSceneHeight(scene, targetHeight) {
   scene.updateWorldMatrix(true, true);
   const box = new THREE.Box3().setFromObject(scene);
   if (box.isEmpty()) return;
-
   const height = box.max.y - box.min.y;
   if (height > 0.001) {
     const scale = (targetHeight / height) * fbxAnimConfig.sceneScaleMultiplier;
@@ -153,12 +232,14 @@ function normalizeSceneHeight(scene, targetHeight) {
   }
 }
 
-// ── Per-instance state so we can hot-rebuild clips on debug changes ─────────
+// ── Hot-rebuild loop ───────────────────────────────────────────────────────
+
 const _instances = new Set();
+let _pollRafId = null;
 
 function rebuildInstance(inst) {
-  const { scene, mixer, rawWalkClip, onRebuild } = inst;
-  const walkClip = retargetClip(rawWalkClip, scene);
+  const { scene, mixer, rawWalkClip, fbxGroup, onRebuild } = inst;
+  const walkClip = retargetClip(rawWalkClip, scene, fbxGroup);
   mixer.stopAllAction();
   const walkAction = mixer.clipAction(walkClip);
   walkAction.setLoop(THREE.LoopRepeat, Infinity);
@@ -167,72 +248,68 @@ function rebuildInstance(inst) {
   if (onRebuild) onRebuild(walkAction);
 }
 
-// Poll for dirty flag each frame (called from createGLBCharacterInstance callers via mixer.update)
-let _pollRafId = null;
 function ensureDebugPoll() {
   if (_pollRafId !== null) return;
-  function poll() {
+  (function poll() {
     _pollRafId = requestAnimationFrame(poll);
     if (!fbxAnimConfig._dirty) return;
     fbxAnimConfig._dirty = false;
     for (const inst of _instances) {
       rebuildInstance(inst);
-      // Re-apply scene offset
-      inst.scene.position.y = -new THREE.Box3().setFromObject(inst.scene).min.y + fbxAnimConfig.sceneOffsetY;
-    }
-    // Sync time scale on all mixers without full rebuild
-    for (const inst of _instances) {
+      // Re-apply Y offset without full height re-normalisation
+      inst.scene.position.y = inst.scene.position.y - (inst._lastOffsetY ?? 0) + fbxAnimConfig.sceneOffsetY;
+      inst._lastOffsetY = fbxAnimConfig.sceneOffsetY;
       inst.mixer.timeScale = fbxAnimConfig.timeScale;
     }
-  }
-  poll();
+  })();
 }
+
+// ── Public API ─────────────────────────────────────────────────────────────
 
 /**
  * Creates one independent GLB character instance with its own mixer.
  *
  * @param {object} [opts]
- * @param {number} [opts.targetHeight=1.0] – scale the character to this world-space height
+ * @param {number} [opts.targetHeight=1.0]
  * @param {function} [opts.onRebuild] – called with new walkAction after a debug rebuild
- * @returns {Promise<{container: THREE.Group, mixer: THREE.AnimationMixer, walkAction: THREE.AnimationAction}>}
  */
 export async function createGLBCharacterInstance(opts = {}) {
   const targetHeight = opts.targetHeight ?? fbxAnimConfig.targetHeight;
 
-  const [gltf, rawWalkClip] = await Promise.all([getGLBGltf(), getWalkClip()]);
+  const [gltf, rawWalkClip, fbxGroup] = await Promise.all([
+    getGLBGltf(),
+    getWalkClip(),
+    getFbxGroup(),
+  ]);
 
-  // Clone so each instance has independent skeleton/bones
   const scene = SkeletonUtils.clone(gltf.scene);
   scene.name = 'GLBCharacterScene';
   scene.traverse(obj => {
-    if (obj.isMesh) {
-      obj.castShadow = true;
-      obj.receiveShadow = true;
-    }
+    if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; }
   });
 
   const container = new THREE.Group();
   container.name = 'GLBCharacterContainer';
   container.add(scene);
 
-  // Normalize height & foot position
   normalizeSceneHeight(scene, targetHeight);
 
-  // Build a retargeted walk clip for this scene's skeleton
-  const walkClip = retargetClip(rawWalkClip, scene);
+  const walkClip = retargetClip(rawWalkClip, scene, fbxGroup);
 
   const mixer = new THREE.AnimationMixer(scene);
   mixer.timeScale = fbxAnimConfig.timeScale;
   const walkAction = mixer.clipAction(walkClip);
   walkAction.setLoop(THREE.LoopRepeat, Infinity);
 
-  // Register for hot-rebuild on debug changes
-  const inst = { scene, mixer, rawWalkClip, walkAction, onRebuild: opts.onRebuild ?? null };
+  const inst = {
+    scene, mixer, rawWalkClip, fbxGroup,
+    walkAction,
+    onRebuild: opts.onRebuild ?? null,
+    _lastOffsetY: fbxAnimConfig.sceneOffsetY,
+  };
   _instances.add(inst);
   ensureDebugPoll();
 
-  // Expose on container so callers can get fresh walkAction after debug rebuilds
   container.userData._fbxDebugInst = inst;
-
   return { container, mixer, walkAction };
 }
