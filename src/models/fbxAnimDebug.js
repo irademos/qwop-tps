@@ -24,8 +24,11 @@ export const fbxAnimConfig = {
   sceneScaleMultiplier: 1.0,
   sceneOffsetY: 0.0,
 
-  // Extra root pre-rotation on top of the hardcoded Y180 (degrees).
-  // Use if the character is still facing the wrong way or tilted.
+  // X rotation on the scene group to correct backward lean (degrees, negative = tilt forward).
+  sceneRotX: 0,
+
+  // Extra root bone pre-rotation on top of the baked corrections (degrees).
+  // Use only if the character is still facing wrong after the scene Y180.
   rootPreRotX: 0,
   rootPreRotY: 0,
   rootPreRotZ: 0,
@@ -179,6 +182,7 @@ function buildPanel() {
   slider('Target Height',    'targetHeight',         0.2, 3.0, 0.01);
   slider('Scale Multiplier', 'sceneScaleMultiplier', 0.1, 4.0, 0.01);
   slider('Y Offset',         'sceneOffsetY',        -2,   2,   0.01);
+  slider('Lean (rotX °)',    'sceneRotX',           -30,  30,  0.5);
 
   // ── Extra root rotation
   section('🌍 Extra Root Rotation (°)');
@@ -273,7 +277,7 @@ function buildPanel() {
     Object.assign(fbxAnimConfig, {
       timeScale: 1.0, keepPosition: true, keepQuaternion: true, keepScale: false,
       stripRootPosition: true, targetHeight: 1.0, sceneScaleMultiplier: 1.0, sceneOffsetY: 0.0,
-      rootPreRotX: 0, rootPreRotY: 0, rootPreRotZ: 0,
+      sceneRotX: 0, rootPreRotX: 0, rootPreRotY: 0, rootPreRotZ: 0,
       flipCorrectX: false, flipCorrectY: false, flipCorrectZ: false, _dirty: true,
     });
     DEFAULT_BONE_ROWS.forEach(b => {

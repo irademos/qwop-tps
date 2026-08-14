@@ -3,8 +3,11 @@
  *
  * Retargeting uses bindPose correction — each keyframe quaternion is pre-multiplied
  * by (glbBoneRestInv × fbxBoneRest) to compensate for rest-pose differences between
- * the two skeletons. The root bone also gets a hardcoded 180° Y pre-rotation to
- * correct the facing direction baked into the Mixamo FBX export.
+ * the two skeletons.
+ *
+ * The facing direction is fixed by rotating the scene group itself Y+180° so both
+ * the static rest pose and the animated pose agree — no track-level Y180 needed.
+ * A small X rotation on the scene corrects any backward lean (fbxAnimConfig.sceneRotX).
  *
  * Fine-tuning is available at runtime via the debug panel (window.__fbxAnimDebug).
  */
@@ -80,10 +83,6 @@ const ROOT_CANDIDATES = new Set([
   'Hips', 'mixamorig:Hips', 'Root', 'mixamorig:Root', 'Armature', 'mixamorigHips',
 ]);
 
-// Hardcoded 180° Y pre-rotation applied to the root bone.
-// Corrects the facing direction baked into Mixamo FBX exports.
-const ROOT_PRE_ROT_Y180 = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0));
-
 function retargetClip(rawClip, scene, fbxGroup) {
   const existingNames = new Set();
   scene.traverse(o => { if (o.name) existingNames.add(o.name); });
@@ -109,7 +108,7 @@ function retargetClip(rawClip, scene, fbxGroup) {
   ));
   const hasGlobalFlip = fbxAnimConfig.flipCorrectX || fbxAnimConfig.flipCorrectY || fbxAnimConfig.flipCorrectZ;
 
-  // Debug-panel root pre-rotation (added on top of the hardcoded Y180)
+  // Debug-panel extra root pre-rotation
   const debugPreRot = new THREE.Quaternion().setFromEuler(new THREE.Euler(
     THREE.MathUtils.degToRad(fbxAnimConfig.rootPreRotX),
     THREE.MathUtils.degToRad(fbxAnimConfig.rootPreRotY),
@@ -134,13 +133,11 @@ function retargetClip(rawClip, scene, fbxGroup) {
     if (prop === 'position') {
       if (!fbxAnimConfig.keepPosition) continue;
       if (fbxAnimConfig.stripRootPosition && isRoot) continue;
-      // Rotate root position track to match orientation corrections
-      if (isRoot) {
+      // Apply any extra debug pre-rotation to the root position track
+      if (hasDebugPreRot && isRoot) {
         const values = track.values.slice();
         for (let i = 0; i < values.length; i += 3) {
-          v.set(values[i], values[i + 1], values[i + 2])
-            .applyQuaternion(ROOT_PRE_ROT_Y180);
-          if (hasDebugPreRot) v.applyQuaternion(debugPreRot);
+          v.set(values[i], values[i + 1], values[i + 2]).applyQuaternion(debugPreRot);
           values[i] = v.x; values[i + 1] = v.y; values[i + 2] = v.z;
         }
         tracks.push(new THREE.VectorKeyframeTrack(track.name, track.times.slice(), values));
@@ -169,7 +166,7 @@ function retargetClip(rawClip, scene, fbxGroup) {
         ));
       }
 
-      const needsMod = isRoot || bindDelta || eulerQ || hasGlobalFlip ||
+      const needsMod = (isRoot && hasDebugPreRot) || bindDelta || eulerQ || hasGlobalFlip ||
         (boneCfg && (boneCfg.flipX || boneCfg.flipY || boneCfg.flipZ));
 
       if (needsMod) {
@@ -177,19 +174,16 @@ function retargetClip(rawClip, scene, fbxGroup) {
         for (let i = 0; i < values.length; i += 4) {
           q.set(values[i], values[i + 1], values[i + 2], values[i + 3]);
 
-          // 1. Hardcoded root Y180 (facing fix)
-          if (isRoot) q.premultiply(ROOT_PRE_ROT_Y180);
-
-          // 2. Debug-panel extra root rotation
+          // 1. Debug-panel extra root rotation
           if (isRoot && hasDebugPreRot) q.premultiply(debugPreRot);
 
-          // 3. Global flip (debug panel)
+          // 2. Global flip (debug panel)
           if (hasGlobalFlip) q.premultiply(globalFlip);
 
-          // 4. bindPose rest-delta correction
+          // 3. bindPose rest-delta correction
           if (bindDelta) q.premultiply(bindDelta);
 
-          // 5. Per-bone component sign flip (debug panel)
+          // 4. Per-bone component sign flip (debug panel)
           if (boneCfg) {
             if (boneCfg.flipX) q.x = -q.x;
             if (boneCfg.flipY) q.y = -q.y;
@@ -197,7 +191,7 @@ function retargetClip(rawClip, scene, fbxGroup) {
             if (boneCfg.flipX || boneCfg.flipY || boneCfg.flipZ) q.normalize();
           }
 
-          // 6. Per-bone euler offset (debug panel)
+          // 5. Per-bone euler offset (debug panel)
           if (eulerQ) q.multiply(eulerQ);
 
           values[i] = q.x; values[i + 1] = q.y; values[i + 2] = q.z; values[i + 3] = q.w;
@@ -214,6 +208,16 @@ function retargetClip(rawClip, scene, fbxGroup) {
 }
 
 // ── Scene normalization ────────────────────────────────────────────────────
+
+function applySceneOrientation(scene) {
+  // Y180 aligns the static rest pose with the walking animation direction.
+  // sceneRotX corrects any backward lean (negative = tilt forward).
+  scene.rotation.set(
+    THREE.MathUtils.degToRad(fbxAnimConfig.sceneRotX),
+    Math.PI,  // hardcoded — do not expose; scene group handles facing, not tracks
+    0,
+  );
+}
 
 function normalizeSceneHeight(scene, targetHeight) {
   scene.updateWorldMatrix(true, true);
@@ -237,6 +241,7 @@ const _instances = new Set();
 let _pollRafId = null;
 
 function rebuildInstance(inst) {
+  applySceneOrientation(inst.scene);
   const walkClip = retargetClip(inst.rawWalkClip, inst.scene, inst.fbxGroup);
   inst.mixer.stopAllAction();
   const walkAction = inst.mixer.clipAction(walkClip);
@@ -286,6 +291,7 @@ export async function createGLBCharacterInstance(opts = {}) {
   container.add(scene);
 
   normalizeSceneHeight(scene, targetHeight);
+  applySceneOrientation(scene);
 
   const walkClip = retargetClip(rawWalkClip, scene, fbxGroup);
 
