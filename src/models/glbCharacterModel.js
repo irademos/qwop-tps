@@ -108,6 +108,10 @@ export async function createGLBCharacterInstance(opts = {}) {
     }
   });
 
+  // Rotate 180° on Y so the animation's left/right bone directions align with
+  // the GLB skeleton's coordinate frame (common Blender/FBX handedness fix).
+  scene.rotation.y = Math.PI;
+
   const container = new THREE.Group();
   container.name = 'GLBCharacterContainer';
   container.add(scene);
