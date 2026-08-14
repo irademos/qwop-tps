@@ -101,8 +101,10 @@ function retargetClip(rawClip, scene, fbxGroup) {
   const existingNames = new Set();
   scene.traverse(o => { if (o.name) existingNames.add(o.name); });
 
+  // All names that could be the animation root bone
   const ROOT_CANDIDATES = new Set([
     'Hips', 'mixamorig:Hips', 'Root', 'mixamorig:Root', 'Armature',
+    'mixamorigHips',
   ]);
 
   // Collect bone names that have tracks (for boneInfoRegistry)
@@ -133,8 +135,21 @@ function retargetClip(rawClip, scene, fbxGroup) {
   ));
   const hasGlobalFlip = fbxAnimConfig.flipCorrectX || fbxAnimConfig.flipCorrectY || fbxAnimConfig.flipCorrectZ;
 
+  // Root pre-rotation — compensates for FBX global axis transform not surviving
+  // clip extraction (Mixamo commonly bakes ±90° X into the skeleton root).
+  // Applied as a premultiply to the Hips quaternion track and used to rotate
+  // the Hips position track so the character stands upright.
+  const preRot = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+    THREE.MathUtils.degToRad(fbxAnimConfig.rootPreRotX),
+    THREE.MathUtils.degToRad(fbxAnimConfig.rootPreRotY),
+    THREE.MathUtils.degToRad(fbxAnimConfig.rootPreRotZ),
+    'XYZ',
+  ));
+  const hasPreRot = fbxAnimConfig.rootPreRotX !== 0 || fbxAnimConfig.rootPreRotY !== 0 || fbxAnimConfig.rootPreRotZ !== 0;
+
   const tracks = [];
   const q = new THREE.Quaternion();
+  const v = new THREE.Vector3();
 
   for (const track of rawClip.tracks) {
     const dotIdx = track.name.lastIndexOf('.');
@@ -146,6 +161,16 @@ function retargetClip(rawClip, scene, fbxGroup) {
     if (prop === 'position') {
       if (!fbxAnimConfig.keepPosition) continue;
       if (fbxAnimConfig.stripRootPosition && ROOT_CANDIDATES.has(boneName)) continue;
+      // Apply pre-rotation to root position track so vertical orientation is correct
+      if (hasPreRot && ROOT_CANDIDATES.has(boneName)) {
+        const values = track.values.slice();
+        for (let i = 0; i < values.length; i += 3) {
+          v.set(values[i], values[i + 1], values[i + 2]).applyQuaternion(preRot);
+          values[i] = v.x; values[i + 1] = v.y; values[i + 2] = v.z;
+        }
+        tracks.push(new THREE.VectorKeyframeTrack(track.name, track.times.slice(), values));
+        continue;
+      }
     }
     if (prop === 'quaternion' && !fbxAnimConfig.keepQuaternion) continue;
     if (prop === 'scale' && !fbxAnimConfig.keepScale) continue;
@@ -174,7 +199,10 @@ function retargetClip(rawClip, scene, fbxGroup) {
         ));
       }
 
-      const needsMod = hasGlobalFlip || bindDelta || eulerQ ||
+      // Root pre-rotation applies to the Hips/root quaternion track
+      const isRoot = ROOT_CANDIDATES.has(boneName);
+
+      const needsMod = hasGlobalFlip || bindDelta || eulerQ || (isRoot && hasPreRot) ||
         (boneCfg && (boneCfg.flipX || boneCfg.flipY || boneCfg.flipZ));
 
       if (needsMod) {
@@ -182,22 +210,24 @@ function retargetClip(rawClip, scene, fbxGroup) {
         for (let i = 0; i < values.length; i += 4) {
           q.set(values[i], values[i + 1], values[i + 2], values[i + 3]);
 
-          // 1. Global flip
+          // 1. Root pre-rotation (world-space re-orient for Hips/root only)
+          if (isRoot && hasPreRot) q.premultiply(preRot);
+
+          // 2. Global flip
           if (hasGlobalFlip) q.premultiply(globalFlip);
 
-          // 2. bindPose rest-delta correction
+          // 3. bindPose rest-delta correction
           if (bindDelta) q.premultiply(bindDelta);
 
-          // 3. Per-bone axis component negation (manual sign flip)
+          // 4. Per-bone axis component negation (manual sign flip)
           if (boneCfg) {
             if (boneCfg.flipX) q.x = -q.x;
             if (boneCfg.flipY) q.y = -q.y;
             if (boneCfg.flipZ) q.z = -q.z;
-            // Re-normalise after sign flip to keep it a valid unit quaternion
             if (boneCfg.flipX || boneCfg.flipY || boneCfg.flipZ) q.normalize();
           }
 
-          // 4. Per-bone euler offset (local, post-multiply)
+          // 5. Per-bone euler offset (local, post-multiply)
           if (eulerQ) q.multiply(eulerQ);
 
           values[i] = q.x; values[i + 1] = q.y;

@@ -26,6 +26,13 @@ export const fbxAnimConfig = {
   sceneScaleMultiplier: 1.0,
   sceneOffsetY: 0.0,
 
+  // Root pre-rotation — applied to the Hips bone's position track to re-orient
+  // the whole skeleton. Mixamo FBX exports often have a -90° or 90° X baked in
+  // that doesn't survive clip extraction. Try -90 first.
+  rootPreRotX: 0,
+  rootPreRotY: 0,
+  rootPreRotZ: 0,
+
   // Global quaternion flip (kept for reference, usually not enough on its own)
   flipCorrectX: false,
   flipCorrectY: false,
@@ -46,16 +53,18 @@ export const fbxAnimConfig = {
   _dirty: false,
 };
 
-// Bones to show in the panel by default
+// Bones to show in the panel by default — use actual mixamorig-prefixed names
 const DEFAULT_BONE_ROWS = [
-  'Hips',
-  'LeftUpLeg', 'RightUpLeg',
-  'LeftLeg',   'RightLeg',
-  'LeftFoot',  'RightFoot',
-  'Spine', 'Spine1', 'Spine2',
-  'Neck', 'Head',
-  'LeftArm',  'RightArm',
-  'LeftForeArm', 'RightForeArm',
+  'mixamorigHips',
+  'mixamorigLeftUpLeg',  'mixamorigRightUpLeg',
+  'mixamorigLeftLeg',    'mixamorigRightLeg',
+  'mixamorigLeftFoot',   'mixamorigRightFoot',
+  'mixamorigLeftToeBase','mixamorigRightToeBase',
+  'mixamorigSpine', 'mixamorigSpine1', 'mixamorigSpine2',
+  'mixamorigNeck', 'mixamorigHead',
+  'mixamorigLeftShoulder',  'mixamorigRightShoulder',
+  'mixamorigLeftArm',   'mixamorigRightArm',
+  'mixamorigLeftForeArm','mixamorigRightForeArm',
 ];
 DEFAULT_BONE_ROWS.forEach(b => {
   fbxAnimConfig.boneCorrections[b] = { flipX: false, flipY: false, flipZ: false, ex: 0, ey: 0, ez: 0 };
@@ -188,6 +197,13 @@ function buildPanel() {
   });
   panel.append(modeRow);
 
+  // ── Root pre-rotation
+  section('🌍 Root Pre-Rotation (°)');
+  note('Applied to the root/Hips bone to re-orient the whole skeleton. Mixamo FBX exports often bake a ±90° X-axis rotation — try rootPreRotX = -90 first if the character is upside-down or underground.');
+  slider('rootPreRotX', 'rootPreRotX', -180, 180, 1);
+  slider('rootPreRotY', 'rootPreRotY', -180, 180, 1);
+  slider('rootPreRotZ', 'rootPreRotZ', -180, 180, 1);
+
   // ── Playback
   section('⏱ Playback');
   slider('Time Scale', 'timeScale', 0, 3, 0.01);
@@ -298,6 +314,7 @@ function buildPanel() {
     Object.assign(fbxAnimConfig, {
       timeScale: 1.0, keepPosition: true, keepQuaternion: true, keepScale: false,
       stripRootPosition: true, flipCorrectX: false, flipCorrectY: false, flipCorrectZ: false,
+      rootPreRotX: 0, rootPreRotY: 0, rootPreRotZ: 0,
       targetHeight: 1.0, sceneScaleMultiplier: 1.0, sceneOffsetY: 0.0,
       retargetMode: 'direct', _dirty: true,
     });
