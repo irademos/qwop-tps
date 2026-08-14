@@ -48,7 +48,7 @@ export const fbxAnimConfig = {
   //   'direct'   – apply FBX tracks as-is to matching bone names (current behaviour)
   //   'bindPose' – pre-multiply each keyframe by (glbBoneRestInv * fbxBoneRest) to
   //                compensate for rest-pose differences (more correct but needs both skeletons)
-  retargetMode: 'direct',
+  retargetMode: 'bindPose',
 
   _dirty: false,
 };
@@ -316,7 +316,7 @@ function buildPanel() {
       stripRootPosition: true, flipCorrectX: false, flipCorrectY: false, flipCorrectZ: false,
       rootPreRotX: 0, rootPreRotY: 0, rootPreRotZ: 0,
       targetHeight: 1.0, sceneScaleMultiplier: 1.0, sceneOffsetY: 0.0,
-      retargetMode: 'direct', _dirty: true,
+      retargetMode: 'bindPose', _dirty: true,
     });
     DEFAULT_BONE_ROWS.forEach(b => {
       fbxAnimConfig.boneCorrections[b] = { flipX: false, flipY: false, flipZ: false, ex: 0, ey: 0, ez: 0 };
