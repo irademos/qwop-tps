@@ -15859,6 +15859,22 @@ async function initCore(runtimeContext) {
     const mixerDelta = mixerClock.getDelta();
     updatePlayerCopies(mixerDelta);
 
+    // Update local player GLB character animation
+    {
+      const rig = playerModel?.userData?.qwopRig;
+      if (rig?.glbMixer) {
+        rig.glbMixer.update(mixerDelta);
+        const isWalking = !!playerControls?.isMoving;
+        if (isWalking && !rig.glbIsWalking) {
+          rig.glbWalkAction?.reset().fadeIn(0.15).play();
+          rig.glbIsWalking = true;
+        } else if (!isWalking && rig.glbIsWalking) {
+          rig.glbWalkAction?.fadeOut(0.15);
+          rig.glbIsWalking = false;
+        }
+      }
+    }
+
     // 1) Always advance animation mixers (every frame)
     Object.values(otherPlayers).forEach(p => {
       p.model?.userData?.mixer?.update(mixerDelta);
