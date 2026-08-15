@@ -108,14 +108,16 @@ function retargetClip(rawClip, scene, fbxGroup) {
   ));
   const hasGlobalFlip = fbxAnimConfig.flipCorrectX || fbxAnimConfig.flipCorrectY || fbxAnimConfig.flipCorrectZ;
 
-  // Debug-panel extra root pre-rotation
+  // Root pre-rotation applied to animation tracks only (not the static scene).
+  // Combines the lean correction (sceneRotX) with any extra debug overrides.
   const debugPreRot = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-    THREE.MathUtils.degToRad(fbxAnimConfig.rootPreRotX),
+    THREE.MathUtils.degToRad(fbxAnimConfig.sceneRotX + fbxAnimConfig.rootPreRotX),
     THREE.MathUtils.degToRad(fbxAnimConfig.rootPreRotY),
     THREE.MathUtils.degToRad(fbxAnimConfig.rootPreRotZ),
     'XYZ',
   ));
-  const hasDebugPreRot = fbxAnimConfig.rootPreRotX !== 0 || fbxAnimConfig.rootPreRotY !== 0 || fbxAnimConfig.rootPreRotZ !== 0;
+  const hasDebugPreRot = fbxAnimConfig.sceneRotX !== 0 ||
+    fbxAnimConfig.rootPreRotX !== 0 || fbxAnimConfig.rootPreRotY !== 0 || fbxAnimConfig.rootPreRotZ !== 0;
 
   const tracks = [];
   const q = new THREE.Quaternion();
@@ -211,12 +213,9 @@ function retargetClip(rawClip, scene, fbxGroup) {
 
 function applySceneOrientation(scene) {
   // Y180 aligns the static rest pose with the walking animation direction.
-  // sceneRotX corrects any backward lean (negative = tilt forward).
-  scene.rotation.set(
-    THREE.MathUtils.degToRad(fbxAnimConfig.sceneRotX),
-    Math.PI,  // hardcoded — do not expose; scene group handles facing, not tracks
-    0,
-  );
+  // X lean is intentionally NOT applied here — it goes on the animation tracks
+  // only so the static pose stays upright.
+  scene.rotation.set(0, Math.PI, 0);
 }
 
 function normalizeSceneHeight(scene, targetHeight) {
