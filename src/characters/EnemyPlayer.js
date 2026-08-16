@@ -190,7 +190,13 @@ export class EnemyPlayer {
     this._glbMixer = null;
     this._glbWalkAction = null;
     this._glbIsWalking = false;
-    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT }).then(({ container, mixer, walkAction }) => {
+    createGLBCharacterInstance({
+      targetHeight: CAPSULE_HEIGHT,
+      onRebuild: (newWalkAction) => {
+        this._glbWalkAction = newWalkAction;
+        if (this._glbIsWalking) newWalkAction.reset().fadeIn(0.15).play();
+      },
+    }).then(({ container, mixer, walkAction }) => {
       this.group.add(container);
       this._glbMixer = mixer;
       this._glbWalkAction = walkAction;
