@@ -404,6 +404,10 @@ export class MonsterCharacter extends CharacterBase {
         this.baseScale.y * this.sizeScale,
         this.baseScale.z * this.sizeScale
       );
+      // Offset pivot down by the physics capsule's center-to-ground distance
+      // (halfHeight=0.6 + radius=0.3 = 0.9 per unit scale) so visual feet sit on the ground
+      // when the model position is at the physics body center (groundY + 0.9 * scale).
+      this.pivot.position.y = -0.9 * this.sizeScale;
     }
     this.updateHealthBarScale();
     if (!preserveHealth) {
