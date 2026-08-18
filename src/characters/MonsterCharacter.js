@@ -206,20 +206,16 @@ export class MonsterCharacter extends CharacterBase {
 
     const body = this.body;
     const physicsMode = this.model?.userData?.physicsMode;
+    if (body && physicsMode !== 'kinematic') {
+      const vel = body.linvel();
+      body.setLinvel({ x: movement.x, y: vel.y, z: movement.z }, true);
+      return;
+    }
     const configuredOffset = Number.isFinite(context?.groundOffset)
       ? context.groundOffset
       : 0.9 * (Number.isFinite(this.sizeScale) ? this.sizeScale : 1);
     if (nextGround && Number.isFinite(nextGround.groundY)) {
       nextPosition.y = nextGround.groundY + configuredOffset;
-    }
-    if (body && physicsMode !== 'kinematic') {
-      const vel = body.linvel();
-      if (!this.isKnocked) {
-        body.setTranslation({ x: nextPosition.x, y: nextPosition.y, z: nextPosition.z }, true);
-        this.model.position.copy(nextPosition);
-      }
-      body.setLinvel({ x: movement.x, y: this.isKnocked ? vel.y : 0, z: movement.z }, true);
-      return;
     }
     if (body?.setNextKinematicTranslation) {
       body.setNextKinematicTranslation({ x: nextPosition.x, y: nextPosition.y, z: nextPosition.z });
@@ -408,10 +404,6 @@ export class MonsterCharacter extends CharacterBase {
         this.baseScale.y * this.sizeScale,
         this.baseScale.z * this.sizeScale
       );
-      // Shift pivot down so visual feet land at ground level.
-      // model.position.y is the physics capsule center (groundY + 0.9*scale);
-      // subtracting that offset here aligns the visible bottom with groundY.
-      this.pivot.position.y = -0.9 * this.sizeScale;
     }
     this.updateHealthBarScale();
     if (!preserveHealth) {

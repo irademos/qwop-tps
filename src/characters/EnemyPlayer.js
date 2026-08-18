@@ -497,7 +497,7 @@ export class EnemyPlayer {
 
     // ── Sync visual group from physics ──────────────────────────────────────
     const t = this.rigidBody.translation();
-    this.group.position.set(t.x, t.y - CAPSULE_HEIGHT / 2, t.z);
+    this.group.position.set(t.x, t.y - (PHYS_HALF_HEIGHT + PHYS_RADIUS), t.z);
 
     // ── Ragdoll: sync full rotation from physics body ──────────────────────
     if (this._isRagdoll) {
