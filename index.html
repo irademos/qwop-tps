@@ -243,13 +243,32 @@
       border-top:none;
       border-radius:0 0 6px 6px;
       padding:10px;
-      width:260px;
+      width:270px;
     ">
-      <div id="psw-debug-speed" style="margin-bottom:8px;color:#aef;font-size:11px">Angular speed: —</div>
+      <div id="psw-debug-speed" style="margin-bottom:4px;color:#aef;font-size:11px">Angular speed: —</div>
+      <div id="psw-debug-tier" style="margin-bottom:10px;font-size:11px;color:#fa0">Tier: —</div>
+
+      <!-- Detection -->
+      <div style="color:#88aaff;font-weight:bold;margin-bottom:4px;border-bottom:1px solid #333;padding-bottom:2px">Detection</div>
 
       <label style="display:block;margin-bottom:6px">
-        Speed threshold (deg/s): <span id="psw-lbl-threshold">4370</span>
-        <input type="range" min="20" max="10000" step="50" value="4370" id="psw-threshold"
+        Slow threshold (deg/s): <span id="psw-lbl-threshold">4370</span>
+        <br><small style="color:#aaa">minimum speed to count as any swing</small>
+        <input type="range" min="100" max="10000" step="50" value="4370" id="psw-threshold"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Medium threshold (deg/s): <span id="psw-lbl-medium">7000</span>
+        <br><small style="color:#aaa">above this → medium tier (trail + rotation)</small>
+        <input type="range" min="100" max="15000" step="100" value="7000" id="psw-medium"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Fast threshold (deg/s): <span id="psw-lbl-fast">11000</span>
+        <br><small style="color:#aaa">above this → fast tier (more damage, longer hold)</small>
+        <input type="range" min="100" max="20000" step="100" value="11000" id="psw-fast"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
@@ -258,6 +277,9 @@
         <input type="range" min="0" max="180" step="5" value="25" id="psw-mindelta"
           style="width:100%;display:block;margin-top:2px">
       </label>
+
+      <!-- Medium / Fast swing motion -->
+      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">Medium/Fast Swing Motion</div>
 
       <label style="display:block;margin-bottom:6px">
         Opposite strength: <span id="psw-lbl-oppstr">1</span>
@@ -268,15 +290,20 @@
 
       <label style="display:block;margin-bottom:6px">
         Hold duration (s): <span id="psw-lbl-hold">0.5</span>
+        <br><small style="color:#aaa">medium hold; fast gets 1.6× automatically</small>
         <input type="range" min="0.05" max="2" step="0.05" value="0.5" id="psw-hold"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
       <label style="display:block;margin-bottom:6px">
         Return duration (s): <span id="psw-lbl-return">0.3</span>
+        <br><small style="color:#aaa">medium return; fast gets 1.6× automatically</small>
         <input type="range" min="0.05" max="2" step="0.05" value="0.3" id="psw-return"
           style="width:100%;display:block;margin-top:2px">
       </label>
+
+      <!-- Trail -->
+      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">Trail (medium/fast only)</div>
 
       <label style="display:block;margin-bottom:6px">
         Trail duration (s): <span id="psw-lbl-trail">0.4</span>
@@ -329,15 +356,17 @@
           if (window.phoneSwordSwingCfg) window.phoneSwordSwingCfg[key] = v;
         });
       }
-      bind('psw-threshold', 'psw-lbl-threshold', 'speedThreshold', Number);
-      bind('psw-mindelta',  'psw-lbl-mindelta',  'minSwingDelta',  Number);
+      bind('psw-threshold', 'psw-lbl-threshold', 'speedThreshold',   Number);
+      bind('psw-medium',    'psw-lbl-medium',    'mediumThreshold',  Number);
+      bind('psw-fast',      'psw-lbl-fast',      'fastThreshold',    Number);
+      bind('psw-mindelta',  'psw-lbl-mindelta',  'minSwingDelta',    Number);
       bind('psw-oppstr',    'psw-lbl-oppstr',    'oppositeStrength', Number);
-      bind('psw-return',    'psw-lbl-return',    'returnDuration', Number);
-      bind('psw-hold',      'psw-lbl-hold',       'holdDuration',   Number);
-      bind('psw-trail',     'psw-lbl-trail',      'trailDuration',  Number);
-      bind('psw-opacity',   'psw-lbl-opacity',    'trailOpacity',   Number);
-      bind('psw-linecount', 'psw-lbl-linecount',  'trailLineCount', Number);
-      bind('psw-spread',    'psw-lbl-spread',     'trailLineSpread',Number);
+      bind('psw-hold',      'psw-lbl-hold',      'holdDuration',     Number);
+      bind('psw-return',    'psw-lbl-return',    'returnDuration',   Number);
+      bind('psw-trail',     'psw-lbl-trail',     'trailDuration',    Number);
+      bind('psw-opacity',   'psw-lbl-opacity',   'trailOpacity',     Number);
+      bind('psw-linecount', 'psw-lbl-linecount', 'trailLineCount',   Number);
+      bind('psw-spread',    'psw-lbl-spread',    'trailLineSpread',  Number);
 
       const colorEl = document.getElementById('psw-color');
       if (colorEl) {
@@ -358,7 +387,6 @@
           copyConfirm.textContent = '✓ Copied!';
           setTimeout(() => { copyConfirm.textContent = ''; }, 2000);
         }).catch(function () {
-          // Fallback for browsers that block clipboard
           const ta = document.createElement('textarea');
           ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
           document.body.appendChild(ta); ta.select();
@@ -380,18 +408,22 @@
         arrow.textContent   = open ? '▼' : '▶';
       });
 
-      // Show panel and update live speed readout once phoneSwordMode is detected
+      // Show panel and update live speed + tier readout once phoneSwordMode is detected
       function tryShow() {
         if (window.phoneSwordMode) {
           document.getElementById('psw-debug-panel').style.display = 'block';
-          // Live angular speed display — hook into game loop via rAF
           (function tick() {
             const cfg = window.phoneSwordSwingCfg;
             const psw = window._pswDebugSpeed;
             if (cfg && psw !== undefined) {
+              const tier = psw >= (cfg.fastThreshold ?? 11000) ? 3
+                         : psw >= (cfg.mediumThreshold ?? 7000) ? 2
+                         : psw >= cfg.speedThreshold ? 1 : 0;
+              const tierLabel = ['idle 💤', 'slow 🗡', 'medium ⚔️', 'FAST ⚡'][tier];
               document.getElementById('psw-debug-speed').textContent =
-                'Angular speed: ' + (psw | 0) + ' deg/s' +
-                (psw > cfg.speedThreshold ? ' 🗡️ SWING' : '');
+                'Angular speed: ' + (psw | 0) + ' deg/s';
+              document.getElementById('psw-debug-tier').textContent =
+                'Tier: ' + tierLabel;
             }
             requestAnimationFrame(tick);
           })();

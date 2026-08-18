@@ -998,10 +998,12 @@ async function initCore(runtimeContext) {
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
-    speedThreshold: 4370,   // deg/s
+    speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
+    mediumThreshold: 7000,  // deg/s — above this → medium tier (trail + rotation)
+    fastThreshold: 11000,   // deg/s — above this → fast tier (more damage, longer hold)
     minSwingDelta: 25,      // deg — total arc in last 200ms required
     oppositeStrength: 1.0,  // 0=no swing, 1=full opposite, >1=overshoot
-    holdDuration: 0.5,      // seconds — how long opposite pose is held
+    holdDuration: 0.5,      // seconds — medium hold; fast gets 1.6× automatically
     returnDuration: 0.3,    // seconds — how long to smoothly return to gyro after hold
     trailDuration: 0.4,     // seconds — how long trail history is kept/shown
     trailOpacity: 0.75,
