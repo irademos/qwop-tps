@@ -15,6 +15,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
 import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
+import { getTerrainHeight } from '../environment/terrainHeight.js';
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -497,7 +498,10 @@ export class EnemyPlayer {
 
     // ── Sync visual group from physics ──────────────────────────────────────
     const t = this.rigidBody.translation();
-    this.group.position.set(t.x, t.y - (PHYS_HALF_HEIGHT + PHYS_RADIUS), t.z);
+    const physY = t.y - (PHYS_HALF_HEIGHT + PHYS_RADIUS);
+    const terrainY = getTerrainHeight(t.x, t.z);
+    const groupY = Number.isFinite(terrainY) ? Math.max(physY, terrainY) : physY;
+    this.group.position.set(t.x, groupY, t.z);
 
     // ── Ragdoll: sync full rotation from physics body ──────────────────────
     if (this._isRagdoll) {
