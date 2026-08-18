@@ -992,6 +992,9 @@ async function initCore(runtimeContext) {
     parryActive: false,
     parryStartTime: 0,
     parryQ: new THREE.Quaternion(), // reversed pose held during parry (no trail, 1 s hold)
+    // Swing strength tier: 0=none, 1=slow (no trail/rotation), 2=medium, 3=fast
+    swingStrength: 0,
+    slowHitWindow: 0,     // timestamp until which a slow swing can register hits
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
@@ -15466,29 +15469,41 @@ async function initCore(runtimeContext) {
           if (!_psw.swingActive && !_psw.returning && !suppressed && !blocking &&
               angSpeed > _swCfg.speedThreshold &&
               totalArc > _swCfg.minSwingDelta) {
-            _psw.swingActive = true;
-            _psw.returning = false;
+            // Determine swing strength tier based on rotation speed
+            const _MEDIUM_THRESHOLD = (_swCfg.mediumThreshold ?? 7000);
+            const _FAST_THRESHOLD   = (_swCfg.fastThreshold   ?? 11000);
+            const _tier = angSpeed >= _FAST_THRESHOLD ? 3 : angSpeed >= _MEDIUM_THRESHOLD ? 2 : 1;
+            _psw.swingStrength = _tier;
             _psw.parryActive = false;
-            _psw.swingEndTime = nowSec + _swCfg.holdDuration;
-            _psw.swingStartQ.copy(_phoneSwordGyroQ); // snapshot pre-swing orientation for parry reversal
-            // Trail NOT cleared here — pre-swing tip positions already in buffer show the arc
+            _psw.swingStartQ.copy(_phoneSwordGyroQ);
 
-            // Swing direction: opposite of where the sword currently points.
-            // Negate the calibration-relative euler angles so e.g. "up" becomes "down".
-            const curEX = (_dBeta  + _cfg.offsetX) * DEG;
-            const curEY = (_dAlpha + _cfg.offsetY) * DEG;
-            const curEZ = (_dGamma + _cfg.offsetZ) * DEG;
-            const curGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(curEX, curEY, curEZ, 'YXZ'));
-            const oppGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-curEX, -curEY, -curEZ, 'YXZ'));
-            // Always swing a fixed angular arc (~150°) so the sword fully crosses the body
-            // regardless of where it starts. When starting near center the negated angles are
-            // small and the raw slerp target is too close; extend past it to reach the full arc.
-            const _SWING_TARGET_ANGLE = 2.6; // radians ≈ 149°
-            const _rawAngle = curGyroQ.angleTo(oppGyroQ);
-            const _swingT = _rawAngle > 0.01
-              ? (_SWING_TARGET_ANGLE / _rawAngle) * _swCfg.oppositeStrength
-              : _swCfg.oppositeStrength;
-            _psw.swingExaggerQ.slerpQuaternions(curGyroQ, oppGyroQ, _swingT);
+            if (_tier === 1) {
+              // Slow swing: no automatic rotation, no trail — just open a brief hit window
+              _psw.slowHitWindow = nowSec + 0.25;
+              _psw.suppressUntil = nowSec + 0.35;
+              _psw.prevBeta = _psw.prevGamma = _psw.prevAlpha = null;
+              _psw.deltaHistory = [];
+            } else {
+              // Medium / fast swing: full rotation + trail
+              const _holdMult = _tier === 3 ? 1.6 : 1.0;
+              _psw.swingActive = true;
+              _psw.returning = false;
+              _psw.swingEndTime = nowSec + _swCfg.holdDuration * _holdMult;
+              // Trail NOT cleared here — pre-swing tip positions already in buffer show the arc
+
+              // Swing direction: opposite of where the sword currently points.
+              const curEX = (_dBeta  + _cfg.offsetX) * DEG;
+              const curEY = (_dAlpha + _cfg.offsetY) * DEG;
+              const curEZ = (_dGamma + _cfg.offsetZ) * DEG;
+              const curGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(curEX, curEY, curEZ, 'YXZ'));
+              const oppGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-curEX, -curEY, -curEZ, 'YXZ'));
+              const _SWING_TARGET_ANGLE = 2.6; // radians ≈ 149°
+              const _rawAngle = curGyroQ.angleTo(oppGyroQ);
+              const _swingT = _rawAngle > 0.01
+                ? (_SWING_TARGET_ANGLE / _rawAngle) * _swCfg.oppositeStrength
+                : _swCfg.oppositeStrength;
+              _psw.swingExaggerQ.slerpQuaternions(curGyroQ, oppGyroQ, _swingT);
+            }
           }
         }
         _psw.prevBeta  = _dBeta;
@@ -15516,8 +15531,9 @@ async function initCore(runtimeContext) {
             _psw.returning = true;
             _psw.returnStartTime = nowSec;
             _psw.returnStartQ.copy(_psw.swingExaggerQ);
-            // Suppress detection for the full return duration + buffer
-            _psw.suppressUntil = nowSec + (_swCfg.returnDuration || 0.3) + 0.15;
+            // Suppress detection for the full return duration + buffer (longer for fast swings)
+            const _retMult = _psw.swingStrength === 3 ? 1.6 : 1.0;
+            _psw.suppressUntil = nowSec + (_swCfg.returnDuration || 0.3) * _retMult + 0.15;
             _psw.prevBeta = _psw.prevGamma = _psw.prevAlpha = null;
             _psw.deltaHistory = [];
             activeGyroQ = _psw.swingExaggerQ;
@@ -15591,7 +15607,8 @@ async function initCore(runtimeContext) {
 
       // Determine whether the trail should be visible this frame.
       // Parry hold never shows a trail — the sword reverses without visual arc.
-      const trailVisible = !_psw.parryActive && (
+      // Slow swings (tier 1) also suppress the trail.
+      const trailVisible = !_psw.parryActive && _psw.swingStrength >= 2 && (
         _psw.swingActive || _psw.returning ||
         (nowSec2 - _psw.swingEndTime) < _swCfg2.trailDuration
       );
@@ -15724,12 +15741,16 @@ async function initCore(runtimeContext) {
         };
 
         // ── Player's foam sword hitting the enemy ──────────────────────────
-        // In phone sword mode, hits only register during an active swing (trailing lines visible).
+        // In phone sword mode, hits only register during an active swing or slow-swing hit window.
         // Simply touching the enemy with the sword while idle or blocking deals no damage.
         if (!_he._playerSwordLastHit) _he._playerSwordLastHit = 0;
+        const _nowMs2 = Date.now();
+        const _phoneSwordHitOk = !window.phoneSwordMode ||
+          _psw.swingActive ||
+          (_nowMs2 / 1000 < _psw.slowHitWindow);
         const _canSwordHit = swordMesh?.visible &&
-          (!window.phoneSwordMode || _psw.swingActive) &&
-          (Date.now() - _he._playerSwordLastHit) > 1000;
+          _phoneSwordHitOk &&
+          (_nowMs2 - _he._playerSwordLastHit) > 1000;
         if (_canSwordHit) {
           const _enemyCenter = _he.getCenterWorldPos();
           if (_tipWorld.distanceTo(_enemyCenter) < 0.65) {
@@ -15738,10 +15759,18 @@ async function initCore(runtimeContext) {
             _hitDir.y = 0;
             if (_hitDir.lengthSq() < 0.0001) _hitDir.set(0, 0, 1);
             _hitDir.normalize();
-            const _kb = window._hordeKB ?? { horizSpeed: 12.5, upVelocity: 0, torqueMag: 10, ragdoll: true };
-            _he.applyDamage(2);
-            _he.applyDirectKnockback({ direction: _hitDir, ..._kb });
-            _he._playerSwordLastHit = Date.now();
+            const _baseKB = window._hordeKB ?? { horizSpeed: 12.5, upVelocity: 0, torqueMag: 10, ragdoll: true };
+            // Scale damage and knockback by swing strength tier
+            const _str = window.phoneSwordMode ? (_psw.swingStrength || 2) : 2;
+            const _dmg = _str === 1 ? 1 : _str === 3 ? 4 : 2;
+            const _kbSpeed = _str === 1 ? _baseKB.horizSpeed * 0.4 : _str === 3 ? _baseKB.horizSpeed * 1.6 : _baseKB.horizSpeed;
+            _he.applyDamage(_dmg);
+            _he.applyDirectKnockback({ direction: _hitDir, ..._baseKB, horizSpeed: _kbSpeed });
+            _he._playerSwordLastHit = _nowMs2;
+            // Close the slow-swing hit window after first hit so it only triggers once
+            if (_psw.slowHitWindow > 0 && _nowMs2 / 1000 < _psw.slowHitWindow) {
+              _psw.slowHitWindow = 0;
+            }
           }
         }
       }
