@@ -505,7 +505,7 @@ export class EnemyPlayer {
    * @param {boolean}       allowAttack  – if false, yield attack slot: retreat and hold idle pose
    */
   update(dt, targetModel, targetControls, shieldActive, allowAttack = true) {
-    if (this.isDead || !this.rigidBody) return;
+    if (!this.rigidBody) return;
 
     // ── Sync visual group from physics ──────────────────────────────────────
     const t = this.rigidBody.translation();
@@ -513,6 +513,15 @@ export class EnemyPlayer {
     const terrainY = getTerrainHeight(t.x, t.z);
     const groupY = Number.isFinite(terrainY) ? Math.max(physY, terrainY) : physY;
     this.group.position.set(t.x, groupY, t.z);
+
+    // Dead: only sync position/rotation, skip all AI and combat logic
+    if (this.isDead) {
+      if (this._isRagdoll && this.rigidBody) {
+        const rot = this.rigidBody.rotation();
+        this.group.quaternion.set(rot.x, rot.y, rot.z, rot.w);
+      }
+      return;
+    }
 
     // ── Ragdoll: sync full rotation from physics body ──────────────────────
     if (this._isRagdoll) {
