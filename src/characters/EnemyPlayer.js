@@ -1029,11 +1029,8 @@ export class EnemyPlayer {
     this._isRagdoll = false;
     this._swordGroup.visible = false;
 
-    // Remove physics body immediately so it stops blocking
-    if (this.rigidBody && this.rapierWorld?.getRigidBody(this.rigidBody.handle)) {
-      this.rapierWorld.removeRigidBody(this.rigidBody);
-      this.rigidBody = null;
-    }
+    // Keep rigid body alive so knockback applied after _die() still has something to push.
+    // destroy() will remove it when the fade finishes.
 
     // Fade out the group over 2 s then destroy
     const _startMs = Date.now();
