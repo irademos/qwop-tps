@@ -291,16 +291,16 @@
       <div style="color:#88aaff;font-weight:bold;margin-bottom:4px;border-bottom:1px solid #333;padding-bottom:2px">Hit Detection</div>
 
       <label style="display:block;margin-bottom:6px">
-        Min sweep speed (deg/s): <span id="psw-lbl-sweepspeed">2000</span>
+        Min sweep speed (deg/s): <span id="psw-lbl-sweepspeed">100</span>
         <br><small style="color:#aaa">gyro rotation speed required for a hit</small>
-        <input type="range" min="0" max="15000" step="100" value="2000" id="psw-sweepspeed"
+        <input type="range" min="0" max="15000" step="50" value="100" id="psw-sweepspeed"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
       <label style="display:block;margin-bottom:6px">
-        Min sweep dist (m): <span id="psw-lbl-minsweep">0.015</span>
+        Min sweep dist (m): <span id="psw-lbl-minsweep">0.15</span>
         <br><small style="color:#aaa">tip movement per frame required for a hit</small>
-        <input type="range" min="0.001" max="0.15" step="0.001" value="0.015" id="psw-minsweep"
+        <input type="range" min="0.001" max="1.0" step="0.005" value="0.15" id="psw-minsweep"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
@@ -308,16 +308,23 @@
       <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">Block / Bounce</div>
 
       <label style="display:block;margin-bottom:6px">
-        Bounce-back strength: <span id="psw-lbl-bouncestr">1.8</span>
-        <br><small style="color:#aaa">slerp overshoot — higher = further recoil</small>
-        <input type="range" min="0.1" max="4" step="0.05" value="1.8" id="psw-bouncestr"
+        Bounce angle (deg): <span id="psw-lbl-bounceangle">90</span>
+        <br><small style="color:#aaa">how far sideways the sword is knocked</small>
+        <input type="range" min="10" max="180" step="5" value="90" id="psw-bounceangle"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
       <label style="display:block;margin-bottom:6px">
-        Bounce hold (s): <span id="psw-lbl-bouncedur">0.5</span>
-        <br><small style="color:#aaa">how long sword is stuck in recoil</small>
-        <input type="range" min="0.05" max="2" step="0.05" value="0.5" id="psw-bouncedur"
+        Bounce snap speed: <span id="psw-lbl-bouncesnap">18</span>
+        <br><small style="color:#aaa">how fast it snaps to recoil position (higher = faster)</small>
+        <input type="range" min="1" max="60" step="1" value="18" id="psw-bouncesnap"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
+        Bounce hold (s): <span id="psw-lbl-bouncedur">0.35</span>
+        <br><small style="color:#aaa">how long sword stays at peak recoil</small>
+        <input type="range" min="0.05" max="2" step="0.05" value="0.35" id="psw-bouncedur"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
@@ -344,8 +351,9 @@
       }
       bind('psw-sweepspeed', 'psw-lbl-sweepspeed', 'minSweepSpeed', Number);
       bind('psw-minsweep',   'psw-lbl-minsweep',   'minSweepDist',  Number);
-      bind('psw-bouncestr',  'psw-lbl-bouncestr',  'bounceStrength', Number);
-      bind('psw-bouncedur',  'psw-lbl-bouncedur',  'bounceHoldDur',  Number);
+      bind('psw-bounceangle', 'psw-lbl-bounceangle', 'bounceAngle',     Number);
+      bind('psw-bouncesnap',  'psw-lbl-bouncesnap',  'bounceSnapSpeed', Number);
+      bind('psw-bouncedur',   'psw-lbl-bouncedur',   'bounceHoldDur',   Number);
 
       // Copy to clipboard
       const copyBtn = document.getElementById('psw-copy-btn');

@@ -1003,6 +1003,7 @@ async function initCore(runtimeContext) {
     bounceDur: 0.5,
     bounceFromQ: new THREE.Quaternion(),
     bounceTargetQ: new THREE.Quaternion(),
+    bounceCurrentQ: new THREE.Quaternion(),
   };
   // Block flash helper — called with 'player' (green) or 'enemy' (gray)
   window._pswShowBlockFlash = function(who) {
@@ -1038,10 +1039,11 @@ async function initCore(runtimeContext) {
     trailColor: 0xff4986,
     trailLineCount: 3,
     trailLineSpread: 0.005,
-    minSweepDist: 0.015,   // meters — minimum tip movement per frame to register a sweep hit
-    minSweepSpeed: 2000,   // deg/s — gyro rotation speed required for a sweep hit to register
-    bounceStrength: 1.8,   // slerp overshoot factor for player sword bounce-back
-    bounceHoldDur: 0.5,    // seconds sword stays in bounce recoil before returning to gyro
+    minSweepDist: 0.15,    // meters — minimum tip movement per frame to register a sweep hit
+    minSweepSpeed: 100,    // deg/s — gyro rotation speed required for a sweep hit to register
+    bounceAngle: 90,       // degrees — how far sideways the sword is knocked
+    bounceSnapSpeed: 18,   // exp-decay rate — higher = snaps to recoil position faster
+    bounceHoldDur: 0.35,   // seconds sword stays at peak recoil before returning
   };
 
   const tempVector3A = new THREE.Vector3();
@@ -15465,21 +15467,33 @@ async function initCore(runtimeContext) {
         _psw.prevGyroQ.copy(_phoneSwordGyroQ);
         _psw.prevGyroTime = nowSec;
 
-        // Bounce: lerp away from live gyro and back over bounceHoldDur s
+        // Bounce: snap to recoil target (exp-decay), hold, then return to live gyro
         let activeGyroQ;
         if (_psw.bounceActive) {
-          const _bDur = _psw.bounceDur ?? 0.5;
-          const elapsed = nowSec - _psw.bounceStartTime;
-          if (elapsed >= _bDur) {
-            _psw.bounceActive = false;
-            activeGyroQ = _phoneSwordGyroQ;
+          const _bCfg      = window.phoneSwordSwingCfg;
+          const _snapSpeed = _bCfg?.bounceSnapSpeed ?? 18;
+          const _holdDur   = _psw.bounceDur ?? 0.35;
+          const elapsed    = nowSec - _psw.bounceStartTime;
+          // Phase 1: snap to recoil target (first 0.12 s at snapSpeed)
+          const _snapDur = 0.12;
+          if (elapsed < _snapDur) {
+            const _dt2 = nowSec - ((_psw._lastBounceT ?? nowSec - 0.016));
+            _psw.bounceCurrentQ.slerp(_psw.bounceTargetQ, 1 - Math.exp(-_snapSpeed * _dt2));
+            activeGyroQ = _psw.bounceCurrentQ;
+          // Phase 2: hold at recoil position
+          } else if (elapsed < _snapDur + _holdDur) {
+            _psw.bounceCurrentQ.copy(_psw.bounceTargetQ);
+            activeGyroQ = _psw.bounceCurrentQ;
+          // Phase 3: return to live gyro
           } else {
-            const t = elapsed / _bDur;
-            activeGyroQ = t < 0.5
-              ? new THREE.Quaternion().slerpQuaternions(_psw.bounceFromQ, _psw.bounceTargetQ, t * 2)
-              : new THREE.Quaternion().slerpQuaternions(_psw.bounceTargetQ, _phoneSwordGyroQ, (t - 0.5) * 2);
+            const _returnDur = 0.2;
+            const _rt = Math.min((elapsed - _snapDur - _holdDur) / _returnDur, 1);
+            if (_rt >= 1) { _psw.bounceActive = false; activeGyroQ = _phoneSwordGyroQ; }
+            else { activeGyroQ = new THREE.Quaternion().slerpQuaternions(_psw.bounceTargetQ, _phoneSwordGyroQ, _rt); }
           }
+          _psw._lastBounceT = nowSec;
         } else {
+          _psw._lastBounceT = null;
           activeGyroQ = _phoneSwordGyroQ;
         }
 
@@ -15494,19 +15508,9 @@ async function initCore(runtimeContext) {
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
 
-      // Re-derive active Q (bounce or live gyro)
+      // Re-derive active Q — use bounceCurrentQ if bouncing, else live gyro
       const _nowSecPS = performance.now() / 1000;
-      let _activeQ;
-      if (_psw.bounceActive) {
-        const _el  = _nowSecPS - _psw.bounceStartTime;
-        const _bD  = _psw.bounceDur ?? 0.5;
-        const _t   = Math.min(_el / _bD, 1);
-        _activeQ = _t < 0.5
-          ? new THREE.Quaternion().slerpQuaternions(_psw.bounceFromQ, _psw.bounceTargetQ, _t * 2)
-          : new THREE.Quaternion().slerpQuaternions(_psw.bounceTargetQ, _phoneSwordGyroQ, (_t - 0.5) * 2);
-      } else {
-        _activeQ = _phoneSwordGyroQ;
-      }
+      const _activeQ = _psw.bounceActive ? _psw.bounceCurrentQ : _phoneSwordGyroQ;
       foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
 
       // ── Hide any leftover trail lines from the old swing system ─────────────
@@ -15545,14 +15549,16 @@ async function initCore(runtimeContext) {
 
           if (_swordCollision && !_psw.bounceActive) {
             const _bounceCfg = window.phoneSwordSwingCfg;
-            const _bounceStr = _bounceCfg?.bounceStrength ?? 1.8;
-            const _bounceDur = _bounceCfg?.bounceHoldDur ?? 0.5;
-            // Player sword bounces back
+            const _bounceAngle = (_bounceCfg?.bounceAngle ?? 90) * (Math.PI / 180);
+            const _bounceDur   = _bounceCfg?.bounceHoldDur ?? 0.35;
+            // Build recoil target: rotate current sword Q by bounceAngle around world Y
+            const _yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), _bounceAngle);
             _psw.bounceActive    = true;
             _psw.bounceStartTime = _nowSecPS;
             _psw.bounceDur       = _bounceDur;
             _psw.bounceFromQ.copy(_activeQ);
-            _psw.bounceTargetQ.slerpQuaternions(_activeQ, _psw.prevSwordQ, _bounceStr);
+            _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
+            _psw.bounceCurrentQ.copy(_activeQ);
             // Enemy sword also bounces
             _he.applySwordBounce?.();
             // Player block flash (green spiky)
