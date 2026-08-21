@@ -1045,7 +1045,7 @@ async function initCore(runtimeContext) {
     bounceSnapSpeed: 18,   // exp-decay rate — higher = snaps to recoil position faster
     bounceHoldDur: 0.7,    // seconds sword stays at peak recoil before returning
     blockLateralScale: 0.3,  // 0=fully centered, 1=full spread — how much lateral offset in block mode
-    hitKnockbackWeak: 3,     // horizSpeed for non-killing hits (killing hits always use full force)
+    hitKnockbackWeak: 20,    // horizSpeed for non-killing hits (killing hits always use full force)
     enemyBounceHoldDur: 2.0, // seconds enemy sword stays stuck after being blocked by player
   };
 
