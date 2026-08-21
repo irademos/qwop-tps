@@ -70,7 +70,7 @@ export class FoamSword extends Weapon {
     // Guard (cross-guard): flat cylinder perpendicular to blade, at z=0
     const guardMat = new THREE.MeshStandardMaterial({ color: GUARD_COLOR, roughness: 0.7, metalness: 0.02 });
     const guardGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.035, 14);
-    // Leave guard in default CylinderGeometry orientation (Y-axis), no rotation
+    guardGeo.rotateX(Math.PI / 2); // rotate so circular face is perpendicular to blade (+Z)
     const guard = new THREE.Mesh(guardGeo, guardMat);
     guard.position.set(0, 0, 0);
     guard.castShadow = true;

@@ -484,6 +484,24 @@ function createHandGroup(mat, side) {
  * Called once from createPlayerModel; both groups are patched when ready.
  */
 async function initGLBHands(leftGroup, rightGroup) {
+  if (window.phoneSwordMode) {
+    // Phone sword mode: use a simple sphere instead of the GLB hand model
+    const handMat = new THREE.MeshStandardMaterial({
+      color: 0xf1c27d, roughness: 0.8, transparent: true, opacity: 0.70,
+    });
+    const sphereGeo = new THREE.SphereGeometry(0.065, 10, 8);
+    const rightSphere = new THREE.Mesh(sphereGeo, handMat);
+    rightSphere.castShadow = true;
+    rightGroup.add(rightSphere);
+    rightGroup.userData.glbReady = true;
+
+    const leftSphere = new THREE.Mesh(sphereGeo, handMat.clone());
+    leftSphere.castShadow = true;
+    leftGroup.add(leftSphere);
+    leftGroup.userData.glbReady = true;
+    return;
+  }
+
   let gltf;
   try {
     gltf = await getGLBHandGLTF();
