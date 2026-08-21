@@ -54,11 +54,12 @@ const SWING_PRESETS = [
 
 // ── Block hand positions (body-local) ─────────────────────────────────────────
 // Each enemy randomly picks one when entering a block phase.
+// Z values are low (close to body) to mirror the player's blocking stance.
 const BLOCK_HAND_PRESETS = [
-  new THREE.Vector3( 0.25, 1.05, 0.52),  // center-high guard
-  new THREE.Vector3(-0.10, 1.10, 0.52),  // slight left guard
-  new THREE.Vector3( 0.40, 0.95, 0.50),  // right mid-guard
-  new THREE.Vector3( 0.05, 1.18, 0.50),  // high center guard
+  new THREE.Vector3( 0.10, 1.00, 0.22),  // center-high guard
+  new THREE.Vector3(-0.05, 1.05, 0.22),  // slight left guard
+  new THREE.Vector3( 0.20, 0.90, 0.20),  // right mid-guard
+  new THREE.Vector3( 0.05, 1.10, 0.20),  // high center guard
 ];
 
 // Trail rendering for sword swings
@@ -246,6 +247,25 @@ export class EnemyPlayer {
   }
 
   async _loadHands() {
+    const handMat = new THREE.MeshStandardMaterial({
+      color: 0xf1c27d, roughness: 0.8, transparent: true, opacity: 0.70,
+    });
+
+    if (window.phoneSwordMode) {
+      // Phone sword mode: use a simple sphere instead of the GLB hand model
+      const sphereGeo = new THREE.SphereGeometry(0.065, 10, 8);
+      const rightSphere = new THREE.Mesh(sphereGeo, handMat);
+      rightSphere.castShadow = true;
+      this._rightHandGroup.add(rightSphere);
+      this._rightHandGroup.userData.glbReady = true;
+
+      const leftSphere = new THREE.Mesh(sphereGeo, handMat.clone());
+      leftSphere.castShadow = true;
+      this._leftHandGroup.add(leftSphere);
+      this._leftHandGroup.userData.glbReady = true;
+      return;
+    }
+
     let gltf;
     try { gltf = await getGLBHandGLTF(); } catch (e) {
       console.warn('[EnemyPlayer] GLB load failed:', e);
@@ -411,8 +431,10 @@ export class EnemyPlayer {
     swordGroup.add(tip);
 
     // Guard
+    const guardGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.035, 14);
+    guardGeo.rotateX(Math.PI / 2); // circular face perpendicular to blade
     const guard = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.11, 0.11, 0.035, 14),
+      guardGeo,
       new THREE.MeshStandardMaterial({ color: 0xcc2222 })
     );
     guard.position.set(0, 0, 0);
@@ -686,9 +708,17 @@ export class EnemyPlayer {
           this._trailPoints    = [];
           this._trailFadeStart = -1;
         } else if (this._attackPhase === 'swing_execute') {
-          // Swing done — start trail fade, pick next action
+          // Swing done — hold final pose for 2s, then fade trail and decide next
           this._trailFadeStart = Date.now();
-          this._decideNextPhase();
+          this._attackPhase    = 'swing_end_hold';
+          this._attackPhaseDur = 2.0;
+          this._attackPhaseT   = 0;
+          // Capture the final sword quaternion so we can hold it exactly
+          this._swingEndSwordQ = this._swordQuaternion.clone();
+          // Capture final hand position (swing target) to hold
+          this._swingEndHandPos = new THREE.Vector3(
+            this._swingPreset.swing.x, this._swingPreset.swing.y, this._swingPreset.swing.z
+          );
         } else {
           // block or decide
           this._decideNextPhase();
@@ -735,6 +765,14 @@ export class EnemyPlayer {
           );
           // Sample trail tip this frame
           this._sampleTrail(Date.now());
+          break;
+        }
+
+        case 'swing_end_hold': {
+          // Hold at the final swing-target position for 2 seconds
+          if (this._swingEndHandPos) {
+            this._handTargetR.copy(this._swingEndHandPos);
+          }
           break;
         }
 
@@ -839,14 +877,13 @@ export class EnemyPlayer {
     }
 
     if (this._attackPhase === 'block') {
-      // ── Block: hold sword diagonally across the body (guard position) ─────
-      // Blend the enemy's world yaw with a fixed "blade up-diagonally" euler
+      // ── Block: hold sword upright close to body, matching player's block stance ─
       this.group.getWorldQuaternion(_rootQ);
-      // Blade points roughly upward-forward when blocking
+      // Blade points upward-forward with slight tilt, like the player holding in guard
       const blockEuler = new THREE.Euler(
-        -Math.PI * 0.45 + Math.sin(this._attackPhaseT * 2.7 + this._blockSeed) * 0.06,
+        -Math.PI * 0.15 + Math.sin(this._attackPhaseT * 2.7 + this._blockSeed) * 0.04,
          0,
-         Math.PI * 0.25 + Math.sin(this._attackPhaseT * 1.8 + this._blockSeed * 0.6) * 0.05,
+         Math.PI * 0.08 + Math.sin(this._attackPhaseT * 1.8 + this._blockSeed * 0.6) * 0.04,
         'YXZ'
       );
       _tmpQ.setFromEuler(blockEuler);
@@ -865,6 +902,12 @@ export class EnemyPlayer {
         .applyQuaternion(_rootQ);
       _tmpQ.setFromUnitVectors(_fwdAxis, _handVelDir);
       this._swordQuaternion.slerpQuaternions(this._swingStartSwordQ, _tmpQ, eased);
+
+    } else if (this._attackPhase === 'swing_end_hold') {
+      // ── Post-swing: freeze sword at final swing position for 2 seconds ────
+      if (this._swingEndSwordQ) {
+        this._swordQuaternion.copy(this._swingEndSwordQ);
+      }
 
     } else if (this._attackPhase === 'swing_hold') {
       // ── Windup: tilt blade toward target direction before swing ───────────
