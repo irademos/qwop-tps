@@ -988,6 +988,7 @@ export class EnemyPlayer {
     if (typeof window.localHealth === 'number') {
       window.localHealth = Math.max(0, window.localHealth - SWORD_DAMAGE);
     }
+    window.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
 
     this._lastHitTime = now;
 
