@@ -1039,11 +1039,12 @@ async function initCore(runtimeContext) {
     trailColor: 0xff4986,
     trailLineCount: 3,
     trailLineSpread: 0.005,
-    minSweepDist: 0.15,    // meters — minimum tip movement per frame to register a sweep hit
+    minSweepDist: 0.3,     // meters — minimum tip movement per frame to register a sweep hit
     minSweepSpeed: 100,    // deg/s — gyro rotation speed required for a sweep hit to register
-    bounceAngle: 90,       // degrees — how far sideways the sword is knocked
+    bounceAngle: 120,      // degrees — how far sideways the sword is knocked
     bounceSnapSpeed: 18,   // exp-decay rate — higher = snaps to recoil position faster
-    bounceHoldDur: 0.35,   // seconds sword stays at peak recoil before returning
+    bounceHoldDur: 0.7,    // seconds sword stays at peak recoil before returning
+    blockLateralScale: 0.3, // 0=fully centered, 1=full spread — how much lateral offset in block mode
   };
 
   const tempVector3A = new THREE.Vector3();
