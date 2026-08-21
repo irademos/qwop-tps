@@ -1044,7 +1044,8 @@ async function initCore(runtimeContext) {
     bounceAngle: 120,      // degrees — how far sideways the sword is knocked
     bounceSnapSpeed: 18,   // exp-decay rate — higher = snaps to recoil position faster
     bounceHoldDur: 0.7,    // seconds sword stays at peak recoil before returning
-    blockLateralScale: 0.3, // 0=fully centered, 1=full spread — how much lateral offset in block mode
+    blockLateralScale: 0.3,  // 0=fully centered, 1=full spread — how much lateral offset in block mode
+    hitKnockbackWeak: 3,     // horizSpeed for non-killing hits (killing hits always use full force)
   };
 
   const tempVector3A = new THREE.Vector3();
@@ -15595,14 +15596,27 @@ async function initCore(runtimeContext) {
                   _sweepDir.y = 0;
                   if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
                   _sweepDir.normalize();
-                  _he.applyDamage(2);
-                  _he.applyDirectKnockback({
-                    direction: _sweepDir,
-                    horizSpeed: 10,
-                    upVelocity: 1,
-                    torqueMag: 60,
-                    ragdoll: true,
-                  });
+                  const _killingBlow = _he.applyDamage(1);
+                  if (_killingBlow) {
+                    // Full knockback on killing hit
+                    _he.applyDirectKnockback({
+                      direction: _sweepDir,
+                      horizSpeed: 10,
+                      upVelocity: 1,
+                      torqueMag: 60,
+                      ragdoll: true,
+                    });
+                  } else {
+                    // Weak step-back on non-killing hit
+                    const _weakSpd = window.phoneSwordSwingCfg?.hitKnockbackWeak ?? 3;
+                    _he.applyDirectKnockback({
+                      direction: _sweepDir,
+                      horizSpeed: _weakSpd,
+                      upVelocity: 0.2,
+                      torqueMag: 0,
+                      ragdoll: false,
+                    });
+                  }
                   _he._playerSwordLastHit = _nowMsPS;
                 }
               }
