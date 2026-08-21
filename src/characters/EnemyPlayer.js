@@ -148,6 +148,10 @@ export class EnemyPlayer {
     this._isRagdoll    = false;
     this._ragdollTimeout = null;
 
+    // Sword bounce state (triggered when player sword collides with this sword)
+    this._bounceActive  = false;
+    this._bounceEndTime = 0;
+
     // Sword quaternion (updated each frame)
     this._swordQuaternion = new THREE.Quaternion().setFromEuler(REST_SWORD_EULER);
 
@@ -765,9 +769,36 @@ export class EnemyPlayer {
     armMesh.quaternion.copy(_rootQ.clone().invert().multiply(_armQ));
   }
 
+  /** Called externally when the player's sword hits this sword. */
+  applySwordBounce() {
+    this._bounceActive  = true;
+    this._bounceEndTime = Date.now() + 500;
+    // Cancel any in-flight swing so the bounce doesn't immediately re-hit
+    if (this._attackPhase === 'swing_execute') {
+      this._attackPhase    = 'swing_hold';
+      this._attackPhaseT   = 0;
+      this._attackPhaseDur = 0.6;
+    }
+  }
+
   _updateSword(dt) {
     // Sword origin = right hand world position
     this._rightHandGroup.getWorldPosition(_tmpV);
+
+    // Bounce overrides normal sword motion for 0.5 s
+    if (this._bounceActive) {
+      if (Date.now() > this._bounceEndTime) {
+        this._bounceActive = false;
+      } else {
+        this.group.getWorldQuaternion(_rootQ);
+        // Recoil: blade pulled back and slightly upward
+        _tmpQ.setFromEuler(new THREE.Euler(-Math.PI * 0.25, 0, Math.PI * 0.18, 'YXZ')).premultiply(_rootQ);
+        this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-18 * dt));
+        this._swordGroup.position.copy(_tmpV);
+        this._swordGroup.quaternion.copy(this._swordQuaternion);
+        return;
+      }
+    }
 
     if (this._attackPhase === 'block') {
       // ── Block: hold sword diagonally across the body (guard position) ─────
@@ -835,6 +866,19 @@ export class EnemyPlayer {
 
     const dist = _swordTipWorld.distanceTo(targetCenter);
     if (dist > SWORD_TIP_HIT_RADIUS) return;
+
+    // Player sword block: if the player's blade points are near this sword's tip, deflect.
+    const playerBladePoints = window.phoneSwordBladePoints;
+    if (playerBladePoints?.length) {
+      for (const pp of playerBladePoints) {
+        if (_swordTipWorld.distanceTo(pp) < 0.22) {
+          // Player sword intercepted — bounce this enemy sword, no damage
+          this.applySwordBounce();
+          this._lastHitTime = now;
+          return;
+        }
+      }
+    }
 
     // Shield check — delegate to existing game logic
     if (shieldActive && typeof window.tryBlockLocalPlayerHitWithShield === 'function') {

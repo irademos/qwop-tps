@@ -995,6 +995,13 @@ async function initCore(runtimeContext) {
     // Swing strength tier: 0=none, 1=slow (no trail/rotation), 2=medium, 3=fast
     swingStrength: 0,
     slowHitWindow: 0,     // timestamp until which a slow swing can register hits
+    // Sword-collision bounce state (replaces swing auto-rotation for player)
+    prevTipWorld: null,   // THREE.Vector3 — sword tip last frame, for sweep direction
+    prevSwordQ: new THREE.Quaternion(), // sword Q last frame
+    bounceActive: false,
+    bounceStartTime: 0,
+    bounceFromQ: new THREE.Quaternion(),
+    bounceTargetQ: new THREE.Quaternion(),
   };
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
@@ -15397,34 +15404,12 @@ async function initCore(runtimeContext) {
     bow?.update();
     bazooka?.update();
     bomb?.update();
-    // Phone Sword: compute gyro quaternion, detect swings, apply exaggerated pose + trail
+    // Phone Sword: read gyro quaternion and apply directly (no swing exaggeration).
+    // Hit detection is now sweep-based with sword-vs-sword collision (see below).
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
-      // Cancel any in-progress swing when blocking starts; check for perpendicular parry first.
-      if (window.phoneSwordGyro.blocking && (_psw.swingActive || _psw.returning)) {
-        // Parry: if the swing direction is perpendicular to the blocking sword direction (±40°),
-        // reverse the sword back to its start pose for 1 s with no trailing lines.
-        if (_psw.swingActive && !_psw.parryActive) {
-          const _swDir = new THREE.Vector3(0, 0, 1).applyQuaternion(_psw.swingExaggerQ);
-          const _blDir = new THREE.Vector3(0, 0, 1).applyQuaternion(_phoneSwordGyroQ);
-          _swDir.y = 0; if (_swDir.lengthSq() > 1e-4) _swDir.normalize();
-          _blDir.y = 0; if (_blDir.lengthSq() > 1e-4) _blDir.normalize();
-          // Perpendicular ±40° means |dot| < sin(40°) ≈ 0.643
-          if (Math.abs(_swDir.dot(_blDir)) < Math.sin(40 * Math.PI / 180)) {
-            _psw.parryActive = true;
-            _psw.parryStartTime = performance.now() / 1000;
-            _psw.swingEndTime = 0; // prevent trail fade-out during parry hold
-            _psw.parryQ.copy(_psw.swingStartQ); // sword snaps back to pre-swing orientation
-          }
-        }
-        _psw.swingActive = false;
-        _psw.returning = false;
-        _psw.deltaHistory = [];
-        _psw.suppressUntil = 0;
-      }
       const _g = window.phoneSwordGyro;
       const _c = window.phoneSwordCalib;
       const _cfg = window.phoneSwordConfig || { offsetX: 0, offsetY: 0, offsetZ: 0 };
-      const _swCfg = window.phoneSwordSwingCfg;
       const _beta = _g.beta, _gamma = _g.gamma;
       if (Number.isFinite(_beta) && Number.isFinite(_gamma)) {
         const DEG = Math.PI / 180;
@@ -15433,137 +15418,35 @@ async function initCore(runtimeContext) {
         let _dAlpha = (Number.isFinite(_g.alpha) ? _g.alpha : _c.alpha) - _c.alpha;
         if (_dAlpha > 180) _dAlpha -= 360;
         if (_dAlpha < -180) _dAlpha += 360;
-        const _dBeta = _beta - _c.beta;
+        const _dBeta  = _beta  - _c.beta;
         const _dGamma = _gamma - _c.gamma;
 
-        // Compute per-frame angle deltas
-        let frameDeltaB = 0, frameDeltaG = 0, frameDeltaA = 0;
-        if (_psw.prevBeta !== null) {
-          frameDeltaB = _dBeta  - _psw.prevBeta;
-          frameDeltaG = _dGamma - _psw.prevGamma;
-          frameDeltaA = _dAlpha - _psw.prevAlpha;
-          if (frameDeltaA >  180) frameDeltaA -= 360;
-          if (frameDeltaA < -180) frameDeltaA += 360;
-        }
-
-        // Rolling arc-length history (200ms window)
-        _psw.deltaHistory.push({ dB: frameDeltaB, dG: frameDeltaG, dA: frameDeltaA, t: nowSec });
-        const windowCutoff = nowSec - _psw.deltaWindowSec;
-        while (_psw.deltaHistory.length > 0 && _psw.deltaHistory[0].t < windowCutoff) _psw.deltaHistory.shift();
-        let arcBeta = 0, arcGamma = 0, arcAlpha = 0;
-        for (const h of _psw.deltaHistory) { arcBeta += Math.abs(h.dB); arcGamma += Math.abs(h.dG); arcAlpha += Math.abs(h.dA); }
-        const totalArc = Math.sqrt(arcBeta * arcBeta + arcGamma * arcGamma + arcAlpha * arcAlpha);
-
-        // Angular velocity for speed detection
-        let angSpeed = 0;
-        if (_psw.prevBeta !== null && _psw.prevTime !== null) {
-          const dt = Math.max(nowSec - _psw.prevTime, 0.001);
-          let vBeta  = frameDeltaB / dt;
-          let vGamma = frameDeltaG / dt;
-          let vAlpha = frameDeltaA / dt;
-          if (vAlpha >  180) vAlpha -= 360;
-          if (vAlpha < -180) vAlpha += 360;
-          angSpeed = Math.sqrt(vBeta * vBeta + vGamma * vGamma + vAlpha * vAlpha);
-          window._pswDebugSpeed = angSpeed;
-
-          const suppressed = nowSec < _psw.suppressUntil;
-          const blocking = !!window.phoneSwordGyro?.blocking;
-          if (!_psw.swingActive && !_psw.returning && !suppressed && !blocking &&
-              angSpeed > _swCfg.speedThreshold &&
-              totalArc > _swCfg.minSwingDelta) {
-            // Determine swing strength tier based on rotation speed
-            const _MEDIUM_THRESHOLD = (_swCfg.mediumThreshold ?? 7000);
-            const _FAST_THRESHOLD   = (_swCfg.fastThreshold   ?? 11000);
-            const _tier = angSpeed >= _FAST_THRESHOLD ? 3 : angSpeed >= _MEDIUM_THRESHOLD ? 2 : 1;
-            _psw.swingStrength = _tier;
-            _psw.parryActive = false;
-            _psw.swingStartQ.copy(_phoneSwordGyroQ);
-
-            if (_tier === 1) {
-              // Slow swing: no automatic rotation, no trail — just open a brief hit window
-              _psw.slowHitWindow = nowSec + 0.25;
-              _psw.suppressUntil = nowSec + 0.35;
-              _psw.prevBeta = _psw.prevGamma = _psw.prevAlpha = null;
-              _psw.deltaHistory = [];
-            } else {
-              // Medium / fast swing: full rotation + trail
-              const _holdMult = _tier === 3 ? 1.6 : 1.0;
-              _psw.swingActive = true;
-              _psw.returning = false;
-              _psw.swingEndTime = nowSec + _swCfg.holdDuration * _holdMult;
-              // Trail NOT cleared here — pre-swing tip positions already in buffer show the arc
-
-              // Swing direction: opposite of where the sword currently points.
-              const curEX = (_dBeta  + _cfg.offsetX) * DEG;
-              const curEY = (_dAlpha + _cfg.offsetY) * DEG;
-              const curEZ = (_dGamma + _cfg.offsetZ) * DEG;
-              const curGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(curEX, curEY, curEZ, 'YXZ'));
-              const oppGyroQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-curEX, -curEY, -curEZ, 'YXZ'));
-              const _SWING_TARGET_ANGLE = 2.6; // radians ≈ 149°
-              const _rawAngle = curGyroQ.angleTo(oppGyroQ);
-              const _swingT = _rawAngle > 0.01
-                ? (_SWING_TARGET_ANGLE / _rawAngle) * _swCfg.oppositeStrength
-                : _swCfg.oppositeStrength;
-              _psw.swingExaggerQ.slerpQuaternions(curGyroQ, oppGyroQ, _swingT);
-            }
-          }
-        }
-        _psw.prevBeta  = _dBeta;
-        _psw.prevGamma = _dGamma;
-        _psw.prevAlpha = _dAlpha;
-        _psw.prevTime  = nowSec;
-
-        // Expire parry after 1 second hold
-        if (_psw.parryActive) {
-          if (nowSec - _psw.parryStartTime >= 1.0) {
-            _psw.parryActive = false;
-            _psw.suppressUntil = nowSec + 0.15;
-            _psw.prevBeta = _psw.prevGamma = _psw.prevAlpha = null;
-          }
-        }
-
-        // Choose which quaternion drives the sword this frame
-        let activeGyroQ;
-        if (_psw.parryActive) {
-          activeGyroQ = _psw.parryQ;
-        } else if (_psw.swingActive) {
-          if (nowSec >= _psw.swingEndTime) {
-            // Hold ended — begin smooth return to live gyro
-            _psw.swingActive = false;
-            _psw.returning = true;
-            _psw.returnStartTime = nowSec;
-            _psw.returnStartQ.copy(_psw.swingExaggerQ);
-            // Suppress detection for the full return duration + buffer (longer for fast swings)
-            const _retMult = _psw.swingStrength === 3 ? 1.6 : 1.0;
-            _psw.suppressUntil = nowSec + (_swCfg.returnDuration || 0.3) * _retMult + 0.15;
-            _psw.prevBeta = _psw.prevGamma = _psw.prevAlpha = null;
-            _psw.deltaHistory = [];
-            activeGyroQ = _psw.swingExaggerQ;
-          } else {
-            activeGyroQ = _psw.swingExaggerQ;
-          }
-        } else if (_psw.returning) {
-          const elapsed = nowSec - _psw.returnStartTime;
-          const t = Math.min(elapsed / Math.max(_swCfg.returnDuration || 0.3, 0.01), 1);
-          if (t >= 1) {
-            _psw.returning = false;
-            activeGyroQ = _phoneSwordGyroQ;
-          } else {
-            activeGyroQ = new THREE.Quaternion().slerpQuaternions(_psw.returnStartQ, _phoneSwordGyroQ, t);
-          }
-        } else {
-          activeGyroQ = _phoneSwordGyroQ;
-        }
-
         _phoneSwordEuler.set(
-          (_dBeta + _cfg.offsetX) * DEG,
+          (_dBeta  + _cfg.offsetX) * DEG,
           (_dAlpha + _cfg.offsetY) * DEG,
           (_dGamma + _cfg.offsetZ) * DEG,
           'YXZ'
         );
         _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
 
-        // Write to _holdQuaternion so foamSword.update() reads correct blade direction
+        // Bounce: lerp away from live gyro and back over 0.5 s
+        let activeGyroQ;
+        if (_psw.bounceActive) {
+          const elapsed = nowSec - _psw.bounceStartTime;
+          if (elapsed >= 0.5) {
+            _psw.bounceActive = false;
+            activeGyroQ = _phoneSwordGyroQ;
+          } else {
+            const t = elapsed / 0.5;
+            // First half: lerp from pre-bounce Q to bounce target; second half: return to live gyro
+            activeGyroQ = t < 0.5
+              ? new THREE.Quaternion().slerpQuaternions(_psw.bounceFromQ, _psw.bounceTargetQ, t * 2)
+              : new THREE.Quaternion().slerpQuaternions(_psw.bounceTargetQ, _phoneSwordGyroQ, (t - 0.5) * 2);
+          }
+        } else {
+          activeGyroQ = _phoneSwordGyroQ;
+        }
+
         if (foamSword?.holder === playerControls) {
           foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
         }
@@ -15571,109 +15454,102 @@ async function initCore(runtimeContext) {
     }
     autumnSword?.update();
     foamSword?.update();
-    // Phone Sword: after foamSword.update() positions the mesh via hand bone, directly override
-    // the mesh quaternion using player world rotation + active gyro Q (swing-exaggerated or normal).
+    // Phone Sword: override mesh quaternion, then run sword-vs-sword collision + sweep hit detection.
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
-      // activeGyroQ computed above (exaggerated / lerping / live); re-derive here for mesh override
-      const _isSwinging = _psw.swingActive || _psw.returning;
+
+      // Re-derive active Q (bounce or live gyro)
+      const _nowSecPS = performance.now() / 1000;
       let _activeQ;
-      if (_psw.parryActive) {
-        _activeQ = _psw.parryQ;
-      } else if (_psw.swingActive) {
-        _activeQ = _psw.swingExaggerQ;
-      } else if (_psw.returning) {
-        const _elapsed = performance.now() / 1000 - _psw.returnStartTime;
-        const _t = Math.min(_elapsed / Math.max(window.phoneSwordSwingCfg.returnDuration || 0.3, 0.01), 1);
-        _activeQ = new THREE.Quaternion().slerpQuaternions(_psw.returnStartQ, _phoneSwordGyroQ, _t);
+      if (_psw.bounceActive) {
+        const _el = _nowSecPS - _psw.bounceStartTime;
+        const _t  = Math.min(_el / 0.5, 1);
+        _activeQ = _t < 0.5
+          ? new THREE.Quaternion().slerpQuaternions(_psw.bounceFromQ, _psw.bounceTargetQ, _t * 2)
+          : new THREE.Quaternion().slerpQuaternions(_psw.bounceTargetQ, _phoneSwordGyroQ, (_t - 0.5) * 2);
       } else {
         _activeQ = _phoneSwordGyroQ;
       }
       foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
 
-      // ── Sword trail ──────────────────────────────────────────────────────────
-      const _swCfg2 = window.phoneSwordSwingCfg;
-      const nowSec2 = performance.now() / 1000;
+      // ── Hide any leftover trail lines from the old swing system ─────────────
+      for (const l of _psw.trailLines) l.visible = false;
 
-      // Always sample sword tip so pre-swing positions are already in the buffer when a swing fires.
-      // The expiry below keeps only the last trailDuration seconds, so memory stays bounded.
-      {
-        const tipLocal = new THREE.Vector3(0, 0, 0.655);
-        const tipWorld = tipLocal.applyQuaternion(foamSword.mesh.quaternion).add(foamSword.mesh.position);
-        _psw.trail.push({ pos: tipWorld, t: nowSec2 });
-      }
-
-      // Expire old trail points
-      const trailCutoff = nowSec2 - _swCfg2.trailDuration;
-      _psw.trail = _psw.trail.filter(p => p.t >= trailCutoff);
-
-      // Determine whether the trail should be visible this frame.
-      // Parry hold never shows a trail — the sword reverses without visual arc.
-      // Slow swings (tier 1) also suppress the trail.
-      const trailVisible = !_psw.parryActive && _psw.swingStrength >= 2 && (
-        _psw.swingActive || _psw.returning ||
-        (nowSec2 - _psw.swingEndTime) < _swCfg2.trailDuration
+      // ── Compute player sword blade sample points (guard / mid / tip) ────────
+      const _pswSampleOffsets = [
+        new THREE.Vector3(0, 0, -0.1),
+        new THREE.Vector3(0, 0,  0.3),
+        new THREE.Vector3(0, 0,  0.65),
+      ];
+      const _playerBladePoints = _pswSampleOffsets.map(p =>
+        p.clone().applyQuaternion(foamSword.mesh.quaternion).add(foamSword.mesh.position)
       );
+      window.phoneSwordBladePoints = _playerBladePoints;
 
-      // Remove stale trail lines from scene
-      while (_psw.trailLines.length > _swCfg2.trailLineCount) {
-        const old = _psw.trailLines.pop();
-        scene.remove(old);
-        old.geometry.dispose();
-        old.material.dispose();
-      }
+      const _tipWorld = _playerBladePoints[2]; // tip
 
-      if (trailVisible && _psw.trail.length >= 2) {
-        const pts = _psw.trail.map(p => p.pos);
-        // Fade: full during swing hold and return; fade out after return ends
-        let fadeT;
-        if (_psw.swingActive || _psw.returning) {
-          fadeT = 1.0;
-        } else {
-          const age = nowSec2 - _psw.swingEndTime;
-          fadeT = Math.max(0, 1 - age / _swCfg2.trailDuration);
-        }
-        const baseOpacity = _swCfg2.trailOpacity * fadeT;
+      // ── Sword-vs-sword collision + sweep hit detection for horde enemies ─────
+      if (window.gameMode === 'horde') {
+        for (const _he of hordeEnemies) {
+          if (_he.isDead || !_he._swordGroup) continue;
 
-        // Compute camera-right for spreading parallel lines
-        const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+          // Sample enemy blade points
+          const _enemyBladePoints = _pswSampleOffsets.map(p =>
+            p.clone().applyQuaternion(_he._swordGroup.quaternion).add(_he._swordGroup.position)
+          );
 
-        // Rebuild one Line per trail layer
-        for (let li = 0; li < _swCfg2.trailLineCount; li++) {
-          const spread = (li - (_swCfg2.trailLineCount - 1) / 2) * _swCfg2.trailLineSpread;
-          const offset = camRight.clone().multiplyScalar(spread);
-          const positions = new Float32Array(pts.length * 3);
-          for (let pi = 0; pi < pts.length; pi++) {
-            positions[pi * 3]     = pts[pi].x + offset.x;
-            positions[pi * 3 + 1] = pts[pi].y + offset.y;
-            positions[pi * 3 + 2] = pts[pi].z + offset.z;
+          // Sword-sword collision: any player blade point within 0.15 m of any enemy blade point
+          let _swordCollision = false;
+          outer: for (const pp of _playerBladePoints) {
+            for (const ep of _enemyBladePoints) {
+              if (pp.distanceTo(ep) < 0.15) { _swordCollision = true; break outer; }
+            }
           }
 
-          let line = _psw.trailLines[li];
-          if (!line) {
-            const geom = new THREE.BufferGeometry();
-            const mat = new THREE.LineBasicMaterial({
-              color: _swCfg2.trailColor,
-              transparent: true,
-              depthWrite: false,
-              blending: THREE.AdditiveBlending,
-            });
-            line = new THREE.Line(geom, mat);
-            scene.add(line);
-            _psw.trailLines[li] = line;
+          if (_swordCollision && !_psw.bounceActive) {
+            // Player sword bounces back — target Q is the previous-frame sword Q pushed further back
+            _psw.bounceActive    = true;
+            _psw.bounceStartTime = _nowSecPS;
+            _psw.bounceFromQ.copy(_activeQ);
+            _psw.bounceTargetQ.slerpQuaternions(_activeQ, _psw.prevSwordQ, 1.8);
+            // Enemy sword also bounces
+            _he.applySwordBounce?.();
           }
-          line.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-          line.geometry.setDrawRange(0, pts.length);
-          line.geometry.attributes.position.needsUpdate = true;
-          // Outer lines are slightly more transparent
-          const layerFade = 1 - Math.abs(li - (_swCfg2.trailLineCount - 1) / 2) / _swCfg2.trailLineCount * 0.5;
-          line.material.opacity = baseOpacity * layerFade;
-          line.material.color.setHex(_swCfg2.trailColor);
-          line.visible = pts.length >= 2;
+
+          // Sweep hit: sword tip enters enemy body radius without sword collision
+          if (!_swordCollision) {
+            const _enemyCenter = _he.group.position.clone();
+            _enemyCenter.y += 0.8;
+            if (_tipWorld.distanceTo(_enemyCenter) < 0.65) {
+              const _nowMsPS = Date.now();
+              if (!_he._playerSwordLastHit) _he._playerSwordLastHit = 0;
+              if (_nowMsPS - _he._playerSwordLastHit > 1000 && _psw.prevTipWorld) {
+                const _sweepVec = new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
+                const _sweepDist = _sweepVec.length();
+                if (_sweepDist > 0.003) { // must actually be moving
+                  const _sweepDir = _sweepVec.clone().normalize();
+                  _sweepDir.y = 0;
+                  if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
+                  _sweepDir.normalize();
+                  _he.applyDamage(2);
+                  _he.applyDirectKnockback({
+                    direction: _sweepDir,
+                    horizSpeed: 10,
+                    upVelocity: 1,
+                    torqueMag: 60,
+                    ragdoll: true,
+                  });
+                  _he._playerSwordLastHit = _nowMsPS;
+                }
+              }
+            }
+          }
         }
-      } else {
-        for (const l of _psw.trailLines) l.visible = false;
       }
+
+      // Store previous-frame state for next frame
+      _psw.prevTipWorld = _tipWorld.clone();
+      _psw.prevSwordQ.copy(_activeQ);
     }
     hammer?.update();
     pistol?.update();
