@@ -1017,6 +1017,7 @@ async function initCore(runtimeContext) {
     trailColor: 0xff4986,
     trailLineCount: 3,
     trailLineSpread: 0.005,
+    minSweepDist: 0.015,   // meters — minimum tip movement per frame to register a sweep hit
   };
 
   const tempVector3A = new THREE.Vector3();
@@ -15514,10 +15515,22 @@ async function initCore(runtimeContext) {
             _psw.bounceTargetQ.slerpQuaternions(_activeQ, _psw.prevSwordQ, 1.8);
             // Enemy sword also bounces
             _he.applySwordBounce?.();
+            // Show block flash
+            const _blockFlash = document.getElementById('sword-block-flash');
+            if (_blockFlash) {
+              _blockFlash.style.display = 'flex';
+              // Re-trigger animation by replacing the inner element
+              const _inner = _blockFlash.firstElementChild;
+              if (_inner) { _inner.style.animation = 'none'; void _inner.offsetWidth; _inner.style.animation = ''; }
+              clearTimeout(_blockFlash._hideTimer);
+              _blockFlash._hideTimer = setTimeout(() => { _blockFlash.style.display = 'none'; }, 480);
+            }
           }
 
           // Sweep hit: sword tip enters enemy body radius without sword collision
-          if (!_swordCollision) {
+          // Skip entirely if player is blocking
+          const _playerBlocking = !!window.phoneSwordGyro?.blocking;
+          if (!_swordCollision && !_playerBlocking) {
             const _enemyCenter = _he.group.position.clone();
             _enemyCenter.y += 0.8;
             if (_tipWorld.distanceTo(_enemyCenter) < 0.65) {
@@ -15526,7 +15539,8 @@ async function initCore(runtimeContext) {
               if (_nowMsPS - _he._playerSwordLastHit > 1000 && _psw.prevTipWorld) {
                 const _sweepVec = new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
                 const _sweepDist = _sweepVec.length();
-                if (_sweepDist > 0.003) { // must actually be moving
+                const _minSweep = window.phoneSwordSwingCfg?.minSweepDist ?? 0.015;
+                if (_sweepDist > _minSweep) {
                   const _sweepDir = _sweepVec.clone().normalize();
                   _sweepDir.y = 0;
                   if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
