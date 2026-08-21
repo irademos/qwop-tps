@@ -15547,22 +15547,31 @@ async function initCore(runtimeContext) {
             }
           }
 
-          if (_swordCollision && !_psw.bounceActive) {
-            const _bounceCfg = window.phoneSwordSwingCfg;
-            const _bounceAngle = (_bounceCfg?.bounceAngle ?? 90) * (Math.PI / 180);
-            const _bounceDur   = _bounceCfg?.bounceHoldDur ?? 0.35;
-            // Build recoil target: rotate current sword Q by bounceAngle around world Y
-            const _yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), _bounceAngle);
-            _psw.bounceActive    = true;
-            _psw.bounceStartTime = _nowSecPS;
-            _psw.bounceDur       = _bounceDur;
-            _psw.bounceFromQ.copy(_activeQ);
-            _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
-            _psw.bounceCurrentQ.copy(_activeQ);
-            // Enemy sword also bounces
+          const _isBlocking = !!window.phoneSwordGyro?.blocking;
+          // Only bounce the player's sword when not blocking AND the sword is moving fast enough
+          const _colAngSpd  = window._pswDebugSpeed ?? 0;
+          const _colMinSpd  = window.phoneSwordSwingCfg?.minSweepSpeed ?? 100;
+          const _colSweepDist = _psw.prevTipWorld ? _tipWorld.distanceTo(_psw.prevTipWorld) : 0;
+          const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
+          const _playerMovingFast = _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
+
+          if (_swordCollision) {
+            // Enemy sword always bounces on collision
             _he.applySwordBounce?.();
-            // Player block flash (green spiky)
-            window._pswShowBlockFlash?.('player');
+            // Player sword only bounces if NOT blocking AND sword is swinging fast enough
+            if (!_isBlocking && _playerMovingFast && !_psw.bounceActive) {
+              const _bounceCfg = window.phoneSwordSwingCfg;
+              const _bounceAngle = (_bounceCfg?.bounceAngle ?? 90) * (Math.PI / 180);
+              const _bounceDur   = _bounceCfg?.bounceHoldDur ?? 0.35;
+              const _yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), _bounceAngle);
+              _psw.bounceActive    = true;
+              _psw.bounceStartTime = _nowSecPS;
+              _psw.bounceDur       = _bounceDur;
+              _psw.bounceFromQ.copy(_activeQ);
+              _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
+              _psw.bounceCurrentQ.copy(_activeQ);
+              window._pswShowBlockFlash?.('player');
+            }
           }
 
           // Sweep hit: sword tip enters enemy body radius without sword collision

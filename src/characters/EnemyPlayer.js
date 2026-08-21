@@ -771,9 +771,10 @@ export class EnemyPlayer {
 
   /** Called externally when the player's sword hits this sword. */
   applySwordBounce() {
-    const dur = (window.phoneSwordSwingCfg?.bounceHoldDur ?? 0.5) * 1000;
-    this._bounceActive  = true;
-    this._bounceEndTime = Date.now() + dur;
+    const dur = (window.phoneSwordSwingCfg?.bounceHoldDur ?? 0.35) * 1000;
+    this._bounceActive    = true;
+    this._bounceEndTime   = Date.now() + dur;
+    this._bounceInitDone  = false; // force recoil target rebuild on next _updateSword
     // Cancel any in-flight swing so the bounce doesn't immediately re-hit
     if (this._attackPhase === 'swing_execute') {
       this._attackPhase    = 'swing_hold';
@@ -793,10 +794,17 @@ export class EnemyPlayer {
       if (Date.now() > this._bounceEndTime) {
         this._bounceActive = false;
       } else {
-        this.group.getWorldQuaternion(_rootQ);
-        // Recoil: blade pulled back and slightly upward
-        _tmpQ.setFromEuler(new THREE.Euler(-Math.PI * 0.25, 0, Math.PI * 0.18, 'YXZ')).premultiply(_rootQ);
-        this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-18 * dt));
+        const cfg = window.phoneSwordSwingCfg;
+        const snapSpeed  = cfg?.bounceSnapSpeed ?? 18;
+        const bounceAngle = ((cfg?.bounceAngle ?? 90) * Math.PI) / 180;
+        // Build recoil target: rotate current sword Q by bounceAngle around world Y
+        if (!this._bounceTargetQ) this._bounceTargetQ = new THREE.Quaternion();
+        if (!this._bounceInitDone) {
+          const yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), bounceAngle);
+          this._bounceTargetQ.copy(yRot).multiply(this._swordQuaternion);
+          this._bounceInitDone = true;
+        }
+        this._swordQuaternion.slerp(this._bounceTargetQ, 1 - Math.exp(-snapSpeed * dt));
         this._swordGroup.position.copy(_tmpV);
         this._swordGroup.quaternion.copy(this._swordQuaternion);
         return;
