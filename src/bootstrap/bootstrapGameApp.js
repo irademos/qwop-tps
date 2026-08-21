@@ -15454,6 +15454,17 @@ async function initCore(runtimeContext) {
         );
         _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
 
+        // Compute angular speed (deg/s) from quaternion delta vs previous frame
+        if (_psw.prevGyroQ && _psw.prevGyroTime && nowSec > _psw.prevGyroTime) {
+          const _dt = nowSec - _psw.prevGyroTime;
+          const _dot = Math.abs(_phoneSwordGyroQ.dot(_psw.prevGyroQ));
+          const _angleDeg = 2 * Math.acos(Math.min(1, _dot)) * (180 / Math.PI);
+          window._pswDebugSpeed = _angleDeg / _dt;
+        }
+        if (!_psw.prevGyroQ) _psw.prevGyroQ = new THREE.Quaternion();
+        _psw.prevGyroQ.copy(_phoneSwordGyroQ);
+        _psw.prevGyroTime = nowSec;
+
         // Bounce: lerp away from live gyro and back over bounceHoldDur s
         let activeGyroQ;
         if (_psw.bounceActive) {
