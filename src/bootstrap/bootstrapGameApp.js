@@ -15682,6 +15682,9 @@ async function initCore(runtimeContext) {
           if (!_he.group.parent) {
             hordeEnemies.splice(_hi, 1);
             _justDied++;
+          } else {
+            // Still call update so physics ragdoll position/rotation syncs to visual
+            _he.update(frameDelta, null, null, false, false);
           }
           continue;
         }

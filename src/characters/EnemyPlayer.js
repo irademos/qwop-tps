@@ -451,12 +451,14 @@ export class EnemyPlayer {
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.24), mat);
     plane.name = 'enemyHealthBar';
     plane.position.y = CAPSULE_HEIGHT + 0.3;
+    plane.visible = false;
     this.group.add(plane);
     this._hpPlane = plane;
-    this._updateHealthBarCanvas();
+    this._hpShowUntil = 0;
+    this._updateHealthBarCanvas(true);
   }
 
-  _updateHealthBarCanvas() {
+  _updateHealthBarCanvas(silent = false) {
     const ctx = this._hpCtx;
     const W = 96, H = 32;
     ctx.clearRect(0, 0, W, H);
@@ -464,15 +466,21 @@ export class EnemyPlayer {
     const gap = 4;
     const totalW = this.maxHearts * heartSize + (this.maxHearts - 1) * gap;
     const startX = (W - totalW) / 2;
+    ctx.font = `${heartSize}px serif`;
     for (let i = 0; i < this.maxHearts; i++) {
       const x = startX + i * (heartSize + gap);
       const filled = i < this.hearts;
-      ctx.font = `${heartSize}px serif`;
       ctx.globalAlpha = filled ? 1 : 0.25;
+      ctx.fillStyle = filled ? '#ff2244' : '#000000';
       ctx.fillText('❤', x, H - 4);
     }
     ctx.globalAlpha = 1;
     this._hpTexture.needsUpdate = true;
+    if (!silent) {
+      // Show hearts for 3 seconds after a hit
+      this._hpShowUntil = Date.now() + 3000;
+      if (this._hpPlane) this._hpPlane.visible = true;
+    }
   }
 
   // ─── Rapier physics ────────────────────────────────────────────────────────
@@ -619,6 +627,9 @@ export class EnemyPlayer {
     // ── Billboard health bar toward camera ─────────────────────────────────
     if (this._camera) {
       this._hpPlane.lookAt(this._camera.position);
+    }
+    if (this._hpPlane.visible && Date.now() > this._hpShowUntil) {
+      this._hpPlane.visible = false;
     }
 
     // ── Update sword swing trail ───────────────────────────────────────────
