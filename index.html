@@ -213,26 +213,43 @@
     </div>
   </div>
 
-  <!-- Phone Sword: block flash overlay -->
-  <div id="sword-block-flash" style="
-    display:none;
-    position:fixed;inset:0;z-index:9999;
-    pointer-events:none;
-    background:rgba(80,160,255,0.22);
-    justify-content:center;align-items:center;
+  <!-- Phone Sword: block flash overlays -->
+  <!-- Player blocks (green) — bottom-left -->
+  <div id="sword-block-flash-player" style="
+    display:none;position:fixed;left:16px;bottom:80px;z-index:9999;pointer-events:none;
   ">
-    <div style="
-      font-size:clamp(2rem,8vw,5rem);font-weight:900;letter-spacing:0.08em;
-      color:#fff;text-shadow:0 0 24px #4af,0 0 60px #08f,0 2px 4px #000a;
-      animation:psw-block-pop 0.45s ease-out forwards;
-    ">⚔️ BLOCK!</div>
+    <svg id="sword-block-svg-player" width="110" height="110" viewBox="-55 -55 110 110" style="overflow:visible">
+      <polygon points="0,-48 6,-12 30,-30 12,-6 48,0 12,6 30,30 6,12 0,48 -6,12 -30,30 -12,6 -48,0 -12,-6 -30,-30 -6,-12"
+        fill="rgba(60,200,80,0.22)" stroke="#4e4" stroke-width="1.5" opacity="0"/>
+      <text x="0" y="6" text-anchor="middle" dominant-baseline="middle"
+        font-family="monospace" font-weight="900" font-size="13" fill="#6f6" opacity="0"
+        style="letter-spacing:0.05em">BLOCK</text>
+    </svg>
+  </div>
+  <!-- Enemy blocks (gray) — near enemy, triggered at fixed position for simplicity -->
+  <div id="sword-block-flash-enemy" style="
+    display:none;position:fixed;right:16px;bottom:80px;z-index:9999;pointer-events:none;
+  ">
+    <svg id="sword-block-svg-enemy" width="90" height="90" viewBox="-45 -45 90 90" style="overflow:visible">
+      <polygon points="0,-40 5,-10 25,-25 10,-5 40,0 10,5 25,25 5,10 0,40 -5,10 -25,25 -10,5 -40,0 -10,-5 -25,-25 -5,-10"
+        fill="rgba(160,160,160,0.18)" stroke="#999" stroke-width="1.2" opacity="0"/>
+      <text x="0" y="5" text-anchor="middle" dominant-baseline="middle"
+        font-family="monospace" font-weight="900" font-size="11" fill="#bbb" opacity="0"
+        style="letter-spacing:0.05em">BLOCKED</text>
+    </svg>
   </div>
   <style>
-    @keyframes psw-block-pop {
-      0%   { transform:scale(0.5);opacity:0; }
-      30%  { transform:scale(1.15);opacity:1; }
-      70%  { transform:scale(1);opacity:1; }
-      100% { transform:scale(1.05);opacity:0; }
+    @keyframes psw-block-player {
+      0%   { opacity:0; transform:scale(0.6); }
+      20%  { opacity:1; transform:scale(1.1); }
+      60%  { opacity:0.9; transform:scale(1); }
+      100% { opacity:0; transform:scale(1.05); }
+    }
+    @keyframes psw-block-enemy {
+      0%   { opacity:0; transform:scale(0.6); }
+      20%  { opacity:0.85; transform:scale(1.08); }
+      60%  { opacity:0.7; transform:scale(1); }
+      100% { opacity:0; transform:scale(1.03); }
     }
   </style>
 
@@ -268,99 +285,40 @@
       padding:10px;
       width:270px;
     ">
-      <div id="psw-debug-speed" style="margin-bottom:4px;color:#aef;font-size:11px">Angular speed: —</div>
-      <div id="psw-debug-tier" style="margin-bottom:10px;font-size:11px;color:#fa0">Tier: —</div>
+      <div id="psw-debug-speed" style="margin-bottom:10px;color:#aef;font-size:11px">Angular speed: —</div>
 
-      <!-- Detection -->
-      <div style="color:#88aaff;font-weight:bold;margin-bottom:4px;border-bottom:1px solid #333;padding-bottom:2px">Detection</div>
+      <!-- Hit detection -->
+      <div style="color:#88aaff;font-weight:bold;margin-bottom:4px;border-bottom:1px solid #333;padding-bottom:2px">Hit Detection</div>
 
       <label style="display:block;margin-bottom:6px">
-        Slow threshold (deg/s): <span id="psw-lbl-threshold">4370</span>
-        <br><small style="color:#aaa">minimum speed to count as any swing</small>
-        <input type="range" min="100" max="10000" step="50" value="4370" id="psw-threshold"
+        Min sweep speed (deg/s): <span id="psw-lbl-sweepspeed">2000</span>
+        <br><small style="color:#aaa">gyro rotation speed required for a hit</small>
+        <input type="range" min="0" max="15000" step="100" value="2000" id="psw-sweepspeed"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
-      <label style="display:block;margin-bottom:6px">
-        Medium threshold (deg/s): <span id="psw-lbl-medium">7000</span>
-        <br><small style="color:#aaa">above this → medium tier (trail + rotation)</small>
-        <input type="range" min="100" max="15000" step="100" value="7000" id="psw-medium"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Fast threshold (deg/s): <span id="psw-lbl-fast">11000</span>
-        <br><small style="color:#aaa">above this → fast tier (more damage, longer hold)</small>
-        <input type="range" min="100" max="20000" step="100" value="11000" id="psw-fast"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Min arc swept (deg): <span id="psw-lbl-mindelta">25</span>
-        <input type="range" min="0" max="180" step="5" value="25" id="psw-mindelta"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
       <label style="display:block;margin-bottom:6px">
         Min sweep dist (m): <span id="psw-lbl-minsweep">0.015</span>
+        <br><small style="color:#aaa">tip movement per frame required for a hit</small>
         <input type="range" min="0.001" max="0.15" step="0.001" value="0.015" id="psw-minsweep"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
-      <!-- Medium / Fast swing motion -->
-      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">Medium/Fast Swing Motion</div>
+      <!-- Block / bounce -->
+      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">Block / Bounce</div>
 
       <label style="display:block;margin-bottom:6px">
-        Opposite strength: <span id="psw-lbl-oppstr">1</span>
-        <br><small style="color:#aaa">0=no swing, 1=full opposite, 2=overshoot</small>
-        <input type="range" min="0" max="2" step="0.05" value="1" id="psw-oppstr"
+        Bounce-back strength: <span id="psw-lbl-bouncestr">1.8</span>
+        <br><small style="color:#aaa">slerp overshoot — higher = further recoil</small>
+        <input type="range" min="0.1" max="4" step="0.05" value="1.8" id="psw-bouncestr"
           style="width:100%;display:block;margin-top:2px">
       </label>
 
       <label style="display:block;margin-bottom:6px">
-        Hold duration (s): <span id="psw-lbl-hold">0.5</span>
-        <br><small style="color:#aaa">medium hold; fast gets 1.6× automatically</small>
-        <input type="range" min="0.05" max="2" step="0.05" value="0.5" id="psw-hold"
+        Bounce hold (s): <span id="psw-lbl-bouncedur">0.5</span>
+        <br><small style="color:#aaa">how long sword is stuck in recoil</small>
+        <input type="range" min="0.05" max="2" step="0.05" value="0.5" id="psw-bouncedur"
           style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Return duration (s): <span id="psw-lbl-return">0.3</span>
-        <br><small style="color:#aaa">medium return; fast gets 1.6× automatically</small>
-        <input type="range" min="0.05" max="2" step="0.05" value="0.3" id="psw-return"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <!-- Trail -->
-      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">Trail (medium/fast only)</div>
-
-      <label style="display:block;margin-bottom:6px">
-        Trail duration (s): <span id="psw-lbl-trail">0.4</span>
-        <input type="range" min="0.05" max="2" step="0.05" value="0.4" id="psw-trail"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Trail opacity: <span id="psw-lbl-opacity">0.75</span>
-        <input type="range" min="0" max="1" step="0.05" value="0.75" id="psw-opacity"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Trail line count: <span id="psw-lbl-linecount">3</span>
-        <input type="range" min="1" max="7" step="1" value="3" id="psw-linecount"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Trail line spread: <span id="psw-lbl-spread">0.005</span>
-        <input type="range" min="0" max="0.2" step="0.005" value="0.005" id="psw-spread"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Trail color (hex): <span id="psw-lbl-color">#ff4986</span>
-        <input type="color" value="#ff4986" id="psw-color"
-          style="width:100%;display:block;margin-top:2px;height:28px">
       </label>
 
       <button id="psw-copy-btn" style="
@@ -384,27 +342,10 @@
           if (window.phoneSwordSwingCfg) window.phoneSwordSwingCfg[key] = v;
         });
       }
-      bind('psw-threshold', 'psw-lbl-threshold', 'speedThreshold',   Number);
-      bind('psw-medium',    'psw-lbl-medium',    'mediumThreshold',  Number);
-      bind('psw-fast',      'psw-lbl-fast',      'fastThreshold',    Number);
-      bind('psw-mindelta',  'psw-lbl-mindelta',  'minSwingDelta',    Number);
-      bind('psw-minsweep', 'psw-lbl-minsweep', 'minSweepDist',     Number);
-      bind('psw-oppstr',    'psw-lbl-oppstr',    'oppositeStrength', Number);
-      bind('psw-hold',      'psw-lbl-hold',      'holdDuration',     Number);
-      bind('psw-return',    'psw-lbl-return',    'returnDuration',   Number);
-      bind('psw-trail',     'psw-lbl-trail',     'trailDuration',    Number);
-      bind('psw-opacity',   'psw-lbl-opacity',   'trailOpacity',     Number);
-      bind('psw-linecount', 'psw-lbl-linecount', 'trailLineCount',   Number);
-      bind('psw-spread',    'psw-lbl-spread',    'trailLineSpread',  Number);
-
-      const colorEl = document.getElementById('psw-color');
-      if (colorEl) {
-        colorEl.addEventListener('input', function () {
-          document.getElementById('psw-lbl-color').textContent = this.value;
-          if (window.phoneSwordSwingCfg)
-            window.phoneSwordSwingCfg.trailColor = parseInt(this.value.replace('#',''), 16);
-        });
-      }
+      bind('psw-sweepspeed', 'psw-lbl-sweepspeed', 'minSweepSpeed', Number);
+      bind('psw-minsweep',   'psw-lbl-minsweep',   'minSweepDist',  Number);
+      bind('psw-bouncestr',  'psw-lbl-bouncestr',  'bounceStrength', Number);
+      bind('psw-bouncedur',  'psw-lbl-bouncedur',  'bounceHoldDur',  Number);
 
       // Copy to clipboard
       const copyBtn = document.getElementById('psw-copy-btn');
@@ -442,17 +383,10 @@
         if (window.phoneSwordMode) {
           document.getElementById('psw-debug-panel').style.display = 'block';
           (function tick() {
-            const cfg = window.phoneSwordSwingCfg;
             const psw = window._pswDebugSpeed;
-            if (cfg && psw !== undefined) {
-              const tier = psw >= (cfg.fastThreshold ?? 11000) ? 3
-                         : psw >= (cfg.mediumThreshold ?? 7000) ? 2
-                         : psw >= cfg.speedThreshold ? 1 : 0;
-              const tierLabel = ['idle 💤', 'slow 🗡', 'medium ⚔️', 'FAST ⚡'][tier];
+            if (psw !== undefined) {
               document.getElementById('psw-debug-speed').textContent =
                 'Angular speed: ' + (psw | 0) + ' deg/s';
-              document.getElementById('psw-debug-tier').textContent =
-                'Tier: ' + tierLabel;
             }
             requestAnimationFrame(tick);
           })();

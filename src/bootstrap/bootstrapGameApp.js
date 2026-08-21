@@ -1000,9 +1000,30 @@ async function initCore(runtimeContext) {
     prevSwordQ: new THREE.Quaternion(), // sword Q last frame
     bounceActive: false,
     bounceStartTime: 0,
+    bounceDur: 0.5,
     bounceFromQ: new THREE.Quaternion(),
     bounceTargetQ: new THREE.Quaternion(),
   };
+  // Block flash helper — called with 'player' (green) or 'enemy' (gray)
+  window._pswShowBlockFlash = function(who) {
+    const id = who === 'player' ? 'sword-block-flash-player' : 'sword-block-flash-enemy';
+    const svgId = who === 'player' ? 'sword-block-svg-player' : 'sword-block-svg-enemy';
+    const el = document.getElementById(id);
+    const svg = document.getElementById(svgId);
+    if (!el || !svg) return;
+    el.style.display = 'block';
+    const dur = who === 'player' ? 420 : 360;
+    const animName = who === 'player' ? 'psw-block-player' : 'psw-block-enemy';
+    // Re-trigger SVG animation on all children
+    for (const child of svg.children) {
+      child.style.animation = 'none';
+      void child.offsetWidth;
+      child.style.animation = animName + ' ' + (dur / 1000).toFixed(2) + 's ease-out forwards';
+    }
+    clearTimeout(el._bfTimer);
+    el._bfTimer = setTimeout(() => { el.style.display = 'none'; }, dur + 40);
+  };
+
   // Default swing config — overridden live by the debug panel
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
     speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
@@ -1018,6 +1039,9 @@ async function initCore(runtimeContext) {
     trailLineCount: 3,
     trailLineSpread: 0.005,
     minSweepDist: 0.015,   // meters — minimum tip movement per frame to register a sweep hit
+    minSweepSpeed: 2000,   // deg/s — gyro rotation speed required for a sweep hit to register
+    bounceStrength: 1.8,   // slerp overshoot factor for player sword bounce-back
+    bounceHoldDur: 0.5,    // seconds sword stays in bounce recoil before returning to gyro
   };
 
   const tempVector3A = new THREE.Vector3();
@@ -15430,16 +15454,16 @@ async function initCore(runtimeContext) {
         );
         _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
 
-        // Bounce: lerp away from live gyro and back over 0.5 s
+        // Bounce: lerp away from live gyro and back over bounceHoldDur s
         let activeGyroQ;
         if (_psw.bounceActive) {
+          const _bDur = _psw.bounceDur ?? 0.5;
           const elapsed = nowSec - _psw.bounceStartTime;
-          if (elapsed >= 0.5) {
+          if (elapsed >= _bDur) {
             _psw.bounceActive = false;
             activeGyroQ = _phoneSwordGyroQ;
           } else {
-            const t = elapsed / 0.5;
-            // First half: lerp from pre-bounce Q to bounce target; second half: return to live gyro
+            const t = elapsed / _bDur;
             activeGyroQ = t < 0.5
               ? new THREE.Quaternion().slerpQuaternions(_psw.bounceFromQ, _psw.bounceTargetQ, t * 2)
               : new THREE.Quaternion().slerpQuaternions(_psw.bounceTargetQ, _phoneSwordGyroQ, (t - 0.5) * 2);
@@ -15463,8 +15487,9 @@ async function initCore(runtimeContext) {
       const _nowSecPS = performance.now() / 1000;
       let _activeQ;
       if (_psw.bounceActive) {
-        const _el = _nowSecPS - _psw.bounceStartTime;
-        const _t  = Math.min(_el / 0.5, 1);
+        const _el  = _nowSecPS - _psw.bounceStartTime;
+        const _bD  = _psw.bounceDur ?? 0.5;
+        const _t   = Math.min(_el / _bD, 1);
         _activeQ = _t < 0.5
           ? new THREE.Quaternion().slerpQuaternions(_psw.bounceFromQ, _psw.bounceTargetQ, _t * 2)
           : new THREE.Quaternion().slerpQuaternions(_psw.bounceTargetQ, _phoneSwordGyroQ, (_t - 0.5) * 2);
@@ -15508,23 +15533,19 @@ async function initCore(runtimeContext) {
           }
 
           if (_swordCollision && !_psw.bounceActive) {
-            // Player sword bounces back — target Q is the previous-frame sword Q pushed further back
+            const _bounceCfg = window.phoneSwordSwingCfg;
+            const _bounceStr = _bounceCfg?.bounceStrength ?? 1.8;
+            const _bounceDur = _bounceCfg?.bounceHoldDur ?? 0.5;
+            // Player sword bounces back
             _psw.bounceActive    = true;
             _psw.bounceStartTime = _nowSecPS;
+            _psw.bounceDur       = _bounceDur;
             _psw.bounceFromQ.copy(_activeQ);
-            _psw.bounceTargetQ.slerpQuaternions(_activeQ, _psw.prevSwordQ, 1.8);
+            _psw.bounceTargetQ.slerpQuaternions(_activeQ, _psw.prevSwordQ, _bounceStr);
             // Enemy sword also bounces
             _he.applySwordBounce?.();
-            // Show block flash
-            const _blockFlash = document.getElementById('sword-block-flash');
-            if (_blockFlash) {
-              _blockFlash.style.display = 'flex';
-              // Re-trigger animation by replacing the inner element
-              const _inner = _blockFlash.firstElementChild;
-              if (_inner) { _inner.style.animation = 'none'; void _inner.offsetWidth; _inner.style.animation = ''; }
-              clearTimeout(_blockFlash._hideTimer);
-              _blockFlash._hideTimer = setTimeout(() => { _blockFlash.style.display = 'none'; }, 480);
-            }
+            // Player block flash (green spiky)
+            window._pswShowBlockFlash?.('player');
           }
 
           // Sweep hit: sword tip enters enemy body radius without sword collision
@@ -15540,7 +15561,9 @@ async function initCore(runtimeContext) {
                 const _sweepVec = new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
                 const _sweepDist = _sweepVec.length();
                 const _minSweep = window.phoneSwordSwingCfg?.minSweepDist ?? 0.015;
-                if (_sweepDist > _minSweep) {
+                const _minSweepSpd = window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000;
+                const _curAngSpd = window._pswDebugSpeed ?? 0;
+                if (_sweepDist > _minSweep && _curAngSpd >= _minSweepSpd) {
                   const _sweepDir = _sweepVec.clone().normalize();
                   _sweepDir.y = 0;
                   if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);

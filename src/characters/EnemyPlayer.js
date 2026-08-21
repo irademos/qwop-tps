@@ -771,14 +771,17 @@ export class EnemyPlayer {
 
   /** Called externally when the player's sword hits this sword. */
   applySwordBounce() {
+    const dur = (window.phoneSwordSwingCfg?.bounceHoldDur ?? 0.5) * 1000;
     this._bounceActive  = true;
-    this._bounceEndTime = Date.now() + 500;
+    this._bounceEndTime = Date.now() + dur;
     // Cancel any in-flight swing so the bounce doesn't immediately re-hit
     if (this._attackPhase === 'swing_execute') {
       this._attackPhase    = 'swing_hold';
       this._attackPhaseT   = 0;
       this._attackPhaseDur = 0.6;
     }
+    // Show enemy block flash (gray spiky) if a callback is registered
+    window._pswShowBlockFlash?.('enemy');
   }
 
   _updateSword(dt) {
