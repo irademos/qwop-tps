@@ -975,8 +975,6 @@ export function createPlayerModel(
   const capsuleMesh = bodyRoot.getObjectByName('bodyCapsulemesh');
   if (capsuleMesh) capsuleMesh.visible = false;
 
-  initFbxAnimDebugPanel();
-
   createGLBCharacterInstance({
     targetHeight: 1.0,
     onRebuild: (newWalkAction) => {

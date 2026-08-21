@@ -126,8 +126,9 @@ export class FoamSword extends Weapon {
         const tgt = pm.userData.foamSwordHandTarget;
         const blocking = !!window.phoneSwordGyro?.blocking;
         const blockSign = blocking ? -1 : 1;
-        // Lateral: sword right → hands right (inverted in blocking mode)
-        tgt.x = THREE.MathUtils.clamp(_fsSwordDir.x * FS_HAND_SPREAD * blockSign, -1.2, 1.2);
+        // Lateral: sword right → hands right (inverted + compressed toward center in blocking mode)
+        const _blockLatScale = blocking ? (window.phoneSwordSwingCfg?.blockLateralScale ?? 0.3) : 1;
+        tgt.x = THREE.MathUtils.clamp(_fsSwordDir.x * FS_HAND_SPREAD * blockSign * _blockLatScale, -1.2, 1.2);
         // Vertical: sword up → hands up (inverted in blocking mode)
         tgt.y = THREE.MathUtils.clamp(FS_HAND_CENTER_Y + _fsSwordDir.y * FS_HAND_HEIGHT_GAIN * blockSign, 0.2, 1.6);
         // Depth: mirrored in blocking mode

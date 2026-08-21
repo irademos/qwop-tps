@@ -116,8 +116,8 @@ export class EnemyPlayer {
     this.rapier      = rapier;
     this.rapierWorld = rapierWorld;
 
-    this.health    = 10;
-    this.maxHealth = 10;
+    this.hearts    = 3;
+    this.maxHearts = 3;
     this.isDead    = false;
 
     this._swingT       = 0;
@@ -147,6 +147,10 @@ export class EnemyPlayer {
 
     this._isRagdoll    = false;
     this._ragdollTimeout = null;
+
+    // Sword bounce state (triggered when player sword collides with this sword)
+    this._bounceActive  = false;
+    this._bounceEndTime = 0;
 
     // Sword quaternion (updated each frame)
     this._swordQuaternion = new THREE.Quaternion().setFromEuler(REST_SWORD_EULER);
@@ -433,35 +437,50 @@ export class EnemyPlayer {
     this.scene.add(swordGroup); // added directly to scene so world transforms are straightforward
   }
 
-  // ─── health bar ────────────────────────────────────────────────────────────
+  // ─── heart display ─────────────────────────────────────────────────────────
 
   _buildHealthBar() {
     const canvas = document.createElement('canvas');
-    canvas.width  = 128;
-    canvas.height = 16;
+    canvas.width  = 96;
+    canvas.height = 32;
     this._hpCanvas  = canvas;
     this._hpCtx     = canvas.getContext('2d');
     this._hpTexture = new THREE.CanvasTexture(canvas);
 
     const mat = new THREE.MeshBasicMaterial({ map: this._hpTexture, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-    const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.11), mat);
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.24), mat);
     plane.name = 'enemyHealthBar';
-    plane.position.y = CAPSULE_HEIGHT + 0.22;
+    plane.position.y = CAPSULE_HEIGHT + 0.3;
+    plane.visible = false;
     this.group.add(plane);
     this._hpPlane = plane;
-    this._updateHealthBarCanvas();
+    this._hpShowUntil = 0;
+    this._updateHealthBarCanvas(true);
   }
 
-  _updateHealthBarCanvas() {
+  _updateHealthBarCanvas(silent = false) {
     const ctx = this._hpCtx;
-    const W = 128, H = 16;
+    const W = 96, H = 32;
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#333';
-    ctx.fillRect(0, 0, W, H);
-    const pct = Math.max(0, this.health / this.maxHealth);
-    ctx.fillStyle = pct > 0.5 ? '#44dd44' : pct > 0.25 ? '#ddcc22' : '#dd3322';
-    ctx.fillRect(0, 0, Math.round(W * pct), H);
+    const heartSize = 24;
+    const gap = 4;
+    const totalW = this.maxHearts * heartSize + (this.maxHearts - 1) * gap;
+    const startX = (W - totalW) / 2;
+    ctx.font = `${heartSize}px serif`;
+    for (let i = 0; i < this.maxHearts; i++) {
+      const x = startX + i * (heartSize + gap);
+      const filled = i < this.hearts;
+      ctx.globalAlpha = filled ? 1 : 0.25;
+      ctx.fillStyle = filled ? '#ff2244' : '#000000';
+      ctx.fillText('❤', x, H - 4);
+    }
+    ctx.globalAlpha = 1;
     this._hpTexture.needsUpdate = true;
+    if (!silent) {
+      // Show hearts for 3 seconds after a hit
+      this._hpShowUntil = Date.now() + 3000;
+      if (this._hpPlane) this._hpPlane.visible = true;
+    }
   }
 
   // ─── Rapier physics ────────────────────────────────────────────────────────
@@ -494,7 +513,7 @@ export class EnemyPlayer {
    * @param {boolean}       allowAttack  – if false, yield attack slot: retreat and hold idle pose
    */
   update(dt, targetModel, targetControls, shieldActive, allowAttack = true) {
-    if (this.isDead || !this.rigidBody) return;
+    if (!this.rigidBody) return;
 
     // ── Sync visual group from physics ──────────────────────────────────────
     const t = this.rigidBody.translation();
@@ -502,6 +521,15 @@ export class EnemyPlayer {
     const terrainY = getTerrainHeight(t.x, t.z);
     const groupY = Number.isFinite(terrainY) ? Math.max(physY, terrainY) : physY;
     this.group.position.set(t.x, groupY, t.z);
+
+    // Dead: only sync position/rotation, skip all AI and combat logic
+    if (this.isDead) {
+      if (this._isRagdoll && this.rigidBody) {
+        const rot = this.rigidBody.rotation();
+        this.group.quaternion.set(rot.x, rot.y, rot.z, rot.w);
+      }
+      return;
+    }
 
     // ── Ragdoll: sync full rotation from physics body ──────────────────────
     if (this._isRagdoll) {
@@ -599,6 +627,9 @@ export class EnemyPlayer {
     // ── Billboard health bar toward camera ─────────────────────────────────
     if (this._camera) {
       this._hpPlane.lookAt(this._camera.position);
+    }
+    if (this._hpPlane.visible && Date.now() > this._hpShowUntil) {
+      this._hpPlane.visible = false;
     }
 
     // ── Update sword swing trail ───────────────────────────────────────────
@@ -765,9 +796,47 @@ export class EnemyPlayer {
     armMesh.quaternion.copy(_rootQ.clone().invert().multiply(_armQ));
   }
 
+  /** Called externally when the player's sword hits this sword. */
+  applySwordBounce() {
+    const dur = (window.phoneSwordSwingCfg?.enemyBounceHoldDur ?? 2.0) * 1000;
+    this._bounceActive    = true;
+    this._bounceEndTime   = Date.now() + dur;
+    this._bounceInitDone  = false; // force recoil target rebuild on next _updateSword
+    // Cancel any in-flight swing so the bounce doesn't immediately re-hit
+    if (this._attackPhase === 'swing_execute') {
+      this._attackPhase    = 'swing_hold';
+      this._attackPhaseT   = 0;
+      this._attackPhaseDur = 0.6;
+    }
+    // Show enemy block flash (gray spiky) if a callback is registered
+    window._pswShowBlockFlash?.('enemy');
+  }
+
   _updateSword(dt) {
     // Sword origin = right hand world position
     this._rightHandGroup.getWorldPosition(_tmpV);
+
+    // Bounce overrides normal sword motion for 0.5 s
+    if (this._bounceActive) {
+      if (Date.now() > this._bounceEndTime) {
+        this._bounceActive = false;
+      } else {
+        const cfg = window.phoneSwordSwingCfg;
+        const snapSpeed  = cfg?.bounceSnapSpeed ?? 18;
+        const bounceAngle = ((cfg?.bounceAngle ?? 90) * Math.PI) / 180;
+        // Build recoil target: rotate current sword Q by bounceAngle around world Y
+        if (!this._bounceTargetQ) this._bounceTargetQ = new THREE.Quaternion();
+        if (!this._bounceInitDone) {
+          const yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), bounceAngle);
+          this._bounceTargetQ.copy(yRot).multiply(this._swordQuaternion);
+          this._bounceInitDone = true;
+        }
+        this._swordQuaternion.slerp(this._bounceTargetQ, 1 - Math.exp(-snapSpeed * dt));
+        this._swordGroup.position.copy(_tmpV);
+        this._swordGroup.quaternion.copy(this._swordQuaternion);
+        return;
+      }
+    }
 
     if (this._attackPhase === 'block') {
       // ── Block: hold sword diagonally across the body (guard position) ─────
@@ -836,6 +905,21 @@ export class EnemyPlayer {
     const dist = _swordTipWorld.distanceTo(targetCenter);
     if (dist > SWORD_TIP_HIT_RADIUS) return;
 
+    // Player sword block: if the player's blade points are near this sword's tip, deflect.
+    const playerBladePoints = window.phoneSwordBladePoints;
+    if (playerBladePoints?.length) {
+      const _playerBlocking = !!window.phoneSwordGyro?.blocking;
+      const _blockRadius = _playerBlocking ? 0.55 : 0.32;
+      for (const pp of playerBladePoints) {
+        if (_swordTipWorld.distanceTo(pp) < _blockRadius) {
+          // Player sword intercepted — bounce this enemy sword, no damage
+          this.applySwordBounce();
+          this._lastHitTime = now;
+          return;
+        }
+      }
+    }
+
     // Shield check — delegate to existing game logic
     if (shieldActive && typeof window.tryBlockLocalPlayerHitWithShield === 'function') {
       const blocked = window.tryBlockLocalPlayerHitWithShield({
@@ -883,13 +967,13 @@ export class EnemyPlayer {
 
   applyDamage(amount) {
     if (this.isDead) return false;
-    this.health = Math.max(0, this.health - amount);
+    this.hearts = Math.max(0, this.hearts - 1);
     this._updateHealthBarCanvas();
-    if (this.health <= 0) {
+    if (this.hearts <= 0) {
       this._die();
-      return true;
+      return true; // killing blow
     }
-    return false;
+    return false; // survived
   }
 
   // Direct knockback — bypasses the strength/profile system for easy tuning.
@@ -965,19 +1049,30 @@ export class EnemyPlayer {
     this.isDead = true;
     if (this._ragdollTimeout) { clearTimeout(this._ragdollTimeout); this._ragdollTimeout = null; }
     this._isRagdoll = false;
-    // Tip capsule over on death
-    this.group.rotation.z = Math.PI / 2;
-    this._capsuleMesh.material.color.setHex(0x333333);
     this._swordGroup.visible = false;
 
-    // Remove physics body
-    if (this.rigidBody && this.rapierWorld?.getRigidBody(this.rigidBody.handle)) {
-      this.rapierWorld.removeRigidBody(this.rigidBody);
-      this.rigidBody = null;
-    }
+    // Keep rigid body alive so knockback applied after _die() still has something to push.
+    // destroy() will remove it when the fade finishes.
 
-    // Fade out and remove after 3 s
-    setTimeout(() => this.destroy(), 3000);
+    // Fade out the group over 2 s then destroy
+    const _startMs = Date.now();
+    const _fadeDur = 2000;
+    const _fadeGroup = this.group;
+    const _fadeHp = this._hpPlane;
+    const _tick = () => {
+      const t = Math.min(1, (Date.now() - _startMs) / _fadeDur);
+      const opacity = 1 - t;
+      _fadeGroup.traverse(obj => {
+        if (obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = opacity;
+        }
+      });
+      if (_fadeHp) _fadeHp.material.opacity = opacity;
+      if (t < 1) requestAnimationFrame(_tick);
+      else this.destroy();
+    };
+    requestAnimationFrame(_tick);
   }
 
   /**
