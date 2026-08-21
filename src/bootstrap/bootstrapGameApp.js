@@ -3094,6 +3094,7 @@ async function initCore(runtimeContext) {
     );
     mapGroup = gltf.scene;
     mapGroup.name = 'map';
+    mapGroup.scale.setScalar(5);
     scene.add(mapGroup);
 
     // Build a flat list of meshes for downward raycasting to get terrain height.
@@ -15583,6 +15584,7 @@ async function initCore(runtimeContext) {
           if (_swordCollision) {
             // Enemy sword always bounces on collision
             _he.applySwordBounce?.();
+            audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
             // Player sword only bounces if NOT blocking AND sword is swinging fast enough
             if (!_isBlocking && _playerMovingFast && !_psw.bounceActive) {
               const _bounceCfg = window.phoneSwordSwingCfg;
@@ -15640,6 +15642,7 @@ async function initCore(runtimeContext) {
                       ragdoll: false,
                     });
                   }
+                  audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
                   _he._playerSwordLastHit = _nowMsPS;
                 }
               }
@@ -15748,6 +15751,7 @@ async function initCore(runtimeContext) {
             const _kbSpeed = _str === 1 ? _baseKB.horizSpeed * 0.4 : _str === 3 ? _baseKB.horizSpeed * 1.6 : _baseKB.horizSpeed;
             _he.applyDamage(_dmg);
             _he.applyDirectKnockback({ direction: _hitDir, ..._baseKB, horizSpeed: _kbSpeed });
+            audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
             _he._playerSwordLastHit = _nowMs2;
             // Close the slow-swing hit window after first hit so it only triggers once
             if (_psw.slowHitWindow > 0 && _nowMs2 / 1000 < _psw.slowHitWindow) {
