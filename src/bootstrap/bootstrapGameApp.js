@@ -3086,11 +3086,33 @@ async function initCore(runtimeContext) {
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
 
-  const mapGroup = await new MapLoader().load('/map/map.mappack', {
-    renderer,
-    transcoderPath: '/basis/',
-  });
-  scene.add(mapGroup);
+  let mapGroup;
+  if (window.phoneSwordMode) {
+    // Phone-sword mode: load the GLB map and register a downward-raycast height resolver.
+    const gltf = await new Promise((resolve, reject) =>
+      new GLTFLoader().load('/glb_map/map.glb', resolve, undefined, reject)
+    );
+    mapGroup = gltf.scene;
+    mapGroup.name = 'map';
+    scene.add(mapGroup);
+
+    // Build a flat list of meshes for downward raycasting to get terrain height.
+    const glbMeshes = [];
+    mapGroup.traverse(obj => { if (obj.isMesh) glbMeshes.push(obj); });
+    const _glbRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+    const { registerTerrainHeightResolver } = await import('../environment/terrainHeight.js');
+    registerTerrainHeightResolver((x, z) => {
+      _glbRaycaster.ray.origin.set(x, 500, z);
+      const hits = _glbRaycaster.intersectObjects(glbMeshes, false);
+      return hits.length > 0 ? hits[0].point.y : undefined;
+    });
+  } else {
+    mapGroup = await new MapLoader().load('/map/map.mappack', {
+      renderer,
+      transcoderPath: '/basis/',
+    });
+    scene.add(mapGroup);
+  }
 
   const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
   mapRenderer = createMapRenderer({ scene, renderer });
