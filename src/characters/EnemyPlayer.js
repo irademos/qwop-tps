@@ -798,7 +798,7 @@ export class EnemyPlayer {
 
   /** Called externally when the player's sword hits this sword. */
   applySwordBounce() {
-    const dur = (window.phoneSwordSwingCfg?.bounceHoldDur ?? 0.35) * 1000;
+    const dur = (window.phoneSwordSwingCfg?.enemyBounceHoldDur ?? 2.0) * 1000;
     this._bounceActive    = true;
     this._bounceEndTime   = Date.now() + dur;
     this._bounceInitDone  = false; // force recoil target rebuild on next _updateSword
@@ -908,8 +908,10 @@ export class EnemyPlayer {
     // Player sword block: if the player's blade points are near this sword's tip, deflect.
     const playerBladePoints = window.phoneSwordBladePoints;
     if (playerBladePoints?.length) {
+      const _playerBlocking = !!window.phoneSwordGyro?.blocking;
+      const _blockRadius = _playerBlocking ? 0.55 : 0.32;
       for (const pp of playerBladePoints) {
-        if (_swordTipWorld.distanceTo(pp) < 0.22) {
+        if (_swordTipWorld.distanceTo(pp) < _blockRadius) {
           // Player sword intercepted — bounce this enemy sword, no damage
           this.applySwordBounce();
           this._lastHitTime = now;

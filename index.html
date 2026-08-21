@@ -214,9 +214,9 @@
   </div>
 
   <!-- Phone Sword: block flash overlays -->
-  <!-- Player blocks (green) — bottom-left -->
+  <!-- Player blocks (green) — center screen -->
   <div id="sword-block-flash-player" style="
-    display:none;position:fixed;left:16px;bottom:80px;z-index:9999;pointer-events:none;
+    display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9999;pointer-events:none;
   ">
     <svg id="sword-block-svg-player" width="110" height="110" viewBox="-55 -55 110 110" style="overflow:visible">
       <polygon points="0,-48 6,-12 30,-30 12,-6 48,0 12,6 30,30 6,12 0,48 -6,12 -30,30 -12,6 -48,0 -12,-6 -30,-30 -6,-12"
@@ -226,9 +226,9 @@
         style="letter-spacing:0.05em">BLOCK</text>
     </svg>
   </div>
-  <!-- Enemy blocks (gray) — near enemy, triggered at fixed position for simplicity -->
+  <!-- Enemy blocks (gray) — center screen -->
   <div id="sword-block-flash-enemy" style="
-    display:none;position:fixed;right:16px;bottom:80px;z-index:9999;pointer-events:none;
+    display:none;position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:9999;pointer-events:none;
   ">
     <svg id="sword-block-svg-enemy" width="90" height="90" viewBox="-45 -45 90 90" style="overflow:visible">
       <polygon points="0,-40 5,-10 25,-25 10,-5 40,0 10,5 25,25 5,10 0,40 -5,10 -25,25 -10,5 -40,0 -10,-5 -25,-25 -5,-10"
@@ -336,6 +336,13 @@
       </label>
 
       <label style="display:block;margin-bottom:6px">
+        Enemy bounce hold (s): <span id="psw-lbl-enemybouncedur">2</span>
+        <br><small style="color:#aaa">how long enemy sword is stuck after being blocked</small>
+        <input type="range" min="0.1" max="5" step="0.1" value="2" id="psw-enemybouncedur"
+          style="width:100%;display:block;margin-top:2px">
+      </label>
+
+      <label style="display:block;margin-bottom:6px">
         Block lateral scale: <span id="psw-lbl-blocklat">0.3</span>
         <br><small style="color:#aaa">0=fully centered, 1=full spread when blocking horizontally</small>
         <input type="range" min="0" max="1" step="0.05" value="0.3" id="psw-blocklat"
@@ -368,8 +375,9 @@
       bind('psw-weakknock',   'psw-lbl-weakknock',   'hitKnockbackWeak', Number);
       bind('psw-bounceangle', 'psw-lbl-bounceangle', 'bounceAngle',      Number);
       bind('psw-bouncesnap',  'psw-lbl-bouncesnap',  'bounceSnapSpeed',  Number);
-      bind('psw-bouncedur',   'psw-lbl-bouncedur',   'bounceHoldDur',    Number);
-      bind('psw-blocklat',    'psw-lbl-blocklat',    'blockLateralScale', Number);
+      bind('psw-bouncedur',      'psw-lbl-bouncedur',      'bounceHoldDur',      Number);
+      bind('psw-enemybouncedur', 'psw-lbl-enemybouncedur', 'enemyBounceHoldDur', Number);
+      bind('psw-blocklat',       'psw-lbl-blocklat',       'blockLateralScale',  Number);
 
       // Copy to clipboard
       const copyBtn = document.getElementById('psw-copy-btn');

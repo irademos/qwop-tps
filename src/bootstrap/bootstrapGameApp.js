@@ -1046,6 +1046,7 @@ async function initCore(runtimeContext) {
     bounceHoldDur: 0.7,    // seconds sword stays at peak recoil before returning
     blockLateralScale: 0.3,  // 0=fully centered, 1=full spread — how much lateral offset in block mode
     hitKnockbackWeak: 3,     // horizSpeed for non-killing hits (killing hits always use full force)
+    enemyBounceHoldDur: 2.0, // seconds enemy sword stays stuck after being blocked by player
   };
 
   const tempVector3A = new THREE.Vector3();
