@@ -3097,16 +3097,39 @@ async function initCore(runtimeContext) {
     mapGroup.scale.setScalar(5);
     scene.add(mapGroup);
 
-    // Build a flat list of meshes for downward raycasting to get terrain height.
+    // Build a BVH-accelerated mesh list for downward raycasting to get terrain height.
+    const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = await import('three-mesh-bvh');
+    THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+    THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+    THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
     const glbMeshes = [];
-    mapGroup.traverse(obj => { if (obj.isMesh) glbMeshes.push(obj); });
-    const _glbRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
-    const { registerTerrainHeightResolver } = await import('../environment/terrainHeight.js');
-    registerTerrainHeightResolver((x, z) => {
-      _glbRaycaster.ray.origin.set(x, 500, z);
-      const hits = _glbRaycaster.intersectObjects(glbMeshes, false);
-      return hits.length > 0 ? hits[0].point.y : undefined;
+    mapGroup.traverse(obj => {
+      if (obj.isMesh) {
+        obj.geometry.computeBoundsTree();
+        glbMeshes.push(obj);
+      }
     });
+    const _glbRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+
+    // Cache terrain height per entity to avoid re-raycasting every frame.
+    // Key: "x_z" snapped to 0.5-unit grid; value: resolved Y.
+    const _glbHeightCache = new Map();
+    const _CACHE_SNAP = 0.5;
+    const _glbResolveHeight = (x, z) => {
+      const sx = Math.round(x / _CACHE_SNAP) * _CACHE_SNAP;
+      const sz = Math.round(z / _CACHE_SNAP) * _CACHE_SNAP;
+      const key = `${sx}_${sz}`;
+      if (_glbHeightCache.has(key)) return _glbHeightCache.get(key);
+      _glbRaycaster.ray.origin.set(sx, 500, sz);
+      const hits = _glbRaycaster.intersectObjects(glbMeshes, false);
+      const y = hits.length > 0 ? hits[0].point.y : undefined;
+      _glbHeightCache.set(key, y);
+      return y;
+    };
+
+    const { registerTerrainHeightResolver } = await import('../environment/terrainHeight.js');
+    registerTerrainHeightResolver(_glbResolveHeight);
   } else {
     mapGroup = await new MapLoader().load('/map/map.mappack', {
       renderer,

@@ -37,6 +37,7 @@
     "qrcode": "^1.5.4",
     "three": "^0.176.0",
     "three-bvh-csg": "^0.0.17",
+    "three-mesh-bvh": "^0.9.4",
     "three-stdlib": "^2.36.0"
   }
 }
