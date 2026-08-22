@@ -11843,6 +11843,39 @@ async function initCore(runtimeContext) {
       phoneSwordQrModal.classList.add('hidden');
     });
 
+    // "Use This Device" — pipe the current device's own gyroscope into phoneSwordGyro
+    document.getElementById('phone-sword-use-this-device')?.addEventListener('click', async () => {
+      if (typeof DeviceOrientationEvent === 'undefined') {
+        alert('Gyroscope not available on this device.');
+        return;
+      }
+      // iOS 13+ requires explicit permission from a user gesture
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          const perm = await DeviceOrientationEvent.requestPermission();
+          if (perm !== 'granted') { alert('Gyroscope permission denied.'); return; }
+        } catch (e) {
+          alert('Could not request gyroscope permission: ' + e.message);
+          return;
+        }
+      }
+      const _localGyroHandler = (event) => {
+        if (event.alpha === null) return;
+        window.phoneSwordGyro.alpha = event.alpha;
+        window.phoneSwordGyro.beta = event.beta;
+        window.phoneSwordGyro.gamma = event.gamma;
+        // blocking not available from local device — stays false
+      };
+      window.addEventListener('deviceorientation', _localGyroHandler, true);
+      window.phoneSwordGyro.connected = true;
+      phoneSwordQrStatus.textContent = 'This device connected!';
+      phoneSwordQrStatus.classList.add('connected');
+      setTimeout(() => {
+        phoneSwordQrModal.classList.add('hidden');
+        phoneSwordConnectCalib?.classList.remove('hidden');
+      }, 1200);
+    });
+
     // ── Calibration modal ────────────────────────────────────────────────────
     const openCalibModal = () => phoneSwordCalibModal.classList.remove('hidden');
     const closeCalibModal = () => phoneSwordCalibModal.classList.add('hidden');
