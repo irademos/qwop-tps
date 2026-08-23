@@ -11896,9 +11896,6 @@ async function initCore(runtimeContext) {
     window.hordeEnemies = hordeEnemies;
     // If player is already dead at startup, auto-respawn silently then show stage 1
     const _psInit = () => {
-      if (playerDead) {
-        respawnPlayer();
-      }
       _psShowStageOverlay(1, () => _psStartStage(1));
     };
     // Delay briefly so the rest of init completes first
@@ -16125,12 +16122,7 @@ async function initCore(runtimeContext) {
         die.reset().fadeIn(0.2).play();
         playerModel.userData.currentAction = 'die';
       }
-      if (window.phoneSwordMode) {
-        // Auto-respawn in phone sword mode; no continue screen shown
-        setTimeout(() => { hideGameOver(); respawnPlayer(); }, 1200);
-      } else {
-        showGameOver();
-      }
+      showGameOver();
     }
 
     const mixerDelta = mixerClock.getDelta();
