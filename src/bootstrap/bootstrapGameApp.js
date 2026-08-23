@@ -15850,6 +15850,11 @@ async function initCore(runtimeContext) {
       // ── Sword-vs-sword collision + sweep hit detection for horde enemies ─────
       if (window.gameMode === 'horde') {
         let _swingHitOccurred = false;
+        const _colAngSpd  = window._pswDebugSpeed ?? 0;
+        const _colMinSpd  = window.phoneSwordSwingCfg?.minSweepSpeed ?? 100;
+        const _colSweepDist = _psw.prevTipWorld ? _tipWorld.distanceTo(_psw.prevTipWorld) : 0;
+        const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
+        const _playerMovingFast = _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
         for (const _he of hordeEnemies) {
           if (_he.isDead || !_he._swordGroup) continue;
 
@@ -15867,12 +15872,6 @@ async function initCore(runtimeContext) {
           }
 
           const _isBlocking = !!window.phoneSwordGyro?.blocking;
-          // Only bounce the player's sword when not blocking AND the sword is moving fast enough
-          const _colAngSpd  = window._pswDebugSpeed ?? 0;
-          const _colMinSpd  = window.phoneSwordSwingCfg?.minSweepSpeed ?? 100;
-          const _colSweepDist = _psw.prevTipWorld ? _tipWorld.distanceTo(_psw.prevTipWorld) : 0;
-          const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
-          const _playerMovingFast = _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
 
           if (_swordCollision) {
             // Enemy sword always bounces on collision
