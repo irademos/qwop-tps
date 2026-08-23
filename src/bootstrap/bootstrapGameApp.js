@@ -11747,21 +11747,162 @@ async function initCore(runtimeContext) {
 
   // ── Horde-mode enemy players ───────────────────────────────────────────────
   const hordeEnemies = [];
-  const _spawnHordeEnemy = () => {
+  const _spawnHordeEnemy = (opts = {}) => {
     const angle = Math.random() * Math.PI * 2;
     const dist  = 5 + Math.random() * 4;
     const spawnOffset = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
+    const spawnPos = opts.position ?? playerModel.position.clone().add(spawnOffset);
     const enemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
-      position: playerModel.position.clone().add(spawnOffset)
+      position: spawnPos,
+      hearts: opts.hearts ?? 3,
+      speedScale: opts.speedScale ?? 1.0,
     });
     enemy._camera = camera;
     hordeEnemies.push(enemy);
     return enemy;
   };
-  if (window.gameMode === 'horde' && rapierWorld) {
+  if (window.gameMode === 'horde' && !window.phoneSwordMode && rapierWorld) {
     const initialCount = 6 + Math.floor(Math.random() * 6); // 6–11
     for (let i = 0; i < initialCount; i++) _spawnHordeEnemy();
     window.hordeEnemies = hordeEnemies;
+  }
+
+  // ── Phone Sword: stage progression system ─────────────────────────────────
+  let _psStage = 1;
+  let _psEnemyQueue = [];   // [{pos: THREE.Vector3, hearts: number, triggerDist: number}]
+  let _psPathEnd = new THREE.Vector3();
+  let _psAutoWalking = false;
+  let _psAutoWalkDir = new THREE.Vector3();
+  let _psStageActive = false;
+  let _psWinShown = false;
+  const PS_SPEED = 1.1;        // auto-walk speed (m/s) — roughly 1/3 of normal walk speed
+  const PS_ENEMY_SPEED = 1.0 / 3.0;   // enemy speed multiplier (1/3 of normal)
+  const PS_SPAWN_TRIGGER_DIST = 18;    // spawn enemy when player gets within this distance
+
+  const _psStageOverlay = document.getElementById('ps-stage-overlay');
+  const _psStageBadge   = document.getElementById('ps-stage-badge');
+  const _psStageEnemies = document.getElementById('ps-stage-enemies');
+  const _psStageOkBtn   = document.getElementById('ps-stage-ok');
+  const _psWinOverlay   = document.getElementById('ps-win-overlay');
+  const _psWinTitle     = document.getElementById('ps-win-title');
+  const _psWinSub       = document.getElementById('ps-win-sub');
+
+  const _psEnemyCount = (stage) => 20 + Math.floor(stage * 0.6) + Math.floor(Math.random() * 6);
+
+  const _psHeartsForStage = (stage) => {
+    const r = Math.random();
+    if (stage <= 5) {
+      return r < 0.7 ? 1 : r < 0.92 ? 2 : 3;
+    } else if (stage <= 15) {
+      return r < 0.4 ? 1 : r < 0.78 ? 2 : 3;
+    } else if (stage <= 30) {
+      return r < 0.2 ? 1 : r < 0.55 ? 2 : 3;
+    } else {
+      return r < 0.1 ? 1 : r < 0.4 ? 2 : 3;
+    }
+  };
+
+  const _psRandomSpawnPos = () => {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 40 + Math.random() * 60;
+    return new THREE.Vector3(
+      playerModel.position.x + Math.cos(angle) * dist,
+      playerModel.position.y,
+      playerModel.position.z + Math.sin(angle) * dist
+    );
+  };
+
+  const _psBuildStage = (stage) => {
+    const count = _psEnemyCount(stage);
+    const pathLen = 80 + stage * 3;
+    const pathAngle = Math.random() * Math.PI * 2;
+    _psPathEnd.set(
+      playerModel.position.x + Math.cos(pathAngle) * pathLen,
+      playerModel.position.y,
+      playerModel.position.z + Math.sin(pathAngle) * pathLen
+    );
+    _psAutoWalkDir.subVectors(_psPathEnd, playerModel.position).setY(0).normalize();
+    _psEnemyQueue = [];
+    for (let i = 0; i < count; i++) {
+      const t = (i + 0.5) / count;
+      const baseX = playerModel.position.x + _psAutoWalkDir.x * pathLen * t;
+      const baseZ = playerModel.position.z + _psAutoWalkDir.z * pathLen * t;
+      const scatter = 8;
+      _psEnemyQueue.push({
+        pos: new THREE.Vector3(
+          baseX + (Math.random() - 0.5) * scatter,
+          playerModel.position.y,
+          baseZ + (Math.random() - 0.5) * scatter
+        ),
+        hearts: _psHeartsForStage(stage),
+        triggerDist: pathLen * t - 10
+      });
+    }
+    _psAutoWalking = true;
+    _psStageActive = true;
+    _psWinShown = false;
+    window.hordeEnemies = hordeEnemies;
+  };
+
+  const _psShowWin = (onDone) => {
+    _psWinShown = true;
+    _psAutoWalking = false;
+    _psWinTitle.textContent = 'YOU WIN!';
+    _psWinSub.textContent = `Stage ${_psStage} Cleared!`;
+    // force animation restart
+    _psWinTitle.style.animation = 'none';
+    _psWinSub.style.animation = 'none';
+    _psWinOverlay.classList.remove('hidden');
+    void _psWinOverlay.offsetWidth;
+    _psWinTitle.style.animation = '';
+    _psWinSub.style.animation = '';
+    setTimeout(() => {
+      _psWinOverlay.classList.add('hidden');
+      onDone();
+    }, 2800);
+  };
+
+  const _psShowStageOverlay = (stage, onOk) => {
+    const count = _psEnemyCount(stage);
+    _psStageBadge.textContent = stage <= 50 ? `STAGE ${stage}` : 'FINAL STAGE';
+    _psStageEnemies.textContent = `Defeat ${count} enemies`;
+    _psStageOkBtn.onclick = () => {
+      _psStageOverlay.classList.add('hidden');
+      onOk(count);
+    };
+    _psStageOverlay.classList.remove('hidden');
+  };
+
+  const _psStartStage = (stage) => {
+    // Respawn player at a random location
+    const spawnAngle = Math.random() * Math.PI * 2;
+    const spawnDist  = 5 + Math.random() * 10;
+    const spawnX = playerModel.position.x + Math.cos(spawnAngle) * spawnDist;
+    const spawnZ = playerModel.position.z + Math.sin(spawnAngle) * spawnDist;
+    const spawnY = playerModel.position.y;
+    playerModel.position.set(spawnX, spawnY, spawnZ);
+    playerControls.playerX = spawnX;
+    playerControls.playerY = spawnY;
+    playerControls.playerZ = spawnZ;
+    playerControls.lastPosition?.set(spawnX, spawnY, spawnZ);
+    if (playerControls.body) {
+      playerControls.body.setTranslation({ x: spawnX, y: spawnY + 0.6, z: spawnZ }, true);
+      playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    }
+    _psBuildStage(stage);
+  };
+
+  if (window.phoneSwordMode && rapierWorld) {
+    window.hordeEnemies = hordeEnemies;
+    // If player is already dead at startup, auto-respawn silently then show stage 1
+    const _psInit = () => {
+      if (playerDead) {
+        respawnPlayer();
+      }
+      _psShowStageOverlay(1, () => _psStartStage(1));
+    };
+    // Delay briefly so the rest of init completes first
+    setTimeout(_psInit, 600);
   }
 
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
@@ -15817,10 +15958,71 @@ async function initCore(runtimeContext) {
         }
       }
 
-      // Spawn 1-2 replacements for each enemy that just died
-      if (_justDied > 0 && rapierWorld) {
-        const toSpawn = _justDied * (1 + Math.floor(Math.random() * 2));
-        for (let _s = 0; _s < toSpawn; _s++) _spawnHordeEnemy();
+      if (window.phoneSwordMode) {
+        // ── Phone Sword: spawn queued enemies as player gets close ────────────
+        if (_psStageActive && _psEnemyQueue.length > 0) {
+          const _playerTravelDir = _psAutoWalkDir;
+          const _playerOffset = new THREE.Vector3()
+            .subVectors(playerModel.position, _psPathEnd)
+            .dot(_playerTravelDir.clone().negate());
+          // triggerDist is distance from start; approx via path progress
+          const _pathProgress = new THREE.Vector3()
+            .subVectors(playerModel.position, _psPathEnd)
+            .setY(0).length();
+          for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
+            const _qe = _psEnemyQueue[_qi];
+            const _distToEnemy = playerModel.position.distanceTo(_qe.pos);
+            if (_distToEnemy <= PS_SPAWN_TRIGGER_DIST) {
+              _spawnHordeEnemy({ position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED });
+              _psEnemyQueue.splice(_qi, 1);
+            }
+          }
+        }
+
+        // ── Phone Sword: auto-walk player along path ──────────────────────────
+        if (_psAutoWalking && _psStageActive && !playerDead) {
+          // Stop if any attacker is in attack mode and very close
+          const _hasNearAttacker = hordeEnemies.some(e =>
+            !e.isDead &&
+            e._aiState === 'attack' &&
+            e.group.position.distanceTo(playerModel.position) < 3.5
+          );
+          if (!_hasNearAttacker) {
+            const _dx = _psPathEnd.x - playerModel.position.x;
+            const _dz = _psPathEnd.z - playerModel.position.z;
+            const _distToEnd = Math.sqrt(_dx * _dx + _dz * _dz);
+            if (_distToEnd > 1.5) {
+              const _moveStep = PS_SPEED * frameDelta;
+              playerControls.playerX = (playerControls.playerX || playerModel.position.x) + _psAutoWalkDir.x * _moveStep;
+              playerControls.playerZ = (playerControls.playerZ || playerModel.position.z) + _psAutoWalkDir.z * _moveStep;
+            } else {
+              _psAutoWalking = false;
+            }
+          }
+        }
+
+        // ── Phone Sword: win detection ─────────────────────────────────────────
+        if (_psStageActive && !_psWinShown && _psEnemyQueue.length === 0 && hordeEnemies.every(e => e.isDead)) {
+          _psStageActive = false;
+          _psWinShown = true;
+          const _nextStage = _psStage + 1;
+          _psShowWin(() => {
+            if (_nextStage <= 50) {
+              _psStage = _nextStage;
+              _psShowStageOverlay(_nextStage, () => _psStartStage(_nextStage));
+            } else {
+              // Game complete — show final stage badge then loop back to stage 1
+              _psStage = 1;
+              _psShowStageOverlay(1, () => _psStartStage(1));
+            }
+          });
+        }
+      } else {
+        // Standard horde: spawn replacements for each enemy that just died
+        if (_justDied > 0 && rapierWorld) {
+          const toSpawn = _justDied * (1 + Math.floor(Math.random() * 2));
+          for (let _s = 0; _s < toSpawn; _s++) _spawnHordeEnemy();
+        }
       }
     }
     syncRemoteHeldWeaponMesh(iceGun);
@@ -15924,7 +16126,12 @@ async function initCore(runtimeContext) {
         die.reset().fadeIn(0.2).play();
         playerModel.userData.currentAction = 'die';
       }
-      showGameOver();
+      if (window.phoneSwordMode) {
+        // Auto-respawn in phone sword mode; no continue screen shown
+        setTimeout(() => { hideGameOver(); respawnPlayer(); }, 1200);
+      } else {
+        showGameOver();
+      }
     }
 
     const mixerDelta = mixerClock.getDelta();
