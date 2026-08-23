@@ -316,43 +316,71 @@
       ">🎯 Calibrate Gyro (hold phone neutral, tap)</button>
       <div id="psw-calib-confirm" style="font-size:10px;color:#7f7;margin-top:-6px;margin-bottom:8px;height:14px"></div>
 
-      <!-- Gun rotation -->
-      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🔫 Gun Default Rotation</div>
+      <!-- Gun -->
+      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🔫 Gun</div>
+      <label style="display:block;margin-bottom:4px">X offset (deg): <span id="psw-lbl-gunx">180</span>
+        <input type="range" min="-180" max="180" step="1" value="180" id="psw-gunx" style="width:100%;display:block;margin-top:2px">
+      </label>
+      <label style="display:block;margin-bottom:4px">Y offset (deg): <span id="psw-lbl-guny">42</span>
+        <input type="range" min="-180" max="180" step="1" value="42" id="psw-guny" style="width:100%;display:block;margin-top:2px">
+      </label>
+      <label style="display:block;margin-bottom:6px">Z offset (deg): <span id="psw-lbl-gunz">-132</span>
+        <input type="range" min="-180" max="180" step="1" value="-132" id="psw-gunz" style="width:100%;display:block;margin-top:2px">
+      </label>
+      <div style="font-size:11px;color:#aaa;margin-bottom:3px">Axis mapping (which gyro input drives each Euler axis):</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:6px">
+        <div><div style="color:#ccc;font-size:10px">Euler X ←</div>
+          <select id="psw-gun-axX" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta" selected>beta (pitch)</option><option value="alpha">alpha (yaw)</option><option value="gamma">gamma (roll)</option>
+          </select>
+          <button id="psw-gun-sgnX" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+        <div><div style="color:#ccc;font-size:10px">Euler Y ←</div>
+          <select id="psw-gun-axY" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta">beta (pitch)</option><option value="alpha" selected>alpha (yaw)</option><option value="gamma">gamma (roll)</option>
+          </select>
+          <button id="psw-gun-sgnY" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+        <div><div style="color:#ccc;font-size:10px">Euler Z ←</div>
+          <select id="psw-gun-axZ" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta">beta (pitch)</option><option value="alpha">alpha (yaw)</option><option value="gamma" selected>gamma (roll)</option>
+          </select>
+          <button id="psw-gun-sgnZ" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+      </div>
 
-      <label style="display:block;margin-bottom:6px">
-        Gun X (deg): <span id="psw-lbl-gunx">180</span>
-        <input type="range" min="-180" max="180" step="1" value="180" id="psw-gunx"
-          style="width:100%;display:block;margin-top:2px">
+      <!-- Shield -->
+      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🛡 Shield</div>
+      <label style="display:block;margin-bottom:4px">X offset (deg): <span id="psw-lbl-shieldx">-180</span>
+        <input type="range" min="-180" max="180" step="1" value="-180" id="psw-shieldx" style="width:100%;display:block;margin-top:2px">
       </label>
-      <label style="display:block;margin-bottom:6px">
-        Gun Y (deg): <span id="psw-lbl-guny">42</span>
-        <input type="range" min="-180" max="180" step="1" value="42" id="psw-guny"
-          style="width:100%;display:block;margin-top:2px">
+      <label style="display:block;margin-bottom:4px">Y offset (deg): <span id="psw-lbl-shieldy">180</span>
+        <input type="range" min="-180" max="180" step="1" value="180" id="psw-shieldy" style="width:100%;display:block;margin-top:2px">
       </label>
-      <label style="display:block;margin-bottom:6px">
-        Gun Z (deg): <span id="psw-lbl-gunz">-132</span>
-        <input type="range" min="-180" max="180" step="1" value="-132" id="psw-gunz"
-          style="width:100%;display:block;margin-top:2px">
+      <label style="display:block;margin-bottom:6px">Z offset (deg): <span id="psw-lbl-shieldz">0</span>
+        <input type="range" min="-180" max="180" step="1" value="0" id="psw-shieldz" style="width:100%;display:block;margin-top:2px">
       </label>
-
-      <!-- Shield rotation -->
-      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🛡 Shield Default Rotation</div>
-
-      <label style="display:block;margin-bottom:6px">
-        Shield X (deg): <span id="psw-lbl-shieldx">-180</span>
-        <input type="range" min="-180" max="180" step="1" value="-180" id="psw-shieldx"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-      <label style="display:block;margin-bottom:6px">
-        Shield Y (deg): <span id="psw-lbl-shieldy">180</span>
-        <input type="range" min="-180" max="180" step="1" value="180" id="psw-shieldy"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-      <label style="display:block;margin-bottom:6px">
-        Shield Z (deg): <span id="psw-lbl-shieldz">0</span>
-        <input type="range" min="-180" max="180" step="1" value="0" id="psw-shieldz"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
+      <div style="font-size:11px;color:#aaa;margin-bottom:3px">Axis mapping:</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:6px">
+        <div><div style="color:#ccc;font-size:10px">Euler X ←</div>
+          <select id="psw-shield-axX" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta" selected>beta (pitch)</option><option value="alpha">alpha (yaw)</option><option value="gamma">gamma (roll)</option>
+          </select>
+          <button id="psw-shield-sgnX" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+        <div><div style="color:#ccc;font-size:10px">Euler Y ←</div>
+          <select id="psw-shield-axY" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta">beta (pitch)</option><option value="alpha" selected>alpha (yaw)</option><option value="gamma">gamma (roll)</option>
+          </select>
+          <button id="psw-shield-sgnY" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+        <div><div style="color:#ccc;font-size:10px">Euler Z ←</div>
+          <select id="psw-shield-axZ" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta">beta (pitch)</option><option value="alpha">alpha (yaw)</option><option value="gamma" selected>gamma (roll)</option>
+          </select>
+          <button id="psw-shield-sgnZ" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+      </div>
 
       <button id="psw-copy-btn" style="
         margin-top:6px;width:100%;padding:6px;
@@ -392,6 +420,30 @@
       bind('psw-shieldx', 'psw-lbl-shieldx', 'shieldX');
       bind('psw-shieldy', 'psw-lbl-shieldy', 'shieldY');
       bind('psw-shieldz', 'psw-lbl-shieldz', 'shieldZ');
+
+      // Axis mapping selects and sign flip buttons
+      ['gun', 'shield'].forEach(function (pfx) {
+        ['X', 'Y', 'Z'].forEach(function (axis) {
+          var selId  = 'psw-' + pfx + '-ax' + axis;
+          var btnId  = 'psw-' + pfx + '-sgn' + axis;
+          var cfgAx  = pfx + 'Ax' + axis;
+          var cfgSgn = pfx + 'Sgn' + axis;
+          var sel = document.getElementById(selId);
+          var btn = document.getElementById(btnId);
+          if (sel) sel.addEventListener('change', function () {
+            if (!window.phoneSwordWeaponCfg) window.phoneSwordWeaponCfg = {};
+            window.phoneSwordWeaponCfg[cfgAx] = this.value;
+          });
+          if (btn) btn.addEventListener('click', function () {
+            if (!window.phoneSwordWeaponCfg) window.phoneSwordWeaponCfg = {};
+            var cur = window.phoneSwordWeaponCfg[cfgSgn] ?? 1;
+            var next = cur === 1 ? -1 : 1;
+            window.phoneSwordWeaponCfg[cfgSgn] = next;
+            this.textContent = next === 1 ? '+1 (flip)' : '-1 (flip)';
+            this.style.background = next === 1 ? '#332' : '#323';
+          });
+        });
+      });
 
       // Copy to clipboard
       const copyBtn = document.getElementById('psw-copy-btn');
