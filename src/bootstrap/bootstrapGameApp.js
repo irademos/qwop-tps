@@ -308,7 +308,6 @@ const TERRAIN_STAMP_REGRESSION_SCENE = Object.freeze({
 let rapierWorld;
 const rbToMesh = new Map(); // RigidBody -> THREE.Mesh
 let physicsAccumulator = 0;
-let gamePaused = false;
 const FIXED_DT = 1 / 60;
 let monsterSwordTemplate = null;
 let monsterSwordTemplatePromise = null;
@@ -756,12 +755,6 @@ async function initCore(runtimeContext) {
   };
 
   arcadeOverlay.setStartHandler(startAudioAndGameOnce);
-
-  new MutationObserver(() => {
-    if (startOverlay.classList.contains('hidden')) {
-      gamePaused = false;
-    }
-  }).observe(startOverlay, { attributes: true, attributeFilter: ['class'] });
 
   let playerName = localStorage.getItem('playerName') || getCookie("playerName");
   const hasStoredPin = !!getStoredPinHash(playerName);
@@ -13420,12 +13413,7 @@ async function initCore(runtimeContext) {
 
     noBtn.onclick = () => {
       clearInterval(interval);
-      hideGameOver();
-      respawnPlayer();
-      gamePaused = true;
-      startOverlay.classList.remove('hidden');
-      startOverlay.style.display = '';
-      startOverlay.setAttribute('aria-hidden', 'false');
+      window.location.reload();
     };
   }
 
@@ -14891,7 +14879,6 @@ async function initCore(runtimeContext) {
 
   function animate() {
     requestAnimationFrame(animate);
-    if (gamePaused) return;
     const frameStartMs = performance.now();
 
     // --- RAPIER FIXED-STEP & SYNC ---
