@@ -974,10 +974,6 @@ async function initCore(runtimeContext) {
   const _phoneSwordEuler = new THREE.Euler();
   // Foam sword default hold orientation (Euler 0, π, 0) — applied after gyro rotation
   const _phoneSwordBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0, 'YXZ'));
-  // Persistent smoothed quaternions for shield/pistol (temporal smoothing prevents jumps)
-  const _shieldSmoothedQ = new THREE.Quaternion();
-  const _pistolSmoothedQ = new THREE.Quaternion();
-  let _weaponQInitialized = false;
 
   // Phone Sword: gyro swing detection & trail state
   const _psw = {
@@ -1038,8 +1034,6 @@ async function initCore(runtimeContext) {
   window.phoneSwordWeaponCfg = window.phoneSwordWeaponCfg || {
     shieldX: -180, shieldY: 180, shieldZ: 0,
     gunX: 180, gunY: 42, gunZ: -132,
-    damping: 0.45,   // slerp scale toward neutral (0=no rotation, 1=full)
-    smoothing: 12,   // lerp speed for temporal smoothing (higher=snappier)
   };
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
     speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
@@ -16057,13 +16051,11 @@ async function initCore(runtimeContext) {
       _psw.prevTipWorld = _tipWorld.clone();
       _psw.prevSwordQ.copy(_activeQ);
     }
-    // Phone Sword: apply gyro quaternion to shield and pistol with temporal smoothing
+    // Phone Sword: apply gyro quaternion to shield and pistol — same approach as the sword
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
       const _activeGyroForWeapons = _psw.bounceActive ? _psw.bounceCurrentQ : _phoneSwordGyroQ;
       const _wCfg = window.phoneSwordWeaponCfg;
       const _DEG = Math.PI / 180;
-      const _damping   = _wCfg?.damping   ?? 0.45;
-      const _smoothSpd = _wCfg?.smoothing ?? 12;
       const _shieldBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(
         (_wCfg?.shieldX ?? -180) * _DEG,
         (_wCfg?.shieldY ??  180) * _DEG,
@@ -16072,29 +16064,11 @@ async function initCore(runtimeContext) {
         (_wCfg?.gunX ??  180) * _DEG,
         (_wCfg?.gunY ??   42) * _DEG,
         (_wCfg?.gunZ ?? -132) * _DEG, 'YXZ'));
-      const _dampedGyroQ = new THREE.Quaternion().slerpQuaternions(
-        new THREE.Quaternion(), _activeGyroForWeapons, _damping
-      );
-      // Seed smoothed quaternions on first frame so they start at the right pose
-      if (!_weaponQInitialized) {
-        _shieldSmoothedQ.copy(_dampedGyroQ).multiply(_shieldBaseQ);
-        _pistolSmoothedQ.copy(_dampedGyroQ).multiply(_pistolBaseQ);
-        _weaponQInitialized = true;
-      }
-      // Temporal smoothing: lerp toward target each frame to eliminate gyro discontinuity jumps
-      const _wAlpha = 1 - Math.exp(-_smoothSpd * frameDelta);
-      const _shieldTargetQ = new THREE.Quaternion().copy(_dampedGyroQ).multiply(_shieldBaseQ);
-      const _pistolTargetQ = new THREE.Quaternion().copy(_dampedGyroQ).multiply(_pistolBaseQ);
-      // Negate target if dot < 0 so we always slerp the short way around
-      if (_shieldSmoothedQ.dot(_shieldTargetQ) < 0) _shieldTargetQ.negate();
-      if (_pistolSmoothedQ.dot(_pistolTargetQ) < 0) _pistolTargetQ.negate();
-      _shieldSmoothedQ.slerp(_shieldTargetQ, _wAlpha);
-      _pistolSmoothedQ.slerp(_pistolTargetQ, _wAlpha);
       if (shield?.holder === playerControls) {
-        shield._holdQuaternion.copy(_shieldSmoothedQ);
+        shield._holdQuaternion.copy(_activeGyroForWeapons).multiply(_shieldBaseQ);
       }
       if (pistol?.holder === playerControls) {
-        pistol._holdQuaternion.copy(_pistolSmoothedQ);
+        pistol._holdQuaternion.copy(_activeGyroForWeapons).multiply(_pistolBaseQ);
       }
     }
     hammer?.update();

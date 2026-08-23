@@ -308,21 +308,13 @@
       padding:10px;
       width:270px;
     ">
-      <!-- Smoothing -->
-      <div style="color:#88aaff;font-weight:bold;margin-bottom:4px;border-bottom:1px solid #333;padding-bottom:2px">🎛 Gyro Smoothing</div>
-
-      <label style="display:block;margin-bottom:6px">
-        Smoothing speed: <span id="psw-lbl-smoothing">12</span>
-        <br><small style="color:#aaa">higher=snappier, lower=glides (reduces jumpiness)</small>
-        <input type="range" min="1" max="60" step="1" value="12" id="psw-smoothing"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-      <label style="display:block;margin-bottom:6px">
-        Damping: <span id="psw-lbl-damping">0.45</span>
-        <br><small style="color:#aaa">0=no rotation, 1=full gyro range</small>
-        <input type="range" min="0" max="1" step="0.01" value="0.45" id="psw-damping"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
+      <!-- Calibrate -->
+      <button id="psw-calib-btn" style="
+        width:100%;padding:8px;margin-bottom:10px;
+        background:#243;border:1px solid #4a7;border-radius:4px;
+        color:#afa;font-family:monospace;font-size:12px;cursor:pointer;font-weight:bold;
+      ">🎯 Calibrate Gyro (hold phone neutral, tap)</button>
+      <div id="psw-calib-confirm" style="font-size:10px;color:#7f7;margin-top:-6px;margin-bottom:8px;height:14px"></div>
 
       <!-- Gun rotation -->
       <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🔫 Gun Default Rotation</div>
@@ -383,8 +375,17 @@
           window.phoneSwordWeaponCfg[cfgKey] = Number(this.value);
         });
       }
-      bind('psw-smoothing', 'psw-lbl-smoothing', 'smoothing');
-      bind('psw-damping',   'psw-lbl-damping',   'damping');
+      // Calibrate button
+      const calibBtn = document.getElementById('psw-calib-btn');
+      const calibConfirm = document.getElementById('psw-calib-confirm');
+      if (calibBtn) calibBtn.addEventListener('click', function () {
+        if (window.phoneSwordRecalibrate) {
+          window.phoneSwordRecalibrate();
+          calibConfirm.textContent = '✓ Calibrated!';
+          setTimeout(() => { calibConfirm.textContent = ''; }, 2000);
+        }
+      });
+
       bind('psw-gunx',    'psw-lbl-gunx',    'gunX');
       bind('psw-guny',    'psw-lbl-guny',    'gunY');
       bind('psw-gunz',    'psw-lbl-gunz',    'gunZ');
