@@ -16082,7 +16082,7 @@ async function initCore(runtimeContext) {
         _weaponQInitialized = true;
       }
       // Temporal smoothing: lerp toward target each frame to eliminate gyro discontinuity jumps
-      const _wAlpha = 1 - Math.exp(-_smoothSpd * deltaSeconds);
+      const _wAlpha = 1 - Math.exp(-_smoothSpd * frameDelta);
       const _shieldTargetQ = new THREE.Quaternion().copy(_dampedGyroQ).multiply(_shieldBaseQ);
       const _pistolTargetQ = new THREE.Quaternion().copy(_dampedGyroQ).multiply(_pistolBaseQ);
       // Negate target if dot < 0 so we always slerp the short way around
