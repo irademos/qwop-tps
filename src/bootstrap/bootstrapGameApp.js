@@ -13401,7 +13401,7 @@ async function initCore(runtimeContext) {
       countdownEl.textContent = countdown;
       if (countdown <= 0) {
         clearInterval(interval);
-        hideGameOver();
+        countdownEl.textContent = '';
       }
     }, 1000);
 
@@ -13414,6 +13414,9 @@ async function initCore(runtimeContext) {
     noBtn.onclick = () => {
       clearInterval(interval);
       hideGameOver();
+      startOverlay.classList.remove('hidden');
+      startOverlay.style.display = '';
+      startOverlay.setAttribute('aria-hidden', 'false');
     };
   }
 
