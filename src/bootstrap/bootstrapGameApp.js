@@ -132,6 +132,11 @@ import {
   saveWalkingStats,
   saveStatsImmediate,
   saveStatsThrottled,
+  loadPhoneSwordLeaderboards,
+  savePhoneSwordStats,
+  loadPhoneSwordStats,
+  savePhoneSwordStage,
+  loadPhoneSwordStage,
   initMonsterPersistence,
   loadMonstersSnapshot,
   subscribeMonsterUpdates,
@@ -11770,9 +11775,26 @@ async function initCore(runtimeContext) {
   // ── Phone Sword: stage progression system ─────────────────────────────────
   const _psStageLsKey = () => profileNameKey ? `ps_stage_${profileNameKey}` : null;
   const _psSavedStage = () => { try { const k = _psStageLsKey(); return k ? (parseInt(localStorage.getItem(k), 10) || 1) : 1; } catch (_) { return 1; } };
-  const _psSaveStage = (s) => { try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, s); } catch (_) {} };
+  const _psSaveStage = (s) => {
+    try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, s); } catch (_) {}
+    if (profileNameKey) {
+      void savePhoneSwordStage(profileNameKey, s);
+      // Also update highestStage in phoneSwordStats
+      if (s > (_psStats.highestStage || 1)) {
+        _psStats.highestStage = s;
+        void savePhoneSwordStats(profileNameKey, { ..._psStats });
+      }
+    }
+  };
+  // Phone sword session stats (kills, deaths, highestStage)
+  let _psStats = { kills: 0, deaths: 0, highestStage: 1 };
+  // Load stage from Firebase first (async), fallback to localStorage
   let _psStage = _psSavedStage();
   let _psEnemyQueue = [];   // [{pos: THREE.Vector3, hearts: number, triggerDist: number}]
+  let _psJumpVelY = 0;       // vertical velocity for phone sword jump
+  let _psGroundY = null;     // ground Y level for phone sword mode
+  const PS_JUMP_FORCE = 8.5; // initial upward speed m/s
+  const PS_GRAVITY = 20;     // gravity m/s²
   let _psPathEnd = new THREE.Vector3();
   let _psAutoWalking = false;
   let _psAutoWalkDir = new THREE.Vector3();
@@ -11891,6 +11913,19 @@ async function initCore(runtimeContext) {
       _psStageOverlay.classList.add('hidden');
       onOk(count);
     };
+    // Shop button — opens merchant panel if available
+    let _psShopBtn = document.getElementById('ps-stage-shop-btn');
+    if (!_psShopBtn) {
+      _psShopBtn = document.createElement('button');
+      _psShopBtn.id = 'ps-stage-shop-btn';
+      _psShopBtn.className = 'ps-stage-shop-btn';
+      _psShopBtn.textContent = '🛒 Shop';
+      _psStageOkBtn.parentNode?.insertBefore(_psShopBtn, _psStageOkBtn);
+    }
+    _psShopBtn.onclick = async () => {
+      const mod = await import('../controls/merchantPanel.js').catch(() => null);
+      mod?.openMerchantPanel?.('buy');
+    };
     _psStageOverlay.classList.remove('hidden');
   };
 
@@ -11936,7 +11971,22 @@ async function initCore(runtimeContext) {
     const _psMagicBar = document.getElementById('magic-bar');
     if (_psHungerBar) _psHungerBar.style.display = 'none';
     if (_psMagicBar) _psMagicBar.style.display = 'none';
-    const _psInit = () => {
+    const _psInit = async () => {
+      // Load PS stats and stage from Firebase (falls back gracefully)
+      if (profileNameKey) {
+        try {
+          const [fbStats, fbStage] = await Promise.all([
+            loadPhoneSwordStats(profileNameKey),
+            loadPhoneSwordStage(profileNameKey)
+          ]);
+          _psStats = fbStats;
+          // Use whichever is higher: Firebase stage or localStorage
+          const lsStage = _psSavedStage();
+          _psStage = Math.max(fbStage, lsStage);
+          // Sync localStorage to Firebase value
+          try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, _psStage); } catch (_) {}
+        } catch (_) { /* keep localStorage value */ }
+      }
       _psShowStageOverlay(_psStage, () => _psStartStage(_psStage));
     };
     // Delay briefly so the rest of init completes first
@@ -13589,6 +13639,8 @@ async function initCore(runtimeContext) {
       hideGameOver();
       respawnPlayer();
       if (window.phoneSwordMode) {
+        _psStats.deaths = (_psStats.deaths || 0) + 1;
+        if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
         _psRestartCurrentStage();
       }
     };
@@ -14468,6 +14520,8 @@ async function initCore(runtimeContext) {
     },
     getPlayerStats: () => ({ ...statsState }),
     getLeaderboards: (limit = 10) => loadLeaderboards(limit),
+    getPhoneSwordLeaderboards: (limit = 10) => loadPhoneSwordLeaderboards(limit),
+    getPhoneSwordStats: () => ({ ..._psStats }),
     getQuestLog: () => window.questManager?.getQuestLog?.() || [],
     getAchievements: () => getAchievementView(achievementState),
     claimAchievementReward: (achievementId) => {
@@ -15880,6 +15934,18 @@ async function initCore(runtimeContext) {
                       ragdoll: false,
                     });
                   }
+                  // Player lunges forward a step on hit
+                  const _stepDist = 0.6;
+                  const _stepX = playerModel.position.x + _sweepDir.x * _stepDist;
+                  const _stepZ = playerModel.position.z + _sweepDir.z * _stepDist;
+                  playerModel.position.x = _stepX;
+                  playerModel.position.z = _stepZ;
+                  playerControls.playerX = _stepX;
+                  playerControls.playerZ = _stepZ;
+                  playerControls.lastPosition?.set(_stepX, playerModel.position.y, _stepZ);
+                  if (playerControls.body) {
+                    playerControls.body.setNextKinematicTranslation({ x: _stepX, y: playerModel.position.y + 0.6, z: _stepZ });
+                  }
                   audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
                   _he._playerSwordLastHit = _nowMsPS;
                 }
@@ -16039,6 +16105,29 @@ async function initCore(runtimeContext) {
 
     // ── Horde enemy update ─────────────────────────────────────────────────
     if (window.gameMode === 'horde' && hordeEnemies.length > 0) {
+      // Phone sword jump system (kinematic body doesn't support applyImpulse)
+      if (window.phoneSwordMode) {
+        if (_psGroundY === null) _psGroundY = playerModel.position.y;
+        // Jump initiation
+        if (window.phoneSwordJumpPressed) {
+          window.phoneSwordJumpPressed = false;
+          if (playerModel.position.y <= _psGroundY + 0.05) {
+            _psJumpVelY = PS_JUMP_FORCE;
+          }
+        }
+        // Apply vertical velocity + gravity
+        if (_psJumpVelY !== 0) {
+          _psJumpVelY -= PS_GRAVITY * frameDelta;
+          playerModel.position.y += _psJumpVelY * frameDelta;
+          playerControls.playerY = playerModel.position.y;
+          if (playerModel.position.y <= _psGroundY) {
+            playerModel.position.y = _psGroundY;
+            playerControls.playerY = _psGroundY;
+            _psJumpVelY = 0;
+            playerControls.canJump = true;
+          }
+        }
+      }
       // Sync kinematic player body to visual position each frame
       if (playerControls?.body) {
         playerControls.body.setNextKinematicTranslation({
@@ -16090,6 +16179,10 @@ async function initCore(runtimeContext) {
           if (!_he.group.parent) {
             hordeEnemies.splice(_hi, 1);
             _justDied++;
+            if (window.phoneSwordMode) {
+              _psStats.kills = (_psStats.kills || 0) + 1;
+              if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
+            }
           } else {
             // Still call update so physics ragdoll position/rotation syncs to visual
             _he.update(frameDelta, null, null, false, false);
@@ -16133,6 +16226,20 @@ async function initCore(runtimeContext) {
             const _kbSpeed = _str === 1 ? _baseKB.horizSpeed * 0.4 : _str === 3 ? _baseKB.horizSpeed * 1.6 : _baseKB.horizSpeed;
             _he.applyDamage(_dmg);
             _he.applyDirectKnockback({ direction: _hitDir, ..._baseKB, horizSpeed: _kbSpeed });
+            // Player steps forward on hit in phone sword mode
+            if (window.phoneSwordMode) {
+              const _stepDist2 = 0.5;
+              const _stepX2 = playerModel.position.x + _hitDir.x * _stepDist2;
+              const _stepZ2 = playerModel.position.z + _hitDir.z * _stepDist2;
+              playerModel.position.x = _stepX2;
+              playerModel.position.z = _stepZ2;
+              playerControls.playerX = _stepX2;
+              playerControls.playerZ = _stepZ2;
+              playerControls.lastPosition?.set(_stepX2, playerModel.position.y, _stepZ2);
+              if (playerControls.body) {
+                playerControls.body.setNextKinematicTranslation({ x: _stepX2, y: playerModel.position.y + 0.6, z: _stepZ2 });
+              }
+            }
             audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
             _he._playerSwordLastHit = _nowMs2;
             // Close the slow-swing hit window after first hit so it only triggers once

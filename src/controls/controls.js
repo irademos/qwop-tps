@@ -539,7 +539,11 @@ export class PlayerControls {
     document.getElementById('jump-button').addEventListener('touchstart', (event) => {
       if (!this.enabled || this.isInWater) return;
       this.jumpButtonPressed = true;
-      this.tryJump();
+      if (window.phoneSwordMode) {
+        window.phoneSwordJumpPressed = true;
+      } else {
+        this.tryJump();
+      }
       this.safePreventDefault(event);
     });
 
@@ -615,12 +619,15 @@ export class PlayerControls {
       }
     });
 
-    // Gyroscope button
+    // Gyroscope button — hidden in phone sword mode (uses separate gyro input)
     let gyroButton = document.getElementById('gyro-button');
     if (!gyroButton) {
       gyroButton = document.createElement('div');
       gyroButton.id = 'gyro-button';
       document.body.appendChild(gyroButton);
+    }
+    if (window.phoneSwordMode) {
+      gyroButton.style.display = 'none';
     }
     const updateGyroButtonLabel = () => {
       gyroButton.innerHTML = this.gyroActive
@@ -792,6 +799,25 @@ export class PlayerControls {
     this.optionLeftButton = createButton('left-punch-button', 'mobile-option-action', 'Shield');
     this.optionCenterButton = createButton('punch-kick-button', 'mobile-option-action', '🎤');
     this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', '—');
+    // Block button — phone sword mode only
+    this.blockButton = createButton('ps-block-button', 'mobile-option-action ps-block-btn', '🛡 Block');
+    if (window.phoneSwordMode) {
+      this.blockButton.style.display = '';
+      this.blockButton.addEventListener('touchstart', (e) => {
+        if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = true;
+        this.safePreventDefault(e);
+      }, { passive: false });
+      this.blockButton.addEventListener('touchend', (e) => {
+        if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
+        this.safePreventDefault(e);
+      }, { passive: false });
+      this.blockButton.addEventListener('touchcancel', (e) => {
+        if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
+        this.safePreventDefault(e);
+      }, { passive: false });
+    } else {
+      this.blockButton.style.display = 'none';
+    }
 
     this.mobileEquipButtons = [];
     this.mobileItemActionButtons = [];
@@ -1421,6 +1447,7 @@ export class PlayerControls {
       this.optionLeftButton,
       this.optionCenterButton,
       this.optionRightButton,
+      this.blockButton,
       ...(this.mobileEquipButtons || []),
       ...(this.mobileItemActionButtons || [])
     ].forEach(clearButtonPos);
@@ -1458,6 +1485,10 @@ export class PlayerControls {
     this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
     this.applyMobileButtonPosition(this.spellsButton, { x: 0, y: 1 });
     this.applyMobileButtonPosition(this.equipButton, { x: 1, y: 1 });
+    // In phone sword mode, place block button at a separate position (x:0, y:2)
+    if (window.phoneSwordMode) {
+      this.applyMobileButtonPosition(this.blockButton, { x: 0, y: 0 });
+    }
   }
 
   setupEventListeners() {
