@@ -117,9 +117,11 @@ export class EnemyPlayer {
     this.rapier      = rapier;
     this.rapierWorld = rapierWorld;
 
-    this.hearts    = 3;
-    this.maxHearts = 3;
+    const initHearts = options.hearts ?? 3;
+    this.hearts    = initHearts;
+    this.maxHearts = initHearts;
     this.isDead    = false;
+    this.speedScale = options.speedScale ?? 1.0;
 
     this._swingT       = 0;
     this._lastHitTime  = 0;
@@ -599,7 +601,7 @@ export class EnemyPlayer {
         _toTarget.subVectors(this.group.position, targetModel.position);
         _toTarget.y = 0;
         if (_toTarget.lengthSq() > 0.001) {
-          _toTarget.normalize().multiplyScalar(BACKOFF_SPEED);
+          _toTarget.normalize().multiplyScalar(BACKOFF_SPEED * this.speedScale);
           const vel = this.rigidBody.linvel();
           this.rigidBody.setLinvel({ x: _toTarget.x, y: vel.y, z: _toTarget.z }, true);
         }
@@ -609,7 +611,7 @@ export class EnemyPlayer {
         _toTarget.subVectors(targetModel.position, this.group.position);
         _toTarget.y = 0;
         if (_toTarget.lengthSq() > 0.001) {
-          _toTarget.normalize().multiplyScalar(CHASE_SPEED);
+          _toTarget.normalize().multiplyScalar(CHASE_SPEED * this.speedScale);
           const vel = this.rigidBody.linvel();
           this.rigidBody.setLinvel(
             { x: _toTarget.x, y: vel.y, z: _toTarget.z }, true
