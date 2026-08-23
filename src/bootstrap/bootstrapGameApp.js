@@ -16113,31 +16113,39 @@ async function initCore(runtimeContext) {
       }
     }
 
-    // ── Horde enemy update ─────────────────────────────────────────────────
-    if (window.gameMode === 'horde' && hordeEnemies.length > 0) {
-      // Phone sword jump system (kinematic body doesn't support applyImpulse)
-      if (window.phoneSwordMode) {
-        if (_psGroundY === null) _psGroundY = playerModel.position.y;
-        // Jump initiation
-        if (window.phoneSwordJumpPressed) {
-          window.phoneSwordJumpPressed = false;
-          if (playerModel.position.y <= _psGroundY + 0.05) {
-            _psJumpVelY = PS_JUMP_FORCE;
-          }
-        }
-        // Apply vertical velocity + gravity
-        if (_psJumpVelY !== 0) {
-          _psJumpVelY -= PS_GRAVITY * frameDelta;
-          playerModel.position.y += _psJumpVelY * frameDelta;
-          playerControls.playerY = playerModel.position.y;
-          if (playerModel.position.y <= _psGroundY) {
-            playerModel.position.y = _psGroundY;
-            playerControls.playerY = _psGroundY;
-            _psJumpVelY = 0;
-            playerControls.canJump = true;
-          }
+    // ── Phone sword jump (runs regardless of enemy count) ─────────────────
+    if (window.phoneSwordMode && window.gameMode === 'horde' && playerModel) {
+      if (_psGroundY === null) _psGroundY = playerModel.position.y;
+      if (window.phoneSwordJumpPressed) {
+        window.phoneSwordJumpPressed = false;
+        if (playerModel.position.y <= _psGroundY + 0.05) {
+          _psJumpVelY = PS_JUMP_FORCE;
+          window.phoneSwordAirborne = true;
         }
       }
+      if (_psJumpVelY !== 0) {
+        _psJumpVelY -= PS_GRAVITY * frameDelta;
+        playerModel.position.y += _psJumpVelY * frameDelta;
+        playerControls.playerY = playerModel.position.y;
+        if (playerControls.body) {
+          playerControls.body.setNextKinematicTranslation({
+            x: playerModel.position.x,
+            y: playerModel.position.y + 0.6,
+            z: playerModel.position.z
+          });
+        }
+        if (playerModel.position.y <= _psGroundY) {
+          playerModel.position.y = _psGroundY;
+          playerControls.playerY = _psGroundY;
+          _psJumpVelY = 0;
+          window.phoneSwordAirborne = false;
+          playerControls.canJump = true;
+        }
+      }
+    }
+
+    // ── Horde enemy update ─────────────────────────────────────────────────
+    if (window.gameMode === 'horde' && hordeEnemies.length > 0) {
       // Sync kinematic player body to visual position each frame
       if (playerControls?.body) {
         playerControls.body.setNextKinematicTranslation({

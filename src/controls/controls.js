@@ -750,24 +750,13 @@ export class PlayerControls {
     this.optionLeftButton = createButton('left-punch-button', 'mobile-option-action', 'Shield');
     this.optionCenterButton = createButton('punch-kick-button', 'mobile-option-action', '🎤');
     this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', '—');
-    // Block button — phone sword mode only
-    this.blockButton = createButton('ps-block-button', 'mobile-option-action ps-block-btn', '🛡 Block');
+    this.blockButton = null; // block functionality moved to punchButton in PS mode
+
     if (window.phoneSwordMode) {
-      this.blockButton.style.display = '';
-      this.blockButton.addEventListener('touchstart', (e) => {
-        if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = true;
-        this.safePreventDefault(e);
-      }, { passive: false });
-      this.blockButton.addEventListener('touchend', (e) => {
-        if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
-        this.safePreventDefault(e);
-      }, { passive: false });
-      this.blockButton.addEventListener('touchcancel', (e) => {
-        if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
-        this.safePreventDefault(e);
-      }, { passive: false });
-    } else {
-      this.blockButton.style.display = 'none';
+      // In PS mode: hide spells/equip; punchButton doubles as block/fire
+      this.spellsButton.style.display = 'none';
+      this.equipButton.style.display = 'none';
+      this.punchButton.classList.add('ps-block-btn');
     }
 
     this.mobileEquipButtons = [];
@@ -861,10 +850,37 @@ export class PlayerControls {
       if (event) this.safePreventDefault(event);
     };
 
-    bindActionPress(this.punchButton, {
-      onPressStart: onAttackPressStart,
-      onPressEnd: onAttackPressEnd
-    });
+    if (window.phoneSwordMode) {
+      // In PS mode the punch/fire button doubles as block (when sword) or fire (when gun)
+      this.punchButton.addEventListener('touchstart', (e) => {
+        this.safePreventDefault(e);
+        const w = this.getEquippedWeapon('right');
+        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
+        if (isGun) {
+          onAttackPressStart(e);
+        } else {
+          if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = true;
+        }
+      }, { passive: false });
+      this.punchButton.addEventListener('touchend', (e) => {
+        this.safePreventDefault(e);
+        const w = this.getEquippedWeapon('right');
+        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
+        if (isGun) {
+          onAttackPressEnd(e);
+        } else {
+          if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
+        }
+      }, { passive: false });
+      this.punchButton.addEventListener('touchcancel', (e) => {
+        if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
+      }, { passive: false });
+    } else {
+      bindActionPress(this.punchButton, {
+        onPressStart: onAttackPressStart,
+        onPressEnd: onAttackPressEnd
+      });
+    }
 
     const onSpellsToggle = (event) => {
       if (!this.enabled) return;
@@ -972,6 +988,10 @@ export class PlayerControls {
 
   getMobileAttackLabel() {
     const weapon = this.getEquippedWeapon('right');
+    if (window.phoneSwordMode) {
+      if (weapon?.itemId === 'pistol' || weapon?.itemId === 'bazooka') return 'Fire';
+      return '🛡 Block';
+    }
     if (weapon?.itemId === 'bow') return 'Bow';
     if (weapon?.itemId === 'bazooka') return 'Fire';
     if (weapon?.itemId === 'bomb') return 'Bomb';
@@ -1309,8 +1329,10 @@ export class PlayerControls {
     actionContainer.classList.toggle('mobile-freeze-mode', state === 'freeze');
 
     this.punchButton.textContent = this.getMobileAttackLabel();
-    this.spellsButton.textContent = 'Spells';
-    this.spellsButton.disabled = false;
+    if (!window.phoneSwordMode) {
+      this.spellsButton.textContent = 'Spells';
+      this.spellsButton.disabled = false;
+    }
 
     this.optionLeftButton.textContent = isIceGunEquipped ? 'Freeze' : 'Shield';
     this.optionLeftButton.disabled = false;
@@ -1398,10 +1420,15 @@ export class PlayerControls {
       this.optionLeftButton,
       this.optionCenterButton,
       this.optionRightButton,
-      this.blockButton,
       ...(this.mobileEquipButtons || []),
       ...(this.mobileItemActionButtons || [])
     ].forEach(clearButtonPos);
+
+    // Phone sword mode: only show punchButton (block/fire) — spells/equip already hidden
+    if (window.phoneSwordMode) {
+      this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
+      return;
+    }
 
     if (state === 'spell-options') {
       this.applyMobileButtonPosition(this.optionLeftButton, { x: 1, y: 1 });
@@ -1436,10 +1463,6 @@ export class PlayerControls {
     this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
     this.applyMobileButtonPosition(this.spellsButton, { x: 0, y: 1 });
     this.applyMobileButtonPosition(this.equipButton, { x: 1, y: 1 });
-    // In phone sword mode, place block button at a separate position (x:0, y:2)
-    if (window.phoneSwordMode) {
-      this.applyMobileButtonPosition(this.blockButton, { x: 0, y: 0 });
-    }
   }
 
   setupEventListeners() {
@@ -2587,13 +2610,15 @@ export class PlayerControls {
       this.playerX += movement.x * speed * deltaSeconds;
       this.playerZ += movement.z * speed * deltaSeconds;
 
-      const { groundY } = this.resolveGroundY(
-        this.playerX,
-        this.playerY + PLAYER_HALF_HEIGHT,
-        this.playerZ,
-        { includeSolidHit: false }
-      );
-      this.playerY = groundY;
+      if (!window.phoneSwordAirborne) {
+        const { groundY } = this.resolveGroundY(
+          this.playerX,
+          this.playerY + PLAYER_HALF_HEIGHT,
+          this.playerZ,
+          { includeSolidHit: false }
+        );
+        this.playerY = groundY;
+      }
 
       const newX = this.playerX;
       const newY = this.playerY;
