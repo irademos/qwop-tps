@@ -1031,6 +1031,10 @@ async function initCore(runtimeContext) {
   };
 
   // Default swing config — overridden live by the debug panel
+  window.phoneSwordWeaponCfg = window.phoneSwordWeaponCfg || {
+    shieldX: 90, shieldY: 0, shieldZ: 0,
+    gunX: 0, gunY: 180, gunZ: 0,
+  };
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
     speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
     mediumThreshold: 7000,  // deg/s — above this → medium tier (trail + rotation)
@@ -16050,8 +16054,16 @@ async function initCore(runtimeContext) {
     // Phone Sword: apply gyro quaternion to shield and pistol (less dramatic than sword)
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
       const _activeGyroForWeapons = _psw.bounceActive ? _psw.bounceCurrentQ : _phoneSwordGyroQ;
-      const _shieldBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0, 'YXZ'));
-      const _pistolBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0, 'YXZ'));
+      const _wCfg = window.phoneSwordWeaponCfg;
+      const _DEG = Math.PI / 180;
+      const _shieldBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+        (_wCfg?.shieldX ?? 90) * _DEG,
+        (_wCfg?.shieldY ?? 0)  * _DEG,
+        (_wCfg?.shieldZ ?? 0)  * _DEG, 'YXZ'));
+      const _pistolBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+        (_wCfg?.gunX ?? 0)   * _DEG,
+        (_wCfg?.gunY ?? 180) * _DEG,
+        (_wCfg?.gunZ ?? 0)   * _DEG, 'YXZ'));
       // Reduced-scale gyro for shield/pistol: slerp toward neutral to dampen
       const _dampedGyroQ = new THREE.Quaternion().slerpQuaternions(
         new THREE.Quaternion(), _activeGyroForWeapons, 0.45
