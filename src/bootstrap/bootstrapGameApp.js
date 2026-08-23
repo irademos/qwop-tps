@@ -1821,6 +1821,7 @@ async function initCore(runtimeContext) {
 
 
   syncBackgroundLoopForDisplayMode = () => {
+    if (window.phoneSwordMode && _psStageActive) return;
     const effectiveMode = displaySettings.mode === 'auto'
       ? (lastAutoMode || getAutoMode())
       : displaySettings.mode;
@@ -1832,6 +1833,7 @@ async function initCore(runtimeContext) {
   };
 
   const updateAutoDisplayMode = () => {
+    if (window.phoneSwordMode && _psStageActive) return;
     if (displaySettings.mode !== 'auto') return;
     const nextMode = getAutoMode();
     if (nextMode === lastAutoMode) return;
@@ -11814,6 +11816,49 @@ async function initCore(runtimeContext) {
   const PS_CAM_SWITCH_MIN_CLOSER = 3.0; // new target must be this many metres closer to switch immediately
   const PS_CAM_SWITCH_STABLE_MS = 2000; // or must be closest for this long
 
+  // Phone Sword: time-of-day choice ('random', 'day', 'night') and current stage night flag
+  let _psTimePref = 'random';
+  let _psCurrentIsNight = false;
+
+  // Phone Sword: song shuffling
+  const PS_DAY_SONGS   = ['Songs/day1.ogg','Songs/day2.ogg','Songs/day3.ogg','Songs/day4.ogg','Songs/day5.ogg','Songs/day6.ogg'];
+  const PS_NIGHT_SONGS = ['Songs/night1.ogg','Songs/night2.ogg'];
+  let _psSongAudio = null;
+  let _psSongPool  = [];
+
+  const _psPick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+  const _psGetNextSong = (isNight) => {
+    const src = isNight ? PS_NIGHT_SONGS : PS_DAY_SONGS;
+    if (_psSongPool.length === 0) _psSongPool = [...src];
+    const idx = Math.floor(Math.random() * _psSongPool.length);
+    const song = _psSongPool.splice(idx, 1)[0];
+    return song;
+  };
+
+  const _psPlayNextSong = (isNight) => {
+    const song = _psGetNextSong(isNight);
+    if (!_psSongAudio) {
+      _psSongAudio = new Audio(`assets/audio/${song}`);
+      _psSongAudio.volume = 0.5;
+    } else {
+      _psSongAudio.pause();
+      _psSongAudio.src = `assets/audio/${song}`;
+      _psSongAudio.currentTime = 0;
+    }
+    _psSongAudio.onended = () => { if (_psStageActive) _psPlayNextSong(isNight); };
+    _psSongAudio.play().catch(() => {});
+  };
+
+  const _psStopSong = () => {
+    if (_psSongAudio) {
+      _psSongAudio.onended = null;
+      _psSongAudio.pause();
+      _psSongAudio.currentTime = 0;
+    }
+    _psSongPool = [];
+  };
+
   const _psStageOverlay = document.getElementById('ps-stage-overlay');
   const _psStageBadge   = document.getElementById('ps-stage-badge');
   const _psStageEnemies = document.getElementById('ps-stage-enemies');
@@ -11890,6 +11935,7 @@ async function initCore(runtimeContext) {
   const _psShowWin = (onDone) => {
     _psWinShown = true;
     _psAutoWalking = false;
+    _psStopSong();
     _psWinTitle.textContent = 'YOU WIN!';
     _psWinSub.textContent = `Stage ${_psStage} Cleared!`;
     // force animation restart
@@ -11909,6 +11955,17 @@ async function initCore(runtimeContext) {
     const count = _psEnemyCount(stage);
     _psStageBadge.textContent = stage <= 50 ? `STAGE ${stage}` : 'FINAL STAGE';
     _psStageEnemies.textContent = `Defeat ${count} enemies`;
+
+    // Wire up time-picker buttons
+    const _timeBtns = _psStageOverlay.querySelectorAll('.ps-stage-time-btn');
+    _timeBtns.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.time === _psTimePref);
+      btn.onclick = () => {
+        _psTimePref = btn.dataset.time;
+        _timeBtns.forEach(b => b.classList.toggle('active', b === btn));
+      };
+    });
+
     _psStageOkBtn.onclick = () => {
       _psStageOverlay.classList.add('hidden');
       onOk(count);
@@ -11930,6 +11987,25 @@ async function initCore(runtimeContext) {
   };
 
   const _psStartStage = (stage) => {
+    // Determine day/night for this stage
+    if (_psTimePref === 'random') {
+      _psCurrentIsNight = Math.random() < 0.5;
+    } else {
+      _psCurrentIsNight = _psTimePref === 'night';
+    }
+    // Reset song pool so we shuffle fresh each stage
+    _psSongPool = [];
+    // Apply lighting/display for day or night
+    const _stageDisplayMode = _psCurrentIsNight ? 'night' : 'day';
+    lastAutoMode = _stageDisplayMode;
+    applyPresetForMode(_stageDisplayMode);
+    applyDisplaySettings();
+    clearRoadLightPool();
+
+    // Start stage music
+    _psStopSong();
+    _psPlayNextSong(_psCurrentIsNight);
+
     // Respawn player at a random location
     const spawnAngle = Math.random() * Math.PI * 2;
     const spawnDist  = 5 + Math.random() * 10;
@@ -11950,6 +12026,7 @@ async function initCore(runtimeContext) {
 
   // Restart the current stage after death (clears enemies, rebuilds, shows overlay)
   const _psRestartCurrentStage = () => {
+    _psStopSong();
     // Remove all living horde enemies
     for (let _ri = hordeEnemies.length - 1; _ri >= 0; _ri--) {
       const _re = hordeEnemies[_ri];
@@ -15004,6 +15081,7 @@ async function initCore(runtimeContext) {
   };
 
   const isNightDisplayMode = () => {
+    if (window.phoneSwordMode && _psStageActive) return _psCurrentIsNight;
     const effectiveMode = displaySettings.mode === 'auto'
       ? (lastAutoMode || getAutoMode())
       : displaySettings.mode;
