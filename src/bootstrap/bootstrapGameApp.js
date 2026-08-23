@@ -11768,7 +11768,10 @@ async function initCore(runtimeContext) {
   }
 
   // ── Phone Sword: stage progression system ─────────────────────────────────
-  let _psStage = 1;
+  const _psStageLsKey = () => profileNameKey ? `ps_stage_${profileNameKey}` : null;
+  const _psSavedStage = () => { try { const k = _psStageLsKey(); return k ? (parseInt(localStorage.getItem(k), 10) || 1) : 1; } catch (_) { return 1; } };
+  const _psSaveStage = (s) => { try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, s); } catch (_) {} };
+  let _psStage = _psSavedStage();
   let _psEnemyQueue = [];   // [{pos: THREE.Vector3, hearts: number, triggerDist: number}]
   let _psPathEnd = new THREE.Vector3();
   let _psAutoWalking = false;
@@ -11848,6 +11851,14 @@ async function initCore(runtimeContext) {
         triggerDist: pathLen * t - 10
       });
     }
+    // Spawn coins along the path
+    const coinCount = 8 + Math.floor(stage * 0.3);
+    for (let ci = 0; ci < coinCount; ci++) {
+      const ct = (ci + 0.5) / coinCount;
+      const cx = playerModel.position.x + _psAutoWalkDir.x * pathLen * ct + (Math.random() - 0.5) * 6;
+      const cz = playerModel.position.z + _psAutoWalkDir.z * pathLen * ct + (Math.random() - 0.5) * 6;
+      spawnCoinPickup(new THREE.Vector3(cx, playerModel.position.y, cz));
+    }
     _psAutoWalking = true;
     _psStageActive = true;
     _psWinShown = false;
@@ -11902,11 +11913,31 @@ async function initCore(runtimeContext) {
     _psBuildStage(stage);
   };
 
+  // Restart the current stage after death (clears enemies, rebuilds, shows overlay)
+  const _psRestartCurrentStage = () => {
+    // Remove all living horde enemies
+    for (let _ri = hordeEnemies.length - 1; _ri >= 0; _ri--) {
+      const _re = hordeEnemies[_ri];
+      if (_re.group?.parent) _re.group.parent.remove(_re.group);
+      try { _re.destroy?.(); } catch (_) {}
+    }
+    hordeEnemies.length = 0;
+    _psEnemyQueue = [];
+    _psAutoWalking = false;
+    _psStageActive = false;
+    _psWinShown = false;
+    _psShowStageOverlay(_psStage, () => _psStartStage(_psStage));
+  };
+
   if (window.phoneSwordMode && rapierWorld) {
     window.hordeEnemies = hordeEnemies;
-    // If player is already dead at startup, auto-respawn silently then show stage 1
+    // Hide hunger and magic bars in phone sword mode
+    const _psHungerBar = document.getElementById('hunger-bar');
+    const _psMagicBar = document.getElementById('magic-bar');
+    if (_psHungerBar) _psHungerBar.style.display = 'none';
+    if (_psMagicBar) _psMagicBar.style.display = 'none';
     const _psInit = () => {
-      _psShowStageOverlay(1, () => _psStartStage(1));
+      _psShowStageOverlay(_psStage, () => _psStartStage(_psStage));
     };
     // Delay briefly so the rest of init completes first
     setTimeout(_psInit, 600);
@@ -13557,6 +13588,9 @@ async function initCore(runtimeContext) {
       clearInterval(interval);
       hideGameOver();
       respawnPlayer();
+      if (window.phoneSwordMode) {
+        _psRestartCurrentStage();
+      }
     };
 
     noBtn.onclick = () => {
@@ -15303,7 +15337,7 @@ async function initCore(runtimeContext) {
           }
         }
 
-        if (statsState.hunger <= 0 && statsState.health > 0) {
+        if (!window.phoneSwordMode && statsState.hunger <= 0 && statsState.health > 0) {
           const healthDecay = HUNGER_HEALTH_DECAY_SEGMENTS_PER_SECOND * elapsedSeconds;
           if (healthDecay > 0) {
             healthDecayRemainder += healthDecay;
@@ -15916,9 +15950,11 @@ async function initCore(runtimeContext) {
         _psShowWin(() => {
           if (_nextStage <= 50) {
             _psStage = _nextStage;
+            _psSaveStage(_psStage);
             _psShowStageOverlay(_nextStage, () => _psStartStage(_nextStage));
           } else {
             _psStage = 1;
+            _psSaveStage(_psStage);
             _psShowStageOverlay(1, () => _psStartStage(1));
           }
         });
@@ -16043,6 +16079,13 @@ async function initCore(runtimeContext) {
       for (let _hi = hordeEnemies.length - 1; _hi >= 0; _hi--) {
         const _he = hordeEnemies[_hi];
         if (_he.isDead) {
+          // Drop coins on first death frame (phone sword mode)
+          if (window.phoneSwordMode && !_he._coinDropped) {
+            _he._coinDropped = true;
+            const _dropPos = _he.group.position.clone();
+            spawnCoinPickup(_dropPos);
+            if (Math.random() < 0.4) spawnCoinPickup(_dropPos.clone().add(new THREE.Vector3((Math.random()-0.5)*1.5, 0, (Math.random()-0.5)*1.5)));
+          }
           // Remove from array once the Three.js group has been removed from scene
           if (!_he.group.parent) {
             hordeEnemies.splice(_hi, 1);
