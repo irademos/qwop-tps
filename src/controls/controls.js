@@ -578,7 +578,7 @@ export class PlayerControls {
       if (!this.enabled || this.isEngaged || this.gyroActive) return;
       for (const touch of event.changedTouches) {
         const target = document.elementFromPoint(touch.clientX, touch.clientY);
-        if (target && !target.closest('#joystick-container') && !target.closest('#jump-button') && !target.closest('#action-buttons') && !target.closest('#gyro-button')) {
+        if (target && !target.closest('#joystick-container') && !target.closest('#jump-button') && !target.closest('#action-buttons')) {
           this.cameraTouchId = touch.identifier;
           this.touchStartX = touch.clientX;
           this.touchStartY = touch.clientY;
@@ -619,58 +619,9 @@ export class PlayerControls {
       }
     });
 
-    // Gyroscope button — hidden in phone sword mode (uses separate gyro input)
-    let gyroButton = document.getElementById('gyro-button');
-    if (!gyroButton) {
-      gyroButton = document.createElement('div');
-      gyroButton.id = 'gyro-button';
-      document.body.appendChild(gyroButton);
-    }
-    if (window.phoneSwordMode) {
-      gyroButton.style.display = 'none';
-    }
-    const updateGyroButtonLabel = () => {
-      gyroButton.innerHTML = this.gyroActive
-        ? '<span style="font-size:18px">⟳</span><span>RECAL</span>'
-        : '<span style="font-size:18px">⟳</span><span>GYRO</span>';
-      gyroButton.classList.toggle('active', this.gyroActive);
-    };
-    updateGyroButtonLabel();
-
-    let gyroLongPressTimer = null;
-    gyroButton.addEventListener('touchstart', async (event) => {
-      this.safePreventDefault(event);
-      gyroLongPressTimer = setTimeout(() => {
-        gyroLongPressTimer = null;
-        if (this.gyroActive) {
-          this.disableGyroscope();
-          updateGyroButtonLabel();
-        }
-      }, 600);
-
-      if (!this.gyroActive) {
-        gyroButton.innerHTML = '<span>...</span>';
-        const ok = await this.initGyroscope();
-        if (ok) {
-          updateGyroButtonLabel();
-        } else {
-          gyroButton.innerHTML = '<span style="font-size:18px">⟳</span><span>GYRO</span>';
-          gyroButton.classList.remove('active');
-        }
-      }
-    }, { passive: false });
-
-    gyroButton.addEventListener('touchend', (event) => {
-      this.safePreventDefault(event);
-      if (gyroLongPressTimer !== null) {
-        clearTimeout(gyroLongPressTimer);
-        gyroLongPressTimer = null;
-        // Short tap while active = recalibrate
-        if (this.gyroActive) {
-          this.calibrateGyroscope();
-        }
-      }
-    }, { passive: false });
+    // Remove any existing gyro button (no longer supported)
+    const _existingGyroBtn = document.getElementById('gyro-button');
+    if (_existingGyroBtn) _existingGyroBtn.remove();
   }
 
   // Compute device-orientation quaternion using the Three.js DeviceOrientationControls approach

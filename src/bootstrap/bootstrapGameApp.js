@@ -15849,6 +15849,7 @@ async function initCore(runtimeContext) {
 
       // ── Sword-vs-sword collision + sweep hit detection for horde enemies ─────
       if (window.gameMode === 'horde') {
+        let _swingHitOccurred = false;
         for (const _he of hordeEnemies) {
           if (_he.isDead || !_he._swordGroup) continue;
 
@@ -15890,6 +15891,16 @@ async function initCore(runtimeContext) {
               _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
               _psw.bounceCurrentQ.copy(_activeQ);
               window._pswShowBlockFlash?.('player');
+              // Step forward on blocked swing (swing was fast enough but blocked)
+              _swingHitOccurred = true; // prevent duplicate step from miss path
+              const _blockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
+              _blockFwd.y = 0; _blockFwd.normalize();
+              const _bsx = playerModel.position.x + _blockFwd.x * 0.35;
+              const _bsz = playerModel.position.z + _blockFwd.z * 0.35;
+              playerModel.position.x = _bsx; playerModel.position.z = _bsz;
+              playerControls.playerX = _bsx; playerControls.playerZ = _bsz;
+              playerControls.lastPosition?.set(_bsx, playerModel.position.y, _bsz);
+              if (playerControls.body) playerControls.body.setNextKinematicTranslation({ x: _bsx, y: playerModel.position.y + 0.6, z: _bsz });
             }
           }
 
@@ -15934,24 +15945,24 @@ async function initCore(runtimeContext) {
                       ragdoll: false,
                     });
                   }
-                  // Player lunges forward a step on hit
-                  const _stepDist = 0.6;
-                  const _stepX = playerModel.position.x + _sweepDir.x * _stepDist;
-                  const _stepZ = playerModel.position.z + _sweepDir.z * _stepDist;
-                  playerModel.position.x = _stepX;
-                  playerModel.position.z = _stepZ;
-                  playerControls.playerX = _stepX;
-                  playerControls.playerZ = _stepZ;
-                  playerControls.lastPosition?.set(_stepX, playerModel.position.y, _stepZ);
-                  if (playerControls.body) {
-                    playerControls.body.setNextKinematicTranslation({ x: _stepX, y: playerModel.position.y + 0.6, z: _stepZ });
-                  }
+                  _swingHitOccurred = true;
                   audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
                   _he._playerSwordLastHit = _nowMsPS;
                 }
               }
             }
           }
+        }
+        // Forward lunge on fast swing that missed all enemies
+        if (_playerMovingFast && !_swingHitOccurred) {
+          const _missFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
+          _missFwd.y = 0; _missFwd.normalize();
+          const _msx = playerModel.position.x + _missFwd.x * 0.6;
+          const _msz = playerModel.position.z + _missFwd.z * 0.6;
+          playerModel.position.x = _msx; playerModel.position.z = _msz;
+          playerControls.playerX = _msx; playerControls.playerZ = _msz;
+          playerControls.lastPosition?.set(_msx, playerModel.position.y, _msz);
+          if (playerControls.body) playerControls.body.setNextKinematicTranslation({ x: _msx, y: playerModel.position.y + 0.6, z: _msz });
         }
       }
 
@@ -16226,20 +16237,6 @@ async function initCore(runtimeContext) {
             const _kbSpeed = _str === 1 ? _baseKB.horizSpeed * 0.4 : _str === 3 ? _baseKB.horizSpeed * 1.6 : _baseKB.horizSpeed;
             _he.applyDamage(_dmg);
             _he.applyDirectKnockback({ direction: _hitDir, ..._baseKB, horizSpeed: _kbSpeed });
-            // Player steps forward on hit in phone sword mode
-            if (window.phoneSwordMode) {
-              const _stepDist2 = 0.5;
-              const _stepX2 = playerModel.position.x + _hitDir.x * _stepDist2;
-              const _stepZ2 = playerModel.position.z + _hitDir.z * _stepDist2;
-              playerModel.position.x = _stepX2;
-              playerModel.position.z = _stepZ2;
-              playerControls.playerX = _stepX2;
-              playerControls.playerZ = _stepZ2;
-              playerControls.lastPosition?.set(_stepX2, playerModel.position.y, _stepZ2);
-              if (playerControls.body) {
-                playerControls.body.setNextKinematicTranslation({ x: _stepX2, y: playerModel.position.y + 0.6, z: _stepZ2 });
-              }
-            }
             audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
             _he._playerSwordLastHit = _nowMs2;
             // Close the slow-swing hit window after first hit so it only triggers once

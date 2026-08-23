@@ -1174,7 +1174,7 @@ body.settings-open #inventory-button {
   display: none;
   justify-content: center;
   align-items: center;
-  z-index: 999;
+  z-index: 9500;
   overflow-y: auto;
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
