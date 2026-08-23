@@ -14,7 +14,12 @@ export {
   saveSleepTimestamp,
   saveWalkingStats,
   saveStatsImmediate,
-  saveStatsThrottled
+  saveStatsThrottled,
+  loadPhoneSwordLeaderboards,
+  savePhoneSwordStats,
+  loadPhoneSwordStats,
+  savePhoneSwordStage,
+  loadPhoneSwordStage
 } from '../player/playerProfile.js';
 
 export {

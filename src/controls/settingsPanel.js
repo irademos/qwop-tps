@@ -213,7 +213,30 @@ function buildCharacterPanel() {
     elements.characterStatFields[key] = statValue;
   });
 
-  panelEl.append(nameGroup, characterGroup, previewWrapper, customizeButton, statsTitle, statsGrid);
+  // Phone Sword Stats section (only visible in phone sword mode)
+  const psStatsTitle = createElement('h3', 'settings-section-title', 'Phone Sword Stats');
+  psStatsTitle.id = 'ps-stats-title';
+  if (!window.phoneSwordMode) psStatsTitle.style.display = 'none';
+  const psStatsGrid = createElement('div', 'settings-stats-grid');
+  psStatsGrid.id = 'ps-stats-grid';
+  if (!window.phoneSwordMode) psStatsGrid.style.display = 'none';
+  const PS_STAT_DEFS = [
+    { key: 'kills', label: 'PS Kills' },
+    { key: 'deaths', label: 'PS Deaths' },
+    { key: 'highestStage', label: 'Highest Stage' }
+  ];
+  elements.phoneSwordStatFields = {};
+  PS_STAT_DEFS.forEach(({ key, label }) => {
+    const statRow = createElement('div', 'settings-stat');
+    const statLabel = createElement('span', 'settings-stat-label', label);
+    const statValue = createElement('span', 'settings-stat-value', '—');
+    statValue.dataset.field = `ps-stat-${key}`;
+    statRow.append(statLabel, statValue);
+    psStatsGrid.appendChild(statRow);
+    elements.phoneSwordStatFields[key] = statValue;
+  });
+
+  panelEl.append(nameGroup, characterGroup, previewWrapper, customizeButton, statsTitle, statsGrid, psStatsTitle, psStatsGrid);
 
   elements.nameInput = nameInput;
   elements.nameSaveButton = nameSaveButton;
@@ -1102,7 +1125,18 @@ function buildLeaderboardOverlay() {
   xpTab.dataset.leaderboardTab = 'xp';
   xpTab.setAttribute('role', 'tab');
   xpTab.setAttribute('aria-selected', 'false');
-  tabs.append(killsTab, xpTab);
+  // Phone Sword mode tabs (shown in all modes so players can browse PS scores)
+  const psKillsTab = createElement('button', 'leaderboard-tab leaderboard-tab-ps', '⚔️ PS Kills');
+  psKillsTab.type = 'button';
+  psKillsTab.dataset.leaderboardTab = 'ps-kills';
+  psKillsTab.setAttribute('role', 'tab');
+  psKillsTab.setAttribute('aria-selected', 'false');
+  const psStageTab = createElement('button', 'leaderboard-tab leaderboard-tab-ps', '⚔️ PS Stage');
+  psStageTab.type = 'button';
+  psStageTab.dataset.leaderboardTab = 'ps-stage';
+  psStageTab.setAttribute('role', 'tab');
+  psStageTab.setAttribute('aria-selected', 'false');
+  tabs.append(killsTab, xpTab, psKillsTab, psStageTab);
 
   const body = createElement('div', 'leaderboard-body');
   const status = createElement('div', 'settings-muted', 'Loading leaderboard...');
@@ -1118,15 +1152,16 @@ function buildLeaderboardOverlay() {
   leaderboardPanel.append(header, tabs, body, actions);
   leaderboardOverlay.replaceChildren(leaderboardPanel);
 
-  elements.leaderboardTabs = { kills: killsTab, xp: xpTab };
+  elements.leaderboardTabs = { kills: killsTab, xp: xpTab, 'ps-kills': psKillsTab, 'ps-stage': psStageTab };
   elements.leaderboardList = list;
   elements.leaderboardStatus = status;
   elements.leaderboardActiveTab = 'kills';
-  elements.leaderboardData = { topKills: [], topXp: [] };
+  elements.leaderboardData = { topKills: [], topXp: [], psTopKills: [], psTopStage: [] };
 }
 
 function setLeaderboardTab(tabId) {
-  const safeTab = tabId === 'xp' ? 'xp' : 'kills';
+  const validTabs = ['kills', 'xp', 'ps-kills', 'ps-stage'];
+  const safeTab = validTabs.includes(tabId) ? tabId : 'kills';
   elements.leaderboardActiveTab = safeTab;
   Object.entries(elements.leaderboardTabs || {}).forEach(([id, button]) => {
     const active = id === safeTab;
@@ -1138,11 +1173,21 @@ function setLeaderboardTab(tabId) {
 
 function renderLeaderboard() {
   if (!elements.leaderboardList || !elements.leaderboardStatus) return;
-  const activeTab = elements.leaderboardActiveTab === 'xp' ? 'xp' : 'kills';
-  const rows = activeTab === 'xp'
-    ? (elements.leaderboardData?.topXp || [])
-    : (elements.leaderboardData?.topKills || []);
-  const valueLabel = activeTab === 'xp' ? 'XP' : 'kills';
+  const activeTab = elements.leaderboardActiveTab;
+  let rows, valueLabel;
+  if (activeTab === 'xp') {
+    rows = elements.leaderboardData?.topXp || [];
+    valueLabel = 'XP';
+  } else if (activeTab === 'ps-kills') {
+    rows = elements.leaderboardData?.psTopKills || [];
+    valueLabel = 'PS kills';
+  } else if (activeTab === 'ps-stage') {
+    rows = elements.leaderboardData?.psTopStage || [];
+    valueLabel = 'stage';
+  } else {
+    rows = elements.leaderboardData?.topKills || [];
+    valueLabel = 'kills';
+  }
   elements.leaderboardList.innerHTML = '';
   if (!rows.length) {
     elements.leaderboardStatus.textContent = 'No scores yet.';
@@ -1175,7 +1220,16 @@ async function openLeaderboardOverlay() {
     if (!context.appState?.getLeaderboards) {
       throw new Error('Leaderboards unavailable');
     }
-    elements.leaderboardData = await context.appState.getLeaderboards(10);
+    const [regularData, psData] = await Promise.allSettled([
+      context.appState.getLeaderboards(10),
+      context.appState.getPhoneSwordLeaderboards?.(10) ?? Promise.resolve({ topKills: [], topDeaths: [], topStage: [] })
+    ]);
+    elements.leaderboardData = {
+      topKills: regularData.status === 'fulfilled' ? (regularData.value?.topKills ?? []) : [],
+      topXp: regularData.status === 'fulfilled' ? (regularData.value?.topXp ?? []) : [],
+      psTopKills: psData.status === 'fulfilled' ? (psData.value?.topKills ?? []) : [],
+      psTopStage: psData.status === 'fulfilled' ? (psData.value?.topStage ?? []) : []
+    };
     renderLeaderboard();
   } catch (error) {
     console.warn('Failed to load leaderboard:', error);
@@ -2152,6 +2206,13 @@ export function updateUI() {
     const stats = context.appState.getPlayerStats() || {};
     Object.entries(elements.characterStatFields).forEach(([key, node]) => {
       node.textContent = formatStatValue(key, stats[key]);
+    });
+  }
+  if (elements.phoneSwordStatFields && window.phoneSwordMode) {
+    const psStats = context.appState?.getPhoneSwordStats?.() || {};
+    Object.entries(elements.phoneSwordStatFields).forEach(([key, node]) => {
+      const val = psStats[key];
+      node.textContent = Number.isFinite(val) ? String(Math.max(0, Math.floor(val))) : '—';
     });
   }
 

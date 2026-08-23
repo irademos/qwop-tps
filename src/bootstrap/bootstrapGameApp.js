@@ -132,6 +132,11 @@ import {
   saveWalkingStats,
   saveStatsImmediate,
   saveStatsThrottled,
+  loadPhoneSwordLeaderboards,
+  savePhoneSwordStats,
+  loadPhoneSwordStats,
+  savePhoneSwordStage,
+  loadPhoneSwordStage,
   initMonsterPersistence,
   loadMonstersSnapshot,
   subscribeMonsterUpdates,
@@ -11770,9 +11775,26 @@ async function initCore(runtimeContext) {
   // ── Phone Sword: stage progression system ─────────────────────────────────
   const _psStageLsKey = () => profileNameKey ? `ps_stage_${profileNameKey}` : null;
   const _psSavedStage = () => { try { const k = _psStageLsKey(); return k ? (parseInt(localStorage.getItem(k), 10) || 1) : 1; } catch (_) { return 1; } };
-  const _psSaveStage = (s) => { try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, s); } catch (_) {} };
+  const _psSaveStage = (s) => {
+    try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, s); } catch (_) {}
+    if (profileNameKey) {
+      void savePhoneSwordStage(profileNameKey, s);
+      // Also update highestStage in phoneSwordStats
+      if (s > (_psStats.highestStage || 1)) {
+        _psStats.highestStage = s;
+        void savePhoneSwordStats(profileNameKey, { ..._psStats });
+      }
+    }
+  };
+  // Phone sword session stats (kills, deaths, highestStage)
+  let _psStats = { kills: 0, deaths: 0, highestStage: 1 };
+  // Load stage from Firebase first (async), fallback to localStorage
   let _psStage = _psSavedStage();
   let _psEnemyQueue = [];   // [{pos: THREE.Vector3, hearts: number, triggerDist: number}]
+  let _psJumpVelY = 0;       // vertical velocity for phone sword jump
+  let _psGroundY = null;     // ground Y level for phone sword mode
+  const PS_JUMP_FORCE = 8.5; // initial upward speed m/s
+  const PS_GRAVITY = 20;     // gravity m/s²
   let _psPathEnd = new THREE.Vector3();
   let _psAutoWalking = false;
   let _psAutoWalkDir = new THREE.Vector3();
@@ -11891,6 +11913,19 @@ async function initCore(runtimeContext) {
       _psStageOverlay.classList.add('hidden');
       onOk(count);
     };
+    // Shop button — opens merchant panel if available
+    let _psShopBtn = document.getElementById('ps-stage-shop-btn');
+    if (!_psShopBtn) {
+      _psShopBtn = document.createElement('button');
+      _psShopBtn.id = 'ps-stage-shop-btn';
+      _psShopBtn.className = 'ps-stage-shop-btn';
+      _psShopBtn.textContent = '🛒 Shop';
+      _psStageOkBtn.parentNode?.insertBefore(_psShopBtn, _psStageOkBtn);
+    }
+    _psShopBtn.onclick = async () => {
+      const mod = await import('../controls/merchantPanel.js').catch(() => null);
+      mod?.openMerchantPanel?.('buy');
+    };
     _psStageOverlay.classList.remove('hidden');
   };
 
@@ -11936,7 +11971,22 @@ async function initCore(runtimeContext) {
     const _psMagicBar = document.getElementById('magic-bar');
     if (_psHungerBar) _psHungerBar.style.display = 'none';
     if (_psMagicBar) _psMagicBar.style.display = 'none';
-    const _psInit = () => {
+    const _psInit = async () => {
+      // Load PS stats and stage from Firebase (falls back gracefully)
+      if (profileNameKey) {
+        try {
+          const [fbStats, fbStage] = await Promise.all([
+            loadPhoneSwordStats(profileNameKey),
+            loadPhoneSwordStage(profileNameKey)
+          ]);
+          _psStats = fbStats;
+          // Use whichever is higher: Firebase stage or localStorage
+          const lsStage = _psSavedStage();
+          _psStage = Math.max(fbStage, lsStage);
+          // Sync localStorage to Firebase value
+          try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, _psStage); } catch (_) {}
+        } catch (_) { /* keep localStorage value */ }
+      }
       _psShowStageOverlay(_psStage, () => _psStartStage(_psStage));
     };
     // Delay briefly so the rest of init completes first
@@ -13589,6 +13639,8 @@ async function initCore(runtimeContext) {
       hideGameOver();
       respawnPlayer();
       if (window.phoneSwordMode) {
+        _psStats.deaths = (_psStats.deaths || 0) + 1;
+        if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
         _psRestartCurrentStage();
       }
     };
@@ -14468,6 +14520,8 @@ async function initCore(runtimeContext) {
     },
     getPlayerStats: () => ({ ...statsState }),
     getLeaderboards: (limit = 10) => loadLeaderboards(limit),
+    getPhoneSwordLeaderboards: (limit = 10) => loadPhoneSwordLeaderboards(limit),
+    getPhoneSwordStats: () => ({ ..._psStats }),
     getQuestLog: () => window.questManager?.getQuestLog?.() || [],
     getAchievements: () => getAchievementView(achievementState),
     claimAchievementReward: (achievementId) => {
@@ -15795,6 +15849,12 @@ async function initCore(runtimeContext) {
 
       // ── Sword-vs-sword collision + sweep hit detection for horde enemies ─────
       if (window.gameMode === 'horde') {
+        let _swingHitOccurred = false;
+        const _colAngSpd  = window._pswDebugSpeed ?? 0;
+        const _colMinSpd  = window.phoneSwordSwingCfg?.minSweepSpeed ?? 100;
+        const _colSweepDist = _psw.prevTipWorld ? _tipWorld.distanceTo(_psw.prevTipWorld) : 0;
+        const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
+        const _playerMovingFast = _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
         for (const _he of hordeEnemies) {
           if (_he.isDead || !_he._swordGroup) continue;
 
@@ -15812,12 +15872,6 @@ async function initCore(runtimeContext) {
           }
 
           const _isBlocking = !!window.phoneSwordGyro?.blocking;
-          // Only bounce the player's sword when not blocking AND the sword is moving fast enough
-          const _colAngSpd  = window._pswDebugSpeed ?? 0;
-          const _colMinSpd  = window.phoneSwordSwingCfg?.minSweepSpeed ?? 100;
-          const _colSweepDist = _psw.prevTipWorld ? _tipWorld.distanceTo(_psw.prevTipWorld) : 0;
-          const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
-          const _playerMovingFast = _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
 
           if (_swordCollision) {
             // Enemy sword always bounces on collision
@@ -15836,6 +15890,16 @@ async function initCore(runtimeContext) {
               _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
               _psw.bounceCurrentQ.copy(_activeQ);
               window._pswShowBlockFlash?.('player');
+              // Step forward on blocked swing (swing was fast enough but blocked)
+              _swingHitOccurred = true; // prevent duplicate step from miss path
+              const _blockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
+              _blockFwd.y = 0; _blockFwd.normalize();
+              const _bsx = playerModel.position.x + _blockFwd.x * 0.09;
+              const _bsz = playerModel.position.z + _blockFwd.z * 0.09;
+              playerModel.position.x = _bsx; playerModel.position.z = _bsz;
+              playerControls.playerX = _bsx; playerControls.playerZ = _bsz;
+              playerControls.lastPosition?.set(_bsx, playerModel.position.y, _bsz);
+              if (playerControls.body) playerControls.body.setNextKinematicTranslation({ x: _bsx, y: playerModel.position.y + 0.6, z: _bsz });
             }
           }
 
@@ -15880,12 +15944,24 @@ async function initCore(runtimeContext) {
                       ragdoll: false,
                     });
                   }
+                  _swingHitOccurred = true;
                   audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
                   _he._playerSwordLastHit = _nowMsPS;
                 }
               }
             }
           }
+        }
+        // Forward lunge on fast swing that missed all enemies
+        if (_playerMovingFast && !_swingHitOccurred) {
+          const _missFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
+          _missFwd.y = 0; _missFwd.normalize();
+          const _msx = playerModel.position.x + _missFwd.x * 0.15;
+          const _msz = playerModel.position.z + _missFwd.z * 0.15;
+          playerModel.position.x = _msx; playerModel.position.z = _msz;
+          playerControls.playerX = _msx; playerControls.playerZ = _msz;
+          playerControls.lastPosition?.set(_msx, playerModel.position.y, _msz);
+          if (playerControls.body) playerControls.body.setNextKinematicTranslation({ x: _msx, y: playerModel.position.y + 0.6, z: _msz });
         }
       }
 
@@ -16037,6 +16113,37 @@ async function initCore(runtimeContext) {
       }
     }
 
+    // ── Phone sword jump (runs regardless of enemy count) ─────────────────
+    if (window.phoneSwordMode && window.gameMode === 'horde' && playerModel) {
+      if (_psGroundY === null) _psGroundY = playerModel.position.y;
+      if (window.phoneSwordJumpPressed) {
+        window.phoneSwordJumpPressed = false;
+        if (playerModel.position.y <= _psGroundY + 0.05) {
+          _psJumpVelY = PS_JUMP_FORCE;
+          window.phoneSwordAirborne = true;
+        }
+      }
+      if (_psJumpVelY !== 0) {
+        _psJumpVelY -= PS_GRAVITY * frameDelta;
+        playerModel.position.y += _psJumpVelY * frameDelta;
+        playerControls.playerY = playerModel.position.y;
+        if (playerControls.body) {
+          playerControls.body.setNextKinematicTranslation({
+            x: playerModel.position.x,
+            y: playerModel.position.y + 0.6,
+            z: playerModel.position.z
+          });
+        }
+        if (playerModel.position.y <= _psGroundY) {
+          playerModel.position.y = _psGroundY;
+          playerControls.playerY = _psGroundY;
+          _psJumpVelY = 0;
+          window.phoneSwordAirborne = false;
+          playerControls.canJump = true;
+        }
+      }
+    }
+
     // ── Horde enemy update ─────────────────────────────────────────────────
     if (window.gameMode === 'horde' && hordeEnemies.length > 0) {
       // Sync kinematic player body to visual position each frame
@@ -16090,6 +16197,10 @@ async function initCore(runtimeContext) {
           if (!_he.group.parent) {
             hordeEnemies.splice(_hi, 1);
             _justDied++;
+            if (window.phoneSwordMode) {
+              _psStats.kills = (_psStats.kills || 0) + 1;
+              if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
+            }
           } else {
             // Still call update so physics ragdoll position/rotation syncs to visual
             _he.update(frameDelta, null, null, false, false);

@@ -59,6 +59,12 @@ const DEFAULT_WALKING_STATS = {
 };
 const DEFAULT_COMPANIONS = {};
 
+const DEFAULT_PHONE_SWORD_STATS = {
+  kills: 0,
+  deaths: 0,
+  highestStage: 1
+};
+
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
 const pendingInventoryByName = new Map();
@@ -268,6 +274,93 @@ export async function loadLeaderboards(limit = 10) {
     topKills: killsResult.status === 'fulfilled' ? killsResult.value : [],
     topXp: xpResult.status === 'fulfilled' ? xpResult.value : []
   };
+}
+
+// ── Phone Sword leaderboard ──────────────────────────────────────────────────
+
+async function loadPhoneSwordLeaderboardByMetric(metric, limit = 10) {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(50, Math.floor(limit))) : 10;
+  const lbQuery = query(
+    ref(db, 'profiles'),
+    orderByChild(`phoneSwordStats/${metric}`),
+    limitToLast(safeLimit)
+  );
+  const snapshot = await get(lbQuery);
+  const entries = [];
+  snapshot.forEach((child) => {
+    const profile = child.val();
+    const psStats = profile?.phoneSwordStats && typeof profile.phoneSwordStats === 'object' ? profile.phoneSwordStats : {};
+    const value = Number(psStats[metric]);
+    entries.push({
+      id: child.key,
+      name: typeof profile?.name === 'string' && profile.name.trim() ? profile.name.trim() : child.key,
+      value: Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+    });
+  });
+  return entries
+    .filter(e => e.value > 0)
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+    .slice(0, safeLimit);
+}
+
+export async function loadPhoneSwordLeaderboards(limit = 10) {
+  const [killsResult, deathsResult, stageResult] = await Promise.allSettled([
+    loadPhoneSwordLeaderboardByMetric('kills', limit),
+    loadPhoneSwordLeaderboardByMetric('deaths', limit),
+    loadPhoneSwordLeaderboardByMetric('highestStage', limit)
+  ]);
+  return {
+    topKills: killsResult.status === 'fulfilled' ? killsResult.value : [],
+    topDeaths: deathsResult.status === 'fulfilled' ? deathsResult.value : [],
+    topStage: stageResult.status === 'fulfilled' ? stageResult.value : []
+  };
+}
+
+export async function savePhoneSwordStats(nameKey, psStats) {
+  if (!nameKey || !psStats) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}/phoneSwordStats`), { ...psStats });
+  } catch (err) {
+    console.warn('Failed to save phone sword stats:', err);
+  }
+}
+
+export async function loadPhoneSwordStats(nameKey) {
+  if (!nameKey) return { ...DEFAULT_PHONE_SWORD_STATS };
+  try {
+    const snap = await get(ref(db, `profiles/${nameKey}/phoneSwordStats`));
+    const val = snap.val();
+    if (!val) return { ...DEFAULT_PHONE_SWORD_STATS };
+    return {
+      kills: Math.max(0, Math.floor(Number(val.kills) || 0)),
+      deaths: Math.max(0, Math.floor(Number(val.deaths) || 0)),
+      highestStage: Math.max(1, Math.floor(Number(val.highestStage) || 1))
+    };
+  } catch (err) {
+    console.warn('Failed to load phone sword stats:', err);
+    return { ...DEFAULT_PHONE_SWORD_STATS };
+  }
+}
+
+export async function savePhoneSwordStage(nameKey, stage) {
+  if (!nameKey || !Number.isFinite(stage)) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}/phoneSwordStats`), { currentStage: Math.max(1, Math.floor(stage)) });
+  } catch (err) {
+    console.warn('Failed to save phone sword stage:', err);
+  }
+}
+
+export async function loadPhoneSwordStage(nameKey) {
+  if (!nameKey) return 1;
+  try {
+    const snap = await get(ref(db, `profiles/${nameKey}/phoneSwordStats/currentStage`));
+    const val = snap.val();
+    return Math.max(1, Math.floor(Number(val) || 1));
+  } catch (err) {
+    console.warn('Failed to load phone sword stage:', err);
+    return 1;
+  }
 }
 
 async function loadProfileForName(profileRef, trimmedName) {

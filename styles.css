@@ -1174,7 +1174,7 @@ body.settings-open #inventory-button {
   display: none;
   justify-content: center;
   align-items: center;
-  z-index: 999;
+  z-index: 9500;
   overflow-y: auto;
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
@@ -3196,6 +3196,36 @@ body.settings-open #inventory-button {
 }
 .ps-stage-ok-btn:active { transform: scale(0.95); }
 .ps-stage-ok-btn:hover  { box-shadow: 0 6px 32px rgba(99,102,241,0.8); }
+
+.ps-stage-shop-btn {
+  background: linear-gradient(135deg, #059669, #047857);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  padding: 14px 36px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(5,150,105,0.45);
+  transition: transform 0.1s, box-shadow 0.1s;
+  margin-top: 8px;
+  margin-right: 12px;
+}
+.ps-stage-shop-btn:active { transform: scale(0.95); }
+.ps-stage-shop-btn:hover  { box-shadow: 0 6px 28px rgba(5,150,105,0.7); }
+
+/* ── Phone Sword: Block button ──────────────────────────────────────────────── */
+.ps-block-btn {
+  background: rgba(30, 80, 180, 0.75) !important;
+  color: #fff !important;
+  border: 2px solid rgba(100,160,255,0.7) !important;
+}
+
+/* ── Phone Sword: Leaderboard PS tabs ────────────────────────────────────────── */
+.leaderboard-tab-ps {
+  font-size: 0.85em;
+}
 
 /* ── Phone Sword: Win overlay ───────────────────────────────────────────────── */
 .ps-win-overlay {

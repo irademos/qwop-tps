@@ -539,7 +539,11 @@ export class PlayerControls {
     document.getElementById('jump-button').addEventListener('touchstart', (event) => {
       if (!this.enabled || this.isInWater) return;
       this.jumpButtonPressed = true;
-      this.tryJump();
+      if (window.phoneSwordMode) {
+        window.phoneSwordJumpPressed = true;
+      } else {
+        this.tryJump();
+      }
       this.safePreventDefault(event);
     });
 
@@ -574,7 +578,7 @@ export class PlayerControls {
       if (!this.enabled || this.isEngaged || this.gyroActive) return;
       for (const touch of event.changedTouches) {
         const target = document.elementFromPoint(touch.clientX, touch.clientY);
-        if (target && !target.closest('#joystick-container') && !target.closest('#jump-button') && !target.closest('#action-buttons') && !target.closest('#gyro-button')) {
+        if (target && !target.closest('#joystick-container') && !target.closest('#jump-button') && !target.closest('#action-buttons')) {
           this.cameraTouchId = touch.identifier;
           this.touchStartX = touch.clientX;
           this.touchStartY = touch.clientY;
@@ -615,55 +619,9 @@ export class PlayerControls {
       }
     });
 
-    // Gyroscope button
-    let gyroButton = document.getElementById('gyro-button');
-    if (!gyroButton) {
-      gyroButton = document.createElement('div');
-      gyroButton.id = 'gyro-button';
-      document.body.appendChild(gyroButton);
-    }
-    const updateGyroButtonLabel = () => {
-      gyroButton.innerHTML = this.gyroActive
-        ? '<span style="font-size:18px">⟳</span><span>RECAL</span>'
-        : '<span style="font-size:18px">⟳</span><span>GYRO</span>';
-      gyroButton.classList.toggle('active', this.gyroActive);
-    };
-    updateGyroButtonLabel();
-
-    let gyroLongPressTimer = null;
-    gyroButton.addEventListener('touchstart', async (event) => {
-      this.safePreventDefault(event);
-      gyroLongPressTimer = setTimeout(() => {
-        gyroLongPressTimer = null;
-        if (this.gyroActive) {
-          this.disableGyroscope();
-          updateGyroButtonLabel();
-        }
-      }, 600);
-
-      if (!this.gyroActive) {
-        gyroButton.innerHTML = '<span>...</span>';
-        const ok = await this.initGyroscope();
-        if (ok) {
-          updateGyroButtonLabel();
-        } else {
-          gyroButton.innerHTML = '<span style="font-size:18px">⟳</span><span>GYRO</span>';
-          gyroButton.classList.remove('active');
-        }
-      }
-    }, { passive: false });
-
-    gyroButton.addEventListener('touchend', (event) => {
-      this.safePreventDefault(event);
-      if (gyroLongPressTimer !== null) {
-        clearTimeout(gyroLongPressTimer);
-        gyroLongPressTimer = null;
-        // Short tap while active = recalibrate
-        if (this.gyroActive) {
-          this.calibrateGyroscope();
-        }
-      }
-    }, { passive: false });
+    // Remove any existing gyro button (no longer supported)
+    const _existingGyroBtn = document.getElementById('gyro-button');
+    if (_existingGyroBtn) _existingGyroBtn.remove();
   }
 
   // Compute device-orientation quaternion using the Three.js DeviceOrientationControls approach
@@ -792,6 +750,14 @@ export class PlayerControls {
     this.optionLeftButton = createButton('left-punch-button', 'mobile-option-action', 'Shield');
     this.optionCenterButton = createButton('punch-kick-button', 'mobile-option-action', '🎤');
     this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', '—');
+    this.blockButton = null; // block functionality moved to punchButton in PS mode
+
+    if (window.phoneSwordMode) {
+      // In PS mode: hide spells/equip; punchButton doubles as block/fire
+      this.spellsButton.style.display = 'none';
+      this.equipButton.style.display = 'none';
+      this.punchButton.classList.add('ps-block-btn');
+    }
 
     this.mobileEquipButtons = [];
     this.mobileItemActionButtons = [];
@@ -884,10 +850,37 @@ export class PlayerControls {
       if (event) this.safePreventDefault(event);
     };
 
-    bindActionPress(this.punchButton, {
-      onPressStart: onAttackPressStart,
-      onPressEnd: onAttackPressEnd
-    });
+    if (window.phoneSwordMode) {
+      // In PS mode the punch/fire button doubles as block (when sword) or fire (when gun)
+      this.punchButton.addEventListener('touchstart', (e) => {
+        this.safePreventDefault(e);
+        const w = this.getEquippedWeapon('right');
+        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
+        if (isGun) {
+          onAttackPressStart(e);
+        } else {
+          if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = true;
+        }
+      }, { passive: false });
+      this.punchButton.addEventListener('touchend', (e) => {
+        this.safePreventDefault(e);
+        const w = this.getEquippedWeapon('right');
+        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
+        if (isGun) {
+          onAttackPressEnd(e);
+        } else {
+          if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
+        }
+      }, { passive: false });
+      this.punchButton.addEventListener('touchcancel', (e) => {
+        if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
+      }, { passive: false });
+    } else {
+      bindActionPress(this.punchButton, {
+        onPressStart: onAttackPressStart,
+        onPressEnd: onAttackPressEnd
+      });
+    }
 
     const onSpellsToggle = (event) => {
       if (!this.enabled) return;
@@ -995,6 +988,10 @@ export class PlayerControls {
 
   getMobileAttackLabel() {
     const weapon = this.getEquippedWeapon('right');
+    if (window.phoneSwordMode) {
+      if (weapon?.itemId === 'pistol' || weapon?.itemId === 'bazooka') return 'Fire';
+      return '🛡 Block';
+    }
     if (weapon?.itemId === 'bow') return 'Bow';
     if (weapon?.itemId === 'bazooka') return 'Fire';
     if (weapon?.itemId === 'bomb') return 'Bomb';
@@ -1332,8 +1329,10 @@ export class PlayerControls {
     actionContainer.classList.toggle('mobile-freeze-mode', state === 'freeze');
 
     this.punchButton.textContent = this.getMobileAttackLabel();
-    this.spellsButton.textContent = 'Spells';
-    this.spellsButton.disabled = false;
+    if (!window.phoneSwordMode) {
+      this.spellsButton.textContent = 'Spells';
+      this.spellsButton.disabled = false;
+    }
 
     this.optionLeftButton.textContent = isIceGunEquipped ? 'Freeze' : 'Shield';
     this.optionLeftButton.disabled = false;
@@ -1424,6 +1423,12 @@ export class PlayerControls {
       ...(this.mobileEquipButtons || []),
       ...(this.mobileItemActionButtons || [])
     ].forEach(clearButtonPos);
+
+    // Phone sword mode: only show punchButton (block/fire) — spells/equip already hidden
+    if (window.phoneSwordMode) {
+      this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
+      return;
+    }
 
     if (state === 'spell-options') {
       this.applyMobileButtonPosition(this.optionLeftButton, { x: 1, y: 1 });
@@ -2605,13 +2610,15 @@ export class PlayerControls {
       this.playerX += movement.x * speed * deltaSeconds;
       this.playerZ += movement.z * speed * deltaSeconds;
 
-      const { groundY } = this.resolveGroundY(
-        this.playerX,
-        this.playerY + PLAYER_HALF_HEIGHT,
-        this.playerZ,
-        { includeSolidHit: false }
-      );
-      this.playerY = groundY;
+      if (!window.phoneSwordAirborne) {
+        const { groundY } = this.resolveGroundY(
+          this.playerX,
+          this.playerY + PLAYER_HALF_HEIGHT,
+          this.playerZ,
+          { includeSolidHit: false }
+        );
+        this.playerY = groundY;
+      }
 
       const newX = this.playerX;
       const newY = this.playerY;

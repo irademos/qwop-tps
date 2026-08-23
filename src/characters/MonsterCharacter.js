@@ -779,19 +779,21 @@ export class MonsterCharacter extends CharacterBase {
       this.setDirection(faceDir);
       const strafeDir = new THREE.Vector3(-faceDir.z, 0, faceDir.x);
       const strafeOffset = Math.sin(now * STRAFE_OSCILLATION) * STRAFE_SPEED * this.speedMultiplier;
+      // In phone sword mode enemies press in closer before attacking
+      const _activeStandoff = window.phoneSwordMode ? STANDOFF_DISTANCE * 0.55 : STANDOFF_DISTANCE;
       let forwardSpeed = 0;
-      if (distance < STANDOFF_DISTANCE - STANDOFF_BUFFER) {
+      if (distance < _activeStandoff - STANDOFF_BUFFER) {
         if (now - this.lastStandoffRetreatTime >= STANDOFF_RETREAT_INTERVAL_MS) {
           forwardSpeed = -walkSpeed;
           this.lastStandoffRetreatTime = now;
         }
-      } else if (distance > STANDOFF_DISTANCE + STANDOFF_BUFFER) {
+      } else if (distance > _activeStandoff + STANDOFF_BUFFER) {
         forwardSpeed = walkSpeed;
       }
       const movement = faceDir.clone().multiplyScalar(forwardSpeed).add(strafeDir.multiplyScalar(strafeOffset));
       this.setHorizontalMovement(movement, 1, delta, context);
       this.faceDirection(faceDir);
-      if (canAttack && distance <= STANDOFF_DISTANCE + 0.5) {
+      if (canAttack && distance <= _activeStandoff + 0.5) {
         this.attackDirection.copy(faceDir);
         this.setDirection(this.attackDirection);
         // Occasionally grab instead of punch
