@@ -15894,8 +15894,8 @@ async function initCore(runtimeContext) {
               _swingHitOccurred = true; // prevent duplicate step from miss path
               const _blockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
               _blockFwd.y = 0; _blockFwd.normalize();
-              const _bsx = playerModel.position.x + _blockFwd.x * 0.35;
-              const _bsz = playerModel.position.z + _blockFwd.z * 0.35;
+              const _bsx = playerModel.position.x + _blockFwd.x * 0.09;
+              const _bsz = playerModel.position.z + _blockFwd.z * 0.09;
               playerModel.position.x = _bsx; playerModel.position.z = _bsz;
               playerControls.playerX = _bsx; playerControls.playerZ = _bsz;
               playerControls.lastPosition?.set(_bsx, playerModel.position.y, _bsz);
@@ -15956,8 +15956,8 @@ async function initCore(runtimeContext) {
         if (_playerMovingFast && !_swingHitOccurred) {
           const _missFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
           _missFwd.y = 0; _missFwd.normalize();
-          const _msx = playerModel.position.x + _missFwd.x * 0.6;
-          const _msz = playerModel.position.z + _missFwd.z * 0.6;
+          const _msx = playerModel.position.x + _missFwd.x * 0.15;
+          const _msz = playerModel.position.z + _missFwd.z * 0.15;
           playerModel.position.x = _msx; playerModel.position.z = _msz;
           playerControls.playerX = _msx; playerControls.playerZ = _msz;
           playerControls.lastPosition?.set(_msx, playerModel.position.y, _msz);
