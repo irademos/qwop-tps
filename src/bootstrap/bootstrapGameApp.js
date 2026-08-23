@@ -15859,6 +15859,66 @@ async function initCore(runtimeContext) {
     torch?.update();
     shield?.update();
 
+    // ── Phone Sword: auto-walk + queue spawn (runs even when hordeEnemies is empty) ──
+    if (window.phoneSwordMode && _psStageActive && !playerDead) {
+      // Spawn queued enemies as player approaches their positions
+      for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
+        const _qe = _psEnemyQueue[_qi];
+        if (playerModel.position.distanceTo(_qe.pos) <= PS_SPAWN_TRIGGER_DIST) {
+          _spawnHordeEnemy({ position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED });
+          _psEnemyQueue.splice(_qi, 1);
+        }
+      }
+
+      // Auto-walk: pause when an enemy is actively attacking close by
+      if (_psAutoWalking) {
+        const _hasNearAttacker = hordeEnemies.some(e =>
+          !e.isDead &&
+          e._aiState === 'attack' &&
+          e.group.position.distanceTo(playerModel.position) < 3.5
+        );
+        if (!_hasNearAttacker) {
+          const _ddx = _psPathEnd.x - playerModel.position.x;
+          const _ddz = _psPathEnd.z - playerModel.position.z;
+          const _distToEnd = Math.sqrt(_ddx * _ddx + _ddz * _ddz);
+          if (_distToEnd > 1.5) {
+            const _moveStep = PS_SPEED * frameDelta;
+            const _nx = playerModel.position.x + _psAutoWalkDir.x * _moveStep;
+            const _nz = playerModel.position.z + _psAutoWalkDir.z * _moveStep;
+            playerModel.position.x = _nx;
+            playerModel.position.z = _nz;
+            playerControls.playerX = _nx;
+            playerControls.playerZ = _nz;
+            playerControls.lastPosition?.set(_nx, playerModel.position.y, _nz);
+            if (playerControls.body) {
+              playerControls.body.setNextKinematicTranslation({ x: _nx, y: playerModel.position.y + 0.6, z: _nz });
+            }
+            playerModel.rotation.y = Math.atan2(_psAutoWalkDir.x, _psAutoWalkDir.z);
+            playerControls.isMoving = true;
+          } else {
+            _psAutoWalking = false;
+            playerControls.isMoving = false;
+          }
+        }
+      }
+
+      // Win detection
+      if (!_psWinShown && _psEnemyQueue.length === 0 && hordeEnemies.length > 0 && hordeEnemies.every(e => e.isDead)) {
+        _psStageActive = false;
+        _psWinShown = true;
+        const _nextStage = _psStage + 1;
+        _psShowWin(() => {
+          if (_nextStage <= 50) {
+            _psStage = _nextStage;
+            _psShowStageOverlay(_nextStage, () => _psStartStage(_nextStage));
+          } else {
+            _psStage = 1;
+            _psShowStageOverlay(1, () => _psStartStage(1));
+          }
+        });
+      }
+    }
+
     // ── Horde enemy update ─────────────────────────────────────────────────
     if (window.gameMode === 'horde' && hordeEnemies.length > 0) {
       // Sync kinematic player body to visual position each frame
@@ -15958,83 +16018,10 @@ async function initCore(runtimeContext) {
         }
       }
 
-      if (window.phoneSwordMode) {
-        // ── Phone Sword: spawn queued enemies as player gets close ────────────
-        if (_psStageActive && _psEnemyQueue.length > 0) {
-          const _playerTravelDir = _psAutoWalkDir;
-          const _playerOffset = new THREE.Vector3()
-            .subVectors(playerModel.position, _psPathEnd)
-            .dot(_playerTravelDir.clone().negate());
-          // triggerDist is distance from start; approx via path progress
-          const _pathProgress = new THREE.Vector3()
-            .subVectors(playerModel.position, _psPathEnd)
-            .setY(0).length();
-          for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
-            const _qe = _psEnemyQueue[_qi];
-            const _distToEnemy = playerModel.position.distanceTo(_qe.pos);
-            if (_distToEnemy <= PS_SPAWN_TRIGGER_DIST) {
-              _spawnHordeEnemy({ position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED });
-              _psEnemyQueue.splice(_qi, 1);
-            }
-          }
-        }
-
-        // ── Phone Sword: auto-walk player along path ──────────────────────────
-        if (_psAutoWalking && _psStageActive && !playerDead) {
-          // Stop if any attacker is in attack mode and very close
-          const _hasNearAttacker = hordeEnemies.some(e =>
-            !e.isDead &&
-            e._aiState === 'attack' &&
-            e.group.position.distanceTo(playerModel.position) < 3.5
-          );
-          if (!_hasNearAttacker) {
-            const _dx = _psPathEnd.x - playerModel.position.x;
-            const _dz = _psPathEnd.z - playerModel.position.z;
-            const _distToEnd = Math.sqrt(_dx * _dx + _dz * _dz);
-            if (_distToEnd > 1.5) {
-              const _moveStep = PS_SPEED * frameDelta;
-              const _nx = playerModel.position.x + _psAutoWalkDir.x * _moveStep;
-              const _nz = playerModel.position.z + _psAutoWalkDir.z * _moveStep;
-              playerModel.position.x = _nx;
-              playerModel.position.z = _nz;
-              playerControls.playerX = _nx;
-              playerControls.playerZ = _nz;
-              playerControls.lastPosition?.set(_nx, playerModel.position.y, _nz);
-              if (playerControls.body) {
-                playerControls.body.setNextKinematicTranslation({ x: _nx, y: playerModel.position.y + 0.6, z: _nz });
-              }
-              // Face the walk direction
-              playerModel.rotation.y = Math.atan2(_psAutoWalkDir.x, _psAutoWalkDir.z);
-              playerControls.isMoving = true;
-            } else {
-              _psAutoWalking = false;
-              playerControls.isMoving = false;
-            }
-          }
-        }
-
-        // ── Phone Sword: win detection ─────────────────────────────────────────
-        if (_psStageActive && !_psWinShown && _psEnemyQueue.length === 0 && hordeEnemies.every(e => e.isDead)) {
-          _psStageActive = false;
-          _psWinShown = true;
-          const _nextStage = _psStage + 1;
-          _psShowWin(() => {
-            if (_nextStage <= 50) {
-              _psStage = _nextStage;
-              _psShowStageOverlay(_nextStage, () => _psStartStage(_nextStage));
-            } else {
-              // Game complete — show final stage badge then loop back to stage 1
-              _psStage = 1;
-              _psShowStageOverlay(1, () => _psStartStage(1));
-            }
-          });
-        }
-      } else {
-        // Standard horde: spawn replacements for each enemy that just died
-        if (_justDied > 0 && rapierWorld) {
-          const toSpawn = _justDied * (1 + Math.floor(Math.random() * 2));
-          for (let _s = 0; _s < toSpawn; _s++) _spawnHordeEnemy();
-        }
+      // Standard horde: spawn replacements for each enemy that just died
+      if (!window.phoneSwordMode && _justDied > 0 && rapierWorld) {
+        const toSpawn = _justDied * (1 + Math.floor(Math.random() * 2));
+        for (let _s = 0; _s < toSpawn; _s++) _spawnHordeEnemy();
       }
     }
     syncRemoteHeldWeaponMesh(iceGun);
