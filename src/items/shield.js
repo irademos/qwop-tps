@@ -90,6 +90,18 @@ export class Shield extends Weapon {
   }
 
   update() {
+    if (window.phoneSwordMode && this.holder?.playerModel) {
+      const pm = this.holder.playerModel;
+      pm.userData.foamSwordMode = true;
+      const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(this._holdQuaternion);
+      if (!pm.userData.foamSwordHandTarget) {
+        pm.userData.foamSwordHandTarget = { x: 0, y: 0.85, z: 0.45 };
+      }
+      const tgt = pm.userData.foamSwordHandTarget;
+      tgt.x = THREE.MathUtils.clamp(dir.x * 0.3, -0.6, 0.6);
+      tgt.y = THREE.MathUtils.clamp(0.85 + dir.y * 0.15, 0.4, 1.3);
+      tgt.z = THREE.MathUtils.clamp(0.45 - (dir.z - 0.2) * 0.12, 0.2, 0.7);
+    }
     super.update();
     const targets = [this.mesh, this.heldMesh].filter(Boolean);
     const now = performance.now();

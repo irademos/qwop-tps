@@ -505,9 +505,11 @@ export class PlayerControls {
     } else {
       // this.setupPointerLock(); // leave pointer lock in PlayerControls
     }
-    initHandTracking().catch((err) => {
-      console.warn('[Controls] Hand tracking init failed:', err);
-    });
+    if (!window.phoneSwordMode) {
+      initHandTracking().catch((err) => {
+        console.warn('[Controls] Hand tracking init failed:', err);
+      });
+    }
   }
   
   safePreventDefault(event) {

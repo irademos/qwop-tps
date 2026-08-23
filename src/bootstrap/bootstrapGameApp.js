@@ -16047,6 +16047,22 @@ async function initCore(runtimeContext) {
       _psw.prevTipWorld = _tipWorld.clone();
       _psw.prevSwordQ.copy(_activeQ);
     }
+    // Phone Sword: apply gyro quaternion to shield and pistol (less dramatic than sword)
+    if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
+      const _activeGyroForWeapons = _psw.bounceActive ? _psw.bounceCurrentQ : _phoneSwordGyroQ;
+      const _shieldBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0, 'YXZ'));
+      const _pistolBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0, 'YXZ'));
+      // Reduced-scale gyro for shield/pistol: slerp toward neutral to dampen
+      const _dampedGyroQ = new THREE.Quaternion().slerpQuaternions(
+        new THREE.Quaternion(), _activeGyroForWeapons, 0.45
+      );
+      if (shield?.holder === playerControls) {
+        shield._holdQuaternion.copy(_dampedGyroQ).multiply(_shieldBaseQ);
+      }
+      if (pistol?.holder === playerControls) {
+        pistol._holdQuaternion.copy(_dampedGyroQ).multiply(_pistolBaseQ);
+      }
+    }
     hammer?.update();
     pistol?.update();
     paintBrush?.update();
