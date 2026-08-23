@@ -15993,10 +15993,22 @@ async function initCore(runtimeContext) {
             const _distToEnd = Math.sqrt(_dx * _dx + _dz * _dz);
             if (_distToEnd > 1.5) {
               const _moveStep = PS_SPEED * frameDelta;
-              playerControls.playerX = (playerControls.playerX || playerModel.position.x) + _psAutoWalkDir.x * _moveStep;
-              playerControls.playerZ = (playerControls.playerZ || playerModel.position.z) + _psAutoWalkDir.z * _moveStep;
+              const _nx = playerModel.position.x + _psAutoWalkDir.x * _moveStep;
+              const _nz = playerModel.position.z + _psAutoWalkDir.z * _moveStep;
+              playerModel.position.x = _nx;
+              playerModel.position.z = _nz;
+              playerControls.playerX = _nx;
+              playerControls.playerZ = _nz;
+              playerControls.lastPosition?.set(_nx, playerModel.position.y, _nz);
+              if (playerControls.body) {
+                playerControls.body.setNextKinematicTranslation({ x: _nx, y: playerModel.position.y + 0.6, z: _nz });
+              }
+              // Face the walk direction
+              playerModel.rotation.y = Math.atan2(_psAutoWalkDir.x, _psAutoWalkDir.z);
+              playerControls.isMoving = true;
             } else {
               _psAutoWalking = false;
+              playerControls.isMoving = false;
             }
           }
         }
