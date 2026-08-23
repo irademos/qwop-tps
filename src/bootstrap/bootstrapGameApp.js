@@ -11779,6 +11779,16 @@ async function initCore(runtimeContext) {
   const PS_ENEMY_SPEED = 1.0 / 3.0;   // enemy speed multiplier (1/3 of normal)
   const PS_SPAWN_TRIGGER_DIST = 18;    // spawn enemy when player gets within this distance
 
+  // Camera auto-aim state for phone sword mode
+  let _psCamTarget = null;           // currently tracked enemy
+  let _psCamCandidate = null;        // new closest enemy being evaluated
+  let _psCamCandidateTime = 0;       // when candidate first became closest
+  let _psCamManualUntil = 0;         // timestamp until which manual camera override is active
+  let _psCamLastYaw = null;          // yaw we set last frame (to detect manual camera changes)
+  const PS_CAM_MANUAL_TIMEOUT = 5000;   // ms of inactivity before auto-aim resumes
+  const PS_CAM_SWITCH_MIN_CLOSER = 3.0; // new target must be this many metres closer to switch immediately
+  const PS_CAM_SWITCH_STABLE_MS = 2000; // or must be closest for this long
+
   const _psStageOverlay = document.getElementById('ps-stage-overlay');
   const _psStageBadge   = document.getElementById('ps-stage-badge');
   const _psStageEnemies = document.getElementById('ps-stage-enemies');
@@ -15890,7 +15900,6 @@ async function initCore(runtimeContext) {
             if (playerControls.body) {
               playerControls.body.setNextKinematicTranslation({ x: _nx, y: playerModel.position.y + 0.6, z: _nz });
             }
-            playerModel.rotation.y = Math.atan2(_psAutoWalkDir.x, _psAutoWalkDir.z);
             playerControls.isMoving = true;
           } else {
             _psAutoWalking = false;
@@ -15913,6 +15922,82 @@ async function initCore(runtimeContext) {
             _psShowStageOverlay(1, () => _psStartStage(1));
           }
         });
+      }
+
+      // ── Phone Sword: camera auto-aim at closest enemy ──
+      if (playerControls && hordeEnemies.length > 0) {
+        const _now = performance.now();
+
+        // Detect manual camera movement: if yaw changed and we didn't set it, player moved camera
+        const _curYaw = playerControls.yaw;
+        if (_psCamLastYaw !== null) {
+          const _yawDiff = Math.abs(((_curYaw - _psCamLastYaw + 3 * Math.PI) % (2 * Math.PI)) - Math.PI);
+          if (_yawDiff > 0.01 && playerControls.cameraTouchId !== null) {
+            _psCamManualUntil = _now + PS_CAM_MANUAL_TIMEOUT;
+          }
+        }
+
+        if (_now >= _psCamManualUntil) {
+          // Find closest living enemy
+          let _closest = null;
+          let _closestDist = Infinity;
+          for (const _e of hordeEnemies) {
+            if (_e.isDead) continue;
+            const _ep = _e.group?.position ?? _e.model?.position;
+            if (!_ep) continue;
+            const _d = playerModel.position.distanceTo(_ep);
+            if (_d < _closestDist) { _closestDist = _d; _closest = _e; }
+          }
+
+          if (_closest) {
+            // Hysteresis: decide whether to switch camera target
+            const _curTargetDist = _psCamTarget && !_psCamTarget.isDead
+              ? playerModel.position.distanceTo(_psCamTarget.group?.position ?? _psCamTarget.model?.position ?? playerModel.position)
+              : Infinity;
+
+            if (!_psCamTarget || _psCamTarget.isDead) {
+              // No current target — take the closest immediately
+              _psCamTarget = _closest;
+              _psCamCandidate = null;
+            } else if (_closest === _psCamTarget) {
+              // Still the same target, reset candidate
+              _psCamCandidate = null;
+            } else {
+              // Different closest enemy — apply hysteresis
+              if (_closest !== _psCamCandidate) {
+                _psCamCandidate = _closest;
+                _psCamCandidateTime = _now;
+              }
+              const _muchCloser = (_curTargetDist - _closestDist) >= PS_CAM_SWITCH_MIN_CLOSER;
+              const _stableEnough = (_now - _psCamCandidateTime) >= PS_CAM_SWITCH_STABLE_MS;
+              if (_muchCloser || _stableEnough) {
+                _psCamTarget = _psCamCandidate;
+                _psCamCandidate = null;
+              }
+            }
+
+            // Aim camera yaw at target
+            const _tp = _psCamTarget?.group?.position ?? _psCamTarget?.model?.position;
+            if (_tp && !_psCamTarget.isDead) {
+              const _dx = _tp.x - playerModel.position.x;
+              const _dz = _tp.z - playerModel.position.z;
+              if (Math.hypot(_dx, _dz) > 0.5) {
+                const _targetYaw = Math.atan2(_dx, _dz);
+                // Smooth approach to avoid snapping
+                const _yawDelta = ((_targetYaw - playerControls.yaw + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+                playerControls.yaw += _yawDelta * Math.min(1, frameDelta * 4);
+                _psCamLastYaw = playerControls.yaw;
+              }
+            }
+          } else {
+            _psCamTarget = null;
+            _psCamCandidate = null;
+            _psCamLastYaw = playerControls.yaw;
+          }
+        } else {
+          // Manual control active — track current yaw without overriding
+          _psCamLastYaw = playerControls.yaw;
+        }
       }
     }
 
