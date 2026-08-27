@@ -720,7 +720,12 @@ function createArcadeOverlay(startOverlay) {
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
-  const audioManager = createAudioManager();
+  const _savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0');
+  const _savedSfxVol = parseFloat(localStorage.getItem('sq:sfxVolume') ?? '1');
+  const audioManager = createAudioManager({
+    musicVolume: Number.isFinite(_savedMusicVol) ? _savedMusicVol : 0,
+    sfxVolume: Number.isFinite(_savedSfxVol) ? _savedSfxVol : 1
+  });
   runtimeContext.systems.audioManager = audioManager;
   window.audioManager = audioManager;
   let syncBackgroundLoopForDisplayMode = () => {
@@ -11840,12 +11845,13 @@ async function initCore(runtimeContext) {
     const song = _psGetNextSong(isNight);
     if (!_psSongAudio) {
       _psSongAudio = new Audio(`assets/audio/${song}`);
-      _psSongAudio.volume = 0.5;
+      audioManager.phoneSwordAudio = _psSongAudio;
     } else {
       _psSongAudio.pause();
       _psSongAudio.src = `assets/audio/${song}`;
       _psSongAudio.currentTime = 0;
     }
+    _psSongAudio.volume = audioManager.musicVolume;
     _psSongAudio.onended = () => { if (_psStageActive) _psPlayNextSong(isNight); };
     _psSongAudio.play().catch(() => {});
   };

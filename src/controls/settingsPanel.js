@@ -726,6 +726,19 @@ function buildDisplayPanel() {
     return { field, input, valueLabel };
   };
 
+  const audioSectionTitle = createElement('h3', 'settings-section-title', 'Audio');
+  const musicVolumeField = createRangeField({ id: 'settings-audio-music', label: 'Music Volume', min: 0, max: 1, step: 0.05 });
+  const sfxVolumeField = createRangeField({ id: 'settings-audio-sfx', label: 'SFX Volume', min: 0, max: 1, step: 0.05 });
+
+  const savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0');
+  const savedSfxVol = parseFloat(localStorage.getItem('sq:sfxVolume') ?? '1');
+  musicVolumeField.input.value = `${Number.isFinite(savedMusicVol) ? savedMusicVol : 0}`;
+  musicVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedMusicVol) ? savedMusicVol : 0) * 100)}%`;
+  sfxVolumeField.input.value = `${Number.isFinite(savedSfxVol) ? savedSfxVol : 1}`;
+  sfxVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedSfxVol) ? savedSfxVol : 1) * 100)}%`;
+
+  const lightSectionTitle = createElement('h3', 'settings-section-title', 'Lighting');
+
   const ambientField = createRangeField({
     id: 'settings-display-ambient',
     label: 'Ambient Light',
@@ -850,6 +863,9 @@ function buildDisplayPanel() {
   const fovField = createRangeField({ id: 'settings-display-fov', label: 'Field of View', min: 30, max: 160, step: 1 });
 
   panelEl.append(
+    audioSectionTitle,
+    musicVolumeField.field,
+    sfxVolumeField.field,
     modeGroup,
     performanceGroup,
     unitsGroup,
@@ -865,6 +881,7 @@ function buildDisplayPanel() {
     lookTargetField.field,
     capsuleOpacityField.field,
     fovField.field,
+    lightSectionTitle,
     ambientField.field,
     directionalField.field,
     groundField.field,
@@ -874,6 +891,10 @@ function buildDisplayPanel() {
   );
 
   elements.displayFields = {
+    musicVolumeSlider: musicVolumeField.input,
+    musicVolumeValue: musicVolumeField.valueLabel,
+    sfxVolumeSlider: sfxVolumeField.input,
+    sfxVolumeValue: sfxVolumeField.valueLabel,
     modeSelect,
     performanceSelect,
     unitsSelect,
@@ -1818,6 +1839,28 @@ function bindEvents() {
     elements.debugLocationFields.accuracy.addEventListener('change', (event) => {
       const value = parseFloat(event.target.value);
       context.location?.setDebugAccuracy?.(value);
+    });
+  }
+
+  if (elements.displayFields?.musicVolumeSlider) {
+    elements.displayFields.musicVolumeSlider.addEventListener('input', (event) => {
+      const value = parseFloat(event.target.value);
+      if (elements.displayFields.musicVolumeValue) {
+        elements.displayFields.musicVolumeValue.textContent = `${Math.round(value * 100)}%`;
+      }
+      window.audioManager?.setMusicVolume?.(value);
+      localStorage.setItem('sq:musicVolume', `${value}`);
+    });
+  }
+
+  if (elements.displayFields?.sfxVolumeSlider) {
+    elements.displayFields.sfxVolumeSlider.addEventListener('input', (event) => {
+      const value = parseFloat(event.target.value);
+      if (elements.displayFields.sfxVolumeValue) {
+        elements.displayFields.sfxVolumeValue.textContent = `${Math.round(value * 100)}%`;
+      }
+      window.audioManager?.setSFXVolume?.(value);
+      localStorage.setItem('sq:sfxVolume', `${value}`);
     });
   }
 

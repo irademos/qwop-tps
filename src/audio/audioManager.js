@@ -57,7 +57,8 @@ export class AudioManager {
     }
 
     this.masterVolume = options.masterVolume ?? 1;
-    this.sfxVolume = options.sfxVolume ?? 0.8;
+    this.sfxVolume = options.sfxVolume ?? 1.0;
+    this.musicVolume = options.musicVolume ?? 0;
 
     if (this.performanceProfile.preloadCommonSFX) {
       this.preloadCommonSFX();
@@ -113,6 +114,16 @@ export class AudioManager {
     this.sfxVolume = Math.max(0, Math.min(1, value));
     if (this.sfxGain) {
       this.sfxGain.gain.value = this.sfxVolume;
+    }
+  }
+
+  setMusicVolume(value) {
+    this.musicVolume = Math.max(0, Math.min(1, value));
+    if (this.background) {
+      this.background.volume = this.musicVolume;
+    }
+    if (this.phoneSwordAudio) {
+      this.phoneSwordAudio.volume = this.musicVolume;
     }
   }
 
@@ -184,7 +195,7 @@ export class AudioManager {
     if (!this.background) {
       this.background = new Audio(path);
       this.background.loop = true;
-      this.background.volume = 0.5;
+      this.background.volume = this.musicVolume;
     } else {
       if (this.currentBGSPath === path) {
         if (this.background.paused) {
