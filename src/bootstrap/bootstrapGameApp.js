@@ -12035,6 +12035,16 @@ async function initCore(runtimeContext) {
       playerControls.body.setTranslation({ x: spawnX, y: spawnY + 0.6, z: spawnZ }, true);
       playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     }
+    // Clear any dead enemies left over from the previous stage
+    for (let _di = hordeEnemies.length - 1; _di >= 0; _di--) {
+      const _de = hordeEnemies[_di];
+      if (_de.isDead) {
+        if (_de.group?.parent) _de.group.parent.remove(_de.group);
+        try { _de.destroy?.(); } catch (_) {}
+        hordeEnemies.splice(_di, 1);
+      }
+    }
+
     _psBuildStage(stage);
   };
 
