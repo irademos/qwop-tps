@@ -1,4 +1,5 @@
 // app.js
+import { initComicRenderer, renderComic, resizeComicRenderer } from '../environment/comicRenderer.js';
 import QRCode from 'qrcode';
 import { getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
 import { Weapon } from '../items/weapon.js';
@@ -3187,9 +3188,11 @@ async function initCore(runtimeContext) {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     mapRenderer.setResolution(window.innerWidth, window.innerHeight);
+    resizeComicRenderer(window.innerWidth, window.innerHeight);
   };
   window.addEventListener('resize', handleResize);
   handleResize();
+  initComicRenderer(renderer, scene, camera);
 
   ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
   scene.add(ambientLight);
@@ -17040,7 +17043,7 @@ async function initCore(runtimeContext) {
       processHordeGestures();
     }
 
-    renderer.render(scene, camera);
+    renderComic();
     const frameTotalMs = performance.now() - frameStartMs;
     if (frameTotalMs > FRAME_TIME_DEGRADE_THRESHOLD_MS) {
       frameOverrunStreak += 1;
