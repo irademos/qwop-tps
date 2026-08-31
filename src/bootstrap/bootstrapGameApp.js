@@ -1032,10 +1032,10 @@ async function initCore(runtimeContext) {
 
   // Default swing config — overridden live by the debug panel
   window.phoneSwordWeaponCfg = window.phoneSwordWeaponCfg || {
-    shieldX: -180, shieldY: 180, shieldZ: 0,
+    shieldX: 0, shieldY: 0, shieldZ: 0,
     shieldAxX: 'beta', shieldAxY: 'alpha', shieldAxZ: 'gamma',
-    shieldSgnX: 1, shieldSgnY: 1, shieldSgnZ: 1,
-    gunX: 180, gunY: 42, gunZ: -132,
+    shieldSgnX: -1, shieldSgnY: 1, shieldSgnZ: 1,
+    gunX: 180, gunY: 0, gunZ: -180,
     gunAxX: 'beta', gunAxY: 'alpha', gunAxZ: 'gamma',
     gunSgnX: 1, gunSgnY: 1, gunSgnZ: 1,
   };
