@@ -276,7 +276,7 @@
     }
   </style>
 
-  <!-- Phone Sword: gyro swing debug panel (visible only in phoneSwordMode) -->
+  <!-- Phone Sword: weapon rotation debug panel (visible only in phoneSwordMode) -->
   <div id="psw-debug-panel" style="
     display:none;
     position:fixed;
@@ -297,7 +297,7 @@
       align-items:center;
       gap:8px;
     ">
-      <span>⚔️ Swing Debug</span>
+      <span>⚙️ Weapon Rotation</span>
       <span id="psw-debug-arrow" style="margin-left:auto">▼</span>
     </div>
     <div id="psw-debug-body" style="
@@ -308,69 +308,79 @@
       padding:10px;
       width:270px;
     ">
-      <div id="psw-debug-speed" style="margin-bottom:10px;color:#aef;font-size:11px">Angular speed: —</div>
+      <!-- Calibrate -->
+      <button id="psw-calib-btn" style="
+        width:100%;padding:8px;margin-bottom:10px;
+        background:#243;border:1px solid #4a7;border-radius:4px;
+        color:#afa;font-family:monospace;font-size:12px;cursor:pointer;font-weight:bold;
+      ">🎯 Calibrate Gyro (hold phone neutral, tap)</button>
+      <div id="psw-calib-confirm" style="font-size:10px;color:#7f7;margin-top:-6px;margin-bottom:8px;height:14px"></div>
 
-      <!-- Hit detection -->
-      <div style="color:#88aaff;font-weight:bold;margin-bottom:4px;border-bottom:1px solid #333;padding-bottom:2px">Hit Detection</div>
-
-      <label style="display:block;margin-bottom:6px">
-        Min sweep speed (deg/s): <span id="psw-lbl-sweepspeed">100</span>
-        <br><small style="color:#aaa">gyro rotation speed required for a hit</small>
-        <input type="range" min="0" max="15000" step="50" value="100" id="psw-sweepspeed"
-          style="width:100%;display:block;margin-top:2px">
+      <!-- Gun -->
+      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🔫 Gun</div>
+      <label style="display:block;margin-bottom:4px">X offset (deg): <span id="psw-lbl-gunx">180</span>
+        <input type="range" min="-180" max="180" step="1" value="180" id="psw-gunx" style="width:100%;display:block;margin-top:2px">
       </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Min sweep dist (m): <span id="psw-lbl-minsweep">0.3</span>
-        <br><small style="color:#aaa">tip movement per frame required for a hit</small>
-        <input type="range" min="0.001" max="1.0" step="0.005" value="0.3" id="psw-minsweep"
-          style="width:100%;display:block;margin-top:2px">
+      <label style="display:block;margin-bottom:4px">Y offset (deg): <span id="psw-lbl-guny">0</span>
+        <input type="range" min="-180" max="180" step="1" value="0" id="psw-guny" style="width:100%;display:block;margin-top:2px">
       </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Weak hit knockback: <span id="psw-lbl-weakknock">20</span>
-        <br><small style="color:#aaa">horizSpeed for non-killing hits (step-back only)</small>
-        <input type="range" min="0" max="20" step="0.5" value="20" id="psw-weakknock"
-          style="width:100%;display:block;margin-top:2px">
+      <label style="display:block;margin-bottom:6px">Z offset (deg): <span id="psw-lbl-gunz">-180</span>
+        <input type="range" min="-180" max="180" step="1" value="-180" id="psw-gunz" style="width:100%;display:block;margin-top:2px">
       </label>
+      <div style="font-size:11px;color:#aaa;margin-bottom:3px">Axis mapping (which gyro input drives each Euler axis):</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:6px">
+        <div><div style="color:#ccc;font-size:10px">Euler X ←</div>
+          <select id="psw-gun-axX" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta" selected>beta (pitch)</option><option value="alpha">alpha (yaw)</option><option value="gamma">gamma (roll)</option>
+          </select>
+          <button id="psw-gun-sgnX" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+        <div><div style="color:#ccc;font-size:10px">Euler Y ←</div>
+          <select id="psw-gun-axY" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta">beta (pitch)</option><option value="alpha" selected>alpha (yaw)</option><option value="gamma">gamma (roll)</option>
+          </select>
+          <button id="psw-gun-sgnY" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+        <div><div style="color:#ccc;font-size:10px">Euler Z ←</div>
+          <select id="psw-gun-axZ" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta">beta (pitch)</option><option value="alpha">alpha (yaw)</option><option value="gamma" selected>gamma (roll)</option>
+          </select>
+          <button id="psw-gun-sgnZ" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+      </div>
 
-      <!-- Block / bounce -->
-      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">Block / Bounce</div>
-
-      <label style="display:block;margin-bottom:6px">
-        Bounce angle (deg): <span id="psw-lbl-bounceangle">120</span>
-        <br><small style="color:#aaa">how far sideways the sword is knocked</small>
-        <input type="range" min="10" max="180" step="5" value="120" id="psw-bounceangle"
-          style="width:100%;display:block;margin-top:2px">
+      <!-- Shield -->
+      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🛡 Shield</div>
+      <label style="display:block;margin-bottom:4px">X offset (deg): <span id="psw-lbl-shieldx">0</span>
+        <input type="range" min="-180" max="180" step="1" value="0" id="psw-shieldx" style="width:100%;display:block;margin-top:2px">
       </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Bounce snap speed: <span id="psw-lbl-bouncesnap">18</span>
-        <br><small style="color:#aaa">how fast it snaps to recoil position (higher = faster)</small>
-        <input type="range" min="1" max="60" step="1" value="18" id="psw-bouncesnap"
-          style="width:100%;display:block;margin-top:2px">
+      <label style="display:block;margin-bottom:4px">Y offset (deg): <span id="psw-lbl-shieldy">0</span>
+        <input type="range" min="-180" max="180" step="1" value="0" id="psw-shieldy" style="width:100%;display:block;margin-top:2px">
       </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Bounce hold (s): <span id="psw-lbl-bouncedur">0.7</span>
-        <br><small style="color:#aaa">how long sword stays at peak recoil</small>
-        <input type="range" min="0.05" max="2" step="0.05" value="0.7" id="psw-bouncedur"
-          style="width:100%;display:block;margin-top:2px">
+      <label style="display:block;margin-bottom:6px">Z offset (deg): <span id="psw-lbl-shieldz">0</span>
+        <input type="range" min="-180" max="180" step="1" value="0" id="psw-shieldz" style="width:100%;display:block;margin-top:2px">
       </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Enemy bounce hold (s): <span id="psw-lbl-enemybouncedur">2</span>
-        <br><small style="color:#aaa">how long enemy sword is stuck after being blocked</small>
-        <input type="range" min="0.1" max="5" step="0.1" value="2" id="psw-enemybouncedur"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <label style="display:block;margin-bottom:6px">
-        Block lateral scale: <span id="psw-lbl-blocklat">0.3</span>
-        <br><small style="color:#aaa">0=fully centered, 1=full spread when blocking horizontally</small>
-        <input type="range" min="0" max="1" step="0.05" value="0.3" id="psw-blocklat"
-          style="width:100%;display:block;margin-top:2px">
-      </label>
+      <div style="font-size:11px;color:#aaa;margin-bottom:3px">Axis mapping:</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:6px">
+        <div><div style="color:#ccc;font-size:10px">Euler X ←</div>
+          <select id="psw-shield-axX" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta" selected>beta (pitch)</option><option value="alpha">alpha (yaw)</option><option value="gamma">gamma (roll)</option>
+          </select>
+          <button id="psw-shield-sgnX" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+        <div><div style="color:#ccc;font-size:10px">Euler Y ←</div>
+          <select id="psw-shield-axY" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta">beta (pitch)</option><option value="alpha" selected>alpha (yaw)</option><option value="gamma">gamma (roll)</option>
+          </select>
+          <button id="psw-shield-sgnY" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+        <div><div style="color:#ccc;font-size:10px">Euler Z ←</div>
+          <select id="psw-shield-axZ" style="width:100%;background:#222;color:#fff;border:1px solid #555;font-size:11px">
+            <option value="beta">beta (pitch)</option><option value="alpha">alpha (yaw)</option><option value="gamma" selected>gamma (roll)</option>
+          </select>
+          <button id="psw-shield-sgnZ" style="width:100%;margin-top:2px;background:#332;border:1px solid #665;border-radius:3px;color:#ffa;font-size:11px;cursor:pointer">+1 (flip)</button>
+        </div>
+      </div>
 
       <button id="psw-copy-btn" style="
         margin-top:6px;width:100%;padding:6px;
@@ -381,32 +391,65 @@
     </div>
   </div>
   <script>
-    // Phone Sword debug panel — wires sliders to window.phoneSwordSwingCfg
+    // Phone Sword weapon rotation debug panel — wires sliders to window.phoneSwordWeaponCfg
     (function () {
-      function bind(id, lblId, key, parse) {
+      function bind(id, lblId, cfgKey) {
         const el = document.getElementById(id);
         const lbl = document.getElementById(lblId);
         if (!el) return;
         el.addEventListener('input', function () {
-          const v = parse(this.value);
           lbl.textContent = this.value;
-          if (window.phoneSwordSwingCfg) window.phoneSwordSwingCfg[key] = v;
+          if (!window.phoneSwordWeaponCfg) window.phoneSwordWeaponCfg = {};
+          window.phoneSwordWeaponCfg[cfgKey] = Number(this.value);
         });
       }
-      bind('psw-sweepspeed', 'psw-lbl-sweepspeed', 'minSweepSpeed', Number);
-      bind('psw-minsweep',   'psw-lbl-minsweep',   'minSweepDist',  Number);
-      bind('psw-weakknock',   'psw-lbl-weakknock',   'hitKnockbackWeak', Number);
-      bind('psw-bounceangle', 'psw-lbl-bounceangle', 'bounceAngle',      Number);
-      bind('psw-bouncesnap',  'psw-lbl-bouncesnap',  'bounceSnapSpeed',  Number);
-      bind('psw-bouncedur',      'psw-lbl-bouncedur',      'bounceHoldDur',      Number);
-      bind('psw-enemybouncedur', 'psw-lbl-enemybouncedur', 'enemyBounceHoldDur', Number);
-      bind('psw-blocklat',       'psw-lbl-blocklat',       'blockLateralScale',  Number);
+      // Calibrate button
+      const calibBtn = document.getElementById('psw-calib-btn');
+      const calibConfirm = document.getElementById('psw-calib-confirm');
+      if (calibBtn) calibBtn.addEventListener('click', function () {
+        if (window.phoneSwordRecalibrate) {
+          window.phoneSwordRecalibrate();
+          calibConfirm.textContent = '✓ Calibrated!';
+          setTimeout(() => { calibConfirm.textContent = ''; }, 2000);
+        }
+      });
+
+      bind('psw-gunx',    'psw-lbl-gunx',    'gunX');
+      bind('psw-guny',    'psw-lbl-guny',    'gunY');
+      bind('psw-gunz',    'psw-lbl-gunz',    'gunZ');
+      bind('psw-shieldx', 'psw-lbl-shieldx', 'shieldX');
+      bind('psw-shieldy', 'psw-lbl-shieldy', 'shieldY');
+      bind('psw-shieldz', 'psw-lbl-shieldz', 'shieldZ');
+
+      // Axis mapping selects and sign flip buttons
+      ['gun', 'shield'].forEach(function (pfx) {
+        ['X', 'Y', 'Z'].forEach(function (axis) {
+          var selId  = 'psw-' + pfx + '-ax' + axis;
+          var btnId  = 'psw-' + pfx + '-sgn' + axis;
+          var cfgAx  = pfx + 'Ax' + axis;
+          var cfgSgn = pfx + 'Sgn' + axis;
+          var sel = document.getElementById(selId);
+          var btn = document.getElementById(btnId);
+          if (sel) sel.addEventListener('change', function () {
+            if (!window.phoneSwordWeaponCfg) window.phoneSwordWeaponCfg = {};
+            window.phoneSwordWeaponCfg[cfgAx] = this.value;
+          });
+          if (btn) btn.addEventListener('click', function () {
+            if (!window.phoneSwordWeaponCfg) window.phoneSwordWeaponCfg = {};
+            var cur = window.phoneSwordWeaponCfg[cfgSgn] ?? 1;
+            var next = cur === 1 ? -1 : 1;
+            window.phoneSwordWeaponCfg[cfgSgn] = next;
+            this.textContent = next === 1 ? '+1 (flip)' : '-1 (flip)';
+            this.style.background = next === 1 ? '#332' : '#323';
+          });
+        });
+      });
 
       // Copy to clipboard
       const copyBtn = document.getElementById('psw-copy-btn');
       const copyConfirm = document.getElementById('psw-copy-confirm');
       if (copyBtn) copyBtn.addEventListener('click', function () {
-        const cfg = window.phoneSwordSwingCfg || {};
+        const cfg = window.phoneSwordWeaponCfg || {};
         const text = JSON.stringify(cfg, null, 2);
         navigator.clipboard.writeText(text).then(function () {
           copyConfirm.textContent = '✓ Copied!';
@@ -433,18 +476,10 @@
         arrow.textContent   = open ? '▼' : '▶';
       });
 
-      // Show panel and update live speed + tier readout once phoneSwordMode is detected
+      // Show panel once phoneSwordMode is detected
       function tryShow() {
         if (window.phoneSwordMode) {
           document.getElementById('psw-debug-panel').style.display = 'block';
-          (function tick() {
-            const psw = window._pswDebugSpeed;
-            if (psw !== undefined) {
-              document.getElementById('psw-debug-speed').textContent =
-                'Angular speed: ' + (psw | 0) + ' deg/s';
-            }
-            requestAnimationFrame(tick);
-          })();
         } else {
           setTimeout(tryShow, 500);
         }

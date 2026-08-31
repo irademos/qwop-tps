@@ -1036,6 +1036,14 @@ async function initCore(runtimeContext) {
   };
 
   // Default swing config — overridden live by the debug panel
+  window.phoneSwordWeaponCfg = window.phoneSwordWeaponCfg || {
+    shieldX: 0, shieldY: 0, shieldZ: 0,
+    shieldAxX: 'beta', shieldAxY: 'alpha', shieldAxZ: 'gamma',
+    shieldSgnX: -1, shieldSgnY: 1, shieldSgnZ: 1,
+    gunX: 180, gunY: 0, gunZ: -180,
+    gunAxX: 'beta', gunAxY: 'alpha', gunAxZ: 'gamma',
+    gunSgnX: 1, gunSgnY: 1, gunSgnZ: 1,
+  };
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
     speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
     mediumThreshold: 7000,  // deg/s — above this → medium tier (trail + rotation)
@@ -15857,6 +15865,10 @@ async function initCore(runtimeContext) {
           'YXZ'
         );
         _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
+        // Expose raw deltas for per-weapon axis remapping
+        window.phoneSwordGyro._dBeta  = _dBeta;
+        window.phoneSwordGyro._dAlpha = _dAlpha;
+        window.phoneSwordGyro._dGamma = _dGamma;
 
         // Compute angular speed (deg/s) from quaternion delta vs previous frame
         if (_psw.prevGyroQ && _psw.prevGyroTime && nowSec > _psw.prevGyroTime) {
@@ -16052,6 +16064,44 @@ async function initCore(runtimeContext) {
       // Store previous-frame state for next frame
       _psw.prevTipWorld = _tipWorld.clone();
       _psw.prevSwordQ.copy(_activeQ);
+    }
+    // Phone Sword: apply gyro quaternion to shield and pistol — same approach as the sword,
+    // but with per-weapon axis remapping and sign flipping controllable from the debug panel.
+    if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
+      const _wCfg = window.phoneSwordWeaponCfg;
+      const _DEG = Math.PI / 180;
+      const _gyro = window.phoneSwordGyro;
+      // Raw gyro deltas: beta=pitch, alpha=yaw, gamma=roll
+      const _rawB = _gyro._dBeta  ?? 0;
+      const _rawA = _gyro._dAlpha ?? 0;
+      const _rawG = _gyro._dGamma ?? 0;
+      // Helper: build a remapped quaternion for a weapon from its axis config
+      const _buildWeaponQ = (pfx) => {
+        const _axX = _wCfg?.[pfx + 'AxX'] ?? 'beta';
+        const _axY = _wCfg?.[pfx + 'AxY'] ?? 'alpha';
+        const _axZ = _wCfg?.[pfx + 'AxZ'] ?? 'gamma';
+        const _raw = { beta: _rawB, alpha: _rawA, gamma: _rawG };
+        const _sX  = _wCfg?.[pfx + 'SgnX'] ?? 1;
+        const _sY  = _wCfg?.[pfx + 'SgnY'] ?? 1;
+        const _sZ  = _wCfg?.[pfx + 'SgnZ'] ?? 1;
+        const _e = new THREE.Euler(
+          _raw[_axX] * _sX * _DEG,
+          _raw[_axY] * _sY * _DEG,
+          _raw[_axZ] * _sZ * _DEG,
+          'YXZ'
+        );
+        const _baseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+          (_wCfg?.[pfx + 'X'] ?? 0) * _DEG,
+          (_wCfg?.[pfx + 'Y'] ?? 0) * _DEG,
+          (_wCfg?.[pfx + 'Z'] ?? 0) * _DEG, 'YXZ'));
+        return new THREE.Quaternion().setFromEuler(_e).multiply(_baseQ);
+      };
+      if (shield?.holder === playerControls) {
+        shield._holdQuaternion.copy(_buildWeaponQ('shield'));
+      }
+      if (pistol?.holder === playerControls) {
+        pistol._holdQuaternion.copy(_buildWeaponQ('gun'));
+      }
     }
     hammer?.update();
     pistol?.update();
