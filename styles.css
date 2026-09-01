@@ -561,14 +561,55 @@ body.map-open #friendly-interact {
   z-index: 1000;
 }
 
+#shield-health-display {
+  position: absolute;
+  top: 68px;
+  left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 1001;
+}
+
+.shield-hud-icon {
+  font-size: 11px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.8));
+}
+
+#shield-health-bar-hud {
+  width: 60px;
+  height: 7px;
+  background: rgba(20, 10, 0, 0.75);
+  border: 1.5px solid rgba(0,0,0,0.8);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#shield-health-bar-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #43d15a, #2db347);
+  border-radius: 2px;
+  transition: width 0.15s ease, background 0.15s ease;
+}
+
+.shield-hud-count {
+  font-size: 10px;
+  color: #fff;
+  text-shadow: 1px 1px 0 #000;
+  font-weight: bold;
+  line-height: 1;
+}
+
 #hunger-bar {
-  top: 74px;
+  top: 82px;
   --stat-fill-start: #ffd166;
   --stat-fill-end: #f59e0b;
 }
 
 #magic-bar {
-  top: 98px;
+  top: 106px;
   --stat-fill-start: #c084fc;
   --stat-fill-end: #7c3aed;
 }
@@ -2106,6 +2147,7 @@ body.settings-open #inventory-button {
   }
 
   body.settings-open #health-display,
+  body.settings-open #shield-health-display,
   body.settings-open #hunger-bar,
   body.settings-open #energy-bar,
   body.settings-open #magic-bar,
