@@ -3436,8 +3436,20 @@ export class PlayerControls {
   }
 
   getAimDirection(invertForBow = false) {
-    const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
-    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
+    let direction;
+    if (this.gyroActive) {
+      // When gyro controls the camera, derive aim from yaw/pitch directly.
+      // Using camera.quaternion gives the wrong vertical direction because the
+      // camera orbits around the player and its +Z points backward.
+      direction = new THREE.Vector3(
+        Math.sin(this.yaw) * Math.cos(this.pitch),
+        Math.sin(this.pitch),
+        Math.cos(this.yaw) * Math.cos(this.pitch)
+      ).normalize();
+    } else {
+      const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
+      direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
+    }
     if (invertForBow) {
       direction.multiplyScalar(-1);
     }

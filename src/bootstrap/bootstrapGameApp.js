@@ -1038,11 +1038,11 @@ async function initCore(runtimeContext) {
   // Default weapon position/rotation config — overridden live by the debug panel
   window.phoneSwordWeaponCfg = window.phoneSwordWeaponCfg || {
     // Shield: holdOffset (meters) and holdRotation (degrees) relative to hand
-    shieldPosX: -0.18, shieldPosY: 0.2, shieldPosZ: 0.2,
-    shieldRotX: 90, shieldRotY: 0, shieldRotZ: 0,
+    shieldPosX: -0.02, shieldPosY: -0.17, shieldPosZ: 0.2,
+    shieldRotX: 0, shieldRotY: 0, shieldRotZ: 0,
     // Gun: holdOffset (meters) and holdRotation (degrees) relative to hand
-    gunPosX: 0.0, gunPosY: 0.0, gunPosZ: 0.0,
-    gunRotX: 0, gunRotY: 180, gunRotZ: 0,
+    gunPosX: -0.02, gunPosY: 0.06, gunPosZ: 0.02,
+    gunRotX: 7, gunRotY: 180, gunRotZ: 0,
   };
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
     speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
@@ -6787,7 +6787,6 @@ async function initCore(runtimeContext) {
     if (hand === 'left') {
       if (isInventoryItemEquipped('torch')) return 'torch';
       if (isInventoryItemEquipped('lantern')) return 'lantern';
-      if (isInventoryItemEquipped(SHIELD_ITEM_ID)) return SHIELD_ITEM_ID;
       return null;
     }
     if (hand === 'right') {
@@ -6799,6 +6798,7 @@ async function initCore(runtimeContext) {
       if (isInventoryItemEquipped(FOAM_SWORD_ITEM_ID)) return FOAM_SWORD_ITEM_ID;
       if (isInventoryItemEquipped('hammer')) return 'hammer';
       if (isInventoryItemEquipped('pistol')) return 'pistol';
+      if (isInventoryItemEquipped(SHIELD_ITEM_ID)) return SHIELD_ITEM_ID;
     }
     return null;
   }
