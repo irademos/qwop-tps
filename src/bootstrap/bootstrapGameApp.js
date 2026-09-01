@@ -1035,14 +1035,14 @@ async function initCore(runtimeContext) {
     el._bfTimer = setTimeout(() => { el.style.display = 'none'; }, dur + 40);
   };
 
-  // Default swing config — overridden live by the debug panel
+  // Default weapon position/rotation config — overridden live by the debug panel
   window.phoneSwordWeaponCfg = window.phoneSwordWeaponCfg || {
-    shieldX: 0, shieldY: 0, shieldZ: 0,
-    shieldAxX: 'beta', shieldAxY: 'alpha', shieldAxZ: 'gamma',
-    shieldSgnX: -1, shieldSgnY: 1, shieldSgnZ: 1,
-    gunX: 180, gunY: 0, gunZ: -180,
-    gunAxX: 'beta', gunAxY: 'alpha', gunAxZ: 'gamma',
-    gunSgnX: 1, gunSgnY: 1, gunSgnZ: 1,
+    // Shield: holdOffset (meters) and holdRotation (degrees) relative to hand
+    shieldPosX: -0.18, shieldPosY: 0.2, shieldPosZ: 0.2,
+    shieldRotX: 90, shieldRotY: 0, shieldRotZ: 0,
+    // Gun: holdOffset (meters) and holdRotation (degrees) relative to hand
+    gunPosX: 0.0, gunPosY: 0.0, gunPosZ: 0.0,
+    gunRotX: 0, gunRotY: 180, gunRotZ: 0,
   };
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
     speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
@@ -4492,6 +4492,7 @@ async function initCore(runtimeContext) {
       [SHIELD_HEALTH_KEY]: pickupHealth
     }));
     shield.localHoldOrigin = 'world';
+    if (window.phoneSwordMode) window._enableWeaponGyroCamera?.();
   };
   shield.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
@@ -6365,7 +6366,8 @@ async function initCore(runtimeContext) {
     bomb: 'right',
     autumnSword: 'right',
     hammer: 'right',
-    pistol: 'right'
+    pistol: 'right',
+    [FOAM_SWORD_ITEM_ID]: 'right',
   };
   const getInventoryItemHand = (itemId) => inventoryHandSlots[itemId] || null;
   const isMushroomItem = (itemId) => mushroomItemIds.has(itemId);
@@ -7066,6 +7068,7 @@ async function initCore(runtimeContext) {
         playerControls.playerModel.userData.handDepthOverride = { left: 0.3 };
       }
       playerControls.updateAmmoUI?.(false);
+      if (window.phoneSwordMode) window._enableWeaponGyroCamera?.();
       updateSettingsUI();
     }
   }
@@ -7110,6 +7113,7 @@ async function initCore(runtimeContext) {
       if (shield.heldMesh) {
         shield.heldMesh.visible = false;
       }
+      if (window.phoneSwordMode) playerControls?.disableGyroscope?.();
       updateSettingsUI();
       return;
     }
@@ -7239,6 +7243,7 @@ async function initCore(runtimeContext) {
       }
       clearPlayerWeaponType(playerControls, pistol.type);
       playerControls?.updateAmmoUI?.(false);
+      if (window.phoneSwordMode) playerControls?.disableGyroscope?.();
       updateSettingsUI();
     }
   }
@@ -12109,6 +12114,40 @@ async function initCore(runtimeContext) {
       if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
       if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
       if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+      // Also recalibrate the camera gyro using the same reference orientation
+      if (playerControls?.gyroActive && g.alpha !== null) {
+        playerControls.gyroLastAlpha = g.alpha;
+        playerControls.gyroLastBeta = g.beta ?? 0;
+        playerControls.gyroLastGamma = g.gamma ?? 0;
+        playerControls.calibrateGyroscope?.();
+      }
+    };
+
+    // Enable camera gyro when shield or gun is equipped in phoneSwordMode,
+    // calibrated from the current sword calibration reference (same neutral pose).
+    window._enableWeaponGyroCamera = () => {
+      if (!playerControls) return;
+      const g = window.phoneSwordGyro;
+      const calib = window.phoneSwordCalib;
+      if (playerControls.gyroActive) return; // already active
+      if (g && g.alpha !== null && calib) {
+        // Seed the controls gyro with the calibration orientation as neutral
+        playerControls.gyroLastAlpha = calib.alpha ?? g.alpha;
+        playerControls.gyroLastBeta = calib.beta ?? g.beta ?? 0;
+        playerControls.gyroLastGamma = calib.gamma ?? g.gamma ?? 0;
+        playerControls.calibrateGyroscope?.();
+        playerControls.gyroActive = true;
+      } else if (g && g.alpha !== null) {
+        // No calibration yet — use current position
+        playerControls.gyroLastAlpha = g.alpha;
+        playerControls.gyroLastBeta = g.beta ?? 0;
+        playerControls.gyroLastGamma = g.gamma ?? 0;
+        playerControls.calibrateGyroscope?.();
+        playerControls.gyroActive = true;
+      } else {
+        // Fallback: try the native initGyroscope if phoneSwordGyro has no data yet
+        playerControls.initGyroscope?.();
+      }
     };
 
     const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
@@ -16075,42 +16114,45 @@ async function initCore(runtimeContext) {
       _psw.prevTipWorld = _tipWorld.clone();
       _psw.prevSwordQ.copy(_activeQ);
     }
-    // Phone Sword: apply gyro quaternion to shield and pistol — same approach as the sword,
-    // but with per-weapon axis remapping and sign flipping controllable from the debug panel.
-    if (window.phoneSwordMode && window.phoneSwordGyro?.connected) {
+    // Phone Sword: apply fixed position/rotation config to shield and pistol,
+    // and feed phoneSwordGyro data into the camera gyro system.
+    if (window.phoneSwordMode) {
       const _wCfg = window.phoneSwordWeaponCfg;
       const _DEG = Math.PI / 180;
-      const _gyro = window.phoneSwordGyro;
-      // Raw gyro deltas: beta=pitch, alpha=yaw, gamma=roll
-      const _rawB = _gyro._dBeta  ?? 0;
-      const _rawA = _gyro._dAlpha ?? 0;
-      const _rawG = _gyro._dGamma ?? 0;
-      // Helper: build a remapped quaternion for a weapon from its axis config
-      const _buildWeaponQ = (pfx) => {
-        const _axX = _wCfg?.[pfx + 'AxX'] ?? 'beta';
-        const _axY = _wCfg?.[pfx + 'AxY'] ?? 'alpha';
-        const _axZ = _wCfg?.[pfx + 'AxZ'] ?? 'gamma';
-        const _raw = { beta: _rawB, alpha: _rawA, gamma: _rawG };
-        const _sX  = _wCfg?.[pfx + 'SgnX'] ?? 1;
-        const _sY  = _wCfg?.[pfx + 'SgnY'] ?? 1;
-        const _sZ  = _wCfg?.[pfx + 'SgnZ'] ?? 1;
-        const _e = new THREE.Euler(
-          _raw[_axX] * _sX * _DEG,
-          _raw[_axY] * _sY * _DEG,
-          _raw[_axZ] * _sZ * _DEG,
-          'YXZ'
-        );
-        const _baseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(
-          (_wCfg?.[pfx + 'X'] ?? 0) * _DEG,
-          (_wCfg?.[pfx + 'Y'] ?? 0) * _DEG,
-          (_wCfg?.[pfx + 'Z'] ?? 0) * _DEG, 'YXZ'));
-        return new THREE.Quaternion().setFromEuler(_e).multiply(_baseQ);
-      };
-      if (shield?.holder === playerControls) {
-        shield._holdQuaternion.copy(_buildWeaponQ('shield'));
+      if (_wCfg) {
+        if (shield?.holder === playerControls) {
+          shield._holdOffset.set(
+            _wCfg.shieldPosX ?? -0.18,
+            _wCfg.shieldPosY ?? 0.2,
+            _wCfg.shieldPosZ ?? 0.2
+          );
+          shield._holdQuaternion.setFromEuler(new THREE.Euler(
+            (_wCfg.shieldRotX ?? 90) * _DEG,
+            (_wCfg.shieldRotY ?? 0) * _DEG,
+            (_wCfg.shieldRotZ ?? 0) * _DEG,
+            'YXZ'
+          ));
+        }
+        if (pistol?.holder === playerControls) {
+          pistol._holdOffset.set(
+            _wCfg.gunPosX ?? 0.0,
+            _wCfg.gunPosY ?? 0.0,
+            _wCfg.gunPosZ ?? 0.0
+          );
+          pistol._holdQuaternion.setFromEuler(new THREE.Euler(
+            (_wCfg.gunRotX ?? 0) * _DEG,
+            (_wCfg.gunRotY ?? 180) * _DEG,
+            (_wCfg.gunRotZ ?? 0) * _DEG,
+            'YXZ'
+          ));
+        }
       }
-      if (pistol?.holder === playerControls) {
-        pistol._holdQuaternion.copy(_buildWeaponQ('gun'));
+      // Feed phoneSwordGyro data into camera gyro each frame
+      const _pg = window.phoneSwordGyro;
+      if (_pg?.connected && playerControls?.gyroActive && _pg.alpha !== null) {
+        playerControls.gyroLastAlpha = _pg.alpha;
+        playerControls.gyroLastBeta = _pg.beta ?? 0;
+        playerControls.gyroLastGamma = _pg.gamma ?? 0;
       }
     }
     hammer?.update();
