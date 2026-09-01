@@ -1100,7 +1100,14 @@ export class EnemyPlayer {
     // Keep rigid body alive so knockback applied after _die() still has something to push.
     // destroy() will remove it when the fade finishes.
 
-    // Fade out the group over 2 s then destroy
+    // Fade out the group over 2 s then destroy.
+    // Clone materials first so the fade doesn't corrupt shared material state
+    // (SkeletonUtils.clone shares materials by reference across all character instances).
+    this.group.traverse(obj => {
+      if (obj.isMesh && obj.material) {
+        obj.material = obj.material.clone();
+      }
+    });
     const _startMs = Date.now();
     const _fadeDur = 2000;
     const _fadeGroup = this.group;
