@@ -3690,10 +3690,7 @@ export class PlayerControls {
   getProjectileSpawnPosition(direction) {
     const gun = this.getEquippedGun();
     const isBazooka = gun?.itemId === 'bazooka';
-    // In phoneSwordMode the gun is held close to the body; push the spawn point
-    // further out so the bullet clears the player model and pistol mesh.
-    const baseOffset = isBazooka ? 0.78 : 0.6;
-    const offsetDistance = (window.phoneSwordMode && !isBazooka) ? 1.2 : baseOffset;
+    const offsetDistance = isBazooka ? 0.78 : 0.6;
     const normalizedDirection = direction.clone().normalize();
 
     const activeGunMesh = gun?.useHeldMeshWhenHeld && gun?.heldMesh
