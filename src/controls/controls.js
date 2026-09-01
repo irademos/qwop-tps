@@ -3437,7 +3437,8 @@ export class PlayerControls {
 
   getAimDirection(invertForBow = false) {
     const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
-    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
+    // Camera looks down its -Z axis, so (0,0,-1) is the actual forward direction.
+    const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(sourceQuaternion).normalize();
     if (invertForBow) direction.multiplyScalar(-1);
     return direction;
   }
