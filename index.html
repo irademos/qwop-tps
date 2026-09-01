@@ -297,7 +297,7 @@
       align-items:center;
       gap:8px;
     ">
-      <span>⚙️ Weapon Position</span>
+      <span>⚙️ Bullet Direction</span>
       <span id="psw-debug-arrow" style="margin-left:auto">▼</span>
     </div>
     <div id="psw-debug-body" style="
@@ -306,95 +306,66 @@
       border-top:none;
       border-radius:0 0 6px 6px;
       padding:10px;
-      width:270px;
+      width:240px;
     ">
-      <!-- Gun -->
-      <div style="color:#88aaff;font-weight:bold;margin:0 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🔫 Gun Position</div>
-      <label style="display:block;margin-bottom:3px">Pos X: <span id="psw-lbl-gun-px">-0.02</span>
-        <input type="range" min="-1" max="1" step="0.01" value="-0.02" id="psw-gun-px" style="width:100%;display:block;margin-top:2px">
+      <div style="color:#88aaff;font-weight:bold;margin:0 0 6px;border-bottom:1px solid #333;padding-bottom:2px">🔫 Axis Flips</div>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+        <input type="checkbox" id="psw-bullet-fx"> Flip X (left/right)
       </label>
-      <label style="display:block;margin-bottom:3px">Pos Y: <span id="psw-lbl-gun-py">0.06</span>
-        <input type="range" min="-1" max="1" step="0.01" value="0.06" id="psw-gun-py" style="width:100%;display:block;margin-top:2px">
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+        <input type="checkbox" id="psw-bullet-fy"> Flip Y (up/down)
       </label>
-      <label style="display:block;margin-bottom:3px">Pos Z: <span id="psw-lbl-gun-pz">0.02</span>
-        <input type="range" min="-1" max="1" step="0.01" value="0.02" id="psw-gun-pz" style="width:100%;display:block;margin-top:2px">
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <input type="checkbox" id="psw-bullet-fz"> Flip Z (forward/back)
       </label>
-      <div style="color:#88aaff;font-weight:bold;margin:6px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🔫 Gun Rotation (deg)</div>
-      <label style="display:block;margin-bottom:3px">Rot X: <span id="psw-lbl-gun-rx">7</span>
-        <input type="range" min="-180" max="180" step="1" value="7" id="psw-gun-rx" style="width:100%;display:block;margin-top:2px">
+      <div style="color:#88aaff;font-weight:bold;margin:0 0 6px;border-bottom:1px solid #333;padding-bottom:2px">🔫 Angle Offset (deg)</div>
+      <label style="display:block;margin-bottom:4px">Yaw (left/right): <span id="psw-lbl-byaw">0</span>
+        <input type="range" min="-90" max="90" step="1" value="0" id="psw-bullet-yaw" style="width:100%;display:block;margin-top:2px">
       </label>
-      <label style="display:block;margin-bottom:3px">Rot Y: <span id="psw-lbl-gun-ry">180</span>
-        <input type="range" min="-180" max="180" step="1" value="180" id="psw-gun-ry" style="width:100%;display:block;margin-top:2px">
-      </label>
-      <label style="display:block;margin-bottom:6px">Rot Z: <span id="psw-lbl-gun-rz">0</span>
-        <input type="range" min="-180" max="180" step="1" value="0" id="psw-gun-rz" style="width:100%;display:block;margin-top:2px">
-      </label>
-
-      <!-- Shield -->
-      <div style="color:#88aaff;font-weight:bold;margin:10px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🛡 Shield Position</div>
-      <label style="display:block;margin-bottom:3px">Pos X: <span id="psw-lbl-shield-px">-0.02</span>
-        <input type="range" min="-1" max="1" step="0.01" value="-0.02" id="psw-shield-px" style="width:100%;display:block;margin-top:2px">
-      </label>
-      <label style="display:block;margin-bottom:3px">Pos Y: <span id="psw-lbl-shield-py">-0.17</span>
-        <input type="range" min="-1" max="1" step="0.01" value="-0.17" id="psw-shield-py" style="width:100%;display:block;margin-top:2px">
-      </label>
-      <label style="display:block;margin-bottom:3px">Pos Z: <span id="psw-lbl-shield-pz">0.2</span>
-        <input type="range" min="-1" max="1" step="0.01" value="0.2" id="psw-shield-pz" style="width:100%;display:block;margin-top:2px">
-      </label>
-      <div style="color:#88aaff;font-weight:bold;margin:6px 0 4px;border-bottom:1px solid #333;padding-bottom:2px">🛡 Shield Rotation (deg)</div>
-      <label style="display:block;margin-bottom:3px">Rot X: <span id="psw-lbl-shield-rx">0</span>
-        <input type="range" min="-180" max="180" step="1" value="0" id="psw-shield-rx" style="width:100%;display:block;margin-top:2px">
-      </label>
-      <label style="display:block;margin-bottom:3px">Rot Y: <span id="psw-lbl-shield-ry">0</span>
-        <input type="range" min="-180" max="180" step="1" value="0" id="psw-shield-ry" style="width:100%;display:block;margin-top:2px">
-      </label>
-      <label style="display:block;margin-bottom:6px">Rot Z: <span id="psw-lbl-shield-rz">0</span>
-        <input type="range" min="-180" max="180" step="1" value="0" id="psw-shield-rz" style="width:100%;display:block;margin-top:2px">
+      <label style="display:block;margin-bottom:10px">Pitch (up/down): <span id="psw-lbl-bpitch">0</span>
+        <input type="range" min="-90" max="90" step="1" value="0" id="psw-bullet-pitch" style="width:100%;display:block;margin-top:2px">
       </label>
 
       <button id="psw-copy-btn" style="
-        margin-top:6px;width:100%;padding:6px;
+        margin-top:4px;width:100%;padding:6px;
         background:#334;border:1px solid #667;border-radius:4px;
         color:#cdf;font-family:monospace;font-size:11px;cursor:pointer;
-      ">📋 Copy values to clipboard</button>
+      ">📋 Copy bullet cfg</button>
       <div id="psw-copy-confirm" style="font-size:10px;color:#7f7;margin-top:3px;height:14px"></div>
     </div>
   </div>
   <script>
-    // Phone Sword weapon position/rotation debug panel — wires sliders to window.phoneSwordWeaponCfg
+    // Phone Sword bullet direction debug panel — wires controls to window.phoneSwordBulletCfg
     (function () {
-      function bind(id, lblId, cfgKey, decimals) {
+      function cfg() {
+        return window.phoneSwordBulletCfg || (window.phoneSwordBulletCfg = { flipX:false, flipY:false, flipZ:false, yawOffset:0, pitchOffset:0 });
+      }
+      function bindCheck(id, key) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', function () { cfg()[key] = this.checked; });
+      }
+      function bindRange(id, lblId, key) {
         const el = document.getElementById(id);
         const lbl = document.getElementById(lblId);
         if (!el) return;
         el.addEventListener('input', function () {
           const v = parseFloat(this.value);
-          lbl.textContent = v.toFixed(decimals ?? 0);
-          if (!window.phoneSwordWeaponCfg) window.phoneSwordWeaponCfg = {};
-          window.phoneSwordWeaponCfg[cfgKey] = v;
+          lbl.textContent = v;
+          cfg()[key] = v;
         });
       }
-
-      bind('psw-gun-px', 'psw-lbl-gun-px', 'gunPosX', 2);
-      bind('psw-gun-py', 'psw-lbl-gun-py', 'gunPosY', 2);
-      bind('psw-gun-pz', 'psw-lbl-gun-pz', 'gunPosZ', 2);
-      bind('psw-gun-rx', 'psw-lbl-gun-rx', 'gunRotX', 0);
-      bind('psw-gun-ry', 'psw-lbl-gun-ry', 'gunRotY', 0);
-      bind('psw-gun-rz', 'psw-lbl-gun-rz', 'gunRotZ', 0);
-
-      bind('psw-shield-px', 'psw-lbl-shield-px', 'shieldPosX', 2);
-      bind('psw-shield-py', 'psw-lbl-shield-py', 'shieldPosY', 2);
-      bind('psw-shield-pz', 'psw-lbl-shield-pz', 'shieldPosZ', 2);
-      bind('psw-shield-rx', 'psw-lbl-shield-rx', 'shieldRotX', 0);
-      bind('psw-shield-ry', 'psw-lbl-shield-ry', 'shieldRotY', 0);
-      bind('psw-shield-rz', 'psw-lbl-shield-rz', 'shieldRotZ', 0);
+      bindCheck('psw-bullet-fx', 'flipX');
+      bindCheck('psw-bullet-fy', 'flipY');
+      bindCheck('psw-bullet-fz', 'flipZ');
+      bindRange('psw-bullet-yaw', 'psw-lbl-byaw', 'yawOffset');
+      bindRange('psw-bullet-pitch', 'psw-lbl-bpitch', 'pitchOffset');
 
       // Copy to clipboard
       const copyBtn = document.getElementById('psw-copy-btn');
       const copyConfirm = document.getElementById('psw-copy-confirm');
       if (copyBtn) copyBtn.addEventListener('click', function () {
-        const cfg = window.phoneSwordWeaponCfg || {};
-        const text = JSON.stringify(cfg, null, 2);
+        const text = JSON.stringify(window.phoneSwordBulletCfg || {}, null, 2);
         navigator.clipboard.writeText(text).then(function () {
           copyConfirm.textContent = '✓ Copied!';
           setTimeout(() => { copyConfirm.textContent = ''; }, 2000);

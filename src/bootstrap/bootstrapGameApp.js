@@ -1044,6 +1044,10 @@ async function initCore(runtimeContext) {
     gunPosX: -0.02, gunPosY: 0.06, gunPosZ: 0.02,
     gunRotX: 7, gunRotY: 180, gunRotZ: 0,
   };
+  window.phoneSwordBulletCfg = window.phoneSwordBulletCfg || {
+    flipX: false, flipY: false, flipZ: false,
+    yawOffset: 0, pitchOffset: 0,
+  };
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
     speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
     mediumThreshold: 7000,  // deg/s — above this → medium tier (trail + rotation)

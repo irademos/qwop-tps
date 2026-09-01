@@ -3436,25 +3436,24 @@ export class PlayerControls {
   }
 
   getAimDirection(invertForBow = false) {
-    let direction;
-    if (this.gyroActive) {
-      // When gyro controls the camera, derive aim from yaw/pitch directly.
-      // Using camera.quaternion gives the wrong vertical direction because the
-      // camera orbits around the player and its +Z points backward.
-      // pitch is inverted: positive pitch = camera above player = looking down,
-      // so negate it to get the actual aim direction's Y component.
-      direction = new THREE.Vector3(
-        Math.sin(this.yaw) * Math.cos(this.pitch),
-        -Math.sin(this.pitch),
-        Math.cos(this.yaw) * Math.cos(this.pitch)
-      ).normalize();
-    } else {
-      const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
-      direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
+    const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
+    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
+    if (window.phoneSwordMode) {
+      const cfg = window.phoneSwordBulletCfg;
+      if (cfg) {
+        if (cfg.flipX) direction.x *= -1;
+        if (cfg.flipY) direction.y *= -1;
+        if (cfg.flipZ) direction.z *= -1;
+        if (cfg.yawOffset || cfg.pitchOffset) {
+          const _DEG = Math.PI / 180;
+          const q = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler((cfg.pitchOffset ?? 0) * _DEG, (cfg.yawOffset ?? 0) * _DEG, 0, 'YXZ')
+          );
+          direction.applyQuaternion(q).normalize();
+        }
+      }
     }
-    if (invertForBow) {
-      direction.multiplyScalar(-1);
-    }
+    if (invertForBow) direction.multiplyScalar(-1);
     return direction;
   }
 
