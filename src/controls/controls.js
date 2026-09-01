@@ -3438,21 +3438,6 @@ export class PlayerControls {
   getAimDirection(invertForBow = false) {
     const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
     const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(sourceQuaternion).normalize();
-    if (window.phoneSwordMode) {
-      const cfg = window.phoneSwordBulletCfg;
-      if (cfg) {
-        if (cfg.flipX) direction.x *= -1;
-        if (cfg.flipY) direction.y *= -1;
-        if (cfg.flipZ) direction.z *= -1;
-        if (cfg.yawOffset || cfg.pitchOffset) {
-          const _DEG = Math.PI / 180;
-          const q = new THREE.Quaternion().setFromEuler(
-            new THREE.Euler((cfg.pitchOffset ?? 0) * _DEG, (cfg.yawOffset ?? 0) * _DEG, 0, 'YXZ')
-          );
-          direction.applyQuaternion(q).normalize();
-        }
-      }
-    }
     if (invertForBow) direction.multiplyScalar(-1);
     return direction;
   }
@@ -3704,7 +3689,10 @@ export class PlayerControls {
   getProjectileSpawnPosition(direction) {
     const gun = this.getEquippedGun();
     const isBazooka = gun?.itemId === 'bazooka';
-    const offsetDistance = isBazooka ? 0.78 : 0.6;
+    // In phoneSwordMode the gun is held close to the body; push the spawn point
+    // further out so the bullet clears the player model and pistol mesh.
+    const baseOffset = isBazooka ? 0.78 : 0.6;
+    const offsetDistance = (window.phoneSwordMode && !isBazooka) ? 1.2 : baseOffset;
     const normalizedDirection = direction.clone().normalize();
 
     const activeGunMesh = gun?.useHeldMeshWhenHeld && gun?.heldMesh
