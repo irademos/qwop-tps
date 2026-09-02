@@ -7130,6 +7130,7 @@ async function initCore(runtimeContext) {
       return;
     }
     if (itemId === SHIELD_ITEM_ID) {
+      hideShieldHealthHUD();
       if (shield?.holder !== playerControls) return;
       shield.holder = null;
       shield.localHoldOrigin = null;
@@ -7140,7 +7141,6 @@ async function initCore(runtimeContext) {
         shield.heldMesh.visible = false;
       }
       if (window.phoneSwordMode) playerControls?.disableGyroscope?.();
-      hideShieldHealthHUD();
       updateSettingsUI();
       return;
     }
