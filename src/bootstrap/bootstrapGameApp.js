@@ -6848,6 +6848,14 @@ async function initCore(runtimeContext) {
 
   function equipInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
+    // Capture the currently held right-hand item BEFORE unequipping it,
+    // so we can restore it if the shield later breaks with no spares.
+    if (itemId === SHIELD_ITEM_ID) {
+      const currentRight = getEquippedInventoryItemIdForHand('right');
+      if (currentRight && currentRight !== SHIELD_ITEM_ID) {
+        lastEquippedBeforeShield = currentRight;
+      }
+    }
     unequipOtherInventoryItems(itemId);
     if (itemId === 'lantern') {
       if (!lantern?.mesh || !playerControls) return;
@@ -6921,11 +6929,6 @@ async function initCore(runtimeContext) {
         delete inventoryState[SHIELD_ITEM_ID];
         persistInventoryAndStorage();
         return;
-      }
-      // Save the currently equipped right-hand item so we can restore it if the shield breaks
-      const currentRight = getEquippedInventoryItemIdForHand('right');
-      if (currentRight && currentRight !== SHIELD_ITEM_ID) {
-        lastEquippedBeforeShield = currentRight;
       }
       inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, entry);
       const heldMesh = ensureLocalHeldWeaponMesh(shield, SHIELD_ITEM_ID, { forceNew: true });
@@ -9574,6 +9577,7 @@ async function initCore(runtimeContext) {
     }
     shield?.showHealthBar?.(nextHealth, DEFAULT_SHIELD_HEALTH);
     if (nextHealth <= 0) {
+      hideShieldHealthHUD();
       const prevCount = currentEntry.count;
       if (prevCount > 1) {
         // Consume the broken shield, reset health for the next one in inventory
