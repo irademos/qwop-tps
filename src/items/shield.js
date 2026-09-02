@@ -3,7 +3,7 @@ import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { Weapon } from './weapon.js';
 
 export const SHIELD_ITEM_ID = 'shield';
-export const DEFAULT_SHIELD_HEALTH = 60;
+export const DEFAULT_SHIELD_HEALTH = 20;
 
 const SHIELD_RADIUS = 0.42;
 const SHIELD_THICKNESS = 0.12;

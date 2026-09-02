@@ -6130,6 +6130,26 @@ async function initCore(runtimeContext) {
   );
   const SHIELD_HEALTH_KEY = 'shieldHealth';
   const SHIELD_MAX_HEALTH_KEY = 'shieldMaxHealth';
+  let lastEquippedBeforeShield = null;
+
+  const updateShieldHealthHUD = (health, maxHealth, count) => {
+    const display = document.getElementById('shield-health-display');
+    const fill = document.getElementById('shield-health-bar-fill');
+    const countEl = document.getElementById('shield-count-hud');
+    if (!display || !fill) return;
+    const safeMax = (Number.isFinite(maxHealth) && maxHealth > 0) ? maxHealth : DEFAULT_SHIELD_HEALTH;
+    const ratio = Math.max(0, Math.min(1, (Number.isFinite(health) ? health : safeMax) / safeMax));
+    fill.style.width = `${ratio * 100}%`;
+    fill.style.background = ratio > 0.35
+      ? 'linear-gradient(90deg, #43d15a, #2db347)'
+      : 'linear-gradient(90deg, #ff5c45, #c62828)';
+    if (countEl) countEl.textContent = (Number.isFinite(count) && count > 1) ? `×${count}` : '';
+    display.classList.remove('hidden');
+  };
+
+  const hideShieldHealthHUD = () => {
+    document.getElementById('shield-health-display')?.classList.add('hidden');
+  };
   const normalizeShieldHealth = (value) => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
@@ -6828,6 +6848,14 @@ async function initCore(runtimeContext) {
 
   function equipInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
+    // Capture the currently held right-hand item BEFORE unequipping it,
+    // so we can restore it if the shield later breaks with no spares.
+    if (itemId === SHIELD_ITEM_ID) {
+      const currentRight = getEquippedInventoryItemIdForHand('right');
+      if (currentRight && currentRight !== SHIELD_ITEM_ID) {
+        lastEquippedBeforeShield = currentRight;
+      }
+    }
     unequipOtherInventoryItems(itemId);
     if (itemId === 'lantern') {
       if (!lantern?.mesh || !playerControls) return;
@@ -6915,6 +6943,7 @@ async function initCore(runtimeContext) {
       shield.mesh.visible = false;
       shield.localHoldOrigin = 'inventory';
       shield.holder = playerControls;
+      updateShieldHealthHUD(entry[SHIELD_HEALTH_KEY], entry[SHIELD_MAX_HEALTH_KEY], entry.count);
       updateSettingsUI();
       return;
     }
@@ -7104,6 +7133,7 @@ async function initCore(runtimeContext) {
       return;
     }
     if (itemId === SHIELD_ITEM_ID) {
+      hideShieldHealthHUD();
       if (shield?.holder !== playerControls) return;
       shield.holder = null;
       shield.localHoldOrigin = null;
@@ -9537,10 +9567,6 @@ async function initCore(runtimeContext) {
     if (!currentEntry.count || currentEntry[SHIELD_HEALTH_KEY] <= 0) return false;
     const currentHealth = currentEntry[SHIELD_HEALTH_KEY];
     const nextHealth = Math.max(0, currentHealth - Math.max(1, Math.round(damage)));
-    const nextEntry = normalizeShieldEntry({
-      ...currentEntry,
-      [SHIELD_HEALTH_KEY]: nextHealth
-    });
     if (shield?.mesh) {
       shield.mesh.userData.shieldHealth = nextHealth;
       shield.mesh.userData.shieldMaxHealth = DEFAULT_SHIELD_HEALTH;
@@ -9551,12 +9577,47 @@ async function initCore(runtimeContext) {
     }
     shield?.showHealthBar?.(nextHealth, DEFAULT_SHIELD_HEALTH);
     if (nextHealth <= 0) {
-      delete inventoryState[SHIELD_ITEM_ID];
-      unequipInventoryItem(SHIELD_ITEM_ID);
+      hideShieldHealthHUD();
+      const prevCount = currentEntry.count;
+      if (prevCount > 1) {
+        // Consume the broken shield, reset health for the next one in inventory
+        const nextEntry = normalizeShieldEntry({
+          ...currentEntry,
+          count: prevCount - 1,
+          [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
+          [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+        });
+        inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, nextEntry);
+        persistInventoryAndStorage();
+        // Brief unequip then re-equip a fresh shield
+        unequipInventoryItem(SHIELD_ITEM_ID);
+        setTimeout(() => {
+          if (inventoryState[SHIELD_ITEM_ID]?.count > 0) {
+            equipInventoryItem(SHIELD_ITEM_ID);
+          }
+        }, 400);
+      } else {
+        // Last shield consumed — remove and restore previous item
+        delete inventoryState[SHIELD_ITEM_ID];
+        persistInventoryAndStorage();
+        const restoreItemId = lastEquippedBeforeShield;
+        lastEquippedBeforeShield = null;
+        unequipInventoryItem(SHIELD_ITEM_ID);
+        if (restoreItemId && inventoryState[restoreItemId]?.count > 0) {
+          setTimeout(() => {
+            equipInventoryItem(restoreItemId);
+          }, 400);
+        }
+      }
     } else {
+      const nextEntry = normalizeShieldEntry({
+        ...currentEntry,
+        [SHIELD_HEALTH_KEY]: nextHealth
+      });
       inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, nextEntry);
+      updateShieldHealthHUD(nextHealth, DEFAULT_SHIELD_HEALTH, nextEntry.count);
+      persistInventoryAndStorage();
     }
-    persistInventoryAndStorage();
     return true;
   };
 

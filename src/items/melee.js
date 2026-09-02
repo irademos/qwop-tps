@@ -226,7 +226,6 @@ export function updateMeleeAttacks({
         }) || hit;
       }
       for (const target of players) {
-        continue; // Disable player-vs-player melee damage entirely.
         if (!target.model || !target.model.position) continue;
         if (isTargetInAttackRange(attacker.model, target.model.position, attackCfg)) {
           hit = true;
