@@ -972,6 +972,8 @@ export class EnemyPlayer {
         damage: SWORD_DAMAGE
       });
       if (blocked) {
+        this.applySwordBounce();
+        window._pswShowBlockFlash?.('player');
         this._lastHitTime = now;
         return; // hit absorbed by shield
       }
