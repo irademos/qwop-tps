@@ -11965,21 +11965,22 @@ async function initCore(runtimeContext) {
   const _psRandomSpawnPos = () => {
     const angle = Math.random() * Math.PI * 2;
     const dist = 40 + Math.random() * 60;
-    return new THREE.Vector3(
-      playerModel.position.x + Math.cos(angle) * dist,
-      playerModel.position.y,
-      playerModel.position.z + Math.sin(angle) * dist
-    );
+    const rx = playerModel.position.x + Math.cos(angle) * dist;
+    const rz = playerModel.position.z + Math.sin(angle) * dist;
+    const ry = getTerrainHeight(rx, rz) ?? playerModel.position.y;
+    return new THREE.Vector3(rx, ry, rz);
   };
 
   const _psBuildStage = (stage) => {
     const count = _psEnemyCount(stage);
     const pathLen = 80 + stage * 3;
     const pathAngle = Math.random() * Math.PI * 2;
+    const _psPathEndX = playerModel.position.x + Math.cos(pathAngle) * pathLen;
+    const _psPathEndZ = playerModel.position.z + Math.sin(pathAngle) * pathLen;
     _psPathEnd.set(
-      playerModel.position.x + Math.cos(pathAngle) * pathLen,
-      playerModel.position.y,
-      playerModel.position.z + Math.sin(pathAngle) * pathLen
+      _psPathEndX,
+      getTerrainHeight(_psPathEndX, _psPathEndZ) ?? playerModel.position.y,
+      _psPathEndZ
     );
     _psAutoWalkDir.subVectors(_psPathEnd, playerModel.position).setY(0).normalize();
     _psEnemyQueue = [];
@@ -11988,12 +11989,11 @@ async function initCore(runtimeContext) {
       const baseX = playerModel.position.x + _psAutoWalkDir.x * pathLen * t;
       const baseZ = playerModel.position.z + _psAutoWalkDir.z * pathLen * t;
       const scatter = 8;
+      const ex = baseX + (Math.random() - 0.5) * scatter;
+      const ez = baseZ + (Math.random() - 0.5) * scatter;
+      const ey = getTerrainHeight(ex, ez) ?? playerModel.position.y;
       _psEnemyQueue.push({
-        pos: new THREE.Vector3(
-          baseX + (Math.random() - 0.5) * scatter,
-          playerModel.position.y,
-          baseZ + (Math.random() - 0.5) * scatter
-        ),
+        pos: new THREE.Vector3(ex, ey, ez),
         hearts: _psHeartsForStage(stage),
         triggerDist: pathLen * t - 10
       });
