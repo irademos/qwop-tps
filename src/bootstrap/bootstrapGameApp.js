@@ -16246,6 +16246,8 @@ async function initCore(runtimeContext) {
           const _ddz = _psPathEnd.z - playerModel.position.z;
           const _distToEnd = Math.sqrt(_ddx * _ddx + _ddz * _ddz);
           if (_distToEnd > 1.5) {
+            // Recompute direction each frame so manual movement doesn't break the path
+            _psAutoWalkDir.set(_ddx / _distToEnd, 0, _ddz / _distToEnd);
             const _moveStep = PS_SPEED * frameDelta;
             const _nx = playerModel.position.x + _psAutoWalkDir.x * _moveStep;
             const _nz = playerModel.position.z + _psAutoWalkDir.z * _moveStep;
