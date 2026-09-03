@@ -243,7 +243,7 @@ export function updateProjectiles({
     }
 
     for (const [id, { model }] of Object.entries(otherPlayers)) {
-      continue; // Disable projectile player-vs-player damage entirely.
+      if (!window.phoneSwordMode) continue; // Only enable projectile PvP damage in phone sword mode.
       if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
       if (age < 80) continue;
       const playerBox = getObjectBox(model);

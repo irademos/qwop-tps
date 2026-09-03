@@ -752,11 +752,38 @@ export class PlayerControls {
     this.optionRightButton = createButton('right-punch-button', 'mobile-option-action', '—');
     this.blockButton = null; // block functionality moved to punchButton in PS mode
 
+    // PS mode weapon switch buttons (two slots showing the non-equipped weapons)
+    this.psWeaponBtn1 = createButton('ps-weapon-btn-1', 'mobile-primary-action ps-weapon-btn', '');
+    this.psWeaponBtn2 = createButton('ps-weapon-btn-2', 'mobile-primary-action ps-weapon-btn', '');
+    this.psWeaponBtn1.style.display = 'none';
+    this.psWeaponBtn2.style.display = 'none';
+
     if (window.phoneSwordMode) {
       // In PS mode: hide spells/equip; punchButton doubles as block/fire
       this.spellsButton.style.display = 'none';
       this.equipButton.style.display = 'none';
       this.punchButton.classList.add('ps-block-btn');
+      this.psWeaponBtn1.style.display = '';
+      this.psWeaponBtn2.style.display = '';
+
+      const makePsWeaponHandler = (btnRef) => {
+        const onPress = (event) => {
+          if (!this.enabled) return;
+          const itemId = btnRef.dataset.psWeaponId;
+          if (!itemId) return;
+          const appState = appContext.uiState.appState ?? window.appState;
+          appState?.equipInventoryItem?.(itemId);
+          this.refreshActionButtons();
+          if (event) this.safePreventDefault(event);
+        };
+        btnRef.addEventListener('touchstart', (e) => {
+          this.lastTouchButtonTime = performance.now();
+          onPress(e);
+        }, { passive: false });
+        btnRef.addEventListener('mousedown', onPress);
+      };
+      makePsWeaponHandler(this.psWeaponBtn1);
+      makePsWeaponHandler(this.psWeaponBtn2);
     }
 
     this.mobileEquipButtons = [];
@@ -856,9 +883,10 @@ export class PlayerControls {
         this.safePreventDefault(e);
         const w = this.getEquippedWeapon('right');
         const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
+        const isSword = w?.itemId === 'foamSword';
         if (isGun) {
           onAttackPressStart(e);
-        } else {
+        } else if (isSword) {
           if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = true;
         }
       }, { passive: false });
@@ -866,9 +894,10 @@ export class PlayerControls {
         this.safePreventDefault(e);
         const w = this.getEquippedWeapon('right');
         const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
+        const isSword = w?.itemId === 'foamSword';
         if (isGun) {
           onAttackPressEnd(e);
-        } else {
+        } else if (isSword) {
           if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
         }
       }, { passive: false });
@@ -990,7 +1019,8 @@ export class PlayerControls {
     const weapon = this.getEquippedWeapon('right');
     if (window.phoneSwordMode) {
       if (weapon?.itemId === 'pistol' || weapon?.itemId === 'bazooka') return 'Fire';
-      return '🛡 Block';
+      if (weapon?.itemId === 'foamSword') return '🛡 Block';
+      return 'Attack';
     }
     if (weapon?.itemId === 'bow') return 'Bow';
     if (weapon?.itemId === 'bazooka') return 'Fire';
@@ -1334,6 +1364,33 @@ export class PlayerControls {
       this.spellsButton.disabled = false;
     }
 
+    if (window.phoneSwordMode) {
+      // Update the two weapon switch buttons to show the two non-equipped weapons
+      const PS_WEAPONS = [
+        { id: 'foamSword', label: 'Sword' },
+        { id: 'pistol', label: 'Gun' },
+        { id: 'shield', label: 'Shield' },
+      ];
+      const equippedWeapon = this.getEquippedWeapon('right');
+      const equippedId = equippedWeapon?.itemId ?? null;
+      const others = PS_WEAPONS.filter(w => w.id !== equippedId);
+      if (this.psWeaponBtn1) {
+        const w = others[0];
+        this.psWeaponBtn1.dataset.psWeaponId = w ? w.id : '';
+        this.psWeaponBtn1.textContent = w ? w.label : '';
+        this.psWeaponBtn1.style.display = w ? '' : 'none';
+      }
+      if (this.psWeaponBtn2) {
+        const w = others[1];
+        this.psWeaponBtn2.dataset.psWeaponId = w ? w.id : '';
+        this.psWeaponBtn2.textContent = w ? w.label : '';
+        this.psWeaponBtn2.style.display = w ? '' : 'none';
+      }
+      // Block button only makes sense when sword is equipped; hide it for gun/shield
+      const swordEquipped = equippedId === 'foamSword';
+      this.punchButton.style.display = swordEquipped ? '' : (equippedId === 'pistol' ? '' : 'none');
+    }
+
     this.optionLeftButton.textContent = isIceGunEquipped ? 'Freeze' : 'Shield';
     this.optionLeftButton.disabled = false;
     this.optionCenterButton.textContent = '🎤';
@@ -1420,13 +1477,28 @@ export class PlayerControls {
       this.optionLeftButton,
       this.optionCenterButton,
       this.optionRightButton,
+      this.psWeaponBtn1,
+      this.psWeaponBtn2,
       ...(this.mobileEquipButtons || []),
       ...(this.mobileItemActionButtons || [])
     ].forEach(clearButtonPos);
 
-    // Phone sword mode: only show punchButton (block/fire) — spells/equip already hidden
+    // Phone sword mode: show block/fire button + two weapon switch buttons
     if (window.phoneSwordMode) {
-      this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
+      const equippedWeapon = this.getEquippedWeapon('right');
+      const equippedId = equippedWeapon?.itemId ?? null;
+      const showPunch = equippedId === 'foamSword' || equippedId === 'pistol';
+      if (showPunch) {
+        this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
+      }
+      // Place the two weapon switch buttons above/beside the action area
+      // x:2 keeps them clear of jump (far right) and punchButton (x:1)
+      if (this.psWeaponBtn1?.dataset?.psWeaponId) {
+        this.applyMobileButtonPosition(this.psWeaponBtn1, { x: 2, y: 0 });
+      }
+      if (this.psWeaponBtn2?.dataset?.psWeaponId) {
+        this.applyMobileButtonPosition(this.psWeaponBtn2, { x: 2, y: 1 });
+      }
       return;
     }
 
