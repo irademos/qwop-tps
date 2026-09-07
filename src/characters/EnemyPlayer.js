@@ -1011,6 +1011,9 @@ export class EnemyPlayer {
     });
   }
 
+  // Alias so projectile code can use monster.model like other enemy types
+  get model() { return this.group; }
+
   // ─── take damage (called externally when player's sword hits this enemy) ────
 
   applyDamage(amount) {

@@ -5724,6 +5724,7 @@ async function initCore(runtimeContext) {
   }
 
   function initWalkingTrackerButton() {
+    if (window.phoneSwordMode) return;
     walkingTrackerButton = document.createElement('button');
     walkingTrackerButton.type = 'button';
     walkingTrackerButton.setAttribute('aria-label', 'Open distance traveled summary');
@@ -15043,6 +15044,9 @@ async function initCore(runtimeContext) {
   settingsBtn.addEventListener('click', () => {
     openSettings();
   });
+  if (window.phoneSwordMode && inventoryBtn) {
+    inventoryBtn.style.display = 'none';
+  }
   inventoryBtn?.addEventListener('click', () => {
     openInventory();
   });
@@ -17062,7 +17066,9 @@ async function initCore(runtimeContext) {
       playerModel,
       otherPlayers,
       multiplayer,
-      monsters: getDamageableCreatures(),
+      monsters: window.phoneSwordMode && hordeEnemies.length > 0
+        ? [...getDamageableCreatures(), ...hordeEnemies]
+        : getDamageableCreatures(),
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage,
       onBuildHit: handleBuildProjectileHit
