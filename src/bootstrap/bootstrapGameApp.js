@@ -17066,9 +17066,8 @@ async function initCore(runtimeContext) {
       playerModel,
       otherPlayers,
       multiplayer,
-      monsters: window.phoneSwordMode && hordeEnemies.length > 0
-        ? [...getDamageableCreatures(), ...hordeEnemies]
-        : getDamageableCreatures(),
+      monsters: getDamageableCreatures(),
+      hordeEnemies: window.phoneSwordMode ? hordeEnemies : null,
       sendMonsterAttack: sendMonsterAttackIntent,
       onMonsterHit: handleMonsterDamage,
       onBuildHit: handleBuildProjectileHit
