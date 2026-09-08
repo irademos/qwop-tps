@@ -1020,8 +1020,9 @@ export class PlayerControls {
   getMobileAttackLabel() {
     const weapon = this.getEquippedWeapon('right');
     if (window.phoneSwordMode) {
-      if (weapon?.itemId === 'pistol' || weapon?.itemId === 'bazooka') return 'Fire';
-      if (weapon?.itemId === 'foamSword') return '🛡 Block';
+      const psItemId = weapon?.itemId ?? 'foamSword';
+      if (psItemId === 'pistol' || psItemId === 'bazooka') return 'Fire';
+      if (psItemId === 'foamSword') return '🛡 Block';
       return 'Attack';
     }
     if (weapon?.itemId === 'bow') return 'Bow';
