@@ -137,6 +137,7 @@ export function updateProjectiles({
   playerModel,
   multiplayer,
   monsters,
+  hordeEnemies,
   sendMonsterAttack,
   onMonsterHit,
   onBuildHit
@@ -342,6 +343,27 @@ export function updateProjectiles({
     }
 
     if (removed) continue;
+
+    // Horde enemies (EnemyPlayer) are always local — call applyDamage directly.
+    if (!removed && Array.isArray(hordeEnemies) && hordeEnemies.length > 0 && age >= 80) {
+      for (const enemy of hordeEnemies) {
+        if (enemy.isDead) continue;
+        const enemyBox = getObjectBox(enemy.group);
+        if (!enemyBox) continue;
+        if (projBox.intersectsBox(enemyBox)) {
+          const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
+          const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
+          const killed = enemy.applyDamage(Math.max(1, Math.round(damage)));
+          if (!killed) {
+            const dir = vel.clone().normalize();
+            enemy.applyKnockback({ direction: dir, strength: 3 });
+          }
+          removeProjectile(i);
+          removed = true;
+          break;
+        }
+      }
+    }
 
     if (isHost && Array.isArray(monsters)) {
       for (const monster of monsters) {

@@ -1020,8 +1020,9 @@ export class PlayerControls {
   getMobileAttackLabel() {
     const weapon = this.getEquippedWeapon('right');
     if (window.phoneSwordMode) {
-      if (weapon?.itemId === 'pistol' || weapon?.itemId === 'bazooka') return 'Fire';
-      if (weapon?.itemId === 'foamSword') return '🛡 Block';
+      const psItemId = weapon?.itemId ?? 'foamSword';
+      if (psItemId === 'pistol' || psItemId === 'bazooka') return 'Fire';
+      if (psItemId === 'foamSword') return '🛡 Block';
       return 'Attack';
     }
     if (weapon?.itemId === 'bow') return 'Bow';
@@ -1381,7 +1382,8 @@ export class PlayerControls {
         { id: 'pistol', label: 'Gun' },
         { id: 'shield', label: 'Shield' },
       ];
-      const equippedId = rightWeapon?.itemId ?? null;
+      // Default to foamSword when nothing detected so buttons show Gun+Shield
+      const equippedId = rightWeapon?.itemId ?? 'foamSword';
       const others = PS_WEAPONS.filter(w => w.id !== equippedId);
       if (this.psWeaponBtn1) {
         const w = others[0];
@@ -1485,7 +1487,7 @@ export class PlayerControls {
 
     // Phone sword mode: show block/fire button + two weapon switch buttons
     if (window.phoneSwordMode) {
-      const equippedId = this.getEquippedWeapon('right')?.itemId ?? null;
+      const equippedId = this.getEquippedWeapon('right')?.itemId ?? 'foamSword';
       const showPunch = equippedId === 'foamSword' || equippedId === 'pistol';
       if (showPunch) {
         this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
