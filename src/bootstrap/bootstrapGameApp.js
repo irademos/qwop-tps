@@ -6365,16 +6365,8 @@ async function initCore(runtimeContext) {
     };
     homeStorageDirty = true;
   }
-  // Pistol is always in inventory
-  if (!inventoryState.pistol) {
-    inventoryState.pistol = {
-      count: 1,
-      icon: inventoryCatalog.pistol.icon,
-      name: inventoryCatalog.pistol.name,
-      [PISTOL_AMMO_KEY]: DEFAULT_PISTOL_AMMO
-    };
-    inventoryDirty = true;
-  } else if (!Number.isFinite(inventoryState.pistol?.[PISTOL_AMMO_KEY])) {
+  // Ensure pistol ammo field exists if pistol is in inventory
+  if (inventoryState.pistol?.count > 0 && !Number.isFinite(inventoryState.pistol?.[PISTOL_AMMO_KEY])) {
     inventoryState.pistol = {
       ...inventoryState.pistol,
       [PISTOL_AMMO_KEY]: DEFAULT_PISTOL_AMMO
@@ -6660,6 +6652,12 @@ async function initCore(runtimeContext) {
     const nextAmount = getPistolAmmoCount() + amount;
     setPistolAmmoCount(nextAmount);
     if (amount > 0) showPickupToast(PISTOL_AMMO_KEY, amount, 'Bullets');
+  }
+
+  function seedPistolAmmoIfNeeded() {
+    if (!Number.isFinite(inventoryState.pistol?.[PISTOL_AMMO_KEY])) {
+      inventoryState.pistol = { ...inventoryState.pistol, [PISTOL_AMMO_KEY]: DEFAULT_PISTOL_AMMO };
+    }
   }
 
   function addToInventory(itemId, amount = 1, options = {}) {
@@ -11860,11 +11858,12 @@ async function initCore(runtimeContext) {
   // Horde mode: seed inventory with pistol, shield, and autumnSword so gesture equip can work immediately.
   // Write directly to inventoryState to avoid triggering persistInventoryAndStorage during
   // bootstrap (UI panels may not be fully initialised yet).
+  // In phoneSword mode, pistol and shield must be purchased from the merchant.
   if (window.gameMode === 'horde') {
-    if (!(inventoryState['pistol']?.count > 0)) {
+    if (!window.phoneSwordMode && !(inventoryState['pistol']?.count > 0)) {
       inventoryState['pistol'] = ensureCatalogEntry('pistol', { count: 1 });
     }
-    if (!(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
+    if (!window.phoneSwordMode && !(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
       inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
         count: 1,
         [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
@@ -13926,11 +13925,12 @@ async function initCore(runtimeContext) {
     _hordePendingFrames = 0;
     _hordeEquipHoldSince = 0;
     // Re-seed horde inventory (cleared by dropInventoryOnDeath) so gesture equip works again
+    // In phoneSword mode, pistol and shield must be purchased from the merchant.
     if (window.gameMode === 'horde') {
-      if (!(inventoryState['pistol']?.count > 0)) {
+      if (!window.phoneSwordMode && !(inventoryState['pistol']?.count > 0)) {
         inventoryState['pistol'] = ensureCatalogEntry('pistol', { count: 1 });
       }
-      if (!(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
+      if (!window.phoneSwordMode && !(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
         inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
           count: 1,
           [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
@@ -14798,6 +14798,7 @@ async function initCore(runtimeContext) {
     addArrowAmmo: (amount) => addArrowAmmo(amount),
     addMissileAmmo: (amount) => addMissileAmmo(amount),
     addPistolAmmo: (amount) => addPistolAmmo(amount),
+    seedPistolAmmoIfNeeded: () => seedPistolAmmoIfNeeded(),
     getHomeStorage: () => getHomeStorage(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
     getEquippedInventoryItemIds: () => getEquippedInventoryItemIds(),

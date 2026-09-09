@@ -37,6 +37,8 @@ const BASE_MERCHANT_ITEMS = {
   bow: { name: 'Bow', price: 30, count: 1, icon: '/assets/ui/items/bow.png' },
   bomb: { name: 'Bombs', price: 10, count: 5, icon: '/assets/ui/items/bomb.png' },
   lantern: { name: 'Lantern', price: 20, count: 1, icon: '/assets/ui/items/lantern.png' },
+  shield: { name: 'Shield', price: 50, count: 5 },
+  pistol: { name: 'Gun', price: 200, count: 1 },
   [LIFE_POTION_ITEM_ID]: { name: 'Life Potion', price: 30, count: 5, icon: '/assets/ui/items/life_potion.png' },
   [MANA_POTION_ITEM_ID]: { name: 'Mana Potion', price: 30, count: 5, icon: '/assets/ui/items/mana_potion.png' },
   [ICE_AMMO_ITEM_ID]: { name: 'Ice Ammo', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
@@ -339,6 +341,10 @@ export const buyMerchantItem = async (itemId) => {
     }
   } else {
     merchantAppState?.addToInventory?.(itemId, 1);
+  }
+  // For pistol, ensure ammo is seeded if buying the gun for the first time
+  if (itemId === 'pistol') {
+    merchantAppState?.seedPistolAmmoIfNeeded?.();
   }
   merchantAppState?.addCoins?.(-price);
   merchantState.items[itemId] = { ...item, count: item.count - 1 };

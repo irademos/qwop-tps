@@ -1401,12 +1401,16 @@ export class PlayerControls {
     this.punchButton.style.display = '';
 
     if (window.phoneSwordMode) {
+      const appState = appContext.uiState.appState ?? window.appState;
+      const psInventory = appState?.getInventory?.() || {};
+      const hasGun = (psInventory['pistol']?.count ?? 0) > 0;
+      const hasShield = (psInventory['shield']?.count ?? 0) > 0;
       const PS_WEAPONS = [
         { id: 'foamSword', label: 'Sword' },
-        { id: 'pistol', label: 'Gun' },
-        { id: 'shield', label: 'Shield' },
+        ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
+        ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),
       ];
-      // Default to foamSword when nothing detected so buttons show Gun+Shield
+      // Default to foamSword when nothing detected
       const equippedId = rightWeapon?.itemId ?? 'foamSword';
       const others = PS_WEAPONS.filter(w => w.id !== equippedId);
       if (this.psWeaponBtn1) {
