@@ -889,9 +889,9 @@ export class PlayerControls {
       this.punchButton.addEventListener('touchstart', (e) => {
         this.safePreventDefault(e);
         const w = this.getEquippedWeapon('right');
-        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
         const isSword = w?.itemId === 'foamSword';
-        if (isGun) {
+        const isBazooka = w?.itemId === 'bazooka';
+        if (isBazooka) {
           onAttackPressStart(e);
         } else if (isSword) {
           if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = true;
@@ -899,10 +899,14 @@ export class PlayerControls {
       }, { passive: false });
       this.punchButton.addEventListener('touchend', (e) => {
         this.safePreventDefault(e);
+        if (!this.enabled) return;
         const w = this.getEquippedWeapon('right');
-        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
+        const isPistol = w?.itemId === 'pistol';
+        const isBazooka = w?.itemId === 'bazooka';
         const isSword = w?.itemId === 'foamSword';
-        if (isGun) {
+        if (isPistol) {
+          this.attemptFireProjectile();
+        } else if (isBazooka) {
           onAttackPressEnd(e);
         } else if (isSword) {
           if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
@@ -910,17 +914,21 @@ export class PlayerControls {
       }, { passive: false });
       this.punchButton.addEventListener('touchcancel', (e) => {
         if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
+        const w = this.getEquippedWeapon('right');
+        if (w?.itemId === 'bazooka') onAttackPressEnd(e);
       }, { passive: false });
       // Desktop mouse support for gun fire in PS mode
       this.punchButton.addEventListener('mousedown', (e) => {
         const w = this.getEquippedWeapon('right');
-        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
-        if (isGun) onAttackPressStart(e);
+        if (w?.itemId === 'bazooka') onAttackPressStart(e);
       });
       this.punchButton.addEventListener('mouseup', (e) => {
         const w = this.getEquippedWeapon('right');
-        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
-        if (isGun) onAttackPressEnd(e);
+        if (w?.itemId === 'pistol') {
+          if (this.enabled) this.attemptFireProjectile();
+        } else if (w?.itemId === 'bazooka') {
+          onAttackPressEnd(e);
+        }
       });
     } else {
       bindActionPress(this.punchButton, {
