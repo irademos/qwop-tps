@@ -577,7 +577,7 @@ export class PlayerControls {
     // Touch camera control
     this.cameraTouchId = null;
     this.domElement.addEventListener('touchstart', (event) => {
-      if (!this.enabled || this.isEngaged || this.gyroActive) return;
+      if (!this.enabled || this.isEngaged || (this.gyroActive && !window.phoneSwordMode)) return;
       for (const touch of event.changedTouches) {
         const target = document.elementFromPoint(touch.clientX, touch.clientY);
         if (target && !target.closest('#joystick-container') && !target.closest('#jump-button') && !target.closest('#action-buttons')) {
@@ -591,7 +591,7 @@ export class PlayerControls {
     }, { passive: false });
 
     this.domElement.addEventListener('touchmove', (event) => {
-      if (!this.enabled || this.isEngaged || this.cameraTouchId === null || this.gyroActive) return;
+      if (!this.enabled || this.isEngaged || this.cameraTouchId === null || (this.gyroActive && !window.phoneSwordMode)) return;
       for (const touch of event.changedTouches) {
         if (touch.identifier === this.cameraTouchId) {
           const deltaX = touch.clientX - this.touchStartX;
@@ -599,12 +599,17 @@ export class PlayerControls {
           this.touchStartX = touch.clientX;
           this.touchStartY = touch.clientY;
 
-          this.yaw -= deltaX * this.touchSensitivity;
-          this.pitch -= deltaY * this.touchSensitivity;
-
           const maxPitch = Math.PI / 3;
           const minPitch = -Math.PI / 8;
-          this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
+          if (this.gyroActive && window.phoneSwordMode) {
+            // Shift the gyro calibration reference so touch drag offsets the gyro aim
+            this.gyroCalibYaw = (this.gyroCalibYaw + deltaX * this.touchSensitivity) % (2 * Math.PI);
+            this.gyroCalibPitch = Math.max(minPitch, Math.min(maxPitch, this.gyroCalibPitch - deltaY * this.touchSensitivity));
+          } else {
+            this.yaw -= deltaX * this.touchSensitivity;
+            this.pitch -= deltaY * this.touchSensitivity;
+            this.pitch = Math.max(minPitch, Math.min(maxPitch, this.pitch));
+          }
           this.breakAutoAimFromManualCamera(Math.hypot(deltaX * this.touchSensitivity, deltaY * this.touchSensitivity));
           this.safePreventDefault(event);
           break;
@@ -2757,11 +2762,19 @@ export class PlayerControls {
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
     if (!this.isEngaged) {
       if (this.keys.has('ArrowLeft')) {
-        this.yaw += rotateSpeed;
+        if (this.gyroActive && window.phoneSwordMode) {
+          this.gyroCalibYaw = (this.gyroCalibYaw + rotateSpeed) % (2 * Math.PI);
+        } else {
+          this.yaw += rotateSpeed;
+        }
         this.breakAutoAimFromManualCamera(Math.abs(rotateSpeed));
       }
       if (this.keys.has('ArrowRight')) {
-        this.yaw -= rotateSpeed;
+        if (this.gyroActive && window.phoneSwordMode) {
+          this.gyroCalibYaw = (this.gyroCalibYaw - rotateSpeed + 2 * Math.PI) % (2 * Math.PI);
+        } else {
+          this.yaw -= rotateSpeed;
+        }
         this.breakAutoAimFromManualCamera(Math.abs(rotateSpeed));
       }
     }
@@ -2771,11 +2784,19 @@ export class PlayerControls {
 
     if (!this.isEngaged) {
       if (this.keys.has('ArrowUp')) {
-        this.pitch = Math.min(maxPitch, this.pitch + 0.02);
+        if (this.gyroActive && window.phoneSwordMode) {
+          this.gyroCalibPitch = Math.min(maxPitch, this.gyroCalibPitch + 0.02);
+        } else {
+          this.pitch = Math.min(maxPitch, this.pitch + 0.02);
+        }
         this.breakAutoAimFromManualCamera(0.02);
       }
       if (this.keys.has('ArrowDown')) {
-        this.pitch = Math.max(minPitch, this.pitch - 0.02);
+        if (this.gyroActive && window.phoneSwordMode) {
+          this.gyroCalibPitch = Math.max(minPitch, this.gyroCalibPitch - 0.02);
+        } else {
+          this.pitch = Math.max(minPitch, this.pitch - 0.02);
+        }
         this.breakAutoAimFromManualCamera(0.02);
       }
     }
