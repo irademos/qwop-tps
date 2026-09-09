@@ -911,6 +911,17 @@ export class PlayerControls {
       this.punchButton.addEventListener('touchcancel', (e) => {
         if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
       }, { passive: false });
+      // Desktop mouse support for gun fire in PS mode
+      this.punchButton.addEventListener('mousedown', (e) => {
+        const w = this.getEquippedWeapon('right');
+        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
+        if (isGun) onAttackPressStart(e);
+      });
+      this.punchButton.addEventListener('mouseup', (e) => {
+        const w = this.getEquippedWeapon('right');
+        const isGun = w?.itemId === 'pistol' || w?.itemId === 'bazooka';
+        if (isGun) onAttackPressEnd(e);
+      });
     } else {
       bindActionPress(this.punchButton, {
         onPressStart: onAttackPressStart,
