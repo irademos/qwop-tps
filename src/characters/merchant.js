@@ -24,6 +24,7 @@ const MANA_POTION_OFFSET = new THREE.Vector3(-0.15, 100.0, 0.05);
 const ICE_AMMO_ITEM_ID = 'ice ammo';
 const ARROW_AMMO_ITEM_ID = 'arrow ammo';
 const MISSILE_AMMO_ITEM_ID = 'missiles';
+const GUN_BULLETS_ITEM_ID = 'gun bullets';
 const AMMO_PACK_AMOUNT = 5;
 const LIFE_POTION_ITEM_ID = 'life_potion';
 const MANA_POTION_ITEM_ID = 'mana_potion';
@@ -41,6 +42,7 @@ const BASE_MERCHANT_ITEMS = {
   [ICE_AMMO_ITEM_ID]: { name: 'Ice Ammo', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
   [ARROW_AMMO_ITEM_ID]: { name: 'Arrows', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
   [MISSILE_AMMO_ITEM_ID]: { name: 'Missiles', price: 4, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
+  [GUN_BULLETS_ITEM_ID]: { name: 'Gun Bullets', price: 10, count: 10, ammoAmount: 1 },
   apple: { name: 'Apples', price: 2, count: 5 },
   wood: { name: 'Wood', price: 1, count: 15 }
 };
@@ -324,12 +326,14 @@ export const buyMerchantItem = async (itemId) => {
   const price = Number.isFinite(item.price) ? item.price : getMerchantItemMeta(itemId).price;
   const currentCoins = merchantAppState?.getCoins?.() ?? merchantAppState?.getPlayerStats?.()?.coins ?? 0;
   if (currentCoins < price) return false;
-  if (itemId === ICE_AMMO_ITEM_ID || itemId === ARROW_AMMO_ITEM_ID || itemId === MISSILE_AMMO_ITEM_ID) {
+  if (itemId === ICE_AMMO_ITEM_ID || itemId === ARROW_AMMO_ITEM_ID || itemId === MISSILE_AMMO_ITEM_ID || itemId === GUN_BULLETS_ITEM_ID) {
     const ammoAmount = Number.isFinite(catalogEntry.ammoAmount) ? catalogEntry.ammoAmount : 1;
     if (itemId === ICE_AMMO_ITEM_ID) {
       merchantAppState?.addIceAmmo?.(ammoAmount);
     } else if (itemId === ARROW_AMMO_ITEM_ID) {
       merchantAppState?.addArrowAmmo?.(ammoAmount);
+    } else if (itemId === GUN_BULLETS_ITEM_ID) {
+      merchantAppState?.addPistolAmmo?.(ammoAmount);
     } else {
       merchantAppState?.addMissileAmmo?.(ammoAmount);
     }
@@ -345,18 +349,22 @@ export const buyMerchantItem = async (itemId) => {
 
 export const sellMerchantItem = async (itemId) => {
   const catalogEntry = merchantItemCatalog[itemId] || {};
-  if (itemId === ICE_AMMO_ITEM_ID || itemId === ARROW_AMMO_ITEM_ID || itemId === MISSILE_AMMO_ITEM_ID) {
+  if (itemId === ICE_AMMO_ITEM_ID || itemId === ARROW_AMMO_ITEM_ID || itemId === MISSILE_AMMO_ITEM_ID || itemId === GUN_BULLETS_ITEM_ID) {
     const ammoAmount = Number.isFinite(catalogEntry.ammoAmount) ? catalogEntry.ammoAmount : 1;
     const currentAmmo = itemId === ICE_AMMO_ITEM_ID
       ? merchantAppState?.getIceAmmoCount?.() ?? 0
       : itemId === ARROW_AMMO_ITEM_ID
         ? merchantAppState?.getArrowAmmoCount?.() ?? 0
-        : merchantAppState?.getMissileAmmoCount?.() ?? 0;
+        : itemId === GUN_BULLETS_ITEM_ID
+          ? merchantAppState?.getPistolAmmoCount?.() ?? 0
+          : merchantAppState?.getMissileAmmoCount?.() ?? 0;
     if (currentAmmo < ammoAmount) return false;
     if (itemId === ICE_AMMO_ITEM_ID) {
       merchantAppState?.addIceAmmo?.(-ammoAmount);
     } else if (itemId === ARROW_AMMO_ITEM_ID) {
       merchantAppState?.addArrowAmmo?.(-ammoAmount);
+    } else if (itemId === GUN_BULLETS_ITEM_ID) {
+      merchantAppState?.addPistolAmmo?.(-ammoAmount);
     } else {
       merchantAppState?.addMissileAmmo?.(-ammoAmount);
     }

@@ -13,7 +13,7 @@ export class Pistol extends Weapon {
       holdOffset: new THREE.Vector3(0.0, 0.0, 0.0),
       holdRotation: new THREE.Euler(0, Math.PI, 0, 'YXZ')
     });
-    this.infiniteAmmo = true;
+    this.infiniteAmmo = false;
   }
 
   update() {
