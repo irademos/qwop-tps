@@ -159,7 +159,18 @@ function renderTab(tabId) {
   if (!grid || !emptyState || !detailsText || !detailsContainer || !actionButton) return;
 
   const data = getTabData(tabId);
-  const entries = Object.entries(data).filter(([, item]) => (item?.count || 0) > 0);
+  const PHONE_SWORD_BUY_HIDDEN = new Set([
+    'iceGun', 'autumnSword', 'lantern', 'life_potion', 'mana_potion', 'ice ammo',
+    'apple', 'wood'
+  ]);
+  const entries = Object.entries(data).filter(([id, item]) => {
+    if ((item?.count || 0) <= 0) return false;
+    if (window.phoneSwordMode && tabId === 'buy') {
+      if (PHONE_SWORD_BUY_HIDDEN.has(id)) return false;
+      if (id.startsWith('mushroom_')) return false;
+    }
+    return true;
+  });
 
   grid.innerHTML = '';
   if (!entries.length) {
