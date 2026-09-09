@@ -1072,9 +1072,11 @@ async function initCore(runtimeContext) {
   const ICE_AMMO_KEY = 'ice ammo';
   const ARROW_AMMO_KEY = 'arrow ammo';
   const MISSILE_AMMO_KEY = 'missiles';
+  const PISTOL_AMMO_KEY = 'gun bullets';
   const DEFAULT_ICE_AMMO = 10;
   const DEFAULT_ARROW_AMMO = 5;
   const DEFAULT_MISSILE_AMMO = 3;
+  const DEFAULT_PISTOL_AMMO = 15;
   const COIN_PICKUP_GAIN = 1;
   const foodPickups = [];
   const healthPickups = [];
@@ -6363,12 +6365,19 @@ async function initCore(runtimeContext) {
     };
     homeStorageDirty = true;
   }
-  // Pistol is always in inventory with infinite ammo
+  // Pistol is always in inventory
   if (!inventoryState.pistol) {
     inventoryState.pistol = {
       count: 1,
       icon: inventoryCatalog.pistol.icon,
-      name: inventoryCatalog.pistol.name
+      name: inventoryCatalog.pistol.name,
+      [PISTOL_AMMO_KEY]: DEFAULT_PISTOL_AMMO
+    };
+    inventoryDirty = true;
+  } else if (!Number.isFinite(inventoryState.pistol?.[PISTOL_AMMO_KEY])) {
+    inventoryState.pistol = {
+      ...inventoryState.pistol,
+      [PISTOL_AMMO_KEY]: DEFAULT_PISTOL_AMMO
     };
     inventoryDirty = true;
   }
@@ -6625,6 +6634,32 @@ async function initCore(runtimeContext) {
     const nextAmount = getMissileAmmoCount() + amount;
     setMissileAmmoCount(nextAmount);
     showPickupToast(MISSILE_AMMO_KEY, amount, 'Missiles');
+  }
+
+  function setPistolAmmoCount(amount) {
+    if (!Number.isFinite(amount)) return;
+    const normalized = Math.max(0, Math.floor(amount));
+    const current = inventoryState.pistol || {};
+    inventoryState.pistol = {
+      ...current,
+      [PISTOL_AMMO_KEY]: normalized,
+      icon: current.icon || inventoryCatalog.pistol.icon,
+      name: current.name || inventoryCatalog.pistol.name
+    };
+    persistInventoryAndStorage();
+  }
+
+  function getPistolAmmoCount() {
+    return Number.isFinite(inventoryState.pistol?.[PISTOL_AMMO_KEY])
+      ? inventoryState.pistol[PISTOL_AMMO_KEY]
+      : 0;
+  }
+
+  function addPistolAmmo(amount) {
+    if (!Number.isFinite(amount)) return;
+    const nextAmount = getPistolAmmoCount() + amount;
+    setPistolAmmoCount(nextAmount);
+    if (amount > 0) showPickupToast(PISTOL_AMMO_KEY, amount, 'Bullets');
   }
 
   function addToInventory(itemId, amount = 1, options = {}) {
@@ -7097,7 +7132,12 @@ async function initCore(runtimeContext) {
       if (playerControls.playerModel) {
         playerControls.playerModel.userData.handDepthOverride = { left: 0.3 };
       }
-      playerControls.updateAmmoUI?.(false);
+      playerControls.updateAmmoUI?.(true);
+      playerControls.setAmmo?.(
+        getPistolAmmoCount(),
+        getAmmoLabelForType('bullet'),
+        getAmmoIconForType('bullet')
+      );
       if (window.phoneSwordMode) window._enableWeaponGyroCamera?.();
       updateSettingsUI();
     }
@@ -10918,12 +10958,14 @@ async function initCore(runtimeContext) {
   function getAmmoLabelForType(type) {
     if (type === 'arrow') return 'Arrows';
     if (type === 'missile') return 'Missiles';
+    if (type === 'bullet') return 'Bullets';
     return 'Ice ammo';
   }
 
   function getAmmoIconForType(type) {
     if (type === 'arrow') return '🏹';
     if (type === 'missile') return '🚀';
+    if (type === 'bullet') return '🔫';
     return '❄️';
   }
 
@@ -11661,6 +11703,8 @@ async function initCore(runtimeContext) {
         setArrowAmmoCount(amount);
       } else if (playerControls?.ammoLabel === 'Missiles') {
         setMissileAmmoCount(amount);
+      } else if (playerControls?.ammoLabel === 'Bullets') {
+        setPistolAmmoCount(amount);
       } else {
         setIceAmmoCount(amount);
       }
@@ -14749,9 +14793,11 @@ async function initCore(runtimeContext) {
     getIceAmmoCount: () => getIceAmmoCount(),
     getArrowAmmoCount: () => getArrowAmmoCount(),
     getMissileAmmoCount: () => getMissileAmmoCount(),
+    getPistolAmmoCount: () => getPistolAmmoCount(),
     addIceAmmo: (amount) => addIceAmmo(amount),
     addArrowAmmo: (amount) => addArrowAmmo(amount),
     addMissileAmmo: (amount) => addMissileAmmo(amount),
+    addPistolAmmo: (amount) => addPistolAmmo(amount),
     getHomeStorage: () => getHomeStorage(),
     getEquippedInventoryItemId: () => getEquippedInventoryItemId(),
     getEquippedInventoryItemIds: () => getEquippedInventoryItemIds(),

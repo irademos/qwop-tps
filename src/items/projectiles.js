@@ -355,9 +355,11 @@ export function updateProjectiles({
         if (projBox.intersectsBox(enemyBox)) {
           const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
+          const dir = vel.clone().normalize();
           const killed = enemy.applyDamage(Math.max(1, Math.round(damage)));
-          if (!killed) {
-            const dir = vel.clone().normalize();
+          if (killed) {
+            enemy.applyDirectKnockback({ direction: dir, horizSpeed: 9, upVelocity: 3.5, torqueMag: 70, ragdoll: true });
+          } else {
             enemy.applyKnockback({ direction: dir, strength: 3 });
           }
           removeProjectile(i);
