@@ -163,7 +163,7 @@ function renderTab(tabId) {
   const data = getTabData(tabId);
   const PHONE_SWORD_BUY_HIDDEN = new Set([
     'iceGun', 'autumnSword', 'lantern', 'life_potion', 'mana_potion', 'ice ammo',
-    'apple', 'wood'
+    'apple', 'wood', 'hammer', 'bazooka', 'bow', 'arrow ammo', 'bomb', 'missiles'
   ]);
   const entries = Object.entries(data).filter(([id, item]) => {
     if ((item?.count || 0) <= 0) return false;
