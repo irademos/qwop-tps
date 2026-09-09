@@ -99,6 +99,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.prevY = mesh.position.y;
   mesh.userData.lifetime = Number.isFinite(options.lifetime) ? options.lifetime : 4000;
   mesh.userData.spawnTime = Date.now();
+  mesh.userData.spawnPosition = spawnPosition.clone();
   mesh.userData.shooterId = shooterId;
   mesh.userData.pickupOnRest = options.pickupOnRest ?? false;
   mesh.userData.pickupAmount = options.pickupAmount ?? 0;
@@ -246,7 +247,8 @@ export function updateProjectiles({
     for (const [id, { model }] of Object.entries(otherPlayers)) {
       if (!window.phoneSwordMode) continue; // Only enable projectile PvP damage in phone sword mode.
       if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
-      if (age < 80) continue;
+      // Skip until the projectile has left the shooter's immediate vicinity (~0.5 m).
+      if (proj.userData.spawnPosition && proj.position.distanceToSquared(proj.userData.spawnPosition) < 0.25) continue;
       const playerBox = getObjectBox(model);
       if (!playerBox) continue;
       if (projBox.intersectsBox(playerBox)) {
