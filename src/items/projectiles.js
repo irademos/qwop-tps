@@ -347,7 +347,7 @@ export function updateProjectiles({
     if (removed) continue;
 
     // Horde enemies (EnemyPlayer) are always local — call applyDamage directly.
-    if (!removed && Array.isArray(hordeEnemies) && hordeEnemies.length > 0 && age >= 80) {
+    if (!removed && Array.isArray(hordeEnemies) && hordeEnemies.length > 0 && (!proj.userData.spawnPosition || proj.position.distanceToSquared(proj.userData.spawnPosition) >= 0.0064)) {
       for (const enemy of hordeEnemies) {
         if (enemy.isDead) continue;
         const enemyBox = getObjectBox(enemy.group);
