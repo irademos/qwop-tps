@@ -133,6 +133,8 @@ function getFallbackIcon(itemId) {
   if (itemId === 'hammer') return '🔨';
   if (itemId === 'lantern') return '🏮';
   if (itemId === 'shield') return '🛡️';
+  if (itemId === 'pistol') return '🔫';
+  if (itemId === 'gun bullets') return '🔶';
   if (itemId === 'apple') return '🍎';
   if (itemId === 'wood') return '🪵';
   if (itemId === 'meat' || itemId === 'crab_meat') return '🦀';
