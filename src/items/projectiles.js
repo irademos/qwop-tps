@@ -248,7 +248,7 @@ export function updateProjectiles({
       if (!window.phoneSwordMode) continue; // Only enable projectile PvP damage in phone sword mode.
       if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
       // Skip until the projectile has left the shooter's immediate vicinity (~0.5 m).
-      if (proj.userData.spawnPosition && proj.position.distanceToSquared(proj.userData.spawnPosition) < 0.25) continue;
+      if (proj.userData.spawnPosition && proj.position.distanceToSquared(proj.userData.spawnPosition) < 0.0064) continue;
       const playerBox = getObjectBox(model);
       if (!playerBox) continue;
       if (projBox.intersectsBox(playerBox)) {
