@@ -1014,6 +1014,9 @@ async function initCore(runtimeContext) {
     bounceFromQ: new THREE.Quaternion(),
     bounceTargetQ: new THREE.Quaternion(),
     bounceCurrentQ: new THREE.Quaternion(),
+    // Block guard pose interpolation
+    blockCurrentQ: new THREE.Quaternion(),
+    _lastBlockT: null,
   };
   // Block flash helper — called with 'player' (green) or 'enemy' (gray)
   window._pswShowBlockFlash = function(who) {
@@ -1045,10 +1048,10 @@ async function initCore(runtimeContext) {
     gunRotX: 7, gunRotY: 180, gunRotZ: 0,
   };
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
-    speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
+    speedThreshold: 2100,   // deg/s — minimum speed to register as any swing (slow tier)
     mediumThreshold: 7000,  // deg/s — above this → medium tier (trail + rotation)
     fastThreshold: 11000,   // deg/s — above this → fast tier (more damage, longer hold)
-    minSwingDelta: 25,      // deg — total arc in last 200ms required
+    minSwingDelta: 19,      // deg — total arc in last 200ms required
     oppositeStrength: 1.0,  // 0=no swing, 1=full opposite, >1=overshoot
     holdDuration: 0.5,      // seconds — medium hold; fast gets 1.6× automatically
     returnDuration: 0.3,    // seconds — how long to smoothly return to gyro after hold
@@ -1057,7 +1060,7 @@ async function initCore(runtimeContext) {
     trailColor: 0xff4986,
     trailLineCount: 3,
     trailLineSpread: 0.005,
-    minSweepDist: 0.3,     // meters — minimum tip movement per frame to register a sweep hit
+    minSweepDist: 0.16,    // meters — minimum tip movement per frame to register a sweep hit
     minSweepSpeed: 100,    // deg/s — gyro rotation speed required for a sweep hit to register
     bounceAngle: 120,      // degrees — how far sideways the sword is knocked
     bounceSnapSpeed: 18,   // exp-decay rate — higher = snaps to recoil position faster
@@ -16072,6 +16075,22 @@ async function initCore(runtimeContext) {
           activeGyroQ = _phoneSwordGyroQ;
         }
 
+        // Block guard pose: when blocking, slerp sword toward a raised guard position
+        if (window.phoneSwordGyro?.blocking && !_psw.bounceActive) {
+          const _dt3 = nowSec - (_psw._lastBlockT ?? nowSec - 0.016);
+          _psw._lastBlockT = nowSec;
+          // Guard target: tip up and angled across body (beta=-70°, gamma=30°)
+          const _blockTargetQ = new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(-1.22, 0, 0.52, 'YXZ')
+          );
+          _psw.blockCurrentQ.slerp(_blockTargetQ, 1 - Math.exp(-14 * _dt3));
+          activeGyroQ = _psw.blockCurrentQ;
+        } else if (!window.phoneSwordGyro?.blocking && _psw._lastBlockT !== null) {
+          // Unblocking: snap blockCurrentQ to current gyro so next block starts from here
+          _psw.blockCurrentQ.copy(_phoneSwordGyroQ);
+          _psw._lastBlockT = null;
+        }
+
         if (foamSword?.holder === playerControls) {
           foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
         }
@@ -16083,9 +16102,10 @@ async function initCore(runtimeContext) {
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
 
-      // Re-derive active Q — use bounceCurrentQ if bouncing, else live gyro
+      // Re-derive active Q — bounce > block guard > live gyro
       const _nowSecPS = performance.now() / 1000;
-      const _activeQ = _psw.bounceActive ? _psw.bounceCurrentQ : _phoneSwordGyroQ;
+      const _activeQ = _psw.bounceActive ? _psw.bounceCurrentQ
+        : (window.phoneSwordGyro?.blocking ? _psw.blockCurrentQ : _phoneSwordGyroQ);
       foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
 
       // ── Hide any leftover trail lines from the old swing system ─────────────
