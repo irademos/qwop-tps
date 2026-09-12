@@ -114,6 +114,7 @@ import { db } from '../core/firebase-init.js';
 import { onValue, push, ref, remove, set, update } from 'firebase/database';
 import { openPopupDialog } from '../controls/popupDialog.js';
 import { EnemyPlayer } from '../characters/EnemyPlayer.js';
+import { BombThrowerEnemy } from '../characters/BombThrowerEnemy.js';
 
 import {
   clearStoredPin,
@@ -11882,12 +11883,21 @@ async function initCore(runtimeContext) {
     const dist  = 5 + Math.random() * 4;
     const spawnOffset = new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist);
     const spawnPos = opts.position ?? playerModel.position.clone().add(spawnOffset);
-    const enemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
-      position: spawnPos,
-      hearts: opts.hearts ?? 3,
-      speedScale: opts.speedScale ?? 1.0,
-    });
-    enemy._camera = camera;
+    let enemy;
+    if (opts.bombThrower) {
+      enemy = new BombThrowerEnemy(scene, RAPIER, rapierWorld, {
+        position: spawnPos,
+        hearts: opts.hearts ?? 3,
+        speedScale: opts.speedScale ?? 1.0,
+      });
+    } else {
+      enemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
+        position: spawnPos,
+        hearts: opts.hearts ?? 3,
+        speedScale: opts.speedScale ?? 1.0,
+      });
+      enemy._camera = camera;
+    }
     hordeEnemies.push(enemy);
     return enemy;
   };
@@ -12036,10 +12046,13 @@ async function initCore(runtimeContext) {
       const ex = baseX + (Math.random() - 0.5) * scatter;
       const ez = baseZ + (Math.random() - 0.5) * scatter;
       const ey = getTerrainHeight(ex, ez) ?? playerModel.position.y;
+      // Bomb throwers: start appearing at stage 3, ~20% chance scaling up with stage
+      const _btChance = stage >= 3 ? Math.min(0.35, 0.10 + (stage - 3) * 0.015) : 0;
       _psEnemyQueue.push({
         pos: new THREE.Vector3(ex, ey, ez),
         hearts: _psHeartsForStage(stage),
-        triggerDist: pathLen * t - 10
+        triggerDist: pathLen * t - 10,
+        bombThrower: Math.random() < _btChance,
       });
     }
     // Spawn coins along the path
@@ -16286,7 +16299,7 @@ async function initCore(runtimeContext) {
       for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
         const _qe = _psEnemyQueue[_qi];
         if (playerModel.position.distanceTo(_qe.pos) <= PS_SPAWN_TRIGGER_DIST) {
-          _spawnHordeEnemy({ position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED });
+          _spawnHordeEnemy({ position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED, bombThrower: _qe.bombThrower });
           _psEnemyQueue.splice(_qi, 1);
         }
       }
@@ -16568,6 +16581,34 @@ async function initCore(runtimeContext) {
             // Close the slow-swing hit window after first hit so it only triggers once
             if (_psw.slowHitWindow > 0 && _nowMs2 / 1000 < _psw.slowHitWindow) {
               _psw.slowHitWindow = 0;
+            }
+          }
+        }
+      }
+
+      // ── Foam sword deflects in-flight enemy bombs ────────────────────────
+      if (window.phoneSwordMode && swordMesh?.visible && _tipWorld && _psw.swingActive) {
+        const _bombs = window._enemyBombs;
+        if (Array.isArray(_bombs)) {
+          for (let _bi = _bombs.length - 1; _bi >= 0; _bi--) {
+            const _bomb = _bombs[_bi];
+            if (!_bomb || _bomb.deflected) continue;
+            if (_tipWorld.distanceTo(_bomb.mesh.position) < 0.70) {
+              // Deflect: send bomb back toward the thrower
+              const _thrower = _bomb.thrower;
+              let _deflectDir;
+              if (_thrower && _thrower.group) {
+                _deflectDir = _thrower.group.position.clone().sub(_bomb.mesh.position).normalize();
+              } else {
+                _deflectDir = _bomb.vel.clone().negate().normalize();
+              }
+              _deflectDir.y = 0.35;
+              _deflectDir.normalize();
+              _bomb.vel.copy(_deflectDir.multiplyScalar(12));
+              _bomb.deflected = true;
+              _bomb.deflectedAt = Date.now();
+              window.audioManager?.playSFX?.('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.75, { cooldownKey: 'bomb-deflect', cooldownMs: 80 });
+              window._pswShowBlockFlash?.('player');
             }
           }
         }
