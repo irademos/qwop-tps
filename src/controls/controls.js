@@ -917,10 +917,13 @@ export class PlayerControls {
         const w = this.getEquippedWeapon('right');
         if (w?.itemId === 'bazooka') onAttackPressEnd(e);
       }, { passive: false });
-      // Desktop mouse support for gun fire in PS mode
+      // Desktop/pointer support for gun fire and sword block in PS mode
       this.punchButton.addEventListener('mousedown', (e) => {
         const w = this.getEquippedWeapon('right');
         if (w?.itemId === 'bazooka') onAttackPressStart(e);
+        else if (w?.itemId === 'foamSword') {
+          if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = true;
+        }
       });
       this.punchButton.addEventListener('mouseup', (e) => {
         const w = this.getEquippedWeapon('right');
@@ -928,7 +931,13 @@ export class PlayerControls {
           if (this.enabled) this.attemptFireProjectile();
         } else if (w?.itemId === 'bazooka') {
           onAttackPressEnd(e);
+        } else if (w?.itemId === 'foamSword') {
+          if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
         }
+      });
+      this.punchButton.addEventListener('mouseleave', () => {
+        const w = this.getEquippedWeapon('right');
+        if (w?.itemId === 'foamSword' && window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
       });
     } else {
       bindActionPress(this.punchButton, {
