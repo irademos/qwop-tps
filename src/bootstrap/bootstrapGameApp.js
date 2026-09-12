@@ -16210,7 +16210,13 @@ async function initCore(runtimeContext) {
           }
         }
         // Forward lunge on fast swing that missed all enemies
-        if (_playerMovingFast && !_swingHitOccurred) {
+        // Suppress if any enemy is very close (prevents clipping through them)
+        const _lungeProximityDist = 1.0;
+        const _tooCloseToEnemy = hordeEnemies.some(_e =>
+          !_e.isDead && _e.group &&
+          playerModel.position.distanceTo(_e.group.position) < _lungeProximityDist
+        );
+        if (_playerMovingFast && !_swingHitOccurred && !_tooCloseToEnemy) {
           const _missFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
           _missFwd.y = 0; _missFwd.normalize();
           const _msx = playerModel.position.x + _missFwd.x * 0.15;
@@ -16510,6 +16516,19 @@ async function initCore(runtimeContext) {
 
         const _allowAttack = _attackSlotSet.has(_he);
         _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack);
+
+        // Push enemy away if it gets too close to the player (prevents clipping)
+        if (window.phoneSwordMode) {
+          const _pushDist = 0.5;
+          const _dx = _he.group.position.x - playerModel.position.x;
+          const _dz = _he.group.position.z - playerModel.position.z;
+          const _dist2d = Math.sqrt(_dx * _dx + _dz * _dz);
+          if (_dist2d < _pushDist && _dist2d > 0.001) {
+            const _pushStep = (_pushDist - _dist2d) * 0.15;
+            _he.group.position.x += (_dx / _dist2d) * _pushStep;
+            _he.group.position.z += (_dz / _dist2d) * _pushStep;
+          }
+        }
 
         _he._onHitPlayer = (direction) => {
           const speed = 4.5;
