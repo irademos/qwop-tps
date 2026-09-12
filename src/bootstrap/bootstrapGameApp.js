@@ -1014,9 +1014,6 @@ async function initCore(runtimeContext) {
     bounceFromQ: new THREE.Quaternion(),
     bounceTargetQ: new THREE.Quaternion(),
     bounceCurrentQ: new THREE.Quaternion(),
-    // Block guard pose interpolation
-    blockCurrentQ: new THREE.Quaternion(),
-    _lastBlockT: null,
   };
   // Block flash helper — called with 'player' (green) or 'enemy' (gray)
   window._pswShowBlockFlash = function(who) {
@@ -12209,7 +12206,7 @@ async function initCore(runtimeContext) {
 
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
   if (window.phoneSwordMode) {
-    window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false };
+    window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false, blocking: false };
     // Calibration: these are the "neutral" angles subtracted from live readings
     window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
     // Config: additional rotation offsets (degrees) applied on top of gyro delta
@@ -16075,22 +16072,6 @@ async function initCore(runtimeContext) {
           activeGyroQ = _phoneSwordGyroQ;
         }
 
-        // Block guard pose: when blocking, slerp sword toward a raised guard position
-        if (window.phoneSwordGyro?.blocking && !_psw.bounceActive) {
-          const _dt3 = nowSec - (_psw._lastBlockT ?? nowSec - 0.016);
-          _psw._lastBlockT = nowSec;
-          // Guard target: tip up and angled across body (beta=-70°, gamma=30°)
-          const _blockTargetQ = new THREE.Quaternion().setFromEuler(
-            new THREE.Euler(-1.22, 0, 0.52, 'YXZ')
-          );
-          _psw.blockCurrentQ.slerp(_blockTargetQ, 1 - Math.exp(-14 * _dt3));
-          activeGyroQ = _psw.blockCurrentQ;
-        } else if (!window.phoneSwordGyro?.blocking && _psw._lastBlockT !== null) {
-          // Unblocking: snap blockCurrentQ to current gyro so next block starts from here
-          _psw.blockCurrentQ.copy(_phoneSwordGyroQ);
-          _psw._lastBlockT = null;
-        }
-
         if (foamSword?.holder === playerControls) {
           foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
         }
@@ -16102,10 +16083,9 @@ async function initCore(runtimeContext) {
     if (window.phoneSwordMode && window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
 
-      // Re-derive active Q — bounce > block guard > live gyro
+      // Re-derive active Q — use bounceCurrentQ if bouncing, else live gyro
       const _nowSecPS = performance.now() / 1000;
-      const _activeQ = _psw.bounceActive ? _psw.bounceCurrentQ
-        : (window.phoneSwordGyro?.blocking ? _psw.blockCurrentQ : _phoneSwordGyroQ);
+      const _activeQ = _psw.bounceActive ? _psw.bounceCurrentQ : _phoneSwordGyroQ;
       foamSword.mesh.quaternion.copy(playerModel.quaternion).multiply(_activeQ).multiply(_phoneSwordBaseQ);
 
       // ── Hide any leftover trail lines from the old swing system ─────────────
