@@ -1045,10 +1045,10 @@ async function initCore(runtimeContext) {
     gunRotX: 7, gunRotY: 180, gunRotZ: 0,
   };
   window.phoneSwordSwingCfg = window.phoneSwordSwingCfg || {
-    speedThreshold: 4370,   // deg/s — minimum speed to register as any swing (slow tier)
+    speedThreshold: 2100,   // deg/s — minimum speed to register as any swing (slow tier)
     mediumThreshold: 7000,  // deg/s — above this → medium tier (trail + rotation)
     fastThreshold: 11000,   // deg/s — above this → fast tier (more damage, longer hold)
-    minSwingDelta: 25,      // deg — total arc in last 200ms required
+    minSwingDelta: 19,      // deg — total arc in last 200ms required
     oppositeStrength: 1.0,  // 0=no swing, 1=full opposite, >1=overshoot
     holdDuration: 0.5,      // seconds — medium hold; fast gets 1.6× automatically
     returnDuration: 0.3,    // seconds — how long to smoothly return to gyro after hold
@@ -1057,7 +1057,7 @@ async function initCore(runtimeContext) {
     trailColor: 0xff4986,
     trailLineCount: 3,
     trailLineSpread: 0.005,
-    minSweepDist: 0.3,     // meters — minimum tip movement per frame to register a sweep hit
+    minSweepDist: 0.16,    // meters — minimum tip movement per frame to register a sweep hit
     minSweepSpeed: 100,    // deg/s — gyro rotation speed required for a sweep hit to register
     bounceAngle: 120,      // degrees — how far sideways the sword is knocked
     bounceSnapSpeed: 18,   // exp-decay rate — higher = snaps to recoil position faster
@@ -12206,7 +12206,7 @@ async function initCore(runtimeContext) {
 
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
   if (window.phoneSwordMode) {
-    window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false };
+    window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false, blocking: false };
     // Calibration: these are the "neutral" angles subtracted from live readings
     window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
     // Config: additional rotation offsets (degrees) applied on top of gyro delta

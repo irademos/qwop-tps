@@ -3293,6 +3293,10 @@ body.settings-open #inventory-button {
   color: #fff !important;
   border: 2px solid rgba(100,160,255,0.7) !important;
 }
+.ps-block-btn.ps-blocking-active {
+  background: rgba(0, 200, 100, 0.85) !important;
+  border-color: rgba(100, 255, 160, 0.9) !important;
+}
 
 /* ── Phone Sword: Leaderboard PS tabs ────────────────────────────────────────── */
 .leaderboard-tab-ps {

@@ -886,49 +886,58 @@ export class PlayerControls {
 
     if (window.phoneSwordMode) {
       // In PS mode the punch/fire button doubles as block (when sword) or fire (when gun)
+      const _psPunchBtn = this.punchButton;
+      const _setPsBlocking = (val) => {
+        if (!window.phoneSwordGyro) return;
+        window.phoneSwordGyro.blocking = val;
+        _psPunchBtn.classList.toggle('ps-blocking-active', val);
+      };
       this.punchButton.addEventListener('touchstart', (e) => {
         this.safePreventDefault(e);
         const w = this.getEquippedWeapon('right');
-        const isSword = w?.itemId === 'foamSword';
-        const isBazooka = w?.itemId === 'bazooka';
-        if (isBazooka) {
+        if (w?.itemId === 'bazooka') {
           onAttackPressStart(e);
-        } else if (isSword) {
-          if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = true;
+        } else {
+          // Treat any non-bazooka weapon as sword (button only shows for sword/pistol)
+          _setPsBlocking(true);
         }
       }, { passive: false });
       this.punchButton.addEventListener('touchend', (e) => {
         this.safePreventDefault(e);
+        _setPsBlocking(false);
         if (!this.enabled) return;
         const w = this.getEquippedWeapon('right');
         const isPistol = w?.itemId === 'pistol';
         const isBazooka = w?.itemId === 'bazooka';
-        const isSword = w?.itemId === 'foamSword';
         if (isPistol) {
           this.attemptFireProjectile();
         } else if (isBazooka) {
+          _setPsBlocking(false);
           onAttackPressEnd(e);
-        } else if (isSword) {
-          if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
         }
       }, { passive: false });
       this.punchButton.addEventListener('touchcancel', (e) => {
-        if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
+        _setPsBlocking(false);
         const w = this.getEquippedWeapon('right');
         if (w?.itemId === 'bazooka') onAttackPressEnd(e);
       }, { passive: false });
-      // Desktop mouse support for gun fire in PS mode
+      // Desktop/pointer support for gun fire and sword block in PS mode
       this.punchButton.addEventListener('mousedown', (e) => {
         const w = this.getEquippedWeapon('right');
         if (w?.itemId === 'bazooka') onAttackPressStart(e);
+        else _setPsBlocking(true);
       });
       this.punchButton.addEventListener('mouseup', (e) => {
+        _setPsBlocking(false);
         const w = this.getEquippedWeapon('right');
         if (w?.itemId === 'pistol') {
           if (this.enabled) this.attemptFireProjectile();
         } else if (w?.itemId === 'bazooka') {
           onAttackPressEnd(e);
         }
+      });
+      this.punchButton.addEventListener('mouseleave', () => {
+        _setPsBlocking(false);
       });
     } else {
       bindActionPress(this.punchButton, {

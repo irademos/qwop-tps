@@ -4,7 +4,7 @@ import { formatDistanceForDisplay, getDistanceUnitPreference, setDistanceUnitPre
 
 const TAB_KEY = 'settings:lastTab';
 
-const TABS = [
+const BASE_TABS = [
   { id: 'character', label: 'Character' },
   { id: 'quests', label: 'Quests' },
   { id: 'achievements', label: 'Achievements' },
@@ -15,6 +15,12 @@ const TABS = [
   { id: 'account', label: 'Account' },
   { id: 'developer', label: 'Developer' }
 ];
+const SWORD_GYRO_TAB = { id: 'swordgyro', label: 'Sword Gyro' };
+function getTabs() {
+  return window.phoneSwordMode ? [...BASE_TABS, SWORD_GYRO_TAB] : BASE_TABS;
+}
+// Keep TABS as a reference but populate dynamically at build time
+let TABS = BASE_TABS;
 const CHARACTER_STATS = [
   { key: 'level', label: 'Level' },
   { key: 'xp', label: 'XP' },
@@ -141,6 +147,7 @@ function buildHeader() {
 }
 
 function buildTabs() {
+  TABS = getTabs();
   const tablist = createElement('div', 'settings-tabs');
   tablist.setAttribute('role', 'tablist');
   elements.tabs = {};
@@ -873,7 +880,6 @@ function buildDisplayPanel() {
     gyroGroup,
     gyroRecalGroup,
     highContrastGroup,
-    phoneSwordRecalGroup,
     cameraPreviewGroup,
     tpCameraHeaderGroup,
     cameraDistField.field,
@@ -1081,6 +1087,100 @@ function buildAccountPanel() {
   return panelEl;
 }
 
+function buildSwordGyroPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-swordgyro';
+  panelEl.dataset.panel = 'swordgyro';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-swordgyro');
+
+  const createRangeField = ({ id, label, min, max, step }) => {
+    const field = createElement('div', 'settings-field');
+    const labelRow = createElement('div', 'settings-range-row');
+    const fieldLabel = createElement('label', 'settings-label', label);
+    fieldLabel.setAttribute('for', id);
+    const valueLabel = createElement('span', 'settings-range-value', '—');
+    valueLabel.dataset.valueFor = id;
+    labelRow.append(fieldLabel, valueLabel);
+    const input = createElement('input', 'settings-range');
+    input.type = 'range';
+    input.id = id;
+    input.min = `${min}`;
+    input.max = `${max}`;
+    input.step = `${step}`;
+    field.append(labelRow, input);
+    return { field, input, valueLabel };
+  };
+
+  // Recalibrate button
+  const calibSection = createElement('h3', 'settings-section-title', 'Calibration');
+  const recalGroup = createElement('div', 'settings-field');
+  const recalBtn = createElement('button', 'settings-button settings-button-secondary', 'Recalibrate Sword');
+  recalBtn.id = 'settings-swordgyro-recal';
+  recalBtn.type = 'button';
+  recalBtn.addEventListener('click', () => {
+    if (window.phoneSwordRecalibrate) {
+      window.phoneSwordRecalibrate();
+      recalBtn.textContent = '✅ Calibrated!';
+      setTimeout(() => { recalBtn.textContent = 'Recalibrate Sword'; }, 1500);
+    } else {
+      document.getElementById('phone-sword-calib-modal')?.classList.remove('hidden');
+    }
+  });
+  const recalHint = createElement('div', 'settings-muted');
+  recalHint.textContent = 'Hold the sword in its resting position, then tap to set neutral.';
+  recalGroup.append(recalBtn, recalHint);
+
+  // Sensitivity sliders
+  const sensSection = createElement('h3', 'settings-section-title', 'Hit Detection Sensitivity');
+
+  const cfg = window.phoneSwordSwingCfg || {};
+
+  const swingSpeedField = createRangeField({ id: 'sg-swing-speed', label: 'Min Swing Speed (deg/s)', min: 500, max: 15000, step: 100 });
+  swingSpeedField.input.value = `${cfg.speedThreshold ?? 4370}`;
+  swingSpeedField.valueLabel.textContent = `${cfg.speedThreshold ?? 4370}`;
+
+  const swingArcField = createRangeField({ id: 'sg-swing-arc', label: 'Min Swing Arc (deg)', min: 5, max: 90, step: 1 });
+  swingArcField.input.value = `${cfg.minSwingDelta ?? 25}`;
+  swingArcField.valueLabel.textContent = `${cfg.minSwingDelta ?? 25}°`;
+
+  const sweepSpeedField = createRangeField({ id: 'sg-sweep-speed', label: 'Min Sweep Speed (deg/s)', min: 50, max: 5000, step: 50 });
+  sweepSpeedField.input.value = `${cfg.minSweepSpeed ?? 100}`;
+  sweepSpeedField.valueLabel.textContent = `${cfg.minSweepSpeed ?? 100}`;
+
+  const sweepDistField = createRangeField({ id: 'sg-sweep-dist', label: 'Min Tip Movement (m)', min: 0.01, max: 1.0, step: 0.01 });
+  sweepDistField.input.value = `${cfg.minSweepDist ?? 0.3}`;
+  sweepDistField.valueLabel.textContent = `${(cfg.minSweepDist ?? 0.3).toFixed(2)}m`;
+
+  const sensHint = createElement('div', 'settings-muted');
+  sensHint.textContent = 'Lower values = easier to register hits. Higher values = harder but more deliberate.';
+
+  panelEl.append(
+    calibSection,
+    recalGroup,
+    sensSection,
+    swingSpeedField.field,
+    swingArcField.field,
+    sweepSpeedField.field,
+    sweepDistField.field,
+    sensHint
+  );
+
+  elements.swordGyroFields = {
+    recalBtn,
+    swingSpeedInput: swingSpeedField.input,
+    swingSpeedValue: swingSpeedField.valueLabel,
+    swingArcInput: swingArcField.input,
+    swingArcValue: swingArcField.valueLabel,
+    sweepSpeedInput: sweepSpeedField.input,
+    sweepSpeedValue: sweepSpeedField.valueLabel,
+    sweepDistInput: sweepDistField.input,
+    sweepDistValue: sweepDistField.valueLabel,
+  };
+
+  return panelEl;
+}
+
 function buildPanels() {
   const body = createElement('div', 'settings-body');
   const characterPanel = buildCharacterPanel();
@@ -1092,7 +1192,7 @@ function buildPanels() {
   const aboutPanel = buildAboutPanel();
   const accountPanel = buildAccountPanel();
   const developerPanel = buildDeveloperPanel();
-  body.append(characterPanel, questsPanel, achievementsPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel);
+  const panelsToAppend = [characterPanel, questsPanel, achievementsPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel];
   elements.panels = {
     character: characterPanel,
     multiplayer: multiplayerPanel,
@@ -1104,6 +1204,12 @@ function buildPanels() {
     account: accountPanel,
     developer: developerPanel
   };
+  if (window.phoneSwordMode) {
+    const swordGyroPanel = buildSwordGyroPanel();
+    panelsToAppend.push(swordGyroPanel);
+    elements.panels.swordgyro = swordGyroPanel;
+  }
+  body.append(...panelsToAppend);
   return body;
 }
 
@@ -2003,6 +2109,21 @@ function bindEvents() {
   window.addEventListener('resize', () => {
     refreshLayout();
   });
+
+  if (elements.swordGyroFields) {
+    const f = elements.swordGyroFields;
+    const bindSwingSlider = (input, valueEl, cfgKey, fmt) => {
+      input.addEventListener('input', () => {
+        const v = parseFloat(input.value);
+        valueEl.textContent = fmt ? fmt(v) : `${v}`;
+        if (window.phoneSwordSwingCfg) window.phoneSwordSwingCfg[cfgKey] = v;
+      });
+    };
+    bindSwingSlider(f.swingSpeedInput, f.swingSpeedValue, 'speedThreshold', v => `${Math.round(v)}`);
+    bindSwingSlider(f.swingArcInput, f.swingArcValue, 'minSwingDelta', v => `${Math.round(v)}°`);
+    bindSwingSlider(f.sweepSpeedInput, f.sweepSpeedValue, 'minSweepSpeed', v => `${Math.round(v)}`);
+    bindSwingSlider(f.sweepDistInput, f.sweepDistValue, 'minSweepDist', v => `${v.toFixed(2)}m`);
+  }
 }
 
 function initPreview() {
