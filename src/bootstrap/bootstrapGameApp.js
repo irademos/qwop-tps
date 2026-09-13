@@ -16587,7 +16587,7 @@ async function initCore(runtimeContext) {
       }
 
       // ── Foam sword deflects in-flight enemy bombs ────────────────────────
-      if (window.phoneSwordMode && swordMesh?.visible && _tipWorld && _psw.swingActive) {
+      if (window.phoneSwordMode && swordMesh?.visible && _tipWorld) {
         const _bombs = window._enemyBombs;
         if (Array.isArray(_bombs)) {
           for (let _bi = _bombs.length - 1; _bi >= 0; _bi--) {
