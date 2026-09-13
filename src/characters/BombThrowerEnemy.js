@@ -421,6 +421,35 @@ export class BombThrowerEnemy {
         continue;
       }
 
+      // Shield intercept: if the player has shield equipped and the bomb is
+      // close enough, deflect it back toward the thrower instead of exploding.
+      if (!bomb.deflected && targetModel) {
+        const distToPlayer = bomb.mesh.position.distanceTo(targetModel.position);
+        if (distToPlayer < 0.9) {
+          const shieldBlocked = typeof window.tryBlockLocalPlayerHitWithShield === 'function' &&
+            window.tryBlockLocalPlayerHitWithShield({
+              attackerModel: { position: bomb.mesh.position },
+              damage: BOMB_EXPLOSION_DAMAGE
+            });
+          if (shieldBlocked) {
+            // Deflect toward the thrower
+            const throwerPos = this.group.position.clone();
+            throwerPos.y += CAPSULE_HEIGHT / 2;
+            const deflectDir = throwerPos.sub(bomb.mesh.position).normalize();
+            deflectDir.y = 0.25;
+            deflectDir.normalize();
+            bomb.vel.copy(deflectDir.multiplyScalar(12));
+            bomb.deflected = true;
+            bomb.deflectedAt = Date.now();
+            window.audioManager?.playSFX?.('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.7, {
+              cooldownKey: 'bomb-shield', cooldownMs: 80
+            });
+            window._pswShowBlockFlash?.('player');
+            continue;
+          }
+        }
+      }
+
       // Deflected bomb: check if it hit the thrower
       if (bomb.deflected && this.group) {
         const throwerCenter = this.group.position.clone();
