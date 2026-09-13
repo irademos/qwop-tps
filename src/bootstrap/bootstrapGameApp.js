@@ -16593,7 +16593,7 @@ async function initCore(runtimeContext) {
           for (let _bi = _bombs.length - 1; _bi >= 0; _bi--) {
             const _bomb = _bombs[_bi];
             if (!_bomb || _bomb.deflected) continue;
-            if (_tipWorld.distanceTo(_bomb.mesh.position) < 1.2) {
+            if (_tipWorld.distanceTo(_bomb.mesh.position) < 3.0) {
               // Deflect: send bomb back toward the thrower
               const _thrower = _bomb.thrower;
               let _deflectDir;
