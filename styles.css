@@ -3244,6 +3244,24 @@ body.settings-open #inventory-button {
 .ps-stage-ok-btn:active { transform: scale(0.95); }
 .ps-stage-ok-btn:hover  { box-shadow: 0 6px 32px rgba(99,102,241,0.8); }
 
+.ps-stage-recalib-btn {
+  background: linear-gradient(135deg, #b45309, #92400e);
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  padding: 14px 36px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(180,83,9,0.45);
+  transition: transform 0.1s, box-shadow 0.1s;
+  margin-top: 8px;
+  margin-right: 12px;
+}
+.ps-stage-recalib-btn:active { transform: scale(0.95); }
+.ps-stage-recalib-btn:hover  { box-shadow: 0 6px 28px rgba(180,83,9,0.7); }
+
 .ps-stage-shop-btn {
   background: linear-gradient(135deg, #059669, #047857);
   color: #fff;
