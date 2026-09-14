@@ -12107,6 +12107,16 @@ async function initCore(runtimeContext) {
       _psStageOverlay.classList.add('hidden');
       onOk(count);
     };
+    // Recalibrate button — snaps current gyro orientation as neutral
+    const _psRecalibBtn = document.getElementById('ps-stage-recalib');
+    if (_psRecalibBtn) {
+      _psRecalibBtn.onclick = () => {
+        window.phoneSwordRecalibrate?.();
+        _psRecalibBtn.textContent = '✅ Calibrated!';
+        setTimeout(() => { _psRecalibBtn.textContent = '🎯 Recalibrate Sword'; }, 1500);
+      };
+    }
+
     // Shop button — opens merchant panel if available
     let _psShopBtn = document.getElementById('ps-stage-shop-btn');
     if (!_psShopBtn) {
