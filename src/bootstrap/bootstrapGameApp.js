@@ -495,7 +495,6 @@ function createArcadeOverlay(startOverlay) {
     form?.classList.remove('hidden');
     welcomeSection?.classList.add('hidden');
     startButton?.classList.add('hidden');
-    modeSelectEl?.classList.add('hidden');
     setMode('login');
     if (!preserveMessage) {
       setMessage('');
