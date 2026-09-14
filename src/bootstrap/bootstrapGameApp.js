@@ -419,11 +419,10 @@ function createArcadeOverlay(startOverlay) {
   const signupButton = startOverlay.querySelector('[data-arcade-signup]');
   const backButton = startOverlay.querySelector('[data-arcade-back]');
   const startButton = startOverlay.querySelector('[data-arcade-start]');
-  const modeSelectEl = startOverlay.querySelector('[data-arcade-mode-select]');
-  const modeBtns = startOverlay.querySelectorAll('[data-mode-btn]');
+
 
   let mode = 'login';
-  let pendingAuthResult = null;
+
   let currentName = '';
   let authInProgress = false;
   let authToken = 0;
@@ -481,10 +480,15 @@ function createArcadeOverlay(startOverlay) {
   };
 
   const showModeSelect = (authResult) => {
-    pendingAuthResult = authResult;
-    form?.classList.add('hidden');
-    startButton?.classList.add('hidden');
-    modeSelectEl?.classList.remove('hidden');
+    // Auto-start phone sword mode without showing mode selection UI.
+    window.gameMode = 'phone_sword';
+    if (startHandler) startHandler();
+    hideOverlay();
+    if (authResult && resolveAuth) {
+      resolveAuth(authResult);
+    } else if (resolveAuth) {
+      resolveAuth({});
+    }
   };
 
   const showLoginForm = ({ name, preserveMessage = false } = {}) => {
@@ -675,19 +679,6 @@ function createArcadeOverlay(startOverlay) {
     hideOverlay();
   });
 
-  modeBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const chosenMode = btn.dataset.modeBtn;
-      window.gameMode = chosenMode;
-      if (startHandler) startHandler();
-      hideOverlay();
-      if (pendingAuthResult && resolveAuth) {
-        resolveAuth(pendingAuthResult);
-      } else if (resolveAuth) {
-        resolveAuth({});
-      }
-    });
-  });
 
   return {
     async authenticate({ initialName, hasStoredPin, loadProfile }) {
