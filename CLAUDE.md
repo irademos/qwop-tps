@@ -1,5 +1,7 @@
 # Street Quest — Codebase Guide for AI Agents
 
+> **Maintenance rule for AI agents:** If your changes add/remove/rename source files, move logic between modules, introduce new architectural patterns, or add new env vars — update this file and `docs/AI_AGENT_GUIDE.md` in the same commit. Keep the "Common Task Locations" table and directory tree accurate. Stale docs cost more tokens than fresh ones.
+
 ## What This Is
 A browser-based 3D multiplayer RPG. Players explore a procedurally extended real-world map (live OpenStreetMap data), fight monsters, complete quests, and interact with an AI NPC powered by Groq/Llama-3.1. The repo name "qwop-tps" is historical; the game is called **Street Quest**.
 
