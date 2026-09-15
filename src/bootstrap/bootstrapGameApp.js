@@ -419,16 +419,16 @@ function createArcadeOverlay(startOverlay) {
   const signupButton = startOverlay.querySelector('[data-arcade-signup]');
   const backButton = startOverlay.querySelector('[data-arcade-back]');
   const startButton = startOverlay.querySelector('[data-arcade-start]');
-  const modeSelectEl = startOverlay.querySelector('[data-arcade-mode-select]');
-  const modeBtns = startOverlay.querySelectorAll('[data-mode-btn]');
+
 
   let mode = 'login';
-  let pendingAuthResult = null;
+
   let currentName = '';
   let authInProgress = false;
   let authToken = 0;
   let resolveAuth = null;
   let startHandler = null;
+  let pendingAuthResult = null;
   let activeLoadProfile = loadOrCreateWithPin;
 
   const createWaiter = () => {
@@ -481,17 +481,18 @@ function createArcadeOverlay(startOverlay) {
   };
 
   const showModeSelect = (authResult) => {
+    // Show a "Start" button instead of a mode picker.
+    // The start button click (below) will resolve auth and launch the game.
     pendingAuthResult = authResult;
     form?.classList.add('hidden');
-    startButton?.classList.add('hidden');
-    modeSelectEl?.classList.remove('hidden');
+    startButton?.classList.remove('hidden');
+    welcomeSection?.classList.remove('hidden');
   };
 
   const showLoginForm = ({ name, preserveMessage = false } = {}) => {
     form?.classList.remove('hidden');
     welcomeSection?.classList.add('hidden');
     startButton?.classList.add('hidden');
-    modeSelectEl?.classList.add('hidden');
     setMode('login');
     if (!preserveMessage) {
       setMessage('');
@@ -501,14 +502,11 @@ function createArcadeOverlay(startOverlay) {
     confirmInput.value = '';
   };
 
-  const showWelcome = (name, { ready = false } = {}) => {
+  const showWelcome = (name) => {
     welcomeText.textContent = `Welcome back ${name}`;
     welcomeSection?.classList.remove('hidden');
     form?.classList.add('hidden');
     startButton?.classList.add('hidden');
-    if (ready) {
-      showModeSelect(null);
-    }
   };
 
   const hideOverlay = () => {
@@ -550,7 +548,7 @@ function createArcadeOverlay(startOverlay) {
       }
       currentName = result.profile?.name || name;
       setMessage('');
-      showWelcome(currentName, { ready: true });
+      showWelcome(currentName);
       showModeSelect(result);
     } catch (err) {
       if (token !== authToken) return;
@@ -623,6 +621,7 @@ function createArcadeOverlay(startOverlay) {
   const handleSwitchUser = () => {
     authToken += 1;
     authInProgress = false;
+    pendingAuthResult = null;
     if (currentName) {
       clearStoredPin(currentName);
       setCookie('playerName', '', -1);
@@ -669,25 +668,12 @@ function createArcadeOverlay(startOverlay) {
   switchButton?.addEventListener('click', handleSwitchUser);
 
   startButton?.addEventListener('click', () => {
-    if (startHandler) {
-      startHandler();
-    }
+    window.gameMode = 'phone_sword';
+    if (startHandler) startHandler();
     hideOverlay();
+    if (resolveAuth) resolveAuth(pendingAuthResult || {});
   });
 
-  modeBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const chosenMode = btn.dataset.modeBtn;
-      window.gameMode = chosenMode;
-      if (startHandler) startHandler();
-      hideOverlay();
-      if (pendingAuthResult && resolveAuth) {
-        resolveAuth(pendingAuthResult);
-      } else if (resolveAuth) {
-        resolveAuth({});
-      }
-    });
-  });
 
   return {
     async authenticate({ initialName, hasStoredPin, loadProfile }) {
