@@ -67,6 +67,15 @@ const TRAIL_COLORS       = [0xff4986, 0xff79ab, 0xffaad0]; // three stacked line
 const PHYS_HALF_HEIGHT = 0.6;
 const PHYS_RADIUS      = 0.3;
 
+// Upper limits on the knockback a dead enemy can receive (the killing blow and anything
+// after it), so the death ragdoll tumbles back instead of rocketing across the arena.
+export const DEATH_KNOCKBACK_CAP = {
+  horizSpeed: 7,   // m/s, horizontal
+  upVelocity: 3,   // m/s, upward
+  torqueMag: 40,   // torque impulse
+  angSpeed: 10,    // rad/s, angular velocity
+};
+
 // Sword blade goes in +Z; default rest orientation (Euler, YXZ)
 const DEG = Math.PI / 180;
 const REST_SWORD_EULER = new THREE.Euler(360 * DEG, 90 * DEG, -90 * DEG, 'YXZ');
@@ -174,7 +183,7 @@ export class EnemyPlayer {
       if (this._destroyed) { character.dispose(); return; }
       this.group.add(container);
       this._glbCharacter = character;
-      if (this.isDead) character.setFurEnabled(false);
+      if (this.isDead) { character.setFurEnabled(false); character.playDeath(); }
     }).catch(e => console.warn('[EnemyPlayer] GLB character load failed:', e));
 
     // Floating hand groups — invisible targets that move around each frame; the GLB
@@ -402,12 +411,17 @@ export class EnemyPlayer {
     const groupY = Number.isFinite(terrainY) ? Math.max(physY, terrainY) : physY;
     this.group.position.set(t.x, groupY, t.z);
 
-    // Dead: only sync position/rotation, skip all AI and combat logic
+    // Dead: ragdoll rotation from physics + the death clip; skip all AI and combat logic
     if (this.isDead) {
-      if (this._isRagdoll && this.rigidBody) {
+      this._clampDeathVelocity();
+      if (this._isRagdoll) {
         const rot = this.rigidBody.rotation();
         this.group.quaternion.set(rot.x, rot.y, rot.z, rot.w);
       }
+      this._glbCharacter?.animate(dt);
+      this._solveArm('right');
+      this._solveArm('left');
+      this._glbCharacter?.stepFluff(dt);
       return;
     }
 
@@ -860,6 +874,11 @@ export class EnemyPlayer {
   // Direct knockback — bypasses the strength/profile system for easy tuning.
   applyDirectKnockback({ direction, horizSpeed = 6, upVelocity = 2, torqueMag = 80, ragdoll = false } = {}) {
     if (!direction || !this.rigidBody) return;
+    if (this.isDead) {
+      horizSpeed = Math.min(horizSpeed, DEATH_KNOCKBACK_CAP.horizSpeed);
+      upVelocity = Math.min(upVelocity, DEATH_KNOCKBACK_CAP.upVelocity);
+      torqueMag  = Math.min(torqueMag, DEATH_KNOCKBACK_CAP.torqueMag);
+    }
     const vel = this.rigidBody.linvel();
     this.rigidBody.setLinvel({ x: direction.x * horizSpeed, y: vel.y + upVelocity, z: direction.z * horizSpeed }, true);
     if (ragdoll) {
@@ -876,6 +895,7 @@ export class EnemyPlayer {
       }
       this._ragdollTimeout = setTimeout(() => this._endRagdoll(), 2000);
     }
+    this._clampDeathVelocity();
   }
 
   applyKnockback({ direction, strength = 2 } = {}) {
@@ -893,6 +913,24 @@ export class EnemyPlayer {
     if (strength >= RAGDOLL_STRENGTH_THRESHOLD) {
       this._startRagdoll(direction, strength);
     }
+    this._clampDeathVelocity();
+  }
+
+  /** Once dead, keep the body's linear/angular velocity within DEATH_KNOCKBACK_CAP. */
+  _clampDeathVelocity() {
+    if (!this.isDead || !this.rigidBody) return;
+    const cap = DEATH_KNOCKBACK_CAP;
+    const v = this.rigidBody.linvel();
+    const h = Math.hypot(v.x, v.z);
+    const k = h > cap.horizSpeed ? cap.horizSpeed / h : 1;
+    const y = Math.min(v.y, cap.upVelocity);
+    if (k < 1 || y !== v.y) this.rigidBody.setLinvel({ x: v.x * k, y, z: v.z * k }, true);
+    const w = this.rigidBody.angvel();
+    const ws = Math.hypot(w.x, w.y, w.z);
+    if (ws > cap.angSpeed) {
+      const s = cap.angSpeed / ws;
+      this.rigidBody.setAngvel({ x: w.x * s, y: w.y * s, z: w.z * s }, true);
+    }
   }
 
   _startRagdoll(direction, strength) {
@@ -901,7 +939,7 @@ export class EnemyPlayer {
     try {
       this.rigidBody.setEnabledRotations(true, true, true, true);
       const torqueAxis = new THREE.Vector3(-direction.z, 0.1, direction.x).normalize();
-      const torqueMag = strength * 10;
+      const torqueMag = this.isDead ? Math.min(strength * 10, DEATH_KNOCKBACK_CAP.torqueMag) : strength * 10;
       this.rigidBody.applyTorqueImpulse(
         { x: torqueAxis.x * torqueMag, y: torqueAxis.y * torqueMag, z: torqueAxis.z * torqueMag },
         true
@@ -929,8 +967,17 @@ export class EnemyPlayer {
   _die() {
     this.isDead = true;
     if (this._ragdollTimeout) { clearTimeout(this._ragdollTimeout); this._ragdollTimeout = null; }
-    this._isRagdoll = false;
     this._swordGroup.visible = false;
+
+    // Ragdoll stays on for the whole death (free rotation, synced in update()) while the
+    // flying-back death clip plays once on top of it.
+    this._isRagdoll = true;
+    try {
+      this.rigidBody?.setEnabledRotations(true, true, true, true);
+    } catch (e) {
+      console.warn('[EnemyPlayer] death ragdoll error:', e);
+    }
+    this._glbCharacter?.playDeath();
 
     // Keep rigid body alive so knockback applied after _die() still has something to push.
     // destroy() will remove it when the fade finishes.

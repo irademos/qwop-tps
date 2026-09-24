@@ -50,6 +50,7 @@ export interface PlayOptions {
   inPlace?: boolean // drop the clip's horizontal root motion (use for game locomotion)
   fade?: number     // seconds to crossfade from the current pose (default 0 = snap)
   excludeBones?: string[] // bone names (any Mixamo prefix) the clip must not drive; their children are excluded too
+  loop?: boolean    // default true; false plays the clip once and holds its last frame
 }
 
 // ── Mixamo animation sources ──────────────────────────────────────────────
@@ -566,7 +567,7 @@ export class FluffyCharacter {
 
   // ── Animation
 
-  /** Plays a Mixamo FBX clip (looping), retargeted by bone name. */
+  /** Plays a Mixamo FBX clip (looping unless `loop: false`), retargeted by bone name. */
   async play(fbxUrl: string, opts: PlayOptions = {}) {
     const token = ++this.playToken
     const source = await loadAnimation(fbxUrl)
@@ -581,7 +582,12 @@ export class FluffyCharacter {
     } : null
     this.stopMixer()
     const mixer = new THREE.AnimationMixer(source.root)
-    mixer.clipAction(source.clip).play()
+    const action = mixer.clipAction(source.clip)
+    if (opts.loop === false) {
+      action.setLoop(THREE.LoopOnce, 1)
+      action.clampWhenFinished = true
+    }
+    action.play()
     this.anim = {
       source, mixer,
       retarget: createRetargeter(this.rig, source, excluded),

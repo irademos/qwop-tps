@@ -13929,6 +13929,7 @@ async function initCore(runtimeContext) {
       playerControls.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
     playerDead = false;
+    playerModel.userData.qwopRig?.glbCharacter?.revive();
     // Reset gesture equip state so gestures can re-equip after respawn
     _hordeEquipped = null;
     _hordePendingGesture = 'none';
@@ -16718,6 +16719,8 @@ async function initCore(runtimeContext) {
         die.reset().fadeIn(0.2).play();
         playerModel.userData.currentAction = 'die';
       }
+      // GLB character: play the flying-back death clip once (held until respawn)
+      playerModel.userData.qwopRig?.glbCharacter?.playDeath();
       showGameOver();
     }
 
