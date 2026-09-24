@@ -69,6 +69,7 @@ A browser-based 3D multiplayer RPG. Players explore a procedurally extended real
 │   │
 │   ├── combat/                 # Combat utilities
 │   │   ├── knockback.js        # Computes knockback impulse/motion vectors for hit reactions
+│   │   ├── bloodEffect.js      # Blood spray/splat particles on damage (player + Sword Showdown enemies); updateBloodEffects(dt) in game loop
 │   │   └── pickupSpatialGrid.js # Spatial hash grid for fast nearby-item lookup (loot pickups)
 │   │
 │   ├── multiplayer/
@@ -272,6 +273,7 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 | Firebase data structure | `src/player/playerProfile.js`, `src/npc/npcPersistence.js` |
 | Multiplayer protocol | `src/multiplayer/peerConnection.js`, `src/bootstrap/bootstrapGameApp.js` |
 | AI NPC prompt/behavior | `/api/llama.js` (server), `src/npc/friendlyNpcManager.js` (client) |
+| Damage hit effect (blood spray) | `src/combat/bloodEffect.js`; player trigger in `setStat` (`triggerPlayerHurtBlood`), enemies in `applyDamage` |
 | Audio | `src/audio/audioManager.js`, `public/assets/audio/` |
 | Add new 3D prop | Place GLB in `public/assets/props/`, load in relevant environment file |
 | Serverless API changes | `/api/llama.js` or `/api/overpass.js` |

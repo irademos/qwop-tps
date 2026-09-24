@@ -3,6 +3,7 @@ import QRCode from 'qrcode';
 import { getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTrackingManager.js';
 import { Weapon } from '../items/weapon.js';
 import * as THREE from "three";
+import { spawnBloodBurst, updateBloodEffects } from "../combat/bloodEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { loadMonsterModel } from "../models/monsterModel.js";
 import { updateRemotePlayerRig } from "../models/playerModel.js";
@@ -9275,7 +9276,7 @@ async function initCore(runtimeContext) {
     }
     statsState[key] = clampStat(key, value);
     if (key === 'health') {
-      triggerPlayerHurtFlash(prevValue, statsState[key]);
+      triggerPlayerHurtBlood(prevValue, statsState[key]);
     }
     if (key === 'health') {
       updateHealthUI();
@@ -9324,55 +9325,15 @@ async function initCore(runtimeContext) {
     bed: null
   };
 
-  const PLAYER_HURT_FLASH_DURATION_MS = 280;
-  const PLAYER_HURT_FLASH_MAX_ALPHA = 0.92;
-  const playerHurtFlashState = {
-    activeUntil: 0,
-    pulseAt: 0,
-    ring: null
-  };
-  const ensurePlayerHurtFlashRing = () => {
-    if (playerHurtFlashState.ring || !playerModel) return;
-    const ringGeometry = new THREE.RingGeometry(0.6, 1.35, 48);
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff2f2f,
-      transparent: true,
-      opacity: 0,
-      side: THREE.DoubleSide,
-      depthWrite: false
-    });
-    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(0, 0.1, 0);
-    ring.visible = false;
-    playerModel.add(ring);
-    playerHurtFlashState.ring = ring;
-  };
-  const triggerPlayerHurtFlash = (previousHealth, nextHealth) => {
+  const playerBloodOrigin = new THREE.Vector3();
+  const triggerPlayerHurtBlood = (previousHealth, nextHealth) => {
     if (!Number.isFinite(previousHealth) || !Number.isFinite(nextHealth)) return;
-    if (nextHealth >= previousHealth) return;
-    ensurePlayerHurtFlashRing();
-    const now = performance.now();
-    playerHurtFlashState.activeUntil = now + PLAYER_HURT_FLASH_DURATION_MS;
-    playerHurtFlashState.pulseAt = now;
-  };
-  const updatePlayerHurtFlash = () => {
-    ensurePlayerHurtFlashRing();
-    const ring = playerHurtFlashState.ring;
-    if (!ring) return;
-    const now = performance.now();
-    if (now >= playerHurtFlashState.activeUntil) {
-      ring.visible = false;
-      ring.material.opacity = 0;
-      return;
-    }
-    const elapsed = now - playerHurtFlashState.pulseAt;
-    const progress = THREE.MathUtils.clamp(elapsed / PLAYER_HURT_FLASH_DURATION_MS, 0, 1);
-    const opacity = (1 - progress) * PLAYER_HURT_FLASH_MAX_ALPHA;
-    const scale = 1 + (0.28 * progress);
-    ring.visible = true;
-    ring.material.opacity = opacity;
-    ring.scale.setScalar(scale);
+    if (nextHealth >= previousHealth || !playerModel?.parent) return;
+    playerModel.getWorldPosition(playerBloodOrigin);
+    const groundY = playerBloodOrigin.y;
+    playerBloodOrigin.y += 0.85;
+    const intensity = THREE.MathUtils.clamp((previousHealth - nextHealth) / 2, 0.6, 2);
+    spawnBloodBurst(scene, playerBloodOrigin, { groundY, intensity });
   };
 
   const getSleepRecoveryValue = (key, startValue, elapsedSeconds) => {
@@ -14210,8 +14171,6 @@ async function initCore(runtimeContext) {
     player = newPlayer;
     playerModel = newModel;
     window.playerModel = playerModel;
-    playerHurtFlashState.ring = null;
-    ensurePlayerHurtFlashRing();
     playerControls?.setPlayerModel(playerModel);
     void initMapViewFeature({ camera, scene, player: playerModel });
   }
@@ -15491,7 +15450,7 @@ async function initCore(runtimeContext) {
         climbedSinceGrounded = false;
       }
     }
-    updatePlayerHurtFlash();
+    updateBloodEffects(frameDelta);
     if (buildState.placing) {
       const moveSpeed = 3 * frameDelta;
       const keys = buildHorizontalKeys;

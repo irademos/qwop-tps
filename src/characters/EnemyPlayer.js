@@ -10,10 +10,13 @@
  * rest of the game uses for melee weapons).
  */
 
+import { spawnBloodBurst } from '../combat/bloodEffect.js';
 import * as THREE from 'three';
 import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
 import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
+
+const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 
 // ─── constants ───────────────────────────────────────────────────────────────
 
@@ -864,6 +867,7 @@ export class EnemyPlayer {
     if (this.isDead) return false;
     this.hearts = Math.max(0, this.hearts - 1);
     this._updateHealthBarCanvas();
+    spawnBloodBurst(this.scene, this.getCenterWorldPos().add(_bloodOffset), { groundY: this.group.position.y });
     if (this.hearts <= 0) {
       this._die();
       return true; // killing blow
