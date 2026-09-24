@@ -205,6 +205,14 @@ export class Weapon {
     let rightHandBone = null;
     let anyHandBone = null;
 
+    // Explicit hand markers win over name matching (e.g. a GLB body's mixamorig hand
+    // bones, which would otherwise match 'righthand'/'lefthand' first)
+    root.traverse(child => {
+      const marker = child?.userData?.proceduralHand;
+      if (marker === 'right' && !rightHandBone) rightHandBone = child;
+      if (marker === 'left' && !leftHandBone) leftHandBone = child;
+    });
+
     root.traverse(child => {
       if (!child?.name) return;
       const name = child.name.toLowerCase();

@@ -81,7 +81,7 @@ A browser-based 3D multiplayer RPG. Players explore a procedurally extended real
 │   │   ├── CharacterBase.js    # Base class — model ref, health, velocity, animation mixer
 │   │   ├── CharacterSpawn.js   # Factory for creating character instances from loaded models
 │   │   ├── PlayerCharacter.js  # Local player character (owned by PlayerControls)
-│   │   ├── EnemyPlayer.js      # Remote multiplayer player character
+│   │   ├── EnemyPlayer.js      # Sword Showdown AI swordsman (same GLB character, IK arms, foam sword)
 │   │   ├── MonsterCharacter.js # Monster enemy — AI pathing, aggro, attack
 │   │   ├── FriendlyCharacter.js # Friendly NPC — dialog, wander, combat assist
 │   │   └── merchant.js         # Merchant NPC with shop inventory
@@ -136,8 +136,10 @@ A browser-based 3D multiplayer RPG. Players explore a procedurally extended real
 │   │
 │   ├── models/                 # 3D model loading
 │   │   ├── monsterModel.js     # Loads/caches monster FBX models with animations
-│   │   ├── playerModel.js      # Loads player FBX; updateProceduralPlayerRig() for IK hand positioning
-│   │   └── handRotationDebug.js # Debug visualization for hand tracking rotation
+│   │   ├── playerModel.js      # Player group + floating hand targets; updateProceduralPlayerRig() moves hands, animates GLB character
+│   │   ├── glbCharacterModel.js # Shared GLB character (gemhorn_rigged.glb): walk/idle clips, arm IK toward floating hands, config
+│   │   ├── fluffyCharacter.ts  # Mixamo FBX → GLB world-space retargeter + fluffy fur/secondary motion (library)
+│   │   └── handRotationDebug.js # Debug visualization for hand tracking rotation; foamSwordConfig
 │   │
 │   ├── physics/
 │   │   ├── rapierSafety.js     # Safe wrapper for world.removeRigidBody() (prevents double-remove crash)
@@ -219,7 +221,10 @@ Every ~10 seconds, `friendlyNpcManager.js` sends NPC game state (HP, nearby enti
 - Grass blade instance data
 - Placed GLB scene objects
 
-### 8. PIN Auth
+### 8. GLB Character + IK Arms
+Players and EnemyPlayers render `public/models/glb_characters/gemhorn_rigged.glb` (Mixamo skeleton). `fluffyCharacter.ts` retargets Mixamo FBX clips (walk/idle) onto it and adds fur; the clip drives everything **except** the arm chains. Arms are posed each frame by a stretchy two-bone IK (`GLBCharacter.solveArm`) toward invisible floating-hand groups, which are also the weapon attach points (`userData.proceduralHand` markers, preferred by `Weapon._getHandBone`). The GLB and clips face +Z (game forward) — no Y180 needed. Hand labels are mirrored: the `'right'` floating hand is at local +X, i.e. the anatomical left arm.
+
+### 9. PIN Auth
 No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hashed client-side via Web Crypto, stored in Firebase. Hash cached in cookie for auto-login.
 
 ---
@@ -259,6 +264,8 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 | Modify NPC behavior | `src/npc/friendlyNpcManager.js` |
 | Add a quest | `src/npc/quest.js` |
 | Change movement/controls | `src/controls/controls.js` |
+| Player/enemy character model, animation clips, arm IK, fur | `src/models/glbCharacterModel.js` (`glbCharacterConfig`), `src/models/fluffyCharacter.ts` |
+| Where the hands go (sword/shield/gun grip, enemy swings) | `src/models/playerModel.js`, `src/items/foamSword.js`/`shield.js`/`pistol.js`, `src/characters/EnemyPlayer.js` |
 | Add a new UI panel | `src/controls/`, lazy-load in `src/features/uiPanelsFeature.js` |
 | Modify map rendering | `src/environment/mapRender.js`, `src/environment/buildingsRender.js` |
 | Change terrain generation | `src/environment/worldGeneration.js`, `src/environment/terrainHeight.js` |
