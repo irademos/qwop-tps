@@ -20,6 +20,9 @@
  *
  * Frame order per character:
  *   setMoving() → animate(dt) → solveArm(...) for each hand → stepFluff(dt)
+ *
+ * Death: playDeath() plays deathClip once over the whole body (arm IK suspended, the
+ * floating hands just follow the palms) until revive().
  */
 
 import * as THREE from 'three';
@@ -31,6 +34,7 @@ export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',
+  deathClip: '/models/animations/Flying Back Death.fbx', // played once (whole body, arms included) by playDeath()
   clipFade: 0.2,           // seconds to crossfade walk <-> idle
   targetHeight: 1.0,       // world height of the character (bind pose)
 
@@ -98,6 +102,7 @@ export class GLBCharacter {
       this.arms[hand] = this._buildArm(side);
     }
     this._moving = null;
+    this._dead = false;
     this.setMoving(false);
   }
 
@@ -153,6 +158,7 @@ export class GLBCharacter {
 
   /** Switches between the walk and idle clips (crossfaded); no-op if unchanged. */
   setMoving(moving) {
+    if (this._dead) return;
     moving = !!moving;
     if (moving === this._moving) return;
     this._moving = moving;
@@ -162,6 +168,41 @@ export class GLBCharacter {
       fade: cfg.clipFade,
       excludeBones: ARM_ROOT_BONES,
     }).catch((e) => console.warn('[GLBCharacter] clip load failed:', e));
+  }
+
+  /**
+   * Plays the death clip once and holds its last frame. The clip drives the arms too
+   * (IK is suspended) until revive(); setMoving() is ignored meanwhile.
+   */
+  playDeath() {
+    if (this._dead) return;
+    this._dead = true;
+    this._setArmIK(false);
+    const cfg = glbCharacterConfig;
+    this.fluffy.play(cfg.deathClip, { inPlace: true, fade: 0.15, loop: false })
+      .catch((e) => console.warn('[GLBCharacter] death clip load failed:', e));
+  }
+
+  /** Undoes playDeath(): arms back on IK, walk/idle clips resume. */
+  revive() {
+    if (!this._dead) return;
+    this._dead = false;
+    this._setArmIK(true);
+    this._moving = null;
+    this.setMoving(false);
+  }
+
+  get isDead() { return this._dead; }
+
+  // IK on: solveArm() writes the arm bones' matrices. Off: the clip drives them normally.
+  _setArmIK(enabled) {
+    for (const arm of Object.values(this.arms)) {
+      if (!arm) continue;
+      for (const b of [arm.upper, arm.fore, arm.hand]) {
+        b.matrixAutoUpdate = !enabled;
+        if (!enabled) b.updateMatrix();
+      }
+    }
   }
 
   /** Body animation for this frame (arms excluded). */
@@ -180,6 +221,15 @@ export class GLBCharacter {
   solveArm(hand, targetObject, { writeBack = true } = {}) {
     const arm = this.arms[hand];
     if (!arm || !targetObject) return;
+    if (this._dead) {
+      // Death clip owns the arms: just keep the floating hand (and anything held) on the palm
+      if (writeBack && targetObject.parent) {
+        arm.hand.updateMatrixWorld(true);
+        _v.set(0, arm.palm, 0).applyMatrix4(arm.hand.matrixWorld);
+        targetObject.position.copy(targetObject.parent.worldToLocal(_v));
+      }
+      return;
+    }
     const cfg = glbCharacterConfig;
     const rig = this.fluffy.rigSpace;
     _rigInv.copy(rig.matrixWorld).invert();

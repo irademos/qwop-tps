@@ -94,7 +94,7 @@ src/
 
 **Terrain stamps:** Roads/buildings flatten the procedural terrain via priority-weighted stamps stored per tile. Query height at runtime via `terrainHeight.js`.
 
-**Character arms (GLB + IK):** Players and EnemyPlayers use `gemhorn_rigged.glb`. Mixamo FBX clips animate everything except the arm chains (Shoulder→Hand); each frame the arms are solved with a stretchy two-bone IK toward invisible "floating hand" groups, which are also the weapon attach points (marked with `userData.proceduralHand`). Frame order: `setMoving` → `animate` → `solveArm` per hand → `stepFluff`. Floating-hand labels are mirrored: `'right'` sits at local +X = the character's anatomical left arm.
+**Character arms (GLB + IK):** Players and EnemyPlayers use `gemhorn_rigged.glb`. Mixamo FBX clips animate everything except the arm chains (Shoulder→Hand); each frame the arms are solved with a stretchy two-bone IK toward invisible "floating hand" groups, which are also the weapon attach points (marked with `userData.proceduralHand`). Frame order: `setMoving` → `animate` → `solveArm` per hand → `stepFluff`. Floating-hand labels are mirrored: `'right'` sits at local +X = the character's anatomical left arm. `playDeath()` plays the flying-back death clip once (arms included, IK off) until `revive()` — used by the local player on death/respawn and by EnemyPlayer (ragdoll stays on; dead-enemy knockback capped by `DEATH_KNOCKBACK_CAP` in `EnemyPlayer.js`).
 
 **Multiplayer star topology:** Firebase = signaling only. PeerJS WebRTC carries actual game state. One host elected; all clients connect to host; host re-broadcasts.
 
