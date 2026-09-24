@@ -1,6 +1,6 @@
 /**
- * EnemyPlayer — a horde-mode opponent that looks like the player
- * (capsule body, GLB hands, elastic arms) and always wields a foam sword.
+ * EnemyPlayer — a horde-mode opponent that looks like the player (the shared GLB
+ * character, whose arms reach for the floating hand targets) and always wields a foam sword.
  *
  * AI: chases the player; enters attack mode when close; swings right hand
  * sinusoidally so the sword tip sweeps through the player's hit sphere.
@@ -11,8 +11,6 @@
  */
 
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
 import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
@@ -21,8 +19,6 @@ import { getTerrainHeight } from '../environment/terrainHeight.js';
 
 const CAPSULE_RADIUS   = 0.28;
 const CAPSULE_HEIGHT   = 1.0;
-const SHOULDER_Y_FRAC  = 0.82;
-const HAND_MODEL_SCALE = 0.7;
 
 const CHASE_SPEED   = 3.2;   // m/s while chasing
 const ATTACK_RANGE  = 2.8;   // switch to attack mode when this close
@@ -75,25 +71,8 @@ const PHYS_RADIUS      = 0.3;
 const DEG = Math.PI / 180;
 const REST_SWORD_EULER = new THREE.Euler(360 * DEG, 90 * DEG, -90 * DEG, 'YXZ');
 
-// ─── shared GLB cache (re-use the same GLTF across all EnemyPlayer instances) ─
-let _glbHandPromise = null;
-const _glbLoader = new GLTFLoader();
-function getGLBHandGLTF() {
-  if (!_glbHandPromise) {
-    _glbHandPromise = new Promise((resolve, reject) =>
-      _glbLoader.load('/models/hands/right_hand.glb', resolve, undefined, reject)
-    );
-  }
-  return _glbHandPromise;
-}
-
 // ─── scratch objects (not per-instance, module-level) ────────────────────────
-const _upAxis  = new THREE.Vector3(0, 1, 0);
-const _sWorld  = new THREE.Vector3();
-const _hWorld  = new THREE.Vector3();
 const _rootQ   = new THREE.Quaternion();
-const _armQ    = new THREE.Quaternion();
-const _tipWorld = new THREE.Vector3();
 const _toTarget = new THREE.Vector3();
 const _tmpV    = new THREE.Vector3();
 const _tmpQ    = new THREE.Quaternion();
@@ -171,11 +150,6 @@ export class EnemyPlayer {
     this._buildHealthBar();
     this._buildPhysics(startPos);
 
-    // async hand GLB load
-    this._loadHands().catch(e =>
-      console.warn('[EnemyPlayer] hand GLB load error:', e)
-    );
-
     scene.add(this.group);
   }
 
@@ -194,149 +168,31 @@ export class EnemyPlayer {
     this.group.add(capsuleMesh);
     this._capsuleMesh = capsuleMesh;
 
-    // GLB character — loaded async
-    this._glbMixer = null;
-    this._glbWalkAction = null;
-    this._glbIsWalking = false;
-    createGLBCharacterInstance({
-      targetHeight: CAPSULE_HEIGHT,
-      onRebuild: (newWalkAction) => {
-        this._glbWalkAction = newWalkAction;
-        if (this._glbIsWalking) newWalkAction.reset().fadeIn(0.15).play();
-      },
-    }).then(({ container, mixer, walkAction }) => {
+    // GLB character — loaded async. Its arms reach for the floating hand groups below.
+    this._glbCharacter = null;
+    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT }).then(({ container, character }) => {
+      if (this._destroyed) { character.dispose(); return; }
       this.group.add(container);
-      this._glbMixer = mixer;
-      this._glbWalkAction = walkAction;
+      this._glbCharacter = character;
+      if (this.isDead) character.setFurEnabled(false);
     }).catch(e => console.warn('[EnemyPlayer] GLB character load failed:', e));
 
-    // Shoulder anchors
-    const shoulderY = CAPSULE_HEIGHT * SHOULDER_Y_FRAC;
-    this._leftShoulder  = new THREE.Group();
-    this._leftShoulder.name  = 'enemyLeftShoulder';
-    this._leftShoulder.position.set(-(CAPSULE_RADIUS + 0.08), shoulderY, 0);
-    this.group.add(this._leftShoulder);
-
-    this._rightShoulder = new THREE.Group();
-    this._rightShoulder.name = 'enemyRightShoulder';
-    this._rightShoulder.position.set( (CAPSULE_RADIUS + 0.08), shoulderY, 0);
-    this.group.add(this._rightShoulder);
-
-    // Elastic arm cylinders
-    const armMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d, roughness: 0.8, transparent: true, opacity: 0.70 });
-    this._leftArm  = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), armMat);
-    this._leftArm.name  = 'enemyLeftArm';
-    this._leftArm.castShadow = true;
-    this.group.add(this._leftArm);
-
-    this._rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 1, 8), armMat.clone());
-    this._rightArm.name = 'enemyRightArm';
-    this._rightArm.castShadow = true;
-    this.group.add(this._rightArm);
-
-    // Floating hand groups — these are what move around each frame
+    // Floating hand groups — invisible targets that move around each frame; the GLB
+    // arms reach for them and the sword follows the right one.
     this._leftHandGroup  = new THREE.Group();
     this._leftHandGroup.name  = 'enemyLeftFloatingHand';
-    this._leftHandGroup.userData.glbReady = false;
     this._leftHandGroup.position.set(-0.5, 0.82, 0.25);
     this.group.add(this._leftHandGroup);
 
     this._rightHandGroup = new THREE.Group();
     this._rightHandGroup.name = 'enemyRightFloatingHand';
-    this._rightHandGroup.userData.glbReady = false;
     this._rightHandGroup.position.set( 0.5, 0.82, 0.25);
     this.group.add(this._rightHandGroup);
   }
 
-  async _loadHands() {
-    const handMat = new THREE.MeshStandardMaterial({
-      color: 0xf1c27d, roughness: 0.8, transparent: true, opacity: 0.70,
-    });
-
-    if (window.phoneSwordMode) {
-      // Phone sword mode: use a simple sphere instead of the GLB hand model
-      const sphereGeo = new THREE.SphereGeometry(0.065, 10, 8);
-      const rightSphere = new THREE.Mesh(sphereGeo, handMat);
-      rightSphere.castShadow = true;
-      this._rightHandGroup.add(rightSphere);
-      this._rightHandGroup.userData.glbReady = true;
-
-      const leftSphere = new THREE.Mesh(sphereGeo, handMat.clone());
-      leftSphere.castShadow = true;
-      this._leftHandGroup.add(leftSphere);
-      this._leftHandGroup.userData.glbReady = true;
-      return;
-    }
-
-    let gltf;
-    try { gltf = await getGLBHandGLTF(); } catch (e) {
-      console.warn('[EnemyPlayer] GLB load failed:', e);
-      return;
-    }
-
-    // ── Right hand ──────────────────────────────────────────────────────────
-    const rightScene = SkeletonUtils.clone(gltf.scene);
-    rightScene.scale.setScalar(HAND_MODEL_SCALE);
-    rightScene.position.set(0, 0, 0);
-    rightScene.rotation.set(-Math.PI / 2, Math.PI, 0);
-    rightScene.children.forEach(c => {
-      if (!c.isMesh) { c.position.set(0, 0, 0); c.rotation.set(0, 0, 0); }
-    });
-
-    const rightPivot = new THREE.Group();
-    rightPivot.name = 'enemyRightHandPivot';
-    rightPivot.add(rightScene);
-    this._rightHandGroup.add(rightPivot);
-    rightScene.updateWorldMatrix(true, true);
-
-    const rightWristBone = rightScene.getObjectByName('Bone_Armature');
-    if (rightWristBone) {
-      const bp = new THREE.Vector3();
-      rightWristBone.getWorldPosition(bp);
-      rightPivot.worldToLocal(bp);
-      rightScene.position.sub(bp);
-      rightScene.updateWorldMatrix(true, true);
-    }
-
-    rightScene.traverse(obj => {
-      if (!obj.isMesh) return;
-      obj.castShadow = true;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      mats.forEach(m => { if (m) { m.color.setHex(0xf1c27d); m.roughness = 0.8; m.transparent = true; m.opacity = 0.70; } });
-    });
-    this._rightHandGroup.userData.glbReady = true;
-
-    // ── Left hand (mirror) ──────────────────────────────────────────────────
-    const leftScene = SkeletonUtils.clone(gltf.scene);
-    leftScene.scale.set(-HAND_MODEL_SCALE, HAND_MODEL_SCALE, HAND_MODEL_SCALE);
-    leftScene.position.set(0, 0, 0);
-    leftScene.rotation.set(-Math.PI / 2, Math.PI, 0);
-    leftScene.children.forEach(c => {
-      if (!c.isMesh) { c.position.set(0, 0, 0); c.rotation.set(0, 0, 0); }
-    });
-
-    const leftPivot = new THREE.Group();
-    leftPivot.name = 'enemyLeftHandPivot';
-    leftPivot.add(leftScene);
-    this._leftHandGroup.add(leftPivot);
-    leftScene.updateWorldMatrix(true, true);
-
-    const leftWristBone = leftScene.getObjectByName('Bone_Armature');
-    if (leftWristBone) {
-      const bp = new THREE.Vector3();
-      leftWristBone.getWorldPosition(bp);
-      leftPivot.worldToLocal(bp);
-      leftScene.position.sub(bp);
-      leftScene.updateWorldMatrix(true, true);
-    }
-
-    leftScene.traverse(obj => {
-      if (!obj.isMesh) return;
-      obj.castShadow = true;
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      mats.forEach(m => { if (m) { m.side = THREE.DoubleSide; m.color.setHex(0xf1c27d); m.roughness = 0.8; m.transparent = true; m.opacity = 0.70; } });
-    });
-    this._leftHandGroup.userData.glbReady = true;
+  /** Pose the GLB arm for `side` so its hand reaches (and snaps) the floating hand group. */
+  _solveArm(side) {
+    this._glbCharacter?.solveArm(side, side === 'right' ? this._rightHandGroup : this._leftHandGroup);
   }
 
   // ─── sword trail ──────────────────────────────────────────────────────────
@@ -560,11 +416,14 @@ export class EnemyPlayer {
       const rot = this.rigidBody.rotation();
       this.group.quaternion.set(rot.x, rot.y, rot.z, rot.w);
       // Still update arms/sword visuals but skip AI
+      this._glbCharacter?.setMoving(false);
+      this._glbCharacter?.animate(dt);
       this._updateHandPositions(dt, Infinity);
-      this._updateElasticArm(this._rightArm, this._rightShoulder, this._rightHandGroup);
+      this._solveArm('right');
       this._updateSword(dt);
       this._updateLeftHandToPommel(dt);
-      this._updateElasticArm(this._leftArm, this._leftShoulder, this._leftHandGroup);
+      this._solveArm('left');
+      this._glbCharacter?.stepFluff(dt);
       this._updateTrailMeshes(Date.now());
       return;
     }
@@ -624,29 +483,21 @@ export class EnemyPlayer {
       this.rigidBody.setLinvel({ x: vel.x * 0.8, y: vel.y, z: vel.z * 0.8 }, true);
     }
 
-    // ── GLB character walk animation ──────────────────────────────────────
-    if (this._glbMixer) {
-      this._glbMixer.update(dt);
-      const isMoving = this._aiState === 'chase' || this._aiState === 'backoff';
-      if (isMoving && !this._glbIsWalking) {
-        this._glbWalkAction?.reset().fadeIn(0.15).play();
-        this._glbIsWalking = true;
-      } else if (!isMoving && this._glbIsWalking) {
-        this._glbWalkAction?.fadeOut(0.15);
-        this._glbIsWalking = false;
-      }
-    }
+    // ── GLB character body animation (walk / idle; arms are posed below) ──
+    this._glbCharacter?.setMoving(this._aiState === 'chase' || this._aiState === 'backoff');
+    this._glbCharacter?.animate(dt);
 
     // ── Right hand (drives sword position) ────────────────────────────────
     this._updateHandPositions(dt, distToTarget);
-    this._updateElasticArm(this._rightArm, this._rightShoulder, this._rightHandGroup);
+    this._solveArm('right');
 
     // ── Sword (orientation depends on right hand) ──────────────────────────
     this._updateSword(dt);
 
     // ── Left hand grips pommel (depends on sword orientation) ─────────────
     this._updateLeftHandToPommel(dt);
-    this._updateElasticArm(this._leftArm, this._leftShoulder, this._leftHandGroup);
+    this._solveArm('left');
+    this._glbCharacter?.stepFluff(dt);
 
     // ── Billboard health bar toward camera ─────────────────────────────────
     if (this._camera) {
@@ -816,24 +667,6 @@ export class EnemyPlayer {
     // Fast lerp during swing, a bit slower during block/hold so it feels natural
     const speed = this._attackPhase === 'swing_execute' ? 22 : 12;
     this._leftHandGroup.position.lerp(this._handTargetL, 1 - Math.exp(-speed * dt));
-  }
-
-  _updateElasticArm(armMesh, shoulderGroup, handGroup) {
-    shoulderGroup.getWorldPosition(_sWorld);
-    handGroup.getWorldPosition(_hWorld);
-
-    const dist = _sWorld.distanceTo(_hWorld);
-    if (dist < 0.01) return;
-
-    const mid = _sWorld.clone().add(_hWorld).multiplyScalar(0.5);
-    // Express mid in group-local space for the mesh position
-    armMesh.position.copy(this.group.worldToLocal(mid.clone()));
-    armMesh.scale.set(0.4, dist, 0.4);
-
-    const dir = _hWorld.clone().sub(_sWorld).normalize();
-    this.group.getWorldQuaternion(_rootQ);
-    _armQ.setFromUnitVectors(_upAxis, dir);
-    armMesh.quaternion.copy(_rootQ.clone().invert().multiply(_armQ));
   }
 
   /** Called externally when the player's sword hits this sword. */
@@ -1103,6 +936,8 @@ export class EnemyPlayer {
     // destroy() will remove it when the fade finishes.
 
     // Fade out the group over 2 s then destroy.
+    // Switch the fur off first: its shells/shader don't survive material.clone().
+    this._glbCharacter?.setFurEnabled(false);
     // Clone materials first so the fade doesn't corrupt shared material state
     // (SkeletonUtils.clone shares materials by reference across all character instances).
     this.group.traverse(obj => {
@@ -1134,6 +969,9 @@ export class EnemyPlayer {
    * Call when the enemy should be fully removed from the scene.
    */
   destroy() {
+    this._destroyed = true;
+    this._glbCharacter?.dispose();
+    this._glbCharacter = null;
     if (this._ragdollTimeout) { clearTimeout(this._ragdollTimeout); this._ragdollTimeout = null; }
     if (this._swordGroup.parent) this.scene.remove(this._swordGroup);
     if (this.group.parent)       this.scene.remove(this.group);

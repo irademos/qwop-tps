@@ -49,12 +49,12 @@ src/
   combat/       knockback, pickupSpatialGrid
   multiplayer/  peerConnection
   audio/        audioManager
-  characters/   CharacterBase, PlayerCharacter, MonsterCharacter, FriendlyCharacter, merchant
+  characters/   CharacterBase, PlayerCharacter, EnemyPlayer, MonsterCharacter, FriendlyCharacter, merchant
   controls/     PlayerControls (controls.js), all UI panels
   environment/  MapLoader, mapRender, buildingsRender, terrainHeight, worldGeneration, nature, animals, water
   features/     Lazy-load facades for code splitting (combatFeature, uiPanelsFeature, etc.)
   items/        weapon.js + melee.js + projectiles.js + per-weapon files
-  models/       FBX loaders (monsterModel, playerModel)
+  models/       monsterModel, playerModel, glbCharacterModel (GLB character + arm IK), fluffyCharacter.ts (Mixamo retarget + fur)
   physics/      rapierSafety, staticBoxCollider
   mediapipe/    handTrackingManager, mediapipeHelper
   workers/      osmWorker (Web Worker)
@@ -71,6 +71,8 @@ src/
 | NPC behavior / AI loop | `src/npc/friendlyNpcManager.js` |
 | Add quest | `src/npc/quest.js` |
 | Movement / camera / input | `src/controls/controls.js` |
+| Player / enemy character model, clips, arm IK, fur | `src/models/glbCharacterModel.js` (`glbCharacterConfig`), `src/models/fluffyCharacter.ts` |
+| Where hands go (sword/shield/gun grip) | `src/models/playerModel.js` (`updateProceduralPlayerRig`), `src/items/foamSword.js`, `shield.js`, `pistol.js`; enemies: `src/characters/EnemyPlayer.js` |
 | New UI panel | `src/controls/<panel>.js` + lazy-load in `src/features/uiPanelsFeature.js` |
 | Map / road rendering | `src/environment/mapRender.js`, `buildingsRender.js` |
 | Terrain generation | `src/environment/worldGeneration.js`, `terrainHeight.js` |
@@ -91,6 +93,8 @@ src/
 **Map pipeline:** GPS → `osmClient.js` → `osmWorker.js` (Web Worker) → `mapRender.js`/`buildingsRender.js` → `terrainHeight.js` stamps
 
 **Terrain stamps:** Roads/buildings flatten the procedural terrain via priority-weighted stamps stored per tile. Query height at runtime via `terrainHeight.js`.
+
+**Character arms (GLB + IK):** Players and EnemyPlayers use `gemhorn_rigged.glb`. Mixamo FBX clips animate everything except the arm chains (Shoulder→Hand); each frame the arms are solved with a stretchy two-bone IK toward invisible "floating hand" groups, which are also the weapon attach points (marked with `userData.proceduralHand`). Frame order: `setMoving` → `animate` → `solveArm` per hand → `stepFluff`. Floating-hand labels are mirrored: `'right'` sits at local +X = the character's anatomical left arm.
 
 **Multiplayer star topology:** Firebase = signaling only. PeerJS WebRTC carries actual game state. One host elected; all clients connect to host; host re-broadcasts.
 

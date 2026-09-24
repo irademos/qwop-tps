@@ -2789,7 +2789,7 @@ export class PlayerControls {
       this._processHandFistAttack('left', htd?.left?.isFist);
       this._processHandFistAttack('right', htd?.right?.isFist);
     }
-    updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta);
+    updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta, { isMoving: !!this.isMoving });
 
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
     if (!this.isEngaged) {
