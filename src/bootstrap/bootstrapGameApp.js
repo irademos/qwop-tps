@@ -116,7 +116,7 @@ import { db } from '../core/firebase-init.js';
 import { onValue, push, ref, remove, set, update } from 'firebase/database';
 import { openPopupDialog } from '../controls/popupDialog.js';
 import { EnemyPlayer } from '../characters/EnemyPlayer.js';
-import { BombThrowerEnemy } from '../characters/BombThrowerEnemy.js';
+import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerEnemy.js';
 
 import {
   clearStoredPin,
@@ -11896,6 +11896,29 @@ async function initCore(runtimeContext) {
   const PS_CAM_MANUAL_TIMEOUT = 5000;   // ms of inactivity before auto-aim resumes
   const PS_CAM_SWITCH_MIN_CLOSER = 3.0; // new target must be this many metres closer to switch immediately
   const PS_CAM_SWITCH_STABLE_MS = 2000; // or must be closest for this long
+  const PS_INCOMING_BOMB_RANGE = 25;    // m — bombs farther than this are ignored
+
+  /**
+   * Closest in-flight enemy bomb that is heading toward the player (not yet
+   * deflected, horizontal velocity pointing at the player), or null.
+   * While one exists the camera tracks it and sword enemies hold their attacks.
+   */
+  function _psFindIncomingBomb() {
+    const bombs = window._enemyBombs;
+    if (!playerModel || !Array.isArray(bombs) || bombs.length === 0) return null;
+    let closest = null;
+    let closestDist = PS_INCOMING_BOMB_RANGE;
+    for (const b of bombs) {
+      if (!b || b.deflected || !b.mesh) continue;
+      const bp = b.mesh.position;
+      const dx = playerModel.position.x - bp.x;
+      const dz = playerModel.position.z - bp.z;
+      if (b.vel.x * dx + b.vel.z * dz <= 0) continue; // moving away / past the player
+      const d = Math.hypot(dx, dz);
+      if (d < closestDist) { closestDist = d; closest = b; }
+    }
+    return closest;
+  }
 
   // Phone Sword: time-of-day choice ('random', 'day', 'night') and current stage night flag
   let _psTimePref = 'random';
@@ -11994,8 +12017,8 @@ async function initCore(runtimeContext) {
       const ex = baseX + (Math.random() - 0.5) * scatter;
       const ez = baseZ + (Math.random() - 0.5) * scatter;
       const ey = getTerrainHeight(ex, ez) ?? playerModel.position.y;
-      // Bomb throwers: start appearing at stage 3, ~20% chance scaling up with stage
-      const _btChance = stage >= 3 ? Math.min(0.35, 0.10 + (stage - 3) * 0.015) : 0;
+      // Bomb throwers: start appearing at stage 3, ~5% chance scaling up slowly with stage
+      const _btChance = stage >= 3 ? Math.min(0.15, 0.05 + (stage - 3) * 0.006) : 0;
       _psEnemyQueue.push({
         pos: new THREE.Vector3(ex, ey, ez),
         hearts: _psHeartsForStage(stage),
@@ -16261,14 +16284,17 @@ async function initCore(runtimeContext) {
         }
       }
 
-      // Auto-walk: pause when an enemy is actively attacking close by
+      // Auto-walk: pause when an enemy is actively attacking close by,
+      // or while the camera is tracking an incoming bomb
       if (_psAutoWalking) {
         const _hasNearAttacker = hordeEnemies.some(e =>
           !e.isDead &&
           e._aiState === 'attack' &&
           e.group.position.distanceTo(playerModel.position) < 3.5
         );
-        if (!_hasNearAttacker) {
+        if (_psFindIncomingBomb()) {
+          playerControls.isMoving = false;
+        } else if (!_hasNearAttacker) {
           const _ddx = _psPathEnd.x - playerModel.position.x;
           const _ddz = _psPathEnd.z - playerModel.position.z;
           const _distToEnd = Math.sqrt(_ddx * _ddx + _ddz * _ddz);
@@ -16325,7 +16351,19 @@ async function initCore(runtimeContext) {
           }
         }
 
-        if (_now >= _psCamManualUntil) {
+        const _incomingBomb = _psFindIncomingBomb();
+        if (_now >= _psCamManualUntil && _incomingBomb) {
+          // Incoming bomb takes priority over enemies: track the closest one
+          const _bp = _incomingBomb.mesh.position;
+          const _dx = _bp.x - playerModel.position.x;
+          const _dz = _bp.z - playerModel.position.z;
+          if (Math.hypot(_dx, _dz) > 0.5) {
+            const _targetYaw = Math.atan2(_dx, _dz);
+            const _yawDelta = ((_targetYaw - playerControls.yaw + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
+            playerControls.yaw += _yawDelta * Math.min(1, frameDelta * 6);
+          }
+          _psCamLastYaw = playerControls.yaw;
+        } else if (_now >= _psCamManualUntil) {
           // Find closest living enemy
           let _closest = null;
           let _closestDist = Infinity;
@@ -16458,6 +16496,9 @@ async function initCore(runtimeContext) {
       );
       const _attackSlotSet = new Set(_liveEnemies.slice(0, _MAX_ATTACKERS));
 
+      // Sword Showdown: enemies hold their attacks while a bomb is inbound
+      const _pauseForBomb = !!window.phoneSwordMode && !!_psFindIncomingBomb();
+
       let _justDied = 0;
       for (let _hi = hordeEnemies.length - 1; _hi >= 0; _hi--) {
         const _he = hordeEnemies[_hi];
@@ -16485,7 +16526,7 @@ async function initCore(runtimeContext) {
         }
 
         const _allowAttack = _attackSlotSet.has(_he);
-        _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack);
+        _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack, _pauseForBomb);
 
         // Push enemy away if it gets too close to the player (prevents clipping)
         if (window.phoneSwordMode) {
@@ -16561,7 +16602,7 @@ async function initCore(runtimeContext) {
               }
               _deflectDir.y = 0.35;
               _deflectDir.normalize();
-              _bomb.vel.copy(_deflectDir.multiplyScalar(12));
+              _bomb.vel.copy(_deflectDir.multiplyScalar(BOMB_DEFLECT_SPEED));
               _bomb.deflected = true;
               _bomb.deflectedAt = Date.now();
               window.audioManager?.playSFX?.('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.75, { cooldownKey: 'bomb-deflect', cooldownMs: 80 });
