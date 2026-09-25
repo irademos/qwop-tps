@@ -71,6 +71,7 @@ A browser-based 3D multiplayer RPG. Players explore a procedurally extended real
 │   │   ├── knockback.js        # Computes knockback impulse/motion vectors for hit reactions
 │   │   ├── bloodEffect.js      # Blood spray/splat particles on damage (player + Sword Showdown enemies); updateBloodEffects(dt) in game loop
 │   │   ├── explosionEffect.js  # Bomb explosion VFX — flash, fireball, sparks, shockwave, scorch, smoke; updateExplosionEffects(dt) in game loop
+│   │   ├── playerBomb.js       # Sword Showdown player bombs — same flight/blast as a bomber's (shared helpers exported from BombThrowerEnemy.js)
 │   │   └── pickupSpatialGrid.js # Spatial hash grid for fast nearby-item lookup (loot pickups)
 │   │
 │   ├── multiplayer/
@@ -275,10 +276,11 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 | Firebase data structure | `src/player/playerProfile.js`, `src/npc/npcPersistence.js` |
 | Multiplayer protocol | `src/multiplayer/peerConnection.js`, `src/bootstrap/bootstrapGameApp.js` |
 | AI NPC prompt/behavior | `/api/llama.js` (server), `src/npc/friendlyNpcManager.js` (client) |
-| Sword Showdown bombs / bomber (blast damage/knockback, explosion VFX, throw clip, held bomb) | `src/characters/BombThrowerEnemy.js` (`_explodeBomb`, `_blastEnemies`, `_updateHeldBomb`, throw logic in `update`), `src/combat/explosionEffect.js`, `EnemyPlayer.applyBlastKnockback`, `_blastPlayer` in `bootstrapGameApp.js` |
+| Sword Showdown bombs / bomber (blast damage/knockback, explosion VFX, throw clip, held bomb) | `src/characters/BombThrowerEnemy.js` (`_explodeBomb`, `_updateHeldBomb`, throw logic in `update`; shared helpers `blastEnemiesAt`/`computeBombLobVelocity`/`createBombMesh`/`spawnBombExplosion`), `src/combat/explosionEffect.js`, `EnemyPlayer.applyBlastKnockback`, `_blastPlayer` in `bootstrapGameApp.js` |
 | Sword Showdown stage path (flattest-direction pick, enemy/coin placement, auto-walk) | `_psPickPathAngle` / `_psBuildStage` in `bootstrapGameApp.js`; auto-walk in the game loop (`_psAutoWalking`) |
 | Damage hit effect (blood spray) | `src/combat/bloodEffect.js`; player trigger in `setStat` (`triggerPlayerHurtBlood`), enemies in `applyDamage` |
-| Sword Showdown shop upgrades (heart/shield upgrade/bubble) | Catalog + purchase in `src/characters/merchant.js` (`unlimited`/`showdownOnly` items); effects in `appState.applyShopUpgrade` + bubble system (`activatePlayerBubble`, `window.isPlayerBubbleActive`) in `bootstrapGameApp.js`; bubble button in `src/controls/controls.js`; enemy checks in `EnemyPlayer.js`/`BombThrowerEnemy.js` |
+| Sword Showdown player bombs (💣 button, Throw.fbx, unequip/re-equip) | `src/combat/playerBomb.js` (flight/blast); `throwPlayerBomb`/`updatePlayerBombs` in `bootstrapGameApp.js` (count = `stats.bombs`, shop item `showdown_bomb`); button `psBombBtn` in `src/controls/controls.js` |
+| Sword Showdown shop upgrades (heart/shield upgrade/bubble/bomb) | Catalog + purchase in `src/characters/merchant.js` (`unlimited`/`showdownOnly` items); effects in `appState.applyShopUpgrade` + bubble system (`activatePlayerBubble`, `window.isPlayerBubbleActive`) in `bootstrapGameApp.js`; bubble button in `src/controls/controls.js`; enemy checks in `EnemyPlayer.js`/`BombThrowerEnemy.js` |
 | Audio | `src/audio/audioManager.js`, `public/assets/audio/`; Sword Showdown ambient loop = `SWORD_SHOWDOWN_BGS` in `bootstrapGameApp.js`; hurt vocals = `audioManager.playOuch(kind)` — ouch1 enemies via `playEnemyOuch()` (every 3rd or 4th hit across all enemies, `applyDamage`), ouch2 player hurt / ouch3 player death (`triggerPlayerHurtBlood`) |
 | Add new 3D prop | Place GLB in `public/assets/props/`, load in relevant environment file |
 | Serverless API changes | `/api/llama.js` or `/api/overpass.js` |

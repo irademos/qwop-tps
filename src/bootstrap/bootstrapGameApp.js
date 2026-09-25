@@ -8,6 +8,7 @@ import { updateExplosionEffects } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { loadMonsterModel } from "../models/monsterModel.js";
 import { updateRemotePlayerRig } from "../models/playerModel.js";
+import { glbCharacterConfig } from "../models/glbCharacterModel.js";
 import { MonsterCharacter } from "../characters/MonsterCharacter.js";
 import { FriendlyCharacter } from "../characters/FriendlyCharacter.js";
 import { createFriendlyNpcManager } from "../npc/friendlyNpcManager.js";
@@ -118,6 +119,7 @@ import { onValue, push, ref, remove, set, update } from 'firebase/database';
 import { openPopupDialog } from '../controls/popupDialog.js';
 import { EnemyPlayer } from '../characters/EnemyPlayer.js';
 import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerEnemy.js';
+import { createPlayerBombs } from '../combat/playerBomb.js';
 
 import {
   clearStoredPin,
@@ -5762,7 +5764,8 @@ async function initCore(runtimeContext) {
     monsterKills: playerProfile.stats.monsterKills,
     coins: playerProfile.stats.coins,
     shieldUpgrades: playerProfile.stats.shieldUpgrades,
-    bubbles: playerProfile.stats.bubbles
+    bubbles: playerProfile.stats.bubbles,
+    bombs: playerProfile.stats.bombs
   };
   statsState.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
   statsState.maxHungerSegments = Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(statsState.maxHungerSegments || BASE_HUNGER_SEGMENTS)));
@@ -9283,7 +9286,7 @@ async function initCore(runtimeContext) {
       }
       return Math.max(0, Math.floor(num));
     }
-    if (key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles') {
+    if (key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles' || key === 'bombs') {
       const num = Number(value);
       if (!Number.isFinite(num)) {
         return 0;
@@ -12038,6 +12041,116 @@ async function initCore(runtimeContext) {
       if (!playerDead) glbCharacter.revive();
     }, PLAYER_BLAST_STUN_MS);
   }
+
+  // ── Sword Showdown: player bombs (bought in the shop, thrown with the 💣 button) ──
+  // Throwing puts away whatever is held, plays Throw.fbx (bomb in the right palm until
+  // the release point) and re-equips it once the clip is over. The bomb flies and blasts
+  // like a bomber's (combat/playerBomb.js).
+  const PLAYER_BOMB_THROW_DIST = 8;         // m ahead of the player where the bomb lands
+  const PLAYER_BOMB_RELEASE_AT = 0.3;       // fraction of Throw.fbx where the bomb leaves the hand
+  const PLAYER_BOMB_WINDUP_MS = 700;        // release time when the character hasn't loaded
+  const PLAYER_BOMB_CLIP_TIMEOUT_MS = 2500; // release anyway if the clip is slow to load
+  const PLAYER_BOMB_HAND = 'left';          // mirrored label: the anatomical right arm
+  const playerBombs = window.phoneSwordMode
+    ? createPlayerBombs({ scene, getBlastTargets: () => hordeEnemies })
+    : null;
+  const _playerBombPalm = new THREE.Vector3();
+  const _playerBombForward = new THREE.Vector3();
+  let playerBombThrow = null; // { restoreIds, startedAt, usesClip, released }
+  const getPlayerBombCount = () => Math.max(0, Math.floor(statsState.bombs || 0));
+  let lastPsBombButtonLabel = '';
+  const updatePsBombButton = () => {
+    const button = playerControls?.psBombBtn;
+    if (!button) return;
+    const label = `💣 ${getPlayerBombCount()}`;
+    if (label !== lastPsBombButtonLabel) {
+      button.textContent = label;
+      lastPsBombButtonLabel = label;
+    }
+    button.classList.toggle('ps-bomb-active', !!playerBombThrow);
+    button.classList.toggle('ps-bomb-empty', !playerBombThrow && getPlayerBombCount() <= 0);
+  };
+  const throwPlayerBomb = () => {
+    if (!playerBombs || playerDead || playerBombThrow) return false;
+    if (getPlayerBombCount() <= 0) return false;
+    const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
+    if (glbCharacter?.isDead) return false; // knocked down by a blast
+    setStat('bombs', getPlayerBombCount() - 1, { skipSave: true });
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+    const restoreIds = getEquippedInventoryItemIds();
+    restoreIds.forEach((itemId) => unequipInventoryItem(itemId));
+    playerControls?.refreshActionButtons?.();
+    playerBombThrow = { restoreIds, startedAt: Date.now(), usesClip: !!glbCharacter, released: false };
+    glbCharacter?.playAction(glbCharacterConfig.throwClip);
+    updatePsBombButton();
+    return true;
+  };
+  const releasePlayerBomb = () => {
+    const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
+    if (glbCharacter) {
+      glbCharacter.getPalmWorldPosition(PLAYER_BOMB_HAND, _playerBombPalm);
+    } else {
+      _playerBombPalm.copy(playerModel.position);
+      _playerBombPalm.y += 0.75;
+    }
+    playerModel.getWorldDirection(_playerBombForward).setY(0);
+    if (_playerBombForward.lengthSq() < 1e-6) _playerBombForward.set(0, 0, 1);
+    _playerBombForward.normalize();
+    const target = playerModel.position.clone().addScaledVector(_playerBombForward, PLAYER_BOMB_THROW_DIST);
+    const groundY = getTerrainHeight(target.x, target.z);
+    if (Number.isFinite(groundY)) target.y = groundY;
+    playerBombs.throw(_playerBombPalm, target);
+  };
+  const finishPlayerBombThrow = () => {
+    const { restoreIds } = playerBombThrow;
+    playerBombThrow = null;
+    playerBombs.setHeld(null);
+    // Put back what was held, unless something else got equipped during the throw
+    if (!playerDead && getEquippedInventoryItemIds().length === 0) {
+      restoreIds.forEach((itemId) => {
+        if (inventoryState[itemId]?.count > 0) equipInventoryItem(itemId);
+      });
+      playerControls?.refreshActionButtons?.();
+    }
+    updatePsBombButton();
+  };
+  const updatePlayerBombs = (dt) => {
+    if (!playerBombs) return;
+    playerBombs.update(dt);
+    const t = playerBombThrow;
+    if (!t) {
+      updatePsBombButton();
+      return;
+    }
+    if (playerDead) {
+      // Respawn re-equips the sword
+      playerBombThrow = null;
+      playerBombs.setHeld(null);
+      updatePsBombButton();
+      return;
+    }
+    const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
+    if (!t.released) {
+      if (glbCharacter?.isDead) {
+        // Blasted off our feet mid-windup: throw cancelled, bomb refunded
+        setStat('bombs', getPlayerBombCount() + 1, { skipSave: true });
+        finishPlayerBombThrow();
+        return;
+      }
+      const now = Date.now();
+      const release = t.usesClip && glbCharacter
+        ? glbCharacter.actionProgress >= PLAYER_BOMB_RELEASE_AT || !glbCharacter.actionActive ||
+          now >= t.startedAt + PLAYER_BOMB_WINDUP_MS + PLAYER_BOMB_CLIP_TIMEOUT_MS
+        : now >= t.startedAt + PLAYER_BOMB_WINDUP_MS;
+      if (release) {
+        t.released = true;
+        releasePlayerBomb();
+      } else {
+        playerBombs.setHeld(glbCharacter ? glbCharacter.getPalmWorldPosition(PLAYER_BOMB_HAND, _playerBombPalm) : null);
+      }
+    }
+    if (t.released && !glbCharacter?.actionActive) finishPlayerBombThrow();
+  };
   let _psPathEnd = new THREE.Vector3();
   let _psAutoWalking = false;
   let _psAutoWalkDir = new THREE.Vector3();
@@ -12365,6 +12478,7 @@ async function initCore(runtimeContext) {
       try { _re.destroy?.(); } catch (_) {}
     }
     hordeEnemies.length = 0;
+    playerBombs?.clear();
     _psEnemyQueue = [];
     _psAutoWalking = false;
     _psStageActive = false;
@@ -15006,6 +15120,9 @@ async function initCore(runtimeContext) {
       } else if (itemId === 'bubble') {
         setStat('bubbles', getBubbleCount() + 1, { skipSave: true });
         updatePsBubbleButton();
+      } else if (itemId === 'showdown_bomb') {
+        setStat('bombs', getPlayerBombCount() + 1, { skipSave: true });
+        updatePsBombButton();
       } else {
         return false;
       }
@@ -15014,6 +15131,8 @@ async function initCore(runtimeContext) {
     },
     getBubbleCount: () => getBubbleCount(),
     activateBubble: () => activatePlayerBubble(),
+    getBombCount: () => getPlayerBombCount(),
+    throwBomb: () => throwPlayerBomb(),
     getCharacterOptions: () => characterOptions,
     getInventory: () => getInventory(),
     getIceAmmoCount: () => getIceAmmoCount(),
@@ -15709,6 +15828,7 @@ async function initCore(runtimeContext) {
     updateBloodEffects(frameDelta);
     updateExplosionEffects(frameDelta);
     updatePlayerBubble();
+    updatePlayerBombs(frameDelta);
     if (buildState.placing) {
       const moveSpeed = 3 * frameDelta;
       const keys = buildHorizontalKeys;

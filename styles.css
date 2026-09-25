@@ -3345,6 +3345,22 @@ body.settings-open #inventory-button {
   opacity: 0.5;
 }
 
+/* ── Phone Sword: Bomb button ───────────────────────────────────────────────── */
+.ps-bomb-btn {
+  background: rgba(200, 90, 30, 0.8) !important;
+  color: #fff !important;
+  border: 2px solid rgba(255, 170, 90, 0.85) !important;
+  white-space: nowrap;
+}
+.ps-bomb-btn.ps-bomb-active {
+  background: rgba(255, 140, 40, 0.95) !important;
+  border-color: #fff !important;
+  box-shadow: 0 0 14px rgba(255, 150, 60, 0.9);
+}
+.ps-bomb-btn.ps-bomb-empty {
+  opacity: 0.5;
+}
+
 /* ── Phone Sword: Leaderboard PS tabs ────────────────────────────────────────── */
 .leaderboard-tab-ps {
   font-size: 0.85em;
