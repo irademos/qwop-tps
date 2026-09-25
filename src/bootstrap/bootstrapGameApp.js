@@ -1011,6 +1011,7 @@ async function initCore(runtimeContext) {
     slowHitWindow: 0,     // timestamp until which a slow swing can register hits
     // Sword-collision bounce state (replaces swing auto-rotation for player)
     prevTipWorld: null,   // THREE.Vector3 — sword tip last frame, for sweep direction
+    tipHistory: [],       // {pos, t}[] — sword tip over the last ~0.12 s, for swing direction (blocks)
     prevSwordQ: new THREE.Quaternion(), // sword Q last frame
     bounceActive: false,
     bounceStartTime: 0,
@@ -16543,54 +16544,56 @@ async function initCore(runtimeContext) {
             }
           }
 
-          const _isBlocking = !!window.phoneSwordGyro?.blocking;
-
-          if (_swordCollision) {
-            // Enemy sword always bounces on collision
-            _he.applySwordBounce?.();
-            audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
-            // Player sword only bounces if NOT blocking AND sword is swinging fast enough
-            if (!_isBlocking && _playerMovingFast && !_psw.bounceActive) {
-              const _bounceCfg = window.phoneSwordSwingCfg;
-              const _bounceAngle = (_bounceCfg?.bounceAngle ?? 90) * (Math.PI / 180);
-              const _bounceDur   = _bounceCfg?.bounceHoldDur ?? 0.35;
-              const _yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), _bounceAngle);
-              _psw.bounceActive    = true;
-              _psw.bounceStartTime = _nowSecPS;
-              _psw.bounceDur       = _bounceDur;
-              _psw.bounceFromQ.copy(_activeQ);
-              _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
-              _psw.bounceCurrentQ.copy(_activeQ);
-              window._pswShowBlockFlash?.('player');
-              // Step forward on blocked swing (swing was fast enough but blocked)
-              _swingHitOccurred = true; // prevent duplicate step from miss path
-              const _blockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
-              _blockFwd.y = 0; _blockFwd.normalize();
-              const _bsx = playerModel.position.x + _blockFwd.x * 0.09;
-              const _bsz = playerModel.position.z + _blockFwd.z * 0.09;
-              playerModel.position.x = _bsx; playerModel.position.z = _bsz;
-              playerControls.playerX = _bsx; playerControls.playerZ = _bsz;
-              playerControls.lastPosition?.set(_bsx, playerModel.position.y, _bsz);
-              if (playerControls.body) playerControls.body.setNextKinematicTranslation({ x: _bsx, y: playerModel.position.y + 0.6, z: _bsz });
-            }
-          }
-
-          // Sweep hit: sword tip enters enemy body radius without sword collision
-          // Skip entirely if player is blocking
+          // Blocks are directional and only happen while the enemy holds its block stance:
+          // a swing that reaches the enemy (body or blade) is stopped only if it crosses the
+          // blocking blade (see swingCrossesBlade). Otherwise blade contact is ignored and the
+          // swing can land. The player can't hit while holding their own block button.
           const _playerBlocking = !!window.phoneSwordGyro?.blocking;
-          if (!_swordCollision && !_playerBlocking) {
+          if (!_playerBlocking) {
             const _enemyCenter = _he.group.position.clone();
             _enemyCenter.y += 0.8;
-            if (_tipWorld.distanceTo(_enemyCenter) < 0.65) {
-              const _nowMsPS = Date.now();
-              if (!_he._playerSwordLastHit) _he._playerSwordLastHit = 0;
-              if (_nowMsPS - _he._playerSwordLastHit > 1000 && _psw.prevTipWorld) {
-                const _sweepVec = new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
-                const _sweepDist = _sweepVec.length();
-                const _minSweep = window.phoneSwordSwingCfg?.minSweepDist ?? 0.015;
-                const _minSweepSpd = window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000;
-                const _curAngSpd = window._pswDebugSpeed ?? 0;
-                if (_sweepDist > _minSweep && _curAngSpd >= _minSweepSpd) {
+            const _reachesBody = _tipWorld.distanceTo(_enemyCenter) < 0.65;
+            const _nowMsPS = Date.now();
+            if (!_he._playerSwordLastHit) _he._playerSwordLastHit = 0;
+            if ((_reachesBody || _swordCollision) && _nowMsPS - _he._playerSwordLastHit > 1000 && _psw.prevTipWorld) {
+              const _sweepVec = new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
+              const _sweepDist = _sweepVec.length();
+              const _minSweep = window.phoneSwordSwingCfg?.minSweepDist ?? 0.015;
+              const _minSweepSpd = window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000;
+              const _curAngSpd = window._pswDebugSpeed ?? 0;
+              if (_sweepDist > _minSweep && _curAngSpd >= _minSweepSpd) {
+                // Swing direction over the last few frames (steadier than one frame's delta)
+                const _swingDir = _psw.tipHistory.length
+                  ? new THREE.Vector3().subVectors(_tipWorld, _psw.tipHistory[0].pos)
+                  : _sweepVec.clone();
+                if (_he.blocksSwing?.(_swingDir, playerModel.position)) {
+                  // Enemy's block holds — both swords recoil, no damage
+                  _he.applySwordBounce?.();
+                  audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
+                  if (!_psw.bounceActive) {
+                    const _bounceCfg = window.phoneSwordSwingCfg;
+                    const _bounceAngle = (_bounceCfg?.bounceAngle ?? 90) * (Math.PI / 180);
+                    const _bounceDur   = _bounceCfg?.bounceHoldDur ?? 0.35;
+                    const _yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), _bounceAngle);
+                    _psw.bounceActive    = true;
+                    _psw.bounceStartTime = _nowSecPS;
+                    _psw.bounceDur       = _bounceDur;
+                    _psw.bounceFromQ.copy(_activeQ);
+                    _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
+                    _psw.bounceCurrentQ.copy(_activeQ);
+                  }
+                  // Small step forward into the blocked swing (instead of the miss lunge)
+                  const _blockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
+                  _blockFwd.y = 0; _blockFwd.normalize();
+                  const _bsx = playerModel.position.x + _blockFwd.x * 0.09;
+                  const _bsz = playerModel.position.z + _blockFwd.z * 0.09;
+                  playerModel.position.x = _bsx; playerModel.position.z = _bsz;
+                  playerControls.playerX = _bsx; playerControls.playerZ = _bsz;
+                  playerControls.lastPosition?.set(_bsx, playerModel.position.y, _bsz);
+                  if (playerControls.body) playerControls.body.setNextKinematicTranslation({ x: _bsx, y: playerModel.position.y + 0.6, z: _bsz });
+                  _swingHitOccurred = true; // blocked swing doesn't lunge
+                  _he._playerSwordLastHit = _nowMsPS; // this swing is spent
+                } else if (_reachesBody) {
                   const _sweepDir = _sweepVec.clone().normalize();
                   _sweepDir.y = 0;
                   if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
@@ -16646,6 +16649,8 @@ async function initCore(runtimeContext) {
       // Store previous-frame state for next frame
       _psw.prevTipWorld = _tipWorld.clone();
       _psw.prevSwordQ.copy(_activeQ);
+      _psw.tipHistory.push({ pos: _psw.prevTipWorld, t: _nowSecPS });
+      while (_psw.tipHistory.length && _nowSecPS - _psw.tipHistory[0].t > 0.12) _psw.tipHistory.shift();
     }
     // Phone Sword: apply fixed position/rotation config to shield and pistol,
     // and feed phoneSwordGyro data into the camera gyro system.
