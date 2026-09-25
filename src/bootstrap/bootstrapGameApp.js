@@ -12155,10 +12155,53 @@ async function initCore(runtimeContext) {
     return new THREE.Vector3(rx, ry, rz);
   };
 
+  // Steepest ground step (m per PS_PATH_SAMPLE_STEP) along a straight line from the player,
+  // or Infinity if the line leaves the map. Bails early once it exceeds `giveUpAbove`.
+  const PS_PATH_CANDIDATES = 24;
+  const PS_PATH_SAMPLE_STEP = 1;      // m between height samples
+  const PS_PATH_MAX_OK_STEP = 0.35;   // m rise per metre (~19°) — first candidate under this wins
+  const _psPathSteepness = (angle, pathLen, giveUpAbove) => {
+    const ox = playerModel.position.x;
+    const oz = playerModel.position.z;
+    const dx = Math.cos(angle);
+    const dz = Math.sin(angle);
+    let prevY = getTerrainHeight(ox, oz);
+    if (!Number.isFinite(prevY)) prevY = playerModel.position.y;
+    let worst = 0;
+    for (let d = PS_PATH_SAMPLE_STEP; d <= pathLen; d += PS_PATH_SAMPLE_STEP) {
+      const y = getTerrainHeight(ox + dx * d, oz + dz * d);
+      if (!Number.isFinite(y)) return Infinity;
+      worst = Math.max(worst, Math.abs(y - prevY));
+      if (worst > giveUpAbove) return worst;
+      prevY = y;
+    }
+    return worst;
+  };
+
+  // Try evenly spaced directions (random order/offset for variety); take the first that is
+  // gentle enough, else the flattest one found.
+  const _psPickPathAngle = (pathLen) => {
+    const offset = Math.random() * Math.PI * 2;
+    const order = Array.from({ length: PS_PATH_CANDIDATES }, (_, i) => i)
+      .sort(() => Math.random() - 0.5);
+    let bestAngle = offset;
+    let bestScore = Infinity;
+    for (const i of order) {
+      const angle = offset + (i / PS_PATH_CANDIDATES) * Math.PI * 2;
+      const score = _psPathSteepness(angle, pathLen, bestScore);
+      if (score < bestScore) {
+        bestScore = score;
+        bestAngle = angle;
+        if (score <= PS_PATH_MAX_OK_STEP) break;
+      }
+    }
+    return bestAngle;
+  };
+
   const _psBuildStage = (stage) => {
     const count = _psEnemyCount(stage);
     const pathLen = 80 + stage * 3;
-    const pathAngle = Math.random() * Math.PI * 2;
+    const pathAngle = _psPickPathAngle(pathLen);
     const _psPathEndX = playerModel.position.x + Math.cos(pathAngle) * pathLen;
     const _psPathEndZ = playerModel.position.z + Math.sin(pathAngle) * pathLen;
     _psPathEnd.set(
@@ -16082,6 +16125,9 @@ async function initCore(runtimeContext) {
         pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
         if (!playerDead && playerModel.position.distanceTo(pickup.position) <= getPickupAttractRadius()) {
           attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
+          // Follow the ground while drifting; otherwise the bob above resets y to the spawn height
+          const groundY = getSpawnY(pickup.position.x, pickup.position.z, 0.6, { allowOnBuildings: true });
+          if (Number.isFinite(groundY)) pickup.userData.baseY = groundY;
         }
 
         if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
