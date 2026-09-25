@@ -116,7 +116,7 @@ export class EnemyPlayer {
 
     this._swingT       = 0;
     this._lastHitTime  = 0;
-    this._aiState      = 'chase';  // 'chase' | 'attack'
+    this._aiState      = 'chase';  // 'chase' | 'attack' | 'backoff' | 'hold'
 
     // ── Attack phase state machine ──────────────────────────────────────────
     // Phases: 'decide' | 'block' | 'swing_hold' | 'swing_execute'
@@ -403,8 +403,10 @@ export class EnemyPlayer {
    * @param {object|null}   targetControls – PlayerControls (for applyKnockback / applyDamage)
    * @param {boolean}       shieldActive – whether the player has shield equipped and facing us
    * @param {boolean}       allowAttack  – if false, yield attack slot: retreat and hold idle pose
+   * @param {boolean}       attacksPaused – if true, hold position with an idle guard (no swings/hits);
+   *                                        used while a bomb is flying at the player
    */
-  update(dt, targetModel, targetControls, shieldActive, allowAttack = true) {
+  update(dt, targetModel, targetControls, shieldActive, allowAttack = true, attacksPaused = false) {
     if (!this.rigidBody) return;
 
     // ── Sync visual group from physics ──────────────────────────────────────
@@ -462,7 +464,9 @@ export class EnemyPlayer {
       : Infinity;
 
     // ── AI state ───────────────────────────────────────────────────────────
-    if (!allowAttack && distToTarget < BACKOFF_DIST) {
+    if (attacksPaused && distToTarget < ATTACK_RANGE) {
+      this._aiState = 'hold';
+    } else if (!allowAttack && distToTarget < BACKOFF_DIST) {
       this._aiState = 'backoff';
     } else if (distToTarget < ATTACK_RANGE && allowAttack) {
       this._aiState = 'attack';
@@ -482,6 +486,10 @@ export class EnemyPlayer {
           this.rigidBody.setLinvel({ x: _toTarget.x, y: vel.y, z: _toTarget.z }, true);
         }
       }
+    } else if (this._aiState === 'hold') {
+      // Paused: slow to a stop and wait
+      const vel = this.rigidBody.linvel();
+      this.rigidBody.setLinvel({ x: vel.x * 0.8, y: vel.y, z: vel.z * 0.8 }, true);
     } else if (this._aiState === 'chase' || distToTarget > CHASE_RANGE * 1.5) {
       if (targetModel && distToTarget > CHASE_RANGE) {
         _toTarget.subVectors(targetModel.position, this.group.position);

@@ -31,19 +31,19 @@ const RETREAT_SPEED    = 2.8;  // m/s when too close
 
 const THROW_RANGE_MIN  = 5;    // min distance to throw (don't throw point-blank)
 const THROW_RANGE_MAX  = 18;   // max distance to throw
-const THROW_COOLDOWN_MS = 3200; // ms between throws
+const THROW_COOLDOWN_MS = 6000; // ms between throws
 const THROW_WINDUP_MS   = 700;  // pre-throw animation hold
-const BOMB_SPEED        = 10;   // m/s initial speed
-const BOMB_GRAVITY      = 14;   // m/s² downward acceleration
+const BOMB_SPEED        = 6;    // m/s initial horizontal speed (slow, readable lob)
+const BOMB_GRAVITY      = 8;    // m/s² downward acceleration (low → floaty arc)
 const BOMB_SCALE        = 0.55;
 const BOMB_EXPLOSION_RADIUS = 2.8;  // m — blast radius for player damage
 const BOMB_EXPLOSION_DAMAGE = 3;    // health segments
-const BOMB_LIFETIME_MS  = 6000;
+const BOMB_LIFETIME_MS  = 8000;
 
 // Deflect: foam sword hits the bomb in this radius
 const DEFLECT_RADIUS    = 0.7;  // m
-// Deflected bomb travels back this fast
-const DEFLECT_SPEED     = 12;
+// Deflected bomb travels back this fast (also used by the foam-sword deflect in bootstrapGameApp)
+export const BOMB_DEFLECT_SPEED = 10;
 
 const HEALTH_BAR_DISPLAY_MS = 2000;
 
@@ -441,7 +441,7 @@ export class BombThrowerEnemy {
             const deflectDir = throwerPos.sub(bomb.mesh.position).normalize();
             deflectDir.y = 0.25;
             deflectDir.normalize();
-            bomb.vel.copy(deflectDir.multiplyScalar(12));
+            bomb.vel.copy(deflectDir.multiplyScalar(BOMB_DEFLECT_SPEED));
             bomb.deflected = true;
             bomb.deflectedAt = Date.now();
             window.audioManager?.playSFX?.('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.7, {
