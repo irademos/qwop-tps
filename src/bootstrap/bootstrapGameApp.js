@@ -1835,7 +1835,7 @@ async function initCore(runtimeContext) {
 
   syncBackgroundLoopForDisplayMode = () => {
     if (window.phoneSwordMode) {
-      // Sword Showdown always uses the same ambient loop, at half music volume.
+      // Sword Showdown always uses the same ambient loop, at half the SFX volume.
       audioManager.playBGS(SWORD_SHOWDOWN_BGS, { volumeScale: SWORD_SHOWDOWN_BGS_VOLUME_SCALE });
       return;
     }

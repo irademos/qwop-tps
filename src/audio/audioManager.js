@@ -133,6 +133,7 @@ export class AudioManager {
     if (this.masterGain) {
       this.masterGain.gain.value = this.masterVolume;
     }
+    this._applyBGSVolume();
   }
 
   setSFXVolume(value) {
@@ -140,13 +141,19 @@ export class AudioManager {
     if (this.sfxGain) {
       this.sfxGain.gain.value = this.sfxVolume;
     }
+    this._applyBGSVolume();
+  }
+
+  // Ambient BGS loops follow the SFX slider (not music), like the Web Audio SFX
+  // they sit alongside, scaled by the per-loop volumeScale from playBGS().
+  _applyBGSVolume() {
+    if (!this.background) return;
+    const volume = this.masterVolume * this.sfxVolume * (this.bgsVolumeScale ?? 1);
+    this.background.volume = Math.max(0, Math.min(1, volume));
   }
 
   setMusicVolume(value) {
     this.musicVolume = Math.max(0, Math.min(1, value));
-    if (this.background) {
-      this.background.volume = this.musicVolume * (this.bgsVolumeScale ?? 1);
-    }
     if (this.phoneSwordAudio) {
       this.phoneSwordAudio.volume = this.musicVolume;
     }
@@ -215,7 +222,7 @@ export class AudioManager {
     return loadPromise;
   }
 
-  // volumeScale multiplies the music volume for this loop (e.g. 0.5 = half as loud).
+  // volumeScale multiplies the SFX volume for this loop (e.g. 0.5 = half as loud).
   playBGS(name, { volumeScale = 1 } = {}) {
     const path = `assets/audio/BGS Loops/${name}`;
     this.bgsVolumeScale = volumeScale;
@@ -223,9 +230,9 @@ export class AudioManager {
     if (!this.background) {
       this.background = new Audio(path);
       this.background.loop = true;
-      this.background.volume = this.musicVolume * volumeScale;
+      this._applyBGSVolume();
     } else {
-      this.background.volume = this.musicVolume * volumeScale;
+      this._applyBGSVolume();
       if (this.currentBGSPath === path) {
         if (this.background.paused) {
           this.background.play().catch(err => console.error('BGS resume failed', err));
