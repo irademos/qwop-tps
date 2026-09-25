@@ -529,6 +529,7 @@ export class FluffyCharacter {
   private anim: {
     source: AnimationSource
     mixer: THREE.AnimationMixer
+    action: THREE.AnimationAction
     retarget: (inPlace: boolean) => void
     speed: number
     inPlace: boolean
@@ -589,7 +590,7 @@ export class FluffyCharacter {
     }
     action.play()
     this.anim = {
-      source, mixer,
+      source, mixer, action,
       retarget: createRetargeter(this.rig, source, excluded),
       speed: opts.speed ?? 1,
       inPlace: opts.inPlace ?? false,
@@ -614,6 +615,18 @@ export class FluffyCharacter {
 
   /** Parent of the top bone (the exported `Armature` node): the space the rig is animated in. */
   get rigSpace(): THREE.Object3D { return this.rig.rigSpace }
+
+  /** Playback position of the current clip, 0..1 (0 when nothing plays). */
+  get clipProgress(): number {
+    if (!this.anim) return 0
+    const d = this.anim.action.getClip().duration
+    return d > 0 ? THREE.MathUtils.clamp(this.anim.action.time / d, 0, 1) : 1
+  }
+
+  /** True once a `loop: false` clip has reached its end (and is holding the last frame). */
+  get clipFinished(): boolean {
+    return !!this.anim && this.anim.action.loop === THREE.LoopOnce && !this.anim.action.isRunning()
+  }
 
   setSpeed(speed: number) { if (this.anim) this.anim.speed = speed }
   setInPlace(inPlace: boolean) { if (this.anim) this.anim.inPlace = inPlace }

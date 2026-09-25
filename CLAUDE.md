@@ -84,6 +84,7 @@ A browser-based 3D multiplayer RPG. Players explore a procedurally extended real
 │   │   ├── CharacterSpawn.js   # Factory for creating character instances from loaded models
 │   │   ├── PlayerCharacter.js  # Local player character (owned by PlayerControls)
 │   │   ├── EnemyPlayer.js      # Sword Showdown AI swordsman (same GLB character, IK arms, foam sword)
+│   │   ├── BombThrowerEnemy.js # Sword Showdown bomber (same GLB character, Throw.fbx, bomb held in right hand)
 │   │   ├── MonsterCharacter.js # Monster enemy — AI pathing, aggro, attack
 │   │   ├── FriendlyCharacter.js # Friendly NPC — dialog, wander, combat assist
 │   │   └── merchant.js         # Merchant NPC with shop inventory
@@ -139,7 +140,7 @@ A browser-based 3D multiplayer RPG. Players explore a procedurally extended real
 │   ├── models/                 # 3D model loading
 │   │   ├── monsterModel.js     # Loads/caches monster FBX models with animations
 │   │   ├── playerModel.js      # Player group + floating hand targets; updateProceduralPlayerRig() moves hands, animates GLB character
-│   │   ├── glbCharacterModel.js # Shared GLB character (gemhorn_rigged.glb): walk/idle clips, arm IK toward floating hands, config
+│   │   ├── glbCharacterModel.js # Shared GLB character (gemhorn_rigged.glb): walk/idle clips, one-shot actions (playAction), arm IK toward floating hands, config
 │   │   ├── fluffyCharacter.ts  # Mixamo FBX → GLB world-space retargeter + fluffy fur/secondary motion (library)
 │   │   └── handRotationDebug.js # Debug visualization for hand tracking rotation; foamSwordConfig
 │   │
@@ -224,7 +225,7 @@ Every ~10 seconds, `friendlyNpcManager.js` sends NPC game state (HP, nearby enti
 - Placed GLB scene objects
 
 ### 8. GLB Character + IK Arms
-Players and EnemyPlayers render `public/models/glb_characters/gemhorn_rigged.glb` (Mixamo skeleton). `fluffyCharacter.ts` retargets Mixamo FBX clips (walk/idle) onto it and adds fur; the clip drives everything **except** the arm chains. Arms are posed each frame by a stretchy two-bone IK (`GLBCharacter.solveArm`) toward invisible floating-hand groups, which are also the weapon attach points (`userData.proceduralHand` markers, preferred by `Weapon._getHandBone`). The GLB and clips face +Z (game forward) — no Y180 needed. Hand labels are mirrored: the `'right'` floating hand is at local +X, i.e. the anatomical left arm. On death, `GLBCharacter.playDeath()` plays `Flying Back Death.fbx` once over the whole body (IK suspended, hands follow the palms) until `revive()`; EnemyPlayer keeps its ragdoll during it, with knockback capped by `DEATH_KNOCKBACK_CAP`. Bomb blasts reuse the clip without dying: `EnemyPlayer.applyBlastKnockback()` (ragdoll + `playDeath()`, `revive()` in `_endRagdoll`, force/cap `BLAST_KNOCKBACK`) and `_blastPlayer()` in `bootstrapGameApp.js` for the local player.
+Players and EnemyPlayers render `public/models/glb_characters/gemhorn_rigged.glb` (Mixamo skeleton). `fluffyCharacter.ts` retargets Mixamo FBX clips (walk/idle) onto it and adds fur; the clip drives everything **except** the arm chains. Arms are posed each frame by a stretchy two-bone IK (`GLBCharacter.solveArm`) toward invisible floating-hand groups, which are also the weapon attach points (`userData.proceduralHand` markers, preferred by `Weapon._getHandBone`). The GLB and clips face +Z (game forward) — no Y180 needed. Hand labels are mirrored: the `'right'` floating hand is at local +X, i.e. the anatomical left arm. On death, `GLBCharacter.playDeath()` plays `Flying Back Death.fbx` once over the whole body (IK suspended, hands follow the palms) until `revive()`; EnemyPlayer keeps its ragdoll during it, with knockback capped by `DEATH_KNOCKBACK_CAP`. Bomb blasts reuse the clip without dying: `EnemyPlayer.applyBlastKnockback()` (ragdoll + `playDeath()`, `revive()` in `_endRagdoll`, force/cap `BLAST_KNOCKBACK`) and `_blastPlayer()` in `bootstrapGameApp.js` for the local player. `BombThrowerEnemy` uses the same GLB with `armIK: false` (clips drive the arms, no floating hands): `playAction(glbCharacterConfig.throwClip)` plays `Throw.fbx` once and releases the bomb at `THROW_RELEASE_AT` of the clip; between throws a bomb mesh is snapped to the anatomical right palm (`getPalmWorldPosition('left')` — labels are mirrored). Blasts from other throwers play the death clip for `BLAST_STUN_MS`, then `revive()`.
 
 ### 9. PIN Auth
 No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hashed client-side via Web Crypto, stored in Firebase. Hash cached in cookie for auto-login.
@@ -274,7 +275,7 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 | Firebase data structure | `src/player/playerProfile.js`, `src/npc/npcPersistence.js` |
 | Multiplayer protocol | `src/multiplayer/peerConnection.js`, `src/bootstrap/bootstrapGameApp.js` |
 | AI NPC prompt/behavior | `/api/llama.js` (server), `src/npc/friendlyNpcManager.js` (client) |
-| Sword Showdown bombs (blast damage/knockback, explosion VFX) | `src/characters/BombThrowerEnemy.js` (`_explodeBomb`, `_blastEnemies`), `src/combat/explosionEffect.js`, `EnemyPlayer.applyBlastKnockback`, `_blastPlayer` in `bootstrapGameApp.js` |
+| Sword Showdown bombs / bomber (blast damage/knockback, explosion VFX, throw clip, held bomb) | `src/characters/BombThrowerEnemy.js` (`_explodeBomb`, `_blastEnemies`, `_updateHeldBomb`, throw logic in `update`), `src/combat/explosionEffect.js`, `EnemyPlayer.applyBlastKnockback`, `_blastPlayer` in `bootstrapGameApp.js` |
 | Damage hit effect (blood spray) | `src/combat/bloodEffect.js`; player trigger in `setStat` (`triggerPlayerHurtBlood`), enemies in `applyDamage` |
 | Sword Showdown shop upgrades (heart/shield upgrade/bubble) | Catalog + purchase in `src/characters/merchant.js` (`unlimited`/`showdownOnly` items); effects in `appState.applyShopUpgrade` + bubble system (`activatePlayerBubble`, `window.isPlayerBubbleActive`) in `bootstrapGameApp.js`; bubble button in `src/controls/controls.js`; enemy checks in `EnemyPlayer.js`/`BombThrowerEnemy.js` |
 | Audio | `src/audio/audioManager.js`, `public/assets/audio/`; Sword Showdown ambient loop = `SWORD_SHOWDOWN_BGS` in `bootstrapGameApp.js`; hurt vocals = `audioManager.playOuch()` (player in `triggerPlayerHurtBlood`, enemies in `applyDamage`) |

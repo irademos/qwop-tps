@@ -4,6 +4,10 @@
  * on ground contact.  The player can deflect a bomb mid-air by hitting it with
  * the foam sword, sending it back toward the thrower (it homes in and always kills them).
  *
+ * Body: the shared GLB character (gemhorn_rigged.glb, like the player and
+ * EnemyPlayers) with walk/idle clips, Throw.fbx for each throw and the flying-back
+ * death clip. Its arms follow the clips (no IK); a bomb is held in the right palm.
+ *
  * Physics: dynamic Rapier capsule (same as EnemyPlayer).
  * Bomb projectiles are purely kinematic (custom gravity, no Rapier body) so
  * we can detect hits easily without adding extra colliders.
@@ -15,10 +19,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js';
+import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 const _homeDir = new THREE.Vector3();
 const _bubbleCenter = new THREE.Vector3();
+const _palm = new THREE.Vector3();
 
 // ─── tuning constants ────────────────────────────────────────────────────────
 
@@ -35,7 +41,12 @@ const RETREAT_SPEED    = 2.8;  // m/s when too close
 const THROW_RANGE_MIN  = 5;    // min distance to throw (don't throw point-blank)
 const THROW_RANGE_MAX  = 18;   // max distance to throw
 const THROW_COOLDOWN_MS = 6000; // ms between throws
-const THROW_WINDUP_MS   = 700;  // pre-throw animation hold
+const THROW_WINDUP_MS   = 700;  // fallback windup when the throw clip isn't playing (character still loading)
+const THROW_RELEASE_AT  = 0.3;  // fraction of Throw.fbx where the bomb leaves the hand (fastest, forward swing)
+const THROW_CLIP_TIMEOUT_MS = 2500; // throw anyway if the clip hasn't reached the release point by then
+// The GLB's floating-hand labels are mirrored: 'left' is the anatomical right arm (see glbCharacterModel.js)
+const BOMB_HAND         = 'left';
+const BLAST_STUN_MS     = 1400; // flying-back clip when caught in another thrower's blast
 const BOMB_SPEED        = 6;    // m/s initial horizontal speed (slow, readable lob)
 const BOMB_GRAVITY      = 8;    // m/s² downward acceleration (low → floaty arc)
 const BOMB_SCALE        = 0.55;
@@ -114,6 +125,8 @@ export class BombThrowerEnemy {
     this._lastThrowTime = -Infinity;
     this._windupEnd     = 0;      // timestamp when windup finishes → throw
     this._inWindup      = false;
+    this._releaseNow    = false;  // throw clip passed its release point this frame
+    this._stunUntil     = 0;      // blast knockback: no AI until then
 
     // Live bomb projectiles: {mesh, vel, spawnTime, deflected, thrower: this}[]
     this._bombs = [];
@@ -130,7 +143,7 @@ export class BombThrowerEnemy {
 
     // async GLB load
     getBombGLTF()
-      .then(gltf => { this._bombGltf = gltf; })
+      .then(gltf => { this._bombGltf = gltf; this._buildHeldBomb(); })
       .catch(e => console.warn('[BombThrowerEnemy] bomb GLB load error:', e));
 
     scene.add(this.group);
@@ -139,22 +152,39 @@ export class BombThrowerEnemy {
   // ─── visual body ────────────────────────────────────────────────────────────
 
   _buildBody() {
-    // Distinctive dark capsule so players can tell it apart from sword enemies
-    const mat = new THREE.MeshStandardMaterial({ color: 0x1a1a2e, roughness: 0.7, metalness: 0.15 });
-    const geo = new THREE.CapsuleGeometry(CAPSULE_RADIUS, CAPSULE_HEIGHT - CAPSULE_RADIUS * 2, 8, 16);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = true;
-    mesh.position.y = CAPSULE_HEIGHT / 2;
-    this.group.add(mesh);
-    this._bodyMesh = mesh;
+    // Same GLB character as the player/EnemyPlayers; the clips drive its arms (no IK)
+    this._glbCharacter = null;
+    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT, armIK: false }).then(({ container, character }) => {
+      if (this._destroyed) { character.dispose(); return; }
+      this.group.add(container);
+      this._glbCharacter = character;
+      if (this.isDead) { character.setFurEnabled(false); character.playDeath(); }
+    }).catch(e => console.warn('[BombThrowerEnemy] GLB character load failed:', e));
+  }
 
-    // Throwing arm indicator (bright red sphere held at chest)
-    const armMat = new THREE.MeshStandardMaterial({ color: 0xff2200, roughness: 0.5, emissive: 0x440000 });
-    const armSphere = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), armMat);
-    armSphere.position.set(0.28, CAPSULE_HEIGHT * 0.65, 0.22);
-    armSphere.name = 'throwArmIndicator';
-    this.group.add(armSphere);
-    this._throwArmIndicator = armSphere;
+  // Bomb in the right hand; its position is snapped to the palm every frame
+  _buildHeldBomb() {
+    if (this._heldBomb || this._destroyed || !this._bombGltf) return;
+    const held = this._bombGltf.scene.clone(true);
+    held.scale.setScalar(BOMB_SCALE); // same size as in flight, so no pop on release
+    held.name = 'HeldBomb';
+    held.visible = false; // shown once it's on the palm
+    held.traverse(obj => { if (obj.isMesh) obj.castShadow = true; });
+    this.group.add(held);
+    this._heldBomb = held;
+    this._heldBombReady = true;
+  }
+
+  _updateHeldBomb() {
+    const held = this._heldBomb;
+    if (!held) return;
+    const character = this._glbCharacter;
+    // Back in hand once the throw clip is over (pulls out the next bomb)
+    if (!this._heldBombReady && !this._inWindup && !character?.actionActive) this._heldBombReady = true;
+    held.visible = !!character && this._heldBombReady && !this.isDead;
+    if (!held.visible) return;
+    character.getPalmWorldPosition(BOMB_HAND, _palm);
+    held.position.copy(this.group.worldToLocal(_palm));
   }
 
   // ─── health bar ─────────────────────────────────────────────────────────────
@@ -220,8 +250,14 @@ export class BombThrowerEnemy {
   // ─── bomb spawning ──────────────────────────────────────────────────────────
 
   _spawnBomb(targetPos) {
-    const origin = this.group.position.clone();
-    origin.y += CAPSULE_HEIGHT * 0.75; // throw from chest height
+    // Leaves from the throwing hand (chest height until the character has loaded)
+    const origin = new THREE.Vector3();
+    if (this._glbCharacter) {
+      this._glbCharacter.getPalmWorldPosition(BOMB_HAND, origin);
+    } else {
+      origin.copy(this.group.position);
+      origin.y += CAPSULE_HEIGHT * 0.75;
+    }
 
     // Compute initial velocity: aim for apex 1.5 m above midpoint, solve for vy.
     const dx = targetPos.x - origin.x;
@@ -271,13 +307,9 @@ export class BombThrowerEnemy {
     if (!window._enemyBombs) window._enemyBombs = [];
     window._enemyBombs.push(bomb);
 
-    // Flash the throw arm indicator
-    this._throwArmIndicator.material.emissive.setHex(0xff4400);
-    setTimeout(() => {
-      if (this._throwArmIndicator?.material) {
-        this._throwArmIndicator.material.emissive.setHex(0x440000);
-      }
-    }, 300);
+    // The held bomb is the one in flight now
+    this._heldBombReady = false;
+    if (this._heldBomb) this._heldBomb.visible = false;
   }
 
   _removeBomb(bomb) {
@@ -324,7 +356,11 @@ export class BombThrowerEnemy {
     const groupY = Number.isFinite(terrainY) ? Math.max(physY, terrainY) : physY;
     this.group.position.set(t.x, groupY, t.z);
 
-    if (this.isDead) return;
+    // Dead: just the flying-back death clip while fading out
+    if (this.isDead) {
+      this._animateBody(dt, false);
+      return;
+    }
 
     // ── Health bar billboard ───────────────────────────────────────────────
     if (this._hpPlane.visible && Date.now() > this._hpShowUntil) {
@@ -333,8 +369,23 @@ export class BombThrowerEnemy {
 
     // ── Update bombs in flight ─────────────────────────────────────────────
     this._updateBombs(dt, targetModel, targetControls);
+    if (this.isDead) return; // its own deflected bomb just blew it up
 
-    if (!targetModel) return;
+    // ── Blast stun: flying-back clip, no AI; back on its feet afterwards ──
+    const now = Date.now();
+    if (this._stunUntil) {
+      if (now < this._stunUntil) {
+        this._animateBody(dt, false);
+        return;
+      }
+      this._stunUntil = 0;
+      this._glbCharacter?.revive();
+    }
+
+    if (!targetModel) {
+      this._animateBody(dt, false);
+      return;
+    }
 
     // ── Face target ────────────────────────────────────────────────────────
     const dx = targetModel.position.x - this.group.position.x;
@@ -345,10 +396,12 @@ export class BombThrowerEnemy {
       this.group.rotation.y = THREE.MathUtils.lerp(this.group.rotation.y, yaw, 1 - Math.exp(-6 * dt));
     }
 
-    // ── Movement: kite at PREFERRED_DIST ──────────────────────────────────
+    // ── Movement: kite at PREFERRED_DIST (stands still while throwing) ────
     let velX = 0, velZ = 0;
     const vel = this.rigidBody.linvel();
-    if (dist < PREFERRED_DIST - 1) {
+    if (this._inWindup || this._glbCharacter?.actionActive) {
+      // Plant the feet for the throw clip
+    } else if (dist < PREFERRED_DIST - 1) {
       // Too close — retreat
       const speed = RETREAT_SPEED * this.speedScale;
       velX = -(dx / Math.max(0.001, dist)) * speed;
@@ -362,40 +415,54 @@ export class BombThrowerEnemy {
     this.rigidBody.setLinvel({ x: velX, y: vel.y, z: velZ }, true);
 
     // ── Throw logic ────────────────────────────────────────────────────────
-    const now = Date.now();
     const cooldownReady = (now - this._lastThrowTime) >= THROW_COOLDOWN_MS;
     const inRange = dist >= THROW_RANGE_MIN && dist <= THROW_RANGE_MAX;
 
     if (!this._inWindup && cooldownReady && inRange) {
-      // Start windup
+      // Start the throw: Throw.fbx when the character is loaded, else a timed windup
       this._inWindup  = true;
       this._windupEnd = now + THROW_WINDUP_MS;
-      // Windup visual: raise throw arm indicator
-      this._throwArmIndicator.position.y = CAPSULE_HEIGHT * 0.85;
+      this._throwUsesClip = !!this._glbCharacter;
+      this._glbCharacter?.playAction(glbCharacterConfig.throwClip);
     }
 
-    if (this._inWindup && now >= this._windupEnd) {
-      this._inWindup = false;
-      this._lastThrowTime = now;
-      // Lower arm indicator back
-      this._throwArmIndicator.position.y = CAPSULE_HEIGHT * 0.65;
-      // Aim a bit ahead of where the player currently is (simple lead)
-      const lead = 0.4;
-      const aimTarget = targetModel.position.clone();
-      if (targetControls?.velocity) {
-        aimTarget.x += (targetControls.velocity.x ?? 0) * lead;
-        aimTarget.z += (targetControls.velocity.z ?? 0) * lead;
-      }
-      const aimGroundY = getTerrainHeight(aimTarget.x, aimTarget.z);
-      if (Number.isFinite(aimGroundY)) aimTarget.y = aimGroundY;
-      this._spawnBomb(aimTarget);
-    }
+    // Animate before releasing so the bomb leaves from this frame's palm position
+    this._animateBody(dt, velX !== 0 || velZ !== 0);
 
-    // Windup pulsing visual
     if (this._inWindup) {
-      const pulse = Math.sin((now / 1000) * 12) * 0.5 + 0.5;
-      this._throwArmIndicator.material.emissive.setRGB(pulse * 0.8, 0, 0);
+      const character = this._glbCharacter;
+      const release = this._throwUsesClip && character
+        // At the release point of the swing (or right away if the clip failed to load),
+        // with a timeout in case the clip is slow to load
+        ? character.actionProgress >= THROW_RELEASE_AT || !character.actionActive ||
+          now >= this._windupEnd + THROW_CLIP_TIMEOUT_MS
+        : now >= this._windupEnd;
+      if (release) {
+        this._inWindup = false;
+        this._lastThrowTime = now;
+        // Aim a bit ahead of where the player currently is (simple lead)
+        const lead = 0.4;
+        const aimTarget = targetModel.position.clone();
+        if (targetControls?.velocity) {
+          aimTarget.x += (targetControls.velocity.x ?? 0) * lead;
+          aimTarget.z += (targetControls.velocity.z ?? 0) * lead;
+        }
+        const aimGroundY = getTerrainHeight(aimTarget.x, aimTarget.z);
+        if (Number.isFinite(aimGroundY)) aimTarget.y = aimGroundY;
+        this._spawnBomb(aimTarget);
+      }
     }
+  }
+
+  // GLB body animation (walk / idle / throw / death) + the bomb in its hand
+  _animateBody(dt, moving) {
+    const character = this._glbCharacter;
+    if (character) {
+      character.setMoving(moving);
+      character.animate(dt);
+      character.stepFluff(dt);
+    }
+    this._updateHeldBomb();
   }
 
   _updateBombs(dt, targetModel, targetControls) {
@@ -584,6 +651,23 @@ export class BombThrowerEnemy {
     );
   }
 
+  /**
+   * Caught in another thrower's blast: thrown back with the flying-back clip, then
+   * back on its feet after BLAST_STUN_MS (a throw in progress is abandoned).
+   * @param {THREE.Vector3} direction – horizontal unit vector away from the blast
+   * @param {number} [falloff]        – 0..1 force scale (1 = centre of the blast)
+   */
+  applyBlastKnockback({ direction, falloff = 1 } = {}) {
+    if (!direction || !this.rigidBody) return;
+    const k = THREE.MathUtils.clamp(falloff, 0, 1);
+    this.applyDirectKnockback({ direction, horizSpeed: 7 * k, upVelocity: 3 * k });
+    if (this.isDead) return;
+    this._inWindup = false;
+    this._lastThrowTime = Date.now();
+    this._stunUntil = Date.now() + BLAST_STUN_MS;
+    this._glbCharacter?.playDeath();
+  }
+
   getCenterWorldPos() {
     return this.group.position.clone().add(new THREE.Vector3(0, CAPSULE_HEIGHT / 2, 0));
   }
@@ -596,7 +680,13 @@ export class BombThrowerEnemy {
       this._removeBomb(this._bombs[i]);
     }
 
-    // Fade out and destroy
+    this._inWindup = false;
+    this._glbCharacter?.playDeath();
+
+    // Fade out and destroy.
+    // Switch the fur off first: its shells/shader don't survive material.clone().
+    this._glbCharacter?.setFurEnabled(false);
+    // Clone materials so the fade doesn't touch the character's shared materials
     this.group.traverse(obj => {
       if (obj.isMesh && obj.material) obj.material = obj.material.clone();
     });
@@ -615,6 +705,9 @@ export class BombThrowerEnemy {
   }
 
   destroy() {
+    this._destroyed = true;
+    this._glbCharacter?.dispose();
+    this._glbCharacter = null;
     if (this.group.parent)  this.scene.remove(this.group);
     // Remove any remaining bombs from the scene
     for (const b of this._bombs) {
