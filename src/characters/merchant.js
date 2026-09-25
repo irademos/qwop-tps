@@ -28,6 +28,9 @@ const GUN_BULLETS_ITEM_ID = 'gun bullets';
 const AMMO_PACK_AMOUNT = 5;
 const LIFE_POTION_ITEM_ID = 'life_potion';
 const MANA_POTION_ITEM_ID = 'mana_potion';
+const HEART_UPGRADE_ITEM_ID = 'heart_upgrade';
+const SHIELD_UPGRADE_ITEM_ID = 'shield_upgrade';
+const BUBBLE_ITEM_ID = 'bubble';
 
 const BASE_MERCHANT_ITEMS = {
   iceGun: { name: 'Ice Gun', price: 30, count: 1, icon: '/assets/ui/items/icegun.png' },
@@ -46,8 +49,13 @@ const BASE_MERCHANT_ITEMS = {
   [MISSILE_AMMO_ITEM_ID]: { name: 'Missiles', price: 4, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
   [GUN_BULLETS_ITEM_ID]: { name: 'Gun Bullets', price: 10, count: 10, ammoAmount: 1 },
   apple: { name: 'Apples', price: 2, count: 5 },
-  wood: { name: 'Wood', price: 1, count: 15 }
+  wood: { name: 'Wood', price: 1, count: 15 },
+  // Sword Showdown upgrades — never sell out, applied immediately via appState.applyShopUpgrade
+  [HEART_UPGRADE_ITEM_ID]: { name: 'Heart', price: 350, count: 1, unlimited: true, showdownOnly: true, description: '+1 max health segment' },
+  [SHIELD_UPGRADE_ITEM_ID]: { name: 'Shield Upgrade', price: 150, count: 1, unlimited: true, showdownOnly: true, description: '+10 durability for all shields' },
+  [BUBBLE_ITEM_ID]: { name: 'Bubble', price: 30, count: 1, unlimited: true, showdownOnly: true, description: '10s protective bubble (tap 🫧 to use)' }
 };
+const SHOP_UPGRADE_ITEM_IDS = new Set([HEART_UPGRADE_ITEM_ID, SHIELD_UPGRADE_ITEM_ID, BUBBLE_ITEM_ID]);
 
 const merchantItemCatalog = (() => {
   const catalog = { ...BASE_MERCHANT_ITEMS };
@@ -317,7 +325,10 @@ export const getMerchantItemMeta = (itemId) => {
   return {
     name: entry.name || itemId,
     price: entry.price || 0,
-    icon: entry.icon || ''
+    icon: entry.icon || '',
+    description: entry.description || '',
+    unlimited: !!entry.unlimited,
+    showdownOnly: !!entry.showdownOnly
   };
 };
 
@@ -328,6 +339,12 @@ export const buyMerchantItem = async (itemId) => {
   const price = Number.isFinite(item.price) ? item.price : getMerchantItemMeta(itemId).price;
   const currentCoins = merchantAppState?.getCoins?.() ?? merchantAppState?.getPlayerStats?.()?.coins ?? 0;
   if (currentCoins < price) return false;
+  if (SHOP_UPGRADE_ITEM_IDS.has(itemId)) {
+    if (!merchantAppState?.applyShopUpgrade?.(itemId)) return false;
+    merchantAppState?.addCoins?.(-price);
+    window.questManager?.handleMerchantTransaction?.('buy');
+    return true;
+  }
   if (itemId === ICE_AMMO_ITEM_ID || itemId === ARROW_AMMO_ITEM_ID || itemId === MISSILE_AMMO_ITEM_ID || itemId === GUN_BULLETS_ITEM_ID) {
     const ammoAmount = Number.isFinite(catalogEntry.ammoAmount) ? catalogEntry.ammoAmount : 1;
     if (itemId === ICE_AMMO_ITEM_ID) {

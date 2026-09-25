@@ -806,6 +806,16 @@ export class EnemyPlayer {
     targetCenter.y += 0.7; // roughly torso height
 
     const dist = _swordTipWorld.distanceTo(targetCenter);
+
+    // Protective bubble: the sword bounces off the bubble surface, no damage
+    const bubbleRadius = window.getPlayerBubbleRadius?.() || 0;
+    if (bubbleRadius > 0 && dist <= Math.max(bubbleRadius, SWORD_TIP_HIT_RADIUS)) {
+      this.applySwordBounce();
+      window.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.45, { cooldownKey: 'psw-bubble-block', cooldownMs: 200 });
+      this._lastHitTime = now;
+      return;
+    }
+
     if (dist > SWORD_TIP_HIT_RADIUS) return;
 
     // Player sword block: if the player's blade points are near this sword's tip, deflect.

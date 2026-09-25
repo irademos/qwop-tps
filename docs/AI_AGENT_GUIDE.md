@@ -82,6 +82,7 @@ src/
 | Audio | `src/audio/audioManager.js` + `public/assets/audio/` |
 | New 3D prop | GLB → `public/assets/props/` + load in relevant `src/environment/` file |
 | Serverless API | `api/llama.js` or `api/overpass.js` |
+| Sword Showdown shop upgrades (heart, shield upgrade, bubble) | Catalog + purchase in `src/characters/merchant.js`; effects in `appState.applyShopUpgrade` and the bubble system (`activatePlayerBubble`) in `src/bootstrap/bootstrapGameApp.js`; bubble button in `src/controls/controls.js` |
 | Terrain stamp debugging | `src/environment/terrainHeight.js` + `docs/terrain-stamp-regression-checklist.md` |
 
 ---

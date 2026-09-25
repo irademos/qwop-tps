@@ -5747,7 +5747,9 @@ async function initCore(runtimeContext) {
     luck: playerProfile.stats.luck,
     xp: playerProfile.stats.xp,
     monsterKills: playerProfile.stats.monsterKills,
-    coins: playerProfile.stats.coins
+    coins: playerProfile.stats.coins,
+    shieldUpgrades: playerProfile.stats.shieldUpgrades,
+    bubbles: playerProfile.stats.bubbles
   };
   statsState.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
   statsState.maxHungerSegments = Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(statsState.maxHungerSegments || BASE_HUNGER_SEGMENTS)));
@@ -6128,6 +6130,10 @@ async function initCore(runtimeContext) {
   );
   const SHIELD_HEALTH_KEY = 'shieldHealth';
   const SHIELD_MAX_HEALTH_KEY = 'shieldMaxHealth';
+  // Each Sword Showdown "Shield Upgrade" purchase adds this much durability to every shield
+  const SHIELD_UPGRADE_HEALTH = 10;
+  const getShieldMaxHealth = () => DEFAULT_SHIELD_HEALTH
+    + Math.max(0, Math.floor(statsState.shieldUpgrades || 0)) * SHIELD_UPGRADE_HEALTH;
   let lastEquippedBeforeShield = null;
 
   const updateShieldHealthHUD = (health, maxHealth, count) => {
@@ -6135,7 +6141,7 @@ async function initCore(runtimeContext) {
     const fill = document.getElementById('shield-health-bar-fill');
     const countEl = document.getElementById('shield-count-hud');
     if (!display || !fill) return;
-    const safeMax = (Number.isFinite(maxHealth) && maxHealth > 0) ? maxHealth : DEFAULT_SHIELD_HEALTH;
+    const safeMax = (Number.isFinite(maxHealth) && maxHealth > 0) ? maxHealth : getShieldMaxHealth();
     const ratio = Math.max(0, Math.min(1, (Number.isFinite(health) ? health : safeMax) / safeMax));
     fill.style.width = `${ratio * 100}%`;
     fill.style.background = ratio > 0.35
@@ -6151,9 +6157,9 @@ async function initCore(runtimeContext) {
   const normalizeShieldHealth = (value) => {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) {
-      return DEFAULT_SHIELD_HEALTH;
+      return getShieldMaxHealth();
     }
-    return Math.max(0, Math.min(DEFAULT_SHIELD_HEALTH, numeric));
+    return Math.max(0, Math.min(getShieldMaxHealth(), numeric));
   };
   const normalizeShieldEntry = (entry = {}) => {
     const countValue = Number.isFinite(entry.count) ? Math.max(0, Math.floor(entry.count)) : 0;
@@ -6162,7 +6168,7 @@ async function initCore(runtimeContext) {
       ...entry,
       count: countValue > 0 && health > 0 ? countValue : 0,
       [SHIELD_HEALTH_KEY]: health,
-      [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+      [SHIELD_MAX_HEALTH_KEY]: getShieldMaxHealth()
     };
   };
   const inventoryCatalog = {
@@ -8070,7 +8076,7 @@ async function initCore(runtimeContext) {
           addToInventory(itemId, pickup.quantity);
           inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
             ...inventoryState[SHIELD_ITEM_ID],
-            [SHIELD_HEALTH_KEY]: pickup.shieldHealth ?? pickupMesh.userData.shieldHealth ?? DEFAULT_SHIELD_HEALTH
+            [SHIELD_HEALTH_KEY]: pickup.shieldHealth ?? pickupMesh.userData.shieldHealth ?? getShieldMaxHealth()
           }));
           persistInventoryAndStorage();
         } else {
@@ -9264,7 +9270,7 @@ async function initCore(runtimeContext) {
       }
       return Math.max(0, Math.floor(num));
     }
-    if (key === 'coins') {
+    if (key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles') {
       const num = Number(value);
       if (!Number.isFinite(num)) {
         return 0;
@@ -9538,10 +9544,102 @@ async function initCore(runtimeContext) {
   const getSwordShowdownKillXp = (stage) => 10 + Math.max(1, Math.floor(stage || 1));
   const getSwordShowdownStageXp = (stage) => 100 + Math.max(1, Math.floor(stage || 1)) * 20;
 
+  // ── Sword Showdown: protective bubble ─────────────────────────────────────
+  // While active, a sphere surrounds the player: enemy swords bounce off it,
+  // enemy bombs are deflected back from any direction, and no damage lands.
+  const BUBBLE_DURATION_MS = 10000;
+  const BUBBLE_RADIUS = 1.3;
+  const BUBBLE_CENTER_HEIGHT = 0.9;
+  let bubbleActiveUntil = 0;
+  let bubbleMesh = null;
+  const isPlayerBubbleActive = () => Date.now() < bubbleActiveUntil && !playerDead;
+  const getBubbleCount = () => Math.max(0, Math.floor(statsState.bubbles || 0));
+  const ensureBubbleMesh = () => {
+    if (bubbleMesh) return bubbleMesh;
+    bubbleMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(BUBBLE_RADIUS, 32, 20),
+      new THREE.MeshPhongMaterial({
+        color: 0x7fd8ff,
+        emissive: 0x1a5f8a,
+        specular: 0xffffff,
+        shininess: 90,
+        transparent: true,
+        opacity: 0.28,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    bubbleMesh.name = 'PlayerBubble';
+    bubbleMesh.renderOrder = 10;
+    bubbleMesh.visible = false;
+    bubbleMesh.userData.hideInMapView = true;
+    scene.add(bubbleMesh);
+    return bubbleMesh;
+  };
+  const getPlayerBubbleCenter = (target = new THREE.Vector3()) => (
+    target.copy(playerModel.position).setY(playerModel.position.y + BUBBLE_CENTER_HEIGHT)
+  );
+  const activatePlayerBubble = () => {
+    if (!window.phoneSwordMode || playerDead || isPlayerBubbleActive()) return false;
+    if (getBubbleCount() <= 0) return false;
+    setStat('bubbles', getBubbleCount() - 1, { skipSave: true });
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+    bubbleActiveUntil = Date.now() + BUBBLE_DURATION_MS;
+    ensureBubbleMesh().visible = true;
+    audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.6, { cooldownKey: 'player-bubble', cooldownMs: 200 });
+    updatePsBubbleButton();
+    return true;
+  };
+  const deactivatePlayerBubble = () => {
+    bubbleActiveUntil = 0;
+    if (bubbleMesh) bubbleMesh.visible = false;
+    updatePsBubbleButton();
+  };
+  let lastPsBubbleButtonLabel = '';
+  const updatePsBubbleButton = () => {
+    const button = playerControls?.psBubbleBtn;
+    if (!button) return;
+    const active = isPlayerBubbleActive();
+    const label = active
+      ? `🫧 ${Math.ceil((bubbleActiveUntil - Date.now()) / 1000)}s`
+      : `🫧 ${getBubbleCount()}`;
+    if (label !== lastPsBubbleButtonLabel) {
+      button.textContent = label;
+      lastPsBubbleButtonLabel = label;
+    }
+    button.classList.toggle('ps-bubble-active', active);
+    button.classList.toggle('ps-bubble-empty', !active && getBubbleCount() <= 0);
+  };
+  const updatePlayerBubble = () => {
+    if (!window.phoneSwordMode) return;
+    if (!bubbleMesh?.visible && !bubbleActiveUntil) {
+      updatePsBubbleButton();
+      return;
+    }
+    if (!isPlayerBubbleActive()) {
+      deactivatePlayerBubble();
+      return;
+    }
+    getPlayerBubbleCenter(bubbleMesh.position);
+    const remaining = bubbleActiveUntil - Date.now();
+    const pulse = 1 + Math.sin(performance.now() * 0.006) * 0.03;
+    bubbleMesh.scale.setScalar(pulse);
+    // Blink during the last 2 seconds as a warning that the bubble is about to pop
+    bubbleMesh.material.opacity = remaining < 2000 && Math.floor(remaining / 150) % 2 === 0 ? 0.1 : 0.28;
+    updatePsBubbleButton();
+  };
+  window.isPlayerBubbleActive = isPlayerBubbleActive;
+  window.getPlayerBubbleRadius = () => (isPlayerBubbleActive() ? BUBBLE_RADIUS : 0);
+  window.getPlayerBubbleCenter = getPlayerBubbleCenter;
+
   Object.defineProperty(window, 'localHealth', {
     configurable: true,
     get: () => statsState.health,
-    set: value => setStat('health', value)
+    set: value => {
+      // The protective bubble absorbs all incoming damage
+      if (isPlayerBubbleActive() && Number(value) < statsState.health) return;
+      setStat('health', value);
+    }
   });
 
   const shieldBlockTempForward = new THREE.Vector3();
@@ -9574,13 +9672,13 @@ async function initCore(runtimeContext) {
     const nextHealth = Math.max(0, currentHealth - Math.max(1, Math.round(damage)));
     if (shield?.mesh) {
       shield.mesh.userData.shieldHealth = nextHealth;
-      shield.mesh.userData.shieldMaxHealth = DEFAULT_SHIELD_HEALTH;
+      shield.mesh.userData.shieldMaxHealth = getShieldMaxHealth();
     }
     if (shield?.heldMesh) {
       shield.heldMesh.userData.shieldHealth = nextHealth;
-      shield.heldMesh.userData.shieldMaxHealth = DEFAULT_SHIELD_HEALTH;
+      shield.heldMesh.userData.shieldMaxHealth = getShieldMaxHealth();
     }
-    shield?.showHealthBar?.(nextHealth, DEFAULT_SHIELD_HEALTH);
+    shield?.showHealthBar?.(nextHealth, getShieldMaxHealth());
     if (nextHealth <= 0) {
       hideShieldHealthHUD();
       const prevCount = currentEntry.count;
@@ -9589,8 +9687,8 @@ async function initCore(runtimeContext) {
         const nextEntry = normalizeShieldEntry({
           ...currentEntry,
           count: prevCount - 1,
-          [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
-          [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+          [SHIELD_HEALTH_KEY]: getShieldMaxHealth(),
+          [SHIELD_MAX_HEALTH_KEY]: getShieldMaxHealth()
         });
         inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, nextEntry);
         persistInventoryAndStorage();
@@ -9620,7 +9718,7 @@ async function initCore(runtimeContext) {
         [SHIELD_HEALTH_KEY]: nextHealth
       });
       inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, nextEntry);
-      updateShieldHealthHUD(nextHealth, DEFAULT_SHIELD_HEALTH, nextEntry.count);
+      updateShieldHealthHUD(nextHealth, getShieldMaxHealth(), nextEntry.count);
       persistInventoryAndStorage();
     }
     return true;
@@ -9706,7 +9804,8 @@ async function initCore(runtimeContext) {
           localControls.isInvincible = false;
           localControls.invincibleUntil = 0;
         }
-        const isInvincible = localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0);
+        const isInvincible = (localControls?.isInvincible && Date.now() < (localControls.invincibleUntil || 0))
+          || isPlayerBubbleActive();
         if (!isInvincible) {
           const attackTypes = getAttackTypes(attackLabel, ['explosive']);
           window.localHealth = Math.max(0, window.localHealth - damage);
@@ -11832,8 +11931,8 @@ async function initCore(runtimeContext) {
     if (!window.phoneSwordMode && !(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
       inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
         count: 1,
-        [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
-        [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+        [SHIELD_HEALTH_KEY]: getShieldMaxHealth(),
+        [SHIELD_MAX_HEALTH_KEY]: getShieldMaxHealth()
       }));
     }
     if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
@@ -13945,8 +14044,8 @@ async function initCore(runtimeContext) {
       if (!window.phoneSwordMode && !(inventoryState[SHIELD_ITEM_ID]?.count > 0)) {
         inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
           count: 1,
-          [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH,
-          [SHIELD_MAX_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+          [SHIELD_HEALTH_KEY]: getShieldMaxHealth(),
+          [SHIELD_MAX_HEALTH_KEY]: getShieldMaxHealth()
         }));
       }
       if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
@@ -14798,6 +14897,36 @@ async function initCore(runtimeContext) {
       showCoinPopup(statsState.coins);
       showPickupToast('coins', safeDelta);
     },
+    // Sword Showdown shop upgrades (bought from the merchant, stored as stats)
+    applyShopUpgrade: (itemId) => {
+      if (itemId === 'heart_upgrade') {
+        setStat('maxHealthSegments', statsState.maxHealthSegments + 1, { skipSave: true });
+        setStat('health', statsState.health + 1, { skipSave: true });
+      } else if (itemId === 'shield_upgrade') {
+        setStat('shieldUpgrades', (statsState.shieldUpgrades || 0) + 1, { skipSave: true });
+        const shieldEntry = inventoryState[SHIELD_ITEM_ID];
+        if (shieldEntry?.count > 0) {
+          const nextEntry = normalizeShieldEntry({
+            ...shieldEntry,
+            [SHIELD_HEALTH_KEY]: (Number(shieldEntry[SHIELD_HEALTH_KEY]) || 0) + SHIELD_UPGRADE_HEALTH
+          });
+          inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, nextEntry);
+          if (shield?.holder === playerControls) {
+            updateShieldHealthHUD(nextEntry[SHIELD_HEALTH_KEY], nextEntry[SHIELD_MAX_HEALTH_KEY], nextEntry.count);
+          }
+          persistInventoryAndStorage();
+        }
+      } else if (itemId === 'bubble') {
+        setStat('bubbles', getBubbleCount() + 1, { skipSave: true });
+        updatePsBubbleButton();
+      } else {
+        return false;
+      }
+      void saveStatsImmediate(profileNameKey, statsState, lastStatUpdateAt);
+      return true;
+    },
+    getBubbleCount: () => getBubbleCount(),
+    activateBubble: () => activatePlayerBubble(),
     getCharacterOptions: () => characterOptions,
     getInventory: () => getInventory(),
     getIceAmmoCount: () => getIceAmmoCount(),
@@ -14836,7 +14965,7 @@ async function initCore(runtimeContext) {
         inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
           ...inventoryState[SHIELD_ITEM_ID],
           count: Math.max(1, inventoryState[SHIELD_ITEM_ID]?.count || 1),
-          [SHIELD_HEALTH_KEY]: DEFAULT_SHIELD_HEALTH
+          [SHIELD_HEALTH_KEY]: getShieldMaxHealth()
         }));
         removeFromInventory('wood', 1);
         equipInventoryItem(SHIELD_ITEM_ID);
@@ -15491,6 +15620,7 @@ async function initCore(runtimeContext) {
       }
     }
     updateBloodEffects(frameDelta);
+    updatePlayerBubble();
     if (buildState.placing) {
       const moveSpeed = 3 * frameDelta;
       const keys = buildHorizontalKeys;
@@ -16342,6 +16472,8 @@ async function initCore(runtimeContext) {
         _psStageActive = false;
         _psWinShown = true;
         addPlayerXp(getSwordShowdownStageXp(_psStage));
+        // Stage cleared: restore the player to full health
+        setStat('health', statsState.maxHealthSegments);
         const _nextStage = _psStage + 1;
         _psShowWin(() => {
           if (_nextStage <= 50) {
@@ -16727,6 +16859,7 @@ async function initCore(runtimeContext) {
 
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
+      deactivatePlayerBubble();
       window.onPlayerDeath?.();
       if (!window.phoneSwordMode) dropInventoryOnDeath();
       updateControlAvailability();

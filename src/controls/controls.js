@@ -791,6 +791,25 @@ export class PlayerControls {
       };
       makePsWeaponHandler(this.psWeaponBtn1);
       makePsWeaponHandler(this.psWeaponBtn2);
+
+      // Protective bubble (bought in the shop); label/count kept fresh by the game loop
+      const appStateForBubble = appContext.uiState.appState ?? window.appState;
+      this.psBubbleBtn = createButton('ps-bubble-btn', 'mobile-primary-action ps-bubble-btn', `🫧 ${appStateForBubble?.getBubbleCount?.() ?? 0}`);
+      this.psBubbleBtn.setAttribute('aria-label', 'Activate protective bubble');
+      const onBubblePress = (event) => {
+        if (!this.enabled) return;
+        const appState = appContext.uiState.appState ?? window.appState;
+        appState?.activateBubble?.();
+        if (event) this.safePreventDefault(event);
+      };
+      this.psBubbleBtn.addEventListener('touchstart', (e) => {
+        this.lastTouchButtonTime = performance.now();
+        onBubblePress(e);
+      }, { passive: false });
+      this.psBubbleBtn.addEventListener('mousedown', (e) => {
+        if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+        onBubblePress(e);
+      });
     }
 
     this.mobileEquipButtons = [];
@@ -1518,6 +1537,7 @@ export class PlayerControls {
       this.optionRightButton,
       this.psWeaponBtn1,
       this.psWeaponBtn2,
+      this.psBubbleBtn,
       ...(this.mobileEquipButtons || []),
       ...(this.mobileItemActionButtons || [])
     ].forEach(clearButtonPos);
@@ -1535,6 +1555,8 @@ export class PlayerControls {
       if (this.psWeaponBtn2?.dataset?.psWeaponId) {
         this.applyMobileButtonPosition(this.psWeaponBtn2, { x: 2, y: 1 });
       }
+      // Bubble sits in the free slot above Block/Fire, clear of the weapon buttons
+      this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: 1 });
       return;
     }
 
