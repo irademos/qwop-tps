@@ -79,6 +79,17 @@ export const DEATH_KNOCKBACK_CAP = {
   angSpeed: 10,    // rad/s, angular velocity
 };
 
+// Bomb blast: the enemy is thrown back a little harder than a death knockback and plays the
+// flying-back death clip once, then gets up after BLAST_STUN_MS (if the blast didn't kill it).
+// Also the velocity cap for an enemy the blast kills.
+export const BLAST_KNOCKBACK = {
+  horizSpeed: 9,   // m/s, horizontal
+  upVelocity: 4,   // m/s, upward
+  torqueMag: 20,   // torque impulse
+  angSpeed: 12,    // rad/s, angular velocity
+};
+const BLAST_STUN_MS = 2200;
+
 // Sword blade goes in +Z; default rest orientation (Euler, YXZ)
 const DEG = Math.PI / 180;
 const REST_SWORD_EULER = new THREE.Euler(360 * DEG, 90 * DEG, -90 * DEG, 'YXZ');
@@ -141,6 +152,7 @@ export class EnemyPlayer {
 
     this._isRagdoll    = false;
     this._ragdollTimeout = null;
+    this._deathKnockbackCap = DEATH_KNOCKBACK_CAP; // BLAST_KNOCKBACK once a bomb blast kills us
 
     // Sword bounce state (triggered when player sword collides with this sword)
     this._bounceActive  = false;
@@ -897,9 +909,10 @@ export class EnemyPlayer {
   applyDirectKnockback({ direction, horizSpeed = 6, upVelocity = 2, torqueMag = 80, ragdoll = false } = {}) {
     if (!direction || !this.rigidBody) return;
     if (this.isDead) {
-      horizSpeed = Math.min(horizSpeed, DEATH_KNOCKBACK_CAP.horizSpeed);
-      upVelocity = Math.min(upVelocity, DEATH_KNOCKBACK_CAP.upVelocity);
-      torqueMag  = Math.min(torqueMag, DEATH_KNOCKBACK_CAP.torqueMag);
+      const cap = this._deathKnockbackCap;
+      horizSpeed = Math.min(horizSpeed, cap.horizSpeed);
+      upVelocity = Math.min(upVelocity, cap.upVelocity);
+      torqueMag  = Math.min(torqueMag, cap.torqueMag);
     }
     const vel = this.rigidBody.linvel();
     this.rigidBody.setLinvel({ x: direction.x * horizSpeed, y: vel.y + upVelocity, z: direction.z * horizSpeed }, true);
@@ -920,6 +933,29 @@ export class EnemyPlayer {
     this._clampDeathVelocity();
   }
 
+  /**
+   * Bomb blast: thrown back (ragdoll) while the flying-back death clip plays once; gets up
+   * after BLAST_STUN_MS. Call after applyDamage() — if that killed us, the death plays instead.
+   * @param {THREE.Vector3} direction – horizontal unit vector away from the blast
+   * @param {number} [falloff]        – 0..1 force scale (1 = centre of the blast)
+   */
+  applyBlastKnockback({ direction, falloff = 1 } = {}) {
+    if (!direction || !this.rigidBody) return;
+    const k = THREE.MathUtils.clamp(falloff, 0, 1);
+    if (this.isDead) this._deathKnockbackCap = BLAST_KNOCKBACK;
+    this.applyDirectKnockback({
+      direction,
+      horizSpeed: BLAST_KNOCKBACK.horizSpeed * k,
+      upVelocity: BLAST_KNOCKBACK.upVelocity * k,
+      torqueMag: BLAST_KNOCKBACK.torqueMag,
+      ragdoll: !this.isDead,
+    });
+    if (this.isDead) return;
+    this._glbCharacter?.playDeath();
+    if (this._ragdollTimeout) clearTimeout(this._ragdollTimeout);
+    this._ragdollTimeout = setTimeout(() => this._endRagdoll(), BLAST_STUN_MS);
+  }
+
   applyKnockback({ direction, strength = 2 } = {}) {
     if (!direction || !this.rigidBody) return;
     const { impulse } = getKnockbackImpulse(direction, strength);
@@ -938,10 +974,10 @@ export class EnemyPlayer {
     this._clampDeathVelocity();
   }
 
-  /** Once dead, keep the body's linear/angular velocity within DEATH_KNOCKBACK_CAP. */
+  /** Once dead, keep the body's linear/angular velocity within the death knockback cap. */
   _clampDeathVelocity() {
     if (!this.isDead || !this.rigidBody) return;
-    const cap = DEATH_KNOCKBACK_CAP;
+    const cap = this._deathKnockbackCap;
     const v = this.rigidBody.linvel();
     const h = Math.hypot(v.x, v.z);
     const k = h > cap.horizSpeed ? cap.horizSpeed / h : 1;
@@ -961,7 +997,7 @@ export class EnemyPlayer {
     try {
       this.rigidBody.setEnabledRotations(true, true, true, true);
       const torqueAxis = new THREE.Vector3(-direction.z, 0.1, direction.x).normalize();
-      const torqueMag = this.isDead ? Math.min(strength * 10, DEATH_KNOCKBACK_CAP.torqueMag) : strength * 10;
+      const torqueMag = this.isDead ? Math.min(strength * 10, this._deathKnockbackCap.torqueMag) : strength * 10;
       this.rigidBody.applyTorqueImpulse(
         { x: torqueAxis.x * torqueMag, y: torqueAxis.y * torqueMag, z: torqueAxis.z * torqueMag },
         true
@@ -976,6 +1012,8 @@ export class EnemyPlayer {
   _endRagdoll() {
     if (!this.rigidBody || this.isDead) return;
     this._isRagdoll = false;
+    // Back on our feet after a bomb blast's flying-back clip (no-op otherwise)
+    this._glbCharacter?.revive();
     try {
       this.rigidBody.setEnabledRotations(false, true, false, true);
       this.rigidBody.setAngvel({ x: 0, y: 0, z: 0 }, true);
