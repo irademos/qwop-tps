@@ -31,15 +31,12 @@ const BACKOFF_DIST  = 3.8;   // target distance while backing off
 
 // Sword tip distance threshold for registering a hit
 const SWORD_TIP_HIT_RADIUS  = 0.55;
-// Extra sphere at pommel (guard) for block detection
-const SWORD_GUARD_HIT_RADIUS = 0.38;
 
 const SWORD_DAMAGE          = 2;  // health segments per hit
 const HIT_COOLDOWN_MS       = 1200;
 
 // Sword tip offset in the sword group's local space (+Z points toward tip)
 const SWORD_TIP_LOCAL = new THREE.Vector3(0, 0, 0.69);
-const SWORD_GUARD_LOCAL = new THREE.Vector3(0, 0, 0);
 
 // ── Blade poses (body-local space; +Z = forward, +Y = up) ─────────────────────
 // Blade directions are unit vectors; the sword quaternion is built so its +Z (blade)
@@ -254,7 +251,6 @@ export class EnemyPlayer {
     this._trailPoints    = [];            // { pos: THREE.Vector3, t: number }[]
     this._trailLines     = [];            // THREE.Line objects in scene
     this._trailFadeStart = -1;            // ms timestamp when fade began
-
 
     this._isRagdoll    = false;
     this._ragdollTimeout = null;

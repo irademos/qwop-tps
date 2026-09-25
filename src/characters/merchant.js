@@ -1,76 +1,25 @@
-import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { get, onValue, ref, set } from 'firebase/database';
 import { db } from '../core/firebase-init.js';
-import { MUSHROOM_ENTRIES } from '../environment/mushrooms.js';
-import { loadMonsterModel } from '../models/monsterModel.js';
-import { createLightSource, LIGHT_SOURCE_CONFIGS } from '../environment/light_sources.js';
-import { FriendlyCharacter } from './FriendlyCharacter.js';
-import { createStaticBoxColliderForObject } from '../physics/staticBoxCollider.js';
 
-const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
-const MERCHANT_MODEL = '/models/cowboy.fbx';
+// Sword Showdown shop: catalog, per-room stock (Firebase) and buy/sell.
 const MERCHANT_RESTOCK_MS = 60 * 60 * 1000;
-const DEFAULT_MARKET_STALL_POSITION = new THREE.Vector3(5, 0, 5);
-const MARKET_STALL_SIZE = 0.013;
-const MERCHANT_OFFSET = new THREE.Vector3(0.0, 0, -1.4);
-const MERCHANT_GROUND_OFFSET = 0.9;
-const LIFE_POTION_MODEL = '/assets/props/life_potion.glb';
-const MANA_POTION_MODEL = '/assets/props/mana_potion.glb';
-const LIFE_POTION_SCALE = 4000.0;
-const MANA_POTION_SCALE = 8.0;
-const LIFE_POTION_OFFSET = new THREE.Vector3(-50, 60.0, 0.45);
-const MANA_POTION_OFFSET = new THREE.Vector3(-0.15, 100.0, 0.05);
-const ICE_AMMO_ITEM_ID = 'ice ammo';
-const ARROW_AMMO_ITEM_ID = 'arrow ammo';
-const MISSILE_AMMO_ITEM_ID = 'missiles';
 const GUN_BULLETS_ITEM_ID = 'gun bullets';
-const AMMO_PACK_AMOUNT = 5;
-const LIFE_POTION_ITEM_ID = 'life_potion';
-const MANA_POTION_ITEM_ID = 'mana_potion';
 const HEART_UPGRADE_ITEM_ID = 'heart_upgrade';
 const SHIELD_UPGRADE_ITEM_ID = 'shield_upgrade';
 const BUBBLE_ITEM_ID = 'bubble';
 const SHOWDOWN_BOMB_ITEM_ID = 'showdown_bomb';
 
-const BASE_MERCHANT_ITEMS = {
-  iceGun: { name: 'Ice Gun', price: 30, count: 1, icon: '/assets/ui/items/icegun.png' },
-  autumnSword: { name: 'Autumn Sword', price: 30, count: 1, icon: '/assets/ui/items/sword.png' },
-  hammer: { name: 'Hammer', price: 25, count: 1 },
-  bazooka: { name: 'Bazooka', price: 45, count: 1, icon: '/assets/ui/items/bazooka.png' },
-  bow: { name: 'Bow', price: 30, count: 1, icon: '/assets/ui/items/bow.png' },
-  bomb: { name: 'Bombs', price: 10, count: 5, icon: '/assets/ui/items/bomb.png' },
-  lantern: { name: 'Lantern', price: 20, count: 1, icon: '/assets/ui/items/lantern.png' },
+const merchantItemCatalog = {
   shield: { name: 'Shield', price: 50, count: 5 },
   pistol: { name: 'Gun', price: 200, count: 1 },
-  [LIFE_POTION_ITEM_ID]: { name: 'Life Potion', price: 30, count: 5, icon: '/assets/ui/items/life_potion.png' },
-  [MANA_POTION_ITEM_ID]: { name: 'Mana Potion', price: 30, count: 5, icon: '/assets/ui/items/mana_potion.png' },
-  [ICE_AMMO_ITEM_ID]: { name: 'Ice Ammo', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
-  [ARROW_AMMO_ITEM_ID]: { name: 'Arrows', price: 2, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
-  [MISSILE_AMMO_ITEM_ID]: { name: 'Missiles', price: 4, count: 5, ammoAmount: AMMO_PACK_AMOUNT },
   [GUN_BULLETS_ITEM_ID]: { name: 'Gun Bullets', price: 10, count: 10, ammoAmount: 1 },
-  apple: { name: 'Apples', price: 2, count: 5 },
-  wood: { name: 'Wood', price: 1, count: 15 },
-  // Sword Showdown upgrades — never sell out, applied immediately via appState.applyShopUpgrade
-  [HEART_UPGRADE_ITEM_ID]: { name: 'Heart', price: 350, count: 1, unlimited: true, showdownOnly: true, description: '+1 max health segment' },
-  [SHIELD_UPGRADE_ITEM_ID]: { name: 'Shield Upgrade', price: 150, count: 1, unlimited: true, showdownOnly: true, description: '+10 durability for all shields' },
-  [BUBBLE_ITEM_ID]: { name: 'Bubble', price: 30, count: 1, unlimited: true, showdownOnly: true, description: '10s protective bubble (tap 🫧 to use)' },
-  [SHOWDOWN_BOMB_ITEM_ID]: { name: 'Bomb', price: 20, count: 1, unlimited: true, showdownOnly: true, icon: '/assets/ui/items/bomb.png', description: 'Throwable bomb (tap 💣 to throw)' }
+  // Upgrades — never sell out, applied immediately via appState.applyShopUpgrade
+  [HEART_UPGRADE_ITEM_ID]: { name: 'Heart', price: 350, count: 1, unlimited: true, description: '+1 max health segment' },
+  [SHIELD_UPGRADE_ITEM_ID]: { name: 'Shield Upgrade', price: 150, count: 1, unlimited: true, description: '+10 durability for all shields' },
+  [BUBBLE_ITEM_ID]: { name: 'Bubble', price: 30, count: 1, unlimited: true, description: '10s protective bubble (tap 🫧 to use)' },
+  [SHOWDOWN_BOMB_ITEM_ID]: { name: 'Bomb', price: 20, count: 1, unlimited: true, icon: '/assets/ui/items/bomb.png', description: 'Throwable bomb (tap 💣 to throw)' }
 };
 const SHOP_UPGRADE_ITEM_IDS = new Set([HEART_UPGRADE_ITEM_ID, SHIELD_UPGRADE_ITEM_ID, BUBBLE_ITEM_ID, SHOWDOWN_BOMB_ITEM_ID]);
-
-const merchantItemCatalog = (() => {
-  const catalog = { ...BASE_MERCHANT_ITEMS };
-  MUSHROOM_ENTRIES.forEach((entry) => {
-    catalog[entry.id] = {
-      name: entry.name,
-      price: 2,
-      count: 5,
-      icon: `/assets/ui/items/${entry.icon_name}.png`
-    };
-  });
-  return catalog;
-})();
 
 let merchantState = {
   items: {},
@@ -79,23 +28,7 @@ let merchantState = {
 let merchantRoomId = null;
 let merchantUnsubscribe = null;
 let merchantAppState = null;
-let merchantFriendly = null;
-let marketStall = null;
-let merchantRoadLight = null;
 let merchantIsHost = false;
-let marketStallCollider = null;
-let merchantSpawnBasePosition = DEFAULT_MARKET_STALL_POSITION.clone();
-
-const resolveMerchantBasePosition = (position, { getTerrainHeight, liftPositionToBuildingTop } = {}) => {
-  if (!position) return merchantSpawnBasePosition.clone();
-  const basePosition = position.clone ? position.clone() : new THREE.Vector3(position.x || 0, position.y || 0, position.z || 0);
-  const terrainHeight = getTerrainHeight?.(basePosition.x, basePosition.z);
-  if (Number.isFinite(terrainHeight)) {
-    basePosition.y = terrainHeight;
-  }
-  liftPositionToBuildingTop?.(basePosition, 0.5);
-  return basePosition;
-};
 
 const buildDefaultInventory = () => {
   const items = {};
@@ -153,10 +86,6 @@ const restockIfNeeded = async (record) => {
   return restocked;
 };
 
-const setMerchantState = (record) => {
-  merchantState = sanitizeInventory(record);
-};
-
 const persistMerchantState = async () => {
   await set(getMerchantRef(), merchantState);
 };
@@ -183,143 +112,6 @@ const subscribeInventoryUpdates = () => {
   });
 };
 
-const loadMarketStall = async ({ scene, getTerrainHeight, liftPositionToBuildingTop } = {}) => {
-  if (!scene) return;
-  const loader = new GLTFLoader();
-  try {
-    const gltf = await loader.loadAsync(MARKET_STALL_MODEL);
-    marketStall = gltf.scene;
-    marketStall.scale.multiplyScalar(MARKET_STALL_SIZE);
-    marketStall.position.copy(merchantSpawnBasePosition);
-    const terrainHeight = getTerrainHeight?.(marketStall.position.x, marketStall.position.z);
-    if (Number.isFinite(terrainHeight)) {
-      marketStall.position.y = terrainHeight - 0.005;
-    }
-    liftPositionToBuildingTop?.(marketStall.position, 0.5);
-    scene.add(marketStall);
-    marketStallCollider = createStaticBoxColliderForObject(marketStall, {
-      friction: 0.95,
-      restitution: 0.01,
-      halfExtents: new THREE.Vector3(1.35, 1.2, 0.9)
-    });
-    await Promise.all([
-      loadMarketStallPotion({
-        loader,
-        modelPath: LIFE_POTION_MODEL,
-        scale: LIFE_POTION_SCALE,
-        offset: LIFE_POTION_OFFSET
-      }),
-      loadMarketStallPotion({
-        loader,
-        modelPath: MANA_POTION_MODEL,
-        scale: MANA_POTION_SCALE,
-        offset: MANA_POTION_OFFSET
-      })
-    ]);
-  } catch (error) {
-    console.warn('Failed to load market stall model.', error);
-  }
-};
-
-
-const removeMerchantEntities = () => {
-  if (merchantFriendly?.model?.parent) {
-    merchantFriendly.model.parent.remove(merchantFriendly.model);
-  }
-  merchantFriendly?.model?.userData?.mixer?.stopAllAction?.();
-  merchantFriendly = null;
-  window.merchantFriendly = null;
-
-  if (marketStall?.parent) {
-    marketStall.parent.remove(marketStall);
-  }
-  marketStall = null;
-  if (marketStallCollider) {
-    marketStallCollider = null;
-  }
-
-  if (merchantRoadLight?.model?.parent) {
-    merchantRoadLight.model.parent.remove(merchantRoadLight.model);
-  }
-  merchantRoadLight = null;
-};
-
-const loadMarketStallPotion = async ({ loader, modelPath, scale, offset }) => {
-  if (!marketStall || !loader) return;
-  try {
-    const gltf = await loader.loadAsync(modelPath);
-    const potion = gltf.scene;
-    potion.scale.multiplyScalar(scale);
-    potion.position.copy(offset);
-    marketStall.add(potion);
-  } catch (error) {
-    console.warn('Failed to load merchant potion:', modelPath, error);
-  }
-};
-
-const loadMerchantFriendly = ({
-  scene,
-  attachPhysics,
-  getTerrainHeight,
-  liftPositionToBuildingTop
-} = {}) => {
-  if (!scene) return;
-  loadMonsterModel(MERCHANT_MODEL, data => {
-    const friendly = new FriendlyCharacter(data);
-    friendly.id = 'merchant';
-    friendly.modelPath = MERCHANT_MODEL;
-    friendly.type = MERCHANT_MODEL;
-    friendly.forceEngaged = true;
-    friendly.setNoticeRadius(0);
-    friendly.setWanderRadius(0);
-    friendly.setEngageRadius(999);
-    friendly.setDisengageRadius(999);
-    friendly.setLevel(1, { preserveHealth: false });
-    friendly.resetHealth();
-    friendly.model.userData.npcRole = 'merchant';
-    if (friendly.healthBar) {
-      friendly.healthBar.visible = false;
-    }
-    friendly.model.userData.mode = 'engaged';
-    const basePosition = merchantSpawnBasePosition.clone().add(MERCHANT_OFFSET);
-    const terrainHeight = getTerrainHeight?.(basePosition.x, basePosition.z);
-    if (Number.isFinite(terrainHeight)) {
-      basePosition.y = terrainHeight + MERCHANT_GROUND_OFFSET;
-    }
-    liftPositionToBuildingTop?.(basePosition, MERCHANT_GROUND_OFFSET);
-    friendly.setPosition(basePosition.x, basePosition.y, basePosition.z);
-    friendly.setHomePosition(basePosition.clone());
-    scene.add(friendly.model);
-    attachPhysics?.(friendly);
-    merchantFriendly = friendly;
-    window.merchantFriendly = friendly;
-
-    if (!merchantRoadLight) {
-      const lightPosition = basePosition.clone().add(new THREE.Vector3(2.5, 0, 2));
-      const terrainHeight = getTerrainHeight?.(lightPosition.x, lightPosition.z);
-      lightPosition.y = Number.isFinite(terrainHeight) ? terrainHeight + 0.1 : basePosition.y;
-      liftPositionToBuildingTop?.(lightPosition, 0.3);
-      createLightSource(LIGHT_SOURCE_CONFIGS.roadLight, lightPosition)
-        .then((lightSource) => {
-          if (!scene) return;
-          merchantRoadLight = lightSource;
-          merchantRoadLight.model.position.copy(lightPosition);
-          scene.add(lightSource.model);
-          lightSource.collider = createStaticBoxColliderForObject(lightSource.model, {
-            friction: 0.9,
-            restitution: 0.02,
-            halfExtents: new THREE.Vector3(0.35, 1.8, 0.35),
-            centerOffset: new THREE.Vector3(0, 1.8, 0),
-            useObjectPosition: true
-          });
-        })
-        .catch((error) => {
-          console.warn('Failed to load merchant road light:', error);
-        });
-    }
-  });
-};
-
 export const getMerchantInventory = () => ({ ...merchantState.items });
 
 export const getMerchantItemMeta = (itemId) => {
@@ -329,8 +121,7 @@ export const getMerchantItemMeta = (itemId) => {
     price: entry.price || 0,
     icon: entry.icon || '',
     description: entry.description || '',
-    unlimited: !!entry.unlimited,
-    showdownOnly: !!entry.showdownOnly
+    unlimited: !!entry.unlimited
   };
 };
 
@@ -344,20 +135,11 @@ export const buyMerchantItem = async (itemId) => {
   if (SHOP_UPGRADE_ITEM_IDS.has(itemId)) {
     if (!merchantAppState?.applyShopUpgrade?.(itemId)) return false;
     merchantAppState?.addCoins?.(-price);
-    window.questManager?.handleMerchantTransaction?.('buy');
     return true;
   }
-  if (itemId === ICE_AMMO_ITEM_ID || itemId === ARROW_AMMO_ITEM_ID || itemId === MISSILE_AMMO_ITEM_ID || itemId === GUN_BULLETS_ITEM_ID) {
+  if (itemId === GUN_BULLETS_ITEM_ID) {
     const ammoAmount = Number.isFinite(catalogEntry.ammoAmount) ? catalogEntry.ammoAmount : 1;
-    if (itemId === ICE_AMMO_ITEM_ID) {
-      merchantAppState?.addIceAmmo?.(ammoAmount);
-    } else if (itemId === ARROW_AMMO_ITEM_ID) {
-      merchantAppState?.addArrowAmmo?.(ammoAmount);
-    } else if (itemId === GUN_BULLETS_ITEM_ID) {
-      merchantAppState?.addPistolAmmo?.(ammoAmount);
-    } else {
-      merchantAppState?.addMissileAmmo?.(ammoAmount);
-    }
+    merchantAppState?.addPistolAmmo?.(ammoAmount);
   } else {
     merchantAppState?.addToInventory?.(itemId, 1);
   }
@@ -368,31 +150,16 @@ export const buyMerchantItem = async (itemId) => {
   merchantAppState?.addCoins?.(-price);
   merchantState.items[itemId] = { ...item, count: item.count - 1 };
   await persistMerchantState();
-  window.questManager?.handleMerchantTransaction?.('buy');
   return true;
 };
 
 export const sellMerchantItem = async (itemId) => {
   const catalogEntry = merchantItemCatalog[itemId] || {};
-  if (itemId === ICE_AMMO_ITEM_ID || itemId === ARROW_AMMO_ITEM_ID || itemId === MISSILE_AMMO_ITEM_ID || itemId === GUN_BULLETS_ITEM_ID) {
+  if (itemId === GUN_BULLETS_ITEM_ID) {
     const ammoAmount = Number.isFinite(catalogEntry.ammoAmount) ? catalogEntry.ammoAmount : 1;
-    const currentAmmo = itemId === ICE_AMMO_ITEM_ID
-      ? merchantAppState?.getIceAmmoCount?.() ?? 0
-      : itemId === ARROW_AMMO_ITEM_ID
-        ? merchantAppState?.getArrowAmmoCount?.() ?? 0
-        : itemId === GUN_BULLETS_ITEM_ID
-          ? merchantAppState?.getPistolAmmoCount?.() ?? 0
-          : merchantAppState?.getMissileAmmoCount?.() ?? 0;
+    const currentAmmo = merchantAppState?.getPistolAmmoCount?.() ?? 0;
     if (currentAmmo < ammoAmount) return false;
-    if (itemId === ICE_AMMO_ITEM_ID) {
-      merchantAppState?.addIceAmmo?.(-ammoAmount);
-    } else if (itemId === ARROW_AMMO_ITEM_ID) {
-      merchantAppState?.addArrowAmmo?.(-ammoAmount);
-    } else if (itemId === GUN_BULLETS_ITEM_ID) {
-      merchantAppState?.addPistolAmmo?.(-ammoAmount);
-    } else {
-      merchantAppState?.addMissileAmmo?.(-ammoAmount);
-    }
+    merchantAppState?.addPistolAmmo?.(-ammoAmount);
   } else {
     const inventory = merchantAppState?.getInventory?.() || {};
     const entry = inventory[itemId];
@@ -406,33 +173,10 @@ export const sellMerchantItem = async (itemId) => {
     merchantState.items[itemId] = { ...current, count: (current.count || 0) + 1 };
   }
   await persistMerchantState();
-  window.questManager?.handleMerchantTransaction?.('sell');
   return true;
 };
 
-export const subscribeMerchantInventory = (callback) => {
-  const handler = () => {
-    if (typeof callback === 'function') {
-      callback(getMerchantInventory());
-    }
-  };
-  const unsubscribe = onValue(getMerchantRef(), async (snapshot) => {
-    const safe = sanitizeInventory(snapshot.val());
-    merchantState = await restockIfNeeded(safe);
-    handler();
-  });
-  return unsubscribe;
-};
-
-export const initMerchant = async ({
-  scene,
-  attachPhysics,
-  getTerrainHeight,
-  liftPositionToBuildingTop,
-  appState,
-  roomId,
-  isHost = false
-} = {}) => {
+export const initMerchant = async ({ appState, roomId, isHost = false } = {}) => {
   merchantAppState = appState || merchantAppState;
   merchantRoomId = roomId ?? merchantRoomId;
   merchantIsHost = !!isHost;
@@ -449,21 +193,4 @@ export const setMerchantRoom = async ({ roomId, isHost = false } = {}) => {
 
 export const setMerchantHost = (isHost) => {
   merchantIsHost = !!isHost;
-};
-
-export const getMerchantFriendly = () => merchantFriendly;
-
-
-export const spawnMerchantAt = async ({ position, scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop } = {}) => {
-  if (!scene) return;
-  if (position) {
-    merchantSpawnBasePosition = resolveMerchantBasePosition(position, { getTerrainHeight, liftPositionToBuildingTop });
-  }
-  removeMerchantEntities();
-  await loadMarketStall({ scene, getTerrainHeight, liftPositionToBuildingTop });
-  loadMerchantFriendly({ scene, attachPhysics, getTerrainHeight, liftPositionToBuildingTop });
-};
-
-export const clearMerchantSpawn = () => {
-  removeMerchantEntities();
 };

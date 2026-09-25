@@ -1,21 +1,17 @@
 import { appContext } from './appContext.js';
 
 const MIRROR_CONFIG = {
-  monsters: { bucket: 'entities', getter: () => appContext.entities.monsters },
-  animals: { bucket: 'entities', getter: () => appContext.entities.animals },
   otherPlayers: { bucket: 'entities', getter: () => appContext.entities.otherPlayers },
   playerControls: { bucket: 'systems', getter: () => appContext.systems.playerControls },
   weapons: { bucket: 'entities', getter: () => appContext.entities.weapons },
   appState: { bucket: 'uiState', getter: () => appContext.uiState.appState },
   PERF: { bucket: 'debugFlags', getter: () => appContext.debugFlags.PERF },
-  mapRenderer: { bucket: 'systems', getter: () => appContext.systems.mapRenderer },
-  buildingsRenderer: { bucket: 'systems', getter: () => appContext.systems.buildingsRenderer },
   rapierWorld: { bucket: 'systems', getter: () => appContext.systems.rapierWorld },
   rbToMesh: { bucket: 'systems', getter: () => appContext.systems.rbToMesh }
 };
 
-const COMPAT_KEYS = ['monsters', 'animals', 'otherPlayers', 'playerControls', 'weapons', 'appState'];
-const DEBUG_KEYS = ['PERF', 'mapRenderer', 'buildingsRenderer', 'rapierWorld', 'rbToMesh'];
+const COMPAT_KEYS = ['otherPlayers', 'playerControls', 'weapons', 'appState'];
+const DEBUG_KEYS = ['PERF', 'rapierWorld', 'rbToMesh'];
 const defined = new Set();
 
 function defineMirroredProperty(target, key) {

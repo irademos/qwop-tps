@@ -2,68 +2,24 @@ import { ref, get, set, update, runTransaction, query, orderByChild, limitToLast
 import { db } from '../core/firebase-init.js';
 import { getCookie, setCookie } from '../core/utils.js';
 import { BASE_HEALTH_SEGMENTS, normalizeHealthSegments } from './healthUtils.js';
-import {
-  BASE_HUNGER_SEGMENTS,
-  BASE_MAGIC_SEGMENTS,
-  HUNGER_MAX_SEGMENTS,
-  MAGIC_MAX_SEGMENTS,
-  clampHungerSegments,
-  clampMagicSegments
-} from './statSegments.js';
-
 const SALT = 'prototype-salt-v1';
 const PIN_COOKIE_PREFIX = 'playerPinHash_';
 
 const DEFAULT_STATS = {
   health: BASE_HEALTH_SEGMENTS,
-  hunger: BASE_HUNGER_SEGMENTS,
-  energy: BASE_HUNGER_SEGMENTS,
-  magic: BASE_MAGIC_SEGMENTS,
   maxHealthSegments: BASE_HEALTH_SEGMENTS,
-  maxHungerSegments: BASE_HUNGER_SEGMENTS,
-  maxMagicSegments: BASE_MAGIC_SEGMENTS,
   level: 1,
   strength: 5,
-  agility: 5,
-  smarts: 5,
-  charm: 5,
-  luck: 5,
   xp: 0,
-  monsterKills: 0,
   coins: 0,
-  // Sword Showdown shop purchases
+  // Shop purchases
   shieldUpgrades: 0,
   bubbles: 0,
   bombs: 0,
-  // Sword Showdown's own max health (0 = not set yet; kept apart from maxHealthSegments)
+  // Max health (0 = not set yet on profiles from before Showdown kept its own track)
   showdownMaxHealthSegments: 0
 };
 const DEFAULT_INVENTORY = {};
-const DEFAULT_HOME_STORAGE = {};
-const DEFAULT_CUSTOMIZATION = {
-  skinTone: null,
-  shirts: { selectedId: null, overrides: {} },
-  hats: { selectedId: null, overrides: {} }
-};
-const DEFAULT_SPELLS = {
-  shield: true,
-  fly: true
-};
-const DEFAULT_QUESTS = {
-  acceptedQuestIds: [],
-  completedQuestIds: []
-};
-const DEFAULT_ACHIEVEMENTS = {
-  trackers: {},
-  achievements: {}
-};
-const DEFAULT_WALKING_STATS = {
-  totalMiles: 0,
-  dailyMiles: {},
-  dailyResetMiles: {},
-  updatedAt: null
-};
-const DEFAULT_COMPANIONS = {};
 
 const DEFAULT_PHONE_SWORD_STATS = {
   kills: 0,
@@ -74,7 +30,6 @@ const DEFAULT_PHONE_SWORD_STATS = {
 const lastWriteByName = new Map();
 const pendingStatsByName = new Map();
 const pendingInventoryByName = new Map();
-const pendingHomeStorageByName = new Map();
 const pendingMetaByName = new Map();
 const pendingTimersByName = new Map();
 
@@ -110,66 +65,10 @@ function buildProfile(name) {
     name,
     stats: { ...DEFAULT_STATS },
     inventory: { ...DEFAULT_INVENTORY },
-    homeStorage: { ...DEFAULT_HOME_STORAGE },
-    customization: mergeCustomization(DEFAULT_CUSTOMIZATION),
-    spells: { ...DEFAULT_SPELLS },
-    quests: mergeQuests(DEFAULT_QUESTS),
-    achievements: mergeAchievements(DEFAULT_ACHIEVEMENTS),
-    walkingStats: mergeWalkingStats(DEFAULT_WALKING_STATS),
-    companions: { ...DEFAULT_COMPANIONS },
-    characterModel: null,
-    sleepStartedAt: null,
     lastStatUpdateAt: now,
     createdAt: now,
     updatedAt: now
   };
-}
-
-function mergeQuests(quests) {
-  const acceptedQuestIds = Array.isArray(quests?.acceptedQuestIds)
-    ? quests.acceptedQuestIds.filter((id) => typeof id === 'string' && id.trim())
-    : [];
-  const completedQuestIds = Array.isArray(quests?.completedQuestIds)
-    ? quests.completedQuestIds.filter((id) => typeof id === 'string' && id.trim())
-    : [];
-  return {
-    acceptedQuestIds: Array.from(new Set(acceptedQuestIds)),
-    completedQuestIds: Array.from(new Set(completedQuestIds))
-  };
-}
-
-
-function mergeWalkingStats(walkingStats) {
-  const totalMilesRaw = Number(walkingStats?.totalMiles);
-  const totalMiles = Number.isFinite(totalMilesRaw) && totalMilesRaw >= 0 ? totalMilesRaw : 0;
-  const sourceDaily = walkingStats?.dailyMiles && typeof walkingStats.dailyMiles === 'object' ? walkingStats.dailyMiles : {};
-  const dailyMiles = {};
-  for (const [date, miles] of Object.entries(sourceDaily)) {
-    const parsed = Number(miles);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-    if (!Number.isFinite(parsed) || parsed <= 0) continue;
-    dailyMiles[date] = parsed;
-  }
-  const sourceDailyReset = walkingStats?.dailyResetMiles && typeof walkingStats.dailyResetMiles === 'object' ? walkingStats.dailyResetMiles : {};
-  const dailyResetMiles = {};
-  for (const [date, miles] of Object.entries(sourceDailyReset)) {
-    const parsed = Number(miles);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-    if (!Number.isFinite(parsed) || parsed <= 0) continue;
-    dailyResetMiles[date] = parsed;
-  }
-  const updatedAt = Number.isFinite(walkingStats?.updatedAt) ? walkingStats.updatedAt : null;
-  return { totalMiles, dailyMiles, dailyResetMiles, updatedAt };
-}
-
-function mergeAchievements(achievements) {
-  const trackers = achievements?.trackers && typeof achievements.trackers === 'object'
-    ? { ...achievements.trackers }
-    : {};
-  const statuses = achievements?.achievements && typeof achievements.achievements === 'object'
-    ? { ...achievements.achievements }
-    : {};
-  return { trackers, achievements: statuses };
 }
 
 function normalizeStatValue(key, value) {
@@ -181,13 +80,13 @@ function normalizeStatValue(key, value) {
   if (key === 'level') {
     return Math.max(1, Math.floor(numeric));
   }
-  if (key === 'xp' || key === 'monsterKills' || key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles' || key === 'bombs' || key === 'showdownMaxHealthSegments') {
+  if (key === 'xp' || key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles' || key === 'bombs' || key === 'showdownMaxHealthSegments') {
     return Math.max(0, Math.floor(numeric));
   }
-  if (['maxHealthSegments', 'maxHungerSegments', 'maxMagicSegments'].includes(key)) {
+  if (key === 'maxHealthSegments') {
     return Math.max(1, Math.round(numeric));
   }
-  if (['health', 'hunger', 'energy', 'magic'].includes(key)) {
+  if (key === 'health') {
     return Math.round(numeric);
   }
   return numeric;
@@ -200,86 +99,8 @@ function mergeStats(stats) {
     normalized[key] = normalizeStatValue(key, merged[key]);
   }
   normalized.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, normalized.maxHealthSegments);
-  normalized.maxHungerSegments = Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, normalized.maxHungerSegments));
-  normalized.maxMagicSegments = Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, normalized.maxMagicSegments));
   normalized.health = normalizeHealthSegments(normalized.health, normalized.level, normalized.maxHealthSegments);
-  normalized.hunger = clampHungerSegments(normalized.hunger, normalized.maxHungerSegments);
-  normalized.energy = normalized.hunger;
-  normalized.magic = clampMagicSegments(normalized.magic, normalized.maxMagicSegments);
   return normalized;
-}
-
-function mergeCustomization(customization) {
-  return {
-    skinTone: customization?.skinTone ?? DEFAULT_CUSTOMIZATION.skinTone,
-    shirts: {
-      selectedId: customization?.shirts?.selectedId ?? null,
-      overrides: { ...(customization?.shirts?.overrides || {}) }
-    },
-    hats: {
-      selectedId: customization?.hats?.selectedId ?? null,
-      overrides: { ...(customization?.hats?.overrides || {}) }
-    }
-  };
-}
-
-function mergeSpells(spells) {
-  return { ...DEFAULT_SPELLS, ...(spells || {}) };
-}
-
-
-function normalizeLeaderboardEntry(nameKey, profile, metric) {
-  const stats = profile?.stats && typeof profile.stats === 'object' ? profile.stats : {};
-  const value = Number(stats[metric]);
-  return {
-    id: nameKey,
-    name: typeof profile?.name === 'string' && profile.name.trim() ? profile.name.trim() : nameKey,
-    value: Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
-  };
-}
-
-async function loadLeaderboard(metric, limit = 10) {
-  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(50, Math.floor(limit))) : 10;
-  const leaderboardQuery = query(
-    ref(db, 'profiles'),
-    orderByChild(`stats/${metric}`),
-    limitToLast(safeLimit)
-  );
-  const snapshot = await get(leaderboardQuery);
-  const entries = [];
-  snapshot.forEach((child) => {
-    entries.push(normalizeLeaderboardEntry(child.key, child.val(), metric));
-  });
-  return entries
-    .filter((entry) => entry.value > 0)
-    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
-    .slice(0, safeLimit);
-}
-
-export async function loadLeaderboards(limit = 10) {
-  const [killsResult, xpResult] = await Promise.allSettled([
-    loadLeaderboard('monsterKills', limit),
-    loadLeaderboard('xp', limit)
-  ]);
-
-  if (killsResult.status === 'rejected') {
-    console.warn('Failed to load monster-kill leaderboard:', killsResult.reason);
-  }
-  if (xpResult.status === 'rejected') {
-    console.warn('Failed to load XP leaderboard:', xpResult.reason);
-  }
-
-  if (killsResult.status === 'rejected' && xpResult.status === 'rejected') {
-    throw new AggregateError(
-      [killsResult.reason, xpResult.reason],
-      'Failed to load leaderboards'
-    );
-  }
-
-  return {
-    topKills: killsResult.status === 'fulfilled' ? killsResult.value : [],
-    topXp: xpResult.status === 'fulfilled' ? xpResult.value : []
-  };
 }
 
 // ── Phone Sword leaderboard ──────────────────────────────────────────────────
@@ -381,106 +202,25 @@ async function loadProfileForName(profileRef, trimmedName) {
 
   const mergedStats = mergeStats(profile.stats);
   const mergedInventory = profile.inventory ? { ...profile.inventory } : { ...DEFAULT_INVENTORY };
-  const mergedHomeStorage = profile.homeStorage ? { ...profile.homeStorage } : { ...DEFAULT_HOME_STORAGE };
-  const mergedCustomization = mergeCustomization(profile.customization);
-  const mergedSpells = mergeSpells(profile.spells);
-  const mergedQuests = mergeQuests(profile.quests);
-  const mergedAchievements = mergeAchievements(profile.achievements);
-  const mergedCharacterModel = typeof profile.characterModel === 'string' ? profile.characterModel : null;
-  const mergedWalkingStats = mergeWalkingStats(profile.walkingStats);
-  const mergedCompanions = profile.companions && typeof profile.companions === 'object' ? { ...profile.companions } : { ...DEFAULT_COMPANIONS };
   const statsMissing = Object.keys(DEFAULT_STATS).some(key => profile.stats?.[key] == null);
   const hasLastStatUpdateAt = Number.isFinite(profile.lastStatUpdateAt);
   const inventoryMissing = profile.inventory == null;
-  const homeStorageMissing = profile.homeStorage == null;
-  const customizationMissing = profile.customization == null
-    || profile.customization.shirts == null
-    || profile.customization.hats == null;
-  const spellsMissing = profile.spells == null;
-  const questsMissing = profile.quests == null;
-  const achievementsMissing = profile.achievements == null;
-  const characterModelMissing = profile.characterModel !== mergedCharacterModel;
-  const walkingStatsMissing = profile.walkingStats == null;
-  const companionsMissing = profile.companions == null;
-  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing || homeStorageMissing || customizationMissing || spellsMissing || questsMissing || achievementsMissing || characterModelMissing || walkingStatsMissing || companionsMissing) {
+  if (statsMissing || !hasLastStatUpdateAt || inventoryMissing) {
     const updatePayload = { updatedAt: Date.now() };
     if (statsMissing) {
       updatePayload.stats = mergedStats;
-      profile.stats = mergedStats;
-    } else {
-      profile.stats = mergedStats;
     }
     if (inventoryMissing) {
       updatePayload.inventory = mergedInventory;
-      profile.inventory = mergedInventory;
-    } else {
-      profile.inventory = mergedInventory;
-    }
-    if (homeStorageMissing) {
-      updatePayload.homeStorage = mergedHomeStorage;
-      profile.homeStorage = mergedHomeStorage;
-    } else {
-      profile.homeStorage = mergedHomeStorage;
-    }
-    if (customizationMissing) {
-      updatePayload.customization = mergedCustomization;
-      profile.customization = mergedCustomization;
-    } else {
-      profile.customization = mergedCustomization;
-    }
-    if (spellsMissing) {
-      updatePayload.spells = mergedSpells;
-      profile.spells = mergedSpells;
-    } else {
-      profile.spells = mergedSpells;
-    }
-    if (questsMissing) {
-      updatePayload.quests = mergedQuests;
-      profile.quests = mergedQuests;
-    } else {
-      profile.quests = mergedQuests;
-    }
-    if (achievementsMissing) {
-      updatePayload.achievements = mergedAchievements;
-      profile.achievements = mergedAchievements;
-    } else {
-      profile.achievements = mergedAchievements;
-    }
-    if (characterModelMissing) {
-      updatePayload.characterModel = mergedCharacterModel;
-      profile.characterModel = mergedCharacterModel;
-    } else {
-      profile.characterModel = mergedCharacterModel;
-    }
-    if (walkingStatsMissing) {
-      updatePayload.walkingStats = mergedWalkingStats;
-      profile.walkingStats = mergedWalkingStats;
-    } else {
-      profile.walkingStats = mergedWalkingStats;
-    }
-    if (companionsMissing) {
-      updatePayload.companions = mergedCompanions;
-      profile.companions = mergedCompanions;
-    } else {
-      profile.companions = mergedCompanions;
     }
     if (!hasLastStatUpdateAt) {
       updatePayload.lastStatUpdateAt = Date.now();
       profile.lastStatUpdateAt = updatePayload.lastStatUpdateAt;
     }
     await update(profileRef, updatePayload);
-  } else {
-    profile.stats = mergedStats;
-    profile.inventory = mergedInventory;
-    profile.homeStorage = mergedHomeStorage;
-    profile.customization = mergedCustomization;
-    profile.spells = mergedSpells;
-    profile.quests = mergedQuests;
-    profile.achievements = mergedAchievements;
-    profile.characterModel = mergedCharacterModel;
-  profile.walkingStats = mergedWalkingStats;
-  profile.companions = mergedCompanions;
   }
+  profile.stats = mergedStats;
+  profile.inventory = mergedInventory;
 
   console.log('✅ Loaded profile for', trimmedName);
   return profile;
@@ -696,14 +436,12 @@ async function flushStats(nameKey) {
   pendingTimersByName.delete(nameKey);
   const stats = pendingStatsByName.get(nameKey);
   const inventory = pendingInventoryByName.get(nameKey);
-  const homeStorage = pendingHomeStorageByName.get(nameKey);
   const meta = pendingMetaByName.get(nameKey) || {};
-  if (!stats && !inventory && !homeStorage) {
+  if (!stats && !inventory) {
     return;
   }
   pendingStatsByName.delete(nameKey);
   pendingInventoryByName.delete(nameKey);
-  pendingHomeStorageByName.delete(nameKey);
   pendingMetaByName.delete(nameKey);
   lastWriteByName.set(nameKey, Date.now());
   try {
@@ -716,9 +454,6 @@ async function flushStats(nameKey) {
     if (inventory) {
       payload.inventory = inventory;
     }
-    if (homeStorage) {
-      payload.homeStorage = homeStorage;
-    }
     if (Number.isFinite(meta.lastStatUpdateAt)) {
       payload.lastStatUpdateAt = meta.lastStatUpdateAt;
     }
@@ -728,15 +463,12 @@ async function flushStats(nameKey) {
   }
 }
 
-export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt, inventory, homeStorage) {
+export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt, inventory) {
   if (stats) {
     pendingStatsByName.set(nameKey, { ...stats });
   }
   if (inventory) {
     pendingInventoryByName.set(nameKey, { ...inventory });
-  }
-  if (homeStorage) {
-    pendingHomeStorageByName.set(nameKey, { ...homeStorage });
   }
   if (Number.isFinite(lastStatUpdateAt)) {
     pendingMetaByName.set(nameKey, { lastStatUpdateAt });
@@ -760,16 +492,13 @@ export function saveStatsThrottled(nameKey, stats, lastStatUpdateAt, inventory, 
   pendingTimersByName.set(nameKey, timer);
 }
 
-export async function saveStatsImmediate(nameKey, stats, lastStatUpdateAt, inventory, homeStorage) {
+export async function saveStatsImmediate(nameKey, stats, lastStatUpdateAt, inventory) {
   if (!nameKey) return;
   if (stats) {
     pendingStatsByName.set(nameKey, { ...stats });
   }
   if (inventory) {
     pendingInventoryByName.set(nameKey, { ...inventory });
-  }
-  if (homeStorage) {
-    pendingHomeStorageByName.set(nameKey, { ...homeStorage });
   }
   if (Number.isFinite(lastStatUpdateAt)) {
     pendingMetaByName.set(nameKey, { lastStatUpdateAt });
@@ -780,104 +509,6 @@ export async function saveStatsImmediate(nameKey, stats, lastStatUpdateAt, inven
     pendingTimersByName.delete(nameKey);
   }
   await flushStats(nameKey);
-}
-
-export async function saveCustomization(nameKey, customization) {
-  if (!nameKey) return;
-  try {
-    await update(ref(db, `profiles/${nameKey}`), {
-      customization: mergeCustomization(customization),
-      updatedAt: Date.now()
-    });
-  } catch (error) {
-    console.error('Failed to save customization for', nameKey, error);
-  }
-}
-
-export async function saveCharacterModel(nameKey, modelPath) {
-  if (!nameKey) return;
-  if (!modelPath) return;
-  try {
-    await update(ref(db, `profiles/${nameKey}`), {
-      characterModel: modelPath,
-      updatedAt: Date.now()
-    });
-  } catch (error) {
-    console.error('Failed to save character model for', nameKey, error);
-  }
-}
-
-export async function saveSleepTimestamp(nameKey, sleepStartedAt) {
-  if (!nameKey) return;
-  try {
-    await update(ref(db, `profiles/${nameKey}`), {
-      sleepStartedAt: Number.isFinite(sleepStartedAt) ? sleepStartedAt : null,
-      updatedAt: Date.now()
-    });
-  } catch (error) {
-    console.error('Failed to save sleep timestamp for', nameKey, error);
-  }
-}
-
-export async function saveQuestState(nameKey, questState) {
-  if (!nameKey) return;
-  try {
-    await update(ref(db, `profiles/${nameKey}`), {
-      quests: mergeQuests(questState),
-      updatedAt: Date.now()
-    });
-  } catch (error) {
-    console.error('Failed to save quest state for', nameKey, error);
-  }
-}
-
-
-export async function saveAchievementState(nameKey, achievementState) {
-  if (!nameKey) return;
-  try {
-    await update(ref(db, `profiles/${nameKey}`), {
-      achievements: mergeAchievements(achievementState),
-      updatedAt: Date.now()
-    });
-  } catch (error) {
-    console.error('Failed to save achievement state for', nameKey, error);
-  }
-}
-
-export async function saveWalkingStats(nameKey, walkingStats) {
-  if (!nameKey) return;
-  try {
-    await update(ref(db, `profiles/${nameKey}`), {
-      walkingStats: mergeWalkingStats(walkingStats),
-      updatedAt: Date.now()
-    });
-  } catch (error) {
-    console.error('Failed to save walking stats for', nameKey, error);
-  }
-}
-
-export async function saveCompanions(nameKey, companions) {
-  if (!nameKey) return;
-  try {
-    await update(ref(db, `profiles/${nameKey}`), {
-      companions: companions && typeof companions === 'object' ? companions : {},
-      updatedAt: Date.now()
-    });
-  } catch (error) {
-    console.error('Failed to save companions for', nameKey, error);
-  }
-}
-
-export async function getSleepTimestamp(nameKey) {
-  if (!nameKey) return null;
-  try {
-    const snap = await get(ref(db, `profiles/${nameKey}/sleepStartedAt`));
-    const value = snap.val();
-    return Number.isFinite(value) ? value : null;
-  } catch (error) {
-    console.error('Failed to fetch sleep timestamp for', nameKey, error);
-    return null;
-  }
 }
 
 export async function deleteProfileData(nameKey, playerName) {
@@ -891,7 +522,6 @@ export async function deleteProfileData(nameKey, playerName) {
   }
   pendingStatsByName.delete(nameKey);
   pendingInventoryByName.delete(nameKey);
-  pendingHomeStorageByName.delete(nameKey);
   pendingMetaByName.delete(nameKey);
   lastWriteByName.delete(nameKey);
 

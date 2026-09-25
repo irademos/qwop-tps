@@ -1,64 +1,30 @@
-import * as THREE from 'three';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { formatDistanceForDisplay, getDistanceUnitPreference, setDistanceUnitPreference } from '../player/distanceUnits.js';
-
 const TAB_KEY = 'settings:lastTab';
 
-const BASE_TABS = [
+const TABS = [
   { id: 'character', label: 'Character' },
-  { id: 'quests', label: 'Quests' },
-  { id: 'achievements', label: 'Achievements' },
   { id: 'multiplayer', label: 'Multiplayer' },
-  { id: 'location', label: 'World' },
   { id: 'display', label: 'Display' },
+  { id: 'swordgyro', label: 'Sword Gyro' },
   { id: 'about', label: 'About' },
   { id: 'account', label: 'Account' },
   { id: 'developer', label: 'Developer' }
 ];
-const SWORD_GYRO_TAB = { id: 'swordgyro', label: 'Sword Gyro' };
-function getTabs() {
-  return window.phoneSwordMode ? [...BASE_TABS, SWORD_GYRO_TAB] : BASE_TABS;
-}
-// Keep TABS as a reference but populate dynamically at build time
-let TABS = BASE_TABS;
 const CHARACTER_STATS = [
   { key: 'level', label: 'Level' },
   { key: 'xp', label: 'XP' },
-  { key: 'monsterKills', label: 'Monster Kills' },
-  { key: 'strength', label: 'Strength' },
-  { key: 'agility', label: 'Agility' },
-  { key: 'smarts', label: 'Smarts' },
-  { key: 'charm', label: 'Charm' },
-  { key: 'luck', label: 'Luck' },
   { key: 'coins', label: 'Coins' }
 ];
-const PERCENT_STATS = new Set(['health', 'hunger', 'energy']);
 
 let overlay;
 let panel;
-let inventoryOverlay;
-let inventoryPanel;
 let leaderboardOverlay;
 let leaderboardPanel;
 let context = {};
 let elements = {};
-let activeTab = 'character';
 let lastFocusedElement = null;
 let isMobileView = false;
 let isListView = false;
-let selectedInventoryId = null;
 let isEditingName = false;
-let previewState = {
-  active: false,
-  renderer: null,
-  scene: null,
-  camera: null,
-  model: null,
-  frameId: null,
-  loadingToken: null,
-  resizeObserver: null
-};
-
 function createElement(tag, className, text) {
   const el = document.createElement(tag);
   if (className) el.className = className;
@@ -73,27 +39,13 @@ function formatTimestamp(ts) {
   return date.toLocaleString();
 }
 
-function formatDistance(distance) { return formatDistanceForDisplay(distance); }
-
-function formatCoordinate(value) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  return value.toFixed(6);
-}
-
-function formatMeters(value) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  if (getDistanceUnitPreference() === 'km') {
-    return `${value.toFixed(2)} m`;
-  }
-  return `${(value * 3.28084).toFixed(2)} ft`;
-  
+function formatDistance(distance) {
+  if (typeof distance !== 'number' || Number.isNaN(distance)) return '—';
+  return `${Math.round(distance)} m`;
 }
 
 function formatStatValue(key, value) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  if (PERCENT_STATS.has(key)) {
-    return `${Math.round(value)}%`;
-  }
   if (key === 'level') {
     return `${Math.max(1, Math.round(value))}`;
   }
@@ -147,7 +99,6 @@ function buildHeader() {
 }
 
 function buildTabs() {
-  TABS = getTabs();
   const tablist = createElement('div', 'settings-tabs');
   tablist.setAttribute('role', 'tablist');
   elements.tabs = {};
@@ -190,23 +141,6 @@ function buildCharacterPanel() {
   nameRow.append(nameInput, nameSaveButton);
   nameGroup.append(nameLabel, nameRow, nameStatus);
 
-  const characterGroup = createElement('div', 'settings-field');
-  const characterLabel = createElement('label', 'settings-label', 'Character');
-  characterLabel.setAttribute('for', 'settings-character-select');
-  const characterSelect = createElement('select', 'settings-select');
-  characterSelect.id = 'settings-character-select';
-  characterGroup.append(characterLabel, characterSelect);
-
-  const previewWrapper = createElement('div', 'character-preview');
-  const previewCanvas = document.createElement('canvas');
-  previewCanvas.className = 'character-preview-canvas';
-  const previewFallback = createElement('div', 'character-preview-fallback', 'Preview unavailable');
-  previewWrapper.append(previewCanvas, previewFallback);
-
-  const customizeButton = createElement('button', 'settings-button', 'Customize');
-  customizeButton.type = 'button';
-  customizeButton.dataset.action = 'customize';
-
   const statsTitle = createElement('h3', 'settings-section-title', 'Stats');
   const statsGrid = createElement('div', 'settings-stats-grid');
   elements.characterStatFields = {};
@@ -220,16 +154,13 @@ function buildCharacterPanel() {
     elements.characterStatFields[key] = statValue;
   });
 
-  // Phone Sword Stats section (only visible in phone sword mode)
-  const psStatsTitle = createElement('h3', 'settings-section-title', 'Phone Sword Stats');
+  const psStatsTitle = createElement('h3', 'settings-section-title', 'Sword Showdown Stats');
   psStatsTitle.id = 'ps-stats-title';
-  if (!window.phoneSwordMode) psStatsTitle.style.display = 'none';
   const psStatsGrid = createElement('div', 'settings-stats-grid');
   psStatsGrid.id = 'ps-stats-grid';
-  if (!window.phoneSwordMode) psStatsGrid.style.display = 'none';
   const PS_STAT_DEFS = [
-    { key: 'kills', label: 'PS Kills' },
-    { key: 'deaths', label: 'PS Deaths' },
+    { key: 'kills', label: 'Kills' },
+    { key: 'deaths', label: 'Deaths' },
     { key: 'highestStage', label: 'Highest Stage' }
   ];
   elements.phoneSwordStatFields = {};
@@ -243,15 +174,11 @@ function buildCharacterPanel() {
     elements.phoneSwordStatFields[key] = statValue;
   });
 
-  panelEl.append(nameGroup, characterGroup, previewWrapper, customizeButton, statsTitle, statsGrid, psStatsTitle, psStatsGrid);
+  panelEl.append(nameGroup, statsTitle, statsGrid, psStatsTitle, psStatsGrid);
 
   elements.nameInput = nameInput;
   elements.nameSaveButton = nameSaveButton;
   elements.nameStatus = nameStatus;
-  elements.characterSelect = characterSelect;
-  elements.previewCanvas = previewCanvas;
-  elements.previewFallback = previewFallback;
-  elements.customizeButton = customizeButton;
 
   return panelEl;
 }
@@ -296,165 +223,6 @@ function buildMultiplayerPanel() {
   return panelEl;
 }
 
-function buildInventoryPanel() {
-  const panelEl = createElement('section', 'settings-tabpanel');
-  panelEl.id = 'panel-inventory';
-  panelEl.dataset.panel = 'inventory';
-  panelEl.setAttribute('role', 'tabpanel');
-  panelEl.setAttribute('aria-labelledby', 'tab-inventory');
-
-  const grid = createElement('div', 'inventory-grid');
-  const emptyState = createElement('div', 'settings-muted');
-  emptyState.classList.add('inventory-empty');
-  emptyState.textContent = 'Empty';
-  const details = createElement('div', 'inventory-details');
-  const detailsText = createElement('div', 'inventory-details-text', 'Select an item to see details.');
-  const actions = createElement('div', 'inventory-actions');
-  const dropButton = createElement('button', 'settings-button', 'Drop');
-  dropButton.type = 'button';
-  dropButton.dataset.inventoryAction = 'drop';
-  const infoButton = createElement('button', 'settings-button', 'Info');
-  infoButton.type = 'button';
-  infoButton.dataset.inventoryAction = 'info';
-  const useButton = createElement('button', 'settings-button', 'Use');
-  useButton.type = 'button';
-  useButton.dataset.inventoryAction = 'use';
-  const equipButton = createElement('button', 'settings-button', 'Equip');
-  equipButton.type = 'button';
-  equipButton.dataset.inventoryAction = 'equip';
-  const eatButton = createElement('button', 'settings-button', 'Eat');
-  eatButton.type = 'button';
-  eatButton.dataset.inventoryAction = 'eat';
-  const buildButton = createElement('button', 'settings-button', 'Build');
-  buildButton.type = 'button';
-  buildButton.dataset.inventoryAction = 'build';
-  actions.append(dropButton, infoButton, useButton, equipButton, eatButton, buildButton);
-  details.append(detailsText, actions);
-  panelEl.append(grid, emptyState, details);
-
-  const infoModal = createElement('div', 'inventory-info-modal hidden');
-  infoModal.setAttribute('role', 'dialog');
-  infoModal.setAttribute('aria-modal', 'true');
-  const infoCard = createElement('div', 'inventory-info-card');
-  const infoHeader = createElement('div', 'inventory-info-header');
-  const infoClose = createElement('button', 'settings-close', '✕');
-  infoClose.type = 'button';
-  infoClose.dataset.inventoryAction = 'close-info';
-  infoClose.setAttribute('aria-label', 'Close item info');
-  const infoTitle = createElement('h3', 'settings-section-title', 'Item Info');
-  infoHeader.append(infoTitle, infoClose);
-  const infoText = createElement('div', 'settings-muted');
-  infoText.textContent = '';
-  infoCard.append(infoHeader, infoText);
-  infoModal.append(infoCard);
-  panelEl.append(infoModal);
-
-  elements.inventoryGrid = grid;
-  elements.inventoryEmpty = emptyState;
-  elements.inventoryDetails = detailsText;
-  elements.inventoryDetailsContainer = details;
-  elements.inventoryActions = actions;
-  elements.inventoryDropButton = dropButton;
-  elements.inventoryInfoButton = infoButton;
-  elements.inventoryUseButton = useButton;
-  elements.inventoryEquipButton = equipButton;
-  elements.inventoryEatButton = eatButton;
-  elements.inventoryBuildButton = buildButton;
-  elements.inventoryInfoModal = infoModal;
-  elements.inventoryInfoText = infoText;
-
-  return panelEl;
-}
-
-
-function buildQuestsPanel() {
-  const panelEl = createElement('section', 'settings-tabpanel');
-  panelEl.id = 'panel-quests';
-  panelEl.dataset.panel = 'quests';
-  panelEl.setAttribute('role', 'tabpanel');
-  panelEl.setAttribute('aria-labelledby', 'tab-quests');
-
-  const title = createElement('h3', 'settings-section-title', 'Accepted Quests');
-  const list = createElement('ul', 'settings-list');
-  const emptyState = createElement('div', 'settings-muted', 'Accept a quest by talking to the tutorial friendly near the origin.');
-
-  panelEl.append(title, list, emptyState);
-
-  elements.questList = list;
-  elements.questEmpty = emptyState;
-
-  return panelEl;
-}
-
-function buildAchievementsPanel() {
-  const panelEl = createElement('section', 'settings-tabpanel');
-  panelEl.id = 'panel-achievements';
-  panelEl.dataset.panel = 'achievements';
-  panelEl.setAttribute('role', 'tabpanel');
-  panelEl.setAttribute('aria-labelledby', 'tab-achievements');
-
-  const title = createElement('h3', 'settings-section-title', 'Achievements');
-  const list = createElement('div', 'achievement-list');
-  const emptyState = createElement('div', 'settings-muted', 'No achievements yet.');
-  panelEl.append(title, list, emptyState);
-
-  elements.achievementList = list;
-  elements.achievementEmpty = emptyState;
-  return panelEl;
-}
-
-function buildLocationPanel() {
-  const panelEl = createElement('section', 'settings-tabpanel');
-  panelEl.id = 'panel-location';
-  panelEl.dataset.panel = 'location';
-  panelEl.setAttribute('role', 'tabpanel');
-  panelEl.setAttribute('aria-labelledby', 'tab-location');
-
-  const rows = [
-    ['Status', 'location-status'],
-    ['Source', 'location-source'],
-    ['World X', 'location-x'],
-    ['World Y', 'location-y'],
-    ['World Z', 'location-z'],
-    ['Heading', 'location-heading'],
-    ['Speed', 'location-speed'],
-    ['Last Update', 'location-time']
-  ];
-
-  rows.forEach(([label, field]) => {
-    const row = createElement('div', 'settings-row');
-    row.innerHTML = `<span>${label}</span><span data-field="${field}">—</span>`;
-    panelEl.appendChild(row);
-    if (field === 'location-source') {
-      elements.locationSourceRow = row;
-    }
-  });
-
-  const guidance = createElement('div', 'settings-muted');
-  guidance.dataset.field = 'location-guidance';
-  guidance.textContent = '';
-
-  const retryButton = createElement('button', 'settings-button', 'Retry');
-  retryButton.type = 'button';
-  retryButton.dataset.action = 'location-retry';
-
-  panelEl.append(guidance, retryButton);
-
-  elements.locationFields = {
-    status: panelEl.querySelector('[data-field="location-status"]'),
-    source: panelEl.querySelector('[data-field="location-source"]'),
-    x: panelEl.querySelector('[data-field="location-x"]'),
-    y: panelEl.querySelector('[data-field="location-y"]'),
-    z: panelEl.querySelector('[data-field="location-z"]'),
-    heading: panelEl.querySelector('[data-field="location-heading"]'),
-    speed: panelEl.querySelector('[data-field="location-speed"]'),
-    time: panelEl.querySelector('[data-field="location-time"]'),
-    guidance
-  };
-
-  return panelEl;
-}
-
 function buildDeveloperPanel() {
   const panelEl = createElement('section', 'settings-tabpanel');
   panelEl.id = 'panel-developer';
@@ -470,112 +238,12 @@ function buildDeveloperPanel() {
   copyDebugButton.type = 'button';
   copyDebugButton.dataset.action = 'copy-debug';
 
-  const resetOriginButton = createElement('button', 'settings-button', 'Reset Origin');
-  resetOriginButton.type = 'button';
-  resetOriginButton.dataset.action = 'reset-origin';
-
-  const levelBuilderButton = createElement('button', 'settings-button', 'Level Builder');
-  levelBuilderButton.type = 'button';
-  levelBuilderButton.id = 'level-builder-button';
-
   const serverToolsTitle = createElement('h3', 'settings-section-title', 'Server Tools');
   const clearServerButton = createElement('button', 'settings-button', 'Clear Rooms/Sessions Cache');
   clearServerButton.type = 'button';
   clearServerButton.dataset.action = 'clear-server-state';
   const clearServerStatus = createElement('div', 'settings-muted');
   clearServerStatus.textContent = 'Clears server-side rooms, sessions, and caches.';
-
-  const debugLocationTitle = createElement('h3', 'settings-section-title', 'Debug World Position');
-
-  const debugToggleRow = createElement('div', 'settings-row');
-  const debugToggleLabel = createElement('label', 'settings-label', 'Enable Debug World Position');
-  debugToggleLabel.setAttribute('for', 'debug-location-toggle');
-  const debugToggle = createElement('input', 'settings-checkbox');
-  debugToggle.type = 'checkbox';
-  debugToggle.id = 'debug-location-toggle';
-  debugToggleRow.append(debugToggleLabel, debugToggle);
-
-  const debugLocationGrid = createElement('div', 'settings-debug-grid');
-  const debugLatGroup = createElement('div', 'settings-field');
-  const debugLatLabel = createElement('label', 'settings-label', 'World X');
-  debugLatLabel.setAttribute('for', 'debug-location-x');
-  const debugLatInput = createElement('input', 'settings-input');
-  debugLatInput.id = 'debug-location-x';
-  debugLatInput.type = 'number';
-  debugLatInput.step = '0.000001';
-  debugLatInput.inputMode = 'decimal';
-  debugLatGroup.append(debugLatLabel, debugLatInput);
-
-  const debugLonGroup = createElement('div', 'settings-field');
-  const debugLonLabel = createElement('label', 'settings-label', 'World Z');
-  debugLonLabel.setAttribute('for', 'debug-location-z');
-  const debugLonInput = createElement('input', 'settings-input');
-  debugLonInput.id = 'debug-location-z';
-  debugLonInput.type = 'number';
-  debugLonInput.step = '0.000001';
-  debugLonInput.inputMode = 'decimal';
-  debugLonGroup.append(debugLonLabel, debugLonInput);
-
-  const debugAccuracyGroup = createElement('div', 'settings-field');
-  const debugAccuracyLabel = createElement('label', 'settings-label', 'Accuracy (m)');
-  debugAccuracyLabel.setAttribute('for', 'debug-location-accuracy');
-  const debugAccuracyInput = createElement('input', 'settings-input');
-  debugAccuracyInput.id = 'debug-location-accuracy';
-  debugAccuracyInput.type = 'number';
-  debugAccuracyInput.step = '0.5';
-  debugAccuracyInput.min = '0.5';
-  debugAccuracyInput.inputMode = 'decimal';
-  debugAccuracyGroup.append(debugAccuracyLabel, debugAccuracyInput);
-
-  debugLocationGrid.append(debugLatGroup, debugLonGroup, debugAccuracyGroup);
-
-  const debugApplyButton = createElement('button', 'settings-button', 'Apply Debug World Position');
-  debugApplyButton.type = 'button';
-  debugApplyButton.dataset.action = 'apply-debug-position';
-
-  const debugStepRow = createElement('div', 'settings-debug-step');
-  const debugStepLabel = createElement('label', 'settings-label', 'Step (m)');
-  debugStepLabel.setAttribute('for', 'debug-location-step');
-  const debugStepInput = createElement('input', 'settings-input');
-  debugStepInput.id = 'debug-location-step';
-  debugStepInput.type = 'number';
-  debugStepInput.step = '1';
-  debugStepInput.min = '1';
-  debugStepInput.value = '5';
-  debugStepInput.inputMode = 'decimal';
-  debugStepRow.append(debugStepLabel, debugStepInput);
-
-  const debugStepButtons = createElement('div', 'settings-debug-buttons');
-  const stepNorthButton = createElement('button', 'settings-button', 'Step North');
-  stepNorthButton.type = 'button';
-  stepNorthButton.dataset.action = 'step-debug';
-  stepNorthButton.dataset.direction = 'north';
-  const stepSouthButton = createElement('button', 'settings-button', 'Step South');
-  stepSouthButton.type = 'button';
-  stepSouthButton.dataset.action = 'step-debug';
-  stepSouthButton.dataset.direction = 'south';
-  const stepEastButton = createElement('button', 'settings-button', 'Step East');
-  stepEastButton.type = 'button';
-  stepEastButton.dataset.action = 'step-debug';
-  stepEastButton.dataset.direction = 'east';
-  const stepWestButton = createElement('button', 'settings-button', 'Step West');
-  stepWestButton.type = 'button';
-  stepWestButton.dataset.action = 'step-debug';
-  stepWestButton.dataset.direction = 'west';
-  debugStepButtons.append(stepNorthButton, stepSouthButton, stepEastButton, stepWestButton);
-
-  const originSection = createElement('div', 'settings-section');
-  const originRows = [
-    ['Origin', 'debug-origin'],
-    ['Current', 'debug-current'],
-    ['Player (x,z)', 'debug-player'],
-    ['Tile', 'debug-tile']
-  ];
-  originRows.forEach(([label, field]) => {
-    const row = createElement('div', 'settings-row');
-    row.innerHTML = `<span>${label}</span><span data-field="${field}">—</span>`;
-    originSection.appendChild(row);
-  });
 
   const consoleLog = createElement('div', 'settings-console');
   consoleLog.id = 'console-log';
@@ -584,38 +252,15 @@ function buildDeveloperPanel() {
   panelEl.append(
     consoleButton,
     copyDebugButton,
-    resetOriginButton,
     serverToolsTitle,
     clearServerButton,
     clearServerStatus,
-    debugLocationTitle,
-    debugToggleRow,
-    debugLocationGrid,
-    debugApplyButton,
-    debugStepRow,
-    debugStepButtons,
-    levelBuilderButton,
-    originSection,
     consoleLog
   );
   elements.consoleButton = consoleButton;
   elements.consoleLog = consoleLog;
   elements.clearServerButton = clearServerButton;
   elements.clearServerStatus = clearServerStatus;
-  elements.debugLocationFields = {
-    toggle: debugToggle,
-    x: debugLatInput,
-    z: debugLonInput,
-    accuracy: debugAccuracyInput,
-    step: debugStepInput
-  };
-  elements.debugFields = {
-    origin: originSection.querySelector('[data-field="debug-origin"]'),
-    current: originSection.querySelector('[data-field="debug-current"]'),
-    player: originSection.querySelector('[data-field="debug-player"]'),
-    tile: originSection.querySelector('[data-field="debug-tile"]')
-  };
-
   return panelEl;
 }
 
@@ -662,18 +307,6 @@ function buildDisplayPanel() {
     performanceSelect.appendChild(option);
   });
   performanceGroup.append(performanceLabel, performanceSelect);
-  const unitsGroup = createElement('div', 'settings-field');
-  const unitsLabel = createElement('label', 'settings-label', 'Distance Units');
-  unitsLabel.setAttribute('for', 'settings-distance-units');
-  const unitsSelect = createElement('select', 'settings-select');
-  unitsSelect.id = 'settings-distance-units';
-  [{ value: 'km', label: 'Kilometers / meters' }, { value: 'miles', label: 'Miles / feet' }].forEach(({ value, label }) => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
-    unitsSelect.appendChild(option);
-  });
-  unitsGroup.append(unitsLabel, unitsSelect);
   const firstPersonGroup = createElement('div', 'settings-field');
   const firstPersonLabel = createElement('label', 'settings-label', 'First Person View');
   firstPersonLabel.setAttribute('for', 'settings-display-first-person');
@@ -760,20 +393,6 @@ function buildDisplayPanel() {
     max: 2,
     step: 0.05
   });
-  const groundField = createRangeField({
-    id: 'settings-display-ground',
-    label: 'Ground Brightness',
-    min: 0.2,
-    max: 1.6,
-    step: 0.05
-  });
-  const buildingField = createRangeField({
-    id: 'settings-display-building',
-    label: 'Building Brightness',
-    min: 0.2,
-    max: 1.6,
-    step: 0.05
-  });
   const skyField = createRangeField({
     id: 'settings-display-sky',
     label: 'Sky Brightness',
@@ -784,78 +403,6 @@ function buildDisplayPanel() {
 
   const hint = createElement('div', 'settings-muted');
   hint.textContent = 'Auto mode uses local time to switch between day and night lighting.';
-
-  const phoneSwordRecalGroup = createElement('div', 'settings-field');
-  phoneSwordRecalGroup.hidden = !window.phoneSwordMode;
-  const phoneSwordRecalLabel = createElement('label', 'settings-label', 'Phone Sword');
-  const phoneSwordRecalBtn = createElement('button', 'settings-button settings-button-secondary', 'Recalibrate Sword');
-  phoneSwordRecalBtn.id = 'settings-phone-sword-recal';
-  phoneSwordRecalBtn.type = 'button';
-  phoneSwordRecalBtn.addEventListener('click', () => {
-    if (window.phoneSwordRecalibrate) {
-      window.phoneSwordRecalibrate();
-      phoneSwordRecalBtn.textContent = '✅ Calibrated!';
-      setTimeout(() => { phoneSwordRecalBtn.textContent = 'Recalibrate Sword'; }, 1500);
-    } else {
-      document.getElementById('phone-sword-calib-modal')?.classList.remove('hidden');
-    }
-  });
-  const phoneSwordRecalHint = createElement('div', 'settings-muted');
-  phoneSwordRecalHint.textContent = 'Hold the phone in its resting position, then tap to set neutral. Resets all calibration state.';
-  phoneSwordRecalGroup.append(phoneSwordRecalLabel, phoneSwordRecalBtn, phoneSwordRecalHint);
-
-  const cameraPreviewGroup = createElement('div', 'settings-field');
-  const cameraPreviewLabel = createElement('label', 'settings-label', 'Camera Feed');
-  const cameraPreviewBtn = createElement('button', 'settings-button settings-button-secondary', 'View Camera Feed');
-  cameraPreviewBtn.id = 'settings-camera-preview-btn';
-  cameraPreviewBtn.type = 'button';
-  const cameraPreviewHint = createElement('div', 'settings-muted');
-  cameraPreviewHint.textContent = 'Preview the camera feed used for hand tracking.';
-  cameraPreviewGroup.append(cameraPreviewLabel, cameraPreviewBtn, cameraPreviewHint);
-
-  cameraPreviewBtn.addEventListener('click', () => {
-    const videoEl = document.querySelector('#hand-tracking-container video');
-    if (!videoEl) {
-      alert('Camera feed is not active. Enable hand tracking first.');
-      return;
-    }
-
-    const overlay = createElement('div', '');
-    overlay.style.cssText = `
-      position: fixed; inset: 0; z-index: 10000;
-      background: rgba(0,0,0,0.85);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 12px;
-    `;
-
-    const previewVideo = document.createElement('video');
-    previewVideo.srcObject = videoEl.srcObject;
-    previewVideo.autoplay = true;
-    previewVideo.playsInline = true;
-    previewVideo.muted = true;
-    previewVideo.style.cssText = `
-      max-width: 90vw; max-height: 70vh;
-      border-radius: 8px; background: #000;
-      transform: scaleX(-1);
-    `;
-
-    const closeBtn = createElement('button', 'settings-button', 'Close');
-    closeBtn.style.cssText = 'min-width: 120px;';
-    closeBtn.addEventListener('click', () => {
-      previewVideo.srcObject = null;
-      overlay.remove();
-    });
-
-    overlay.append(previewVideo, closeBtn);
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) {
-        previewVideo.srcObject = null;
-        overlay.remove();
-      }
-    });
-    document.body.appendChild(overlay);
-  });
 
   const tpCameraLabel = createElement('label', 'settings-label', '3rd Person Camera');
   const tpCameraHint = createElement('div', 'settings-muted');
@@ -875,12 +422,10 @@ function buildDisplayPanel() {
     sfxVolumeField.field,
     modeGroup,
     performanceGroup,
-    unitsGroup,
     firstPersonGroup,
     gyroGroup,
     gyroRecalGroup,
     highContrastGroup,
-    cameraPreviewGroup,
     tpCameraHeaderGroup,
     cameraDistField.field,
     cameraHeightField.field,
@@ -890,8 +435,6 @@ function buildDisplayPanel() {
     lightSectionTitle,
     ambientField.field,
     directionalField.field,
-    groundField.field,
-    buildingField.field,
     skyField.field,
     hint
   );
@@ -903,7 +446,6 @@ function buildDisplayPanel() {
     sfxVolumeValue: sfxVolumeField.valueLabel,
     modeSelect,
     performanceSelect,
-    unitsSelect,
     firstPersonToggle,
     gyroToggle,
     gyroRecalBtn,
@@ -922,15 +464,11 @@ function buildDisplayPanel() {
     sliders: {
       ambientIntensity: ambientField.input,
       directionalIntensity: directionalField.input,
-      groundBrightness: groundField.input,
-      buildingBrightness: buildingField.input,
       skyBrightness: skyField.input
     },
     values: {
       ambientIntensity: ambientField.valueLabel,
       directionalIntensity: directionalField.valueLabel,
-      groundBrightness: groundField.valueLabel,
-      buildingBrightness: buildingField.valueLabel,
       skyBrightness: skyField.valueLabel
     }
   };
@@ -1017,26 +555,12 @@ function buildAboutPanel() {
   return panelEl;
 }
 
-
 function buildAccountPanel() {
   const panelEl = createElement('section', 'settings-tabpanel');
   panelEl.id = 'panel-account';
   panelEl.dataset.panel = 'account';
   panelEl.setAttribute('role', 'tabpanel');
   panelEl.setAttribute('aria-labelledby', 'tab-account');
-
-  const homeDescription = createElement(
-    'div',
-    'settings-muted',
-    'Clear your home location to select a new home while standing in a building.'
-  );
-
-  const clearHomeButton = createElement('button', 'settings-button', 'Clear Home Location');
-  clearHomeButton.type = 'button';
-  clearHomeButton.dataset.action = 'clear-home-location';
-
-  const clearHomeStatus = createElement('div', 'settings-muted');
-  clearHomeStatus.dataset.field = 'clear-home-status';
 
   const description = createElement(
     'div',
@@ -1067,17 +591,12 @@ function buildAccountPanel() {
   status.dataset.field = 'delete-account-status';
 
   panelEl.append(
-    homeDescription,
-    clearHomeButton,
-    clearHomeStatus,
     description,
     deleteButton,
     confirm,
     status
   );
 
-  elements.clearHomeButton = clearHomeButton;
-  elements.clearHomeStatus = clearHomeStatus;
   elements.deleteAccountButton = deleteButton;
   elements.deleteAccountConfirm = confirm;
   elements.deleteAccountConfirmYes = confirmYes;
@@ -1183,36 +702,18 @@ function buildSwordGyroPanel() {
 
 function buildPanels() {
   const body = createElement('div', 'settings-body');
-  const characterPanel = buildCharacterPanel();
-  const multiplayerPanel = buildMultiplayerPanel();
-  const questsPanel = buildQuestsPanel();
-  const achievementsPanel = buildAchievementsPanel();
-  const locationPanel = buildLocationPanel();
-  const displayPanel = buildDisplayPanel();
-  const aboutPanel = buildAboutPanel();
-  const accountPanel = buildAccountPanel();
-  const developerPanel = buildDeveloperPanel();
-  const panelsToAppend = [characterPanel, questsPanel, achievementsPanel, multiplayerPanel, locationPanel, displayPanel, accountPanel, aboutPanel, developerPanel];
   elements.panels = {
-    character: characterPanel,
-    multiplayer: multiplayerPanel,
-    quests: questsPanel,
-    achievements: achievementsPanel,
-    location: locationPanel,
-    display: displayPanel,
-    about: aboutPanel,
-    account: accountPanel,
-    developer: developerPanel
+    character: buildCharacterPanel(),
+    multiplayer: buildMultiplayerPanel(),
+    display: buildDisplayPanel(),
+    swordgyro: buildSwordGyroPanel(),
+    about: buildAboutPanel(),
+    account: buildAccountPanel(),
+    developer: buildDeveloperPanel()
   };
-  if (window.phoneSwordMode) {
-    const swordGyroPanel = buildSwordGyroPanel();
-    panelsToAppend.push(swordGyroPanel);
-    elements.panels.swordgyro = swordGyroPanel;
-  }
-  body.append(...panelsToAppend);
+  body.append(...Object.values(elements.panels));
   return body;
 }
-
 
 function buildLeaderboardOverlay() {
   leaderboardOverlay = document.getElementById('leaderboard-overlay');
@@ -1242,28 +743,17 @@ function buildLeaderboardOverlay() {
 
   const tabs = createElement('div', 'leaderboard-tabs');
   tabs.setAttribute('role', 'tablist');
-  const killsTab = createElement('button', 'leaderboard-tab is-active', 'Top Kills');
+  const killsTab = createElement('button', 'leaderboard-tab is-active', '⚔️ Top Kills');
   killsTab.type = 'button';
   killsTab.dataset.leaderboardTab = 'kills';
   killsTab.setAttribute('role', 'tab');
   killsTab.setAttribute('aria-selected', 'true');
-  const xpTab = createElement('button', 'leaderboard-tab', 'Top XP');
-  xpTab.type = 'button';
-  xpTab.dataset.leaderboardTab = 'xp';
-  xpTab.setAttribute('role', 'tab');
-  xpTab.setAttribute('aria-selected', 'false');
-  // Phone Sword mode tabs (shown in all modes so players can browse PS scores)
-  const psKillsTab = createElement('button', 'leaderboard-tab leaderboard-tab-ps', '⚔️ PS Kills');
-  psKillsTab.type = 'button';
-  psKillsTab.dataset.leaderboardTab = 'ps-kills';
-  psKillsTab.setAttribute('role', 'tab');
-  psKillsTab.setAttribute('aria-selected', 'false');
-  const psStageTab = createElement('button', 'leaderboard-tab leaderboard-tab-ps', '⚔️ PS Stage');
-  psStageTab.type = 'button';
-  psStageTab.dataset.leaderboardTab = 'ps-stage';
-  psStageTab.setAttribute('role', 'tab');
-  psStageTab.setAttribute('aria-selected', 'false');
-  tabs.append(killsTab, xpTab, psKillsTab, psStageTab);
+  const stageTab = createElement('button', 'leaderboard-tab', '⚔️ Top Stage');
+  stageTab.type = 'button';
+  stageTab.dataset.leaderboardTab = 'stage';
+  stageTab.setAttribute('role', 'tab');
+  stageTab.setAttribute('aria-selected', 'false');
+  tabs.append(killsTab, stageTab);
 
   const body = createElement('div', 'leaderboard-body');
   const status = createElement('div', 'settings-muted', 'Loading leaderboard...');
@@ -1279,15 +769,15 @@ function buildLeaderboardOverlay() {
   leaderboardPanel.append(header, tabs, body, actions);
   leaderboardOverlay.replaceChildren(leaderboardPanel);
 
-  elements.leaderboardTabs = { kills: killsTab, xp: xpTab, 'ps-kills': psKillsTab, 'ps-stage': psStageTab };
+  elements.leaderboardTabs = { kills: killsTab, stage: stageTab };
   elements.leaderboardList = list;
   elements.leaderboardStatus = status;
   elements.leaderboardActiveTab = 'kills';
-  elements.leaderboardData = { topKills: [], topXp: [], psTopKills: [], psTopStage: [] };
+  elements.leaderboardData = { topKills: [], topStage: [] };
 }
 
 function setLeaderboardTab(tabId) {
-  const validTabs = ['kills', 'xp', 'ps-kills', 'ps-stage'];
+  const validTabs = ['kills', 'stage'];
   const safeTab = validTabs.includes(tabId) ? tabId : 'kills';
   elements.leaderboardActiveTab = safeTab;
   Object.entries(elements.leaderboardTabs || {}).forEach(([id, button]) => {
@@ -1301,20 +791,8 @@ function setLeaderboardTab(tabId) {
 function renderLeaderboard() {
   if (!elements.leaderboardList || !elements.leaderboardStatus) return;
   const activeTab = elements.leaderboardActiveTab;
-  let rows, valueLabel;
-  if (activeTab === 'xp') {
-    rows = elements.leaderboardData?.topXp || [];
-    valueLabel = 'XP';
-  } else if (activeTab === 'ps-kills') {
-    rows = elements.leaderboardData?.psTopKills || [];
-    valueLabel = 'PS kills';
-  } else if (activeTab === 'ps-stage') {
-    rows = elements.leaderboardData?.psTopStage || [];
-    valueLabel = 'stage';
-  } else {
-    rows = elements.leaderboardData?.topKills || [];
-    valueLabel = 'kills';
-  }
+  const rows = (activeTab === 'stage' ? elements.leaderboardData?.topStage : elements.leaderboardData?.topKills) || [];
+  const valueLabel = activeTab === 'stage' ? 'stage' : 'kills';
   elements.leaderboardList.innerHTML = '';
   if (!rows.length) {
     elements.leaderboardStatus.textContent = 'No scores yet.';
@@ -1344,18 +822,13 @@ async function openLeaderboardOverlay() {
   elements.leaderboardList.innerHTML = '';
   setLeaderboardTab(elements.leaderboardActiveTab || 'kills');
   try {
-    if (!context.appState?.getLeaderboards) {
+    if (!context.appState?.getPhoneSwordLeaderboards) {
       throw new Error('Leaderboards unavailable');
     }
-    const [regularData, psData] = await Promise.allSettled([
-      context.appState.getLeaderboards(10),
-      context.appState.getPhoneSwordLeaderboards?.(10) ?? Promise.resolve({ topKills: [], topDeaths: [], topStage: [] })
-    ]);
+    const data = await context.appState.getPhoneSwordLeaderboards(10);
     elements.leaderboardData = {
-      topKills: regularData.status === 'fulfilled' ? (regularData.value?.topKills ?? []) : [],
-      topXp: regularData.status === 'fulfilled' ? (regularData.value?.topXp ?? []) : [],
-      psTopKills: psData.status === 'fulfilled' ? (psData.value?.topKills ?? []) : [],
-      psTopStage: psData.status === 'fulfilled' ? (psData.value?.topStage ?? []) : []
+      topKills: data?.topKills ?? [],
+      topStage: data?.topStage ?? []
     };
     renderLeaderboard();
   } catch (error) {
@@ -1372,36 +845,10 @@ function closeLeaderboardOverlay() {
   syncOverlayBodyState();
 }
 
-function buildInventoryOverlay() {
-  if (!inventoryPanel) return;
-  inventoryPanel.innerHTML = '';
-  inventoryPanel.classList.add('settings-shell', 'inventory-shell');
-  inventoryPanel.setAttribute('role', 'dialog');
-  inventoryPanel.setAttribute('aria-modal', 'true');
-  inventoryPanel.setAttribute('aria-labelledby', 'inventory-title');
-  inventoryPanel.tabIndex = -1;
-
-  const header = createElement('div', 'settings-header');
-  const title = createElement('h2', 'settings-title', 'Inventory');
-  title.id = 'inventory-title';
-  const closeButton = createElement('button', 'settings-close', '✕');
-  closeButton.type = 'button';
-  closeButton.setAttribute('aria-label', 'Close inventory');
-  closeButton.dataset.action = 'close-inventory';
-  header.append(title, closeButton);
-
-  const body = createElement('div', 'settings-body inventory-body');
-  const inventoryBodyPanel = buildInventoryPanel();
-  inventoryBodyPanel.hidden = false;
-  body.append(inventoryBodyPanel);
-  inventoryPanel.append(header, body);
-}
-
 function setActiveTab(tabId) {
   const newTab = elements.tabs?.[tabId];
   const newPanel = elements.panels?.[tabId];
   if (!newTab || !newPanel) return;
-  activeTab = tabId;
   localStorage.setItem(TAB_KEY, tabId);
 
   Object.entries(elements.tabs).forEach(([id, button]) => {
@@ -1418,12 +865,6 @@ function setActiveTab(tabId) {
   if (isMobileView) {
     setListView(false);
   }
-
-  if (tabId === 'character') {
-    startPreview();
-  } else {
-    stopPreview();
-  }
 }
 
 function openOverlay() {
@@ -1438,9 +879,6 @@ function openOverlay() {
   } else {
     panel?.focus?.();
   }
-  if (activeTab === 'character') {
-    startPreview();
-  }
   updateUI();
 }
 
@@ -1449,28 +887,6 @@ function closeOverlay() {
   overlay.style.display = 'none';
   overlay.setAttribute('aria-hidden', 'true');
   syncOverlayBodyState();
-  stopPreview();
-  if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
-    lastFocusedElement.focus();
-  }
-}
-
-function openInventoryOverlay() {
-  if (!inventoryOverlay) return;
-  lastFocusedElement = document.activeElement;
-  inventoryOverlay.style.display = 'flex';
-  inventoryOverlay.setAttribute('aria-hidden', 'false');
-  syncOverlayBodyState();
-  inventoryPanel?.focus?.();
-  updateUI();
-}
-
-function closeInventoryOverlay() {
-  if (!inventoryOverlay) return;
-  inventoryOverlay.style.display = 'none';
-  inventoryOverlay.setAttribute('aria-hidden', 'true');
-  elements.inventoryInfoModal?.classList.add('hidden');
-  syncOverlayBodyState();
   if (lastFocusedElement && typeof lastFocusedElement.focus === 'function') {
     lastFocusedElement.focus();
   }
@@ -1478,9 +894,8 @@ function closeInventoryOverlay() {
 
 function syncOverlayBodyState() {
   const isSettingsOpen = overlay?.getAttribute('aria-hidden') === 'false';
-  const isInventoryOpen = inventoryOverlay?.getAttribute('aria-hidden') === 'false';
   const isLeaderboardOpen = leaderboardOverlay?.getAttribute('aria-hidden') === 'false';
-  document.body.classList.toggle('settings-open', isSettingsOpen || isInventoryOpen || isLeaderboardOpen);
+  document.body.classList.toggle('settings-open', isSettingsOpen || isLeaderboardOpen);
 }
 
 async function handleAction(target) {
@@ -1496,11 +911,6 @@ async function handleAction(target) {
     await openLeaderboardOverlay();
   } else if (action === 'reconnect') {
     context.multiplayer?.reconnect?.();
-  } else if (action === 'location-retry') {
-    context.location?.retry?.();
-  } else if (action === 'customize') {
-    closeOverlay();
-    void import('./customize.js').then(({ openCustomizeUI }) => openCustomizeUI());
   } else if (action === 'toggle-console') {
     const visible = elements.consoleLog.style.display === 'block';
     elements.consoleLog.style.display = visible ? 'none' : 'block';
@@ -1508,8 +918,6 @@ async function handleAction(target) {
   } else if (action === 'copy-debug') {
     const info = collectDebugInfo();
     navigator.clipboard?.writeText?.(info);
-  } else if (action === 'reset-origin') {
-    context.appState?.resetWorldOrigin?.();
   } else if (action === 'save-name') {
     if (!elements.nameInput) return;
     const desiredName = elements.nameInput.value.trim();
@@ -1575,52 +983,6 @@ async function handleAction(target) {
     } finally {
       clearServerButton.disabled = false;
     }
-  } else if (action === 'apply-debug-position') {
-    const x = parseFloat(elements.debugLocationFields?.x?.value);
-    const z = parseFloat(elements.debugLocationFields?.z?.value);
-    context.location?.setDebugLocation?.({ x, z });
-  } else if (action === 'step-debug') {
-    const stepValue = parseFloat(elements.debugLocationFields?.step?.value);
-    const stepMeters = Number.isFinite(stepValue) ? stepValue : 0;
-    const direction = target.dataset.direction;
-    if (!stepMeters || !direction) return;
-    const delta = { northMeters: 0, eastMeters: 0 };
-    if (direction === 'north') delta.northMeters = stepMeters;
-    if (direction === 'south') delta.northMeters = -stepMeters;
-    if (direction === 'east') delta.eastMeters = stepMeters;
-    if (direction === 'west') delta.eastMeters = -stepMeters;
-    context.location?.stepDebugLocation?.(delta);
-  } else if (action === 'clear-home-location') {
-    const { clearHomeButton, clearHomeStatus } = elements;
-    if (!context.appState?.clearHomeLocation) {
-      if (clearHomeStatus) {
-        clearHomeStatus.textContent = 'Home clearing is unavailable right now.';
-      }
-      return;
-    }
-    if (clearHomeStatus) {
-      clearHomeStatus.textContent = 'Clearing home location...';
-    }
-    if (clearHomeButton) {
-      clearHomeButton.disabled = true;
-    }
-    try {
-      const result = await context.appState.clearHomeLocation();
-      if (clearHomeStatus) {
-        clearHomeStatus.textContent = result?.status === 'ok'
-          ? 'Home location cleared.'
-          : 'Failed to clear home location.';
-      }
-    } catch (error) {
-      console.warn('Failed to clear home location:', error);
-      if (clearHomeStatus) {
-        clearHomeStatus.textContent = 'Failed to clear home location.';
-      }
-    } finally {
-      if (clearHomeButton) {
-        clearHomeButton.disabled = false;
-      }
-    }
   } else if (action === 'delete-account') {
     if (elements.deleteAccountConfirm) {
       elements.deleteAccountConfirm.hidden = false;
@@ -1666,174 +1028,10 @@ async function handleAction(target) {
   }
 }
 
-function renderInventory() {
-  if (!elements.inventoryGrid) return;
-  const inventory = context.appState?.getInventory?.() || {};
-  const entries = Object.entries(inventory).filter(([, item]) => (item?.count || 0) > 0);
-  const equippedItems = new Set(context.appState?.getEquippedInventoryItemIds?.() || []);
-  const fallbackIcons = {
-    iceGun: '❄️',
-    bow: '🏹',
-    bazooka: '🚀',
-    pistol: '🔫',
-    autumnSword: '🗡️',
-    hammer: '🔨',
-    lantern: '🏮',
-    shield: '🛡️',
-    apple: '🍎',
-    wood: '🪵',
-    meat: '🥩',
-    crab_meat: '🦀',
-    Salt: '🪨',
-    zombie_brains: '🧠'
-  };
-
-  elements.inventoryGrid.innerHTML = '';
-  if (!entries.length) {
-    elements.inventoryEmpty.style.display = 'block';
-    elements.inventoryDetails.textContent = 'Inventory is empty.';
-    if (elements.inventoryActions) {
-      elements.inventoryActions.style.display = 'none';
-    }
-    elements.inventoryDetailsContainer?.remove();
-    selectedInventoryId = null;
-    return;
-  }
-
-  elements.inventoryEmpty.style.display = 'none';
-  if (!selectedInventoryId || !inventory[selectedInventoryId]) {
-    selectedInventoryId = entries[0][0];
-  }
-
-  let selectedTile = null;
-  entries.forEach(([itemId, item]) => {
-    const button = createElement('button', 'inventory-tile');
-    button.type = 'button';
-    button.dataset.inventoryId = itemId;
-    button.setAttribute('aria-selected', itemId === selectedInventoryId ? 'true' : 'false');
-    button.classList.toggle('is-selected', itemId === selectedInventoryId);
-    button.classList.toggle('is-equipped', equippedItems.has(itemId));
-    if (itemId === selectedInventoryId) {
-      selectedTile = button;
-    }
-
-    const iconWrapper = createElement('div', 'inventory-icon-wrapper');
-    const fallbackIcon = fallbackIcons[itemId] || (itemId.startsWith('mushroom_') ? '🍄' : '🎒');
-    if (item.icon) {
-      const img = document.createElement('img');
-      img.className = 'inventory-icon';
-      img.alt = item.name || itemId;
-      img.loading = 'lazy';
-      img.src = item.icon;
-      img.addEventListener('error', () => {
-        img.remove();
-        const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcon);
-        iconWrapper.appendChild(fallback);
-      }, { once: true });
-      iconWrapper.appendChild(img);
-    } else {
-      const fallback = createElement('div', 'inventory-icon-fallback', fallbackIcon);
-      iconWrapper.appendChild(fallback);
-    }
-
-    button.appendChild(iconWrapper);
-
-    if (item.count && item.count > 1) {
-      const badge = createElement('span', 'inventory-badge', `${item.count}`);
-      button.appendChild(badge);
-    }
-
-    if (itemId === 'iceGun') {
-      const ammoCount = Number.isFinite(item?.['ice ammo']) ? item['ice ammo'] : 0;
-      const ammoLabel = createElement('span', 'inventory-ammo', `Ice ammo: ${ammoCount}`);
-      button.appendChild(ammoLabel);
-    }
-    if (itemId === 'bow') {
-      const ammoCount = Number.isFinite(item?.['arrow ammo']) ? item['arrow ammo'] : 0;
-      const ammoLabel = createElement('span', 'inventory-ammo', `Arrows: ${ammoCount}`);
-      button.appendChild(ammoLabel);
-    }
-    if (itemId === 'bazooka') {
-      const ammoCount = Number.isFinite(item?.missiles) ? item.missiles : 0;
-      const ammoLabel = createElement('span', 'inventory-ammo', `Missiles: ${ammoCount}`);
-      button.appendChild(ammoLabel);
-    }
-
-    elements.inventoryGrid.appendChild(button);
-  });
-
-  const selectedItem = inventory[selectedInventoryId];
-  if (elements.inventoryInfoModal && selectedInventoryId !== 'zombie_brains') {
-    elements.inventoryInfoModal.classList.add('hidden');
-  }
-
-  if (selectedItem) {
-    const itemActions = context.appState?.getInventoryItemActions?.(selectedInventoryId) || ['drop', 'equip'];
-    const isEquipped = equippedItems.has(selectedInventoryId);
-    const equippedText = isEquipped ? ' • Equipped' : '';
-    const countText = selectedItem.count ? ` • Qty ${selectedItem.count}` : '';
-    const ammoText = selectedInventoryId === 'iceGun'
-      ? ` • Ice ammo ${Number.isFinite(selectedItem?.['ice ammo']) ? selectedItem['ice ammo'] : 0}`
-      : selectedInventoryId === 'bow'
-        ? ` • Arrows ${Number.isFinite(selectedItem?.['arrow ammo']) ? selectedItem['arrow ammo'] : 0}`
-        : selectedInventoryId === 'bazooka'
-          ? ` • Missiles ${Number.isFinite(selectedItem?.missiles) ? selectedItem.missiles : 0}`
-          : '';
-    const shieldHealthText = selectedInventoryId === 'shield'
-      ? ` • Health ${Math.max(0, Math.round(Number.isFinite(selectedItem?.shieldHealth) ? selectedItem.shieldHealth : 0))}`
-      : '';
-    elements.inventoryDetails.textContent = `${selectedItem.name || selectedInventoryId}${equippedText}${countText}${ammoText}${shieldHealthText}`;
-    if (elements.inventoryActions) {
-      elements.inventoryActions.style.display = 'flex';
-    }
-    if (elements.inventoryEquipButton) {
-      const canEquip = itemActions.includes('equip');
-      elements.inventoryEquipButton.style.display = canEquip ? 'inline-flex' : 'none';
-      if (canEquip) {
-        elements.inventoryEquipButton.textContent = isEquipped ? 'Unequip' : 'Equip';
-        elements.inventoryEquipButton.dataset.inventoryAction =
-          isEquipped ? 'unequip' : 'equip';
-      }
-    }
-    if (elements.inventoryDropButton) {
-      const canDrop = itemActions.includes('drop');
-      elements.inventoryDropButton.style.display = canDrop ? 'inline-flex' : 'none';
-    }
-    if (elements.inventoryUseButton) {
-      const canUse = itemActions.includes('use');
-      elements.inventoryUseButton.style.display = canUse ? 'inline-flex' : 'none';
-    }
-    if (elements.inventoryInfoButton) {
-      const canInfo = itemActions.includes('info');
-      elements.inventoryInfoButton.style.display = canInfo ? 'inline-flex' : 'none';
-    }
-    if (elements.inventoryEatButton) {
-      const canEat = itemActions.includes('eat');
-      elements.inventoryEatButton.style.display = canEat ? 'inline-flex' : 'none';
-    }
-    if (elements.inventoryBuildButton) {
-      const canBuild = itemActions.includes('build');
-      elements.inventoryBuildButton.style.display = canBuild ? 'inline-flex' : 'none';
-    }
-    if (elements.inventoryDetailsContainer) {
-      if (selectedTile && selectedTile.parentElement === elements.inventoryGrid) {
-        selectedTile.insertAdjacentElement('afterend', elements.inventoryDetailsContainer);
-      } else {
-        elements.inventoryGrid.appendChild(elements.inventoryDetailsContainer);
-      }
-    }
-  }
-}
-
 function bindEvents() {
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) {
       closeOverlay();
-    }
-  });
-  inventoryOverlay?.addEventListener('click', (event) => {
-    if (event.target === inventoryOverlay) {
-      closeInventoryOverlay();
     }
   });
   leaderboardOverlay?.addEventListener('click', (event) => {
@@ -1853,62 +1051,16 @@ function bindEvents() {
       setLeaderboardTab(button.dataset.leaderboardTab);
       return;
     }
-    if (button.dataset.inventoryAction) {
-      const action = button.dataset.inventoryAction;
-      if (!selectedInventoryId && action !== 'close-info') return;
-      if (action === 'drop') {
-        context.appState?.dropInventoryItem?.(selectedInventoryId);
-      } else if (action === 'use') {
-        context.appState?.useInventoryItem?.(selectedInventoryId);
-      } else if (action === 'equip') {
-        context.appState?.equipInventoryItem?.(selectedInventoryId);
-      } else if (action === 'unequip') {
-        context.appState?.unequipInventoryItem?.(selectedInventoryId);
-      } else if (action === 'eat') {
-        context.appState?.eatInventoryItem?.(selectedInventoryId);
-      } else if (action === 'build') {
-        context.appState?.startBuildFlow?.(selectedInventoryId);
-        closeInventoryOverlay();
-      } else if (action === 'info') {
-        if (selectedInventoryId === 'zombie_brains' && elements.inventoryInfoModal && elements.inventoryInfoText) {
-          elements.inventoryInfoText.textContent = 'Zombie Brains are unstable remains from undead creatures. They pulse with strange energy. Maybe you can craft them into something useful at your home crafting table.';
-          elements.inventoryInfoModal.classList.remove('hidden');
-        }
-      } else if (action === 'close-info') {
-        elements.inventoryInfoModal?.classList.add('hidden');
-      }
-      renderInventory();
-      return;
-    }
-    if (button.dataset.achievementAction === 'claim') {
-      const achievementId = button.dataset.achievementId;
-      if (achievementId) {
-        context.appState?.claimAchievementReward?.(achievementId);
-        updateUI();
-      }
-      return;
-    }
-    if (button.dataset.inventoryId) {
-      selectedInventoryId = button.dataset.inventoryId;
-      elements.inventoryInfoModal?.classList.add('hidden');
-      renderInventory();
-      return;
-    }
     if (button.dataset.tab) {
       setTab(button.dataset.tab);
       return;
     }
     if (button.dataset.action) {
-      if (button.dataset.action === 'close-inventory') {
-        closeInventoryOverlay();
-        return;
-      }
       void handleAction(button);
     }
   };
 
   panel.addEventListener('click', handlePanelClick);
-  inventoryPanel?.addEventListener('click', handlePanelClick);
   leaderboardPanel?.addEventListener('click', handlePanelClick);
 
   elements.nameInput.addEventListener('input', () => {
@@ -1927,26 +1079,6 @@ function bindEvents() {
     }
     updateNameSaveState();
   });
-
-  elements.characterSelect.addEventListener('change', (event) => {
-    const value = event.target.value;
-    context.appState?.setCharacterModel?.(value);
-    loadPreviewModel(value);
-  });
-
-  if (elements.debugLocationFields?.toggle) {
-    elements.debugLocationFields.toggle.addEventListener('change', (event) => {
-      context.location?.setDebugEnabled?.(event.target.checked);
-      updateUI();
-    });
-  }
-
-  if (elements.debugLocationFields?.accuracy) {
-    elements.debugLocationFields.accuracy.addEventListener('change', (event) => {
-      const value = parseFloat(event.target.value);
-      context.location?.setDebugAccuracy?.(value);
-    });
-  }
 
   if (elements.displayFields?.musicVolumeSlider) {
     elements.displayFields.musicVolumeSlider.addEventListener('input', (event) => {
@@ -1981,17 +1113,6 @@ function bindEvents() {
     elements.displayFields.performanceSelect.addEventListener('change', (event) => {
       const value = event.target.value;
       context.appState?.setDisplaySetting?.('performanceMode', value);
-    });
-  }
-  if (elements.displayFields?.unitsSelect) {
-    elements.displayFields.unitsSelect.addEventListener('change', (event) => {
-      const selectedUnit = event.target.value;
-      const appliedUnit = context.appState?.setDistanceUnitPreference?.(selectedUnit) ?? setDistanceUnitPreference(selectedUnit);
-      if (elements.displayFields?.unitsSelect) {
-        elements.displayFields.unitsSelect.value = appliedUnit;
-      }
-      window.dispatchEvent(new Event('distance-unit-changed'));
-      update();
     });
   }
   if (elements.displayFields?.firstPersonToggle) {
@@ -2051,7 +1172,6 @@ function bindEvents() {
         controls.camera.updateProjectionMatrix();
         controls.defaultFov = v;
         controls.defaultFovDesktop = v;
-        controls.aimFov = Math.max(45, v - 8);
       }
       if (elements.displayFields?.fovValue) {
         elements.displayFields.fovValue.textContent = Math.round(v);
@@ -2126,197 +1246,24 @@ function bindEvents() {
   }
 }
 
-function initPreview() {
-  if (previewState.renderer) return;
-  try {
-    previewState.renderer = new THREE.WebGLRenderer({
-      canvas: elements.previewCanvas,
-      alpha: true,
-      antialias: true
-    });
-  } catch (error) {
-    elements.previewFallback.textContent = 'Preview unavailable';
-    elements.previewFallback.style.display = 'flex';
-    return;
-  }
-  previewState.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  previewState.scene = new THREE.Scene();
-  previewState.camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
-  previewState.camera.position.set(0, 1, 3);
-  previewState.scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(2, 2, 2);
-  previewState.scene.add(dir);
-
-  previewState.resizeObserver = new ResizeObserver(() => {
-    resizePreview();
-  });
-  previewState.resizeObserver.observe(elements.previewCanvas.parentElement);
-  resizePreview();
-}
-
-function resizePreview() {
-  if (!previewState.renderer || !previewState.camera) return;
-  const rect = elements.previewCanvas.parentElement.getBoundingClientRect();
-  const width = Math.max(rect.width, 1);
-  const height = Math.max(rect.height, 1);
-  previewState.renderer.setSize(width, height, false);
-  previewState.camera.aspect = width / height;
-  previewState.camera.updateProjectionMatrix();
-}
-
-function loadPreviewModel(modelPath) {
-  if (!modelPath) return;
-  initPreview();
-  if (!previewState.renderer) return;
-  const loader = new FBXLoader();
-  const token = Symbol('preview');
-  previewState.loadingToken = token;
-  loader.load(
-    modelPath,
-    (model) => {
-      if (previewState.loadingToken !== token) return;
-      if (previewState.model) {
-        previewState.scene.remove(previewState.model);
-      }
-      previewState.model = model;
-      previewState.scene.add(model);
-
-      const box = new THREE.Box3().setFromObject(model);
-      const size = box.getSize(new THREE.Vector3());
-      const center = box.getCenter(new THREE.Vector3());
-      model.position.sub(center);
-      const maxDim = Math.max(size.x, size.y, size.z, 0.001);
-      const scale = 1.2 / maxDim;
-      model.scale.setScalar(scale);
-
-      previewState.camera.position.set(0, size.y * scale * 0.6 + 0.4, maxDim * scale * 2.3 + 1);
-      previewState.camera.lookAt(0, size.y * scale * 0.3, 0);
-      elements.previewFallback.style.display = 'none';
-    },
-    undefined,
-    () => {
-      elements.previewFallback.style.display = 'flex';
-    }
-  );
-}
-
-function startPreview() {
-  if (!previewState.renderer) {
-    initPreview();
-    loadPreviewModel(context.appState?.getCharacterModel?.());
-  }
-  if (!previewState.renderer) return;
-  previewState.active = true;
-  if (previewState.frameId) return;
-  const render = () => {
-    if (!previewState.active) {
-      previewState.frameId = null;
-      return;
-    }
-    if (previewState.model) {
-      previewState.model.rotation.y += 0.005;
-    }
-    previewState.renderer.render(previewState.scene, previewState.camera);
-    previewState.frameId = requestAnimationFrame(render);
-  };
-  previewState.frameId = requestAnimationFrame(render);
-}
-
-function stopPreview() {
-  previewState.active = false;
-  if (previewState.frameId) {
-    cancelAnimationFrame(previewState.frameId);
-    previewState.frameId = null;
-  }
-}
-
 function collectDebugInfo() {
   const connectionStatus = context.appState?.getConnectionStatus?.() ?? 'Unknown';
   const lastPing = context.appState?.getLastPing?.();
-  const locationState = context.location?.getState?.() ?? {};
-  const lastOsmFetch = context.appState?.getLastOsmFetch?.();
   const lastError = context.appState?.getLastError?.();
   const version = context.appState?.getAppVersion?.() ?? 'unknown';
   const viewport = `${window.innerWidth}x${window.innerHeight}`;
-  const originText = `${formatMeters(locationState.originX)}, ${formatMeters(locationState.originZ)}`;
-  const currentText = `${formatMeters(locationState.x)}, ${formatMeters(locationState.z)}`;
-  const playerText = `${formatMeters(locationState.x)}, ${formatMeters(locationState.z)}`;
-  const tileText = locationState.tile ? `${locationState.tile.x},${locationState.tile.y}` : '—';
+  const playerPosition = window.playerModel?.position;
+  const playerText = playerPosition ? `${playerPosition.x.toFixed(2)}, ${playerPosition.z.toFixed(2)}` : '—';
   const info = [
     `version: ${version}`,
     `userAgent: ${navigator.userAgent}`,
     `viewport: ${viewport}`,
     `connectionStatus: ${connectionStatus}`,
     `lastPing: ${typeof lastPing === 'number' ? `${lastPing} ms` : 'N/A'}`,
-    `worldStatus: ${locationState.state || 'unknown'}`,
-    `origin: ${originText}`,
-    `current: ${currentText}`,
     `playerXZ: ${playerText}`,
-    `tile: ${tileText}`,
-    `lastOsmFetch: ${lastOsmFetch ? formatTimestamp(lastOsmFetch) : '—'}`,
     `lastError: ${lastError ? `${lastError.message} @ ${formatTimestamp(lastError.timestamp)}` : '—'}`
   ];
   return info.join('\n');
-}
-
-function renderAchievements() {
-  if (!elements.achievementList) return;
-  const achievementExpiryMs = 10 * 60 * 1000;
-  const now = Date.now();
-  const achievements = (context.appState?.getAchievements?.() || []).filter((achievement) => {
-    if (!achievement.claimedAt) return true;
-    return (now - achievement.claimedAt) < achievementExpiryMs;
-  });
-  elements.achievementList.innerHTML = '';
-  if (elements.achievementEmpty) {
-    elements.achievementEmpty.style.display = achievements.length ? 'none' : 'block';
-  }
-  achievements.forEach((achievement) => {
-    const row = createElement('div', 'achievement-row');
-    const isLocked = !achievement.unlockedAt;
-    const text = createElement('div', 'achievement-text');
-    const title = createElement('div', 'achievement-title', achievement.title);
-    const sub = createElement(
-      'div',
-      'achievement-subtitle',
-      `${achievement.description} (${achievement.progress}/${achievement.target})`
-    );
-    text.append(title, sub);
-    const button = createElement('button', 'settings-button achievement-claim-button');
-    button.type = 'button';
-    button.dataset.achievementAction = 'claim';
-    button.dataset.achievementId = achievement.id;
-    if (achievement.pendingClaim) {
-      button.textContent = 'Claim reward';
-      button.classList.add('claimable');
-    } else if (achievement.claimedAt) {
-      button.textContent = 'Claimed';
-      button.disabled = true;
-    } else if (!achievement.unlockedAt) {
-      button.textContent = 'Locked';
-      button.disabled = true;
-    } else {
-      button.textContent = 'Unavailable';
-      button.disabled = true;
-    }
-    if (isLocked) {
-      row.classList.add('locked');
-    }
-    row.append(text, button);
-    elements.achievementList.appendChild(row);
-  });
-}
-
-function updateCharacterOptions() {
-  const options = context.appState?.getCharacterOptions?.() ?? [];
-  elements.characterSelect.innerHTML = '';
-  options.forEach((option) => {
-    const opt = document.createElement('option');
-    opt.value = option.value;
-    opt.textContent = option.label;
-    elements.characterSelect.appendChild(opt);
-  });
 }
 
 function refreshLayout() {
@@ -2341,11 +1288,6 @@ function setListView(enabled) {
   if (elements.backButton) {
     elements.backButton.style.display = enabled ? 'none' : 'inline-flex';
   }
-  if (enabled) {
-    stopPreview();
-  } else if (activeTab === 'character') {
-    startPreview();
-  }
 }
 
 export function updateUI() {
@@ -2357,50 +1299,19 @@ export function updateUI() {
     }
     updateNameSaveState();
   }
-  if (elements.characterSelect && context.appState?.getCharacterModel) {
-    const model = context.appState.getCharacterModel();
-    if (elements.characterSelect.value !== model) {
-      elements.characterSelect.value = model;
-      if (activeTab === 'character') {
-        loadPreviewModel(model);
-      }
-    }
-  }
   if (elements.characterStatFields && context.appState?.getPlayerStats) {
     const stats = context.appState.getPlayerStats() || {};
     Object.entries(elements.characterStatFields).forEach(([key, node]) => {
       node.textContent = formatStatValue(key, stats[key]);
     });
   }
-  if (elements.phoneSwordStatFields && window.phoneSwordMode) {
+  if (elements.phoneSwordStatFields) {
     const psStats = context.appState?.getPhoneSwordStats?.() || {};
     Object.entries(elements.phoneSwordStatFields).forEach(([key, node]) => {
       const val = psStats[key];
       node.textContent = Number.isFinite(val) ? String(Math.max(0, Math.floor(val))) : '—';
     });
   }
-
-
-  if (elements.questList) {
-    const quests = context.appState?.getQuestLog?.() ?? [];
-    elements.questList.innerHTML = '';
-    const hasQuests = quests.length > 0;
-    if (elements.questEmpty) {
-      elements.questEmpty.style.display = hasQuests ? 'none' : 'block';
-    }
-    quests.forEach((quest) => {
-      const item = createElement('li', 'settings-list-item');
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = Boolean(quest.completed);
-      checkbox.disabled = true;
-      checkbox.setAttribute('aria-label', `${quest.title} completed`);
-      const label = createElement('span', '', `${quest.title} ${quest.progress || ''}`.trim());
-      item.append(checkbox, label);
-      elements.questList.appendChild(item);
-    });
-  }
-  renderAchievements();
 
   if (elements.connectionStatus) {
     elements.connectionStatus.textContent = context.appState?.getConnectionStatus?.() ?? 'Connecting';
@@ -2431,72 +1342,6 @@ export function updateUI() {
       : 'None';
   }
 
-  if (elements.locationFields && context.location?.getState) {
-    const state = context.location.getState();
-    elements.locationFields.status.textContent = state.state ? state.state : '—';
-    if (elements.locationFields.source) {
-      const sourceLabel = state.source === 'world' ? 'World' : (state.source || '—');
-      elements.locationFields.source.textContent = sourceLabel;
-      if (elements.locationSourceRow) {
-        elements.locationSourceRow.classList.toggle('is-debug', state.source === 'world');
-      }
-    }
-    elements.locationFields.x.textContent = formatMeters(state.x);
-    elements.locationFields.y.textContent = formatMeters(state.y);
-    elements.locationFields.z.textContent = formatMeters(state.z);
-    elements.locationFields.heading.textContent = typeof state.heading === 'number'
-      ? `${state.heading.toFixed(1)}°`
-      : '—';
-    elements.locationFields.speed.textContent = typeof state.speed === 'number'
-      ? `${state.speed.toFixed(1)} m/s`
-      : '—';
-    elements.locationFields.time.textContent = state.timestamp ? formatTimestamp(state.timestamp) : '—';
-    elements.locationFields.guidance.textContent = state.message || '';
-  }
-
-  if (elements.debugFields && context.location?.getState) {
-    const state = context.location.getState();
-    const originText = `${formatMeters(state.originX)}, ${formatMeters(state.originZ)}`;
-    const currentText = `${formatMeters(state.x)}, ${formatMeters(state.z)}`;
-    const playerText = `${formatMeters(state.x)}, ${formatMeters(state.z)}`;
-    const tileText = state.tile ? `${state.tile.x}, ${state.tile.y}` : '—';
-    elements.debugFields.origin.textContent = originText;
-    elements.debugFields.current.textContent = currentText;
-    elements.debugFields.player.textContent = playerText;
-    elements.debugFields.tile.textContent = tileText;
-  }
-
-  if (elements.debugLocationFields && context.location?.getDebugState) {
-    const debugState = context.location.getDebugState();
-    if (elements.debugLocationFields.toggle) {
-      elements.debugLocationFields.toggle.checked = Boolean(debugState.enabled);
-    }
-    if (elements.debugLocationFields.x) {
-      const xInput = elements.debugLocationFields.x;
-      if (document.activeElement !== xInput) {
-        xInput.value = Number.isFinite(debugState.x)
-          ? debugState.x.toFixed(6)
-          : '';
-      }
-    }
-    if (elements.debugLocationFields.z) {
-      const zInput = elements.debugLocationFields.z;
-      if (document.activeElement !== zInput) {
-        zInput.value = Number.isFinite(debugState.z)
-          ? debugState.z.toFixed(6)
-          : '';
-      }
-    }
-    if (elements.debugLocationFields.accuracy) {
-      const accuracyInput = elements.debugLocationFields.accuracy;
-      if (document.activeElement !== accuracyInput) {
-        accuracyInput.value = Number.isFinite(debugState.accuracyMeters)
-          ? debugState.accuracyMeters.toFixed(1)
-          : '';
-      }
-    }
-  }
-
   if (elements.displayFields && context.appState?.getDisplaySettings) {
     const displaySettings = context.appState.getDisplaySettings();
     if (displaySettings?.mode && elements.displayFields.modeSelect) {
@@ -2508,9 +1353,6 @@ export function updateUI() {
       if (elements.displayFields.performanceSelect.value !== displaySettings.performanceMode) {
         elements.displayFields.performanceSelect.value = displaySettings.performanceMode;
       }
-    }
-    if (elements.displayFields.unitsSelect) {
-      elements.displayFields.unitsSelect.value = getDistanceUnitPreference();
     }
     if (elements.displayFields.highContrastToggle) {
       elements.displayFields.highContrastToggle.checked = Boolean(displaySettings?.highContrastMode);
@@ -2533,8 +1375,6 @@ export function updateUI() {
       }
     });
   }
-
-  renderInventory();
 }
 
 export function setTab(tabId) {
@@ -2550,26 +1390,14 @@ export function closeSettings() {
   closeOverlay();
 }
 
-export function openInventory() {
-  openInventoryOverlay();
-}
-
-export function closeInventory() {
-  closeInventoryOverlay();
-}
-
-export function initSettingsPanel({ appState, multiplayer, location, player } = {}) {
-  context = { appState, multiplayer, location, player };
+export function initSettingsPanel({ appState, multiplayer, player } = {}) {
+  context = { appState, multiplayer, player };
   overlay = document.getElementById('settings-overlay');
   panel = document.getElementById('settings-panel');
-  inventoryOverlay = document.getElementById('inventory-overlay');
-  inventoryPanel = document.getElementById('inventory-panel');
-  if (!overlay || !panel || !inventoryOverlay || !inventoryPanel) {
-    throw new Error('Settings or inventory overlay not found.');
+  if (!overlay || !panel) {
+    throw new Error('Settings overlay not found.');
   }
   overlay.setAttribute('aria-hidden', 'true');
-  inventoryOverlay.setAttribute('aria-hidden', 'true');
-  inventoryPanel.innerHTML = '';
   panel.innerHTML = '';
   panel.classList.add('settings-shell');
   panel.classList.add('show-tab-panel');
@@ -2582,10 +1410,8 @@ export function initSettingsPanel({ appState, multiplayer, location, player } = 
   const tabs = buildTabs();
   const body = buildPanels();
   panel.append(header, tabs, body);
-  buildInventoryOverlay();
   buildLeaderboardOverlay();
 
-  updateCharacterOptions();
   refreshLayout();
 
   const storedTab = localStorage.getItem(TAB_KEY);
@@ -2594,6 +1420,5 @@ export function initSettingsPanel({ appState, multiplayer, location, player } = 
   bindEvents();
   const savedTab = localStorage.getItem(TAB_KEY) || 'character';
   setActiveTab(savedTab);
-  loadPreviewModel(context.appState?.getCharacterModel?.());
   updateUI();
 }

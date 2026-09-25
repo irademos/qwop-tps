@@ -17,7 +17,7 @@ export class Pistol extends Weapon {
   }
 
   update() {
-    if (window.phoneSwordMode && this.holder?.playerModel) {
+    if (this.holder?.playerModel) {
       const pm = this.holder.playerModel;
       pm.userData.foamSwordMode = true;
       _pistolDir.set(0, 0, 1).applyQuaternion(this._holdQuaternion);

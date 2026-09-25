@@ -130,23 +130,10 @@ function getFallbackIcon(itemId) {
   if (itemId === 'heart_upgrade') return '❤️';
   if (itemId === 'shield_upgrade') return '🔰';
   if (itemId === 'bubble') return '🫧';
-  if (itemId === 'iceGun') return '❄️';
-  if (itemId === 'ice ammo') return '❄️';
-  if (itemId === 'bow') return '🏹';
-  if (itemId === 'arrow ammo') return '🏹';
-  if (itemId === 'bazooka' || itemId === 'missiles') return '🚀';
-  if (itemId === 'autumnSword') return '🗡️';
-  if (itemId === 'hammer') return '🔨';
-  if (itemId === 'lantern') return '🏮';
+  if (itemId === 'foamSword') return '🗡️';
   if (itemId === 'shield') return '🛡️';
   if (itemId === 'pistol') return '🔫';
   if (itemId === 'gun bullets') return '🔶';
-  if (itemId === 'apple') return '🍎';
-  if (itemId === 'wood') return '🪵';
-  if (itemId === 'meat' || itemId === 'crab_meat') return '🦀';
-  if (itemId === 'Salt') return '🪨';
-  if (itemId === 'zombie_brains') return '🧠';
-  if (itemId.startsWith('mushroom_')) return '🍄';
   return '🎒';
 }
 
@@ -202,19 +189,7 @@ function renderTab(tabId) {
   if (!grid || !emptyState || !detailsText || !detailsContainer || !actionButton) return;
 
   const data = getTabData(tabId);
-  const PHONE_SWORD_BUY_HIDDEN = new Set([
-    'iceGun', 'autumnSword', 'lantern', 'life_potion', 'mana_potion', 'ice ammo',
-    'apple', 'wood', 'hammer', 'bazooka', 'bow', 'arrow ammo', 'bomb', 'missiles'
-  ]);
-  const entries = Object.entries(data).filter(([id, item]) => {
-    if ((item?.count || 0) <= 0) return false;
-    if (!window.phoneSwordMode && tabId === 'buy' && getMerchantItemMeta(id).showdownOnly) return false;
-    if (window.phoneSwordMode && tabId === 'buy') {
-      if (PHONE_SWORD_BUY_HIDDEN.has(id)) return false;
-      if (id.startsWith('mushroom_')) return false;
-    }
-    return true;
-  });
+  const entries = Object.entries(data).filter(([, item]) => (item?.count || 0) > 0);
 
   grid.innerHTML = '';
   if (!entries.length) {

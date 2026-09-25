@@ -34,7 +34,6 @@ import {
 } from '../features/uiPanelsFeature.js';
 import { appContext } from '../core/appContext.js';
 import { exposeDebugGlobals } from '../core/exposeDebugGlobals.js';
-import { getDistanceUnitPreference, setDistanceUnitPreference } from '../player/distanceUnits.js';
 import { EnemyPlayer } from '../characters/EnemyPlayer.js';
 import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerEnemy.js';
 import { createPlayerBombs } from '../combat/playerBomb.js';
@@ -86,12 +85,7 @@ const ROAD_LIGHT_POINT_LIGHT_CONFIG = Object.freeze({
 });
 
 const PERF = {
-  throttleAI: true,
-  throttlePickups: true,
-  throttleUI: true,
-  disableMonsters: false,
-  disablePickups: false,
-  disableMapUpdates: false
+  throttlePickups: true
 };
 
 const FRAME_TIME_DEGRADE_THRESHOLD_MS = 25;
@@ -101,7 +95,6 @@ const INCOMING_QUEUE_MAX_PER_FRAME = 40;
 const INCOMING_QUEUE_BUDGET_MS = 3;
 const INCOMING_QUEUE_MAX_BACKLOG = 400;
 const LOW_END_BUCKET_INTERVALS = Object.freeze({
-  ai: 2,
   pickups: 2,
   remoteLabels: 2,
   audio: 3
@@ -109,15 +102,6 @@ const LOW_END_BUCKET_INTERVALS = Object.freeze({
 const NETWORK_TOPOLOGY_MODE = (import.meta.env.VITE_NETWORK_TOPOLOGY_MODE || 'star').toLowerCase() === 'mesh'
   ? 'mesh'
   : 'star';
-const HOST_CRITICAL_MESSAGE_TYPES = new Set([
-  'entityControl',
-  'entityStates',
-  'attackMonster',
-  'spawnRequest',
-  'projectile',
-  'inventoryThrowProjectile'
-]);
-
 appContext.debugFlags.PERF = PERF;
 appContext.debugFlags.DEBUG_CONSOLE = false;
 exposeDebugGlobals({
@@ -127,7 +111,6 @@ exposeDebugGlobals({
 
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
-
 
 // --- Rapier demo state ---
 let rapierWorld;
@@ -171,12 +154,6 @@ const PERFORMANCE_PROFILE_CAPS = {
   high: 2.0
 };
 
-
-
-
-
-
-
 function createArcadeOverlay(startOverlay) {
   const message = startOverlay.querySelector('[data-arcade-message]');
   const welcomeSection = startOverlay.querySelector('[data-arcade-welcome]');
@@ -191,7 +168,6 @@ function createArcadeOverlay(startOverlay) {
   const signupButton = startOverlay.querySelector('[data-arcade-signup]');
   const backButton = startOverlay.querySelector('[data-arcade-back]');
   const startButton = startOverlay.querySelector('[data-arcade-start]');
-
 
   let mode = 'login';
 
@@ -445,7 +421,6 @@ function createArcadeOverlay(startOverlay) {
     if (resolveAuth) resolveAuth(pendingAuthResult || {});
   });
 
-
   return {
     async authenticate({ initialName, hasStoredPin, loadProfile }) {
       if (loadProfile) {
@@ -554,15 +529,13 @@ async function initCore(runtimeContext) {
   let scene = null;
   let ambientLight = null;
   let dirLight = null;
-  let entityBroadcastIntervalMs = 260;
-  let controlSendIntervalMs = 220;
   let presenceSendIntervalMs = PRESENCE_SEND_MS;
   const POSITION_DEADBAND_SQ = 0.03 * 0.03;
   const ROTATION_DEADBAND_RAD = 0.045;
   const NETWORK_BASE_PROFILE = Object.freeze({
-    high: Object.freeze({ presenceMs: 350, entityMs: 260, controlMs: 200 }),
-    mid: Object.freeze({ presenceMs: 420, entityMs: 300, controlMs: 240 }),
-    low: Object.freeze({ presenceMs: 550, entityMs: 380, controlMs: 320 })
+    high: Object.freeze({ presenceMs: 350 }),
+    mid: Object.freeze({ presenceMs: 420 }),
+    low: Object.freeze({ presenceMs: 550 })
   });
   const NETWORK_ADAPTIVE_PROFILE = Object.freeze({
     backlogWarn: 40,
@@ -576,25 +549,12 @@ async function initCore(runtimeContext) {
     presenceDeadbandMul: 0.75,
     rotationDeadbandMul: 0.7
   });
-  const CRITICAL_PAYLOAD_TYPES = new Set([
-    'entityControl',
-    'entityStates',
-    'attackMonster',
-    'spawnRequest',
-    'projectile',
-    'inventoryThrowProjectile',
-    'grab',
-    'grabMove'
-  ]);
   const MIN_POSITION_DEADBAND_SQ = (0.008 * 0.008);
   const MIN_ROTATION_DEADBAND_RAD = 0.012;
   let runtimePositionDeadbandSq = POSITION_DEADBAND_SQ;
   let runtimeRotationDeadbandRad = ROTATION_DEADBAND_RAD;
-  const netSendQueue = {
-    critical: [],
-    high: new Map(),
-    normal: []
-  };
+  // Only presence goes through the queue (projectiles are sent directly by PlayerControls)
+  const netSendQueue = [];
   const NET_SEND_BUDGETS = Object.freeze({
     high: { maxMessages: 12, maxBytes: 14000 },
     mid: { maxMessages: 9, maxBytes: 9000 },
@@ -604,11 +564,8 @@ async function initCore(runtimeContext) {
     sentInWindow: 0,
     windowStartMs: performance.now(),
     messagesPerSecond: 0,
-    coalesced: 0,
     dropped: 0,
-    deferred: 0,
-    laneDropped: { critical: 0, high: 0, normal: 0 },
-    laneDeferred: { critical: 0, high: 0, normal: 0 }
+    deferred: 0
   };
   const lastSentPresenceState = {
     x: null,
@@ -741,7 +698,7 @@ async function initCore(runtimeContext) {
   let adaptiveNetworkPressureLevel = 0;
   let networkRecoveryStableFrames = 0;
   let adaptiveIntervalOffsetMs = 0;
-  let onlyCriticalPayloadClasses = false;
+  let deferPresence = false;
   let lastNetworkProfileLogAt = 0;
   let lastNetworkProfileLogKey = '';
   const remotePresenceMeta = {};
@@ -800,10 +757,9 @@ async function initCore(runtimeContext) {
       }
     }
 
-    onlyCriticalPayloadClasses = adaptiveNetworkPressureLevel >= 2;
+    // Under critical pressure presence updates are deferred
+    deferPresence = adaptiveNetworkPressureLevel >= 2;
     presenceSendIntervalMs = tierProfile.presenceMs + Math.round(adaptiveIntervalOffsetMs * 0.65);
-    entityBroadcastIntervalMs = tierProfile.entityMs + adaptiveIntervalOffsetMs;
-    controlSendIntervalMs = tierProfile.controlMs + adaptiveIntervalOffsetMs;
 
     const positionDeadbandMul = adaptiveNetworkPressureLevel > 0 ? NETWORK_ADAPTIVE_PROFILE.presenceDeadbandMul : 1;
     const rotationDeadbandMul = adaptiveNetworkPressureLevel > 0 ? NETWORK_ADAPTIVE_PROFILE.rotationDeadbandMul : 1;
@@ -811,7 +767,7 @@ async function initCore(runtimeContext) {
     runtimeRotationDeadbandRad = Math.max(MIN_ROTATION_DEADBAND_RAD, ROTATION_DEADBAND_RAD * rotationDeadbandMul);
 
     const now = performance.now();
-    const logKey = `${tier}:${adaptiveNetworkPressureLevel}:${Math.round(adaptiveIntervalOffsetMs / 10)}:${onlyCriticalPayloadClasses ? 'critical' : 'mixed'}`;
+    const logKey = `${tier}:${adaptiveNetworkPressureLevel}:${Math.round(adaptiveIntervalOffsetMs / 10)}:${deferPresence ? 'deferred' : 'normal'}`;
     if (logKey !== lastNetworkProfileLogKey && (now - lastNetworkProfileLogAt) >= NETWORK_ADAPTIVE_PROFILE.logWindowMs) {
       console.debug('[net-profile]', {
         tier,
@@ -822,9 +778,7 @@ async function initCore(runtimeContext) {
         overrunStreak: safeOverrun,
         recoverStreak: safeRecover,
         presenceSendIntervalMs,
-        entityBroadcastIntervalMs,
-        controlSendIntervalMs,
-        onlyCriticalPayloadClasses
+        deferPresence
       });
       lastNetworkProfileLogAt = now;
       lastNetworkProfileLogKey = logKey;
@@ -833,11 +787,6 @@ async function initCore(runtimeContext) {
   const recordNetSent = (count = 1) => {
     netStats.sentInWindow += count;
   };
-  const getNetQueueDepth = () => (
-    netSendQueue.critical.length
-    + netSendQueue.high.size
-    + netSendQueue.normal.length
-  );
   const estimatePayloadBytes = (payload) => {
     if (!payload) return 0;
     try {
@@ -846,101 +795,40 @@ async function initCore(runtimeContext) {
       return 0;
     }
   };
-  const getMessageLane = (payload) => {
-    const type = payload?.type;
-    if (onlyCriticalPayloadClasses && !CRITICAL_PAYLOAD_TYPES.has(type)) {
-      return 'normal';
-    }
-    if (type === 'attackMonster' || type === 'spawnRequest' || type === 'projectile' || type === 'inventoryThrowProjectile' || type === 'grab') {
-      return 'critical';
-    }
-    if (type === 'entityControl' || type === 'entityStates') return 'high';
-    return 'normal';
-  };
-  const queueNetMessage = (payload, coalesceKey = null) => {
+  const queueNetMessage = (payload) => {
     if (!multiplayer || !payload) {
       netStats.dropped += 1;
-      netStats.laneDropped.normal += 1;
       return false;
     }
-    const lane = getMessageLane(payload);
-    if (onlyCriticalPayloadClasses && lane === 'normal') {
+    if (deferPresence) {
       netStats.deferred += 1;
-      netStats.laneDeferred.normal += 1;
       return false;
     }
-    const canCoalesce = lane === 'high' && (coalesceKey?.startsWith('entityControl:') || coalesceKey?.startsWith('entityStates:'));
-    if (canCoalesce) {
-      if (netSendQueue.high.has(coalesceKey)) {
-        netStats.coalesced += 1;
-      }
-      netSendQueue.high.set(coalesceKey, payload);
-      return true;
-    }
-    if (lane === 'critical') {
-      netSendQueue.critical.push(payload);
-      return true;
-    }
-    netSendQueue.normal.push(payload);
+    netSendQueue.push(payload);
     return true;
   };
   const flushNetSendQueue = () => {
-    if (!multiplayer) return;
-    const depth = getNetQueueDepth();
-    if (depth === 0) return;
+    if (!multiplayer || netSendQueue.length === 0) return;
     const tier = getNetworkTier();
     const budget = NET_SEND_BUDGETS[tier] || NET_SEND_BUDGETS.high;
     let sent = 0;
     let sentBytes = 0;
-
-    while (netSendQueue.critical.length > 0) {
-      const payload = netSendQueue.critical.shift();
-      if (sendNetworkPayload(payload)) {
-        sent += 1;
-      }
-    }
-
-    const highEntries = Array.from(netSendQueue.high.entries());
-    for (const [key, payload] of highEntries) {
+    while (netSendQueue.length > 0) {
       if (sent >= budget.maxMessages || sentBytes >= budget.maxBytes) break;
+      const payload = netSendQueue[0];
       const payloadBytes = estimatePayloadBytes(payload);
       if ((sent + 1) > budget.maxMessages || (sentBytes + payloadBytes) > budget.maxBytes) break;
-      if (sendNetworkPayload(payload)) {
-        sent += 1;
-        sentBytes += payloadBytes;
-        netSendQueue.high.delete(key);
-      }
-    }
-
-    while (netSendQueue.normal.length > 0) {
-      if (sent >= budget.maxMessages || sentBytes >= budget.maxBytes) break;
-      const payload = netSendQueue.normal[0];
-      const payloadBytes = estimatePayloadBytes(payload);
-      if ((sent + 1) > budget.maxMessages || (sentBytes + payloadBytes) > budget.maxBytes) break;
-      netSendQueue.normal.shift();
+      netSendQueue.shift();
       if (sendNetworkPayload(payload)) {
         sent += 1;
         sentBytes += payloadBytes;
       }
     }
-
-    const deferredHigh = netSendQueue.high.size;
-    const deferredNormal = netSendQueue.normal.length;
-    if (deferredHigh > 0) netStats.laneDeferred.high += deferredHigh;
-    if (deferredNormal > 0) netStats.laneDeferred.normal += deferredNormal;
-    netStats.deferred += deferredHigh + deferredNormal;
-
+    netStats.deferred += netSendQueue.length;
     recordNetSent(sent);
   };
   const sendNetworkPayload = (payload) => {
     if (!multiplayer || !payload) return false;
-    const isHostCritical = NETWORK_TOPOLOGY_MODE === 'star'
-      && HOST_CRITICAL_MESSAGE_TYPES.has(payload.type);
-    const hostId = multiplayer.getHostId?.();
-    if (!multiplayer.isHost && isHostCritical && hostId) {
-      multiplayer.sendTo(hostId, payload);
-      return true;
-    }
     multiplayer.send(payload);
     return true;
   };
@@ -953,22 +841,13 @@ async function initCore(runtimeContext) {
     window.netRuntimeStats = {
       msgsPerSecond: Number(netStats.messagesPerSecond.toFixed(2)),
       rttMs: Number.isFinite(multiplayer?.lastPingMs) ? multiplayer.lastPingMs : null,
-      coalesced: netStats.coalesced,
       dropped: netStats.dropped,
-      queueDepth: getNetQueueDepth(),
+      queueDepth: netSendQueue.length,
       deferred: netStats.deferred,
-      deferredByLane: { ...netStats.laneDeferred },
-      droppedByLane: { ...netStats.laneDropped },
       topologyMode: NETWORK_TOPOLOGY_MODE,
-      intervals: {
-        presenceSendIntervalMs,
-        entityBroadcastIntervalMs,
-        controlSendIntervalMs
-      }
+      presenceSendIntervalMs
     };
   };
-
-
 
   scene = new THREE.Scene();
   const rotateSkyboxFaceClockwise = (image) => {
@@ -1244,7 +1123,6 @@ async function initCore(runtimeContext) {
     }
   }
 
-
   const updateAutoDisplayMode = () => {
     if (_psStageActive) return;
     if (displaySettings.mode !== 'auto') return;
@@ -1302,12 +1180,6 @@ async function initCore(runtimeContext) {
     }
   };
 
-
-
-
-
-
-
   const attractPickupToPlayer = (meshOrPosition, targetModel, speed, deltaSeconds) => {
     const sourcePosition = meshOrPosition?.isVector3 ? meshOrPosition : meshOrPosition?.position;
     if (!sourcePosition || !targetModel?.position || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return false;
@@ -1325,7 +1197,6 @@ async function initCore(runtimeContext) {
   };
 
   const getPickupAttractRadius = () => PICKUP_ATTRACT_RADIUS;
-
 
   const removeRemotePlayer = (remoteId, reason = 'unknown') => {
     const existing = otherPlayers[remoteId];
@@ -1345,26 +1216,6 @@ async function initCore(runtimeContext) {
     }
     logNet('despawn', remoteId, reason);
   };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
   function processIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
@@ -1464,7 +1315,7 @@ async function initCore(runtimeContext) {
       }
 
       const hasAuthoritativeY = Number.isFinite(data.y);
-      const resolvedNetworkY = getSpawnY(targetX, targetZ, 0.6, { allowOnBuildings: true });
+      const resolvedNetworkY = getSpawnY(targetX, targetZ, 0.6);
       const targetY = hasAuthoritativeY ? data.y : (Number.isFinite(resolvedNetworkY) ? resolvedNetworkY : getTerrainHeight(targetX, targetZ));
 
       if (!player.targetPos) {
@@ -1495,16 +1346,6 @@ async function initCore(runtimeContext) {
         actions[current]?.fadeOut(0.2);
         actions[data.action]?.reset().fadeIn(0.2).play();
         player.model.userData.currentAction = data.action;
-        if (['mutantPunch', 'swordSlash', 'swordSlashLeft', 'swordSpin', 'swordFwdSpin', 'leftPunch', 'hurricaneKick', 'mmaKick'].includes(data.action)) {
-          const attackName = data.action === 'leftPunch'
-            ? 'mutantPunch'
-            : data.action;
-          player.model.userData.attack = {
-            name: attackName,
-            start: Date.now(),
-            hasHit: false
-          };
-        }
       }
 
       return;
@@ -1530,11 +1371,6 @@ async function initCore(runtimeContext) {
 
   multiplayer = new Multiplayer(playerName, handleIncomingData);
   window.multiplayer = multiplayer;
-  multiplayer.queueCoalesced = (payload, key) => queueNetMessage(payload, key);
-  multiplayer.sendHighFrequency = (payload, typeKey, targetKey = 'global') => {
-    const key = `${typeKey}:${targetKey}`;
-    return queueNetMessage(payload, key);
-  };
   multiplayer.getNetRuntimeStats = () => ({ ...window.netRuntimeStats });
   multiplayer.onPingUpdate = () => {
     applyRuntimeNetworkProfile({
@@ -1632,8 +1468,6 @@ async function initCore(runtimeContext) {
   applyRendererPerformanceSettings();
   applyDisplaySettings();
 
-
-
   // --- RAPIER INIT ---
   await RAPIER.init({});
   rapierWorld = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
@@ -1685,9 +1519,6 @@ async function initCore(runtimeContext) {
       }
     }
   };
-
-
-
 
   const droppedWeaponPickups = [];
   window.weaponPickups = droppedWeaponPickups;
@@ -1854,7 +1685,6 @@ async function initCore(runtimeContext) {
 
   const { FoamSword, FOAM_SWORD_ITEM_ID, Shield, SHIELD_ITEM_ID, DEFAULT_SHIELD_HEALTH, Pistol } = await loadSpecialWeapons();
 
-
   foamSword = new FoamSword(scene);
   await foamSword.load();
   window.foamSword = foamSword;
@@ -1933,9 +1763,6 @@ async function initCore(runtimeContext) {
     pistol.mesh = hordeGunGroup;
   }
 
-
-
-
   let player = new PlayerCharacter(playerName);
   let playerModel = player.model;
   scene.add(playerModel);
@@ -1975,10 +1802,6 @@ async function initCore(runtimeContext) {
     shield.mesh.visible = false;
   }
 
-
-
-
-
   const disposeSceneObject = (object) => {
     if (!object) return;
     if (object.parent) {
@@ -1992,7 +1815,6 @@ async function initCore(runtimeContext) {
     });
   };
 
-
   const lastStatUpdateAt = Date.now();
 
   const statsState = {
@@ -2000,12 +1822,7 @@ async function initCore(runtimeContext) {
     maxHealthSegments: playerProfile.stats.maxHealthSegments,
     level: playerProfile.stats.level,
     strength: playerProfile.stats.strength,
-    agility: playerProfile.stats.agility,
-    smarts: playerProfile.stats.smarts,
-    charm: playerProfile.stats.charm,
-    luck: playerProfile.stats.luck,
     xp: playerProfile.stats.xp,
-    monsterKills: playerProfile.stats.monsterKills,
     coins: playerProfile.stats.coins,
     shieldUpgrades: playerProfile.stats.shieldUpgrades,
     bubbles: playerProfile.stats.bubbles,
@@ -2498,8 +2315,6 @@ async function initCore(runtimeContext) {
     persistInventory();
   }
 
-
-
   function isInventoryItemEquipped(itemId) {
     if (itemId === SHIELD_ITEM_ID) {
       return shield?.holder === playerControls;
@@ -2740,7 +2555,7 @@ async function initCore(runtimeContext) {
       if (!Number.isFinite(num)) return SHOWDOWN_BASE_HEALTH_SEGMENTS;
       return Math.max(SHOWDOWN_BASE_HEALTH_SEGMENTS, Math.min(SHOWDOWN_MAX_HEALTH_SEGMENTS, Math.round(num)));
     }
-    if (key === 'xp' || key === 'monsterKills') {
+    if (key === 'xp') {
       const num = Number(value);
       if (!Number.isFinite(num)) {
         return 0;
@@ -3034,38 +2849,23 @@ async function initCore(runtimeContext) {
     }
   }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   function asVec3(p) {
     return p?.isVector3 ? p.clone()
       : p && Number.isFinite(p.x) && Number.isFinite(p.z) ? new THREE.Vector3(p.x, p.y ?? 0, p.z)
       : null;
   }
 
-  function resolveSpawnY(position, offset, { allowOnBuildings = false } = {}) {
+  function resolveSpawnY(position, offset) {
     if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.z)) return null;
-    return getSpawnY(position.x, position.z, offset, { allowOnBuildings });
+    return getSpawnY(position.x, position.z, offset);
   }
 
-  function applySpawnY(position, offset, { allowOnBuildings = false } = {}) {
-    const resolvedY = resolveSpawnY(position, offset, { allowOnBuildings });
+  function applySpawnY(position, offset) {
+    const resolvedY = resolveSpawnY(position, offset);
     if (!Number.isFinite(resolvedY)) return false;
     position.y = resolvedY;
     return true;
   }
-
 
   function getAmmoLabelForType() {
     return 'Bullets';
@@ -3078,7 +2878,7 @@ async function initCore(runtimeContext) {
   function spawnCoinPickup(position) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
-    if (!applySpawnY(spawnPos, 0.6, { allowOnBuildings: true })) return null;
+    if (!applySpawnY(spawnPos, 0.6)) return null;
 
     const geometry = new THREE.CylinderGeometry(0.2, 0.2, 0.06, 24);
     const material = new THREE.MeshStandardMaterial({
@@ -3411,7 +3211,6 @@ async function initCore(runtimeContext) {
   let _psSongAudio = null;
   let _psSongPool  = [];
 
-
   const _psGetNextSong = (isNight) => {
     const src = isNight ? PS_NIGHT_SONGS : PS_DAY_SONGS;
     if (_psSongPool.length === 0) _psSongPool = [...src];
@@ -3466,7 +3265,6 @@ async function initCore(runtimeContext) {
       return r < 0.1 ? 1 : r < 0.4 ? 2 : 3;
     }
   };
-
 
   // Steepest ground step (m per PS_PATH_SAMPLE_STEP) along a straight line from the player,
   // or Infinity if the line leaves the map. Bails early once it exceeds `giveUpAbove`.
@@ -4096,19 +3894,13 @@ async function initCore(runtimeContext) {
   }
 
   const debugPerf = {
-    monsters: 0,
-    ammoPickups: 0,
-    foodPickups: 0,
-    healthPickups: 0,
     coinPickups: 0,
-    tileCacheSize: 0,
     incomingBacklog: 0,
     incomingProcessedPerFrame: 0,
     adaptiveDegradeLevel: 0
   };
   const subsystemPerf = {
     incomingQueue: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
-    ai: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
     pickups: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
     remoteLabels: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 },
     audio: { totalMs: 0, calls: 0, maxMs: 0, lastMs: 0 }
@@ -4237,7 +4029,7 @@ async function initCore(runtimeContext) {
     setStat('health', statsState.maxHealthSegments);
     setStat('hunger', statsState.maxHungerSegments);
     setStat('magic', statsState.maxMagicSegments);
-    const spawn = getSpawnPosition({ allowOnBuildings: true });
+    const spawn = getSpawnPosition();
     playerModel.position.set(spawn.x, spawn.y, spawn.z);
     playerControls.playerX = spawn.x;
     playerControls.playerY = spawn.y;
@@ -4400,8 +4192,6 @@ async function initCore(runtimeContext) {
     getDisplaySettings: () => ({ ...displaySettings }),
     setDisplayMode: (mode) => setDisplayMode(mode),
     setDisplaySetting: (key, value) => setDisplaySetting(key, value),
-    getDistanceUnitPreference: () => getDistanceUnitPreference(),
-    setDistanceUnitPreference: (unit) => setDistanceUnitPreference(unit),
     deleteAccount: async () => {
       if (!profileNameKey) {
         return { status: 'missing-key' };
@@ -4789,8 +4579,6 @@ async function initCore(runtimeContext) {
       }
     }
 
-
-
     updateRoadLightsNearPlayer();
     playerControls.update();
     updateBloodEffects(frameDelta);
@@ -4838,7 +4626,7 @@ async function initCore(runtimeContext) {
           if (!playerDead && playerModel.position.distanceTo(pickup.position) <= getPickupAttractRadius()) {
             attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
             // Follow the ground while drifting; otherwise the bob above resets y to the spawn height
-            const groundY = getSpawnY(pickup.position.x, pickup.position.z, 0.6, { allowOnBuildings: true });
+            const groundY = getSpawnY(pickup.position.x, pickup.position.z, 0.6);
             if (Number.isFinite(groundY)) pickup.userData.baseY = groundY;
           }
 
@@ -5571,7 +5359,7 @@ async function initCore(runtimeContext) {
       const actionChanged = payload.action !== lastSentPresenceState.action;
       const heartbeatDue = now - (lastSentPresenceState.sentAt || 0) >= PRESENCE_HEARTBEAT_MS;
       if (lastSentPresenceState.x == null || moved || rotated || actionChanged || heartbeatDue) {
-        queueNetMessage(payload, 'presence:self');
+        queueNetMessage(payload);
         lastSentPresenceState.x = payload.x;
         lastSentPresenceState.y = payload.y;
         lastSentPresenceState.z = payload.z;
@@ -5580,7 +5368,6 @@ async function initCore(runtimeContext) {
         lastSentPresenceState.sentAt = now;
       } else {
         netStats.dropped += 1;
-        netStats.laneDropped.normal += 1;
       }
       lastPresenceSend = now;
     }
@@ -5641,9 +5428,7 @@ async function initCore(runtimeContext) {
     }
 
     updateProjectiles({
-      scene,
       projectiles,
-      playerModel,
       otherPlayers,
       multiplayer,
       hordeEnemies

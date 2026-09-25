@@ -1,46 +1,20 @@
 import { showFeatureLoading } from './loadingState.js';
-import { spawnProjectile, updateProjectiles, removeProjectileAt } from '../items/projectiles.js';
-import { spawnArrowProjectile } from '../items/arrow.js';
-import { ATTACKS, updateMeleeAttacks } from '../items/melee.js';
-import { Torch, TORCH_PICKUP_LOCATION } from '../items/torch.js';
+import { spawnProjectile, updateProjectiles } from '../items/projectiles.js';
 
 let specialWeaponsPromise = null;
 
-export {
-  spawnProjectile,
-  updateProjectiles,
-  removeProjectileAt,
-  spawnArrowProjectile,
-  ATTACKS,
-  updateMeleeAttacks,
-  Torch,
-  TORCH_PICKUP_LOCATION
-};
+export { spawnProjectile, updateProjectiles };
 
 export async function loadSpecialWeapons() {
   if (!specialWeaponsPromise) {
-    const hideLoading = showFeatureLoading('Loading special weapons');
+    const hideLoading = showFeatureLoading('Loading weapons');
     specialWeaponsPromise = Promise.all([
-      import('../items/iceGun.js'),
-      import('../items/bow.js'),
-      import('../items/lantern.js'),
-      import('../items/autumnSword.js'),
-      import('../items/hammer.js'),
-      import('../items/bazooka.js'),
-      import('../items/bomb.js'),
       import('../items/shield.js'),
       import('../items/pistol.js'),
       import('../items/foamSword.js')
-    ]).then(([iceGunModule, bowModule, lanternModule, autumnSwordModule, hammerModule, bazookaModule, bombModule, shieldModule, pistolModule, foamSwordModule]) => ({
-      IceGun: iceGunModule.IceGun,
-      Bow: bowModule.Bow,
-      Lantern: lanternModule.Lantern,
-      AutumnSword: autumnSwordModule.AutumnSword,
+    ]).then(([shieldModule, pistolModule, foamSwordModule]) => ({
       FoamSword: foamSwordModule.FoamSword,
       FOAM_SWORD_ITEM_ID: foamSwordModule.FOAM_SWORD_ITEM_ID,
-      Hammer: hammerModule.Hammer,
-      Bazooka: bazookaModule.Bazooka,
-      Bomb: bombModule.Bomb,
       Shield: shieldModule.Shield,
       SHIELD_ITEM_ID: shieldModule.SHIELD_ITEM_ID,
       DEFAULT_SHIELD_HEALTH: shieldModule.DEFAULT_SHIELD_HEALTH,

@@ -90,7 +90,7 @@ export class Shield extends Weapon {
   }
 
   update() {
-    if (window.phoneSwordMode && this.holder?.playerModel) {
+    if (this.holder?.playerModel) {
       const pm = this.holder.playerModel;
       pm.userData.foamSwordMode = true;
       const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(this._holdQuaternion);

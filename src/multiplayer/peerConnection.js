@@ -11,23 +11,7 @@ import {
 
 const VALID_MESSAGE_TYPES = new Set([
   'presence',
-  'entityControl',
-  'entityStates',
-  'entitySnapshot',
-  'entityStateRequest',
-  'projectile',
-  'inventoryThrowProjectile',
-  'monster',
-  'attackMonster',
-  'inventoryDrop',
-  'inventoryWorldDrop',
-  'inventoryWeaponDrop',
-  'dropPickup',
-  'dropWorldPickup',
-  'dropWeaponPickup',
-  'grab',
-  'grabMove',
-  'spawnRequest'
+  'projectile'
 ]);
 const MAX_PENDING_PAYLOADS = 75;
 const COALESCED_PAYLOAD_TYPES = new Set(['entitySnapshot', 'entityStates']);

@@ -28,7 +28,6 @@ const _palm = new THREE.Vector3();
 
 // ─── tuning constants ────────────────────────────────────────────────────────
 
-const CAPSULE_RADIUS  = 0.28;
 const CAPSULE_HEIGHT  = 1.0;
 const PHYS_HALF_HEIGHT = 0.6;
 const PHYS_RADIUS      = 0.3;
@@ -55,8 +54,6 @@ const BOMB_EXPLOSION_DAMAGE = 3;    // health segments
 const BOMB_ENEMY_DAMAGE     = 1;    // hearts taken from enemies caught in the blast
 export const BOMB_LIFETIME_MS = 8000;
 
-// Deflect: foam sword hits the bomb in this radius
-const DEFLECT_RADIUS    = 0.7;  // m
 // Deflected bomb travels back this fast (also used by the foam-sword deflect in bootstrapGameApp)
 export const BOMB_DEFLECT_SPEED = 10;
 
