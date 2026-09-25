@@ -61,6 +61,7 @@ import { createBuildingsRenderer } from '../environment/buildingsRender.js';
 import {
   BASE_HEALTH_SEGMENTS,
   HEALTH_SEGMENT_VALUE,
+  SHOWDOWN_BASE_HEALTH_SEGMENTS,
   SHOWDOWN_MAX_HEALTH_SEGMENTS,
   clampHealthSegments,
   convertPointsToSegments,
@@ -137,8 +138,8 @@ import {
   saveCompanions,
   saveSleepTimestamp,
   saveWalkingStats,
-  saveStatsImmediate,
-  saveStatsThrottled,
+  saveStatsImmediate as saveStatsImmediateRaw,
+  saveStatsThrottled as saveStatsThrottledRaw,
   loadPhoneSwordLeaderboards,
   savePhoneSwordStats,
   loadPhoneSwordStats,
@@ -163,6 +164,16 @@ if ('serviceWorker' in navigator) {
     }
   });
 }
+
+// Sword Showdown keeps its own max health (statsState.showdownMaxHealthSegments) and uses it as
+// maxHealthSegments at runtime; saves put the regular game's value back so the modes never clobber
+// each other. Set once at startup in Showdown mode; null otherwise.
+let showdownRegularMaxHealthSegments = null;
+const statsForSave = (stats) => (showdownRegularMaxHealthSegments == null || !stats
+  ? stats
+  : { ...stats, showdownMaxHealthSegments: stats.maxHealthSegments, maxHealthSegments: showdownRegularMaxHealthSegments });
+const saveStatsImmediate = (nameKey, stats, ...rest) => saveStatsImmediateRaw(nameKey, statsForSave(stats), ...rest);
+const saveStatsThrottled = (nameKey, stats, ...rest) => saveStatsThrottledRaw(nameKey, statsForSave(stats), ...rest);
 
 // Sword Showdown: max "Shield Upgrade" purchases (each +SHIELD_UPGRADE_HEALTH durability → 20 + 4×10 = 60 max)
 const SHOWDOWN_MAX_SHIELD_UPGRADES = 4;
@@ -5770,16 +5781,28 @@ async function initCore(runtimeContext) {
     coins: playerProfile.stats.coins,
     shieldUpgrades: playerProfile.stats.shieldUpgrades,
     bubbles: playerProfile.stats.bubbles,
-    bombs: playerProfile.stats.bombs
+    bombs: playerProfile.stats.bombs,
+    showdownMaxHealthSegments: playerProfile.stats.showdownMaxHealthSegments
   };
   statsState.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
   if (window.phoneSwordMode) {
-    statsState.maxHealthSegments = Math.min(SHOWDOWN_MAX_HEALTH_SEGMENTS, statsState.maxHealthSegments);
+    // Showdown health track: SHOWDOWN_BASE_HEALTH_SEGMENTS at level 1. First Showdown session on an
+    // older profile converts the shared value from the regular base (keeps level/Heart bonuses).
+    showdownRegularMaxHealthSegments = statsState.maxHealthSegments;
+    const storedShowdownMax = Math.round(statsState.showdownMaxHealthSegments || 0);
+    const showdownMax = storedShowdownMax > 0
+      ? storedShowdownMax
+      : statsState.maxHealthSegments - (BASE_HEALTH_SEGMENTS - SHOWDOWN_BASE_HEALTH_SEGMENTS);
+    statsState.maxHealthSegments = Math.max(SHOWDOWN_BASE_HEALTH_SEGMENTS, Math.min(SHOWDOWN_MAX_HEALTH_SEGMENTS, showdownMax));
+    statsState.showdownMaxHealthSegments = statsState.maxHealthSegments;
     statsState.shieldUpgrades = Math.min(SHOWDOWN_MAX_SHIELD_UPGRADES, Math.max(0, Math.floor(statsState.shieldUpgrades || 0)));
   }
   statsState.maxHungerSegments = Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(statsState.maxHungerSegments || BASE_HUNGER_SEGMENTS)));
   statsState.maxMagicSegments = Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, Math.round(statsState.maxMagicSegments || BASE_MAGIC_SEGMENTS)));
   statsState.health = normalizeHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
+  // Sword Showdown: every session starts at full health, so a death saved by a previous
+  // game never leaves the player dead (Continue? prompt) before the first stage.
+  if (window.phoneSwordMode) statsState.health = statsState.maxHealthSegments;
   statsState.hunger = clampHungerSegments(statsState.hunger, statsState.maxHungerSegments);
   statsState.energy = statsState.hunger;
   statsState.magic = clampMagicSegments(statsState.magic, statsState.maxMagicSegments);
@@ -9197,7 +9220,8 @@ async function initCore(runtimeContext) {
 
   function updateHealthUI() {
     if (!healthBar) return;
-    const maxSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
+    const minSegments = window.phoneSwordMode ? SHOWDOWN_BASE_HEALTH_SEGMENTS : BASE_HEALTH_SEGMENTS;
+    const maxSegments = Math.max(minSegments, Math.round(statsState.maxHealthSegments || minSegments));
     const currentSegments = clampHealthSegments(statsState.health, statsState.level, maxSegments);
     const healthRatio = maxSegments > 0 ? currentSegments / maxSegments : 0;
     if (healthBar.childElementCount !== maxSegments) {
@@ -9282,9 +9306,12 @@ async function initCore(runtimeContext) {
     }
     if (key === 'maxHealthSegments') {
       const num = Number(value);
+      if (window.phoneSwordMode) {
+        if (!Number.isFinite(num)) return SHOWDOWN_BASE_HEALTH_SEGMENTS;
+        return Math.max(SHOWDOWN_BASE_HEALTH_SEGMENTS, Math.min(SHOWDOWN_MAX_HEALTH_SEGMENTS, Math.round(num)));
+      }
       if (!Number.isFinite(num)) return BASE_HEALTH_SEGMENTS;
-      const clamped = Math.max(BASE_HEALTH_SEGMENTS, Math.round(num));
-      return window.phoneSwordMode ? Math.min(SHOWDOWN_MAX_HEALTH_SEGMENTS, clamped) : clamped;
+      return Math.max(BASE_HEALTH_SEGMENTS, Math.round(num));
     }
     if (key === 'maxHungerSegments') {
       const num = Number(value);
@@ -9342,6 +9369,7 @@ async function initCore(runtimeContext) {
       updateHealthUI();
     }
     if (key === 'maxHealthSegments') {
+      if (window.phoneSwordMode) statsState.showdownMaxHealthSegments = statsState.maxHealthSegments;
       statsState.health = clampHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
       updateHealthUI();
     }
@@ -12174,6 +12202,20 @@ async function initCore(runtimeContext) {
   let _psAutoWalkDir = new THREE.Vector3();
   let _psStageActive = false;
   let _psWinShown = false;
+  let _psStageKills = 0;       // enemies killed this stage
+  let _psStageTotal = 0;       // enemies in this stage
+  let _psKillHud = null;
+  const _psUpdateKillHud = (visible = true) => {
+    if (!_psKillHud) {
+      _psKillHud = document.createElement('div');
+      _psKillHud.id = 'ps-kill-counter';
+      _psKillHud.className = 'ps-kill-counter hidden';
+      _psKillHud.setAttribute('aria-live', 'polite');
+      document.body.appendChild(_psKillHud);
+    }
+    _psKillHud.textContent = `⚔️ ${Math.min(_psStageKills, _psStageTotal)} / ${_psStageTotal}`;
+    _psKillHud.classList.toggle('hidden', !visible);
+  };
   const PS_SPEED = 1.1;        // auto-walk speed (m/s) — roughly 1/3 of normal walk speed
   const PS_ENEMY_SPEED = 1.0 / 3.0;   // enemy speed multiplier (1/3 of normal)
   const PS_SPAWN_TRIGGER_DIST = 18;    // spawn enemy when player gets within this distance
@@ -12330,8 +12372,7 @@ async function initCore(runtimeContext) {
     return bestAngle;
   };
 
-  const _psBuildStage = (stage) => {
-    const count = _psEnemyCount(stage);
+  const _psBuildStage = (stage, count = _psEnemyCount(stage)) => {
     const pathLen = 80 + stage * 3;
     const pathAngle = _psPickPathAngle(pathLen);
     const _psPathEndX = playerModel.position.x + Math.cos(pathAngle) * pathLen;
@@ -12371,6 +12412,9 @@ async function initCore(runtimeContext) {
     _psAutoWalking = true;
     _psStageActive = true;
     _psWinShown = false;
+    _psStageKills = 0;
+    _psStageTotal = count;
+    _psUpdateKillHud(true);
     window.hordeEnemies = hordeEnemies;
   };
 
@@ -12395,6 +12439,7 @@ async function initCore(runtimeContext) {
 
   const _psShowStageOverlay = (stage, onOk) => {
     const count = _psEnemyCount(stage);
+    _psUpdateKillHud(false);
     _psStageBadge.textContent = stage <= 50 ? `STAGE ${stage}` : 'FINAL STAGE';
     _psStageEnemies.textContent = `Defeat ${count} enemies`;
 
@@ -12438,7 +12483,12 @@ async function initCore(runtimeContext) {
     _psStageOverlay.classList.remove('hidden');
   };
 
-  const _psStartStage = (stage) => {
+  const _psStartStage = (stage, count) => {
+    // Never begin a stage dead (e.g. health 0 left over from a previous game)
+    if (playerDead || statsState.health <= 0) {
+      hideGameOver();
+      respawnPlayer();
+    }
     // Determine day/night for this stage
     if (_psTimePref === 'random') {
       _psCurrentIsNight = Math.random() < 0.5;
@@ -12483,7 +12533,7 @@ async function initCore(runtimeContext) {
       }
     }
 
-    _psBuildStage(stage);
+    _psBuildStage(stage, count);
   };
 
   // Restart the current stage after death (clears enemies, rebuilds, shows overlay)
@@ -12501,7 +12551,7 @@ async function initCore(runtimeContext) {
     _psAutoWalking = false;
     _psStageActive = false;
     _psWinShown = false;
-    _psShowStageOverlay(_psStage, () => _psStartStage(_psStage));
+    _psShowStageOverlay(_psStage, (count) => _psStartStage(_psStage, count));
   };
 
   if (window.phoneSwordMode && rapierWorld) {
@@ -12527,7 +12577,7 @@ async function initCore(runtimeContext) {
           try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, _psStage); } catch (_) {}
         } catch (_) { /* keep localStorage value */ }
       }
-      _psShowStageOverlay(_psStage, () => _psStartStage(_psStage));
+      _psShowStageOverlay(_psStage, (count) => _psStartStage(_psStage, count));
     };
     // Delay briefly so the rest of init completes first
     setTimeout(_psInit, 600);
@@ -12738,6 +12788,97 @@ async function initCore(runtimeContext) {
       phoneSwordConnectCalib?.classList.add('hidden');
     });
 
+    // ── Phone controller input (phone-sword.html) ─────────────────────────────
+    // Besides gyro + block, the phone page has a joystick and bomb/gun/fire/shield/bubble/jump
+    // buttons. The joystick rides along in each 'gyro' packet; buttons arrive as 'action'
+    // messages. The host pushes a small 'status' message back so the phone can show counts.
+    let _remoteJoyActive = false;
+    const _applyRemoteJoystick = (angle, force) => {
+      if (!playerControls) return;
+      const f = Number.isFinite(force) ? Math.max(0, Math.min(1, force)) : 0;
+      if (f > 0.05 && Number.isFinite(angle)) {
+        playerControls.joystickAngle = angle;
+        playerControls.joystickForce = f;
+        _remoteJoyActive = true;
+      } else if (_remoteJoyActive) {
+        // Only release what the phone set, so the on-screen joystick keeps working
+        playerControls.joystickForce = 0;
+        _remoteJoyActive = false;
+      }
+    };
+    // Gun/Shield buttons equip that item, or go back to the sword if it's already equipped
+    const _toggleRemoteWeapon = (itemId) => {
+      const appStateRef = window.appState;
+      const inv = appStateRef?.getInventory?.() || {};
+      if (!((inv[itemId]?.count ?? 0) > 0)) return;
+      const equippedId = playerControls?.getEquippedWeapon?.('right')?.itemId;
+      appStateRef.equipInventoryItem?.(equippedId === itemId ? FOAM_SWORD_ITEM_ID : itemId);
+      playerControls?.refreshActionButtons?.();
+    };
+    const _handlePhoneAction = (action) => {
+      if (!playerControls?.enabled) return;
+      const appStateRef = window.appState;
+      if (action === 'jump') {
+        if (!playerControls.isInWater) window.phoneSwordJumpPressed = true;
+      } else if (action === 'bomb') {
+        appStateRef?.throwBomb?.();
+      } else if (action === 'bubble') {
+        appStateRef?.activateBubble?.();
+      } else if (action === 'fire') {
+        if (playerControls.getEquippedWeapon?.('right')?.itemId === 'pistol') playerControls.attemptFireProjectile?.();
+      } else if (action === 'gun') {
+        _toggleRemoteWeapon('pistol');
+      } else if (action === 'shield') {
+        _toggleRemoteWeapon(SHIELD_ITEM_ID);
+      }
+    };
+    const _phoneControllerStatus = () => {
+      const inv = window.appState?.getInventory?.() || {};
+      return {
+        bombs: getPlayerBombCount(),
+        bubbles: getBubbleCount(),
+        bubbleActive: isPlayerBubbleActive(),
+        hasGun: (inv.pistol?.count ?? 0) > 0,
+        hasShield: (inv[SHIELD_ITEM_ID]?.count ?? 0) > 0,
+        ammo: getPistolAmmoCount(),
+        equipped: playerControls?.getEquippedWeapon?.('right')?.itemId ?? FOAM_SWORD_ITEM_ID
+      };
+    };
+    const _attachPhoneSwordConn = (conn) => {
+      window.phoneSwordGyro.connected = true;
+      let lastStatusJson = '';
+      const sendStatus = () => {
+        if (!conn.open) return;
+        const status = _phoneControllerStatus();
+        const json = JSON.stringify(status);
+        if (json === lastStatusJson) return;
+        try {
+          conn.send({ type: 'status', ...status });
+          lastStatusJson = json;
+        } catch (_) { /* ignore */ }
+      };
+      const statusTimer = setInterval(sendStatus, 300);
+      conn.on('data', (data) => {
+        if (!data) return;
+        if (data.type === 'gyro') {
+          window.phoneSwordGyro.alpha = data.alpha;
+          window.phoneSwordGyro.beta = data.beta;
+          window.phoneSwordGyro.gamma = data.gamma;
+          window.phoneSwordGyro.blocking = !!data.blocking;
+          if ('joyForce' in data) _applyRemoteJoystick(Number(data.joyAngle), Number(data.joyForce));
+        } else if (data.type === 'action' && typeof data.action === 'string') {
+          _handlePhoneAction(data.action);
+          lastStatusJson = ''; // counts/equipped likely changed — resend soon
+        }
+      });
+      conn.on('close', () => {
+        clearInterval(statusTimer);
+        window.phoneSwordGyro.connected = false;
+        window.phoneSwordGyro.blocking = false;
+        _applyRemoteJoystick(0, 0);
+      });
+    };
+
     // Derive a stable peer ID from the player profile so the phone-sword URL never changes.
     // Uses SHA-256 of the profile key so IDs are short, URL-safe, and unique per account.
     let _fixedPeerId = null;
@@ -12792,21 +12933,7 @@ async function initCore(runtimeContext) {
           phoneSwordConnectCalib?.classList.remove('hidden');
         }, 1800);
 
-        window.phoneSwordGyro.connected = true;
-
-        conn.on('data', (data) => {
-          if (data && data.type === 'gyro') {
-            window.phoneSwordGyro.alpha = data.alpha;
-            window.phoneSwordGyro.beta = data.beta;
-            window.phoneSwordGyro.gamma = data.gamma;
-            window.phoneSwordGyro.blocking = !!data.blocking;
-          }
-        });
-
-        conn.on('close', () => {
-          window.phoneSwordGyro.connected = false;
-          window.phoneSwordGyro.blocking = false;
-        });
+        _attachPhoneSwordConn(conn);
       });
 
       gyroPeer.on('error', (err) => {
@@ -12823,16 +12950,7 @@ async function initCore(runtimeContext) {
               phoneSwordQrModal.classList.add('hidden');
               phoneSwordConnectCalib?.classList.remove('hidden');
             }, 1800);
-            window.phoneSwordGyro.connected = true;
-            conn.on('data', (data) => {
-              if (data && data.type === 'gyro') {
-                window.phoneSwordGyro.alpha = data.alpha;
-                window.phoneSwordGyro.beta = data.beta;
-                window.phoneSwordGyro.gamma = data.gamma;
-                window.phoneSwordGyro.blocking = !!data.blocking;
-              }
-            });
-            conn.on('close', () => { window.phoneSwordGyro.connected = false; window.phoneSwordGyro.blocking = false; });
+            _attachPhoneSwordConn(conn);
           });
           fallbackPeer.on('error', (e) => console.warn('[PhoneSword] PeerJS error:', e.message));
         } else {
@@ -16759,11 +16877,11 @@ async function initCore(runtimeContext) {
           if (_nextStage <= 50) {
             _psStage = _nextStage;
             _psSaveStage(_psStage);
-            _psShowStageOverlay(_nextStage, () => _psStartStage(_nextStage));
+            _psShowStageOverlay(_nextStage, (count) => _psStartStage(_nextStage, count));
           } else {
             _psStage = 1;
             _psSaveStage(_psStage);
-            _psShowStageOverlay(1, () => _psStartStage(1));
+            _psShowStageOverlay(1, (count) => _psStartStage(1, count));
           }
         });
       }
@@ -16946,6 +17064,8 @@ async function initCore(runtimeContext) {
           // Drop coins on first death frame (phone sword mode)
           if (window.phoneSwordMode && !_he._coinDropped) {
             _he._coinDropped = true;
+            _psStageKills++;
+            _psUpdateKillHud(true);
             addPlayerXp(getSwordShowdownKillXp(_psStage));
             const _dropPos = _he.group.position.clone();
             spawnCoinPickup(_dropPos);
