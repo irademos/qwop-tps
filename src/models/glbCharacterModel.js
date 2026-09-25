@@ -23,6 +23,14 @@
  *
  * Death: playDeath() plays deathClip once over the whole body (arm IK suspended, the
  * floating hands just follow the palms) until revive().
+ *
+ * One-shot actions: playAction(url) plays a clip once over the whole body (arm IK
+ * suspended like death), then returns to walk/idle; actionProgress / actionActive
+ * let the caller time events (e.g. the bomb thrower's release) against the clip.
+ *
+ * armIK: false (createGLBCharacterInstance option) leaves the arms to the clips
+ * entirely — for characters with no floating-hand targets (the bomb thrower).
+ * solveArm() then only snaps the target to the palm.
  */
 
 import * as THREE from 'three';
@@ -35,6 +43,7 @@ export const glbCharacterConfig = {
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',
   deathClip: '/models/animations/Flying Back Death.fbx', // played once (whole body, arms included) by playDeath()
+  throwClip: '/models/animations/Throw.fbx', // bomb thrower's throw (playAction); right-handed
   clipFade: 0.2,           // seconds to crossfade walk <-> idle
   targetHeight: 1.0,       // world height of the character (bind pose)
 
@@ -93,8 +102,9 @@ const _stretch = new THREE.Vector3();
 // ── Character ───────────────────────────────────────────────────────────────
 
 export class GLBCharacter {
-  constructor(scene) {
+  constructor(scene, { armIK = true } = {}) {
     this.scene = scene;
+    this._armIK = armIK;
     this.fluffy = new FluffyCharacter(scene, glbCharacterConfig.fluffy);
     this.arms = {};
     scene.updateMatrixWorld(true);
@@ -103,6 +113,8 @@ export class GLBCharacter {
     }
     this._moving = null;
     this._dead = false;
+    this._action = null; // { started } while a playAction() clip owns the body
+    if (!armIK) this._setArmIK(false);
     this.setMoving(false);
   }
 
@@ -162,12 +174,48 @@ export class GLBCharacter {
     moving = !!moving;
     if (moving === this._moving) return;
     this._moving = moving;
+    if (this._action) return; // picked up when the action clip ends
     const cfg = glbCharacterConfig;
     this.fluffy.play(moving ? cfg.walkClip : cfg.idleClip, {
       inPlace: true,
       fade: cfg.clipFade,
-      excludeBones: ARM_ROOT_BONES,
+      excludeBones: this._armIK ? ARM_ROOT_BONES : [],
     }).catch((e) => console.warn('[GLBCharacter] clip load failed:', e));
+  }
+
+  /**
+   * Plays `url` once over the whole body (arm IK suspended), then crossfades back to
+   * walk/idle. Ignored while dead; a later playDeath() cancels it.
+   */
+  playAction(url, { fade = 0.1 } = {}) {
+    if (this._dead) return;
+    const action = { started: false };
+    this._action = action;
+    this._setArmIK(false);
+    this.fluffy.play(url, { inPlace: true, fade, loop: false })
+      .then(() => { if (this._action === action) action.started = true; })
+      .catch((e) => {
+        console.warn('[GLBCharacter] action clip load failed:', e);
+        if (this._action === action) this._endAction();
+      });
+  }
+
+  /** True from playAction() until its clip has finished. */
+  get actionActive() { return !!this._action; }
+
+  /** Playback position (0..1) of the playAction() clip; 0 while it is still loading. */
+  get actionProgress() {
+    if (!this._action) return 1;
+    return this._action.started ? this.fluffy.clipProgress : 0;
+  }
+
+  _endAction() {
+    this._action = null;
+    if (this._dead) return;
+    this._setArmIK(this._armIK);
+    const moving = this._moving;
+    this._moving = null;
+    this.setMoving(moving);
   }
 
   /**
@@ -177,6 +225,7 @@ export class GLBCharacter {
   playDeath() {
     if (this._dead) return;
     this._dead = true;
+    this._action = null;
     this._setArmIK(false);
     const cfg = glbCharacterConfig;
     this.fluffy.play(cfg.deathClip, { inPlace: true, fade: 0.15, loop: false })
@@ -187,7 +236,7 @@ export class GLBCharacter {
   revive() {
     if (!this._dead) return;
     this._dead = false;
-    this._setArmIK(true);
+    this._setArmIK(this._armIK);
     this._moving = null;
     this.setMoving(false);
   }
@@ -208,6 +257,7 @@ export class GLBCharacter {
   /** Body animation for this frame (arms excluded). */
   animate(dt) {
     this.fluffy.animate(dt);
+    if (this._action?.started && this.fluffy.clipFinished) this._endAction();
     // Bring the rig (and its ancestors) up to date so solveArm() works on this frame's pose
     this.fluffy.rigSpace.updateWorldMatrix(true, true);
   }
@@ -221,12 +271,10 @@ export class GLBCharacter {
   solveArm(hand, targetObject, { writeBack = true } = {}) {
     const arm = this.arms[hand];
     if (!arm || !targetObject) return;
-    if (this._dead) {
-      // Death clip owns the arms: just keep the floating hand (and anything held) on the palm
+    if (this._dead || this._action || !this._armIK) {
+      // A clip owns the arms: just keep the floating hand (and anything held) on the palm
       if (writeBack && targetObject.parent) {
-        arm.hand.updateMatrixWorld(true);
-        _v.set(0, arm.palm, 0).applyMatrix4(arm.hand.matrixWorld);
-        targetObject.position.copy(targetObject.parent.worldToLocal(_v));
+        targetObject.position.copy(targetObject.parent.worldToLocal(this.getPalmWorldPosition(hand, _v)));
       }
       return;
     }
@@ -294,6 +342,17 @@ export class GLBCharacter {
     }
   }
 
+  /**
+   * World position of the middle of the palm for floating hand `hand` (game labels:
+   * 'left' is the anatomical right arm). Valid after animate()/solveArm() this frame.
+   */
+  getPalmWorldPosition(hand, out = new THREE.Vector3()) {
+    const arm = this.arms[hand];
+    if (!arm) return out;
+    arm.hand.updateMatrixWorld(true);
+    return out.set(0, arm.palm, 0).applyMatrix4(arm.hand.matrixWorld);
+  }
+
   /** Fur springs; call after solveArm() so the fur follows the final arm pose. */
   stepFluff(dt) {
     this.fluffy.stepFluff(dt);
@@ -313,6 +372,7 @@ export class GLBCharacter {
  * Loads (once) and clones the character.
  * @param {object} [opts]
  * @param {number} [opts.targetHeight] world height of the character
+ * @param {boolean} [opts.armIK] false: the clips drive the arms (no floating-hand IK)
  * @returns {Promise<{ container: THREE.Group, character: GLBCharacter }>}
  */
 export async function createGLBCharacterInstance(opts = {}) {
@@ -344,7 +404,7 @@ export async function createGLBCharacterInstance(opts = {}) {
   container.name = 'GLBCharacterContainer';
   container.add(scene);
 
-  const character = new GLBCharacter(scene);
+  const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true });
   container.userData.glbCharacter = character;
   return { container, character };
 }
