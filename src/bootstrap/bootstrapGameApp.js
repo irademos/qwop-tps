@@ -16284,14 +16284,17 @@ async function initCore(runtimeContext) {
         }
       }
 
-      // Auto-walk: pause when an enemy is actively attacking close by
+      // Auto-walk: pause when an enemy is actively attacking close by,
+      // or while the camera is tracking an incoming bomb
       if (_psAutoWalking) {
         const _hasNearAttacker = hordeEnemies.some(e =>
           !e.isDead &&
           e._aiState === 'attack' &&
           e.group.position.distanceTo(playerModel.position) < 3.5
         );
-        if (!_hasNearAttacker) {
+        if (_psFindIncomingBomb()) {
+          playerControls.isMoving = false;
+        } else if (!_hasNearAttacker) {
           const _ddx = _psPathEnd.x - playerModel.position.x;
           const _ddz = _psPathEnd.z - playerModel.position.z;
           const _distToEnd = Math.sqrt(_ddx * _ddx + _ddz * _ddz);

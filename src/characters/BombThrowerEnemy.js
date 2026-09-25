@@ -2,7 +2,7 @@
  * BombThrowerEnemy — a ranged horde enemy that keeps its distance and lobs
  * bombs at the player.  Bombs use the /assets/props/bomb.glb model and explode
  * on ground contact.  The player can deflect a bomb mid-air by hitting it with
- * the foam sword, sending it back toward the thrower.
+ * the foam sword, sending it back toward the thrower (it homes in and always kills them).
  *
  * Physics: dynamic Rapier capsule (same as EnemyPlayer).
  * Bomb projectiles are purely kinematic (custom gravity, no Rapier body) so
@@ -16,6 +16,7 @@ import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js';
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
+const _homeDir = new THREE.Vector3();
 
 // ─── tuning constants ────────────────────────────────────────────────────────
 
@@ -397,8 +398,18 @@ export class BombThrowerEnemy {
       const bomb = this._bombs[i];
       const age = now - bomb.spawnTime;
 
-      // Apply gravity
-      bomb.vel.y -= BOMB_GRAVITY * dt;
+      if (bomb.deflected && this.group) {
+        // Deflected: home straight at the thrower so it always lands the kill
+        _homeDir.copy(this.group.position);
+        _homeDir.y += CAPSULE_HEIGHT / 2;
+        _homeDir.sub(bomb.mesh.position);
+        if (_homeDir.lengthSq() > 1e-6) {
+          bomb.vel.copy(_homeDir.normalize().multiplyScalar(BOMB_DEFLECT_SPEED));
+        }
+      } else {
+        // Apply gravity
+        bomb.vel.y -= BOMB_GRAVITY * dt;
+      }
 
       // Move
       bomb.mesh.position.addScaledVector(bomb.vel, dt);
@@ -407,9 +418,9 @@ export class BombThrowerEnemy {
       bomb.mesh.rotation.x += dt * 4;
       bomb.mesh.rotation.z += dt * 2.5;
 
-      // Lifetime check
+      // Lifetime check (a deflected bomb always kills its thrower)
       if (age > BOMB_LIFETIME_MS) {
-        this._explodeBomb(bomb, bomb.mesh.position.clone(), targetModel, targetControls);
+        this._explodeBomb(bomb, bomb.mesh.position.clone(), targetModel, targetControls, bomb.deflected);
         this._removeBomb(bomb);
         i = Math.min(i, this._bombs.length - 1);
         continue;
@@ -418,7 +429,7 @@ export class BombThrowerEnemy {
       // Ground contact
       const groundY = getTerrainHeight(bomb.mesh.position.x, bomb.mesh.position.z);
       if (Number.isFinite(groundY) && bomb.mesh.position.y <= groundY + 0.15) {
-        this._explodeBomb(bomb, bomb.mesh.position.clone(), targetModel, targetControls);
+        this._explodeBomb(bomb, bomb.mesh.position.clone(), targetModel, targetControls, bomb.deflected);
         this._removeBomb(bomb);
         i = Math.min(i, this._bombs.length - 1);
         continue;
