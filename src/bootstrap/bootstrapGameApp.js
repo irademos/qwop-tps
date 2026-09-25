@@ -4,6 +4,7 @@ import { getHandTrackingData, isHandTrackingEnabled } from '../mediapipe/handTra
 import { Weapon } from '../items/weapon.js';
 import * as THREE from "three";
 import { spawnBloodBurst, updateBloodEffects } from "../combat/bloodEffect.js";
+import { updateExplosionEffects } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { loadMonsterModel } from "../models/monsterModel.js";
 import { updateRemotePlayerRig } from "../models/playerModel.js";
@@ -11953,6 +11954,8 @@ async function initCore(runtimeContext) {
         position: spawnPos,
         hearts: opts.hearts ?? 3,
         speedScale: opts.speedScale ?? 1.0,
+        getBlastTargets: () => hordeEnemies,
+        onBlastPlayer: _blastPlayer,
       });
     } else {
       enemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
@@ -11994,6 +11997,33 @@ async function initCore(runtimeContext) {
   let _psGroundY = null;     // ground Y level for phone sword mode
   const PS_JUMP_FORCE = 8.5; // initial upward speed m/s
   const PS_GRAVITY = 20;     // gravity m/s²
+
+  // Bomb blast on the player: thrown back (and up, in Sword Showdown) a little harder than an
+  // enemy's death knockback, playing the flying-back death clip once before getting back up.
+  const PLAYER_BLAST_SPEED = 9;       // m/s horizontal, decays over PLAYER_BLAST_MS
+  const PLAYER_BLAST_UP = 5;          // m/s upward pop (Sword Showdown jump physics)
+  const PLAYER_BLAST_MS = 900;
+  const PLAYER_BLAST_STUN_MS = 2000;  // flying-back clip time before getting up
+  let _playerBlastReviveTimer = null;
+  function _blastPlayer(direction, falloff = 1) {
+    if (playerDead || !direction) return;
+    const k = THREE.MathUtils.clamp(falloff, 0, 1);
+    _playerKnockback.vx = direction.x * PLAYER_BLAST_SPEED * k;
+    _playerKnockback.vz = direction.z * PLAYER_BLAST_SPEED * k;
+    _playerKnockback.endTime = Date.now() + PLAYER_BLAST_MS;
+    if (window.phoneSwordMode) {
+      _psJumpVelY = Math.max(_psJumpVelY, PLAYER_BLAST_UP * k);
+      window.phoneSwordAirborne = true;
+    }
+    const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
+    if (!glbCharacter) return;
+    glbCharacter.playDeath();
+    clearTimeout(_playerBlastReviveTimer);
+    _playerBlastReviveTimer = setTimeout(() => {
+      _playerBlastReviveTimer = null;
+      if (!playerDead) glbCharacter.revive();
+    }, PLAYER_BLAST_STUN_MS);
+  }
   let _psPathEnd = new THREE.Vector3();
   let _psAutoWalking = false;
   let _psAutoWalkDir = new THREE.Vector3();
@@ -15620,6 +15650,7 @@ async function initCore(runtimeContext) {
       }
     }
     updateBloodEffects(frameDelta);
+    updateExplosionEffects(frameDelta);
     updatePlayerBubble();
     if (buildState.placing) {
       const moveSpeed = 3 * frameDelta;

@@ -10,6 +10,7 @@
  */
 
 import { spawnBloodBurst } from '../combat/bloodEffect.js';
+import { spawnExplosion } from '../combat/explosionEffect.js';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
@@ -40,6 +41,7 @@ const BOMB_GRAVITY      = 8;    // m/s² downward acceleration (low → floaty a
 const BOMB_SCALE        = 0.55;
 const BOMB_EXPLOSION_RADIUS = 2.8;  // m — blast radius for player damage
 const BOMB_EXPLOSION_DAMAGE = 3;    // health segments
+const BOMB_ENEMY_DAMAGE     = 1;    // hearts taken from enemies caught in the blast
 const BOMB_LIFETIME_MS  = 8000;
 
 // Deflect: foam sword hits the bomb in this radius
@@ -48,6 +50,23 @@ const DEFLECT_RADIUS    = 0.7;  // m
 export const BOMB_DEFLECT_SPEED = 10;
 
 const HEALTH_BAR_DISPLAY_MS = 2000;
+
+// Horizontal unit vector pointing from the blast to `target` (falls back to the bomb's
+// travel direction, then a random one, when the target is right on top of it).
+function _blastDirection(from, target, fallbackVel = null) {
+  const dir = new THREE.Vector3(target.x - from.x, 0, target.z - from.z);
+  if (dir.lengthSq() < 1e-4 && fallbackVel) dir.set(fallbackVel.x, 0, fallbackVel.z);
+  if (dir.lengthSq() < 1e-4) {
+    const a = Math.random() * Math.PI * 2;
+    dir.set(Math.cos(a), 0, Math.sin(a));
+  }
+  return dir.normalize();
+}
+
+// 1 at the centre of the blast, easing to 0.6 at its edge
+function _blastFalloff(dist) {
+  return 1 - 0.4 * THREE.MathUtils.clamp(dist / BOMB_EXPLOSION_RADIUS, 0, 1);
+}
 
 // ─── shared GLB cache ────────────────────────────────────────────────────────
 let _bombGltfPromise = null;
@@ -73,6 +92,10 @@ export class BombThrowerEnemy {
    * @param {THREE.Vector3} [options.position]
    * @param {number}        [options.hearts]
    * @param {number}        [options.speedScale]
+   * @param {() => object[]} [options.getBlastTargets] – other enemies a blast can hit
+   *                          (each needs group, applyDamage and applyBlastKnockback/applyDirectKnockback)
+   * @param {(direction: THREE.Vector3, falloff: number) => void} [options.onBlastPlayer]
+   *                          – throws the player back when caught in a blast
    */
   constructor(scene, rapier, rapierWorld, options = {}) {
     this.scene       = scene;
@@ -84,6 +107,8 @@ export class BombThrowerEnemy {
     this.maxHearts = this.hearts;
     this.isDead    = false;
     this.speedScale = options.speedScale ?? 1.0;
+    this._getBlastTargets = options.getBlastTargets ?? null;
+    this._onBlastPlayer   = options.onBlastPlayer ?? null;
 
     // Throw state
     this._lastThrowTime = -Infinity;
@@ -273,30 +298,10 @@ export class BombThrowerEnemy {
     }
   }
 
-  // Spark / shockwave burst visual on explosion
+  // Fireball / smoke / shockwave visual + boom on explosion
   _spawnExplosion(pos) {
-    const geo = new THREE.SphereGeometry(0.5, 8, 6);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0xff6600, emissive: 0xff2200, transparent: true, opacity: 0.85, roughness: 0.9
-    });
-    const sphere = new THREE.Mesh(geo, mat);
-    sphere.position.copy(pos);
-    sphere.position.y += 0.3;
-    this.scene.add(sphere);
-    const start = Date.now();
-    const dur   = 420;
-    const tick  = () => {
-      const t = Math.min(1, (Date.now() - start) / dur);
-      sphere.scale.setScalar(1 + t * 3.5);
-      sphere.material.opacity = 0.85 * (1 - t);
-      if (t < 1) {
-        requestAnimationFrame(tick);
-      } else {
-        this.scene.remove(sphere);
-        geo.dispose(); mat.dispose();
-      }
-    };
-    requestAnimationFrame(tick);
+    const groundY = getTerrainHeight(pos.x, pos.z);
+    spawnExplosion(this.scene, pos, { groundY: Number.isFinite(groundY) ? groundY : pos.y });
     window.audioManager?.playSFX?.('SFX/Attacks/Explosions/Cannon/Cannon Explosion 1.ogg', 0.75, {
       cooldownKey: 'bomb-explode', cooldownMs: 50
     });
@@ -506,10 +511,12 @@ export class BombThrowerEnemy {
       // Deflected bomb explodes on the thrower — instant kill
       this.hearts = 0;
       this._die();
-      return;
     }
 
-    if (!targetModel) return;
+    this._blastEnemies(pos);
+
+    // The player's own deflected bomb never hurts them
+    if (bomb.deflected || !targetModel) return;
     // Protective bubble: explosions can't hurt or knock back the player
     if (window.isPlayerBubbleActive?.()) return;
     const distToPlayer = pos.distanceTo(targetModel.position);
@@ -517,10 +524,29 @@ export class BombThrowerEnemy {
       if (typeof window.localHealth === 'number') {
         window.localHealth = Math.max(0, window.localHealth - BOMB_EXPLOSION_DAMAGE);
       }
-      if (targetControls && !targetControls.isKnocked) {
-        const dir = targetModel.position.clone().sub(pos).normalize();
-        dir.y = 0;
+      const dir = _blastDirection(pos, targetModel.position, bomb.vel);
+      if (this._onBlastPlayer) {
+        this._onBlastPlayer(dir, _blastFalloff(distToPlayer));
+      } else if (targetControls) {
         targetControls.applyKnockback?.({ direction: dir, strength: 3 });
+      }
+    }
+  }
+
+  // Every other enemy inside the blast radius loses a heart and is thrown back.
+  _blastEnemies(pos) {
+    const targets = this._getBlastTargets?.();
+    if (!targets?.length) return;
+    for (const enemy of targets) {
+      if (!enemy || enemy === this || enemy.isDead || !enemy.group) continue;
+      const dist = pos.distanceTo(enemy.group.position);
+      if (dist > BOMB_EXPLOSION_RADIUS) continue;
+      const dir = _blastDirection(pos, enemy.group.position);
+      enemy.applyDamage?.(BOMB_ENEMY_DAMAGE);
+      if (typeof enemy.applyBlastKnockback === 'function') {
+        enemy.applyBlastKnockback({ direction: dir, falloff: _blastFalloff(dist) });
+      } else {
+        enemy.applyDirectKnockback?.({ direction: dir, horizSpeed: 7 * _blastFalloff(dist), upVelocity: 3 });
       }
     }
   }
