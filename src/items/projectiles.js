@@ -51,6 +51,31 @@ const getObjectBox = (object) => {
   return box;
 };
 
+// Fast shots (pistol: ~0.5 m/frame) can skip past a slim enemy between frames, or be
+// bounced off its physics capsule before the boxes overlap, so also test the segment
+// travelled this frame against the enemy's vertical body axis.
+const HORDE_HIT_RADIUS = 0.45;
+const HORDE_HIT_HEIGHT = 1.4;
+const _segDir = new THREE.Vector3();
+const _segToAxis = new THREE.Vector3();
+const sweptHitsHordeEnemy = (from, to, enemy) => {
+  const base = enemy?.group?.position;
+  if (!base) return false;
+  _segDir.subVectors(to, from);
+  _segDir.y = 0;
+  const lenSq = _segDir.lengthSq();
+  // Closest point on the (horizontal) segment to the enemy's axis
+  _segToAxis.set(base.x - from.x, 0, base.z - from.z);
+  const t = lenSq > 1e-8 ? THREE.MathUtils.clamp(_segToAxis.dot(_segDir) / lenSq, 0, 1) : 0;
+  const px = from.x + (to.x - from.x) * t;
+  const py = from.y + (to.y - from.y) * t;
+  const pz = from.z + (to.z - from.z) * t;
+  if (py < base.y - 0.1 || py > base.y + HORDE_HIT_HEIGHT) return false;
+  const dx = px - base.x;
+  const dz = pz - base.z;
+  return dx * dx + dz * dz < HORDE_HIT_RADIUS * HORDE_HIT_RADIUS;
+};
+
 export function removeProjectileAt(projectiles, index) {
   const projectile = projectiles[index];
   if (!projectile) return;
@@ -348,11 +373,12 @@ export function updateProjectiles({
 
     // Horde enemies (EnemyPlayer) are always local — call applyDamage directly.
     if (!removed && Array.isArray(hordeEnemies) && hordeEnemies.length > 0 && (!proj.userData.spawnPosition || proj.position.distanceToSquared(proj.userData.spawnPosition) >= 0.0064)) {
+      const prevPos = proj.userData.hordePrevPos ?? proj.position;
       for (const enemy of hordeEnemies) {
         if (enemy.isDead) continue;
         const enemyBox = getObjectBox(enemy.group);
         if (!enemyBox) continue;
-        if (projBox.intersectsBox(enemyBox)) {
+        if (projBox.intersectsBox(enemyBox) || sweptHitsHordeEnemy(prevPos, proj.position, enemy)) {
           const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
           const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
           const dir = vel.clone().normalize();
@@ -367,6 +393,7 @@ export function updateProjectiles({
           break;
         }
       }
+      if (!removed) (proj.userData.hordePrevPos ??= new THREE.Vector3()).copy(proj.position);
     }
 
     if (isHost && Array.isArray(monsters)) {
