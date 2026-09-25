@@ -86,9 +86,13 @@ const IDLE_BLADE_DIR = N(0.05, 0.35, 1);
 const IDLE_FLAT_REF  = V(1, 0, 0);
 
 // Attack-loop timing (seconds)
-const SWING_WINDUP_MIN = 0.45, SWING_WINDUP_RAND = 0.45; // wind-up before a swing
+const SWING_WINDUP_MIN = 0.60, SWING_WINDUP_RAND = 0.45; // wind-up before a swing
 const SWING_EXEC_MIN   = 0.32, SWING_EXEC_RAND   = 0.10; // the swing itself
 const SWING_END_HOLD   = 2.0;                            // follow-through hold
+// Wind-up jostle: the sword circles restlessly at the wound-up extreme before the swing
+const WINDUP_CIRCLE_HZ     = 2.2;   // revolutions per second
+const WINDUP_CIRCLE_HAND   = 0.06;  // hand circle radius (m)
+const WINDUP_CIRCLE_BLADE  = 0.22;  // blade-direction circle radius (unit-vector offset)
 
 // Trail rendering for sword swings
 const TRAIL_DURATION_MS  = 380;  // how long trail history is kept (ms)
@@ -131,6 +135,8 @@ const _tmpQ    = new THREE.Quaternion();
 const _swordTipWorld  = new THREE.Vector3();
 const _swordGuardWorld = new THREE.Vector3();
 const _bladeDir = new THREE.Vector3();
+const _swingDirWorld    = new THREE.Vector3();
+const _playerBladeWorld = new THREE.Vector3();
 const _upAxis  = new THREE.Vector3(0, 1, 0);
 const _bladeX  = new THREE.Vector3();
 const _bladeY  = new THREE.Vector3();
@@ -154,6 +160,51 @@ function swingBladeDir(preset, u, out) {
     .addScaledVector(preset.mid, b)
     .addScaledVector(preset.to, c)
     .normalize();
+}
+
+// ── Directional blocking ──────────────────────────────────────────────────────
+// A block only stops a swing that crosses the blocking blade. Seen from the attacker,
+// if the swing's line of motion is within BLOCK_MIN_ANGLE_DEG of the blade's line
+// (same or opposite direction), the swing slides along the blade and lands; otherwise
+// it is blocked. E.g. a horizontal block stops an overhead chop but not a side sweep.
+export const BLOCK_MIN_ANGLE_DEG = 30;
+// The player's block is more forgiving: a wider reach around their blade, and only swings
+// within this (smaller) angle of their blade's line slip past it.
+const PLAYER_BLOCK_MIN_ANGLE_DEG = 15;
+const PLAYER_BLOCK_REACH         = 0.85;  // m, from any point of the player's blade
+const _blkS = new THREE.Vector3();
+const _blkB = new THREE.Vector3();
+const _blkV = new THREE.Vector3();
+
+/**
+ * True if a swing moving along `swingDir` is stopped by a blade lying along `bladeDir`.
+ * Both are projected onto the plane facing the attacker (`viewDir` = attacker → defender).
+ * Swings within `minAngleDeg` of the blade's line get through.
+ */
+export function swingCrossesBlade(swingDir, bladeDir, viewDir, minAngleDeg = BLOCK_MIN_ANGLE_DEG) {
+  _blkV.copy(viewDir);
+  if (_blkV.lengthSq() < 1e-8) _blkV.set(0, 0, 1);
+  _blkV.normalize();
+  _blkS.copy(swingDir).addScaledVector(_blkV, -swingDir.dot(_blkV));
+  _blkB.copy(bladeDir).addScaledVector(_blkV, -bladeDir.dot(_blkV));
+  if (_blkB.lengthSq() < 1e-6) return false; // blade pointed at the attacker covers nothing
+  if (_blkS.lengthSq() < 1e-6) return true;  // straight thrust into the guard
+  const cos = Math.abs(_blkS.normalize().dot(_blkB.normalize()));
+  return cos < Math.cos(minAngleDeg * Math.PI / 180);
+}
+
+/**
+ * Wind-up jostle: an offset of length `radius` circling in the plane perpendicular to the
+ * wound-up blade direction (`preset.from`), at WINDUP_CIRCLE_HZ.
+ */
+const _circA = new THREE.Vector3();
+const _circB = new THREE.Vector3();
+function windupCircleOffset(preset, t, seed, radius, out) {
+  _circA.copy(preset.flat);
+  _circB.crossVectors(preset.from, preset.flat).normalize();
+  const ang = t * WINDUP_CIRCLE_HZ * Math.PI * 2 + seed;
+  return out.copy(_circA).multiplyScalar(Math.cos(ang) * radius)
+    .addScaledVector(_circB, Math.sin(ang) * radius);
 }
 
 /** Ease-in-out used for swing progress. */
@@ -628,6 +679,7 @@ export class EnemyPlayer {
       this._attackPhase    = 'swing_hold';
       this._attackPhaseDur = SWING_WINDUP_MIN + Math.random() * SWING_WINDUP_RAND;
       this._swingPreset    = SWING_PRESETS[Math.floor(Math.random() * SWING_PRESETS.length)];
+      this._blockSeed      = Math.random() * 100;  // randomizes the wind-up circle's phase
     }
     this._attackPhaseT = 0;
   }
@@ -684,10 +736,10 @@ export class EnemyPlayer {
         }
 
         case 'swing_hold': {
-          // Hand out at the wound-up extreme, with a subtle tension wobble
-          const wob = Math.sin(t * 5.0) * 0.02;
+          // Hand out at the wound-up extreme, jostling around in small circles
           this._handTargetR.copy(SWING_PIVOT).addScaledVector(this._swingPreset.from, SWING_REACH);
-          this._handTargetR.x += wob;
+          windupCircleOffset(this._swingPreset, t, this._blockSeed, WINDUP_CIRCLE_HAND, _tmpV);
+          this._handTargetR.add(_tmpV);
           break;
         }
 
@@ -739,6 +791,25 @@ export class EnemyPlayer {
     // Fast lerp during swing, a bit slower during block/hold so it feels natural
     const speed = this._attackPhase === 'swing_execute' ? 22 : 12;
     this._leftHandGroup.position.lerp(this._handTargetL, 1 - Math.exp(-speed * dt));
+  }
+
+  /** True while the enemy is deliberately holding a block stance. */
+  isBlocking() {
+    return !this.isDead && this._aiState === 'attack' && this._attackPhase === 'block';
+  }
+
+  /**
+   * Whether this enemy's block stops a swing moving along `swingDir` (world space) from an
+   * attacker at `attackerPos`. Only true in the block stance, and only when the swing crosses
+   * the blade at more than BLOCK_MIN_ANGLE_DEG (see swingCrossesBlade).
+   */
+  blocksSwing(swingDir, attackerPos) {
+    if (!this.isBlocking()) return false;
+    // Use the stance's blade direction (not the live sword, which may be mid-recoil)
+    this.group.getWorldQuaternion(_rootQ);
+    _bladeDir.copy(this._blockPreset.dir).applyQuaternion(_rootQ);
+    _toTarget.subVectors(this.group.position, attackerPos).setY(0);
+    return swingCrossesBlade(swingDir, _bladeDir, _toTarget);
   }
 
   /** Called externally when the player's sword hits this sword. */
@@ -806,9 +877,14 @@ export class EnemyPlayer {
       const p = Math.min(this._attackPhaseT / Math.max(0.001, this._attackPhaseDur), 1);
       const u = phase === 'swing_hold' ? 0 : phase === 'swing_execute' ? easeSwing(p) : 1;
       swingBladeDir(preset, u, _bladeDir);
+      if (phase === 'swing_hold') {
+        // Blade tip circles along with the hand while winding up
+        windupCircleOffset(preset, this._attackPhaseT, this._blockSeed, WINDUP_CIRCLE_BLADE, _swingDirWorld);
+        _bladeDir.add(_swingDirWorld).normalize();
+      }
       this.group.getWorldQuaternion(_rootQ);
       bladeQuat(_bladeDir, preset.flat, _tmpQ).premultiply(_rootQ);
-      const rate = phase === 'swing_hold' ? 10 : 30;
+      const rate = phase === 'swing_hold' ? 16 : 30;
       this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-rate * dt));
 
     } else {
@@ -846,15 +922,26 @@ export class EnemyPlayer {
 
     if (dist > SWORD_TIP_HIT_RADIUS) return;
 
-    // Player sword block: if the player's blade points are near this sword's tip, deflect.
+    // Player sword block: only while the player holds the block button, with their blade in
+    // the way of this sword, and only if the swing crosses their blade (see swingCrossesBlade).
     const playerBladePoints = window.phoneSwordBladePoints;
-    if (playerBladePoints?.length) {
-      const _playerBlocking = !!window.phoneSwordGyro?.blocking;
-      const _blockRadius = _playerBlocking ? 0.55 : 0.32;
-      for (const pp of playerBladePoints) {
-        if (_swordTipWorld.distanceTo(pp) < _blockRadius) {
-          // Player sword intercepted — bounce this enemy sword, no damage
+    if (window.phoneSwordGyro?.blocking && playerBladePoints?.length >= 2) {
+      // Forgiving reach: the enemy's tip or guard anywhere near the player's blade counts
+      _swordGuardWorld.copy(this._swordGroup.position);
+      const intercepted = playerBladePoints.some(pp =>
+        _swordTipWorld.distanceTo(pp) < PLAYER_BLOCK_REACH ||
+        _swordGuardWorld.distanceTo(pp) < PLAYER_BLOCK_REACH);
+      if (intercepted) {
+        // Swing direction = chord of the swing arc (wind-up side → follow-through side)
+        this.group.getWorldQuaternion(_rootQ);
+        _swingDirWorld.subVectors(this._swingPreset.to, this._swingPreset.from).applyQuaternion(_rootQ);
+        _playerBladeWorld.subVectors(playerBladePoints[playerBladePoints.length - 1], playerBladePoints[0]);
+        _toTarget.subVectors(targetModel.position, this.group.position).setY(0);
+        if (swingCrossesBlade(_swingDirWorld, _playerBladeWorld, _toTarget, PLAYER_BLOCK_MIN_ANGLE_DEG)) {
+          // Player's block holds — bounce this enemy sword, no damage
           this.applySwordBounce();
+          window._pswShowBlockFlash?.('player');
+          window.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
           this._lastHitTime = now;
           return;
         }
