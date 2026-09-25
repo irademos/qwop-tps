@@ -625,11 +625,7 @@ export class BombThrowerEnemy {
     this.hearts = Math.max(0, this.hearts - Math.max(1, amount));
     this._showHealthBar();
     spawnBloodBurst(this.scene, this.getCenterWorldPos().add(_bloodOffset), { groundY: this.group.position.y });
-    // Enemy hurt vocal only on the 3rd and 4th hit taken.
-    this._hurtCount = (this._hurtCount ?? 0) + 1;
-    if (this._hurtCount === 3 || this._hurtCount === 4) {
-      window.audioManager?.playOuch('enemy', `ouch-enemy-${this.group.uuid}`);
-    }
+    window.audioManager?.playEnemyOuch(`ouch-enemy-${this.group.uuid}`);
     if (this.hearts <= 0) {
       this._die();
       return true;

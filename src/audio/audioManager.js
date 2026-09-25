@@ -321,6 +321,17 @@ export class AudioManager {
     return this.playSFX(this.ouchSounds[index], volume, { cooldownKey, cooldownMs: 150 });
   }
 
+  // Called on every enemy hit (any enemy). Only every 3rd or 4th hit
+  // (randomly chosen each cycle) actually cries out with ouch1.
+  playEnemyOuch(cooldownKey) {
+    this.enemyHurtCount = (this.enemyHurtCount ?? 0) + 1;
+    this.enemyOuchAt ??= 3 + Math.floor(Math.random() * 2);
+    if (this.enemyHurtCount < this.enemyOuchAt) return null;
+    this.enemyHurtCount = 0;
+    this.enemyOuchAt = 3 + Math.floor(Math.random() * 2);
+    return this.playOuch('enemy', cooldownKey);
+  }
+
   playAttack() {
     const clip = this.attacks[Math.floor(Math.random() * this.attacks.length)];
     this.playSFX(clip, 0.6, {
