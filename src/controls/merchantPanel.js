@@ -159,9 +159,6 @@ function getOwnedCount(itemId) {
   else if (itemId === 'heart_upgrade') owned = stats.maxHealthSegments;
   else if (itemId === 'shield_upgrade') owned = stats.shieldUpgrades;
   else if (itemId === 'gun bullets') owned = appState.getPistolAmmoCount?.();
-  else if (itemId === 'ice ammo') owned = appState.getIceAmmoCount?.();
-  else if (itemId === 'arrow ammo') owned = appState.getArrowAmmoCount?.();
-  else if (itemId === 'missiles') owned = appState.getMissileAmmoCount?.();
   else owned = appState.getInventory?.()?.[itemId]?.count;
   return Number.isFinite(owned) ? Math.max(0, Math.floor(owned)) : 0;
 }

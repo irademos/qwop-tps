@@ -1,9 +1,9 @@
-# Street Quest — AI Agent Quick-Start Guide
+# Sword Showdown — AI Agent Quick-Start Guide
 
 > **Maintenance rule:** When you add/remove/rename files, change module responsibilities, or alter the boot sequence, update this file and `CLAUDE.md` in the same commit. Accurate docs save tokens on every future task.
 
-**Game name:** Street Quest (repo name `qwop-tps` is historical)  
-**Type:** Browser-based 3D multiplayer RPG  
+**Game name:** Sword Showdown (repo name `qwop-tps` is historical)  
+**Type:** Browser-based 3D sword-fighting game; your phone is the sword (gyro controller via PeerJS). Sword Showdown is the only mode.  
 **Deep reference:** `CLAUDE.md` at repo root (architecture, patterns, full directory tree)
 
 ---
@@ -13,25 +13,25 @@
 | What | Where |
 |---|---|
 | All source code | `src/` |
-| Game orchestrator / main loop | `src/bootstrap/bootstrapGameApp.js` (~15k lines) |
+| Game orchestrator / main loop / stages | `src/bootstrap/bootstrapGameApp.js` (~5.5k lines) |
+| Phone controller page | `public/phone-sword.html` |
 | Shared runtime state (DI container) | `src/core/appContext.js` |
 | HTML shell + all HUD elements | `index.html` |
 | All CSS | `styles.css` |
-| Serverless functions (Vercel) | `api/llama.js`, `api/overpass.js` |
-| Static assets | `public/` |
+| Serverless function (Vercel) | `api/turn-credentials.js` |
+| Static assets | `public/` (GLB map, character, clips, audio) |
 | Build | `npm run dev` (port 3000) · `npm run build` |
 
-**Rule:** Never use raw globals. Always read/write through `appContext.entities`, `.systems`, `.uiState`, `.settings`, `.debugFlags`.
+**Rule:** Prefer `appContext.entities`, `.systems`, `.uiState`, `.settings`, `.debugFlags` over new raw globals.
 
 ---
 
 ## Tech Stack (one-liner each)
 
-- **Rendering:** Three.js v0.176
+- **Rendering:** Three.js v0.176 (+ `three-mesh-bvh` for map raycasts)
 - **Physics:** Rapier3D (`@dimforge/rapier3d-compat`)
-- **Multiplayer:** Firebase (signaling/presence) + PeerJS WebRTC (star topology — one host, others connect to it)
-- **Map data:** OpenStreetMap via Overpass API → Web Worker → Three.js meshes
-- **AI NPC:** Groq/Llama-3.1 via `/api/llama` (called every ~10s by `src/npc/friendlyNpcManager.js`)
+- **Multiplayer:** Firebase (signaling/presence, shop stock) + PeerJS WebRTC (star topology — one host, others connect to it); messages: `presence`, `projectile`
+- **World:** static GLB map (`public/glb_map/map.glb`)
 - **Auth:** PIN → SHA-256 → Firebase + cookie (no OAuth)
 - **Build:** Vite 6, deployed on Vercel
 
@@ -41,23 +41,20 @@
 
 ```
 src/
-  bootstrap/    bootstrapGameApp.js       ← game init + rAF loop
-  core/         appContext, firebase, utils, requestQueue
-  player/       stats, health, achievements, home, auth
-  npc/          friendlyNpcManager, quest, persistence
-  map/          osmClient, osmGeoJson, tileCache, location, spawnUtils
-  combat/       knockback, pickupSpatialGrid, bloodEffect (damage blood spray), explosionEffect (bomb explosion + smoke), playerBomb (Sword Showdown player bombs)
+  bootstrap/    bootstrapGameApp.js       ← game init, GLB map, stages (_ps*), phone link, shop/stats, rAF loop
+  core/         appContext, exposeDebugGlobals, firebase-init, externalDeps (PeerJS/NippleJS CDN), utils (cookies)
+  player/       playerProfile (Firebase stats/inventory/PIN/leaderboard), healthUtils
+  map/          spawnUtils
+  environment/  terrainHeight (height resolver registry)
+  combat/       knockback, bloodEffect (damage blood spray), explosionEffect (bomb explosion + smoke), playerBomb (player bombs)
   multiplayer/  peerConnection
   audio/        audioManager
-  characters/   CharacterBase, PlayerCharacter, EnemyPlayer, MonsterCharacter, FriendlyCharacter, merchant
-  controls/     PlayerControls (controls.js), all UI panels
-  environment/  MapLoader, mapRender, buildingsRender, terrainHeight, worldGeneration, nature, animals, water
-  features/     Lazy-load facades for code splitting (combatFeature, uiPanelsFeature, etc.)
-  items/        weapon.js + melee.js + projectiles.js + per-weapon files
-  models/       monsterModel, playerModel, glbCharacterModel (GLB character + arm IK), fluffyCharacter.ts (Mixamo retarget + fur)
-  physics/      rapierSafety, staticBoxCollider
-  mediapipe/    handTrackingManager, mediapipeHelper
-  workers/      osmWorker (Web Worker)
+  characters/   CharacterBase, PlayerCharacter, EnemyPlayer (swordsman), BombThrowerEnemy (bomber), merchant (shop catalog/stock)
+  controls/     PlayerControls (controls.js), merchantPanel (shop UI), settingsPanel
+  features/     Lazy-load facades for code splitting (audio, combat, persistence, uiPanels, loadingState)
+  items/        weapon.js + foamSword, shield, pistol + projectiles.js
+  models/       playerModel, glbCharacterModel (GLB character + arm IK), fluffyCharacter.ts (Mixamo retarget + fur)
+  physics/      rapierSafety
 ```
 
 ---
@@ -66,29 +63,28 @@ src/
 
 | Task | Primary file(s) |
 |---|---|
-| Player stats (HP/hunger/magic) | `src/player/healthUtils.js`, `src/player/statSegments.js` |
+| Player stats (health segments, level/XP, coins) | `src/player/healthUtils.js`; `statsState` / `appState` in `src/bootstrap/bootstrapGameApp.js` |
 | Add weapon | `src/items/<weapon>.js` + register in `src/features/combatFeature.js` |
-| NPC behavior / AI loop | `src/npc/friendlyNpcManager.js` |
-| Add quest | `src/npc/quest.js` |
-| Movement / camera / input | `src/controls/controls.js` |
+| Movement / camera / input / action buttons | `src/controls/controls.js` |
 | Player / enemy / bomb-thrower character model, clips, arm IK, fur | `src/models/glbCharacterModel.js` (`glbCharacterConfig`), `src/models/fluffyCharacter.ts` |
 | Where hands go (sword/shield/gun grip) | `src/models/playerModel.js` (`updateProceduralPlayerRig`), `src/items/foamSword.js`, `shield.js`, `pistol.js`; enemies: `src/characters/EnemyPlayer.js` |
 | New UI panel | `src/controls/<panel>.js` + lazy-load in `src/features/uiPanelsFeature.js` |
-| Map / road rendering | `src/environment/mapRender.js`, `buildingsRender.js` |
-| Terrain generation | `src/environment/worldGeneration.js`, `terrainHeight.js` |
-| Firebase data shape | `src/player/playerProfile.js`, `src/npc/npcPersistence.js` |
-| Multiplayer protocol | `src/multiplayer/peerConnection.js` |
-| AI NPC prompt | `api/llama.js` (server) + `src/npc/friendlyNpcManager.js` (client) |
+| World map / ground height | `public/glb_map/map.glb`; loaded in `bootstrapGameApp.js`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |
+| Firebase data shape | `src/player/playerProfile.js`, `src/characters/merchant.js` (room shop stock) |
+| Multiplayer protocol | `src/multiplayer/peerConnection.js`, `src/bootstrap/bootstrapGameApp.js` |
 | Audio | `src/audio/audioManager.js` + `public/assets/audio/` |
-| New 3D prop | GLB → `public/assets/props/` + load in relevant `src/environment/` file |
-| Serverless API | `api/llama.js` or `api/overpass.js` |
-| Sword Showdown sword blocking (only while blocking; swing must cross the blade by > 30°) | `swingCrossesBlade` / `BLOCK_MIN_ANGLE_DEG` / `EnemyPlayer.blocksSwing` in `src/characters/EnemyPlayer.js`; player block in `EnemyPlayer._checkSwordHitOnTarget`; enemy block in the phone-sword hit loop in `bootstrapGameApp.js` |
-| Sword Showdown player bombs (💣 button, throw clip, re-equip) | `src/combat/playerBomb.js`; `throwPlayerBomb`/`updatePlayerBombs` in `src/bootstrap/bootstrapGameApp.js`; `psBombBtn` in `src/controls/controls.js` |
-| Sword Showdown shop upgrades (heart, shield upgrade, bubble, bomb) | Catalog + purchase in `src/characters/merchant.js`; effects in `appState.applyShopUpgrade` (caps: `SHOWDOWN_MAX_HEALTH_SEGMENTS`=20 in `healthUtils.js`, also limits level-ups; `SHOWDOWN_MAX_SHIELD_UPGRADES`=4 in `bootstrapGameApp.js`; `appState.isShopItemMaxed` → "MAX" in shop) and the bubble system (`activatePlayerBubble`) in `src/bootstrap/bootstrapGameApp.js`; bubble button in `src/controls/controls.js`; auto-buy when out of bombs/bubbles/shield/gun/bullets = `psAutoBuyTick` (`PS_AUTO_BUY_ITEMS`) in `bootstrapGameApp.js`; shop coin/owned display in `src/controls/merchantPanel.js` (`renderCoins`, `getOwnedCount`) |
-| Sword Showdown health (3 segments at level 1, own max-health track, full health each session / stage start) | `SHOWDOWN_BASE_HEALTH_SEGMENTS` in `src/player/healthUtils.js`; `statsState.showdownMaxHealthSegments` (profile stat) used as `maxHealthSegments` in Showdown, `statsForSave` in `bootstrapGameApp.js` writes the regular value back on save; "never start dead" guard at the top of `_psStartStage` |
+| New 3D prop | GLB → `public/assets/props/` + load from `bootstrapGameApp.js` |
+| Serverless API | `api/turn-credentials.js` |
+| Sword Showdown bombs / bomber (blast damage/knockback, explosion VFX, throw clip, held bomb) | `src/characters/BombThrowerEnemy.js` (`_explodeBomb`, `_updateHeldBomb`, throw logic in `update`; shared helpers `blastEnemiesAt`/`computeBombLobVelocity`/`createBombMesh`/`spawnBombExplosion`), `src/combat/explosionEffect.js`, `EnemyPlayer.applyBlastKnockback`, `_blastPlayer` in `bootstrapGameApp.js` |
+| Sword Showdown sword blocking (explicit block stance/button + directional rule: swing must cross the blade by > `BLOCK_MIN_ANGLE_DEG`=30°; player block is more forgiving: `PLAYER_BLOCK_MIN_ANGLE_DEG`=15°, `PLAYER_BLOCK_REACH`) | `swingCrossesBlade` / `EnemyPlayer.blocksSwing` in `src/characters/EnemyPlayer.js`; player's block in `EnemyPlayer._checkSwordHitOnTarget`; enemy's block in the phone-sword hit loop in `bootstrapGameApp.js` (swing direction from `_psw.tipHistory`) |
+| Sword Showdown stage path (flattest-direction pick, enemy/coin placement, auto-walk) | `_psPickPathAngle` / `_psBuildStage` in `bootstrapGameApp.js`; auto-walk in the game loop (`_psAutoWalking`) |
+| Damage hit effect (blood spray) | `src/combat/bloodEffect.js`; player trigger in `setStat` (`triggerPlayerHurtBlood`), enemies in `applyDamage` |
+| Sword Showdown player bombs (💣 button, Throw.fbx, unequip/re-equip) | `src/combat/playerBomb.js` (flight/blast); `throwPlayerBomb`/`updatePlayerBombs` in `bootstrapGameApp.js` (count = `stats.bombs`, shop item `showdown_bomb`); button `psBombBtn` in `src/controls/controls.js` |
+| Sword Showdown shop upgrades (heart/shield upgrade/bubble/bomb) | Catalog + purchase in `src/characters/merchant.js` (`unlimited` items); effects in `appState.applyShopUpgrade` (caps: `SHOWDOWN_MAX_HEALTH_SEGMENTS`=20 in `healthUtils.js`, also applies to level-ups; `SHOWDOWN_MAX_SHIELD_UPGRADES`=4 in `bootstrapGameApp.js`; `appState.isShopItemMaxed` → "MAX" in shop) + bubble system (`activatePlayerBubble`, `window.isPlayerBubbleActive`) in `bootstrapGameApp.js`; bubble button in `src/controls/controls.js`; enemy checks in `EnemyPlayer.js`/`BombThrowerEnemy.js`; auto-buy when out of bombs/bubbles/shield/gun/bullets = `psAutoBuyTick` (`PS_AUTO_BUY_ITEMS`, "Purchased …" toast via `showPickupToast` `options.text`) in `bootstrapGameApp.js`; shop coin balance + owned counts in `src/controls/merchantPanel.js` (`renderCoins`, `getOwnedCount`) |
+| Sword Showdown health (3 segments at level 1, own max-health track, full health each session / stage start) | `SHOWDOWN_BASE_HEALTH_SEGMENTS` in `src/player/healthUtils.js`; `statsState.maxHealthSegments` is saved as the `showdownMaxHealthSegments` profile stat (`statsForSave` in `bootstrapGameApp.js`; older profiles fall back to their legacy `maxHealthSegments`); "never start dead" guard at the top of `_psStartStage` |
 | Sword Showdown kill counter (killed / total this stage) | `_psStageKills` / `_psStageTotal` / `_psUpdateKillHud` in `bootstrapGameApp.js` (`#ps-kill-counter`, `.ps-kill-counter` in `styles.css`) |
 | Phone controller page (gyro sword + joystick, Block, bomb/gun/fire/shield/bubble/jump) | `public/phone-sword.html` (sends `gyro` packets with `joyAngle`/`joyForce`, `action` messages; shows host `status`); receiver `_attachPhoneSwordConn` / `_handlePhoneAction` in `bootstrapGameApp.js`; remote joystick also moves the player on desktop (`useJoystick` in `PlayerControls.processMovement`) |
-| Terrain stamp debugging | `src/environment/terrainHeight.js` + `docs/terrain-stamp-regression-checklist.md` |
+| Audio | `src/audio/audioManager.js`, `public/assets/audio/`; Sword Showdown ambient loop = `SWORD_SHOWDOWN_BGS` in `bootstrapGameApp.js`; hurt vocals = `audioManager.playOuch(kind)` — ouch1 enemies via `playEnemyOuch()` (every 3rd or 4th hit across all enemies, `applyDamage`), ouch2 player hurt / ouch3 player death (`triggerPlayerHurtBlood`) |
 
 ---
 
@@ -96,13 +92,13 @@ src/
 
 **Feature facades** (`src/features/`): thin wrappers that re-export lightweight APIs and `import()` heavy modules lazily. When adding a heavy new feature, add a facade here to keep the initial bundle small.
 
-**Map pipeline:** GPS → `osmClient.js` → `osmWorker.js` (Web Worker) → `mapRender.js`/`buildingsRender.js` → `terrainHeight.js` stamps
+**World:** `bootstrapGameApp.js` loads the GLB map, builds a BVH and registers a raycast height resolver with `registerTerrainHeightResolver`; `getTerrainHeight` / `getSpawnY` use it.
 
-**Terrain stamps:** Roads/buildings flatten the procedural terrain via priority-weighted stamps stored per tile. Query height at runtime via `terrainHeight.js`.
+**Stages:** `_psPickPathAngle` picks the flattest direction, `_psBuildStage` places enemies and coins along it, and the player auto-walks between fights. Enemies live in the `hordeEnemies` array (historical name).
 
 **Character arms (GLB + IK):** Players and EnemyPlayers use `gemhorn_rigged.glb`. Mixamo FBX clips animate everything except the arm chains (Shoulder→Hand); each frame the arms are solved with a stretchy two-bone IK toward invisible "floating hand" groups, which are also the weapon attach points (marked with `userData.proceduralHand`). Frame order: `setMoving` → `animate` → `solveArm` per hand → `stepFluff`. Floating-hand labels are mirrored: `'right'` sits at local +X = the character's anatomical left arm. `playDeath()` plays the flying-back death clip once (arms included, IK off) until `revive()` — used by the local player on death/respawn and by EnemyPlayer (ragdoll stays on; dead-enemy knockback capped by `DEATH_KNOCKBACK_CAP` in `EnemyPlayer.js`). The Sword Showdown bomb thrower (`BombThrowerEnemy.js`) uses the same GLB with `armIK: false` (clips drive the arms): `playAction(glbCharacterConfig.throwClip)` plays `Throw.fbx` once and the bomb is released at `THROW_RELEASE_AT` of the clip; between throws a bomb is held on the anatomical right palm (`getPalmWorldPosition('left')`).
 
-**Multiplayer star topology:** Firebase = signaling only. PeerJS WebRTC carries actual game state. One host elected; all clients connect to host; host re-broadcasts.
+**Multiplayer star topology:** Firebase = signaling/presence. PeerJS WebRTC carries player presence and projectiles; the phone controller has its own PeerJS link. One host elected; all clients connect to host; host re-broadcasts.
 
 ---
 
@@ -112,8 +108,7 @@ src/
 |---|---|
 | `VITE_FIREBASE_*` | `src/core/firebase-init.js` |
 | `VITE_NETWORK_TOPOLOGY_MODE` | `src/multiplayer/peerConnection.js` (`star`\|`mesh`) |
-| `GROQ_API_KEY` | `api/llama.js` (server-side only) |
-| `MAPTILER_KEY` | `src/map/osmClient.js` |
+| `VITE_METERED_API_KEY` | `api/turn-credentials.js`, `src/multiplayer/peerConnection.js` (TURN credentials) |
 
 ---
 
@@ -123,11 +118,10 @@ src/
 1. Three.js scene + renderer
 2. Rapier physics world
 3. Firebase + player profile
-4. Map/OSM systems
+4. GLB map + height resolver
 5. Character spawning
-6. Multiplayer (PeerJS)
-7. Hand tracking (optional)
-8. `requestAnimationFrame` loop starts
+6. Multiplayer (PeerJS) + phone controller link
+7. `requestAnimationFrame` loop starts
 
 ---
 

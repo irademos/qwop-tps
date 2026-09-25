@@ -112,7 +112,7 @@ exposeDebugGlobals({
 const clock = new THREE.Clock();
 const mixerClock = new THREE.Clock();
 
-// --- Rapier demo state ---
+// --- Physics + presence state ---
 let rapierWorld;
 const rbToMesh = new Map(); // RigidBody -> THREE.Mesh
 let physicsAccumulator = 0;
@@ -2188,7 +2188,6 @@ async function initCore(runtimeContext) {
   let pickupToastContainer = null;
   let pickupToastTimer = null;
   let pickupToastAnimateTimer = null;
-  let inventoryGlowTimer = null;
 
   const getPickupFallbackIcon = (itemId) => {
     if (itemId === 'coins') return '🪙';
@@ -2198,16 +2197,6 @@ async function initCore(runtimeContext) {
     if (itemId === 'bubble') return '🫧';
     if (itemId === 'showdown_bomb') return '💣';
     return '🎒';
-  };
-
-  const triggerInventoryButtonGlow = () => {
-    const inventoryButton = document.getElementById('inventory-button');
-    if (!inventoryButton) return;
-    inventoryButton.classList.add('inventory-button-glow');
-    if (inventoryGlowTimer) clearTimeout(inventoryGlowTimer);
-    inventoryGlowTimer = setTimeout(() => {
-      inventoryButton.classList.remove('inventory-button-glow');
-    }, 1000);
   };
 
   // options.text replaces the default "Collected …" message; options.icon overrides the item icon
@@ -2233,26 +2222,18 @@ async function initCore(runtimeContext) {
       </div>
     `;
     const toast = pickupToastContainer.querySelector('.pickup-toast');
-    const inventoryButton = document.getElementById('inventory-button');
-    if (!toast || !inventoryButton) return;
-    const buttonRect = inventoryButton.getBoundingClientRect();
-    const toastRect = toast.getBoundingClientRect();
-    const targetX = (buttonRect.left + (buttonRect.width / 2)) - (toastRect.width / 2);
-    const targetY = buttonRect.top + (buttonRect.height / 2) - (toastRect.height / 2);
-    const deltaX = targetX - toastRect.left;
-    const deltaY = targetY - toastRect.top;
+    if (!toast) return;
     if (pickupToastAnimateTimer) clearTimeout(pickupToastAnimateTimer);
     pickupToastAnimateTimer = setTimeout(() => {
       requestAnimationFrame(() => {
         toast.style.opacity = '0';
-        toast.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(0.66)`;
+        toast.style.transform = 'translateY(-24px) scale(0.9)';
       });
     }, 2200);
     if (pickupToastTimer) clearTimeout(pickupToastTimer);
     pickupToastTimer = setTimeout(() => {
       pickupToastContainer.innerHTML = '';
     }, 3050);
-    triggerInventoryButtonGlow();
   };
 
   function setPistolAmmoCount(amount) {

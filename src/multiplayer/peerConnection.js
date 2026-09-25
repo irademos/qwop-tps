@@ -14,7 +14,6 @@ const VALID_MESSAGE_TYPES = new Set([
   'projectile'
 ]);
 const MAX_PENDING_PAYLOADS = 75;
-const COALESCED_PAYLOAD_TYPES = new Set(['entitySnapshot', 'entityStates']);
 const NETWORK_TOPOLOGY_MODE = (import.meta.env.VITE_NETWORK_TOPOLOGY_MODE || 'star').toLowerCase();
 const PEER_LOG_THROTTLE_MS = 30000;
 
@@ -499,13 +498,6 @@ export class Multiplayer {
       this.pendingPayloads.set(peerId, []);
     }
     const queue = this.pendingPayloads.get(peerId);
-    if (data?.type && COALESCED_PAYLOAD_TYPES.has(data.type)) {
-      for (let i = queue.length - 1; i >= 0; i -= 1) {
-        if (queue[i]?.type === data.type) {
-          queue.splice(i, 1);
-        }
-      }
-    }
     queue.push(data);
     if (queue.length > MAX_PENDING_PAYLOADS) {
       const dropCount = queue.length - MAX_PENDING_PAYLOADS;

@@ -981,7 +981,7 @@ export class PlayerControls {
     return this.getWeapons().find(
       weapon => weapon.holder === this
         && (hand === 'left' ? weapon.hand === 'left' : weapon.hand !== 'left')
-        && (weapon.type === 'gun' || weapon.type === 'bow' || weapon.type === 'bazooka')
+        && weapon.type === 'gun'
     ) || null;
   }
 

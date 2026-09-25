@@ -4,16 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0f172a">
-  <title>Minimalist 3D Multiplayer Movement</title>
+  <title>Sword Showdown</title>
   <link rel="stylesheet" href="styles.css">
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <link rel="icon" href="data:,">
   <link rel="manifest" href="/manifest.webmanifest">
 </head>
 <body>
-  <div id="game-container">
-    <div class="crosshair"></div>
-  </div>
+  <div id="game-container"></div>
   <div id="start-overlay" aria-label="Sword Showdown login and start screen" aria-hidden="false">
     <div class="arcade-shell" role="dialog" aria-modal="true" aria-labelledby="arcade-title">
       <div class="arcade-header">
@@ -51,35 +49,11 @@
       </div>
     </div>
   </div>
-  <div id="interaction-tooltip" class="interaction-tooltip"></div>
-  <button id="climb-overlay" class="climb-overlay hidden" type="button" aria-label="Start climbing">Tap to climb</button>
-  <button id="friendly-interact" class="friendly-interact hidden" type="button" aria-label="Interact"></button>
-  <div id="friendly-dialogue" class="friendly-dialogue hidden" role="dialog" aria-live="polite" aria-atomic="true">
-    <div class="friendly-dialogue-text"></div>
-    <div class="friendly-dialogue-options"></div>
-  </div>
-  <div id="craft-dialogue" class="friendly-dialogue hidden" role="dialog" aria-live="polite" aria-atomic="true">
-    <div class="friendly-dialogue-text"></div>
-    <div class="friendly-dialogue-options"></div>
-  </div>
   <div id="player-info">
     <div id="player-level-badge"><span id="player-level">1</span></div>
     <div id="player-name-display"></div>
   </div>
   <div id="level-popup" aria-live="polite" aria-atomic="true"></div>
-  <div id="level-up-panel" class="level-up-panel hidden" role="dialog" aria-modal="true" aria-live="polite" aria-atomic="true">
-    <div class="level-up-card">
-      <h2 id="level-up-title">You've reached Level 1</h2>
-      <p id="level-up-subtitle">Choose your power ups.</p>
-      <p id="level-up-remaining">You have 0 power ups left.</p>
-      <div class="level-up-grid">
-        <button id="level-up-strength" type="button" class="level-up-tile strength"><span class="icon">⚔️</span><span>Strength</span></button>
-        <button id="level-up-magic" type="button" class="level-up-tile magic"><span class="icon">✨</span><span>Magic</span></button>
-        <button id="level-up-hunger" type="button" class="level-up-tile hunger"><span class="icon">🍗</span><span>Hunger</span></button>
-        <button id="level-up-health" type="button" class="level-up-tile health"><span class="icon">❤️</span><span>Health</span></button>
-      </div>
-    </div>
-  </div>
   <div id="xp-bar" class="xp-bar hidden" aria-live="polite" aria-atomic="true">
     <div class="xp-bar-header">
       <span id="xp-bar-label">XP</span>
@@ -100,51 +74,24 @@
     </div>
     <span id="shield-count-hud" class="shield-hud-count"></span>
   </div>
-  <div id="hunger-bar" role="img" aria-label="Hunger bar"></div>
-  <div id="magic-bar" role="img" aria-label="Magic bar"></div>
   <div id="ammo-display" class="hidden">
-    <span id="ammo-icon">❄️</span>
+    <span id="ammo-icon">🔫</span>
     <span id="ammo-count">0</span>
   </div>
-  <div id="ammo-popup" aria-live="polite" aria-atomic="true"></div>
   <div id="coin-popup" aria-live="polite" aria-atomic="true"></div>
-  <div id="treasure-popup" aria-live="polite" aria-atomic="true"></div>
-  <div id="craft-message" aria-live="polite" aria-atomic="true"></div>
-  <div id="hunger-warning" aria-live="polite" aria-atomic="true">
-    You're famished! Eat something to avoid losing health!
-  </div>
-  <div id="voice-transcript" aria-live="polite" aria-atomic="true"></div>
   <div id="action-buttons"></div>
   
   <!-- Settings Button -->
   <div id="settings-button">⚙️</div>
-  <button id="inventory-button" aria-label="Open inventory">
-    <span class="inventory-button-icon" aria-hidden="true">📖</span>
-  </button>
 
   <!-- Settings Overlay -->
   <div id="settings-overlay">
     <div id="settings-panel"></div>
   </div>
 
-  <!-- Inventory Overlay -->
-  <div id="inventory-overlay">
-    <div id="inventory-panel"></div>
-  </div>
-
-  <!-- Home Storage Overlay -->
-  <div id="home-storage-overlay">
-    <div id="home-storage-panel"></div>
-  </div>
-
   <!-- Merchant Overlay -->
   <div id="merchant-overlay">
     <div id="merchant-panel"></div>
-  </div>
-
-  <!-- Crafting Overlay -->
-  <div id="craft-overlay">
-    <div id="craft-panel"></div>
   </div>
 
   <!-- Game Over Overlay -->
@@ -158,13 +105,6 @@
         <span id="continue-no" class="continue-option">NO</span>
       </div>
     </div>
-  </div>
-
-  <div id="level-builder-sidebar" class="hidden"></div>
-  <div id="level-builder-controls" class="hidden">
-    <button data-mode="translate">⇄</button>
-    <button data-mode="rotate">⟳</button>
-    <button data-mode="scale">⤢</button>
   </div>
 
   <!-- Phone Sword: QR code modal shown on game start -->

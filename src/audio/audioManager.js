@@ -2,7 +2,6 @@ const DEFAULT_PERF_PROFILE = {
   maxConcurrentSFX: 12,
   footstepCooldownMs: 220,
   footstepMinIntervalMs: 300,
-  attackCooldownMs: 120,
   preloadCommonSFX: true
 };
 
@@ -10,7 +9,6 @@ const LOW_END_PERF_PROFILE = {
   maxConcurrentSFX: 5,
   footstepCooldownMs: 320,
   footstepMinIntervalMs: 420,
-  attackCooldownMs: 180,
   preloadCommonSFX: true
 };
 
@@ -28,12 +26,6 @@ export class AudioManager {
       'SFX/Footsteps/Dirt/Dirt Walk 4.ogg',
       'SFX/Footsteps/Dirt/Dirt Walk 5.ogg'
     ];
-    this.attacks = [
-      'SFX/Chopping and Mining/chop 3.ogg',
-      'SFX/Chopping and Mining/mine 3.ogg',
-      'SFX/Chopping and Mining/mine 5.ogg',
-      'SFX/Spells/Spell Impact 3.ogg'
-    ];
     this.ouchSounds = [
       'NPC Sounds/ouch1.ogg',
       'NPC Sounds/ouch2.ogg',
@@ -44,7 +36,6 @@ export class AudioManager {
     this.pendingLoads = new Map();
     this.soundCooldowns = new Map();
     this.activeSFXNodes = new Set();
-    this.loopingSFX = new Map();
     this.lastFootstepAt = 0;
 
     this.context = null;
@@ -117,17 +108,6 @@ export class AudioManager {
     }
   }
 
-  setPerformanceProfile(profile = {}) {
-    this.performanceProfile = {
-      ...this.performanceProfile,
-      ...profile
-    };
-  }
-
-  setLowEndMode(enabled) {
-    this.performanceProfile = enabled ? { ...LOW_END_PERF_PROFILE } : { ...DEFAULT_PERF_PROFILE };
-  }
-
   setMasterVolume(value) {
     this.masterVolume = Math.max(0, Math.min(1, value));
     if (this.masterGain) {
@@ -162,26 +142,13 @@ export class AudioManager {
   async preloadCommonSFX() {
     const common = [
       ...this.footsteps,
-      ...this.attacks,
       'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg',
       'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Sheath 1.ogg',
-      'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Attack 1.ogg',
-      'SFX/Attacks/Bow Attacks Hits and Blocks/Bow Attack 2.ogg',
-      'SFX/Attacks/Bow Attacks Hits and Blocks/Bow Blocked 1.ogg',
-      'SFX/Attacks/Bow Attacks Hits and Blocks/Bow Take Out 1.ogg',
-      'SFX/Attacks/Bow Attacks Hits and Blocks/Bow Put Away 1.ogg',
-      'SFX/Doors Gates and Chests/Door Open 1.ogg',
+      'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg',
+      'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg',
+      'SFX/Explosions/Explosion 1.ogg',
+      'SFX/Spells/Spell Impact 1.ogg',
       'SFX/Spells/Waterspray 1.ogg',
-      'SFX/Torch/Light Torch 1.ogg',
-      'SFX/Torch/Torch Attack Strike 1.ogg',
-      'SFX/Torch/Torch Loop.ogg',
-      'NPC Sounds/friendly_sound_1.ogg',
-      'NPC Sounds/friendly_sound_2.ogg',
-      'NPC Sounds/friendly_sound_3.ogg',
-      'NPC Sounds/friendly_sound_4.ogg',
-      'NPC Sounds/zombie_sound_1.ogg',
-      'NPC Sounds/zombie_sound_2.ogg',
-      'NPC Sounds/merchant_loop.ogg',
       ...this.ouchSounds
     ];
     await Promise.allSettled(common.map(path => this.loadBuffer(path)));
@@ -246,10 +213,6 @@ export class AudioManager {
 
     this.currentBGSPath = path;
     this.background.play().catch(err => console.error('BGS play failed', err));
-  }
-
-  pauseBGS() {
-    this.background?.pause();
   }
 
   canPlaySound(key, cooldownMs) {
@@ -332,29 +295,6 @@ export class AudioManager {
     return this.playOuch('enemy', cooldownKey);
   }
 
-  playAttack() {
-    const clip = this.attacks[Math.floor(Math.random() * this.attacks.length)];
-    this.playSFX(clip, 0.6, {
-      cooldownKey: 'attack',
-      cooldownMs: this.performanceProfile.attackCooldownMs
-    });
-  }
-
-  playFootstep() {
-    const now = performance.now();
-    const minInterval = this.performanceProfile.footstepMinIntervalMs ?? 0;
-    if (minInterval > 0 && now - this.lastFootstepAt < minInterval) {
-      return;
-    }
-    this.lastFootstepAt = now;
-
-    const clip = this.footsteps[Math.floor(Math.random() * this.footsteps.length)];
-    this.playSFX(clip, 0.4, {
-      cooldownKey: 'footstep',
-      cooldownMs: this.performanceProfile.footstepCooldownMs
-    });
-  }
-
   playFootstepAt(entityId, volume = 0.3) {
     const now = performance.now();
     const minInterval = this.performanceProfile.footstepMinIntervalMs ?? 0;
@@ -368,42 +308,5 @@ export class AudioManager {
       cooldownKey: `footstep:${entityId}`,
       cooldownMs: this.performanceProfile.footstepCooldownMs
     });
-  }
-
-  startLoopingSFX(loopId, path, volume = 0.35) {
-    if (!loopId || !path) return;
-    if (this.loopingSFX.has(loopId)) return;
-    this.resumeAudioContext().then(async () => {
-      const buffer = await this.loadBuffer(path);
-      if (!buffer || !this.context || !this.sfxGain || this.loopingSFX.has(loopId)) {
-        return;
-      }
-      const source = this.context.createBufferSource();
-      source.buffer = buffer;
-      source.loop = true;
-
-      const gainNode = this.context.createGain();
-      gainNode.gain.value = Math.max(0, Math.min(1, volume));
-      source.connect(gainNode);
-      gainNode.connect(this.sfxGain);
-
-      this.loopingSFX.set(loopId, { source, gainNode });
-      source.start(0);
-    });
-  }
-
-  stopLoopingSFX(loopId) {
-    const entry = this.loopingSFX.get(loopId);
-    if (!entry) return;
-    try {
-      entry.source.stop(0);
-    } catch {}
-    this.loopingSFX.delete(loopId);
-  }
-
-  setLoopingSFXVolume(loopId, volume = 0) {
-    const entry = this.loopingSFX.get(loopId);
-    if (!entry?.gainNode) return;
-    entry.gainNode.gain.value = Math.max(0, Math.min(1, volume));
   }
 }

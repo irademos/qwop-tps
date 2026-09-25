@@ -95,8 +95,7 @@ export function updateRemotePlayerRig(playerGroup, deltaSeconds) {
 export function createPlayerModel(
   THREE,
   username,
-  onLoad,
-  modelPath = '/models/cowboy.fbx'
+  onLoad
 ) {
   const playerGroup = new THREE.Group();
   playerGroup.name = 'ProceduralGangBeastsPlayer';
@@ -127,7 +126,6 @@ export function createPlayerModel(
     floatingHands: { left: leftFloatingHand, right: rightFloatingHand },
     forwardIntent: 0,
     balance: 0,
-    modelPath,
     description: 'GLB character with IK arms reaching for floating hand targets',
     glbCharacter: null,
   };
