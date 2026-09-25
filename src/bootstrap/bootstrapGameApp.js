@@ -707,6 +707,9 @@ function createArcadeOverlay(startOverlay) {
   };
 }
 
+const SWORD_SHOWDOWN_BGS = 'Interior Day/Inside Day.ogg';
+const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
+
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
@@ -719,6 +722,10 @@ async function initCore(runtimeContext) {
   runtimeContext.systems.audioManager = audioManager;
   window.audioManager = audioManager;
   let syncBackgroundLoopForDisplayMode = () => {
+    if (window.gameMode === 'phone_sword' || window.phoneSwordMode) {
+      audioManager.playBGS(SWORD_SHOWDOWN_BGS, { volumeScale: SWORD_SHOWDOWN_BGS_VOLUME_SCALE });
+      return;
+    }
     audioManager.playBGS('Forest Day/Forest Day.ogg');
   };
   const startOverlay = document.getElementById('start-overlay');
@@ -1826,7 +1833,11 @@ async function initCore(runtimeContext) {
 
 
   syncBackgroundLoopForDisplayMode = () => {
-    if (window.phoneSwordMode && _psStageActive) return;
+    if (window.phoneSwordMode) {
+      // Sword Showdown always uses the same ambient loop, at half music volume.
+      audioManager.playBGS(SWORD_SHOWDOWN_BGS, { volumeScale: SWORD_SHOWDOWN_BGS_VOLUME_SCALE });
+      return;
+    }
     const effectiveMode = displaySettings.mode === 'auto'
       ? (lastAutoMode || getAutoMode())
       : displaySettings.mode;
@@ -9347,6 +9358,7 @@ async function initCore(runtimeContext) {
     playerBloodOrigin.y += 0.85;
     const intensity = THREE.MathUtils.clamp((previousHealth - nextHealth) / 2, 0.6, 2);
     spawnBloodBurst(scene, playerBloodOrigin, { groundY, intensity });
+    audioManager?.playOuch('ouch-player');
   };
 
   const getSleepRecoveryValue = (key, startValue, elapsedSeconds) => {

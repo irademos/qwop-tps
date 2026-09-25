@@ -32,6 +32,11 @@ export class AudioManager {
       'SFX/Chopping and Mining/mine 5.ogg',
       'SFX/Spells/Spell Impact 3.ogg'
     ];
+    this.ouchSounds = [
+      'NPC Sounds/ouch1.ogg',
+      'NPC Sounds/ouch2.ogg',
+      'NPC Sounds/ouch3.ogg'
+    ];
 
     this.bufferCache = new Map();
     this.pendingLoads = new Map();
@@ -120,7 +125,7 @@ export class AudioManager {
   setMusicVolume(value) {
     this.musicVolume = Math.max(0, Math.min(1, value));
     if (this.background) {
-      this.background.volume = this.musicVolume;
+      this.background.volume = this.musicVolume * (this.bgsVolumeScale ?? 1);
     }
     if (this.phoneSwordAudio) {
       this.phoneSwordAudio.volume = this.musicVolume;
@@ -149,7 +154,8 @@ export class AudioManager {
       'NPC Sounds/friendly_sound_4.ogg',
       'NPC Sounds/zombie_sound_1.ogg',
       'NPC Sounds/zombie_sound_2.ogg',
-      'NPC Sounds/merchant_loop.ogg'
+      'NPC Sounds/merchant_loop.ogg',
+      ...this.ouchSounds
     ];
     await Promise.allSettled(common.map(path => this.loadBuffer(path)));
   }
@@ -189,14 +195,17 @@ export class AudioManager {
     return loadPromise;
   }
 
-  playBGS(name) {
+  // volumeScale multiplies the music volume for this loop (e.g. 0.5 = half as loud).
+  playBGS(name, { volumeScale = 1 } = {}) {
     const path = `assets/audio/BGS Loops/${name}`;
+    this.bgsVolumeScale = volumeScale;
 
     if (!this.background) {
       this.background = new Audio(path);
       this.background.loop = true;
-      this.background.volume = this.musicVolume;
+      this.background.volume = this.musicVolume * volumeScale;
     } else {
+      this.background.volume = this.musicVolume * volumeScale;
       if (this.currentBGSPath === path) {
         if (this.background.paused) {
           this.background.play().catch(err => console.error('BGS resume failed', err));
@@ -272,6 +281,13 @@ export class AudioManager {
 
     source.start(0);
     return source;
+  }
+
+  // Random hurt vocal (NPC Sounds/ouch1-3). cooldownKey is per character so
+  // several enemies hit together can each cry out, but one can't stack.
+  playOuch(cooldownKey = 'ouch', volume = 0.7) {
+    const clip = this.ouchSounds[Math.floor(Math.random() * this.ouchSounds.length)];
+    return this.playSFX(clip, volume, { cooldownKey, cooldownMs: 150 });
   }
 
   playAttack() {
