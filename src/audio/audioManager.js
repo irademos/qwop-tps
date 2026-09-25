@@ -14,6 +14,8 @@ const LOW_END_PERF_PROFILE = {
   preloadCommonSFX: true
 };
 
+const UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'keydown', 'click'];
+
 export class AudioManager {
   constructor(options = {}) {
     this.background = null;
@@ -65,6 +67,22 @@ export class AudioManager {
     this.sfxVolume = options.sfxVolume ?? 1.0;
     this.musicVolume = options.musicVolume ?? 0;
 
+    // Browsers block an AudioContext created before a user gesture, so the
+    // context (and the SFX preload, which needs it to decode) waits for the
+    // first click/tap/key press.
+    this._unlockListener = () => this.unlock();
+    for (const type of UNLOCK_EVENTS) {
+      window.addEventListener(type, this._unlockListener, { capture: true, passive: true });
+    }
+  }
+
+  unlock() {
+    if (this._unlocked) return;
+    this._unlocked = true;
+    for (const type of UNLOCK_EVENTS) {
+      window.removeEventListener(type, this._unlockListener, { capture: true });
+    }
+    this.resumeAudioContext();
     if (this.performanceProfile.preloadCommonSFX) {
       this.preloadCommonSFX();
     }
@@ -72,6 +90,8 @@ export class AudioManager {
 
   ensureAudioContext() {
     if (this.context) return;
+    // No gesture yet: creating the context now would just trigger the autoplay warning.
+    if (!this._unlocked && navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
 

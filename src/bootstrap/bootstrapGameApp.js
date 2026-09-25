@@ -756,6 +756,7 @@ async function initCore(runtimeContext) {
   const startAudioAndGameOnce = async () => {
     if (hasStartedAudio) return;
     hasStartedAudio = true;
+    audioManager.unlock();
     await resumeAudioContext();
     syncBackgroundLoopForDisplayMode();
     focusGameCanvas?.();
