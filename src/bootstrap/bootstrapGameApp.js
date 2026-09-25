@@ -713,10 +713,10 @@ const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
 
-  const _savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0');
+  const _savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0.05');
   const _savedSfxVol = parseFloat(localStorage.getItem('sq:sfxVolume') ?? '1');
   const audioManager = createAudioManager({
-    musicVolume: Number.isFinite(_savedMusicVol) ? _savedMusicVol : 0,
+    musicVolume: Number.isFinite(_savedMusicVol) ? _savedMusicVol : 0.05,
     sfxVolume: Number.isFinite(_savedSfxVol) ? _savedSfxVol : 1
   });
   runtimeContext.systems.audioManager = audioManager;

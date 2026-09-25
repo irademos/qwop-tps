@@ -737,10 +737,10 @@ function buildDisplayPanel() {
   const musicVolumeField = createRangeField({ id: 'settings-audio-music', label: 'Music Volume', min: 0, max: 1, step: 0.05 });
   const sfxVolumeField = createRangeField({ id: 'settings-audio-sfx', label: 'SFX Volume', min: 0, max: 1, step: 0.05 });
 
-  const savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0');
+  const savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0.05');
   const savedSfxVol = parseFloat(localStorage.getItem('sq:sfxVolume') ?? '1');
-  musicVolumeField.input.value = `${Number.isFinite(savedMusicVol) ? savedMusicVol : 0}`;
-  musicVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedMusicVol) ? savedMusicVol : 0) * 100)}%`;
+  musicVolumeField.input.value = `${Number.isFinite(savedMusicVol) ? savedMusicVol : 0.05}`;
+  musicVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedMusicVol) ? savedMusicVol : 0.05) * 100)}%`;
   sfxVolumeField.input.value = `${Number.isFinite(savedSfxVol) ? savedSfxVol : 1}`;
   sfxVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedSfxVol) ? savedSfxVol : 1) * 100)}%`;
 

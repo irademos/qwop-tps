@@ -65,7 +65,7 @@ export class AudioManager {
 
     this.masterVolume = options.masterVolume ?? 1;
     this.sfxVolume = options.sfxVolume ?? 1.0;
-    this.musicVolume = options.musicVolume ?? 0;
+    this.musicVolume = options.musicVolume ?? 0.05;
 
     // Browsers block an AudioContext created before a user gesture, so the
     // context (and the SFX preload, which needs it to decode) waits for the
