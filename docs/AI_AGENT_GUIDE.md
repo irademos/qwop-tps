@@ -83,7 +83,7 @@ src/
 | New 3D prop | GLB → `public/assets/props/` + load in relevant `src/environment/` file |
 | Serverless API | `api/llama.js` or `api/overpass.js` |
 | Sword Showdown player bombs (💣 button, throw clip, re-equip) | `src/combat/playerBomb.js`; `throwPlayerBomb`/`updatePlayerBombs` in `src/bootstrap/bootstrapGameApp.js`; `psBombBtn` in `src/controls/controls.js` |
-| Sword Showdown shop upgrades (heart, shield upgrade, bubble, bomb) | Catalog + purchase in `src/characters/merchant.js`; effects in `appState.applyShopUpgrade` and the bubble system (`activatePlayerBubble`) in `src/bootstrap/bootstrapGameApp.js`; bubble button in `src/controls/controls.js`; auto-buy when out of bombs/bubbles/shield/gun/bullets = `psAutoBuyTick` (`PS_AUTO_BUY_ITEMS`) in `bootstrapGameApp.js`; shop coin/owned display in `src/controls/merchantPanel.js` (`renderCoins`, `getOwnedCount`) |
+| Sword Showdown shop upgrades (heart, shield upgrade, bubble, bomb) | Catalog + purchase in `src/characters/merchant.js`; effects in `appState.applyShopUpgrade` (caps: `SHOWDOWN_MAX_HEALTH_SEGMENTS`=20 in `healthUtils.js`, also limits level-ups; `SHOWDOWN_MAX_SHIELD_UPGRADES`=4 in `bootstrapGameApp.js`; `appState.isShopItemMaxed` → "MAX" in shop) and the bubble system (`activatePlayerBubble`) in `src/bootstrap/bootstrapGameApp.js`; bubble button in `src/controls/controls.js`; auto-buy when out of bombs/bubbles/shield/gun/bullets = `psAutoBuyTick` (`PS_AUTO_BUY_ITEMS`) in `bootstrapGameApp.js`; shop coin/owned display in `src/controls/merchantPanel.js` (`renderCoins`, `getOwnedCount`) |
 | Terrain stamp debugging | `src/environment/terrainHeight.js` + `docs/terrain-stamp-regression-checklist.md` |
 
 ---

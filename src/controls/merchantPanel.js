@@ -179,6 +179,11 @@ function getOwnedCount(itemId) {
   return Number.isFinite(owned) ? Math.max(0, Math.floor(owned)) : 0;
 }
 
+// Capped Sword Showdown upgrades (Heart, Shield Upgrade) the player can't buy more of
+function isItemMaxed(itemId) {
+  return !!context.appState?.isShopItemMaxed?.(itemId);
+}
+
 function getItemDisplay(itemId, item, tabId) {
   const meta = getMerchantItemMeta(itemId);
   const name = item?.name || meta.name || itemId;
@@ -270,7 +275,12 @@ function renderTab(tabId) {
     const priceLabel = createElement('span', 'inventory-price', `${display.price}c`);
     button.appendChild(priceLabel);
     if (tabId === 'buy') {
-      const ownedLabel = createElement('span', 'inventory-owned', `Have ${getOwnedCount(itemId)}`);
+      const maxed = isItemMaxed(itemId);
+      const ownedLabel = createElement('span', 'inventory-owned', maxed ? 'MAX' : `Have ${getOwnedCount(itemId)}`);
+      if (maxed) {
+        ownedLabel.classList.add('is-maxed');
+        button.classList.add('is-maxed');
+      }
       button.appendChild(ownedLabel);
     }
 
@@ -284,8 +294,11 @@ function renderTab(tabId) {
     const priceText = ` • Price ${display.price} coins`;
     const descriptionText = tabId === 'buy' && display.description ? ` • ${display.description}` : '';
     const ownedText = tabId === 'buy' ? ` • You have ${getOwnedCount(selectedIds[tabId])}` : '';
-    detailsText.textContent = `${display.name}${countText}${priceText}${ownedText}${descriptionText}`;
-    actionButton.disabled = false;
+    const maxed = tabId === 'buy' && isItemMaxed(selectedIds[tabId]);
+    detailsText.textContent = maxed
+      ? `${display.name} • You're at the maximum — can't buy more.`
+      : `${display.name}${countText}${priceText}${ownedText}${descriptionText}`;
+    actionButton.disabled = maxed;
 
     if (selectedTile && selectedTile.parentElement === grid) {
       selectedTile.insertAdjacentElement('afterend', detailsContainer);

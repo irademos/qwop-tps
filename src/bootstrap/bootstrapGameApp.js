@@ -61,6 +61,7 @@ import { createBuildingsRenderer } from '../environment/buildingsRender.js';
 import {
   BASE_HEALTH_SEGMENTS,
   HEALTH_SEGMENT_VALUE,
+  SHOWDOWN_MAX_HEALTH_SEGMENTS,
   clampHealthSegments,
   convertPointsToSegments,
   normalizeHealthSegments
@@ -162,6 +163,9 @@ if ('serviceWorker' in navigator) {
     }
   });
 }
+
+// Sword Showdown: max "Shield Upgrade" purchases (each +SHIELD_UPGRADE_HEALTH durability → 20 + 4×10 = 60 max)
+const SHOWDOWN_MAX_SHIELD_UPGRADES = 4;
 
 const ROAD_LIGHT_GRID_SIZE = 3;
 const ROAD_LIGHT_GRID_COUNT = ROAD_LIGHT_GRID_SIZE * ROAD_LIGHT_GRID_SIZE;
@@ -5768,6 +5772,10 @@ async function initCore(runtimeContext) {
     bombs: playerProfile.stats.bombs
   };
   statsState.maxHealthSegments = Math.max(BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || BASE_HEALTH_SEGMENTS));
+  if (window.phoneSwordMode) {
+    statsState.maxHealthSegments = Math.min(SHOWDOWN_MAX_HEALTH_SEGMENTS, statsState.maxHealthSegments);
+    statsState.shieldUpgrades = Math.min(SHOWDOWN_MAX_SHIELD_UPGRADES, Math.max(0, Math.floor(statsState.shieldUpgrades || 0)));
+  }
   statsState.maxHungerSegments = Math.max(BASE_HUNGER_SEGMENTS, Math.min(HUNGER_MAX_SEGMENTS, Math.round(statsState.maxHungerSegments || BASE_HUNGER_SEGMENTS)));
   statsState.maxMagicSegments = Math.max(BASE_MAGIC_SEGMENTS, Math.min(MAGIC_MAX_SEGMENTS, Math.round(statsState.maxMagicSegments || BASE_MAGIC_SEGMENTS)));
   statsState.health = normalizeHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
@@ -9274,7 +9282,8 @@ async function initCore(runtimeContext) {
     if (key === 'maxHealthSegments') {
       const num = Number(value);
       if (!Number.isFinite(num)) return BASE_HEALTH_SEGMENTS;
-      return Math.max(BASE_HEALTH_SEGMENTS, Math.round(num));
+      const clamped = Math.max(BASE_HEALTH_SEGMENTS, Math.round(num));
+      return window.phoneSwordMode ? Math.min(SHOWDOWN_MAX_HEALTH_SEGMENTS, clamped) : clamped;
     }
     if (key === 'maxHungerSegments') {
       const num = Number(value);
@@ -9298,6 +9307,7 @@ async function initCore(runtimeContext) {
       if (!Number.isFinite(num)) {
         return 0;
       }
+      if (key === 'shieldUpgrades') return Math.min(SHOWDOWN_MAX_SHIELD_UPGRADES, Math.max(0, Math.floor(num)));
       return Math.max(0, Math.floor(num));
     }
     return value;
@@ -15105,8 +15115,15 @@ async function initCore(runtimeContext) {
       showCoinPopup(statsState.coins);
       showPickupToast('coins', safeDelta);
     },
+    // Sword Showdown shop upgrades that are capped: true once the player can't buy more
+    isShopItemMaxed: (itemId) => {
+      if (itemId === 'heart_upgrade') return statsState.maxHealthSegments >= SHOWDOWN_MAX_HEALTH_SEGMENTS;
+      if (itemId === 'shield_upgrade') return (statsState.shieldUpgrades || 0) >= SHOWDOWN_MAX_SHIELD_UPGRADES;
+      return false;
+    },
     // Sword Showdown shop upgrades (bought from the merchant, stored as stats)
     applyShopUpgrade: (itemId) => {
+      if (appState.isShopItemMaxed(itemId)) return false;
       if (itemId === 'heart_upgrade') {
         setStat('maxHealthSegments', statsState.maxHealthSegments + 1, { skipSave: true });
         setStat('health', statsState.health + 1, { skipSave: true });

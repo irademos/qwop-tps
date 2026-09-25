@@ -1801,6 +1801,15 @@ body.settings-open #inventory-button {
   font-weight: 600;
 }
 
+.inventory-owned.is-maxed {
+  background: #f6d9d9;
+  color: #8a1f1f;
+}
+
+.inventory-tile.is-maxed .inventory-icon-wrapper {
+  opacity: 0.5;
+}
+
 .merchant-coins {
   font-size: 13px;
   font-weight: 700;
