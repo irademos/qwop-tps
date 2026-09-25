@@ -46,7 +46,7 @@ src/
   player/       stats, health, achievements, home, auth
   npc/          friendlyNpcManager, quest, persistence
   map/          osmClient, osmGeoJson, tileCache, location, spawnUtils
-  combat/       knockback, pickupSpatialGrid
+  combat/       knockback, pickupSpatialGrid, bloodEffect (damage blood spray)
   multiplayer/  peerConnection
   audio/        audioManager
   characters/   CharacterBase, PlayerCharacter, EnemyPlayer, MonsterCharacter, FriendlyCharacter, merchant

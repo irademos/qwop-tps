@@ -9,10 +9,13 @@
  * we can detect hits easily without adding extra colliders.
  */
 
+import { spawnBloodBurst } from '../combat/bloodEffect.js';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js';
+
+const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 
 // ─── tuning constants ────────────────────────────────────────────────────────
 
@@ -495,6 +498,7 @@ export class BombThrowerEnemy {
     if (this.isDead) return false;
     this.hearts = Math.max(0, this.hearts - Math.max(1, amount));
     this._showHealthBar();
+    spawnBloodBurst(this.scene, this.getCenterWorldPos().add(_bloodOffset), { groundY: this.group.position.y });
     if (this.hearts <= 0) {
       this._die();
       return true;
