@@ -14,6 +14,8 @@ const LOW_END_PERF_PROFILE = {
   preloadCommonSFX: true
 };
 
+const UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'keydown', 'click'];
+
 export class AudioManager {
   constructor(options = {}) {
     this.background = null;
@@ -31,6 +33,11 @@ export class AudioManager {
       'SFX/Chopping and Mining/mine 3.ogg',
       'SFX/Chopping and Mining/mine 5.ogg',
       'SFX/Spells/Spell Impact 3.ogg'
+    ];
+    this.ouchSounds = [
+      'NPC Sounds/ouch1.ogg',
+      'NPC Sounds/ouch2.ogg',
+      'NPC Sounds/ouch3.ogg'
     ];
 
     this.bufferCache = new Map();
@@ -60,6 +67,22 @@ export class AudioManager {
     this.sfxVolume = options.sfxVolume ?? 1.0;
     this.musicVolume = options.musicVolume ?? 0;
 
+    // Browsers block an AudioContext created before a user gesture, so the
+    // context (and the SFX preload, which needs it to decode) waits for the
+    // first click/tap/key press.
+    this._unlockListener = () => this.unlock();
+    for (const type of UNLOCK_EVENTS) {
+      window.addEventListener(type, this._unlockListener, { capture: true, passive: true });
+    }
+  }
+
+  unlock() {
+    if (this._unlocked) return;
+    this._unlocked = true;
+    for (const type of UNLOCK_EVENTS) {
+      window.removeEventListener(type, this._unlockListener, { capture: true });
+    }
+    this.resumeAudioContext();
     if (this.performanceProfile.preloadCommonSFX) {
       this.preloadCommonSFX();
     }
@@ -67,6 +90,8 @@ export class AudioManager {
 
   ensureAudioContext() {
     if (this.context) return;
+    // No gesture yet: creating the context now would just trigger the autoplay warning.
+    if (!this._unlocked && navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
 
@@ -108,6 +133,7 @@ export class AudioManager {
     if (this.masterGain) {
       this.masterGain.gain.value = this.masterVolume;
     }
+    this._applyBGSVolume();
   }
 
   setSFXVolume(value) {
@@ -115,13 +141,19 @@ export class AudioManager {
     if (this.sfxGain) {
       this.sfxGain.gain.value = this.sfxVolume;
     }
+    this._applyBGSVolume();
+  }
+
+  // Ambient BGS loops follow the SFX slider (not music), like the Web Audio SFX
+  // they sit alongside, scaled by the per-loop volumeScale from playBGS().
+  _applyBGSVolume() {
+    if (!this.background) return;
+    const volume = this.masterVolume * this.sfxVolume * (this.bgsVolumeScale ?? 1);
+    this.background.volume = Math.max(0, Math.min(1, volume));
   }
 
   setMusicVolume(value) {
     this.musicVolume = Math.max(0, Math.min(1, value));
-    if (this.background) {
-      this.background.volume = this.musicVolume;
-    }
     if (this.phoneSwordAudio) {
       this.phoneSwordAudio.volume = this.musicVolume;
     }
@@ -149,7 +181,8 @@ export class AudioManager {
       'NPC Sounds/friendly_sound_4.ogg',
       'NPC Sounds/zombie_sound_1.ogg',
       'NPC Sounds/zombie_sound_2.ogg',
-      'NPC Sounds/merchant_loop.ogg'
+      'NPC Sounds/merchant_loop.ogg',
+      ...this.ouchSounds
     ];
     await Promise.allSettled(common.map(path => this.loadBuffer(path)));
   }
@@ -189,14 +222,17 @@ export class AudioManager {
     return loadPromise;
   }
 
-  playBGS(name) {
+  // volumeScale multiplies the SFX volume for this loop (e.g. 0.5 = half as loud).
+  playBGS(name, { volumeScale = 1 } = {}) {
     const path = `assets/audio/BGS Loops/${name}`;
+    this.bgsVolumeScale = volumeScale;
 
     if (!this.background) {
       this.background = new Audio(path);
       this.background.loop = true;
-      this.background.volume = this.musicVolume;
+      this._applyBGSVolume();
     } else {
+      this._applyBGSVolume();
       if (this.currentBGSPath === path) {
         if (this.background.paused) {
           this.background.play().catch(err => console.error('BGS resume failed', err));
@@ -272,6 +308,13 @@ export class AudioManager {
 
     source.start(0);
     return source;
+  }
+
+  // Random hurt vocal (NPC Sounds/ouch1-3). cooldownKey is per character so
+  // several enemies hit together can each cry out, but one can't stack.
+  playOuch(cooldownKey = 'ouch', volume = 0.7) {
+    const clip = this.ouchSounds[Math.floor(Math.random() * this.ouchSounds.length)];
+    return this.playSFX(clip, volume, { cooldownKey, cooldownMs: 150 });
   }
 
   playAttack() {

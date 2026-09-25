@@ -302,7 +302,7 @@ export class BombThrowerEnemy {
   _spawnExplosion(pos) {
     const groundY = getTerrainHeight(pos.x, pos.z);
     spawnExplosion(this.scene, pos, { groundY: Number.isFinite(groundY) ? groundY : pos.y });
-    window.audioManager?.playSFX?.('SFX/Attacks/Explosions/Cannon/Cannon Explosion 1.ogg', 0.75, {
+    window.audioManager?.playSFX?.('SFX/Explosions/Explosion 1.ogg', 0.75, {
       cooldownKey: 'bomb-explode', cooldownMs: 50
     });
   }
@@ -558,6 +558,7 @@ export class BombThrowerEnemy {
     this.hearts = Math.max(0, this.hearts - Math.max(1, amount));
     this._showHealthBar();
     spawnBloodBurst(this.scene, this.getCenterWorldPos().add(_bloodOffset), { groundY: this.group.position.y });
+    window.audioManager?.playOuch(`ouch-enemy-${this.group.uuid}`);
     if (this.hearts <= 0) {
       this._die();
       return true;
