@@ -86,30 +86,109 @@
       margin-bottom: 16px;
       filter: drop-shadow(0 0 12px #6366f1);
     }
-    #block-btn {
+    /* ── Controller layout (shown once connected) ─────────────────────── */
+    body.controller-mode {
+      justify-content: flex-start;
+      padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+      touch-action: none;
+      overflow: hidden;
+    }
+    body.controller-mode .sword-icon,
+    body.controller-mode h1,
+    body.controller-mode .subtitle,
+    body.controller-mode .connected-icon,
+    body.controller-mode #gyro-display { display: none !important; }
+    body.controller-mode #status {
+      font-size: 0.85rem;
+      padding: 6px 12px;
+      margin-bottom: 12px;
+    }
+    #controller {
       display: none;
-      position: fixed;
-      bottom: 40px;
+      flex: 1;
+      width: 100%;
+      max-width: 480px;
+      flex-direction: column;
+      gap: 14px;
+    }
+    body.controller-mode #controller { display: flex; }
+    #action-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .ctl-btn {
+      height: 68px;
+      border: none;
+      border-radius: 16px;
+      background: #334155;
+      color: #fff;
+      font-size: 1.05rem;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      touch-action: none;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+      transition: transform 0.08s, filter 0.08s;
+    }
+    .ctl-btn.pressed { transform: scale(0.94); filter: brightness(1.3); }
+    .ctl-btn:disabled { opacity: 0.35; }
+    .ctl-btn.equipped { outline: 3px solid #facc15; outline-offset: -3px; }
+    .ctl-btn.active { outline: 3px solid #7dd3fc; outline-offset: -3px; }
+    #btn-bomb   { background: #7c2d12; }
+    #btn-bubble { background: #0e7490; }
+    #btn-jump   { background: #4338ca; }
+    #btn-gun    { background: #475569; }
+    #btn-shield { background: #475569; }
+    #btn-fire   { background: #b45309; }
+    #bottom-row {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 190px;
+    }
+    #joystick {
+      position: relative;
+      width: 170px;
+      height: 170px;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.07);
+      border: 2px solid rgba(255,255,255,0.18);
+      touch-action: none;
+    }
+    #joystick-knob {
+      position: absolute;
       left: 50%;
-      transform: translateX(-50%);
-      width: 220px;
-      height: 80px;
+      top: 50%;
+      width: 70px;
+      height: 70px;
+      margin: -35px 0 0 -35px;
+      border-radius: 50%;
+      background: rgba(226,232,240,0.55);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+      pointer-events: none;
+    }
+    #block-btn {
+      flex: 1;
+      max-width: 220px;
+      height: 150px;
       background: #dc2626;
       color: #fff;
       border: none;
-      border-radius: 20px;
-      font-size: 2rem;
+      border-radius: 24px;
+      font-size: 1.8rem;
       font-weight: 900;
       letter-spacing: 0.08em;
       cursor: pointer;
       box-shadow: 0 6px 32px rgba(220,38,38,0.5);
       transition: background 0.1s, transform 0.08s, box-shadow 0.1s;
       touch-action: none;
-      z-index: 100;
     }
     #block-btn.blocking {
       background: #991b1b;
-      transform: translateX(-50%) scale(0.95);
+      transform: scale(0.95);
       box-shadow: 0 2px 12px rgba(220,38,38,0.8);
     }
   </style>
@@ -128,7 +207,21 @@
     <div id="gyro-gamma">γ (tilt left/right): —</div>
   </div>
   <div id="error-msg"></div>
-  <button id="block-btn">🛡️ BLOCK</button>
+
+  <div id="controller">
+    <div id="action-grid">
+      <button class="ctl-btn" id="btn-bomb" data-action="bomb">💣 0</button>
+      <button class="ctl-btn" id="btn-bubble" data-action="bubble">🫧 0</button>
+      <button class="ctl-btn" id="btn-jump" data-action="jump">⬆️ Jump</button>
+      <button class="ctl-btn" id="btn-gun" data-action="gun">🔫 Gun</button>
+      <button class="ctl-btn" id="btn-shield" data-action="shield">🛡 Shield</button>
+      <button class="ctl-btn" id="btn-fire" data-action="fire">🔥 Fire</button>
+    </div>
+    <div id="bottom-row">
+      <div id="joystick"><div id="joystick-knob"></div></div>
+      <button id="block-btn">🛡️ BLOCK</button>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script>
@@ -156,10 +249,88 @@
       isBlocking = val;
       blockBtn.classList.toggle('blocking', val);
     };
-    blockBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); setBlocking(true); });
+    blockBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      try { blockBtn.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+      setBlocking(true);
+    });
     blockBtn.addEventListener('pointerup', () => setBlocking(false));
     blockBtn.addEventListener('pointercancel', () => setBlocking(false));
     blockBtn.addEventListener('pointerleave', () => setBlocking(false));
+
+    // ── Joystick (angle in radians, 0 = right, π/2 = up; force 0–1) ────────
+    const joystickEl = document.getElementById('joystick');
+    const joystickKnob = document.getElementById('joystick-knob');
+    let joy = { angle: 0, force: 0 };
+    let joyPointerId = null;
+    const updateJoystick = (e) => {
+      const rect = joystickEl.getBoundingClientRect();
+      const radius = rect.width / 2;
+      let dx = e.clientX - (rect.left + radius);
+      let dy = e.clientY - (rect.top + radius);
+      const dist = Math.hypot(dx, dy);
+      if (dist > radius) { dx *= radius / dist; dy *= radius / dist; }
+      joystickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+      joy = { angle: Math.atan2(-dy, dx), force: Math.min(1, dist / radius) };
+    };
+    const releaseJoystick = (e) => {
+      if (e.pointerId !== joyPointerId) return;
+      joyPointerId = null;
+      joy = { angle: 0, force: 0 };
+      joystickKnob.style.transform = '';
+    };
+    joystickEl.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      joyPointerId = e.pointerId;
+      try { joystickEl.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+      updateJoystick(e);
+    });
+    joystickEl.addEventListener('pointermove', (e) => {
+      if (e.pointerId === joyPointerId) updateJoystick(e);
+    });
+    joystickEl.addEventListener('pointerup', releaseJoystick);
+    joystickEl.addEventListener('pointercancel', releaseJoystick);
+
+    // ── Action buttons: one 'action' message per press ────────────────────
+    const actionButtons = Array.from(document.querySelectorAll('.ctl-btn[data-action]'));
+    actionButtons.forEach((btn) => {
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (btn.disabled) return;
+        btn.classList.add('pressed');
+        if (navigator.vibrate) navigator.vibrate(15);
+        if (conn && conn.open) {
+          try { conn.send({ type: 'action', action: btn.dataset.action, ts: Date.now() }); } catch (_) { /* ignore */ }
+        }
+      });
+      const unpress = () => btn.classList.remove('pressed');
+      btn.addEventListener('pointerup', unpress);
+      btn.addEventListener('pointercancel', unpress);
+      btn.addEventListener('pointerleave', unpress);
+    });
+    document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // ── Status from the game (counts, owned weapons, what's equipped) ─────
+    const btnBomb = document.getElementById('btn-bomb');
+    const btnBubble = document.getElementById('btn-bubble');
+    const btnGun = document.getElementById('btn-gun');
+    const btnShield = document.getElementById('btn-shield');
+    const btnFire = document.getElementById('btn-fire');
+    function applyStatus(st) {
+      btnBomb.textContent = `💣 ${st.bombs ?? 0}`;
+      btnBomb.disabled = !(st.bombs > 0);
+      btnBubble.textContent = `🫧 ${st.bubbles ?? 0}`;
+      btnBubble.disabled = !(st.bubbles > 0) && !st.bubbleActive;
+      btnBubble.classList.toggle('active', !!st.bubbleActive);
+      btnGun.disabled = !st.hasGun;
+      btnShield.disabled = !st.hasShield;
+      btnGun.classList.toggle('equipped', st.equipped === 'pistol');
+      btnShield.classList.toggle('equipped', st.equipped === 'shield');
+      btnGun.textContent = st.equipped === 'pistol' ? '🗡️ Sword' : '🔫 Gun';
+      btnShield.textContent = st.equipped === 'shield' ? '🗡️ Sword' : '🛡 Shield';
+      btnFire.disabled = st.equipped !== 'pistol';
+      btnFire.textContent = st.equipped === 'pistol' ? `🔥 Fire ${st.ammo ?? 0}` : '🔥 Fire';
+    }
 
     if (!hostPeerId) {
       statusEl.textContent = 'No host ID in URL. Scan the QR code from the game.';
@@ -205,6 +376,8 @@
               beta: lastGyro.beta,
               gamma: lastGyro.gamma,
               blocking: isBlocking,
+              joyAngle: joy.angle,
+              joyForce: joy.force,
               ts: Date.now()
             });
           } catch (_) { /* ignore */ }
@@ -250,12 +423,16 @@
       peer.on('open', () => {
         conn = peer.connect(hostPeerId, { serialization: 'json' });
 
+        conn.on('data', (data) => {
+          if (data && data.type === 'status') applyStatus(data);
+        });
+
         conn.on('open', () => {
           setStatus('Connected! Move your phone like a sword.');
           connectedIcon.style.display = 'block';
           gyroDisplay.style.display = 'block';
           connectBtn.style.display = 'none';
-          blockBtn.style.display = 'block';
+          document.body.classList.add('controller-mode');
           startGyro();
           startSendLoop();
           conn.send({ type: 'gyro_hello', msg: 'Phone Sword connected!' });
@@ -264,7 +441,7 @@
         conn.on('close', () => {
           setStatus('Disconnected from game');
           connectedIcon.style.display = 'none';
-          blockBtn.style.display = 'none';
+          document.body.classList.remove('controller-mode');
           setBlocking(false);
           if (sendInterval) clearInterval(sendInterval);
           connectBtn.disabled = false;
@@ -273,6 +450,8 @@
 
         conn.on('error', (err) => {
           setError('Data channel error: ' + err.message);
+          document.body.classList.remove('controller-mode');
+          setBlocking(false);
           if (sendInterval) clearInterval(sendInterval);
           connectBtn.disabled = false;
           connectBtn.style.display = '';

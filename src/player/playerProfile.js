@@ -34,7 +34,9 @@ const DEFAULT_STATS = {
   // Sword Showdown shop purchases
   shieldUpgrades: 0,
   bubbles: 0,
-  bombs: 0
+  bombs: 0,
+  // Sword Showdown's own max health (0 = not set yet; kept apart from maxHealthSegments)
+  showdownMaxHealthSegments: 0
 };
 const DEFAULT_INVENTORY = {};
 const DEFAULT_HOME_STORAGE = {};
@@ -179,7 +181,7 @@ function normalizeStatValue(key, value) {
   if (key === 'level') {
     return Math.max(1, Math.floor(numeric));
   }
-  if (key === 'xp' || key === 'monsterKills' || key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles' || key === 'bombs') {
+  if (key === 'xp' || key === 'monsterKills' || key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles' || key === 'bombs' || key === 'showdownMaxHealthSegments') {
     return Math.max(0, Math.floor(numeric));
   }
   if (['maxHealthSegments', 'maxHungerSegments', 'maxMagicSegments'].includes(key)) {

@@ -270,6 +270,8 @@ export class PlayerControls {
     
     // Mobile control variables
     this.joystick = null;
+    this.joystickAngle = 0;
+    this.joystickForce = 0;
     this.touchStartX = 0;
     this.touchStartY = 0;
     this.touchSensitivity = 0.006;
@@ -2717,9 +2719,11 @@ export class PlayerControls {
 
     // Simple direct position movement — no physics, no gravity, no collider
     {
-      // Build move direction from WASD or joystick
+      // Build move direction from WASD or joystick (on-screen, or the phone-sword page's
+      // remote joystick, which also drives desktop)
       const moveDirection = new THREE.Vector3(0, 0, 0);
-      if (this.isMobile) {
+      const useJoystick = this.isMobile || this.joystickForce > 0.1;
+      if (useJoystick) {
         if (this.joystickForce > 0.1) {
           const cameraForward = new THREE.Vector3();
           this.camera.getWorldDirection(cameraForward);
@@ -2745,7 +2749,7 @@ export class PlayerControls {
       const rightVector = new THREE.Vector3().crossVectors(this.camera.up, cameraDirection).normalize();
 
       const movement = new THREE.Vector3();
-      if (!this.isMobile) {
+      if (!useJoystick) {
         if (moveDirection.z !== 0) movement.add(cameraDirection.clone().multiplyScalar(moveDirection.z));
         if (moveDirection.x !== 0) movement.add(rightVector.clone().multiplyScalar(moveDirection.x));
         if (movement.length() > 0) movement.normalize();

@@ -3394,6 +3394,25 @@ body.settings-open #inventory-button {
   font-size: 0.85em;
 }
 
+/* Sword Showdown: enemies killed / total this stage */
+.ps-kill-counter {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.78);
+  border: 2px solid rgba(248, 113, 113, 0.7);
+  color: #fff;
+  font: 700 16px/1.2 'Segoe UI', Arial, sans-serif;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.ps-kill-counter.hidden { display: none; }
+
 /* ── Phone Sword: Win overlay ───────────────────────────────────────────────── */
 .ps-win-overlay {
   position: fixed;
