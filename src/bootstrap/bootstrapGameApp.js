@@ -6510,6 +6510,10 @@ async function initCore(runtimeContext) {
     if (itemId === ARROW_AMMO_KEY || itemId === 'bow') return '🏹';
     if (itemId === MISSILE_AMMO_KEY || itemId === 'bazooka') return '🚀';
     if (itemId === SHIELD_ITEM_ID) return '🛡️';
+    if (itemId === 'pistol') return '🔫';
+    if (itemId === PISTOL_AMMO_KEY) return '🔶';
+    if (itemId === 'bubble') return '🫧';
+    if (itemId === 'showdown_bomb') return '💣';
     if (itemId === APPLE_ITEM_ID) return '🍎';
     if (itemId?.startsWith?.('mushroom_')) return '🍄';
     return '🎒';
@@ -6525,7 +6529,8 @@ async function initCore(runtimeContext) {
     }, 1000);
   };
 
-  const showPickupToast = (itemId, amount = 1, explicitLabel = '') => {
+  // options.text replaces the default "Collected …" message; options.icon overrides the item icon
+  const showPickupToast = (itemId, amount = 1, explicitLabel = '', options = {}) => {
     if (!itemId || !Number.isFinite(amount) || amount <= 0) return;
     if (!pickupToastContainer) {
       pickupToastContainer = document.createElement('div');
@@ -6538,10 +6543,12 @@ async function initCore(runtimeContext) {
     const label = explicitLabel || entry?.name || itemId;
     const amountLabel = amount > 1 ? ` x${Math.floor(amount)}` : '';
     const iconText = getPickupFallbackIcon(itemId);
+    const icon = options.icon || entry?.icon;
+    const text = options.text || `Collected ${label}${amountLabel}`;
     pickupToastContainer.innerHTML = `
       <div class="pickup-toast">
-        ${entry?.icon ? `<img src="${entry.icon}" alt="" class="pickup-toast-icon">` : `<span class="pickup-toast-icon pickup-toast-icon-fallback">${iconText}</span>`}
-        <span class="pickup-toast-text">Collected ${label}${amountLabel}</span>
+        ${icon ? `<img src="${icon}" alt="" class="pickup-toast-icon">` : `<span class="pickup-toast-icon pickup-toast-icon-fallback">${iconText}</span>`}
+        <span class="pickup-toast-text">${text}</span>
       </div>
     `;
     const toast = pickupToastContainer.querySelector('.pickup-toast');
@@ -15450,7 +15457,46 @@ async function initCore(runtimeContext) {
   const craftOverlay = document.getElementById('craft-overlay');
   const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
 
+  // Sword Showdown auto-buy: when the player runs out of one of these, spend coins on it
+  // automatically (in this priority order, one purchase per tick) and flash a purchase toast.
+  const PS_AUTO_BUY_ITEMS = [
+    { itemId: 'showdown_bomb', has: () => getPlayerBombCount() > 0 },
+    { itemId: 'bubble', has: () => getBubbleCount() > 0 },
+    { itemId: SHIELD_ITEM_ID, has: () => (inventoryState[SHIELD_ITEM_ID]?.count || 0) > 0 },
+    { itemId: 'pistol', has: () => (inventoryState.pistol?.count || 0) > 0 },
+    // Bullets are only useful once the gun is owned
+    { itemId: PISTOL_AMMO_KEY, has: () => !(inventoryState.pistol?.count > 0) || getPistolAmmoCount() > 0 }
+  ];
+  let psAutoBuyBusy = false;
+  const psAutoBuyTick = async () => {
+    if (!window.phoneSwordMode || psAutoBuyBusy) return;
+    const needed = PS_AUTO_BUY_ITEMS.filter(entry => !entry.has());
+    if (!needed.length) return;
+    psAutoBuyBusy = true;
+    try {
+      const merchant = await import('../characters/merchant.js');
+      const stock = merchant.getMerchantInventory();
+      const coins = appState.getCoins();
+      for (const { itemId } of needed) {
+        const meta = merchant.getMerchantItemMeta(itemId);
+        if ((stock[itemId]?.count || 0) <= 0 || coins < meta.price) continue;
+        if (!await merchant.buyMerchantItem(itemId)) continue;
+        showPickupToast(itemId, 1, '', {
+          text: `Purchased ${meta.name} -${meta.price} coins`,
+          icon: meta.icon
+        });
+        if (isOverlayVisible(merchantOverlay)) void updateMerchantUIFeature();
+        break;
+      }
+    } catch (error) {
+      console.warn('Sword Showdown auto-buy failed:', error);
+    } finally {
+      psAutoBuyBusy = false;
+    }
+  };
+
   setInterval(() => {
+    void psAutoBuyTick();
     if (isOverlayVisible(settingsOverlay)) {
       updateSettingsUI();
     }

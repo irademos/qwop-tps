@@ -1789,6 +1789,25 @@ body.settings-open #inventory-button {
   font-weight: 600;
 }
 
+.inventory-owned {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: #dff3df;
+  color: #22572a;
+  border-radius: 999px;
+  font-size: 10px;
+  padding: 2px 6px;
+  font-weight: 600;
+}
+
+.merchant-coins {
+  font-size: 13px;
+  font-weight: 700;
+  color: #6a4b00;
+  white-space: nowrap;
+}
+
 .inventory-ammo {
   position: absolute;
   bottom: 6px;

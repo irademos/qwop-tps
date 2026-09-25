@@ -36,8 +36,11 @@ function buildHeader() {
   closeButton.type = 'button';
   closeButton.dataset.action = 'close';
   closeButton.setAttribute('aria-label', 'Close merchant');
-  header.append(createElement('span'), title, closeButton);
+  const coins = createElement('span', 'merchant-coins', '🪙 0');
+  coins.setAttribute('aria-label', 'Your coins');
+  header.append(coins, title, closeButton);
   elements.closeButton = closeButton;
+  elements.coins = coins;
   return header;
 }
 
@@ -147,6 +150,35 @@ function getFallbackIcon(itemId) {
   return '🎒';
 }
 
+function getCoinCount() {
+  const appState = context.appState;
+  const coins = appState?.getCoins?.() ?? appState?.getPlayerStats?.()?.coins ?? 0;
+  return Number.isFinite(coins) ? Math.max(0, Math.floor(coins)) : 0;
+}
+
+function renderCoins() {
+  if (elements.coins) elements.coins.textContent = `🪙 ${getCoinCount()}`;
+}
+
+// How many of a shop item the player currently has (ammo, upgrades and
+// showdown consumables are tracked outside the plain inventory).
+function getOwnedCount(itemId) {
+  const appState = context.appState;
+  if (!appState) return 0;
+  const stats = appState.getPlayerStats?.() || {};
+  let owned;
+  if (itemId === 'showdown_bomb') owned = appState.getBombCount?.();
+  else if (itemId === 'bubble') owned = appState.getBubbleCount?.();
+  else if (itemId === 'heart_upgrade') owned = stats.maxHealthSegments;
+  else if (itemId === 'shield_upgrade') owned = stats.shieldUpgrades;
+  else if (itemId === 'gun bullets') owned = appState.getPistolAmmoCount?.();
+  else if (itemId === 'ice ammo') owned = appState.getIceAmmoCount?.();
+  else if (itemId === 'arrow ammo') owned = appState.getArrowAmmoCount?.();
+  else if (itemId === 'missiles') owned = appState.getMissileAmmoCount?.();
+  else owned = appState.getInventory?.()?.[itemId]?.count;
+  return Number.isFinite(owned) ? Math.max(0, Math.floor(owned)) : 0;
+}
+
 function getItemDisplay(itemId, item, tabId) {
   const meta = getMerchantItemMeta(itemId);
   const name = item?.name || meta.name || itemId;
@@ -237,6 +269,10 @@ function renderTab(tabId) {
     }
     const priceLabel = createElement('span', 'inventory-price', `${display.price}c`);
     button.appendChild(priceLabel);
+    if (tabId === 'buy') {
+      const ownedLabel = createElement('span', 'inventory-owned', `Have ${getOwnedCount(itemId)}`);
+      button.appendChild(ownedLabel);
+    }
 
     grid.appendChild(button);
   });
@@ -247,7 +283,8 @@ function renderTab(tabId) {
     const countText = display.count ? ` • Qty ${display.count}` : '';
     const priceText = ` • Price ${display.price} coins`;
     const descriptionText = tabId === 'buy' && display.description ? ` • ${display.description}` : '';
-    detailsText.textContent = `${display.name}${countText}${priceText}${descriptionText}`;
+    const ownedText = tabId === 'buy' ? ` • You have ${getOwnedCount(selectedIds[tabId])}` : '';
+    detailsText.textContent = `${display.name}${countText}${priceText}${ownedText}${descriptionText}`;
     actionButton.disabled = false;
 
     if (selectedTile && selectedTile.parentElement === grid) {
@@ -259,6 +296,7 @@ function renderTab(tabId) {
 }
 
 function renderAllTabs() {
+  renderCoins();
   MERCHANT_TABS.forEach(tab => {
     renderTab(tab.id);
   });
