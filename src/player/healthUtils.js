@@ -1,7 +1,7 @@
 export const BASE_HEALTH_SEGMENTS = 10;
 export const HEALTH_SEGMENT_VALUE = 10;
 // Sword Showdown: max health segments can never exceed this (level-ups and Heart purchases)
-export const SHOWDOWN_MAX_HEALTH_SEGMENTS = 15;
+export const SHOWDOWN_MAX_HEALTH_SEGMENTS = 20;
 
 export const getMaxHealthSegments = (level = 1, bonusSegments = 0) => {
   const safeLevel = Math.max(1, Math.round(level || 1));
