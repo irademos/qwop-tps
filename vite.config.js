@@ -23,16 +23,12 @@ export default defineConfig({
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
 
-          if (id.includes('/three') || id.includes('three-stdlib') || id.includes('three-bvh-csg')) {
+          if (id.includes('/three')) {
             return 'vendor-three';
           }
 
           if (id.includes('@dimforge/rapier3d')) {
             return 'vendor-rapier';
-          }
-
-          if (id.includes('@mediapipe/tasks-vision')) {
-            return 'vendor-mediapipe';
           }
 
           if (id.includes('/firebase/')) {

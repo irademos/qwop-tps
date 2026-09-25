@@ -1,22 +1,13 @@
-import { appContext } from '../core/appContext.js';
 import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
-import { updateArrowProjectile } from "./arrow.js";
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../player/healthUtils.js";
-import { getTerrainHeight } from '../environment/terrainHeight.js';
-import { getAttackTypes } from './melee.js';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 
-const detachProjectileMesh = (mesh) => {
+const disposeProjectileMesh = (mesh) => {
   if (!mesh) return;
   if (mesh.parent) {
     mesh.parent.remove(mesh);
   }
-};
-
-const disposeProjectileMesh = (mesh) => {
-  if (!mesh) return;
-  detachProjectileMesh(mesh);
   mesh.traverse(child => {
     if (!child.isMesh) return;
     if (child.geometry) {
@@ -25,21 +16,6 @@ const disposeProjectileMesh = (mesh) => {
     const materials = Array.isArray(child.material) ? child.material : [child.material];
     materials.forEach(material => material?.dispose?.());
   });
-};
-
-
-const playArrowBlockedSFX = () => {
-  window.audioManager?.playSFX?.('SFX/Attacks/Bow Attacks Hits and Blocks/Bow Blocked 1.ogg', 0.58, {
-    cooldownKey: 'bow-blocked',
-    cooldownMs: 60
-  });
-};
-
-
-const isProtectedCompanionTarget = (entity) => {
-  if (!entity?.model?.userData) return false;
-  const type = String(entity.type || entity.model.userData.type || '').toLowerCase();
-  return !!entity.model.userData.isCompanion || type === 'dog' || type.includes('companion');
 };
 
 const getObjectBox = (object) => {
@@ -54,11 +30,11 @@ const getObjectBox = (object) => {
 // Fast shots (pistol: ~0.5 m/frame) can skip past a slim enemy between frames, or be
 // bounced off its physics capsule before the boxes overlap, so also test the segment
 // travelled this frame against the enemy's vertical body axis.
-const HORDE_HIT_RADIUS = 0.45;
-const HORDE_HIT_HEIGHT = 1.4;
+const ENEMY_HIT_RADIUS = 0.45;
+const ENEMY_HIT_HEIGHT = 1.4;
 const _segDir = new THREE.Vector3();
 const _segToAxis = new THREE.Vector3();
-const sweptHitsHordeEnemy = (from, to, enemy) => {
+const sweptHitsEnemy = (from, to, enemy) => {
   const base = enemy?.group?.position;
   if (!base) return false;
   _segDir.subVectors(to, from);
@@ -70,22 +46,17 @@ const sweptHitsHordeEnemy = (from, to, enemy) => {
   const px = from.x + (to.x - from.x) * t;
   const py = from.y + (to.y - from.y) * t;
   const pz = from.z + (to.z - from.z) * t;
-  if (py < base.y - 0.1 || py > base.y + HORDE_HIT_HEIGHT) return false;
+  if (py < base.y - 0.1 || py > base.y + ENEMY_HIT_HEIGHT) return false;
   const dx = px - base.x;
   const dz = pz - base.z;
-  return dx * dx + dz * dz < HORDE_HIT_RADIUS * HORDE_HIT_RADIUS;
+  return dx * dx + dz * dz < ENEMY_HIT_RADIUS * ENEMY_HIT_RADIUS;
 };
 
-export function removeProjectileAt(projectiles, index) {
+function removeProjectileAt(projectiles, index) {
   const projectile = projectiles[index];
   if (!projectile) return;
   const body = projectile.userData?.rb;
-  if (typeof projectile.userData?.releaseMesh === 'function') {
-    detachProjectileMesh(projectile);
-    projectile.userData.releaseMesh(projectile);
-  } else {
-    disposeProjectileMesh(projectile);
-  }
+  disposeProjectileMesh(projectile);
   projectiles.splice(index, 1);
   if (body) {
     window.rbToMesh?.delete?.(body);
@@ -99,10 +70,7 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   const geometry = options.geometry || new THREE.BoxGeometry(size, size, size);
   const color = options.color || new THREE.Color(Math.random(), Math.random(), Math.random());
   const material = new THREE.MeshStandardMaterial({ color });
-  let mesh = options.createMesh ? options.createMesh() : null;
-  if (!mesh) {
-    mesh = new THREE.Mesh(geometry, material);
-  }
+  const mesh = new THREE.Mesh(geometry, material);
   const spawnPosition = position.clone();
   mesh.position.copy(spawnPosition);
   // Rapier body
@@ -120,56 +88,21 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   window.rbToMesh.set(rb, mesh);
 
   mesh.userData.rb = rb;
-  mesh.userData.velocity = vel.clone();
-  mesh.userData.prevY = mesh.position.y;
   mesh.userData.lifetime = Number.isFinite(options.lifetime) ? options.lifetime : 4000;
-  mesh.userData.spawnTime = Date.now();
   mesh.userData.spawnPosition = spawnPosition.clone();
   mesh.userData.shooterId = shooterId;
-  mesh.userData.pickupOnRest = options.pickupOnRest ?? false;
-  mesh.userData.pickupAmount = options.pickupAmount ?? 0;
-  mesh.userData.spawnPickup = options.spawnPickup ?? null;
-  mesh.userData.isArrow = options.isArrow ?? false;
-  mesh.userData.releaseMesh = options.releaseMesh ?? null;
-  mesh.userData.onGroundHit = options.onGroundHit ?? null;
-  mesh.userData.onMonsterImpact = typeof options.onMonsterImpact === 'function'
-    ? options.onMonsterImpact
-    : null;
-  mesh.userData.onBuildImpact = typeof options.onBuildImpact === 'function'
-    ? options.onBuildImpact
-    : null;
-  mesh.userData.onPlayerImpact = typeof options.onPlayerImpact === 'function'
-    ? options.onPlayerImpact
-    : null;
   mesh.userData.damage = Number.isFinite(options.damage) ? options.damage : 1;
-  mesh.userData.attackLabel = typeof options.attackLabel === 'string' && options.attackLabel
-    ? options.attackLabel
-    : 'bowArrowProjectile';
-  mesh.userData.attackTypes = Array.isArray(options.attackTypes) && options.attackTypes.length
-    ? options.attackTypes
-    : ['projectile'];
-  mesh.userData.gravity = Number.isFinite(options.gravity) ? options.gravity : null;
-  mesh.userData.hasHitGround = false;
-  mesh.userData.wasAboveGround = false;
-  mesh.userData.groundContactOffset = Number.isFinite(options.groundContactOffset) ? options.groundContactOffset : 0;
   scene.add(mesh);
   projectiles.push(mesh);
 }
 
 export function updateProjectiles({
-  scene,
   projectiles,
   otherPlayers,
-  playerModel,
   multiplayer,
-  monsters,
-  hordeEnemies,
-  sendMonsterAttack,
-  onMonsterHit,
-  onBuildHit
+  hordeEnemies
 }) {
   const localId = multiplayer?.getId?.();
-  const isHost = !multiplayer || multiplayer.isHost;
   const getStrengthDamage = baseDamage => {
     if (typeof window.getPlayerStrength === 'function') {
       const strength = window.getPlayerStrength();
@@ -179,6 +112,10 @@ export function updateProjectiles({
       }
     }
     return baseDamage;
+  };
+  const getDamage = (proj) => {
+    const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
+    return proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
   };
   const removeProjectile = (index) => {
     removeProjectileAt(projectiles, index);
@@ -192,111 +129,44 @@ export function updateProjectiles({
     try {
       const body = window.rapierWorld?.getRigidBody(rb.handle);
       if (!body) {
-        if (proj.userData?.isArrow) playArrowBlockedSFX();
         removeProjectile(i);
         continue;
-      }
-      const customGravity = proj?.userData?.gravity;
-      if (Number.isFinite(customGravity) && customGravity !== 0) {
-        const currentVel = body.linvel();
-        const gravityStep = customGravity * (16 / 1000);
-        body.setLinvel({
-          x: currentVel.x,
-          y: currentVel.y - gravityStep,
-          z: currentVel.z
-        }, true);
       }
       linvel = body.linvel();
     } catch (e) {
       removeProjectile(i);
       continue;
     }
-
     const vel = new THREE.Vector3(linvel.x, linvel.y, linvel.z);
-    proj.userData.velocity = vel.clone();
-    const sampledGroundY = getTerrainHeight(proj.position.x, proj.position.z);
-    const prevY = Number.isFinite(proj.userData.prevY) ? proj.userData.prevY : proj.position.y;
-    const crossedGround = Number.isFinite(sampledGroundY)
-      ? (prevY > sampledGroundY && proj.position.y <= sampledGroundY)
-      : false;
-    const aboveGroundThreshold = 0.18;
-    const groundContactEpsilon = 0.08;
-    const hasTerrainSample = Number.isFinite(sampledGroundY);
-    const aboveGround = hasTerrainSample && proj.position.y > sampledGroundY + aboveGroundThreshold;
-    if (aboveGround) {
-      proj.userData.wasAboveGround = true;
-    }
-    const groundContactOffset = Number.isFinite(proj.userData.groundContactOffset) ? proj.userData.groundContactOffset : 0;
-    const touchingGround = hasTerrainSample && proj.position.y <= sampledGroundY + groundContactOffset + groundContactEpsilon;
-    updateArrowProjectile(proj, rb, vel, sampledGroundY, crossedGround);
-
-    if (typeof proj.userData.onGroundHit === 'function' && !proj.userData.hasHitGround) {
-      const groundedAfterThrow = proj.userData.wasAboveGround && touchingGround && vel.y <= 0.6;
-      if ((crossedGround && vel.y <= 0.1) || groundedAfterThrow) {
-        proj.userData.hasHitGround = true;
-        proj.userData.onGroundHit(proj.position.clone(), proj);
-        if (proj.userData?.isArrow) playArrowBlockedSFX();
-        removeProjectile(i);
-        continue;
-      }
-    }
 
     proj.userData.lifetime -= 16;
     if (proj.userData.lifetime <= 0) {
-      if (proj.userData.pickupOnRest && typeof proj.userData.spawnPickup === 'function') {
-        proj.userData.spawnPickup(proj.position.clone(), proj.userData.pickupAmount || 1);
-      }
       removeProjectile(i);
       continue;
     }
-
-    if (proj.userData.pickupOnRest && !proj.userData.arrowStuck && typeof proj.userData.spawnPickup === 'function') {
-      const speed = vel.length();
-      if (speed < 0.6 && proj.position.y <= 1.0) {
-        proj.userData.spawnPickup(proj.position.clone(), proj.userData.pickupAmount || 1);
-        if (proj.userData?.isArrow) playArrowBlockedSFX();
-        removeProjectile(i);
-        continue;
-      }
-    }
-
-    proj.userData.prevY = proj.position.y;
-    const age = Date.now() - proj.userData.spawnTime;
 
     let removed = false;
     const projBox = getObjectBox(proj);
     if (!projBox) {
       continue;
     }
+    // Skip hits until the projectile has left the shooter's immediate vicinity (~0.08 m).
+    const leftShooter = !proj.userData.spawnPosition
+      || proj.position.distanceToSquared(proj.userData.spawnPosition) >= 0.0064;
 
+    // PvP: other players
     for (const [id, { model }] of Object.entries(otherPlayers)) {
-      if (!window.phoneSwordMode) continue; // Only enable projectile PvP damage in phone sword mode.
       if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
-      // Skip until the projectile has left the shooter's immediate vicinity (~0.5 m).
-      if (proj.userData.spawnPosition && proj.position.distanceToSquared(proj.userData.spawnPosition) < 0.0064) continue;
+      if (!leftShooter) continue;
       const playerBox = getObjectBox(model);
       if (!playerBox) continue;
       if (projBox.intersectsBox(playerBox)) {
-        if (typeof proj.userData.onPlayerImpact === 'function') {
-          const handled = proj.userData.onPlayerImpact(proj.position.clone(), proj);
-          if (handled) {
-            removeProjectile(i);
-            removed = true;
-            break;
-          }
-        }
         const player = otherPlayers[id];
         if (player) {
-          const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
-          const attackTypes = getAttackTypes(
-            proj.userData.attackLabel || 'bowArrowProjectile',
-            proj.userData.attackTypes || ['projectile']
-          );
+          const damage = getDamage(proj);
           const previousHealth = Number.isFinite(player.health) ? player.health : BASE_HEALTH_SEGMENTS;
           const nextHealth = Math.max(0, previousHealth - damage);
           player.health = nextHealth;
-          player.lastHitAttackTypes = attackTypes;
           if (nextHealth <= 0 && previousHealth > 0) {
             player.isDead = true;
             if (proj.userData.shooterId === localId) {
@@ -307,7 +177,6 @@ export function updateProjectiles({
           }
           console.log(`💥 Hit player: ${id}, Health: ${player.health}`);
         }
-        if (proj.userData?.isArrow) playArrowBlockedSFX();
         removeProjectile(i);
         removed = true;
         break;
@@ -316,71 +185,15 @@ export function updateProjectiles({
 
     if (removed) continue;
 
-    if (typeof onBuildHit === 'function' && age >= 80) {
-      const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
-      const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
-      const attackTypes = getAttackTypes(
-        proj.userData.attackLabel || 'bowArrowProjectile',
-        proj.userData.attackTypes || ['projectile']
-      );
-      if (onBuildHit({ projectile: proj, projectileBox: projBox, damage, attackTypes })) {
-        if (typeof proj.userData.onBuildImpact === 'function') {
-          proj.userData.onBuildImpact(proj.position.clone(), proj);
-        }
-        if (proj.userData?.isArrow) playArrowBlockedSFX();
-        removeProjectile(i);
-        removed = true;
-      }
-    }
-
-    if (removed) continue;
-
-    const localBox = getObjectBox(playerModel);
-    if (!localBox) continue;
-    if (false && projBox.intersectsBox(localBox) && age >= 80 && proj.userData.shooterId !== localId) {
-      if (typeof proj.userData.onPlayerImpact === 'function') {
-        const handled = proj.userData.onPlayerImpact(proj.position.clone(), proj);
-        if (handled) {
-          removeProjectile(i);
-          removed = true;
-          continue;
-        }
-      }
-      console.log(`💥 You were hit`);
-      if (proj.userData?.isArrow) playArrowBlockedSFX();
-      removeProjectile(i);
-      removed = true;
-
-      if (typeof window.localHealth === 'number') {
-        const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
-        const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
-        const attackTypes = getAttackTypes(
-          proj.userData.attackLabel || 'bowArrowProjectile',
-          proj.userData.attackTypes || ['projectile']
-        );
-        window.localHealth = Math.max(0, window.localHealth - damage);
-        window.lastHitAttackTypes = attackTypes;
-        console.log(`❤️ Your Health: ${window.localHealth}`);
-      }
-
-      const playerControls = appContext.systems.playerControls ?? window.playerControls;
-      if (playerControls) {
-        playerControls.applyKnockback({ direction: vel, strength: 3 });
-      }
-    }
-
-    if (removed) continue;
-
-    // Horde enemies (EnemyPlayer) are always local — call applyDamage directly.
-    if (!removed && Array.isArray(hordeEnemies) && hordeEnemies.length > 0 && (!proj.userData.spawnPosition || proj.position.distanceToSquared(proj.userData.spawnPosition) >= 0.0064)) {
-      const prevPos = proj.userData.hordePrevPos ?? proj.position;
+    // Showdown enemies are always local — call applyDamage directly.
+    if (Array.isArray(hordeEnemies) && hordeEnemies.length > 0 && leftShooter) {
+      const prevPos = proj.userData.prevPos ?? proj.position;
       for (const enemy of hordeEnemies) {
         if (enemy.isDead) continue;
         const enemyBox = getObjectBox(enemy.group);
         if (!enemyBox) continue;
-        if (projBox.intersectsBox(enemyBox) || sweptHitsHordeEnemy(prevPos, proj.position, enemy)) {
-          const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
+        if (projBox.intersectsBox(enemyBox) || sweptHitsEnemy(prevPos, proj.position, enemy)) {
+          const damage = getDamage(proj);
           const dir = vel.clone().normalize();
           const killed = enemy.applyDamage(Math.max(1, Math.round(damage)));
           if (killed) {
@@ -393,91 +206,7 @@ export function updateProjectiles({
           break;
         }
       }
-      if (!removed) (proj.userData.hordePrevPos ??= new THREE.Vector3()).copy(proj.position);
-    }
-
-    if (isHost && Array.isArray(monsters)) {
-      for (const monster of monsters) {
-        if (isProtectedCompanionTarget(monster)) continue;
-        const monsterBox = getObjectBox(monster?.model);
-        if (!monsterBox) continue;
-        if (projBox.intersectsBox(monsterBox) && age >= 80) {
-          if (typeof proj.userData.onMonsterImpact === 'function') {
-            const handled = proj.userData.onMonsterImpact({
-              projectile: proj,
-              monster,
-              hitPosition: proj.position.clone()
-            });
-            if (handled) {
-              removeProjectile(i);
-              removed = true;
-              break;
-            }
-          }
-          console.log(`💥 Monster was hit`);
-          const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
-          const attackTypes = getAttackTypes(
-            proj.userData.attackLabel || 'bowArrowProjectile',
-            proj.userData.attackTypes || ['projectile']
-          );
-          const direction = vel.clone();
-          const killed = monster.applyDamage(damage, {
-            attackTypes,
-            hitDirection: direction,
-            knockbackStrength: 3
-          });
-          if (!killed) {
-            monster.applyKnockback({ direction, strength: 3 });
-          }
-          onMonsterHit?.(monster, { damage, killed, sourceId: proj.userData.shooterId, attackTypes });
-          if (killed && proj.userData.shooterId === localId) {
-            const withFriend = window.questManager?.isFriendActive?.() ?? false;
-            window.onMonsterKill?.(monster, { withFriend });
-          }
-          if (proj.userData?.isArrow) playArrowBlockedSFX();
-          removeProjectile(i);
-          removed = true;
-          break;
-        }
-      }
-    } else if (!isHost && Array.isArray(monsters)) {
-      for (const monster of monsters) {
-        if (isProtectedCompanionTarget(monster)) continue;
-        const monsterBox = getObjectBox(monster?.model);
-        if (!monsterBox) continue;
-        if (projBox.intersectsBox(monsterBox) && age >= 80) {
-          if (typeof proj.userData.onMonsterImpact === 'function') {
-            const handled = proj.userData.onMonsterImpact({
-              projectile: proj,
-              monster,
-              hitPosition: proj.position.clone()
-            });
-            if (handled) {
-              removeProjectile(i);
-              removed = true;
-              break;
-            }
-          }
-          const baseDamage = Number.isFinite(proj.userData.damage) ? proj.userData.damage : 1;
-          const damage = proj.userData.shooterId === localId ? getStrengthDamage(baseDamage) : baseDamage;
-          const attackTypes = getAttackTypes(
-            proj.userData.attackLabel || 'bowArrowProjectile',
-            proj.userData.attackTypes || ['projectile']
-          );
-          sendMonsterAttack?.({
-            monsterId: monster.id,
-            damage,
-            sourcePlayerId: proj.userData.shooterId || localId,
-            attackTypes,
-            at: Date.now()
-          });
-          if (proj.userData?.isArrow) playArrowBlockedSFX();
-          removeProjectile(i);
-          removed = true;
-          break;
-        }
-      }
+      if (!removed) (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
     }
   }
 }

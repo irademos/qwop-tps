@@ -1,6 +1,6 @@
 // fluffyCharacter.ts: runtime for characters exported from the Character Maker
 //
-// Street Quest additions (see glbCharacterModel.js for the game integration):
+// Sword Showdown additions (see glbCharacterModel.js for the game integration):
 //   - play(url, { excludeBones }) leaves whole bone subtrees (e.g. the arms) to
 //     the caller instead of the clip
 //   - play(url, { fade }) crossfades from the current pose to the new clip
