@@ -310,11 +310,15 @@ export class AudioManager {
     return source;
   }
 
-  // Random hurt vocal (NPC Sounds/ouch1-3). cooldownKey is per character so
-  // several enemies hit together can each cry out, but one can't stack.
-  playOuch(cooldownKey = 'ouch', volume = 0.7) {
-    const clip = this.ouchSounds[Math.floor(Math.random() * this.ouchSounds.length)];
-    return this.playSFX(clip, volume, { cooldownKey, cooldownMs: 150 });
+  // Hurt vocals (NPC Sounds/ouch1-3), played at ~50% of the SFX volume:
+  //   'enemy'       → ouch1 (enemy swordsmen and bombers)
+  //   'player'      → ouch2 (local player hurt)
+  //   'playerDeath' → ouch3 (local player dies)
+  // cooldownKey is per character so several enemies hit together can each
+  // cry out, but one can't stack.
+  playOuch(kind = 'enemy', cooldownKey = `ouch-${kind}`, volume = 0.5) {
+    const index = kind === 'player' ? 1 : kind === 'playerDeath' ? 2 : 0;
+    return this.playSFX(this.ouchSounds[index], volume, { cooldownKey, cooldownMs: 150 });
   }
 
   playAttack() {
