@@ -5801,7 +5801,12 @@ async function initCore(runtimeContext) {
   };
   const showLevelPopup = level => {
     if (!levelPopup) return;
-    levelPopup.textContent = `You've reached level ${level}!`;
+    levelPopup.textContent = window.phoneSwordMode
+      ? `You've reached level ${level}! +1 ❤ Max Health`
+      : `You've reached level ${level}!`;
+    // Restart the pop animation even if the popup is already showing
+    levelPopup.classList.remove('visible');
+    void levelPopup.offsetWidth;
     levelPopup.classList.add('visible');
     if (levelPopupTimer) {
       clearTimeout(levelPopupTimer);
@@ -5978,6 +5983,7 @@ async function initCore(runtimeContext) {
 
   const showXpLevelUp = () => {
     if (!xpLevelUpText) return;
+    xpLevelUpText.classList.remove('hidden');
     xpLevelUpText.classList.add('visible');
     if (xpLevelUpTimer) {
       clearTimeout(xpLevelUpTimer);
@@ -6059,7 +6065,7 @@ async function initCore(runtimeContext) {
         await animateXpSegment(segmentStartXp, segmentEndXp, segmentLevel);
         segmentStartXp = segmentEndXp;
         displayedXp = segmentStartXp;
-        if (segmentStartXp >= nextLevelXp && segmentStartXp < targetXp) {
+        if (segmentStartXp >= nextLevelXp) {
           segmentLevel += 1;
           displayedLevel = segmentLevel;
           updatePlayerInfoUI();
@@ -9458,6 +9464,13 @@ async function initCore(runtimeContext) {
     if (!Number.isFinite(fromLevel) || !Number.isFinite(toLevel) || toLevel <= fromLevel) {
       return;
     }
+    // Sword Showdown: no stat-choice panel — each level grants one extra health segment
+    if (window.phoneSwordMode) {
+      const gained = toLevel - fromLevel;
+      setStat('maxHealthSegments', statsState.maxHealthSegments + gained, { skipSave: true });
+      setStat('health', statsState.health + gained, { skipSave: true });
+      return;
+    }
     for (let level = fromLevel + 1; level <= toLevel; level += 1) {
       pendingLevelUpChoices += getPowerUpsForLevel(level);
       pendingLevelUpLevel = level;
@@ -9520,6 +9533,10 @@ async function initCore(runtimeContext) {
     addPlayerXp(currentLevel * 100);
   };
   window.onPlayerDeath = () => {};
+
+  // Sword Showdown XP rewards (scale with stage so the level curve keeps pace)
+  const getSwordShowdownKillXp = (stage) => 10 + Math.max(1, Math.floor(stage || 1));
+  const getSwordShowdownStageXp = (stage) => 100 + Math.max(1, Math.floor(stage || 1)) * 20;
 
   Object.defineProperty(window, 'localHealth', {
     configurable: true,
@@ -16298,6 +16315,7 @@ async function initCore(runtimeContext) {
       if (!_psWinShown && _psEnemyQueue.length === 0 && hordeEnemies.length > 0 && hordeEnemies.every(e => e.isDead)) {
         _psStageActive = false;
         _psWinShown = true;
+        addPlayerXp(getSwordShowdownStageXp(_psStage));
         const _nextStage = _psStage + 1;
         _psShowWin(() => {
           if (_nextStage <= 50) {
@@ -16465,6 +16483,7 @@ async function initCore(runtimeContext) {
           // Drop coins on first death frame (phone sword mode)
           if (window.phoneSwordMode && !_he._coinDropped) {
             _he._coinDropped = true;
+            addPlayerXp(getSwordShowdownKillXp(_psStage));
             const _dropPos = _he.group.position.clone();
             spawnCoinPickup(_dropPos);
             if (Math.random() < 0.4) spawnCoinPickup(_dropPos.clone().add(new THREE.Vector3((Math.random()-0.5)*1.5, 0, (Math.random()-0.5)*1.5)));
