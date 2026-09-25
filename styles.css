@@ -3328,6 +3328,23 @@ body.settings-open #inventory-button {
   border-color: rgba(100, 255, 160, 0.9) !important;
 }
 
+/* ── Phone Sword: Protective bubble button ───────────────────────────────────── */
+.ps-bubble-btn {
+  background: rgba(40, 150, 210, 0.75) !important;
+  color: #fff !important;
+  border: 2px solid rgba(140, 220, 255, 0.8) !important;
+  white-space: nowrap;
+}
+.ps-bubble-btn.ps-bubble-active {
+  background: rgba(120, 220, 255, 0.9) !important;
+  border-color: #fff !important;
+  color: #063a57 !important;
+  box-shadow: 0 0 14px rgba(140, 220, 255, 0.9);
+}
+.ps-bubble-btn.ps-bubble-empty {
+  opacity: 0.5;
+}
+
 /* ── Phone Sword: Leaderboard PS tabs ────────────────────────────────────────── */
 .leaderboard-tab-ps {
   font-size: 0.85em;

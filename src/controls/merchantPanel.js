@@ -124,6 +124,9 @@ function getTabData(tabId) {
 }
 
 function getFallbackIcon(itemId) {
+  if (itemId === 'heart_upgrade') return '❤️';
+  if (itemId === 'shield_upgrade') return '🔰';
+  if (itemId === 'bubble') return '🫧';
   if (itemId === 'iceGun') return '❄️';
   if (itemId === 'ice ammo') return '❄️';
   if (itemId === 'bow') return '🏹';
@@ -147,9 +150,10 @@ function getFallbackIcon(itemId) {
 function getItemDisplay(itemId, item, tabId) {
   const meta = getMerchantItemMeta(itemId);
   const name = item?.name || meta.name || itemId;
-  const count = tabId === 'buy' ? (item?.count || 0) : (item?.count || 0);
+  // Unlimited shop upgrades never sell out, so don't show a stock count
+  const count = tabId === 'buy' && meta.unlimited ? 0 : (item?.count || 0);
   const price = meta.price || 0;
-  return { name, count, price };
+  return { name, count, price, description: meta.description };
 }
 
 function renderTab(tabId) {
@@ -167,6 +171,7 @@ function renderTab(tabId) {
   ]);
   const entries = Object.entries(data).filter(([id, item]) => {
     if ((item?.count || 0) <= 0) return false;
+    if (!window.phoneSwordMode && tabId === 'buy' && getMerchantItemMeta(id).showdownOnly) return false;
     if (window.phoneSwordMode && tabId === 'buy') {
       if (PHONE_SWORD_BUY_HIDDEN.has(id)) return false;
       if (id.startsWith('mushroom_')) return false;
@@ -241,7 +246,8 @@ function renderTab(tabId) {
     const display = getItemDisplay(selectedIds[tabId], selectedItem, tabId);
     const countText = display.count ? ` • Qty ${display.count}` : '';
     const priceText = ` • Price ${display.price} coins`;
-    detailsText.textContent = `${display.name}${countText}${priceText}`;
+    const descriptionText = tabId === 'buy' && display.description ? ` • ${display.description}` : '';
+    detailsText.textContent = `${display.name}${countText}${priceText}${descriptionText}`;
     actionButton.disabled = false;
 
     if (selectedTile && selectedTile.parentElement === grid) {

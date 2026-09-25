@@ -17,6 +17,7 @@ import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js'
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 const _homeDir = new THREE.Vector3();
+const _bubbleCenter = new THREE.Vector3();
 
 // ─── tuning constants ────────────────────────────────────────────────────────
 
@@ -435,6 +436,22 @@ export class BombThrowerEnemy {
         continue;
       }
 
+      // Protective bubble: any bomb touching the bubble (from any direction)
+      // is deflected back toward the thrower.
+      if (!bomb.deflected && targetModel) {
+        const bubbleRadius = window.getPlayerBubbleRadius?.() || 0;
+        if (bubbleRadius > 0 && window.getPlayerBubbleCenter) {
+          const bubbleCenter = window.getPlayerBubbleCenter(_bubbleCenter);
+          if (bomb.mesh.position.distanceTo(bubbleCenter) < bubbleRadius + 0.2) {
+            this._deflectBombToThrower(bomb, 0.25);
+            window.audioManager?.playSFX?.('SFX/Spells/Spell Impact 1.ogg', 0.7, {
+              cooldownKey: 'bomb-bubble', cooldownMs: 80
+            });
+            continue;
+          }
+        }
+      }
+
       // Shield intercept: if the player has shield equipped and the bomb is
       // close enough, deflect it back toward the thrower instead of exploding.
       if (!bomb.deflected && targetModel) {
@@ -446,15 +463,7 @@ export class BombThrowerEnemy {
               damage: BOMB_EXPLOSION_DAMAGE
             });
           if (shieldBlocked) {
-            // Deflect toward the thrower
-            const throwerPos = this.group.position.clone();
-            throwerPos.y += CAPSULE_HEIGHT / 2;
-            const deflectDir = throwerPos.sub(bomb.mesh.position).normalize();
-            deflectDir.y = 0.25;
-            deflectDir.normalize();
-            bomb.vel.copy(deflectDir.multiplyScalar(BOMB_DEFLECT_SPEED));
-            bomb.deflected = true;
-            bomb.deflectedAt = Date.now();
+            this._deflectBombToThrower(bomb, 0.25);
             window.audioManager?.playSFX?.('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.7, {
               cooldownKey: 'bomb-shield', cooldownMs: 80
             });
@@ -479,6 +488,17 @@ export class BombThrowerEnemy {
     }
   }
 
+  _deflectBombToThrower(bomb, lift) {
+    const throwerPos = this.group.position.clone();
+    throwerPos.y += CAPSULE_HEIGHT / 2;
+    const deflectDir = throwerPos.sub(bomb.mesh.position).normalize();
+    deflectDir.y = lift;
+    deflectDir.normalize();
+    bomb.vel.copy(deflectDir.multiplyScalar(BOMB_DEFLECT_SPEED));
+    bomb.deflected = true;
+    bomb.deflectedAt = Date.now();
+  }
+
   _explodeBomb(bomb, pos, targetModel, targetControls, hitThrower = false) {
     this._spawnExplosion(pos);
 
@@ -490,6 +510,8 @@ export class BombThrowerEnemy {
     }
 
     if (!targetModel) return;
+    // Protective bubble: explosions can't hurt or knock back the player
+    if (window.isPlayerBubbleActive?.()) return;
     const distToPlayer = pos.distanceTo(targetModel.position);
     if (distToPlayer <= BOMB_EXPLOSION_RADIUS) {
       if (typeof window.localHealth === 'number') {

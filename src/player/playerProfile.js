@@ -30,7 +30,10 @@ const DEFAULT_STATS = {
   luck: 5,
   xp: 0,
   monsterKills: 0,
-  coins: 0
+  coins: 0,
+  // Sword Showdown shop purchases
+  shieldUpgrades: 0,
+  bubbles: 0
 };
 const DEFAULT_INVENTORY = {};
 const DEFAULT_HOME_STORAGE = {};
@@ -175,7 +178,7 @@ function normalizeStatValue(key, value) {
   if (key === 'level') {
     return Math.max(1, Math.floor(numeric));
   }
-  if (key === 'xp' || key === 'monsterKills' || key === 'coins') {
+  if (key === 'xp' || key === 'monsterKills' || key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles') {
     return Math.max(0, Math.floor(numeric));
   }
   if (['maxHealthSegments', 'maxHungerSegments', 'maxMagicSegments'].includes(key)) {

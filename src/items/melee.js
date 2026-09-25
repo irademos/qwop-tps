@@ -242,6 +242,7 @@ export function updateMeleeAttacks({
               attackTypes
             });
             if (blockedByShield) continue;
+            if (window.isPlayerBubbleActive?.()) continue;
             window.localHealth = Math.max(0, window.localHealth - attackDamage);
             window.lastHitAttackTypes = attackTypes;
             const playerControls = appContext.systems.playerControls ?? window.playerControls;
