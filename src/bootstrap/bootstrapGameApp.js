@@ -12025,7 +12025,7 @@ async function initCore(runtimeContext) {
     _playerKnockback.vx = direction.x * PLAYER_BLAST_SPEED * k;
     _playerKnockback.vz = direction.z * PLAYER_BLAST_SPEED * k;
     _playerKnockback.endTime = Date.now() + PLAYER_BLAST_MS;
-    if (window.phoneSwordMode) {
+    if (window.phoneSwordMode && k > 0) {
       _psJumpVelY = Math.max(_psJumpVelY, PLAYER_BLAST_UP * k);
       window.phoneSwordAirborne = true;
     }
@@ -16344,18 +16344,19 @@ async function initCore(runtimeContext) {
         const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
         const _playerMovingFast = _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
         for (const _he of hordeEnemies) {
-          if (_he.isDead || !_he._swordGroup) continue;
-
-          // Sample enemy blade points
-          const _enemyBladePoints = _pswSampleOffsets.map(p =>
-            p.clone().applyQuaternion(_he._swordGroup.quaternion).add(_he._swordGroup.position)
-          );
+          if (_he.isDead) continue;
 
           // Sword-sword collision: any player blade point within 0.15 m of any enemy blade point
+          // (bombers carry no sword, so they can only be hit)
           let _swordCollision = false;
-          outer: for (const pp of _playerBladePoints) {
-            for (const ep of _enemyBladePoints) {
-              if (pp.distanceTo(ep) < 0.15) { _swordCollision = true; break outer; }
+          if (_he._swordGroup) {
+            const _enemyBladePoints = _pswSampleOffsets.map(p =>
+              p.clone().applyQuaternion(_he._swordGroup.quaternion).add(_he._swordGroup.position)
+            );
+            outer: for (const pp of _playerBladePoints) {
+              for (const ep of _enemyBladePoints) {
+                if (pp.distanceTo(ep) < 0.15) { _swordCollision = true; break outer; }
+              }
             }
           }
 
@@ -16670,7 +16671,16 @@ async function initCore(runtimeContext) {
 
     // ── Phone sword jump (runs regardless of enemy count) ─────────────────
     if (window.phoneSwordMode && window.gameMode === 'horde' && playerModel) {
-      if (_psGroundY === null) _psGroundY = playerModel.position.y;
+      // Ground under the player's current XZ (the stage isn't flat, and a blast carries
+      // the player several metres while airborne — landing on a stale height sank them).
+      const _psGroundAt = () => {
+        const _gy = playerControls?.resolveGroundY?.(
+          playerModel.position.x, playerModel.position.y + 0.6, playerModel.position.z,
+          { includeSolidHit: false }
+        )?.groundY;
+        return Number.isFinite(_gy) ? _gy : (_psGroundY ?? playerModel.position.y);
+      };
+      if (_psJumpVelY === 0 && !window.phoneSwordAirborne) _psGroundY = playerModel.position.y;
       if (window.phoneSwordJumpPressed) {
         window.phoneSwordJumpPressed = false;
         if (playerModel.position.y <= _psGroundY + 0.05) {
@@ -16689,6 +16699,7 @@ async function initCore(runtimeContext) {
             z: playerModel.position.z
           });
         }
+        _psGroundY = _psGroundAt();
         if (playerModel.position.y <= _psGroundY) {
           playerModel.position.y = _psGroundY;
           playerControls.playerY = _psGroundY;
