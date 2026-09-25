@@ -31,6 +31,7 @@ const MANA_POTION_ITEM_ID = 'mana_potion';
 const HEART_UPGRADE_ITEM_ID = 'heart_upgrade';
 const SHIELD_UPGRADE_ITEM_ID = 'shield_upgrade';
 const BUBBLE_ITEM_ID = 'bubble';
+const SHOWDOWN_BOMB_ITEM_ID = 'showdown_bomb';
 
 const BASE_MERCHANT_ITEMS = {
   iceGun: { name: 'Ice Gun', price: 30, count: 1, icon: '/assets/ui/items/icegun.png' },
@@ -53,9 +54,10 @@ const BASE_MERCHANT_ITEMS = {
   // Sword Showdown upgrades — never sell out, applied immediately via appState.applyShopUpgrade
   [HEART_UPGRADE_ITEM_ID]: { name: 'Heart', price: 350, count: 1, unlimited: true, showdownOnly: true, description: '+1 max health segment' },
   [SHIELD_UPGRADE_ITEM_ID]: { name: 'Shield Upgrade', price: 150, count: 1, unlimited: true, showdownOnly: true, description: '+10 durability for all shields' },
-  [BUBBLE_ITEM_ID]: { name: 'Bubble', price: 30, count: 1, unlimited: true, showdownOnly: true, description: '10s protective bubble (tap 🫧 to use)' }
+  [BUBBLE_ITEM_ID]: { name: 'Bubble', price: 30, count: 1, unlimited: true, showdownOnly: true, description: '10s protective bubble (tap 🫧 to use)' },
+  [SHOWDOWN_BOMB_ITEM_ID]: { name: 'Bomb', price: 20, count: 1, unlimited: true, showdownOnly: true, icon: '/assets/ui/items/bomb.png', description: 'Throwable bomb (tap 💣 to throw)' }
 };
-const SHOP_UPGRADE_ITEM_IDS = new Set([HEART_UPGRADE_ITEM_ID, SHIELD_UPGRADE_ITEM_ID, BUBBLE_ITEM_ID]);
+const SHOP_UPGRADE_ITEM_IDS = new Set([HEART_UPGRADE_ITEM_ID, SHIELD_UPGRADE_ITEM_ID, BUBBLE_ITEM_ID, SHOWDOWN_BOMB_ITEM_ID]);
 
 const merchantItemCatalog = (() => {
   const catalog = { ...BASE_MERCHANT_ITEMS };

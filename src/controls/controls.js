@@ -810,6 +810,24 @@ export class PlayerControls {
         if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
         onBubblePress(e);
       });
+
+      // Bombs (bought in the shop): throws one forward; label/count kept fresh by the game loop
+      this.psBombBtn = createButton('ps-bomb-btn', 'mobile-primary-action ps-bomb-btn', `💣 ${appStateForBubble?.getBombCount?.() ?? 0}`);
+      this.psBombBtn.setAttribute('aria-label', 'Throw a bomb');
+      const onBombPress = (event) => {
+        if (!this.enabled) return;
+        const appState = appContext.uiState.appState ?? window.appState;
+        appState?.throwBomb?.();
+        if (event) this.safePreventDefault(event);
+      };
+      this.psBombBtn.addEventListener('touchstart', (e) => {
+        this.lastTouchButtonTime = performance.now();
+        onBombPress(e);
+      }, { passive: false });
+      this.psBombBtn.addEventListener('mousedown', (e) => {
+        if ((performance.now() - this.lastTouchButtonTime) <= 550) return;
+        onBombPress(e);
+      });
     }
 
     this.mobileEquipButtons = [];
@@ -1538,6 +1556,7 @@ export class PlayerControls {
       this.psWeaponBtn1,
       this.psWeaponBtn2,
       this.psBubbleBtn,
+      this.psBombBtn,
       ...(this.mobileEquipButtons || []),
       ...(this.mobileItemActionButtons || [])
     ].forEach(clearButtonPos);
@@ -1557,6 +1576,8 @@ export class PlayerControls {
       }
       // Bubble sits in the free slot above Block/Fire, clear of the weapon buttons
       this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: 1 });
+      // Bomb sits above the bubble (the jump/gyro column and weapon buttons stay clear)
+      this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: 2 });
       return;
     }
 

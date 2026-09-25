@@ -48,12 +48,12 @@ const THROW_CLIP_TIMEOUT_MS = 2500; // throw anyway if the clip hasn't reached t
 const BOMB_HAND         = 'left';
 const BLAST_STUN_MS     = 1400; // flying-back clip when caught in another thrower's blast
 const BOMB_SPEED        = 6;    // m/s initial horizontal speed (slow, readable lob)
-const BOMB_GRAVITY      = 8;    // m/s² downward acceleration (low → floaty arc)
+export const BOMB_GRAVITY = 8;  // m/s² downward acceleration (low → floaty arc)
 const BOMB_SCALE        = 0.55;
 const BOMB_EXPLOSION_RADIUS = 2.8;  // m — blast radius for player damage
 const BOMB_EXPLOSION_DAMAGE = 3;    // health segments
 const BOMB_ENEMY_DAMAGE     = 1;    // hearts taken from enemies caught in the blast
-const BOMB_LIFETIME_MS  = 8000;
+export const BOMB_LIFETIME_MS = 8000;
 
 // Deflect: foam sword hits the bomb in this radius
 const DEFLECT_RADIUS    = 0.7;  // m
@@ -83,13 +83,90 @@ function _blastFalloff(dist) {
 let _bombGltfPromise = null;
 const _gltfLoader = new GLTFLoader();
 
-function getBombGLTF() {
+export function getBombGLTF() {
   if (!_bombGltfPromise) {
     _bombGltfPromise = new Promise((resolve, reject) =>
       _gltfLoader.load('/assets/props/bomb.glb', resolve, undefined, reject)
     );
   }
   return _bombGltfPromise;
+}
+
+// ─── shared bomb helpers (also used by the player's bombs, combat/playerBomb.js) ──
+
+/** Bomb mesh: the GLB if loaded, else a bright orange sphere fallback. */
+export function createBombMesh(gltf = null) {
+  if (gltf) {
+    const bombScene = gltf.scene.clone(true);
+    bombScene.scale.setScalar(BOMB_SCALE);
+    const group = new THREE.Group();
+    group.add(bombScene);
+    return group;
+  }
+  const geo = new THREE.SphereGeometry(0.18, 10, 8);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0x331100, roughness: 0.6 });
+  return new THREE.Mesh(geo, mat);
+}
+
+/** Held (in-hand) bomb: same size as in flight, so no pop on release. Starts hidden. */
+export function createHeldBombMesh(gltf) {
+  const held = gltf.scene.clone(true);
+  held.scale.setScalar(BOMB_SCALE);
+  held.name = 'HeldBomb';
+  held.visible = false;
+  held.traverse(obj => { if (obj.isMesh) obj.castShadow = true; });
+  return held;
+}
+
+/**
+ * Initial velocity of a lob from `origin` landing on `targetPos`: fixed horizontal
+ * speed, vertical speed solved for the flight time under BOMB_GRAVITY.
+ */
+export function computeBombLobVelocity(origin, targetPos, out = new THREE.Vector3()) {
+  const dx = targetPos.x - origin.x;
+  const dz = targetPos.z - origin.z;
+  const horizDist = Math.sqrt(dx * dx + dz * dz);
+  const inv = 1 / Math.max(0.001, horizDist);
+  const tFlight = Math.max(0.001, horizDist / BOMB_SPEED);
+  const vy = (targetPos.y - origin.y + 0.5 * BOMB_GRAVITY * tFlight * tFlight) / tFlight;
+  return out.set(dx * inv * BOMB_SPEED, vy, dz * inv * BOMB_SPEED);
+}
+
+/** Removes a bomb mesh from the scene and frees its (cloned) resources. */
+export function disposeBombMesh(mesh) {
+  if (mesh?.parent) mesh.parent.remove(mesh);
+  mesh?.traverse(obj => {
+    if (!obj.isMesh) return;
+    obj.geometry?.dispose?.();
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(m => m?.dispose?.());
+  });
+}
+
+/** Fireball / smoke / shockwave visual + boom on explosion. */
+export function spawnBombExplosion(scene, pos) {
+  const groundY = getTerrainHeight(pos.x, pos.z);
+  spawnExplosion(scene, pos, { groundY: Number.isFinite(groundY) ? groundY : pos.y });
+  window.audioManager?.playSFX?.('SFX/Explosions/Explosion 1.ogg', 0.75, {
+    cooldownKey: 'bomb-explode', cooldownMs: 50
+  });
+}
+
+/** Every enemy in `targets` (except `exclude`) inside the blast radius loses a heart and is thrown back. */
+export function blastEnemiesAt(pos, targets, exclude = null) {
+  if (!targets?.length) return;
+  for (const enemy of targets) {
+    if (!enemy || enemy === exclude || enemy.isDead || !enemy.group) continue;
+    const dist = pos.distanceTo(enemy.group.position);
+    if (dist > BOMB_EXPLOSION_RADIUS) continue;
+    const dir = _blastDirection(pos, enemy.group.position);
+    enemy.applyDamage?.(BOMB_ENEMY_DAMAGE);
+    if (typeof enemy.applyBlastKnockback === 'function') {
+      enemy.applyBlastKnockback({ direction: dir, falloff: _blastFalloff(dist) });
+    } else {
+      enemy.applyDirectKnockback?.({ direction: dir, horizSpeed: 7 * _blastFalloff(dist), upVelocity: 3 });
+    }
+  }
 }
 
 // ─── BombThrowerEnemy ────────────────────────────────────────────────────────
@@ -165,11 +242,7 @@ export class BombThrowerEnemy {
   // Bomb in the right hand; its position is snapped to the palm every frame
   _buildHeldBomb() {
     if (this._heldBomb || this._destroyed || !this._bombGltf) return;
-    const held = this._bombGltf.scene.clone(true);
-    held.scale.setScalar(BOMB_SCALE); // same size as in flight, so no pop on release
-    held.name = 'HeldBomb';
-    held.visible = false; // shown once it's on the palm
-    held.traverse(obj => { if (obj.isMesh) obj.castShadow = true; });
+    const held = createHeldBombMesh(this._bombGltf); // shown once it's on the palm
     this.group.add(held);
     this._heldBomb = held;
     this._heldBombReady = true;
@@ -259,36 +332,8 @@ export class BombThrowerEnemy {
       origin.y += CAPSULE_HEIGHT * 0.75;
     }
 
-    // Compute initial velocity: aim for apex 1.5 m above midpoint, solve for vy.
-    const dx = targetPos.x - origin.x;
-    const dz = targetPos.z - origin.z;
-    const horizDist = Math.sqrt(dx * dx + dz * dz);
-    const horizDir  = new THREE.Vector3(dx / Math.max(0.001, horizDist), 0, dz / Math.max(0.001, horizDist));
-    // Time of flight estimate based on horizontal speed
-    const tFlight = horizDist / BOMB_SPEED;
-    const dy = targetPos.y - origin.y;
-    const vy = (dy + 0.5 * BOMB_GRAVITY * tFlight * tFlight) / Math.max(0.001, tFlight);
-    const vel = new THREE.Vector3(
-      horizDir.x * BOMB_SPEED,
-      vy,
-      horizDir.z * BOMB_SPEED
-    );
-
-    // Visual mesh: GLB if loaded, else bright orange sphere fallback
-    let mesh;
-    if (this._bombGltf) {
-      const gltf = this._bombGltf;
-      // Clone materials so each bomb can be independently manipulated
-      const bombScene = gltf.scene.clone(true);
-      bombScene.scale.setScalar(BOMB_SCALE);
-      const group = new THREE.Group();
-      group.add(bombScene);
-      mesh = group;
-    } else {
-      const geo = new THREE.SphereGeometry(0.18, 10, 8);
-      const mat = new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0x331100, roughness: 0.6 });
-      mesh = new THREE.Mesh(geo, mat);
-    }
+    const vel = computeBombLobVelocity(origin, targetPos);
+    const mesh = createBombMesh(this._bombGltf);
     mesh.name = 'EnemyBomb';
     mesh.position.copy(origin);
     this.scene.add(mesh);
@@ -313,13 +358,7 @@ export class BombThrowerEnemy {
   }
 
   _removeBomb(bomb) {
-    if (bomb.mesh?.parent) bomb.mesh.parent.remove(bomb.mesh);
-    bomb.mesh?.traverse(obj => {
-      if (!obj.isMesh) return;
-      obj.geometry?.dispose?.();
-      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
-      mats.forEach(m => m?.dispose?.());
-    });
+    disposeBombMesh(bomb.mesh);
     // Remove from local array
     const idx = this._bombs.indexOf(bomb);
     if (idx !== -1) this._bombs.splice(idx, 1);
@@ -328,15 +367,6 @@ export class BombThrowerEnemy {
       const gi = window._enemyBombs.indexOf(bomb);
       if (gi !== -1) window._enemyBombs.splice(gi, 1);
     }
-  }
-
-  // Fireball / smoke / shockwave visual + boom on explosion
-  _spawnExplosion(pos) {
-    const groundY = getTerrainHeight(pos.x, pos.z);
-    spawnExplosion(this.scene, pos, { groundY: Number.isFinite(groundY) ? groundY : pos.y });
-    window.audioManager?.playSFX?.('SFX/Explosions/Explosion 1.ogg', 0.75, {
-      cooldownKey: 'bomb-explode', cooldownMs: 50
-    });
   }
 
   // ─── update (called every frame) ────────────────────────────────────────────
@@ -572,7 +602,7 @@ export class BombThrowerEnemy {
   }
 
   _explodeBomb(bomb, pos, targetModel, targetControls, hitThrower = false) {
-    this._spawnExplosion(pos);
+    spawnBombExplosion(this.scene, pos);
 
     if (hitThrower && !this.isDead) {
       // Deflected bomb explodes on the thrower — instant kill
@@ -602,20 +632,7 @@ export class BombThrowerEnemy {
 
   // Every other enemy inside the blast radius loses a heart and is thrown back.
   _blastEnemies(pos) {
-    const targets = this._getBlastTargets?.();
-    if (!targets?.length) return;
-    for (const enemy of targets) {
-      if (!enemy || enemy === this || enemy.isDead || !enemy.group) continue;
-      const dist = pos.distanceTo(enemy.group.position);
-      if (dist > BOMB_EXPLOSION_RADIUS) continue;
-      const dir = _blastDirection(pos, enemy.group.position);
-      enemy.applyDamage?.(BOMB_ENEMY_DAMAGE);
-      if (typeof enemy.applyBlastKnockback === 'function') {
-        enemy.applyBlastKnockback({ direction: dir, falloff: _blastFalloff(dist) });
-      } else {
-        enemy.applyDirectKnockback?.({ direction: dir, horizSpeed: 7 * _blastFalloff(dist), upVelocity: 3 });
-      }
-    }
+    blastEnemiesAt(pos, this._getBlastTargets?.(), this);
   }
 
   // ─── public interface ────────────────────────────────────────────────────────

@@ -46,7 +46,7 @@ src/
   player/       stats, health, achievements, home, auth
   npc/          friendlyNpcManager, quest, persistence
   map/          osmClient, osmGeoJson, tileCache, location, spawnUtils
-  combat/       knockback, pickupSpatialGrid, bloodEffect (damage blood spray), explosionEffect (bomb explosion + smoke)
+  combat/       knockback, pickupSpatialGrid, bloodEffect (damage blood spray), explosionEffect (bomb explosion + smoke), playerBomb (Sword Showdown player bombs)
   multiplayer/  peerConnection
   audio/        audioManager
   characters/   CharacterBase, PlayerCharacter, EnemyPlayer, MonsterCharacter, FriendlyCharacter, merchant
@@ -82,7 +82,8 @@ src/
 | Audio | `src/audio/audioManager.js` + `public/assets/audio/` |
 | New 3D prop | GLB → `public/assets/props/` + load in relevant `src/environment/` file |
 | Serverless API | `api/llama.js` or `api/overpass.js` |
-| Sword Showdown shop upgrades (heart, shield upgrade, bubble) | Catalog + purchase in `src/characters/merchant.js`; effects in `appState.applyShopUpgrade` and the bubble system (`activatePlayerBubble`) in `src/bootstrap/bootstrapGameApp.js`; bubble button in `src/controls/controls.js` |
+| Sword Showdown player bombs (💣 button, throw clip, re-equip) | `src/combat/playerBomb.js`; `throwPlayerBomb`/`updatePlayerBombs` in `src/bootstrap/bootstrapGameApp.js`; `psBombBtn` in `src/controls/controls.js` |
+| Sword Showdown shop upgrades (heart, shield upgrade, bubble, bomb) | Catalog + purchase in `src/characters/merchant.js`; effects in `appState.applyShopUpgrade` and the bubble system (`activatePlayerBubble`) in `src/bootstrap/bootstrapGameApp.js`; bubble button in `src/controls/controls.js` |
 | Terrain stamp debugging | `src/environment/terrainHeight.js` + `docs/terrain-stamp-regression-checklist.md` |
 
 ---
