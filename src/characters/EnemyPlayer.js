@@ -41,25 +41,54 @@ const HIT_COOLDOWN_MS       = 1200;
 const SWORD_TIP_LOCAL = new THREE.Vector3(0, 0, 0.69);
 const SWORD_GUARD_LOCAL = new THREE.Vector3(0, 0, 0);
 
-// ── Swing presets: hold position + swing target (body-local space) ────────────
-// Each enemy randomly picks one; holds 2-4s then swings to the target quickly.
-const SWING_PRESETS = [
-  { hold: new THREE.Vector3( 0.0,  1.55, 0.25), swing: new THREE.Vector3( 0.15, 0.45, 0.55) }, // straight up → slam down
-  { hold: new THREE.Vector3(-0.9,  0.90, 0.30), swing: new THREE.Vector3( 0.85, 0.85, 0.35) }, // far left → right sweep
-  { hold: new THREE.Vector3( 0.80, 1.25, 0.25), swing: new THREE.Vector3(-0.65, 0.80, 0.38) }, // upper-right → lower-left
-  { hold: new THREE.Vector3(-0.65, 1.30, 0.25), swing: new THREE.Vector3( 0.70, 0.75, 0.40) }, // upper-left → lower-right
-  { hold: new THREE.Vector3( 0.90, 0.80, 0.35), swing: new THREE.Vector3(-0.50, 1.20, 0.30) }, // right → upper-left
-];
+// ── Blade poses (body-local space; +Z = forward, +Y = up) ─────────────────────
+// Blade directions are unit vectors; the sword quaternion is built so its +Z (blade)
+// points along them. See bladeQuat() below.
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+const N = (x, y, z) => new THREE.Vector3(x, y, z).normalize();
 
-// ── Block hand positions (body-local) ─────────────────────────────────────────
-// Each enemy randomly picks one when entering a block phase.
-// Z values are low (close to body) to mirror the player's blocking stance.
-const BLOCK_HAND_PRESETS = [
-  new THREE.Vector3( 0.10, 1.00, 0.22),  // center-high guard
-  new THREE.Vector3(-0.05, 1.05, 0.22),  // slight left guard
-  new THREE.Vector3( 0.20, 0.90, 0.20),  // right mid-guard
-  new THREE.Vector3( 0.05, 1.10, 0.20),  // high center guard
+// Swings sweep the blade in an arc from one extreme side, through the front of the body
+// (where it hits), to the opposite side. `from` is the wound-up blade direction, `mid` the
+// direction as it passes in front, `to` the follow-through. The hand rides the same arc
+// around SWING_PIVOT, so the whole sword sweeps rather than poking forward.
+const SWING_PIVOT = V(0, 0.9, 0.18);
+const SWING_REACH = 0.38;
+const SWING_PRESETS = [
+  { from: N( 0.15,  1.0,  -0.35), mid: N( 0.0,  0.10, 1), to: N(-0.10, -0.85, 0.45) }, // overhead → slam down
+  { from: N( 1.0,   0.15, -0.25), mid: N( 0.0, -0.05, 1), to: N(-1.0,  -0.10, 0.15) }, // right → left sweep
+  { from: N(-1.0,   0.15, -0.25), mid: N( 0.0, -0.05, 1), to: N( 1.0,  -0.10, 0.15) }, // left → right sweep
+  { from: N( 0.75,  0.75, -0.20), mid: N( 0.0,  0.0,  1), to: N(-0.70, -0.60, 0.20) }, // upper-right → lower-left
+  { from: N(-0.75,  0.75, -0.20), mid: N( 0.0,  0.0,  1), to: N( 0.70, -0.60, 0.20) }, // upper-left → lower-right
+  { from: N( 0.85, -0.45,  0.05), mid: N( 0.0,  0.10, 1), to: N(-0.70,  0.70, 0.0 ) }, // low-right → upper-left rising
 ];
+// Roll reference for each swing: the normal of its swing plane, so the blade keeps a
+// constant edge orientation through the arc.
+for (const p of SWING_PRESETS) {
+  p.flat = new THREE.Vector3().crossVectors(p.from, p.mid)
+    .add(new THREE.Vector3().crossVectors(p.mid, p.to)).normalize();
+}
+
+// ── Block poses: hand position + blade direction (body-local) ─────────────────
+// The blade always lies across the body — vertical, horizontal or diagonal — never
+// pointing out at the opponent. Each enemy randomly picks one when entering a block.
+const BLOCK_PRESETS = [
+  { hand: V( 0.12, 0.85, 0.28), dir: N( 0.0,  1.0, 0.08) }, // vertical, center
+  { hand: V( 0.30, 1.10, 0.30), dir: N(-1.0,  0.05, 0.05) }, // horizontal, high (across face)
+  { hand: V( 0.30, 0.85, 0.30), dir: N(-1.0,  0.0,  0.05) }, // horizontal, mid (across chest)
+  { hand: V( 0.25, 0.80, 0.30), dir: N(-0.7,  0.7,  0.05) }, // diagonal, rising to the left
+  { hand: V(-0.20, 0.80, 0.30), dir: N( 0.7,  0.7,  0.05) }, // diagonal, rising to the right
+];
+const BLOCK_FLAT_REF = V(0, 0, 1);
+
+// ── Idle pose: sword held forward, tip tilted slightly up; neither blocking nor attacking
+const IDLE_HAND      = V(0.12, 0.80, 0.30);
+const IDLE_BLADE_DIR = N(0.05, 0.35, 1);
+const IDLE_FLAT_REF  = V(1, 0, 0);
+
+// Attack-loop timing (seconds)
+const SWING_WINDUP_MIN = 0.45, SWING_WINDUP_RAND = 0.45; // wind-up before a swing
+const SWING_EXEC_MIN   = 0.32, SWING_EXEC_RAND   = 0.10; // the swing itself
+const SWING_END_HOLD   = 2.0;                            // follow-through hold
 
 // Trail rendering for sword swings
 const TRAIL_DURATION_MS  = 380;  // how long trail history is kept (ms)
@@ -101,8 +130,36 @@ const _tmpV    = new THREE.Vector3();
 const _tmpQ    = new THREE.Quaternion();
 const _swordTipWorld  = new THREE.Vector3();
 const _swordGuardWorld = new THREE.Vector3();
-const _fwdAxis = new THREE.Vector3(0, 0, 1);
-const _handVelDir = new THREE.Vector3();
+const _bladeDir = new THREE.Vector3();
+const _upAxis  = new THREE.Vector3(0, 1, 0);
+const _bladeX  = new THREE.Vector3();
+const _bladeY  = new THREE.Vector3();
+const _bladeM  = new THREE.Matrix4();
+
+/** Body-local quaternion whose +Z (blade) points along `dir`; `flatRef` fixes the roll. */
+function bladeQuat(dir, flatRef, out) {
+  _bladeY.crossVectors(dir, flatRef);
+  if (_bladeY.lengthSq() < 1e-6) _bladeY.crossVectors(dir, _upAxis);
+  _bladeY.normalize();
+  _bladeX.crossVectors(_bladeY, dir);
+  _bladeM.makeBasis(_bladeX, _bladeY, dir);
+  return out.setFromRotationMatrix(_bladeM);
+}
+
+/** Blade direction at progress `u` (0..1) of a swing: quadratic arc from → mid → to. */
+function swingBladeDir(preset, u, out) {
+  const a = (1 - u) * (1 - u), b = 2 * u * (1 - u), c = u * u;
+  return out.set(0, 0, 0)
+    .addScaledVector(preset.from, a)
+    .addScaledVector(preset.mid, b)
+    .addScaledVector(preset.to, c)
+    .normalize();
+}
+
+/** Ease-in-out used for swing progress. */
+function easeSwing(p) {
+  return p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p;
+}
 
 // ─── EnemyPlayer ─────────────────────────────────────────────────────────────
 
@@ -130,19 +187,17 @@ export class EnemyPlayer {
     this._aiState      = 'chase';  // 'chase' | 'attack' | 'backoff' | 'hold'
 
     // ── Attack phase state machine ──────────────────────────────────────────
-    // Phases: 'decide' | 'block' | 'swing_hold' | 'swing_execute'
+    // Phases: 'decide' | 'block' | 'idle' | 'swing_hold' | 'swing_execute' | 'swing_end_hold'
     this._attackPhase    = 'decide';
     this._attackPhaseT   = 0;
     this._attackPhaseDur = 0;
 
     // Block state
-    this._blockBasePos = new THREE.Vector3();
+    this._blockPreset  = BLOCK_PRESETS[0];
     this._blockSeed    = Math.random() * 100;  // unique wobble offset per enemy
 
     // Swing state
     this._swingPreset    = null;          // chosen SWING_PRESETS entry
-    this._swingStartR    = new THREE.Vector3(); // hand position at swing start
-    this._swingStartSwordQ = new THREE.Quaternion(); // sword quaternion captured at swing start
 
     // Trail state (sampled during swing_execute, fades afterwards)
     this._trailPoints    = [];            // { pos: THREE.Vector3, t: number }[]
@@ -548,26 +603,30 @@ export class EnemyPlayer {
     this._updateTrailMeshes(Date.now());
 
     // ── Sword hit detection ────────────────────────────────────────────────
-    if (this._aiState === 'attack' && targetModel) {
+    // Only the swing itself can hurt — blocking/idle/wind-up swords never poke the player.
+    if (this._aiState === 'attack' && this._attackPhase === 'swing_execute' && targetModel) {
       this._checkSwordHitOnTarget(targetModel, targetControls, shieldActive);
     }
   }
 
   // ─── internal helpers ──────────────────────────────────────────────────────
 
-  /** Pick next attack phase randomly: 60% block, 40% swing. */
+  /** Pick next attack phase randomly: 40% block, 25% idle, 35% swing. */
   _decideNextPhase() {
-    if (Math.random() < 0.60) {
-      // Enter block
+    const r = Math.random();
+    if (r < 0.40) {
       this._attackPhase    = 'block';
       this._attackPhaseDur = 1.5 + Math.random() * 2.5;
       this._blockSeed      = Math.random() * 100;
-      const preset = BLOCK_HAND_PRESETS[Math.floor(Math.random() * BLOCK_HAND_PRESETS.length)];
-      this._blockBasePos.copy(preset);
+      this._blockPreset    = BLOCK_PRESETS[Math.floor(Math.random() * BLOCK_PRESETS.length)];
+    } else if (r < 0.65) {
+      this._attackPhase    = 'idle';
+      this._attackPhaseDur = 1.0 + Math.random() * 1.5;
+      this._blockSeed      = Math.random() * 100;
     } else {
-      // Enter swing hold
+      // Wind up for a swing
       this._attackPhase    = 'swing_hold';
-      this._attackPhaseDur = 2.0 + Math.random() * 2.0;
+      this._attackPhaseDur = SWING_WINDUP_MIN + Math.random() * SWING_WINDUP_RAND;
       this._swingPreset    = SWING_PRESETS[Math.floor(Math.random() * SWING_PRESETS.length)];
     }
     this._attackPhaseT = 0;
@@ -586,31 +645,21 @@ export class EnemyPlayer {
       // ── Phase transitions ────────────────────────────────────────────────
       if (this._attackPhase === 'decide' || this._attackPhaseT >= this._attackPhaseDur) {
         if (this._attackPhase === 'swing_hold') {
-          // Move to swing execute
+          // Wind-up done — swing across
           this._attackPhase    = 'swing_execute';
-          this._attackPhaseDur = 0.32 + Math.random() * 0.10;
+          this._attackPhaseDur = SWING_EXEC_MIN + Math.random() * SWING_EXEC_RAND;
           this._attackPhaseT   = 0;
-          // Record right hand position at start of swing for lerping
-          this._swingStartR.copy(this._rightHandGroup.position);
-          // Capture sword quaternion so swing rotation starts from current pose
-          this._swingStartSwordQ.copy(this._swordQuaternion);
           // Clear old trail points, start fresh
           this._trailPoints    = [];
           this._trailFadeStart = -1;
         } else if (this._attackPhase === 'swing_execute') {
-          // Swing done — hold final pose for 2s, then fade trail and decide next
+          // Swing done — hold the follow-through, then fade trail and decide next
           this._trailFadeStart = Date.now();
           this._attackPhase    = 'swing_end_hold';
-          this._attackPhaseDur = 2.0;
+          this._attackPhaseDur = SWING_END_HOLD;
           this._attackPhaseT   = 0;
-          // Capture the final sword quaternion so we can hold it exactly
-          this._swingEndSwordQ = this._swordQuaternion.clone();
-          // Capture final hand position (swing target) to hold
-          this._swingEndHandPos = new THREE.Vector3(
-            this._swingPreset.swing.x, this._swingPreset.swing.y, this._swingPreset.swing.z
-          );
         } else {
-          // block or decide
+          // block, idle, follow-through or decide
           this._decideNextPhase();
         }
       }
@@ -621,53 +670,39 @@ export class EnemyPlayer {
 
       switch (this._attackPhase) {
 
-        case 'block': {
+        case 'block':
+        case 'idle': {
           // Natural wobble: two overlapping sin waves at different frequencies
+          const base = this._attackPhase === 'block' ? this._blockPreset.hand : IDLE_HAND;
           const wx = Math.sin(t * 3.1 + this._blockSeed) * 0.048
                    + Math.sin(t * 1.9 + this._blockSeed * 0.5) * 0.022;
           const wy = Math.sin(t * 2.4 + this._blockSeed * 0.7) * 0.035
                    + Math.sin(t * 4.3 + this._blockSeed * 1.3) * 0.018;
-          this._handTargetR.set(
-            this._blockBasePos.x + wx,
-            this._blockBasePos.y + wy,
-            this._blockBasePos.z
-          );
+          const k = this._attackPhase === 'block' ? 1 : 0.6;
+          this._handTargetR.set(base.x + wx * k, base.y + wy * k, base.z);
           break;
         }
 
         case 'swing_hold': {
-          const hold = this._swingPreset.hold;
-          // Subtle tension wobble while winding up
-          const wob = Math.sin(t * 5.0) * 0.025;
-          this._handTargetR.set(hold.x + wob, hold.y, hold.z);
+          // Hand out at the wound-up extreme, with a subtle tension wobble
+          const wob = Math.sin(t * 5.0) * 0.02;
+          this._handTargetR.copy(SWING_PIVOT).addScaledVector(this._swingPreset.from, SWING_REACH);
+          this._handTargetR.x += wob;
           break;
         }
 
-        case 'swing_execute': {
-          // Ease-in-out from hold → swing target (fast!)
-          const eased = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p;
-          const hold  = this._swingPreset.hold;
-          const tgt   = this._swingPreset.swing;
-          this._handTargetR.set(
-            hold.x + (tgt.x - hold.x) * eased,
-            hold.y + (tgt.y - hold.y) * eased,
-            hold.z + (tgt.z - hold.z) * eased
-          );
-          // Sample trail tip this frame
-          this._sampleTrail(Date.now());
-          break;
-        }
-
+        case 'swing_execute':
         case 'swing_end_hold': {
-          // Hold at the final swing-target position for 2 seconds
-          if (this._swingEndHandPos) {
-            this._handTargetR.copy(this._swingEndHandPos);
-          }
+          // Hand rides the swing arc (held at the end of it during the follow-through)
+          const u = this._attackPhase === 'swing_execute' ? easeSwing(p) : 1;
+          swingBladeDir(this._swingPreset, u, _bladeDir);
+          this._handTargetR.copy(SWING_PIVOT).addScaledVector(_bladeDir, SWING_REACH);
+          if (this._attackPhase === 'swing_execute') this._sampleTrail(Date.now());
           break;
         }
 
         default:
-          this._handTargetR.set(0.4, 0.85, 0.35);
+          this._handTargetR.copy(IDLE_HAND);
       }
 
     } else {
@@ -748,52 +783,33 @@ export class EnemyPlayer {
       }
     }
 
-    if (this._attackPhase === 'block') {
-      // ── Block: hold sword upright close to body, matching player's block stance ─
+    const phase = this._attackPhase;
+    if (phase === 'block' || phase === 'idle') {
+      // ── Block: blade across the body (vertical / horizontal / diagonal).
+      // ── Idle: blade held forward, tip tilted slightly up. Both with a gentle sway.
+      const isBlock = phase === 'block';
+      const dir  = isBlock ? this._blockPreset.dir : IDLE_BLADE_DIR;
+      const flat = isBlock ? BLOCK_FLAT_REF : IDLE_FLAT_REF;
+      _bladeDir.set(
+        dir.x + Math.sin(this._attackPhaseT * 1.8 + this._blockSeed * 0.6) * 0.05,
+        dir.y + Math.sin(this._attackPhaseT * 2.7 + this._blockSeed) * 0.05,
+        dir.z
+      ).normalize();
       this.group.getWorldQuaternion(_rootQ);
-      // Blade points upward-forward with slight tilt, like the player holding in guard
-      const blockEuler = new THREE.Euler(
-        -Math.PI * 0.15 + Math.sin(this._attackPhaseT * 2.7 + this._blockSeed) * 0.04,
-         0,
-         Math.PI * 0.08 + Math.sin(this._attackPhaseT * 1.8 + this._blockSeed * 0.6) * 0.04,
-        'YXZ'
-      );
-      _tmpQ.setFromEuler(blockEuler);
-      _tmpQ.premultiply(_rootQ);
+      bladeQuat(_bladeDir, flat, _tmpQ).premultiply(_rootQ);
       this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-8 * dt));
 
-    } else if (this._attackPhase === 'swing_execute') {
-      // ── Swing: rotate blade in sync with hand motion using the same eased progress ──
+    } else if (phase === 'swing_hold' || phase === 'swing_execute' || phase === 'swing_end_hold') {
+      // ── Wind-up: blade out to the starting extreme. Swing: blade sweeps across the
+      // front of the body to the opposite extreme. Follow-through: held at the end.
+      const preset = this._swingPreset;
       const p = Math.min(this._attackPhaseT / Math.max(0.001, this._attackPhaseDur), 1);
-      const eased = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p;
-      const hold = this._swingPreset.hold;
-      const tgt  = this._swingPreset.swing;
-      // Swing direction in body-local space → world space
+      const u = phase === 'swing_hold' ? 0 : phase === 'swing_execute' ? easeSwing(p) : 1;
+      swingBladeDir(preset, u, _bladeDir);
       this.group.getWorldQuaternion(_rootQ);
-      _handVelDir.set(tgt.x - hold.x, tgt.y - hold.y, tgt.z - hold.z).normalize()
-        .applyQuaternion(_rootQ);
-      _tmpQ.setFromUnitVectors(_fwdAxis, _handVelDir);
-      this._swordQuaternion.slerpQuaternions(this._swingStartSwordQ, _tmpQ, eased);
-
-    } else if (this._attackPhase === 'swing_end_hold') {
-      // ── Post-swing: freeze sword at final swing position for 2 seconds ────
-      if (this._swingEndSwordQ) {
-        this._swordQuaternion.copy(this._swingEndSwordQ);
-      }
-
-    } else if (this._attackPhase === 'swing_hold') {
-      // ── Windup: tilt blade toward target direction before swing ───────────
-      this.group.getWorldQuaternion(_rootQ);
-      const hold = this._swingPreset?.hold ?? _tmpV;
-      const holdEuler = new THREE.Euler(
-        -Math.PI * 0.35,
-        Math.atan2(hold.x, hold.z + 0.001),
-        0,
-        'YXZ'
-      );
-      _tmpQ.setFromEuler(holdEuler);
-      _tmpQ.premultiply(_rootQ);
-      this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-6 * dt));
+      bladeQuat(_bladeDir, preset.flat, _tmpQ).premultiply(_rootQ);
+      const rate = phase === 'swing_hold' ? 10 : 30;
+      this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-rate * dt));
 
     } else {
       // Rest / chase orientation: blade points forward from hand
