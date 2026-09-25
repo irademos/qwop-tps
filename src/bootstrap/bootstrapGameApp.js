@@ -9359,7 +9359,8 @@ async function initCore(runtimeContext) {
     playerBloodOrigin.y += 0.85;
     const intensity = THREE.MathUtils.clamp((previousHealth - nextHealth) / 2, 0.6, 2);
     spawnBloodBurst(scene, playerBloodOrigin, { groundY, intensity });
-    audioManager?.playOuch('ouch-player');
+    if (nextHealth <= 0) audioManager?.playOuch('playerDeath', 'ouch-player');
+    else audioManager?.playOuch('player', 'ouch-player');
   };
 
   const getSleepRecoveryValue = (key, startValue, elapsedSeconds) => {

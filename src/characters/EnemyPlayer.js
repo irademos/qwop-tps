@@ -898,7 +898,7 @@ export class EnemyPlayer {
     this.hearts = Math.max(0, this.hearts - 1);
     this._updateHealthBarCanvas();
     spawnBloodBurst(this.scene, this.getCenterWorldPos().add(_bloodOffset), { groundY: this.group.position.y });
-    window.audioManager?.playOuch(`ouch-enemy-${this.group.uuid}`);
+    window.audioManager?.playEnemyOuch(`ouch-enemy-${this.group.uuid}`);
     if (this.hearts <= 0) {
       this._die();
       return true; // killing blow
