@@ -50,7 +50,7 @@ const N = (x, y, z) => new THREE.Vector3(x, y, z).normalize();
 // around SWING_PIVOT, so the whole sword sweeps rather than poking forward.
 const SWING_PIVOT = V(0, 0.9, 0.18);
 const SWING_REACH = 0.38;
-const SWING_PRESETS = [
+export const SWING_PRESETS = [
   { from: N( 0.15,  1.0,  -0.35), mid: N( 0.0,  0.10, 1), to: N(-0.10, -0.85, 0.45) }, // overhead → slam down
   { from: N( 1.0,   0.15, -0.25), mid: N( 0.0, -0.05, 1), to: N(-1.0,  -0.10, 0.15) }, // right → left sweep
   { from: N(-1.0,   0.15, -0.25), mid: N( 0.0, -0.05, 1), to: N( 1.0,  -0.10, 0.15) }, // left → right sweep
@@ -68,7 +68,7 @@ for (const p of SWING_PRESETS) {
 // ── Block poses: hand position + blade direction (body-local) ─────────────────
 // The blade always lies across the body — vertical, horizontal or diagonal — never
 // pointing out at the opponent. Each enemy randomly picks one when entering a block.
-const BLOCK_PRESETS = [
+export const BLOCK_PRESETS = [
   { hand: V( 0.12, 0.85, 0.28), dir: N( 0.0,  1.0, 0.08) }, // vertical, center
   { hand: V( 0.30, 1.10, 0.30), dir: N(-1.0,  0.05, 0.05) }, // horizontal, high (across face)
   { hand: V( 0.30, 0.85, 0.30), dir: N(-1.0,  0.0,  0.05) }, // horizontal, mid (across chest)
@@ -231,6 +231,17 @@ export class EnemyPlayer {
     this.speedScale = options.speedScale ?? 1.0;
     // Chance each attack-phase decision is a swing (rest is block/idle); set per stage
     this.swingChance = options.swingChance ?? 0.35;
+    // Never walks (tutorial targets); still faces the player and fights if the player comes close
+    this.stationary = !!options.stationary;
+    // Tutorial override of the attack AI (see _applyScript), or null for the normal loop:
+    //   { mode: 'passive' }                    – stands idle, never attacks
+    //   { mode: 'block', preset }              – holds BLOCK_PRESETS[preset] indefinitely
+    //   { mode: 'windup', preset, release }    – winds up SWING_PRESETS[preset] and only swings
+    //                                            when `release` is set (cleared on the swing;
+    //                                            `swings` counts them)
+    this.script = options.script ?? null;
+    // Times this sword has been knocked back (player block, shield, bubble or a blocked swing)
+    this.swordBounces = 0;
 
     this._swingT       = 0;
     this._lastHitTime  = 0;
@@ -580,7 +591,13 @@ export class EnemyPlayer {
       : Infinity;
 
     // ── AI state ───────────────────────────────────────────────────────────
-    if (attacksPaused && distToTarget < ATTACK_RANGE) {
+    const scriptMode = this.script?.mode;
+    if (scriptMode === 'passive') {
+      this._aiState = 'hold';
+    } else if (scriptMode === 'block' || scriptMode === 'windup') {
+      // Scripted stances ignore attack slots and bomb pauses
+      this._aiState = distToTarget < ATTACK_RANGE ? 'attack' : 'chase';
+    } else if (attacksPaused && distToTarget < ATTACK_RANGE) {
       this._aiState = 'hold';
     } else if (!allowAttack && distToTarget < BACKOFF_DIST) {
       this._aiState = 'backoff';
@@ -588,6 +605,9 @@ export class EnemyPlayer {
       this._aiState = 'attack';
     } else {
       this._aiState = 'chase';
+    }
+    if (this.stationary && (this._aiState === 'chase' || this._aiState === 'backoff')) {
+      this._aiState = 'hold';
     }
 
     // ── Movement ───────────────────────────────────────────────────────────
@@ -606,7 +626,7 @@ export class EnemyPlayer {
       // Paused: slow to a stop and wait
       const vel = this.rigidBody.linvel();
       this.rigidBody.setLinvel({ x: vel.x * 0.8, y: vel.y, z: vel.z * 0.8 }, true);
-    } else if (this._aiState === 'chase' || distToTarget > CHASE_RANGE * 1.5) {
+    } else if (!this.stationary && (this._aiState === 'chase' || distToTarget > CHASE_RANGE * 1.5)) {
       if (targetModel && distToTarget > CHASE_RANGE) {
         _toTarget.subVectors(targetModel.position, this.group.position);
         _toTarget.y = 0;
@@ -687,6 +707,38 @@ export class EnemyPlayer {
     this._attackPhaseT = 0;
   }
 
+  /** Pins the attack phase to the tutorial script's stance (see `this.script`). */
+  _applyScript() {
+    const script = this.script;
+    if (script?.mode === 'block') {
+      const preset = BLOCK_PRESETS[script.preset] ?? BLOCK_PRESETS[0];
+      if (this._attackPhase !== 'block' || this._blockPreset !== preset) {
+        this._attackPhase = 'block';
+        this._blockPreset = preset;
+        this._attackPhaseT = 0;
+      }
+      this._attackPhaseDur = Infinity;
+    } else if (script?.mode === 'windup') {
+      const preset = SWING_PRESETS[script.preset] ?? SWING_PRESETS[0];
+      const phase = this._attackPhase;
+      // Let a released swing play out, with a short follow-through
+      if (phase === 'swing_execute') return;
+      if (phase === 'swing_end_hold' && this._attackPhaseT < 1.0) return;
+      if (phase !== 'swing_hold' || this._swingPreset !== preset) {
+        this._attackPhase = 'swing_hold';
+        this._swingPreset = preset;
+        this._attackPhaseT = 0;
+      }
+      if (script.release) {
+        script.release = false;
+        script.swings = (script.swings || 0) + 1;
+        this._attackPhaseDur = 0; // swing on this frame's transition
+      } else {
+        this._attackPhaseDur = Infinity;
+      }
+    }
+  }
+
   _updateHandPositions(dt, distToTarget) {
     if (!this._handTargetR) {
       this._handTargetR = new THREE.Vector3();
@@ -696,6 +748,7 @@ export class EnemyPlayer {
 
     if (this._aiState === 'attack') {
       this._attackPhaseT += dt;
+      this._applyScript();
 
       // ── Phase transitions ────────────────────────────────────────────────
       if (this._attackPhase === 'decide' || this._attackPhaseT >= this._attackPhaseDur) {
@@ -818,6 +871,7 @@ export class EnemyPlayer {
   /** Called externally when the player's sword hits this sword. */
   applySwordBounce() {
     const dur = (window.phoneSwordSwingCfg?.enemyBounceHoldDur ?? 2.0) * 1000;
+    this.swordBounces += 1;
     this._bounceActive    = true;
     this._bounceEndTime   = Date.now() + dur;
     this._bounceInitDone  = false; // force recoil target rebuild on next _updateSword

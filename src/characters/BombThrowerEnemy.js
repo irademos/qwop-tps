@@ -194,6 +194,11 @@ export class BombThrowerEnemy {
     this.speedScale = options.speedScale ?? 1.0;
     this._getBlastTargets = options.getBlastTargets ?? null;
     this._onBlastPlayer   = options.onBlastPlayer ?? null;
+    // Tutorial controls: never walks; throws only while `throwsHeld` is false; `aimAt()`
+    // (if it returns a point) replaces aiming at the player
+    this.stationary = !!options.stationary;
+    this.throwsHeld = !!options.throwsHeld;
+    this.aimAt      = options.aimAt ?? null;
 
     // Throw state
     this._lastThrowTime = -Infinity;
@@ -426,7 +431,7 @@ export class BombThrowerEnemy {
     // ── Movement: kite at PREFERRED_DIST (stands still while throwing) ────
     let velX = 0, velZ = 0;
     const vel = this.rigidBody.linvel();
-    if (this._inWindup || this._glbCharacter?.actionActive) {
+    if (this._inWindup || this._glbCharacter?.actionActive || this.stationary) {
       // Plant the feet for the throw clip
     } else if (dist < PREFERRED_DIST - 1) {
       // Too close — retreat
@@ -445,7 +450,7 @@ export class BombThrowerEnemy {
     const cooldownReady = (now - this._lastThrowTime) >= THROW_COOLDOWN_MS;
     const inRange = dist >= THROW_RANGE_MIN && dist <= THROW_RANGE_MAX;
 
-    if (!this._inWindup && cooldownReady && inRange) {
+    if (!this._inWindup && cooldownReady && inRange && !this.throwsHeld) {
       // Start the throw: Throw.fbx when the character is loaded, else a timed windup
       this._inWindup  = true;
       this._windupEnd = now + THROW_WINDUP_MS;
@@ -476,7 +481,7 @@ export class BombThrowerEnemy {
         }
         const aimGroundY = getTerrainHeight(aimTarget.x, aimTarget.z);
         if (Number.isFinite(aimGroundY)) aimTarget.y = aimGroundY;
-        this._spawnBomb(aimTarget);
+        this._spawnBomb(this.aimAt?.() ?? aimTarget);
       }
     }
   }

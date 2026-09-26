@@ -10,5 +10,7 @@ export {
   savePhoneSwordStats,
   loadPhoneSwordStats,
   savePhoneSwordStage,
-  loadPhoneSwordStage
+  loadPhoneSwordStage,
+  hasCompletedTutorial,
+  saveTutorialCompleted
 } from '../player/playerProfile.js';
