@@ -2942,6 +2942,11 @@ async function initCore(runtimeContext) {
 
   // ── Horde-mode enemy players ───────────────────────────────────────────────
   const hordeEnemies = [];
+  // Stage difficulty: how many swordsmen may attack at once (1 through stage 7, then +1
+  // every 4 stages up to 4) and how often an attacking swordsman swings instead of
+  // blocking/idling (20% at stage 1, rising to 60% by stage 21).
+  const _psMaxAttackers = (stage) => (stage <= 7 ? 1 : Math.min(4, 2 + Math.floor((stage - 8) / 4)));
+  const _psSwingChance = (stage) => Math.min(0.6, 0.2 + Math.max(0, stage - 1) * 0.02);
   const _spawnHordeEnemy = (opts = {}) => {
     const angle = Math.random() * Math.PI * 2;
     const dist  = 5 + Math.random() * 4;
@@ -2961,6 +2966,7 @@ async function initCore(runtimeContext) {
         position: spawnPos,
         hearts: opts.hearts ?? 3,
         speedScale: opts.speedScale ?? 1.0,
+        swingChance: opts.swingChance ?? _psSwingChance(_psStage),
       });
       enemy._camera = camera;
     }
@@ -5121,9 +5127,10 @@ async function initCore(runtimeContext) {
       const _tipOffset = swordMesh ? new THREE.Vector3(0, 0, 0.69).applyQuaternion(swordMesh.quaternion) : null;
       const _tipWorld  = swordMesh ? swordMesh.position.clone().add(_tipOffset) : null;
 
-      // Determine which enemies get an attack slot (closest 1–2 alive enemies)
-      const _MAX_ATTACKERS = 2;
-      const _liveEnemies = hordeEnemies.filter(e => !e.isDead);
+      // Determine which swordsmen get an attack slot (closest alive ones, count by stage;
+      // bombers don't use slots)
+      const _MAX_ATTACKERS = _psMaxAttackers(_psStage);
+      const _liveEnemies = hordeEnemies.filter(e => !e.isDead && !(e instanceof BombThrowerEnemy));
       _liveEnemies.sort((a, b) =>
         a.group.position.distanceTo(playerModel.position) -
         b.group.position.distanceTo(playerModel.position)
