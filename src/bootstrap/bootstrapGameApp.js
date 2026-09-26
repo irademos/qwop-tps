@@ -3238,19 +3238,20 @@ async function initCore(runtimeContext) {
   const _psWinTitle     = document.getElementById('ps-win-title');
   const _psWinSub       = document.getElementById('ps-win-sub');
 
-  const _psEnemyCount = (stage) => 20 + Math.floor(stage * 0.6) + Math.floor(Math.random() * 6);
+  // Stage 1: exactly 15 enemies; +1 per stage after that (plus a little randomness), capped at 45.
+  const _psEnemyCount = (stage) => (stage <= 1
+    ? 15
+    : Math.min(45, 15 + (stage - 1) + Math.floor(Math.random() * 3)));
 
+  // Stage 1: every enemy has 1 heart. Each later stage raises the chance of 2+ hearts
+  // (+8%/stage, max 90%) and, from stage 5, of 3 hearts (+4%/stage, max 60%).
   const _psHeartsForStage = (stage) => {
+    const pTwoPlus = Math.min(0.9, Math.max(0, stage - 1) * 0.08);
+    const pThree = Math.min(0.6, Math.max(0, stage - 4) * 0.04);
     const r = Math.random();
-    if (stage <= 5) {
-      return r < 0.7 ? 1 : r < 0.92 ? 2 : 3;
-    } else if (stage <= 15) {
-      return r < 0.4 ? 1 : r < 0.78 ? 2 : 3;
-    } else if (stage <= 30) {
-      return r < 0.2 ? 1 : r < 0.55 ? 2 : 3;
-    } else {
-      return r < 0.1 ? 1 : r < 0.4 ? 2 : 3;
-    }
+    if (r < pThree) return 3;
+    if (r < pTwoPlus) return 2;
+    return 1;
   };
 
   // Steepest ground step (m per PS_PATH_SAMPLE_STEP) along a straight line from the player,
