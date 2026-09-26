@@ -102,7 +102,7 @@ export function updateProjectiles({
   multiplayer,
   hordeEnemies
 }) {
-  const localId = multiplayer?.getId?.();
+  const localId = multiplayer?.getId?.() ?? 'local'; // 'local' = single player (see PlayerControls)
   const getStrengthDamage = baseDamage => {
     if (typeof window.getPlayerStrength === 'function') {
       const strength = window.getPlayerStrength();
