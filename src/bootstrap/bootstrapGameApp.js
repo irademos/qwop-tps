@@ -2942,6 +2942,11 @@ async function initCore(runtimeContext) {
 
   // ── Horde-mode enemy players ───────────────────────────────────────────────
   const hordeEnemies = [];
+  // Stage difficulty: how many swordsmen may attack at once (1 through stage 7, then +1
+  // every 4 stages up to 4) and how often an attacking swordsman swings instead of
+  // blocking/idling (20% at stage 1, rising to 60% by stage 21).
+  const _psMaxAttackers = (stage) => (stage <= 7 ? 1 : Math.min(4, 2 + Math.floor((stage - 8) / 4)));
+  const _psSwingChance = (stage) => Math.min(0.6, 0.2 + Math.max(0, stage - 1) * 0.02);
   const _spawnHordeEnemy = (opts = {}) => {
     const angle = Math.random() * Math.PI * 2;
     const dist  = 5 + Math.random() * 4;
@@ -2961,6 +2966,7 @@ async function initCore(runtimeContext) {
         position: spawnPos,
         hearts: opts.hearts ?? 3,
         speedScale: opts.speedScale ?? 1.0,
+        swingChance: opts.swingChance ?? _psSwingChance(_psStage),
       });
       enemy._camera = camera;
     }
@@ -3232,19 +3238,20 @@ async function initCore(runtimeContext) {
   const _psWinTitle     = document.getElementById('ps-win-title');
   const _psWinSub       = document.getElementById('ps-win-sub');
 
-  const _psEnemyCount = (stage) => 20 + Math.floor(stage * 0.6) + Math.floor(Math.random() * 6);
+  // Stage 1: exactly 15 enemies; +1 per stage after that (plus a little randomness), capped at 45.
+  const _psEnemyCount = (stage) => (stage <= 1
+    ? 15
+    : Math.min(45, 15 + (stage - 1) + Math.floor(Math.random() * 3)));
 
+  // Stage 1: every enemy has 1 heart. Each later stage raises the chance of 2+ hearts
+  // (+8%/stage, max 90%) and, from stage 5, of 3 hearts (+4%/stage, max 60%).
   const _psHeartsForStage = (stage) => {
+    const pTwoPlus = Math.min(0.9, Math.max(0, stage - 1) * 0.08);
+    const pThree = Math.min(0.6, Math.max(0, stage - 4) * 0.04);
     const r = Math.random();
-    if (stage <= 5) {
-      return r < 0.7 ? 1 : r < 0.92 ? 2 : 3;
-    } else if (stage <= 15) {
-      return r < 0.4 ? 1 : r < 0.78 ? 2 : 3;
-    } else if (stage <= 30) {
-      return r < 0.2 ? 1 : r < 0.55 ? 2 : 3;
-    } else {
-      return r < 0.1 ? 1 : r < 0.4 ? 2 : 3;
-    }
+    if (r < pThree) return 3;
+    if (r < pTwoPlus) return 2;
+    return 1;
   };
 
   // Steepest ground step (m per PS_PATH_SAMPLE_STEP) along a straight line from the player,
@@ -5121,9 +5128,10 @@ async function initCore(runtimeContext) {
       const _tipOffset = swordMesh ? new THREE.Vector3(0, 0, 0.69).applyQuaternion(swordMesh.quaternion) : null;
       const _tipWorld  = swordMesh ? swordMesh.position.clone().add(_tipOffset) : null;
 
-      // Determine which enemies get an attack slot (closest 1–2 alive enemies)
-      const _MAX_ATTACKERS = 2;
-      const _liveEnemies = hordeEnemies.filter(e => !e.isDead);
+      // Determine which swordsmen get an attack slot (closest alive ones, count by stage;
+      // bombers don't use slots)
+      const _MAX_ATTACKERS = _psMaxAttackers(_psStage);
+      const _liveEnemies = hordeEnemies.filter(e => !e.isDead && !(e instanceof BombThrowerEnemy));
       _liveEnemies.sort((a, b) =>
         a.group.position.distanceTo(playerModel.position) -
         b.group.position.distanceTo(playerModel.position)

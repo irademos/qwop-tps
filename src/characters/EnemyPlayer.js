@@ -229,6 +229,8 @@ export class EnemyPlayer {
     this.maxHearts = initHearts;
     this.isDead    = false;
     this.speedScale = options.speedScale ?? 1.0;
+    // Chance each attack-phase decision is a swing (rest is block/idle); set per stage
+    this.swingChance = options.swingChance ?? 0.35;
 
     this._swingT       = 0;
     this._lastHitTime  = 0;
@@ -658,15 +660,20 @@ export class EnemyPlayer {
 
   // ─── internal helpers ──────────────────────────────────────────────────────
 
-  /** Pick next attack phase randomly: 40% block, 25% idle, 35% swing. */
+  /**
+   * Pick next attack phase randomly: `swingChance` swing, the rest split 40:25 between
+   * block and idle (default 0.35 → 40% block, 25% idle, 35% swing).
+   */
   _decideNextPhase() {
     const r = Math.random();
-    if (r < 0.40) {
+    const swing = Math.min(0.9, Math.max(0, this.swingChance));
+    const blockCut = (1 - swing) * (40 / 65);
+    if (r < blockCut) {
       this._attackPhase    = 'block';
       this._attackPhaseDur = 1.5 + Math.random() * 2.5;
       this._blockSeed      = Math.random() * 100;
       this._blockPreset    = BLOCK_PRESETS[Math.floor(Math.random() * BLOCK_PRESETS.length)];
-    } else if (r < 0.65) {
+    } else if (r < 1 - swing) {
       this._attackPhase    = 'idle';
       this._attackPhaseDur = 1.0 + Math.random() * 1.5;
       this._blockSeed      = Math.random() * 100;
