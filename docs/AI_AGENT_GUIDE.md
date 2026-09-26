@@ -53,6 +53,7 @@ src/
   controls/     PlayerControls (controls.js), merchantPanel (shop UI), settingsPanel
   features/     Lazy-load facades for code splitting (audio, combat, persistence, uiPanels, loadingState)
   items/        weapon.js + foamSword, shield, pistol + projectiles.js
+  tutorial/     showdownTutorial (scripted tutorial steps), tutorialOverlay (panel, arrows/bars, button ring)
   models/       playerModel, glbCharacterModel (GLB character + arm IK), fluffyCharacter.ts (Mixamo retarget + fur)
   physics/      rapierSafety
 ```
@@ -72,6 +73,7 @@ src/
 | World map / ground height | `public/glb_map/map.glb`; loaded in `bootstrapGameApp.js`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |
 | Firebase data shape | `src/player/playerProfile.js`, `src/characters/merchant.js` (room shop stock) |
 | Multiplayer protocol | `src/multiplayer/peerConnection.js`, `src/bootstrap/bootstrapGameApp.js` |
+| Start screen ("Start Game" = tutorial until `profiles/<key>/tutorialCompleted`; then Tutorial / Showdown) + Sword Showdown tutorial (QR setup, hit past blocks, block swings, deflect a bomb, coins/auto-buy/bomb throw, shield, bubble, gun; player can't die, every step skippable) | `createArcadeOverlay` (`chooseMode`, `showStartScreen`, `setModeHandler`) + `tutorialCtx` / `startTutorialMode` / `_resetForMenu` in `bootstrapGameApp.js`; steps in `src/tutorial/showdownTutorial.js`; panel/arrows/button ring in `src/tutorial/tutorialOverlay.js` (`.tutorial-*` in `styles.css`); enemy hooks `EnemyPlayer.script` / `stationary` / `swordBounces`, `BombThrowerEnemy.throwsHeld` / `aimAt` / `stationary`; flag via `saveTutorialCompleted` / `hasCompletedTutorial` in `src/player/playerProfile.js`; phone button ring = `highlight` in the phone `status` message (`public/phone-sword.html`) |
 | Audio | `src/audio/audioManager.js` + `public/assets/audio/` |
 | New 3D prop | GLB → `public/assets/props/` + load from `bootstrapGameApp.js` |
 | Serverless API | `api/turn-credentials.js` |
@@ -98,6 +100,8 @@ src/
 **Stages:** `_psPickPathAngle` picks the flattest direction, `_psBuildStage` places enemies and coins along it, and the player auto-walks between fights. Enemies live in the `hordeEnemies` array (historical name).
 
 **Character arms (GLB + IK):** Players and EnemyPlayers use `gemhorn_rigged.glb`. Mixamo FBX clips animate everything except the arm chains (Shoulder→Hand); each frame the arms are solved with a stretchy two-bone IK toward invisible "floating hand" groups, which are also the weapon attach points (marked with `userData.proceduralHand`). Frame order: `setMoving` → `animate` → `solveArm` per hand → `stepFluff`. Floating-hand labels are mirrored: `'right'` sits at local +X = the character's anatomical left arm. `playDeath()` plays the flying-back death clip once (arms included, IK off) until `revive()` — used by the local player on death/respawn and by EnemyPlayer (ragdoll stays on; dead-enemy knockback capped by `DEATH_KNOCKBACK_CAP` in `EnemyPlayer.js`). The Sword Showdown bomb thrower (`BombThrowerEnemy.js`) uses the same GLB with `armIK: false` (clips drive the arms): `playAction(glbCharacterConfig.throwClip)` plays `Throw.fbx` once and the bomb is released at `THROW_RELEASE_AT` of the clip; between throws a bomb is held on the anatomical right palm (`getPalmWorldPosition('left')`).
+
+**Start screen + tutorial:** "Start Game" runs the tutorial until `profiles/<key>/tutorialCompleted` is set; then the start screen offers Tutorial / Showdown (`profileResult.mode`, `arcadeOverlay.showStartScreen` / `setModeHandler`). `src/tutorial/showdownTutorial.js` scripts enemies via `EnemyPlayer.script` and the bomber's `throwsHeld` / `aimAt`, and reaches the game only through `tutorialCtx` in `bootstrapGameApp.js`.
 
 **Multiplayer star topology:** Firebase = signaling/presence. PeerJS WebRTC carries player presence and projectiles; the phone controller has its own PeerJS link. One host elected; all clients connect to host; host re-broadcasts.
 

@@ -102,6 +102,11 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
       }
     },
 
+    /** Bombs currently in flight. */
+    get activeCount() {
+      return bombs.length;
+    },
+
     /** Removes every bomb in flight without exploding (stage restart). */
     clear() {
       for (const bomb of bombs) disposeBombMesh(bomb.mesh);

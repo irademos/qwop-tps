@@ -37,6 +37,7 @@ import { exposeDebugGlobals } from '../core/exposeDebugGlobals.js';
 import { EnemyPlayer } from '../characters/EnemyPlayer.js';
 import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerEnemy.js';
 import { createPlayerBombs } from '../combat/playerBomb.js';
+import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 
 import {
   clearStoredPin,
@@ -50,7 +51,9 @@ import {
   savePhoneSwordStats,
   loadPhoneSwordStats,
   savePhoneSwordStage,
-  loadPhoneSwordStage
+  loadPhoneSwordStage,
+  hasCompletedTutorial,
+  saveTutorialCompleted
 } from '../features/persistenceFeature.js';
 
 if ('serviceWorker' in navigator) {
@@ -168,8 +171,15 @@ function createArcadeOverlay(startOverlay) {
   const signupButton = startOverlay.querySelector('[data-arcade-signup]');
   const backButton = startOverlay.querySelector('[data-arcade-back]');
   const startButton = startOverlay.querySelector('[data-arcade-start]');
+  const modeSelect = startOverlay.querySelector('[data-arcade-modes]');
+  const tutorialButton = startOverlay.querySelector('[data-arcade-tutorial]');
+  const showdownButton = startOverlay.querySelector('[data-arcade-showdown]');
 
   let mode = 'login';
+  // Until the tutorial is done the start screen only offers "Start Game" (which runs it);
+  // afterwards it offers Tutorial and Showdown.
+  let tutorialCompleted = false;
+  let modeHandler = null; // picks a mode once the game is running (start screen shown again)
 
   let currentName = '';
   let authInProgress = false;
@@ -228,19 +238,30 @@ function createArcadeOverlay(startOverlay) {
     }
   };
 
+  const showModeButtons = () => {
+    startButton?.classList.toggle('hidden', tutorialCompleted);
+    modeSelect?.classList.toggle('hidden', !tutorialCompleted);
+  };
+
+  const hideModeButtons = () => {
+    startButton?.classList.add('hidden');
+    modeSelect?.classList.add('hidden');
+  };
+
   const showModeSelect = (authResult) => {
-    // Show a "Start" button instead of a mode picker.
-    // The start button click (below) will resolve auth and launch the game.
+    // "Start Game" (tutorial) for new players, else Tutorial / Showdown.
+    // A click (below) resolves auth and launches the game in that mode.
     pendingAuthResult = authResult;
+    tutorialCompleted = hasCompletedTutorial(authResult?.profile);
     form?.classList.add('hidden');
-    startButton?.classList.remove('hidden');
+    showModeButtons();
     welcomeSection?.classList.remove('hidden');
   };
 
   const showLoginForm = ({ name, preserveMessage = false } = {}) => {
     form?.classList.remove('hidden');
     welcomeSection?.classList.add('hidden');
-    startButton?.classList.add('hidden');
+    hideModeButtons();
     setMode('login');
     if (!preserveMessage) {
       setMessage('');
@@ -254,7 +275,7 @@ function createArcadeOverlay(startOverlay) {
     welcomeText.textContent = `Welcome back ${name}`;
     welcomeSection?.classList.remove('hidden');
     form?.classList.add('hidden');
-    startButton?.classList.add('hidden');
+    hideModeButtons();
   };
 
   const hideOverlay = () => {
@@ -415,11 +436,21 @@ function createArcadeOverlay(startOverlay) {
   backButton?.addEventListener('click', handleBackToLogin);
   switchButton?.addEventListener('click', handleSwitchUser);
 
-  startButton?.addEventListener('click', () => {
+  const chooseMode = (gameMode) => {
     if (startHandler) startHandler();
     hideOverlay();
-    if (resolveAuth) resolveAuth(pendingAuthResult || {});
-  });
+    if (resolveAuth) {
+      const resolve = resolveAuth;
+      resolveAuth = null;
+      resolve({ ...(pendingAuthResult || {}), mode: gameMode });
+    } else {
+      modeHandler?.(gameMode);
+    }
+  };
+
+  startButton?.addEventListener('click', () => chooseMode('tutorial'));
+  tutorialButton?.addEventListener('click', () => chooseMode('tutorial'));
+  showdownButton?.addEventListener('click', () => chooseMode('showdown'));
 
   return {
     async authenticate({ initialName, hasStoredPin, loadProfile }) {
@@ -445,6 +476,21 @@ function createArcadeOverlay(startOverlay) {
     },
     setStartHandler(handler) {
       startHandler = handler;
+    },
+    setModeHandler(handler) {
+      modeHandler = handler;
+    },
+    // Back to the start screen mid-session (e.g. after the tutorial)
+    showStartScreen({ tutorialDone = tutorialCompleted } = {}) {
+      tutorialCompleted = !!tutorialDone;
+      setMessage('');
+      form?.classList.add('hidden');
+      switchButton?.classList.add('hidden'); // switching user needs a fresh page load
+      welcomeSection?.classList.remove('hidden');
+      showModeButtons();
+      startOverlay.style.display = '';
+      startOverlay.classList.remove('hidden');
+      startOverlay.setAttribute('aria-hidden', 'false');
     },
     hideOverlay
   };
@@ -2723,12 +2769,20 @@ async function initCore(runtimeContext) {
   window.getPlayerBubbleRadius = () => (isPlayerBubbleActive() ? BUBBLE_RADIUS : 0);
   window.getPlayerBubbleCenter = getPlayerBubbleCenter;
 
+  // Sword Showdown tutorial (created further down); while it runs the player can't be hurt
+  let showdownTutorial = null;
   Object.defineProperty(window, 'localHealth', {
     configurable: true,
     get: () => statsState.health,
     set: value => {
       // The protective bubble absorbs all incoming damage
       if (isPlayerBubbleActive() && Number(value) < statsState.health) return;
+      // Tutorial: show the hit, keep health full
+      if (showdownTutorial?.isActive() && Number(value) < statsState.health) {
+        triggerPlayerHurtBlood(statsState.health, Math.max(1, Number(value) || 0));
+        showdownTutorial.notifyPlayerHurt();
+        return;
+      }
       setStat('health', value);
     }
   });
@@ -2856,7 +2910,8 @@ async function initCore(runtimeContext) {
     return '🔫';
   }
 
-  function spawnCoinPickup(position) {
+  // `value` = coins this pickup is worth (tutorial coins are worth more than 1)
+  function spawnCoinPickup(position, { value = COIN_PICKUP_GAIN } = {}) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
     if (!applySpawnY(spawnPos, 0.6)) return null;
@@ -2878,6 +2933,7 @@ async function initCore(runtimeContext) {
     pickup.userData.baseY = spawnPos.y;
     pickup.userData.phase = Math.random() * Math.PI * 2;
     pickup.userData.type = 'coin';
+    pickup.userData.value = value;
     pickup.rotation.x = Math.PI / 2;
     scene.add(pickup);
     coinPickups.push(pickup);
@@ -2890,12 +2946,12 @@ async function initCore(runtimeContext) {
     pickup.material?.dispose();
   };
 
-  function applyCoinPickupEffects() {
-    const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + COIN_PICKUP_GAIN;
+  function applyCoinPickupEffects(value = COIN_PICKUP_GAIN) {
+    const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + value;
     setStat('coins', nextCoins, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     showCoinPopup(statsState.coins);
-    showPickupToast('coins', COIN_PICKUP_GAIN);
+    showPickupToast('coins', value);
   }
 
   playerControls = new PlayerControls({
@@ -3503,8 +3559,9 @@ async function initCore(runtimeContext) {
     }
     _psShowStageOverlay(_psStage, (count) => _psStartStage(_psStage, count));
   };
-  // Delay briefly so the rest of init completes first
-  setTimeout(_psInit, 600);
+  // Showdown picked on the start screen: delay briefly so the rest of init completes first
+  // (the tutorial is started at the end of init instead)
+  if (profileResult.mode === 'showdown') setTimeout(_psInit, 600);
 
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
   window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false, blocking: false };
@@ -3565,7 +3622,11 @@ async function initCore(runtimeContext) {
   const phoneSwordCalibModal = document.getElementById('phone-sword-calib-modal');
   const phoneSwordConnectCalib = document.getElementById('phone-sword-connect-calib');
 
+  let _phoneSwordPeerId = null;     // gyro peer id once open (for re-showing the QR code)
+  let _phoneSwordQrShownAt = 0;
   const showPhoneSwordQr = async (peerId) => {
+    _phoneSwordPeerId = peerId;
+    _phoneSwordQrShownAt = Date.now();
     const phoneUrl = `${location.origin}/phone-sword.html?host=${encodeURIComponent(peerId)}`;
     phoneSwordQrUrl.textContent = phoneUrl;
     phoneSwordQrUrl.dataset.url = phoneUrl;
@@ -3761,9 +3822,12 @@ async function initCore(runtimeContext) {
       hasGun: (inv.pistol?.count ?? 0) > 0,
       hasShield: (inv[SHIELD_ITEM_ID]?.count ?? 0) > 0,
       ammo: getPistolAmmoCount(),
-      equipped: playerControls?.getEquippedWeapon?.('right')?.itemId ?? FOAM_SWORD_ITEM_ID
+      equipped: playerControls?.getEquippedWeapon?.('right')?.itemId ?? FOAM_SWORD_ITEM_ID,
+      // Tutorial: phone button to ring ('bomb' | 'bubble' | 'gun' | 'shield' | 'fire' | 'block')
+      highlight: showdownTutorial?.isActive() ? _tutorialPhoneHighlight : null
     };
   };
+  let _tutorialPhoneHighlight = null;
   const _attachPhoneSwordConn = (conn) => {
     window.phoneSwordGyro.connected = true;
     let lastStatusJson = '';
@@ -3833,6 +3897,7 @@ async function initCore(runtimeContext) {
     let _autoConnectTimer = null;
 
     gyroPeer.on('open', (id) => {
+      _phoneSwordPeerId = id;
       // Give the phone 3 seconds to auto-reconnect (if it has the URL bookmarked)
       // before showing the QR modal.
       _autoConnectTimer = setTimeout(() => {
@@ -4227,7 +4292,8 @@ async function initCore(runtimeContext) {
   ];
   let psAutoBuyBusy = false;
   const psAutoBuyTick = async () => {
-    if (psAutoBuyBusy) return;
+    // The tutorial does its own (scripted) purchases
+    if (psAutoBuyBusy || showdownTutorial?.isActive()) return;
     const needed = PS_AUTO_BUY_ITEMS.filter(entry => !entry.has());
     if (!needed.length) return;
     psAutoBuyBusy = true;
@@ -4483,6 +4549,233 @@ async function initCore(runtimeContext) {
     }
   };
 
+  // ── Sword Showdown tutorial (src/tutorial/showdownTutorial.js) ──────────────
+  // Everything the scripted tutorial needs from the game. Purchases skip the room shop
+  // stock (always available) but cost the same coins as the shop.
+  const _tutorialTip = new THREE.Vector3(0, 0, 0.69);
+  const TUTORIAL_ENEMY_SPEED = 0.6; // a bit quicker than stage enemies, so knocked-back ones return sooner
+  const _tutorialRemoveEnemy = (enemy) => {
+    if (!enemy) return;
+    const i = hordeEnemies.indexOf(enemy);
+    if (i !== -1) hordeEnemies.splice(i, 1);
+    if (enemy.group?.parent) enemy.group.parent.remove(enemy.group);
+    try { enemy.destroy?.(); } catch (_) { /* already gone */ }
+  };
+  const _tutorialMarkEnemy = (enemy) => {
+    enemy._tutorial = true;
+    enemy._coinDropped = true; // no coin drop / kill counter / XP
+    return enemy;
+  };
+  const _tutorialButton = (name) => {
+    const pc = playerControls;
+    if (!pc) return null;
+    if (name === 'bomb') return pc.psBombBtn;
+    if (name === 'bubble') return pc.psBubbleBtn;
+    if (name === 'block' || name === 'fire') return pc.punchButton;
+    const itemId = name === 'gun' ? 'pistol' : name === 'shield' ? SHIELD_ITEM_ID : name;
+    return [pc.psWeaponBtn1, pc.psWeaponBtn2].find(b => b?.dataset.psWeaponId === itemId) || null;
+  };
+  const _refreshShowdownButtons = () => {
+    playerControls?.refreshActionButtons?.();
+    updatePsBombButton();
+    updatePsBubbleButton();
+  };
+  const _tutorialAddAmmo = (amount) => {
+    addPistolAmmo(amount);
+    if (pistol?.holder === playerControls) {
+      playerControls.setAmmo?.(getPistolAmmoCount(), getAmmoLabelForType('bullet'), getAmmoIconForType('bullet'));
+    }
+  };
+  const tutorialCtx = {
+    scene,
+    camera,
+    playerModel,
+    bombThrowDistance: PLAYER_BOMB_THROW_DIST,
+    groundY: (x, z) => {
+      const y = getTerrainHeight(x, z);
+      return Number.isFinite(y) ? y : null;
+    },
+    getForward: (out) => {
+      playerModel.getWorldDirection(out).setY(0);
+      if (out.lengthSq() < 1e-6) out.set(0, 0, 1);
+      return out.normalize();
+    },
+    spawnSwordsman: ({ position, hearts = 3, script = null, stationary = false }) => {
+      const enemy = _spawnHordeEnemy({ position, hearts, speedScale: TUTORIAL_ENEMY_SPEED, swingChance: 0.3 });
+      enemy.script = script;
+      enemy.stationary = stationary;
+      return _tutorialMarkEnemy(enemy);
+    },
+    spawnBomber: ({ position, hearts = 1, throwsHeld = true, aimAt = null }) => {
+      const enemy = _spawnHordeEnemy({ position, hearts, speedScale: PS_ENEMY_SPEED, bombThrower: true });
+      enemy.stationary = true;
+      enemy.throwsHeld = throwsHeld;
+      enemy.aimAt = aimAt;
+      return _tutorialMarkEnemy(enemy);
+    },
+    removeEnemy: _tutorialRemoveEnemy,
+    // Deflect point of the player's sword (same tip the bomb-deflect check uses), or null
+    getSwordTip: (out) => {
+      if (foamSword?.holder !== playerControls) return null;
+      const mesh = foamSword.useHeldMeshWhenHeld && foamSword.heldMesh ? foamSword.heldMesh : foamSword.mesh;
+      if (!mesh?.visible) return null;
+      return out.copy(_tutorialTip).applyQuaternion(mesh.quaternion).add(mesh.position);
+    },
+    // Guard → tip of the phone-driven blade (world), or null without a phone
+    getPlayerBladeDir: (out) => {
+      const pts = window.phoneSwordBladePoints;
+      if (!window.phoneSwordGyro?.connected || foamSword?.holder !== playerControls || !(pts?.length >= 3)) return null;
+      return out.subVectors(pts[2], pts[0]);
+    },
+    isBlocking: () => !!window.phoneSwordGyro?.blocking,
+    isPhoneConnected: () => !!window.phoneSwordGyro?.connected,
+    requestPhoneSetup: () => {
+      if (window.phoneSwordGyro?.connected || !_phoneSwordPeerId) return false;
+      phoneSwordQrStatus.textContent = 'Waiting for phone…';
+      phoneSwordQrStatus.classList.remove('connected');
+      void showPhoneSwordQr(_phoneSwordPeerId);
+      return true;
+    },
+    isPhoneSetupOpen: () => !phoneSwordQrModal.classList.contains('hidden')
+      || (!!phoneSwordConnectCalib && !phoneSwordConnectCalib.classList.contains('hidden')),
+    getButton: _tutorialButton,
+    setPhoneHighlight: (name) => { _tutorialPhoneHighlight = name || null; },
+    // Coins in a ring around the player, inside the drift radius
+    spawnCoins: (count, value) => {
+      const pickups = [];
+      const offset = Math.random() * Math.PI * 2;
+      for (let i = 0; i < count; i++) {
+        const angle = offset + (i / count) * Math.PI * 2;
+        const dist = 2.2 + (i % 3) * 0.6;
+        const pos = playerModel.position.clone().add(new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist));
+        const pickup = spawnCoinPickup(pos, { value });
+        if (pickup) pickups.push(pickup);
+      }
+      return pickups;
+    },
+    countPickups: (pickups) => pickups.filter(p => coinPickups.includes(p)).length,
+    removePickups: (pickups) => {
+      pickups.forEach((p) => {
+        const i = coinPickups.indexOf(p);
+        if (i === -1) return;
+        coinPickups.splice(i, 1);
+        disposePickup(p);
+      });
+    },
+    getPrice: async (itemId) => {
+      const merchant = await import('../characters/merchant.js');
+      return merchant.getMerchantItemMeta(itemId).price;
+    },
+    // Scripted "auto-buy": same price and toast as psAutoBuyTick
+    buy: async (itemId) => {
+      const merchant = await import('../characters/merchant.js');
+      const meta = merchant.getMerchantItemMeta(itemId);
+      if (appState.getCoins() < meta.price) return false;
+      if (itemId === SHIELD_ITEM_ID || itemId === 'pistol') {
+        addToInventory(itemId, 1);
+        if (itemId === 'pistol') seedPistolAmmoIfNeeded();
+      } else if (itemId === PISTOL_AMMO_KEY) {
+        _tutorialAddAmmo(1);
+      } else if (!appState.applyShopUpgrade(itemId)) {
+        return false;
+      }
+      appState.addCoins(-meta.price);
+      void saveStatsImmediate(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
+      showPickupToast(itemId, 1, '', { text: `Purchased ${meta.name} -${meta.price} coins`, icon: meta.icon });
+      _refreshShowdownButtons();
+      return true;
+    },
+    // Free replacement when a lesson needs another try
+    giveItem: (itemId) => {
+      if (itemId === 'showdown_bomb') setStat('bombs', getPlayerBombCount() + 1, { skipSave: true });
+      else if (itemId === 'bubble') setStat('bubbles', getBubbleCount() + 1, { skipSave: true });
+      _refreshShowdownButtons();
+    },
+    getBombCount: () => getPlayerBombCount(),
+    isPlayerBombBusy: () => !!playerBombThrow || (playerBombs?.activeCount ?? 0) > 0,
+    getBubbleCount: () => getBubbleCount(),
+    isBubbleActive: () => isPlayerBubbleActive(),
+    hasItem: (itemId) => (inventoryState[itemId]?.count || 0) > 0,
+    getShieldCount: () => inventoryState[SHIELD_ITEM_ID]?.count || 0,
+    isEquipped: (itemId) => isInventoryItemEquipped(itemId),
+    // Lower the durability of the shield on top of the stack (a quick break for the lesson)
+    weakenShield: (health) => {
+      const entry = inventoryState[SHIELD_ITEM_ID];
+      if (!entry?.count) return;
+      const current = normalizeShieldHealth(entry[SHIELD_HEALTH_KEY]);
+      inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+        ...entry,
+        [SHIELD_HEALTH_KEY]: Math.min(current, health)
+      }));
+      persistInventory();
+    },
+    equipSword: () => {
+      if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
+        inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+      }
+      equipInventoryItem(FOAM_SWORD_ITEM_ID);
+      _refreshShowdownButtons();
+    },
+    getAmmo: () => getPistolAmmoCount(),
+    addAmmo: _tutorialAddAmmo,
+    onComplete: async () => {
+      if (playerProfile) playerProfile.tutorialCompleted = true;
+      void saveTutorialCompleted(profileNameKey);
+      _psWinTitle.textContent = 'TUTORIAL COMPLETE!';
+      _psWinSub.textContent = 'You’re ready for the Showdown';
+      _psWinTitle.style.animation = 'none';
+      _psWinSub.style.animation = 'none';
+      _psWinOverlay.classList.remove('hidden');
+      void _psWinOverlay.offsetWidth;
+      _psWinTitle.style.animation = '';
+      _psWinSub.style.animation = '';
+      await new Promise(resolve => setTimeout(resolve, 2800));
+      _psWinOverlay.classList.add('hidden');
+      _resetForMenu();
+      arcadeOverlay.showStartScreen({ tutorialDone: true });
+    }
+  };
+  showdownTutorial = createShowdownTutorial(tutorialCtx);
+
+  // Clear the field (enemies, bombs, stage) and put the player back on their feet
+  const _resetForMenu = () => {
+    _psStopSong();
+    _psStageOverlay.classList.add('hidden');
+    for (let i = hordeEnemies.length - 1; i >= 0; i--) _tutorialRemoveEnemy(hordeEnemies[i]);
+    playerBombs?.clear();
+    _psEnemyQueue = [];
+    _psAutoWalking = false;
+    _psStageActive = false;
+    _psWinShown = false;
+    _psUpdateKillHud(false);
+    if (playerDead || statsState.health <= 0) {
+      hideGameOver();
+      respawnPlayer();
+    }
+    setStat('health', statsState.maxHealthSegments);
+    tutorialCtx.equipSword();
+  };
+
+  const startTutorialMode = () => {
+    _resetForMenu();
+    lastAutoMode = 'day';
+    applyPresetForMode('day');
+    applyDisplaySettings();
+    clearRoadLightPool();
+    showdownTutorial.start();
+  };
+
+  // Start screen shown again later (after the tutorial): Tutorial or Showdown
+  arcadeOverlay.setModeHandler((gameMode) => {
+    if (gameMode === 'showdown') {
+      _resetForMenu();
+      void _psInit();
+    } else {
+      startTutorialMode();
+    }
+  });
+  if (profileResult.mode !== 'showdown') setTimeout(startTutorialMode, 600);
+
   function animate() {
     requestAnimationFrame(animate);
     const frameStartMs = performance.now();
@@ -4573,6 +4866,7 @@ async function initCore(runtimeContext) {
     updateExplosionEffects(frameDelta);
     updatePlayerBubble();
     updatePlayerBombs(frameDelta);
+    showdownTutorial?.update(frameDelta);
     const now = performance.now();
     processIncomingPeerDataQueue();
     if (now - lastPerfUpdateMs >= 1000) {
@@ -4619,7 +4913,7 @@ async function initCore(runtimeContext) {
           }
 
           if (shouldCheckPickups && !playerDead && playerModel.position.distanceTo(pickup.position) < PICKUP_RADIUS) {
-            applyCoinPickupEffects();
+            applyCoinPickupEffects(pickup.userData.value);
             disposePickup(pickup);
             coinPickups.splice(i, 1);
           }
@@ -4902,7 +5196,8 @@ async function initCore(runtimeContext) {
     shield?.update();
 
     // ── Phone Sword: auto-walk + queue spawn (runs even when hordeEnemies is empty) ──
-    if (_psStageActive && !playerDead) {
+    const _tutorialActive = !!showdownTutorial?.isActive();
+    if ((_psStageActive || _tutorialActive) && !playerDead) {
       // Spawn queued enemies as player approaches their positions
       for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
         const _qe = _psEnemyQueue[_qi];
@@ -4949,7 +5244,7 @@ async function initCore(runtimeContext) {
       }
 
       // Win detection
-      if (!_psWinShown && _psEnemyQueue.length === 0 && hordeEnemies.length > 0 && hordeEnemies.every(e => e.isDead)) {
+      if (_psStageActive && !_psWinShown && _psEnemyQueue.length === 0 && hordeEnemies.length > 0 && hordeEnemies.every(e => e.isDead)) {
         _psStageActive = false;
         _psWinShown = true;
         addPlayerXp(getSwordShowdownStageXp(_psStage));
@@ -5157,6 +5452,7 @@ async function initCore(runtimeContext) {
           // Remove from array once the Three.js group has been removed from scene
           if (!_he.group.parent) {
             hordeEnemies.splice(_hi, 1);
+            if (_he._tutorial) continue; // tutorial kills don't count
             _psStats.kills = (_psStats.kills || 0) + 1;
             if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
           } else {

@@ -190,6 +190,20 @@ export async function loadPhoneSwordStage(nameKey) {
   }
 }
 
+// Sword Showdown tutorial: profiles/<nameKey>/tutorialCompleted = true once finished
+export function hasCompletedTutorial(profile) {
+  return profile?.tutorialCompleted === true;
+}
+
+export async function saveTutorialCompleted(nameKey) {
+  if (!nameKey) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}`), { tutorialCompleted: true });
+  } catch (err) {
+    console.warn('Failed to save tutorial completion:', err);
+  }
+}
+
 async function loadProfileForName(profileRef, trimmedName) {
   const profileSnap = await get(profileRef);
   let profile = profileSnap.val();

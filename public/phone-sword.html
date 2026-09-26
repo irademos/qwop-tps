@@ -134,6 +134,12 @@
     .ctl-btn:disabled { opacity: 0.35; }
     .ctl-btn.equipped { outline: 3px solid #facc15; outline-offset: -3px; }
     .ctl-btn.active { outline: 3px solid #7dd3fc; outline-offset: -3px; }
+    /* Tutorial: the button the game is asking for */
+    .tutorial-highlight { position: relative; animation: tutorial-ring 1s ease-in-out infinite; }
+    @keyframes tutorial-ring {
+      0%, 100% { box-shadow: 0 0 0 4px #facc15, 0 0 14px 4px rgba(250, 204, 21, 0.6); }
+      50%      { box-shadow: 0 0 0 8px #facc15, 0 0 26px 10px rgba(250, 204, 21, 0.85); }
+    }
     #btn-bomb   { background: #7c2d12; }
     #btn-bubble { background: #0e7490; }
     #btn-jump   { background: #4338ca; }
@@ -330,6 +336,11 @@
       btnShield.textContent = st.equipped === 'shield' ? '🗡️ Sword' : '🛡 Shield';
       btnFire.disabled = st.equipped !== 'pistol';
       btnFire.textContent = st.equipped === 'pistol' ? `🔥 Fire ${st.ammo ?? 0}` : '🔥 Fire';
+      // Tutorial: ring the button the game is asking for
+      const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, fire: btnFire, block: blockBtn };
+      Object.entries(highlightTargets).forEach(([name, el]) => {
+        el.classList.toggle('tutorial-highlight', st.highlight === name);
+      });
     }
 
     if (!hostPeerId) {

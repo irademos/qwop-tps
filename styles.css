@@ -1887,3 +1887,108 @@ body.settings-open #inventory-button {
   from { opacity: 0; transform: translateY(20px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Sword Showdown tutorial (src/tutorial/tutorialOverlay.js) ─────────────── */
+.tutorial-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  pointer-events: none;
+}
+.tutorial-root.hidden { display: none; }
+.tutorial-guides {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.tutorial-guide {
+  position: absolute;
+  left: 0;
+  top: 0;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.7));
+}
+.tutorial-guide svg { display: block; }
+.tutorial-guide-label {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.8);
+  color: #fff;
+  font: 800 12px/1.2 'Segoe UI', Arial, sans-serif;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  transform-origin: 50% 0;
+}
+.tutorial-panel {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 14px 18px 12px;
+  border-radius: 16px;
+  border: 2px solid #facc15;
+  background: rgba(5, 6, 17, 0.88);
+  box-shadow: 0 0 24px rgba(250, 204, 21, 0.25);
+  color: #f8fafc;
+  font: 500 15px/1.4 'Segoe UI', Arial, sans-serif;
+  text-align: center;
+  pointer-events: auto;
+}
+.tutorial-progress {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #93c5fd;
+}
+.tutorial-title {
+  margin-top: 4px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: clamp(12px, 2.6vw, 16px);
+  color: #fcd34d;
+}
+.tutorial-text { margin-top: 8px; }
+.tutorial-hint {
+  margin-top: 8px;
+  font-weight: 800;
+  color: #fde68a;
+}
+.tutorial-hint[data-tone="ok"] { color: #4ade80; }
+.tutorial-hint[data-tone="warn"] { color: #fca5a5; }
+.tutorial-hint.hidden { display: none; }
+.tutorial-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+.tutorial-skip {
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.9);
+  color: #cbd5e1;
+  font: 700 11px/1 'Segoe UI', Arial, sans-serif;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.tutorial-skip.hidden { display: none; }
+
+/* Ring around the HUD button a tutorial step is asking for */
+.tutorial-highlight { overflow: visible; }
+.tutorial-highlight::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border: 4px solid #facc15;
+  border-radius: 50%;
+  box-shadow: 0 0 16px 4px rgba(250, 204, 21, 0.7);
+  pointer-events: none;
+  animation: tutorial-ring-pulse 1s ease-in-out infinite;
+}
+@keyframes tutorial-ring-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.15); opacity: 0.6; }
+}
