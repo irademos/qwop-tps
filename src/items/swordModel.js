@@ -4,7 +4,9 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // The sword GLB (player + enemy swords). Sword convention everywhere else: the
 // origin is the grip (hand), the blade points along +Z and the tip is ~0.69 ahead
 // (hit checks use that fixed tip, see SWORD_TIP_LOCAL in EnemyPlayer.js).
-export const SWORD_MODEL_URL = '/assets/props/sword.glb';
+// ?v= busts browser caches: vercel.json marks /assets/* immutable, so a 404 served
+// before the file existed would otherwise stick. Bump it when sword.glb changes.
+export const SWORD_MODEL_URL = '/assets/props/sword.glb?v=2';
 
 // Auto-fit: the model's longest axis is turned onto +Z and scaled to this length
 // before the debug adjust is applied (0.8: sword.glb's grip lands at the hand and
