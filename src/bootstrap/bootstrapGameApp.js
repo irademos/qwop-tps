@@ -499,6 +499,9 @@ function createArcadeOverlay(startOverlay) {
 
 const SWORD_SHOWDOWN_BGS = 'Interior Day/Inside Day.ogg';
 const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
+// "Use This Device" (the game screen is also the sword): gyro angles are multiplied by this
+// so smaller wrist movements swing the sword and the screen stays in view
+const PHONE_SWORD_LOCAL_SENSITIVITY = 2;
 
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
@@ -3600,7 +3603,7 @@ async function initCore(runtimeContext) {
   if (profileResult.mode === 'showdown') setTimeout(_psInit, 600);
 
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
-  window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false, blocking: false };
+  window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false, blocking: false, localDevice: false };
   // Calibration: these are the "neutral" angles subtracted from live readings
   window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
   // Config: additional rotation offsets (degrees) applied on top of gyro delta
@@ -3716,6 +3719,7 @@ async function initCore(runtimeContext) {
   });
 
   // "Use This Device" — pipe the current device's own gyroscope into phoneSwordGyro
+  let _localGyroHandler = null;
   document.getElementById('phone-sword-use-this-device')?.addEventListener('click', async () => {
     if (typeof DeviceOrientationEvent === 'undefined') {
       alert('Gyroscope not available on this device.');
@@ -3731,14 +3735,19 @@ async function initCore(runtimeContext) {
         return;
       }
     }
-    const _localGyroHandler = (event) => {
-      if (event.alpha === null) return;
-      window.phoneSwordGyro.alpha = event.alpha;
-      window.phoneSwordGyro.beta = event.beta;
-      window.phoneSwordGyro.gamma = event.gamma;
-      // blocking not available from local device — stays false
-    };
-    window.addEventListener('deviceorientation', _localGyroHandler, true);
+    // The screen is also the sword, so the gyro is amplified (PHONE_SWORD_LOCAL_SENSITIVITY)
+    // and small wrist movements are enough while still being able to see the screen.
+    // Blocking comes from the on-screen Block button.
+    if (!_localGyroHandler) {
+      _localGyroHandler = (event) => {
+        if (!window.phoneSwordGyro.localDevice || event.alpha === null) return;
+        window.phoneSwordGyro.alpha = event.alpha;
+        window.phoneSwordGyro.beta = event.beta;
+        window.phoneSwordGyro.gamma = event.gamma;
+      };
+      window.addEventListener('deviceorientation', _localGyroHandler, true);
+    }
+    window.phoneSwordGyro.localDevice = true;
     window.phoneSwordGyro.connected = true;
     phoneSwordQrStatus.textContent = 'This device connected!';
     phoneSwordQrStatus.classList.add('connected');
@@ -3873,6 +3882,8 @@ async function initCore(runtimeContext) {
   let _tutorialPhoneHighlight = null;
   const _attachPhoneSwordConn = (conn) => {
     window.phoneSwordGyro.connected = true;
+    // A separate phone took over — stop using this device's own gyro
+    window.phoneSwordGyro.localDevice = false;
     let lastStatusJson = '';
     const sendStatus = () => {
       if (!conn.open) return;
@@ -5109,8 +5120,14 @@ async function initCore(runtimeContext) {
         let _dAlpha = (Number.isFinite(_g.alpha) ? _g.alpha : _c.alpha) - _c.alpha;
         if (_dAlpha > 180) _dAlpha -= 360;
         if (_dAlpha < -180) _dAlpha += 360;
-        const _dBeta  = _beta  - _c.beta;
-        const _dGamma = _gamma - _c.gamma;
+        let _dBeta  = _beta  - _c.beta;
+        let _dGamma = _gamma - _c.gamma;
+        // "Use This Device": amplify so small movements swing the sword (screen stays visible)
+        if (_g.localDevice) {
+          _dAlpha *= PHONE_SWORD_LOCAL_SENSITIVITY;
+          _dBeta  *= PHONE_SWORD_LOCAL_SENSITIVITY;
+          _dGamma *= PHONE_SWORD_LOCAL_SENSITIVITY;
+        }
 
         _phoneSwordEuler.set(
           (_dBeta  + _cfg.offsetX) * DEG,
