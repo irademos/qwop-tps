@@ -7,14 +7,15 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 export const SWORD_MODEL_URL = '/assets/props/sword.glb';
 
 // Auto-fit: the model's longest axis is turned onto +Z and scaled to this length
-// (the foam sword was ~0.9 from pommel to tip) before the debug adjust is applied.
-const SWORD_FIT_LENGTH = 0.9;
+// before the debug adjust is applied (0.8: sword.glb's grip lands at the hand and
+// its tip near the 0.69 hit tip).
+const SWORD_FIT_LENGTH = 0.8;
 
 // Grip → model placement. TEMP: tuned with the debug sliders (mountSwordDebugPanel);
 // paste the copied values here once they look right.
 export const SWORD_ADJUST_DEFAULTS = Object.freeze({
-  px: 0, py: 0, pz: 0.24,   // position (m, sword-local)
-  rx: 0, ry: 0, rz: 0,      // rotation (deg, XYZ)
+  px: 0, py: 0, pz: 0.31,   // position (m, sword-local)
+  rx: 0, ry: 180, rz: 0,    // rotation (deg, XYZ) — sword.glb's handle is at its +X end
   scale: 1,
 });
 
