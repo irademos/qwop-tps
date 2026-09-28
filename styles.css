@@ -450,13 +450,20 @@ body {
   color: #ff9b9b;
 }
 
+/* Above the start screen, Multiplayer lobby and stage overlay so settings open from them too
+   (below the phone QR / calibration popups and the shop) */
 #settings-button {
   position: fixed;
   top: 10px;
   right: 10px;
   font-size: 24px;
   cursor: pointer;
-  z-index: 1000;
+  z-index: 9150;
+}
+
+/* Hidden until the settings panel exists (before login / while the game loads) */
+body:not(.settings-ready) #settings-button {
+  display: none;
 }
 
 #pickup-toast-container {
@@ -509,7 +516,7 @@ body {
   display: none;
   justify-content: center;
   align-items: center;
-  z-index: 999;
+  z-index: 9100;
 
   /* let content scroll if needed (small screens / keyboard) */
   overflow-y: auto;
@@ -1360,7 +1367,7 @@ body.settings-open #inventory-button {
   display: none;
   justify-content: center;
   align-items: center;
-  z-index: 999;
+  z-index: 9110;
   overflow-y: auto;
   padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
