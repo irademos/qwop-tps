@@ -59,6 +59,11 @@ export const glbCharacterConfig = {
     enabled: true, softness: 0.55, bounce: 0.45, amount: 0.8, flutter: 0.3, fuzz: 0.5,
     shells: 8, furLength: 0.06, shellsHairOnly: false,
   },
+  // Per-model overrides of `fluffy`, keyed by url. The frog man keeps the bouncy
+  // secondary motion but has no shell fur.
+  fluffyByUrl: {
+    '/models/glb_characters/frog_man.glb': { shells: 0 },
+  },
 };
 
 // Floating-hand label → Mixamo arm on the same local-X side (see header)
@@ -106,10 +111,10 @@ const _stretch = new THREE.Vector3();
 // ── Character ───────────────────────────────────────────────────────────────
 
 export class GLBCharacter {
-  constructor(scene, { armIK = true } = {}) {
+  constructor(scene, { armIK = true, fluffy = glbCharacterConfig.fluffy } = {}) {
     this.scene = scene;
     this._armIK = armIK;
-    this.fluffy = new FluffyCharacter(scene, glbCharacterConfig.fluffy);
+    this.fluffy = new FluffyCharacter(scene, fluffy);
     this.arms = {};
     scene.updateMatrixWorld(true);
     for (const [hand, side] of Object.entries(ARM_CHAIN_FOR_HAND)) {
@@ -382,7 +387,8 @@ export class GLBCharacter {
  */
 export async function createGLBCharacterInstance(opts = {}) {
   const targetHeight = opts.targetHeight ?? glbCharacterConfig.targetHeight;
-  const gltf = await getCharacterGLTF(opts.url);
+  const url = opts.url ?? glbCharacterConfig.url;
+  const gltf = await getCharacterGLTF(url);
 
   const scene = SkeletonUtils.clone(gltf.scene);
   scene.name = 'GLBCharacterScene';
@@ -409,7 +415,8 @@ export async function createGLBCharacterInstance(opts = {}) {
   container.name = 'GLBCharacterContainer';
   container.add(scene);
 
-  const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true });
+  const fluffy = { ...glbCharacterConfig.fluffy, ...glbCharacterConfig.fluffyByUrl[url] };
+  const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true, fluffy });
   container.userData.glbCharacter = character;
   return { container, character };
 }
