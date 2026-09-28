@@ -7,7 +7,8 @@ import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig } from "../models/playerModel.js";
 import { glbCharacterConfig } from "../models/glbCharacterModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
-import { Multiplayer } from '../multiplayer/peerConnection.js';
+import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
+import { createDuelMode } from '../multiplayer/duelMode.js';
 import { PlayerControls } from '../controls/controls.js';
 import { getCookie, setCookie } from '../core/utils.js';
 import { createAudioManager } from '../features/audioFeature.js';
@@ -28,13 +29,11 @@ import {
   updateSettingsUI,
   initMerchantPanelFeature,
   updateMerchantUIFeature,
-  initMerchantFeature,
-  setMerchantHostFeature,
-  setMerchantRoomFeature
+  initMerchantFeature
 } from '../features/uiPanelsFeature.js';
 import { appContext } from '../core/appContext.js';
 import { exposeDebugGlobals } from '../core/exposeDebugGlobals.js';
-import { EnemyPlayer } from '../characters/EnemyPlayer.js';
+import { EnemyPlayer, swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/EnemyPlayer.js';
 import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerEnemy.js';
 import { createPlayerBombs } from '../combat/playerBomb.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
@@ -174,10 +173,11 @@ function createArcadeOverlay(startOverlay) {
   const modeSelect = startOverlay.querySelector('[data-arcade-modes]');
   const tutorialButton = startOverlay.querySelector('[data-arcade-tutorial]');
   const showdownButton = startOverlay.querySelector('[data-arcade-showdown]');
+  const multiplayerButton = startOverlay.querySelector('[data-arcade-multiplayer]');
 
   let mode = 'login';
   // Until the tutorial is done the start screen only offers "Start Game" (which runs it);
-  // afterwards it offers Tutorial and Showdown.
+  // afterwards it offers Tutorial, Showdown and Multiplayer.
   let tutorialCompleted = false;
   let modeHandler = null; // picks a mode once the game is running (start screen shown again)
 
@@ -249,7 +249,7 @@ function createArcadeOverlay(startOverlay) {
   };
 
   const showModeSelect = (authResult) => {
-    // "Start Game" (tutorial) for new players, else Tutorial / Showdown.
+    // "Start Game" (tutorial) for new players, else Tutorial / Showdown / Multiplayer.
     // A click (below) resolves auth and launches the game in that mode.
     pendingAuthResult = authResult;
     tutorialCompleted = hasCompletedTutorial(authResult?.profile);
@@ -451,6 +451,7 @@ function createArcadeOverlay(startOverlay) {
   startButton?.addEventListener('click', () => chooseMode('tutorial'));
   tutorialButton?.addEventListener('click', () => chooseMode('tutorial'));
   showdownButton?.addEventListener('click', () => chooseMode('showdown'));
+  multiplayerButton?.addEventListener('click', () => chooseMode('multiplayer'));
 
   return {
     async authenticate({ initialName, hasStoredPin, loadProfile }) {
@@ -571,6 +572,7 @@ async function initCore(runtimeContext) {
 
   let multiplayer = null;
   let isHost = false;
+  let duelMode = null; // Multiplayer mode: lobby + duels (created further down)
   var playerControls = null;
   let scene = null;
   let ambientLight = null;
@@ -873,9 +875,11 @@ async function initCore(runtimeContext) {
     netStats.deferred += netSendQueue.length;
     recordNetSent(sent);
   };
+  // Game traffic only goes to the current duel opponent (the lobby needs none)
   const sendNetworkPayload = (payload) => {
-    if (!multiplayer || !payload) return false;
-    multiplayer.send(payload);
+    const opponentId = duelMode?.getOpponentId();
+    if (!multiplayer || !payload || !opponentId) return false;
+    multiplayer.sendTo(opponentId, payload);
     return true;
   };
   const tickNetStats = (nowMs) => {
@@ -1305,7 +1309,11 @@ async function initCore(runtimeContext) {
         return;
       }
       const remoteId = data.id || peerId;
-      if (remoteId === multiplayer.getId()) {
+      if (!multiplayer || remoteId === multiplayer.getId()) {
+        return;
+      }
+      // Only the duel opponent is shown (lobby peers stay off the map)
+      if (!duelMode?.acceptsPresenceFrom(remoteId)) {
         return;
       }
       const now = performance.now();
@@ -1397,7 +1405,13 @@ async function initCore(runtimeContext) {
       return;
     }
 
+    if (data.type === 'duel') {
+      duelMode?.handleMessage(peerId, data);
+      return;
+    }
+
     if (data.type === 'projectile') {
+      if (!duelMode?.acceptsPresenceFrom(peerId)) return;
       if (!isProjectileMessage(data)) {
         logInvalidPayload('projectile', data);
         return;
@@ -1415,28 +1429,46 @@ async function initCore(runtimeContext) {
     }
   }
 
-  multiplayer = new Multiplayer(playerName, handleIncomingData);
-  window.multiplayer = multiplayer;
-  multiplayer.getNetRuntimeStats = () => ({ ...window.netRuntimeStats });
-  multiplayer.onPingUpdate = () => {
-    applyRuntimeNetworkProfile({
-      incomingBacklog: lastIncomingBacklog,
-      incomingProcessCount: lastIncomingProcessCount,
-      overrunStreak: frameOverrunStreak,
-      recoverStreak: frameRecoverStreak
-    });
+  // Peer multiplayer only runs in Multiplayer mode (lobby + duels); Showdown and the
+  // tutorial are single player. startMultiplayer/stopMultiplayer are driven by duelMode.
+  const startMultiplayer = () => {
+    if (multiplayer) return multiplayer;
+    multiplayer = new Multiplayer(playerName, handleIncomingData, { roomId: LOBBY_ROOM_ID });
+    window.multiplayer = multiplayer;
+    if (playerControls) playerControls.multiplayer = multiplayer;
+    multiplayer.getNetRuntimeStats = () => ({ ...window.netRuntimeStats });
+    multiplayer.onPingUpdate = () => {
+      applyRuntimeNetworkProfile({
+        incomingBacklog: lastIncomingBacklog,
+        incomingProcessCount: lastIncomingProcessCount,
+        overrunStreak: frameOverrunStreak,
+        recoverStreak: frameRecoverStreak
+      });
+    };
+    multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
+      isHost = !!isCurrentHost;
+      if (previousHostId !== newHostId) {
+        clearAllRemoteHeldWeaponMeshes();
+        if (shield) shield.remoteHolderId = null;
+      }
+    };
+    multiplayer.onReady = () => {
+      isHost = !!multiplayer?.isHost;
+      duelMode?.onPeersChange();
+    };
+    multiplayer.onPeersChange = () => duelMode?.onPeersChange();
+    return multiplayer;
   };
-  multiplayer.onHostChange = ({ previousHostId, newHostId, isCurrentHost }) => {
-    isHost = !!isCurrentHost;
-    setMerchantHostFeature(isHost);
-    if (previousHostId !== newHostId) {
-      clearAllRemoteHeldWeaponMeshes();
-      shield.remoteHolderId = null;
-    }
-  };
-  multiplayer.onReady = async ({ roomId }) => {
-    isHost = !!multiplayer.isHost;
-    await setMerchantRoomFeature({ roomId: roomId || null, isHost: multiplayer.isHost });
+  const stopMultiplayer = () => {
+    if (!multiplayer) return;
+    multiplayer.destroy();
+    multiplayer = null;
+    window.multiplayer = null;
+    isHost = false;
+    if (playerControls) playerControls.multiplayer = null;
+    Object.keys(otherPlayers).forEach(id => removeRemotePlayer(id, 'multiplayer-stopped'));
+    pendingIncomingPeerData.length = 0;
+    netSendQueue.length = 0;
   };
 
   let foamSword;
@@ -2389,6 +2421,8 @@ async function initCore(runtimeContext) {
 
   function equipInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
+    // Multiplayer duels are sword only
+    if (duelMode?.isActive() && itemId !== FOAM_SWORD_ITEM_ID) return;
     // Capture the currently held right-hand item BEFORE unequipping it,
     // so we can restore it if the shield later breaks with no spares.
     if (itemId === SHIELD_ITEM_ID) {
@@ -2525,9 +2559,10 @@ async function initCore(runtimeContext) {
   }
 
   let playerDead = false;
+  let duelControlsLocked = false; // Multiplayer lobby / duel countdown
   const updateControlAvailability = () => {
     if (!playerControls) return;
-    playerControls.enabled = !playerDead;
+    playerControls.enabled = !playerDead && !duelControlsLocked;
   };
 
   const healthBar = document.getElementById('health-bar');
@@ -2718,7 +2753,7 @@ async function initCore(runtimeContext) {
     target.copy(playerModel.position).setY(playerModel.position.y + BUBBLE_CENTER_HEIGHT)
   );
   const activatePlayerBubble = () => {
-    if (playerDead || isPlayerBubbleActive()) return false;
+    if (playerDead || isPlayerBubbleActive() || duelMode?.isActive()) return false;
     if (getBubbleCount() <= 0) return false;
     setStat('bubbles', getBubbleCount() - 1, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -2987,6 +3022,7 @@ async function initCore(runtimeContext) {
   }
   // Knockback velocity applied directly to player position in the game loop
   const _playerKnockback = { vx: 0, vy: 0, vz: 0, endTime: 0 };
+  let _duelLastSwordHitAt = 0; // last time our sword hit/was blocked by the duel opponent
 
   updateControlAvailability();
 
@@ -3108,7 +3144,7 @@ async function initCore(runtimeContext) {
     button.classList.toggle('ps-bomb-empty', !playerBombThrow && getPlayerBombCount() <= 0);
   };
   const throwPlayerBomb = () => {
-    if (!playerBombs || playerDead || playerBombThrow) return false;
+    if (!playerBombs || playerDead || playerBombThrow || duelMode?.isActive()) return false;
     if (getPlayerBombCount() <= 0) return false;
     const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
     if (glbCharacter?.isDead) return false; // knocked down by a blast
@@ -3815,6 +3851,13 @@ async function initCore(runtimeContext) {
   };
   const _phoneControllerStatus = () => {
     const inv = window.appState?.getInventory?.() || {};
+    if (duelMode?.isActive()) {
+      // Multiplayer duels are sword only: grey out bomb/bubble/gun/shield on the phone
+      return {
+        bombs: 0, bubbles: 0, bubbleActive: false, hasGun: false, hasShield: false,
+        ammo: 0, equipped: FOAM_SWORD_ITEM_ID, highlight: null
+      };
+    }
     return {
       bombs: getPlayerBombCount(),
       bubbles: getBubbleCount(),
@@ -4267,11 +4310,12 @@ async function initCore(runtimeContext) {
   window.removeFromInventory = removeFromInventory;
   initSettingsPanel({
     appState,
-    multiplayer,
+    getMultiplayer: () => multiplayer,
     player
   });
   await initMerchantPanelFeature({ appState });
-  void initMerchantFeature({ appState });
+  // Single-player shop (Showdown has no peer multiplayer): this client keeps the stock
+  void initMerchantFeature({ appState, isHost: true });
 
   settingsBtn.addEventListener('click', () => {
     openSettings();
@@ -4292,8 +4336,8 @@ async function initCore(runtimeContext) {
   ];
   let psAutoBuyBusy = false;
   const psAutoBuyTick = async () => {
-    // The tutorial does its own (scripted) purchases
-    if (psAutoBuyBusy || showdownTutorial?.isActive()) return;
+    // The tutorial does its own (scripted) purchases; Multiplayer duels are sword only
+    if (psAutoBuyBusy || showdownTutorial?.isActive() || duelMode?.isActive()) return;
     const needed = PS_AUTO_BUY_ITEMS.filter(entry => !entry.has());
     if (!needed.length) return;
     psAutoBuyBusy = true;
@@ -4765,16 +4809,146 @@ async function initCore(runtimeContext) {
     showdownTutorial.start();
   };
 
-  // Start screen shown again later (after the tutorial): Tutorial or Showdown
+  // ── Multiplayer mode: lobby + 1v1 sword duels (src/multiplayer/duelMode.js) ──
+  const DUEL_HEALTH_SEGMENTS = SHOWDOWN_BASE_HEALTH_SEGMENTS;
+  const _duelSwordLocalPos = new THREE.Vector3();
+  const _duelSwordLocalQ = new THREE.Quaternion();
+  const _round3 = (v) => Math.round(v * 1000) / 1000;
+  const _round2 = (v) => Math.round(v * 100) / 100;
+  let _duelCamLastYaw = null;
+  let _duelCamManualUntil = 0;
+  const _teleportPlayer = (x, z, yaw) => {
+    const groundY = getSpawnY(x, z, 0);
+    const y = Number.isFinite(groundY) ? groundY : playerModel.position.y;
+    playerModel.position.set(x, y, z);
+    playerControls.playerX = x;
+    playerControls.playerY = y;
+    playerControls.playerZ = z;
+    playerControls.lastPosition?.set(x, y, z);
+    if (playerControls.body) {
+      playerControls.body.setTranslation({ x, y: y + 0.6, z }, true);
+      playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    }
+    if (Number.isFinite(yaw)) {
+      playerControls.yaw = yaw;
+      playerModel.rotation.set(0, yaw, 0);
+      _duelCamLastYaw = yaw;
+    }
+    _playerKnockback.endTime = 0;
+  };
+  const _duelDayLighting = () => {
+    lastAutoMode = 'day';
+    applyPresetForMode('day');
+    applyDisplaySettings();
+    clearRoadLightPool();
+  };
+  const duelCtx = {
+    scene,
+    getMultiplayer: () => multiplayer,
+    startMultiplayer,
+    stopMultiplayer,
+    getPlayerName: () => playerName,
+    createSwordMesh: () => (foamSword?.mesh ? foamSword.mesh.clone(true) : null),
+    getRemoteModel: (id) => otherPlayers[id]?.model || null,
+    removeRemotePlayer: (id) => removeRemotePlayer(id, 'duel-ended'),
+    setControlsLocked: (locked) => {
+      duelControlsLocked = !!locked;
+      if (locked && playerControls) {
+        playerControls.keysPressed?.clear?.();
+        playerControls.isMoving = false;
+      }
+      updateControlAvailability();
+    },
+    // Temporary: where am I? (for picking the duel location — see DUEL_LOCATION)
+    getPlayerPose: () => {
+      const yaw = Math.atan2(Math.sin(playerControls.yaw), Math.cos(playerControls.yaw));
+      return {
+        x: _round2(playerModel.position.x),
+        y: _round2(playerModel.position.y),
+        z: _round2(playerModel.position.z),
+        yaw: _round2(yaw)
+      };
+    },
+    spawnForRoam: () => {
+      _resetForMenu();
+    },
+    enterDuel: ({ x, z, yaw }) => {
+      _resetForMenu();
+      _duelDayLighting();
+      _teleportPlayer(x, z, yaw);
+      // Same health for both duelists, whatever they've upgraded to in Showdown
+      statsState.health = clampStat('health', DUEL_HEALTH_SEGMENTS);
+      updateHealthUI();
+      duelCtx.setControlsLocked(true);
+    },
+    leaveDuel: () => {
+      _resetForMenu();
+    },
+    // Sword pose in the local player's model space (+ grip + block stance) for the opponent
+    getLocalSwordState: () => {
+      if (foamSword?.holder !== playerControls || !foamSword.mesh) return null;
+      playerModel.updateMatrixWorld();
+      _duelSwordLocalPos.copy(foamSword.mesh.position);
+      playerModel.worldToLocal(_duelSwordLocalPos);
+      _duelSwordLocalQ.copy(playerModel.quaternion).invert().multiply(foamSword.mesh.quaternion);
+      const hand = playerModel.userData.foamSwordHandTarget;
+      return {
+        sword: {
+          p: _duelSwordLocalPos.toArray().map(_round3),
+          q: _duelSwordLocalQ.toArray().map(_round3)
+        },
+        hand: hand ? [_round3(hand.x), _round3(hand.y), _round3(hand.z)] : null,
+        blocking: !!window.phoneSwordGyro?.blocking
+      };
+    },
+    // The opponent's sword landed on us
+    applyHit: (dmg, dir) => {
+      if (playerDead) return;
+      window.localHealth = statsState.health - dmg;
+      if (dir) {
+        const len = Math.hypot(dir[0], dir[1]);
+        if (len > 1e-4) {
+          _playerKnockback.vx = (dir[0] / len) * 4.5;
+          _playerKnockback.vz = (dir[1] / len) * 4.5;
+          _playerKnockback.endTime = Date.now() + 500;
+        }
+      }
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'duel-hurt', cooldownMs: 200 });
+    },
+    // Our block stopped the opponent's swing
+    onSwingBlocked: () => {
+      window._pswShowBlockFlash?.('player');
+      audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
+    },
+    // "Back" in the lobby: multiplayer is off again, show the start screen
+    onExit: () => {
+      _resetForMenu();
+      arcadeOverlay.showStartScreen();
+    }
+  };
+  duelMode = createDuelMode(duelCtx);
+
+  const startMultiplayerMode = () => {
+    _resetForMenu();
+    _duelDayLighting();
+    duelMode.enter();
+  };
+
+  // Start screen shown again later (after the tutorial / leaving the lobby):
+  // Tutorial, Showdown or Multiplayer. Only Multiplayer runs peer multiplayer.
   arcadeOverlay.setModeHandler((gameMode) => {
+    if (gameMode !== 'multiplayer') duelMode.exit();
     if (gameMode === 'showdown') {
       _resetForMenu();
       void _psInit();
+    } else if (gameMode === 'multiplayer') {
+      startMultiplayerMode();
     } else {
       startTutorialMode();
     }
   });
-  if (profileResult.mode !== 'showdown') setTimeout(startTutorialMode, 600);
+  if (profileResult.mode === 'multiplayer') setTimeout(startMultiplayerMode, 600);
+  else if (profileResult.mode !== 'showdown') setTimeout(startTutorialMode, 600);
 
   function animate() {
     requestAnimationFrame(animate);
@@ -5029,6 +5203,20 @@ async function initCore(runtimeContext) {
       const _colSweepDist = _psw.prevTipWorld ? _tipWorld.distanceTo(_psw.prevTipWorld) : 0;
       const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
       const _playerMovingFast = _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
+      // Blocked swing: knock the player's sword sideways (snap, hold, return to live gyro)
+      const _startSwordBounce = () => {
+        if (_psw.bounceActive) return;
+        const _bounceCfg = window.phoneSwordSwingCfg;
+        const _bounceAngle = (_bounceCfg?.bounceAngle ?? 90) * (Math.PI / 180);
+        const _bounceDur   = _bounceCfg?.bounceHoldDur ?? 0.35;
+        const _yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), _bounceAngle);
+        _psw.bounceActive    = true;
+        _psw.bounceStartTime = _nowSecPS;
+        _psw.bounceDur       = _bounceDur;
+        _psw.bounceFromQ.copy(_activeQ);
+        _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
+        _psw.bounceCurrentQ.copy(_activeQ);
+      };
       for (const _he of hordeEnemies) {
         if (_he.isDead) continue;
 
@@ -5072,18 +5260,7 @@ async function initCore(runtimeContext) {
                 // Enemy's block holds — both swords recoil, no damage
                 _he.applySwordBounce?.();
                 audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
-                if (!_psw.bounceActive) {
-                  const _bounceCfg = window.phoneSwordSwingCfg;
-                  const _bounceAngle = (_bounceCfg?.bounceAngle ?? 90) * (Math.PI / 180);
-                  const _bounceDur   = _bounceCfg?.bounceHoldDur ?? 0.35;
-                  const _yRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), _bounceAngle);
-                  _psw.bounceActive    = true;
-                  _psw.bounceStartTime = _nowSecPS;
-                  _psw.bounceDur       = _bounceDur;
-                  _psw.bounceFromQ.copy(_activeQ);
-                  _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
-                  _psw.bounceCurrentQ.copy(_activeQ);
-                }
+                _startSwordBounce();
                 // Small step forward into the blocked swing (instead of the miss lunge)
                 const _blockFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
                 _blockFwd.y = 0; _blockFwd.normalize();
@@ -5129,13 +5306,60 @@ async function initCore(runtimeContext) {
           }
         }
       }
+      // ── Duel: same sweep hit + directional block against the other player ──
+      // The attacker detects the hit and sends it; the victim applies the damage.
+      const _duelOpp = duelMode?.getOpponentCombat();
+      if (_duelOpp && !window.phoneSwordGyro?.blocking && _psw.prevTipWorld) {
+        const _nowMsD = Date.now();
+        let _duelSwordCollision = false;
+        if (_duelOpp.hasBlade) {
+          duelBlade: for (const pp of _playerBladePoints) {
+            for (const op of _duelOpp.bladePoints) {
+              if (pp.distanceTo(op) < 0.15) { _duelSwordCollision = true; break duelBlade; }
+            }
+          }
+        }
+        const _duelReachesBody = _tipWorld.distanceTo(_duelOpp.center) < 0.65;
+        if ((_duelReachesBody || _duelSwordCollision) && _nowMsD - _duelLastSwordHitAt > 1000) {
+          const _sweepVec = new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
+          const _minSweep = window.phoneSwordSwingCfg?.minSweepDist ?? 0.015;
+          const _minSweepSpd = window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000;
+          if (_sweepVec.length() > _minSweep && (window._pswDebugSpeed ?? 0) >= _minSweepSpd) {
+            const _swingDir = _psw.tipHistory.length
+              ? new THREE.Vector3().subVectors(_tipWorld, _psw.tipHistory[0].pos)
+              : _sweepVec.clone();
+            const _toOpp = new THREE.Vector3().subVectors(_duelOpp.position, playerModel.position).setY(0);
+            const _duelBlocked = _duelOpp.blocking && _duelOpp.hasBlade &&
+              swingCrossesBlade(_swingDir, _duelOpp.bladeDir, _toOpp, PLAYER_BLOCK_MIN_ANGLE_DEG);
+            if (_duelBlocked) {
+              audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
+              window._pswShowBlockFlash?.('enemy');
+              _startSwordBounce();
+              duelMode.sendBlocked();
+              _swingHitOccurred = true;
+              _duelLastSwordHitAt = _nowMsD;
+            } else if (_duelReachesBody) {
+              const _sweepDir = _sweepVec.clone().setY(0);
+              if (_sweepDir.lengthSq() < 0.0001) _sweepDir.copy(_toOpp);
+              if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
+              _sweepDir.normalize();
+              duelMode.sendHit(1, _sweepDir);
+              spawnBloodBurst(scene, _duelOpp.center, { groundY: _duelOpp.position.y, intensity: 0.8 });
+              audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
+              _swingHitOccurred = true;
+              _duelLastSwordHitAt = _nowMsD;
+            }
+          }
+        }
+      }
+
       // Forward lunge on fast swing that missed all enemies
-      // Suppress if any enemy is very close (prevents clipping through them)
+      // Suppress if any enemy (or the duel opponent) is very close (prevents clipping through them)
       const _lungeProximityDist = 1.0;
       const _tooCloseToEnemy = hordeEnemies.some(_e =>
         !_e.isDead && _e.group &&
         playerModel.position.distanceTo(_e.group.position) < _lungeProximityDist
-      );
+      ) || (!!_duelOpp && playerModel.position.distanceTo(_duelOpp.position) < _lungeProximityDist);
       if (_playerMovingFast && !_swingHitOccurred && !_tooCloseToEnemy) {
         const _missFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
         _missFwd.y = 0; _missFwd.normalize();
@@ -5353,6 +5577,23 @@ async function initCore(runtimeContext) {
       }
     }
 
+    // ── Duel: camera turns toward the opponent (keyboard / touch turning pauses it) ──
+    if (duelMode?.isFighting() && playerControls) {
+      const _opp = duelMode.getOpponentCombat();
+      const _nowD = performance.now();
+      if (_duelCamLastYaw !== null && Math.abs(wrapDeltaRad(playerControls.yaw - _duelCamLastYaw)) > 0.01) {
+        _duelCamManualUntil = _nowD + 2000;
+      }
+      if (_opp && _nowD >= _duelCamManualUntil) {
+        const _dx = _opp.position.x - playerModel.position.x;
+        const _dz = _opp.position.z - playerModel.position.z;
+        if (Math.hypot(_dx, _dz) > 0.5) {
+          playerControls.yaw += wrapDeltaRad(Math.atan2(_dx, _dz) - playerControls.yaw) * Math.min(1, frameDelta * 4);
+        }
+      }
+      _duelCamLastYaw = playerControls.yaw;
+    }
+
     // ── Phone sword jump (runs regardless of enemy count) ─────────────────
     if (playerModel) {
       // Ground under the player's current XZ (the stage isn't flat, and a blast carries
@@ -5394,8 +5635,8 @@ async function initCore(runtimeContext) {
       }
     }
 
-    // ── Horde enemy update ─────────────────────────────────────────────────
-    if (hordeEnemies.length > 0) {
+    // ── Horde enemy update (also runs in duels: player knockback + body sync) ──
+    if (hordeEnemies.length > 0 || duelMode?.isInDuel()) {
       // Sync kinematic player body to visual position each frame
       if (playerControls?.body) {
         playerControls.body.setNextKinematicTranslation({
@@ -5563,7 +5804,9 @@ async function initCore(runtimeContext) {
       }
       // GLB character: play the flying-back death clip once (held until respawn)
       playerModel.userData.qwopRig?.glbCharacter?.playDeath();
-      showGameOver();
+      // Losing a duel shows the winner and goes back to the lobby instead of Game Over
+      if (duelMode?.isInDuel()) duelMode.onLocalDeath();
+      else showGameOver();
     }
 
     const mixerDelta = mixerClock.getDelta();
@@ -5623,7 +5866,8 @@ async function initCore(runtimeContext) {
       player.model.quaternion.slerp(player.targetQuat, REMOTE_LERP_ALPHA);
     });
 
-    if (now - lastPresenceSend >= presenceSendIntervalMs) {
+    duelMode?.update();
+    if (multiplayer && duelMode?.getOpponentId() && now - lastPresenceSend >= presenceSendIntervalMs) {
       const payload = {
         type: "presence",
         id: multiplayer.getId(),

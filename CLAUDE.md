@@ -3,14 +3,14 @@
 > **Maintenance rule for AI agents:** If your changes add/remove/rename source files, move logic between modules, introduce new architectural patterns, or add new env vars — update this file and `docs/AI_AGENT_GUIDE.md` in the same commit. Keep the "Common Task Locations" table and directory tree accurate. Stale docs cost more tokens than fresh ones.
 
 ## What This Is
-A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone is the sword controller (gyro + joystick over PeerJS, `public/phone-sword.html`); the desktop/TV browser runs the game. Players fight waves of AI swordsmen and bomb throwers along a path through a static GLB map, stage by stage, collect coins and buy upgrades in the shop. Other players in the same room are visible (presence sync) and can be shot with the pistol. Sword Showdown is the only mode — the old RPG, horde, 3D painter, OSM map and NPC systems were removed. The repo name "qwop-tps" is historical.
+A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone is the sword controller (gyro + joystick over PeerJS, `public/phone-sword.html`); the desktop/TV browser runs the game. Players fight waves of AI swordsmen and bomb throwers along a path through a static GLB map, stage by stage, collect coins and buy upgrades in the shop. Showdown is single player. **Multiplayer** mode is a lobby of everyone online where you challenge another player to a 1v1 sword duel in a private room (guns, bombs, bubbles and shields off). The old RPG, horde, 3D painter, OSM map and NPC systems were removed. The repo name "qwop-tps" is historical.
 
 ## Tech Stack
 | Layer | Technology |
 |---|---|
 | 3D Rendering | Three.js v0.176 (+ `three-mesh-bvh` for map raycasts) |
 | Physics | Rapier3D (`@dimforge/rapier3d-compat`) |
-| Multiplayer | Firebase Realtime Database (presence/signaling, shop stock) + PeerJS WebRTC (player presence + projectiles; phone controller link) |
+| Multiplayer | Firebase Realtime Database (lobby/presence/signaling, shop stock) + PeerJS WebRTC (Multiplayer mode only: duel challenges, presence, sword state; separately the phone controller link) |
 | Map | Static GLB (`public/glb_map/map.glb`), height via BVH raycast |
 | Build tool | Vite 6 |
 | Deploy | Vercel (with `/api/turn-credentials` serverless function) |
@@ -56,7 +56,8 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone i
 │   │   └── playerBomb.js       # Player bombs — same flight/blast as a bomber's (shared helpers exported from BombThrowerEnemy.js)
 │   │
 │   ├── multiplayer/
-│   │   └── peerConnection.js   # Multiplayer class — PeerJS WebRTC, Firebase signaling, star topology; messages: presence, projectile
+│   │   ├── peerConnection.js   # Multiplayer class — PeerJS WebRTC, Firebase signaling, rooms (lobby / duel-<id>, joinRoom, destroy); messages: presence, projectile, duel
+│   │   └── duelMode.js         # Multiplayer mode: lobby screen, challenges, duel lifecycle (countdown/winner), temp find-location tool — game access via a ctx from bootstrapGameApp.js
 │   │
 │   ├── audio/
 │   │   └── audioManager.js     # AudioManager — BGS loop, SFX playback/preload, footsteps, ouch vocals
@@ -140,10 +141,13 @@ appContext.debugFlags // PERF, DEBUG_CONSOLE
 ### 2. Feature Facade Pattern (`src/features/`)
 Files in `features/` are **thin re-export + lazy-load wrappers** to enable Vite code splitting. `combatFeature.js` re-exports `projectiles.js` and lazy-loads the weapon modules (shield, pistol, foam sword); `uiPanelsFeature.js` lazy-loads the shop. When adding new heavy features, add a facade here.
 
-### 3. Multiplayer: Star Topology
-- Firebase Realtime Database = presence/signaling (and shop stock per room)
-- PeerJS WebRTC = game traffic; only two message types: `presence` (position/animation/equipment) and `projectile` (pistol PvP)
-- One peer elected "host"; all others connect to host (star), host re-broadcasts
+### 3. Multiplayer: lobby + duel rooms (Multiplayer mode only)
+- Peer multiplayer only exists in Multiplayer mode: `startMultiplayer` / `stopMultiplayer` in `bootstrapGameApp.js` create/destroy the `Multiplayer` instance (Showdown and the tutorial are single player; `multiplayer` is `null` there — guard every use)
+- Firebase Realtime Database = `peers/<id>` ({name, roomId}) lists everyone online (the lobby list), `rooms/<roomId>/<id>` drives who connects to whom; the shop stock is global (`merchantInventory`)
+- Rooms: everyone starts in `lobby`; a duel moves both players to `duel-<challengeId>` (`joinRoom`) and back afterwards
+- PeerJS WebRTC message types: `presence` (position/animation/equipment), `projectile`, `duel` (`op`: challenge/accept/decline/cancel/state/hit/blocked/dead/leave — see `duelMode.js`). Game traffic is sent only to the duel opponent (`sendTo`); presence from anyone else is ignored
+- Duel hits: the attacker's sword check detects the hit and sends `hit`; the victim applies the damage and sends `dead` when it dies
+- One peer per room elected "host"; others connect to it (star)
 - Topology mode configurable via `VITE_NETWORK_TOPOLOGY_MODE` env var
 - The phone controller has its own PeerJS connection to the game (`_attachPhoneSwordConn` in `bootstrapGameApp.js`); TURN servers come from `/api/turn-credentials`
 
@@ -157,7 +161,7 @@ Each stage picks the flattest direction from the start (`_psPickPathAngle`), pla
 Players and EnemyPlayers render `public/models/glb_characters/gemhorn_rigged.glb` (Mixamo skeleton). `fluffyCharacter.ts` retargets Mixamo FBX clips (walk/idle) onto it and adds fur; the clip drives everything **except** the arm chains. Arms are posed each frame by a stretchy two-bone IK (`GLBCharacter.solveArm`) toward invisible floating-hand groups, which are also the weapon attach points (`userData.proceduralHand` markers, preferred by `Weapon._getHandBone`). The GLB and clips face +Z (game forward) — no Y180 needed. Hand labels are mirrored: the `'right'` floating hand is at local +X, i.e. the anatomical left arm. On death, `GLBCharacter.playDeath()` plays `Flying Back Death.fbx` once over the whole body (IK suspended, hands follow the palms) until `revive()`; EnemyPlayer keeps its ragdoll during it, with knockback capped by `DEATH_KNOCKBACK_CAP`. Bomb blasts reuse the clip without dying: `EnemyPlayer.applyBlastKnockback()` (ragdoll + `playDeath()`, `revive()` in `_endRagdoll`, force/cap `BLAST_KNOCKBACK`) and `_blastPlayer()` in `bootstrapGameApp.js` for the local player. `BombThrowerEnemy` uses the same GLB with `armIK: false` (clips drive the arms, no floating hands): `playAction(glbCharacterConfig.throwClip)` plays `Throw.fbx` once and releases the bomb at `THROW_RELEASE_AT` of the clip; between throws a bomb mesh is snapped to the anatomical right palm (`getPalmWorldPosition('left')` — labels are mirrored). Blasts from other throwers play the death clip for `BLAST_STUN_MS`, then `revive()`.
 
 ### 7. Start screen + tutorial
-After login the start screen shows only **Start Game** (runs the tutorial) until the profile has `tutorialCompleted: true`; after that it shows **Tutorial** and **Showdown**. The chosen mode rides on the auth result (`profileResult.mode`); when the tutorial finishes, `arcadeOverlay.showStartScreen()` brings the start screen back and `setModeHandler` starts the next mode in the running game. The tutorial script (`src/tutorial/showdownTutorial.js`) drives enemies through `EnemyPlayer.script` (`passive` / `block` / `windup`) and the bomber's `throwsHeld` / `aimAt`, and touches the game only through `tutorialCtx` in `bootstrapGameApp.js`. While it runs, health never drops (`localHealth` setter), auto-buy is paused (it buys scripted), and tutorial enemies drop no coins and don't count as kills (`_tutorial`).
+After login the start screen shows only **Start Game** (runs the tutorial) until the profile has `tutorialCompleted: true`; after that it shows **Tutorial**, **Showdown** and **Multiplayer**. The chosen mode rides on the auth result (`profileResult.mode`); when the tutorial finishes, `arcadeOverlay.showStartScreen()` brings the start screen back and `setModeHandler` starts the next mode in the running game. The tutorial script (`src/tutorial/showdownTutorial.js`) drives enemies through `EnemyPlayer.script` (`passive` / `block` / `windup`) and the bomber's `throwsHeld` / `aimAt`, and touches the game only through `tutorialCtx` in `bootstrapGameApp.js`. While it runs, health never drops (`localHealth` setter), auto-buy is paused (it buys scripted), and tutorial enemies drop no coins and don't count as kills (`_tutorial`).
 
 ### 8. PIN Auth
 No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hashed client-side via Web Crypto, stored in Firebase. Hash cached in cookie for auto-login.
@@ -174,7 +178,7 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
    - Firebase + player profile load
    - GLB map + height resolver
    - Character spawning
-   - Multiplayer (PeerJS) + phone controller link
+   - Phone controller link (PeerJS); peer multiplayer starts only when Multiplayer mode is picked
    - Main animation/game loop (`requestAnimationFrame`)
 
 ---
@@ -211,9 +215,10 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 | Sword Showdown enemy difficulty per stage (enemy count: 15 at stage 1, +1/stage; hearts: all 1 at stage 1, more 2–3 heart enemies later — `_psEnemyCount` / `_psHeartsForStage`; swordsmen attacking at once: 1 for stages 1–7, up to 4; swing vs block/idle frequency) | `_psMaxAttackers` / `_psSwingChance` in `bootstrapGameApp.js` (attack slots in the game loop, `swingChance` passed in `_spawnHordeEnemy`); `EnemyPlayer.swingChance` used by `_decideNextPhase` in `src/characters/EnemyPlayer.js` |
 | Sword Showdown kill counter (killed / total this stage) | `_psStageKills` / `_psStageTotal` / `_psUpdateKillHud` in `bootstrapGameApp.js` (`#ps-kill-counter`, `.ps-kill-counter` in `styles.css`) |
 | Phone controller page (gyro sword + joystick, Block, bomb/gun/fire/shield/bubble/jump) | `public/phone-sword.html` (sends `gyro` packets with `joyAngle`/`joyForce`, `action` messages; shows host `status`); receiver `_attachPhoneSwordConn` / `_handlePhoneAction` in `bootstrapGameApp.js`; remote joystick also moves the player on desktop (`useJoystick` in `PlayerControls.processMovement`) |
-| Start screen ("Start Game" = tutorial until `profiles/<key>/tutorialCompleted`; then Tutorial / Showdown) + Sword Showdown tutorial (QR setup, hit past blocks, block swings, deflect a bomb, coins/auto-buy/bomb throw, shield, bubble, gun; player can't die, every step skippable) | `createArcadeOverlay` (`chooseMode`, `showStartScreen`, `setModeHandler`) + `tutorialCtx` / `startTutorialMode` / `_resetForMenu` in `bootstrapGameApp.js`; steps in `src/tutorial/showdownTutorial.js`; panel/arrows/button ring in `src/tutorial/tutorialOverlay.js` (`.tutorial-*` in `styles.css`); enemy hooks `EnemyPlayer.script` / `stationary` / `swordBounces`, `BombThrowerEnemy.throwsHeld` / `aimAt` / `stationary`; flag via `saveTutorialCompleted` / `hasCompletedTutorial` in `src/player/playerProfile.js`; phone button ring = `highlight` in the phone `status` message (`public/phone-sword.html`) |
+| Start screen ("Start Game" = tutorial until `profiles/<key>/tutorialCompleted`; then Tutorial / Showdown / Multiplayer) + Sword Showdown tutorial (QR setup, hit past blocks, block swings, deflect a bomb, coins/auto-buy/bomb throw, shield, bubble, gun; player can't die, every step skippable) | `createArcadeOverlay` (`chooseMode`, `showStartScreen`, `setModeHandler`) + `tutorialCtx` / `startTutorialMode` / `_resetForMenu` in `bootstrapGameApp.js`; steps in `src/tutorial/showdownTutorial.js`; panel/arrows/button ring in `src/tutorial/tutorialOverlay.js` (`.tutorial-*` in `styles.css`); enemy hooks `EnemyPlayer.script` / `stationary` / `swordBounces`, `BombThrowerEnemy.throwsHeld` / `aimAt` / `stationary`; flag via `saveTutorialCompleted` / `hasCompletedTutorial` in `src/player/playerProfile.js`; phone button ring = `highlight` in the phone `status` message (`public/phone-sword.html`) |
 | Audio | `src/audio/audioManager.js`, `public/assets/audio/`; Sword Showdown ambient loop = `SWORD_SHOWDOWN_BGS` in `bootstrapGameApp.js`; hurt vocals = `audioManager.playOuch(kind)` — ouch1 enemies via `playEnemyOuch()` (every 3rd or 4th hit across all enemies, `applyDamage`), ouch2 player hurt / ouch3 player death (`triggerPlayerHurtBlood`) |
 | Add new 3D prop | Place GLB in `public/assets/props/`, load it from `bootstrapGameApp.js` (see `ROAD_LIGHT_MODEL_URL`) |
+| Multiplayer mode (lobby of everyone online, challenge → private duel room, sword-only duels, 3-2-1-FIGHT, WINNER banner, forfeit; temporary "Find Location" + "Copy location information" for picking the duel spot) | Lobby/duel state machine + DOM in `src/multiplayer/duelMode.js` (`DUEL_LOCATION` = where duels happen — paste the copied JSON there; `.duel-*` in `styles.css`); game side = `duelCtx` / `startMultiplayerMode` + duel sword hit check (`getOpponentCombat`) in the phone-sword loop of `bootstrapGameApp.js`; rooms / `joinRoom` / `destroy` in `src/multiplayer/peerConnection.js`; opponent grip IK = `userData.remoteHandTarget` in `updateRemotePlayerRig` (`src/models/playerModel.js`) |
 | Serverless API changes | `/api/turn-credentials.js` |
 
 ---

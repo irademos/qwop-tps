@@ -1026,9 +1026,11 @@ export class PlayerControls {
     const position = this.getProjectileSpawnPosition(direction);
 
     this.consumeAmmo();
-    this.multiplayer.send({
+    // Single-player modes have no multiplayer connection
+    const shooterId = this.multiplayer?.getId?.() ?? 'local';
+    this.multiplayer?.send?.({
       type: 'projectile',
-      id: this.multiplayer.getId(),
+      id: shooterId,
       position: position.toArray(),
       direction: direction.toArray()
     });
@@ -1039,7 +1041,7 @@ export class PlayerControls {
       this.projectiles,
       position,
       direction,
-      this.multiplayer.getId(),
+      shooterId,
       {
         geometry: new THREE.SphereGeometry(0.08, 8, 8),
         colliderDesc: RAPIER.ColliderDesc.ball(0.08).setRestitution(0.3).setFriction(0.5),

@@ -89,6 +89,15 @@ export function updateRemotePlayerRig(playerGroup, deltaSeconds) {
   if (!rig.lastRemotePos) rig.lastRemotePos = pos.clone();
   const speed = dt > 0 ? Math.hypot(pos.x - rig.lastRemotePos.x, pos.z - rig.lastRemotePos.z) / dt : 0;
   rig.lastRemotePos.copy(pos);
+  // Duel opponent: both hands grip the sword where the other player's game says it is
+  const handTarget = playerGroup.userData.remoteHandTarget;
+  if (handTarget && rig.floatingHands) {
+    for (const side of ['left', 'right']) {
+      const yOff = side === 'right' ? -0.08 : 0;
+      _fsHandTarget.set(handTarget.x, handTarget.y + yOff, handTarget.z);
+      rig.floatingHands[side].position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
+    }
+  }
   updateGLBCharacter(rig, dt, speed > 0.4);
 }
 

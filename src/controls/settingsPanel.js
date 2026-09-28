@@ -1,3 +1,4 @@
+import { clearMultiplayerServerState } from '../multiplayer/peerConnection.js';
 const TAB_KEY = 'settings:lastTab';
 
 const TABS = [
@@ -910,7 +911,7 @@ async function handleAction(target) {
   } else if (action === 'open-leaderboard') {
     await openLeaderboardOverlay();
   } else if (action === 'reconnect') {
-    context.multiplayer?.reconnect?.();
+    getMultiplayer()?.reconnect?.();
   } else if (action === 'toggle-console') {
     const visible = elements.consoleLog.style.display === 'block';
     elements.consoleLog.style.display = visible ? 'none' : 'block';
@@ -959,10 +960,6 @@ async function handleAction(target) {
     }
   } else if (action === 'clear-server-state') {
     const { clearServerButton, clearServerStatus } = elements;
-    if (!context.multiplayer?.clearServerState) {
-      clearServerStatus.textContent = 'Server clear unavailable in this build.';
-      return;
-    }
     const confirmed = window.confirm(
       'Clear server-side rooms, sessions, and caches? This will disconnect players.'
     );
@@ -970,7 +967,7 @@ async function handleAction(target) {
     clearServerButton.disabled = true;
     clearServerStatus.textContent = 'Clearing server-side state...';
     try {
-      const result = await context.multiplayer.clearServerState();
+      const result = await clearMultiplayerServerState();
       if (result.failed.length) {
         const failedList = result.failed.map(item => item.path).join(', ');
         clearServerStatus.textContent = `Cleared: ${result.cleared.join(', ')}. Failed: ${failedList}.`;
@@ -1390,8 +1387,11 @@ export function closeSettings() {
   closeOverlay();
 }
 
-export function initSettingsPanel({ appState, multiplayer, player } = {}) {
-  context = { appState, multiplayer, player };
+// Multiplayer only exists while Multiplayer mode is on, so it's looked up when needed
+const getMultiplayer = () => context?.getMultiplayer?.() ?? null;
+
+export function initSettingsPanel({ appState, getMultiplayer, player } = {}) {
+  context = { appState, getMultiplayer, player };
   overlay = document.getElementById('settings-overlay');
   panel = document.getElementById('settings-panel');
   if (!overlay || !panel) {

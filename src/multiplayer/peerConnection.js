@@ -3,16 +3,18 @@ import { loadPeerJs } from '../core/externalDeps.js';
 import {
   ref,
   set,
+  update,
   remove,
   onValue,
-  get,
   onDisconnect
 } from 'firebase/database';
 
 const VALID_MESSAGE_TYPES = new Set([
   'presence',
-  'projectile'
+  'projectile',
+  'duel'
 ]);
+export const LOBBY_ROOM_ID = 'lobby';
 const MAX_PENDING_PAYLOADS = 75;
 const NETWORK_TOPOLOGY_MODE = (import.meta.env.VITE_NETWORK_TOPOLOGY_MODE || 'star').toLowerCase();
 const PEER_LOG_THROTTLE_MS = 30000;
@@ -28,8 +30,32 @@ const debugNetLog = (...args) => {
   }
 };
 
+// Developer tool (Settings → Developer): wipe rooms/peers/sessions in Firebase
+export async function clearMultiplayerServerState() {
+  const targets = ['rooms', 'peers', 'sessions'];
+  const results = await Promise.all(
+    targets.map(async (path) => {
+      try {
+        await remove(ref(db, path));
+        return { path, ok: true };
+      } catch (error) {
+        console.warn(`Failed to clear ${path}:`, error);
+        return { path, ok: false, error };
+      }
+    })
+  );
+  const cleared = results.filter(result => result.ok).map(result => result.path);
+  const failed = results
+    .filter(result => !result.ok)
+    .map(result => ({ path: result.path, error: result.error }));
+  return { cleared, failed };
+}
+
 export class Multiplayer {
-  constructor(playerName, onPeerData) {
+  // options.roomId: room to join once the peer is open (default: the multiplayer lobby).
+  // Rooms decide who connects to whom; joinRoom() moves this peer to another room
+  // (e.g. a private duel room).
+  constructor(playerName, onPeerData, { roomId = LOBBY_ROOM_ID } = {}) {
     this.connections = {};
     this.pendingConnections = new Set();
     this.pendingPayloads = new Map();
@@ -55,6 +81,12 @@ export class Multiplayer {
     this.unsubscribeRoomListener = null;
     this.hostRecalcTimer = null;
     this.roomPeerIds = [];
+    this.roomId = roomId;          // room this peer wants to be in
+    this.registeredRoomId = null;  // room it's registered under in Firebase
+    this.roomJoinChain = null;
+    this.destroyed = false;
+    this.onPeersChange = null;
+    this.handleBeforeUnload = () => this.removeServerEntries();
     this.networkTopologyMode = NETWORK_TOPOLOGY_MODE === 'mesh' ? 'mesh' : 'star';
     
     this.initPeer(); // Start async setup
@@ -93,41 +125,22 @@ export class Multiplayer {
     }
   
     const Peer = await loadPeerJs();
+    if (this.destroyed) return;
 
     this.peer = new Peer({
       config: { iceServers }
     });
 
     this.peer.on('open', async id => {
+      if (this.destroyed) return;
       this.id = id;
-
-      const roomsRef = ref(db, 'rooms');
-      const snapshot = await get(roomsRef);
-
-      let assignedRoom = null;
-      let roomIndex = 0;
-
-      if (snapshot.exists()) {
-        const rooms = snapshot.val();
-        for (const roomName in rooms) {
-          const peersInRoom = Object.keys(rooms[roomName]);
-          if (peersInRoom.length < 20) {
-            assignedRoom = roomName;
-            debugNetLog("Entered room: ", assignedRoom);
-            break;
-          }
-          roomIndex++;
-        }
-      }
-
-      if (!assignedRoom) {
-        assignedRoom = `room-${roomIndex}`;
-      }
+      const assignedRoom = this.roomId || LOBBY_ROOM_ID;
+      debugNetLog('Entered room: ', assignedRoom);
 
       const roomRef = ref(db, `rooms/${assignedRoom}/${id}`);
-      this.roomId = assignedRoom;
       await remove(roomRef);
       await set(roomRef, true);
+      this.registeredRoomId = assignedRoom;
 
       const peerRef = ref(db, `peers/${id}`);
       await remove(peerRef);
@@ -141,14 +154,17 @@ export class Multiplayer {
       onDisconnect(roomRef).remove();
       onDisconnect(peerRef).remove();
 
+      if (this.destroyed) {
+        this.removeServerEntries();
+        return;
+      }
       // Still use beforeunload for graceful exit (optional)
-      window.addEventListener('beforeunload', () => {
-        remove(roomRef);
-        remove(peerRef);
-      });
+      window.addEventListener('beforeunload', this.handleBeforeUnload);
 
       this.attachPeersListener();
       this.attachRoomListener(assignedRoom);
+      // joinRoom() called while we were registering
+      if (this.roomId !== assignedRoom) void this.joinRoom(this.roomId);
 
       if (typeof this.onReady === 'function') {
         try {
@@ -181,6 +197,11 @@ export class Multiplayer {
     this.unsubscribePeersListener = onValue(ref(db, 'peers'), snapshot => {
       this.peersCache = snapshot.val() || {};
       this.scheduleHostRecalculation();
+      try {
+        this.onPeersChange?.(this.peersCache);
+      } catch (err) {
+        console.warn('onPeersChange callback failed:', err);
+      }
     });
   }
 
@@ -298,24 +319,80 @@ export class Multiplayer {
     }
   }
 
+  // Move this peer to another room (lobby <-> private duel room). Moves are chained so
+  // quick back-to-back joins land in order. Connections to peers outside the new room are
+  // left open; callers address duel traffic directly with sendTo().
+  joinRoom(roomId) {
+    if (!roomId || this.destroyed) return Promise.resolve();
+    this.roomId = roomId;
+    this.roomJoinChain = (this.roomJoinChain || Promise.resolve())
+      .then(() => this.syncRoomRegistration());
+    return this.roomJoinChain;
+  }
+
+  async syncRoomRegistration() {
+    const roomId = this.roomId;
+    const previousRoomId = this.registeredRoomId;
+    if (!this.id || this.destroyed || previousRoomId === roomId) return;
+    try {
+      if (previousRoomId) {
+        const previousRoomRef = ref(db, `rooms/${previousRoomId}/${this.id}`);
+        await onDisconnect(previousRoomRef).cancel();
+        await remove(previousRoomRef);
+      }
+      const roomRef = ref(db, `rooms/${roomId}/${this.id}`);
+      await set(roomRef, true);
+      onDisconnect(roomRef).remove();
+      await update(ref(db, `peers/${this.id}`), { roomId });
+    } catch (err) {
+      console.warn('joinRoom failed:', err);
+      this.recordError(err);
+    }
+    this.registeredRoomId = roomId;
+    if (this.destroyed) return;
+    this.roomPeerIds = [];
+    this.currentHostId = null;
+    this.lastValidPeerSetKey = '';
+    this.lastOrderedPeerIds = [];
+    this.attachRoomListener(roomId);
+  }
+
+  getRoomId() {
+    return this.roomId;
+  }
+
+  // Everyone online: { [peerId]: { name, roomId, timestamp } }
+  getOnlinePeers() {
+    return { ...(this.peersCache || {}) };
+  }
+
+  removeServerEntries() {
+    if (!this.id) return;
+    remove(ref(db, `rooms/${this.registeredRoomId || this.roomId}/${this.id}`)).catch(() => {});
+    remove(ref(db, `peers/${this.id}`)).catch(() => {});
+  }
+
+  // Leave multiplayer entirely: drop presence in Firebase, close every connection.
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.resetRealtimeListeners();
+    window.removeEventListener('beforeunload', this.handleBeforeUnload);
+    this.removeServerEntries();
+    this.pendingConnectionRetries.forEach(timeoutId => clearTimeout(timeoutId));
+    this.pendingConnectionRetries.clear();
+    Object.keys(this.connections).forEach(peerId => {
+      this.stopPingLoop(peerId);
+      try { this.connections[peerId]?.close?.(); } catch (_) { /* already closed */ }
+    });
+    this.connections = {};
+    this.pendingConnections.clear();
+    this.pendingPayloads.clear();
+    try { this.peer?.destroy?.(); } catch (_) { /* already destroyed */ }
+  }
+
   async clearServerState() {
-    const targets = ['rooms', 'peers', 'sessions'];
-    const results = await Promise.all(
-      targets.map(async (path) => {
-        try {
-          await remove(ref(db, path));
-          return { path, ok: true };
-        } catch (error) {
-          console.warn(`Failed to clear ${path}:`, error);
-          return { path, ok: false, error };
-        }
-      })
-    );
-    const cleared = results.filter(result => result.ok).map(result => result.path);
-    const failed = results
-      .filter(result => !result.ok)
-      .map(result => ({ path: result.path, error: result.error }));
-    return { cleared, failed };
+    return clearMultiplayerServerState();
   }
 
   connectToPeer(peerId) {

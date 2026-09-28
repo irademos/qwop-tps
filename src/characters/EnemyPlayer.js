@@ -167,7 +167,7 @@ function swingBladeDir(preset, u, out) {
 export const BLOCK_MIN_ANGLE_DEG = 30;
 // The player's block is more forgiving: a wider reach around their blade, and only swings
 // within this (smaller) angle of their blade's line slip past it.
-const PLAYER_BLOCK_MIN_ANGLE_DEG = 15;
+export const PLAYER_BLOCK_MIN_ANGLE_DEG = 15;
 const PLAYER_BLOCK_REACH         = 0.85;  // m, from any point of the player's blade
 const _blkS = new THREE.Vector3();
 const _blkB = new THREE.Vector3();
