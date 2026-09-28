@@ -1283,6 +1283,36 @@ body.settings-open #inventory-button {
   }
 }
 
+/* Touch screens: Block/Fire is a full-width bar along the bottom (toggled by
+   PlayerControls.refreshActionButtons); the joystick and other buttons sit above it */
+@media (pointer: coarse) {
+  body.mobile-block-bar {
+    --block-bar-height: clamp(64px, 11vh, 84px);
+    --block-bar-clearance: calc(16px + var(--block-bar-height) + 12px);
+  }
+
+  body.mobile-block-bar #action-buttons #punch-button {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    height: var(--block-bar-height);
+    font-size: clamp(18px, 5vw, 26px);
+    border-radius: 14px;
+  }
+
+  body.mobile-block-bar #action-buttons,
+  body.mobile-block-bar #jump-button,
+  body.mobile-block-bar #joystick-container {
+    bottom: calc(var(--block-bar-clearance) + env(safe-area-inset-bottom, 0px));
+  }
+
+  body.mobile-block-bar #gyro-button {
+    bottom: calc(var(--block-bar-clearance) + env(safe-area-inset-bottom, 0px) + var(--mobile-grid-size) + 8px);
+  }
+}
+
 #game-over-overlay {
   position: fixed;
   top: 0;

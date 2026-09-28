@@ -499,6 +499,13 @@ function createArcadeOverlay(startOverlay) {
 
 const SWORD_SHOWDOWN_BGS = 'Interior Day/Inside Day.ogg';
 const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
+// Sword gyro sensitivity: gyro angles are multiplied by window.phoneSwordLocalSensitivity
+// ("Use This Device" — the game screen is also the sword, so it defaults higher: small wrist
+// movements swing the sword and the screen stays in view) or window.phoneSwordPhoneSensitivity
+// (a separate phone connected by QR code). Set from Settings → Sword Gyro, saved per device
+// as sq:swordLocalSensitivity / sq:swordPhoneSensitivity.
+const PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT = 2;
+const PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT = 1;
 
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
@@ -3600,11 +3607,20 @@ async function initCore(runtimeContext) {
   if (profileResult.mode === 'showdown') setTimeout(_psInit, 600);
 
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
-  window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false, blocking: false };
+  window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false, blocking: false, localDevice: false };
   // Calibration: these are the "neutral" angles subtracted from live readings
   window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
   // Config: additional rotation offsets (degrees) applied on top of gyro delta
   window.phoneSwordConfig = { offsetX: 90, offsetY: 180, offsetZ: 0 };
+  const _loadSwordSensitivity = (key, fallback) => {
+    try {
+      const saved = parseFloat(localStorage.getItem(key));
+      if (Number.isFinite(saved) && saved > 0) return saved;
+    } catch (_) { /* storage unavailable — keep the default */ }
+    return fallback;
+  };
+  window.phoneSwordLocalSensitivity = _loadSwordSensitivity('sq:swordLocalSensitivity', PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT);
+  window.phoneSwordPhoneSensitivity = _loadSwordSensitivity('sq:swordPhoneSensitivity', PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT);
 
   // Recalibrate: snapshot current gyro as neutral AND clear cached base quaternions
   // so the gyro loop re-initializes them cleanly from the weapon's _holdRotation.
@@ -3716,6 +3732,7 @@ async function initCore(runtimeContext) {
   });
 
   // "Use This Device" — pipe the current device's own gyroscope into phoneSwordGyro
+  let _localGyroHandler = null;
   document.getElementById('phone-sword-use-this-device')?.addEventListener('click', async () => {
     if (typeof DeviceOrientationEvent === 'undefined') {
       alert('Gyroscope not available on this device.');
@@ -3731,14 +3748,19 @@ async function initCore(runtimeContext) {
         return;
       }
     }
-    const _localGyroHandler = (event) => {
-      if (event.alpha === null) return;
-      window.phoneSwordGyro.alpha = event.alpha;
-      window.phoneSwordGyro.beta = event.beta;
-      window.phoneSwordGyro.gamma = event.gamma;
-      // blocking not available from local device — stays false
-    };
-    window.addEventListener('deviceorientation', _localGyroHandler, true);
+    // The screen is also the sword, so the gyro is amplified (window.phoneSwordLocalSensitivity)
+    // and small wrist movements are enough while still being able to see the screen.
+    // Blocking comes from the on-screen Block button.
+    if (!_localGyroHandler) {
+      _localGyroHandler = (event) => {
+        if (!window.phoneSwordGyro.localDevice || event.alpha === null) return;
+        window.phoneSwordGyro.alpha = event.alpha;
+        window.phoneSwordGyro.beta = event.beta;
+        window.phoneSwordGyro.gamma = event.gamma;
+      };
+      window.addEventListener('deviceorientation', _localGyroHandler, true);
+    }
+    window.phoneSwordGyro.localDevice = true;
     window.phoneSwordGyro.connected = true;
     phoneSwordQrStatus.textContent = 'This device connected!';
     phoneSwordQrStatus.classList.add('connected');
@@ -3873,6 +3895,8 @@ async function initCore(runtimeContext) {
   let _tutorialPhoneHighlight = null;
   const _attachPhoneSwordConn = (conn) => {
     window.phoneSwordGyro.connected = true;
+    // A separate phone took over — stop using this device's own gyro
+    window.phoneSwordGyro.localDevice = false;
     let lastStatusJson = '';
     const sendStatus = () => {
       if (!conn.open) return;
@@ -5109,8 +5133,17 @@ async function initCore(runtimeContext) {
         let _dAlpha = (Number.isFinite(_g.alpha) ? _g.alpha : _c.alpha) - _c.alpha;
         if (_dAlpha > 180) _dAlpha -= 360;
         if (_dAlpha < -180) _dAlpha += 360;
-        const _dBeta  = _beta  - _c.beta;
-        const _dGamma = _gamma - _c.gamma;
+        let _dBeta  = _beta  - _c.beta;
+        let _dGamma = _gamma - _c.gamma;
+        // Sensitivity: "Use This Device" (amplified so the screen stays visible) or QR phone
+        const _sens = _g.localDevice
+          ? (window.phoneSwordLocalSensitivity ?? PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT)
+          : (window.phoneSwordPhoneSensitivity ?? PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT);
+        if (_sens !== 1) {
+          _dAlpha *= _sens;
+          _dBeta  *= _sens;
+          _dGamma *= _sens;
+        }
 
         _phoneSwordEuler.set(
           (_dBeta  + _cfg.offsetX) * DEG,

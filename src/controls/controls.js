@@ -491,7 +491,14 @@ export class PlayerControls {
     const showPunch = equippedId === 'foamSword' || equippedId === 'pistol';
     this.punchButton.textContent = this.getMobileAttackLabel();
     this.punchButton.style.display = showPunch ? '' : 'none';
+    // On touch screens Block/Fire is a full-width bar along the bottom; the joystick and
+    // other buttons move up above it (styles.css, body.mobile-block-bar)
+    document.body.classList.toggle('mobile-block-bar', showPunch && this.isTouchLayout());
     this.layoutMobileActionButtons();
+  }
+
+  isTouchLayout() {
+    return !!window.matchMedia?.('(pointer: coarse)').matches;
   }
 
   applyMobileButtonPosition(button, slot) {
@@ -506,7 +513,9 @@ export class PlayerControls {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
     });
-    if (this.punchButton.style.display !== 'none') {
+    // On touch screens Block/Fire is the bottom bar, so bubble and bomb drop down a slot
+    const blockInGrid = !this.isTouchLayout();
+    if (blockInGrid && this.punchButton.style.display !== 'none') {
       this.applyMobileButtonPosition(this.punchButton, { x: 1, y: 0 });
     }
     if (this.psWeaponBtn1.dataset.psWeaponId) {
@@ -516,9 +525,9 @@ export class PlayerControls {
       this.applyMobileButtonPosition(this.psWeaponBtn2, { x: 2, y: 1 });
     }
     // Bubble sits in the free slot above Block/Fire, clear of the weapon buttons
-    this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: 1 });
+    this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: blockInGrid ? 1 : 0 });
     // Bomb sits above the bubble (the jump/gyro column and weapon buttons stay clear)
-    this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: 2 });
+    this.applyMobileButtonPosition(this.psBombBtn, { x: 1, y: blockInGrid ? 2 : 1 });
   }
 
   setupEventListeners() {
