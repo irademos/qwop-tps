@@ -13,7 +13,10 @@
 import { spawnBloodBurst } from '../combat/bloodEffect.js';
 import * as THREE from 'three';
 import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
-import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
+import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
+
+// Alternates the character model per spawned swordsman: half frog men, half gemhorns
+let _enemyModelToggle = false;
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { createSwordModelInstance } from '../items/swordModel.js';
 
@@ -310,7 +313,9 @@ export class EnemyPlayer {
 
     // GLB character — loaded async. Its arms reach for the floating hand groups below.
     this._glbCharacter = null;
-    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT }).then(({ container, character }) => {
+    _enemyModelToggle = !_enemyModelToggle;
+    const characterUrl = _enemyModelToggle ? glbCharacterConfig.frogManUrl : glbCharacterConfig.url;
+    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT, url: characterUrl }).then(({ container, character }) => {
       if (this._destroyed) { character.dispose(); return; }
       this.group.add(container);
       this._glbCharacter = character;

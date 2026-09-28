@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createGLBCharacterInstance } from './glbCharacterModel.js';
+import { createGLBCharacterInstance, glbCharacterConfig } from './glbCharacterModel.js';
 
 export function createProceduralBody(THREE) {
   const root = new THREE.Group();
@@ -146,7 +146,7 @@ export function createPlayerModel(
   const capsuleMesh = bodyRoot.getObjectByName('bodyCapsulemesh');
   if (capsuleMesh) capsuleMesh.visible = false;
 
-  createGLBCharacterInstance({ targetHeight: 1.0 }).then(({ container, character }) => {
+  createGLBCharacterInstance({ targetHeight: 1.0, url: glbCharacterConfig.frogManUrl }).then(({ container, character }) => {
     bodyRoot.add(container);
     playerGroup.userData.qwopRig.glbCharacter = character;
   }).catch(e => console.warn('[PlayerModel] GLB character load failed:', e));
