@@ -651,6 +651,15 @@ function buildSwordGyroPanel() {
   recalHint.textContent = 'Hold the sword in its resting position, then tap to set neutral.';
   recalGroup.append(recalBtn, recalHint);
 
+  // "Use This Device" gyro sensitivity (saved per device)
+  const localSection = createElement('h3', 'settings-section-title', 'This Device Sensitivity');
+  const localSens = window.phoneSwordLocalSensitivity ?? 2;
+  const localSensField = createRangeField({ id: 'sg-local-sensitivity', label: 'Gyro Sensitivity', min: 1, max: 4, step: 0.1 });
+  localSensField.input.value = `${localSens}`;
+  localSensField.valueLabel.textContent = `${localSens.toFixed(1)}×`;
+  const localSensHint = createElement('div', 'settings-muted');
+  localSensHint.textContent = 'When the game screen is also the sword ("Use This Device"). Higher = smaller movements swing the sword, so you can keep watching the screen.';
+
   // Sensitivity sliders
   const sensSection = createElement('h3', 'settings-section-title', 'Hit Detection Sensitivity');
 
@@ -678,6 +687,9 @@ function buildSwordGyroPanel() {
   panelEl.append(
     calibSection,
     recalGroup,
+    localSection,
+    localSensField.field,
+    localSensHint,
     sensSection,
     swingSpeedField.field,
     swingArcField.field,
@@ -688,6 +700,8 @@ function buildSwordGyroPanel() {
 
   elements.swordGyroFields = {
     recalBtn,
+    localSensInput: localSensField.input,
+    localSensValue: localSensField.valueLabel,
     swingSpeedInput: swingSpeedField.input,
     swingSpeedValue: swingSpeedField.valueLabel,
     swingArcInput: swingArcField.input,
@@ -1240,6 +1254,12 @@ function bindEvents() {
     bindSwingSlider(f.swingArcInput, f.swingArcValue, 'minSwingDelta', v => `${Math.round(v)}°`);
     bindSwingSlider(f.sweepSpeedInput, f.sweepSpeedValue, 'minSweepSpeed', v => `${Math.round(v)}`);
     bindSwingSlider(f.sweepDistInput, f.sweepDistValue, 'minSweepDist', v => `${v.toFixed(2)}m`);
+    f.localSensInput.addEventListener('input', () => {
+      const v = parseFloat(f.localSensInput.value);
+      f.localSensValue.textContent = `${v.toFixed(1)}×`;
+      window.phoneSwordLocalSensitivity = v;
+      try { localStorage.setItem('sq:swordLocalSensitivity', `${v}`); } catch (_) { /* ignore */ }
+    });
   }
 }
 

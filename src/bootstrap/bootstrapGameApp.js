@@ -499,9 +499,10 @@ function createArcadeOverlay(startOverlay) {
 
 const SWORD_SHOWDOWN_BGS = 'Interior Day/Inside Day.ogg';
 const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
-// "Use This Device" (the game screen is also the sword): gyro angles are multiplied by this
-// so smaller wrist movements swing the sword and the screen stays in view
-const PHONE_SWORD_LOCAL_SENSITIVITY = 2;
+// "Use This Device" (the game screen is also the sword): gyro angles are multiplied by
+// window.phoneSwordLocalSensitivity so smaller wrist movements swing the sword and the screen
+// stays in view. Set from Settings → Sword Gyro (saved per device as sq:swordLocalSensitivity).
+const PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT = 2;
 
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
@@ -3608,6 +3609,11 @@ async function initCore(runtimeContext) {
   window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
   // Config: additional rotation offsets (degrees) applied on top of gyro delta
   window.phoneSwordConfig = { offsetX: 90, offsetY: 180, offsetZ: 0 };
+  window.phoneSwordLocalSensitivity = PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT;
+  try {
+    const savedSens = parseFloat(localStorage.getItem('sq:swordLocalSensitivity'));
+    if (Number.isFinite(savedSens) && savedSens > 0) window.phoneSwordLocalSensitivity = savedSens;
+  } catch (_) { /* storage unavailable — keep the default */ }
 
   // Recalibrate: snapshot current gyro as neutral AND clear cached base quaternions
   // so the gyro loop re-initializes them cleanly from the weapon's _holdRotation.
@@ -3735,7 +3741,7 @@ async function initCore(runtimeContext) {
         return;
       }
     }
-    // The screen is also the sword, so the gyro is amplified (PHONE_SWORD_LOCAL_SENSITIVITY)
+    // The screen is also the sword, so the gyro is amplified (window.phoneSwordLocalSensitivity)
     // and small wrist movements are enough while still being able to see the screen.
     // Blocking comes from the on-screen Block button.
     if (!_localGyroHandler) {
@@ -5124,9 +5130,10 @@ async function initCore(runtimeContext) {
         let _dGamma = _gamma - _c.gamma;
         // "Use This Device": amplify so small movements swing the sword (screen stays visible)
         if (_g.localDevice) {
-          _dAlpha *= PHONE_SWORD_LOCAL_SENSITIVITY;
-          _dBeta  *= PHONE_SWORD_LOCAL_SENSITIVITY;
-          _dGamma *= PHONE_SWORD_LOCAL_SENSITIVITY;
+          const _sens = window.phoneSwordLocalSensitivity ?? PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT;
+          _dAlpha *= _sens;
+          _dBeta  *= _sens;
+          _dGamma *= _sens;
         }
 
         _phoneSwordEuler.set(
