@@ -1254,7 +1254,13 @@ function bindEvents() {
       input.addEventListener('input', () => {
         const v = parseFloat(input.value);
         valueEl.textContent = fmt ? fmt(v) : `${v}`;
-        if (window.phoneSwordSwingCfg) window.phoneSwordSwingCfg[cfgKey] = v;
+        if (!window.phoneSwordSwingCfg) return;
+        window.phoneSwordSwingCfg[cfgKey] = v;
+        // Saved per device (loaded in bootstrapGameApp.js), so it applies in every mode
+        try {
+          const saved = JSON.parse(localStorage.getItem('sq:swordSwingCfg') || '{}');
+          localStorage.setItem('sq:swordSwingCfg', JSON.stringify({ ...saved, [cfgKey]: v }));
+        } catch (_) { /* ignore */ }
       });
     };
     bindSwingSlider(f.swingSpeedInput, f.swingSpeedValue, 'speedThreshold', v => `${Math.round(v)}`);

@@ -179,14 +179,15 @@ function createArcadeOverlay(startOverlay) {
   // Until the tutorial is done the start screen only offers "Start Game" (which runs it);
   // afterwards it offers Tutorial, Showdown and Multiplayer.
   let tutorialCompleted = false;
-  let modeHandler = null; // picks a mode once the game is running (start screen shown again)
+  let modeHandler = null; // picks a mode once the game is running
+  let pendingGameMode = null; // mode picked before the game finished loading
 
   let currentName = '';
   let authInProgress = false;
   let authToken = 0;
   let resolveAuth = null;
   let startHandler = null;
-  let pendingAuthResult = null;
+  let authResolved = false;
   let activeLoadProfile = loadOrCreateWithPin;
 
   const createWaiter = () => {
@@ -250,12 +251,18 @@ function createArcadeOverlay(startOverlay) {
 
   const showModeSelect = (authResult) => {
     // "Start Game" (tutorial) for new players, else Tutorial / Showdown / Multiplayer.
-    // A click (below) resolves auth and launches the game in that mode.
-    pendingAuthResult = authResult;
+    // Auth resolves now, so the game (and the settings panel) loads behind the start
+    // screen while the player picks; the click (below) goes to the mode handler.
     tutorialCompleted = hasCompletedTutorial(authResult?.profile);
     form?.classList.add('hidden');
     showModeButtons();
     welcomeSection?.classList.remove('hidden');
+    if (resolveAuth) {
+      const resolve = resolveAuth;
+      resolveAuth = null;
+      authResolved = true;
+      resolve(authResult);
+    }
   };
 
   const showLoginForm = ({ name, preserveMessage = false } = {}) => {
@@ -390,11 +397,15 @@ function createArcadeOverlay(startOverlay) {
   const handleSwitchUser = () => {
     authToken += 1;
     authInProgress = false;
-    pendingAuthResult = null;
     if (currentName) {
       clearStoredPin(currentName);
       setCookie('playerName', '', -1);
       localStorage.removeItem('playerName');
+    }
+    // The game is already loading for this player: switching user needs a fresh page load
+    if (authResolved) {
+      window.location.reload();
+      return;
     }
     currentName = '';
     showLoginForm();
@@ -439,13 +450,8 @@ function createArcadeOverlay(startOverlay) {
   const chooseMode = (gameMode) => {
     if (startHandler) startHandler();
     hideOverlay();
-    if (resolveAuth) {
-      const resolve = resolveAuth;
-      resolveAuth = null;
-      resolve({ ...(pendingAuthResult || {}), mode: gameMode });
-    } else {
-      modeHandler?.(gameMode);
-    }
+    if (modeHandler) modeHandler(gameMode);
+    else pendingGameMode = gameMode; // started by setModeHandler once the game is ready
   };
 
   startButton?.addEventListener('click', () => chooseMode('tutorial'));
@@ -480,6 +486,12 @@ function createArcadeOverlay(startOverlay) {
     },
     setModeHandler(handler) {
       modeHandler = handler;
+      if (pendingGameMode) {
+        const gameMode = pendingGameMode;
+        pendingGameMode = null;
+        // Delay briefly so the rest of init completes first
+        setTimeout(() => handler(gameMode), 600);
+      }
     },
     // Back to the start screen mid-session (e.g. after the tutorial)
     showStartScreen({ tutorialDone = tutorialCompleted } = {}) {
@@ -506,6 +518,9 @@ const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
 // as sq:swordLocalSensitivity / sq:swordPhoneSensitivity.
 const PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT = 2;
 const PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT = 1;
+// Settings → Sword Gyro hit detection sliders, saved per device (settingsPanel.js writes it)
+const SWORD_SWING_CFG_STORAGE_KEY = 'sq:swordSwingCfg';
+const SWORD_SWING_CFG_SAVED_KEYS = ['speedThreshold', 'minSwingDelta', 'minSweepSpeed', 'minSweepDist'];
 
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
@@ -730,6 +745,13 @@ async function initCore(runtimeContext) {
     hitKnockbackWeak: 20,    // horizSpeed for non-killing hits (killing hits always use full force)
     enemyBounceHoldDur: 2.0, // seconds enemy sword stays stuck after being blocked by player
   };
+  // Hit detection sliders from Settings → Sword Gyro (saved per device, every mode)
+  try {
+    const saved = JSON.parse(localStorage.getItem(SWORD_SWING_CFG_STORAGE_KEY) || '{}');
+    for (const key of SWORD_SWING_CFG_SAVED_KEYS) {
+      if (Number.isFinite(saved?.[key])) window.phoneSwordSwingCfg[key] = saved[key];
+    }
+  } catch (_) { /* keep defaults */ }
 
   const tempVector3A = new THREE.Vector3();
   const PISTOL_AMMO_KEY = 'gun bullets';
@@ -3602,9 +3624,6 @@ async function initCore(runtimeContext) {
     }
     _psShowStageOverlay(_psStage, (count) => _psStartStage(_psStage, count));
   };
-  // Showdown picked on the start screen: delay briefly so the rest of init completes first
-  // (the tutorial is started at the end of init instead)
-  if (profileResult.mode === 'showdown') setTimeout(_psInit, 600);
 
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
   window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false, blocking: false, localDevice: false };
@@ -3696,6 +3715,17 @@ async function initCore(runtimeContext) {
     }
 
     phoneSwordQrModal.classList.remove('hidden');
+  };
+  // The automatic QR popup waits until a mode is picked (the game loads behind the start
+  // screen, so it would cover the mode buttons) — see the mode handler
+  let _phoneSwordQrDeferred = false;
+  const autoShowPhoneSwordQr = (peerId) => {
+    if (!startOverlay.classList.contains('hidden')) {
+      _phoneSwordPeerId = peerId;
+      _phoneSwordQrDeferred = true;
+      return;
+    }
+    void showPhoneSwordQr(peerId);
   };
 
   // Copy URL to clipboard
@@ -3969,7 +3999,7 @@ async function initCore(runtimeContext) {
       // before showing the QR modal.
       _autoConnectTimer = setTimeout(() => {
         if (!window.phoneSwordGyro.connected) {
-          showPhoneSwordQr(id);
+          autoShowPhoneSwordQr(id);
         }
       }, 3000);
     });
@@ -3994,7 +4024,7 @@ async function initCore(runtimeContext) {
         console.warn('[PhoneSword] Fixed peer ID taken, falling back to random ID');
         _fixedPeerId = null;
         const fallbackPeer = new PeerClass(_peerOpts);
-        fallbackPeer.on('open', (id) => showPhoneSwordQr(id));
+        fallbackPeer.on('open', (id) => autoShowPhoneSwordQr(id));
         fallbackPeer.on('connection', (conn) => {
           phoneSwordQrStatus.textContent = 'Phone connected!';
           phoneSwordQrStatus.classList.add('connected');
@@ -4344,6 +4374,8 @@ async function initCore(runtimeContext) {
   settingsBtn.addEventListener('click', () => {
     openSettings();
   });
+  // The gear stays hidden until the panel exists (the start screen shows it once the game loads)
+  document.body.classList.add('settings-ready');
   const settingsOverlay = document.getElementById('settings-overlay');
   const merchantOverlay = document.getElementById('merchant-overlay');
   const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
@@ -4958,9 +4990,14 @@ async function initCore(runtimeContext) {
     duelMode.enter();
   };
 
-  // Start screen shown again later (after the tutorial / leaving the lobby):
+  // Mode picked on the start screen (first time, after the tutorial, leaving the lobby):
   // Tutorial, Showdown or Multiplayer. Only Multiplayer runs peer multiplayer.
+  // A pick made while the game was still loading runs as soon as this is set.
   arcadeOverlay.setModeHandler((gameMode) => {
+    if (_phoneSwordQrDeferred) {
+      _phoneSwordQrDeferred = false;
+      if (!window.phoneSwordGyro?.connected && _phoneSwordPeerId) void showPhoneSwordQr(_phoneSwordPeerId);
+    }
     if (gameMode !== 'multiplayer') duelMode.exit();
     if (gameMode === 'showdown') {
       _resetForMenu();
@@ -4971,8 +5008,6 @@ async function initCore(runtimeContext) {
       startTutorialMode();
     }
   });
-  if (profileResult.mode === 'multiplayer') setTimeout(startMultiplayerMode, 600);
-  else if (profileResult.mode !== 'showdown') setTimeout(startTutorialMode, 600);
 
   function animate() {
     requestAnimationFrame(animate);
