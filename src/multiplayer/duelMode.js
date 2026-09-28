@@ -14,7 +14,7 @@ import { LOBBY_ROOM_ID } from './peerConnection.js';
 
 // Where duels happen: paste the output of the lobby's "Copy location information" here.
 // The challenger stands behind this point facing `yaw`, the accepter in front facing back.
-export const DUEL_LOCATION = { x: -134.75, y: 6.21, z: 70.51, yaw: 2.62 };
+export const DUEL_LOCATION = { x: -133.85, y: 6.21, z: 68.77, yaw: 2.63 };
 
 const DUEL_DEFAULT_LOCATION = { x: 0, z: 0, yaw: 0 };
 const DUEL_START_GAP = 4;              // metres between the two players at "3"
