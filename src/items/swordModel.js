@@ -13,12 +13,17 @@ export const SWORD_MODEL_URL = '/assets/props/sword.glb?v=2';
 // its tip near the 0.69 hit tip).
 const SWORD_FIT_LENGTH = 0.8;
 
-// Grip → model placement. TEMP: tuned with the debug sliders (mountSwordDebugPanel);
-// paste the copied values here once they look right.
+// The GLB's blade is fully metallic (metalness texture) and the scene has no
+// environment map to reflect, so it renders dark: metalness is scaled down to this…
+const SWORD_METALNESS = 0.35;
+
+// Grip → model placement + brightness. TEMP: tuned with the debug sliders
+// (mountSwordDebugPanel); paste the copied values here once they look right.
 export const SWORD_ADJUST_DEFAULTS = Object.freeze({
   px: 0, py: 0, pz: 0.31,   // position (m, sword-local)
   rx: 0, ry: 180, rz: 0,    // rotation (deg, XYZ) — sword.glb's handle is at its +X end
-  scale: 1,
+  scale: 1.16,
+  brightness: 0.45,         // …and the base-color texture is added as self-light (emissive)
 });
 
 const ADJUST_STORAGE_KEY = 'sq:swordModelAdjust';
@@ -79,6 +84,15 @@ function buildTemplate(gltfScene) {
     if (!child.isMesh) return;
     child.castShadow = true;
     child.receiveShadow = true;
+    forEachMaterial(child, mat => {
+      if ('metalness' in mat) mat.metalness = Math.min(mat.metalness, SWORD_METALNESS);
+      if (mat.emissive && mat.map) {
+        mat.emissive.set(0xffffff);
+        mat.emissiveMap = mat.map;
+        mat.emissiveIntensity = swordModelAdjust.brightness;
+        mat.needsUpdate = true;
+      }
+    });
   });
 
   // Fit: longest axis → +Z, scaled to SWORD_FIT_LENGTH
@@ -92,6 +106,11 @@ function buildTemplate(gltfScene) {
   return fit;
 }
 
+function forEachMaterial(mesh, fn) {
+  if (Array.isArray(mesh.material)) mesh.material.forEach(m => m && fn(m));
+  else if (mesh.material) fn(mesh.material);
+}
+
 function applyAdjust(adjustGroup) {
   const a = swordModelAdjust;
   adjustGroup.position.set(a.px, a.py, a.pz);
@@ -101,6 +120,12 @@ function applyAdjust(adjustGroup) {
     THREE.MathUtils.degToRad(a.rz),
   );
   adjustGroup.scale.setScalar(a.scale);
+  adjustGroup.traverse(child => {
+    if (!child.isMesh) return;
+    forEachMaterial(child, mat => {
+      if (mat.emissiveMap) mat.emissiveIntensity = a.brightness;
+    });
+  });
 }
 
 // A new sword model instance (adjust group → fit → GLB), or null before the GLB has
@@ -142,6 +167,7 @@ const SLIDERS = [
   { key: 'ry', label: 'Rot Y', min: -180, max: 180, step: 1 },
   { key: 'rz', label: 'Rot Z', min: -180, max: 180, step: 1 },
   { key: 'scale', label: 'Scale', min: 0.1, max: 3, step: 0.01 },
+  { key: 'brightness', label: 'Bright', min: 0, max: 1.5, step: 0.01 },
 ];
 
 export function mountSwordDebugPanel(scene) {

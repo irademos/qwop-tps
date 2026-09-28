@@ -201,7 +201,7 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 | Add a new weapon | `src/items/<weapon>.js`, register in `src/features/combatFeature.js` |
 | Change movement/controls | `src/controls/controls.js` |
 | Player/enemy character model, animation clips, arm IK, fur | `src/models/glbCharacterModel.js` (`glbCharacterConfig`), `src/models/fluffyCharacter.ts` |
-| Sword model (sword.glb, grip offset/rotation/scale — TEMP debug sliders `#sword-debug-panel`, saved as `localStorage` `sq:swordModelAdjust`; bake final values into `SWORD_ADJUST_DEFAULTS`) | `src/items/swordModel.js`; used by `FoamSword.load` (`src/items/foamSword.js`) and `EnemyPlayer._buildSword`; panel mounted after the sword loads in `bootstrapGameApp.js`; `.sword-debug-*` in `styles.css` |
+| Sword model (sword.glb, grip offset/rotation/scale/brightness — metalness capped `SWORD_METALNESS`, texture as emissive; TEMP debug sliders `#sword-debug-panel`, saved as `localStorage` `sq:swordModelAdjust`; bake final values into `SWORD_ADJUST_DEFAULTS`) | `src/items/swordModel.js`; used by `FoamSword.load` (`src/items/foamSword.js`) and `EnemyPlayer._buildSword`; panel mounted after the sword loads in `bootstrapGameApp.js`; `.sword-debug-*` in `styles.css` |
 | Where the hands go (sword/shield/gun grip, enemy swings) | `src/models/playerModel.js`, `src/items/foamSword.js`/`shield.js`/`pistol.js`, `src/characters/EnemyPlayer.js` |
 | Add a new UI panel | `src/controls/`, lazy-load in `src/features/uiPanelsFeature.js` |
 | World map / ground height | `public/glb_map/map.glb`; loaded + height resolver registered in `bootstrapGameApp.js`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |
