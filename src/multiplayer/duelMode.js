@@ -13,8 +13,8 @@ import { LOBBY_ROOM_ID } from './peerConnection.js';
 //   hit {dmg, dir} (the attacker detects hits, the victim applies them) · blocked · dead · leave
 
 // Where duels happen: paste the output of the lobby's "Copy location information" here.
-// null → the map origin.
-export const DUEL_LOCATION = null;
+// The challenger stands behind this point facing `yaw`, the accepter in front facing back.
+export const DUEL_LOCATION = { x: -134.75, y: 6.21, z: 70.51, yaw: 2.62 };
 
 const DUEL_DEFAULT_LOCATION = { x: 0, z: 0, yaw: 0 };
 const DUEL_START_GAP = 4;              // metres between the two players at "3"
