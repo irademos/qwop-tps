@@ -651,14 +651,18 @@ function buildSwordGyroPanel() {
   recalHint.textContent = 'Hold the sword in its resting position, then tap to set neutral.';
   recalGroup.append(recalBtn, recalHint);
 
-  // "Use This Device" gyro sensitivity (saved per device)
-  const localSection = createElement('h3', 'settings-section-title', 'This Device Sensitivity');
-  const localSens = window.phoneSwordLocalSensitivity ?? 2;
-  const localSensField = createRangeField({ id: 'sg-local-sensitivity', label: 'Gyro Sensitivity', min: 1, max: 4, step: 0.1 });
-  localSensField.input.value = `${localSens}`;
-  localSensField.valueLabel.textContent = `${localSens.toFixed(1)}×`;
-  const localSensHint = createElement('div', 'settings-muted');
-  localSensHint.textContent = 'When the game screen is also the sword ("Use This Device"). Higher = smaller movements swing the sword, so you can keep watching the screen.';
+  // Gyro sensitivity (saved per device): "Use This Device" and a separate phone by QR code
+  const gyroSensSection = createElement('h3', 'settings-section-title', 'Gyro Sensitivity');
+  const createSensField = (id, label, value) => {
+    const f = createRangeField({ id, label, min: 0.5, max: 4, step: 0.1 });
+    f.input.value = `${value}`;
+    f.valueLabel.textContent = `${value.toFixed(1)}×`;
+    return f;
+  };
+  const localSensField = createSensField('sg-local-sensitivity', 'This Device', window.phoneSwordLocalSensitivity ?? 2);
+  const phoneSensField = createSensField('sg-phone-sensitivity', 'Phone by QR Code', window.phoneSwordPhoneSensitivity ?? 1);
+  const gyroSensHint = createElement('div', 'settings-muted');
+  gyroSensHint.textContent = 'How far the sword turns for each tilt of the phone. "This Device" is used when the game screen is also the sword — higher means smaller movements, so you can keep watching the screen.';
 
   // Sensitivity sliders
   const sensSection = createElement('h3', 'settings-section-title', 'Hit Detection Sensitivity');
@@ -687,9 +691,10 @@ function buildSwordGyroPanel() {
   panelEl.append(
     calibSection,
     recalGroup,
-    localSection,
+    gyroSensSection,
     localSensField.field,
-    localSensHint,
+    phoneSensField.field,
+    gyroSensHint,
     sensSection,
     swingSpeedField.field,
     swingArcField.field,
@@ -702,6 +707,8 @@ function buildSwordGyroPanel() {
     recalBtn,
     localSensInput: localSensField.input,
     localSensValue: localSensField.valueLabel,
+    phoneSensInput: phoneSensField.input,
+    phoneSensValue: phoneSensField.valueLabel,
     swingSpeedInput: swingSpeedField.input,
     swingSpeedValue: swingSpeedField.valueLabel,
     swingArcInput: swingArcField.input,
@@ -1254,12 +1261,16 @@ function bindEvents() {
     bindSwingSlider(f.swingArcInput, f.swingArcValue, 'minSwingDelta', v => `${Math.round(v)}°`);
     bindSwingSlider(f.sweepSpeedInput, f.sweepSpeedValue, 'minSweepSpeed', v => `${Math.round(v)}`);
     bindSwingSlider(f.sweepDistInput, f.sweepDistValue, 'minSweepDist', v => `${v.toFixed(2)}m`);
-    f.localSensInput.addEventListener('input', () => {
-      const v = parseFloat(f.localSensInput.value);
-      f.localSensValue.textContent = `${v.toFixed(1)}×`;
-      window.phoneSwordLocalSensitivity = v;
-      try { localStorage.setItem('sq:swordLocalSensitivity', `${v}`); } catch (_) { /* ignore */ }
-    });
+    const bindSensSlider = (input, valueEl, globalKey, storageKey) => {
+      input.addEventListener('input', () => {
+        const v = parseFloat(input.value);
+        valueEl.textContent = `${v.toFixed(1)}×`;
+        window[globalKey] = v;
+        try { localStorage.setItem(storageKey, `${v}`); } catch (_) { /* ignore */ }
+      });
+    };
+    bindSensSlider(f.localSensInput, f.localSensValue, 'phoneSwordLocalSensitivity', 'sq:swordLocalSensitivity');
+    bindSensSlider(f.phoneSensInput, f.phoneSensValue, 'phoneSwordPhoneSensitivity', 'sq:swordPhoneSensitivity');
   }
 }
 

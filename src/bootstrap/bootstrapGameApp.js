@@ -499,10 +499,13 @@ function createArcadeOverlay(startOverlay) {
 
 const SWORD_SHOWDOWN_BGS = 'Interior Day/Inside Day.ogg';
 const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
-// "Use This Device" (the game screen is also the sword): gyro angles are multiplied by
-// window.phoneSwordLocalSensitivity so smaller wrist movements swing the sword and the screen
-// stays in view. Set from Settings → Sword Gyro (saved per device as sq:swordLocalSensitivity).
+// Sword gyro sensitivity: gyro angles are multiplied by window.phoneSwordLocalSensitivity
+// ("Use This Device" — the game screen is also the sword, so it defaults higher: small wrist
+// movements swing the sword and the screen stays in view) or window.phoneSwordPhoneSensitivity
+// (a separate phone connected by QR code). Set from Settings → Sword Gyro, saved per device
+// as sq:swordLocalSensitivity / sq:swordPhoneSensitivity.
 const PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT = 2;
+const PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT = 1;
 
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
@@ -3609,11 +3612,15 @@ async function initCore(runtimeContext) {
   window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
   // Config: additional rotation offsets (degrees) applied on top of gyro delta
   window.phoneSwordConfig = { offsetX: 90, offsetY: 180, offsetZ: 0 };
-  window.phoneSwordLocalSensitivity = PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT;
-  try {
-    const savedSens = parseFloat(localStorage.getItem('sq:swordLocalSensitivity'));
-    if (Number.isFinite(savedSens) && savedSens > 0) window.phoneSwordLocalSensitivity = savedSens;
-  } catch (_) { /* storage unavailable — keep the default */ }
+  const _loadSwordSensitivity = (key, fallback) => {
+    try {
+      const saved = parseFloat(localStorage.getItem(key));
+      if (Number.isFinite(saved) && saved > 0) return saved;
+    } catch (_) { /* storage unavailable — keep the default */ }
+    return fallback;
+  };
+  window.phoneSwordLocalSensitivity = _loadSwordSensitivity('sq:swordLocalSensitivity', PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT);
+  window.phoneSwordPhoneSensitivity = _loadSwordSensitivity('sq:swordPhoneSensitivity', PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT);
 
   // Recalibrate: snapshot current gyro as neutral AND clear cached base quaternions
   // so the gyro loop re-initializes them cleanly from the weapon's _holdRotation.
@@ -5128,9 +5135,11 @@ async function initCore(runtimeContext) {
         if (_dAlpha < -180) _dAlpha += 360;
         let _dBeta  = _beta  - _c.beta;
         let _dGamma = _gamma - _c.gamma;
-        // "Use This Device": amplify so small movements swing the sword (screen stays visible)
-        if (_g.localDevice) {
-          const _sens = window.phoneSwordLocalSensitivity ?? PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT;
+        // Sensitivity: "Use This Device" (amplified so the screen stays visible) or QR phone
+        const _sens = _g.localDevice
+          ? (window.phoneSwordLocalSensitivity ?? PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT)
+          : (window.phoneSwordPhoneSensitivity ?? PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT);
+        if (_sens !== 1) {
           _dAlpha *= _sens;
           _dBeta  *= _sens;
           _dGamma *= _sens;
