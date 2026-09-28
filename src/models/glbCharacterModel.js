@@ -1,7 +1,8 @@
 /**
  * GLB character used by the local player, remote players and EnemyPlayers.
  *
- * The character (gemhorn_rigged.glb, Mixamo skeleton) is animated with Mixamo FBX
+ * The character (frog_man.glb for players, frog_man.glb or gemhorn_rigged.glb for
+ * enemies — both share the Mixamo skeleton; pick one with the `url` option) is animated with Mixamo FBX
  * clips through fluffyCharacter.ts, which retargets by world-space rotation deltas
  * and adds fluffy secondary motion + shell fur. The clip drives the whole body
  * EXCEPT the arm chains (Shoulder → Arm → ForeArm → Hand): those are posed every
@@ -39,7 +40,8 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { FluffyCharacter } from './fluffyCharacter.ts';
 
 export const glbCharacterConfig = {
-  url: '/models/glb_characters/gemhorn_rigged.glb',
+  url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
+  frogManUrl: '/models/glb_characters/frog_man.glb',       // player character; half the EnemyPlayers
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',
   deathClip: '/models/animations/Flying Back Death.fbx', // played once (whole body, arms included) by playDeath()
@@ -57,6 +59,11 @@ export const glbCharacterConfig = {
     enabled: true, softness: 0.55, bounce: 0.45, amount: 0.8, flutter: 0.3, fuzz: 0.5,
     shells: 8, furLength: 0.06, shellsHairOnly: false,
   },
+  // Per-model overrides of `fluffy`, keyed by url. The frog man keeps the bouncy
+  // secondary motion but has no shell fur.
+  fluffyByUrl: {
+    '/models/glb_characters/frog_man.glb': { shells: 0 },
+  },
 };
 
 // Floating-hand label → Mixamo arm on the same local-X side (see header)
@@ -65,14 +72,16 @@ const ARM_CHAIN_FOR_HAND = { right: 'Left', left: 'Right' };
 const ARM_ROOT_BONES = ['LeftShoulder', 'RightShoulder'];
 
 const _gltfLoader = new GLTFLoader();
-let _gltfPromise = null;
+const _gltfPromises = new Map(); // url → Promise<gltf>
 
-function getCharacterGLTF() {
-  if (!_gltfPromise) {
-    _gltfPromise = _gltfLoader.loadAsync(glbCharacterConfig.url);
-    _gltfPromise.catch(() => { _gltfPromise = null; });
+function getCharacterGLTF(url = glbCharacterConfig.url) {
+  let promise = _gltfPromises.get(url);
+  if (!promise) {
+    promise = _gltfLoader.loadAsync(url);
+    promise.catch(() => { _gltfPromises.delete(url); });
+    _gltfPromises.set(url, promise);
   }
-  return _gltfPromise;
+  return promise;
 }
 
 // ── Scratch objects ─────────────────────────────────────────────────────────
@@ -102,10 +111,10 @@ const _stretch = new THREE.Vector3();
 // ── Character ───────────────────────────────────────────────────────────────
 
 export class GLBCharacter {
-  constructor(scene, { armIK = true } = {}) {
+  constructor(scene, { armIK = true, fluffy = glbCharacterConfig.fluffy } = {}) {
     this.scene = scene;
     this._armIK = armIK;
-    this.fluffy = new FluffyCharacter(scene, glbCharacterConfig.fluffy);
+    this.fluffy = new FluffyCharacter(scene, fluffy);
     this.arms = {};
     scene.updateMatrixWorld(true);
     for (const [hand, side] of Object.entries(ARM_CHAIN_FOR_HAND)) {
@@ -373,11 +382,13 @@ export class GLBCharacter {
  * @param {object} [opts]
  * @param {number} [opts.targetHeight] world height of the character
  * @param {boolean} [opts.armIK] false: the clips drive the arms (no floating-hand IK)
+ * @param {string} [opts.url] character GLB (Mixamo skeleton); defaults to glbCharacterConfig.url
  * @returns {Promise<{ container: THREE.Group, character: GLBCharacter }>}
  */
 export async function createGLBCharacterInstance(opts = {}) {
   const targetHeight = opts.targetHeight ?? glbCharacterConfig.targetHeight;
-  const gltf = await getCharacterGLTF();
+  const url = opts.url ?? glbCharacterConfig.url;
+  const gltf = await getCharacterGLTF(url);
 
   const scene = SkeletonUtils.clone(gltf.scene);
   scene.name = 'GLBCharacterScene';
@@ -404,7 +415,8 @@ export async function createGLBCharacterInstance(opts = {}) {
   container.name = 'GLBCharacterContainer';
   container.add(scene);
 
-  const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true });
+  const fluffy = { ...glbCharacterConfig.fluffy, ...glbCharacterConfig.fluffyByUrl[url] };
+  const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true, fluffy });
   container.userData.glbCharacter = character;
   return { container, character };
 }
