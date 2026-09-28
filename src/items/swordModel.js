@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // (hit checks use that fixed tip, see SWORD_TIP_LOCAL in EnemyPlayer.js).
 // ?v= busts browser caches: vercel.json marks /assets/* immutable, so a 404 served
 // before the file existed would otherwise stick. Bump it when sword.glb changes.
-export const SWORD_MODEL_URL = '/assets/props/sword.glb?v=2';
+export const SWORD_MODEL_URL = '/assets/props/sword.glb?v=3';
 
 // Auto-fit: the model's longest axis is turned onto +Z and scaled to this length
 // before the debug adjust is applied (0.8: sword.glb's grip lands at the hand and
