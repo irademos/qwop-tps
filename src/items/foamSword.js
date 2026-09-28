@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { Weapon } from './weapon.js';
+import { loadSwordModelTemplate, createSwordModelInstance } from './swordModel.js';
 
 export const FOAM_SWORD_ITEM_ID = 'foamSword';
 
@@ -21,6 +22,53 @@ const FS_HAND_HEIGHT_GAIN = 0.4;
 const FS_HAND_CENTER_Y = 0.82;
 const FS_HAND_Z        = 0.50;
 
+// Procedural foam sword (origin at the guard, blade along +Z)
+function buildFoamSwordParts(group) {
+  // Blade: thin rod extending in +Z direction (base at z=0, tip at z=0.62)
+  const bladeMat = new THREE.MeshStandardMaterial({ color: BLADE_COLOR, roughness: 0.55, metalness: 0.05 });
+  const bladeGeo = new THREE.CylinderGeometry(0.022, 0.032, 0.62, 12);
+  bladeGeo.rotateX(Math.PI / 2);
+  const blade = new THREE.Mesh(bladeGeo, bladeMat);
+  blade.position.set(0, 0, 0.31); // center of blade sits 0.31 along +Z
+  blade.castShadow = true;
+  group.add(blade);
+
+  // Blade tip: small tapered cap
+  const tipMat = new THREE.MeshStandardMaterial({ color: BLADE_TIP_COLOR, roughness: 0.5, metalness: 0.05 });
+  const tipGeo = new THREE.CylinderGeometry(0, 0.022, 0.07, 10);
+  tipGeo.rotateX(Math.PI / 2);
+  const tip = new THREE.Mesh(tipGeo, tipMat);
+  tip.position.set(0, 0, 0.655);
+  tip.castShadow = true;
+  group.add(tip);
+
+  // Guard (cross-guard): flat cylinder perpendicular to blade, at z=0
+  const guardMat = new THREE.MeshStandardMaterial({ color: GUARD_COLOR, roughness: 0.7, metalness: 0.02 });
+  const guardGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.035, 14);
+  guardGeo.rotateX(Math.PI / 2); // rotate so circular face is perpendicular to blade (+Z)
+  const guard = new THREE.Mesh(guardGeo, guardMat);
+  guard.position.set(0, 0, 0);
+  guard.castShadow = true;
+  group.add(guard);
+
+  // Handle: behind the guard (negative Z direction from attachment point)
+  const handleMat = new THREE.MeshStandardMaterial({ color: HANDLE_COLOR, roughness: 0.75, metalness: 0.01 });
+  const handleGeo = new THREE.CylinderGeometry(0.028, 0.032, 0.16, 10);
+  handleGeo.rotateX(Math.PI / 2);
+  const handle = new THREE.Mesh(handleGeo, handleMat);
+  handle.position.set(0, 0, -0.08); // extends behind attachment point
+  handle.castShadow = true;
+  group.add(handle);
+
+  // Pommel: small sphere at the very end of the handle
+  const pommelMat = new THREE.MeshStandardMaterial({ color: POMMEL_COLOR, roughness: 0.6, metalness: 0.04 });
+  const pommelGeo = new THREE.SphereGeometry(0.038, 10, 8);
+  const pommel = new THREE.Mesh(pommelGeo, pommelMat);
+  pommel.position.set(0, 0, -0.175);
+  pommel.castShadow = true;
+  group.add(pommel);
+}
+
 export class FoamSword extends Weapon {
   constructor(scene) {
     super(scene, {
@@ -38,49 +86,11 @@ export class FoamSword extends Weapon {
     const group = new THREE.Group();
     group.name = 'foam-sword';
 
-    // Blade: thin rod extending in +Z direction (base at z=0, tip at z=0.62)
-    const bladeMat = new THREE.MeshStandardMaterial({ color: BLADE_COLOR, roughness: 0.55, metalness: 0.05 });
-    const bladeGeo = new THREE.CylinderGeometry(0.022, 0.032, 0.62, 12);
-    bladeGeo.rotateX(Math.PI / 2);
-    const blade = new THREE.Mesh(bladeGeo, bladeMat);
-    blade.position.set(0, 0, 0.31); // center of blade sits 0.31 along +Z
-    blade.castShadow = true;
-    group.add(blade);
-
-    // Blade tip: small tapered cap
-    const tipMat = new THREE.MeshStandardMaterial({ color: BLADE_TIP_COLOR, roughness: 0.5, metalness: 0.05 });
-    const tipGeo = new THREE.CylinderGeometry(0, 0.022, 0.07, 10);
-    tipGeo.rotateX(Math.PI / 2);
-    const tip = new THREE.Mesh(tipGeo, tipMat);
-    tip.position.set(0, 0, 0.655);
-    tip.castShadow = true;
-    group.add(tip);
-
-    // Guard (cross-guard): flat cylinder perpendicular to blade, at z=0
-    const guardMat = new THREE.MeshStandardMaterial({ color: GUARD_COLOR, roughness: 0.7, metalness: 0.02 });
-    const guardGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.035, 14);
-    guardGeo.rotateX(Math.PI / 2); // rotate so circular face is perpendicular to blade (+Z)
-    const guard = new THREE.Mesh(guardGeo, guardMat);
-    guard.position.set(0, 0, 0);
-    guard.castShadow = true;
-    group.add(guard);
-
-    // Handle: behind the guard (negative Z direction from attachment point)
-    const handleMat = new THREE.MeshStandardMaterial({ color: HANDLE_COLOR, roughness: 0.75, metalness: 0.01 });
-    const handleGeo = new THREE.CylinderGeometry(0.028, 0.032, 0.16, 10);
-    handleGeo.rotateX(Math.PI / 2);
-    const handle = new THREE.Mesh(handleGeo, handleMat);
-    handle.position.set(0, 0, -0.08); // extends behind attachment point
-    handle.castShadow = true;
-    group.add(handle);
-
-    // Pommel: small sphere at the very end of the handle
-    const pommelMat = new THREE.MeshStandardMaterial({ color: POMMEL_COLOR, roughness: 0.6, metalness: 0.04 });
-    const pommelGeo = new THREE.SphereGeometry(0.038, 10, 8);
-    const pommel = new THREE.Mesh(pommelGeo, pommelMat);
-    pommel.position.set(0, 0, -0.175);
-    pommel.castShadow = true;
-    group.add(pommel);
+    // sword.glb; the procedural foam sword is the fallback when it can't load
+    await loadSwordModelTemplate();
+    const model = createSwordModelInstance();
+    if (model) group.add(model);
+    else buildFoamSwordParts(group);
 
     const targetPos = position.clone();
     const terrainHeight = getTerrainHeight(targetPos.x, targetPos.z);
