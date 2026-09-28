@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
 import { createGLBCharacterInstance } from '../models/glbCharacterModel.js';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { createSwordModelInstance } from '../items/swordModel.js';
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 
@@ -411,7 +412,17 @@ export class EnemyPlayer {
   _buildSword() {
     const swordGroup = new THREE.Group();
     swordGroup.name = 'enemyFoamSword';
+    this._swordGroup = swordGroup;
+    this.scene.add(swordGroup); // added directly to scene so world transforms are straightforward
 
+    // sword.glb (loaded with the player's sword); own materials for the hit flash
+    const model = createSwordModelInstance({ cloneMaterials: true });
+    if (model) {
+      swordGroup.add(model);
+      return;
+    }
+
+    // Fallback: procedural foam sword
     // Blade
     const bladeGeo = new THREE.CylinderGeometry(0.022, 0.032, 0.62, 12);
     bladeGeo.rotateX(Math.PI / 2);
@@ -451,9 +462,6 @@ export class EnemyPlayer {
     );
     pommel.position.set(0, 0, -0.175);
     swordGroup.add(pommel);
-
-    this._swordGroup = swordGroup;
-    this.scene.add(swordGroup); // added directly to scene so world transforms are straightforward
   }
 
   // ─── heart display ─────────────────────────────────────────────────────────

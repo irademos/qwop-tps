@@ -52,7 +52,7 @@ src/
   characters/   CharacterBase, PlayerCharacter, EnemyPlayer (swordsman), BombThrowerEnemy (bomber), merchant (shop catalog/stock)
   controls/     PlayerControls (controls.js), merchantPanel (shop UI), settingsPanel
   features/     Lazy-load facades for code splitting (audio, combat, persistence, uiPanels, loadingState)
-  items/        weapon.js + foamSword, shield, pistol + projectiles.js
+  items/        weapon.js + foamSword (sword.glb via swordModel.js), shield, pistol + projectiles.js
   tutorial/     showdownTutorial (scripted tutorial steps), tutorialOverlay (panel, arrows/bars, button ring)
   models/       playerModel, glbCharacterModel (GLB character + arm IK), fluffyCharacter.ts (Mixamo retarget + fur)
   physics/      rapierSafety
@@ -68,6 +68,7 @@ src/
 | Add weapon | `src/items/<weapon>.js` + register in `src/features/combatFeature.js` |
 | Movement / camera / input / action buttons | `src/controls/controls.js` |
 | Player / enemy / bomb-thrower character model, clips, arm IK, fur | `src/models/glbCharacterModel.js` (`glbCharacterConfig`), `src/models/fluffyCharacter.ts` |
+| Sword model / grip placement / brightness | `src/items/swordModel.js` (`SWORD_GRIP`, `SWORD_BRIGHTNESS`) |
 | Where hands go (sword/shield/gun grip) | `src/models/playerModel.js` (`updateProceduralPlayerRig`), `src/items/foamSword.js`, `shield.js`, `pistol.js`; enemies: `src/characters/EnemyPlayer.js` |
 | New UI panel | `src/controls/<panel>.js` + lazy-load in `src/features/uiPanelsFeature.js` |
 | World map / ground height | `public/glb_map/map.glb`; loaded in `bootstrapGameApp.js`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |
