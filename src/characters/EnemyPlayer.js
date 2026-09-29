@@ -15,7 +15,7 @@ import * as THREE from 'three';
 import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 
-// Cycles the character model per spawned swordsman: a third each antler guys, frog men, gemhorns
+// Cycles the character model per spawned swordsman: a quarter each pumpkins, antler guys, frog men, gemhorns
 let _enemyModelIndex = 0;
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { createSwordModelInstance } from '../items/swordModel.js';
@@ -260,7 +260,7 @@ export class EnemyPlayer {
     this.swordBounces = 0;
     // Health segments a sword hit on the local player takes (Multiplayer bots use 1)
     this.swordDamage = options.swordDamage ?? SWORD_DAMAGE;
-    // Character GLB (default: cycle antler guy / frog man / gemhorn per spawn)
+    // Character GLB (default: cycle pumpkin / antler guy / frog man / gemhorn per spawn)
     this._characterUrl = options.characterUrl ?? null;
     this._showHealthBar = options.showHealthBar ?? true;
     // Multiplayer bots: when the target isn't the local player, a sword swing reaching it is
@@ -333,7 +333,7 @@ export class EnemyPlayer {
 
     // GLB character — loaded async. Its arms reach for the floating hand groups below.
     this._glbCharacter = null;
-    const enemyModelUrls = [glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url];
+    const enemyModelUrls = [glbCharacterConfig.pumpkinUrl, glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url];
     const characterUrl = this._characterUrl ?? enemyModelUrls[_enemyModelIndex++ % enemyModelUrls.length];
     createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT, url: characterUrl }).then(({ container, character }) => {
       if (this._destroyed) { character.dispose(); return; }

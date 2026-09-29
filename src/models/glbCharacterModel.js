@@ -1,7 +1,7 @@
 /**
  * GLB character used by the local player, remote players and EnemyPlayers.
  *
- * The character (antler_guy.glb for players; antler_guy.glb, frog_man.glb or
+ * The character (pumpkin.glb for players; pumpkin.glb, antler_guy.glb, frog_man.glb or
  * gemhorn_rigged.glb for enemies — all share the Mixamo skeleton; pick one with the `url` option) is animated with Mixamo FBX
  * clips through fluffyCharacter.ts, which retargets by world-space rotation deltas
  * and adds fluffy secondary motion + shell fur. The clip drives the whole body
@@ -41,8 +41,9 @@ import { FluffyCharacter } from './fluffyCharacter.ts';
 
 export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
-  frogManUrl: '/models/glb_characters/frog_man.glb',       // a third of the EnemyPlayers
-  antlerGuyUrl: '/models/glb_characters/antler_guy.glb',   // player character; a third of the EnemyPlayers
+  frogManUrl: '/models/glb_characters/frog_man.glb',       // a quarter of the EnemyPlayers
+  antlerGuyUrl: '/models/glb_characters/antler_guy.glb',   // a quarter of the EnemyPlayers
+  pumpkinUrl: '/models/glb_characters/pumpkin.glb',        // player character; a quarter of the EnemyPlayers
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',
   deathClip: '/models/animations/Flying Back Death.fbx', // played once (whole body, arms included) by playDeath()
@@ -60,11 +61,12 @@ export const glbCharacterConfig = {
     enabled: true, softness: 0.55, bounce: 0.45, amount: 0.8, flutter: 0.3, fuzz: 0.5,
     shells: 8, furLength: 0.06, shellsHairOnly: false,
   },
-  // Per-model overrides of `fluffy`, keyed by url. The frog man and antler guy keep
+  // Per-model overrides of `fluffy`, keyed by url. The frog man, antler guy and pumpkin keep
   // the bouncy secondary motion but have no shell fur.
   fluffyByUrl: {
     '/models/glb_characters/frog_man.glb': { shells: 0 },
     '/models/glb_characters/antler_guy.glb': { shells: 0 },
+    '/models/glb_characters/pumpkin.glb': { shells: 0 },
   },
 };
 

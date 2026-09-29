@@ -1361,7 +1361,7 @@ async function initCore(runtimeContext) {
   };
 
   // Model for another player (or, in a battle, a bot the host simulates) — characterUrl
-  // picks the GLB (default antler guy)
+  // picks the GLB (default pumpkin)
   const _spawnRemotePlayer = (remoteId, name, characterUrl = null) => {
     const other = new PlayerCharacter(name, characterUrl ? { characterUrl } : undefined);
     scene.add(other.model);
@@ -5207,7 +5207,7 @@ async function initCore(runtimeContext) {
       setPlayerCharacterUrl(playerModel, characterUrl);
     },
     leaveMatch: () => {
-      setPlayerCharacterUrl(playerModel, glbCharacterConfig.antlerGuyUrl);
+      setPlayerCharacterUrl(playerModel, glbCharacterConfig.pumpkinUrl);
       duelCtx.leaveDuel();
     },
     startWalk: duelCtx.startWalkIn,

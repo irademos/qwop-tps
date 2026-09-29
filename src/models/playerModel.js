@@ -126,7 +126,7 @@ export function createPlayerModel(
   THREE,
   username,
   onLoad,
-  { characterUrl = glbCharacterConfig.antlerGuyUrl } = {}
+  { characterUrl = glbCharacterConfig.pumpkinUrl } = {}
 ) {
   const playerGroup = new THREE.Group();
   playerGroup.name = 'ProceduralGangBeastsPlayer';
