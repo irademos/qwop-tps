@@ -84,7 +84,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone i
 │   ├── items/
 │   │   ├── weapon.js           # Weapon base class
 │   │   ├── foamSword.js        # Sword — follows the phone-sword hand target (model from swordModel.js, procedural foam sword fallback)
-│   │   ├── swordModel.js       # sword.glb loader (translation stripped, fitted to grip origin / blade +Z) for player + enemy swords; grip placement + brightness
+│   │   ├── swordModel.js       # sword.glb loader (translation stripped, fitted to grip origin / blade +Z) for player + enemy swords; TEMP grip adjust sliders
 │   │   ├── shield.js           # Shield (upgradeable)
 │   │   ├── pistol.js           # Pistol (ammo = "gun bullets")
 │   │   └── projectiles.js      # Bullet spawning + update loop (hits remote players and enemies)
@@ -202,7 +202,7 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 | Add a new weapon | `src/items/<weapon>.js`, register in `src/features/combatFeature.js` |
 | Change movement/controls | `src/controls/controls.js` |
 | Player/enemy character model, animation clips, arm IK, fur | `src/models/glbCharacterModel.js` (`glbCharacterConfig`), `src/models/fluffyCharacter.ts` |
-| Sword model (sword.glb, grip offset/rotation/scale = `SWORD_GRIP`, brightness = `SWORD_BRIGHTNESS` (texture as emissive), metalness capped `SWORD_METALNESS`; bump `?v=` in `SWORD_MODEL_URL` when the GLB changes) | `src/items/swordModel.js`; used by `FoamSword.load` (`src/items/foamSword.js`) and `EnemyPlayer._buildSword` |
+| Sword model (sword.glb, grip offset/rotation/scale/brightness = `SWORD_ADJUST_DEFAULTS` — texture as emissive, metalness capped `SWORD_METALNESS`; TEMP debug sliders `#sword-debug-panel`, saved as `localStorage` `sq:swordModelAdjust:v4`; bake final values into `SWORD_ADJUST_DEFAULTS`; bump `?v=` in `SWORD_MODEL_URL` (and the storage key) when the GLB changes) | `src/items/swordModel.js`; used by `FoamSword.load` (`src/items/foamSword.js`) and `EnemyPlayer._buildSword`; panel mounted after the sword loads in `bootstrapGameApp.js`; `.sword-debug-*` in `styles.css` |
 | Where the hands go (sword/shield/gun grip, enemy swings) | `src/models/playerModel.js`, `src/items/foamSword.js`/`shield.js`/`pistol.js`, `src/characters/EnemyPlayer.js` |
 | Add a new UI panel | `src/controls/`, lazy-load in `src/features/uiPanelsFeature.js` |
 | World map / ground height | `public/glb_map/map.glb`; loaded + height resolver registered in `bootstrapGameApp.js`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |

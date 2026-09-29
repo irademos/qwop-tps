@@ -68,7 +68,7 @@ src/
 | Add weapon | `src/items/<weapon>.js` + register in `src/features/combatFeature.js` |
 | Movement / camera / input / action buttons | `src/controls/controls.js` |
 | Player / enemy / bomb-thrower character model, clips, arm IK, fur | `src/models/glbCharacterModel.js` (`glbCharacterConfig`), `src/models/fluffyCharacter.ts` |
-| Sword model / grip placement / brightness | `src/items/swordModel.js` (`SWORD_GRIP`, `SWORD_BRIGHTNESS`) |
+| Sword model / grip adjust (TEMP sliders) | `src/items/swordModel.js` (`SWORD_ADJUST_DEFAULTS`) |
 | Where hands go (sword/shield/gun grip) | `src/models/playerModel.js` (`updateProceduralPlayerRig`), `src/items/foamSword.js`, `shield.js`, `pistol.js`; enemies: `src/characters/EnemyPlayer.js` |
 | New UI panel | `src/controls/<panel>.js` + lazy-load in `src/features/uiPanelsFeature.js` |
 | World map / ground height | `public/glb_map/map.glb`; loaded in `bootstrapGameApp.js`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |
