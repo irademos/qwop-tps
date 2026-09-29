@@ -14,7 +14,6 @@ import { getCookie, setCookie } from '../core/utils.js';
 import { createAudioManager } from '../features/audioFeature.js';
 import { spawnProjectile, updateProjectiles, loadSpecialWeapons } from '../features/combatFeature.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { mountSwordDebugPanel } from '../items/swordModel.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
 import { getSpawnPosition, getSpawnY } from '../map/spawnUtils.js';
@@ -1796,8 +1795,6 @@ async function initCore(runtimeContext) {
   foamSword = new FoamSword(scene);
   await foamSword.load();
   window.foamSword = foamSword;
-  // TEMP: sliders for the sword.glb grip offset/rotation/scale
-  mountSwordDebugPanel(scene);
   foamSword.onPickup = (holder) => {
     if (holder !== playerControls) return;
     const heldMesh = ensureLocalHeldWeaponMesh(foamSword, FOAM_SWORD_ITEM_ID);
