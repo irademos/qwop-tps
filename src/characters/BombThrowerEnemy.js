@@ -4,7 +4,7 @@
  * on ground contact.  The player can deflect a bomb mid-air by hitting it with
  * the foam sword, sending it back toward the thrower (it homes in and always kills them).
  *
- * Body: the shared GLB character (gemhorn_rigged.glb, like half the
+ * Body: the shared GLB character (gemhorn_rigged.glb, like a third of the
  * EnemyPlayers) with walk/idle clips, Throw.fbx for each throw and the flying-back
  * death clip. Its arms follow the clips (no IK); a bomb is held in the right palm.
  *

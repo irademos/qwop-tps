@@ -15,8 +15,8 @@ import * as THREE from 'three';
 import { getKnockbackImpulse, getKnockbackMotion, RAGDOLL_STRENGTH_THRESHOLD } from '../combat/knockback.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 
-// Alternates the character model per spawned swordsman: half frog men, half gemhorns
-let _enemyModelToggle = false;
+// Cycles the character model per spawned swordsman: a third each antler guys, frog men, gemhorns
+let _enemyModelIndex = 0;
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { createSwordModelInstance } from '../items/swordModel.js';
 
@@ -99,6 +99,13 @@ const WINDUP_CIRCLE_HZ     = 2.2;   // revolutions per second
 const WINDUP_CIRCLE_HAND   = 0.06;  // hand circle radius (m)
 const WINDUP_CIRCLE_BLADE  = 0.22;  // blade-direction circle radius (unit-vector offset)
 
+// Swing telegraph: an additive glow along the blade. Wind-up glows yellow and pulses
+// faster/brighter as the swing nears; the swing itself flashes red; it fades after.
+const SWING_GLOW_WINDUP_COLOR = new THREE.Color(0xffd21a);
+const SWING_GLOW_SWING_COLOR  = new THREE.Color(0xff1a00);
+const SWING_GLOW_FADE_RATE    = 6;    // 1/s — fade-out after the swing
+const SWING_GLOW_BLADE_START  = 0.08; // sword-local z where the glow starts (just above the guard)
+
 // Trail rendering for sword swings
 const TRAIL_DURATION_MS  = 380;  // how long trail history is kept (ms)
 const TRAIL_FADE_MS      = 450;  // how long trail fades after swing (ms)
@@ -141,6 +148,7 @@ const _swordTipWorld  = new THREE.Vector3();
 const _swordGuardWorld = new THREE.Vector3();
 const _bladeDir = new THREE.Vector3();
 const _swingDirWorld    = new THREE.Vector3();
+const _whiteColor       = new THREE.Color(0xffffff);
 const _playerBladeWorld = new THREE.Vector3();
 const _upAxis  = new THREE.Vector3(0, 1, 0);
 const _bladeX  = new THREE.Vector3();
@@ -317,8 +325,8 @@ export class EnemyPlayer {
 
     // GLB character — loaded async. Its arms reach for the floating hand groups below.
     this._glbCharacter = null;
-    _enemyModelToggle = !_enemyModelToggle;
-    const characterUrl = _enemyModelToggle ? glbCharacterConfig.frogManUrl : glbCharacterConfig.url;
+    const enemyModelUrls = [glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url];
+    const characterUrl = enemyModelUrls[_enemyModelIndex++ % enemyModelUrls.length];
     createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT, url: characterUrl }).then(({ container, character }) => {
       if (this._destroyed) { character.dispose(); return; }
       this.group.add(container);
@@ -425,6 +433,7 @@ export class EnemyPlayer {
     this.scene.add(swordGroup); // added directly to scene so world transforms are straightforward
 
     // sword.glb (loaded with the player's sword); own materials for the hit flash
+    this._buildSwingGlow(swordGroup);
     const model = createSwordModelInstance({ cloneMaterials: true });
     if (model) {
       swordGroup.add(model);
@@ -584,6 +593,7 @@ export class EnemyPlayer {
       this._updateHandPositions(dt, Infinity);
       this._solveArm('right');
       this._updateSword(dt);
+      this._updateSwingGlow(dt);
       this._updateLeftHandToPommel(dt);
       this._solveArm('left');
       this._glbCharacter?.stepFluff(dt);
@@ -688,6 +698,7 @@ export class EnemyPlayer {
 
     // ── Sword (orientation depends on right hand) ──────────────────────────
     this._updateSword(dt);
+    this._updateSwingGlow(dt);
 
     // ── Left hand grips pommel (depends on sword orientation) ─────────────
     this._updateLeftHandToPommel(dt);
@@ -1074,9 +1085,73 @@ export class EnemyPlayer {
     this._flashSword();
   }
 
+  /** Additive blade glow used to telegraph swings (see SWING_GLOW_*). */
+  _buildSwingGlow(swordGroup) {
+    const len = SWORD_TIP_LOCAL.z + 0.04 - SWING_GLOW_BLADE_START;
+    const makeLayer = (radius, name) => {
+      const geo = new THREE.CylinderGeometry(radius * 0.45, radius, len, 12, 1, true);
+      geo.rotateX(Math.PI / 2);
+      geo.translate(0, 0, SWING_GLOW_BLADE_START + len / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: SWING_GLOW_WINDUP_COLOR.clone(), transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.name = name;
+      mesh.userData.swingGlow = true;
+      mesh.renderOrder = 2;
+      mesh.frustumCulled = false;
+      return mesh;
+    };
+    const glow = new THREE.Group();
+    glow.name = 'enemySwingGlow';
+    glow.add(makeLayer(0.035, 'enemySwingGlowCore'), makeLayer(0.09, 'enemySwingGlowHalo'));
+    glow.visible = false;
+    swordGroup.add(glow);
+    this._swingGlow = glow;
+    this._swingGlowLevel = 0;
+    this._swingGlowTime = 0;
+  }
+
+  _updateSwingGlow(dt) {
+    const glow = this._swingGlow;
+    if (!glow) return;
+    const phase = this._attackPhase;
+    const active = this._aiState === 'attack' && !this._isRagdoll && !this.isDead;
+    let target = 0;
+    let color = SWING_GLOW_WINDUP_COLOR;
+    let pulse = 1;
+    this._swingGlowTime += dt;
+    if (active && phase === 'swing_hold') {
+      // Brightens and pulses faster as the wind-up nears its release
+      const dur = this._attackPhaseDur;
+      const p = Number.isFinite(dur) ? Math.min(1, this._attackPhaseT / Math.max(0.001, dur)) : 0.6;
+      const freq = 6 + p * 14;
+      pulse = 0.65 + 0.35 * Math.sin(this._swingGlowTime * freq);
+      target = 0.55 + 0.45 * p;
+    } else if (active && phase === 'swing_execute') {
+      color = SWING_GLOW_SWING_COLOR;
+      target = 1;
+    } else if (active && phase === 'swing_end_hold') {
+      color = SWING_GLOW_SWING_COLOR;
+    }
+    if (target > this._swingGlowLevel) this._swingGlowLevel = target;
+    else this._swingGlowLevel = Math.max(target, this._swingGlowLevel - SWING_GLOW_FADE_RATE * dt);
+    const level = this._swingGlowLevel * pulse;
+    glow.visible = level > 0.01;
+    if (!glow.visible) return;
+    const [core, halo] = glow.children;
+    core.material.color.copy(color).lerp(_whiteColor, 0.35);
+    core.material.opacity = Math.min(1, level * 1.1);
+    halo.material.color.copy(color);
+    halo.material.opacity = level * 0.55;
+    const s = 1 + 0.25 * level;
+    halo.scale.set(s, s, 1);
+  }
+
   _flashSword() {
     this._swordGroup.traverse(obj => {
-      if (!obj.isMesh) return;
+      if (!obj.isMesh || obj.userData.swingGlow) return;
       const mat = Array.isArray(obj.material) ? obj.material[0] : obj.material;
       if (!mat) return;
       const origColor = mat.color.getHex();
@@ -1276,6 +1351,7 @@ export class EnemyPlayer {
     this._glbCharacter = null;
     if (this._ragdollTimeout) { clearTimeout(this._ragdollTimeout); this._ragdollTimeout = null; }
     if (this._swordGroup.parent) this.scene.remove(this._swordGroup);
+    this._swingGlow?.children.forEach(m => { m.geometry.dispose(); m.material.dispose(); });
     if (this.group.parent)       this.scene.remove(this.group);
     // Remove trail lines
     this._trailLines.forEach(l => {
