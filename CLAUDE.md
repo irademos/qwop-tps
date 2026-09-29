@@ -3,14 +3,14 @@
 > **Maintenance rule for AI agents:** If your changes add/remove/rename source files, move logic between modules, introduce new architectural patterns, or add new env vars — update this file and `docs/AI_AGENT_GUIDE.md` in the same commit. Keep the "Common Task Locations" table and directory tree accurate. Stale docs cost more tokens than fresh ones.
 
 ## What This Is
-A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone is the sword controller (gyro + joystick over PeerJS, `public/phone-sword.html`); the desktop/TV browser runs the game. Players fight waves of AI swordsmen and bomb throwers along a path through a static GLB map, stage by stage, collect coins and buy upgrades in the shop. Showdown is single player. **Multiplayer** mode is a lobby of everyone online where you challenge another player to a 1v1 sword duel in a private room (guns, bombs, bubbles and shields off). The old RPG, horde, 3D painter, OSM map and NPC systems were removed. The repo name "qwop-tps" is historical.
+A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone is the sword controller (gyro + joystick over PeerJS, `public/phone-sword.html`); the desktop/TV browser runs the game. Players fight waves of AI swordsmen and bomb throwers along a path through a static GLB map, stage by stage, collect coins and buy upgrades in the shop. Showdown is single player. **Multiplayer** mode is a lobby of everyone online where you challenge another player to a 1v1 sword duel in a private room, or start a **Team Battle** (5 v 5) / **Free For All** (10 fighters) with invited players, matchmaking players and bots (guns, bombs, bubbles and shields off). The old RPG, horde, 3D painter, OSM map and NPC systems were removed. The repo name "qwop-tps" is historical.
 
 ## Tech Stack
 | Layer | Technology |
 |---|---|
 | 3D Rendering | Three.js v0.176 (+ `three-mesh-bvh` for map raycasts) |
 | Physics | Rapier3D (`@dimforge/rapier3d-compat`) |
-| Multiplayer | Firebase Realtime Database (lobby/presence/signaling, shop stock) + PeerJS WebRTC (Multiplayer mode only: duel challenges, presence, sword state; separately the phone controller link) |
+| Multiplayer | Firebase Realtime Database (lobby/presence/signaling, shop stock) + PeerJS WebRTC (Multiplayer mode only: duel challenges, battle parties/matchmaking, presence, sword state; separately the phone controller link) |
 | Map | Static GLB (`public/glb_map/map.glb`), height via BVH raycast |
 | Build tool | Vite 6 |
 | Deploy | Vercel (with `/api/turn-credentials` serverless function) |
@@ -58,8 +58,9 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone i
 │   │   └── comboMeter.js       # Showdown combo meter HUD — consecutive hits, cashed out as coins when it ends
 │   │
 │   ├── multiplayer/
-│   │   ├── peerConnection.js   # Multiplayer class — PeerJS WebRTC, Firebase signaling, rooms (lobby / duel-<id>, joinRoom, destroy); messages: presence, projectile, duel
-│   │   └── duelMode.js         # Multiplayer mode: lobby screen, challenges, duel lifecycle (countdown/winner), temp find-location tool — game access via a ctx from bootstrapGameApp.js
+│   │   ├── peerConnection.js   # Multiplayer class — PeerJS WebRTC, Firebase signaling, rooms (lobby / duel-<id> / mm-<mode> / party-<id> / match-<id>, joinRoom, destroy); messages: presence, projectile, duel, match
+│   │   ├── duelMode.js         # Multiplayer mode: lobby screen (+ Team Battle / Free For All buttons), challenges, duel lifecycle (countdown/winner), temp find-location tool — game access via a ctx from bootstrapGameApp.js
+│   │   └── matchMode.js        # Team Battle / Free For All: party setup + invites, matchmaking queue, bots (host-simulated EnemyPlayers), battle lifecycle — game access via matchCtx
 │   │
 │   ├── audio/
 │   │   └── audioManager.js     # AudioManager — BGS loop, SFX playback/preload, footsteps, ouch vocals
@@ -149,8 +150,9 @@ Files in `features/` are **thin re-export + lazy-load wrappers** to enable Vite 
 ### 3. Multiplayer: lobby + duel rooms (Multiplayer mode only)
 - Peer multiplayer only exists in Multiplayer mode: `startMultiplayer` / `stopMultiplayer` in `bootstrapGameApp.js` create/destroy the `Multiplayer` instance (Showdown and the tutorial are single player; `multiplayer` is `null` there — guard every use)
 - Firebase Realtime Database = `peers/<id>` ({name, roomId}) lists everyone online (the lobby list), `rooms/<roomId>/<id>` drives who connects to whom; the shop stock is global (`merchantInventory`)
-- Rooms: everyone starts in `lobby`; a duel moves both players to `duel-<challengeId>` (`joinRoom`) and back afterwards
-- PeerJS WebRTC message types: `presence` (position/animation/equipment), `projectile`, `duel` (`op`: challenge/accept/decline/cancel/state/hit/blocked/dead/leave — see `duelMode.js`). Game traffic is sent only to the duel opponent (`sendTo`); presence from anyone else is ignored
+- Rooms: everyone starts in `lobby`; a duel moves both players to `duel-<challengeId>` (`joinRoom`) and back afterwards. Battles: a solo party host waits in `mm-<mode>` (the matchmaking queue), a party with guests in `party-<hostId>`, the battle itself in `match-<matchId>`
+- PeerJS WebRTC message types: `presence` (position/animation/equipment), `projectile`, `duel` (`op`: challenge/accept/decline/cancel/state/hit/blocked/dead/leave — see `duelMode.js`), `match` (party/queue/battle ops — see the header of `matchMode.js`). Game traffic is sent only to the duel opponent / the other battle players (`sendTo`, `_netRecipients`); presence from anyone else is ignored
+- Battles: the host (whoever pressed Start) simulates the bots and decides the winner; bot state is broadcast (`bots`), humans hit bots via `botHit` to the host. The host leaving ends the battle
 - Duel hits: the attacker's sword check detects the hit and sends `hit`; the victim applies the damage and sends `dead` when it dies
 - One peer per room elected "host"; others connect to it (star)
 - Topology mode configurable via `VITE_NETWORK_TOPOLOGY_MODE` env var
@@ -232,6 +234,7 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 | Audio | `src/audio/audioManager.js`, `public/assets/audio/`; Sword Showdown ambient loop = `SWORD_SHOWDOWN_BGS` in `bootstrapGameApp.js`; hurt vocals = `audioManager.playOuch(kind)` — ouch1 enemies via `playEnemyOuch()` (every 3rd or 4th hit across all enemies, `applyDamage`), ouch2 player hurt / ouch3 player death (`triggerPlayerHurtBlood`) |
 | Add new 3D prop | Place GLB in `public/assets/props/`, load it from `bootstrapGameApp.js` (see `ROAD_LIGHT_MODEL_URL`) |
 | Multiplayer mode (lobby of everyone online, challenge → private duel room, sword-only duels, best of 3 rounds (`DUEL_ROUNDS`, draw replays the round), 3-2-1-FIGHT then both auto-walk in (`startWalkIn`, stop at `DUEL_WALK_STOP_DIST`), 8 health segments every round (`DUEL_HEALTH_SEGMENTS` → `duelMaxHealthOverride`, never saved), WINNER banner, forfeit; temporary "Find Location" + "Copy location information" for picking the duel spot) | Lobby/duel state machine + DOM in `src/multiplayer/duelMode.js` (`DUEL_LOCATION` = where duels happen — paste the copied JSON there; `.duel-*` in `styles.css`); game side = `duelCtx` / `startMultiplayerMode` + duel sword hit check (`getOpponentCombat`) in the phone-sword loop of `bootstrapGameApp.js`; rooms / `joinRoom` / `destroy` in `src/multiplayer/peerConnection.js`; opponent grip IK = `userData.remoteHandTarget` in `updateRemotePlayerRig` (`src/models/playerModel.js`) |
+| Multiplayer battles: Team Battle (2 teams of 5, each team one character — antler / frog / gemhorn, host picks with 🔄, players pick a side) and Free For All (10 fighters, everyone picks a character); host invites online players (invite → join), a solo host sits in room `mm-<mode>` = the matchmaking queue, Start pulls queued players (pull → pullOk) and fills to `MATCH_SIZE`=10 with bots, private room `match-<matchId>`, spawn around `DUEL_LOCATION` (team lines / FFA ring), 8 health, auto-walk to the closest enemy (`MATCH_REENGAGE_DIST`), last team / fighter standing wins | Party/queue/battle state machine + DOM in `src/multiplayer/matchMode.js` (`MATCH_CHARACTERS`, `buildRoster`, `spawnPose`, host bot AI `updateBots` / `resolveBotHit`, `.match-*` in `styles.css`); game side = `matchCtx` in `bootstrapGameApp.js` (bots = `EnemyPlayer` with `characterUrl` / `swordDamage` / `showHealthBar` / `targetHitHandler`, host only; other clients see them as remote models); lobby buttons + `suspend`/`resume` in `duelMode.js`; sword hits on duel/battle opponents go through `_getPvpTargets` in the phone-sword loop; character swap = `setPlayerCharacterUrl` in `src/models/playerModel.js` |
 | Serverless API changes | `/api/turn-credentials.js` |
 
 ---

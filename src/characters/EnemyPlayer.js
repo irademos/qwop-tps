@@ -258,6 +258,14 @@ export class EnemyPlayer {
     this.script = options.script ?? null;
     // Times this sword has been knocked back (player block, shield, bubble or a blocked swing)
     this.swordBounces = 0;
+    // Health segments a sword hit on the local player takes (Multiplayer bots use 1)
+    this.swordDamage = options.swordDamage ?? SWORD_DAMAGE;
+    // Character GLB (default: cycle antler guy / frog man / gemhorn per spawn)
+    this._characterUrl = options.characterUrl ?? null;
+    this._showHealthBar = options.showHealthBar ?? true;
+    // Multiplayer bots: when the target isn't the local player, a sword swing reaching it is
+    // resolved by this callback instead: (targetModel, swingDirWorld) => 'hit' | 'blocked' | null
+    this.targetHitHandler = null;
 
     this._swingT       = 0;
     this._lastHitTime  = 0;
@@ -326,7 +334,7 @@ export class EnemyPlayer {
     // GLB character — loaded async. Its arms reach for the floating hand groups below.
     this._glbCharacter = null;
     const enemyModelUrls = [glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url];
-    const characterUrl = enemyModelUrls[_enemyModelIndex++ % enemyModelUrls.length];
+    const characterUrl = this._characterUrl ?? enemyModelUrls[_enemyModelIndex++ % enemyModelUrls.length];
     createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT, url: characterUrl }).then(({ container, character }) => {
       if (this._destroyed) { character.dispose(); return; }
       this.group.add(container);
@@ -507,8 +515,9 @@ export class EnemyPlayer {
     const ctx = this._hpCtx;
     const W = 96, H = 32;
     ctx.clearRect(0, 0, W, H);
-    const heartSize = 24;
-    const gap = 4;
+    // Shrink the hearts to fit when there are many (Multiplayer bots have 8)
+    const gap = this.maxHearts > 3 ? 2 : 4;
+    const heartSize = Math.min(24, Math.floor((W - gap * (this.maxHearts - 1)) / Math.max(1, this.maxHearts)));
     const totalW = this.maxHearts * heartSize + (this.maxHearts - 1) * gap;
     const startX = (W - totalW) / 2;
     ctx.font = `${heartSize}px serif`;
@@ -524,7 +533,7 @@ export class EnemyPlayer {
     if (!silent) {
       // Show hearts for 3 seconds after a hit
       this._hpShowUntil = Date.now() + 3000;
-      if (this._hpPlane) this._hpPlane.visible = true;
+      if (this._hpPlane && this._showHealthBar) this._hpPlane.visible = true;
     }
   }
 
@@ -1013,6 +1022,18 @@ export class EnemyPlayer {
 
     const dist = _swordTipWorld.distanceTo(targetCenter);
 
+    // Multiplayer bot swinging at someone other than the local player
+    if (this.targetHitHandler) {
+      if (dist > SWORD_TIP_HIT_RADIUS) return;
+      this.group.getWorldQuaternion(_rootQ);
+      _swingDirWorld.subVectors(this._swingPreset.to, this._swingPreset.from).applyQuaternion(_rootQ);
+      const result = this.targetHitHandler(targetModel, _swingDirWorld);
+      if (result === 'blocked') this.applySwordBounce();
+      else if (result === 'hit') this._flashSword();
+      if (result) this._lastHitTime = now;
+      return;
+    }
+
     // Protective bubble: the sword bounces off the bubble surface, no damage
     const bubbleRadius = window.getPlayerBubbleRadius?.() || 0;
     if (bubbleRadius > 0 && dist <= Math.max(bubbleRadius, SWORD_TIP_HIT_RADIUS)) {
@@ -1075,7 +1096,7 @@ export class EnemyPlayer {
 
     // Reduce player health via window.localHealth
     if (typeof window.localHealth === 'number') {
-      window.localHealth = Math.max(0, window.localHealth - SWORD_DAMAGE);
+      window.localHealth = Math.max(0, window.localHealth - this.swordDamage);
     }
     window.audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
 
