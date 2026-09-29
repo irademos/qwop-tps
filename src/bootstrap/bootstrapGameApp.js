@@ -2589,6 +2589,10 @@ async function initCore(runtimeContext) {
 
   let playerDead = false;
   let duelControlsLocked = false; // Multiplayer lobby / duel countdown
+  // Multiplayer duel: everyone gets the same max health, whatever they've upgraded to in
+  // Showdown (null outside a duel). Never saved — statsState.maxHealthSegments is untouched.
+  let duelMaxHealthOverride = null;
+  const effectiveMaxHealthSegments = () => duelMaxHealthOverride ?? statsState.maxHealthSegments;
   const updateControlAvailability = () => {
     if (!playerControls) return;
     playerControls.enabled = !playerDead && !duelControlsLocked;
@@ -2598,7 +2602,8 @@ async function initCore(runtimeContext) {
   const healthLabel = document.getElementById('health-label');
   function updateHealthUI() {
     if (!healthBar) return;
-    const maxSegments = Math.max(SHOWDOWN_BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || SHOWDOWN_BASE_HEALTH_SEGMENTS));
+    const maxSegments = duelMaxHealthOverride
+      ?? Math.max(SHOWDOWN_BASE_HEALTH_SEGMENTS, Math.round(statsState.maxHealthSegments || SHOWDOWN_BASE_HEALTH_SEGMENTS));
     const currentSegments = clampHealthSegments(statsState.health, statsState.level, maxSegments);
     const healthRatio = maxSegments > 0 ? currentSegments / maxSegments : 0;
     if (healthBar.childElementCount !== maxSegments) {
@@ -2632,7 +2637,7 @@ async function initCore(runtimeContext) {
       if (!Number.isFinite(num)) {
         return 0;
       }
-      return clampHealthSegments(num, statsState.level, statsState.maxHealthSegments);
+      return clampHealthSegments(num, statsState.level, effectiveMaxHealthSegments());
     }
     if (key === 'level') {
       const num = Number(value);
@@ -4866,7 +4871,9 @@ async function initCore(runtimeContext) {
   };
 
   // ── Multiplayer mode: lobby + 1v1 sword duels (src/multiplayer/duelMode.js) ──
-  const DUEL_HEALTH_SEGMENTS = SHOWDOWN_BASE_HEALTH_SEGMENTS;
+  const DUEL_HEALTH_SEGMENTS = 8;      // every duelist, every round, whatever their Showdown max
+  const DUEL_WALK_STOP_DIST = 1.4;     // auto-walk toward the opponent stops this close (m)
+  let _duelWalking = false;            // walking in toward the opponent after "FIGHT!"
   const _duelSwordLocalPos = new THREE.Vector3();
   const _duelSwordLocalQ = new THREE.Quaternion();
   const _round3 = (v) => Math.round(v * 1000) / 1000;
@@ -4928,18 +4935,29 @@ async function initCore(runtimeContext) {
     spawnForRoam: () => {
       _resetForMenu();
     },
+    // Start of every round: back on our feet at the start spot with full duel health
     enterDuel: ({ x, z, yaw }) => {
+      // Same health for both duelists, whatever they've upgraded to in Showdown
+      duelMaxHealthOverride = DUEL_HEALTH_SEGMENTS;
+      _duelWalking = false;
       _resetForMenu();
       _duelDayLighting();
       _teleportPlayer(x, z, yaw);
-      // Same health for both duelists, whatever they've upgraded to in Showdown
-      statsState.health = clampStat('health', DUEL_HEALTH_SEGMENTS);
-      updateHealthUI();
+      setStat('health', DUEL_HEALTH_SEGMENTS, { skipSave: true });
       duelCtx.setControlsLocked(true);
     },
     leaveDuel: () => {
+      duelMaxHealthOverride = null;
+      _duelWalking = false;
       _resetForMenu();
     },
+    // "FIGHT!": walk in toward the opponent until close (like Showdown enemies close in)
+    startWalkIn: () => { _duelWalking = true; },
+    stopWalkIn: () => {
+      if (_duelWalking && playerControls) playerControls.isMoving = false;
+      _duelWalking = false;
+    },
+    reviveRemotePlayer: (id) => otherPlayers[id]?.model?.userData?.qwopRig?.glbCharacter?.revive?.(),
     // Sword pose in the local player's model space (+ grip + block stance) for the opponent
     getLocalSwordState: () => {
       if (foamSword?.holder !== playerControls || !foamSword.mesh) return null;
@@ -5660,6 +5678,30 @@ async function initCore(runtimeContext) {
         }
       }
       _duelCamLastYaw = playerControls.yaw;
+
+      // Walk in toward the opponent (they do the same on their side) and stop when close
+      if (_duelWalking && _opp && !playerDead) {
+        const _wdx = _opp.position.x - playerModel.position.x;
+        const _wdz = _opp.position.z - playerModel.position.z;
+        const _wDist = Math.hypot(_wdx, _wdz);
+        if (_wDist > DUEL_WALK_STOP_DIST) {
+          const _step = Math.min(PS_SPEED * frameDelta, _wDist - DUEL_WALK_STOP_DIST);
+          const _nx = playerModel.position.x + (_wdx / _wDist) * _step;
+          const _nz = playerModel.position.z + (_wdz / _wDist) * _step;
+          playerModel.position.x = _nx;
+          playerModel.position.z = _nz;
+          playerControls.playerX = _nx;
+          playerControls.playerZ = _nz;
+          playerControls.lastPosition?.set(_nx, playerModel.position.y, _nz);
+          if (playerControls.body) {
+            playerControls.body.setNextKinematicTranslation({ x: _nx, y: playerModel.position.y + 0.6, z: _nz });
+          }
+          playerControls.isMoving = true;
+        } else {
+          _duelWalking = false;
+          playerControls.isMoving = false;
+        }
+      }
     }
 
     // ── Phone sword jump (runs regardless of enemy count) ─────────────────

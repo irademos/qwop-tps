@@ -3,21 +3,29 @@ import { LOBBY_ROOM_ID } from './peerConnection.js';
 
 // Multiplayer mode: a lobby of everyone online (the `peers` list the Multiplayer class keeps
 // from Firebase) where you challenge a player to a 1v1 sword duel. A duel moves both players
-// into their own private room at DUEL_LOCATION, locks guns/bombs/bubbles/shields, counts
-// "3 2 1 FIGHT!" and ends when one of them dies ("WINNER <name>"), then both go back to the
-// lobby. Game access goes through `ctx` (built in bootstrapGameApp.js).
+// into their own private room at DUEL_LOCATION, locks guns/bombs/bubbles/shields and plays
+// best of DUEL_ROUNDS rounds: each round both start apart with full duel health, count
+// "3 2 1 FIGHT!", walk in toward each other and fight until one dies. First to
+// ROUNDS_TO_WIN round wins is the WINNER, then both go back to the lobby.
+// Game access goes through `ctx` (built in bootstrapGameApp.js).
 //
 // Wire protocol: PeerJS messages of type 'duel' sent straight to the other player (sendTo):
 //   challenge {challengeId, name, location} · accept {challengeId, name} · decline · cancel
 //   state {sword: {p, q}, hand, blocking}  (~20 Hz, sword pose in the sender's model space)
-//   hit {dmg, dir} (the attacker detects hits, the victim applies them) · blocked · dead · leave
+//   hit {dmg, dir} (the attacker detects hits, the victim applies them) · blocked
+//   dead {round} (the sender lost that round) · leave
+// Both sides keep the score themselves from the `dead` messages; if both die in the same
+// round (each gets the other's `dead` while the round is over) the round is a draw and replays.
 
 // Where duels happen: paste the output of the lobby's "Copy location information" here.
 // The challenger stands behind this point facing `yaw`, the accepter in front facing back.
-export const DUEL_LOCATION = { x: -133.85, y: 6.21, z: 68.77, yaw: 2.63 };
+export const DUEL_LOCATION = { x: -109.56, y: 26.97, z: -80.17, yaw: 1.87 };
 
 const DUEL_DEFAULT_LOCATION = { x: 0, z: 0, yaw: 0 };
-const DUEL_START_GAP = 4;              // metres between the two players at "3"
+const DUEL_START_GAP = 8;              // metres between the two players at "3" (they walk in)
+const DUEL_ROUNDS = 3;                 // best of 3
+const ROUNDS_TO_WIN = Math.floor(DUEL_ROUNDS / 2) + 1;
+const ROUND_BANNER_MS = 2500;          // round result on screen before the next round
 const CHALLENGE_TIMEOUT_MS = 30000;
 const STATE_SEND_MS = 50;
 const OPPONENT_TIMEOUT_MS = 10000;     // no messages this long → the opponent left
@@ -51,11 +59,13 @@ const copyText = async (text) => {
 };
 
 export function createDuelMode(ctx) {
-  // 'off' | 'lobby' | 'roam' (find location) | 'countdown' | 'fighting' | 'over'
+  // 'off' | 'lobby' | 'roam' (find location) | 'countdown' | 'fighting' | 'roundOver' | 'over'
   let phase = 'off';
   let outgoing = null;   // { challengeId, to, name, timer }
   let incoming = null;   // { challengeId, from, name, location, timer }
-  let duel = null;       // { challengeId, roomId, opponentId, opponentName, lastHeardAt }
+  // { challengeId, roomId, opponentId, opponentName, lastHeardAt, location, side,
+  //   round, myWins, oppWins, iDied, oppDied, roundTimer }
+  let duel = null;
   let lastStateSentAt = 0;
   let countdownTimers = [];
   let remoteSword = null;
@@ -273,14 +283,38 @@ export function createDuelMode(ctx) {
 
   const startDuel = ({ challengeId, opponentId, opponentName, location, side }) => {
     const roomId = `duel-${challengeId}`;
-    duel = { challengeId, roomId, opponentId, opponentName, lastHeardAt: Date.now() };
-    phase = 'countdown';
+    duel = {
+      challengeId, roomId, opponentId, opponentName, lastHeardAt: Date.now(), location, side,
+      round: 0, myWins: 0, oppWins: 0, iDied: false, oppDied: false, roundTimer: null
+    };
     lobby.classList.add('hidden');
     hideBanner();
     void ctx.getMultiplayer()?.joinRoom?.(roomId);
+    forfeitBtn.classList.remove('hidden');
+    hud.classList.remove('hidden');
+    ensureRemoteSword();
+    startRound();
+  };
+
+  const renderHud = () => {
+    if (!duel) return;
+    hudVs.textContent = `${ctx.getPlayerName()} ${duel.myWins} – ${duel.oppWins} ${duel.opponentName}`
+      + ` · Round ${Math.min(duel.round, DUEL_ROUNDS)}/${DUEL_ROUNDS}`;
+  };
+
+  const startRound = () => {
+    if (!duel) return;
+    clearCountdown();
+    duel.round += 1;
+    duel.iDied = false;
+    duel.oppDied = false;
+    phase = 'countdown';
+    hideBanner();
+    renderHud();
 
     // Face each other across the duel spot: challenger (side 0) behind the centre facing
     // along the location's yaw, the accepter in front facing back.
+    const { location, side } = duel;
     const loc = location && Number.isFinite(location.x) && Number.isFinite(location.z)
       ? location
       : DUEL_DEFAULT_LOCATION;
@@ -291,14 +325,13 @@ export function createDuelMode(ctx) {
     const x = loc.x + fx * offset;
     const z = loc.z + fz * offset;
     ctx.enterDuel({ x, z, yaw: side === 0 ? yaw : yaw + Math.PI });
-    hudVs.textContent = `${ctx.getPlayerName()} vs ${opponentName}`;
-    forfeitBtn.classList.remove('hidden');
-    hud.classList.remove('hidden');
-    ensureRemoteSword();
+    ctx.reviveRemotePlayer(duel.opponentId);
 
+    const isFinal = duel.myWins === ROUNDS_TO_WIN - 1 && duel.oppWins === ROUNDS_TO_WIN - 1;
+    const roundLabel = isFinal ? 'FINAL ROUND' : `ROUND ${duel.round}`;
     ['3', '2', '1'].forEach((text, i) => {
       countdownTimers.push(setTimeout(() => {
-        if (phase === 'countdown') showBanner(text);
+        if (phase === 'countdown') showBanner(text, roundLabel);
       }, i * COUNTDOWN_STEP_MS));
     });
     countdownTimers.push(setTimeout(() => {
@@ -306,15 +339,62 @@ export function createDuelMode(ctx) {
       phase = 'fighting';
       showBanner('FIGHT!');
       ctx.setControlsLocked(false);
+      ctx.startWalkIn();
       countdownTimers.push(setTimeout(() => {
         if (phase === 'fighting') hideBanner();
       }, 800));
     }, 3 * COUNTDOWN_STEP_MS));
   };
 
+  // Someone died this round (iLost: the local player). A second death while the round is
+  // over (both died at once) turns the round into a draw that is replayed.
+  const onRoundDeath = (iLost) => {
+    if (!duel) return;
+    if (phase === 'fighting') {
+      clearCountdown();
+      ctx.stopWalkIn();
+      phase = 'roundOver';
+      if (iLost) { duel.iDied = true; duel.oppWins += 1; } else { duel.oppDied = true; duel.myWins += 1; }
+      renderHud();
+      ctx.setControlsLocked(true);
+      if (duel.myWins >= ROUNDS_TO_WIN || duel.oppWins >= ROUNDS_TO_WIN) {
+        // Hold the result briefly in case the other death is in flight (draw)
+        scheduleNextRound(true);
+      } else {
+        const winner = iLost ? opponentName() : ctx.getPlayerName();
+        showBanner(`${winner} wins round ${duel.round}`, `${duel.myWins} – ${duel.oppWins}`);
+        scheduleNextRound(false);
+      }
+      return;
+    }
+    if (phase !== 'roundOver') return;
+    if (iLost ? duel.iDied : duel.oppDied) return;
+    // Both went down: undo the point, replay the round
+    if (iLost) { duel.iDied = true; duel.myWins -= 1; } else { duel.oppDied = true; duel.oppWins -= 1; }
+    duel.round -= 1;
+    renderHud();
+    showBanner('DRAW', `${duel.myWins} – ${duel.oppWins} · replaying the round`);
+    ctx.setControlsLocked(true);
+    scheduleNextRound(false);
+  };
+
+  const scheduleNextRound = (maybeFinal) => {
+    clearTimeout(duel.roundTimer);
+    const current = duel;
+    // A deciding round waits only a moment (to catch a simultaneous death) before the WINNER banner
+    duel.roundTimer = setTimeout(() => {
+      if (duel !== current || phase !== 'roundOver') return;
+      if (duel.myWins >= ROUNDS_TO_WIN) endDuel(ctx.getPlayerName(), `${duel.myWins} – ${duel.oppWins}`);
+      else if (duel.oppWins >= ROUNDS_TO_WIN) endDuel(opponentName(), `${duel.oppWins} – ${duel.myWins}`);
+      else startRound();
+    }, maybeFinal ? 600 : ROUND_BANNER_MS);
+  };
+
   const endDuel = (winnerName, sub = '') => {
     if (!duel || phase === 'over') return;
     clearCountdown();
+    clearTimeout(duel.roundTimer);
+    ctx.stopWalkIn();
     phase = 'over';
     forfeitBtn.classList.add('hidden');
     ctx.setControlsLocked(true);
@@ -328,6 +408,7 @@ export function createDuelMode(ctx) {
 
   const returnToLobby = () => {
     clearCountdown();
+    if (duel) clearTimeout(duel.roundTimer);
     const opponentId = duel?.opponentId;
     duel = null;
     hideBanner();
@@ -342,7 +423,7 @@ export function createDuelMode(ctx) {
   const opponentName = () => duel?.opponentName || 'Opponent';
 
   forfeitBtn.addEventListener('click', () => {
-    if (!duel || (phase !== 'countdown' && phase !== 'fighting')) return;
+    if (!duel || (phase !== 'countdown' && phase !== 'fighting' && phase !== 'roundOver')) return;
     send(duel.opponentId, { op: 'leave', challengeId: duel.challengeId });
     endDuel(opponentName(), `${ctx.getPlayerName()} forfeited`);
   });
@@ -406,6 +487,10 @@ export function createDuelMode(ctx) {
     clearIncoming();
     clearCountdown();
     const opponentId = duel?.opponentId;
+    if (duel) {
+      clearTimeout(duel.roundTimer);
+      ctx.leaveDuel();
+    }
     duel = null;
     phase = 'off';
     disposeRemoteSword();
@@ -510,8 +595,10 @@ export function createDuelMode(ctx) {
         ctx.onSwingBlocked();
         return;
       case 'dead':
+        // Only for the round being played (a stale one from a previous round is ignored)
+        if (Number(data.round) !== duel.round) return;
         ctx.getRemoteModel(duel.opponentId)?.userData?.qwopRig?.glbCharacter?.playDeath?.();
-        endDuel(ctx.getPlayerName());
+        onRoundDeath(false);
         return;
       case 'leave':
         endDuel(ctx.getPlayerName(), `${opponentName()} left the duel`);
@@ -525,7 +612,7 @@ export function createDuelMode(ctx) {
       const pose = ctx.getPlayerPose();
       roamCoords.textContent = `x ${pose.x}  y ${pose.y}  z ${pose.z}  yaw ${pose.yaw}`;
     }
-    if (!duel || (phase !== 'countdown' && phase !== 'fighting')) return;
+    if (!duel || (phase !== 'countdown' && phase !== 'fighting' && phase !== 'roundOver')) return;
 
     const now = Date.now();
     const peers = ctx.getMultiplayer()?.getOnlinePeers?.();
@@ -592,7 +679,7 @@ export function createDuelMode(ctx) {
     handleMessage,
     getOpponentCombat,
     isActive: () => phase !== 'off',
-    isInDuel: () => !!duel && (phase === 'countdown' || phase === 'fighting' || phase === 'over'),
+    isInDuel: () => !!duel && phase !== 'off',
     isFighting: () => phase === 'fighting',
     getOpponentId: () => duel?.opponentId || null,
     acceptsPresenceFrom: (peerId) => !!duel && peerId === duel.opponentId,
@@ -604,11 +691,11 @@ export function createDuelMode(ctx) {
       if (phase !== 'fighting' || !duel) return;
       send(duel.opponentId, { op: 'blocked', challengeId: duel.challengeId });
     },
-    // The local player died in a duel: tell the opponent, they win
+    // The local player died in a duel: tell the opponent, they take the round
     onLocalDeath: () => {
-      if (!duel || phase !== 'fighting') return;
-      send(duel.opponentId, { op: 'dead', challengeId: duel.challengeId });
-      endDuel(opponentName());
+      if (!duel || (phase !== 'fighting' && phase !== 'roundOver')) return;
+      send(duel.opponentId, { op: 'dead', challengeId: duel.challengeId, round: duel.round });
+      onRoundDeath(true);
     },
     onPeersChange: () => {
       if (phase === 'lobby') renderLobby();
