@@ -36,6 +36,8 @@ import { exposeDebugGlobals } from '../core/exposeDebugGlobals.js';
 import { EnemyPlayer, swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/EnemyPlayer.js';
 import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerEnemy.js';
 import { createPlayerBombs } from '../combat/playerBomb.js';
+import { createHeartBubbles } from '../combat/heartBubbles.js';
+import { createComboMeter } from '../combat/comboMeter.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 
 import {
@@ -2306,6 +2308,7 @@ async function initCore(runtimeContext) {
     if (itemId === PISTOL_AMMO_KEY) return '🔶';
     if (itemId === 'bubble') return '🫧';
     if (itemId === 'showdown_bomb') return '💣';
+    if (itemId === 'heart') return '❤️';
     return '🎒';
   };
 
@@ -2693,10 +2696,23 @@ async function initCore(runtimeContext) {
     }
   }
 
+  // Sword Showdown combo meter: consecutive sword hits; ends (and pays that many coins)
+  // when the player is hurt, presses Block or has a swing blocked (src/combat/comboMeter.js)
+  const comboMeter = createComboMeter({
+    onCashOut: (coins) => {
+      const nextCoins = (Number.isFinite(statsState.coins) ? statsState.coins : 0) + coins;
+      setStat('coins', nextCoins, { skipSave: true });
+      saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+      showCoinPopup(statsState.coins);
+      showPickupToast('coins', coins, '', { text: `${coins} hit combo: +${coins} coins` });
+    },
+  });
+
   const playerBloodOrigin = new THREE.Vector3();
   const triggerPlayerHurtBlood = (previousHealth, nextHealth) => {
     if (!Number.isFinite(previousHealth) || !Number.isFinite(nextHealth)) return;
     if (nextHealth >= previousHealth || !playerModel?.parent) return;
+    comboMeter.end();
     playerModel.getWorldPosition(playerBloodOrigin);
     const groundY = playerBloodOrigin.y;
     playerBloodOrigin.y += 0.85;
@@ -3164,6 +3180,24 @@ async function initCore(runtimeContext) {
   const PLAYER_BOMB_CLIP_TIMEOUT_MS = 2500; // release anyway if the clip is slow to load
   const PLAYER_BOMB_HAND = 'left';          // mirrored label: the anatomical right arm
   const playerBombs = createPlayerBombs({ scene, getBlastTargets: () => hordeEnemies });
+
+  // ── Sword Showdown: heart bubbles (placed mid-stage in _psBuildStage, popped by the
+  // sword in the phone-sword loop for +1 health segment; src/combat/heartBubbles.js) ──
+  const heartBubbles = createHeartBubbles({ scene, getGroundY: getTerrainHeight });
+  const _popHeartBubbles = (count) => {
+    if (count <= 0) return;
+    const before = statsState.health;
+    setStat('health', statsState.health + count, { skipSave: true });
+    const gained = Math.max(0, Math.round(statsState.health - before));
+    audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.7, { cooldownKey: 'heart-bubble', cooldownMs: 150 });
+    showPickupToast('heart', Math.max(1, gained), '', { text: gained > 0 ? `+${gained} ❤️ Health` : 'Health already full' });
+  };
+  // Heart bubbles per stage: 1 at the start, +1 every 5 stages (max 4), plus a rising
+  // chance of one more; they sit around the middle of the path.
+  const _psHeartBubbleCount = (stage) => {
+    const base = Math.min(4, 1 + Math.floor((stage - 1) / 5));
+    return base + (Math.random() < Math.min(0.8, stage * 0.04) ? 1 : 0);
+  };
   const _playerBombPalm = new THREE.Vector3();
   const _playerBombForward = new THREE.Vector3();
   let playerBombThrow = null; // { restoreIds, startedAt, usesClip, released }
@@ -3463,6 +3497,16 @@ async function initCore(runtimeContext) {
       const cz = playerModel.position.z + _psAutoWalkDir.z * pathLen * ct + (Math.random() - 0.5) * 6;
       spawnCoinPickup(new THREE.Vector3(cx, playerModel.position.y, cz));
     }
+    // Heart bubbles around halfway (between 35% and 70% of the path)
+    heartBubbles.clear();
+    const heartCount = _psHeartBubbleCount(stage);
+    for (let hi = 0; hi < heartCount; hi++) {
+      const ht = heartCount === 1 ? 0.5 : 0.35 + 0.35 * (hi / (heartCount - 1));
+      const hx = playerModel.position.x + _psAutoWalkDir.x * pathLen * ht + (Math.random() - 0.5) * 3;
+      const hz = playerModel.position.z + _psAutoWalkDir.z * pathLen * ht + (Math.random() - 0.5) * 3;
+      heartBubbles.spawn(new THREE.Vector3(hx, playerModel.position.y, hz));
+    }
+    comboMeter.reset();
     _psAutoWalking = true;
     _psStageActive = true;
     _psWinShown = false;
@@ -3601,6 +3645,8 @@ async function initCore(runtimeContext) {
     }
     hordeEnemies.length = 0;
     playerBombs?.clear();
+    heartBubbles.clear();
+    comboMeter.reset();
     _psEnemyQueue = [];
     _psAutoWalking = false;
     _psStageActive = false;
@@ -4851,6 +4897,8 @@ async function initCore(runtimeContext) {
     _psStageOverlay.classList.add('hidden');
     for (let i = hordeEnemies.length - 1; i >= 0; i--) _tutorialRemoveEnemy(hordeEnemies[i]);
     playerBombs?.clear();
+    heartBubbles.clear();
+    comboMeter.reset();
     _psEnemyQueue = [];
     _psAutoWalking = false;
     _psStageActive = false;
@@ -5268,6 +5316,7 @@ async function initCore(runtimeContext) {
       }
     }
     foamSword?.update();
+    let _frameBladePoints = null; // player's blade points this frame (only with the phone sword out)
     // Phone Sword: override mesh quaternion, then run sword-vs-sword collision + sweep hit detection.
     if (window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
@@ -5298,6 +5347,7 @@ async function initCore(runtimeContext) {
       // a moment after every block toggle and restart the swing-direction history.
       const _blockingNow = !!window.phoneSwordGyro?.blocking;
       if (_blockingNow !== _psw.lastBlocking) {
+        if (_blockingNow) comboMeter.end(); // blocking ends the combo
         _psw.lastBlocking = _blockingNow;
         _psw.blockToggleUntil = _nowSecPS + PSW_BLOCK_TOGGLE_IGNORE_S;
         _psw.tipHistory.length = 0;
@@ -5368,6 +5418,7 @@ async function initCore(runtimeContext) {
               if (_he.blocksSwing?.(_swingDir, playerModel.position)) {
                 // Enemy's block holds — both swords recoil, no damage
                 _he.applySwordBounce?.();
+                if (!_he._tutorial) comboMeter.end();
                 audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
                 _startSwordBounce();
                 // Small step forward into the blocked swing (instead of the miss lunge)
@@ -5387,6 +5438,7 @@ async function initCore(runtimeContext) {
                 if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
                 _sweepDir.normalize();
                 const _killingBlow = _he.applyDamage(1);
+                if (!_he._tutorial && _psStageActive) comboMeter.hit();
                 if (_killingBlow) {
                   // Full knockback on killing hit
                   _he.applyDirectKnockback({
@@ -5415,6 +5467,8 @@ async function initCore(runtimeContext) {
           }
         }
       }
+      _frameBladePoints = _playerBladePoints; // heart bubbles (below)
+
       // ── Duel: same sweep hit + directional block against the other player ──
       // The attacker detects the hit and sends it; the victim applies the damage.
       const _duelOpp = duelMode?.getOpponentCombat();
@@ -5486,6 +5540,11 @@ async function initCore(runtimeContext) {
       _psw.tipHistory.push({ pos: _psw.prevTipWorld, t: _nowSecPS });
       while (_psw.tipHistory.length && _nowSecPS - _psw.tipHistory[0].t > 0.12) _psw.tipHistory.shift();
     }
+    // Heart bubbles: drift to the player; any blade point touching one pops it (+1 health)
+    _popHeartBubbles(heartBubbles.update(frameDelta, {
+      playerModel: playerDead ? null : playerModel,
+      bladePoints: playerDead ? null : _frameBladePoints,
+    }));
     // Phone Sword: apply fixed position/rotation config to shield and pistol,
     // and feed phoneSwordGyro data into the camera gyro system.
     const _wCfg = window.phoneSwordWeaponCfg;
@@ -5580,6 +5639,8 @@ async function initCore(runtimeContext) {
       if (_psStageActive && !_psWinShown && _psEnemyQueue.length === 0 && hordeEnemies.length > 0 && hordeEnemies.every(e => e.isDead)) {
         _psStageActive = false;
         _psWinShown = true;
+        comboMeter.end();
+        heartBubbles.clear();
         addPlayerXp(getSwordShowdownStageXp(_psStage));
         // Stage cleared: restore the player to full health
         setStat('health', statsState.maxHealthSegments);
