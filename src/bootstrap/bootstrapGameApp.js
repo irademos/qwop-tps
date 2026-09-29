@@ -660,6 +660,57 @@ async function initCore(runtimeContext) {
   // Phone Sword gyro scratch objects
   const _phoneSwordGyroQ = new THREE.Quaternion();
   const _phoneSwordEuler = new THREE.Euler();
+  // Orientation math is done with quaternions (not per-axis Euler deltas, which flip near
+  // beta = ±90°). Device orientation per the W3C spec = Rz(alpha)·Rx(beta)·Ry(gamma) in the
+  // earth frame (x east, y north, z up). _phoneSwordEarthToGameQ maps earth → the player's
+  // local game frame (Y up, +Z forward, -X right) with "forward" = where the phone's back/top
+  // pointed at calibration, so the sword turns exactly as the phone turns in the world.
+  const _pswDeviceQ = new THREE.Quaternion();
+  const _pswCalibQ = new THREE.Quaternion();
+  const _pswEarthToGameQ = new THREE.Quaternion();
+  const _pswYawQ = new THREE.Quaternion();
+  const _pswNeutralQ = new THREE.Quaternion();
+  const _pswTmpEuler = new THREE.Euler();
+  const _pswTmpV = new THREE.Vector3();
+  const _pswTmpV2 = new THREE.Vector3();
+  const _pswTmpM = new THREE.Matrix4();
+  const _PSW_UP = new THREE.Vector3(0, 1, 0);
+  const _pswDeviceQuat = (alpha, beta, gamma, out) => {
+    const DEG = Math.PI / 180;
+    return out.setFromEuler(_pswTmpEuler.set(beta * DEG, gamma * DEG, alpha * DEG, 'ZXY'));
+  };
+  // Earth → game frame, with the forward heading taken from the calibration pose: the sum of
+  // the horizontal parts of the phone's back (-z, upright hold) and top (+y, flat hold).
+  const _pswEarthToGame = (calibQ, out) => {
+    const back = _pswTmpV.set(0, 0, -1).applyQuaternion(calibQ);
+    const top = _pswTmpV2.set(0, 1, 0).applyQuaternion(calibQ);
+    let fx = back.x + top.x, fy = back.y + top.y;
+    const len = Math.hypot(fx, fy);
+    if (len < 1e-4) { fx = 0; fy = 1; } else { fx /= len; fy /= len; }
+    // Rows = game X/Y/Z axes in earth coords: game +X = -right = (-fy, fx, 0),
+    // game +Y = earth up, game +Z = forward (fx, fy, 0).
+    _pswTmpM.set(
+      -fy, fx, 0, 0,
+        0,  0, 1, 0,
+       fx, fy, 0, 0,
+        0,  0, 0, 1
+    );
+    return out.setFromRotationMatrix(_pswTmpM);
+  };
+  // Yaw auto-recentre (see the phone-sword gyro loop): only yaw drifts — beta/gamma are
+  // gravity-referenced on the phone — so during calm, non-fighting moments the sword's yaw
+  // is pulled slowly back to "forward", faster the longer since the last manual calibration.
+  const PSW_YAW_RECENTER_MAX_SPEED = 60;     // deg/s — stiller than this counts as "not swinging"
+  const PSW_YAW_RECENTER_STILL_S = 0.5;      // must be still this long before correcting
+  const PSW_YAW_RECENTER_MAX_TILT_DEG = 45;  // only while the blade is roughly upright (neutral hold)
+  const PSW_YAW_RECENTER_DEADBAND_DEG = 3;   // ignore tiny offsets (intentional hold differences)
+  const PSW_YAW_RECENTER_TAU_S = 4;          // pull time constant right after a manual calibration…
+  const PSW_YAW_RECENTER_TAU_MIN_S = 1.5;    // …shrinking to this…
+  const PSW_YAW_RECENTER_TRUST_RAMP_S = 120; // …over this long since the last manual calibration
+  const PSW_YAW_RECENTER_ENEMY_DIST = 6;     // no live enemy closer than this
+  // Sword smoothing: filter cutoff = MIN + GAIN × angular speed (deg/s)
+  const PSW_SMOOTH_MIN_CUTOFF_HZ = 4;        // ~40 ms lag while nearly still
+  const PSW_SMOOTH_SPEED_GAIN = 0.1;         // Hz per deg/s — ~34 Hz (near passthrough) at 300°/s
   // Foam sword default hold orientation (Euler 0, π, 0) — applied after gyro rotation
   const _phoneSwordBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0, 'YXZ'));
 
@@ -3682,7 +3733,13 @@ async function initCore(runtimeContext) {
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
   window.phoneSwordGyro = { alpha: null, beta: null, gamma: null, connected: false, blocking: false, localDevice: false };
   // Calibration: these are the "neutral" angles subtracted from live readings
-  window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0 };
+  // yawDrift (radians) = yaw correction learned by the auto-recentre in the gyro loop;
+  // calibratedAt (s, performance.now) = time of the last manual calibration.
+  window.phoneSwordCalib = { alpha: 0, beta: 0, gamma: 0, yawDrift: 0, calibratedAt: performance.now() / 1000 };
+  const _resetSwordCalibDrift = () => {
+    window.phoneSwordCalib.yawDrift = 0;
+    window.phoneSwordCalib.calibratedAt = performance.now() / 1000;
+  };
   // Config: additional rotation offsets (degrees) applied on top of gyro delta
   window.phoneSwordConfig = { offsetX: 90, offsetY: 180, offsetZ: 0 };
   const _loadSwordSensitivity = (key, fallback) => {
@@ -3702,6 +3759,7 @@ async function initCore(runtimeContext) {
     if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
     if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
     if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
+    _resetSwordCalibDrift();
     // Also recalibrate the camera gyro using the same reference orientation
     if (playerControls?.gyroActive && g.alpha !== null) {
       playerControls.gyroLastAlpha = g.alpha;
@@ -3901,6 +3959,7 @@ async function initCore(runtimeContext) {
         window.phoneSwordCalib.gamma = -30;
         window.phoneSwordCalib.alpha = window.phoneSwordGyro.alpha ?? 0;
       }
+      _resetSwordCalibDrift();
       closeCalibModal();
     });
   });
@@ -5242,32 +5301,63 @@ async function initCore(runtimeContext) {
         const DEG = Math.PI / 180;
         const nowSec = performance.now() / 1000;
 
-        let _dAlpha = (Number.isFinite(_g.alpha) ? _g.alpha : _c.alpha) - _c.alpha;
-        if (_dAlpha > 180) _dAlpha -= 360;
-        if (_dAlpha < -180) _dAlpha += 360;
-        let _dBeta  = _beta  - _c.beta;
-        let _dGamma = _gamma - _c.gamma;
-        // Sensitivity: "Use This Device" (amplified so the screen stays visible) or QR phone
+        // Raw rotation since calibration, in the player's game frame (unscaled):
+        // G = E · D · D0⁻¹ · E⁻¹, then the yaw drift correction about game Y.
+        _pswDeviceQuat(_c.alpha, _c.beta, _c.gamma, _pswCalibQ);
+        _pswEarthToGame(_pswCalibQ, _pswEarthToGameQ);
+        _pswDeviceQuat(Number.isFinite(_g.alpha) ? _g.alpha : _c.alpha, _beta, _gamma, _pswDeviceQ);
+        const _rel = _pswDeviceQ.multiply(_pswCalibQ.invert()); // D · D0⁻¹ (reuses _pswDeviceQ)
+        _rel.premultiply(_pswEarthToGameQ).multiply(_pswEarthToGameQ.invert());
+        _pswYawQ.setFromAxisAngle(_PSW_UP, -(_c.yawDrift || 0));
+        _rel.premultiply(_pswYawQ);
+        if (_rel.w < 0) { _rel.x = -_rel.x; _rel.y = -_rel.y; _rel.z = -_rel.z; _rel.w = -_rel.w; }
+
+        // Yaw auto-recentre during calm moments (auto-walk between fights / duel walk-in).
+        const _speed = window._pswDebugSpeed ?? 0;
+        const _calmMoment = (_psAutoWalking && playerControls?.isMoving && !_psFindIncomingBomb() &&
+            !hordeEnemies.some(e => !e.isDead && e.group.position.distanceTo(playerModel.position) < PSW_YAW_RECENTER_ENEMY_DIST)) ||
+          _duelWalking;
+        if (_calmMoment && !_g.blocking && _speed < PSW_YAW_RECENTER_MAX_SPEED) {
+          _psw.stillSince ??= nowSec;
+        } else {
+          _psw.stillSince = null;
+        }
+        const _dtYaw = Math.min(0.1, Math.max(0, nowSec - (_psw.prevGyroTime ?? nowSec)));
+        if (_psw.stillSince !== null && nowSec - _psw.stillSince >= PSW_YAW_RECENTER_STILL_S && _dtYaw > 0) {
+          // Blade tilt away from vertical (neutral blade is upright): skip odd holds (hanging down etc.)
+          const _bladeUpY = _pswTmpV.set(0, 1, 0).applyQuaternion(_rel).y;
+          const _twistNorm = Math.hypot(_rel.y, _rel.w);
+          if (_bladeUpY > Math.cos(PSW_YAW_RECENTER_MAX_TILT_DEG * DEG) && _twistNorm > 0.5) {
+            // Twist of the rotation about game Y = the current yaw offset from forward
+            const _yawErr = 2 * Math.atan2(_rel.y, _rel.w);
+            if (Math.abs(_yawErr) > PSW_YAW_RECENTER_DEADBAND_DEG * DEG) {
+              const _trust = Math.min(1, (nowSec - (_c.calibratedAt ?? nowSec)) / PSW_YAW_RECENTER_TRUST_RAMP_S);
+              const _tau = PSW_YAW_RECENTER_TAU_S + (PSW_YAW_RECENTER_TAU_MIN_S - PSW_YAW_RECENTER_TAU_S) * _trust;
+              const _step = _yawErr * (1 - Math.exp(-_dtYaw / _tau));
+              _c.yawDrift = (_c.yawDrift || 0) + _step;
+              _pswYawQ.setFromAxisAngle(_PSW_UP, -_step);
+              _rel.premultiply(_pswYawQ);
+            }
+          }
+        }
+
+        // Sensitivity: "Use This Device" (amplified so the screen stays visible) or QR phone.
+        // Scales the rotation angle about its axis.
         const _sens = _g.localDevice
           ? (window.phoneSwordLocalSensitivity ?? PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT)
           : (window.phoneSwordPhoneSensitivity ?? PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT);
         if (_sens !== 1) {
-          _dAlpha *= _sens;
-          _dBeta  *= _sens;
-          _dGamma *= _sens;
+          const _half = Math.acos(Math.min(1, _rel.w));
+          const _sinHalf = Math.sin(_half);
+          if (_sinHalf > 1e-6) {
+            const _k = Math.sin(_half * _sens) / _sinHalf;
+            _rel.set(_rel.x * _k, _rel.y * _k, _rel.z * _k, Math.cos(_half * _sens));
+          }
         }
 
-        _phoneSwordEuler.set(
-          (_dBeta  + _cfg.offsetX) * DEG,
-          (_dAlpha + _cfg.offsetY) * DEG,
-          (_dGamma + _cfg.offsetZ) * DEG,
-          'YXZ'
-        );
-        _phoneSwordGyroQ.setFromEuler(_phoneSwordEuler);
-        // Expose raw deltas for per-weapon axis remapping
-        window.phoneSwordGyro._dBeta  = _dBeta;
-        window.phoneSwordGyro._dAlpha = _dAlpha;
-        window.phoneSwordGyro._dGamma = _dGamma;
+        // Neutral sword pose (config offsets), rotated by the phone's rotation since calibration
+        _pswNeutralQ.setFromEuler(_phoneSwordEuler.set(_cfg.offsetX * DEG, _cfg.offsetY * DEG, _cfg.offsetZ * DEG, 'YXZ'));
+        _phoneSwordGyroQ.copy(_rel).multiply(_pswNeutralQ);
 
         // Compute angular speed (deg/s) from quaternion delta vs previous frame
         if (_psw.prevGyroQ && _psw.prevGyroTime && nowSec > _psw.prevGyroTime) {
@@ -5276,9 +5366,22 @@ async function initCore(runtimeContext) {
           const _angleDeg = 2 * Math.acos(Math.min(1, _dot)) * (180 / Math.PI);
           window._pswDebugSpeed = _angleDeg / _dt;
         }
+        const _smoothDt = Math.min(0.1, nowSec - (_psw.prevGyroTime ?? nowSec));
         if (!_psw.prevGyroQ) _psw.prevGyroQ = new THREE.Quaternion();
         _psw.prevGyroQ.copy(_phoneSwordGyroQ);
         _psw.prevGyroTime = nowSec;
+
+        // Adaptive smoothing (one-euro style): heavy while nearly still (hides hand tremor and
+        // the ~30 Hz packet steps), almost none during fast swings so hits don't lag.
+        // Speed is eased because at 60 fps every other frame repeats the last packet.
+        _psw.smoothSpeed = (_psw.smoothSpeed ?? 0) + ((window._pswDebugSpeed ?? 0) - (_psw.smoothSpeed ?? 0)) * 0.5;
+        if (!_psw.smoothQ) {
+          _psw.smoothQ = _phoneSwordGyroQ.clone();
+        } else if (_smoothDt > 0) {
+          const _cutoffHz = PSW_SMOOTH_MIN_CUTOFF_HZ + PSW_SMOOTH_SPEED_GAIN * _psw.smoothSpeed;
+          _psw.smoothQ.slerp(_phoneSwordGyroQ, 1 - Math.exp(-2 * Math.PI * _cutoffHz * _smoothDt));
+        }
+        _phoneSwordGyroQ.copy(_psw.smoothQ);
 
         // Bounce: snap to recoil target (exp-decay), hold, then return to live gyro
         let activeGyroQ;
