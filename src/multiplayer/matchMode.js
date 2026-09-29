@@ -38,7 +38,8 @@ export const MATCH_CHARACTERS = {
   antler: { label: 'Antler Guy', team: 'Antlers', emoji: '🦌', url: glbCharacterConfig.antlerGuyUrl },
   frog: { label: 'Frog Man', team: 'Frogs', emoji: '🐸', url: glbCharacterConfig.frogManUrl },
   gemhorn: { label: 'Gemhorn', team: 'Gemhorns', emoji: '💎', url: glbCharacterConfig.url },
-  pumpkin: { label: 'Pumpkin', team: 'Pumpkins', emoji: '🎃', url: glbCharacterConfig.pumpkinUrl }
+  pumpkin: { label: 'Pumpkin', team: 'Pumpkins', emoji: '🎃', url: glbCharacterConfig.pumpkinUrl },
+  wizard: { label: 'Wizard', team: 'Wizards', emoji: '🧙', url: glbCharacterConfig.wizardUrl }
 };
 const CHAR_KEYS = Object.keys(MATCH_CHARACTERS);
 
@@ -360,7 +361,7 @@ export function createMatchMode(ctx) {
       hostName: ctx.getPlayerName(),
       isHost: true,
       members: new Map(),
-      myPick: { side: 0, char: 'pumpkin' },
+      myPick: { side: 0, char: 'frog' },
       teamChars: ['antler', 'frog']
     };
     phase = 'setup';
@@ -548,7 +549,7 @@ export function createMatchMode(ctx) {
     }
     party = {
       key, mode, hostId: from, hostName: name, isHost: false,
-      roster: [], teamChars: ['antler', 'frog'], myPick: { side: 0, char: 'pumpkin' }
+      roster: [], teamChars: ['antler', 'frog'], myPick: { side: 0, char: 'frog' }
     };
     phase = 'guest';
     joinRoom(`party-${from}`);

@@ -190,6 +190,38 @@ export async function loadPhoneSwordStage(nameKey) {
   }
 }
 
+// Sword Showdown characters: phoneSwordStats/characters = { unlocked: [key…], selected: key }
+// (keys of MATCH_CHARACTERS; beating a stage's final enemy unlocks its character)
+export async function saveShowdownCharacters(nameKey, { unlocked, selected }) {
+  if (!nameKey || !Array.isArray(unlocked)) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}/phoneSwordStats/characters`), {
+      unlocked: unlocked.filter((k) => typeof k === 'string').slice(0, 20),
+      selected: typeof selected === 'string' ? selected : null
+    });
+  } catch (err) {
+    console.warn('Failed to save Showdown characters:', err);
+  }
+}
+
+export async function loadShowdownCharacters(nameKey) {
+  const empty = { unlocked: [], selected: null };
+  if (!nameKey) return empty;
+  try {
+    const snap = await get(ref(db, `profiles/${nameKey}/phoneSwordStats/characters`));
+    const val = snap.val();
+    if (!val) return empty;
+    const unlocked = Array.isArray(val.unlocked) ? val.unlocked : Object.values(val.unlocked || {});
+    return {
+      unlocked: unlocked.filter((k) => typeof k === 'string'),
+      selected: typeof val.selected === 'string' ? val.selected : null
+    };
+  } catch (err) {
+    console.warn('Failed to load Showdown characters:', err);
+    return empty;
+  }
+}
+
 // Sword Showdown tutorial: profiles/<nameKey>/tutorialCompleted = true once finished
 export function hasCompletedTutorial(profile) {
   return profile?.tutorialCompleted === true;
