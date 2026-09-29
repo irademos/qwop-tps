@@ -708,6 +708,9 @@ async function initCore(runtimeContext) {
   const PSW_YAW_RECENTER_TAU_MIN_S = 1.5;    // …shrinking to this…
   const PSW_YAW_RECENTER_TRUST_RAMP_S = 120; // …over this long since the last manual calibration
   const PSW_YAW_RECENTER_ENEMY_DIST = 6;     // no live enemy closer than this
+  // Sword smoothing: filter cutoff = MIN + GAIN × angular speed (deg/s)
+  const PSW_SMOOTH_MIN_CUTOFF_HZ = 4;        // ~40 ms lag while nearly still
+  const PSW_SMOOTH_SPEED_GAIN = 0.1;         // Hz per deg/s — ~34 Hz (near passthrough) at 300°/s
   // Foam sword default hold orientation (Euler 0, π, 0) — applied after gyro rotation
   const _phoneSwordBaseQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, Math.PI, 0, 'YXZ'));
 
@@ -5363,9 +5366,22 @@ async function initCore(runtimeContext) {
           const _angleDeg = 2 * Math.acos(Math.min(1, _dot)) * (180 / Math.PI);
           window._pswDebugSpeed = _angleDeg / _dt;
         }
+        const _smoothDt = Math.min(0.1, nowSec - (_psw.prevGyroTime ?? nowSec));
         if (!_psw.prevGyroQ) _psw.prevGyroQ = new THREE.Quaternion();
         _psw.prevGyroQ.copy(_phoneSwordGyroQ);
         _psw.prevGyroTime = nowSec;
+
+        // Adaptive smoothing (one-euro style): heavy while nearly still (hides hand tremor and
+        // the ~30 Hz packet steps), almost none during fast swings so hits don't lag.
+        // Speed is eased because at 60 fps every other frame repeats the last packet.
+        _psw.smoothSpeed = (_psw.smoothSpeed ?? 0) + ((window._pswDebugSpeed ?? 0) - (_psw.smoothSpeed ?? 0)) * 0.5;
+        if (!_psw.smoothQ) {
+          _psw.smoothQ = _phoneSwordGyroQ.clone();
+        } else if (_smoothDt > 0) {
+          const _cutoffHz = PSW_SMOOTH_MIN_CUTOFF_HZ + PSW_SMOOTH_SPEED_GAIN * _psw.smoothSpeed;
+          _psw.smoothQ.slerp(_phoneSwordGyroQ, 1 - Math.exp(-2 * Math.PI * _cutoffHz * _smoothDt));
+        }
+        _phoneSwordGyroQ.copy(_psw.smoothQ);
 
         // Bounce: snap to recoil target (exp-decay), hold, then return to live gyro
         let activeGyroQ;
