@@ -101,10 +101,32 @@ export function updateRemotePlayerRig(playerGroup, deltaSeconds) {
   updateGLBCharacter(rig, dt, speed > 0.4);
 }
 
+// Swap the GLB character a player group wears (Multiplayer team / free-for-all picks).
+// The newest request wins if several loads are in flight.
+export function setPlayerCharacterUrl(playerGroup, url) {
+  const rig = playerGroup?.userData?.qwopRig;
+  if (!rig || !url || rig.characterUrl === url) return;
+  rig.characterUrl = url;
+  const token = (rig.characterLoadToken || 0) + 1;
+  rig.characterLoadToken = token;
+  createGLBCharacterInstance({ targetHeight: 1.0, url }).then(({ container, character }) => {
+    if (rig.characterLoadToken !== token) { character.dispose(); return; }
+    const old = rig.glbCharacter;
+    const oldContainer = rig.characterContainer;
+    if (oldContainer?.parent) oldContainer.parent.remove(oldContainer);
+    old?.dispose();
+    rig.bodyRoot.add(container);
+    rig.characterContainer = container;
+    rig.glbCharacter = character;
+    if (old?.isDead) character.playDeath();
+  }).catch(e => console.warn('[PlayerModel] GLB character swap failed:', e));
+}
+
 export function createPlayerModel(
   THREE,
   username,
-  onLoad
+  onLoad,
+  { characterUrl = glbCharacterConfig.antlerGuyUrl } = {}
 ) {
   const playerGroup = new THREE.Group();
   playerGroup.name = 'ProceduralGangBeastsPlayer';
@@ -137,6 +159,9 @@ export function createPlayerModel(
     balance: 0,
     description: 'GLB character with IK arms reaching for floating hand targets',
     glbCharacter: null,
+    characterContainer: null,
+    characterUrl,
+    characterLoadToken: 0,
   };
   playerGroup.userData.currentAction = 'idle';
   playerGroup.userData.actions = {};
@@ -146,9 +171,13 @@ export function createPlayerModel(
   const capsuleMesh = bodyRoot.getObjectByName('bodyCapsulemesh');
   if (capsuleMesh) capsuleMesh.visible = false;
 
-  createGLBCharacterInstance({ targetHeight: 1.0, url: glbCharacterConfig.antlerGuyUrl }).then(({ container, character }) => {
+  createGLBCharacterInstance({ targetHeight: 1.0, url: characterUrl }).then(({ container, character }) => {
+    const rig = playerGroup.userData.qwopRig;
+    // Superseded by setPlayerCharacterUrl() while loading
+    if (rig.characterLoadToken !== 0) { character.dispose(); return; }
     bodyRoot.add(container);
-    playerGroup.userData.qwopRig.glbCharacter = character;
+    rig.characterContainer = container;
+    rig.glbCharacter = character;
   }).catch(e => console.warn('[PlayerModel] GLB character load failed:', e));
 
   if (onLoad) {

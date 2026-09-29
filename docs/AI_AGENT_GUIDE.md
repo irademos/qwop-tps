@@ -3,7 +3,7 @@
 > **Maintenance rule:** When you add/remove/rename files, change module responsibilities, or alter the boot sequence, update this file and `CLAUDE.md` in the same commit. Accurate docs save tokens on every future task.
 
 **Game name:** Sword Showdown (repo name `qwop-tps` is historical)  
-**Type:** Browser-based 3D sword-fighting game; your phone is the sword (gyro controller via PeerJS). Modes: Tutorial, Showdown (single player) and Multiplayer (lobby + 1v1 sword duels).  
+**Type:** Browser-based 3D sword-fighting game; your phone is the sword (gyro controller via PeerJS). Modes: Tutorial, Showdown (single player) and Multiplayer (lobby + 1v1 sword duels, Team Battle 5v5 and Free For All with matchmaking + bots).  
 **Deep reference:** `CLAUDE.md` at repo root (architecture, patterns, full directory tree)
 
 ---
@@ -30,7 +30,7 @@
 
 - **Rendering:** Three.js v0.176 (+ `three-mesh-bvh` for map raycasts)
 - **Physics:** Rapier3D (`@dimforge/rapier3d-compat`)
-- **Multiplayer:** Multiplayer mode only (Showdown is single player). Firebase (`peers` = lobby list, `rooms` = lobby / private duel rooms, shop stock) + PeerJS WebRTC; messages: `presence`, `projectile`, `duel`
+- **Multiplayer:** Multiplayer mode only (Showdown is single player). Firebase (`peers` = lobby list, `rooms` = lobby / private duel rooms / `mm-<mode>` matchmaking queue / `party-<hostId>` / `match-<matchId>`, shop stock) + PeerJS WebRTC; messages: `presence`, `projectile`, `duel`, `match`
 - **World:** static GLB map (`public/glb_map/map.glb`)
 - **Auth:** PIN → SHA-256 → Firebase + cookie (no OAuth)
 - **Build:** Vite 6, deployed on Vercel
@@ -47,7 +47,7 @@ src/
   map/          spawnUtils
   environment/  terrainHeight (height resolver registry)
   combat/       knockback, bloodEffect (damage blood spray), explosionEffect (bomb explosion + smoke), playerBomb (player bombs), heartBubbles (Showdown heart bubbles), comboMeter (Showdown combo HUD)
-  multiplayer/  peerConnection (rooms, joinRoom, destroy), duelMode (lobby, challenges, duels, temp find-location)
+  multiplayer/  peerConnection (rooms, joinRoom, destroy), duelMode (lobby, challenges, duels, temp find-location), matchMode (Team Battle / Free For All: parties, matchmaking, bots, battles)
   audio/        audioManager
   characters/   CharacterBase, PlayerCharacter, EnemyPlayer (swordsman), BombThrowerEnemy (bomber), merchant (shop catalog/stock)
   controls/     PlayerControls (controls.js), merchantPanel (shop UI), settingsPanel
@@ -75,6 +75,7 @@ src/
 | Firebase data shape | `src/player/playerProfile.js`, `src/characters/merchant.js` (room shop stock) |
 | Multiplayer protocol | `src/multiplayer/peerConnection.js`, `src/bootstrap/bootstrapGameApp.js` |
 | Multiplayer mode (lobby of everyone online, challenge → private duel room, sword-only duels, best of 3 rounds (`DUEL_ROUNDS`, draw replays the round), 3-2-1-FIGHT then both auto-walk in (`startWalkIn`, stop at `DUEL_WALK_STOP_DIST`), 8 health segments every round (`DUEL_HEALTH_SEGMENTS` → `duelMaxHealthOverride`, never saved), WINNER banner, forfeit; temporary "Find Location" + "Copy location information" for picking the duel spot) | Lobby/duel state machine + DOM in `src/multiplayer/duelMode.js` (`DUEL_LOCATION` = where duels happen — paste the copied JSON there; `.duel-*` in `styles.css`); game side = `duelCtx` / `startMultiplayerMode` + duel sword hit check (`getOpponentCombat`) in the phone-sword loop of `bootstrapGameApp.js`; rooms / `joinRoom` / `destroy` in `src/multiplayer/peerConnection.js`; opponent grip IK = `userData.remoteHandTarget` in `updateRemotePlayerRig` (`src/models/playerModel.js`) |
+| Multiplayer battles: Team Battle (2 teams of 5, each team one character — antler / frog / gemhorn, host picks with 🔄, players pick a side) and Free For All (10 fighters, everyone picks a character); host invites online players (invite → join), a solo host sits in room `mm-<mode>` = the matchmaking queue, Start pulls queued players (pull → pullOk) and fills to `MATCH_SIZE`=10 with bots, private room `match-<matchId>`, spawn around `DUEL_LOCATION` (team lines / FFA ring), 8 health, auto-walk to the closest enemy (`MATCH_REENGAGE_DIST`), last team / fighter standing wins | Party/queue/battle state machine + DOM in `src/multiplayer/matchMode.js` (`MATCH_CHARACTERS`, `buildRoster`, `spawnPose`, host bot AI `updateBots` / `resolveBotHit`, `.match-*` in `styles.css`); game side = `matchCtx` in `bootstrapGameApp.js` (bots = `EnemyPlayer` with `characterUrl` / `swordDamage` / `showHealthBar` / `targetHitHandler`, host only; other clients see them as remote models); lobby buttons + `suspend`/`resume` in `duelMode.js`; sword hits on duel/battle opponents go through `_getPvpTargets` in the phone-sword loop; character swap = `setPlayerCharacterUrl` in `src/models/playerModel.js` |
 | Start screen ("Start Game" = tutorial until `profiles/<key>/tutorialCompleted`; then Tutorial / Showdown / Multiplayer) + Sword Showdown tutorial (QR setup, hit past blocks, block swings, deflect a bomb, coins/auto-buy/bomb throw, shield, bubble, gun; player can't die, every step skippable) | `createArcadeOverlay` (`chooseMode`, `showStartScreen`, `setModeHandler`) + `tutorialCtx` / `startTutorialMode` / `_resetForMenu` in `bootstrapGameApp.js`; steps in `src/tutorial/showdownTutorial.js`; panel/arrows/button ring in `src/tutorial/tutorialOverlay.js` (`.tutorial-*` in `styles.css`); enemy hooks `EnemyPlayer.script` / `stationary` / `swordBounces`, `BombThrowerEnemy.throwsHeld` / `aimAt` / `stationary`; flag via `saveTutorialCompleted` / `hasCompletedTutorial` in `src/player/playerProfile.js`; phone button ring = `highlight` in the phone `status` message (`public/phone-sword.html`) |
 | Audio | `src/audio/audioManager.js` + `public/assets/audio/` |
 | New 3D prop | GLB → `public/assets/props/` + load from `bootstrapGameApp.js` |
@@ -110,7 +111,7 @@ src/
 
 **Start screen + tutorial:** "Start Game" runs the tutorial until `profiles/<key>/tutorialCompleted` is set; then the start screen offers Tutorial / Showdown / Multiplayer (auth resolves at login so the game loads behind the start screen; picks go through `setModeHandler`, queued if the game isn't ready; `arcadeOverlay.showStartScreen`). The ⚙️ settings button is layered above the start screen, stage overlay and Multiplayer lobby, shown once `body.settings-ready` is set. `src/tutorial/showdownTutorial.js` scripts enemies via `EnemyPlayer.script` and the bomber's `throwsHeld` / `aimAt`, and reaches the game only through `tutorialCtx` in `bootstrapGameApp.js`.
 
-**Multiplayer (lobby + duels):** only in Multiplayer mode — `startMultiplayer`/`stopMultiplayer` in `bootstrapGameApp.js` create/destroy the `Multiplayer` instance, so `multiplayer` is `null` in Showdown/tutorial. Firebase `peers` = who's online (lobby list), `rooms` = `lobby` or `duel-<challengeId>` (`joinRoom`). `src/multiplayer/duelMode.js` runs the lobby, challenges (PeerJS `duel` messages via `sendTo`) and the duel (sword only, best of 3 rounds with 8 health each, 3-2-1-FIGHT, both walk in toward each other, attacker-detected hits, `dead {round}` scores the round, WINNER banner, back to lobby); it reaches the game through `duelCtx`. Duel spot = `DUEL_LOCATION` in `duelMode.js`. The phone controller has its own PeerJS link.
+**Multiplayer (lobby + duels):** only in Multiplayer mode — `startMultiplayer`/`stopMultiplayer` in `bootstrapGameApp.js` create/destroy the `Multiplayer` instance, so `multiplayer` is `null` in Showdown/tutorial. Firebase `peers` = who's online (lobby list), `rooms` = `lobby` or `duel-<challengeId>` (`joinRoom`). `src/multiplayer/duelMode.js` runs the lobby, challenges (PeerJS `duel` messages via `sendTo`) and the duel (sword only, best of 3 rounds with 8 health each, 3-2-1-FIGHT, both walk in toward each other, attacker-detected hits, `dead {round}` scores the round, WINNER banner, back to lobby); it reaches the game through `duelCtx`. Duel spot = `DUEL_LOCATION` in `duelMode.js`. The lobby's Team Battle / Free For All buttons hand over to `src/multiplayer/matchMode.js` (lobby `suspend`/`resume`): party setup with invites and side/character picks, Start pulls players waiting in `mm-<mode>`, bots fill up to 10 (host-simulated `EnemyPlayer`s), battle in `match-<matchId>` around `DUEL_LOCATION`, last team / fighter standing wins; game access via `matchCtx`. The phone controller has its own PeerJS link.
 
 ---
 

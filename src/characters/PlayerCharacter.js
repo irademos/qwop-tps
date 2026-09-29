@@ -4,14 +4,15 @@ import { createPlayerModel } from "../models/playerModel.js";
 import * as THREE from "three";
 
 export class PlayerCharacter extends CharacterBase {
-  constructor(username) {
+  constructor(username, { characterUrl } = {}) {
     const { model, nameLabel } = createPlayerModel(
       THREE,
       username,
       ({ mixer, actions }) => {
         this.mixer = mixer;
         this.actions = actions;
-      }
+      },
+      characterUrl ? { characterUrl } : undefined
     );
     super(model);
     this.nameLabel = nameLabel;

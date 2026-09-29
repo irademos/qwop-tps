@@ -12,7 +12,8 @@ import {
 const VALID_MESSAGE_TYPES = new Set([
   'presence',
   'projectile',
-  'duel'
+  'duel',
+  'match'
 ]);
 export const LOBBY_ROOM_ID = 'lobby';
 const MAX_PENDING_PAYLOADS = 75;

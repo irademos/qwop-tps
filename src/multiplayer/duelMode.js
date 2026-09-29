@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { LOBBY_ROOM_ID } from './peerConnection.js';
 
 // Multiplayer mode: a lobby of everyone online (the `peers` list the Multiplayer class keeps
-// from Firebase) where you challenge a player to a 1v1 sword duel. A duel moves both players
+// from Firebase) where you challenge a player to a 1v1 sword duel, or open Team Battle /
+// Free For All (src/multiplayer/matchMode.js — the lobby is suspended while it runs). A duel moves both players
 // into their own private room at DUEL_LOCATION, locks guns/bombs/bubbles/shields and plays
 // best of DUEL_ROUNDS rounds: each round both start apart with full duel health, count
 // "3 2 1 FIGHT!", walk in toward each other and fight until one dies. First to
@@ -60,6 +61,7 @@ const copyText = async (text) => {
 
 export function createDuelMode(ctx) {
   // 'off' | 'lobby' | 'roam' (find location) | 'countdown' | 'fighting' | 'roundOver' | 'over'
+  // | 'match' (lobby handed over to matchMode: party setup or a team / free-for-all match)
   let phase = 'off';
   let outgoing = null;   // { challengeId, to, name, timer }
   let incoming = null;   // { challengeId, from, name, location, timer }
@@ -79,6 +81,10 @@ export function createDuelMode(ctx) {
   const lobbyTitle = el('div', 'duel-lobby-title', 'Multiplayer Lobby');
   const lobbyStatus = el('div', 'duel-lobby-status');
   const lobbyList = el('ul', 'duel-lobby-list');
+  const lobbyModes = el('div', 'duel-lobby-modes');
+  const teamBattleBtn = el('button', 'arcade-button', '👥 Team Battle');
+  const ffaBtn = el('button', 'arcade-button', '🎯 Free For All');
+  lobbyModes.append(teamBattleBtn, ffaBtn);
   const lobbyActions = el('div', 'duel-lobby-actions');
   const findLocationBtn = el('button', 'arcade-button arcade-secondary', '📍 Find Location');
   const backBtn = el('button', 'arcade-button arcade-secondary', '⬅ Back');
@@ -91,7 +97,7 @@ export function createDuelMode(ctx) {
   const cancelBtn = el('button', 'arcade-button arcade-secondary', 'Cancel');
   promptActions.append(acceptBtn, declineBtn, cancelBtn);
   prompt.append(promptText, promptActions);
-  lobbyPanel.append(lobbyTitle, lobbyStatus, lobbyList, prompt, lobbyActions);
+  lobbyPanel.append(lobbyTitle, lobbyModes, lobbyStatus, lobbyList, prompt, lobbyActions);
   lobby.append(lobbyPanel);
 
   const roamPanel = el('div', 'duel-roam hidden');
@@ -131,9 +137,14 @@ export function createDuelMode(ctx) {
     if (!peer) return 'offline';
     if (peer.roomId === LOBBY_ROOM_ID) return 'lobby';
     if (typeof peer.roomId === 'string' && peer.roomId.startsWith('duel-')) return 'dueling';
+    if (typeof peer.roomId === 'string' && peer.roomId.startsWith('match-')) return 'matching';
+    if (typeof peer.roomId === 'string' && (peer.roomId.startsWith('mm-') || peer.roomId.startsWith('party-'))) return 'queued';
     return 'playing';
   };
-  const STATUS_LABELS = { lobby: 'In lobby', dueling: 'Dueling', playing: 'Playing', offline: 'Offline' };
+  const STATUS_LABELS = {
+    lobby: 'In lobby', dueling: 'Dueling', matching: 'In a battle', queued: 'Matchmaking',
+    playing: 'Playing', offline: 'Offline'
+  };
 
   const renderLobby = () => {
     if (phase !== 'lobby') return;
@@ -428,6 +439,38 @@ export function createDuelMode(ctx) {
     endDuel(opponentName(), `${ctx.getPlayerName()} forfeited`);
   });
 
+  // ── Team Battle / Free For All (matchMode) ───────────────────────────────
+  const dropChallenges = () => {
+    if (outgoing) {
+      send(outgoing.to, { op: 'cancel', challengeId: outgoing.challengeId });
+      clearOutgoing();
+    }
+    if (incoming) {
+      send(incoming.from, { op: 'decline', challengeId: incoming.challengeId });
+      clearIncoming();
+    }
+  };
+  // Hand the screen to matchMode (party setup / match); challenges are declined as busy
+  const suspend = () => {
+    if (phase !== 'lobby') return false;
+    dropChallenges();
+    phase = 'match';
+    lobby.classList.add('hidden');
+    prompt.classList.add('hidden');
+    return true;
+  };
+  const resume = (flash) => {
+    if (phase !== 'match') return;
+    showLobby();
+    if (flash) flashLobbyStatus(flash);
+  };
+  teamBattleBtn.addEventListener('click', () => {
+    if (phase === 'lobby' && ctx.getMultiplayer()?.getId?.()) ctx.openMatch('team');
+  });
+  ffaBtn.addEventListener('click', () => {
+    if (phase === 'lobby' && ctx.getMultiplayer()?.getId?.()) ctx.openMatch('ffa');
+  });
+
   // ── Lobby / roam screens ─────────────────────────────────────────────────
   const showLobby = () => {
     phase = 'lobby';
@@ -439,14 +482,7 @@ export function createDuelMode(ctx) {
 
   findLocationBtn.addEventListener('click', () => {
     if (phase !== 'lobby') return;
-    if (outgoing) {
-      send(outgoing.to, { op: 'cancel', challengeId: outgoing.challengeId });
-      clearOutgoing();
-    }
-    if (incoming) {
-      send(incoming.from, { op: 'decline', challengeId: incoming.challengeId });
-      clearIncoming();
-    }
+    dropChallenges();
     phase = 'roam';
     lobby.classList.add('hidden');
     roamPanel.classList.remove('hidden');
@@ -652,7 +688,10 @@ export function createDuelMode(ctx) {
     bladePoints: _bladeOffsets.map(() => new THREE.Vector3()),
     bladeDir: new THREE.Vector3(),
     blocking: false,
-    hasBlade: false
+    hasBlade: false,
+    id: 'duel-opponent',
+    onHit: (dmg, dir) => sendHit(dmg, dir),
+    onBlocked: () => sendBlocked()
   };
   const getOpponentCombat = () => {
     if (phase !== 'fighting' || !duel) return null;
@@ -672,25 +711,32 @@ export function createDuelMode(ctx) {
     return _combat;
   };
 
+  const sendHit = (dmg, dir) => {
+    if (phase !== 'fighting' || !duel) return;
+    send(duel.opponentId, { op: 'hit', challengeId: duel.challengeId, dmg, dir: [dir.x, dir.z] });
+  };
+  const sendBlocked = () => {
+    if (phase !== 'fighting' || !duel) return;
+    send(duel.opponentId, { op: 'blocked', challengeId: duel.challengeId });
+  };
+
   return {
     enter,
     exit,
     update,
     handleMessage,
     getOpponentCombat,
+    suspend,
+    resume,
+    // In the lobby with no challenge going either way (free to join a battle party)
+    isIdleInLobby: () => phase === 'lobby' && !outgoing && !incoming,
     isActive: () => phase !== 'off',
     isInDuel: () => !!duel && phase !== 'off',
     isFighting: () => phase === 'fighting',
     getOpponentId: () => duel?.opponentId || null,
     acceptsPresenceFrom: (peerId) => !!duel && peerId === duel.opponentId,
-    sendHit: (dmg, dir) => {
-      if (phase !== 'fighting' || !duel) return;
-      send(duel.opponentId, { op: 'hit', challengeId: duel.challengeId, dmg, dir: [dir.x, dir.z] });
-    },
-    sendBlocked: () => {
-      if (phase !== 'fighting' || !duel) return;
-      send(duel.opponentId, { op: 'blocked', challengeId: duel.challengeId });
-    },
+    sendHit,
+    sendBlocked,
     // The local player died in a duel: tell the opponent, they take the round
     onLocalDeath: () => {
       if (!duel || (phase !== 'fighting' && phase !== 'roundOver')) return;

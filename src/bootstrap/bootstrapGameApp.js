@@ -4,11 +4,12 @@ import * as THREE from "three";
 import { spawnBloodBurst, updateBloodEffects } from "../combat/bloodEffect.js";
 import { updateExplosionEffects } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
-import { updateRemotePlayerRig } from "../models/playerModel.js";
+import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerModel.js";
 import { glbCharacterConfig } from "../models/glbCharacterModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
+import { createMatchMode } from '../multiplayer/matchMode.js';
 import { PlayerControls } from '../controls/controls.js';
 import { getCookie, setCookie } from '../core/utils.js';
 import { createAudioManager } from '../features/audioFeature.js';
@@ -600,6 +601,7 @@ async function initCore(runtimeContext) {
   let multiplayer = null;
   let isHost = false;
   let duelMode = null; // Multiplayer mode: lobby + duels (created further down)
+  let matchMode = null; // Multiplayer mode: Team Battle / Free For All (created further down)
   var playerControls = null;
   let scene = null;
   let ambientLight = null;
@@ -960,11 +962,17 @@ async function initCore(runtimeContext) {
     netStats.deferred += netSendQueue.length;
     recordNetSent(sent);
   };
-  // Game traffic only goes to the current duel opponent (the lobby needs none)
-  const sendNetworkPayload = (payload) => {
+  // Game traffic only goes to the current duel opponent or the other battle players
+  // (the lobby needs none)
+  const _netRecipients = () => {
+    if (matchMode?.isInMatch()) return matchMode.getPeerIds();
     const opponentId = duelMode?.getOpponentId();
-    if (!multiplayer || !payload || !opponentId) return false;
-    multiplayer.sendTo(opponentId, payload);
+    return opponentId ? [opponentId] : [];
+  };
+  const sendNetworkPayload = (payload) => {
+    const recipients = _netRecipients();
+    if (!multiplayer || !payload || !recipients.length) return false;
+    recipients.forEach(id => multiplayer.sendTo(id, payload));
     return true;
   };
   const tickNetStats = (nowMs) => {
@@ -1352,6 +1360,25 @@ async function initCore(runtimeContext) {
     logNet('despawn', remoteId, reason);
   };
 
+  // Model for another player (or, in a battle, a bot the host simulates) — characterUrl
+  // picks the GLB (default antler guy)
+  const _spawnRemotePlayer = (remoteId, name, characterUrl = null) => {
+    const other = new PlayerCharacter(name, characterUrl ? { characterUrl } : undefined);
+    scene.add(other.model);
+    document.body.appendChild(other.nameLabel);
+    otherPlayers[remoteId] = {
+      model: other.model,
+      nameLabel: other.nameLabel,
+      name,
+      health: BASE_HEALTH_SEGMENTS,
+      targetPos: new THREE.Vector3(),
+      targetQuat: new THREE.Quaternion(),
+      targetRotY: 0
+    };
+    logNet('spawn', remoteId, name);
+    return otherPlayers[remoteId];
+  };
+
   function processIncomingData(peerId, data) {
     // console.log('📡 Incoming data:', data);
     const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -1397,8 +1424,8 @@ async function initCore(runtimeContext) {
       if (!multiplayer || remoteId === multiplayer.getId()) {
         return;
       }
-      // Only the duel opponent is shown (lobby peers stay off the map)
-      if (!duelMode?.acceptsPresenceFrom(remoteId)) {
+      // Only the duel opponent / battle players are shown (lobby peers stay off the map)
+      if (!duelMode?.acceptsPresenceFrom(remoteId) && !matchMode?.acceptsPresenceFrom(remoteId)) {
         return;
       }
       const now = performance.now();
@@ -1424,19 +1451,7 @@ async function initCore(runtimeContext) {
       }
 
       if (!otherPlayers[remoteId]) {
-        const other = new PlayerCharacter(data.name);
-        scene.add(other.model);
-        document.body.appendChild(other.nameLabel);
-        otherPlayers[remoteId] = {
-          model: other.model,
-          nameLabel: other.nameLabel,
-          name: data.name,
-          health: BASE_HEALTH_SEGMENTS,
-          targetPos: new THREE.Vector3(),
-          targetQuat: new THREE.Quaternion(),
-          targetRotY: 0
-        };
-        logNet('spawn', remoteId, data.name);
+        _spawnRemotePlayer(remoteId, data.name, matchMode?.getCharacterUrl(remoteId));
       }
 
       const player = otherPlayers[remoteId];
@@ -1495,6 +1510,11 @@ async function initCore(runtimeContext) {
       return;
     }
 
+    if (data.type === 'match') {
+      matchMode?.handleMessage(peerId, data);
+      return;
+    }
+
     if (data.type === 'projectile') {
       if (!duelMode?.acceptsPresenceFrom(peerId)) return;
       if (!isProjectileMessage(data)) {
@@ -1540,8 +1560,12 @@ async function initCore(runtimeContext) {
     multiplayer.onReady = () => {
       isHost = !!multiplayer?.isHost;
       duelMode?.onPeersChange();
+      matchMode?.onPeersChange();
     };
-    multiplayer.onPeersChange = () => duelMode?.onPeersChange();
+    multiplayer.onPeersChange = () => {
+      duelMode?.onPeersChange();
+      matchMode?.onPeersChange();
+    };
     return multiplayer;
   };
   const stopMultiplayer = () => {
@@ -3126,7 +3150,16 @@ async function initCore(runtimeContext) {
   }
   // Knockback velocity applied directly to player position in the game loop
   const _playerKnockback = { vx: 0, vy: 0, vz: 0, endTime: 0 };
-  let _duelLastSwordHitAt = 0; // last time our sword hit/was blocked by the duel opponent
+  const _pvpLastSwordHitAt = new Map(); // per duel opponent / battle enemy: last time our sword hit or was blocked
+  const _noPvpTargets = [];
+  // Everyone the local sword can hit besides Showdown enemies: the duel opponent or the
+  // battle's enemies (each { id, position, center, bladePoints, bladeDir, hasBlade, blocking,
+  // blocksSwing?, ownBlood?, onHit(dmg, dir), onBlocked() })
+  const _getPvpTargets = () => {
+    if (matchMode?.isFighting()) return matchMode.getEnemyCombatants();
+    const opp = duelMode?.getOpponentCombat();
+    return opp ? [opp] : _noPvpTargets;
+  };
 
   updateControlAvailability();
 
@@ -5112,13 +5145,103 @@ async function initCore(runtimeContext) {
       window._pswShowBlockFlash?.('player');
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
     },
+    // Lobby's Team Battle / Free For All buttons
+    openMatch: (mode) => matchMode?.openSetup(mode),
     // "Back" in the lobby: multiplayer is off again, show the start screen
     onExit: () => {
+      matchMode?.exit();
       _resetForMenu();
       arcadeOverlay.showStartScreen();
     }
   };
   duelMode = createDuelMode(duelCtx);
+
+  // ── Multiplayer mode: Team Battle / Free For All (src/multiplayer/matchMode.js) ──
+  // Same arena, sword rules, health and auto-walk as duels; up to 10 fighters, bots fill
+  // the empty spots (simulated by the battle's host as EnemyPlayers).
+  const MATCH_HEALTH_SEGMENTS = DUEL_HEALTH_SEGMENTS;
+  const MATCH_REENGAGE_DIST = 2.8;     // closest enemy farther than this → auto-walk to it
+  const MATCH_BOT_SWING_CHANCE = 0.35;
+  const _upAxis = new THREE.Vector3(0, 1, 0);
+  const _placeRemote = (entry, x, y, z, yaw) => {
+    entry.targetPos.set(x, y, z);
+    if (Number.isFinite(yaw)) {
+      entry.targetRotY = yaw;
+      entry.targetQuat.setFromAxisAngle(_upAxis, yaw);
+    }
+    entry.model.visible = true;
+  };
+  const matchCtx = {
+    scene,
+    camera,
+    matchHealth: MATCH_HEALTH_SEGMENTS,
+    getMultiplayer: () => multiplayer,
+    getPlayerName: () => playerName,
+    suspendLobby: () => duelMode.suspend(),
+    resumeLobby: (flash) => duelMode.resume(flash),
+    isLobbyIdle: () => duelMode.isIdleInLobby(),
+    createSwordMesh: duelCtx.createSwordMesh,
+    getRemoteModel: duelCtx.getRemoteModel,
+    removeRemotePlayer: (id) => removeRemotePlayer(id, 'match-ended'),
+    // Another fighter's model, placed at its start spot
+    ensureRemoteModel: (id, name, characterUrl, pose) => {
+      const entry = otherPlayers[id] || _spawnRemotePlayer(id, name, characterUrl);
+      if (pose) {
+        const groundY = getSpawnY(pose.x, pose.z, 0);
+        const y = Number.isFinite(groundY) ? groundY : playerModel.position.y;
+        entry.model.position.set(pose.x, y, pose.z);
+        entry.model.rotation.set(0, pose.yaw, 0);
+        _placeRemote(entry, pose.x, y, pose.z, pose.yaw);
+        entry.model.quaternion.copy(entry.targetQuat);
+      }
+      return entry;
+    },
+    // Position/heading from the battle's state / bots messages
+    setRemotePose: (id, pos, yaw, name, characterUrl) => {
+      const entry = otherPlayers[id] || _spawnRemotePlayer(id, name, characterUrl);
+      _placeRemote(entry, pos[0], pos[1], pos[2], yaw);
+    },
+    setControlsLocked: duelCtx.setControlsLocked,
+    enterMatch: ({ x, z, yaw, characterUrl }) => {
+      duelCtx.enterDuel({ x, z, yaw });
+      setPlayerCharacterUrl(playerModel, characterUrl);
+    },
+    leaveMatch: () => {
+      setPlayerCharacterUrl(playerModel, glbCharacterConfig.antlerGuyUrl);
+      duelCtx.leaveDuel();
+    },
+    startWalk: duelCtx.startWalkIn,
+    stopWalk: duelCtx.stopWalkIn,
+    getLocalPlayerModel: () => playerModel,
+    getPlayerControls: () => playerControls,
+    getLocalHealth: () => statsState.health,
+    getLocalSwordState: duelCtx.getLocalSwordState,
+    applyHit: duelCtx.applyHit,
+    onSwingBlocked: duelCtx.onSwingBlocked,
+    // A host bot's sword landed on the local player (damage is applied by EnemyPlayer)
+    knockbackLocal: (dir) => {
+      _playerKnockback.vx = dir.x * 4.5;
+      _playerKnockback.vz = dir.z * 4.5;
+      _playerKnockback.endTime = Date.now() + 500;
+    },
+    spawnBlood: (pos, groundY) => spawnBloodBurst(scene, pos, { groundY, intensity: 0.8 }),
+    createBot: ({ x, z, yaw, characterUrl }) => {
+      const groundY = getSpawnY(x, z, 0);
+      const y = Number.isFinite(groundY) ? groundY : playerModel.position.y;
+      const bot = new EnemyPlayer(scene, RAPIER, rapierWorld, {
+        position: new THREE.Vector3(x, y, z),
+        hearts: MATCH_HEALTH_SEGMENTS,
+        characterUrl,
+        swordDamage: 1,
+        showHealthBar: false,
+        swingChance: MATCH_BOT_SWING_CHANCE,
+      });
+      bot.group.rotation.y = yaw;
+      bot._camera = camera;
+      return bot;
+    }
+  };
+  matchMode = createMatchMode(matchCtx);
 
   const startMultiplayerMode = () => {
     _resetForMenu();
@@ -5134,7 +5257,10 @@ async function initCore(runtimeContext) {
       _phoneSwordQrDeferred = false;
       if (!window.phoneSwordGyro?.connected && _phoneSwordPeerId) void showPhoneSwordQr(_phoneSwordPeerId);
     }
-    if (gameMode !== 'multiplayer') duelMode.exit();
+    if (gameMode !== 'multiplayer') {
+      matchMode.exit();
+      duelMode.exit();
+    }
     if (gameMode === 'showdown') {
       _resetForMenu();
       void _psInit();
@@ -5572,60 +5698,64 @@ async function initCore(runtimeContext) {
       }
       _frameBladePoints = _playerBladePoints; // heart bubbles (below)
 
-      // ── Duel: same sweep hit + directional block against the other player ──
-      // The attacker detects the hit and sends it; the victim applies the damage.
-      const _duelOpp = duelMode?.getOpponentCombat();
-      if (_duelOpp && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld) {
+      // ── Duel / battle: same sweep hit + directional block against other players ──
+      // (and battle bots). The attacker detects the hit and reports it (onHit); the victim
+      // applies the damage.
+      const _pvpTargets = _getPvpTargets();
+      if (_pvpTargets.length && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld) {
         const _nowMsD = Date.now();
-        let _duelSwordCollision = false;
-        if (_duelOpp.hasBlade) {
-          duelBlade: for (const pp of _playerBladePoints) {
-            for (const op of _duelOpp.bladePoints) {
-              if (pp.distanceTo(op) < 0.15) { _duelSwordCollision = true; break duelBlade; }
+        for (const _opp of _pvpTargets) {
+          let _pvpSwordCollision = false;
+          if (_opp.hasBlade) {
+            pvpBlade: for (const pp of _playerBladePoints) {
+              for (const op of _opp.bladePoints) {
+                if (pp.distanceTo(op) < 0.15) { _pvpSwordCollision = true; break pvpBlade; }
+              }
             }
           }
-        }
-        const _duelReachesBody = _tipWorld.distanceTo(_duelOpp.center) < 0.65;
-        if ((_duelReachesBody || _duelSwordCollision) && _nowMsD - _duelLastSwordHitAt > 1000) {
+          const _pvpReachesBody = _tipWorld.distanceTo(_opp.center) < 0.65;
+          if (!(_pvpReachesBody || _pvpSwordCollision) || _nowMsD - (_pvpLastSwordHitAt.get(_opp.id) || 0) <= 1000) continue;
           const _sweepVec = new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
           const _minSweep = window.phoneSwordSwingCfg?.minSweepDist ?? 0.015;
           const _minSweepSpd = window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000;
-          if (_sweepVec.length() > _minSweep && (window._pswDebugSpeed ?? 0) >= _minSweepSpd) {
-            const _swingDir = _psw.tipHistory.length
-              ? new THREE.Vector3().subVectors(_tipWorld, _psw.tipHistory[0].pos)
-              : _sweepVec.clone();
-            const _toOpp = new THREE.Vector3().subVectors(_duelOpp.position, playerModel.position).setY(0);
-            const _duelBlocked = _duelOpp.blocking && _duelOpp.hasBlade &&
-              swingCrossesBlade(_swingDir, _duelOpp.bladeDir, _toOpp, PLAYER_BLOCK_MIN_ANGLE_DEG);
-            if (_duelBlocked) {
-              audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
-              window._pswShowBlockFlash?.('enemy');
-              _startSwordBounce();
-              duelMode.sendBlocked();
-              _swingHitOccurred = true;
-              _duelLastSwordHitAt = _nowMsD;
-            } else if (_duelReachesBody) {
-              const _sweepDir = _sweepVec.clone().setY(0);
-              if (_sweepDir.lengthSq() < 0.0001) _sweepDir.copy(_toOpp);
-              if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
-              _sweepDir.normalize();
-              duelMode.sendHit(1, _sweepDir);
-              spawnBloodBurst(scene, _duelOpp.center, { groundY: _duelOpp.position.y, intensity: 0.8 });
-              audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
-              _swingHitOccurred = true;
-              _duelLastSwordHitAt = _nowMsD;
-            }
+          if (_sweepVec.length() <= _minSweep || (window._pswDebugSpeed ?? 0) < _minSweepSpd) continue;
+          const _swingDir = _psw.tipHistory.length
+            ? new THREE.Vector3().subVectors(_tipWorld, _psw.tipHistory[0].pos)
+            : _sweepVec.clone();
+          const _toOpp = new THREE.Vector3().subVectors(_opp.position, playerModel.position).setY(0);
+          const _pvpBlocked = _opp.blocksSwing
+            ? _opp.blocksSwing(_swingDir, playerModel.position)
+            : _opp.blocking && _opp.hasBlade &&
+              swingCrossesBlade(_swingDir, _opp.bladeDir, _toOpp, PLAYER_BLOCK_MIN_ANGLE_DEG);
+          if (_pvpBlocked) {
+            audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
+            window._pswShowBlockFlash?.('enemy');
+            _startSwordBounce();
+            _opp.onBlocked();
+            _swingHitOccurred = true;
+            _pvpLastSwordHitAt.set(_opp.id, _nowMsD);
+            break; // the swing is spent
+          } else if (_pvpReachesBody) {
+            const _sweepDir = _sweepVec.clone().setY(0);
+            if (_sweepDir.lengthSq() < 0.0001) _sweepDir.copy(_toOpp);
+            if (_sweepDir.lengthSq() < 0.0001) _sweepDir.set(0, 0, 1);
+            _sweepDir.normalize();
+            _opp.onHit(1, _sweepDir);
+            if (!_opp.ownBlood) spawnBloodBurst(scene, _opp.center, { groundY: _opp.position.y, intensity: 0.8 });
+            audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
+            _swingHitOccurred = true;
+            _pvpLastSwordHitAt.set(_opp.id, _nowMsD);
           }
         }
       }
 
       // Forward lunge on fast swing that missed all enemies
-      // Suppress if any enemy (or the duel opponent) is very close (prevents clipping through them)
+      // Suppress if any enemy (or another player) is very close (prevents clipping through them)
       const _lungeProximityDist = 1.0;
       const _tooCloseToEnemy = hordeEnemies.some(_e =>
         !_e.isDead && _e.group &&
         playerModel.position.distanceTo(_e.group.position) < _lungeProximityDist
-      ) || (!!_duelOpp && playerModel.position.distanceTo(_duelOpp.position) < _lungeProximityDist);
+      ) || _pvpTargets.some(_o => playerModel.position.distanceTo(_o.position) < _lungeProximityDist);
       if (_playerMovingFast && !_swingHitOccurred && !_tooCloseToEnemy) {
         const _missFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
         _missFwd.y = 0; _missFwd.normalize();
@@ -5850,9 +5980,25 @@ async function initCore(runtimeContext) {
       }
     }
 
-    // ── Duel: camera turns toward the opponent (keyboard / touch turning pauses it) ──
-    if (duelMode?.isFighting() && playerControls) {
-      const _opp = duelMode.getOpponentCombat();
+    // ── Duel / battle: camera turns toward the (closest) opponent (keyboard / touch
+    // turning pauses it) ──
+    const _pvpFighting = !!(duelMode?.isFighting() || matchMode?.isFighting());
+    if (_pvpFighting && playerControls) {
+      let _opp = null;
+      let _oppDistSq = Infinity;
+      for (const _t of _getPvpTargets()) {
+        const _d = _t.position.distanceToSquared(playerModel.position);
+        if (_d < _oppDistSq) { _oppDistSq = _d; _opp = _t; }
+      }
+      // Battle: once the closest enemy is out of reach (it died, or someone else is closer
+      // than it now), walk to the next one — like the Showdown auto-walk between fights
+      if (matchMode?.isFighting() && !playerDead) {
+        if (_opp && !_duelWalking && Math.sqrt(_oppDistSq) > MATCH_REENGAGE_DIST) _duelWalking = true;
+        if (!_opp && _duelWalking) {
+          _duelWalking = false;
+          playerControls.isMoving = false;
+        }
+      }
       const _nowD = performance.now();
       if (_duelCamLastYaw !== null && Math.abs(wrapDeltaRad(playerControls.yaw - _duelCamLastYaw)) > 0.01) {
         _duelCamManualUntil = _nowD + 2000;
@@ -5892,7 +6038,7 @@ async function initCore(runtimeContext) {
 
       // Too close to land a swing (the blade reaches past the body): step back to
       // DUEL_MIN_SPACING. The opponent does the same on their side, so both give ground.
-      if (!_duelWalking && _opp && !playerDead && duelMode.isFighting()) {
+      if (!_duelWalking && _opp && !playerDead) {
         let _sdx = playerModel.position.x - _opp.position.x;
         let _sdz = playerModel.position.z - _opp.position.z;
         let _sDist = Math.hypot(_sdx, _sdz);
@@ -5962,7 +6108,7 @@ async function initCore(runtimeContext) {
     }
 
     // ── Horde enemy update (also runs in duels: player knockback + body sync) ──
-    if (hordeEnemies.length > 0 || duelMode?.isInDuel()) {
+    if (hordeEnemies.length > 0 || duelMode?.isInDuel() || matchMode?.isInMatch()) {
       // Sync kinematic player body to visual position each frame
       if (playerControls?.body) {
         playerControls.body.setNextKinematicTranslation({
@@ -6130,8 +6276,10 @@ async function initCore(runtimeContext) {
       }
       // GLB character: play the flying-back death clip once (held until respawn)
       playerModel.userData.qwopRig?.glbCharacter?.playDeath();
-      // Losing a duel shows the winner and goes back to the lobby instead of Game Over
+      // Losing a duel shows the winner and goes back to the lobby instead of Game Over;
+      // in a battle the player watches until it ends
       if (duelMode?.isInDuel()) duelMode.onLocalDeath();
+      else if (matchMode?.isInMatch()) matchMode.onLocalDeath();
       else showGameOver();
     }
 
@@ -6193,7 +6341,8 @@ async function initCore(runtimeContext) {
     });
 
     duelMode?.update();
-    if (multiplayer && duelMode?.getOpponentId() && now - lastPresenceSend >= presenceSendIntervalMs) {
+    matchMode?.update(frameDelta);
+    if (multiplayer && _netRecipients().length && now - lastPresenceSend >= presenceSendIntervalMs) {
       const payload = {
         type: "presence",
         id: multiplayer.getId(),
