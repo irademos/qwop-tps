@@ -29,7 +29,11 @@ const CAPSULE_HEIGHT   = 1.0;
 
 const CHASE_SPEED   = 3.2;   // m/s while chasing
 const ATTACK_RANGE  = 2.8;   // switch to attack mode when this close
-const CHASE_RANGE   = 0.9;   // stop moving closer when this close (during attack)
+const CHASE_RANGE   = 1.05;  // stop moving closer when this close (during attack)
+// Too close to land a swing either way (the blade reaches past the body): step back
+// until CHASE_RANGE apart again
+const TOO_CLOSE_DIST  = 0.85;
+const SPACING_SPEED   = 2.0;   // m/s while stepping back to swing distance
 const BACKOFF_SPEED = 1.6;   // m/s retreat speed when yielding attack slot
 const BACKOFF_DIST  = 3.8;   // target distance while backing off
 
@@ -623,8 +627,25 @@ export class EnemyPlayer {
       this._aiState = 'hold';
     }
 
+    // ── Spacing: step back when the player has crowded in too close ─────────
+    if (this.stationary || !targetModel || this._aiState === 'backoff') {
+      this._makingSpace = false;
+    } else if (distToTarget < TOO_CLOSE_DIST) {
+      this._makingSpace = true;
+    } else if (distToTarget >= CHASE_RANGE) {
+      this._makingSpace = false;
+    }
+
     // ── Movement ───────────────────────────────────────────────────────────
-    if (this._aiState === 'backoff') {
+    if (this._makingSpace) {
+      _toTarget.subVectors(this.group.position, targetModel.position);
+      _toTarget.y = 0;
+      if (_toTarget.lengthSq() < 0.0001) _toTarget.set(0, 0, -1).applyQuaternion(this.group.quaternion);
+      _toTarget.y = 0;
+      _toTarget.normalize().multiplyScalar(SPACING_SPEED * this.speedScale);
+      const vel = this.rigidBody.linvel();
+      this.rigidBody.setLinvel({ x: _toTarget.x, y: vel.y, z: _toTarget.z }, true);
+    } else if (this._aiState === 'backoff') {
       // Retreat away from player until we reach BACKOFF_DIST
       if (targetModel) {
         _toTarget.subVectors(this.group.position, targetModel.position);
@@ -658,7 +679,7 @@ export class EnemyPlayer {
     }
 
     // ── GLB character body animation (walk / idle; arms are posed below) ──
-    this._glbCharacter?.setMoving(this._aiState === 'chase' || this._aiState === 'backoff');
+    this._glbCharacter?.setMoving(this._aiState === 'chase' || this._aiState === 'backoff' || this._makingSpace);
     this._glbCharacter?.animate(dt);
 
     // ── Right hand (drives sword position) ────────────────────────────────
