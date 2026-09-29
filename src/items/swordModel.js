@@ -6,7 +6,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 // (hit checks use that fixed tip, see SWORD_TIP_LOCAL in EnemyPlayer.js).
 // ?v= busts browser caches: vercel.json marks /assets/* immutable, so a 404 served
 // before the file existed would otherwise stick. Bump it when sword.glb changes.
-export const SWORD_MODEL_URL = '/assets/props/sword.glb?v=3';
+export const SWORD_MODEL_URL = '/assets/props/sword.glb?v=4';
 
 // Auto-fit: the model's longest axis is turned onto +Z and scaled to this length
 // before the debug adjust is applied (0.8: sword.glb's grip lands at the hand and
@@ -19,8 +19,10 @@ const SWORD_METALNESS = 0.35;
 
 // Grip → model placement (tuned in game)
 const SWORD_GRIP = Object.freeze({
-  position: new THREE.Vector3(0, 0, 0.31), // m, sword-local
-  rotation: new THREE.Euler(0, Math.PI, 0), // sword.glb's handle is at its +X end
+  position: new THREE.Vector3(0, 0, 0.32), // m, sword-local
+  // sword.glb stands on +Y (blade up), so the fit already points it along +Z;
+  // then turned 86° around the blade
+  rotation: new THREE.Euler(0, 0, THREE.MathUtils.degToRad(86)),
   scale: 1.16,
 });
 
