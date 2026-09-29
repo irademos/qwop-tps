@@ -3230,9 +3230,9 @@ async function initCore(runtimeContext) {
   // ── Sword Showdown characters (keys of MATCH_CHARACTERS) ──
   // Regular enemies are frog men plus every character unlocked so far; each stage ends with
   // a boss (a locked character, PS_BOSS_HEARTS+ hearts) whose defeat unlocks it. Once all
-  // are unlocked the boss is a random non-frog character. The player picks who to play as
+  // are unlocked the boss is any random character. The player picks who to play as
   // on the stage screen. Saved in localStorage + profiles/<key>/phoneSwordStats/characters.
-  const PS_START_CHARACTERS = ['pumpkin', 'frog'];
+  const PS_START_CHARACTERS = ['frog'];
   const PS_ENEMY_BASE_CHARACTER = 'frog';
   const PS_BOSS_HEARTS = 3;          // stage 1 boss; +1 every PS_BOSS_HEARTS_EVERY stages
   const PS_BOSS_HEARTS_EVERY = 3;
@@ -3260,12 +3260,12 @@ async function initCore(runtimeContext) {
   const _psPickBoss = () => {
     const nonFrog = Object.keys(MATCH_CHARACTERS).filter((k) => k !== PS_ENEMY_BASE_CHARACTER);
     const locked = nonFrog.filter((k) => !_psChars.unlocked.includes(k));
-    const pool = locked.length ? locked : nonFrog;
+    const pool = locked.length ? locked : Object.keys(MATCH_CHARACTERS);
     return { key: pool[Math.floor(Math.random() * pool.length)], unlocks: locked.length > 0 };
   };
   const _psBossHearts = (stage) => Math.min(PS_BOSS_MAX_HEARTS,
     PS_BOSS_HEARTS + Math.floor(Math.max(0, stage - 1) / PS_BOSS_HEARTS_EVERY));
-  // Regular enemies: frog men + characters won from bosses (not the starting pumpkin)
+  // Regular enemies: frog men + characters won from bosses
   const _psEnemyCharacterPool = () => [PS_ENEMY_BASE_CHARACTER, ..._psChars.unlocked.filter(
     (k) => !PS_START_CHARACTERS.includes(k))];
   let _psJumpVelY = 0;       // vertical velocity for phone sword jump
@@ -3616,8 +3616,8 @@ async function initCore(runtimeContext) {
       const ex = baseX + (Math.random() - 0.5) * scatter;
       const ez = baseZ + (Math.random() - 0.5) * scatter;
       const ey = getTerrainHeight(ex, ez) ?? playerModel.position.y;
-      // Bomb throwers: ~5% chance from stage 1, scaling up slowly with stage
-      const _btChance = Math.min(0.15, 0.05 + (stage - 1) * 0.006);
+      // Bomb throwers: start appearing at stage 3, ~5% chance scaling up slowly with stage
+      const _btChance = stage >= 3 ? Math.min(0.15, 0.05 + (stage - 3) * 0.006) : 0;
       const charKey = isBoss ? _psStageBoss.key : _charPool[Math.floor(Math.random() * _charPool.length)];
       _psEnemyQueue.push({
         pos: new THREE.Vector3(ex, ey, ez),
@@ -5097,8 +5097,8 @@ async function initCore(runtimeContext) {
     }
     setStat('health', statsState.maxHealthSegments);
     tutorialCtx.equipSword();
-    // Tutorial / Multiplayer play as the pumpkin; Showdown applies its pick on the stage screen
-    setPlayerCharacterUrl(playerModel, glbCharacterConfig.pumpkinUrl);
+    // Tutorial / Multiplayer play as the frog man; Showdown applies its pick on the stage screen
+    setPlayerCharacterUrl(playerModel, glbCharacterConfig.frogManUrl);
   };
 
   // "Back" on the stage screen: leave Showdown for the start screen (Tutorial / Showdown / Multiplayer)
@@ -5304,7 +5304,7 @@ async function initCore(runtimeContext) {
       setPlayerCharacterUrl(playerModel, characterUrl);
     },
     leaveMatch: () => {
-      setPlayerCharacterUrl(playerModel, glbCharacterConfig.pumpkinUrl);
+      setPlayerCharacterUrl(playerModel, glbCharacterConfig.frogManUrl);
       duelCtx.leaveDuel();
     },
     startWalk: duelCtx.startWalkIn,

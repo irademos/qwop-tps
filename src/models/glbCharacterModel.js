@@ -41,9 +41,9 @@ import { FluffyCharacter } from './fluffyCharacter.ts';
 
 export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
-  frogManUrl: '/models/glb_characters/frog_man.glb',       // a quarter of the EnemyPlayers
+  frogManUrl: '/models/glb_characters/frog_man.glb',       // default player character; Showdown's base enemy
   antlerGuyUrl: '/models/glb_characters/antler_guy.glb',   // a quarter of the EnemyPlayers
-  pumpkinUrl: '/models/glb_characters/pumpkin.glb',        // player character; a quarter of the EnemyPlayers
+  pumpkinUrl: '/models/glb_characters/pumpkin.glb',        // Multiplayer roster / Showdown unlock
   wizardUrl: '/models/glb_characters/wizard.glb',          // Multiplayer roster / Showdown unlock
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',

@@ -361,7 +361,7 @@ export function createMatchMode(ctx) {
       hostName: ctx.getPlayerName(),
       isHost: true,
       members: new Map(),
-      myPick: { side: 0, char: 'pumpkin' },
+      myPick: { side: 0, char: 'frog' },
       teamChars: ['antler', 'frog']
     };
     phase = 'setup';
@@ -549,7 +549,7 @@ export function createMatchMode(ctx) {
     }
     party = {
       key, mode, hostId: from, hostName: name, isHost: false,
-      roster: [], teamChars: ['antler', 'frog'], myPick: { side: 0, char: 'pumpkin' }
+      roster: [], teamChars: ['antler', 'frog'], myPick: { side: 0, char: 'frog' }
     };
     phase = 'guest';
     joinRoom(`party-${from}`);
