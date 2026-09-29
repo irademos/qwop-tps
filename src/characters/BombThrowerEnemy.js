@@ -181,6 +181,7 @@ export class BombThrowerEnemy {
    *                          (each needs group, applyDamage and applyBlastKnockback/applyDirectKnockback)
    * @param {(direction: THREE.Vector3, falloff: number) => void} [options.onBlastPlayer]
    *                          – throws the player back when caught in a blast
+   * @param {string}        [options.characterUrl] – character GLB (default glbCharacterConfig.url)
    */
   constructor(scene, rapier, rapierWorld, options = {}) {
     this.scene       = scene;
@@ -199,6 +200,7 @@ export class BombThrowerEnemy {
     this.stationary = !!options.stationary;
     this.throwsHeld = !!options.throwsHeld;
     this.aimAt      = options.aimAt ?? null;
+    this._characterUrl = options.characterUrl ?? glbCharacterConfig.url;
 
     // Throw state
     this._lastThrowTime = -Infinity;
@@ -233,7 +235,7 @@ export class BombThrowerEnemy {
   _buildBody() {
     // Same GLB character as the player/EnemyPlayers; the clips drive its arms (no IK)
     this._glbCharacter = null;
-    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT, armIK: false }).then(({ container, character }) => {
+    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT, url: this._characterUrl, armIK: false }).then(({ container, character }) => {
       if (this._destroyed) { character.dispose(); return; }
       this.group.add(container);
       this._glbCharacter = character;

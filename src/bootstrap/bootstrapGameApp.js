@@ -9,7 +9,7 @@ import { glbCharacterConfig } from "../models/glbCharacterModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
-import { createMatchMode } from '../multiplayer/matchMode.js';
+import { createMatchMode, MATCH_CHARACTERS } from '../multiplayer/matchMode.js';
 import { PlayerControls } from '../controls/controls.js';
 import { getCookie, setCookie } from '../core/utils.js';
 import { createAudioManager } from '../features/audioFeature.js';
@@ -54,6 +54,8 @@ import {
   loadPhoneSwordStats,
   savePhoneSwordStage,
   loadPhoneSwordStage,
+  saveShowdownCharacters,
+  loadShowdownCharacters,
   hasCompletedTutorial,
   saveTutorialCompleted
 } from '../features/persistenceFeature.js';
@@ -3189,6 +3191,7 @@ async function initCore(runtimeContext) {
         speedScale: opts.speedScale ?? 1.0,
         getBlastTargets: () => hordeEnemies,
         onBlastPlayer: _blastPlayer,
+        characterUrl: opts.characterUrl,
       });
     } else {
       enemy = new EnemyPlayer(scene, RAPIER, rapierWorld, {
@@ -3196,6 +3199,7 @@ async function initCore(runtimeContext) {
         hearts: opts.hearts ?? 3,
         speedScale: opts.speedScale ?? 1.0,
         swingChance: opts.swingChance ?? _psSwingChance(_psStage),
+        characterUrl: opts.characterUrl,
       });
       enemy._camera = camera;
     }
@@ -3221,7 +3225,49 @@ async function initCore(runtimeContext) {
   let _psStats = { kills: 0, deaths: 0, highestStage: 1 };
   // Load stage from Firebase first (async), fallback to localStorage
   let _psStage = _psSavedStage();
-  let _psEnemyQueue = [];   // [{pos: THREE.Vector3, hearts: number, triggerDist: number}]
+  let _psEnemyQueue = [];   // [{pos, hearts, triggerDist, bombThrower, characterUrl, boss}]
+
+  // ── Sword Showdown characters (keys of MATCH_CHARACTERS) ──
+  // Regular enemies are frog men plus every character unlocked so far; each stage ends with
+  // a boss (a locked character, PS_BOSS_HEARTS+ hearts) whose defeat unlocks it. Once all
+  // are unlocked the boss is a random non-frog character. The player picks who to play as
+  // on the stage screen. Saved in localStorage + profiles/<key>/phoneSwordStats/characters.
+  const PS_START_CHARACTERS = ['pumpkin', 'frog'];
+  const PS_ENEMY_BASE_CHARACTER = 'frog';
+  const PS_BOSS_HEARTS = 3;          // stage 1 boss; +1 every PS_BOSS_HEARTS_EVERY stages
+  const PS_BOSS_HEARTS_EVERY = 3;
+  const PS_BOSS_MAX_HEARTS = 10;
+  const PS_BOSS_SWING_BONUS = 0.15;  // bosses swing more often than their stage's swordsmen
+  const _psCharsLsKey = () => profileNameKey ? `ps_chars_${profileNameKey}` : null;
+  const _psNormalizeChars = ({ unlocked, selected } = {}) => {
+    const set = new Set(PS_START_CHARACTERS);
+    for (const k of unlocked || []) if (MATCH_CHARACTERS[k]) set.add(k);
+    const list = Object.keys(MATCH_CHARACTERS).filter((k) => set.has(k));
+    return { unlocked: list, selected: list.includes(selected) ? selected : PS_START_CHARACTERS[0] };
+  };
+  const _psLoadLocalChars = () => {
+    try {
+      const k = _psCharsLsKey();
+      return _psNormalizeChars(k ? JSON.parse(localStorage.getItem(k) || 'null') || {} : {});
+    } catch (_) { return _psNormalizeChars(); }
+  };
+  let _psChars = _psLoadLocalChars();
+  const _psSaveChars = () => {
+    try { const k = _psCharsLsKey(); if (k) localStorage.setItem(k, JSON.stringify(_psChars)); } catch (_) {}
+    if (profileNameKey) void saveShowdownCharacters(profileNameKey, _psChars);
+  };
+  let _psStageBoss = null; // { key, unlocks } for the stage on the stage screen / being played
+  const _psPickBoss = () => {
+    const nonFrog = Object.keys(MATCH_CHARACTERS).filter((k) => k !== PS_ENEMY_BASE_CHARACTER);
+    const locked = nonFrog.filter((k) => !_psChars.unlocked.includes(k));
+    const pool = locked.length ? locked : nonFrog;
+    return { key: pool[Math.floor(Math.random() * pool.length)], unlocks: locked.length > 0 };
+  };
+  const _psBossHearts = (stage) => Math.min(PS_BOSS_MAX_HEARTS,
+    PS_BOSS_HEARTS + Math.floor(Math.max(0, stage - 1) / PS_BOSS_HEARTS_EVERY));
+  // Regular enemies: frog men + characters won from bosses (not the starting pumpkin)
+  const _psEnemyCharacterPool = () => [PS_ENEMY_BASE_CHARACTER, ..._psChars.unlocked.filter(
+    (k) => !PS_START_CHARACTERS.includes(k))];
   let _psJumpVelY = 0;       // vertical velocity for phone sword jump
   let _psGroundY = null;     // ground Y level for phone sword mode
   const PS_JUMP_FORCE = 8.5; // initial upward speed m/s
@@ -3481,6 +3527,8 @@ async function initCore(runtimeContext) {
   const _psStageBadge   = document.getElementById('ps-stage-badge');
   const _psStageEnemies = document.getElementById('ps-stage-enemies');
   const _psStageOkBtn   = document.getElementById('ps-stage-ok');
+  const _psStageBossEl  = document.getElementById('ps-stage-boss');
+  const _psStageCharsEl = document.getElementById('ps-stage-chars');
   const _psWinOverlay   = document.getElementById('ps-win-overlay');
   const _psWinTitle     = document.getElementById('ps-win-title');
   const _psWinSub       = document.getElementById('ps-win-sub');
@@ -3556,21 +3604,28 @@ async function initCore(runtimeContext) {
     );
     _psAutoWalkDir.subVectors(_psPathEnd, playerModel.position).setY(0).normalize();
     _psEnemyQueue = [];
+    const _charPool = _psEnemyCharacterPool();
+    if (!_psStageBoss) _psStageBoss = _psPickBoss();
     for (let i = 0; i < count; i++) {
+      // The last enemy is the stage boss: on the path itself (no scatter), so it comes last
+      const isBoss = i === count - 1;
       const t = (i + 0.5) / count;
       const baseX = playerModel.position.x + _psAutoWalkDir.x * pathLen * t;
       const baseZ = playerModel.position.z + _psAutoWalkDir.z * pathLen * t;
-      const scatter = 8;
+      const scatter = isBoss ? 0 : 8;
       const ex = baseX + (Math.random() - 0.5) * scatter;
       const ez = baseZ + (Math.random() - 0.5) * scatter;
       const ey = getTerrainHeight(ex, ez) ?? playerModel.position.y;
-      // Bomb throwers: start appearing at stage 3, ~5% chance scaling up slowly with stage
-      const _btChance = stage >= 3 ? Math.min(0.15, 0.05 + (stage - 3) * 0.006) : 0;
+      // Bomb throwers: ~5% chance from stage 1, scaling up slowly with stage
+      const _btChance = Math.min(0.15, 0.05 + (stage - 1) * 0.006);
+      const charKey = isBoss ? _psStageBoss.key : _charPool[Math.floor(Math.random() * _charPool.length)];
       _psEnemyQueue.push({
         pos: new THREE.Vector3(ex, ey, ez),
-        hearts: _psHeartsForStage(stage),
+        hearts: isBoss ? _psBossHearts(stage) : _psHeartsForStage(stage),
         triggerDist: pathLen * t - 10,
-        bombThrower: Math.random() < _btChance,
+        bombThrower: !isBoss && Math.random() < _btChance,
+        characterUrl: MATCH_CHARACTERS[charKey].url,
+        boss: isBoss,
       });
     }
     // Spawn coins along the path
@@ -3605,7 +3660,10 @@ async function initCore(runtimeContext) {
     _psAutoWalking = false;
     _psStopSong();
     _psWinTitle.textContent = 'YOU WIN!';
-    _psWinSub.textContent = `Stage ${_psStage} Cleared!`;
+    const _unlocked = _psStageBoss?.unlocks ? MATCH_CHARACTERS[_psStageBoss.key] : null;
+    _psWinSub.textContent = _unlocked
+      ? `Stage ${_psStage} Cleared! ${_unlocked.emoji} ${_unlocked.label} unlocked!`
+      : `Stage ${_psStage} Cleared!`;
     // force animation restart
     _psWinTitle.style.animation = 'none';
     _psWinSub.style.animation = 'none';
@@ -3624,6 +3682,36 @@ async function initCore(runtimeContext) {
     _psUpdateKillHud(false);
     _psStageBadge.textContent = stage <= 50 ? `STAGE ${stage}` : 'FINAL STAGE';
     _psStageEnemies.textContent = `Defeat ${count} enemies`;
+    // Final enemy (picked here so the screen can name it; kept through retries of this stage)
+    if (!_psStageBoss) _psStageBoss = _psPickBoss();
+    const _boss = MATCH_CHARACTERS[_psStageBoss.key];
+    if (_psStageBossEl) {
+      _psStageBossEl.textContent = `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
+        + (_psStageBoss.unlocks ? ' — beat it to unlock!' : '');
+    }
+    // Character picker: unlocked characters are selectable, the rest show a lock
+    const _applySelected = () => setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected].url);
+    if (_psStageCharsEl) {
+      _psStageCharsEl.replaceChildren();
+      for (const [key, c] of Object.entries(MATCH_CHARACTERS)) {
+        const unlocked = _psChars.unlocked.includes(key);
+        const btn = document.createElement('button');
+        btn.className = 'ps-stage-char-btn';
+        btn.classList.toggle('active', key === _psChars.selected);
+        btn.classList.toggle('locked', !unlocked);
+        btn.disabled = !unlocked;
+        btn.textContent = unlocked ? `${c.emoji} ${c.label}` : `🔒 ${c.label}`;
+        btn.onclick = () => {
+          _psChars.selected = key;
+          _psSaveChars();
+          _applySelected();
+          _psStageCharsEl.querySelectorAll('.ps-stage-char-btn')
+            .forEach((b) => b.classList.toggle('active', b === btn));
+        };
+        _psStageCharsEl.appendChild(btn);
+      }
+    }
+    _applySelected();
 
     // Wire up time-picker buttons
     const _timeBtns = _psStageOverlay.querySelectorAll('.ps-stage-time-btn');
@@ -3748,11 +3836,18 @@ async function initCore(runtimeContext) {
     // Load PS stats and stage from Firebase (falls back gracefully)
     if (profileNameKey) {
       try {
-        const [fbStats, fbStage] = await Promise.all([
+        const [fbStats, fbStage, fbChars] = await Promise.all([
           loadPhoneSwordStats(profileNameKey),
-          loadPhoneSwordStage(profileNameKey)
+          loadPhoneSwordStage(profileNameKey),
+          loadShowdownCharacters(profileNameKey)
         ]);
         _psStats = fbStats;
+        // Characters: union of Firebase + localStorage unlocks; local pick wins
+        const localChars = _psLoadLocalChars();
+        _psChars = _psNormalizeChars({
+          unlocked: [...localChars.unlocked, ...fbChars.unlocked],
+          selected: localChars.selected !== PS_START_CHARACTERS[0] ? localChars.selected : fbChars.selected
+        });
         // Use whichever is higher: Firebase stage or localStorage
         const lsStage = _psSavedStage();
         _psStage = Math.max(fbStage, lsStage);
@@ -5002,6 +5097,8 @@ async function initCore(runtimeContext) {
     }
     setStat('health', statsState.maxHealthSegments);
     tutorialCtx.equipSword();
+    // Tutorial / Multiplayer play as the pumpkin; Showdown applies its pick on the stage screen
+    setPlayerCharacterUrl(playerModel, glbCharacterConfig.pumpkinUrl);
   };
 
   // "Back" on the stage screen: leave Showdown for the start screen (Tutorial / Showdown / Multiplayer)
@@ -5827,7 +5924,11 @@ async function initCore(runtimeContext) {
       for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
         const _qe = _psEnemyQueue[_qi];
         if (playerModel.position.distanceTo(_qe.pos) <= PS_SPAWN_TRIGGER_DIST) {
-          _spawnHordeEnemy({ position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED, bombThrower: _qe.bombThrower });
+          _spawnHordeEnemy({
+            position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED, bombThrower: _qe.bombThrower,
+            characterUrl: _qe.characterUrl,
+            swingChance: _qe.boss ? Math.min(0.75, _psSwingChance(_psStage) + PS_BOSS_SWING_BONUS) : undefined,
+          });
           _psEnemyQueue.splice(_qi, 1);
         }
       }
@@ -5875,10 +5976,17 @@ async function initCore(runtimeContext) {
         comboMeter.end();
         heartBubbles.clear();
         addPlayerXp(getSwordShowdownStageXp(_psStage));
+        // Boss beaten: unlock its character (the win banner names it); next stage picks a new boss
+        const _clearedBoss = _psStageBoss;
+        if (_clearedBoss?.unlocks && !_psChars.unlocked.includes(_clearedBoss.key)) {
+          _psChars = _psNormalizeChars({ ..._psChars, unlocked: [..._psChars.unlocked, _clearedBoss.key] });
+          _psSaveChars();
+        }
         // Stage cleared: restore the player to full health
         setStat('health', statsState.maxHealthSegments);
         const _nextStage = _psStage + 1;
         _psShowWin(() => {
+          _psStageBoss = null;
           if (_nextStage <= 50) {
             _psStage = _nextStage;
             _psSaveStage(_psStage);

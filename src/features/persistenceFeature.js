@@ -11,6 +11,8 @@ export {
   loadPhoneSwordStats,
   savePhoneSwordStage,
   loadPhoneSwordStage,
+  saveShowdownCharacters,
+  loadShowdownCharacters,
   hasCompletedTutorial,
   saveTutorialCompleted
 } from '../player/playerProfile.js';
