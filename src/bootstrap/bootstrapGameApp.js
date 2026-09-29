@@ -509,6 +509,9 @@ function createArcadeOverlay(startOverlay) {
   };
 }
 
+// Swing detection is ignored this long after Block is pressed or released (the stance change
+// moves the sword abruptly and would otherwise count as a swing + forward lunge).
+const PSW_BLOCK_TOGGLE_IGNORE_S = 0.35;
 const SWORD_SHOWDOWN_BGS = 'Interior Day/Inside Day.ogg';
 const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
 // Sword gyro sensitivity: gyro angles are multiplied by window.phoneSwordLocalSensitivity
@@ -4861,6 +4864,12 @@ async function initCore(runtimeContext) {
     tutorialCtx.equipSword();
   };
 
+  // "Back" on the stage screen: leave Showdown for the start screen (Tutorial / Showdown / Multiplayer)
+  document.getElementById('ps-stage-back')?.addEventListener('click', () => {
+    _resetForMenu();
+    arcadeOverlay.showStartScreen();
+  });
+
   const startTutorialMode = () => {
     _resetForMenu();
     lastAutoMode = 'day';
@@ -4873,6 +4882,8 @@ async function initCore(runtimeContext) {
   // ── Multiplayer mode: lobby + 1v1 sword duels (src/multiplayer/duelMode.js) ──
   const DUEL_HEALTH_SEGMENTS = 8;      // every duelist, every round, whatever their Showdown max
   const DUEL_WALK_STOP_DIST = 1.4;     // auto-walk toward the opponent stops this close (m)
+  const DUEL_MIN_SPACING = 1.0;        // closer than this, step back (too close to land a swing)
+  const DUEL_SPACING_SPEED = 1.5;      // m/s while stepping back
   let _duelWalking = false;            // walking in toward the opponent after "FIGHT!"
   const _duelSwordLocalPos = new THREE.Vector3();
   const _duelSwordLocalQ = new THREE.Quaternion();
@@ -5282,13 +5293,26 @@ async function initCore(runtimeContext) {
 
       const _tipWorld = _playerBladePoints[2]; // tip
 
+      // Pressing/releasing Block flips the hands into/out of the block stance (and jolts
+      // the phone), so the tip jumps in one frame. That isn't a swing: ignore swings for
+      // a moment after every block toggle and restart the swing-direction history.
+      const _blockingNow = !!window.phoneSwordGyro?.blocking;
+      if (_blockingNow !== _psw.lastBlocking) {
+        _psw.lastBlocking = _blockingNow;
+        _psw.blockToggleUntil = _nowSecPS + PSW_BLOCK_TOGGLE_IGNORE_S;
+        _psw.tipHistory.length = 0;
+        _psw.prevTipWorld = null;
+      }
+      const _blockToggleSettling = _nowSecPS < (_psw.blockToggleUntil ?? 0);
+
       // ── Sword-vs-sword collision + sweep hit detection for horde enemies ─────
       let _swingHitOccurred = false;
       const _colAngSpd  = window._pswDebugSpeed ?? 0;
       const _colMinSpd  = window.phoneSwordSwingCfg?.minSweepSpeed ?? 100;
       const _colSweepDist = _psw.prevTipWorld ? _tipWorld.distanceTo(_psw.prevTipWorld) : 0;
       const _colMinDist = window.phoneSwordSwingCfg?.minSweepDist ?? 0.15;
-      const _playerMovingFast = _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
+      const _playerMovingFast = !_blockingNow && !_blockToggleSettling &&
+        _colAngSpd >= _colMinSpd && _colSweepDist >= _colMinDist;
       // Blocked swing: knock the player's sword sideways (snap, hold, return to live gyro)
       const _startSwordBounce = () => {
         if (_psw.bounceActive) return;
@@ -5324,8 +5348,7 @@ async function initCore(runtimeContext) {
         // a swing that reaches the enemy (body or blade) is stopped only if it crosses the
         // blocking blade (see swingCrossesBlade). Otherwise blade contact is ignored and the
         // swing can land. The player can't hit while holding their own block button.
-        const _playerBlocking = !!window.phoneSwordGyro?.blocking;
-        if (!_playerBlocking) {
+        if (!_blockingNow && !_blockToggleSettling) {
           const _enemyCenter = _he.group.position.clone();
           _enemyCenter.y += 0.8;
           const _reachesBody = _tipWorld.distanceTo(_enemyCenter) < 0.65;
@@ -5395,7 +5418,7 @@ async function initCore(runtimeContext) {
       // ── Duel: same sweep hit + directional block against the other player ──
       // The attacker detects the hit and sends it; the victim applies the damage.
       const _duelOpp = duelMode?.getOpponentCombat();
-      if (_duelOpp && !window.phoneSwordGyro?.blocking && _psw.prevTipWorld) {
+      if (_duelOpp && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld) {
         const _nowMsD = Date.now();
         let _duelSwordCollision = false;
         if (_duelOpp.hasBlade) {
@@ -5700,6 +5723,35 @@ async function initCore(runtimeContext) {
         } else {
           _duelWalking = false;
           playerControls.isMoving = false;
+        }
+      }
+
+      // Too close to land a swing (the blade reaches past the body): step back to
+      // DUEL_MIN_SPACING. The opponent does the same on their side, so both give ground.
+      if (!_duelWalking && _opp && !playerDead && duelMode.isFighting()) {
+        let _sdx = playerModel.position.x - _opp.position.x;
+        let _sdz = playerModel.position.z - _opp.position.z;
+        let _sDist = Math.hypot(_sdx, _sdz);
+        if (_sDist < 1e-3) {
+          _sdx = -Math.sin(playerControls.yaw);
+          _sdz = -Math.cos(playerControls.yaw);
+          _sDist = 0;
+        } else {
+          _sdx /= _sDist;
+          _sdz /= _sDist;
+        }
+        if (_sDist < DUEL_MIN_SPACING) {
+          const _step = Math.min(DUEL_SPACING_SPEED * frameDelta, DUEL_MIN_SPACING - _sDist);
+          const _nx = playerModel.position.x + _sdx * _step;
+          const _nz = playerModel.position.z + _sdz * _step;
+          playerModel.position.x = _nx;
+          playerModel.position.z = _nz;
+          playerControls.playerX = _nx;
+          playerControls.playerZ = _nz;
+          playerControls.lastPosition?.set(_nx, playerModel.position.y, _nz);
+          if (playerControls.body) {
+            playerControls.body.setNextKinematicTranslation({ x: _nx, y: playerModel.position.y + 0.6, z: _nz });
+          }
         }
       }
     }
