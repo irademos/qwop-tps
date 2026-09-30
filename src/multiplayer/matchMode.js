@@ -39,7 +39,8 @@ export const MATCH_CHARACTERS = {
   frog: { label: 'Frog Man', team: 'Frogs', emoji: '🐸', url: glbCharacterConfig.frogManUrl },
   gemhorn: { label: 'Gemhorn', team: 'Gemhorns', emoji: '💎', url: glbCharacterConfig.url },
   pumpkin: { label: 'Pumpkin', team: 'Pumpkins', emoji: '🎃', url: glbCharacterConfig.pumpkinUrl },
-  wizard: { label: 'Wizard', team: 'Wizards', emoji: '🧙', url: glbCharacterConfig.wizardUrl }
+  wizard: { label: 'Wizard', team: 'Wizards', emoji: '🧙', url: glbCharacterConfig.wizardUrl },
+  mii1: { label: 'Mii', team: 'Miis', emoji: '🙂', url: glbCharacterConfig.mii1Url }
 };
 const CHAR_KEYS = Object.keys(MATCH_CHARACTERS);
 
@@ -657,7 +658,7 @@ export function createMatchMode(ctx) {
         if (c.enemy) c.enemy.stationary = true;
       } else {
         ctx.ensureRemoteModel(r.id, r.name, url, pose);
-        c.sword = ctx.createSwordMesh();
+        c.sword = ctx.createSwordMesh(url);
         if (c.sword) {
           c.sword.visible = false;
           ctx.scene.add(c.sword);

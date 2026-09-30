@@ -269,11 +269,18 @@ export function createDuelMode(ctx) {
   });
 
   // ── Remote sword ─────────────────────────────────────────────────────────
-  const ensureRemoteSword = () => {
-    if (remoteSword) return remoteSword;
-    remoteSword = ctx.createSwordMesh();
+  // characterUrl: the opponent's character (a Mii holds the Wii sword); undefined keeps
+  // whatever sword is already there
+  const ensureRemoteSword = (characterUrl) => {
+    if (remoteSword && (characterUrl === undefined || remoteSword.userData.characterUrl === characterUrl)) {
+      return remoteSword;
+    }
+    const wasVisible = !!remoteSword?.visible;
+    remoteSword?.parent?.remove(remoteSword);
+    remoteSword = ctx.createSwordMesh(characterUrl ?? null);
     if (remoteSword) {
-      remoteSword.visible = false;
+      remoteSword.userData.characterUrl = characterUrl ?? null;
+      remoteSword.visible = wasVisible;
       ctx.scene.add(remoteSword);
     }
     return remoteSword;
@@ -666,7 +673,7 @@ export function createDuelMode(ctx) {
 
     const model = ctx.getRemoteModel(duel.opponentId);
     if (model) model.userData.remoteHandTarget = remoteHandTarget;
-    if (ensureRemoteSword()) {
+    if (ensureRemoteSword(model?.userData?.qwopRig?.characterUrl)) {
       remoteSword.visible = !!(model && remoteSwordTarget.has);
       if (remoteSword.visible) {
         remoteSword.position.copy(remoteSwordTarget.pos);
