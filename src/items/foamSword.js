@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { Weapon } from './weapon.js';
-import { loadSwordModelTemplate, createSwordModelInstance } from './swordModel.js';
+import { loadAllSwordModelTemplates, createSwordModelInstance, swordVariantForCharacter } from './swordModel.js';
 
 export const FOAM_SWORD_ITEM_ID = 'foamSword';
 
@@ -80,17 +80,29 @@ export class FoamSword extends Weapon {
       holdOffset: new THREE.Vector3(0, 0, 0),
     });
     this._groundOffset = 0.35;
+    this._variant = null; // sword model shown: 'default' (sword.glb) or 'wii' (Mii holder)
+  }
+
+  // Shows the sword model for `variant` on the pickup mesh and the held clone (the one
+  // in the hand, made from the mesh when equipped); the procedural foam sword when
+  // its GLB can't load
+  _setVariant(variant) {
+    if (!this.mesh || variant === this._variant) return;
+    this._variant = variant;
+    for (const group of new Set([this.mesh, this.heldMesh].filter(Boolean))) {
+      group.clear();
+      const model = createSwordModelInstance({ variant });
+      if (model) group.add(model);
+      else buildFoamSwordParts(group);
+    }
   }
 
   async load(position = this._defaultPosition) {
     const group = new THREE.Group();
     group.name = 'foam-sword';
 
-    // sword.glb; the procedural foam sword is the fallback when it can't load
-    await loadSwordModelTemplate();
-    const model = createSwordModelInstance();
-    if (model) group.add(model);
-    else buildFoamSwordParts(group);
+    // Both sword GLBs (enemy swords are built from the templates too)
+    await loadAllSwordModelTemplates();
 
     const targetPos = position.clone();
     const terrainHeight = getTerrainHeight(targetPos.x, targetPos.z);
@@ -99,6 +111,7 @@ export class FoamSword extends Weapon {
     group.userData.hideInMapView = true;
 
     this.mesh = group;
+    this._setVariant('default');
     this.scene.add(this.mesh);
   }
 
@@ -108,6 +121,8 @@ export class FoamSword extends Weapon {
     if (this.holder?.playerModel) {
       const pm = this.holder.playerModel;
       pm.userData.foamSwordMode = true;
+      // Mii characters hold the Wii sword (with their ball hands on the handle)
+      this._setVariant(swordVariantForCharacter(pm.userData.qwopRig?.characterUrl));
 
       // Derive where the blade points (+Z axis of sword in player-local space)
       _fsSwordDir.set(0, 0, 1).applyQuaternion(this._holdQuaternion);

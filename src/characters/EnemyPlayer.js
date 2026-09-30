@@ -17,6 +17,11 @@ import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCha
 
 // Cycles the character model per spawned swordsman: a quarter each pumpkins, antler guys, frog men, gemhorns
 let _enemyModelIndex = 0;
+// Character for an EnemyPlayer spawned without one: cycles through the roster
+function nextDefaultEnemyCharacterUrl() {
+  const urls = [glbCharacterConfig.pumpkinUrl, glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url, glbCharacterConfig.wizardUrl];
+  return urls[_enemyModelIndex++ % urls.length];
+}
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { createSwordModelInstance } from '../items/swordModel.js';
 
@@ -261,7 +266,7 @@ export class EnemyPlayer {
     // Health segments a sword hit on the local player takes (Multiplayer bots use 1)
     this.swordDamage = options.swordDamage ?? SWORD_DAMAGE;
     // Character GLB (default: cycle pumpkin / antler guy / frog man / gemhorn / wizard per spawn)
-    this._characterUrl = options.characterUrl ?? null;
+    this._characterUrl = options.characterUrl ?? nextDefaultEnemyCharacterUrl();
     this._showHealthBar = options.showHealthBar ?? true;
     // Multiplayer bots: when the target isn't the local player, a sword swing reaching it is
     // resolved by this callback instead: (targetModel, swingDirWorld) => 'hit' | 'blocked' | null
@@ -333,9 +338,7 @@ export class EnemyPlayer {
 
     // GLB character — loaded async. Its arms reach for the floating hand groups below.
     this._glbCharacter = null;
-    const enemyModelUrls = [glbCharacterConfig.pumpkinUrl, glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url, glbCharacterConfig.wizardUrl];
-    const characterUrl = this._characterUrl ?? enemyModelUrls[_enemyModelIndex++ % enemyModelUrls.length];
-    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT, url: characterUrl }).then(({ container, character }) => {
+    createGLBCharacterInstance({ targetHeight: CAPSULE_HEIGHT, url: this._characterUrl }).then(({ container, character }) => {
       if (this._destroyed) { character.dispose(); return; }
       this.group.add(container);
       this._glbCharacter = character;
@@ -440,9 +443,10 @@ export class EnemyPlayer {
     this._swordGroup = swordGroup;
     this.scene.add(swordGroup); // added directly to scene so world transforms are straightforward
 
-    // sword.glb (loaded with the player's sword); own materials for the hit flash
+    // sword.glb — the Wii sword with ball hands for a Mii (loaded with the player's
+    // sword); own materials for the hit flash
     this._buildSwingGlow(swordGroup);
-    const model = createSwordModelInstance({ cloneMaterials: true });
+    const model = createSwordModelInstance({ cloneMaterials: true, characterUrl: this._characterUrl });
     if (model) {
       swordGroup.add(model);
       return;

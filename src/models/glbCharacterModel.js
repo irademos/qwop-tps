@@ -29,6 +29,10 @@
  * suspended like death), then returns to walk/idle; actionProgress / actionActive
  * let the caller time events (e.g. the bomb thrower's release) against the clip.
  *
+ * Mii characters (isMiiCharacterUrl) have no arm bones: solveArm() leaves the floating
+ * hands where the game put them, getPalmWorldPosition() returns a point beside the body,
+ * and the hands are drawn by the Wii sword they hold (swordModel.js).
+ *
  * armIK: false (createGLBCharacterInstance option) leaves the arms to the clips
  * entirely — for characters with no floating-hand targets (the bomb thrower).
  * solveArm() then only snaps the target to the palm.
@@ -45,6 +49,7 @@ export const glbCharacterConfig = {
   antlerGuyUrl: '/models/glb_characters/antler_guy.glb',   // a quarter of the EnemyPlayers
   pumpkinUrl: '/models/glb_characters/pumpkin.glb',        // Multiplayer roster / Showdown unlock
   wizardUrl: '/models/glb_characters/wizard.glb',          // Multiplayer roster / Showdown unlock
+  mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Multiplayer roster / Showdown unlock
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',
   deathClip: '/models/animations/Flying Back Death.fbx', // played once (whole body, arms included) by playDeath()
@@ -70,7 +75,19 @@ export const glbCharacterConfig = {
     '/models/glb_characters/pumpkin.glb': { shells: 0 },
     '/models/glb_characters/wizard.glb': { shells: 0 },
   },
+  // Mii characters (miiN.glb) get these fluffy overrides
+  miiFluffy: { shells: 0 },
 };
+
+/**
+ * Mii characters: /models/glb_characters/mii1.glb, mii2.glb, … They have no shoulders,
+ * arms or hands (legs + body + head only), so the arm IK has nothing to pose; instead
+ * they hold the Wii sword, which carries two floating brown ball hands on its handle
+ * (swordModel.js, swordVariantForCharacter).
+ */
+export function isMiiCharacterUrl(url) {
+  return typeof url === 'string' && /\/mii\d+\.glb(?:[?#]|$)/.test(url);
+}
 
 // Floating-hand label → Mixamo arm on the same local-X side (see header)
 const ARM_CHAIN_FOR_HAND = { right: 'Left', left: 'Right' };
@@ -117,8 +134,10 @@ const _stretch = new THREE.Vector3();
 // ── Character ───────────────────────────────────────────────────────────────
 
 export class GLBCharacter {
-  constructor(scene, { armIK = true, fluffy = glbCharacterConfig.fluffy } = {}) {
+  constructor(scene, { armIK = true, fluffy = glbCharacterConfig.fluffy, palmFallback = null } = {}) {
     this.scene = scene;
+    // Scene-local stand-in palm points for arms the rig doesn't have (Mii characters)
+    this._palmFallback = palmFallback;
     this._armIK = armIK;
     this.fluffy = new FluffyCharacter(scene, fluffy);
     this.arms = {};
@@ -363,7 +382,13 @@ export class GLBCharacter {
    */
   getPalmWorldPosition(hand, out = new THREE.Vector3()) {
     const arm = this.arms[hand];
-    if (!arm) return out;
+    if (!arm) {
+      // No arm (Mii): a point beside the body where that hand would float
+      const fallback = this._palmFallback?.[hand];
+      if (!fallback) return out;
+      this.scene.updateWorldMatrix(true, false);
+      return this.scene.localToWorld(out.copy(fallback));
+    }
     arm.hand.updateMatrixWorld(true);
     return out.set(0, arm.palm, 0).applyMatrix4(arm.hand.matrixWorld);
   }
@@ -421,8 +446,18 @@ export async function createGLBCharacterInstance(opts = {}) {
   container.name = 'GLBCharacterContainer';
   container.add(scene);
 
-  const fluffy = { ...glbCharacterConfig.fluffy, ...glbCharacterConfig.fluffyByUrl[url] };
-  const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true, fluffy });
+  const fluffy = {
+    ...glbCharacterConfig.fluffy,
+    ...(isMiiCharacterUrl(url) ? glbCharacterConfig.miiFluffy : null),
+    ...glbCharacterConfig.fluffyByUrl[url],
+  };
+  // Where the hands would be on a rig without arms (scene-local, bind pose): beside the
+  // body at mid height, a little forward. 'right' is the game's +X hand (see header).
+  const palmFallback = box.isEmpty() ? null : {
+    right: new THREE.Vector3(box.max.x, box.min.y + (box.max.y - box.min.y) * 0.45, box.max.z * 0.5),
+    left: new THREE.Vector3(box.min.x, box.min.y + (box.max.y - box.min.y) * 0.45, box.max.z * 0.5),
+  };
+  const character = new GLBCharacter(scene, { armIK: opts.armIK ?? true, fluffy, palmFallback });
   container.userData.glbCharacter = character;
   return { container, character };
 }

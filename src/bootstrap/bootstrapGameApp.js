@@ -6,6 +6,7 @@ import { updateExplosionEffects } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerModel.js";
 import { glbCharacterConfig } from "../models/glbCharacterModel.js";
+import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
@@ -5159,7 +5160,15 @@ async function initCore(runtimeContext) {
     startMultiplayer,
     stopMultiplayer,
     getPlayerName: () => playerName,
-    createSwordMesh: () => (foamSword?.mesh ? foamSword.mesh.clone(true) : null),
+    // A sword for another fighter: the Wii sword (with ball hands) for Mii characters
+    createSwordMesh: (characterUrl = null) => {
+      const model = createSwordModelInstance({ characterUrl });
+      if (!model) return foamSword?.mesh ? foamSword.mesh.clone(true) : null;
+      const group = new THREE.Group();
+      group.name = 'remote-sword';
+      group.add(model);
+      return group;
+    },
     getRemoteModel: (id) => otherPlayers[id]?.model || null,
     removeRemotePlayer: (id) => removeRemotePlayer(id, 'duel-ended'),
     setControlsLocked: (locked) => {
