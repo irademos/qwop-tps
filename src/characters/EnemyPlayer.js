@@ -274,7 +274,7 @@ export class EnemyPlayer {
     // Character GLB (default: cycle pumpkin / antler guy / frog man / gemhorn / wizard per spawn)
     this._characterUrl = options.characterUrl ?? nextDefaultEnemyCharacterUrl();
     this._showHealthBar = options.showHealthBar ?? true;
-    // Classic mode: always-on name tag (hearts + name, yellow triangle when targeted)
+    // Classic mode: name tag (yellow triangle, hearts + name) on the closest enemy only,
     // instead of the hearts that pop up after a hit
     this.nameTag = typeof options.nameTag === 'string' && options.nameTag ? options.nameTag : null;
     this._targeted = false;
@@ -530,7 +530,8 @@ export class EnemyPlayer {
   }
 
   // Classic mode name tag: a constant-size sprite anchored above the head — yellow
-  // triangle (targeted only), a line down to the head, hearts + name on an underline.
+  // triangle, a line down to the head, hearts + name on an underline. Only the targeted
+  // enemy (the closest one) shows it.
   _buildNameTag() {
     const canvas = document.createElement('canvas');
     canvas.width = NAME_TAG_W;
@@ -548,6 +549,7 @@ export class EnemyPlayer {
     sprite.scale.set(NAME_TAG_SCALE * NAME_TAG_W / NAME_TAG_H, NAME_TAG_SCALE, 1);
     sprite.position.y = CAPSULE_HEIGHT + 0.08;
     sprite.renderOrder = 10;
+    sprite.visible = false; // shown only on the targeted (closest) enemy — setTargeted
     this.group.add(sprite);
     this._hpPlane = sprite;
     this._hpShowUntil = Infinity;
@@ -570,7 +572,7 @@ export class EnemyPlayer {
       draw();
     };
     // Line from the label down to the head, and the underline to the right
-    outlined(() => { ctx.beginPath(); ctx.moveTo(ax, this._targeted ? 96 : lineY); ctx.lineTo(ax, H - 2); ctx.stroke(); }, 4);
+    outlined(() => { ctx.beginPath(); ctx.moveTo(ax, 96); ctx.lineTo(ax, H - 2); ctx.stroke(); }, 4);
     const underline = ctx.createLinearGradient(ax, 0, W, 0);
     underline.addColorStop(0, 'rgba(255,255,255,1)');
     underline.addColorStop(1, 'rgba(255,255,255,0)');
@@ -580,8 +582,8 @@ export class EnemyPlayer {
     ctx.strokeStyle = underline;
     ctx.lineWidth = 4;
     ctx.beginPath(); ctx.moveTo(ax, lineY); ctx.lineTo(W - 4, lineY); ctx.stroke();
-    // Yellow "target" triangle over the enemy the camera is locked on to
-    if (this._targeted) {
+    // Yellow "target" triangle
+    {
       ctx.beginPath();
       ctx.moveTo(ax - 36, 10); ctx.lineTo(ax + 36, 10); ctx.lineTo(ax, 94); ctx.closePath();
       const tri = ctx.createLinearGradient(0, 10, 0, 94);
@@ -630,12 +632,12 @@ export class EnemyPlayer {
     this._hpTexture.needsUpdate = true;
   }
 
-  /** Classic mode: show/hide the yellow target triangle on the name tag. */
+  /** Classic mode: show/hide the name tag (only the closest enemy shows it). */
   setTargeted(on) {
     const next = !!on && !this.isDead;
     if (!this.nameTag || next === this._targeted) return;
     this._targeted = next;
-    this._drawNameTag();
+    if (this._hpPlane) this._hpPlane.visible = next;
   }
 
   _updateHealthBarCanvas(silent = false) {

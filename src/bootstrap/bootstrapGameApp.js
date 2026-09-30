@@ -6187,9 +6187,16 @@ async function initCore(runtimeContext) {
         }
       }
 
-      // Classic: yellow triangle over the enemy the camera is locked on to
+      // Classic: only the closest living enemy shows its name tag (name + hearts)
       if (_classicMode) {
-        for (const _ce of hordeEnemies) _ce.setTargeted?.(_ce === _psCamTarget);
+        let _closestTag = null;
+        let _closestTagDist = Infinity;
+        for (const _ce of hordeEnemies) {
+          if (_ce.isDead || !_ce.nameTag) continue;
+          const _d = _ce.group.position.distanceToSquared(playerModel.position);
+          if (_d < _closestTagDist) { _closestTagDist = _d; _closestTag = _ce; }
+        }
+        for (const _ce of hordeEnemies) _ce.setTargeted?.(_ce === _closestTag);
       }
 
       // Win detection
