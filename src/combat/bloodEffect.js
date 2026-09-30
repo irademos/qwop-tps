@@ -19,6 +19,12 @@ const _identityQuat = new THREE.Quaternion();
 
 const activeBursts = [];
 
+// Classic mode has no blood: while disabled, spawnBloodBurst does nothing
+let bloodEnabled = true;
+export function setBloodEnabled(enabled) {
+  bloodEnabled = !!enabled;
+}
+
 /**
  * @param {THREE.Object3D} scene
  * @param {THREE.Vector3}  position  world-space origin of the spray (e.g. chest height)
@@ -29,7 +35,7 @@ const activeBursts = [];
  * @param {number}  [options.intensity]  scales speed/size (1 = normal hit)
  */
 export function spawnBloodBurst(scene, position, options = {}) {
-  if (!scene || !position) return;
+  if (!bloodEnabled || !scene || !position) return;
   const intensity = THREE.MathUtils.clamp(options.intensity ?? 1, 0.3, 3);
   const count = Math.max(4, Math.round(options.count ?? 18 * intensity));
   const groundY = Number.isFinite(options.groundY) ? options.groundY : position.y - 1;

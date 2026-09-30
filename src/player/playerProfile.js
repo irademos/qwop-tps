@@ -190,6 +190,27 @@ export async function loadPhoneSwordStage(nameKey) {
   }
 }
 
+// Classic mode stage progress: classicStats/currentStage (separate from Showdown's)
+export async function saveClassicStage(nameKey, stage) {
+  if (!nameKey || !Number.isFinite(stage)) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}/classicStats`), { currentStage: Math.max(1, Math.floor(stage)) });
+  } catch (err) {
+    console.warn('Failed to save Classic stage:', err);
+  }
+}
+
+export async function loadClassicStage(nameKey) {
+  if (!nameKey) return 1;
+  try {
+    const snap = await get(ref(db, `profiles/${nameKey}/classicStats/currentStage`));
+    return Math.max(1, Math.floor(Number(snap.val()) || 1));
+  } catch (err) {
+    console.warn('Failed to load Classic stage:', err);
+    return 1;
+  }
+}
+
 // Sword Showdown characters: phoneSwordStats/characters = { unlocked: [key…], selected: key }
 // (keys of MATCH_CHARACTERS; beating a stage's final enemy unlocks its character)
 export async function saveShowdownCharacters(nameKey, { unlocked, selected }) {

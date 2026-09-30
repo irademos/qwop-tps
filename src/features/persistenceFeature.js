@@ -11,6 +11,8 @@ export {
   loadPhoneSwordStats,
   savePhoneSwordStage,
   loadPhoneSwordStage,
+  saveClassicStage,
+  loadClassicStage,
   saveShowdownCharacters,
   loadShowdownCharacters,
   hasCompletedTutorial,
