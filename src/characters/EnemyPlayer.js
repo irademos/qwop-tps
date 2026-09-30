@@ -27,6 +27,12 @@ import { createSwordModelInstance } from '../items/swordModel.js';
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 
+// Classic mode name tag canvas (px) and on-screen height (sprite scale, sizeAttenuation off)
+const NAME_TAG_W = 512;
+const NAME_TAG_H = 256;
+const NAME_TAG_ANCHOR_X = 60; // x of the line that points down at the head
+const NAME_TAG_SCALE = 0.17;
+
 // ─── constants ───────────────────────────────────────────────────────────────
 
 const CAPSULE_RADIUS   = 0.28;
@@ -268,6 +274,10 @@ export class EnemyPlayer {
     // Character GLB (default: cycle pumpkin / antler guy / frog man / gemhorn / wizard per spawn)
     this._characterUrl = options.characterUrl ?? nextDefaultEnemyCharacterUrl();
     this._showHealthBar = options.showHealthBar ?? true;
+    // Classic mode: name tag (yellow triangle, hearts + name) on the closest enemy only,
+    // instead of the hearts that pop up after a hit
+    this.nameTag = typeof options.nameTag === 'string' && options.nameTag ? options.nameTag : null;
+    this._targeted = false;
     // Multiplayer bots: when the target isn't the local player, a sword swing reaching it is
     // resolved by this callback instead: (targetModel, swingDirWorld) => 'hit' | 'blocked' | null
     this.targetHitHandler = null;
@@ -497,6 +507,10 @@ export class EnemyPlayer {
   // ─── heart display ─────────────────────────────────────────────────────────
 
   _buildHealthBar() {
+    if (this.nameTag) {
+      this._buildNameTag();
+      return;
+    }
     const canvas = document.createElement('canvas');
     canvas.width  = 96;
     canvas.height = 32;
@@ -515,7 +529,122 @@ export class EnemyPlayer {
     this._updateHealthBarCanvas(true);
   }
 
+  // Classic mode name tag: a constant-size sprite anchored above the head — yellow
+  // triangle, a line down to the head, hearts + name on an underline. Only the targeted
+  // enemy (the closest one) shows it.
+  _buildNameTag() {
+    const canvas = document.createElement('canvas');
+    canvas.width = NAME_TAG_W;
+    canvas.height = NAME_TAG_H;
+    this._hpCanvas = canvas;
+    this._hpCtx = canvas.getContext('2d');
+    this._hpTexture = new THREE.CanvasTexture(canvas);
+    this._hpTexture.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.SpriteMaterial({
+      map: this._hpTexture, transparent: true, depthWrite: false, sizeAttenuation: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.name = 'enemyNameTag';
+    sprite.center.set(NAME_TAG_ANCHOR_X / NAME_TAG_W, 0); // the line's foot sits on the head
+    sprite.scale.set(NAME_TAG_SCALE * NAME_TAG_W / NAME_TAG_H, NAME_TAG_SCALE, 1);
+    sprite.position.y = CAPSULE_HEIGHT + 0.08;
+    sprite.renderOrder = 10;
+    sprite.visible = false; // shown only on the targeted (closest) enemy — setTargeted
+    this.group.add(sprite);
+    this._hpPlane = sprite;
+    this._hpShowUntil = Infinity;
+    this._drawNameTag();
+  }
+
+  _drawNameTag() {
+    const ctx = this._hpCtx;
+    const W = NAME_TAG_W, H = NAME_TAG_H, ax = NAME_TAG_ANCHOR_X;
+    ctx.clearRect(0, 0, W, H);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    const lineY = 176;
+    const outlined = (draw, width) => {
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = width + 4;
+      draw();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = width;
+      draw();
+    };
+    // Line from the label down to the head, and the underline to the right
+    outlined(() => { ctx.beginPath(); ctx.moveTo(ax, 96); ctx.lineTo(ax, H - 2); ctx.stroke(); }, 4);
+    const underline = ctx.createLinearGradient(ax, 0, W, 0);
+    underline.addColorStop(0, 'rgba(255,255,255,1)');
+    underline.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(ax, lineY); ctx.lineTo(W - 20, lineY); ctx.stroke();
+    ctx.strokeStyle = underline;
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(ax, lineY); ctx.lineTo(W - 4, lineY); ctx.stroke();
+    // Yellow "target" triangle
+    {
+      ctx.beginPath();
+      ctx.moveTo(ax - 36, 10); ctx.lineTo(ax + 36, 10); ctx.lineTo(ax, 94); ctx.closePath();
+      const tri = ctx.createLinearGradient(0, 10, 0, 94);
+      tri.addColorStop(0, '#fff7a8');
+      tri.addColorStop(0.45, '#ffd92e');
+      tri.addColorStop(1, '#e8a200');
+      ctx.fillStyle = tri;
+      ctx.fill();
+      ctx.strokeStyle = '#5b3b00';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(ax - 22, 20); ctx.lineTo(ax + 22, 20); ctx.stroke();
+    }
+    // Hearts, then the name
+    const heart = (x, y, size, filled) => {
+      const s = size / 2;
+      ctx.beginPath();
+      ctx.moveTo(x, y + s * 0.9);
+      ctx.bezierCurveTo(x - s * 1.25, y + s * 0.05, x - s * 0.95, y - s * 1.05, x, y - s * 0.4);
+      ctx.bezierCurveTo(x + s * 0.95, y - s * 1.05, x + s * 1.25, y + s * 0.05, x, y + s * 0.9);
+      ctx.closePath();
+      ctx.fillStyle = filled ? '#e8122c' : 'rgba(70,70,70,0.75)';
+      ctx.fill();
+      ctx.strokeStyle = filled ? '#ffffff' : 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    };
+    const heartSize = 46;
+    const textY = 148;
+    let x = ax + 16 + heartSize / 2;
+    for (let i = 0; i < this.maxHearts; i++) {
+      heart(x, textY - 2, heartSize, i < this.hearts);
+      x += heartSize + 4;
+    }
+    ctx.font = '900 52px "Arial Rounded MT Bold", "Trebuchet MS", Arial, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 9;
+    ctx.strokeStyle = 'rgba(20,20,20,0.9)';
+    const nameX = x - heartSize / 2 + 8;
+    const maxW = W - nameX - 8;
+    ctx.strokeText(this.nameTag, nameX, textY, maxW);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(this.nameTag, nameX, textY, maxW);
+    this._hpTexture.needsUpdate = true;
+  }
+
+  /** Classic mode: show/hide the name tag (only the closest enemy shows it). */
+  setTargeted(on) {
+    const next = !!on && !this.isDead;
+    if (!this.nameTag || next === this._targeted) return;
+    this._targeted = next;
+    if (this._hpPlane) this._hpPlane.visible = next;
+  }
+
   _updateHealthBarCanvas(silent = false) {
+    if (this.nameTag) {
+      this._drawNameTag();
+      return;
+    }
     const ctx = this._hpCtx;
     const W = 96, H = 32;
     ctx.clearRect(0, 0, W, H);
@@ -1321,6 +1450,7 @@ export class EnemyPlayer {
 
   _die() {
     this.isDead = true;
+    if (this.nameTag && this._hpPlane) this._hpPlane.visible = false;
     if (this._ragdollTimeout) { clearTimeout(this._ragdollTimeout); this._ragdollTimeout = null; }
     this._swordGroup.visible = false;
 

@@ -49,6 +49,7 @@
         <div class="arcade-actions arcade-mode-select hidden" data-arcade-modes>
           <button class="arcade-button arcade-secondary arcade-start" type="button" data-arcade-tutorial>Tutorial</button>
           <button class="arcade-button arcade-start" type="button" data-arcade-showdown>Showdown</button>
+          <button class="arcade-button arcade-start" type="button" data-arcade-classic>Classic</button>
           <button class="arcade-button arcade-start" type="button" data-arcade-multiplayer>Multiplayer</button>
         </div>
       </div>
@@ -143,6 +144,31 @@
       <button id="ps-stage-ok" class="ps-stage-ok-btn">⚔️ Let's Go!</button>
       <button id="ps-stage-back" class="ps-stage-back-btn">⬅ Back</button>
     </div>
+  </div>
+
+  <!-- Classic mode: stage banner (over the world) + OK / Recalibrate / Back -->
+  <div id="classic-stage-overlay" class="classic-stage-overlay hidden">
+    <div class="classic-stage-banner">
+      <div class="classic-stage-number-band">
+        <div class="classic-stage-number" id="classic-stage-number">Stage 1</div>
+      </div>
+      <div class="classic-stage-name-band">
+        <div class="classic-stage-name" id="classic-stage-name">Bridge at High Noon</div>
+      </div>
+    </div>
+    <div class="classic-stage-actions">
+      <button id="classic-stage-ok" class="classic-btn classic-btn-ok">OK</button>
+      <button id="classic-stage-recalib" class="classic-btn">🎯 Recalibrate Sword</button>
+      <button id="classic-stage-back" class="classic-btn classic-btn-back">⬅ Back</button>
+    </div>
+  </div>
+
+  <!-- Classic mode: "Ready" / "Go!" and the gameplay HUD -->
+  <div id="classic-callout" class="classic-callout hidden" aria-live="assertive"></div>
+  <div id="classic-hearts" class="classic-hearts" role="img" aria-label="Hearts"></div>
+  <div id="classic-score" class="classic-score" aria-live="polite">
+    <span class="classic-score-label">Score</span>
+    <span class="classic-score-value" id="classic-score-value">0%</span>
   </div>
 
   <!-- Phone Sword: win overlay -->

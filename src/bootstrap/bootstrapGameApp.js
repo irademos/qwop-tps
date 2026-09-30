@@ -1,11 +1,11 @@
 // app.js
 import QRCode from 'qrcode';
 import * as THREE from "three";
-import { spawnBloodBurst, updateBloodEffects } from "../combat/bloodEffect.js";
+import { spawnBloodBurst, updateBloodEffects, setBloodEnabled } from "../combat/bloodEffect.js";
 import { updateExplosionEffects } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerModel.js";
-import { glbCharacterConfig } from "../models/glbCharacterModel.js";
+import { glbCharacterConfig, isMiiCharacterUrl } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
@@ -55,6 +55,8 @@ import {
   loadPhoneSwordStats,
   savePhoneSwordStage,
   loadPhoneSwordStage,
+  saveClassicStage,
+  loadClassicStage,
   saveShowdownCharacters,
   loadShowdownCharacters,
   hasCompletedTutorial,
@@ -180,10 +182,11 @@ function createArcadeOverlay(startOverlay) {
   const tutorialButton = startOverlay.querySelector('[data-arcade-tutorial]');
   const showdownButton = startOverlay.querySelector('[data-arcade-showdown]');
   const multiplayerButton = startOverlay.querySelector('[data-arcade-multiplayer]');
+  const classicButton = startOverlay.querySelector('[data-arcade-classic]');
 
   let mode = 'login';
   // Until the tutorial is done the start screen only offers "Start Game" (which runs it);
-  // afterwards it offers Tutorial, Showdown and Multiplayer.
+  // afterwards it offers Tutorial, Showdown, Classic and Multiplayer.
   let tutorialCompleted = false;
   let modeHandler = null; // picks a mode once the game is running
   let pendingGameMode = null; // mode picked before the game finished loading
@@ -256,7 +259,7 @@ function createArcadeOverlay(startOverlay) {
   };
 
   const showModeSelect = (authResult) => {
-    // "Start Game" (tutorial) for new players, else Tutorial / Showdown / Multiplayer.
+    // "Start Game" (tutorial) for new players, else Tutorial / Showdown / Classic / Multiplayer.
     // Auth resolves now, so the game (and the settings panel) loads behind the start
     // screen while the player picks; the click (below) goes to the mode handler.
     tutorialCompleted = hasCompletedTutorial(authResult?.profile);
@@ -464,6 +467,7 @@ function createArcadeOverlay(startOverlay) {
   tutorialButton?.addEventListener('click', () => chooseMode('tutorial'));
   showdownButton?.addEventListener('click', () => chooseMode('showdown'));
   multiplayerButton?.addEventListener('click', () => chooseMode('multiplayer'));
+  classicButton?.addEventListener('click', () => chooseMode('classic'));
 
   return {
     async authenticate({ initialName, hasStoredPin, loadProfile }) {
@@ -533,6 +537,9 @@ const SWORD_SWING_CFG_SAVED_KEYS = ['speedThreshold', 'minSwingDelta', 'minSweep
 
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
+  // Classic mode (Wii-style Showdown, see "Classic mode" further down); declared first
+  // because inventory / controls code checks it
+  let _classicMode = false;
 
   const _savedMusicVol = parseFloat(localStorage.getItem('sq:musicVolume') ?? '0.05');
   const _savedSfxVol = parseFloat(localStorage.getItem('sq:sfxVolume') ?? '1');
@@ -2536,6 +2543,7 @@ async function initCore(runtimeContext) {
     if (!itemId || !inventoryState[itemId]) return;
     // Multiplayer duels are sword only
     if (duelMode?.isActive() && itemId !== FOAM_SWORD_ITEM_ID) return;
+    if (_classicMode && itemId !== FOAM_SWORD_ITEM_ID) return; // Classic: sword only
     // Capture the currently held right-hand item BEFORE unequipping it,
     // so we can restore it if the shield later breaks with no spares.
     if (itemId === SHIELD_ITEM_ID) {
@@ -2712,6 +2720,20 @@ async function initCore(runtimeContext) {
     }
     if (healthLabel) {
       healthLabel.textContent = 'Health';
+    }
+    // Classic mode HUD: one heart per remaining hit (bottom left)
+    const classicHearts = document.getElementById('classic-hearts');
+    if (classicHearts) {
+      if (classicHearts.childElementCount !== maxSegments) {
+        classicHearts.replaceChildren(...Array.from({ length: maxSegments }, () => {
+          const heart = document.createElement('span');
+          heart.className = 'classic-heart';
+          return heart;
+        }));
+      }
+      Array.from(classicHearts.children).forEach((heart, index) => {
+        heart.classList.toggle('lost', index >= currentSegments);
+      });
     }
   }
 
@@ -3201,6 +3223,8 @@ async function initCore(runtimeContext) {
         speedScale: opts.speedScale ?? 1.0,
         swingChance: opts.swingChance ?? _psSwingChance(_psStage),
         characterUrl: opts.characterUrl,
+        swordDamage: opts.swordDamage,
+        nameTag: opts.nameTag,
       });
       enemy._camera = camera;
     }
@@ -3226,7 +3250,62 @@ async function initCore(runtimeContext) {
   let _psStats = { kills: 0, deaths: 0, highestStage: 1 };
   // Load stage from Firebase first (async), fallback to localStorage
   let _psStage = _psSavedStage();
-  let _psEnemyQueue = [];   // [{pos, hearts, triggerDist, bombThrower, characterUrl, boss}]
+  let _psEnemyQueue = [];   // [{pos, hearts, triggerDist, bombThrower, characterUrl, boss, nameTag}]
+
+  // ── Classic mode: the Showdown stages, Wii Sports Resort style ──
+  // Miis only (player and enemies; enemies get random names shown with their hearts),
+  // swordsmen only (no bombers, bosses, coins, heart bubbles, blood, XP or shop items),
+  // CLASSIC_HEARTS hits per stage, Block is the only button, always daytime. Own stage
+  // screen ("Stage N" + stage name, OK / Recalibrate / Back), "Ready" → "Go!", and HUD:
+  // hearts bottom left, Score % (enemies defeated) bottom right, "N-hit Combo!" every 5th
+  // hit. Stage progress is its own (localStorage ps_classic_stage_<key> + classicStats).
+  // body.classic-mode / body.classic-playing hide the rest of the HUD (styles.css).
+  let _classicCountdown = false;        // "Ready" / "Go!" up: stage built, nothing moves yet
+  const CLASSIC_HEARTS = 3;
+  const CLASSIC_ENEMY_SWORD_DAMAGE = 1; // one heart per hit
+  const CLASSIC_MII_URLS = Object.values(MATCH_CHARACTERS).map((c) => c.url).filter(isMiiCharacterUrl);
+  const _classicMiiUrl = () => (CLASSIC_MII_URLS.length
+    ? CLASSIC_MII_URLS[Math.floor(Math.random() * CLASSIC_MII_URLS.length)]
+    : glbCharacterConfig.mii1Url);
+  const CLASSIC_NAMES = [
+    'Helen', 'Matt', 'Sakura', 'Takumi', 'Emma', 'Lucia', 'Pierre', 'Hiromasa', 'Sarah', 'Marco',
+    'Chika', 'Abby', 'Gabriele', 'Rin', 'Tommy', 'Nelly', 'Steph', 'Vincenzo', 'Ai', 'Shinta',
+    'Keiko', 'Hayley', 'Eva', 'Elisa', 'Julie', 'Miguel', 'Shouta', 'Jessie', 'Oscar', 'Yoshi',
+    'Holly', 'Alex', 'Fumiko', 'George', 'Martin', 'Kathrin', 'Asami', 'Akira', 'Ursula', 'Silke',
+    'Cole', 'Maria', 'Theo', 'Nick', 'Jake', 'Rainer', 'Tatsuaki', 'Sota', 'Naomi', 'Ren',
+    'Pablo', 'Anna', 'Greg', 'Cleo', 'Ryan', 'Pavel', 'Nina', 'Lola', 'Hugo', 'Ida'
+  ];
+  let _classicNamePool = [];
+  const _classicName = () => {
+    if (!_classicNamePool.length) _classicNamePool = [...CLASSIC_NAMES];
+    return _classicNamePool.splice(Math.floor(Math.random() * _classicNamePool.length), 1)[0];
+  };
+  const CLASSIC_STAGE_NAMES = [
+    'Bridge at High Noon', 'Sunrise on the Trail', 'The Long Meadow', 'Hillside Ambush',
+    'Windy Ridge', 'Crossroads Clash', 'Riverside Rumble', 'Old Stone Path',
+    'Valley of Swords', 'Cliffside Charge', 'Forest Gate', 'The Winding Road',
+    'Lighthouse Approach', 'Grassland Gauntlet', 'Ruins at Midday', 'Summit Showdown',
+    'Canyon Run', 'Lakeside Standoff', 'Tower Steps', 'The Final Field'
+  ];
+  const _classicStageName = (stage) => CLASSIC_STAGE_NAMES[(Math.max(1, stage) - 1) % CLASSIC_STAGE_NAMES.length];
+  const _classicStageLsKey = () => profileNameKey ? `ps_classic_stage_${profileNameKey}` : null;
+  const _classicSavedStage = () => {
+    try { const k = _classicStageLsKey(); return k ? (parseInt(localStorage.getItem(k), 10) || 1) : 1; } catch (_) { return 1; }
+  };
+  const _classicSaveStage = (stage) => {
+    try { const k = _classicStageLsKey(); if (k) localStorage.setItem(k, stage); } catch (_) {}
+    if (profileNameKey) void saveClassicStage(profileNameKey, stage);
+  };
+  const _classicScoreValue = document.getElementById('classic-score-value');
+  const _classicUpdateScore = () => {
+    if (!_classicScoreValue) return;
+    const pct = _psStageTotal > 0 ? Math.floor((100 * Math.min(_psStageKills, _psStageTotal)) / _psStageTotal) : 0;
+    _classicScoreValue.textContent = `${pct}%`;
+  };
+  // Gameplay HUD on/off (hearts, score, Block); the settings button hides while it's on
+  const _classicSetPlaying = (on) => {
+    document.body.classList.toggle('classic-playing', !!on && _classicMode);
+  };
 
   // ── Sword Showdown characters (keys of MATCH_CHARACTERS) ──
   // Regular enemies are frog men plus every character unlocked so far; each stage ends with
@@ -3443,7 +3522,8 @@ async function initCore(runtimeContext) {
       document.body.appendChild(_psKillHud);
     }
     _psKillHud.textContent = `⚔️ ${Math.min(_psStageKills, _psStageTotal)} / ${_psStageTotal}`;
-    _psKillHud.classList.toggle('hidden', !visible);
+    _psKillHud.classList.toggle('hidden', !visible || _classicMode);
+    if (_classicMode) _classicUpdateScore();
   };
   const PS_SPEED = 1.1;        // auto-walk speed (m/s) — roughly 1/3 of normal walk speed
   const PS_ENEMY_SPEED = 1.0 / 3.0;   // enemy speed multiplier (1/3 of normal)
@@ -3606,10 +3686,11 @@ async function initCore(runtimeContext) {
     _psAutoWalkDir.subVectors(_psPathEnd, playerModel.position).setY(0).normalize();
     _psEnemyQueue = [];
     const _charPool = _psEnemyCharacterPool();
-    if (!_psStageBoss) _psStageBoss = _psPickBoss();
+    if (!_classicMode && !_psStageBoss) _psStageBoss = _psPickBoss();
     for (let i = 0; i < count; i++) {
       // The last enemy is the stage boss: on the path itself (no scatter), so it comes last
-      const isBoss = i === count - 1;
+      // (Classic has no bosses)
+      const isBoss = !_classicMode && i === count - 1;
       const t = (i + 0.5) / count;
       const baseX = playerModel.position.x + _psAutoWalkDir.x * pathLen * t;
       const baseZ = playerModel.position.z + _psAutoWalkDir.z * pathLen * t;
@@ -3618,19 +3699,20 @@ async function initCore(runtimeContext) {
       const ez = baseZ + (Math.random() - 0.5) * scatter;
       const ey = getTerrainHeight(ex, ez) ?? playerModel.position.y;
       // Bomb throwers: start appearing at stage 3, ~5% chance scaling up slowly with stage
-      const _btChance = stage >= 3 ? Math.min(0.15, 0.05 + (stage - 3) * 0.006) : 0;
+      const _btChance = !_classicMode && stage >= 3 ? Math.min(0.15, 0.05 + (stage - 3) * 0.006) : 0;
       const charKey = isBoss ? _psStageBoss.key : _charPool[Math.floor(Math.random() * _charPool.length)];
       _psEnemyQueue.push({
         pos: new THREE.Vector3(ex, ey, ez),
         hearts: isBoss ? _psBossHearts(stage) : _psHeartsForStage(stage),
         triggerDist: pathLen * t - 10,
         bombThrower: !isBoss && Math.random() < _btChance,
-        characterUrl: MATCH_CHARACTERS[charKey].url,
+        characterUrl: _classicMode ? _classicMiiUrl() : MATCH_CHARACTERS[charKey].url,
         boss: isBoss,
+        nameTag: _classicMode ? _classicName() : null,
       });
     }
-    // Spawn coins along the path
-    const coinCount = 8 + Math.floor(stage * 0.3);
+    // Spawn coins along the path (none in Classic)
+    const coinCount = _classicMode ? 0 : 8 + Math.floor(stage * 0.3);
     for (let ci = 0; ci < coinCount; ci++) {
       const ct = (ci + 0.5) / coinCount;
       const cx = playerModel.position.x + _psAutoWalkDir.x * pathLen * ct + (Math.random() - 0.5) * 6;
@@ -3639,7 +3721,7 @@ async function initCore(runtimeContext) {
     }
     // Heart bubbles around halfway (between 35% and 70% of the path)
     heartBubbles.clear();
-    const heartCount = _psHeartBubbleCount(stage);
+    const heartCount = _classicMode ? 0 : _psHeartBubbleCount(stage);
     for (let hi = 0; hi < heartCount; hi++) {
       const ht = heartCount === 1 ? 0.5 : 0.35 + 0.35 * (hi / (heartCount - 1));
       const hx = playerModel.position.x + _psAutoWalkDir.x * pathLen * ht + (Math.random() - 0.5) * 3;
@@ -3660,8 +3742,9 @@ async function initCore(runtimeContext) {
     _psWinShown = true;
     _psAutoWalking = false;
     _psStopSong();
-    _psWinTitle.textContent = 'YOU WIN!';
-    const _unlocked = _psStageBoss?.unlocks ? MATCH_CHARACTERS[_psStageBoss.key] : null;
+    _psWinTitle.textContent = _classicMode ? 'STAGE CLEAR!' : 'YOU WIN!';
+    _classicSetPlaying(false);
+    const _unlocked = !_classicMode && _psStageBoss?.unlocks ? MATCH_CHARACTERS[_psStageBoss.key] : null;
     _psWinSub.textContent = _unlocked
       ? `Stage ${_psStage} Cleared! ${_unlocked.emoji} ${_unlocked.label} unlocked!`
       : `Stage ${_psStage} Cleared!`;
@@ -3754,14 +3837,83 @@ async function initCore(runtimeContext) {
     _psStageOverlay.classList.remove('hidden');
   };
 
+  // ── Classic mode: stage screen (banner over the world) and "Ready" / "Go!" ──
+  const _classicStageOverlay = document.getElementById('classic-stage-overlay');
+  const _classicStageNumberEl = document.getElementById('classic-stage-number');
+  const _classicStageNameEl = document.getElementById('classic-stage-name');
+  const _classicStageOk = document.getElementById('classic-stage-ok');
+  const _classicStageRecalib = document.getElementById('classic-stage-recalib');
+  const _classicCallout = document.getElementById('classic-callout');
+  const CLASSIC_READY_MS = 1400;  // "Ready" stays up this long, then "Go!"
+  const CLASSIC_GO_MS = 900;      // "Go!" fades out after this
+  let _classicCalloutTimers = [];
+  const _classicClearCallout = () => {
+    _classicCalloutTimers.forEach(clearTimeout);
+    _classicCalloutTimers = [];
+    _classicCallout?.classList.add('hidden');
+  };
+  const _classicShowCallout = (text) => {
+    if (!_classicCallout) return;
+    _classicCallout.textContent = text;
+    _classicCallout.classList.remove('hidden', 'classic-callout-pop');
+    void _classicCallout.offsetWidth;
+    _classicCallout.classList.add('classic-callout-pop');
+  };
+  const _classicReadyGo = (onGo) => {
+    _classicClearCallout();
+    _classicShowCallout('Ready');
+    _classicCalloutTimers.push(setTimeout(() => {
+      _classicShowCallout('Go!');
+      audioManager?.playSFX?.('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.5);
+      onGo();
+      _classicCalloutTimers.push(setTimeout(_classicClearCallout, CLASSIC_GO_MS));
+    }, CLASSIC_READY_MS));
+  };
+  const _classicShowStageOverlay = (stage, onOk) => {
+    const count = _psEnemyCount(stage);
+    _classicSetPlaying(false);
+    _classicClearCallout();
+    _psUpdateKillHud(false);
+    if (_classicStageNumberEl) _classicStageNumberEl.textContent = `Stage ${stage}`;
+    if (_classicStageNameEl) _classicStageNameEl.textContent = _classicStageName(stage);
+    setPlayerCharacterUrl(playerModel, glbCharacterConfig.mii1Url);
+    _classicStageOk.onclick = () => {
+      _classicStageOverlay.classList.add('hidden');
+      _classicCountdown = true;
+      onOk(count);
+      _classicUpdateScore();
+      _classicSetPlaying(true);
+      _classicReadyGo(() => { _classicCountdown = false; });
+    };
+    if (_classicStageRecalib) {
+      _classicStageRecalib.onclick = () => {
+        window.phoneSwordRecalibrate?.();
+        _classicStageRecalib.textContent = '✅ Calibrated!';
+        setTimeout(() => { _classicStageRecalib.textContent = '🎯 Recalibrate Sword'; }, 1500);
+      };
+    }
+    // Replay the banner's slide-in
+    _classicStageOverlay.classList.add('hidden');
+    void _classicStageOverlay.offsetWidth;
+    _classicStageOverlay.classList.remove('hidden');
+  };
+  // Stage screen for the current mode
+  const _psShowStageScreen = (stage, onOk) => (_classicMode
+    ? _classicShowStageOverlay(stage, onOk)
+    : _psShowStageOverlay(stage, onOk));
+
   const _psStartStage = (stage, count) => {
     // Never begin a stage dead (e.g. health 0 left over from a previous game)
     if (playerDead || statsState.health <= 0) {
       hideGameOver();
       respawnPlayer();
     }
-    // Determine day/night for this stage
-    if (_psTimePref === 'random') {
+    // Classic: every stage starts with all its hearts
+    if (_classicMode) setStat('health', CLASSIC_HEARTS, { skipSave: true });
+    // Determine day/night for this stage (Classic is always daytime)
+    if (_classicMode) {
+      _psCurrentIsNight = false;
+    } else if (_psTimePref === 'random') {
       _psCurrentIsNight = Math.random() < 0.5;
     } else {
       _psCurrentIsNight = _psTimePref === 'night';
@@ -3824,7 +3976,7 @@ async function initCore(runtimeContext) {
     _psAutoWalking = false;
     _psStageActive = false;
     _psWinShown = false;
-    _psShowStageOverlay(_psStage, (count) => _psStartStage(_psStage, count));
+    _psShowStageScreen(_psStage, (count) => _psStartStage(_psStage, count));
   };
 
   window.hordeEnemies = hordeEnemies;
@@ -3834,6 +3986,7 @@ async function initCore(runtimeContext) {
   if (_psHungerBar) _psHungerBar.style.display = 'none';
   if (_psMagicBar) _psMagicBar.style.display = 'none';
   const _psInit = async () => {
+    _psStage = _psSavedStage(); // (Classic shares _psStage while it runs)
     // Load PS stats and stage from Firebase (falls back gracefully)
     if (profileNameKey) {
       try {
@@ -4106,7 +4259,8 @@ async function initCore(runtimeContext) {
   let _remoteJoyActive = false;
   const _applyRemoteJoystick = (angle, force) => {
     if (!playerControls) return;
-    const f = Number.isFinite(force) ? Math.max(0, Math.min(1, force)) : 0;
+    // Classic has no joystick
+    const f = Number.isFinite(force) && !_classicMode ? Math.max(0, Math.min(1, force)) : 0;
     if (f > 0.05 && Number.isFinite(angle)) {
       playerControls.joystickAngle = angle;
       playerControls.joystickForce = f;
@@ -4127,7 +4281,7 @@ async function initCore(runtimeContext) {
     playerControls?.refreshActionButtons?.();
   };
   const _handlePhoneAction = (action) => {
-    if (!playerControls?.enabled) return;
+    if (!playerControls?.enabled || _classicMode) return; // Classic: Block only
     const appStateRef = window.appState;
     if (action === 'jump') {
       if (!playerControls.isInWater) window.phoneSwordJumpPressed = true;
@@ -4145,6 +4299,13 @@ async function initCore(runtimeContext) {
   };
   const _phoneControllerStatus = () => {
     const inv = window.appState?.getInventory?.() || {};
+    if (_classicMode) {
+      // Classic: the phone shows only Block (no joystick or other buttons)
+      return {
+        bombs: 0, bubbles: 0, bubbleActive: false, hasGun: false, hasShield: false,
+        ammo: 0, equipped: FOAM_SWORD_ITEM_ID, highlight: null, blockOnly: true
+      };
+    }
     if (duelMode?.isActive()) {
       // Multiplayer duels are sword only: grey out bomb/bubble/gun/shield on the phone
       return {
@@ -4635,7 +4796,7 @@ async function initCore(runtimeContext) {
   let psAutoBuyBusy = false;
   const psAutoBuyTick = async () => {
     // The tutorial does its own (scripted) purchases; Multiplayer duels are sword only
-    if (psAutoBuyBusy || showdownTutorial?.isActive() || duelMode?.isActive()) return;
+    if (psAutoBuyBusy || showdownTutorial?.isActive() || duelMode?.isActive() || _classicMode) return;
     const needed = PS_AUTO_BUY_ITEMS.filter(entry => !entry.has());
     if (!needed.length) return;
     psAutoBuyBusy = true;
@@ -5083,6 +5244,10 @@ async function initCore(runtimeContext) {
   const _resetForMenu = () => {
     _psStopSong();
     _psStageOverlay.classList.add('hidden');
+    _classicStageOverlay?.classList.add('hidden');
+    _classicClearCallout();
+    _classicCountdown = false;
+    _classicSetPlaying(false);
     for (let i = hordeEnemies.length - 1; i >= 0; i--) _tutorialRemoveEnemy(hordeEnemies[i]);
     playerBombs?.clear();
     heartBubbles.clear();
@@ -5104,6 +5269,45 @@ async function initCore(runtimeContext) {
 
   // "Back" on the stage screen: leave Showdown for the start screen (Tutorial / Showdown / Multiplayer)
   document.getElementById('ps-stage-back')?.addEventListener('click', () => {
+    _resetForMenu();
+    arcadeOverlay.showStartScreen();
+  });
+
+  // Classic mode on/off: HUD classes, no blood, Classic combo pop-ups, CLASSIC_HEARTS max health
+  const _setClassicMode = (on) => {
+    const next = !!on;
+    if (next === _classicMode) return;
+    _classicMode = next;
+    document.body.classList.toggle('classic-mode', next);
+    if (!next) _classicSetPlaying(false);
+    setBloodEnabled(!next);
+    comboMeter.setClassic(next);
+    duelMaxHealthOverride = next ? CLASSIC_HEARTS : null;
+    updateHealthUI();
+    playerControls?.refreshActionButtons?.();
+  };
+  const startClassicMode = async () => {
+    _setClassicMode(true);
+    _resetForMenu();
+    // Sword only (a bought gun / shield stays in the inventory for Showdown)
+    tutorialCtx.equipSword();
+    setStat('health', CLASSIC_HEARTS, { skipSave: true });
+    lastAutoMode = 'day';
+    applyPresetForMode('day');
+    applyDisplaySettings();
+    clearRoadLightPool();
+    _psStage = _classicSavedStage();
+    if (profileNameKey) {
+      const fbStage = await loadClassicStage(profileNameKey).catch(() => 1);
+      if (!_classicMode) return; // left Classic while loading
+      _psStage = Math.max(_psStage, fbStage);
+      try { const k = _classicStageLsKey(); if (k) localStorage.setItem(k, _psStage); } catch (_) {}
+    }
+    _classicShowStageOverlay(_psStage, (count) => _psStartStage(_psStage, count));
+  };
+  // "Back" on the Classic stage screen → start screen
+  document.getElementById('classic-stage-back')?.addEventListener('click', () => {
+    _setClassicMode(false);
     _resetForMenu();
     arcadeOverlay.showStartScreen();
   });
@@ -5356,7 +5560,7 @@ async function initCore(runtimeContext) {
   };
 
   // Mode picked on the start screen (first time, after the tutorial, leaving the lobby):
-  // Tutorial, Showdown or Multiplayer. Only Multiplayer runs peer multiplayer.
+  // Tutorial, Showdown, Classic or Multiplayer. Only Multiplayer runs peer multiplayer.
   // A pick made while the game was still loading runs as soon as this is set.
   arcadeOverlay.setModeHandler((gameMode) => {
     if (_phoneSwordQrDeferred) {
@@ -5367,9 +5571,12 @@ async function initCore(runtimeContext) {
       matchMode.exit();
       duelMode.exit();
     }
+    if (gameMode !== 'classic') _setClassicMode(false);
     if (gameMode === 'showdown') {
       _resetForMenu();
       void _psInit();
+    } else if (gameMode === 'classic') {
+      void startClassicMode();
     } else if (gameMode === 'multiplayer') {
       startMultiplayerMode();
     } else {
@@ -5928,7 +6135,7 @@ async function initCore(runtimeContext) {
 
     // ── Phone Sword: auto-walk + queue spawn (runs even when hordeEnemies is empty) ──
     const _tutorialActive = !!showdownTutorial?.isActive();
-    if ((_psStageActive || _tutorialActive) && !playerDead) {
+    if ((_psStageActive || _tutorialActive) && !playerDead && !_classicCountdown) {
       // Spawn queued enemies as player approaches their positions
       for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
         const _qe = _psEnemyQueue[_qi];
@@ -5936,6 +6143,8 @@ async function initCore(runtimeContext) {
           _spawnHordeEnemy({
             position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED, bombThrower: _qe.bombThrower,
             characterUrl: _qe.characterUrl,
+            nameTag: _qe.nameTag,
+            swordDamage: _classicMode ? CLASSIC_ENEMY_SWORD_DAMAGE : undefined,
             swingChance: _qe.boss ? Math.min(0.75, _psSwingChance(_psStage) + PS_BOSS_SWING_BONUS) : undefined,
           });
           _psEnemyQueue.splice(_qi, 1);
@@ -5978,16 +6187,28 @@ async function initCore(runtimeContext) {
         }
       }
 
+      // Classic: only the closest living enemy shows its name tag (name + hearts)
+      if (_classicMode) {
+        let _closestTag = null;
+        let _closestTagDist = Infinity;
+        for (const _ce of hordeEnemies) {
+          if (_ce.isDead || !_ce.nameTag) continue;
+          const _d = _ce.group.position.distanceToSquared(playerModel.position);
+          if (_d < _closestTagDist) { _closestTagDist = _d; _closestTag = _ce; }
+        }
+        for (const _ce of hordeEnemies) _ce.setTargeted?.(_ce === _closestTag);
+      }
+
       // Win detection
       if (_psStageActive && !_psWinShown && _psEnemyQueue.length === 0 && hordeEnemies.length > 0 && hordeEnemies.every(e => e.isDead)) {
         _psStageActive = false;
         _psWinShown = true;
         comboMeter.end();
         heartBubbles.clear();
-        addPlayerXp(getSwordShowdownStageXp(_psStage));
+        if (!_classicMode) addPlayerXp(getSwordShowdownStageXp(_psStage));
         // Boss beaten: unlock its character (the win banner names it); next stage picks a new boss
         const _clearedBoss = _psStageBoss;
-        if (_clearedBoss?.unlocks && !_psChars.unlocked.includes(_clearedBoss.key)) {
+        if (!_classicMode && _clearedBoss?.unlocks && !_psChars.unlocked.includes(_clearedBoss.key)) {
           _psChars = _psNormalizeChars({ ..._psChars, unlocked: [..._psChars.unlocked, _clearedBoss.key] });
           _psSaveChars();
         }
@@ -5995,15 +6216,16 @@ async function initCore(runtimeContext) {
         setStat('health', statsState.maxHealthSegments);
         const _nextStage = _psStage + 1;
         _psShowWin(() => {
-          _psStageBoss = null;
+          if (!_classicMode) _psStageBoss = null; // (Classic leaves Showdown's next boss alone)
+          const _saveStage = _classicMode ? _classicSaveStage : _psSaveStage;
           if (_nextStage <= 50) {
             _psStage = _nextStage;
-            _psSaveStage(_psStage);
-            _psShowStageOverlay(_nextStage, (count) => _psStartStage(_nextStage, count));
+            _saveStage(_psStage);
+            _psShowStageScreen(_nextStage, (count) => _psStartStage(_nextStage, count));
           } else {
             _psStage = 1;
-            _psSaveStage(_psStage);
-            _psShowStageOverlay(1, (count) => _psStartStage(1, count));
+            _saveStage(_psStage);
+            _psShowStageScreen(1, (count) => _psStartStage(1, count));
           }
         });
       }
@@ -6197,7 +6419,7 @@ async function initCore(runtimeContext) {
       if (_psJumpVelY === 0 && !window.phoneSwordAirborne) _psGroundY = playerModel.position.y;
       if (window.phoneSwordJumpPressed) {
         window.phoneSwordJumpPressed = false;
-        if (playerModel.position.y <= _psGroundY + 0.05) {
+        if (!_classicMode && playerModel.position.y <= _psGroundY + 0.05) { // no jumping in Classic
           _psJumpVelY = PS_JUMP_FORCE;
           window.phoneSwordAirborne = true;
         }
@@ -6274,15 +6496,17 @@ async function initCore(runtimeContext) {
             _he._coinDropped = true;
             _psStageKills++;
             _psUpdateKillHud(true);
-            addPlayerXp(getSwordShowdownKillXp(_psStage));
-            const _dropPos = _he.group.position.clone();
-            spawnCoinPickup(_dropPos);
-            if (Math.random() < 0.4) spawnCoinPickup(_dropPos.clone().add(new THREE.Vector3((Math.random()-0.5)*1.5, 0, (Math.random()-0.5)*1.5)));
+            if (!_classicMode) { // Classic: no XP or coins
+              addPlayerXp(getSwordShowdownKillXp(_psStage));
+              const _dropPos = _he.group.position.clone();
+              spawnCoinPickup(_dropPos);
+              if (Math.random() < 0.4) spawnCoinPickup(_dropPos.clone().add(new THREE.Vector3((Math.random()-0.5)*1.5, 0, (Math.random()-0.5)*1.5)));
+            }
           }
           // Remove from array once the Three.js group has been removed from scene
           if (!_he.group.parent) {
             hordeEnemies.splice(_hi, 1);
-            if (_he._tutorial) continue; // tutorial kills don't count
+            if (_he._tutorial || _classicMode) continue; // tutorial / Classic kills don't count
             _psStats.kills = (_psStats.kills || 0) + 1;
             if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
           } else {

@@ -192,6 +192,11 @@
       transition: background 0.1s, transform 0.08s, box-shadow 0.1s;
       touch-action: none;
     }
+    /* Classic mode: Block is the only control */
+    body.block-only #action-grid,
+    body.block-only #joystick { display: none; }
+    body.block-only #bottom-row { justify-content: center; }
+    body.block-only #block-btn { max-width: none; height: 190px; }
     #block-btn.blocking {
       background: #991b1b;
       transform: scale(0.95);
@@ -323,6 +328,7 @@
     const btnShield = document.getElementById('btn-shield');
     const btnFire = document.getElementById('btn-fire');
     function applyStatus(st) {
+      document.body.classList.toggle('block-only', !!st.blockOnly);
       btnBomb.textContent = `💣 ${st.bombs ?? 0}`;
       btnBomb.disabled = !(st.bombs > 0);
       btnBubble.textContent = `🫧 ${st.bubbles ?? 0}`;
