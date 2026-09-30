@@ -83,14 +83,18 @@ export class FoamSword extends Weapon {
     this._variant = null; // sword model shown: 'default' (sword.glb) or 'wii' (Mii holder)
   }
 
-  // Shows the sword model for `variant`; the procedural foam sword when its GLB can't load
+  // Shows the sword model for `variant` on the pickup mesh and the held clone (the one
+  // in the hand, made from the mesh when equipped); the procedural foam sword when
+  // its GLB can't load
   _setVariant(variant) {
     if (!this.mesh || variant === this._variant) return;
     this._variant = variant;
-    this.mesh.clear();
-    const model = createSwordModelInstance({ variant });
-    if (model) this.mesh.add(model);
-    else buildFoamSwordParts(this.mesh);
+    for (const group of new Set([this.mesh, this.heldMesh].filter(Boolean))) {
+      group.clear();
+      const model = createSwordModelInstance({ variant });
+      if (model) group.add(model);
+      else buildFoamSwordParts(group);
+    }
   }
 
   async load(position = this._defaultPosition) {

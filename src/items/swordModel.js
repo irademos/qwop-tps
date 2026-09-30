@@ -50,8 +50,10 @@ const SWORD_VARIANTS = {
       rotation: new THREE.Euler(0, 0, 0),
       scale: 1,
     }),
-    // Mii hand balls along the handle (sword-local z), guard-side hand first
-    hands: [0.018, -0.03],
+    // Mii hand balls on the handle (sword-local x, z): the guard-side hand a little
+    // to the left (+x = the holder's left with the blade pointing forward) and up,
+    // the other a little to the right and down
+    hands: [[0.014, 0.03], [-0.014, -0.045]],
   },
 };
 
@@ -162,10 +164,10 @@ export function createSwordModelInstance({ cloneMaterials = false, variant, char
   root.add(grip);
   if (cfg.hands) {
     const handMat = new THREE.MeshStandardMaterial({ color: MII_HAND_COLOR, roughness: 0.7, metalness: 0 });
-    for (const z of cfg.hands) {
+    for (const [x, z] of cfg.hands) {
       const hand = new THREE.Mesh(_miiHandGeometry(), handMat);
       hand.name = 'mii-hand';
-      hand.position.set(0, 0, z);
+      hand.position.set(x, 0, z);
       hand.castShadow = true;
       root.add(hand);
     }
