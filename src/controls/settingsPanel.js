@@ -54,11 +54,16 @@ const PROFILE_STAT_SECTIONS = [
   }
 ];
 
-// Settings → Display → First Person Camera sliders (PlayerControls.cameraConfig)
-const CAMERA_FIELDS = [
-  { key: 'eyeHeight', label: 'Eye Height (m)', min: 0.2, max: 2, step: 0.05, decimals: 2 },
-  { key: 'eyeForward', label: 'Eye Forward (m)', min: -0.5, max: 0.5, step: 0.05, decimals: 2 },
-  { key: 'fov', label: 'Field of View (°)', min: 40, max: 140, step: 1, decimals: 0 }
+// Settings → Display → Camera, in display order (PlayerControls.cameraConfig keys)
+const percent = (v) => `${Math.round(v * 100)}%`;
+const CAMERA_CONTROLS = [
+  { key: 'firstPerson', type: 'toggle', label: 'First Person View', hint: 'See through your character\'s eyes (the sword stays).' },
+  { key: 'eyeHeight', label: 'Eye Height (m)', min: 0.2, max: 2, step: 0.05, format: (v) => v.toFixed(2) },
+  { key: 'eyeForward', label: 'Eye Forward (m)', min: -0.5, max: 0.5, step: 0.05, format: (v) => v.toFixed(2) },
+  { key: 'hideBody', type: 'toggle', label: 'Hide Body in First Person', hint: 'Off: your body is drawn at the opacity below.' },
+  { key: 'firstPersonOpacity', label: 'Body Opacity (first person)', min: 0.05, max: 1, step: 0.05, format: percent },
+  { key: 'thirdPersonOpacity', label: 'Body Opacity (third person)', min: 0.05, max: 1, step: 0.05, format: percent },
+  { key: 'fov', label: 'Field of View (°)', min: 40, max: 140, step: 1, format: (v) => v.toFixed(0) }
 ];
 
 let overlay;
@@ -365,19 +370,22 @@ function buildDisplayPanel() {
   sfxVolumeField.input.value = `${Number.isFinite(savedSfxVol) ? savedSfxVol : 1}`;
   sfxVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedSfxVol) ? savedSfxVol : 1) * 100)}%`;
 
-  const cameraSectionTitle = createElement('h3', 'settings-section-title', 'First Person Camera');
-  const firstPersonGroup = createElement('div', 'settings-field');
-  const firstPersonLabel = createElement('label', 'settings-label', 'First Person View');
-  firstPersonLabel.setAttribute('for', 'settings-display-first-person');
-  const firstPersonToggle = createElement('input', 'settings-checkbox');
-  firstPersonToggle.id = 'settings-display-first-person';
-  firstPersonToggle.type = 'checkbox';
-  const firstPersonHint = createElement('div', 'settings-muted');
-  firstPersonHint.textContent = 'See through your character\'s eyes (the body is hidden, the sword stays).';
-  firstPersonGroup.append(firstPersonLabel, firstPersonToggle, firstPersonHint);
+  const cameraSectionTitle = createElement('h3', 'settings-section-title', 'Camera');
+  // key → { field, input, valueLabel? } (toggles: checkbox input, sliders: range input)
   const cameraFields = {};
-  CAMERA_FIELDS.forEach(({ key, label, min, max, step }) => {
-    cameraFields[key] = createRangeField({ id: `settings-camera-${key}`, label, min, max, step });
+  CAMERA_CONTROLS.forEach(({ key, type, label, hint, min, max, step }) => {
+    if (type === 'toggle') {
+      const field = createElement('div', 'settings-field');
+      const fieldLabel = createElement('label', 'settings-label', label);
+      fieldLabel.setAttribute('for', `settings-camera-${key}`);
+      const input = createElement('input', 'settings-checkbox');
+      input.id = `settings-camera-${key}`;
+      input.type = 'checkbox';
+      field.append(fieldLabel, input, createElement('div', 'settings-muted', hint));
+      cameraFields[key] = { field, input };
+    } else {
+      cameraFields[key] = createRangeField({ id: `settings-camera-${key}`, label, min, max, step });
+    }
   });
   const cameraActions = createElement('div', 'settings-name-row');
   const cameraCopyButton = createElement('button', 'settings-button', 'Copy Values');
@@ -388,7 +396,7 @@ function buildDisplayPanel() {
   cameraResetButton.dataset.action = 'reset-camera';
   cameraActions.append(cameraCopyButton, cameraResetButton);
   const cameraHint = createElement('div', 'settings-muted');
-  cameraHint.textContent = 'Eye height and forward apply in first person view; field of view applies to both views. Saved on this device.';
+  cameraHint.textContent = 'Saved on this device.';
 
   panelEl.append(
     audioSectionTitle,
@@ -399,8 +407,7 @@ function buildDisplayPanel() {
     gyroRecalGroup,
     highContrastGroup,
     cameraSectionTitle,
-    firstPersonGroup,
-    ...CAMERA_FIELDS.map(({ key }) => cameraFields[key].field),
+    ...CAMERA_CONTROLS.map(({ key }) => cameraFields[key].field),
     cameraActions,
     cameraHint
   );
@@ -415,7 +422,6 @@ function buildDisplayPanel() {
     gyroRecalBtn,
     gyroRecalGroup,
     highContrastToggle,
-    firstPersonToggle,
     cameraFields,
     cameraCopyButton
   };
@@ -1050,14 +1056,19 @@ function bindEvents() {
       context.appState?.setDisplaySetting?.('performanceMode', value);
     });
   }
-  elements.displayFields?.firstPersonToggle?.addEventListener('change', (event) => {
-    window.playerControls?.setCameraConfig?.({ firstPerson: event.target.checked });
-  });
-  Object.entries(elements.displayFields?.cameraFields || {}).forEach(([key, { input, valueLabel }]) => {
-    const { decimals } = CAMERA_FIELDS.find(field => field.key === key);
-    input.addEventListener('input', () => {
-      const value = parseFloat(input.value);
-      valueLabel.textContent = value.toFixed(decimals);
+  CAMERA_CONTROLS.forEach(({ key, type, format }) => {
+    const field = elements.displayFields?.cameraFields?.[key];
+    if (!field) return;
+    if (type === 'toggle') {
+      field.input.addEventListener('change', () => {
+        window.playerControls?.setCameraConfig?.({ [key]: field.input.checked });
+        syncCameraFields();
+      });
+      return;
+    }
+    field.input.addEventListener('input', () => {
+      const value = parseFloat(field.input.value);
+      field.valueLabel.textContent = format(value);
       window.playerControls?.setCameraConfig?.({ [key]: value });
     });
   });
@@ -1117,15 +1128,20 @@ function bindEvents() {
 // Camera sliders ← PlayerControls.cameraConfig (when the panel opens, after Reset)
 function syncCameraFields() {
   const cfg = window.playerControls?.getCameraConfig?.() ?? CAMERA_CONFIG_DEFAULTS;
-  if (elements.displayFields?.firstPersonToggle) {
-    elements.displayFields.firstPersonToggle.checked = !!cfg.firstPerson;
-  }
-  CAMERA_FIELDS.forEach(({ key, decimals }) => {
-    const field = elements.displayFields?.cameraFields?.[key];
-    if (!field || !Number.isFinite(cfg[key])) return;
-    field.input.value = `${cfg[key]}`;
-    field.valueLabel.textContent = cfg[key].toFixed(decimals);
+  const fields = elements.displayFields?.cameraFields;
+  if (!fields) return;
+  CAMERA_CONTROLS.forEach(({ key, type, format }) => {
+    const field = fields[key];
+    if (!field) return;
+    if (type === 'toggle') {
+      field.input.checked = !!cfg[key];
+    } else if (Number.isFinite(cfg[key])) {
+      field.input.value = `${cfg[key]}`;
+      field.valueLabel.textContent = format(cfg[key]);
+    }
   });
+  // The first person opacity only matters while the body is shown there
+  if (fields.firstPersonOpacity) fields.firstPersonOpacity.input.disabled = !!cfg.hideBody;
 }
 
 function refreshLayout() {

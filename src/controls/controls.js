@@ -15,11 +15,20 @@ const PLAYER_HALF_HEIGHT = 0.6;
 const DEFAULT_CAMERA_DISTANCE = 1.0;
 const DEFAULT_CAMERA_RAISE = 0.0;
 const DEFAULT_CAMERA_LOOK_HEIGHT = 1.5;
-// First person view + its tuning (Settings → Display → First Person Camera, saved per device
-// in CAMERA_CONFIG_KEY): eyes eyeHeight above the feet, eyeForward metres ahead of the body
-// centre, body hidden. fov = base field of view in either view (portrait phones add
-// MOBILE_PORTRAIT_CAMERA_FOV_BONUS).
-export const CAMERA_CONFIG_DEFAULTS = Object.freeze({ firstPerson: true, eyeHeight: 1.1, eyeForward: 0, fov: 100 });
+// Camera settings (Settings → Display → Camera, saved per device in CAMERA_CONFIG_KEY):
+// first person = eyes eyeHeight above the feet, eyeForward metres ahead of the body centre;
+// hideBody hides the player's body there, else it's drawn at firstPersonOpacity. The normal
+// (third person) view draws it at thirdPersonOpacity. fov = base field of view in either view
+// (portrait phones add MOBILE_PORTRAIT_CAMERA_FOV_BONUS).
+export const CAMERA_CONFIG_DEFAULTS = Object.freeze({
+  firstPerson: false,
+  eyeHeight: 1.1,
+  eyeForward: 0,
+  hideBody: true,
+  firstPersonOpacity: 1,
+  thirdPersonOpacity: 1,
+  fov: 100
+});
 const CAMERA_CONFIG_KEY = 'sq:firstPersonCam';
 const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const WEAPON_CAMERA_FOV_DELTA = 8;
@@ -175,6 +184,46 @@ export class PlayerControls {
     this.defaultFovDesktop = this.cameraConfig.fov;
     this.applyMobilePortraitCameraTuning();
     try { localStorage.setItem(CAMERA_CONFIG_KEY, JSON.stringify(this.cameraConfig)); } catch (_) { /* ignore */ }
+  }
+
+  // Draws the player's body at `opacity` (1 = as authored). Each material remembers its own
+  // opacity/transparency and the factor last applied, so this is cheap to call every frame.
+  // Materials shared with other characters (the GLB's originals, e.g. while the fur is off)
+  // are cloned for the player first; the fur's own materials are already the player's.
+  _applyBodyOpacity(bodyRoot, opacity) {
+    const furMaterials = this.playerModel.userData?.qwopRig?.glbCharacter?.fluffy?.fluffyMaterials || [];
+    const prepare = (mat) => {
+      if (!mat) return mat;
+      if (!mat.userData.playerBodyMaterial && !furMaterials.includes(mat)) {
+        if (opacity >= 1) return mat; // leave shared materials alone until a fade is wanted
+        mat = mat.clone();
+      }
+      const data = mat.userData;
+      if (!data.playerBodyMaterial) {
+        data.playerBodyMaterial = true;
+        data.baseOpacity = mat.opacity;
+        data.baseTransparent = mat.transparent;
+        data.appliedOpacity = 1;
+      }
+      if (data.appliedOpacity !== opacity) {
+        const transparent = data.baseTransparent || opacity < 1;
+        if (mat.transparent !== transparent) {
+          mat.transparent = transparent;
+          mat.needsUpdate = true;
+        }
+        mat.opacity = data.baseOpacity * opacity;
+        data.appliedOpacity = opacity;
+      }
+      return mat;
+    };
+    bodyRoot.traverse((obj) => {
+      if (!obj.isMesh || !obj.visible) return;
+      if (Array.isArray(obj.material)) {
+        obj.material.forEach((mat, i) => { obj.material[i] = prepare(mat); });
+      } else {
+        obj.material = prepare(obj.material);
+      }
+    });
   }
 
   // Portrait phones get a wider field of view
@@ -959,7 +1008,7 @@ export class PlayerControls {
       Math.sin(this.pitch),
       Math.cos(this.yaw) * Math.cos(this.pitch)
     );
-    const { firstPerson, eyeHeight, eyeForward } = this.cameraConfig;
+    const { firstPerson, eyeHeight, eyeForward, hideBody, firstPersonOpacity, thirdPersonOpacity } = this.cameraConfig;
     if (firstPerson) {
       // First-person view: camera at the player's eyes, looking in the yaw/pitch direction
       const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(
@@ -983,10 +1032,16 @@ export class PlayerControls {
       this.camera.lookAt(lookPoint);
     }
     if (this.playerModel) {
-      // First person: hide the body but keep floating hands/arms (direct playerGroup children)
+      // Hiding / fading touches the body only: floating hands/arms and the sword are direct
+      // playerGroup children
+      const opacity = firstPerson ? (hideBody ? 0 : firstPersonOpacity) : thirdPersonOpacity;
       const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
-      if (bodyRoot) bodyRoot.visible = !firstPerson;
-      else this.playerModel.visible = !firstPerson;
+      if (bodyRoot) {
+        bodyRoot.visible = opacity > 0.001;
+        if (bodyRoot.visible) this._applyBodyOpacity(bodyRoot, opacity);
+      } else {
+        this.playerModel.visible = opacity > 0.001;
+      }
     }
 
     if (this.playerModel && this.playerModel.userData.mixer) {
