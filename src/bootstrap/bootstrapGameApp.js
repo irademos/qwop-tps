@@ -60,7 +60,9 @@ import {
   saveShowdownCharacters,
   loadShowdownCharacters,
   hasCompletedTutorial,
-  saveTutorialCompleted
+  saveTutorialCompleted,
+  randomGuestName,
+  buildGuestProfile
 } from '../features/persistenceFeature.js';
 
 if ('serviceWorker' in navigator) {
@@ -75,8 +77,9 @@ if ('serviceWorker' in navigator) {
 
 // Max health is stored as showdownMaxHealthSegments (older profiles only have maxHealthSegments).
 const statsForSave = (stats) => (stats ? { ...stats, showdownMaxHealthSegments: stats.maxHealthSegments } : stats);
-const saveStatsImmediate = (nameKey, stats, ...rest) => saveStatsImmediateRaw(nameKey, statsForSave(stats), ...rest);
-const saveStatsThrottled = (nameKey, stats, ...rest) => saveStatsThrottledRaw(nameKey, statsForSave(stats), ...rest);
+// Guests (no profile) have nameKey null: nothing is saved.
+const saveStatsImmediate = (nameKey, stats, ...rest) => (nameKey ? saveStatsImmediateRaw(nameKey, statsForSave(stats), ...rest) : undefined);
+const saveStatsThrottled = (nameKey, stats, ...rest) => (nameKey ? saveStatsThrottledRaw(nameKey, statsForSave(stats), ...rest) : undefined);
 
 // Sword Showdown: max "Shield Upgrade" purchases (each +SHIELD_UPGRADE_HEALTH durability → 20 + 4×10 = 60 max)
 const SHOWDOWN_MAX_SHIELD_UPGRADES = 4;
@@ -183,6 +186,7 @@ function createArcadeOverlay(startOverlay) {
   const showdownButton = startOverlay.querySelector('[data-arcade-showdown]');
   const multiplayerButton = startOverlay.querySelector('[data-arcade-multiplayer]');
   const classicButton = startOverlay.querySelector('[data-arcade-classic]');
+  const guestButton = startOverlay.querySelector('[data-arcade-guest]');
 
   let mode = 'login';
   // Until the tutorial is done the start screen only offers "Start Game" (which runs it);
@@ -198,6 +202,7 @@ function createArcadeOverlay(startOverlay) {
   let startHandler = null;
   let authResolved = false;
   let activeLoadProfile = loadOrCreateWithPin;
+  let isGuest = false;
 
   const createWaiter = () => {
     const queue = [];
@@ -270,6 +275,7 @@ function createArcadeOverlay(startOverlay) {
       const resolve = resolveAuth;
       resolveAuth = null;
       authResolved = true;
+      if (authResult?.guest) switchButton.textContent = 'Sign In'; // reloads to the login form
       resolve(authResult);
     }
   };
@@ -406,7 +412,7 @@ function createArcadeOverlay(startOverlay) {
   const handleSwitchUser = () => {
     authToken += 1;
     authInProgress = false;
-    if (currentName) {
+    if (currentName && !isGuest) {
       clearStoredPin(currentName);
       setCookie('playerName', '', -1);
       localStorage.removeItem('playerName');
@@ -455,6 +461,21 @@ function createArcadeOverlay(startOverlay) {
 
   backButton?.addEventListener('click', handleBackToLogin);
   switchButton?.addEventListener('click', handleSwitchUser);
+
+  // Play without signing in: a guest with a random name and no profile (nothing is saved).
+  // All modes are offered right away (the tutorial can't be remembered as done).
+  guestButton?.addEventListener('click', event => {
+    event.preventDefault();
+    if (authResolved) return;
+    authToken += 1; // drop any login in progress
+    authInProgress = false;
+    isGuest = true;
+    currentName = randomGuestName();
+    setMessage('');
+    welcomeText.textContent = `Playing as guest ${currentName}`;
+    const guestProfile = buildGuestProfile(currentName);
+    showModeSelect({ guest: true, nameKey: null, profile: guestProfile });
+  });
 
   const chooseMode = (gameMode) => {
     if (startHandler) startHandler();
@@ -597,10 +618,14 @@ async function initCore(runtimeContext) {
     loadProfile: loadOrCreateWithPin
   });
   playerName = profileResult.profile?.name || playerName;
+  // Guest (Play Without Signing In): profileNameKey is null, so nothing is saved
+  const isGuest = !!profileResult.guest;
   let { nameKey: profileNameKey, profile: playerProfile } = profileResult;
 
-  setCookie("playerName", playerName);
-  localStorage.setItem('playerName', playerName);
+  if (!isGuest) {
+    setCookie("playerName", playerName);
+    localStorage.setItem('playerName', playerName);
+  }
 
   let updatePlayerInfoUI = () => {};
 
@@ -4618,8 +4643,10 @@ async function initCore(runtimeContext) {
         player.nameLabel.innerText = playerName;
       }
       updatePlayerInfoUI();
-      setCookie("playerName", playerName);
-      localStorage.setItem('playerName', playerName);
+      if (!isGuest) {
+        setCookie("playerName", playerName);
+        localStorage.setItem('playerName', playerName);
+      }
       if (multiplayer) {
         multiplayer.playerName = playerName;
       }
@@ -4631,6 +4658,12 @@ async function initCore(runtimeContext) {
       }
       if (trimmedName === playerName) {
         return { status: 'unchanged' };
+      }
+      if (isGuest) {
+        // No profile to rename: just use the new name for this session
+        playerProfile.name = trimmedName;
+        appState.setPlayerName(trimmedName);
+        return { status: 'ok' };
       }
       try {
         const result = await renameProfile(playerName, profileNameKey, trimmedName);
@@ -5223,7 +5256,7 @@ async function initCore(runtimeContext) {
     addAmmo: _tutorialAddAmmo,
     onComplete: async () => {
       if (playerProfile) playerProfile.tutorialCompleted = true;
-      void saveTutorialCompleted(profileNameKey);
+      if (profileNameKey) void saveTutorialCompleted(profileNameKey);
       _psWinTitle.textContent = 'TUTORIAL COMPLETE!';
       _psWinSub.textContent = 'You’re ready for the Showdown';
       _psWinTitle.style.animation = 'none';

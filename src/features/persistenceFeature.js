@@ -16,5 +16,7 @@ export {
   saveShowdownCharacters,
   loadShowdownCharacters,
   hasCompletedTutorial,
-  saveTutorialCompleted
+  saveTutorialCompleted,
+  randomGuestName,
+  buildGuestProfile
 } from '../player/playerProfile.js';
