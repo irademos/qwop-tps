@@ -19,7 +19,7 @@ const DEFAULT_CAMERA_LOOK_HEIGHT = 1.5;
 // in CAMERA_CONFIG_KEY): eyes eyeHeight above the feet, eyeForward metres ahead of the body
 // centre, body hidden. fov = base field of view in either view (portrait phones add
 // MOBILE_PORTRAIT_CAMERA_FOV_BONUS).
-export const CAMERA_CONFIG_DEFAULTS = Object.freeze({ firstPerson: false, eyeHeight: 0.7, eyeForward: 0, fov: 100 });
+export const CAMERA_CONFIG_DEFAULTS = Object.freeze({ firstPerson: true, eyeHeight: 1.1, eyeForward: 0, fov: 100 });
 const CAMERA_CONFIG_KEY = 'sq:firstPersonCam';
 const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const WEAPON_CAMERA_FOV_DELTA = 8;
