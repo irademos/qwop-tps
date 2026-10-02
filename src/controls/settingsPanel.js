@@ -56,9 +56,8 @@ const PROFILE_STAT_SECTIONS = [
 
 // Settings → Display → First Person Camera sliders (PlayerControls.cameraConfig)
 const CAMERA_FIELDS = [
-  { key: 'distance', label: 'Distance Behind Eyes (m)', min: 0, max: 3, step: 0.05, decimals: 2 },
-  { key: 'eyeHeight', label: 'Eye Height (m)', min: 0.3, max: 2.5, step: 0.05, decimals: 2 },
-  { key: 'height', label: 'Camera Raise (m)', min: -1, max: 2, step: 0.05, decimals: 2 },
+  { key: 'eyeHeight', label: 'Eye Height (m)', min: 0.2, max: 2, step: 0.05, decimals: 2 },
+  { key: 'eyeForward', label: 'Eye Forward (m)', min: -0.5, max: 0.5, step: 0.05, decimals: 2 },
   { key: 'fov', label: 'Field of View (°)', min: 40, max: 140, step: 1, decimals: 0 }
 ];
 
@@ -120,11 +119,6 @@ async function copyText(text) {
     area.remove();
     return ok;
   }
-}
-
-function formatRangeValue(value, decimals = 2) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  return value.toFixed(decimals);
 }
 
 function setNameStatus(message, tone = 'error') {
@@ -371,31 +365,16 @@ function buildDisplayPanel() {
   sfxVolumeField.input.value = `${Number.isFinite(savedSfxVol) ? savedSfxVol : 1}`;
   sfxVolumeField.valueLabel.textContent = `${Math.round((Number.isFinite(savedSfxVol) ? savedSfxVol : 1) * 100)}%`;
 
-  const lightSectionTitle = createElement('h3', 'settings-section-title', 'Lighting');
-
-  const ambientField = createRangeField({
-    id: 'settings-display-ambient',
-    label: 'Ambient Light',
-    min: 0,
-    max: 2,
-    step: 0.05
-  });
-  const directionalField = createRangeField({
-    id: 'settings-display-directional',
-    label: 'Direct Light',
-    min: 0,
-    max: 2,
-    step: 0.05
-  });
-  const skyField = createRangeField({
-    id: 'settings-display-sky',
-    label: 'Sky Brightness',
-    min: 0.1,
-    max: 1.6,
-    step: 0.05
-  });
-
   const cameraSectionTitle = createElement('h3', 'settings-section-title', 'First Person Camera');
+  const firstPersonGroup = createElement('div', 'settings-field');
+  const firstPersonLabel = createElement('label', 'settings-label', 'First Person View');
+  firstPersonLabel.setAttribute('for', 'settings-display-first-person');
+  const firstPersonToggle = createElement('input', 'settings-checkbox');
+  firstPersonToggle.id = 'settings-display-first-person';
+  firstPersonToggle.type = 'checkbox';
+  const firstPersonHint = createElement('div', 'settings-muted');
+  firstPersonHint.textContent = 'See through your character\'s eyes (the body is hidden, the sword stays).';
+  firstPersonGroup.append(firstPersonLabel, firstPersonToggle, firstPersonHint);
   const cameraFields = {};
   CAMERA_FIELDS.forEach(({ key, label, min, max, step }) => {
     cameraFields[key] = createRangeField({ id: `settings-camera-${key}`, label, min, max, step });
@@ -409,7 +388,7 @@ function buildDisplayPanel() {
   cameraResetButton.dataset.action = 'reset-camera';
   cameraActions.append(cameraCopyButton, cameraResetButton);
   const cameraHint = createElement('div', 'settings-muted');
-  cameraHint.textContent = 'Distance 0 puts the camera right at the eyes (your body is hidden). Saved on this device.';
+  cameraHint.textContent = 'Eye height and forward apply in first person view; field of view applies to both views. Saved on this device.';
 
   panelEl.append(
     audioSectionTitle,
@@ -420,13 +399,10 @@ function buildDisplayPanel() {
     gyroRecalGroup,
     highContrastGroup,
     cameraSectionTitle,
+    firstPersonGroup,
     ...CAMERA_FIELDS.map(({ key }) => cameraFields[key].field),
     cameraActions,
-    cameraHint,
-    lightSectionTitle,
-    ambientField.field,
-    directionalField.field,
-    skyField.field
+    cameraHint
   );
 
   elements.displayFields = {
@@ -439,18 +415,9 @@ function buildDisplayPanel() {
     gyroRecalBtn,
     gyroRecalGroup,
     highContrastToggle,
+    firstPersonToggle,
     cameraFields,
-    cameraCopyButton,
-    sliders: {
-      ambientIntensity: ambientField.input,
-      directionalIntensity: directionalField.input,
-      skyBrightness: skyField.input
-    },
-    values: {
-      ambientIntensity: ambientField.valueLabel,
-      directionalIntensity: directionalField.valueLabel,
-      skyBrightness: skyField.valueLabel
-    }
+    cameraCopyButton
   };
 
   return panelEl;
@@ -1083,6 +1050,9 @@ function bindEvents() {
       context.appState?.setDisplaySetting?.('performanceMode', value);
     });
   }
+  elements.displayFields?.firstPersonToggle?.addEventListener('change', (event) => {
+    window.playerControls?.setCameraConfig?.({ firstPerson: event.target.checked });
+  });
   Object.entries(elements.displayFields?.cameraFields || {}).forEach(([key, { input, valueLabel }]) => {
     const { decimals } = CAMERA_FIELDS.find(field => field.key === key);
     input.addEventListener('input', () => {
@@ -1125,18 +1095,6 @@ function bindEvents() {
     });
   }
 
-  if (elements.displayFields?.sliders) {
-    Object.entries(elements.displayFields.sliders).forEach(([key, slider]) => {
-      slider.addEventListener('input', (event) => {
-        const value = parseFloat(event.target.value);
-        if (elements.displayFields?.values?.[key]) {
-          elements.displayFields.values[key].textContent = formatRangeValue(value);
-        }
-        context.appState?.setDisplaySetting?.(key, value);
-      });
-    });
-  }
-
   window.addEventListener('resize', () => {
     refreshLayout();
   });
@@ -1159,6 +1117,9 @@ function bindEvents() {
 // Camera sliders ← PlayerControls.cameraConfig (when the panel opens, after Reset)
 function syncCameraFields() {
   const cfg = window.playerControls?.getCameraConfig?.() ?? CAMERA_CONFIG_DEFAULTS;
+  if (elements.displayFields?.firstPersonToggle) {
+    elements.displayFields.firstPersonToggle.checked = !!cfg.firstPerson;
+  }
   CAMERA_FIELDS.forEach(({ key, decimals }) => {
     const field = elements.displayFields?.cameraFields?.[key];
     if (!field || !Number.isFinite(cfg[key])) return;
@@ -1261,16 +1222,6 @@ export function updateUI() {
         elements.displayFields.gyroRecalGroup.hidden = !gyroActive;
       }
     }
-    Object.entries(elements.displayFields.sliders || {}).forEach(([key, slider]) => {
-      const value = displaySettings?.[key];
-      if (typeof value !== 'number' || Number.isNaN(value)) return;
-      if (document.activeElement !== slider) {
-        slider.value = `${value}`;
-      }
-      if (elements.displayFields?.values?.[key]) {
-        elements.displayFields.values[key].textContent = formatRangeValue(value);
-      }
-    });
   }
 }
 
