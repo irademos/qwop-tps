@@ -1,19 +1,65 @@
-import { clearMultiplayerServerState } from '../multiplayer/peerConnection.js';
+import { CAMERA_CONFIG_DEFAULTS } from './controls.js';
 const TAB_KEY = 'settings:lastTab';
 
 const TABS = [
-  { id: 'character', label: 'Character' },
+  { id: 'profile', label: 'Profile' },
   { id: 'multiplayer', label: 'Multiplayer' },
   { id: 'display', label: 'Display' },
   { id: 'swordgyro', label: 'Sword Gyro' },
   { id: 'about', label: 'About' },
-  { id: 'account', label: 'Account' },
-  { id: 'developer', label: 'Developer' }
+  { id: 'account', label: 'Account' }
 ];
-const CHARACTER_STATS = [
-  { key: 'level', label: 'Level' },
-  { key: 'xp', label: 'XP' },
-  { key: 'coins', label: 'Coins' }
+
+// Settings → Profile: sections of appState.getProfileStats() (pick = the section's object)
+const PROFILE_STAT_SECTIONS = [
+  {
+    title: 'Stats',
+    pick: (stats) => stats,
+    rows: [
+      { key: 'level', label: 'Level' },
+      { key: 'xp', label: 'XP' },
+      { key: 'coins', label: 'Coins' }
+    ]
+  },
+  {
+    title: 'Sword Showdown',
+    pick: (stats) => stats.showdown,
+    rows: [
+      { key: 'currentStage', label: 'Current Stage' },
+      { key: 'highestStage', label: 'Highest Stage' },
+      { key: 'kills', label: 'Kills' },
+      { key: 'deaths', label: 'Deaths' },
+      { key: 'maxHearts', label: 'Max Hearts' },
+      { key: 'shieldUpgrades', label: 'Shield Upgrades' },
+      { key: 'bombs', label: 'Bombs' },
+      { key: 'bubbles', label: 'Bubbles' },
+      {
+        key: 'charactersUnlocked',
+        label: 'Characters',
+        format: (section) => (Number.isFinite(section?.charactersUnlocked)
+          ? `${section.charactersUnlocked} / ${section.charactersTotal}`
+          : '—')
+      }
+    ]
+  },
+  {
+    title: 'Classic',
+    pick: (stats) => stats.classic,
+    rows: [
+      { key: 'currentStage', label: 'Current Stage' },
+      { key: 'highestStage', label: 'Highest Stage' },
+      { key: 'kills', label: 'Kills' },
+      { key: 'deaths', label: 'Deaths' }
+    ]
+  }
+];
+
+// Settings → Display → First Person Camera sliders (PlayerControls.cameraConfig)
+const CAMERA_FIELDS = [
+  { key: 'distance', label: 'Distance Behind Eyes (m)', min: 0, max: 3, step: 0.05, decimals: 2 },
+  { key: 'eyeHeight', label: 'Eye Height (m)', min: 0.3, max: 2.5, step: 0.05, decimals: 2 },
+  { key: 'height', label: 'Camera Raise (m)', min: -1, max: 2, step: 0.05, decimals: 2 },
+  { key: 'fov', label: 'Field of View (°)', min: 40, max: 140, step: 1, decimals: 0 }
 ];
 
 let overlay;
@@ -40,17 +86,40 @@ function formatTimestamp(ts) {
   return date.toLocaleString();
 }
 
-function formatDistance(distance) {
-  if (typeof distance !== 'number' || Number.isNaN(distance)) return '—';
-  return `${Math.round(distance)} m`;
+function formatStatValue(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  return Math.max(0, Math.floor(value)).toLocaleString();
 }
 
-function formatStatValue(key, value) {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  if (key === 'level') {
-    return `${Math.max(1, Math.round(value))}`;
+// Multiplayer room ids (peerConnection.js) → what the player is doing
+function describeRoom(roomId) {
+  if (!roomId) return '—';
+  if (roomId === 'lobby') return 'Lobby';
+  if (roomId.startsWith('duel-')) return 'Duel';
+  if (roomId.startsWith('mm-')) return 'Matchmaking';
+  if (roomId.startsWith('party-')) return 'Party';
+  if (roomId.startsWith('match-')) return 'Battle';
+  return roomId;
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {
+    // Older / non-secure contexts: copy through a hidden textarea
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    area.remove();
+    return ok;
   }
-  return `${Math.round(value)}`;
 }
 
 function formatRangeValue(value, decimals = 2) {
@@ -119,12 +188,12 @@ function buildTabs() {
   return tablist;
 }
 
-function buildCharacterPanel() {
+function buildProfilePanel() {
   const panelEl = createElement('section', 'settings-tabpanel');
-  panelEl.id = 'panel-character';
-  panelEl.dataset.panel = 'character';
+  panelEl.id = 'panel-profile';
+  panelEl.dataset.panel = 'profile';
   panelEl.setAttribute('role', 'tabpanel');
-  panelEl.setAttribute('aria-labelledby', 'tab-character');
+  panelEl.setAttribute('aria-labelledby', 'tab-profile');
 
   const nameGroup = createElement('div', 'settings-field');
   const nameLabel = createElement('label', 'settings-label', 'Name');
@@ -142,40 +211,31 @@ function buildCharacterPanel() {
   nameRow.append(nameInput, nameSaveButton);
   nameGroup.append(nameLabel, nameRow, nameStatus);
 
-  const statsTitle = createElement('h3', 'settings-section-title', 'Stats');
-  const statsGrid = createElement('div', 'settings-stats-grid');
-  elements.characterStatFields = {};
-  CHARACTER_STATS.forEach(({ key, label }) => {
-    const statRow = createElement('div', 'settings-stat');
-    const statLabel = createElement('span', 'settings-stat-label', label);
-    const statValue = createElement('span', 'settings-stat-value', '—');
-    statValue.dataset.field = `stat-${key}`;
-    statRow.append(statLabel, statValue);
-    statsGrid.appendChild(statRow);
-    elements.characterStatFields[key] = statValue;
+  const guestNote = createElement('div', 'settings-muted', 'Playing as a guest: nothing is saved after you leave.');
+  guestNote.hidden = !context.appState?.isGuest?.();
+
+  panelEl.append(nameGroup, guestNote);
+
+  // [{ node, pick, row }] — filled in by updateUI()
+  elements.profileStatFields = [];
+  PROFILE_STAT_SECTIONS.forEach(({ title, pick, rows }) => {
+    const sectionTitle = createElement('h3', 'settings-section-title', title);
+    const grid = createElement('div', 'settings-stats-grid');
+    rows.forEach((row) => {
+      const statRow = createElement('div', 'settings-stat');
+      const statLabel = createElement('span', 'settings-stat-label', row.label);
+      const statValue = createElement('span', 'settings-stat-value', '—');
+      statRow.append(statLabel, statValue);
+      grid.appendChild(statRow);
+      elements.profileStatFields.push({ node: statValue, pick, row });
+    });
+    panelEl.append(sectionTitle, grid);
   });
 
-  const psStatsTitle = createElement('h3', 'settings-section-title', 'Sword Showdown Stats');
-  psStatsTitle.id = 'ps-stats-title';
-  const psStatsGrid = createElement('div', 'settings-stats-grid');
-  psStatsGrid.id = 'ps-stats-grid';
-  const PS_STAT_DEFS = [
-    { key: 'kills', label: 'Kills' },
-    { key: 'deaths', label: 'Deaths' },
-    { key: 'highestStage', label: 'Highest Stage' }
-  ];
-  elements.phoneSwordStatFields = {};
-  PS_STAT_DEFS.forEach(({ key, label }) => {
-    const statRow = createElement('div', 'settings-stat');
-    const statLabel = createElement('span', 'settings-stat-label', label);
-    const statValue = createElement('span', 'settings-stat-value', '—');
-    statValue.dataset.field = `ps-stat-${key}`;
-    statRow.append(statLabel, statValue);
-    psStatsGrid.appendChild(statRow);
-    elements.phoneSwordStatFields[key] = statValue;
-  });
-
-  panelEl.append(nameGroup, statsTitle, statsGrid, psStatsTitle, psStatsGrid);
+  const leaderboardButton = createElement('button', 'settings-button', 'Showdown Leaderboard');
+  leaderboardButton.type = 'button';
+  leaderboardButton.dataset.action = 'open-leaderboard';
+  panelEl.append(leaderboardButton);
 
   elements.nameInput = nameInput;
   elements.nameSaveButton = nameSaveButton;
@@ -191,18 +251,19 @@ function buildMultiplayerPanel() {
   panelEl.setAttribute('role', 'tabpanel');
   panelEl.setAttribute('aria-labelledby', 'tab-multiplayer');
 
+  const offlineHint = createElement('div', 'settings-muted',
+    'Multiplayer connects when you pick Multiplayer on the start screen.');
+
   const statusRow = createElement('div', 'settings-row');
-  statusRow.innerHTML = '<span>Connection Status</span><span data-field="connection-status">—</span>';
+  statusRow.innerHTML = '<span>Connection</span><span data-field="connection-status">—</span>';
+  const roomRow = createElement('div', 'settings-row');
+  roomRow.innerHTML = '<span>Where</span><span data-field="room">—</span>';
   const pingRow = createElement('div', 'settings-row');
   pingRow.innerHTML = '<span>Ping</span><span data-field="ping">N/A</span>';
 
   const playersTitle = createElement('h3', 'settings-section-title', 'Connected Players');
   const playersList = createElement('ul', 'settings-list');
   playersList.dataset.field = 'players';
-
-  const leaderboardButton = createElement('button', 'settings-button', 'Leaderboard');
-  leaderboardButton.type = 'button';
-  leaderboardButton.dataset.action = 'open-leaderboard';
 
   const reconnectButton = createElement('button', 'settings-button', 'Reconnect');
   reconnectButton.type = 'button';
@@ -213,55 +274,16 @@ function buildMultiplayerPanel() {
   errorText.dataset.field = 'connection-error';
   errorText.textContent = 'None';
 
-  panelEl.append(statusRow, pingRow, playersTitle, playersList, leaderboardButton, reconnectButton, errorTitle, errorText);
+  panelEl.append(offlineHint, statusRow, roomRow, pingRow, playersTitle, playersList, reconnectButton, errorTitle, errorText);
 
+  elements.multiplayerOfflineHint = offlineHint;
   elements.connectionStatus = statusRow.querySelector('[data-field="connection-status"]');
+  elements.room = roomRow.querySelector('[data-field="room"]');
   elements.ping = pingRow.querySelector('[data-field="ping"]');
   elements.playersList = playersList;
+  elements.reconnectButton = reconnectButton;
   elements.connectionError = errorText;
-  elements.leaderboardButton = leaderboardButton;
 
-  return panelEl;
-}
-
-function buildDeveloperPanel() {
-  const panelEl = createElement('section', 'settings-tabpanel');
-  panelEl.id = 'panel-developer';
-  panelEl.dataset.panel = 'developer';
-  panelEl.setAttribute('role', 'tabpanel');
-  panelEl.setAttribute('aria-labelledby', 'tab-developer');
-
-  const consoleButton = createElement('button', 'settings-button', 'Show Console');
-  consoleButton.type = 'button';
-  consoleButton.dataset.action = 'toggle-console';
-
-  const copyDebugButton = createElement('button', 'settings-button', 'Copy Debug Info');
-  copyDebugButton.type = 'button';
-  copyDebugButton.dataset.action = 'copy-debug';
-
-  const serverToolsTitle = createElement('h3', 'settings-section-title', 'Server Tools');
-  const clearServerButton = createElement('button', 'settings-button', 'Clear Rooms/Sessions Cache');
-  clearServerButton.type = 'button';
-  clearServerButton.dataset.action = 'clear-server-state';
-  const clearServerStatus = createElement('div', 'settings-muted');
-  clearServerStatus.textContent = 'Clears server-side rooms, sessions, and caches.';
-
-  const consoleLog = createElement('div', 'settings-console');
-  consoleLog.id = 'console-log';
-  consoleLog.style.display = 'none';
-
-  panelEl.append(
-    consoleButton,
-    copyDebugButton,
-    serverToolsTitle,
-    clearServerButton,
-    clearServerStatus,
-    consoleLog
-  );
-  elements.consoleButton = consoleButton;
-  elements.consoleLog = consoleLog;
-  elements.clearServerButton = clearServerButton;
-  elements.clearServerStatus = clearServerStatus;
   return panelEl;
 }
 
@@ -271,24 +293,6 @@ function buildDisplayPanel() {
   panelEl.dataset.panel = 'display';
   panelEl.setAttribute('role', 'tabpanel');
   panelEl.setAttribute('aria-labelledby', 'tab-display');
-
-  const modeGroup = createElement('div', 'settings-field');
-  const modeLabel = createElement('label', 'settings-label', 'Day/Night Mode');
-  modeLabel.setAttribute('for', 'settings-display-mode');
-  const modeSelect = createElement('select', 'settings-select');
-  modeSelect.id = 'settings-display-mode';
-  const modeOptions = [
-    { value: 'auto', label: 'Auto (8:00am / 5:30pm)' },
-    { value: 'day', label: 'Day' },
-    { value: 'night', label: 'Night' }
-  ];
-  modeOptions.forEach(({ value, label }) => {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
-    modeSelect.appendChild(option);
-  });
-  modeGroup.append(modeLabel, modeSelect);
 
   const performanceGroup = createElement('div', 'settings-field');
   const performanceLabel = createElement('label', 'settings-label', 'Performance Mode');
@@ -308,17 +312,6 @@ function buildDisplayPanel() {
     performanceSelect.appendChild(option);
   });
   performanceGroup.append(performanceLabel, performanceSelect);
-  const firstPersonGroup = createElement('div', 'settings-field');
-  const firstPersonLabel = createElement('label', 'settings-label', 'First Person View');
-  firstPersonLabel.setAttribute('for', 'settings-display-first-person');
-  const firstPersonToggle = createElement('input', 'settings-checkbox');
-  firstPersonToggle.id = 'settings-display-first-person';
-  firstPersonToggle.type = 'checkbox';
-  firstPersonToggle.checked = false;
-  const firstPersonHint = createElement('div', 'settings-muted');
-  firstPersonHint.textContent = 'Check to switch to first-person view.';
-  firstPersonGroup.append(firstPersonLabel, firstPersonToggle, firstPersonHint);
-
   const gyroGroup = createElement('div', 'settings-field');
   const gyroLabel = createElement('label', 'settings-label', 'Gyroscope Camera');
   gyroLabel.setAttribute('for', 'settings-display-gyro');
@@ -402,42 +395,38 @@ function buildDisplayPanel() {
     step: 0.05
   });
 
-  const hint = createElement('div', 'settings-muted');
-  hint.textContent = 'Auto mode uses local time to switch between day and night lighting.';
-
-  const tpCameraLabel = createElement('label', 'settings-label', '3rd Person Camera');
-  const tpCameraHint = createElement('div', 'settings-muted');
-  tpCameraHint.textContent = 'Adjust the third-person camera position and capsule transparency.';
-  const tpCameraHeaderGroup = createElement('div', 'settings-field');
-  tpCameraHeaderGroup.append(tpCameraLabel, tpCameraHint);
-
-  const cameraDistField = createRangeField({ id: 'settings-display-cam-distance', label: 'Camera Distance', min: 1, max: 20, step: 0.5 });
-  const cameraHeightField = createRangeField({ id: 'settings-display-cam-height', label: 'Camera Height', min: -2, max: 10, step: 0.25 });
-  const lookTargetField = createRangeField({ id: 'settings-display-cam-look-target', label: 'Look Target Height', min: 0, max: 3, step: 0.1 });
-  const capsuleOpacityField = createRangeField({ id: 'settings-display-capsule-opacity', label: 'Capsule Opacity', min: 0, max: 1, step: 0.05 });
-  const fovField = createRangeField({ id: 'settings-display-fov', label: 'Field of View', min: 30, max: 160, step: 1 });
+  const cameraSectionTitle = createElement('h3', 'settings-section-title', 'First Person Camera');
+  const cameraFields = {};
+  CAMERA_FIELDS.forEach(({ key, label, min, max, step }) => {
+    cameraFields[key] = createRangeField({ id: `settings-camera-${key}`, label, min, max, step });
+  });
+  const cameraActions = createElement('div', 'settings-name-row');
+  const cameraCopyButton = createElement('button', 'settings-button', 'Copy Values');
+  cameraCopyButton.type = 'button';
+  cameraCopyButton.dataset.action = 'copy-camera';
+  const cameraResetButton = createElement('button', 'settings-button settings-button-secondary', 'Reset');
+  cameraResetButton.type = 'button';
+  cameraResetButton.dataset.action = 'reset-camera';
+  cameraActions.append(cameraCopyButton, cameraResetButton);
+  const cameraHint = createElement('div', 'settings-muted');
+  cameraHint.textContent = 'Distance 0 puts the camera right at the eyes (your body is hidden). Saved on this device.';
 
   panelEl.append(
     audioSectionTitle,
     musicVolumeField.field,
     sfxVolumeField.field,
-    modeGroup,
     performanceGroup,
-    firstPersonGroup,
     gyroGroup,
     gyroRecalGroup,
     highContrastGroup,
-    tpCameraHeaderGroup,
-    cameraDistField.field,
-    cameraHeightField.field,
-    lookTargetField.field,
-    capsuleOpacityField.field,
-    fovField.field,
+    cameraSectionTitle,
+    ...CAMERA_FIELDS.map(({ key }) => cameraFields[key].field),
+    cameraActions,
+    cameraHint,
     lightSectionTitle,
     ambientField.field,
     directionalField.field,
-    skyField.field,
-    hint
+    skyField.field
   );
 
   elements.displayFields = {
@@ -445,23 +434,13 @@ function buildDisplayPanel() {
     musicVolumeValue: musicVolumeField.valueLabel,
     sfxVolumeSlider: sfxVolumeField.input,
     sfxVolumeValue: sfxVolumeField.valueLabel,
-    modeSelect,
     performanceSelect,
-    firstPersonToggle,
     gyroToggle,
     gyroRecalBtn,
     gyroRecalGroup,
     highContrastToggle,
-    camDistanceSlider: cameraDistField.input,
-    camDistanceValue: cameraDistField.valueLabel,
-    camHeightSlider: cameraHeightField.input,
-    camHeightValue: cameraHeightField.valueLabel,
-    lookTargetSlider: lookTargetField.input,
-    lookTargetValue: lookTargetField.valueLabel,
-    capsuleOpacitySlider: capsuleOpacityField.input,
-    capsuleOpacityValue: capsuleOpacityField.valueLabel,
-    fovSlider: fovField.input,
-    fovValue: fovField.valueLabel,
+    cameraFields,
+    cameraCopyButton,
     sliders: {
       ambientIntensity: ambientField.input,
       directionalIntensity: directionalField.input,
@@ -552,7 +531,16 @@ function buildAboutPanel() {
   text.innerHTML = '<strong>Credits</strong><br><br>Loading credits...';
   loadCredits(text);
 
-  panelEl.append(title, text);
+  const troubleTitle = createElement('h3', 'settings-section-title', 'Troubleshooting');
+  const clearCacheButton = createElement('button', 'settings-button', 'Clear Cache & Reload');
+  clearCacheButton.type = 'button';
+  clearCacheButton.dataset.action = 'clear-cache';
+  const clearCacheStatus = createElement('div', 'settings-muted',
+    'Re-downloads the game files (fixes an old version or missing assets after an update). Your progress and settings are kept.');
+
+  panelEl.append(title, text, troubleTitle, clearCacheButton, clearCacheStatus);
+  elements.clearCacheButton = clearCacheButton;
+  elements.clearCacheStatus = clearCacheStatus;
   return panelEl;
 }
 
@@ -566,8 +554,9 @@ function buildAccountPanel() {
   const description = createElement(
     'div',
     'settings-muted',
-    'Deleting your account permanently removes your profile data from Firebase.'
+    'Deleting your account permanently removes your profile (stats, stages, characters, coins and items) and frees your name.'
   );
+  const guestNote = createElement('div', 'settings-muted', 'Playing as a guest: there is no account to delete.');
 
   const deleteButton = createElement('button', 'settings-button settings-button-danger', 'Delete Account');
   deleteButton.type = 'button';
@@ -591,8 +580,15 @@ function buildAccountPanel() {
   const status = createElement('div', 'settings-muted');
   status.dataset.field = 'delete-account-status';
 
+  // Guests have no profile: only the note
+  const isGuest = !!context.appState?.isGuest?.();
+  description.hidden = isGuest;
+  deleteButton.hidden = isGuest;
+  guestNote.hidden = !isGuest;
+
   panelEl.append(
     description,
+    guestNote,
     deleteButton,
     confirm,
     status
@@ -664,43 +660,13 @@ function buildSwordGyroPanel() {
   const gyroSensHint = createElement('div', 'settings-muted');
   gyroSensHint.textContent = 'How far the sword turns for each tilt of the phone. "This Device" is used when the game screen is also the sword — higher means smaller movements, so you can keep watching the screen.';
 
-  // Sensitivity sliders
-  const sensSection = createElement('h3', 'settings-section-title', 'Hit Detection Sensitivity');
-
-  const cfg = window.phoneSwordSwingCfg || {};
-
-  const swingSpeedField = createRangeField({ id: 'sg-swing-speed', label: 'Min Swing Speed (deg/s)', min: 500, max: 15000, step: 100 });
-  swingSpeedField.input.value = `${cfg.speedThreshold ?? 4370}`;
-  swingSpeedField.valueLabel.textContent = `${cfg.speedThreshold ?? 4370}`;
-
-  const swingArcField = createRangeField({ id: 'sg-swing-arc', label: 'Min Swing Arc (deg)', min: 5, max: 90, step: 1 });
-  swingArcField.input.value = `${cfg.minSwingDelta ?? 25}`;
-  swingArcField.valueLabel.textContent = `${cfg.minSwingDelta ?? 25}°`;
-
-  const sweepSpeedField = createRangeField({ id: 'sg-sweep-speed', label: 'Min Sweep Speed (deg/s)', min: 50, max: 5000, step: 50 });
-  sweepSpeedField.input.value = `${cfg.minSweepSpeed ?? 100}`;
-  sweepSpeedField.valueLabel.textContent = `${cfg.minSweepSpeed ?? 100}`;
-
-  const sweepDistField = createRangeField({ id: 'sg-sweep-dist', label: 'Min Tip Movement (m)', min: 0.01, max: 1.0, step: 0.01 });
-  sweepDistField.input.value = `${cfg.minSweepDist ?? 0.3}`;
-  sweepDistField.valueLabel.textContent = `${(cfg.minSweepDist ?? 0.3).toFixed(2)}m`;
-
-  const sensHint = createElement('div', 'settings-muted');
-  sensHint.textContent = 'Lower values = easier to register hits. Higher values = harder but more deliberate.';
-
   panelEl.append(
     calibSection,
     recalGroup,
     gyroSensSection,
     localSensField.field,
     phoneSensField.field,
-    gyroSensHint,
-    sensSection,
-    swingSpeedField.field,
-    swingArcField.field,
-    sweepSpeedField.field,
-    sweepDistField.field,
-    sensHint
+    gyroSensHint
   );
 
   elements.swordGyroFields = {
@@ -709,14 +675,6 @@ function buildSwordGyroPanel() {
     localSensValue: localSensField.valueLabel,
     phoneSensInput: phoneSensField.input,
     phoneSensValue: phoneSensField.valueLabel,
-    swingSpeedInput: swingSpeedField.input,
-    swingSpeedValue: swingSpeedField.valueLabel,
-    swingArcInput: swingArcField.input,
-    swingArcValue: swingArcField.valueLabel,
-    sweepSpeedInput: sweepSpeedField.input,
-    sweepSpeedValue: sweepSpeedField.valueLabel,
-    sweepDistInput: sweepDistField.input,
-    sweepDistValue: sweepDistField.valueLabel,
   };
 
   return panelEl;
@@ -725,13 +683,12 @@ function buildSwordGyroPanel() {
 function buildPanels() {
   const body = createElement('div', 'settings-body');
   elements.panels = {
-    character: buildCharacterPanel(),
+    profile: buildProfilePanel(),
     multiplayer: buildMultiplayerPanel(),
     display: buildDisplayPanel(),
     swordgyro: buildSwordGyroPanel(),
     about: buildAboutPanel(),
-    account: buildAccountPanel(),
-    developer: buildDeveloperPanel()
+    account: buildAccountPanel()
   };
   body.append(...Object.values(elements.panels));
   return body;
@@ -901,6 +858,7 @@ function openOverlay() {
   } else {
     panel?.focus?.();
   }
+  syncCameraFields();
   updateUI();
 }
 
@@ -933,13 +891,17 @@ async function handleAction(target) {
     await openLeaderboardOverlay();
   } else if (action === 'reconnect') {
     getMultiplayer()?.reconnect?.();
-  } else if (action === 'toggle-console') {
-    const visible = elements.consoleLog.style.display === 'block';
-    elements.consoleLog.style.display = visible ? 'none' : 'block';
-    elements.consoleButton.textContent = visible ? 'Show Console' : 'Hide Console';
-  } else if (action === 'copy-debug') {
-    const info = collectDebugInfo();
-    navigator.clipboard?.writeText?.(info);
+  } else if (action === 'copy-camera') {
+    const cfg = window.playerControls?.getCameraConfig?.() ?? CAMERA_CONFIG_DEFAULTS;
+    const ok = await copyText(JSON.stringify(cfg));
+    const button = elements.displayFields?.cameraCopyButton;
+    if (button) {
+      button.textContent = ok ? '✅ Copied!' : 'Copy failed';
+      setTimeout(() => { button.textContent = 'Copy Values'; }, 1500);
+    }
+  } else if (action === 'reset-camera') {
+    window.playerControls?.setCameraConfig?.({ ...CAMERA_CONFIG_DEFAULTS });
+    syncCameraFields();
   } else if (action === 'save-name') {
     if (!elements.nameInput) return;
     const desiredName = elements.nameInput.value.trim();
@@ -979,28 +941,23 @@ async function handleAction(target) {
       }
       updateNameSaveState();
     }
-  } else if (action === 'clear-server-state') {
-    const { clearServerButton, clearServerStatus } = elements;
-    const confirmed = window.confirm(
-      'Clear server-side rooms, sessions, and caches? This will disconnect players.'
-    );
-    if (!confirmed) return;
-    clearServerButton.disabled = true;
-    clearServerStatus.textContent = 'Clearing server-side state...';
+  } else if (action === 'clear-cache') {
+    // Service worker caches (public/service-worker.js) + the worker itself; the reload
+    // fetches fresh files and registers it again. localStorage / cookies are untouched.
+    if (!window.confirm('Clear the cached game files and reload?')) return;
+    elements.clearCacheButton.disabled = true;
+    elements.clearCacheStatus.textContent = 'Clearing cache...';
     try {
-      const result = await clearMultiplayerServerState();
-      if (result.failed.length) {
-        const failedList = result.failed.map(item => item.path).join(', ');
-        clearServerStatus.textContent = `Cleared: ${result.cleared.join(', ')}. Failed: ${failedList}.`;
-      } else {
-        clearServerStatus.textContent = `Cleared: ${result.cleared.join(', ')}.`;
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(key => caches.delete(key)));
       }
+      const registrations = await navigator.serviceWorker?.getRegistrations?.() ?? [];
+      await Promise.all(registrations.map(registration => registration.unregister()));
     } catch (error) {
-      console.warn('Failed to clear server-side state:', error);
-      clearServerStatus.textContent = 'Failed to clear server-side state. Check console.';
-    } finally {
-      clearServerButton.disabled = false;
+      console.warn('Failed to clear cache:', error);
     }
+    window.location.reload();
   } else if (action === 'delete-account') {
     if (elements.deleteAccountConfirm) {
       elements.deleteAccountConfirm.hidden = false;
@@ -1120,84 +1077,20 @@ function bindEvents() {
     });
   }
 
-  if (elements.displayFields?.modeSelect) {
-    elements.displayFields.modeSelect.addEventListener('change', (event) => {
-      const value = event.target.value;
-      context.appState?.setDisplayMode?.(value);
-    });
-  }
-
   if (elements.displayFields?.performanceSelect) {
     elements.displayFields.performanceSelect.addEventListener('change', (event) => {
       const value = event.target.value;
       context.appState?.setDisplaySetting?.('performanceMode', value);
     });
   }
-  if (elements.displayFields?.firstPersonToggle) {
-    elements.displayFields.firstPersonToggle.addEventListener('change', (event) => {
-      if (window.playerControls) {
-        window.playerControls.firstPersonView = event.target.checked;
-      }
+  Object.entries(elements.displayFields?.cameraFields || {}).forEach(([key, { input, valueLabel }]) => {
+    const { decimals } = CAMERA_FIELDS.find(field => field.key === key);
+    input.addEventListener('input', () => {
+      const value = parseFloat(input.value);
+      valueLabel.textContent = value.toFixed(decimals);
+      window.playerControls?.setCameraConfig?.({ [key]: value });
     });
-  }
-
-  const _wireTpSlider = (sliderKey, valueKey, tpConfigKey, format) => {
-    const slider = elements.displayFields?.[sliderKey];
-    if (!slider) return;
-    const syncFromControls = () => {
-      const cfg = window.playerControls?.tpConfig;
-      if (cfg && tpConfigKey in cfg) {
-        slider.value = cfg[tpConfigKey];
-        if (elements.displayFields?.[valueKey]) {
-          elements.displayFields[valueKey].textContent = format(cfg[tpConfigKey]);
-        }
-      }
-    };
-    slider.addEventListener('input', (event) => {
-      const value = parseFloat(event.target.value);
-      if (window.playerControls?.tpConfig) {
-        window.playerControls.tpConfig[tpConfigKey] = value;
-      }
-      if (elements.displayFields?.[valueKey]) {
-        elements.displayFields[valueKey].textContent = format(value);
-      }
-    });
-    syncFromControls();
-    window.addEventListener('playercontrols-ready', syncFromControls, { once: true });
-  };
-
-  _wireTpSlider('camDistanceSlider', 'camDistanceValue', 'distance', v => v.toFixed(1));
-  _wireTpSlider('camHeightSlider', 'camHeightValue', 'height', v => v.toFixed(2));
-  _wireTpSlider('lookTargetSlider', 'lookTargetValue', 'lookTargetHeight', v => v.toFixed(1));
-  _wireTpSlider('capsuleOpacitySlider', 'capsuleOpacityValue', 'capsuleOpacity', v => v.toFixed(2));
-
-  if (elements.displayFields?.fovSlider) {
-    const fovSlider = elements.displayFields.fovSlider;
-    const syncFov = () => {
-      const cam = window.playerControls?.camera;
-      if (cam) {
-        fovSlider.value = cam.fov;
-        if (elements.displayFields?.fovValue) {
-          elements.displayFields.fovValue.textContent = Math.round(cam.fov);
-        }
-      }
-    };
-    fovSlider.addEventListener('input', (event) => {
-      const v = parseFloat(event.target.value);
-      const controls = window.playerControls;
-      if (controls) {
-        controls.camera.fov = v;
-        controls.camera.updateProjectionMatrix();
-        controls.defaultFov = v;
-        controls.defaultFovDesktop = v;
-      }
-      if (elements.displayFields?.fovValue) {
-        elements.displayFields.fovValue.textContent = Math.round(v);
-      }
-    });
-    syncFov();
-    window.addEventListener('playercontrols-ready', syncFov, { once: true });
-  }
+  });
 
   if (elements.displayFields?.gyroToggle) {
     elements.displayFields.gyroToggle.addEventListener('change', async (event) => {
@@ -1250,23 +1143,6 @@ function bindEvents() {
 
   if (elements.swordGyroFields) {
     const f = elements.swordGyroFields;
-    const bindSwingSlider = (input, valueEl, cfgKey, fmt) => {
-      input.addEventListener('input', () => {
-        const v = parseFloat(input.value);
-        valueEl.textContent = fmt ? fmt(v) : `${v}`;
-        if (!window.phoneSwordSwingCfg) return;
-        window.phoneSwordSwingCfg[cfgKey] = v;
-        // Saved per device (loaded in bootstrapGameApp.js), so it applies in every mode
-        try {
-          const saved = JSON.parse(localStorage.getItem('sq:swordSwingCfg') || '{}');
-          localStorage.setItem('sq:swordSwingCfg', JSON.stringify({ ...saved, [cfgKey]: v }));
-        } catch (_) { /* ignore */ }
-      });
-    };
-    bindSwingSlider(f.swingSpeedInput, f.swingSpeedValue, 'speedThreshold', v => `${Math.round(v)}`);
-    bindSwingSlider(f.swingArcInput, f.swingArcValue, 'minSwingDelta', v => `${Math.round(v)}°`);
-    bindSwingSlider(f.sweepSpeedInput, f.sweepSpeedValue, 'minSweepSpeed', v => `${Math.round(v)}`);
-    bindSwingSlider(f.sweepDistInput, f.sweepDistValue, 'minSweepDist', v => `${v.toFixed(2)}m`);
     const bindSensSlider = (input, valueEl, globalKey, storageKey) => {
       input.addEventListener('input', () => {
         const v = parseFloat(input.value);
@@ -1280,24 +1156,15 @@ function bindEvents() {
   }
 }
 
-function collectDebugInfo() {
-  const connectionStatus = context.appState?.getConnectionStatus?.() ?? 'Unknown';
-  const lastPing = context.appState?.getLastPing?.();
-  const lastError = context.appState?.getLastError?.();
-  const version = context.appState?.getAppVersion?.() ?? 'unknown';
-  const viewport = `${window.innerWidth}x${window.innerHeight}`;
-  const playerPosition = window.playerModel?.position;
-  const playerText = playerPosition ? `${playerPosition.x.toFixed(2)}, ${playerPosition.z.toFixed(2)}` : '—';
-  const info = [
-    `version: ${version}`,
-    `userAgent: ${navigator.userAgent}`,
-    `viewport: ${viewport}`,
-    `connectionStatus: ${connectionStatus}`,
-    `lastPing: ${typeof lastPing === 'number' ? `${lastPing} ms` : 'N/A'}`,
-    `playerXZ: ${playerText}`,
-    `lastError: ${lastError ? `${lastError.message} @ ${formatTimestamp(lastError.timestamp)}` : '—'}`
-  ];
-  return info.join('\n');
+// Camera sliders ← PlayerControls.cameraConfig (when the panel opens, after Reset)
+function syncCameraFields() {
+  const cfg = window.playerControls?.getCameraConfig?.() ?? CAMERA_CONFIG_DEFAULTS;
+  CAMERA_FIELDS.forEach(({ key, decimals }) => {
+    const field = elements.displayFields?.cameraFields?.[key];
+    if (!field || !Number.isFinite(cfg[key])) return;
+    field.input.value = `${cfg[key]}`;
+    field.valueLabel.textContent = cfg[key].toFixed(decimals);
+  });
 }
 
 function refreshLayout() {
@@ -1333,22 +1200,26 @@ export function updateUI() {
     }
     updateNameSaveState();
   }
-  if (elements.characterStatFields && context.appState?.getPlayerStats) {
-    const stats = context.appState.getPlayerStats() || {};
-    Object.entries(elements.characterStatFields).forEach(([key, node]) => {
-      node.textContent = formatStatValue(key, stats[key]);
-    });
-  }
-  if (elements.phoneSwordStatFields) {
-    const psStats = context.appState?.getPhoneSwordStats?.() || {};
-    Object.entries(elements.phoneSwordStatFields).forEach(([key, node]) => {
-      const val = psStats[key];
-      node.textContent = Number.isFinite(val) ? String(Math.max(0, Math.floor(val))) : '—';
+  if (elements.profileStatFields && context.appState?.getProfileStats) {
+    const stats = context.appState.getProfileStats() || {};
+    elements.profileStatFields.forEach(({ node, pick, row }) => {
+      const section = pick(stats) || {};
+      node.textContent = row.format ? row.format(section) : formatStatValue(section[row.key]);
     });
   }
 
+  const inMultiplayer = !!getMultiplayer();
+  if (elements.multiplayerOfflineHint) {
+    elements.multiplayerOfflineHint.hidden = inMultiplayer;
+  }
+  if (elements.reconnectButton) {
+    elements.reconnectButton.hidden = !inMultiplayer;
+  }
   if (elements.connectionStatus) {
-    elements.connectionStatus.textContent = context.appState?.getConnectionStatus?.() ?? 'Connecting';
+    elements.connectionStatus.textContent = context.appState?.getConnectionStatus?.() ?? 'Offline';
+  }
+  if (elements.room) {
+    elements.room.textContent = describeRoom(context.appState?.getMultiplayerRoom?.());
   }
   if (elements.ping) {
     const ping = context.appState?.getLastPing?.();
@@ -1358,14 +1229,11 @@ export function updateUI() {
     const players = context.appState?.getConnectedPlayers?.() ?? [];
     elements.playersList.innerHTML = '';
     if (!players.length) {
-      const empty = createElement('li', 'settings-muted', 'No active connections.');
+      const empty = createElement('li', 'settings-muted', inMultiplayer ? 'Nobody else here yet.' : 'Not connected.');
       elements.playersList.appendChild(empty);
     } else {
       players.forEach((player) => {
-        const item = createElement('li', 'settings-list-item');
-        const distance = player.distance != null ? ` • ${formatDistance(player.distance)}` : '';
-        item.textContent = `${player.name} (${player.id})${distance}`;
-        elements.playersList.appendChild(item);
+        elements.playersList.appendChild(createElement('li', 'settings-list-item', player.name));
       });
     }
   }
@@ -1378,11 +1246,6 @@ export function updateUI() {
 
   if (elements.displayFields && context.appState?.getDisplaySettings) {
     const displaySettings = context.appState.getDisplaySettings();
-    if (displaySettings?.mode && elements.displayFields.modeSelect) {
-      if (elements.displayFields.modeSelect.value !== displaySettings.mode) {
-        elements.displayFields.modeSelect.value = displaySettings.mode;
-      }
-    }
     if (displaySettings?.performanceMode && elements.displayFields.performanceSelect) {
       if (elements.displayFields.performanceSelect.value !== displaySettings.performanceMode) {
         elements.displayFields.performanceSelect.value = displaySettings.performanceMode;
@@ -1451,11 +1314,10 @@ export function initSettingsPanel({ appState, getMultiplayer, player } = {}) {
 
   refreshLayout();
 
+  // (A tab saved by an older version — Character, Developer — falls back to Profile)
   const storedTab = localStorage.getItem(TAB_KEY);
-  setActiveTab(storedTab && elements.tabs[storedTab] ? storedTab : 'character');
+  setActiveTab(storedTab && elements.tabs[storedTab] ? storedTab : 'profile');
 
   bindEvents();
-  const savedTab = localStorage.getItem(TAB_KEY) || 'character';
-  setActiveTab(savedTab);
   updateUI();
 }

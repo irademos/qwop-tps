@@ -56,6 +56,8 @@ import {
   savePhoneSwordStage,
   loadPhoneSwordStage,
   saveClassicStage,
+  saveClassicStats,
+  normalizeStageStats,
   loadClassicStage,
   saveShowdownCharacters,
   loadShowdownCharacters,
@@ -552,9 +554,9 @@ const SWORD_SHOWDOWN_BGS_VOLUME_SCALE = 0.5;
 // as sq:swordLocalSensitivity / sq:swordPhoneSensitivity.
 const PHONE_SWORD_LOCAL_SENSITIVITY_DEFAULT = 2;
 const PHONE_SWORD_PHONE_SENSITIVITY_DEFAULT = 1;
-// Settings → Sword Gyro hit detection sliders, saved per device (settingsPanel.js writes it)
+// Settings → Sword Gyro used to have hit detection sliders saved here; they're gone, so a
+// leftover value is dropped and everyone gets the tuned defaults in phoneSwordSwingCfg
 const SWORD_SWING_CFG_STORAGE_KEY = 'sq:swordSwingCfg';
-const SWORD_SWING_CFG_SAVED_KEYS = ['speedThreshold', 'minSwingDelta', 'minSweepSpeed', 'minSweepDist'];
 
 async function initCore(runtimeContext) {
   document.body.addEventListener('touchstart', () => {}, { once: true });
@@ -838,13 +840,7 @@ async function initCore(runtimeContext) {
     hitKnockbackWeak: 20,    // horizSpeed for non-killing hits (killing hits always use full force)
     enemyBounceHoldDur: 2.0, // seconds enemy sword stays stuck after being blocked by player
   };
-  // Hit detection sliders from Settings → Sword Gyro (saved per device, every mode)
-  try {
-    const saved = JSON.parse(localStorage.getItem(SWORD_SWING_CFG_STORAGE_KEY) || '{}');
-    for (const key of SWORD_SWING_CFG_SAVED_KEYS) {
-      if (Number.isFinite(saved?.[key])) window.phoneSwordSwingCfg[key] = saved[key];
-    }
-  } catch (_) { /* keep defaults */ }
+  try { localStorage.removeItem(SWORD_SWING_CFG_STORAGE_KEY); } catch (_) { /* ignore */ }
 
   const tempVector3A = new THREE.Vector3();
   const PISTOL_AMMO_KEY = 'gun bullets';
@@ -1051,7 +1047,6 @@ async function initCore(runtimeContext) {
     );
   scene.background = skyboxTexture;
 
-  const DISPLAY_MODES = new Set(['auto', 'day', 'night']);
   const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
   const pickupEmissiveMaterials = new Set();
   let pickupEmissiveBrightness = 1;
@@ -1222,9 +1217,9 @@ async function initCore(runtimeContext) {
   let currentPerformanceTier = resolvePerformanceTier(displaySettings.performanceMode);
   let optionalShadowsEnabled = !isLowEndTier(currentPerformanceTier);
 
-  if (!DISPLAY_MODES.has(displaySettings.mode)) {
-    displaySettings.mode = 'auto';
-  }
+  // No day/night picker any more (Showdown's stage screen picks each stage's time of day,
+  // Classic and Multiplayer are always day): a mode saved by older versions is ignored
+  displaySettings.mode = 'auto';
   if (!PERFORMANCE_MODES.has(displaySettings.performanceMode)) {
     displaySettings.performanceMode = 'auto';
   }
@@ -1309,22 +1304,6 @@ async function initCore(runtimeContext) {
     lastAutoMode = nextMode;
     applyPresetForMode(nextMode);
     saveDisplaySettings();
-    applyDisplaySettings();
-    updateSettingsUI();
-  };
-
-  const setDisplayMode = (mode) => {
-    if (!DISPLAY_MODES.has(mode)) return;
-    displaySettings.mode = mode;
-    if (mode === 'auto') {
-      lastAutoMode = getAutoMode();
-      applyPresetForMode(lastAutoMode);
-    } else {
-      lastAutoMode = mode;
-      applyPresetForMode(mode);
-    }
-    saveDisplaySettings();
-    applyRendererPerformanceSettings();
     applyDisplaySettings();
     updateSettingsUI();
   };
@@ -3271,8 +3250,15 @@ async function initCore(runtimeContext) {
       }
     }
   };
-  // Phone sword session stats (kills, deaths, highestStage)
-  let _psStats = { kills: 0, deaths: 0, highestStage: 1 };
+  // Sword Showdown stats (kills, deaths, highestStage), from the profile loaded at login so
+  // they're right before Showdown is ever started (Settings → Profile, deaths in other modes).
+  // highestStage is never below the stage saved here or in Firebase; a stale stored value
+  // is written back so the Top Stage leaderboard is right too.
+  let _psStats = normalizeStageStats(playerProfile?.phoneSwordStats);
+  if (_psSavedStage() > _psStats.highestStage) _psStats.highestStage = _psSavedStage();
+  if (profileNameKey && _psStats.highestStage !== Number(playerProfile?.phoneSwordStats?.highestStage)) {
+    void savePhoneSwordStats(profileNameKey, { highestStage: _psStats.highestStage });
+  }
   // Load stage from Firebase first (async), fallback to localStorage
   let _psStage = _psSavedStage();
   let _psEnemyQueue = [];   // [{pos, hearts, triggerDist, bombThrower, characterUrl, boss, nameTag}]
@@ -3317,9 +3303,17 @@ async function initCore(runtimeContext) {
   const _classicSavedStage = () => {
     try { const k = _classicStageLsKey(); return k ? (parseInt(localStorage.getItem(k), 10) || 1) : 1; } catch (_) { return 1; }
   };
+  // Classic stats (kills, deaths, highestStage) — Classic kills/deaths don't count for Showdown
+  let _classicStats = normalizeStageStats(playerProfile?.classicStats);
+  if (_classicSavedStage() > _classicStats.highestStage) _classicStats.highestStage = _classicSavedStage();
+  const _classicSaveStats = () => { if (profileNameKey) void saveClassicStats(profileNameKey, _classicStats); };
   const _classicSaveStage = (stage) => {
     try { const k = _classicStageLsKey(); if (k) localStorage.setItem(k, stage); } catch (_) {}
     if (profileNameKey) void saveClassicStage(profileNameKey, stage);
+    if (stage > _classicStats.highestStage) {
+      _classicStats.highestStage = stage;
+      _classicSaveStats();
+    }
   };
   const _classicScoreValue = document.getElementById('classic-score-value');
   const _classicUpdateScore = () => {
@@ -4020,7 +4014,12 @@ async function initCore(runtimeContext) {
           loadPhoneSwordStage(profileNameKey),
           loadShowdownCharacters(profileNameKey)
         ]);
-        _psStats = fbStats;
+        // (Only ever grows: keep the higher of Firebase and this session, e.g. another device)
+        _psStats = {
+          kills: Math.max(fbStats.kills, _psStats.kills),
+          deaths: Math.max(fbStats.deaths, _psStats.deaths),
+          highestStage: Math.max(fbStats.highestStage, _psStats.highestStage)
+        };
         // Characters: union of Firebase + localStorage unlocks; local pick wins
         const localChars = _psLoadLocalChars();
         _psChars = _psNormalizeChars({
@@ -4030,6 +4029,7 @@ async function initCore(runtimeContext) {
         // Use whichever is higher: Firebase stage or localStorage
         const lsStage = _psSavedStage();
         _psStage = Math.max(fbStage, lsStage);
+        _psStats.highestStage = Math.max(_psStats.highestStage, _psStage);
         // Sync localStorage to Firebase value
         try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, _psStage); } catch (_) {}
       } catch (_) { /* keep localStorage value */ }
@@ -4552,6 +4552,14 @@ async function initCore(runtimeContext) {
   const noBtn = document.getElementById('continue-no');
 
   function showGameOver() {
+    // Counted on death (not on Continue, so quitting from Game Over counts too)
+    if (_classicMode) {
+      _classicStats.deaths += 1;
+      _classicSaveStats();
+    } else if (!showdownTutorial?.isActive()) {
+      _psStats.deaths = (_psStats.deaths || 0) + 1;
+      if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
+    }
     gameOverOverlay.classList.remove('hidden');
     continueSection.classList.add('hidden');
     gameOverMessage.style.opacity = 0;
@@ -4585,8 +4593,6 @@ async function initCore(runtimeContext) {
       clearInterval(interval);
       hideGameOver();
       respawnPlayer();
-      _psStats.deaths = (_psStats.deaths || 0) + 1;
-      if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
       _psRestartCurrentStage();
     };
 
@@ -4681,6 +4687,36 @@ async function initCore(runtimeContext) {
     getPlayerStats: () => ({ ...statsState }),
     getPhoneSwordLeaderboards: (limit = 10) => loadPhoneSwordLeaderboards(limit),
     getPhoneSwordStats: () => ({ ..._psStats }),
+    // Everything Settings → Profile shows (Showdown / Classic stage stats, upgrades, characters)
+    getProfileStats: () => ({
+      level: statsState.level,
+      xp: statsState.xp,
+      coins: statsState.coins,
+      showdown: {
+        // (_psStage holds Classic's stage while Classic runs; guests have nothing saved)
+        currentStage: profileNameKey
+          ? Math.max(_psSavedStage(), Number(playerProfile?.phoneSwordStats?.currentStage) || 1)
+          : (_classicMode ? 1 : _psStage),
+        highestStage: _psStats.highestStage,
+        kills: _psStats.kills,
+        deaths: _psStats.deaths,
+        maxHearts: statsState.maxHealthSegments,
+        shieldUpgrades: statsState.shieldUpgrades || 0,
+        bombs: getPlayerBombCount(),
+        bubbles: getBubbleCount(),
+        charactersUnlocked: _psChars.unlocked.length,
+        charactersTotal: Object.keys(MATCH_CHARACTERS).length
+      },
+      classic: {
+        currentStage: profileNameKey
+          ? Math.max(_classicSavedStage(), Number(playerProfile?.classicStats?.currentStage) || 1)
+          : (_classicMode ? _psStage : 1),
+        highestStage: _classicStats.highestStage,
+        kills: _classicStats.kills,
+        deaths: _classicStats.deaths
+      }
+    }),
+    isGuest: () => isGuest,
     getCoins: () => (Number.isFinite(statsState.coins) ? statsState.coins : 0),
     addCoins: (delta) => {
       const safeDelta = Number.isFinite(delta) ? delta : 0;
@@ -4745,26 +4781,16 @@ async function initCore(runtimeContext) {
     unequipInventoryItem: (itemId) => unequipInventoryItem(itemId),
     addToInventory: (itemId, amount) => addToInventory(itemId, amount),
     removeFromInventory: (itemId, amount) => removeFromInventory(itemId, amount),
-    getConnectedPlayers: () => {
-      const players = [];
-      const playerPos = playerModel?.position;
-      const connections = multiplayer?.connections || {};
-      Object.keys(connections).forEach((id) => {
-        const other = otherPlayers[id];
-        let distance = remotePresenceMeta[id]?.lastDistance ?? null;
-        if (distance == null && other?.model && playerPos) {
-          distance = playerPos.distanceTo(other.model.position);
-        }
-        players.push({
-          id,
-          name: other?.name || `Player ${id.slice(0, 4)}`,
-          distance
-        });
-      });
-      return players;
-    },
+    // Peers this client is connected to in its current room (lobby / duel / party / battle)
+    getConnectedPlayers: () => Object.keys(multiplayer?.connections || {}).map((id) => ({
+      id,
+      name: otherPlayers[id]?.name || `Player ${id.slice(0, 4)}`
+    })),
+    // Room id (lobby, duel-<id>, mm-<mode>, party-<id>, match-<id>) or null outside Multiplayer
+    getMultiplayerRoom: () => multiplayer?.roomId ?? null,
     getConnectionStatus: () => {
-      if (!multiplayer?.peer) return 'Connecting';
+      if (!multiplayer) return 'Offline';
+      if (!multiplayer.peer) return 'Connecting';
       if (multiplayer.peer.destroyed) return 'Disconnected';
       if (multiplayer.peer.disconnected) return 'Disconnected';
       if (multiplayer.peer.open) return 'Connected';
@@ -4774,16 +4800,20 @@ async function initCore(runtimeContext) {
     getLastError: () => {
       return multiplayer?.lastError ?? null;
     },
-    getAppVersion: () => import.meta.env?.VITE_APP_VERSION || import.meta.env?.VITE_GIT_COMMIT || 'unknown',
     getDisplaySettings: () => ({ ...displaySettings }),
-    setDisplayMode: (mode) => setDisplayMode(mode),
     setDisplaySetting: (key, value) => setDisplaySetting(key, value),
     deleteAccount: async () => {
       if (!profileNameKey) {
         return { status: 'missing-key' };
       }
-      const result = await deleteProfileData(profileNameKey, playerName);
+      const deletedKey = profileNameKey;
+      const result = await deleteProfileData(deletedKey, playerName);
       if (result.status === 'ok') {
+        // Local progress too, or re-registering the same name would bring the stages back
+        [_psStageLsKey(), _classicStageLsKey(), _psCharsLsKey()].forEach((k) => {
+          try { if (k) localStorage.removeItem(k); } catch (_) { /* ignore */ }
+        });
+        profileNameKey = null; // nothing more gets saved before the reload
         localStorage.removeItem('playerName');
         setCookie('playerName', '', -1);
         clearStoredPin(playerName);
@@ -4868,21 +4898,6 @@ async function initCore(runtimeContext) {
   setInterval(() => {
     updateAutoDisplayMode();
   }, 60 * 1000);
-
-  const consoleDiv = document.getElementById("console-log");
-  if (runtimeContext.debugFlags.DEBUG_CONSOLE === true) {
-    (function() {
-      const originalLog = console.log;
-      console.log = function(...args) {
-        originalLog(...args);
-        if (!consoleDiv) return;
-        const msg = document.createElement("div");
-        msg.textContent = args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(" ");
-        consoleDiv.appendChild(msg);
-        consoleDiv.scrollTop = consoleDiv.scrollHeight;
-      };
-    })();
-  }
 
   const getMeshWorldBounds = (mesh) => {
     const geometry = mesh.geometry;
@@ -6539,7 +6554,12 @@ async function initCore(runtimeContext) {
           // Remove from array once the Three.js group has been removed from scene
           if (!_he.group.parent) {
             hordeEnemies.splice(_hi, 1);
-            if (_he._tutorial || _classicMode) continue; // tutorial / Classic kills don't count
+            if (_he._tutorial) continue; // tutorial kills don't count
+            if (_classicMode) {
+              _classicStats.kills += 1;
+              _classicSaveStats();
+              continue;
+            }
             _psStats.kills = (_psStats.kills || 0) + 1;
             if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
           } else {

@@ -10,7 +10,13 @@ import { loadNippleJs } from '../core/externalDeps.js';
 
 const PLAYER_RADIUS = 0.3;
 const PLAYER_HALF_HEIGHT = 0.6;
-const FIRST_PERSON_EYE_HEIGHT = 0.7;
+// Camera (Settings → Display → First Person Camera; saved per device in CAMERA_CONFIG_KEY):
+// the eye sits eyeHeight above the player's feet (+ height), distance metres behind it.
+// distance 0 = from the eyes (the body is hidden below FIRST_PERSON_HIDE_BODY_DIST).
+// fov = base field of view (portrait phones add MOBILE_PORTRAIT_CAMERA_FOV_BONUS).
+export const CAMERA_CONFIG_DEFAULTS = Object.freeze({ distance: 1.0, eyeHeight: 1.5, height: 0.0, fov: 100 });
+const CAMERA_CONFIG_KEY = 'sq:cameraCfg';
+const FIRST_PERSON_HIDE_BODY_DIST = 0.2;
 const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const WEAPON_CAMERA_FOV_DELTA = 8;
 const CAMERA_FOV_LERP_SPEED = 6;
@@ -109,9 +115,16 @@ export class PlayerControls {
     this.camera.position.set(this.playerX, this.playerY + 2, this.playerZ + 5);
     this.camera.lookAt(this.playerX, this.playerY + 1, this.playerZ);
 
-    this.firstPersonView = false;
-    this.tpConfig = { distance: 1.0, height: 0.0, lookTargetHeight: 1.5, capsuleOpacity: 0.6 };
-    this.defaultFovDesktop = this.camera.fov;
+    this.cameraConfig = { ...CAMERA_CONFIG_DEFAULTS };
+    try {
+      const saved = JSON.parse(localStorage.getItem(CAMERA_CONFIG_KEY) || 'null');
+      if (saved && typeof saved === 'object') {
+        for (const key of Object.keys(CAMERA_CONFIG_DEFAULTS)) {
+          if (Number.isFinite(saved[key])) this.cameraConfig[key] = saved[key];
+        }
+      }
+    } catch (_) { /* defaults */ }
+    this.defaultFovDesktop = this.cameraConfig.fov;
     this.applyMobilePortraitCameraTuning();
 
     // Initialize controls based on device
@@ -136,6 +149,20 @@ export class PlayerControls {
       this.ammoIconEl.textContent = this.ammoIcon;
     }
     this.updateAmmoUI(!!this.getEquippedGun());
+  }
+
+  getCameraConfig() {
+    return { ...this.cameraConfig };
+  }
+
+  // Partial update ({ distance, eyeHeight, height, fov }), saved per device
+  setCameraConfig(partial = {}) {
+    for (const key of Object.keys(CAMERA_CONFIG_DEFAULTS)) {
+      if (Number.isFinite(partial[key])) this.cameraConfig[key] = partial[key];
+    }
+    this.defaultFovDesktop = this.cameraConfig.fov;
+    this.applyMobilePortraitCameraTuning();
+    try { localStorage.setItem(CAMERA_CONFIG_KEY, JSON.stringify(this.cameraConfig)); } catch (_) { /* ignore */ }
   }
 
   // Portrait phones get a wider field of view
@@ -920,45 +947,26 @@ export class PlayerControls {
       Math.sin(this.pitch),
       Math.cos(this.yaw) * Math.cos(this.pitch)
     );
-    if (this.firstPersonView) {
-      // First-person view: place camera at player's eye and look in yaw/pitch direction
-      const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(0, FIRST_PERSON_EYE_HEIGHT, 0));
-      this.camera.position.copy(eyePosition);
-      this.camera.lookAt(eyePosition.clone().add(lookDirection));
-      if (this.playerModel) {
-        // Hide the body but keep floating hands/arms (direct playerGroup children) visible
-        const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
-        if (bodyRoot) bodyRoot.visible = false;
-        else this.playerModel.visible = false;
-      }
-    } else {
-      // Third-person view: orbit camera around player using yaw + pitch
-      const { distance, height, lookTargetHeight, capsuleOpacity } = this.tpConfig;
-      const tpCenter = this.playerModel.position.clone().add(new THREE.Vector3(0, lookTargetHeight, 0));
+    {
+      // Orbit the eye point using yaw + pitch, `distance` behind it (see CAMERA_CONFIG_DEFAULTS)
+      const { distance, height, eyeHeight } = this.cameraConfig;
+      const eye = this.playerModel.position.clone().add(new THREE.Vector3(0, eyeHeight, 0));
       const pitchClamped = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pitch));
       const horizontalDist = distance * Math.cos(pitchClamped);
       const verticalOffset = height + distance * Math.sin(pitchClamped);
       this.camera.position.set(
-        tpCenter.x - Math.sin(this.yaw) * horizontalDist,
-        tpCenter.y + verticalOffset,
-        tpCenter.z - Math.cos(this.yaw) * horizontalDist
+        eye.x - Math.sin(this.yaw) * horizontalDist,
+        eye.y + verticalOffset,
+        eye.z - Math.cos(this.yaw) * horizontalDist
       );
-      this.camera.lookAt(tpCenter);
+      const fromEyes = distance < FIRST_PERSON_HIDE_BODY_DIST;
+      // From (almost) the eyes there's nothing to look at: look along yaw/pitch instead
+      this.camera.lookAt(distance < 0.01 ? this.camera.position.clone().add(lookDirection) : eye);
       if (this.playerModel) {
+        // From the eyes: hide the body but keep floating hands/arms (direct playerGroup children)
         const bodyRoot = this.playerModel.userData?.qwopRig?.bodyRoot;
-        if (bodyRoot) bodyRoot.visible = true;
-        else this.playerModel.visible = true;
-      }
-      // apply capsule opacity
-      const capsuleMesh = this.playerModel.getObjectByName('bodyCapsulemesh');
-      if (capsuleMesh) {
-        const mat = capsuleMesh.material;
-        const wantsTransparent = capsuleOpacity < 1.0;
-        if (mat.transparent !== wantsTransparent) {
-          mat.transparent = wantsTransparent;
-          mat.needsUpdate = true;
-        }
-        mat.opacity = capsuleOpacity;
+        if (bodyRoot) bodyRoot.visible = !fromEyes;
+        else this.playerModel.visible = !fromEyes;
       }
     }
 
