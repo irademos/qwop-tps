@@ -1180,6 +1180,12 @@ body.settings-open #inventory-button {
   color: #0b1120;
 }
 
+.arcade-guest {
+  margin-top: 4px;
+  border-color: #94a3b8;
+  background: linear-gradient(180deg, #cbd5e1, #94a3b8);
+}
+
 .arcade-start {
   font-size: 14px;
   padding: 14px 20px;

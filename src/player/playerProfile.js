@@ -257,6 +257,20 @@ export async function saveTutorialCompleted(nameKey) {
   }
 }
 
+// Guest play (no sign in): an in-memory profile with default stats and a random name.
+// Never written to Firebase; tutorialCompleted so the start screen offers every mode.
+const GUEST_ADJECTIVES = ['Brave', 'Swift', 'Sneaky', 'Mighty', 'Lucky', 'Fuzzy', 'Clever', 'Wild', 'Jolly', 'Bold'];
+const GUEST_NOUNS = ['Knight', 'Fencer', 'Squire', 'Ninja', 'Duelist', 'Ranger', 'Pirate', 'Samurai', 'Viking', 'Rogue'];
+
+export function randomGuestName() {
+  const pick = (list) => list[Math.floor(Math.random() * list.length)];
+  return `${pick(GUEST_ADJECTIVES)}${pick(GUEST_NOUNS)}${Math.floor(100 + Math.random() * 900)}`;
+}
+
+export function buildGuestProfile(name) {
+  return { ...buildProfile(name), tutorialCompleted: true };
+}
+
 async function loadProfileForName(profileRef, trimmedName) {
   const profileSnap = await get(profileRef);
   let profile = profileSnap.val();

@@ -32,7 +32,7 @@
 - **Physics:** Rapier3D (`@dimforge/rapier3d-compat`)
 - **Multiplayer:** Multiplayer mode only (Showdown is single player). Firebase (`peers` = lobby list, `rooms` = lobby / private duel rooms / `mm-<mode>` matchmaking queue / `party-<hostId>` / `match-<matchId>`, shop stock) + PeerJS WebRTC; messages: `presence`, `projectile`, `duel`, `match`
 - **World:** static GLB map (`public/glb_map/map.glb`)
-- **Auth:** PIN → SHA-256 → Firebase + cookie (no OAuth)
+- **Auth:** PIN → SHA-256 → Firebase + cookie (no OAuth); "Play Without Signing In" = guest with a random name, `profileNameKey` null, nothing saved (guard profile writes on `profileNameKey`)
 - **Build:** Vite 6, deployed on Vercel
 
 ---

@@ -14,7 +14,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone i
 | Map | Static GLB (`public/glb_map/map.glb`), height via BVH raycast |
 | Build tool | Vite 6 |
 | Deploy | Vercel (with `/api/turn-credentials` serverless function) |
-| Auth | PIN-based (SHA-256 hashed, stored in Firebase + cookie) |
+| Auth | PIN-based (SHA-256 hashed, stored in Firebase + cookie); guest play saves nothing |
 
 ---
 
@@ -177,6 +177,8 @@ After login the start screen shows only **Start Game** (runs the tutorial) until
 
 ### 8. PIN Auth
 No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hashed client-side via Web Crypto, stored in Firebase. Hash cached in cookie for auto-login.
+
+**Guest play:** "Play Without Signing In" on the login form (`data-arcade-guest` in `createArcadeOverlay`) skips auth with a random name (`randomGuestName`) and an in-memory profile (`buildGuestProfile`, all modes offered). `initCore` then has `isGuest` true and `profileNameKey` null — every profile save (`saveStats*` wrappers, stage/characters/tutorial/phoneSwordStats, localStorage `ps_*` keys) is skipped when the key is null, `playerName` isn't stored, and renaming only changes the session name. Guard new profile writes on `profileNameKey`.
 
 ---
 
