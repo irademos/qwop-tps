@@ -12,6 +12,8 @@ export {
   savePhoneSwordStage,
   loadPhoneSwordStage,
   saveClassicStage,
+  saveClassicStats,
+  normalizeStageStats,
   loadClassicStage,
   saveShowdownCharacters,
   loadShowdownCharacters,

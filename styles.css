@@ -937,17 +937,6 @@ body.settings-open #inventory-button {
   gap: 8px;
 }
 
-.settings-console {
-  max-height: 150px;
-  overflow-y: auto;
-  background: rgba(0, 0, 0, 0.8);
-  color: #0f0;
-  padding: 10px;
-  font-family: monospace;
-  font-size: 11px;
-  border-radius: 8px;
-}
-
 @media (max-width: 720px) {
   #settings-overlay {
     align-items: center;
