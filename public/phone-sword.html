@@ -4,12 +4,34 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Phone Sword Controller</title>
+  <meta name="theme-color" content="#07090f">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@700;800;900&display=swap" rel="stylesheet">
   <style>
+    /* Same design tokens as the game (styles.css :root) */
+    :root {
+      --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+      --font-display: 'Outfit', 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+      --bg-0: #07090f;
+      --surface-raised: rgba(255, 255, 255, 0.05);
+      --border: rgba(255, 255, 255, 0.10);
+      --border-strong: rgba(255, 255, 255, 0.18);
+      --text: #f1f5f9;
+      --text-muted: #9aa6b8;
+      --accent: #fbbf24;
+      --accent-ink: #1c1303;
+      --accent-gradient: linear-gradient(180deg, #fcd34d 0%, #f5a524 100%);
+      --danger: #f87171;
+    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: #0f172a;
-      color: #e2e8f0;
-      font-family: 'Segoe UI', Arial, sans-serif;
+      background:
+        radial-gradient(700px 360px at 50% -10%, rgba(251, 191, 36, 0.14), transparent 62%),
+        var(--bg-0);
+      color: var(--text);
+      font-family: var(--font-ui);
+      -webkit-font-smoothing: antialiased;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -20,13 +42,14 @@
       user-select: none;
     }
     h1 {
-      font-size: 1.6rem;
-      font-weight: 700;
+      font-family: var(--font-display);
+      font-size: 2rem;
+      font-weight: 800;
       margin-bottom: 8px;
-      color: #f8fafc;
+      color: var(--text);
     }
     .subtitle {
-      color: #94a3b8;
+      color: var(--text-muted);
       font-size: 0.95rem;
       margin-bottom: 32px;
     }
@@ -35,37 +58,40 @@
       margin-bottom: 24px;
       min-height: 1.5em;
       padding: 10px 20px;
-      border-radius: 8px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 999px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-weight: 600;
       width: 100%;
       max-width: 320px;
     }
     #connect-btn {
-      background: #6366f1;
-      color: #fff;
+      background: var(--accent-gradient);
+      color: var(--accent-ink);
       border: none;
-      border-radius: 12px;
-      padding: 16px 40px;
-      font-size: 1.2rem;
-      font-weight: 700;
+      border-radius: 14px;
+      padding: 16px 48px;
+      font-family: inherit;
+      font-size: 1.15rem;
+      font-weight: 800;
       cursor: pointer;
-      transition: background 0.15s, transform 0.1s;
+      transition: filter 0.15s, transform 0.1s;
       margin-bottom: 24px;
-      letter-spacing: 0.05em;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.35) inset, 0 8px 28px rgba(245,165,36,0.35);
     }
     #connect-btn:active { transform: scale(0.96); }
-    #connect-btn:hover { background: #4f46e5; }
-    #connect-btn:disabled { background: #475569; cursor: not-allowed; }
+    #connect-btn:hover { filter: brightness(1.06); }
+    #connect-btn:disabled { background: #334155; color: var(--text-muted); box-shadow: none; cursor: not-allowed; }
     #gyro-display {
       display: none;
       font-size: 0.85rem;
-      color: #94a3b8;
-      font-family: monospace;
+      color: var(--text-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       line-height: 1.8;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 8px;
+      background: var(--surface-raised);
+      border: 1px solid var(--border);
+      border-radius: 14px;
       padding: 12px 20px;
       width: 100%;
       max-width: 320px;
@@ -76,15 +102,22 @@
       display: none;
     }
     #error-msg {
-      color: #f87171;
+      color: var(--danger);
       font-size: 0.9rem;
       margin-top: 16px;
       min-height: 1.4em;
     }
     .sword-icon {
-      font-size: 4rem;
-      margin-bottom: 16px;
-      filter: drop-shadow(0 0 12px #6366f1);
+      display: grid;
+      place-items: center;
+      width: 96px;
+      height: 96px;
+      font-size: 3rem;
+      margin-bottom: 20px;
+      border-radius: 28px;
+      background: rgba(251, 191, 36, 0.14);
+      border: 1px solid rgba(251, 191, 36, 0.45);
+      box-shadow: 0 0 48px rgba(251, 191, 36, 0.2);
     }
     /* ── Controller layout (shown once connected) ─────────────────────── */
     body.controller-mode {
@@ -119,20 +152,20 @@
     }
     .ctl-btn {
       height: 68px;
-      border: none;
+      border: 1px solid var(--border-strong);
       border-radius: 16px;
-      background: #334155;
+      background: var(--surface-raised);
       color: #fff;
+      font-family: inherit;
       font-size: 1.05rem;
-      font-weight: 800;
-      letter-spacing: 0.03em;
+      font-weight: 700;
       touch-action: none;
       box-shadow: 0 4px 14px rgba(0,0,0,0.35);
       transition: transform 0.08s, filter 0.08s;
     }
     .ctl-btn.pressed { transform: scale(0.94); filter: brightness(1.3); }
     .ctl-btn:disabled { opacity: 0.35; }
-    .ctl-btn.equipped { outline: 3px solid #facc15; outline-offset: -3px; }
+    .ctl-btn.equipped { outline: 3px solid var(--accent); outline-offset: -3px; }
     .ctl-btn.active { outline: 3px solid #7dd3fc; outline-offset: -3px; }
     /* Tutorial: the button the game is asking for */
     .tutorial-highlight { position: relative; animation: tutorial-ring 1s ease-in-out infinite; }
@@ -140,12 +173,11 @@
       0%, 100% { box-shadow: 0 0 0 4px #facc15, 0 0 14px 4px rgba(250, 204, 21, 0.6); }
       50%      { box-shadow: 0 0 0 8px #facc15, 0 0 26px 10px rgba(250, 204, 21, 0.85); }
     }
-    #btn-bomb   { background: #7c2d12; }
-    #btn-bubble { background: #0e7490; }
-    #btn-jump   { background: #4338ca; }
-    #btn-gun    { background: #475569; }
-    #btn-shield { background: #475569; }
-    #btn-fire   { background: #b45309; }
+    /* Same tints as the game's on-screen buttons */
+    #btn-bomb   { background: rgba(234, 88, 12, 0.45); border-color: rgba(253, 186, 116, 0.6); }
+    #btn-bubble { background: rgba(14, 165, 233, 0.4); border-color: rgba(186, 230, 253, 0.6); }
+    #btn-jump   { background: rgba(99, 102, 241, 0.4); border-color: rgba(165, 180, 252, 0.6); }
+    #btn-fire   { background: rgba(245, 158, 11, 0.4); border-color: rgba(253, 230, 138, 0.6); }
     #bottom-row {
       flex: 1;
       display: flex;
@@ -160,8 +192,8 @@
       height: 170px;
       flex: 0 0 auto;
       border-radius: 50%;
-      background: rgba(255,255,255,0.07);
-      border: 2px solid rgba(255,255,255,0.18);
+      background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 70%);
+      border: 1px solid rgba(255,255,255,0.22);
       touch-action: none;
     }
     #joystick-knob {
@@ -172,23 +204,24 @@
       height: 70px;
       margin: -35px 0 0 -35px;
       border-radius: 50%;
-      background: rgba(226,232,240,0.55);
-      box-shadow: 0 2px 10px rgba(0,0,0,0.4);
+      background: rgba(241,245,249,0.7);
+      box-shadow: 0 4px 14px rgba(0,0,0,0.45);
       pointer-events: none;
     }
     #block-btn {
       flex: 1;
       max-width: 220px;
       height: 150px;
-      background: #dc2626;
+      background: linear-gradient(180deg, #3b82f6, #1d4ed8);
       color: #fff;
-      border: none;
+      border: 1px solid rgba(147, 197, 253, 0.7);
       border-radius: 24px;
+      font-family: var(--font-display);
       font-size: 1.8rem;
       font-weight: 900;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
       cursor: pointer;
-      box-shadow: 0 6px 32px rgba(220,38,38,0.5);
+      box-shadow: 0 8px 32px rgba(37, 99, 235, 0.45);
       transition: background 0.1s, transform 0.08s, box-shadow 0.1s;
       touch-action: none;
     }
@@ -198,9 +231,10 @@
     body.block-only #bottom-row { justify-content: center; }
     body.block-only #block-btn { max-width: none; height: 190px; }
     #block-btn.blocking {
-      background: #991b1b;
+      background: linear-gradient(180deg, #10b981, #047857);
+      border-color: rgba(167, 243, 208, 0.95);
       transform: scale(0.95);
-      box-shadow: 0 2px 12px rgba(220,38,38,0.8);
+      box-shadow: 0 2px 18px rgba(52, 211, 153, 0.7);
     }
   </style>
 </head>
