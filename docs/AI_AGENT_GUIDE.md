@@ -69,7 +69,7 @@ src/
 | Movement / camera / input / action buttons | `src/controls/controls.js` |
 | Player / enemy / bomb-thrower character model, clips, arm IK, fur | `src/models/glbCharacterModel.js` (`glbCharacterConfig`), `src/models/fluffyCharacter.ts` |
 | Sword model / grip placement / brightness (variants: `default` = sword.glb, `wii` = wii_sword.glb + Mii ball hands) | `src/items/swordModel.js` (`SWORD_VARIANTS`, `swordVariantForCharacter`, `SWORD_BRIGHTNESS`) |
-| Where hands go (sword/shield/gun grip) | `src/models/playerModel.js` (`updateProceduralPlayerRig`), `src/items/foamSword.js`, `shield.js`, `pistol.js` (gun hands + gun follow the camera aim pitch, `GUN_AIM_*`); enemies: `src/characters/EnemyPlayer.js` |
+| Where hands go (sword/shield/gun grip) | `src/models/playerModel.js` (`updateProceduralPlayerRig`), `src/items/foamSword.js`, `shield.js`, `pistol.js` (gun hands + gun follow the aim pitch from `getAimDirection`, `GUN_AIM_*`); enemies: `src/characters/EnemyPlayer.js` |
 | New UI panel | `src/controls/<panel>.js` + lazy-load in `src/features/uiPanelsFeature.js` |
 | Settings panel (Profile stats, Multiplayer status, Display incl. Camera: First Person View / Hide Body toggles, eye + body opacity + FOV sliders, Copy Values, Sword Gyro, About + Clear Cache & Reload, Account delete) | `src/controls/settingsPanel.js`; stats = `appState.getProfileStats` + `_psStats` / `_classicStats` in `bootstrapGameApp.js`, `normalizeStageStats` / `saveClassicStats` in `src/player/playerProfile.js`; camera = `PlayerControls.cameraConfig` (`sq:firstPersonCam`) in `src/controls/controls.js` |
 | World map / ground height | `public/glb_map/map.glb`; loaded in `bootstrapGameApp.js`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |

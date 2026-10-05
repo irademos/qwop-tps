@@ -1968,7 +1968,6 @@ async function initCore(runtimeContext) {
       [SHIELD_HEALTH_KEY]: pickupHealth
     }));
     shield.localHoldOrigin = 'world';
-    window._enableWeaponGyroCamera?.();
   };
   shield.onDrop = (holder, { removeFromInventory: shouldRemoveFromInventory } = {}) => {
     if (holder !== playerControls) return;
@@ -2607,8 +2606,7 @@ async function initCore(runtimeContext) {
         getAmmoLabelForType('bullet'),
         getAmmoIconForType('bullet')
       );
-      window._enableWeaponGyroCamera?.();
-      updateSettingsUI();
+        updateSettingsUI();
     }
   }
 
@@ -2624,7 +2622,6 @@ async function initCore(runtimeContext) {
       if (shield.heldMesh) {
         shield.heldMesh.visible = false;
       }
-      playerControls?.disableGyroscope?.();
       updateSettingsUI();
       return;
     }
@@ -2660,7 +2657,6 @@ async function initCore(runtimeContext) {
       }
       clearPlayerWeaponType(playerControls, pistol.type);
       playerControls?.updateAmmoUI?.(false);
-      playerControls?.disableGyroscope?.();
       updateSettingsUI();
     }
   }
@@ -4093,40 +4089,89 @@ async function initCore(runtimeContext) {
     if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
     if (g.gamma !== null) window.phoneSwordCalib.gamma = g.gamma;
     _resetSwordCalibDrift();
-    // Also recalibrate the camera gyro using the same reference orientation
-    if (playerControls?.gyroActive && g.alpha !== null) {
-      playerControls.gyroLastAlpha = g.alpha;
-      playerControls.gyroLastBeta = g.beta ?? 0;
-      playerControls.gyroLastGamma = g.gamma ?? 0;
-      playerControls.calibrateGyroscope?.();
-    }
+    // Gun / shield gyro aim: the current pose becomes its neutral too (re-captured next frame)
+    _stopWeaponGyroAim();
   };
 
-  // Enable camera gyro when shield or gun is equipped,
-  // calibrated from the current sword calibration reference (same neutral pose).
-  window._enableWeaponGyroCamera = () => {
-    if (!playerControls) return;
+  // Gun / shield aim from the phone gyro (sword or "Use This Device"). Neutral = the phone
+  // pose when the weapon was picked up (or the sword was recalibrated). The rotation since
+  // then is taken in that pose's game frame (same quaternion math as the sword, so it never
+  // flips with the phone's heading): its twist about game Y turns the aim left/right — an
+  // amplified offset right away, plus a continuous turn while the phone stays turned past
+  // the dead zone (hold it right to spin round) — and the tilt of the forward axis aims
+  // up/down (amplified; tip the phone's back/top up = aim up).
+  const WEAPON_AIM_YAW_GAIN = 2.2;
+  const WEAPON_AIM_YAW_OFFSET_MAX = THREE.MathUtils.degToRad(45);
+  const WEAPON_AIM_TURN_DEADZONE = THREE.MathUtils.degToRad(8);
+  const WEAPON_AIM_TURN_RATE = 7;        // rad/s of turn per radian past the dead zone
+  const WEAPON_AIM_TURN_RATE_MAX = 4.5;  // rad/s
+  const WEAPON_AIM_PITCH_GAIN = 2.6;
+  const WEAPON_AIM_PITCH_MIN = THREE.MathUtils.degToRad(-50);
+  const WEAPON_AIM_PITCH_MAX = THREE.MathUtils.degToRad(65);
+  const WEAPON_AIM_SMOOTH = 18;          // 1/s — takes the edge off amplified sensor noise
+  const _weaponAim = {
+    active: false,
+    neutralQ: new THREE.Quaternion(),
+    earthToGameQ: new THREE.Quaternion(),
+    baseYaw: 0,
+    lastYaw: 0,
+    phoneYaw: 0,
+    phonePitch: 0,
+  };
+  const _weaponAimDevQ = new THREE.Quaternion();
+  const _weaponAimRelQ = new THREE.Quaternion();
+  const _weaponAimTmpQ = new THREE.Quaternion();
+  const _weaponAimV = new THREE.Vector3();
+  const _stopWeaponGyroAim = () => {
+    _weaponAim.active = false;
+    if (playerControls) playerControls.weaponAimPitch = null;
+  };
+  const _updateWeaponGyroAim = (dt) => {
     const g = window.phoneSwordGyro;
-    const calib = window.phoneSwordCalib;
-    if (playerControls.gyroActive) return; // already active
-    if (g && g.alpha !== null && calib) {
-      // Seed the controls gyro with the calibration orientation as neutral
-      playerControls.gyroLastAlpha = calib.alpha ?? g.alpha;
-      playerControls.gyroLastBeta = calib.beta ?? g.beta ?? 0;
-      playerControls.gyroLastGamma = calib.gamma ?? g.gamma ?? 0;
-      playerControls.calibrateGyroscope?.();
-      playerControls.gyroActive = true;
-    } else if (g && g.alpha !== null) {
-      // No calibration yet — use current position
-      playerControls.gyroLastAlpha = g.alpha;
-      playerControls.gyroLastBeta = g.beta ?? 0;
-      playerControls.gyroLastGamma = g.gamma ?? 0;
-      playerControls.calibrateGyroscope?.();
-      playerControls.gyroActive = true;
-    } else {
-      // Fallback: try the native initGyroscope if phoneSwordGyro has no data yet
-      playerControls.initGyroscope?.();
+    const holding = !!playerControls && (pistol?.holder === playerControls || shield?.holder === playerControls);
+    if (!holding || playerDead || !g?.connected || !Number.isFinite(g.beta) || !Number.isFinite(g.gamma)) {
+      if (_weaponAim.active) _stopWeaponGyroAim();
+      return;
     }
+    _pswDeviceQuat(Number.isFinite(g.alpha) ? g.alpha : 0, g.beta, g.gamma, _weaponAimDevQ);
+    if (!_weaponAim.active) {
+      _weaponAim.active = true;
+      _weaponAim.neutralQ.copy(_weaponAimDevQ);
+      _pswEarthToGame(_weaponAim.neutralQ, _weaponAim.earthToGameQ);
+      _weaponAim.baseYaw = playerControls.yaw;
+      _weaponAim.lastYaw = playerControls.yaw;
+      _weaponAim.phoneYaw = 0;
+      _weaponAim.phonePitch = 0;
+    }
+    // Yaw changed by something else since last frame (touch drag, arrow keys, respawn)
+    _weaponAim.baseYaw += wrapDeltaRad(playerControls.yaw - _weaponAim.lastYaw);
+
+    // R = E · D · N⁻¹ · E⁻¹ (rotation since neutral, in the neutral pose's game frame)
+    const R = _weaponAimRelQ.copy(_weaponAimDevQ).multiply(_weaponAimTmpQ.copy(_weaponAim.neutralQ).invert());
+    R.premultiply(_weaponAim.earthToGameQ).multiply(_weaponAimTmpQ.copy(_weaponAim.earthToGameQ).invert());
+    if (R.w < 0) { R.x = -R.x; R.y = -R.y; R.z = -R.z; R.w = -R.w; }
+    // Twist about game Y (+ = toward game +X = left, same sign as the camera yaw)
+    const phoneYaw = 2 * Math.atan2(R.y, R.w);
+    // Swing without the twist: how far the forward axis tilted up/down
+    _weaponAimTmpQ.setFromAxisAngle(_PSW_UP, -phoneYaw).multiply(R);
+    _weaponAimV.set(0, 0, 1).applyQuaternion(_weaponAimTmpQ);
+    const phonePitch = Math.atan2(_weaponAimV.y, Math.hypot(_weaponAimV.x, _weaponAimV.z));
+    const k = dt > 0 ? 1 - Math.exp(-WEAPON_AIM_SMOOTH * dt) : 1;
+    _weaponAim.phoneYaw += (phoneYaw - _weaponAim.phoneYaw) * k;
+    _weaponAim.phonePitch += (phonePitch - _weaponAim.phonePitch) * k;
+
+    const yawAbs = Math.abs(_weaponAim.phoneYaw);
+    if (yawAbs > WEAPON_AIM_TURN_DEADZONE && dt > 0) {
+      const rate = Math.min(WEAPON_AIM_TURN_RATE_MAX, (yawAbs - WEAPON_AIM_TURN_DEADZONE) * WEAPON_AIM_TURN_RATE);
+      _weaponAim.baseYaw += Math.sign(_weaponAim.phoneYaw) * rate * dt;
+    }
+    const yawOffset = THREE.MathUtils.clamp(_weaponAim.phoneYaw * WEAPON_AIM_YAW_GAIN, -WEAPON_AIM_YAW_OFFSET_MAX, WEAPON_AIM_YAW_OFFSET_MAX);
+    playerControls.yaw = _weaponAim.baseYaw + yawOffset;
+    _weaponAim.lastYaw = playerControls.yaw;
+    // Read by PlayerControls (aim direction + camera pitch) and the pistol (arms + gun pitch)
+    playerControls.weaponAimPitch = THREE.MathUtils.clamp(
+      _weaponAim.phonePitch * WEAPON_AIM_PITCH_GAIN, WEAPON_AIM_PITCH_MIN, WEAPON_AIM_PITCH_MAX
+    );
   };
 
   const phoneSwordQrModal = document.getElementById('phone-sword-qr-modal');
@@ -6166,8 +6211,7 @@ async function initCore(runtimeContext) {
       playerModel: playerDead ? null : playerModel,
       bladePoints: playerDead ? null : _frameBladePoints,
     }));
-    // Phone Sword: apply fixed position/rotation config to shield and pistol,
-    // and feed phoneSwordGyro data into the camera gyro system.
+    // Phone Sword: apply fixed position/rotation config to shield and pistol
     const _wCfg = window.phoneSwordWeaponCfg;
     const _DEG = Math.PI / 180;
     if (_wCfg) {
@@ -6198,13 +6242,8 @@ async function initCore(runtimeContext) {
         ));
       }
     }
-    // Feed phoneSwordGyro data into camera gyro each frame
-    const _pg = window.phoneSwordGyro;
-    if (_pg?.connected && playerControls?.gyroActive && _pg.alpha !== null) {
-      playerControls.gyroLastAlpha = _pg.alpha;
-      playerControls.gyroLastBeta = _pg.beta ?? 0;
-      playerControls.gyroLastGamma = _pg.gamma ?? 0;
-    }
+    // Gun / shield: the phone gyro turns and pitches the aim
+    _updateWeaponGyroAim(frameDelta);
     pistol?.update();
     shield?.update();
 
@@ -6305,8 +6344,8 @@ async function initCore(runtimeContext) {
         });
       }
 
-      // ── Phone Sword: camera auto-aim at closest enemy ──
-      if (playerControls && hordeEnemies.length > 0) {
+      // ── Phone Sword: camera auto-aim at closest enemy (not while the phone aims a gun / shield) ──
+      if (playerControls && hordeEnemies.length > 0 && !_weaponAim.active) {
         const _now = performance.now();
 
         // Detect manual camera movement: if yaw changed and we didn't set it, player moved camera

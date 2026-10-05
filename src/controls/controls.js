@@ -34,6 +34,7 @@ const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const WEAPON_CAMERA_FOV_DELTA = 8;
 const CAMERA_FOV_LERP_SPEED = 6;
 const GYRO_LERP_SPEED = 12; // rad/s convergence for gyroscope smoothing
+const WEAPON_AIM_CAMERA_FOLLOW = 0.4; // third person: share of the phone aim pitch the camera orbit follows
 const MOBILE_PORTRAIT_CAMERA_FOV_BONUS = 20;
 const GANG_BEASTS_ATTACK_DURATION_MS = 420;
 const GANG_BEASTS_PARALYSIS_MS = 1000;
@@ -104,6 +105,9 @@ export class PlayerControls {
     this._gyroForwardRef = new THREE.Vector3();
     this._gyroForwardCur = new THREE.Vector3();
     this._gyroOrientHandler = null;
+    // Gun / shield aim pitch from the phone gyro (radians, + = up; null = aim with the camera).
+    // Set each frame by the weapon gyro aim in bootstrapGameApp.js.
+    this.weaponAimPitch = null;
 
     // Initial player position
     const spawn = getSpawnPosition();
@@ -995,8 +999,17 @@ export class PlayerControls {
       }
     }
 
-    // Gyroscope: smoothly slerp yaw/pitch toward device orientation target
-    this._applyGyroUpdate(delta);
+    if (Number.isFinite(this.weaponAimPitch)) {
+      // Phone-aimed gun / shield: the camera tilts with the aim (third person orbits the
+      // other way — a lower camera looks up)
+      const targetPitch = this.cameraConfig.firstPerson
+        ? Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.weaponAimPitch))
+        : Math.max(-Math.PI / 8, Math.min(Math.PI / 4, -this.weaponAimPitch * WEAPON_AIM_CAMERA_FOLLOW));
+      this.pitch += (targetPitch - this.pitch) * (1 - Math.exp(-GYRO_LERP_SPEED * delta));
+    } else {
+      // Gyroscope: smoothly slerp yaw/pitch toward device orientation target
+      this._applyGyroUpdate(delta);
+    }
 
     const fovLerpFactor = 1 - Math.exp(-CAMERA_FOV_LERP_SPEED * this.deltaSeconds);
     const targetFov = Math.max(45, this.defaultFov - WEAPON_CAMERA_FOV_DELTA);
@@ -1145,6 +1158,10 @@ export class PlayerControls {
   }
 
   getAimDirection() {
+    if (Number.isFinite(this.weaponAimPitch)) {
+      const p = this.weaponAimPitch;
+      return new THREE.Vector3(Math.sin(this.yaw) * Math.cos(p), Math.sin(p), Math.cos(this.yaw) * Math.cos(p));
+    }
     const sourceQuaternion = this.camera?.quaternion ?? this.playerModel.quaternion;
     // Camera looks down its -Z axis, so (0,0,-1) is the actual forward direction.
     return new THREE.Vector3(0, 0, -1).applyQuaternion(sourceQuaternion).normalize();
