@@ -17,7 +17,7 @@
 | Phone controller page | `public/phone-sword.html` |
 | Shared runtime state (DI container) | `src/core/appContext.js` |
 | HTML shell + all HUD elements | `index.html` |
-| All CSS | `styles.css` |
+| All CSS | `styles.css` — design tokens on `:root` + shared panel / button (primary, secondary, ghost) / chip components at the top; reuse the `ui-*` classes and tokens for new UI |
 | Serverless function (Vercel) | `api/turn-credentials.js` |
 | Static assets | `public/` (GLB map, character, clips, audio) |
 | Build | `npm run dev` (port 3000) · `npm run build` |
