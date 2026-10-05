@@ -31,27 +31,6 @@ const debugNetLog = (...args) => {
   }
 };
 
-// Developer tool (Settings → Developer): wipe rooms/peers/sessions in Firebase
-export async function clearMultiplayerServerState() {
-  const targets = ['rooms', 'peers', 'sessions'];
-  const results = await Promise.all(
-    targets.map(async (path) => {
-      try {
-        await remove(ref(db, path));
-        return { path, ok: true };
-      } catch (error) {
-        console.warn(`Failed to clear ${path}:`, error);
-        return { path, ok: false, error };
-      }
-    })
-  );
-  const cleared = results.filter(result => result.ok).map(result => result.path);
-  const failed = results
-    .filter(result => !result.ok)
-    .map(result => ({ path: result.path, error: result.error }));
-  return { cleared, failed };
-}
-
 export class Multiplayer {
   // options.roomId: room to join once the peer is open (default: the multiplayer lobby).
   // Rooms decide who connects to whom; joinRoom() moves this peer to another room
@@ -390,10 +369,6 @@ export class Multiplayer {
     this.pendingConnections.clear();
     this.pendingPayloads.clear();
     try { this.peer?.destroy?.(); } catch (_) { /* already destroyed */ }
-  }
-
-  async clearServerState() {
-    return clearMultiplayerServerState();
   }
 
   connectToPeer(peerId) {

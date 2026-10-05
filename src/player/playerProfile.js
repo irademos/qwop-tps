@@ -152,17 +152,27 @@ export async function savePhoneSwordStats(nameKey, psStats) {
   }
 }
 
+// { kills, deaths, highestStage } from a stored phoneSwordStats / classicStats object.
+// highestStage is never below the saved currentStage (older profiles never stored it,
+// or stored it below the stage they had already reached).
+export function normalizeStageStats(val) {
+  const raw = val && typeof val === 'object' ? val : {};
+  const count = (v) => Math.max(0, Math.floor(Number(v) || 0));
+  const stage = (v) => Math.max(1, Math.floor(Number(v) || 1));
+  return {
+    kills: count(raw.kills),
+    deaths: count(raw.deaths),
+    highestStage: Math.max(stage(raw.highestStage), stage(raw.currentStage))
+  };
+}
+
 export async function loadPhoneSwordStats(nameKey) {
   if (!nameKey) return { ...DEFAULT_PHONE_SWORD_STATS };
   try {
     const snap = await get(ref(db, `profiles/${nameKey}/phoneSwordStats`));
     const val = snap.val();
     if (!val) return { ...DEFAULT_PHONE_SWORD_STATS };
-    return {
-      kills: Math.max(0, Math.floor(Number(val.kills) || 0)),
-      deaths: Math.max(0, Math.floor(Number(val.deaths) || 0)),
-      highestStage: Math.max(1, Math.floor(Number(val.highestStage) || 1))
-    };
+    return normalizeStageStats(val);
   } catch (err) {
     console.warn('Failed to load phone sword stats:', err);
     return { ...DEFAULT_PHONE_SWORD_STATS };
@@ -197,6 +207,16 @@ export async function saveClassicStage(nameKey, stage) {
     await update(ref(db, `profiles/${nameKey}/classicStats`), { currentStage: Math.max(1, Math.floor(stage)) });
   } catch (err) {
     console.warn('Failed to save Classic stage:', err);
+  }
+}
+
+// Classic mode stats: classicStats/{kills, deaths, highestStage} (Showdown's are phoneSwordStats)
+export async function saveClassicStats(nameKey, stats) {
+  if (!nameKey || !stats) return;
+  try {
+    await update(ref(db, `profiles/${nameKey}/classicStats`), normalizeStageStats(stats));
+  } catch (err) {
+    console.warn('Failed to save Classic stats:', err);
   }
 }
 
