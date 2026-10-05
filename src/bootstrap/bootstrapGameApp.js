@@ -1128,14 +1128,8 @@ async function initCore(runtimeContext) {
       materials.forEach((material) => applyHighContrastMaterialState(material, enabled));
     });
   };
-  const getAutoMode = () => {
-    const now = new Date();
-    const minutes = now.getHours() * 60 + now.getMinutes();
-    if (minutes >= 21 * 60 || minutes < 6 * 60) {
-      return 'night';
-    }
-    return 'day';
-  };
+  // Outside Showdown stages (which pick their own time of day) it's always day — no clock-based night
+  const getAutoMode = () => 'day';
   const getDevicePerformanceProfile = () => {
     const hardwareConcurrency = Number.isFinite(navigator.hardwareConcurrency) ? navigator.hardwareConcurrency : 4;
     const memory = Number.isFinite(navigator.deviceMemory) ? navigator.deviceMemory : 4;
@@ -1295,18 +1289,6 @@ async function initCore(runtimeContext) {
       });
     }
   }
-
-  const updateAutoDisplayMode = () => {
-    if (_psStageActive) return;
-    if (displaySettings.mode !== 'auto') return;
-    const nextMode = getAutoMode();
-    if (nextMode === lastAutoMode) return;
-    lastAutoMode = nextMode;
-    applyPresetForMode(nextMode);
-    saveDisplaySettings();
-    applyDisplaySettings();
-    updateSettingsUI();
-  };
 
   const setDisplaySetting = (key, value) => {
     if (key === 'performanceMode') {
@@ -3792,27 +3774,71 @@ async function initCore(runtimeContext) {
       _psStageBossEl.textContent = `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
         + (_psStageBoss.unlocks ? ' — beat it to unlock!' : '');
     }
-    // Character picker: unlocked characters are selectable, the rest show a lock
+    // Character chooser: one compact card, swipe (or ‹ › / arrow keys) through the roster;
+    // landing on an unlocked character selects it, locked ones just show a lock
     const _applySelected = () => setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected].url);
     if (_psStageCharsEl) {
+      const keys = Object.keys(MATCH_CHARACTERS);
+      let idx = Math.max(0, keys.indexOf(_psChars.selected));
       _psStageCharsEl.replaceChildren();
-      for (const [key, c] of Object.entries(MATCH_CHARACTERS)) {
+      _psStageCharsEl.tabIndex = 0;
+      const mk = (tag, cls, text = '') => {
+        const el = document.createElement(tag);
+        el.className = cls;
+        el.textContent = text;
+        return el;
+      };
+      const prev = mk('button', 'ps-stage-char-nav', '‹');
+      const next = mk('button', 'ps-stage-char-nav', '›');
+      prev.setAttribute('aria-label', 'Previous character');
+      next.setAttribute('aria-label', 'Next character');
+      const card = mk('div', 'ps-stage-char-card');
+      const emoji = mk('div', 'ps-stage-char-emoji');
+      const name = mk('div', 'ps-stage-char-name');
+      const dots = mk('div', 'ps-stage-char-dots');
+      card.append(emoji, name, dots);
+      _psStageCharsEl.append(prev, card, next);
+      const render = (dir = 0) => {
+        const key = keys[idx];
+        const c = MATCH_CHARACTERS[key];
         const unlocked = _psChars.unlocked.includes(key);
-        const btn = document.createElement('button');
-        btn.className = 'ps-stage-char-btn';
-        btn.classList.toggle('active', key === _psChars.selected);
-        btn.classList.toggle('locked', !unlocked);
-        btn.disabled = !unlocked;
-        btn.textContent = unlocked ? `${c.emoji} ${c.label}` : `🔒 ${c.label}`;
-        btn.onclick = () => {
+        emoji.textContent = unlocked ? c.emoji : '🔒';
+        name.textContent = unlocked ? c.label : `${c.label} — locked`;
+        card.classList.toggle('locked', !unlocked);
+        dots.replaceChildren(...keys.map((k, i) => {
+          const d = mk('span', 'ps-stage-char-dot');
+          d.classList.toggle('active', i === idx);
+          d.classList.toggle('locked', !_psChars.unlocked.includes(k));
+          return d;
+        }));
+        if (dir) {
+          card.classList.remove('slide-left', 'slide-right');
+          void card.offsetWidth; // restart the slide-in animation
+          card.classList.add(dir > 0 ? 'slide-left' : 'slide-right');
+        }
+        if (unlocked && key !== _psChars.selected) {
           _psChars.selected = key;
           _psSaveChars();
           _applySelected();
-          _psStageCharsEl.querySelectorAll('.ps-stage-char-btn')
-            .forEach((b) => b.classList.toggle('active', b === btn));
-        };
-        _psStageCharsEl.appendChild(btn);
-      }
+        }
+      };
+      const step = (dir) => { idx = (idx + dir + keys.length) % keys.length; render(dir); };
+      prev.onclick = () => step(-1);
+      next.onclick = () => step(1);
+      _psStageCharsEl.onkeydown = (e) => {
+        if (e.key === 'ArrowLeft') { step(-1); e.preventDefault(); }
+        else if (e.key === 'ArrowRight') { step(1); e.preventDefault(); }
+      };
+      let swipeX = null;
+      card.onpointerdown = (e) => { swipeX = e.clientX; card.setPointerCapture?.(e.pointerId); };
+      card.onpointerup = (e) => {
+        if (swipeX === null) return;
+        const dx = e.clientX - swipeX;
+        swipeX = null;
+        if (Math.abs(dx) > 30) step(dx < 0 ? 1 : -1);
+      };
+      card.onpointercancel = () => { swipeX = null; };
+      render();
     }
     _applySelected();
 
@@ -4894,10 +4920,6 @@ async function initCore(runtimeContext) {
       void updateMerchantUIFeature();
     }
   }, 1000);
-  updateAutoDisplayMode();
-  setInterval(() => {
-    updateAutoDisplayMode();
-  }, 60 * 1000);
 
   const getMeshWorldBounds = (mesh) => {
     const geometry = mesh.geometry;
@@ -5310,6 +5332,11 @@ async function initCore(runtimeContext) {
       respawnPlayer();
     }
     setStat('health', statsState.maxHealthSegments);
+    // Back to day (a Showdown night stage must not carry over into the menu / other modes)
+    lastAutoMode = 'day';
+    applyPresetForMode('day');
+    applyDisplaySettings();
+    clearRoadLightPool();
     tutorialCtx.equipSword();
     // Tutorial / Multiplayer play as the frog man; Showdown applies its pick on the stage screen
     setPlayerCharacterUrl(playerModel, glbCharacterConfig.frogManUrl);

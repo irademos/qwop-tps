@@ -241,7 +241,7 @@ textarea {
 .settings-tab:focus-visible,
 .leaderboard-tab:focus-visible,
 .ps-stage-time-btn:focus-visible,
-.ps-stage-char-btn:focus-visible,
+.ps-stage-char-nav:focus-visible,
 .settings-close:focus-visible,
 .settings-back:focus-visible {
   outline: 2px solid var(--accent);
@@ -338,7 +338,7 @@ textarea {
 .settings-tab,
 .leaderboard-tab,
 .ps-stage-time-btn,
-.ps-stage-char-btn,
+.ps-stage-char-nav,
 .phone-sword-calib-preset {
   display: inline-flex;
   align-items: center;
@@ -364,7 +364,7 @@ textarea {
 .settings-tab:hover,
 .leaderboard-tab:hover,
 .ps-stage-time-btn:hover,
-.ps-stage-char-btn:hover:not(:disabled),
+.ps-stage-char-nav:hover:not(:disabled),
 .phone-sword-calib-preset:hover {
   background: var(--surface-hover);
   border-color: var(--border-strong);
@@ -373,7 +373,7 @@ textarea {
 
 .ui-chip:active,
 .ps-stage-time-btn:active,
-.ps-stage-char-btn:active:not(:disabled),
+.ps-stage-char-nav:active:not(:disabled),
 .phone-sword-calib-preset:active {
   transform: scale(0.96);
 }
@@ -381,8 +381,7 @@ textarea {
 .ui-chip.is-active,
 .settings-tab.is-active,
 .leaderboard-tab.is-active,
-.ps-stage-time-btn.active,
-.ps-stage-char-btn.active {
+.ps-stage-time-btn.active {
   background: var(--accent-soft);
   border-color: var(--accent-ring);
   color: var(--accent-hi);
@@ -2408,21 +2407,59 @@ body.settings-open #inventory-button {
 .ps-stage-boss:empty { display: none; }
 .ps-stage-chars {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
   justify-content: center;
-  max-width: 560px;
-  padding-top: 6px;
+  gap: 10px;
+  width: 100%;
+  padding-top: 8px;
   margin-top: 4px;
   border-top: 1px solid var(--border);
-  width: 100%;
+  outline: none;
 }
-.ps-stage-char-btn.active {
-  background: var(--success-soft);
-  border-color: rgba(52, 211, 153, 0.6);
-  color: var(--success);
+.ps-stage-char-nav {
+  min-height: 0;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  font-size: 22px;
+  flex: 0 0 auto;
 }
-.ps-stage-char-btn.locked { opacity: 0.4; cursor: not-allowed; }
+.ps-stage-char-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 170px;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--accent-ring);
+  border-radius: var(--radius-md, 12px);
+  background: var(--accent-soft);
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ps-stage-char-card.locked {
+  border-color: var(--border);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+}
+.ps-stage-char-emoji { font-size: 34px; line-height: 1.1; }
+.ps-stage-char-name { font-size: 14px; font-weight: 600; color: var(--accent-hi); white-space: nowrap; }
+.ps-stage-char-card.locked .ps-stage-char-name { color: var(--text-muted); }
+.ps-stage-char-dots { display: flex; gap: 5px; margin-top: 4px; }
+.ps-stage-char-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.ps-stage-char-dot.locked { opacity: 0.45; }
+.ps-stage-char-dot.active { background: var(--accent-hi); opacity: 1; }
+.ps-stage-char-card.slide-left { animation: psCharSlideLeft 0.2s var(--ease); }
+.ps-stage-char-card.slide-right { animation: psCharSlideRight 0.2s var(--ease); }
+@keyframes psCharSlideLeft { from { transform: translateX(24px); opacity: 0.3; } to { transform: none; opacity: 1; } }
+@keyframes psCharSlideRight { from { transform: translateX(-24px); opacity: 0.3; } to { transform: none; opacity: 1; } }
 
 /* ── Showdown: action buttons (Block / bubble / bomb) ─────────────────────────── */
 .ps-block-btn {
