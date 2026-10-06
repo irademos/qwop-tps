@@ -4,9 +4,10 @@ import { DUEL_LOCATION } from './duelMode.js';
 import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/EnemyPlayer.js';
 
-// Multiplayer battles: Team Battle (two teams of 5, each team one character model) and
-// Free For All (10 fighters, everyone picks their own character). Opened from the
-// Multiplayer lobby (duelMode suspends its lobby while this runs).
+// Multiplayer battles: Team Battle (two teams of 5, each team one character model),
+// Free For All (10 fighters, everyone picks their own character) and Guns & Bombs (free
+// for all with guns and bombs only — unlimited bullets and bombs, one shield each).
+// Opened from the Multiplayer lobby (duelMode suspends its lobby while this runs).
 //
 // Party setup: whoever opens a mode is the host of a party. They invite online players
 // (invite → join), everyone picks a side (Team Battle) or a character (Free For All), and
@@ -16,10 +17,14 @@ import { swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/Ene
 // everyone `start` with the full roster. Parties with guests sit in `party-<hostId>`
 // (not pullable); a battle runs in its own private room `match-<matchId>`.
 //
-// Battle: everyone spawns around DUEL_LOCATION (teams in two lines facing each other,
+// Battle: everyone spawns around DUEL_LOCATION (Guns & Bombs: scattered wider around
+// GUNS_LOCATION) (teams in two lines facing each other,
 // free-for-all in a ring), counts down "3 2 1 FIGHT!", auto-walks toward the closest
 // enemy and fights with swords only, MATCH_HEALTH health each. The host simulates the
 // bots (EnemyPlayer AI) and decides the winner: the last team / fighter standing.
+// Guns & Bombs: no swords. Whoever fires a bullet / throws a bomb detects its hits (the
+// host for its bots) and sends `hit` / `botHit` with the damage; the victim's shield (held
+// up and facing the shot) takes it instead. Bots keep their distance and shoot / lob bombs.
 // Game access goes through `ctx` (built in bootstrapGameApp.js).
 //
 // Wire protocol: PeerJS messages of type 'match', each with a `key` (party key or matchId):
@@ -27,13 +32,19 @@ import { swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/Ene
 //           party {mode, roster, teamChars} (host → guests) · leave
 //   queue:  pull {mode, name} · pullOk {name, pick} · pullNo · pullCancel
 //   battle: start {matchId, partyKey, mode, roster, teamChars}
-//           state {sword, hand, blocking, pos, ry, hp} (~20 Hz, every human → every human)
-//           bots {list} (~15 Hz, host → humans) · hit {dmg, dir} (attacker → victim; the
-//           host sends bot hits) · blocked · botHit {bot, dir} / botBlocked {bot} (human →
-//           host) · dead (the sender died) · end {winnerTeam, winnerId, winnerName} (host)
-//           · leave (the sender left; the host leaving ends the battle)
+//           state {sword, hand, blocking, pos, ry, hp, w} (~20 Hz, every human → every
+//           human; w = 'gun' | 'shield' | null in Guns & Bombs)
+//           bots {list} (~15 Hz, host → humans) · hit {dmg, dir, kind, src} (attacker →
+//           victim; the host sends bot hits) · blocked · botHit {bot, dir, dmg, kind, src} /
+//           botBlocked {bot} (human → host) · dead (the sender died)
+//           · end {winnerTeam, winnerId, winnerName} (host) · leave (the sender left; the
+//           host leaving ends the battle)
+//           Guns & Bombs: shot {bot, o, d} (host: a bot fired; humans' bullets go out as
+//           'projectile' messages) · bomb {bot?, o, t} (a bomb was thrown from o to t)
 
-export const MATCH_MODES = { team: 'Team Battle', ffa: 'Free For All' };
+export const MATCH_MODES = { team: 'Team Battle', ffa: 'Free For All', guns: 'Guns & Bombs' };
+// Every mode but Team Battle is everyone for themselves
+const isFreeForAll = (mode) => mode !== 'team';
 export const MATCH_CHARACTERS = {
   antler: { label: 'Antler Guy', team: 'Antlers', emoji: '🦌', url: glbCharacterConfig.antlerGuyUrl },
   frog: { label: 'Frog Man', team: 'Frogs', emoji: '🐸', url: glbCharacterConfig.frogManUrl },
@@ -62,6 +73,40 @@ const BOT_ATTACKERS_PER_TARGET = 2;    // the rest of the bots on one target cir
 const BODY_CENTER_Y = 0.8;
 const KEY_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+// Guns & Bombs
+const GUN_DAMAGE = 1;
+const BOMB_DAMAGE = 2;
+const SHIELD_ARC_DOT = 0.2;            // shot / blast from in front of the shield (cos of ~78°)
+const BOT_SHIELD_HP = 4;               // a bot's one shield (the player's: GUNS_MATCH_SHIELD_HEALTH)
+// Bots hold the gun or the shield, never both: shield up this long now and then (no
+// shooting meanwhile), gun the rest of the time
+const BOT_SHIELD_UP_MS = [1200, 2600];
+const BOT_GUN_MS = [2500, 6000];
+const BOT_SHIELD_CHANCE = 0.45;        // chance a gun spell ends with the shield going up
+const BOT_RANGE = { min: 4.5, max: 9 }; // bots keep this far (m) from their target
+const BOT_SHOT_RANGE = 16;
+const BOT_SHOT_MS = [900, 1900];       // random gap between a bot's shots
+const BOT_SHOT_SPREAD = 0.07;          // radians of aim error
+const BOT_BOMB_RANGE = [3.5, 13];
+const BOT_BOMB_MS = [5000, 9000];
+const BOT_MUZZLE = new THREE.Vector3(0, 1.0, 0.75);   // model space
+const randIn = ([a, b]) => a + Math.random() * (b - a);
+// Where Guns & Bombs battles happen; fighters are scattered around it (each in its own
+// slice of the ring, GUNS_SPAWN_RADIUS from the centre) — wider than the sword modes
+export const GUNS_LOCATION = { x: -62.87, y: 2.98, z: 64.22, yaw: 0.05 };
+const GUNS_SPAWN_RADIUS = [9, 20];
+// Same "random" numbers on every client (seeded by the match id + the fighter's slot)
+const seededRandom = (seedText) => {
+  let h = 2166136261;
+  for (let i = 0; i < seedText.length; i++) h = Math.imul(h ^ seedText.charCodeAt(i), 16777619);
+  return () => {
+    h = Math.imul(h ^ (h >>> 15), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+};
+
 const BOT_NAMES = ['Bruno', 'Kira', 'Otto', 'Mira', 'Rex', 'Juno', 'Pip', 'Zara', 'Hugo', 'Nell'];
 
 const el = (tag, className, text) => {
@@ -91,6 +136,8 @@ const _tmpV = new THREE.Vector3();
 const _tmpV2 = new THREE.Vector3();
 const _tmpQ = new THREE.Quaternion();
 const _yAxis = new THREE.Vector3(0, 1, 0);
+const _tmpV3 = new THREE.Vector3();
+
 
 export function createMatchMode(ctx) {
   // 'off' | 'setup' (party host) | 'starting' (host waiting on pulled players) | 'guest'
@@ -249,7 +296,7 @@ export function createMatchMode(ctx) {
     roster.forEach((m) => {
       const row = el('li', `duel-lobby-row${m.id === selfId ? ' duel-lobby-row-self' : ''}`);
       const pick = cleanPick(m.pick);
-      const suffix = party.mode === 'ffa'
+      const suffix = isFreeForAll(party.mode)
         ? ` ${MATCH_CHARACTERS[pick.char].emoji}`
         : ` · ${teamLabel(party.teamChars[pick.side])}`;
       row.append(el('span', 'duel-lobby-name', `${m.name}${m.id === selfId ? ' (you)' : ''}${suffix}`));
@@ -564,7 +611,20 @@ export function createMatchMode(ctx) {
   });
 
   // ── Battle ───────────────────────────────────────────────────────────────
-  const spawnPose = (entry) => {
+  const spawnPose = (entry, mode, matchId) => {
+    if (mode === 'guns') {
+      const loc = GUNS_LOCATION;
+      const rand = seededRandom(`${matchId}:${entry.slot}`);
+      const slice = (Math.PI * 2) / MATCH_SIZE;
+      const angle = loc.yaw + (entry.slot + 0.25 + rand() * 0.5) * slice;
+      // Neighbours alternate between the inner and outer half of the ring (never side by side)
+      const [rMin, rMax] = GUNS_SPAWN_RADIUS;
+      const half = (rMax - rMin) / 2;
+      const radius = rMin + (entry.slot % 2) * half + rand() * half;
+      const x = loc.x + Math.sin(angle) * radius;
+      const z = loc.z + Math.cos(angle) * radius;
+      return { x, z, yaw: Math.atan2(loc.x - x, loc.z - z) };
+    }
     const loc = DUEL_LOCATION;
     const yaw = Number.isFinite(loc.yaw) ? loc.yaw : 0;
     if (entry.team === 0 || entry.team === 1) {
@@ -621,6 +681,7 @@ export function createMatchMode(ctx) {
     joinRoom(`match-${matchId}`);
 
     const isHost = hostId === selfId;
+    const guns = mode === 'guns';
     const now = Date.now();
     match = {
       matchId, mode, hostId, isHost,
@@ -646,24 +707,36 @@ export function createMatchMode(ctx) {
         label: null,
         targetId: null,
         retargetAt: 0,
-        combat: null
+        combat: null,
+        // Guns & Bombs
+        weapon: guns ? 'gun' : null,     // what they hold: 'gun' | 'shield' | null
+        weaponUntil: 0,                  // host bots: when to reconsider gun / shield
+        shieldHp: guns && r.bot ? BOT_SHIELD_HP : 0,
+        gunMesh: null,
+        shieldMesh: null,
+        shotTarget: null,
+        nextShotAt: Infinity,
+        nextBombAt: Infinity
       };
-      const pose = spawnPose(r);
+      const pose = spawnPose(r, mode, matchId);
       const url = MATCH_CHARACTERS[r.char].url;
       if (c.isSelf) {
         match.myTeam = r.team;
-        ctx.enterMatch({ ...pose, characterUrl: url });
+        ctx.enterMatch({ ...pose, characterUrl: url, loadout: guns ? 'guns' : null });
       } else if (r.bot && isHost) {
-        c.enemy = ctx.createBot({ x: pose.x, z: pose.z, yaw: pose.yaw, characterUrl: url });
+        c.enemy = ctx.createBot({ x: pose.x, z: pose.z, yaw: pose.yaw, characterUrl: url, ranged: guns ? BOT_RANGE : null });
         if (c.enemy) c.enemy.stationary = true;
       } else {
         ctx.ensureRemoteModel(r.id, r.name, url, pose);
-        c.sword = ctx.createSwordMesh(url);
-        if (c.sword) {
-          c.sword.visible = false;
-          ctx.scene.add(c.sword);
+        if (!guns) {
+          c.sword = ctx.createSwordMesh(url);
+          if (c.sword) {
+            c.sword.visible = false;
+            ctx.scene.add(c.sword);
+          }
         }
       }
+      if (guns && !c.isSelf) attachGunGear(c);
       if (!c.isSelf) {
         c.label = el('div', `match-label match-label-team-${r.team}`);
         labelLayer.append(c.label);
@@ -678,7 +751,7 @@ export function createMatchMode(ctx) {
     renderHud();
     const intro = mode === 'team'
       ? `You fight for the ${teamLabel(match.teamChars[match.myTeam] ?? 'antler')}`
-      : 'Last one standing wins';
+      : mode === 'guns' ? 'Guns & bombs only · last one standing wins' : 'Last one standing wins';
     ['3', '2', '1'].forEach((text, i) => {
       countdownTimers.push(setTimeout(() => {
         if (phase === 'countdown') showBanner(text, `${MATCH_MODES[mode]} · ${intro}`);
@@ -690,7 +763,14 @@ export function createMatchMode(ctx) {
       showBanner('FIGHT!');
       ctx.setControlsLocked(false);
       ctx.startWalk();
-      match.combatants.forEach((c) => { if (c.enemy) c.enemy.stationary = false; });
+      const fightAt = Date.now();
+      match.combatants.forEach((c) => {
+        if (!c.enemy) return;
+        c.enemy.stationary = false;
+        c.nextShotAt = fightAt + randIn([600, 2200]);
+        c.nextBombAt = fightAt + randIn(BOT_BOMB_MS);
+        c.weaponUntil = fightAt + randIn(BOT_GUN_MS);
+      });
       countdownTimers.push(setTimeout(() => {
         if (phase === 'fighting') hideBanner();
       }, 800));
@@ -708,7 +788,7 @@ export function createMatchMode(ctx) {
     humansExceptMe().forEach((id) => send(id, { key: match.matchId, ...payload }));
   };
 
-  const isEnemyOf = (a, b) => a !== b && (match.mode === 'ffa' || a.team !== b.team);
+  const isEnemyOf = (a, b) => a !== b && (isFreeForAll(match.mode) || a.team !== b.team);
 
   const combatantModel = (c) => {
     if (!c) return null;
@@ -725,7 +805,7 @@ export function createMatchMode(ctx) {
       hudText.textContent = `${teamLabel(match.teamChars[0])} ${alive[0]}  vs  ${alive[1]} ${teamLabel(match.teamChars[1])}`;
     } else {
       const alive = all.filter((c) => c.alive).length;
-      hudText.textContent = `Free For All · ${alive} left`;
+      hudText.textContent = `${MATCH_MODES[match.mode]} · ${alive} left`;
     }
   };
 
@@ -750,9 +830,9 @@ export function createMatchMode(ctx) {
     if (match.isHost) checkWinner();
   };
 
-  const applyBotDamage = (c, dir) => {
+  const applyBotDamage = (c, dir, dmg = 1) => {
     if (!c?.alive || !c.enemy || phase !== 'fighting') return;
-    const killed = c.enemy.applyDamage(1);
+    const killed = c.enemy.applyDamage(dmg);
     c.hp = c.enemy.hearts;
     renderLabel(c);
     _tmpV.set(dir?.x ?? 0, 0, dir?.z ?? 1);
@@ -838,6 +918,200 @@ export function createMatchMode(ctx) {
     ctx.resumeLobby('You left the battle');
   });
 
+  // ── Guns & Bombs: gear, bullets, bombs ───────────────────────────────────
+  // The gun and the one shield on another fighter, held like the local player holds them:
+  // same models, on the same floating hand with the same hold offset / rotation, and both
+  // hands on the grip (ctx.getWeaponGear — taken from the player's own Pistol / Shield)
+  function attachGunGear(c) {
+    const model = combatantModel(c);
+    const gear = ctx.getWeaponGear?.();
+    if (!model || !gear) return;
+    // The weapon hand: the floating hand the player's Weapon attaches to (labels mirrored)
+    const hand = c.enemy
+      ? c.enemy._leftHandGroup
+      : model.children.find((child) => child.userData?.proceduralHand === 'left');
+    const place = (mesh, kind) => {
+      if (!mesh) return null;
+      const g = gear[kind];
+      mesh.position.copy(g.offset);
+      if (!hand) mesh.position.add(g.grip);
+      mesh.quaternion.copy(g.quaternion);
+      mesh.visible = false;
+      (hand || model).add(mesh);
+      return mesh;
+    };
+    c.gripGun = gear.gun.grip.clone();
+    c.gripShield = gear.shield.grip.clone();
+    c.gunMesh = place(gear.gun.createMesh(), 'gun');
+    c.shieldMesh = place(gear.shield.createMesh(), 'shield');
+  }
+
+  const updateGunGear = (c) => {
+    const alive = c.alive && phase !== 'off';
+    const shieldUp = c.weapon === 'shield';
+    if (c.gunMesh) c.gunMesh.visible = alive && c.weapon === 'gun';
+    if (c.shieldMesh) c.shieldMesh.visible = alive && shieldUp;
+    const grip = shieldUp ? c.gripShield : c.gripGun;
+    if (c.enemy) {
+      c.enemy.gripTarget = alive && grip ? grip : null;
+    } else {
+      const model = ctx.getRemoteModel(c.id);
+      if (model && grip) model.userData.remoteHandTarget = grip;
+    }
+  };
+
+  const posOf = (c) => combatantModel(c)?.position ?? null;
+  // The shooter / thrower's game deals the damage: ours, or the host's for its bots
+  const ownsAttacker = (a) => !!a && (a.isSelf || (a.bot && !!a.enemy));
+
+  // A host bot's shield faces the shot / blast (humans check their own, in ctx.applyHit)
+  const botShieldBlocks = (c, src) => {
+    if (!c.enemy || c.weapon !== 'shield' || c.shieldHp <= 0 || !src) return false;
+    const g = c.enemy.group;
+    _tmpV.set(src.x - g.position.x, 0, src.z - g.position.z);
+    if (_tmpV.lengthSq() < 1e-6) return true;
+    _tmpV.normalize();
+    _tmpV2.set(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
+    return _tmpV2.dot(_tmpV) > SHIELD_ARC_DOT;
+  };
+
+  const damageBot = (c, dmg, dir, src) => {
+    if (botShieldBlocks(c, src)) {
+      c.shieldHp = Math.max(0, c.shieldHp - dmg);
+      if (c.shieldHp <= 0) {
+        // Broken: back to the gun for good
+        c.weapon = 'gun';
+        c.weaponUntil = Infinity;
+      }
+      ctx.onShieldHit?.(posOf(c));
+      return;
+    }
+    applyBotDamage(c, dir, dmg);
+  };
+
+  // `attackerId`'s bullet / bomb reached `target`; only the attacker's game acts on it
+  const rangedHit = (attackerId, target, dmg, dir, kind, src) => {
+    if (!match || phase !== 'fighting' || !target?.alive) return;
+    const attacker = match.combatants.get(attackerId);
+    if (!ownsAttacker(attacker) || !isEnemyOf(attacker, target)) return;
+    const len = Math.hypot(dir?.x ?? 0, dir?.z ?? 0);
+    const d = len > 1e-4 ? [round3(dir.x / len), round3(dir.z / len)] : [0, 1];
+    const s = src ? [round3(src.x), round3(src.z)] : null;
+    if (target.isSelf) {
+      ctx.applyHit(dmg, d, { kind, src: s });
+    } else if (target.enemy) {
+      damageBot(target, dmg, { x: d[0], z: d[1] }, src);
+    } else if (target.bot) {
+      send(match.hostId, { op: 'botHit', key: match.matchId, bot: target.id, dir: d, dmg, kind, src: s });
+    } else {
+      send(target.id, { op: 'hit', key: match.matchId, dmg, dir: d, kind, src: s });
+      const model = posOf(target) && combatantModel(target);
+      if (model) ctx.spawnBlood(_tmpV.copy(model.position).setY(model.position.y + BODY_CENTER_Y), model.position.y);
+    }
+  };
+
+  // Everyone a bullet can stop at (projectiles.js); null outside Guns & Bombs
+  const getShotTargets = () => {
+    if (!match || match.mode !== 'guns') return null;
+    const out = [];
+    match.combatants.forEach((c) => {
+      if (!c.alive) return;
+      const pos = posOf(c);
+      if (!pos) return;
+      c.shotTarget ??= {
+        id: c.id,
+        position: null,
+        onHit: (shooterId, dir) => {
+          const shooter = match?.combatants.get(shooterId);
+          rangedHit(shooterId, c, GUN_DAMAGE, dir, 'gun', shooter ? posOf(shooter) : null);
+        }
+      };
+      c.shotTarget.position = pos;
+      out.push(c.shotTarget);
+    });
+    return out;
+  };
+
+  // Who a bomb thrown by `throwerId` can blast (blastEnemiesAt targets; never the thrower)
+  const bombTargetsFor = (throwerId) => () => {
+    if (!match) return [];
+    const out = [];
+    match.combatants.forEach((c) => {
+      if (c.id === throwerId || !c.alive) return;
+      const model = combatantModel(c);
+      if (!model) return;
+      out.push({
+        group: model,
+        isDead: false,
+        applyDamage: () => false,
+        applyBlastKnockback: ({ direction }) => {
+          // Blast came from the bomb's side of the target (for the shield check)
+          const src = _tmpV3.copy(model.position).sub(direction);
+          rangedHit(throwerId, c, BOMB_DAMAGE, direction, 'bomb', src);
+        }
+      });
+    });
+    return out;
+  };
+
+  const launchBomb = (throwerId, origin, target, keepHeld) => {
+    ctx.launchBomb(origin, target, bombTargetsFor(throwerId), keepHeld);
+  };
+
+  // The local player threw a bomb (bootstrap's bomb release); false outside Guns & Bombs
+  const throwLocalBomb = (origin, target) => {
+    if (!match || match.mode !== 'guns' || phase !== 'fighting') return false;
+    broadcast({ op: 'bomb', o: origin.toArray().map(round3), t: target.toArray().map(round3) });
+    launchBomb(myId(), origin, target, false);
+    return true;
+  };
+
+  // Host: a gun bot shoots / lobs a bomb at its target now and then
+  const botMuzzle = new THREE.Vector3();
+  const updateGunBot = (bot, targetModel, now) => {
+    const g = bot.enemy.group;
+    const dist = g.position.distanceTo(targetModel.position);
+    // Gun or shield (never both)
+    if (now >= bot.weaponUntil) {
+      if (bot.weapon === 'gun' && bot.shieldHp > 0 && Math.random() < BOT_SHIELD_CHANCE) {
+        bot.weapon = 'shield';
+        bot.weaponUntil = now + randIn(BOT_SHIELD_UP_MS);
+      } else {
+        if (bot.weapon === 'shield') bot.nextShotAt = Math.max(bot.nextShotAt, now + 400);
+        bot.weapon = 'gun';
+        bot.weaponUntil = now + randIn(BOT_GUN_MS);
+      }
+    }
+    if (bot.weapon !== 'gun') return;
+    if (now >= bot.nextShotAt) {
+      bot.nextShotAt = now + randIn(BOT_SHOT_MS);
+      if (dist <= BOT_SHOT_RANGE) {
+        g.updateMatrixWorld();
+        botMuzzle.copy(BOT_MUZZLE);
+        g.localToWorld(botMuzzle);
+        const dir = _tmpV.copy(targetModel.position).setY(targetModel.position.y + BODY_CENTER_Y).sub(botMuzzle);
+        if (dir.lengthSq() > 1e-4) {
+          dir.normalize().applyAxisAngle(_yAxis, (Math.random() * 2 - 1) * BOT_SHOT_SPREAD);
+          dir.y += (Math.random() * 2 - 1) * BOT_SHOT_SPREAD * 0.5;
+          dir.normalize();
+          ctx.spawnShot(botMuzzle, dir, bot.id);
+          broadcast({ op: 'shot', bot: bot.id, o: botMuzzle.toArray().map(round3), d: dir.toArray().map(round3) });
+        }
+      }
+    }
+    if (now >= bot.nextBombAt) {
+      bot.nextBombAt = now + randIn(BOT_BOMB_MS);
+      if (dist >= BOT_BOMB_RANGE[0] && dist <= BOT_BOMB_RANGE[1]) {
+        const origin = new THREE.Vector3(0, 1.6, 0.3);
+        g.updateMatrixWorld();
+        g.localToWorld(origin);
+        const target = targetModel.position.clone();
+        launchBomb(bot.id, origin, target, true);
+        broadcast({ op: 'bomb', bot: bot.id, o: origin.toArray().map(round3), t: target.toArray().map(round3) });
+      }
+    }
+  };
+
   // ── Host: bots ───────────────────────────────────────────────────────────
   // A bot's swing reached someone other than the host player: block check, then damage
   const resolveBotHit = (bot, targetId, swingDir) => {
@@ -915,6 +1189,7 @@ export function createMatchMode(ctx) {
       bot.enemy._onHitPlayer = targetIsMe ? (dir) => ctx.knockbackLocal(dir) : null;
       bot.enemy.update(dt, targetModel, targetIsMe ? ctx.getPlayerControls() : null, false,
         fighting && allowed.has(bot));
+      if (match.mode === 'guns' && fighting && targetModel) updateGunBot(bot, targetModel, now);
     }
   };
 
@@ -933,6 +1208,10 @@ export function createMatchMode(ctx) {
         d: !c.alive,
         b: c.enemy.isBlocking()
       };
+      if (match.mode === 'guns') {
+        entry.sh = c.shieldHp;
+        entry.w = c.weapon;
+      }
       const sg = c.enemy._swordGroup;
       if (sg?.visible && c.alive) {
         g.updateMatrixWorld();
@@ -1034,7 +1313,8 @@ export function createMatchMode(ctx) {
         blocking: !!state.blocking,
         pos: model ? [round3(model.position.x), round3(model.position.y), round3(model.position.z)] : null,
         ry: model ? round3(model.rotation.y) : null,
-        hp: me.hp
+        hp: me.hp,
+        w: match.mode === 'guns' ? ctx.getLocalWeapon?.() ?? null : undefined
       });
     }
 
@@ -1048,6 +1328,7 @@ export function createMatchMode(ctx) {
     if (!match) return;
     match.combatants.forEach((c) => {
       if (!c.isSelf && !c.enemy) updateRemoteCombatant(c);
+      if (match.mode === 'guns' && !c.isSelf) updateGunGear(c);
       if (c.enemy && c.alive) c.hp = c.enemy.hearts;
       renderLabel(c);
     });
@@ -1122,6 +1403,7 @@ export function createMatchMode(ctx) {
         case 'state': {
           applySwordState(c, data.sword, data.hand);
           c.blocking = !!data.blocking;
+          if (match.mode === 'guns') c.weapon = data.w === 'gun' || data.w === 'shield' ? data.w : null;
           if (Number.isFinite(data.hp) && c.alive) c.hp = Math.max(0, Math.min(99, Math.round(data.hp)));
           if (isVec(data.pos, 3)) {
             ctx.setRemotePose(c.id, data.pos, Number.isFinite(data.ry) ? data.ry : null,
@@ -1140,6 +1422,8 @@ export function createMatchMode(ctx) {
             }
             applySwordState(bot, b.s, b.h);
             bot.blocking = !!b.b;
+            if (Number.isFinite(b.sh)) bot.shieldHp = Math.max(0, Math.round(b.sh));
+            if (b.w === 'gun' || b.w === 'shield') bot.weapon = b.w;
             if (Number.isFinite(b.hp) && bot.alive) bot.hp = Math.max(0, Math.round(b.hp));
             if (b.d && bot.alive) markDead(bot.id);
           }
@@ -1147,10 +1431,30 @@ export function createMatchMode(ctx) {
         }
         case 'hit': {
           if (phase !== 'fighting') return;
+          const ranged = match.mode === 'guns' && (data.kind === 'gun' || data.kind === 'bomb');
           ctx.applyHit(
             Math.max(1, Math.min(2, Math.round(Number(data.dmg) || 1))),
-            isVec(data.dir, 2) ? data.dir : null
+            isVec(data.dir, 2) ? data.dir : null,
+            ranged ? { kind: data.kind, src: isVec(data.src, 2) ? data.src : null } : undefined
           );
+          return;
+        }
+        case 'shot': {
+          if (match.mode !== 'guns' || peerId !== match.hostId || match.isHost) return;
+          const bot = typeof data.bot === 'string' ? match.combatants.get(data.bot) : null;
+          if (!bot?.bot || !isVec(data.o, 3) || !isVec(data.d, 3)) return;
+          ctx.spawnShot(new THREE.Vector3().fromArray(data.o), new THREE.Vector3().fromArray(data.d), bot.id);
+          return;
+        }
+        case 'bomb': {
+          if (match.mode !== 'guns' || !isVec(data.o, 3) || !isVec(data.t, 3)) return;
+          let throwerId = peerId;
+          if (data.bot != null) {
+            const bot = typeof data.bot === 'string' ? match.combatants.get(data.bot) : null;
+            if (peerId !== match.hostId || !bot?.bot) return;
+            throwerId = bot.id;
+          }
+          launchBomb(throwerId, new THREE.Vector3().fromArray(data.o), new THREE.Vector3().fromArray(data.t), true);
           return;
         }
         case 'blocked':
@@ -1166,6 +1470,12 @@ export function createMatchMode(ctx) {
             return;
           }
           const dir = isVec(data.dir, 2) ? new THREE.Vector3(data.dir[0], 0, data.dir[1]) : null;
+          if (match.mode === 'guns') {
+            const dmg = data.kind === 'bomb' ? BOMB_DAMAGE : GUN_DAMAGE;
+            const src = isVec(data.src, 2) ? { x: data.src[0], z: data.src[1] } : null;
+            damageBot(bot, dmg, dir, src);
+            return;
+          }
           applyBotDamage(bot, dir);
           return;
         }
@@ -1395,6 +1705,9 @@ export function createMatchMode(ctx) {
     handleMessage,
     onPeersChange,
     getEnemyCombatants,
+    getShotTargets,
+    throwLocalBomb,
+    isGunsMatch: () => match?.mode === 'guns',
     // In a battle (countdown / fighting / result)
     isInMatch: () => !!match,
     isFighting: () => phase === 'fighting',

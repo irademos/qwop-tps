@@ -2763,10 +2763,11 @@ body.settings-open #inventory-button {
 }
 
 /* ── Multiplayer mode: lobby, duel countdown / winner, find-location (src/multiplayer/duelMode.js) ── */
-/* Duels are sword only: hide the bubble, bomb and weapon-switch buttons */
+/* Duels are sword only: hide the bubble, bomb and weapon-switch buttons (Guns & Bombs
+   battles, body.guns-match, keep bombs and the gun / shield switch) */
 body.multiplayer-mode #ps-bubble-btn,
-body.multiplayer-mode #ps-bomb-btn,
-body.multiplayer-mode .ps-weapon-btn {
+body.multiplayer-mode:not(.guns-match) #ps-bomb-btn,
+body.multiplayer-mode:not(.guns-match) .ps-weapon-btn {
   display: none !important;
 }
 

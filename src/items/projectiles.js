@@ -52,6 +52,8 @@ const sweptHitsEnemy = (from, to, enemy) => {
   return dx * dx + dz * dz < ENEMY_HIT_RADIUS * ENEMY_HIT_RADIUS;
 };
 
+const _pvpProbe = { group: { position: null } };
+
 function removeProjectileAt(projectiles, index) {
   const projectile = projectiles[index];
   if (!projectile) return;
@@ -100,7 +102,8 @@ export function updateProjectiles({
   projectiles,
   otherPlayers,
   multiplayer,
-  hordeEnemies
+  hordeEnemies,
+  pvpTargets = null
 }) {
   const localId = multiplayer?.getId?.() ?? 'local'; // 'local' = single player (see PlayerControls)
   const getStrengthDamage = baseDamage => {
@@ -153,6 +156,25 @@ export function updateProjectiles({
     // Skip hits until the projectile has left the shooter's immediate vicinity (~0.08 m).
     const leftShooter = !proj.userData.spawnPosition
       || proj.position.distanceToSquared(proj.userData.spawnPosition) >= 0.0064;
+
+    // Multiplayer Guns & Bombs: every fighter ({id, position, onHit}) — the battle code
+    // decides who deals the damage (src/multiplayer/matchMode.js)
+    if (pvpTargets) {
+      const prevPos = proj.userData.prevPos ?? proj.position;
+      if (leftShooter) {
+        for (const target of pvpTargets) {
+          if (target.id === proj.userData.shooterId) continue;
+          _pvpProbe.group.position = target.position;
+          if (!sweptHitsEnemy(prevPos, proj.position, _pvpProbe)) continue;
+          target.onHit(proj.userData.shooterId, vel.clone().setY(0).normalize());
+          removeProjectile(i);
+          removed = true;
+          break;
+        }
+      }
+      if (!removed) (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
+      continue;
+    }
 
     // PvP: other players
     for (const [id, { model }] of Object.entries(otherPlayers)) {

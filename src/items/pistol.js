@@ -37,6 +37,14 @@ export class Pistol extends Weapon {
     return THREE.MathUtils.clamp(pitch, GUN_AIM_MIN_PITCH, GUN_AIM_MAX_PITCH);
   }
 
+  /** Where both hands hold the gun (holder's model space) when aiming at `pitch` radians. */
+  getGripTarget(out = new THREE.Vector3(), pitch = 0) {
+    out.x = 0;
+    out.y = GUN_AIM_PIVOT_Y + Math.sin(pitch) * GUN_AIM_REACH;
+    out.z = GUN_AIM_PIVOT_Z + Math.cos(pitch) * GUN_AIM_REACH;
+    return out;
+  }
+
   update() {
     const pm = this.holder?.playerModel;
     if (pm) {
@@ -50,10 +58,7 @@ export class Pistol extends Weapon {
       if (!pm.userData.foamSwordHandTarget) {
         pm.userData.foamSwordHandTarget = { x: 0, y: GUN_AIM_PIVOT_Y, z: 0.6 };
       }
-      const tgt = pm.userData.foamSwordHandTarget;
-      tgt.x = 0;
-      tgt.y = GUN_AIM_PIVOT_Y + Math.sin(this._aimPitch) * GUN_AIM_REACH;
-      tgt.z = GUN_AIM_PIVOT_Z + Math.cos(this._aimPitch) * GUN_AIM_REACH;
+      this.getGripTarget(pm.userData.foamSwordHandTarget, this._aimPitch);
     } else {
       this._lastUpdateMs = 0;
     }

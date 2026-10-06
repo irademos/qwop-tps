@@ -150,6 +150,14 @@ export class Weapon {
     }
   }
 
+  /**
+   * How the weapon sits on its holder's hand: `offset` (hand / model space) and
+   * `quaternion` relative to the hand (Multiplayer copies this onto other fighters).
+   */
+  getHoldPose() {
+    return { offset: this._holdOffset, quaternion: this._holdQuaternion };
+  }
+
   update() {
     if (!this.mesh) return;
     if (!this.holder || !this.holder.playerModel) return;

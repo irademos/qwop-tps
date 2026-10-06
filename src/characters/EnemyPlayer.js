@@ -260,6 +260,12 @@ export class EnemyPlayer {
     this.swingChance = options.swingChance ?? 0.35;
     // Never walks (tutorial targets); still faces the player and fights if the player comes close
     this.stationary = !!options.stationary;
+    // Ranged fighter (Multiplayer Guns & Bombs bots): no sword, never swings, keeps
+    // between `min` and `max` metres from the target — { min, max } or null
+    this.ranged = options.ranged ?? null;
+    // Both hands on one grip point (model space) instead of the sword AI's hand poses —
+    // a held gun / shield, posed like the player's (Multiplayer Guns & Bombs), or null
+    this.gripTarget = null;
     // Tutorial override of the attack AI (see _applyScript), or null for the normal loop:
     //   { mode: 'passive' }                    – stands idle, never attacks
     //   { mode: 'block', preset }              – holds BLOCK_PRESETS[preset] indefinitely
@@ -324,6 +330,7 @@ export class EnemyPlayer {
 
     this._buildBody();
     this._buildSword();
+    if (this.ranged) this._swordGroup.visible = false;
     this._buildTrail();
     this._buildHealthBar();
     this._buildPhysics(startPos);
@@ -732,11 +739,11 @@ export class EnemyPlayer {
       // Still update arms/sword visuals but skip AI
       this._glbCharacter?.setMoving(false);
       this._glbCharacter?.animate(dt);
-      this._updateHandPositions(dt, Infinity);
+      if (!this._applyGripTarget(dt)) this._updateHandPositions(dt, Infinity);
       this._solveArm('right');
       this._updateSword(dt);
       this._updateSwingGlow(dt);
-      this._updateLeftHandToPommel(dt);
+      if (!this.gripTarget) this._updateLeftHandToPommel(dt);
       this._solveArm('left');
       this._glbCharacter?.stepFluff(dt);
       this._updateTrailMeshes(Date.now());
@@ -774,6 +781,10 @@ export class EnemyPlayer {
       this._aiState = 'attack';
     } else {
       this._aiState = 'chase';
+    }
+    if (this.ranged && scriptMode !== 'passive') {
+      this._aiState = distToTarget > this.ranged.max ? 'chase'
+        : distToTarget < this.ranged.min ? 'backoff' : 'hold';
     }
     if (this.stationary && (this._aiState === 'chase' || this._aiState === 'backoff')) {
       this._aiState = 'hold';
@@ -835,7 +846,7 @@ export class EnemyPlayer {
     this._glbCharacter?.animate(dt);
 
     // ── Right hand (drives sword position) ────────────────────────────────
-    this._updateHandPositions(dt, distToTarget);
+    if (!this._applyGripTarget(dt)) this._updateHandPositions(dt, distToTarget);
     this._solveArm('right');
 
     // ── Sword (orientation depends on right hand) ──────────────────────────
@@ -843,7 +854,7 @@ export class EnemyPlayer {
     this._updateSwingGlow(dt);
 
     // ── Left hand grips pommel (depends on sword orientation) ─────────────
-    this._updateLeftHandToPommel(dt);
+    if (!this.gripTarget) this._updateLeftHandToPommel(dt);
     this._solveArm('left');
     this._glbCharacter?.stepFluff(dt);
 
@@ -1010,6 +1021,20 @@ export class EnemyPlayer {
     }
 
     this._rightHandGroup.position.lerp(this._handTargetR, lerpR);
+  }
+
+  /** Both hands to `gripTarget` (the +X hand a bit lower, as on the player rig). */
+  _applyGripTarget(dt) {
+    const grip = this.gripTarget;
+    if (!grip) return false;
+    const k = 1 - Math.exp(-18 * dt);
+    this._handTargetR ??= new THREE.Vector3();
+    this._handTargetL ??= new THREE.Vector3();
+    this._handTargetR.set(grip.x, grip.y - 0.08, grip.z);
+    this._handTargetL.set(grip.x, grip.y, grip.z);
+    this._rightHandGroup.position.lerp(this._handTargetR, k);
+    this._leftHandGroup.position.lerp(this._handTargetL, k);
+    return true;
   }
 
   /**

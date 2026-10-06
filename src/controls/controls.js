@@ -565,8 +565,10 @@ export class PlayerControls {
     const inventory = appState?.getInventory?.() || {};
     const hasGun = (inventory.pistol?.count ?? 0) > 0;
     const hasShield = (inventory.shield?.count ?? 0) > 0;
+    // Multiplayer Guns & Bombs: gun and shield only
+    const swordAllowed = appState?.isSwordAllowed?.() !== false;
     const weapons = [
-      { id: 'foamSword', label: 'Sword' },
+      ...(swordAllowed ? [{ id: 'foamSword', label: 'Sword' }] : []),
       ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
       ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),
     ];
@@ -1132,12 +1134,16 @@ export class PlayerControls {
     this.consumeAmmo();
     // Single-player modes have no multiplayer connection
     const shooterId = this.multiplayer?.getId?.() ?? 'local';
-    this.multiplayer?.send?.({
-      type: 'projectile',
-      id: shooterId,
-      position: position.toArray(),
-      direction: direction.toArray()
-    });
+    if (this.multiplayer) {
+      const payload = {
+        type: 'projectile',
+        id: shooterId,
+        position: position.toArray(),
+        direction: direction.toArray()
+      };
+      if (this.sendProjectile) this.sendProjectile(payload);
+      else this.multiplayer.send?.(payload);
+    }
 
     this.playAction('projectile');
     this.spawnProjectile(
