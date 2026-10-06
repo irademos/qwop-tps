@@ -66,6 +66,7 @@ export const glbCharacterConfig = {
   // fluffyCharacter settings (fur length is in the GLB's own units, before targetHeight scaling)
   fluffy: {
     enabled: true, softness: 0.55, bounce: 0.45, amount: 0.8, flutter: 0.3, fuzz: 0.5,
+    movementLag: 0.15, // share of walking / turning the wobble lags behind (1 = full world-space lag)
     shells: 0, furLength: 0.06, shellsHairOnly: false, // shells 0: bouncy motion, no shell fur
   },
   // Per-model overrides of `fluffy`, keyed by url (e.g. { shells: 8 } for shell fur)
