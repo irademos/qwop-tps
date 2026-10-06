@@ -76,7 +76,12 @@ const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 const GUN_DAMAGE = 1;
 const BOMB_DAMAGE = 2;
 const SHIELD_ARC_DOT = 0.2;            // shot / blast from in front of the shield (cos of ~78°)
-const BOT_SHIELD_HP = 4;               // a bot's one shield (the player's: its shop shield health)
+const BOT_SHIELD_HP = 4;               // a bot's one shield (the player's: GUNS_MATCH_SHIELD_HEALTH)
+// Bots hold the gun or the shield, never both: shield up this long now and then (no
+// shooting meanwhile), gun the rest of the time
+const BOT_SHIELD_UP_MS = [1200, 2600];
+const BOT_GUN_MS = [2500, 6000];
+const BOT_SHIELD_CHANCE = 0.45;        // chance a gun spell ends with the shield going up
 const BOT_RANGE = { min: 4.5, max: 9 }; // bots keep this far (m) from their target
 const BOT_SHOT_RANGE = 16;
 const BOT_SHOT_MS = [900, 1900];       // random gap between a bot's shots
@@ -690,7 +695,8 @@ export function createMatchMode(ctx) {
         retargetAt: 0,
         combat: null,
         // Guns & Bombs
-        weapon: guns ? 'gun' : null,     // what a human holds: 'gun' | 'shield' | null
+        weapon: guns ? 'gun' : null,     // what they hold: 'gun' | 'shield' | null
+        weaponUntil: 0,                  // host bots: when to reconsider gun / shield
         shieldHp: guns && r.bot ? BOT_SHIELD_HP : 0,
         gunMesh: null,
         shieldMesh: null,
@@ -749,6 +755,7 @@ export function createMatchMode(ctx) {
         c.enemy.stationary = false;
         c.nextShotAt = fightAt + randIn([600, 2200]);
         c.nextBombAt = fightAt + randIn(BOT_BOMB_MS);
+        c.weaponUntil = fightAt + randIn(BOT_GUN_MS);
       });
       countdownTimers.push(setTimeout(() => {
         if (phase === 'fighting') hideBanner();
@@ -911,19 +918,14 @@ export function createMatchMode(ctx) {
       model.add(c.gunMesh);
     }
     c.shieldMesh = createShieldDisc();
-    if (c.bot) {
-      // Bots carry theirs on the off arm, facing forward, while it lasts
-      c.shieldMesh.position.set(0.34, 0.85, 0.28);
-    } else {
-      c.shieldMesh.position.copy(SHIELD_OFFSET);
-    }
+    c.shieldMesh.position.copy(SHIELD_OFFSET);
     model.add(c.shieldMesh);
   }
 
   const updateGunGear = (c) => {
     const alive = c.alive && phase !== 'off';
-    const shieldUp = c.bot ? c.shieldHp > 0 : c.weapon === 'shield';
-    if (c.gunMesh) c.gunMesh.visible = alive && (c.bot || c.weapon === 'gun');
+    const shieldUp = c.weapon === 'shield';
+    if (c.gunMesh) c.gunMesh.visible = alive && c.weapon === 'gun';
     if (c.shieldMesh) c.shieldMesh.visible = alive && shieldUp;
     if (!c.enemy) {
       const model = ctx.getRemoteModel(c.id);
@@ -937,7 +939,7 @@ export function createMatchMode(ctx) {
 
   // A host bot's shield faces the shot / blast (humans check their own, in ctx.applyHit)
   const botShieldBlocks = (c, src) => {
-    if (!c.enemy || c.shieldHp <= 0 || !src) return false;
+    if (!c.enemy || c.weapon !== 'shield' || c.shieldHp <= 0 || !src) return false;
     const g = c.enemy.group;
     _tmpV.set(src.x - g.position.x, 0, src.z - g.position.z);
     if (_tmpV.lengthSq() < 1e-6) return true;
@@ -949,6 +951,11 @@ export function createMatchMode(ctx) {
   const damageBot = (c, dmg, dir, src) => {
     if (botShieldBlocks(c, src)) {
       c.shieldHp = Math.max(0, c.shieldHp - dmg);
+      if (c.shieldHp <= 0) {
+        // Broken: back to the gun for good
+        c.weapon = 'gun';
+        c.weaponUntil = Infinity;
+      }
       ctx.onShieldHit?.(posOf(c));
       return;
     }
@@ -1037,6 +1044,18 @@ export function createMatchMode(ctx) {
   const updateGunBot = (bot, targetModel, now) => {
     const g = bot.enemy.group;
     const dist = g.position.distanceTo(targetModel.position);
+    // Gun or shield (never both)
+    if (now >= bot.weaponUntil) {
+      if (bot.weapon === 'gun' && bot.shieldHp > 0 && Math.random() < BOT_SHIELD_CHANCE) {
+        bot.weapon = 'shield';
+        bot.weaponUntil = now + randIn(BOT_SHIELD_UP_MS);
+      } else {
+        if (bot.weapon === 'shield') bot.nextShotAt = Math.max(bot.nextShotAt, now + 400);
+        bot.weapon = 'gun';
+        bot.weaponUntil = now + randIn(BOT_GUN_MS);
+      }
+    }
+    if (bot.weapon !== 'gun') return;
     if (now >= bot.nextShotAt) {
       bot.nextShotAt = now + randIn(BOT_SHOT_MS);
       if (dist <= BOT_SHOT_RANGE) {
@@ -1162,7 +1181,10 @@ export function createMatchMode(ctx) {
         d: !c.alive,
         b: c.enemy.isBlocking()
       };
-      if (match.mode === 'guns') entry.sh = c.shieldHp;
+      if (match.mode === 'guns') {
+        entry.sh = c.shieldHp;
+        entry.w = c.weapon;
+      }
       const sg = c.enemy._swordGroup;
       if (sg?.visible && c.alive) {
         g.updateMatrixWorld();
@@ -1374,6 +1396,7 @@ export function createMatchMode(ctx) {
             applySwordState(bot, b.s, b.h);
             bot.blocking = !!b.b;
             if (Number.isFinite(b.sh)) bot.shieldHp = Math.max(0, Math.round(b.sh));
+            if (b.w === 'gun' || b.w === 'shield') bot.weapon = b.w;
             if (Number.isFinite(b.hp) && bot.alive) bot.hp = Math.max(0, Math.round(b.hp));
             if (b.d && bot.alive) markDead(bot.id);
           }
