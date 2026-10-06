@@ -42,6 +42,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { FluffyCharacter } from './fluffyCharacter.ts';
+import { stylizeObject, whenStyleReferenceReady } from '../environment/artStyle.js';
 
 export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
@@ -65,18 +66,12 @@ export const glbCharacterConfig = {
   // fluffyCharacter settings (fur length is in the GLB's own units, before targetHeight scaling)
   fluffy: {
     enabled: true, softness: 0.55, bounce: 0.45, amount: 0.8, flutter: 0.3, fuzz: 0.5,
-    shells: 8, furLength: 0.06, shellsHairOnly: false,
+    shells: 0, furLength: 0.06, shellsHairOnly: false, // shells 0: bouncy motion, no shell fur
   },
-  // Per-model overrides of `fluffy`, keyed by url. The frog man, antler guy, pumpkin and
-  // wizard keep the bouncy secondary motion but have no shell fur.
-  fluffyByUrl: {
-    '/models/glb_characters/frog_man.glb': { shells: 0 },
-    '/models/glb_characters/antler_guy.glb': { shells: 0 },
-    '/models/glb_characters/pumpkin.glb': { shells: 0 },
-    '/models/glb_characters/wizard.glb': { shells: 0 },
-  },
+  // Per-model overrides of `fluffy`, keyed by url (e.g. { shells: 8 } for shell fur)
+  fluffyByUrl: {},
   // Mii characters (miiN.glb) get these fluffy overrides
-  miiFluffy: { shells: 0 },
+  miiFluffy: {},
 };
 
 /**
@@ -100,7 +95,9 @@ const _gltfPromises = new Map(); // url → Promise<gltf>
 function getCharacterGLTF(url = glbCharacterConfig.url) {
   let promise = _gltfPromises.get(url);
   if (!promise) {
-    promise = _gltfLoader.loadAsync(url);
+    // Textures are matched to the map's art style once, on the cached scene (clones share them)
+    promise = Promise.all([_gltfLoader.loadAsync(url), whenStyleReferenceReady()])
+      .then(([gltf]) => { stylizeObject(gltf.scene, { character: true }); return gltf; });
     promise.catch(() => { _gltfPromises.delete(url); });
     _gltfPromises.set(url, promise);
   }

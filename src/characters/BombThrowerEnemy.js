@@ -20,6 +20,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
+import { stylizeObject } from '../environment/artStyle.js';
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 const _homeDir = new THREE.Vector3();
@@ -83,7 +84,7 @@ const _gltfLoader = new GLTFLoader();
 export function getBombGLTF() {
   if (!_bombGltfPromise) {
     _bombGltfPromise = new Promise((resolve, reject) =>
-      _gltfLoader.load('/assets/props/bomb.glb', resolve, undefined, reject)
+      _gltfLoader.load('/assets/props/bomb.glb', (gltf) => { stylizeObject(gltf.scene); resolve(gltf); }, undefined, reject)
     );
   }
   return _bombGltfPromise;
