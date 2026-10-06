@@ -34,6 +34,7 @@ export interface FluffySettings {
   bounce: number          // 0 = settles smoothly … 1 = springy overshoot
   amount: number          // how strongly the outer volume follows the lagged skeleton
   flutter: number         // idle noise wobble
+  movementLag: number     // 0 = springs ride along with whole-body walking/turning … 1 = lag the full world motion
   fuzz: number            // rim sheen + darker roots shading
   shells: number          // shell-fur layers (0 = off, no extra draws)
   furLength: number       // shell-fur length in world units
@@ -41,7 +42,7 @@ export interface FluffySettings {
 }
 
 export const DEFAULT_FLUFFY: FluffySettings = {
-  enabled: false, softness: 0.5, bounce: 0.4, amount: 0.8, flutter: 0.3, fuzz: 0.5,
+  enabled: false, softness: 0.5, bounce: 0.4, amount: 0.8, flutter: 0.3, fuzz: 0.5, movementLag: 0.15,
   shells: 0, furLength: 0.06, shellsHairOnly: false,
 }
 
@@ -463,11 +464,41 @@ class LagSkeletons {
   private tp = new THREE.Vector3(); private ts = new THREE.Vector3(); private tq = new THREE.Quaternion()
   private err = new THREE.Quaternion(); private dq = new THREE.Quaternion()
   private acc = new THREE.Vector3(); private e = new THREE.Vector3(); private axis = new THREE.Vector3()
+  private prevRoot = new THREE.Matrix4(); private prevRootInit = false
+  private carryM = new THREE.Matrix4(); private tmpInv = new THREE.Matrix4(); private carryQ = new THREE.Quaternion()
+  private pp = new THREE.Vector3(); private pq = new THREE.Quaternion(); private ps = new THREE.Vector3()
+  private np = new THREE.Vector3(); private nq = new THREE.Quaternion(); private ns = new THREE.Vector3()
+
+  // Move the spring states along with the character's whole-body motion (walking,
+  // turning) so only `movementLag` of it shows up as lag; the animation's own
+  // motion relative to the body still drives the full wobble.
+  private carryWithRoot(s: FluffySettings) {
+    const { prevRoot, carryM, carryQ, pp, pq, ps, np, nq, ns } = this
+    const rootM = this.root.matrixWorld
+    if (this.prevRootInit) {
+      const carry = 1 - THREE.MathUtils.clamp(s.movementLag ?? 0, 0, 1)
+      prevRoot.decompose(pp, pq, ps)
+      rootM.decompose(np, nq, ns)
+      np.lerpVectors(pp, np, carry); nq.slerpQuaternions(pq, nq, carry); ns.lerpVectors(ps, ns, carry)
+      carryM.compose(np, nq, ns).multiply(this.tmpInv.copy(prevRoot).invert())
+      carryQ.copy(pq).invert().premultiply(nq)
+      this.states.forEach((st) => {
+        if (!st.init) return
+        st.pos.applyMatrix4(carryM)
+        st.vel.applyQuaternion(carryQ)
+        st.quat.premultiply(carryQ)
+        st.angVel.applyQuaternion(carryQ)
+      })
+    }
+    prevRoot.copy(rootM)
+    this.prevRootInit = true
+  }
 
   step(dt: number, s: FluffySettings) {
     const { tp, ts, tq, err, dq, acc, e, axis } = this
     // Bones were just moved by the animation / pose
     this.root.updateMatrixWorld(true)
+    this.carryWithRoot(s)
     dt = Math.min(dt, 1 / 20)
     const k = THREE.MathUtils.lerp(700, 18, s.softness)
     const c = 2 * THREE.MathUtils.lerp(1.1, 0.12, s.bounce) * Math.sqrt(k)
