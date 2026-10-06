@@ -1631,6 +1631,10 @@ async function initCore(runtimeContext) {
   mapGroup.name = 'map';
   mapGroup.scale.setScalar(5);
   scene.add(mapGroup);
+  // The height raycasts below use the meshes' matrixWorld, which three.js only refreshes on
+  // render. Without this, spawn heights sampled before the first frame hit the unscaled map
+  // (too low) and stay cached for that cell — the player spawned underground until they moved.
+  mapGroup.updateMatrixWorld(true);
 
   // Build a BVH-accelerated mesh list for downward raycasting to get terrain height.
   const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = await import('three-mesh-bvh');
