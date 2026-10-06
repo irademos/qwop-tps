@@ -206,6 +206,23 @@ function createArcadeOverlay(startOverlay) {
   let activeLoadProfile = loadOrCreateWithPin;
   let isGuest = false;
 
+  // Signing in (or switching user) once the game is loading needs a fresh page load; this
+  // flag makes that load show the login form instead of starting as a guest again.
+  const SHOW_LOGIN_KEY = 'sq:showLogin';
+  const reloadToLoginForm = () => {
+    try { sessionStorage.setItem(SHOW_LOGIN_KEY, '1'); } catch (_) {}
+    window.location.reload();
+  };
+  const consumeShowLoginFlag = () => {
+    try {
+      const flag = sessionStorage.getItem(SHOW_LOGIN_KEY) === '1';
+      sessionStorage.removeItem(SHOW_LOGIN_KEY);
+      return flag;
+    } catch (_) {
+      return false;
+    }
+  };
+
   const createWaiter = () => {
     const queue = [];
     let resolver = null;
@@ -419,9 +436,10 @@ function createArcadeOverlay(startOverlay) {
       setCookie('playerName', '', -1);
       localStorage.removeItem('playerName');
     }
-    // The game is already loading for this player: switching user needs a fresh page load
+    // The game is already loading for this player: switching user / signing in needs a
+    // fresh page load (which opens on the login form)
     if (authResolved) {
-      window.location.reload();
+      reloadToLoginForm();
       return;
     }
     currentName = '';
@@ -466,8 +484,9 @@ function createArcadeOverlay(startOverlay) {
 
   // Play without signing in: a guest with a random name and no profile (nothing is saved).
   // All modes are offered right away (the tutorial can't be remembered as done).
-  guestButton?.addEventListener('click', event => {
-    event.preventDefault();
+  // The app opens as a guest unless a signed-in player is remembered; the welcome
+  // section's "Sign In" button (switchButton) reloads to the login form.
+  const startAsGuest = () => {
     if (authResolved) return;
     authToken += 1; // drop any login in progress
     authInProgress = false;
@@ -477,6 +496,11 @@ function createArcadeOverlay(startOverlay) {
     welcomeText.textContent = `Playing as guest ${currentName}`;
     const guestProfile = buildGuestProfile(currentName);
     showModeSelect({ guest: true, nameKey: null, profile: guestProfile });
+  };
+
+  guestButton?.addEventListener('click', event => {
+    event.preventDefault();
+    startAsGuest();
   });
 
   const chooseMode = (gameMode) => {
@@ -509,8 +533,10 @@ function createArcadeOverlay(startOverlay) {
         welcomeSection?.classList.remove('hidden');
         form?.classList.add('hidden');
         startAuthFlow(initialName, { autoStart: false });
+      } else if (consumeShowLoginFlag()) {
+        showLoginForm({ name: initialName }); // the player asked to sign in
       } else {
-        showLoginForm({ name: initialName });
+        startAsGuest();
       }
       return authPromise;
     },
@@ -531,7 +557,8 @@ function createArcadeOverlay(startOverlay) {
       tutorialCompleted = !!tutorialDone;
       setMessage('');
       form?.classList.add('hidden');
-      switchButton?.classList.add('hidden'); // switching user needs a fresh page load
+      // "Sign In" (guest) / "Switch user" stays available — it reloads to the login form
+      switchButton?.classList.remove('hidden');
       welcomeSection?.classList.remove('hidden');
       showModeButtons();
       startOverlay.style.display = '';
