@@ -3,7 +3,7 @@ import { LOBBY_ROOM_ID } from './peerConnection.js';
 
 // Multiplayer mode: a lobby of everyone online (the `peers` list the Multiplayer class keeps
 // from Firebase) where you challenge a player to a 1v1 sword duel, or open Team Battle /
-// Free For All (src/multiplayer/matchMode.js — the lobby is suspended while it runs). A duel moves both players
+// Free For All / Guns & Bombs (src/multiplayer/matchMode.js — the lobby is suspended while it runs). A duel moves both players
 // into their own private room at DUEL_LOCATION, locks guns/bombs/bubbles/shields and plays
 // best of DUEL_ROUNDS rounds: each round both start apart with full duel health, count
 // "3 2 1 FIGHT!", walk in toward each other and fight until one dies. First to
@@ -84,7 +84,8 @@ export function createDuelMode(ctx) {
   const lobbyModes = el('div', 'duel-lobby-modes');
   const teamBattleBtn = el('button', 'arcade-button', '👥 Team Battle');
   const ffaBtn = el('button', 'arcade-button', '🎯 Free For All');
-  lobbyModes.append(teamBattleBtn, ffaBtn);
+  const gunsBtn = el('button', 'arcade-button', '🔫 Guns & Bombs');
+  lobbyModes.append(teamBattleBtn, ffaBtn, gunsBtn);
   const lobbyActions = el('div', 'duel-lobby-actions');
   const findLocationBtn = el('button', 'arcade-button arcade-secondary', '📍 Find Location');
   const backBtn = el('button', 'arcade-button arcade-secondary', '⬅ Back');
@@ -476,6 +477,9 @@ export function createDuelMode(ctx) {
   });
   ffaBtn.addEventListener('click', () => {
     if (phase === 'lobby' && ctx.getMultiplayer()?.getId?.()) ctx.openMatch('ffa');
+  });
+  gunsBtn.addEventListener('click', () => {
+    if (phase === 'lobby' && ctx.getMultiplayer()?.getId?.()) ctx.openMatch('guns');
   });
 
   // ── Lobby / roam screens ─────────────────────────────────────────────────

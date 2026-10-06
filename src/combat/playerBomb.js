@@ -48,13 +48,13 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
   const explode = (bomb) => {
     const pos = bomb.mesh.position.clone();
     spawnBombExplosion(scene, pos);
-    blastEnemiesAt(pos, getBlastTargets?.());
+    blastEnemiesAt(pos, (bomb.getBlastTargets ?? getBlastTargets)?.());
     disposeBombMesh(bomb.mesh);
     bombs.splice(bombs.indexOf(bomb), 1);
   };
 
-  const touchesEnemy = (pos) => {
-    const targets = getBlastTargets?.();
+  const touchesEnemy = (bomb, pos) => {
+    const targets = (bomb.getBlastTargets ?? getBlastTargets)?.();
     if (!targets?.length) return false;
     for (const enemy of targets) {
       if (!enemy || enemy.isDead || !enemy.group) continue;
@@ -73,14 +73,22 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
       if (worldPos) held.position.copy(worldPos);
     },
 
-    /** Lobs a bomb from `origin` so it lands on `target` (both world space). */
-    throw(origin, target) {
+    /**
+     * Lobs a bomb from `origin` so it lands on `target` (both world space).
+     * `opts.getBlastTargets` overrides who this bomb's blast can hit (Multiplayer Guns & Bombs).
+     */
+    throw(origin, target, opts = {}) {
       const mesh = createBombMesh(gltf);
       mesh.name = 'PlayerBomb';
       mesh.position.copy(origin);
       scene.add(mesh);
-      bombs.push({ mesh, vel: computeBombLobVelocity(origin, target), spawnTime: Date.now() });
-      if (held) held.visible = false;
+      bombs.push({
+        mesh,
+        vel: computeBombLobVelocity(origin, target),
+        spawnTime: Date.now(),
+        getBlastTargets: opts.getBlastTargets ?? null
+      });
+      if (held && !opts.keepHeld) held.visible = false;
     },
 
     update(dt) {
@@ -96,7 +104,7 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
         const groundY = getTerrainHeight(p.x, p.z);
         if (now - bomb.spawnTime > BOMB_LIFETIME_MS ||
             (Number.isFinite(groundY) && p.y <= groundY + 0.15) ||
-            touchesEnemy(p)) {
+            touchesEnemy(bomb, p)) {
           explode(bomb);
         }
       }

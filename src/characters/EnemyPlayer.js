@@ -260,6 +260,9 @@ export class EnemyPlayer {
     this.swingChance = options.swingChance ?? 0.35;
     // Never walks (tutorial targets); still faces the player and fights if the player comes close
     this.stationary = !!options.stationary;
+    // Ranged fighter (Multiplayer Guns & Bombs bots): no sword, never swings, keeps
+    // between `min` and `max` metres from the target — { min, max } or null
+    this.ranged = options.ranged ?? null;
     // Tutorial override of the attack AI (see _applyScript), or null for the normal loop:
     //   { mode: 'passive' }                    – stands idle, never attacks
     //   { mode: 'block', preset }              – holds BLOCK_PRESETS[preset] indefinitely
@@ -324,6 +327,7 @@ export class EnemyPlayer {
 
     this._buildBody();
     this._buildSword();
+    if (this.ranged) this._swordGroup.visible = false;
     this._buildTrail();
     this._buildHealthBar();
     this._buildPhysics(startPos);
@@ -774,6 +778,10 @@ export class EnemyPlayer {
       this._aiState = 'attack';
     } else {
       this._aiState = 'chase';
+    }
+    if (this.ranged && scriptMode !== 'passive') {
+      this._aiState = distToTarget > this.ranged.max ? 'chase'
+        : distToTarget < this.ranged.min ? 'backoff' : 'hold';
     }
     if (this.stationary && (this._aiState === 'chase' || this._aiState === 'backoff')) {
       this._aiState = 'hold';
