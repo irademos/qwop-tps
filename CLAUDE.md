@@ -181,7 +181,7 @@ Every screen — start screen, settings / shop / leaderboard (`.settings-shell`)
 ### 9. PIN Auth
 No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hashed client-side via Web Crypto, stored in Firebase. Hash cached in cookie for auto-login.
 
-**Guest play:** "Play Without Signing In" on the login form (`data-arcade-guest` in `createArcadeOverlay`) skips auth with a random name (`randomGuestName`) and an in-memory profile (`buildGuestProfile`, all modes offered). `initCore` then has `isGuest` true and `profileNameKey` null — every profile save (`saveStats*` wrappers, stage/characters/tutorial/phoneSwordStats, localStorage `ps_*` keys) is skipped when the key is null, `playerName` isn't stored, and renaming only changes the session name. Guard new profile writes on `profileNameKey`.
+**Guest play:** the app opens as a guest (`startAsGuest` in `createArcadeOverlay`) unless a signed-in player is remembered (stored PIN → auto-login). The start screen's "Sign In" / "Switch user" button (`data-arcade-switch`, kept visible when returning from any mode via `showStartScreen`) reloads the page with the `sq:showLogin` sessionStorage flag, which opens the login form instead; "Play Without Signing In" there (`data-arcade-guest`) goes back to guest. Guest play skips auth with a random name (`randomGuestName`) and an in-memory profile (`buildGuestProfile`, all modes offered). `initCore` then has `isGuest` true and `profileNameKey` null — every profile save (`saveStats*` wrappers, stage/characters/tutorial/phoneSwordStats, localStorage `ps_*` keys) is skipped when the key is null, `playerName` isn't stored, and renaming only changes the session name. Guard new profile writes on `profileNameKey`.
 
 ---
 
