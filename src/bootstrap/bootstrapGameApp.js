@@ -9,6 +9,7 @@ import { glbCharacterConfig, isMiiCharacterUrl } from "../models/glbCharacterMod
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
 import { setStyleReference, stylizeObject } from '../environment/artStyle.js';
+import { createOutlineRenderer } from '../environment/outlinePass.js';
 import { setBlobShadowsEnabled } from '../environment/blobShadows.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
@@ -1224,7 +1225,7 @@ async function initCore(runtimeContext) {
   };
 
   const loadDisplaySettings = () => {
-    const defaults = { mode: 'auto', performanceMode: 'auto', highContrastMode: false, ...DISPLAY_PRESETS.day };
+    const defaults = { mode: 'auto', performanceMode: 'auto', highContrastMode: false, outlines: true, ...DISPLAY_PRESETS.day };
     const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
     if (!raw) return defaults;
     try {
@@ -1246,6 +1247,7 @@ async function initCore(runtimeContext) {
   let displaySettings = loadDisplaySettings();
   let lastAutoMode = null;
   let renderer = null;
+  let outlineRenderer = null; // cartoon outlines post pass (outlinePass.js), wraps renderer
   let currentPerformanceTier = resolvePerformanceTier(displaySettings.performanceMode);
   let optionalShadowsEnabled = !isLowEndTier(currentPerformanceTier);
 
@@ -1257,6 +1259,9 @@ async function initCore(runtimeContext) {
   }
   if (typeof displaySettings.highContrastMode !== 'boolean') {
     displaySettings.highContrastMode = false;
+  }
+  if (typeof displaySettings.outlines !== 'boolean') {
+    displaySettings.outlines = true;
   }
   if (displaySettings.mode === 'auto') {
     lastAutoMode = getAutoMode();
@@ -1313,6 +1318,11 @@ async function initCore(runtimeContext) {
       renderer.shadowMap.enabled = !lowEnd;
       renderer.shadowMap.type = lowEnd ? THREE.BasicShadowMap : (nextTier === 'high' ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap);
     }
+    if (outlineRenderer) {
+      // The scene goes through the outline pass's render target, so it carries the MSAA
+      outlineRenderer.setSamples(isLowEndTier(nextTier) ? 0 : 4);
+      outlineRenderer.setEnabled(displaySettings.outlines);
+    }
     if (dirLight) {
       const lowEnd = isLowEndTier(nextTier);
       dirLight.castShadow = !lowEnd;
@@ -1339,6 +1349,13 @@ async function initCore(runtimeContext) {
     if (key === 'performanceMode') {
       if (!PERFORMANCE_MODES.has(value)) return;
       displaySettings.performanceMode = value;
+      saveDisplaySettings();
+      applyRendererPerformanceSettings();
+      updateSettingsUI();
+      return;
+    }
+    if (key === 'outlines') {
+      displaySettings.outlines = Boolean(value);
       saveDisplaySettings();
       applyRendererPerformanceSettings();
       updateSettingsUI();
@@ -1630,6 +1647,7 @@ async function initCore(runtimeContext) {
 
   const initialTier = resolvePerformanceTier(displaySettings.performanceMode);
   renderer = new THREE.WebGLRenderer({ antialias: !isLowEndTier(initialTier) });
+  outlineRenderer = createOutlineRenderer(renderer);
   currentPerformanceTier = initialTier;
   optionalShadowsEnabled = !isLowEndTier(initialTier);
   applyRendererPerformanceSettings();
@@ -7126,7 +7144,7 @@ async function initCore(runtimeContext) {
       dirLight.position.set(fx, playerModel.position.y, fz).add(SHADOW_LIGHT_OFFSET);
       dirLight.target.updateMatrixWorld();
     }
-    renderer.render(scene, camera);
+    outlineRenderer.render(scene, camera);
     const frameTotalMs = performance.now() - frameStartMs;
     if (frameTotalMs > FRAME_TIME_DEGRADE_THRESHOLD_MS) {
       frameOverrunStreak += 1;

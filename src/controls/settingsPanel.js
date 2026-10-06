@@ -341,6 +341,16 @@ function buildDisplayPanel() {
   highContrastHint.textContent = 'Boosts object contrast and lighting for better daytime phone visibility.';
   highContrastGroup.append(highContrastLabel, highContrastToggle, highContrastHint);
 
+  const outlinesGroup = createElement('div', 'settings-field');
+  const outlinesLabel = createElement('label', 'settings-label', 'Cartoon Outlines');
+  outlinesLabel.setAttribute('for', 'settings-display-outlines');
+  const outlinesToggle = createElement('input', 'settings-checkbox');
+  outlinesToggle.id = 'settings-display-outlines';
+  outlinesToggle.type = 'checkbox';
+  const outlinesHint = createElement('div', 'settings-muted');
+  outlinesHint.textContent = 'Thin hand-drawn ink lines around everything.';
+  outlinesGroup.append(outlinesLabel, outlinesToggle, outlinesHint);
+
   const createRangeField = ({ id, label, min, max, step }) => {
     const field = createElement('div', 'settings-field');
     const labelRow = createElement('div', 'settings-range-row');
@@ -406,6 +416,7 @@ function buildDisplayPanel() {
     gyroGroup,
     gyroRecalGroup,
     highContrastGroup,
+    outlinesGroup,
     cameraSectionTitle,
     ...CAMERA_CONTROLS.map(({ key }) => cameraFields[key].field),
     cameraActions,
@@ -422,6 +433,7 @@ function buildDisplayPanel() {
     gyroRecalBtn,
     gyroRecalGroup,
     highContrastToggle,
+    outlinesToggle,
     cameraFields,
     cameraCopyButton
   };
@@ -1100,6 +1112,12 @@ function bindEvents() {
     });
   }
 
+  if (elements.displayFields?.outlinesToggle) {
+    elements.displayFields.outlinesToggle.addEventListener('change', (event) => {
+      context.appState?.setDisplaySetting?.('outlines', event.target.checked);
+    });
+  }
+
   if (elements.displayFields?.highContrastToggle) {
     elements.displayFields.highContrastToggle.addEventListener('change', (event) => {
       context.appState?.setDisplaySetting?.('highContrastMode', event.target.checked);
@@ -1230,6 +1248,9 @@ export function updateUI() {
     }
     if (elements.displayFields.highContrastToggle) {
       elements.displayFields.highContrastToggle.checked = Boolean(displaySettings?.highContrastMode);
+    }
+    if (elements.displayFields.outlinesToggle) {
+      elements.displayFields.outlinesToggle.checked = displaySettings?.outlines !== false;
     }
     if (elements.displayFields.gyroToggle && !elements.displayFields.gyroToggle.disabled) {
       const gyroActive = Boolean(window.playerControls?.gyroActive);
