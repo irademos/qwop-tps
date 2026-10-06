@@ -17,7 +17,8 @@ import { swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/Ene
 // everyone `start` with the full roster. Parties with guests sit in `party-<hostId>`
 // (not pullable); a battle runs in its own private room `match-<matchId>`.
 //
-// Battle: everyone spawns around DUEL_LOCATION (teams in two lines facing each other,
+// Battle: everyone spawns around DUEL_LOCATION (Guns & Bombs: scattered wider around
+// GUNS_LOCATION) (teams in two lines facing each other,
 // free-for-all in a ring), counts down "3 2 1 FIGHT!", auto-walks toward the closest
 // enemy and fights with swords only, MATCH_HEALTH health each. The host simulates the
 // bots (EnemyPlayer AI) and decides the winner: the last team / fighter standing.
@@ -93,6 +94,21 @@ const GUN_OFFSET = new THREE.Vector3(0, 0.95, 0.5);   // where fighters hold the
 const GUN_HAND = new THREE.Vector3(0, 0.88, 0.42);
 const SHIELD_OFFSET = new THREE.Vector3(0, 0.9, 0.45);
 const randIn = ([a, b]) => a + Math.random() * (b - a);
+// Where Guns & Bombs battles happen; fighters are scattered around it (each in its own
+// slice of the ring, GUNS_SPAWN_RADIUS from the centre) — wider than the sword modes
+export const GUNS_LOCATION = { x: -62.87, y: 2.98, z: 64.22, yaw: 0.05 };
+const GUNS_SPAWN_RADIUS = [9, 20];
+// Same "random" numbers on every client (seeded by the match id + the fighter's slot)
+const seededRandom = (seedText) => {
+  let h = 2166136261;
+  for (let i = 0; i < seedText.length; i++) h = Math.imul(h ^ seedText.charCodeAt(i), 16777619);
+  return () => {
+    h = Math.imul(h ^ (h >>> 15), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+};
 
 const BOT_NAMES = ['Bruno', 'Kira', 'Otto', 'Mira', 'Rex', 'Juno', 'Pip', 'Zara', 'Hugo', 'Nell'];
 
@@ -610,7 +626,20 @@ export function createMatchMode(ctx) {
   });
 
   // ── Battle ───────────────────────────────────────────────────────────────
-  const spawnPose = (entry) => {
+  const spawnPose = (entry, mode, matchId) => {
+    if (mode === 'guns') {
+      const loc = GUNS_LOCATION;
+      const rand = seededRandom(`${matchId}:${entry.slot}`);
+      const slice = (Math.PI * 2) / MATCH_SIZE;
+      const angle = loc.yaw + (entry.slot + 0.25 + rand() * 0.5) * slice;
+      // Neighbours alternate between the inner and outer half of the ring (never side by side)
+      const [rMin, rMax] = GUNS_SPAWN_RADIUS;
+      const half = (rMax - rMin) / 2;
+      const radius = rMin + (entry.slot % 2) * half + rand() * half;
+      const x = loc.x + Math.sin(angle) * radius;
+      const z = loc.z + Math.cos(angle) * radius;
+      return { x, z, yaw: Math.atan2(loc.x - x, loc.z - z) };
+    }
     const loc = DUEL_LOCATION;
     const yaw = Number.isFinite(loc.yaw) ? loc.yaw : 0;
     if (entry.team === 0 || entry.team === 1) {
@@ -704,7 +733,7 @@ export function createMatchMode(ctx) {
         nextShotAt: Infinity,
         nextBombAt: Infinity
       };
-      const pose = spawnPose(r);
+      const pose = spawnPose(r, mode, matchId);
       const url = MATCH_CHARACTERS[r.char].url;
       if (c.isSelf) {
         match.myTeam = r.team;
