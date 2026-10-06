@@ -9,6 +9,7 @@ import { glbCharacterConfig, isMiiCharacterUrl } from "../models/glbCharacterMod
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
 import { setStyleReference, stylizeObject } from '../environment/artStyle.js';
+import { setBlobShadowsEnabled } from '../environment/blobShadows.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
 import { createMatchMode, MATCH_CHARACTERS } from '../multiplayer/matchMode.js';
@@ -164,6 +165,10 @@ const HIGH_CONTRAST_PRESET = {
   buildingBrightness: 2.0
 };
 const PERFORMANCE_MODES = new Set(['auto', 'quality', 'balanced', 'performance']);
+// Sun shadows: the light sits at this offset from the player and its shadow box (± this many
+// metres) follows them, so characters' shadows show on the map wherever the stage goes
+const SHADOW_LIGHT_OFFSET = new THREE.Vector3(15, 30, 15);
+const SHADOW_HALF_SIZE = 18;
 const PERFORMANCE_PROFILE_CAPS = {
   low: 1.0,
   mid: 1.5,
@@ -1311,8 +1316,15 @@ async function initCore(runtimeContext) {
     if (dirLight) {
       const lowEnd = isLowEndTier(nextTier);
       dirLight.castShadow = !lowEnd;
-      dirLight.shadow.mapSize.set(lowEnd ? 512 : 1024, lowEnd ? 512 : 1024);
+      const mapSize = lowEnd ? 512 : 1024;
+      if (dirLight.shadow.mapSize.x !== mapSize) {
+        dirLight.shadow.mapSize.set(mapSize, mapSize);
+        dirLight.shadow.map?.dispose();
+        dirLight.shadow.map = null; // re-created at the new size
+      }
     }
+    // The low tier has no shadow maps: characters get a cheap blob shadow instead
+    setBlobShadowsEnabled(isLowEndTier(nextTier));
     if (scene) {
       scene.traverse((child) => {
         if (!child?.isMesh) return;
@@ -1634,6 +1646,11 @@ async function initCore(runtimeContext) {
   // The map is the art-style reference: characters are matched to its colours (artStyle.js)
   setStyleReference(mapGroup);
   stylizeObject(mapGroup);
+  // The map shows the characters' shadows but casts none itself: its big mesh in the shadow
+  // pass would be the expensive part (see SHADOW_* / the light follow in the game loop)
+  mapGroup.traverse(obj => {
+    if (obj.isMesh) { obj.receiveShadow = true; obj.castShadow = false; }
+  });
   scene.add(mapGroup);
   // The height raycasts below use the meshes' matrixWorld, which three.js only refreshes on
   // render. Without this, spawn heights sampled before the first frame hit the unscaled map
@@ -1688,9 +1705,20 @@ async function initCore(runtimeContext) {
   scene.add(ambientLight);
 
   dirLight = new THREE.DirectionalLight(0xffffff, 1);
-  dirLight.position.set(5, 10, 5);
+  dirLight.position.copy(SHADOW_LIGHT_OFFSET);
   dirLight.castShadow = true;
+  {
+    // A tight box around the player (the light follows them each frame) keeps the 1024 map sharp
+    const cam = dirLight.shadow.camera;
+    cam.left = -SHADOW_HALF_SIZE; cam.right = SHADOW_HALF_SIZE;
+    cam.top = SHADOW_HALF_SIZE; cam.bottom = -SHADOW_HALF_SIZE;
+    cam.near = 1; cam.far = SHADOW_LIGHT_OFFSET.length() + 40;
+    cam.updateProjectionMatrix();
+    dirLight.shadow.bias = -0.0005;
+    dirLight.shadow.normalBias = 0.03;
+  }
   scene.add(dirLight);
+  scene.add(dirLight.target);
   applyRendererPerformanceSettings();
   applyDisplaySettings();
 
@@ -7088,6 +7116,16 @@ async function initCore(runtimeContext) {
       hordeEnemies,
       pvpTargets: matchMode?.getShotTargets() ?? null
     });
+    // Shadows: the sun's shadow box follows the player (snapped to whole shadow-map texels so
+    // the shadow edges don't shimmer as they move)
+    if (dirLight?.castShadow && playerModel) {
+      const texel = (SHADOW_HALF_SIZE * 2) / dirLight.shadow.mapSize.x;
+      const fx = Math.round(playerModel.position.x / texel) * texel;
+      const fz = Math.round(playerModel.position.z / texel) * texel;
+      dirLight.target.position.set(fx, playerModel.position.y, fz);
+      dirLight.position.set(fx, playerModel.position.y, fz).add(SHADOW_LIGHT_OFFSET);
+      dirLight.target.updateMatrixWorld();
+    }
     renderer.render(scene, camera);
     const frameTotalMs = performance.now() - frameStartMs;
     if (frameTotalMs > FRAME_TIME_DEGRADE_THRESHOLD_MS) {

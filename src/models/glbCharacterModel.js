@@ -43,6 +43,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { FluffyCharacter } from './fluffyCharacter.ts';
 import { stylizeObject, whenStyleReferenceReady } from '../environment/artStyle.js';
+import { addBlobShadow } from '../environment/blobShadows.js';
 
 export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
@@ -443,6 +444,7 @@ export async function createGLBCharacterInstance(opts = {}) {
   const container = new THREE.Group();
   container.name = 'GLBCharacterContainer';
   container.add(scene);
+  addBlobShadow(container, targetHeight * 0.7);
 
   const fluffy = {
     ...glbCharacterConfig.fluffy,

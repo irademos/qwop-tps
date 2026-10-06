@@ -221,7 +221,7 @@ export class PlayerControls {
       return mat;
     };
     bodyRoot.traverse((obj) => {
-      if (!obj.isMesh || !obj.visible) return;
+      if (!obj.isMesh || !obj.visible || obj.userData.isBlobShadow) return;
       if (Array.isArray(obj.material)) {
         obj.material.forEach((mat, i) => { obj.material[i] = prepare(mat); });
       } else {
