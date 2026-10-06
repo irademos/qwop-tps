@@ -5760,11 +5760,27 @@ async function initCore(runtimeContext) {
       if (isInventoryItemEquipped(SHIELD_ITEM_ID)) return 'shield';
       return null;
     },
-    createGunMesh: () => {
-      if (!pistol?.mesh) return null;
-      const gun = pistol.mesh.clone(true);
-      gun.visible = true;
-      return gun;
+    // The gun / shield other fighters hold, posed like the local player's: model clone,
+    // hold offset + rotation on the weapon hand, and where both hands grip it
+    getWeaponGear: () => {
+      if (!pistol?.mesh || !shield?.mesh) return null;
+      const cloneOf = (weapon) => () => {
+        const mesh = weapon.mesh.clone(true);
+        mesh.children
+          .filter((child) => child.name === 'shield-health-bar')
+          .forEach((child) => mesh.remove(child));
+        mesh.position.set(0, 0, 0);
+        mesh.traverse((child) => {
+          child.visible = child.name !== 'shield-health-bar';
+          if (child.isMesh) child.castShadow = true;
+        });
+        return mesh;
+      };
+      const gearOf = (weapon) => {
+        const { offset, quaternion } = weapon.getHoldPose();
+        return { createMesh: cloneOf(weapon), offset, quaternion, grip: weapon.getGripTarget(new THREE.Vector3()) };
+      };
+      return { gun: gearOf(pistol), shield: gearOf(shield) };
     },
     // A bullet fired by another fighter (or a host bot) — damage is decided by matchMode
     spawnShot: (origin, dir, shooterId) => spawnPistolBullet(origin, dir, shooterId),

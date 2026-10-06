@@ -90,9 +90,6 @@ const BOT_SHOT_SPREAD = 0.07;          // radians of aim error
 const BOT_BOMB_RANGE = [3.5, 13];
 const BOT_BOMB_MS = [5000, 9000];
 const BOT_MUZZLE = new THREE.Vector3(0, 1.0, 0.75);   // model space
-const GUN_OFFSET = new THREE.Vector3(0, 0.95, 0.5);   // where fighters hold their gun (model space)
-const GUN_HAND = new THREE.Vector3(0, 0.88, 0.42);
-const SHIELD_OFFSET = new THREE.Vector3(0, 0.9, 0.45);
 const randIn = ([a, b]) => a + Math.random() * (b - a);
 // Where Guns & Bombs battles happen; fighters are scattered around it (each in its own
 // slice of the ring, GUNS_SPAWN_RADIUS from the centre) — wider than the sword modes
@@ -141,18 +138,6 @@ const _tmpQ = new THREE.Quaternion();
 const _yAxis = new THREE.Vector3(0, 1, 0);
 const _tmpV3 = new THREE.Vector3();
 
-// Round shield the other fighters carry in Guns & Bombs (shared geometry / material)
-let _shieldGeo = null;
-let _shieldMat = null;
-const createShieldDisc = () => {
-  _shieldGeo ??= new THREE.CylinderGeometry(0.3, 0.3, 0.05, 20).rotateX(Math.PI / 2);
-  _shieldMat ??= new THREE.MeshStandardMaterial({ color: 0x8a5a2b, metalness: 0.35, roughness: 0.55, emissive: 0x1a0d00 });
-  const mesh = new THREE.Mesh(_shieldGeo, _shieldMat);
-  mesh.name = 'match-shield';
-  mesh.castShadow = true;
-  mesh.visible = false;
-  return mesh;
-};
 
 export function createMatchMode(ctx) {
   // 'off' | 'setup' (party host) | 'starting' (host waiting on pulled players) | 'guest'
@@ -934,21 +919,31 @@ export function createMatchMode(ctx) {
   });
 
   // ── Guns & Bombs: gear, bullets, bombs ───────────────────────────────────
-  // A gun (and the one shield) on another fighter's model
+  // The gun and the one shield on another fighter, held like the local player holds them:
+  // same models, on the same floating hand with the same hold offset / rotation, and both
+  // hands on the grip (ctx.getWeaponGear — taken from the player's own Pistol / Shield)
   function attachGunGear(c) {
     const model = combatantModel(c);
-    if (!model) return;
-    c.gunMesh = ctx.createGunMesh?.() || null;
-    if (c.gunMesh) {
-      c.gunMesh.position.copy(GUN_OFFSET);
-      c.gunMesh.rotation.set(0, Math.PI, 0); // barrel along -Z → the model's forward (+Z)
-      c.gunMesh.scale.setScalar(1.6);
-      c.gunMesh.visible = false;
-      model.add(c.gunMesh);
-    }
-    c.shieldMesh = createShieldDisc();
-    c.shieldMesh.position.copy(SHIELD_OFFSET);
-    model.add(c.shieldMesh);
+    const gear = ctx.getWeaponGear?.();
+    if (!model || !gear) return;
+    // The weapon hand: the floating hand the player's Weapon attaches to (labels mirrored)
+    const hand = c.enemy
+      ? c.enemy._leftHandGroup
+      : model.children.find((child) => child.userData?.proceduralHand === 'left');
+    const place = (mesh, kind) => {
+      if (!mesh) return null;
+      const g = gear[kind];
+      mesh.position.copy(g.offset);
+      if (!hand) mesh.position.add(g.grip);
+      mesh.quaternion.copy(g.quaternion);
+      mesh.visible = false;
+      (hand || model).add(mesh);
+      return mesh;
+    };
+    c.gripGun = gear.gun.grip.clone();
+    c.gripShield = gear.shield.grip.clone();
+    c.gunMesh = place(gear.gun.createMesh(), 'gun');
+    c.shieldMesh = place(gear.shield.createMesh(), 'shield');
   }
 
   const updateGunGear = (c) => {
@@ -956,9 +951,12 @@ export function createMatchMode(ctx) {
     const shieldUp = c.weapon === 'shield';
     if (c.gunMesh) c.gunMesh.visible = alive && c.weapon === 'gun';
     if (c.shieldMesh) c.shieldMesh.visible = alive && shieldUp;
-    if (!c.enemy) {
+    const grip = shieldUp ? c.gripShield : c.gripGun;
+    if (c.enemy) {
+      c.enemy.gripTarget = alive && grip ? grip : null;
+    } else {
       const model = ctx.getRemoteModel(c.id);
-      if (model) model.userData.remoteHandTarget = c.weapon === 'shield' ? SHIELD_OFFSET : GUN_HAND;
+      if (model && grip) model.userData.remoteHandTarget = grip;
     }
   };
 

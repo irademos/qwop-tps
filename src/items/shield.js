@@ -10,6 +10,7 @@ const SHIELD_THICKNESS = 0.12;
 const SHIELD_COLOR = 0x7a4a20;
 const SHIELD_RIM_COLOR = 0x4d2c12;
 const BAR_VISIBLE_MS = 1200;
+const _gripDir = new THREE.Vector3();
 
 export class Shield extends Weapon {
   constructor(scene) {
@@ -89,18 +90,23 @@ export class Shield extends Weapon {
     bar.userData.visibleUntil = performance.now() + BAR_VISIBLE_MS;
   }
 
+  /** Where both hands hold the shield (holder's model space). */
+  getGripTarget(out = new THREE.Vector3()) {
+    const dir = _gripDir.set(0, 0, 1).applyQuaternion(this._holdQuaternion);
+    out.x = THREE.MathUtils.clamp(dir.x * 0.3, -0.6, 0.6);
+    out.y = THREE.MathUtils.clamp(0.85 + dir.y * 0.15, 0.4, 1.3);
+    out.z = THREE.MathUtils.clamp(0.45 - (dir.z - 0.2) * 0.12, 0.2, 0.7);
+    return out;
+  }
+
   update() {
     if (this.holder?.playerModel) {
       const pm = this.holder.playerModel;
       pm.userData.foamSwordMode = true;
-      const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(this._holdQuaternion);
       if (!pm.userData.foamSwordHandTarget) {
         pm.userData.foamSwordHandTarget = { x: 0, y: 0.85, z: 0.45 };
       }
-      const tgt = pm.userData.foamSwordHandTarget;
-      tgt.x = THREE.MathUtils.clamp(dir.x * 0.3, -0.6, 0.6);
-      tgt.y = THREE.MathUtils.clamp(0.85 + dir.y * 0.15, 0.4, 1.3);
-      tgt.z = THREE.MathUtils.clamp(0.45 - (dir.z - 0.2) * 0.12, 0.2, 0.7);
+      this.getGripTarget(pm.userData.foamSwordHandTarget);
     }
     super.update();
     const targets = [this.mesh, this.heldMesh].filter(Boolean);
