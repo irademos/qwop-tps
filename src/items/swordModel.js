@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { isMiiCharacterUrl } from '../models/glbCharacterModel.js';
+import { stylizeObject } from '../environment/artStyle.js';
 
 // The sword GLBs (player + enemy swords). Sword convention everywhere else: the
 // origin is the grip (hand), the blade points along +Z and the tip is ~0.69 ahead
@@ -74,6 +75,7 @@ export function loadSwordModelTemplate(variant = 'default') {
   if (promise) return promise;
   promise = new GLTFLoader().loadAsync(cfg.url)
     .then(gltf => {
+      stylizeObject(gltf.scene, { materials: false });
       const template = buildTemplate(gltf.scene, cfg);
       _templates.set(variant, template);
       return template;

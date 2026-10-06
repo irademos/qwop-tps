@@ -8,6 +8,7 @@ import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerMo
 import { glbCharacterConfig, isMiiCharacterUrl } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
+import { setStyleReference, stylizeObject } from '../environment/artStyle.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
 import { createMatchMode, MATCH_CHARACTERS } from '../multiplayer/matchMode.js';
@@ -1630,6 +1631,9 @@ async function initCore(runtimeContext) {
   const mapGroup = mapGltf.scene;
   mapGroup.name = 'map';
   mapGroup.scale.setScalar(5);
+  // The map is the art-style reference: characters are matched to its colours (artStyle.js)
+  setStyleReference(mapGroup);
+  stylizeObject(mapGroup);
   scene.add(mapGroup);
   // The height raycasts below use the meshes' matrixWorld, which three.js only refreshes on
   // render. Without this, spawn heights sampled before the first frame hit the unscaled map
@@ -5161,6 +5165,7 @@ async function initCore(runtimeContext) {
       roadLightTemplatePromise = roadLightLoader.loadAsync(ROAD_LIGHT_MODEL_URL)
         .then((gltf) => {
           roadLightTemplate = gltf?.scene || null;
+          stylizeObject(roadLightTemplate, { materials: false });
           return roadLightTemplate;
         })
         .catch((error) => {

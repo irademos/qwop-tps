@@ -45,7 +45,7 @@ src/
   core/         appContext, exposeDebugGlobals, firebase-init, externalDeps (PeerJS/NippleJS CDN), utils (cookies)
   player/       playerProfile (Firebase stats/inventory/PIN/leaderboard), healthUtils
   map/          spawnUtils
-  environment/  terrainHeight (height resolver registry)
+  environment/  terrainHeight (height resolver registry), artStyle (load-time texture pass that matches characters/props to the map's look)
   combat/       knockback, bloodEffect (damage blood spray), explosionEffect (bomb explosion + smoke), playerBomb (player bombs), heartBubbles (Showdown heart bubbles), comboMeter (Showdown combo HUD; Classic "N-hit Combo!")
   multiplayer/  peerConnection (rooms, joinRoom, destroy), duelMode (lobby, challenges, duels, temp find-location), matchMode (Team Battle / Free For All / Guns & Bombs: parties, matchmaking, bots, battles)
   audio/        audioManager
@@ -72,6 +72,7 @@ src/
 | Where hands go (sword/shield/gun grip) | `src/models/playerModel.js` (`updateProceduralPlayerRig`), `src/items/foamSword.js`, `shield.js`, `pistol.js` (gun hands + gun follow the aim pitch from `getAimDirection`, `GUN_AIM_*`); enemies: `src/characters/EnemyPlayer.js` |
 | New UI panel | `src/controls/<panel>.js` + lazy-load in `src/features/uiPanelsFeature.js` |
 | Settings panel (Profile stats, Multiplayer status, Display incl. Camera: First Person View / Hide Body toggles, eye + body opacity + FOV sliders, Copy Values, Sword Gyro, About + Clear Cache & Reload, Account delete) | `src/controls/settingsPanel.js`; stats = `appState.getProfileStats` + `_psStats` / `_classicStats` in `bootstrapGameApp.js`, `normalizeStageStats` / `saveClassicStats` in `src/player/playerProfile.js`; camera = `PlayerControls.cameraConfig` (`sq:firstPersonCam`) in `src/controls/controls.js` |
+| Art style unifier (character textures matched to the map, shared grade) | `src/environment/artStyle.js` (`artStyleConfig`) |
 | World map / ground height | `public/glb_map/map.glb`; loaded in `bootstrapGameApp.js`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |
 | Firebase data shape | `src/player/playerProfile.js`, `src/characters/merchant.js` (room shop stock) |
 | Multiplayer protocol | `src/multiplayer/peerConnection.js`, `src/bootstrap/bootstrapGameApp.js` |
