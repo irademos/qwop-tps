@@ -1670,6 +1670,7 @@ async function initCore(runtimeContext) {
     if (obj.isMesh) { obj.receiveShadow = true; obj.castShadow = false; }
   });
   scene.add(mapGroup);
+  outlineRenderer.setStaticRoot(mapGroup);
   // The height raycasts below use the meshes' matrixWorld, which three.js only refreshes on
   // render. Without this, spawn heights sampled before the first frame hit the unscaled map
   // (too low) and stay cached for that cell — the player spawned underground until they moved.

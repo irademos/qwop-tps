@@ -8,13 +8,17 @@
  *  - Edge metric: the Laplacian of 1/viewZ. 1/z is exactly linear across any flat surface on
  *    screen, so flat or sloped ground gives 0 and only real edges show: silhouettes (big
  *    jumps) and creases (kinks). Divided by the centre's 1/z so it's distance independent.
- *  - Breaks: 3D value noise sampled at the pixel's world position (reconstructed from depth)
- *    erases the line where it's low. World space, so the gaps stay put on the map as the
- *    camera moves instead of swimming over everything.
+ *  - Breaks: 3D value noise erases the line where it's low. It's sampled at a point fixed to
+ *    the surface, so the gaps stay put instead of sliding along the lines:
+ *      - the static map (`setStaticRoot`): the world position, reconstructed from depth;
+ *      - everything else (characters, swords, props): its bind-pose / local position, from a
+ *        small "anchor" pass that draws only those meshes (ANCHOR_LAYER, tagged every
+ *        TAG_EVERY frames) with the skinning applied, so gaps ride along with the animation.
  *  - Lines fade out with distance so the far map doesn't turn into scribble.
  *
- * No extra scene draw (normals come for free from the depth), so the cost is one
- * full-screen pass with a handful of texture reads. Tune in outlineConfig (read each frame).
+ * Cost: one full-screen pass with ~8 texture reads, the anchor pass (characters only, no
+ * MSAA, no shadows), and the scene going through an 8-bit sRGB render target (which carries
+ * the MSAA instead of the canvas). Tune in outlineConfig (read each frame).
  */
 
 import * as THREE from 'three';
@@ -34,6 +38,36 @@ export const outlineConfig = {
   fadeEnd: 70,                // …and are gone here
 };
 
+// Meshes outside the static root are also put on this layer for the anchor pass
+const ANCHOR_LAYER = 7;
+const TAG_EVERY = 30; // frames between re-tagging (new enemies, swords, props)
+
+// Anchor pass: rgb = the surface point in the mesh's own (bind pose) space, scaled to metres;
+// a = view distance, so the outline pass can tell whether this mesh is the visible surface
+const anchorMaterial = new THREE.ShaderMaterial({
+  vertexShader: /* glsl */`
+    #include <skinning_pars_vertex>
+    varying vec3 vAnchor;
+    varying float vDist;
+    void main() {
+      #include <skinbase_vertex>
+      #include <begin_vertex>
+      vAnchor = transformed * length(modelMatrix[0].xyz);
+      #include <skinning_vertex>
+      #include <project_vertex>
+      vDist = -mvPosition.z;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    varying vec3 vAnchor;
+    varying float vDist;
+    void main() {
+      gl_FragColor = vec4(vAnchor, vDist);
+    }
+  `,
+  side: THREE.DoubleSide,
+});
+
 const vertexShader = /* glsl */`
   varying vec2 vUv;
   void main() {
@@ -46,6 +80,7 @@ const fragmentShader = /* glsl */`
   #include <packing>
   uniform sampler2D tColor;
   uniform sampler2D tDepth;
+  uniform sampler2D tAnchor;
   uniform vec2 texel;            // 1 / render target size
   uniform float cameraNear;
   uniform float cameraFar;
@@ -98,7 +133,12 @@ const fragmentShader = /* glsl */`
     float zu = viewZAt(vUv + vec2(0.0, o.y));
     float ic = -1.0 / zc, il = -1.0 / zl, ir = -1.0 / zr, id = -1.0 / zd, iu = -1.0 / zu;
     float lap = abs(il + ir - 2.0 * ic) + abs(id + iu - 2.0 * ic);
-    float nearest = max(max(max(il, ir), max(id, iu)), ic);
+    float nearest = ic;
+    vec2 nearestUv = vUv;
+    if (il > nearest) { nearest = il; nearestUv = vUv - vec2(o.x, 0.0); }
+    if (ir > nearest) { nearest = ir; nearestUv = vUv + vec2(o.x, 0.0); }
+    if (id > nearest) { nearest = id; nearestUv = vUv - vec2(0.0, o.y); }
+    if (iu > nearest) { nearest = iu; nearestUv = vUv + vec2(0.0, o.y); }
     float edge = smoothstep(edgeStart, edgeStart + edgeSoft, lap / nearest);
 
     // Where the line is in the world (the nearest surface) for the breaks and distance fade
@@ -109,7 +149,12 @@ const fragmentShader = /* glsl */`
     view.xyz *= dist / max(1e-4, -view.z);
     vec3 world = (cameraWorld * vec4(view.xyz, 1.0)).xyz;
 
-    float n = noise3(world * breakScale);
+    // A moving mesh that is the visible surface here: its own anchor point instead
+    vec4 anchor = texture2D(tAnchor, nearestUv);
+    vec3 breakPos = world;
+    if (anchor.a > 0.0 && abs(anchor.a - dist) < 0.06 * dist + 0.05) breakPos = anchor.xyz + 31.7;
+
+    float n = noise3(breakPos * breakScale);
     edge *= smoothstep(breakAmount - breakSoft, breakAmount + breakSoft, n);
     edge *= 1.0 - smoothstep(fadeStart, fadeEnd, dist);
 
@@ -128,11 +173,16 @@ export function createOutlineRenderer(renderer) {
   const size = new THREE.Vector2();
   let samples = 4;
   let target = null;
+  let anchorTarget = null;
+  let staticRoot = null;
+  let frame = 0;
+  const clearColor = new THREE.Color();
 
   const material = new THREE.ShaderMaterial({
     uniforms: {
       tColor: { value: null },
       tDepth: { value: null },
+      tAnchor: { value: null },
       texel: { value: new THREE.Vector2() },
       cameraNear: { value: 0.1 },
       cameraFar: { value: 1000 },
@@ -162,10 +212,13 @@ export function createOutlineRenderer(renderer) {
   quadScene.add(quad);
 
   const disposeTarget = () => {
-    if (!target) return;
-    target.depthTexture?.dispose();
-    target.dispose();
-    target = null;
+    if (target) {
+      target.depthTexture?.dispose();
+      target.dispose();
+      target = null;
+    }
+    anchorTarget?.dispose();
+    anchorTarget = null;
   };
 
   const ensureTarget = () => {
@@ -175,13 +228,55 @@ export function createOutlineRenderer(renderer) {
     disposeTarget();
     const depthTexture = new THREE.DepthTexture(w, h);
     depthTexture.type = THREE.UnsignedIntType;
-    // Half float keeps the linear colours from banding before the sRGB conversion here
+    // 8-bit sRGB storage: half the bandwidth of half float, and the hardware's sRGB encode
+    // keeps the dark colours from banding
     target = new THREE.WebGLRenderTarget(w, h, {
-      type: THREE.HalfFloatType,
+      type: THREE.UnsignedByteType,
+      colorSpace: THREE.SRGBColorSpace,
       samples,
       depthTexture,
       depthBuffer: true,
     });
+    anchorTarget = new THREE.WebGLRenderTarget(w, h, {
+      type: THREE.HalfFloatType,
+      depthBuffer: true,
+    });
+  };
+
+  // Every visible opaque mesh outside the static root goes on ANCHOR_LAYER
+  const tagAnchors = (scene) => {
+    for (const child of scene.children) {
+      if (child === staticRoot) continue;
+      child.traverse((obj) => {
+        if (!obj.isMesh || obj.userData.isBlobShadow) return;
+        const mat = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+        if (mat?.transparent && mat.opacity < 0.999) obj.layers.disable(ANCHOR_LAYER);
+        else obj.layers.enable(ANCHOR_LAYER);
+      });
+    }
+  };
+
+  const renderAnchors = (scene, camera) => {
+    if (frame++ % TAG_EVERY === 0) tagAnchors(scene);
+    const background = scene.background;
+    const override = scene.overrideMaterial;
+    const layerMask = camera.layers.mask;
+    const shadowAuto = renderer.shadowMap.autoUpdate;
+    renderer.getClearColor(clearColor);
+    const clearAlpha = renderer.getClearAlpha();
+    scene.background = null;
+    scene.overrideMaterial = anchorMaterial;
+    camera.layers.set(ANCHOR_LAYER);
+    renderer.shadowMap.autoUpdate = false; // the shadows were drawn for this frame already
+    renderer.setClearColor(0x000000, 0);
+    renderer.setRenderTarget(anchorTarget);
+    renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setClearColor(clearColor, clearAlpha);
+    renderer.shadowMap.autoUpdate = shadowAuto;
+    camera.layers.mask = layerMask;
+    scene.overrideMaterial = override;
+    scene.background = background;
   };
 
   const render = (scene, camera) => {
@@ -192,12 +287,14 @@ export function createOutlineRenderer(renderer) {
     ensureTarget();
     renderer.setRenderTarget(target);
     renderer.render(scene, camera);
+    renderAnchors(scene, camera);
     renderer.setRenderTarget(null);
 
     const u = material.uniforms;
     const cfg = outlineConfig;
     u.tColor.value = target.texture;
     u.tDepth.value = target.depthTexture;
+    u.tAnchor.value = anchorTarget.texture;
     u.texel.value.set(1 / target.width, 1 / target.height);
     u.cameraNear.value = camera.near;
     u.cameraFar.value = camera.far;
@@ -224,6 +321,8 @@ export function createOutlineRenderer(renderer) {
       if (!on) disposeTarget();
     },
     setSamples(n) { samples = Math.max(0, n | 0); },
+    /** The static world (the map): its line breaks use world positions, everything else its own */
+    setStaticRoot(root) { staticRoot = root; },
     dispose() {
       disposeTarget();
       material.dispose();
