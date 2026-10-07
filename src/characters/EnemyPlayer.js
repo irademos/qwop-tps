@@ -19,7 +19,7 @@ import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCha
 let _enemyModelIndex = 0;
 // Character for an EnemyPlayer spawned without one: cycles through the roster
 function nextDefaultEnemyCharacterUrl() {
-  const urls = [glbCharacterConfig.pumpkinUrl, glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url, glbCharacterConfig.wizardUrl];
+  const urls = [glbCharacterConfig.pumpkinUrl, glbCharacterConfig.antlerGuyUrl, glbCharacterConfig.frogManUrl, glbCharacterConfig.url, glbCharacterConfig.wizardUrl, glbCharacterConfig.treeCreatureUrl];
   return urls[_enemyModelIndex++ % urls.length];
 }
 import { getTerrainHeight } from '../environment/terrainHeight.js';
@@ -277,7 +277,7 @@ export class EnemyPlayer {
     this.swordBounces = 0;
     // Health segments a sword hit on the local player takes (Multiplayer bots use 1)
     this.swordDamage = options.swordDamage ?? SWORD_DAMAGE;
-    // Character GLB (default: cycle pumpkin / antler guy / frog man / gemhorn / wizard per spawn)
+    // Character GLB (default: cycle pumpkin / antler guy / frog man / gemhorn / wizard / tree creature per spawn)
     this._characterUrl = options.characterUrl ?? nextDefaultEnemyCharacterUrl();
     this._showHealthBar = options.showHealthBar ?? true;
     // Classic mode: name tag (yellow triangle, hearts + name) on the closest enemy only,

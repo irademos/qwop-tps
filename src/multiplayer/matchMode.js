@@ -51,6 +51,7 @@ export const MATCH_CHARACTERS = {
   gemhorn: { label: 'Gemhorn', team: 'Gemhorns', emoji: '💎', url: glbCharacterConfig.url },
   pumpkin: { label: 'Pumpkin', team: 'Pumpkins', emoji: '🎃', url: glbCharacterConfig.pumpkinUrl },
   wizard: { label: 'Wizard', team: 'Wizards', emoji: '🧙', url: glbCharacterConfig.wizardUrl },
+  tree: { label: 'Tree Creature', team: 'Trees', emoji: '🌳', url: glbCharacterConfig.treeCreatureUrl },
   mii1: { label: 'Mii', team: 'Miis', emoji: '🙂', url: glbCharacterConfig.mii1Url }
 };
 const CHAR_KEYS = Object.keys(MATCH_CHARACTERS);
