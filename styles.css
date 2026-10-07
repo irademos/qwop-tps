@@ -2990,6 +2990,55 @@ body.multiplayer-mode:not(.guns-match) .ps-weapon-btn {
   flex-direction: column;
   gap: 8px;
 }
+/* Free For All / Guns & Bombs fighter chooser: swipe / ‹ › / arrow keys through the roster */
+.match-char-chooser {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  outline: none;
+}
+.match-char-chooser:focus-visible .match-char-card { box-shadow: 0 0 0 2px var(--accent-ring); }
+.match-char-chooser.is-disabled { opacity: 0.6; }
+.match-char-chooser .match-char-nav {
+  min-height: 0;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  font-size: 22px;
+  flex: 0 0 auto;
+}
+.match-char-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 170px;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--accent-ring);
+  border-radius: var(--radius-md, 12px);
+  background: var(--accent-soft);
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.match-char-chooser.is-disabled .match-char-card { cursor: default; }
+.match-char-emoji { font-size: 34px; line-height: 1.1; }
+.match-char-name { font-size: 14px; font-weight: 600; color: var(--accent-hi); white-space: nowrap; }
+.match-char-dots { display: flex; gap: 5px; margin-top: 4px; }
+.match-char-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+.match-char-dot.active { background: var(--accent-hi); }
+.match-char-card.slide-left { animation: matchCharSlideLeft 0.2s var(--ease); }
+.match-char-card.slide-right { animation: matchCharSlideRight 0.2s var(--ease); }
+@keyframes matchCharSlideLeft { from { transform: translateX(24px); opacity: 0.3; } to { transform: none; opacity: 1; } }
+@keyframes matchCharSlideRight { from { transform: translateX(-24px); opacity: 0.3; } to { transform: none; opacity: 1; } }
 .match-pick-btn {
   min-height: 40px;
   font-size: 14px;
