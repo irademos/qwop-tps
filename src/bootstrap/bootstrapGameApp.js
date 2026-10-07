@@ -3770,18 +3770,25 @@ async function initCore(runtimeContext) {
   };
 
   const _psPathLength = (stage) => 80 + stage * 3;
-  // pathAngle: the direction the village's arrow pointed (else the flattest one from here)
-  const _psBuildStage = (stage, count = _psEnemyCount(stage), pathAngle = null) => {
+  // Showdown stages started from the village: the player walks this far out of the village
+  // before the stage's enemies / coins / heart bubbles begin
+  const PS_VILLAGE_EXIT_DIST = 25;
+  // pathAngle: the direction the village's arrow pointed (else the flattest one from here);
+  // lead: metres of empty path before the stage proper (PS_VILLAGE_EXIT_DIST from the village)
+  const _psBuildStage = (stage, count = _psEnemyCount(stage), pathAngle = null, lead = 0) => {
     const pathLen = _psPathLength(stage);
-    if (!Number.isFinite(pathAngle)) pathAngle = _psPickPathAngle(pathLen);
-    const _psPathEndX = playerModel.position.x + Math.cos(pathAngle) * pathLen;
-    const _psPathEndZ = playerModel.position.z + Math.sin(pathAngle) * pathLen;
+    if (!Number.isFinite(pathAngle)) pathAngle = _psPickPathAngle(lead + pathLen);
+    const _psPathEndX = playerModel.position.x + Math.cos(pathAngle) * (lead + pathLen);
+    const _psPathEndZ = playerModel.position.z + Math.sin(pathAngle) * (lead + pathLen);
     _psPathEnd.set(
       _psPathEndX,
       getTerrainHeight(_psPathEndX, _psPathEndZ) ?? playerModel.position.y,
       _psPathEndZ
     );
     _psAutoWalkDir.subVectors(_psPathEnd, playerModel.position).setY(0).normalize();
+    // Where the stage proper begins (enemies, coins and heart bubbles are laid out from here)
+    const _psStartX = playerModel.position.x + _psAutoWalkDir.x * lead;
+    const _psStartZ = playerModel.position.z + _psAutoWalkDir.z * lead;
     _psEnemyQueue = [];
     const _charPool = _psEnemyCharacterPool();
     if (!_classicMode && !_psStageBoss) _psStageBoss = _psPickBoss();
@@ -3790,8 +3797,8 @@ async function initCore(runtimeContext) {
       // (Classic has no bosses)
       const isBoss = !_classicMode && i === count - 1;
       const t = (i + 0.5) / count;
-      const baseX = playerModel.position.x + _psAutoWalkDir.x * pathLen * t;
-      const baseZ = playerModel.position.z + _psAutoWalkDir.z * pathLen * t;
+      const baseX = _psStartX + _psAutoWalkDir.x * pathLen * t;
+      const baseZ = _psStartZ + _psAutoWalkDir.z * pathLen * t;
       const scatter = isBoss ? 0 : 8;
       const ex = baseX + (Math.random() - 0.5) * scatter;
       const ez = baseZ + (Math.random() - 0.5) * scatter;
@@ -3802,7 +3809,7 @@ async function initCore(runtimeContext) {
       _psEnemyQueue.push({
         pos: new THREE.Vector3(ex, ey, ez),
         hearts: isBoss ? _psBossHearts(stage) : _psHeartsForStage(stage),
-        triggerDist: pathLen * t - 10,
+        triggerDist: lead + pathLen * t - 10,
         bombThrower: !isBoss && Math.random() < _btChance,
         characterUrl: _classicMode ? _classicMiiUrl() : MATCH_CHARACTERS[charKey].url,
         boss: isBoss,
@@ -3813,8 +3820,8 @@ async function initCore(runtimeContext) {
     const coinCount = _classicMode ? 0 : 8 + Math.floor(stage * 0.3);
     for (let ci = 0; ci < coinCount; ci++) {
       const ct = (ci + 0.5) / coinCount;
-      const cx = playerModel.position.x + _psAutoWalkDir.x * pathLen * ct + (Math.random() - 0.5) * 6;
-      const cz = playerModel.position.z + _psAutoWalkDir.z * pathLen * ct + (Math.random() - 0.5) * 6;
+      const cx = _psStartX + _psAutoWalkDir.x * pathLen * ct + (Math.random() - 0.5) * 6;
+      const cz = _psStartZ + _psAutoWalkDir.z * pathLen * ct + (Math.random() - 0.5) * 6;
       spawnCoinPickup(new THREE.Vector3(cx, playerModel.position.y, cz));
     }
     // Heart bubbles around halfway (between 35% and 70% of the path)
@@ -3822,8 +3829,8 @@ async function initCore(runtimeContext) {
     const heartCount = _classicMode ? 0 : _psHeartBubbleCount(stage);
     for (let hi = 0; hi < heartCount; hi++) {
       const ht = heartCount === 1 ? 0.5 : 0.35 + 0.35 * (hi / (heartCount - 1));
-      const hx = playerModel.position.x + _psAutoWalkDir.x * pathLen * ht + (Math.random() - 0.5) * 3;
-      const hz = playerModel.position.z + _psAutoWalkDir.z * pathLen * ht + (Math.random() - 0.5) * 3;
+      const hx = _psStartX + _psAutoWalkDir.x * pathLen * ht + (Math.random() - 0.5) * 3;
+      const hz = _psStartZ + _psAutoWalkDir.z * pathLen * ht + (Math.random() - 0.5) * 3;
       heartBubbles.spawn(new THREE.Vector3(hx, playerModel.position.y, hz));
     }
     comboMeter.reset();
@@ -3894,7 +3901,7 @@ async function initCore(runtimeContext) {
     village?.enter({
       stage,
       count,
-      pathAngle: _psPickPathAngle(_psPathLength(stage)),
+      pathAngle: _psPickPathAngle(PS_VILLAGE_EXIT_DIST + _psPathLength(stage)),
       boss: `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
         + (_psStageBoss.unlocks ? ' — beat it to unlock!' : ''),
     });
@@ -4016,7 +4023,7 @@ async function initCore(runtimeContext) {
     // Clear any dead enemies left over from the previous stage
     _psClearDeadEnemies();
 
-    _psBuildStage(stage, count, pathAngle);
+    _psBuildStage(stage, count, pathAngle, inPlace && !_classicMode ? PS_VILLAGE_EXIT_DIST : 0);
   };
 
   // Restart the current stage after death (clears enemies, rebuilds, shows overlay)
@@ -4643,16 +4650,14 @@ async function initCore(runtimeContext) {
     lastIncomingBacklog = pendingIncomingPeerData.length;
   });
 
-  // Game Over UI elements
+  // Game Over UI: just the GAME OVER text over the world (no backdrop), then straight back to
+  // the stage screen (Showdown: the village; Classic: the stage banner) — no Continue? prompt
   const gameOverOverlay = document.getElementById('game-over-overlay');
   const gameOverMessage = document.getElementById('game-over-message');
-  const continueSection = document.getElementById('continue-section');
-  const countdownEl = document.getElementById('countdown');
-  const yesBtn = document.getElementById('continue-yes');
-  const noBtn = document.getElementById('continue-no');
+  let _gameOverTimers = [];
 
   function showGameOver() {
-    // Counted on death (not on Continue, so quitting from Game Over counts too)
+    // Counted on death
     if (_classicMode) {
       _classicStats.deaths += 1;
       _classicSaveStats();
@@ -4660,51 +4665,26 @@ async function initCore(runtimeContext) {
       _psStats.deaths = (_psStats.deaths || 0) + 1;
       if (profileNameKey) void savePhoneSwordStats(profileNameKey, { ..._psStats });
     }
+    hideGameOver();
     gameOverOverlay.classList.remove('hidden');
-    continueSection.classList.add('hidden');
-    gameOverMessage.style.opacity = 0;
     gameOverMessage.classList.remove('hidden');
-    setTimeout(() => {
+    _gameOverTimers.push(setTimeout(() => {
       gameOverMessage.style.opacity = 1;
-      setTimeout(() => {
+      _gameOverTimers.push(setTimeout(() => {
         gameOverMessage.style.opacity = 0;
-        setTimeout(() => {
-          gameOverMessage.classList.add('hidden');
-          showContinue();
-        }, 1000);
-      }, 1500);
-    }, 50);
-  }
-
-  function showContinue() {
-    continueSection.classList.remove('hidden');
-    let countdown = 9;
-    countdownEl.textContent = countdown;
-    const interval = setInterval(() => {
-      countdown--;
-      countdownEl.textContent = countdown;
-      if (countdown <= 0) {
-        clearInterval(interval);
-        countdownEl.textContent = '';
-      }
-    }, 1000);
-
-    yesBtn.onclick = () => {
-      clearInterval(interval);
-      hideGameOver();
-      respawnPlayer();
-      _psRestartCurrentStage();
-    };
-
-    noBtn.onclick = () => {
-      clearInterval(interval);
-      window.location.reload();
-    };
+        _gameOverTimers.push(setTimeout(() => {
+          hideGameOver();
+          respawnPlayer();
+          _psRestartCurrentStage();
+        }, 1000));
+      }, 1500));
+    }, 50));
   }
 
   function hideGameOver() {
+    _gameOverTimers.forEach(clearTimeout);
+    _gameOverTimers = [];
     gameOverOverlay.classList.add('hidden');
-    continueSection.classList.add('hidden');
     gameOverMessage.classList.add('hidden');
     gameOverMessage.style.opacity = 0;
   }

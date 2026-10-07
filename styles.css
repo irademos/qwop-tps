@@ -1913,9 +1913,9 @@ body.settings-open #inventory-button {
   left: 0;
   width: 100%;
   height: 100%;
-  background:
-    radial-gradient(900px 500px at 50% 40%, rgba(239, 68, 68, 0.18), transparent 65%),
-    rgba(5, 6, 10, 0.86);
+  /* No backdrop: just the GAME OVER text over the world */
+  background: transparent;
+  pointer-events: none;
   flex-direction: column;
   justify-content: center;
   align-items: center;
@@ -1926,67 +1926,18 @@ body.settings-open #inventory-button {
   z-index: 2000;
 }
 
+#game-over-overlay:not(.hidden) {
+  display: flex;
+}
+
 #game-over-message {
   font-size: clamp(44px, 10vw, 84px);
   font-weight: 900;
   letter-spacing: 0.06em;
   color: var(--danger);
-  text-shadow: 0 0 40px rgba(239, 68, 68, 0.45);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.85), 0 0 40px rgba(239, 68, 68, 0.45);
   opacity: 0;
   transition: opacity 1s;
-}
-
-#continue-section {
-  display: grid;
-  justify-items: center;
-  gap: 10px;
-  margin-top: 16px;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  color: var(--text-muted);
-}
-
-#continue-section.hidden {
-  display: none;
-}
-
-#countdown {
-  font-size: 64px;
-  font-weight: 900;
-  line-height: 1;
-  letter-spacing: 0;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.continue-option {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 110px;
-  min-height: 46px;
-  margin: 6px;
-  padding: 10px 20px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-strong);
-  background: var(--surface-raised);
-  color: var(--text);
-  font-family: var(--font-ui);
-  font-size: 15px;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  transition: background-color 0.18s, transform 0.12s;
-}
-
-.continue-option:hover {
-  background: var(--surface-hover);
-}
-
-#continue-yes {
-  background: var(--accent-gradient);
-  border-color: transparent;
-  color: var(--accent-ink);
 }
 
 .hidden {
