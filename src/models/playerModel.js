@@ -37,6 +37,8 @@ function updateGLBCharacter(rig, dt, isMoving) {
   character.stepFluff(dt);
 }
 
+const CLIMB_HAND_CYCLES_PER_M = 1.2; // hand-over-hand cycles per m of wall climbed
+
 export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds, options = {}) {
   const rig = playerGroup?.userData?.qwopRig;
   if (!rig) return { forwardIntent: 0, balance: 0 };
@@ -69,6 +71,17 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
         }
         floatingHand.position.lerp(targetPos, 1 - Math.exp(-18 * dt));
       }
+    }
+  }
+
+  // Wall climbing (PlayerControls._updateClimb): hand over hand up the wall in front,
+  // overriding the weapon grip while it lasts
+  if (options.climbing && rig.floatingHands) {
+    const phase = (options.climbPhase || 0) * CLIMB_HAND_CYCLES_PER_M * Math.PI * 2;
+    for (const side of ['left', 'right']) {
+      const reach = side === 'left' ? Math.sin(phase) : -Math.sin(phase);
+      _fsHandTarget.set(side === 'left' ? -0.25 : 0.25, 1.75 + reach * 0.2, 0.35);
+      rig.floatingHands[side].position.lerp(_fsHandTarget, 1 - Math.exp(-12 * dt));
     }
   }
 

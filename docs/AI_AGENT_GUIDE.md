@@ -68,6 +68,7 @@ src/
 | Player stats (health segments, level/XP, coins) | `src/player/healthUtils.js`; `statsState` / `appState` in `src/bootstrap/bootstrapGameApp.js` |
 | Add weapon | `src/items/<weapon>.js` + register in `src/features/combatFeature.js` |
 | Movement / camera / input / action buttons | `src/controls/controls.js` |
+| Wall climbing (walking into ground that rises more than `CLIMB_CONFIG.minRise` within `probeDist` ahead starts a climb instead of popping on top: forward input climbs, sideways ignored, pulling back hops off and falls; player only — auto-walk / enemies still snap to the ground) | `CLIMB_CONFIG` / `_updateClimb` in `src/controls/controls.js` (called from `processMovement`); jump-off hop = `playerControls.onClimbJumpOff` (`CLIMB_JUMP_OFF_UP`, jump gravity) in `bootstrapGameApp.js`; hand-over-hand pose = `climbing` option of `updateProceduralPlayerRig` in `src/models/playerModel.js` |
 | Player / enemy / bomb-thrower character model, clips, arm IK, fur | `src/models/glbCharacterModel.js` (`glbCharacterConfig`), `src/models/fluffyCharacter.ts` |
 | Sword model / grip placement / brightness (variants: `default` = sword.glb, `wii` = wii_sword.glb + Mii ball hands) | `src/items/swordModel.js` (`SWORD_VARIANTS`, `swordVariantForCharacter`, `SWORD_BRIGHTNESS`) |
 | Where hands go (sword/shield/gun grip) | `src/models/playerModel.js` (`updateProceduralPlayerRig`), `src/items/foamSword.js`, `shield.js`, `pistol.js` (gun hands + gun follow the aim pitch from `getAimDirection`, `GUN_AIM_*`); enemies: `src/characters/EnemyPlayer.js` |

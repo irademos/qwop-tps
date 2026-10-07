@@ -3460,6 +3460,13 @@ async function initCore(runtimeContext) {
   let _psGroundY = null;     // ground Y level for phone sword mode
   const PS_JUMP_FORCE = 8.5; // initial upward speed m/s
   const PS_GRAVITY = 20;     // gravity m/s²
+  const CLIMB_JUMP_OFF_UP = 3; // m/s upward pop when pulling back off a wall (PlayerControls climbing)
+  // Pulling back while climbing a wall: a small hop, then fall with the jump gravity
+  // (PlayerControls drifts the player backward until they land)
+  playerControls.onClimbJumpOff = () => {
+    _psJumpVelY = CLIMB_JUMP_OFF_UP;
+    window.phoneSwordAirborne = true;
+  };
 
   // Bomb blast on the player: thrown back (and up, in Sword Showdown) a little harder than an
   // enemy's death knockback, playing the flying-back death clip once before getting back up.
@@ -5574,6 +5581,7 @@ async function initCore(runtimeContext) {
     _psStopSong();
     village?.exit();
     deathCarry?.cancel();
+    playerControls?.cancelClimb?.();
     _classicStageOverlay?.classList.add('hidden');
     _classicClearCallout();
     _classicCountdown = false;
