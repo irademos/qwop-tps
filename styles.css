@@ -381,6 +381,8 @@ textarea {
 .phone-sword-calib-modal {
   background: var(--scrim);
 }
+/* The calibrate popup (after connecting / before each Showdown stage): no backdrop */
+#phone-sword-connect-calib { background: none; }
 
 /* ── Touch controls ──────────────────────────────────────────────────────────── */
 
@@ -2250,6 +2252,14 @@ body.settings-open #inventory-button {
   font-size: 15px;
   font-weight: 700;
 }
+/* Focused on a station: ⬅ Village sits bottom middle; the bottom panel moves up above it */
+.village-back.village-back-bottom {
+  top: auto;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+}
+.village-ui.village-focused .village-panel { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
 .village-top {
   position: absolute;
   top: calc(14px + env(safe-area-inset-top, 0px));
@@ -2548,6 +2558,13 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
   pointer-events: none;
 }
 .ps-win-overlay.hidden { display: none; }
+/* Showdown stage complete: just the banner over the world (like the STAGE N banner), no backdrop */
+.ps-win-overlay.ps-win-banner {
+  align-items: flex-start;
+  padding-top: 16vh;
+  background: none;
+}
+.ps-win-overlay.ps-win-banner .ps-win-title { filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.55)); }
 
 .ps-win-inner {
   text-align: center;
