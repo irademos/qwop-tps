@@ -6283,6 +6283,13 @@ async function initCore(runtimeContext) {
           foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
         }
       }
+    } else if (foamSword?.holder === playerControls) {
+      // No phone / gyro: hold the sword in the neutral pose (blade straight up) instead of
+      // the weapon's default hold, which points the blade back at the player's face
+      const DEG = Math.PI / 180;
+      const _cfg = window.phoneSwordConfig || { offsetX: 0, offsetY: 0, offsetZ: 0 };
+      _pswNeutralQ.setFromEuler(_phoneSwordEuler.set(_cfg.offsetX * DEG, _cfg.offsetY * DEG, _cfg.offsetZ * DEG, 'YXZ'));
+      foamSword._holdQuaternion.copy(_pswNeutralQ).multiply(_phoneSwordBaseQ);
     }
     foamSword?.update();
     let _frameBladePoints = null; // player's blade points this frame (only with the phone sword out)
