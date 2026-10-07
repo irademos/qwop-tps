@@ -244,7 +244,8 @@ export function createMatchMode(ctx) {
   };
 
   // Free For All / Guns & Bombs fighter chooser: one card, swipe (or ‹ › / arrow keys)
-  // through the roster — same as the Showdown character chooser. Built once so the
+  // through the roster — same as the Showdown character chooser; characters not yet
+  // unlocked in Showdown are locked. Built once so the
   // slide-in animation and keyboard focus survive renderPicks rebuilding the panel.
   const charChooser = (() => {
     const root = el('div', 'match-char-chooser');
@@ -261,21 +262,27 @@ export function createMatchMode(ctx) {
     const dots = el('div', 'match-char-dots');
     card.append(emoji, name, dots);
     root.append(prev, card, next);
-    let current = CHAR_KEYS[0];
-    let isLocked = false;
+    // Characters still locked in Showdown show a lock and can't be picked (Team Battle
+    // isn't affected — it doesn't use this chooser)
+    const isUnlocked = (k) => (ctx.getUnlockedCharacters?.() ?? CHAR_KEYS).includes(k);
+    let current = CHAR_KEYS[0];   // the card being shown (may be locked)
+    let picked = null;            // the pick it was last synced to
+    let isDisabled = false;
     let slideDir = 0;
-    const render = (key, locked) => {
-      current = CHAR_KEYS.includes(key) ? key : CHAR_KEYS[0];
-      isLocked = locked;
+    const draw = () => {
       const c = MATCH_CHARACTERS[current];
-      emoji.textContent = c.emoji;
-      name.textContent = c.label;
-      prev.disabled = locked;
-      next.disabled = locked;
-      root.classList.toggle('is-disabled', locked);
+      const unlocked = isUnlocked(current);
+      emoji.textContent = unlocked ? c.emoji : '🔒';
+      name.textContent = unlocked ? c.label : `${c.label} — locked`;
+      card.classList.toggle('locked', !unlocked);
+      card.title = unlocked ? '' : 'Unlock this character in Showdown';
+      prev.disabled = isDisabled;
+      next.disabled = isDisabled;
+      root.classList.toggle('is-disabled', isDisabled);
       dots.replaceChildren(...CHAR_KEYS.map((k) => {
         const d = el('span', 'match-char-dot');
         d.classList.toggle('active', k === current);
+        d.classList.toggle('locked', !isUnlocked(k));
         return d;
       }));
       if (slideDir) {
@@ -285,11 +292,26 @@ export function createMatchMode(ctx) {
         slideDir = 0;
       }
     };
+    const render = (pickKey, disabled) => {
+      isDisabled = disabled;
+      // Follow the pick when it changes (new party); otherwise keep showing a locked card
+      if (pickKey !== picked) {
+        picked = pickKey;
+        current = CHAR_KEYS.includes(pickKey) ? pickKey : CHAR_KEYS[0];
+      }
+      draw();
+    };
     const step = (dir) => {
-      if (isLocked) return;
+      if (isDisabled) return;
       const i = CHAR_KEYS.indexOf(current);
+      current = CHAR_KEYS[(i + dir + CHAR_KEYS.length) % CHAR_KEYS.length];
       slideDir = dir;
-      setMyPick({ char: CHAR_KEYS[(i + dir + CHAR_KEYS.length) % CHAR_KEYS.length] });
+      if (isUnlocked(current) && current !== picked) {
+        picked = current;
+        setMyPick({ char: current });
+      } else {
+        draw();
+      }
     };
     prev.addEventListener('click', () => step(-1));
     next.addEventListener('click', () => step(1));

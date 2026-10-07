@@ -5747,6 +5747,8 @@ async function initCore(runtimeContext) {
     matchHealth: MATCH_HEALTH_SEGMENTS,
     getMultiplayer: () => multiplayer,
     getPlayerName: () => playerName,
+    // Free For All / Guns & Bombs only offer characters unlocked in Showdown
+    getUnlockedCharacters: () => _psChars.unlocked,
     suspendLobby: () => duelMode.suspend(),
     resumeLobby: (flash) => duelMode.resume(flash),
     isLobbyIdle: () => duelMode.isIdleInLobby(),

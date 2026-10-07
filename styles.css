@@ -3025,6 +3025,11 @@ body.multiplayer-mode:not(.guns-match) .ps-weapon-btn {
   -webkit-user-select: none;
 }
 .match-char-chooser.is-disabled .match-char-card { cursor: default; }
+.match-char-card.locked {
+  border-color: var(--border);
+  background: var(--surface-raised);
+}
+.match-char-card.locked .match-char-name { color: var(--text-muted); }
 .match-char-emoji { font-size: 34px; line-height: 1.1; }
 .match-char-name { font-size: 14px; font-weight: 600; color: var(--accent-hi); white-space: nowrap; }
 .match-char-dots { display: flex; gap: 5px; margin-top: 4px; }
@@ -3034,7 +3039,8 @@ body.multiplayer-mode:not(.guns-match) .ps-weapon-btn {
   border-radius: 50%;
   background: var(--border-strong);
 }
-.match-char-dot.active { background: var(--accent-hi); }
+.match-char-dot.locked { opacity: 0.45; }
+.match-char-dot.active { background: var(--accent-hi); opacity: 1; }
 .match-char-card.slide-left { animation: matchCharSlideLeft 0.2s var(--ease); }
 .match-char-card.slide-right { animation: matchCharSlideRight 0.2s var(--ease); }
 @keyframes matchCharSlideLeft { from { transform: translateX(24px); opacity: 0.3; } to { transform: none; opacity: 1; } }
