@@ -2,13 +2,14 @@
  * Player bombs (Sword Showdown, bought in the shop and thrown with the 💣 button).
  *
  * Same projectile as a BombThrowerEnemy's bomb (bomb.glb, lob arc under BOMB_GRAVITY,
- * explodes on ground contact or after BOMB_LIFETIME_MS) and the same blast: every enemy
+ * explodes on ground contact, against a building / wall or after BOMB_LIFETIME_MS) and the same blast: every enemy
  * inside the radius loses a heart and is thrown back. A player bomb also goes off when it
  * reaches an enemy's body, and never hurts the player.
  */
 
 import * as THREE from 'three';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { raycastMapSegment } from '../environment/mapCollision.js';
 import {
   BOMB_GRAVITY,
   BOMB_LIFETIME_MS,
@@ -23,8 +24,10 @@ import {
 
 const ENEMY_CONTACT_RADIUS = 0.6; // m — bomb touching an enemy's body (centre at half height)
 const ENEMY_CENTER_HEIGHT = 0.5;
+const BOMB_WALL_STANDOFF = 0.15; // m — explode just in front of the wall it hit
 
 const _enemyCenter = new THREE.Vector3();
+const _prevPos = new THREE.Vector3();
 
 /**
  * @param {object} opts
@@ -97,9 +100,18 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
         const bomb = bombs[i];
         const p = bomb.mesh.position;
         bomb.vel.y -= BOMB_GRAVITY * dt;
+        _prevPos.copy(p);
         p.addScaledVector(bomb.vel, dt);
         bomb.mesh.rotation.x += dt * 4;
         bomb.mesh.rotation.z += dt * 2.5;
+
+        // Buildings / walls: go off where it hits them instead of flying through
+        const wallHit = raycastMapSegment(_prevPos, p);
+        if (wallHit) {
+          p.copy(wallHit.point).addScaledVector(wallHit.normal, BOMB_WALL_STANDOFF);
+          explode(bomb);
+          continue;
+        }
 
         const groundY = getTerrainHeight(p.x, p.z);
         if (now - bomb.spawnTime > BOMB_LIFETIME_MS ||
