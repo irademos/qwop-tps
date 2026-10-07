@@ -31,6 +31,23 @@ export const CAMERA_CONFIG_DEFAULTS = Object.freeze({
 });
 const CAMERA_CONFIG_KEY = 'sq:firstPersonCam';
 const MAX_WALKABLE_SLOPE_DEGREES = 42;
+// Ledges: ground dropping more than this below the feet (m) → fall instead of snapping down
+const LEDGE_FALL_MIN_DROP = 0.6;
+// Moved further than this (m) since the last frame → a teleport, snap to the ground
+const LEDGE_FALL_MAX_STEP = 1.5;
+// Wall climbing: walking (joystick / W) into ground that rises more than minRise within
+// probeDist ahead starts a climb instead of popping onto it. While climbing, forward input
+// raises the player at speed m/s until they are level with the top (then they step onto it),
+// sideways input is ignored and pulling back jumps off (onClimbJumpOff hook, bootstrapGameApp.js).
+export const CLIMB_CONFIG = {
+  probeDist: 0.4,       // m ahead of the player where the wall height is sampled
+  minRise: 0.9,         // m higher than the feet at probeDist → a wall to climb
+  speed: 1.6,           // m/s climbing speed at full forward input
+  inputThreshold: 0.3,  // forward / back share of the input that counts
+  topStep: 0.15,        // extra m past the probe point the player steps onto at the top
+  jumpOffSpeed: 3,      // m/s backward drift while falling after jumping off
+  maxAnchorDrift: 0.3   // m — moved off the wall by something else (auto-walk, knockback) → stop climbing
+};
 const WEAPON_CAMERA_FOV_DELTA = 8;
 const CAMERA_FOV_LERP_SPEED = 6;
 const GYRO_LERP_SPEED = 12; // rad/s convergence for gyroscope smoothing
@@ -858,6 +875,74 @@ export class PlayerControls {
     };
   }
 
+  // Height of the ground (map only) at x, z
+  _groundHeightAt(x, z) {
+    return this.resolveGroundY(x, this.playerY + PLAYER_HALF_HEIGHT, z, { includeSolidHit: false }).groundY;
+  }
+
+  get isClimbing() {
+    return !!this._climb;
+  }
+
+  cancelClimb() {
+    this._climb = null;
+  }
+
+  // Wall climbing (CLIMB_CONFIG). Returns true when it owns this frame's movement.
+  _updateClimb(movement, deltaSeconds) {
+    const cfg = CLIMB_CONFIG;
+    let climb = this._climb;
+    if (climb && (window.phoneSwordAirborne ||
+        Math.hypot(this.playerX - climb.x, this.playerZ - climb.z) > cfg.maxAnchorDrift)) {
+      // Jumped, blasted or carried away from the wall
+      this._climb = climb = null;
+    }
+
+    if (!climb) {
+      if (window.phoneSwordAirborne || movement.lengthSq() < 1e-6) return false;
+      const dirX = movement.x / movement.length();
+      const dirZ = movement.z / movement.length();
+      const aheadY = this._groundHeightAt(this.playerX + dirX * cfg.probeDist, this.playerZ + dirZ * cfg.probeDist);
+      if (!Number.isFinite(aheadY) || aheadY - this.playerY <= cfg.minRise) return false;
+      this._climb = climb = { x: this.playerX, z: this.playerZ, dirX, dirZ, topY: aheadY };
+      this._climbFall = null;
+    }
+
+    // Only the input along the wall direction counts (no sideways climbing)
+    const along = movement.x * climb.dirX + movement.z * climb.dirZ;
+    this.playerX = climb.x;
+    this.playerZ = climb.z;
+    if (along > cfg.inputThreshold) {
+      this.playerY += cfg.speed * along * deltaSeconds;
+      this.climbPhase = (this.climbPhase || 0) + along * deltaSeconds;
+      if (this.playerY >= climb.topY) {
+        const topX = climb.x + climb.dirX * (cfg.probeDist + cfg.topStep);
+        const topZ = climb.z + climb.dirZ * (cfg.probeDist + cfg.topStep);
+        const topY = this._groundHeightAt(topX, topZ);
+        if (Number.isFinite(topY) && topY - this.playerY > cfg.minRise) {
+          // Another, higher wall above: keep climbing
+          climb.topY = topY;
+        } else {
+          this._climb = null;
+          this.playerX = topX;
+          this.playerZ = topZ;
+          if (Number.isFinite(topY)) this.playerY = Math.max(this.playerY, topY);
+        }
+      }
+    } else if (along < -cfg.inputThreshold) {
+      // Jump off backward (falls with the game's jump gravity, no climbing back down)
+      this._climb = null;
+      this._climbFall = { x: -climb.dirX * cfg.jumpOffSpeed, z: -climb.dirZ * cfg.jumpOffSpeed };
+      if (typeof this.onClimbJumpOff === 'function') {
+        this.onClimbJumpOff();
+      } else {
+        this._climbFall = null;
+        this.playerY = this._groundHeightAt(this.playerX, this.playerZ);
+      }
+    }
+    return true;
+  }
+
   processMovement() {
     if (!this.enabled) return;
 
@@ -906,24 +991,50 @@ export class PlayerControls {
         : 0.016;
       const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05;
 
-      this.playerX += movement.x * speed * deltaSeconds;
-      this.playerZ += movement.z * speed * deltaSeconds;
+      const climbHandled = this._updateClimb(movement, deltaSeconds);
+      if (!climbHandled) {
+        this.playerX += movement.x * speed * deltaSeconds;
+        this.playerZ += movement.z * speed * deltaSeconds;
+      }
 
-      if (!window.phoneSwordAirborne) {
+      if (!climbHandled && !window.phoneSwordAirborne) {
         const { groundY } = this.resolveGroundY(
           this.playerX,
           this.playerY + PLAYER_HALF_HEIGHT,
           this.playerZ,
           { includeSolidHit: false }
         );
-        this.playerY = groundY;
+        // Walked off a ledge: fall with the jump gravity (onLedgeFall hook) instead of
+        // snapping down. A big jump in position this frame is a teleport (respawn, stage
+        // start…) and still snaps.
+        const drop = this.playerY - groundY;
+        const moved = Number.isFinite(this._lastStepX)
+          ? Math.hypot(this.playerX - this._lastStepX, this.playerZ - this._lastStepZ)
+          : Infinity;
+        if (drop > LEDGE_FALL_MIN_DROP && moved < LEDGE_FALL_MAX_STEP && typeof this.onLedgeFall === 'function') {
+          this.onLedgeFall();
+        } else {
+          this.playerY = groundY;
+        }
+      }
+      this._lastStepX = this.playerX;
+      this._lastStepZ = this.playerZ;
+
+      if (this._climbFall) {
+        // Jumped off a wall: drift backward until landing
+        if (window.phoneSwordAirborne) {
+          this.playerX += this._climbFall.x * deltaSeconds;
+          this.playerZ += this._climbFall.z * deltaSeconds;
+        } else {
+          this._climbFall = null;
+        }
       }
 
       const newX = this.playerX;
       const newY = this.playerY;
       const newZ = this.playerZ;
       const isMovingNow = movement.length() > 0;
-      this.isMoving = isMovingNow;
+      this.isMoving = isMovingNow && !this._climb;
 
       if (this.playerModel) {
         this.playerModel.position.set(newX, newY, newZ);
@@ -965,7 +1076,11 @@ export class PlayerControls {
     this.time = (now * 0.01) % 1000; // Use performance.now() for consistent timing
     this.deltaSeconds = delta;
 
-    updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta, { isMoving: !!this.isMoving });
+    updateProceduralPlayerRig(this.playerModel, this.keysPressed, delta, {
+      isMoving: !!this.isMoving && !this._climb,
+      climbing: !!this._climb,
+      climbPhase: this.climbPhase || 0
+    });
 
     // Arrow keys turn the camera (or shift the gyro reference while the camera gyro is active)
     const rotateSpeed = CHARACTER_MOVEMENT.turnRate * 3.5;
