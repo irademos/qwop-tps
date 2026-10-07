@@ -118,7 +118,6 @@ textarea {
 .duel-lobby-panel,
 .phone-sword-qr-inner,
 .phone-sword-calib-inner,
-.ps-stage-inner,
 .duel-roam,
 .match-invite {
   background: var(--surface);
@@ -149,10 +148,6 @@ textarea {
 .ui-btn,
 .arcade-button,
 .settings-button,
-.ps-stage-ok-btn,
-.ps-stage-recalib-btn,
-.ps-stage-shop-btn,
-.ps-stage-back-btn,
 .classic-btn,
 .phone-sword-qr-copy,
 .phone-sword-qr-dismiss,
@@ -191,7 +186,6 @@ textarea {
 .ui-btn:hover,
 .arcade-button:hover,
 .settings-button:hover,
-.ps-stage-ok-btn:hover,
 .classic-btn-ok:hover,
 .phone-sword-calib-set:hover,
 .duel-challenge-btn:hover:not(:disabled) {
@@ -203,10 +197,6 @@ textarea {
 .ui-btn:active,
 .arcade-button:active,
 .settings-button:active,
-.ps-stage-ok-btn:active,
-.ps-stage-recalib-btn:active,
-.ps-stage-shop-btn:active,
-.ps-stage-back-btn:active,
 .classic-btn:active,
 .phone-sword-qr-copy:active,
 .phone-sword-qr-dismiss:active,
@@ -223,10 +213,6 @@ textarea {
 .ui-btn:focus-visible,
 .arcade-button:focus-visible,
 .settings-button:focus-visible,
-.ps-stage-ok-btn:focus-visible,
-.ps-stage-recalib-btn:focus-visible,
-.ps-stage-shop-btn:focus-visible,
-.ps-stage-back-btn:focus-visible,
 .classic-btn:focus-visible,
 .phone-sword-qr-copy:focus-visible,
 .phone-sword-qr-dismiss:focus-visible,
@@ -240,8 +226,6 @@ textarea {
 .tutorial-skip:focus-visible,
 .settings-tab:focus-visible,
 .leaderboard-tab:focus-visible,
-.ps-stage-time-btn:focus-visible,
-.ps-stage-char-nav:focus-visible,
 .settings-close:focus-visible,
 .settings-back:focus-visible {
   outline: 2px solid var(--accent);
@@ -264,8 +248,6 @@ textarea {
 .ui-btn-secondary,
 .arcade-secondary,
 .settings-button.settings-button-secondary,
-.ps-stage-recalib-btn,
-.ps-stage-shop-btn,
 .classic-btn,
 .phone-sword-qr-copy,
 .phone-sword-calib-close,
@@ -281,8 +263,6 @@ textarea {
 .ui-btn-secondary:hover,
 .arcade-secondary:hover,
 .settings-button.settings-button-secondary:hover,
-.ps-stage-recalib-btn:hover,
-.ps-stage-shop-btn:hover,
 .classic-btn:not(.classic-btn-ok):hover,
 .phone-sword-qr-copy:hover,
 .phone-sword-calib-close:hover,
@@ -299,7 +279,6 @@ textarea {
 /* Button: ghost (text only) */
 .ui-btn-ghost,
 .arcade-guest,
-.ps-stage-back-btn,
 .classic-btn-back,
 .phone-sword-qr-dismiss,
 .tutorial-skip {
@@ -311,7 +290,6 @@ textarea {
 
 .ui-btn-ghost:hover,
 .arcade-guest:hover,
-.ps-stage-back-btn:hover,
 .classic-btn-back:hover,
 .phone-sword-qr-dismiss:hover,
 .tutorial-skip:hover {
@@ -337,8 +315,6 @@ textarea {
 .ui-chip,
 .settings-tab,
 .leaderboard-tab,
-.ps-stage-time-btn,
-.ps-stage-char-nav,
 .phone-sword-calib-preset {
   display: inline-flex;
   align-items: center;
@@ -363,8 +339,6 @@ textarea {
 .ui-chip:hover,
 .settings-tab:hover,
 .leaderboard-tab:hover,
-.ps-stage-time-btn:hover,
-.ps-stage-char-nav:hover:not(:disabled),
 .phone-sword-calib-preset:hover {
   background: var(--surface-hover);
   border-color: var(--border-strong);
@@ -372,16 +346,13 @@ textarea {
 }
 
 .ui-chip:active,
-.ps-stage-time-btn:active,
-.ps-stage-char-nav:active:not(:disabled),
 .phone-sword-calib-preset:active {
   transform: scale(0.96);
 }
 
 .ui-chip.is-active,
 .settings-tab.is-active,
-.leaderboard-tab.is-active,
-.ps-stage-time-btn.active {
+.leaderboard-tab.is-active {
   background: var(--accent-soft);
   border-color: var(--accent-ring);
   color: var(--accent-hi);
@@ -2303,163 +2274,180 @@ body.settings-open #inventory-button {
   font-size: 14px;
 }
 
-/* ── Showdown: stage screen ──────────────────────────────────────────────────── */
-.ps-stage-overlay {
+/* ── Showdown: village between stages (src/village/villageMode.js) ─────────────── */
+.village-ui {
   position: fixed;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  background: var(--menu-bg);
-  z-index: 9000;
+  z-index: 1100;
+  pointer-events: none;   /* taps go through to the 3D view; the controls opt back in */
   font-family: var(--font-ui);
-  animation: ps-stage-in 0.4s ease-out;
-}
-.ps-stage-overlay.hidden { display: none; }
-.ps-stage-overlay { overflow-y: auto; }
-.ps-stage-inner { margin: auto; } /* auto margins: centred, but scrolls from the top when too tall */
-
-@keyframes ps-stage-in {
-  from { opacity: 0; transform: scale(1.04); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
-.ps-stage-inner {
-  width: min(560px, 100%);
-  text-align: center;
   color: var(--text);
-  padding: 32px 28px 24px;
+}
+.village-ui.hidden,
+.village-ui .hidden { display: none !important; }
+.village-ui button,
+.village-panel,
+.village-card { pointer-events: auto; }
+.village-back {
+  position: absolute;
+  background: var(--surface-strong);
+  border-color: var(--border-strong);
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: calc(12px + env(safe-area-inset-left, 0px));
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.village-top {
+  position: absolute;
+  top: calc(14px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
-  flex-flow: row wrap;
-  justify-content: center;
+  gap: 8px;
   align-items: center;
-  gap: 14px 10px;
+  padding: 7px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--surface-hud);
+  pointer-events: none;
 }
-
-/* One item per row, except Recalibrate + Shop which share a row above Let's Go */
-.ps-stage-inner > * {
-  flex: 0 0 100%;
+.village-top-sep { color: var(--text-dim); }
+.village-panel {
+  position: absolute;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: min(460px, calc(100% - 32px));
+  padding: 14px 18px;
+  text-align: center;
+  animation: village-pop 0.25s var(--ease);
 }
-
-.ps-stage-badge {
+.village-panel-title {
   font-family: var(--font-display);
-  font-size: clamp(48px, 11vw, 76px);
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--accent-hi);
+}
+.village-panel-text {
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.village-panel-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.village-panel-actions:empty { display: none; }
+.village-panel-actions .ui-btn { min-width: 180px; min-height: 46px; font-size: 16px; }
+/* Buy card: placed above the selected item on the stall (left/top set from JS) */
+.village-card {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(320px, calc(100vw - 24px));
+  padding: 12px 10px;
+  animation: village-pop 0.2s var(--ease);
+}
+.village-card-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  text-align: center;
+}
+.village-card-name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--accent-hi);
+}
+.village-card-desc { font-size: 13px; line-height: 1.35; color: var(--text-muted); }
+.village-card-owned { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.village-card-buy { margin-top: 6px; width: 100%; min-height: 42px; font-size: 15px; }
+.village-card-nav {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  font-size: 22px;
+}
+@keyframes village-pop {
+  from { opacity: 0; transform: translate(-50%, -100%) scale(0.94); }
+  to   { opacity: 1; }
+}
+.village-panel { animation-name: village-panel-in; }
+@keyframes village-panel-in {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+/* "STAGE N" banner shown as the stage walk begins */
+.village-banner {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, calc(100% - 32px));
+  text-align: center;
+  pointer-events: none;
+}
+.village-banner-title {
+  font-family: var(--font-display);
+  font-size: clamp(46px, 11vw, 74px);
   font-weight: 900;
   line-height: 1;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
   background: linear-gradient(180deg, #fff 10%, var(--accent-hi) 60%, var(--accent-lo) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  text-shadow: none;
-  filter: drop-shadow(0 6px 24px rgba(251, 191, 36, 0.28));
+  filter: drop-shadow(0 6px 24px rgba(0, 0, 0, 0.55));
 }
-
-.ps-stage-enemies {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--text-muted);
+.village-banner-sub {
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.7);
 }
-
-.ps-stage-ok-btn {
-  order: 10;
-  width: 100%;
-  min-height: 58px;
-  margin-top: 6px;
-  font-size: 19px;
-  font-weight: 800;
-}
-
-.ps-stage-inner > .ps-stage-recalib-btn,
-.ps-stage-inner > .ps-stage-shop-btn {
-  order: 9;
-  flex: 1 1 0;
-  margin: 0;
-}
-
-.ps-stage-inner > .ps-stage-back-btn {
-  order: 11;
-  flex: 0 0 auto;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.ps-stage-time-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-  margin-bottom: 4px;
-}
-
-/* Stage screen: final enemy + character picker (unlocked by beating a stage's final enemy) */
-.ps-stage-boss {
+.village-banner-boss {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 7px 14px;
   font-size: 14px;
   font-weight: 600;
   color: #fecaca;
-  padding: 8px 14px;
   border-radius: var(--radius-pill);
-  background: var(--danger-soft);
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  background: rgba(60, 10, 14, 0.7);
+  border: 1px solid rgba(248, 113, 113, 0.35);
 }
-.ps-stage-boss:empty { display: none; }
-.ps-stage-chars {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  width: 100%;
-  padding-top: 8px;
-  margin-top: 4px;
-  border-top: 1px solid var(--border);
-  outline: none;
+.village-banner-boss:empty { display: none; }
+.village-banner-in { animation: village-banner-in 0.45s var(--ease); }
+.village-banner-out { opacity: 0; transition: opacity 0.45s ease; }
+@keyframes village-banner-in {
+  from { opacity: 0; transform: translateX(-50%) scale(1.15); }
+  to   { opacity: 1; transform: translateX(-50%) scale(1); }
 }
-.ps-stage-char-nav {
-  min-height: 0;
-  width: 38px;
-  height: 38px;
-  padding: 0;
-  font-size: 22px;
-  flex: 0 0 auto;
+/* In the village the world is the menu: no fight HUD (the back button takes the top-left corner) */
+body.village-mode #player-info,
+body.village-mode #xp-bar,
+body.village-mode #action-buttons,
+body.village-mode #joystick-container,
+body.village-mode #ammo-display,
+body.village-mode #shield-health-display {
+  display: none !important;
 }
-.ps-stage-char-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  width: 170px;
-  padding: 6px 10px 8px;
-  border: 1px solid var(--accent-ring);
-  border-radius: var(--radius-md, 12px);
-  background: var(--accent-soft);
-  cursor: grab;
-  touch-action: pan-y;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.ps-stage-char-card.locked {
-  border-color: var(--border);
-  background: var(--surface-raised);
-  color: var(--text-muted);
-}
-.ps-stage-char-emoji { font-size: 34px; line-height: 1.1; }
-.ps-stage-char-name { font-size: 14px; font-weight: 600; color: var(--accent-hi); white-space: nowrap; }
-.ps-stage-char-card.locked .ps-stage-char-name { color: var(--text-muted); }
-.ps-stage-char-dots { display: flex; gap: 5px; margin-top: 4px; }
-.ps-stage-char-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--border-strong);
-}
-.ps-stage-char-dot.locked { opacity: 0.45; }
-.ps-stage-char-dot.active { background: var(--accent-hi); opacity: 1; }
-.ps-stage-char-card.slide-left { animation: psCharSlideLeft 0.2s var(--ease); }
-.ps-stage-char-card.slide-right { animation: psCharSlideRight 0.2s var(--ease); }
-@keyframes psCharSlideLeft { from { transform: translateX(24px); opacity: 0.3; } to { transform: none; opacity: 1; } }
-@keyframes psCharSlideRight { from { transform: translateX(-24px); opacity: 0.3; } to { transform: none; opacity: 1; } }
+body.village-mode #health-display { top: calc(64px + env(safe-area-inset-top, 0px)); }
+body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px)); }
 
 /* ── Showdown: action buttons (Block / bubble / bomb) ─────────────────────────── */
 .ps-block-btn {
@@ -3363,7 +3351,9 @@ body.mobile-block-bar .classic-combo {
   .phone-sword-qr-inner,
   .phone-sword-calib-inner,
   .match-invite,
-  .ps-stage-overlay {
+  .village-panel,
+  .village-card,
+  .village-banner-in {
     animation: none;
   }
 }
