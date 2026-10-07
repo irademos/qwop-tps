@@ -18,12 +18,14 @@ import { spawnExplosion } from '../combat/explosionEffect.js';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { getTerrainHeight } from '../environment/terrainHeight.js';
+import { raycastMapSegment } from '../environment/mapCollision.js';
 import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { stylizeObject } from '../environment/artStyle.js';
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 const _homeDir = new THREE.Vector3();
+const _bombPrevPos = new THREE.Vector3();
 const _bubbleCenter = new THREE.Vector3();
 const _palm = new THREE.Vector3();
 
@@ -520,6 +522,7 @@ export class BombThrowerEnemy {
       }
 
       // Move
+      _bombPrevPos.copy(bomb.mesh.position);
       bomb.mesh.position.addScaledVector(bomb.vel, dt);
 
       // Spin for visual fun
@@ -528,6 +531,16 @@ export class BombThrowerEnemy {
 
       // Lifetime check (a deflected bomb always kills its thrower)
       if (age > BOMB_LIFETIME_MS) {
+        this._explodeBomb(bomb, bomb.mesh.position.clone(), targetModel, targetControls, bomb.deflected);
+        this._removeBomb(bomb);
+        i = Math.min(i, this._bombs.length - 1);
+        continue;
+      }
+
+      // Buildings / walls (map geometry): explode just in front of the surface it hit
+      const wallHit = raycastMapSegment(_bombPrevPos, bomb.mesh.position);
+      if (wallHit) {
+        bomb.mesh.position.copy(wallHit.point).addScaledVector(wallHit.normal, 0.15);
         this._explodeBomb(bomb, bomb.mesh.position.clone(), targetModel, targetControls, bomb.deflected);
         this._removeBomb(bomb);
         i = Math.min(i, this._bombs.length - 1);

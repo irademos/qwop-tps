@@ -8,6 +8,8 @@ import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerMo
 import { glbCharacterConfig, isMiiCharacterUrl } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
+import { registerMapMeshes } from '../environment/mapCollision.js';
+import { updateBulletImpacts } from '../combat/bulletImpact.js';
 import { setStyleReference, stylizeObject } from '../environment/artStyle.js';
 import { setBlobShadowsEnabled } from '../environment/blobShadows.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
@@ -1708,6 +1710,7 @@ async function initCore(runtimeContext) {
   };
 
   registerTerrainHeightResolver(_glbResolveHeight);
+  registerMapMeshes(glbMeshes); // bullets stop at buildings / walls (src/items/projectiles.js)
 
   const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -6098,6 +6101,7 @@ async function initCore(runtimeContext) {
     updateRoadLightsNearPlayer();
     playerControls.update();
     updateBloodEffects(frameDelta);
+    updateBulletImpacts(frameDelta);
     updateExplosionEffects(frameDelta);
     updatePlayerBubble();
     updatePlayerBombs(frameDelta);

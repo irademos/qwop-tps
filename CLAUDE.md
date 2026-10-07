@@ -48,12 +48,14 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone i
 │   │
 │   ├── environment/
 │   │   ├── terrainHeight.js    # Height resolver registry — the GLB map registers its BVH raycast; getTerrainHeight(x, z)
+│   │   ├── mapCollision.js     # raycastMapSegment — bullets / bombs vs the map's BVH meshes (registerMapMeshes in bootstrapGameApp.js)
 │   │   ├── blobShadows.js      # Blob shadows — soft disc on the ground under each character (added in createGLBCharacterInstance); shown only on the low performance tier
 │   │   └── artStyle.js         # Art style unifier — load-time texture pass: characters matched to the map's colours (shading flattened, posterized), shared grade on all textures, materials normalised
 │   │
 │   ├── combat/
 │   │   ├── knockback.js        # Computes knockback impulse/motion vectors for hit reactions
 │   │   ├── bloodEffect.js      # Blood spray/splat particles on damage (player + enemies); updateBloodEffects(dt) in game loop; setBloodEnabled (off in Classic)
+│   │   ├── bulletImpact.js     # Sparks + dust puff where a bullet hits the map; updateBulletImpacts(dt) in game loop
 │   │   ├── explosionEffect.js  # Bomb explosion VFX — flash, fireball, sparks, shockwave, scorch, smoke; updateExplosionEffects(dt) in game loop
 │   │   ├── playerBomb.js       # Player bombs — same flight/blast as a bomber's (shared helpers exported from BombThrowerEnemy.js)
 │   │   ├── heartBubbles.js     # Showdown heart bubbles — float mid-stage, drift in front of the player, sword poke pops for +1 health
@@ -93,7 +95,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone i
 │   │   ├── swordModel.js       # sword.glb / wii_sword.glb loader (translation stripped, fitted to grip origin / blade +Z) for player + enemy swords; per-variant grip placement, Mii ball hands, brightness
 │   │   ├── shield.js           # Shield (upgradeable)
 │   │   ├── pistol.js           # Pistol (ammo = "gun bullets")
-│   │   └── projectiles.js      # Bullet spawning + update loop (hits remote players and enemies)
+│   │   └── projectiles.js      # Bullet spawning + update loop (hits remote players and enemies; stopped by the map via mapCollision.js)
 │   │
 │   ├── village/
 │   │   └── villageMode.js      # Showdown village between stages: market stall shop + mystery chest, character pick, time of day, arrow to the next stage (calibration popup before each stage) — game access via villageCtx in bootstrapGameApp.js
@@ -240,6 +242,7 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
 | Death in Showdown / Classic (GAME OVER text only — no backdrop, no Continue prompt — then back to the village / Classic stage screen via `_psRestartCurrentStage`; Showdown first has two frog men walk in, lift the body (arm IK to grip points) and carry it off screen while the camera holds a framed view; enemies hold their attacks while the player is dead) | `showGameOver` / `hideGameOver` (timers cancelled on hide) in `bootstrapGameApp.js`; `#game-over-overlay` in `index.html` / `styles.css`; carry = `src/combat/deathCarry.js` (`createDeathCarry`, `deathCarry.update` after `village.update` in the game loop, `cancel` in `_resetForMenu`) |
 | Showdown stage win (STAGE COMPLETE! + unlocked character as a banner over the world, no backdrop — `.ps-win-banner`; Classic keeps the full-screen STAGE CLEAR!) | `_psShowWin` + the win detection in the game loop of `bootstrapGameApp.js`; `.ps-win-*` in `styles.css` |
 | Damage hit effect (blood spray) | `src/combat/bloodEffect.js`; player trigger in `setStat` (`triggerPlayerHurtBlood`), enemies in `applyDamage` |
+| Bullets / bombs stopped by the map (buildings / walls / ground; each frame a segment raycast from the last position against the map BVH — fighters in front of the wall on that segment are still hit by bullets; bombs explode just in front of the wall) + bullet impact sparks | `raycastMapSegment` in `src/environment/mapCollision.js` (`registerMapMeshes(glbMeshes)` after the BVH build in `bootstrapGameApp.js`), used in `updateProjectiles` (`src/items/projectiles.js`), `createPlayerBombs().update` (`src/combat/playerBomb.js`) and `BombThrowerEnemy._updateBombs`; effect `src/combat/bulletImpact.js` (`updateBulletImpacts` in the game loop) |
 | Sword Showdown player bombs (💣 button, Throw.fbx, unequip/re-equip) | `src/combat/playerBomb.js` (flight/blast); `throwPlayerBomb`/`updatePlayerBombs` in `bootstrapGameApp.js` (count = `stats.bombs`, shop item `showdown_bomb`); button `psBombBtn` in `src/controls/controls.js` |
 | Sword Showdown shop upgrades (heart/shield upgrade/bubble/bomb/life potion) | Catalog + purchase in `src/characters/merchant.js` (`unlimited` items); effects in `appState.applyShopUpgrade` (caps: `SHOWDOWN_MAX_HEALTH_SEGMENTS`=20 in `healthUtils.js`, also applies to level-ups; `SHOWDOWN_MAX_SHIELD_UPGRADES`=4 in `bootstrapGameApp.js`; `appState.isShopItemMaxed` → "MAX" in shop) + bubble system (`activatePlayerBubble`, `window.isPlayerBubbleActive`) in `bootstrapGameApp.js`; bubble button in `src/controls/controls.js`; enemy checks in `EnemyPlayer.js`/`BombThrowerEnemy.js`; auto-buy when out of bombs/bubbles/shield/gun/bullets = `psAutoBuyTick` (`PS_AUTO_BUY_ITEMS`, "Purchased …" toast via `showPickupToast` `options.text`) in `bootstrapGameApp.js`; shop coin balance + owned counts in `src/controls/merchantPanel.js` (`renderCoins`, `getOwnedCount`) |
 | Sword Showdown health (5 segments at level 1, own max-health track, full health each session / stage start) | `SHOWDOWN_BASE_HEALTH_SEGMENTS` in `src/player/healthUtils.js`; `statsState.maxHealthSegments` is saved as the `showdownMaxHealthSegments` profile stat (`statsForSave` in `bootstrapGameApp.js`; older profiles fall back to their legacy `maxHealthSegments`); "never start dead" guard at the top of `_psStartStage` |
