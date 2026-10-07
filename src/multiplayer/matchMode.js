@@ -19,8 +19,8 @@ import { swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/Ene
 //
 // Battle: everyone spawns around DUEL_LOCATION (Guns & Bombs: scattered wider around
 // GUNS_LOCATION) (teams in two lines facing each other,
-// free-for-all in a ring), counts down "3 2 1 FIGHT!", auto-walks toward the closest
-// enemy and fights with swords only, MATCH_HEALTH health each. The host simulates the
+// free-for-all in a ring), counts down "3 2 1 FIGHT!", then players move
+// themselves (bots walk toward the closest enemy) and fight with swords only, MATCH_HEALTH health each. The host simulates the
 // bots (EnemyPlayer AI) and decides the winner: the last team / fighter standing.
 // Guns & Bombs: no swords. Whoever fires a bullet / throws a bomb detects its hits (the
 // host for its bots) and sends `hit` / `botHit` with the damage; the victim's shield (held
@@ -846,7 +846,6 @@ export function createMatchMode(ctx) {
       phase = 'fighting';
       showBanner('FIGHT!');
       ctx.setControlsLocked(false);
-      ctx.startWalk();
       const fightAt = Date.now();
       match.combatants.forEach((c) => {
         if (!c.enemy) return;
