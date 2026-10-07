@@ -42,6 +42,7 @@ import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerE
 import { createPlayerBombs } from '../combat/playerBomb.js';
 import { createHeartBubbles } from '../combat/heartBubbles.js';
 import { createComboMeter } from '../combat/comboMeter.js';
+import { createDeathCarry } from '../combat/deathCarry.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage } from '../village/villageMode.js';
 
@@ -3731,13 +3732,13 @@ async function initCore(runtimeContext) {
   const PS_PATH_CANDIDATES = 24;
   const PS_PATH_SAMPLE_STEP = 1;      // m between height samples
   const PS_PATH_MAX_OK_STEP = 0.35;   // m rise per metre (~19°) — first candidate under this wins
-  const _psPathSteepness = (angle, pathLen, giveUpAbove) => {
-    const ox = playerModel.position.x;
-    const oz = playerModel.position.z;
+  const _psPathSteepness = (angle, pathLen, giveUpAbove, origin = playerModel.position) => {
+    const ox = origin.x;
+    const oz = origin.z;
     const dx = Math.cos(angle);
     const dz = Math.sin(angle);
     let prevY = getTerrainHeight(ox, oz);
-    if (!Number.isFinite(prevY)) prevY = playerModel.position.y;
+    if (!Number.isFinite(prevY)) prevY = origin.y;
     let worst = 0;
     for (let d = PS_PATH_SAMPLE_STEP; d <= pathLen; d += PS_PATH_SAMPLE_STEP) {
       const y = getTerrainHeight(ox + dx * d, oz + dz * d);
@@ -3750,8 +3751,8 @@ async function initCore(runtimeContext) {
   };
 
   // Try evenly spaced directions (random order/offset for variety); take the first that is
-  // gentle enough, else the flattest one found.
-  const _psPickPathAngle = (pathLen) => {
+  // gentle enough, else the flattest one found. (origin: where the path starts, default the player)
+  const _psPickPathAngle = (pathLen, origin = playerModel.position) => {
     const offset = Math.random() * Math.PI * 2;
     const order = Array.from({ length: PS_PATH_CANDIDATES }, (_, i) => i)
       .sort(() => Math.random() - 0.5);
@@ -3759,7 +3760,7 @@ async function initCore(runtimeContext) {
     let bestScore = Infinity;
     for (const i of order) {
       const angle = offset + (i / PS_PATH_CANDIDATES) * Math.PI * 2;
-      const score = _psPathSteepness(angle, pathLen, bestScore);
+      const score = _psPathSteepness(angle, pathLen, bestScore, origin);
       if (score < bestScore) {
         bestScore = score;
         bestAngle = angle;
@@ -3843,33 +3844,42 @@ async function initCore(runtimeContext) {
     window.hordeEnemies = hordeEnemies;
   };
 
+  // Showdown: "STAGE COMPLETE!" (+ the unlocked character) as a banner over the world — no
+  // backdrop — and onDone() straight away (the next village is built ahead, the player walks
+  // in under the banner). Classic: the full-screen STAGE CLEAR!, then onDone().
+  let _psWinHideTimer = null;
   const _psShowWin = (onDone) => {
     _psWinShown = true;
     _psAutoWalking = false;
     _psStopSong();
-    _psWinTitle.textContent = _classicMode ? 'STAGE CLEAR!' : 'YOU WIN!';
+    const _banner = !_classicMode;
+    _psWinTitle.textContent = _classicMode ? 'STAGE CLEAR!' : 'STAGE COMPLETE!';
     _classicSetPlaying(false);
     const _unlocked = !_classicMode && _psStageBoss?.unlocks ? MATCH_CHARACTERS[_psStageBoss.key] : null;
     _psWinSub.textContent = _unlocked
-      ? `Stage ${_psStage} Cleared! ${_unlocked.emoji} ${_unlocked.label} unlocked!`
+      ? `${_unlocked.emoji} ${_unlocked.label} unlocked!`
       : `Stage ${_psStage} Cleared!`;
     // force animation restart
     _psWinTitle.style.animation = 'none';
     _psWinSub.style.animation = 'none';
+    _psWinOverlay.classList.toggle('ps-win-banner', _banner);
     _psWinOverlay.classList.remove('hidden');
     void _psWinOverlay.offsetWidth;
     _psWinTitle.style.animation = '';
     _psWinSub.style.animation = '';
-    setTimeout(() => {
+    clearTimeout(_psWinHideTimer);
+    _psWinHideTimer = setTimeout(() => {
       _psWinOverlay.classList.add('hidden');
-      onDone();
-    }, 2800);
+      if (!_banner) onDone();
+    }, _banner ? 3200 : 2800);
+    if (_banner) onDone();
   };
 
   // Sword Showdown between stages: the village (src/village/villageMode.js) — shop, character
   // pick, sword calibration, time of day, and the arrow that starts the stage. Created once
   // the shop (appState) exists; see villageCtx.
   let village = null;
+  let deathCarry = null;
   const _psClearDeadEnemies = () => {
     for (let _di = hordeEnemies.length - 1; _di >= 0; _di--) {
       const _de = hordeEnemies[_di];
@@ -3888,10 +3898,29 @@ async function initCore(runtimeContext) {
     applyDisplaySettings();
   };
   let _psVillageStart = null; // onOk of the open village
-  const _psShowVillage = (stage, onOk) => {
+  // After a stage win the village is built this far ahead along the stage path and the
+  // player walks in (nearer spots are tried if the ground there is missing / a cliff)
+  const PS_VILLAGE_APPROACH_DISTS = [8, 6, 4];
+  const _psVillageApproachSpot = () => {
+    const dir = new THREE.Vector3(_psAutoWalkDir.x, 0, _psAutoWalkDir.z);
+    if (dir.lengthSq() < 1e-6) dir.set(Math.sin(playerControls?.yaw ?? 0), 0, Math.cos(playerControls?.yaw ?? 0));
+    dir.normalize();
+    const p = playerModel.position;
+    for (const d of PS_VILLAGE_APPROACH_DISTS) {
+      const x = p.x + dir.x * d;
+      const z = p.z + dir.z * d;
+      const y = getTerrainHeight(x, z);
+      if (Number.isFinite(y) && Math.abs(y - p.y) < d * PS_PATH_MAX_OK_STEP) return new THREE.Vector3(x, y, z);
+    }
+    return null;
+  };
+  // approach: build it a little way ahead and walk the player there (after a stage win)
+  const _psShowVillage = (stage, onOk, { approach = false } = {}) => {
     const count = _psEnemyCount(stage);
     _psUpdateKillHud(false);
-    _psClearDeadEnemies();
+    const _center = approach ? _psVillageApproachSpot() : null;
+    // (walking in: the fallen enemies stay until the player gets there)
+    if (!_center) _psClearDeadEnemies();
     // Final enemy (picked here so the banner can name it; kept through retries of this stage)
     if (!_psStageBoss) _psStageBoss = _psPickBoss();
     const _boss = MATCH_CHARACTERS[_psStageBoss.key];
@@ -3901,7 +3930,9 @@ async function initCore(runtimeContext) {
     village?.enter({
       stage,
       count,
-      pathAngle: _psPickPathAngle(PS_VILLAGE_EXIT_DIST + _psPathLength(stage)),
+      center: _center,
+      onArrive: _center ? _psClearDeadEnemies : null,
+      pathAngle: _psPickPathAngle(PS_VILLAGE_EXIT_DIST + _psPathLength(stage), _center ?? playerModel.position),
       boss: `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
         + (_psStageBoss.unlocks ? ' — beat it to unlock!' : ''),
     });
@@ -3968,9 +3999,10 @@ async function initCore(runtimeContext) {
     _classicStageOverlay.classList.remove('hidden');
   };
   // Stage screen for the current mode
-  const _psShowStageScreen = (stage, onOk) => (_classicMode
+  // (opts: _psShowVillage's, e.g. { approach } after a win)
+  const _psShowStageScreen = (stage, onOk, opts) => (_classicMode
     ? _classicShowStageOverlay(stage, onOk)
-    : _psShowVillage(stage, onOk));
+    : _psShowVillage(stage, onOk, opts));
 
   // inPlace: start where the player stands (the village) instead of a random spot nearby;
   // pathAngle: the stage's direction (the village arrow)
@@ -4369,10 +4401,20 @@ async function initCore(runtimeContext) {
   });
 
   // ── Post-connect calibration popup ──────────────────────────────────────
+  // (also shown before every Showdown stage: the village arrow waits on Okay)
+  let _connectCalibThen = null;
   document.getElementById('phone-sword-connect-calib-ok')?.addEventListener('click', () => {
     window.phoneSwordRecalibrate?.();
     phoneSwordConnectCalib?.classList.add('hidden');
+    const then = _connectCalibThen;
+    _connectCalibThen = null;
+    then?.();
   });
+  const _requireSwordCalibration = (then) => {
+    if (!phoneSwordConnectCalib) { then(); return; }
+    _connectCalibThen = then;
+    phoneSwordConnectCalib.classList.remove('hidden');
+  };
 
   // ── Phone controller input (phone-sword.html) ─────────────────────────────
   // Besides gyro + block, the phone page has a joystick and bomb/gun/fire/shield/bubble/jump
@@ -4668,14 +4710,31 @@ async function initCore(runtimeContext) {
     hideGameOver();
     gameOverOverlay.classList.remove('hidden');
     gameOverMessage.classList.remove('hidden');
+    const backToStageScreen = () => {
+      hideGameOver();
+      respawnPlayer();
+      _psRestartCurrentStage();
+    };
+    // Showdown: two frog men walk up, pick the player up and carry them off screen first
+    const carry = !_classicMode && !!deathCarry;
+    if (carry) {
+      deathCarry.start({
+        body: playerModel,
+        character: playerModel.userData.qwopRig?.glbCharacter ?? null,
+        onDone: backToStageScreen,
+      });
+    }
     _gameOverTimers.push(setTimeout(() => {
       gameOverMessage.style.opacity = 1;
       _gameOverTimers.push(setTimeout(() => {
         gameOverMessage.style.opacity = 0;
         _gameOverTimers.push(setTimeout(() => {
-          hideGameOver();
-          respawnPlayer();
-          _psRestartCurrentStage();
+          if (carry) {
+            gameOverOverlay.classList.add('hidden');
+            gameOverMessage.classList.add('hidden');
+          } else {
+            backToStageScreen();
+          }
         }, 1000));
       }, 1500));
     }, 50));
@@ -5006,6 +5065,8 @@ async function initCore(runtimeContext) {
       return { ok: true };
     },
   };
+  // Showdown death: two frog men carry the player off (see showGameOver)
+  deathCarry = createDeathCarry({ scene, camera, getTerrainHeight });
   village = createVillage({
     scene,
     camera,
@@ -5028,7 +5089,7 @@ async function initCore(runtimeContext) {
       get: () => _psTimePref,
       set: (pref) => { _psTimePref = pref; _psPreviewTime(); },
     },
-    recalibrate: () => window.phoneSwordRecalibrate?.(),
+    confirmStart: (go) => _requireSwordCalibration(go),
     onStart: (pathAngle) => _psVillageStart?.(pathAngle),
     onLobby: () => {
       _resetForMenu();
@@ -5468,6 +5529,8 @@ async function initCore(runtimeContext) {
     onComplete: async () => {
       if (playerProfile) playerProfile.tutorialCompleted = true;
       if (profileNameKey) void saveTutorialCompleted(profileNameKey);
+      clearTimeout(_psWinHideTimer);
+      _psWinOverlay.classList.remove('ps-win-banner');
       _psWinTitle.textContent = 'TUTORIAL COMPLETE!';
       _psWinSub.textContent = 'You’re ready for the Showdown';
       _psWinTitle.style.animation = 'none';
@@ -5488,6 +5551,7 @@ async function initCore(runtimeContext) {
   const _resetForMenu = () => {
     _psStopSong();
     village?.exit();
+    deathCarry?.cancel();
     _classicStageOverlay?.classList.add('hidden');
     _classicClearCallout();
     _classicCountdown = false;
@@ -6555,11 +6619,11 @@ async function initCore(runtimeContext) {
           if (_nextStage <= 50) {
             _psStage = _nextStage;
             _saveStage(_psStage);
-            _psShowStageScreen(_nextStage, (count, opts) => _psStartStage(_nextStage, count, opts));
+            _psShowStageScreen(_nextStage, (count, opts) => _psStartStage(_nextStage, count, opts), { approach: true });
           } else {
             _psStage = 1;
             _saveStage(_psStage);
-            _psShowStageScreen(1, (count, opts) => _psStartStage(1, count, opts));
+            _psShowStageScreen(1, (count, opts) => _psStartStage(1, count, opts), { approach: true });
           }
         });
       }
@@ -6832,7 +6896,7 @@ async function initCore(runtimeContext) {
           if (!_he._coinDropped) {
             _he._coinDropped = true;
             _psStageKills++;
-            _psUpdateKillHud(true);
+            _psUpdateKillHud(_psStageActive); // (the last kill lands after the win: the village is up)
             if (!_classicMode) { // Classic: no XP or coins
               addPlayerXp(getSwordShowdownKillXp(_psStage));
               const _dropPos = _he.group.position.clone();
@@ -6859,7 +6923,12 @@ async function initCore(runtimeContext) {
         }
 
         const _allowAttack = _attackSlotSet.has(_he);
-        _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack, _pauseForBomb);
+        if (playerDead) {
+          // (the body is being carried off: no more swings / bombs at it)
+          _he.update(frameDelta, _he instanceof BombThrowerEnemy ? null : playerModel, playerControls, false, false, true);
+        } else {
+          _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack, _pauseForBomb);
+        }
 
         // Push enemy away if it gets too close to the player (prevents clipping)
         const _pushDist = 0.5;
@@ -7124,6 +7193,8 @@ async function initCore(runtimeContext) {
     });
     // Village (between Showdown stages): walks the player around and has the last word on the camera
     village?.update(frameDelta);
+    // Showdown death: the carriers + the fixed camera
+    deathCarry?.update(frameDelta);
     // Shadows: the sun's shadow box follows the player (snapped to whole shadow-map texels so
     // the shadow edges don't shimmer as they move)
     if (dirLight?.castShadow && playerModel) {

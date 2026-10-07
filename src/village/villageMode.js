@@ -6,10 +6,11 @@
 //     one (or swipe / ‹ › / arrow keys) for its buy card. The chest is a mystery item.
 //   • Unlocked characters idling — tap one to play as them: they walk over and take the
 //     player's place, the old character goes to idle in their spot.
-//   • Floating sword — Calibrate button.
 //   • Floating ☀️ 🌙 🎲 — the next stage's time of day.
-//   • Arrow — points along the next stage's path; tap it to start the stage.
-// Top left: ⬅ Lobby (overview) / ⬅ Village (focused on something).
+//   • Arrow — points along the next stage's path; tap it to start the stage (after the
+//     sword calibration popup, ctx.confirmStart).
+// ⬅ Lobby top left (overview); ⬅ Village bottom middle (focused on something).
+// After a stage win it can be built a little way ahead, the player walking in (`approach`).
 //
 // Game access goes through `ctx` (villageCtx in bootstrapGameApp.js); the shop logic
 // (prices, stock, buying, the chest's prizes) lives there too.
@@ -17,7 +18,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
-import { createSwordModelInstance, loadSwordModelTemplate } from '../items/swordModel.js';
 import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 import { stylizeObject } from '../environment/artStyle.js';
 
@@ -38,7 +38,7 @@ const MANA_POTION_SCALE = 8.0;
 const LIFE_POTION_OFFSET = new THREE.Vector3(-50, 60.0, 0.45);
 const MANA_POTION_OFFSET = new THREE.Vector3(-0.15, 100.0, 0.05);
 const STALL_UNIT = MARKET_STALL_SIZE * VILLAGE_PROP_SCALE; // metres per stall unit
-const STALL_COUNTER_Y = 62;        // counter top (stall units)
+const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall units, measured) — items stand on it
 const MERCHANT_CHARACTER_URL = glbCharacterConfig.wizardUrl;
 
 // ── Layout (village-local metres: x = right, z = toward the next stage) ────────
@@ -46,7 +46,6 @@ const LAYOUT = {
   stall: new THREE.Vector3(-3.5, 0, 3.0),
   chestSide: 1.45,                 // chest: this far beside the stall (toward the centre)
   characters: new THREE.Vector3(3.5, 0, 3.0),
-  sword: new THREE.Vector3(-1.5, 1.2, 5.4),
   time: new THREE.Vector3(1.5, 1.3, 5.4),
   arrow: new THREE.Vector3(0, 0.3, 6.6),
 };
@@ -60,12 +59,12 @@ const LEAVE_REMOVE_MS = 4000;      // …or this long after the stage starts (th
 
 // Shop items on the counter (left → right, also the swipe order). Positions in stall units.
 const SHOP_ITEMS = [
-  { id: 'showdown_bomb', at: [-92, STALL_COUNTER_Y, 34], build: 'bomb' },
+  { id: 'showdown_bomb', at: [-92, COUNTER_SURFACE_Y + 10, 34], build: 'bomb' },
   { id: 'life_potion', potion: 'life' },
-  { id: 'gun bullets', at: [-24, STALL_COUNTER_Y, 36], build: 'bullets' },
+  { id: 'gun bullets', at: [-24, COUNTER_SURFACE_Y + 1, 36], build: 'bullets' },
   { id: 'mana_potion', potion: 'mana' },
-  { id: 'pistol', at: [34, STALL_COUNTER_Y, 32], build: 'gun' },
-  { id: 'shield', at: [88, STALL_COUNTER_Y + 22, 12], build: 'shield' },
+  { id: 'pistol', at: [34, COUNTER_SURFACE_Y + 3, 32], build: 'gun' },
+  { id: 'shield', at: [88, COUNTER_SURFACE_Y - 8, 12], build: 'shield' },
   { id: 'heart_upgrade', at: [-62, 150, 4], build: 'heart', hang: true },
   { id: 'bubble', at: [0, 160, 4], build: 'bubble', hang: true },
   { id: 'shield_upgrade', at: [62, 150, 4], build: 'shieldUpgrade', hang: true },
@@ -264,7 +263,7 @@ const yawToward = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
  *          buy(id) → Promise<{ ok, text, emoji? }> }   (id 'treasure_chest' = open the chest)
  *  characters: { roster, get() → { unlocked, selected }, select(key) }
  *  time: { get(), set(pref) }
- *  recalibrate()
+ *  confirmStart(go)   — the arrow was tapped: call go() to start the stage (after calibrating)
  *  onStart(pathAngle)  — start the stage (the player auto-walks along pathAngle)
  *  onLobby()           — back to the start screen
  */
@@ -275,6 +274,8 @@ export function createVillage(ctx) {
   const textSprite = (text, opts = {}) => makeTextSprite(text, { ...opts, height: (opts.height ?? 0.24) * labelScale });
   let active = false;
   let leaving = null;       // { startedMs } once the stage walk has begun
+  let approaching = false;  // the player is still walking in (built ahead after a stage win)
+  let starting = false;     // arrow tapped, waiting on ctx.confirmStart
   let root = null;          // THREE.Group with everything
   let center = new THREE.Vector3();
   let fwd = new THREE.Vector3(0, 0, 1);
@@ -345,7 +346,7 @@ export function createVillage(ctx) {
   let bannerTimer = null;
 
   el.back.addEventListener('click', () => {
-    if (!active || leaving) return;
+    if (!active || leaving || approaching) return;
     if (focus) unfocus();
     else ctx.onLobby();
   });
@@ -397,35 +398,6 @@ export function createVillage(ctx) {
       makeClickable(arrow, { station: 'arrow' });
       makeClickable(label, { station: 'arrow' });
       makeClickable(ring, { station: 'arrow' });
-    }
-
-    // Sword (floating, turning slowly)
-    {
-      const pos = local(LAYOUT.sword.x, 0, LAYOUT.sword.z);
-      const gy = groundY(pos.x, pos.z, center.y);
-      const holder = new THREE.Group();
-      holder.position.set(pos.x, gy + LAYOUT.sword.y, pos.z);
-      const hit = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.1, 0.35), new THREE.MeshBasicMaterial({ visible: false }));
-      holder.add(hit);
-      const label = textSprite('🎯 Sword', { height: 0.3 });
-      label.position.set(pos.x, gy + LAYOUT.sword.y + 0.78, pos.z);
-      const ring = makeRing(0.35);
-      ring.position.set(pos.x, gy + 0.03, pos.z);
-      root.add(holder, label, ring);
-      overviewLabels.push(label);
-      stations.sword = { key: 'sword', holder, label, baseY: holder.position.y, pos: holder.position.clone() };
-      makeClickable(holder, { station: 'sword' });
-      makeClickable(label, { station: 'sword' });
-      loadSwordModelTemplate('default').then(() => {
-        if (!alive()) return;
-        const sword = createSwordModelInstance({ variant: 'default' });
-        if (!sword) return;
-        sword.rotation.x = -Math.PI / 2;      // blade (+Z) up
-        sword.position.y = -0.35;
-        markShared(sword);
-        holder.add(sword);
-        makeClickable(sword, { station: 'sword' });
-      }).catch(() => {});
     }
 
     // Time of day: ☀️ 🎲 🌙 floating side by side
@@ -681,11 +653,6 @@ export function createVillage(ctx) {
       const target = _v2.copy(s.pos).add(_v.set(0, 0.6, 0)).clone();
       const dir = _v.copy(s.facing).addScaledVector(_UP, 0.35).clone();
       setView(target, dir, 1.35, 0.8, 2.2);
-    } else if (focus === 'sword') {
-      const s = stations.sword;
-      const target = _v2.copy(s.pos).clone();
-      const dir = _v.subVectors(center, s.pos).setY(0).normalize().addScaledVector(_UP, 0.2).clone();
-      setView(target, dir, 0.75, 0.75, 1.6);
     } else if (focus === 'time') {
       const s = stations.time;
       const target = _v2.copy(s.pos).clone();
@@ -733,8 +700,12 @@ export function createVillage(ctx) {
     refreshBack();
   }
 
+  // ⬅ Lobby top left in the overview; ⬅ Village bottom middle when focused (the bottom
+  // panel moves up above it)
   function refreshBack() {
     el.back.textContent = focus ? '⬅ Village' : '⬅ Lobby';
+    el.back.classList.toggle('village-back-bottom', !!focus);
+    ui.classList.toggle('village-focused', !!focus);
   }
 
   // Bottom panel: what to do at the current station
@@ -754,7 +725,7 @@ export function createVillage(ctx) {
       return b;
     };
     if (!focus) {
-      show(`Stage ${stageInfo.stage}`, 'Tap the shop, a character, the sword or the sun / moon — tap the arrow when you’re ready to fight.');
+      show(`Stage ${stageInfo.stage}`, 'Tap the shop, a character or the sun / moon — tap the arrow when you’re ready to fight.');
     } else if (focus === 'shop') {
       if (selectedItem >= 0) el.panel.classList.add('hidden');
       else show('🛒 Shop', 'Tap an item on the stall — or the chest for a mystery prize.');
@@ -764,13 +735,6 @@ export function createVillage(ctx) {
       show('👥 Characters', any
         ? `Playing as ${sel?.emoji ?? ''} ${sel?.label ?? ''}. Tap a character to switch.`
         : `Playing as ${sel?.emoji ?? ''} ${sel?.label ?? ''}. Beat a stage’s final enemy to unlock their character.`);
-    } else if (focus === 'sword') {
-      const cal = btn('🎯 Calibrate', () => {
-        ctx.recalibrate();
-        cal.textContent = '✅ Calibrated!';
-        setTimeout(() => { cal.textContent = '🎯 Calibrate'; }, 1500);
-      });
-      show('🎯 Sword', 'Hold your sword (phone) pointing straight ahead, then tap Calibrate.', [cal]);
     } else if (focus === 'time') {
       const cur = TIME_CHOICES.find((c) => c.pref === ctx.time.get());
       show('Time of day', `Next stage: ${cur?.emoji ?? ''} ${cur?.label ?? ''}. Tap ☀️ day, 🌙 night or 🎲 random.`);
@@ -960,11 +924,11 @@ export function createVillage(ctx) {
     return null;
   };
   const onPointerDown = (e) => {
-    if (!active || leaving) return;
+    if (!active || leaving || approaching) return;
     down = { x: e.clientX, y: e.clientY, t: performance.now() };
   };
   const onPointerUp = (e) => {
-    if (!active || leaving || !down) return;
+    if (!active || leaving || approaching || !down) return;
     const dx = e.clientX - down.x;
     const dy = e.clientY - down.y;
     const dt = performance.now() - down.t;
@@ -978,18 +942,18 @@ export function createVillage(ctx) {
     if (t) onTarget(t);
   };
   const onPointerMove = (e) => {
-    if (!active || leaving || e.pointerType === 'touch') return;
+    if (!active || leaving || approaching || e.pointerType === 'touch') return;
     domElement.style.cursor = pick(e.clientX, e.clientY) ? 'pointer' : '';
   };
   const onKeyDown = (e) => {
-    if (!active || leaving || focus !== 'shop') return;
+    if (!active || leaving || approaching || focus !== 'shop') return;
     if (e.target?.closest?.('input, textarea')) return;
     if (e.key === 'ArrowLeft') { stepItem(-1); e.preventDefault(); }
     else if (e.key === 'ArrowRight') { stepItem(1); e.preventDefault(); }
   };
 
   function onTarget(t) {
-    if (t.station === 'arrow') { startStage(); return; }
+    if (t.station === 'arrow') { requestStart(); return; }
     if (t.station === 'shop') {
       if (Number.isInteger(t.item)) {
         if (focus === 'shop' && selectedItem === t.item && itemEntries[t.item]?.def.chest) { void buySelected(); return; }
@@ -1013,10 +977,22 @@ export function createVillage(ctx) {
       refreshPanel();
       return;
     }
-    if (t.station === 'sword') focusStation('sword');
   }
 
   // ── Stage start ──
+  // The arrow: the game first makes the player calibrate the sword (ctx.confirmStart)
+  function requestStart() {
+    if (leaving || starting) return;
+    if (!ctx.confirmStart) { startStage(); return; }
+    starting = true;
+    const token = buildToken;
+    ctx.confirmStart(() => {
+      if (token !== buildToken) return; // (this village was closed meanwhile)
+      starting = false;
+      if (active && !leaving) startStage();
+    });
+  }
+
   function startStage() {
     if (leaving) return;
     focus = null;
@@ -1055,20 +1031,25 @@ export function createVillage(ctx) {
 
   // ── Lifecycle ──
   /**
-   * Opens the village around the player.
-   * @param {{ stage: number, count: number, boss: string, pathAngle: number }} info
+   * Opens the village around the player — or, with `center`, at that spot: the player walks
+   * there first (the UI shows on arrival, then `onArrive()`).
+   * @param {{ stage: number, count: number, boss: string, pathAngle: number,
+   *           center?: THREE.Vector3, onArrive?: () => void }} info
    *   pathAngle: next stage's direction (x = cos, z = sin, as _psBuildStage uses it)
    */
   function enter(info) {
     exit();
     active = true;
     leaving = null;
+    starting = false;
     stageInfo = info;
     pathAngle = info.pathAngle;
     buildToken += 1;
     labelScale = camera.aspect < 0.8 ? 1.6 : camera.aspect < 1.2 ? 1.25 : 1;
     const { model, controls } = ctx.getPlayer();
-    center.copy(model.position);
+    approaching = !!info.center;
+    if (info.center) center.set(info.center.x, groundY(info.center.x, info.center.z, model.position.y), info.center.z);
+    else center.copy(model.position);
     fwd.set(Math.cos(pathAngle), 0, Math.sin(pathAngle)).normalize();
     right.crossVectors(fwd, _UP).normalize();
     focus = null;
@@ -1076,6 +1057,17 @@ export function createVillage(ctx) {
     walk = null;
     faceYaw = Math.atan2(fwd.x, fwd.z);
     if (controls) { controls.yaw = faceYaw; controls.pitch = 0; }
+    if (approaching) {
+      walk = {
+        to: center.clone(),
+        onArrive: () => {
+          approaching = false;
+          faceYaw = Math.atan2(fwd.x, fwd.z);
+          showUi();
+          info.onArrive?.();
+        },
+      };
+    }
     camInit = false;
     camReleased = false;
     swapBusy = false;
@@ -1083,12 +1075,15 @@ export function createVillage(ctx) {
     clickables.length = 0;
     void ctx.shop.load?.().then(() => refreshCard());
     ui.classList.remove('hidden');
-    el.back.classList.remove('hidden');
-    ui.querySelector('.village-top')?.classList.remove('hidden');
     el.banner.classList.add('hidden');
     el.stage.textContent = info.stage <= 50 ? `Stage ${info.stage}` : 'Final stage';
-    refreshBack();
-    refreshPanel();
+    if (approaching) {
+      el.back.classList.add('hidden');
+      ui.querySelector('.village-top')?.classList.add('hidden');
+      el.panel.classList.add('hidden');
+    } else {
+      showUi();
+    }
     refreshCard();
     document.body.classList.add('village-mode');
     domElement.addEventListener('pointerdown', onPointerDown);
@@ -1096,6 +1091,13 @@ export function createVillage(ctx) {
     domElement.addEventListener('pointermove', onPointerMove);
     window.addEventListener('keydown', onKeyDown);
     void build(buildToken);
+  }
+
+  function showUi() {
+    el.back.classList.remove('hidden');
+    ui.querySelector('.village-top')?.classList.remove('hidden');
+    refreshBack();
+    refreshPanel();
   }
 
   // Removes the village props (the banner can keep playing)
@@ -1121,6 +1123,8 @@ export function createVillage(ctx) {
     const wasActive = active;
     active = false;
     leaving = null;
+    approaching = false;
+    starting = false;
     teardown();
     walk = null;
     faceYaw = null;
@@ -1167,7 +1171,7 @@ export function createVillage(ctx) {
     let x = (p.x * 0.5 + 0.5) * w;
     let y = (-p.y * 0.5 + 0.5) * h - 18;
     x = Math.min(w - cw / 2 - 12, Math.max(cw / 2 + 12, x));
-    y = Math.min(h - 12, Math.max(ch + 70, y));
+    y = Math.min(h - 76, Math.max(ch + 70, y)); // (above the ⬅ Village button)
     el.card.style.left = `${x}px`;
     el.card.style.top = `${y}px`;
   }
@@ -1209,7 +1213,7 @@ export function createVillage(ctx) {
     updateNpcs(dt);
 
     overviewLabels.forEach((l) => { l.visible = !focus; });
-    // Idle motion: arrow bob, sword spin, time emojis float, items on the counter
+    // Idle motion: arrow bob, time emojis float, items on the counter
     const arrow = stations.arrow;
     if (arrow) {
       // Bob up and nudge forward, like it's beckoning
@@ -1219,11 +1223,6 @@ export function createVillage(ctx) {
       arrow.arrow.position.z = arrow.basePos.z + fwd.z * nudge;
       const s = 1 + Math.sin(t * 3) * 0.06;
       arrow.ring.scale.set(s, s, s);
-    }
-    const sword = stations.sword;
-    if (sword) {
-      sword.holder.rotation.y = t * 0.9;
-      sword.holder.position.y = sword.baseY + Math.sin(t * 1.7) * 0.07;
     }
     timeSprites.forEach((ts, i) => {
       ts.sprite.position.y = ts.base.y + Math.sin(t * 1.8 + i * 1.3) * 0.06;
