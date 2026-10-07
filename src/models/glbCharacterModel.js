@@ -51,6 +51,7 @@ export const glbCharacterConfig = {
   antlerGuyUrl: '/models/glb_characters/antler_guy.glb',   // a quarter of the EnemyPlayers
   pumpkinUrl: '/models/glb_characters/pumpkin.glb',        // Multiplayer roster / Showdown unlock
   wizardUrl: '/models/glb_characters/wizard.glb',          // Multiplayer roster / Showdown unlock
+  treeCreatureUrl: '/models/glb_characters/tree_creature.glb', // Multiplayer roster / Showdown unlock
   mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Multiplayer roster / Showdown unlock
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',
