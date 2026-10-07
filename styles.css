@@ -2260,6 +2260,23 @@ body.settings-open #inventory-button {
   transform: translateX(-50%);
 }
 .village-ui.village-focused .village-panel { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+/* Phones: ‹ › to the neighbouring station (shop / next stage / time / characters) */
+.village-nav {
+  position: absolute;
+  top: 42%;
+  min-height: 44px;
+  max-width: 44vw;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--surface-strong);
+  border-color: var(--border-strong);
+}
+.village-nav-prev { left: calc(10px + env(safe-area-inset-left, 0px)); }
+.village-nav-next { right: calc(10px + env(safe-area-inset-right, 0px)); }
 .village-top {
   position: absolute;
   top: calc(14px + env(safe-area-inset-top, 0px));

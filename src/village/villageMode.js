@@ -10,6 +10,8 @@
 //   • Arrow — points along the next stage's path; tap it to start the stage (after the
 //     sword calibration popup, ctx.confirmStart).
 // ⬅ Lobby top left (overview); ⬅ Village bottom middle (focused on something).
+// Phones (portrait / touch): no high overview — the home view is low behind the player,
+// on the arrow; ‹ › buttons or a swipe move the camera between the stations (STATION_ORDER).
 // After a stage win it can be built a little way ahead, the player walking in (`approach`).
 //
 // Game access goes through `ctx` (villageCtx in bootstrapGameApp.js); the shop logic
@@ -54,6 +56,10 @@ const PLAYER_WALK_SPEED = 2.4;     // m/s
 const NPC_WALK_SPEED = 1.7;        // m/s
 const CAMERA_LERP = 3.2;           // 1/s
 const VILLAGE_FOV = 55;            // the fight camera is very wide; the village is framed tighter
+// Phone station carousel, left → right as seen from the village centre (null = home: the arrow)
+const STATION_ORDER = ['shop', null, 'time', 'characters'];
+const STATION_NAMES = { shop: '🛒 Shop', null: '➜ Next stage', time: '☀️ Time', characters: '👥 Characters' };
+const COARSE_POINTER = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
 const LEAVE_REMOVE_DIST = 10;      // m from the village centre: props removed once the stage walk gets here
 const LEAVE_REMOVE_MS = 4000;      // …or this long after the stage starts (the first enemies spawn close by)
 
@@ -313,6 +319,8 @@ export function createVillage(ctx) {
   ui.className = 'village-ui hidden';
   ui.innerHTML = `
     <button type="button" class="ui-btn-secondary village-back" data-v="back">⬅ Lobby</button>
+    <button type="button" class="ui-btn-secondary village-nav village-nav-prev hidden" data-v="nav-prev"></button>
+    <button type="button" class="ui-btn-secondary village-nav village-nav-next hidden" data-v="nav-next"></button>
     <div class="village-top ui-chip"><span data-v="stage"></span><span class="village-top-sep">·</span><span data-v="coins"></span></div>
     <div class="village-panel ui-panel hidden" data-v="panel">
       <div class="village-panel-title" data-v="panel-title"></div>
@@ -340,7 +348,7 @@ export function createVillage(ctx) {
     back: $('back'), stage: $('stage'), coins: $('coins'),
     panel: $('panel'), panelTitle: $('panel-title'), panelText: $('panel-text'), panelActions: $('panel-actions'),
     card: $('card'), cardName: $('card-name'), cardDesc: $('card-desc'), cardOwned: $('card-owned'), buy: $('buy'),
-    prev: $('prev'), next: $('next'),
+    prev: $('prev'), next: $('next'), navPrev: $('nav-prev'), navNext: $('nav-next'),
     banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'), bannerBoss: $('banner-boss'),
   };
   let bannerTimer = null;
@@ -353,6 +361,13 @@ export function createVillage(ctx) {
   el.prev.addEventListener('click', () => stepItem(-1));
   el.next.addEventListener('click', () => stepItem(1));
   el.buy.addEventListener('click', () => { void buySelected(); });
+  el.navPrev.addEventListener('click', () => stepStation(-1));
+  el.navNext.addEventListener('click', () => stepStation(1));
+
+  // Phones: low home view on the arrow + station carousel instead of the high overview
+  // (decided per frame: the phone can be turned)
+  const isCompact = () => (camera.aspect || 1) < 1 || COARSE_POINTER;
+  let compact = false;
 
   const local = (x, y, z, out = new THREE.Vector3()) => out.copy(center)
     .addScaledVector(right, x).addScaledVector(fwd, z).setY(center.y + y);
@@ -625,6 +640,13 @@ export function createVillage(ctx) {
 
   function computeWantedCamera() {
     const st = focus ? stations[focus] : null;
+    if (!st && compact) {
+      // Home: low behind the player, on the arrow (the player stands in the foreground)
+      const target = local(0, 0.55, LAYOUT.arrow.z - 0.4);
+      const dir = _v2.copy(fwd).multiplyScalar(-1).addScaledVector(_UP, 0.3);
+      setView(target, dir, 1.5, 1.0, 4.5);
+      return;
+    }
     if (!st) {
       // Overview from behind the village centre, a little above
       // (aimed a little short of the middle so the bottom panel doesn't cover the player)
@@ -645,14 +667,14 @@ export function createVillage(ctx) {
       } else {
         // Stall + chest
         const target = _v2.copy(s.stallRoot.position).addScaledVector(s.side, s.chestSign * 0.55).add(_v.set(0, 0.85, 0)).clone();
-        const dir = _v.copy(s.facing).addScaledVector(_UP, 0.32).clone();
-        setView(target, dir, 2.3, 1.4, 2.6);
+        const dir = _v.copy(s.facing).addScaledVector(_UP, compact ? 0.22 : 0.32).clone();
+        setView(target, dir, compact ? 1.8 : 2.3, 1.4, 2.6);
       }
     } else if (focus === 'characters') {
       const s = stations.characters;
       const target = _v2.copy(s.pos).add(_v.set(0, 0.6, 0)).clone();
-      const dir = _v.copy(s.facing).addScaledVector(_UP, 0.35).clone();
-      setView(target, dir, 1.35, 0.8, 2.2);
+      const dir = _v.copy(s.facing).addScaledVector(_UP, compact ? 0.22 : 0.35).clone();
+      setView(target, dir, compact ? 1.15 : 1.35, 0.8, 2.2);
     } else if (focus === 'time') {
       const s = stations.time;
       const target = _v2.copy(s.pos).clone();
@@ -696,8 +718,31 @@ export function createVillage(ctx) {
   function unfocus() {
     focus = null;
     selectItem(-1);
+    // (phones: the home view is from behind the village centre — the player goes back there)
+    if (compact) walkTo(center, () => { faceYaw = Math.atan2(fwd.x, fwd.z); });
     refreshPanel();
     refreshBack();
+  }
+
+  // Phones: ‹ › / swipe to the neighbouring station
+  function stepStation(dir) {
+    if (!active || leaving || approaching) return;
+    const i = STATION_ORDER.indexOf(focus);
+    const n = STATION_ORDER.length;
+    const key = STATION_ORDER[(Math.max(i, 0) + dir + n) % n];
+    if (key === null) unfocus();
+    else focusStation(key);
+  }
+  // ‹ › name the neighbouring stations; hidden off phones and while the buy card (its own ‹ ›) is up
+  function refreshNav() {
+    const show = compact && active && !leaving && !approaching && !(focus === 'shop' && selectedItem >= 0);
+    el.navPrev.classList.toggle('hidden', !show);
+    el.navNext.classList.toggle('hidden', !show);
+    if (!show) return;
+    const i = Math.max(STATION_ORDER.indexOf(focus), 0);
+    const n = STATION_ORDER.length;
+    el.navPrev.textContent = `‹ ${STATION_NAMES[STATION_ORDER[(i - 1 + n) % n]]}`;
+    el.navNext.textContent = `${STATION_NAMES[STATION_ORDER[(i + 1) % n]]} ›`;
   }
 
   // ⬅ Lobby top left in the overview; ⬅ Village bottom middle when focused (the bottom
@@ -706,6 +751,7 @@ export function createVillage(ctx) {
     el.back.textContent = focus ? '⬅ Village' : '⬅ Lobby';
     el.back.classList.toggle('village-back-bottom', !!focus);
     ui.classList.toggle('village-focused', !!focus);
+    refreshNav();
   }
 
   // Bottom panel: what to do at the current station
@@ -725,7 +771,9 @@ export function createVillage(ctx) {
       return b;
     };
     if (!focus) {
-      show(`Stage ${stageInfo.stage}`, 'Tap the shop, a character or the sun / moon — tap the arrow when you’re ready to fight.');
+      show(`Stage ${stageInfo.stage}`, compact
+        ? 'Swipe or tap ‹ › for the shop, characters and time of day — tap the arrow when you’re ready to fight.'
+        : 'Tap the shop, a character or the sun / moon — tap the arrow when you’re ready to fight.');
     } else if (focus === 'shop') {
       if (selectedItem >= 0) el.panel.classList.add('hidden');
       else show('🛒 Shop', 'Tap an item on the stall — or the chest for a mystery prize.');
@@ -747,6 +795,7 @@ export function createVillage(ctx) {
     selectedItem = i >= 0 && i < itemEntries.length ? i : -1;
     if (focus === 'shop') refreshPanel();
     refreshCard();
+    refreshNav();
   }
   function stepItem(dir) {
     if (focus !== 'shop' || !itemEntries.length) return;
@@ -934,7 +983,9 @@ export function createVillage(ctx) {
     const dt = performance.now() - down.t;
     down = null;
     if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4 && dt < 700) {
-      if (focus === 'shop') stepItem(dx < 0 ? 1 : -1);
+      // (shop item close-up: the next item; phones otherwise: the next station)
+      if (focus === 'shop' && (selectedItem >= 0 || !compact)) stepItem(dx < 0 ? 1 : -1);
+      else if (compact) stepStation(dx < 0 ? 1 : -1);
       return;
     }
     if (Math.hypot(dx, dy) > 12) return;
@@ -946,10 +997,14 @@ export function createVillage(ctx) {
     domElement.style.cursor = pick(e.clientX, e.clientY) ? 'pointer' : '';
   };
   const onKeyDown = (e) => {
-    if (!active || leaving || approaching || focus !== 'shop') return;
+    if (!active || leaving || approaching) return;
     if (e.target?.closest?.('input, textarea')) return;
-    if (e.key === 'ArrowLeft') { stepItem(-1); e.preventDefault(); }
-    else if (e.key === 'ArrowRight') { stepItem(1); e.preventDefault(); }
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const dir = e.key === 'ArrowLeft' ? -1 : 1;
+    if (focus === 'shop' && (selectedItem >= 0 || !compact)) stepItem(dir);
+    else if (compact) stepStation(dir);
+    else return;
+    e.preventDefault();
   };
 
   function onTarget(t) {
@@ -1002,6 +1057,8 @@ export function createVillage(ctx) {
     el.panel.classList.add('hidden');
     el.card.classList.add('hidden');
     el.back.classList.add('hidden');
+    el.navPrev.classList.add('hidden');
+    el.navNext.classList.add('hidden');
     ui.querySelector('.village-top')?.classList.add('hidden');
     domElement.style.cursor = '';
     document.body.classList.remove('village-mode'); // fight HUD back
@@ -1046,6 +1103,7 @@ export function createVillage(ctx) {
     pathAngle = info.pathAngle;
     buildToken += 1;
     labelScale = camera.aspect < 0.8 ? 1.6 : camera.aspect < 1.2 ? 1.25 : 1;
+    compact = isCompact();
     const { model, controls } = ctx.getPlayer();
     approaching = !!info.center;
     if (info.center) center.set(info.center.x, groundY(info.center.x, info.center.z, model.position.y), info.center.z);
@@ -1078,6 +1136,7 @@ export function createVillage(ctx) {
     el.banner.classList.add('hidden');
     el.stage.textContent = info.stage <= 50 ? `Stage ${info.stage}` : 'Final stage';
     if (approaching) {
+      refreshNav();
       el.back.classList.add('hidden');
       ui.querySelector('.village-top')?.classList.add('hidden');
       el.panel.classList.add('hidden');
@@ -1139,6 +1198,7 @@ export function createVillage(ctx) {
     ui.classList.add('hidden');
     el.panel.classList.add('hidden');
     el.card.classList.add('hidden');
+    refreshNav();
     if (wasActive) {
       clearTimeout(bannerTimer);
       el.banner.classList.add('hidden');
@@ -1209,6 +1269,10 @@ export function createVillage(ctx) {
       return;
     }
 
+    if (isCompact() !== compact) {
+      compact = !compact;
+      if (!approaching) { refreshPanel(); refreshBack(); }
+    }
     movePlayer(dt);
     updateNpcs(dt);
 
