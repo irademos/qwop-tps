@@ -31,6 +31,10 @@ export const CAMERA_CONFIG_DEFAULTS = Object.freeze({
 });
 const CAMERA_CONFIG_KEY = 'sq:firstPersonCam';
 const MAX_WALKABLE_SLOPE_DEGREES = 42;
+// Ledges: ground dropping more than this below the feet (m) → fall instead of snapping down
+const LEDGE_FALL_MIN_DROP = 0.6;
+// Moved further than this (m) since the last frame → a teleport, snap to the ground
+const LEDGE_FALL_MAX_STEP = 1.5;
 // Wall climbing: walking (joystick / W) into ground that rises more than minRise within
 // probeDist ahead starts a climb instead of popping onto it. While climbing, forward input
 // raises the player at speed m/s until they are level with the top (then they step onto it),
@@ -1000,8 +1004,21 @@ export class PlayerControls {
           this.playerZ,
           { includeSolidHit: false }
         );
-        this.playerY = groundY;
+        // Walked off a ledge: fall with the jump gravity (onLedgeFall hook) instead of
+        // snapping down. A big jump in position this frame is a teleport (respawn, stage
+        // start…) and still snaps.
+        const drop = this.playerY - groundY;
+        const moved = Number.isFinite(this._lastStepX)
+          ? Math.hypot(this.playerX - this._lastStepX, this.playerZ - this._lastStepZ)
+          : Infinity;
+        if (drop > LEDGE_FALL_MIN_DROP && moved < LEDGE_FALL_MAX_STEP && typeof this.onLedgeFall === 'function') {
+          this.onLedgeFall();
+        } else {
+          this.playerY = groundY;
+        }
       }
+      this._lastStepX = this.playerX;
+      this._lastStepZ = this.playerZ;
 
       if (this._climbFall) {
         // Jumped off a wall: drift backward until landing

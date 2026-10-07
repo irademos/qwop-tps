@@ -3467,6 +3467,11 @@ async function initCore(runtimeContext) {
     _psJumpVelY = CLIMB_JUMP_OFF_UP;
     window.phoneSwordAirborne = true;
   };
+  // Walking off a ledge: fall from rest with the jump gravity (lands in the jump code below)
+  playerControls.onLedgeFall = () => {
+    _psJumpVelY = -0.01;
+    window.phoneSwordAirborne = true;
+  };
 
   // Bomb blast on the player: thrown back (and up, in Sword Showdown) a little harder than an
   // enemy's death knockback, playing the flying-back death clip once before getting back up.
