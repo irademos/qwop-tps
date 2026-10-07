@@ -2692,8 +2692,9 @@ async function initCore(runtimeContext) {
       pistol.localHoldOrigin = 'inventory';
       pistol.holder = playerControls;
       setPlayerWeaponType(playerControls, pistol.type);
-      // Aiming a gun: switch to the first-person camera
-      if (!playerControls.cameraConfig?.firstPerson) playerControls.setCameraConfig?.({ firstPerson: true });
+      // Aiming a gun: first-person camera while it is held (not saved — unequipping goes
+      // back to the player's own camera setting)
+      playerControls.forceFirstPerson = true;
       // Pistol: fixed depth regardless of hand size
       if (playerControls.playerModel) {
         playerControls.playerModel.userData.handDepthOverride = { left: 0.3 };
@@ -2754,6 +2755,7 @@ async function initCore(runtimeContext) {
         delete playerControls.playerModel.userData.handDepthOverride;
       }
       clearPlayerWeaponType(playerControls, pistol.type);
+      playerControls.forceFirstPerson = false;
       playerControls?.updateAmmoUI?.(false);
       updateSettingsUI();
     }
@@ -5821,13 +5823,11 @@ async function initCore(runtimeContext) {
   duelMode = createDuelMode(duelCtx);
 
   // ── Multiplayer mode: Team Battle / Free For All (src/multiplayer/matchMode.js) ──
-  // Same arena, sword rules, health and auto-walk as duels; up to 10 fighters, bots fill
-  // the empty spots (simulated by the battle's host as EnemyPlayers).
+  // Same arena, sword rules and health as duels (but no auto-walk: players move
+  // themselves, bots still walk to their enemies); up to 10 fighters, bots fill the empty
+  // spots (simulated by the battle's host as EnemyPlayers).
   const MATCH_HEALTH_SEGMENTS = DUEL_HEALTH_SEGMENTS;
-  const MATCH_REENGAGE_DIST = 2.8;     // closest enemy farther than this → auto-walk to it
-  // Guns & Bombs: walk in only to shooting range, and keep some room
-  const GUNS_WALK_STOP_DIST = 7;
-  const GUNS_REENGAGE_DIST = 11;
+  // Guns & Bombs: keep some room
   const GUNS_MIN_SPACING = 2.5;
   let _gunsSavedLoadout = null;        // the real pistol / shield entries while in Guns & Bombs
   const MATCH_BOT_SWING_CHANCE = 0.35;
@@ -5962,7 +5962,6 @@ async function initCore(runtimeContext) {
       playerBombs?.throw(origin, target, { getBlastTargets, keepHeld });
     },
     onShieldHit: () => duelCtx.onShieldHit(),
-    startWalk: duelCtx.startWalkIn,
     stopWalk: duelCtx.stopWalkIn,
     getLocalPlayerModel: () => playerModel,
     getPlayerControls: () => playerControls,
@@ -6586,16 +6585,8 @@ async function initCore(runtimeContext) {
             // Recompute direction each frame so manual movement doesn't break the path
             _psAutoWalkDir.set(_ddx / _distToEnd, 0, _ddz / _distToEnd);
             const _moveStep = PS_SPEED * frameDelta;
-            const _nx = playerModel.position.x + _psAutoWalkDir.x * _moveStep;
-            const _nz = playerModel.position.z + _psAutoWalkDir.z * _moveStep;
-            playerModel.position.x = _nx;
-            playerModel.position.z = _nz;
-            playerControls.playerX = _nx;
-            playerControls.playerZ = _nz;
-            playerControls.lastPosition?.set(_nx, playerModel.position.y, _nz);
-            if (playerControls.body) {
-              playerControls.body.setNextKinematicTranslation({ x: _nx, y: playerModel.position.y + 0.6, z: _nz });
-            }
+            // Moved by processMovement next frame, so it climbs steep ground like manual walking
+            playerControls.queueAutoMove(_psAutoWalkDir.x * _moveStep, _psAutoWalkDir.z * _moveStep);
             playerControls.isMoving = true;
           } else {
             _psAutoWalking = false;
@@ -6746,16 +6737,6 @@ async function initCore(runtimeContext) {
         const _d = _t.position.distanceToSquared(playerModel.position);
         if (_d < _oppDistSq) { _oppDistSq = _d; _opp = _t; }
       }
-      // Battle: once the closest enemy is out of reach (it died, or someone else is closer
-      // than it now), walk to the next one — like the Showdown auto-walk between fights
-      if (matchMode?.isFighting() && !playerDead) {
-        const _reengage = _gunsMatch ? GUNS_REENGAGE_DIST : MATCH_REENGAGE_DIST;
-        if (_opp && !_duelWalking && Math.sqrt(_oppDistSq) > _reengage) _duelWalking = true;
-        if (!_opp && _duelWalking) {
-          _duelWalking = false;
-          playerControls.isMoving = false;
-        }
-      }
       const _nowD = performance.now();
       if (_duelCamLastYaw !== null && Math.abs(wrapDeltaRad(playerControls.yaw - _duelCamLastYaw)) > 0.01) {
         _duelCamManualUntil = _nowD + 2000;
@@ -6769,24 +6750,16 @@ async function initCore(runtimeContext) {
       }
       _duelCamLastYaw = playerControls.yaw;
 
-      // Walk in toward the opponent (they do the same on their side) and stop when close
-      const _walkStop = _gunsMatch ? GUNS_WALK_STOP_DIST : DUEL_WALK_STOP_DIST;
+      // Duel: walk in toward the opponent (they do the same on their side) and stop when close
+      const _walkStop = DUEL_WALK_STOP_DIST;
       if (_duelWalking && _opp && !playerDead) {
         const _wdx = _opp.position.x - playerModel.position.x;
         const _wdz = _opp.position.z - playerModel.position.z;
         const _wDist = Math.hypot(_wdx, _wdz);
         if (_wDist > _walkStop) {
           const _step = Math.min(PS_SPEED * frameDelta, _wDist - _walkStop);
-          const _nx = playerModel.position.x + (_wdx / _wDist) * _step;
-          const _nz = playerModel.position.z + (_wdz / _wDist) * _step;
-          playerModel.position.x = _nx;
-          playerModel.position.z = _nz;
-          playerControls.playerX = _nx;
-          playerControls.playerZ = _nz;
-          playerControls.lastPosition?.set(_nx, playerModel.position.y, _nz);
-          if (playerControls.body) {
-            playerControls.body.setNextKinematicTranslation({ x: _nx, y: playerModel.position.y + 0.6, z: _nz });
-          }
+          // Moved by processMovement next frame, so it climbs steep ground like manual walking
+          playerControls.queueAutoMove((_wdx / _wDist) * _step, (_wdz / _wDist) * _step);
           playerControls.isMoving = true;
         } else {
           _duelWalking = false;

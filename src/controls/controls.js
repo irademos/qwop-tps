@@ -46,7 +46,7 @@ export const CLIMB_CONFIG = {
   inputThreshold: 0.3,  // forward / back share of the input that counts
   topStep: 0.15,        // extra m past the probe point the player steps onto at the top
   jumpOffSpeed: 3,      // m/s backward drift while falling after jumping off
-  maxAnchorDrift: 0.3   // m — moved off the wall by something else (auto-walk, knockback) → stop climbing
+  maxAnchorDrift: 0.3   // m — moved off the wall by something else (knockback, teleport) → stop climbing
 };
 const WEAPON_CAMERA_FOV_DELTA = 8;
 const CAMERA_FOV_LERP_SPEED = 6;
@@ -200,6 +200,12 @@ export class PlayerControls {
   }
 
   // Partial update ({ firstPerson, eyeHeight, eyeForward, fov }), saved per device
+  // First-person camera in use: the saved setting, or forced on while a gun is equipped
+  // (forceFirstPerson — temporary, never saved, so unequipping returns to the setting)
+  get isFirstPersonView() {
+    return !!(this.cameraConfig?.firstPerson || this.forceFirstPerson);
+  }
+
   setCameraConfig(partial = {}) {
     this.cameraConfig = this._mergeCameraConfig(partial);
     this.defaultFovDesktop = this.cameraConfig.fov;
@@ -943,8 +949,20 @@ export class PlayerControls {
     return true;
   }
 
+  // Auto-walk (Showdown path, duel walk-in): move by (dx, dz) metres on the next
+  // processMovement, through the same ground / wall-climb handling as manual movement
+  queueAutoMove(dx, dz) {
+    if (!Number.isFinite(dx) || !Number.isFinite(dz)) return;
+    const m = this._autoMove || (this._autoMove = { x: 0, z: 0 });
+    m.x += dx;
+    m.z += dz;
+  }
+
   processMovement() {
-    if (!this.enabled) return;
+    if (!this.enabled) {
+      this._autoMove = null;
+      return;
+    }
 
     // Simple direct position movement — no physics, no gravity, no collider
     {
@@ -991,10 +1009,26 @@ export class PlayerControls {
         : 0.016;
       const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05;
 
-      const climbHandled = this._updateClimb(movement, deltaSeconds);
+      // Auto-walk counts as full forward input along its direction for wall climbing
+      const autoMove = this._autoMove;
+      this._autoMove = null;
+      const autoLen = autoMove ? Math.hypot(autoMove.x, autoMove.z) : 0;
+      let climbInput = movement;
+      if (autoLen > 1e-6) {
+        climbInput = movement.clone();
+        climbInput.x += autoMove.x / autoLen;
+        climbInput.z += autoMove.z / autoLen;
+        if (climbInput.length() > 1) climbInput.normalize();
+      }
+
+      const climbHandled = this._updateClimb(climbInput, deltaSeconds);
       if (!climbHandled) {
         this.playerX += movement.x * speed * deltaSeconds;
         this.playerZ += movement.z * speed * deltaSeconds;
+        if (autoLen > 1e-6) {
+          this.playerX += autoMove.x;
+          this.playerZ += autoMove.z;
+        }
       }
 
       if (!climbHandled && !window.phoneSwordAirborne) {
@@ -1033,7 +1067,7 @@ export class PlayerControls {
       const newX = this.playerX;
       const newY = this.playerY;
       const newZ = this.playerZ;
-      const isMovingNow = movement.length() > 0;
+      const isMovingNow = climbInput.length() > 0;
       this.isMoving = isMovingNow && !this._climb;
 
       if (this.playerModel) {
@@ -1119,7 +1153,7 @@ export class PlayerControls {
     if (Number.isFinite(this.weaponAimPitch)) {
       // Phone-aimed gun / shield: the camera tilts with the aim (third person orbits the
       // other way — a lower camera looks up)
-      const targetPitch = this.cameraConfig.firstPerson
+      const targetPitch = this.isFirstPersonView
         ? Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.weaponAimPitch))
         : Math.max(-Math.PI / 8, Math.min(Math.PI / 4, -this.weaponAimPitch * WEAPON_AIM_CAMERA_FOLLOW));
       this.pitch += (targetPitch - this.pitch) * (1 - Math.exp(-GYRO_LERP_SPEED * delta));
@@ -1138,7 +1172,8 @@ export class PlayerControls {
       Math.sin(this.pitch),
       Math.cos(this.yaw) * Math.cos(this.pitch)
     );
-    const { firstPerson, eyeHeight, eyeForward, hideBody, firstPersonOpacity, thirdPersonOpacity } = this.cameraConfig;
+    const { eyeHeight, eyeForward, hideBody, firstPersonOpacity, thirdPersonOpacity } = this.cameraConfig;
+    const firstPerson = this.isFirstPersonView;
     if (firstPerson) {
       // First-person view: camera at the player's eyes, looking in the yaw/pitch direction
       const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(
