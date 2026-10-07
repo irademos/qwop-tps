@@ -2,6 +2,8 @@ import * as THREE from "three";
 import RAPIER from '@dimforge/rapier3d-compat';
 import { BASE_HEALTH_SEGMENTS, convertPointsToSegments } from "../player/healthUtils.js";
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
+import { raycastMapSegment } from '../environment/mapCollision.js';
+import { spawnBulletImpact } from '../combat/bulletImpact.js';
 
 const disposeProjectileMesh = (mesh) => {
   if (!mesh) return;
@@ -53,6 +55,8 @@ const sweptHitsEnemy = (from, to, enemy) => {
 };
 
 const _pvpProbe = { group: { position: null } };
+const _wallPoint = new THREE.Vector3();
+const _wallNormal = new THREE.Vector3();
 
 function removeProjectileAt(projectiles, index) {
   const projectile = projectiles[index];
@@ -157,29 +161,44 @@ export function updateProjectiles({
     const leftShooter = !proj.userData.spawnPosition
       || proj.position.distanceToSquared(proj.userData.spawnPosition) >= 0.0064;
 
+    // Map geometry (buildings, walls, ground) stops the shot. Fighters in front of the wall
+    // on this frame's path still get hit: the swept checks below end at the wall.
+    const prevPos = proj.userData.prevPos ?? proj.position;
+    const wallHit = raycastMapSegment(proj.userData.prevPos ?? proj.userData.spawnPosition, proj.position);
+    if (wallHit) {
+      _wallPoint.copy(wallHit.point);
+      _wallNormal.copy(wallHit.normal);
+    }
+    const segEnd = wallHit ? _wallPoint : proj.position;
+    const stopAtWall = () => {
+      if (proj.parent) spawnBulletImpact(proj.parent, _wallPoint, _wallNormal);
+      removeProjectile(i);
+    };
+
     // Multiplayer Guns & Bombs: every fighter ({id, position, onHit}) — the battle code
     // decides who deals the damage (src/multiplayer/matchMode.js)
     if (pvpTargets) {
-      const prevPos = proj.userData.prevPos ?? proj.position;
       if (leftShooter) {
         for (const target of pvpTargets) {
           if (target.id === proj.userData.shooterId) continue;
           _pvpProbe.group.position = target.position;
-          if (!sweptHitsEnemy(prevPos, proj.position, _pvpProbe)) continue;
+          if (!sweptHitsEnemy(prevPos, segEnd, _pvpProbe)) continue;
           target.onHit(proj.userData.shooterId, vel.clone().setY(0).normalize());
           removeProjectile(i);
           removed = true;
           break;
         }
       }
-      if (!removed) (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
+      if (removed) continue;
+      if (wallHit) stopAtWall();
+      else (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
       continue;
     }
 
     // PvP: other players
     for (const [id, { model }] of Object.entries(otherPlayers)) {
       if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
-      if (!leftShooter) continue;
+      if (!leftShooter || wallHit) continue;
       const playerBox = getObjectBox(model);
       if (!playerBox) continue;
       if (projBox.intersectsBox(playerBox)) {
@@ -209,12 +228,11 @@ export function updateProjectiles({
 
     // Showdown enemies are always local — call applyDamage directly.
     if (Array.isArray(hordeEnemies) && hordeEnemies.length > 0 && leftShooter) {
-      const prevPos = proj.userData.prevPos ?? proj.position;
       for (const enemy of hordeEnemies) {
         if (enemy.isDead) continue;
         const enemyBox = getObjectBox(enemy.group);
         if (!enemyBox) continue;
-        if (projBox.intersectsBox(enemyBox) || sweptHitsEnemy(prevPos, proj.position, enemy)) {
+        if ((!wallHit && projBox.intersectsBox(enemyBox)) || sweptHitsEnemy(prevPos, segEnd, enemy)) {
           const damage = getDamage(proj);
           const dir = vel.clone().normalize();
           const killed = enemy.applyDamage(Math.max(1, Math.round(damage)));
@@ -228,7 +246,9 @@ export function updateProjectiles({
           break;
         }
       }
-      if (!removed) (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
     }
+    if (removed) continue;
+    if (wallHit) stopAtWall();
+    else (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
   }
 }
