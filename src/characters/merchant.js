@@ -8,6 +8,7 @@ const HEART_UPGRADE_ITEM_ID = 'heart_upgrade';
 const SHIELD_UPGRADE_ITEM_ID = 'shield_upgrade';
 const BUBBLE_ITEM_ID = 'bubble';
 const SHOWDOWN_BOMB_ITEM_ID = 'showdown_bomb';
+const LIFE_POTION_ITEM_ID = 'life_potion';
 
 const merchantItemCatalog = {
   shield: { name: 'Shield', price: 50, count: 5 },
@@ -17,9 +18,11 @@ const merchantItemCatalog = {
   [HEART_UPGRADE_ITEM_ID]: { name: 'Heart', price: 350, count: 1, unlimited: true, description: '+1 max health segment' },
   [SHIELD_UPGRADE_ITEM_ID]: { name: 'Shield Upgrade', price: 150, count: 1, unlimited: true, description: '+10 durability for all shields' },
   [BUBBLE_ITEM_ID]: { name: 'Bubble', price: 30, count: 1, unlimited: true, description: '10s protective bubble (tap 🫧 to use)' },
-  [SHOWDOWN_BOMB_ITEM_ID]: { name: 'Bomb', price: 20, count: 1, unlimited: true, icon: '/assets/ui/items/bomb.png', description: 'Throwable bomb (tap 💣 to throw)' }
+  [SHOWDOWN_BOMB_ITEM_ID]: { name: 'Bomb', price: 20, count: 1, unlimited: true, icon: '/assets/ui/items/bomb.png', description: 'Throwable bomb (tap 💣 to throw)' },
+  // Sold on the village market stall; used straight away
+  [LIFE_POTION_ITEM_ID]: { name: 'Life Potion', price: 30, count: 1, unlimited: true, description: 'Fills your health to full' }
 };
-const SHOP_UPGRADE_ITEM_IDS = new Set([HEART_UPGRADE_ITEM_ID, SHIELD_UPGRADE_ITEM_ID, BUBBLE_ITEM_ID, SHOWDOWN_BOMB_ITEM_ID]);
+const SHOP_UPGRADE_ITEM_IDS = new Set([HEART_UPGRADE_ITEM_ID, SHIELD_UPGRADE_ITEM_ID, BUBBLE_ITEM_ID, SHOWDOWN_BOMB_ITEM_ID, LIFE_POTION_ITEM_ID]);
 
 let merchantState = {
   items: {},

@@ -43,6 +43,7 @@ import { createPlayerBombs } from '../combat/playerBomb.js';
 import { createHeartBubbles } from '../combat/heartBubbles.js';
 import { createComboMeter } from '../combat/comboMeter.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
+import { createVillage } from '../village/villageMode.js';
 
 import {
   clearStoredPin,
@@ -3705,12 +3706,6 @@ async function initCore(runtimeContext) {
     _psSongPool = [];
   };
 
-  const _psStageOverlay = document.getElementById('ps-stage-overlay');
-  const _psStageBadge   = document.getElementById('ps-stage-badge');
-  const _psStageEnemies = document.getElementById('ps-stage-enemies');
-  const _psStageOkBtn   = document.getElementById('ps-stage-ok');
-  const _psStageBossEl  = document.getElementById('ps-stage-boss');
-  const _psStageCharsEl = document.getElementById('ps-stage-chars');
   const _psWinOverlay   = document.getElementById('ps-win-overlay');
   const _psWinTitle     = document.getElementById('ps-win-title');
   const _psWinSub       = document.getElementById('ps-win-sub');
@@ -3774,9 +3769,11 @@ async function initCore(runtimeContext) {
     return bestAngle;
   };
 
-  const _psBuildStage = (stage, count = _psEnemyCount(stage)) => {
-    const pathLen = 80 + stage * 3;
-    const pathAngle = _psPickPathAngle(pathLen);
+  const _psPathLength = (stage) => 80 + stage * 3;
+  // pathAngle: the direction the village's arrow pointed (else the flattest one from here)
+  const _psBuildStage = (stage, count = _psEnemyCount(stage), pathAngle = null) => {
+    const pathLen = _psPathLength(stage);
+    if (!Number.isFinite(pathAngle)) pathAngle = _psPickPathAngle(pathLen);
     const _psPathEndX = playerModel.position.x + Math.cos(pathAngle) * pathLen;
     const _psPathEndZ = playerModel.position.z + Math.sin(pathAngle) * pathLen;
     _psPathEnd.set(
@@ -3862,124 +3859,45 @@ async function initCore(runtimeContext) {
     }, 2800);
   };
 
-  const _psShowStageOverlay = (stage, onOk) => {
+  // Sword Showdown between stages: the village (src/village/villageMode.js) — shop, character
+  // pick, sword calibration, time of day, and the arrow that starts the stage. Created once
+  // the shop (appState) exists; see villageCtx.
+  let village = null;
+  const _psClearDeadEnemies = () => {
+    for (let _di = hordeEnemies.length - 1; _di >= 0; _di--) {
+      const _de = hordeEnemies[_di];
+      if (_de.isDead) {
+        if (_de.group?.parent) _de.group.parent.remove(_de.group);
+        try { _de.destroy?.(); } catch (_) {}
+        hordeEnemies.splice(_di, 1);
+      }
+    }
+  };
+  // Lighting preview for the next stage's time of day (random shows day)
+  const _psPreviewTime = () => {
+    const mode = _psTimePref === 'night' ? 'night' : 'day';
+    lastAutoMode = mode;
+    applyPresetForMode(mode);
+    applyDisplaySettings();
+  };
+  let _psVillageStart = null; // onOk of the open village
+  const _psShowVillage = (stage, onOk) => {
     const count = _psEnemyCount(stage);
     _psUpdateKillHud(false);
-    _psStageBadge.textContent = stage <= 50 ? `STAGE ${stage}` : 'FINAL STAGE';
-    _psStageEnemies.textContent = `Defeat ${count} enemies`;
-    // Final enemy (picked here so the screen can name it; kept through retries of this stage)
+    _psClearDeadEnemies();
+    // Final enemy (picked here so the banner can name it; kept through retries of this stage)
     if (!_psStageBoss) _psStageBoss = _psPickBoss();
     const _boss = MATCH_CHARACTERS[_psStageBoss.key];
-    if (_psStageBossEl) {
-      _psStageBossEl.textContent = `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
-        + (_psStageBoss.unlocks ? ' — beat it to unlock!' : '');
-    }
-    // Character chooser: one compact card, swipe (or ‹ › / arrow keys) through the roster;
-    // landing on an unlocked character selects it, locked ones just show a lock
-    const _applySelected = () => setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected].url);
-    if (_psStageCharsEl) {
-      const keys = Object.keys(MATCH_CHARACTERS);
-      let idx = Math.max(0, keys.indexOf(_psChars.selected));
-      _psStageCharsEl.replaceChildren();
-      _psStageCharsEl.tabIndex = 0;
-      const mk = (tag, cls, text = '') => {
-        const el = document.createElement(tag);
-        el.className = cls;
-        el.textContent = text;
-        return el;
-      };
-      const prev = mk('button', 'ps-stage-char-nav', '‹');
-      const next = mk('button', 'ps-stage-char-nav', '›');
-      prev.setAttribute('aria-label', 'Previous character');
-      next.setAttribute('aria-label', 'Next character');
-      const card = mk('div', 'ps-stage-char-card');
-      const emoji = mk('div', 'ps-stage-char-emoji');
-      const name = mk('div', 'ps-stage-char-name');
-      const dots = mk('div', 'ps-stage-char-dots');
-      card.append(emoji, name, dots);
-      _psStageCharsEl.append(prev, card, next);
-      const render = (dir = 0) => {
-        const key = keys[idx];
-        const c = MATCH_CHARACTERS[key];
-        const unlocked = _psChars.unlocked.includes(key);
-        emoji.textContent = unlocked ? c.emoji : '🔒';
-        name.textContent = unlocked ? c.label : `${c.label} — locked`;
-        card.classList.toggle('locked', !unlocked);
-        dots.replaceChildren(...keys.map((k, i) => {
-          const d = mk('span', 'ps-stage-char-dot');
-          d.classList.toggle('active', i === idx);
-          d.classList.toggle('locked', !_psChars.unlocked.includes(k));
-          return d;
-        }));
-        if (dir) {
-          card.classList.remove('slide-left', 'slide-right');
-          void card.offsetWidth; // restart the slide-in animation
-          card.classList.add(dir > 0 ? 'slide-left' : 'slide-right');
-        }
-        if (unlocked && key !== _psChars.selected) {
-          _psChars.selected = key;
-          _psSaveChars();
-          _applySelected();
-        }
-      };
-      const step = (dir) => { idx = (idx + dir + keys.length) % keys.length; render(dir); };
-      prev.onclick = () => step(-1);
-      next.onclick = () => step(1);
-      _psStageCharsEl.onkeydown = (e) => {
-        if (e.key === 'ArrowLeft') { step(-1); e.preventDefault(); }
-        else if (e.key === 'ArrowRight') { step(1); e.preventDefault(); }
-      };
-      let swipeX = null;
-      card.onpointerdown = (e) => { swipeX = e.clientX; card.setPointerCapture?.(e.pointerId); };
-      card.onpointerup = (e) => {
-        if (swipeX === null) return;
-        const dx = e.clientX - swipeX;
-        swipeX = null;
-        if (Math.abs(dx) > 30) step(dx < 0 ? 1 : -1);
-      };
-      card.onpointercancel = () => { swipeX = null; };
-      render();
-    }
-    _applySelected();
-
-    // Wire up time-picker buttons
-    const _timeBtns = _psStageOverlay.querySelectorAll('.ps-stage-time-btn');
-    _timeBtns.forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.time === _psTimePref);
-      btn.onclick = () => {
-        _psTimePref = btn.dataset.time;
-        _timeBtns.forEach(b => b.classList.toggle('active', b === btn));
-      };
+    setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected].url);
+    _psPreviewTime();
+    _psVillageStart = (pathAngle) => onOk(count, { pathAngle, inPlace: true });
+    village?.enter({
+      stage,
+      count,
+      pathAngle: _psPickPathAngle(_psPathLength(stage)),
+      boss: `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
+        + (_psStageBoss.unlocks ? ' — beat it to unlock!' : ''),
     });
-
-    _psStageOkBtn.onclick = () => {
-      _psStageOverlay.classList.add('hidden');
-      onOk(count);
-    };
-    // Recalibrate button — snaps current gyro orientation as neutral
-    const _psRecalibBtn = document.getElementById('ps-stage-recalib');
-    if (_psRecalibBtn) {
-      _psRecalibBtn.onclick = () => {
-        window.phoneSwordRecalibrate?.();
-        _psRecalibBtn.textContent = '✅ Calibrated!';
-        setTimeout(() => { _psRecalibBtn.textContent = '🎯 Recalibrate Sword'; }, 1500);
-      };
-    }
-
-    // Shop button — opens merchant panel if available
-    let _psShopBtn = document.getElementById('ps-stage-shop-btn');
-    if (!_psShopBtn) {
-      _psShopBtn = document.createElement('button');
-      _psShopBtn.id = 'ps-stage-shop-btn';
-      _psShopBtn.className = 'ps-stage-shop-btn';
-      _psShopBtn.textContent = '🛒 Shop';
-      _psStageOkBtn.parentNode?.insertBefore(_psShopBtn, _psStageOkBtn);
-    }
-    _psShopBtn.onclick = async () => {
-      const mod = await import('../controls/merchantPanel.js').catch(() => null);
-      mod?.openMerchantPanel?.('buy');
-    };
-    _psStageOverlay.classList.remove('hidden');
   };
 
   // ── Classic mode: stage screen (banner over the world) and "Ready" / "Go!" ──
@@ -4045,9 +3963,11 @@ async function initCore(runtimeContext) {
   // Stage screen for the current mode
   const _psShowStageScreen = (stage, onOk) => (_classicMode
     ? _classicShowStageOverlay(stage, onOk)
-    : _psShowStageOverlay(stage, onOk));
+    : _psShowVillage(stage, onOk));
 
-  const _psStartStage = (stage, count) => {
+  // inPlace: start where the player stands (the village) instead of a random spot nearby;
+  // pathAngle: the stage's direction (the village arrow)
+  const _psStartStage = (stage, count, { pathAngle = null, inPlace = false } = {}) => {
     // Never begin a stage dead (e.g. health 0 left over from a previous game)
     if (playerDead || statsState.health <= 0) {
       hideGameOver();
@@ -4076,32 +3996,27 @@ async function initCore(runtimeContext) {
     _psStopSong();
     _psPlayNextSong(_psCurrentIsNight);
 
-    // Respawn player at a random location
-    const spawnAngle = Math.random() * Math.PI * 2;
-    const spawnDist  = 5 + Math.random() * 10;
-    const spawnX = playerModel.position.x + Math.cos(spawnAngle) * spawnDist;
-    const spawnZ = playerModel.position.z + Math.sin(spawnAngle) * spawnDist;
-    const spawnY = playerModel.position.y;
-    playerModel.position.set(spawnX, spawnY, spawnZ);
-    playerControls.playerX = spawnX;
-    playerControls.playerY = spawnY;
-    playerControls.playerZ = spawnZ;
-    playerControls.lastPosition?.set(spawnX, spawnY, spawnZ);
-    if (playerControls.body) {
-      playerControls.body.setTranslation({ x: spawnX, y: spawnY + 0.6, z: spawnZ }, true);
-      playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    }
-    // Clear any dead enemies left over from the previous stage
-    for (let _di = hordeEnemies.length - 1; _di >= 0; _di--) {
-      const _de = hordeEnemies[_di];
-      if (_de.isDead) {
-        if (_de.group?.parent) _de.group.parent.remove(_de.group);
-        try { _de.destroy?.(); } catch (_) {}
-        hordeEnemies.splice(_di, 1);
+    // Respawn player at a random location (not from the village: the stage starts right there)
+    if (!inPlace) {
+      const spawnAngle = Math.random() * Math.PI * 2;
+      const spawnDist  = 5 + Math.random() * 10;
+      const spawnX = playerModel.position.x + Math.cos(spawnAngle) * spawnDist;
+      const spawnZ = playerModel.position.z + Math.sin(spawnAngle) * spawnDist;
+      const spawnY = playerModel.position.y;
+      playerModel.position.set(spawnX, spawnY, spawnZ);
+      playerControls.playerX = spawnX;
+      playerControls.playerY = spawnY;
+      playerControls.playerZ = spawnZ;
+      playerControls.lastPosition?.set(spawnX, spawnY, spawnZ);
+      if (playerControls.body) {
+        playerControls.body.setTranslation({ x: spawnX, y: spawnY + 0.6, z: spawnZ }, true);
+        playerControls.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       }
     }
+    // Clear any dead enemies left over from the previous stage
+    _psClearDeadEnemies();
 
-    _psBuildStage(stage, count);
+    _psBuildStage(stage, count, pathAngle);
   };
 
   // Restart the current stage after death (clears enemies, rebuilds, shows overlay)
@@ -4121,7 +4036,7 @@ async function initCore(runtimeContext) {
     _psAutoWalking = false;
     _psStageActive = false;
     _psWinShown = false;
-    _psShowStageScreen(_psStage, (count) => _psStartStage(_psStage, count));
+    _psShowStageScreen(_psStage, (count, opts) => _psStartStage(_psStage, count, opts));
   };
 
   window.hordeEnemies = hordeEnemies;
@@ -4160,7 +4075,7 @@ async function initCore(runtimeContext) {
         try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, _psStage); } catch (_) {}
       } catch (_) { /* keep localStorage value */ }
     }
-    _psShowStageOverlay(_psStage, (count) => _psStartStage(_psStage, count));
+    _psShowVillage(_psStage, (count, opts) => _psStartStage(_psStage, count, opts));
   };
 
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
@@ -4914,6 +4829,7 @@ async function initCore(runtimeContext) {
     },
     // Sword Showdown shop upgrades that are capped: true once the player can't buy more
     isShopItemMaxed: (itemId) => {
+      if (itemId === 'life_potion') return statsState.health >= statsState.maxHealthSegments;
       if (itemId === 'heart_upgrade') return statsState.maxHealthSegments >= SHOWDOWN_MAX_HEALTH_SEGMENTS;
       if (itemId === 'shield_upgrade') return (statsState.shieldUpgrades || 0) >= SHOWDOWN_MAX_SHIELD_UPGRADES;
       return false;
@@ -4944,6 +4860,8 @@ async function initCore(runtimeContext) {
       } else if (itemId === 'showdown_bomb') {
         setStat('bombs', getPlayerBombCount() + 1, { skipSave: true });
         updatePsBombButton();
+      } else if (itemId === 'life_potion') {
+        setStat('health', statsState.maxHealthSegments, { skipSave: true });
       } else {
         return false;
       }
@@ -5023,6 +4941,120 @@ async function initCore(runtimeContext) {
   await initMerchantPanelFeature({ appState });
   // Single-player shop (Showdown has no peer multiplayer): this client keeps the stock
   void initMerchantFeature({ appState, isHost: true });
+
+  // ── Village (between Showdown stages): shop on the market stall, mystery chest ──
+  const TREASURE_CHEST_PRICE = 50;
+  const VILLAGE_ITEM_TEXT = {
+    life_potion: { name: 'Life Potion', desc: 'Fills your health to full' },
+    mana_potion: { name: 'Mana Potion', desc: 'Restores magic — coming soon' },
+    shield: { desc: 'Blocks hits from in front until it breaks' },
+    pistol: { desc: 'Shoot enemies from afar (needs bullets)' },
+    'gun bullets': { desc: 'One bullet for the gun' },
+    treasure_chest: { name: 'Mystery Chest', desc: 'A random prize — coins, bombs, a shield, maybe even a gun!' },
+  };
+  let _villageMerchant = null;
+  const _villageOwned = (itemId) => {
+    switch (itemId) {
+      case 'life_potion': return `Health ${statsState.health} / ${statsState.maxHealthSegments}`;
+      case 'showdown_bomb': return `You have ${getPlayerBombCount()}`;
+      case 'bubble': return `You have ${getBubbleCount()}`;
+      case SHIELD_ITEM_ID: return `You have ${inventoryState[SHIELD_ITEM_ID]?.count || 0}`;
+      case 'pistol': return (inventoryState.pistol?.count || 0) > 0 ? 'You have one' : '';
+      case PISTOL_AMMO_KEY: return `You have ${getPistolAmmoCount()}`;
+      case 'heart_upgrade': return `Max health ${statsState.maxHealthSegments} / ${SHOWDOWN_MAX_HEALTH_SEGMENTS}`;
+      case 'shield_upgrade': return `Upgrades ${statsState.shieldUpgrades || 0} / ${SHOWDOWN_MAX_SHIELD_UPGRADES}`;
+      default: return '';
+    }
+  };
+  const _villageSaved = () => {
+    void saveStatsImmediate(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
+    playerControls?.refreshActionButtons?.();
+    updatePsBombButton();
+    updatePsBubbleButton();
+  };
+  // Mystery chest: pay, then one weighted random prize (things that can't be used are left out)
+  const _openTreasureChest = () => {
+    if (appState.getCoins() < TREASURE_CHEST_PRICE) return { ok: false };
+    const hasGun = (inventoryState.pistol?.count || 0) > 0;
+    const prizes = [
+      { w: 24, emoji: '🪙', give: () => { const n = 20 + 10 * Math.floor(Math.random() * 9); appState.addCoins(n); return `${n} coins`; } },
+      { w: 18, emoji: '💣', give: () => { setStat('bombs', getPlayerBombCount() + 3, { skipSave: true }); return '3 bombs'; } },
+      { w: 14, emoji: '🫧', give: () => { setStat('bubbles', getBubbleCount() + 2, { skipSave: true }); return '2 bubbles'; } },
+      { w: 12, emoji: '🛡️', give: () => { addToInventory(SHIELD_ITEM_ID, 1); return 'a shield'; } },
+      { w: hasGun ? 12 : 0, emoji: '🔫', give: () => { addPistolAmmo(5); return '5 gun bullets'; } },
+      { w: hasGun ? 0 : 5, emoji: '🔫', give: () => { addToInventory('pistol', 1); seedPistolAmmoIfNeeded(); return 'a gun!'; } },
+      { w: appState.isShopItemMaxed('heart_upgrade') ? 0 : 4, emoji: '❤️', give: () => { appState.applyShopUpgrade('heart_upgrade'); return '+1 max health!'; } },
+      { w: appState.isShopItemMaxed('shield_upgrade') ? 0 : 5, emoji: '⬆️', give: () => { appState.applyShopUpgrade('shield_upgrade'); return 'a shield upgrade'; } },
+      { w: 3, emoji: '💰', give: () => { appState.addCoins(150); return 'the jackpot — 150 coins!'; } },
+    ].filter((p) => p.w > 0);
+    appState.addCoins(-TREASURE_CHEST_PRICE);
+    let r = Math.random() * prizes.reduce((sum, p) => sum + p.w, 0);
+    const prize = prizes.find((p) => (r -= p.w) < 0) || prizes[0];
+    const text = prize.give();
+    _villageSaved();
+    showPickupToast('coins', 1, '', { text: `🎁 Mystery Chest: ${text}` });
+    return { ok: true, emoji: prize.emoji, text };
+  };
+  const villageShop = {
+    load: async () => { _villageMerchant ??= await import('../characters/merchant.js'); },
+    getItemState: (itemId) => {
+      const extra = VILLAGE_ITEM_TEXT[itemId] || {};
+      if (itemId === 'mana_potion') return { ...extra, price: 0, owned: '', status: 'soon' };
+      if (itemId === 'treasure_chest') return { ...extra, price: TREASURE_CHEST_PRICE, owned: '', status: 'ok' };
+      const meta = _villageMerchant?.getMerchantItemMeta(itemId);
+      const stock = _villageMerchant?.getMerchantInventory()[itemId]?.count ?? 0;
+      let status = 'ok';
+      if (!meta) status = 'soon';
+      else if (appState.isShopItemMaxed(itemId)) status = 'max';
+      else if (!meta.unlimited && stock <= 0) status = 'soldout';
+      return {
+        name: extra.name || meta?.name || itemId,
+        desc: meta?.description || extra.desc || '',
+        price: meta?.price ?? 0,
+        owned: _villageOwned(itemId),
+        status,
+        note: itemId === 'life_potion' ? 'Health is full' : 'MAX',
+      };
+    },
+    buy: async (itemId) => {
+      if (itemId === 'treasure_chest') return _openTreasureChest();
+      await villageShop.load();
+      const meta = _villageMerchant.getMerchantItemMeta(itemId);
+      if (!await _villageMerchant.buyMerchantItem(itemId)) return { ok: false };
+      _villageSaved();
+      showPickupToast(itemId, 1, '', { text: `Purchased ${meta.name} -${meta.price} coins`, icon: meta.icon });
+      return { ok: true };
+    },
+  };
+  village = createVillage({
+    scene,
+    camera,
+    domElement: renderer.domElement,
+    getTerrainHeight,
+    getPlayer: () => ({ model: playerModel, controls: playerControls }),
+    getCoins: () => appState.getCoins(),
+    shop: villageShop,
+    characters: {
+      roster: MATCH_CHARACTERS,
+      get: () => _psChars,
+      select: (key) => {
+        if (!_psChars.unlocked.includes(key) || !MATCH_CHARACTERS[key]) return;
+        _psChars = { ..._psChars, selected: key };
+        _psSaveChars();
+        setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[key].url);
+      },
+    },
+    time: {
+      get: () => _psTimePref,
+      set: (pref) => { _psTimePref = pref; _psPreviewTime(); },
+    },
+    recalibrate: () => window.phoneSwordRecalibrate?.(),
+    onStart: (pathAngle) => _psVillageStart?.(pathAngle),
+    onLobby: () => {
+      _resetForMenu();
+      arcadeOverlay.showStartScreen();
+    },
+  });
 
   settingsBtn.addEventListener('click', () => {
     openSettings();
@@ -5475,7 +5507,7 @@ async function initCore(runtimeContext) {
   // Clear the field (enemies, bombs, stage) and put the player back on their feet
   const _resetForMenu = () => {
     _psStopSong();
-    _psStageOverlay.classList.add('hidden');
+    village?.exit();
     _classicStageOverlay?.classList.add('hidden');
     _classicClearCallout();
     _classicCountdown = false;
@@ -5503,12 +5535,6 @@ async function initCore(runtimeContext) {
     // Tutorial / Multiplayer play as the frog man; Showdown applies its pick on the stage screen
     setPlayerCharacterUrl(playerModel, glbCharacterConfig.frogManUrl);
   };
-
-  // "Back" on the stage screen: leave Showdown for the start screen (Tutorial / Showdown / Multiplayer)
-  document.getElementById('ps-stage-back')?.addEventListener('click', () => {
-    _resetForMenu();
-    arcadeOverlay.showStartScreen();
-  });
 
   // Classic mode on/off: HUD classes, no blood, Classic combo pop-ups, CLASSIC_HEARTS max health
   const _setClassicMode = (on) => {
@@ -6549,11 +6575,11 @@ async function initCore(runtimeContext) {
           if (_nextStage <= 50) {
             _psStage = _nextStage;
             _saveStage(_psStage);
-            _psShowStageScreen(_nextStage, (count) => _psStartStage(_nextStage, count));
+            _psShowStageScreen(_nextStage, (count, opts) => _psStartStage(_nextStage, count, opts));
           } else {
             _psStage = 1;
             _saveStage(_psStage);
-            _psShowStageScreen(1, (count) => _psStartStage(1, count));
+            _psShowStageScreen(1, (count, opts) => _psStartStage(1, count, opts));
           }
         });
       }
@@ -7116,6 +7142,8 @@ async function initCore(runtimeContext) {
       hordeEnemies,
       pvpTargets: matchMode?.getShotTargets() ?? null
     });
+    // Village (between Showdown stages): walks the player around and has the last word on the camera
+    village?.update(frameDelta);
     // Shadows: the sun's shadow box follows the player (snapped to whole shadow-map texels so
     // the shadow edges don't shimmer as they move)
     if (dirLight?.castShadow && playerModel) {
