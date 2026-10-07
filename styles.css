@@ -381,6 +381,8 @@ textarea {
 .phone-sword-calib-modal {
   background: var(--scrim);
 }
+/* The calibrate popup (after connecting / before each Showdown stage): no backdrop */
+#phone-sword-connect-calib { background: none; }
 
 /* ── Touch controls ──────────────────────────────────────────────────────────── */
 

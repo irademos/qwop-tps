@@ -1260,6 +1260,10 @@ export function createVillage(ctx) {
       return true;
     });
 
+    // Walking in: the player controls' camera follows the player; on arrival it eases out to
+    // the village view from wherever it is (camInit picks the pose up then)
+    if (approaching) return;
+
     // Camera
     computeWantedCamera();
     if (!camInit) {
