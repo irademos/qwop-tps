@@ -243,7 +243,96 @@ export function createMatchMode(ctx) {
     return btn;
   };
 
+  // Free For All / Guns & Bombs fighter chooser: one card, swipe (or ‹ › / arrow keys)
+  // through the roster — same as the Showdown character chooser; characters not yet
+  // unlocked in Showdown are locked. Built once so the
+  // slide-in animation and keyboard focus survive renderPicks rebuilding the panel.
+  const charChooser = (() => {
+    const root = el('div', 'match-char-chooser');
+    root.tabIndex = 0;
+    const prev = el('button', 'ui-btn-secondary match-char-nav', '‹');
+    const next = el('button', 'ui-btn-secondary match-char-nav', '›');
+    prev.type = 'button';
+    next.type = 'button';
+    prev.setAttribute('aria-label', 'Previous character');
+    next.setAttribute('aria-label', 'Next character');
+    const card = el('div', 'match-char-card');
+    const emoji = el('div', 'match-char-emoji');
+    const name = el('div', 'match-char-name');
+    const dots = el('div', 'match-char-dots');
+    card.append(emoji, name, dots);
+    root.append(prev, card, next);
+    // Characters still locked in Showdown show a lock and can't be picked (Team Battle
+    // isn't affected — it doesn't use this chooser)
+    const isUnlocked = (k) => (ctx.getUnlockedCharacters?.() ?? CHAR_KEYS).includes(k);
+    let current = CHAR_KEYS[0];   // the card being shown (may be locked)
+    let picked = null;            // the pick it was last synced to
+    let isDisabled = false;
+    let slideDir = 0;
+    const draw = () => {
+      const c = MATCH_CHARACTERS[current];
+      const unlocked = isUnlocked(current);
+      emoji.textContent = unlocked ? c.emoji : '🔒';
+      name.textContent = unlocked ? c.label : `${c.label} — locked`;
+      card.classList.toggle('locked', !unlocked);
+      card.title = unlocked ? '' : 'Unlock this character in Showdown';
+      prev.disabled = isDisabled;
+      next.disabled = isDisabled;
+      root.classList.toggle('is-disabled', isDisabled);
+      dots.replaceChildren(...CHAR_KEYS.map((k) => {
+        const d = el('span', 'match-char-dot');
+        d.classList.toggle('active', k === current);
+        d.classList.toggle('locked', !isUnlocked(k));
+        return d;
+      }));
+      if (slideDir) {
+        card.classList.remove('slide-left', 'slide-right');
+        void card.offsetWidth; // restart the slide-in animation
+        card.classList.add(slideDir > 0 ? 'slide-left' : 'slide-right');
+        slideDir = 0;
+      }
+    };
+    const render = (pickKey, disabled) => {
+      isDisabled = disabled;
+      // Follow the pick when it changes (new party); otherwise keep showing a locked card
+      if (pickKey !== picked) {
+        picked = pickKey;
+        current = CHAR_KEYS.includes(pickKey) ? pickKey : CHAR_KEYS[0];
+      }
+      draw();
+    };
+    const step = (dir) => {
+      if (isDisabled) return;
+      const i = CHAR_KEYS.indexOf(current);
+      current = CHAR_KEYS[(i + dir + CHAR_KEYS.length) % CHAR_KEYS.length];
+      slideDir = dir;
+      if (isUnlocked(current) && current !== picked) {
+        picked = current;
+        setMyPick({ char: current });
+      } else {
+        draw();
+      }
+    };
+    prev.addEventListener('click', () => step(-1));
+    next.addEventListener('click', () => step(1));
+    root.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') { step(-1); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { step(1); e.preventDefault(); }
+    });
+    let swipeX = null;
+    card.addEventListener('pointerdown', (e) => { swipeX = e.clientX; card.setPointerCapture?.(e.pointerId); });
+    card.addEventListener('pointerup', (e) => {
+      if (swipeX === null) return;
+      const dx = e.clientX - swipeX;
+      swipeX = null;
+      if (Math.abs(dx) > 30) step(dx < 0 ? 1 : -1);
+    });
+    card.addEventListener('pointercancel', () => { swipeX = null; });
+    return { root, render };
+  })();
+
   const renderPicks = () => {
+    const chooserFocus = charChooser.root.contains(document.activeElement) ? document.activeElement : null;
     picks.innerHTML = '';
     if (!party) return;
     const roster = partyRoster();
@@ -276,16 +365,10 @@ export function createMatchMode(ctx) {
       });
     } else {
       const row = el('div', 'match-char-row');
-      row.append(el('div', 'match-section-title', 'Pick your fighter'));
-      CHAR_KEYS.forEach((key) => {
-        const c = MATCH_CHARACTERS[key];
-        const btn = pickButton(`${c.emoji} ${c.label}`, party.myPick.char === key, () => {
-          if (!locked) setMyPick({ char: key });
-        });
-        btn.disabled = locked;
-        row.append(btn);
-      });
+      row.append(el('div', 'match-section-title', 'Pick your fighter'), charChooser.root);
+      charChooser.render(cleanPick(party.myPick).char, locked);
       picks.append(row);
+      chooserFocus?.focus?.({ preventScroll: true });
     }
   };
 
