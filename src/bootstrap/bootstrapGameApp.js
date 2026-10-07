@@ -849,6 +849,23 @@ async function initCore(runtimeContext) {
     el._bfTimer = setTimeout(() => { el.style.display = 'none'; }, dur + 40);
   };
 
+  // Puts `weapon`'s hold pose (offset + rotation on the hand) from phoneSwordWeaponCfg
+  // (`kind` 'shield' | 'gun'); the constructor's pose is only a fallback
+  const _WEAPON_HOLD_FALLBACK = {
+    shield: { PosX: -0.18, PosY: 0.2, PosZ: 0.2, RotX: 90, RotY: 0, RotZ: 0 },
+    gun: { PosX: 0, PosY: 0, PosZ: 0, RotX: 0, RotY: 180, RotZ: 0 },
+  };
+  const _weaponHoldEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+  function _applyWeaponHoldCfg(weapon, kind) {
+    const cfg = window.phoneSwordWeaponCfg;
+    if (!weapon || !cfg) return;
+    const fb = _WEAPON_HOLD_FALLBACK[kind];
+    const v = (key) => cfg[kind + key] ?? fb[key];
+    const DEG = Math.PI / 180;
+    weapon._holdOffset.set(v('PosX'), v('PosY'), v('PosZ'));
+    weapon._holdQuaternion.setFromEuler(_weaponHoldEuler.set(v('RotX') * DEG, v('RotY') * DEG, v('RotZ') * DEG, 'YXZ'));
+  }
+
   // Default weapon position/rotation config — overridden live by the debug panel
   window.phoneSwordWeaponCfg = window.phoneSwordWeaponCfg || {
     // Shield: holdOffset (meters) and holdRotation (degrees) relative to hand
@@ -2672,6 +2689,8 @@ async function initCore(runtimeContext) {
       pistol.localHoldOrigin = 'inventory';
       pistol.holder = playerControls;
       setPlayerWeaponType(playerControls, pistol.type);
+      // Aiming a gun: switch to the first-person camera
+      if (!playerControls.cameraConfig?.firstPerson) playerControls.setCameraConfig?.({ firstPerson: true });
       // Pistol: fixed depth regardless of hand size
       if (playerControls.playerModel) {
         playerControls.playerModel.userData.handDepthOverride = { left: 0.3 };
@@ -5912,11 +5931,13 @@ async function initCore(runtimeContext) {
         });
         return mesh;
       };
-      const gearOf = (weapon) => {
+      const gearOf = (weapon, kind) => {
+        // The pose the player holds it in (a weapon not in hand still has its constructor's)
+        _applyWeaponHoldCfg(weapon, kind);
         const { offset, quaternion } = weapon.getHoldPose();
         return { createMesh: cloneOf(weapon), offset, quaternion, grip: weapon.getGripTarget(new THREE.Vector3()) };
       };
-      return { gun: gearOf(pistol), shield: gearOf(shield) };
+      return { gun: gearOf(pistol, 'gun'), shield: gearOf(shield, 'shield') };
     },
     // A bullet fired by another fighter (or a host bot) — damage is decided by matchMode
     spawnShot: (origin, dir, shooterId) => spawnPistolBullet(origin, dir, shooterId),
@@ -6498,36 +6519,8 @@ async function initCore(runtimeContext) {
       bladePoints: playerDead ? null : _frameBladePoints,
     }));
     // Phone Sword: apply fixed position/rotation config to shield and pistol
-    const _wCfg = window.phoneSwordWeaponCfg;
-    const _DEG = Math.PI / 180;
-    if (_wCfg) {
-      if (shield?.holder === playerControls) {
-        shield._holdOffset.set(
-          _wCfg.shieldPosX ?? -0.18,
-          _wCfg.shieldPosY ?? 0.2,
-          _wCfg.shieldPosZ ?? 0.2
-        );
-        shield._holdQuaternion.setFromEuler(new THREE.Euler(
-          (_wCfg.shieldRotX ?? 90) * _DEG,
-          (_wCfg.shieldRotY ?? 0) * _DEG,
-          (_wCfg.shieldRotZ ?? 0) * _DEG,
-          'YXZ'
-        ));
-      }
-      if (pistol?.holder === playerControls) {
-        pistol._holdOffset.set(
-          _wCfg.gunPosX ?? 0.0,
-          _wCfg.gunPosY ?? 0.0,
-          _wCfg.gunPosZ ?? 0.0
-        );
-        pistol._holdQuaternion.setFromEuler(new THREE.Euler(
-          (_wCfg.gunRotX ?? 0) * _DEG,
-          (_wCfg.gunRotY ?? 180) * _DEG,
-          (_wCfg.gunRotZ ?? 0) * _DEG,
-          'YXZ'
-        ));
-      }
-    }
+    if (shield?.holder === playerControls) _applyWeaponHoldCfg(shield, 'shield');
+    if (pistol?.holder === playerControls) _applyWeaponHoldCfg(pistol, 'gun');
     // Gun / shield: the phone gyro turns and pitches the aim
     _updateWeaponGyroAim(frameDelta);
     pistol?.update();
