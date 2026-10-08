@@ -98,6 +98,8 @@ export function spawnProjectile(scene, projectiles, position, direction, shooter
   mesh.userData.spawnPosition = spawnPosition.clone();
   mesh.userData.shooterId = shooterId;
   mesh.userData.damage = Number.isFinite(options.damage) ? options.damage : 1;
+  // Enemy shot (the Showdown final boss's gun): hits only the local player (updateProjectiles' localTarget)
+  mesh.userData.hostile = !!options.hostile;
   scene.add(mesh);
   projectiles.push(mesh);
 }
@@ -107,7 +109,8 @@ export function updateProjectiles({
   otherPlayers,
   multiplayer,
   hordeEnemies,
-  pvpTargets = null
+  pvpTargets = null,
+  localTarget = null   // { position, onHit(dir, from) } — what hostile shots can hit
 }) {
   const localId = multiplayer?.getId?.() ?? 'local'; // 'local' = single player (see PlayerControls)
   const getStrengthDamage = baseDamage => {
@@ -174,6 +177,21 @@ export function updateProjectiles({
       if (proj.parent) spawnBulletImpact(proj.parent, _wallPoint, _wallNormal);
       removeProjectile(i);
     };
+
+    // Hostile shots (the Showdown final boss): only the local player, then the map
+    if (proj.userData.hostile) {
+      if (localTarget && leftShooter) {
+        _pvpProbe.group.position = localTarget.position;
+        if (sweptHitsEnemy(prevPos, segEnd, _pvpProbe)) {
+          localTarget.onHit(vel.clone().setY(0).normalize(), proj.userData.spawnPosition);
+          removeProjectile(i);
+          continue;
+        }
+      }
+      if (wallHit) stopAtWall();
+      else (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
+      continue;
+    }
 
     // Multiplayer Guns & Bombs: every fighter ({id, position, onHit}) — the battle code
     // decides who deals the damage (src/multiplayer/matchMode.js)

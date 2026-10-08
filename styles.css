@@ -2371,6 +2371,25 @@ body.settings-open #inventory-button {
   line-height: 1.4;
   color: var(--text-muted);
 }
+/* The villager's conversation (villageMode.js dialogueNodes) */
+.village-panel-text:has(.village-line) {
+  max-height: min(38vh, 260px);
+  overflow-y: auto;
+  text-align: left;
+}
+.village-line { margin-top: 6px; color: var(--text); }
+.village-line:first-child { margin-top: 2px; }
+.village-line-who {
+  font-weight: 800;
+  color: var(--accent-hi);
+}
+.village-line-you { color: var(--text-muted); }
+.village-line-you .village-line-who { color: var(--info); }
+.village-line-action {
+  font-style: italic;
+  color: var(--text-dim);
+  text-align: center;
+}
 .village-panel-actions {
   display: flex;
   justify-content: center;
@@ -2558,6 +2577,71 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
     padding: 6px 12px;
     font-size: 14px;
   }
+}
+
+/* ── Sword Showdown: final boss health bar (src/characters/pembertonBoss.js) ──── */
+.boss-health {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  width: min(620px, calc(100vw - 150px));
+  pointer-events: none;
+  text-align: center;
+  transition: opacity 0.6s var(--ease);
+}
+.boss-health.hidden { display: none; }
+.boss-health.boss-health-out { opacity: 0; transition-delay: 1.4s; }
+.boss-health-name {
+  font: 800 17px/1.2 var(--font-display);
+  letter-spacing: 0.06em;
+  color: #fecaca;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7), 0 0 14px rgba(239, 68, 68, 0.55);
+  margin-bottom: 5px;
+}
+.boss-health-track {
+  position: relative;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-hud);
+  border: 1px solid rgba(248, 113, 113, 0.55);
+  box-shadow: var(--shadow-sm), 0 0 16px rgba(239, 68, 68, 0.35);
+  overflow: hidden;
+}
+.boss-health-fill,
+.boss-health-lag {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
+  border-radius: inherit;
+}
+.boss-health-fill {
+  background: linear-gradient(180deg, #f87171 0%, var(--danger-strong) 55%, #b91c1c 100%);
+  transition: width 0.18s var(--ease);
+}
+/* (trails the fill so a hit shows how much it took) */
+.boss-health-lag {
+  background: rgba(254, 202, 202, 0.75);
+  transition: width 0.7s 0.35s var(--ease);
+}
+.boss-health-low .boss-health-fill { animation: boss-health-pulse 0.8s ease-in-out infinite alternate; }
+@keyframes boss-health-pulse {
+  from { filter: brightness(1); }
+  to   { filter: brightness(1.45); }
+}
+@media (max-width: 600px) {
+  .boss-health {
+    left: calc(14px + env(safe-area-inset-left, 0px));
+    transform: none;
+    width: calc(100vw - 92px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    top: calc(10px + env(safe-area-inset-top, 0px));
+  }
+  .boss-health-name { font-size: 15px; text-align: left; }
+  .boss-health-track { height: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boss-health-low .boss-health-fill { animation: none; }
 }
 
 /* ── Sword Showdown: combo meter (src/combat/comboMeter.js) ─────────────────── */

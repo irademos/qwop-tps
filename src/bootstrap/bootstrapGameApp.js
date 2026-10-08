@@ -46,7 +46,8 @@ import { createHeartBubbles } from '../combat/heartBubbles.js';
 import { createComboMeter } from '../combat/comboMeter.js';
 import { createDeathCarry } from '../combat/deathCarry.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
-import { createVillage } from '../village/villageMode.js';
+import { createVillage, PEMBERTON_STAGE } from '../village/villageMode.js';
+import { createPembertonBoss, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 
 import {
   clearStoredPin,
@@ -3321,11 +3322,84 @@ async function initCore(runtimeContext) {
         characterUrl: opts.characterUrl,
         swordDamage: opts.swordDamage,
         nameTag: opts.nameTag,
+        showHealthBar: !opts.pemberton, // (his is across the top of the screen)
       });
       enemy._camera = camera;
+      if (Number.isFinite(opts.yaw)) enemy.group.rotation.y = opts.yaw;
+      if (opts.pemberton) _psSpawnPemberton(enemy);
     }
     hordeEnemies.push(enemy);
     return enemy;
+  };
+
+  // ── Sword Showdown story: Pemberton, the final boss (PEMBERTON_STAGE) ──
+  // The villager who gave every quest, big and glowing red; sword, gun, shield and bombs
+  // (src/characters/pembertonBoss.js). His bullets / bombs hit only the player.
+  const PEMBERTON_BULLET_DAMAGE = 1;
+  const PEMBERTON_BOMB_DAMAGE = 2;
+  const PEMBERTON_BULLET_SPEED = 13;  // m/s — slow enough to see coming (the player's: 28)
+  const PEMBERTON_WALK_STOP_DIST = 3; // m — the final stage's auto-walk closes in this far
+  let _psPemberton = null;            // createPembertonBoss() while he's in the stage
+  const _psIsFinalStage = (stage) => !_classicMode && stage === PEMBERTON_STAGE;
+  // A boss bullet / bomb reached the player: bubble and a shield facing it stop it
+  const _pembertonHitPlayer = (dmg, src, dir, blastFalloff = null) => {
+    if (playerDead || window.isPlayerBubbleActive?.()) return;
+    if (src) {
+      _shieldHitFrom.position.set(src.x, playerModel.position.y, src.z);
+      if (window.tryBlockLocalPlayerHitWithShield?.({ attackerModel: _shieldHitFrom, damage: dmg })) {
+        duelCtx.onShieldHit();
+        return;
+      }
+    }
+    window.localHealth = Math.max(0, statsState.health - dmg);
+    if (blastFalloff !== null) {
+      _blastPlayer(dir, blastFalloff);
+    } else if (dir) {
+      _playerKnockback.vx = dir.x * 3;
+      _playerKnockback.vz = dir.z * 3;
+      _playerKnockback.endTime = Date.now() + 300;
+    }
+    audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'boss-hit-player', cooldownMs: 150 });
+  };
+  // What his bullets can hit (updateProjectiles' localTarget) and his bombs can blast
+  const _pembertonShotTarget = {
+    get position() { return playerModel.position; },
+    onHit: (dir, src) => _pembertonHitPlayer(PEMBERTON_BULLET_DAMAGE, src, dir),
+  };
+  const _pembertonBombTargets = [{
+    get group() { return playerModel; },
+    get isDead() { return playerDead; },
+    applyDamage: () => false,
+    applyBlastKnockback: ({ direction, falloff = 1 }) => {
+      const src = playerModel.position.clone().sub(direction);
+      _pembertonHitPlayer(PEMBERTON_BOMB_DAMAGE, src, direction, falloff);
+    },
+  }];
+  const _psSpawnPemberton = (enemy) => {
+    _psPemberton?.dispose();
+    const boss = createPembertonBoss({
+      enemy,
+      name: '🎩 Pemberton',
+      getTarget: () => (playerDead ? null : playerModel),
+      getWeaponGear: () => matchCtx.getWeaponGear(),
+      fireBullet: (origin, dir) => spawnProjectileWithPerfFlags(scene, projectiles, origin, dir, 'pemberton', {
+        geometry: new THREE.SphereGeometry(0.1, 8, 8),
+        colliderDesc: RAPIER.ColliderDesc.ball(0.1).setRestitution(0.3).setFriction(0.5),
+        color: new THREE.Color(0xff4422),
+        speed: PEMBERTON_BULLET_SPEED,
+        lifetime: 2500,
+        hostile: true,
+      }),
+      throwBomb: (origin, target) => playerBombs.throw(origin, target, { getBlastTargets: () => _pembertonBombTargets, keepHeld: true }),
+      onShieldBlock: () => duelCtx.onShieldHit(),
+    });
+    const baseDispose = boss.dispose;
+    boss.dispose = () => {
+      baseDispose();
+      if (_psPemberton === boss) _psPemberton = null;
+    };
+    _psPemberton = boss;
+    enemy.onAfterUpdate = () => boss.update();
   };
 
   // ── Phone Sword: stage progression system ─────────────────────────────────
@@ -3664,7 +3738,7 @@ async function initCore(runtimeContext) {
       document.body.appendChild(_psKillHud);
     }
     _psKillHud.textContent = `⚔️ ${Math.min(_psStageKills, _psStageTotal)} / ${_psStageTotal}`;
-    _psKillHud.classList.toggle('hidden', !visible || _classicMode);
+    _psKillHud.classList.toggle('hidden', !visible || _classicMode || _psIsFinalStage(_psStage));
     if (_classicMode) _classicUpdateScore();
   };
   const PS_SPEED = 1.1;        // auto-walk speed (m/s) — roughly 1/3 of normal walk speed
@@ -3815,7 +3889,8 @@ async function initCore(runtimeContext) {
   const PS_VILLAGE_EXIT_DIST = 25;
   // pathAngle: the direction the village's arrow pointed (else the flattest one from here);
   // lead: metres of empty path before the stage proper (PS_VILLAGE_EXIT_DIST from the village)
-  const _psBuildStage = (stage, count = _psEnemyCount(stage), pathAngle = null, lead = 0) => {
+  // bossSpot: { position, yaw } where Pemberton stood in the village (PEMBERTON_STAGE)
+  const _psBuildStage = (stage, count = _psEnemyCount(stage), pathAngle = null, lead = 0, bossSpot = null) => {
     const pathLen = _psPathLength(stage);
     if (!Number.isFinite(pathAngle)) pathAngle = _psPickPathAngle(lead + pathLen);
     const _psPathEndX = playerModel.position.x + Math.cos(pathAngle) * (lead + pathLen);
@@ -3832,7 +3907,26 @@ async function initCore(runtimeContext) {
     _psEnemyQueue = [];
     const _charPool = _psEnemyCharacterPool();
     if (!_classicMode && !_psStageBoss) _psStageBoss = _psPickBoss();
-    for (let i = 0; i < count; i++) {
+    // The final stage is Pemberton alone, right where he stood (no coins or heart bubbles)
+    const _final = _psIsFinalStage(stage);
+    if (_final) {
+      const _bp = bossSpot?.position?.clone()
+        ?? playerModel.position.clone().addScaledVector(_psAutoWalkDir, 6);
+      _bp.y = getTerrainHeight(_bp.x, _bp.z) ?? playerModel.position.y;
+      _psEnemyQueue.push({
+        pos: _bp,
+        yaw: bossSpot?.yaw,
+        hearts: PEMBERTON_HEARTS,
+        triggerDist: 0,
+        bombThrower: false,
+        characterUrl: MATCH_CHARACTERS.villager.url,
+        boss: true,
+        pemberton: true,
+        nameTag: null,
+      });
+      count = 1;
+    }
+    for (let i = 0; i < (_final ? 0 : count); i++) {
       // The last enemy is the stage boss: on the path itself (no scatter), so it comes last
       // (Classic has no bosses)
       const isBoss = !_classicMode && i === count - 1;
@@ -3857,7 +3951,7 @@ async function initCore(runtimeContext) {
       });
     }
     // Spawn coins along the path (none in Classic)
-    const coinCount = _classicMode ? 0 : 8 + Math.floor(stage * 0.3);
+    const coinCount = _classicMode || _final ? 0 : 8 + Math.floor(stage * 0.3);
     for (let ci = 0; ci < coinCount; ci++) {
       const ct = (ci + 0.5) / coinCount;
       const cx = _psStartX + _psAutoWalkDir.x * pathLen * ct + (Math.random() - 0.5) * 6;
@@ -3866,7 +3960,7 @@ async function initCore(runtimeContext) {
     }
     // Heart bubbles around halfway (between 35% and 70% of the path)
     heartBubbles.clear();
-    const heartCount = _classicMode ? 0 : _psHeartBubbleCount(stage);
+    const heartCount = _classicMode || _final ? 0 : _psHeartBubbleCount(stage);
     for (let hi = 0; hi < heartCount; hi++) {
       const ht = heartCount === 1 ? 0.5 : 0.35 + 0.35 * (hi / (heartCount - 1));
       const hx = _psStartX + _psAutoWalkDir.x * pathLen * ht + (Math.random() - 0.5) * 3;
@@ -3898,6 +3992,11 @@ async function initCore(runtimeContext) {
     _psWinSub.textContent = _unlocked
       ? `${_unlocked.emoji} ${_unlocked.label} unlocked!`
       : `Stage ${_psStage} Cleared!`;
+    // The story's end: Pemberton beaten (unlocks the villager)
+    if (!_classicMode && _psStageBoss?.pemberton) {
+      _psWinTitle.textContent = 'PEMBERTON DEFEATED!';
+      _psWinSub.textContent = `The debts are settled.${_unlocked ? ` ${_unlocked.emoji} ${_unlocked.label} unlocked!` : ''}`;
+    }
     // force animation restart
     _psWinTitle.style.animation = 'none';
     _psWinSub.style.animation = 'none';
@@ -3955,25 +4054,31 @@ async function initCore(runtimeContext) {
   };
   // approach: build it a little way ahead and walk the player there (after a stage win)
   const _psShowVillage = (stage, onOk, { approach = false } = {}) => {
-    const count = _psEnemyCount(stage);
+    const _final = _psIsFinalStage(stage);
+    const count = _final ? 1 : _psEnemyCount(stage);
     _psUpdateKillHud(false);
     const _center = approach ? _psVillageApproachSpot() : null;
     // (walking in: the fallen enemies stay until the player gets there)
     if (!_center) _psClearDeadEnemies();
     // Final enemy (picked here so the banner can name it; kept through retries of this stage)
-    if (!_psStageBoss) _psStageBoss = _psPickBoss();
+    // (the final stage's is Pemberton — the villager character, unlocked by beating him)
+    if (_final) _psStageBoss = { key: 'villager', unlocks: !_psChars.unlocked.includes('villager'), pemberton: true };
+    else if (!_psStageBoss || _psStageBoss.pemberton) _psStageBoss = _psPickBoss();
     const _boss = MATCH_CHARACTERS[_psStageBoss.key];
     setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected].url);
     _psPreviewTime();
-    _psVillageStart = (pathAngle) => onOk(count, { pathAngle, inPlace: true });
+    _psVillageStart = (pathAngle, extra = {}) => onOk(count, { pathAngle, inPlace: true, bossSpot: extra.bossSpot });
     village?.enter({
       stage,
       count,
       center: _center,
       onArrive: _center ? _psClearDeadEnemies : null,
       pathAngle: _psPickPathAngle(PS_VILLAGE_EXIT_DIST + _psPathLength(stage), _center ?? playerModel.position),
-      boss: `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
-        + (_psStageBoss.unlocks ? ' — beat it to unlock!' : ''),
+      boss: _final
+        ? `🎩 Pemberton (${PEMBERTON_HEARTS} ❤️)`
+        : `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
+          + (_psStageBoss.unlocks ? ' — beat it to unlock!' : ''),
+      finalBoss: _final,
     });
   };
 
@@ -4045,7 +4150,7 @@ async function initCore(runtimeContext) {
 
   // inPlace: start where the player stands (the village) instead of a random spot nearby;
   // pathAngle: the stage's direction (the village path, where the villager stands)
-  const _psStartStage = (stage, count, { pathAngle = null, inPlace = false } = {}) => {
+  const _psStartStage = (stage, count, { pathAngle = null, inPlace = false, bossSpot = null } = {}) => {
     // Never begin a stage dead (e.g. health 0 left over from a previous game)
     if (playerDead || statsState.health <= 0) {
       hideGameOver();
@@ -4092,7 +4197,8 @@ async function initCore(runtimeContext) {
     // Clear any dead enemies left over from the previous stage
     _psClearDeadEnemies();
 
-    _psBuildStage(stage, count, pathAngle, inPlace && !_classicMode ? PS_VILLAGE_EXIT_DIST : 0);
+    _psBuildStage(stage, count, pathAngle,
+      inPlace && !_classicMode && !_psIsFinalStage(stage) ? PS_VILLAGE_EXIT_DIST : 0, bossSpot);
   };
 
   // Restart the current stage after death (clears enemies, rebuilds, shows overlay)
@@ -5138,7 +5244,7 @@ async function initCore(runtimeContext) {
       set: (pref) => { _psTimePref = pref; _psPreviewTime(); },
     },
     confirmStart: (go) => _requireSwordCalibration(go),
-    onStart: (pathAngle) => _psVillageStart?.(pathAngle),
+    onStart: (pathAngle, extra) => _psVillageStart?.(pathAngle, extra),
     onLobby: () => {
       _resetForMenu();
       arcadeOverlay.showStartScreen();
@@ -6404,8 +6510,8 @@ async function initCore(runtimeContext) {
         // swing can land. The player can't hit while holding their own block button.
         if (!_blockingNow && !_blockToggleSettling) {
           const _enemyCenter = _he.group.position.clone();
-          _enemyCenter.y += 0.8;
-          const _reachesBody = _tipWorld.distanceTo(_enemyCenter) < 0.65;
+          _enemyCenter.y += _he.bodyHitCenterY ?? 0.8;
+          const _reachesBody = _tipWorld.distanceTo(_enemyCenter) < (_he.bodyHitRadius ?? 0.65);
           const _nowMsPS = Date.now();
           if (!_he._playerSwordLastHit) _he._playerSwordLastHit = 0;
           if ((_reachesBody || _swordCollision) && _nowMsPS - _he._playerSwordLastHit > 1000 && _psw.prevTipWorld) {
@@ -6573,7 +6679,10 @@ async function initCore(runtimeContext) {
             characterUrl: _qe.characterUrl,
             nameTag: _qe.nameTag,
             swordDamage: _classicMode ? CLASSIC_ENEMY_SWORD_DAMAGE : undefined,
-            swingChance: _qe.boss ? Math.min(0.75, _psSwingChance(_psStage) + PS_BOSS_SWING_BONUS) : undefined,
+            swingChance: _qe.pemberton ? PEMBERTON_SWING_CHANCE
+              : _qe.boss ? Math.min(0.75, _psSwingChance(_psStage) + PS_BOSS_SWING_BONUS) : undefined,
+            pemberton: _qe.pemberton,
+            yaw: _qe.yaw,
           });
           _psEnemyQueue.splice(_qi, 1);
         }
@@ -6590,10 +6699,22 @@ async function initCore(runtimeContext) {
         if (_psFindIncomingBomb()) {
           playerControls.isMoving = false;
         } else if (!_hasNearAttacker) {
-          const _ddx = _psPathEnd.x - playerModel.position.x;
-          const _ddz = _psPathEnd.z - playerModel.position.z;
+          // Final stage: walk toward Pemberton (he backs off to shoot) instead of a path end
+          const _bossPos = _psPemberton && !_psPemberton.enemy.isDead ? _psPemberton.enemy.group.position : null;
+          const _walkTo = _bossPos ?? _psPathEnd;
+          const _ddx = _walkTo.x - playerModel.position.x;
+          const _ddz = _walkTo.z - playerModel.position.z;
           const _distToEnd = Math.sqrt(_ddx * _ddx + _ddz * _ddz);
-          if (_distToEnd > 1.5) {
+          if (_bossPos) {
+            if (_distToEnd > PEMBERTON_WALK_STOP_DIST) {
+              _psAutoWalkDir.set(_ddx / _distToEnd, 0, _ddz / _distToEnd);
+              const _moveStep = PS_SPEED * frameDelta;
+              playerControls.queueAutoMove(_psAutoWalkDir.x * _moveStep, _psAutoWalkDir.z * _moveStep);
+              playerControls.isMoving = true;
+            } else {
+              playerControls.isMoving = false;
+            }
+          } else if (_distToEnd > 1.5) {
             // Recompute direction each frame so manual movement doesn't break the path
             _psAutoWalkDir.set(_ddx / _distToEnd, 0, _ddz / _distToEnd);
             const _moveStep = PS_SPEED * frameDelta;
@@ -6922,6 +7043,7 @@ async function initCore(runtimeContext) {
           } else {
             // Still call update so physics ragdoll position/rotation syncs to visual
             _he.update(frameDelta, null, null, false, false);
+            _he.onAfterUpdate?.(frameDelta);
           }
           continue;
         }
@@ -6933,6 +7055,7 @@ async function initCore(runtimeContext) {
         } else {
           _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack, _pauseForBomb);
         }
+        _he.onAfterUpdate?.(frameDelta); // (Pemberton: gun / shield / bombs)
 
         // Push enemy away if it gets too close to the player (prevents clipping)
         const _pushDist = 0.5;
@@ -7193,7 +7316,8 @@ async function initCore(runtimeContext) {
       otherPlayers,
       multiplayer,
       hordeEnemies,
-      pvpTargets: matchMode?.getShotTargets() ?? null
+      pvpTargets: matchMode?.getShotTargets() ?? null,
+      localTarget: playerDead ? null : _pembertonShotTarget
     });
     // Village (between Showdown stages): walks the player around and has the last word on the camera
     village?.update(frameDelta);

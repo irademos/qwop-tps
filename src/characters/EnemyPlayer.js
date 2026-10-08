@@ -1173,7 +1173,9 @@ export class EnemyPlayer {
     if (now - this._lastHitTime < HIT_COOLDOWN_MS) return;
 
     // Compute sword tip in world space
-    _swordTipWorld.copy(SWORD_TIP_LOCAL).applyQuaternion(this._swordGroup.quaternion).add(this._swordGroup.position);
+    // (scaled with the sword: the final boss carries a bigger one)
+    _swordTipWorld.copy(SWORD_TIP_LOCAL).multiplyScalar(this._swordGroup.scale.z)
+      .applyQuaternion(this._swordGroup.quaternion).add(this._swordGroup.position);
 
     const targetCenter = _tmpV.copy(targetModel.position);
     targetCenter.y += 0.7; // roughly torso height
@@ -1550,7 +1552,7 @@ export class EnemyPlayer {
    * World-space position of the sword tip — used by external hit checks.
    */
   getSwordTipWorldPos() {
-    _swordTipWorld.copy(SWORD_TIP_LOCAL)
+    _swordTipWorld.copy(SWORD_TIP_LOCAL).multiplyScalar(this._swordGroup.scale.z)
       .applyQuaternion(this._swordGroup.quaternion)
       .add(this._swordGroup.position);
     return _swordTipWorld.clone();
