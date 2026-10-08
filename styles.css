@@ -2241,27 +2241,29 @@ body.settings-open #inventory-button {
 .village-ui button,
 .village-panel,
 .village-card { pointer-events: auto; }
-.village-back {
+.village-back,
+.village-lobby-top {
   position: absolute;
   background: var(--surface-strong);
   border-color: var(--border-strong);
-  top: calc(10px + env(safe-area-inset-top, 0px));
-  left: calc(12px + env(safe-area-inset-left, 0px));
   min-height: 44px;
   padding: 0 16px;
   font-size: 15px;
   font-weight: 700;
 }
-/* Focused on a station: ⬅ Village sits bottom middle; the bottom panel moves up above it */
-.village-back.village-back-bottom {
-  top: auto;
+/* Bottom middle: ⬅ Lobby (village view) / ⬅ Village (at a station); the bottom panel sits above it */
+.village-back {
   left: 50%;
   bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
 }
-.village-ui.village-focused .village-panel { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
-/* Phones: ‹ › to the neighbouring station (shop / next stage / campfire / characters), bottom
-   corners either side of the back button (bottom middle) */
+/* At a station ⬅ Lobby stays reachable top left */
+.village-lobby-top {
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: calc(12px + env(safe-area-inset-left, 0px));
+}
+/* ‹ › to the neighbouring station (shop / next stage / campfire / characters), bottom corners
+   either side of the back button (bottom middle) */
 .village-nav {
   position: absolute;
   bottom: calc(14px + env(safe-area-inset-bottom, 0px));
@@ -2316,7 +2318,7 @@ body.settings-open #inventory-button {
 .village-panel {
   position: absolute;
   left: 50%;
-  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   width: min(460px, calc(100% - 32px));
   padding: 14px 18px;

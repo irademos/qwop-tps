@@ -10,10 +10,10 @@
 //     stage's time of day).
 //   • Arrow — points along the next stage's path; tap it to start the stage (after the
 //     sword calibration popup, ctx.confirmStart).
-// ⬅ Lobby top left (overview); ⬅ Village bottom middle (focused on something).
-// Phones (portrait / touch): no high overview — the home view is low behind the player,
-// on the arrow; ‹ › buttons (bottom corners, either side of the back button, which is
-// always bottom middle there) or a swipe move the camera between the stations (STATION_ORDER).
+// Bottom row: ‹ › to the neighbouring station (STATION_ORDER) either side of the back button —
+// ⬅ Lobby in the village view, ⬅ Village at a station (⬅ Lobby then moves to the top left).
+// Phones (portrait / touch): no high overview — the home view is low behind the player, on the
+// arrow; a swipe also moves between the stations.
 // After a stage win it can be built a little way ahead, the player walking in (`approach`).
 //
 // Game access goes through `ctx` (villageCtx in bootstrapGameApp.js); the shop logic
@@ -423,6 +423,7 @@ export function createVillage(ctx) {
   ui.className = 'village-ui hidden';
   ui.innerHTML = `
     <button type="button" class="ui-btn-secondary village-back" data-v="back">⬅ Lobby</button>
+    <button type="button" class="ui-btn-secondary village-lobby-top hidden" data-v="lobby">⬅ Lobby</button>
     <button type="button" class="ui-btn-secondary village-nav village-nav-prev hidden" data-v="nav-prev"></button>
     <button type="button" class="ui-btn-secondary village-nav village-nav-next hidden" data-v="nav-next"></button>
     <div class="village-top ui-chip"><span data-v="stage"></span><span class="village-top-sep">·</span><span data-v="coins"></span></div>
@@ -450,7 +451,7 @@ export function createVillage(ctx) {
   document.body.appendChild(ui);
   const $ = (k) => ui.querySelector(`[data-v="${k}"]`);
   const el = {
-    back: $('back'), stage: $('stage'), coins: $('coins'),
+    back: $('back'), lobby: $('lobby'), stage: $('stage'), coins: $('coins'),
     panel: $('panel'), panelTitle: $('panel-title'), panelText: $('panel-text'), panelActions: $('panel-actions'),
     card: $('card'), cardName: $('card-name'), cardDesc: $('card-desc'), cardOwned: $('card-owned'), buy: $('buy'),
     prev: $('prev'), next: $('next'), navPrev: $('nav-prev'), navNext: $('nav-next'),
@@ -459,6 +460,10 @@ export function createVillage(ctx) {
   };
   let bannerTimer = null;
 
+  el.lobby.addEventListener('click', () => {
+    if (!active || leaving || approaching || sitting) return;
+    ctx.onLobby();
+  });
   el.back.addEventListener('click', () => {
     if (!active || leaving || approaching || sitting) return;
     if (focus) unfocus();
@@ -833,9 +838,9 @@ export function createVillage(ctx) {
     if (key === null) unfocus();
     else focusStation(key);
   }
-  // ‹ › name the neighbouring stations; hidden off phones and while the buy card (its own ‹ ›) is up
+  // ‹ › name the neighbouring stations
   function refreshNav() {
-    const show = compact && active && !leaving && !approaching && !(focus === 'shop' && selectedItem >= 0);
+    const show = active && !leaving && !approaching;
     el.navPrev.classList.toggle('hidden', !show);
     el.navNext.classList.toggle('hidden', !show);
     if (!show) return;
@@ -845,14 +850,10 @@ export function createVillage(ctx) {
     el.navNext.textContent = `${STATION_NAMES[STATION_ORDER[(i + 1) % n]]} ›`;
   }
 
-  // ⬅ Lobby top left in the overview; ⬅ Village bottom middle when focused (the bottom
-  // panel moves up above it)
+  // Bottom middle: ⬅ Lobby in the village view, ⬅ Village at a station (⬅ Lobby then top left)
   function refreshBack() {
-    // (phones: always bottom middle, between the ‹ › station buttons)
-    const bottom = !!focus || compact;
     el.back.textContent = focus ? '⬅ Village' : '⬅ Lobby';
-    el.back.classList.toggle('village-back-bottom', bottom);
-    ui.classList.toggle('village-focused', bottom);
+    el.lobby.classList.toggle('hidden', !focus || !active || !!leaving || approaching);
     refreshNav();
   }
 
@@ -1180,6 +1181,7 @@ export function createVillage(ctx) {
     el.panel.classList.add('hidden');
     el.card.classList.add('hidden');
     el.back.classList.add('hidden');
+    el.lobby.classList.add('hidden');
     el.navPrev.classList.add('hidden');
     el.navNext.classList.add('hidden');
     ui.querySelector('.village-top')?.classList.add('hidden');
@@ -1261,6 +1263,7 @@ export function createVillage(ctx) {
     if (approaching) {
       refreshNav();
       el.back.classList.add('hidden');
+      el.lobby.classList.add('hidden');
       ui.querySelector('.village-top')?.classList.add('hidden');
       el.panel.classList.add('hidden');
     } else {
