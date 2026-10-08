@@ -2275,6 +2275,25 @@ body.settings-open #inventory-button {
   background: var(--surface-strong);
   border-color: var(--border-strong);
 }
+/* Sitting by the campfire: the screen fades out while the time of day changes */
+.village-fade {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #05060a;
+  opacity: 0;
+  transition: opacity 0.7s ease;
+  pointer-events: auto;   /* (no taps while sitting) */
+}
+.village-fade.is-on { opacity: 1; }
+.village-fade-text {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--accent-hi);
+}
 .village-nav-prev { left: calc(10px + env(safe-area-inset-left, 0px)); }
 .village-nav-next { right: calc(10px + env(safe-area-inset-right, 0px)); }
 .village-top {
