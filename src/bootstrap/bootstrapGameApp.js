@@ -575,6 +575,7 @@ function createArcadeOverlay(startOverlay) {
       startOverlay.classList.remove('hidden');
       startOverlay.setAttribute('aria-hidden', 'false');
     },
+    isStartScreenShown: () => startOverlay.getAttribute('aria-hidden') === 'false',
     hideOverlay
   };
 }
@@ -4814,6 +4815,17 @@ async function initCore(runtimeContext) {
 
   const settingsBtn = document.getElementById('settings-button');
   const appState = {
+    // Settings → Back to Lobby: leave whatever mode is running for the start screen
+    canReturnToLobby: () => !arcadeOverlay.isStartScreenShown(),
+    returnToLobby: async () => {
+      if (arcadeOverlay.isStartScreenShown()) return;
+      if (showdownTutorial?.isActive()) await showdownTutorial.stop();
+      matchMode?.exit();
+      duelMode?.exit();
+      _setClassicMode(false);
+      _resetForMenu();
+      arcadeOverlay.showStartScreen();
+    },
     getPlayerName: () => playerName,
     setPlayerName: (name) => {
       if (!name) return;
