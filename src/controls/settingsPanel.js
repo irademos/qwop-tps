@@ -167,6 +167,18 @@ function buildHeader() {
   return header;
 }
 
+// Always-visible footer: Back to Lobby (start screen), shown while a mode is running
+function buildFooter() {
+  const footer = createElement('div', 'settings-footer');
+  const lobbyButton = createElement('button', 'settings-button settings-button-secondary', '⬅ Back to Lobby');
+  lobbyButton.type = 'button';
+  lobbyButton.dataset.action = 'back-to-lobby';
+  footer.append(lobbyButton);
+  footer.hidden = true;
+  elements.lobbyFooter = footer;
+  return footer;
+}
+
 function buildTabs() {
   const tablist = createElement('div', 'settings-tabs');
   tablist.setAttribute('role', 'tablist');
@@ -824,6 +836,9 @@ function openOverlay() {
   lastFocusedElement = document.activeElement;
   overlay.style.display = 'flex';
   overlay.setAttribute('aria-hidden', 'false');
+  if (elements.lobbyFooter) {
+    elements.lobbyFooter.hidden = !context.appState?.canReturnToLobby?.();
+  }
   syncOverlayBodyState();
   refreshLayout();
   if (isMobileView) {
@@ -856,6 +871,9 @@ async function handleAction(target) {
   if (!action) return;
   if (action === 'close') {
     closeOverlay();
+  } else if (action === 'back-to-lobby') {
+    closeOverlay();
+    await context.appState?.returnToLobby?.();
   } else if (action === 'back') {
     if (isMobileView) {
       setListView(true);
@@ -1276,7 +1294,8 @@ export function initSettingsPanel({ appState, getMultiplayer, player } = {}) {
   const header = buildHeader();
   const tabs = buildTabs();
   const body = buildPanels();
-  panel.append(header, tabs, body);
+  const footer = buildFooter();
+  panel.append(header, tabs, body, footer);
   buildLeaderboardOverlay();
 
   refreshLayout();

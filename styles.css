@@ -1036,6 +1036,17 @@ body.settings-open #inventory-button {
   color: var(--text);
 }
 
+.settings-footer {
+  display: flex;
+  justify-content: center;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-footer[hidden] {
+  display: none;
+}
+
 .settings-tabs {
   display: flex;
   gap: 6px;
@@ -3188,7 +3199,7 @@ body.match-active .name-label { display: none !important; }
 /* ── Classic mode (Wii-style Showdown; bootstrapGameApp.js "Classic mode") ─────
    body.classic-mode: the Showdown HUD, joystick and every button except Block are
    hidden. body.classic-playing (during a stage): hearts bottom left, Score % bottom
-   right, and the settings button hides too. The stage banner / callouts keep the
+   right. The settings button stays (top right). The stage banner / callouts keep the
    Wii-style lettering; panels and buttons use the shared components. */
 body.classic-mode #player-info,
 body.classic-mode #health-display,
@@ -3205,8 +3216,7 @@ body.classic-mode #jump-button,
 body.classic-mode #gyro-button,
 body.classic-mode #ps-bubble-btn,
 body.classic-mode #ps-bomb-btn,
-body.classic-mode .ps-weapon-btn,
-body.classic-playing #settings-button {
+body.classic-mode .ps-weapon-btn {
   display: none !important;
 }
 /* Desktop: Block sits above the score instead of on top of it */

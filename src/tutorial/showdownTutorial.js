@@ -75,6 +75,8 @@ export function createShowdownTutorial(ctx) {
   let frameHandler = null;
   let active = false;
   let skipRequested = false;
+  let aborted = false;      // stop(): leave mid-tutorial (Settings → Back to Lobby)
+  let runPromise = null;
   let hurtCount = 0;
   let swordsman = null;
   const markers = [];
@@ -578,8 +580,9 @@ export function createShowdownTutorial(ctx) {
         }
         runCleanups();
         overlay.setHint('');
+        if (aborted) break;
       }
-      completed = true;
+      completed = !aborted;
     } catch (err) {
       console.error('[tutorial] failed', err);
     }
@@ -598,9 +601,21 @@ export function createShowdownTutorial(ctx) {
     start() {
       if (active) return;
       active = true;
+      aborted = false;
       hurtCount = 0;
       overlay.show();
-      void run();
+      runPromise = run();
+    },
+    // Abandon the tutorial (no completion); resolves once its enemies / overlay are cleaned up
+    stop() {
+      if (!active) return Promise.resolve();
+      aborted = true;
+      skipRequested = true;
+      for (const w of [...waits]) {
+        waits.delete(w);
+        w.reject(new StepSkipped());
+      }
+      return runPromise || Promise.resolve();
     },
     notifyPlayerHurt() {
       hurtCount += 1;
