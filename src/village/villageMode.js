@@ -6,10 +6,14 @@
 //     one (or swipe / ‹ › / arrow keys) for its buy card. The chest is a mystery item.
 //   • Unlocked characters idling — tap one to play as them: they walk over and take the
 //     player's place, the old character goes to idle in their spot.
-//   • Floating ☀️ 🌙 🎲 — the next stage's time of day.
+//   • Campfire in front of the characters — tap it to sit until night / morning (the next
+//     stage's time of day).
 //   • Arrow — points along the next stage's path; tap it to start the stage (after the
 //     sword calibration popup, ctx.confirmStart).
-// ⬅ Lobby top left (overview); ⬅ Village bottom middle (focused on something).
+// Bottom row: ‹ › to the neighbouring station (STATION_ORDER) either side of the back button —
+// ⬅ Lobby in the village view, ⬅ Village at a station (⬅ Lobby then moves to the top left).
+// Phones (portrait / touch): no high overview — the home view is low behind the player, on the
+// arrow; a swipe also moves between the stations.
 // After a stage win it can be built a little way ahead, the player walking in (`approach`).
 //
 // Game access goes through `ctx` (villageCtx in bootstrapGameApp.js); the shop logic
@@ -42,18 +46,28 @@ const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall un
 const MERCHANT_CHARACTER_URL = glbCharacterConfig.wizardUrl;
 
 // ── Layout (village-local metres: x = right, z = toward the next stage) ────────
+// Skinny: the shop and the characters face each other across a lane (turned a little back
+// toward the village centre), the arrow at its far end; the campfire is in front of the characters
 const LAYOUT = {
-  stall: new THREE.Vector3(-3.5, 0, 3.0),
+  stall: new THREE.Vector3(-2.4, 0, 3.6),
+  stallFaces: new THREE.Vector3(1.5, 0, 1.6),      // the stall's front looks at this point
   chestSide: 1.45,                 // chest: this far beside the stall (toward the centre)
-  characters: new THREE.Vector3(3.5, 0, 3.0),
-  time: new THREE.Vector3(1.5, 1.3, 5.4),
-  arrow: new THREE.Vector3(0, 0.3, 6.6),
+  characters: new THREE.Vector3(2.4, 0, 3.6),
+  charactersFace: new THREE.Vector3(-1.5, 0, 1.6), // the group faces this point
+  arrow: new THREE.Vector3(0, 0.3, 7.8),
 };
 const CHARACTER_ARC_RADIUS = 1.35;
 const PLAYER_WALK_SPEED = 2.4;     // m/s
 const NPC_WALK_SPEED = 1.7;        // m/s
 const CAMERA_LERP = 3.2;           // 1/s
 const VILLAGE_FOV = 55;            // the fight camera is very wide; the village is framed tighter
+// Phone station carousel, left → right as seen from the village centre (null = home: the arrow)
+const STATION_ORDER = ['shop', null, 'fire', 'characters'];
+const STATION_NAMES = { shop: '🛒 Shop', null: '➜ Next stage', fire: '🔥 Campfire', characters: '👥 Characters' };
+const CAMPFIRE_AHEAD = 0.4;        // m from the characters' group centre toward the lane (they stand behind it)
+const SIT_FADE_MS = 700;           // sitting by the fire: fade out, change the time, fade back in
+const SIT_HOLD_MS = 900;
+const COARSE_POINTER = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
 const LEAVE_REMOVE_DIST = 10;      // m from the village centre: props removed once the stage walk gets here
 const LEAVE_REMOVE_MS = 4000;      // …or this long after the stage starts (the first enemies spawn close by)
 
@@ -71,11 +85,11 @@ const SHOP_ITEMS = [
   { id: 'treasure_chest', chest: true },
 ];
 
-const TIME_CHOICES = [
-  { pref: 'day', emoji: '☀️', label: 'Day' },
-  { pref: 'random', emoji: '🎲', label: 'Random' },
-  { pref: 'night', emoji: '🌙', label: 'Night' },
-];
+// Sitting by the campfire: until night / until morning
+const SIT_CHOICES = {
+  night: { pref: 'night', button: '🌙 Sit until night', fade: '🌙 Night falls…', label: '🌙 Night' },
+  day: { pref: 'day', button: '☀️ Sit until morning', fade: '☀️ Morning comes…', label: '☀️ Day' },
+};
 
 const _UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
@@ -248,6 +262,100 @@ function makeRing(radius = 0.5, color = 0xf4c454) {
   return ring;
 }
 
+// Soft round spot (white centre → transparent) for the flames / embers / glow
+function makeGlowTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.35, 'rgba(255,255,255,0.75)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Campfire: box logs in a little teepee, a stone ring, additive flame / ember sprites and a
+// ground glow (no light: adding one would recompile every material). Animated by updateCampfire.
+const FLAME_COUNT = 12;
+const EMBER_COUNT = 6;
+function makeCampfire() {
+  const g = new THREE.Group();
+  const logMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, emissive: 0x3a1404, emissiveIntensity: 0.6, roughness: 1, metalness: 0 });
+  const logGeo = new THREE.BoxGeometry(0.5, 0.075, 0.075);
+  for (let i = 0; i < 5; i++) {
+    const pivot = new THREE.Group();
+    pivot.rotation.y = (i / 5) * Math.PI * 2 + 0.3;
+    const log = new THREE.Mesh(logGeo, logMat);
+    log.position.set(0.14, 0.12, 0);
+    log.rotation.z = 0.5;           // inner end up: the logs lean together
+    log.castShadow = true;
+    pivot.add(log);
+    g.add(pivot);
+  }
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x77736b, roughness: 1, metalness: 0 });
+  const stoneGeo = new THREE.DodecahedronGeometry(0.065, 0);
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2;
+    const st = new THREE.Mesh(stoneGeo, stoneMat);
+    st.position.set(Math.sin(a) * 0.36, 0.03, Math.cos(a) * 0.36);
+    st.rotation.set(a, a * 2, 0);
+    st.scale.set(1.2, 0.75, 1);
+    g.add(st);
+  }
+  const tex = makeGlowTexture();
+  const glow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.9, 24),
+    new THREE.MeshBasicMaterial({ map: tex, color: 0xff7a1a, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false })
+  );
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = 0.02;
+  glow.renderOrder = 3;
+  g.add(glow);
+  const spark = (opacity) => {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false }));
+    sp.renderOrder = 6;
+    g.add(sp);
+    return sp;
+  };
+  const flames = [];
+  for (let i = 0; i < FLAME_COUNT; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.random() * 0.1;
+    flames.push({ sprite: spark(0), phase: i / FLAME_COUNT, speed: 1.1 + Math.random() * 0.5, ox: Math.sin(a) * r, oz: Math.cos(a) * r });
+  }
+  const embers = [];
+  for (let i = 0; i < EMBER_COUNT; i++) {
+    embers.push({ sprite: spark(0), phase: i / EMBER_COUNT, speed: 0.35 + Math.random() * 0.2, drift: Math.random() * Math.PI * 2 });
+  }
+  return { group: g, flames, embers, glow };
+}
+const _flameHot = new THREE.Color(1, 0.85, 0.45);
+const _flameCool = new THREE.Color(1, 0.28, 0.05);
+function updateCampfire(fire, t) {
+  for (const f of fire.flames) {
+    const age = (t * f.speed + f.phase) % 1;
+    const sp = f.sprite;
+    sp.position.set(f.ox * (1 - age), 0.12 + age * 0.55, f.oz * (1 - age));
+    const sc = 0.34 * (1 - age * 0.7);
+    sp.scale.set(sc, sc * 1.25, 1);
+    sp.material.color.copy(_flameHot).lerp(_flameCool, age);
+    sp.material.opacity = (age < 0.15 ? age / 0.15 : 1 - (age - 0.15) / 0.85) * 0.9;
+  }
+  for (const e of fire.embers) {
+    const age = (t * e.speed + e.phase) % 1;
+    const sp = e.sprite;
+    sp.position.set(Math.sin(e.drift + age * 4) * 0.12 * age, 0.25 + age * 1.1, Math.cos(e.drift + age * 3) * 0.12 * age);
+    sp.scale.set(0.035, 0.035, 1);
+    sp.material.color.copy(_flameCool);
+    sp.material.opacity = (1 - age) * 0.9;
+  }
+  fire.glow.material.opacity = 0.42 + Math.sin(t * 11) * 0.05 + Math.sin(t * 7.3) * 0.05;
+}
+
 const angleLerp = (a, b, t) => {
   let d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
   return a + d * t;
@@ -290,7 +398,9 @@ export function createVillage(ctx) {
   let itemEntries = [];     // { def, object, baseY, baseRotY, centerOffset, hopUntil }
   let npcs = [];            // { key, container, character, slot: Vector3, walk: { to, onArrive }, label }
   let swapBusy = false;
-  let timeSprites = [];
+  let campfire = null;      // makeCampfire() result
+  let sitting = false;      // sitting by the fire (screen fade) — input ignored meanwhile
+  let sitTimers = [];
   let chestFx = null;
   let prizeFx = [];
   let cardRefreshedAt = 0;
@@ -312,7 +422,12 @@ export function createVillage(ctx) {
   const ui = document.createElement('div');
   ui.className = 'village-ui hidden';
   ui.innerHTML = `
-    <button type="button" class="ui-btn-secondary village-back" data-v="back">⬅ Lobby</button>
+    <div class="village-bottom-row">
+      <button type="button" class="ui-btn-secondary village-nav village-nav-prev hidden" data-v="nav-prev"></button>
+      <button type="button" class="ui-btn-secondary village-back" data-v="back">⬅ Lobby</button>
+      <button type="button" class="ui-btn-secondary village-nav village-nav-next hidden" data-v="nav-next"></button>
+    </div>
+    <button type="button" class="ui-btn-secondary village-lobby-top hidden" data-v="lobby">⬅ Lobby</button>
     <div class="village-top ui-chip"><span data-v="stage"></span><span class="village-top-sep">·</span><span data-v="coins"></span></div>
     <div class="village-panel ui-panel hidden" data-v="panel">
       <div class="village-panel-title" data-v="panel-title"></div>
@@ -329,6 +444,7 @@ export function createVillage(ctx) {
       </div>
       <button type="button" class="ui-chip village-card-nav" data-v="next" aria-label="Next item">›</button>
     </div>
+    <div class="village-fade hidden" data-v="fade"><div class="village-fade-text" data-v="fade-text"></div></div>
     <div class="village-banner hidden" data-v="banner">
       <div class="village-banner-title" data-v="banner-title"></div>
       <div class="village-banner-sub" data-v="banner-sub"></div>
@@ -337,22 +453,34 @@ export function createVillage(ctx) {
   document.body.appendChild(ui);
   const $ = (k) => ui.querySelector(`[data-v="${k}"]`);
   const el = {
-    back: $('back'), stage: $('stage'), coins: $('coins'),
+    back: $('back'), lobby: $('lobby'), stage: $('stage'), coins: $('coins'),
     panel: $('panel'), panelTitle: $('panel-title'), panelText: $('panel-text'), panelActions: $('panel-actions'),
     card: $('card'), cardName: $('card-name'), cardDesc: $('card-desc'), cardOwned: $('card-owned'), buy: $('buy'),
-    prev: $('prev'), next: $('next'),
+    prev: $('prev'), next: $('next'), navPrev: $('nav-prev'), navNext: $('nav-next'),
+    fade: $('fade'), fadeText: $('fade-text'),
     banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'), bannerBoss: $('banner-boss'),
   };
   let bannerTimer = null;
 
+  el.lobby.addEventListener('click', () => {
+    if (!active || leaving || approaching || sitting) return;
+    ctx.onLobby();
+  });
   el.back.addEventListener('click', () => {
-    if (!active || leaving || approaching) return;
+    if (!active || leaving || approaching || sitting) return;
     if (focus) unfocus();
     else ctx.onLobby();
   });
   el.prev.addEventListener('click', () => stepItem(-1));
   el.next.addEventListener('click', () => stepItem(1));
   el.buy.addEventListener('click', () => { void buySelected(); });
+  el.navPrev.addEventListener('click', () => stepStation(-1));
+  el.navNext.addEventListener('click', () => stepStation(1));
+
+  // Phones: low home view on the arrow + station carousel instead of the high overview
+  // (decided per frame: the phone can be turned)
+  const isCompact = () => (camera.aspect || 1) < 1 || COARSE_POINTER;
+  let compact = false;
 
   const local = (x, y, z, out = new THREE.Vector3()) => out.copy(center)
     .addScaledVector(right, x).addScaledVector(fwd, z).setY(center.y + y);
@@ -400,36 +528,13 @@ export function createVillage(ctx) {
       makeClickable(ring, { station: 'arrow' });
     }
 
-    // Time of day: ☀️ 🎲 🌙 floating side by side
-    {
-      const pos = local(LAYOUT.time.x, 0, LAYOUT.time.z);
-      const gy = groundY(pos.x, pos.z, center.y);
-      const base = new THREE.Vector3(pos.x, gy + LAYOUT.time.y, pos.z);
-      timeSprites = TIME_CHOICES.map((c, i) => {
-        const s = makeEmojiSprite(c.emoji, 0.5);
-        s.position.copy(base).addScaledVector(right, (i - 1) * 0.55);
-        root.add(s);
-        makeClickable(s, { station: 'time', time: c.pref });
-        return { ...c, sprite: s, base: s.position.clone() };
-      });
-      const label = textSprite('☀️ Time of day 🌙', { height: 0.28 });
-      label.position.copy(base).add(_v.set(0, 0.5, 0));
-      const ring = makeRing(0.45);
-      ring.position.set(pos.x, gy + 0.03, pos.z);
-      root.add(label, ring);
-      overviewLabels.push(label);
-      stations.time = { key: 'time', label, pos: base.clone() };
-      makeClickable(label, { station: 'time' });
-      refreshTime();
-    }
-
     // Characters: the unlocked ones (except the one being played) idle in a little arc
     {
       const pos = local(LAYOUT.characters.x, 0, LAYOUT.characters.z);
       const gy = groundY(pos.x, pos.z, center.y);
       const groupCenter = new THREE.Vector3(pos.x, gy, pos.z);
-      // Arc opens toward the village centre
-      const toCenter = _v.subVectors(center, groupCenter).setY(0).normalize().clone();
+      // Arc opens across the lane, toward the shop
+      const toCenter = _v.subVectors(local(LAYOUT.charactersFace.x, 0, LAYOUT.charactersFace.z), groupCenter).setY(0).normalize().clone();
       const label = textSprite('👥 Characters', { height: 0.32 });
       label.position.copy(groupCenter).add(_v2.set(0, 1.75, 0));
       root.add(label);
@@ -449,6 +554,22 @@ export function createVillage(ctx) {
       const slots = characterSlots(groupCenter, toCenter, Math.max(keys.length, 1));
       keys.forEach((key, i) => spawnNpc(key, slots[i], groupCenter, alive));
       stations.characters.slots = slots;
+
+      // Campfire just in front of them: tap it to sit until night / morning
+      const firePos = _v2.copy(groupCenter).addScaledVector(toCenter, CAMPFIRE_AHEAD);
+      campfire = makeCampfire();
+      placeOnGround(campfire.group, firePos, 0);
+      root.add(campfire.group);
+      const hit = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8), new THREE.MeshBasicMaterial({ visible: false }));
+      hit.position.y = 0.3;
+      campfire.group.add(hit);
+      makeClickable(campfire.group, { station: 'fire' });
+      const fireLabel = textSprite('🔥 Campfire', { height: 0.22 });
+      fireLabel.position.copy(campfire.group.position).add(_v.set(0, 0.85, 0));
+      root.add(fireLabel);
+      overviewLabels.push(fireLabel);
+      makeClickable(fireLabel, { station: 'fire' });
+      stations.fire = { key: 'fire', label: fireLabel, pos: campfire.group.position.clone() };
     }
 
     // Shop: stall + merchant + counter items + chest
@@ -464,8 +585,8 @@ export function createVillage(ctx) {
       const pos = local(LAYOUT.stall.x, 0, LAYOUT.stall.z);
       const stallRoot = new THREE.Group();
       placeOnGround(stallRoot, pos, -0.005);
-      // Front (+Z of the model) faces a point behind the village centre (toward the overview camera)
-      const lookAt = local(0, 0, -3);
+      // Front (+Z of the model) faces across the lane, toward the characters
+      const lookAt = local(LAYOUT.stallFaces.x, 0, LAYOUT.stallFaces.z);
       const facing = _v.subVectors(lookAt, stallRoot.position).setY(0).normalize().clone();
       stallRoot.rotation.y = Math.atan2(facing.x, facing.z);
       const side = new THREE.Vector3().crossVectors(_UP, facing).normalize(); // customer's right
@@ -625,13 +746,20 @@ export function createVillage(ctx) {
 
   function computeWantedCamera() {
     const st = focus ? stations[focus] : null;
+    if (!st && compact) {
+      // Home: low behind the player, on the arrow (the player stands in the foreground)
+      const target = local(0, 0.55, LAYOUT.arrow.z - 0.6);
+      const dir = _v2.copy(fwd).multiplyScalar(-1).addScaledVector(_UP, 0.25);
+      setView(target, dir, 1.9, 1.0, 7.5);
+      return;
+    }
     if (!st) {
       // Overview from behind the village centre, a little above
       // (aimed a little short of the middle so the bottom panel doesn't cover the player)
-      const target = local(0, 0.35, 2.4);
+      const target = local(0, 0.35, 3.4);
       // (steeper on tall screens: more of the height is used)
       const dir = _v2.copy(fwd).multiplyScalar(-1).addScaledVector(_UP, camera.aspect < 1 ? 1.15 : 0.55);
-      setView(target, dir, 5.0, 2.9, 5);
+      setView(target, dir, 4.2, 2.9, 5);
       return;
     }
     if (focus === 'shop') {
@@ -645,19 +773,20 @@ export function createVillage(ctx) {
       } else {
         // Stall + chest
         const target = _v2.copy(s.stallRoot.position).addScaledVector(s.side, s.chestSign * 0.55).add(_v.set(0, 0.85, 0)).clone();
-        const dir = _v.copy(s.facing).addScaledVector(_UP, 0.32).clone();
-        setView(target, dir, 2.3, 1.4, 2.6);
+        const dir = _v.copy(s.facing).addScaledVector(_UP, compact ? 0.22 : 0.32).clone();
+        setView(target, dir, compact ? 1.8 : 2.3, 1.4, 2.6);
       }
     } else if (focus === 'characters') {
       const s = stations.characters;
       const target = _v2.copy(s.pos).add(_v.set(0, 0.6, 0)).clone();
-      const dir = _v.copy(s.facing).addScaledVector(_UP, 0.35).clone();
-      setView(target, dir, 1.35, 0.8, 2.2);
-    } else if (focus === 'time') {
-      const s = stations.time;
-      const target = _v2.copy(s.pos).clone();
-      const dir = _v.subVectors(center, s.pos).setY(0).normalize().addScaledVector(_UP, 0.15).clone();
-      setView(target, dir, 1.0, 0.55, 1.6);
+      const dir = _v.copy(s.facing).addScaledVector(_UP, compact ? 0.22 : 0.35).clone();
+      setView(target, dir, compact ? 1.15 : 1.35, 0.8, 2.2);
+    } else if (focus === 'fire') {
+      // The fire with the characters standing behind it
+      const s = stations.fire;
+      const target = _v2.copy(s.pos).add(_v.set(0, 0.45, 0)).clone();
+      const dir = _v.copy(stations.characters.facing).addScaledVector(_UP, 0.3).clone();
+      setView(target, dir, 1.2, 0.75, 2.0);
     }
   }
 
@@ -696,16 +825,38 @@ export function createVillage(ctx) {
   function unfocus() {
     focus = null;
     selectItem(-1);
+    // (phones: the home view is from behind the village centre — the player goes back there)
+    if (compact) walkTo(center, () => { faceYaw = Math.atan2(fwd.x, fwd.z); });
     refreshPanel();
     refreshBack();
   }
 
-  // ⬅ Lobby top left in the overview; ⬅ Village bottom middle when focused (the bottom
-  // panel moves up above it)
+  // Phones: ‹ › / swipe to the neighbouring station
+  function stepStation(dir) {
+    if (!active || leaving || approaching || sitting) return;
+    const i = STATION_ORDER.indexOf(focus);
+    const n = STATION_ORDER.length;
+    const key = STATION_ORDER[(Math.max(i, 0) + dir + n) % n];
+    if (key === null) unfocus();
+    else focusStation(key);
+  }
+  // ‹ › name the neighbouring stations
+  function refreshNav() {
+    const show = active && !leaving && !approaching;
+    el.navPrev.classList.toggle('hidden', !show);
+    el.navNext.classList.toggle('hidden', !show);
+    if (!show) return;
+    const i = Math.max(STATION_ORDER.indexOf(focus), 0);
+    const n = STATION_ORDER.length;
+    el.navPrev.textContent = `‹ ${STATION_NAMES[STATION_ORDER[(i - 1 + n) % n]]}`;
+    el.navNext.textContent = `${STATION_NAMES[STATION_ORDER[(i + 1) % n]]} ›`;
+  }
+
+  // Bottom middle: ⬅ Lobby in the village view, ⬅ Village at a station (⬅ Lobby then top left)
   function refreshBack() {
     el.back.textContent = focus ? '⬅ Village' : '⬅ Lobby';
-    el.back.classList.toggle('village-back-bottom', !!focus);
-    ui.classList.toggle('village-focused', !!focus);
+    el.lobby.classList.toggle('hidden', !focus || !active || !!leaving || approaching);
+    refreshNav();
   }
 
   // Bottom panel: what to do at the current station
@@ -725,7 +876,9 @@ export function createVillage(ctx) {
       return b;
     };
     if (!focus) {
-      show(`Stage ${stageInfo.stage}`, 'Tap the shop, a character or the sun / moon — tap the arrow when you’re ready to fight.');
+      show(`Stage ${stageInfo.stage}`, compact
+        ? 'Swipe or tap ‹ › for the shop, the campfire and characters — tap the arrow when you’re ready to fight.'
+        : 'Tap the shop, the campfire or a character — tap the arrow when you’re ready to fight.');
     } else if (focus === 'shop') {
       if (selectedItem >= 0) el.panel.classList.add('hidden');
       else show('🛒 Shop', 'Tap an item on the stall — or the chest for a mystery prize.');
@@ -735,9 +888,13 @@ export function createVillage(ctx) {
       show('👥 Characters', any
         ? `Playing as ${sel?.emoji ?? ''} ${sel?.label ?? ''}. Tap a character to switch.`
         : `Playing as ${sel?.emoji ?? ''} ${sel?.label ?? ''}. Beat a stage’s final enemy to unlock their character.`);
-    } else if (focus === 'time') {
-      const cur = TIME_CHOICES.find((c) => c.pref === ctx.time.get());
-      show('Time of day', `Next stage: ${cur?.emoji ?? ''} ${cur?.label ?? ''}. Tap ☀️ day, 🌙 night or 🎲 random.`);
+    } else if (focus === 'fire') {
+      // Offer the one that changes the time
+      const night = ctx.time.get() === 'night';
+      const cur = night ? SIT_CHOICES.night : SIT_CHOICES.day;
+      const next = night ? SIT_CHOICES.day : SIT_CHOICES.night;
+      show('🔥 Campfire', `Next stage: ${cur.label}. Sit by the fire to pass the time.`,
+        [btn(next.button, () => sitUntil(next))]);
     }
   }
 
@@ -747,6 +904,7 @@ export function createVillage(ctx) {
     selectedItem = i >= 0 && i < itemEntries.length ? i : -1;
     if (focus === 'shop') refreshPanel();
     refreshCard();
+    refreshNav();
   }
   function stepItem(dir) {
     if (focus !== 'shop' || !itemEntries.length) return;
@@ -802,13 +960,35 @@ export function createVillage(ctx) {
     prizeFx.push({ sprite, start, born: performance.now() });
   }
 
-  // ── Time of day ──
-  function refreshTime() {
-    const pref = ctx.time.get();
-    timeSprites.forEach((t) => {
-      t.selected = t.pref === pref;
-      t.sprite.material.opacity = t.selected ? 1 : 0.6;
-    });
+  // ── Campfire: sit until night / morning ──
+  // Fade out, change the next stage's time of day (the lighting previews it), fade back in
+  function sitUntil(choice) {
+    if (sitting || !active || leaving) return;
+    sitting = true;
+    walk = null;
+    if (stations.fire) faceYaw = yawToward(playerPos(), stations.fire.pos);
+    el.fadeText.textContent = choice.fade;
+    el.fade.classList.remove('hidden', 'is-on');
+    void el.fade.offsetWidth;
+    el.fade.classList.add('is-on');
+    sitTimers.push(setTimeout(() => {
+      ctx.time.set(choice.pref);
+      refreshPanel();
+      sitTimers.push(setTimeout(() => {
+        el.fade.classList.remove('is-on');
+        sitTimers.push(setTimeout(() => {
+          el.fade.classList.add('hidden');
+          sitting = false;
+        }, SIT_FADE_MS));
+      }, SIT_HOLD_MS));
+    }, SIT_FADE_MS));
+  }
+  function cancelSit() {
+    sitTimers.forEach(clearTimeout);
+    sitTimers = [];
+    sitting = false;
+    el.fade.classList.remove('is-on');
+    el.fade.classList.add('hidden');
   }
 
   // ── Characters ──
@@ -924,7 +1104,7 @@ export function createVillage(ctx) {
     return null;
   };
   const onPointerDown = (e) => {
-    if (!active || leaving || approaching) return;
+    if (!active || leaving || approaching || sitting) return;
     down = { x: e.clientX, y: e.clientY, t: performance.now() };
   };
   const onPointerUp = (e) => {
@@ -934,7 +1114,9 @@ export function createVillage(ctx) {
     const dt = performance.now() - down.t;
     down = null;
     if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4 && dt < 700) {
-      if (focus === 'shop') stepItem(dx < 0 ? 1 : -1);
+      // (shop item close-up: the next item; phones otherwise: the next station)
+      if (focus === 'shop' && (selectedItem >= 0 || !compact)) stepItem(dx < 0 ? 1 : -1);
+      else if (compact) stepStation(dx < 0 ? 1 : -1);
       return;
     }
     if (Math.hypot(dx, dy) > 12) return;
@@ -946,10 +1128,14 @@ export function createVillage(ctx) {
     domElement.style.cursor = pick(e.clientX, e.clientY) ? 'pointer' : '';
   };
   const onKeyDown = (e) => {
-    if (!active || leaving || approaching || focus !== 'shop') return;
+    if (!active || leaving || approaching || sitting) return;
     if (e.target?.closest?.('input, textarea')) return;
-    if (e.key === 'ArrowLeft') { stepItem(-1); e.preventDefault(); }
-    else if (e.key === 'ArrowRight') { stepItem(1); e.preventDefault(); }
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const dir = e.key === 'ArrowLeft' ? -1 : 1;
+    if (focus === 'shop' && (selectedItem >= 0 || !compact)) stepItem(dir);
+    else if (compact) stepStation(dir);
+    else return;
+    e.preventDefault();
   };
 
   function onTarget(t) {
@@ -968,13 +1154,8 @@ export function createVillage(ctx) {
       else focusStation('characters');
       return;
     }
-    if (t.station === 'time') {
-      if (t.time) {
-        ctx.time.set(t.time);
-        refreshTime();
-      }
-      focusStation('time');
-      refreshPanel();
+    if (t.station === 'fire') {
+      focusStation('fire');
       return;
     }
   }
@@ -1002,6 +1183,9 @@ export function createVillage(ctx) {
     el.panel.classList.add('hidden');
     el.card.classList.add('hidden');
     el.back.classList.add('hidden');
+    el.lobby.classList.add('hidden');
+    el.navPrev.classList.add('hidden');
+    el.navNext.classList.add('hidden');
     ui.querySelector('.village-top')?.classList.add('hidden');
     domElement.style.cursor = '';
     document.body.classList.remove('village-mode'); // fight HUD back
@@ -1046,6 +1230,7 @@ export function createVillage(ctx) {
     pathAngle = info.pathAngle;
     buildToken += 1;
     labelScale = camera.aspect < 0.8 ? 1.6 : camera.aspect < 1.2 ? 1.25 : 1;
+    compact = isCompact();
     const { model, controls } = ctx.getPlayer();
     approaching = !!info.center;
     if (info.center) center.set(info.center.x, groundY(info.center.x, info.center.z, model.position.y), info.center.z);
@@ -1078,7 +1263,9 @@ export function createVillage(ctx) {
     el.banner.classList.add('hidden');
     el.stage.textContent = info.stage <= 50 ? `Stage ${info.stage}` : 'Final stage';
     if (approaching) {
+      refreshNav();
       el.back.classList.add('hidden');
+      el.lobby.classList.add('hidden');
       ui.querySelector('.village-top')?.classList.add('hidden');
       el.panel.classList.add('hidden');
     } else {
@@ -1112,7 +1299,7 @@ export function createVillage(ctx) {
     }
     clickables.length = 0;
     itemEntries = [];
-    timeSprites = [];
+    campfire = null;
     overviewLabels = [];
     prizeFx = [];
     chestFx = null;
@@ -1121,6 +1308,7 @@ export function createVillage(ctx) {
 
   function exit() {
     const wasActive = active;
+    cancelSit();
     active = false;
     leaving = null;
     approaching = false;
@@ -1139,6 +1327,7 @@ export function createVillage(ctx) {
     ui.classList.add('hidden');
     el.panel.classList.add('hidden');
     el.card.classList.add('hidden');
+    refreshNav();
     if (wasActive) {
       clearTimeout(bannerTimer);
       el.banner.classList.add('hidden');
@@ -1209,6 +1398,10 @@ export function createVillage(ctx) {
       return;
     }
 
+    if (isCompact() !== compact) {
+      compact = !compact;
+      if (!approaching) { refreshPanel(); refreshBack(); }
+    }
     movePlayer(dt);
     updateNpcs(dt);
 
@@ -1224,11 +1417,7 @@ export function createVillage(ctx) {
       const s = 1 + Math.sin(t * 3) * 0.06;
       arrow.ring.scale.set(s, s, s);
     }
-    timeSprites.forEach((ts, i) => {
-      ts.sprite.position.y = ts.base.y + Math.sin(t * 1.8 + i * 1.3) * 0.06;
-      const sc = ts.selected ? 0.62 : 0.44;
-      ts.sprite.scale.set(sc, sc, 1);
-    });
+    if (campfire) updateCampfire(campfire, t);
     itemEntries.forEach((entry, i) => {
       const o = entry.object;
       const sel = focus === 'shop' && i === selectedItem;

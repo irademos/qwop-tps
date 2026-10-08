@@ -2241,25 +2241,87 @@ body.settings-open #inventory-button {
 .village-ui button,
 .village-panel,
 .village-card { pointer-events: auto; }
-.village-back {
-  position: absolute;
+/* Village buttons: solid dark, no lift (a lift transform would undo centring, and a tapped
+   button stays :hover on touch screens — so no lighter hover background either) */
+.village-back,
+.village-lobby-top,
+.village-nav {
   background: var(--surface-strong);
   border-color: var(--border-strong);
-  top: calc(10px + env(safe-area-inset-top, 0px));
-  left: calc(12px + env(safe-area-inset-left, 0px));
   min-height: 44px;
-  padding: 0 16px;
-  font-size: 15px;
   font-weight: 700;
 }
-/* Focused on a station: ⬅ Village sits bottom middle; the bottom panel moves up above it */
-.village-back.village-back-bottom {
-  top: auto;
-  left: 50%;
-  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-  transform: translateX(-50%);
+.village-ui .village-back:hover,
+.village-ui .village-lobby-top:hover,
+.village-ui .village-nav:hover,
+.village-ui .village-back:active,
+.village-ui .village-lobby-top:active,
+.village-ui .village-nav:active {
+  background: var(--surface-strong);
+  transform: none;
 }
-.village-ui.village-focused .village-panel { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+@media (hover: hover) {
+  .village-ui .village-back:hover,
+  .village-ui .village-lobby-top:hover,
+  .village-ui .village-nav:hover { border-color: var(--accent); }
+}
+/* Bottom row: ‹ station · back (⬅ Lobby in the village view / ⬅ Village at a station) · station ›,
+   the back button in the middle and the station buttons right beside it; the bottom panel sits above */
+.village-bottom-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  padding: 0 calc(10px + env(safe-area-inset-right, 0px)) 0 calc(10px + env(safe-area-inset-left, 0px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.village-back { grid-column: 2; padding: 0 16px; font-size: 15px; }
+.village-nav {
+  max-width: 100%;
+  padding: 0 12px;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.village-nav-prev { grid-column: 1; justify-self: end; }
+.village-nav-next { grid-column: 3; justify-self: start; }
+@media (max-width: 440px) {
+  .village-bottom-row { gap: 6px; padding-left: calc(6px + env(safe-area-inset-left, 0px)); padding-right: calc(6px + env(safe-area-inset-right, 0px)); }
+  .village-back { padding: 0 12px; font-size: 14px; }
+  .village-nav { padding: 0 8px; }
+}
+/* At a station ⬅ Lobby stays reachable top left */
+.village-lobby-top {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: calc(12px + env(safe-area-inset-left, 0px));
+  padding: 0 16px;
+  font-size: 15px;
+}
+/* Sitting by the campfire: the screen fades out while the time of day changes */
+.village-fade {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #05060a;
+  opacity: 0;
+  transition: opacity 0.7s ease;
+  pointer-events: auto;   /* (no taps while sitting) */
+}
+.village-fade.is-on { opacity: 1; }
+.village-fade-text {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--accent-hi);
+}
 .village-top {
   position: absolute;
   top: calc(14px + env(safe-area-inset-top, 0px));
@@ -2279,7 +2341,7 @@ body.settings-open #inventory-button {
 .village-panel {
   position: absolute;
   left: 50%;
-  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   width: min(460px, calc(100% - 32px));
   padding: 14px 18px;

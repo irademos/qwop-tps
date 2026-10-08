@@ -3702,7 +3702,7 @@ async function initCore(runtimeContext) {
   }
 
   // Phone Sword: time-of-day choice ('random', 'day', 'night') and current stage night flag
-  let _psTimePref = 'random';
+  let _psTimePref = 'day';   // 'day' | 'night' — set at the village campfire
   let _psCurrentIsNight = false;
 
   // Phone Sword: song shuffling
@@ -3926,7 +3926,7 @@ async function initCore(runtimeContext) {
       }
     }
   };
-  // Lighting preview for the next stage's time of day (random shows day)
+  // Lighting preview for the next stage's time of day
   const _psPreviewTime = () => {
     const mode = _psTimePref === 'night' ? 'night' : 'day';
     lastAutoMode = mode;
@@ -4053,8 +4053,6 @@ async function initCore(runtimeContext) {
     // Determine day/night for this stage (Classic is always daytime)
     if (_classicMode) {
       _psCurrentIsNight = false;
-    } else if (_psTimePref === 'random') {
-      _psCurrentIsNight = Math.random() < 0.5;
     } else {
       _psCurrentIsNight = _psTimePref === 'night';
     }
