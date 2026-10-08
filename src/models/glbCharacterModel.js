@@ -59,6 +59,10 @@ export const glbCharacterConfig = {
   throwClip: '/models/animations/Throw.fbx', // bomb thrower's throw (playAction); right-handed
   clipFade: 0.2,           // seconds to crossfade walk <-> idle
   targetHeight: 1.0,       // world height of the character (bind pose)
+  // Per-model multiplier on targetHeight, keyed by url (every model is otherwise normalised to the same height)
+  heightScaleByUrl: {
+    '/models/glb_characters/tree_creature.glb': 1.2,
+  },
 
   // Arm IK
   armMaxStretch: 5,        // arms may stretch up to this multiple of their rest length
@@ -417,8 +421,9 @@ export class GLBCharacter {
  * @returns {Promise<{ container: THREE.Group, character: GLBCharacter }>}
  */
 export async function createGLBCharacterInstance(opts = {}) {
-  const targetHeight = opts.targetHeight ?? glbCharacterConfig.targetHeight;
   const url = opts.url ?? glbCharacterConfig.url;
+  const targetHeight = (opts.targetHeight ?? glbCharacterConfig.targetHeight)
+    * (glbCharacterConfig.heightScaleByUrl[url] ?? 1);
   const gltf = await getCharacterGLTF(url);
 
   const scene = SkeletonUtils.clone(gltf.scene);
