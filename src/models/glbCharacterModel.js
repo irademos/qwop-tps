@@ -62,6 +62,7 @@ export const glbCharacterConfig = {
   // Per-model multiplier on targetHeight, keyed by url (every model is otherwise normalised to the same height)
   heightScaleByUrl: {
     '/models/glb_characters/tree_creature.glb': 1.4,
+    '/models/glb_characters/gemhorn_rigged.glb': 1.4,
   },
 
   // Arm IK
