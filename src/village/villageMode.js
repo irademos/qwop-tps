@@ -8,10 +8,13 @@
 //     player's place, the old character goes to idle in their spot.
 //   • Campfire in front of the characters — tap it to sit until night / morning (the next
 //     stage's time of day).
-//   • Villager — stands on the next stage's path with a quest (VILLAGER_QUESTS, one per
-//     stage for the first ten, then a rotating few). Tap him to talk: "accept" starts the
-//     stage (after the sword calibration popup, ctx.confirmStart), "not now" goes back to
-//     the village. He steps aside when the stage starts.
+//   • Villager (Pemberton) — stands on the next stage's path with a quest (VILLAGER_QUESTS,
+//     the story: one per stage for the first ten, then the fight with him on PEMBERTON_STAGE,
+//     then a rotating few). Tap him to talk: "accept" starts the stage (after the sword
+//     calibration popup, ctx.confirmStart), "not now" goes back to the village. He steps
+//     aside when the stage starts — except on PEMBERTON_STAGE (`finalBoss`): there he stands
+//     PEMBERTON_SCALE× tall, glowing red, and the stage's boss takes his place (ctx.onStart's
+//     bossSpot).
 // Bottom row: ‹ › to the neighbouring station (STATION_ORDER) either side of the back button —
 // ⬅ Lobby in the village view, ⬅ Village at a station (⬅ Lobby then moves to the top left).
 // Phones (portrait / touch): no high overview — the home view is low behind the player, toward
@@ -26,6 +29,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 import { stylizeObject } from '../environment/artStyle.js';
+import { PEMBERTON_SCALE, addRedGlow } from '../characters/pembertonBoss.js';
 
 // ── Props ───────────────────────────────────────────────────────────────────
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
@@ -48,57 +52,105 @@ const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall un
 const MERCHANT_CHARACTER_URL = glbCharacterConfig.wizardUrl;
 const VILLAGER_CHARACTER_URL = glbCharacterConfig.villagerUrl;
 
-// The villager's quest for each stage (stage 1 = index 0); after these, VILLAGER_REPEAT_QUESTS
-// take turns. `title` also shows on the stage banner.
+// The villager's quest for each stage (stage 1 = index 0) — the story of Pemberton, who keeps
+// sending the player down the road against "monsters" (and turns up in every village: he
+// keeps a very fast carriage). `place` = the village the player is in (top chip),
+// `title` = the quest (also on the stage banner), `lines` = the conversation ([who, text],
+// who = 'them' (the speaker) / 'you'). Stage PEMBERTON_STAGE is the fight with him
+// (FINAL_BOSS_QUEST); after it VILLAGER_REPEAT_QUESTS take turns.
+const PEMBERTON = { speaker: 'Pemberton', emoji: '🎩' };
 const VILLAGER_QUESTS = [
-  { title: 'Deliver the note',
-    text: 'Ah, a traveller with a sword! I need to send a note to the next village, but the road is crawling with monsters. Can you deliver it for me? Watch out for the monsters out there.',
-    accept: 'Let’s go — I’ll deliver it!' },
-  { title: 'Deliver the supplies',
-    text: 'Our neighbours down the road are running out of bread and lamp oil. I’ve packed a crate of supplies — will you carry it to them? Monsters have been ambushing every cart that tries.',
-    accept: 'Hand it over, I’ll take it!' },
-  { title: 'Protect the village',
-    text: 'There’s an attack on the village! Monsters are marching up the road right now — please, protect the village and stop them before they reach the gate!',
-    accept: 'I’ll hold them off!' },
-  { title: 'Find the lost goat',
-    text: 'My goat Clover wandered off down the path this morning and never came back. Could you bring her home? Mind the monsters — they’ve been chasing anything that moves.',
-    accept: 'Let’s go find her!' },
-  { title: 'Fetch the medicine',
-    text: 'A fever is going round the village, and only the healer in the next town has the cure. Please fetch the medicine for us — quickly, before it’s too late!',
-    accept: 'I’ll be right back!' },
-  { title: 'Clear the trade road',
-    text: 'The merchant’s cart is due tomorrow, but monsters have taken over the trade road. If they’re still there, he won’t get through. Can you clear the road?',
-    accept: 'Consider it cleared!' },
-  { title: 'Drive out the bombers',
-    text: 'Those bomb throwers have set up camp past the hill. Every night we hear explosions, and the chickens have stopped laying. Drive them out, would you?',
-    accept: 'Let’s go, I’ll help!' },
-  { title: 'Check on my daughter',
-    text: 'My daughter lives in the next village and I haven’t heard from her in weeks. Take her this letter and make sure she’s safe? The road is more dangerous than ever.',
-    accept: 'I’ll find her!' },
-  { title: 'Thin the army',
-    text: 'A scout saw a huge army of monsters gathering down the road. If they all come at once we’re finished. Go out and thin their ranks before they reach us!',
-    accept: 'Leave it to me!' },
-  { title: 'Defend the village',
-    text: 'This is it — their leader is coming for the village himself, with everything they’ve got. You’re our only hope, hero. Will you stand with us?',
-    accept: 'I’ll stand with you!' },
+  { place: 'Millbrook', title: 'Carry the letter to Thornwick',
+    lines: [
+      ['them', 'Ah, a traveler! Splendid. Would you carry this letter to Thornwick for me? Do watch the road, though. Monsters about. Nasty business.'],
+      ['you', 'Monsters?'],
+      ['them', 'Nothing a strong arm can’t handle. There’s a coin in it for you.'],
+    ],
+    accept: 'I’ll take the letter' },
+  { place: 'Thornwick', title: 'Clear the granaries at Ashford',
+    lines: [
+      ['them', 'You made it! Don’t look so surprised, I keep a very fast carriage. Now, those creatures have been getting into my grain stores near Ashford. Be a friend and clear them out?'],
+    ],
+    accept: 'I’ll clear them out' },
+  { place: 'Ashford', title: 'Clear the quarry at Greyhollow',
+    lines: [
+      ['them', 'My granaries are safe again. Funny how the beasts only ever go after the grain, isn’t it? Greedy little things. I hear there’s a whole nest in the old quarry at Greyhollow.'],
+    ],
+    accept: 'On my way' },
+  { place: 'Greyhollow', title: 'Clear the docks at Saltmere',
+    lines: [
+      ['you', 'One of them was holding a pickaxe.'],
+      ['them', 'Monsters will use anything as a weapon. The quarry’s mine now, by the way. Bought it from the bank, after the bank took it from people who couldn’t pay the bank. Marvelous system. Now, the fishing docks at Saltmere need clearing. I’ve plans for those docks.'],
+    ],
+    accept: 'I’ll go' },
+  { place: 'Saltmere', title: 'Clear the mill at Fenwick',
+    lines: [
+      ['you', 'One of them tried to speak to me.'],
+      ['them', 'Speak? Growl, surely. Mimicry, friend. Clever beasts pick up sounds. Don’t let it get under your skin. They’ve got into my mill at Fenwick now — off you go.'],
+    ],
+    accept: 'I’ll go' },
+  { place: 'Fenwick', title: 'Clear the camp at Riverbend',
+    lines: [
+      ['them', 'They’ve been painting on my mill walls. “WAGES.” Can you imagine?'],
+      ['you', 'Monsters can write?'],
+      ['them', 'Learned it somewhere, I suppose. Don’t encourage them. There’s a camp by the river at Riverbend. Squatters. I mean, monsters.'],
+    ],
+    accept: '…I’ll go' },
+  { place: 'Riverbend', title: 'Clear the road to Old Hearth',
+    lines: [
+      ['you', 'There were small ones in that camp.'],
+      ['them', 'Yes, well. They breed. That’s rather the whole problem, isn’t it? Here, double the usual. You’ve earned it. Old Hearth next — same business.'],
+    ],
+    accept: '…Fine' },
+  { place: 'Old Hearth', title: 'Clear Highcrest Gate',
+    lines: [
+      ['them', 'My man tells me you hesitated back there. I’d hate to think you were getting sentimental. Every village you’ve walked through, I own now. Every one. Think what we could do together. Just Highcrest Gate left.'],
+    ],
+    accept: 'One more' },
+  { place: 'Highcrest Gate', title: 'Go to Gould Manor',
+    lines: [
+      ['you', 'I found your ledger. Every “monster” I killed had a name, and a debt next to it.'],
+      ['them', 'Debts are debts, friend. I didn’t make the rules. I just bought them. Now, please don’t be tiresome.'],
+    ],
+    accept: 'I’m coming for you, Pemberton' },
+  { place: 'Gould Manor', title: 'Get past the guards',
+    lines: [
+      ['them', 'Look at you. Blade dripping, boots muddy, breaking into a man’s home uninvited. If anyone here looks like a monster, it certainly isn’t me.'],
+      ['action', 'He rings a bell.'],
+      ['them', 'GUARDS! There’s a monster in the house!'],
+    ],
+    accept: 'Bring them on' },
 ];
+// The stage after the guards: Pemberton himself (1.5× size, glowing red — see `finalBoss`)
+export const PEMBERTON_STAGE = VILLAGER_QUESTS.length + 1;
+const FINAL_BOSS_QUEST = {
+  place: 'Gould Manor', title: 'Settle the account',
+  lines: [
+    ['them', 'Hired guards. Never worth the coin. Very well — if a thing’s worth doing, a gentleman does it himself.'],
+    ['you', 'It’s over, Pemberton.'],
+    ['them', 'Over? I own the roads, the mills, the docks — the very ground you’re standing on. Come, then, monster. Let’s settle your account.'],
+  ],
+  accept: 'Let’s settle it',
+};
+// After Pemberton: the villages are free, the road still isn't
+const VILLAGER = { speaker: 'Villager', emoji: '🧑‍🌾' };
 const VILLAGER_REPEAT_QUESTS = [
   { title: 'Patrol the road',
-    text: 'More monsters on the road again, I’m afraid. They just keep coming. Could you patrol it and send them packing?',
+    lines: [['them', 'With Pemberton gone, the debts are torn up and the mills pay wages again. But real monsters still roam the road. Could you patrol it and send them packing?']],
     accept: 'Let’s go, I’ll help!' },
   { title: 'Deliver the mail',
-    text: 'The mail’s piled up again and the post rider won’t go out alone. Could you take this bag of letters to the next village? Watch out for the monsters.',
+    lines: [['them', 'The mail’s piled up again and the post rider won’t go out alone. Could you take this bag of letters to the next village? Watch out for the monsters.']],
     accept: 'I’ll deliver it!' },
   { title: 'Protect the village',
-    text: 'They’re attacking again! Please, protect the village!',
+    lines: [['them', 'They’re attacking again! Please, protect the village!']],
     accept: 'I’ll hold them off!' },
 ];
 const VILLAGER_DECLINE = 'Not right now';
 export function villagerQuestForStage(stage) {
-  const i = Math.max(1, Math.floor(stage) || 1) - 1;
-  return i < VILLAGER_QUESTS.length
-    ? VILLAGER_QUESTS[i]
-    : VILLAGER_REPEAT_QUESTS[(i - VILLAGER_QUESTS.length) % VILLAGER_REPEAT_QUESTS.length];
+  const s = Math.max(1, Math.floor(stage) || 1);
+  if (s <= VILLAGER_QUESTS.length) return { ...PEMBERTON, ...VILLAGER_QUESTS[s - 1] };
+  if (s === PEMBERTON_STAGE) return { ...PEMBERTON, ...FINAL_BOSS_QUEST, finalBoss: true };
+  return { ...VILLAGER, ...VILLAGER_REPEAT_QUESTS[(s - PEMBERTON_STAGE - 1) % VILLAGER_REPEAT_QUESTS.length] };
 }
 
 // ── Layout (village-local metres: x = right, z = toward the next stage) ────────
@@ -122,6 +174,7 @@ const VILLAGE_FOV = 55;            // the fight camera is very wide; the village
 // Phone station carousel, left → right as seen from the village centre (home = the villager's spot)
 const STATION_ORDER = ['shop', 'villager', 'fire', 'characters'];
 const STATION_NAMES = { shop: '🛒 Shop', villager: '🧑‍🌾 Villager', fire: '🔥 Campfire', characters: '👥 Characters' };
+const FINAL_BOSS_MARKER_BG = 'rgba(220, 38, 38, 0.92)';
 const CAMPFIRE_AHEAD = 0.4;        // m from the characters' group centre toward the lane (they stand behind it)
 const SIT_FADE_MS = 700;           // sitting by the fire: fade out, change the time, fade back in
 const SIT_HOLD_MS = 900;
@@ -407,7 +460,8 @@ const yawToward = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
  *  characters: { roster, get() → { unlocked, selected }, select(key) }
  *  time: { get(), set(pref) }
  *  confirmStart(go)   — the villager's quest was accepted: call go() to start the stage (after calibrating)
- *  onStart(pathAngle)  — start the stage (the player auto-walks along pathAngle)
+ *  onStart(pathAngle, { bossSpot }?) — start the stage (the player auto-walks along pathAngle);
+ *                       bossSpot = { position, yaw } where the villager stood (finalBoss only)
  *  onLobby()           — back to the start screen
  */
 export function createVillage(ctx) {
@@ -425,7 +479,11 @@ export function createVillage(ctx) {
   let right = new THREE.Vector3(-1, 0, 0);
   let pathAngle = 0;
   let stageInfo = null;
-  let quest = VILLAGER_QUESTS[0];
+  let quest = villagerQuestForStage(1);
+  let finalBoss = false;    // PEMBERTON_STAGE: the villager is the boss (big + glowing red)
+  let villagerScale = 1;
+  // (the villager's button is named after whoever gives the quest)
+  const stationName = (key) => (key === 'villager' ? `${quest.emoji} ${quest.speaker}` : STATION_NAMES[key]);
   let buildToken = 0;
 
   let stations = {};        // key → station
@@ -550,15 +608,18 @@ export function createVillage(ctx) {
       pos.y = groundY(pos.x, pos.z, center.y);
       const facing = _v.subVectors(center, pos).setY(0).normalize().clone();
       // Quest marker over his head (always shown: it says "talk to me")
-      const marker = textSprite('❗', { height: 0.42, bg: 'rgba(244, 196, 84, 0.92)', border: 'rgba(255,255,255,0.9)', pad: 14 });
-      marker.position.copy(pos).add(_v2.set(0, 1.45, 0));
-      const label = textSprite(`🧑‍🌾 ${quest.title}`, { height: 0.3 });
-      label.position.copy(pos).add(_v2.set(0, 1.85, 0));
-      const ring = makeRing(0.6);
+      const sc = villagerScale;
+      const marker = finalBoss
+        ? textSprite('⚔️', { height: 0.42, bg: FINAL_BOSS_MARKER_BG, border: 'rgba(255,255,255,0.9)', pad: 14 })
+        : textSprite('❗', { height: 0.42, bg: 'rgba(244, 196, 84, 0.92)', border: 'rgba(255,255,255,0.9)', pad: 14 });
+      marker.position.copy(pos).add(_v2.set(0, 1.45 * sc, 0));
+      const label = textSprite(`${quest.emoji} ${quest.title}`, { height: 0.3 });
+      label.position.copy(pos).add(_v2.set(0, 1.45 * sc + 0.4, 0));
+      const ring = makeRing(0.6 * sc);
       ring.position.set(pos.x, pos.y + 0.03, pos.z);
       // Bigger tap target than the model
-      const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.3, 10), new THREE.MeshBasicMaterial({ visible: false }));
-      hit.position.copy(pos).add(_v2.set(0, 0.65, 0));
+      const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.45 * sc, 0.45 * sc, 1.3 * sc, 10), new THREE.MeshBasicMaterial({ visible: false }));
+      hit.position.copy(pos).add(_v2.set(0, 0.65 * sc, 0));
       root.add(marker, label, ring, hit);
       overviewLabels.push(label);
       stations.villager = { key: 'villager', pos: pos.clone(), facing, marker, markerY: marker.position.y, label, ring, hit };
@@ -566,7 +627,7 @@ export function createVillage(ctx) {
       const npc = { key: 'villager', container: null, character: null, walk: null, villager: true };
       npcs.push(npc);
       stations.villager.npc = npc;
-      createGLBCharacterInstance({ targetHeight: 1.0, url: VILLAGER_CHARACTER_URL, armIK: false }).then(({ container, character }) => {
+      createGLBCharacterInstance({ targetHeight: villagerScale, url: VILLAGER_CHARACTER_URL, armIK: false }).then(({ container, character }) => {
         if (!alive() || !npcs.includes(npc)) { character.dispose(); return; }
         npc.container = container;
         npc.character = character;
@@ -575,7 +636,11 @@ export function createVillage(ctx) {
         character.setMoving(false);
         root.add(container);
         makeClickable(container, { station: 'villager' });
-        if (leaving) stepVillagerAside();
+        if (finalBoss) npc.glow = addRedGlow(container, { height: villagerScale });
+        if (leaving) {
+          if (finalBoss) removeNpc(npc);
+          else stepVillagerAside();
+        }
       }).catch((e) => console.warn('[Village] villager load failed:', e));
     }
 
@@ -781,6 +846,8 @@ export function createVillage(ctx) {
       if (npc.label) disposeOwned(npc.label);
     }
     npc.character?.dispose();
+    npc.glow?.dispose();
+    npc.glow = null;
   }
 
   // ── Focus / camera targets ──
@@ -839,9 +906,10 @@ export function createVillage(ctx) {
       // doesn't block him)
       const s = stations.villager;
       const side = _v.crossVectors(_UP, s.facing).normalize().clone();
-      const target = _v2.copy(s.pos).addScaledVector(s.facing, 0.5).addScaledVector(side, -0.2).add(_v.set(0, 0.6, 0)).clone();
+      const sc = villagerScale;
+      const target = _v2.copy(s.pos).addScaledVector(s.facing, 0.5 * sc).addScaledVector(side, -0.2 * sc).add(_v.set(0, 0.6 * sc, 0)).clone();
       const dir = side.multiplyScalar(1.1).addScaledVector(s.facing, 0.7).addScaledVector(_UP, 0.3);
-      setView(target, dir, 1.1, 0.8, 2.4);
+      setView(target, dir, 1.1 * sc, 0.8, 2.4);
     } else if (focus === 'fire') {
       // The fire with the characters standing behind it
       const s = stations.fire;
@@ -869,7 +937,7 @@ export function createVillage(ctx) {
       // In front of him, a little to the side the camera isn't on
       const s = stations.villager;
       const side = _v2.crossVectors(_UP, s.facing).normalize();
-      const p = _v.copy(s.pos).addScaledVector(s.facing, 1.0).addScaledVector(side, -0.45).clone();
+      const p = _v.copy(s.pos).addScaledVector(s.facing, villagerScale).addScaledVector(side, -0.45).clone();
       return { to: p, face: s.pos.clone() };
     }
     const s = stations[key];
@@ -916,8 +984,8 @@ export function createVillage(ctx) {
     if (!show) return;
     const i = stationIndex();
     const n = STATION_ORDER.length;
-    el.navPrev.textContent = `‹ ${STATION_NAMES[STATION_ORDER[(i - 1 + n) % n]]}`;
-    el.navNext.textContent = `${STATION_NAMES[STATION_ORDER[(i + 1) % n]]} ›`;
+    el.navPrev.textContent = `‹ ${stationName(STATION_ORDER[(i - 1 + n) % n])}`;
+    el.navNext.textContent = `${stationName(STATION_ORDER[(i + 1) % n])} ›`;
   }
 
   // Bottom middle: ⬅ Lobby in the village view, ⬅ Village at a station (⬅ Lobby then top left)
@@ -929,9 +997,11 @@ export function createVillage(ctx) {
 
   // Bottom panel: what to do at the current station
   function refreshPanel() {
+    // (text: a string, or nodes — the villager's conversation)
     const show = (title, text, actions = []) => {
       el.panelTitle.textContent = title;
-      el.panelText.textContent = text;
+      if (Array.isArray(text)) el.panelText.replaceChildren(...text);
+      else el.panelText.textContent = text;
       el.panelActions.replaceChildren(...actions);
       el.panel.classList.remove('hidden');
     };
@@ -944,11 +1014,12 @@ export function createVillage(ctx) {
       return b;
     };
     if (!focus) {
-      show(`Stage ${stageInfo.stage}`, compact
-        ? 'Swipe or tap ‹ › for the shop, the campfire and characters — talk to the villager when you’re ready to fight.'
-        : 'Tap the shop, the campfire or a character — talk to the villager ❗ when you’re ready to fight.');
+      const who = quest.speaker === 'Villager' ? 'the villager' : quest.speaker;
+      show(finalBoss ? 'Final stage' : `Stage ${stageInfo.stage}`, compact
+        ? `Swipe or tap ‹ › for the shop, the campfire and characters — talk to ${who} when you’re ready to fight.`
+        : `Tap the shop, the campfire or a character — talk to ${who} ${finalBoss ? '⚔️' : '❗'} when you’re ready to fight.`);
     } else if (focus === 'villager') {
-      show(`🧑‍🌾 Villager — ${quest.title}`, `“${quest.text}”`, [
+      show(`${quest.emoji} ${quest.speaker} — ${quest.title}`, dialogueNodes(), [
         btn(quest.accept, () => requestStart()),
         btn(VILLAGER_DECLINE, () => unfocus(), 'ui-btn-secondary'),
       ]);
@@ -969,6 +1040,23 @@ export function createVillage(ctx) {
       show('🔥 Campfire', `Next stage: ${cur.label}. Sit by the fire to pass the time.`,
         [btn(next.button, () => sitUntil(next))]);
     }
+  }
+
+  // The villager's conversation: one line per speaker turn ('action' = a stage direction)
+  function dialogueNodes() {
+    return quest.lines.map(([who, text]) => {
+      const line = document.createElement('div');
+      line.className = `village-line village-line-${who}`;
+      if (who === 'action') {
+        line.textContent = text;
+        return line;
+      }
+      const name = document.createElement('span');
+      name.className = 'village-line-who';
+      name.textContent = who === 'you' ? 'You' : quest.speaker;
+      line.append(name, ` ${text}`);
+      return line;
+    });
   }
 
   // ── Shop ──
@@ -1273,6 +1361,14 @@ export function createVillage(ctx) {
     const { controls } = ctx.getPlayer();
     if (controls) controls.yaw = Math.atan2(fwd.x, fwd.z);
     showBanner();
+    if (finalBoss) {
+      // Pemberton doesn't step aside: the stage's boss takes his place
+      const npc = v?.npc;
+      const bossSpot = v ? { position: v.pos.clone(), yaw: npc?.container?.rotation.y ?? Math.atan2(v.facing.x, v.facing.z) } : null;
+      if (npc) removeNpc(npc);
+      ctx.onStart(pathAngle, { bossSpot });
+      return;
+    }
     stepVillagerAside();
     ctx.onStart(pathAngle);
   }
@@ -1291,8 +1387,10 @@ export function createVillage(ctx) {
   }
 
   function showBanner() {
-    el.bannerTitle.textContent = stageInfo.stage <= 50 ? `STAGE ${stageInfo.stage}` : 'FINAL STAGE';
-    el.bannerSub.textContent = `${quest.title} · Defeat ${stageInfo.count} enemies`;
+    el.bannerTitle.textContent = finalBoss || stageInfo.stage > 50 ? 'FINAL STAGE' : `STAGE ${stageInfo.stage}`;
+    el.bannerSub.textContent = finalBoss
+      ? `${quest.title} · Defeat ${quest.speaker}`
+      : `${quest.title} · Defeat ${stageInfo.count} enemies`;
     el.bannerBoss.textContent = stageInfo.boss || '';
     el.banner.classList.remove('hidden', 'village-banner-out');
     void el.banner.offsetWidth;
@@ -1319,6 +1417,8 @@ export function createVillage(ctx) {
     starting = false;
     stageInfo = info;
     quest = villagerQuestForStage(info.stage);
+    finalBoss = !!info.finalBoss;
+    villagerScale = finalBoss ? PEMBERTON_SCALE : 1;
     pathAngle = info.pathAngle;
     buildToken += 1;
     labelScale = camera.aspect < 0.8 ? 1.6 : camera.aspect < 1.2 ? 1.25 : 1;
@@ -1353,7 +1453,7 @@ export function createVillage(ctx) {
     void ctx.shop.load?.().then(() => refreshCard());
     ui.classList.remove('hidden');
     el.banner.classList.add('hidden');
-    el.stage.textContent = info.stage <= 50 ? `Stage ${info.stage}` : 'Final stage';
+    el.stage.textContent = `${finalBoss || info.stage > 50 ? 'Final stage' : `Stage ${info.stage}`}${quest.place ? ` · ${quest.place}` : ''}`;
     if (approaching) {
       refreshNav();
       el.back.classList.add('hidden');
@@ -1486,7 +1586,8 @@ export function createVillage(ctx) {
           camera.lookAt(camLook);
         }
       }
-      if (far || now - leaving.startedMs > LEAVE_REMOVE_MS) finishLeaving();
+      // (the fight with Pemberton is right here: the props stay until the next village)
+      if (far || (!finalBoss && now - leaving.startedMs > LEAVE_REMOVE_MS)) finishLeaving();
       return;
     }
 
@@ -1505,6 +1606,7 @@ export function createVillage(ctx) {
       vil.marker.visible = focus !== 'villager';
       const s = 1 + Math.sin(t * 3) * 0.06;
       vil.ring.scale.set(s, s, s);
+      vil.npc?.glow?.update(t);
     }
     if (campfire) updateCampfire(campfire, t);
     itemEntries.forEach((entry, i) => {
