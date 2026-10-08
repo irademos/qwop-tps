@@ -8,12 +8,14 @@
 //     player's place, the old character goes to idle in their spot.
 //   • Campfire in front of the characters — tap it to sit until night / morning (the next
 //     stage's time of day).
-//   • Arrow — points along the next stage's path; tap it to start the stage (after the
-//     sword calibration popup, ctx.confirmStart).
+//   • Villager — stands on the next stage's path with a quest (VILLAGER_QUESTS, one per
+//     stage for the first ten, then a rotating few). Tap him to talk: "accept" starts the
+//     stage (after the sword calibration popup, ctx.confirmStart), "not now" goes back to
+//     the village. He steps aside when the stage starts.
 // Bottom row: ‹ › to the neighbouring station (STATION_ORDER) either side of the back button —
 // ⬅ Lobby in the village view, ⬅ Village at a station (⬅ Lobby then moves to the top left).
-// Phones (portrait / touch): no high overview — the home view is low behind the player, on the
-// arrow; a swipe also moves between the stations.
+// Phones (portrait / touch): no high overview — the home view is low behind the player, toward
+// the villager; a swipe also moves between the stations.
 // After a stage win it can be built a little way ahead, the player walking in (`approach`).
 //
 // Game access goes through `ctx` (villageCtx in bootstrapGameApp.js); the shop logic
@@ -44,26 +46,82 @@ const MANA_POTION_OFFSET = new THREE.Vector3(-0.15, 100.0, 0.05);
 const STALL_UNIT = MARKET_STALL_SIZE * VILLAGE_PROP_SCALE; // metres per stall unit
 const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall units, measured) — items stand on it
 const MERCHANT_CHARACTER_URL = glbCharacterConfig.wizardUrl;
+const VILLAGER_CHARACTER_URL = glbCharacterConfig.villagerUrl;
+
+// The villager's quest for each stage (stage 1 = index 0); after these, VILLAGER_REPEAT_QUESTS
+// take turns. `title` also shows on the stage banner.
+const VILLAGER_QUESTS = [
+  { title: 'Deliver the note',
+    text: 'Ah, a traveller with a sword! I need to send a note to the next village, but the road is crawling with monsters. Can you deliver it for me? Watch out for the monsters out there.',
+    accept: 'Let’s go — I’ll deliver it!' },
+  { title: 'Deliver the supplies',
+    text: 'Our neighbours down the road are running out of bread and lamp oil. I’ve packed a crate of supplies — will you carry it to them? Monsters have been ambushing every cart that tries.',
+    accept: 'Hand it over, I’ll take it!' },
+  { title: 'Protect the village',
+    text: 'There’s an attack on the village! Monsters are marching up the road right now — please, protect the village and stop them before they reach the gate!',
+    accept: 'I’ll hold them off!' },
+  { title: 'Find the lost goat',
+    text: 'My goat Clover wandered off down the path this morning and never came back. Could you bring her home? Mind the monsters — they’ve been chasing anything that moves.',
+    accept: 'Let’s go find her!' },
+  { title: 'Fetch the medicine',
+    text: 'A fever is going round the village, and only the healer in the next town has the cure. Please fetch the medicine for us — quickly, before it’s too late!',
+    accept: 'I’ll be right back!' },
+  { title: 'Clear the trade road',
+    text: 'The merchant’s cart is due tomorrow, but monsters have taken over the trade road. If they’re still there, he won’t get through. Can you clear the road?',
+    accept: 'Consider it cleared!' },
+  { title: 'Drive out the bombers',
+    text: 'Those bomb throwers have set up camp past the hill. Every night we hear explosions, and the chickens have stopped laying. Drive them out, would you?',
+    accept: 'Let’s go, I’ll help!' },
+  { title: 'Check on my daughter',
+    text: 'My daughter lives in the next village and I haven’t heard from her in weeks. Take her this letter and make sure she’s safe? The road is more dangerous than ever.',
+    accept: 'I’ll find her!' },
+  { title: 'Thin the army',
+    text: 'A scout saw a huge army of monsters gathering down the road. If they all come at once we’re finished. Go out and thin their ranks before they reach us!',
+    accept: 'Leave it to me!' },
+  { title: 'Defend the village',
+    text: 'This is it — their leader is coming for the village himself, with everything they’ve got. You’re our only hope, hero. Will you stand with us?',
+    accept: 'I’ll stand with you!' },
+];
+const VILLAGER_REPEAT_QUESTS = [
+  { title: 'Patrol the road',
+    text: 'More monsters on the road again, I’m afraid. They just keep coming. Could you patrol it and send them packing?',
+    accept: 'Let’s go, I’ll help!' },
+  { title: 'Deliver the mail',
+    text: 'The mail’s piled up again and the post rider won’t go out alone. Could you take this bag of letters to the next village? Watch out for the monsters.',
+    accept: 'I’ll deliver it!' },
+  { title: 'Protect the village',
+    text: 'They’re attacking again! Please, protect the village!',
+    accept: 'I’ll hold them off!' },
+];
+const VILLAGER_DECLINE = 'Not right now';
+export function villagerQuestForStage(stage) {
+  const i = Math.max(1, Math.floor(stage) || 1) - 1;
+  return i < VILLAGER_QUESTS.length
+    ? VILLAGER_QUESTS[i]
+    : VILLAGER_REPEAT_QUESTS[(i - VILLAGER_QUESTS.length) % VILLAGER_REPEAT_QUESTS.length];
+}
 
 // ── Layout (village-local metres: x = right, z = toward the next stage) ────────
 // Skinny: the shop and the characters face each other across a lane (turned a little back
-// toward the village centre), the arrow at its far end; the campfire is in front of the characters
+// toward the village centre), the villager at its far end; the campfire is in front of the characters
 const LAYOUT = {
   stall: new THREE.Vector3(-2.4, 0, 3.6),
   stallFaces: new THREE.Vector3(1.5, 0, 1.6),      // the stall's front looks at this point
   chestSide: 1.45,                 // chest: this far beside the stall (toward the centre)
   characters: new THREE.Vector3(2.4, 0, 3.6),
   charactersFace: new THREE.Vector3(-1.5, 0, 1.6), // the group faces this point
-  arrow: new THREE.Vector3(0, 0.3, 7.8),
+  villager: new THREE.Vector3(0, 0, 7.8),
+  villagerAside: new THREE.Vector3(1.7, 0, 8.4),   // where he steps to when the stage starts
 };
 const CHARACTER_ARC_RADIUS = 1.35;
 const PLAYER_WALK_SPEED = 2.4;     // m/s
 const NPC_WALK_SPEED = 1.7;        // m/s
+const VILLAGER_ASIDE_SPEED = 3.2;  // m/s — out of the player's way when the stage starts
 const CAMERA_LERP = 3.2;           // 1/s
 const VILLAGE_FOV = 55;            // the fight camera is very wide; the village is framed tighter
-// Phone station carousel, left → right as seen from the village centre (null = home: the arrow)
-const STATION_ORDER = ['shop', null, 'fire', 'characters'];
-const STATION_NAMES = { shop: '🛒 Shop', null: '➜ Next stage', fire: '🔥 Campfire', characters: '👥 Characters' };
+// Phone station carousel, left → right as seen from the village centre (home = the villager's spot)
+const STATION_ORDER = ['shop', 'villager', 'fire', 'characters'];
+const STATION_NAMES = { shop: '🛒 Shop', villager: '🧑‍🌾 Villager', fire: '🔥 Campfire', characters: '👥 Characters' };
 const CAMPFIRE_AHEAD = 0.4;        // m from the characters' group centre toward the lane (they stand behind it)
 const SIT_FADE_MS = 700;           // sitting by the fire: fade out, change the time, fade back in
 const SIT_HOLD_MS = 900;
@@ -229,29 +287,6 @@ function buildItemMesh(kind) {
   return g;
 }
 
-// Flat arrow lying over the ground, pointing along +Z (reads well from the raised camera)
-function makeArrowMesh() {
-  const s = new THREE.Shape();
-  const hw = 0.2;   // half shaft width
-  const hh = 0.55;  // half head width
-  s.moveTo(-hw, -0.8);
-  s.lineTo(hw, -0.8);
-  s.lineTo(hw, 0.05);
-  s.lineTo(hh, 0.05);
-  s.lineTo(0, 0.8);
-  s.lineTo(-hh, 0.05);
-  s.lineTo(-hw, 0.05);
-  s.closePath();
-  const geo = new THREE.ExtrudeGeometry(s, { depth: 0.1, bevelEnabled: true, bevelSize: 0.03, bevelThickness: 0.03, bevelSegments: 2 });
-  geo.rotateX(Math.PI / 2);          // shape +Y (the tip) → +Z, extruded downward
-  const mat = new THREE.MeshStandardMaterial({ color: 0xf4c454, emissive: 0xc98a12, emissiveIntensity: 0.8, roughness: 0.35, metalness: 0.2 });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.castShadow = true;
-  const g = new THREE.Group();
-  g.add(mesh);
-  return g;
-}
-
 function makeRing(radius = 0.5, color = 0xf4c454) {
   const ring = new THREE.Mesh(
     new THREE.RingGeometry(radius * 0.82, radius, 40),
@@ -371,7 +406,7 @@ const yawToward = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
  *          buy(id) → Promise<{ ok, text, emoji? }> }   (id 'treasure_chest' = open the chest)
  *  characters: { roster, get() → { unlocked, selected }, select(key) }
  *  time: { get(), set(pref) }
- *  confirmStart(go)   — the arrow was tapped: call go() to start the stage (after calibrating)
+ *  confirmStart(go)   — the villager's quest was accepted: call go() to start the stage (after calibrating)
  *  onStart(pathAngle)  — start the stage (the player auto-walks along pathAngle)
  *  onLobby()           — back to the start screen
  */
@@ -383,13 +418,14 @@ export function createVillage(ctx) {
   let active = false;
   let leaving = null;       // { startedMs } once the stage walk has begun
   let approaching = false;  // the player is still walking in (built ahead after a stage win)
-  let starting = false;     // arrow tapped, waiting on ctx.confirmStart
+  let starting = false;     // quest accepted, waiting on ctx.confirmStart
   let root = null;          // THREE.Group with everything
   let center = new THREE.Vector3();
   let fwd = new THREE.Vector3(0, 0, 1);
   let right = new THREE.Vector3(-1, 0, 0);
   let pathAngle = 0;
   let stageInfo = null;
+  let quest = VILLAGER_QUESTS[0];
   let buildToken = 0;
 
   let stations = {};        // key → station
@@ -477,7 +513,7 @@ export function createVillage(ctx) {
   el.navPrev.addEventListener('click', () => stepStation(-1));
   el.navNext.addEventListener('click', () => stepStation(1));
 
-  // Phones: low home view on the arrow + station carousel instead of the high overview
+  // Phones: low home view toward the villager + station carousel instead of the high overview
   // (decided per frame: the phone can be turned)
   const isCompact = () => (camera.aspect || 1) < 1 || COARSE_POINTER;
   let compact = false;
@@ -508,24 +544,39 @@ export function createVillage(ctx) {
     const rootRef = root;
     const alive = () => active && token === buildToken && root === rootRef;
 
-    // Arrow toward the next stage
+    // Villager on the next stage's path, facing the village, with this stage's quest
     {
-      const arrow = makeArrowMesh();
-      const pos = local(LAYOUT.arrow.x, 0, LAYOUT.arrow.z);
-      const gy = groundY(pos.x, pos.z, center.y);
-      arrow.position.set(pos.x, gy + LAYOUT.arrow.y, pos.z);
-      arrow.rotation.y = Math.atan2(fwd.x, fwd.z);
-      const label = textSprite(`Stage ${stageInfo.stage}  ➜`, { height: 0.38 });
-      label.position.set(pos.x, gy + LAYOUT.arrow.y + 0.9, pos.z);
-      const ring = makeRing(1.05);
-      ring.position.set(pos.x, gy + 0.03, pos.z);
-      root.add(arrow, label, ring);
+      const pos = local(LAYOUT.villager.x, 0, LAYOUT.villager.z);
+      pos.y = groundY(pos.x, pos.z, center.y);
+      const facing = _v.subVectors(center, pos).setY(0).normalize().clone();
+      // Quest marker over his head (always shown: it says "talk to me")
+      const marker = textSprite('❗', { height: 0.42, bg: 'rgba(244, 196, 84, 0.92)', border: 'rgba(255,255,255,0.9)', pad: 14 });
+      marker.position.copy(pos).add(_v2.set(0, 1.45, 0));
+      const label = textSprite(`🧑‍🌾 ${quest.title}`, { height: 0.3 });
+      label.position.copy(pos).add(_v2.set(0, 1.85, 0));
+      const ring = makeRing(0.6);
+      ring.position.set(pos.x, pos.y + 0.03, pos.z);
+      // Bigger tap target than the model
+      const hit = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.3, 10), new THREE.MeshBasicMaterial({ visible: false }));
+      hit.position.copy(pos).add(_v2.set(0, 0.65, 0));
+      root.add(marker, label, ring, hit);
       overviewLabels.push(label);
-      const st = { key: 'arrow', arrow, label, ring, baseY: arrow.position.y, basePos: arrow.position.clone() };
-      stations.arrow = st;
-      makeClickable(arrow, { station: 'arrow' });
-      makeClickable(label, { station: 'arrow' });
-      makeClickable(ring, { station: 'arrow' });
+      stations.villager = { key: 'villager', pos: pos.clone(), facing, marker, markerY: marker.position.y, label, ring, hit };
+      for (const o of [marker, label, ring, hit]) makeClickable(o, { station: 'villager' });
+      const npc = { key: 'villager', container: null, character: null, walk: null, villager: true };
+      npcs.push(npc);
+      stations.villager.npc = npc;
+      createGLBCharacterInstance({ targetHeight: 1.0, url: VILLAGER_CHARACTER_URL, armIK: false }).then(({ container, character }) => {
+        if (!alive() || !npcs.includes(npc)) { character.dispose(); return; }
+        npc.container = container;
+        npc.character = character;
+        placeOnGround(container, pos, 0);
+        container.rotation.y = Math.atan2(facing.x, facing.z);
+        character.setMoving(false);
+        root.add(container);
+        makeClickable(container, { station: 'villager' });
+        if (leaving) stepVillagerAside();
+      }).catch((e) => console.warn('[Village] villager load failed:', e));
     }
 
     // Characters: the unlocked ones (except the one being played) idle in a little arc
@@ -543,7 +594,9 @@ export function createVillage(ctx) {
       makeClickable(label, { station: 'characters' });
       const { unlocked, selected } = ctx.characters.get();
       const keys = unlocked.filter((k) => k !== selected && ctx.characters.roster[k]);
-      const lockedCount = Object.keys(ctx.characters.roster).length - unlocked.length;
+      // (story characters aren't won from bosses)
+      const lockedCount = Object.entries(ctx.characters.roster)
+        .filter(([k, c]) => !c.story && !unlocked.includes(k)).length;
       if (lockedCount > 0) {
         const sign = textSprite(`🔒 ${lockedCount} more — beat stage bosses`, { height: 0.2, border: 'rgba(255,255,255,0.25)' });
         sign.position.copy(groupCenter).add(_v2.set(0, 1.42, 0));
@@ -747,8 +800,8 @@ export function createVillage(ctx) {
   function computeWantedCamera() {
     const st = focus ? stations[focus] : null;
     if (!st && compact) {
-      // Home: low behind the player, on the arrow (the player stands in the foreground)
-      const target = local(0, 0.55, LAYOUT.arrow.z - 0.6);
+      // Home: low behind the player, toward the villager (the player stands in the foreground)
+      const target = local(0, 0.55, LAYOUT.villager.z - 0.6);
       const dir = _v2.copy(fwd).multiplyScalar(-1).addScaledVector(_UP, 0.25);
       setView(target, dir, 1.9, 1.0, 7.5);
       return;
@@ -781,6 +834,14 @@ export function createVillage(ctx) {
       const target = _v2.copy(s.pos).add(_v.set(0, 0.6, 0)).clone();
       const dir = _v.copy(s.facing).addScaledVector(_UP, compact ? 0.22 : 0.35).clone();
       setView(target, dir, compact ? 1.15 : 1.35, 0.8, 2.2);
+    } else if (focus === 'villager') {
+      // Over the player's shoulder at the villager (from a little to the side, so the player
+      // doesn't block him)
+      const s = stations.villager;
+      const side = _v.crossVectors(_UP, s.facing).normalize().clone();
+      const target = _v2.copy(s.pos).addScaledVector(s.facing, 0.5).addScaledVector(side, -0.2).add(_v.set(0, 0.6, 0)).clone();
+      const dir = side.multiplyScalar(1.1).addScaledVector(s.facing, 0.7).addScaledVector(_UP, 0.3);
+      setView(target, dir, 1.1, 0.8, 2.4);
     } else if (focus === 'fire') {
       // The fire with the characters standing behind it
       const s = stations.fire;
@@ -802,6 +863,13 @@ export function createVillage(ctx) {
       const s = stations.characters;
       const sideDir = _v2.crossVectors(_UP, s.facing).normalize();
       const p = _v.copy(s.pos).addScaledVector(s.facing, 1.5).addScaledVector(sideDir, -2.3).clone();
+      return { to: p, face: s.pos.clone() };
+    }
+    if (key === 'villager') {
+      // In front of him, a little to the side the camera isn't on
+      const s = stations.villager;
+      const side = _v2.crossVectors(_UP, s.facing).normalize();
+      const p = _v.copy(s.pos).addScaledVector(s.facing, 1.0).addScaledVector(side, -0.45).clone();
       return { to: p, face: s.pos.clone() };
     }
     const s = stations[key];
@@ -834,19 +902,19 @@ export function createVillage(ctx) {
   // Phones: ‹ › / swipe to the neighbouring station
   function stepStation(dir) {
     if (!active || leaving || approaching || sitting) return;
-    const i = STATION_ORDER.indexOf(focus);
+    const i = stationIndex();
     const n = STATION_ORDER.length;
-    const key = STATION_ORDER[(Math.max(i, 0) + dir + n) % n];
-    if (key === null) unfocus();
-    else focusStation(key);
+    focusStation(STATION_ORDER[(i + dir + n) % n]);
   }
+  // (home = the villager's place in the carousel)
+  const stationIndex = () => Math.max(STATION_ORDER.indexOf(focus ?? 'villager'), 0);
   // ‹ › name the neighbouring stations
   function refreshNav() {
     const show = active && !leaving && !approaching;
     el.navPrev.classList.toggle('hidden', !show);
     el.navNext.classList.toggle('hidden', !show);
     if (!show) return;
-    const i = Math.max(STATION_ORDER.indexOf(focus), 0);
+    const i = stationIndex();
     const n = STATION_ORDER.length;
     el.navPrev.textContent = `‹ ${STATION_NAMES[STATION_ORDER[(i - 1 + n) % n]]}`;
     el.navNext.textContent = `${STATION_NAMES[STATION_ORDER[(i + 1) % n]]} ›`;
@@ -877,14 +945,19 @@ export function createVillage(ctx) {
     };
     if (!focus) {
       show(`Stage ${stageInfo.stage}`, compact
-        ? 'Swipe or tap ‹ › for the shop, the campfire and characters — tap the arrow when you’re ready to fight.'
-        : 'Tap the shop, the campfire or a character — tap the arrow when you’re ready to fight.');
+        ? 'Swipe or tap ‹ › for the shop, the campfire and characters — talk to the villager when you’re ready to fight.'
+        : 'Tap the shop, the campfire or a character — talk to the villager ❗ when you’re ready to fight.');
+    } else if (focus === 'villager') {
+      show(`🧑‍🌾 Villager — ${quest.title}`, `“${quest.text}”`, [
+        btn(quest.accept, () => requestStart()),
+        btn(VILLAGER_DECLINE, () => unfocus(), 'ui-btn-secondary'),
+      ]);
     } else if (focus === 'shop') {
       if (selectedItem >= 0) el.panel.classList.add('hidden');
       else show('🛒 Shop', 'Tap an item on the stall — or the chest for a mystery prize.');
     } else if (focus === 'characters') {
       const sel = ctx.characters.roster[ctx.characters.get().selected];
-      const any = npcs.some((n) => !n.merchant);
+      const any = npcs.some((n) => !n.merchant && !n.villager);
       show('👥 Characters', any
         ? `Playing as ${sel?.emoji ?? ''} ${sel?.label ?? ''}. Tap a character to switch.`
         : `Playing as ${sel?.emoji ?? ''} ${sel?.label ?? ''}. Beat a stage’s final enemy to unlock their character.`);
@@ -993,7 +1066,7 @@ export function createVillage(ctx) {
 
   // ── Characters ──
   function pickCharacter(npc) {
-    if (swapBusy || !npc.container || npc.merchant) return;
+    if (swapBusy || !npc.container || npc.merchant || npc.villager) return;
     swapBusy = true;
     const player = ctx.getPlayer();
     const oldKey = ctx.characters.get().selected;
@@ -1076,7 +1149,7 @@ export function createVillage(ctx) {
           done?.();
           if (!n.character) continue;
         } else {
-          const step = Math.min(dist, NPC_WALK_SPEED * dt);
+          const step = Math.min(dist, (n.walk.speed ?? NPC_WALK_SPEED) * dt);
           p.x += (dx / dist) * step;
           p.z += (dz / dist) * step;
           p.y = groundY(p.x, p.z, p.y);
@@ -1139,7 +1212,10 @@ export function createVillage(ctx) {
   };
 
   function onTarget(t) {
-    if (t.station === 'arrow') { requestStart(); return; }
+    if (t.station === 'villager') {
+      if (focus !== 'villager') focusStation('villager');
+      return;
+    }
     if (t.station === 'shop') {
       if (Number.isInteger(t.item)) {
         if (focus === 'shop' && selectedItem === t.item && itemEntries[t.item]?.def.chest) { void buySelected(); return; }
@@ -1161,7 +1237,7 @@ export function createVillage(ctx) {
   }
 
   // ── Stage start ──
-  // The arrow: the game first makes the player calibrate the sword (ctx.confirmStart)
+  // Quest accepted: the game first makes the player calibrate the sword (ctx.confirmStart)
   function requestStart() {
     if (leaving || starting) return;
     if (!ctx.confirmStart) { startStage(); return; }
@@ -1189,19 +1265,34 @@ export function createVillage(ctx) {
     ui.querySelector('.village-top')?.classList.add('hidden');
     domElement.style.cursor = '';
     document.body.classList.remove('village-mode'); // fight HUD back
-    // The arrow is in the way of the walk: gone at once; the rest once we're past it
-    const arrow = stations.arrow;
-    if (arrow) [arrow.arrow, arrow.label, arrow.ring].forEach((o) => o.parent?.remove(o));
+    // The villager is in the way of the walk: he steps aside (his marker etc. go at once);
+    // the rest goes once we're past it
+    const v = stations.villager;
+    if (v) [v.marker, v.label, v.ring, v.hit].forEach((o) => o.parent?.remove(o));
     leaving = { startedMs: performance.now() };
     const { controls } = ctx.getPlayer();
     if (controls) controls.yaw = Math.atan2(fwd.x, fwd.z);
     showBanner();
+    stepVillagerAside();
     ctx.onStart(pathAngle);
+  }
+
+  function stepVillagerAside() {
+    const npc = stations.villager?.npc;
+    if (!npc?.character) return;
+    const to = local(LAYOUT.villagerAside.x, 0, LAYOUT.villagerAside.z);
+    npc.walk = {
+      to,
+      speed: VILLAGER_ASIDE_SPEED,
+      // ...and watches the player go
+      onArrive: () => { if (npc.container) npc.container.rotation.y = Math.atan2(-right.x, -right.z); },
+    };
+    npc.character.setMoving(true);
   }
 
   function showBanner() {
     el.bannerTitle.textContent = stageInfo.stage <= 50 ? `STAGE ${stageInfo.stage}` : 'FINAL STAGE';
-    el.bannerSub.textContent = `Defeat ${stageInfo.count} enemies`;
+    el.bannerSub.textContent = `${quest.title} · Defeat ${stageInfo.count} enemies`;
     el.bannerBoss.textContent = stageInfo.boss || '';
     el.banner.classList.remove('hidden', 'village-banner-out');
     void el.banner.offsetWidth;
@@ -1227,6 +1318,7 @@ export function createVillage(ctx) {
     leaving = null;
     starting = false;
     stageInfo = info;
+    quest = villagerQuestForStage(info.stage);
     pathAngle = info.pathAngle;
     buildToken += 1;
     labelScale = camera.aspect < 0.8 ? 1.6 : camera.aspect < 1.2 ? 1.25 : 1;
@@ -1406,16 +1498,13 @@ export function createVillage(ctx) {
     updateNpcs(dt);
 
     overviewLabels.forEach((l) => { l.visible = !focus; });
-    // Idle motion: arrow bob, time emojis float, items on the counter
-    const arrow = stations.arrow;
-    if (arrow) {
-      // Bob up and nudge forward, like it's beckoning
-      arrow.arrow.position.y = arrow.baseY + Math.sin(t * 2.4) * 0.08;
-      const nudge = (Math.sin(t * 3.2) * 0.5 + 0.5) * 0.35;
-      arrow.arrow.position.x = arrow.basePos.x + fwd.x * nudge;
-      arrow.arrow.position.z = arrow.basePos.z + fwd.z * nudge;
+    // Idle motion: quest marker bob, items on the counter
+    const vil = stations.villager;
+    if (vil) {
+      vil.marker.position.y = vil.markerY + Math.sin(t * 2.4) * 0.06;
+      vil.marker.visible = focus !== 'villager';
       const s = 1 + Math.sin(t * 3) * 0.06;
-      arrow.ring.scale.set(s, s, s);
+      vil.ring.scale.set(s, s, s);
     }
     if (campfire) updateCampfire(campfire, t);
     itemEntries.forEach((entry, i) => {

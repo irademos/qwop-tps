@@ -33,6 +33,10 @@
  * hands where the game put them, getPalmWorldPosition() returns a point beside the body,
  * and the hands are drawn by the Wii sword they hold (swordModel.js).
  *
+ * Unrigged GLBs (no skeleton — villager.glb for now) get a StaticRig instead of the
+ * FluffyCharacter: no clips, just a little procedural motion (breathing, a walking bob,
+ * tipping over on death). Once the GLB is rigged it uses the normal path automatically.
+ *
  * armIK: false (createGLBCharacterInstance option) leaves the arms to the clips
  * entirely — for characters with no floating-hand targets (the bomb thrower).
  * solveArm() then only snaps the target to the palm.
@@ -53,6 +57,7 @@ export const glbCharacterConfig = {
   wizardUrl: '/models/glb_characters/wizard.glb',          // Multiplayer roster / Showdown unlock
   treeCreatureUrl: '/models/glb_characters/tree_creature.glb', // Multiplayer roster / Showdown unlock
   mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Multiplayer roster / Showdown unlock
+  villagerUrl: '/models/glb_characters/villager.glb',      // Showdown village quest giver; roster (story unlock). Unrigged for now (StaticRig)
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',
   deathClip: '/models/animations/Flying Back Death.fbx', // played once (whole body, arms included) by playDeath()
@@ -136,6 +141,62 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _stretch = new THREE.Vector3();
 
+// ── Unrigged characters ─────────────────────────────────────────────────────
+
+// Stand-in for FluffyCharacter on a GLB without a skeleton (same surface as GLBCharacter
+// uses). Clips can't play: walk = bob + sway, idle = breathing, death = tip over backwards.
+class StaticRig {
+  constructor(scene) {
+    this.scene = scene;
+    this.rigSpace = scene;
+    this._baseScaleY = scene.scale.y;
+    this._baseY = scene.position.y;
+    this._mode = 'idle';
+    this._t = Math.random() * 10;
+    this._fall = 0;
+  }
+
+  getBone() { return undefined; }
+
+  play(url) {
+    const cfg = glbCharacterConfig;
+    this._mode = url === cfg.deathClip ? 'death' : url === cfg.walkClip ? 'walk' : url === cfg.idleClip ? 'idle' : this._mode;
+    if (this._mode !== 'death') this._fall = 0;
+    return Promise.resolve();
+  }
+
+  get clipProgress() { return 1; }
+  get clipFinished() { return true; }
+
+  animate(dt) {
+    this._t += dt;
+    const s = this.scene;
+    const t = this._t;
+    s.scale.y = this._baseScaleY;
+    s.position.y = this._baseY;
+    s.rotation.set(0, 0, 0);
+    if (this._mode === 'death') {
+      this._fall = Math.min(1, this._fall + dt * 3);
+      s.rotation.x = -Math.PI / 2 * (1 - (1 - this._fall) ** 2);
+    } else if (this._mode === 'walk') {
+      s.position.y = this._baseY + Math.abs(Math.sin(t * 9)) * 0.04 * this._baseScaleY;
+      s.rotation.z = Math.sin(t * 9) * 0.06;
+    } else {
+      s.scale.y = this._baseScaleY * (1 + Math.sin(t * 2.2) * 0.012);
+    }
+  }
+
+  stepFluff() {}
+  setFluffy() {}
+  dispose() {}
+}
+
+const hasSkeleton = (root) => {
+  let found = false;
+  root.traverse((o) => { if (o.isBone) found = true; });
+  return found;
+};
+
 // ── Character ───────────────────────────────────────────────────────────────
 
 export class GLBCharacter {
@@ -144,7 +205,7 @@ export class GLBCharacter {
     // Scene-local stand-in palm points for arms the rig doesn't have (Mii characters)
     this._palmFallback = palmFallback;
     this._armIK = armIK;
-    this.fluffy = new FluffyCharacter(scene, fluffy);
+    this.fluffy = hasSkeleton(scene) ? new FluffyCharacter(scene, fluffy) : new StaticRig(scene);
     this.arms = {};
     scene.updateMatrixWorld(true);
     for (const [hand, side] of Object.entries(ARM_CHAIN_FOR_HAND)) {
@@ -418,7 +479,7 @@ export class GLBCharacter {
  * @param {object} [opts]
  * @param {number} [opts.targetHeight] world height of the character
  * @param {boolean} [opts.armIK] false: the clips drive the arms (no floating-hand IK)
- * @param {string} [opts.url] character GLB (Mixamo skeleton); defaults to glbCharacterConfig.url
+ * @param {string} [opts.url] character GLB (Mixamo skeleton, or unrigged → StaticRig); defaults to glbCharacterConfig.url
  * @returns {Promise<{ container: THREE.Group, character: GLBCharacter }>}
  */
 export async function createGLBCharacterInstance(opts = {}) {

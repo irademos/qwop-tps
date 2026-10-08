@@ -3448,10 +3448,12 @@ async function initCore(runtimeContext) {
     if (profileNameKey) void saveShowdownCharacters(profileNameKey, _psChars);
   };
   let _psStageBoss = null; // { key, unlocks } for the stage on the stage screen / being played
+  // (story characters — MATCH_CHARACTERS[k].story — are never bosses: story mode unlocks them)
   const _psPickBoss = () => {
-    const nonFrog = Object.keys(MATCH_CHARACTERS).filter((k) => k !== PS_ENEMY_BASE_CHARACTER);
+    const fightable = Object.keys(MATCH_CHARACTERS).filter((k) => !MATCH_CHARACTERS[k].story);
+    const nonFrog = fightable.filter((k) => k !== PS_ENEMY_BASE_CHARACTER);
     const locked = nonFrog.filter((k) => !_psChars.unlocked.includes(k));
-    const pool = locked.length ? locked : Object.keys(MATCH_CHARACTERS);
+    const pool = locked.length ? locked : fightable;
     return { key: pool[Math.floor(Math.random() * pool.length)], unlocks: locked.length > 0 };
   };
   const _psBossHearts = (stage) => Math.min(PS_BOSS_MAX_HEARTS,
@@ -3913,7 +3915,7 @@ async function initCore(runtimeContext) {
   };
 
   // Sword Showdown between stages: the village (src/village/villageMode.js) — shop, character
-  // pick, sword calibration, time of day, and the arrow that starts the stage. Created once
+  // pick, sword calibration, time of day, and the villager whose quest starts the stage. Created once
   // the shop (appState) exists; see villageCtx.
   let village = null;
   let deathCarry = null;
@@ -4042,7 +4044,7 @@ async function initCore(runtimeContext) {
     : _psShowVillage(stage, onOk, opts));
 
   // inPlace: start where the player stands (the village) instead of a random spot nearby;
-  // pathAngle: the stage's direction (the village arrow)
+  // pathAngle: the stage's direction (the village path, where the villager stands)
   const _psStartStage = (stage, count, { pathAngle = null, inPlace = false } = {}) => {
     // Never begin a stage dead (e.g. health 0 left over from a previous game)
     if (playerDead || statsState.health <= 0) {
@@ -4436,7 +4438,7 @@ async function initCore(runtimeContext) {
   });
 
   // ── Post-connect calibration popup ──────────────────────────────────────
-  // (also shown before every Showdown stage: the village arrow waits on Okay)
+  // (also shown before every Showdown stage: accepting the villager’s quest waits on Okay)
   let _connectCalibThen = null;
   document.getElementById('phone-sword-connect-calib-ok')?.addEventListener('click', () => {
     window.phoneSwordRecalibrate?.();

@@ -52,9 +52,13 @@ export const MATCH_CHARACTERS = {
   pumpkin: { label: 'Pumpkin', team: 'Pumpkins', emoji: '🎃', url: glbCharacterConfig.pumpkinUrl },
   wizard: { label: 'Wizard', team: 'Wizards', emoji: '🧙', url: glbCharacterConfig.wizardUrl },
   tree: { label: 'Tree Creature', team: 'Trees', emoji: '🌳', url: glbCharacterConfig.treeCreatureUrl },
-  mii1: { label: 'Mii', team: 'Miis', emoji: '🙂', url: glbCharacterConfig.mii1Url }
+  mii1: { label: 'Mii', team: 'Miis', emoji: '🙂', url: glbCharacterConfig.mii1Url },
+  // story: not won from a Showdown boss — unlocked by the (future) story mode; locked
+  // everywhere (Team Battle included) until then, and never given to bots
+  villager: { label: 'Villager', team: 'Villagers', emoji: '🧑‍🌾', url: glbCharacterConfig.villagerUrl, story: true }
 };
 const CHAR_KEYS = Object.keys(MATCH_CHARACTERS);
+const BOT_CHAR_KEYS = CHAR_KEYS.filter((k) => !MATCH_CHARACTERS[k].story);
 
 const MATCH_SIZE = 10;                 // fighters per battle (humans + bots)
 const TEAM_SIZE = MATCH_SIZE / 2;
@@ -273,9 +277,9 @@ export function createMatchMode(ctx) {
       const c = MATCH_CHARACTERS[current];
       const unlocked = isUnlocked(current);
       emoji.textContent = unlocked ? c.emoji : '🔒';
-      name.textContent = unlocked ? c.label : `${c.label} — locked`;
+      name.textContent = unlocked ? c.label : `${c.label} — ${c.story ? 'story mode' : 'locked'}`;
       card.classList.toggle('locked', !unlocked);
-      card.title = unlocked ? '' : 'Unlock this character in Showdown';
+      card.title = unlocked ? '' : c.story ? 'Unlocked in Story mode (coming soon)' : 'Unlock this character in Showdown';
       prev.disabled = isDisabled;
       next.disabled = isDisabled;
       root.classList.toggle('is-disabled', isDisabled);
@@ -549,7 +553,10 @@ export function createMatchMode(ctx) {
     if (phase !== 'setup' || !party?.isHost) return;
     const other = party.teamChars[1 - side];
     let idx = CHAR_KEYS.indexOf(party.teamChars[side]);
-    do { idx = (idx + 1) % CHAR_KEYS.length; } while (CHAR_KEYS[idx] === other);
+    // (story characters only once unlocked)
+    const unlocked = ctx.getUnlockedCharacters?.() ?? [];
+    const allowed = (k) => k !== other && (!MATCH_CHARACTERS[k].story || unlocked.includes(k));
+    do { idx = (idx + 1) % CHAR_KEYS.length; } while (!allowed(CHAR_KEYS[idx]));
     party.teamChars[side] = CHAR_KEYS[idx];
     broadcastParty();
     renderSetup();
@@ -645,7 +652,7 @@ export function createMatchMode(ctx) {
         const h = humans[slot];
         if (h) roster.push({ id: h.id, name: h.name, team: -1, char: cleanPick(h.pick).char, slot, bot: false });
         else {
-          const char = CHAR_KEYS[Math.floor(Math.random() * CHAR_KEYS.length)];
+          const char = BOT_CHAR_KEYS[Math.floor(Math.random() * BOT_CHAR_KEYS.length)];
           roster.push({ id: `bot${botIndex}`, name: botName(), team: -1, char, slot, bot: true });
           botIndex += 1;
         }
