@@ -44,12 +44,16 @@ const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall un
 const MERCHANT_CHARACTER_URL = glbCharacterConfig.wizardUrl;
 
 // ── Layout (village-local metres: x = right, z = toward the next stage) ────────
+// Skinny: the shop and the characters face each other across a lane (turned a little back
+// toward the village centre), the time of day and the arrow at its far end
 const LAYOUT = {
-  stall: new THREE.Vector3(-3.5, 0, 3.0),
+  stall: new THREE.Vector3(-2.4, 0, 3.6),
+  stallFaces: new THREE.Vector3(1.5, 0, 1.6),      // the stall's front looks at this point
   chestSide: 1.45,                 // chest: this far beside the stall (toward the centre)
-  characters: new THREE.Vector3(3.5, 0, 3.0),
-  time: new THREE.Vector3(1.5, 1.3, 5.4),
-  arrow: new THREE.Vector3(0, 0.3, 6.6),
+  characters: new THREE.Vector3(2.4, 0, 3.6),
+  charactersFace: new THREE.Vector3(-1.5, 0, 1.6), // the group faces this point
+  time: new THREE.Vector3(1.2, 1.3, 6.4),
+  arrow: new THREE.Vector3(0, 0.3, 7.8),
 };
 const CHARACTER_ARC_RADIUS = 1.35;
 const PLAYER_WALK_SPEED = 2.4;     // m/s
@@ -443,8 +447,8 @@ export function createVillage(ctx) {
       const pos = local(LAYOUT.characters.x, 0, LAYOUT.characters.z);
       const gy = groundY(pos.x, pos.z, center.y);
       const groupCenter = new THREE.Vector3(pos.x, gy, pos.z);
-      // Arc opens toward the village centre
-      const toCenter = _v.subVectors(center, groupCenter).setY(0).normalize().clone();
+      // Arc opens across the lane, toward the shop
+      const toCenter = _v.subVectors(local(LAYOUT.charactersFace.x, 0, LAYOUT.charactersFace.z), groupCenter).setY(0).normalize().clone();
       const label = textSprite('👥 Characters', { height: 0.32 });
       label.position.copy(groupCenter).add(_v2.set(0, 1.75, 0));
       root.add(label);
@@ -479,8 +483,8 @@ export function createVillage(ctx) {
       const pos = local(LAYOUT.stall.x, 0, LAYOUT.stall.z);
       const stallRoot = new THREE.Group();
       placeOnGround(stallRoot, pos, -0.005);
-      // Front (+Z of the model) faces a point behind the village centre (toward the overview camera)
-      const lookAt = local(0, 0, -3);
+      // Front (+Z of the model) faces across the lane, toward the characters
+      const lookAt = local(LAYOUT.stallFaces.x, 0, LAYOUT.stallFaces.z);
       const facing = _v.subVectors(lookAt, stallRoot.position).setY(0).normalize().clone();
       stallRoot.rotation.y = Math.atan2(facing.x, facing.z);
       const side = new THREE.Vector3().crossVectors(_UP, facing).normalize(); // customer's right
@@ -642,18 +646,18 @@ export function createVillage(ctx) {
     const st = focus ? stations[focus] : null;
     if (!st && compact) {
       // Home: low behind the player, on the arrow (the player stands in the foreground)
-      const target = local(0, 0.55, LAYOUT.arrow.z - 0.4);
-      const dir = _v2.copy(fwd).multiplyScalar(-1).addScaledVector(_UP, 0.3);
-      setView(target, dir, 1.5, 1.0, 4.5);
+      const target = local(0, 0.55, LAYOUT.arrow.z - 0.6);
+      const dir = _v2.copy(fwd).multiplyScalar(-1).addScaledVector(_UP, 0.25);
+      setView(target, dir, 1.9, 1.0, 7.5);
       return;
     }
     if (!st) {
       // Overview from behind the village centre, a little above
       // (aimed a little short of the middle so the bottom panel doesn't cover the player)
-      const target = local(0, 0.35, 2.4);
+      const target = local(0, 0.35, 3.4);
       // (steeper on tall screens: more of the height is used)
       const dir = _v2.copy(fwd).multiplyScalar(-1).addScaledVector(_UP, camera.aspect < 1 ? 1.15 : 0.55);
-      setView(target, dir, 5.0, 2.9, 5);
+      setView(target, dir, 4.2, 2.9, 5);
       return;
     }
     if (focus === 'shop') {
