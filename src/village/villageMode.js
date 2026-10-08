@@ -422,10 +422,12 @@ export function createVillage(ctx) {
   const ui = document.createElement('div');
   ui.className = 'village-ui hidden';
   ui.innerHTML = `
-    <button type="button" class="ui-btn-secondary village-back" data-v="back">⬅ Lobby</button>
+    <div class="village-bottom-row">
+      <button type="button" class="ui-btn-secondary village-nav village-nav-prev hidden" data-v="nav-prev"></button>
+      <button type="button" class="ui-btn-secondary village-back" data-v="back">⬅ Lobby</button>
+      <button type="button" class="ui-btn-secondary village-nav village-nav-next hidden" data-v="nav-next"></button>
+    </div>
     <button type="button" class="ui-btn-secondary village-lobby-top hidden" data-v="lobby">⬅ Lobby</button>
-    <button type="button" class="ui-btn-secondary village-nav village-nav-prev hidden" data-v="nav-prev"></button>
-    <button type="button" class="ui-btn-secondary village-nav village-nav-next hidden" data-v="nav-next"></button>
     <div class="village-top ui-chip"><span data-v="stage"></span><span class="village-top-sep">·</span><span data-v="coins"></span></div>
     <div class="village-panel ui-panel hidden" data-v="panel">
       <div class="village-panel-title" data-v="panel-title"></div>
