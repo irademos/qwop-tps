@@ -19,7 +19,7 @@
 | HTML shell + all HUD elements | `index.html` |
 | All CSS | `styles.css` — design tokens on `:root` + shared panel / button (primary, secondary, ghost) / chip components at the top; reuse the `ui-*` classes and tokens for new UI |
 | Serverless function (Vercel) | `api/turn-credentials.js` |
-| Static assets | `public/` (GLB map, character, clips, audio) |
+| Static assets | `public/` (mappack + GLB map, character, clips, audio) |
 | Build | `npm run dev` (port 3000) · `npm run build` |
 
 **Rule:** Prefer `appContext.entities`, `.systems`, `.uiState`, `.settings`, `.debugFlags` over new raw globals.
@@ -31,7 +31,7 @@
 - **Rendering:** Three.js v0.176 (+ `three-mesh-bvh` for map raycasts)
 - **Physics:** Rapier3D (`@dimforge/rapier3d-compat`)
 - **Multiplayer:** Multiplayer mode only (Showdown is single player). Firebase (`peers` = lobby list, `rooms` = lobby / private duel rooms / `mm-<mode>` matchmaking queue / `party-<hostId>` / `match-<matchId>`, shop stock) + PeerJS WebRTC; messages: `presence`, `projectile`, `duel`, `match`
-- **World:** static GLB map (`public/glb_map/map.glb`)
+- **World:** `public/mappacks/mountain_town.mappack` (via `src/map/MapLoader.ts`) for every mode but Classic; Classic uses the static GLB map (`public/glb_map/map.glb`)
 - **Auth:** PIN → SHA-256 → Firebase + cookie (no OAuth); the app opens as a guest (unless a stored PIN auto-logs in); "Sign In" on the start screen reloads to the login form (`sq:showLogin` sessionStorage flag); guest = random name, `profileNameKey` null, nothing saved (guard profile writes on `profileNameKey`)
 - **Build:** Vite 6, deployed on Vercel
 
@@ -41,10 +41,10 @@
 
 ```
 src/
-  bootstrap/    bootstrapGameApp.js       ← game init, GLB map, stages (_ps*), phone link, shop/stats, rAF loop
+  bootstrap/    bootstrapGameApp.js       ← game init, maps (MAPS / _setActiveMap), stages (_ps*), phone link, shop/stats, rAF loop
   core/         appContext, exposeDebugGlobals, firebase-init, externalDeps (PeerJS/NippleJS CDN), utils (cookies)
   player/       playerProfile (Firebase stats/inventory/PIN/leaderboard), healthUtils
-  map/          spawnUtils
+  map/          spawnUtils, MapLoader.ts (.mappack loader)
   environment/  terrainHeight (height resolver registry), mapCollision (bullet / bomb segment raycast vs the map BVH), artStyle (load-time texture pass that matches characters/props to the map's look), blobShadows (cheap disc shadows under characters on the low performance tier)
   combat/       knockback, bloodEffect (damage blood spray), bulletImpact (sparks + dust where a bullet hits the map), explosionEffect (bomb explosion + smoke), playerBomb (player bombs), heartBubbles (Showdown heart bubbles), comboMeter (Showdown combo HUD; Classic "N-hit Combo!"), deathCarry (Showdown death: frog men carry the player off)
   multiplayer/  peerConnection (rooms, joinRoom, destroy), duelMode (lobby, challenges, duels, temp find-location), matchMode (Team Battle / Free For All / Guns & Bombs: parties, matchmaking, bots, battles)
@@ -76,7 +76,7 @@ src/
 | Settings panel (⬅ Back to Lobby footer while a mode runs → `appState.returnToLobby`; Profile stats, Multiplayer status, Display incl. Camera: First Person View / Hide Body toggles, eye + body opacity + FOV sliders, Copy Values, Sword Gyro, About + Clear Cache & Reload, Account delete) | `src/controls/settingsPanel.js`; stats = `appState.getProfileStats` + `_psStats` / `_classicStats` in `bootstrapGameApp.js`, `normalizeStageStats` / `saveClassicStats` in `src/player/playerProfile.js`; camera = `PlayerControls.cameraConfig` (`sq:firstPersonCam`) in `src/controls/controls.js` |
 | Art style unifier (character textures matched to the map, shared grade) | `src/environment/artStyle.js` (`artStyleConfig`) |
 | Character shadows (sun shadow box follows the player, map receives but doesn't cast; low tier = blob shadows) | `SHADOW_LIGHT_OFFSET` / `SHADOW_HALF_SIZE`, `applyRendererPerformanceSettings` + light follow before `renderer.render` in `bootstrapGameApp.js`; `src/environment/blobShadows.js` |
-| World map / ground height | `public/glb_map/map.glb`; loaded in `bootstrapGameApp.js`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |
+| World map / ground height | `MAPS` / `_setActiveMap` in `bootstrapGameApp.js`; `src/map/MapLoader.ts`; `public/mappacks/`, `public/glb_map/map.glb`; `src/environment/terrainHeight.js`, `src/map/spawnUtils.js` |
 | Firebase data shape | `src/player/playerProfile.js`, `src/characters/merchant.js` (room shop stock) |
 | Multiplayer protocol | `src/multiplayer/peerConnection.js`, `src/bootstrap/bootstrapGameApp.js` |
 | Multiplayer mode (lobby of everyone online, challenge → private duel room, sword-only duels, best of 3 rounds (`DUEL_ROUNDS`, draw replays the round), 3-2-1-FIGHT then both auto-walk in (`startWalkIn`, stop at `DUEL_WALK_STOP_DIST`), 8 health segments every round (`DUEL_HEALTH_SEGMENTS` → `duelMaxHealthOverride`, never saved), WINNER banner, forfeit; temporary "Find Location" + "Copy location information" for picking the duel spot) | Lobby/duel state machine + DOM in `src/multiplayer/duelMode.js` (`DUEL_LOCATION` = where duels happen — paste the copied JSON there; `.duel-*` in `styles.css`); game side = `duelCtx` / `startMultiplayerMode` + duel sword hit check (`getOpponentCombat`) in the phone-sword loop of `bootstrapGameApp.js`; rooms / `joinRoom` / `destroy` in `src/multiplayer/peerConnection.js`; opponent grip IK = `userData.remoteHandTarget` in `updateRemotePlayerRig` (`src/models/playerModel.js`) |
@@ -116,7 +116,7 @@ src/
 
 **Feature facades** (`src/features/`): thin wrappers that re-export lightweight APIs and `import()` heavy modules lazily. When adding a heavy new feature, add a facade here to keep the initial bundle small.
 
-**World:** `bootstrapGameApp.js` loads the GLB map, builds a BVH and registers a raycast height resolver with `registerTerrainHeightResolver`; `getTerrainHeight` / `getSpawnY` use it.
+**World:** `bootstrapGameApp.js` loads the map for the mode (`MAPS`: mountain town mappack, or `map.glb` for Classic — switched by `_setActiveMap` in the mode handler), builds a BVH and registers a raycast height resolver with `registerTerrainHeightResolver`; `getTerrainHeight` / `getSpawnY` use it.
 
 **Stages:** `_psPickPathAngle` picks the flattest direction, `_psBuildStage` places enemies and coins along it, and the player auto-walks between fights. Enemies live in the `hordeEnemies` array (historical name).
 
@@ -144,7 +144,7 @@ src/
 1. Three.js scene + renderer
 2. Rapier physics world
 3. Firebase + player profile
-4. GLB map + height resolver
+4. Default map (mountain town mappack) + height resolver
 5. Character spawning
 6. Phone controller link (peer multiplayer starts only in Multiplayer mode)
 7. `requestAnimationFrame` loop starts

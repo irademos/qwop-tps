@@ -157,6 +157,7 @@ function imageSize(img) {
 
 /** Draws the texture's image (capped at maxSize) to a canvas; null if it can't be read. */
 function readTexture(texture, maxSize = Infinity) {
+  if (texture?.isCompressedTexture || texture?.isDataTexture) return null; // GPU formats (KTX2…): not drawable
   const img = texture?.image;
   const { w, h } = imageSize(img);
   if (!w || !h) return null;

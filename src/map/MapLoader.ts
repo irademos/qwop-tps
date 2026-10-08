@@ -22,7 +22,15 @@
  * The returned Group has three named children:
  *   group.getObjectByName('terrain')  – MeshStandard terrain with vertex colours or KTX2 splat
  *   group.getObjectByName('grass')    – instanced grass blade chunks
- *   group.getObjectByName('objects')  – all placed GLB models
+ *   group.getObjectByName('objects')  – all placed GLB models (each instance carries
+ *                                        userData.mapObject = { id, name, modelFile })
+ *
+ * In Sword Showdown: loaded by bootstrapGameApp.js (`MAPS` / `_loadMap`) with the game's
+ * renderer; the basis transcoder is served from public/basis/ (copied from
+ * three/examples/jsm/libs/basis). The terrain's real size comes from `options.worldSize`,
+ * else `terrain.worldWidth` / `worldDepth` in map.json, else `terrain.worldSize` — exported
+ * packs can carry a stale worldSize (mountain_town.mappack says 50 but its objects are
+ * placed on a 200 × 200 terrain).
  */
 
 import * as THREE from 'three'
@@ -95,6 +103,8 @@ export interface MapManifest {
     gridWidth: number    // = TERRAIN_VERTS
     gridHeight: number   // = TERRAIN_VERTS
     worldSize: number    // = TERRAIN_SIZE
+    worldWidth?: number  // real X extent when it differs from worldSize
+    worldDepth?: number  // real Z extent when it differs from worldSize
     heightsFile: string  // path inside zip
     colorStops: MapTerrainColorStop[]
     colorBlendWidth?: number  // world-unit blend zone width between height stops (0 = hard)
@@ -144,6 +154,19 @@ export interface MapLoadOptions {
    * Defaults to '/basis/' — copy public/basis/ from this repo to your project.
    */
   transcoderPath?: string
+  /**
+   * Real world extent of the terrain: one number (square) or [width, depth].
+   * Overrides terrain.worldWidth / worldDepth / worldSize from map.json.
+   */
+  worldSize?: number | [number, number]
+}
+
+/** Terrain extent [width, depth]: options.worldSize, else map.json's worldWidth/Depth/Size. */
+export function resolveWorldSize(manifest: MapManifest, override?: number | [number, number]): [number, number] {
+  if (Array.isArray(override)) return [override[0], override[1]]
+  if (Number.isFinite(override)) return [override as number, override as number]
+  const t = manifest.terrain
+  return [t.worldWidth ?? t.worldSize, t.worldDepth ?? t.worldSize]
 }
 
 // ── Exported low-level functions ───────────────────────────────────────────
@@ -664,7 +687,9 @@ async function buildGrassGroup(
   gridH: number,
   worldSize: number,
   grassConfig: MapManifest['grass'],
-  textureMap: Map<string, THREE.Texture> | null
+  textureMap: Map<string, THREE.Texture> | null,
+  worldWidth?: number,
+  worldDepth?: number,
 ): Promise<THREE.Group> {
   const group = new THREE.Group()
   group.name  = 'grass'
@@ -683,7 +708,8 @@ async function buildGrassGroup(
           minScale:   grassConfig.minScale,
           maxScale:   grassConfig.maxScale,
           colorStops: grassConfig.colorStops,
-        }
+        },
+        worldWidth, worldDepth,
       )
       if (inst.count === 0) continue
 
@@ -734,6 +760,7 @@ export class MapLoader {
     const { renderer, transcoderPath = '/basis/' } = options
     const zip      = await this.openZip(source)
     const manifest = await this.readManifest(zip)
+    const [worldW, worldD] = resolveWorldSize(manifest, options.worldSize)
 
     const [terrainBuf, grassBuf] = await Promise.all([
       this.readFile(zip, manifest.terrain.heightsFile),
@@ -759,7 +786,8 @@ export class MapLoader {
       heights, gW, gH, manifest.terrain.worldSize,
       manifest.terrain.colorStops,
       manifest.terrain.colorBlendWidth,
-      manifest.terrain.steepnessStops
+      manifest.terrain.steepnessStops,
+      worldW, worldD,
     )
     const terrainMat  = this.buildTerrainMaterial(manifest, textureMap)
     const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat)
@@ -768,7 +796,8 @@ export class MapLoader {
 
     // Grass
     root.add(await buildGrassGroup(
-      heights, densityMap, gW, gH, manifest.terrain.worldSize, manifest.grass, textureMap
+      heights, densityMap, gW, gH, manifest.terrain.worldSize, manifest.grass, textureMap,
+      worldW, worldD,
     ))
 
     // Objects
@@ -792,6 +821,7 @@ export class MapLoader {
         }
         const inst = scene.clone(true)
         inst.name  = obj.name
+        inst.userData.mapObject = { id: obj.id, name: obj.name, modelFile: obj.modelFile }
         inst.position.set(...obj.position)
         inst.rotation.set(...obj.rotation)
         inst.scale.set(...obj.scale)
@@ -845,6 +875,7 @@ export class MapLoader {
     }))
 
     blobUrls.forEach((u) => URL.revokeObjectURL(u))
+    loader.dispose() // frees the transcoder workers (only one KTX2Loader should be active)
     return map
   }
 
@@ -930,7 +961,9 @@ vTerrainNormal = normalize(mat3(modelMatrix) * normal);`)
 
   private async openZip(source: File | Blob | ArrayBuffer | string): Promise<JSZip> {
     if (typeof source === 'string') {
-      const buf = await (await fetch(source)).arrayBuffer()
+      const res = await fetch(source)
+      if (!res.ok) throw new Error(`[MapLoader] ${source}: HTTP ${res.status}`)
+      const buf = await res.arrayBuffer()
       return JSZip.loadAsync(buf)
     }
     return JSZip.loadAsync(source as Blob | ArrayBuffer)
