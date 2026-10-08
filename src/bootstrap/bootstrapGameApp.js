@@ -12,6 +12,7 @@ import { registerMapMeshes } from '../environment/mapCollision.js';
 import { updateBulletImpacts } from '../combat/bulletImpact.js';
 import { setStyleReference, stylizeObject } from '../environment/artStyle.js';
 import { setBlobShadowsEnabled } from '../environment/blobShadows.js';
+import { showFeatureLoading } from '../features/loadingState.js';
 import { Multiplayer, LOBBY_ROOM_ID } from '../multiplayer/peerConnection.js';
 import { createDuelMode } from '../multiplayer/duelMode.js';
 import { createMatchMode, MATCH_CHARACTERS } from '../multiplayer/matchMode.js';
@@ -22,7 +23,7 @@ import { spawnProjectile, updateProjectiles, loadSpecialWeapons } from '../featu
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { removeRigidBodySafely } from '../physics/rapierSafety.js';
-import { getSpawnPosition, getSpawnY } from '../map/spawnUtils.js';
+import { getSpawnPosition, getSpawnY, setSpawnCenter } from '../map/spawnUtils.js';
 import {
   BASE_HEALTH_SEGMENTS,
   SHOWDOWN_BASE_HEALTH_SEGMENTS,
@@ -1659,26 +1660,25 @@ async function initCore(runtimeContext) {
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.getElementById('game-container').appendChild(renderer.domElement);
 
-  // Load the GLB map and register a downward-raycast height resolver.
-  const mapGltf = await new Promise((resolve, reject) =>
-    new GLTFLoader().load('/glb_map/map.glb', resolve, undefined, reject)
-  );
-  const mapGroup = mapGltf.scene;
-  mapGroup.name = 'map';
-  mapGroup.scale.setScalar(5);
-  // The map is the art-style reference: characters are matched to its colours (artStyle.js)
-  setStyleReference(mapGroup);
-  stylizeObject(mapGroup);
-  // The map shows the characters' shadows but casts none itself: its big mesh in the shadow
-  // pass would be the expensive part (see SHADOW_* / the light follow in the game loop)
-  mapGroup.traverse(obj => {
-    if (obj.isMesh) { obj.receiveShadow = true; obj.castShadow = false; }
-  });
-  scene.add(mapGroup);
-  // The height raycasts below use the meshes' matrixWorld, which three.js only refreshes on
-  // render. Without this, spawn heights sampled before the first frame hit the unscaled map
-  // (too low) and stay cached for that cell — the player spawned underground until they moved.
-  mapGroup.updateMatrixWorld(true);
+  // ── Maps ──────────────────────────────────────────────────────────────────
+  // Classic plays on the original GLB map; every other mode (Showdown, tutorial, Multiplayer)
+  // on the mountain town mappack (src/map/MapLoader.ts). The mode handler switches with
+  // _useMapForMode before a mode starts; a map is loaded the first time it's needed.
+  //   kind 'glb':     a plain GLB scene, scaled by `scale`
+  //   kind 'mappack': an editor .mappack (zip); `worldSize` = the terrain's real extent
+  //                   (the pack's map.json says 50, its objects sit on a 200 × 200 terrain);
+  //                   map objects whose model file matches `noGround` (trees) aren't stood
+  //                   on — characters walk through them, bullets still stop at them
+  //   spawn: where (re)spawns are picked (src/map/spawnUtils.js)
+  const MAPS = {
+    mountainTown: {
+      kind: 'mappack', url: '/mappacks/mountain_town.mappack', worldSize: 200, noGround: /tree/i,
+      spawn: { x: 1, z: -11, radius: 3 },   // the open ground on the town's plateau
+    },
+    classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
+  };
+  const DEFAULT_MAP = 'mountainTown';
+  const mapForMode = (gameMode) => (gameMode === 'classic' ? 'classic' : DEFAULT_MAP);
 
   // Build a BVH-accelerated mesh list for downward raycasting to get terrain height.
   const { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } = await import('three-mesh-bvh');
@@ -1686,17 +1686,69 @@ async function initCore(runtimeContext) {
   THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
   THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-  const glbMeshes = [];
-  mapGroup.traverse(obj => {
-    if (obj.isMesh) {
-      obj.geometry.computeBoundsTree();
-      glbMeshes.push(obj);
-    }
-  });
+  // The first map loaded is the art-style reference: characters are matched to its colours
+  // (artStyle.js — they are stylized once, so later maps don't change them)
+  let _mapStyleReferenceSet = false;
+  const _loadedMaps = new Map();   // key → Promise<{ group, meshes, groundMeshes }>
+  const _loadMap = (key) => {
+    if (_loadedMaps.has(key)) return _loadedMaps.get(key);
+    const def = MAPS[key];
+    const promise = (async () => {
+      let group;
+      let styleRoot;   // what the art-style pass reads / grades (not the KTX2 terrain / grass)
+      if (def.kind === 'mappack') {
+        const { MapLoader } = await import('../map/MapLoader.ts');
+        group = await new MapLoader().load(def.url, { renderer, transcoderPath: '/basis/', worldSize: def.worldSize });
+        styleRoot = group.getObjectByName('objects');
+      } else {
+        const gltf = await new Promise((resolve, reject) =>
+          new GLTFLoader().load(def.url, resolve, undefined, reject)
+        );
+        group = gltf.scene;
+        group.scale.setScalar(def.scale ?? 1);
+        styleRoot = group;
+      }
+      group.name = 'map';
+      if (styleRoot) {
+        if (!_mapStyleReferenceSet) { setStyleReference(styleRoot); _mapStyleReferenceSet = true; }
+        stylizeObject(styleRoot);
+      }
+      // The map shows the characters' shadows but casts none itself: its big mesh in the shadow
+      // pass would be the expensive part (see SHADOW_* / the light follow in the game loop)
+      group.traverse(obj => {
+        if (obj.isMesh) { obj.receiveShadow = true; obj.castShadow = false; }
+      });
+      // The height raycasts below use the meshes' matrixWorld, which three.js only refreshes on
+      // render. Without this, spawn heights sampled before the first frame hit the unscaled map
+      // (too low) and stay cached for that cell — the player spawned underground until they moved.
+      group.updateMatrixWorld(true);
+      // Solid meshes (bullets / bombs stop at them) and the ones characters stand on.
+      // Instanced grass is neither.
+      const meshes = [];
+      const groundMeshes = [];
+      group.traverse(obj => {
+        if (!obj.isMesh || obj.isInstancedMesh) return;
+        obj.geometry.computeBoundsTree();
+        meshes.push(obj);
+        let o = obj;
+        while (o && !o.userData.mapObject) o = o.parent;
+        const file = o?.userData.mapObject?.modelFile ?? '';
+        if (!(def.noGround && def.noGround.test(file))) groundMeshes.push(obj);
+      });
+      return { group, meshes, groundMeshes };
+    })();
+    _loadedMaps.set(key, promise);
+    promise.catch(() => _loadedMaps.delete(key)); // let a later switch retry
+    return promise;
+  };
+
+  let _activeMapKey = null;
+  let _activeMap = null;
+  let _groundMeshes = [];
   const _glbRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
 
   // Cache terrain height per entity to avoid re-raycasting every frame.
-  // Key: "x_z" snapped to 0.5-unit grid; value: resolved Y.
+  // Key: "x_z" snapped to 0.5-unit grid; value: resolved Y. Cleared when the map changes.
   const _glbHeightCache = new Map();
   const _CACHE_SNAP = 0.5;
   const _glbResolveHeight = (x, z) => {
@@ -1705,14 +1757,39 @@ async function initCore(runtimeContext) {
     const key = `${sx}_${sz}`;
     if (_glbHeightCache.has(key)) return _glbHeightCache.get(key);
     _glbRaycaster.ray.origin.set(sx, 500, sz);
-    const hits = _glbRaycaster.intersectObjects(glbMeshes, false);
+    const hits = _glbRaycaster.intersectObjects(_groundMeshes, false);
     const y = hits.length > 0 ? hits[0].point.y : undefined;
     _glbHeightCache.set(key, y);
     return y;
   };
-
   registerTerrainHeightResolver(_glbResolveHeight);
-  registerMapMeshes(glbMeshes); // bullets stop at buildings / walls (src/items/projectiles.js)
+
+  // Show `key` (loading it if needed) and make it the ground / bullet-stopping map.
+  // Returns true when the map changed. A newer call wins over one still loading.
+  let _mapSwitchToken = 0;
+  const _setActiveMap = async (key) => {
+    const token = ++_mapSwitchToken;
+    if (key === _activeMapKey) return false;
+    let hideLoading = null;
+    if (_activeMapKey) hideLoading = showFeatureLoading('Loading map');
+    let loaded;
+    try {
+      loaded = await _loadMap(key);
+    } finally {
+      hideLoading?.();
+    }
+    if (token !== _mapSwitchToken) return false;
+    if (_activeMap) scene.remove(_activeMap.group);
+    _activeMap = loaded;
+    _activeMapKey = key;
+    scene.add(loaded.group);
+    _groundMeshes = loaded.groundMeshes;
+    _glbHeightCache.clear();
+    setSpawnCenter(MAPS[key].spawn);
+    registerMapMeshes(loaded.meshes); // bullets stop at buildings / walls (src/items/projectiles.js)
+    return true;
+  };
+  await _setActiveMap(DEFAULT_MAP);
 
   const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -6119,6 +6196,20 @@ async function initCore(runtimeContext) {
     duelMode.enter();
   };
 
+  let _modeStartToken = 0;
+  const _startMode = (gameMode) => {
+    if (gameMode === 'showdown') {
+      _resetForMenu();
+      void _psInit();
+    } else if (gameMode === 'classic') {
+      void startClassicMode();
+    } else if (gameMode === 'multiplayer') {
+      startMultiplayerMode();
+    } else {
+      startTutorialMode();
+    }
+  };
+
   // Mode picked on the start screen (first time, after the tutorial, leaving the lobby):
   // Tutorial, Showdown, Classic or Multiplayer. Only Multiplayer runs peer multiplayer.
   // A pick made while the game was still loading runs as soon as this is set.
@@ -6132,16 +6223,19 @@ async function initCore(runtimeContext) {
       duelMode.exit();
     }
     if (gameMode !== 'classic') _setClassicMode(false);
-    if (gameMode === 'showdown') {
-      _resetForMenu();
-      void _psInit();
-    } else if (gameMode === 'classic') {
-      void startClassicMode();
-    } else if (gameMode === 'multiplayer') {
-      startMultiplayerMode();
-    } else {
-      startTutorialMode();
-    }
+    // Each mode's map first (Classic: map.glb, the rest: the mountain town); a new map puts
+    // the player at its spawn. A newer pick made while a map loads wins.
+    const token = ++_modeStartToken;
+    _setActiveMap(mapForMode(gameMode))
+      .catch((err) => { console.error('[map] load failed, staying on the current map:', err); return false; })
+      .then((changed) => {
+        if (token !== _modeStartToken) return;
+        if (changed) {
+          const spawn = getSpawnPosition();
+          _teleportPlayer(spawn.x, spawn.z);
+        }
+        _startMode(gameMode);
+      });
   });
 
   function animate() {
