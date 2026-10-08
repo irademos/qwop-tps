@@ -12,7 +12,8 @@
 //     sword calibration popup, ctx.confirmStart).
 // ⬅ Lobby top left (overview); ⬅ Village bottom middle (focused on something).
 // Phones (portrait / touch): no high overview — the home view is low behind the player,
-// on the arrow; ‹ › buttons or a swipe move the camera between the stations (STATION_ORDER).
+// on the arrow; ‹ › buttons (bottom corners, either side of the back button, which is
+// always bottom middle there) or a swipe move the camera between the stations (STATION_ORDER).
 // After a stage win it can be built a little way ahead, the player walking in (`approach`).
 //
 // Game access goes through `ctx` (villageCtx in bootstrapGameApp.js); the shop logic
@@ -847,9 +848,11 @@ export function createVillage(ctx) {
   // ⬅ Lobby top left in the overview; ⬅ Village bottom middle when focused (the bottom
   // panel moves up above it)
   function refreshBack() {
+    // (phones: always bottom middle, between the ‹ › station buttons)
+    const bottom = !!focus || compact;
     el.back.textContent = focus ? '⬅ Village' : '⬅ Lobby';
-    el.back.classList.toggle('village-back-bottom', !!focus);
-    ui.classList.toggle('village-focused', !!focus);
+    el.back.classList.toggle('village-back-bottom', bottom);
+    ui.classList.toggle('village-focused', bottom);
     refreshNav();
   }
 

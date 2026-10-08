@@ -2260,14 +2260,15 @@ body.settings-open #inventory-button {
   transform: translateX(-50%);
 }
 .village-ui.village-focused .village-panel { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
-/* Phones: ‹ › to the neighbouring station (shop / next stage / time / characters) */
+/* Phones: ‹ › to the neighbouring station (shop / next stage / campfire / characters), bottom
+   corners either side of the back button (bottom middle) */
 .village-nav {
   position: absolute;
-  top: 42%;
+  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
   min-height: 44px;
-  max-width: 44vw;
-  padding: 0 12px;
-  font-size: 14px;
+  max-width: calc(50% - 82px);
+  padding: 0 10px;
+  font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
@@ -2275,6 +2276,8 @@ body.settings-open #inventory-button {
   background: var(--surface-strong);
   border-color: var(--border-strong);
 }
+.village-nav-prev { left: calc(10px + env(safe-area-inset-left, 0px)); }
+.village-nav-next { right: calc(10px + env(safe-area-inset-right, 0px)); }
 /* Sitting by the campfire: the screen fades out while the time of day changes */
 .village-fade {
   position: absolute;
@@ -2294,8 +2297,6 @@ body.settings-open #inventory-button {
   font-weight: 800;
   color: var(--accent-hi);
 }
-.village-nav-prev { left: calc(10px + env(safe-area-inset-left, 0px)); }
-.village-nav-next { right: calc(10px + env(safe-area-inset-right, 0px)); }
 .village-top {
   position: absolute;
   top: calc(14px + env(safe-area-inset-top, 0px));
