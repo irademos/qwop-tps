@@ -3,7 +3,7 @@
 > **Maintenance rule for AI agents:** If your changes add/remove/rename source files, move logic between modules, introduce new architectural patterns, or add new env vars — update this file and `docs/AI_AGENT_GUIDE.md` in the same commit. Keep the "Common Task Locations" table and directory tree accurate. Stale docs cost more tokens than fresh ones.
 
 ## What This Is
-A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone is the sword controller (gyro + joystick over PeerJS, `public/phone-sword.html`); the desktop/TV browser runs the game. Players fight waves of AI swordsmen and bomb throwers along a path through the mountain town map (a map-editor `.mappack`; Classic keeps the static GLB map), stage by stage, collect coins and, in the village between stages, buy upgrades from the market stall, switch characters, and calibrate the sword before each stage. Showdown is single player; **Classic** is a Wii Sports Resort–style take on it (Miis only, swordsmen only, 3 hearts per stage, Block is the only button, minimal HUD). **Multiplayer** mode is a lobby of everyone online where you challenge another player to a 1v1 sword duel in a private room, or start a **Team Battle** (5 v 5) / **Free For All** (10 fighters) with invited players, matchmaking players and bots (guns, bombs, bubbles and shields off), or **Guns & Bombs** (a free for all with guns and bombs only — unlimited bullets and bombs, one shield each). The old RPG, horde, 3D painter, OSM map and NPC systems were removed. The repo name "qwop-tps" is historical.
+A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone is the sword controller (gyro + joystick over PeerJS, `public/phone-sword.html`); the desktop/TV browser runs the game. Players fight waves of AI swordsmen and bomb throwers along a path across the island town map (a map-editor `.mappack`; Classic keeps the static GLB map), stage by stage, collect coins and, in the village between stages, buy upgrades from the market stall, switch characters, and calibrate the sword before each stage. Showdown is single player; **Classic** is a Wii Sports Resort–style take on it (Miis only, swordsmen only, 3 hearts per stage, Block is the only button, minimal HUD). **Multiplayer** mode is a lobby of everyone online where you challenge another player to a 1v1 sword duel in a private room, or start a **Team Battle** (5 v 5) / **Free For All** (10 fighters) with invited players, matchmaking players and bots (guns, bombs, bubbles and shields off), or **Guns & Bombs** (a free for all with guns and bombs only — unlimited bullets and bombs, one shield each). The old RPG, horde, 3D painter, OSM map and NPC systems were removed. The repo name "qwop-tps" is historical.
 
 ## Tech Stack
 | Layer | Technology |
@@ -11,7 +11,7 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone i
 | 3D Rendering | Three.js v0.176 (+ `three-mesh-bvh` for map raycasts) |
 | Physics | Rapier3D (`@dimforge/rapier3d-compat`) |
 | Multiplayer | Firebase Realtime Database (lobby/presence/signaling, shop stock) + PeerJS WebRTC (Multiplayer mode only: duel challenges, battle parties/matchmaking, presence, sword state; separately the phone controller link) |
-| Map | Editor `.mappack` (`public/mappacks/mountain_town.mappack`, loaded by `src/map/MapLoader.ts` + `jszip`, KTX2 via `public/basis/`) for every mode but Classic; Classic = static GLB (`public/glb_map/map.glb`); height via BVH raycast |
+| Map | Editor `.mappack` (`public/mappacks/island_town.mappack`, loaded by `src/map/MapLoader.ts` + `jszip`, KTX2 via `public/basis/`) for every mode but Classic; Classic = static GLB (`public/glb_map/map.glb`); height via BVH raycast |
 | Build tool | Vite 6 |
 | Deploy | Vercel (with `/api/turn-credentials` serverless function) |
 | Auth | PIN-based (SHA-256 hashed, stored in Firebase + cookie); guest play saves nothing |
@@ -45,10 +45,10 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone i
 │   │
 │   ├── map/
 │   │   ├── spawnUtils.js       # getSpawnY / getSpawnPosition (terrain-aligned spawn height, around the active map's `setSpawnCenter`)
-│   │   └── MapLoader.ts        # .mappack (zip) loader from the map editor — terrain (vertex colours / KTX2 splat), instanced grass, placed GLB objects; `worldSize` option = the terrain's real extent
+│   │   └── MapLoader.ts        # .mappack (zip) loader from the map editor — terrain (vertex colours / KTX2 splat), instanced grass, placed GLB objects, painted trails / roads, scatter, lakes + ocean (`sea` / `seabed`, `sampleMapWaterLevel`)
 │   │
 │   ├── environment/
-│   │   ├── terrainHeight.js    # Height resolver registry — the GLB map registers its BVH raycast; getTerrainHeight(x, z) (never below 0)
+│   │   ├── terrainHeight.js    # Height resolver registry — the GLB map registers its BVH raycast; getTerrainHeight(x, z) (never below the map's floor — 0, or just under the sea level: `setTerrainFloor`)
 │   │   ├── mapCollision.js     # raycastMapSegment — bullets / bombs vs the map's BVH meshes (registerMapMeshes in bootstrapGameApp.js)
 │   │   ├── blobShadows.js      # Blob shadows — soft disc on the ground under each character (added in createGLBCharacterInstance); shown only on the low performance tier
 │   │   └── artStyle.js         # Art style unifier — load-time texture pass: characters matched to the map's colours (shading flattened, posterized), shared grade on all textures, materials normalised
@@ -120,7 +120,8 @@ A browser-based 3D sword-fighting game, **Sword Showdown**. The player's phone i
 ├── public/                     # Static assets (served as-is)
 │   ├── phone-sword.html        # Phone controller page (gyro sword, joystick, Block + action buttons) — connects to the game via PeerJS
 │   ├── glb_map/map.glb         # Classic's world
-│   ├── mappacks/mountain_town.mappack # The world for Showdown / tutorial / Multiplayer (map editor export, zip)
+│   ├── mappacks/island_town.mappack # The world for Showdown / tutorial / Multiplayer (map editor export, zip)
+│   ├── mappacks/mountain_town.mappack # The previous world (unused)
 │   ├── basis/                  # basis_transcoder.js / .wasm (KTX2 textures in mappacks; copied from three/examples/jsm/libs/basis)
 │   ├── models/glb_characters/pumpkin.glb         # Pumpkin (Multiplayer roster; Showdown unlock)
 │   ├── models/glb_characters/antler_guy.glb      # Antler guy (Multiplayer roster; Showdown unlock)
@@ -176,7 +177,7 @@ Files in `features/` are **thin re-export + lazy-load wrappers** to enable Vite 
 - The phone controller has its own PeerJS connection to the game (`_attachPhoneSwordConn` in `bootstrapGameApp.js`); TURN servers come from `/api/turn-credentials`
 
 ### 4. World: maps per mode
-`MAPS` in `bootstrapGameApp.js` lists the maps: `mountainTown` (`public/mappacks/mountain_town.mappack`, loaded with `MapLoader` from `src/map/MapLoader.ts` — the map editor's runtime, edited for the game: `worldSize` option, `userData.mapObject` on placed objects) for Showdown, the tutorial and Multiplayer, and `classic` (`public/glb_map/map.glb`, ×5) for Classic (`mapForMode`). The default map loads at boot; the mode handler (`setModeHandler`) awaits `_setActiveMap(mapForMode(mode))` before starting a mode — it loads a map the first time (cached after), swaps it into the scene, clears the height cache, re-registers the bullet meshes (`registerMapMeshes`) and the spawn centre (`setSpawnCenter`), and a changed map teleports the player to its spawn. Each map's meshes get a `three-mesh-bvh` BVH and one downward-raycast height resolver (`registerTerrainHeightResolver`, `src/environment/terrainHeight.js`) casts against the active map's ground meshes. Everything that needs ground height (`getTerrainHeight`, `getSpawnY`) goes through that resolver. Mappack grass (instanced) is neither ground nor solid; objects matching a map's `noGround` (trees) stop bullets but aren't stood on. The mountain town's `map.json` says `worldSize` 50 but its objects sit on a 200 × 200 terrain, so `MAPS.mountainTown.worldSize` = 200. The first map loaded is the art-style reference (its objects' textures; KTX2 textures are skipped by `artStyle.js`). Multiplayer spots (`DUEL_LOCATION`, `GUNS_LOCATION`) are mountain town coordinates.
+`MAPS` in `bootstrapGameApp.js` lists the maps: `islandTown` (`public/mappacks/island_town.mappack`, loaded with `MapLoader` from `src/map/MapLoader.ts` — the map editor's runtime, edited for the game: `userData.mapObject` on placed objects, KTX2 loader disposed, fetch errors thrown; replace it with a new editor copy and re-apply those) for Showdown, the tutorial and Multiplayer, and `classic` (`public/glb_map/map.glb`, ×5) for Classic (`mapForMode`). The default map loads at boot; the mode handler (`setModeHandler`) awaits `_setActiveMap(mapForMode(mode))` before starting a mode — it loads a map the first time (cached after), swaps it into the scene, clears the height cache, re-registers the bullet meshes (`registerMapMeshes`) and the spawn centre (`setSpawnCenter`), and a changed map teleports the player to its spawn. Each map's meshes get a `three-mesh-bvh` BVH and one downward-raycast height resolver (`registerTerrainHeightResolver`, `src/environment/terrainHeight.js`) casts against the active map's ground meshes. Everything that needs ground height (`getTerrainHeight`, `getSpawnY`) goes through that resolver. Mappack grass / scatter (instanced) is neither ground nor solid; objects matching a map's `noGround` (trees) and the water meshes (`MAP_NOT_GROUND`: `sea` / `seabed` / `water`) stop bullets but aren't stood on. A pack with a sea level (the island) sets the ground floor `SEA_WADE_DEPTH` under it (`setTerrainFloor`), so characters wade in the sea instead of sinking; `_isOverWater(x, z)` (MapLoader's `sampleMapWaterLevel`, bridges count as dry) makes `_psPathSteepness` steer stage paths away from water (`PS_PATH_WATER_PENALTY`). The first map loaded is the art-style reference (its objects' textures; KTX2 textures are skipped by `artStyle.js`). Multiplayer spots (`DUEL_LOCATION`, `GUNS_LOCATION`) are island town coordinates.
 
 ### 5. Stages (`_ps*` in `bootstrapGameApp.js`)
 Between stages the player is in the **village** (`src/village/villageMode.js`, see Common Task Locations), built around wherever they stand; the villager stands on the next stage's path and gives a quest for it (accepting starts the stage). Each stage picks the flattest direction from the start (`_psPickPathAngle` — picked when the village opens and passed to `_psStartStage` / `_psBuildStage`), places swordsmen, bombers and coins along it (`_psBuildStage`; from the village they start `PS_VILLAGE_EXIT_DIST` m out so the player walks out first), then auto-walks the player between fights. Enemies (`EnemyPlayer`, `BombThrowerEnemy`) live in the `hordeEnemies` array (historical name).
@@ -209,7 +210,7 @@ No OAuth. Player registers with name + numeric PIN. PIN is `SALT + SHA-256` hash
    - Three.js scene + renderer
    - Rapier physics world
    - Firebase + player profile load
-   - Default map (mountain town mappack) + height resolver
+   - Default map (island town mappack) + height resolver
    - Character spawning
    - Phone controller link (PeerJS); peer multiplayer starts only when Multiplayer mode is picked
    - Main animation/game loop (`requestAnimationFrame`)

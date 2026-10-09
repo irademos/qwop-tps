@@ -7,7 +7,7 @@ import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerModel.js";
 import { glbCharacterConfig, isMiiCharacterUrl } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
-import { getTerrainHeight, registerTerrainHeightResolver } from '../environment/terrainHeight.js';
+import { getTerrainHeight, registerTerrainHeightResolver, setTerrainFloor } from '../environment/terrainHeight.js';
 import { registerMapMeshes } from '../environment/mapCollision.js';
 import { updateBulletImpacts } from '../combat/bulletImpact.js';
 import { setStyleReference, stylizeObject } from '../environment/artStyle.js';
@@ -1662,22 +1662,25 @@ async function initCore(runtimeContext) {
 
   // ── Maps ──────────────────────────────────────────────────────────────────
   // Classic plays on the original GLB map; every other mode (Showdown, tutorial, Multiplayer)
-  // on the mountain town mappack (src/map/MapLoader.ts). The mode handler switches with
-  // _useMapForMode before a mode starts; a map is loaded the first time it's needed.
+  // on the island town mappack (src/map/MapLoader.ts). The mode handler switches with
+  // _setActiveMap before a mode starts; a map is loaded the first time it's needed.
   //   kind 'glb':     a plain GLB scene, scaled by `scale`
-  //   kind 'mappack': an editor .mappack (zip); `worldSize` = the terrain's real extent
-  //                   (the pack's map.json says 50, its objects sit on a 200 × 200 terrain);
-  //                   map objects whose model file matches `noGround` (trees) aren't stood
-  //                   on — characters walk through them, bullets still stop at them
+  //   kind 'mappack': an editor .mappack (zip); map objects whose model file matches
+  //                   `noGround` (trees) aren't stood on — characters walk through them,
+  //                   bullets still stop at them. A pack with a sea level gets an ocean
+  //                   (MapLoader's 'sea' / 'seabed' meshes — not ground) and the ground floor
+  //                   SEA_WADE_DEPTH under it (setTerrainFloor): characters wade, never sink.
   //   spawn: where (re)spawns are picked (src/map/spawnUtils.js)
   const MAPS = {
-    mountainTown: {
-      kind: 'mappack', url: '/mappacks/mountain_town.mappack', worldSize: 200, noGround: /tree/i,
-      spawn: { x: 1, z: -11, radius: 3 },   // the open ground on the town's plateau
+    islandTown: {
+      kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree/i,
+      spawn: { x: 10, z: -4, radius: 3 },   // the flat ground in the middle of the island
     },
     classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
   };
-  const DEFAULT_MAP = 'mountainTown';
+  const DEFAULT_MAP = 'islandTown';
+  const SEA_WADE_DEPTH = 0.6;   // m under the sea surface characters wade at
+  const MAP_NOT_GROUND = new Set(['sea', 'seabed', 'water']);   // MapLoader water meshes
   const mapForMode = (gameMode) => (gameMode === 'classic' ? 'classic' : DEFAULT_MAP);
 
   // Build a BVH-accelerated mesh list for downward raycasting to get terrain height.
@@ -1689,17 +1692,22 @@ async function initCore(runtimeContext) {
   // The first map loaded is the art-style reference: characters are matched to its colours
   // (artStyle.js — they are stylized once, so later maps don't change them)
   let _mapStyleReferenceSet = false;
-  const _loadedMaps = new Map();   // key → Promise<{ group, meshes, groundMeshes }>
+  const _loadedMaps = new Map();   // key → Promise<{ group, meshes, groundMeshes, floor, water }>
   const _loadMap = (key) => {
     if (_loadedMaps.has(key)) return _loadedMaps.get(key);
     const def = MAPS[key];
     const promise = (async () => {
       let group;
       let styleRoot;   // what the art-style pass reads / grades (not the KTX2 terrain / grass)
+      let water = null;   // (x, z) → water surface Y or null (mappacks with water / a sea)
+      let floor = 0;      // lowest ground height (setTerrainFloor)
       if (def.kind === 'mappack') {
-        const { MapLoader } = await import('../map/MapLoader.ts');
-        group = await new MapLoader().load(def.url, { renderer, transcoderPath: '/basis/', worldSize: def.worldSize });
+        const { MapLoader, sampleMapWaterLevel } = await import('../map/MapLoader.ts');
+        group = await new MapLoader().load(def.url, { renderer, transcoderPath: '/basis/' });
         styleRoot = group.getObjectByName('objects');
+        const info = group.userData.water;
+        if (info) water = (x, z) => sampleMapWaterLevel(info, x, z);
+        if (Number.isFinite(info?.seaLevel)) floor = info.seaLevel - SEA_WADE_DEPTH;
       } else {
         const gltf = await new Promise((resolve, reject) =>
           new GLTFLoader().load(def.url, resolve, undefined, reject)
@@ -1723,19 +1731,20 @@ async function initCore(runtimeContext) {
       // (too low) and stay cached for that cell — the player spawned underground until they moved.
       group.updateMatrixWorld(true);
       // Solid meshes (bullets / bombs stop at them) and the ones characters stand on.
-      // Instanced grass is neither.
+      // Instanced grass / scatter is neither; water stops bullets but isn't stood on.
       const meshes = [];
       const groundMeshes = [];
       group.traverse(obj => {
         if (!obj.isMesh || obj.isInstancedMesh) return;
         obj.geometry.computeBoundsTree();
         meshes.push(obj);
+        if (MAP_NOT_GROUND.has(obj.name)) return;
         let o = obj;
         while (o && !o.userData.mapObject) o = o.parent;
         const file = o?.userData.mapObject?.modelFile ?? '';
         if (!(def.noGround && def.noGround.test(file))) groundMeshes.push(obj);
       });
-      return { group, meshes, groundMeshes };
+      return { group, meshes, groundMeshes, floor, water };
     })();
     _loadedMaps.set(key, promise);
     promise.catch(() => _loadedMaps.delete(key)); // let a later switch retry
@@ -1764,6 +1773,14 @@ async function initCore(runtimeContext) {
   };
   registerTerrainHeightResolver(_glbResolveHeight);
 
+  // True where the active map's water (a lake or the sea) covers the ground — not on a bridge
+  const _isOverWater = (x, z) => {
+    const level = _activeMap?.water?.(x, z);
+    if (level == null) return false;
+    const ground = _glbResolveHeight(x, z);
+    return !(Number.isFinite(ground) && ground >= level);
+  };
+
   // Show `key` (loading it if needed) and make it the ground / bullet-stopping map.
   // Returns true when the map changed. A newer call wins over one still loading.
   let _mapSwitchToken = 0;
@@ -1785,6 +1802,7 @@ async function initCore(runtimeContext) {
     scene.add(loaded.group);
     _groundMeshes = loaded.groundMeshes;
     _glbHeightCache.clear();
+    setTerrainFloor(loaded.floor);
     setSpawnCenter(MAPS[key].spawn);
     registerMapMeshes(loaded.meshes); // bullets stop at buildings / walls (src/items/projectiles.js)
     return true;
@@ -3918,10 +3936,13 @@ async function initCore(runtimeContext) {
   };
 
   // Steepest ground step (m per PS_PATH_SAMPLE_STEP) along a straight line from the player,
-  // or Infinity if the line leaves the map. Bails early once it exceeds `giveUpAbove`.
+  // plus PS_PATH_WATER_PENALTY per sample in water (the sea is flat, but the path should stay
+  // on the island), or Infinity if the line leaves the map. Bails early once it exceeds
+  // `giveUpAbove`.
   const PS_PATH_CANDIDATES = 24;
   const PS_PATH_SAMPLE_STEP = 1;      // m between height samples
   const PS_PATH_MAX_OK_STEP = 0.35;   // m rise per metre (~19°) — first candidate under this wins
+  const PS_PATH_WATER_PENALTY = 0.5;
   const _psPathSteepness = (angle, pathLen, giveUpAbove, origin = playerModel.position) => {
     const ox = origin.x;
     const oz = origin.z;
@@ -3930,14 +3951,18 @@ async function initCore(runtimeContext) {
     let prevY = getTerrainHeight(ox, oz);
     if (!Number.isFinite(prevY)) prevY = origin.y;
     let worst = 0;
+    let wet = 0;
     for (let d = PS_PATH_SAMPLE_STEP; d <= pathLen; d += PS_PATH_SAMPLE_STEP) {
-      const y = getTerrainHeight(ox + dx * d, oz + dz * d);
+      const x = ox + dx * d;
+      const z = oz + dz * d;
+      const y = getTerrainHeight(x, z);
       if (!Number.isFinite(y)) return Infinity;
       worst = Math.max(worst, Math.abs(y - prevY));
-      if (worst > giveUpAbove) return worst;
+      if (_isOverWater(x, z)) wet += PS_PATH_WATER_PENALTY;
+      if (worst + wet > giveUpAbove) return worst + wet;
       prevY = y;
     }
-    return worst;
+    return worst + wet;
   };
 
   // Try evenly spaced directions (random order/offset for variety); take the first that is
@@ -6223,7 +6248,7 @@ async function initCore(runtimeContext) {
       duelMode.exit();
     }
     if (gameMode !== 'classic') _setClassicMode(false);
-    // Each mode's map first (Classic: map.glb, the rest: the mountain town); a new map puts
+    // Each mode's map first (Classic: map.glb, the rest: the island town); a new map puts
     // the player at its spawn. A newer pick made while a map loads wins.
     const token = ++_modeStartToken;
     _setActiveMap(mapForMode(gameMode))

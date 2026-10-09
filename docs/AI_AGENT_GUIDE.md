@@ -31,7 +31,7 @@
 - **Rendering:** Three.js v0.176 (+ `three-mesh-bvh` for map raycasts)
 - **Physics:** Rapier3D (`@dimforge/rapier3d-compat`)
 - **Multiplayer:** Multiplayer mode only (Showdown is single player). Firebase (`peers` = lobby list, `rooms` = lobby / private duel rooms / `mm-<mode>` matchmaking queue / `party-<hostId>` / `match-<matchId>`, shop stock) + PeerJS WebRTC; messages: `presence`, `projectile`, `duel`, `match`
-- **World:** `public/mappacks/mountain_town.mappack` (via `src/map/MapLoader.ts`) for every mode but Classic; Classic uses the static GLB map (`public/glb_map/map.glb`)
+- **World:** `public/mappacks/island_town.mappack` (via `src/map/MapLoader.ts`) for every mode but Classic; Classic uses the static GLB map (`public/glb_map/map.glb`)
 - **Auth:** PIN → SHA-256 → Firebase + cookie (no OAuth); the app opens as a guest (unless a stored PIN auto-logs in); "Sign In" on the start screen reloads to the login form (`sq:showLogin` sessionStorage flag); guest = random name, `profileNameKey` null, nothing saved (guard profile writes on `profileNameKey`)
 - **Build:** Vite 6, deployed on Vercel
 
@@ -116,7 +116,7 @@ src/
 
 **Feature facades** (`src/features/`): thin wrappers that re-export lightweight APIs and `import()` heavy modules lazily. When adding a heavy new feature, add a facade here to keep the initial bundle small.
 
-**World:** `bootstrapGameApp.js` loads the map for the mode (`MAPS`: mountain town mappack, or `map.glb` for Classic — switched by `_setActiveMap` in the mode handler), builds a BVH and registers a raycast height resolver with `registerTerrainHeightResolver`; `getTerrainHeight` / `getSpawnY` use it.
+**World:** `bootstrapGameApp.js` loads the map for the mode (`MAPS`: island town mappack, or `map.glb` for Classic — switched by `_setActiveMap` in the mode handler), builds a BVH and registers a raycast height resolver with `registerTerrainHeightResolver`; `getTerrainHeight` / `getSpawnY` use it.
 
 **Stages:** `_psPickPathAngle` picks the flattest direction, `_psBuildStage` places enemies and coins along it, and the player auto-walks between fights. Enemies live in the `hordeEnemies` array (historical name).
 
@@ -144,7 +144,7 @@ src/
 1. Three.js scene + renderer
 2. Rapier physics world
 3. Firebase + player profile
-4. Default map (mountain town mappack) + height resolver
+4. Default map (island town mappack) + height resolver
 5. Character spawning
 6. Phone controller link (peer multiplayer starts only in Multiplayer mode)
 7. `requestAnimationFrame` loop starts

@@ -24,13 +24,22 @@
  *   group.getObjectByName('grass')    – instanced grass blade chunks
  *   group.getObjectByName('objects')  – all placed GLB models (each instance carries
  *                                        userData.mapObject = { id, name, modelFile })
+ *   group.getObjectByName('scatter')  – instanced rocks / bushes / flowers
+ *   group.getObjectByName('water')    – animated water surface (if any)
+ *   group.getObjectByName('sea')      – ocean plane at the sea level (if set)
+ *   group.getObjectByName('seabed')   – opaque floor under the ocean (if set)
+ *
+ * Terrain, grass, scatter and water share a parent group offset by the
+ * terrain centre. group.userData.water holds a MapWaterInfo for gameplay
+ * queries — pass it to sampleMapWaterLevel() with world-space x/z.
+ * Painted trails and roads are drawn into the terrain material; when the map
+ * has any, group.userData.paths holds a MapPathInfo — pass it to
+ * sampleMapPath() to find out whether a world x/z is on a trail or road.
  *
  * In Sword Showdown: loaded by bootstrapGameApp.js (`MAPS` / `_loadMap`) with the game's
  * renderer; the basis transcoder is served from public/basis/ (copied from
- * three/examples/jsm/libs/basis). The terrain's real size comes from `options.worldSize`,
- * else `terrain.worldWidth` / `worldDepth` in map.json, else `terrain.worldSize` — exported
- * packs can carry a stale worldSize (mountain_town.mappack says 50 but its objects are
- * placed on a 200 × 200 terrain).
+ * three/examples/jsm/libs/basis). Game edits to the editor's copy: userData.mapObject on
+ * placed objects, the KTX2 loader is disposed after use, a failed fetch throws.
  */
 
 import * as THREE from 'three'
@@ -90,6 +99,18 @@ export interface MapObject {
   scale: [number, number, number]
 }
 
+export type MapScatterType = 'rocks' | 'bushes' | 'flowers'
+
+// Scatter instance. position x/z are terrain-local (relative to the terrain
+// centre); y is the terrain height at export time — the runtime re-samples it.
+export interface MapScatterInstance {
+  type:      MapScatterType
+  position:  [number, number, number]
+  rotationY: number
+  scale:     [number, number, number]
+  color:     string
+}
+
 // Per-body manual level override stored in the mappack.
 // When absent the runtime recomputes the level from terrain heights.
 export interface WaterBodyOverride {
@@ -102,9 +123,12 @@ export interface MapManifest {
   terrain: {
     gridWidth: number    // = TERRAIN_VERTS
     gridHeight: number   // = TERRAIN_VERTS
-    worldSize: number    // = TERRAIN_SIZE
-    worldWidth?: number  // real X extent when it differs from worldSize
-    worldDepth?: number  // real Z extent when it differs from worldSize
+    worldSize: number    // = TERRAIN_SIZE (legacy; prefer worldWidth/worldDepth)
+    worldWidth?: number  // X extent in world units (defaults to worldSize)
+    worldDepth?: number  // Z extent in world units (defaults to worldSize)
+    shape?: 'rectangle' | 'circle'
+    centerX?: number     // terrain group offset in world space
+    centerZ?: number
     heightsFile: string  // path inside zip
     colorStops: MapTerrainColorStop[]
     colorBlendWidth?: number  // world-unit blend zone width between height stops (0 = hard)
@@ -120,7 +144,20 @@ export interface MapManifest {
     colorStops: MapGrassColorStop[]
   }
   objects: MapObject[]
-  water?: { maskFile: string; overrides?: WaterBodyOverride[] }
+  scatter?: {
+    instances: MapScatterInstance[]
+    assetProps?: Partial<Record<MapScatterType, { castShadows: boolean; receiveShadows: boolean }>>
+  }
+  water?: {
+    maskFile?:  string           // painted water depths (lakes, ponds)
+    overrides?: WaterBodyOverride[]
+    seaLevel?:  number           // ocean surface Y; absent = no ocean
+  }
+  paths?: {
+    maskFile:   string  // raw Uint8 RG (R = trail, G = road), resolution² texels
+    resolution: number  // = PATH_RES
+    styles:     Record<MapPathType, MapPathStyle>
+  }
   // KTX2 texture set names bundled in zip under textures/{name}/albedo.ktx2
   textures?: string[]
 }
@@ -154,19 +191,6 @@ export interface MapLoadOptions {
    * Defaults to '/basis/' — copy public/basis/ from this repo to your project.
    */
   transcoderPath?: string
-  /**
-   * Real world extent of the terrain: one number (square) or [width, depth].
-   * Overrides terrain.worldWidth / worldDepth / worldSize from map.json.
-   */
-  worldSize?: number | [number, number]
-}
-
-/** Terrain extent [width, depth]: options.worldSize, else map.json's worldWidth/Depth/Size. */
-export function resolveWorldSize(manifest: MapManifest, override?: number | [number, number]): [number, number] {
-  if (Array.isArray(override)) return [override[0], override[1]]
-  if (Number.isFinite(override)) return [override as number, override as number]
-  const t = manifest.terrain
-  return [t.worldWidth ?? t.worldSize, t.worldDepth ?? t.worldSize]
 }
 
 // ── Exported low-level functions ───────────────────────────────────────────
@@ -383,6 +407,7 @@ export function buildGrassChunkInstances(
   },
   worldWidth?: number,
   worldDepth?: number,
+  pathMask?: Uint8Array | null,
 ): GrassChunkInstances {
   const wW = worldWidth ?? worldSize
   const wD = worldDepth ?? worldSize
@@ -415,6 +440,7 @@ export function buildGrassChunkInstances(
 
     const dens = sampleBilinear(densityMap, wx, wz, gridW, gridH, wW, wD)
     if (acceptR >= dens) continue
+    if (pathMask && samplePathCoverage(pathMask, wx, wz, wW, wD) > PATH_GRASS_CUTOFF) continue
 
     const wy = sampleBilinear(heights, wx, wz, gridW, gridH, wW, wD)
     dummy.position.set(wx, wy, wz)
@@ -608,6 +634,178 @@ export function makeSplatInitUniforms(): Record<string, { value: any }> {
   return u
 }
 
+// ── Paths (trails & roads) ─────────────────────────────────────────────────
+// Paths are a PATH_RES×PATH_RES two-channel coverage mask (R = trail,
+// G = road, 0–255) stretched over the whole terrain and drawn into the
+// terrain material. Row index follows world Z, column follows world X —
+// the same orientation as the terrain UVs. Stored raw in path_mask.bin.
+
+export const PATH_RES = 256
+export type MapPathType = 'trail' | 'road'
+export const PATH_TYPES: MapPathType[] = ['trail', 'road']
+/** Coverage above which grass blades are not grown. */
+export const PATH_GRASS_CUTOFF = 0.35
+
+export interface MapPathStyle {
+  color:       string   // hex, used when no texture (or it failed to load)
+  textureSet?: string   // optional KTX2 set name
+  raggedness:  number   // 0 = clean edges (paved), 1 = very rough (dirt)
+}
+
+export const DEFAULT_PATH_STYLES: Record<MapPathType, MapPathStyle> = {
+  trail: { color: '#8b6b47', raggedness: 0.7 },
+  road:  { color: '#77746f', raggedness: 0.12 },
+}
+
+/** Parse path_mask.bin. Returns null when the size doesn't match. */
+export function parsePathMask(buf: ArrayBuffer, res: number): Uint8Array<ArrayBuffer> | null {
+  if (buf.byteLength !== res * res * 2) return null
+  return new Uint8Array(buf.slice(0))
+}
+
+/**
+ * Path coverage (0–1, the larger of trail/road) at terrain-local x/z.
+ * Nearest-texel lookup; cheap enough for per-blade grass culling.
+ */
+export function samplePathCoverage(
+  mask: Uint8Array, wx: number, wz: number, worldWidth: number, worldDepth: number,
+): number {
+  const res = Math.round(Math.sqrt(mask.length / 2))
+  const col = Math.floor((wx / worldWidth + 0.5) * res)
+  const row = Math.floor((wz / worldDepth + 0.5) * res)
+  if (col < 0 || row < 0 || col >= res || row >= res) return 0
+  const k = (row * res + col) * 2
+  return Math.max(mask[k], mask[k + 1]) / 255
+}
+
+/** Wrap a path mask in a GPU texture. Set .needsUpdate after editing the array. */
+export function createPathMaskTexture(mask: Uint8Array): THREE.DataTexture {
+  const res = Math.round(Math.sqrt(mask.length / 2))
+  const tex = new THREE.DataTexture(mask, res, res, THREE.RGFormat, THREE.UnsignedByteType)
+  tex.magFilter = THREE.LinearFilter
+  tex.minFilter = THREE.LinearFilter
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping
+  tex.needsUpdate = true
+  return tex
+}
+
+export function makePathInitUniforms(): Record<string, { value: any }> {
+  return {
+    uPathMask    : { value: null },
+    uPathScale   : { value: 3.0 },
+    uPathCol0    : { value: new THREE.Color(DEFAULT_PATH_STYLES.trail.color).convertSRGBToLinear() },
+    uPathCol1    : { value: new THREE.Color(DEFAULT_PATH_STYLES.road.color).convertSRGBToLinear() },
+    uPathRough0  : { value: DEFAULT_PATH_STYLES.trail.raggedness },
+    uPathRough1  : { value: DEFAULT_PATH_STYLES.road.raggedness },
+    uPathTex0    : { value: null },
+    uPathTex1    : { value: null },
+    uPathUseTex0 : { value: 0 },
+    uPathUseTex1 : { value: 0 },
+  }
+}
+
+/**
+ * Write path style colours/raggedness into uniforms. Textures are passed
+ * separately (null = use the colour) since loading differs per caller.
+ */
+export function setPathStyleUniforms(
+  u: Record<string, { value: any }>,
+  styles: Record<MapPathType, MapPathStyle>,
+  textures: Partial<Record<MapPathType, THREE.Texture | null>> = {},
+): void {
+  PATH_TYPES.forEach((type, i) => {
+    const style = styles[type] ?? DEFAULT_PATH_STYLES[type]
+    u[`uPathCol${i}`].value = new THREE.Color(style.color).convertSRGBToLinear()
+    u[`uPathRough${i}`].value = style.raggedness
+    const tex = textures[type] ?? null
+    u[`uPathTex${i}`].value = tex
+    u[`uPathUseTex${i}`].value = tex ? 1 : 0
+  })
+}
+
+const PATH_FRAG_DECLS = /* glsl */`
+varying vec2 vPathUv;
+uniform sampler2D uPathMask, uPathTex0, uPathTex1;
+uniform float uPathScale, uPathRough0, uPathRough1, uPathUseTex0, uPathUseTex1;
+uniform vec3  uPathCol0, uPathCol1;
+float pathHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float pathNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(pathHash(i), pathHash(i + vec2(1.0, 0.0)), f.x),
+             mix(pathHash(i + vec2(0.0, 1.0)), pathHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}`
+
+// Runs after the base colour (vertex colours or splat) is resolved. The mask
+// is thresholded at 0.5 with a noise offset so edges wander instead of
+// following the brush circle; raggedness scales that offset.
+const PATH_FRAG_CODE = /* glsl */`
+{
+  vec2 pm = texture2D(uPathMask, vPathUv).rg;
+  if (max(pm.r, pm.g) > 0.004) {
+    vec2 pw  = vTerrainWorld.xz;
+    float pn = pathNoise(pw * 1.7) * 0.65 + pathNoise(pw * 6.3) * 0.35 - 0.5;
+    float grain = 0.88 + 0.24 * pathNoise(pw * 11.0);
+    vec2 puv = pw / uPathScale;
+    float aT = smoothstep(0.44, 0.56, pm.r + pn * uPathRough0 * 1.6);
+    float aR = smoothstep(0.44, 0.56, pm.g + pn * uPathRough1 * 1.6);
+    vec3 cT = uPathUseTex0 > 0.5 ? texture2D(uPathTex0, puv).rgb : uPathCol0 * grain;
+    vec3 cR = uPathUseTex1 > 0.5 ? texture2D(uPathTex1, puv).rgb : uPathCol1 * grain;
+    diffuseColor.rgb = mix(diffuseColor.rgb, cT, aT);
+    diffuseColor.rgb = mix(diffuseColor.rgb, cR, aR);
+  }
+}`
+
+/**
+ * Inject the terrain shader into a MeshStandardMaterial's onBeforeCompile.
+ * steepN = null keeps the plain vertex-colour base (no splat); withPaths
+ * adds the trail/road overlay. `uniforms` must hold the matching splat
+ * and/or path uniforms.
+ */
+export function patchTerrainShader(
+  shader: { uniforms: Record<string, { value: any }>; vertexShader: string; fragmentShader: string },
+  uniforms: Record<string, { value: any }>,
+  steepN: number | null,
+  withPaths: boolean,
+): void {
+  Object.assign(shader.uniforms, uniforms)
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>',
+      `#include <common>\n${buildSplatVertDecls()}${withPaths ? '\nvarying vec2 vPathUv;' : ''}`)
+    .replace('#include <begin_vertex>',
+      `#include <begin_vertex>
+vTerrainWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+vTerrainNormal = normalize(mat3(modelMatrix) * normal);${withPaths ? '\nvPathUv = uv;' : ''}`)
+
+  const decls = steepN !== null ? buildSplatFragDecls(steepN) : buildSplatVertDecls()
+  const base  = steepN !== null ? buildSplatFragCode(steepN) : '#include <color_fragment>'
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>',
+      `#include <common>\n${decls}${withPaths ? PATH_FRAG_DECLS : ''}`)
+    .replace('#include <color_fragment>', `${base}${withPaths ? PATH_FRAG_CODE : ''}`)
+}
+
+export interface MapPathInfo {
+  mask: Uint8Array
+  worldWidth: number
+  worldDepth: number
+  centerX: number
+  centerZ: number
+}
+
+/** Which path (if any) covers world-space x/z. */
+export function sampleMapPath(p: MapPathInfo, x: number, z: number): MapPathType | null {
+  const res = Math.round(Math.sqrt(p.mask.length / 2))
+  const col = Math.floor(((x - p.centerX) / p.worldWidth + 0.5) * res)
+  const row = Math.floor(((z - p.centerZ) / p.worldDepth + 0.5) * res)
+  if (col < 0 || row < 0 || col >= res || row >= res) return null
+  const k = (row * res + col) * 2
+  const trail = p.mask[k], road = p.mask[k + 1]
+  if (road >= 128 && road >= trail) return 'road'
+  if (trail >= 128) return 'trail'
+  return null
+}
+
 // ── Private geometry helpers ───────────────────────────────────────────────
 
 function applyTerrainColors(
@@ -678,6 +876,369 @@ function applyTerrainColors(
   attr.needsUpdate = true
 }
 
+// ── Water ──────────────────────────────────────────────────────────────────
+// Water is stored as a (gridW-1)×(gridH-1) per-cell depth grid (raw
+// little-endian Float32, row-major, no header) in water_mask.bin. A cell is
+// wet when its depth >= WATER_EPSILON; its surface sits at the cell's average
+// terrain height + depth.
+
+export const WATER_EPSILON = 0.0005
+
+/** Average terrain height of each (gridW-1)×(gridH-1) cell. */
+export function computeCellHeights(heights: Float32Array, gridW: number, gridH: number): Float32Array {
+  const RX = gridW - 1, RZ = gridH - 1
+  const cellH = new Float32Array(RX * RZ)
+  for (let i = 0; i < RZ; i++) {
+    for (let j = 0; j < RX; j++) {
+      cellH[i * RX + j] = (
+        heights[i * gridW + j] + heights[i * gridW + j + 1] +
+        heights[(i + 1) * gridW + j] + heights[(i + 1) * gridW + j + 1]
+      ) * 0.25
+    }
+  }
+  return cellH
+}
+
+/**
+ * Parse water_mask.bin into per-cell depths. Accepts the Float32 format and
+ * the legacy one-byte-per-cell format. Returns null if the size doesn't match.
+ */
+export function parseWaterMask(buf: ArrayBuffer, resX: number, resZ: number): Float32Array<ArrayBuffer> | null {
+  const n = resX * resZ
+  if (buf.byteLength === n * 4) return new Float32Array(buf.slice(0))
+  if (buf.byteLength === n) {
+    const u8  = new Uint8Array(buf)
+    const out = new Float32Array(n)
+    for (let k = 0; k < n; k++) out[k] = u8[k] ? 0.5 : 0
+    return out
+  }
+  return null
+}
+
+/**
+ * Build a water surface geometry from per-cell water depths + terrain heights.
+ * Each wet cell becomes a flat quad at (cell avg terrain height + depth).
+ * Coordinates are terrain-local (centred on the origin).
+ */
+export function buildWaterGeometry(
+  volume: Float32Array,
+  heights: Float32Array,
+  gridW: number,
+  gridH: number,
+  worldWidth: number,
+  worldDepth: number,
+): THREE.BufferGeometry {
+  const RX = gridW - 1, RZ = gridH - 1
+  const cellH = computeCellHeights(heights, gridW, gridH)
+
+  const positions: number[] = []
+  const normals:   number[] = []
+  const indices:   number[] = []
+
+  for (let i = 0; i < RZ; i++) {
+    for (let j = 0; j < RX; j++) {
+      const idx = i * RX + j
+      if (!(volume[idx] >= WATER_EPSILON)) continue
+      const level = cellH[idx] + volume[idx]
+
+      const x0 = (j / RX - 0.5) * worldWidth
+      const x1 = ((j + 1) / RX - 0.5) * worldWidth
+      const z0 = (i / RZ - 0.5) * worldDepth
+      const z1 = ((i + 1) / RZ - 0.5) * worldDepth
+
+      const base = positions.length / 3
+      positions.push(
+        x0, level, z0,   x1, level, z0,
+        x0, level, z1,   x1, level, z1,
+      )
+      normals.push(0,1,0, 0,1,0, 0,1,0, 0,1,0)
+      indices.push(base, base+2, base+1,  base+1, base+2, base+3)
+    }
+  }
+
+  const geo = new THREE.BufferGeometry()
+  if (positions.length === 0) return geo
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3))
+  geo.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(normals),   3))
+  geo.setIndex(indices)
+  geo.computeBoundingSphere()
+  return geo
+}
+
+const WATER_VERT = /* glsl */`
+#include <fog_pars_vertex>
+uniform float uTime;
+varying vec3  vWorld;
+
+void main() {
+  vWorld = position;
+  vec3 pos = position;
+  float wave = sin(pos.x * 1.8 + uTime * 1.4) * 0.03
+             + sin(pos.z * 2.2 + uTime * 1.0) * 0.02
+             + sin((pos.x + pos.z) * 1.2 - uTime * 0.8) * 0.01;
+  pos.y += wave;
+  vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}
+`
+
+const WATER_FRAG = /* glsl */`
+uniform vec3  uShallowColor;
+uniform vec3  uDeepColor;
+uniform float uOpacity;
+uniform float uTime;
+varying vec3  vWorld;
+#include <fog_pars_fragment>
+
+void main() {
+  // World-space UV for repeating pattern independent of polygon size
+  vec2 wuv = vWorld.xz * 0.4;
+
+  // Procedural animated normal for Fresnel
+  float nx = sin(wuv.x * 2.5 + uTime * 1.1) * 0.35;
+  float nz = cos(wuv.y * 2.0 + uTime * 0.85) * 0.35;
+  vec3 N = normalize(vec3(nx, 1.0, nz));
+  float fresnel = pow(1.0 - abs(N.y), 2.5);
+
+  vec3 color = mix(uShallowColor, uDeepColor, 0.5);
+  color = mix(color, vec3(0.88, 0.95, 1.0), fresnel * 0.35);
+
+  float shimmer = max(0.0, sin(wuv.x * 6.0 + uTime * 3.5) * sin(wuv.y * 5.0 - uTime * 2.5));
+  color += shimmer * 0.07;
+
+  gl_FragColor = vec4(color, uOpacity);
+  #include <fog_fragment>
+}
+`
+
+/**
+ * Animated water material. Advance `material.uniforms.uTime.value` (seconds)
+ * each frame to animate it — MapLoader's water mesh does this automatically.
+ */
+export function createWaterMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    vertexShader:   WATER_VERT,
+    fragmentShader: WATER_FRAG,
+    fog: true,
+    uniforms: {
+      ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
+      uTime:         { value: 0 },
+      uShallowColor: { value: new THREE.Color('#7ec8e3') },
+      uDeepColor:    { value: new THREE.Color('#1a5b8e') },
+      uOpacity:      { value: 0.78 },
+    },
+    transparent: true,
+    depthWrite:  false,
+    side:        THREE.DoubleSide,
+  })
+}
+
+/**
+ * Sample the water surface at a terrain-local (x, z). Returns the surface Y,
+ * or null when that point is dry. Useful for swimming / splash checks.
+ * Pass `seaLevel` to also count the ocean: points off the terrain, or where
+ * the ground is below sea level, are wet up to the sea level.
+ */
+export function sampleWaterLevel(
+  volume: Float32Array | null,
+  heights: Float32Array,
+  gridW: number,
+  gridH: number,
+  worldWidth: number,
+  worldDepth: number,
+  x: number,
+  z: number,
+  seaLevel: number | null = null,
+): number | null {
+  const RX = gridW - 1, RZ = gridH - 1
+  const j = Math.floor((x / worldWidth + 0.5) * RX)
+  const i = Math.floor((z / worldDepth + 0.5) * RZ)
+  if (i < 0 || i >= RZ || j < 0 || j >= RX) return seaLevel
+  const cellH = (
+    heights[i * gridW + j] + heights[i * gridW + j + 1] +
+    heights[(i + 1) * gridW + j] + heights[(i + 1) * gridW + j + 1]
+  ) * 0.25
+  const depth = volume ? volume[i * RX + j] : 0
+  const painted = depth >= WATER_EPSILON ? cellH + depth : null
+  const sea     = seaLevel !== null && cellH < seaLevel ? seaLevel : null
+  if (painted === null) return sea
+  if (sea === null) return painted
+  return Math.max(painted, sea)
+}
+
+/** Water data MapLoader stores in group.userData.water. */
+export interface MapWaterInfo {
+  volume:     Float32Array | null  // painted water depths, null when none
+  heights:    Float32Array
+  gridW:      number
+  gridH:      number
+  worldWidth: number
+  worldDepth: number
+  shape:      'rectangle' | 'circle'
+  centerX:    number
+  centerZ:    number
+  seaLevel:   number | null
+}
+
+/**
+ * Sample the water surface at a world-space (x, z) using the info MapLoader
+ * stores in group.userData.water. Off a circular terrain counts as open sea.
+ * Returns the surface Y, or null when that point is dry.
+ */
+export function sampleMapWaterLevel(w: MapWaterInfo, x: number, z: number): number | null {
+  const lx = x - w.centerX, lz = z - w.centerZ
+  if (!isOnTerrain(lx, lz, w.worldWidth, w.worldDepth, w.shape)) return w.seaLevel
+  return sampleWaterLevel(w.volume, w.heights, w.gridW, w.gridH, w.worldWidth, w.worldDepth, lx, lz, w.seaLevel)
+}
+
+// ── Sea ────────────────────────────────────────────────────────────────────
+// An optional ocean: one flat water plane at the sea level that reaches far
+// past the terrain, plus an opaque seabed underneath so the open sea doesn't
+// show the empty void below the map. The seabed sits just under the lowest
+// terrain point and starts in the terrain's lowest colour, so a coast that
+// drops to the floor blends in, then fades to deep blue away from the map.
+
+/** How far the sea reaches, as a multiple of the terrain's larger side. */
+export const SEA_EXTENT = 12
+
+/** Flat, subdivided sea plane centred on the terrain (terrain-local). */
+export function buildSeaGeometry(worldWidth: number, worldDepth: number, seaLevel: number): THREE.BufferGeometry {
+  const size = Math.max(worldWidth, worldDepth) * SEA_EXTENT
+  const geo  = new THREE.PlaneGeometry(size, size, 128, 128)
+  geo.rotateX(-Math.PI / 2)
+  geo.translate(0, seaLevel, 0)
+  return geo
+}
+
+/** Height of the seabed: just below the lowest terrain point, and at least 1 below the sea. */
+export function computeSeabedLevel(heights: Float32Array, seaLevel: number): number {
+  let min = seaLevel - 1
+  for (let k = 0; k < heights.length; k++) if (heights[k] < min) min = heights[k]
+  return min - 0.02
+}
+
+const SEABED_DEEP_COLOR = new THREE.Color('#0f2a3d')
+
+/** Lowest-height terrain colour stop, used as the seabed's shore colour. */
+export function lowestStopColor(stops: MapTerrainColorStop[]): string {
+  let best: MapTerrainColorStop | null = null
+  for (const s of stops) if (!best || s.minHeight < best.minHeight) best = s
+  return best?.color ?? '#d8c48a'
+}
+
+export function buildSeabedGeometry(
+  worldWidth: number, worldDepth: number, level: number,
+  shoreColor: THREE.ColorRepresentation,
+  shape: 'rectangle' | 'circle' = 'rectangle',
+): THREE.BufferGeometry {
+  const size = Math.max(worldWidth, worldDepth) * SEA_EXTENT
+  const geo  = new THREE.PlaneGeometry(size, size, 96, 96)
+  geo.rotateX(-Math.PI / 2)
+  geo.translate(0, level, 0)
+
+  // Distance from the terrain outline in terrain half-extents (1 = the edge)
+  const shore = new THREE.Color(shoreColor)
+  const pos   = geo.attributes.position
+  const cols  = new Float32Array(pos.count * 3)
+  const c     = new THREE.Color()
+  for (let k = 0; k < pos.count; k++) {
+    const nx = Math.abs(pos.getX(k)) / (worldWidth / 2)
+    const nz = Math.abs(pos.getZ(k)) / (worldDepth / 2)
+    const e  = shape === 'circle' ? Math.sqrt(nx * nx + nz * nz) : Math.max(nx, nz)
+    const u  = Math.max(0, Math.min(1, (e - 1) / 2))
+    c.copy(shore).lerp(SEABED_DEEP_COLOR, u * u * (3 - 2 * u))
+    cols[k * 3] = c.r; cols[k * 3 + 1] = c.g; cols[k * 3 + 2] = c.b
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3))
+  return geo
+}
+
+export function createSeabedMaterial(): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 })
+}
+
+// ── Scatter (rocks / bushes / flowers) ─────────────────────────────────────
+
+export const SCATTER_TYPES: MapScatterType[] = ['rocks', 'bushes', 'flowers']
+
+export const SCATTER_GEOMETRIES: Record<MapScatterType, THREE.BufferGeometry> = {
+  rocks:   new THREE.IcosahedronGeometry(0.5, 0),
+  bushes:  new THREE.IcosahedronGeometry(0.45, 1),
+  flowers: new THREE.SphereGeometry(0.3, 8, 5),
+}
+
+/** True when a terrain-local (x, z) point lies on the terrain surface. */
+export function isOnTerrain(
+  x: number, z: number, worldWidth: number, worldDepth: number, shape: 'rectangle' | 'circle' = 'rectangle',
+): boolean {
+  const nx = x / (worldWidth / 2)
+  const nz = z / (worldDepth / 2)
+  if (shape === 'circle') return nx * nx + nz * nz <= 1
+  return Math.abs(nx) <= 1 && Math.abs(nz) <= 1
+}
+
+/**
+ * Write instance matrices + colours for scatter objects into an InstancedMesh,
+ * snapping each instance's Y to the current terrain height.
+ */
+export function updateScatterInstancedMesh(
+  mesh: THREE.InstancedMesh,
+  instances: MapScatterInstance[],
+  heights: Float32Array,
+  gridW: number,
+  gridH: number,
+  worldWidth: number,
+  worldDepth: number,
+): void {
+  const mat  = new THREE.Matrix4()
+  const quat = new THREE.Quaternion()
+  const euler = new THREE.Euler()
+  const pos  = new THREE.Vector3()
+  const sca  = new THREE.Vector3()
+  const col  = new THREE.Color()
+  for (let i = 0; i < instances.length; i++) {
+    const inst = instances[i]
+    const x = inst.position[0], z = inst.position[2]
+    pos.set(x, sampleBilinear(heights, x, z, gridW, gridH, worldWidth, worldDepth), z)
+    quat.setFromEuler(euler.set(0, inst.rotationY, 0))
+    sca.set(inst.scale[0], inst.scale[1], inst.scale[2])
+    mat.compose(pos, quat, sca)
+    mesh.setMatrixAt(i, mat)
+    mesh.setColorAt(i, col.set(inst.color))
+  }
+  mesh.count = instances.length
+  mesh.instanceMatrix.needsUpdate = true
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+}
+
+function buildScatterGroup(
+  scatter: NonNullable<MapManifest['scatter']>,
+  heights: Float32Array,
+  gridW: number,
+  gridH: number,
+  worldWidth: number,
+  worldDepth: number,
+  shape: 'rectangle' | 'circle',
+): THREE.Group {
+  const group = new THREE.Group()
+  group.name  = 'scatter'
+  for (const type of SCATTER_TYPES) {
+    const list = scatter.instances.filter((s) =>
+      s.type === type && isOnTerrain(s.position[0], s.position[2], worldWidth, worldDepth, shape))
+    if (list.length === 0) continue
+    const mat  = new THREE.MeshStandardMaterial({ flatShading: type === 'rocks' })
+    const mesh = new THREE.InstancedMesh(SCATTER_GEOMETRIES[type], mat, list.length)
+    mesh.name  = type
+    const props = scatter.assetProps?.[type]
+    mesh.castShadow    = props?.castShadows ?? true
+    mesh.receiveShadow = props?.receiveShadows ?? true
+    updateScatterInstancedMesh(mesh, list, heights, gridW, gridH, worldWidth, worldDepth)
+    group.add(mesh)
+  }
+  return group
+}
+
 // ── Grass group builder (used internally by MapLoader.load) ────────────────
 
 async function buildGrassGroup(
@@ -690,6 +1251,7 @@ async function buildGrassGroup(
   textureMap: Map<string, THREE.Texture> | null,
   worldWidth?: number,
   worldDepth?: number,
+  pathMask?: Uint8Array | null,
 ): Promise<THREE.Group> {
   const group = new THREE.Group()
   group.name  = 'grass'
@@ -709,7 +1271,7 @@ async function buildGrassGroup(
           maxScale:   grassConfig.maxScale,
           colorStops: grassConfig.colorStops,
         },
-        worldWidth, worldDepth,
+        worldWidth, worldDepth, pathMask,
       )
       if (inst.count === 0) continue
 
@@ -760,7 +1322,6 @@ export class MapLoader {
     const { renderer, transcoderPath = '/basis/' } = options
     const zip      = await this.openZip(source)
     const manifest = await this.readManifest(zip)
-    const [worldW, worldD] = resolveWorldSize(manifest, options.worldSize)
 
     const [terrainBuf, grassBuf] = await Promise.all([
       this.readFile(zip, manifest.terrain.heightsFile),
@@ -781,24 +1342,106 @@ export class MapLoader {
       textureMap = await this.loadKtx2Textures(zip, manifest.textures, renderer, transcoderPath)
     }
 
+    const worldWidth = manifest.terrain.worldWidth ?? manifest.terrain.worldSize
+    const worldDepth = manifest.terrain.worldDepth ?? manifest.terrain.worldSize
+    const shape      = manifest.terrain.shape ?? 'rectangle'
+
+    // Terrain, grass and scatter are laid out in terrain-local space and
+    // offset together by the terrain centre; placed objects are world-space.
+    const terrainRoot = new THREE.Group()
+    terrainRoot.position.set(manifest.terrain.centerX ?? 0, 0, manifest.terrain.centerZ ?? 0)
+    root.add(terrainRoot)
+
+    // Paths (trails / roads) — drawn by the terrain material, keep grass off them
+    let pathMask: Uint8Array | null = null
+    if (manifest.paths?.maskFile) {
+      const buf = await zip.file(manifest.paths.maskFile)?.async('arraybuffer')
+      pathMask  = buf ? parsePathMask(buf, manifest.paths.resolution ?? PATH_RES) : null
+      if (buf && !pathMask) console.warn(`[MapLoader] ${manifest.paths.maskFile} has unexpected size; paths skipped`)
+    }
+
     // Terrain
     const terrainGeo  = buildTerrainGeometry(
       heights, gW, gH, manifest.terrain.worldSize,
       manifest.terrain.colorStops,
       manifest.terrain.colorBlendWidth,
       manifest.terrain.steepnessStops,
-      worldW, worldD,
+      worldWidth, worldDepth,
     )
-    const terrainMat  = this.buildTerrainMaterial(manifest, textureMap)
+    const terrainMat  = this.buildTerrainMaterial(manifest, textureMap, pathMask)
     const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat)
     terrainMesh.name  = 'terrain'
-    root.add(terrainMesh)
+    terrainRoot.add(terrainMesh)
 
     // Grass
-    root.add(await buildGrassGroup(
+    terrainRoot.add(await buildGrassGroup(
       heights, densityMap, gW, gH, manifest.terrain.worldSize, manifest.grass, textureMap,
-      worldW, worldD,
+      worldWidth, worldDepth, pathMask,
     ))
+
+    // Scatter
+    if (manifest.scatter && manifest.scatter.instances.length > 0) {
+      terrainRoot.add(buildScatterGroup(manifest.scatter, heights, gW, gH, worldWidth, worldDepth, shape))
+    }
+
+    // Water
+    let waterVolume: Float32Array | null = null
+    if (manifest.water?.maskFile) {
+      const buf    = await zip.file(manifest.water.maskFile)?.async('arraybuffer')
+      const volume = buf ? parseWaterMask(buf, gW - 1, gH - 1) : null
+      if (volume && volume.some((v) => v >= WATER_EPSILON)) {
+        waterVolume = volume
+        const waterMat  = createWaterMaterial()
+        const waterMesh = new THREE.Mesh(
+          buildWaterGeometry(volume, heights, gW, gH, worldWidth, worldDepth),
+          waterMat,
+        )
+        waterMesh.name        = 'water'
+        waterMesh.renderOrder = 1
+        waterMesh.onBeforeRender = () => { waterMat.uniforms.uTime.value = performance.now() / 1000 }
+        terrainRoot.add(waterMesh)
+      } else if (buf && !volume) {
+        console.warn(`[MapLoader] ${manifest.water.maskFile} has unexpected size; water skipped`)
+      }
+    }
+
+    // Sea
+    const seaLevel = typeof manifest.water?.seaLevel === 'number' ? manifest.water.seaLevel : null
+    if (seaLevel !== null) {
+      const seaMat  = createWaterMaterial()
+      const seaMesh = new THREE.Mesh(buildSeaGeometry(worldWidth, worldDepth, seaLevel), seaMat)
+      seaMesh.name        = 'sea'
+      seaMesh.renderOrder = 1
+      seaMesh.onBeforeRender = () => { seaMat.uniforms.uTime.value = performance.now() / 1000 }
+      terrainRoot.add(seaMesh)
+
+      const seabed = new THREE.Mesh(
+        buildSeabedGeometry(
+          worldWidth, worldDepth, computeSeabedLevel(heights, seaLevel),
+          lowestStopColor(manifest.terrain.colorStops), shape,
+        ),
+        createSeabedMaterial(),
+      )
+      seabed.name = 'seabed'
+      seabed.receiveShadow = true
+      terrainRoot.add(seabed)
+    }
+
+    if (waterVolume || seaLevel !== null) {
+      const water: MapWaterInfo = {
+        volume: waterVolume, heights, gridW: gW, gridH: gH, worldWidth, worldDepth, shape,
+        centerX: terrainRoot.position.x, centerZ: terrainRoot.position.z, seaLevel,
+      }
+      root.userData.water = water
+    }
+
+    if (pathMask) {
+      const paths: MapPathInfo = {
+        mask: pathMask, worldWidth, worldDepth,
+        centerX: terrainRoot.position.x, centerZ: terrainRoot.position.z,
+      }
+      root.userData.paths = paths
+    }
 
     // Objects
     const objectsGroup = new THREE.Group()
@@ -821,10 +1464,10 @@ export class MapLoader {
         }
         const inst = scene.clone(true)
         inst.name  = obj.name
-        inst.userData.mapObject = { id: obj.id, name: obj.name, modelFile: obj.modelFile }
         inst.position.set(...obj.position)
         inst.rotation.set(...obj.rotation)
         inst.scale.set(...obj.scale)
+        inst.userData.mapObject = { id: obj.id, name: obj.name, modelFile: obj.modelFile }
         objectsGroup.add(inst)
       } catch (err) {
         console.warn(`[MapLoader] failed to load ${obj.modelFile}:`, err)
@@ -879,10 +1522,12 @@ export class MapLoader {
     return map
   }
 
-  // Build a terrain material: splat shader when textures are available, vertex colours otherwise.
+  // Build a terrain material: splat shader when textures are available, vertex
+  // colours otherwise; either way with the trail/road overlay when painted.
   private buildTerrainMaterial(
     manifest: MapManifest,
-    textureMap: Map<string, THREE.Texture> | null
+    textureMap: Map<string, THREE.Texture> | null,
+    pathMask: Uint8Array | null = null,
   ): THREE.MeshStandardMaterial {
     const colorStops    = manifest.terrain.colorStops
     const steepnessStops = manifest.terrain.steepnessStops ?? []
@@ -894,8 +1539,23 @@ export class MapLoader {
     const hasTextures = !!textureMap && textureMap.size > 0 &&
       (sorted.some((s) => s.textureSet) || sortedSteep.some((s) => s.textureSet))
 
+    const pathU = pathMask ? makePathInitUniforms() : null
+    if (pathU && pathMask) {
+      const styles = manifest.paths?.styles ?? DEFAULT_PATH_STYLES
+      pathU.uPathMask.value = createPathMaskTexture(pathMask)
+      setPathStyleUniforms(pathU, styles, {
+        trail: styles.trail?.textureSet ? textureMap?.get(styles.trail.textureSet) ?? null : null,
+        road:  styles.road?.textureSet  ? textureMap?.get(styles.road.textureSet)  ?? null : null,
+      })
+    }
+
     if (!hasTextures) {
-      return new THREE.MeshStandardMaterial({ flatShading: true, vertexColors: true, side: THREE.DoubleSide })
+      const mat = new THREE.MeshStandardMaterial({ flatShading: true, vertexColors: true, side: THREE.DoubleSide })
+      if (pathU) {
+        mat.customProgramCacheKey = () => 'maploader-vc-paths'
+        mat.onBeforeCompile = (shader) => patchTerrainShader(shader, pathU, null, true)
+      }
+      return mat
     }
 
     const allTexSets = [
@@ -940,21 +1600,8 @@ export class MapLoader {
 
     const steepN = sortedSteep.length
     const mat    = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, vertexColors: false })
-    mat.customProgramCacheKey = () => `maploader-splat-s${steepN}`
-    mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, u)
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>',
-          `#include <common>\n${buildSplatVertDecls()}`)
-        .replace('#include <begin_vertex>',
-          `#include <begin_vertex>
-vTerrainWorld = (modelMatrix * vec4(position, 1.0)).xyz;
-vTerrainNormal = normalize(mat3(modelMatrix) * normal);`)
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>',
-          `#include <common>\n${buildSplatFragDecls(steepN)}`)
-        .replace('#include <color_fragment>', buildSplatFragCode(steepN))
-    }
+    mat.customProgramCacheKey = () => `maploader-splat-s${steepN}${pathU ? '-paths' : ''}`
+    mat.onBeforeCompile = (shader) => patchTerrainShader(shader, { ...u, ...(pathU ?? {}) }, steepN, !!pathU)
 
     return mat
   }
