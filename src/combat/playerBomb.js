@@ -127,6 +127,11 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
       return bombs.length;
     },
 
+    /** Pushes the fuse of every bomb in flight back by `ms` (the game was paused). */
+    delay(ms) {
+      for (const bomb of bombs) bomb.spawnTime += ms;
+    },
+
     /** Removes every bomb in flight without exploding (stage restart). */
     clear() {
       for (const bomb of bombs) disposeBombMesh(bomb.mesh);

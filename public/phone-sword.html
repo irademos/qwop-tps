@@ -405,6 +405,7 @@
     }
 
     function startGyro() {
+      if (gyroEnabled) return; // (already listening — a reconnect)
       window.addEventListener('deviceorientation', (e) => {
         lastGyro.alpha = e.alpha;
         lastGyro.beta = e.beta;
@@ -417,6 +418,7 @@
     }
 
     function startSendLoop() {
+      if (sendInterval) clearInterval(sendInterval);
       // Send at ~30 Hz
       sendInterval = setInterval(() => {
         if (conn && conn.open && gyroEnabled) {
@@ -463,22 +465,76 @@
         }
       } catch (_) { /* fall through to STUN-only */ }
 
-      peer = new Peer({ config: { iceServers } });
+      connectToGame(iceServers, 0);
+    });
 
-      peer.on('error', (err) => {
-        setError('Connection error: ' + err.message);
+    // The game can be briefly unreachable (its link to the signalling server is reconnecting,
+    // e.g. after its tab was in the background) — keep trying for a little while
+    const FIND_GAME_RETRIES = 6;
+    const FIND_GAME_RETRY_MS = 2500;
+    const CONNECT_TIMEOUT_MS = 15000;
+    let connectTimer = null;
+
+    function showConnectButton() {
+      connectBtn.disabled = false;
+      connectBtn.style.display = '';
+    }
+
+    function dropConnection() {
+      clearTimeout(connectTimer);
+      if (sendInterval) { clearInterval(sendInterval); sendInterval = null; }
+      if (conn) { try { conn.close(); } catch (_) { /* ignore */ } conn = null; }
+      if (peer) { try { peer.destroy(); } catch (_) { /* ignore */ } peer = null; }
+    }
+
+    function connectToGame(iceServers, attempt) {
+      dropConnection(); // (a stale peer / connection from an earlier try)
+      const myPeer = new Peer({ config: { iceServers } });
+      peer = myPeer;
+      let done = false;
+      const fail = (message, retry) => {
+        if (done || peer !== myPeer) return;
+        done = true;
+        dropConnection();
+        document.body.classList.remove('controller-mode');
+        connectedIcon.style.display = 'none';
+        setBlocking(false);
+        if (retry && attempt < FIND_GAME_RETRIES) {
+          setStatus(`Looking for the game… (${attempt + 1}/${FIND_GAME_RETRIES})`);
+          connectTimer = setTimeout(() => connectToGame(iceServers, attempt + 1), FIND_GAME_RETRY_MS);
+          return;
+        }
+        setError(message);
         setStatus('Failed to connect');
-        connectBtn.disabled = false;
+        showConnectButton();
+      };
+
+      myPeer.on('error', (err) => {
+        if (err.type === 'peer-unavailable') {
+          fail('Could not find the game. Make sure it is open on the other screen, then tap Connect '
+            + '(if the game page was reloaded, scan its new QR code).', true);
+        } else {
+          fail('Connection error: ' + err.message, ['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type));
+        }
       });
 
-      peer.on('open', () => {
-        conn = peer.connect(hostPeerId, { serialization: 'json' });
+      myPeer.on('open', () => {
+        if (peer !== myPeer) return;
+        const myConn = myPeer.connect(hostPeerId, { serialization: 'json' });
+        conn = myConn;
+        // (a connection that never opens — e.g. ICE fails — would otherwise hang here forever)
+        connectTimer = setTimeout(() => {
+          if (!myConn.open) fail('Timed out connecting to the game. Tap Connect to try again.', true);
+        }, CONNECT_TIMEOUT_MS);
 
-        conn.on('data', (data) => {
+        myConn.on('data', (data) => {
           if (data && data.type === 'status') applyStatus(data);
         });
 
-        conn.on('open', () => {
+        myConn.on('open', () => {
+          if (conn !== myConn) return;
+          clearTimeout(connectTimer);
+          setError('');
           setStatus('Connected! Move your phone like a sword.');
           connectedIcon.style.display = 'block';
           gyroDisplay.style.display = 'block';
@@ -486,29 +542,26 @@
           document.body.classList.add('controller-mode');
           startGyro();
           startSendLoop();
-          conn.send({ type: 'gyro_hello', msg: 'Phone Sword connected!' });
+          myConn.send({ type: 'gyro_hello', msg: 'Phone Sword connected!' });
         });
 
-        conn.on('close', () => {
+        myConn.on('close', () => {
+          if (conn !== myConn || done) return;
+          done = true;
+          dropConnection();
           setStatus('Disconnected from game');
           connectedIcon.style.display = 'none';
           document.body.classList.remove('controller-mode');
           setBlocking(false);
-          if (sendInterval) clearInterval(sendInterval);
-          connectBtn.disabled = false;
-          connectBtn.style.display = '';
+          showConnectButton();
         });
 
-        conn.on('error', (err) => {
-          setError('Data channel error: ' + err.message);
-          document.body.classList.remove('controller-mode');
-          setBlocking(false);
-          if (sendInterval) clearInterval(sendInterval);
-          connectBtn.disabled = false;
-          connectBtn.style.display = '';
+        myConn.on('error', (err) => {
+          if (conn !== myConn) return;
+          fail('Data channel error: ' + err.message, false);
         });
       });
-    });
+    }
   </script>
 </body>
 </html>

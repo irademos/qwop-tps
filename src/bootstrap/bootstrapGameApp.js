@@ -3484,7 +3484,7 @@ async function initCore(runtimeContext) {
     const boss = createPembertonBoss({
       enemy,
       name: '🎩 Pemberton',
-      getTarget: () => (playerDead ? null : playerModel),
+      getTarget: () => (_attacksHeld() ? null : playerModel),
       getWeaponGear: () => matchCtx.getWeaponGear(),
       fireBullet: (origin, dir) => spawnProjectileWithPerfFlags(scene, projectiles, origin, dir, 'pemberton', {
         geometry: new THREE.SphereGeometry(0.1, 8, 8),
@@ -3834,6 +3834,18 @@ async function initCore(runtimeContext) {
   let _psAutoWalkDir = new THREE.Vector3();
   let _psStageActive = false;
   let _psWinShown = false;
+  // Settings open during a single-player stage (Showdown / Classic / tutorial) pauses the game:
+  // the game loop only renders. Enemies' timers run on the wall clock, so for a moment after
+  // closing the settings they hold their attacks (no wind-up finishing the instant play resumes).
+  const PAUSE_RESUME_GRACE_MS = 1500;
+  let _gamePaused = false;
+  let _pausedAtMs = 0;
+  let _pauseGraceUntil = 0;
+  const _isSettingsPauseWanted = () => document.body.classList.contains('settings-open')
+    && !multiplayer
+    && (_psStageActive || !!showdownTutorial?.isActive());
+  // Enemies don't attack the player: dead (body carried off) or just back from a pause
+  const _attacksHeld = () => playerDead || performance.now() < _pauseGraceUntil;
   let _psStageKills = 0;       // enemies killed this stage
   let _psStageTotal = 0;       // enemies in this stage
   let _psKillHud = null;
@@ -4746,7 +4758,7 @@ async function initCore(runtimeContext) {
     playerControls?.refreshActionButtons?.();
   };
   const _handlePhoneAction = (action) => {
-    if (!playerControls?.enabled || _classicMode) return; // Classic: Block only
+    if (!playerControls?.enabled || _classicMode || _gamePaused) return; // Classic: Block only
     const appStateRef = window.appState;
     if (action === 'jump') {
       if (!playerControls.isInWater) window.phoneSwordJumpPressed = true;
@@ -4799,7 +4811,14 @@ async function initCore(runtimeContext) {
     };
   };
   let _tutorialPhoneHighlight = null;
+  // The phone currently driving the sword. A reconnecting phone (its browser was closed) opens
+  // a new connection while the old one may not have noticed it's dead yet: the new one wins,
+  // and the old one closing later must not mark the phone as disconnected.
+  let _phoneSwordConn = null;
   const _attachPhoneSwordConn = (conn) => {
+    const prev = _phoneSwordConn;
+    _phoneSwordConn = conn;
+    if (prev && prev !== conn) { try { prev.close(); } catch (_) { /* ignore */ } }
     window.phoneSwordGyro.connected = true;
     // A separate phone took over — stop using this device's own gyro
     window.phoneSwordGyro.localDevice = false;
@@ -4816,7 +4835,7 @@ async function initCore(runtimeContext) {
     };
     const statusTimer = setInterval(sendStatus, 300);
     conn.on('data', (data) => {
-      if (!data) return;
+      if (!data || conn !== _phoneSwordConn) return;
       if (data.type === 'gyro') {
         window.phoneSwordGyro.alpha = data.alpha;
         window.phoneSwordGyro.beta = data.beta;
@@ -4828,12 +4847,19 @@ async function initCore(runtimeContext) {
         lastStatusJson = ''; // counts/equipped likely changed — resend soon
       }
     });
-    conn.on('close', () => {
+    let closed = false;
+    const onGone = () => {
+      if (closed) return;
+      closed = true;
       clearInterval(statusTimer);
+      if (conn !== _phoneSwordConn) return; // replaced by a newer phone connection
+      _phoneSwordConn = null;
       window.phoneSwordGyro.connected = false;
       window.phoneSwordGyro.blocking = false;
       _applyRemoteJoystick(0, 0);
-    });
+    };
+    conn.on('close', onGone);
+    conn.on('error', onGone);
   };
 
   // Derive a stable peer ID from the player profile so the phone-sword URL never changes.
@@ -4846,7 +4872,11 @@ async function initCore(runtimeContext) {
     _fixedPeerId = 'sq-' + _hashHex.slice(0, 24);
   } catch (_) { /* fall back to random ID */ }
 
-  // Create a dedicated PeerJS peer for receiving gyro data
+  // Create a dedicated PeerJS peer for receiving gyro data.
+  // The phone finds the game through the PeerJS signalling server, so the game's peer has to
+  // stay registered there the whole time: when its socket drops (network blip, the tab was in
+  // the background, the laptop slept) it is reconnected, and a peer that died is recreated —
+  // otherwise a phone that reloads its page can no longer reach the game ("Could not connect to peer").
   const { loadPeerJs: _loadPeerJs } = await import('../core/externalDeps.js');
   try {
     const PeerClass = await _loadPeerJs();
@@ -4862,25 +4892,19 @@ async function initCore(runtimeContext) {
     } catch (_) { /* fall back to STUN-only */ }
 
     const _peerOpts = { config: { iceServers: _gyroIceServers } };
-    // Use fixed ID if available; PeerJS accepts it as first argument
-    const gyroPeer = _fixedPeerId
-      ? new PeerClass(_fixedPeerId, _peerOpts)
-      : new PeerClass(_peerOpts);
-
+    // Our fixed ID can be "taken" for a while by our own previous registration (a reload or a
+    // dropped socket) — retry it a few times before giving up on it for a random ID
+    const GYRO_ID_TAKEN_RETRIES = 4;
+    const GYRO_ID_TAKEN_RETRY_MS = 5000;
+    const GYRO_RECONNECT_MAX_MS = 15000;
+    let _idTakenRetries = 0;
+    let _reconnectDelayMs = 1000;
+    let _reconnectTimer = null;
     let _autoConnectTimer = null;
+    let _firstOpen = true;
+    let gyroPeer = null;
 
-    gyroPeer.on('open', (id) => {
-      _phoneSwordPeerId = id;
-      // Give the phone 3 seconds to auto-reconnect (if it has the URL bookmarked)
-      // before showing the QR modal.
-      _autoConnectTimer = setTimeout(() => {
-        if (!window.phoneSwordGyro.connected) {
-          autoShowPhoneSwordQr(id);
-        }
-      }, 3000);
-    });
-
-    gyroPeer.on('connection', (conn) => {
+    const _onPhoneConnection = (conn) => {
       clearTimeout(_autoConnectTimer);
       phoneSwordQrStatus.textContent = 'Phone connected!';
       phoneSwordQrStatus.classList.add('connected');
@@ -4892,29 +4916,103 @@ async function initCore(runtimeContext) {
       }, 1800);
 
       _attachPhoneSwordConn(conn);
-    });
+    };
 
-    gyroPeer.on('error', (err) => {
-      // If our fixed ID is already taken (stale session), fall back to a random ID
-      if (err.type === 'unavailable-id' && _fixedPeerId) {
-        console.warn('[PhoneSword] Fixed peer ID taken, falling back to random ID');
-        _fixedPeerId = null;
-        const fallbackPeer = new PeerClass(_peerOpts);
-        fallbackPeer.on('open', (id) => autoShowPhoneSwordQr(id));
-        fallbackPeer.on('connection', (conn) => {
-          phoneSwordQrStatus.textContent = 'Phone connected!';
-          phoneSwordQrStatus.classList.add('connected');
-          setTimeout(() => {
-            phoneSwordQrModal.classList.add('hidden');
-            phoneSwordConnectCalib?.classList.remove('hidden');
-          }, 1800);
-          _attachPhoneSwordConn(conn);
-        });
-        fallbackPeer.on('error', (e) => console.warn('[PhoneSword] PeerJS error:', e.message));
-      } else {
-        console.warn('[PhoneSword] PeerJS error:', err.message);
+    const _scheduleGyroReconnect = (fn, delayMs) => {
+      clearTimeout(_reconnectTimer);
+      _reconnectTimer = setTimeout(fn, delayMs);
+    };
+
+    const _createGyroPeer = () => {
+      const id = _fixedPeerId;
+      const peer = id ? new PeerClass(id, _peerOpts) : new PeerClass(_peerOpts);
+      gyroPeer = peer;
+
+      peer.on('open', (openId) => {
+        if (peer !== gyroPeer) return;
+        _reconnectDelayMs = 1000;
+        _idTakenRetries = 0;
+        const idChanged = _phoneSwordPeerId && _phoneSwordPeerId !== openId;
+        _phoneSwordPeerId = openId;
+        if (_firstOpen) {
+          _firstOpen = false;
+          // Give the phone 3 seconds to auto-reconnect (if it has the URL bookmarked)
+          // before showing the QR modal.
+          _autoConnectTimer = setTimeout(() => {
+            if (!window.phoneSwordGyro.connected) {
+              autoShowPhoneSwordQr(openId);
+            }
+          }, 3000);
+        } else if (idChanged && !phoneSwordQrModal.classList.contains('hidden')) {
+          void showPhoneSwordQr(openId); // the QR on screen pointed at the old ID
+        }
+      });
+
+      peer.on('connection', (conn) => {
+        if (peer !== gyroPeer) return;
+        _onPhoneConnection(conn);
+      });
+
+      // Lost the signalling server (the phone link itself, if any, keeps working)
+      peer.on('disconnected', () => {
+        if (peer !== gyroPeer || peer.destroyed) return;
+        _scheduleGyroReconnect(() => {
+          if (peer !== gyroPeer || peer.destroyed || !peer.disconnected) return;
+          try { peer.reconnect(); } catch (_) { /* 'error' / 'close' handle it */ }
+        }, _reconnectDelayMs);
+        _reconnectDelayMs = Math.min(GYRO_RECONNECT_MAX_MS, _reconnectDelayMs * 2);
+      });
+
+      // Destroyed (fatal error): start over with a new peer
+      peer.on('close', () => {
+        if (peer !== gyroPeer) return;
+        _scheduleGyroReconnect(_createGyroPeer, _reconnectDelayMs);
+        _reconnectDelayMs = Math.min(GYRO_RECONNECT_MAX_MS, _reconnectDelayMs * 2);
+      });
+
+      peer.on('error', (err) => {
+        if (peer !== gyroPeer) return;
+        if (err.type === 'unavailable-id' && _fixedPeerId) {
+          gyroPeer = null; // (its 'close' is not ours to handle any more)
+          try { peer.destroy(); } catch (_) { /* ignore */ }
+          if (_idTakenRetries < GYRO_ID_TAKEN_RETRIES) {
+            _idTakenRetries += 1;
+            console.warn('[PhoneSword] Fixed peer ID taken, retrying shortly');
+            _scheduleGyroReconnect(_createGyroPeer, GYRO_ID_TAKEN_RETRY_MS);
+          } else {
+            console.warn('[PhoneSword] Fixed peer ID taken, falling back to random ID');
+            _fixedPeerId = null;
+            _createGyroPeer();
+          }
+          return;
+        }
+        // Fatal errors destroy the peer ('close' recreates it); socket / network errors only
+        // disconnect it ('disconnected' reconnects it); 'peer-unavailable' etc. change nothing
+        console.warn('[PhoneSword] PeerJS error:', err.type, err.message);
+        if (err.type === 'browser-incompatible') gyroPeer = null; // (no point retrying)
+      });
+    };
+
+    _createGyroPeer();
+
+    // Back from the background / sleep / offline: re-register right away instead of waiting
+    // for the backoff
+    const _wakeGyroPeer = () => {
+      const peer = gyroPeer;
+      if (!peer || document.visibilityState === 'hidden') return;
+      if (peer.destroyed) { _scheduleGyroReconnect(_createGyroPeer, 0); return; }
+      if (peer.disconnected) {
+        _reconnectDelayMs = 1000;
+        _scheduleGyroReconnect(() => {
+          if (peer === gyroPeer && peer.disconnected && !peer.destroyed) {
+            try { peer.reconnect(); } catch (_) { /* ignore */ }
+          }
+        }, 0);
       }
-    });
+    };
+    document.addEventListener('visibilitychange', _wakeGyroPeer);
+    window.addEventListener('online', _wakeGyroPeer);
+    window.addEventListener('focus', _wakeGyroPeer);
   } catch (err) {
     console.warn('[PhoneSword] Failed to init PeerJS:', err);
   }
@@ -6350,6 +6448,20 @@ async function initCore(runtimeContext) {
     // --- RAPIER FIXED-STEP & SYNC ---
     // Accumulate variable rAF time into fixed physics steps
     const frameDelta = clock.getDelta();
+    // Paused (settings open in a single-player stage): draw the frozen world, simulate nothing
+    if (_isSettingsPauseWanted()) {
+      if (!_gamePaused) { _gamePaused = true; _pausedAtMs = Date.now(); }
+      renderer.render(scene, camera);
+      return;
+    }
+    if (_gamePaused) {
+      _gamePaused = false;
+      _pauseGraceUntil = performance.now() + PAUSE_RESUME_GRACE_MS;
+      // Bomb fuses run on the wall clock: don't let bombs in flight go off the moment play resumes
+      const pausedMs = Date.now() - _pausedAtMs;
+      playerBombs.delay(pausedMs);
+      for (const _he of hordeEnemies) _he._bombs?.forEach((b) => { b.spawnTime += pausedMs; });
+    }
     frameIndex += 1;
     accumulateBucketDeltas(frameDelta);
     physicsAccumulator += frameDelta;
@@ -7254,8 +7366,8 @@ async function initCore(runtimeContext) {
         }
 
         const _allowAttack = _attackSlotSet.has(_he);
-        if (playerDead) {
-          // (the body is being carried off: no more swings / bombs at it)
+        if (_attacksHeld()) {
+          // (the body is being carried off / just back from a pause: no swings / bombs at it)
           _he.update(frameDelta, _he instanceof BombThrowerEnemy ? null : playerModel, playerControls, false, false, true);
         } else {
           _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack, _pauseForBomb);
@@ -7523,7 +7635,7 @@ async function initCore(runtimeContext) {
       multiplayer,
       hordeEnemies,
       pvpTargets: matchMode?.getShotTargets() ?? null,
-      localTarget: playerDead ? null : _pembertonShotTarget
+      localTarget: _attacksHeld() ? null : _pembertonShotTarget
     });
     // Village (between Showdown stages): walks the player around and has the last word on the camera
     village?.update(frameDelta);
