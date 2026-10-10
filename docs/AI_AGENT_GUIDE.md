@@ -14,7 +14,8 @@
 |---|---|
 | All source code | `src/` |
 | Game orchestrator / main loop / stages | `src/bootstrap/bootstrapGameApp.js` (~5.5k lines) |
-| Phone controller page | `public/phone-sword.html` |
+| Phone controller page | `public/phone-sword.html` (reconnect: `connectToGame`; game side `_createGyroPeer` / `_attachPhoneSwordConn` in `bootstrapGameApp.js`) |
+| Pause while settings open (Showdown / Classic / tutorial) | `_isSettingsPauseWanted` / `_attacksHeld` + top of `animate` in `bootstrapGameApp.js` |
 | Shared runtime state (DI container) | `src/core/appContext.js` |
 | HTML shell + all HUD elements | `index.html` |
 | All CSS | `styles.css` — design tokens on `:root` + shared panel / button (primary, secondary, ghost) / chip components at the top; reuse the `ui-*` classes and tokens for new UI |
