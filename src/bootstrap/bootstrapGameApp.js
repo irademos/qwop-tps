@@ -48,6 +48,8 @@ import { createComboMeter } from '../combat/comboMeter.js';
 import { createDeathCarry } from '../combat/deathCarry.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage, PEMBERTON_STAGE } from '../village/villageMode.js';
+import { stageRoute, createPolyline } from '../map/stageRoutes.js';
+import { createDevRoam } from '../dev/devRoam.js';
 import { createPembertonBoss, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 
 import {
@@ -555,6 +557,8 @@ function createArcadeOverlay(startOverlay) {
     setStartHandler(handler) {
       startHandler = handler;
     },
+    // Start a mode without the start screen's buttons (Settings → Dev → Free Roam)
+    startMode: (gameMode) => chooseMode(gameMode),
     setModeHandler(handler) {
       modeHandler = handler;
       if (pendingGameMode) {
@@ -679,6 +683,7 @@ async function initCore(runtimeContext) {
   let isHost = false;
   let duelMode = null; // Multiplayer mode: lobby + duels (created further down)
   let matchMode = null; // Multiplayer mode: Team Battle / Free For All (created further down)
+  let devRoam = null; // Dev: Free Roam (Settings → Dev; created further down)
   // Multiplayer Guns & Bombs battle: gun + shield instead of the sword, unlimited bullets /
   // bombs, one shield; the real inventory is set aside meanwhile (matchCtx.enterMatch)
   let _gunsMatch = false;
@@ -3821,6 +3826,10 @@ async function initCore(runtimeContext) {
     if (t.released && !glbCharacter?.actionActive) finishPlayerBombThrow();
   };
   let _psPathEnd = new THREE.Vector3();
+  // Auto-walk waypoints of the current stage (the last one = _psPathEnd) and the next one to reach
+  let _psPathPoints = [];
+  let _psPathIdx = 0;
+  const PS_WAYPOINT_REACHED = 1.5; // m — a waypoint (not the last) this close counts as reached
   let _psAutoWalking = false;
   let _psAutoWalkDir = new THREE.Vector3();
   let _psStageActive = false;
@@ -3993,23 +4002,48 @@ async function initCore(runtimeContext) {
   // Showdown stages started from the village: the player walks this far out of the village
   // before the stage's enemies / coins / heart bubbles begin
   const PS_VILLAGE_EXIT_DIST = 25;
+  // Hand-authored route of a Showdown stage on the active map (src/map/stageRoutes.js), or null
+  const _psRoute = (stage) => (!_classicMode && _activeMapKey ? stageRoute(_activeMapKey, stage) : null);
+  // A route's village is walked into after a stage win when it is this close, else teleported to
+  const PS_ROUTE_WALK_IN_MAX = 30;
+  const _psRouteAngle = (route) => {
+    const [a, b] = route.points;
+    return b ? Math.atan2(b.z - a.z, b.x - a.x) : null;
+  };
   // pathAngle: the direction the village's arrow pointed (else the flattest one from here);
   // lead: metres of empty path before the stage proper (PS_VILLAGE_EXIT_DIST from the village)
   // bossSpot: { position, yaw } where Pemberton stood in the village (PEMBERTON_STAGE)
   const _psBuildStage = (stage, count = _psEnemyCount(stage), pathAngle = null, lead = 0, bossSpot = null) => {
-    const pathLen = _psPathLength(stage);
-    if (!Number.isFinite(pathAngle)) pathAngle = _psPickPathAngle(lead + pathLen);
-    const _psPathEndX = playerModel.position.x + Math.cos(pathAngle) * (lead + pathLen);
-    const _psPathEndZ = playerModel.position.z + Math.sin(pathAngle) * (lead + pathLen);
-    _psPathEnd.set(
-      _psPathEndX,
-      getTerrainHeight(_psPathEndX, _psPathEndZ) ?? playerModel.position.y,
-      _psPathEndZ
-    );
-    _psAutoWalkDir.subVectors(_psPathEnd, playerModel.position).setY(0).normalize();
-    // Where the stage proper begins (enemies, coins and heart bubbles are laid out from here)
-    const _psStartX = playerModel.position.x + _psAutoWalkDir.x * lead;
-    const _psStartZ = playerModel.position.z + _psAutoWalkDir.z * lead;
+    // The path: the stage's route waypoints (from where the player stands), else a straight
+    // line along pathAngle (the flattest direction)
+    const route = _psRoute(stage);
+    let pathLen;
+    let pts;
+    if (route && route.points.length >= 2) {
+      pts = [{ x: playerModel.position.x, z: playerModel.position.z }, ...route.points.slice(1)];
+      const total = createPolyline(pts).length;
+      // (a short route: the walk out of the village is a quarter of it at most)
+      lead = Math.min(lead, total * 0.25);
+      pathLen = Math.max(1, total - lead);
+    } else {
+      pathLen = _psPathLength(stage);
+      if (!Number.isFinite(pathAngle)) pathAngle = _psPickPathAngle(lead + pathLen);
+      pts = [
+        { x: playerModel.position.x, z: playerModel.position.z },
+        {
+          x: playerModel.position.x + Math.cos(pathAngle) * (lead + pathLen),
+          z: playerModel.position.z + Math.sin(pathAngle) * (lead + pathLen),
+        },
+      ];
+    }
+    const path = createPolyline(pts);
+    _psPathPoints = pts.slice(1).map(p => new THREE.Vector3(p.x, getTerrainHeight(p.x, p.z) ?? playerModel.position.y, p.z));
+    _psPathIdx = 0;
+    _psPathEnd.copy(_psPathPoints[_psPathPoints.length - 1]);
+    const _first = path.at(0);
+    _psAutoWalkDir.set(_first.dx, 0, _first.dz);
+    // Point `t` (0–1) of the way along the stage proper (after the walk out of the village)
+    const _stageAt = (t) => path.at(lead + pathLen * t);
     _psEnemyQueue = [];
     const _charPool = _psEnemyCharacterPool();
     if (!_classicMode && !_psStageBoss) _psStageBoss = _psPickBoss();
@@ -4037,8 +4071,7 @@ async function initCore(runtimeContext) {
       // (Classic has no bosses)
       const isBoss = !_classicMode && i === count - 1;
       const t = (i + 0.5) / count;
-      const baseX = _psStartX + _psAutoWalkDir.x * pathLen * t;
-      const baseZ = _psStartZ + _psAutoWalkDir.z * pathLen * t;
+      const { x: baseX, z: baseZ } = _stageAt(t);
       const scatter = isBoss ? 0 : 8;
       const ex = baseX + (Math.random() - 0.5) * scatter;
       const ez = baseZ + (Math.random() - 0.5) * scatter;
@@ -4060,8 +4093,9 @@ async function initCore(runtimeContext) {
     const coinCount = _classicMode || _final ? 0 : 8 + Math.floor(stage * 0.3);
     for (let ci = 0; ci < coinCount; ci++) {
       const ct = (ci + 0.5) / coinCount;
-      const cx = _psStartX + _psAutoWalkDir.x * pathLen * ct + (Math.random() - 0.5) * 6;
-      const cz = _psStartZ + _psAutoWalkDir.z * pathLen * ct + (Math.random() - 0.5) * 6;
+      const c = _stageAt(ct);
+      const cx = c.x + (Math.random() - 0.5) * 6;
+      const cz = c.z + (Math.random() - 0.5) * 6;
       spawnCoinPickup(new THREE.Vector3(cx, playerModel.position.y, cz));
     }
     // Heart bubbles around halfway (between 35% and 70% of the path)
@@ -4069,8 +4103,9 @@ async function initCore(runtimeContext) {
     const heartCount = _classicMode || _final ? 0 : _psHeartBubbleCount(stage);
     for (let hi = 0; hi < heartCount; hi++) {
       const ht = heartCount === 1 ? 0.5 : 0.35 + 0.35 * (hi / (heartCount - 1));
-      const hx = _psStartX + _psAutoWalkDir.x * pathLen * ht + (Math.random() - 0.5) * 3;
-      const hz = _psStartZ + _psAutoWalkDir.z * pathLen * ht + (Math.random() - 0.5) * 3;
+      const h = _stageAt(ht);
+      const hx = h.x + (Math.random() - 0.5) * 3;
+      const hz = h.z + (Math.random() - 0.5) * 3;
       heartBubbles.spawn(new THREE.Vector3(hx, playerModel.position.y, hz));
     }
     comboMeter.reset();
@@ -4163,7 +4198,21 @@ async function initCore(runtimeContext) {
     const _final = _psIsFinalStage(stage);
     const count = _final ? 1 : _psEnemyCount(stage);
     _psUpdateKillHud(false);
-    const _center = approach ? _psVillageApproachSpot() : null;
+    // A hand-authored route: the village goes at its first point (walked into after a stage
+    // win when it is close, else the player is moved there) and faces its first waypoint
+    const route = _psRoute(stage);
+    let _center = null;
+    if (route) {
+      const [start] = route.points;
+      const p = playerModel.position;
+      if (approach && Math.hypot(start.x - p.x, start.z - p.z) <= PS_ROUTE_WALK_IN_MAX) {
+        _center = new THREE.Vector3(start.x, getTerrainHeight(start.x, start.z) ?? p.y, start.z);
+      } else {
+        _teleportPlayer(start.x, start.z);
+      }
+    } else if (approach) {
+      _center = _psVillageApproachSpot();
+    }
     // (walking in: the fallen enemies stay until the player gets there)
     if (!_center) _psClearDeadEnemies();
     // Final enemy (picked here so the banner can name it; kept through retries of this stage)
@@ -4179,7 +4228,8 @@ async function initCore(runtimeContext) {
       count,
       center: _center,
       onArrive: _center ? _psClearDeadEnemies : null,
-      pathAngle: _psPickPathAngle(PS_VILLAGE_EXIT_DIST + _psPathLength(stage), _center ?? playerModel.position),
+      pathAngle: (route && _psRouteAngle(route))
+        ?? _psPickPathAngle(PS_VILLAGE_EXIT_DIST + _psPathLength(stage), _center ?? playerModel.position),
       boss: _final
         ? `🎩 Pemberton (${PEMBERTON_HEARTS} ❤️)`
         : `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
@@ -5036,10 +5086,19 @@ async function initCore(runtimeContext) {
       if (showdownTutorial?.isActive()) await showdownTutorial.stop();
       matchMode?.exit();
       duelMode?.exit();
+      devRoam?.exit();
       _setClassicMode(false);
       _resetForMenu();
       arcadeOverlay.showStartScreen();
     },
+    // Settings → Dev
+    getPlayerPose: () => _playerPose(),
+    startDevRoam: async () => {
+      await appState.returnToLobby(); // leave whatever mode runs (the tutorial too) first
+      arcadeOverlay.startMode('roam');
+    },
+    setDevRoutesVisible: (on) => devRoam?.setRoutesVisible(on),
+    refreshDevRoutes: () => devRoam?.refresh(),
     getPlayerName: () => playerName,
     setPlayerName: (name) => {
       if (!name) return;
@@ -5927,6 +5986,16 @@ async function initCore(runtimeContext) {
     applyDisplaySettings();
     clearRoadLightPool();
   };
+  // Where am I? ({x, y, z, yaw}, rounded — Settings → Dev "Copy location", Free Roam)
+  const _playerPose = () => {
+    const yaw = Math.atan2(Math.sin(playerControls.yaw), Math.cos(playerControls.yaw));
+    return {
+      x: _round2(playerModel.position.x),
+      y: _round2(playerModel.position.y),
+      z: _round2(playerModel.position.z),
+      yaw: _round2(yaw)
+    };
+  };
   const duelCtx = {
     scene,
     getMultiplayer: () => multiplayer,
@@ -5951,19 +6020,6 @@ async function initCore(runtimeContext) {
         playerControls.isMoving = false;
       }
       updateControlAvailability();
-    },
-    // Temporary: where am I? (for picking the duel location — see DUEL_LOCATION)
-    getPlayerPose: () => {
-      const yaw = Math.atan2(Math.sin(playerControls.yaw), Math.cos(playerControls.yaw));
-      return {
-        x: _round2(playerModel.position.x),
-        y: _round2(playerModel.position.y),
-        z: _round2(playerModel.position.z),
-        yaw: _round2(yaw)
-      };
-    },
-    spawnForRoam: () => {
-      _resetForMenu();
     },
     // Start of every round: back on our feet at the start spot with full duel health
     enterDuel: ({ x, z, yaw }) => {
@@ -6225,6 +6281,22 @@ async function initCore(runtimeContext) {
     duelMode.enter();
   };
 
+  // ── Dev: Free Roam (Settings → Dev) — walk the map, copy locations, record stage routes ──
+  devRoam = createDevRoam({
+    scene,
+    getPlayerPose: _playerPose,
+    getGroundY: (x, z) => getTerrainHeight(x, z),
+    getMapKey: () => _activeMapKey,
+    teleport: (x, z) => _teleportPlayer(x, z),
+    onExit: () => { void appState.returnToLobby(); },
+  });
+  // (Settings → Dev "Show routes in the world" is remembered)
+  try { if (localStorage.getItem('sq:devShowRoutes') === '1') devRoam.setRoutesVisible(true); } catch (_) {}
+  const startDevRoamMode = () => {
+    _resetForMenu();
+    devRoam.enter();
+  };
+
   let _modeStartToken = 0;
   const _startMode = (gameMode) => {
     if (gameMode === 'showdown') {
@@ -6234,6 +6306,8 @@ async function initCore(runtimeContext) {
       void startClassicMode();
     } else if (gameMode === 'multiplayer') {
       startMultiplayerMode();
+    } else if (gameMode === 'roam') {
+      startDevRoamMode();
     } else {
       startTutorialMode();
     }
@@ -6252,6 +6326,7 @@ async function initCore(runtimeContext) {
       duelMode.exit();
     }
     if (gameMode !== 'classic') _setClassicMode(false);
+    devRoam.exit();
     // Each mode's map first (Classic: map.glb, the rest: the island town); a new map puts
     // the player at its spawn. A newer pick made while a map loads wins.
     const token = ++_modeStartToken;
@@ -6262,6 +6337,7 @@ async function initCore(runtimeContext) {
         if (changed) {
           const spawn = getSpawnPosition();
           _teleportPlayer(spawn.x, spawn.z);
+          devRoam.refresh(); // routes drawn for the new map
         }
         _startMode(gameMode);
       });
@@ -6824,7 +6900,13 @@ async function initCore(runtimeContext) {
         } else if (!_hasNearAttacker) {
           // Final stage: walk toward Pemberton (he backs off to shoot) instead of a path end
           const _bossPos = _psPemberton && !_psPemberton.enemy.isDead ? _psPemberton.enemy.group.position : null;
-          const _walkTo = _bossPos ?? _psPathEnd;
+          // (reaching a waypoint moves on to the next one; the last one is the path end)
+          while (!_bossPos && _psPathIdx < _psPathPoints.length - 1) {
+            const _wp = _psPathPoints[_psPathIdx];
+            if (Math.hypot(_wp.x - playerModel.position.x, _wp.z - playerModel.position.z) > PS_WAYPOINT_REACHED) break;
+            _psPathIdx += 1;
+          }
+          const _walkTo = _bossPos ?? _psPathPoints[_psPathIdx] ?? _psPathEnd;
           const _ddx = _walkTo.x - playerModel.position.x;
           const _ddz = _walkTo.z - playerModel.position.z;
           const _distToEnd = Math.sqrt(_ddx * _ddx + _ddz * _ddz);
@@ -7343,6 +7425,7 @@ async function initCore(runtimeContext) {
     });
 
     duelMode?.update();
+    devRoam?.update();
     matchMode?.update(frameDelta);
     if (multiplayer && _netRecipients().length && now - lastPresenceSend >= presenceSendIntervalMs) {
       const payload = {

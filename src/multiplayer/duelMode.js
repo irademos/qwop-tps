@@ -18,7 +18,7 @@ import { LOBBY_ROOM_ID } from './peerConnection.js';
 // Both sides keep the score themselves from the `dead` messages; if both die in the same
 // round (each gets the other's `dead` while the round is over) the round is a draw and replays.
 
-// Where duels happen: paste the output of the lobby's "Copy location information" here.
+// Where duels happen: paste the output of Settings → Dev → Free Roam → "Copy location" here.
 // The challenger stands behind this point facing `yaw`, the accepter in front facing back.
 // Multiplayer plays on the island town mappack: flat open ground south of the spawn.
 export const DUEL_LOCATION = { x: -4, y: 1, z: -38, yaw: 0 };
@@ -42,26 +42,8 @@ const el = (tag, className, text) => {
   return node;
 };
 
-const copyText = async (text) => {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch (_) {
-    const area = document.createElement('textarea');
-    area.value = text;
-    area.style.position = 'fixed';
-    area.style.opacity = '0';
-    document.body.appendChild(area);
-    area.select();
-    let ok = false;
-    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
-    area.remove();
-    return ok;
-  }
-};
-
 export function createDuelMode(ctx) {
-  // 'off' | 'lobby' | 'roam' (find location) | 'countdown' | 'fighting' | 'roundOver' | 'over'
+  // 'off' | 'lobby' | 'countdown' | 'fighting' | 'roundOver' | 'over'
   // | 'match' (lobby handed over to matchMode: party setup or a team / free-for-all match)
   let phase = 'off';
   let outgoing = null;   // { challengeId, to, name, timer }
@@ -88,9 +70,8 @@ export function createDuelMode(ctx) {
   const gunsBtn = el('button', 'arcade-button', '🔫 Guns & Bombs');
   lobbyModes.append(teamBattleBtn, ffaBtn, gunsBtn);
   const lobbyActions = el('div', 'duel-lobby-actions');
-  const findLocationBtn = el('button', 'arcade-button arcade-secondary', '📍 Find Location');
   const backBtn = el('button', 'arcade-button arcade-secondary', '⬅ Back');
-  lobbyActions.append(findLocationBtn, backBtn);
+  lobbyActions.append(backBtn);
   const prompt = el('div', 'duel-prompt hidden');
   const promptText = el('div', 'duel-prompt-text');
   const promptActions = el('div', 'duel-lobby-actions');
@@ -102,12 +83,6 @@ export function createDuelMode(ctx) {
   lobbyPanel.append(lobbyTitle, lobbyModes, lobbyStatus, lobbyList, prompt, lobbyActions);
   lobby.append(lobbyPanel);
 
-  const roamPanel = el('div', 'duel-roam hidden');
-  const roamCoords = el('div', 'duel-roam-coords');
-  const copyBtn = el('button', 'arcade-button', '📋 Copy location information');
-  const roamBackBtn = el('button', 'arcade-button arcade-secondary', '⬅ Back to Lobby');
-  roamPanel.append(roamCoords, copyBtn, roamBackBtn);
-
   const banner = el('div', 'duel-banner hidden');
   const bannerTitle = el('div', 'duel-banner-title');
   const bannerSub = el('div', 'duel-banner-sub');
@@ -118,7 +93,7 @@ export function createDuelMode(ctx) {
   const forfeitBtn = el('button', 'duel-forfeit-btn', 'Forfeit');
   hud.append(hudVs, forfeitBtn);
 
-  document.body.append(lobby, roamPanel, banner, hud);
+  document.body.append(lobby, banner, hud);
 
   const showBanner = (title, sub = '') => {
     bannerTitle.textContent = title;
@@ -483,35 +458,14 @@ export function createDuelMode(ctx) {
     if (phase === 'lobby' && ctx.getMultiplayer()?.getId?.()) ctx.openMatch('guns');
   });
 
-  // ── Lobby / roam screens ─────────────────────────────────────────────────
+  // ── Lobby screen ─────────────────────────────────────────────────────────
   const showLobby = () => {
     phase = 'lobby';
-    roamPanel.classList.add('hidden');
     lobby.classList.remove('hidden');
     ctx.setControlsLocked(true);
     renderPrompt();
   };
 
-  findLocationBtn.addEventListener('click', () => {
-    if (phase !== 'lobby') return;
-    dropChallenges();
-    phase = 'roam';
-    lobby.classList.add('hidden');
-    roamPanel.classList.remove('hidden');
-    ctx.spawnForRoam();
-    ctx.setControlsLocked(false);
-  });
-  roamBackBtn.addEventListener('click', () => {
-    if (phase === 'roam') showLobby();
-  });
-  copyBtn.addEventListener('click', async () => {
-    const pose = ctx.getPlayerPose();
-    const text = JSON.stringify(pose);
-    const ok = await copyText(text);
-    copyBtn.textContent = ok ? '✅ Copied!' : '❌ Copy failed';
-    if (!ok) roamCoords.textContent = text;
-    setTimeout(() => { copyBtn.textContent = '📋 Copy location information'; }, 1500);
-  });
   backBtn.addEventListener('click', () => {
     if (phase !== 'lobby') return;
     exit();
@@ -544,7 +498,6 @@ export function createDuelMode(ctx) {
     disposeRemoteSword();
     if (opponentId) ctx.removeRemotePlayer(opponentId);
     lobby.classList.add('hidden');
-    roamPanel.classList.add('hidden');
     hud.classList.add('hidden');
     hideBanner();
     document.body.classList.remove('multiplayer-mode');
@@ -656,10 +609,6 @@ export function createDuelMode(ctx) {
   };
 
   const update = () => {
-    if (phase === 'roam') {
-      const pose = ctx.getPlayerPose();
-      roamCoords.textContent = `x ${pose.x}  y ${pose.y}  z ${pose.z}  yaw ${pose.yaw}`;
-    }
     if (!duel || (phase !== 'countdown' && phase !== 'fighting' && phase !== 'roundOver')) return;
 
     const now = Date.now();
