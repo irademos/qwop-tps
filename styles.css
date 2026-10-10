@@ -2326,16 +2326,18 @@ body.settings-open #inventory-button {
   background: var(--surface-hud);
   pointer-events: none;
 }
-/* Near a station: its button(s) bottom right ("🛒 Shop", "💬 Talk"…); on touch screens above
-   the jump button */
+/* Near a station: its button(s) bottom centre ("🛒 Shop", "💬 Talk"…), between the joystick
+   (bottom left) and the jump button (bottom right) */
 .village-acts {
   position: absolute;
-  right: calc(16px + env(safe-area-inset-right, 0px));
+  left: 50%;
   bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
+  flex-direction: column-reverse;   /* (two: the nearest at the bottom, the other above it) */
+  align-items: center;
   gap: 8px;
+  white-space: nowrap;
 }
 .village-act {
   min-height: 48px;
@@ -2344,8 +2346,10 @@ body.settings-open #inventory-button {
   font-weight: 800;
   animation: village-act-in 0.2s var(--ease);
 }
-@media (pointer: coarse) {
-  .village-acts { bottom: calc(104px + env(safe-area-inset-bottom, 0px)); }
+/* Phones: smaller, to fit between the joystick and the jump button */
+@media (max-width: 520px) {
+  .village-acts { gap: 6px; }
+  .village-act { min-height: 44px; padding: 0 12px; font-size: 14px; }
 }
 @keyframes village-act-in {
   from { opacity: 0; transform: translateY(8px); }

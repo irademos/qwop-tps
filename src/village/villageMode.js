@@ -177,7 +177,8 @@ const LAYOUT = {
   villagerAside: new THREE.Vector3(1.7, 0, 8.4),   // where he steps to when the stage starts
 };
 const CHARACTER_ARC_RADIUS = 1.35;
-const PLAYER_WALK_SPEED = 2.4;     // m/s
+const PLAYER_WALK_SPEED = 2.0;     // m/s (tap-to-walk / walking to a station)
+const VILLAGE_MOVE_SPEED_SCALE = 0.5; // WASD / joystick speed in the village (× the normal walk)
 const NPC_WALK_SPEED = 1.7;        // m/s
 const VILLAGER_ASIDE_SPEED = 3.2;  // m/s — out of the player's way when the stage starts
 const CAMERA_LERP = 3.2;           // 1/s
@@ -968,7 +969,7 @@ export function createVillage(ctx) {
     return out.sort((a, b) => b.w - a.w || a.d - b.d);
   }
 
-  // Buttons for the stations in reach (bottom right; E / Enter = the first)
+  // Buttons for the stations in reach (bottom centre; E / Enter = the first)
   const actLabel = (key) => (key === 'villager' ? (finalBoss ? '⚔️ Confront' : '💬 Talk') : STATION_NAMES[key]);
   function refreshActs(near) {
     const keys = active && !leaving && !approaching && !sitting && !focus
@@ -1588,6 +1589,7 @@ export function createVillage(ctx) {
 
   function startStage() {
     if (leaving) return;
+    resetMoveSpeed();
     focus = null;
     selectItem(-1);
     walk = null;
@@ -1694,7 +1696,7 @@ export function createVillage(ctx) {
     bodyYaw = controls?.yaw ?? faceYaw;
     followYaw = faceYaw;
     prevPos.copy(model.position);
-    if (controls) { controls.yaw = faceYaw; controls.pitch = 0; }
+    if (controls) { controls.yaw = faceYaw; controls.pitch = 0; controls.moveSpeedScale = VILLAGE_MOVE_SPEED_SCALE; }
     if (approaching) {
       walk = {
         to: center.clone(),
@@ -1758,8 +1760,15 @@ export function createVillage(ctx) {
     stations = {};
   }
 
+  // (normal walking speed again for the stage / anything after the village)
+  function resetMoveSpeed() {
+    const { controls } = ctx.getPlayer();
+    if (controls) controls.moveSpeedScale = 1;
+  }
+
   function exit() {
     const wasActive = active;
+    resetMoveSpeed();
     cancelSit();
     active = false;
     leaving = null;
