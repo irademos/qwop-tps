@@ -1,4 +1,7 @@
 import { CAMERA_CONFIG_DEFAULTS } from './controls.js';
+import {
+  loadDraftRoutes, discardDraftRoutes, formatRoutes, isUsingDraftRoutes, setUsingDraftRoutes,
+} from '../map/stageRoutes.js';
 const TAB_KEY = 'settings:lastTab';
 
 const TABS = [
@@ -7,8 +10,12 @@ const TABS = [
   { id: 'display', label: 'Display' },
   { id: 'swordgyro', label: 'Sword Gyro' },
   { id: 'about', label: 'About' },
-  { id: 'account', label: 'Account' }
+  { id: 'account', label: 'Account' },
+  { id: 'dev', label: 'Dev' }
 ];
+// Showdown's map (the one stage routes are recorded / played on — src/map/stageRoutes.js)
+const ROUTES_MAP_KEY = 'islandTown';
+const DEV_SHOW_ROUTES_KEY = 'sq:devShowRoutes';
 
 // Settings → Profile: sections of appState.getProfileStats() (pick = the section's object)
 const PROFILE_STAT_SECTIONS = [
@@ -588,6 +595,92 @@ function buildAccountPanel() {
   return panelEl;
 }
 
+// Settings → Dev: Free Roam (walk the map with the location / stage route tools), current
+// location, Showdown stage route drafts (src/map/stageRoutes.js)
+function buildDevPanel() {
+  const panelEl = createElement('section', 'settings-tabpanel');
+  panelEl.id = 'panel-dev';
+  panelEl.dataset.panel = 'dev';
+  panelEl.setAttribute('role', 'tabpanel');
+  panelEl.setAttribute('aria-labelledby', 'tab-dev');
+
+  const roamTitle = createElement('h3', 'settings-section-title', 'Free Roam');
+  const roamText = createElement('div', 'settings-muted',
+    'Walk the island freely with a panel to copy your location and record the Showdown stage routes (village spot + waypoints per stage). Leaves the mode you are in.');
+  const roamButton = createElement('button', 'settings-button', '🧭 Free Roam');
+  roamButton.type = 'button';
+  roamButton.dataset.action = 'dev-roam';
+
+  const locTitle = createElement('h3', 'settings-section-title', 'Location');
+  const locRow = createElement('div', 'settings-row');
+  locRow.innerHTML = '<span>You are at</span><span data-field="dev-location">—</span>';
+  const locButton = createElement('button', 'settings-button settings-button-secondary', '📋 Copy location');
+  locButton.type = 'button';
+  locButton.dataset.action = 'dev-copy-location';
+  const locHint = createElement('div', 'settings-muted',
+    'Copies {x, y, z, yaw} — paste into DUEL_LOCATION (duelMode.js) or GUNS_LOCATION (matchMode.js).');
+
+  const routesTitle = createElement('h3', 'settings-section-title', 'Showdown Stage Routes');
+  const routesStatus = createElement('div', 'settings-muted');
+
+  const showGroup = createElement('div', 'settings-field');
+  const showLabel = createElement('label', 'settings-label', 'Show routes in the world');
+  showLabel.setAttribute('for', 'settings-dev-show-routes');
+  const showToggle = createElement('input', 'settings-checkbox');
+  showToggle.id = 'settings-dev-show-routes';
+  showToggle.type = 'checkbox';
+  showGroup.append(showLabel, showToggle);
+
+  const draftGroup = createElement('div', 'settings-field');
+  const draftLabel = createElement('label', 'settings-label', 'Play draft routes in Showdown');
+  draftLabel.setAttribute('for', 'settings-dev-use-draft');
+  const draftToggle = createElement('input', 'settings-checkbox');
+  draftToggle.id = 'settings-dev-use-draft';
+  draftToggle.type = 'checkbox';
+  const draftHint = createElement('div', 'settings-muted',
+    'This browser only: Showdown uses the routes recorded here instead of STAGE_ROUTES in src/map/stageRoutes.js.');
+  draftGroup.append(draftLabel, draftToggle, draftHint);
+
+  const copyRoutesButton = createElement('button', 'settings-button settings-button-secondary', '📋 Copy draft routes');
+  copyRoutesButton.type = 'button';
+  copyRoutesButton.dataset.action = 'dev-copy-routes';
+  const discardButton = createElement('button', 'settings-button settings-button-danger', 'Discard draft');
+  discardButton.type = 'button';
+  discardButton.dataset.action = 'dev-discard-routes';
+
+  panelEl.append(
+    roamTitle, roamText, roamButton,
+    locTitle, locRow, locButton, locHint,
+    routesTitle, routesStatus, showGroup, draftGroup, copyRoutesButton, discardButton
+  );
+
+  elements.dev = {
+    location: locRow.querySelector('[data-field="dev-location"]'),
+    locButton,
+    routesStatus,
+    showToggle,
+    draftToggle,
+    copyRoutesButton,
+  };
+  return panelEl;
+}
+
+function syncDevFields() {
+  const dev = elements.dev;
+  if (!dev) return;
+  const pose = context.appState?.getPlayerPose?.();
+  dev.location.textContent = pose ? `x ${pose.x}  z ${pose.z}  yaw ${pose.yaw}` : '—';
+  const routes = loadDraftRoutes(ROUTES_MAP_KEY);
+  const recorded = routes.filter(r => r?.points?.length).length;
+  dev.routesStatus.textContent = `Draft: ${recorded} stage${recorded === 1 ? '' : 's'} with a route.`;
+  dev.draftToggle.checked = isUsingDraftRoutes();
+  dev.showToggle.checked = readShowRoutes();
+}
+
+const readShowRoutes = () => {
+  try { return localStorage.getItem(DEV_SHOW_ROUTES_KEY) === '1'; } catch (_) { return false; }
+};
+
 function buildSwordGyroPanel() {
   const panelEl = createElement('section', 'settings-tabpanel');
   panelEl.id = 'panel-swordgyro';
@@ -673,7 +766,8 @@ function buildPanels() {
     display: buildDisplayPanel(),
     swordgyro: buildSwordGyroPanel(),
     about: buildAboutPanel(),
-    account: buildAccountPanel()
+    account: buildAccountPanel(),
+    dev: buildDevPanel()
   };
   body.append(...Object.values(elements.panels));
   return body;
@@ -847,7 +941,15 @@ function openOverlay() {
     panel?.focus?.();
   }
   syncCameraFields();
+  syncDevFields();
   updateUI();
+}
+
+function flashButton(button, text) {
+  if (!button) return;
+  const prev = button.textContent;
+  button.textContent = text;
+  setTimeout(() => { button.textContent = prev; }, 1500);
 }
 
 function closeOverlay() {
@@ -880,6 +982,22 @@ async function handleAction(target) {
     }
   } else if (action === 'open-leaderboard') {
     await openLeaderboardOverlay();
+  } else if (action === 'dev-roam') {
+    closeOverlay();
+    await context.appState?.startDevRoam?.();
+  } else if (action === 'dev-copy-location') {
+    const pose = context.appState?.getPlayerPose?.();
+    if (!pose) return;
+    const ok = await copyText(JSON.stringify(pose));
+    flashButton(elements.dev?.locButton, ok ? '✅ Copied!' : 'Copy failed');
+  } else if (action === 'dev-copy-routes') {
+    const ok = await copyText(formatRoutes(loadDraftRoutes(ROUTES_MAP_KEY)));
+    flashButton(elements.dev?.copyRoutesButton, ok ? '✅ Copied!' : 'Copy failed');
+  } else if (action === 'dev-discard-routes') {
+    if (!window.confirm('Discard the draft stage routes on this device?')) return;
+    discardDraftRoutes(ROUTES_MAP_KEY);
+    context.appState?.refreshDevRoutes?.();
+    syncDevFields();
   } else if (action === 'reconnect') {
     getMultiplayer()?.reconnect?.();
   } else if (action === 'copy-camera') {
@@ -1027,6 +1145,18 @@ function bindEvents() {
   };
 
   panel.addEventListener('click', handlePanelClick);
+
+  elements.dev?.showToggle.addEventListener('change', (event) => {
+    const on = event.target.checked;
+    try {
+      if (on) localStorage.setItem(DEV_SHOW_ROUTES_KEY, '1');
+      else localStorage.removeItem(DEV_SHOW_ROUTES_KEY);
+    } catch (_) { /* ignore */ }
+    context.appState?.setDevRoutesVisible?.(on);
+  });
+  elements.dev?.draftToggle.addEventListener('change', (event) => {
+    setUsingDraftRoutes(event.target.checked);
+  });
   leaderboardPanel?.addEventListener('click', handlePanelClick);
 
   elements.nameInput.addEventListener('input', () => {
