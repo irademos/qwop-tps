@@ -20,9 +20,8 @@
 //     or "not now". He steps aside when the stage starts — except on PEMBERTON_STAGE
 //     (`finalBoss`): there he stands PEMBERTON_SCALE× tall, glowing red, and the stage's boss
 //     takes his place (ctx.onStart's bossSpot).
-// Bottom row: ‹ › to the neighbouring station (STATION_ORDER) either side of the back button —
-// ⬅ Lobby while walking around, ⬅ Village at a station (⬅ Lobby then moves to the top left).
-// Walking off (WASD / joystick) leaves a station too. Phones: a swipe also moves between stations.
+// ⬅ Lobby is top left. At a station, tapping anywhere that isn't one of its items / characters
+// (or a button) goes back to walking around, and so does walking off (WASD / joystick).
 // After a stage win it can be built a little way ahead, the player walking in (`approach`).
 //
 // Game access goes through `ctx` (villageCtx in bootstrapGameApp.js); the shop logic
@@ -60,16 +59,16 @@ const VILLAGER_CHARACTER_URL = glbCharacterConfig.villagerUrl;
 // The villager's quest for each stage (stage 1 = index 0) — the story of Pemberton, who keeps
 // sending the player down the road against "monsters" (and turns up in every village: he
 // keeps a very fast carriage). `place` = the village the player is in (top chip),
-// `title` = the quest (also on the stage banner), `lines` = the conversation ([who, text, alt?],
+// `title` = the quest (also on the stage banner), `lines` = the conversation ([who, text],
 // who = 'them' (the speaker) / 'you' / 'action'). A 'you' line is offered as a choice next to
-// its `alt` (TALK_DEFAULT_REPLY if none) — either one carries on the same way. Stage
+// TALK_CANCEL (back to the village). Stage
 // PEMBERTON_STAGE is the fight with him (FINAL_BOSS_QUEST); after it VILLAGER_REPEAT_QUESTS take turns.
 const PEMBERTON = { speaker: 'Pemberton', emoji: '🎩' };
 const VILLAGER_QUESTS = [
   { place: 'Millbrook', title: 'Carry the letter to Thornwick',
     lines: [
       ['them', 'Ah, a traveler! Splendid. Would you carry this letter to Thornwick for me? Do watch the road, though. Monsters about. Nasty business.'],
-      ['you', 'Monsters?', 'Okay, got it.'],
+      ['you', 'Monsters?'],
       ['them', 'Nothing a strong arm can’t handle. There’s a coin in it for you.'],
     ],
     accept: 'I’ll take the letter' },
@@ -86,28 +85,28 @@ const VILLAGER_QUESTS = [
   { place: 'Greyhollow', title: 'Clear the docks at Saltmere',
     lines: [
       ['them', 'Back already? Splendid.'],
-      ['you', 'One of them was holding a pickaxe.', 'Done. What’s next?'],
+      ['you', 'One of them was holding a pickaxe.'],
       ['them', 'Monsters will use anything as a weapon. The quarry’s mine now, by the way. Bought it from the bank, after the bank took it from people who couldn’t pay the bank. Marvelous system. Now, the fishing docks at Saltmere need clearing. I’ve plans for those docks.'],
     ],
     accept: 'I’ll go' },
   { place: 'Saltmere', title: 'Clear the mill at Fenwick',
     lines: [
       ['them', 'Ah, there you are. All quiet at the docks?'],
-      ['you', 'One of them tried to speak to me.', 'All quiet.'],
+      ['you', 'One of them tried to speak to me.'],
       ['them', 'Speak? Growl, surely. Mimicry, friend. Clever beasts pick up sounds. Don’t let it get under your skin. They’ve got into my mill at Fenwick now — off you go.'],
     ],
     accept: 'I’ll go' },
   { place: 'Fenwick', title: 'Clear the camp at Riverbend',
     lines: [
       ['them', 'They’ve been painting on my mill walls. “WAGES.” Can you imagine?'],
-      ['you', 'Monsters can write?', 'Vandals.'],
+      ['you', 'Monsters can write?'],
       ['them', 'Learned it somewhere, I suppose. Don’t encourage them. There’s a camp by the river at Riverbend. Squatters. I mean, monsters.'],
     ],
     accept: '…I’ll go' },
   { place: 'Riverbend', title: 'Clear the road to Old Hearth',
     lines: [
       ['them', 'Well? How did it go?'],
-      ['you', 'There were small ones in that camp.', 'It’s done.'],
+      ['you', 'There were small ones in that camp.'],
       ['them', 'Yes, well. They breed. That’s rather the whole problem, isn’t it? Here, double the usual. You’ve earned it. Old Hearth next — same business.'],
     ],
     accept: '…Fine' },
@@ -119,7 +118,7 @@ const VILLAGER_QUESTS = [
   { place: 'Highcrest Gate', title: 'Go to Gould Manor',
     lines: [
       ['them', 'Ah. You again. You look troubled, friend.'],
-      ['you', 'I found your ledger. Every “monster” I killed had a name, and a debt next to it.', 'What is this ledger, Pemberton?'],
+      ['you', 'I found your ledger. Every “monster” I killed had a name, and a debt next to it.'],
       ['them', 'Debts are debts, friend. I didn’t make the rules. I just bought them. Now, please don’t be tiresome.'],
     ],
     accept: 'I’m coming for you, Pemberton' },
@@ -137,7 +136,7 @@ const FINAL_BOSS_QUEST = {
   place: 'Gould Manor', title: 'Settle the account',
   lines: [
     ['them', 'Hired guards. Never worth the coin. Very well — if a thing’s worth doing, a gentleman does it himself.'],
-    ['you', 'It’s over, Pemberton.', 'You’re finished.'],
+    ['you', 'It’s over, Pemberton.'],
     ['them', 'Over? I own the roads, the mills, the docks — the very ground you’re standing on. Come, then, monster. Let’s settle your account.'],
   ],
   accept: 'Let’s settle it',
@@ -156,7 +155,7 @@ const VILLAGER_REPEAT_QUESTS = [
     accept: 'I’ll hold them off!' },
 ];
 const VILLAGER_DECLINE = 'Not right now';
-const TALK_DEFAULT_REPLY = 'Okay, got it.';
+const TALK_CANCEL = 'Never mind';   // next to each of the player's lines: back to the village
 const TALK_WORDS_PER_SEC = 13;     // the line plays out a word or two at a time
 export function villagerQuestForStage(stage) {
   const s = Math.max(1, Math.floor(stage) || 1);
@@ -204,8 +203,6 @@ const STALL_BLOCK_BACK = 0.35;     // m behind the stall's origin
 const FIRE_BLOCK_RADIUS = 0.55;
 const VILLAGER_BLOCK_RADIUS = 0.45;
 const WALK_STUCK_MS = 600;         // a tap-walk that stops getting closer (a prop in the way) ends there
-// Phone station carousel, left → right as seen from the village centre (home = the villager's spot)
-const STATION_ORDER = ['shop', 'villager', 'fire', 'characters'];
 const STATION_NAMES = { shop: '🛒 Shop', villager: '🧑‍🌾 Villager', fire: '🔥 Campfire', characters: '👥 Characters' };
 const FINAL_BOSS_MARKER_BG = 'rgba(220, 38, 38, 0.92)';
 const CAMPFIRE_AHEAD = 0.4;        // m from the characters' group centre toward the lane (they stand behind it)
@@ -516,8 +513,6 @@ export function createVillage(ctx) {
   let quest = villagerQuestForStage(1);
   let finalBoss = false;    // PEMBERTON_STAGE: the villager is the boss (big + glowing red)
   let villagerScale = 1;
-  // (the villager's button is named after whoever gives the quest)
-  const stationName = (key) => (key === 'villager' ? `${quest.emoji} ${quest.speaker}` : STATION_NAMES[key]);
   let buildToken = 0;
 
   let stations = {};        // key → station
@@ -558,17 +553,13 @@ export function createVillage(ctx) {
   const ui = document.createElement('div');
   ui.className = 'village-ui hidden';
   ui.innerHTML = `
-    <div class="village-bottom-row">
-      <button type="button" class="ui-btn-secondary village-nav village-nav-prev hidden" data-v="nav-prev"></button>
-      <button type="button" class="ui-btn-secondary village-back" data-v="back">⬅ Lobby</button>
-      <button type="button" class="ui-btn-secondary village-nav village-nav-next hidden" data-v="nav-next"></button>
-    </div>
     <button type="button" class="ui-btn-secondary village-lobby-top hidden" data-v="lobby">⬅ Lobby</button>
     <div class="village-top ui-chip"><span data-v="stage"></span><span class="village-top-sep">·</span><span data-v="coins"></span></div>
     <div class="village-hint hidden" data-v="hint"></div>
     <div class="village-acts hidden" data-v="acts"></div>
     <div class="village-talk ui-panel hidden" data-v="talk">
       <div class="village-talk-head"><span class="village-talk-who" data-v="talk-who"></span><span class="village-talk-quest" data-v="talk-quest"></span></div>
+      <button type="button" class="village-talk-close" data-v="talk-close" aria-label="Back to the village">✕</button>
       <div class="village-talk-text" data-v="talk-text"></div>
       <div class="village-talk-more hidden" data-v="talk-more">▼</div>
       <div class="village-talk-choices" data-v="talk-choices"></div>
@@ -597,15 +588,15 @@ export function createVillage(ctx) {
   document.body.appendChild(ui);
   const $ = (k) => ui.querySelector(`[data-v="${k}"]`);
   const el = {
-    back: $('back'), lobby: $('lobby'), stage: $('stage'), coins: $('coins'),
+    lobby: $('lobby'), stage: $('stage'), coins: $('coins'),
     panel: $('panel'), panelTitle: $('panel-title'), panelText: $('panel-text'), panelActions: $('panel-actions'),
     card: $('card'), cardName: $('card-name'), cardDesc: $('card-desc'), cardOwned: $('card-owned'), buy: $('buy'),
-    prev: $('prev'), next: $('next'), navPrev: $('nav-prev'), navNext: $('nav-next'),
+    prev: $('prev'), next: $('next'),
     fade: $('fade'), fadeText: $('fade-text'),
     banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'), bannerBoss: $('banner-boss'),
     hint: $('hint'), acts: $('acts'),
     talk: $('talk'), talkWho: $('talk-who'), talkQuest: $('talk-quest'), talkText: $('talk-text'),
-    talkMore: $('talk-more'), talkChoices: $('talk-choices'),
+    talkMore: $('talk-more'), talkChoices: $('talk-choices'), talkClose: $('talk-close'),
   };
   let bannerTimer = null;
 
@@ -613,20 +604,14 @@ export function createVillage(ctx) {
     if (!active || leaving || approaching || sitting) return;
     ctx.onLobby();
   });
-  el.back.addEventListener('click', () => {
-    if (!active || leaving || approaching || sitting) return;
-    if (focus) unfocus();
-    else ctx.onLobby();
-  });
+  el.talkClose.addEventListener('click', () => { if (active && !leaving && !starting) unfocus(); });
   el.prev.addEventListener('click', () => stepItem(-1));
   el.next.addEventListener('click', () => stepItem(1));
   el.buy.addEventListener('click', () => { void buySelected(); });
-  el.navPrev.addEventListener('click', () => stepStation(-1));
-  el.navNext.addEventListener('click', () => stepStation(1));
   // Tapping the conversation box: finish the line / on to the next one
   el.talk.addEventListener('click', (e) => { if (!e.target.closest('button')) advanceTalk(); });
 
-  // Phones / portrait: the camera further out, swipes move between the stations
+  // Phones / portrait: the camera further out, the shop framed closer on the counter
   // (decided per frame: the phone can be turned)
   const isCompact = () => (camera.aspect || 1) < 1 || COARSE_POINTER;
   let compact = false;
@@ -734,8 +719,8 @@ export function createVillage(ctx) {
       campfire = makeCampfire();
       placeOnGround(campfire.group, firePos, 0);
       root.add(campfire.group);
-      const hit = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8), new THREE.MeshBasicMaterial({ visible: false }));
-      hit.position.y = 0.3;
+      const hit = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), new THREE.MeshBasicMaterial({ visible: false }));
+      hit.position.y = 0.2;
       campfire.group.add(hit);
       makeClickable(campfire.group, { station: 'fire' });
       const fireLabel = textSprite('🔥 Campfire', { height: 0.22 });
@@ -814,8 +799,9 @@ export function createVillage(ctx) {
         entry.centerOffset = c.clone().sub(origin);
         makeClickable(entry.object, { station: 'shop', item: i });
         if (!entry.def.chest) {
-          const size = box.isEmpty() ? 0.2 : box.getSize(new THREE.Vector3()).length() / 2;
-          const hit = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.17, size), 10, 8), hitMat);
+          // (small: neighbouring items' targets would swallow each other's taps)
+          const size = box.isEmpty() ? 0.12 : box.getSize(new THREE.Vector3()).length() / 2;
+          const hit = new THREE.Mesh(new THREE.SphereGeometry(THREE.MathUtils.clamp(size, 0.1, 0.14), 10, 8), hitMat);
           hit.position.copy(stallRoot.worldToLocal(c.clone()));
           stallRoot.add(hit);
           makeClickable(hit, { station: 'shop', item: i });
@@ -1013,12 +999,17 @@ export function createVillage(ctx) {
         const p = itemCenter(entry, new THREE.Vector3());
         p.y += 0.05;
         const dir = _v.copy(s.facing).addScaledVector(_UP, 0.45).clone();
-        setView(p, dir, 0.8, 0.5, 1.5);
+        setView(p, dir, compact ? 0.62 : 0.8, 0.5, compact ? 1.2 : 1.5);
+      } else if (compact) {
+        // Phones: close on the counter and the items hanging over it (the chest off to the side)
+        const target = _v2.copy(s.stallRoot.position).add(_v.set(0, 0.8, 0)).clone();
+        const dir = _v.copy(s.facing).addScaledVector(_UP, 0.3).clone();
+        setView(target, dir, 0.72, 0.5, 1.2);
       } else {
         // Stall + chest
         const target = _v2.copy(s.stallRoot.position).addScaledVector(s.side, s.chestSign * 0.55).add(_v.set(0, 0.85, 0)).clone();
-        const dir = _v.copy(s.facing).addScaledVector(_UP, compact ? 0.22 : 0.32).clone();
-        setView(target, dir, compact ? 1.8 : 2.3, 1.4, 2.6);
+        const dir = _v.copy(s.facing).addScaledVector(_UP, 0.32).clone();
+        setView(target, dir, 2.3, 1.4, 2.6);
       }
     } else if (focus === 'characters') {
       const s = stations.characters;
@@ -1092,34 +1083,10 @@ export function createVillage(ctx) {
     refreshBack();
   }
 
-  // Phones: ‹ › / swipe to the neighbouring station
-  function stepStation(dir) {
-    if (!active || leaving || approaching || sitting) return;
-    const i = stationIndex();
-    const n = STATION_ORDER.length;
-    focusStation(STATION_ORDER[(i + dir + n) % n]);
-  }
-  // (home = the villager's place in the carousel)
-  const stationIndex = () => Math.max(STATION_ORDER.indexOf(focus ?? 'villager'), 0);
-  // ‹ › name the neighbouring stations
-  function refreshNav() {
-    const show = active && !leaving && !approaching;
-    el.navPrev.classList.toggle('hidden', !show);
-    el.navNext.classList.toggle('hidden', !show);
-    if (!show) return;
-    const i = stationIndex();
-    const n = STATION_ORDER.length;
-    el.navPrev.textContent = `‹ ${stationName(STATION_ORDER[(i - 1 + n) % n])}`;
-    el.navNext.textContent = `${stationName(STATION_ORDER[(i + 1) % n])} ›`;
-  }
-
-  // Bottom middle: ⬅ Lobby in the village view, ⬅ Village at a station (⬅ Lobby then top left)
+  // ⬅ Lobby top left (not while walking in / leaving); no joystick / jump at a station
   function refreshBack() {
-    el.back.textContent = focus ? '⬅ Village' : '⬅ Lobby';
-    // (no joystick at a station: the panels take the bottom of the screen)
     document.body.classList.toggle('village-focused', !!focus && active && !leaving);
-    el.lobby.classList.toggle('hidden', !focus || !active || !!leaving || approaching);
-    refreshNav();
+    el.lobby.classList.toggle('hidden', !active || !!leaving || approaching);
   }
 
   // Bottom panel: what to do at the current station
@@ -1234,7 +1201,7 @@ export function createVillage(ctx) {
       nextLine();
     };
     const options = reply
-      ? [[reply[1], onReply], [reply[2] || TALK_DEFAULT_REPLY, onReply]]
+      ? [[reply[1], onReply], [TALK_CANCEL, () => unfocus()]]
       : [[quest.accept, () => requestStart(), 'ui-btn'], [VILLAGER_DECLINE, () => unfocus()]];
     talk.choices = options;
     el.talkMore.classList.add('hidden');
@@ -1268,7 +1235,6 @@ export function createVillage(ctx) {
     selectedItem = i >= 0 && i < itemEntries.length ? i : -1;
     if (focus === 'shop') refreshPanel();
     refreshCard();
-    refreshNav();
   }
   function stepItem(dir) {
     if (focus !== 'shop' || !itemEntries.length) return;
@@ -1494,13 +1460,25 @@ export function createVillage(ctx) {
     _ndc.set(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     _ray.setFromCamera(_ndc, camera);
     const hits = _ray.intersectObjects(clickables, true);
+    const targets = [];
     for (const h of hits) {
-      let o = h.object;
-      if (o.isSprite && o.material?.opacity === 0) continue;
+      const o = h.object;
+      if (o.isSprite && (o.material?.opacity === 0 || !o.visible)) continue;
       const t = o.userData.villageTarget;
-      if (t) return t;
+      if (t && !targets.includes(t)) targets.push(t);
     }
-    return null;
+    // A character wins over the campfire in front of them; among counter items the one whose
+    // centre is closest to the tap wins (their tap targets overlap)
+    const npc = targets.find((t) => t.npc);
+    if (npc) return npc;
+    let best = null;
+    let bestD = Infinity;
+    for (const t of targets) {
+      if (!Number.isInteger(t.item) || !itemEntries[t.item]) continue;
+      const d = _ray.ray.distanceSqToPoint(itemCenter(itemEntries[t.item], _v));
+      if (d < bestD) { bestD = d; best = t; }
+    }
+    return best ?? targets[0] ?? null;
   };
   const onPointerDown = (e) => {
     if (!active || leaving || approaching || sitting) return;
@@ -1513,16 +1491,22 @@ export function createVillage(ctx) {
     const dt = performance.now() - down.t;
     down = null;
     if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy) * 1.4 && dt < 700) {
-      // (shop item close-up: the next item; phones otherwise: the next station)
-      if (focus === 'shop' && (selectedItem >= 0 || !compact)) stepItem(dx < 0 ? 1 : -1);
-      else if (compact) stepStation(dx < 0 ? 1 : -1);
+      // (at the shop: the next item)
+      if (focus === 'shop') stepItem(dx < 0 ? 1 : -1);
       return;
     }
-    if (Math.hypot(dx, dy) > 12) return;
+    if (Math.hypot(dx, dy) > 12 || sitting) return;
     const t = pick(e.clientX, e.clientY);
+    if (focus) {
+      // At a station: its items / characters are tapped, anywhere else goes back to the village
+      const inStation = t && ((focus === 'shop' && Number.isInteger(t.item)) || (focus === 'characters' && t.npc));
+      if (inStation) onTarget(t);
+      else if (!starting) unfocus();
+      return;
+    }
     if (t) { onTarget(t); return; }
     // Walking around: tap / click the ground to walk there (pick() aimed _ray)
-    if (!focus && !sitting && e.target === domElement) {
+    if (e.target === domElement) {
       _groundPlane.set(_UP, -playerPos().y);
       if (_ray.ray.intersectPlane(_groundPlane, _v)) walkTo(clampToVillage(_v), null);
     }
@@ -1552,17 +1536,14 @@ export function createVillage(ctx) {
         return;
       }
     }
-    if (key === 'Escape' && focus) { unfocus(); e.preventDefault(); return; }
+    if (key === 'Escape' && focus && !starting) { unfocus(); e.preventDefault(); return; }
     if ((key === 'e' || key === 'Enter') && !focus && nearKeys) {
       focusStation(nearKeys.split(',')[0]);
       e.preventDefault();
       return;
     }
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    const dir = e.key === 'ArrowLeft' ? -1 : 1;
-    if (focus === 'shop' && (selectedItem >= 0 || !compact)) stepItem(dir);
-    else if (compact) stepStation(dir);
-    else return;
+    if (focus !== 'shop' || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+    stepItem(e.key === 'ArrowLeft' ? -1 : 1);
     e.preventDefault();
   };
 
@@ -1614,13 +1595,10 @@ export function createVillage(ctx) {
     endTalk();
     el.panel.classList.add('hidden');
     el.card.classList.add('hidden');
-    el.back.classList.add('hidden');
     el.lobby.classList.add('hidden');
     el.hint.classList.add('hidden');
     hideActs();
     document.body.classList.remove('village-focused');
-    el.navPrev.classList.add('hidden');
-    el.navNext.classList.add('hidden');
     ui.querySelector('.village-top')?.classList.add('hidden');
     domElement.style.cursor = '';
     document.body.classList.remove('village-mode'); // fight HUD back
@@ -1738,8 +1716,6 @@ export function createVillage(ctx) {
     el.banner.classList.add('hidden');
     el.stage.textContent = `${finalBoss || info.stage > 50 ? 'Final stage' : `Stage ${info.stage}`}${quest.place ? ` · ${quest.place}` : ''}`;
     if (approaching) {
-      refreshNav();
-      el.back.classList.add('hidden');
       el.lobby.classList.add('hidden');
       ui.querySelector('.village-top')?.classList.add('hidden');
       el.panel.classList.add('hidden');
@@ -1758,7 +1734,6 @@ export function createVillage(ctx) {
   }
 
   function showUi() {
-    el.back.classList.remove('hidden');
     ui.querySelector('.village-top')?.classList.remove('hidden');
     refreshBack();
     refreshPanel();
@@ -1809,7 +1784,7 @@ export function createVillage(ctx) {
     ui.classList.add('hidden');
     el.panel.classList.add('hidden');
     el.card.classList.add('hidden');
-    refreshNav();
+    el.lobby.classList.add('hidden');
     if (wasActive) {
       clearTimeout(bannerTimer);
       el.banner.classList.add('hidden');
@@ -1843,7 +1818,7 @@ export function createVillage(ctx) {
     let x = (p.x * 0.5 + 0.5) * w;
     let y = (-p.y * 0.5 + 0.5) * h - 18;
     x = Math.min(w - cw / 2 - 12, Math.max(cw / 2 + 12, x));
-    y = Math.min(h - 76, Math.max(ch + 70, y)); // (above the ⬅ Village button)
+    y = Math.min(h - 16, Math.max(ch + 70, y));
     el.card.style.left = `${x}px`;
     el.card.style.top = `${y}px`;
   }
