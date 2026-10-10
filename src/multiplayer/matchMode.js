@@ -98,8 +98,8 @@ const BOT_MUZZLE = new THREE.Vector3(0, 1.0, 0.75);   // model space
 const randIn = ([a, b]) => a + Math.random() * (b - a);
 // Where Guns & Bombs battles happen; fighters are scattered around it (each in its own
 // slice of the ring, GUNS_SPAWN_RADIUS from the centre) — wider than the sword modes.
-// Mountain town mappack: a gentle open valley away from the town
-export const GUNS_LOCATION = { x: -30, y: 1.5, z: -58, yaw: 0 };
+// Island town mappack: the gentle open ground in the island's south (all of it above the sea)
+export const GUNS_LOCATION = { x: 6, y: 1, z: -34, yaw: 0 };
 const GUNS_SPAWN_RADIUS = [9, 20];
 // Same "random" numbers on every client (seeded by the match id + the fighter's slot)
 const seededRandom = (seedText) => {

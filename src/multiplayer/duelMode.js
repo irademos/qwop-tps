@@ -20,8 +20,8 @@ import { LOBBY_ROOM_ID } from './peerConnection.js';
 
 // Where duels happen: paste the output of the lobby's "Copy location information" here.
 // The challenger stands behind this point facing `yaw`, the accepter in front facing back.
-// Multiplayer plays on the mountain town mappack: flat open ground away from the town.
-export const DUEL_LOCATION = { x: 42, y: 0, z: 74, yaw: -2.62 };
+// Multiplayer plays on the island town mappack: flat open ground south of the spawn.
+export const DUEL_LOCATION = { x: -4, y: 1, z: -38, yaw: 0 };
 
 const DUEL_DEFAULT_LOCATION = { x: 0, z: 0, yaw: 0 };
 const DUEL_START_GAP = 8;              // metres between the two players at "3" (they walk in)
