@@ -1452,32 +1452,35 @@ export class MapLoader {
     const modelCache: Map<string, THREE.Group> = new Map()
     const blobUrls: string[] = []
 
-    for (const obj of manifest.objects) {
-      if (!obj.visible) continue
+    // Load every model file once, all at the same time (they were awaited one by one)
+    const visibleObjects = manifest.objects.filter((obj) => obj.visible)
+    const modelFiles = [...new Set(visibleObjects.map((obj) => obj.modelFile))]
+    await Promise.all(modelFiles.map(async (file) => {
       try {
-        let scene = modelCache.get(obj.modelFile)
-        if (!scene) {
-          const glbBuf = await zip.file(obj.modelFile)?.async('arraybuffer')
-          if (!glbBuf) { console.warn(`[MapLoader] missing: ${obj.modelFile}`); continue }
-          const url  = URL.createObjectURL(new Blob([glbBuf], { type: 'model/gltf-binary' }))
-          blobUrls.push(url)
-          const gltf = await this.gltfLoader.loadAsync(url)
-          scene = normalisePivot(gltf.scene.clone(true) as THREE.Group)
-          modelCache.set(obj.modelFile, scene)
-        }
-        // The placement transform goes on a wrapper: the clone's own position holds the
-        // normalisePivot offset (bottom-centre pivot, as in the editor) and must survive.
-        const inst = new THREE.Group()
-        inst.add(scene.clone(true))
-        inst.name  = obj.name
-        inst.position.set(...obj.position)
-        inst.rotation.set(...obj.rotation)
-        inst.scale.set(...obj.scale)
-        inst.userData.mapObject = { id: obj.id, name: obj.name, modelFile: obj.modelFile }
-        objectsGroup.add(inst)
+        const glbBuf = await zip.file(file)?.async('arraybuffer')
+        if (!glbBuf) { console.warn(`[MapLoader] missing: ${file}`); return }
+        const url  = URL.createObjectURL(new Blob([glbBuf], { type: 'model/gltf-binary' }))
+        blobUrls.push(url)
+        const gltf = await this.gltfLoader.loadAsync(url)
+        modelCache.set(file, normalisePivot(gltf.scene.clone(true) as THREE.Group))
       } catch (err) {
-        console.warn(`[MapLoader] failed to load ${obj.modelFile}:`, err)
+        console.warn(`[MapLoader] failed to load ${file}:`, err)
       }
+    }))
+
+    for (const obj of visibleObjects) {
+      const scene = modelCache.get(obj.modelFile)
+      if (!scene) continue
+      // The placement transform goes on a wrapper: the clone's own position holds the
+      // normalisePivot offset (bottom-centre pivot, as in the editor) and must survive.
+      const inst = new THREE.Group()
+      inst.add(scene.clone(true))
+      inst.name  = obj.name
+      inst.position.set(...obj.position)
+      inst.rotation.set(...obj.rotation)
+      inst.scale.set(...obj.scale)
+      inst.userData.mapObject = { id: obj.id, name: obj.name, modelFile: obj.modelFile }
+      objectsGroup.add(inst)
     }
 
     root.add(objectsGroup)

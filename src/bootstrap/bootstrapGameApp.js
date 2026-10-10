@@ -1741,7 +1741,8 @@ async function initCore(runtimeContext) {
       const groundMeshes = [];
       group.traverse(obj => {
         if (!obj.isMesh || obj.isInstancedMesh) return;
-        obj.geometry.computeBoundsTree();
+        // Placed copies of one model share its geometry: build that BVH once, not per copy
+        if (!obj.geometry.boundsTree) obj.geometry.computeBoundsTree();
         meshes.push(obj);
         if (MAP_NOT_GROUND.has(obj.name)) return;
         let o = obj;
