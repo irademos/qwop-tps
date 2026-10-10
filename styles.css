@@ -2251,67 +2251,25 @@ body.settings-open #inventory-button {
 .village-ui button,
 .village-panel,
 .village-card { pointer-events: auto; }
-/* Village buttons: solid dark, no lift (a lift transform would undo centring, and a tapped
-   button stays :hover on touch screens — so no lighter hover background either) */
-.village-back,
-.village-lobby-top,
-.village-nav {
-  background: var(--surface-strong);
-  border-color: var(--border-strong);
-  min-height: 44px;
-  font-weight: 700;
-}
-.village-ui .village-back:hover,
-.village-ui .village-lobby-top:hover,
-.village-ui .village-nav:hover,
-.village-ui .village-back:active,
-.village-ui .village-lobby-top:active,
-.village-ui .village-nav:active {
-  background: var(--surface-strong);
-  transform: none;
-}
-@media (hover: hover) {
-  .village-ui .village-back:hover,
-  .village-ui .village-lobby-top:hover,
-  .village-ui .village-nav:hover { border-color: var(--accent); }
-}
-/* Bottom row: ‹ station · back (⬅ Lobby in the village view / ⬅ Village at a station) · station ›,
-   the back button in the middle and the station buttons right beside it; the bottom panel sits above */
-.village-bottom-row {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-  padding: 0 calc(10px + env(safe-area-inset-right, 0px)) 0 calc(10px + env(safe-area-inset-left, 0px));
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  pointer-events: none;
-}
-.village-back { grid-column: 2; padding: 0 16px; font-size: 15px; }
-.village-nav {
-  max-width: 100%;
-  padding: 0 12px;
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.village-nav-prev { grid-column: 1; justify-self: end; }
-.village-nav-next { grid-column: 3; justify-self: start; }
-@media (max-width: 440px) {
-  .village-bottom-row { gap: 6px; padding-left: calc(6px + env(safe-area-inset-left, 0px)); padding-right: calc(6px + env(safe-area-inset-right, 0px)); }
-  .village-back { padding: 0 12px; font-size: 14px; }
-  .village-nav { padding: 0 8px; }
-}
-/* At a station ⬅ Lobby stays reachable top left */
+/* ⬅ Lobby, top left: solid dark, no lift (a tapped button stays :hover on touch screens) */
 .village-lobby-top {
   position: absolute;
   top: calc(10px + env(safe-area-inset-top, 0px));
   left: calc(12px + env(safe-area-inset-left, 0px));
+  min-height: 44px;
   padding: 0 16px;
   font-size: 15px;
+  font-weight: 700;
+  background: var(--surface-strong);
+  border-color: var(--border-strong);
+}
+.village-ui .village-lobby-top:hover,
+.village-ui .village-lobby-top:active {
+  background: var(--surface-strong);
+  transform: none;
+}
+@media (hover: hover) {
+  .village-ui .village-lobby-top:hover { border-color: var(--accent); }
 }
 /* Sitting by the campfire: the screen fades out while the time of day changes */
 .village-fade {
@@ -2348,10 +2306,151 @@ body.settings-open #inventory-button {
   pointer-events: none;
 }
 .village-top-sep { color: var(--text-dim); }
+/* Narrow phones: the chip moves right of centre, clear of ⬅ Lobby */
+@media (max-width: 520px) {
+  .village-top { left: calc(50% + 34px); gap: 6px; padding: 6px 10px; font-size: 13px; }
+}
+/* Walking around: one line of help under the top chip */
+.village-hint {
+  position: absolute;
+  top: calc(52px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100% - 32px));
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-muted);
+  border-radius: var(--radius-pill);
+  background: var(--surface-hud);
+  pointer-events: none;
+}
+/* Near a station: its button(s) bottom centre ("🛒 Shop", "💬 Talk"…), between the joystick
+   (bottom left) and the jump button (bottom right) */
+.village-acts {
+  position: absolute;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column-reverse;   /* (two: the nearest at the bottom, the other above it) */
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.village-act {
+  min-height: 48px;
+  padding: 0 22px;
+  font-size: 16px;
+  font-weight: 800;
+  animation: village-act-in 0.2s var(--ease);
+}
+/* Phones: smaller, to fit between the joystick and the jump button */
+@media (max-width: 520px) {
+  .village-acts { gap: 6px; }
+  .village-act { min-height: 44px; padding: 0 12px; font-size: 14px; }
+}
+@keyframes village-act-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+/* The villager's conversation: one line at a time (villageMode.js startTalk), tap to go on */
+.village-talk {
+  position: absolute;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: min(420px, calc(100% - 32px));
+  padding: 10px 14px 12px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: village-panel-in 0.25s var(--ease);
+}
+.village-talk-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding-right: 30px;   /* (the ✕) */
+}
+/* ✕ top right: back to the village */
+.village-ui .village-talk-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 30px;
+  cursor: pointer;
+}
+@media (hover: hover) {
+  .village-ui .village-talk-close:hover { color: var(--text); background: var(--surface-strong); }
+}
+.village-talk-who {
+  flex: 0 0 auto;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--accent-hi);
+}
+.village-talk-quest {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.village-talk-text {
+  margin-top: 4px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.village-talk-rest { visibility: hidden; }
+.village-talk.is-action .village-talk-text {
+  font-style: italic;
+  text-align: center;
+  color: var(--text-muted);
+}
+.village-talk-more {
+  text-align: right;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--accent);
+  animation: village-talk-more 0.9s ease-in-out infinite;
+}
+@keyframes village-talk-more {
+  50% { transform: translateY(3px); opacity: 0.55; }
+}
+.village-talk-choices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.village-talk-choices:empty { display: none; }
+.village-talk-choice {
+  flex: 1 1 140px;
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+}
 .village-panel {
   position: absolute;
   left: 50%;
-  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   width: min(460px, calc(100% - 32px));
   padding: 14px 18px;
@@ -2369,25 +2468,6 @@ body.settings-open #inventory-button {
   font-size: 14px;
   line-height: 1.4;
   color: var(--text-muted);
-}
-/* The villager's conversation (villageMode.js dialogueNodes) */
-.village-panel-text:has(.village-line) {
-  max-height: min(38vh, 260px);
-  overflow-y: auto;
-  text-align: left;
-}
-.village-line { margin-top: 6px; color: var(--text); }
-.village-line:first-child { margin-top: 2px; }
-.village-line-who {
-  font-weight: 800;
-  color: var(--accent-hi);
-}
-.village-line-you { color: var(--text-muted); }
-.village-line-you .village-line-who { color: var(--info); }
-.village-line-action {
-  font-style: italic;
-  color: var(--text-dim);
-  text-align: center;
 }
 .village-panel-actions {
   display: flex;
@@ -2489,16 +2569,20 @@ body.settings-open #inventory-button {
   from { opacity: 0; transform: translateX(-50%) scale(1.15); }
   to   { opacity: 1; transform: translateX(-50%) scale(1); }
 }
-/* In the village the world is the menu: no fight HUD (the back button takes the top-left corner) */
+/* In the village the world is the menu: no fight HUD (⬅ Lobby takes the top-left corner).
+   The joystick and jump stay for walking around — but not at a station (body.village-focused),
+   where the panels take the bottom of the screen */
 body.village-mode #player-info,
 body.village-mode #xp-bar,
 body.village-mode #action-buttons,
-body.village-mode #joystick-container,
+body.village-mode.village-focused #joystick-container,
+body.village-mode.village-focused #jump-button,
+body.village-mode #gyro-button,
 body.village-mode #ammo-display,
 body.village-mode #shield-health-display {
   display: none !important;
 }
-body.village-mode #health-display { top: calc(64px + env(safe-area-inset-top, 0px)); }
+body.village-mode #health-display { top: calc(84px + env(safe-area-inset-top, 0px)); }
 body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px)); }
 
 /* ── Showdown: action buttons (Block / bubble / bomb) ─────────────────────────── */
@@ -3575,6 +3659,9 @@ body.mobile-block-bar .classic-combo {
   .match-invite,
   .village-panel,
   .village-card,
+  .village-talk,
+  .village-act,
+  .village-talk-more,
   .village-banner-in {
     animation: none;
   }

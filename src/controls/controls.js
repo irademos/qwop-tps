@@ -99,6 +99,8 @@ export class PlayerControls {
     this.joystick = null;
     this.joystickAngle = 0;
     this.joystickForce = 0;
+    // WASD / joystick speed multiplier (the Showdown village walks slower)
+    this.moveSpeedScale = 1;
     this.touchStartX = 0;
     this.touchStartY = 0;
     this.touchSensitivity = 0.006;
@@ -1007,7 +1009,7 @@ export class PlayerControls {
       const deltaSeconds = Number.isFinite(this.deltaSeconds) && this.deltaSeconds > 0
         ? this.deltaSeconds
         : 0.016;
-      const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05;
+      const speed = CHARACTER_MOVEMENT.walkSpeed * 1.05 * (this.moveSpeedScale ?? 1);
 
       // Auto-walk counts as full forward input along its direction for wall climbing
       const autoMove = this._autoMove;

@@ -4206,6 +4206,25 @@ async function initCore(runtimeContext) {
     }
     return null;
   };
+  // No weapon in hand in the village: whatever is held is put away there, and the sword comes
+  // back when the next stage's calibration starts (villageCtx.confirmStart) or the player leaves
+  let _villageSheathed = false;
+  const _villageSheathe = () => {
+    const held = getEquippedInventoryItemIds();
+    if (!held.length) return;
+    held.forEach((itemId) => unequipInventoryItem(itemId));
+    _villageSheathed = true;
+    playerControls?.refreshActionButtons?.();
+  };
+  const _villageUnsheathe = () => {
+    if (!_villageSheathed) return;
+    _villageSheathed = false;
+    if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
+      inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+    }
+    equipInventoryItem(FOAM_SWORD_ITEM_ID);
+    playerControls?.refreshActionButtons?.();
+  };
   // approach: build it a little way ahead and walk the player there (after a stage win)
   const _psShowVillage = (stage, onOk, { approach = false } = {}) => {
     const _final = _psIsFinalStage(stage);
@@ -4235,6 +4254,7 @@ async function initCore(runtimeContext) {
     const _boss = MATCH_CHARACTERS[_psStageBoss.key];
     setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected].url);
     _psPreviewTime();
+    _villageSheathe();
     _psVillageStart = (pathAngle, extra = {}) => onOk(count, { pathAngle, inPlace: true, bossSpot: extra.bossSpot });
     village?.enter({
       stage,
@@ -4453,7 +4473,11 @@ async function initCore(runtimeContext) {
 
   // Recalibrate: snapshot current gyro as neutral AND clear cached base quaternions
   // so the gyro loop re-initializes them cleanly from the weapon's _holdRotation.
+  // (performance.now ms of the last manual calibration — the stage-start popup is skipped
+  // while it is fresher than SWORD_CALIB_FRESH_MS)
+  let _swordCalibratedAtMs = -Infinity;
   window.phoneSwordRecalibrate = () => {
+    _swordCalibratedAtMs = performance.now();
     const g = window.phoneSwordGyro;
     if (g.alpha !== null) window.phoneSwordCalib.alpha = g.alpha;
     if (g.beta !== null) window.phoneSwordCalib.beta = g.beta;
@@ -4713,7 +4737,8 @@ async function initCore(runtimeContext) {
   });
 
   // ── Post-connect calibration popup ──────────────────────────────────────
-  // (also shown before every Showdown stage: accepting the villager’s quest waits on Okay)
+  // (also shown before every Showdown stage: accepting the villager’s quest waits on Okay —
+  // unless the sword was calibrated less than SWORD_CALIB_FRESH_MS ago)
   let _connectCalibThen = null;
   document.getElementById('phone-sword-connect-calib-ok')?.addEventListener('click', () => {
     window.phoneSwordRecalibrate?.();
@@ -4722,8 +4747,10 @@ async function initCore(runtimeContext) {
     _connectCalibThen = null;
     then?.();
   });
+  // (calibrated within this long: no popup)
+  const SWORD_CALIB_FRESH_MS = 60000;
   const _requireSwordCalibration = (then) => {
-    if (!phoneSwordConnectCalib) { then(); return; }
+    if (!phoneSwordConnectCalib || performance.now() - _swordCalibratedAtMs < SWORD_CALIB_FRESH_MS) { then(); return; }
     _connectCalibThen = then;
     phoneSwordConnectCalib.classList.remove('hidden');
   };
@@ -5507,7 +5534,10 @@ async function initCore(runtimeContext) {
       get: () => _psTimePref,
       set: (pref) => { _psTimePref = pref; _psPreviewTime(); },
     },
-    confirmStart: (go) => _requireSwordCalibration(go),
+    confirmStart: (go) => {
+      _villageUnsheathe();
+      _requireSwordCalibration(go);
+    },
     onStart: (pathAngle, extra) => _psVillageStart?.(pathAngle, extra),
     onLobby: () => {
       _resetForMenu();
@@ -5969,6 +5999,7 @@ async function initCore(runtimeContext) {
   const _resetForMenu = () => {
     _psStopSong();
     village?.exit();
+    _villageUnsheathe();
     deathCarry?.cancel();
     playerControls?.cancelClimb?.();
     _classicStageOverlay?.classList.add('hidden');
