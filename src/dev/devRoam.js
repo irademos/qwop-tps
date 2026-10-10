@@ -216,7 +216,7 @@ export function createDevRoam(ctx) {
     if (start) ctx.teleport(start.x, start.z);
   });
   copyAllBtn.addEventListener('click', async () => {
-    const text = formatRoutes(routes);
+    const text = formatRoutes(mapKey, routes);
     const ok = await copyText(text);
     flash(copyAllBtn, ok ? '✅ Copied!' : '❌ Copy failed');
     if (!ok) { output.value = text; output.classList.remove('hidden'); }

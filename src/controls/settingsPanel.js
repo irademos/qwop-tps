@@ -1,6 +1,7 @@
 import { CAMERA_CONFIG_DEFAULTS } from './controls.js';
 import {
   loadDraftRoutes, discardDraftRoutes, formatRoutes, isUsingDraftRoutes, setUsingDraftRoutes,
+  hasDraftRoutes, countFileRoutes, countRoutes,
 } from '../map/stageRoutes.js';
 const TAB_KEY = 'settings:lastTab';
 
@@ -670,9 +671,11 @@ function syncDevFields() {
   if (!dev) return;
   const pose = context.appState?.getPlayerPose?.();
   dev.location.textContent = pose ? `x ${pose.x}  z ${pose.z}  yaw ${pose.yaw}` : '—';
-  const routes = loadDraftRoutes(ROUTES_MAP_KEY);
-  const recorded = routes.filter(r => r?.points?.length).length;
-  dev.routesStatus.textContent = `Draft: ${recorded} stage${recorded === 1 ? '' : 's'} with a route.`;
+  const stages = (n) => `${n} stage${n === 1 ? '' : 's'}`;
+  const inFile = `stageRoutes.js: ${stages(countFileRoutes(ROUTES_MAP_KEY))} with a route`;
+  dev.routesStatus.textContent = hasDraftRoutes(ROUTES_MAP_KEY)
+    ? `${inFile} · draft on this device: ${stages(countRoutes(loadDraftRoutes(ROUTES_MAP_KEY)))}.`
+    : `${inFile} · no draft on this device.`;
   dev.draftToggle.checked = isUsingDraftRoutes();
   dev.showToggle.checked = readShowRoutes();
 }
@@ -991,7 +994,7 @@ async function handleAction(target) {
     const ok = await copyText(JSON.stringify(pose));
     flashButton(elements.dev?.locButton, ok ? '✅ Copied!' : 'Copy failed');
   } else if (action === 'dev-copy-routes') {
-    const ok = await copyText(formatRoutes(loadDraftRoutes(ROUTES_MAP_KEY)));
+    const ok = await copyText(formatRoutes(ROUTES_MAP_KEY, loadDraftRoutes(ROUTES_MAP_KEY)));
     flashButton(elements.dev?.copyRoutesButton, ok ? '✅ Copied!' : 'Copy failed');
   } else if (action === 'dev-discard-routes') {
     if (!window.confirm('Discard the draft stage routes on this device?')) return;

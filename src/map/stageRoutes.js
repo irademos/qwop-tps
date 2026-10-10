@@ -9,13 +9,13 @@
 // random straight path (_psPickPathAngle). Classic (its own map) and the final Pemberton stage
 // only use points[0] / nothing.
 //
-// Record them in the game: Settings → Dev → Free Roam → stage waypoints (Copy all → paste the
-// array here). Recorded routes are kept as a draft in this browser (localStorage) and, with
+// Record them in the game: Settings → Dev → Free Roam → stage waypoints (Copy all routes copies
+// the whole `islandTown: [ … ],` entry — replace that entry below with it). Recorded routes are kept as a draft in this browser (localStorage) and, with
 // "Play draft routes" on in the Dev tab, Showdown uses the draft instead of this file.
 export const STAGE_ROUTES = {
-  islandTown: [[
-  { points: [{ x: -39.11, z: 17.73 }, { x: -18.16, z: 15.43 }, { x: -13.66, z: 20.42 }, { x: -13.66, z: 36.63 }, { x: 0.68, z: 39.72 }, { x: 7.65, z: 31.88 }, { x: 14.25, z: 23.01 }] }, // stage 1
-]],
+  islandTown: [
+    { points: [{ x: -39.11, z: 17.73 }, { x: -18.16, z: 15.43 }, { x: -13.66, z: 20.42 }, { x: -13.66, z: 36.63 }, { x: 0.68, z: 39.72 }, { x: 7.65, z: 31.88 }, { x: 14.25, z: 23.01 }] }, // stage 1
+  ],
 };
 
 const DRAFT_KEY = 'sq:devStageRoutes';
@@ -49,6 +49,10 @@ export const saveDraftRoutes = (mapKey, routes) => {
   all[mapKey] = routes;
   writeJson(DRAFT_KEY, all);
 };
+export const hasDraftRoutes = (mapKey) => Array.isArray(readJson(DRAFT_KEY)?.[mapKey]);
+// Stages with a usable route in STAGE_ROUTES (the file)
+export const countFileRoutes = (mapKey) => (STAGE_ROUTES[mapKey] ?? []).filter(validRoute).length;
+export const countRoutes = (routes) => routes.filter(validRoute).length;
 export const discardDraftRoutes = (mapKey) => {
   const all = readJson(DRAFT_KEY) || {};
   delete all[mapKey];
@@ -100,10 +104,11 @@ export const createPolyline = (points) => {
 };
 
 const r2 = (v) => Math.round(v * 100) / 100;
-// Route list as text to paste into STAGE_ROUTES (one stage per line)
-export const formatRoutes = (routes) => {
+// A map's routes as its whole STAGE_ROUTES entry (`  islandTown: [ … ],`, one stage per line),
+// to replace that entry with
+export const formatRoutes = (mapKey, routes) => {
   const lines = routes.map((r, i) => (validRoute(r)
-    ? `  { points: [${r.points.map(p => `{ x: ${r2(p.x)}, z: ${r2(p.z)} }`).join(', ')}] }, // stage ${i + 1}`
-    : `  null, // stage ${i + 1}`));
-  return `[\n${lines.join('\n')}\n]`;
+    ? `    { points: [${r.points.map(p => `{ x: ${r2(p.x)}, z: ${r2(p.z)} }`).join(', ')}] }, // stage ${i + 1}`
+    : `    null, // stage ${i + 1}`));
+  return `  ${mapKey}: [\n${lines.join('\n')}\n  ],`;
 };
