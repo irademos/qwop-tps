@@ -13,9 +13,9 @@
 // array here). Recorded routes are kept as a draft in this browser (localStorage) and, with
 // "Play draft routes" on in the Dev tab, Showdown uses the draft instead of this file.
 export const STAGE_ROUTES = {
-  islandTown: [[
+  islandTown: [
   { points: [{ x: -39.11, z: 17.73 }, { x: -18.16, z: 15.43 }, { x: -13.66, z: 20.42 }, { x: -13.66, z: 36.63 }, { x: 0.68, z: 39.72 }, { x: 7.65, z: 31.88 }, { x: 14.25, z: 23.01 }] }, // stage 1
-]],
+],
 };
 
 const DRAFT_KEY = 'sq:devStageRoutes';
