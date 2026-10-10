@@ -3876,6 +3876,25 @@ async function initCore(runtimeContext) {
   const PS_CAM_SWITCH_MIN_CLOSER = 3.0; // new target must be this many metres closer to switch immediately
   const PS_CAM_SWITCH_STABLE_MS = 2000; // or must be closest for this long
   const PS_INCOMING_BOMB_RANGE = 25;    // m — bombs farther than this are ignored
+  const CAM_AIM_PITCH_SPEED = 3;        // 1/s — how fast the camera tilts toward the target's height
+
+  /**
+   * Tilt the camera up / down toward a target that stands higher / lower than the player
+   * (`pos` = feet, like the player's; level ground → pitch 0). First person looks along the
+   * elevation; third person orbits the other way (a raised camera looks down).
+   */
+  function _aimCameraPitchAt(pos, dt) {
+    if (playerControls.cameraTouchId !== null) return; // the player is dragging the camera
+    let target = 0;
+    if (pos) {
+      const horiz = Math.hypot(pos.x - playerModel.position.x, pos.z - playerModel.position.z);
+      const elevation = Math.atan2(pos.y - playerModel.position.y, Math.max(0.5, horiz));
+      target = playerControls.isFirstPersonView
+        ? Math.max(-Math.PI / 3, Math.min(Math.PI / 3, elevation))
+        : Math.max(-Math.PI / 6, Math.min(Math.PI / 3, -elevation));
+    }
+    playerControls.pitch += (target - playerControls.pitch) * Math.min(1, dt * CAM_AIM_PITCH_SPEED);
+  }
 
   /**
    * Closest in-flight enemy bomb that is heading toward the player (not yet
@@ -7144,6 +7163,7 @@ async function initCore(runtimeContext) {
             const _yawDelta = ((_targetYaw - playerControls.yaw + 3 * Math.PI) % (2 * Math.PI)) - Math.PI;
             playerControls.yaw += _yawDelta * Math.min(1, frameDelta * 6);
           }
+          _aimCameraPitchAt(_bp, frameDelta);
           _psCamLastYaw = playerControls.yaw;
         } else if (_now >= _psCamManualUntil) {
           // Find closest living enemy
@@ -7196,11 +7216,13 @@ async function initCore(runtimeContext) {
                 playerControls.yaw += _yawDelta * Math.min(1, frameDelta * 4);
                 _psCamLastYaw = playerControls.yaw;
               }
+              _aimCameraPitchAt(_tp, frameDelta);
             }
           } else {
             _psCamTarget = null;
             _psCamCandidate = null;
             _psCamLastYaw = playerControls.yaw;
+            _aimCameraPitchAt(null, frameDelta);
           }
         } else {
           // Manual control active — track current yaw without overriding
@@ -7229,6 +7251,7 @@ async function initCore(runtimeContext) {
         if (Math.hypot(_dx, _dz) > 0.5) {
           playerControls.yaw += wrapDeltaRad(Math.atan2(_dx, _dz) - playerControls.yaw) * Math.min(1, frameDelta * 4);
         }
+        if (!_weaponAim.active) _aimCameraPitchAt(_opp.position, frameDelta);
       }
       _duelCamLastYaw = playerControls.yaw;
 
