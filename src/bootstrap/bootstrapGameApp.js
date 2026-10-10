@@ -1803,10 +1803,16 @@ async function initCore(runtimeContext) {
     _groundMeshes = loaded.groundMeshes;
     _glbHeightCache.clear();
     setTerrainFloor(loaded.floor);
+    _syncPhysicsGround();
     setSpawnCenter(MAPS[key].spawn);
     registerMapMeshes(loaded.meshes); // bullets stop at buildings / walls (src/items/projectiles.js)
     return true;
   };
+  // Flat Rapier ground (created after the first map load, below); moved to the map's floor
+  let _physicsGroundRb = null;
+  function _syncPhysicsGround() {
+    _physicsGroundRb?.setTranslation({ x: 0, y: (_activeMap?.floor ?? 0) - 1, z: 0 }, true);
+  }
   await _setActiveMap(DEFAULT_MAP);
 
   const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -1849,16 +1855,14 @@ async function initCore(runtimeContext) {
   runtimeContext.systems.rbToMesh = rbToMesh;
   window.rbToMesh = rbToMesh;
 
-  // Ground collider
-  {
-    const groundRb = rapierWorld.createRigidBody(
-      RAPIER.RigidBodyDesc.fixed().setTranslation(0, -1, 0)
-    );
-    rapierWorld.createCollider(
-      RAPIER.ColliderDesc.cuboid(200, 1, 200),
-      groundRb
-    );
-  }
+  // Ground collider — its top sits at the active map's floor (_syncPhysicsGround), so enemies
+  // (dynamic bodies) can walk down into the sea's shallows instead of resting on y = 0
+  _physicsGroundRb = rapierWorld.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+  rapierWorld.createCollider(
+    RAPIER.ColliderDesc.cuboid(200, 1, 200),
+    _physicsGroundRb
+  );
+  _syncPhysicsGround();
 
   // Prime with an initial distant wave
 

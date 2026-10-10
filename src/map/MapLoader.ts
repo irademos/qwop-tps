@@ -39,7 +39,10 @@
  * In Sword Showdown: loaded by bootstrapGameApp.js (`MAPS` / `_loadMap`) with the game's
  * renderer; the basis transcoder is served from public/basis/ (copied from
  * three/examples/jsm/libs/basis). Game edits to the editor's copy: userData.mapObject on
- * placed objects, the KTX2 loader is disposed after use, a failed fetch throws.
+ * placed objects, each placed object is a wrapper group around the pivot-normalised model
+ * (the editor's copy overwrites the pivot offset with the placement position, so models
+ * whose origin isn't at their bottom-centre land in the wrong spot), the KTX2 loader is
+ * disposed after use, a failed fetch throws.
  */
 
 import * as THREE from 'three'
@@ -1462,7 +1465,10 @@ export class MapLoader {
           scene = normalisePivot(gltf.scene.clone(true) as THREE.Group)
           modelCache.set(obj.modelFile, scene)
         }
-        const inst = scene.clone(true)
+        // The placement transform goes on a wrapper: the clone's own position holds the
+        // normalisePivot offset (bottom-centre pivot, as in the editor) and must survive.
+        const inst = new THREE.Group()
+        inst.add(scene.clone(true))
         inst.name  = obj.name
         inst.position.set(...obj.position)
         inst.rotation.set(...obj.rotation)
