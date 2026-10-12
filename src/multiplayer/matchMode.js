@@ -99,7 +99,7 @@ const randIn = ([a, b]) => a + Math.random() * (b - a);
 // Where Guns & Bombs battles happen; fighters are scattered around it (each in its own
 // slice of the ring, GUNS_SPAWN_RADIUS from the centre) — wider than the sword modes.
 // Island town mappack: the gentle open ground in the island's south (all of it above the sea)
-export const GUNS_LOCATION = { x: 6, y: 1, z: -34, yaw: 0 };
+export const GUNS_LOCATION = { x: 8.4, y: 1.4, z: -47.6, yaw: 0 };
 const GUNS_SPAWN_RADIUS = [9, 20];
 // Same "random" numbers on every client (seeded by the match id + the fighter's slot)
 const seededRandom = (seedText) => {

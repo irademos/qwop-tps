@@ -1670,6 +1670,8 @@ async function initCore(runtimeContext) {
   // on the island town mappack (src/map/MapLoader.ts). The mode handler switches with
   // _setActiveMap before a mode starts; a map is loaded the first time it's needed.
   //   kind 'glb':     a plain GLB scene, scaled by `scale`
+  //   scale (mappacks too): uniform world scale of the whole map; coordinates written for a map
+  //                   (spawn, DUEL_LOCATION / GUNS_LOCATION, STAGE_ROUTES) are in scaled world units
   //   kind 'mappack': an editor .mappack (zip); map objects whose model file matches
   //                   `noGround` (trees) aren't stood on — characters walk through them,
   //                   bullets still stop at them. A pack with a sea level gets an ocean
@@ -1678,8 +1680,8 @@ async function initCore(runtimeContext) {
   //   spawn: where (re)spawns are picked (src/map/spawnUtils.js)
   const MAPS = {
     islandTown: {
-      kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree/i,
-      spawn: { x: 10, z: -4, radius: 3 },   // the flat ground in the middle of the island
+      kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree/i, scale: 1.4,
+      spawn: { x: 14, z: -5.6, radius: 3 },   // the flat ground in the middle of the island
     },
     classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
   };
@@ -1710,17 +1712,24 @@ async function initCore(runtimeContext) {
         const { MapLoader, sampleMapWaterLevel } = await import('../map/MapLoader.ts');
         group = await new MapLoader().load(def.url, { renderer, transcoderPath: '/basis/' });
         styleRoot = group.getObjectByName('objects');
+        // Water data is in the pack's own units: sample unscaled, scale the level back up
+        const s = def.scale ?? 1;
         const info = group.userData.water;
-        if (info) water = (x, z) => sampleMapWaterLevel(info, x, z);
-        if (Number.isFinite(info?.seaLevel)) floor = info.seaLevel - SEA_WADE_DEPTH;
+        if (info) {
+          water = (x, z) => {
+            const level = sampleMapWaterLevel(info, x / s, z / s);
+            return level == null ? null : level * s;
+          };
+        }
+        if (Number.isFinite(info?.seaLevel)) floor = info.seaLevel * s - SEA_WADE_DEPTH;
       } else {
         const gltf = await new Promise((resolve, reject) =>
           new GLTFLoader().load(def.url, resolve, undefined, reject)
         );
         group = gltf.scene;
-        group.scale.setScalar(def.scale ?? 1);
         styleRoot = group;
       }
+      group.scale.setScalar(def.scale ?? 1);
       group.name = 'map';
       if (styleRoot) {
         if (!_mapStyleReferenceSet) { setStyleReference(styleRoot); _mapStyleReferenceSet = true; }
