@@ -32,7 +32,7 @@
 - **Rendering:** Three.js v0.176 (+ `three-mesh-bvh` for map raycasts)
 - **Physics:** Rapier3D (`@dimforge/rapier3d-compat`)
 - **Multiplayer:** Multiplayer mode only (Showdown is single player). Firebase (`peers` = lobby list, `rooms` = lobby / private duel rooms / `mm-<mode>` matchmaking queue / `party-<hostId>` / `match-<matchId>`, shop stock) + PeerJS WebRTC; messages: `presence`, `projectile`, `duel`, `match`
-- **World:** `public/mappacks/island_town.mappack` (via `src/map/MapLoader.ts`) for every mode but Classic; Classic uses the static GLB map (`public/glb_map/map.glb`)
+- **World:** `public/mappacks/island_town.mappack` (via `src/map/MapLoader.ts`) for every mode but Classic (scaled ×1.3 via `MAPS.islandTown.scale` — map coordinates in code are scaled world units); Classic uses the static GLB map (`public/glb_map/map.glb`)
 - **Auth:** PIN → SHA-256 → Firebase + cookie (no OAuth); the app opens as a guest (unless a stored PIN auto-logs in); "Sign In" on the start screen reloads to the login form (`sq:showLogin` sessionStorage flag); guest = random name, `profileNameKey` null, nothing saved (guard profile writes on `profileNameKey`)
 - **Build:** Vite 6, deployed on Vercel
 
