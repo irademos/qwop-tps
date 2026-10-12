@@ -1680,8 +1680,8 @@ async function initCore(runtimeContext) {
   //   spawn: where (re)spawns are picked (src/map/spawnUtils.js)
   const MAPS = {
     islandTown: {
-      kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree/i, scale: 1.3,
-      spawn: { x: 13, z: -5.2, radius: 3 },   // the flat ground in the middle of the island
+      kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree/i, scale: 1.4,
+      spawn: { x: 14, z: -5.6, radius: 3 },   // the flat ground in the middle of the island
     },
     classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
   };
