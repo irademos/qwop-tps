@@ -528,8 +528,11 @@ export class PlayerControls {
       this.refreshActionButtons();
       if (event) this.safePreventDefault(event);
     };
+    // (third slot: the magic wand once it's owned in Showdown)
+    this.psWeaponBtn3 = createButton('ps-weapon-btn-3', 'mobile-primary-action ps-weapon-btn', '');
     bindPress(this.psWeaponBtn1, makePsWeaponHandler(this.psWeaponBtn1));
     bindPress(this.psWeaponBtn2, makePsWeaponHandler(this.psWeaponBtn2));
+    bindPress(this.psWeaponBtn3, makePsWeaponHandler(this.psWeaponBtn3));
 
     // Protective bubble (bought in the shop); label/count kept fresh by the game loop
     this.psBubbleBtn = createButton('ps-bubble-btn', 'mobile-primary-action ps-bubble-btn', `🫧 ${getAppState()?.getBubbleCount?.() ?? 0}`);
@@ -577,10 +580,17 @@ export class PlayerControls {
     this.refreshActionButtons();
   }
 
+  // Equipped right-hand item id; the magic wand is the sword weapon in wand form
+  getEquippedItemId() {
+    const appState = appContext.uiState.appState ?? window.appState;
+    if (appState?.isWandEquipped?.()) return 'magic_wand';
+    return this.getEquippedWeapon('right')?.itemId ?? 'foamSword';
+  }
+
   getMobileAttackLabel() {
-    const itemId = this.getEquippedWeapon('right')?.itemId ?? 'foamSword';
+    const itemId = this.getEquippedItemId();
     if (itemId === 'pistol') return 'Fire';
-    if (itemId === 'foamSword') return '🛡 Block';
+    if (itemId === 'foamSword' || itemId === 'magic_wand') return '🛡 Block';
     return 'Attack';
   }
 
@@ -592,22 +602,25 @@ export class PlayerControls {
     const hasShield = (inventory.shield?.count ?? 0) > 0;
     // Multiplayer Guns & Bombs: gun and shield only
     const swordAllowed = appState?.isSwordAllowed?.() !== false;
+    const hasWand = !!appState?.isWandAllowed?.();
     const weapons = [
       ...(swordAllowed ? [{ id: 'foamSword', label: 'Sword' }] : []),
+      ...(hasWand ? [{ id: 'magic_wand', label: '🪄 Wand' }] : []),
       ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
       ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),
     ];
     // Default to foamSword when nothing detected
-    const equippedId = this.getEquippedWeapon('right')?.itemId ?? 'foamSword';
+    const equippedId = this.getEquippedItemId();
     const others = weapons.filter(w => w.id !== equippedId);
-    [this.psWeaponBtn1, this.psWeaponBtn2].forEach((button, index) => {
+    [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3].forEach((button, index) => {
       const w = others[index];
       button.dataset.psWeaponId = w ? w.id : '';
       button.textContent = w ? w.label : '';
       button.style.display = w ? '' : 'none';
+      button.classList.toggle('ps-wand-btn', w?.id === 'magic_wand');
     });
-    // Block button only shown for sword; gun shows Fire; shield hides it
-    const showPunch = equippedId === 'foamSword' || equippedId === 'pistol';
+    // Block button shown for the sword / wand; gun shows Fire; shield hides it
+    const showPunch = equippedId === 'foamSword' || equippedId === 'magic_wand' || equippedId === 'pistol';
     this.punchButton.textContent = this.getMobileAttackLabel();
     this.punchButton.style.display = showPunch ? '' : 'none';
     // On touch screens Block/Fire is a full-width bar along the bottom; the joystick and
@@ -628,7 +641,7 @@ export class PlayerControls {
 
   // Block/fire button + two weapon switch buttons, bubble and bomb
   layoutMobileActionButtons() {
-    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psBubbleBtn, this.psBombBtn].forEach((button) => {
+    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psBubbleBtn, this.psBombBtn].forEach((button) => {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
     });
@@ -642,6 +655,9 @@ export class PlayerControls {
     }
     if (this.psWeaponBtn2.dataset.psWeaponId) {
       this.applyMobileButtonPosition(this.psWeaponBtn2, { x: 2, y: 1 });
+    }
+    if (this.psWeaponBtn3.dataset.psWeaponId) {
+      this.applyMobileButtonPosition(this.psWeaponBtn3, { x: 2, y: 2 });
     }
     // Bubble sits in the free slot above Block/Fire, clear of the weapon buttons
     this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: blockInGrid ? 1 : 0 });

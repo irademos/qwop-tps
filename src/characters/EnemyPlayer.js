@@ -24,6 +24,8 @@ function nextDefaultEnemyCharacterUrl() {
 }
 import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { createSwordModelInstance } from '../items/swordModel.js';
+import { createWandModel, setWandGlow, WAND_TIP_LOCAL } from '../items/magicWand.js';
+import { bladeBlocksBlast, createIceEncasing, setIceEncasingLevel, MAGIC_ELEMENTS, randomMagicElement } from '../combat/magicBlast.js';
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 
@@ -100,6 +102,26 @@ const BLOCK_FLAT_REF = V(0, 0, 1);
 const IDLE_HAND      = V(0.12, 0.80, 0.30);
 const IDLE_BLADE_DIR = N(0.05, 0.35, 1);
 const IDLE_FLAT_REF  = V(1, 0, 0);
+
+// ── Wand casters (Sword Showdown, later stages): from range they charge a spell (the orb
+// glows in the element's colour, hand out at the start of a swipe), then swipe — the blast
+// flies at the target in the swipe's shape (line, body-local)
+export const WAND_CAST_LINES = {
+  horizontal: N(1, 0, 0),
+  vertical: N(0, 1, 0),
+  diagonalUp: N(1, 1, 0),
+  diagonalDown: N(-1, 1, 0),
+};
+const WAND_CAST_LINE_LIST = Object.values(WAND_CAST_LINES);
+const WAND_CAST_CHARGE_S = 0.9;     // orb glows, hand wound up
+const WAND_CAST_SWIPE_S = 0.18;     // the swipe; the blast leaves at its end
+const WAND_CAST_RECOVER_S = 0.3;
+const WAND_CAST_COOLDOWN_MIN = 3.2, WAND_CAST_COOLDOWN_RAND = 2.6;
+const WAND_CAST_FIRST_DELAY = 1.2;  // after first getting in range
+const WAND_CAST_PIVOT = V(0.12, 0.82, 0.32);
+const WAND_CAST_HAND_REACH = 0.24;  // hand travel either side of the pivot along the line
+const WAND_POINT_DIR = N(0, 0.45, 1);
+const WAND_BLAST_HEIGHT = 0.55;     // m above the feet: blasts fly at body height
 
 // Attack-loop timing (seconds)
 const SWING_WINDUP_MIN = 0.60, SWING_WINDUP_RAND = 0.45; // wind-up before a swing
@@ -287,6 +309,18 @@ export class EnemyPlayer {
     // Multiplayer bots: when the target isn't the local player, a sword swing reaching it is
     // resolved by this callback instead: (targetModel, swingDirWorld) => 'hit' | 'blocked' | null
     this.targetHitHandler = null;
+    // Wand caster (Sword Showdown, later stages; use with `ranged`): no sword, casts spells.
+    // onCast({ origin, forward, line, element }) fires the blast (set by the game).
+    this.wand = !!options.wand;
+    this.onCast = null;
+    this.castsHeld = false;   // tutorial: no casting on its own…
+    this.forceCast = null;    // …only when given { line: WAND_CAST_LINES key, element? }
+    this._cast = null;        // { t, line (body-local), element, fired }
+    this._castCooldown = WAND_CAST_FIRST_DELAY + Math.random() * 1.5;
+    // Ice (magic blast): frozen in place for this many more seconds
+    this._frozenLeft = 0;
+    this._frozenFor = 0;
+    this._ice = null;
 
     this._swingT       = 0;
     this._lastHitTime  = 0;
@@ -330,7 +364,7 @@ export class EnemyPlayer {
 
     this._buildBody();
     this._buildSword();
-    if (this.ranged) this._swordGroup.visible = false;
+    if (this.ranged && !this.wand) this._swordGroup.visible = false;
     this._buildTrail();
     this._buildHealthBar();
     this._buildPhysics(startPos);
@@ -463,6 +497,11 @@ export class EnemyPlayer {
     // sword.glb — the Wii sword with ball hands for a Mii (loaded with the player's
     // sword); own materials for the hit flash
     this._buildSwingGlow(swordGroup);
+    if (this.wand) {
+      this._wandModel = createWandModel();
+      swordGroup.add(this._wandModel);
+      return;
+    }
     const model = createSwordModelInstance({ cloneMaterials: true, characterUrl: this._characterUrl });
     if (model) {
       swordGroup.add(model);
@@ -720,6 +759,7 @@ export class EnemyPlayer {
 
     // Dead: ragdoll rotation from physics + the death clip; skip all AI and combat logic
     if (this.isDead) {
+      if (this._ice) this._thaw();
       this._clampDeathVelocity();
       if (this._isRagdoll) {
         const rot = this.rigidBody.rotation();
@@ -747,6 +787,15 @@ export class EnemyPlayer {
       this._solveArm('left');
       this._glbCharacter?.stepFluff(dt);
       this._updateTrailMeshes(Date.now());
+      if (this._frozenLeft > 0) this._tickFrozen(dt);
+      return;
+    }
+
+    // ── Frozen in ice: no moving, turning, swinging or casting ─────────────
+    if (this._frozenLeft > 0) {
+      const vel = this.rigidBody.linvel();
+      this.rigidBody.setLinvel({ x: 0, y: Math.min(0, vel.y), z: 0 }, true);
+      this._tickFrozen(dt);
       return;
     }
 
@@ -852,6 +901,7 @@ export class EnemyPlayer {
     // ── Sword (orientation depends on right hand) ──────────────────────────
     this._updateSword(dt);
     this._updateSwingGlow(dt);
+    if (this.wand) this._updateWandCast(dt, targetModel, distToTarget, !attacksPaused && !!targetModel);
 
     // ── Left hand grips pommel (depends on sword orientation) ─────────────
     if (!this.gripTarget) this._updateLeftHandToPommel(dt);
@@ -942,7 +992,7 @@ export class EnemyPlayer {
       this._handTargetR = new THREE.Vector3();
       this._handTargetL = new THREE.Vector3();
     }
-    const lerpR = 1 - Math.exp(-(this._attackPhase === 'swing_execute' ? 22 : 12) * dt);
+    const lerpR = 1 - Math.exp(-(this._attackPhase === 'swing_execute' || this._cast ? 22 : 12) * dt);
 
     if (this._aiState === 'attack') {
       this._attackPhaseT += dt;
@@ -1011,6 +1061,12 @@ export class EnemyPlayer {
           this._handTargetR.copy(IDLE_HAND);
       }
 
+    } else if (this.wand && (this._cast || this._aiState === 'hold')) {
+      // Wand caster: wand out in front, riding the swipe while casting
+      this._handTargetR.copy(WAND_CAST_PIVOT);
+      if (this._cast) this._handTargetR.addScaledVector(this._cast.line, this._castSwipeAmount() * WAND_CAST_HAND_REACH);
+      this._attackPhase  = 'decide';
+      this._attackPhaseT = 0;
     } else {
       // idle / chase / backoff — arms at sides, reset attack phase
       const gait = this._aiState === 'backoff' ? 0 : Math.sin(Date.now() * 0.004);
@@ -1063,7 +1119,119 @@ export class EnemyPlayer {
 
   /** True while the enemy is deliberately holding a block stance. */
   isBlocking() {
-    return !this.isDead && this._aiState === 'attack' && this._attackPhase === 'block';
+    return !this.isDead && !(this._frozenLeft > 0) && this._aiState === 'attack' && this._attackPhase === 'block';
+  }
+
+  /**
+   * Whether this enemy's block stops a magic blast (see magicBlast.js): only in the block
+   * stance, with the blade along the blast's line.
+   */
+  blocksBlast(blast) {
+    if (!this.isBlocking() || !blast) return false;
+    this.group.getWorldQuaternion(_rootQ);
+    _bladeDir.copy(this._blockPreset.dir).applyQuaternion(_rootQ);
+    return bladeBlocksBlast(_bladeDir, blast.line, blast.forward);
+  }
+
+  // ─── ice (magic blast) ─────────────────────────────────────────────────────
+
+  /** Frozen in ice cubes for `seconds` (no moving, swinging or casting). */
+  freeze(seconds) {
+    if (this.isDead || !(seconds > 0)) return;
+    this._frozenLeft = Math.max(this._frozenLeft, seconds);
+    this._frozenFor = Math.max(this._frozenFor, this._frozenLeft);
+    if (!this._ice) {
+      this._ice = createIceEncasing(CAPSULE_HEIGHT);
+      this.group.add(this._ice);
+    }
+    // A frozen swing or spell never lands
+    if (this._attackPhase === 'swing_execute' || this._attackPhase === 'swing_hold') {
+      this._attackPhase = 'decide';
+      this._trailFadeStart = Date.now();
+    }
+    this._cast = null;
+    if (this._wandModel) setWandGlow(this._wandModel, 0);
+    this._glbCharacter?.setMoving(false);
+  }
+
+  isFrozen() {
+    return this._frozenLeft > 0;
+  }
+
+  _tickFrozen(dt) {
+    this._frozenLeft -= dt;
+    setIceEncasingLevel(this._ice, this._frozenLeft / Math.max(0.001, this._frozenFor));
+    if (this._frozenLeft <= 0) this._thaw();
+  }
+
+  _thaw() {
+    this._frozenLeft = 0;
+    this._frozenFor = 0;
+    this._ice?.parent?.remove(this._ice);
+    this._ice = null;
+  }
+
+  // ─── wand casting ──────────────────────────────────────────────────────────
+
+  /** -1 (wound up) → +1 (end of the swipe) along the cast's line. */
+  _castSwipeAmount() {
+    const c = this._cast;
+    if (!c) return 0;
+    if (c.t < WAND_CAST_CHARGE_S) return -1;
+    return Math.min(1, -1 + (2 * (c.t - WAND_CAST_CHARGE_S)) / WAND_CAST_SWIPE_S);
+  }
+
+  _updateWandCast(dt, targetModel, distToTarget, canCast) {
+    dt = Math.min(dt, 0.1); // (a frame hitch never skips the charge-up telegraph)
+    if (this._cast && !this._cast.fired && !canCast) this._cast = null; // (player down / bomb inbound)
+    const c = this._cast;
+    if (c) {
+      c.t += dt;
+      const charge = Math.min(1, c.t / WAND_CAST_CHARGE_S);
+      setWandGlow(this._wandModel, c.fired ? Math.max(0, 1 - (c.t - WAND_CAST_CHARGE_S - WAND_CAST_SWIPE_S) * 4) : charge,
+        new THREE.Color(MAGIC_ELEMENTS[c.element].glow));
+      if (!c.fired && c.t >= WAND_CAST_CHARGE_S + WAND_CAST_SWIPE_S) {
+        c.fired = true;
+        if (targetModel) this._fireCast(c, targetModel);
+      }
+      if (c.t >= WAND_CAST_CHARGE_S + WAND_CAST_SWIPE_S + WAND_CAST_RECOVER_S) {
+        this._cast = null;
+        this._castCooldown = WAND_CAST_COOLDOWN_MIN + Math.random() * WAND_CAST_COOLDOWN_RAND;
+      }
+      return;
+    }
+    setWandGlow(this._wandModel, 0);
+    if (!canCast) return;
+    const forced = this.forceCast;
+    if (forced) {
+      this.forceCast = null;
+      this._startCast(WAND_CAST_LINES[forced.line] ?? WAND_CAST_LINES.horizontal, forced.element);
+      return;
+    }
+    if (this.castsHeld) return;
+    const inRange = !this.ranged || distToTarget <= this.ranged.max + 1.5;
+    if (!inRange) return;
+    this._castCooldown -= dt;
+    if (this._castCooldown > 0) return;
+    this._startCast(WAND_CAST_LINE_LIST[Math.floor(Math.random() * WAND_CAST_LINE_LIST.length)]);
+  }
+
+  _startCast(line, element = randomMagicElement()) {
+    this._cast = { t: 0, line, element, fired: false };
+    this.casts = (this.casts || 0) + 1;
+  }
+
+  _fireCast(cast, targetModel) {
+    if (typeof this.onCast !== 'function') return;
+    this.group.getWorldQuaternion(_rootQ);
+    const line = cast.line.clone().applyQuaternion(_rootQ);
+    const tip = WAND_TIP_LOCAL.clone().applyQuaternion(this._swordGroup.quaternion).add(this._swordGroup.position);
+    const origin = new THREE.Vector3(tip.x, this.group.position.y + WAND_BLAST_HEIGHT, tip.z);
+    const aimAt = targetModel.position.clone();
+    aimAt.y += WAND_BLAST_HEIGHT;
+    const forward = aimAt.sub(origin);
+    if (forward.lengthSq() < 1e-6) forward.set(0, 0, 1).applyQuaternion(_rootQ);
+    this.onCast({ origin, forward: forward.normalize(), line, element: cast.element });
   }
 
   /**
@@ -1124,7 +1292,14 @@ export class EnemyPlayer {
     }
 
     const phase = this._attackPhase;
-    if (phase === 'block' || phase === 'idle') {
+    if (this.wand) {
+      // Wand: pointed ahead and a little up; it sweeps along the spell's line while casting
+      _bladeDir.copy(WAND_POINT_DIR);
+      if (this._cast) _bladeDir.addScaledVector(this._cast.line, this._castSwipeAmount() * 0.9).normalize();
+      this.group.getWorldQuaternion(_rootQ);
+      bladeQuat(_bladeDir, IDLE_FLAT_REF, _tmpQ).premultiply(_rootQ);
+      this._swordQuaternion.slerp(_tmpQ, 1 - Math.exp(-(this._cast ? 20 : 8) * dt));
+    } else if (phase === 'block' || phase === 'idle') {
       // ── Block: blade across the body (vertical / horizontal / diagonal).
       // ── Idle: blade held forward, tip tilted slightly up. Both with a gentle sway.
       const isBlock = phase === 'block';

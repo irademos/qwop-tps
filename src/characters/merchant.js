@@ -9,6 +9,8 @@ const SHIELD_UPGRADE_ITEM_ID = 'shield_upgrade';
 const BUBBLE_ITEM_ID = 'bubble';
 const SHOWDOWN_BOMB_ITEM_ID = 'showdown_bomb';
 const LIFE_POTION_ITEM_ID = 'life_potion';
+const MANA_POTION_ITEM_ID = 'mana_potion';
+const MAGIC_WAND_ITEM_ID = 'magic_wand';
 
 const merchantItemCatalog = {
   shield: { name: 'Shield', price: 50, count: 5 },
@@ -20,9 +22,12 @@ const merchantItemCatalog = {
   [BUBBLE_ITEM_ID]: { name: 'Bubble', price: 30, count: 1, unlimited: true, description: '10s protective bubble (tap 🫧 to use)' },
   [SHOWDOWN_BOMB_ITEM_ID]: { name: 'Bomb', price: 20, count: 1, unlimited: true, icon: '/assets/ui/items/bomb.png', description: 'Throwable bomb (tap 💣 to throw)' },
   // Sold on the village market stall; used straight away
-  [LIFE_POTION_ITEM_ID]: { name: 'Life Potion', price: 30, count: 1, unlimited: true, description: 'Fills your health to full' }
+  [LIFE_POTION_ITEM_ID]: { name: 'Life Potion', price: 30, count: 1, unlimited: true, description: 'Fills your health to full' },
+  [MANA_POTION_ITEM_ID]: { name: 'Mana Potion', price: 40, count: 1, unlimited: true, description: 'Fills your mana to full (the magic wand runs on mana)' },
+  // Magic wand: bought once (appState.isShopItemMaxed once owned), swiped like the sword to cast
+  [MAGIC_WAND_ITEM_ID]: { name: 'Magic Wand', price: 500, count: 1, unlimited: true, description: 'Swipe it like a sword to cast a fire or ice blast in the shape of your swipe (uses mana)' }
 };
-const SHOP_UPGRADE_ITEM_IDS = new Set([HEART_UPGRADE_ITEM_ID, SHIELD_UPGRADE_ITEM_ID, BUBBLE_ITEM_ID, SHOWDOWN_BOMB_ITEM_ID, LIFE_POTION_ITEM_ID]);
+const SHOP_UPGRADE_ITEM_IDS = new Set([HEART_UPGRADE_ITEM_ID, SHIELD_UPGRADE_ITEM_ID, BUBBLE_ITEM_ID, SHOWDOWN_BOMB_ITEM_ID, LIFE_POTION_ITEM_ID, MANA_POTION_ITEM_ID, MAGIC_WAND_ITEM_ID]);
 
 let merchantState = {
   items: {},

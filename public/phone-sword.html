@@ -178,6 +178,8 @@
     #btn-bubble { background: rgba(14, 165, 233, 0.4); border-color: rgba(186, 230, 253, 0.6); }
     #btn-jump   { background: rgba(99, 102, 241, 0.4); border-color: rgba(165, 180, 252, 0.6); }
     #btn-fire   { background: rgba(245, 158, 11, 0.4); border-color: rgba(253, 230, 138, 0.6); }
+    #btn-wand   { background: rgba(124, 58, 237, 0.45); border-color: rgba(216, 180, 254, 0.6); display: none; }
+    #btn-wand.owned { display: block; }
     #bottom-row {
       flex: 1;
       display: flex;
@@ -261,6 +263,7 @@
       <button class="ctl-btn" id="btn-gun" data-action="gun">🔫 Gun</button>
       <button class="ctl-btn" id="btn-shield" data-action="shield">🛡 Shield</button>
       <button class="ctl-btn" id="btn-fire" data-action="fire">🔥 Fire</button>
+      <button class="ctl-btn" id="btn-wand" data-action="wand">🪄 Wand</button>
     </div>
     <div id="bottom-row">
       <div id="joystick"><div id="joystick-knob"></div></div>
@@ -361,6 +364,7 @@
     const btnGun = document.getElementById('btn-gun');
     const btnShield = document.getElementById('btn-shield');
     const btnFire = document.getElementById('btn-fire');
+    const btnWand = document.getElementById('btn-wand');
     function applyStatus(st) {
       document.body.classList.toggle('block-only', !!st.blockOnly);
       btnBomb.textContent = `💣 ${st.bombs ?? 0}`;
@@ -376,8 +380,12 @@
       btnShield.textContent = st.equipped === 'shield' ? '🗡️ Sword' : '🛡 Shield';
       btnFire.disabled = st.equipped !== 'pistol';
       btnFire.textContent = st.equipped === 'pistol' ? `🔥 Fire ${st.ammo ?? 0}` : '🔥 Fire';
+      // Magic wand (Showdown, once bought): swaps with the sword; shows the mana left
+      btnWand.classList.toggle('owned', !!st.hasWand);
+      btnWand.classList.toggle('equipped', st.equipped === 'magic_wand');
+      btnWand.textContent = st.equipped === 'magic_wand' ? `🗡️ Sword · 🔮${st.mana ?? 0}` : `🪄 Wand · 🔮${st.mana ?? 0}`;
       // Tutorial: ring the button the game is asking for
-      const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, fire: btnFire, block: blockBtn };
+      const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, fire: btnFire, wand: btnWand, block: blockBtn };
       Object.entries(highlightTargets).forEach(([name, el]) => {
         el.classList.toggle('tutorial-highlight', st.highlight === name);
       });

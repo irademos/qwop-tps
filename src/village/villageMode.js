@@ -34,6 +34,7 @@ import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 import { stylizeObject } from '../environment/artStyle.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { PEMBERTON_SCALE, addRedGlow } from '../characters/pembertonBoss.js';
+import { createWandModel } from '../items/magicWand.js';
 
 // ── Props ───────────────────────────────────────────────────────────────────
 const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
@@ -220,6 +221,7 @@ const SHOP_ITEMS = [
   { id: 'gun bullets', at: [-24, COUNTER_SURFACE_Y + 1, 36], build: 'bullets' },
   { id: 'mana_potion', potion: 'mana' },
   { id: 'pistol', at: [34, COUNTER_SURFACE_Y + 3, 32], build: 'gun' },
+  { id: 'magic_wand', at: [62, COUNTER_SURFACE_Y + 3, 42], build: 'wand' },
   { id: 'shield', at: [88, COUNTER_SURFACE_Y - 8, 12], build: 'shield' },
   { id: 'heart_upgrade', at: [-62, 150, 4], build: 'heart', hang: true },
   { id: 'bubble', at: [0, 160, 4], build: 'bubble', hang: true },
@@ -357,6 +359,15 @@ function buildItemMesh(kind) {
     const shine = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 }));
     shine.position.set(-0.05, 0.06, 0.09);
     g.add(ball, shine);
+  } else if (kind === 'wand') {
+    // Lying on the counter, diagonally, orb toward the customer's right
+    const wand = createWandModel(); // (along +Z, grip at the origin: centred on the holder)
+    wand.position.set(0, 0.035, -0.25);
+    const holder = new THREE.Group();
+    holder.add(wand);
+    holder.rotation.y = -Math.PI / 2 - 0.5;
+    holder.scale.setScalar(0.42); // (~0.33 m: the counter is ~1.3 m wide)
+    g.add(holder);
   } else if (kind === 'heart') {
     const s = new THREE.Shape();
     s.moveTo(0, -0.1);
