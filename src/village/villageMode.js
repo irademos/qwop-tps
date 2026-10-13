@@ -8,7 +8,8 @@
 // player over and frames the camera on it.
 //   • Market stall + merchant + treasure chest — the shop. Items sit on the counter; tap
 //     one (or swipe / ‹ › / arrow keys) for its buy card. The chest is a mystery item.
-//   • Unlocked characters idling — tap one to play as them: they walk over and take the
+//   • Unlocked characters idling — walk up to one and a "🔄 Switch" button shows over it
+//     (or E / Enter; tapping one walks the player over): they walk over and take the
 //     player's place, the old character goes to idle in their spot.
 //   • Campfire in front of the characters — sit until night / morning (the next stage's time
 //     of day).
@@ -205,7 +206,9 @@ const STALL_BLOCK_BACK = 0.35;     // m behind the stall's origin
 const FIRE_BLOCK_RADIUS = 0.55;
 const VILLAGER_BLOCK_RADIUS = 0.45;
 const WALK_STUCK_MS = 600;         // a tap-walk that stops getting closer (a prop in the way) ends there
-const STATION_NAMES = { shop: '🛒 Shop', villager: '🧑‍🌾 Villager', fire: '🔥 Campfire', characters: '👥 Characters' };
+const STATION_NAMES = { shop: '🛒 Shop', villager: '🧑‍🌾 Villager', fire: '🔥 Campfire' };
+const NPC_SWITCH_RANGE = 1.4;      // m: an idling character's 🔄 Switch button shows this close
+const NPC_VIEW_RANGE = 2.3;        // m: the camera starts easing round to it
 const FINAL_BOSS_MARKER_BG = 'rgba(220, 38, 38, 0.92)';
 const CAMPFIRE_AHEAD = 0.4;        // m from the characters' group centre toward the lane (they stand behind it)
 const SIT_FADE_MS = 700;           // sitting by the fire: fade out, change the time, fade back in
@@ -549,6 +552,7 @@ export function createVillage(ctx) {
   const prevPos = new THREE.Vector3();
   let obstacles = [];       // { pos: Vector3, r } — round props the player walks around
   let nearKeys = '';        // stations whose buttons are showing (free walking)
+  let switchNpc = null;     // idling character whose 🔄 Switch button is showing
   // The villager's conversation: { i: line index, words, shown, done, choices }
   let talk = null;
   // Camera (smoothed)
@@ -569,6 +573,7 @@ export function createVillage(ctx) {
     <div class="village-top ui-chip"><span data-v="stage"></span><span class="village-top-sep">·</span><span data-v="coins"></span></div>
     <div class="village-hint hidden" data-v="hint"></div>
     <div class="village-acts hidden" data-v="acts"></div>
+    <button type="button" class="ui-btn village-switch hidden" data-v="switch"></button>
     <div class="village-talk ui-panel hidden" data-v="talk">
       <div class="village-talk-head"><span class="village-talk-who" data-v="talk-who"></span><span class="village-talk-quest" data-v="talk-quest"></span></div>
       <button type="button" class="village-talk-close" data-v="talk-close" aria-label="Back to the village">✕</button>
@@ -606,7 +611,7 @@ export function createVillage(ctx) {
     prev: $('prev'), next: $('next'),
     fade: $('fade'), fadeText: $('fade-text'),
     banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'), bannerBoss: $('banner-boss'),
-    hint: $('hint'), acts: $('acts'),
+    hint: $('hint'), acts: $('acts'), switchBtn: $('switch'),
     talk: $('talk'), talkWho: $('talk-who'), talkQuest: $('talk-quest'), talkText: $('talk-text'),
     talkMore: $('talk-more'), talkChoices: $('talk-choices'), talkClose: $('talk-close'),
   };
@@ -615,6 +620,9 @@ export function createVillage(ctx) {
   el.lobby.addEventListener('click', () => {
     if (!active || leaving || approaching || sitting) return;
     ctx.onLobby();
+  });
+  el.switchBtn.addEventListener('click', () => {
+    if (active && !leaving && !sitting && switchNpc) pickCharacter(switchNpc);
   });
   el.talkClose.addEventListener('click', () => { if (active && !leaving && !starting) unfocus(); });
   el.prev.addEventListener('click', () => stepItem(-1));
@@ -697,19 +705,15 @@ export function createVillage(ctx) {
       }).catch((e) => console.warn('[Village] villager load failed:', e));
     }
 
-    // Characters: the unlocked ones (except the one being played) idle in a little arc
+    // Characters: the unlocked ones (except the one being played) idle in a little arc —
+    // walk up to one to switch to it (not a station: each has its own button)
     {
       const pos = local(LAYOUT.characters.x, 0, LAYOUT.characters.z);
       const gy = groundY(pos.x, pos.z, center.y);
       const groupCenter = new THREE.Vector3(pos.x, gy, pos.z);
       // Arc opens across the lane, toward the shop
       const toCenter = _v.subVectors(local(LAYOUT.charactersFace.x, 0, LAYOUT.charactersFace.z), groupCenter).setY(0).normalize().clone();
-      const label = textSprite('👥 Characters', { height: 0.32 });
-      label.position.copy(groupCenter).add(_v2.set(0, 1.75, 0));
-      root.add(label);
-      overviewLabels.push(label);
-      stations.characters = { key: 'characters', label, pos: groupCenter.clone(), facing: toCenter };
-      makeClickable(label, { station: 'characters' });
+      stations.characters = { key: 'characters', pos: groupCenter.clone(), facing: toCenter };
       const { unlocked, selected } = ctx.characters.get();
       const keys = unlocked.filter((k) => k !== selected && ctx.characters.roster[k]);
       // (story characters aren't won from bosses)
@@ -720,7 +724,6 @@ export function createVillage(ctx) {
         sign.position.copy(groupCenter).add(_v2.set(0, 1.42, 0));
         root.add(sign);
         overviewLabels.push(sign);
-        makeClickable(sign, { station: 'characters' });
       }
       const slots = characterSlots(groupCenter, toCenter, Math.max(keys.length, 1));
       keys.forEach((key, i) => spawnNpc(key, slots[i], groupCenter, alive));
@@ -956,9 +959,11 @@ export function createVillage(ctx) {
     const out = [];
     const flat = (a) => Math.hypot(a.x - p.x, a.z - p.z);
     const add = (key, d, inner, outer, facing, look) => {
-      if (!(d < outer)) return;
+      if (!(d < outer)) return null;
       const t = THREE.MathUtils.clamp((d - inner) / (outer - inner), 0, 1);
-      out.push({ key, d, w: 1 - t * t * (3 - 2 * t), inRange: d <= inner, viewYaw: Math.atan2(-facing.x, -facing.z), look });
+      const entry = { key, d, w: 1 - t * t * (3 - 2 * t), inRange: d <= inner, viewYaw: Math.atan2(-facing.x, -facing.z), look };
+      out.push(entry);
+      return entry;
     };
     const v = stations.villager;
     if (v) {
@@ -973,9 +978,15 @@ export function createVillage(ctx) {
     }
     const c = stations.characters;
     if (c) {
-      add('characters', flat(c.pos), 1.9, 2.9, c.facing, c.pos.clone().setY(c.pos.y + 0.6));
       const f = stations.fire;
       if (f) add('fire', flat(f.pos), 1.3, 2.0, c.facing, f.pos.clone().setY(f.pos.y + 0.4));
+      // Each idling character (its 🔄 Switch button)
+      for (const n of npcs) {
+        if (n.merchant || n.villager || !n.container || n.walk) continue;
+        const np = n.container.position;
+        const entry = add('npc', flat(np), NPC_SWITCH_RANGE, NPC_VIEW_RANGE, c.facing, np.clone().setY(np.y + 0.6));
+        if (entry) entry.npc = n;
+      }
     }
     return out.sort((a, b) => b.w - a.w || a.d - b.d);
   }
@@ -983,9 +994,20 @@ export function createVillage(ctx) {
   // Buttons for the stations in reach (bottom centre; E / Enter = the first)
   const actLabel = (key) => (key === 'villager' ? (finalBoss ? '⚔️ Confront' : '💬 Talk') : STATION_NAMES[key]);
   function refreshActs(near) {
-    const keys = active && !leaving && !approaching && !sitting && !focus
-      ? near.filter((n) => n.inRange).slice(0, 2).map((n) => n.key)
-      : [];
+    const free = active && !leaving && !approaching && !sitting && !focus;
+    const inRange = free ? near.filter((n) => n.inRange) : [];
+    // An idling character in reach: its own 🔄 Switch button, over it (placeSwitch)
+    const sw = swapBusy ? null : inRange.find((n) => n.key === 'npc')?.npc ?? null;
+    if (sw !== switchNpc) {
+      switchNpc = sw;
+      el.switchBtn.classList.toggle('hidden', !sw);
+      if (sw) {
+        const def = ctx.characters.roster[sw.key];
+        el.switchBtn.textContent = `🔄 Switch to ${def?.label ?? sw.key}`;
+      }
+    }
+    placeSwitch();
+    const keys = inRange.filter((n) => n.key !== 'npc').slice(0, 2).map((n) => n.key);
     const k = keys.join(',');
     if (k === nearKeys) return;
     nearKeys = k;
@@ -1023,11 +1045,6 @@ export function createVillage(ctx) {
         const dir = _v.copy(s.facing).addScaledVector(_UP, 0.32).clone();
         setView(target, dir, 2.3, 1.4, 2.6);
       }
-    } else if (focus === 'characters') {
-      const s = stations.characters;
-      const target = _v2.copy(s.pos).add(_v.set(0, 0.6, 0)).clone();
-      const dir = _v.copy(s.facing).addScaledVector(_UP, compact ? 0.22 : 0.35).clone();
-      setView(target, dir, compact ? 1.15 : 1.35, 0.8, 2.2);
     } else if (focus === 'villager') {
       // Over the player's shoulder at the villager (from a little to the side, so the player
       // doesn't block him)
@@ -1053,12 +1070,6 @@ export function createVillage(ctx) {
       // Beyond the chest, out of the item close-ups
       const p = _v.copy(s.stallRoot.position).addScaledVector(s.facing, 1.3).addScaledVector(s.side, s.chestSign * 2.6).clone();
       return { to: p, face: s.stallRoot.position.clone() };
-    }
-    if (key === 'characters') {
-      const s = stations.characters;
-      const sideDir = _v2.crossVectors(_UP, s.facing).normalize();
-      const p = _v.copy(s.pos).addScaledVector(s.facing, 1.5).addScaledVector(sideDir, -2.3).clone();
-      return { to: p, face: s.pos.clone() };
     }
     if (key === 'villager') {
       // In front of him, a little to the side the camera isn't on
@@ -1131,12 +1142,6 @@ export function createVillage(ctx) {
     } else if (focus === 'shop') {
       if (selectedItem >= 0) el.panel.classList.add('hidden');
       else show('🛒 Shop', 'Tap an item on the stall — or the chest for a mystery prize.');
-    } else if (focus === 'characters') {
-      const sel = ctx.characters.roster[ctx.characters.get().selected];
-      const any = npcs.some((n) => !n.merchant && !n.villager);
-      show('👥 Characters', any
-        ? `Playing as ${sel?.emoji ?? ''} ${sel?.label ?? ''}. Tap a character to switch.`
-        : `Playing as ${sel?.emoji ?? ''} ${sel?.label ?? ''}. Beat a stage’s final enemy to unlock their character.`);
     } else if (focus === 'fire') {
       // Offer the one that changes the time
       const night = ctx.time.get() === 'night';
@@ -1511,7 +1516,7 @@ export function createVillage(ctx) {
     const t = pick(e.clientX, e.clientY);
     if (focus) {
       // At a station: its items / characters are tapped, anywhere else goes back to the village
-      const inStation = t && ((focus === 'shop' && Number.isInteger(t.item)) || (focus === 'characters' && t.npc));
+      const inStation = t && focus === 'shop' && Number.isInteger(t.item);
       if (inStation) onTarget(t);
       else if (!starting) unfocus();
       return;
@@ -1549,8 +1554,9 @@ export function createVillage(ctx) {
       }
     }
     if (key === 'Escape' && focus && !starting) { unfocus(); e.preventDefault(); return; }
-    if ((key === 'e' || key === 'Enter') && !focus && nearKeys) {
-      focusStation(nearKeys.split(',')[0]);
+    if ((key === 'e' || key === 'Enter') && !focus && (switchNpc || nearKeys)) {
+      if (switchNpc) pickCharacter(switchNpc);
+      else focusStation(nearKeys.split(',')[0]);
       e.preventDefault();
       return;
     }
@@ -1573,9 +1579,15 @@ export function createVillage(ctx) {
       }
       return;
     }
-    if (t.station === 'characters') {
-      if (focus === 'characters' && t.npc) pickCharacter(t.npc);
-      else focusStation('characters');
+    if (t.station === 'characters' && t.npc) {
+      // In reach: switch; otherwise walk up to it (its 🔄 Switch button shows there)
+      if (t.npc === switchNpc) { pickCharacter(t.npc); return; }
+      const np = t.npc.container?.position;
+      const f = stations.characters?.facing;
+      if (np && f) {
+        const to = clampToVillage(np.clone().addScaledVector(f, NPC_SWITCH_RANGE * 0.7));
+        walkTo(to, () => { faceYaw = yawToward(playerPos(), np); });
+      }
       return;
     }
     if (t.station === 'fire') {
@@ -1652,6 +1664,22 @@ export function createVillage(ctx) {
     nearKeys = '';
     el.acts.replaceChildren();
     el.acts.classList.add('hidden');
+    switchNpc = null;
+    el.switchBtn.classList.add('hidden');
+  }
+
+  // The 🔄 Switch button floats over the idling character in reach
+  function placeSwitch() {
+    const n = switchNpc;
+    if (!n?.container) return;
+    const p = _v.copy(n.container.position).add(_v2.set(0, 1.45, 0)).project(camera);
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const bw = el.switchBtn.offsetWidth || 160;
+    const x = Math.min(w - bw / 2 - 8, Math.max(bw / 2 + 8, (p.x * 0.5 + 0.5) * w));
+    const y = Math.min(h - 120, Math.max(90, (-p.y * 0.5 + 0.5) * h));
+    el.switchBtn.style.left = `${x}px`;
+    el.switchBtn.style.top = `${y}px`;
   }
 
   function showBanner() {

@@ -136,13 +136,15 @@
       padding: 6px 12px;
       margin-bottom: 12px;
     }
+    /* Buttons low down, just above the joystick; Block is a full-width bar along the bottom */
     #controller {
       display: none;
       flex: 1;
       width: 100%;
       max-width: 480px;
       flex-direction: column;
-      gap: 14px;
+      justify-content: flex-end;
+      gap: 12px;
     }
     body.controller-mode #controller { display: flex; }
     #action-grid {
@@ -177,16 +179,27 @@
     #btn-bomb   { background: rgba(234, 88, 12, 0.45); border-color: rgba(253, 186, 116, 0.6); }
     #btn-bubble { background: rgba(14, 165, 233, 0.4); border-color: rgba(186, 230, 253, 0.6); }
     #btn-jump   { background: rgba(99, 102, 241, 0.4); border-color: rgba(165, 180, 252, 0.6); }
-    #btn-fire   { background: rgba(245, 158, 11, 0.4); border-color: rgba(253, 230, 138, 0.6); }
     #btn-wand   { background: rgba(124, 58, 237, 0.45); border-color: rgba(216, 180, 254, 0.6); display: none; }
     #btn-wand.owned { display: block; }
-    #bottom-row {
-      flex: 1;
+    #joy-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      min-height: 190px;
+    }
+    /* Equip buttons (gun / shield / wand) big, right of the joystick — Jump is in the row above */
+    #equip-col {
+      flex: 1;
+      max-width: 240px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #equip-col .ctl-btn {
+      height: auto;
+      min-height: 64px;
+      flex: 1;
+      font-size: 1.2rem;
     }
     #joystick {
       position: relative;
@@ -211,9 +224,9 @@
       pointer-events: none;
     }
     #block-btn {
-      flex: 1;
-      max-width: 220px;
-      height: 150px;
+      width: 100%;
+      height: clamp(84px, 14vh, 120px);
+      flex: 0 0 auto;
       background: linear-gradient(180deg, #3b82f6, #1d4ed8);
       color: #fff;
       border: 1px solid rgba(147, 197, 253, 0.7);
@@ -227,11 +240,27 @@
       transition: background 0.1s, transform 0.08s, box-shadow 0.1s;
       touch-action: none;
     }
+    /* What the bar does with the weapon in hand: Fire (gun), Sword (shield), Shield (wand) */
+    #block-btn.mode-fire {
+      background: linear-gradient(180deg, #f59e0b, #c2410c);
+      border-color: rgba(253, 230, 138, 0.8);
+      box-shadow: 0 8px 32px rgba(234, 88, 12, 0.45);
+    }
+    #block-btn.mode-sword {
+      background: linear-gradient(180deg, #64748b, #334155);
+      border-color: rgba(203, 213, 225, 0.6);
+      box-shadow: 0 8px 32px rgba(15, 23, 42, 0.5);
+    }
+    #block-btn.mode-shield {
+      background: linear-gradient(180deg, #7c3aed, #4c1d95);
+      border-color: rgba(216, 180, 254, 0.8);
+      box-shadow: 0 8px 32px rgba(124, 58, 237, 0.45);
+    }
+    #block-btn.pressed { transform: scale(0.96); filter: brightness(1.3); }
     /* Classic mode: Block is the only control */
     body.block-only #action-grid,
-    body.block-only #joystick { display: none; }
-    body.block-only #bottom-row { justify-content: center; }
-    body.block-only #block-btn { max-width: none; height: 190px; }
+    body.block-only #joy-row { display: none; }
+    body.block-only #block-btn { height: 190px; }
     #block-btn.blocking {
       background: linear-gradient(180deg, #10b981, #047857);
       border-color: rgba(167, 243, 208, 0.95);
@@ -260,15 +289,16 @@
       <button class="ctl-btn" id="btn-bomb" data-action="bomb">💣 0</button>
       <button class="ctl-btn" id="btn-bubble" data-action="bubble">🫧 0</button>
       <button class="ctl-btn" id="btn-jump" data-action="jump">⬆️ Jump</button>
-      <button class="ctl-btn" id="btn-gun" data-action="gun">🔫 Gun</button>
-      <button class="ctl-btn" id="btn-shield" data-action="shield">🛡 Shield</button>
-      <button class="ctl-btn" id="btn-fire" data-action="fire">🔥 Fire</button>
-      <button class="ctl-btn" id="btn-wand" data-action="wand">🪄 Wand</button>
     </div>
-    <div id="bottom-row">
+    <div id="joy-row">
       <div id="joystick"><div id="joystick-knob"></div></div>
-      <button id="block-btn">🛡️ BLOCK</button>
+      <div id="equip-col">
+        <button class="ctl-btn" id="btn-gun" data-action="gun">🔫 Gun</button>
+        <button class="ctl-btn" id="btn-shield" data-action="shield">🛡 Shield</button>
+        <button class="ctl-btn" id="btn-wand" data-action="wand">🪄 Wand</button>
+      </div>
     </div>
+    <button id="block-btn">🛡️ BLOCK</button>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
@@ -292,19 +322,49 @@
     let lastGyro = { alpha: null, beta: null, gamma: null };
     let isBlocking = false;
 
+    // The bottom bar does what fits the weapon in hand (barMode, from the game's status):
+    //   block — sword: blocks while held       fire — gun: fires
+    //   sword — shield: back to the sword       shield — wand: shield up while held, wand back on release
     const blockBtn = document.getElementById('block-btn');
+    let barMode = 'block';
+    let pressMode = null;   // the mode the current press started in
+    const sendAction = (action) => {
+      if (conn && conn.open) {
+        try { conn.send({ type: 'action', action, ts: Date.now() }); } catch (_) { /* ignore */ }
+      }
+    };
     const setBlocking = (val) => {
       isBlocking = val;
       blockBtn.classList.toggle('blocking', val);
     };
+    const pressBar = () => {
+      if (pressMode) return;
+      pressMode = barMode;
+      if (navigator.vibrate && pressMode !== 'block') navigator.vibrate(15);
+      if (pressMode === 'block') setBlocking(true);
+      else {
+        blockBtn.classList.add('pressed');
+        if (pressMode === 'fire') sendAction('fire');
+        // (Shield again goes back to the sword — Guns & Bombs: the gun)
+        else if (pressMode === 'sword') sendAction('shield');
+        else if (pressMode === 'shield') sendAction('wandShieldDown');
+      }
+    };
+    const releaseBar = () => {
+      const mode = pressMode;
+      pressMode = null;
+      setBlocking(false);
+      blockBtn.classList.remove('pressed');
+      if (mode === 'shield') sendAction('wandShieldUp');
+    };
     blockBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       try { blockBtn.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
-      setBlocking(true);
+      pressBar();
     });
-    blockBtn.addEventListener('pointerup', () => setBlocking(false));
-    blockBtn.addEventListener('pointercancel', () => setBlocking(false));
-    blockBtn.addEventListener('pointerleave', () => setBlocking(false));
+    blockBtn.addEventListener('pointerup', releaseBar);
+    blockBtn.addEventListener('pointercancel', releaseBar);
+    blockBtn.addEventListener('pointerleave', releaseBar);
 
     // ── Joystick (angle in radians, 0 = right, π/2 = up; force 0–1) ────────
     const joystickEl = document.getElementById('joystick');
@@ -347,9 +407,7 @@
         if (btn.disabled) return;
         btn.classList.add('pressed');
         if (navigator.vibrate) navigator.vibrate(15);
-        if (conn && conn.open) {
-          try { conn.send({ type: 'action', action: btn.dataset.action, ts: Date.now() }); } catch (_) { /* ignore */ }
-        }
+        sendAction(btn.dataset.action);
       });
       const unpress = () => btn.classList.remove('pressed');
       btn.addEventListener('pointerup', unpress);
@@ -363,7 +421,6 @@
     const btnBubble = document.getElementById('btn-bubble');
     const btnGun = document.getElementById('btn-gun');
     const btnShield = document.getElementById('btn-shield');
-    const btnFire = document.getElementById('btn-fire');
     const btnWand = document.getElementById('btn-wand');
     function applyStatus(st) {
       document.body.classList.toggle('block-only', !!st.blockOnly);
@@ -378,17 +435,30 @@
       btnShield.classList.toggle('equipped', st.equipped === 'shield');
       btnGun.textContent = st.equipped === 'pistol' ? '🗡️ Sword' : '🔫 Gun';
       btnShield.textContent = st.equipped === 'shield' ? '🗡️ Sword' : '🛡 Shield';
-      btnFire.disabled = st.equipped !== 'pistol';
-      btnFire.textContent = st.equipped === 'pistol' ? `🔥 Fire ${st.ammo ?? 0}` : '🔥 Fire';
+      // The bottom bar: Fire (gun), Sword (shield), Shield (wand, when a shield is owned), else Block
+      const nextMode = st.blockOnly ? 'block'
+        : st.equipped === 'pistol' ? 'fire'
+        : st.equipped === 'shield' ? (st.wandShieldHeld ? 'shield' : 'sword')
+        : st.equipped === 'magic_wand' && st.hasShield ? 'shield'
+        : 'block';
+      // (a held Block stays a block until it's let go)
+      if (nextMode !== barMode && pressMode === 'block') releaseBar();
+      barMode = nextMode;
+      ['fire', 'sword', 'shield'].forEach((m) => blockBtn.classList.toggle(`mode-${m}`, barMode === m));
+      blockBtn.textContent = barMode === 'fire' ? `🔥 FIRE ${st.ammo ?? 0}`
+        : barMode === 'sword' ? (st.swordAllowed === false ? '🔫 GUN' : '🗡️ SWORD')
+        : barMode === 'shield' ? '🛡 SHIELD'
+        : '🛡️ BLOCK';
       // Magic wand (Showdown, once bought): swaps with the sword; shows the mana left
       btnWand.classList.toggle('owned', !!st.hasWand);
       btnWand.classList.toggle('equipped', st.equipped === 'magic_wand');
       btnWand.textContent = st.equipped === 'magic_wand' ? `🗡️ Sword · 🔮${st.mana ?? 0}` : `🪄 Wand · 🔮${st.mana ?? 0}`;
       // Tutorial: ring the button the game is asking for
-      const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, fire: btnFire, wand: btnWand, block: blockBtn };
+      const highlightTargets = { bomb: btnBomb, bubble: btnBubble, gun: btnGun, shield: btnShield, wand: btnWand };
       Object.entries(highlightTargets).forEach(([name, el]) => {
         el.classList.toggle('tutorial-highlight', st.highlight === name);
       });
+      blockBtn.classList.toggle('tutorial-highlight', st.highlight === 'block' || st.highlight === 'fire');
     }
 
     if (!hostPeerId) {
@@ -506,7 +576,7 @@
         dropConnection();
         document.body.classList.remove('controller-mode');
         connectedIcon.style.display = 'none';
-        setBlocking(false);
+        releaseBar();
         if (retry && attempt < FIND_GAME_RETRIES) {
           setStatus(`Looking for the game… (${attempt + 1}/${FIND_GAME_RETRIES})`);
           connectTimer = setTimeout(() => connectToGame(iceServers, attempt + 1), FIND_GAME_RETRY_MS);
@@ -560,7 +630,7 @@
           setStatus('Disconnected from game');
           connectedIcon.style.display = 'none';
           document.body.classList.remove('controller-mode');
-          setBlocking(false);
+          releaseBar();
           showConnectButton();
         });
 
