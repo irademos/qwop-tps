@@ -552,30 +552,53 @@ export class PlayerControls {
       if (event) this.safePreventDefault(event);
     });
 
-    // The block/fire button blocks while held (sword) or fires on release (gun)
+    // The Block bar does what fits the weapon in hand (getBlockBarMode), decided on press:
+    // block while held (sword), fire on release (gun), back to the sword (shield), or the
+    // shield up while held and the wand back on release (wand)
     const setBlocking = (val) => {
       if (!window.phoneSwordGyro) return;
       window.phoneSwordGyro.blocking = val;
       this.punchButton.classList.toggle('ps-blocking-active', val);
     };
-    const releaseBlockOrFire = () => {
-      setBlocking(false);
-      if (this.enabled && this.getEquippedWeapon('right')?.itemId === 'pistol') {
+    let pressMode = null;
+    const pressBar = () => {
+      if (pressMode) return;
+      pressMode = this.getBlockBarMode();
+      if (pressMode === 'block') {
+        setBlocking(true);
+      } else if (pressMode === 'shield') {
+        if (this.enabled) getAppState()?.setWandShieldHold?.(true);
+        this.punchButton.classList.add('ps-blocking-active');
+      } else if (pressMode === 'sword' && this.enabled) {
+        const app = getAppState();
+        app?.equipInventoryItem?.(app?.isSwordAllowed?.() === false ? 'pistol' : 'foamSword');
+        this.refreshActionButtons();
+      }
+    };
+    const releaseBar = (cancel = false) => {
+      const mode = pressMode;
+      pressMode = null;
+      if (mode === 'block') {
+        setBlocking(false);
+      } else if (mode === 'shield') {
+        this.punchButton.classList.remove('ps-blocking-active');
+        getAppState()?.setWandShieldHold?.(false);
+      } else if (mode === 'fire' && !cancel && this.enabled && this.getEquippedWeapon('right')?.itemId === 'pistol') {
         this.attemptFireProjectile();
       }
     };
     this.punchButton.addEventListener('touchstart', (e) => {
       this.safePreventDefault(e);
-      setBlocking(true);
+      pressBar();
     }, { passive: false });
     this.punchButton.addEventListener('touchend', (e) => {
       this.safePreventDefault(e);
-      releaseBlockOrFire();
+      releaseBar();
     }, { passive: false });
-    this.punchButton.addEventListener('touchcancel', () => setBlocking(false), { passive: false });
-    this.punchButton.addEventListener('mousedown', () => setBlocking(true));
-    this.punchButton.addEventListener('mouseup', releaseBlockOrFire);
-    this.punchButton.addEventListener('mouseleave', () => setBlocking(false));
+    this.punchButton.addEventListener('touchcancel', () => releaseBar(true), { passive: false });
+    this.punchButton.addEventListener('mousedown', pressBar);
+    this.punchButton.addEventListener('mouseup', () => releaseBar());
+    this.punchButton.addEventListener('mouseleave', () => releaseBar(true));
 
     this.refreshActionButtons();
   }
@@ -587,10 +610,30 @@ export class PlayerControls {
     return this.getEquippedWeapon('right')?.itemId ?? 'foamSword';
   }
 
-  getMobileAttackLabel() {
+  // What the Block bar does for the weapon in hand: 'block' (sword; the wand with no shield),
+  // 'fire' (gun), 'sword' (shield: back to the sword), 'shield' (wand: shield up while held)
+  getBlockBarMode() {
+    const appState = appContext.uiState.appState ?? window.appState;
     const itemId = this.getEquippedItemId();
-    if (itemId === 'pistol') return 'Fire';
-    if (itemId === 'foamSword' || itemId === 'magic_wand') return '🛡 Block';
+    if (itemId === 'pistol') return 'fire';
+    if (itemId === 'shield') return appState?.isWandShieldHeld?.() ? 'shield' : 'sword';
+    if (itemId === 'magic_wand') {
+      const hasShield = ((appState?.getInventory?.() || {}).shield?.count ?? 0) > 0;
+      return hasShield ? 'shield' : 'block';
+    }
+    if (itemId === 'foamSword') return 'block';
+    return null;
+  }
+
+  getMobileAttackLabel() {
+    const mode = this.getBlockBarMode();
+    if (mode === 'fire') return 'Fire';
+    if (mode === 'shield') return '🛡 Shield';
+    if (mode === 'sword') {
+      const appState = appContext.uiState.appState ?? window.appState;
+      return appState?.isSwordAllowed?.() === false ? '🔫 Gun' : '🗡 Sword';
+    }
+    if (mode === 'block') return '🛡 Block';
     return 'Attack';
   }
 
@@ -619,8 +662,8 @@ export class PlayerControls {
       button.style.display = w ? '' : 'none';
       button.classList.toggle('ps-wand-btn', w?.id === 'magic_wand');
     });
-    // Block button shown for the sword / wand; gun shows Fire; shield hides it
-    const showPunch = equippedId === 'foamSword' || equippedId === 'magic_wand' || equippedId === 'pistol';
+    // Block bar: Block (sword / wand), Fire (gun), Sword (shield), Shield (wand + a shield)
+    const showPunch = !!this.getBlockBarMode();
     this.punchButton.textContent = this.getMobileAttackLabel();
     this.punchButton.style.display = showPunch ? '' : 'none';
     // On touch screens Block/Fire is a full-width bar along the bottom; the joystick and

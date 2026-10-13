@@ -2429,6 +2429,21 @@ body.settings-open #inventory-button {
   .village-acts { gap: 6px; }
   .village-act { min-height: 44px; padding: 0 12px; font-size: 14px; }
 }
+/* Walking up to an idling character: "🔄 Switch to …" floats over it (villageMode.js placeSwitch) */
+.village-switch {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  min-height: 42px;
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 800;
+  white-space: nowrap;
+  animation: village-switch-in 0.2s var(--ease);
+}
+@keyframes village-switch-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 @keyframes village-act-in {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: none; }
@@ -3743,6 +3758,7 @@ body.mobile-block-bar .classic-combo {
   .village-card,
   .village-talk,
   .village-act,
+  .village-switch,
   .village-talk-more,
   .village-banner-in {
     animation: none;
