@@ -104,10 +104,12 @@ const SHOWDOWN_MAX_SHIELD_UPGRADES = 4;
 const MAGIC_WAND_ITEM_ID = 'magic_wand';
 const MAX_MANA = 100;
 const WAND_MANA_COST = 10;               // per blast; mana potions refill it
-const WAND_SWIPE_START_SPEED = 340;      // deg/s: a swipe starts…
+const WAND_SWIPE_START_SPEED = 420;      // deg/s: a swipe starts…
 const WAND_SWIPE_END_SPEED = 120;        // …and ends when the wand slows down again
-const WAND_SWIPE_MAX_S = 0.6;
-const WAND_SWIPE_MIN_DIST = 0.3;         // m the wand tip has to travel for a spell
+const WAND_SWIPE_MAX_S = 0.7;
+const WAND_SWIPE_PEAK_SPEED = 600;       // deg/s the swipe has to reach at some point
+const WAND_SWIPE_MIN_ANGLE = 80;         // deg the wand has to turn through during the swipe
+const WAND_SWIPE_MIN_DIST = 0.5;         // m the wand tip has to travel for a spell
 const WAND_CAST_COOLDOWN_S = 0.45;
 const PLAYER_BLAST_SPEED_MPS = 16;
 const PLAYER_BLAST_LENGTH = 1.4;         // m — the line's length
@@ -2600,7 +2602,10 @@ async function initCore(runtimeContext) {
   const getMana = () => (Number.isFinite(statsState.mana) ? statsState.mana : MAX_MANA);
   const isWandAllowed = () => hasMagicWand() && !_classicMode && !_gunsMatch && !duelMode?.isActive();
   // Wand swipe in progress (phone-sword loop → _updateWandSwipe)
-  const _wandSwipe = { active: false, startAt: 0, slowSince: null, cooldownUntil: 0, start: new THREE.Vector3() };
+  const _wandSwipe = {
+    active: false, startAt: 0, slowSince: null, cooldownUntil: 0, start: new THREE.Vector3(),
+    lastAt: 0, angle: 0, peak: 0, // (turned through / fastest so far — a flick isn't a swipe)
+  };
   // Frozen in ice by an ice blast: { left, total } seconds, the cubes around the player
   const _playerFreeze = { left: 0, total: 0, ice: null };
   const isPlayerFrozen = () => _playerFreeze.left > 0;
@@ -3945,11 +3950,17 @@ async function initCore(runtimeContext) {
       if (speed >= WAND_SWIPE_START_SPEED && nowSec >= sw.cooldownUntil) {
         sw.active = true;
         sw.startAt = nowSec;
+        sw.lastAt = nowSec;
+        sw.angle = 0;
+        sw.peak = speed;
         sw.slowSince = null;
         sw.start.copy(_psw.tipHistory.length ? _psw.tipHistory[0].pos : (_psw.prevTipWorld ?? tipWorld));
       }
       return;
     }
+    sw.angle += speed * Math.min(0.1, nowSec - sw.lastAt);
+    sw.lastAt = nowSec;
+    sw.peak = Math.max(sw.peak, speed);
     // (at 60 fps every other frame repeats the last ~30 Hz phone packet: wait a moment)
     if (speed > WAND_SWIPE_END_SPEED) sw.slowSince = null;
     else sw.slowSince ??= nowSec;
@@ -3957,7 +3968,7 @@ async function initCore(runtimeContext) {
     if (!ended) return;
     sw.active = false;
     const swipe = _wandSwipeVec.subVectors(tipWorld, sw.start);
-    if (swipe.length() < WAND_SWIPE_MIN_DIST) return;
+    if (swipe.length() < WAND_SWIPE_MIN_DIST || sw.angle < WAND_SWIPE_MIN_ANGLE || sw.peak < WAND_SWIPE_PEAK_SPEED) return;
     sw.cooldownUntil = nowSec + WAND_CAST_COOLDOWN_S;
     castPlayerSpell(swipe.clone());
   };
