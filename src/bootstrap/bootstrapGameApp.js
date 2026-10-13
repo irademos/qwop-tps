@@ -104,12 +104,12 @@ const SHOWDOWN_MAX_SHIELD_UPGRADES = 4;
 const MAGIC_WAND_ITEM_ID = 'magic_wand';
 const MAX_MANA = 100;
 const WAND_MANA_COST = 10;               // per blast; mana potions refill it
-const WAND_SWIPE_START_SPEED = 390;      // deg/s: a swipe starts…
+const WAND_SWIPE_START_SPEED = 405;      // deg/s: a swipe starts…
 const WAND_SWIPE_END_SPEED = 120;        // …and ends when the wand slows down again
 const WAND_SWIPE_MAX_S = 0.7;
-const WAND_SWIPE_PEAK_SPEED = 390;       // deg/s the swipe has to reach at some point
+const WAND_SWIPE_PEAK_SPEED = 405;       // deg/s the swipe has to reach at some point
 const WAND_SWIPE_MIN_ANGLE = 80;         // deg the wand has to turn through during the swipe
-const WAND_SWIPE_MIN_DIST = 0.5;         // m the wand tip has to travel for a spell
+const WAND_SWIPE_MIN_DIST = 0.45;        // m the wand tip has to travel for a spell
 const WAND_CAST_COOLDOWN_S = 0.45;
 const PLAYER_BLAST_SPEED_MPS = 16;
 const PLAYER_BLAST_LENGTH = 1.4;         // m — the line's length
@@ -3905,6 +3905,7 @@ async function initCore(runtimeContext) {
     magicBlasts.spawn({
       origin, forward, line, element, side: 'enemy', caster: enemy,
       speed: ENEMY_BLAST_SPEED_MPS, length: ENEMY_BLAST_LENGTH,
+      ignoreMap: !!enemy._tutorial, // (a tree / wall in the way would stall the lesson)
     });
   };
   // Player's spell: the swipe's line, flying the way the player faces
@@ -3934,6 +3935,7 @@ async function initCore(runtimeContext) {
     const blast = magicBlasts.spawn({
       origin, forward, line: swipe, side: 'player',
       speed: PLAYER_BLAST_SPEED_MPS, length: PLAYER_BLAST_LENGTH,
+      ignoreMap: !!showdownTutorial?.isActive(),
     });
     _wandGlow.level = 1;
     _wandGlow.color.set(MAGIC_ELEMENTS[blast.element].glow);
@@ -6303,6 +6305,8 @@ async function initCore(runtimeContext) {
     getPlayerCasts: () => _playerCasts,
     getMagicBlocks: () => _magicBlocks,
     isPlayerFrozen: () => isPlayerFrozen(),
+    freezePlayer: (seconds) => freezePlayer(seconds),
+    thawPlayer: () => thawPlayer(),
     magicBlastsInFlight: () => magicBlasts.count(),
     // Deflect point of the player's sword (same tip the bomb-deflect check uses), or null
     getSwordTip: (out) => {

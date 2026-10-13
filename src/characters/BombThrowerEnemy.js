@@ -550,7 +550,8 @@ export class BombThrowerEnemy {
       }
 
       // Buildings / walls (map geometry): explode just in front of the surface it hit
-      const wallHit = raycastMapSegment(_bombPrevPos, bomb.mesh.position);
+      // (not in the tutorial: a tree / wall in the way would stall the deflect lesson)
+      const wallHit = this._tutorial ? null : raycastMapSegment(_bombPrevPos, bomb.mesh.position);
       if (wallHit) {
         bomb.mesh.position.copy(wallHit.point).addScaledVector(wallHit.normal, 0.15);
         this._explodeBomb(bomb, bomb.mesh.position.clone(), targetModel, targetControls, bomb.deflected);
