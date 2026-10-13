@@ -187,11 +187,19 @@
       justify-content: space-between;
       gap: 16px;
     }
-    #joy-row #btn-jump {
-      width: 120px;
-      height: 120px;
-      border-radius: 50%;
-      font-size: 1.15rem;
+    /* Equip buttons (gun / shield / wand) big, right of the joystick — Jump is in the row above */
+    #equip-col {
+      flex: 1;
+      max-width: 240px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #equip-col .ctl-btn {
+      height: auto;
+      min-height: 64px;
+      flex: 1;
+      font-size: 1.2rem;
     }
     #joystick {
       position: relative;
@@ -280,13 +288,15 @@
     <div id="action-grid">
       <button class="ctl-btn" id="btn-bomb" data-action="bomb">💣 0</button>
       <button class="ctl-btn" id="btn-bubble" data-action="bubble">🫧 0</button>
-      <button class="ctl-btn" id="btn-gun" data-action="gun">🔫 Gun</button>
-      <button class="ctl-btn" id="btn-shield" data-action="shield">🛡 Shield</button>
-      <button class="ctl-btn" id="btn-wand" data-action="wand">🪄 Wand</button>
+      <button class="ctl-btn" id="btn-jump" data-action="jump">⬆️ Jump</button>
     </div>
     <div id="joy-row">
       <div id="joystick"><div id="joystick-knob"></div></div>
-      <button class="ctl-btn" id="btn-jump" data-action="jump">⬆️ Jump</button>
+      <div id="equip-col">
+        <button class="ctl-btn" id="btn-gun" data-action="gun">🔫 Gun</button>
+        <button class="ctl-btn" id="btn-shield" data-action="shield">🛡 Shield</button>
+        <button class="ctl-btn" id="btn-wand" data-action="wand">🪄 Wand</button>
+      </div>
     </div>
     <button id="block-btn">🛡️ BLOCK</button>
   </div>
