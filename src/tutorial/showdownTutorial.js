@@ -11,13 +11,16 @@
  *   6. Shield (bought, equipped, then hit until it breaks)
  *   7. Bubble (bought, activated, enemy swords bounce off it)
  *   8. Gun + bullets (bought, equipped, shoot a distant swordsman)
+ *   9. Magic wand (lent for the lesson): swipe a blast past a horizontal block
+ *  10. Blocking a wand enemy's horizontal blast (blade along the blast)
  *
  * The player can't die (bootstrapGameApp keeps health full while it runs). Every step can
  * be skipped from the panel (e.g. when playing without a phone). All game access goes
  * through `ctx` (see createShowdownTutorialContext in bootstrapGameApp.js).
  */
 import * as THREE from 'three';
-import { BLOCK_PRESETS, SWING_PRESETS, swingCrossesBlade } from '../characters/EnemyPlayer.js';
+import { BLOCK_PRESETS, SWING_PRESETS, WAND_CAST_LINES, swingCrossesBlade } from '../characters/EnemyPlayer.js';
+import { bladeBlocksBlast } from '../combat/magicBlast.js';
 import { createTutorialOverlay } from './tutorialOverlay.js';
 
 // Blocks the player has to hit past: [BLOCK_PRESETS index, name]
@@ -45,6 +48,10 @@ const BOMB_TARGET_SPREAD = 1.3;         // m either side of the centre target
 const GUN_TARGET_DISTANCE = 7;
 const TUTORIAL_SHIELD_HEALTH = 6;       // 3 enemy sword hits
 const BUBBLE_BLOCKS_NEEDED = 2;
+const WAND_BLOCK_PRESET = 2;            // BLOCK_PRESETS: horizontal, mid — blasts past it must not be horizontal
+const WAND_CASTER_DISTANCE = 7;
+const MAGIC_BLOCK_HOLD_S = 0.35;        // correct block held this long → the caster casts
+const MAGIC_RESULT_TIMEOUT_MS = 2600;
 
 const COLORS = {
   guide: '#facc15',
@@ -208,7 +215,7 @@ export function createShowdownTutorial(ctx) {
   // ── steps ─────────────────────────────────────────────────────────────────
   const steps = [];
   const step = (fn) => steps.push(fn);
-  const TOTAL = 13;
+  const TOTAL = 15;
 
   // 1. Phone setup
   step(async () => {
@@ -564,6 +571,115 @@ export function createShowdownTutorial(ctx) {
     frameHandler = null;
     setHighlight(null);
     overlay.setHint('Got him! ✔', 'ok');
+    await delay(1500);
+  });
+
+  // 14. Magic wand: cast a blast past a horizontal block
+  step(async () => {
+    removeEnemy(swordsman);
+    ctx.equipSword();
+    ctx.lendWand();
+    onCleanup(() => ctx.returnWand());
+    panel(14, TOTAL, 'MAGIC WAND',
+      'The market sells a Magic Wand. Here’s one to try — tap 🪄 Wand to take it out.');
+    frameHandler = () => setHighlight('wand');
+    await waitFor(() => ctx.isEquipped('magic_wand'));
+    setHighlight(null);
+    const enemy = ensureSwordsman({ mode: 'block', preset: WAND_BLOCK_PRESET });
+    healSwordsman();
+    panel(14, TOTAL, 'CAST A SPELL',
+      'Swipe the wand like a sword: the blast flies forward in the SHAPE of your swipe — randomly 🔥 fire (knocks back) or 🧊 ice (freezes). Spells use mana. This enemy blocks HORIZONTALLY, so a horizontal blast is blocked — swipe UP or DOWN to blast past it.');
+    const presetDir = BLOCK_PRESETS[WAND_BLOCK_PRESET].dir;
+    frameHandler = () => {
+      if (!swordsman) return;
+      setHighlight(ctx.isEquipped('magic_wand') ? null : 'wand');
+      chestOf(swordsman, _a);
+      swordsman.group.getWorldQuaternion(_quat);
+      _b.copy(presetDir).applyQuaternion(_quat);
+      const at = toScreen(_a);
+      const angle = screenAngle(_a, _b);
+      // The swipe that gets through: across the blocking blade
+      overlay.setGuides(at && angle !== null ? [{
+        key: 'swipe', type: 'double-arrow', x: at.x, y: at.y, angle: lineAngle(angle + Math.PI / 2),
+        length: 200, color: COLORS.guide, label: 'SWIPE'
+      }] : []);
+    };
+    let blocks = enemy.magicBlocks || 0;
+    await waitFor(() => {
+      const e = swordsman;
+      if (!e || e.isDead) return true;
+      if ((e.magicBlocks || 0) > blocks) {
+        blocks = e.magicBlocks;
+        overlay.setHint('Blocked! That blast lined up with the blade — swipe up or down instead.', 'warn');
+      }
+      return (e.magicHits || 0) > 0;
+    });
+    frameHandler = null;
+    overlay.clearGuides();
+    setHighlight(null);
+    overlay.setHint('Zap! ✔', 'ok');
+    await delay(1800);
+  });
+
+  // 15. Block a wand enemy's (horizontal) blast
+  step(async () => {
+    removeEnemy(swordsman);
+    ctx.equipSword();
+    const dir = ctx.getForward(new THREE.Vector3());
+    // (sturdy: a stray bullet or bomb shouldn't end the lesson)
+    const caster = ctx.spawnWandCaster({ position: pointFromPlayer(dir, WAND_CASTER_DISTANCE), hearts: 5 });
+    onCleanup(() => { if (!caster.isDead) removeEnemy(caster); });
+    panel(15, TOTAL, 'BLOCK A MAGIC BLAST',
+      'Wand enemies cast from a distance. A blast is only blocked by a blade lying ALONG it. This one will be HORIZONTAL: hold 🛡 BLOCK with your sword FLAT — it casts when your block is right.');
+    const line = new THREE.Vector3();
+    const forward = new THREE.Vector3();
+    const bladeDir = new THREE.Vector3();
+    let correctFor = 0;
+    let pending = null; // { at, blocks, hurt }
+    let done = false;
+    frameHandler = (dt) => {
+      if (caster.isDead) return;
+      caster.group.getWorldQuaternion(_quat);
+      line.copy(WAND_CAST_LINES.horizontal).applyQuaternion(_quat);
+      forward.subVectors(ctx.playerModel.position, caster.group.position).setY(0);
+      const blade = ctx.getPlayerBladeDir(bladeDir);
+      const correct = ctx.isBlocking() && !!blade && !ctx.isPlayerFrozen() && bladeBlocksBlast(blade, line, forward);
+      setHighlight(ctx.isBlocking() ? null : 'block');
+
+      // Block bar along the blast's line, between the player and the caster
+      chestOf(caster, _a);
+      _b.copy(ctx.playerModel.position).setY(ctx.playerModel.position.y + 1.0).lerp(_a, 0.35);
+      const barAt = toScreen(_b);
+      const barAngle = screenAngle(_b, line);
+      overlay.setGuides(barAt && barAngle !== null ? [{
+        key: 'bar', type: 'bar', x: barAt.x, y: barAt.y, angle: lineAngle(barAngle), length: 170,
+        color: correct ? COLORS.ok : COLORS.guide, label: correct ? 'GOOD!' : 'BLOCK'
+      }] : []);
+
+      if (pending) {
+        if (ctx.getMagicBlocks() > pending.blocks) {
+          done = true;
+        } else if (hurtCount > pending.hurt || ctx.isPlayerFrozen()) {
+          overlay.setHint('Ouch! Keep holding BLOCK with the blade flat, along the blast.', 'warn');
+          pending = null;
+          correctFor = 0;
+        } else if (performance.now() - pending.at > MAGIC_RESULT_TIMEOUT_MS && ctx.magicBlastsInFlight() === 0) {
+          pending = null;
+          correctFor = 0;
+        }
+        return;
+      }
+      correctFor = correct ? correctFor + dt : 0;
+      if (correctFor >= MAGIC_BLOCK_HOLD_S && !caster._cast && ctx.magicBlastsInFlight() === 0) {
+        pending = { at: performance.now(), blocks: ctx.getMagicBlocks(), hurt: hurtCount };
+        caster.forceCast = { line: 'horizontal' };
+      }
+    };
+    await waitFor(() => done || caster.isDead);
+    frameHandler = null;
+    overlay.clearGuides();
+    setHighlight(null);
+    overlay.setHint('Blocked! ✔', 'ok');
     await delay(1500);
   });
 

@@ -134,6 +134,8 @@ function getFallbackIcon(itemId) {
   if (itemId === 'shield') return '🛡️';
   if (itemId === 'pistol') return '🔫';
   if (itemId === 'gun bullets') return '🔶';
+  if (itemId === 'magic_wand') return '🪄';
+  if (itemId === 'mana_potion') return '🧪';
   return '🎒';
 }
 
@@ -159,6 +161,7 @@ function getOwnedCount(itemId) {
   else if (itemId === 'heart_upgrade') owned = stats.maxHealthSegments;
   else if (itemId === 'shield_upgrade') owned = stats.shieldUpgrades;
   else if (itemId === 'gun bullets') owned = appState.getPistolAmmoCount?.();
+  else if (itemId === 'mana_potion') owned = appState.getMana?.();
   else owned = appState.getInventory?.()?.[itemId]?.count;
   return Number.isFinite(owned) ? Math.max(0, Math.floor(owned)) : 0;
 }

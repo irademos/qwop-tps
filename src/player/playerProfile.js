@@ -16,6 +16,8 @@ const DEFAULT_STATS = {
   shieldUpgrades: 0,
   bubbles: 0,
   bombs: 0,
+  // Magic wand mana (refilled with mana potions)
+  mana: 100,
   // Max health (0 = not set yet on profiles from before Showdown kept its own track)
   showdownMaxHealthSegments: 0
 };
@@ -80,7 +82,7 @@ function normalizeStatValue(key, value) {
   if (key === 'level') {
     return Math.max(1, Math.floor(numeric));
   }
-  if (key === 'xp' || key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles' || key === 'bombs' || key === 'showdownMaxHealthSegments') {
+  if (key === 'xp' || key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles' || key === 'bombs' || key === 'mana' || key === 'showdownMaxHealthSegments') {
     return Math.max(0, Math.floor(numeric));
   }
   if (key === 'maxHealthSegments') {

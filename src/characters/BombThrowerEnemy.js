@@ -22,6 +22,7 @@ import { raycastMapSegment } from '../environment/mapCollision.js';
 import { getKnockbackImpulse, getKnockbackMotion } from '../combat/knockback.js';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { stylizeObject } from '../environment/artStyle.js';
+import { createIceEncasing, setIceEncasingLevel } from '../combat/magicBlast.js';
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 const _homeDir = new THREE.Vector3();
@@ -395,6 +396,7 @@ export class BombThrowerEnemy {
 
     // Dead: just the flying-back death clip while fading out
     if (this.isDead) {
+      if (this._ice) this._thaw();
       this._animateBody(dt, false);
       return;
     }
@@ -407,6 +409,16 @@ export class BombThrowerEnemy {
     // ── Update bombs in flight ─────────────────────────────────────────────
     this._updateBombs(dt, targetModel, targetControls);
     if (this.isDead) return; // its own deflected bomb just blew it up
+
+    // ── Frozen in ice (magic blast): no moving or throwing ─────────────────
+    if (this._frozenLeft > 0) {
+      const vel = this.rigidBody.linvel();
+      this.rigidBody.setLinvel({ x: 0, y: Math.min(0, vel.y), z: 0 }, true);
+      this._frozenLeft -= dt;
+      setIceEncasingLevel(this._ice, this._frozenLeft / Math.max(0.001, this._frozenFor));
+      if (this._frozenLeft <= 0) this._thaw();
+      return;
+    }
 
     // ── Blast stun: flying-back clip, no AI; back on its feet afterwards ──
     const now = Date.now();
@@ -701,6 +713,28 @@ export class BombThrowerEnemy {
     this._lastThrowTime = Date.now();
     this._stunUntil = Date.now() + BLAST_STUN_MS;
     this._glbCharacter?.playDeath();
+  }
+
+  /** Frozen in ice cubes for `seconds` (magic blast): no moving or throwing. */
+  freeze(seconds) {
+    if (this.isDead || !(seconds > 0)) return;
+    this._frozenLeft = Math.max(this._frozenLeft || 0, seconds);
+    this._frozenFor = Math.max(this._frozenFor || 0, this._frozenLeft);
+    if (!this._ice) {
+      this._ice = createIceEncasing(CAPSULE_HEIGHT);
+      this.group.add(this._ice);
+    }
+  }
+
+  isFrozen() {
+    return this._frozenLeft > 0;
+  }
+
+  _thaw() {
+    this._frozenLeft = 0;
+    this._frozenFor = 0;
+    this._ice?.parent?.remove(this._ice);
+    this._ice = null;
   }
 
   getCenterWorldPos() {

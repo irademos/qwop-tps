@@ -46,6 +46,10 @@ import { createPlayerBombs } from '../combat/playerBomb.js';
 import { createHeartBubbles } from '../combat/heartBubbles.js';
 import { createComboMeter } from '../combat/comboMeter.js';
 import { createDeathCarry } from '../combat/deathCarry.js';
+import {
+  createMagicBlasts, bladeBlocksBlast, createIceEncasing, setIceEncasingLevel, shakeIceEncasing, MAGIC_ELEMENTS
+} from '../combat/magicBlast.js';
+import { setWandGlow } from '../items/magicWand.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage, PEMBERTON_STAGE } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
@@ -95,6 +99,30 @@ const saveStatsThrottled = (nameKey, stats, ...rest) => (nameKey ? saveStatsThro
 
 // Sword Showdown: max "Shield Upgrade" purchases (each +SHIELD_UPGRADE_HEALTH durability → 20 + 4×10 = 60 max)
 const SHOWDOWN_MAX_SHIELD_UPGRADES = 4;
+
+// ── Sword Showdown magic wand (bought for 500, swiped like the sword; src/combat/magicBlast.js) ──
+const MAGIC_WAND_ITEM_ID = 'magic_wand';
+const MAX_MANA = 100;
+const WAND_MANA_COST = 10;               // per blast; mana potions refill it
+const WAND_SWIPE_START_SPEED = 260;      // deg/s: a swipe starts…
+const WAND_SWIPE_END_SPEED = 120;        // …and ends when the wand slows down again
+const WAND_SWIPE_MAX_S = 0.6;
+const WAND_SWIPE_MIN_DIST = 0.22;        // m the wand tip has to travel for a spell
+const WAND_CAST_COOLDOWN_S = 0.45;
+const PLAYER_BLAST_SPEED_MPS = 16;
+const PLAYER_BLAST_LENGTH = 1.4;         // m — the line's length
+const ENEMY_BLAST_SPEED_MPS = 9;         // slower: the player has time to match the block
+const ENEMY_BLAST_LENGTH = 1.3;
+const MAGIC_BLAST_HEIGHT = 0.55;         // m above the caster's feet
+const MAGIC_FIRE_DAMAGE = 2;             // health segments / hearts
+const MAGIC_ICE_DAMAGE = 1;
+const MAGIC_FREEZE_MIN_S = 3;            // frozen for 3–5 s…
+const MAGIC_FREEZE_RAND_S = 2;
+const FREEZE_SHAKE_SPEED = 220;          // deg/s of phone shaking that counts…
+const FREEZE_SHAKE_RATE = 1.6;           // …and melts this many extra seconds per second
+// Wand-casting enemies: from this stage, a rising share of the swordsmen
+const PS_WAND_ENEMY_FROM_STAGE = 6;
+const WAND_ENEMY_RANGE = { min: 6, max: 11 };
 
 const ROAD_LIGHT_GRID_SIZE = 3;
 const ROAD_LIGHT_GRID_SPACING_METERS = 40;
@@ -2218,6 +2246,7 @@ async function initCore(runtimeContext) {
     shieldUpgrades: playerProfile.stats.shieldUpgrades,
     bubbles: playerProfile.stats.bubbles,
     bombs: playerProfile.stats.bombs,
+    mana: playerProfile.stats.mana,
     showdownMaxHealthSegments: playerProfile.stats.showdownMaxHealthSegments
   };
   // Max health: SHOWDOWN_BASE_HEALTH_SEGMENTS at level 1. Profiles saved before Showdown had its own
@@ -2508,6 +2537,10 @@ async function initCore(runtimeContext) {
     [SHIELD_ITEM_ID]: {
       name: 'Shield',
       icon: ''
+    },
+    [MAGIC_WAND_ITEM_ID]: {
+      name: 'Magic Wand',
+      icon: ''
     }
   };
   const ensureCatalogEntry = (itemId, entry) => {
@@ -2552,12 +2585,41 @@ async function initCore(runtimeContext) {
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
   }
 
-  const equippableItems = new Set([SHIELD_ITEM_ID, FOAM_SWORD_ITEM_ID, 'pistol']);
+  const equippableItems = new Set([SHIELD_ITEM_ID, FOAM_SWORD_ITEM_ID, 'pistol', MAGIC_WAND_ITEM_ID]);
   const inventoryHandSlots = {
     [SHIELD_ITEM_ID]: 'right',
     pistol: 'right',
     [FOAM_SWORD_ITEM_ID]: 'right',
+    [MAGIC_WAND_ITEM_ID]: 'right',
   };
+  // Magic wand: the sword weapon with the wand model (held the same way); spells instead of
+  // sword hits while it's out. Showdown (and the tutorial) only.
+  let _wandActive = false;
+  const hasMagicWand = () => (inventoryState[MAGIC_WAND_ITEM_ID]?.count || 0) > 0;
+  const isWandEquipped = () => _wandActive && foamSword?.holder === playerControls;
+  const getMana = () => (Number.isFinite(statsState.mana) ? statsState.mana : MAX_MANA);
+  const isWandAllowed = () => hasMagicWand() && !_classicMode && !_gunsMatch && !duelMode?.isActive();
+  // Wand swipe in progress (phone-sword loop → _updateWandSwipe)
+  const _wandSwipe = { active: false, startAt: 0, slowSince: null, cooldownUntil: 0, start: new THREE.Vector3() };
+  // Frozen in ice by an ice blast: { left, total } seconds, the cubes around the player
+  const _playerFreeze = { left: 0, total: 0, ice: null };
+  const isPlayerFrozen = () => _playerFreeze.left > 0;
+  // Mana pill under the health bar: shown once the wand is owned (Showdown / tutorial only)
+  function updateManaUI() {
+    const bar = document.getElementById('mana-bar');
+    if (!bar) return;
+    const show = hasMagicWand() && !_classicMode && !duelMode?.isActive();
+    bar.classList.toggle('hidden', !show);
+    document.body.classList.toggle('has-mana', show);
+    if (!show) return;
+    const mana = getMana();
+    const fill = document.getElementById('mana-bar-fill');
+    if (fill) fill.style.width = `${Math.round((mana / MAX_MANA) * 100)}%`;
+    const count = document.getElementById('mana-count');
+    if (count) count.textContent = String(mana);
+    bar.classList.toggle('wand-out', _wandActive && foamSword?.holder === playerControls);
+    bar.classList.toggle('mana-empty', mana < WAND_MANA_COST);
+  }
   const getInventoryItemHand = (itemId) => inventoryHandSlots[itemId] || null;
   const getInventoryItemActions = (itemId) => {
     if (itemId === 'pistol') {
@@ -2589,6 +2651,8 @@ async function initCore(runtimeContext) {
     if (itemId === PISTOL_AMMO_KEY) return '🔶';
     if (itemId === 'bubble') return '🫧';
     if (itemId === 'showdown_bomb') return '💣';
+    if (itemId === MAGIC_WAND_ITEM_ID) return '🪄';
+    if (itemId === 'mana_potion') return '🧪';
     if (itemId === 'heart') return '❤️';
     return '🎒';
   };
@@ -2695,7 +2759,10 @@ async function initCore(runtimeContext) {
       return shield?.holder === playerControls;
     }
     if (itemId === FOAM_SWORD_ITEM_ID) {
-      return foamSword?.holder === playerControls;
+      return foamSword?.holder === playerControls && !_wandActive;
+    }
+    if (itemId === MAGIC_WAND_ITEM_ID) {
+      return isWandEquipped();
     }
     if (itemId === 'pistol') {
       return pistol?.holder === playerControls;
@@ -2705,6 +2772,7 @@ async function initCore(runtimeContext) {
 
   function getEquippedInventoryItemIdForHand(hand) {
     if (hand === 'right') {
+      if (isInventoryItemEquipped(MAGIC_WAND_ITEM_ID)) return MAGIC_WAND_ITEM_ID;
       if (isInventoryItemEquipped(FOAM_SWORD_ITEM_ID)) return FOAM_SWORD_ITEM_ID;
       if (isInventoryItemEquipped('pistol')) return 'pistol';
       if (isInventoryItemEquipped(SHIELD_ITEM_ID)) return SHIELD_ITEM_ID;
@@ -2741,6 +2809,29 @@ async function initCore(runtimeContext) {
     if (_mpSwordOnly() && itemId !== FOAM_SWORD_ITEM_ID) return;
     if (_gunsMatch && itemId === FOAM_SWORD_ITEM_ID) return;
     if (_classicMode && itemId !== FOAM_SWORD_ITEM_ID) return; // Classic: sword only
+    // The wand is the sword weapon in wand form: switching between them just swaps the model
+    if (itemId === MAGIC_WAND_ITEM_ID || itemId === FOAM_SWORD_ITEM_ID) {
+      const wand = itemId === MAGIC_WAND_ITEM_ID;
+      if (wand && (_mpSwordOnly() || _gunsMatch || matchMode?.isInMatch?.())) return; // Showdown only
+      if (foamSword?.holder === playerControls && _wandActive !== wand) {
+        // Already in hand: just swap sword ↔ wand
+        _wandActive = wand;
+        foamSword.wand = wand;
+        _wandSwipe.active = false;
+        audioManager?.playSFX(wand ? 'SFX/Spells/Spell Impact 1.ogg' : 'SFX/Attacks/Sword Attacks Hits and Blocks/Sword Unsheath 1.ogg', 0.45, { cooldownKey: 'sword-equip', cooldownMs: 100 });
+        updateManaUI();
+        updateSettingsUI();
+        return;
+      }
+      _wandActive = wand;
+      if (foamSword) foamSword.wand = wand;
+      _wandSwipe.active = false;
+      updateManaUI();
+      itemId = FOAM_SWORD_ITEM_ID;
+      if (!inventoryState[FOAM_SWORD_ITEM_ID]) {
+        inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+      }
+    }
     // Capture the currently held right-hand item BEFORE unequipping it,
     // so we can restore it if the shield later breaks with no spares.
     if (itemId === SHIELD_ITEM_ID) {
@@ -2826,6 +2917,10 @@ async function initCore(runtimeContext) {
   }
 
   function unequipInventoryItem(itemId) {
+    if (itemId === MAGIC_WAND_ITEM_ID) {
+      if (!isWandEquipped()) return;
+      itemId = FOAM_SWORD_ITEM_ID;
+    }
     if (itemId === SHIELD_ITEM_ID) {
       hideShieldHealthHUD();
       if (shield?.holder !== playerControls) return;
@@ -2885,7 +2980,7 @@ async function initCore(runtimeContext) {
   const effectiveMaxHealthSegments = () => duelMaxHealthOverride ?? statsState.maxHealthSegments;
   const updateControlAvailability = () => {
     if (!playerControls) return;
-    playerControls.enabled = !playerDead && !duelControlsLocked;
+    playerControls.enabled = !playerDead && !duelControlsLocked && !isPlayerFrozen();
   };
 
   const healthBar = document.getElementById('health-bar');
@@ -2962,6 +3057,10 @@ async function initCore(runtimeContext) {
       }
       return Math.max(0, Math.floor(num));
     }
+    if (key === 'mana') {
+      const num = Number(value);
+      return Number.isFinite(num) ? Math.max(0, Math.min(MAX_MANA, Math.round(num))) : MAX_MANA;
+    }
     if (key === 'coins' || key === 'shieldUpgrades' || key === 'bubbles' || key === 'bombs') {
       const num = Number(value);
       if (!Number.isFinite(num)) {
@@ -2989,6 +3088,7 @@ async function initCore(runtimeContext) {
       statsState.health = clampHealthSegments(statsState.health, statsState.level, statsState.maxHealthSegments);
       updateHealthUI();
     }
+    if (key === 'mana') updateManaUI();
     if (!skipSave) {
       saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     }
@@ -3437,8 +3537,11 @@ async function initCore(runtimeContext) {
         swordDamage: opts.swordDamage,
         nameTag: opts.nameTag,
         showHealthBar: !opts.pemberton, // (his is across the top of the screen)
+        wand: !!opts.wand,
+        ranged: opts.wand ? WAND_ENEMY_RANGE : undefined,
       });
       enemy._camera = camera;
+      if (opts.wand) enemy.onCast = (cast) => _castEnemySpell(enemy, cast);
       if (Number.isFinite(opts.yaw)) enemy.group.rotation.y = opts.yaw;
       if (opts.pemberton) _psSpawnPemberton(enemy);
     }
@@ -3704,6 +3807,205 @@ async function initCore(runtimeContext) {
   const PLAYER_BOMB_CLIP_TIMEOUT_MS = 2500; // release anyway if the clip is slow to load
   const PLAYER_BOMB_HAND = 'left';          // mirrored label: the anatomical right arm
   const playerBombs = createPlayerBombs({ scene, getBlastTargets: () => hordeEnemies });
+
+  // ── Sword Showdown magic: the magic wand and wand-casting enemies ──
+  // A swipe of the wand (held like the sword) fires a blast shaped like the swipe
+  // (src/combat/magicBlast.js), costing WAND_MANA_COST mana. Each blast is randomly fire
+  // (thrown back like a bomb blast, MAGIC_FIRE_DAMAGE) or ice (MAGIC_ICE_DAMAGE, frozen in ice
+  // cubes for 3–5 s — shaking the phone melts it sooner). A block stops a blast only with the
+  // blade along the blast's line (bladeBlocksBlast).
+  const magicBlasts = createMagicBlasts({ scene });
+  const _magicFreezeSeconds = () => MAGIC_FREEZE_MIN_S + Math.random() * MAGIC_FREEZE_RAND_S;
+  const _wandGlow = { level: 0, color: new THREE.Color() };
+  const _magicBladeDir = new THREE.Vector3();
+  const _wandSwipeVec = new THREE.Vector3();
+  let _magicBlocks = 0;  // blasts the player has blocked (tutorial)
+  let _playerCasts = 0;  // spells the player has cast (tutorial)
+  const _magicPushDir = (blast) => {
+    const dir = blast.forward.clone().setY(0);
+    return dir.lengthSq() > 1e-6 ? dir.normalize() : dir.set(0, 0, 1);
+  };
+  // A player blast reached an enemy (not blocked)
+  const _magicHitEnemy = (enemy, blast) => {
+    if (enemy.isDead) return;
+    const dir = _magicPushDir(blast);
+    if (blast.element === 'fire') {
+      enemy.applyDamage(MAGIC_FIRE_DAMAGE);
+      enemy.applyBlastKnockback?.({ direction: dir, falloff: 0.75 });
+    } else {
+      enemy.applyDamage(MAGIC_ICE_DAMAGE);
+      if (!enemy.isDead) enemy.freeze?.(_magicFreezeSeconds());
+    }
+    enemy.magicHits = (enemy.magicHits || 0) + 1;
+    if (!enemy._tutorial && _psStageActive) comboMeter.hit();
+  };
+  const _playerBlastTarget = {
+    center: new THREE.Vector3(),
+    radius: 0.42,
+    // Bubble, a shield facing the blast, or a sword / wand block along the blast's line
+    blocks: (blast) => {
+      if (window.isPlayerBubbleActive?.()) return true;
+      _shieldHitFrom.position.copy(playerModel.position).addScaledVector(blast.forward, -3).setY(playerModel.position.y);
+      if (window.tryBlockLocalPlayerHitWithShield?.({ attackerModel: _shieldHitFrom, damage: blast.element === 'fire' ? MAGIC_FIRE_DAMAGE : MAGIC_ICE_DAMAGE })) {
+        duelCtx.onShieldHit();
+        return true;
+      }
+      const pts = window.phoneSwordBladePoints;
+      if (window.phoneSwordGyro?.blocking && !isPlayerFrozen() && foamSword?.holder === playerControls && pts?.length >= 3 &&
+          bladeBlocksBlast(_magicBladeDir.subVectors(pts[2], pts[0]), blast.line, blast.forward)) {
+        window._pswShowBlockFlash?.('player');
+        audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
+        _magicBlocks += 1;
+        return true;
+      }
+      return false;
+    },
+    onHit: (blast) => {
+      if (playerDead) return;
+      const dir = _magicPushDir(blast);
+      if (blast.element === 'fire') {
+        window.localHealth = Math.max(0, statsState.health - MAGIC_FIRE_DAMAGE);
+        _blastPlayer(dir, 0.75);
+      } else {
+        window.localHealth = Math.max(0, statsState.health - MAGIC_ICE_DAMAGE);
+        freezePlayer(_magicFreezeSeconds());
+      }
+    },
+  };
+  const _magicTargets = (blast) => {
+    if (blast.side === 'enemy') {
+      if (playerDead || _attacksHeld()) return [];
+      _playerBlastTarget.center.copy(playerModel.position).setY(playerModel.position.y + 0.5);
+      return [_playerBlastTarget];
+    }
+    const targets = [];
+    for (const enemy of hordeEnemies) {
+      if (enemy.isDead || !enemy.group?.parent) continue;
+      targets.push({
+        center: enemy.getCenterWorldPos(),
+        radius: (enemy.bodyHitRadius ?? 0.45) * 0.9,
+        blocks: (b) => !!enemy.blocksBlast?.(b),
+        onBlocked: () => {
+          enemy.applySwordBounce?.();
+          enemy.magicBlocks = (enemy.magicBlocks || 0) + 1;
+          audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.6, { cooldownKey: 'magic-parry', cooldownMs: 200 });
+        },
+        onHit: (b) => _magicHitEnemy(enemy, b),
+      });
+    }
+    return targets;
+  };
+  // Wand enemy's spell leaves its wand (EnemyPlayer.onCast)
+  const _castEnemySpell = (enemy, { origin, forward, line, element }) => {
+    magicBlasts.spawn({
+      origin, forward, line, element, side: 'enemy', caster: enemy,
+      speed: ENEMY_BLAST_SPEED_MPS, length: ENEMY_BLAST_LENGTH,
+    });
+  };
+  // Player's spell: the swipe's line, flying the way the player faces
+  let _manaToastAt = 0;
+  const castPlayerSpell = (swipe) => {
+    if (getMana() < WAND_MANA_COST) {
+      const bar = document.getElementById('mana-bar');
+      bar?.classList.remove('mana-flash');
+      void bar?.offsetWidth;
+      bar?.classList.add('mana-flash');
+      if (performance.now() - _manaToastAt > 2500) {
+        _manaToastAt = performance.now();
+        showPickupToast('mana_potion', 1, '', { text: 'Out of mana — buy a 🧪 Mana Potion' });
+      }
+      void psAutoBuyTick();
+      return false;
+    }
+    if (!showdownTutorial?.isActive()) {
+      setStat('mana', getMana() - WAND_MANA_COST, { skipSave: true });
+      saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
+    }
+    const forward = playerModel.getWorldDirection(new THREE.Vector3()).setY(0);
+    if (forward.lengthSq() < 1e-6) forward.set(0, 0, 1);
+    forward.normalize();
+    const origin = playerModel.position.clone().addScaledVector(forward, 0.6);
+    origin.y += MAGIC_BLAST_HEIGHT;
+    const blast = magicBlasts.spawn({
+      origin, forward, line: swipe, side: 'player',
+      speed: PLAYER_BLAST_SPEED_MPS, length: PLAYER_BLAST_LENGTH,
+    });
+    _wandGlow.level = 1;
+    _wandGlow.color.set(MAGIC_ELEMENTS[blast.element].glow);
+    _playerCasts += 1;
+    return true;
+  };
+  // Swipe detection: starts when the wand speeds up, ends once it has slowed for a moment;
+  // the tip's travel in between is the swipe
+  const _updateWandSwipe = (tipWorld, nowSec, locked) => {
+    const sw = _wandSwipe;
+    const speed = window._pswDebugSpeed ?? 0;
+    if (locked || playerDead) { sw.active = false; return; }
+    if (!sw.active) {
+      if (speed >= WAND_SWIPE_START_SPEED && nowSec >= sw.cooldownUntil) {
+        sw.active = true;
+        sw.startAt = nowSec;
+        sw.slowSince = null;
+        sw.start.copy(_psw.tipHistory.length ? _psw.tipHistory[0].pos : (_psw.prevTipWorld ?? tipWorld));
+      }
+      return;
+    }
+    // (at 60 fps every other frame repeats the last ~30 Hz phone packet: wait a moment)
+    if (speed > WAND_SWIPE_END_SPEED) sw.slowSince = null;
+    else sw.slowSince ??= nowSec;
+    const ended = (sw.slowSince !== null && nowSec - sw.slowSince > 0.07) || nowSec - sw.startAt > WAND_SWIPE_MAX_S;
+    if (!ended) return;
+    sw.active = false;
+    const swipe = _wandSwipeVec.subVectors(tipWorld, sw.start);
+    if (swipe.length() < WAND_SWIPE_MIN_DIST) return;
+    sw.cooldownUntil = nowSec + WAND_CAST_COOLDOWN_S;
+    castPlayerSpell(swipe.clone());
+  };
+  // Ice on the player: controls off, the sword stuck; shaking the phone melts it faster
+  function freezePlayer(seconds) {
+    if (playerDead || !(seconds > 0)) return;
+    _playerFreeze.left = Math.max(_playerFreeze.left, seconds);
+    _playerFreeze.total = Math.max(_playerFreeze.total, _playerFreeze.left);
+    if (!_playerFreeze.ice) {
+      _playerFreeze.ice = createIceEncasing(1.0);
+      playerModel.add(_playerFreeze.ice);
+    }
+    _wandSwipe.active = false;
+    if (window.phoneSwordGyro) window.phoneSwordGyro.blocking = false;
+    playerControls?.punchButton?.classList.remove('ps-blocking-active');
+    document.body.classList.add('player-frozen');
+    updateControlAvailability();
+  }
+  function thawPlayer() {
+    _playerFreeze.left = 0;
+    _playerFreeze.total = 0;
+    _playerFreeze.ice?.parent?.remove(_playerFreeze.ice);
+    _playerFreeze.ice = null;
+    document.body.classList.remove('player-frozen');
+    updateControlAvailability();
+  }
+  const _updatePlayerFreeze = (dt) => {
+    if (!isPlayerFrozen()) return;
+    const shake = window.phoneSwordGyro?.connected ? (window._pswDebugSpeed ?? 0) : 0;
+    const shaking = shake > FREEZE_SHAKE_SPEED;
+    const melt = dt * (1 + (shaking ? FREEZE_SHAKE_RATE * Math.min(2, shake / FREEZE_SHAKE_SPEED) : 0));
+    _playerFreeze.left -= melt;
+    setIceEncasingLevel(_playerFreeze.ice, _playerFreeze.left / Math.max(0.001, _playerFreeze.total));
+    shakeIceEncasing(_playerFreeze.ice, shaking ? 0.07 : 0);
+    if (_playerFreeze.left <= 0) {
+      thawPlayer();
+      audioManager?.playSFX('SFX/Spells/Waterspray 1.ogg', 0.5, { cooldownKey: 'magic-thaw', cooldownMs: 300 });
+    }
+  };
+  const _updateMagic = (dt) => {
+    magicBlasts.update(dt, _magicTargets);
+    _updatePlayerFreeze(dt);
+    // Wand orb: flashes the spell's colour on a cast, then settles
+    if (_wandActive) {
+      _wandGlow.level = Math.max(0, _wandGlow.level - dt * 3);
+      setWandGlow(foamSword?.getWandModel?.(), _wandGlow.level, _wandGlow.color);
+    }
+  };
 
   // ── Sword Showdown: heart bubbles (placed mid-stage in _psBuildStage, popped by the
   // sword in the phone-sword loop for +1 health segment; src/combat/heartBubbles.js) ──
@@ -4119,12 +4421,17 @@ async function initCore(runtimeContext) {
       const ey = getTerrainHeight(ex, ez) ?? playerModel.position.y;
       // Bomb throwers: start appearing at stage 3, ~5% chance scaling up slowly with stage
       const _btChance = !_classicMode && stage >= 3 ? Math.min(0.15, 0.05 + (stage - 3) * 0.006) : 0;
+      // Wand casters: from PS_WAND_ENEMY_FROM_STAGE, a rising share of the swordsmen
+      const _wandChance = !_classicMode && stage >= PS_WAND_ENEMY_FROM_STAGE
+        ? Math.min(0.25, 0.08 + (stage - PS_WAND_ENEMY_FROM_STAGE) * 0.015) : 0;
       const charKey = isBoss ? _psStageBoss.key : _charPool[Math.floor(Math.random() * _charPool.length)];
+      const _bomber = !isBoss && Math.random() < _btChance;
       _psEnemyQueue.push({
         pos: new THREE.Vector3(ex, ey, ez),
         hearts: isBoss ? _psBossHearts(stage) : _psHeartsForStage(stage),
         triggerDist: lead + pathLen * t - 10,
-        bombThrower: !isBoss && Math.random() < _btChance,
+        bombThrower: _bomber,
+        wand: !isBoss && !_bomber && Math.random() < _wandChance,
         characterUrl: _classicMode ? _classicMiiUrl() : MATCH_CHARACTERS[charKey].url,
         boss: isBoss,
         nameTag: _classicMode ? _classicName() : null,
@@ -4234,8 +4541,9 @@ async function initCore(runtimeContext) {
     }
     return null;
   };
-  // No weapon in hand in the village: whatever is held is put away there, and the sword comes
-  // back when the next stage's calibration starts (villageCtx.confirmStart) or the player leaves
+  // No weapon in hand in the village: whatever is held is put away there, and the sword (or the
+  // magic wand, if that was out) comes back when the next stage's calibration starts
+  // (villageCtx.confirmStart) or the player leaves
   let _villageSheathed = false;
   const _villageSheathe = () => {
     const held = getEquippedInventoryItemIds();
@@ -4250,11 +4558,13 @@ async function initCore(runtimeContext) {
     if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
       inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
     }
-    equipInventoryItem(FOAM_SWORD_ITEM_ID);
+    equipInventoryItem(_wandActive && isWandAllowed() ? MAGIC_WAND_ITEM_ID : FOAM_SWORD_ITEM_ID);
     playerControls?.refreshActionButtons?.();
   };
   // approach: build it a little way ahead and walk the player there (after a stage win)
   const _psShowVillage = (stage, onOk, { approach = false } = {}) => {
+    magicBlasts.clear();
+    thawPlayer();
     const _final = _psIsFinalStage(stage);
     const count = _final ? 1 : _psEnemyCount(stage);
     _psUpdateKillHud(false);
@@ -4375,6 +4685,8 @@ async function initCore(runtimeContext) {
     }
     // Classic: every stage starts with all its hearts
     if (_classicMode) setStat('health', CLASSIC_HEARTS, { skipSave: true });
+    magicBlasts.clear();
+    thawPlayer();
     // Determine day/night for this stage (Classic is always daytime)
     if (_classicMode) {
       _psCurrentIsNight = false;
@@ -4828,6 +5140,11 @@ async function initCore(runtimeContext) {
       _toggleRemoteWeapon('pistol');
     } else if (action === 'shield') {
       _toggleRemoteWeapon(SHIELD_ITEM_ID);
+    } else if (action === 'wand') {
+      // Magic wand ↔ sword
+      if (!isWandAllowed()) return;
+      equipInventoryItem(isWandEquipped() ? FOAM_SWORD_ITEM_ID : MAGIC_WAND_ITEM_ID);
+      playerControls?.refreshActionButtons?.();
     }
   };
   const _phoneControllerStatus = () => {
@@ -4861,7 +5178,9 @@ async function initCore(runtimeContext) {
       hasGun: (inv.pistol?.count ?? 0) > 0,
       hasShield: (inv[SHIELD_ITEM_ID]?.count ?? 0) > 0,
       ammo: getPistolAmmoCount(),
-      equipped: playerControls?.getEquippedWeapon?.('right')?.itemId ?? FOAM_SWORD_ITEM_ID,
+      hasWand: isWandAllowed(),
+      mana: getMana(),
+      equipped: isWandEquipped() ? MAGIC_WAND_ITEM_ID : (playerControls?.getEquippedWeapon?.('right')?.itemId ?? FOAM_SWORD_ITEM_ID),
       // Tutorial: phone button to ring ('bomb' | 'bubble' | 'gun' | 'shield' | 'fire' | 'block')
       highlight: showdownTutorial?.isActive() ? _tutorialPhoneHighlight : null
     };
@@ -5342,6 +5661,8 @@ async function initCore(runtimeContext) {
     // Sword Showdown shop upgrades that are capped: true once the player can't buy more
     isShopItemMaxed: (itemId) => {
       if (itemId === 'life_potion') return statsState.health >= statsState.maxHealthSegments;
+      if (itemId === 'mana_potion') return getMana() >= MAX_MANA;
+      if (itemId === MAGIC_WAND_ITEM_ID) return hasMagicWand();
       if (itemId === 'heart_upgrade') return statsState.maxHealthSegments >= SHOWDOWN_MAX_HEALTH_SEGMENTS;
       if (itemId === 'shield_upgrade') return (statsState.shieldUpgrades || 0) >= SHOWDOWN_MAX_SHIELD_UPGRADES;
       return false;
@@ -5374,6 +5695,12 @@ async function initCore(runtimeContext) {
         updatePsBombButton();
       } else if (itemId === 'life_potion') {
         setStat('health', statsState.maxHealthSegments, { skipSave: true });
+      } else if (itemId === 'mana_potion') {
+        setStat('mana', MAX_MANA, { skipSave: true });
+      } else if (itemId === MAGIC_WAND_ITEM_ID) {
+        addToInventory(MAGIC_WAND_ITEM_ID, 1);
+        updateManaUI();
+        playerControls?.refreshActionButtons?.();
       } else {
         return false;
       }
@@ -5386,6 +5713,11 @@ async function initCore(runtimeContext) {
     throwBomb: () => throwPlayerBomb(),
     // Multiplayer Guns & Bombs has no sword (PlayerControls.refreshActionButtons)
     isSwordAllowed: () => !_gunsMatch,
+    // Magic wand: owned, and only in Showdown / the tutorial
+    isWandAllowed: () => isWandAllowed(),
+    isWandEquipped: () => isWandEquipped(),
+    getMana: () => getMana(),
+    getMaxMana: () => MAX_MANA,
     getInventory: () => getInventory(),
     getPistolAmmoCount: () => getPistolAmmoCount(),
     addPistolAmmo: (amount) => addPistolAmmo(amount),
@@ -5458,7 +5790,8 @@ async function initCore(runtimeContext) {
   const TREASURE_CHEST_PRICE = 50;
   const VILLAGE_ITEM_TEXT = {
     life_potion: { name: 'Life Potion', desc: 'Fills your health to full' },
-    mana_potion: { name: 'Mana Potion', desc: 'Restores magic — coming soon' },
+    mana_potion: { name: 'Mana Potion', desc: 'Fills your mana to full — the magic wand runs on mana' },
+    magic_wand: { name: 'Magic Wand' },
     shield: { desc: 'Blocks hits from in front until it breaks' },
     pistol: { desc: 'Shoot enemies from afar (needs bullets)' },
     'gun bullets': { desc: 'One bullet for the gun' },
@@ -5468,6 +5801,8 @@ async function initCore(runtimeContext) {
   const _villageOwned = (itemId) => {
     switch (itemId) {
       case 'life_potion': return `Health ${statsState.health} / ${statsState.maxHealthSegments}`;
+      case 'mana_potion': return `Mana ${getMana()} / ${MAX_MANA}`;
+      case MAGIC_WAND_ITEM_ID: return hasMagicWand() ? 'You have it — tap 🪄 Wand to use it' : `Each spell uses ${WAND_MANA_COST} mana`;
       case 'showdown_bomb': return `You have ${getPlayerBombCount()}`;
       case 'bubble': return `You have ${getBubbleCount()}`;
       case SHIELD_ITEM_ID: return `You have ${inventoryState[SHIELD_ITEM_ID]?.count || 0}`;
@@ -5483,6 +5818,7 @@ async function initCore(runtimeContext) {
     playerControls?.refreshActionButtons?.();
     updatePsBombButton();
     updatePsBubbleButton();
+    updateManaUI();
   };
   // Mystery chest: pay, then one weighted random prize (things that can't be used are left out)
   const _openTreasureChest = () => {
@@ -5511,7 +5847,6 @@ async function initCore(runtimeContext) {
     load: async () => { _villageMerchant ??= await import('../characters/merchant.js'); },
     getItemState: (itemId) => {
       const extra = VILLAGE_ITEM_TEXT[itemId] || {};
-      if (itemId === 'mana_potion') return { ...extra, price: 0, owned: '', status: 'soon' };
       if (itemId === 'treasure_chest') return { ...extra, price: TREASURE_CHEST_PRICE, owned: '', status: 'ok' };
       const meta = _villageMerchant?.getMerchantItemMeta(itemId);
       const stock = _villageMerchant?.getMerchantInventory()[itemId]?.count ?? 0;
@@ -5525,7 +5860,9 @@ async function initCore(runtimeContext) {
         price: meta?.price ?? 0,
         owned: _villageOwned(itemId),
         status,
-        note: itemId === 'life_potion' ? 'Health is full' : 'MAX',
+        note: itemId === 'life_potion' ? 'Health is full'
+          : itemId === 'mana_potion' ? 'Mana is full'
+          : itemId === MAGIC_WAND_ITEM_ID ? 'Owned' : 'MAX',
       };
     },
     buy: async (itemId) => {
@@ -5590,7 +5927,9 @@ async function initCore(runtimeContext) {
     { itemId: SHIELD_ITEM_ID, has: () => (inventoryState[SHIELD_ITEM_ID]?.count || 0) > 0 },
     { itemId: 'pistol', has: () => (inventoryState.pistol?.count || 0) > 0 },
     // Bullets are only useful once the gun is owned
-    { itemId: PISTOL_AMMO_KEY, has: () => !(inventoryState.pistol?.count > 0) || getPistolAmmoCount() > 0 }
+    { itemId: PISTOL_AMMO_KEY, has: () => !(inventoryState.pistol?.count > 0) || getPistolAmmoCount() > 0 },
+    // Mana: only with the wand, once there isn't enough left for a spell
+    { itemId: 'mana_potion', has: () => !hasMagicWand() || getMana() >= WAND_MANA_COST }
   ];
   let psAutoBuyBusy = false;
   const psAutoBuyTick = async () => {
@@ -5837,6 +6176,7 @@ async function initCore(runtimeContext) {
   // Everything the scripted tutorial needs from the game. Purchases skip the room shop
   // stock (always available) but cost the same coins as the shop.
   const _tutorialTip = new THREE.Vector3(0, 0, 0.69);
+  let _tutorialLentWand = false;
   const TUTORIAL_ENEMY_SPEED = 0.6; // a bit quicker than stage enemies, so knocked-back ones return sooner
   const _tutorialRemoveEnemy = (enemy) => {
     if (!enemy) return;
@@ -5856,8 +6196,8 @@ async function initCore(runtimeContext) {
     if (name === 'bomb') return pc.psBombBtn;
     if (name === 'bubble') return pc.psBubbleBtn;
     if (name === 'block' || name === 'fire') return pc.punchButton;
-    const itemId = name === 'gun' ? 'pistol' : name === 'shield' ? SHIELD_ITEM_ID : name;
-    return [pc.psWeaponBtn1, pc.psWeaponBtn2].find(b => b?.dataset.psWeaponId === itemId) || null;
+    const itemId = name === 'gun' ? 'pistol' : name === 'shield' ? SHIELD_ITEM_ID : name === 'wand' ? MAGIC_WAND_ITEM_ID : name;
+    return [pc.psWeaponBtn1, pc.psWeaponBtn2, pc.psWeaponBtn3].find(b => b?.dataset.psWeaponId === itemId) || null;
   };
   const _refreshShowdownButtons = () => {
     playerControls?.refreshActionButtons?.();
@@ -5897,7 +6237,34 @@ async function initCore(runtimeContext) {
       enemy.aimAt = aimAt;
       return _tutorialMarkEnemy(enemy);
     },
+    // Wand caster (ranged, holds its spells until forceCast)
+    spawnWandCaster: ({ position, hearts = 1 }) => {
+      const enemy = _spawnHordeEnemy({ position, hearts, speedScale: PS_ENEMY_SPEED, wand: true });
+      enemy.stationary = true;
+      enemy.castsHeld = true;
+      return _tutorialMarkEnemy(enemy);
+    },
     removeEnemy: _tutorialRemoveEnemy,
+    // Magic wand lesson: a wand to try (taken back afterwards unless the player owns one)
+    lendWand: () => {
+      if (hasMagicWand()) return;
+      _tutorialLentWand = true;
+      inventoryState[MAGIC_WAND_ITEM_ID] = ensureCatalogEntry(MAGIC_WAND_ITEM_ID, { count: 1 });
+      updateManaUI();
+      _refreshShowdownButtons();
+    },
+    returnWand: () => {
+      if (!_tutorialLentWand) return;
+      _tutorialLentWand = false;
+      if (_wandActive) equipInventoryItem(FOAM_SWORD_ITEM_ID);
+      delete inventoryState[MAGIC_WAND_ITEM_ID];
+      updateManaUI();
+      _refreshShowdownButtons();
+    },
+    getPlayerCasts: () => _playerCasts,
+    getMagicBlocks: () => _magicBlocks,
+    isPlayerFrozen: () => isPlayerFrozen(),
+    magicBlastsInFlight: () => magicBlasts.count(),
     // Deflect point of the player's sword (same tip the bomb-deflect check uses), or null
     getSwordTip: (out) => {
       if (foamSword?.holder !== playerControls) return null;
@@ -6036,6 +6403,10 @@ async function initCore(runtimeContext) {
     _classicSetPlaying(false);
     for (let i = hordeEnemies.length - 1; i >= 0; i--) _tutorialRemoveEnemy(hordeEnemies[i]);
     playerBombs?.clear();
+    magicBlasts.clear();
+    thawPlayer();
+    // (the wand is Showdown's: other modes start with the sword)
+    if (_wandActive) equipInventoryItem(FOAM_SWORD_ITEM_ID);
     heartBubbles.clear();
     comboMeter.reset();
     _psEnemyQueue = [];
@@ -6606,6 +6977,7 @@ async function initCore(runtimeContext) {
     updateExplosionEffects(frameDelta);
     updatePlayerBubble();
     updatePlayerBombs(frameDelta);
+    _updateMagic(frameDelta);
     showdownTutorial?.update(frameDelta);
     const now = performance.now();
     processIncomingPeerDataQueue();
@@ -6753,6 +7125,13 @@ async function initCore(runtimeContext) {
           _psw.smoothQ.slerp(_phoneSwordGyroQ, 1 - Math.exp(-2 * Math.PI * _cutoffHz * _smoothDt));
         }
         _phoneSwordGyroQ.copy(_psw.smoothQ);
+        // Frozen in ice: the sword is stuck where it was (the shaking still counts — speed above)
+        if (isPlayerFrozen()) {
+          _psw.frozenQ ??= _phoneSwordGyroQ.clone();
+          _phoneSwordGyroQ.copy(_psw.frozenQ);
+        } else {
+          _psw.frozenQ = null;
+        }
 
         // Bounce: snap to recoil target (exp-decay), hold, then return to live gyro
         let activeGyroQ;
@@ -6834,7 +7213,10 @@ async function initCore(runtimeContext) {
         _psw.tipHistory.length = 0;
         _psw.prevTipWorld = null;
       }
-      const _blockToggleSettling = _nowSecPS < (_psw.blockToggleUntil ?? 0);
+      // (frozen in ice: no swings either)
+      const _blockToggleSettling = _nowSecPS < (_psw.blockToggleUntil ?? 0) || isPlayerFrozen();
+      // Magic wand out: swipes cast spells (below) instead of sword hits
+      const _wandOut = _wandActive;
 
       // ── Sword-vs-sword collision + sweep hit detection for horde enemies ─────
       let _swingHitOccurred = false;
@@ -6858,7 +7240,7 @@ async function initCore(runtimeContext) {
         _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
         _psw.bounceCurrentQ.copy(_activeQ);
       };
-      for (const _he of hordeEnemies) {
+      for (const _he of (_wandOut ? [] : hordeEnemies)) {
         if (_he.isDead) continue;
 
         // Sword-sword collision: any player blade point within 0.15 m of any enemy blade point
@@ -6953,7 +7335,7 @@ async function initCore(runtimeContext) {
       // ── Duel / battle: same sweep hit + directional block against other players ──
       // (and battle bots). The attacker detects the hit and reports it (onHit); the victim
       // applies the damage.
-      const _pvpTargets = _getPvpTargets();
+      const _pvpTargets = _wandOut ? _noPvpTargets : _getPvpTargets();
       if (_pvpTargets.length && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld) {
         const _nowMsD = Date.now();
         for (const _opp of _pvpTargets) {
@@ -7008,7 +7390,9 @@ async function initCore(runtimeContext) {
         !_e.isDead && _e.group &&
         playerModel.position.distanceTo(_e.group.position) < _lungeProximityDist
       ) || _pvpTargets.some(_o => playerModel.position.distanceTo(_o.position) < _lungeProximityDist);
-      if (_playerMovingFast && !_swingHitOccurred && !_tooCloseToEnemy) {
+      if (_wandOut) {
+        _updateWandSwipe(_tipWorld, _nowSecPS, _blockingNow || _blockToggleSettling);
+      } else if (_playerMovingFast && !_swingHitOccurred && !_tooCloseToEnemy) {
         const _missFwd = new THREE.Vector3(0, 0, 1).applyQuaternion(playerModel.quaternion);
         _missFwd.y = 0; _missFwd.normalize();
         const _msx = playerModel.position.x + _missFwd.x * 0.15;
@@ -7047,6 +7431,7 @@ async function initCore(runtimeContext) {
         if (playerModel.position.distanceTo(_qe.pos) <= PS_SPAWN_TRIGGER_DIST) {
           _spawnHordeEnemy({
             position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED, bombThrower: _qe.bombThrower,
+            wand: _qe.wand,
             characterUrl: _qe.characterUrl,
             nameTag: _qe.nameTag,
             swordDamage: _classicMode ? CLASSIC_ENEMY_SWORD_DAMAGE : undefined,
@@ -7385,7 +7770,7 @@ async function initCore(runtimeContext) {
       // Determine which swordsmen get an attack slot (closest alive ones, count by stage;
       // bombers don't use slots)
       const _MAX_ATTACKERS = _psMaxAttackers(_psStage);
-      const _liveEnemies = hordeEnemies.filter(e => !e.isDead && !(e instanceof BombThrowerEnemy));
+      const _liveEnemies = hordeEnemies.filter(e => !e.isDead && !(e instanceof BombThrowerEnemy) && !e.wand);
       _liveEnemies.sort((a, b) =>
         a.group.position.distanceTo(playerModel.position) -
         b.group.position.distanceTo(playerModel.position)
@@ -7436,7 +7821,7 @@ async function initCore(runtimeContext) {
         } else {
           _he.update(frameDelta, playerModel, playerControls, shieldEquipped, _allowAttack, _pauseForBomb);
         }
-        _he.onAfterUpdate?.(frameDelta); // (Pemberton: gun / shield / bombs)
+        if (!_he.isFrozen?.()) _he.onAfterUpdate?.(frameDelta); // (Pemberton: gun / shield / bombs; not while frozen)
 
         // Push enemy away if it gets too close to the player (prevents clipping)
         const _pushDist = 0.5;
@@ -7463,7 +7848,7 @@ async function initCore(runtimeContext) {
         const _nowMs2 = Date.now();
         const _phoneSwordHitOk = _psw.swingActive ||
           (_nowMs2 / 1000 < _psw.slowHitWindow);
-        const _canSwordHit = swordMesh?.visible &&
+        const _canSwordHit = swordMesh?.visible && !_wandActive &&
           _phoneSwordHitOk &&
           (_nowMs2 - _he._playerSwordLastHit) > 1000;
         if (_canSwordHit) {
@@ -7524,6 +7909,7 @@ async function initCore(runtimeContext) {
     if (window.localHealth <= 0 && !playerDead) {
       playerDead = true;
       deactivatePlayerBubble();
+      thawPlayer();
       window.onPlayerDeath?.();
       updateControlAvailability();
       const actions = playerModel.userData.actions;

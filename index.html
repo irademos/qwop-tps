@@ -75,6 +75,11 @@
   </div>
   <div id="health-display">
     <div id="health-bar" role="img" aria-label="Health bar"></div>
+    <div id="mana-bar" class="hidden" role="img" aria-label="Mana">
+      <span class="mana-icon">🔮</span>
+      <div class="mana-track"><div id="mana-bar-fill"></div></div>
+      <span id="mana-count">100</span>
+    </div>
   </div>
   <div id="shield-health-display" class="hidden" role="img" aria-label="Shield health bar">
     <span class="shield-hud-icon">🛡</span>
@@ -87,6 +92,7 @@
     <span id="ammo-icon">🔫</span>
     <span id="ammo-count">0</span>
   </div>
+  <div id="frozen-overlay" aria-live="polite"><span class="frozen-label">🧊 FROZEN! Shake your phone to break free</span></div>
   <div id="coin-popup" aria-live="polite" aria-atomic="true"></div>
   <div id="action-buttons"></div>
   
