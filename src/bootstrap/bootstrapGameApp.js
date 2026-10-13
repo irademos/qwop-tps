@@ -109,7 +109,7 @@ const WAND_SWIPE_END_SPEED = 120;        // …and ends when the wand slows down
 const WAND_SWIPE_MAX_S = 0.7;
 const WAND_SWIPE_PEAK_SPEED = 405;       // deg/s the swipe has to reach at some point
 const WAND_SWIPE_MIN_ANGLE = 80;         // deg the wand has to turn through during the swipe
-const WAND_SWIPE_MIN_DIST = 0.45;        // m the wand tip has to travel for a spell
+const WAND_SWIPE_MIN_DIST = 0.4;         // m the wand tip has to travel for a spell
 const WAND_CAST_COOLDOWN_S = 0.45;
 const PLAYER_BLAST_SPEED_MPS = 16;
 const PLAYER_BLAST_LENGTH = 1.4;         // m — the line's length
@@ -6408,6 +6408,10 @@ async function initCore(runtimeContext) {
         inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
       }
       equipInventoryItem(FOAM_SWORD_ITEM_ID);
+      _refreshShowdownButtons();
+    },
+    unequipAll: () => {
+      getEquippedInventoryItemIds().forEach((itemId) => unequipInventoryItem(itemId));
       _refreshShowdownButtons();
     },
     getAmmo: () => getPistolAmmoCount(),

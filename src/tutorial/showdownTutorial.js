@@ -691,21 +691,18 @@ export function createShowdownTutorial(ctx) {
 
   // 16. Frozen by an ice blast: shake the phone to break out
   step(async () => {
-    ctx.equipSword();
+    ctx.unequipAll(); // (nothing in hand: no blocking the ice)
+    onCleanup(() => ctx.equipSword());
     const dir = ctx.getForward(new THREE.Vector3());
     const caster = ctx.spawnWandCaster({ position: pointFromPlayer(dir, WAND_CASTER_DISTANCE), hearts: 5 });
     onCleanup(() => { if (!caster.isDead) removeEnemy(caster); });
     onCleanup(() => { if (ctx.isPlayerFrozen()) ctx.thawPlayer(); }); // (skipped while frozen)
     panel(16, TOTAL, 'FROZEN!',
-      'An 🧊 ice blast freezes you solid — you can’t move, swing or block. Let this one hit you: DON’T block it.');
+      'An 🧊 ice blast freezes you solid — you can’t move, swing or block. Your sword is put away: let this one hit you.');
     let castAt = -Infinity;
     frameHandler = () => {
       if (caster.isDead || ctx.isPlayerFrozen()) return;
       setHighlight(null);
-      if (ctx.isBlocking()) {
-        overlay.setHint('Let go of BLOCK — let the ice hit you this time.', 'warn');
-        return;
-      }
       if (caster._cast || ctx.magicBlastsInFlight() > 0 || performance.now() - castAt < FREEZE_CAST_RETRY_MS) return;
       castAt = performance.now();
       caster.forceCast = { line: 'vertical', element: 'ice' };
