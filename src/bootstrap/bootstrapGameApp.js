@@ -4334,23 +4334,32 @@ async function initCore(runtimeContext) {
   }
 
   /**
-   * Closest in-flight enemy bomb that is heading toward the player (not yet
-   * deflected, horizontal velocity pointing at the player), or null.
-   * While one exists the camera tracks it and sword enemies hold their attacks.
+   * Closest in-flight enemy bomb or enemy magic blast heading toward the player (bombs: not yet
+   * deflected; both: horizontal velocity pointing at the player) — its position, or null.
+   * While one exists the camera tracks it and sword / wand enemies hold their attacks.
    */
-  function _psFindIncomingBomb() {
-    const bombs = window._enemyBombs;
-    if (!playerModel || !Array.isArray(bombs) || bombs.length === 0) return null;
+  function _psFindIncomingThreat() {
+    if (!playerModel) return null;
+    const pp = playerModel.position;
     let closest = null;
     let closestDist = PS_INCOMING_BOMB_RANGE;
-    for (const b of bombs) {
-      if (!b || b.deflected || !b.mesh) continue;
-      const bp = b.mesh.position;
-      const dx = playerModel.position.x - bp.x;
-      const dz = playerModel.position.z - bp.z;
-      if (b.vel.x * dx + b.vel.z * dz <= 0) continue; // moving away / past the player
+    const consider = (pos, vx, vz) => {
+      const dx = pp.x - pos.x;
+      const dz = pp.z - pos.z;
+      if (vx * dx + vz * dz <= 0) return; // moving away / past the player
       const d = Math.hypot(dx, dz);
-      if (d < closestDist) { closestDist = d; closest = b; }
+      if (d < closestDist) { closestDist = d; closest = pos; }
+    };
+    const bombs = window._enemyBombs;
+    if (Array.isArray(bombs)) {
+      for (const b of bombs) {
+        if (!b || b.deflected || !b.mesh) continue;
+        consider(b.mesh.position, b.vel.x, b.vel.z);
+      }
+    }
+    for (const b of magicBlasts.list()) {
+      if (b.side !== 'enemy') continue;
+      consider(b.group.position, b.forward.x, b.forward.z);
     }
     return closest;
   }
@@ -7259,7 +7268,7 @@ async function initCore(runtimeContext) {
 
         // Yaw auto-recentre during calm moments (auto-walk between fights / duel walk-in).
         const _speed = window._pswDebugSpeed ?? 0;
-        const _calmMoment = (_psAutoWalking && playerControls?.isMoving && !_psFindIncomingBomb() &&
+        const _calmMoment = (_psAutoWalking && playerControls?.isMoving && !_psFindIncomingThreat() &&
             !hordeEnemies.some(e => !e.isDead && e.group.position.distanceTo(playerModel.position) < PSW_YAW_RECENTER_ENEMY_DIST)) ||
           _duelWalking;
         if (_calmMoment && !_g.blocking && _speed < PSW_YAW_RECENTER_MAX_SPEED) {
@@ -7666,7 +7675,7 @@ async function initCore(runtimeContext) {
       }
 
       // Auto-walk: pause when an enemy is actively attacking close by,
-      // or while the camera is tracking an incoming bomb (and while a boss talks)
+      // or while the camera is tracking an incoming bomb / magic blast (and while a boss talks)
       if (_psAutoWalking && _psBossTalking) {
         playerControls.isMoving = false;
       } else if (_psAutoWalking) {
@@ -7675,7 +7684,7 @@ async function initCore(runtimeContext) {
           e._aiState === 'attack' &&
           e.group.position.distanceTo(playerModel.position) < 3.5
         );
-        if (_psFindIncomingBomb()) {
+        if (_psFindIncomingThreat()) {
           playerControls.isMoving = false;
         } else if (!_hasNearAttacker) {
           // A boss fighting (Pemberton / a stage boss after its talk): walk toward it (it may
@@ -7772,10 +7781,10 @@ async function initCore(runtimeContext) {
           }
         }
 
-        const _incomingBomb = _psFindIncomingBomb();
-        if (_now >= _psCamManualUntil && _incomingBomb) {
-          // Incoming bomb takes priority over enemies: track the closest one
-          const _bp = _incomingBomb.mesh.position;
+        const _incoming = _psFindIncomingThreat();
+        if (_now >= _psCamManualUntil && _incoming) {
+          // An incoming bomb / magic blast takes priority over enemies: track the closest one
+          const _bp = _incoming;
           const _dx = _bp.x - playerModel.position.x;
           const _dz = _bp.z - playerModel.position.z;
           if (Math.hypot(_dx, _dz) > 0.5) {
@@ -8004,8 +8013,8 @@ async function initCore(runtimeContext) {
       );
       const _attackSlotSet = new Set(_liveEnemies.slice(0, _MAX_ATTACKERS));
 
-      // Sword Showdown: enemies hold their attacks while a bomb is inbound
-      const _pauseForBomb = !!_psFindIncomingBomb();
+      // Sword Showdown: enemies hold their attacks while a bomb / magic blast is inbound
+      const _pauseForBomb = !!_psFindIncomingThreat();
 
       for (let _hi = hordeEnemies.length - 1; _hi >= 0; _hi--) {
         const _he = hordeEnemies[_hi];
