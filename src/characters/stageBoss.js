@@ -27,7 +27,8 @@ export function stageBossGearIcons(stage) {
 
 // The story's stage bosses (stage 1 = index 0; stages 1–10, the guards are stage 10).
 // `name` = how it calls itself (else the character's name), `lines` = [who, text] with who =
-// 'them' / 'you' (a reply button) / 'action', `fight` = the button that starts the fight.
+// 'them' / 'you' (a reply button) / 'action' ({name} = the player's name — createBossTalk's
+// `fill`), `fight` = the button that starts the fight.
 // `spare`: no fight — the button spares it (it joins the player).
 const STORY_BOSSES = [
   { // → Thornwick (the letter)
@@ -78,9 +79,9 @@ const STORY_BOSSES = [
     name: 'Bram',
     lines: [
       ['action', 'He lowers his blade, just a little.'],
-      ['them', 'I saw you at the camp. You stopped. Why?'],
+      ['them', 'I saw you at the camp, {name}. You stopped. Why?'],
       ['you', 'I don’t know any more.'],
-      ['them', 'My name is Bram. I was the smith at Old Hearth, before the bank came for my forge. Remember that name when his man asks how many you killed.'],
+      ['them', 'They say yours is {name}. Mine is Bram. I was the smith at Old Hearth, before the bank came for my forge. Remember that name when his man asks how many you killed.'],
       ['them', 'But I won’t let you through to my family. En garde.'],
     ],
     fight: '⚔️ En garde' },
@@ -89,7 +90,7 @@ const STORY_BOSSES = [
     lines: [
       ['them', 'Bram was my brother.'],
       ['you', 'I’m sorry.'],
-      ['them', 'Sorry. Do you even know what you’re fighting for?'],
+      ['them', 'Sorry. Do you even know what you’re fighting for, {name}?'],
       ['you', 'He pays me.'],
       ['them', 'He pays you with our money. He keeps a ledger — every name, every debt. Bram’s in it. So am I. Find it. Read it. Then decide who the monster is.'],
       ['them', 'But you’ll have to get past me first. I can’t just let you through.'],
@@ -99,7 +100,7 @@ const STORY_BOSSES = [
     name: 'Marta',
     lines: [
       ['action', 'She steps into the road, blade up — then sees your face.'],
-      ['them', 'So. You read the ledger.'],
+      ['them', 'So, {name}. You read the ledger.'],
       ['you', 'Every name. I’m going after him.'],
       ['them', 'Then for once we’re on the same side. I won’t fight you, and you won’t fight me.'],
       ['action', 'She lowers her blade.'],
@@ -111,7 +112,7 @@ const STORY_BOSSES = [
     lines: [
       ['them', 'Halt! Mr. Pemberton’s orders: no monsters past this gate.'],
       ['you', 'Read his ledger. He’s the monster.'],
-      ['them', 'He pays me, friend. Same as he paid you.'],
+      ['them', 'He pays me, {name}. Same as he paid you.'],
       ['them', 'GUARDS! Hold the line!'],
     ],
     fight: '⚔️ Fight' },
@@ -150,11 +151,11 @@ const TALK_WORDS_PER_SEC = 13; // as the villager's
 /**
  * The talk box (bottom centre, over the HUD). One line at a time, played out a word or two at
  * a time; tapping it (or Enter) finishes the line / goes on. A 'you' line is a reply button;
- * the last line ends with the fight / spare button.
+ * the last line ends with the fight / spare button. `fill(text)` fills a line's {name}.
  * @returns {{ open(talk, onDone: (choice: 'fight'|'spare') => void): void, close(): void,
  *             update(dt: number): void, isOpen(): boolean }}
  */
-export function createBossTalk() {
+export function createBossTalk({ fill = (text) => text } = {}) {
   const layer = document.createElement('div');
   layer.className = 'boss-talk-layer hidden';
   layer.innerHTML = `
@@ -172,7 +173,7 @@ export function createBossTalk() {
 
   const setLine = (who, text) => {
     talk.who = who;
-    talk.words = String(text).split(/\s+/).filter(Boolean);
+    talk.words = String(fill(text)).split(/\s+/).filter(Boolean);
     talk.shown = 0;
     talk.acc = 0;
     talk.done = false;
@@ -199,7 +200,7 @@ export function createBossTalk() {
       done(choice);
     };
     const options = reply
-      ? [[reply[1], () => { talk.i += 1; nextLine(); }, 'ui-btn-secondary']]
+      ? [[fill(reply[1]), () => { talk.i += 1; nextLine(); }, 'ui-btn-secondary']]
       : talk.data.spare
         ? [[talk.data.spare, () => finish('spare'), 'ui-btn']]
         : [[talk.data.fight, () => finish('fight'), 'ui-btn']];

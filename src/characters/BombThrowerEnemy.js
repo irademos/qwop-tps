@@ -26,6 +26,7 @@ import { createIceEncasing, setIceEncasingLevel } from '../combat/magicBlast.js'
 
 const _bloodOffset = new THREE.Vector3(0, 0.35, 0); // spray from chest height
 const _homeDir = new THREE.Vector3();
+const _chaseVia = new THREE.Vector3();
 const _bombPrevPos = new THREE.Vector3();
 const _bubbleCenter = new THREE.Vector3();
 const _palm = new THREE.Vector3();
@@ -202,6 +203,9 @@ export class BombThrowerEnemy {
     // Tutorial controls: never walks; throws only while `throwsHeld` is false; `aimAt()`
     // (if it returns a point) replaces aiming at the player
     this.stationary = !!options.stationary;
+    // Optional (pos, targetPos, out) → point to walk toward instead of the target when closing
+    // up, or null (Showdown: keep to the stage path)
+    this.chaseVia = null;
     this.throwsHeld = !!options.throwsHeld;
     this.aimAt      = options.aimAt ?? null;
     this._characterUrl = options.characterUrl ?? glbCharacterConfig.url;
@@ -458,8 +462,12 @@ export class BombThrowerEnemy {
     } else if (dist > MAX_RETREAT_DIST) {
       // Wandered too far — close up
       const speed = CHASE_SPEED * this.speedScale;
-      velX = (dx / Math.max(0.001, dist)) * speed;
-      velZ = (dz / Math.max(0.001, dist)) * speed;
+      const via = this.chaseVia?.(this.group.position, targetModel.position, _chaseVia);
+      const cx = via ? via.x - this.group.position.x : dx;
+      const cz = via ? via.z - this.group.position.z : dz;
+      const cd = Math.max(0.001, Math.hypot(cx, cz));
+      velX = (cx / cd) * speed;
+      velZ = (cz / cd) * speed;
     }
     this.rigidBody.setLinvel({ x: velX, y: vel.y, z: velZ }, true);
 

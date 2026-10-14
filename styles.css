@@ -2388,22 +2388,6 @@ body.settings-open #inventory-button {
 @media (max-width: 520px) {
   .village-top { left: calc(50% + 34px); gap: 6px; padding: 6px 10px; font-size: 13px; }
 }
-/* Walking around: one line of help under the top chip */
-.village-hint {
-  position: absolute;
-  top: calc(52px + env(safe-area-inset-top, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: min(520px, calc(100% - 32px));
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: center;
-  color: var(--text-muted);
-  border-radius: var(--radius-pill);
-  background: var(--surface-hud);
-  pointer-events: none;
-}
 /* Near a station: its button(s) bottom centre ("🛒 Shop", "💬 Talk"…), between the joystick
    (bottom left) and the jump button (bottom right) */
 .village-acts {

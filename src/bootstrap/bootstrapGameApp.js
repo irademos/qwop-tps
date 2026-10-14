@@ -51,7 +51,7 @@ import {
 } from '../combat/magicBlast.js';
 import { setWandGlow } from '../items/magicWand.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
-import { createVillage, PEMBERTON_STAGE } from '../village/villageMode.js';
+import { createVillage, PEMBERTON_STAGE, villagerQuestReward, fillTalk } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createPembertonBoss, createStageBoss, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
@@ -3647,7 +3647,7 @@ async function initCore(runtimeContext) {
   // Starts when the player gets this close; meanwhile nobody attacks (_attacksHeld) and the
   // auto-walk waits. Ends with the fight — or, on SPARED_STAGE, sparing it (_psSpareBoss).
   const BOSS_TALK_DIST = 5;
-  const bossTalk = createBossTalk();
+  const bossTalk = createBossTalk({ fill: (text) => fillTalk(text, { name: playerName || 'friend' }) });
   let _psBossTalking = false;
   const _psSparedEnemies = []; // spared stage bosses: stand there (passive) until the next village
   const _psStartBossTalk = (boss) => {
@@ -4211,10 +4211,33 @@ async function initCore(runtimeContext) {
     if (t.released && !glbCharacter?.actionActive) finishPlayerBombThrow();
   };
   let _psPathEnd = new THREE.Vector3();
-  // Auto-walk waypoints of the current stage (the last one = _psPathEnd) and the next one to reach
-  let _psPathPoints = [];
-  let _psPathIdx = 0;
-  const PS_WAYPOINT_REACHED = 1.5; // m — a waypoint (not the last) this close counts as reached
+  // The current stage's path (createPolyline) and how far along it the player has got: the
+  // auto-walk heads for a point a little further along it from wherever the player is (walking
+  // past a bend by hand never sends them back to it). Enemies chasing from far off follow it too.
+  let _psPath = null;
+  let _psPathProgress = 0;
+  const PS_PATH_LOOKAHEAD = 3;          // m along the path ahead of the player that the auto-walk heads for
+  const PS_PATH_BACKTRACK = 5;          // m: the player's spot on the path never moves back more than this
+  const PS_ENEMY_PATH_DIRECT_DIST = 7;  // m: an enemy closer than this walks straight at the player
+  const PS_ENEMY_PATH_LOOKAHEAD = 3;    // m along the path toward the player
+  const _psPathAheadPoint = new THREE.Vector3();
+  const _psUpdatePathProgress = () => {
+    if (!_psPath) return 0;
+    const s = _psPath.project(playerModel.position.x, playerModel.position.z, _psPathProgress - PS_PATH_BACKTRACK);
+    _psPathProgress = Math.max(_psPathProgress, s);
+    return s;
+  };
+  // EnemyPlayer / BombThrowerEnemy `chaseVia`: walking toward the player from a way off, they
+  // keep to the path (a point a little along it from their own spot, toward the player's)
+  const _psEnemyChaseVia = (pos, target, out) => {
+    if (!_psPath || !_psStageActive) return null;
+    if (Math.hypot(target.x - pos.x, target.z - pos.z) < PS_ENEMY_PATH_DIRECT_DIST) return null;
+    const se = _psPath.project(pos.x, pos.z);
+    const sp = _psPath.project(target.x, target.z, _psPathProgress - PS_PATH_BACKTRACK);
+    const p = _psPath.at(se + Math.sign(sp - se) * Math.min(Math.abs(sp - se), PS_ENEMY_PATH_LOOKAHEAD));
+    if (Math.hypot(p.x - pos.x, p.z - pos.z) < 0.3) return null;
+    return out.set(p.x, pos.y, p.z);
+  };
   let _psAutoWalking = false;
   let _psAutoWalkDir = new THREE.Vector3();
   let _psStageActive = false;
@@ -4453,9 +4476,10 @@ async function initCore(runtimeContext) {
       ];
     }
     const path = createPolyline(pts);
-    _psPathPoints = pts.slice(1).map(p => new THREE.Vector3(p.x, getTerrainHeight(p.x, p.z) ?? playerModel.position.y, p.z));
-    _psPathIdx = 0;
-    _psPathEnd.copy(_psPathPoints[_psPathPoints.length - 1]);
+    _psPath = path;
+    _psPathProgress = 0;
+    const _last = pts[pts.length - 1];
+    _psPathEnd.set(_last.x, getTerrainHeight(_last.x, _last.z) ?? playerModel.position.y, _last.z);
     const _first = path.at(0);
     _psAutoWalkDir.set(_first.dx, 0, _first.dz);
     // Point `t` (0–1) of the way along the stage proper (after the walk out of the village)
@@ -4601,6 +4625,21 @@ async function initCore(runtimeContext) {
     applyDisplaySettings();
   };
   let _psVillageStart = null; // onOk of the open village
+  // Coins the villager (Pemberton) owes for the last stage's quest — paid at the next talk with
+  // him (villageCtx.reward); kept in localStorage `ps_reward_<key>` (guests: this session only)
+  const _psRewardLsKey = () => profileNameKey ? `ps_reward_${profileNameKey}` : null;
+  let _psRewardOwed = (() => { try { const k = _psRewardLsKey(); return k ? (parseInt(localStorage.getItem(k), 10) || 0) : 0; } catch (_) { return 0; } })();
+  const _psSetRewardOwed = (n) => {
+    _psRewardOwed = Math.max(0, Math.floor(n) || 0);
+    try { const k = _psRewardLsKey(); if (k) localStorage.setItem(k, _psRewardOwed); } catch (_) {}
+  };
+  // Pemberton says hello in the first village (once per profile: `ps_intro_<key>`)
+  const _psIntroLsKey = () => profileNameKey ? `ps_intro_${profileNameKey}` : null;
+  let _psIntroSeen = (() => { try { const k = _psIntroLsKey(); return k ? localStorage.getItem(k) === '1' : false; } catch (_) { return false; } })();
+  const _psMarkIntroSeen = () => {
+    _psIntroSeen = true;
+    try { const k = _psIntroLsKey(); if (k) localStorage.setItem(k, '1'); } catch (_) {}
+  };
   // After a stage win the village is built this far ahead along the stage path and the
   // player walks in (nearer spots are tried if the ground there is missing / a cliff)
   const PS_VILLAGE_APPROACH_DISTS = [8, 6, 4];
@@ -4683,6 +4722,7 @@ async function initCore(runtimeContext) {
           + (stage === SPARED_STAGE ? ')' : ` ${stageBossGearIcons(stage)})`)
           + (_psStageBoss.unlocks && stage !== SPARED_STAGE ? ' — beat it to unlock!' : ''),
       finalBoss: _final,
+      intro: stage === 1 && !_psIntroSeen,
     });
   };
 
@@ -6015,6 +6055,17 @@ async function initCore(runtimeContext) {
       _resetForMenu();
       arcadeOverlay.showStartScreen();
     },
+    getPlayerName: () => playerName,
+    reward: {
+      owed: () => _psRewardOwed,
+      collect: () => {
+        const n = _psRewardOwed;
+        if (n <= 0) return;
+        _psSetRewardOwed(0);
+        appState.addCoins(n);
+      },
+    },
+    onIntroDone: _psMarkIntroSeen,
   });
 
   settingsBtn.addEventListener('click', () => {
@@ -7545,7 +7596,7 @@ async function initCore(runtimeContext) {
       for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
         const _qe = _psEnemyQueue[_qi];
         if (playerModel.position.distanceTo(_qe.pos) <= PS_SPAWN_TRIGGER_DIST) {
-          _spawnHordeEnemy({
+          const _psSpawned = _spawnHordeEnemy({
             position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED, bombThrower: _qe.bombThrower,
             wand: _qe.wand,
             characterUrl: _qe.characterUrl,
@@ -7557,9 +7608,14 @@ async function initCore(runtimeContext) {
             stageBoss: _qe.boss && !_qe.pemberton && _qe.bossKey ? { stage: _psStage, key: _qe.bossKey } : null,
             yaw: _qe.yaw,
           });
+          // (bosses wait on the path; everyone else keeps to it when chasing from a way off)
+          if (!_qe.boss && !_tutorialActive) _psSpawned.chaseVia = _psEnemyChaseVia;
           _psEnemyQueue.splice(_qi, 1);
         }
       }
+
+      // How far along the stage path the player has got (by the auto-walk or by hand)
+      if (_psStageActive) _psUpdatePathProgress();
 
       // The stage boss talks first: when the player gets to it
       if (_psBoss && !_psBossTalking && !_psWinShown && !_psBoss.isStarted() && !_psBoss.enemy.isDead
@@ -7583,13 +7639,12 @@ async function initCore(runtimeContext) {
           // A boss fighting (Pemberton / a stage boss after its talk): walk toward it (it may
           // back off to shoot / cast) instead of a path end
           const _bossPos = _psBoss?.isStarted() && !_psBoss.enemy.isDead ? _psBoss.enemy.group.position : null;
-          // (reaching a waypoint moves on to the next one; the last one is the path end)
-          while (!_bossPos && _psPathIdx < _psPathPoints.length - 1) {
-            const _wp = _psPathPoints[_psPathIdx];
-            if (Math.hypot(_wp.x - playerModel.position.x, _wp.z - playerModel.position.z) > PS_WAYPOINT_REACHED) break;
-            _psPathIdx += 1;
+          // Along the path: a little ahead of the player's spot on it (the last point = the end)
+          let _walkTo = _bossPos ?? _psPathEnd;
+          if (!_bossPos && _psPath) {
+            const _ahead = _psPath.at(_psPathProgress + PS_PATH_LOOKAHEAD);
+            _walkTo = _psPathAheadPoint.set(_ahead.x, 0, _ahead.z);
           }
-          const _walkTo = _bossPos ?? _psPathPoints[_psPathIdx] ?? _psPathEnd;
           const _ddx = _walkTo.x - playerModel.position.x;
           const _ddz = _walkTo.z - playerModel.position.z;
           const _distToEnd = Math.sqrt(_ddx * _ddx + _ddz * _ddz);
@@ -7642,6 +7697,8 @@ async function initCore(runtimeContext) {
           _psChars = _psNormalizeChars({ ..._psChars, unlocked: [..._psChars.unlocked, _clearedBoss.key] });
           _psSaveChars();
         }
+        // The quest's pay: handed over at the next talk with the villager
+        if (!_classicMode) _psSetRewardOwed(_psRewardOwed + villagerQuestReward(_psStage));
         // Stage cleared: restore the player to full health
         setStat('health', statsState.maxHealthSegments);
         const _nextStage = _psStage + 1;
