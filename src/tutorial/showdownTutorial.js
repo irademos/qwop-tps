@@ -13,6 +13,7 @@
  *   8. Gun + bullets (bought, equipped, shoot a distant swordsman)
  *   9. Magic wand (lent for the lesson): swipe a blast past a horizontal block
  *  10. Blocking a wand enemy's horizontal blast (blade along the blast)
+ *  11. Frozen by a wand enemy's ice blast: shaking the phone breaks out
  *
  * The player can't die (bootstrapGameApp keeps health full while it runs). Every step can
  * be skipped from the panel (e.g. when playing without a phone). All game access goes
@@ -49,7 +50,10 @@ const GUN_TARGET_DISTANCE = 7;
 const TUTORIAL_SHIELD_HEALTH = 6;       // 3 enemy sword hits
 const BUBBLE_BLOCKS_NEEDED = 2;
 const WAND_BLOCK_PRESET = 2;            // BLOCK_PRESETS: horizontal, mid — blasts past it must not be horizontal
+const WAND_TARGET_DISTANCE = 2.6;       // m: the wand lesson's blocking swordsman stands still here (< ATTACK_RANGE)
 const WAND_CASTER_DISTANCE = 7;
+const TUTORIAL_FREEZE_S = 10;           // the frozen lesson's ice lasts long enough to shake out of
+const FREEZE_CAST_RETRY_MS = 3200;      // a missed / blocked ice blast is cast again after this
 const MAGIC_BLOCK_HOLD_S = 0.35;        // correct block held this long → the caster casts
 const MAGIC_RESULT_TIMEOUT_MS = 2600;
 
@@ -182,11 +186,11 @@ export function createShowdownTutorial(ctx) {
     if (enemy === swordsman) swordsman = null;
   };
 
-  const ensureSwordsman = (script) => {
+  const ensureSwordsman = (script, dist = 2.4) => {
     if (!swordsman || swordsman.isDead || !swordsman.group?.parent) {
       if (swordsman) removeEnemy(swordsman);
       const dir = ctx.getForward(_a);
-      swordsman = ctx.spawnSwordsman({ position: pointFromPlayer(dir, 2.4), hearts: 3, script });
+      swordsman = ctx.spawnSwordsman({ position: pointFromPlayer(dir, dist), hearts: 3, script });
     } else {
       swordsman.script = script;
     }
@@ -215,7 +219,7 @@ export function createShowdownTutorial(ctx) {
   // ── steps ─────────────────────────────────────────────────────────────────
   const steps = [];
   const step = (fn) => steps.push(fn);
-  const TOTAL = 15;
+  const TOTAL = 16;
 
   // 1. Phone setup
   step(async () => {
@@ -585,7 +589,9 @@ export function createShowdownTutorial(ctx) {
     frameHandler = () => setHighlight('wand');
     await waitFor(() => ctx.isEquipped('magic_wand'));
     setHighlight(null);
-    const enemy = ensureSwordsman({ mode: 'block', preset: WAND_BLOCK_PRESET });
+    // A little further back than the sword lessons, standing still (holds the block from there)
+    const enemy = ensureSwordsman({ mode: 'block', preset: WAND_BLOCK_PRESET }, WAND_TARGET_DISTANCE);
+    enemy.stationary = true;
     healSwordsman();
     panel(14, TOTAL, 'CAST A SPELL',
       'Swipe the wand like a sword: the blast flies forward in the SHAPE of your swipe — randomly 🔥 fire (knocks back) or 🧊 ice (freezes). Spells use mana. This enemy blocks HORIZONTALLY, so a horizontal blast is blocked — swipe UP or DOWN to blast past it.');
@@ -680,6 +686,37 @@ export function createShowdownTutorial(ctx) {
     overlay.clearGuides();
     setHighlight(null);
     overlay.setHint('Blocked! ✔', 'ok');
+    await delay(1500);
+  });
+
+  // 16. Frozen by an ice blast: shake the phone to break out
+  step(async () => {
+    ctx.unequipAll(); // (nothing in hand: no blocking the ice)
+    onCleanup(() => ctx.equipSword());
+    const dir = ctx.getForward(new THREE.Vector3());
+    const caster = ctx.spawnWandCaster({ position: pointFromPlayer(dir, WAND_CASTER_DISTANCE), hearts: 5 });
+    onCleanup(() => { if (!caster.isDead) removeEnemy(caster); });
+    onCleanup(() => { if (ctx.isPlayerFrozen()) ctx.thawPlayer(); }); // (skipped while frozen)
+    panel(16, TOTAL, 'FROZEN!',
+      'An 🧊 ice blast freezes you solid — you can’t move, swing or block. Your sword is put away: let this one hit you.');
+    let castAt = -Infinity;
+    frameHandler = () => {
+      if (caster.isDead || ctx.isPlayerFrozen()) return;
+      setHighlight(null);
+      if (caster._cast || ctx.magicBlastsInFlight() > 0 || performance.now() - castAt < FREEZE_CAST_RETRY_MS) return;
+      castAt = performance.now();
+      caster.forceCast = { line: 'vertical', element: 'ice' };
+    };
+    await waitFor(() => ctx.isPlayerFrozen() || caster.isDead);
+    frameHandler = null;
+    if (ctx.isPlayerFrozen()) {
+      ctx.freezePlayer(TUTORIAL_FREEZE_S);
+      overlay.setHint('');
+      panel(16, TOTAL, 'SHAKE TO BREAK FREE',
+        'You’re frozen! The ice melts on its own after a few seconds — SHAKE your phone hard to crack out of it much faster.');
+      await waitFor(() => !ctx.isPlayerFrozen());
+    }
+    overlay.setHint('Free! ✔', 'ok');
     await delay(1500);
   });
 

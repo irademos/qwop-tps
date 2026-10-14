@@ -10,7 +10,7 @@ import { spawnExplosion } from './explosionEffect.js';
 // that target is blocking with its blade along the same line (bladeBlocksBlast). Each blast
 // is randomly FIRE (thrown back like a bomb blast, more damage) or ICE (less damage, frozen in
 // ice cubes for a few seconds). What a hit does is up to the caller (target.onHit).
-// Map surfaces stop blasts (raycastMapSegment). Call update(dt, getTargets) once per frame.
+// Map surfaces stop blasts (raycastMapSegment) unless spawned with `ignoreMap` (tutorial). Call update(dt, getTargets) once per frame.
 
 export const MAGIC_ELEMENTS = {
   fire: { key: 'fire', core: 0xfff0b0, glow: 0xff5a14, spark: 0xffa040 },
@@ -132,7 +132,7 @@ export function createMagicBlasts({ scene }) {
    * getTargets), `element` = 'fire' | 'ice' (random when left out).
    */
   const spawn = ({ origin, forward, line, side = 'player', element = randomMagicElement(), speed = 15,
-    length = 1.4, range = 22, caster = null }) => {
+    length = 1.4, range = 22, caster = null, ignoreMap = false }) => {
     const f = forward.clone();
     if (f.lengthSq() < 1e-6) f.set(0, 0, 1);
     f.normalize();
@@ -173,7 +173,7 @@ export function createMagicBlasts({ scene }) {
     group.traverse((o) => { o.frustumCulled = false; o.renderOrder = 3; });
     scene.add(group);
     const blast = {
-      group, element, side, caster, forward: f, line: l, length, speed, range,
+      group, element, side, caster, forward: f, line: l, length, speed, range, ignoreMap,
       travelled: 0, age: 0, shards, done: false,
     };
     blasts.push(blast);
@@ -211,7 +211,7 @@ export function createMagicBlasts({ scene }) {
         if (along < hitT) { hitT = along; hit = t; }
       }
       // The map stops it (only up to the target's distance)
-      const mapHit = raycastMapSegment(from, to);
+      const mapHit = b.ignoreMap ? null : raycastMapSegment(from, to);
       if (mapHit && (!hit || mapHit.distance < hitT)) {
         const p = mapHit.point.clone();
         burst(p, b.element, 12);

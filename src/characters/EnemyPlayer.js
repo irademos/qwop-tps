@@ -820,8 +820,9 @@ export class EnemyPlayer {
     if (scriptMode === 'passive') {
       this._aiState = 'hold';
     } else if (scriptMode === 'block' || scriptMode === 'windup') {
-      // Scripted stances ignore attack slots and bomb pauses
-      this._aiState = distToTarget < ATTACK_RANGE ? 'attack' : 'chase';
+      // Scripted stances ignore attack slots and bomb pauses (a stationary one holds its
+      // stance from any distance)
+      this._aiState = distToTarget < ATTACK_RANGE || this.stationary ? 'attack' : 'chase';
     } else if (attacksPaused && distToTarget < ATTACK_RANGE) {
       this._aiState = 'hold';
     } else if (!allowAttack && distToTarget < BACKOFF_DIST) {
