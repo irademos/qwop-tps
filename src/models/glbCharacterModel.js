@@ -51,7 +51,8 @@ import { addBlobShadow } from '../environment/blobShadows.js';
 
 export const glbCharacterConfig = {
   url: '/models/glb_characters/gemhorn_rigged.glb',       // default character (enemies, bomber)
-  frogManUrl: '/models/glb_characters/frog_man.glb',       // default player character; Showdown's base enemy
+  psychicKidUrl: '/models/glb_characters/psychic_kid.glb', // default player character (unlocked from the start)
+  frogManUrl: '/models/glb_characters/frog_man.glb',       // Showdown's base enemy; Showdown boss unlock
   antlerGuyUrl: '/models/glb_characters/antler_guy.glb',   // a quarter of the EnemyPlayers
   pumpkinUrl: '/models/glb_characters/pumpkin.glb',        // Multiplayer roster / Showdown unlock
   wizardUrl: '/models/glb_characters/wizard.glb',          // Multiplayer roster / Showdown unlock
@@ -68,6 +69,7 @@ export const glbCharacterConfig = {
   heightScaleByUrl: {
     '/models/glb_characters/tree_creature.glb': 1.4,
     '/models/glb_characters/gemhorn_rigged.glb': 1.4,
+    '/models/glb_characters/psychic_kid.glb': 0.7,
   },
 
   // Arm IK
