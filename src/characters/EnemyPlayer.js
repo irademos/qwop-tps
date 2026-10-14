@@ -219,6 +219,8 @@ export const BLOCK_MIN_ANGLE_DEG = 30;
 // within this (smaller) angle of their blade's line slip past it.
 export const PLAYER_BLOCK_MIN_ANGLE_DEG = 15;
 const PLAYER_BLOCK_REACH         = 0.85;  // m, from any point of the player's blade
+// How far a blocking enemy's blade gives along the blocked swing before easing back (applyBlockImpact)
+const BLOCK_IMPACT_ANGLE = (12 * Math.PI) / 180;
 const _blkS = new THREE.Vector3();
 const _blkB = new THREE.Vector3();
 const _blkV = new THREE.Vector3();
@@ -1254,8 +1256,30 @@ export class EnemyPlayer {
     return swingCrossesBlade(swingDir, _bladeDir, _toTarget);
   }
 
-  /** Called externally when the player's sword hits this sword. */
+  /**
+   * Called when this enemy's block stops a hit (sword swing / blast). Unlike applySwordBounce
+   * the blade stays in the block stance — it only gives a little along `swingDir` (world
+   * space, optional) and eases back — so the visible blade always matches what blocksSwing checks.
+   */
+  applyBlockImpact(swingDir = null) {
+    this.swordBounces += 1;
+    this._bounceActive = false;
+    if (swingDir && this._attackPhase === 'block') {
+      this.group.getWorldQuaternion(_rootQ);
+      _bladeDir.copy(this._blockPreset.dir).applyQuaternion(_rootQ);
+      _tmpV.crossVectors(_bladeDir, swingDir);
+      if (_tmpV.lengthSq() > 1e-8) {
+        _tmpQ.setFromAxisAngle(_tmpV.normalize(), BLOCK_IMPACT_ANGLE);
+        this._swordQuaternion.premultiply(_tmpQ); // block-stance slerp in _updateSword eases it back
+      }
+    }
+    window._pswShowBlockFlash?.('enemy');
+  }
+
+  /** Called externally when this sword is blocked / bounced (its own swing stopped). */
   applySwordBounce() {
+    // A blocking enemy did the blocking — never recoil out of its stance
+    if (this.isBlocking()) { this.applyBlockImpact(); return; }
     const dur = (window.phoneSwordSwingCfg?.enemyBounceHoldDur ?? 2.0) * 1000;
     this.swordBounces += 1;
     this._bounceActive    = true;
@@ -1277,7 +1301,8 @@ export class EnemyPlayer {
 
     // Bounce overrides normal sword motion for 0.5 s
     if (this._bounceActive) {
-      if (Date.now() > this._bounceEndTime) {
+      // (a block stance takes the sword back at once, so the blade shown is the one that blocks)
+      if (Date.now() > this._bounceEndTime || this._attackPhase === 'block') {
         this._bounceActive = false;
       } else {
         const cfg = window.phoneSwordSwingCfg;
