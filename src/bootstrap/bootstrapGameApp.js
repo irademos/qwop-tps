@@ -54,7 +54,8 @@ import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage, PEMBERTON_STAGE } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
-import { createPembertonBoss, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
+import { createPembertonBoss, createStageBoss, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
+import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE } from '../characters/stageBoss.js';
 
 import {
   clearStoredPin,
@@ -3541,7 +3542,7 @@ async function initCore(runtimeContext) {
         characterUrl: opts.characterUrl,
         swordDamage: opts.swordDamage,
         nameTag: opts.nameTag,
-        showHealthBar: !opts.pemberton, // (his is across the top of the screen)
+        showHealthBar: !opts.pemberton && !opts.stageBoss, // (theirs is across the top of the screen)
         wand: !!opts.wand,
         ranged: opts.wand ? WAND_ENEMY_RANGE : undefined,
       });
@@ -3549,6 +3550,7 @@ async function initCore(runtimeContext) {
       if (opts.wand) enemy.onCast = (cast) => _castEnemySpell(enemy, cast);
       if (Number.isFinite(opts.yaw)) enemy.group.rotation.y = opts.yaw;
       if (opts.pemberton) _psSpawnPemberton(enemy);
+      else if (opts.stageBoss) _psSpawnStageBoss(enemy, opts.stageBoss);
     }
     hordeEnemies.push(enemy);
     return enemy;
@@ -3560,10 +3562,12 @@ async function initCore(runtimeContext) {
   const PEMBERTON_BULLET_DAMAGE = 1;
   const PEMBERTON_BOMB_DAMAGE = 2;
   const PEMBERTON_BULLET_SPEED = 13;  // m/s — slow enough to see coming (the player's: 28)
-  const PEMBERTON_WALK_STOP_DIST = 3; // m — the final stage's auto-walk closes in this far
-  let _psPemberton = null;            // createPembertonBoss() while he's in the stage
+  const PEMBERTON_WALK_STOP_DIST = 3; // m — the auto-walk closes in this far on a fighting boss
+  // The stage's boss fighter (pembertonBoss.js) while it's in the stage: Pemberton, or the
+  // final enemy of any other stage (createStageBoss — talks first, then fights)
+  let _psBoss = null;
   const _psIsFinalStage = (stage) => !_classicMode && stage === PEMBERTON_STAGE;
-  // A boss bullet / bomb reached the player: bubble and a shield facing it stop it
+  // A boss bullet / bomb reached the player (Pemberton's, or a stage boss's): bubble and a shield facing it stop it
   const _pembertonHitPlayer = (dmg, src, dir, blastFalloff = null) => {
     if (playerDead || window.isPlayerBubbleActive?.()) return;
     if (src) {
@@ -3597,31 +3601,87 @@ async function initCore(runtimeContext) {
       _pembertonHitPlayer(PEMBERTON_BOMB_DAMAGE, src, direction, falloff);
     },
   }];
-  const _psSpawnPemberton = (enemy) => {
-    _psPemberton?.dispose();
-    const boss = createPembertonBoss({
-      enemy,
-      name: '🎩 Pemberton',
-      getTarget: () => (_attacksHeld() ? null : playerModel),
-      getWeaponGear: () => matchCtx.getWeaponGear(),
-      fireBullet: (origin, dir) => spawnProjectileWithPerfFlags(scene, projectiles, origin, dir, 'pemberton', {
-        geometry: new THREE.SphereGeometry(0.1, 8, 8),
-        colliderDesc: RAPIER.ColliderDesc.ball(0.1).setRestitution(0.3).setFriction(0.5),
-        color: new THREE.Color(0xff4422),
-        speed: PEMBERTON_BULLET_SPEED,
-        lifetime: 2500,
-        hostile: true,
-      }),
-      throwBomb: (origin, target) => playerBombs.throw(origin, target, { getBlastTargets: () => _pembertonBombTargets, keepHeld: true }),
-      onShieldBlock: () => duelCtx.onShieldHit(),
-    });
+  // What a boss fighter (Pemberton / a stage boss) gets from the game
+  const _bossFighterCtx = (enemy) => ({
+    enemy,
+    getTarget: () => (_attacksHeld() ? null : playerModel),
+    getWeaponGear: () => matchCtx.getWeaponGear(),
+    fireBullet: (origin, dir) => spawnProjectileWithPerfFlags(scene, projectiles, origin, dir, 'pemberton', {
+      geometry: new THREE.SphereGeometry(0.1, 8, 8),
+      colliderDesc: RAPIER.ColliderDesc.ball(0.1).setRestitution(0.3).setFriction(0.5),
+      color: new THREE.Color(0xff4422),
+      speed: PEMBERTON_BULLET_SPEED,
+      lifetime: 2500,
+      hostile: true,
+    }),
+    throwBomb: (origin, target) => playerBombs.throw(origin, target, { getBlastTargets: () => _pembertonBombTargets, keepHeld: true }),
+    onShieldBlock: () => duelCtx.onShieldHit(),
+    wandRange: WAND_ENEMY_RANGE,
+  });
+  const _psTrackBoss = (boss, enemy) => {
     const baseDispose = boss.dispose;
     boss.dispose = () => {
       baseDispose();
-      if (_psPemberton === boss) _psPemberton = null;
+      if (_psBoss === boss) _psBoss = null;
     };
-    _psPemberton = boss;
+    _psBoss = boss;
     enemy.onAfterUpdate = () => boss.update();
+  };
+  const _psSpawnPemberton = (enemy) => {
+    _psBoss?.dispose();
+    _psTrackBoss(createPembertonBoss({ ..._bossFighterCtx(enemy), name: '🎩 Pemberton' }), enemy);
+  };
+  // A stage's final enemy: waits on the path, talks when the player gets to it (_psStartBossTalk),
+  // then grows, glows red and fights with the stage's gear (stageBoss.js)
+  // info: { stage, key } (key: its MATCH_CHARACTERS key)
+  const _psSpawnStageBoss = (enemy, { stage, key }) => {
+    _psBoss?.dispose();
+    const talk = stageBossTalk(stage, MATCH_CHARACTERS[key], { afterStory: stage > PEMBERTON_STAGE });
+    const boss = createStageBoss({ ..._bossFighterCtx(enemy), name: talk.name, gear: stageBossGear(stage) });
+    boss.talk = talk;
+    enemy.onCast = (cast) => _castEnemySpell(enemy, cast); // (its wand spells)
+    _psTrackBoss(boss, enemy);
+  };
+
+  // ── A stage boss's talk (src/characters/stageBoss.js) ──
+  // Starts when the player gets this close; meanwhile nobody attacks (_attacksHeld) and the
+  // auto-walk waits. Ends with the fight — or, on SPARED_STAGE, sparing it (_psSpareBoss).
+  const BOSS_TALK_DIST = 5;
+  const bossTalk = createBossTalk();
+  let _psBossTalking = false;
+  const _psSparedEnemies = []; // spared stage bosses: stand there (passive) until the next village
+  const _psStartBossTalk = (boss) => {
+    _psBossTalking = true;
+    playerControls.isMoving = false;
+    bossTalk.open(boss.talk, (choice) => {
+      _psBossTalking = false;
+      if (_psBoss !== boss || boss.enemy.isDead) return;
+      if (choice === 'spare') _psSpareBoss(boss);
+      else boss.start();
+    });
+  };
+  const _psCloseBossTalk = () => {
+    bossTalk.close();
+    _psBossTalking = false;
+  };
+  // Spared: out of the fight (no longer one of hordeEnemies), counts toward the stage, joins the
+  // player (the win banner says so — _psShowWin)
+  const _psSpareBoss = (boss) => {
+    const enemy = boss.enemy;
+    boss.dispose();
+    enemy.onAfterUpdate = null;
+    const i = hordeEnemies.indexOf(enemy);
+    if (i !== -1) hordeEnemies.splice(i, 1);
+    _psSparedEnemies.push(enemy);
+    if (_psStageBoss) _psStageBoss.spared = true;
+    _psStageKills++;
+    _psUpdateKillHud(_psStageActive);
+  };
+  const _psClearSpared = () => {
+    for (const e of _psSparedEnemies.splice(0)) {
+      if (e.group?.parent) e.group.parent.remove(e.group);
+      try { e.destroy?.(); } catch (_) {}
+    }
   };
 
   // ── Phone Sword: stage progression system ─────────────────────────────────
@@ -4170,7 +4230,7 @@ async function initCore(runtimeContext) {
     && !multiplayer
     && (_psStageActive || !!showdownTutorial?.isActive());
   // Enemies don't attack the player: dead (body carried off) or just back from a pause
-  const _attacksHeld = () => playerDead || performance.now() < _pauseGraceUntil;
+  const _attacksHeld = () => playerDead || _psBossTalking || performance.now() < _pauseGraceUntil;
   let _psStageKills = 0;       // enemies killed this stage
   let _psStageTotal = 0;       // enemies in this stage
   let _psKillHud = null;
@@ -4403,6 +4463,7 @@ async function initCore(runtimeContext) {
     _psEnemyQueue = [];
     const _charPool = _psEnemyCharacterPool();
     if (!_classicMode && !_psStageBoss) _psStageBoss = _psPickBoss();
+    if (_psStageBoss) _psStageBoss.spared = false; // (a retry: talks again)
     // The final stage is Pemberton alone, right where he stood (no coins or heart bubbles)
     const _final = _psIsFinalStage(stage);
     if (_final) {
@@ -4447,6 +4508,7 @@ async function initCore(runtimeContext) {
         wand: !isBoss && !_bomber && Math.random() < _wandChance,
         characterUrl: _classicMode ? _classicMiiUrl() : MATCH_CHARACTERS[charKey].url,
         boss: isBoss,
+        bossKey: isBoss ? charKey : null,
         nameTag: _classicMode ? _classicName() : null,
       });
     }
@@ -4492,7 +4554,7 @@ async function initCore(runtimeContext) {
     _classicSetPlaying(false);
     const _unlocked = !_classicMode && _psStageBoss?.unlocks ? MATCH_CHARACTERS[_psStageBoss.key] : null;
     _psWinSub.textContent = _unlocked
-      ? `${_unlocked.emoji} ${_unlocked.label} unlocked!`
+      ? `${_unlocked.emoji} ${_unlocked.label} ${_psStageBoss.spared ? 'joined you' : 'unlocked'}!`
       : `Stage ${_psStage} Cleared!`;
     // The story's end: Pemberton beaten (unlocks the villager)
     if (!_classicMode && _psStageBoss?.pemberton) {
@@ -4521,6 +4583,7 @@ async function initCore(runtimeContext) {
   let village = null;
   let deathCarry = null;
   const _psClearDeadEnemies = () => {
+    _psClearSpared();
     for (let _di = hordeEnemies.length - 1; _di >= 0; _di--) {
       const _de = hordeEnemies[_di];
       if (_de.isDead) {
@@ -4616,8 +4679,9 @@ async function initCore(runtimeContext) {
         ?? _psPickPathAngle(PS_VILLAGE_EXIT_DIST + _psPathLength(stage), _center ?? playerModel.position),
       boss: _final
         ? `🎩 Pemberton (${PEMBERTON_HEARTS} ❤️)`
-        : `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️)`
-          + (_psStageBoss.unlocks ? ' — beat it to unlock!' : ''),
+        : `Final enemy: ${_boss.emoji} ${_boss.label} (${_psBossHearts(stage)} ❤️`
+          + (stage === SPARED_STAGE ? ')' : ` ${stageBossGearIcons(stage)})`)
+          + (_psStageBoss.unlocks && stage !== SPARED_STAGE ? ' — beat it to unlock!' : ''),
       finalBoss: _final,
     });
   };
@@ -4753,6 +4817,8 @@ async function initCore(runtimeContext) {
       try { _re.destroy?.(); } catch (_) {}
     }
     hordeEnemies.length = 0;
+    _psClearSpared();
+    _psCloseBossTalk();
     playerBombs?.clear();
     heartBubbles.clear();
     comboMeter.reset();
@@ -6449,6 +6515,8 @@ async function initCore(runtimeContext) {
     _classicCountdown = false;
     _classicSetPlaying(false);
     for (let i = hordeEnemies.length - 1; i >= 0; i--) _tutorialRemoveEnemy(hordeEnemies[i]);
+    _psClearSpared();
+    _psCloseBossTalk();
     playerBombs?.clear();
     magicBlasts.clear();
     thawPlayer();
@@ -7288,7 +7356,7 @@ async function initCore(runtimeContext) {
         _psw.bounceTargetQ.copy(_yRot).multiply(_activeQ);
         _psw.bounceCurrentQ.copy(_activeQ);
       };
-      for (const _he of (_wandOut ? [] : hordeEnemies)) {
+      for (const _he of (_wandOut || _psBossTalking ? [] : hordeEnemies)) { // (no hits while a boss talks)
         if (_he.isDead) continue;
 
         // Sword-sword collision: any player blade point within 0.15 m of any enemy blade point
@@ -7486,15 +7554,24 @@ async function initCore(runtimeContext) {
             swingChance: _qe.pemberton ? PEMBERTON_SWING_CHANCE
               : _qe.boss ? Math.min(0.75, _psSwingChance(_psStage) + PS_BOSS_SWING_BONUS) : undefined,
             pemberton: _qe.pemberton,
+            stageBoss: _qe.boss && !_qe.pemberton && _qe.bossKey ? { stage: _psStage, key: _qe.bossKey } : null,
             yaw: _qe.yaw,
           });
           _psEnemyQueue.splice(_qi, 1);
         }
       }
 
+      // The stage boss talks first: when the player gets to it
+      if (_psBoss && !_psBossTalking && !_psWinShown && !_psBoss.isStarted() && !_psBoss.enemy.isDead
+        && playerModel.position.distanceTo(_psBoss.enemy.group.position) <= BOSS_TALK_DIST) {
+        _psStartBossTalk(_psBoss);
+      }
+
       // Auto-walk: pause when an enemy is actively attacking close by,
-      // or while the camera is tracking an incoming bomb
-      if (_psAutoWalking) {
+      // or while the camera is tracking an incoming bomb (and while a boss talks)
+      if (_psAutoWalking && _psBossTalking) {
+        playerControls.isMoving = false;
+      } else if (_psAutoWalking) {
         const _hasNearAttacker = hordeEnemies.some(e =>
           !e.isDead &&
           e._aiState === 'attack' &&
@@ -7503,8 +7580,9 @@ async function initCore(runtimeContext) {
         if (_psFindIncomingBomb()) {
           playerControls.isMoving = false;
         } else if (!_hasNearAttacker) {
-          // Final stage: walk toward Pemberton (he backs off to shoot) instead of a path end
-          const _bossPos = _psPemberton && !_psPemberton.enemy.isDead ? _psPemberton.enemy.group.position : null;
+          // A boss fighting (Pemberton / a stage boss after its talk): walk toward it (it may
+          // back off to shoot / cast) instead of a path end
+          const _bossPos = _psBoss?.isStarted() && !_psBoss.enemy.isDead ? _psBoss.enemy.group.position : null;
           // (reaching a waypoint moves on to the next one; the last one is the path end)
           while (!_bossPos && _psPathIdx < _psPathPoints.length - 1) {
             const _wp = _psPathPoints[_psPathIdx];
@@ -7551,7 +7629,8 @@ async function initCore(runtimeContext) {
       }
 
       // Win detection
-      if (_psStageActive && !_psWinShown && _psEnemyQueue.length === 0 && hordeEnemies.length > 0 && hordeEnemies.every(e => e.isDead)) {
+      if (_psStageActive && !_psWinShown && _psEnemyQueue.length === 0 && (hordeEnemies.length > 0 || _psSparedEnemies.length > 0)
+        && hordeEnemies.every(e => e.isDead)) {
         _psStageActive = false;
         _psWinShown = true;
         comboMeter.end();
@@ -7818,7 +7897,8 @@ async function initCore(runtimeContext) {
       // Determine which swordsmen get an attack slot (closest alive ones, count by stage;
       // bombers don't use slots)
       const _MAX_ATTACKERS = _psMaxAttackers(_psStage);
-      const _liveEnemies = hordeEnemies.filter(e => !e.isDead && !(e instanceof BombThrowerEnemy) && !e.wand);
+      const _liveEnemies = hordeEnemies.filter(e => !e.isDead && !(e instanceof BombThrowerEnemy) && !e.wand
+        && e.script?.mode !== 'passive'); // (a stage boss waiting to talk)
       _liveEnemies.sort((a, b) =>
         a.group.position.distanceTo(playerModel.position) -
         b.group.position.distanceTo(playerModel.position)
@@ -7896,7 +7976,7 @@ async function initCore(runtimeContext) {
         const _nowMs2 = Date.now();
         const _phoneSwordHitOk = _psw.swingActive ||
           (_nowMs2 / 1000 < _psw.slowHitWindow);
-        const _canSwordHit = swordMesh?.visible && !_wandActive &&
+        const _canSwordHit = swordMesh?.visible && !_wandActive && !_psBossTalking &&
           _phoneSwordHitOk &&
           (_nowMs2 - _he._playerSwordLastHit) > 1000;
         if (_canSwordHit) {
@@ -8135,6 +8215,9 @@ async function initCore(runtimeContext) {
       pvpTargets: matchMode?.getShotTargets() ?? null,
       localTarget: _attacksHeld() ? null : _pembertonShotTarget
     });
+    // A stage boss's talk box; spared bosses stand there facing the player
+    bossTalk.update(frameDelta);
+    for (const _se of _psSparedEnemies) _se.update(frameDelta, playerModel, playerControls, false, false, true);
     // Village (between Showdown stages): walks the player around and has the last word on the camera
     village?.update(frameDelta);
     // Showdown death: the carriers + the fixed camera

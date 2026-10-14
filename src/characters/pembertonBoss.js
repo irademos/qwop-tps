@@ -1,17 +1,24 @@
 /**
- * Pemberton — the Sword Showdown story's final boss (stage PEMBERTON_STAGE, villageMode.js).
+ * Sword Showdown boss fighters: Pemberton — the story's final boss (stage PEMBERTON_STAGE,
+ * villageMode.js) — and every stage's final enemy (createStageBoss, after its talk —
+ * src/characters/stageBoss.js).
  *
- * An EnemyPlayer (the villager character) PEMBERTON_SCALE× tall, glowing red (addRedGlow,
- * also used on him in the village), with a big health bar across the top of the screen.
- * Mostly fights with his sword, and between sword spells he:
- *   • backs off and shoots the gun (`ranged`, hostile bullets — ctx.fireBullet),
- *   • raises a shield and advances behind it (blocks sword swings, bullets and bombs),
- *   • lobs a bomb now and then when the player is at a distance (ctx.throwBomb).
+ * An EnemyPlayer made bigger (`scale`), glowing red (addRedGlow, also used on Pemberton in the
+ * village), with a big health bar across the top of the screen. Mostly fights with its sword,
+ * and, with the gear it was given (`gear`), between sword spells it:
+ *   • gun    — backs off and shoots (`ranged`, hostile bullets — ctx.fireBullet),
+ *   • shield — raises a shield and advances behind it (blocks swings, bullets, bombs, blasts),
+ *   • wand   — backs off and casts fire / ice blasts (EnemyPlayer's wand AI → enemy.onCast),
+ *   • bombs  — lobs a bomb now and then when the player is at a distance (ctx.throwBomb),
+ *   • bubble — after a hit, now and then a bubble round it stops everything for a while.
  * The gun / shield are the player's own models, held like Multiplayer Guns & Bombs bots hold
- * them (ctx.getWeaponGear). Game access goes through `ctx` (see createPembertonBoss).
+ * them (ctx.getWeaponGear). A stage boss waits (`autoStart: false`: passive, can't be hurt)
+ * until start() — then it grows to its size over GROW_MS and the glow + health bar come on.
+ * Game access goes through `ctx` (see createBossFighter).
  */
 
 import * as THREE from 'three';
+import { createWandModel, setWandGlow } from '../items/magicWand.js';
 
 export const PEMBERTON_SCALE = 1.5;
 export const PEMBERTON_HEARTS = 15;
@@ -20,12 +27,19 @@ const PEMBERTON_SWORD_SCALE = 1.3;
 // Body hit sphere for the player's sword (bigger than a normal enemy's 0.65 m at 0.8 m up)
 const PEMBERTON_BODY_HIT_RADIUS = 0.85;
 const PEMBERTON_BODY_HIT_CENTER_Y = 1.1;
+// Stage bosses (createStageBoss): a little bigger once the fight starts
+export const STAGE_BOSS_SCALE = 1.25;
+const STAGE_BOSS_SWORD_SCALE = 1.12;
+const STAGE_BOSS_BODY_HIT_RADIUS = 0.75;
+const STAGE_BOSS_BODY_HIT_CENTER_Y = 0.95;
+const GROW_MS = 900;                 // start(): grows to its size over this long
 
-// Phases: 'sword' (the normal sword AI) → 'gun' or 'shield' → back to 'sword'
+// Phases: 'sword' (the normal sword AI) → 'gun', 'shield' or 'wand' (what it has) → 'sword'
 const SWORD_MS = [6500, 10500];
 const GUN_MS = [4000, 6500];
 const SHIELD_MS = [2200, 3600];
-const GUN_CHANCE = 0.6;              // after a sword spell: gun, else shield
+const WAND_MS = [4500, 7000];
+const GUN_CHANCE = 0.6;              // Pemberton after a sword spell: gun, else shield
 const GUN_RANGE = { min: 6, max: 11 };    // keeps this far away while shooting
 const SHIELD_RANGE = { min: 1.4, max: 3.2 }; // walks in behind the shield
 const SHOT_MS = [850, 1600];
@@ -35,6 +49,11 @@ const MUZZLE = new THREE.Vector3(0, 1.0, 0.75); // model space (scaled with him)
 const BOMB_MS = [5000, 8500];
 const BOMB_RANGE = [4.5, 14];        // only from a distance
 const BOMB_HAND = new THREE.Vector3(0, 1.6, 0.3);
+const BUBBLE_MS = 3500;              // a bubble lasts this long…
+const BUBBLE_COOLDOWN_MS = [11000, 16000]; // …and the next can't come sooner
+const BUBBLE_CHANCE = 0.5;           // after a hit that didn't kill it
+const BUBBLE_RADIUS = 1.0;           // model space (scaled with it)
+const BUBBLE_CENTER_Y = 0.75;
 const SHIELD_ARC_DOT = 0.2;          // hits from in front of the shield (cos of ~78°)
 const PLAYER_CENTER_Y = 0.8;
 const HUD_HIDE_MS = 2500;            // health bar stays up this long after he falls
@@ -129,37 +148,88 @@ function bossHud() {
   return hudEl;
 }
 
+const bubbleMaterial = () => new THREE.MeshPhongMaterial({
+  color: 0x7fd8ff,
+  emissive: 0x1a5f8a,
+  specular: 0xffffff,
+  shininess: 90,
+  transparent: true,
+  opacity: 0.3,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+
+/**
+ * Pemberton: sword, gun, shield and bombs, PEMBERTON_SCALE× tall from the start.
+ * ctx: as createBossFighter (without gear / scale).
+ */
+export function createPembertonBoss(ctx) {
+  return createBossFighter({
+    ...ctx,
+    scale: PEMBERTON_SCALE,
+    swordScale: PEMBERTON_SWORD_SCALE,
+    bodyHitRadius: PEMBERTON_BODY_HIT_RADIUS,
+    bodyHitCenterY: PEMBERTON_BODY_HIT_CENTER_Y,
+    gear: { gun: true, shield: true, bombs: true },
+  });
+}
+
+/**
+ * A stage's final enemy, after its talk: waits (passive, can't be hurt) until start(), then
+ * grows to STAGE_BOSS_SCALE, glows red and fights with `gear` (stageBossGear in stageBoss.js).
+ * ctx: as createBossFighter (without scale); also `gear`.
+ */
+export function createStageBoss(ctx) {
+  return createBossFighter({
+    ...ctx,
+    scale: STAGE_BOSS_SCALE,
+    swordScale: STAGE_BOSS_SWORD_SCALE,
+    bodyHitRadius: STAGE_BOSS_BODY_HIT_RADIUS,
+    bodyHitCenterY: STAGE_BOSS_BODY_HIT_CENTER_Y,
+    autoStart: false,
+  });
+}
+
 /**
  * @param {object} ctx
- *  enemy                          — the EnemyPlayer (villager character), already spawned
+ *  enemy                          — the EnemyPlayer, already spawned
  *  name                           — shown over the health bar
+ *  gear                           — { gun, shield, wand, bombs, bubble } (booleans)
+ *  scale / swordScale             — its size (and its sword's) once fighting
+ *  bodyHitRadius / bodyHitCenterY — the player's sword's hit sphere on it (at that size)
+ *  autoStart                      — false: waits for start() (see createStageBoss)
+ *  wandRange                      — { min, max } kept from the player while casting
  *  getTarget() → THREE.Object3D|null — the player model (null while dead)
  *  getWeaponGear() → { gun, shield } | null — as matchCtx.getWeaponGear (Guns & Bombs)
  *  fireBullet(origin, dir)        — a hostile bullet
  *  throwBomb(origin, target)      — a bomb that can blast the player
- *  onShieldBlock(position)        — his shield stopped something
- * @returns {{ enemy, update(): void, dispose(): void, isShieldUp(): boolean }}
+ *  onShieldBlock(position)        — its shield / bubble stopped something
+ * @returns {{ enemy, start(): void, isStarted(): boolean, update(): void, dispose(): void, isShieldUp(): boolean }}
  */
-export function createPembertonBoss(ctx) {
+export function createBossFighter(ctx) {
   const { enemy } = ctx;
-  enemy.group.scale.setScalar(PEMBERTON_SCALE);
-  enemy._swordGroup.scale.setScalar(PEMBERTON_SWORD_SCALE);
-  enemy.bodyHitRadius = PEMBERTON_BODY_HIT_RADIUS;
-  enemy.bodyHitCenterY = PEMBERTON_BODY_HIT_CENTER_Y;
+  const gear = { gun: false, shield: false, wand: false, bombs: false, bubble: false, ...ctx.gear };
+  const scale = ctx.scale ?? 1;
+  const swordScale = ctx.swordScale ?? 1;
 
+  let started = false;
+  let growFrom = 0;       // performance.now() when start() was called (grow-in)
   let phase = 'sword';
-  let phaseUntil = performance.now() + randIn(SWORD_MS);
+  let phaseUntil = 0;
   let nextShotAt = 0;
-  let nextBombAt = performance.now() + randIn(BOMB_MS);
-  let gear = null;        // { gunMesh, shieldMesh, gripGun, gripShield }
+  let nextBombAt = 0;
+  let held = null;        // { gunMesh, shieldMesh, gripGun, gripShield }
+  let wandModel = null;
+  let swordParts = null;  // the sword model's meshes (hidden while the wand is out)
+  let bubble = null;      // the bubble mesh (child of enemy.group)
+  let bubbleUntil = 0;
+  let nextBubbleAt = 0;
   let glow = null;
   let disposed = false;
   let hideTimer = null;
   let shownFrac = -1;
 
   const hud = bossHud();
-  hud.name.textContent = ctx.name;
-  hud.root.classList.remove('hidden', 'boss-health-out');
   const setHud = (frac) => {
     if (frac === shownFrac) return;
     shownFrac = frac;
@@ -167,9 +237,14 @@ export function createPembertonBoss(ctx) {
     hud.lag.style.width = `${frac * 100}%`;
     hud.root.classList.toggle('boss-health-low', frac <= 0.3);
   };
-  setHud(1);
 
-  const shieldUp = () => phase === 'shield' && !!gear && !enemy.isDead;
+  // (body.boss-health-up: the kill counter makes way for the bar — styles.css)
+  const hideHud = () => {
+    hud.root.classList.add('hidden');
+    document.body.classList.remove('boss-health-up');
+  };
+  const shieldUp = () => phase === 'shield' && !!held && !enemy.isDead;
+  const bubbleUp = () => started && !enemy.isDead && performance.now() < bubbleUntil;
   const facesShield = (pos) => {
     if (!pos) return true;
     const g = enemy.group;
@@ -179,25 +254,63 @@ export function createPembertonBoss(ctx) {
     _v2.set(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
     return _v2.dot(_v) > SHIELD_ARC_DOT;
   };
+  // Shield (from in front) or bubble (from anywhere) in the way
+  const guarded = (fromPos) => bubbleUp() || (shieldUp() && facesShield(fromPos));
 
-  // The shield stops sword swings, bullets and bombs from in front
+  const raiseBubble = (now) => {
+    if (!bubble) {
+      bubble = new THREE.Mesh(new THREE.SphereGeometry(BUBBLE_RADIUS, 28, 18), bubbleMaterial());
+      bubble.name = 'BossBubble';
+      bubble.position.y = BUBBLE_CENTER_Y;
+      bubble.renderOrder = 10;
+      enemy.group.add(bubble);
+    }
+    bubble.visible = true;
+    bubbleUntil = now + BUBBLE_MS;
+    nextBubbleAt = bubbleUntil + randIn(BUBBLE_COOLDOWN_MS);
+    window.audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.6, { cooldownKey: 'boss-bubble', cooldownMs: 200 });
+  };
+
+  // Shield / bubble stop sword swings, bullets, bombs and blasts; nothing hurts it before start()
   const baseApplyDamage = enemy.applyDamage.bind(enemy);
   enemy.applyDamage = (amount) => {
-    const target = ctx.getTarget();
-    if (shieldUp() && facesShield(target?.position)) {
+    if (!started) return false;
+    if (guarded(ctx.getTarget()?.position)) {
       ctx.onShieldBlock?.(enemy.group.position);
       return false;
     }
-    return baseApplyDamage(amount);
+    const killed = baseApplyDamage(amount);
+    const now = performance.now();
+    if (gear.bubble && !enemy.isDead && now >= nextBubbleAt && Math.random() < BUBBLE_CHANCE) raiseBubble(now);
+    return killed;
   };
   const baseBlast = enemy.applyBlastKnockback.bind(enemy);
   enemy.applyBlastKnockback = (opts) => {
-    if (shieldUp()) return;
+    if (!started || shieldUp() || bubbleUp()) return;
     baseBlast(opts);
   };
+  const baseDirectKnockback = enemy.applyDirectKnockback.bind(enemy);
+  enemy.applyDirectKnockback = (opts) => {
+    if (!started || bubbleUp()) return;
+    baseDirectKnockback(opts);
+  };
+  const baseFreeze = enemy.freeze.bind(enemy);
+  enemy.freeze = (seconds) => {
+    if (!started || bubbleUp()) return;
+    baseFreeze(seconds);
+  };
   const baseBlocks = enemy.blocksSwing.bind(enemy);
-  enemy.blocksSwing = (swingDir, attackerPos) => (shieldUp() && facesShield(attackerPos))
-    || baseBlocks(swingDir, attackerPos);
+  enemy.blocksSwing = (swingDir, attackerPos) => guarded(attackerPos) || baseBlocks(swingDir, attackerPos);
+  const baseBlocksBlast = enemy.blocksBlast.bind(enemy);
+  enemy.blocksBlast = (blast) => {
+    if (bubbleUp()) return true;
+    if (shieldUp() && blast?.forward) {
+      // (a blast flying at it from in front: its source is back along `forward`)
+      _v.copy(enemy.group.position).addScaledVector(blast.forward, -3);
+      if (facesShield(_v)) return true;
+    }
+    return baseBlocksBlast(blast);
+  };
   const baseDestroy = enemy.destroy.bind(enemy);
   enemy.destroy = () => {
     dispose();
@@ -205,7 +318,7 @@ export function createPembertonBoss(ctx) {
   };
 
   // Gun + shield on the weapon hand (the floating hand the player's Weapon attaches to)
-  const attachGear = () => {
+  const attachHeld = () => {
     const g = ctx.getWeaponGear?.();
     if (!g) return false;
     const hand = enemy._leftHandGroup;
@@ -217,31 +330,55 @@ export function createPembertonBoss(ctx) {
       hand.add(mesh);
       return mesh;
     };
-    gear = {
-      gunMesh: place(g.gun.createMesh(), 'gun'),
-      shieldMesh: place(g.shield.createMesh(), 'shield'),
+    held = {
+      gunMesh: gear.gun ? place(g.gun.createMesh(), 'gun') : null,
+      shieldMesh: gear.shield ? place(g.shield.createMesh(), 'shield') : null,
       gripGun: g.gun.grip.clone(),
       gripShield: g.shield.grip.clone(),
     };
     return true;
   };
 
-  const setPhase = (next, now) => {
-    if (next !== 'sword' && !gear && !attachGear()) next = 'sword';
-    phase = next;
-    phaseUntil = now + randIn(next === 'gun' ? GUN_MS : next === 'shield' ? SHIELD_MS : SWORD_MS);
-    enemy.ranged = next === 'gun' ? GUN_RANGE : next === 'shield' ? SHIELD_RANGE : null;
-    enemy.gripTarget = next === 'gun' ? gear.gripGun : next === 'shield' ? gear.gripShield : null;
-    enemy._swordGroup.visible = next === 'sword';
-    if (gear) {
-      if (gear.gunMesh) gear.gunMesh.visible = next === 'gun';
-      if (gear.shieldMesh) gear.shieldMesh.visible = next === 'shield';
+  // Wand out (EnemyPlayer's wand AI casts; enemy.onCast fires the blast) / sword back
+  const setWandOut = (on) => {
+    if (on && !wandModel) {
+      swordParts = enemy._swordGroup.children.filter((c) => c !== enemy._swingGlow);
+      wandModel = createWandModel();
+      enemy._swordGroup.add(wandModel);
+      enemy._wandModel = wandModel;
     }
-    if (next === 'sword') {
-      enemy._attackPhase = 'decide';
-    } else if (next === 'gun') {
+    if (!wandModel) return;
+    wandModel.visible = on;
+    swordParts.forEach((c) => { c.visible = !on; });
+    enemy.wand = on;
+    enemy._cast = null;
+    setWandGlow(wandModel, 0);
+  };
+
+  const setPhase = (next, now) => {
+    if ((next === 'gun' || next === 'shield') && !held && !attachHeld()) next = 'sword';
+    phase = next;
+    phaseUntil = now + randIn(next === 'gun' ? GUN_MS : next === 'shield' ? SHIELD_MS : next === 'wand' ? WAND_MS : SWORD_MS);
+    enemy.ranged = next === 'gun' ? GUN_RANGE : next === 'shield' ? SHIELD_RANGE
+      : next === 'wand' ? (ctx.wandRange ?? GUN_RANGE) : null;
+    enemy.gripTarget = next === 'gun' ? held.gripGun : next === 'shield' ? held.gripShield : null;
+    if (gear.wand) setWandOut(next === 'wand');
+    enemy._swordGroup.visible = next === 'sword' || next === 'wand';
+    if (held) {
+      if (held.gunMesh) held.gunMesh.visible = next === 'gun';
+      if (held.shieldMesh) held.shieldMesh.visible = next === 'shield';
+    }
+    // (a block stance left over from the sword would still stop swings)
+    enemy._attackPhase = next === 'sword' ? 'decide' : 'idle';
+    if (next === 'gun') {
       nextShotAt = now + 500; // (gun up first)
     }
+  };
+  // After a sword spell: one of the others it has (Pemberton: gun more often than shield)
+  const nextAfterSword = () => {
+    if (gear.gun && gear.shield && !gear.wand) return Math.random() < GUN_CHANCE ? 'gun' : 'shield';
+    const options = ['gun', 'shield', 'wand'].filter((k) => gear[k]);
+    return options.length ? options[Math.floor(Math.random() * options.length)] : 'sword';
   };
 
   const shoot = (target) => {
@@ -264,35 +401,88 @@ export function createPembertonBoss(ctx) {
     ctx.throwBomb(origin, aim);
   };
 
+  // Its size: growing from 1 (k = 0) to `scale` (k = 1)
+  const applySize = (k) => {
+    const e = k * k * (3 - 2 * k);
+    enemy.group.scale.setScalar(1 + (scale - 1) * e);
+    enemy._swordGroup.scale.setScalar(1 + (swordScale - 1) * e);
+  };
+
+  function start() {
+    if (started || disposed) return;
+    started = true;
+    enemy.script = null;
+    enemy._attackPhase = 'decide';
+    enemy.bodyHitRadius = ctx.bodyHitRadius;
+    enemy.bodyHitCenterY = ctx.bodyHitCenterY;
+    const now = performance.now();
+    growFrom = ctx.autoStart === false ? now : now - GROW_MS;
+    phase = 'sword';
+    phaseUntil = now + randIn(SWORD_MS);
+    nextBombAt = now + randIn(BOMB_MS);
+    nextBubbleAt = 0;
+    hud.name.textContent = ctx.name;
+    hud.root.classList.remove('hidden', 'boss-health-out');
+    document.body.classList.add('boss-health-up');
+    shownFrac = -1;
+    setHud(1);
+  }
+
   function dispose() {
     if (disposed) return;
     disposed = true;
     glow?.dispose();
     glow = null;
+    if (bubble) {
+      bubble.parent?.remove(bubble);
+      bubble.geometry.dispose();
+      bubble.material.dispose();
+      bubble = null;
+    }
     clearTimeout(hideTimer);
-    hud.root.classList.add('hidden');
+    if (started) hideHud();
+  }
+
+  if (ctx.autoStart === false) {
+    enemy.script = { mode: 'passive' };
+  } else {
+    applySize(1);
+    start();
   }
 
   return {
     enemy,
+    start,
+    isStarted: () => started,
     isShieldUp: shieldUp,
     dispose,
     /** Every frame after enemy.update (not while the player is dead). */
     update() {
-      if (disposed) return;
+      if (disposed || !started) return;
       const now = performance.now();
-      // Glow once the character has loaded
-      if (!glow && enemy._glbCharacter) glow = addRedGlow(enemy.group, { height: PEMBERTON_SCALE });
+      const grow = Math.min(1, (now - growFrom) / GROW_MS);
+      if (grow < 1 || enemy.group.scale.y !== scale) applySize(grow);
+      // Glow once the character has loaded (sized for the character at scale 1: grows with it)
+      if (!glow && enemy._glbCharacter) glow = addRedGlow(enemy.group, { height: enemy.group.scale.y });
       glow?.update(now / 1000);
       setHud(Math.max(0, enemy.hearts) / Math.max(1, enemy.maxHearts));
+      if (bubble) {
+        const left = bubbleUntil - now;
+        bubble.visible = left > 0 && !enemy.isDead;
+        if (bubble.visible) {
+          bubble.scale.setScalar(1 + Math.sin(now * 0.006) * 0.03);
+          // (blinks in its last second)
+          bubble.material.opacity = left < 1000 && Math.floor(left / 150) % 2 === 0 ? 0.1 : 0.3;
+        }
+      }
       if (enemy.isDead) {
-        if (gear) {
-          if (gear.gunMesh) gear.gunMesh.visible = false;
-          if (gear.shieldMesh) gear.shieldMesh.visible = false;
+        if (held) {
+          if (held.gunMesh) held.gunMesh.visible = false;
+          if (held.shieldMesh) held.shieldMesh.visible = false;
         }
         if (!hideTimer) {
           hud.root.classList.add('boss-health-out');
-          hideTimer = setTimeout(() => hud.root.classList.add('hidden'), HUD_HIDE_MS);
+          hideTimer = setTimeout(hideHud, HUD_HIDE_MS);
         }
         return;
       }
@@ -301,16 +491,16 @@ export function createPembertonBoss(ctx) {
       const dist = enemy.group.position.distanceTo(target.position);
 
       if (now >= phaseUntil) {
-        if (phase === 'sword') setPhase(Math.random() < GUN_CHANCE ? 'gun' : 'shield', now);
+        if (phase === 'sword') setPhase(nextAfterSword(), now);
         else setPhase('sword', now);
       }
-      // (not mid-blast: he's on his back)
+      // (not mid-blast: it's on its back)
       if (enemy._isRagdoll) return;
       if (phase === 'gun' && now >= nextShotAt) {
         nextShotAt = now + randIn(SHOT_MS);
         if (dist <= SHOT_MAX_DIST) shoot(target);
       }
-      if (phase !== 'shield' && now >= nextBombAt) {
+      if (gear.bombs && phase !== 'shield' && now >= nextBombAt) {
         nextBombAt = now + randIn(BOMB_MS);
         if (dist >= BOMB_RANGE[0] && dist <= BOMB_RANGE[1]) throwBomb(target);
       }
