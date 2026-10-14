@@ -5,7 +5,7 @@ import { spawnBloodBurst, updateBloodEffects, setBloodEnabled } from "../combat/
 import { updateExplosionEffects } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerModel.js";
-import { glbCharacterConfig, isMiiCharacterUrl } from "../models/glbCharacterModel.js";
+import { glbCharacterConfig, isMiiCharacterUrl, characterHold } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver, setTerrainFloor } from '../environment/terrainHeight.js';
 import { registerMapMeshes } from '../environment/mapCollision.js';
@@ -6736,6 +6736,7 @@ async function initCore(runtimeContext) {
       if (!model) return foamSword?.mesh ? foamSword.mesh.clone(true) : null;
       const group = new THREE.Group();
       group.name = 'remote-sword';
+      model.scale.multiplyScalar(characterHold(characterUrl).sword);
       group.add(model);
       return group;
     },
@@ -7366,6 +7367,12 @@ async function initCore(runtimeContext) {
 
         if (foamSword?.holder === playerControls) {
           foamSword._holdQuaternion.copy(activeGyroQ).multiply(_phoneSwordBaseQ);
+        }
+        // Unarmed (village): the gyro moves the player's right arm (updateProceduralPlayerRig)
+        const _pmUD = playerControls?.playerModel?.userData;
+        if (_pmUD) {
+          (_pmUD.gyroArmQuat ??= new THREE.Quaternion()).copy(activeGyroQ).multiply(_phoneSwordBaseQ);
+          _pmUD.gyroArmTime = performance.now();
         }
       }
     } else if (foamSword?.holder === playerControls) {

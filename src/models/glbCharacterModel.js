@@ -71,6 +71,11 @@ export const glbCharacterConfig = {
     '/models/glb_characters/gemhorn_rigged.glb': 1.4,
     '/models/glb_characters/psychic_kid.glb': 0.7,
   },
+  // Per-model weapon hold (characterHold): `grip` scales where the hands hold the sword /
+  // shield / gun (and the unarmed gyro arm) around the feet, `sword` scales the held sword
+  holdByUrl: {
+    '/models/glb_characters/psychic_kid.glb': { grip: 0.65, sword: 0.8 },
+  },
 
   // Arm IK
   armMaxStretch: 5,        // arms may stretch up to this multiple of their rest length
@@ -103,6 +108,13 @@ export function isMiiCharacterUrl(url) {
 const ARM_CHAIN_FOR_HAND = { right: 'Left', left: 'Right' };
 // Clip-excluded subtrees: the clavicles and everything below them
 const ARM_ROOT_BONES = ['LeftShoulder', 'RightShoulder'];
+
+const DEFAULT_HOLD = Object.freeze({ grip: 1, sword: 1 });
+/** How a character holds weapons: { grip, sword } scales (glbCharacterConfig.holdByUrl). */
+export function characterHold(url) {
+  const hold = url && glbCharacterConfig.holdByUrl[url];
+  return hold ? { ...DEFAULT_HOLD, ...hold } : DEFAULT_HOLD;
+}
 
 const _gltfLoader = new GLTFLoader();
 const _gltfPromises = new Map(); // url → Promise<gltf>
@@ -207,6 +219,8 @@ export class GLBCharacter {
     // Scene-local stand-in palm points for arms the rig doesn't have (Mii characters)
     this._palmFallback = palmFallback;
     this._armIK = armIK;
+    // Which floating hands the IK drives (setArmIKHands); the clip drives the other arm
+    this._ikHands = { left: true, right: true };
     this.fluffy = hasSkeleton(scene) ? new FluffyCharacter(scene, fluffy) : new StaticRig(scene);
     this.arms = {};
     scene.updateMatrixWorld(true);
@@ -281,8 +295,30 @@ export class GLBCharacter {
     this.fluffy.play(moving ? cfg.walkClip : cfg.idleClip, {
       inPlace: true,
       fade: cfg.clipFade,
-      excludeBones: this._armIK ? ARM_ROOT_BONES : [],
+      excludeBones: this._armIK ? this._ikShoulders() : [],
     }).catch((e) => console.warn('[GLBCharacter] clip load failed:', e));
+  }
+
+  // Clavicles of the IK-driven arms (the clip must leave those subtrees alone)
+  _ikShoulders() {
+    return Object.entries(ARM_CHAIN_FOR_HAND)
+      .filter(([hand]) => this._ikHands[hand])
+      .map(([, side]) => `${side}Shoulder`);
+  }
+
+  /**
+   * Picks which floating hands the arm IK follows ({ left, right }, game labels; both by
+   * default); the walk / idle clip animates the other arm. The clip restarts (crossfaded)
+   * when this changes.
+   */
+  setArmIKHands({ left = true, right = true } = {}) {
+    if (left === this._ikHands.left && right === this._ikHands.right) return;
+    this._ikHands = { left, right };
+    if (this._dead || this._action) return; // applied by revive() / _endAction()
+    this._setArmIK(this._armIK);
+    const moving = this._moving;
+    this._moving = null;
+    this.setMoving(moving);
   }
 
   /**
@@ -346,12 +382,16 @@ export class GLBCharacter {
   get isDead() { return this._dead; }
 
   // IK on: solveArm() writes the arm bones' matrices. Off: the clip drives them normally.
+  // Per arm: only the hands picked by setArmIKHands(). An arm leaving the IK keeps the
+  // IK's rotations so the clip crossfades from where it was.
   _setArmIK(enabled) {
-    for (const arm of Object.values(this.arms)) {
+    for (const [hand, arm] of Object.entries(this.arms)) {
       if (!arm) continue;
+      const ik = enabled && this._ikHands[hand];
       for (const b of [arm.upper, arm.fore, arm.hand]) {
-        b.matrixAutoUpdate = !enabled;
-        if (!enabled) b.updateMatrix();
+        if (!ik && !b.matrixAutoUpdate) b.matrix.decompose(_v, b.quaternion, _v2);
+        b.matrixAutoUpdate = !ik;
+        if (!ik) b.updateMatrix();
       }
     }
   }
@@ -373,8 +413,8 @@ export class GLBCharacter {
   solveArm(hand, targetObject, { writeBack = true } = {}) {
     const arm = this.arms[hand];
     if (!arm || !targetObject) return;
-    if (this._dead || this._action || !this._armIK) {
-      // A clip owns the arms: just keep the floating hand (and anything held) on the palm
+    if (this._dead || this._action || !this._armIK || !this._ikHands[hand]) {
+      // A clip owns the arm: just keep the floating hand (and anything held) on the palm
       if (writeBack && targetObject.parent) {
         targetObject.position.copy(targetObject.parent.worldToLocal(this.getPalmWorldPosition(hand, _v)));
       }

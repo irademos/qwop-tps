@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createGLBCharacterInstance, glbCharacterConfig } from './glbCharacterModel.js';
+import { createGLBCharacterInstance, glbCharacterConfig, characterHold } from './glbCharacterModel.js';
 
 export function createProceduralBody(THREE) {
   const root = new THREE.Group();
@@ -23,6 +23,17 @@ export function createProceduralBody(THREE) {
 
 const _fsHandTarget = new THREE.Vector3();
 const _defaultHandPos = new THREE.Vector3();
+const _gyroArmDir = new THREE.Vector3();
+
+// Unarmed gyro arm (game 'left' hand = the anatomical right arm): the hand follows the
+// direction the phone points like the sword grip does, one-handed, beside the body
+const GYRO_ARM_MAX_AGE_MS = 500; // gyro older than this → both arms back on the clip
+const GYRO_ARM_X = -0.2;
+const GYRO_ARM_SPREAD = 0.3;
+const GYRO_ARM_Y = 0.6;
+const GYRO_ARM_HEIGHT_GAIN = 0.35;
+const GYRO_ARM_Z = 0.22;
+const GYRO_ARM_DEPTH_GAIN = 0.18;
 
 // Animate the GLB character body, then pose its arms so the hands reach the floating hands.
 // The floating hand groups are invisible IK targets / weapon attach points; solveArm() moves
@@ -49,17 +60,35 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   if (rig.floatingHands) {
     // FoamSword.update() (and shield/pistol)
     // sets foamSwordMode=true and writes foamSwordHandTarget with the desired grip position.
-    if (playerGroup.userData.foamSwordMode) {
+    // Per-character hold (e.g. the small psychic kid grips lower and closer in)
+    const grip = characterHold(rig.characterUrl).grip;
+    // Unarmed with the phone gyro live: it moves only the anatomical right arm ('left'),
+    // the clip animates the other one (both while there's no gyro)
+    const gyroQ = playerGroup.userData.gyroArmQuat;
+    const gyroLive = !!gyroQ && performance.now() - (playerGroup.userData.gyroArmTime || 0) < GYRO_ARM_MAX_AGE_MS;
+    const armed = !!playerGroup.userData.foamSwordMode;
+    rig.glbCharacter?.setArmIKHands(armed || options.climbing
+      ? { left: true, right: true }
+      : { left: gyroLive, right: false });
+    if (armed) {
       playerGroup.userData.foamSwordMode = false; // consume the flag
       const fst = playerGroup.userData.foamSwordHandTarget;
       if (fst) {
         for (const side of ['left', 'right']) {
           // Right tracking slot (support hand) sits slightly lower on the handle
           const yOff = side === 'right' ? -0.08 : 0;
-          _fsHandTarget.set(fst.x, fst.y + yOff, fst.z);
+          _fsHandTarget.set(fst.x, fst.y + yOff, fst.z).multiplyScalar(grip);
           rig.floatingHands[side].position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
         }
       }
+    } else if (gyroLive) {
+      _gyroArmDir.set(0, 0, 1).applyQuaternion(gyroQ);
+      _fsHandTarget.set(
+        GYRO_ARM_X + _gyroArmDir.x * GYRO_ARM_SPREAD,
+        GYRO_ARM_Y + _gyroArmDir.y * GYRO_ARM_HEIGHT_GAIN,
+        Math.max(0.08, GYRO_ARM_Z + _gyroArmDir.z * GYRO_ARM_DEPTH_GAIN),
+      ).multiplyScalar(grip);
+      rig.floatingHands.left.position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
     } else {
       for (const side of ['left', 'right']) {
         const floatingHand = rig.floatingHands[side];
@@ -107,7 +136,7 @@ export function updateRemotePlayerRig(playerGroup, deltaSeconds) {
   if (handTarget && rig.floatingHands) {
     for (const side of ['left', 'right']) {
       const yOff = side === 'right' ? -0.08 : 0;
-      _fsHandTarget.set(handTarget.x, handTarget.y + yOff, handTarget.z);
+      _fsHandTarget.set(handTarget.x, handTarget.y + yOff, handTarget.z).multiplyScalar(characterHold(rig.characterUrl).grip);
       rig.floatingHands[side].position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
     }
   }
