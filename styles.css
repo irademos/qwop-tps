@@ -2328,6 +2328,7 @@ body.settings-open #inventory-button {
 .village-ui .hidden { display: none !important; }
 .village-ui button,
 .village-panel,
+.village-talk,
 .village-card { pointer-events: auto; }
 /* ⬅ Lobby, top left: solid dark, no lift (a tapped button stays :hover on touch screens) */
 .village-lobby-top {
