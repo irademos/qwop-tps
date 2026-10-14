@@ -2772,6 +2772,7 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
   transition: opacity 0.6s var(--ease);
 }
 .boss-health.hidden { display: none; }
+body.boss-health-up .ps-kill-counter { visibility: hidden; } /* (where the bar goes) */
 .boss-health.boss-health-out { opacity: 0; transition-delay: 1.4s; }
 .boss-health-name {
   font: 800 17px/1.2 var(--font-display);
@@ -2823,6 +2824,24 @@ body.village-mode #coin-popup { top: calc(200px + env(safe-area-inset-top, 0px))
 @media (prefers-reduced-motion: reduce) {
   .boss-health-low .boss-health-fill { animation: none; }
 }
+
+/* Sword Showdown: a stage's final enemy talks first (src/characters/stageBoss.js
+   createBossTalk) — the villager's talk box (.village-talk), over the HUD; the fight
+   controls are put away meanwhile */
+.boss-talk-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+  font-family: var(--font-ui);
+  color: var(--text);
+}
+.boss-talk-layer.hidden { display: none; }
+.boss-talk-layer .hidden { display: none; }
+.boss-talk { pointer-events: auto; }
+body.boss-talking #action-buttons,
+body.boss-talking #joystick-container,
+body.boss-talking #jump-button { visibility: hidden; }
 
 /* ── Sword Showdown: combo meter (src/combat/comboMeter.js) ─────────────────── */
 .combo-meter {
