@@ -6,6 +6,7 @@ import { getSpawnPosition } from '../map/spawnUtils.js';
 import { CHARACTER_MOVEMENT } from "../characters/CharacterBase.js";
 import { getKnockbackImpulse, getKnockbackMotion } from "../combat/knockback.js";
 import { updateProceduralPlayerRig } from '../models/playerModel.js';
+import { characterCameraHeight } from '../models/glbCharacterModel.js';
 import { loadNippleJs } from '../core/externalDeps.js';
 
 const PLAYER_RADIUS = 0.3;
@@ -1235,18 +1236,20 @@ export class PlayerControls {
     );
     const { eyeHeight, eyeForward, hideBody, firstPersonOpacity, thirdPersonOpacity } = this.cameraConfig;
     const firstPerson = this.isFirstPersonView;
+    // (lower for a smaller character)
+    const heightScale = characterCameraHeight(this.playerModel?.userData?.qwopRig?.characterUrl);
     if (firstPerson) {
       // First-person view: camera at the player's eyes, looking in the yaw/pitch direction
       const eyePosition = this.playerModel.position.clone().add(new THREE.Vector3(
         Math.sin(this.yaw) * eyeForward,
-        eyeHeight,
+        eyeHeight * heightScale,
         Math.cos(this.yaw) * eyeForward
       ));
       this.camera.position.copy(eyePosition);
       this.camera.lookAt(eyePosition.clone().add(lookDirection));
     } else {
       // Normal view: orbit the look point using yaw + pitch
-      const lookPoint = this.playerModel.position.clone().add(new THREE.Vector3(0, DEFAULT_CAMERA_LOOK_HEIGHT, 0));
+      const lookPoint = this.playerModel.position.clone().add(new THREE.Vector3(0, DEFAULT_CAMERA_LOOK_HEIGHT * heightScale, 0));
       const pitchClamped = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, this.pitch));
       const horizontalDist = DEFAULT_CAMERA_DISTANCE * Math.cos(pitchClamped);
       const verticalOffset = DEFAULT_CAMERA_RAISE + DEFAULT_CAMERA_DISTANCE * Math.sin(pitchClamped);

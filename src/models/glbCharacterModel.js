@@ -69,12 +69,18 @@ export const glbCharacterConfig = {
   heightScaleByUrl: {
     '/models/glb_characters/tree_creature.glb': 1.4,
     '/models/glb_characters/gemhorn_rigged.glb': 1.4,
-    '/models/glb_characters/psychic_kid.glb': 0.7,
+    '/models/glb_characters/psychic_kid.glb': 0.8,
+    '/models/glb_characters/villager.glb': 1.1, // Pemberton
+  },
+  // Per-model multiplier on the player camera's height (characterCameraHeight): a smaller
+  // character gets a lower camera
+  cameraHeightByUrl: {
+    '/models/glb_characters/psychic_kid.glb': 0.9,
   },
   // Per-model weapon hold (characterHold): `grip` scales where the hands hold the sword /
   // shield / gun (and the unarmed gyro arm) around the feet, `sword` scales the held sword
   holdByUrl: {
-    '/models/glb_characters/psychic_kid.glb': { grip: 0.65, sword: 0.8 },
+    '/models/glb_characters/psychic_kid.glb': { grip: 0.76, sword: 0.8 },
   },
 
   // Arm IK
@@ -114,6 +120,11 @@ const DEFAULT_HOLD = Object.freeze({ grip: 1, sword: 1 });
 export function characterHold(url) {
   const hold = url && glbCharacterConfig.holdByUrl[url];
   return hold ? { ...DEFAULT_HOLD, ...hold } : DEFAULT_HOLD;
+}
+
+/** Player camera height multiplier for a character (glbCharacterConfig.cameraHeightByUrl). */
+export function characterCameraHeight(url) {
+  return (url && glbCharacterConfig.cameraHeightByUrl[url]) ?? 1;
 }
 
 const _gltfLoader = new GLTFLoader();

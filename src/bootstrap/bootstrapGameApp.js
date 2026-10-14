@@ -4247,6 +4247,7 @@ async function initCore(runtimeContext) {
   // …nor forward more than this in one frame (a winding route passes near its own later stretches:
   // walking off the path toward one mustn't skip the player there, or to the end)
   const PS_PATH_MAX_SKIP = 1.5;
+  const PS_PATH_REACHED = 1.5;          // m: the auto-walk's target point counts as reached this close
   const PS_ENEMY_PATH_DIRECT_DIST = 7;  // m: an enemy closer than this walks straight at the player
   const PS_ENEMY_PATH_LOOKAHEAD = 3;    // m along the path toward the player
   const _psPathAheadPoint = new THREE.Vector3();
@@ -4255,6 +4256,14 @@ async function initCore(runtimeContext) {
     const s = _psPath.project(playerModel.position.x, playerModel.position.z,
       _psPathProgress - PS_PATH_BACKTRACK, _psPathProgress + PS_PATH_MAX_SKIP);
     _psPathProgress = Math.max(_psPathProgress, s);
+    // At a sharp bend the walk cuts the corner and reaches the point it heads for while its
+    // spot on the path (above) stays short of the bend: that point is behind it now, move on
+    // (else the auto-walk thinks it's at the end and waits)
+    for (let i = 0; i < 20 && _psPathProgress + PS_PATH_LOOKAHEAD < _psPath.length; i++) {
+      const a = _psPath.at(_psPathProgress + PS_PATH_LOOKAHEAD);
+      if (Math.hypot(a.x - playerModel.position.x, a.z - playerModel.position.z) > PS_PATH_REACHED) break;
+      _psPathProgress += 0.5;
+    }
     return s;
   };
   // EnemyPlayer / BombThrowerEnemy `chaseVia`: walking toward the player from a way off, they
@@ -7699,7 +7708,7 @@ async function initCore(runtimeContext) {
             } else {
               playerControls.isMoving = false;
             }
-          } else if (_distToEnd > 1.5) {
+          } else if (_distToEnd > PS_PATH_REACHED) {
             // Recompute direction each frame so manual movement doesn't break the path
             _psAutoWalkDir.set(_ddx / _distToEnd, 0, _ddz / _distToEnd);
             const _moveStep = PS_SPEED * frameDelta;
