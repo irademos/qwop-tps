@@ -3977,7 +3977,7 @@ async function initCore(runtimeContext) {
         radius: (enemy.bodyHitRadius ?? 0.45) * 0.9,
         blocks: (b) => !!enemy.blocksBlast?.(b),
         onBlocked: () => {
-          enemy.applySwordBounce?.();
+          enemy.applyBlockImpact?.();
           enemy.magicBlocks = (enemy.magicBlocks || 0) + 1;
           audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.6, { cooldownKey: 'magic-parry', cooldownMs: 200 });
         },
@@ -7480,8 +7480,9 @@ async function initCore(runtimeContext) {
                 ? new THREE.Vector3().subVectors(_tipWorld, _psw.tipHistory[0].pos)
                 : _sweepVec.clone();
               if (_he.blocksSwing?.(_swingDir, playerModel.position)) {
-                // Enemy's block holds — both swords recoil, no damage
-                _he.applySwordBounce?.();
+                // Enemy's block holds — the player's sword recoils, the enemy's stays in its block, no damage
+                if (_he.applyBlockImpact) _he.applyBlockImpact(_swingDir.clone().normalize());
+                else _he.applySwordBounce?.();
                 if (!_he._tutorial) comboMeter.end();
                 audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
                 _startSwordBounce();
