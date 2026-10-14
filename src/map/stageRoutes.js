@@ -85,8 +85,8 @@ export const stageRoute = (mapKey, stage) => {
   return validRoute(route) ? route : null;
 };
 
-// Polyline through `points` ({x, z}): total length and the point / heading at a distance
-// along it (clamped to the ends).
+// Polyline through `points` ({x, z}): total length, the point / heading at a distance
+// along it (clamped to the ends) and the distance along it nearest a point (project).
 export const createPolyline = (points) => {
   const cum = [0];
   for (let i = 1; i < points.length; i++) {
@@ -106,7 +106,30 @@ export const createPolyline = (points) => {
     const dz = seg > 1e-6 ? (b.z - a.z) / seg : 0;
     return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, dx, dz };
   };
-  return { length, at };
+  // Distance along the line of its closest point to (x, z), looking only at [minS, maxS]
+  const project = (x, z, minS = 0, maxS = length) => {
+    if (points.length === 1) return 0;
+    let best = Math.min(Math.max(minS, 0), length);
+    let bestD = Infinity;
+    for (let i = 1; i < points.length; i++) {
+      const s0 = cum[i - 1];
+      const s1 = cum[i];
+      if (s1 < minS || s0 > maxS) continue;
+      const a = points[i - 1];
+      const b = points[i];
+      const seg = s1 - s0;
+      const ex = b.x - a.x;
+      const ez = b.z - a.z;
+      let t = seg > 1e-6 ? ((x - a.x) * ex + (z - a.z) * ez) / (seg * seg) : 0;
+      t = Math.min(Math.max(t, (minS - s0) / (seg || 1), 0), Math.min((maxS - s0) / (seg || 1), 1));
+      const px = a.x + ex * t;
+      const pz = a.z + ez * t;
+      const d = (px - x) ** 2 + (pz - z) ** 2;
+      if (d < bestD) { bestD = d; best = s0 + seg * t; }
+    }
+    return best;
+  };
+  return { length, at, project };
 };
 
 const r2 = (v) => Math.round(v * 100) / 100;

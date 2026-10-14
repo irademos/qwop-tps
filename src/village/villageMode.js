@@ -1,7 +1,7 @@
 // Sword Showdown village: the hub between stages (replaces the old stage screen).
 //
 // Built around the player wherever they stand when it opens. The player walks around it
-// (WASD / joystick, or tap / click the ground), kept inside a box (VILLAGE_BOUNDS) and out of
+// (WASD / joystick — tapping the ground doesn't walk; tapping a thing does), kept inside a box (VILLAGE_BOUNDS) and out of
 // the props; the camera follows from behind, further out and higher than the fight camera,
 // and eases round to look at a station the player comes near, which shows its button
 // ("🛒 Shop", "💬 Talk"… — E / Enter). The button (or tapping the thing itself) walks the
@@ -20,7 +20,10 @@
 //     with "accept" — the stage starts (after the sword calibration popup, ctx.confirmStart) —
 //     or "not now". He steps aside when the stage starts — except on PEMBERTON_STAGE
 //     (`finalBoss`): there he stands PEMBERTON_SCALE× tall, glowing red, and the stage's boss
-//     takes his place (ctx.onStart's bossSpot).
+//     takes his place (ctx.onStart's bossSpot). Lines use the player's name ({name}); a quest
+//     that pays says how much (villagerQuestReward), and the next talk after the stage is won
+//     starts by handing it over (ctx.reward). The first time (`intro`) he walks up to the player
+//     and says hello (INTRO_TALK) before going back to his spot.
 // ⬅ Lobby is top left. At a station, tapping anywhere that isn't one of its items / characters
 // (or a button) goes back to walking around, and so does walking off (WASD / joystick).
 // After a stage win it can be built a little way ahead, the player walking in (`approach`).
@@ -65,18 +68,26 @@ const VILLAGER_CHARACTER_URL = glbCharacterConfig.villagerUrl;
 // who = 'them' (the speaker) / 'you' / 'action'). A 'you' line is offered as a choice next to
 // TALK_CANCEL (back to the village). Stage
 // PEMBERTON_STAGE is the fight with him (FINAL_BOSS_QUEST); after it VILLAGER_REPEAT_QUESTS take turns.
-const PEMBERTON = { speaker: 'Pemberton', emoji: '🎩' };
+// In the text, {name} = the player's name. A quest that pays (not `unpaid`) ends with the
+// speaker's `payLine` ({reward} = villagerQuestReward(stage)); the reward is paid at the next
+// talk after the stage is won (`paidLine` + `paidAction`, {owed} = the coins).
+const PEMBERTON = {
+  speaker: 'Pemberton', emoji: '🎩',
+  payLine: 'Do this one for me and there’s {reward} coins in it for you.',
+  paidLine: 'Ah, and your wages for the last job, as promised.',
+  paidAction: 'Pemberton hands you {owed} coins.',
+};
 const VILLAGER_QUESTS = [
   { place: 'Millbrook', title: 'Carry the letter to Thornwick',
     lines: [
-      ['them', 'Ah, a traveler! Splendid. Would you carry this letter to Thornwick for me? Do watch the road, though. Monsters about. Nasty business.'],
+      ['them', 'Ah, {name}! Splendid. Would you carry this letter to Thornwick for me? Do watch the road, though. Monsters about. Nasty business.'],
       ['you', 'Monsters?'],
-      ['them', 'Nothing a strong arm can’t handle. There’s a coin in it for you.'],
+      ['them', 'Nothing a strong arm can’t handle.'],
     ],
     accept: 'I’ll take the letter' },
   { place: 'Thornwick', title: 'Clear the granaries at Ashford',
     lines: [
-      ['them', 'You made it! Don’t look so surprised, I keep a very fast carriage. Now, those creatures have been getting into my grain stores near Ashford. Be a friend and clear them out?'],
+      ['them', 'You made it, {name}! Don’t look so surprised, I keep a very fast carriage. Now, those creatures have been getting into my grain stores near Ashford. Be a friend and clear them out?'],
     ],
     accept: 'I’ll clear them out' },
   { place: 'Ashford', title: 'Clear the quarry at Greyhollow',
@@ -86,14 +97,14 @@ const VILLAGER_QUESTS = [
     accept: 'On my way' },
   { place: 'Greyhollow', title: 'Clear the docks at Saltmere',
     lines: [
-      ['them', 'Back already? Splendid.'],
+      ['them', 'Back already, {name}? Splendid.'],
       ['you', 'One of them was holding a pickaxe.'],
       ['them', 'Monsters will use anything as a weapon. The quarry’s mine now, by the way. Bought it from the bank, after the bank took it from people who couldn’t pay the bank. Marvelous system. Now, the fishing docks at Saltmere need clearing. I’ve plans for those docks.'],
     ],
     accept: 'I’ll go' },
   { place: 'Saltmere', title: 'Clear the mill at Fenwick',
     lines: [
-      ['them', 'Ah, there you are. All quiet at the docks?'],
+      ['them', 'Ah, there you are, {name}. All quiet at the docks?'],
       ['you', 'One of them tried to speak to me.'],
       ['them', 'Speak? Growl, surely. Mimicry, friend. Clever beasts pick up sounds. Don’t let it get under your skin. They’ve got into my mill at Fenwick now — off you go.'],
     ],
@@ -107,30 +118,30 @@ const VILLAGER_QUESTS = [
     accept: '…I’ll go' },
   { place: 'Riverbend', title: 'Clear the road to Old Hearth',
     lines: [
-      ['them', 'Well? How did it go?'],
+      ['them', 'Well, {name}? How did it go?'],
       ['you', 'There were small ones in that camp.'],
-      ['them', 'Yes, well. They breed. That’s rather the whole problem, isn’t it? Here, double the usual. You’ve earned it. Old Hearth next — same business.'],
+      ['them', 'Yes, well. They breed. That’s rather the whole problem, isn’t it? Old Hearth next — same business.'],
     ],
     accept: '…Fine' },
   { place: 'Old Hearth', title: 'Clear Highcrest Gate',
     lines: [
-      ['them', 'My man tells me you hesitated back there. I’d hate to think you were getting sentimental. Every village you’ve walked through, I own now. Every one. Think what we could do together. Just Highcrest Gate left.'],
+      ['them', 'My man tells me you hesitated back there, {name}. I’d hate to think you were getting sentimental. Every village you’ve walked through, I own now. Every one. Think what we could do together. Just Highcrest Gate left.'],
     ],
     accept: 'One more' },
   { place: 'Highcrest Gate', title: 'Go to Gould Manor',
     lines: [
-      ['them', 'Ah. You again. You look troubled, friend.'],
+      ['them', 'Ah. {name}. You look troubled, friend.'],
       ['you', 'I found your ledger. Every “monster” I killed had a name, and a debt next to it.'],
       ['them', 'Debts are debts, friend. I didn’t make the rules. I just bought them. Now, please don’t be tiresome.'],
     ],
-    accept: 'I’m coming for you, Pemberton' },
+    accept: 'I’m coming for you, Pemberton', unpaid: true },
   { place: 'Gould Manor', title: 'Get past the guards',
     lines: [
       ['them', 'Look at you. Blade dripping, boots muddy, breaking into a man’s home uninvited. If anyone here looks like a monster, it certainly isn’t me.'],
       ['action', 'He rings a bell.'],
       ['them', 'GUARDS! There’s a monster in the house!'],
     ],
-    accept: 'Bring them on' },
+    accept: 'Bring them on', unpaid: true },
 ];
 // The stage after the guards: Pemberton himself (1.5× size, glowing red — see `finalBoss`)
 export const PEMBERTON_STAGE = VILLAGER_QUESTS.length + 1;
@@ -139,26 +150,62 @@ const FINAL_BOSS_QUEST = {
   lines: [
     ['them', 'Hired guards. Never worth the coin. Very well — if a thing’s worth doing, a gentleman does it himself.'],
     ['you', 'It’s over, Pemberton.'],
-    ['them', 'Over? I own the roads, the mills, the docks — the very ground you’re standing on. Come, then, monster. Let’s settle your account.'],
+    ['them', 'Over? I own the roads, the mills, the docks — the very ground you’re standing on. Come, then, {name}, you monster. Let’s settle your account.'],
   ],
-  accept: 'Let’s settle it',
+  accept: 'Let’s settle it', unpaid: true,
 };
 // After Pemberton: the villages are free, the road still isn't
-const VILLAGER = { speaker: 'Villager', emoji: '🧑‍🌾' };
+const VILLAGER = {
+  speaker: 'Villager', emoji: '🧑‍🌾',
+  payLine: 'We’ll pay you {reward} coins for it.',
+  paidLine: 'Thank you for last time, {name}. Here, for your trouble.',
+  paidAction: 'The villager hands you {owed} coins.',
+};
 const VILLAGER_REPEAT_QUESTS = [
   { title: 'Patrol the road',
-    lines: [['them', 'With Pemberton gone, the debts are torn up and the mills pay wages again. But real monsters still roam the road. Could you patrol it and send them packing?']],
+    lines: [['them', 'With Pemberton gone, the debts are torn up and the mills pay wages again. But real monsters still roam the road. Could you patrol it and send them packing, {name}?']],
     accept: 'Let’s go, I’ll help!' },
   { title: 'Deliver the mail',
     lines: [['them', 'The mail’s piled up again and the post rider won’t go out alone. Could you take this bag of letters to the next village? Watch out for the monsters.']],
     accept: 'I’ll deliver it!' },
   { title: 'Protect the village',
-    lines: [['them', 'They’re attacking again! Please, protect the village!']],
+    lines: [['them', '{name}! They’re attacking again! Please, protect the village!']],
     accept: 'I’ll hold them off!' },
 ];
 const VILLAGER_DECLINE = 'Not right now';
 const TALK_CANCEL = 'Never mind';   // next to each of the player's lines: back to the village
 const TALK_WORDS_PER_SEC = 13;     // the line plays out a word or two at a time
+// Coins the quest of `stage` pays (0: it doesn't — Pemberton's last ones), more every stage
+const QUEST_REWARD_BASE = 40;
+const QUEST_REWARD_PER_STAGE = 20;
+export function villagerQuestReward(stage) {
+  const s = Math.max(1, Math.floor(stage) || 1);
+  return villagerQuestForStage(s).unpaid ? 0 : QUEST_REWARD_BASE + QUEST_REWARD_PER_STAGE * (s - 1);
+}
+// Pemberton walks up and says hello the first time the player is in the village (`intro`)
+const INTRO_TALK = {
+  ...PEMBERTON,
+  title: 'Welcome to Millbrook',
+  lines: [
+    ['them', 'Well, hello there! Haven’t seen you around here before. What’s your name, friend?'],
+    ['you', 'I’m {name}.'],
+    ['them', '{name}! Splendid name. Welcome to Millbrook. I’m Pemberton — I own a little of everything around here.'],
+    ['them', 'The market stall’s just there if you need supplies. Potions, bombs, that sort of thing. Or sit by the campfire a while and pass the time.'],
+    ['them', '{controls}'],
+    ['them', 'And come and see me whenever you’d like to earn some coin. I always have work for a strong arm.'],
+  ],
+  accept: 'Thanks, Pemberton!',
+};
+const INTRO_CONTROLS = {
+  touch: 'Use the joystick to walk about, and tap the buttons that pop up to talk to folk or use things.',
+  keys: 'Use WASD to walk about, and press E to talk to folk or use things.',
+};
+const INTRO_MEET_DIST = 1.3;       // m in front of the player where Pemberton stops to say hello
+const INTRO_LOAD_WAIT_MS = 6000;   // his model isn't there by then: skip the hello
+/** Fills {name} / {reward} / {owed} / {controls} in a line of the villager's / a boss's talk. */
+export function fillTalk(text, vars = {}) {
+  return String(text).replace(/\{(\w+)\}/g, (m, k) => (vars[k] ?? m));
+}
 export function villagerQuestForStage(stage) {
   const s = Math.max(1, Math.floor(stage) || 1);
   if (s <= VILLAGER_QUESTS.length) return { ...PEMBERTON, ...VILLAGER_QUESTS[s - 1] };
@@ -242,7 +289,6 @@ const _UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _ray = new THREE.Raycaster();
-const _groundPlane = new THREE.Plane();
 const _ndc = new THREE.Vector2();
 
 const _loader = new GLTFLoader();
@@ -509,6 +555,9 @@ const yawToward = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
  *  onStart(pathAngle, { bossSpot }?) — start the stage (the player auto-walks along pathAngle);
  *                       bossSpot = { position, yaw } where the villager stood (finalBoss only)
  *  onLobby()           — back to the start screen
+ *  getPlayerName()     — {name} in the talk
+ *  reward: { owed() → coins owed for the last stage's quest, collect() — pay them }
+ *  onIntroDone()       — Pemberton's hello (enter's `intro`) is over
  */
 export function createVillage(ctx) {
   const { scene, camera, domElement } = ctx;
@@ -553,8 +602,9 @@ export function createVillage(ctx) {
   let obstacles = [];       // { pos: Vector3, r } — round props the player walks around
   let nearKeys = '';        // stations whose buttons are showing (free walking)
   let switchNpc = null;     // idling character whose 🔄 Switch button is showing
-  // The villager's conversation: { i: line index, words, shown, done, choices }
+  // The villager's conversation: { script, i: line index, words, shown, done, choices }
   let talk = null;
+  let intro = null;         // Pemberton's hello in progress: { phase } (updateIntro)
   // Camera (smoothed)
   const camPos = new THREE.Vector3();
   const camLook = new THREE.Vector3();
@@ -571,7 +621,6 @@ export function createVillage(ctx) {
   ui.innerHTML = `
     <button type="button" class="ui-btn-secondary village-lobby-top hidden" data-v="lobby">⬅ Lobby</button>
     <div class="village-top ui-chip"><span data-v="stage"></span><span class="village-top-sep">·</span><span data-v="coins"></span></div>
-    <div class="village-hint hidden" data-v="hint"></div>
     <div class="village-acts hidden" data-v="acts"></div>
     <button type="button" class="ui-btn village-switch hidden" data-v="switch"></button>
     <div class="village-talk ui-panel hidden" data-v="talk">
@@ -611,7 +660,7 @@ export function createVillage(ctx) {
     prev: $('prev'), next: $('next'),
     fade: $('fade'), fadeText: $('fade-text'),
     banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'), bannerBoss: $('banner-boss'),
-    hint: $('hint'), acts: $('acts'), switchBtn: $('switch'),
+    acts: $('acts'), switchBtn: $('switch'),
     talk: $('talk'), talkWho: $('talk-who'), talkQuest: $('talk-quest'), talkText: $('talk-text'),
     talkMore: $('talk-more'), talkChoices: $('talk-choices'), talkClose: $('talk-close'),
   };
@@ -994,7 +1043,7 @@ export function createVillage(ctx) {
   // Buttons for the stations in reach (bottom centre; E / Enter = the first)
   const actLabel = (key) => (key === 'villager' ? (finalBoss ? '⚔️ Confront' : '💬 Talk') : STATION_NAMES[key]);
   function refreshActs(near) {
-    const free = active && !leaving && !approaching && !sitting && !focus;
+    const free = active && !leaving && !approaching && !sitting && !focus && !intro;
     const inRange = free ? near.filter((n) => n.inRange) : [];
     // An idling character in reach: its own 🔄 Switch button, over it (placeSwitch)
     const sw = swapBusy ? null : inRange.find((n) => n.key === 'npc')?.npc ?? null;
@@ -1048,7 +1097,9 @@ export function createVillage(ctx) {
     } else if (focus === 'villager') {
       // Over the player's shoulder at the villager (from a little to the side, so the player
       // doesn't block him)
-      const s = stations.villager;
+      const s = intro
+        ? { pos: villagerNow(), facing: _v2.subVectors(playerPos(), villagerNow()).setY(0).normalize().clone() }
+        : stations.villager;
       const side = _v.crossVectors(_UP, s.facing).normalize().clone();
       const sc = villagerScale;
       const target = _v2.copy(s.pos).addScaledVector(s.facing, 0.5 * sc).addScaledVector(side, -0.2 * sc).add(_v.set(0, 0.6 * sc, 0)).clone();
@@ -1099,6 +1150,7 @@ export function createVillage(ctx) {
   }
 
   function unfocus() {
+    if (intro) { finishIntro(); return; }
     focus = null;
     endTalk();
     selectItem(-1);
@@ -1130,13 +1182,9 @@ export function createVillage(ctx) {
       b.addEventListener('click', onClick);
       return b;
     };
-    el.hint.classList.toggle('hidden', !!focus);
     el.talk.classList.toggle('hidden', focus !== 'villager' || !talk);
     if (!focus) {
-      // Walking around: just a hint under the top chip
       el.panel.classList.add('hidden');
-      const who = quest.speaker === 'Villager' ? 'the villager' : quest.speaker;
-      el.hint.textContent = `${COARSE_POINTER ? 'Joystick or tap to walk' : 'WASD or click to walk · E to interact'} · talk to ${who} ${finalBoss ? '⚔️' : '❗'} when you’re ready`;
     } else if (focus === 'villager') {
       el.panel.classList.add('hidden');
     } else if (focus === 'shop') {
@@ -1155,10 +1203,43 @@ export function createVillage(ctx) {
   // ── The villager's conversation ──
   // One line at a time, played out a word or two at a time (tap the box: finish the line / next
   // line). A 'you' line is a choice of two replies (either one carries on); the last line ends
-  // with the quest's accept / VILLAGER_DECLINE.
-  function startTalk() {
-    talk = { i: -1, who: 'them', words: [], shown: 0, acc: 0, done: true, choices: null };
-    el.talkQuest.textContent = quest.title;
+  // with the script's end buttons (the quest's accept / VILLAGER_DECLINE). A line marked `pay`
+  // hands over the reward owed for the last stage (ctx.reward.collect) as it shows.
+  const talkVars = (extra = {}) => ({
+    name: ctx.getPlayerName?.() || 'friend',
+    controls: COARSE_POINTER ? INTRO_CONTROLS.touch : INTRO_CONTROLS.keys,
+    ...extra,
+  });
+  // The quest's talk: last stage's pay (if owed), the quest, what this one pays
+  function questScript() {
+    const owed = ctx.reward?.owed?.() || 0;
+    const reward = villagerQuestReward(stageInfo.stage);
+    const vars = talkVars({ owed, reward });
+    const lines = [];
+    if (owed > 0 && quest.paidLine) lines.push(['them', quest.paidLine], ['action', quest.paidAction, { pay: true }]);
+    lines.push(...quest.lines);
+    if (reward > 0 && quest.payLine) lines.push(['them', quest.payLine]);
+    return {
+      who: `${quest.emoji} ${quest.speaker}`,
+      title: reward > 0 ? `${quest.title} · 🪙 ${reward}` : quest.title,
+      lines: lines.map(([w, text, opts]) => [w, fillTalk(text, vars), opts]),
+      cancel: TALK_CANCEL,
+      end: [[quest.accept, () => requestStart(), 'ui-btn'], [VILLAGER_DECLINE, () => unfocus()]],
+    };
+  }
+  function introScript() {
+    const vars = talkVars();
+    return {
+      who: `${INTRO_TALK.emoji} ${INTRO_TALK.speaker}`,
+      title: INTRO_TALK.title,
+      lines: INTRO_TALK.lines.map(([w, text]) => [w, fillTalk(text, vars)]),
+      cancel: null,
+      end: [[INTRO_TALK.accept, () => finishIntro(), 'ui-btn']],
+    };
+  }
+  function startTalk(script = questScript()) {
+    talk = { script, i: -1, who: 'them', words: [], shown: 0, acc: 0, done: true, choices: null };
+    el.talkQuest.textContent = script.title;
     nextLine();
   }
   function endTalk() {
@@ -1167,7 +1248,7 @@ export function createVillage(ctx) {
   }
   function nextLine() {
     if (!talk) return;
-    const line = quest.lines[talk.i + 1];
+    const line = talk.script.lines[talk.i + 1];
     if (!line || line[0] === 'you') {
       // (a quest that opens with a reply: he just waits)
       if (talk.i < 0 && !talk.words.length) setLine('them', '…');
@@ -1178,6 +1259,7 @@ export function createVillage(ctx) {
       return;
     }
     talk.i += 1;
+    if (line[2]?.pay) ctx.reward?.collect?.();
     setLine(line[0], line[1]);
   }
   function setLine(who, text) {
@@ -1188,7 +1270,7 @@ export function createVillage(ctx) {
     talk.done = false;
     talk.choices = null;
     el.talk.classList.toggle('is-action', who === 'action');
-    el.talkWho.textContent = who === 'action' ? '' : `${quest.emoji} ${quest.speaker}`;
+    el.talkWho.textContent = who === 'action' ? '' : talk.script.who;
     el.talkChoices.replaceChildren();
     el.talkMore.classList.add('hidden');
     renderTalkText();
@@ -1206,20 +1288,21 @@ export function createVillage(ctx) {
     talk.shown = talk.words.length;
     talk.done = true;
     renderTalkText();
-    const next = quest.lines[talk.i + 1];
+    const next = talk.script.lines[talk.i + 1];
     if (!next || next[0] === 'you') showChoices(next);
     else el.talkMore.classList.remove('hidden');
   }
-  // reply = the 'you' line coming up (two ways to say it), or none: accept / not now
+  // reply = the 'you' line coming up (next to the script's cancel, if any), or none: its end buttons
   function showChoices(reply) {
     const onReply = () => {
       if (!talk) return;
       talk.i += 1;
       nextLine();
     };
+    const { script } = talk;
     const options = reply
-      ? [[reply[1], onReply], [TALK_CANCEL, () => unfocus()]]
-      : [[quest.accept, () => requestStart(), 'ui-btn'], [VILLAGER_DECLINE, () => unfocus()]];
+      ? [[reply[1], onReply], ...(script.cancel ? [[script.cancel, () => unfocus()]] : [])]
+      : script.end;
     talk.choices = options;
     el.talkMore.classList.add('hidden');
     el.talkChoices.replaceChildren(...options.map(([label, onClick, cls = 'ui-btn-secondary']) => {
@@ -1245,6 +1328,53 @@ export function createVillage(ctx) {
     if (n >= talk.words.length) finishLine();
     else renderTalkText();
   }
+
+  // ── Pemberton's hello (the first village) ──
+  // He walks up to the player (who waits meanwhile), says hello (introScript), then goes back
+  // to his spot (finishIntro). Phases: 'wait' (his model loading / the player walking in) → 'walk' → 'talk'.
+  function updateIntro() {
+    if (!intro) return;
+    const npc = stations.villager?.npc;
+    if (intro.phase === 'wait') {
+      if (approaching) { intro.since = performance.now(); return; }
+      // (his model never loaded: no hello)
+      if (!npc?.container) { if (performance.now() - intro.since > INTRO_LOAD_WAIT_MS) finishIntro(); return; }
+      const p = playerPos();
+      const from = npc.container.position;
+      const dir = _v.set(from.x - p.x, 0, from.z - p.z);
+      const d = dir.length();
+      if (d > 1e-3) dir.divideScalar(d); else dir.copy(fwd);
+      const to = new THREE.Vector3(p.x, 0, p.z).addScaledVector(dir, Math.min(INTRO_MEET_DIST, d));
+      intro.phase = 'walk';
+      faceYaw = Math.atan2(dir.x, dir.z);
+      npc.walk = { to, onArrive: () => {
+        if (!intro || !npc.container) return;
+        npc.container.rotation.y = yawToward(npc.container.position, playerPos());
+        intro.phase = 'talk';
+        focus = 'villager';
+        startTalk(introScript());
+        refreshPanel();
+        refreshBack();
+      } };
+      npc.character?.setMoving(true);
+    }
+  }
+  function finishIntro() {
+    if (!intro) return;
+    intro = null;
+    const v = stations.villager;
+    const npc = v?.npc;
+    unfocus();
+    if (npc?.character && v) {
+      npc.walk = { to: v.pos.clone(), onArrive: () => { if (npc.container) npc.container.rotation.y = Math.atan2(v.facing.x, v.facing.z); } };
+      npc.character.setMoving(true);
+    }
+    const { controls } = ctx.getPlayer();
+    if (controls) controls.moveSpeedScale = VILLAGE_MOVE_SPEED_SCALE;
+    ctx.onIntroDone?.();
+  }
+  // Where the villager is right now (he walks about during the hello)
+  const villagerNow = () => stations.villager?.npc?.container?.position ?? stations.villager?.pos;
 
   // ── Shop ──
   const itemCenter = (entry, out) => entry.object.getWorldPosition(out).add(entry.centerOffset || _v2.set(0, 0, 0));
@@ -1498,7 +1628,7 @@ export function createVillage(ctx) {
     return best ?? targets[0] ?? null;
   };
   const onPointerDown = (e) => {
-    if (!active || leaving || approaching || sitting) return;
+    if (!active || leaving || approaching || sitting || (intro && intro.phase !== 'talk')) return;
     down = { x: e.clientX, y: e.clientY, t: performance.now() };
   };
   const onPointerUp = (e) => {
@@ -1521,19 +1651,15 @@ export function createVillage(ctx) {
       else if (!starting) unfocus();
       return;
     }
-    if (t) { onTarget(t); return; }
-    // Walking around: tap / click the ground to walk there (pick() aimed _ray)
-    if (e.target === domElement) {
-      _groundPlane.set(_UP, -playerPos().y);
-      if (_ray.ray.intersectPlane(_groundPlane, _v)) walkTo(clampToVillage(_v), null);
-    }
+    // (things only — tapping the ground doesn't walk there)
+    if (t) onTarget(t);
   };
   const onPointerMove = (e) => {
     if (!active || leaving || approaching || e.pointerType === 'touch') return;
     domElement.style.cursor = pick(e.clientX, e.clientY) ? 'pointer' : '';
   };
   const onKeyDown = (e) => {
-    if (!active || leaving || approaching || sitting) return;
+    if (!active || leaving || approaching || sitting || (intro && intro.phase !== 'talk')) return;
     if (e.target?.closest?.('input, textarea')) return;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     // (a focused button gets Enter / Space itself)
@@ -1621,7 +1747,6 @@ export function createVillage(ctx) {
     el.panel.classList.add('hidden');
     el.card.classList.add('hidden');
     el.lobby.classList.add('hidden');
-    el.hint.classList.add('hidden');
     hideActs();
     document.body.classList.remove('village-focused');
     ui.querySelector('.village-top')?.classList.add('hidden');
@@ -1703,8 +1828,9 @@ export function createVillage(ctx) {
    * Opens the village around the player — or, with `center`, at that spot: the player walks
    * there first (the UI shows on arrival, then `onArrive()`).
    * @param {{ stage: number, count: number, boss: string, pathAngle: number,
-   *           center?: THREE.Vector3, onArrive?: () => void }} info
+   *           center?: THREE.Vector3, onArrive?: () => void, intro?: boolean }} info
    *   pathAngle: next stage's direction (x = cos, z = sin, as _psBuildStage uses it)
+   *   intro: Pemberton walks up and says hello first (ctx.onIntroDone after)
    */
   function enter(info) {
     exit();
@@ -1713,6 +1839,7 @@ export function createVillage(ctx) {
     starting = false;
     stageInfo = info;
     quest = villagerQuestForStage(info.stage);
+    intro = info.intro && !info.finalBoss ? { phase: 'wait', since: performance.now() } : null;
     finalBoss = !!info.finalBoss;
     villagerScale = finalBoss ? PEMBERTON_SCALE : 1;
     pathAngle = info.pathAngle;
@@ -1735,7 +1862,8 @@ export function createVillage(ctx) {
     bodyYaw = controls?.yaw ?? faceYaw;
     followYaw = faceYaw;
     prevPos.copy(model.position);
-    if (controls) { controls.yaw = faceYaw; controls.pitch = 0; controls.moveSpeedScale = VILLAGE_MOVE_SPEED_SCALE; }
+    // (Pemberton's hello: the player waits for him)
+    if (controls) { controls.yaw = faceYaw; controls.pitch = 0; controls.moveSpeedScale = intro ? 0 : VILLAGE_MOVE_SPEED_SCALE; }
     if (approaching) {
       walk = {
         to: center.clone(),
@@ -1760,7 +1888,6 @@ export function createVillage(ctx) {
       el.lobby.classList.add('hidden');
       ui.querySelector('.village-top')?.classList.add('hidden');
       el.panel.classList.add('hidden');
-      el.hint.classList.add('hidden');
       el.talk.classList.add('hidden');
     } else {
       showUi();
@@ -1813,6 +1940,7 @@ export function createVillage(ctx) {
     leaving = null;
     approaching = false;
     starting = false;
+    intro = null;
     teardown();
     walk = null;
     faceYaw = null;
@@ -1821,7 +1949,6 @@ export function createVillage(ctx) {
     endTalk();
     hideActs();
     obstacles = [];
-    el.hint.classList.add('hidden');
     document.body.classList.remove('village-focused');
     domElement.removeEventListener('pointerdown', onPointerDown);
     window.removeEventListener('pointerup', onPointerUp);
@@ -1912,7 +2039,7 @@ export function createVillage(ctx) {
     // Moved by WASD / the joystick this frame (the controls ran first): that cancels a tap-walk
     // and leaves a station; the body turns the way it goes
     const { controls } = ctx.getPlayer();
-    if (model && controls?.isMoving && !approaching && !sitting) {
+    if (model && controls?.isMoving && !approaching && !sitting && !intro) {
       if (walk) walk = null;
       if (focus) unfocus();
       const mx = model.position.x - prevPos.x;
@@ -1923,6 +2050,7 @@ export function createVillage(ctx) {
     if (!approaching) constrainPlayer();
     if (model) prevPos.copy(model.position);
     updateNpcs(dt);
+    updateIntro();
     updateTalk(dt);
 
     overviewLabels.forEach((l) => { l.visible = !focus && l.position.distanceTo(camera.position) > LABEL_HIDE_DIST * labelScale; });
@@ -1930,7 +2058,8 @@ export function createVillage(ctx) {
     const vil = stations.villager;
     if (vil) {
       vil.marker.position.y = vil.markerY + Math.sin(t * 2.4) * 0.06;
-      vil.marker.visible = focus !== 'villager';
+      vil.marker.visible = focus !== 'villager' && !intro;
+      vil.label.visible = vil.label.visible && !intro;
       const s = 1 + Math.sin(t * 3) * 0.06;
       vil.ring.scale.set(s, s, s);
       vil.npc?.glow?.update(t);

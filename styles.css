@@ -2328,6 +2328,7 @@ body.settings-open #inventory-button {
 .village-ui .hidden { display: none !important; }
 .village-ui button,
 .village-panel,
+.village-talk,
 .village-card { pointer-events: auto; }
 /* ⬅ Lobby, top left: solid dark, no lift (a tapped button stays :hover on touch screens) */
 .village-lobby-top {
@@ -2387,22 +2388,6 @@ body.settings-open #inventory-button {
 /* Narrow phones: the chip moves right of centre, clear of ⬅ Lobby */
 @media (max-width: 520px) {
   .village-top { left: calc(50% + 34px); gap: 6px; padding: 6px 10px; font-size: 13px; }
-}
-/* Walking around: one line of help under the top chip */
-.village-hint {
-  position: absolute;
-  top: calc(52px + env(safe-area-inset-top, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: min(520px, calc(100% - 32px));
-  padding: 4px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: center;
-  color: var(--text-muted);
-  border-radius: var(--radius-pill);
-  background: var(--surface-hud);
-  pointer-events: none;
 }
 /* Near a station: its button(s) bottom centre ("🛒 Shop", "💬 Talk"…), between the joystick
    (bottom left) and the jump button (bottom right) */

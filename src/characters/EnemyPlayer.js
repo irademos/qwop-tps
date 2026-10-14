@@ -175,6 +175,7 @@ const REST_SWORD_EULER = new THREE.Euler(360 * DEG, 90 * DEG, -90 * DEG, 'YXZ');
 // ─── scratch objects (not per-instance, module-level) ────────────────────────
 const _rootQ   = new THREE.Quaternion();
 const _toTarget = new THREE.Vector3();
+const _chaseVia = new THREE.Vector3();
 const _tmpV    = new THREE.Vector3();
 const _tmpQ    = new THREE.Quaternion();
 const _swordTipWorld  = new THREE.Vector3();
@@ -295,6 +296,9 @@ export class EnemyPlayer {
     //                                            when `release` is set (cleared on the swing;
     //                                            `swings` counts them)
     this.script = options.script ?? null;
+    // Optional (pos, targetPos, out) → point to walk toward instead of the target while chasing,
+    // or null (Showdown: keep to the stage path when far off)
+    this.chaseVia = null;
     // Times this sword has been knocked back (player block, shield, bubble or a blocked swing)
     this.swordBounces = 0;
     // Health segments a sword hit on the local player takes (Multiplayer bots use 1)
@@ -875,7 +879,8 @@ export class EnemyPlayer {
       this.rigidBody.setLinvel({ x: vel.x * 0.8, y: vel.y, z: vel.z * 0.8 }, true);
     } else if (!this.stationary && (this._aiState === 'chase' || distToTarget > CHASE_RANGE * 1.5)) {
       if (targetModel && distToTarget > CHASE_RANGE) {
-        _toTarget.subVectors(targetModel.position, this.group.position);
+        const via = this.chaseVia?.(this.group.position, targetModel.position, _chaseVia);
+        _toTarget.subVectors(via ?? targetModel.position, this.group.position);
         _toTarget.y = 0;
         if (_toTarget.lengthSq() > 0.001) {
           _toTarget.normalize().multiplyScalar(CHASE_SPEED * this.speedScale);
