@@ -3,6 +3,7 @@ import { getTerrainHeight } from '../environment/terrainHeight.js';
 import { Weapon } from './weapon.js';
 import { loadAllSwordModelTemplates, createSwordModelInstance, swordVariantForCharacter } from './swordModel.js';
 import { createWandModel } from './magicWand.js';
+import { characterHold } from '../models/glbCharacterModel.js';
 
 export const FOAM_SWORD_ITEM_ID = 'foamSword';
 
@@ -158,5 +159,11 @@ export class FoamSword extends Weapon {
       tgt.z = THREE.MathUtils.clamp(FS_HAND_Z - (_fsSwordDir.z - 0.2) * 0.35 * blockSign, 0.15, 0.7);
     }
     super.update();
+    // Per-character sword size (the small psychic kid holds a smaller one)
+    if (this.holder?.playerModel) {
+      const active = this.useHeldMeshWhenHeld && this.heldMesh ? this.heldMesh : this.mesh;
+      const scale = this.wand ? 1 : characterHold(this.holder.playerModel.userData.qwopRig?.characterUrl).sword;
+      active?.scale.setScalar(scale);
+    }
   }
 }
