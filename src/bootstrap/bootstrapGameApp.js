@@ -3414,6 +3414,29 @@ async function initCore(runtimeContext) {
   }
 
   // `value` = coins this pickup is worth (tutorial coins are worth more than 1)
+  // A quest's pay: coins pop up all around the player, then slide in to be collected
+  // (`holdUntil`: they sit there until then; `homing`: drawn in from any distance)
+  const REWARD_COIN_MAX = 16;
+  const REWARD_COIN_HOLD_MS = 600;
+  const REWARD_COIN_STAGGER_MS = 45;
+  function _spawnRewardCoins(total) {
+    const count = Math.max(1, Math.min(REWARD_COIN_MAX, Math.ceil(total / 5)));
+    const base = Math.floor(total / count);
+    let extra = total - base * count;
+    const offset = Math.random() * Math.PI * 2;
+    const now = performance.now();
+    for (let i = 0; i < count; i++) {
+      const value = base + (extra-- > 0 ? 1 : 0);
+      const angle = offset + (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+      const dist = 2.6 + Math.random() * 1.8;
+      const pos = playerModel.position.clone().add(new THREE.Vector3(Math.cos(angle) * dist, 0, Math.sin(angle) * dist));
+      const pickup = spawnCoinPickup(pos, { value });
+      if (!pickup) { applyCoinPickupEffects(value); continue; }
+      pickup.userData.homing = true;
+      pickup.userData.holdUntil = now + REWARD_COIN_HOLD_MS + i * REWARD_COIN_STAGGER_MS;
+    }
+  }
+
   function spawnCoinPickup(position, { value = COIN_PICKUP_GAIN } = {}) {
     const spawnPos = asVec3(position);
     if (!spawnPos) return;
@@ -4218,12 +4241,16 @@ async function initCore(runtimeContext) {
   let _psPathProgress = 0;
   const PS_PATH_LOOKAHEAD = 3;          // m along the path ahead of the player that the auto-walk heads for
   const PS_PATH_BACKTRACK = 5;          // m: the player's spot on the path never moves back more than this
+  // …nor forward more than this in one frame (a winding route passes near its own later stretches:
+  // walking off the path toward one mustn't skip the player there, or to the end)
+  const PS_PATH_MAX_SKIP = 1.5;
   const PS_ENEMY_PATH_DIRECT_DIST = 7;  // m: an enemy closer than this walks straight at the player
   const PS_ENEMY_PATH_LOOKAHEAD = 3;    // m along the path toward the player
   const _psPathAheadPoint = new THREE.Vector3();
   const _psUpdatePathProgress = () => {
     if (!_psPath) return 0;
-    const s = _psPath.project(playerModel.position.x, playerModel.position.z, _psPathProgress - PS_PATH_BACKTRACK);
+    const s = _psPath.project(playerModel.position.x, playerModel.position.z,
+      _psPathProgress - PS_PATH_BACKTRACK, _psPathProgress + PS_PATH_MAX_SKIP);
     _psPathProgress = Math.max(_psPathProgress, s);
     return s;
   };
@@ -6062,7 +6089,7 @@ async function initCore(runtimeContext) {
         const n = _psRewardOwed;
         if (n <= 0) return;
         _psSetRewardOwed(0);
-        appState.addCoins(n);
+        _spawnRewardCoins(n);
       },
     },
     onIntroDone: _psMarkIntroSeen,
@@ -7184,7 +7211,9 @@ async function initCore(runtimeContext) {
           pickup.rotation.z += 0.10;
           const phase = pickup.userData.phase ?? 0;
           pickup.position.y = pickup.userData.baseY + Math.sin(pickupTime + phase) * 0.1;
-          if (!playerDead && playerModel.position.distanceTo(pickup.position) <= getPickupAttractRadius()) {
+          // (a quest's pay: shows round the player first, then slides in from wherever it is)
+          if (pickup.userData.holdUntil && performance.now() < pickup.userData.holdUntil) continue;
+          if (!playerDead && (pickup.userData.homing || playerModel.position.distanceTo(pickup.position) <= getPickupAttractRadius())) {
             attractPickupToPlayer(pickup, playerModel, PICKUP_ATTRACT_SPEED, pickupDeltaSeconds);
             // Follow the ground while drifting; otherwise the bob above resets y to the spawn height
             const groundY = getSpawnY(pickup.position.x, pickup.position.z, 0.6);
@@ -7665,7 +7694,7 @@ async function initCore(runtimeContext) {
             playerControls.queueAutoMove(_psAutoWalkDir.x * _moveStep, _psAutoWalkDir.z * _moveStep);
             playerControls.isMoving = true;
           } else {
-            _psAutoWalking = false;
+            // At the end: wait there (walked away by hand, it picks up again)
             playerControls.isMoving = false;
           }
         }
