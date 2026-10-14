@@ -3799,10 +3799,11 @@ async function initCore(runtimeContext) {
 
   // ── Sword Showdown characters (keys of MATCH_CHARACTERS) ──
   // Regular enemies are frog men plus every character unlocked so far; each stage ends with
-  // a boss (a locked character, PS_BOSS_HEARTS+ hearts) whose defeat unlocks it. Once all
-  // are unlocked the boss is any random character. The player picks who to play as
-  // on the stage screen. Saved in localStorage + profiles/<key>/phoneSwordStats/characters.
-  const PS_START_CHARACTERS = ['frog'];
+  // a boss (a locked character — the frog man included, PS_BOSS_HEARTS+ hearts) whose defeat
+  // unlocks it. Once all are unlocked the boss is any random character. The player starts as
+  // the psychic kid and picks who to play as in the village.
+  // Saved in localStorage + profiles/<key>/phoneSwordStats/characters.
+  const PS_START_CHARACTERS = ['psychic'];
   const PS_ENEMY_BASE_CHARACTER = 'frog';
   const PS_BOSS_HEARTS = 3;          // stage 1 boss; +1 every PS_BOSS_HEARTS_EVERY stages
   const PS_BOSS_HEARTS_EVERY = 3;
@@ -3811,7 +3812,10 @@ async function initCore(runtimeContext) {
   const _psCharsLsKey = () => profileNameKey ? `ps_chars_${profileNameKey}` : null;
   const _psNormalizeChars = ({ unlocked, selected } = {}) => {
     const set = new Set(PS_START_CHARACTERS);
-    for (const k of unlocked || []) if (MATCH_CHARACTERS[k]) set.add(k);
+    // Saves from before the psychic kid had the frog man as the free start character (never
+    // won from a boss), so a list without the psychic kid drops it: the frog man is a boss now
+    const legacy = Array.isArray(unlocked) && unlocked.length > 0 && !unlocked.includes('psychic');
+    for (const k of unlocked || []) if (MATCH_CHARACTERS[k] && !(legacy && k === 'frog')) set.add(k);
     const list = Object.keys(MATCH_CHARACTERS).filter((k) => set.has(k));
     return { unlocked: list, selected: list.includes(selected) ? selected : PS_START_CHARACTERS[0] };
   };
@@ -3830,8 +3834,7 @@ async function initCore(runtimeContext) {
   // (story characters — MATCH_CHARACTERS[k].story — are never bosses: story mode unlocks them)
   const _psPickBoss = () => {
     const fightable = Object.keys(MATCH_CHARACTERS).filter((k) => !MATCH_CHARACTERS[k].story);
-    const nonFrog = fightable.filter((k) => k !== PS_ENEMY_BASE_CHARACTER);
-    const locked = nonFrog.filter((k) => !_psChars.unlocked.includes(k));
+    const locked = fightable.filter((k) => !_psChars.unlocked.includes(k));
     const pool = locked.length ? locked : fightable;
     return { key: pool[Math.floor(Math.random() * pool.length)], unlocks: locked.length > 0 };
   };
@@ -3839,7 +3842,7 @@ async function initCore(runtimeContext) {
     PS_BOSS_HEARTS + Math.floor(Math.max(0, stage - 1) / PS_BOSS_HEARTS_EVERY));
   // Regular enemies: frog men + characters won from bosses
   const _psEnemyCharacterPool = () => [PS_ENEMY_BASE_CHARACTER, ..._psChars.unlocked.filter(
-    (k) => !PS_START_CHARACTERS.includes(k))];
+    (k) => !PS_START_CHARACTERS.includes(k) && k !== PS_ENEMY_BASE_CHARACTER)];
   let _psJumpVelY = 0;       // vertical velocity for phone sword jump
   let _psGroundY = null;     // ground Y level for phone sword mode
   const PS_JUMP_FORCE = 8.5; // initial upward speed m/s
@@ -4919,10 +4922,12 @@ async function initCore(runtimeContext) {
           highestStage: Math.max(fbStats.highestStage, _psStats.highestStage)
         };
         // Characters: union of Firebase + localStorage unlocks; local pick wins
+        // (each side normalised first, so an old save's free frog man is dropped before the union)
         const localChars = _psLoadLocalChars();
+        const remoteChars = _psNormalizeChars(fbChars);
         _psChars = _psNormalizeChars({
-          unlocked: [...localChars.unlocked, ...fbChars.unlocked],
-          selected: localChars.selected !== PS_START_CHARACTERS[0] ? localChars.selected : fbChars.selected
+          unlocked: [...localChars.unlocked, ...remoteChars.unlocked],
+          selected: localChars.selected !== PS_START_CHARACTERS[0] ? localChars.selected : remoteChars.selected
         });
         // Use whichever is higher: Firebase stage or localStorage
         const lsStage = _psSavedStage();
@@ -6619,8 +6624,8 @@ async function initCore(runtimeContext) {
     applyDisplaySettings();
     clearRoadLightPool();
     tutorialCtx.equipSword();
-    // Tutorial / Multiplayer play as the frog man; Showdown applies its pick on the stage screen
-    setPlayerCharacterUrl(playerModel, glbCharacterConfig.frogManUrl);
+    // Tutorial / Multiplayer play as the psychic kid; Showdown applies its pick on the stage screen
+    setPlayerCharacterUrl(playerModel, glbCharacterConfig.psychicKidUrl);
   };
 
   // Classic mode on/off: HUD classes, no blood, Classic combo pop-ups, CLASSIC_HEARTS max health
@@ -6884,7 +6889,7 @@ async function initCore(runtimeContext) {
     },
     leaveMatch: () => {
       matchCtx.endGunsLoadout();
-      setPlayerCharacterUrl(playerModel, glbCharacterConfig.frogManUrl);
+      setPlayerCharacterUrl(playerModel, glbCharacterConfig.psychicKidUrl);
       duelCtx.leaveDuel();
     },
     // Guns & Bombs: the gun (unlimited bullets) in hand, one fresh shield, unlimited bombs.

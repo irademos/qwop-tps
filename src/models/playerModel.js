@@ -139,7 +139,7 @@ export function createPlayerModel(
   THREE,
   username,
   onLoad,
-  { characterUrl = glbCharacterConfig.frogManUrl } = {}
+  { characterUrl = glbCharacterConfig.psychicKidUrl } = {}
 ) {
   const playerGroup = new THREE.Group();
   playerGroup.name = 'ProceduralGangBeastsPlayer';
