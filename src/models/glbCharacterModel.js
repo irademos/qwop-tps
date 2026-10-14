@@ -69,6 +69,7 @@ export const glbCharacterConfig = {
   heightScaleByUrl: {
     '/models/glb_characters/tree_creature.glb': 1.4,
     '/models/glb_characters/gemhorn_rigged.glb': 1.4,
+    '/models/glb_characters/psychic_kid.glb': 0.7,
   },
 
   // Arm IK
