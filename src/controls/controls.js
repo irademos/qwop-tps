@@ -571,8 +571,7 @@ export class PlayerControls {
         if (this.enabled) getAppState()?.setWandShieldHold?.(true);
         this.punchButton.classList.add('ps-blocking-active');
       } else if (pressMode === 'sword' && this.enabled) {
-        const app = getAppState();
-        app?.equipInventoryItem?.(app?.isSwordAllowed?.() === false ? 'pistol' : 'foamSword');
+        getAppState()?.equipInventoryItem?.('foamSword');
         this.refreshActionButtons();
       }
     };
@@ -630,10 +629,7 @@ export class PlayerControls {
     const mode = this.getBlockBarMode();
     if (mode === 'fire') return 'Fire';
     if (mode === 'shield') return '🛡 Shield';
-    if (mode === 'sword') {
-      const appState = appContext.uiState.appState ?? window.appState;
-      return appState?.isSwordAllowed?.() === false ? '🔫 Gun' : '🗡 Sword';
-    }
+    if (mode === 'sword') return '🗡 Sword';
     if (mode === 'block') return '🛡 Block';
     return 'Attack';
   }
@@ -644,11 +640,9 @@ export class PlayerControls {
     const inventory = appState?.getInventory?.() || {};
     const hasGun = (inventory.pistol?.count ?? 0) > 0;
     const hasShield = (inventory.shield?.count ?? 0) > 0;
-    // Multiplayer Guns & Bombs: gun and shield only
-    const swordAllowed = appState?.isSwordAllowed?.() !== false;
     const hasWand = !!appState?.isWandAllowed?.();
     const weapons = [
-      ...(swordAllowed ? [{ id: 'foamSword', label: 'Sword' }] : []),
+      { id: 'foamSword', label: 'Sword' },
       ...(hasWand ? [{ id: 'magic_wand', label: '🪄 Wand' }] : []),
       ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
       ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),
@@ -1324,13 +1318,10 @@ export class PlayerControls {
   canFireProjectile(hand = 'right') {
     const gun = this.getEquippedGun(hand);
     if (!gun || !this.playerModel) return false;
-    if (gun.infiniteAmmo) return true;
     return this.ammo > 0;
   }
 
   consumeAmmo() {
-    const gun = this.getEquippedGun();
-    if (gun?.infiniteAmmo) return true;
     if (this.ammo <= 0) return false;
     this.setAmmo(this.ammo - 1);
     return true;

@@ -193,7 +193,7 @@ export function updateProjectiles({
       continue;
     }
 
-    // Multiplayer Guns & Bombs: every fighter ({id, position, onHit}) — the battle code
+    // Multiplayer battles: every fighter ({id, position, onHit}) — the battle code
     // decides who deals the damage (src/multiplayer/matchMode.js)
     if (pvpTargets) {
       if (leftShooter) {

@@ -128,7 +128,7 @@ export function createMagicBlasts({ scene }) {
 
   /**
    * Fires a blast. `origin` = centre of the line, `forward` = flight direction,
-   * `line` = the line's direction, `side` = who cast it ('player' | 'enemy', passed back to
+   * `line` = the line's direction, `side` = who cast it ('player' | 'enemy' | 'match' — a Multiplayer battle, passed back to
    * getTargets), `element` = 'fire' | 'ice' (random when left out).
    */
   const spawn = ({ origin, forward, line, side = 'player', element = randomMagicElement(), speed = 15,

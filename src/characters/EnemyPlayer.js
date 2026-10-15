@@ -285,11 +285,11 @@ export class EnemyPlayer {
     this.swingChance = options.swingChance ?? 0.35;
     // Never walks (tutorial targets); still faces the player and fights if the player comes close
     this.stationary = !!options.stationary;
-    // Ranged fighter (Multiplayer Guns & Bombs bots): no sword, never swings, keeps
+    // Ranged fighter (bosses with a gun): no sword, never swings, keeps
     // between `min` and `max` metres from the target — { min, max } or null
     this.ranged = options.ranged ?? null;
     // Both hands on one grip point (model space) instead of the sword AI's hand poses —
-    // a held gun / shield, posed like the player's (Multiplayer Guns & Bombs), or null
+    // a held gun / shield, posed like the player's (bosses), or null
     this.gripTarget = null;
     // Tutorial override of the attack AI (see _applyScript), or null for the normal loop:
     //   { mode: 'passive' }                    – stands idle, never attacks

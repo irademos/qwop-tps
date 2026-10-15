@@ -4,7 +4,7 @@ import {
 } from '../map/stageRoutes.js';
 
 // Dev tool (Settings → Dev → Free Roam): walk the active map freely with a panel to
-//  - copy the current location ({x, y, z, yaw} — for DUEL_LOCATION / GUNS_LOCATION), and
+//  - copy the current location ({x, y, z, yaw} — for DUEL_LOCATION / ARENA_LOCATION), and
 //  - record Showdown stage routes: per stage, the village spot then the waypoints, kept as a
 //    draft in localStorage (src/map/stageRoutes.js) and copied as text to paste into
 //    STAGE_ROUTES.

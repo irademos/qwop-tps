@@ -3,7 +3,7 @@ import { LOBBY_ROOM_ID } from './peerConnection.js';
 
 // Multiplayer mode: a lobby of everyone online (the `peers` list the Multiplayer class keeps
 // from Firebase) where you challenge a player to a 1v1 sword duel, or open Team Battle /
-// Free For All / Guns & Bombs (src/multiplayer/matchMode.js — the lobby is suspended while it runs). A duel moves both players
+// Free For All, each as Survival or Most Kills (src/multiplayer/matchMode.js — the lobby is suspended while it runs). A duel moves both players
 // into their own private room at DUEL_LOCATION, locks guns/bombs/bubbles/shields and plays
 // best of DUEL_ROUNDS rounds: each round both start apart with full duel health, count
 // "3 2 1 FIGHT!", walk in toward each other and fight until one dies. First to
@@ -65,10 +65,30 @@ export function createDuelMode(ctx) {
   const lobbyStatus = el('div', 'duel-lobby-status');
   const lobbyList = el('ul', 'duel-lobby-list');
   const lobbyModes = el('div', 'duel-lobby-modes');
-  const teamBattleBtn = el('button', 'arcade-button', '👥 Team Battle');
-  const ffaBtn = el('button', 'arcade-button', '🎯 Free For All');
-  const gunsBtn = el('button', 'arcade-button', '🔫 Guns & Bombs');
-  lobbyModes.append(teamBattleBtn, ffaBtn, gunsBtn);
+  // Battle modes: a card each, with a button per rule (matchMode's MATCH_RULES)
+  const BATTLE_MODES = [
+    { mode: 'team', icon: '👥', title: 'Team Battle', desc: '5 v 5 · pick a side' },
+    { mode: 'ffa', icon: '🎯', title: 'Free For All', desc: '10 fighters · everyone for themselves' }
+  ];
+  const BATTLE_RULES = [
+    { rule: 'survival', label: '🛡️ Survival' },
+    { rule: 'kills', label: '💀 Most Kills' }
+  ];
+  BATTLE_MODES.forEach(({ mode, icon, title, desc }) => {
+    const card = el('div', 'duel-mode-card');
+    const head = el('div', 'duel-mode-head');
+    head.append(el('span', 'duel-mode-icon', icon), el('span', 'duel-mode-title', title));
+    const rules = el('div', 'duel-mode-rules');
+    BATTLE_RULES.forEach(({ rule, label }) => {
+      const btn = el('button', rule === 'survival' ? 'arcade-button' : 'arcade-button arcade-secondary', label);
+      btn.addEventListener('click', () => {
+        if (phase === 'lobby' && ctx.getMultiplayer()?.getId?.()) ctx.openMatch(mode, rule);
+      });
+      rules.append(btn);
+    });
+    card.append(head, el('div', 'duel-mode-desc', `${desc} · pickups everywhere`), rules);
+    lobbyModes.append(card);
+  });
   const lobbyActions = el('div', 'duel-lobby-actions');
   const backBtn = el('button', 'arcade-button arcade-secondary', '⬅ Back');
   lobbyActions.append(backBtn);
@@ -448,15 +468,6 @@ export function createDuelMode(ctx) {
     showLobby();
     if (flash) flashLobbyStatus(flash);
   };
-  teamBattleBtn.addEventListener('click', () => {
-    if (phase === 'lobby' && ctx.getMultiplayer()?.getId?.()) ctx.openMatch('team');
-  });
-  ffaBtn.addEventListener('click', () => {
-    if (phase === 'lobby' && ctx.getMultiplayer()?.getId?.()) ctx.openMatch('ffa');
-  });
-  gunsBtn.addEventListener('click', () => {
-    if (phase === 'lobby' && ctx.getMultiplayer()?.getId?.()) ctx.openMatch('guns');
-  });
 
   // ── Lobby screen ─────────────────────────────────────────────────────────
   const showLobby = () => {

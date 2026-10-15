@@ -78,7 +78,7 @@ export function createPlayerBombs({ scene, getBlastTargets }) {
 
     /**
      * Lobs a bomb from `origin` so it lands on `target` (both world space).
-     * `opts.getBlastTargets` overrides who this bomb's blast can hit (Multiplayer Guns & Bombs).
+     * `opts.getBlastTargets` overrides who this bomb's blast can hit (Multiplayer battles).
      */
     throw(origin, target, opts = {}) {
       const mesh = createBombMesh(gltf);
