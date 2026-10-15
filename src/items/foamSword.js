@@ -159,7 +159,7 @@ export class FoamSword extends Weapon {
       tgt.z = THREE.MathUtils.clamp(FS_HAND_Z - (_fsSwordDir.z - 0.2) * 0.35 * blockSign, 0.15, 0.7);
     }
     super.update();
-    // Per-character sword size (the small psychic kid holds a smaller one)
+    // Per-character sword size (the small village boy holds a smaller one)
     if (this.holder?.playerModel) {
       const active = this.useHeldMeshWhenHeld && this.heldMesh ? this.heldMesh : this.mesh;
       const scale = this.wand ? 1 : characterHold(this.holder.playerModel.userData.qwopRig?.characterUrl).sword;

@@ -46,7 +46,7 @@ export const MATCH_MODES = { team: 'Team Battle', ffa: 'Free For All', guns: 'Gu
 // Every mode but Team Battle is everyone for themselves
 const isFreeForAll = (mode) => mode !== 'team';
 export const MATCH_CHARACTERS = {
-  psychic: { label: 'Psychic Kid', team: 'Psychics', emoji: '🔮', url: glbCharacterConfig.psychicKidUrl },
+  villageBoy: { label: 'Village Boy', team: 'Village Boys', emoji: '👦', url: glbCharacterConfig.villageBoyUrl },
   antler: { label: 'Antler Guy', team: 'Antlers', emoji: '🦌', url: glbCharacterConfig.antlerGuyUrl },
   frog: { label: 'Frog Man', team: 'Frogs', emoji: '🐸', url: glbCharacterConfig.frogManUrl },
   gemhorn: { label: 'Gemhorn', team: 'Gemhorns', emoji: '💎', url: glbCharacterConfig.url },
@@ -499,7 +499,7 @@ export function createMatchMode(ctx) {
       hostName: ctx.getPlayerName(),
       isHost: true,
       members: new Map(),
-      myPick: { side: 0, char: 'psychic' },
+      myPick: { side: 0, char: 'villageBoy' },
       teamChars: ['antler', 'frog']
     };
     phase = 'setup';
@@ -690,7 +690,7 @@ export function createMatchMode(ctx) {
     }
     party = {
       key, mode, hostId: from, hostName: name, isHost: false,
-      roster: [], teamChars: ['antler', 'frog'], myPick: { side: 0, char: 'psychic' }
+      roster: [], teamChars: ['antler', 'frog'], myPick: { side: 0, char: 'villageBoy' }
     };
     phase = 'guest';
     joinRoom(`party-${from}`);
