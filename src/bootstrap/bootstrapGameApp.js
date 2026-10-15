@@ -55,7 +55,7 @@ import { createVillage, PEMBERTON_STAGE, villagerQuestReward, fillTalk } from '.
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createPembertonBoss, createStageBoss, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
-import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE } from '../characters/stageBoss.js';
+import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE } from '../characters/stageBoss.js';
 
 import {
   clearStoredPin,
@@ -123,8 +123,9 @@ const MAGIC_FREEZE_MIN_S = 3;            // frozen for 3–5 s…
 const MAGIC_FREEZE_RAND_S = 2;
 const FREEZE_SHAKE_SPEED = 220;          // deg/s of phone shaking that counts…
 const FREEZE_SHAKE_RATE = 1.6;           // …and melts this many extra seconds per second
-// Wand-casting enemies: from this stage, a rising share of the swordsmen
-const PS_WAND_ENEMY_FROM_STAGE = 6;
+// Wand-casting enemies: a rising share of the swordsmen, from the stage after the first boss
+// with a wand (FIRST_WAND_BOSS_STAGE, the wizard)
+const PS_WAND_ENEMY_FROM_STAGE = FIRST_WAND_BOSS_STAGE + 1;
 const WAND_ENEMY_RANGE = { min: 6, max: 11 };
 
 const ROAD_LIGHT_GRID_SIZE = 3;
@@ -3800,21 +3801,28 @@ async function initCore(runtimeContext) {
   // ── Sword Showdown characters (keys of MATCH_CHARACTERS) ──
   // Regular enemies are frog men plus every character unlocked so far; each stage ends with
   // a boss (a locked character — the frog man included, PS_BOSS_HEARTS+ hearts) whose defeat
-  // unlocks it. Once all are unlocked the boss is any random character. The player starts as
-  // the psychic kid and picks who to play as in the village.
+  // unlocks it. Once all are unlocked the boss is any random character. Stage 1's boss is
+  // always the frog man and the first boss with a wand (FIRST_WAND_BOSS_STAGE) the wizard.
+  // The player starts as the village boy and picks who to play as in the village.
   // Saved in localStorage + profiles/<key>/phoneSwordStats/characters.
-  const PS_START_CHARACTERS = ['psychic'];
+  const PS_START_CHARACTERS = ['villageBoy'];
   const PS_ENEMY_BASE_CHARACTER = 'frog';
+  const PS_FIXED_BOSSES = { 1: 'frog', [FIRST_WAND_BOSS_STAGE]: 'wizard' }; // stage → boss character
+  const PS_WAND_ENEMY_CHARACTER = 'wizard'; // wand casters are always wizards
   const PS_BOSS_HEARTS = 3;          // stage 1 boss; +1 every PS_BOSS_HEARTS_EVERY stages
   const PS_BOSS_HEARTS_EVERY = 3;
   const PS_BOSS_MAX_HEARTS = 10;
   const PS_BOSS_SWING_BONUS = 0.15;  // bosses swing more often than their stage's swordsmen
   const _psCharsLsKey = () => profileNameKey ? `ps_chars_${profileNameKey}` : null;
+  // (the village boy replaced the psychic kid as the start character: old saves say 'psychic')
+  const _psCharKey = (k) => (k === 'psychic' ? 'villageBoy' : k);
   const _psNormalizeChars = ({ unlocked, selected } = {}) => {
     const set = new Set(PS_START_CHARACTERS);
-    // Saves from before the psychic kid had the frog man as the free start character (never
-    // won from a boss), so a list without the psychic kid drops it: the frog man is a boss now
-    const legacy = Array.isArray(unlocked) && unlocked.length > 0 && !unlocked.includes('psychic');
+    unlocked = Array.isArray(unlocked) ? unlocked.map(_psCharKey) : unlocked;
+    selected = _psCharKey(selected);
+    // Saves from before the psychic kid (now the village boy) had the frog man as the free start
+    // character (never won from a boss), so a list without it drops it: the frog man is a boss now
+    const legacy = Array.isArray(unlocked) && unlocked.length > 0 && !unlocked.includes('villageBoy');
     for (const k of unlocked || []) if (MATCH_CHARACTERS[k] && !(legacy && k === 'frog')) set.add(k);
     const list = Object.keys(MATCH_CHARACTERS).filter((k) => set.has(k));
     return { unlocked: list, selected: list.includes(selected) ? selected : PS_START_CHARACTERS[0] };
@@ -3830,13 +3838,19 @@ async function initCore(runtimeContext) {
     try { const k = _psCharsLsKey(); if (k) localStorage.setItem(k, JSON.stringify(_psChars)); } catch (_) {}
     if (profileNameKey) void saveShowdownCharacters(profileNameKey, _psChars);
   };
-  let _psStageBoss = null; // { key, unlocks } for the stage on the stage screen / being played
-  // (story characters — MATCH_CHARACTERS[k].story — are never bosses: story mode unlocks them)
-  const _psPickBoss = () => {
+  let _psStageBoss = null; // { key, unlocks, stage } for the stage on the stage screen / being played
+  // (story characters — MATCH_CHARACTERS[k].story — are never bosses: story mode unlocks them;
+  // a fixed stage's boss is always its PS_FIXED_BOSSES character, which no earlier stage picks)
+  const _psPickBoss = (stage) => {
+    const fixed = PS_FIXED_BOSSES[stage];
+    if (fixed) return { key: fixed, unlocks: !_psChars.unlocked.includes(fixed), stage };
+    const reserved = Object.entries(PS_FIXED_BOSSES).filter(([s]) => Number(s) > stage).map(([, k]) => k);
     const fightable = Object.keys(MATCH_CHARACTERS).filter((k) => !MATCH_CHARACTERS[k].story);
     const locked = fightable.filter((k) => !_psChars.unlocked.includes(k));
-    const pool = locked.length ? locked : fightable;
-    return { key: pool[Math.floor(Math.random() * pool.length)], unlocks: locked.length > 0 };
+    const lockedFree = locked.filter((k) => !reserved.includes(k));
+    const pool = lockedFree.length ? lockedFree : locked.length ? locked : fightable;
+    const key = pool[Math.floor(Math.random() * pool.length)];
+    return { key, unlocks: locked.includes(key), stage };
   };
   const _psBossHearts = (stage) => Math.min(PS_BOSS_MAX_HEARTS,
     PS_BOSS_HEARTS + Math.floor(Math.max(0, stage - 1) / PS_BOSS_HEARTS_EVERY));
@@ -4534,7 +4548,7 @@ async function initCore(runtimeContext) {
     const _stageAt = (t) => path.at(lead + pathLen * t);
     _psEnemyQueue = [];
     const _charPool = _psEnemyCharacterPool();
-    if (!_classicMode && !_psStageBoss) _psStageBoss = _psPickBoss();
+    if (!_classicMode && (!_psStageBoss || _psStageBoss.stage !== stage)) _psStageBoss = _psPickBoss(stage);
     if (_psStageBoss) _psStageBoss.spared = false; // (a retry: talks again)
     // The final stage is Pemberton alone, right where he stood (no coins or heart bubbles)
     const _final = _psIsFinalStage(stage);
@@ -4567,17 +4581,20 @@ async function initCore(runtimeContext) {
       const ey = getTerrainHeight(ex, ez) ?? playerModel.position.y;
       // Bomb throwers: start appearing at stage 3, ~5% chance scaling up slowly with stage
       const _btChance = !_classicMode && stage >= 3 ? Math.min(0.15, 0.05 + (stage - 3) * 0.006) : 0;
-      // Wand casters: from PS_WAND_ENEMY_FROM_STAGE, a rising share of the swordsmen
+      // Wand casters (always wizards): from PS_WAND_ENEMY_FROM_STAGE, a rising share of the swordsmen
       const _wandChance = !_classicMode && stage >= PS_WAND_ENEMY_FROM_STAGE
         ? Math.min(0.25, 0.08 + (stage - PS_WAND_ENEMY_FROM_STAGE) * 0.015) : 0;
-      const charKey = isBoss ? _psStageBoss.key : _charPool[Math.floor(Math.random() * _charPool.length)];
       const _bomber = !isBoss && Math.random() < _btChance;
+      const _wand = !isBoss && !_bomber && Math.random() < _wandChance;
+      const charKey = isBoss ? _psStageBoss.key
+        : _wand ? PS_WAND_ENEMY_CHARACTER
+        : _charPool[Math.floor(Math.random() * _charPool.length)];
       _psEnemyQueue.push({
         pos: new THREE.Vector3(ex, ey, ez),
         hearts: isBoss ? _psBossHearts(stage) : _psHeartsForStage(stage),
         triggerDist: lead + pathLen * t - 10,
         bombThrower: _bomber,
-        wand: !isBoss && !_bomber && Math.random() < _wandChance,
+        wand: _wand,
         characterUrl: _classicMode ? _classicMiiUrl() : MATCH_CHARACTERS[charKey].url,
         boss: isBoss,
         bossKey: isBoss ? charKey : null,
@@ -4750,8 +4767,8 @@ async function initCore(runtimeContext) {
     if (!_center) _psClearDeadEnemies();
     // Final enemy (picked here so the banner can name it; kept through retries of this stage)
     // (the final stage's is Pemberton — the villager character, unlocked by beating him)
-    if (_final) _psStageBoss = { key: 'villager', unlocks: !_psChars.unlocked.includes('villager'), pemberton: true };
-    else if (!_psStageBoss || _psStageBoss.pemberton) _psStageBoss = _psPickBoss();
+    if (_final) _psStageBoss = { key: 'villager', unlocks: !_psChars.unlocked.includes('villager'), pemberton: true, stage };
+    else if (!_psStageBoss || _psStageBoss.pemberton || _psStageBoss.stage !== stage) _psStageBoss = _psPickBoss(stage);
     const _boss = MATCH_CHARACTERS[_psStageBoss.key];
     setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected].url);
     _psPreviewTime();
@@ -6642,8 +6659,8 @@ async function initCore(runtimeContext) {
     applyDisplaySettings();
     clearRoadLightPool();
     tutorialCtx.equipSword();
-    // Tutorial / Multiplayer play as the psychic kid; Showdown applies its pick on the stage screen
-    setPlayerCharacterUrl(playerModel, glbCharacterConfig.psychicKidUrl);
+    // Tutorial / Multiplayer play as the village boy; Showdown applies its pick on the stage screen
+    setPlayerCharacterUrl(playerModel, glbCharacterConfig.villageBoyUrl);
   };
 
   // Classic mode on/off: HUD classes, no blood, Classic combo pop-ups, CLASSIC_HEARTS max health
@@ -6908,7 +6925,7 @@ async function initCore(runtimeContext) {
     },
     leaveMatch: () => {
       matchCtx.endGunsLoadout();
-      setPlayerCharacterUrl(playerModel, glbCharacterConfig.psychicKidUrl);
+      setPlayerCharacterUrl(playerModel, glbCharacterConfig.villageBoyUrl);
       duelCtx.leaveDuel();
     },
     // Guns & Bombs: the gun (unlimited bullets) in hand, one fresh shield, unlimited bombs.

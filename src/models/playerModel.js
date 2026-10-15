@@ -60,7 +60,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
   if (rig.floatingHands) {
     // FoamSword.update() (and shield/pistol)
     // sets foamSwordMode=true and writes foamSwordHandTarget with the desired grip position.
-    // Per-character hold (e.g. the small psychic kid grips lower and closer in)
+    // Per-character hold (e.g. the small village boy grips lower and closer in)
     const grip = characterHold(rig.characterUrl).grip;
     // Unarmed with the phone gyro live: it moves only the anatomical right arm ('left'),
     // the clip animates the other one (both while there's no gyro)
@@ -168,7 +168,7 @@ export function createPlayerModel(
   THREE,
   username,
   onLoad,
-  { characterUrl = glbCharacterConfig.psychicKidUrl } = {}
+  { characterUrl = glbCharacterConfig.villageBoyUrl } = {}
 ) {
   const playerGroup = new THREE.Group();
   playerGroup.name = 'ProceduralGangBeastsPlayer';

@@ -24,6 +24,8 @@ export function stageBossGearIcons(stage) {
   const gear = stageBossGear(stage);
   return `🗡️${STAGE_BOSS_GEAR_ORDER.filter((k) => gear[k]).map((k) => GEAR_ICONS[k]).join('')}`;
 }
+/** First stage whose boss has the wand (the wizard; wand enemies come after it). */
+export const FIRST_WAND_BOSS_STAGE = STAGE_BOSS_GEAR_ORDER.indexOf('wand') + 2;
 
 // The story's stage bosses (stage 1 = index 0; stages 1–10, the guards are stage 10).
 // `name` = how it calls itself (else the character's name), `lines` = [who, text] with who =
