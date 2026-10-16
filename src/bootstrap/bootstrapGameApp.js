@@ -5336,20 +5336,6 @@ async function initCore(runtimeContext) {
     appStateRef.equipInventoryItem?.(equippedId === itemId ? FOAM_SWORD_ITEM_ID : itemId);
     playerControls?.refreshActionButtons?.();
   };
-  // The phone's one Equip button: the next weapon in Sword → Gun → Shield → Wand that the
-  // player has (the tutorial's asked-for weapon first); null when there's nothing to switch to
-  const _PHONE_HIGHLIGHT_ITEMS = { gun: 'pistol', shield: SHIELD_ITEM_ID, wand: MAGIC_WAND_ITEM_ID };
-  const _phoneNextWeapon = (st) => {
-    const order = [FOAM_SWORD_ITEM_ID];
-    if (st.hasGun) order.push('pistol');
-    if (st.hasShield) order.push(SHIELD_ITEM_ID);
-    if (st.hasWand) order.push(MAGIC_WAND_ITEM_ID);
-    const cur = order.includes(st.equipped) ? st.equipped : FOAM_SWORD_ITEM_ID;
-    const asked = _PHONE_HIGHLIGHT_ITEMS[st.highlight];
-    if (asked && asked !== cur && order.includes(asked)) return asked;
-    const next = order[(order.indexOf(cur) + 1) % order.length];
-    return next === cur ? null : next;
-  };
   const _handlePhoneAction = (action) => {
     if (action === 'wandShieldUp') { setWandShieldHold(false); return; } // (always let go)
     if (!playerControls?.enabled || _classicMode || _gamePaused) return; // Classic: Block only
@@ -5373,12 +5359,6 @@ async function initCore(runtimeContext) {
       playerControls?.refreshActionButtons?.();
     } else if (action === 'wandShieldDown') {
       setWandShieldHold(true);
-    } else if (action === 'equipNext') {
-      const next = _phoneNextWeapon(_phoneControllerStatus());
-      if (!next) return;
-      if (next === MAGIC_WAND_ITEM_ID && !isWandAllowed()) return;
-      equipInventoryItem(next);
-      playerControls?.refreshActionButtons?.();
     }
   };
   const _phoneControllerStatus = () => {
@@ -5397,7 +5377,7 @@ async function initCore(runtimeContext) {
         ammo: 0, equipped: FOAM_SWORD_ITEM_ID, highlight: null
       };
     }
-    const status = {
+    return {
       bombs: getPlayerBombCount(),
       bubbles: getBubbleCount(),
       bubbleActive: isPlayerBubbleActive(),
@@ -5412,9 +5392,6 @@ async function initCore(runtimeContext) {
       // Tutorial: phone button to ring ('bomb' | 'bubble' | 'gun' | 'shield' | 'fire' | 'block')
       highlight: showdownTutorial?.isActive() ? _tutorialPhoneHighlight : null
     };
-    // What the phone's Equip button switches to ('pistol' | shield | wand | sword id | null)
-    status.nextEquip = _phoneNextWeapon(status);
-    return status;
   };
   let _tutorialPhoneHighlight = null;
   // The phone currently driving the sword. A reconnecting phone (its browser was closed) opens
