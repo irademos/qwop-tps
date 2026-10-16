@@ -342,6 +342,8 @@ export function createDuelMode(ctx) {
     const z = loc.z + fz * offset;
     ctx.enterDuel({ x, z, yaw: side === 0 ? yaw : yaw + Math.PI });
     ctx.reviveRemotePlayer(duel.opponentId);
+    // (start of the duel: recalibrate the sword during the countdown)
+    if (!duel.calibPrompted) { duel.calibPrompted = true; ctx.promptSwordCalibration?.(); }
 
     const isFinal = duel.myWins === ROUNDS_TO_WIN - 1 && duel.oppWins === ROUNDS_TO_WIN - 1;
     const roundLabel = isFinal ? 'FINAL ROUND' : `ROUND ${duel.round}`;

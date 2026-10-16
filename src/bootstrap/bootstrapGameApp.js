@@ -5288,6 +5288,12 @@ async function initCore(runtimeContext) {
     _connectCalibThen = then;
     phoneSwordConnectCalib.classList.remove('hidden');
   };
+  // Start of every Multiplayer duel / battle: always ask (the game doesn't wait on it)
+  const _promptSwordCalibration = () => {
+    if (!phoneSwordConnectCalib || _connectCalibThen) return;
+    phoneSwordConnectCalib.classList.remove('hidden');
+  };
+  const _isSwordCalibPromptOpen = () => !!phoneSwordConnectCalib && !phoneSwordConnectCalib.classList.contains('hidden');
 
   // ── Phone controller input (phone-sword.html) ─────────────────────────────
   // Besides gyro + block, the phone page has a joystick and bomb/gun/fire/shield/bubble/jump
@@ -5339,6 +5345,14 @@ async function initCore(runtimeContext) {
   };
   const _handlePhoneAction = (action) => {
     if (action === 'wandShieldUp') { setWandShieldHold(false); return; } // (always let go)
+    if (action === 'interact') {
+      // The Block bar as an interact button: the calibration popup's Okay, a boss's talk, the village
+      if (_isSwordCalibPromptOpen()) document.getElementById('phone-sword-connect-calib-ok')?.click();
+      else if (_gamePaused) return;
+      else if (bossTalk.isOpen()) bossTalk.interact();
+      else if (village?.isOpen()) village.interact();
+      return;
+    }
     if (!playerControls?.enabled || _classicMode || _gamePaused) return; // Classic: Block only
     const appStateRef = window.appState;
     if (action === 'jump') {
@@ -5362,7 +5376,20 @@ async function initCore(runtimeContext) {
       setWandShieldHold(true);
     }
   };
+  // What the phone's Block bar does as an interact button right now (undefined: it's Block / Fire…;
+  // null: interact, but nothing to do) — the calibration popup, a boss's talk, the village
+  const _phoneInteract = () => {
+    if (_isSwordCalibPromptOpen()) return '✅ Okay';
+    if (bossTalk.isOpen()) return bossTalk.interactLabel();
+    if (village?.isOpen()) return village.interactLabel();
+    return undefined;
+  };
   const _phoneControllerStatus = () => {
+    const status = _phoneControllerGearStatus();
+    const interact = _phoneInteract();
+    return interact === undefined ? status : { ...status, interactMode: true, interact };
+  };
+  const _phoneControllerGearStatus = () => {
     const inv = window.appState?.getInventory?.() || {};
     if (_classicMode) {
       // Classic: the phone shows only Block (no joystick or other buttons)
@@ -6784,6 +6811,7 @@ async function initCore(runtimeContext) {
       }
       updateControlAvailability();
     },
+    promptSwordCalibration: () => _promptSwordCalibration(),
     // Start of every round: back on our feet at the start spot with full duel health
     enterDuel: ({ x, z, yaw }) => {
       // Same health for both duelists, whatever they've upgraded to in Showdown
@@ -6985,6 +7013,7 @@ async function initCore(runtimeContext) {
       duelCtx.enterDuel({ x, z, yaw });
       setPlayerCharacterUrl(playerModel, characterUrl);
       matchCtx.startMatchLoadout();
+      _promptSwordCalibration();
     },
     leaveMatch: () => {
       matchCtx.endMatchLoadout();
