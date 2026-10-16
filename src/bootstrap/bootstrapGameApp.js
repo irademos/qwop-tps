@@ -40,6 +40,7 @@ import {
 } from '../features/uiPanelsFeature.js';
 import { appContext } from '../core/appContext.js';
 import { exposeDebugGlobals } from '../core/exposeDebugGlobals.js';
+import { keepScreenAwake } from '../core/wakeLock.js';
 import { EnemyPlayer, swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/EnemyPlayer.js';
 import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerEnemy.js';
 import { createPlayerBombs } from '../combat/playerBomb.js';
@@ -8579,6 +8580,7 @@ async function initNetworkingAndPersistence(runtimeContext) {
 
 export async function bootstrapGameApp() {
   appContext.settings.startupPhases = [];
+  keepScreenAwake(); // phones (also "Use This Device" as the sword) shouldn't dim / sleep mid-game
 
   await initCore(appContext);
   await initWorld(appContext);
