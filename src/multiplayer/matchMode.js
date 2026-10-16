@@ -3,6 +3,7 @@ import { LOBBY_ROOM_ID } from './peerConnection.js';
 import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/EnemyPlayer.js';
 import { createMatchPickups, PICKUP_TYPES } from './matchPickups.js';
+import { createBossFighter } from '../characters/pembertonBoss.js';
 
 // Multiplayer battles: Team Battle (two teams of 5, each team one character model) and
 // Free For All (10 fighters, everyone picks their own character), each played with one of
@@ -28,7 +29,11 @@ import { createMatchPickups, PICKUP_TYPES } from './matchPickups.js';
 // Battle: everyone spawns around ARENA_LOCATION (teams in two lines facing each other,
 // free-for-all in a ring), counts down "3 2 1 FIGHT!", then players move themselves (bots
 // walk toward the closest enemy), MATCH_HEALTH health each. The host simulates the bots
-// (EnemyPlayer AI), owns the pickups and the score, and decides the winner.
+// (EnemyPlayer AI + the Showdown boss fighter logic, createBossFighter in pembertonBoss.js:
+// sword spells, then gun / shield / wand spells with what they've picked up, bombs lobbed
+// from a distance, a bubble after a hit), owns the pickups and the score, and decides the
+// winner. Bots grab every kind of pickup they need, going out of their way for one nearby
+// (`loadout`: bullets, shield strength, mana, bombs, bubbles — used up as they fight).
 // Sword hits: the attacker detects them. Bullets / bombs: whoever fires / throws detects
 // the hits (the host for its bots) and sends `hit` / `botHit` with the damage; the victim's
 // shield (held up and facing the shot) takes it instead, a bubble ignores it. Magic blasts:
@@ -44,13 +49,15 @@ import { createMatchPickups, PICKUP_TYPES } from './matchPickups.js';
 //   battle: start {matchId, partyKey, mode, rule, roster, teamChars}
 //           state {sword, hand, blocking, pos, ry, hp, w, bu} (~20 Hz, every human → every
 //           human; w = 'sword' | 'wand' | 'gun' | 'shield' | null, bu = bubble up)
-//           bots {list} (~15 Hz, host → humans) · hit {dmg, dir, kind, src, by} (attacker →
+//           bots {list} (~15 Hz, host → humans; each {id, p, r, hp, d, b, pr, w, s?, h?} —
+//           w = the bot's weapon, pr = bubble up) · hit {dmg, dir, kind, src, by} (attacker →
 //           victim; the host sends bot hits with `by`) · blocked · botHit {bot, dir, dmg,
 //           kind, src} / botBlocked {bot} (human → host) · dead {by, kind} (the sender died)
 //           · kill {v, by, k, sc} (host: v was killed by `by` with k; sc = [[id, kills,
 //           deaths]…]) · respawn {pos: [x, z, yaw], bot?} (the sender / a host bot is back)
-//           · bomb {bot?, o, t} (a bomb was thrown from o to t) · magic {o, f, l, e} (the
-//           sender cast a blast) · take {pid} (human → host: I'm standing on that pickup)
+//           · bomb {bot?, o, t} (a bomb was thrown from o to t) · magic {bot?, o, f, l, e}
+//           (the sender / a host bot cast a blast) · shot {bot, o, d} (host: a bot fired a
+//           bullet from o along d) · take {pid} (human → host: I'm standing on that pickup)
 //           · taken {pid, by, r} (host: pickup pid went to `by`, back in r ms)
 //           · end {winnerTeam, winnerId, winnerName, sc} (host) · leave (the sender left;
 //           the host leaving ends the battle). Humans' bullets go out as 'projectile' messages.
@@ -79,10 +86,10 @@ export const MATCH_CHARACTERS = {
 const CHAR_KEYS = Object.keys(MATCH_CHARACTERS);
 const BOT_CHAR_KEYS = CHAR_KEYS.filter((k) => !MATCH_CHARACTERS[k].story);
 
-// Where battles happen (island town mappack: the gentle open ground in the island's south,
-// all of it above the sea). Fighters start around it; pickups and respawns spread wider.
-// Paste Settings → Dev → Free Roam → "Copy location" here to move it.
-export const ARENA_LOCATION = { x: 8.4, y: 1.4, z: -47.6, yaw: 0 };
+// Where battles happen (island town mappack; the same spot as duels — DUEL_LOCATION in
+// duelMode.js). Fighters start around it; pickups and respawns spread wider (never in the
+// sea). Paste Settings → Dev → Free Roam → "Copy location" here to move it.
+export const ARENA_LOCATION = { x: -39.53, y: 0, z: -44.59, yaw: 0.84 };
 
 const MATCH_SIZE = 10;                 // fighters per battle (humans + bots)
 const TEAM_SIZE = MATCH_SIZE / 2;
@@ -116,10 +123,14 @@ const LAST_HIT_CREDIT_MS = 10000;      // a death credits the last hit this rece
 // Ranged damage (bullets / bombs from pickups)
 const GUN_DAMAGE = 1;
 const BOMB_DAMAGE = 2;
-// Bots grab hearts / life potions / bombs they walk over and lob the bombs
-const BOT_PICKUPS = new Set(['heart', 'potion', 'bomb']);
-const BOT_BOMB_RANGE = [3.5, 12];
-const BOT_BOMB_MS = [3500, 6500];
+// Bots: fight with what they pick up (createBossFighter), go for pickups they need this near
+const BOT_SWORD_MS = [4000, 7500];     // each sword spell before a gun / shield / wand one
+const BOT_WAND_RANGE = { min: 4.5, max: 10 };
+const BOT_SEEK_RADIUS = 9;
+const BOT_SHIELD_BLOCKS = 3;           // a picked-up shield stops this many hits
+const BOT_WANTS_AMMO_BELOW = 20;
+const BOT_WANTS_BOMBS_BELOW = 4;
+const BOT_WANTS_BUBBLES_BELOW = 2;
 const randIn = ([a, b]) => a + Math.random() * (b - a);
 
 const KIND_ICONS = { sword: '⚔️', gun: '🔫', bomb: '💣', fire: '🔥', ice: '❄️' };
@@ -916,8 +927,9 @@ export function createMatchMode(ctx) {
         lastHitAt: 0,
         respawnAt: 0,
         protectedUntil: 0,
-        bombs: 0,                        // host bots: bombs picked up
-        nextBombAt: 0
+        fighter: null,                   // host bots: createBossFighter
+        loadout: null,                   // host bots: what they've picked up (newBotLoadout)
+        seek: null                       // host bots: the pickup they're going for
       };
       const pose = spawnPose(r);
       const url = MATCH_CHARACTERS[r.char].url;
@@ -926,7 +938,10 @@ export function createMatchMode(ctx) {
         ctx.enterMatch({ ...pose, characterUrl: url });
       } else if (r.bot && isHost) {
         c.enemy = ctx.createBot({ x: pose.x, z: pose.z, yaw: pose.yaw, characterUrl: url });
-        if (c.enemy) c.enemy.stationary = true;
+        if (c.enemy) {
+          c.enemy.stationary = true;
+          setupBot(c);
+        }
       } else {
         ctx.ensureRemoteModel(r.id, r.name, url, pose);
         c.sword = ctx.createSwordMesh(url);
@@ -934,12 +949,10 @@ export function createMatchMode(ctx) {
           c.sword.visible = false;
           ctx.scene.add(c.sword);
         }
-        if (!r.bot) {
-          c.wandMesh = ctx.createWandMesh?.() || null;
-          if (c.wandMesh) {
-            c.wandMesh.visible = false;
-            ctx.scene.add(c.wandMesh);
-          }
+        c.wandMesh = ctx.createWandMesh?.() || null;
+        if (c.wandMesh) {
+          c.wandMesh.visible = false;
+          ctx.scene.add(c.wandMesh);
         }
       }
       if (!c.isSelf) {
@@ -1198,18 +1211,28 @@ export function createMatchMode(ctx) {
     c.enemy?.destroy();
     c.enemy = ctx.createBot({ x: pose.x, z: pose.z, yaw: pose.yaw, characterUrl: MATCH_CHARACTERS[c.char].url });
     c.protectedUntil = Date.now() + SPAWN_PROTECT_MS;
-    c.bombs = 0;
     c.targetId = null;
+    if (c.enemy) setupBot(c); // (back with the sword only)
     reviveCombatant(c, pose);
     broadcast({ op: 'respawn', bot: c.id, pos: [round3(pose.x), round3(pose.z), round3(pose.yaw)] });
   };
 
-  const applyBotDamage = (c, dir, dmg = 1, byId = null, kind = 'sword') => {
+  // (src: where a bullet / bomb / blast came from; else the attacker's position)
+  const applyBotDamage = (c, dir, dmg = 1, byId = null, kind = 'sword', src = null) => {
     if (!c?.alive || !c.enemy || phase !== 'fighting') return;
     if (Date.now() < c.protectedUntil) return; // spawn bubble
+    // Its shield (facing the attacker) or bubble stops it
+    const from = src ? _tmpV3.set(src.x, 0, src.z) : posOf(match.combatants.get(byId));
+    const guard = c.fighter?.guardKind(from) ?? null;
+    if (guard) {
+      botGuarded(c, guard);
+      c.enemy.applyBlockImpact?.();
+      return;
+    }
     noteHit(c, byId, kind);
     let killed = false;
-    for (let i = 0; i < Math.max(1, dmg) && !killed; i++) killed = c.enemy.applyDamage(1);
+    const fromPos = from ? from.clone() : undefined;
+    for (let i = 0; i < Math.max(1, dmg) && !killed; i++) killed = c.enemy.applyDamage(1, fromPos);
     c.hp = c.enemy.hearts;
     renderLabel(c);
     _tmpV.set(dir?.x ?? 0, 0, dir?.z ?? 1);
@@ -1460,7 +1483,7 @@ export function createMatchMode(ctx) {
       noteHit(target, attackerId, kind);
       ctx.applyHit(dmg, d, { kind, src: s });
     } else if (target.enemy) {
-      applyBotDamage(target, { x: d[0], z: d[1] }, dmg, attackerId, kind);
+      applyBotDamage(target, { x: d[0], z: d[1] }, dmg, attackerId, kind, src);
     } else if (target.bot) {
       send(match.hostId, { op: 'botHit', key: match.matchId, bot: target.id, dir: d, dmg, kind, src: s });
     } else {
@@ -1601,12 +1624,51 @@ export function createMatchMode(ctx) {
   const givePickup = (c, type) => {
     if (c.isSelf) {
       ctx.applyPickup(type);
-    } else if (c.enemy) {
-      if (type === 'heart') c.enemy.hearts = Math.min(c.enemy.maxHearts, c.enemy.hearts + 2);
+    } else if (c.enemy && c.loadout) {
+      const L = c.loadout;
+      const B = ctx.botLoadout;
+      if (type === 'heart') c.enemy.hearts = Math.min(c.enemy.maxHearts, c.enemy.hearts + B.heartPickup);
       else if (type === 'potion') c.enemy.hearts = c.enemy.maxHearts;
-      else if (type === 'bomb') c.bombs += 2;
+      else if (type === 'bomb') L.bombs += B.bombPickup;
+      else if (type === 'bubble') L.bubbles += 1;
+      else if (type === 'gun') {
+        L.ammo += B.gunAmmo + (L.gun ? 0 : L.ammoBank);
+        if (!L.gun) L.ammoBank = 0;
+        L.gun = true;
+      } else if (type === 'ammo') {
+        if (L.gun) L.ammo += B.ammoPickup;
+        else L.ammoBank += B.ammoPickup;
+      } else if (type === 'shield') {
+        L.shield = true;
+        L.shieldBlocks = BOT_SHIELD_BLOCKS;
+      } else if (type === 'wand') {
+        L.wand = true;
+        L.mana = B.maxMana;
+      } else if (type === 'mana') {
+        L.mana = Math.min(B.maxMana, L.mana + B.manaPickup);
+      }
       c.hp = c.enemy.hearts;
+      syncBotGear(c);
       renderLabel(c);
+    }
+  };
+
+  // Whether a host bot could use pickup `pk` now
+  const botWants = (c, pk) => {
+    const L = c.loadout;
+    const B = ctx.botLoadout;
+    if (!L || !c.enemy) return false;
+    switch (pk.type) {
+      case 'heart':
+      case 'potion': return c.enemy.hearts < c.enemy.maxHearts;
+      case 'gun': return !L.gun || L.ammo < BOT_WANTS_AMMO_BELOW;
+      case 'ammo': return L.gun ? L.ammo < BOT_WANTS_AMMO_BELOW : L.ammoBank < BOT_WANTS_AMMO_BELOW;
+      case 'shield': return !L.shield;
+      case 'wand': return !L.wand || L.mana < B.maxMana / 2;
+      case 'mana': return L.wand && L.mana < B.maxMana;
+      case 'bomb': return L.bombs < BOT_WANTS_BOMBS_BELOW;
+      case 'bubble': return L.bubbles < BOT_WANTS_BUBBLES_BELOW;
+      default: return false;
     }
   };
 
@@ -1628,8 +1690,7 @@ export function createMatchMode(ctx) {
     if (!match.isHost) return;
     match.combatants.forEach((c) => {
       if (!c.enemy || !c.alive) return;
-      const p = pickups.findTouching(c.enemy.group.position, PICKUP_TOUCH, now, (pk) => BOT_PICKUPS.has(pk.type)
-        && (pk.type === 'bomb' || c.enemy.hearts < c.enemy.maxHearts));
+      const p = pickups.findTouching(c.enemy.group.position, PICKUP_TOUCH, now, (pk) => botWants(c, pk));
       if (p) hostTake(c.id, p.id);
     });
   };
@@ -1644,7 +1705,11 @@ export function createMatchMode(ctx) {
     if (!model) return null;
     const toTarget = _tmpV2.subVectors(model.position, botPos).setY(0);
     if (t.enemy) {
-      if (t.enemy.blocksSwing(swingDir, botPos)) return 'blocked';
+      if (t.enemy.blocksSwing(swingDir, botPos)) {
+        const guard = t.fighter?.guardKind(botPos);
+        if (guard) botGuarded(t, guard);
+        return 'blocked';
+      }
       applyBotDamage(t, toTarget.clone().normalize(), 1, bot.id, 'sword');
       return 'hit';
     }
@@ -1663,20 +1728,102 @@ export function createMatchMode(ctx) {
     return 'hit';
   };
 
-  // A bot with bombs lobs one at its target now and then
-  const updateBotBombs = (bot, targetModel, now) => {
-    if (bot.bombs <= 0 || now < bot.nextBombAt) return;
-    const g = bot.enemy.group;
-    const dist = g.position.distanceTo(targetModel.position);
-    if (dist < BOT_BOMB_RANGE[0] || dist > BOT_BOMB_RANGE[1]) return;
-    bot.nextBombAt = now + randIn(BOT_BOMB_MS);
-    bot.bombs -= 1;
-    const origin = new THREE.Vector3(0, 1.6, 0.3);
-    g.updateMatrixWorld();
-    g.localToWorld(origin);
-    const target = targetModel.position.clone();
-    launchBomb(bot.id, origin, target, true);
-    broadcast({ op: 'bomb', bot: bot.id, o: origin.toArray().map(round3), t: target.toArray().map(round3) });
+  // A host bot's gear: what it has picked up (and not used up yet) → its boss fighter
+  const newBotLoadout = () => ({
+    gun: false, ammo: 0, ammoBank: 0,
+    shield: false, shieldBlocks: 0,
+    wand: false, mana: 0,
+    bombs: 0, bubbles: 0
+  });
+  const syncBotGear = (c) => {
+    const L = c.loadout;
+    if (!L || !c.fighter) return;
+    if (L.gun && L.ammo <= 0) L.gun = false;
+    if (L.shield && L.shieldBlocks <= 0) L.shield = false;
+    c.fighter.setGear({
+      gun: L.gun,
+      shield: L.shield,
+      wand: L.wand && L.mana >= ctx.botLoadout.manaCost,
+      bombs: L.bombs > 0,
+      bubble: L.bubbles > 0
+    });
+  };
+  // Its shield / bubble stopped something (a shield wears out)
+  const botGuarded = (c, kind) => {
+    if (kind !== 'shield' || !c.loadout) return;
+    c.loadout.shieldBlocks -= 1;
+    syncBotGear(c);
+  };
+  const botTargetModel = (c) => {
+    if (!match || phase !== 'fighting' || !c.alive) return null;
+    const t = match.combatants.get(c.targetId);
+    return t?.alive ? combatantModel(t) : null;
+  };
+  const vecMsg = (v) => v.toArray().map(round3);
+  // Host: a new bot EnemyPlayer (start / respawn) gets its fighter and an empty loadout
+  function setupBot(c) {
+    c.loadout = newBotLoadout();
+    c.seek = null;
+    const enemy = c.enemy;
+    c.fighter = createBossFighter({
+      enemy,
+      name: c.name,
+      hud: false,
+      glow: false,
+      swordMs: BOT_SWORD_MS,
+      wandRange: BOT_WAND_RANGE,
+      gear: {},
+      getTarget: () => botTargetModel(c),
+      getWeaponGear: () => ctx.getWeaponGear?.() ?? null,
+      fireBullet: (origin, dir) => {
+        if (!match || phase !== 'fighting' || c.loadout.ammo <= 0) return;
+        c.loadout.ammo -= 1;
+        ctx.spawnShot(origin, dir, c.id);
+        broadcast({ op: 'shot', bot: c.id, o: vecMsg(origin), d: vecMsg(dir) });
+        syncBotGear(c);
+      },
+      throwBomb: (origin, target) => {
+        if (!match || phase !== 'fighting' || c.loadout.bombs <= 0) return;
+        c.loadout.bombs -= 1;
+        launchBomb(c.id, origin, target, true);
+        broadcast({ op: 'bomb', bot: c.id, o: vecMsg(origin), t: vecMsg(target) });
+        syncBotGear(c);
+      },
+      onShieldBlock: (pos, kind) => botGuarded(c, kind),
+      useBubble: () => {
+        if (c.loadout.bubbles <= 0) return false;
+        c.loadout.bubbles -= 1;
+        syncBotGear(c);
+        return true;
+      }
+    });
+    // Its wand spells (the fighter's wand spell → EnemyPlayer's casting AI)
+    enemy.onCast = ({ origin, forward, line, element }) => {
+      const cost = ctx.botLoadout.manaCost;
+      if (!match || phase !== 'fighting' || !c.alive || c.loadout.mana < cost) return;
+      c.loadout.mana -= cost;
+      ctx.spawnMagic({ origin, forward, line, element, caster: c.id });
+      broadcast({ op: 'magic', bot: c.id, o: vecMsg(origin), f: vecMsg(forward), l: vecMsg(line), e: element === 'ice' ? 'ice' : 'fire' });
+      syncBotGear(c);
+    };
+  }
+
+  // A pickup a bot wants near it, closer than its target: it heads there on its way
+  // (EnemyPlayer.chaseVia — it still faces / fights its target once that's in reach)
+  const updateBotSeek = (bot, targetModel, now) => {
+    const pos = bot.enemy.group.position;
+    const targetD = targetModel ? pos.distanceTo(targetModel.position) : Infinity;
+    let best = null;
+    let bestD = Math.min(BOT_SEEK_RADIUS, targetD);
+    for (const pk of pickups.list) {
+      if (!pickups.isAvailable(pk.id, now) || !botWants(bot, pk)) continue;
+      const d = Math.hypot(pk.pos.x - pos.x, pk.pos.z - pos.z);
+      if (d < bestD) { bestD = d; best = pk; }
+    }
+    bot.seek = best;
+    bot.enemy.chaseVia = best
+      ? (from, to, out) => (bot.seek && pickups.isAvailable(bot.seek.id) ? out.set(bot.seek.pos.x, from.y, bot.seek.pos.z) : null)
+      : null;
   };
 
   const updateBots = (dt, now) => {
@@ -1726,6 +1873,7 @@ export function createMatchMode(ctx) {
       if (!bot.enemy?.rigidBody) continue; // faded out and destroyed
       if (!bot.alive) {
         bot.enemy.update(dt, null, null, false, false);
+        bot.fighter?.update(); // (puts its gun / shield away)
         continue;
       }
       const target = match.combatants.get(bot.targetId);
@@ -1736,9 +1884,10 @@ export function createMatchMode(ctx) {
         noteHit(target, bot.id, 'sword');
         ctx.knockbackLocal(dir);
       } : null;
+      if (fighting) updateBotSeek(bot, targetModel, now);
       bot.enemy.update(dt, targetModel, targetIsMe ? ctx.getPlayerControls() : null, false,
         fighting && allowed.has(bot));
-      if (fighting && targetModel) updateBotBombs(bot, targetModel, now);
+      bot.fighter?.update();
     }
   };
 
@@ -1756,7 +1905,8 @@ export function createMatchMode(ctx) {
         hp: c.hp,
         d: !c.alive,
         b: c.enemy.isBlocking(),
-        pr: now < c.protectedUntil ? 1 : 0
+        pr: now < c.protectedUntil || c.fighter?.isBubbleUp() ? 1 : 0,
+        w: c.alive ? (c.fighter?.getPhase() ?? 'sword') : null
       };
       const sg = c.enemy._swordGroup;
       if (sg?.visible && c.alive) {
@@ -1896,7 +2046,7 @@ export function createMatchMode(ctx) {
     match.combatants.forEach((c) => {
       if (!c.isSelf && !c.enemy) {
         updateRemoteCombatant(c);
-        if (!c.bot) updateGunGear(c);
+        updateGunGear(c);
       }
       if (c.enemy && c.alive) c.hp = c.enemy.hearts;
       if (!c.isSelf) updateBubble(c, c.bubble || (c.enemy && now < c.protectedUntil));
@@ -2005,6 +2155,7 @@ export function createMatchMode(ctx) {
             applySwordState(bot, b.s, b.h);
             bot.blocking = !!b.b;
             bot.bubble = !!b.pr;
+            bot.weapon = ['sword', 'wand', 'gun', 'shield'].includes(b.w) ? b.w : 'sword';
             if (Number.isFinite(b.hp) && bot.alive) bot.hp = Math.max(0, Math.round(b.hp));
             if (b.d && bot.alive) markDead(bot.id);
             else if (!b.d && !bot.alive && match.rule === 'kills' && isVec(b.p, 3)) {
@@ -2040,15 +2191,24 @@ export function createMatchMode(ctx) {
           return;
         }
         case 'magic': {
-          if (phase !== 'fighting' || !c.alive) return;
+          // (a host bot's, or the sender's own)
+          const caster = data.bot != null ? hostBot(data.bot) : c;
+          if (phase !== 'fighting' || !caster?.alive) return;
           if (!isVec(data.o, 3) || !isVec(data.f, 3) || !isVec(data.l, 3)) return;
           ctx.spawnMagic({
             origin: new THREE.Vector3().fromArray(data.o),
             forward: new THREE.Vector3().fromArray(data.f),
             line: new THREE.Vector3().fromArray(data.l),
             element: data.e === 'ice' ? 'ice' : 'fire',
-            caster: peerId
+            caster: caster.id
           });
+          return;
+        }
+        case 'shot': {
+          // A host bot's bullet (the host deals its damage)
+          const bot = hostBot(data.bot);
+          if (phase !== 'fighting' || !bot?.alive || !isVec(data.o, 3) || !isVec(data.d, 3)) return;
+          ctx.spawnShot(new THREE.Vector3().fromArray(data.o), new THREE.Vector3().fromArray(data.d).normalize(), bot.id);
           return;
         }
         case 'blocked':
@@ -2066,7 +2226,8 @@ export function createMatchMode(ctx) {
           const dir = isVec(data.dir, 2) ? new THREE.Vector3(data.dir[0], 0, data.dir[1]) : null;
           const kind = data.kind === 'gun' || data.kind === 'bomb' ? data.kind : 'sword';
           const dmg = kind === 'bomb' ? BOMB_DAMAGE : kind === 'gun' ? GUN_DAMAGE : 1;
-          applyBotDamage(bot, dir, dmg, peerId, kind);
+          const src = kind !== 'sword' && isVec(data.src, 2) ? { x: data.src[0], z: data.src[1] } : null;
+          applyBotDamage(bot, dir, dmg, peerId, kind, src);
           return;
         }
         case 'dead': {

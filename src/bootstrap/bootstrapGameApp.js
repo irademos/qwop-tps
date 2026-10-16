@@ -6697,8 +6697,11 @@ async function initCore(runtimeContext) {
     arcadeOverlay.showStartScreen();
   });
 
+  // Where the tutorial is played (island town; Settings → Dev → Free Roam → "Copy location")
+  const TUTORIAL_LOCATION = { x: -25.83, y: -0.17, z: -85.88, yaw: -0.11 };
   const startTutorialMode = () => {
     _resetForMenu();
+    _teleportPlayer(TUTORIAL_LOCATION.x, TUTORIAL_LOCATION.z, TUTORIAL_LOCATION.yaw);
     lastAutoMode = 'day';
     applyPresetForMode('day');
     applyDisplaySettings();
@@ -6925,6 +6928,16 @@ async function initCore(runtimeContext) {
     matchHealth: MATCH_HEALTH_SEGMENTS,
     magicDamage: { fire: MAGIC_FIRE_DAMAGE, ice: MAGIC_ICE_DAMAGE },
     magicFreezeSeconds: () => _magicFreezeSeconds(),
+    // What a host bot gets from a pickup (as the local player's applyPickup) and a blast costs it
+    botLoadout: {
+      gunAmmo: MATCH_GUN_AMMO,
+      ammoPickup: MATCH_AMMO_PICKUP,
+      bombPickup: MATCH_BOMB_PICKUP,
+      manaPickup: MATCH_MANA_PICKUP,
+      heartPickup: MATCH_HEART_PICKUP,
+      maxMana: MAX_MANA,
+      manaCost: WAND_MANA_COST
+    },
     getMultiplayer: () => multiplayer,
     getPlayerName: () => playerName,
     // Free For All only offers characters unlocked in Showdown
