@@ -142,9 +142,23 @@
       top: calc(10px + env(safe-area-inset-top, 0px));
       left: 50%;
       transform: translateX(-50%);
-      width: calc(100% - 32px);
+      width: calc(100% - 128px);
       z-index: 1;
     }
+    /* Recalibrate the sword (same as the game's Recalibrate) — top right, beside the status pill */
+    #btn-recalib {
+      display: none;
+      position: fixed;
+      top: calc(6px + env(safe-area-inset-top, 0px));
+      right: calc(10px + env(safe-area-inset-right, 0px));
+      height: 40px;
+      padding: 0 10px;
+      font-size: 0.8rem;
+      border-radius: 12px;
+      z-index: 2;
+    }
+    body.controller-mode #btn-recalib { display: block; }
+    #btn-recalib.done { border-color: var(--accent); }
     #controller {
       display: none;
       position: fixed;
@@ -335,6 +349,7 @@
   </div>
   <div id="error-msg"></div>
 
+  <button class="ctl-btn" id="btn-recalib" data-action="recalibrate">⟲ Recalibrate</button>
   <div id="controller">
     <div id="action-grid">
       <button class="ctl-btn row-btn" id="btn-gun" data-action="gun">🔫
@@ -462,6 +477,16 @@ Wand</button>
     joystickEl.addEventListener('pointercancel', releaseJoystick);
 
     // ── Action buttons: one 'action' message per press ────────────────────
+    let recalibTimer = null;
+    function flashRecalibrated(btn) {
+      btn.textContent = '✓ Calibrated';
+      btn.classList.add('done');
+      clearTimeout(recalibTimer);
+      recalibTimer = setTimeout(() => {
+        btn.textContent = '⟲ Recalibrate';
+        btn.classList.remove('done');
+      }, 1200);
+    }
     const actionButtons = Array.from(document.querySelectorAll('.ctl-btn[data-action]'));
     actionButtons.forEach((btn) => {
       btn.addEventListener('pointerdown', (e) => {
@@ -470,6 +495,7 @@ Wand</button>
         btn.classList.add('pressed');
         if (navigator.vibrate) navigator.vibrate(15);
         sendAction(btn.dataset.action);
+        if (btn.dataset.action === 'recalibrate') flashRecalibrated(btn);
       });
       const unpress = () => btn.classList.remove('pressed');
       btn.addEventListener('pointerup', unpress);

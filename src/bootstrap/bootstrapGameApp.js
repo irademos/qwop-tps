@@ -5345,6 +5345,7 @@ async function initCore(runtimeContext) {
   };
   const _handlePhoneAction = (action) => {
     if (action === 'wandShieldUp') { setWandShieldHold(false); return; } // (always let go)
+    if (action === 'recalibrate') { window.phoneSwordRecalibrate?.(); return; } // phone's ⟲ button (any mode)
     if (action === 'interact') {
       // The Block bar as an interact button: the calibration popup's Okay, a boss's talk, the village
       if (_isSwordCalibPromptOpen()) document.getElementById('phone-sword-connect-calib-ok')?.click();
@@ -5474,11 +5475,26 @@ async function initCore(runtimeContext) {
     conn.on('error', onGone);
   };
 
-  // Derive a stable peer ID from the player profile so the phone-sword URL never changes.
-  // Uses SHA-256 of the profile key so IDs are short, URL-safe, and unique per account.
+  // Derive a stable peer ID so the phone-sword URL never changes: signed-in players get one per
+  // profile (their normalized name key), guests one per browser (a random device ID kept in
+  // localStorage + a cookie, so a refresh with a new random guest name keeps the same URL).
+  // Uses SHA-256 of the source so IDs are short, URL-safe, and unique per account / device.
+  const _guestDeviceId = () => {
+    const KEY = 'sq:guestDeviceId';
+    let id = null;
+    try { id = localStorage.getItem(KEY); } catch (_) { /* storage blocked */ }
+    if (!id) id = getCookie(KEY);
+    if (!id || !/^[a-z0-9-]{8,64}$/i.test(id)) {
+      id = crypto.randomUUID ? crypto.randomUUID()
+        : Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    try { localStorage.setItem(KEY, id); } catch (_) { /* storage blocked */ }
+    setCookie(KEY, id);
+    return id;
+  };
   let _fixedPeerId = null;
   try {
-    const _idSource = 'sqsword:' + (profileNameKey || playerName || 'anon');
+    const _idSource = profileNameKey ? 'sqsword:' + profileNameKey : 'sqsword-guest:' + _guestDeviceId();
     const _hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(_idSource));
     const _hashHex = Array.from(new Uint8Array(_hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
     _fixedPeerId = 'sq-' + _hashHex.slice(0, 24);
