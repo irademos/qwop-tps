@@ -15,6 +15,10 @@
  * Multiplayer battles (ctx.getWeaponGear). A stage boss waits (`autoStart: false`: passive, can't be hurt)
  * until start() — then it grows to its size over GROW_MS and the glow + health bar come on.
  * Game access goes through `ctx` (see createBossFighter).
+ *
+ * Multiplayer battle bots (src/multiplayer/matchMode.js) fight with the same logic, at their
+ * normal size with no glow or health bar (`hud: false`, `glow: false`), and with gear that
+ * changes as they pick things up and use them up (setGear).
  */
 
 import * as THREE from 'three';
@@ -198,19 +202,25 @@ export function createStageBoss(ctx) {
  *  scale / swordScale             — its size (and its sword's) once fighting
  *  bodyHitRadius / bodyHitCenterY — the player's sword's hit sphere on it (at that size)
  *  autoStart                      — false: waits for start() (see createStageBoss)
+ *  hud / glow                     — false: no health bar across the top / no red glow (battle bots)
+ *  swordMs                        — [min, max] ms of each sword spell (default SWORD_MS)
  *  wandRange                      — { min, max } kept from the player while casting
  *  getTarget() → THREE.Object3D|null — the player model (null while dead)
  *  getWeaponGear() → { gun, shield } | null — as matchCtx.getWeaponGear (Multiplayer battles)
  *  fireBullet(origin, dir)        — a hostile bullet
  *  throwBomb(origin, target)      — a bomb that can blast the player
- *  onShieldBlock(position)        — its shield / bubble stopped something
- * @returns {{ enemy, start(): void, isStarted(): boolean, update(): void, dispose(): void, isShieldUp(): boolean }}
+ *  onShieldBlock(position, kind)  — its shield / bubble ('shield' | 'bubble') stopped something
+ *  useBubble() → boolean          — optional: may it raise a bubble now (battle bots use one up)
+ * @returns {{ enemy, start(): void, isStarted(): boolean, update(): void, dispose(): void,
+ *   isShieldUp(): boolean, guardKind(fromPos): 'shield'|'bubble'|null, getPhase(): string,
+ *   isBubbleUp(): boolean, setGear(gear): void }}
  */
 export function createBossFighter(ctx) {
   const { enemy } = ctx;
   const gear = { gun: false, shield: false, wand: false, bombs: false, bubble: false, ...ctx.gear };
   const scale = ctx.scale ?? 1;
   const swordScale = ctx.swordScale ?? 1;
+  const swordMs = ctx.swordMs ?? SWORD_MS;
 
   let started = false;
   let growFrom = 0;       // performance.now() when start() was called (grow-in)
@@ -229,9 +239,9 @@ export function createBossFighter(ctx) {
   let hideTimer = null;
   let shownFrac = -1;
 
-  const hud = bossHud();
+  const hud = ctx.hud === false ? null : bossHud();
   const setHud = (frac) => {
-    if (frac === shownFrac) return;
+    if (!hud || frac === shownFrac) return;
     shownFrac = frac;
     hud.fill.style.width = `${frac * 100}%`;
     hud.lag.style.width = `${frac * 100}%`;
@@ -240,6 +250,7 @@ export function createBossFighter(ctx) {
 
   // (body.boss-health-up: the kill counter makes way for the bar — styles.css)
   const hideHud = () => {
+    if (!hud) return;
     hud.root.classList.add('hidden');
     document.body.classList.remove('boss-health-up');
   };
@@ -256,6 +267,7 @@ export function createBossFighter(ctx) {
   };
   // Shield (from in front) or bubble (from anywhere) in the way
   const guarded = (fromPos) => bubbleUp() || (shieldUp() && facesShield(fromPos));
+  const guardKind = (fromPos) => (bubbleUp() ? 'bubble' : shieldUp() && facesShield(fromPos) ? 'shield' : null);
 
   const raiseBubble = (now) => {
     if (!bubble) {
@@ -273,15 +285,18 @@ export function createBossFighter(ctx) {
 
   // Shield / bubble stop sword swings, bullets, bombs and blasts; nothing hurts it before start()
   const baseApplyDamage = enemy.applyDamage.bind(enemy);
-  enemy.applyDamage = (amount) => {
+  // (fromPos: where the hit came from — default the player / its target)
+  enemy.applyDamage = (amount, fromPos) => {
     if (!started) return false;
-    if (guarded(ctx.getTarget()?.position)) {
-      ctx.onShieldBlock?.(enemy.group.position);
+    const kind = guardKind(fromPos ?? ctx.getTarget()?.position);
+    if (kind) {
+      ctx.onShieldBlock?.(enemy.group.position, kind);
       return false;
     }
     const killed = baseApplyDamage(amount);
     const now = performance.now();
-    if (gear.bubble && !enemy.isDead && now >= nextBubbleAt && Math.random() < BUBBLE_CHANCE) raiseBubble(now);
+    if (gear.bubble && !enemy.isDead && now >= nextBubbleAt && Math.random() < BUBBLE_CHANCE
+      && (!ctx.useBubble || ctx.useBubble())) raiseBubble(now);
     return killed;
   };
   const baseBlast = enemy.applyBlastKnockback.bind(enemy);
@@ -317,25 +332,24 @@ export function createBossFighter(ctx) {
     baseDestroy();
   };
 
-  // Gun + shield on the weapon hand (the floating hand the player's Weapon attaches to)
-  const attachHeld = () => {
-    const g = ctx.getWeaponGear?.();
-    if (!g) return false;
-    const hand = enemy._leftHandGroup;
-    const place = (mesh, kind) => {
-      if (!mesh) return null;
-      mesh.position.copy(g[kind].offset);
-      mesh.quaternion.copy(g[kind].quaternion);
+  // Gun / shield on the weapon hand (the floating hand the player's Weapon attaches to),
+  // made the first time it's needed
+  const ensureHeld = (kind) => {
+    if (!held) {
+      const g = ctx.getWeaponGear?.();
+      if (!g) return false;
+      held = { g, gunMesh: null, shieldMesh: null, gripGun: g.gun.grip.clone(), gripShield: g.shield.grip.clone() };
+    }
+    const key = kind === 'gun' ? 'gunMesh' : 'shieldMesh';
+    if (!held[key]) {
+      const mesh = held.g[kind].createMesh();
+      if (!mesh) return false;
+      mesh.position.copy(held.g[kind].offset);
+      mesh.quaternion.copy(held.g[kind].quaternion);
       mesh.visible = false;
-      hand.add(mesh);
-      return mesh;
-    };
-    held = {
-      gunMesh: gear.gun ? place(g.gun.createMesh(), 'gun') : null,
-      shieldMesh: gear.shield ? place(g.shield.createMesh(), 'shield') : null,
-      gripGun: g.gun.grip.clone(),
-      gripShield: g.shield.grip.clone(),
-    };
+      enemy._leftHandGroup.add(mesh);
+      held[key] = mesh;
+    }
     return true;
   };
 
@@ -356,13 +370,14 @@ export function createBossFighter(ctx) {
   };
 
   const setPhase = (next, now) => {
-    if ((next === 'gun' || next === 'shield') && !held && !attachHeld()) next = 'sword';
+    if ((next === 'gun' || next === 'shield' || next === 'wand') && !gear[next]) next = 'sword';
+    if ((next === 'gun' || next === 'shield') && !ensureHeld(next)) next = 'sword';
     phase = next;
-    phaseUntil = now + randIn(next === 'gun' ? GUN_MS : next === 'shield' ? SHIELD_MS : next === 'wand' ? WAND_MS : SWORD_MS);
+    phaseUntil = now + randIn(next === 'gun' ? GUN_MS : next === 'shield' ? SHIELD_MS : next === 'wand' ? WAND_MS : swordMs);
     enemy.ranged = next === 'gun' ? GUN_RANGE : next === 'shield' ? SHIELD_RANGE
       : next === 'wand' ? (ctx.wandRange ?? GUN_RANGE) : null;
     enemy.gripTarget = next === 'gun' ? held.gripGun : next === 'shield' ? held.gripShield : null;
-    if (gear.wand) setWandOut(next === 'wand');
+    if (gear.wand || wandModel) setWandOut(next === 'wand');
     enemy._swordGroup.visible = next === 'sword' || next === 'wand';
     if (held) {
       if (held.gunMesh) held.gunMesh.visible = next === 'gun';
@@ -413,19 +428,21 @@ export function createBossFighter(ctx) {
     started = true;
     enemy.script = null;
     enemy._attackPhase = 'decide';
-    enemy.bodyHitRadius = ctx.bodyHitRadius;
-    enemy.bodyHitCenterY = ctx.bodyHitCenterY;
+    if (ctx.bodyHitRadius != null) enemy.bodyHitRadius = ctx.bodyHitRadius;
+    if (ctx.bodyHitCenterY != null) enemy.bodyHitCenterY = ctx.bodyHitCenterY;
     const now = performance.now();
     growFrom = ctx.autoStart === false ? now : now - GROW_MS;
     phase = 'sword';
-    phaseUntil = now + randIn(SWORD_MS);
+    phaseUntil = now + randIn(swordMs);
     nextBombAt = now + randIn(BOMB_MS);
     nextBubbleAt = 0;
-    hud.name.textContent = ctx.name;
-    hud.root.classList.remove('hidden', 'boss-health-out');
-    document.body.classList.add('boss-health-up');
-    shownFrac = -1;
-    setHud(1);
+    if (hud) {
+      hud.name.textContent = ctx.name;
+      hud.root.classList.remove('hidden', 'boss-health-out');
+      document.body.classList.add('boss-health-up');
+      shownFrac = -1;
+      setHud(1);
+    }
   }
 
   function dispose() {
@@ -455,7 +472,15 @@ export function createBossFighter(ctx) {
     start,
     isStarted: () => started,
     isShieldUp: shieldUp,
+    isBubbleUp: bubbleUp,
+    guardKind,
+    getPhase: () => phase,
     dispose,
+    /** What it has now (battle bots: what they've picked up and not used up). A spell with gear it lost ends. */
+    setGear(next) {
+      Object.assign(gear, next);
+      if (started && phase !== 'sword' && !gear[phase]) setPhase('sword', performance.now());
+    },
     /** Every frame after enemy.update (not while the player is dead). */
     update() {
       if (disposed || !started) return;
@@ -463,7 +488,7 @@ export function createBossFighter(ctx) {
       const grow = Math.min(1, (now - growFrom) / GROW_MS);
       if (grow < 1 || enemy.group.scale.y !== scale) applySize(grow);
       // Glow once the character has loaded (sized for the character at scale 1: grows with it)
-      if (!glow && enemy._glbCharacter) glow = addRedGlow(enemy.group, { height: enemy.group.scale.y });
+      if (!glow && ctx.glow !== false && enemy._glbCharacter) glow = addRedGlow(enemy.group, { height: enemy.group.scale.y });
       glow?.update(now / 1000);
       setHud(Math.max(0, enemy.hearts) / Math.max(1, enemy.maxHearts));
       if (bubble) {
@@ -480,7 +505,7 @@ export function createBossFighter(ctx) {
           if (held.gunMesh) held.gunMesh.visible = false;
           if (held.shieldMesh) held.shieldMesh.visible = false;
         }
-        if (!hideTimer) {
+        if (!hideTimer && hud) {
           hud.root.classList.add('boss-health-out');
           hideTimer = setTimeout(hideHud, HUD_HIDE_MS);
         }

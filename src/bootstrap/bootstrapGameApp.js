@@ -5336,6 +5336,20 @@ async function initCore(runtimeContext) {
     appStateRef.equipInventoryItem?.(equippedId === itemId ? FOAM_SWORD_ITEM_ID : itemId);
     playerControls?.refreshActionButtons?.();
   };
+  // The phone's one Equip button: the next weapon in Sword → Gun → Shield → Wand that the
+  // player has (the tutorial's asked-for weapon first); null when there's nothing to switch to
+  const _PHONE_HIGHLIGHT_ITEMS = { gun: 'pistol', shield: SHIELD_ITEM_ID, wand: MAGIC_WAND_ITEM_ID };
+  const _phoneNextWeapon = (st) => {
+    const order = [FOAM_SWORD_ITEM_ID];
+    if (st.hasGun) order.push('pistol');
+    if (st.hasShield) order.push(SHIELD_ITEM_ID);
+    if (st.hasWand) order.push(MAGIC_WAND_ITEM_ID);
+    const cur = order.includes(st.equipped) ? st.equipped : FOAM_SWORD_ITEM_ID;
+    const asked = _PHONE_HIGHLIGHT_ITEMS[st.highlight];
+    if (asked && asked !== cur && order.includes(asked)) return asked;
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+    return next === cur ? null : next;
+  };
   const _handlePhoneAction = (action) => {
     if (action === 'wandShieldUp') { setWandShieldHold(false); return; } // (always let go)
     if (!playerControls?.enabled || _classicMode || _gamePaused) return; // Classic: Block only
@@ -5359,6 +5373,12 @@ async function initCore(runtimeContext) {
       playerControls?.refreshActionButtons?.();
     } else if (action === 'wandShieldDown') {
       setWandShieldHold(true);
+    } else if (action === 'equipNext') {
+      const next = _phoneNextWeapon(_phoneControllerStatus());
+      if (!next) return;
+      if (next === MAGIC_WAND_ITEM_ID && !isWandAllowed()) return;
+      equipInventoryItem(next);
+      playerControls?.refreshActionButtons?.();
     }
   };
   const _phoneControllerStatus = () => {
@@ -5377,7 +5397,7 @@ async function initCore(runtimeContext) {
         ammo: 0, equipped: FOAM_SWORD_ITEM_ID, highlight: null
       };
     }
-    return {
+    const status = {
       bombs: getPlayerBombCount(),
       bubbles: getBubbleCount(),
       bubbleActive: isPlayerBubbleActive(),
@@ -5392,6 +5412,9 @@ async function initCore(runtimeContext) {
       // Tutorial: phone button to ring ('bomb' | 'bubble' | 'gun' | 'shield' | 'fire' | 'block')
       highlight: showdownTutorial?.isActive() ? _tutorialPhoneHighlight : null
     };
+    // What the phone's Equip button switches to ('pistol' | shield | wand | sword id | null)
+    status.nextEquip = _phoneNextWeapon(status);
+    return status;
   };
   let _tutorialPhoneHighlight = null;
   // The phone currently driving the sword. A reconnecting phone (its browser was closed) opens
@@ -6697,8 +6720,11 @@ async function initCore(runtimeContext) {
     arcadeOverlay.showStartScreen();
   });
 
+  // Where the tutorial is played (island town; Settings → Dev → Free Roam → "Copy location")
+  const TUTORIAL_LOCATION = { x: -25.83, y: -0.17, z: -85.88, yaw: -0.11 };
   const startTutorialMode = () => {
     _resetForMenu();
+    _teleportPlayer(TUTORIAL_LOCATION.x, TUTORIAL_LOCATION.z, TUTORIAL_LOCATION.yaw);
     lastAutoMode = 'day';
     applyPresetForMode('day');
     applyDisplaySettings();
@@ -6925,6 +6951,16 @@ async function initCore(runtimeContext) {
     matchHealth: MATCH_HEALTH_SEGMENTS,
     magicDamage: { fire: MAGIC_FIRE_DAMAGE, ice: MAGIC_ICE_DAMAGE },
     magicFreezeSeconds: () => _magicFreezeSeconds(),
+    // What a host bot gets from a pickup (as the local player's applyPickup) and a blast costs it
+    botLoadout: {
+      gunAmmo: MATCH_GUN_AMMO,
+      ammoPickup: MATCH_AMMO_PICKUP,
+      bombPickup: MATCH_BOMB_PICKUP,
+      manaPickup: MATCH_MANA_PICKUP,
+      heartPickup: MATCH_HEART_PICKUP,
+      maxMana: MAX_MANA,
+      manaCost: WAND_MANA_COST
+    },
     getMultiplayer: () => multiplayer,
     getPlayerName: () => playerName,
     // Free For All only offers characters unlocked in Showdown
