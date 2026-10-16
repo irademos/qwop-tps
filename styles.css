@@ -2064,8 +2064,9 @@ body.settings-open #inventory-button {
   padding: 14px 18px 0;
 }
 
+.leaderboard-tabs { flex-wrap: wrap; }
 .leaderboard-tab {
-  flex: 1;
+  flex: 1 1 40%;
 }
 
 .leaderboard-body {
@@ -2100,6 +2101,13 @@ body.settings-open #inventory-button {
   font-family: var(--font-display);
   font-weight: 800;
   color: var(--text-muted);
+}
+
+.leaderboard-detail {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .leaderboard-name {
@@ -2426,6 +2434,17 @@ body.settings-open #inventory-button {
   font-weight: 800;
   white-space: nowrap;
   animation: village-switch-in 0.2s var(--ease);
+}
+.village-switch-quote {
+  display: block;
+  max-width: 240px;
+  margin: 8px auto 4px;
+  font-size: 12px;
+  font-weight: 500;
+  font-style: italic;
+  line-height: 1.35;
+  white-space: normal;
+  color: var(--text-muted);
 }
 @keyframes village-switch-in {
   from { opacity: 0; }
@@ -3860,6 +3879,7 @@ body:not(.match-active) .match-feed { display: none; }
 .match-results-emoji { flex: none; }
 .match-results-num { text-align: center; font-variant-numeric: tabular-nums; font-weight: 800; }
 .match-results-row.is-head span:nth-child(n + 3) { text-align: center; }
+.has-kd .match-results-row { grid-template-columns: 26px 1fr 34px 34px 44px; }
 
 @media (max-width: 720px) {
   /* The scoreboard takes the top: health (and the kill feed) go under it */

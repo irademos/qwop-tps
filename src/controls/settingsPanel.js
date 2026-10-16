@@ -50,6 +50,23 @@ const PROFILE_STAT_SECTIONS = [
     ]
   },
   {
+    title: 'Multiplayer',
+    pick: (stats) => stats.multiplayer,
+    rows: [
+      { key: 'wins', label: 'Wins' },
+      { key: 'losses', label: 'Losses' },
+      { key: 'kills', label: 'Kills' },
+      { key: 'deaths', label: 'Deaths' },
+      {
+        key: 'kd',
+        label: 'K/D',
+        format: (section) => (Number.isFinite(section?.kills)
+          ? (section.kills / Math.max(1, section.deaths || 0)).toFixed(2)
+          : '—')
+      }
+    ]
+  },
+  {
     title: 'Classic',
     pick: (stats) => stats.classic,
     rows: [
@@ -253,7 +270,11 @@ function buildProfilePanel() {
   const leaderboardButton = createElement('button', 'settings-button', 'Showdown Leaderboard');
   leaderboardButton.type = 'button';
   leaderboardButton.dataset.action = 'open-leaderboard';
-  panelEl.append(leaderboardButton);
+  const mpLeaderboardButton = createElement('button', 'settings-button settings-button-secondary', 'Multiplayer Leaderboard');
+  mpLeaderboardButton.type = 'button';
+  mpLeaderboardButton.dataset.action = 'open-leaderboard';
+  mpLeaderboardButton.dataset.leaderboard = 'mpWins';
+  panelEl.append(leaderboardButton, mpLeaderboardButton);
 
   elements.nameInput = nameInput;
   elements.nameSaveButton = nameSaveButton;
@@ -725,6 +746,23 @@ function buildSwordGyroPanel() {
   recalHint.textContent = 'Hold the sword in its resting position, then tap to set neutral.';
   recalGroup.append(recalBtn, recalHint);
 
+  // Re-open the phone QR popup (connect / reconnect the phone controller)
+  const qrGroup = createElement('div', 'settings-field');
+  const qrBtn = createElement('button', 'settings-button settings-button-secondary', '📱 Show Phone QR Code');
+  qrBtn.id = 'settings-swordgyro-qr';
+  qrBtn.type = 'button';
+  qrBtn.addEventListener('click', () => {
+    if (window.phoneSwordShowQr?.()) {
+      closeSettings();
+    } else {
+      qrBtn.textContent = 'Phone link still starting… try again';
+      setTimeout(() => { qrBtn.textContent = '📱 Show Phone QR Code'; }, 2000);
+    }
+  });
+  const qrHint = createElement('div', 'settings-muted');
+  qrHint.textContent = 'Shows the QR code again so you can connect (or reconnect) your phone as the sword.';
+  qrGroup.append(qrBtn, qrHint);
+
   // Gyro sensitivity (saved per device): "Use This Device" and a separate phone by QR code
   const gyroSensSection = createElement('h3', 'settings-section-title', 'Gyro Sensitivity');
   const createSensField = (id, label, value) => {
@@ -741,6 +779,7 @@ function buildSwordGyroPanel() {
   panelEl.append(
     calibSection,
     recalGroup,
+    qrGroup,
     gyroSensSection,
     localSensField.field,
     phoneSensField.field,
@@ -801,7 +840,7 @@ function buildLeaderboardOverlay() {
 
   const tabs = createElement('div', 'leaderboard-tabs');
   tabs.setAttribute('role', 'tablist');
-  const killsTab = createElement('button', 'leaderboard-tab is-active', '⚔️ Top Kills');
+  const killsTab = createElement('button', 'leaderboard-tab is-active', '⚔️ Showdown Kills');
   killsTab.type = 'button';
   killsTab.dataset.leaderboardTab = 'kills';
   killsTab.setAttribute('role', 'tab');
@@ -811,7 +850,18 @@ function buildLeaderboardOverlay() {
   stageTab.dataset.leaderboardTab = 'stage';
   stageTab.setAttribute('role', 'tab');
   stageTab.setAttribute('aria-selected', 'false');
-  tabs.append(killsTab, stageTab);
+  // Multiplayer (duels + battles): top wins / top kills, each row with W · L · K · D
+  const makeTab = (id, label) => {
+    const tab = createElement('button', 'leaderboard-tab', label);
+    tab.type = 'button';
+    tab.dataset.leaderboardTab = id;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', 'false');
+    return tab;
+  };
+  const mpWinsTab = makeTab('mpWins', '🏆 Multiplayer Wins');
+  const mpKillsTab = makeTab('mpKills', '💀 Multiplayer Kills');
+  tabs.append(killsTab, stageTab, mpWinsTab, mpKillsTab);
 
   const body = createElement('div', 'leaderboard-body');
   const status = createElement('div', 'settings-muted', 'Loading leaderboard...');
@@ -827,16 +877,22 @@ function buildLeaderboardOverlay() {
   leaderboardPanel.append(header, tabs, body, actions);
   leaderboardOverlay.replaceChildren(leaderboardPanel);
 
-  elements.leaderboardTabs = { kills: killsTab, stage: stageTab };
+  elements.leaderboardTabs = { kills: killsTab, stage: stageTab, mpWins: mpWinsTab, mpKills: mpKillsTab };
   elements.leaderboardList = list;
   elements.leaderboardStatus = status;
   elements.leaderboardActiveTab = 'kills';
-  elements.leaderboardData = { topKills: [], topStage: [] };
+  elements.leaderboardData = { topKills: [], topStage: [], mpWins: [], mpKills: [] };
 }
 
+const LEADERBOARD_TABS = {
+  kills: { rows: 'topKills', unit: 'kills' },
+  stage: { rows: 'topStage', unit: 'stage' },
+  mpWins: { rows: 'mpWins', unit: 'wins', multiplayer: true },
+  mpKills: { rows: 'mpKills', unit: 'kills', multiplayer: true }
+};
+
 function setLeaderboardTab(tabId) {
-  const validTabs = ['kills', 'stage'];
-  const safeTab = validTabs.includes(tabId) ? tabId : 'kills';
+  const safeTab = LEADERBOARD_TABS[tabId] ? tabId : 'kills';
   elements.leaderboardActiveTab = safeTab;
   Object.entries(elements.leaderboardTabs || {}).forEach(([id, button]) => {
     const active = id === safeTab;
@@ -849,8 +905,9 @@ function setLeaderboardTab(tabId) {
 function renderLeaderboard() {
   if (!elements.leaderboardList || !elements.leaderboardStatus) return;
   const activeTab = elements.leaderboardActiveTab;
-  const rows = (activeTab === 'stage' ? elements.leaderboardData?.topStage : elements.leaderboardData?.topKills) || [];
-  const valueLabel = activeTab === 'stage' ? 'stage' : 'kills';
+  const tab = LEADERBOARD_TABS[activeTab] || LEADERBOARD_TABS.kills;
+  const rows = elements.leaderboardData?.[tab.rows] || [];
+  const valueLabel = tab.unit;
   elements.leaderboardList.innerHTML = '';
   if (!rows.length) {
     elements.leaderboardStatus.textContent = 'No scores yet.';
@@ -862,13 +919,18 @@ function renderLeaderboard() {
     const item = createElement('li', 'leaderboard-row');
     const rank = createElement('span', 'leaderboard-rank', `#${index + 1}`);
     const name = createElement('span', 'leaderboard-name', entry.name || 'Unknown Player');
+    if (tab.multiplayer && entry.stats) {
+      const { wins, losses, kills, deaths } = entry.stats;
+      name.append(createElement('span', 'leaderboard-detail',
+        `W ${wins} · L ${losses} · K ${kills} · D ${deaths} · K/D ${(kills / Math.max(1, deaths)).toFixed(2)}`));
+    }
     const value = createElement('span', 'leaderboard-value', `${Math.max(0, Math.floor(entry.value || 0)).toLocaleString()} ${valueLabel}`);
     item.append(rank, name, value);
     elements.leaderboardList.appendChild(item);
   });
 }
 
-async function openLeaderboardOverlay() {
+async function openLeaderboardOverlay(tabId = 'kills') {
   if (!leaderboardOverlay || !leaderboardPanel) return;
   closeOverlay();
   leaderboardOverlay.style.display = 'flex';
@@ -878,15 +940,22 @@ async function openLeaderboardOverlay() {
   elements.leaderboardStatus.hidden = false;
   elements.leaderboardStatus.textContent = 'Loading leaderboard...';
   elements.leaderboardList.innerHTML = '';
-  setLeaderboardTab(elements.leaderboardActiveTab || 'kills');
+  setLeaderboardTab(tabId);
+  elements.leaderboardStatus.hidden = false;
+  elements.leaderboardStatus.textContent = 'Loading leaderboard...';
   try {
     if (!context.appState?.getPhoneSwordLeaderboards) {
       throw new Error('Leaderboards unavailable');
     }
-    const data = await context.appState.getPhoneSwordLeaderboards(10);
+    const [data, mp] = await Promise.all([
+      context.appState.getPhoneSwordLeaderboards(10),
+      context.appState.getMultiplayerLeaderboards?.(10) ?? null
+    ]);
     elements.leaderboardData = {
       topKills: data?.topKills ?? [],
-      topStage: data?.topStage ?? []
+      topStage: data?.topStage ?? [],
+      mpWins: mp?.topWins ?? [],
+      mpKills: mp?.topKills ?? []
     };
     renderLeaderboard();
   } catch (error) {
@@ -981,7 +1050,7 @@ async function handleAction(target) {
       setListView(true);
     }
   } else if (action === 'open-leaderboard') {
-    await openLeaderboardOverlay();
+    await openLeaderboardOverlay(target.dataset.leaderboard || 'kills');
   } else if (action === 'dev-roam') {
     closeOverlay();
     await context.appState?.startDevRoam?.();
@@ -1396,6 +1465,11 @@ export function setTab(tabId) {
 
 export function openSettings() {
   openOverlay();
+}
+
+// Opens the leaderboard on a tab ('kills' | 'stage' | 'mpWins' | 'mpKills') — Multiplayer lobby
+export function openLeaderboard(tabId = 'kills') {
+  void openLeaderboardOverlay(tabId);
 }
 
 export function closeSettings() {

@@ -33,6 +33,7 @@ import {
 import {
   initSettingsPanel,
   openSettings,
+  openLeaderboard,
   updateSettingsUI,
   initMerchantPanelFeature,
   updateMerchantUIFeature,
@@ -67,6 +68,9 @@ import {
   saveStatsImmediate as saveStatsImmediateRaw,
   saveStatsThrottled as saveStatsThrottledRaw,
   loadPhoneSwordLeaderboards,
+  loadMultiplayerLeaderboards,
+  recordMultiplayerResult,
+  normalizeMultiplayerStats,
   savePhoneSwordStats,
   loadPhoneSwordStats,
   savePhoneSwordStage,
@@ -3664,7 +3668,7 @@ async function initCore(runtimeContext) {
   // info: { stage, key } (key: its MATCH_CHARACTERS key)
   const _psSpawnStageBoss = (enemy, { stage, key }) => {
     _psBoss?.dispose();
-    const talk = stageBossTalk(stage, MATCH_CHARACTERS[key], { afterStory: stage > PEMBERTON_STAGE });
+    const talk = stageBossTalk(stage, MATCH_CHARACTERS[key], { afterStory: stage > PEMBERTON_STAGE, key });
     const boss = createStageBoss({ ..._bossFighterCtx(enemy), name: talk.name, gear: stageBossGear(stage) });
     boss.talk = talk;
     enemy.onCast = (cast) => _castEnemySpell(enemy, cast); // (its wand spells)
@@ -3735,6 +3739,21 @@ async function initCore(runtimeContext) {
   if (profileNameKey && _psStats.highestStage !== Number(playerProfile?.phoneSwordStats?.highestStage)) {
     void savePhoneSwordStats(profileNameKey, { highestStage: _psStats.highestStage });
   }
+  // Multiplayer stats (wins, losses, kills, deaths — duels and battles) for Settings → Profile
+  // and the Multiplayer leaderboard; guests keep them for the session only
+  let _mpStats = normalizeMultiplayerStats(playerProfile?.multiplayerStats);
+  const _recordMultiplayerResult = ({ won = false, lost = false, kills = 0, deaths = 0 } = {}) => {
+    _mpStats = normalizeMultiplayerStats({
+      wins: _mpStats.wins + (won ? 1 : 0),
+      losses: _mpStats.losses + (lost ? 1 : 0),
+      kills: _mpStats.kills + (Number(kills) || 0),
+      deaths: _mpStats.deaths + (Number(deaths) || 0)
+    });
+    if (!profileNameKey) return;
+    void recordMultiplayerResult(profileNameKey, { won, lost, kills, deaths }).then((saved) => {
+      if (saved) _mpStats = saved;
+    });
+  };
   // Load stage from Firebase first (async), fallback to localStorage
   let _psStage = _psSavedStage();
   let _psEnemyQueue = [];   // [{pos, hearts, triggerDist, bombThrower, characterUrl, boss, nameTag}]
@@ -3812,6 +3831,9 @@ async function initCore(runtimeContext) {
   const PS_START_CHARACTERS = ['villageBoy'];
   const PS_ENEMY_BASE_CHARACTER = 'frog';
   const PS_FIXED_BOSSES = { 1: 'frog', [FIRST_WAND_BOSS_STAGE]: 'wizard' }; // stage → boss character
+  // The story's boss for each stage (where each character lives — CHARACTER_STORIES in
+  // stageBoss.js): used while still locked (else, with others still locked, a random locked one)
+  const PS_STORY_BOSSES = { 2: 'pumpkin', 3: 'gemhorn', 4: 'mii1', 5: 'tree', 7: 'antler', 8: 'antler' };
   const PS_WAND_ENEMY_CHARACTER = 'wizard'; // wand casters are always wizards
   const PS_BOSS_HEARTS = 3;          // stage 1 boss; +1 every PS_BOSS_HEARTS_EVERY stages
   const PS_BOSS_HEARTS_EVERY = 3;
@@ -3844,13 +3866,17 @@ async function initCore(runtimeContext) {
   };
   let _psStageBoss = null; // { key, unlocks, stage } for the stage on the stage screen / being played
   // (story characters — MATCH_CHARACTERS[k].story — are never bosses: story mode unlocks them;
-  // a fixed stage's boss is always its PS_FIXED_BOSSES character, which no earlier stage picks)
+  // a fixed stage's boss is always its PS_FIXED_BOSSES character, which no earlier stage picks;
+  // a story stage's is its PS_STORY_BOSSES character when that is still locked)
   const _psPickBoss = (stage) => {
     const fixed = PS_FIXED_BOSSES[stage];
     if (fixed) return { key: fixed, unlocks: !_psChars.unlocked.includes(fixed), stage };
-    const reserved = Object.entries(PS_FIXED_BOSSES).filter(([s]) => Number(s) > stage).map(([, k]) => k);
+    const reserved = [...Object.entries(PS_FIXED_BOSSES), ...Object.entries(PS_STORY_BOSSES)]
+      .filter(([s]) => Number(s) > stage).map(([, k]) => k);
     const fightable = Object.keys(MATCH_CHARACTERS).filter((k) => !MATCH_CHARACTERS[k].story);
     const locked = fightable.filter((k) => !_psChars.unlocked.includes(k));
+    const story = PS_STORY_BOSSES[stage];
+    if (story && (locked.includes(story) || !locked.length)) return { key: story, unlocks: locked.includes(story), stage };
     const lockedFree = locked.filter((k) => !reserved.includes(k));
     const pool = lockedFree.length ? lockedFree : locked.length ? locked : fightable;
     const key = pool[Math.floor(Math.random() * pool.length)];
@@ -4131,8 +4157,8 @@ async function initCore(runtimeContext) {
     }
   };
 
-  // ── Sword Showdown: heart bubbles (placed mid-stage in _psBuildStage, popped by the
-  // sword in the phone-sword loop for +1 health segment; src/combat/heartBubbles.js) ──
+  // ── Sword Showdown: heart bubbles (placed mid-stage in _psBuildStage, pop when they
+  // reach the player for +1 health segment; src/combat/heartBubbles.js) ──
   const heartBubbles = createHeartBubbles({ scene, getGroundY: getTerrainHeight });
   const _popHeartBubbles = (count) => {
     if (count <= 0) return;
@@ -5152,6 +5178,16 @@ async function initCore(runtimeContext) {
     }
     void showPhoneSwordQr(peerId);
   };
+  // Settings → Sword Gyro → "Show Phone QR Code": bring the connection popup back on demand
+  // (to connect a phone that dropped, or a different one). False until the gyro peer is open.
+  window.phoneSwordShowQr = () => {
+    if (!_phoneSwordPeerId) return false;
+    const connected = !!window.phoneSwordGyro?.connected;
+    phoneSwordQrStatus.textContent = connected ? 'Phone connected — scan to switch phones' : 'Waiting for phone…';
+    phoneSwordQrStatus.classList.toggle('connected', connected);
+    void showPhoneSwordQr(_phoneSwordPeerId);
+    return true;
+  };
 
   // Copy URL to clipboard
   phoneSwordQrCopy.addEventListener('click', () => {
@@ -5877,6 +5913,7 @@ async function initCore(runtimeContext) {
     },
     getPlayerStats: () => ({ ...statsState }),
     getPhoneSwordLeaderboards: (limit = 10) => loadPhoneSwordLeaderboards(limit),
+    getMultiplayerLeaderboards: (limit = 10) => loadMultiplayerLeaderboards(limit),
     getPhoneSwordStats: () => ({ ..._psStats }),
     // Everything Settings → Profile shows (Showdown / Classic stage stats, upgrades, characters)
     getProfileStats: () => ({
@@ -5898,6 +5935,7 @@ async function initCore(runtimeContext) {
         charactersUnlocked: _psChars.unlocked.length,
         charactersTotal: Object.keys(MATCH_CHARACTERS).length
       },
+      multiplayer: { ..._mpStats },
       classic: {
         currentStage: profileNameKey
           ? Math.max(_classicSavedStage(), Number(playerProfile?.classicStats?.currentStage) || 1)
@@ -6810,6 +6848,8 @@ async function initCore(runtimeContext) {
   };
   const duelCtx = {
     scene,
+    recordMultiplayerResult: _recordMultiplayerResult,
+    openLeaderboard: () => openLeaderboard('mpWins'),
     getMultiplayer: () => multiplayer,
     startMultiplayer,
     stopMultiplayer,
@@ -6976,6 +7016,7 @@ async function initCore(runtimeContext) {
   };
   const matchCtx = {
     scene,
+    recordMultiplayerResult: _recordMultiplayerResult,
     camera,
     matchHealth: MATCH_HEALTH_SEGMENTS,
     magicDamage: { fire: MAGIC_FIRE_DAMAGE, ice: MAGIC_ICE_DAMAGE },
@@ -7630,7 +7671,6 @@ async function initCore(runtimeContext) {
       foamSword._holdQuaternion.copy(_pswNeutralQ).multiply(_phoneSwordBaseQ);
     }
     foamSword?.update();
-    let _frameBladePoints = null; // player's blade points this frame (only with the phone sword out)
     // Phone Sword: override mesh quaternion, then run sword-vs-sword collision + sweep hit detection.
     if (window.phoneSwordGyro?.connected &&
         foamSword?.holder === playerControls && foamSword?.mesh && playerModel) {
@@ -7785,7 +7825,6 @@ async function initCore(runtimeContext) {
           }
         }
       }
-      _frameBladePoints = _playerBladePoints; // heart bubbles (below)
 
       // ── Duel / battle: same sweep hit + directional block against other players ──
       // (and battle bots). The attacker detects the hit and reports it (onHit); the victim
@@ -7864,10 +7903,9 @@ async function initCore(runtimeContext) {
       _psw.tipHistory.push({ pos: _psw.prevTipWorld, t: _nowSecPS });
       while (_psw.tipHistory.length && _nowSecPS - _psw.tipHistory[0].t > 0.12) _psw.tipHistory.shift();
     }
-    // Heart bubbles: drift to the player; any blade point touching one pops it (+1 health)
+    // Heart bubbles: drift to the player and pop on touching them (+1 health)
     _popHeartBubbles(heartBubbles.update(frameDelta, {
       playerModel: playerDead ? null : playerModel,
-      bladePoints: playerDead ? null : _frameBladePoints,
     }));
     // Phone Sword: apply fixed position/rotation config to shield and pistol
     if (shield?.holder === playerControls) _applyWeaponHoldCfg(shield, 'shield');
