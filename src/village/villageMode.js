@@ -211,6 +211,10 @@ const INTRO_LOAD_WAIT_MS = 6000;   // his model isn't there by then: skip the he
 export function fillTalk(text, vars = {}) {
   return String(text).replace(/\{(\w+)\}/g, (m, k) => (vars[k] ?? m));
 }
+/** The name of the village a story stage starts in (null past them). */
+export function villagePlace(stage) {
+  return VILLAGER_QUESTS[Math.floor(stage) - 1]?.place ?? null;
+}
 export function villagerQuestForStage(stage) {
   const s = Math.max(1, Math.floor(stage) || 1);
   if (s <= VILLAGER_QUESTS.length) return { ...PEMBERTON, ...VILLAGER_QUESTS[s - 1] };
@@ -268,6 +272,13 @@ const SIT_HOLD_MS = 900;
 const COARSE_POINTER = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
 const LEAVE_REMOVE_DIST = 10;      // m from the village centre: props removed once the stage walk gets here
 const LEAVE_REMOVE_MS = 4000;      // …or this long after the stage starts (the first enemies spawn close by)
+// Open roam (enterRoam): a spot's village is built this close to it, taken down past ROAM_UNBUILD_DIST
+const ROAM_BUILD_DIST = 26;
+const ROAM_UNBUILD_DIST = 36;
+const ROAM_BEACON_HEIGHT = 0.6;    // m — the beacon over every other spot's village…
+const ROAM_BEACON_LIFT = 4.5;      // …this high over the ground
+const ROAM_BEACON_GROW = 0.035;    // ×1 per m from the camera (readable far off), up to ROAM_BEACON_MAX
+const ROAM_BEACON_MAX = 4;
 
 // Shop items on the counter (left → right, also the swipe order). Positions in stall units.
 const SHOP_ITEMS = [
@@ -582,7 +593,11 @@ export function createVillage(ctx) {
   let quest = villagerQuestForStage(1);
   let finalBoss = false;    // PEMBERTON_STAGE: the villager is the boss (big + glowing red)
   let villagerScale = 1;
+  let villagerUrl = VILLAGER_CHARACTER_URL;   // the quest giver's model (roam: the spot's old boss)
   let buildToken = 0;
+  // Open roam (enterRoam — Showdown after the story): { spots, spot, onStart, title, beacons, releasedAt }
+  // spot = the one whose village is built (the player is near it), or null between villages
+  let roam = null;
 
   let stations = {};        // key → station
   let focus = null;         // focused station key or null (overview)
@@ -723,9 +738,10 @@ export function createVillage(ctx) {
       const facing = _v.subVectors(center, pos).setY(0).normalize().clone();
       // Quest marker over his head (always shown: it says "talk to me")
       const sc = villagerScale;
+      // (roam: a quest done before can be done again)
       const marker = finalBoss
         ? textSprite('⚔️', { height: 0.42, bg: FINAL_BOSS_MARKER_BG, border: 'rgba(255,255,255,0.9)', pad: 14 })
-        : textSprite('❗', { height: 0.42, bg: 'rgba(244, 196, 84, 0.92)', border: 'rgba(255,255,255,0.9)', pad: 14 });
+        : textSprite(quest.done ? '🔁' : '❗', { height: 0.42, bg: 'rgba(244, 196, 84, 0.92)', border: 'rgba(255,255,255,0.9)', pad: 14 });
       marker.position.copy(pos).add(_v2.set(0, 1.45 * sc, 0));
       const label = textSprite(`${quest.emoji} ${quest.title}`, { height: 0.3 });
       label.position.copy(pos).add(_v2.set(0, 1.45 * sc + 0.4, 0));
@@ -742,7 +758,7 @@ export function createVillage(ctx) {
       const npc = { key: 'villager', container: null, character: null, walk: null, villager: true };
       npcs.push(npc);
       stations.villager.npc = npc;
-      createGLBCharacterInstance({ targetHeight: villagerScale, url: VILLAGER_CHARACTER_URL, armIK: false }).then(({ container, character }) => {
+      createGLBCharacterInstance({ targetHeight: villagerScale, url: villagerUrl, armIK: false }).then(({ container, character }) => {
         if (!alive() || !npcs.includes(npc)) { character.dispose(); return; }
         npc.container = container;
         npc.character = character;
@@ -769,7 +785,8 @@ export function createVillage(ctx) {
       const toCenter = _v.subVectors(local(LAYOUT.charactersFace.x, 0, LAYOUT.charactersFace.z), groupCenter).setY(0).normalize().clone();
       stations.characters = { key: 'characters', pos: groupCenter.clone(), facing: toCenter };
       const { unlocked, selected } = ctx.characters.get();
-      const keys = unlocked.filter((k) => k !== selected && ctx.characters.roster[k]);
+      // (roam: the quest giver isn't idling here too)
+      const keys = unlocked.filter((k) => k !== selected && ctx.characters.roster[k] && k !== quest.giverKey);
       // (story characters aren't won from bosses)
       const lockedCount = Object.entries(ctx.characters.roster)
         .filter(([k, c]) => !c.story && !unlocked.includes(k)).length;
@@ -1151,6 +1168,11 @@ export function createVillage(ctx) {
 
   function focusStation(key, { item = -1 } = {}) {
     if (!stations[key]) return;
+    // (roam: the village camera takes over from the player's own at a station — from where it is)
+    if (roam && !focus) {
+      camInit = false;
+      bodyYaw = ctx.getPlayer().model?.rotation.y ?? bodyYaw;
+    }
     if (focus !== key) {
       focus = key;
       const { to, face } = approachFor(key);
@@ -1166,6 +1188,8 @@ export function createVillage(ctx) {
 
   function unfocus() {
     if (intro) { finishIntro(); return; }
+    // (roam: the camera eases back to the player's own; the controls turn the body again)
+    if (roam && focus) { camReleased = false; roam.releasedAt = performance.now(); faceYaw = null; walk = null; }
     focus = null;
     endTalk();
     selectItem(-1);
@@ -1230,7 +1254,7 @@ export function createVillage(ctx) {
   // The quest's talk: last stage's pay (if owed), the quest, what this one pays
   function questScript() {
     const owed = ctx.reward?.owed?.() || 0;
-    const reward = villagerQuestReward(stageInfo.stage);
+    const reward = quest.reward ?? villagerQuestReward(stageInfo.stage);
     const vars = talkVars({ owed, reward });
     const lines = [];
     if (owed > 0 && quest.paidLine) lines.push(['them', quest.paidLine], ['action', quest.paidAction, { pay: true }]);
@@ -1580,6 +1604,7 @@ export function createVillage(ctx) {
 
   // Keeps a point inside the village box (VILLAGE_BOUNDS, along the village's axes)
   function clampToVillage(pos) {
+    if (roam) return pos; // (roam: no box — the island is open)
     const dx = pos.x - center.x;
     const dz = pos.z - center.z;
     const lx = THREE.MathUtils.clamp(dx * right.x + dz * right.z, -VILLAGE_BOUNDS.x, VILLAGE_BOUNDS.x);
@@ -1826,6 +1851,14 @@ export function createVillage(ctx) {
       return;
     }
     stepVillagerAside();
+    if (roam) {
+      // (an open-roam quest: the roam is over until the game calls enterRoam again)
+      const { spot, onStart } = roam;
+      clearRoamBeacons();
+      roam = null;
+      onStart(spot, pathAngle);
+      return;
+    }
     ctx.onStart(pathAngle);
   }
 
@@ -1865,7 +1898,8 @@ export function createVillage(ctx) {
   }
 
   function showBanner() {
-    el.bannerTitle.textContent = finalBoss || stageInfo.stage > 50 ? 'FINAL STAGE' : `STAGE ${stageInfo.stage}`;
+    el.bannerTitle.textContent = stageInfo.bannerTitle
+      ?? (finalBoss || stageInfo.stage > 50 ? 'FINAL STAGE' : `STAGE ${stageInfo.stage}`);
     el.bannerSub.textContent = finalBoss
       ? `${quest.title} · Defeat ${quest.speaker}`
       : `${quest.title} · Defeat ${stageInfo.count} enemies`;
@@ -1896,6 +1930,7 @@ export function createVillage(ctx) {
     starting = false;
     stageInfo = info;
     quest = villagerQuestForStage(info.stage);
+    villagerUrl = VILLAGER_CHARACTER_URL;
     intro = info.intro && !info.finalBoss ? { phase: 'wait', since: performance.now() } : null;
     finalBoss = !!info.finalBoss;
     villagerScale = finalBoss ? PEMBERTON_SCALE : 1;
@@ -1991,6 +2026,8 @@ export function createVillage(ctx) {
 
   function exit() {
     const wasActive = active;
+    clearRoamBeacons();
+    roam = null;
     resetMoveSpeed();
     cancelSit();
     active = false;
@@ -2055,6 +2092,137 @@ export function createVillage(ctx) {
     el.card.style.top = `${y}px`;
   }
 
+  // Eases the camera from the village's view back to the player controls' own (they posed it
+  // this frame); true once it is there
+  function releaseCamera(dt, now, since) {
+    _v.copy(camera.position);
+    camera.getWorldDirection(_v2);
+    wantPos.copy(_v);
+    wantLook.copy(_v).addScaledVector(_v2, 6);
+    const k = 1 - Math.exp(-CAMERA_LERP * 2 * dt);
+    camPos.lerp(wantPos, k);
+    camLook.lerp(wantLook, k);
+    camFov += (camera.fov - camFov) * k;  // (camera.fov: the controls' value this frame)
+    if (camPos.distanceTo(wantPos) < 0.05 || now - since > 1500) return true;
+    camera.fov = camFov;
+    camera.updateProjectionMatrix();
+    camera.position.copy(camPos);
+    camera.lookAt(camLook);
+    return false;
+  }
+
+  // ── Open roam (Showdown after the story) ──
+  // The player walks the island with the game's own camera; the village of the spot they come
+  // near is built (one at a time) and taken down when they walk off. Its stations work as
+  // usual — the village camera only takes over at one — and its quest giver (the spot's
+  // `quest`) starts that spot's stage (info.onStart). Every other spot shows a beacon.
+  function updateRoam() {
+    const p = playerPos();
+    const flat = (c) => Math.hypot(c.x - p.x, c.z - p.z);
+    let nearest = null;
+    let nearestD = Infinity;
+    for (const spot of roam.spots) {
+      const d = flat(spot.center);
+      if (d < nearestD) { nearestD = d; nearest = spot; }
+    }
+    const busy = !!focus || starting || sitting || swapBusy;
+    if (roam.spot && !busy && flat(roam.spot.center) > ROAM_UNBUILD_DIST) dropRoamSpot();
+    if (!roam.spot && nearest && nearestD < ROAM_BUILD_DIST) buildRoamSpot(nearest);
+    // (readable from a long way off: they grow with distance)
+    for (const b of roam.beacons) {
+      b.sprite.visible = b.spot !== roam.spot;
+      if (!b.sprite.visible) continue;
+      const k = THREE.MathUtils.clamp(b.sprite.position.distanceTo(camera.position) * ROAM_BEACON_GROW, 1, ROAM_BEACON_MAX);
+      b.sprite.scale.set(b.w * k, b.h * k, 1);
+    }
+  }
+  function buildRoamSpot(spot) {
+    teardown();
+    roam.spot = spot;
+    stageInfo = { stage: spot.stage, count: spot.count, boss: spot.boss, bannerTitle: spot.bannerTitle };
+    quest = spot.quest;
+    villagerUrl = spot.giverUrl;
+    pathAngle = spot.pathAngle;
+    center.set(spot.center.x, groundY(spot.center.x, spot.center.z, playerPos().y), spot.center.z);
+    fwd.set(Math.cos(pathAngle), 0, Math.sin(pathAngle)).normalize();
+    right.crossVectors(fwd, _UP).normalize();
+    obstacles = [];
+    hideActs();
+    refreshRoamChip();
+    void build(buildToken);
+  }
+  function dropRoamSpot() {
+    teardown();
+    roam.spot = null;
+    obstacles = [];
+    hideActs();
+    refreshRoamChip();
+  }
+  function refreshRoamChip() {
+    el.stage.textContent = roam.spot?.quest.place ? `${roam.title} · ${roam.spot.quest.place}` : roam.title;
+  }
+  function clearRoamBeacons() {
+    for (const b of roam?.beacons ?? []) {
+      b.sprite.parent?.remove(b.sprite);
+      disposeOwned(b.sprite);
+    }
+    if (roam) roam.beacons = [];
+  }
+  /**
+   * Open roam: no box, the player's own camera, a village at every spot.
+   * @param {{ title: string, onStart: (spot, pathAngle: number) => void, spots: Array<{
+   *   stage: number, center: { x, z }, pathAngle: number, count: number, boss: string,
+   *   bannerTitle: string, giverUrl: string,
+   *   quest: { speaker, emoji, title, place, lines, accept, reward, payLine, giverKey, done } }> }} info
+   *   quest: as villagerQuestForStage's (giverKey: its character, not idling there too;
+   *   done: finished before — a 🔁 marker instead of ❗)
+   */
+  function enterRoam(info) {
+    exit();
+    active = true;
+    roam = { spots: info.spots, spot: null, onStart: info.onStart, title: info.title ?? 'Free Roam', beacons: [], releasedAt: 0 };
+    leaving = null;
+    approaching = false;
+    starting = false;
+    intro = null;
+    finalBoss = false;
+    villagerScale = 1;
+    buildToken += 1;
+    labelScale = camera.aspect < 0.8 ? 1.6 : camera.aspect < 1.2 ? 1.25 : 1;
+    compact = isCompact();
+    focus = null;
+    selectedItem = -1;
+    walk = null;
+    talk = null;
+    faceYaw = null;
+    obstacles = [];
+    hideActs();
+    camInit = false;
+    camReleased = true;
+    swapBusy = false;
+    stations = {};
+    clickables.length = 0;
+    const { controls } = ctx.getPlayer();
+    if (controls) controls.moveSpeedScale = 1;
+    for (const spot of roam.spots) {
+      const sprite = makeTextSprite(`❗ ${spot.quest.emoji} ${spot.quest.speaker}`, { height: ROAM_BEACON_HEIGHT });
+      sprite.position.set(spot.center.x, groundY(spot.center.x, spot.center.z, 0) + ROAM_BEACON_LIFT, spot.center.z);
+      scene.add(sprite);
+      roam.beacons.push({ spot, sprite, w: sprite.scale.x, h: sprite.scale.y });
+    }
+    void ctx.shop.load?.().then(() => refreshCard());
+    ui.classList.remove('hidden');
+    el.banner.classList.add('hidden');
+    refreshRoamChip();
+    showUi();
+    refreshCard();
+    document.body.classList.add('village-mode');
+    domElement.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    domElement.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('keydown', onKeyDown);
+  }
+
   /** Every frame, after the player controls (it has the last word on the camera). */
   function update(dt) {
     if (!active) return;
@@ -2067,23 +2235,7 @@ export function createVillage(ctx) {
       // Hand the camera back to the player controls smoothly, then take the props away
       const far = model && Math.hypot(model.position.x - center.x, model.position.z - center.z) > LEAVE_REMOVE_DIST;
       updateNpcs(dt);
-      if (!camReleased) {
-        _v.copy(camera.position);
-        camera.getWorldDirection(_v2);
-        wantPos.copy(_v);
-        wantLook.copy(_v).addScaledVector(_v2, 6);
-        const k = 1 - Math.exp(-CAMERA_LERP * 2 * dt);
-        camPos.lerp(wantPos, k);
-        camLook.lerp(wantLook, k);
-        camFov += (camera.fov - camFov) * k;  // (camera.fov: the controls' value this frame)
-        if (camPos.distanceTo(wantPos) < 0.05 || now - leaving.startedMs > 1500) camReleased = true;
-        else {
-          camera.fov = camFov;
-          camera.updateProjectionMatrix();
-          camera.position.copy(camPos);
-          camera.lookAt(camLook);
-        }
-      }
+      if (!camReleased) camReleased = releaseCamera(dt, now, leaving.startedMs);
       // (the fight with Pemberton is right here: the props stay until the next village)
       if (far || (!finalBoss && now - leaving.startedMs > LEAVE_REMOVE_MS)) finishLeaving();
       return;
@@ -2103,7 +2255,9 @@ export function createVillage(ctx) {
       const mz = model.position.z - prevPos.z;
       if (Math.hypot(mx, mz) > 1e-3) faceYaw = Math.atan2(mx, mz);
     }
-    movePlayer(dt);
+    if (roam) updateRoam();
+    // (roam: the controls turn the body, except on the way to / at a station)
+    if (!roam || focus || walk) movePlayer(dt);
     if (!approaching) constrainPlayer();
     if (model) prevPos.copy(model.position);
     updateNpcs(dt);
@@ -2157,6 +2311,14 @@ export function createVillage(ctx) {
     // the village view from wherever it is (camInit picks the pose up then)
     if (approaching) return;
 
+    // Roam, not at a station: the player's own camera (eased back to after one)
+    if (roam && !focus) {
+      if (!camReleased) camReleased = releaseCamera(dt, now, roam.releasedAt);
+      refreshActs(nearbyStations());
+      el.coins.textContent = `🪙 ${ctx.getCoins()}`;
+      return;
+    }
+
     // Camera: following the player, or framed on the station they're at
     if (!camInit) {
       camFov = camera.fov;
@@ -2194,6 +2356,7 @@ export function createVillage(ctx) {
 
   return {
     enter,
+    enterRoam,
     exit,
     update,
     isActive: () => active,

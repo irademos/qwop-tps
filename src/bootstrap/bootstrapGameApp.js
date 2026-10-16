@@ -54,11 +54,11 @@ import {
 } from '../combat/magicBlast.js';
 import { setWandGlow, createWandModel } from '../items/magicWand.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
-import { createVillage, PEMBERTON_STAGE, villagerQuestReward, fillTalk } from '../village/villageMode.js';
+import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fillTalk } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createPembertonBoss, createStageBoss, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
-import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE } from '../characters/stageBoss.js';
+import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
 import {
   clearStoredPin,
@@ -1719,10 +1719,16 @@ async function initCore(runtimeContext) {
   //                   (MapLoader's 'sea' / 'seabed' meshes — not ground) and the ground floor
   //                   SEA_WADE_DEPTH under it (setTerrainFloor): characters wade, never sink.
   //   spawn: where (re)spawns are picked (src/map/spawnUtils.js)
+  //   floating (mappacks with a sea): GLB props afloat on the sea, bobbing gently — in the pack's
+  //                   own units (before `scale`): at [x, z], yaw (rad), size; they stop bullets but
+  //                   aren't stood on (their masts would be the ground — list them in noGround)
   const MAPS = {
     islandTown: {
-      kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree/i, scale: 1.4,
+      kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree|pirate_ship/i, scale: 1.4,
       spawn: { x: 14, z: -5.6, radius: 3 },   // the flat ground in the middle of the island
+      // The pirate ship: anchored off the north-east shore, in water deep enough for its hull
+      // (world ≈ (69, −108) — in sight of stage 7's road)
+      floating: [{ url: '/assets/props/pirate_ship.glb', at: [49, -77], yaw: 1.8, size: 1.3 }],
     },
     classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
   };
@@ -1749,6 +1755,7 @@ async function initCore(runtimeContext) {
       let styleRoot;   // what the art-style pass reads / grades (not the KTX2 terrain / grass)
       let water = null;   // (x, z) → water surface Y or null (mappacks with water / a sea)
       let floor = 0;      // lowest ground height (setTerrainFloor)
+      const floating = []; // def.floating props: { bob: Group, phase }
       if (def.kind === 'mappack') {
         const { MapLoader, sampleMapWaterLevel } = await import('../map/MapLoader.ts');
         group = await new MapLoader().load(def.url, { renderer, transcoderPath: '/basis/' });
@@ -1762,7 +1769,16 @@ async function initCore(runtimeContext) {
             return level == null ? null : level * s;
           };
         }
-        if (Number.isFinite(info?.seaLevel)) floor = info.seaLevel * s - SEA_WADE_DEPTH;
+        if (Number.isFinite(info?.seaLevel)) {
+          floor = info.seaLevel * s - SEA_WADE_DEPTH;
+          for (const prop of def.floating ?? []) {
+            try {
+              floating.push(await _loadFloatingProp(prop, info.seaLevel, group));
+            } catch (err) {
+              console.warn('[map] floating prop failed to load:', prop.url, err);
+            }
+          }
+        }
       } else {
         const gltf = await new Promise((resolve, reject) =>
           new GLTFLoader().load(def.url, resolve, undefined, reject)
@@ -1776,6 +1792,7 @@ async function initCore(runtimeContext) {
         if (!_mapStyleReferenceSet) { setStyleReference(styleRoot); _mapStyleReferenceSet = true; }
         stylizeObject(styleRoot);
       }
+      floating.forEach(({ bob }) => stylizeObject(bob));
       // The map shows the characters' shadows but casts none itself: its big mesh in the shadow
       // pass would be the expensive part (see SHADOW_* / the light follow in the game loop)
       group.traverse(obj => {
@@ -1800,12 +1817,40 @@ async function initCore(runtimeContext) {
         const file = o?.userData.mapObject?.modelFile ?? '';
         if (!(def.noGround && def.noGround.test(file))) groundMeshes.push(obj);
       });
-      return { group, meshes, groundMeshes, floor, water };
+      // Floating props bob on the swell (called every frame for the active map)
+      const animate = floating.length ? (t) => {
+        for (const { bob, phase } of floating) {
+          bob.position.y = Math.sin(t * FLOAT_BOB_SPEED + phase) * FLOAT_BOB_HEIGHT;
+          bob.rotation.x = Math.sin(t * FLOAT_ROLL_SPEED + phase) * FLOAT_ROLL;
+          bob.rotation.z = Math.sin(t * FLOAT_ROLL_SPEED * 0.7 + phase + 1) * FLOAT_ROLL * 0.5;
+        }
+      } : null;
+      return { group, meshes, groundMeshes, floor, water, animate };
     })();
     _loadedMaps.set(key, promise);
     promise.catch(() => _loadedMaps.delete(key)); // let a later switch retry
     return promise;
   };
+
+  // A def.floating prop, its origin on the sea surface (pack units, inside the map group):
+  // holder (place, yaw, size) > bob (the swell — animate) > model
+  const FLOAT_BOB_HEIGHT = 0.06;   // pack units
+  const FLOAT_BOB_SPEED = 0.9;     // rad/s
+  const FLOAT_ROLL = 0.025;        // rad
+  const FLOAT_ROLL_SPEED = 0.6;    // rad/s
+  async function _loadFloatingProp(prop, seaLevel, mapGroup) {
+    const gltf = await new GLTFLoader().loadAsync(prop.url);
+    const holder = new THREE.Group();
+    holder.position.set(prop.at[0], seaLevel, prop.at[1]);
+    holder.rotation.y = prop.yaw ?? 0;
+    holder.scale.setScalar(prop.size ?? 1);
+    holder.userData.mapObject = { modelFile: prop.url }; // (for the map's noGround)
+    const bob = new THREE.Group();
+    bob.add(gltf.scene);
+    holder.add(bob);
+    mapGroup.add(holder);
+    return { bob, phase: prop.at[0] * 0.37 };
+  }
 
   let _activeMapKey = null;
   let _activeMap = null;
@@ -3662,7 +3707,11 @@ async function initCore(runtimeContext) {
   };
   const _psSpawnPemberton = (enemy) => {
     _psBoss?.dispose();
-    _psTrackBoss(createPembertonBoss({ ..._bossFighterCtx(enemy), name: '🎩 Pemberton' }), enemy);
+    // (a roam quest's: he talks first, like a stage boss, then grows to his size and fights)
+    const talkLines = _psRoamQuest?.def.pemberton;
+    const boss = createPembertonBoss({ ..._bossFighterCtx(enemy), name: '🎩 Pemberton', ...(talkLines ? { autoStart: false } : {}) });
+    if (talkLines) boss.talk = { speaker: '🎩 Pemberton', name: '🎩 Pemberton', lines: talkLines, fight: '⚔️ Fight', spare: null };
+    _psTrackBoss(boss, enemy);
   };
   // A stage's final enemy: waits on the path, talks when the player gets to it (_psStartBossTalk),
   // then grows, glows red and fights with the stage's gear (stageBoss.js)
@@ -4630,15 +4679,18 @@ async function initCore(runtimeContext) {
       const charKey = isBoss ? _psStageBoss.key
         : _wand ? PS_WAND_ENEMY_CHARACTER
         : _charPool[Math.floor(Math.random() * _charPool.length)];
+      // (a roam quest's final enemy is Pemberton — _psStageBoss.key 'villager')
+      const _roamPemberton = isBoss && !!_psRoamQuest;
       _psEnemyQueue.push({
         pos: new THREE.Vector3(ex, ey, ez),
-        hearts: isBoss ? _psBossHearts(stage) : _psHeartsForStage(stage),
+        hearts: _roamPemberton ? PEMBERTON_HEARTS : isBoss ? _psBossHearts(stage) : _psHeartsForStage(stage),
         triggerDist: lead + pathLen * t - 10,
         bombThrower: _bomber,
         wand: _wand,
         characterUrl: _classicMode ? _classicMiiUrl() : MATCH_CHARACTERS[charKey].url,
         boss: isBoss,
         bossKey: isBoss ? charKey : null,
+        pemberton: _roamPemberton,
         nameTag: _classicMode ? _classicName() : null,
       });
     }
@@ -4706,8 +4758,11 @@ async function initCore(runtimeContext) {
     _psWinSub.textContent = _unlocked
       ? `${_unlocked.emoji} ${_unlocked.label} ${_psStageBoss.spared ? 'joined you' : 'unlocked'}!`
       : `Stage ${_psStage} Cleared!`;
-    // The story's end: Pemberton beaten (unlocks the villager)
-    if (!_classicMode && _psStageBoss?.pemberton) {
+    // The story's end: Pemberton beaten (unlocks the villager); an open-roam quest done
+    if (!_classicMode && _psRoamQuest) {
+      _psWinTitle.textContent = 'QUEST COMPLETE!';
+      _psWinSub.textContent = `${_psRoamQuest.def.done} 🪙 +${_psRoamQuest.reward}`;
+    } else if (!_classicMode && _psStageBoss?.pemberton) {
       _psWinTitle.textContent = 'PEMBERTON DEFEATED!';
       _psWinSub.textContent = `The debts are settled.${_unlocked ? ` ${_unlocked.emoji} ${_unlocked.label} unlocked!` : ''}`;
     }
@@ -4915,10 +4970,85 @@ async function initCore(runtimeContext) {
     void _classicStageOverlay.offsetWidth;
     _classicStageOverlay.classList.remove('hidden');
   };
-  // Stage screen for the current mode
-  // (opts: _psShowVillage's, e.g. { approach } after a win)
+  // ── Showdown after the story: open roam ──
+  // Once Pemberton is beaten (PEMBERTON_STAGE won) Showdown is open roam: the player walks the
+  // island freely (village.enterRoam), and the village at each story stage's start has that
+  // stage's old boss in it with a quest (ROAM_QUESTS in stageBoss.js) — the stage again, with
+  // Pemberton as its final enemy. Dying or finishing it goes back to roam (dying: at the quest's
+  // village; finishing: where it ended, the pay popping up around the player).
+  const _psStoryDone = () => !_classicMode && Math.max(_psStage, _psStats.highestStage || 0) > PEMBERTON_STAGE;
+  let _psRoamQuest = null; // { stage, def (its ROAM_QUESTS entry), spot, reward } while its stage runs
+  // Roam quests done at least once (their giver shows 🔁 instead of ❗): localStorage `ps_roam_done_<key>`
+  const _psRoamDoneLsKey = () => profileNameKey ? `ps_roam_done_${profileNameKey}` : null;
+  const _psRoamDone = new Set((() => {
+    try { const k = _psRoamDoneLsKey(); return k ? JSON.parse(localStorage.getItem(k) || '[]') : []; } catch (_) { return []; }
+  })());
+  const _psMarkRoamDone = (stage) => {
+    _psRoamDone.add(stage);
+    try { const k = _psRoamDoneLsKey(); if (k) localStorage.setItem(k, JSON.stringify([..._psRoamDone])); } catch (_) {}
+  };
+  // A village per quest (at its stage route's first point; a stage without a route has none)
+  const _psRoamSpots = () => ROAM_QUESTS.map((q) => {
+    const route = _psRoute(q.stage);
+    const giver = MATCH_CHARACTERS[q.char];
+    if (!route || route.points.length < 2 || !giver) return null;
+    const reward = roamQuestReward(q.stage);
+    return {
+      stage: q.stage,
+      center: { x: route.points[0].x, z: route.points[0].z },
+      pathAngle: _psRouteAngle(route),
+      count: _psEnemyCount(q.stage),
+      boss: `Final enemy: 🎩 Pemberton (${PEMBERTON_HEARTS} ❤️)`,
+      bannerTitle: 'QUEST',
+      giverUrl: giver.url,
+      def: q,
+      quest: {
+        speaker: q.name, emoji: giver.emoji, title: q.title, place: villagePlace(q.stage),
+        lines: q.lines, accept: q.accept, reward,
+        payLine: 'Do it and there’s {reward} coins in it for you.',
+        giverKey: q.char, done: _psRoamDone.has(q.stage),
+      },
+    };
+  }).filter(Boolean);
+  // at: { x, z } to put the player first (null: where they are)
+  const _psEnterRoam = ({ at = null } = {}) => {
+    _psRoamQuest = null;
+    magicBlasts.clear();
+    thawPlayer();
+    _psUpdateKillHud(false);
+    _psClearDeadEnemies();
+    _psStageBoss = null;
+    _psStageActive = false;
+    _psAutoWalking = false;
+    const spots = _psRoamSpots();
+    if (at) {
+      // (facing that village's way)
+      const spot = spots.find((sp) => sp.center.x === at.x && sp.center.z === at.z);
+      _teleportPlayer(at.x, at.z, spot ? Math.atan2(Math.cos(spot.pathAngle), Math.sin(spot.pathAngle)) : undefined);
+    }
+    setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected].url);
+    _psPreviewTime();
+    _villageSheathe();
+    // (a story-era quest's pay still owed: handed over now — nobody's left to pay it at a talk)
+    if (_psRewardOwed > 0) {
+      const owed = _psRewardOwed;
+      _psSetRewardOwed(0);
+      _spawnRewardCoins(owed);
+    }
+    village?.enterRoam({ title: '🗺️ Free Roam', spots, onStart: _psStartRoamQuest });
+  };
+  // A roam village's quest accepted (after the sword calibration): its stage, from right there
+  const _psStartRoamQuest = (spot, pathAngle) => {
+    _psRoamQuest = { stage: spot.stage, def: spot.def, spot, reward: spot.quest.reward };
+    _psStageBoss = { key: 'villager', unlocks: false, pemberton: true, roam: true, stage: spot.stage };
+    _psStartStage(spot.stage, spot.count, { pathAngle, inPlace: true });
+  };
+
+  // Stage screen for the current mode (Showdown after the story: open roam)
+  // (opts: _psShowVillage's, e.g. { approach } after a win; roamAt: where roam puts the player)
   const _psShowStageScreen = (stage, onOk, opts) => (_classicMode
     ? _classicShowStageOverlay(stage, onOk)
+    : _psStoryDone() ? _psEnterRoam({ at: opts?.roamAt ?? null })
     : _psShowVillage(stage, onOk, opts));
 
   // inPlace: start where the player stands (the village) instead of a random spot nearby;
@@ -4996,7 +5126,8 @@ async function initCore(runtimeContext) {
     _psAutoWalking = false;
     _psStageActive = false;
     _psWinShown = false;
-    _psShowStageScreen(_psStage, (count, opts) => _psStartStage(_psStage, count, opts));
+    _psShowStageScreen(_psStage, (count, opts) => _psStartStage(_psStage, count, opts),
+      { roamAt: _psRoamQuest?.spot.center ?? null });
   };
 
   window.hordeEnemies = hordeEnemies;
@@ -5037,7 +5168,9 @@ async function initCore(runtimeContext) {
         try { const k = _psStageLsKey(); if (k) localStorage.setItem(k, _psStage); } catch (_) {}
       } catch (_) { /* keep localStorage value */ }
     }
-    _psShowVillage(_psStage, (count, opts) => _psStartStage(_psStage, count, opts));
+    // (after the story: open roam, starting in the first village)
+    if (_psStoryDone()) _psEnterRoam({ at: _psRoamSpots()[0]?.center ?? null });
+    else _psShowVillage(_psStage, (count, opts) => _psStartStage(_psStage, count, opts));
   };
 
   // ── Phone Sword: gyroscope receiver via PeerJS ─────────────────────────────
@@ -6734,6 +6867,7 @@ async function initCore(runtimeContext) {
   const _resetForMenu = () => {
     _psStopSong();
     village?.exit();
+    _psRoamQuest = null;
     _villageUnsheathe();
     deathCarry?.cancel();
     playerControls?.cancelClimb?.();
@@ -8059,13 +8193,21 @@ async function initCore(runtimeContext) {
           _psChars = _psNormalizeChars({ ..._psChars, unlocked: [..._psChars.unlocked, _clearedBoss.key] });
           _psSaveChars();
         }
-        // The quest's pay: handed over at the next talk with the villager
-        if (!_classicMode) _psSetRewardOwed(_psRewardOwed + villagerQuestReward(_psStage));
+        // The quest's pay: handed over at the next talk with the villager (a roam quest's: now)
+        const _roamDone = _classicMode ? null : _psRoamQuest;
+        if (_roamDone) {
+          _spawnRewardCoins(_roamDone.reward);
+          _psMarkRoamDone(_roamDone.stage);
+        } else if (!_classicMode) {
+          _psSetRewardOwed(_psRewardOwed + villagerQuestReward(_psStage));
+        }
         // Stage cleared: restore the player to full health
         setStat('health', statsState.maxHealthSegments);
         const _nextStage = _psStage + 1;
         _psShowWin(() => {
           if (!_classicMode) _psStageBoss = null; // (Classic leaves Showdown's next boss alone)
+          // (a roam quest: back to roam, right here — the stage doesn't move on)
+          if (_roamDone) { _psEnterRoam(); return; }
           const _saveStage = _classicMode ? _classicSaveStage : _psSaveStage;
           if (_nextStage <= 50) {
             _psStage = _nextStage;
@@ -8639,6 +8781,8 @@ async function initCore(runtimeContext) {
     for (const _se of _psSparedEnemies) _se.update(frameDelta, playerModel, playerControls, false, false, true);
     // Village (between Showdown stages): walks the player around and has the last word on the camera
     village?.update(frameDelta);
+    // Ships on the sea bob on the swell
+    _activeMap?.animate?.(performance.now() / 1000);
     // Showdown death: the carriers + the fixed camera
     deathCarry?.update(frameDelta);
     // Shadows: the sun's shadow box follows the player (snapped to whole shadow-map texels so
