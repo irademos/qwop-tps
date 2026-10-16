@@ -46,6 +46,7 @@ import { EnemyPlayer, swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../c
 import { BombThrowerEnemy, BOMB_DEFLECT_SPEED } from '../characters/BombThrowerEnemy.js';
 import { createPlayerBombs } from '../combat/playerBomb.js';
 import { createHeartBubbles } from '../combat/heartBubbles.js';
+import { createStageChests } from '../combat/stageChests.js';
 import { createComboMeter } from '../combat/comboMeter.js';
 import { createDeathCarry } from '../combat/deathCarry.js';
 import {
@@ -4174,6 +4175,11 @@ async function initCore(runtimeContext) {
     const base = Math.min(4, 1 + Math.floor((stage - 1) / 5));
     return base + (Math.random() < Math.min(0.8, stage * 0.04) ? 1 : 0);
   };
+  // ── Sword Showdown: one hidden chest per stage (placed off the path in _psBuildStage);
+  // swiping it with the sword opens it for a mystery-chest prize (src/combat/stageChests.js) ──
+  const stageChests = createStageChests({ scene, getGroundY: getTerrainHeight });
+  const PS_CHEST_SIDE_MIN = 4;   // m off the path
+  const PS_CHEST_SIDE_MAX = 7;
   const _playerBombPalm = new THREE.Vector3();
   const _playerBombForward = new THREE.Vector3();
   let playerBombThrow = null; // { restoreIds, startedAt, usesClip, released }
@@ -4658,6 +4664,23 @@ async function initCore(runtimeContext) {
       const hz = h.z + (Math.random() - 0.5) * 3;
       heartBubbles.spawn(new THREE.Vector3(hx, playerModel.position.y, hz));
     }
+    // One hidden chest, somewhere between 20% and 85% of the way, off to one side of the path
+    // (not in water: a few tries)
+    stageChests.clear();
+    if (!_classicMode && !_final) {
+      const ct = 0.2 + Math.random() * 0.65;
+      const c = _stageAt(ct);
+      for (let tries = 0; tries < 6; tries++) {
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const off = PS_CHEST_SIDE_MIN + Math.random() * (PS_CHEST_SIDE_MAX - PS_CHEST_SIDE_MIN);
+        // (perpendicular to the path's direction there)
+        const cx = c.x - c.dz * side * off;
+        const cz = c.z + c.dx * side * off;
+        if (_isOverWater(cx, cz) && tries < 5) continue;
+        stageChests.spawn(new THREE.Vector3(cx, playerModel.position.y, cz), Math.atan2(c.dz * side, -c.dx * side)); // (front toward the path)
+        break;
+      }
+    }
     comboMeter.reset();
     _psAutoWalking = true;
     _psStageActive = true;
@@ -4967,6 +4990,7 @@ async function initCore(runtimeContext) {
     _psCloseBossTalk();
     playerBombs?.clear();
     heartBubbles.clear();
+    stageChests.clear();
     comboMeter.reset();
     _psEnemyQueue = [];
     _psAutoWalking = false;
@@ -6119,8 +6143,9 @@ async function initCore(runtimeContext) {
     updateManaUI();
   };
   // Mystery chest: pay, then one weighted random prize (things that can't be used are left out)
-  const _openTreasureChest = () => {
-    if (appState.getCoins() < TREASURE_CHEST_PRICE) return { ok: false };
+  // (`free`: a hidden chest found on a stage — no price)
+  const _openTreasureChest = ({ free = false } = {}) => {
+    if (!free && appState.getCoins() < TREASURE_CHEST_PRICE) return { ok: false };
     const hasGun = (inventoryState.pistol?.count || 0) > 0;
     const prizes = [
       { w: 24, emoji: '🪙', give: () => { const n = 20 + 10 * Math.floor(Math.random() * 9); appState.addCoins(n); return `${n} coins`; } },
@@ -6133,12 +6158,12 @@ async function initCore(runtimeContext) {
       { w: appState.isShopItemMaxed('shield_upgrade') ? 0 : 5, emoji: '⬆️', give: () => { appState.applyShopUpgrade('shield_upgrade'); return 'a shield upgrade'; } },
       { w: 3, emoji: '💰', give: () => { appState.addCoins(150); return 'the jackpot — 150 coins!'; } },
     ].filter((p) => p.w > 0);
-    appState.addCoins(-TREASURE_CHEST_PRICE);
+    if (!free) appState.addCoins(-TREASURE_CHEST_PRICE);
     let r = Math.random() * prizes.reduce((sum, p) => sum + p.w, 0);
     const prize = prizes.find((p) => (r -= p.w) < 0) || prizes[0];
     const text = prize.give();
     _villageSaved();
-    showPickupToast('coins', 1, '', { text: `🎁 Mystery Chest: ${text}` });
+    showPickupToast('coins', 1, '', { text: `🎁 ${free ? 'Hidden Chest' : 'Mystery Chest'}: ${text}` });
     return { ok: true, emoji: prize.emoji, text };
   };
   const villageShop = {
@@ -6726,6 +6751,7 @@ async function initCore(runtimeContext) {
     // (the wand is Showdown's: other modes start with the sword)
     if (_wandActive) equipInventoryItem(FOAM_SWORD_ITEM_ID);
     heartBubbles.clear();
+    stageChests.clear();
     comboMeter.reset();
     _psEnemyQueue = [];
     _psAutoWalking = false;
@@ -7884,6 +7910,12 @@ async function initCore(runtimeContext) {
         !_e.isDead && _e.group &&
         playerModel.position.distanceTo(_e.group.position) < _lungeProximityDist
       ) || _pvpTargets.some(_o => playerModel.position.distanceTo(_o.position) < _lungeProximityDist);
+      // Hidden stage chest: a sword swipe through it opens it (a random prize)
+      if (!_wandOut && !playerDead && stageChests.trySwordHit(_playerBladePoints, _playerMovingFast)) {
+        _swingHitOccurred = true;
+        audioManager?.playSFX?.('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.8);
+        _openTreasureChest({ free: true });
+      }
       if (_wandOut) {
         _updateWandSwipe(_tipWorld, _nowSecPS, _blockingNow || _blockToggleSettling);
       } else if (_playerMovingFast && !_swingHitOccurred && !_tooCloseToEnemy) {
@@ -7907,6 +7939,7 @@ async function initCore(runtimeContext) {
     _popHeartBubbles(heartBubbles.update(frameDelta, {
       playerModel: playerDead ? null : playerModel,
     }));
+    stageChests.update(frameDelta);
     // Phone Sword: apply fixed position/rotation config to shield and pistol
     if (shield?.holder === playerControls) _applyWeaponHoldCfg(shield, 'shield');
     if (pistol?.holder === playerControls) _applyWeaponHoldCfg(pistol, 'gun');
@@ -8018,6 +8051,7 @@ async function initCore(runtimeContext) {
         _psWinShown = true;
         comboMeter.end();
         heartBubbles.clear();
+        stageChests.clear();
         if (!_classicMode) addPlayerXp(getSwordShowdownStageXp(_psStage));
         // Boss beaten: unlock its character (the win banner names it); next stage picks a new boss
         const _clearedBoss = _psStageBoss;

@@ -5,8 +5,8 @@ import { Weapon } from './weapon.js';
 export const SHIELD_ITEM_ID = 'shield';
 export const DEFAULT_SHIELD_HEALTH = 20;
 
-const SHIELD_RADIUS = 0.42;
-const SHIELD_THICKNESS = 0.12;
+const SHIELD_RADIUS = 0.34;
+const SHIELD_THICKNESS = 0.1;
 const SHIELD_COLOR = 0x7a4a20;
 const SHIELD_RIM_COLOR = 0x4d2c12;
 const BAR_VISIBLE_MS = 1200;
@@ -54,7 +54,7 @@ export class Shield extends Weapon {
     rim.receiveShadow = true;
     group.add(rim);
 
-    const bossGeometry = new THREE.CylinderGeometry(0.12, 0.12, SHIELD_THICKNESS * 1.25, 24);
+    const bossGeometry = new THREE.CylinderGeometry(0.1, 0.1, SHIELD_THICKNESS * 1.25, 24);
     bossGeometry.rotateX(Math.PI / 2);
     const boss = new THREE.Mesh(bossGeometry, rimMaterial.clone());
     boss.position.z = SHIELD_THICKNESS * 0.42;
