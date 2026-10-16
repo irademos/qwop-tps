@@ -4,7 +4,8 @@
 // attacks and a box plays the conversation out a line at a time, like the villager's in the
 // village (the same .village-talk look). The first ones only growl; stage by stage they find
 // their words and tell the player what Pemberton really is — the "monsters" are the people
-// he ruined with debts (see VILLAGER_QUESTS in src/village/villageMode.js, the other side of
+// he ruined with debts, each with its own story (CHARACTER_STORIES: the drained fen, the
+// burned pumpkin patch, the quarry, the boat, the Fenwick Wood the tree creature guards…) (see VILLAGER_QUESTS in src/village/villageMode.js, the other side of
 // the story). The stage before Pemberton's guards (SPARED_STAGE) has convinced the player:
 // that one is spared — no fight, it joins them. After the talk the boss grows a little,
 // glows red and fights with a health bar across the top of the screen (createStageBoss in
@@ -27,16 +28,113 @@ export function stageBossGearIcons(stage) {
 /** First stage whose boss has the wand (the wizard; wand enemies come after it). */
 export const FIRST_WAND_BOSS_STAGE = STAGE_BOSS_GEAR_ORDER.indexOf('wand') + 2;
 
+// Who each fightable character is, and what Pemberton did to them. A story boss's talk
+// takes its character's lines in place of its ['backstory'] line: `growl` while the bosses
+// can't talk yet (stages before TALKING_FROM_STAGE — what you see, a broken word or two),
+// `tell` after (in their own words; the boss then goes by `name`). `village` = what it says
+// idling in the village once it has joined the player (over its 🔄 Switch button).
+// The story's order puts each where it lives (PS_STORY_BOSSES in bootstrapGameApp.js):
+// frog → Thornwick road, pumpkin → Ashford, gemhorn → Greyhollow, Mii → Saltmere,
+// tree → Fenwick, wizard → Riverbend, antler → Old Hearth (Bram) and Highcrest (Wren).
+export const CHARACTER_STORIES = {
+  frog: {
+    name: 'Fenn',
+    growl: [
+      ['action', 'Its skin is cracked and dry, like mud at the bottom of a drained pond.'],
+      ['them', 'Grrr… water… GONE…'],
+    ],
+    tell: [
+      ['them', 'I’m Fenn. The frog folk lived in Thornwick Fen for a hundred years, until Pemberton drained it for his wheat. Now we live in the ditches by his road.'],
+    ],
+    village: 'The fen will fill again one day. Frogs are patient.',
+  },
+  pumpkin: {
+    name: 'Hob',
+    growl: [
+      ['action', 'Its vines are scorched black. Somebody burned a pumpkin patch.'],
+      ['them', 'Grrr… my… HARVEST…'],
+    ],
+    tell: [
+      ['them', 'Name’s Hob. I grew the best pumpkins in Ashford. Pemberton called in a debt I never signed, burned my patch and filled my barn with his grain.'],
+    ],
+    village: 'I’m planting again behind the market. Pumpkins grow back. So do people.',
+  },
+  gemhorn: {
+    name: 'Flint',
+    growl: [
+      ['action', 'Its horn is chipped where the gems have been pried out.'],
+      ['them', 'Grrr… he took… my… STONES…'],
+    ],
+    tell: [
+      ['them', 'I’m Flint. I dug the Greyhollow quarry with my own claws. Pemberton bought it from the bank, then pried the gems out of my horn and called it interest.'],
+    ],
+    village: 'My horn’s growing back. Slowly. Don’t stare.',
+  },
+  mii1: {
+    name: 'Pip',
+    growl: [
+      ['action', 'It smells of salt and fish. A torn net is still tangled round its arm.'],
+      ['them', 'Grrr… my… BOAT… he… took…'],
+    ],
+    tell: [
+      ['them', 'I’m Pip. I fished out of Saltmere every morning of my life, till Pemberton took my boat for a harbour fee he made up that week.'],
+    ],
+    village: 'Got my boat back. Fish don’t care who owns the docks.',
+  },
+  tree: {
+    name: 'Oldbark',
+    growl: [
+      ['action', 'Sawdust clings to its bark. It stands between you and the woods, roots dug in.'],
+      ['them', 'Grrr… not… my… TREES…'],
+    ],
+    tell: [
+      ['them', 'I am Oldbark. I have guarded the Fenwick Wood since before there was a Fenwick. Pemberton made the mill a sawmill, and it eats my trees by the hundred.'],
+      ['you', 'It’s only a wood.'],
+      ['them', 'Every plank in his manor was one of my trees, {name}. And the millers who cut them haven’t been paid in twelve weeks. Not one more tree. Not while I stand.'],
+    ],
+    village: 'Mind the saplings, {name}. I planted every one of them.',
+  },
+  wizard: {
+    name: 'Alder',
+    growl: [
+      ['action', 'Herb pouches hang from its belt, all of them empty.'],
+      ['them', 'Grrr… potions… for the… SICK…'],
+    ],
+    tell: [
+      ['them', 'I’m Alder. I was the healer at Riverbend, until Pemberton bought every herb garden and sold my own potions back to the sick at ten times the price. Here I heal them for nothing.'],
+    ],
+    village: 'The merchant’s potions are fairly priced now. I checked.',
+  },
+  antler: {
+    name: 'Bram',
+    growl: [
+      ['action', 'Its arms are scarred with old forge burns.'],
+      ['them', 'Grrr… my… FORGE…'],
+    ],
+    tell: [
+      ['them', 'I was the smith at Old Hearth, before the bank came for my forge. Pemberton bought my debt for a copper and sold my anvil for a gold.'],
+    ],
+    village: 'I’m back at the forge. If your blade ever needs mending, {name}…',
+  },
+};
+// From this stage on the story's bosses talk (before it: growls, `growl` lines)
+const TALKING_FROM_STAGE = 5;
+/** What a character says idling in the village (null: nothing). */
+export function characterVillageLine(key) {
+  return CHARACTER_STORIES[key]?.village ?? null;
+}
+
 // The story's stage bosses (stage 1 = index 0; stages 1–10, the guards are stage 10).
 // `name` = how it calls itself (else the character's name), `lines` = [who, text] with who =
 // 'them' / 'you' (a reply button) / 'action' ({name} = the player's name — createBossTalk's
-// `fill`), `fight` = the button that starts the fight.
+// `fill`) or ['backstory'] (its character's CHARACTER_STORIES lines), `fight` = the button
+// that starts the fight.
 // `spare`: no fight — the button spares it (it joins the player).
 const STORY_BOSSES = [
   { // → Thornwick (the letter)
     lines: [
       ['action', 'It blocks the road, teeth bared.'],
-      ['them', 'Grrrrrr…'],
+      ['backstory'],
       ['them', 'GRRAAAAH!'],
     ],
     fight: '⚔️ Fight' },
@@ -44,12 +142,14 @@ const STORY_BOSSES = [
     lines: [
       ['them', 'Grrr… grain… OURS… grrr…'],
       ['you', 'Did it just say “ours”?'],
+      ['backstory'],
       ['them', 'RRRAAAH!'],
     ],
     fight: '⚔️ Fight' },
   { // → Greyhollow (the quarry)
     lines: [
       ['action', 'It holds its sword the way you’d hold a pickaxe.'],
+      ['backstory'],
       ['them', 'Grrr… go… HOME… grrr…'],
       ['you', 'I can’t. I’ve got a job to do.'],
       ['them', 'GRRAAH!'],
@@ -59,6 +159,7 @@ const STORY_BOSSES = [
     lines: [
       ['them', 'Grrr… you… don’t… KNOW…'],
       ['you', 'You can talk?'],
+      ['backstory'],
       ['them', 'He… sends you… grrr… HE is the… RRAAAH!'],
     ],
     fight: '⚔️ Fight' },
@@ -66,7 +167,8 @@ const STORY_BOSSES = [
     lines: [
       ['them', 'You again. The one he sends.'],
       ['you', 'You really can talk.'],
-      ['them', 'We all can. Nobody listens. Pemberton bought this mill and stopped paying us. Twelve weeks of wages. We painted it on his walls so he’d remember.'],
+      ['them', 'We all can. Nobody listens. We painted it on his walls so he’d remember: WAGES. SAVE THE WOOD.'],
+      ['backstory'],
       ['them', 'He sent you instead. So be it.'],
     ],
     fight: '⚔️ Fight' },
@@ -74,7 +176,9 @@ const STORY_BOSSES = [
     lines: [
       ['them', 'Not the camp. Please. There are children here.'],
       ['you', 'Pemberton says you’re monsters.'],
-      ['them', 'Pemberton took our farms for debts we never signed. This camp is all we have left. If you want it, you’ll have to go through me.'],
+      ['them', 'Pemberton took our farms for debts we never signed. This camp is all we have left.'],
+      ['backstory'],
+      ['them', 'If you want it, you’ll have to go through me.'],
     ],
     fight: '⚔️ Fight' },
   { // → Old Hearth (the road)
@@ -83,7 +187,9 @@ const STORY_BOSSES = [
       ['action', 'He lowers his blade, just a little.'],
       ['them', 'I saw you at the camp, {name}. You stopped. Why?'],
       ['you', 'I don’t know any more.'],
-      ['them', 'They say yours is {name}. Mine is Bram. I was the smith at Old Hearth, before the bank came for my forge. Remember that name when his man asks how many you killed.'],
+      ['them', 'They say yours is {name}. Mine is Bram.'],
+      ['backstory'],
+      ['them', 'Remember that name when his man asks how many you killed.'],
       ['them', 'But I won’t let you through to my family. En garde.'],
     ],
     fight: '⚔️ En garde' },
@@ -94,7 +200,7 @@ const STORY_BOSSES = [
       ['you', 'I’m sorry.'],
       ['them', 'Sorry. Do you even know what you’re fighting for, {name}?'],
       ['you', 'He pays me.'],
-      ['them', 'He pays you with our money. He keeps a ledger — every name, every debt. Bram’s in it. So am I. Find it. Read it. Then decide who the monster is.'],
+      ['them', 'He pays you with our money. He keeps a ledger — every name, every debt. Fenn, Hob, Flint, Pip, Alder, Bram. So am I. Find it. Read it. Then decide who the monster is.'],
       ['them', 'But you’ll have to get past me first. I can’t just let you through.'],
     ],
     fight: '⚔️ Fight' },
@@ -130,19 +236,31 @@ const ROAD_BOSSES = [
 ];
 
 /**
- * The talk of `stage`'s final enemy. `character` = its MATCH_CHARACTERS entry.
+ * The talk of `stage`'s final enemy. `character` = its MATCH_CHARACTERS entry, `key` = its key
+ * (picks its CHARACTER_STORIES lines).
  * @returns {{ speaker, name, lines, fight?, spare? }}
  * (`name` = shown over its health bar)
  */
-export function stageBossTalk(stage, character, { afterStory = false } = {}) {
+export function stageBossTalk(stage, character, { afterStory = false, key = null } = {}) {
   const s = Math.max(1, Math.floor(stage) || 1);
   const story = !afterStory ? STORY_BOSSES[s - 1] : null;
   const emoji = character?.emoji ?? '👹';
-  const name = story?.name ?? character?.label ?? 'Monster';
+  const own = CHARACTER_STORIES[key];
+  const talking = s >= TALKING_FROM_STAGE;
+  const name = story?.name ?? (talking ? own?.name : null) ?? character?.label ?? 'Monster';
+  // ['backstory'] → its character's lines (none for a character with no story)
+  const lines = story
+    ? story.lines.flatMap((line) => {
+      if (line[0] !== 'backstory') return [line];
+      // a named story boss (Bram) only takes the lines of the character it is
+      if (story.name && own?.name !== story.name) return [];
+      return (talking ? own?.tell : own?.growl) ?? [];
+    })
+    : ROAD_BOSSES[(s - 1) % ROAD_BOSSES.length];
   return {
     speaker: `${emoji} ${name}`,
     name: `${emoji} ${name}`,
-    lines: story?.lines ?? ROAD_BOSSES[(s - 1) % ROAD_BOSSES.length],
+    lines,
     fight: story?.spare ? null : (story?.fight ?? '⚔️ Fight'),
     spare: story?.spare ?? null,
   };

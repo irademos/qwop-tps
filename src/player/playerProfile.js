@@ -145,6 +145,79 @@ export async function loadPhoneSwordLeaderboards(limit = 10) {
   };
 }
 
+// ── Multiplayer stats + leaderboard: profiles/<key>/multiplayerStats {wins, losses, kills, deaths}
+// (duels and Team Battle / Free For All battles) ──────────────────────────────
+
+const MP_STAT_KEYS = ['wins', 'losses', 'kills', 'deaths'];
+const cleanCount = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.floor(Number(v))) : 0);
+
+export function normalizeMultiplayerStats(val) {
+  const out = {};
+  MP_STAT_KEYS.forEach((k) => { out[k] = cleanCount(val?.[k]); });
+  return out;
+}
+
+// Adds one finished duel / battle: { won, lost, kills, deaths }
+export async function recordMultiplayerResult(nameKey, { won = false, lost = false, kills = 0, deaths = 0 } = {}) {
+  if (!nameKey) return null;
+  try {
+    const result = await runTransaction(ref(db, `profiles/${nameKey}/multiplayerStats`), (current) => {
+      const stats = normalizeMultiplayerStats(current);
+      stats.wins += won ? 1 : 0;
+      stats.losses += lost ? 1 : 0;
+      stats.kills += cleanCount(kills);
+      stats.deaths += cleanCount(deaths);
+      return stats;
+    });
+    return normalizeMultiplayerStats(result?.snapshot?.val());
+  } catch (err) {
+    console.warn('Failed to save multiplayer stats:', err);
+    return null;
+  }
+}
+
+export async function loadMultiplayerStats(nameKey) {
+  if (!nameKey) return normalizeMultiplayerStats(null);
+  try {
+    const snap = await get(ref(db, `profiles/${nameKey}/multiplayerStats`));
+    return normalizeMultiplayerStats(snap.val());
+  } catch (err) {
+    console.warn('Failed to load multiplayer stats:', err);
+    return normalizeMultiplayerStats(null);
+  }
+}
+
+async function loadMultiplayerLeaderboardByMetric(metric, limit = 10) {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(50, Math.floor(limit))) : 10;
+  const snapshot = await get(query(ref(db, 'profiles'), orderByChild(`multiplayerStats/${metric}`), limitToLast(safeLimit)));
+  const entries = [];
+  snapshot.forEach((child) => {
+    const profile = child.val();
+    const stats = normalizeMultiplayerStats(profile?.multiplayerStats);
+    entries.push({
+      id: child.key,
+      name: typeof profile?.name === 'string' && profile.name.trim() ? profile.name.trim() : child.key,
+      value: stats[metric],
+      stats
+    });
+  });
+  return entries
+    .filter((e) => e.value > 0)
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+    .slice(0, safeLimit);
+}
+
+export async function loadMultiplayerLeaderboards(limit = 10) {
+  const [winsResult, killsResult] = await Promise.allSettled([
+    loadMultiplayerLeaderboardByMetric('wins', limit),
+    loadMultiplayerLeaderboardByMetric('kills', limit)
+  ]);
+  return {
+    topWins: winsResult.status === 'fulfilled' ? winsResult.value : [],
+    topKills: killsResult.status === 'fulfilled' ? killsResult.value : []
+  };
+}
+
 export async function savePhoneSwordStats(nameKey, psStats) {
   if (!nameKey || !psStats) return;
   try {

@@ -92,7 +92,9 @@ export function createDuelMode(ctx) {
   });
   const lobbyActions = el('div', 'duel-lobby-actions');
   const backBtn = el('button', 'arcade-button arcade-secondary', '⬅ Back');
-  lobbyActions.append(backBtn);
+  const leaderboardBtn = el('button', 'arcade-button arcade-secondary', '🏆 Leaderboard');
+  leaderboardBtn.addEventListener('click', () => ctx.openLeaderboard?.());
+  lobbyActions.append(backBtn, leaderboardBtn);
   const prompt = el('div', 'duel-prompt hidden');
   const promptText = el('div', 'duel-prompt-text');
   const promptActions = el('div', 'duel-lobby-actions');
@@ -402,14 +404,17 @@ export function createDuelMode(ctx) {
     // A deciding round waits only a moment (to catch a simultaneous death) before the WINNER banner
     duel.roundTimer = setTimeout(() => {
       if (duel !== current || phase !== 'roundOver') return;
-      if (duel.myWins >= ROUNDS_TO_WIN) endDuel(ctx.getPlayerName(), `${duel.myWins} – ${duel.oppWins}`);
-      else if (duel.oppWins >= ROUNDS_TO_WIN) endDuel(opponentName(), `${duel.oppWins} – ${duel.myWins}`);
+      if (duel.myWins >= ROUNDS_TO_WIN) endDuel(ctx.getPlayerName(), `${duel.myWins} – ${duel.oppWins}`, true);
+      else if (duel.oppWins >= ROUNDS_TO_WIN) endDuel(opponentName(), `${duel.oppWins} – ${duel.myWins}`, false);
       else startRound();
     }, maybeFinal ? 600 : ROUND_BANNER_MS);
   };
 
-  const endDuel = (winnerName, sub = '') => {
+  // won: the local player won (multiplayer leaderboard: a win / loss, rounds won = kills,
+  // rounds lost = deaths)
+  const endDuel = (winnerName, sub = '', won = false) => {
     if (!duel || phase === 'over') return;
+    ctx.recordMultiplayerResult?.({ won, lost: !won, kills: duel.myWins, deaths: duel.oppWins });
     clearCountdown();
     clearTimeout(duel.roundTimer);
     ctx.stopWalkIn();
@@ -443,7 +448,7 @@ export function createDuelMode(ctx) {
   forfeitBtn.addEventListener('click', () => {
     if (!duel || (phase !== 'countdown' && phase !== 'fighting' && phase !== 'roundOver')) return;
     send(duel.opponentId, { op: 'leave', challengeId: duel.challengeId });
-    endDuel(opponentName(), `${ctx.getPlayerName()} forfeited`);
+    endDuel(opponentName(), `${ctx.getPlayerName()} forfeited`, false);
   });
 
   // ── Team Battle / Free For All (matchMode) ───────────────────────────────
@@ -616,7 +621,7 @@ export function createDuelMode(ctx) {
         onRoundDeath(false);
         return;
       case 'leave':
-        endDuel(ctx.getPlayerName(), `${opponentName()} left the duel`);
+        endDuel(ctx.getPlayerName(), `${opponentName()} left the duel`, true);
         return;
       default:
     }
@@ -629,7 +634,7 @@ export function createDuelMode(ctx) {
     const peers = ctx.getMultiplayer()?.getOnlinePeers?.();
     const opponentGone = peers && Object.keys(peers).length > 0 && !peers[duel.opponentId];
     if (opponentGone || now - duel.lastHeardAt > OPPONENT_TIMEOUT_MS) {
-      endDuel(ctx.getPlayerName(), `${opponentName()} disconnected`);
+      endDuel(ctx.getPlayerName(), `${opponentName()} disconnected`, true);
       return;
     }
 

@@ -1,7 +1,7 @@
 import { showFeatureLoading } from './loadingState.js';
-import { initSettingsPanel, openSettings, updateUI as updateSettingsUI } from '../controls/settingsPanel.js';
+import { initSettingsPanel, openSettings, openLeaderboard, updateUI as updateSettingsUI } from '../controls/settingsPanel.js';
 
-export { initSettingsPanel, openSettings, updateSettingsUI };
+export { initSettingsPanel, openSettings, openLeaderboard, updateSettingsUI };
 
 let merchantPromise = null;
 let merchantPanelModule = null;

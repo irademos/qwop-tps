@@ -38,7 +38,7 @@ import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 import { stylizeObject } from '../environment/artStyle.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { PEMBERTON_SCALE, addRedGlow } from '../characters/pembertonBoss.js';
-import { talkAutoHoldSeconds } from '../characters/stageBoss.js';
+import { talkAutoHoldSeconds, characterVillageLine, CHARACTER_STORIES } from '../characters/stageBoss.js';
 import { createWandModel } from '../items/magicWand.js';
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -88,12 +88,14 @@ const VILLAGER_QUESTS = [
     accept: 'I’ll take the letter' },
   { place: 'Thornwick', title: 'Clear the granaries at Ashford',
     lines: [
-      ['them', 'You made it, {name}! Don’t look so surprised, I keep a very fast carriage. Now, those creatures have been getting into my grain stores near Ashford. Be a friend and clear them out?'],
+      ['them', 'You made it, {name}! Don’t look so surprised, I keep a very fast carriage.'],
+      ['you', 'The thing on the road looked like a frog.'],
+      ['them', 'Ah, the fen folk. I drained their swamp, you know — best wheat field in the county now. They’ve sulked in the ditches ever since. Now, those creatures have been getting into my grain stores near Ashford. Be a friend and clear them out?'],
     ],
     accept: 'I’ll clear them out' },
   { place: 'Ashford', title: 'Clear the quarry at Greyhollow',
     lines: [
-      ['them', 'My granaries are safe again. Funny how the beasts only ever go after the grain, isn’t it? Greedy little things. I hear there’s a whole nest in the old quarry at Greyhollow.'],
+      ['them', 'My granaries are safe again. Funny how the beasts only ever go after the grain, isn’t it? Greedy little things. Used to be a pumpkin patch there, before the debt came due. Shame about the fire. I hear there’s a whole nest in the old quarry at Greyhollow.'],
     ],
     accept: 'On my way' },
   { place: 'Greyhollow', title: 'Clear the docks at Saltmere',
@@ -107,12 +109,12 @@ const VILLAGER_QUESTS = [
     lines: [
       ['them', 'Ah, there you are, {name}. All quiet at the docks?'],
       ['you', 'One of them tried to speak to me.'],
-      ['them', 'Speak? Growl, surely. Mimicry, friend. Clever beasts pick up sounds. Don’t let it get under your skin. They’ve got into my mill at Fenwick now — off you go.'],
+      ['them', 'Speak? Growl, surely. Mimicry, friend. Clever beasts pick up sounds. Don’t let it get under your skin. Now, my sawmill at Fenwick — some great walking stump keeps chasing my woodcutters out of the Fenwick Wood. The wood’s mine. I bought it. Off you go.'],
     ],
     accept: 'I’ll go' },
   { place: 'Fenwick', title: 'Clear the camp at Riverbend',
     lines: [
-      ['them', 'They’ve been painting on my mill walls. “WAGES.” Can you imagine?'],
+      ['them', 'They’ve been painting on my mill walls. “WAGES.” “SAVE THE WOOD.” Can you imagine?'],
       ['you', 'Monsters can write?'],
       ['them', 'Learned it somewhere, I suppose. Don’t encourage them. There’s a camp by the river at Riverbend. Squatters. I mean, monsters.'],
     ],
@@ -121,7 +123,7 @@ const VILLAGER_QUESTS = [
     lines: [
       ['them', 'Well, {name}? How did it go?'],
       ['you', 'There were small ones in that camp.'],
-      ['them', 'Yes, well. They breed. That’s rather the whole problem, isn’t it? Old Hearth next — same business.'],
+      ['them', 'Yes, well. They breed. That’s rather the whole problem, isn’t it? And that so-called healer of theirs, giving potions away — terrible for my prices. Old Hearth next — same business.'],
     ],
     accept: '…Fine' },
   { place: 'Old Hearth', title: 'Clear Highcrest Gate',
@@ -1053,7 +1055,17 @@ export function createVillage(ctx) {
       el.switchBtn.classList.toggle('hidden', !sw);
       if (sw) {
         const def = ctx.characters.roster[sw.key];
-        el.switchBtn.textContent = `🔄 Switch to ${def?.label ?? sw.key}`;
+        // What it says once it has joined you (its story — CHARACTER_STORIES in stageBoss.js)
+        const said = characterVillageLine(sw.key);
+        const who = CHARACTER_STORIES[sw.key]?.name;
+        el.switchBtn.replaceChildren();
+        if (said) {
+          const quote = document.createElement('span');
+          quote.className = 'village-switch-quote';
+          quote.textContent = `${who ? `${who}: ` : ''}“${fillTalk(said, { name: ctx.getPlayerName?.() || 'friend' })}”`;
+          el.switchBtn.append(quote);
+        }
+        el.switchBtn.append(document.createTextNode(`🔄 Switch to ${def?.label ?? sw.key}`));
       }
     }
     placeSwitch();

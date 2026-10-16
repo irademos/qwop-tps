@@ -11,7 +11,7 @@ import { createBossFighter } from '../characters/pembertonBoss.js';
 //   • Survival  — no respawns: the last team / fighter standing wins.
 //   • Most Kills — everyone respawns RESPAWN_MS after dying (with a short spawn bubble);
 //     when the clock (KILLS_MATCH_MS) runs out or someone reaches KILL_TARGET, the most
-//     kills wins (Team Battle: the team's total).
+//     kills wins (Team Battle: the team's total; Free For All: the best kill / death ratio).
 // Everyone starts with the sword only; pickups scattered around the arena
 // (src/multiplayer/matchPickups.js) give guns, bullets, shields, bombs, magic wands, mana,
 // hearts, life potions and bubbles. Opened from the Multiplayer lobby (duelMode suspends
@@ -67,6 +67,11 @@ export const MATCH_RULES = {
   survival: { label: 'Survival', icon: '🛡️', blurb: 'No respawns · last one standing wins' },
   kills: { label: 'Most Kills', icon: '💀', blurb: 'Respawn after every death · most kills wins' }
 };
+// Free For All Most Kills is won on kill / death ratio (deaths count as at least 1)
+const KD_BLURB = 'Respawn after every death · best K/D wins';
+const ruleBlurb = (rule, mode) => (rule === 'kills' && isFreeForAll(mode) ? KD_BLURB : MATCH_RULES[rule].blurb);
+const kdRatio = (c) => c.kills / Math.max(1, c.deaths);
+const formatKd = (c) => kdRatio(c).toFixed(2).replace(/\.?0+$/, '');
 const DEFAULT_RULE = 'survival';
 const cleanRule = (rule) => (MATCH_RULES[rule] ? rule : DEFAULT_RULE);
 const isFreeForAll = (mode) => mode !== 'team';
@@ -415,7 +420,7 @@ export function createMatchMode(ctx) {
       btn.disabled = !editable && !selected;
       btn.classList.toggle('is-readonly', !editable);
       btn.append(el('span', 'match-rule-icon', rule.icon), el('span', 'match-rule-label', rule.label),
-        el('span', 'match-rule-blurb', rule.blurb));
+        el('span', 'match-rule-blurb', ruleBlurb(key, party.mode)));
       if (editable) btn.addEventListener('click', () => setRule(key));
       rulePicker.append(btn);
     });
@@ -972,7 +977,7 @@ export function createMatchMode(ctx) {
     const ruleInfo = MATCH_RULES[match.rule];
     const intro = mode === 'team'
       ? `You fight for the ${teamLabel(match.teamChars[match.myTeam] ?? 'antler')}`
-      : ruleInfo.blurb;
+      : ruleBlurb(match.rule, mode);
     const sub = `${MATCH_MODES[mode]} · ${ruleInfo.label} · ${intro}`;
     ['3', '2', '1'].forEach((text, i) => {
       countdownTimers.push(setTimeout(() => {
@@ -1022,8 +1027,11 @@ export function createMatchMode(ctx) {
     match.combatants.forEach((c) => { if (c.team === team) n += c.kills; });
     return n;
   };
+  // Free For All Most Kills ranks by K/D (then kills); everything else by kills
+  const byKd = () => match.rule === 'kills' && isFreeForAll(match.mode);
   const standings = () => [...match.combatants.values()]
-    .sort((a, b) => (b.kills - a.kills) || (a.deaths - b.deaths) || (Number(b.alive) - Number(a.alive)));
+    .sort((a, b) => (byKd() ? kdRatio(b) - kdRatio(a) : 0)
+      || (b.kills - a.kills) || (a.deaths - b.deaths) || (Number(b.alive) - Number(a.alive)));
 
   function renderHud(force = false) {
     if (!match) return;
@@ -1042,7 +1050,7 @@ export function createMatchMode(ctx) {
     hudClock.classList.toggle('is-urgent', kills && phase === 'fighting' && match.endsAt - Date.now() < 30000);
     const target = KILL_TARGET[match.mode];
     hudMode.textContent = kills
-      ? `${MATCH_RULES.kills.label} · first to ${target}`
+      ? `${MATCH_RULES.kills.label} · ${byKd() ? `best K/D · ends at ${target} kills` : `first to ${target}`}`
       : `${MATCH_RULES.survival.label} · ${MATCH_MODES[match.mode]}`;
     if (match.mode === 'team') {
       hudBar.classList.add('is-team');
@@ -1065,14 +1073,14 @@ export function createMatchMode(ctx) {
       const ranked = standings();
       const rank = ranked.indexOf(me) + 1;
       const mine = el('span', 'match-hud-chip is-self');
-      mine.append(el('b', null, 'You'), document.createTextNode(` ${me.kills} K · ${me.deaths} D`));
+      mine.append(el('b', null, 'You'), document.createTextNode(` ${me.kills} K · ${me.deaths} D${byKd() ? ` · ${formatKd(me)} K/D` : ''}`));
       if (match.mode !== 'team') mine.append(el('span', 'match-hud-rank', `#${rank}`));
       hudSub.append(mine);
       if (match.mode !== 'team') {
         ranked.slice(0, 3).forEach((c, i) => {
           if (c === me) return;
           const chip = el('span', 'match-hud-chip');
-          chip.append(el('span', 'match-hud-rank', `#${i + 1}`), document.createTextNode(` ${c.name} ${c.kills}`));
+          chip.append(el('span', 'match-hud-rank', `#${i + 1}`), document.createTextNode(` ${c.name} ${byKd() ? formatKd(c) : c.kills}`));
           chip.classList.toggle('is-dead', !c.alive);
           hudSub.append(chip);
         });
@@ -1271,8 +1279,9 @@ export function createMatchMode(ctx) {
     } else {
       const ranked = standings();
       const top = ranked[0];
-      if (top && (now >= match.endsAt || top.kills >= target)) {
-        const tie = ranked[1] && ranked[1].kills === top.kills;
+      const mostKills = Math.max(0, ...ranked.map((c) => c.kills));
+      if (top && (now >= match.endsAt || mostKills >= target)) {
+        const tie = ranked[1] && Math.abs(kdRatio(ranked[1]) - kdRatio(top)) < 1e-9 && ranked[1].kills === top.kills;
         result = tie || top.kills === 0 ? { winnerId: null } : { winnerId: top.id, winnerName: top.name };
       }
     }
@@ -1309,18 +1318,20 @@ export function createMatchMode(ctx) {
       mood = won ? 'win' : 'lose';
       title = won ? 'VICTORY' : `${name} WINS`;
       sub = match.rule === 'kills'
-        ? `${won ? 'You' : name} got the most kills`
+        ? `${won ? 'You' : name} got the best K/D (${formatKd(match.combatants.get(winnerId) ?? { kills: 0, deaths: 0 })})`
         : `${won ? 'You are' : `${name} is`} the last one standing`;
     } else {
       title = 'DRAW';
-      sub = match.rule === 'kills' ? 'Tied on kills' : 'Nobody is left standing';
+      sub = match.rule === 'kills' ? 'Tied on K/D' : 'Nobody is left standing';
     }
     results.dataset.mood = mood;
     resultsTitle.textContent = title;
     resultsSub.textContent = `${MATCH_MODES[match.mode]} · ${MATCH_RULES[match.rule].label}${sub ? ` — ${sub}` : ''}`;
     resultsTable.replaceChildren();
+    resultsTable.classList.toggle('has-kd', byKd());
     const head = el('div', 'match-results-row is-head');
     head.append(el('span', null, '#'), el('span', null, 'Fighter'), el('span', null, 'K'), el('span', null, 'D'));
+    if (byKd()) head.append(el('span', null, 'K/D'));
     resultsTable.append(head);
     const ranked = match.mode === 'team'
       ? standings().sort((a, b) => (a.team === match.myTeam ? -1 : 0) - (b.team === match.myTeam ? -1 : 0))
@@ -1335,6 +1346,7 @@ export function createMatchMode(ctx) {
         document.createTextNode(`${c.name}${c === me ? ' (you)' : ''}${c.bot ? ' 🤖' : ''}${status}`));
       row.append(el('span', 'match-results-rank', String(i + 1)), name,
         el('span', 'match-results-num', String(c.kills)), el('span', 'match-results-num', String(c.deaths)));
+      if (byKd()) row.append(el('span', 'match-results-num', formatKd(c)));
       resultsTable.append(row);
     });
     results.classList.remove('hidden');
@@ -1349,6 +1361,24 @@ export function createMatchMode(ctx) {
   };
   resultsBackBtn.addEventListener('click', () => { if (phase === 'over') returnToLobby(); });
 
+  // Multiplayer leaderboard: the local player's win / loss (none for a draw or a battle cut
+  // short) and their kills / deaths this battle
+  const recordResult = ({ winnerTeam = null, winnerId = null, reason = '' }) => {
+    const me = match?.combatants.get(myId());
+    if (!me) return;
+    let won = false;
+    let lost = false;
+    if (!reason) {
+      if (match.mode === 'team') {
+        if (winnerTeam === 0 || winnerTeam === 1) { won = winnerTeam === match.myTeam; lost = !won; }
+      } else if (winnerId) {
+        won = winnerId === me.id;
+        lost = !won;
+      }
+    }
+    ctx.recordMultiplayerResult?.({ won, lost, kills: me.kills, deaths: me.deaths });
+  };
+
   function showEnd(result = {}) {
     if (!match || phase === 'over') return;
     clearCountdown();
@@ -1361,6 +1391,7 @@ export function createMatchMode(ctx) {
     feed.replaceChildren();
     renderHud(true);
     renderResults(result);
+    recordResult(result);
     const finished = match;
     let left = Math.round(RESULTS_MS / 1000);
     const tick = () => {
