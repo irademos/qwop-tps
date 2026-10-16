@@ -491,6 +491,23 @@
       errorMsg.textContent = text;
     }
 
+    // Keep the phone's screen on while it is the controller — a sleeping phone stops sending
+    // gyro packets and can come back with a jumped compass heading (bad calibration).
+    // The browser drops the lock whenever the page is hidden, so it is re-requested when it
+    // becomes visible again and on any tap.
+    let wakeLock = null;
+    async function keepScreenAwake() {
+      if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+      if (wakeLock && !wakeLock.released) return;
+      try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      } catch (_) { wakeLock = null; }
+    }
+    document.addEventListener('visibilitychange', keepScreenAwake);
+    window.addEventListener('pointerdown', keepScreenAwake, { passive: true });
+    keepScreenAwake();
+
     async function requestGyroPermission() {
       if (typeof DeviceOrientationEvent !== 'undefined' &&
           typeof DeviceOrientationEvent.requestPermission === 'function') {

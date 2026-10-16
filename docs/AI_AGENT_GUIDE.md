@@ -16,6 +16,7 @@
 | Game orchestrator / main loop / stages | `src/bootstrap/bootstrapGameApp.js` (~5.5k lines) |
 | Phone controller page | `public/phone-sword.html` (reconnect: `connectToGame`; game side `_createGyroPeer` / `_attachPhoneSwordConn` in `bootstrapGameApp.js`) |
 | Pause while settings open (Showdown / Classic / tutorial) | `_isSettingsPauseWanted` / `_attacksHeld` + top of `animate` in `bootstrapGameApp.js` |
+| Keep the screen awake (Screen Wake Lock) | game `src/core/wakeLock.js`; phone `keepScreenAwake` in `public/phone-sword.html` |
 | Shared runtime state (DI container) | `src/core/appContext.js` |
 | HTML shell + all HUD elements | `index.html` |
 | All CSS | `styles.css` — design tokens on `:root` + shared panel / button (primary, secondary, ghost) / chip components at the top; reuse the `ui-*` classes and tokens for new UI |
@@ -43,7 +44,7 @@
 ```
 src/
   bootstrap/    bootstrapGameApp.js       ← game init, maps (MAPS / _setActiveMap), stages (_ps*), phone link, shop/stats, rAF loop
-  core/         appContext, exposeDebugGlobals, firebase-init, externalDeps (PeerJS/NippleJS CDN), utils (cookies)
+  core/         appContext, exposeDebugGlobals, firebase-init, externalDeps (PeerJS/NippleJS CDN), utils (cookies), wakeLock (keepScreenAwake)
   player/       playerProfile (Firebase stats/inventory/PIN/leaderboard), healthUtils
   map/          spawnUtils, MapLoader.ts (.mappack loader), stageRoutes (hand-authored Showdown stage routes + drafts)
   environment/  terrainHeight (height resolver registry), mapCollision (bullet / bomb segment raycast vs the map BVH), artStyle (load-time texture pass that matches characters/props to the map's look), blobShadows (cheap disc shadows under characters on the low performance tier)
