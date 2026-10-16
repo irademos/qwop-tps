@@ -13,6 +13,10 @@ const LOW_END_PERF_PROFILE = {
 };
 
 const UNLOCK_EVENTS = ['pointerdown', 'touchstart', 'keydown', 'click'];
+// Events that count as a user gesture for starting <audio> (Safari doesn't take touchstart / pointerdown)
+const MEDIA_GESTURE_EVENTS = ['click', 'touchend', 'keydown'];
+// A tiny silent WAV, played once inside a gesture to unlock the music element
+const SILENT_WAV = 'data:audio/wav;base64,UklGRkQDAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YSADAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
 
 export class AudioManager {
   constructor(options = {}) {
@@ -65,6 +69,53 @@ export class AudioManager {
     for (const type of UNLOCK_EVENTS) {
       window.addEventListener(type, this._unlockListener, { capture: true, passive: true });
     }
+
+    // Stage songs play on one <audio> element (getMusicElement). Stages often start without a
+    // click on the game page (the phone's interact button, auto-continued dialogue), and Safari
+    // only lets an element start playing inside a gesture — so the element is played once
+    // (silently) on the first gesture, which unlocks it for later songs; a song that was still
+    // blocked is retried on the next gesture.
+    this.musicElement = new Audio();
+    this.musicElement.preload = 'auto';
+    this._musicUnlocked = false;
+    this._musicRetry = false;
+    this._mediaGestureListener = () => this._onMediaGesture();
+    for (const type of MEDIA_GESTURE_EVENTS) {
+      window.addEventListener(type, this._mediaGestureListener, { capture: true, passive: true });
+    }
+  }
+
+  /** The <audio> element for stage songs (unlocked on the first user gesture). */
+  getMusicElement() {
+    return this.musicElement;
+  }
+
+  /** Play the music element; if the browser blocks it, try again on the next user gesture. */
+  playMusic() {
+    const el = this.musicElement;
+    const attempt = el.play();
+    if (!attempt?.catch) return;
+    attempt.then(() => { this._musicRetry = false; }).catch((err) => {
+      if (err?.name === 'NotAllowedError') this._musicRetry = true;
+      else console.warn('Music play failed', err);
+    });
+  }
+
+  _onMediaGesture() {
+    const el = this.musicElement;
+    if (this._musicRetry) { this._musicRetry = false; this.playMusic(); return; }
+    if (this._musicUnlocked) return;
+    this._musicUnlocked = true;
+    if (el.getAttribute('src')) return; // (a song is already on it)
+    el.src = SILENT_WAV;
+    const attempt = el.play();
+    attempt?.then?.(() => { if (el.src === SILENT_WAV) el.pause(); }).catch(() => { this._musicUnlocked = false; });
+  }
+
+  /** Stop the music element (and forget a blocked song waiting for a gesture). */
+  stopMusic() {
+    this._musicRetry = false;
+    this.musicElement.pause();
   }
 
   unlock() {

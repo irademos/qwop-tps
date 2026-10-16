@@ -129,6 +129,7 @@ export function characterCameraHeight(url) {
 
 const _gltfLoader = new GLTFLoader();
 const _gltfPromises = new Map(); // url → Promise<gltf>
+const _gltfSettled = new Set();   // urls whose load has finished (loaded, or failed)
 
 function getCharacterGLTF(url = glbCharacterConfig.url) {
   let promise = _gltfPromises.get(url);
@@ -136,10 +137,20 @@ function getCharacterGLTF(url = glbCharacterConfig.url) {
     // Textures are matched to the map's art style once, on the cached scene (clones share them)
     promise = Promise.all([_gltfLoader.loadAsync(url), whenStyleReferenceReady()])
       .then(([gltf]) => { stylizeObject(gltf.scene, { character: true }); return gltf; });
-    promise.catch(() => { _gltfPromises.delete(url); });
+    promise.then(() => _gltfSettled.add(url), () => { _gltfPromises.delete(url); _gltfSettled.add(url); });
     _gltfPromises.set(url, promise);
   }
   return promise;
+}
+
+/** Start loading a character's GLB (+ its art-style pass) ahead of the first instance. */
+export function preloadCharacterModel(url = glbCharacterConfig.url) {
+  getCharacterGLTF(url).catch(() => {});
+}
+
+/** True once a character's GLB has finished loading (or failed) — a new instance then shows at once. */
+export function isCharacterModelSettled(url = glbCharacterConfig.url) {
+  return _gltfSettled.has(url);
 }
 
 // ── Scratch objects ─────────────────────────────────────────────────────────

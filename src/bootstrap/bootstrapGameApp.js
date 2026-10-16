@@ -5,7 +5,7 @@ import { spawnBloodBurst, updateBloodEffects, setBloodEnabled } from "../combat/
 import { updateExplosionEffects } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerModel.js";
-import { glbCharacterConfig, isMiiCharacterUrl, characterHold } from "../models/glbCharacterModel.js";
+import { glbCharacterConfig, isMiiCharacterUrl, characterHold, preloadCharacterModel, isCharacterModelSettled } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver, setTerrainFloor } from '../environment/terrainHeight.js';
 import { registerMapMeshes } from '../environment/mapCollision.js';
@@ -4415,23 +4415,24 @@ async function initCore(runtimeContext) {
 
   const _psPlayNextSong = (isNight) => {
     const song = _psGetNextSong(isNight);
+    // (the audio manager's music element: unlocked on the first tap, so a stage started from
+    // the phone still gets its song — see AudioManager.getMusicElement)
     if (!_psSongAudio) {
-      _psSongAudio = new Audio(`assets/audio/${song}`);
+      _psSongAudio = audioManager.getMusicElement();
       audioManager.phoneSwordAudio = _psSongAudio;
-    } else {
-      _psSongAudio.pause();
-      _psSongAudio.src = `assets/audio/${song}`;
-      _psSongAudio.currentTime = 0;
     }
+    _psSongAudio.pause();
+    _psSongAudio.src = `assets/audio/${song}`;
+    _psSongAudio.currentTime = 0;
     _psSongAudio.volume = audioManager.musicVolume;
     _psSongAudio.onended = () => { if (_psStageActive) _psPlayNextSong(isNight); };
-    _psSongAudio.play().catch(() => {});
+    audioManager.playMusic();
   };
 
   const _psStopSong = () => {
     if (_psSongAudio) {
       _psSongAudio.onended = null;
-      _psSongAudio.pause();
+      audioManager.stopMusic();
       _psSongAudio.currentTime = 0;
     }
     _psSongPool = [];
@@ -4609,6 +4610,9 @@ async function initCore(runtimeContext) {
         nameTag: _classicMode ? _classicName() : null,
       });
     }
+    // Load the enemies' characters now (an enemy is only spawned once its model is in — see
+    // the queue spawn in the game loop — so none fights without a body)
+    _psEnemyQueue.forEach((q) => preloadCharacterModel(q.characterUrl));
     // Spawn coins along the path (none in Classic)
     const coinCount = _classicMode || _final ? 0 : 8 + Math.floor(stage * 0.3);
     for (let ci = 0; ci < coinCount; ci++) {
@@ -4778,6 +4782,9 @@ async function initCore(runtimeContext) {
     if (_final) _psStageBoss = { key: 'villager', unlocks: !_psChars.unlocked.includes('villager'), pemberton: true, stage };
     else if (!_psStageBoss || _psStageBoss.pemberton || _psStageBoss.stage !== stage) _psStageBoss = _psPickBoss(stage);
     const _boss = MATCH_CHARACTERS[_psStageBoss.key];
+    // Load the next stage's enemy characters while the player is in the village
+    [..._psEnemyCharacterPool(), _psStageBoss.key, ...(stage >= PS_WAND_ENEMY_FROM_STAGE ? [PS_WAND_ENEMY_CHARACTER] : [])]
+      .forEach((k) => { if (MATCH_CHARACTERS[k]) preloadCharacterModel(MATCH_CHARACTERS[k].url); });
     setPlayerCharacterUrl(playerModel, MATCH_CHARACTERS[_psChars.selected].url);
     _psPreviewTime();
     _villageSheathe();
@@ -5345,6 +5352,7 @@ async function initCore(runtimeContext) {
   };
   const _handlePhoneAction = (action) => {
     if (action === 'wandShieldUp') { setWandShieldHold(false); return; } // (always let go)
+    if (action === 'recalibrate') { window.phoneSwordRecalibrate?.(); return; } // phone's ⟲ button (any mode)
     if (action === 'interact') {
       // The Block bar as an interact button: the calibration popup's Okay, a boss's talk, the village
       if (_isSwordCalibPromptOpen()) document.getElementById('phone-sword-connect-calib-ok')?.click();
@@ -5474,11 +5482,26 @@ async function initCore(runtimeContext) {
     conn.on('error', onGone);
   };
 
-  // Derive a stable peer ID from the player profile so the phone-sword URL never changes.
-  // Uses SHA-256 of the profile key so IDs are short, URL-safe, and unique per account.
+  // Derive a stable peer ID so the phone-sword URL never changes: signed-in players get one per
+  // profile (their normalized name key), guests one per browser (a random device ID kept in
+  // localStorage + a cookie, so a refresh with a new random guest name keeps the same URL).
+  // Uses SHA-256 of the source so IDs are short, URL-safe, and unique per account / device.
+  const _guestDeviceId = () => {
+    const KEY = 'sq:guestDeviceId';
+    let id = null;
+    try { id = localStorage.getItem(KEY); } catch (_) { /* storage blocked */ }
+    if (!id) id = getCookie(KEY);
+    if (!id || !/^[a-z0-9-]{8,64}$/i.test(id)) {
+      id = crypto.randomUUID ? crypto.randomUUID()
+        : Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    try { localStorage.setItem(KEY, id); } catch (_) { /* storage blocked */ }
+    setCookie(KEY, id);
+    return id;
+  };
   let _fixedPeerId = null;
   try {
-    const _idSource = 'sqsword:' + (profileNameKey || playerName || 'anon');
+    const _idSource = profileNameKey ? 'sqsword:' + profileNameKey : 'sqsword-guest:' + _guestDeviceId();
     const _hashBuf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(_idSource));
     const _hashHex = Array.from(new Uint8Array(_hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
     _fixedPeerId = 'sq-' + _hashHex.slice(0, 24);
@@ -7860,7 +7883,9 @@ async function initCore(runtimeContext) {
       // Spawn queued enemies as player approaches their positions
       for (let _qi = _psEnemyQueue.length - 1; _qi >= 0; _qi--) {
         const _qe = _psEnemyQueue[_qi];
-        if (playerModel.position.distanceTo(_qe.pos) <= PS_SPAWN_TRIGGER_DIST) {
+        // (waits for its character model: an enemy spawned before it loads would fight invisible)
+        if (playerModel.position.distanceTo(_qe.pos) <= PS_SPAWN_TRIGGER_DIST
+          && isCharacterModelSettled(_qe.characterUrl)) {
           const _psSpawned = _spawnHordeEnemy({
             position: _qe.pos, hearts: _qe.hearts, speedScale: PS_ENEMY_SPEED, bombThrower: _qe.bombThrower,
             wand: _qe.wand,
