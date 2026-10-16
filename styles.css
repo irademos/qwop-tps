@@ -601,8 +601,10 @@ textarea {
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
-body.has-mana:not(.multiplayer-mode):not(.classic-mode) #shield-health-display { top: 106px; }
-body.multiplayer-mode #mana-bar { display: none; }
+body.has-mana:not(.multiplayer-mode):not(.classic-mode) #shield-health-display,
+body.has-mana.match-loadout #shield-health-display { top: 106px; }
+/* Multiplayer: no mana outside battles (a picked-up wand brings it — body.match-loadout) */
+body.multiplayer-mode:not(.match-loadout) #mana-bar { display: none; }
 
 /* Frozen in ice (magic blast): icy screen edge + "shake your phone" prompt */
 #frozen-overlay {
@@ -3060,11 +3062,11 @@ body.boss-talking #jump-button { visibility: hidden; }
 }
 
 /* ── Multiplayer mode: lobby, duel countdown / winner, find-location (src/multiplayer/duelMode.js) ── */
-/* Duels are sword only: hide the bubble, bomb and weapon-switch buttons (Guns & Bombs
-   battles, body.guns-match, keep bombs and the gun / shield switch) */
-body.multiplayer-mode #ps-bubble-btn,
-body.multiplayer-mode:not(.guns-match) #ps-bomb-btn,
-body.multiplayer-mode:not(.guns-match) .ps-weapon-btn {
+/* Duels are sword only: hide the bubble, bomb and weapon-switch buttons (battles,
+   body.match-loadout, keep them: they fill up from the arena's pickups) */
+body.multiplayer-mode:not(.match-loadout) #ps-bubble-btn,
+body.multiplayer-mode:not(.match-loadout) #ps-bomb-btn,
+body.multiplayer-mode:not(.match-loadout) .ps-weapon-btn {
   display: none !important;
 }
 
@@ -3331,17 +3333,78 @@ body.multiplayer-mode:not(.guns-match) .ps-weapon-btn {
 /* ── Multiplayer battles: Team Battle / Free For All (src/multiplayer/matchMode.js) ── */
 .duel-lobby-modes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
 }
-.duel-lobby-modes .arcade-button {
-  min-height: 54px;
-  font-size: 16px;
+.duel-mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--border);
+}
+.duel-mode-head { display: flex; align-items: center; gap: 10px; }
+.duel-mode-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-size: 20px;
+}
+.duel-mode-title { font: 800 18px/1.1 var(--font-display); color: var(--text); }
+.duel-mode-desc { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.duel-mode-rules { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.duel-mode-rules .arcade-button {
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 14px;
 }
 .duel-status-queued { background: var(--accent-soft); color: var(--accent-hi); }
 .duel-status-matching { background: var(--danger-soft); color: var(--danger); }
 
 .match-setup .duel-lobby-panel { overflow-y: auto; }
+/* (scrolls instead of squashing its rows on short screens) */
+.match-setup .duel-lobby-panel > * { flex-shrink: 0; }
+
+/* Survival / Most Kills picker on the party screen (host picks, guests see it) */
+.match-rules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.match-rule {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.match-rule:hover:not(:disabled):not(.is-readonly) { background: var(--surface-hover); }
+.match-rule.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent-ring) inset;
+}
+.match-rule.is-readonly { cursor: default; }
+.match-rule:disabled { opacity: 0.45; }
+.match-rule-icon { grid-row: span 2; font-size: 22px; }
+.match-rule-label { font: 800 15px/1.1 var(--font-display); }
+.match-rule.is-active .match-rule-label { color: var(--accent-hi); }
+.match-rule-blurb { font-size: 11px; font-weight: 600; line-height: 1.3; color: var(--text-muted); }
 .match-setup .hidden { display: none; }
 .match-section-title {
   margin-top: 2px;
@@ -3392,7 +3455,7 @@ body.multiplayer-mode:not(.guns-match) .ps-weapon-btn {
   flex-direction: column;
   gap: 8px;
 }
-/* Free For All / Guns & Bombs fighter chooser: swipe / ‹ › / arrow keys through the roster */
+/* Free For All fighter chooser: swipe / ‹ › / arrow keys through the roster */
 .match-char-chooser {
   display: flex;
   align-items: center;
@@ -3496,17 +3559,317 @@ body.match-active .name-label { display: none !important; }
 .match-label {
   position: absolute;
   transform: translate(-50%, -100%);
-  padding: 3px 10px;
-  border-radius: var(--radius-pill);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 9px 4px;
+  border-radius: var(--radius-sm);
   background: var(--surface-hud);
   border: 1px solid var(--border-strong);
   color: var(--text);
-  font: 700 12px/1.3 var(--font-ui);
+  font: 700 12px/1.2 var(--font-ui);
   white-space: nowrap;
 }
+.match-label-hp {
+  display: block;
+  width: 54px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+.match-label-hp i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6ee7a0, #16a34a);
+  transition: width 0.2s var(--ease);
+}
+.match-label.is-low .match-label-hp i { background: linear-gradient(90deg, #fca5a5, var(--danger-strong)); }
 .match-label-team-0 { border-color: rgba(56, 189, 248, 0.85); }
 .match-label-team-1 { border-color: rgba(248, 113, 113, 0.85); }
 .match-label-dead { opacity: 0.55; }
+.match-label-dead .match-label-hp { display: none; }
+
+/* Battle HUD: scoreboard bar top centre (team scores either side of the clock), your
+   kills / deaths + Free For All standings under it */
+.match-hud {
+  position: fixed;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 128px);
+  font-family: var(--font-ui);
+  color: var(--text);
+  pointer-events: none;
+}
+.match-hud.hidden { display: none; }
+.match-hud-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-hud);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-sm);
+  max-width: 100%;
+}
+.match-leave-btn {
+  pointer-events: auto;
+  flex: none;
+  width: 34px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font: 700 14px/1 var(--font-ui);
+  cursor: pointer;
+}
+.match-leave-btn:hover { background: var(--danger-soft); color: var(--danger); }
+.match-leave-btn.hidden { display: none; }
+.match-hud-team {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+}
+.match-hud-team.hidden { display: none; }
+.match-hud-team-0 { background: linear-gradient(90deg, rgba(56, 189, 248, 0.32), rgba(56, 189, 248, 0.08)); }
+.match-hud-team-1 { background: linear-gradient(270deg, rgba(248, 113, 113, 0.32), rgba(248, 113, 113, 0.08)); }
+.match-hud-team.is-mine { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35) inset; }
+.match-hud-emoji { font-size: 16px; }
+.match-hud-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.match-hud-score {
+  font: 900 22px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.2em;
+  text-align: center;
+}
+.match-hud-team-0 .match-hud-score { color: var(--team-a); }
+.match-hud-team-1 .match-hud-score { color: var(--team-b); }
+.match-hud-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 14px;
+  min-width: 84px;
+}
+.match-hud-clock {
+  font: 900 20px/1 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.match-hud-clock.is-urgent { color: var(--danger); animation: match-clock-pulse 1s ease-in-out infinite; }
+@keyframes match-clock-pulse { 50% { opacity: 0.55; } }
+.match-hud-mode {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.match-hud-sub {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+.match-hud-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-hud);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.match-hud-chip.is-self { border-color: var(--accent-ring); }
+.match-hud-chip.is-self b { color: var(--accent-hi); }
+.match-hud-chip.is-dead { opacity: 0.55; }
+.match-hud-rank { font-weight: 800; color: var(--text-dim); }
+.match-hud-chip.is-self .match-hud-rank { color: var(--accent); }
+
+/* Kill feed (top right, under the settings button) */
+.match-feed {
+  position: fixed;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  z-index: 880;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+  font-family: var(--font-ui);
+}
+body:not(.match-active) .match-feed { display: none; }
+.match-feed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-hud);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  animation: match-feed-in 0.25s var(--ease);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.match-feed-row.is-mine { border-color: var(--accent-ring); background: rgba(40, 30, 6, 0.72); }
+.match-feed-row.is-fading { opacity: 0; transform: translateX(12px); }
+.match-feed-icon { font-size: 13px; }
+.match-feed-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.match-feed-name.team-0 { color: var(--team-a); }
+.match-feed-name.team-1 { color: var(--team-b); }
+.match-feed-name.is-self { color: var(--accent-hi); }
+@keyframes match-feed-in { from { opacity: 0; transform: translateX(16px); } }
+
+/* "You eliminated …" pop */
+.match-kill-pop {
+  position: fixed;
+  left: 50%;
+  top: 30%;
+  transform: translate(-50%, -50%);
+  z-index: 890;
+  padding: 8px 18px;
+  border-radius: var(--radius-pill);
+  background: rgba(127, 29, 29, 0.78);
+  border: 1px solid rgba(248, 113, 113, 0.7);
+  color: #fff;
+  font: 800 16px/1.2 var(--font-display);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 8px 28px rgba(127, 29, 29, 0.45);
+}
+.match-kill-pop.hidden { display: none; }
+.match-kill-pop.is-in { animation: match-kill-pop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+@keyframes match-kill-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* Results card */
+.match-results {
+  position: fixed;
+  inset: 0;
+  z-index: 2360;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--scrim);
+  font-family: var(--font-ui);
+  color: var(--text);
+}
+.match-results.hidden { display: none; }
+.match-results-panel {
+  width: min(520px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 20px 20px;
+  border-radius: var(--radius-xl);
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  animation: ui-panel-in 0.3s var(--ease);
+}
+.match-results-title {
+  text-align: center;
+  font: 900 clamp(2rem, 9vw, 3.2rem)/1.05 var(--font-display);
+  letter-spacing: 0.04em;
+  background: linear-gradient(180deg, #fff 10%, var(--accent-hi) 60%, var(--accent-lo) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  overflow-wrap: anywhere;
+}
+.match-results[data-mood="lose"] .match-results-title {
+  background: linear-gradient(180deg, #fff 10%, #fca5a5 60%, var(--danger-strong) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.match-results[data-mood="draw"] .match-results-title {
+  background: linear-gradient(180deg, #fff 10%, #cbd5e1 70%, #94a3b8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+.match-results-sub {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.match-results-table { display: flex; flex-direction: column; gap: 3px; }
+.match-results-row {
+  display: grid;
+  grid-template-columns: 26px 1fr 38px 38px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+}
+.match-results-row.is-head {
+  background: none;
+  padding-top: 0;
+  padding-bottom: 2px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.match-results-row.team-0 { box-shadow: 3px 0 0 var(--team-a) inset; }
+.match-results-row.team-1 { box-shadow: 3px 0 0 var(--team-b) inset; }
+.match-results-row.is-winner { background: var(--accent-soft); }
+.match-results-row.is-self { border-color: var(--accent-ring); }
+.match-results-rank { color: var(--text-dim); font-weight: 800; text-align: center; }
+.match-results-name { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.match-results-emoji { flex: none; }
+.match-results-num { text-align: center; font-variant-numeric: tabular-nums; font-weight: 800; }
+.match-results-row.is-head span:nth-child(n + 3) { text-align: center; }
+
+@media (max-width: 720px) {
+  /* The scoreboard takes the top: health (and the kill feed) go under it */
+  body.match-active #health-display { top: calc(96px + env(safe-area-inset-top, 0px)); }
+  .match-feed { top: calc(96px + env(safe-area-inset-top, 0px)); }
+  .match-hud-name { display: none; }
+  .match-hud-team { padding: 0 9px; }
+  .match-hud-center { min-width: 66px; padding: 3px 8px; }
+  .match-rules { grid-template-columns: 1fr; }
+}
 
 /* ── Classic mode (Wii-style Showdown; bootstrapGameApp.js "Classic mode") ─────
    body.classic-mode: the Showdown HUD, joystick and every button except Block are

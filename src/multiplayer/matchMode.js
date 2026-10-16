@@ -1,49 +1,67 @@
 import * as THREE from 'three';
 import { LOBBY_ROOM_ID } from './peerConnection.js';
-import { DUEL_LOCATION } from './duelMode.js';
 import { glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/EnemyPlayer.js';
+import { createMatchPickups, PICKUP_TYPES } from './matchPickups.js';
 
-// Multiplayer battles: Team Battle (two teams of 5, each team one character model),
-// Free For All (10 fighters, everyone picks their own character) and Guns & Bombs (free
-// for all with guns and bombs only — unlimited bullets and bombs, one shield each).
-// Opened from the Multiplayer lobby (duelMode suspends its lobby while this runs).
+// Multiplayer battles: Team Battle (two teams of 5, each team one character model) and
+// Free For All (10 fighters, everyone picks their own character), each played with one of
+// two rules (MATCH_RULES):
+//   • Survival  — no respawns: the last team / fighter standing wins.
+//   • Most Kills — everyone respawns RESPAWN_MS after dying (with a short spawn bubble);
+//     when the clock (KILLS_MATCH_MS) runs out or someone reaches KILL_TARGET, the most
+//     kills wins (Team Battle: the team's total).
+// Everyone starts with the sword only; pickups scattered around the arena
+// (src/multiplayer/matchPickups.js) give guns, bullets, shields, bombs, magic wands, mana,
+// hearts, life potions and bubbles. Opened from the Multiplayer lobby (duelMode suspends
+// its lobby while this runs).
 //
-// Party setup: whoever opens a mode is the host of a party. They invite online players
-// (invite → join), everyone picks a side (Team Battle) or a character (Free For All), and
-// the host presses Start. A solo host sits in the Firebase room `mm-<mode>` — that room
-// is the matchmaking queue: on Start the host "pulls" queued players of the same mode
-// into the battle (pull → pullOk), fills the rest up to MATCH_SIZE with bots and sends
-// everyone `start` with the full roster. Parties with guests sit in `party-<hostId>`
-// (not pullable); a battle runs in its own private room `match-<matchId>`.
+// Party setup: whoever opens a mode is the host of a party. They pick the rule, invite
+// online players (invite → join), everyone picks a side (Team Battle) or a character (Free
+// For All), and the host presses Start. A solo host sits in the Firebase room
+// `mm-<mode>-<rule>` — that room is the matchmaking queue: on Start the host "pulls"
+// queued players of the same mode + rule into the battle (pull → pullOk), fills the rest
+// up to MATCH_SIZE with bots and sends everyone `start` with the full roster. Parties with
+// guests sit in `party-<hostId>` (not pullable); a battle runs in its own private room
+// `match-<matchId>`.
 //
-// Battle: everyone spawns around DUEL_LOCATION (Guns & Bombs: scattered wider around
-// GUNS_LOCATION) (teams in two lines facing each other,
-// free-for-all in a ring), counts down "3 2 1 FIGHT!", then players move
-// themselves (bots walk toward the closest enemy) and fight with swords only, MATCH_HEALTH health each. The host simulates the
-// bots (EnemyPlayer AI) and decides the winner: the last team / fighter standing.
-// Guns & Bombs: no swords. Whoever fires a bullet / throws a bomb detects its hits (the
-// host for its bots) and sends `hit` / `botHit` with the damage; the victim's shield (held
-// up and facing the shot) takes it instead. Bots keep their distance and shoot / lob bombs.
+// Battle: everyone spawns around ARENA_LOCATION (teams in two lines facing each other,
+// free-for-all in a ring), counts down "3 2 1 FIGHT!", then players move themselves (bots
+// walk toward the closest enemy), MATCH_HEALTH health each. The host simulates the bots
+// (EnemyPlayer AI), owns the pickups and the score, and decides the winner.
+// Sword hits: the attacker detects them. Bullets / bombs: whoever fires / throws detects
+// the hits (the host for its bots) and sends `hit` / `botHit` with the damage; the victim's
+// shield (held up and facing the shot) takes it instead, a bubble ignores it. Magic blasts:
+// every client spawns them and each checks only itself (+ the host its bots).
+// Kill credit: every hit names its attacker (`by`); the victim's `dead` names the last one,
+// the host counts it and sends `kill` with the scores.
 // Game access goes through `ctx` (built in bootstrapGameApp.js).
 //
 // Wire protocol: PeerJS messages of type 'match', each with a `key` (party key or matchId):
-//   party:  invite {mode, name} · inviteCancel · decline · join {name, pick} · pick {pick}
-//           party {mode, roster, teamChars} (host → guests) · leave
-//   queue:  pull {mode, name} · pullOk {name, pick} · pullNo · pullCancel
-//   battle: start {matchId, partyKey, mode, roster, teamChars}
-//           state {sword, hand, blocking, pos, ry, hp, w} (~20 Hz, every human → every
-//           human; w = 'gun' | 'shield' | null in Guns & Bombs)
-//           bots {list} (~15 Hz, host → humans) · hit {dmg, dir, kind, src} (attacker →
-//           victim; the host sends bot hits) · blocked · botHit {bot, dir, dmg, kind, src} /
-//           botBlocked {bot} (human → host) · dead (the sender died)
-//           · end {winnerTeam, winnerId, winnerName} (host) · leave (the sender left; the
-//           host leaving ends the battle)
-//           Guns & Bombs: shot {bot, o, d} (host: a bot fired; humans' bullets go out as
-//           'projectile' messages) · bomb {bot?, o, t} (a bomb was thrown from o to t)
+//   party:  invite {mode, rule, name} · inviteCancel · decline · join {name, pick}
+//           pick {pick} · party {mode, rule, roster, teamChars} (host → guests) · leave
+//   queue:  pull {mode, rule, name} · pullOk {name, pick} · pullNo · pullCancel
+//   battle: start {matchId, partyKey, mode, rule, roster, teamChars}
+//           state {sword, hand, blocking, pos, ry, hp, w, bu} (~20 Hz, every human → every
+//           human; w = 'sword' | 'wand' | 'gun' | 'shield' | null, bu = bubble up)
+//           bots {list} (~15 Hz, host → humans) · hit {dmg, dir, kind, src, by} (attacker →
+//           victim; the host sends bot hits with `by`) · blocked · botHit {bot, dir, dmg,
+//           kind, src} / botBlocked {bot} (human → host) · dead {by, kind} (the sender died)
+//           · kill {v, by, k, sc} (host: v was killed by `by` with k; sc = [[id, kills,
+//           deaths]…]) · respawn {pos: [x, z, yaw], bot?} (the sender / a host bot is back)
+//           · bomb {bot?, o, t} (a bomb was thrown from o to t) · magic {o, f, l, e} (the
+//           sender cast a blast) · take {pid} (human → host: I'm standing on that pickup)
+//           · taken {pid, by, r} (host: pickup pid went to `by`, back in r ms)
+//           · end {winnerTeam, winnerId, winnerName, sc} (host) · leave (the sender left;
+//           the host leaving ends the battle). Humans' bullets go out as 'projectile' messages.
 
-export const MATCH_MODES = { team: 'Team Battle', ffa: 'Free For All', guns: 'Guns & Bombs' };
-// Every mode but Team Battle is everyone for themselves
+export const MATCH_MODES = { team: 'Team Battle', ffa: 'Free For All' };
+export const MATCH_RULES = {
+  survival: { label: 'Survival', icon: '🛡️', blurb: 'No respawns · last one standing wins' },
+  kills: { label: 'Most Kills', icon: '💀', blurb: 'Respawn after every death · most kills wins' }
+};
+const DEFAULT_RULE = 'survival';
+const cleanRule = (rule) => (MATCH_RULES[rule] ? rule : DEFAULT_RULE);
 const isFreeForAll = (mode) => mode !== 'team';
 export const MATCH_CHARACTERS = {
   villageBoy: { label: 'Village Boy', team: 'Village Boys', emoji: '👦', url: glbCharacterConfig.villageBoyUrl },
@@ -61,6 +79,11 @@ export const MATCH_CHARACTERS = {
 const CHAR_KEYS = Object.keys(MATCH_CHARACTERS);
 const BOT_CHAR_KEYS = CHAR_KEYS.filter((k) => !MATCH_CHARACTERS[k].story);
 
+// Where battles happen (island town mappack: the gentle open ground in the island's south,
+// all of it above the sea). Fighters start around it; pickups and respawns spread wider.
+// Paste Settings → Dev → Free Roam → "Copy location" here to move it.
+export const ARENA_LOCATION = { x: 8.4, y: 1.4, z: -47.6, yaw: 0 };
+
 const MATCH_SIZE = 10;                 // fighters per battle (humans + bots)
 const TEAM_SIZE = MATCH_SIZE / 2;
 const INVITE_TIMEOUT_MS = 30000;
@@ -70,49 +93,37 @@ const STATE_SEND_MS = 50;
 const BOT_SEND_MS = 66;
 const HUMAN_TIMEOUT_MS = 10000;        // no messages this long → that player left
 const COUNTDOWN_STEP_MS = 1000;
-const END_BANNER_MS = 4000;
-const TEAM_GAP = 10;                   // metres between the two team lines at "3"
-const LINE_SPACING = 1.6;              // metres between teammates in a line
-const FFA_RADIUS = 5;                  // free-for-all spawn ring
+const RESULTS_MS = 12000;              // results screen, then back to the lobby
+const TEAM_GAP = 14;                   // metres between the two team lines at "3"
+const LINE_SPACING = 2;                // metres between teammates in a line
+const FFA_RADIUS = 8;                  // free-for-all spawn ring
+const RESPAWN_RADIUS = [5, 18];        // respawn spots (m from the arena centre)
+const PICKUP_RADIUS = [3, 19];         // where pickups are scattered
+const PICKUP_TOUCH = 1.25;             // stand this close to a pickup to take it
+const TAKE_RETRY_MS = 600;
 const BOT_RETARGET_MS = 400;
 const BOT_ATTACKERS_PER_TARGET = 2;    // the rest of the bots on one target circle and wait
 const BODY_CENTER_Y = 0.8;
 const KEY_RE = /^[A-Za-z0-9_-]{1,100}$/;
 const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
-// Guns & Bombs
+const PID_RE = /^p\d{1,3}$/;
+// Most Kills
+const KILLS_MATCH_MS = 3 * 60 * 1000;
+const KILL_TARGET = { team: 30, ffa: 15 };
+const RESPAWN_MS = 4000;
+const SPAWN_PROTECT_MS = 2500;         // spawn bubble after a respawn
+const LAST_HIT_CREDIT_MS = 10000;      // a death credits the last hit this recent
+// Ranged damage (bullets / bombs from pickups)
 const GUN_DAMAGE = 1;
 const BOMB_DAMAGE = 2;
-const SHIELD_ARC_DOT = 0.2;            // shot / blast from in front of the shield (cos of ~78°)
-const BOT_SHIELD_HP = 4;               // a bot's one shield (the player's: GUNS_MATCH_SHIELD_HEALTH)
-// Bots hold the gun or the shield, never both: shield up this long now and then (no
-// shooting meanwhile), gun the rest of the time
-const BOT_SHIELD_UP_MS = [1200, 2600];
-const BOT_GUN_MS = [2500, 6000];
-const BOT_SHIELD_CHANCE = 0.45;        // chance a gun spell ends with the shield going up
-const BOT_RANGE = { min: 4.5, max: 9 }; // bots keep this far (m) from their target
-const BOT_SHOT_RANGE = 16;
-const BOT_SHOT_MS = [900, 1900];       // random gap between a bot's shots
-const BOT_SHOT_SPREAD = 0.07;          // radians of aim error
-const BOT_BOMB_RANGE = [3.5, 13];
-const BOT_BOMB_MS = [5000, 9000];
-const BOT_MUZZLE = new THREE.Vector3(0, 1.0, 0.75);   // model space
+// Bots grab hearts / life potions / bombs they walk over and lob the bombs
+const BOT_PICKUPS = new Set(['heart', 'potion', 'bomb']);
+const BOT_BOMB_RANGE = [3.5, 12];
+const BOT_BOMB_MS = [3500, 6500];
 const randIn = ([a, b]) => a + Math.random() * (b - a);
-// Where Guns & Bombs battles happen; fighters are scattered around it (each in its own
-// slice of the ring, GUNS_SPAWN_RADIUS from the centre) — wider than the sword modes.
-// Island town mappack: the gentle open ground in the island's south (all of it above the sea)
-export const GUNS_LOCATION = { x: 8.4, y: 1.4, z: -47.6, yaw: 0 };
-const GUNS_SPAWN_RADIUS = [9, 20];
-// Same "random" numbers on every client (seeded by the match id + the fighter's slot)
-const seededRandom = (seedText) => {
-  let h = 2166136261;
-  for (let i = 0; i < seedText.length; i++) h = Math.imul(h ^ seedText.charCodeAt(i), 16777619);
-  return () => {
-    h = Math.imul(h ^ (h >>> 15), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    h ^= h >>> 16;
-    return (h >>> 0) / 4294967296;
-  };
-};
+
+const KIND_ICONS = { sword: '⚔️', gun: '🔫', bomb: '💣', fire: '🔥', ice: '❄️' };
+const cleanKind = (k) => (KIND_ICONS[k] ? k : 'sword');
 
 const BOT_NAMES = ['Bruno', 'Kira', 'Otto', 'Mira', 'Rex', 'Juno', 'Pip', 'Zara', 'Hugo', 'Nell'];
 
@@ -129,9 +140,14 @@ const cleanPick = (pick) => ({
   char: CHAR_KEYS.includes(pick?.char) ? pick.char : 'antler'
 });
 const round3 = (v) => Math.round(v * 1000) / 1000;
+const teamChar = (charKey) => MATCH_CHARACTERS[charKey] || MATCH_CHARACTERS.antler;
 const teamLabel = (charKey) => {
-  const c = MATCH_CHARACTERS[charKey] || MATCH_CHARACTERS.antler;
+  const c = teamChar(charKey);
   return `${c.emoji} ${c.team}`;
+};
+const formatClock = (ms) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
 const _bladeOffsets = [
@@ -141,8 +157,6 @@ const _bladeOffsets = [
 ];
 const _tmpV = new THREE.Vector3();
 const _tmpV2 = new THREE.Vector3();
-const _tmpQ = new THREE.Quaternion();
-const _yAxis = new THREE.Vector3(0, 1, 0);
 const _tmpV3 = new THREE.Vector3();
 
 
@@ -150,25 +164,33 @@ export function createMatchMode(ctx) {
   // 'off' | 'setup' (party host) | 'starting' (host waiting on pulled players) | 'guest'
   // | 'pulled' (waiting for a host's `start`) | 'countdown' | 'fighting' | 'over'
   let phase = 'off';
-  // Host: { key, mode, hostId, isHost: true, members: Map(id → {name, status, pick, timer}),
+  // Host: { key, mode, rule, hostId, isHost: true, members: Map(id → {name, status, pick, timer}),
   //         myPick, teamChars }
-  // Guest: { key, mode, hostId, hostName, isHost: false, roster, teamChars, myPick }
+  // Guest: { key, mode, rule, hostId, hostName, isHost: false, roster, teamChars, myPick }
   let party = null;
   let starting = null;      // { matchId, asked: Set, replied: Set, accepted: [], openSlots, timer }
   let pulled = null;        // { matchId, hostId, hostName, timer }
-  let pendingInvite = null; // { key, from, name, mode, timer }
+  let pendingInvite = null; // { key, from, name, mode, rule, timer }
   let match = null;
   let countdownTimers = [];
 
   const myId = () => ctx.getMultiplayer()?.getId?.() || null;
   const send = (peerId, payload) => ctx.getMultiplayer()?.sendTo?.(peerId, { type: 'match', ...payload });
   const joinRoom = (roomId) => { void ctx.getMultiplayer()?.joinRoom?.(roomId); };
+  const queueRoom = (mode, rule) => `mm-${mode}-${rule}`;
+
+  const pickups = createMatchPickups({
+    scene: ctx.scene,
+    getGroundY: (x, z) => ctx.getGroundY(x, z),
+    isBlocked: (x, z) => !!ctx.isBlocked?.(x, z)
+  });
 
   // ── DOM ──────────────────────────────────────────────────────────────────
   const setup = el('div', 'duel-lobby match-setup hidden');
   const setupPanel = el('div', 'duel-lobby-panel');
   const setupTitle = el('div', 'duel-lobby-title');
   const setupStatus = el('div', 'duel-lobby-status');
+  const rulePicker = el('div', 'match-rules');
   const picks = el('div', 'match-picks');
   const membersTitle = el('div', 'match-section-title', 'Your party');
   const membersList = el('ul', 'duel-lobby-list match-members');
@@ -178,7 +200,7 @@ export function createMatchMode(ctx) {
   const startBtn = el('button', 'arcade-button', '▶ Start Battle');
   const setupBackBtn = el('button', 'arcade-button arcade-secondary', '⬅ Back');
   setupActions.append(startBtn, setupBackBtn);
-  setupPanel.append(setupTitle, setupStatus, picks, membersTitle, membersList, inviteTitle, inviteList, setupActions);
+  setupPanel.append(setupTitle, setupStatus, rulePicker, picks, membersTitle, membersList, inviteTitle, inviteList, setupActions);
   setup.append(setupPanel);
 
   const invitePrompt = el('div', 'match-invite hidden');
@@ -194,14 +216,47 @@ export function createMatchMode(ctx) {
   const bannerSub = el('div', 'duel-banner-sub');
   banner.append(bannerTitle, bannerSub);
 
-  const hud = el('div', 'duel-hud hidden');
-  const hudText = el('div', 'duel-hud-vs');
-  const leaveBtn = el('button', 'duel-forfeit-btn', 'Leave');
-  hud.append(hudText, leaveBtn);
+  // Battle HUD: scoreboard bar (top centre), your score / standings under it, kill feed
+  const hud = el('div', 'match-hud hidden');
+  const hudBar = el('div', 'match-hud-bar');
+  const leaveBtn = el('button', 'match-leave-btn', '✕');
+  leaveBtn.title = 'Leave the battle';
+  leaveBtn.setAttribute('aria-label', 'Leave the battle');
+  const hudSide = [0, 1].map((t) => {
+    const box = el('div', `match-hud-team match-hud-team-${t}`);
+    const emoji = el('span', 'match-hud-emoji');
+    const name = el('span', 'match-hud-name');
+    const score = el('span', 'match-hud-score');
+    if (t === 0) box.append(emoji, name, score);
+    else box.append(score, name, emoji);
+    return { box, emoji, name, score };
+  });
+  const hudCenter = el('div', 'match-hud-center');
+  const hudClock = el('div', 'match-hud-clock');
+  const hudMode = el('div', 'match-hud-mode');
+  hudCenter.append(hudClock, hudMode);
+  hudBar.append(leaveBtn, hudSide[0].box, hudCenter, hudSide[1].box);
+  const hudSub = el('div', 'match-hud-sub');
+  hud.append(hudBar, hudSub);
+
+  const feed = el('div', 'match-feed');
+  // "💀 You eliminated X" pop (centre, under the crosshair area)
+  const killPop = el('div', 'match-kill-pop hidden');
+
+  const results = el('div', 'match-results hidden');
+  const resultsPanel = el('div', 'match-results-panel');
+  const resultsTitle = el('div', 'match-results-title');
+  const resultsSub = el('div', 'match-results-sub');
+  const resultsTable = el('div', 'match-results-table');
+  const resultsActions = el('div', 'duel-lobby-actions');
+  const resultsBackBtn = el('button', 'arcade-button', 'Back to Lobby');
+  resultsActions.append(resultsBackBtn);
+  resultsPanel.append(resultsTitle, resultsSub, resultsTable, resultsActions);
+  results.append(resultsPanel);
 
   const labelLayer = el('div', 'match-labels');
 
-  document.body.append(setup, invitePrompt, banner, hud, labelLayer);
+  document.body.append(setup, invitePrompt, banner, hud, feed, killPop, results, labelLayer);
 
   const showBanner = (title, sub = '') => {
     bannerTitle.textContent = title;
@@ -249,10 +304,10 @@ export function createMatchMode(ctx) {
     return btn;
   };
 
-  // Free For All / Guns & Bombs fighter chooser: one card, swipe (or ‹ › / arrow keys)
-  // through the roster — same as the Showdown character chooser; characters not yet
-  // unlocked in Showdown are locked. Built once so the
-  // slide-in animation and keyboard focus survive renderPicks rebuilding the panel.
+  // Free For All fighter chooser: one card, swipe (or ‹ › / arrow keys) through the roster —
+  // same as the Showdown character chooser; characters not yet unlocked in Showdown are
+  // locked. Built once so the slide-in animation and keyboard focus survive renderPicks
+  // rebuilding the panel.
   const charChooser = (() => {
     const root = el('div', 'match-char-chooser');
     root.tabIndex = 0;
@@ -336,6 +391,24 @@ export function createMatchMode(ctx) {
     card.addEventListener('pointercancel', () => { swipeX = null; });
     return { root, render };
   })();
+
+  // Survival / Most Kills: the host picks, guests see it
+  const renderRules = () => {
+    rulePicker.innerHTML = '';
+    if (!party) return;
+    const editable = party.isHost && phase === 'setup';
+    Object.entries(MATCH_RULES).forEach(([key, rule]) => {
+      const selected = party.rule === key;
+      const btn = el('button', `match-rule${selected ? ' is-active' : ''}`);
+      btn.type = 'button';
+      btn.disabled = !editable && !selected;
+      btn.classList.toggle('is-readonly', !editable);
+      btn.append(el('span', 'match-rule-icon', rule.icon), el('span', 'match-rule-label', rule.label),
+        el('span', 'match-rule-blurb', rule.blurb));
+      if (editable) btn.addEventListener('click', () => setRule(key));
+      rulePicker.append(btn);
+    });
+  };
 
   const renderPicks = () => {
     const chooserFocus = charChooser.root.contains(document.activeElement) ? document.activeElement : null;
@@ -438,8 +511,8 @@ export function createMatchMode(ctx) {
     if (!party) return 0;
     const selfId = myId();
     const peers = ctx.getMultiplayer()?.getOnlinePeers?.() || {};
-    return Object.entries(peers)
-      .filter(([id, peer]) => id !== selfId && peer?.roomId === `mm-${party.mode}`).length;
+    const room = queueRoom(party.mode, party.rule);
+    return Object.entries(peers).filter(([id, peer]) => id !== selfId && peer?.roomId === room).length;
   };
 
   function renderSetup() {
@@ -454,13 +527,14 @@ export function createMatchMode(ctx) {
       setupStatus.textContent = `Waiting for ${party.hostName} to start…`;
     } else {
       const queued = queuedCount();
-      setupStatus.textContent = `${queued} other player${queued === 1 ? '' : 's'} matchmaking ${label}. `
-        + `Start fills open spots with them, then bots (${MATCH_SIZE} fighters).`;
+      setupStatus.textContent = `${queued} other player${queued === 1 ? '' : 's'} matchmaking ${label} · `
+        + `${MATCH_RULES[party.rule].label}. Start fills open spots with them, then bots (${MATCH_SIZE} fighters).`;
     }
     startBtn.classList.toggle('hidden', !party.isHost);
     startBtn.disabled = phase !== 'setup';
     setupBackBtn.textContent = party.isHost ? '⬅ Back' : '⬅ Leave party';
     setupBackBtn.disabled = phase === 'starting' || phase === 'pulled';
+    renderRules();
     renderPicks();
     renderMembers();
     renderInvites();
@@ -475,7 +549,7 @@ export function createMatchMode(ctx) {
   // ── Host: party management ───────────────────────────────────────────────
   const syncHostRoom = () => {
     if (!party?.isHost) return;
-    joinRoom(joinedCount() > 0 ? `party-${party.hostId}` : `mm-${party.mode}`);
+    joinRoom(joinedCount() > 0 ? `party-${party.hostId}` : queueRoom(party.mode, party.rule));
   };
 
   const broadcastParty = () => {
@@ -483,18 +557,19 @@ export function createMatchMode(ctx) {
     const roster = partyRoster();
     party.members.forEach((m, id) => {
       if (m.status === 'joined') {
-        send(id, { op: 'party', key: party.key, mode: party.mode, roster, teamChars: party.teamChars });
+        send(id, { op: 'party', key: party.key, mode: party.mode, rule: party.rule, roster, teamChars: party.teamChars });
       }
     });
   };
 
-  const openSetup = (mode) => {
+  const openSetup = (mode, rule = DEFAULT_RULE) => {
     const selfId = myId();
     if (phase !== 'off' || !MATCH_MODES[mode] || !selfId) return;
     if (!ctx.suspendLobby()) return;
     party = {
       key: `${selfId}-${Date.now().toString(36)}`,
       mode,
+      rule: cleanRule(rule),
       hostId: selfId,
       hostName: ctx.getPlayerName(),
       isHost: true,
@@ -503,8 +578,16 @@ export function createMatchMode(ctx) {
       teamChars: ['antler', 'frog']
     };
     phase = 'setup';
-    joinRoom(`mm-${mode}`);
+    joinRoom(queueRoom(mode, party.rule));
     showSetup();
+  };
+
+  const setRule = (rule) => {
+    if (phase !== 'setup' || !party?.isHost || !MATCH_RULES[rule] || party.rule === rule) return;
+    party.rule = rule;
+    syncHostRoom();
+    broadcastParty();
+    renderSetup();
   };
 
   const invite = (peerId, name) => {
@@ -524,7 +607,7 @@ export function createMatchMode(ctx) {
         flashStatus(`${m.name} didn't answer`);
       }, INVITE_TIMEOUT_MS)
     });
-    send(peerId, { op: 'invite', key, mode: party.mode, name: ctx.getPlayerName() });
+    send(peerId, { op: 'invite', key, mode: party.mode, rule: party.rule, name: ctx.getPlayerName() });
     renderSetup();
   };
 
@@ -594,8 +677,9 @@ export function createMatchMode(ctx) {
     const openSlots = MATCH_SIZE - 1 - joinedCount();
     const matchId = `${selfId}-${Date.now().toString(36)}`;
     const peers = ctx.getMultiplayer()?.getOnlinePeers?.() || {};
+    const room = queueRoom(party.mode, party.rule);
     const queued = Object.entries(peers)
-      .filter(([id, peer]) => id !== selfId && peer?.roomId === `mm-${party.mode}` && !party.members.has(id))
+      .filter(([id, peer]) => id !== selfId && peer?.roomId === room && !party.members.has(id))
       .sort(([, a], [, b]) => (a.timestamp ?? 0) - (b.timestamp ?? 0))
       .map(([id]) => id);
     starting = { matchId, asked: new Set(), replied: new Set(), accepted: [], openSlots, timer: null };
@@ -607,7 +691,7 @@ export function createMatchMode(ctx) {
     }
     queued.forEach((id) => {
       starting.asked.add(id);
-      send(id, { op: 'pull', key: matchId, mode: party.mode, name: ctx.getPlayerName() });
+      send(id, { op: 'pull', key: matchId, mode: party.mode, rule: party.rule, name: ctx.getPlayerName() });
     });
     starting.timer = setTimeout(finishStart, PULL_WAIT_MS);
   });
@@ -622,11 +706,11 @@ export function createMatchMode(ctx) {
     const humans = [...partyRoster(), ...accepted].slice(0, MATCH_SIZE);
     const roster = buildRoster(party.mode, humans, party.teamChars);
     const payload = {
-      op: 'start', key: matchId, matchId, partyKey: party.key, mode: party.mode,
+      op: 'start', key: matchId, matchId, partyKey: party.key, mode: party.mode, rule: party.rule,
       roster, teamChars: party.teamChars
     };
     humans.forEach((h) => { if (h.id !== party.hostId) send(h.id, payload); });
-    beginMatch({ matchId, mode: party.mode, hostId: party.hostId, roster, teamChars: party.teamChars });
+    beginMatch({ matchId, mode: party.mode, rule: party.rule, hostId: party.hostId, roster, teamChars: party.teamChars });
   }
 
   const buildRoster = (mode, humans, teamChars) => {
@@ -679,7 +763,7 @@ export function createMatchMode(ctx) {
 
   inviteAcceptBtn.addEventListener('click', () => {
     if (!pendingInvite) return;
-    const { key, from, name, mode } = pendingInvite;
+    const { key, from, name, mode, rule } = pendingInvite;
     hideInvitePrompt();
     if (phase === 'setup' && party?.isHost && joinedCount() === 0) {
       cancelInvites();
@@ -689,7 +773,7 @@ export function createMatchMode(ctx) {
       return;
     }
     party = {
-      key, mode, hostId: from, hostName: name, isHost: false,
+      key, mode, rule, hostId: from, hostName: name, isHost: false,
       roster: [], teamChars: ['antler', 'frog'], myPick: { side: 0, char: 'villageBoy' }
     };
     phase = 'guest';
@@ -704,21 +788,10 @@ export function createMatchMode(ctx) {
   });
 
   // ── Battle ───────────────────────────────────────────────────────────────
-  const spawnPose = (entry, mode, matchId) => {
-    if (mode === 'guns') {
-      const loc = GUNS_LOCATION;
-      const rand = seededRandom(`${matchId}:${entry.slot}`);
-      const slice = (Math.PI * 2) / MATCH_SIZE;
-      const angle = loc.yaw + (entry.slot + 0.25 + rand() * 0.5) * slice;
-      // Neighbours alternate between the inner and outer half of the ring (never side by side)
-      const [rMin, rMax] = GUNS_SPAWN_RADIUS;
-      const half = (rMax - rMin) / 2;
-      const radius = rMin + (entry.slot % 2) * half + rand() * half;
-      const x = loc.x + Math.sin(angle) * radius;
-      const z = loc.z + Math.cos(angle) * radius;
-      return { x, z, yaw: Math.atan2(loc.x - x, loc.z - z) };
-    }
-    const loc = DUEL_LOCATION;
+  const facingCentre = (x, z) => Math.atan2(ARENA_LOCATION.x - x, ARENA_LOCATION.z - z);
+
+  const spawnPose = (entry) => {
+    const loc = ARENA_LOCATION;
     const yaw = Number.isFinite(loc.yaw) ? loc.yaw : 0;
     if (entry.team === 0 || entry.team === 1) {
       const fx = Math.sin(yaw), fz = Math.cos(yaw);
@@ -734,7 +807,31 @@ export function createMatchMode(ctx) {
     const angle = (entry.slot / MATCH_SIZE) * Math.PI * 2;
     const x = loc.x + Math.sin(angle) * FFA_RADIUS;
     const z = loc.z + Math.cos(angle) * FFA_RADIUS;
-    return { x, z, yaw: Math.atan2(loc.x - x, loc.z - z) };
+    return { x, z, yaw: facingCentre(x, z) };
+  };
+
+  // Most Kills respawn: the candidate spot furthest from the closest living enemy
+  const respawnPose = (c) => {
+    const enemies = [];
+    match.combatants.forEach((o) => {
+      if (!o.alive || !isEnemyOf(c, o)) return;
+      const p = posOf(o);
+      if (p) enemies.push(p);
+    });
+    let best = null;
+    let bestScore = -1;
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = randIn(RESPAWN_RADIUS);
+      const x = ARENA_LOCATION.x + Math.sin(a) * r;
+      const z = ARENA_LOCATION.z + Math.cos(a) * r;
+      if (ctx.isBlocked?.(x, z)) continue;
+      let score = 100;
+      for (const p of enemies) score = Math.min(score, Math.hypot(p.x - x, p.z - z));
+      if (score > bestScore) { bestScore = score; best = { x, z }; }
+    }
+    if (!best) return spawnPose(c);
+    return { x: best.x, z: best.z, yaw: facingCentre(best.x, best.z) };
   };
 
   const sanitizeRoster = (roster) => {
@@ -761,7 +858,7 @@ export function createMatchMode(ctx) {
     countdownTimers = [];
   };
 
-  function beginMatch({ matchId, mode, hostId, roster, teamChars }) {
+  function beginMatch({ matchId, mode, rule, hostId, roster, teamChars }) {
     const selfId = myId();
     const clean = sanitizeRoster(roster);
     if (!clean || !clean.some((r) => r.id === selfId && !r.bot)) return;
@@ -774,105 +871,121 @@ export function createMatchMode(ctx) {
     joinRoom(`match-${matchId}`);
 
     const isHost = hostId === selfId;
-    const guns = mode === 'guns';
     const now = Date.now();
     match = {
-      matchId, mode, hostId, isHost,
+      matchId, mode, rule: cleanRule(rule), hostId, isHost,
       teamChars: Array.isArray(teamChars) ? teamChars.map((c) => (CHAR_KEYS.includes(c) ? c : 'antler')) : ['antler', 'frog'],
       combatants: new Map(),
       lastStateSentAt: 0,
       lastBotSentAt: 0,
       endTimer: null,
-      myTeam: -1
+      endsAt: Infinity,
+      myTeam: -1,
+      takeSentAt: new Map(),
+      hudKey: ''
     };
     for (const r of clean) {
       const c = {
         ...r,
         isSelf: r.id === selfId,
         alive: true,
+        left: false,
         hp: ctx.matchHealth,
         lastHeardAt: now,
         enemy: null,
         sword: null,
+        wandMesh: null,
+        bubbleMesh: null,
         swordTarget: { pos: new THREE.Vector3(), quat: new THREE.Quaternion(), has: false },
         hand: new THREE.Vector3(0, 0.82, 0.5),
         blocking: false,
+        weapon: 'sword',                 // 'sword' | 'wand' | 'gun' | 'shield' | null
+        bubble: false,
         label: null,
         targetId: null,
         retargetAt: 0,
         combat: null,
-        // Guns & Bombs
-        weapon: guns ? 'gun' : null,     // what they hold: 'gun' | 'shield' | null
-        weaponUntil: 0,                  // host bots: when to reconsider gun / shield
-        shieldHp: guns && r.bot ? BOT_SHIELD_HP : 0,
+        shotTarget: null,
         gunMesh: null,
         shieldMesh: null,
-        shotTarget: null,
-        nextShotAt: Infinity,
-        nextBombAt: Infinity
+        gearTried: false,
+        kills: 0,
+        deaths: 0,
+        lastHitBy: null,
+        lastHitKind: 'sword',
+        lastHitAt: 0,
+        respawnAt: 0,
+        protectedUntil: 0,
+        bombs: 0,                        // host bots: bombs picked up
+        nextBombAt: 0
       };
-      const pose = spawnPose(r, mode, matchId);
+      const pose = spawnPose(r);
       const url = MATCH_CHARACTERS[r.char].url;
       if (c.isSelf) {
         match.myTeam = r.team;
-        ctx.enterMatch({ ...pose, characterUrl: url, loadout: guns ? 'guns' : null });
+        ctx.enterMatch({ ...pose, characterUrl: url });
       } else if (r.bot && isHost) {
-        c.enemy = ctx.createBot({ x: pose.x, z: pose.z, yaw: pose.yaw, characterUrl: url, ranged: guns ? BOT_RANGE : null });
+        c.enemy = ctx.createBot({ x: pose.x, z: pose.z, yaw: pose.yaw, characterUrl: url });
         if (c.enemy) c.enemy.stationary = true;
       } else {
         ctx.ensureRemoteModel(r.id, r.name, url, pose);
-        if (!guns) {
-          c.sword = ctx.createSwordMesh(url);
-          if (c.sword) {
-            c.sword.visible = false;
-            ctx.scene.add(c.sword);
+        c.sword = ctx.createSwordMesh(url);
+        if (c.sword) {
+          c.sword.visible = false;
+          ctx.scene.add(c.sword);
+        }
+        if (!r.bot) {
+          c.wandMesh = ctx.createWandMesh?.() || null;
+          if (c.wandMesh) {
+            c.wandMesh.visible = false;
+            ctx.scene.add(c.wandMesh);
           }
         }
       }
-      if (guns && !c.isSelf) attachGunGear(c);
       if (!c.isSelf) {
-        c.label = el('div', `match-label match-label-team-${r.team}`);
-        labelLayer.append(c.label);
+        c.label = makeLabel(c);
+        labelLayer.append(c.label.root);
       }
       match.combatants.set(r.id, c);
     }
+    pickups.build(matchId, ARENA_LOCATION, { rMin: PICKUP_RADIUS[0], rMax: PICKUP_RADIUS[1] });
 
     phase = 'countdown';
     document.body.classList.add('match-active');
     hud.classList.remove('hidden');
     leaveBtn.classList.remove('hidden');
-    renderHud();
+    feed.replaceChildren();
+    renderHud(true);
+    const ruleInfo = MATCH_RULES[match.rule];
     const intro = mode === 'team'
       ? `You fight for the ${teamLabel(match.teamChars[match.myTeam] ?? 'antler')}`
-      : mode === 'guns' ? 'Guns & bombs only · last one standing wins' : 'Last one standing wins';
+      : ruleInfo.blurb;
+    const sub = `${MATCH_MODES[mode]} · ${ruleInfo.label} · ${intro}`;
     ['3', '2', '1'].forEach((text, i) => {
       countdownTimers.push(setTimeout(() => {
-        if (phase === 'countdown') showBanner(text, `${MATCH_MODES[mode]} · ${intro}`);
+        if (phase === 'countdown') showBanner(text, sub);
       }, i * COUNTDOWN_STEP_MS));
     });
     countdownTimers.push(setTimeout(() => {
       if (phase !== 'countdown') return;
       phase = 'fighting';
-      showBanner('FIGHT!');
+      if (match.rule === 'kills') match.endsAt = Date.now() + KILLS_MATCH_MS;
+      showBanner('FIGHT!', 'Grab the pickups around the arena');
       ctx.setControlsLocked(false);
-      const fightAt = Date.now();
       match.combatants.forEach((c) => {
-        if (!c.enemy) return;
-        c.enemy.stationary = false;
-        c.nextShotAt = fightAt + randIn([600, 2200]);
-        c.nextBombAt = fightAt + randIn(BOT_BOMB_MS);
-        c.weaponUntil = fightAt + randIn(BOT_GUN_MS);
+        if (c.enemy) c.enemy.stationary = false;
       });
+      renderHud(true);
       countdownTimers.push(setTimeout(() => {
-        if (phase === 'fighting') hideBanner();
-      }, 800));
+        if (phase === 'fighting' && match?.combatants.get(myId())?.alive) hideBanner();
+      }, 1100));
     }, 3 * COUNTDOWN_STEP_MS));
   }
 
   const humansExceptMe = () => {
     if (!match) return [];
     const out = [];
-    match.combatants.forEach((c) => { if (!c.bot && !c.isSelf) out.push(c.id); });
+    match.combatants.forEach((c) => { if (!c.bot && !c.isSelf && !c.left) out.push(c.id); });
     return out;
   };
   const broadcast = (payload) => {
@@ -888,55 +1001,228 @@ export function createMatchMode(ctx) {
     if (c.enemy) return c.enemy.group;
     return ctx.getRemoteModel(c.id);
   };
+  const posOf = (c) => combatantModel(c)?.position ?? null;
 
-  const renderHud = () => {
+  // ── HUD: scoreboard, standings, kill feed, labels ────────────────────────
+  const teamKills = (team) => {
+    let n = 0;
+    match.combatants.forEach((c) => { if (c.team === team) n += c.kills; });
+    return n;
+  };
+  const standings = () => [...match.combatants.values()]
+    .sort((a, b) => (b.kills - a.kills) || (a.deaths - b.deaths) || (Number(b.alive) - Number(a.alive)));
+
+  function renderHud(force = false) {
     if (!match) return;
     const all = [...match.combatants.values()];
+    const kills = match.rule === 'kills';
+    const me = match.combatants.get(myId());
+    let clock;
+    if (phase === 'countdown') clock = kills ? formatClock(KILLS_MATCH_MS) : 'READY';
+    else if (phase === 'over') clock = 'END';
+    else if (kills) clock = formatClock(match.endsAt - Date.now());
+    else clock = `${all.filter((c) => c.alive).length} left`;
+    const key = [clock, phase, ...all.map((c) => `${c.alive ? 1 : 0}${c.kills}.${c.deaths}`)].join('|');
+    if (!force && key === match.hudKey) return;
+    match.hudKey = key;
+    hudClock.textContent = clock;
+    hudClock.classList.toggle('is-urgent', kills && phase === 'fighting' && match.endsAt - Date.now() < 30000);
+    const target = KILL_TARGET[match.mode];
+    hudMode.textContent = kills
+      ? `${MATCH_RULES.kills.label} · first to ${target}`
+      : `${MATCH_RULES.survival.label} · ${MATCH_MODES[match.mode]}`;
     if (match.mode === 'team') {
-      const alive = [0, 1].map((t) => all.filter((c) => c.team === t && c.alive).length);
-      hudText.textContent = `${teamLabel(match.teamChars[0])} ${alive[0]}  vs  ${alive[1]} ${teamLabel(match.teamChars[1])}`;
+      hudBar.classList.add('is-team');
+      [0, 1].forEach((t) => {
+        const c = teamChar(match.teamChars[t]);
+        const side = hudSide[t];
+        side.box.classList.remove('hidden');
+        side.box.classList.toggle('is-mine', match.myTeam === t);
+        side.emoji.textContent = c.emoji;
+        side.name.textContent = c.team;
+        side.score.textContent = String(kills ? teamKills(t) : all.filter((x) => x.team === t && x.alive).length);
+      });
     } else {
-      const alive = all.filter((c) => c.alive).length;
-      hudText.textContent = `${MATCH_MODES[match.mode]} · ${alive} left`;
+      hudBar.classList.remove('is-team');
+      hudSide.forEach((s) => s.box.classList.add('hidden'));
     }
+    // Under the bar: your kills / deaths, and (Free For All) the top three
+    hudSub.replaceChildren();
+    if (me) {
+      const ranked = standings();
+      const rank = ranked.indexOf(me) + 1;
+      const mine = el('span', 'match-hud-chip is-self');
+      mine.append(el('b', null, 'You'), document.createTextNode(` ${me.kills} K · ${me.deaths} D`));
+      if (match.mode !== 'team') mine.append(el('span', 'match-hud-rank', `#${rank}`));
+      hudSub.append(mine);
+      if (match.mode !== 'team') {
+        ranked.slice(0, 3).forEach((c, i) => {
+          if (c === me) return;
+          const chip = el('span', 'match-hud-chip');
+          chip.append(el('span', 'match-hud-rank', `#${i + 1}`), document.createTextNode(` ${c.name} ${c.kills}`));
+          chip.classList.toggle('is-dead', !c.alive);
+          hudSub.append(chip);
+        });
+      }
+    }
+  }
+
+  const showKillPop = (victimName) => {
+    killPop.textContent = `💀 You eliminated ${victimName}`;
+    killPop.classList.remove('hidden', 'is-in');
+    void killPop.offsetWidth;
+    killPop.classList.add('is-in');
+    clearTimeout(showKillPop.timer);
+    showKillPop.timer = setTimeout(() => killPop.classList.add('hidden'), 1800);
   };
+
+  const nameClass = (c) => `match-feed-name team-${c?.team ?? -1}${c?.isSelf ? ' is-self' : ''}`;
+  const addFeed = (victimId, byId, kind) => {
+    if (!match) return;
+    const victim = match.combatants.get(victimId);
+    if (!victim) return;
+    const killer = byId ? match.combatants.get(byId) : null;
+    const row = el('div', 'match-feed-row');
+    if (killer?.isSelf || victim.isSelf) row.classList.add('is-mine');
+    if (killer && killer !== victim) row.append(el('span', nameClass(killer), killer.name));
+    row.append(el('span', 'match-feed-icon', killer ? KIND_ICONS[cleanKind(kind)] : '💀'));
+    row.append(el('span', nameClass(victim), victim.name));
+    feed.prepend(row);
+    while (feed.children.length > 5) feed.lastChild.remove();
+    setTimeout(() => row.classList.add('is-fading'), 5200);
+    setTimeout(() => row.remove(), 6000);
+  };
+
+  function makeLabel(c) {
+    const root = el('div', `match-label match-label-team-${c.team}${c.bot ? ' is-bot' : ''}`);
+    const name = el('span', 'match-label-name', c.name);
+    const bar = el('span', 'match-label-hp');
+    const fill = el('i');
+    bar.append(fill);
+    root.append(name, bar);
+    return { root, name, fill, key: '' };
+  }
 
   const renderLabel = (c) => {
     if (!c.label) return;
-    c.label.textContent = c.alive ? `${c.name} ❤${Math.max(0, c.hp)}` : `💀 ${c.name}`;
-    c.label.classList.toggle('match-label-dead', !c.alive);
+    const key = `${c.alive ? 1 : 0}:${c.hp}`;
+    if (key === c.label.key) return;
+    c.label.key = key;
+    c.label.name.textContent = c.alive ? c.name : `💀 ${c.name}`;
+    c.label.fill.style.width = `${Math.round((Math.max(0, c.hp) / ctx.matchHealth) * 100)}%`;
+    c.label.root.classList.toggle('match-label-dead', !c.alive);
+    c.label.root.classList.toggle('is-low', c.alive && c.hp <= ctx.matchHealth * 0.3);
+  };
+
+  // ── Kills, deaths, respawns ──────────────────────────────────────────────
+  // Remember who hit `c` last (kill credit)
+  const noteHit = (c, byId, kind) => {
+    if (!c || !byId || byId === c.id) return;
+    c.lastHitBy = byId;
+    c.lastHitKind = cleanKind(kind);
+    c.lastHitAt = Date.now();
+  };
+  const creditOf = (c) => (c.lastHitBy && Date.now() - c.lastHitAt < LAST_HIT_CREDIT_MS
+    ? { by: c.lastHitBy, kind: c.lastHitKind } : { by: null, kind: null });
+
+  const scoresPayload = () => [...match.combatants.values()].map((c) => [c.id, c.kills, c.deaths]);
+  const applyScores = (sc) => {
+    if (!Array.isArray(sc)) return;
+    for (const row of sc.slice(0, MATCH_SIZE)) {
+      if (!Array.isArray(row) || typeof row[0] !== 'string') continue;
+      const c = match.combatants.get(row[0]);
+      if (!c) continue;
+      if (Number.isFinite(row[1])) c.kills = Math.max(0, Math.min(999, Math.round(row[1])));
+      if (Number.isFinite(row[2])) c.deaths = Math.max(0, Math.min(999, Math.round(row[2])));
+    }
+  };
+
+  // Host: count a death (and the kill, when an enemy did it), tell everyone
+  const recordKill = (victim, byId, kind) => {
+    victim.deaths += 1;
+    const killer = byId ? match.combatants.get(byId) : null;
+    const credited = killer && isEnemyOf(killer, victim) ? killer : null;
+    if (credited) credited.kills += 1;
+    const k = cleanKind(kind);
+    addFeed(victim.id, credited?.id ?? null, k);
+    broadcast({ op: 'kill', v: victim.id, by: credited?.id ?? null, k, sc: scoresPayload() });
+    if (credited?.isSelf) showKillPop(victim.name);
   };
 
   // Someone is out (died, left or timed out)
-  const markDead = (id) => {
+  const markDead = (id, { by = null, kind = null, left = false } = {}) => {
     const c = match?.combatants.get(id);
-    if (!c || !c.alive) return;
+    if (!c) return;
+    if (left) c.left = true;
+    if (!c.alive) return;
     c.alive = false;
     c.hp = 0;
     if (!c.isSelf && !c.enemy) {
       ctx.getRemoteModel(id)?.userData?.qwopRig?.glbCharacter?.playDeath?.();
       if (c.sword) c.sword.visible = false;
+      if (c.wandMesh) c.wandMesh.visible = false;
+    }
+    if (match.rule === 'kills' && !c.left && (c.isSelf || (match.isHost && c.enemy))) {
+      c.respawnAt = Date.now() + RESPAWN_MS;
+    }
+    if (match.isHost && phase === 'fighting' && !left) recordKill(c, by, kind);
+    renderLabel(c);
+    renderHud();
+    if (match.isHost && match.rule === 'survival') checkSurvivalWinner();
+  };
+
+  const reviveCombatant = (c, pose) => {
+    c.alive = true;
+    c.hp = ctx.matchHealth;
+    c.respawnAt = 0;
+    c.lastHitBy = null;
+    if (c.label) c.label.key = '';
+    if (!c.isSelf && !c.enemy) {
+      ctx.ensureRemoteModel(c.id, c.name, MATCH_CHARACTERS[c.char].url, pose);
+      ctx.reviveRemoteModel(c.id);
     }
     renderLabel(c);
     renderHud();
-    if (match.isHost) checkWinner();
   };
 
-  const applyBotDamage = (c, dir, dmg = 1) => {
+  const respawnSelf = (c) => {
+    const pose = respawnPose(c);
+    ctx.respawnLocal(pose, SPAWN_PROTECT_MS);
+    reviveCombatant(c, pose);
+    broadcast({ op: 'respawn', pos: [round3(pose.x), round3(pose.z), round3(pose.yaw)] });
+    hideBanner();
+  };
+
+  const respawnBot = (c) => {
+    const pose = respawnPose(c);
+    c.enemy?.destroy();
+    c.enemy = ctx.createBot({ x: pose.x, z: pose.z, yaw: pose.yaw, characterUrl: MATCH_CHARACTERS[c.char].url });
+    c.protectedUntil = Date.now() + SPAWN_PROTECT_MS;
+    c.bombs = 0;
+    c.targetId = null;
+    reviveCombatant(c, pose);
+    broadcast({ op: 'respawn', bot: c.id, pos: [round3(pose.x), round3(pose.z), round3(pose.yaw)] });
+  };
+
+  const applyBotDamage = (c, dir, dmg = 1, byId = null, kind = 'sword') => {
     if (!c?.alive || !c.enemy || phase !== 'fighting') return;
-    const killed = c.enemy.applyDamage(dmg);
+    if (Date.now() < c.protectedUntil) return; // spawn bubble
+    noteHit(c, byId, kind);
+    let killed = false;
+    for (let i = 0; i < Math.max(1, dmg) && !killed; i++) killed = c.enemy.applyDamage(1);
     c.hp = c.enemy.hearts;
     renderLabel(c);
     _tmpV.set(dir?.x ?? 0, 0, dir?.z ?? 1);
     if (_tmpV.lengthSq() < 1e-6) _tmpV.set(0, 0, 1);
     _tmpV.normalize();
-    c.enemy.applyDirectKnockback(killed
-      ? { direction: _tmpV, horizSpeed: 10, upVelocity: 1, torqueMag: 60, ragdoll: true }
+    const big = killed || kind === 'bomb' || kind === 'fire';
+    c.enemy.applyDirectKnockback(big
+      ? { direction: _tmpV, horizSpeed: killed ? 10 : 7, upVelocity: 1, torqueMag: 60, ragdoll: killed }
       : { direction: _tmpV, horizSpeed: 3, upVelocity: 0.2, torqueMag: 0, ragdoll: false });
-    if (killed) markDead(c.id);
+    if (killed) markDead(c.id, creditOf(c));
   };
 
-  function checkWinner() {
+  function checkSurvivalWinner() {
     if (!match?.isHost || phase !== 'fighting') return;
     const alive = [...match.combatants.values()].filter((c) => c.alive);
     let result = null;
@@ -946,42 +1232,125 @@ export function createMatchMode(ctx) {
     } else if (alive.length <= 1) {
       result = { winnerId: alive[0]?.id ?? null, winnerName: alive[0]?.name ?? null };
     }
-    if (!result) return;
-    broadcast({ op: 'end', ...result });
-    showEnd(result);
+    if (result) finishMatch(result);
   }
 
-  function showEnd({ winnerTeam = null, winnerId = null, winnerName = null, reason = '' } = {}) {
+  // Host (Most Kills): time's up, or someone reached the target
+  function checkKillsWinner(now) {
+    if (!match?.isHost || phase !== 'fighting' || match.rule !== 'kills') return;
+    const target = KILL_TARGET[match.mode];
+    let result = null;
+    if (match.mode === 'team') {
+      const k = [teamKills(0), teamKills(1)];
+      if (now >= match.endsAt || Math.max(...k) >= target) {
+        result = { winnerTeam: k[0] === k[1] ? null : (k[0] > k[1] ? 0 : 1) };
+      }
+    } else {
+      const ranked = standings();
+      const top = ranked[0];
+      if (top && (now >= match.endsAt || top.kills >= target)) {
+        const tie = ranked[1] && ranked[1].kills === top.kills;
+        result = tie || top.kills === 0 ? { winnerId: null } : { winnerId: top.id, winnerName: top.name };
+      }
+    }
+    if (result) finishMatch(result);
+  }
+
+  const finishMatch = (result) => {
+    broadcast({ op: 'end', ...result, sc: scoresPayload() });
+    showEnd(result);
+  };
+
+  // Results card: winner + everyone's kills / deaths
+  const renderResults = ({ winnerTeam = null, winnerId = null, winnerName = null, reason = '' }) => {
+    const me = match.combatants.get(myId());
+    let title;
+    let sub = '';
+    let mood = 'draw';
+    if (reason) {
+      title = 'BATTLE OVER';
+      sub = reason;
+    } else if (match.mode === 'team') {
+      if (winnerTeam === 0 || winnerTeam === 1) {
+        const won = winnerTeam === match.myTeam;
+        mood = won ? 'win' : 'lose';
+        title = won ? 'VICTORY' : 'DEFEAT';
+        sub = `${teamLabel(match.teamChars[winnerTeam])} win${match.rule === 'kills' ? ` ${teamKills(winnerTeam)} – ${teamKills(1 - winnerTeam)}` : ''}`;
+      } else {
+        title = 'DRAW';
+        sub = match.rule === 'kills' ? 'Both teams tied on kills' : 'Nobody is left standing';
+      }
+    } else if (winnerId) {
+      const name = match.combatants.get(winnerId)?.name || cleanName(winnerName);
+      const won = winnerId === myId();
+      mood = won ? 'win' : 'lose';
+      title = won ? 'VICTORY' : `${name} WINS`;
+      sub = match.rule === 'kills'
+        ? `${won ? 'You' : name} got the most kills`
+        : `${won ? 'You are' : `${name} is`} the last one standing`;
+    } else {
+      title = 'DRAW';
+      sub = match.rule === 'kills' ? 'Tied on kills' : 'Nobody is left standing';
+    }
+    results.dataset.mood = mood;
+    resultsTitle.textContent = title;
+    resultsSub.textContent = `${MATCH_MODES[match.mode]} · ${MATCH_RULES[match.rule].label}${sub ? ` — ${sub}` : ''}`;
+    resultsTable.replaceChildren();
+    const head = el('div', 'match-results-row is-head');
+    head.append(el('span', null, '#'), el('span', null, 'Fighter'), el('span', null, 'K'), el('span', null, 'D'));
+    resultsTable.append(head);
+    const ranked = match.mode === 'team'
+      ? standings().sort((a, b) => (a.team === match.myTeam ? -1 : 0) - (b.team === match.myTeam ? -1 : 0))
+      : standings();
+    ranked.forEach((c, i) => {
+      const row = el('div', `match-results-row team-${c.team}`);
+      row.classList.toggle('is-self', c === me);
+      row.classList.toggle('is-winner', c.id === winnerId || (winnerTeam != null && c.team === winnerTeam));
+      const status = c.left ? ' (left)' : (match.rule === 'survival' && c.alive ? ' 🏅' : '');
+      const name = el('span', 'match-results-name');
+      name.append(el('span', 'match-results-emoji', MATCH_CHARACTERS[c.char].emoji),
+        document.createTextNode(`${c.name}${c === me ? ' (you)' : ''}${c.bot ? ' 🤖' : ''}${status}`));
+      row.append(el('span', 'match-results-rank', String(i + 1)), name,
+        el('span', 'match-results-num', String(c.kills)), el('span', 'match-results-num', String(c.deaths)));
+      resultsTable.append(row);
+    });
+    results.classList.remove('hidden');
+  };
+
+  const returnToLobby = () => {
+    if (!match) return;
+    cleanupMatch();
+    phase = 'off';
+    joinRoom(LOBBY_ROOM_ID);
+    ctx.resumeLobby();
+  };
+  resultsBackBtn.addEventListener('click', () => { if (phase === 'over') returnToLobby(); });
+
+  function showEnd(result = {}) {
     if (!match || phase === 'over') return;
     clearCountdown();
     phase = 'over';
     ctx.stopWalk();
     ctx.setControlsLocked(true);
     leaveBtn.classList.add('hidden');
-    renderHud();
-    if (reason) {
-      showBanner('BATTLE OVER', reason);
-    } else if (match.mode === 'team') {
-      if (winnerTeam === 0 || winnerTeam === 1) {
-        showBanner(`WINNER ${teamLabel(match.teamChars[winnerTeam])}`,
-          winnerTeam === match.myTeam ? 'Your team wins!' : 'Your team lost');
-      } else {
-        showBanner('DRAW', 'Nobody is left standing');
-      }
-    } else if (winnerId) {
-      const name = match.combatants.get(winnerId)?.name || cleanName(winnerName);
-      showBanner(`WINNER ${name}`, winnerId === myId() ? 'You are the last one standing!' : '');
-    } else {
-      showBanner('DRAW', 'Nobody is left standing');
-    }
+    hideBanner();
+    killPop.classList.add('hidden');
+    feed.replaceChildren();
+    renderHud(true);
+    renderResults(result);
     const finished = match;
-    match.endTimer = setTimeout(() => {
+    let left = Math.round(RESULTS_MS / 1000);
+    const tick = () => {
       if (match !== finished) return;
-      cleanupMatch();
-      phase = 'off';
-      joinRoom(LOBBY_ROOM_ID);
-      ctx.resumeLobby();
-    }, END_BANNER_MS);
+      resultsBackBtn.textContent = `Back to Lobby (${left})`;
+      if (left <= 0) {
+        returnToLobby();
+        return;
+      }
+      left -= 1;
+      match.endTimer = setTimeout(tick, 1000);
+    };
+    tick();
   }
 
   function cleanupMatch() {
@@ -991,12 +1360,22 @@ export function createMatchMode(ctx) {
     match.combatants.forEach((c) => {
       if (c.enemy) c.enemy.destroy();
       if (c.sword) c.sword.parent?.remove(c.sword);
+      if (c.wandMesh) c.wandMesh.parent?.remove(c.wandMesh);
+      if (c.bubbleMesh) {
+        c.bubbleMesh.parent?.remove(c.bubbleMesh);
+        c.bubbleMesh.geometry.dispose();
+        c.bubbleMesh.material.dispose();
+      }
       if (!c.isSelf && !c.enemy) ctx.removeRemotePlayer(c.id);
-      c.label?.remove();
+      c.label?.root.remove();
     });
     match = null;
+    pickups.clear();
     hideBanner();
     hud.classList.add('hidden');
+    results.classList.add('hidden');
+    feed.replaceChildren();
+    killPop.classList.add('hidden');
     document.body.classList.remove('match-active');
     ctx.leaveMatch();
   }
@@ -1010,18 +1389,20 @@ export function createMatchMode(ctx) {
     ctx.resumeLobby('You left the battle');
   });
 
-  // ── Guns & Bombs: gear, bullets, bombs ───────────────────────────────────
-  // The gun and the one shield on another fighter, held like the local player holds them:
-  // same models, on the same floating hand with the same hold offset / rotation, and both
-  // hands on the grip (ctx.getWeaponGear — taken from the player's own Pistol / Shield)
+  // ── Gear on other fighters (gun / shield / wand / bubble) ────────────────
+  // The gun and shield on another human, held like the local player holds them: same
+  // models, on the same floating hand with the same hold offset / rotation, and both hands
+  // on the grip (ctx.getWeaponGear — taken from the player's own Pistol / Shield)
   function attachGunGear(c) {
+    c.gearTried = true;
     const model = combatantModel(c);
     const gear = ctx.getWeaponGear?.();
-    if (!model || !gear) return;
+    if (!model || !gear) {
+      c.gearTried = false; // (models still loading: try again later)
+      return;
+    }
     // The weapon hand: the floating hand the player's Weapon attaches to (labels mirrored)
-    const hand = c.enemy
-      ? c.enemy._leftHandGroup
-      : model.children.find((child) => child.userData?.proceduralHand === 'left');
+    const hand = model.children.find((child) => child.userData?.proceduralHand === 'left');
     const place = (mesh, kind) => {
       if (!mesh) return null;
       const g = gear[kind];
@@ -1039,49 +1420,35 @@ export function createMatchMode(ctx) {
   }
 
   const updateGunGear = (c) => {
+    if (!c.gearTried && (c.weapon === 'gun' || c.weapon === 'shield')) attachGunGear(c);
     const alive = c.alive && phase !== 'off';
-    const shieldUp = c.weapon === 'shield';
     if (c.gunMesh) c.gunMesh.visible = alive && c.weapon === 'gun';
-    if (c.shieldMesh) c.shieldMesh.visible = alive && shieldUp;
-    const grip = shieldUp ? c.gripShield : c.gripGun;
-    if (c.enemy) {
-      c.enemy.gripTarget = alive && grip ? grip : null;
-    } else {
-      const model = ctx.getRemoteModel(c.id);
-      if (model && grip) model.userData.remoteHandTarget = grip;
-    }
+    if (c.shieldMesh) c.shieldMesh.visible = alive && c.weapon === 'shield';
+    const grip = c.weapon === 'shield' ? c.gripShield : c.weapon === 'gun' ? c.gripGun : null;
+    const model = ctx.getRemoteModel(c.id);
+    if (model && grip && alive) model.userData.remoteHandTarget = grip;
   };
 
-  const posOf = (c) => combatantModel(c)?.position ?? null;
-  // The shooter / thrower's game deals the damage: ours, or the host's for its bots
-  const ownsAttacker = (a) => !!a && (a.isSelf || (a.bot && !!a.enemy));
-
-  // A host bot's shield faces the shot / blast (humans check their own, in ctx.applyHit)
-  const botShieldBlocks = (c, src) => {
-    if (!c.enemy || c.weapon !== 'shield' || c.shieldHp <= 0 || !src) return false;
-    const g = c.enemy.group;
-    _tmpV.set(src.x - g.position.x, 0, src.z - g.position.z);
-    if (_tmpV.lengthSq() < 1e-6) return true;
-    _tmpV.normalize();
-    _tmpV2.set(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
-    return _tmpV2.dot(_tmpV) > SHIELD_ARC_DOT;
-  };
-
-  const damageBot = (c, dmg, dir, src) => {
-    if (botShieldBlocks(c, src)) {
-      c.shieldHp = Math.max(0, c.shieldHp - dmg);
-      if (c.shieldHp <= 0) {
-        // Broken: back to the gun for good
-        c.weapon = 'gun';
-        c.weaponUntil = Infinity;
-      }
-      ctx.onShieldHit?.(posOf(c));
-      return;
+  const updateBubble = (c, on) => {
+    if (on && !c.bubbleMesh) {
+      c.bubbleMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.95, 24, 16),
+        new THREE.MeshPhongMaterial({
+          color: 0x7fd8ff, emissive: 0x1a5f8a, specular: 0xffffff, shininess: 90,
+          transparent: true, opacity: 0.26, depthWrite: false, side: THREE.DoubleSide
+        })
+      );
+      c.bubbleMesh.renderOrder = 10;
+      ctx.scene.add(c.bubbleMesh);
     }
-    applyBotDamage(c, dir, dmg);
+    if (!c.bubbleMesh) return;
+    const pos = posOf(c);
+    c.bubbleMesh.visible = !!(on && pos && c.alive);
+    if (c.bubbleMesh.visible) c.bubbleMesh.position.copy(pos).setY(pos.y + 0.85);
   };
 
   // `attackerId`'s bullet / bomb reached `target`; only the attacker's game acts on it
+  const ownsAttacker = (a) => !!a && (a.isSelf || (a.bot && !!a.enemy));
   const rangedHit = (attackerId, target, dmg, dir, kind, src) => {
     if (!match || phase !== 'fighting' || !target?.alive) return;
     const attacker = match.combatants.get(attackerId);
@@ -1090,21 +1457,22 @@ export function createMatchMode(ctx) {
     const d = len > 1e-4 ? [round3(dir.x / len), round3(dir.z / len)] : [0, 1];
     const s = src ? [round3(src.x), round3(src.z)] : null;
     if (target.isSelf) {
+      noteHit(target, attackerId, kind);
       ctx.applyHit(dmg, d, { kind, src: s });
     } else if (target.enemy) {
-      damageBot(target, dmg, { x: d[0], z: d[1] }, src);
+      applyBotDamage(target, { x: d[0], z: d[1] }, dmg, attackerId, kind);
     } else if (target.bot) {
       send(match.hostId, { op: 'botHit', key: match.matchId, bot: target.id, dir: d, dmg, kind, src: s });
     } else {
-      send(target.id, { op: 'hit', key: match.matchId, dmg, dir: d, kind, src: s });
-      const model = posOf(target) && combatantModel(target);
+      send(target.id, { op: 'hit', key: match.matchId, dmg, dir: d, kind, src: s, by: attackerId });
+      const model = combatantModel(target);
       if (model) ctx.spawnBlood(_tmpV.copy(model.position).setY(model.position.y + BODY_CENTER_Y), model.position.y);
     }
   };
 
-  // Everyone a bullet can stop at (projectiles.js); null outside Guns & Bombs
+  // Everyone a bullet can stop at (projectiles.js); null outside a battle
   const getShotTargets = () => {
-    if (!match || match.mode !== 'guns') return null;
+    if (!match || phase === 'off') return null;
     const out = [];
     match.combatants.forEach((c) => {
       if (!c.alive) return;
@@ -1150,58 +1518,120 @@ export function createMatchMode(ctx) {
     ctx.launchBomb(origin, target, bombTargetsFor(throwerId), keepHeld);
   };
 
-  // The local player threw a bomb (bootstrap's bomb release); false outside Guns & Bombs
+  // The local player threw a bomb (bootstrap's bomb release); false outside a battle
   const throwLocalBomb = (origin, target) => {
-    if (!match || match.mode !== 'guns' || phase !== 'fighting') return false;
+    if (!match || phase !== 'fighting') return false;
     broadcast({ op: 'bomb', o: origin.toArray().map(round3), t: target.toArray().map(round3) });
     launchBomb(myId(), origin, target, false);
     return true;
   };
 
-  // Host: a gun bot shoots / lobs a bomb at its target now and then
-  const botMuzzle = new THREE.Vector3();
-  const updateGunBot = (bot, targetModel, now) => {
-    const g = bot.enemy.group;
-    const dist = g.position.distanceTo(targetModel.position);
-    // Gun or shield (never both)
-    if (now >= bot.weaponUntil) {
-      if (bot.weapon === 'gun' && bot.shieldHp > 0 && Math.random() < BOT_SHIELD_CHANCE) {
-        bot.weapon = 'shield';
-        bot.weaponUntil = now + randIn(BOT_SHIELD_UP_MS);
+  // ── Magic blasts ─────────────────────────────────────────────────────────
+  // The local player cast `blast` (side 'match', caster = our id): show it to everyone
+  const onLocalCast = (blast) => {
+    if (!match || phase !== 'fighting' || !blast) return;
+    broadcast({
+      op: 'magic',
+      o: blast.origin.toArray().map(round3),
+      f: blast.forward.toArray().map(round3),
+      l: blast.line.toArray().map(round3),
+      e: blast.element === 'ice' ? 'ice' : 'fire'
+    });
+  };
+
+  // Targets of a battle blast (magicBlast.js): every client checks only itself, the host
+  // also its bots; the other fighters just stop it ("ghost" targets, no damage)
+  const getMagicTargets = (blast) => {
+    if (!match || phase !== 'fighting') return [];
+    const caster = match.combatants.get(blast.caster);
+    if (!caster) return [];
+    const out = [];
+    match.combatants.forEach((c) => {
+      if (!c.alive || !isEnemyOf(caster, c)) return;
+      const model = combatantModel(c);
+      if (!model) return;
+      if (c.isSelf) {
+        const t = ctx.getLocalBlastTarget();
+        out.push({
+          center: t.center.copy(model.position).setY(model.position.y + 0.5),
+          radius: t.radius,
+          blocks: t.blocks,
+          onHit: (b) => {
+            noteHit(c, caster.id, b.element);
+            t.onHit(b);
+          }
+        });
+      } else if (c.enemy) {
+        out.push({
+          center: c.enemy.getCenterWorldPos(),
+          radius: (c.enemy.bodyHitRadius ?? 0.45) * 0.9,
+          blocks: (b) => !!c.enemy.blocksBlast?.(b),
+          onBlocked: () => c.enemy.applyBlockImpact?.(),
+          onHit: (b) => {
+            const dir = b.forward;
+            applyBotDamage(c, dir, ctx.magicDamage[b.element] ?? 1, caster.id, b.element);
+            if (b.element === 'ice' && c.alive) c.enemy.freeze?.(ctx.magicFreezeSeconds());
+          }
+        });
       } else {
-        if (bot.weapon === 'shield') bot.nextShotAt = Math.max(bot.nextShotAt, now + 400);
-        bot.weapon = 'gun';
-        bot.weaponUntil = now + randIn(BOT_GUN_MS);
+        out.push({
+          center: _tmpV2.copy(model.position).setY(model.position.y + 0.5).clone(),
+          radius: 0.42,
+          onHit: () => {}
+        });
       }
+    });
+    return out;
+  };
+
+  // ── Pickups ──────────────────────────────────────────────────────────────
+  // Host: `takerId` stands on pickup `pid`
+  const hostTake = (takerId, pid) => {
+    const p = pickups.get(pid);
+    const taker = match?.combatants.get(takerId);
+    if (!p || !taker?.alive || phase !== 'fighting' || !pickups.isAvailable(pid)) return;
+    const pos = posOf(taker);
+    if (!pos || Math.hypot(pos.x - p.pos.x, pos.z - p.pos.z) > PICKUP_TOUCH + 2) return; // (lag slack)
+    const r = PICKUP_TYPES[p.type].respawnMs;
+    pickups.setTaken(pid, Date.now() + r);
+    broadcast({ op: 'taken', pid, by: takerId, r });
+    givePickup(taker, p.type);
+  };
+
+  const givePickup = (c, type) => {
+    if (c.isSelf) {
+      ctx.applyPickup(type);
+    } else if (c.enemy) {
+      if (type === 'heart') c.enemy.hearts = Math.min(c.enemy.maxHearts, c.enemy.hearts + 2);
+      else if (type === 'potion') c.enemy.hearts = c.enemy.maxHearts;
+      else if (type === 'bomb') c.bombs += 2;
+      c.hp = c.enemy.hearts;
+      renderLabel(c);
     }
-    if (bot.weapon !== 'gun') return;
-    if (now >= bot.nextShotAt) {
-      bot.nextShotAt = now + randIn(BOT_SHOT_MS);
-      if (dist <= BOT_SHOT_RANGE) {
-        g.updateMatrixWorld();
-        botMuzzle.copy(BOT_MUZZLE);
-        g.localToWorld(botMuzzle);
-        const dir = _tmpV.copy(targetModel.position).setY(targetModel.position.y + BODY_CENTER_Y).sub(botMuzzle);
-        if (dir.lengthSq() > 1e-4) {
-          dir.normalize().applyAxisAngle(_yAxis, (Math.random() * 2 - 1) * BOT_SHOT_SPREAD);
-          dir.y += (Math.random() * 2 - 1) * BOT_SHOT_SPREAD * 0.5;
-          dir.normalize();
-          ctx.spawnShot(botMuzzle, dir, bot.id);
-          broadcast({ op: 'shot', bot: bot.id, o: botMuzzle.toArray().map(round3), d: dir.toArray().map(round3) });
+  };
+
+  const updatePickups = (dt, now) => {
+    pickups.update(dt, now);
+    if (phase !== 'fighting') return;
+    const me = match.combatants.get(myId());
+    if (me?.alive) {
+      const pos = posOf(me);
+      const p = pos && pickups.findTouching(pos, PICKUP_TOUCH, now);
+      if (p) {
+        if (match.isHost) hostTake(me.id, p.id);
+        else if (now - (match.takeSentAt.get(p.id) ?? 0) > TAKE_RETRY_MS) {
+          match.takeSentAt.set(p.id, now);
+          send(match.hostId, { op: 'take', key: match.matchId, pid: p.id });
         }
       }
     }
-    if (now >= bot.nextBombAt) {
-      bot.nextBombAt = now + randIn(BOT_BOMB_MS);
-      if (dist >= BOT_BOMB_RANGE[0] && dist <= BOT_BOMB_RANGE[1]) {
-        const origin = new THREE.Vector3(0, 1.6, 0.3);
-        g.updateMatrixWorld();
-        g.localToWorld(origin);
-        const target = targetModel.position.clone();
-        launchBomb(bot.id, origin, target, true);
-        broadcast({ op: 'bomb', bot: bot.id, o: origin.toArray().map(round3), t: target.toArray().map(round3) });
-      }
-    }
+    if (!match.isHost) return;
+    match.combatants.forEach((c) => {
+      if (!c.enemy || !c.alive) return;
+      const p = pickups.findTouching(c.enemy.group.position, PICKUP_TOUCH, now, (pk) => BOT_PICKUPS.has(pk.type)
+        && (pk.type === 'bomb' || c.enemy.hearts < c.enemy.maxHearts));
+      if (p) hostTake(c.id, p.id);
+    });
   };
 
   // ── Host: bots ───────────────────────────────────────────────────────────
@@ -1215,29 +1645,53 @@ export function createMatchMode(ctx) {
     const toTarget = _tmpV2.subVectors(model.position, botPos).setY(0);
     if (t.enemy) {
       if (t.enemy.blocksSwing(swingDir, botPos)) return 'blocked';
-      applyBotDamage(t, toTarget.clone().normalize());
+      applyBotDamage(t, toTarget.clone().normalize(), 1, bot.id, 'sword');
       return 'hit';
     }
-    if (t.blocking && t.sword?.visible) {
-      _tmpV.set(0, 0, 1).applyQuaternion(t.sword.quaternion);
+    if (t.bubble) return 'blocked';
+    const blade = t.weapon === 'wand' ? t.wandMesh : t.sword;
+    if (t.blocking && blade?.visible) {
+      _tmpV.set(0, 0, 1).applyQuaternion(blade.quaternion);
       if (swingCrossesBlade(swingDir, _tmpV, toTarget, PLAYER_BLOCK_MIN_ANGLE_DEG)) {
         send(t.id, { op: 'blocked', key: match.matchId });
         return 'blocked';
       }
     }
     const len = Math.hypot(toTarget.x, toTarget.z) || 1;
-    send(t.id, { op: 'hit', key: match.matchId, dmg: 1, dir: [toTarget.x / len, toTarget.z / len] });
+    send(t.id, { op: 'hit', key: match.matchId, dmg: 1, dir: [toTarget.x / len, toTarget.z / len], kind: 'sword', by: bot.id });
     ctx.spawnBlood(_tmpV.copy(model.position).setY(model.position.y + BODY_CENTER_Y), model.position.y);
     return 'hit';
+  };
+
+  // A bot with bombs lobs one at its target now and then
+  const updateBotBombs = (bot, targetModel, now) => {
+    if (bot.bombs <= 0 || now < bot.nextBombAt) return;
+    const g = bot.enemy.group;
+    const dist = g.position.distanceTo(targetModel.position);
+    if (dist < BOT_BOMB_RANGE[0] || dist > BOT_BOMB_RANGE[1]) return;
+    bot.nextBombAt = now + randIn(BOT_BOMB_MS);
+    bot.bombs -= 1;
+    const origin = new THREE.Vector3(0, 1.6, 0.3);
+    g.updateMatrixWorld();
+    g.localToWorld(origin);
+    const target = targetModel.position.clone();
+    launchBomb(bot.id, origin, target, true);
+    broadcast({ op: 'bomb', bot: bot.id, o: origin.toArray().map(round3), t: target.toArray().map(round3) });
   };
 
   const updateBots = (dt, now) => {
     const fighting = phase === 'fighting';
     const all = [...match.combatants.values()];
-    const bots = all.filter((c) => c.enemy);
+    const bots = all.filter((c) => c.bot);
+    // Most Kills: bots back on their feet
+    if (fighting && match.rule === 'kills') {
+      for (const bot of bots) {
+        if (!bot.alive && !bot.left && bot.respawnAt && now >= bot.respawnAt) respawnBot(bot);
+      }
+    }
     // Targets: closest living enemy (re-picked a few times a second)
     for (const bot of bots) {
-      if (!bot.alive) continue;
+      if (!bot.alive || !bot.enemy) continue;
       const cur = match.combatants.get(bot.targetId);
       if (!cur?.alive || now - bot.retargetAt > BOT_RETARGET_MS) {
         bot.retargetAt = now;
@@ -1256,7 +1710,7 @@ export function createMatchMode(ctx) {
     // Attack slots: the closest BOT_ATTACKERS_PER_TARGET bots on each target swing
     const byTarget = new Map();
     for (const bot of bots) {
-      if (!bot.alive || !bot.targetId) continue;
+      if (!bot.alive || !bot.targetId || !bot.enemy) continue;
       if (!byTarget.has(bot.targetId)) byTarget.set(bot.targetId, []);
       byTarget.get(bot.targetId).push(bot);
     }
@@ -1269,7 +1723,7 @@ export function createMatchMode(ctx) {
       list.slice(0, BOT_ATTACKERS_PER_TARGET).forEach((b) => allowed.add(b));
     });
     for (const bot of bots) {
-      if (!bot.enemy.rigidBody) continue; // faded out and destroyed
+      if (!bot.enemy?.rigidBody) continue; // faded out and destroyed
       if (!bot.alive) {
         bot.enemy.update(dt, null, null, false, false);
         continue;
@@ -1278,19 +1732,22 @@ export function createMatchMode(ctx) {
       const targetModel = target?.alive ? combatantModel(target) : null;
       const targetIsMe = !!target?.isSelf;
       bot.enemy.targetHitHandler = targetIsMe ? null : (m, swingDir) => resolveBotHit(bot, bot.targetId, swingDir);
-      bot.enemy._onHitPlayer = targetIsMe ? (dir) => ctx.knockbackLocal(dir) : null;
+      bot.enemy._onHitPlayer = targetIsMe ? (dir) => {
+        noteHit(target, bot.id, 'sword');
+        ctx.knockbackLocal(dir);
+      } : null;
       bot.enemy.update(dt, targetModel, targetIsMe ? ctx.getPlayerControls() : null, false,
         fighting && allowed.has(bot));
-      if (match.mode === 'guns' && fighting && targetModel) updateGunBot(bot, targetModel, now);
+      if (fighting && targetModel) updateBotBombs(bot, targetModel, now);
     }
   };
 
   const botLocalSword = new THREE.Vector3();
   const botLocalQ = new THREE.Quaternion();
-  const sendBots = () => {
+  const sendBots = (now) => {
     const list = [];
     match.combatants.forEach((c) => {
-      if (!c.enemy) return;
+      if (!c.bot || !c.enemy) return;
       const g = c.enemy.group;
       const entry = {
         id: c.id,
@@ -1298,12 +1755,9 @@ export function createMatchMode(ctx) {
         r: round3(g.rotation.y),
         hp: c.hp,
         d: !c.alive,
-        b: c.enemy.isBlocking()
+        b: c.enemy.isBlocking(),
+        pr: now < c.protectedUntil ? 1 : 0
       };
-      if (match.mode === 'guns') {
-        entry.sh = c.shieldHp;
-        entry.w = c.weapon;
-      }
       const sg = c.enemy._swordGroup;
       if (sg?.visible && c.alive) {
         g.updateMatrixWorld();
@@ -1331,16 +1785,25 @@ export function createMatchMode(ctx) {
     if (isVec(hand, 3)) c.hand.fromArray(hand);
   };
 
+  const placeAtSword = (mesh, model, c) => {
+    mesh.position.copy(c.swordTarget.pos);
+    model.updateMatrixWorld();
+    model.localToWorld(mesh.position);
+    mesh.quaternion.copy(model.quaternion).multiply(c.swordTarget.quat);
+  };
+
   const updateRemoteCombatant = (c) => {
     const model = ctx.getRemoteModel(c.id);
     if (model) model.userData.remoteHandTarget = c.hand;
-    if (!c.sword) return;
-    c.sword.visible = !!(model && c.alive && c.swordTarget.has);
-    if (c.sword.visible) {
-      c.sword.position.copy(c.swordTarget.pos);
-      model.updateMatrixWorld();
-      model.localToWorld(c.sword.position);
-      c.sword.quaternion.copy(model.quaternion).multiply(c.swordTarget.quat);
+    const show = !!(model && c.alive && c.swordTarget.has);
+    const wand = c.weapon === 'wand' && !!c.wandMesh;
+    if (c.sword) {
+      c.sword.visible = show && !wand;
+      if (c.sword.visible) placeAtSword(c.sword, model, c);
+    }
+    if (c.wandMesh) {
+      c.wandMesh.visible = show && wand;
+      if (c.wandMesh.visible) placeAtSword(c.wandMesh, model, c);
     }
   };
 
@@ -1351,21 +1814,22 @@ export function createMatchMode(ctx) {
     const h = window.innerHeight;
     match.combatants.forEach((c) => {
       if (!c.label) return;
+      const root = c.label.root;
       const model = combatantModel(c);
-      if (!model || (!c.alive && c.enemy && !c.enemy.group.parent)) {
-        c.label.style.display = 'none';
+      if (!model || (!c.alive && c.enemy && !c.enemy.group.parent) || c.left) {
+        root.style.display = 'none';
         return;
       }
       _tmpV.copy(model.position);
-      _tmpV.y += 1.45;
+      _tmpV.y += 1.55;
       _tmpV.project(camera);
       if (_tmpV.z < 0 || _tmpV.z > 1) {
-        c.label.style.display = 'none';
+        root.style.display = 'none';
         return;
       }
-      c.label.style.display = 'block';
-      c.label.style.left = `${(_tmpV.x * 0.5 + 0.5) * w}px`;
-      c.label.style.top = `${(-_tmpV.y * 0.5 + 0.5) * h}px`;
+      root.style.display = 'flex';
+      root.style.left = `${(_tmpV.x * 0.5 + 0.5) * w}px`;
+      root.style.top = `${(-_tmpV.y * 0.5 + 0.5) * h}px`;
     });
   };
 
@@ -1381,15 +1845,23 @@ export function createMatchMode(ctx) {
       const peers = ctx.getMultiplayer()?.getOnlinePeers?.();
       const hasPeers = peers && Object.keys(peers).length > 0;
       for (const c of match.combatants.values()) {
-        if (c.bot || c.isSelf) continue;
+        if (c.bot || c.isSelf || c.left) continue;
         const gone = (hasPeers && !peers[c.id]) || now - c.lastHeardAt > HUMAN_TIMEOUT_MS;
         if (!gone) continue;
         if (c.id === match.hostId) {
           showEnd({ reason: `${c.name} (the host) left` });
           return;
         }
-        c.lastHeardAt = Infinity; // handled once
-        markDead(c.id);
+        markDead(c.id, { left: true });
+      }
+    }
+
+    // Most Kills: our own respawn
+    if (phase === 'fighting' && me && !me.alive && me.respawnAt) {
+      if (now >= me.respawnAt) respawnSelf(me);
+      else {
+        const killer = me.lastHitBy ? match.combatants.get(me.lastHitBy) : null;
+        bannerSub.textContent = `${killer ? `${KIND_ICONS[me.lastHitKind]} by ${killer.name} · ` : ''}respawning in ${Math.ceil((me.respawnAt - now) / 1000)}`;
       }
     }
 
@@ -1397,7 +1869,7 @@ export function createMatchMode(ctx) {
       match.lastStateSentAt = now;
       const state = ctx.getLocalSwordState() || {};
       const model = ctx.getLocalPlayerModel();
-      me.hp = Math.max(0, ctx.getLocalHealth());
+      if (me.alive) me.hp = Math.max(0, ctx.getLocalHealth());
       broadcast({
         op: 'state',
         sword: state.sword ?? null,
@@ -1406,7 +1878,8 @@ export function createMatchMode(ctx) {
         pos: model ? [round3(model.position.x), round3(model.position.y), round3(model.position.z)] : null,
         ry: model ? round3(model.rotation.y) : null,
         hp: me.hp,
-        w: match.mode === 'guns' ? ctx.getLocalWeapon?.() ?? null : undefined
+        w: ctx.getLocalWeapon?.() ?? null,
+        bu: ctx.isBubbleActive?.() ? 1 : 0
       });
     }
 
@@ -1414,17 +1887,23 @@ export function createMatchMode(ctx) {
       updateBots(dt, now);
       if (match && now - match.lastBotSentAt >= BOT_SEND_MS) {
         match.lastBotSentAt = now;
-        sendBots();
+        sendBots(now);
       }
+      checkKillsWinner(now);
     }
     if (!match) return;
+    updatePickups(dt, now);
     match.combatants.forEach((c) => {
-      if (!c.isSelf && !c.enemy) updateRemoteCombatant(c);
-      if (match.mode === 'guns' && !c.isSelf) updateGunGear(c);
+      if (!c.isSelf && !c.enemy) {
+        updateRemoteCombatant(c);
+        if (!c.bot) updateGunGear(c);
+      }
       if (c.enemy && c.alive) c.hp = c.enemy.hearts;
+      if (!c.isSelf) updateBubble(c, c.bubble || (c.enemy && now < c.protectedUntil));
       renderLabel(c);
     });
     updateLabels();
+    renderHud();
   };
 
   // Enemies the local sword can hit this frame (bootstrap's phone-sword hit loop)
@@ -1448,9 +1927,9 @@ export function createMatchMode(ctx) {
           blocksSwing: c.enemy ? (swingDir, attackerPos) => c.enemy.blocksSwing(swingDir, attackerPos) : null,
           onHit: (dmg, dir) => {
             if (!match || phase !== 'fighting') return;
-            if (c.enemy) applyBotDamage(c, dir);
+            if (c.enemy) applyBotDamage(c, dir, 1, myId(), 'sword');
             else if (c.bot) send(match.hostId, { op: 'botHit', key: match.matchId, bot: c.id, dir: [dir.x, dir.z] });
-            else send(c.id, { op: 'hit', key: match.matchId, dmg: 1, dir: [dir.x, dir.z] });
+            else send(c.id, { op: 'hit', key: match.matchId, dmg: 1, dir: [dir.x, dir.z], kind: 'sword' });
           },
           onBlocked: () => {
             if (!match || phase !== 'fighting') return;
@@ -1461,18 +1940,20 @@ export function createMatchMode(ctx) {
         };
       }
       const combat = c.combat;
+      combat.blocksSwing = c.enemy ? (swingDir, attackerPos) => c.enemy.blocksSwing(swingDir, attackerPos) : null;
+      combat.ownBlood = !!c.enemy;
       const model = combatantModel(c);
       if (!model) return;
       combat.position.copy(model.position);
       combat.center.copy(model.position);
       combat.center.y += BODY_CENTER_Y;
-      const sword = c.enemy ? c.enemy._swordGroup : c.sword;
-      combat.hasBlade = !!sword?.visible;
+      const blade = c.enemy ? c.enemy._swordGroup : (c.wandMesh?.visible ? c.wandMesh : c.sword);
+      combat.hasBlade = !!blade?.visible;
       if (combat.hasBlade) {
         _bladeOffsets.forEach((offset, i) => {
-          combat.bladePoints[i].copy(offset).applyQuaternion(sword.quaternion).add(sword.position);
+          combat.bladePoints[i].copy(offset).applyQuaternion(blade.quaternion).add(blade.position);
         });
-        combat.bladeDir.set(0, 0, 1).applyQuaternion(sword.quaternion);
+        combat.bladeDir.set(0, 0, 1).applyQuaternion(blade.quaternion);
       }
       combat.blocking = c.enemy ? c.enemy.isBlocking() : c.blocking;
       out.push(combat);
@@ -1491,11 +1972,20 @@ export function createMatchMode(ctx) {
       const c = match.combatants.get(peerId);
       if (!c || c.bot || c.isSelf) return;
       if (c.lastHeardAt !== Infinity) c.lastHeardAt = Date.now();
+      const fromHost = peerId === match.hostId && !match.isHost;
+      // A host bot named in a message from the host
+      const hostBot = (id) => {
+        const b = fromHost && typeof id === 'string' ? match.combatants.get(id) : null;
+        return b?.bot ? b : null;
+      };
+      const pose3 = (v) => (isVec(v, 3) ? { x: v[0], z: v[1], yaw: v[2] } : null);
       switch (op) {
         case 'state': {
+          if (c.left) return;
           applySwordState(c, data.sword, data.hand);
           c.blocking = !!data.blocking;
-          if (match.mode === 'guns') c.weapon = data.w === 'gun' || data.w === 'shield' ? data.w : null;
+          c.weapon = ['sword', 'wand', 'gun', 'shield'].includes(data.w) ? data.w : null;
+          c.bubble = !!data.bu;
           if (Number.isFinite(data.hp) && c.alive) c.hp = Math.max(0, Math.min(99, Math.round(data.hp)));
           if (isVec(data.pos, 3)) {
             ctx.setRemotePose(c.id, data.pos, Number.isFinite(data.ry) ? data.ry : null,
@@ -1504,49 +1994,61 @@ export function createMatchMode(ctx) {
           return;
         }
         case 'bots': {
-          if (peerId !== match.hostId || match.isHost || !Array.isArray(data.list)) return;
+          if (!fromHost || !Array.isArray(data.list)) return;
           for (const b of data.list.slice(0, MATCH_SIZE)) {
-            const bot = typeof b?.id === 'string' ? match.combatants.get(b.id) : null;
-            if (!bot?.bot) continue;
+            const bot = hostBot(b?.id);
+            if (!bot) continue;
             if (isVec(b.p, 3)) {
               ctx.setRemotePose(bot.id, b.p, Number.isFinite(b.r) ? b.r : null,
                 bot.name, MATCH_CHARACTERS[bot.char].url);
             }
             applySwordState(bot, b.s, b.h);
             bot.blocking = !!b.b;
-            if (Number.isFinite(b.sh)) bot.shieldHp = Math.max(0, Math.round(b.sh));
-            if (b.w === 'gun' || b.w === 'shield') bot.weapon = b.w;
+            bot.bubble = !!b.pr;
             if (Number.isFinite(b.hp) && bot.alive) bot.hp = Math.max(0, Math.round(b.hp));
             if (b.d && bot.alive) markDead(bot.id);
+            else if (!b.d && !bot.alive && match.rule === 'kills' && isVec(b.p, 3)) {
+              // (missed its respawn message)
+              reviveCombatant(bot, { x: b.p[0], z: b.p[2], yaw: Number.isFinite(b.r) ? b.r : 0 });
+            }
           }
           return;
         }
         case 'hit': {
           if (phase !== 'fighting') return;
-          const ranged = match.mode === 'guns' && (data.kind === 'gun' || data.kind === 'bomb');
+          const me = match.combatants.get(myId());
+          if (!me?.alive) return;
+          const kind = cleanKind(data.kind);
+          const ranged = kind === 'gun' || kind === 'bomb';
+          noteHit(me, hostBot(data.by)?.id ?? peerId, kind);
           ctx.applyHit(
-            Math.max(1, Math.min(2, Math.round(Number(data.dmg) || 1))),
+            Math.max(1, Math.min(3, Math.round(Number(data.dmg) || 1))),
             isVec(data.dir, 2) ? data.dir : null,
-            ranged ? { kind: data.kind, src: isVec(data.src, 2) ? data.src : null } : undefined
+            ranged ? { kind, src: isVec(data.src, 2) ? data.src : null } : undefined
           );
           return;
         }
-        case 'shot': {
-          if (match.mode !== 'guns' || peerId !== match.hostId || match.isHost) return;
-          const bot = typeof data.bot === 'string' ? match.combatants.get(data.bot) : null;
-          if (!bot?.bot || !isVec(data.o, 3) || !isVec(data.d, 3)) return;
-          ctx.spawnShot(new THREE.Vector3().fromArray(data.o), new THREE.Vector3().fromArray(data.d), bot.id);
-          return;
-        }
         case 'bomb': {
-          if (match.mode !== 'guns' || !isVec(data.o, 3) || !isVec(data.t, 3)) return;
+          if (!isVec(data.o, 3) || !isVec(data.t, 3)) return;
           let throwerId = peerId;
           if (data.bot != null) {
-            const bot = typeof data.bot === 'string' ? match.combatants.get(data.bot) : null;
-            if (peerId !== match.hostId || !bot?.bot) return;
+            const bot = hostBot(data.bot);
+            if (!bot) return;
             throwerId = bot.id;
           }
           launchBomb(throwerId, new THREE.Vector3().fromArray(data.o), new THREE.Vector3().fromArray(data.t), true);
+          return;
+        }
+        case 'magic': {
+          if (phase !== 'fighting' || !c.alive) return;
+          if (!isVec(data.o, 3) || !isVec(data.f, 3) || !isVec(data.l, 3)) return;
+          ctx.spawnMagic({
+            origin: new THREE.Vector3().fromArray(data.o),
+            forward: new THREE.Vector3().fromArray(data.f),
+            line: new THREE.Vector3().fromArray(data.l),
+            element: data.e === 'ice' ? 'ice' : 'fire',
+            caster: peerId
+          });
           return;
         }
         case 'blocked':
@@ -1562,20 +2064,54 @@ export function createMatchMode(ctx) {
             return;
           }
           const dir = isVec(data.dir, 2) ? new THREE.Vector3(data.dir[0], 0, data.dir[1]) : null;
-          if (match.mode === 'guns') {
-            const dmg = data.kind === 'bomb' ? BOMB_DAMAGE : GUN_DAMAGE;
-            const src = isVec(data.src, 2) ? { x: data.src[0], z: data.src[1] } : null;
-            damageBot(bot, dmg, dir, src);
-            return;
-          }
-          applyBotDamage(bot, dir);
+          const kind = data.kind === 'gun' || data.kind === 'bomb' ? data.kind : 'sword';
+          const dmg = kind === 'bomb' ? BOMB_DAMAGE : kind === 'gun' ? GUN_DAMAGE : 1;
+          applyBotDamage(bot, dir, dmg, peerId, kind);
           return;
         }
-        case 'dead':
-          markDead(peerId);
+        case 'dead': {
+          const by = typeof data.by === 'string' && match.combatants.has(data.by) ? data.by : null;
+          markDead(peerId, { by, kind: data.kind });
           return;
+        }
+        case 'kill': {
+          if (!fromHost) return;
+          applyScores(data.sc);
+          const v = typeof data.v === 'string' ? match.combatants.get(data.v) : null;
+          if (!v) return;
+          const by = typeof data.by === 'string' && match.combatants.has(data.by) ? data.by : null;
+          addFeed(v.id, by, data.k);
+          if (by === myId()) showKillPop(v.name);
+          if (!v.isSelf) markDead(v.id);
+          renderHud(true);
+          return;
+        }
+        case 'respawn': {
+          if (match.rule !== 'kills' || phase !== 'fighting') return;
+          const pose = pose3(data.pos);
+          if (!pose) return;
+          const who = data.bot != null ? hostBot(data.bot) : c;
+          if (!who || who.alive || who.left) return;
+          reviveCombatant(who, pose);
+          return;
+        }
+        case 'take': {
+          if (!match.isHost || typeof data.pid !== 'string' || !PID_RE.test(data.pid)) return;
+          hostTake(peerId, data.pid);
+          return;
+        }
+        case 'taken': {
+          if (!fromHost || typeof data.pid !== 'string' || !PID_RE.test(data.pid)) return;
+          const p = pickups.get(data.pid);
+          if (!p) return;
+          const r = Number.isFinite(data.r) ? Math.max(1000, Math.min(120000, data.r)) : PICKUP_TYPES[p.type].respawnMs;
+          pickups.setTaken(p.id, Date.now() + r);
+          if (data.by === myId() && match.combatants.get(myId())?.alive) ctx.applyPickup(p.type);
+          return;
+        }
         case 'end':
-          if (peerId !== match.hostId) return;
+          if (!fromHost) return;
+          applyScores(data.sc);
           showEnd({
             winnerTeam: data.winnerTeam === 0 || data.winnerTeam === 1 ? data.winnerTeam : null,
             winnerId: typeof data.winnerId === 'string' ? data.winnerId : null,
@@ -1588,7 +2124,7 @@ export function createMatchMode(ctx) {
             return;
           }
           c.lastHeardAt = Infinity;
-          markDead(peerId);
+          markDead(peerId, { left: true });
           return;
         default:
           return;
@@ -1605,13 +2141,14 @@ export function createMatchMode(ctx) {
           return;
         }
         const name = cleanName(data.name, 'Someone');
+        const rule = cleanRule(data.rule);
         pendingInvite = {
-          key, from: peerId, name, mode,
+          key, from: peerId, name, mode, rule,
           timer: setTimeout(() => {
             if (pendingInvite?.key === key) hideInvitePrompt();
           }, INVITE_TIMEOUT_MS)
         };
-        inviteText.textContent = `${name} invites you to ${MATCH_MODES[mode]}!`;
+        inviteText.textContent = `${name} invites you to ${MATCH_MODES[mode]} · ${MATCH_RULES[rule].icon} ${MATCH_RULES[rule].label}!`;
         invitePrompt.classList.remove('hidden');
         return;
       }
@@ -1676,6 +2213,7 @@ export function createMatchMode(ctx) {
         if (Array.isArray(data.teamChars) && data.teamChars.length === 2) {
           party.teamChars = data.teamChars.map((c) => (CHAR_KEYS.includes(c) ? c : 'antler'));
         }
+        party.rule = cleanRule(data.rule);
         const self = party.roster.find((m) => m.id === myId());
         if (self) party.myPick = cleanPick(self.pick);
         renderSetup();
@@ -1683,7 +2221,8 @@ export function createMatchMode(ctx) {
       }
       // ── Matchmaking queue ──
       case 'pull': {
-        const ok = phase === 'setup' && party?.isHost && party.mode === data.mode && joinedCount() === 0;
+        const ok = phase === 'setup' && party?.isHost && party.mode === data.mode
+          && party.rule === cleanRule(data.rule) && joinedCount() === 0;
         if (!ok) {
           send(peerId, { op: 'pullNo', key });
           return;
@@ -1737,7 +2276,10 @@ export function createMatchMode(ctx) {
         const fromHost = (phase === 'guest' && party?.hostId === peerId && data.partyKey === party.key)
           || (phase === 'pulled' && pulled?.hostId === peerId && data.matchId === pulled.matchId);
         if (!fromHost || data.matchId !== key || !MATCH_MODES[data.mode]) return;
-        beginMatch({ matchId: key, mode: data.mode, hostId: peerId, roster: data.roster, teamChars: data.teamChars });
+        beginMatch({
+          matchId: key, mode: data.mode, rule: data.rule, hostId: peerId,
+          roster: data.roster, teamChars: data.teamChars
+        });
         return;
       }
       default:
@@ -1798,8 +2340,9 @@ export function createMatchMode(ctx) {
     onPeersChange,
     getEnemyCombatants,
     getShotTargets,
+    getMagicTargets,
+    onLocalCast,
     throwLocalBomb,
-    isGunsMatch: () => match?.mode === 'guns',
     // In a battle (countdown / fighting / result)
     isInMatch: () => !!match,
     isFighting: () => phase === 'fighting',
@@ -1810,16 +2353,22 @@ export function createMatchMode(ctx) {
       const c = match?.combatants.get(peerId);
       return c ? MATCH_CHARACTERS[c.char].url : null;
     },
-    // The local player died: tell everyone, keep watching until the battle ends
+    // The local player died: tell everyone (with who did it); Survival: watch until the
+    // battle ends, Most Kills: back in RESPAWN_MS
     onLocalDeath: () => {
       if (!match || (phase !== 'fighting' && phase !== 'countdown')) return;
       const selfId = myId();
       const me = match.combatants.get(selfId);
       if (!me?.alive) return;
       ctx.stopWalk();
-      broadcast({ op: 'dead' });
-      showBanner('ELIMINATED', 'Watching until the battle ends');
-      markDead(selfId);
+      const credit = creditOf(me);
+      broadcast({ op: 'dead', by: credit.by, kind: credit.kind });
+      const killer = credit.by ? match.combatants.get(credit.by) : null;
+      const byText = killer ? `${KIND_ICONS[cleanKind(credit.kind)]} by ${killer.name}` : '';
+      showBanner('ELIMINATED', match.rule === 'kills'
+        ? `${byText ? `${byText} · ` : ''}respawning in ${Math.ceil(RESPAWN_MS / 1000)}`
+        : `${byText ? `${byText} · ` : ''}watching until the battle ends`);
+      markDead(selfId, credit);
     }
   };
 }

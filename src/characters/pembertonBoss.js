@@ -11,8 +11,8 @@
  *   • wand   — backs off and casts fire / ice blasts (EnemyPlayer's wand AI → enemy.onCast),
  *   • bombs  — lobs a bomb now and then when the player is at a distance (ctx.throwBomb),
  *   • bubble — after a hit, now and then a bubble round it stops everything for a while.
- * The gun / shield are the player's own models, held like Multiplayer Guns & Bombs bots hold
- * them (ctx.getWeaponGear). A stage boss waits (`autoStart: false`: passive, can't be hurt)
+ * The gun / shield are the player's own models, held like other fighters hold them in
+ * Multiplayer battles (ctx.getWeaponGear). A stage boss waits (`autoStart: false`: passive, can't be hurt)
  * until start() — then it grows to its size over GROW_MS and the glow + health bar come on.
  * Game access goes through `ctx` (see createBossFighter).
  */
@@ -200,7 +200,7 @@ export function createStageBoss(ctx) {
  *  autoStart                      — false: waits for start() (see createStageBoss)
  *  wandRange                      — { min, max } kept from the player while casting
  *  getTarget() → THREE.Object3D|null — the player model (null while dead)
- *  getWeaponGear() → { gun, shield } | null — as matchCtx.getWeaponGear (Guns & Bombs)
+ *  getWeaponGear() → { gun, shield } | null — as matchCtx.getWeaponGear (Multiplayer battles)
  *  fireBullet(origin, dir)        — a hostile bullet
  *  throwBomb(origin, target)      — a bomb that can blast the player
  *  onShieldBlock(position)        — its shield / bubble stopped something

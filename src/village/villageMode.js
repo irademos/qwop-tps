@@ -355,7 +355,7 @@ function markShared(root) {
 }
 
 // ── Little stand-in models for counter items without a GLB ────────────────────
-function buildItemMesh(kind) {
+export function buildItemMesh(kind) {
   const g = new THREE.Group();
   const std = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.1, ...extra });
   if (kind === 'gun') {

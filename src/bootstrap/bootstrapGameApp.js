@@ -49,7 +49,7 @@ import { createDeathCarry } from '../combat/deathCarry.js';
 import {
   createMagicBlasts, bladeBlocksBlast, createIceEncasing, setIceEncasingLevel, shakeIceEncasing, MAGIC_ELEMENTS
 } from '../combat/magicBlast.js';
-import { setWandGlow } from '../items/magicWand.js';
+import { setWandGlow, createWandModel } from '../items/magicWand.js';
 import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage, PEMBERTON_STAGE, villagerQuestReward, fillTalk } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
@@ -95,8 +95,10 @@ if ('serviceWorker' in navigator) {
 // Max health is stored as showdownMaxHealthSegments (older profiles only have maxHealthSegments).
 const statsForSave = (stats) => (stats ? { ...stats, showdownMaxHealthSegments: stats.maxHealthSegments } : stats);
 // Guests (no profile) have nameKey null: nothing is saved.
-const saveStatsImmediate = (nameKey, stats, ...rest) => (nameKey ? saveStatsImmediateRaw(nameKey, statsForSave(stats), ...rest) : undefined);
-const saveStatsThrottled = (nameKey, stats, ...rest) => (nameKey ? saveStatsThrottledRaw(nameKey, statsForSave(stats), ...rest) : undefined);
+// Multiplayer battles (matchCtx.startMatchLoadout): the pickup loadout is never saved.
+let _statSavesSuspended = false;
+const saveStatsImmediate = (nameKey, stats, ...rest) => (nameKey && !_statSavesSuspended ? saveStatsImmediateRaw(nameKey, statsForSave(stats), ...rest) : undefined);
+const saveStatsThrottled = (nameKey, stats, ...rest) => (nameKey && !_statSavesSuspended ? saveStatsThrottledRaw(nameKey, statsForSave(stats), ...rest) : undefined);
 
 // Sword Showdown: max "Shield Upgrade" purchases (each +SHIELD_UPGRADE_HEALTH durability → 20 + 4×10 = 60 max)
 const SHOWDOWN_MAX_SHIELD_UPGRADES = 4;
@@ -716,11 +718,12 @@ async function initCore(runtimeContext) {
   let duelMode = null; // Multiplayer mode: lobby + duels (created further down)
   let matchMode = null; // Multiplayer mode: Team Battle / Free For All (created further down)
   let devRoam = null; // Dev: Free Roam (Settings → Dev; created further down)
-  // Multiplayer Guns & Bombs battle: gun + shield instead of the sword, unlimited bullets /
-  // bombs, one shield; the real inventory is set aside meanwhile (matchCtx.enterMatch)
-  let _gunsMatch = false;
-  // Multiplayer is sword only (duels, Team Battle, Free For All) — except Guns & Bombs
-  const _mpSwordOnly = () => !!duelMode?.isActive() && !_gunsMatch;
+  // Multiplayer battle (Team Battle / Free For All): everyone starts with the sword and finds
+  // the rest on the arena's pickups; the real inventory / stats are set aside meanwhile and
+  // put back afterwards (matchCtx.startMatchLoadout / endMatchLoadout) — null outside one
+  let _matchLoadout = null;
+  // Multiplayer duels (and the lobby) are sword only; battles use the pickups
+  const _mpSwordOnly = () => !!duelMode?.isActive() && !_matchLoadout;
   var playerControls = null;
   let scene = null;
   let ambientLight = null;
@@ -1618,8 +1621,8 @@ async function initCore(runtimeContext) {
     }
 
     if (data.type === 'projectile') {
-      // Guns & Bombs: another fighter's bullet (their game deals its damage)
-      const fromMatch = !!matchMode?.isGunsMatch() && matchMode.acceptsPresenceFrom(peerId);
+      // Battle: another fighter's bullet (their game deals its damage)
+      const fromMatch = !!matchMode?.isInMatch() && matchMode.acceptsPresenceFrom(peerId);
       if (!duelMode?.acceptsPresenceFrom(peerId) && !fromMatch) return;
       if (!isProjectileMessage(data)) {
         logInvalidPayload('projectile', data);
@@ -1703,7 +1706,7 @@ async function initCore(runtimeContext) {
   // _setActiveMap before a mode starts; a map is loaded the first time it's needed.
   //   kind 'glb':     a plain GLB scene, scaled by `scale`
   //   scale (mappacks too): uniform world scale of the whole map; coordinates written for a map
-  //                   (spawn, DUEL_LOCATION / GUNS_LOCATION, STAGE_ROUTES) are in scaled world units
+  //                   (spawn, DUEL_LOCATION / ARENA_LOCATION, STAGE_ROUTES) are in scaled world units
   //   kind 'mappack': an editor .mappack (zip); map objects whose model file matches
   //                   `noGround` (trees) aren't stood on — characters walk through them,
   //                   bullets still stop at them. A pack with a sea level gets an ocean
@@ -2489,8 +2492,8 @@ async function initCore(runtimeContext) {
   const SHIELD_MAX_HEALTH_KEY = 'shieldMaxHealth';
   // Each Sword Showdown "Shield Upgrade" purchase adds this much durability to every shield
   const SHIELD_UPGRADE_HEALTH = 10;
-  const GUNS_MATCH_SHIELD_HEALTH = 6;  // Guns & Bombs: everyone's one shield, upgrades ignored
-  const getShieldMaxHealth = () => (_gunsMatch ? GUNS_MATCH_SHIELD_HEALTH : DEFAULT_SHIELD_HEALTH
+  const MATCH_SHIELD_HEALTH = 6;  // Multiplayer battles: a picked-up shield, upgrades ignored
+  const getShieldMaxHealth = () => (_matchLoadout ? MATCH_SHIELD_HEALTH : DEFAULT_SHIELD_HEALTH
     + Math.max(0, Math.floor(statsState.shieldUpgrades || 0)) * SHIELD_UPGRADE_HEALTH);
   let lastEquippedBeforeShield = null;
 
@@ -2597,12 +2600,12 @@ async function initCore(runtimeContext) {
     [MAGIC_WAND_ITEM_ID]: 'right',
   };
   // Magic wand: the sword weapon with the wand model (held the same way); spells instead of
-  // sword hits while it's out. Showdown (and the tutorial) only.
+  // sword hits while it's out. Showdown, the tutorial and (picked up) Multiplayer battles.
   let _wandActive = false;
   const hasMagicWand = () => (inventoryState[MAGIC_WAND_ITEM_ID]?.count || 0) > 0;
   const isWandEquipped = () => _wandActive && foamSword?.holder === playerControls;
   const getMana = () => (Number.isFinite(statsState.mana) ? statsState.mana : MAX_MANA);
-  const isWandAllowed = () => hasMagicWand() && !_classicMode && !_gunsMatch && !duelMode?.isActive();
+  const isWandAllowed = () => hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout);
   // Wand swipe in progress (phone-sword loop → _updateWandSwipe)
   const _wandSwipe = {
     active: false, startAt: 0, slowSince: null, cooldownUntil: 0, start: new THREE.Vector3(),
@@ -2615,7 +2618,7 @@ async function initCore(runtimeContext) {
   function updateManaUI() {
     const bar = document.getElementById('mana-bar');
     if (!bar) return;
-    const show = hasMagicWand() && !_classicMode && !duelMode?.isActive();
+    const show = hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout);
     bar.classList.toggle('hidden', !show);
     document.body.classList.toggle('has-mana', show);
     if (!show) return;
@@ -2643,7 +2646,7 @@ async function initCore(runtimeContext) {
   }
 
   function persistInventory() {
-    if (_gunsMatch) return; // the battle loadout is never saved
+    if (_matchLoadout) return; // the battle loadout is never saved
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt, inventoryState);
     updateSettingsUI();
   }
@@ -2812,14 +2815,13 @@ async function initCore(runtimeContext) {
 
   function equipInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
-    // Multiplayer duels are sword only; Guns & Bombs has no sword
+    // Multiplayer duels are sword only
     if (_mpSwordOnly() && itemId !== FOAM_SWORD_ITEM_ID) return;
-    if (_gunsMatch && itemId === FOAM_SWORD_ITEM_ID) return;
     if (_classicMode && itemId !== FOAM_SWORD_ITEM_ID) return; // Classic: sword only
     // The wand is the sword weapon in wand form: switching between them just swaps the model
     if (itemId === MAGIC_WAND_ITEM_ID || itemId === FOAM_SWORD_ITEM_ID) {
       const wand = itemId === MAGIC_WAND_ITEM_ID;
-      if (wand && (_mpSwordOnly() || _gunsMatch || matchMode?.isInMatch?.())) return; // Showdown only
+      if (wand && _mpSwordOnly()) return; // (not in duels)
       if (foamSword?.holder === playerControls && _wandActive !== wand) {
         // Already in hand: just swap sword ↔ wand
         _wandActive = wand;
@@ -3211,7 +3213,8 @@ async function initCore(runtimeContext) {
     target.copy(playerModel.position).setY(playerModel.position.y + BUBBLE_CENTER_HEIGHT)
   );
   const activatePlayerBubble = () => {
-    if (playerDead || isPlayerBubbleActive() || duelMode?.isActive()) return false; // never in Multiplayer
+    if (playerDead || isPlayerBubbleActive()) return false;
+    if (duelMode?.isActive() && !(_matchLoadout && matchMode?.isFighting())) return false; // battles only in Multiplayer
     if (getBubbleCount() <= 0) return false;
     setStat('bubbles', getBubbleCount() - 1, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -3906,7 +3909,7 @@ async function initCore(runtimeContext) {
   // the release point) and re-equips it once the clip is over. The bomb flies and blasts
   // like a bomber's (combat/playerBomb.js).
   const PLAYER_BOMB_THROW_DIST = 8;         // m ahead of the player where the bomb lands
-  const GUNS_BOMB_AIM_RANGE = 14;           // Guns & Bombs: bombs land on the closest opponent this near
+  const MATCH_BOMB_AIM_RANGE = 14;          // Multiplayer battles: bombs land on the closest opponent this near
   const PLAYER_BOMB_RELEASE_AT = 0.3;       // fraction of Throw.fbx where the bomb leaves the hand
   const PLAYER_BOMB_WINDUP_MS = 700;        // release time when the character hasn't loaded
   const PLAYER_BOMB_CLIP_TIMEOUT_MS = 2500; // release anyway if the clip is slow to load
@@ -3978,6 +3981,8 @@ async function initCore(runtimeContext) {
     },
   };
   const _magicTargets = (blast) => {
+    // Multiplayer battle blasts (anyone's): matchMode decides who they can hit
+    if (blast.side === 'match') return matchMode?.getMagicTargets(blast) ?? [];
     if (blast.side === 'enemy') {
       if (playerDead || _attacksHeld()) return [];
       _playerBlastTarget.center.copy(playerModel.position).setY(playerModel.position.y + 0.5);
@@ -4011,6 +4016,8 @@ async function initCore(runtimeContext) {
   // Player's spell: the swipe's line, flying the way the player faces
   let _manaToastAt = 0;
   const castPlayerSpell = (swipe) => {
+    const inMatch = !!matchMode?.isInMatch();
+    if (inMatch && !matchMode.isFighting()) return false;
     if (getMana() < WAND_MANA_COST) {
       const bar = document.getElementById('mana-bar');
       bar?.classList.remove('mana-flash');
@@ -4018,7 +4025,7 @@ async function initCore(runtimeContext) {
       bar?.classList.add('mana-flash');
       if (performance.now() - _manaToastAt > 2500) {
         _manaToastAt = performance.now();
-        showPickupToast('mana_potion', 1, '', { text: 'Out of mana — buy a 🧪 Mana Potion' });
+        showPickupToast('mana_potion', 1, '', { text: _matchLoadout ? 'Out of mana — grab a 🧪 Mana pickup' : 'Out of mana — buy a 🧪 Mana Potion' });
       }
       void psAutoBuyTick();
       return false;
@@ -4033,10 +4040,13 @@ async function initCore(runtimeContext) {
     const origin = playerModel.position.clone().addScaledVector(forward, 0.6);
     origin.y += MAGIC_BLAST_HEIGHT;
     const blast = magicBlasts.spawn({
-      origin, forward, line: swipe, side: 'player',
+      origin, forward, line: swipe,
+      // (battle blasts: every client spawns them, matchMode picks the targets)
+      side: inMatch ? 'match' : 'player', caster: inMatch ? multiplayer?.getId?.() ?? null : null,
       speed: PLAYER_BLAST_SPEED_MPS, length: PLAYER_BLAST_LENGTH,
       ignoreMap: !!showdownTutorial?.isActive(),
     });
+    if (inMatch) matchMode.onLocalCast({ origin, forward, line: blast.line, element: blast.element });
     _wandGlow.level = 1;
     _wandGlow.color.set(MAGIC_ELEMENTS[blast.element].glow);
     _playerCasts += 1;
@@ -4141,13 +4151,12 @@ async function initCore(runtimeContext) {
   const _playerBombForward = new THREE.Vector3();
   let playerBombThrow = null; // { restoreIds, startedAt, usesClip, released }
   const getPlayerBombCount = () => Math.max(0, Math.floor(statsState.bombs || 0));
-  // Guns & Bombs: unlimited bombs (the saved count is untouched)
-  const hasPlayerBomb = () => _gunsMatch || getPlayerBombCount() > 0;
+  const hasPlayerBomb = () => getPlayerBombCount() > 0;
   let lastPsBombButtonLabel = '';
   const updatePsBombButton = () => {
     const button = playerControls?.psBombBtn;
     if (!button) return;
-    const label = _gunsMatch ? '💣 ∞' : `💣 ${getPlayerBombCount()}`;
+    const label = `💣 ${getPlayerBombCount()}`;
     if (label !== lastPsBombButtonLabel) {
       button.textContent = label;
       lastPsBombButtonLabel = label;
@@ -4157,14 +4166,12 @@ async function initCore(runtimeContext) {
   };
   const throwPlayerBomb = () => {
     if (!playerBombs || playerDead || playerBombThrow || _mpSwordOnly()) return false;
-    if (_gunsMatch && !matchMode?.isFighting()) return false;
+    if (_matchLoadout && !matchMode?.isFighting()) return false;
     if (!hasPlayerBomb()) return false;
     const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
     if (glbCharacter?.isDead) return false; // knocked down by a blast
-    if (!_gunsMatch) {
-      setStat('bombs', getPlayerBombCount() - 1, { skipSave: true });
-      saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
-    }
+    setStat('bombs', getPlayerBombCount() - 1, { skipSave: true });
+    saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
     const restoreIds = getEquippedInventoryItemIds();
     restoreIds.forEach((itemId) => unequipInventoryItem(itemId));
     playerControls?.refreshActionButtons?.();
@@ -4185,10 +4192,10 @@ async function initCore(runtimeContext) {
     if (_playerBombForward.lengthSq() < 1e-6) _playerBombForward.set(0, 0, 1);
     _playerBombForward.normalize();
     let target = playerModel.position.clone().addScaledVector(_playerBombForward, PLAYER_BOMB_THROW_DIST);
-    if (_gunsMatch) {
-      // Guns & Bombs: lob it at the closest opponent in range
+    if (_matchLoadout) {
+      // Battle: lob it at the closest opponent in range
       let best = null;
-      let bestD = GUNS_BOMB_AIM_RANGE;
+      let bestD = MATCH_BOMB_AIM_RANGE;
       for (const t of _getPvpTargets()) {
         const d = t.position.distanceTo(playerModel.position);
         if (d < bestD) { bestD = d; best = t; }
@@ -4197,7 +4204,7 @@ async function initCore(runtimeContext) {
     }
     const groundY = getTerrainHeight(target.x, target.z);
     if (Number.isFinite(groundY)) target.y = groundY;
-    if (_gunsMatch && matchMode?.throwLocalBomb(_playerBombPalm.clone(), target)) return;
+    if (_matchLoadout && matchMode?.throwLocalBomb(_playerBombPalm.clone(), target)) return;
     playerBombs.throw(_playerBombPalm, target);
   };
   const finishPlayerBombThrow = () => {
@@ -4232,7 +4239,7 @@ async function initCore(runtimeContext) {
     if (!t.released) {
       if (glbCharacter?.isDead) {
         // Blasted off our feet mid-windup: throw cancelled, bomb refunded
-        if (!_gunsMatch) setStat('bombs', getPlayerBombCount() + 1, { skipSave: true });
+        setStat('bombs', getPlayerBombCount() + 1, { skipSave: true });
         finishPlayerBombThrow();
         return;
       }
@@ -5325,9 +5332,8 @@ async function initCore(runtimeContext) {
     const inv = appStateRef?.getInventory?.() || {};
     if (!((inv[itemId]?.count ?? 0) > 0)) return;
     const equippedId = playerControls?.getEquippedWeapon?.('right')?.itemId;
-    // Pressing the held weapon again goes back to the sword (Guns & Bombs: to the gun)
-    const fallbackId = _gunsMatch ? 'pistol' : FOAM_SWORD_ITEM_ID;
-    appStateRef.equipInventoryItem?.(equippedId === itemId ? fallbackId : itemId);
+    // Pressing the held weapon again goes back to the sword
+    appStateRef.equipInventoryItem?.(equippedId === itemId ? FOAM_SWORD_ITEM_ID : itemId);
     playerControls?.refreshActionButtons?.();
   };
   const _handlePhoneAction = (action) => {
@@ -5364,16 +5370,7 @@ async function initCore(runtimeContext) {
         ammo: 0, equipped: FOAM_SWORD_ITEM_ID, highlight: null, blockOnly: true
       };
     }
-    if (_gunsMatch) {
-      // Guns & Bombs: gun, shield and unlimited bombs, no bubble
-      return {
-        bombs: 99, bubbles: 0, bubbleActive: false, hasGun: true,
-        hasShield: (inv[SHIELD_ITEM_ID]?.count ?? 0) > 0,
-        ammo: 99, equipped: playerControls?.getEquippedWeapon?.('right')?.itemId ?? 'pistol', highlight: null,
-        swordAllowed: false
-      };
-    }
-    if (duelMode?.isActive()) {
+    if (duelMode?.isActive() && !_matchLoadout) {
       // Multiplayer duels are sword only: grey out bomb/bubble/gun/shield on the phone
       return {
         bombs: 0, bubbles: 0, bubbleActive: false, hasGun: false, hasShield: false,
@@ -5923,9 +5920,7 @@ async function initCore(runtimeContext) {
     activateBubble: () => activatePlayerBubble(),
     getBombCount: () => getPlayerBombCount(),
     throwBomb: () => throwPlayerBomb(),
-    // Multiplayer Guns & Bombs has no sword (PlayerControls.refreshActionButtons)
-    isSwordAllowed: () => !_gunsMatch,
-    // Magic wand: owned, and only in Showdown / the tutorial
+    // Magic wand: owned (Showdown / the tutorial) or picked up in a Multiplayer battle
     isWandAllowed: () => isWandAllowed(),
     isWandEquipped: () => isWandEquipped(),
     setWandShieldHold: (down) => setWandShieldHold(down),
@@ -6825,10 +6820,15 @@ async function initCore(runtimeContext) {
         blocking: !!window.phoneSwordGyro?.blocking
       };
     },
-    // The opponent's sword landed on us (Guns & Bombs: a bullet / bomb blast, `ranged` =
-    // { kind, src: [x, z] where it came from } — a raised shield facing it takes the hit)
+    // The opponent's sword landed on us (battles: also a bullet / bomb blast, `ranged` =
+    // { kind, src: [x, z] where it came from } — a raised shield facing it takes the hit;
+    // a bubble stops everything)
     applyHit: (dmg, dir, ranged = null) => {
       if (playerDead) return;
+      if (isPlayerBubbleActive()) {
+        audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.45, { cooldownKey: 'psw-bubble-block', cooldownMs: 200 });
+        return;
+      }
       if (ranged && Array.isArray(ranged.src)) {
         _shieldHitFrom.position.set(ranged.src[0], playerModel.position.y, ranged.src[1]);
         if (window.tryBlockLocalPlayerHitWithShield?.({ attackerModel: _shieldHitFrom, damage: dmg })) {
@@ -6855,8 +6855,8 @@ async function initCore(runtimeContext) {
       window._pswShowBlockFlash?.('player');
       audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.65, { cooldownKey: 'psw-parry', cooldownMs: 300 });
     },
-    // Lobby's Team Battle / Free For All buttons
-    openMatch: (mode) => matchMode?.openSetup(mode),
+    // Lobby's Team Battle / Free For All buttons (rule: 'survival' | 'kills')
+    openMatch: (mode, rule) => matchMode?.openSetup(mode, rule),
     // "Back" in the lobby: multiplayer is off again, show the start screen
     onExit: () => {
       matchMode?.exit();
@@ -6867,14 +6867,18 @@ async function initCore(runtimeContext) {
   duelMode = createDuelMode(duelCtx);
 
   // ── Multiplayer mode: Team Battle / Free For All (src/multiplayer/matchMode.js) ──
-  // Same arena, sword rules and health as duels (but no auto-walk: players move
-  // themselves, bots still walk to their enemies); up to 10 fighters, bots fill the empty
-  // spots (simulated by the battle's host as EnemyPlayers).
+  // Same sword rules and health as duels (but no auto-walk: players move themselves, bots
+  // still walk to their enemies); up to 10 fighters, bots fill the empty spots (simulated
+  // by the battle's host as EnemyPlayers). Everyone starts with the sword; the rest comes
+  // from the arena's pickups (matchCtx.applyPickup) and is never saved.
   const MATCH_HEALTH_SEGMENTS = DUEL_HEALTH_SEGMENTS;
-  // Guns & Bombs: keep some room
-  const GUNS_MIN_SPACING = 2.5;
-  let _gunsSavedLoadout = null;        // the real pistol / shield entries while in Guns & Bombs
   const MATCH_BOT_SWING_CHANCE = 0.35;
+  // What each pickup gives
+  const MATCH_GUN_AMMO = 12;
+  const MATCH_AMMO_PICKUP = 10;
+  const MATCH_BOMB_PICKUP = 2;
+  const MATCH_MANA_PICKUP = 50;
+  const MATCH_HEART_PICKUP = 2;
   const _upAxis = new THREE.Vector3(0, 1, 0);
   const _placeRemote = (entry, x, y, z, yaw) => {
     entry.targetPos.set(x, y, z);
@@ -6884,20 +6888,65 @@ async function initCore(runtimeContext) {
     }
     entry.model.visible = true;
   };
+  // Battle loadout: nothing but the sword (pickups add the rest)
+  const _clearMatchItems = () => {
+    getEquippedInventoryItemIds().forEach((itemId) => unequipInventoryItem(itemId));
+    if (_wandActive) { _wandActive = false; if (foamSword) foamSword.wand = false; }
+    playerBombThrow = null;
+    playerBombs?.setHeld(null);
+    delete inventoryState.pistol;
+    delete inventoryState[SHIELD_ITEM_ID];
+    delete inventoryState[MAGIC_WAND_ITEM_ID];
+    statsState.bombs = 0;
+    statsState.bubbles = 0;
+    statsState.mana = 0;
+    if (_matchLoadout) _matchLoadout.ammoBank = 0;
+    lastEquippedBeforeShield = null;
+    hideShieldHealthHUD();
+    equipInventoryItem(FOAM_SWORD_ITEM_ID);
+    playerControls?.refreshActionButtons?.();
+    updatePsBombButton();
+    updatePsBubbleButton();
+    updateManaUI();
+  };
+  // A bubble for `ms` (Most Kills spawn protection)
+  const _grantPlayerBubble = (ms) => {
+    bubbleActiveUntil = Math.max(bubbleActiveUntil, Date.now() + ms);
+    ensureBubbleMesh().visible = true;
+    updatePsBubbleButton();
+  };
+  const _matchToastIcon = {
+    gun: 'pistol', ammo: PISTOL_AMMO_KEY, shield: SHIELD_ITEM_ID, bomb: 'showdown_bomb', wand: MAGIC_WAND_ITEM_ID,
+    mana: 'mana_potion', heart: 'heart', potion: 'life_potion', bubble: 'bubble'
+  };
   const matchCtx = {
     scene,
     camera,
     matchHealth: MATCH_HEALTH_SEGMENTS,
+    magicDamage: { fire: MAGIC_FIRE_DAMAGE, ice: MAGIC_ICE_DAMAGE },
+    magicFreezeSeconds: () => _magicFreezeSeconds(),
     getMultiplayer: () => multiplayer,
     getPlayerName: () => playerName,
-    // Free For All / Guns & Bombs only offer characters unlocked in Showdown
+    // Free For All only offers characters unlocked in Showdown
     getUnlockedCharacters: () => _psChars.unlocked,
+    getGroundY: (x, z) => getSpawnY(x, z, 0),
+    // Pickups / respawns stay out of the water
+    isBlocked: (x, z) => _isOverWater(x, z),
     suspendLobby: () => duelMode.suspend(),
     resumeLobby: (flash) => duelMode.resume(flash),
     isLobbyIdle: () => duelMode.isIdleInLobby(),
     createSwordMesh: duelCtx.createSwordMesh,
+    // Another fighter's magic wand (posed like their sword)
+    createWandMesh: () => {
+      const wand = createWandModel();
+      const group = new THREE.Group();
+      group.name = 'remote-wand';
+      group.add(wand);
+      return group;
+    },
     getRemoteModel: duelCtx.getRemoteModel,
     removeRemotePlayer: (id) => removeRemotePlayer(id, 'match-ended'),
+    reviveRemoteModel: (id) => duelCtx.reviveRemotePlayer(id),
     // Another fighter's model, placed at its start spot
     ensureRemoteModel: (id, name, characterUrl, pose) => {
       const entry = otherPlayers[id] || _spawnRemotePlayer(id, name, characterUrl);
@@ -6917,64 +6966,152 @@ async function initCore(runtimeContext) {
       _placeRemote(entry, pos[0], pos[1], pos[2], yaw);
     },
     setControlsLocked: duelCtx.setControlsLocked,
-    enterMatch: ({ x, z, yaw, characterUrl, loadout = null }) => {
-      matchCtx.endGunsLoadout();
+    enterMatch: ({ x, z, yaw, characterUrl }) => {
+      matchCtx.endMatchLoadout();
       duelCtx.enterDuel({ x, z, yaw });
       setPlayerCharacterUrl(playerModel, characterUrl);
-      if (loadout === 'guns') matchCtx.startGunsLoadout();
+      matchCtx.startMatchLoadout();
     },
     leaveMatch: () => {
-      matchCtx.endGunsLoadout();
+      matchCtx.endMatchLoadout();
       setPlayerCharacterUrl(playerModel, glbCharacterConfig.villageBoyUrl);
       duelCtx.leaveDuel();
     },
-    // Guns & Bombs: the gun (unlimited bullets) in hand, one fresh shield, unlimited bombs.
-    // The real pistol / shield entries are put back by endGunsLoadout; nothing is saved meanwhile.
-    startGunsLoadout: () => {
-      if (_gunsMatch) return;
-      _gunsSavedLoadout = { pistol: inventoryState.pistol, shield: inventoryState[SHIELD_ITEM_ID] };
-      _gunsMatch = true;
-      document.body.classList.add('guns-match');
-      getEquippedInventoryItemIds().forEach((itemId) => unequipInventoryItem(itemId));
-      inventoryState.pistol = ensureCatalogEntry('pistol', { count: 1, [PISTOL_AMMO_KEY]: 99 });
-      inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
-        count: 1,
-        [SHIELD_HEALTH_KEY]: GUNS_MATCH_SHIELD_HEALTH,
-        [SHIELD_MAX_HEALTH_KEY]: GUNS_MATCH_SHIELD_HEALTH
-      }));
-      if (pistol) pistol.infiniteAmmo = true;
-      lastEquippedBeforeShield = 'pistol';
-      equipInventoryItem('pistol');
-      playerControls?.refreshActionButtons?.();
-      updatePsBombButton();
+    // Set the real gun / shield / wand / bombs / bubbles / mana aside (put back by
+    // endMatchLoadout) and start with the sword only; nothing is saved meanwhile
+    startMatchLoadout: () => {
+      if (_matchLoadout) return;
+      _matchLoadout = {
+        ammoBank: 0,
+        saved: {
+          pistol: inventoryState.pistol,
+          shield: inventoryState[SHIELD_ITEM_ID],
+          wand: inventoryState[MAGIC_WAND_ITEM_ID],
+          bombs: statsState.bombs,
+          bubbles: statsState.bubbles,
+          mana: statsState.mana
+        }
+      };
+      _statSavesSuspended = true;
+      document.body.classList.add('match-loadout');
+      _clearMatchItems();
     },
-    endGunsLoadout: () => {
-      if (!_gunsMatch) return;
+    endMatchLoadout: () => {
+      if (!_matchLoadout) return;
       getEquippedInventoryItemIds().forEach((itemId) => unequipInventoryItem(itemId));
-      _gunsMatch = false;
-      document.body.classList.remove('guns-match');
-      if (pistol) pistol.infiniteAmmo = false;
+      if (_wandActive) { _wandActive = false; if (foamSword) foamSword.wand = false; }
+      deactivatePlayerBubble();
       playerBombThrow = null;
       playerBombs?.setHeld(null);
       playerBombs?.clear();
-      const saved = _gunsSavedLoadout || {};
-      _gunsSavedLoadout = null;
-      if (saved.pistol) inventoryState.pistol = saved.pistol;
-      else delete inventoryState.pistol;
-      if (saved.shield) inventoryState[SHIELD_ITEM_ID] = saved.shield;
-      else delete inventoryState[SHIELD_ITEM_ID];
+      const { saved } = _matchLoadout;
+      _matchLoadout = null;
+      document.body.classList.remove('match-loadout');
+      const putBack = (key, value) => {
+        if (value) inventoryState[key] = value;
+        else delete inventoryState[key];
+      };
+      putBack('pistol', saved.pistol);
+      putBack(SHIELD_ITEM_ID, saved.shield);
+      putBack(MAGIC_WAND_ITEM_ID, saved.wand);
+      statsState.bombs = saved.bombs;
+      statsState.bubbles = saved.bubbles;
+      statsState.mana = saved.mana;
+      _statSavesSuspended = false;
       lastEquippedBeforeShield = null;
       hideShieldHealthHUD();
       equipInventoryItem(FOAM_SWORD_ITEM_ID);
       playerControls?.refreshActionButtons?.();
       updatePsBombButton();
+      updatePsBubbleButton();
+      updateManaUI();
     },
-    // 'gun' | 'shield' | null — what the local player holds (sent to the other fighters)
+    // A pickup we walked over (granted by the battle's host)
+    applyPickup: (type) => {
+      if (!_matchLoadout || playerDead) return;
+      const hasGun = (inventoryState.pistol?.count ?? 0) > 0;
+      let text = '';
+      if (type === 'gun') {
+        const ammo = MATCH_GUN_AMMO + _matchLoadout.ammoBank;
+        _matchLoadout.ammoBank = 0;
+        if (hasGun) {
+          inventoryState.pistol = { ...inventoryState.pistol, [PISTOL_AMMO_KEY]: getPistolAmmoCount() + ammo };
+          text = `+${ammo} 🔶 Bullets`;
+        } else {
+          inventoryState.pistol = ensureCatalogEntry('pistol', { count: 1, [PISTOL_AMMO_KEY]: ammo });
+          text = `🔫 Gun · ${ammo} bullets`;
+        }
+      } else if (type === 'ammo') {
+        if (hasGun) {
+          inventoryState.pistol = { ...inventoryState.pistol, [PISTOL_AMMO_KEY]: getPistolAmmoCount() + MATCH_AMMO_PICKUP };
+          text = `+${MATCH_AMMO_PICKUP} 🔶 Bullets`;
+        } else {
+          _matchLoadout.ammoBank += MATCH_AMMO_PICKUP;
+          text = `+${MATCH_AMMO_PICKUP} 🔶 Bullets (for when you find a gun)`;
+        }
+      } else if (type === 'shield') {
+        inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+          count: 1,
+          [SHIELD_HEALTH_KEY]: MATCH_SHIELD_HEALTH,
+          [SHIELD_MAX_HEALTH_KEY]: MATCH_SHIELD_HEALTH
+        }));
+        if (isInventoryItemEquipped(SHIELD_ITEM_ID)) {
+          updateShieldHealthHUD(MATCH_SHIELD_HEALTH, MATCH_SHIELD_HEALTH, 1);
+        }
+        text = '🛡️ Shield';
+      } else if (type === 'bomb') {
+        setStat('bombs', getPlayerBombCount() + MATCH_BOMB_PICKUP, { skipSave: true });
+        text = `+${MATCH_BOMB_PICKUP} 💣 Bombs`;
+      } else if (type === 'wand') {
+        const had = hasMagicWand();
+        inventoryState[MAGIC_WAND_ITEM_ID] = ensureCatalogEntry(MAGIC_WAND_ITEM_ID, { count: 1 });
+        setStat('mana', MAX_MANA, { skipSave: true });
+        text = had ? '🧪 Mana refilled' : '🪄 Magic Wand · swipe to cast';
+      } else if (type === 'mana') {
+        setStat('mana', Math.min(MAX_MANA, getMana() + MATCH_MANA_PICKUP), { skipSave: true });
+        text = `+${MATCH_MANA_PICKUP} 🧪 Mana`;
+      } else if (type === 'heart' || type === 'potion') {
+        const before = statsState.health;
+        const next = type === 'heart' ? before + MATCH_HEART_PICKUP : effectiveMaxHealthSegments();
+        setStat('health', next, { skipSave: true });
+        const gained = Math.max(0, Math.round(statsState.health - before));
+        text = gained > 0 ? `+${gained} ❤️ Health` : 'Health already full';
+      } else if (type === 'bubble') {
+        setStat('bubbles', getBubbleCount() + 1, { skipSave: true });
+        text = '+1 🫧 Bubble';
+      } else {
+        return;
+      }
+      // (a gun in hand shows its new bullet count)
+      if ((type === 'gun' || type === 'ammo') && isInventoryItemEquipped('pistol')) {
+        playerControls?.setAmmo?.(getPistolAmmoCount(), getAmmoLabelForType('bullet'), getAmmoIconForType('bullet'));
+      }
+      playerControls?.refreshActionButtons?.();
+      updatePsBombButton();
+      updatePsBubbleButton();
+      updateManaUI();
+      audioManager?.playSFX?.('SFX/Spells/Waterspray 1.ogg', 0.55, { cooldownKey: 'match-pickup', cooldownMs: 120 });
+      showPickupToast(_matchToastIcon[type] || type, 1, '', { text });
+    },
+    // Most Kills: back on our feet at `pose`, full health, sword only, a spawn bubble
+    respawnLocal: ({ x, z, yaw }, protectMs = 0) => {
+      thawPlayer();
+      respawnPlayer();
+      _teleportPlayer(x, z, yaw);
+      setStat('health', MATCH_HEALTH_SEGMENTS, { skipSave: true });
+      _clearMatchItems();
+      if (protectMs > 0) _grantPlayerBubble(protectMs);
+    },
+    // 'sword' | 'wand' | 'gun' | 'shield' | null — what the local player holds (sent to the
+    // other fighters)
     getLocalWeapon: () => {
+      if (isWandEquipped()) return 'wand';
       if (isInventoryItemEquipped('pistol')) return 'gun';
       if (isInventoryItemEquipped(SHIELD_ITEM_ID)) return 'shield';
+      if (foamSword?.holder === playerControls) return 'sword';
       return null;
     },
+    isBubbleActive: () => isPlayerBubbleActive(),
     // The gun / shield other fighters hold, posed like the local player's: model clone,
     // hold offset + rotation on the weapon hand, and where both hands grip it
     getWeaponGear: () => {
@@ -6999,6 +7136,15 @@ async function initCore(runtimeContext) {
       };
       return { gun: gearOf(pistol, 'gun'), shield: gearOf(shield, 'shield') };
     },
+    // A battle blast someone else cast (matchMode picks its targets)
+    spawnMagic: ({ origin, forward, line, element, caster }) => {
+      magicBlasts.spawn({
+        origin, forward, line, element, side: 'match', caster,
+        speed: PLAYER_BLAST_SPEED_MPS, length: PLAYER_BLAST_LENGTH,
+      });
+    },
+    // The local player as a blast target ({ center, radius, blocks(blast), onHit(blast) })
+    getLocalBlastTarget: () => _playerBlastTarget,
     // A bullet fired by another fighter (or a host bot) — damage is decided by matchMode
     spawnShot: (origin, dir, shooterId) => spawnPistolBullet(origin, dir, shooterId),
     // A bomb lobbed from `origin` to `target`; its blast hits `getBlastTargets()`
@@ -7020,7 +7166,7 @@ async function initCore(runtimeContext) {
       _playerKnockback.endTime = Date.now() + 500;
     },
     spawnBlood: (pos, groundY) => spawnBloodBurst(scene, pos, { groundY, intensity: 0.8 }),
-    createBot: ({ x, z, yaw, characterUrl, ranged = null }) => {
+    createBot: ({ x, z, yaw, characterUrl }) => {
       const groundY = getSpawnY(x, z, 0);
       const y = Number.isFinite(groundY) ? groundY : playerModel.position.y;
       const bot = new EnemyPlayer(scene, RAPIER, rapierWorld, {
@@ -7030,7 +7176,6 @@ async function initCore(runtimeContext) {
         swordDamage: 1,
         showHealthBar: false,
         swingChance: MATCH_BOT_SWING_CHANCE,
-        ranged,
       });
       bot.group.rotation.y = yaw;
       bot._camera = camera;
@@ -7941,7 +8086,7 @@ async function initCore(runtimeContext) {
           _sdx /= _sDist;
           _sdz /= _sDist;
         }
-        const _minSpacing = _gunsMatch ? GUNS_MIN_SPACING : DUEL_MIN_SPACING;
+        const _minSpacing = DUEL_MIN_SPACING;
         if (_sDist < _minSpacing) {
           const _step = Math.min(DUEL_SPACING_SPEED * frameDelta, _minSpacing - _sDist);
           const _nx = playerModel.position.x + _sdx * _step;
@@ -8262,8 +8407,8 @@ async function initCore(runtimeContext) {
         rotation: playerModel.rotation.y,
         action: playerModel.userData.currentAction
       };
-      // (Guns & Bombs draws other fighters' shields itself — matchMode.js)
-      payload.equippedLeft = !_gunsMatch && isInventoryItemEquipped(SHIELD_ITEM_ID) ? SHIELD_ITEM_ID : null;
+      // (battles draw other fighters' shields themselves — matchMode.js)
+      payload.equippedLeft = !_matchLoadout && isInventoryItemEquipped(SHIELD_ITEM_ID) ? SHIELD_ITEM_ID : null;
       payload.equippedRight = isInventoryItemEquipped(FOAM_SWORD_ITEM_ID) ? 'sword' : null;
       const dx = payload.x - (lastSentPresenceState.x ?? payload.x);
       const dy = payload.y - (lastSentPresenceState.y ?? payload.y);

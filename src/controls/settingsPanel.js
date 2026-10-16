@@ -618,7 +618,7 @@ function buildDevPanel() {
   locButton.type = 'button';
   locButton.dataset.action = 'dev-copy-location';
   const locHint = createElement('div', 'settings-muted',
-    'Copies {x, y, z, yaw} — paste into DUEL_LOCATION (duelMode.js) or GUNS_LOCATION (matchMode.js).');
+    'Copies {x, y, z, yaw} — paste into DUEL_LOCATION (duelMode.js) or ARENA_LOCATION (matchMode.js).');
 
   const routesTitle = createElement('h3', 'settings-section-title', 'Showdown Stage Routes');
   const routesStatus = createElement('div', 'settings-muted');

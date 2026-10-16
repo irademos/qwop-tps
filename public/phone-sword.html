@@ -345,7 +345,7 @@
       else {
         blockBtn.classList.add('pressed');
         if (pressMode === 'fire') sendAction('fire');
-        // (Shield again goes back to the sword — Guns & Bombs: the gun)
+        // (Shield again goes back to the sword)
         else if (pressMode === 'sword') sendAction('shield');
         else if (pressMode === 'shield') sendAction('wandShieldDown');
       }
@@ -446,7 +446,7 @@
       barMode = nextMode;
       ['fire', 'sword', 'shield'].forEach((m) => blockBtn.classList.toggle(`mode-${m}`, barMode === m));
       blockBtn.textContent = barMode === 'fire' ? `🔥 FIRE ${st.ammo ?? 0}`
-        : barMode === 'sword' ? (st.swordAllowed === false ? '🔫 GUN' : '🗡️ SWORD')
+        : barMode === 'sword' ? '🗡️ SWORD'
         : barMode === 'shield' ? '🛡 SHIELD'
         : '🛡️ BLOCK';
       // Magic wand (Showdown, once bought): swaps with the sword; shows the mana left
