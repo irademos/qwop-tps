@@ -38,6 +38,7 @@ import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 import { stylizeObject } from '../environment/artStyle.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { PEMBERTON_SCALE, addRedGlow } from '../characters/pembertonBoss.js';
+import { talkAutoHoldSeconds } from '../characters/stageBoss.js';
 import { createWandModel } from '../items/magicWand.js';
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -1205,6 +1206,8 @@ export function createVillage(ctx) {
   // line). A 'you' line is a choice of two replies (either one carries on); the last line ends
   // with the script's end buttons (the quest's accept / VILLAGER_DECLINE). A line marked `pay`
   // hands over the reward owed for the last stage (ctx.reward.collect) as it shows.
+  // A finished line goes on by itself after talkAutoHoldSeconds; buttons: the first one (the
+  // reply that carries on / the accept that starts the stage).
   const talkVars = (extra = {}) => ({
     name: ctx.getPlayerName?.() || 'friend',
     controls: COARSE_POINTER ? INTRO_CONTROLS.touch : INTRO_CONTROLS.keys,
@@ -1238,7 +1241,7 @@ export function createVillage(ctx) {
     };
   }
   function startTalk(script = questScript()) {
-    talk = { script, i: -1, who: 'them', words: [], shown: 0, acc: 0, done: true, choices: null };
+    talk = { script, i: -1, who: 'them', words: [], shown: 0, acc: 0, done: true, choices: null, wait: 0 };
     el.talkQuest.textContent = script.title;
     nextLine();
   }
@@ -1269,6 +1272,7 @@ export function createVillage(ctx) {
     talk.acc = 0;
     talk.done = false;
     talk.choices = null;
+    talk.wait = 0;
     el.talk.classList.toggle('is-action', who === 'action');
     el.talkWho.textContent = who === 'action' ? '' : talk.script.who;
     el.talkChoices.replaceChildren();
@@ -1304,6 +1308,7 @@ export function createVillage(ctx) {
       ? [[reply[1], onReply], ...(script.cancel ? [[script.cancel, () => unfocus()]] : [])]
       : script.end;
     talk.choices = options;
+    talk.wait = 0;
     el.talkMore.classList.add('hidden');
     el.talkChoices.replaceChildren(...options.map(([label, onClick, cls = 'ui-btn-secondary']) => {
       const b = document.createElement('button');
@@ -1319,8 +1324,21 @@ export function createVillage(ctx) {
     if (!talk.done) finishLine();
     else if (!talk.choices) nextLine();
   }
+  // Enter / E / the phone's interact button: finish the line / next / the first button
+  function interactTalk() {
+    if (!talk || starting) return;
+    if (talk.done && talk.choices) talk.choices[0]?.[1]();
+    else advanceTalk();
+  }
   function updateTalk(dt) {
-    if (!talk || talk.done) return;
+    if (!talk) return;
+    if (talk.done) {
+      // (read it, then on by itself — not while the settings are open or the stage is starting)
+      if (starting || document.body.classList.contains('settings-open')) return;
+      talk.wait += dt;
+      if (talk.wait >= talkAutoHoldSeconds(talk.words.length, talk.choices?.map((c) => c[0]) ?? null)) interactTalk();
+      return;
+    }
     talk.acc += dt * TALK_WORDS_PER_SEC;
     const n = Math.min(talk.words.length, Math.floor(talk.acc));
     if (n === talk.shown) return;
@@ -1667,8 +1685,7 @@ export function createVillage(ctx) {
     if (focus === 'villager' && talk) {
       // Conversation: Enter / E / Space = finish the line / next; 1, 2 = a reply
       if (key === 'Enter' || key === 'e' || key === ' ') {
-        if (talk.done && talk.choices) talk.choices[0]?.[1]();
-        else advanceTalk();
+        interactTalk();
         e.preventDefault();
         return;
       }
@@ -1681,8 +1698,7 @@ export function createVillage(ctx) {
     }
     if (key === 'Escape' && focus && !starting) { unfocus(); e.preventDefault(); return; }
     if ((key === 'e' || key === 'Enter') && !focus && (switchNpc || nearKeys)) {
-      if (switchNpc) pickCharacter(switchNpc);
-      else focusStation(nearKeys.split(',')[0]);
+      interact();
       e.preventDefault();
       return;
     }
@@ -1690,6 +1706,33 @@ export function createVillage(ctx) {
     stepItem(e.key === 'ArrowLeft' ? -1 : 1);
     e.preventDefault();
   };
+
+  // ── The phone's interact button (its Block bar in the village) / E ──
+  // Free walking: the station / character in reach (Switch, Shop, Talk, Campfire); talking: on
+  // with the talk (the first button = carry on / accept); at the campfire: sit; at the shop: back.
+  const canInteract = () => active && !leaving && !approaching && !sitting && !starting
+    && !(intro && intro.phase !== 'talk');
+  function interact() {
+    if (!canInteract()) return;
+    if (focus === 'villager' && talk) { interactTalk(); return; }
+    if (focus === 'fire') {
+      const next = ctx.time.get() === 'night' ? SIT_CHOICES.day : SIT_CHOICES.night;
+      sitUntil(next);
+      return;
+    }
+    if (focus) { unfocus(); return; }
+    if (switchNpc) pickCharacter(switchNpc);
+    else if (nearKeys) focusStation(nearKeys.split(',')[0]);
+  }
+  function interactLabel() {
+    if (!canInteract()) return null;
+    if (focus === 'villager' && talk) return talk.done && talk.choices ? talk.choices[0][0] : '▶ Next';
+    if (focus === 'fire') return '🔥 Sit';
+    if (focus) return '⬅ Back';
+    if (switchNpc) return '🔄 Switch';
+    if (nearKeys) return actLabel(nearKeys.split(',')[0]);
+    return null;
+  }
 
   function onTarget(t) {
     if (t.station === 'villager') {
@@ -2142,5 +2185,8 @@ export function createVillage(ctx) {
     isActive: () => active,
     /** True while the village (not the stage walk after it) has the player. */
     isOpen: () => active && !leaving,
+    interact,
+    /** What the interact button would do right now (null: nothing in reach). */
+    interactLabel,
   };
 }

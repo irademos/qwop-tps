@@ -150,12 +150,30 @@ export function stageBossTalk(stage, character, { afterStory = false } = {}) {
 
 const TALK_WORDS_PER_SEC = 13; // as the villager's
 
+// Auto-continue: once a line has played out it waits long enough to read, then goes on by
+// itself — and when it ends on buttons, picks the first one (the one that carries on / starts
+// the fight or stage). Shared with the villager's talk (villageMode.js).
+export const TALK_AUTO_BASE_S = 1.4;      // every line waits at least this long…
+export const TALK_AUTO_PER_WORD_S = 0.28; // …plus this per word (line + buttons)
+export const TALK_AUTO_CHOICE_S = 1.2;    // extra wait when buttons are showing
+export const TALK_AUTO_MAX_S = 9;
+/** Seconds a finished line waits before the talk goes on by itself. */
+export function talkAutoHoldSeconds(words, choiceLabels = null) {
+  const choiceWords = choiceLabels
+    ? choiceLabels.reduce((n, label) => n + String(label).split(/\s+/).filter(Boolean).length, 0)
+    : 0;
+  return Math.min(TALK_AUTO_MAX_S,
+    TALK_AUTO_BASE_S + (words + choiceWords) * TALK_AUTO_PER_WORD_S + (choiceLabels ? TALK_AUTO_CHOICE_S : 0));
+}
+
 /**
  * The talk box (bottom centre, over the HUD). One line at a time, played out a word or two at
  * a time; tapping it (or Enter) finishes the line / goes on. A 'you' line is a reply button;
  * the last line ends with the fight / spare button. `fill(text)` fills a line's {name}.
+ * A finished line goes on by itself after talkAutoHoldSeconds (buttons: the first one).
  * @returns {{ open(talk, onDone: (choice: 'fight'|'spare') => void): void, close(): void,
- *             update(dt: number): void, isOpen(): boolean }}
+ *             update(dt: number): void, isOpen(): boolean, interact(): void,
+ *             interactLabel(): string|null }}
  */
 export function createBossTalk({ fill = (text) => text } = {}) {
   const layer = document.createElement('div');
@@ -171,7 +189,7 @@ export function createBossTalk({ fill = (text) => text } = {}) {
   const $ = (k) => layer.querySelector(`[data-b="${k}"]`);
   const box = layer.querySelector('.boss-talk');
   const el = { who: $('who'), sub: $('sub'), text: $('text'), more: $('more'), choices: $('choices') };
-  let talk = null; // { data, onDone, i, who, words, shown, acc, done, choices }
+  let talk = null; // { data, onDone, i, who, words, shown, acc, done, choices, wait }
 
   const setLine = (who, text) => {
     talk.who = who;
@@ -180,6 +198,7 @@ export function createBossTalk({ fill = (text) => text } = {}) {
     talk.acc = 0;
     talk.done = false;
     talk.choices = null;
+    talk.wait = 0;
     box.classList.toggle('is-action', who === 'action');
     el.who.textContent = who === 'action' ? '' : talk.data.speaker;
     el.choices.replaceChildren();
@@ -207,6 +226,7 @@ export function createBossTalk({ fill = (text) => text } = {}) {
         ? [[talk.data.spare, () => finish('spare'), 'ui-btn']]
         : [[talk.data.fight, () => finish('fight'), 'ui-btn']];
     talk.choices = options;
+    talk.wait = 0;
     el.more.classList.add('hidden');
     el.choices.replaceChildren(...options.map(([label, onClick, cls]) => {
       const b = document.createElement('button');
@@ -246,13 +266,18 @@ export function createBossTalk({ fill = (text) => text } = {}) {
     if (!talk.done) finishLine();
     else if (!talk.choices) nextLine();
   };
+  // Enter / E / the phone's interact button: finish the line / next / the first button
+  const interact = () => {
+    if (!talk) return;
+    if (talk.choices && talk.done) talk.choices[0][1]();
+    else advance();
+  };
   box.addEventListener('click', (e) => { if (!e.target.closest('button')) advance(); });
   const onKeyDown = (e) => {
     if (!talk || e.repeat || (e.key !== 'Enter' && e.key !== 'e' && e.key !== 'E')) return;
     if (e.target?.closest?.('input, textarea, select')) return;
     e.preventDefault();
-    if (talk.choices && talk.done) talk.choices[0][1]();
-    else advance();
+    interact();
   };
   window.addEventListener('keydown', onKeyDown);
 
@@ -264,8 +289,11 @@ export function createBossTalk({ fill = (text) => text } = {}) {
 
   return {
     isOpen: () => !!talk,
+    interact,
+    /** What the phone's interact button says right now. */
+    interactLabel: () => (!talk ? null : talk.done && talk.choices ? `${talk.choices[0][0]}` : '▶ NEXT'),
     open(data, onDone) {
-      talk = { data, onDone, i: -1, who: 'them', words: [], shown: 0, acc: 0, done: true, choices: null };
+      talk = { data, onDone, i: -1, who: 'them', words: [], shown: 0, acc: 0, done: true, choices: null, wait: 0 };
       el.sub.textContent = data.spare ? '' : 'Final enemy';
       layer.classList.remove('hidden');
       document.body.classList.add('boss-talking');
@@ -273,7 +301,14 @@ export function createBossTalk({ fill = (text) => text } = {}) {
     },
     close,
     update(dt) {
-      if (!talk || talk.done) return;
+      if (!talk) return;
+      if (talk.done) {
+        // (read it, then on by itself)
+        talk.wait += dt;
+        const hold = talkAutoHoldSeconds(talk.words.length, talk.choices?.map((c) => c[0]) ?? null);
+        if (talk.wait >= hold) interact();
+        return;
+      }
       talk.acc += dt * TALK_WORDS_PER_SEC;
       const n = Math.min(talk.words.length, Math.floor(talk.acc));
       if (n === talk.shown) return;

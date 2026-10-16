@@ -131,8 +131,9 @@
     body.controller-mode .subtitle,
     body.controller-mode .connected-icon,
     body.controller-mode #gyro-display { display: none !important; }
-    /* Everything centred on the middle of the screen: Block right in the middle, the joystick
-       just below it (the equip buttons stacked to its left, Jump to its right), the other buttons just above it;
+    /* Everything centred on the middle of the screen: Block right in the middle (a slot on
+       either side of it for buttons that don't fit the row above), the equip / bomb / bubble
+       buttons in one row just above it, the joystick + Jump centred just below it;
        the status pill sits on its own at the top */
     body.controller-mode #status {
       font-size: 0.85rem;
@@ -157,10 +158,23 @@
     #action-grid {
       align-self: end;
       width: min(100%, 380px);
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
+      display: flex;
+      justify-content: center;
+      gap: 6px;
     }
+    /* The button row (up to ACTION_ROW_MAX; the rest go beside Block) */
+    .row-btn {
+      flex: 1 1 0;
+      min-width: 0;
+      max-width: 84px;
+      height: 62px;
+      padding: 2px;
+      font-size: 0.78rem;
+      line-height: 1.15;
+      white-space: pre-line;
+      border-radius: 14px;
+    }
+    .block-side .row-btn { width: 100%; max-width: none; height: 100%; }
     .ctl-btn {
       height: 68px;
       border: 1px solid var(--border-strong);
@@ -190,36 +204,35 @@
     #btn-jump   { background: rgba(99, 102, 241, 0.4); border-color: rgba(165, 180, 252, 0.6); }
     #btn-wand   { background: rgba(124, 58, 237, 0.45); border-color: rgba(216, 180, 254, 0.6); display: none; }
     #btn-wand.owned { display: block; }
+    /* Block with a slot on either side */
+    #block-row {
+      width: min(100%, 380px);
+      display: grid;
+      grid-template-columns: 64px 1fr 64px;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .block-side { display: flex; }
+    /* Joystick + Jump, centred together */
     #joy-row {
       align-self: start;
       width: min(100%, 380px);
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
+      display: flex;
+      justify-content: center;
       align-items: center;
-      gap: 12px;
+      gap: 20px;
     }
-    /* Equip buttons (gun / shield / wand, left) and Jump (right) beside the joystick */
-    #joy-row .ctl-btn {
-      width: 100%;
-      max-width: 104px;
+    #btn-jump {
+      width: 84px;
+      height: 76px;
       padding: 4px;
       font-size: 0.95rem;
       line-height: 1.2;
     }
-    #btn-jump { height: 84px; justify-self: center; }
-    #equip-col {
-      justify-self: center;
-      width: 100%;
-      max-width: 104px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    #equip-col .ctl-btn { height: 50px; font-size: 0.9rem; }
     #joystick {
       position: relative;
-      width: clamp(130px, 40vw, 160px);
-      height: clamp(130px, 40vw, 160px);
+      width: clamp(110px, 32vw, 132px);
+      height: clamp(110px, 32vw, 132px);
       flex: 0 0 auto;
       border-radius: 50%;
       background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 70%);
@@ -230,16 +243,17 @@
       position: absolute;
       left: 50%;
       top: 50%;
-      width: 70px;
-      height: 70px;
-      margin: -35px 0 0 -35px;
+      width: 56px;
+      height: 56px;
+      margin: -28px 0 0 -28px;
       border-radius: 50%;
       background: rgba(241,245,249,0.7);
       box-shadow: 0 4px 14px rgba(0,0,0,0.45);
       pointer-events: none;
     }
     #block-btn {
-      width: min(100%, 380px);
+      width: 100%;
+      min-width: 0;
       height: clamp(84px, 14vh, 120px);
       flex: 0 0 auto;
       background: linear-gradient(180deg, #3b82f6, #1d4ed8);
@@ -271,11 +285,32 @@
       border-color: rgba(216, 180, 254, 0.8);
       box-shadow: 0 8px 32px rgba(124, 58, 237, 0.45);
     }
+    /* Village / a talk / the calibration popup: the bar is the interact button */
+    #block-btn.mode-interact {
+      background: linear-gradient(180deg, #fcd34d, #f5a524);
+      color: var(--accent-ink);
+      border-color: rgba(254, 243, 199, 0.9);
+      box-shadow: 0 8px 32px rgba(245, 165, 36, 0.45);
+      font-family: var(--font-ui);
+      font-size: 1.2rem;
+      font-weight: 800;
+      letter-spacing: 0;
+      padding: 6px 10px;
+      line-height: 1.2;
+    }
+    #block-btn.mode-interact.idle {
+      background: var(--surface-raised);
+      color: var(--text-muted);
+      border-color: var(--border-strong);
+      box-shadow: none;
+    }
     #block-btn.pressed { transform: scale(0.96); filter: brightness(1.3); }
     /* Classic mode: Block is the only control */
     /* (hidden but keeping their rows, so Block stays in the middle) */
     body.block-only #action-grid,
+    body.block-only .block-side,
     body.block-only #joy-row { visibility: hidden; }
+    body.block-only #block-row { grid-template-columns: 0 1fr 0; gap: 0; }
     body.block-only #block-btn { height: 190px; }
     #block-btn.blocking {
       background: linear-gradient(180deg, #10b981, #047857);
@@ -302,16 +337,23 @@
 
   <div id="controller">
     <div id="action-grid">
-      <button class="ctl-btn" id="btn-bomb" data-action="bomb">💣 0</button>
-      <button class="ctl-btn" id="btn-bubble" data-action="bubble">🫧 0</button>
+      <button class="ctl-btn row-btn" id="btn-gun" data-action="gun">🔫
+Gun</button>
+      <button class="ctl-btn row-btn" id="btn-shield" data-action="shield">🛡
+Shield</button>
+      <button class="ctl-btn row-btn" id="btn-wand" data-action="wand">🪄
+Wand</button>
+      <button class="ctl-btn row-btn" id="btn-bomb" data-action="bomb">💣
+0</button>
+      <button class="ctl-btn row-btn" id="btn-bubble" data-action="bubble">🫧
+0</button>
     </div>
-    <button id="block-btn">🛡️ BLOCK</button>
+    <div id="block-row">
+      <div class="block-side" id="block-side-left"></div>
+      <button id="block-btn">🛡️ BLOCK</button>
+      <div class="block-side" id="block-side-right"></div>
+    </div>
     <div id="joy-row">
-      <div id="equip-col">
-        <button class="ctl-btn" id="btn-gun" data-action="gun">🔫 Gun</button>
-        <button class="ctl-btn" id="btn-shield" data-action="shield">🛡 Shield</button>
-        <button class="ctl-btn" id="btn-wand" data-action="wand">🪄 Wand</button>
-      </div>
       <div id="joystick"><div id="joystick-knob"></div></div>
       <button class="ctl-btn" id="btn-jump" data-action="jump">⬆️<br>Jump</button>
     </div>
@@ -341,9 +383,11 @@
     // The bottom bar does what fits the weapon in hand (barMode, from the game's status):
     //   block — sword: blocks while held       fire — gun: fires
     //   sword — shield: back to the sword       shield — wand: shield up while held, wand back on release
+    //   interact — the village / a talk / the calibration popup: one 'interact' per press
     const blockBtn = document.getElementById('block-btn');
     let barMode = 'block';
     let pressMode = null;   // the mode the current press started in
+    let interactLabel = null; // interact mode: what it does (null: nothing in reach)
     const sendAction = (action) => {
       if (conn && conn.open) {
         try { conn.send({ type: 'action', action, ts: Date.now() }); } catch (_) { /* ignore */ }
@@ -355,9 +399,11 @@
     };
     const pressBar = () => {
       if (pressMode) return;
+      if (barMode === 'interact' && !interactLabel) return;
       pressMode = barMode;
       if (navigator.vibrate && pressMode !== 'block') navigator.vibrate(15);
       if (pressMode === 'block') setBlocking(true);
+      else if (pressMode === 'interact') { blockBtn.classList.add('pressed'); sendAction('interact'); }
       else {
         blockBtn.classList.add('pressed');
         if (pressMode === 'fire') sendAction('fire');
@@ -438,11 +484,26 @@
     const btnGun = document.getElementById('btn-gun');
     const btnShield = document.getElementById('btn-shield');
     const btnWand = document.getElementById('btn-wand');
+    // The button row above Block holds up to ACTION_ROW_MAX of the buttons shown; any more go
+    // in the slots beside Block (left, then right)
+    const ACTION_ROW_MAX = 5;
+    const actionRow = document.getElementById('action-grid');
+    const blockSides = [document.getElementById('block-side-left'), document.getElementById('block-side-right')];
+    const rowButtons = [btnGun, btnShield, btnWand, btnBomb, btnBubble];
+    function layoutRowButtons() {
+      let n = 0;
+      rowButtons.forEach((b) => {
+        const shown = b !== btnWand || b.classList.contains('owned');
+        const parent = !shown || n < ACTION_ROW_MAX ? actionRow : blockSides[n - ACTION_ROW_MAX] ?? actionRow;
+        if (shown) n += 1;
+        parent.appendChild(b); // (re-appended in order, so the order holds)
+      });
+    }
     function applyStatus(st) {
       document.body.classList.toggle('block-only', !!st.blockOnly);
-      btnBomb.textContent = `💣 ${st.bombs ?? 0}`;
+      btnBomb.textContent = `💣\n${st.bombs ?? 0}`;
       btnBomb.disabled = !(st.bombs > 0);
-      btnBubble.textContent = `🫧 ${st.bubbles ?? 0}`;
+      btnBubble.textContent = `🫧\n${st.bubbles ?? 0}`;
       btnBubble.disabled = !(st.bubbles > 0) && !st.bubbleActive;
       btnBubble.classList.toggle('active', !!st.bubbleActive);
       // Equip buttons: each toggles its weapon ↔ the sword
@@ -450,14 +511,18 @@
       btnShield.disabled = !st.hasShield;
       btnGun.classList.toggle('equipped', st.equipped === 'pistol');
       btnShield.classList.toggle('equipped', st.equipped === 'shield');
-      btnGun.textContent = st.equipped === 'pistol' ? '🗡️ Sword' : '🔫 Gun';
-      btnShield.textContent = st.equipped === 'shield' ? '🗡️ Sword' : '🛡 Shield';
+      btnGun.textContent = st.equipped === 'pistol' ? '🗡️\nSword' : '🔫\nGun';
+      btnShield.textContent = st.equipped === 'shield' ? '🗡️\nSword' : '🛡\nShield';
       // Magic wand (once owned / picked up): swaps with the sword; shows the mana left
       btnWand.classList.toggle('owned', !!st.hasWand);
       btnWand.classList.toggle('equipped', st.equipped === 'magic_wand');
-      btnWand.textContent = st.equipped === 'magic_wand' ? `🗡️ Sword 🔮${st.mana ?? 0}` : `🪄 Wand 🔮${st.mana ?? 0}`;
-      // The bottom bar: Fire (gun), Sword (shield), Shield (wand, when a shield is owned), else Block
-      const nextMode = st.blockOnly ? 'block'
+      btnWand.textContent = st.equipped === 'magic_wand' ? `🗡️ Sword\n🔮${st.mana ?? 0}` : `🪄 Wand\n🔮${st.mana ?? 0}`;
+      layoutRowButtons();
+      // The bar: Interact (village / talk / calibration popup), Fire (gun), Sword (shield),
+      // Shield (wand, when a shield is owned), else Block
+      interactLabel = st.interactMode ? (st.interact || null) : null;
+      const nextMode = st.interactMode ? 'interact'
+        : st.blockOnly ? 'block'
         : st.equipped === 'pistol' ? 'fire'
         : st.equipped === 'shield' ? (st.wandShieldHeld ? 'shield' : 'sword')
         : st.equipped === 'magic_wand' && st.hasShield ? 'shield'
@@ -465,8 +530,10 @@
       // (a held Block stays a block until it's let go)
       if (nextMode !== barMode && pressMode === 'block') releaseBar();
       barMode = nextMode;
-      ['fire', 'sword', 'shield'].forEach((m) => blockBtn.classList.toggle(`mode-${m}`, barMode === m));
-      blockBtn.textContent = barMode === 'fire' ? `🔥 FIRE ${st.ammo ?? 0}`
+      ['fire', 'sword', 'shield', 'interact'].forEach((m) => blockBtn.classList.toggle(`mode-${m}`, barMode === m));
+      blockBtn.classList.toggle('idle', barMode === 'interact' && !interactLabel);
+      blockBtn.textContent = barMode === 'interact' ? (interactLabel || '✋ Interact')
+        : barMode === 'fire' ? `🔥 FIRE ${st.ammo ?? 0}`
         : barMode === 'sword' ? '🗡️ SWORD'
         : barMode === 'shield' ? '🛡 SHIELD'
         : '🛡️ BLOCK';
