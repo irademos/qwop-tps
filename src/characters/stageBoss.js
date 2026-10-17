@@ -424,3 +424,116 @@ export function createBossTalk({ fill = (text) => text } = {}) {
     },
   };
 }
+
+// ── After the story: open roam (Pemberton beaten) ──
+// The island is free to walk about; the village at each story stage's start (STAGE_ROUTES
+// points[0]) now has that stage's old boss in it, with a quest to take back what Pemberton
+// took from it. The quest is the stage again — the same road and enemies, its final enemy
+// Pemberton (he got back up; men like him always do). Dying or finishing it: back to roam.
+// Stages 9 and 10 (Marta, the guards) start where stages 3 and 2 do and lost nothing to him,
+// so they have no quest. `char` = the giver's MATCH_CHARACTERS key, `name` = what it calls
+// itself, `title` = the quest (over its head, the talk box, the stage banner), `lines` = the
+// talk ([who, text], as the villager's — 'you' lines are reply buttons), `accept` = the button
+// that starts it, `pemberton` = what he says before the fight, `done` = the win banner's line.
+// {name} = the player's name, {reward} = the coins it pays (roamQuestReward).
+export const ROAM_QUESTS = [
+  { stage: 1, char: 'frog', name: 'Fenn', title: 'Take back the fen',
+    lines: [
+      ['them', '{name}! Pemberton got back up. Men like him always do.'],
+      ['them', 'He’s shut the sluice gates on the Thornwick road so my fen stays dry, and paid thugs to guard them.'],
+      ['you', 'Then let’s open them.'],
+    ],
+    accept: '🐸 Open the gates',
+    pemberton: [
+      ['them', 'You again, {name}. That fen is drained land now. My land.'],
+      ['them', 'I have the papers to prove it. Shall I show you?'],
+    ],
+    done: 'The fen is filling again!' },
+  { stage: 2, char: 'pumpkin', name: 'Hob', title: 'Take back the patch',
+    lines: [
+      ['them', 'Pemberton’s back, {name}. He’s put a fence round my old patch and his men are salting the ground so nothing grows but his wheat.'],
+      ['you', 'Not for long.'],
+    ],
+    accept: '🎃 Tear down the fence',
+    pemberton: [
+      ['them', 'Pumpkins, {name}? You came all this way for pumpkins?'],
+      ['them', 'Wheat pays. Sentiment doesn’t.'],
+    ],
+    done: 'Hob’s pumpkin patch is planted again!' },
+  { stage: 3, char: 'gemhorn', name: 'Flint', title: 'Take back the gems',
+    lines: [
+      ['them', 'He still has my gems, {name}. Locked in a strongbox, carted down the Greyhollow road with half his guards round it.'],
+      ['them', 'And him at the end, holding the key.'],
+      ['you', 'I’ll get your gems back.'],
+    ],
+    accept: '💎 Stop the cart',
+    pemberton: [
+      ['them', 'These stones are worth more than that whole beast, {name}.'],
+      ['them', 'Finders keepers.'],
+    ],
+    done: 'Flint’s gems are home!' },
+  { stage: 4, char: 'mii1', name: 'Pip', title: 'Take back the boat',
+    lines: [
+      ['them', 'Pemberton’s painted his name on my boat, {name}. My boat! It’s moored past Saltmere with his men all along the shore.'],
+      ['you', 'Let’s go and scrape it off.'],
+    ],
+    accept: '⛵ Get the boat back',
+    pemberton: [
+      ['them', 'Ah, {name}. Come to admire my boat?'],
+      ['them', 'It even has my name on it. That makes it mine, you know. That’s how names work.'],
+    ],
+    done: 'Pip is fishing again!' },
+  { stage: 5, char: 'tree', name: 'Oldbark', title: 'Take back the wood',
+    lines: [
+      ['them', 'The saws have started again, {name}. Pemberton is felling the Fenwick Wood to rebuild his manor.'],
+      ['them', 'Every tree he cuts was a friend of mine.'],
+      ['you', 'Not one more tree.'],
+    ],
+    accept: '🌳 Stop the saws',
+    pemberton: [
+      ['them', 'It’s timber, {name}. Wood. It grows back.'],
+      ['them', 'Eventually. Not my problem.'],
+    ],
+    done: 'The Fenwick Wood is safe!' },
+  { stage: 6, char: 'wizard', name: 'Alder', title: 'Take back the gardens',
+    lines: [
+      ['them', 'Pemberton still holds the herb gardens past Riverbend, {name}, and he’s selling medicine at ten times the price again.'],
+      ['them', 'People are sick, and they can’t pay.'],
+      ['you', 'Then they won’t have to.'],
+    ],
+    accept: '🌿 Free the gardens',
+    pemberton: [
+      ['them', 'Medicine costs money, {name}. Somebody has to charge for it.'],
+      ['them', 'And that somebody is me.'],
+    ],
+    done: 'The herb gardens are free!' },
+  { stage: 7, char: 'antler', name: 'Bram', title: 'Take back the forge',
+    lines: [
+      ['them', 'He’s locked my forge at Old Hearth, {name}, and sold the key to the highest bidder. Himself.'],
+      ['you', 'Let’s go and get it.'],
+    ],
+    accept: '🔨 Take back the forge',
+    pemberton: [
+      ['them', 'A forge, {name}? I’ll have it melted down and sold by the pound.'],
+      ['them', 'Iron’s up this year, you know.'],
+    ],
+    done: 'Bram’s forge is lit again!' },
+  { stage: 8, char: 'antler', name: 'Wren', title: 'Take back the anvil',
+    lines: [
+      ['them', 'Pemberton sold my brother’s anvil, {name}. Then he bought it back, cheap, and set it up in his trophy room past Highcrest Gate.'],
+      ['them', 'It was our father’s.'],
+      ['you', 'Then it goes home.'],
+    ],
+    accept: '⚒️ Bring the anvil home',
+    pemberton: [
+      ['them', 'That anvil looks splendid in my trophy room, {name}.'],
+      ['them', 'Right next to the space I’ve kept for you.'],
+    ],
+    done: 'The anvil is home!' },
+];
+// What a roam quest pays (more than the story's did)
+const ROAM_QUEST_REWARD_BASE = 120;
+const ROAM_QUEST_REWARD_PER_STAGE = 20;
+export function roamQuestReward(stage) {
+  return ROAM_QUEST_REWARD_BASE + ROAM_QUEST_REWARD_PER_STAGE * (Math.max(1, Math.floor(stage) || 1) - 1);
+}
