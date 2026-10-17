@@ -49,6 +49,14 @@ export const CLIMB_CONFIG = {
   jumpOffSpeed: 3,      // m/s backward drift while falling after jumping off
   maxAnchorDrift: 0.3   // m — moved off the wall by something else (knockback, teleport) → stop climbing
 };
+// Dodge roll (startRoll — a swipe on the touch screen or the phone controller): ROLL.distance m
+// along the swipe over ROLL.duration s (fastest mid-roll), body turned to face the roll
+export const ROLL_CONFIG = {
+  distance: 4,
+  duration: 1.1,
+  swipeMinPx: 50,       // touch screen: a flick at least this long…
+  swipeMaxMs: 350       // …and this quick is a swipe (it doesn't turn the camera)
+};
 const WEAPON_CAMERA_FOV_DELTA = 8;
 const CAMERA_FOV_LERP_SPEED = 6;
 const GYRO_LERP_SPEED = 12; // rad/s convergence for gyroscope smoothing
@@ -337,6 +345,11 @@ export class PlayerControls {
           this.cameraTouchId = touch.identifier;
           this.touchStartX = touch.clientX;
           this.touchStartY = touch.clientY;
+          // A quick flick is a swipe (roll), not a camera drag: the camera goes back on release
+          this._swipe = {
+            x: touch.clientX, y: touch.clientY, t: performance.now(),
+            yaw: this.yaw, pitch: this.pitch, calibYaw: this.gyroCalibYaw, calibPitch: this.gyroCalibPitch
+          };
           this.safePreventDefault(event);
           break;
         }
@@ -373,6 +386,18 @@ export class PlayerControls {
       for (const touch of event.changedTouches) {
         if (touch.identifier === this.cameraTouchId) {
           this.cameraTouchId = null;
+          const sw = this._swipe;
+          this._swipe = null;
+          const dx = touch.clientX - (sw?.x ?? touch.clientX);
+          const dy = touch.clientY - (sw?.y ?? touch.clientY);
+          if (sw && this.enabled && typeof this.onSwipe === 'function' &&
+              performance.now() - sw.t <= ROLL_CONFIG.swipeMaxMs && Math.hypot(dx, dy) >= ROLL_CONFIG.swipeMinPx) {
+            this.yaw = sw.yaw;
+            this.pitch = sw.pitch;
+            this.gyroCalibYaw = sw.calibYaw;
+            this.gyroCalibPitch = sw.calibPitch;
+            this.onSwipe(dx, dy);
+          }
           break;
         }
       }
@@ -946,6 +971,48 @@ export class PlayerControls {
     return !!this._climb;
   }
 
+  /**
+   * Dodge roll toward a screen-space swipe (dx right, dy down, any units): up = away from the
+   * camera, sideways = strafe. Moves ROLL_CONFIG.distance over ROLL_CONFIG.duration with the
+   * body turned toward the roll; other movement input is ignored meanwhile. The caller plays
+   * the clip. Returns false when it can't roll now.
+   */
+  startRoll(dx, dy) {
+    if (this._roll || this._climb || window.phoneSwordAirborne) return false;
+    const len = Math.hypot(dx, dy);
+    if (!(len > 1e-6)) return false;
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    forward.y = 0;
+    if (forward.lengthSq() < 1e-8) forward.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    forward.normalize();
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+    const dir = forward.multiplyScalar(-dy / len).addScaledVector(right, dx / len).normalize();
+    this._roll = { dirX: dir.x, dirZ: dir.z, yaw: Math.atan2(dir.x, dir.z), t: 0, moving: true };
+    return true;
+  }
+
+  get isRolling() {
+    return !!this._roll;
+  }
+
+  cancelRoll() {
+    this._roll = null;
+  }
+
+  // This frame's roll step (m along the roll), easing in and out; ends the roll when done
+  _rollStep(deltaSeconds) {
+    const roll = this._roll;
+    const { distance, duration } = ROLL_CONFIG;
+    const t0 = roll.t / duration;
+    roll.t = Math.min(duration, roll.t + deltaSeconds);
+    const t1 = roll.t / duration;
+    if (roll.t >= duration) this._roll = null;
+    if (!roll.moving) return 0;
+    // ∫ of sin(πt): the distance covered from t0 to t1
+    return distance * (Math.cos(Math.PI * t0) - Math.cos(Math.PI * t1)) / 2;
+  }
+
   cancelClimb() {
     this._climb = null;
   }
@@ -1068,7 +1135,7 @@ export class PlayerControls {
       // Auto-walk counts as full forward input along its direction for wall climbing
       const autoMove = this._autoMove;
       this._autoMove = null;
-      const autoLen = autoMove ? Math.hypot(autoMove.x, autoMove.z) : 0;
+      let autoLen = autoMove ? Math.hypot(autoMove.x, autoMove.z) : 0;
       let climbInput = movement;
       if (autoLen > 1e-6) {
         climbInput = movement.clone();
@@ -1077,7 +1144,27 @@ export class PlayerControls {
         if (climbInput.length() > 1) climbInput.normalize();
       }
 
-      const climbHandled = this._updateClimb(climbInput, deltaSeconds);
+      const roll = this._roll;
+      if (roll) {
+        // Rolling: the roll alone moves the player (no walking, auto-walk or climbing)
+        movement.set(0, 0, 0);
+        autoLen = 0;
+        climbInput = movement;
+        const step = this._rollStep(deltaSeconds);
+        if (step > 0) {
+          // Stops short of a wall instead of popping on top of it
+          const cfg = CLIMB_CONFIG;
+          const aheadY = this._groundHeightAt(this.playerX + roll.dirX * cfg.probeDist, this.playerZ + roll.dirZ * cfg.probeDist);
+          if (Number.isFinite(aheadY) && aheadY - this.playerY > cfg.minRise) {
+            roll.moving = false;
+          } else {
+            this.playerX += roll.dirX * step;
+            this.playerZ += roll.dirZ * step;
+          }
+        }
+      }
+
+      const climbHandled = !roll && this._updateClimb(climbInput, deltaSeconds);
       if (!climbHandled) {
         this.playerX += movement.x * speed * deltaSeconds;
         this.playerZ += movement.z * speed * deltaSeconds;
@@ -1124,11 +1211,11 @@ export class PlayerControls {
       const newY = this.playerY;
       const newZ = this.playerZ;
       const isMovingNow = climbInput.length() > 0;
-      this.isMoving = isMovingNow && !this._climb;
+      this.isMoving = isMovingNow && !this._climb && !roll;
 
       if (this.playerModel) {
         this.playerModel.position.set(newX, newY, newZ);
-        this.playerModel.rotation.set(0, this.yaw, 0);
+        this.playerModel.rotation.set(0, roll ? roll.yaw : this.yaw, 0);
         this.playerModel.up.set(0, 1, 0);
         this.camera.up.set(0, 1, 0);
 

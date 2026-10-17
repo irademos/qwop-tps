@@ -143,6 +143,16 @@ export function updateRemotePlayerRig(playerGroup, deltaSeconds) {
   updateGLBCharacter(rig, dt, speed > 0.4);
 }
 
+// Another player's dodge roll (their duel / battle `state` says `ro` while it lasts): the
+// roll clip plays once when it starts; their own yaw already faces the roll
+export function setRemoteRolling(playerGroup, rolling) {
+  const ud = playerGroup?.userData;
+  if (!ud) return;
+  rolling = !!rolling;
+  if (rolling && !ud.remoteRolling) ud.qwopRig?.glbCharacter?.playAction(glbCharacterConfig.rollClip);
+  ud.remoteRolling = rolling;
+}
+
 // Swap the GLB character a player group wears (Multiplayer team / free-for-all picks).
 // The newest request wins if several loads are in flight.
 export function setPlayerCharacterUrl(playerGroup, url) {

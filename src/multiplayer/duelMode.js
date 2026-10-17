@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LOBBY_ROOM_ID } from './peerConnection.js';
+import { setRemoteRolling } from '../models/playerModel.js';
 
 // Multiplayer mode: a lobby of everyone online (the `peers` list the Multiplayer class keeps
 // from Firebase) where you challenge a player to a 1v1 sword duel, or open Team Battle /
@@ -602,6 +603,9 @@ export function createDuelMode(ctx) {
           remoteHandTarget.fromArray(data.hand);
         }
         remoteBlocking = !!data.blocking;
+        // Rolling: sword put away until it comes back
+        if (data.ro) remoteSwordTarget.has = false;
+        setRemoteRolling(ctx.getRemoteModel(duel.opponentId), data.ro);
         return;
       }
       case 'hit':

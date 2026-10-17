@@ -32,8 +32,7 @@ export const FIRST_WAND_BOSS_STAGE = STAGE_BOSS_GEAR_ORDER.indexOf('wand') + 2;
 // for its character (STORY_BOSSES `char`; PS_STORY_BOSSES / PS_FIXED_BOSSES in
 // bootstrapGameApp.js put it there). If an old save has a different character on a stage, the
 // boss tells its own story instead: `growl` before TALKING_FROM_STAGE, `tell` after (the boss
-// then goes by `name`). `village` = what it says idling in the village once it has joined the
-// player (over its 🔄 Switch button).
+// then goes by `name`.
 export const CHARACTER_STORIES = {
   frog: {
     name: 'Fenn',
@@ -44,7 +43,6 @@ export const CHARACTER_STORIES = {
     tell: [
       ['them', 'I’m Fenn. My people lived in Thornwick Fen for a hundred years, until Pemberton drained it to grow his wheat.'],
     ],
-    village: 'The fen will fill again one day. Frogs are patient.',
   },
   pumpkin: {
     name: 'Hob',
@@ -55,7 +53,6 @@ export const CHARACTER_STORIES = {
     tell: [
       ['them', 'Name’s Hob. Pemberton burned my pumpkin patch to make room for his fields.'],
     ],
-    village: 'I’m planting again behind the market. Pumpkins grow back.',
   },
   gemhorn: {
     name: 'Flint',
@@ -66,7 +63,6 @@ export const CHARACTER_STORIES = {
     tell: [
       ['them', 'I’m Flint. Pemberton pried the gems out of my horn and sold them.'],
     ],
-    village: 'My horn’s growing back. Slowly. Don’t stare.',
   },
   mii1: {
     name: 'Pip',
@@ -77,7 +73,6 @@ export const CHARACTER_STORIES = {
     tell: [
       ['them', 'I’m Pip. Pemberton took my fishing boat, and the whole harbour with it.'],
     ],
-    village: 'Got my boat back. Fish don’t care who owns the docks.',
   },
   tree: {
     name: 'Oldbark',
@@ -88,7 +83,6 @@ export const CHARACTER_STORIES = {
     tell: [
       ['them', 'I am Oldbark. I guard the Fenwick Wood, and Pemberton is cutting it down for his sawmill. Not one more tree.'],
     ],
-    village: 'Mind the saplings, {name}. I planted every one of them.',
   },
   wizard: {
     name: 'Alder',
@@ -99,7 +93,6 @@ export const CHARACTER_STORIES = {
     tell: [
       ['them', 'I’m Alder, a healer. Pemberton bought every herb garden so only he could sell medicine.'],
     ],
-    village: 'Potions are fairly priced again. I checked.',
   },
   antler: {
     name: 'Bram',
@@ -110,15 +103,10 @@ export const CHARACTER_STORIES = {
     tell: [
       ['them', 'I’m Bram, the smith. Pemberton took my forge and sold my anvil.'],
     ],
-    village: 'I’m back at the forge. If your blade ever needs mending, {name}…',
   },
 };
 // From this stage on the bosses talk (before it: growls)
 const TALKING_FROM_STAGE = 5;
-/** What a character says idling in the village (null: nothing). */
-export function characterVillageLine(key) {
-  return CHARACTER_STORIES[key]?.village ?? null;
-}
 
 // The story's stage bosses (stage 1 = index 0; stages 1–10, the guards are stage 10).
 // `char` = the character the stage is written for, `name` = how it calls itself (else the
