@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { LOBBY_ROOM_ID } from './peerConnection.js';
 import { glbCharacterConfig } from '../models/glbCharacterModel.js';
+import { setRemoteRolling } from '../models/playerModel.js';
 import { swingCrossesBlade, PLAYER_BLOCK_MIN_ANGLE_DEG } from '../characters/EnemyPlayer.js';
 import { createMatchPickups, PICKUP_TYPES } from './matchPickups.js';
 import { createBossFighter } from '../characters/pembertonBoss.js';
@@ -2060,7 +2061,8 @@ export function createMatchMode(ctx) {
         ry: model ? round3(model.rotation.y) : null,
         hp: me.hp,
         w: ctx.getLocalWeapon?.() ?? null,
-        bu: ctx.isBubbleActive?.() ? 1 : 0
+        bu: ctx.isBubbleActive?.() ? 1 : 0,
+        ro: state.ro ? 1 : 0
       });
     }
 
@@ -2167,6 +2169,7 @@ export function createMatchMode(ctx) {
           c.blocking = !!data.blocking;
           c.weapon = ['sword', 'wand', 'gun', 'shield'].includes(data.w) ? data.w : null;
           c.bubble = !!data.bu;
+          setRemoteRolling(ctx.getRemoteModel(c.id), data.ro);
           if (Number.isFinite(data.hp) && c.alive) c.hp = Math.max(0, Math.min(99, Math.round(data.hp)));
           if (isVec(data.pos, 3)) {
             ctx.setRemotePose(c.id, data.pos, Number.isFinite(data.ry) ? data.ry : null,

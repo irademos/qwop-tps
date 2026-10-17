@@ -38,7 +38,7 @@ import { createBombMesh, getBombGLTF } from '../characters/BombThrowerEnemy.js';
 import { stylizeObject } from '../environment/artStyle.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { PEMBERTON_SCALE, addRedGlow } from '../characters/pembertonBoss.js';
-import { talkAutoHoldSeconds, characterVillageLine, CHARACTER_STORIES } from '../characters/stageBoss.js';
+import { talkAutoHoldSeconds } from '../characters/stageBoss.js';
 import { createWandModel } from '../items/magicWand.js';
 
 // ── Props ───────────────────────────────────────────────────────────────────
@@ -622,6 +622,7 @@ export function createVillage(ctx) {
   let obstacles = [];       // { pos: Vector3, r } — round props the player walks around
   let nearKeys = '';        // stations whose buttons are showing (free walking)
   let switchNpc = null;     // idling character whose 🔄 Switch button is showing
+  let actsKey = '';         // what the station buttons show (rebuilt when it changes)
   // The villager's conversation: { script, i: line index, words, shown, done, choices }
   let talk = null;
   let intro = null;         // Pemberton's hello in progress: { phase } (updateIntro)
@@ -642,7 +643,6 @@ export function createVillage(ctx) {
     <button type="button" class="ui-btn-secondary village-lobby-top hidden" data-v="lobby">⬅ Lobby</button>
     <div class="village-top ui-chip"><span data-v="stage"></span><span class="village-top-sep">·</span><span data-v="coins"></span></div>
     <div class="village-acts hidden" data-v="acts"></div>
-    <button type="button" class="ui-btn village-switch hidden" data-v="switch"></button>
     <div class="village-talk ui-panel hidden" data-v="talk">
       <div class="village-talk-head"><span class="village-talk-who" data-v="talk-who"></span><span class="village-talk-quest" data-v="talk-quest"></span></div>
       <button type="button" class="village-talk-close" data-v="talk-close" aria-label="Back to the village">✕</button>
@@ -680,7 +680,7 @@ export function createVillage(ctx) {
     prev: $('prev'), next: $('next'),
     fade: $('fade'), fadeText: $('fade-text'),
     banner: $('banner'), bannerTitle: $('banner-title'), bannerSub: $('banner-sub'), bannerBoss: $('banner-boss'),
-    acts: $('acts'), switchBtn: $('switch'),
+    acts: $('acts'),
     talk: $('talk'), talkWho: $('talk-who'), talkQuest: $('talk-quest'), talkText: $('talk-text'),
     talkMore: $('talk-more'), talkChoices: $('talk-choices'), talkClose: $('talk-close'),
   };
@@ -689,9 +689,6 @@ export function createVillage(ctx) {
   el.lobby.addEventListener('click', () => {
     if (!active || leaving || approaching || sitting) return;
     ctx.onLobby();
-  });
-  el.switchBtn.addEventListener('click', () => {
-    if (active && !leaving && !sitting && switchNpc) pickCharacter(switchNpc);
   });
   el.talkClose.addEventListener('click', () => { if (active && !leaving && !starting) unfocus(); });
   el.prev.addEventListener('click', () => stepItem(-1));
@@ -1062,45 +1059,33 @@ export function createVillage(ctx) {
     return out.sort((a, b) => b.w - a.w || a.d - b.d);
   }
 
-  // Buttons for the stations in reach (bottom centre; E / Enter = the first)
+  // Buttons for the stations in reach (bottom centre; E / Enter = the first). An idling
+  // character in reach comes first: "🔄 <name>" swaps with it.
   const actLabel = (key) => (key === 'villager' ? (finalBoss ? '⚔️ Confront' : '💬 Talk') : STATION_NAMES[key]);
+  const switchLabel = (npc) => `🔄 ${ctx.characters.roster[npc.key]?.label ?? npc.key}`;
   function refreshActs(near) {
     const free = active && !leaving && !approaching && !sitting && !focus && !intro;
     const inRange = free ? near.filter((n) => n.inRange) : [];
-    // An idling character in reach: its own 🔄 Switch button, over it (placeSwitch)
     const sw = swapBusy ? null : inRange.find((n) => n.key === 'npc')?.npc ?? null;
-    if (sw !== switchNpc) {
-      switchNpc = sw;
-      el.switchBtn.classList.toggle('hidden', !sw);
-      if (sw) {
-        const def = ctx.characters.roster[sw.key];
-        // What it says once it has joined you (its story — CHARACTER_STORIES in stageBoss.js)
-        const said = characterVillageLine(sw.key);
-        const who = CHARACTER_STORIES[sw.key]?.name;
-        el.switchBtn.replaceChildren();
-        if (said) {
-          const quote = document.createElement('span');
-          quote.className = 'village-switch-quote';
-          quote.textContent = `${who ? `${who}: ` : ''}“${fillTalk(said, { name: ctx.getPlayerName?.() || 'friend' })}”`;
-          el.switchBtn.append(quote);
-        }
-        el.switchBtn.append(document.createTextNode(`🔄 Switch to ${def?.label ?? sw.key}`));
-      }
-    }
-    placeSwitch();
-    const keys = inRange.filter((n) => n.key !== 'npc').slice(0, 2).map((n) => n.key);
-    const k = keys.join(',');
-    if (k === nearKeys) return;
-    nearKeys = k;
-    el.acts.replaceChildren(...keys.map((key, i) => {
+    const keys = inRange.filter((n) => n.key !== 'npc').slice(0, sw ? 1 : 2).map((n) => n.key);
+    const k = `${sw ? `npc:${sw.key}` : ''}|${keys.join(',')}`;
+    switchNpc = sw;
+    if (k === actsKey) return;
+    actsKey = k;
+    nearKeys = keys.join(',');
+    const button = (label, primary, onClick) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = `${i === 0 ? 'ui-btn' : 'ui-btn-secondary'} village-act`;
-      b.textContent = actLabel(key);
-      b.addEventListener('click', () => { if (active && !leaving && !sitting) focusStation(key); });
+      b.className = `${primary ? 'ui-btn' : 'ui-btn-secondary'} village-act`;
+      b.textContent = label;
+      b.addEventListener('click', () => { if (active && !leaving && !sitting) onClick(); });
       return b;
-    }));
-    el.acts.classList.toggle('hidden', !keys.length);
+    };
+    const buttons = [];
+    if (sw) buttons.push(button(switchLabel(sw), true, () => { if (switchNpc) pickCharacter(switchNpc); }));
+    keys.forEach((key) => buttons.push(button(actLabel(key), !buttons.length, () => focusStation(key))));
+    el.acts.replaceChildren(...buttons);
+    el.acts.classList.toggle('hidden', !buttons.length);
   }
 
   // At a station: framed on it
@@ -1768,7 +1753,7 @@ export function createVillage(ctx) {
     if (focus === 'villager' && talk) return talk.done && talk.choices ? talk.choices[0][0] : '▶ Next';
     if (focus === 'fire') return '🔥 Sit';
     if (focus) return '⬅ Back';
-    if (switchNpc) return '🔄 Switch';
+    if (switchNpc) return switchLabel(switchNpc);
     if (nearKeys) return actLabel(nearKeys.split(',')[0]);
     return null;
   }
@@ -1877,24 +1862,10 @@ export function createVillage(ctx) {
 
   function hideActs() {
     nearKeys = '';
+    actsKey = '';
     el.acts.replaceChildren();
     el.acts.classList.add('hidden');
     switchNpc = null;
-    el.switchBtn.classList.add('hidden');
-  }
-
-  // The 🔄 Switch button floats over the idling character in reach
-  function placeSwitch() {
-    const n = switchNpc;
-    if (!n?.container) return;
-    const p = _v.copy(n.container.position).add(_v2.set(0, 1.45, 0)).project(camera);
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    const bw = el.switchBtn.offsetWidth || 160;
-    const x = Math.min(w - bw / 2 - 8, Math.max(bw / 2 + 8, (p.x * 0.5 + 0.5) * w));
-    const y = Math.min(h - 120, Math.max(90, (-p.y * 0.5 + 0.5) * h));
-    el.switchBtn.style.left = `${x}px`;
-    el.switchBtn.style.top = `${y}px`;
   }
 
   function showBanner() {

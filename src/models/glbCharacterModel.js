@@ -22,6 +22,9 @@
  * Frame order per character:
  *   setMoving() → animate(dt) → solveArm(...) for each hand → stepFluff(dt)
  *
+ * Walk / run: while moving, the walk clip turns into the run clip once the character's
+ * measured ground speed passes runSpeed (animate() measures it from the world position).
+ *
  * Death: playDeath() plays deathClip once over the whole body (arm IK suspended, the
  * floating hands just follow the palms) until revive().
  *
@@ -63,7 +66,14 @@ export const glbCharacterConfig = {
   idleClip: '/models/animations/Breathing Idle.fbx',
   deathClip: '/models/animations/Flying Back Death.fbx', // played once (whole body, arms included) by playDeath()
   throwClip: '/models/animations/Throw.fbx', // bomb thrower's throw (playAction); right-handed
+  runClip: '/models/animations/Slow Run.fbx',  // replaces the walk above runSpeed
+  rollClip: '/models/animations/Roll.fbx',     // player's dodge roll (playAction)
   clipFade: 0.2,           // seconds to crossfade walk <-> idle
+  // Moving characters run once their measured ground speed (m/s, world space — every
+  // player, remote player and enemy alike) goes above runSpeed, and walk again below
+  // runSpeed * runStopRatio
+  runSpeed: 3.0,
+  runStopRatio: 0.8,
   targetHeight: 1.0,       // world height of the character (bind pose)
   // Per-model multiplier on targetHeight, keyed by url (every model is otherwise normalised to the same height)
   heightScaleByUrl: {
@@ -196,7 +206,9 @@ class StaticRig {
 
   play(url) {
     const cfg = glbCharacterConfig;
-    this._mode = url === cfg.deathClip ? 'death' : url === cfg.walkClip ? 'walk' : url === cfg.idleClip ? 'idle' : this._mode;
+    this._mode = url === cfg.deathClip ? 'death'
+      : url === cfg.walkClip || url === cfg.runClip ? 'walk'
+      : url === cfg.idleClip ? 'idle' : this._mode;
     if (this._mode !== 'death') this._fall = 0;
     return Promise.resolve();
   }
@@ -250,6 +262,11 @@ export class GLBCharacter {
       this.arms[hand] = this._buildArm(side);
     }
     this._moving = null;
+    this._running = false;
+    this._gaitClip = null; // walk / run / idle clip playing (null: restart it)
+    this._speed = 0;       // smoothed horizontal speed, m/s (world)
+    this._lastX = null;
+    this._lastZ = null;
     this._dead = false;
     this._action = null; // { started } while a playAction() clip owns the body
     if (!armIK) this._setArmIK(false);
@@ -306,20 +323,56 @@ export class GLBCharacter {
     return maxY * 0.5;
   }
 
-  /** Switches between the walk and idle clips (crossfaded); no-op if unchanged. */
+  /**
+   * Switches between the walk (run, when fast — see animate()) and idle clips
+   * (crossfaded); no-op if unchanged.
+   */
   setMoving(moving) {
     if (this._dead) return;
     moving = !!moving;
     if (moving === this._moving) return;
     this._moving = moving;
-    if (this._action) return; // picked up when the action clip ends
+    this._playGait();
+  }
+
+  _playGait() {
+    if (this._dead || this._action) return; // picked up by revive() / when the action clip ends
     const cfg = glbCharacterConfig;
-    this.fluffy.play(moving ? cfg.walkClip : cfg.idleClip, {
+    const clip = !this._moving ? cfg.idleClip : this._running ? cfg.runClip : cfg.walkClip;
+    if (clip === this._gaitClip) return;
+    this._gaitClip = clip;
+    this.fluffy.play(clip, {
       inPlace: true,
       fade: cfg.clipFade,
       excludeBones: this._armIK ? this._ikShoulders() : [],
     }).catch((e) => console.warn('[GLBCharacter] clip load failed:', e));
   }
+
+  // Measures the ground speed from the world position (last frame's matrix) and flips
+  // walk <-> run around runSpeed
+  _updateSpeed(dt) {
+    if (!(dt > 0)) return;
+    const e = this.scene.matrixWorld.elements;
+    const x = e[12];
+    const z = e[14];
+    if (this._lastX !== null) {
+      const v = Math.hypot(x - this._lastX, z - this._lastZ) / dt;
+      // (a jump this big is a teleport, not movement)
+      if (v < 25) this._speed += (v - this._speed) * (1 - Math.exp(-dt / 0.12));
+    }
+    this._lastX = x;
+    this._lastZ = z;
+    const cfg = glbCharacterConfig;
+    const running = this._running
+      ? this._speed > cfg.runSpeed * cfg.runStopRatio
+      : this._speed > cfg.runSpeed;
+    if (running === this._running) return;
+    this._running = running;
+    if (this._moving) this._playGait();
+  }
+
+  /** Smoothed horizontal speed (m/s) the walk / run choice is made on. */
+  get speed() { return this._speed; }
 
   // Clavicles of the IK-driven arms (the clip must leave those subtrees alone)
   _ikShoulders() {
@@ -338,9 +391,8 @@ export class GLBCharacter {
     this._ikHands = { left, right };
     if (this._dead || this._action) return; // applied by revive() / _endAction()
     this._setArmIK(this._armIK);
-    const moving = this._moving;
-    this._moving = null;
-    this.setMoving(moving);
+    this._gaitClip = null;
+    this._playGait();
   }
 
   /**
@@ -351,6 +403,7 @@ export class GLBCharacter {
     if (this._dead) return;
     const action = { started: false };
     this._action = action;
+    this._gaitClip = null;
     this._setArmIK(false);
     this.fluffy.play(url, { inPlace: true, fade, loop: false })
       .then(() => { if (this._action === action) action.started = true; })
@@ -373,9 +426,8 @@ export class GLBCharacter {
     this._action = null;
     if (this._dead) return;
     this._setArmIK(this._armIK);
-    const moving = this._moving;
-    this._moving = null;
-    this.setMoving(moving);
+    this._gaitClip = null;
+    this._playGait();
   }
 
   /**
@@ -386,6 +438,7 @@ export class GLBCharacter {
     if (this._dead) return;
     this._dead = true;
     this._action = null;
+    this._gaitClip = null;
     this._setArmIK(false);
     const cfg = glbCharacterConfig;
     this.fluffy.play(cfg.deathClip, { inPlace: true, fade: 0.15, loop: false })
@@ -397,8 +450,9 @@ export class GLBCharacter {
     if (!this._dead) return;
     this._dead = false;
     this._setArmIK(this._armIK);
-    this._moving = null;
-    this.setMoving(false);
+    this._moving = false;
+    this._gaitClip = null;
+    this._playGait();
   }
 
   get isDead() { return this._dead; }
@@ -420,6 +474,7 @@ export class GLBCharacter {
 
   /** Body animation for this frame (arms excluded). */
   animate(dt) {
+    this._updateSpeed(dt);
     this.fluffy.animate(dt);
     if (this._action?.started && this.fluffy.clipFinished) this._endAction();
     // Bring the rig (and its ancestors) up to date so solveArm() works on this frame's pose

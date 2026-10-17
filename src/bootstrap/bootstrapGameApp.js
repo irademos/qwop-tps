@@ -1720,15 +1720,20 @@ async function initCore(runtimeContext) {
   //                   SEA_WADE_DEPTH under it (setTerrainFloor): characters wade, never sink.
   //   spawn: where (re)spawns are picked (src/map/spawnUtils.js)
   //   floating (mappacks with a sea): GLB props afloat on the sea, bobbing gently — in the pack's
-  //                   own units (before `scale`): at [x, z], yaw (rad), size; they stop bullets but
-  //                   aren't stood on (their masts would be the ground — list them in noGround)
+  //                   own units (before `scale`): at [x, z], yaw (rad), size; they stop bullets.
+  //                   List them in noGround (the map's top-down height raycast would make their
+  //                   masts the ground); `deckMaxY` (model units above its origin, the waterline)
+  //                   makes one ground of its own instead (_floatingGroundHeight): the highest
+  //                   upward-facing surface no higher than that — the deck, climbable from the
+  //                   water like any wall, masts / yards / sails above it ignored
   const MAPS = {
     islandTown: {
       kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree|pirate_ship/i, scale: 1.4,
       spawn: { x: 14, z: -5.6, radius: 3 },   // the flat ground in the middle of the island
       // The pirate ship: anchored off the north-east shore, in water deep enough for its hull
       // (world ≈ (69, −108) — in sight of stage 7's road)
-      floating: [{ url: '/assets/props/pirate_ship.glb', at: [49, -77], yaw: 1.8, size: 1.3 }],
+      // (deck ≈ 0.5, quarterdeck / forecastle ≈ 1.2, yards from ≈ 1.9 model units up)
+      floating: [{ url: '/assets/props/pirate_ship.glb', at: [49, -77], yaw: 1.8, size: 1.3, deckMaxY: 1.5 }],
     },
     classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
   };
@@ -1746,7 +1751,7 @@ async function initCore(runtimeContext) {
   // The first map loaded is the art-style reference: characters are matched to its colours
   // (artStyle.js — they are stylized once, so later maps don't change them)
   let _mapStyleReferenceSet = false;
-  const _loadedMaps = new Map();   // key → Promise<{ group, meshes, groundMeshes, floor, water }>
+  const _loadedMaps = new Map();   // key → Promise<{ group, meshes, groundMeshes, floor, water, floatingGround }>
   const _loadMap = (key) => {
     if (_loadedMaps.has(key)) return _loadedMaps.get(key);
     const def = MAPS[key];
@@ -1755,7 +1760,7 @@ async function initCore(runtimeContext) {
       let styleRoot;   // what the art-style pass reads / grades (not the KTX2 terrain / grass)
       let water = null;   // (x, z) → water surface Y or null (mappacks with water / a sea)
       let floor = 0;      // lowest ground height (setTerrainFloor)
-      const floating = []; // def.floating props: { bob: Group, phase }
+      const floating = []; // def.floating props: { bob: Group, model, phase, deckMaxY }
       if (def.kind === 'mappack') {
         const { MapLoader, sampleMapWaterLevel } = await import('../map/MapLoader.ts');
         group = await new MapLoader().load(def.url, { renderer, transcoderPath: '/basis/' });
@@ -1817,6 +1822,13 @@ async function initCore(runtimeContext) {
         const file = o?.userData.mapObject?.modelFile ?? '';
         if (!(def.noGround && def.noGround.test(file))) groundMeshes.push(obj);
       });
+      // Floating props with a deck to stand on (_floatingGroundHeight): their meshes and where
+      // they are (world box, a little bigger: the swell moves them)
+      const floatingGround = floating.filter((f) => Number.isFinite(f.deckMaxY)).map((f) => {
+        const propMeshes = [];
+        f.model.traverse((o) => { if (o.isMesh && !o.isInstancedMesh) propMeshes.push(o); });
+        return { ...f, meshes: propMeshes, box: new THREE.Box3().setFromObject(f.model).expandByScalar(0.5) };
+      });
       // Floating props bob on the swell (called every frame for the active map)
       const animate = floating.length ? (t) => {
         for (const { bob, phase } of floating) {
@@ -1825,7 +1837,7 @@ async function initCore(runtimeContext) {
           bob.rotation.z = Math.sin(t * FLOAT_ROLL_SPEED * 0.7 + phase + 1) * FLOAT_ROLL * 0.5;
         }
       } : null;
-      return { group, meshes, groundMeshes, floor, water, animate };
+      return { group, meshes, groundMeshes, floor, water, animate, floatingGround };
     })();
     _loadedMaps.set(key, promise);
     promise.catch(() => _loadedMaps.delete(key)); // let a later switch retry
@@ -1849,7 +1861,7 @@ async function initCore(runtimeContext) {
     bob.add(gltf.scene);
     holder.add(bob);
     mapGroup.add(holder);
-    return { bob, phase: prop.at[0] * 0.37 };
+    return { bob, model: gltf.scene, phase: prop.at[0] * 0.37, deckMaxY: prop.deckMaxY };
   }
 
   let _activeMapKey = null;
@@ -1873,6 +1885,33 @@ async function initCore(runtimeContext) {
     return y;
   };
   registerTerrainHeightResolver(_glbResolveHeight);
+
+  // Ground on the active map's floating props with a deck (MAPS `deckMaxY`): straight down
+  // onto the highest upward-facing surface at most deckMaxY up the model. Not cached — the
+  // prop bobs on the swell, and whoever stands on it bobs too.
+  const _floatRaycaster = new THREE.Raycaster(new THREE.Vector3(), new THREE.Vector3(0, -1, 0));
+  const _floatHitLocal = new THREE.Vector3();
+  const _floatNormal = new THREE.Vector3();
+  const _floatingGroundHeight = (x, z) => {
+    const props = _activeMap?.floatingGround;
+    if (!props?.length) return undefined;
+    let best;
+    for (const prop of props) {
+      const { box } = prop;
+      if (x < box.min.x || x > box.max.x || z < box.min.z || z > box.max.z) continue;
+      _floatRaycaster.ray.origin.set(x, box.max.y + 1, z);
+      for (const hit of _floatRaycaster.intersectObjects(prop.meshes, false)) {
+        if (prop.model.worldToLocal(_floatHitLocal.copy(hit.point)).y > prop.deckMaxY) continue;
+        if (!hit.face) continue;
+        _floatNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
+        if (Math.abs(_floatNormal.y) < 0.6) continue; // (a wall / the side of a mast)
+        if (best === undefined || hit.point.y > best) best = hit.point.y;
+        break;
+      }
+    }
+    return best;
+  };
+  registerTerrainHeightResolver(_floatingGroundHeight);
 
   // True where the active map's water (a lake or the sea) covers the ground — not on a bridge
   const _isOverWater = (x, z) => {
@@ -4339,6 +4378,53 @@ async function initCore(runtimeContext) {
     }
     if (t.released && !glbCharacter?.actionActive) finishPlayerBombThrow();
   };
+  // ── Dodge roll: a swipe on the touch screen (PlayerControls.onSwipe) or on the phone
+  // controller ('roll' message) rolls the player that way (PlayerControls.startRoll moves them,
+  // Roll.fbx plays over the body). Whatever is held is put away for the roll and comes back
+  // after, like a bomb throw.
+  let playerRoll = null; // { restoreIds }
+  const tryPlayerRoll = (dx, dy) => {
+    if (!playerControls?.enabled || _classicMode || _gamePaused || playerDead) return false; // Classic: Block only
+    if (playerRoll || playerBombThrow || isPlayerFrozen() || _wandShieldHold) return false;
+    if (bossTalk.isOpen() || _isSwordCalibPromptOpen()) return false;
+    if (!(playerControls.moveSpeedScale > 0)) return false; // (the village intro holds the player still)
+    if (_matchLoadout && !matchMode?.isFighting()) return false;
+    const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
+    if (glbCharacter?.isDead || glbCharacter?.actionActive) return false; // knocked down / mid-throw
+    if (!playerControls.startRoll(dx, dy)) return false;
+    const restoreIds = getEquippedInventoryItemIds();
+    restoreIds.forEach((itemId) => unequipInventoryItem(itemId));
+    playerControls.refreshActionButtons?.();
+    playerRoll = { restoreIds };
+    glbCharacter?.playAction(glbCharacterConfig.rollClip);
+    return true;
+  };
+  playerControls.onSwipe = (dx, dy) => { tryPlayerRoll(dx, dy); };
+  const finishPlayerRoll = () => {
+    const { restoreIds } = playerRoll;
+    playerRoll = null;
+    playerControls?.cancelRoll();
+    // Put back what was held, unless something else got equipped meanwhile
+    if (!playerDead && getEquippedInventoryItemIds().length === 0) {
+      restoreIds.forEach((itemId) => {
+        if (inventoryState[itemId]?.count > 0) equipInventoryItem(itemId);
+      });
+      playerControls?.refreshActionButtons?.();
+    }
+  };
+  const updatePlayerRoll = () => {
+    if (!playerRoll) return;
+    if (playerDead) {
+      // Respawn re-equips the sword
+      playerRoll = null;
+      playerControls?.cancelRoll();
+      return;
+    }
+    const glbCharacter = playerModel.userData.qwopRig?.glbCharacter;
+    // Done once both the move and the clip are (a blast knocking us down ends the clip)
+    if (!playerControls?.isRolling && !glbCharacter?.actionActive) finishPlayerRoll();
+  };
+
   let _psPathEnd = new THREE.Vector3();
   // The current stage's path (createPolyline) and how far along it the player has got: the
   // auto-walk heads for a point a little further along it from wherever the player is (walking
@@ -4842,6 +4928,11 @@ async function initCore(runtimeContext) {
   // (villageCtx.confirmStart) or the player leaves
   let _villageSheathed = false;
   const _villageSheathe = () => {
+    // (mid-roll the weapon is already put away: it stays away and comes back with the stage)
+    if (playerRoll?.restoreIds.length) {
+      playerRoll.restoreIds = [];
+      _villageSheathed = true;
+    }
     const held = getEquippedInventoryItemIds();
     if (!held.length) return;
     held.forEach((itemId) => unequipInventoryItem(itemId));
@@ -5657,6 +5748,12 @@ async function initCore(runtimeContext) {
       } else if (data.type === 'action' && typeof data.action === 'string') {
         _handlePhoneAction(data.action);
         lastStatusJson = ''; // counts/equipped likely changed — resend soon
+      } else if (data.type === 'roll') {
+        // A swipe on the phone's screen (dx right, dy down)
+        const dx = Number(data.dx);
+        const dy = Number(data.dy);
+        if (Number.isFinite(dx) && Number.isFinite(dy)) tryPlayerRoll(dx, dy);
+        lastStatusJson = '';
       }
     });
     let closed = false;
@@ -6871,6 +6968,7 @@ async function initCore(runtimeContext) {
     _villageUnsheathe();
     deathCarry?.cancel();
     playerControls?.cancelClimb?.();
+    if (playerRoll) finishPlayerRoll();
     _classicStageOverlay?.classList.add('hidden');
     _classicClearCallout();
     _classicCountdown = false;
@@ -7060,6 +7158,8 @@ async function initCore(runtimeContext) {
     reviveRemotePlayer: (id) => otherPlayers[id]?.model?.userData?.qwopRig?.glbCharacter?.revive?.(),
     // Sword pose in the local player's model space (+ grip + block stance) for the opponent
     getLocalSwordState: () => {
+      // Mid-roll the sword is put away: no sword, `ro` makes the others play the roll
+      if (playerRoll) return { sword: null, hand: null, blocking: false, ro: 1 };
       if (foamSword?.holder !== playerControls || !foamSword.mesh) return null;
       playerModel.updateMatrixWorld();
       _duelSwordLocalPos.copy(foamSword.mesh.position);
@@ -7624,6 +7724,7 @@ async function initCore(runtimeContext) {
     updateExplosionEffects(frameDelta);
     updatePlayerBubble();
     updatePlayerBombs(frameDelta);
+    updatePlayerRoll();
     _updateMagic(frameDelta);
     showdownTutorial?.update(frameDelta);
     const now = performance.now();
