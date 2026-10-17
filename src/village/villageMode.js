@@ -598,6 +598,7 @@ export function createVillage(ctx) {
   // Open roam (enterRoam — Showdown after the story): { spots, spot, onStart, title, beacons, releasedAt }
   // spot = the one whose village is built (the player is near it), or null between villages
   let roam = null;
+  let extraAct = null; // roam: info.extraAct()'s button while it shows ({ label, onClick })
 
   let stations = {};        // key → station
   let focus = null;         // focused station key or null (overview)
@@ -1068,7 +1069,10 @@ export function createVillage(ctx) {
     const inRange = free ? near.filter((n) => n.inRange) : [];
     const sw = swapBusy ? null : inRange.find((n) => n.key === 'npc')?.npc ?? null;
     const keys = inRange.filter((n) => n.key !== 'npc').slice(0, sw ? 1 : 2).map((n) => n.key);
-    const k = `${sw ? `npc:${sw.key}` : ''}|${keys.join(',')}`;
+    // (roam: the game's own button, e.g. ⛵ Explore the Seas by the pirate ship — first)
+    const extra = free && roam ? roam.extraAct?.() ?? null : null;
+    extraAct = extra;
+    const k = `${extra ? `x:${extra.label}` : ''}|${sw ? `npc:${sw.key}` : ''}|${keys.join(',')}`;
     switchNpc = sw;
     if (k === actsKey) return;
     actsKey = k;
@@ -1082,7 +1086,8 @@ export function createVillage(ctx) {
       return b;
     };
     const buttons = [];
-    if (sw) buttons.push(button(switchLabel(sw), true, () => { if (switchNpc) pickCharacter(switchNpc); }));
+    if (extra) buttons.push(button(extra.label, true, () => extraAct?.onClick()));
+    if (sw) buttons.push(button(switchLabel(sw), !buttons.length, () => { if (switchNpc) pickCharacter(switchNpc); }));
     keys.forEach((key) => buttons.push(button(actLabel(key), !buttons.length, () => focusStation(key))));
     el.acts.replaceChildren(...buttons);
     el.acts.classList.toggle('hidden', !buttons.length);
@@ -1721,7 +1726,7 @@ export function createVillage(ctx) {
       }
     }
     if (key === 'Escape' && focus && !starting) { unfocus(); e.preventDefault(); return; }
-    if ((key === 'e' || key === 'Enter') && !focus && (switchNpc || nearKeys)) {
+    if ((key === 'e' || key === 'Enter') && !focus && (extraAct || switchNpc || nearKeys)) {
       interact();
       e.preventDefault();
       return;
@@ -1745,7 +1750,8 @@ export function createVillage(ctx) {
       return;
     }
     if (focus) { unfocus(); return; }
-    if (switchNpc) pickCharacter(switchNpc);
+    if (extraAct) extraAct.onClick();
+    else if (switchNpc) pickCharacter(switchNpc);
     else if (nearKeys) focusStation(nearKeys.split(',')[0]);
   }
   function interactLabel() {
@@ -1753,6 +1759,7 @@ export function createVillage(ctx) {
     if (focus === 'villager' && talk) return talk.done && talk.choices ? talk.choices[0][0] : '▶ Next';
     if (focus === 'fire') return '🔥 Sit';
     if (focus) return '⬅ Back';
+    if (extraAct) return extraAct.label;
     if (switchNpc) return switchLabel(switchNpc);
     if (nearKeys) return actLabel(nearKeys.split(',')[0]);
     return null;
@@ -1866,6 +1873,7 @@ export function createVillage(ctx) {
     el.acts.replaceChildren();
     el.acts.classList.add('hidden');
     switchNpc = null;
+    extraAct = null;
   }
 
   function showBanner() {
@@ -2144,14 +2152,20 @@ export function createVillage(ctx) {
    * @param {{ title: string, onStart: (spot, pathAngle: number) => void, spots: Array<{
    *   stage: number, center: { x, z }, pathAngle: number, count: number, boss: string,
    *   bannerTitle: string, giverUrl: string,
-   *   quest: { speaker, emoji, title, place, lines, accept, reward, payLine, giverKey, done } }> }} info
+   *   quest: { speaker, emoji, title, place, lines, accept, reward, payLine, giverKey, done } }>,
+   *   extraAct?: () => ({ label: string, onClick: () => void } | null) }} info
    *   quest: as villagerQuestForStage's (giverKey: its character, not idling there too;
    *   done: finished before — a 🔁 marker instead of ❗)
+   *   extraAct: asked every frame — a button of the game's own with the station buttons
+   *   (first; E / Enter / the phone's interact), e.g. ⛵ Explore the Seas by the pirate ship
    */
   function enterRoam(info) {
     exit();
     active = true;
-    roam = { spots: info.spots, spot: null, onStart: info.onStart, title: info.title ?? 'Free Roam', beacons: [], releasedAt: 0 };
+    roam = {
+      spots: info.spots, spot: null, onStart: info.onStart, title: info.title ?? 'Free Roam',
+      extraAct: info.extraAct ?? null, beacons: [], releasedAt: 0,
+    };
     leaving = null;
     approaching = false;
     starting = false;
