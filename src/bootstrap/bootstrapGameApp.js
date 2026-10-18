@@ -1725,7 +1725,9 @@ async function initCore(runtimeContext) {
   //                   masts the ground); `deckMaxY` (model units above its origin, the waterline)
   //                   makes one ground of its own instead (_floatingGroundHeight): the highest
   //                   upward-facing surface no higher than that — the deck, climbable from the
-  //                   water like any wall, masts / yards / sails above it ignored
+  //                   water like any wall, masts / yards / sails above it ignored; `deck`
+  //                   (model units, the bow toward −X) = where a voyage keeps everyone aboard
+  //                   — one with a deck can sail (open roam's ⛵ Explore the Seas, _voyage*)
   const MAPS = {
     islandTown: {
       kind: 'mappack', url: '/mappacks/island_town.mappack', noGround: /tree|pirate_ship/i, scale: 1.4,
@@ -1733,7 +1735,10 @@ async function initCore(runtimeContext) {
       // The pirate ship: anchored off the north-east shore, in water deep enough for its hull
       // (world ≈ (69, −108) — in sight of stage 7's road)
       // (deck ≈ 0.5, quarterdeck / forecastle ≈ 1.2, yards from ≈ 1.9 model units up)
-      floating: [{ url: '/assets/props/pirate_ship.glb', at: [49, -77], yaw: 1.8, size: 1.3, deckMaxY: 1.5 }],
+      floating: [{
+        url: '/assets/props/pirate_ship.glb', at: [49, -77], yaw: 1.8, size: 1.3, deckMaxY: 1.5,
+        deck: { minX: -0.9, maxX: 4.4, halfWidth: 1.3 },
+      }],
     },
     classic: { kind: 'glb', url: '/glb_map/map.glb', scale: 5, spawn: { x: 0, z: 0, radius: 12 } },
   };
@@ -1760,7 +1765,7 @@ async function initCore(runtimeContext) {
       let styleRoot;   // what the art-style pass reads / grades (not the KTX2 terrain / grass)
       let water = null;   // (x, z) → water surface Y or null (mappacks with water / a sea)
       let floor = 0;      // lowest ground height (setTerrainFloor)
-      const floating = []; // def.floating props: { bob: Group, model, phase, deckMaxY }
+      const floating = []; // def.floating props: { holder, bob: Group, model, phase, deckMaxY, deck, anchor }
       if (def.kind === 'mappack') {
         const { MapLoader, sampleMapWaterLevel } = await import('../map/MapLoader.ts');
         group = await new MapLoader().load(def.url, { renderer, transcoderPath: '/basis/' });
@@ -1837,7 +1842,9 @@ async function initCore(runtimeContext) {
           bob.rotation.z = Math.sin(t * FLOAT_ROLL_SPEED * 0.7 + phase + 1) * FLOAT_ROLL * 0.5;
         }
       } : null;
-      return { group, meshes, groundMeshes, floor, water, animate, floatingGround };
+      // (the one that sails: a voyage moves its holder — _voyage*)
+      const ship = floatingGround.find((f) => f.deck) ?? null;
+      return { group, meshes, groundMeshes, floor, water, animate, floatingGround, ship };
     })();
     _loadedMaps.set(key, promise);
     promise.catch(() => _loadedMaps.delete(key)); // let a later switch retry
@@ -1861,7 +1868,10 @@ async function initCore(runtimeContext) {
     bob.add(gltf.scene);
     holder.add(bob);
     mapGroup.add(holder);
-    return { bob, model: gltf.scene, phase: prop.at[0] * 0.37, deckMaxY: prop.deckMaxY };
+    return {
+      holder, bob, model: gltf.scene, phase: prop.at[0] * 0.37, deckMaxY: prop.deckMaxY, deck: prop.deck ?? null,
+      anchor: { position: holder.position.clone(), yaw: holder.rotation.y },
+    };
   }
 
   let _activeMapKey = null;
@@ -4845,7 +4855,10 @@ async function initCore(runtimeContext) {
       ? `${_unlocked.emoji} ${_unlocked.label} ${_psStageBoss.spared ? 'joined you' : 'unlocked'}!`
       : `Stage ${_psStage} Cleared!`;
     // The story's end: Pemberton beaten (unlocks the villager); an open-roam quest done
-    if (!_classicMode && _psRoamQuest) {
+    if (!_classicMode && _voyage) {
+      _psWinTitle.textContent = 'VOYAGE COMPLETE!';
+      _psWinSub.textContent = `The ship’s home safe. 🪙 +${VOYAGE_REWARD}`;
+    } else if (!_classicMode && _psRoamQuest) {
       _psWinTitle.textContent = 'QUEST COMPLETE!';
       _psWinSub.textContent = `${_psRoamQuest.def.done} 🪙 +${_psRoamQuest.reward}`;
     } else if (!_classicMode && _psStageBoss?.pemberton) {
@@ -5061,6 +5074,370 @@ async function initCore(runtimeContext) {
     void _classicStageOverlay.offsetWidth;
     _classicStageOverlay.classList.remove('hidden');
   };
+  // ── Open roam: ⛵ Explore the Seas — a voyage on the pirate ship ──
+  // By the pirate ship (the active map's floating prop with a `deck` — MAPS) roam shows
+  // ⛵ Explore the Seas (villageMode's extraAct): the ship sails a loop out to sea and back
+  // (_voyagePickRoute — open water all the way), carrying whoever is aboard (_voyageCarry),
+  // and the player can't leave the deck until it's over (playerControls.positionConstraint).
+  // On the way frog men climb up the hull in waves (_voyageSpawnBoarder / _voyageClimbStep)
+  // and fight on deck; one knocked overboard climbs back up. Back at anchor with all of them
+  // beaten: VOYAGE COMPLETE!, VOYAGE_REWARD coins, back to roam on the deck. Dying: back to roam
+  // on the ship, at anchor again.
+  const VOYAGE_ACT_DIST = 16;        // m from the ship's middle: the button shows
+  const VOYAGE_OUT_DIST = 100;       // m out to sea (the loop's length)…
+  const VOYAGE_HALF_WIDTH = 24;      // …and half its width
+  const VOYAGE_SPEED = 2.6;          // m/s at full sail
+  const VOYAGE_RAMP_S = 6;           // s to full sail (and to slow down coming home)
+  const VOYAGE_TURN_RATE = 0.35;     // rad/s the ship turns at most
+  const VOYAGE_MIN_DEPTH = 1.5;      // m of water the route needs (the hull's width either side too)
+  const VOYAGE_WAVES = [0.06, 0.28, 0.5, 0.72]; // fraction of the loop sailed when a wave climbs aboard…
+  const VOYAGE_WAVE_SHARE = [0.16, 0.22, 0.28, 0.34]; // …and its share of the boarders
+  const VOYAGE_SPAWN_GAP_MS = 1400;  // between boarders of a wave
+  const VOYAGE_MAX_ABOARD = 5;       // living boarders at once (the rest wait their turn)
+  const VOYAGE_CLIMB_S = 2.4;        // s up the hull…
+  const VOYAGE_HOP_S = 0.4;          // …and over the rail
+  const VOYAGE_OVERBOARD = 0.6;      // m past the deck's edge: knocked overboard (climbs back up)
+  const VOYAGE_REWARD = 120;
+  const VOYAGE_BOARDER_URL = glbCharacterConfig.frogManUrl;
+  let _voyage = null; // { ship, route, theta, speed, phase: sail / dock / docked, wave, waveSizes, toSpawn, nextSpawnAt }
+  const _voyageShip = () => _activeMap?.ship ?? null;
+  const _voyageV = new THREE.Vector3();
+  const _voyageV2 = new THREE.Vector3();
+  const _voyageM0 = new THREE.Matrix4();
+  const _voyageMd = new THREE.Matrix4();
+  // Ship-local (holder space: model units, up = +Y, bow toward −X) ↔ world
+  const _shipToWorld = (ship, x, y, z, out = new THREE.Vector3()) => ship.holder.localToWorld(out.set(x, y, z));
+  const _shipToLocal = (ship, p, out = new THREE.Vector3()) => ship.holder.worldToLocal(out.copy(p));
+  const _shipMiddle = (ship) => _shipToWorld(ship, (ship.deck.minX + ship.deck.maxX) / 2, 0, 0);
+  // Where the player stands on the deck (start / back after dying)
+  const _voyageDeckSpot = (ship) => {
+    const p = _shipToWorld(ship, (ship.deck.minX + ship.deck.maxX) / 2 + 0.6, 0, 0.5);
+    return { x: p.x, z: p.z };
+  };
+  const _voyageOnDeck = (ship, p) => {
+    const l = _shipToLocal(ship, p, _voyageV);
+    const { minX, maxX, halfWidth } = ship.deck;
+    return l.y > 0.2 && l.x > minX - 0.3 && l.x < maxX + 0.3 && Math.abs(l.z) < halfWidth + 0.3;
+  };
+  // A world heading (unit xz) → the holder's yaw (its bow is local −X)
+  const _shipYawFor = (hx, hz) => Math.atan2(hz, -hx);
+  const _voyageDeepAt = (x, z) => {
+    const level = _activeMap?.water?.(x, z);
+    if (level == null) return false;
+    const ground = _glbResolveHeight(x, z);
+    return !Number.isFinite(ground) || level - ground >= VOYAGE_MIN_DEPTH;
+  };
+  // The loop: an ellipse from the anchor A and back, its long axis `d` out to sea, going round
+  // toward side s — P(θ) = C + d·a·cos θ + n·b·sin θ (n = s·d⊥, C = A + d·a), θ from π to 3π
+  const _voyageLoop = (A, d, s, a, b) => {
+    const n = { x: -d.z * s, z: d.x * s };
+    const C = { x: A.x + d.x * a, z: A.z + d.z * a };
+    return {
+      at: (th) => ({
+        x: C.x + d.x * a * Math.cos(th) + n.x * b * Math.sin(th),
+        z: C.z + d.z * a * Math.cos(th) + n.z * b * Math.sin(th),
+      }),
+      tangent: (th) => ({
+        x: -d.x * a * Math.sin(th) + n.x * b * Math.cos(th),
+        z: -d.z * a * Math.sin(th) + n.z * b * Math.cos(th),
+      }),
+    };
+  };
+  // Out away from the island if the water allows (else turned further round, or a smaller
+  // loop), going round the way the bow already points; null: no open water for it
+  const _voyagePickRoute = (ship) => {
+    const A = ship.holder.getWorldPosition(new THREE.Vector3());
+    const spawn = MAPS[_activeMapKey]?.spawn ?? { x: 0, z: 0 };
+    const away = Math.atan2(A.z - spawn.z, A.x - spawn.x);
+    const bow = { x: -Math.cos(ship.anchor.yaw), z: Math.sin(ship.anchor.yaw) };
+    for (const size of [1, 0.75, 0.5]) {
+      const a = (VOYAGE_OUT_DIST / 2) * size;
+      const b = VOYAGE_HALF_WIDTH * size;
+      let best = null;
+      for (const off of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4]) {
+        const d = { x: Math.cos(away + off), z: Math.sin(away + off) };
+        for (const s of [1, -1]) {
+          const loop = _voyageLoop(A, d, s, a, b);
+          let ok = true;
+          for (let i = 1; i < 64 && ok; i++) {
+            const th = Math.PI + (i / 64) * Math.PI * 2;
+            const p = loop.at(th);
+            if (Math.hypot(p.x - A.x, p.z - A.z) < 8) continue; // (where it's anchored already)
+            const t = loop.tangent(th);
+            const tl = Math.hypot(t.x, t.z) || 1;
+            for (const side of [-5, 0, 5]) {
+              if (!_voyageDeepAt(p.x - (t.z / tl) * side, p.z + (t.x / tl) * side)) { ok = false; break; }
+            }
+          }
+          if (!ok) continue;
+          const t0 = loop.tangent(Math.PI);
+          const score = (t0.x * bow.x + t0.z * bow.z) / (Math.hypot(t0.x, t0.z) || 1) - Math.abs(off) * 0.3;
+          if (!best || score > best.score) best = { loop, score };
+        }
+      }
+      if (best) return best;
+    }
+    return null;
+  };
+  // The roam button (null: not by the ship)
+  const _voyageAct = () => {
+    const ship = _voyageShip();
+    if (!ship || _voyage || playerDead) return null;
+    const m = _shipMiddle(ship);
+    if (Math.hypot(m.x - playerModel.position.x, m.z - playerModel.position.z) > VOYAGE_ACT_DIST) return null;
+    return { label: '⛵ Explore the Seas', onClick: _voyageStart };
+  };
+  const _voyageStart = () => {
+    if (_voyage) return;
+    _villageUnsheathe();
+    _requireSwordCalibration(_voyageBegin);
+  };
+  const _voyageBegin = () => {
+    const ship = _voyageShip();
+    if (!ship || _voyage || !village?.isOpen()) return;
+    const route = _voyagePickRoute(ship);
+    if (!route) {
+      showPickupToast('coins', 1, '', { text: '🌊 No open water to sail today' });
+      _villageSheathe();
+      return;
+    }
+    village.exit();
+    _psRoamQuest = null;
+    _psStageBoss = null;
+    magicBlasts.clear();
+    thawPlayer();
+    _psClearDeadEnemies();
+    _psEnemyQueue = [];
+    _psPath = null;
+    _psAutoWalking = false;
+    // All aboard (by the ship, not on it yet: onto the deck)
+    if (!_voyageOnDeck(ship, playerModel.position)) {
+      const p = _voyageDeckSpot(ship);
+      _teleportPlayer(p.x, p.z);
+    }
+    const total = Math.max(12, Math.min(30, Math.round(_psEnemyCount(_psStage) * 0.6)));
+    const waveSizes = VOYAGE_WAVE_SHARE.map((f) => Math.round(total * f));
+    waveSizes[waveSizes.length - 1] += total - waveSizes.reduce((n, k) => n + k, 0);
+    _voyage = {
+      ship, route, theta: Math.PI, speed: 0, phase: 'sail',
+      wave: 0, waveSizes, toSpawn: 0, nextSpawnAt: 0,
+    };
+    preloadCharacterModel(VOYAGE_BOARDER_URL);
+    playerControls.positionConstraint = _voyageConstrainPlayer;
+    _psStageKills = 0;
+    _psStageTotal = total;
+    _psStageActive = true;
+    _psWinShown = false;
+    _psUpdateKillHud(true);
+    comboMeter.reset();
+    _psCurrentIsNight = _psTimePref === 'night';
+    _psSongPool = [];
+    _psStopSong();
+    _psPlayNextSong(_psCurrentIsNight);
+    showPickupToast('coins', 1, '', { text: '⛵ Anchors aweigh! Hold the deck till we’re home' });
+  };
+  // Back to how it was: anchored, nobody kept aboard
+  const _voyageEnd = () => {
+    const v = _voyage;
+    if (!v) return;
+    _voyage = null;
+    if (playerControls?.positionConstraint === _voyageConstrainPlayer) playerControls.positionConstraint = null;
+    const { ship } = v;
+    ship.holder.position.copy(ship.anchor.position);
+    ship.holder.rotation.y = ship.anchor.yaw;
+    ship.holder.updateMatrixWorld(true);
+    ship.box.setFromObject(ship.model).expandByScalar(0.5);
+    for (const e of hordeEnemies) {
+      if (e._voyageClimb) e.onAfterUpdate = null;
+      e._voyageClimb = null;
+    }
+  };
+  // (playerControls.positionConstraint) Never off the deck while it sails
+  function _voyageConstrainPlayer(c) {
+    const ship = _voyage?.ship;
+    if (!ship) return;
+    const l = _shipToLocal(ship, _voyageV2.set(c.playerX, c.playerY, c.playerZ), _voyageV2);
+    const { minX, maxX, halfWidth } = ship.deck;
+    const x = THREE.MathUtils.clamp(l.x, minX, maxX);
+    const z = THREE.MathUtils.clamp(l.z, -halfWidth, halfWidth);
+    if (x === l.x && z === l.z) return;
+    ship.holder.localToWorld(l.set(x, l.y, z));
+    c.playerX = l.x;
+    c.playerZ = l.z;
+  }
+  // The ship moved by Md (turned by dYaw): everyone aboard moves with it
+  const _voyageCarry = (Md, dYaw) => {
+    const px = Number.isFinite(playerControls.playerX) ? playerControls.playerX : playerModel.position.x;
+    const pz = Number.isFinite(playerControls.playerZ) ? playerControls.playerZ : playerModel.position.z;
+    const p = _voyageV.set(px, playerModel.position.y, pz).applyMatrix4(Md);
+    playerControls.playerX = p.x;
+    playerControls.playerZ = p.z;
+    playerModel.position.x = p.x;
+    playerModel.position.z = p.z;
+    playerControls.yaw += dYaw;
+    for (const e of hordeEnemies) {
+      if (!e.rigidBody) continue;
+      const t = e.rigidBody.translation();
+      const q = _voyageV.set(t.x, t.y, t.z).applyMatrix4(Md);
+      e.rigidBody.setTranslation({ x: q.x, y: t.y, z: q.z }, true);
+      e.group.position.x = q.x;
+      e.group.position.z = q.z;
+      e.group.rotation.y += dYaw;
+    }
+  };
+  // A frog man climbs up the hull at a random spot on either side
+  const _voyageSpawnBoarder = (v) => {
+    const { ship } = v;
+    const { minX, maxX } = ship.deck;
+    const lx = minX + 0.4 + Math.random() * (maxX - minX - 0.8);
+    const side = Math.random() < 0.5 ? 1 : -1;
+    const start = _shipToWorld(ship, lx, 0, side * (ship.deck.halfWidth + 0.8));
+    const enemy = _spawnHordeEnemy({
+      position: start, hearts: _psHeartsForStage(_psStage), speedScale: PS_ENEMY_SPEED,
+      characterUrl: VOYAGE_BOARDER_URL,
+    });
+    _voyageStartClimb(enemy, lx, side);
+  };
+  // Climbing: passive (no attack slot), held to the hull (onAfterUpdate has the last word)
+  const _voyageStartClimb = (enemy, lx, side) => {
+    enemy._voyageClimb = { lx, side, t: 0 };
+    enemy.stationary = true;
+    enemy.script = { mode: 'passive' };
+    enemy.onAfterUpdate = (dt) => _voyageClimbStep(enemy, dt);
+  };
+  const _voyageEndClimb = (enemy) => {
+    enemy._voyageClimb = null;
+    enemy.stationary = false;
+    enemy.script = null;
+    enemy.onAfterUpdate = null;
+  };
+  const _voyageClimbStep = (enemy, dt) => {
+    const c = enemy._voyageClimb;
+    const ship = _voyage?.ship;
+    if (!c || !ship) return;
+    // (knocked off the hull: it climbs again once it's up — _voyageUpdate)
+    if (enemy.isDead || enemy._isRagdoll) { _voyageEndClimb(enemy); return; }
+    c.t += dt || 0;
+    const hw = ship.deck.halfWidth;
+    const land = _shipToWorld(ship, c.lx, 0, c.side * (hw - 0.2));
+    const deckY = getTerrainHeight(land.x, land.z);
+    const waterY = _shipToWorld(ship, c.lx, 0, 0, _voyageV2).y - 0.5;
+    let lz;
+    let y;
+    if (c.t < VOYAGE_CLIMB_S) {
+      // Hand over hand up the hull
+      const u = c.t / VOYAGE_CLIMB_S;
+      lz = c.side * (hw + 0.8 - 0.25 * u);
+      y = THREE.MathUtils.lerp(waterY, deckY + 0.35, u * u * (3 - 2 * u)) + Math.sin(u * Math.PI * 6) * 0.05;
+    } else if (c.t < VOYAGE_CLIMB_S + VOYAGE_HOP_S) {
+      // Over the rail
+      const h = (c.t - VOYAGE_CLIMB_S) / VOYAGE_HOP_S;
+      lz = c.side * THREE.MathUtils.lerp(hw + 0.55, hw - 0.2, h);
+      y = THREE.MathUtils.lerp(deckY + 0.35, deckY, h) + Math.sin(h * Math.PI) * 0.35;
+    } else {
+      enemy.rigidBody?.setTranslation({ x: land.x, y: enemy.rigidBody.translation().y, z: land.z }, true);
+      enemy.group.position.copy(land).setY(deckY);
+      _voyageEndClimb(enemy);
+      return;
+    }
+    const p = _shipToWorld(ship, c.lx, 0, lz);
+    enemy.rigidBody?.setTranslation({ x: p.x, y: enemy.rigidBody.translation().y, z: p.z }, true);
+    enemy.rigidBody?.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    enemy.group.position.set(p.x, y, p.z);
+    // (facing the hull)
+    const inward = _shipToWorld(ship, c.lx, 0, 0, _voyageV2).sub(p);
+    enemy.group.rotation.y = Math.atan2(inward.x, inward.z);
+  };
+  // Every frame before the player controls: sail, carry, keep the boarders aboard, waves, the end
+  const _voyageUpdate = (dt) => {
+    const v = _voyage;
+    if (!v) return;
+    const { ship, route } = v;
+    const holder = ship.holder;
+    // Sailing (the ship waits while the player is down)
+    if (!playerDead && v.phase !== 'docked') {
+      holder.updateMatrixWorld(true);
+      _voyageM0.copy(holder.matrixWorld);
+      const yaw0 = holder.rotation.y;
+      let targetYaw = ship.anchor.yaw; // (dock: turned back the way it was anchored)
+      if (v.phase === 'sail') {
+        const tan = route.loop.tangent(v.theta);
+        const tl = Math.hypot(tan.x, tan.z) || 1;
+        // Up to full sail, slowing down for home
+        const remain = (3 * Math.PI - v.theta) * tl;
+        const brake = (VOYAGE_SPEED * VOYAGE_RAMP_S) / 2;
+        v.speed = Math.min(v.speed + (VOYAGE_SPEED / VOYAGE_RAMP_S) * dt, VOYAGE_SPEED,
+          Math.max(0.5, VOYAGE_SPEED * Math.sqrt(remain / brake)));
+        v.theta = Math.min(3 * Math.PI, v.theta + (v.speed * dt) / tl);
+        const p = route.loop.at(v.theta);
+        holder.parent.worldToLocal(_voyageV.set(p.x, 0, p.z));
+        holder.position.x = _voyageV.x;
+        holder.position.z = _voyageV.z;
+        targetYaw = _shipYawFor(tan.x / tl, tan.z / tl);
+        if (v.theta >= 3 * Math.PI) {
+          v.phase = 'dock';
+          holder.position.x = ship.anchor.position.x;
+          holder.position.z = ship.anchor.position.z;
+        }
+      }
+      const dy = Math.atan2(Math.sin(targetYaw - yaw0), Math.cos(targetYaw - yaw0));
+      holder.rotation.y = yaw0 + THREE.MathUtils.clamp(dy, -VOYAGE_TURN_RATE * dt, VOYAGE_TURN_RATE * dt);
+      if (v.phase === 'dock' && Math.abs(dy) < 0.01) {
+        holder.rotation.y = ship.anchor.yaw;
+        v.phase = 'docked';
+      }
+      holder.updateMatrixWorld(true);
+      _voyageMd.copy(holder.matrixWorld).multiply(_voyageM0.invert());
+      _voyageCarry(_voyageMd, holder.rotation.y - yaw0);
+      ship.box.setFromObject(ship.model).expandByScalar(0.5);
+    }
+    // Boarders on deck stay on it; one thrown overboard climbs back up
+    const { minX, maxX, halfWidth } = ship.deck;
+    for (const e of hordeEnemies) {
+      if (e.isDead || e._voyageClimb || e._isRagdoll || !e.rigidBody) continue;
+      const t = e.rigidBody.translation();
+      const l = _shipToLocal(ship, _voyageV.set(t.x, 0, t.z), _voyageV);
+      const x = THREE.MathUtils.clamp(l.x, minX, maxX);
+      const z = THREE.MathUtils.clamp(l.z, -halfWidth, halfWidth);
+      if (x === l.x && z === l.z) continue;
+      if (Math.hypot(l.x - x, l.z - z) > VOYAGE_OVERBOARD) {
+        _voyageStartClimb(e, x, l.z === z ? (Math.random() < 0.5 ? 1 : -1) : Math.sign(l.z));
+        continue;
+      }
+      ship.holder.localToWorld(l.set(x, 0, z));
+      e.rigidBody.setTranslation({ x: l.x, y: t.y, z: l.z }, true);
+    }
+    // Waves: they come up the hull as the ship gets further round
+    const frac = (v.theta - Math.PI) / (2 * Math.PI);
+    while (v.wave < VOYAGE_WAVES.length && frac >= VOYAGE_WAVES[v.wave]) {
+      v.toSpawn += v.waveSizes[v.wave];
+      v.wave += 1;
+    }
+    const now = performance.now();
+    if (v.toSpawn > 0 && !playerDead && !_psWinShown && now >= v.nextSpawnAt
+      && hordeEnemies.filter((e) => !e.isDead).length < VOYAGE_MAX_ABOARD
+      && isCharacterModelSettled(VOYAGE_BOARDER_URL)) {
+      v.toSpawn -= 1;
+      v.nextSpawnAt = now + VOYAGE_SPAWN_GAP_MS;
+      _voyageSpawnBoarder(v);
+    }
+    // Home with the deck cleared: done
+    if (v.phase === 'docked' && v.toSpawn === 0 && v.wave >= VOYAGE_WAVES.length && !_psWinShown && !playerDead
+      && hordeEnemies.every((e) => e.isDead)) {
+      _psStageActive = false;
+      _psWinShown = true;
+      comboMeter.end();
+      addPlayerXp(getSwordShowdownStageXp(_psStage));
+      _spawnRewardCoins(VOYAGE_REWARD);
+      setStat('health', statsState.maxHealthSegments);
+      _psShowWin(() => {
+        _voyageEnd();
+        _psEnterRoam();
+      });
+    }
+  };
+
+
   // ── Showdown after the story: open roam ──
   // Once Pemberton is beaten (PEMBERTON_STAGE won) Showdown is open roam: the player walks the
   // island freely (village.enterRoam), and the village at each story stage's start has that
@@ -5126,7 +5503,7 @@ async function initCore(runtimeContext) {
       _psSetRewardOwed(0);
       _spawnRewardCoins(owed);
     }
-    village?.enterRoam({ title: '🗺️ Free Roam', spots, onStart: _psStartRoamQuest });
+    village?.enterRoam({ title: '🗺️ Free Roam', spots, onStart: _psStartRoamQuest, extraAct: _voyageAct });
   };
   // A roam village's quest accepted (after the sword calibration): its stage, from right there
   const _psStartRoamQuest = (spot, pathAngle) => {
@@ -5217,6 +5594,13 @@ async function initCore(runtimeContext) {
     _psAutoWalking = false;
     _psStageActive = false;
     _psWinShown = false;
+    // (a voyage: back to roam on the ship, at anchor again)
+    if (_voyage) {
+      const ship = _voyage.ship;
+      _voyageEnd();
+      _psEnterRoam({ at: _voyageDeckSpot(ship) });
+      return;
+    }
     _psShowStageScreen(_psStage, (count, opts) => _psStartStage(_psStage, count, opts),
       { roamAt: _psRoamQuest?.spot.center ?? null });
   };
@@ -6965,6 +7349,7 @@ async function initCore(runtimeContext) {
     _psStopSong();
     village?.exit();
     _psRoamQuest = null;
+    _voyageEnd();
     _villageUnsheathe();
     deathCarry?.cancel();
     playerControls?.cancelClimb?.();
@@ -7718,6 +8103,8 @@ async function initCore(runtimeContext) {
     }
 
     updateRoadLightsNearPlayer();
+    // A voyage on the pirate ship: it sails, carrying everyone aboard (before the player moves)
+    _voyageUpdate(frameDelta);
     playerControls.update();
     updateBloodEffects(frameDelta);
     updateBulletImpacts(frameDelta);
@@ -8280,7 +8667,8 @@ async function initCore(runtimeContext) {
       }
 
       // Win detection
-      if (_psStageActive && !_psWinShown && _psEnemyQueue.length === 0 && (hordeEnemies.length > 0 || _psSparedEnemies.length > 0)
+      // (a voyage ends back at anchor instead — _voyageUpdate)
+      if (_psStageActive && !_psWinShown && !_voyage && _psEnemyQueue.length === 0 && (hordeEnemies.length > 0 || _psSparedEnemies.length > 0)
         && hordeEnemies.every(e => e.isDead)) {
         _psStageActive = false;
         _psWinShown = true;
@@ -8581,8 +8969,10 @@ async function initCore(runtimeContext) {
             if (!_classicMode) { // Classic: no XP or coins
               addPlayerXp(getSwordShowdownKillXp(_psStage));
               const _dropPos = _he.group.position.clone();
-              spawnCoinPickup(_dropPos);
-              if (Math.random() < 0.4) spawnCoinPickup(_dropPos.clone().add(new THREE.Vector3((Math.random()-0.5)*1.5, 0, (Math.random()-0.5)*1.5)));
+              const _drops = [spawnCoinPickup(_dropPos)];
+              if (Math.random() < 0.4) _drops.push(spawnCoinPickup(_dropPos.clone().add(new THREE.Vector3((Math.random()-0.5)*1.5, 0, (Math.random()-0.5)*1.5))));
+              // (a voyage: the ship sails on — they come to the player)
+              if (_voyage) _drops.forEach((c) => { if (c) c.userData.homing = true; });
             }
           }
           // Remove from array once the Three.js group has been removed from scene

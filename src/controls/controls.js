@@ -110,6 +110,8 @@ export class PlayerControls {
     this.joystickForce = 0;
     // WASD / joystick speed multiplier (the Showdown village walks slower)
     this.moveSpeedScale = 1;
+    // (controls) => void, after each move: may pull playerX / playerZ back inside an area
+    this.positionConstraint = null;
     this.touchStartX = 0;
     this.touchStartY = 0;
     this.touchSensitivity = 0.006;
@@ -1173,6 +1175,8 @@ export class PlayerControls {
           this.playerZ += autoMove.z;
         }
       }
+      // (a hook that keeps the player inside an area — the pirate ship's deck on a voyage)
+      if (typeof this.positionConstraint === 'function') this.positionConstraint(this);
 
       if (!climbHandled && !window.phoneSwordAirborne) {
         const { groundY } = this.resolveGroundY(
