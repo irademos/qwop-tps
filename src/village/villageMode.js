@@ -57,6 +57,10 @@ const LIFE_POTION_SCALE = 4000.0;
 const MANA_POTION_SCALE = 8.0;
 const LIFE_POTION_OFFSET = new THREE.Vector3(-50, 60.0, 0.45);
 const MANA_POTION_OFFSET = new THREE.Vector3(-0.15, 100.0, 0.05);
+// Where the stall's bounds sit in its own units (the original model): bottom at -1, centred
+// here in x / z. The counter items / potions / COUNTER_SURFACE_Y were placed against that, so
+// a re-exported GLB with a different origin is moved back onto it (alignStallModel)
+const MARKET_STALL_ALIGN = { bottom: -0.97, x: -7.52, z: 1.56 };
 const STALL_UNIT = MARKET_STALL_SIZE * VILLAGE_PROP_SCALE; // metres per stall unit
 const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall units, measured) — items stand on it
 const MERCHANT_CHARACTER_URL = glbCharacterConfig.wizardUrl;
@@ -361,6 +365,16 @@ function disposeOwned(root) {
   });
 }
 // Clones of cached GLBs share geometry / materials: never dispose those
+// The stall model inside a scaled group, its bounds moved onto MARKET_STALL_ALIGN
+function alignStallModel(model) {
+  const box = new THREE.Box3().setFromObject(model);
+  const c = box.getCenter(new THREE.Vector3());
+  model.position.set(MARKET_STALL_ALIGN.x - c.x, MARKET_STALL_ALIGN.bottom - box.min.y, MARKET_STALL_ALIGN.z - c.z);
+  const group = new THREE.Group();
+  group.add(model);
+  return group;
+}
+
 function markShared(root) {
   root.traverse((o) => {
     o.userData.sharedAsset = true;
@@ -837,7 +851,7 @@ export function createVillage(ctx) {
       // The chest goes on the side toward the village centre
       const chestSign = Math.sign(_v.subVectors(center, stallRoot.position).dot(side)) || 1;
       root.add(stallRoot);
-      const stall = markShared(stallGltf.scene.clone(true));
+      const stall = alignStallModel(markShared(stallGltf.scene.clone(true)));
       stall.scale.setScalar(MARKET_STALL_SIZE * VILLAGE_PROP_SCALE);
       stall.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       stallRoot.add(stall);
