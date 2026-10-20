@@ -16,6 +16,25 @@
 // starting with nothing at all (ctx.startLoadout — the real inventory waits outside), and the
 // guards take it all on an arrest.
 //
+// Reactions: how townsfolk feel about the player (attitude) fades over time and shows — friends
+// get a discount at the goods stall, a grudge means no trade and stepping aside; a hurt
+// townsperson's family and the brave nearby come to help, and the family of the dead hold a
+// vendetta (they attack on sight). Townsfolk fight each other too: drifters mug people at
+// night, bandits raid; whoever's seen doing it is an outlaw for a while (hurting an outlaw is no
+// crime), and a guard goes to arrest them (a brawl, then the jail cell). Good friends follow
+// the player (🤝 Join me) and help in fights. Guards and the sheriff fight with gear (a shield;
+// the sheriff a gun too at ★★★).
+//
+// Law: an arrest is two guards carrying the player off (ctx.carryPlayerOff); in the cell:
+// bail, a bribe, picking the lock (townLockpick.js — a jailbreak brings the guards back) or
+// sleeping it off. Bandits live at a camp outside town (BANDIT_ROLES), raid fields and mug
+// people at night, attack the player on sight; the sheriff's board pays bounties on them.
+//
+// Missions (townJobs.js): the sheriff's board (bounties, guarding a field from a raid) and
+// the town board by the fire (deliveries from real shortages, debts, a lost kid), shady jobs
+// from the drifter, and three authored chains (CHAINS); up to MAX_ACTIVE_JOBS at once, shown
+// in the quest tracker with 📍 markers in the world.
+//
 // Bodies are a level of detail: only the nearest TOWN_MAX_BODIES townsfolk get a GLB character
 // (pooled per model); the rest walk the same paths as data. Someone fighting the player is
 // swapped for an EnemyPlayer (ctx.spawnFighter — the stage fighting code) and back.
@@ -27,7 +46,9 @@
 //   getMapObjects(bounds) → [{ file, x, z, radius }]
 //   teleport(x, z, yaw), revivePlayer(x, z, yaw), setPositionConstraint(fn | null)
 //   setTimeOfDay('day' | 'night'), showBanner(title, sub, ms)
-//   spawnFighter({ x, z, yaw, url, hearts, swingChance }) → EnemyPlayer, removeFighter(enemy)
+//   spawnFighter({ x, z, yaw, url, hearts, swingChance, gear, name }) → EnemyPlayer,
+//   removeFighter(enemy), releaseFighterGear(enemy), carryPlayerOff({ carrierUrl, onDone }),
+//   cancelCarry()
 //   spawnBlood(position, groundY), playSfx('hit' | 'chop'), dropCoins(position, n)
 //   getCoins(), addCoins(delta), profileKey() → string | null, onLobby()
 //   startLoadout(items), endLoadout() → items, getItems() → items | null, grantItem(kind, n),
@@ -41,10 +62,13 @@ import { createTownNav } from './townNav.js';
 import { GOODS, GOOD_IDS, FOOD_IDS, SHOP_GEAR, createMarket } from './townEconomy.js';
 import { createMarketPanel } from './townMarketPanel.js';
 import { createTownStalls } from './townStalls.js';
+import { BOARDS, CHAINS, MAX_ACTIVE_JOBS, OPEN_PER_BOARD, createJobBoardPanel, createQuestTracker } from './townJobs.js';
+import { createLockpick } from './townLockpick.js';
 import {
-  TOWN_NAME, ROLES, FOUNDING_ROLES, characterForRole, randomName, firstName,
-  talkLine, giftLine, chatLines, shout,
+  TOWN_NAME, ROLES, FOUNDING_ROLES, BANDIT_ROLES, characterForRole, randomName, firstName,
+  talkLine, giftLine, chatLines, shout, relationOf, fillLine,
   SHOUT_HURT, SHOUT_HELP, SHOUT_MURDER, SHOUT_THIEF, SHOUT_FIGHT, SHOUT_LAW, SHOUT_EAT_BUY,
+  SHOUT_RALLY, SHOUT_VENDETTA, SHOUT_STAY_BACK, SHOUT_MUG, SHOUT_ARREST, SHOUT_BANDIT, SHOUT_THANKS, FOLLOW_LINES,
 } from './townPeople.js';
 
 // ── Layout ──
@@ -79,6 +103,7 @@ const WORK_PAY = 1;                  // coins a guard / the sheriff earns per st
 const GIFT_COINS = 5;                // 🪙 Give
 const FRIEND_ATTITUDE = 0.55;        // friends don't tell the guards what they saw
 const NEWCOMER_DELAY_S = [45, 100];  // s until someone moves in after a death
+const FOUNDING_HOUSEHOLDS = 9;       // houses the founding townsfolk share (families)
 const DEAD_BODY_S = 5;               // s a body lies there before it's taken away
 
 // ── Law ──
@@ -113,6 +138,45 @@ const FISH_WATER_CELLS = 2;          // 🎣 Fish within this many nav cells of 
 const FISH_S = [3, 6];               // s per cast
 const FISH_CHANCE = 0.6;
 const FISH_CANCEL_DIST = 0.8;        // m — walking off cancels the cast
+
+// ── Reactions ──
+const ATTITUDE_FADE = 0.004;         // per second, toward 0 (fondness fades at half the rate)
+const GRUDGE_ATTITUDE = -0.5;        // won't trade with the player, steps aside from them
+const FRIEND_DISCOUNT = 0.15;        // friends pay this much less at the goods stall (and get more)
+const AVOID_DIST = 4.5;              // m
+const RALLY_DIST = 15;               // m — the brave this close (family: further) come to help
+const RALLY_MAX = 2;
+const VENDETTA_SIGHT = 9;            // m — the family of someone the player killed attacks on sight
+const FOLLOW_ATTITUDE = 0.8;         // fond enough to come along (🤝 Join me)
+const MAX_FOLLOWERS = 2;
+const FOLLOW_GAP = 2.2;              // m behind the player
+const FOLLOW_HELP_DIST = 12;         // m — a follower takes on hostiles this close to the player
+const FOLLOW_HIT_S = 1.8;            // s between a follower's blows
+const BRAWL_HIT_S = [1.0, 1.7];      // s between blows when townsfolk fight each other
+const BRAWL_REACH = 1.3;             // m
+const MUG_CHANCE = 0.3;              // a drifter out at night goes after someone (per decision)
+const OUTLAW_S = 120;                // s someone seen attacking / robbing is wanted
+const NPC_JAIL_S = 90;               // s an arrested townsperson spends in the cell
+
+// ── Law (more) ──
+const BRIBE = 35;                    // coins
+const BRIBE_ODDS = 0.5;              // when no officer near likes the player
+const LOCK_SLIP_S = 10;              // s added to the sentence by a slipped lockpick
+const WAKE_HOUR = 7;                 // sleeping it off: out at this hour
+const BANDIT_SIGHT = 9;              // m — bandits attack the player this close (and seen)
+const BANDIT_RETURN_S = [180, 300];  // s until a beaten bandit's place in the gang is filled
+const BANDIT_CAMP_R = 7;             // m they loiter around the camp
+const RAID_CHANCE = 0.35;            // a bandit's night decision: raid a field…
+const BANDIT_MUG_CHANCE = 0.2;       // …or rob someone
+const RAID_TAKE = 2;                 // crops a raider takes
+
+// ── Missions ──
+const BOARD_DIST = 2.6;              // m — 📋 jobs near a board
+const BOARD_REFRESH_S = 120;         // s between postings
+const ACT_DIST = 2.4;                // m — a job's 📦 / 💰 near its townsperson
+const KID_FOUND_DIST = 2.5;          // m
+const KID_HOME_DIST = 3;             // m from their door to count as home
+const RAID_HOUR = 22;                // a guarded field is raided at this hour
 
 const SAVE_EVERY_S = 20;
 const SAVE_PREFIX = 'town_';
@@ -171,6 +235,12 @@ export function createTownMode(ctx) {
   const goods = { wood: 0, fish: 0, crops: 0 }; // what the player carries
   const soldOut = new Set();  // goods the market has run out of (for the feed)
   let fishing = null;         // { left, x, z } while the player's line is out
+  let jobs = [];              // posted + taken jobs (townJobs.js)
+  let nextJobId = 1;
+  let chainsDone = new Set();
+  let boardsAt = 0;           // next posting time
+  const markers = new Map();  // job id → 📍 sprite
+  let strongboxHeld = false;  // (chain: the sheriff's strongbox)
   let lastItems = null;       // the town gear, as it was when the player last left
 
   // ── DOM ──
@@ -209,6 +279,15 @@ export function createTownMode(ctx) {
     onSellGood: (g) => sellGood(g),
     onClose: () => closeMarket(),
   });
+  // Job boards (townJobs.js), the quest tracker, the jailbreak lock
+  let boardOpen = null;       // 'law' | 'town' while a board's panel is up
+  const boardPanel = createJobBoardPanel(hud, {
+    onAccept: (id) => acceptJob(id),
+    onAbandon: (id) => abandonJob(id),
+    onClose: () => closeBoard(),
+  });
+  const tracker = createQuestTracker(hud);
+  const lockpick = createLockpick(hud);
 
   const feedLine = (text) => {
     const line = el('div', 'town-feed-line', text);
@@ -241,7 +320,12 @@ export function createTownMode(ctx) {
       id: n.id, name: n.name, role: n.role, url: n.url, home: n.homeIndex,
       money: Math.round(n.money), attitude: Math.round(n.attitude * 100) / 100,
       carry: { ...n.carry },
+      vendetta: !!n.vendetta, following: !!n.following,
     })),
+    jobs: jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
+    nextJobId,
+    chainsDone: [...chainsDone],
+    strongboxHeld,
     pending: arrivals.map((a) => a.role),
     departed,
     nextId,
@@ -415,9 +499,38 @@ export function createTownMode(ctx) {
     const entranceCell = best(nav.cellsWhere((i) => nav.kindAt(i) >= 1), (i) => dC(i));
     const entrance = entranceCell >= 0 ? cellPos(entranceCell) : { ...NAV_START };
 
+    // The bandit camp: an open spot well out of town, off the roads
+    const campOk = (i, strict) => {
+      const d = dC(i);
+      if (d < 26 || d > 54 || nav.clearanceAt(i) < (strict ? 3 : 2)) return false;
+      if (!strict) return true;
+      const x = nav.cellX(i);
+      const z = nav.cellZ(i);
+      return !nearRoad(i, 8) && dist2(x, z, jailPos.x, jailPos.z) > 20
+        && fields.every((f) => dist2(x, z, f.x, f.z) > 15);
+    };
+    let campCell = best(nav.cellsWhere((i) => campOk(i, true)), (i) => nav.clearanceAt(i) - Math.abs(dC(i) - 38) * 0.1);
+    if (campCell < 0) campCell = best(nav.cellsWhere((i) => campOk(i, false)), (i) => nav.clearanceAt(i));
+    const camp = campCell >= 0 ? cellPos(campCell) : { ...entrance };
+    const campFire = { x: camp.x + 2.2, z: camp.z };
+    const strongbox = { x: camp.x - 1.6, z: camp.z + 1.4 };
+    nav.block(camp.x, camp.z, 1.2);
+    nav.block(campFire.x, campFire.z, 0.8);
+    // Job boards: the sheriff's by the office, the town's by the campfire
+    const walkableNear = (x, z) => {
+      const i = nav.nearestWalkable(x, z);
+      return i >= 0 ? cellPos(i) : { x, z };
+    };
+    const lawBoard = walkableNear(officeSpot.x + jailFwd.z * 1.8, officeSpot.z - jailFwd.x * 1.8);
+    const toMarket = { x: market.x - fire.x, z: market.z - fire.z };
+    const tm = Math.hypot(toMarket.x, toMarket.z) || 1;
+    const townBoard = walkableNear(fire.x - (toMarket.z / tm) * 3.2, fire.z + (toMarket.x / tm) * 3.2);
+    nav.refresh();
+
     const places = {
       center: C, market, gearStall, gearSign, merchantSpot, customerSpot, stallYaw, fire, jail: jailPos, jailYaw, officeSpot,
-      homes, treeSpots, fields, shore, patrol, entrance,
+      homes, treeSpots, fields, shore, patrol, entrance, camp, campFire, strongbox,
+      boards: { law: lawBoard, town: townBoard },
       // the player arrives between the market and the fire
       spawn: { x: (market.x + fire.x) / 2 + fwd.z * 2.2, z: (market.z + fire.z) / 2 - fwd.x * 2.2 },
     };
@@ -501,20 +614,61 @@ export function createTownMode(ctx) {
         }
       }
     }
-    return { group, fire, door };
+    // The bandit camp: a ragged tent, a fire, the stolen strongbox
+    const cloth = new THREE.MeshStandardMaterial({ color: 0x6d5a44, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+    const tent = new THREE.Mesh(new THREE.ConeGeometry(1.3, 1.7, 4, 1, true), cloth);
+    tent.position.set(places.camp.x, groundAt(places.camp.x, places.camp.z) + 0.85, places.camp.z);
+    tent.rotation.y = Math.PI / 4;
+    tent.castShadow = true;
+    group.add(tent);
+    const campFire = makeCampfire();
+    campFire.group.position.set(places.campFire.x, groundAt(places.campFire.x, places.campFire.z), places.campFire.z);
+    group.add(campFire.group);
+    const strongbox = new THREE.Group();
+    const boxBody = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.36, 0.38), new THREE.MeshStandardMaterial({ color: 0x7a5230, roughness: 0.9, metalness: 0 }));
+    boxBody.position.y = 0.18;
+    const boxBand = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.06, 0.4), iron);
+    boxBand.position.y = 0.3;
+    strongbox.add(boxBody, boxBand);
+    strongbox.position.set(places.strongbox.x, groundAt(places.strongbox.x, places.strongbox.z), places.strongbox.z);
+    strongbox.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    group.add(strongbox);
+    const campSign = makeTextSprite('💀 Bandit camp', { height: 0.28 });
+    campSign.position.set(places.camp.x, groundAt(places.camp.x, places.camp.z) + 2.3, places.camp.z);
+    group.add(campSign);
+    // Job boards: a post and a board
+    for (const [key, at] of Object.entries(places.boards)) {
+      const board = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.6, 0.1), wood);
+      post.position.y = 0.8;
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.7, 0.06), wood);
+      panel.position.y = 1.35;
+      board.add(post, panel);
+      board.position.set(at.x, groundAt(at.x, at.z), at.z);
+      board.lookAt(places.fire.x, board.position.y, places.fire.z);
+      board.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      const sign = makeTextSprite(BOARDS[key].label, { height: 0.24 });
+      sign.position.set(0, 2.0, 0);
+      board.add(sign);
+      group.add(board);
+    }
+    return { group, fire, door, campFire, strongbox };
   };
 
   // ── Townsfolk ──
-  const makeNpc = ({ id, name, role, url, home, money = role === 'merchant' ? MERCHANT_START_CASH : rand(4, 14), attitude = 0, carry = null }) => {
+  const makeNpc = ({ id, name, role, url, home, money = role === 'merchant' ? MERCHANT_START_CASH : rand(4, 14), attitude = 0, carry = null, vendetta = false, following = false }) => {
     const def = ROLES[role] ?? ROLES.townsfolk;
     const { homes } = layout.places;
-    const homeIndex = Number.isInteger(home) && home >= 0 && home < homes.length ? home : Math.floor(Math.random() * homes.length);
+    // (bandits live at the camp: home index -1)
+    const homeIndex = def.outlaw ? -1
+      : Number.isInteger(home) && home >= 0 && home < homes.length ? home : Math.floor(Math.random() * homes.length);
+    const homeSpot = def.outlaw ? layout.places.camp : homes[homeIndex];
     return {
       id, name, role, url, def,
       homeIndex,
-      home: homes[homeIndex],
+      home: homeSpot,
       work: null,
-      x: homes[homeIndex].x, z: homes[homeIndex].z, yaw: Math.random() * Math.PI * 2,
+      x: homeSpot.x, z: homeSpot.z, yaw: Math.random() * Math.PI * 2,
       alive: true, dying: null, hp: def.hp, maxHp: def.hp,
       needs: { energy: rand(0.6, 1), hunger: rand(0, 0.6), social: rand(0, 0.7) },
       money, attitude,
@@ -524,6 +678,10 @@ export function createTownMode(ctx) {
       inside: false, fear: 0, hostile: false, fighter: null, lastHurtAt: -1e9, lastHitAt: -1e9,
       body: null, bodyPending: false, wantsBody: false, bubble: null, nextAmbientAt: rand(5, 25),
       patrolI: Math.floor(Math.random() * 6), workT: 0, actionAt: 0, talkBonusAt: -1e9, friendNoted: false,
+      // reactions: a vendetta against the player, following the player, wanted (as an outlaw) /
+      // in the cell until (sim time), the next blow in a brawl, last stepped aside
+      vendetta, following, outlawUntil: 0, jailedUntil: 0, nextBlowAt: 0, avoidAt: 0,
+      loot: 0, lost: false,
     };
   };
   // Work spots handed out per role (two woodcutters don't share a tree)
@@ -616,6 +774,22 @@ export function createTownMode(ctx) {
     const h = hour();
     const def = n.def;
     const night = h >= 21.5 || h < 6;
+    // In the cell / lost / following the player / a bandit: their own routines
+    if (n.jailedUntil > simT) { setTask(n, { type: 'jailed', dur: Infinity }); return; }
+    if (n.lost) { setTask(n, { type: 'lost', dur: Infinity }); return; }
+    if (n.following) {
+      if ((h >= 23 || h < 6) && !n.escort) {
+        n.following = false;
+        say(n, pickOf(FOLLOW_LINES.late));
+        feedLine(`🌙 ${firstName(n.name)} went home for the night.`);
+      } else {
+        setTask(n, { type: 'follow', dur: Infinity });
+        return;
+      }
+    }
+    if (def.outlaw) { decideBandit(n, h); return; }
+    // A drifter out at night may go after someone's purse
+    if (n.role === 'drifter' && (h >= 21 || h < 4) && Math.random() < MUG_CHANCE && startMugging(n)) return;
     const options = [];
     const working = def.hours && inHours(h, def.hours);
     if (def.law) {
@@ -781,7 +955,11 @@ export function createTownMode(ctx) {
     if (n.fighter || !n.alive) return;
     releaseBody(n);
     n.inside = false;
-    const e = ctx.spawnFighter({ x: n.x, z: n.z, yaw: n.yaw, url: n.url, hearts: Math.max(1, n.hp), swingChance: n.def.law ? 0.35 : 0.25 });
+    const e = ctx.spawnFighter({
+      x: n.x, z: n.z, yaw: n.yaw, url: n.url, hearts: Math.max(1, n.hp),
+      swingChance: n.def.law || n.def.outlaw ? 0.35 : 0.25,
+      gear: fighterGear(n), name: `${n.def.emoji} ${n.name}`,
+    });
     if (!e) return;
     n.fighter = e;
     n.hostile = true;
@@ -804,17 +982,23 @@ export function createTownMode(ctx) {
     n.yaw = e.group.rotation.y;
     n.hp = Math.max(1, e.hearts ?? n.hp);
     ctx.removeFighter(e);
+    n.vendetta = false; // (they've had their go)
     if (next) next();
     else decide(n);
   };
   const onFighterHurt = (n, killed) => {
     n.lastHurtAt = simT;
-    n.attitude = Math.max(-1, n.attitude - 0.3);
+    // (a follower's blow is theirs, not the player's — they only take on outlaws and townsfolk
+    // already fighting the player)
+    const byPlayer = !n.followerHit;
+    n.followerHit = false;
+    if (byPlayer) n.attitude = Math.max(-1, n.attitude - 0.3);
     if (killed) {
       n.hp = 0;
-      die(n, { byPlayer: true, bodyless: true });
-      crime('murder', n);
-    } else if (n.def.law && law.stars < 2) {
+      ctx.releaseFighterGear(n.fighter);
+      die(n, { byPlayer, bodyless: true });
+      if (byPlayer && !isOutlaw(n)) crime('murder', n);
+    } else if (byPlayer && n.def.law && law.stars < 2) {
       crime('assault', n);
     }
   };
@@ -832,6 +1016,7 @@ export function createTownMode(ctx) {
     n.lastHurtAt = simT;
     n.hp -= amount;
     n.attitude = Math.max(-1, n.attitude - 0.6);
+    const outlaw = isOutlaw(n);
     const gy = groundY(n);
     ctx.spawnBlood(_v.set(n.x, gy + 0.55 * heightScale(n.url), n.z), gy);
     ctx.playSfx('hit');
@@ -839,19 +1024,23 @@ export function createTownMode(ctx) {
     n.knock = { vx: dir.x * 3, vz: dir.z * 3, left: 0.25 };
     if (n.hp <= 0) {
       die(n, { byPlayer: true });
-      crime('murder', n);
+      if (outlaw) heroic(n);
+      else crime('murder', n);
       return;
     }
     clearTalk(n);
+    // Hitting an outlaw (a bandit, a mugger) is no crime — the town's grateful
+    if (outlaw) heroic(n);
+    else crime('assault', n);
     if (n.def.law || Math.random() < n.def.brave) {
       say(n, shout(n.def.law ? SHOUT_LAW : SHOUT_FIGHT));
-      crime('assault', n);
+      endBrawl(n);
       promote(n);
     } else {
       say(n, shout(SHOUT_HURT));
-      crime('assault', n);
       flee(n);
     }
+    if (!outlaw) rally(n);
   };
   const die = (n, { byPlayer = false, bodyless = false } = {}) => {
     if (!n.alive) return;
@@ -865,21 +1054,41 @@ export function createTownMode(ctx) {
     }
     const at = new THREE.Vector3(n.x, groundY(n) + 0.3, n.z);
     if (n.money >= 1) ctx.dropCoins(at, Math.min(3, 1 + Math.floor(n.money / 8)));
+    endBrawl(n);
+    if (n.def.outlaw) {
+      // A bandit: the gang finds a new one in a while; no grief in town
+      feedLine(`💀 ${n.name} is down.`);
+      arrivals.push({ role: n.role, at: simT + rand(...BANDIT_RETURN_S) });
+      onJobDeath(n, byPlayer);
+      save();
+      return;
+    }
     gossip.push({ kind: 'murder', who: firstName(n.name), by: byPlayer ? 'player' : null, at: simT, fresh: true });
     feedLine(`💀 ${n.name} the ${n.def.label} is dead.`);
     arrivals.push({ role: n.role, at: simT + rand(...NEWCOMER_DELAY_S) });
     departed = [...departed, firstName(n.name)].slice(-20);
+    // Their family won't forget who did it
+    if (byPlayer && !isOutlaw(n)) {
+      for (const k of family(n)) {
+        k.attitude = -1;
+        if (!k.def.unhurt) { k.vendetta = true; k.vendettaFor = relationOf(n.role); }
+      }
+    }
+    onJobDeath(n, byPlayer);
     // Everyone near runs
     for (const o of npcs) {
       if (o !== n && o.alive && !o.fighter && !o.def.law && dist2(o.x, o.z, n.x, n.z) < 14) flee(o);
     }
     save();
   };
-  const flee = (n) => {
-    if (!n.alive || n.fighter) return;
+  // (from: what they run from — the player by default)
+  const flee = (n, from = null) => {
+    if (!n.alive || n.fighter || n.jailedUntil > simT) return;
     n.fear = 12;
     clearTalk(n);
-    const p = playerPos();
+    endBrawl(n);
+    if (n.following) n.following = false;
+    const p = from ?? playerPos();
     // Home if it's away from the player, otherwise straight away from them
     const homeAway = dist2(n.home.x, n.home.z, p.x, p.z) > dist2(n.x, n.z, p.x, p.z) + 4;
     let to = n.home;
@@ -994,6 +1203,329 @@ export function createTownMode(ctx) {
     renderStars();
   };
 
+  // ── Reactions ──
+  const isOutlaw = (n) => !!n.def.outlaw || n.outlawUntil > simT;
+  // Same house = family (bandits have none)
+  const family = (n) => (n.homeIndex < 0 ? [] : npcs.filter((o) => o !== n && o.alive && o.homeIndex === n.homeIndex));
+  const followers = () => npcs.filter((n) => n.alive && n.following);
+  // Guards carry a shield; the sheriff a gun too once it's ★★★; bandits' gear is their role's
+  const fighterGear = (n) => {
+    if (n.def.gear) return n.def.gear;
+    if (n.role === 'sheriff') return law.stars >= 3 ? { gun: true, shield: true } : { shield: true };
+    if (n.def.law) return { shield: true };
+    return null;
+  };
+  // Line of sight from a townsperson's eyes to a point (the player: sees)
+  const seesPoint = (n, x, y, z) => {
+    _v.set(n.x, groundY(n) + 0.8, n.z);
+    _v2.set(x, y + 0.8, z);
+    return !raycastMapSegment(_v, _v2);
+  };
+  // The player hurt an outlaw: those who see it think better of them
+  const heroic = (victim) => {
+    const p = playerPos();
+    for (const w of npcs) {
+      if (!w.alive || w === victim || w.def.outlaw || dist2(w.x, w.z, p.x, p.z) > WITNESS_DIST) continue;
+      w.attitude = Math.min(1, w.attitude + 0.12);
+      if (victim.mugVictim === w && Math.random() < 0.7) say(w, fillLine(pickOf(SHOUT_THANKS), { name: ctx.getPlayerName() }));
+    }
+  };
+  // A townsperson the player hurt: their family and the brave nearby step in
+  const rally = (victim) => {
+    const kin = new Set(family(victim));
+    let n = 0;
+    for (const o of npcs) {
+      if (n >= RALLY_MAX) break;
+      if (o === victim || !o.alive || o.fighter || o.inside || o.def.law || o.def.outlaw || o.def.unhurt
+        || o.following || o.jailedUntil > simT || o.attitude >= FRIEND_ATTITUDE) continue;
+      const isKin = kin.has(o);
+      if (distToPlayer(o) > (isKin ? RALLY_DIST * 1.6 : RALLY_DIST)) continue;
+      if (!isKin && o.def.brave < 0.5) continue;
+      say(o, fillLine(pickOf(SHOUT_RALLY), { who: firstName(victim.name) }));
+      endBrawl(o);
+      promote(o);
+      n += 1;
+    }
+  };
+  // Grudges: a vendetta attacks on sight; a deep grudge steps aside
+  const reactToPlayer = (n) => {
+    if (n.fighter || n.inside || n.jailedUntil > simT || sequence || ctx.isPlayerDead()) return;
+    const d = distToPlayer(n);
+    if (n.vendetta && d < VENDETTA_SIGHT && sees(n)) {
+      say(n, fillLine(pickOf(SHOUT_VENDETTA), { rel: n.vendettaFor || 'friend' }));
+      endBrawl(n);
+      promote(n);
+      return;
+    }
+    if (n.def.outlaw && d < BANDIT_SIGHT && sees(n) && !n.task?.mugging) {
+      say(n, pickOf(SHOUT_BANDIT));
+      endBrawl(n);
+      promote(n);
+      return;
+    }
+    if (n.attitude < GRUDGE_ATTITUDE && d < AVOID_DIST && simT > n.avoidAt && !n.def.law
+      && !['flee', 'sleep', 'brawl', 'arrest', 'mug', 'raid'].includes(n.task?.type)) {
+      n.avoidAt = simT + 20;
+      say(n, pickOf(SHOUT_STAY_BACK));
+      flee(n);
+      n.fear = 4;
+    }
+  };
+
+  // ── Townsfolk fighting each other (light bodies: blows on a timer, no EnemyPlayers) ──
+  // mode: 'mug' (the attacker takes the purse and goes), 'arrest' (a guard, until the other
+  // gives up), 'fight'
+  const startBrawl = (a, b, mode) => {
+    if (!a.alive || !b.alive || a.fighter || b.fighter) return;
+    a.task = { type: 'brawl', t: 0, phase: 'do', foe: b, mode, attacker: true };
+    b.task = { type: 'brawl', t: 0, phase: 'do', foe: a, mode, attacker: false };
+    a.path = null;
+    b.path = null;
+    a.nextBlowAt = simT + 0.4;
+    b.nextBlowAt = simT + rand(...BRAWL_HIT_S);
+    if (mode === 'mug') { say(a, pickOf(SHOUT_MUG)); b.mugVictim = null; a.mugVictim = b; }
+    if (mode === 'arrest') say(a, pickOf(SHOUT_ARREST));
+  };
+  const endBrawl = (n) => {
+    const t = n.task;
+    if (t?.type !== 'brawl') return;
+    n.task = null;
+    const o = t.foe;
+    if (o?.task?.type === 'brawl' && o.task.foe === n) o.task = null;
+  };
+  // One townsperson's blow on another
+  const npcHit = (victim, attacker, amount = 1) => {
+    if (!victim.alive) return;
+    if (victim.def.unhurt) { flee(victim, attacker); return; }
+    victim.hp -= amount;
+    victim.lastHurtAt = simT;
+    if (victim.body && distToPlayer(victim) < 25) {
+      const gy = groundY(victim);
+      ctx.spawnBlood(_v.set(victim.x, gy + 0.55 * heightScale(victim.url), victim.z), gy);
+      if (distToPlayer(victim) < 12) ctx.playSfx('hit');
+    }
+    const dx = victim.x - attacker.x;
+    const dz = victim.z - attacker.z;
+    const d = Math.hypot(dx, dz) || 1;
+    victim.knock = { vx: (dx / d) * 2.5, vz: (dz / d) * 2.5, left: 0.2 };
+    if (victim.hp <= 0) {
+      die(victim, { byPlayer: false });
+      if (!victim.def.outlaw) npcCrime(attacker, 'murder', victim);
+    }
+  };
+  // A townsperson (or bandit) seen attacking / robbing someone is wanted: a guard comes for them
+  const npcCrime = (culprit, kind, victim) => {
+    const seen = npcs.some((w) => w.alive && !w.inside && w !== culprit && !w.def.outlaw
+      && dist2(w.x, w.z, culprit.x, culprit.z) < WITNESS_DIST
+      && (w === victim || seesPoint(w, culprit.x, groundY(culprit), culprit.z)));
+    if (!seen) return;
+    culprit.outlawUntil = simT + OUTLAW_S;
+    gossip.push({ kind: kind === 'murder' ? 'murder' : 'assault', who: firstName(victim.name), by: firstName(culprit.name), at: simT, fresh: true });
+    if (distToPlayer(culprit) < 35) feedLine(`🚨 ${firstName(culprit.name)} ${kind === 'mug' ? 'robbed' : kind === 'theft' ? 'stole from' : 'attacked'} ${firstName(victim.name)}!`);
+    sendGuard(culprit);
+  };
+  // The nearest free guard goes to arrest an outlaw townsperson
+  const sendGuard = (culprit) => {
+    if (law.stars > 0 && distToPlayer(culprit) < LAW_SIGHT) return; // (busy with the player)
+    const guard = lawNpcs().filter((g) => !g.fighter && !g.inside && g.jailedUntil <= simT
+      && !['respond', 'search', 'arrest', 'brawl'].includes(g.task?.type))
+      .sort((a, b) => dist2(a.x, a.z, culprit.x, culprit.z) - dist2(b.x, b.z, culprit.x, culprit.z))[0];
+    if (!guard) return;
+    guard.task = { type: 'arrest', t: 0, phase: 'go', target: culprit, run: true };
+    guard.path = null;
+  };
+  // An outlaw in the cell for a while
+  const jailNpc = (n, by) => {
+    endBrawl(n);
+    n.outlawUntil = 0;
+    n.jailedUntil = simT + NPC_JAIL_S;
+    n.hp = Math.max(n.hp, 1);
+    const P = layout.places;
+    n.x = P.jail.x + rand(-0.4, 0.4);
+    n.z = P.jail.z + rand(-0.4, 0.4);
+    n.path = null;
+    setTask(n, { type: 'jailed', dur: Infinity });
+    if (distToPlayer(n) < 35 || distToPlayer(by) < 35) feedLine(`👮 ${firstName(by.name)} locked up ${firstName(n.name)}.`);
+    gossip.push({ kind: 'jailed', who: firstName(n.name), by: firstName(by.name), at: simT, fresh: true });
+  };
+  // A drifter (or bandit) picks someone out on their own
+  const startMugging = (n) => {
+    const victim = npcs.filter((o) => o !== n && o.alive && !o.fighter && !o.inside && !o.def.law && !o.def.outlaw
+      && !o.def.unhurt && !o.following && o.jailedUntil <= simT && o.money >= 2
+      && dist2(o.x, o.z, n.x, n.z) < 28)
+      .sort((a, b) => dist2(a.x, a.z, n.x, n.z) - dist2(b.x, b.z, n.x, n.z))[0];
+    if (!victim) return false;
+    n.task = { type: 'mug', t: 0, phase: 'go', target: victim, mugging: true };
+    n.path = null;
+    return true;
+  };
+  // A bandit's day: loiter at the camp; at night raid a field or rob someone in town
+  const decideBandit = (n, h) => {
+    const P = layout.places;
+    const night = h >= 21 || h < 4;
+    if (night && !n.loot) {
+      const r = Math.random();
+      if (r < RAID_CHANCE && P.fields.length) { startRaid(n, pickOf(P.fields)); return; }
+      if (r < RAID_CHANCE + BANDIT_MUG_CHANCE && startMugging(n)) return;
+    }
+    if (n.loot && dist2(n.x, n.z, P.camp.x, P.camp.z) > BANDIT_CAMP_R) {
+      setTask(n, { type: 'raidHome', to: randomNear(P.camp.x, P.camp.z, 3), dur: 2, run: true });
+      return;
+    }
+    n.loot = 0;
+    const near = Math.random() < 0.5 ? P.campFire : P.camp;
+    setTask(n, { type: 'camp', to: randomNear(near.x, near.z, BANDIT_CAMP_R * 0.6), dur: rand(6, 16), face: P.campFire });
+  };
+  const startRaid = (n, field, jobId = null) => {
+    setTask(n, { type: 'raid', to: randomNear(field.x, field.z, 1.5), dur: 5, run: true, field, jobId });
+  };
+  // Followers: friends who come along
+  const canRecruit = (n) => n.alive && !n.following && n.attitude >= FOLLOW_ATTITUDE && !n.def.law && !n.def.outlaw
+    && !n.def.unhurt && n.role !== 'merchant' && followers().length < MAX_FOLLOWERS && law.stars < 2;
+  const recruit = (n) => {
+    if (!canRecruit(n)) return;
+    n.following = true;
+    clearTalk(n);
+    setTask(n, { type: 'follow', dur: Infinity });
+    say(n, fillLine(pickOf(FOLLOW_LINES.join), { name: ctx.getPlayerName() }), { big: true });
+    feedLine(`🤝 ${firstName(n.name)} is coming with you.`);
+  };
+  const dismiss = (n, line = FOLLOW_LINES.leave) => {
+    if (!n.following) return;
+    n.following = false;
+    clearTalk(n);
+    say(n, fillLine(pickOf(line), { name: ctx.getPlayerName() }));
+    decide(n);
+  };
+  // Walk toward a moving spot (re-planned now and then)
+  const chase = (n, x, z, dt, run) => {
+    if (!n.path || n.pathI >= n.path.length || simT > (n.replanAt ?? 0)) {
+      planPath(n, x, z);
+      n.replanAt = simT + 1.2;
+    }
+    stepPath(n, dt, (run ? RUN_SPEED : WALK_SPEED) * n.speedScale);
+  };
+  // A swing (the throw clip) toward something
+  const swingAt = (n, x, z) => {
+    n.yaw = Math.atan2(x - n.x, z - n.z);
+    if (n.body) n.body.character.playAction(glbCharacterConfig.throwClip);
+  };
+  // Tasks with their own per-frame logic; true when handled
+  const updateSpecialTask = (n, t, dt) => {
+    const P = layout.places;
+    switch (t.type) {
+      case 'jailed':
+        n.moving = false;
+        faceToward(n, P.jail.x + Math.sin(P.jailYaw) * 3, P.jail.z + Math.cos(P.jailYaw) * 3, dt);
+        if (simT > n.jailedUntil) {
+          n.jailedUntil = 0;
+          n.x = P.officeSpot.x;
+          n.z = P.officeSpot.z;
+          n.task = null;
+          decide(n);
+        }
+        return true;
+      case 'lost':
+        n.moving = false;
+        if (!n.bubble && Math.random() < dt / 6) say(n, pickOf(['Mum? Dad?', 'I want to go home…', '*sniff*']));
+        return true;
+      case 'follow': {
+        const p = playerPos();
+        if (law.stars >= 2 && !n.escort) { dismiss(n, FOLLOW_LINES.wanted); n.attitude -= 0.2; return true; }
+        // Help: the nearest hostile fighter (not the law) near the player (not a kid being walked home)
+        const foe = n.def.unhurt ? null : npcs.filter((o) => o.fighter && !o.def.law && !o.fighter.isDead
+          && dist2(o.x, o.z, p.x, p.z) < FOLLOW_HELP_DIST)
+          .sort((a, b) => dist2(a.x, a.z, n.x, n.z) - dist2(b.x, b.z, n.x, n.z))[0];
+        if (foe) {
+          const fp = foe.fighter.group.position;
+          if (dist2(n.x, n.z, fp.x, fp.z) > BRAWL_REACH) chase(n, fp.x, fp.z, dt, true);
+          else {
+            n.moving = false;
+            faceToward(n, fp.x, fp.z, dt);
+            if (simT > n.nextBlowAt) {
+              n.nextBlowAt = simT + FOLLOW_HIT_S;
+              swingAt(n, fp.x, fp.z);
+              foe.followerHit = true;
+              const dir = new THREE.Vector3(fp.x - n.x, 0, fp.z - n.z).normalize();
+              const killed = foe.fighter.applyDamage(1);
+              if (!killed) foe.fighter.applyDirectKnockback?.({ direction: dir, horizSpeed: 3, upVelocity: 0.2, torqueMag: 0, ragdoll: false });
+            }
+          }
+          return true;
+        }
+        // Keep up: a spot behind the player
+        const d = dist2(n.x, n.z, p.x, p.z);
+        if (d > FOLLOW_GAP + 1) {
+          const k = (d - FOLLOW_GAP) / d;
+          chase(n, n.x + (p.x - n.x) * k, n.z + (p.z - n.z) * k, dt, d > 6);
+        } else {
+          n.moving = false;
+          n.path = null;
+          faceToward(n, p.x, p.z, dt);
+        }
+        return true;
+      }
+      case 'mug': {
+        const v = t.target;
+        if (!v?.alive || v.fighter || v.inside || v.jailedUntil > simT) { n.task = null; decide(n); return true; }
+        if (dist2(n.x, n.z, v.x, v.z) > BRAWL_REACH) chase(n, v.x, v.z, dt, true);
+        else startBrawl(n, v, 'mug');
+        return true;
+      }
+      case 'arrest': {
+        const c = t.target;
+        if (!c?.alive || c.fighter || c.jailedUntil > simT || !isOutlaw(c)) { n.task = null; decide(n); return true; }
+        if (dist2(n.x, n.z, c.x, c.z) > BRAWL_REACH) chase(n, c.x, c.z, dt, true);
+        else startBrawl(n, c, 'arrest');
+        return true;
+      }
+      case 'brawl': {
+        const o = t.foe;
+        if (!o?.alive || o.task?.type !== 'brawl' || o.task.foe !== n) { n.task = null; return true; }
+        n.moving = false;
+        faceToward(n, o.x, o.z, dt);
+        if (dist2(n.x, n.z, o.x, o.z) > BRAWL_REACH + 0.6) {
+          // (knocked apart: close in again)
+          if (t.attacker) chase(n, o.x, o.z, dt, true);
+          return true;
+        }
+        if (simT < n.nextBlowAt) return true;
+        n.nextBlowAt = simT + rand(...BRAWL_HIT_S);
+        // The one defending may just run (the timid), or give up (an arrest)
+        if (!t.attacker && t.mode === 'mug' && Math.random() > n.def.brave) {
+          endBrawl(n);
+          flee(n, o);
+          return true;
+        }
+        swingAt(n, o.x, o.z);
+        npcHit(o, n);
+        if (!o.alive) { n.task = null; return true; }
+        if (t.attacker && t.mode === 'mug') {
+          // Got the purse: off with it
+          const stolen = Math.ceil(o.money / 2);
+          o.money -= stolen;
+          n.money += stolen;
+          n.loot += 1;
+          endBrawl(n);
+          say(o, shout(SHOUT_THIEF));
+          npcCrime(n, 'mug', o);
+          flee(o, n);
+          if (n.def.outlaw) setTask(n, { type: 'raidHome', to: randomNear(P.camp.x, P.camp.z, 3), dur: 2, run: true });
+          else startTask(n, 'wander');
+          return true;
+        }
+        if (t.mode === 'arrest' && n.def.law && (o.hp <= 1 || Math.random() < 0.25)) {
+          jailNpc(o, n);
+          n.task = null;
+          decide(n);
+        }
+        return true;
+      }
+      default:
+        return false;
+    }
+  };
+
   // ── Busted / knocked out ──
   const fadeTo = (on) => fade.classList.toggle('town-fade-on', on);
   const later = (token, ms, fn) => setTimeout(() => { if (sequence === token && active) fn(); }, ms);
@@ -1009,9 +1541,17 @@ export function createTownMode(ctx) {
     clearAllTalk();
     closeMarket();
     fishing = null;
+    lockpick.stop();
+    closeBoard();
+    for (const f of followers()) dismiss(f, FOLLOW_LINES.wanted);
     ctx.showBanner('BUSTED!', surrendered ? 'You came quietly.' : 'The guards got you.', 2400);
     gossip.push({ kind: 'arrest', who: '', by: 'player', at: simT, fresh: true });
-    later(token, 1800, () => {
+    // Two guards carry the player off (the Showdown death carry), then the cell
+    later(token, 900, () => ctx.carryPlayerOff({
+      carrierUrl: characterForRole('guard'),
+      onDone: () => { if (sequence === token && active) toCell(); },
+    }));
+    const toCell = () => {
       fadeTo(true);
       later(token, 700, () => {
         const P = layout.places;
@@ -1027,7 +1567,7 @@ export function createTownMode(ctx) {
         fadeTo(false);
         sequence = null;
       });
-    });
+    };
   };
   const knockedOut = () => {
     if (sequence) return;
@@ -1081,6 +1621,56 @@ export function createTownMode(ctx) {
     ctx.playSfx('coin');
     endJail('🔓 Bail paid. Behave yourself.');
   };
+  // A bribe works if an officer near the cell doesn't mind the player (or by luck)
+  const bribe = () => {
+    if (!jail) return;
+    if (ctx.getCoins() < BRIBE) { feedLine(`🪙 A bribe takes ${BRIBE} coins.`); return; }
+    ctx.addCoins(-BRIBE);
+    const P = layout.places;
+    const officer = lawNpcs().filter((o) => !o.inside && dist2(o.x, o.z, P.jail.x, P.jail.z) < 30)
+      .sort((a, b) => b.attitude - a.attitude)[0];
+    const ok = (officer && officer.attitude >= -0.2) || Math.random() < BRIBE_ODDS;
+    if (ok) {
+      if (officer) officer.money += BRIBE;
+      endJail(`🤝 ${officer ? firstName(officer.name) : 'The guard'} looks the other way. You\'re out.`);
+    } else {
+      jail.left += 15;
+      feedLine('😠 The guard pockets the coins and laughs. +15 s');
+    }
+  };
+  // Sleep it off: out in the morning (the clock jumps)
+  const sleepItOff = () => {
+    if (!jail || sequence) return;
+    const token = {};
+    sequence = token;
+    fadeTo(true);
+    later(token, 800, () => {
+      const h = hour();
+      advanceClock(((WAKE_HOUR - h + 24) % 24 || 24) * 60);
+      endJail('☀️ Morning. The guard lets you out.');
+      fadeTo(false);
+      sequence = null;
+    });
+  };
+  // Pick the lock (townLockpick.js): out, but the guards come running
+  const startLockpick = () => {
+    if (!jail || lockpick.isOpen()) return;
+    lockpick.start((success) => {
+      if (!jail) return;
+      if (success) {
+        endJail('🔓 Click. The door swings open…');
+        law.stars = Math.max(law.stars, 1);
+        law.peak = Math.max(law.peak, law.stars);
+        law.lastSeenAt = simT;
+        law.lastKnown.copy(playerPos());
+        feedLine('🚨 Jailbreak! The guards are after you.');
+        renderStars();
+      } else {
+        jail.left += LOCK_SLIP_S;
+        feedLine(`🔧 The pick slipped — a guard heard. +${LOCK_SLIP_S} s`);
+      }
+    });
+  };
   const renderJail = () => {
     if (!jail) return;
     jailChip.classList.remove('hidden');
@@ -1091,6 +1681,7 @@ export function createTownMode(ctx) {
   const talkTo = (n) => {
     if (!n.alive || !n.body) return;
     if (n.fear > 0) { say(n, talkLine(n)); return; }
+    if (n.following) { say(n, fillLine(pickOf(FOLLOW_LINES.join), { name: ctx.getPlayerName() }), { big: true }); talking = { npc: n }; return; }
     const taskType = n.task?.type === 'talk' ? n.task.prevType : n.task?.type;
     if (n.task?.type !== 'talk') {
       n.task = { type: 'talk', t: 0, phase: 'do', dur: 7, prevType: taskType };
@@ -1301,12 +1892,15 @@ export function createTownMode(ctx) {
     if (key === 'goods') {
       const g = GOODS[id];
       const merchant = workingMerchant();
+      const friend = merchant && merchant.attitude >= FRIEND_ATTITUDE;
       return {
         name: `${g.emoji} ${g.label}`,
-        desc: `${market.stock[id]} in stock${g.food ? ` · eat it for +${g.heal} ❤️` : ''}`,
+        desc: `${market.stock[id]} in stock${g.food ? ` · eat it for +${g.heal} ❤️` : ''}${friend ? ' · friend\'s price' : ''}`,
         owned: `You have ${goods[id]}`,
-        price: market.price(id),
-        blocked: !merchant ? 'The merchant isn’t here' : market.stock[id] <= 0 ? 'Sold out' : null,
+        price: buyPrice(id),
+        blocked: !merchant ? 'The merchant isn’t here'
+          : merchant.attitude < GRUDGE_ATTITUDE ? `${firstName(merchant.name)} won’t sell to you`
+          : market.stock[id] <= 0 ? 'Sold out' : null,
       };
     }
     if (id === 'chest') {
@@ -1358,11 +1952,13 @@ export function createTownMode(ctx) {
       title: `💰 Sell · ${merchant ? firstName(merchant.name) : 'closed'}`,
       coins: ctx.getCoins(),
       cash,
-      note: !merchant ? 'The merchant isn\'t here.' : null,
+      note: !merchant ? 'The merchant isn\'t here.'
+        : merchantShunsPlayer() ? `${firstName(merchant.name)} won't trade with you.`
+        : merchant.attitude >= FRIEND_ATTITUDE ? `${firstName(merchant.name)} gives you a friend's price.` : null,
       goods: GOOD_IDS.map((g) => ({
         id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, stock: market.stock[g], have: goods[g],
-        sell: market.sellPrice(g),
-        canSell: !!merchant && goods[g] > 0 && cash >= market.sellPrice(g),
+        sell: playerSellPrice(g),
+        canSell: !!merchant && !merchantShunsPlayer() && goods[g] > 0 && cash >= playerSellPrice(g),
       })),
     };
   };
@@ -1373,10 +1969,22 @@ export function createTownMode(ctx) {
     marketPanel.open(marketModel());
   };
   const closeMarket = () => marketPanel.close();
+  // What the merchant asks / pays the player: a friend gets a better deal (a grudge, no deal)
+  const buyPrice = (g) => {
+    const m = workingMerchant();
+    const off = m && m.attitude >= FRIEND_ATTITUDE ? 1 - FRIEND_DISCOUNT : 1;
+    return Math.max(1, Math.round(market.price(g) * off));
+  };
+  const playerSellPrice = (g) => {
+    const m = workingMerchant();
+    const up = m && m.attitude >= FRIEND_ATTITUDE ? 1 + FRIEND_DISCOUNT : 1;
+    return Math.max(1, Math.round(market.sellPrice(g) * up));
+  };
+  const merchantShunsPlayer = () => (workingMerchant()?.attitude ?? 0) < GRUDGE_ATTITUDE;
   const buyGood = (g) => {
     const merchant = workingMerchant();
-    const price = market.price(g);
-    if (!merchant || ctx.getCoins() < price || !market.take(g)) return false;
+    const price = buyPrice(g);
+    if (!merchant || merchantShunsPlayer() || ctx.getCoins() < price || !market.take(g)) return false;
     ctx.addCoins(-price);
     merchant.money += price;
     gain(g);
@@ -1385,8 +1993,8 @@ export function createTownMode(ctx) {
   };
   const sellGood = (g) => {
     const merchant = workingMerchant();
-    const price = market.sellPrice(g);
-    if (!merchant || goods[g] <= 0 || merchant.money < price) return;
+    const price = playerSellPrice(g);
+    if (!merchant || merchantShunsPlayer() || goods[g] <= 0 || merchant.money < price) return;
     goods[g] -= 1;
     renderGoods();
     market.put(g);
@@ -1480,6 +2088,7 @@ export function createTownMode(ctx) {
       n.hp = e.hearts ?? n.hp;
       if (e.isDead) {
         // (killed some other way than a counted hit — the stage code fades it out)
+        ctx.releaseFighterGear(e);
         n.fighter = null;
         if (n.alive) die(n, { byPlayer: true, bodyless: true });
         return;
@@ -1487,6 +2096,9 @@ export function createTownMode(ctx) {
       const d = distToPlayer(n);
       if (n.def.law) {
         if (d > DISENGAGE_DIST) demote(n, () => respond(n));
+      } else if (n.def.outlaw) {
+        // (bandits give up the chase and go back to the camp)
+        if (d > DISENGAGE_DIST * 0.7 || ctx.isPlayerDead()) demote(n);
       } else if ((simT - n.lastHurtAt > HOSTILE_CALM_S && d > 6) || d > DISENGAGE_DIST) {
         demote(n, () => { flee(n); n.fear = 6; });
       }
@@ -1500,6 +2112,13 @@ export function createTownMode(ctx) {
     nd.hunger = Math.min(1, nd.hunger + NEEDS.hungerRate * dt);
     nd.social = Math.min(1, nd.social + NEEDS.socialRate * dt);
     if (n.fear > 0) n.fear = Math.max(0, n.fear - dt);
+    // Grudges and fondness fade (fondness slower)
+    n.attitude -= n.attitude * ATTITUDE_FADE * dt * (n.attitude > 0 ? 0.5 : 1);
+    if (simT > (n.reactAt ?? 0)) {
+      n.reactAt = simT + 0.5;
+      reactToPlayer(n);
+      if (n.fighter) return;
+    }
 
     // A shove from a hit
     if (n.knock?.left > 0) {
@@ -1512,6 +2131,7 @@ export function createTownMode(ctx) {
     if (!n.task) decide(n);
     const t = n.task;
     t.t += dt;
+    if (updateSpecialTask(n, t, dt)) { pushFromPlayer(n); return; }
 
     if (n.inside) {
       // At home: out again when it's time for something else
@@ -1584,6 +2204,8 @@ export function createTownMode(ctx) {
     }
     if (t.type === 'eat') buyFood(n);
     if (t.type === 'deliver') deliverGoods(n);
+    if (t.type === 'raid') raidField(n, t);
+    if (t.type === 'raidHome') { n.loot = 0; onRaidHome(n); decide(n); return; }
     if (t.type === 'wander' && Math.random() < 0.35) tryStartChat(n);
   };
   const doActivity = (n, t, dt) => {
@@ -1710,6 +2332,473 @@ export function createTownMode(ctx) {
     if (layout.nav.isWalkable(nx, nz)) { n.x = nx; n.z = nz; }
   };
 
+  // ── Bandit raids ──
+  // A raider at a field: takes what's ripe (stealing — if anyone sees, they're wanted)
+  const raidField = (n, t) => {
+    let took = 0;
+    for (const c of t.field.crops) {
+      if (took >= RAID_TAKE) break;
+      if (!c.ripe) continue;
+      c.ripe = false;
+      c.growAt = simT + CROP_REGROW_S;
+      c.mesh.visible = false;
+      took += 1;
+    }
+    n.loot += took;
+    if (took && distToPlayer(n) < 30) say(n, 'Heh. Supper.');
+    const owner = npcs.find((o) => o.alive && o.role === 'farmer' && o.work === t.field);
+    if (took && owner) npcCrime(n, 'theft', owner);
+  };
+  // A raider back at the camp with the loot (a guarded field's raid got away)
+  const onRaidHome = (n) => {
+    for (const j of jobs) {
+      if (j.status === 'active' && j.kind === 'guardField' && (j.data.raiders ?? []).includes(n.id) && !j.data.failed) {
+        j.data.failed = true;
+        feedLine('😞 The raiders got away with the harvest.');
+      }
+    }
+  };
+  // The camp's gang: fill it up (the first time, or an old save without bandits)
+  const ensureGang = () => {
+    const have = npcs.filter((n) => n.def.outlaw).length + arrivals.filter((a) => ROLES[a.role]?.outlaw).length;
+    for (const role of BANDIT_ROLES.slice(have)) {
+      const n = makeNpc({ id: nextId++, name: randomName(role, usedNames()), role, url: characterForRole(role) });
+      npcs.push(n);
+    }
+  };
+
+  // ── Missions (townJobs.js): job boards, procedural jobs, authored chains, the tracker ──
+  const npcById = (id) => npcs.find((n) => n.id === id && n.alive) ?? null;
+  const activeJobs = () => jobs.filter((j) => j.status === 'active');
+  const rewardText = (r) => [r.coins ? `🪙 ${r.coins}` : null, r.attitude ? '🤝 goodwill' : null, r.item ? `🛡️ a ${r.item}` : null].filter(Boolean).join(' · ') || 'Their thanks';
+  const townsfolkFor = (test) => npcs.filter((n) => n.alive && !n.def.law && !n.def.outlaw && !n.def.unhurt
+    && n.role !== 'merchant' && !n.following && n.jailedUntil <= simT && test(n));
+  // Seconds of town time until the clock next reads `h` o'clock
+  const secondsUntilHour = (h) => {
+    const nowMin = clock.minutes % 1440;
+    let mins = h * 60 - nowMin;
+    if (mins <= 0) mins += 1440;
+    return mins / MINUTES_PER_SEC;
+  };
+  const makeJob = (spec) => ({ id: nextJobId++, status: 'open', reward: { coins: 0 }, data: {}, ...spec });
+  // What the boards post: a few at a time, made from what the town needs right now
+  const chainCtx = () => ({
+    byRole: (role) => npcs.find((n) => n.alive && n.role === role && n.jailedUntil <= simT) ?? null,
+    parentOfKid: () => {
+      for (const kid of npcs.filter((n) => n.alive && n.role === 'kid' && !n.lost)) {
+        const parent = family(kid).find((o) => !o.def.unhurt && !o.def.law) ?? null;
+        if (parent) return { parent, kid: { ...kid, first: firstName(kid.name) } };
+      }
+      return null;
+    },
+    firstField: (g) => Math.max(0, layout.places.fields.indexOf(npcById(g.id)?.work)),
+  });
+  const chainJob = (chain, step) => {
+    const c = chainCtx();
+    const giver = chain.who(c);
+    if (!giver) return null;
+    const g = { id: giver.id, first: firstName(giver.name) };
+    const spec = chain.steps[step](g, c);
+    const last = step === chain.steps.length - 1;
+    return makeJob({
+      board: chain.board, giverId: giver.id, ...spec,
+      title: `${chain.title}: ${spec.title}`,
+      reward: last ? chain.reward : { coins: 10 },
+      chain: { id: chain.id, step },
+    });
+  };
+  const postJobs = () => {
+    for (const board of ['law', 'town']) {
+      const open = jobs.filter((j) => j.board === board && j.status === 'open');
+      // Chains first (one at a time each)
+      for (const chain of CHAINS) {
+        if (chain.board !== board || chainsDone.has(chain.id) || jobs.some((j) => j.chain?.id === chain.id)) continue;
+        if (open.length >= OPEN_PER_BOARD) break;
+        const j = chainJob(chain, 0);
+        if (j) { jobs.push(j); open.push(j); }
+      }
+      let tries = 0;
+      while (open.length < OPEN_PER_BOARD && tries++ < 6) {
+        const j = board === 'law' ? lawJob() : townJob();
+        if (j) { jobs.push(j); open.push(j); }
+      }
+    }
+  };
+  const lawJob = () => {
+    // A bounty on a bandit not already posted
+    const posted = new Set(jobs.filter((j) => j.kind === 'bounty').map((j) => j.data.targetId));
+    const bandit = npcs.find((n) => n.alive && n.def.outlaw && !posted.has(n.id));
+    const h = hour();
+    const fields = layout.places.fields;
+    if (Math.random() < 0.6 && bandit) {
+      return makeJob({
+        board: 'law', kind: 'bounty', giverId: chainCtx().byRole('sheriff')?.id ?? null,
+        title: `Bounty: ${bandit.name}`, desc: `${bandit.name} has been robbing travellers. Bring them down — the camp's outside town.`,
+        reward: { coins: bandit.def.bounty ?? 25 }, data: { targetId: bandit.id },
+      });
+    }
+    if (h >= 10 && h < 20 && fields.length && !jobs.some((j) => j.kind === 'guardField')) {
+      const field = Math.floor(Math.random() * fields.length);
+      const owner = npcs.find((n) => n.alive && n.role === 'farmer' && n.work === fields[field]);
+      return makeJob({
+        board: 'law', kind: 'guardField', giverId: owner?.id ?? null,
+        title: `Guard ${owner ? `${firstName(owner.name)}'s` : 'a'} field tonight`,
+        desc: 'Bandits have been seen eyeing the crops. Be there tonight and beat them off.',
+        reward: { coins: 45, attitude: 0.3 }, data: { field, raiders: [] },
+      });
+    }
+    return null;
+  };
+  const townJob = () => {
+    if (Math.random() < 0.7) {
+      // A delivery: what the market is short of, for someone who needs it
+      const g = market.scarcest() ?? pickOf(GOOD_IDS);
+      const giver = pickOf(townsfolkFor((n) => !jobs.some((j) => j.giverId === n.id)));
+      if (!giver) return null;
+      const n = g === 'wood' ? 3 + Math.floor(Math.random() * 4) : 2 + Math.floor(Math.random() * 3);
+      const why = g === 'wood' ? 'needs firewood for the cold nights' : g === 'fish' ? 'is sick of veg and wants fish' : 'needs veg for a stew';
+      return makeJob({
+        board: 'town', kind: 'deliver', giverId: giver.id,
+        title: `Bring ${n} ${GOODS[g].emoji} to ${firstName(giver.name)}`,
+        desc: `${firstName(giver.name)} ${why}${market.stock[g] <= 0 ? ' — the market\'s out' : ''}.`,
+        reward: { coins: Math.round(GOODS[g].base * n * 1.8) + 4, attitude: 0.2 }, data: { good: g, n, toId: giver.id },
+      });
+    }
+    // A debt to collect (or forgive)
+    const debtor = pickOf(townsfolkFor((n) => !jobs.some((j) => j.data?.debtorId === n.id)));
+    const creditor = debtor && pickOf(townsfolkFor((n) => n !== debtor && n.homeIndex !== debtor.homeIndex));
+    if (!debtor || !creditor) return null;
+    const amount = 8 + Math.floor(Math.random() * 12);
+    return makeJob({
+      board: 'town', kind: 'debt', giverId: creditor.id,
+      title: `${firstName(debtor.name)} owes ${firstName(creditor.name)}`,
+      desc: `${firstName(debtor.name)} owes ${firstName(creditor.name)} ${amount} coins. Collect it (you keep a cut) — or let it go.`,
+      reward: { coins: Math.round(amount * 0.4) }, data: { debtorId: debtor.id, creditorId: creditor.id, amount },
+    });
+  };
+  // The drifter's shady work: veg, no questions asked (the sheriff hears about it)
+  const offerShadyJob = (n) => {
+    if (jobs.some((j) => j.board === 'shady' && j.status === 'active')) { say(n, 'You\'ve got my job already.', { big: true }); return; }
+    if (activeJobs().length >= MAX_ACTIVE_JOBS) { feedLine('📋 You have too many jobs on.'); return; }
+    const j = makeJob({
+      board: 'shady', kind: 'deliver', giverId: n.id, status: 'active',
+      title: `Veg for ${firstName(n.name)}`, desc: 'Three veg, no questions asked.',
+      reward: { coins: 30 }, data: { good: 'crops', n: 3, toId: n.id },
+    });
+    jobs.push(j);
+    const sheriff = chainCtx().byRole('sheriff');
+    if (sheriff) sheriff.attitude = Math.max(-1, sheriff.attitude - 0.15);
+    say(n, 'Three veg. From wherever. Don\'t tell the sheriff.', { big: true });
+    feedLine(`🤫 Job: ${j.title}`);
+  };
+  const startJob = (j) => {
+    j.status = 'active';
+    if (j.kind === 'guardField') {
+      j.data.raidAt = simT + secondsUntilHour(RAID_HOUR);
+      j.data.raiders = [];
+      j.data.raidStarted = false;
+    }
+    if (j.kind === 'findKid') loseKid(j);
+  };
+  const acceptJob = (id) => {
+    const j = jobs.find((x) => x.id === id);
+    if (!j || j.status !== 'open') return;
+    if (activeJobs().length >= MAX_ACTIVE_JOBS) { feedLine(`📋 You can take ${MAX_ACTIVE_JOBS} jobs at a time.`); return; }
+    startJob(j);
+    feedLine(`📋 Job taken: ${j.title}`);
+    renderBoard();
+  };
+  const dropJob = (j) => {
+    jobs = jobs.filter((x) => x !== j);
+    if (j.kind === 'findKid') {
+      const kid = npcById(j.data.kidId);
+      if (kid) { kid.lost = false; kid.escort = false; kid.following = false; kid.task = null; }
+    }
+    if (j.kind === 'fetchStrongbox' || j.kind === 'returnTo') {
+      strongboxHeld = false;
+      layout.props.strongbox.visible = true;
+    }
+  };
+  const abandonJob = (id) => {
+    const j = jobs.find((x) => x.id === id);
+    if (!j) return;
+    dropJob(j);
+    feedLine(`📋 Dropped: ${j.title}`);
+    renderBoard();
+  };
+  const completeJob = (j, { coins = j.reward.coins, text = null } = {}) => {
+    jobs = jobs.filter((x) => x !== j);
+    const giver = npcById(j.giverId);
+    if (coins > 0) ctx.addCoins(coins);
+    if (giver && j.reward.attitude) giver.attitude = Math.min(1, giver.attitude + j.reward.attitude);
+    if (j.reward.item) ctx.grantItem(j.reward.item);
+    if (j.reward.town) for (const n of npcs) if (n.alive && !n.def.outlaw) n.attitude = Math.min(1, n.attitude + j.reward.town);
+    if (giver?.body) say(giver, 'Thank you!', { big: true });
+    feedLine(text ?? `✅ ${j.title}${coins > 0 ? ` · +${coins} 🪙` : ''}`);
+    // A chain goes on to its next step (or ends)
+    const chain = j.chain && CHAINS.find((c) => c.id === j.chain.id);
+    if (chain) {
+      const step = j.chain.step + 1;
+      if (step < chain.steps.length) {
+        const next = chainJob(chain, step);
+        if (next) {
+          jobs.push(next);
+          startJob(next);
+          feedLine(`📋 Next: ${next.title}`);
+        }
+      } else {
+        chainsDone.add(chain.id);
+        ctx.showBanner('QUEST COMPLETE!', `${chain.title}${chain.reward.coins ? ` · 🪙 +${chain.reward.coins}` : ''}`, 3000);
+      }
+    }
+    save();
+  };
+  // Someone died: bounties pay, jobs for / about them end
+  const onJobDeath = (n, byPlayer) => {
+    const mine = byPlayer || distToPlayer(n) < 25;
+    for (const j of [...jobs]) {
+      if (j.kind === 'bounty' && j.data.targetId === n.id) {
+        if (j.status === 'active' && mine) completeJob(j, { text: `💰 Bounty: ${n.name} · +${j.reward.coins} 🪙` });
+        else jobs = jobs.filter((x) => x !== j);
+      } else if (j.kind === 'killBandits' && n.def.outlaw && j.status === 'active' && mine) {
+        j.data.kills += 1;
+        if (j.data.kills >= j.data.n) completeJob(j);
+      } else if (j.kind === 'guardField' && (j.data.raiders ?? []).includes(n.id)) {
+        // (checked in updateJobs: all raiders down)
+      } else if ([j.giverId, j.data.toId, j.data.debtorId, j.data.creditorId, j.data.kidId].includes(n.id) && !n.def.outlaw) {
+        dropJob(j);
+        if (j.status === 'active') feedLine(`✖ ${j.title}: ${firstName(n.name)} is dead.`);
+      }
+    }
+  };
+  // A lost kid: off somewhere quiet, a little way out of town
+  const loseKid = (j) => {
+    const kid = npcById(j.data.kidId);
+    if (!kid) return;
+    let spot = j.data.spot;
+    if (!spot) {
+      const nav = layout.nav;
+      const cells = nav.cellsWhere((i) => {
+        const d = dist2(nav.cellX(i), nav.cellZ(i), kid.home.x, kid.home.z);
+        return d > 22 && d < 45 && nav.clearanceAt(i) >= 1.5;
+      });
+      const i = cells.length ? pickOf(cells) : nav.nearestWalkable(kid.home.x + 25, kid.home.z);
+      spot = { x: nav.cellX(i), z: nav.cellZ(i) };
+      j.data.spot = spot;
+    }
+    endBrawl(kid);
+    kid.lost = true;
+    kid.inside = false;
+    kid.x = spot.x;
+    kid.z = spot.z;
+    kid.path = null;
+    setTask(kid, { type: 'lost', dur: Infinity });
+  };
+  // The acts a job puts on a townsperson the player is next to
+  const jobActsFor = (n) => {
+    const out = [];
+    for (const j of activeJobs()) {
+      const d = j.data;
+      if (j.kind === 'deliver' && d.toId === n.id && goods[d.good] >= d.n) {
+        out.push({ key: `give:${j.id}`, label: `📦 Give ${d.n} ${GOODS[d.good].emoji}`, onClick: () => {
+          if (goods[d.good] < d.n) return;
+          goods[d.good] -= d.n;
+          renderGoods();
+          completeJob(j);
+        } });
+      } else if (j.kind === 'debt' && d.debtorId === n.id) {
+        out.push({ key: `collect:${j.id}`, label: `💰 Collect ${d.amount}`, onClick: () => collectDebt(j, n) });
+        out.push({ key: `forgive:${j.id}`, label: '🤲 Let it go', onClick: () => forgiveDebt(j, n) });
+      } else if (j.kind === 'returnTo' && d.toId === n.id && strongboxHeld) {
+        out.push({ key: `return:${j.id}`, label: '📦 Hand over the strongbox', onClick: () => {
+          strongboxHeld = false;
+          completeJob(j);
+        } });
+      }
+    }
+    return out;
+  };
+  const collectDebt = (j, debtor) => {
+    const creditor = npcById(j.data.creditorId);
+    const paid = Math.min(j.data.amount, Math.floor(debtor.money));
+    if (paid <= 0) { say(debtor, 'I\'ve got nothing! Honest!', { big: true }); return; }
+    debtor.money -= paid;
+    const cut = Math.round(paid * 0.4);
+    if (creditor) creditor.money += paid - cut;
+    debtor.attitude = Math.max(-1, debtor.attitude - 0.3);
+    say(debtor, paid < j.data.amount ? 'That\'s all I have…' : 'Fine. Take it.', { big: true });
+    completeJob(j, { coins: cut, text: `💰 Collected ${paid} for ${creditor ? firstName(creditor.name) : 'nobody'} · +${cut} 🪙` });
+  };
+  const forgiveDebt = (j, debtor) => {
+    const creditor = npcById(j.data.creditorId);
+    debtor.attitude = Math.min(1, debtor.attitude + 0.4);
+    if (creditor) creditor.attitude = Math.max(-1, creditor.attitude - 0.2);
+    say(debtor, 'Bless you! I won\'t forget it.', { big: true });
+    completeJob(j, { coins: 0, text: `🤲 You let ${firstName(debtor.name)}'s debt go.` });
+  };
+  // Per-tick job upkeep: postings, raids, the lost kid, the tracker
+  const updateJobs = () => {
+    if (simT > boardsAt) { boardsAt = simT + BOARD_REFRESH_S; postJobs(); renderBoard(); }
+    const P = layout.places;
+    for (const j of [...activeJobs()]) {
+      const d = j.data;
+      if (j.kind === 'guardField') {
+        if (!d.raidStarted && simT >= d.raidAt) {
+          d.raidStarted = true;
+          d.failed = false;
+          const field = P.fields[d.field] ?? P.fields[0];
+          const free = npcs.filter((n) => n.alive && n.def.outlaw && !n.fighter && n.jailedUntil <= simT);
+          while (free.length < 2) {
+            const n = makeNpc({ id: nextId++, name: randomName('bandit', usedNames()), role: 'bandit', url: characterForRole('bandit') });
+            npcs.push(n);
+            free.push(n);
+          }
+          d.raiders = free.slice(0, 2).map((n) => { startRaid(n, field, j.id); return n.id; });
+          feedLine('🌙 Raiders are heading for the field!');
+        } else if (d.raidStarted && d.raiders.every((id) => !npcById(id) || npcById(id).jailedUntil > simT)) {
+          completeJob(j);
+        } else if (d.raidStarted && d.failed) {
+          // (they got away: they'll be back tomorrow night)
+          d.raidStarted = false;
+          d.failed = false;
+          d.raiders = [];
+          d.raidAt = simT + secondsUntilHour(RAID_HOUR);
+          feedLine('🌙 They\'ll be back tomorrow night.');
+        }
+      } else if (j.kind === 'findKid') {
+        const kid = npcById(d.kidId);
+        if (!kid) continue;
+        if (!d.found && distToPlayer(kid) < KID_FOUND_DIST) {
+          d.found = true;
+          kid.lost = false;
+          kid.escort = true;
+          kid.following = true;
+          setTask(kid, { type: 'follow', dur: Infinity });
+          say(kid, 'You found me! Take me home?', { big: true });
+        } else if (d.found && dist2(kid.x, kid.z, kid.home.x, kid.home.z) < KID_HOME_DIST) {
+          kid.escort = false;
+          kid.following = false;
+          kid.task = null;
+          for (const f of family(kid)) f.attitude = Math.min(1, f.attitude + 0.5);
+          completeJob(j);
+        }
+      } else if (j.kind === 'fetchStrongbox' && strongboxHeld) {
+        completeJob(j);
+      }
+    }
+    tracker.render(activeJobs().map((j) => ({ title: j.title, progress: jobProgress(j) })));
+    if (boardOpen) renderBoard();
+  };
+  const jobProgress = (j) => {
+    const d = j.data;
+    const who = (id) => (npcById(id) ? firstName(npcById(id).name) : '?');
+    switch (j.kind) {
+      case 'deliver': return `${Math.min(goods[d.good], d.n)} / ${d.n} ${GOODS[d.good].emoji} → ${who(d.toId)}`;
+      case 'bounty': return 'Find them near the bandit camp';
+      case 'killBandits': return `${d.kills} / ${d.n} bandits`;
+      case 'guardField': return d.raidStarted ? 'Raiders at the field!' : `Be at the field by ${RAID_HOUR}:00`;
+      case 'findKid': return d.found ? `Walk ${who(d.kidId)} home` : `Look for ${who(d.kidId)} out of town`;
+      case 'debt': return `Talk to ${who(d.debtorId)}`;
+      case 'fetchStrongbox': return 'At the bandit camp';
+      case 'returnTo': return `Bring it to ${who(d.toId)}`;
+      default: return '';
+    }
+  };
+  // Where a job's 📍 points
+  const jobTarget = (j) => {
+    const d = j.data;
+    const P = layout.places;
+    const at = (n) => (n ? { x: n.x, z: n.z, h: 1.7 * heightScale(n.url) } : null);
+    switch (j.kind) {
+      case 'deliver': case 'returnTo': return at(npcById(d.toId));
+      case 'bounty': return at(npcById(d.targetId));
+      case 'killBandits': return { ...P.camp, h: 2.6 };
+      case 'guardField': return { ...(P.fields[d.field] ?? P.fields[0]), h: 1.5 };
+      case 'findKid': { const kid = npcById(d.kidId); return d.found && kid ? { ...kid.home, h: 2 } : at(kid); }
+      case 'debt': return at(npcById(d.debtorId));
+      case 'fetchStrongbox': return { ...P.strongbox, h: 1 };
+      default: return null;
+    }
+  };
+  const updateMarkers = () => {
+    const live = new Set();
+    for (const j of activeJobs()) {
+      const t = jobTarget(j);
+      if (!t) continue;
+      live.add(j.id);
+      let m = markers.get(j.id);
+      if (!m) {
+        m = makeTextSprite('📍', { height: 0.5, size: 96, bg: null, pad: 10 });
+        m.renderOrder = 8;
+        root.add(m);
+        markers.set(j.id, m);
+      }
+      m.position.set(t.x, groundAt(t.x, t.z) + t.h + Math.sin(simT * 3) * 0.08, t.z);
+    }
+    for (const [id, m] of markers) {
+      if (live.has(id)) continue;
+      m.parent?.remove(m);
+      m.material.map?.dispose();
+      m.material.dispose();
+      markers.delete(id);
+    }
+  };
+  // (chain: the sheriff's strongbox — the gang wakes up when it's taken)
+  const takeStrongbox = () => {
+    strongboxHeld = true;
+    layout.props.strongbox.visible = false;
+    feedLine('📦 You have the strongbox!');
+    const P = layout.places;
+    for (const n of npcs) {
+      if (n.alive && n.def.outlaw && !n.fighter && n.jailedUntil <= simT && dist2(n.x, n.z, P.camp.x, P.camp.z) < 20) {
+        say(n, 'Oi! That\'s ours!');
+        promote(n);
+      }
+    }
+  };
+  // The boards' panel
+  const nearBoard = () => {
+    const p = playerPos();
+    for (const [key, at] of Object.entries(layout.places.boards)) {
+      if (dist2(p.x, p.z, at.x, at.z) < BOARD_DIST) return key;
+    }
+    return null;
+  };
+  const boardModel = (key) => ({
+    title: BOARDS[key].label,
+    note: activeJobs().length >= MAX_ACTIVE_JOBS ? `You have ${MAX_ACTIVE_JOBS} jobs on — finish or drop one first.` : null,
+    open: jobs.filter((j) => j.board === key && j.status === 'open').map((j) => ({
+      id: j.id, title: j.title, desc: j.desc, reward: rewardText(j.reward), canAccept: activeJobs().length < MAX_ACTIVE_JOBS,
+    })),
+    active: activeJobs().map((j) => ({ id: j.id, title: j.title, progress: jobProgress(j) })),
+  });
+  const openBoard = (key) => {
+    stalls.unfocus();
+    closeMarket();
+    boardOpen = key;
+    boardPanel.open(boardModel(key));
+  };
+  const renderBoard = () => { if (boardOpen) boardPanel.render(boardModel(boardOpen)); };
+  const closeBoard = () => { boardOpen = null; boardPanel.close(); };
+  // Saved jobs back (raids are re-planned for the next night)
+  const restoreJobs = (state) => {
+    jobs = Array.isArray(state?.jobs) ? state.jobs.filter((j) => j && j.kind && j.data) : [];
+    nextJobId = Math.max(state?.nextJobId ?? 1, ...jobs.map((j) => j.id + 1), 1);
+    chainsDone = new Set(state?.chainsDone ?? []);
+    strongboxHeld = !!state?.strongboxHeld;
+    layout.props.strongbox.visible = !strongboxHeld && !chainsDone.has('strongbox');
+    boardsAt = 0;
+    for (const j of jobs) {
+      if (j.status !== 'active') continue;
+      if (j.kind === 'guardField') { j.data.raidStarted = false; j.data.raiders = []; j.data.raidAt = simT + secondsUntilHour(RAID_HOUR); }
+      if (j.kind === 'findKid') {
+        const kid = npcById(j.data.kidId);
+        if (kid && !j.data.found) loseKid(j);
+        else if (kid) { kid.escort = true; kid.following = true; }
+      }
+    }
+  };
+
   // ── Arrivals (newcomers take the place of the dead) ──
   const usedNames = () => new Set([...npcs.filter((n) => n.alive).map((n) => firstName(n.name)), ...departed]);
   const homeForNewcomer = () => {
@@ -1725,6 +2814,15 @@ export function createTownMode(ctx) {
       if (simT < a.at) continue;
       arrivals.splice(i, 1);
       const n = makeNpc({ id: nextId++, name: randomName(a.role, usedNames()), role: a.role, url: characterForRole(a.role), home: homeForNewcomer() });
+      if (n.def.outlaw) {
+        // (a new face at the bandit camp)
+        n.x = layout.places.camp.x;
+        n.z = layout.places.camp.z;
+        npcs.push(n);
+        decide(n);
+        if (distToPlayer(n) < 40) feedLine(`💀 ${n.name} joined the bandits.`);
+        continue;
+      }
       const E = layout.places.entrance;
       n.x = E.x;
       n.z = E.z;
@@ -1761,7 +2859,8 @@ export function createTownMode(ctx) {
     let best = null;
     let bd = TALK_RANGE;
     for (const n of npcs) {
-      if (!n.alive || !n.body || n.fighter || n.inside || n.dying) continue;
+      if (!n.alive || !n.body || n.fighter || n.inside || n.dying || n.def.outlaw) continue;
+      if (['brawl', 'mug', 'arrest'].includes(n.task?.type)) continue;
       const d = dist2(n.x, n.z, p.x, p.z);
       if (d < bd) { bd = d; best = n; }
     }
@@ -1782,8 +2881,20 @@ export function createTownMode(ctx) {
       out.push({ key: 'back', label: '⬅ Back', onClick: () => { stalls.unfocus(); actsAt = 0; } });
       return out;
     }
+    if (lockpick.isOpen()) {
+      out.push({ key: 'pin', label: '🔧 Now!', onClick: () => lockpick.press() });
+      out.push({ key: 'unpick', label: '✖ Stop', onClick: () => lockpick.stop() });
+      return out;
+    }
     if (jail) {
-      out.push({ key: 'bail', label: `🔓 Pay bail (${BAIL} 🪙)`, onClick: payBail });
+      out.push({ key: 'bail', label: `🔓 Bail (${BAIL} 🪙)`, onClick: payBail });
+      out.push({ key: 'bribe', label: `🤝 Bribe (${BRIBE} 🪙)`, onClick: bribe });
+      out.push({ key: 'pick', label: '🔧 Pick the lock', onClick: startLockpick });
+      out.push({ key: 'sleep', label: '😴 Sleep it off', onClick: sleepItOff });
+      return out;
+    }
+    if (boardOpen) {
+      out.push({ key: 'closeboard', label: '✖ Close board', onClick: closeBoard });
       return out;
     }
     if (law.stars > 0) {
@@ -1798,16 +2909,35 @@ export function createTownMode(ctx) {
       return out;
     }
     const calm = calmNow();
+    const board = calm ? nearBoard() : null;
+    if (board) out.push({ key: `board:${board}`, label: BOARDS[board].short, onClick: () => openBoard(board) });
+    // (the strongbox can be snatched mid-fight: the gang guards it)
+    if (!strongboxHeld && layout.props.strongbox.visible && activeJobs().some((j) => j.kind === 'fetchStrongbox')) {
+      const p = playerPos();
+      const sb = layout.places.strongbox;
+      if (dist2(p.x, p.z, sb.x, sb.z) < 2) out.push({ key: 'strongbox', label: '📦 Take the strongbox', onClick: takeStrongbox });
+    }
     const stall = calm ? nearestStall() : null;
     if (stall === 'gear' && gearOpen()) out.push({ key: 'gear', label: '⚔️ Weapons', onClick: () => focusStall('gear') });
     if (stall === 'goods' && marketOpen()) {
       out.push({ key: 'goods', label: '🧺 Goods', onClick: () => focusStall('goods') });
       out.push({ key: 'sell', label: '💰 Sell', onClick: openMarket });
     }
+    // A job's townsperson within reach (not only the nearest): its 📦 / 💰 first
+    if (!ctx.isPlayerDead() && calm) {
+      for (const o of npcs) {
+        if (o.alive && o.body && !o.fighter && !o.inside && distToPlayer(o) < ACT_DIST) out.push(...jobActsFor(o));
+      }
+    }
     const n = nearestTalkable();
     if (n) {
       out.push({ key: `talk:${n.id}`, label: `💬 ${firstName(n.name)}`, onClick: () => talkTo(n) });
-      if (talking?.npc === n) out.push({ key: `gift:${n.id}`, label: `🪙 Give ${GIFT_COINS}`, onClick: () => gift(n) });
+      if (talking?.npc === n) {
+        if (n.following) out.push({ key: `dismiss:${n.id}`, label: '👋 Go home', onClick: () => dismiss(n) });
+        else if (canRecruit(n)) out.push({ key: `join:${n.id}`, label: '🤝 Join me', onClick: () => recruit(n) });
+        else if (n.role === 'drifter' && n.attitude > -0.2) out.push({ key: `shady:${n.id}`, label: BOARDS.shady.short, onClick: () => offerShadyJob(n) });
+        else out.push({ key: `gift:${n.id}`, label: `🪙 Give ${GIFT_COINS}`, onClick: () => gift(n) });
+      }
     }
     if (calm) {
       if (ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: pickCrop });
@@ -1842,6 +2972,8 @@ export function createTownMode(ctx) {
     if (document.body.classList.contains('settings-open')) return;
     if (e.key === 'Escape' && marketPanel.isOpen()) { closeMarket(); e.preventDefault(); return; }
     if (e.key === 'Escape' && stalls.focused()) { stalls.unfocus(); e.preventDefault(); return; }
+    if (e.key === 'Escape' && boardOpen) { closeBoard(); e.preventDefault(); return; }
+    if (e.key === 'Escape' && lockpick.isOpen()) { lockpick.stop(); e.preventDefault(); return; }
     if (e.key === 'e' || e.key === 'E' || (e.key === 'Enter' && !e.target?.closest?.('button'))) {
       if (interact()) e.preventDefault();
     }
@@ -1875,14 +3007,18 @@ export function createTownMode(ctx) {
       clock.day = 1;
       clock.minutes = START_MINUTES;
       const taken = new Set();
-      const homes = layout.places.homes.length;
+      // Households of two or three (the kids land with the farmers); the other houses wait
+      // for newcomers
+      const households = Math.max(1, Math.min(layout.places.homes.length, FOUNDING_HOUSEHOLDS));
       FOUNDING_ROLES.forEach((role, i) => {
         const name = randomName(role, taken);
         taken.add(firstName(name));
-        npcs.push(makeNpc({ id: nextId++, name, role, url: characterForRole(role), home: i % homes }));
+        npcs.push(makeNpc({ id: nextId++, name, role, url: characterForRole(role), home: i % households }));
       });
     }
+    ensureGang();
     assignWork();
+    restoreJobs(state);
     // Start mid-day: everyone already at whatever they'd be doing
     isNight = null;
     applyTime();
@@ -1935,6 +3071,12 @@ export function createTownMode(ctx) {
     save();
     lastItems = ctx.endLoadout() ?? lastItems;
     closeMarket();
+    closeBoard();
+    lockpick.stop();
+    ctx.cancelCarry();
+    for (const [, m] of markers) { m.parent?.remove(m); m.material.map?.dispose(); m.material.dispose(); }
+    markers.clear();
+    tracker.render([]);
     stalls.setActive(false);
     fishing = null;
     active = false;
@@ -1976,9 +3118,13 @@ export function createTownMode(ctx) {
       renderJail();
       if (jail.left <= 0) endJail('🔓 Time served. You\'re free to go.');
     }
-    // The jail door: shut while the player is inside, open otherwise
+    if (!jail && lockpick.isOpen()) lockpick.stop();
+    lockpick.update(dt);
+    updateCampfire(layout.props.campFire, simT + 3);
+    // The jail door: shut while the player (or a townsperson) is inside, open otherwise
     const door = layout.props.door;
-    door.rotation.y = angleLerp(door.rotation.y, jail ? 0 : -1.9, 1 - Math.exp(-4 * dt));
+    const occupied = jail || npcs.some((n) => n.alive && n.jailedUntil > simT);
+    door.rotation.y = angleLerp(door.rotation.y, occupied ? 0 : -1.9, 1 - Math.exp(-4 * dt));
 
     for (const n of npcs) updateNpc(n, dt);
     npcs = npcs.filter((n) => n.alive || n.dying);
@@ -1988,7 +3134,8 @@ export function createTownMode(ctx) {
     if (marketPanel.isOpen() && (!marketOpen() || !nearStall())) closeMarket();
     for (const g of gossip) if (simT - g.at > 240) g.fresh = false;
     updateArrivals();
-    if (simT > law.tickAt) { law.tickAt = simT + 0.5; updateLaw(); }
+    if (simT > law.tickAt) { law.tickAt = simT + 0.5; updateLaw(); updateJobs(); }
+    updateMarkers();
     if (simT > lodAt) { lodAt = simT + 0.4; updateLod(); }
     for (const n of npcs) if (n.body && !n.dying) syncBody(n, dt);
     if (simT > actsAt) { actsAt = simT + 0.15; refreshActs(); }
@@ -2039,6 +3186,6 @@ export function createTownMode(ctx) {
     // The phone's Block bar label while there's something to do (undefined: it stays Block)
     interactLabel: () => (active && acts.length ? acts[0].label : undefined),
     // (dev console)
-    debug: () => ({ npcs, layout, law, clock, arrivals, market, goods, stalls, ctx }),
+    debug: () => ({ npcs, layout, law, clock, arrivals, market, goods, stalls, ctx, jobs, chainsDone, simT: () => simT, stallItemState }),
   };
 }

@@ -7,8 +7,9 @@
 // yaw relative to h, so turning the frame turns the whole group together.
 //
 // Game access: createDeathCarry({ scene, camera, getTerrainHeight }); start({ body,
-// character, onDone }) on death; update(dt) every frame after the player controls (it has
-// the last word on the camera); cancel() when leaving the mode.
+// character, onDone, carrierUrl? }) on death (Town's arrests too: guards carry); update(dt)
+// every frame after the player controls (it has the last word on the camera); cancel() when
+// leaving the mode.
 
 import * as THREE from 'three';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
@@ -61,10 +62,11 @@ export function createDeathCarry({ scene, camera, getTerrainHeight }) {
   };
 
   /**
-   * @param {{ body: THREE.Object3D, character?: object, onDone: () => void }} opts
-   *   body: the dead player's model (moved / turned while carried); character: its GLBCharacter
+   * @param {{ body: THREE.Object3D, character?: object, onDone: () => void, carrierUrl?: string }} opts
+   *   body: the dead player's model (moved / turned while carried); character: its GLBCharacter;
+   *   carrierUrl: who carries them (frog men; Town's arrests: the guards)
    */
-  function start({ body, character = null, onDone }) {
+  function start({ body, character = null, onDone, carrierUrl = glbCharacterConfig.frogManUrl }) {
     cancel();
     camera.updateMatrixWorld();
     const r = {
@@ -128,7 +130,7 @@ export function createDeathCarry({ scene, camera, getTerrainHeight }) {
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     run = r;
-    const url = glbCharacterConfig.frogManUrl;
+    const url = carrierUrl;
     [1, -1].forEach((sign) => {
       const c = { sign, container: null, character: null, hands: null, arrived: false, rest: null };
       r.carriers.push(c);

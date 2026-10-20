@@ -7,7 +7,10 @@ export const TOWN_NAME = 'Brindlewick';
 
 // hours: [start, end) on the town clock when the role works (end may pass midnight);
 // hp: sword hits to beat them; brave: chance they fight back instead of running when hit;
-// law: guards / the sheriff (they answer crimes and arrest); unhurt: a sword swing only scares them
+// law: guards / the sheriff (they answer crimes and arrest); unhurt: a sword swing only scares them;
+// outlaw: bandits (live at the camp outside town, raid at night, attack the player on sight —
+// hurting them is no crime); gear: what they fight with (createBossFighter) — law gear grows
+// with the stars (townMode fighterGear)
 export const ROLES = {
   merchant:   { label: 'Merchant',   emoji: '🧺', work: 'market', hours: [7, 20], hp: 3, brave: 0.2 },
   guard:      { label: 'Guard',      emoji: '🛡️', work: 'patrol', hours: [6, 20], hp: 4, brave: 1, law: true },
@@ -19,7 +22,11 @@ export const ROLES = {
   townsfolk:  { label: 'Townsfolk',  emoji: '🏠', work: null,     hours: null,    hp: 2, brave: 0.15 },
   kid:        { label: 'Kid',        emoji: '🧒', work: null,     hours: null,    hp: 2, brave: 0, speed: 1.15, unhurt: true },
   drifter:    { label: 'Drifter',    emoji: '🍺', work: null,     hours: null,    hp: 3, brave: 0.5, nightOwl: true },
+  bandit:     { label: 'Bandit',     emoji: '🗡️', work: null,     hours: null,    hp: 3, brave: 1, outlaw: true, nightOwl: true, bounty: 25 },
+  banditBoss: { label: 'Bandit Chief', emoji: '💀', work: null,   hours: null,    hp: 6, brave: 1, outlaw: true, nightOwl: true, bounty: 60, gear: { gun: true } },
 };
+// The bandit camp's gang (outside the town's roster — they come back after a while)
+export const BANDIT_ROLES = ['banditBoss', 'bandit', 'bandit', 'bandit'];
 
 // Who lives here when the town is first founded (the roster is then saved; the dead are
 // replaced by newcomers of the same role)
@@ -44,6 +51,8 @@ export const characterForRole = (role) => {
   if (role === 'sheriff') return glbCharacterConfig.url; // gemhorn
   if (role === 'merchant') return glbCharacterConfig.wizardUrl;
   if (role === 'kid') return glbCharacterConfig.villageBoyUrl;
+  if (role === 'bandit') return glbCharacterConfig.frogManUrl;
+  if (role === 'banditBoss') return glbCharacterConfig.treeCreatureUrl;
   return CIVILIAN_URLS[Math.floor(Math.random() * CIVILIAN_URLS.length)];
 };
 
@@ -53,10 +62,12 @@ const FIRST_NAMES = [
   'Quill', 'Rosalind', 'Silas', 'Tilda', 'Ulric', 'Vera', 'Wendell', 'Yara', 'Zeb', 'Bram',
   'Cora', 'Dunstan', 'Elsie', 'Fitz', 'Greta', 'Hamish', 'Iona', 'Jory', 'Lark', 'Marigold',
 ];
-const TITLE_FOR_ROLE = { guard: 'Guard', nightGuard: 'Watchman', sheriff: 'Sheriff' };
+const TITLE_FOR_ROLE = { guard: 'Guard', nightGuard: 'Watchman', sheriff: 'Sheriff', banditBoss: 'Chief' };
+const BANDIT_NAMES = ['Grub', 'Snag', 'Rotfang', 'Mudge', 'Scab', 'Knuckles', 'Slink', 'Bogwart', 'Gristle', 'Twitch'];
 export const randomName = (role, taken = new Set()) => {
-  const free = FIRST_NAMES.filter((n) => !taken.has(n));
-  const pool = free.length ? free : FIRST_NAMES;
+  const names = role === 'bandit' || role === 'banditBoss' ? BANDIT_NAMES : FIRST_NAMES;
+  const free = names.filter((n) => !taken.has(n));
+  const pool = free.length ? free : names;
   const first = pool[Math.floor(Math.random() * pool.length)];
   return TITLE_FOR_ROLE[role] ? `${TITLE_FOR_ROLE[role]} ${first}` : first;
 };
@@ -144,3 +155,21 @@ export const SHOUT_FIGHT = ['You want a fight?!', 'That\'s it!', 'Come here!'];
 export const SHOUT_LAW = ['Stop right there!', 'In the name of the law!', 'Halt, criminal!'];
 export const SHOUT_EAT_BUY = ['One loaf, please.', 'The usual!', 'Two fish, thanks.'];
 export const shout = (list) => pick(list);
+
+// ── Phase 3 reactions ──
+export const SHOUT_RALLY = ['Leave {who} alone!', 'Hands off {who}!', 'You\'ll pay for that!'];
+export const SHOUT_VENDETTA = ['You killed my {rel}!', 'For my {rel}!', 'Murderer!'];
+export const SHOUT_STAY_BACK = ['Stay back!', 'Don\'t come near me.', 'I\'m watching you…'];
+export const SHOUT_MUG = ['Your purse. Now.', 'Hand it over!', 'Coins or else.'];
+export const SHOUT_ARREST = ['You\'re under arrest!', 'Come quietly!', 'That\'s enough!'];
+export const SHOUT_BANDIT = ['Fresh meat!', 'Get \'em!', 'Nobody leaves!'];
+export const SHOUT_THANKS = ['Thank you, {name}!', 'You saved me!', 'My hero!'];
+export const FOLLOW_LINES = {
+  join: ['Lead the way, {name}!', 'Right behind you.', 'Let\'s go!'],
+  leave: ['I\'ll head home then.', 'See you around, {name}.'],
+  late: ['It\'s late — I\'m off to bed.'],
+  wanted: ['I\'m not fighting the guards! You\'re on your own.'],
+};
+// A family member, by role (for the vendetta shout)
+export const relationOf = (role) => (role === 'kid' ? 'child' : pick(['sister', 'brother', 'cousin', 'friend']));
+export const fillLine = (text, vars) => text.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');

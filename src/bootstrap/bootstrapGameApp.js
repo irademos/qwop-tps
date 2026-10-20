@@ -58,7 +58,7 @@ import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fill
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createTownMode } from '../town/townMode.js';
-import { createPembertonBoss, createStageBoss, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
+import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
 import {
@@ -8204,8 +8204,10 @@ async function initCore(runtimeContext) {
       clearTimeout(_psWinHideTimer);
       _psWinHideTimer = setTimeout(() => _psWinOverlay.classList.add('hidden'), ms);
     },
-    // Someone who fights the player: a stage swordsman (EnemyPlayer) in their character
-    spawnFighter: ({ x, z, yaw, url, hearts, swingChance }) => {
+    // Someone who fights the player: a stage swordsman (EnemyPlayer) in their character; with
+    // `gear` ({ shield, gun, … }) it fights like a stage boss with it (createBossFighter, no
+    // health bar across the top / red glow)
+    spawnFighter: ({ x, z, yaw, url, hearts, swingChance, gear = null, name = '' }) => {
       const groundY = getTerrainHeight(x, z);
       const enemy = _spawnHordeEnemy({
         position: new THREE.Vector3(x, Number.isFinite(groundY) ? groundY : playerModel.position.y, z),
@@ -8213,9 +8215,37 @@ async function initCore(runtimeContext) {
       });
       enemy._town = true;
       enemy._coinDropped = true; // (no stage kill count / XP; the town drops their coins)
+      if (gear && Object.values(gear).some(Boolean)) {
+        const fighter = createBossFighter({ ..._bossFighterCtx(enemy), name, gear, hud: false, glow: false });
+        enemy._townGear = fighter;
+        enemy.onAfterUpdate = () => fighter.update();
+      }
       return enemy;
     },
-    removeFighter: (enemy) => _tutorialRemoveEnemy(enemy),
+    removeFighter: (enemy) => {
+      enemy._townGear?.dispose();
+      enemy._townGear = null;
+      _tutorialRemoveEnemy(enemy);
+    },
+    // A fighter that died (the stage code fades it out): its gun / shield go with it
+    releaseFighterGear: (enemy) => {
+      enemy._townGear?.dispose();
+      enemy._townGear = null;
+    },
+    // Arrested: two guards carry the player off (the Showdown death carry), then onDone
+    carryPlayerOff: ({ carrierUrl, onDone }) => {
+      duelCtx.setControlsLocked(true);
+      deathCarry.start({
+        body: playerModel,
+        character: playerModel.userData.qwopRig?.glbCharacter ?? null,
+        carrierUrl,
+        onDone: () => { duelCtx.setControlsLocked(false); onDone(); },
+      });
+    },
+    cancelCarry: () => {
+      deathCarry.cancel();
+      duelCtx.setControlsLocked(false);
+    },
     spawnBlood: (pos, groundY) => spawnBloodBurst(scene, pos, { groundY, intensity: 0.8 }),
     playSfx: (kind) => { // (no coin sound: the coin pop-up shows)
       if (kind === 'hit') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });

@@ -4294,7 +4294,9 @@ body.town-mode .town-feed { top: calc(128px + env(safe-area-inset-top, 0px)); }
 .town-good:disabled { cursor: default; color: var(--text); opacity: 1; }
 .town-good:not(:disabled):hover { background: var(--surface-hover); }
 /* The market's sell panel: goods sold to the merchant at the going price */
-.town-market {
+.town-market,
+.town-board,
+.town-lockpick {
   position: absolute;
   left: 50%;
   bottom: calc(84px + env(safe-area-inset-bottom, 0px));
@@ -4335,3 +4337,50 @@ body.town-shop-open #jump-button,
 body.town-shop-open #action-buttons { visibility: hidden; }
 /* At a market stall's counter (townStalls.js): the village's buy card over the picked thing */
 .town-hud .town-card { z-index: 1; }
+
+/* Job boards (src/town/townJobs.js): posted jobs + your jobs */
+.town-board-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
+.town-board-title { font-weight: 800; font-size: 15px; }
+.town-board-desc { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+.town-board-reward { font-size: 12px; font-weight: 700; color: var(--accent-hi); margin-top: 3px; }
+.town-board-btn { min-height: 36px; padding: 0 12px; font-size: 13px; font-weight: 800; white-space: nowrap; }
+/* The quest tracker: the jobs on, top right under the goods */
+.town-quests {
+  position: absolute;
+  top: calc(108px + env(safe-area-inset-top, 0px));
+  right: calc(10px + env(safe-area-inset-right, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(260px, calc(50% - 20px));
+}
+.town-quest {
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface-hud);
+  border: 1px solid var(--border);
+}
+.town-quest-title { font-size: 13px; font-weight: 800; }
+.town-quest-progress { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+/* Picking the cell's lock (src/town/townLockpick.js) */
+.town-lockpick { width: min(360px, calc(100% - 24px)); text-align: center; }
+.town-lockpick-track {
+  position: relative;
+  height: 28px;
+  margin: 12px 0 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  overflow: hidden;
+}
+.town-lockpick-zone { position: absolute; top: 0; bottom: 0; background: var(--accent); opacity: 0.75; }
+.town-lockpick-pin {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 4px;
+  margin-left: -2px;
+  background: var(--text);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+}
+.town-lockpick-status { font-size: 13px; font-weight: 700; }
