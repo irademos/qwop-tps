@@ -60,7 +60,7 @@ export const glbCharacterConfig = {
   pumpkinUrl: '/models/glb_characters/pumpkin.glb',        // Multiplayer roster / Showdown unlock
   wizardUrl: '/models/glb_characters/wizard.glb',          // Multiplayer roster / Showdown unlock
   treeCreatureUrl: '/models/glb_characters/tree_creature.glb', // Multiplayer roster / Showdown unlock
-  mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Multiplayer roster / Showdown unlock
+  mii1Url: '/models/glb_characters/mii1.glb',              // Mii (no arms, see isMiiCharacterUrl); Classic only
   villagerUrl: '/models/glb_characters/villager.glb',      // Showdown village quest giver; roster (story unlock). Unrigged for now (StaticRig)
   walkClip: '/models/animations/Old Man Walk.fbx',
   idleClip: '/models/animations/Breathing Idle.fbx',

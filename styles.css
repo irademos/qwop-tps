@@ -4192,6 +4192,8 @@ body.mobile-block-bar .classic-combo {
   background: var(--surface-hud);
   backdrop-filter: none;
 }
+/* The bandit camp's countdown (same spot as the jail chip — never both) */
+.town-camp { color: var(--danger); border-color: var(--danger); }
 .town-lobby {
   position: absolute;
   top: calc(10px + env(safe-area-inset-top, 0px));
