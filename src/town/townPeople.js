@@ -89,12 +89,20 @@ const SCARED_LINES = ['Stay away from me!', 'Please, don\'t hurt me!', 'Guards! 
 const GIFT_LINES = ['For me? You\'re too kind!', 'Bless you, {name}!', 'I won\'t forget this.'];
 const GIFT_BROKE = ['You\'re as broke as I am.'];
 
-// A line for the player talking to `npc` (attitude −1..1: how they feel about the player)
-export function talkLine(npc, { playerName = 'friend', taskType = null } = {}) {
+// A line for the player talking to `npc` (attitude −1..1: how they feel about the player).
+// market: { scarce: { label, emoji, price } | null, foodOut, merchantGone } (townMode marketTalk)
+export function talkLine(npc, { playerName = 'friend', taskType = null, market = null } = {}) {
   const fill = (s) => s.replace(/\{name\}/g, playerName);
   if (npc.fear > 0) return pick(SCARED_LINES);
   if (npc.attitude < -0.35) return pick(COLD_LINES);
   if (npc.attitude > 0.55 && Math.random() < 0.5) return fill(pick(FRIEND_LINES));
+  // How the market's doing
+  if (npc.role === 'merchant' && market?.scarce && Math.random() < 0.6) {
+    return `${market.scarce.emoji} ${market.scarce.label} is scarce — ${market.scarce.price} coins a piece!`;
+  }
+  if (npc.needs.hunger > 0.6 && market?.foodOut) return 'The market\'s out of food… I\'m starving.';
+  if (market?.merchantGone && Math.random() < 0.4) return 'With the merchant gone, where do we buy bread?';
+  if (npc.role === 'merchant' && Math.random() < 0.3) return 'I buy wood, fish and veg — bring me some!';
   if (npc.role === 'kid') return pick(TASK_LINES.kid);
   if (npc.role === 'drifter' && Math.random() < 0.6) return pick(TASK_LINES.drifter);
   if (npc.needs.hunger > 0.75) return 'I could eat a whole pumpkin. Market\'s calling.';
@@ -122,6 +130,7 @@ export function chatLines(gossip, playerName) {
   if (g?.kind === 'murder') return [`Did you hear? Poor ${g.who}…`, g.by === 'player' ? `They say ${playerName} did it!` : 'Terrible business.'];
   if (g?.kind === 'assault') return [`${playerName} attacked ${g.who}!`, 'In broad daylight?!'];
   if (g?.kind === 'arrest') return [`The sheriff locked up ${playerName}.`, 'About time.'];
+  if (g?.kind === 'theft') return [`${playerName} was nicking veg${g.who ? ` from ${g.who}'s field` : ''}!`, 'Lock up your carrots.'];
   if (g?.kind === 'newcomer') return [`Have you met ${g.who}? New in town.`, 'Seems nice enough.'];
   return pick(SMALL_TALK);
 }
@@ -130,6 +139,7 @@ export function chatLines(gossip, playerName) {
 export const SHOUT_HURT = ['Ow!', 'Hey!', 'Stop that!', 'Ouch!'];
 export const SHOUT_HELP = ['Help! Guards!', 'Somebody help!', 'Guards!'];
 export const SHOUT_MURDER = ['Murder!', 'Guards! Murder!', 'No!!'];
+export const SHOUT_THIEF = ['Thief!', 'Stop, thief!', 'Guards! A thief!'];
 export const SHOUT_FIGHT = ['You want a fight?!', 'That\'s it!', 'Come here!'];
 export const SHOUT_LAW = ['Stop right there!', 'In the name of the law!', 'Halt, criminal!'];
 export const SHOUT_EAT_BUY = ['One loaf, please.', 'The usual!', 'Two fish, thanks.'];

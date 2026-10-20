@@ -49,6 +49,9 @@ export const CLIMB_CONFIG = {
   jumpOffSpeed: 3,      // m/s backward drift while falling after jumping off
   maxAnchorDrift: 0.3   // m — moved off the wall by something else (knockback, teleport) → stop climbing
 };
+// Weapon button id for "put everything away" (Town: nothing in hand)
+const HANDS_ID = 'hands';
+
 // Dodge roll (startRoll — a swipe on the touch screen or the phone controller): ROLL.distance m
 // along the swipe over ROLL.duration s (fastest mid-roll), body turned to face the roll
 export const ROLL_CONFIG = {
@@ -112,6 +115,9 @@ export class PlayerControls {
     this.moveSpeedScale = 1;
     // (controls) => void, after each move: may pull playerX / playerZ back inside an area
     this.positionConstraint = null;
+    // () => bool: whether a quick swipe on this screen rolls (false: it stays a camera drag —
+    // this device is the gyro sword, so swipes are sword moves; the QR phone page still rolls)
+    this.swipeRollAllowed = () => true;
     this.touchStartX = 0;
     this.touchStartY = 0;
     this.touchSensitivity = 0.006;
@@ -392,7 +398,7 @@ export class PlayerControls {
           this._swipe = null;
           const dx = touch.clientX - (sw?.x ?? touch.clientX);
           const dy = touch.clientY - (sw?.y ?? touch.clientY);
-          if (sw && this.enabled && typeof this.onSwipe === 'function' &&
+          if (sw && this.enabled && typeof this.onSwipe === 'function' && this.swipeRollAllowed() &&
               performance.now() - sw.t <= ROLL_CONFIG.swipeMaxMs && Math.hypot(dx, dy) >= ROLL_CONFIG.swipeMinPx) {
             this.yaw = sw.yaw;
             this.pitch = sw.pitch;
@@ -552,15 +558,18 @@ export class PlayerControls {
       if (!this.enabled) return;
       const itemId = btnRef.dataset.psWeaponId;
       if (!itemId) return;
-      getAppState()?.equipInventoryItem?.(itemId);
+      if (itemId === HANDS_ID) getAppState()?.putWeaponsAway?.();
+      else getAppState()?.equipInventoryItem?.(itemId);
       this.refreshActionButtons();
       if (event) this.safePreventDefault(event);
     };
-    // (third slot: the magic wand once it's owned in Showdown)
+    // (third slot: the magic wand once it's owned in Showdown; fourth: ✋ Hands in Town)
     this.psWeaponBtn3 = createButton('ps-weapon-btn-3', 'mobile-primary-action ps-weapon-btn', '');
+    this.psWeaponBtn4 = createButton('ps-weapon-btn-4', 'mobile-primary-action ps-weapon-btn', '');
     bindPress(this.psWeaponBtn1, makePsWeaponHandler(this.psWeaponBtn1));
     bindPress(this.psWeaponBtn2, makePsWeaponHandler(this.psWeaponBtn2));
     bindPress(this.psWeaponBtn3, makePsWeaponHandler(this.psWeaponBtn3));
+    bindPress(this.psWeaponBtn4, makePsWeaponHandler(this.psWeaponBtn4));
 
     // Protective bubble (bought in the shop); label/count kept fresh by the game loop
     this.psBubbleBtn = createButton('ps-bubble-btn', 'mobile-primary-action ps-bubble-btn', `🫧 ${getAppState()?.getBubbleCount?.() ?? 0}`);
@@ -634,7 +643,8 @@ export class PlayerControls {
   getEquippedItemId() {
     const appState = appContext.uiState.appState ?? window.appState;
     if (appState?.isWandEquipped?.()) return 'magic_wand';
-    return this.getEquippedWeapon('right')?.itemId ?? 'foamSword';
+    // (Town lets the player put everything away: then nothing is in hand)
+    return this.getEquippedWeapon('right')?.itemId ?? (appState?.isUnarmedAllowed?.() ? null : 'foamSword');
   }
 
   // What the Block bar does for the weapon in hand: 'block' (sword; the wand with no shield),
@@ -668,16 +678,20 @@ export class PlayerControls {
     const hasGun = (inventory.pistol?.count ?? 0) > 0;
     const hasShield = (inventory.shield?.count ?? 0) > 0;
     const hasWand = !!appState?.isWandAllowed?.();
+    // (Town: the sword is bought like the rest, and ✋ Hands puts everything away)
+    const unarmedAllowed = !!appState?.isUnarmedAllowed?.();
+    const hasSword = appState?.ownsSword?.() ?? true;
     const weapons = [
-      { id: 'foamSword', label: 'Sword' },
+      ...(hasSword ? [{ id: 'foamSword', label: 'Sword' }] : []),
       ...(hasWand ? [{ id: 'magic_wand', label: '🪄 Wand' }] : []),
       ...(hasGun ? [{ id: 'pistol', label: 'Gun' }] : []),
       ...(hasShield ? [{ id: 'shield', label: 'Shield' }] : []),
     ];
-    // Default to foamSword when nothing detected
+    // Default to foamSword when nothing detected (unless nothing in hand is allowed)
     const equippedId = this.getEquippedItemId();
     const others = weapons.filter(w => w.id !== equippedId);
-    [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3].forEach((button, index) => {
+    if (unarmedAllowed && equippedId) others.push({ id: HANDS_ID, label: '✋ Hands' });
+    [this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4].forEach((button, index) => {
       const w = others[index];
       button.dataset.psWeaponId = w ? w.id : '';
       button.textContent = w ? w.label : '';
@@ -706,7 +720,7 @@ export class PlayerControls {
 
   // Block/fire button + two weapon switch buttons, bubble and bomb
   layoutMobileActionButtons() {
-    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psBubbleBtn, this.psBombBtn].forEach((button) => {
+    [this.punchButton, this.psWeaponBtn1, this.psWeaponBtn2, this.psWeaponBtn3, this.psWeaponBtn4, this.psBubbleBtn, this.psBombBtn].forEach((button) => {
       button?.style?.removeProperty('--mobile-grid-x');
       button?.style?.removeProperty('--mobile-grid-y');
     });
@@ -723,6 +737,9 @@ export class PlayerControls {
     }
     if (this.psWeaponBtn3.dataset.psWeaponId) {
       this.applyMobileButtonPosition(this.psWeaponBtn3, { x: 2, y: 2 });
+    }
+    if (this.psWeaponBtn4.dataset.psWeaponId) {
+      this.applyMobileButtonPosition(this.psWeaponBtn4, { x: 2, y: 3 });
     }
     // Bubble sits in the free slot above Block/Fire, clear of the weapon buttons
     this.applyMobileButtonPosition(this.psBubbleBtn, { x: 1, y: blockInGrid ? 1 : 0 });

@@ -104,8 +104,26 @@ const statsForSave = (stats) => (stats ? { ...stats, showdownMaxHealthSegments: 
 // Guests (no profile) have nameKey null: nothing is saved.
 // Multiplayer battles (matchCtx.startMatchLoadout): the pickup loadout is never saved.
 let _statSavesSuspended = false;
-const saveStatsImmediate = (nameKey, stats, ...rest) => (nameKey && !_statSavesSuspended ? saveStatsImmediateRaw(nameKey, statsForSave(stats), ...rest) : undefined);
-const saveStatsThrottled = (nameKey, stats, ...rest) => (nameKey && !_statSavesSuspended ? saveStatsThrottledRaw(nameKey, statsForSave(stats), ...rest) : undefined);
+// Town mode (startTownLoadout): the real items set aside while the town's own are in hand —
+// { stats: { bombs, … }, inventory: { itemId: entry | null } }. Saves write these instead, so
+// coins etc. keep saving but the town's gear never reaches the profile.
+let _saveAside = null;
+// (stats, [lastStatUpdateAt, inventory]) → the save call's arguments after nameKey
+const _statsSaveArgs = (stats, rest) => {
+  if (!_saveAside) return [statsForSave(stats), ...rest];
+  const [lastStatUpdateAt, inventory] = rest;
+  let inv = inventory;
+  if (inventory) {
+    inv = { ...inventory };
+    for (const [key, entry] of Object.entries(_saveAside.inventory)) {
+      if (entry) inv[key] = entry;
+      else delete inv[key];
+    }
+  }
+  return [statsForSave(stats ? { ...stats, ..._saveAside.stats } : stats), lastStatUpdateAt, inv];
+};
+const saveStatsImmediate = (nameKey, stats, ...rest) => (nameKey && !_statSavesSuspended ? saveStatsImmediateRaw(nameKey, ..._statsSaveArgs(stats, rest)) : undefined);
+const saveStatsThrottled = (nameKey, stats, ...rest) => (nameKey && !_statSavesSuspended ? saveStatsThrottledRaw(nameKey, ..._statsSaveArgs(stats, rest)) : undefined);
 
 // Sword Showdown: max "Shield Upgrade" purchases (each +SHIELD_UPGRADE_HEALTH durability → 20 + 4×10 = 60 max)
 const SHOWDOWN_MAX_SHIELD_UPGRADES = 4;
@@ -732,9 +750,11 @@ async function initCore(runtimeContext) {
   // the rest on the arena's pickups; the real inventory / stats are set aside meanwhile and
   // put back afterwards (matchCtx.startMatchLoadout / endMatchLoadout) — null outside one
   let _matchLoadout = null;
-  // Multiplayer duels (and the lobby) are sword only; battles use the pickups. Town mode is
-  // sword only too (only sword hits on townsfolk are tracked)
-  const _mpSwordOnly = () => (!!duelMode?.isActive() && !_matchLoadout) || !!town?.isActive();
+  // Town mode: the town's own gear, bought at its market, in place of the real inventory
+  // (startTownLoadout / endTownLoadout, further down) — { hasSword } while in Town, else null
+  let _townLoadout = null;
+  // Multiplayer duels (and the lobby) are sword only; battles use the pickups
+  const _mpSwordOnly = () => !!duelMode?.isActive() && !_matchLoadout;
   var playerControls = null;
   let scene = null;
   let ambientLight = null;
@@ -2601,7 +2621,7 @@ async function initCore(runtimeContext) {
   // Each Sword Showdown "Shield Upgrade" purchase adds this much durability to every shield
   const SHIELD_UPGRADE_HEALTH = 10;
   const MATCH_SHIELD_HEALTH = 6;  // Multiplayer battles: a picked-up shield, upgrades ignored
-  const getShieldMaxHealth = () => (_matchLoadout ? MATCH_SHIELD_HEALTH : DEFAULT_SHIELD_HEALTH
+  const getShieldMaxHealth = () => (_matchLoadout || _townLoadout ? MATCH_SHIELD_HEALTH : DEFAULT_SHIELD_HEALTH
     + Math.max(0, Math.floor(statsState.shieldUpgrades || 0)) * SHIELD_UPGRADE_HEALTH);
   let lastEquippedBeforeShield = null;
 
@@ -2713,7 +2733,7 @@ async function initCore(runtimeContext) {
   const hasMagicWand = () => (inventoryState[MAGIC_WAND_ITEM_ID]?.count || 0) > 0;
   const isWandEquipped = () => _wandActive && foamSword?.holder === playerControls;
   const getMana = () => (Number.isFinite(statsState.mana) ? statsState.mana : MAX_MANA);
-  const isWandAllowed = () => hasMagicWand() && !_classicMode && !town?.isActive() && (!duelMode?.isActive() || !!_matchLoadout);
+  const isWandAllowed = () => hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout);
   // Wand swipe in progress (phone-sword loop → _updateWandSwipe)
   const _wandSwipe = {
     active: false, startAt: 0, slowSince: null, cooldownUntil: 0, start: new THREE.Vector3(),
@@ -2923,6 +2943,8 @@ async function initCore(runtimeContext) {
 
   function equipInventoryItem(itemId) {
     if (!itemId || !inventoryState[itemId]) return;
+    // Town: the sword has to be bought (its inventory entry is also the wand's slot)
+    if (_townLoadout && itemId === FOAM_SWORD_ITEM_ID && !_townLoadout.hasSword) return;
     // Multiplayer duels are sword only
     if (_mpSwordOnly() && itemId !== FOAM_SWORD_ITEM_ID) return;
     if (_classicMode && itemId !== FOAM_SWORD_ITEM_ID) return; // Classic: sword only
@@ -3323,7 +3345,6 @@ async function initCore(runtimeContext) {
   const activatePlayerBubble = () => {
     if (playerDead || isPlayerBubbleActive()) return false;
     if (duelMode?.isActive() && !(_matchLoadout && matchMode?.isFighting())) return false; // battles only in Multiplayer
-    if (town?.isActive()) return false; // (Town: sword only)
     if (getBubbleCount() <= 0) return false;
     setStat('bubbles', getBubbleCount() - 1, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -4049,7 +4070,10 @@ async function initCore(runtimeContext) {
   const PLAYER_BOMB_WINDUP_MS = 700;        // release time when the character hasn't loaded
   const PLAYER_BOMB_CLIP_TIMEOUT_MS = 2500; // release anyway if the clip is slow to load
   const PLAYER_BOMB_HAND = 'left';          // mirrored label: the anatomical right arm
-  const playerBombs = createPlayerBombs({ scene, getBlastTargets: () => hordeEnemies });
+  const playerBombs = createPlayerBombs({
+    scene,
+    getBlastTargets: () => (town?.isActive() ? [...hordeEnemies, ...town.getWeaponTargets()] : hordeEnemies),
+  });
 
   // ── Sword Showdown magic: the magic wand and wand-casting enemies ──
   // A swipe of the wand (held like the sword) fires a blast shaped like the swipe
@@ -4138,6 +4162,7 @@ async function initCore(runtimeContext) {
         onHit: (b) => _magicHitEnemy(enemy, b),
       });
     }
+    if (town?.isActive()) targets.push(...town.getMagicTargets());
     return targets;
   };
   // Wand enemy's spell leaves its wand (EnemyPlayer.onCast)
@@ -4419,6 +4444,8 @@ async function initCore(runtimeContext) {
     return true;
   };
   playerControls.onSwipe = (dx, dy) => { tryPlayerRoll(dx, dy); };
+  // "Use This Device" (this screen is the gyro sword): swipes on it are sword moves, not rolls
+  playerControls.swipeRollAllowed = () => !window.phoneSwordGyro?.localDevice;
   const finishPlayerRoll = () => {
     const { restoreIds } = playerRoll;
     playerRoll = null;
@@ -6018,13 +6045,32 @@ async function initCore(runtimeContext) {
     playerControls?.refreshActionButtons?.();
   };
   // Gun/Shield buttons equip that item, or go back to the sword if it's already equipped
+  // What's in hand: an item id, or null (Town: put away)
+  const _heldWeaponId = () => (isWandEquipped() ? MAGIC_WAND_ITEM_ID : playerControls?.getEquippedWeapon?.('right')?.itemId ?? null);
+  // Everything put away (Town's ✋ Hands; also the town's start, purchases and arrests)
+  const _putWeaponsAway = () => {
+    if (playerRoll) playerRoll.restoreIds = [];
+    getEquippedInventoryItemIds().forEach((itemId) => unequipInventoryItem(itemId));
+    if (_wandActive) { _wandActive = false; if (foamSword) foamSword.wand = false; }
+    playerBombThrow = null;
+    playerBombs?.setHeld(null);
+    lastEquippedBeforeShield = null;
+    hideShieldHealthHUD();
+    updateManaUI();
+  };
+  // Back from the gun / shield / wand: the sword, or (Town without one) empty hands
+  const _backToSword = () => {
+    if (_townLoadout && !_townLoadout.hasSword) _putWeaponsAway();
+    else equipInventoryItem(FOAM_SWORD_ITEM_ID);
+  };
   const _toggleRemoteWeapon = (itemId) => {
     const appStateRef = window.appState;
     const inv = appStateRef?.getInventory?.() || {};
     if (!((inv[itemId]?.count ?? 0) > 0)) return;
     const equippedId = playerControls?.getEquippedWeapon?.('right')?.itemId;
-    // Pressing the held weapon again goes back to the sword
-    appStateRef.equipInventoryItem?.(equippedId === itemId ? FOAM_SWORD_ITEM_ID : itemId);
+    // Pressing the held weapon again goes back to the sword (Town without one: empty hands)
+    if (equippedId === itemId) _backToSword();
+    else appStateRef.equipInventoryItem?.(itemId);
     playerControls?.refreshActionButtons?.();
   };
   const _handlePhoneAction = (action) => {
@@ -6056,7 +6102,14 @@ async function initCore(runtimeContext) {
     } else if (action === 'wand') {
       // Magic wand ↔ sword
       if (!isWandAllowed()) return;
-      equipInventoryItem(isWandEquipped() ? FOAM_SWORD_ITEM_ID : MAGIC_WAND_ITEM_ID);
+      if (isWandEquipped()) _backToSword();
+      else equipInventoryItem(MAGIC_WAND_ITEM_ID);
+      playerControls?.refreshActionButtons?.();
+    } else if (action === 'sword') {
+      // Town: 🗡 Sword out ↔ ✋ Hands (nothing in hand)
+      if (!_townLoadout) return;
+      if (_heldWeaponId()) _putWeaponsAway();
+      else equipInventoryItem(FOAM_SWORD_ITEM_ID);
       playerControls?.refreshActionButtons?.();
     } else if (action === 'wandShieldDown') {
       setWandShieldHold(true);
@@ -6086,7 +6139,7 @@ async function initCore(runtimeContext) {
       };
     }
     if (_mpSwordOnly()) {
-      // Multiplayer duels (and Town) are sword only: grey out bomb/bubble/gun/shield on the phone
+      // Multiplayer duels are sword only: grey out bomb/bubble/gun/shield on the phone
       return {
         bombs: 0, bubbles: 0, bubbleActive: false, hasGun: false, hasShield: false,
         ammo: 0, equipped: FOAM_SWORD_ITEM_ID, highlight: null
@@ -6101,7 +6154,10 @@ async function initCore(runtimeContext) {
       ammo: getPistolAmmoCount(),
       hasWand: isWandAllowed(),
       mana: getMana(),
-      equipped: isWandEquipped() ? MAGIC_WAND_ITEM_ID : (playerControls?.getEquippedWeapon?.('right')?.itemId ?? FOAM_SWORD_ITEM_ID),
+      equipped: _heldWeaponId() ?? (_townLoadout ? 'none' : FOAM_SWORD_ITEM_ID),
+      // Town: the sword is bought; 🗡 / ✋ puts everything away
+      hasSword: _townLoadout ? _townLoadout.hasSword : true,
+      canUnequip: !!_townLoadout,
       // (the shield held up from the wand: Block keeps saying Shield until it's let go)
       wandShieldHeld: _wandShieldHold,
       // Tutorial: phone button to ring ('bomb' | 'bubble' | 'gun' | 'shield' | 'fire' | 'block')
@@ -6484,11 +6540,15 @@ async function initCore(runtimeContext) {
     }
     playerDead = false;
     playerModel.userData.qwopRig?.glbCharacter?.revive();
-    // Always re-equip the foam sword after respawn
-    if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
-      inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+    // Always re-equip the foam sword after respawn (Town: only one that's been bought)
+    if (_townLoadout) {
+      if (_townLoadout.hasSword) equipInventoryItem(FOAM_SWORD_ITEM_ID);
+    } else {
+      if (!(inventoryState[FOAM_SWORD_ITEM_ID]?.count > 0)) {
+        inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+      }
+      equipInventoryItem(FOAM_SWORD_ITEM_ID);
     }
-    equipInventoryItem(FOAM_SWORD_ITEM_ID);
     updateControlAvailability();
     const actions = playerModel.userData.actions;
     const current = playerModel.userData.currentAction;
@@ -6663,6 +6723,14 @@ async function initCore(runtimeContext) {
     throwBomb: () => throwPlayerBomb(),
     // Magic wand: owned (Showdown / the tutorial) or picked up in a Multiplayer battle
     isWandAllowed: () => isWandAllowed(),
+    // Town: nothing in hand is allowed (✋ Hands), and the sword has to be bought
+    isUnarmedAllowed: () => !!_townLoadout,
+    ownsSword: () => !_townLoadout || _townLoadout.hasSword,
+    putWeaponsAway: () => {
+      if (!_townLoadout) return;
+      _putWeaponsAway();
+      playerControls?.refreshActionButtons?.();
+    },
     isWandEquipped: () => isWandEquipped(),
     setWandShieldHold: (down) => setWandShieldHold(down),
     isWandShieldHeld: () => _wandShieldHold,
@@ -6896,7 +6964,7 @@ async function initCore(runtimeContext) {
   let psAutoBuyBusy = false;
   const psAutoBuyTick = async () => {
     // The tutorial does its own (scripted) purchases; Multiplayer duels are sword only
-    if (psAutoBuyBusy || showdownTutorial?.isActive() || duelMode?.isActive() || _classicMode) return;
+    if (psAutoBuyBusy || showdownTutorial?.isActive() || duelMode?.isActive() || _classicMode || _townLoadout) return;
     const needed = PS_AUTO_BUY_ITEMS.filter(entry => !entry.has());
     if (!needed.length) return;
     psAutoBuyBusy = true;
@@ -7973,6 +8041,107 @@ async function initCore(runtimeContext) {
     devRoam.enter();
   };
 
+  // ── Town loadout: the gear the player bought in Town (src/town/townMode.js keeps it in its
+  // save) instead of the real inventory, which is set aside meanwhile (and is still what gets
+  // saved — _saveAside). Nothing at all to start with: even the sword is bought.
+  const TOWN_ITEM_IDS = [FOAM_SWORD_ITEM_ID, 'pistol', SHIELD_ITEM_ID, MAGIC_WAND_ITEM_ID];
+  const TOWN_GUN_AMMO = 12;        // bullets that come with a gun
+  const TOWN_MANA_REFILL = 50;     // a mana purchase
+  // { sword, gun, ammo, shield (health), wand, mana, bombs, bubbles }
+  const _townItems = () => ({
+    sword: !!_townLoadout?.hasSword,
+    gun: (inventoryState.pistol?.count ?? 0) > 0,
+    ammo: getPistolAmmoCount(),
+    shield: (inventoryState[SHIELD_ITEM_ID]?.count ?? 0) > 0
+      ? normalizeShieldEntry(inventoryState[SHIELD_ITEM_ID])[SHIELD_HEALTH_KEY] : 0,
+    wand: hasMagicWand(),
+    mana: getMana(),
+    bombs: getPlayerBombCount(),
+    bubbles: getBubbleCount(),
+  });
+  const _refreshGearUI = () => {
+    if ((inventoryState.pistol?.count ?? 0) > 0 && isInventoryItemEquipped('pistol')) {
+      playerControls?.setAmmo?.(getPistolAmmoCount(), getAmmoLabelForType('bullet'), getAmmoIconForType('bullet'));
+    }
+    playerControls?.refreshActionButtons?.();
+    updatePsBombButton();
+    updatePsBubbleButton();
+    updateManaUI();
+  };
+  const _setTownItems = (items = {}) => {
+    _townLoadout.hasSword = !!items.sword;
+    // (the wand is the sword in wand form: it needs the sword's inventory entry too)
+    if (items.sword || items.wand) inventoryState[FOAM_SWORD_ITEM_ID] = ensureCatalogEntry(FOAM_SWORD_ITEM_ID, { count: 1 });
+    else delete inventoryState[FOAM_SWORD_ITEM_ID];
+    if (items.gun) inventoryState.pistol = ensureCatalogEntry('pistol', { count: 1, [PISTOL_AMMO_KEY]: Math.max(0, Math.floor(items.ammo || 0)) });
+    else delete inventoryState.pistol;
+    if (items.shield > 0) {
+      inventoryState[SHIELD_ITEM_ID] = ensureCatalogEntry(SHIELD_ITEM_ID, normalizeShieldEntry({
+        count: 1, [SHIELD_HEALTH_KEY]: Math.min(MATCH_SHIELD_HEALTH, items.shield), [SHIELD_MAX_HEALTH_KEY]: MATCH_SHIELD_HEALTH,
+      }));
+    } else delete inventoryState[SHIELD_ITEM_ID];
+    if (items.wand) inventoryState[MAGIC_WAND_ITEM_ID] = ensureCatalogEntry(MAGIC_WAND_ITEM_ID, { count: 1 });
+    else delete inventoryState[MAGIC_WAND_ITEM_ID];
+    statsState.mana = Math.max(0, Math.min(MAX_MANA, Math.floor(items.mana || 0)));
+    statsState.bombs = Math.max(0, Math.floor(items.bombs || 0));
+    statsState.bubbles = Math.max(0, Math.floor(items.bubbles || 0));
+  };
+  const startTownLoadout = (items) => {
+    if (_townLoadout) return;
+    _putWeaponsAway();
+    const aside = { stats: { bombs: statsState.bombs, bubbles: statsState.bubbles, mana: statsState.mana }, inventory: {} };
+    TOWN_ITEM_IDS.forEach((id) => { aside.inventory[id] = inventoryState[id] ?? null; });
+    _saveAside = aside;
+    _townLoadout = { hasSword: false };
+    _setTownItems(items);
+    _refreshGearUI();
+  };
+  // Back to the real inventory; returns the town's gear (for its save)
+  const endTownLoadout = () => {
+    if (!_townLoadout) return null;
+    const items = _townItems();
+    _putWeaponsAway();
+    deactivatePlayerBubble();
+    playerBombs?.clear();
+    const aside = _saveAside;
+    _saveAside = null;
+    _townLoadout = null;
+    for (const [id, entry] of Object.entries(aside.inventory)) {
+      if (entry) inventoryState[id] = entry;
+      else delete inventoryState[id];
+    }
+    Object.assign(statsState, aside.stats);
+    equipInventoryItem(FOAM_SWORD_ITEM_ID);
+    _refreshGearUI();
+    return items;
+  };
+  // A purchase at the town's market: 'sword' | 'gun' | 'ammo' | 'shield' | 'bomb' | 'bubble' |
+  // 'wand' | 'mana' (n: how many bullets / bombs). Returns false when it can't be had.
+  const grantTownItem = (kind, n = 1) => {
+    if (!_townLoadout) return false;
+    const items = _townItems();
+    const nothingInHand = !_heldWeaponId();
+    if (kind === 'sword') items.sword = true;
+    else if (kind === 'gun') { items.ammo = (items.gun ? items.ammo : 0) + TOWN_GUN_AMMO; items.gun = true; }
+    else if (kind === 'ammo') { if (!items.gun) return false; items.ammo += n; }
+    else if (kind === 'shield') items.shield = MATCH_SHIELD_HEALTH;
+    else if (kind === 'bomb') items.bombs += n;
+    else if (kind === 'bubble') items.bubbles += n;
+    else if (kind === 'wand') { items.wand = true; items.mana = MAX_MANA; }
+    else if (kind === 'mana') { if (!items.wand) return false; items.mana = Math.min(MAX_MANA, items.mana + TOWN_MANA_REFILL); }
+    else return false;
+    const held = _heldWeaponId();
+    _setTownItems(items);
+    // (a gun / shield held while it's replaced: picked up again)
+    if (held === 'pistol' || held === SHIELD_ITEM_ID) equipInventoryItem(held);
+    // A first weapon goes straight into the hand
+    if (nothingInHand && (kind === 'sword' || kind === 'gun' || kind === 'wand')) {
+      equipInventoryItem(kind === 'sword' ? FOAM_SWORD_ITEM_ID : kind === 'gun' ? 'pistol' : MAGIC_WAND_ITEM_ID);
+    }
+    _refreshGearUI();
+    return true;
+  };
+
   // ── Town mode (start screen → Town): the town of houses as a living place (src/town/townMode.js) ──
   const _townMapObjectBox = new THREE.Box3();
   town = createTownMode({
@@ -8057,6 +8226,24 @@ async function initCore(runtimeContext) {
     getCoins: () => appState.getCoins(),
     addCoins: (delta) => appState.addCoins(delta),
     profileKey: () => profileNameKey,
+    // The town's own gear (see the Town loadout above)
+    startLoadout: (items) => startTownLoadout(items),
+    endLoadout: () => endTownLoadout(),
+    getItems: () => (_townLoadout ? _townItems() : null),
+    grantItem: (kind, n) => grantTownItem(kind, n),
+    // Arrested: the guards take every weapon
+    confiscate: () => {
+      if (!_townLoadout) return;
+      _putWeaponsAway();
+      deactivatePlayerBubble();
+      _setTownItems({});
+      _refreshGearUI();
+    },
+    magicDamage: { fire: MAGIC_FIRE_DAMAGE, ice: MAGIC_ICE_DAMAGE },
+    shieldMax: MATCH_SHIELD_HEALTH,
+    maxMana: MAX_MANA,
+    getHealth: () => ({ health: statsState.health, max: effectiveMaxHealthSegments() }),
+    heal: (n) => setStat('health', Math.min(effectiveMaxHealthSegments(), statsState.health + n)),
     onLobby: () => { void appState.returnToLobby(); },
   });
   window.town = town; // (dev console: town.debug())
@@ -9382,7 +9569,8 @@ async function initCore(runtimeContext) {
       projectiles,
       otherPlayers,
       multiplayer,
-      hordeEnemies,
+      // (Town: the townsfolk near the player too)
+      hordeEnemies: town?.isActive() ? [...hordeEnemies, ...town.getWeaponTargets()] : hordeEnemies,
       pvpTargets: matchMode?.getShotTargets() ?? null,
       localTarget: _attacksHeld() ? null : _pembertonShotTarget
     });

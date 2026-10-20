@@ -6,6 +6,14 @@
 // giving up lands the player in the jail cell. The dead stay dead; newcomers move in to take
 // their place. Townsfolk names / roles / lines are in townPeople.js.
 //
+// Economy (townEconomy.js): woodcutters, farmers and fishers bring wood, veg and fish to the
+// market and are paid by the merchant; everyone buys their food (and firewood) there; prices
+// follow the stock. The player gathers too — chops trees with the sword, fishes from the shore,
+// picks veg (stealing, if anyone sees) — and trades at the stall (townMarketPanel.js), where the
+// gear is sold as well: in Town the player owns only what they bought here, starting with
+// nothing at all (ctx.startLoadout — the real inventory waits outside), and the guards take it
+// all on an arrest.
+//
 // Bodies are a level of detail: only the nearest TOWN_MAX_BODIES townsfolk get a GLB character
 // (pooled per model); the rest walk the same paths as data. Someone fighting the player is
 // swapped for an EnemyPlayer (ctx.spawnFighter — the stage fighting code) and back.
@@ -17,18 +25,22 @@
 //   teleport(x, z, yaw), revivePlayer(x, z, yaw), setPositionConstraint(fn | null)
 //   setTimeOfDay('day' | 'night'), showBanner(title, sub, ms)
 //   spawnFighter({ x, z, yaw, url, hearts, swingChance }) → EnemyPlayer, removeFighter(enemy)
-//   spawnBlood(position, groundY), playSfx('hit' | 'chop' | 'coin'), dropCoins(position, n)
+//   spawnBlood(position, groundY), playSfx('hit' | 'chop'), dropCoins(position, n)
 //   getCoins(), addCoins(delta), profileKey() → string | null, onLobby()
+//   startLoadout(items), endLoadout() → items, getItems() → items | null, grantItem(kind, n),
+//   confiscate(), magicDamage { fire, ice }, getHealth() → { health, max }, heal(n)
 
 import * as THREE from 'three';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { makeTextSprite, makeCampfire, updateCampfire, loadMarketStall, MARKET_STALL_MERCHANT_Z } from '../village/villageMode.js';
 import { createTownNav } from './townNav.js';
+import { GOODS, GOOD_IDS, FOOD_IDS, SHOP_GEAR, createMarket } from './townEconomy.js';
+import { createMarketPanel } from './townMarketPanel.js';
 import {
   TOWN_NAME, ROLES, FOUNDING_ROLES, characterForRole, randomName, firstName,
   talkLine, giftLine, chatLines, shout,
-  SHOUT_HURT, SHOUT_HELP, SHOUT_MURDER, SHOUT_FIGHT, SHOUT_LAW, SHOUT_EAT_BUY,
+  SHOUT_HURT, SHOUT_HELP, SHOUT_MURDER, SHOUT_THIEF, SHOUT_FIGHT, SHOUT_LAW, SHOUT_EAT_BUY,
 } from './townPeople.js';
 
 // ── Layout ──
@@ -59,8 +71,7 @@ const TALK_RANGE = 2.4;              // m — 💬 shows for townsfolk this clos
 const BUBBLE_S = 3.6;                // s a speech bubble stays up
 const PLAYER_PUSH_DIST = 0.55;       // m — townsfolk step out of the player's way
 const NEEDS = { energyDrain: 1 / 420, sleepGain: 1 / 80, hungerRate: 1 / 300, socialRate: 1 / 260 };
-const EAT_COST = 2;                  // coins a townsperson pays the merchant for food
-const WORK_PAY = 3;                  // coins earned per stint of work
+const WORK_PAY = 1;                  // coins a guard / the sheriff earns per stint of work
 const GIFT_COINS = 5;                // 🪙 Give
 const FRIEND_ATTITUDE = 0.55;        // friends don't tell the guards what they saw
 const NEWCOMER_DELAY_S = [45, 100];  // s until someone moves in after a death
@@ -78,6 +89,24 @@ const FINE_PER_STAR = 15;            // coins
 const JAIL_S = 30;                   // s in the cell (or pay bail)
 const BAIL = 20;                     // coins
 const KO_COIN_SHARE = 0.1;           // share of coins lost when knocked out (not wanted)
+
+// ── Economy ──
+// What a stint of work makes: [good, min, max]
+const PRODUCE = { woodcutter: ['wood', 2, 3], farmer: ['crops', 2, 4], fisher: ['fish', 1, 3] };
+const MERCHANT_START_CASH = 60;      // coins the merchant starts out with
+const FIREWOOD_CHANCE = 0.35;        // a townsperson buying food takes some firewood home too
+const MARKET_HOURS = [7, 20];
+const TRADE_DIST = 3.4;              // m from the stall for 🛒 Trade
+const CHOP_HITS = 3;                 // sword hits on a tree per 🪵
+const TREE_WOOD = 3;                 // 🪵 a tree gives before it needs to grow back…
+const TREE_REGROW_S = 40;            // …one per this many seconds
+const CHOP_REACH = 0.85;             // m from the sword tip to the trunk
+const CROP_REGROW_S = 70;            // s until a picked crop is back
+const PICK_DIST = 1.6;               // m — 🌾 Pick near a ripe crop
+const FISH_WATER_CELLS = 2;          // 🎣 Fish within this many nav cells of the water
+const FISH_S = [3, 6];               // s per cast
+const FISH_CHANCE = 0.6;
+const FISH_CANCEL_DIST = 0.8;        // m — walking off cancels the cast
 
 const SAVE_EVERY_S = 20;
 const SAVE_PREFIX = 'town_';
@@ -126,11 +155,17 @@ export function createTownMode(ctx) {
   let departed = [];          // first names of the dead (not given to newcomers)
   let talking = null;         // { npc, until }
   let saveAt = 0;
+  let growAt = 0;
   let lodAt = 0;
   let actsAt = 0;
   let actsKey = '';
   let acts = [];
   const pool = new Map();     // url → [{ container, character }]
+  let market = createMarket(); // the stall's stock (replaced by the saved one on enter)
+  const goods = { wood: 0, fish: 0, crops: 0 }; // what the player carries
+  const soldOut = new Set();  // goods the market has run out of (for the feed)
+  let fishing = null;         // { left, x, z } while the player's line is out
+  let lastItems = null;       // the town gear, as it was when the player last left
 
   // ── DOM ──
   const hud = el('div', 'town-hud hidden');
@@ -147,8 +182,29 @@ export function createTownMode(ctx) {
   const feed = el('div', 'town-feed');
   const actsEl = el('div', 'town-acts hidden');
   const fade = el('div', 'town-fade');
-  hud.append(top, stars, jailChip, lobbyBtn, feed, actsEl);
+  // What the player carries; the food can be eaten (tap) for health
+  const goodsEl = el('div', 'town-goods');
+  const goodEls = {};
+  for (const g of GOOD_IDS) {
+    const b = el('button', 'town-good');
+    b.type = 'button';
+    b.disabled = !GOODS[g].food;
+    b.title = GOODS[g].food ? `Eat ${GOODS[g].label} (+${GOODS[g].heal} health)` : GOODS[g].label;
+    b.addEventListener('click', () => { if (active) eat(g); });
+    goodEls[g] = b;
+    goodsEl.append(b);
+  }
+  hud.append(top, stars, jailChip, lobbyBtn, feed, goodsEl, actsEl);
   document.body.append(hud, fade);
+  const renderGoods = () => {
+    for (const g of GOOD_IDS) goodEls[g].textContent = `${GOODS[g].emoji} ${goods[g]}`;
+  };
+  const marketPanel = createMarketPanel(hud, {
+    onBuyGood: (g) => buyGood(g),
+    onSellGood: (g) => sellGood(g),
+    onBuyGear: (id) => buyGear(id),
+    onClose: () => closeMarket(),
+  });
 
   const feedLine = (text) => {
     const line = el('div', 'town-feed-line', text);
@@ -180,10 +236,14 @@ export function createTownMode(ctx) {
     people: npcs.filter((n) => n.alive).map((n) => ({
       id: n.id, name: n.name, role: n.role, url: n.url, home: n.homeIndex,
       money: Math.round(n.money), attitude: Math.round(n.attitude * 100) / 100,
+      carry: { ...n.carry },
     })),
     pending: arrivals.map((a) => a.role),
     departed,
     nextId,
+    market: market.snapshot(),
+    goods: { ...goods },
+    items: ctx.getItems() ?? lastItems,
   });
   const save = () => {
     if (!ready) return;
@@ -346,7 +406,9 @@ export function createTownMode(ctx) {
       // the player arrives between the market and the fire
       spawn: { x: (market.x + fire.x) / 2 + fwd.z * 2.2, z: (market.z + fire.z) / 2 - fwd.x * 2.2 },
     };
-    return { nav, places, props: buildProps(places) };
+    // Every tree in town can be chopped (wood: what it has left; it grows back)
+    const choppable = trees.map((t) => ({ x: t.x, z: t.z, wood: TREE_WOOD, hits: 0, growAt: 0, hitAt: -1 }));
+    return { nav, places, trees: choppable, props: buildProps(places) };
   };
 
   // ── Props: market stall, campfire, jail cell, fields ──
@@ -408,6 +470,7 @@ export function createTownMode(ctx) {
     const cropGeo = new THREE.ConeGeometry(0.13, 0.32, 5);
     cropGeo.translate(0, 0.16, 0);
     for (const f of places.fields) {
+      f.crops = []; // { mesh, x, z, ripe, growAt } — picked by the player (townMode pick)
       for (let r = -1; r <= 1; r++) {
         const rz = f.z + r * 1.1;
         const soil = new THREE.Mesh(soilGeo, soilMat);
@@ -421,6 +484,7 @@ export function createTownMode(ctx) {
           crop.rotation.y = c * 1.3 + r;
           crop.castShadow = true;
           group.add(crop);
+          f.crops.push({ mesh: crop, x: cx, z: rz, ripe: true, growAt: 0 });
         }
       }
     }
@@ -428,7 +492,7 @@ export function createTownMode(ctx) {
   };
 
   // ── Townsfolk ──
-  const makeNpc = ({ id, name, role, url, home, money = rand(4, 14), attitude = 0 }) => {
+  const makeNpc = ({ id, name, role, url, home, money = role === 'merchant' ? MERCHANT_START_CASH : rand(4, 14), attitude = 0, carry = null }) => {
     const def = ROLES[role] ?? ROLES.townsfolk;
     const { homes } = layout.places;
     const homeIndex = Number.isInteger(home) && home >= 0 && home < homes.length ? home : Math.floor(Math.random() * homes.length);
@@ -441,6 +505,7 @@ export function createTownMode(ctx) {
       alive: true, dying: null, hp: def.hp, maxHp: def.hp,
       needs: { energy: rand(0.6, 1), hunger: rand(0, 0.6), social: rand(0, 0.7) },
       money, attitude,
+      carry: { wood: 0, fish: 0, crops: 0, ...(carry ?? {}) }, // goods made, on the way to the market
       speedScale: (def.speed ?? 1) * rand(0.9, 1.12),
       task: null, path: null, pathI: 0, moving: false,
       inside: false, fear: 0, hostile: false, fighter: null, lastHurtAt: -1e9, lastHitAt: -1e9,
@@ -545,8 +610,18 @@ export function createTownMode(ctx) {
       else options.push(['sleep', 1]);
     } else {
       if (working && (def.work === 'market' || n.work)) options.push(['work', 0.8 + Math.random() * 0.2]);
-      const marketOpen = h >= 7 && h < 20;
-      if (marketOpen && n.money >= EAT_COST && n.role !== 'merchant') options.push(['eat', n.needs.hunger ** 2 * 1.3]);
+      // Something to eat in their own basket: a bite where they stand
+      const ownFood = FOOD_IDS.find((g) => n.carry[g] > 0);
+      if (n.needs.hunger > 0.6 && ownFood) {
+        n.carry[ownFood] -= 1;
+        n.needs.hunger = 0;
+        say(n, '*munch*');
+      }
+      const open = marketOpen();
+      // Goods made: off to sell them
+      if (open && GOOD_IDS.some((g) => n.carry[g] > 0)) options.push(['deliver', 1.1]);
+      const food = market.cheapestFood();
+      if (open && food && n.money >= market.price(food) && n.role !== 'merchant') options.push(['eat', n.needs.hunger ** 2 * 1.3]);
       const evening = h >= 17 && h < 23.5;
       options.push(['social', n.needs.social * 0.7 + (evening ? 0.35 : 0) + (def.nightOwl && night ? 0.6 : 0)]);
       const sleepy = def.nightOwl ? (h >= 3 && h < 11) : night;
@@ -575,6 +650,8 @@ export function createTownMode(ctx) {
         setTask(n, { type, to: randomNear(f.x, f.z, 1.6), dur: rand(18, 35), anim: 'farm', face: null });
       } else if (n.work) setTask(n, { type, to: n.work, dur: rand(45, 90), face: n.work.face, anim: w === 'tree' ? 'chop' : null });
       else setTask(n, { type: 'wander', to: randomNear(n.x, n.z, 14), dur: rand(2, 6) });
+    } else if (type === 'deliver') {
+      setTask(n, { type, to: randomNear(P.customerSpot.x, P.customerSpot.z, 1.5), dur: 3, face: P.market });
     } else if (type === 'eat') {
       setTask(n, { type, to: randomNear(P.customerSpot.x, P.customerSpot.z, 1.5), dur: 4, face: P.market });
     } else if (type === 'social') {
@@ -726,7 +803,7 @@ export function createTownMode(ctx) {
   };
 
   // ── Hurt / death ──
-  const hurt = (n, dir) => {
+  const hurt = (n, dir, amount = 1) => {
     n.lastHitAt = simT;
     // Kids can't be hurt: they just run off
     if (n.def.unhurt) {
@@ -736,7 +813,7 @@ export function createTownMode(ctx) {
       return;
     }
     n.lastHurtAt = simT;
-    n.hp -= 1;
+    n.hp -= amount;
     n.attitude = Math.max(-1, n.attitude - 0.6);
     const gy = groundY(n);
     ctx.spawnBlood(_v.set(n.x, gy + 0.55 * heightScale(n.url), n.z), gy);
@@ -803,13 +880,14 @@ export function createTownMode(ctx) {
 
   // ── Crime and the law ──
   const lawNpcs = () => npcs.filter((n) => n.alive && n.def.law);
+  // kind: 'assault' | 'murder' | 'theft' (victim: the owner, or null)
   const crime = (kind, victim) => {
     const p = playerPos();
     const witnesses = npcs.filter((n) => n.alive && !n.inside
       && (n === victim || n.attitude < FRIEND_ATTITUDE)
       && dist2(n.x, n.z, p.x, p.z) < WITNESS_DIST
-      && (n === victim || sees(n)));
-    gossip.push({ kind, who: firstName(victim.name), by: 'player', at: simT, fresh: true });
+      && ((n === victim && kind !== 'theft') || sees(n)));
+    gossip.push({ kind, who: victim ? firstName(victim.name) : '', by: 'player', at: simT, fresh: true });
     if (gossip.length > 12) gossip.shift();
     if (!witnesses.length) {
       if (kind === 'murder') feedLine('🤫 Nobody saw that.');
@@ -817,17 +895,19 @@ export function createTownMode(ctx) {
     }
     const before = law.stars;
     if (kind === 'murder') law.stars = Math.min(3, Math.max(law.stars + 1, 2));
-    else if (victim.def.law) law.stars = Math.max(law.stars, 2);
+    else if (victim?.def.law) law.stars = Math.max(law.stars, 2);
     else law.stars = Math.max(law.stars, 1);
     law.peak = Math.max(law.peak, law.stars);
     law.lastSeenAt = simT;
     law.lastKnown.copy(p);
     for (const w of witnesses) {
-      w.attitude = Math.max(-1, w.attitude - (kind === 'murder' ? 0.6 : 0.3));
+      w.attitude = Math.max(-1, w.attitude - (kind === 'murder' ? 0.6 : kind === 'theft' ? 0.2 : 0.3));
       if (w === victim || w.fighter || w.def.law) continue;
+      if (kind === 'theft') { say(w, shout(SHOUT_THIEF)); continue; }
       flee(w);
       if (Math.random() < 0.6) say(w, kind === 'murder' ? shout(SHOUT_MURDER) : shout(SHOUT_HELP));
     }
+    if (kind === 'theft' && victim?.alive && witnesses.includes(victim)) say(victim, 'Oi! Those are mine!');
     if (law.stars > before) {
       const w = witnesses.find((x) => x !== victim) ?? witnesses[0];
       feedLine(`🚨 ${firstName(w.name)} saw that! ${'★'.repeat(law.stars)}`);
@@ -910,6 +990,8 @@ export function createTownMode(ctx) {
     removeAllFighters();
     standDown();
     clearAllTalk();
+    closeMarket();
+    fishing = null;
     ctx.showBanner('BUSTED!', surrendered ? 'You came quietly.' : 'The guards got you.', 2400);
     gossip.push({ kind: 'arrest', who: '', by: 'player', at: simT, fresh: true });
     later(token, 1800, () => {
@@ -919,6 +1001,10 @@ export function createTownMode(ctx) {
         ctx.revivePlayer(P.jail.x, P.jail.z, P.jailYaw + Math.PI);
         if (fine > 0) ctx.addCoins(-fine);
         feedLine(fine > 0 ? `⚖️ Fined ${fine} 🪙` : '⚖️ Locked up.');
+        if (Object.values(ctx.getItems() ?? {}).some(Boolean)) {
+          ctx.confiscate();
+          feedLine('🗡️ The guards took your weapons.');
+        }
         advanceClock(3 * 60);
         startJail();
         fadeTo(false);
@@ -932,6 +1018,8 @@ export function createTownMode(ctx) {
     sequence = token;
     removeAllFighters();
     clearAllTalk();
+    closeMarket();
+    fishing = null;
     const lost = Math.floor(ctx.getCoins() * KO_COIN_SHARE);
     ctx.showBanner('KNOCKED OUT', 'You wake up by the fire…', 2400);
     later(token, 1800, () => {
@@ -995,7 +1083,7 @@ export function createTownMode(ctx) {
       n.task.t = 0;
     }
     talking = { npc: n };
-    say(n, talkLine(n, { playerName: ctx.getPlayerName(), taskType }), { big: true });
+    say(n, talkLine(n, { playerName: ctx.getPlayerName(), taskType, market: marketTalk() }), { big: true });
     if (simT - n.talkBonusAt > 60) {
       n.talkBonusAt = simT;
       n.attitude = Math.min(1, n.attitude + 0.04);
@@ -1023,6 +1111,251 @@ export function createTownMode(ctx) {
     talking = null;
     for (const n of npcs) if (n.task?.type === 'talk') n.task = null;
   };
+
+  // What the market's like, for the townsfolk's talk
+  const marketTalk = () => {
+    const scarce = market.scarcest();
+    return {
+      scarce: scarce ? { ...GOODS[scarce], price: market.price(scarce) } : null,
+      foodOut: !market.cheapestFood(),
+      merchantGone: !npcs.some((m) => m.alive && m.role === 'merchant'),
+    };
+  };
+
+  // ── The player's goods, gathering and trade ──
+  const gain = (g, n = 1) => {
+    goods[g] += n;
+    renderGoods();
+  };
+  // Food for health (the goods pill / 🍽 Eat)
+  const eat = (g) => {
+    if (!GOODS[g]?.food || goods[g] <= 0 || sequence || ctx.isPlayerDead()) return;
+    const { health, max } = ctx.getHealth();
+    if (health >= max) { feedLine('❤️ You\'re not hungry.'); return; }
+    goods[g] -= 1;
+    ctx.heal(GOODS[g].heal);
+    renderGoods();
+    feedLine(`😋 Ate a ${GOODS[g].label.toLowerCase()}. +${GOODS[g].heal} ❤️`);
+  };
+  const hurtFood = () => {
+    const { health, max } = ctx.getHealth();
+    if (health >= max) return null;
+    return FOOD_IDS.filter((g) => goods[g] > 0).sort((a, b) => GOODS[b].heal - GOODS[a].heal)[0] ?? null;
+  };
+  // Chop: the sword tip in a trunk (CHOP_HITS hits a log)
+  const tryChop = (tip) => {
+    const p = playerPos();
+    for (const t of layout.trees) {
+      if (dist2(t.x, t.z, p.x, p.z) > 3) continue;
+      if (dist2(t.x, t.z, tip.x, tip.z) > CHOP_REACH) continue;
+      const gy = groundAt(t.x, t.z);
+      if (tip.y < gy + 0.1 || tip.y > gy + 2.6) continue;
+      if (simT - t.hitAt < 0.45) return true;
+      t.hitAt = simT;
+      ctx.playSfx('chop');
+      if (t.wood <= 0) {
+        feedLine('🌳 This tree needs time to grow back.');
+        return true;
+      }
+      t.hits += 1;
+      if (t.hits >= CHOP_HITS) {
+        t.hits = 0;
+        t.wood -= 1;
+        if (t.growAt <= simT) t.growAt = simT + TREE_REGROW_S; // (grows back one at a time)
+        gain('wood');
+        feedLine(`🪵 +1 Wood (${goods.wood})`);
+      }
+      return true;
+    }
+    return false;
+  };
+  const ripeCropNear = () => {
+    const p = playerPos();
+    for (const f of layout.places.fields) {
+      if (dist2(f.x, f.z, p.x, p.z) > 4) continue;
+      for (const c of f.crops) if (c.ripe && dist2(c.x, c.z, p.x, p.z) < PICK_DIST) return { field: f, crop: c };
+    }
+    return null;
+  };
+  // Picking someone's veg is stealing — if anyone sees it
+  const pickCrop = () => {
+    const found = ripeCropNear();
+    if (!found) return;
+    const { field, crop } = found;
+    crop.ripe = false;
+    crop.growAt = simT + CROP_REGROW_S;
+    crop.mesh.visible = false;
+    gain('crops');
+    feedLine(`🥕 +1 Veg (${goods.crops})`);
+    const owner = npcs.find((n) => n.alive && n.role === 'farmer' && n.work === field) ?? null;
+    crime('theft', owner);
+  };
+  const nearWater = () => {
+    const p = playerPos();
+    const nav = layout.nav;
+    const r = FISH_WATER_CELLS * NAV_CELL;
+    for (let dz = -r; dz <= r; dz += NAV_CELL) {
+      for (let dx = -r; dx <= r; dx += NAV_CELL) {
+        if (nav.isWater(nav.indexAt(p.x + dx, p.z + dz))) return true;
+      }
+    }
+    return false;
+  };
+  const startFishing = () => {
+    if (fishing) return;
+    const p = playerPos();
+    fishing = { left: rand(...FISH_S), x: p.x, z: p.z };
+    feedLine('🎣 Line\'s in the water…');
+  };
+  const updateFishing = (dt) => {
+    if (!fishing) return;
+    const p = playerPos();
+    if (dist2(p.x, p.z, fishing.x, fishing.z) > FISH_CANCEL_DIST || ctx.isPlayerDead()) {
+      fishing = null;
+      return;
+    }
+    fishing.left -= dt;
+    if (fishing.left > 0) return;
+    fishing = null;
+    if (Math.random() < FISH_CHANCE) {
+      gain('fish');
+      feedLine(`🐟 Caught a fish! (${goods.fish})`);
+    } else {
+      feedLine('🐟 It got away…');
+    }
+  };
+  // Trees and crops grow back
+  const updateRegrowth = () => {
+    for (const t of layout.trees) {
+      if (t.wood < TREE_WOOD && simT > t.growAt) {
+        t.wood += 1;
+        t.growAt = simT + TREE_REGROW_S;
+      }
+    }
+    for (const f of layout.places.fields) {
+      for (const c of f.crops) {
+        if (!c.ripe && simT > c.growAt) { c.ripe = true; c.mesh.visible = true; }
+      }
+    }
+  };
+
+  // The stall's panel
+  const nearStall = () => {
+    const p = playerPos();
+    const P = layout.places;
+    return dist2(p.x, p.z, P.market.x, P.market.z) < TRADE_DIST;
+  };
+  const gearOwned = (id, items) => {
+    if (!items) return false;
+    if (id === 'sword') return items.sword;
+    if (id === 'shield') return items.shield >= ctx.shieldMax;
+    if (id === 'gun') return items.gun;
+    if (id === 'wand') return items.wand;
+    if (id === 'mana') return items.mana >= ctx.maxMana;
+    return false;
+  };
+  const marketModel = () => {
+    const merchant = workingMerchant();
+    const coins = ctx.getCoins();
+    const items = ctx.getItems();
+    const cash = Math.floor(merchant?.money ?? 0);
+    return {
+      title: `🧺 Market · ${merchant ? firstName(merchant.name) : 'closed'}`,
+      coins,
+      cash,
+      note: !merchant ? 'The merchant isn\'t here.' : null,
+      goods: GOOD_IDS.map((g) => ({
+        id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, stock: market.stock[g], have: goods[g],
+        buy: market.price(g), sell: market.sellPrice(g),
+        canBuy: !!merchant && market.stock[g] > 0 && coins >= market.price(g),
+        canSell: !!merchant && goods[g] > 0 && cash >= market.sellPrice(g),
+      })),
+      gear: SHOP_GEAR.map((item) => {
+        const owned = gearOwned(item.id, items);
+        const missing = item.needs && !items?.[item.needs];
+        return {
+          ...item,
+          owned,
+          canBuy: !!merchant && !owned && !missing && coins >= item.price,
+          note: missing ? `Needs a ${SHOP_GEAR.find((x) => x.id === item.needs)?.label}` : null,
+        };
+      }),
+    };
+  };
+  const openMarket = () => {
+    if (!marketOpen()) { feedLine('🧺 The market\'s closed.'); return; }
+    fishing = null;
+    marketPanel.open(marketModel());
+  };
+  const closeMarket = () => marketPanel.close();
+  const buyGood = (g) => {
+    const merchant = workingMerchant();
+    const price = market.price(g);
+    if (!merchant || ctx.getCoins() < price || !market.take(g)) return;
+    ctx.addCoins(-price);
+    merchant.money += price;
+    gain(g);
+    noteStock();
+  };
+  const sellGood = (g) => {
+    const merchant = workingMerchant();
+    const price = market.sellPrice(g);
+    if (!merchant || goods[g] <= 0 || merchant.money < price) return;
+    goods[g] -= 1;
+    renderGoods();
+    market.put(g);
+    merchant.money -= price;
+    ctx.addCoins(price);
+    noteStock();
+  };
+  const buyGear = (id) => {
+    const merchant = workingMerchant();
+    const item = SHOP_GEAR.find((x) => x.id === id);
+    if (!merchant || !item || ctx.getCoins() < item.price) return;
+    if (!ctx.grantItem(item.kind, item.n ?? 1)) return;
+    ctx.addCoins(-item.price);
+    merchant.money += item.price;
+    feedLine(`${item.emoji} Bought: ${item.label}`);
+    if (marketPanel.isOpen()) marketPanel.render(marketModel());
+  };
+
+  // Other weapons than the sword (bullets, bombs, magic) hit the townsfolk drawn nearby
+  // through stand-ins shaped like stage enemies (projectiles.js / blastEnemiesAt)
+  const weaponTargetsFor = () => npcs.filter((n) => n.alive && n.body && !n.fighter && !n.inside && !n.dying);
+  const fromPlayer = (n) => {
+    const p = playerPos();
+    const d = Math.hypot(n.x - p.x, n.z - p.z) || 1;
+    return { x: (n.x - p.x) / d, z: (n.z - p.z) / d };
+  };
+  const proxyFor = (n) => {
+    if (!n.proxy) {
+      const group = new THREE.Object3D(); // (just a position: no box, the bullet sweep test finds it)
+      n.proxy = {
+        group,
+        get isDead() { return !n.alive; },
+        applyDamage: (amount) => {
+          if (!active || !n.alive || n.fighter) return false;
+          hurt(n, fromPlayer(n), Math.max(1, Math.round(amount || 1)));
+          return !n.alive;
+        },
+        applyKnockback: () => {},
+        applyDirectKnockback: () => {},
+        applyBlastKnockback: () => {},
+      };
+    }
+    n.proxy.group.position.set(n.x, groundY(n), n.z);
+    return n.proxy;
+  };
+  const getWeaponTargets = () => (active && ready && !sequence ? weaponTargetsFor().map(proxyFor) : []);
+  const getMagicTargets = () => (active && ready && !sequence ? weaponTargetsFor().map((n) => ({
+    center: new THREE.Vector3(n.x, groundY(n) + 0.55 * heightScale(n.url), n.z),
+    radius: 0.45,
+    blocks: () => false,
+    onBlocked: () => {},
+    onHit: (b) => {
+      if (n.alive && !n.fighter) hurt(n, fromPlayer(n), b.element === 'fire' ? ctx.magicDamage.fire : ctx.magicDamage.ice);
+    },
+  })) : []);
 
   // ── Per-frame townsperson ──
   const updateNpc = (n, dt) => {
@@ -1121,7 +1454,7 @@ export function createTownMode(ctx) {
     if (simT > n.nextAmbientAt) {
       n.nextAmbientAt = simT + rand(14, 30);
       if (n.body && !n.bubble && distToPlayer(n) < 12 && !['talk', 'chat', 'flee', 'respond'].includes(t.type) && Math.random() < 0.3) {
-        say(n, talkLine(n, { playerName: ctx.getPlayerName(), taskType: t.type }));
+        say(n, talkLine(n, { playerName: ctx.getPlayerName(), taskType: t.type, market: marketTalk() }));
       }
     }
   };
@@ -1141,13 +1474,8 @@ export function createTownMode(ctx) {
       }
       return;
     }
-    if (t.type === 'eat') {
-      say(n, shout(SHOUT_EAT_BUY));
-      const merchant = npcs.find((m) => m.alive && m.role === 'merchant' && m.task?.type === 'work' && m.task.phase === 'do');
-      if (merchant) { merchant.money += EAT_COST; setTimeout(() => say(merchant, `That's ${EAT_COST} coins!`), 900); }
-      n.money -= EAT_COST;
-      n.needs.hunger = 0;
-    }
+    if (t.type === 'eat') buyFood(n);
+    if (t.type === 'deliver') deliverGoods(n);
     if (t.type === 'wander' && Math.random() < 0.35) tryStartChat(n);
   };
   const doActivity = (n, t, dt) => {
@@ -1168,7 +1496,11 @@ export function createTownMode(ctx) {
     }
   };
   const finishTask = (n, t) => {
-    if (t.type === 'work' && n.def.work !== 'patrol') n.money += WORK_PAY;
+    if (t.type === 'work') {
+      const made = PRODUCE[n.role];
+      if (made) n.carry[made[0]] += Math.round(rand(made[1], made[2]));
+      else if (n.def.law) n.money += WORK_PAY; // (the town pays its guards)
+    }
     // (a guard who lost the player keeps looking round where they were last seen)
     if (t.type === 'search' && law.stars > 0) {
       setTask(n, { type: 'search', to: randomNear(law.lastKnown.x, law.lastKnown.z, 8), dur: rand(1, 3) });
@@ -1178,6 +1510,73 @@ export function createTownMode(ctx) {
     }
     decide(n);
   };
+  // ── The market (townEconomy.js): the merchant at the stall buys and sells ──
+  const marketOpen = () => inHours(hour(), MARKET_HOURS) && !!workingMerchant();
+  // The merchant, if they're at the stall now
+  const workingMerchant = () => npcs.find((m) => m.alive && !m.fighter && m.role === 'merchant'
+    && m.task?.type === 'work' && m.task.phase === 'do') ?? null;
+  // (feed: a good running out / coming back)
+  const noteStock = () => {
+    for (const g of GOOD_IDS) {
+      if (market.stock[g] <= 0 && !soldOut.has(g)) {
+        soldOut.add(g);
+        feedLine(`📉 The market's out of ${GOODS[g].label.toLowerCase()}! ${GOODS[g].emoji} ${market.price(g)}🪙 now`);
+      } else if (market.stock[g] > 0 && soldOut.has(g)) {
+        soldOut.delete(g);
+        feedLine(`📦 ${GOODS[g].label} is back at the market.`);
+      }
+    }
+    if (marketPanel.isOpen()) marketPanel.render(marketModel());
+  };
+  // A townsperson buys a meal (and maybe firewood) from the merchant
+  const buyFood = (n) => {
+    const merchant = workingMerchant();
+    const food = market.cheapestFood();
+    if (!merchant || !food) {
+      say(n, 'Sold out?! I\'m starving…');
+      return;
+    }
+    const pay = (g) => {
+      const price = market.price(g);
+      if (n.money < price || !market.take(g)) return false;
+      n.money -= price;
+      merchant.money += price;
+      return true;
+    };
+    if (!pay(food)) return;
+    say(n, shout(SHOUT_EAT_BUY));
+    setTimeout(() => { if (active && merchant.alive) say(merchant, `${GOODS[food].emoji} That's ${market.price(food)} coins!`); }, 900);
+    n.needs.hunger = 0;
+    if (Math.random() < FIREWOOD_CHANCE) pay('wood');
+    noteStock();
+  };
+  // A woodcutter / farmer / fisher sells what they made to the merchant (as far as the
+  // merchant's money goes)
+  const deliverGoods = (n) => {
+    const merchant = workingMerchant();
+    if (!merchant) return;
+    let sold = 0;
+    for (const g of GOOD_IDS) {
+      while (n.carry[g] > 0) {
+        const price = market.sellPrice(g);
+        if (merchant.money < price) break;
+        n.carry[g] -= 1;
+        market.put(g);
+        merchant.money -= price;
+        n.money += price;
+        sold += 1;
+      }
+    }
+    if (sold) {
+      const g = GOOD_IDS.find((x) => PRODUCE[n.role]?.[0] === x) ?? 'wood';
+      say(n, `Fresh ${GOODS[g].label.toLowerCase()}! ${GOODS[g].emoji}`);
+      setTimeout(() => { if (active && merchant.alive) say(merchant, 'I\'ll take the lot.'); }, 900);
+    } else {
+      say(merchant, 'Can\'t afford it today, sorry.');
+    }
+    noteStock();
+  };
+
   const tryStartChat = (n) => {
     const o = npcs.find((m) => m !== n && m.alive && !m.fighter && !m.inside && m.fear <= 0
       && (m.task?.type === 'wander') && dist2(m.x, m.z, n.x, n.z) < 6);
@@ -1263,6 +1662,10 @@ export function createTownMode(ctx) {
   const computeActs = () => {
     const out = [];
     if (sequence) return out;
+    if (marketPanel.isOpen()) {
+      out.push({ key: 'close', label: '✖ Close market', onClick: closeMarket });
+      return out;
+    }
     if (jail) {
       out.push({ key: 'bail', label: `🔓 Pay bail (${BAIL} 🪙)`, onClick: payBail });
       return out;
@@ -1274,12 +1677,24 @@ export function createTownMode(ctx) {
         return out;
       }
     }
+    if (fishing) {
+      out.push({ key: 'fishing', label: '🎣 Fishing… (reel in)', onClick: () => { fishing = null; } });
+      return out;
+    }
+    const calm = !npcs.some((n) => n.fighter && distToPlayer(n) < 8);
+    if (calm && nearStall() && marketOpen()) out.push({ key: 'trade', label: '🛒 Trade', onClick: openMarket });
     const n = nearestTalkable();
     if (n) {
       out.push({ key: `talk:${n.id}`, label: `💬 ${firstName(n.name)}`, onClick: () => talkTo(n) });
-      if (talking?.npc === n) out.push({ key: `gift:${n.id}`, label: `🪙 Give ${GIFT_COINS}`, onClick: () => gift(n), secondary: true });
+      if (talking?.npc === n) out.push({ key: `gift:${n.id}`, label: `🪙 Give ${GIFT_COINS}`, onClick: () => gift(n) });
     }
-    return out;
+    if (calm) {
+      if (ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: pickCrop });
+      if (nearWater()) out.push({ key: 'fish', label: '🎣 Fish', onClick: startFishing });
+      const food = hurtFood();
+      if (food) out.push({ key: `eat:${food}`, label: `🍽 Eat ${GOODS[food].emoji}`, onClick: () => eat(food) });
+    }
+    return out.slice(0, 3);
   };
   const refreshActs = () => {
     acts = computeActs();
@@ -1287,7 +1702,7 @@ export function createTownMode(ctx) {
     if (key === actsKey) return;
     actsKey = key;
     actsEl.replaceChildren(...acts.map((a, i) => {
-      const b = el('button', `${a.secondary || i > 0 ? 'ui-btn-secondary' : 'ui-btn'} town-act`, a.label);
+      const b = el('button', `${i > 0 ? 'ui-btn-secondary' : 'ui-btn'} town-act`, a.label);
       b.type = 'button';
       b.addEventListener('click', () => { if (active) a.onClick(); });
       return b;
@@ -1304,6 +1719,7 @@ export function createTownMode(ctx) {
     if (!active || e.repeat) return;
     if (e.target?.closest?.('input, textarea, select')) return;
     if (document.body.classList.contains('settings-open')) return;
+    if (e.key === 'Escape' && marketPanel.isOpen()) { closeMarket(); e.preventDefault(); return; }
     if (e.key === 'e' || e.key === 'E' || (e.key === 'Enter' && !e.target?.closest?.('button'))) {
       if (interact()) e.preventDefault();
     }
@@ -1316,6 +1732,13 @@ export function createTownMode(ctx) {
     gossip = [];
     arrivals = [];
     departed = Array.isArray(state?.departed) ? state.departed : [];
+    market = createMarket(state?.market);
+    soldOut.clear();
+    GOOD_IDS.forEach((g) => { goods[g] = Math.max(0, Math.floor(state?.goods?.[g] || 0)); });
+    renderGoods();
+    lastItems = state?.items ?? null;
+    // In Town the player has only what they bought here (nothing, the first time)
+    ctx.startLoadout(lastItems ?? {});
     nextId = state?.nextId ?? 1;
     if (state) {
       clock.day = state.day ?? 1;
@@ -1387,6 +1810,9 @@ export function createTownMode(ctx) {
   const exit = () => {
     if (!active) return;
     save();
+    lastItems = ctx.endLoadout() ?? lastItems;
+    closeMarket();
+    fishing = null;
     active = false;
     ready = false;
     enterToken += 1;
@@ -1432,6 +1858,10 @@ export function createTownMode(ctx) {
 
     for (const n of npcs) updateNpc(n, dt);
     npcs = npcs.filter((n) => n.alive || n.dying);
+    updateFishing(dt);
+    if (simT > growAt) { growAt = simT + 1; updateRegrowth(); }
+    // (the market panel shuts when the merchant leaves the stall or the player walks off)
+    if (marketPanel.isOpen() && (!marketOpen() || !nearStall())) closeMarket();
     for (const g of gossip) if (simT - g.at > 240) g.fresh = false;
     updateArrivals();
     if (simT > law.tickAt) { law.tickAt = simT + 0.5; updateLaw(); }
@@ -1442,7 +1872,8 @@ export function createTownMode(ctx) {
   };
 
   // The player's sword swing reached `tip` (world), moving along swingDir: hits the
-  // townsperson it passes through (those fighting are EnemyPlayers — the stage code hits them)
+  // townsperson it passes through (those fighting are EnemyPlayers — the stage code hits
+  // them), or chops the tree it's in
   const trySwordHit = (tip, swingDir) => {
     if (!active || !ready || sequence) return false;
     for (const n of npcs) {
@@ -1456,7 +1887,7 @@ export function createTownMode(ctx) {
       hurt(n, { x: dir.x, z: dir.z });
       return true;
     }
-    return false;
+    return tryChop(tip);
   };
 
   // The player went down: wanted → busted, otherwise knocked out. True when handled.
@@ -1472,12 +1903,14 @@ export function createTownMode(ctx) {
     exit,
     update,
     trySwordHit,
+    getWeaponTargets,
+    getMagicTargets,
     onPlayerDown,
     interact,
     isActive: () => active,
     // The phone's Block bar label while there's something to do (undefined: it stays Block)
     interactLabel: () => (active && acts.length ? acts[0].label : undefined),
     // (dev console)
-    debug: () => ({ npcs, layout, law, clock, arrivals, ctx }),
+    debug: () => ({ npcs, layout, law, clock, arrivals, market, goods, ctx }),
   };
 }

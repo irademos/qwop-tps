@@ -662,6 +662,9 @@ body.player-frozen #frozen-overlay { display: block; }
   z-index: 1001;
 }
 
+/* (the id's display: flex would beat .hidden: it shows only while a shield is held) */
+#shield-health-display.hidden { display: none; }
+
 .shield-hud-icon {
   font-size: 11px;
   line-height: 1;
@@ -4229,6 +4232,10 @@ body.mobile-block-bar .classic-combo {
   bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: max-content;
+  max-width: calc(100% - 200px);
   gap: 8px;
   align-items: center;
   white-space: nowrap;
@@ -4258,12 +4265,68 @@ body.mobile-block-bar .town-acts { bottom: calc(96px + env(safe-area-inset-botto
 .town-fade.town-fade-on { opacity: 1; pointer-events: auto; }
 /* ⬅ Lobby sits top left: the name / level badge and XP bar give way, health moves under it */
 body.town-mode #player-info,
-body.town-mode #xp-bar,
-body.town-mode #shield-health-display { display: none !important; }
+body.town-mode #xp-bar { display: none !important; }
 body.town-mode #health-display { top: calc(64px + env(safe-area-inset-top, 0px)); }
-body.town-mode .town-feed { top: calc(104px + env(safe-area-inset-top, 0px)); }
-/* Sword only in town: no bomb / bubble / other weapons, no mana */
-body.town-mode #ps-bubble-btn,
-body.town-mode #ps-bomb-btn,
-body.town-mode .ps-weapon-btn,
-body.town-mode #mana-bar { display: none !important; }
+body.town-mode #shield-health-display { top: calc(96px + env(safe-area-inset-top, 0px)); }
+body.town-mode .town-feed { top: calc(128px + env(safe-area-inset-top, 0px)); }
+/* What the player carries (top right, under ⚙️); tap a food to eat it */
+.town-goods {
+  position: absolute;
+  top: calc(62px + env(safe-area-inset-top, 0px));
+  right: calc(10px + env(safe-area-inset-right, 0px));
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-hud);
+  border: 1px solid var(--border);
+}
+.town-good {
+  min-width: 46px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text);
+  font: 700 14px var(--font-ui);
+  cursor: pointer;
+}
+.town-good:disabled { cursor: default; color: var(--text); opacity: 1; }
+.town-good:not(:disabled):hover { background: var(--surface-hover); }
+/* The market stall: goods to buy / sell at the going price, gear to buy */
+.town-market {
+  position: absolute;
+  left: 50%;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: min(460px, calc(100% - 24px));
+  max-height: calc(100% - 200px - env(safe-area-inset-top, 0px));
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  pointer-events: auto;
+  animation: village-act-in 0.2s var(--ease);
+}
+.town-market-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.town-market-title { font: 800 18px var(--font-display); }
+.town-market-close { min-height: 36px; min-width: 36px; padding: 0 10px; }
+.town-market-purse { margin-top: 2px; font-size: 13px; color: var(--text-muted); }
+.town-market-note { margin-top: 8px; font-size: 13px; color: var(--accent-hi); }
+.town-market-subtitle {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.town-market-list { display: grid; gap: 6px; }
+.town-market-row { display: flex; align-items: center; gap: 8px; }
+.town-market-left { flex: 1; min-width: 0; }
+.town-market-name { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 15px; }
+.town-market-emoji { font-size: 18px; }
+.town-market-info { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.town-market-btn { min-height: 36px; padding: 0 12px; font-size: 13px; font-weight: 800; white-space: nowrap; }
+/* (the panel covers the bottom of the screen: the touch controls step aside meanwhile) */
+body.town-market-open #joystick-container,
+body.town-market-open #jump-button,
+body.town-market-open #action-buttons { visibility: hidden; }
