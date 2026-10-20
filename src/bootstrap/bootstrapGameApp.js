@@ -57,6 +57,7 @@ import { createShowdownTutorial } from '../tutorial/showdownTutorial.js';
 import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fillTalk } from '../village/villageMode.js';
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
+import { createTownMode } from '../town/townMode.js';
 import { createPembertonBoss, createStageBoss, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
@@ -242,11 +243,12 @@ function createArcadeOverlay(startOverlay) {
   const showdownButton = startOverlay.querySelector('[data-arcade-showdown]');
   const multiplayerButton = startOverlay.querySelector('[data-arcade-multiplayer]');
   const classicButton = startOverlay.querySelector('[data-arcade-classic]');
+  const townButton = startOverlay.querySelector('[data-arcade-town]');
   const guestButton = startOverlay.querySelector('[data-arcade-guest]');
 
   let mode = 'login';
   // Until the tutorial is done the start screen only offers "Start Game" (which runs it);
-  // afterwards it offers Tutorial, Showdown, Classic and Multiplayer.
+  // afterwards it offers Tutorial, Showdown, Classic, Town and Multiplayer.
   let tutorialCompleted = false;
   let modeHandler = null; // picks a mode once the game is running
   let pendingGameMode = null; // mode picked before the game finished loading
@@ -337,7 +339,7 @@ function createArcadeOverlay(startOverlay) {
   };
 
   const showModeSelect = (authResult) => {
-    // "Start Game" (tutorial) for new players, else Tutorial / Showdown / Classic / Multiplayer.
+    // "Start Game" (tutorial) for new players, else Tutorial / Showdown / Classic / Town / Multiplayer.
     // Auth resolves now, so the game (and the settings panel) loads behind the start
     // screen while the player picks; the click (below) goes to the mode handler.
     tutorialCompleted = hasCompletedTutorial(authResult?.profile);
@@ -569,6 +571,7 @@ function createArcadeOverlay(startOverlay) {
   showdownButton?.addEventListener('click', () => chooseMode('showdown'));
   multiplayerButton?.addEventListener('click', () => chooseMode('multiplayer'));
   classicButton?.addEventListener('click', () => chooseMode('classic'));
+  townButton?.addEventListener('click', () => chooseMode('town'));
 
   return {
     async authenticate({ initialName, hasStoredPin, loadProfile }) {
@@ -724,12 +727,14 @@ async function initCore(runtimeContext) {
   let duelMode = null; // Multiplayer mode: lobby + duels (created further down)
   let matchMode = null; // Multiplayer mode: Team Battle / Free For All (created further down)
   let devRoam = null; // Dev: Free Roam (Settings → Dev; created further down)
+  let town = null; // Town mode (src/town/townMode.js; created further down)
   // Multiplayer battle (Team Battle / Free For All): everyone starts with the sword and finds
   // the rest on the arena's pickups; the real inventory / stats are set aside meanwhile and
   // put back afterwards (matchCtx.startMatchLoadout / endMatchLoadout) — null outside one
   let _matchLoadout = null;
-  // Multiplayer duels (and the lobby) are sword only; battles use the pickups
-  const _mpSwordOnly = () => !!duelMode?.isActive() && !_matchLoadout;
+  // Multiplayer duels (and the lobby) are sword only; battles use the pickups. Town mode is
+  // sword only too (only sword hits on townsfolk are tracked)
+  const _mpSwordOnly = () => (!!duelMode?.isActive() && !_matchLoadout) || !!town?.isActive();
   var playerControls = null;
   let scene = null;
   let ambientLight = null;
@@ -1764,10 +1769,11 @@ async function initCore(runtimeContext) {
       let group;
       let styleRoot;   // what the art-style pass reads / grades (not the KTX2 terrain / grass)
       let water = null;   // (x, z) → water surface Y or null (mappacks with water / a sea)
+      let paths = null;   // (x, z) → 'road' | 'trail' | null (mappacks with painted paths)
       let floor = 0;      // lowest ground height (setTerrainFloor)
       const floating = []; // def.floating props: { holder, bob: Group, model, phase, deckMaxY, deck, anchor }
       if (def.kind === 'mappack') {
-        const { MapLoader, sampleMapWaterLevel } = await import('../map/MapLoader.ts');
+        const { MapLoader, sampleMapWaterLevel, sampleMapPath } = await import('../map/MapLoader.ts');
         group = await new MapLoader().load(def.url, { renderer, transcoderPath: '/basis/' });
         styleRoot = group.getObjectByName('objects');
         // Water data is in the pack's own units: sample unscaled, scale the level back up
@@ -1779,6 +1785,8 @@ async function initCore(runtimeContext) {
             return level == null ? null : level * s;
           };
         }
+        const pathInfo = group.userData.paths;
+        if (pathInfo) paths = (x, z) => sampleMapPath(pathInfo, x / s, z / s);
         if (Number.isFinite(info?.seaLevel)) {
           floor = info.seaLevel * s - SEA_WADE_DEPTH;
           for (const prop of def.floating ?? []) {
@@ -1844,7 +1852,7 @@ async function initCore(runtimeContext) {
       } : null;
       // (the one that sails: a voyage moves its holder — _voyage*)
       const ship = floatingGround.find((f) => f.deck) ?? null;
-      return { group, meshes, groundMeshes, floor, water, animate, floatingGround, ship };
+      return { group, meshes, groundMeshes, floor, water, paths, animate, floatingGround, ship };
     })();
     _loadedMaps.set(key, promise);
     promise.catch(() => _loadedMaps.delete(key)); // let a later switch retry
@@ -2705,7 +2713,7 @@ async function initCore(runtimeContext) {
   const hasMagicWand = () => (inventoryState[MAGIC_WAND_ITEM_ID]?.count || 0) > 0;
   const isWandEquipped = () => _wandActive && foamSword?.holder === playerControls;
   const getMana = () => (Number.isFinite(statsState.mana) ? statsState.mana : MAX_MANA);
-  const isWandAllowed = () => hasMagicWand() && !_classicMode && (!duelMode?.isActive() || !!_matchLoadout);
+  const isWandAllowed = () => hasMagicWand() && !_classicMode && !town?.isActive() && (!duelMode?.isActive() || !!_matchLoadout);
   // Wand swipe in progress (phone-sword loop → _updateWandSwipe)
   const _wandSwipe = {
     active: false, startAt: 0, slowSince: null, cooldownUntil: 0, start: new THREE.Vector3(),
@@ -3315,6 +3323,7 @@ async function initCore(runtimeContext) {
   const activatePlayerBubble = () => {
     if (playerDead || isPlayerBubbleActive()) return false;
     if (duelMode?.isActive() && !(_matchLoadout && matchMode?.isFighting())) return false; // battles only in Multiplayer
+    if (town?.isActive()) return false; // (Town: sword only)
     if (getBubbleCount() <= 0) return false;
     setStat('bubbles', getBubbleCount() - 1, { skipSave: true });
     saveStatsThrottled(profileNameKey, statsState, lastStatUpdateAt);
@@ -4489,7 +4498,7 @@ async function initCore(runtimeContext) {
   let _pauseGraceUntil = 0;
   const _isSettingsPauseWanted = () => document.body.classList.contains('settings-open')
     && !multiplayer
-    && (_psStageActive || !!showdownTutorial?.isActive());
+    && (_psStageActive || !!showdownTutorial?.isActive() || !!town?.isActive());
   // Enemies don't attack the player: dead (body carried off) or just back from a pause
   const _attacksHeld = () => playerDead || _psBossTalking || performance.now() < _pauseGraceUntil;
   let _psStageKills = 0;       // enemies killed this stage
@@ -6027,6 +6036,7 @@ async function initCore(runtimeContext) {
       else if (_gamePaused) return;
       else if (bossTalk.isOpen()) bossTalk.interact();
       else if (village?.isOpen()) village.interact();
+      else if (town?.isActive()) town.interact();
       return;
     }
     if (!playerControls?.enabled || _classicMode || _gamePaused) return; // Classic: Block only
@@ -6058,6 +6068,7 @@ async function initCore(runtimeContext) {
     if (_isSwordCalibPromptOpen()) return '✅ Okay';
     if (bossTalk.isOpen()) return bossTalk.interactLabel();
     if (village?.isOpen()) return village.interactLabel();
+    if (town?.isActive()) return town.interactLabel(); // (undefined when there's nothing to do: Block stays Block)
     return undefined;
   };
   const _phoneControllerStatus = () => {
@@ -6074,8 +6085,8 @@ async function initCore(runtimeContext) {
         ammo: 0, equipped: FOAM_SWORD_ITEM_ID, highlight: null, blockOnly: true
       };
     }
-    if (duelMode?.isActive() && !_matchLoadout) {
-      // Multiplayer duels are sword only: grey out bomb/bubble/gun/shield on the phone
+    if (_mpSwordOnly()) {
+      // Multiplayer duels (and Town) are sword only: grey out bomb/bubble/gun/shield on the phone
       return {
         bombs: 0, bubbles: 0, bubbleActive: false, hasGun: false, hasShield: false,
         ammo: 0, equipped: FOAM_SWORD_ITEM_ID, highlight: null
@@ -6405,6 +6416,8 @@ async function initCore(runtimeContext) {
   let _gameOverTimers = [];
 
   function showGameOver() {
+    // Town: busted (wanted) or knocked out — the town takes it from here
+    if (town?.onPlayerDown()) return;
     // Counted on death
     if (_classicMode) {
       _classicStats.deaths += 1;
@@ -6494,6 +6507,7 @@ async function initCore(runtimeContext) {
       matchMode?.exit();
       duelMode?.exit();
       devRoam?.exit();
+      town?.exit();
       _setClassicMode(false);
       _resetForMenu();
       arcadeOverlay.showStartScreen();
@@ -7346,6 +7360,7 @@ async function initCore(runtimeContext) {
 
   // Clear the field (enemies, bombs, stage) and put the player back on their feet
   const _resetForMenu = () => {
+    town?.exit();
     _psStopSong();
     village?.exit();
     _psRoamQuest = null;
@@ -7958,6 +7973,98 @@ async function initCore(runtimeContext) {
     devRoam.enter();
   };
 
+  // ── Town mode (start screen → Town): the town of houses as a living place (src/town/townMode.js) ──
+  const _townMapObjectBox = new THREE.Box3();
+  town = createTownMode({
+    scene,
+    camera,
+    getPlayerPosition: () => playerModel.position,
+    getPlayerName: () => playerName || 'friend',
+    isPlayerDead: () => playerDead,
+    getGroundY: (x, z) => getTerrainHeight(x, z),
+    isOverWater: (x, z) => _isOverWater(x, z),
+    pathAt: (x, z) => _activeMap?.paths?.(x, z) ?? null,
+    // The active map's placed objects (houses, trees…) with their centres inside `b`
+    getMapObjects: (b) => {
+      const out = [];
+      const visit = (o) => {
+        const mo = o.userData?.mapObject;
+        if (mo) {
+          _townMapObjectBox.setFromObject(o);
+          if (!_townMapObjectBox.isEmpty()) {
+            const c = _townMapObjectBox.getCenter(new THREE.Vector3());
+            const size = _townMapObjectBox.getSize(new THREE.Vector3());
+            if (c.x >= b.minX && c.x <= b.maxX && c.z >= b.minZ && c.z <= b.maxZ) {
+              out.push({ file: mo.modelFile ?? '', x: c.x, z: c.z, radius: Math.max(size.x, size.z) / 2 });
+            }
+          }
+          return; // (its own meshes aren't separate objects)
+        }
+        o.children.forEach(visit);
+      };
+      if (_activeMap) visit(_activeMap.group);
+      return out;
+    },
+    teleport: (x, z, yaw) => _teleportPlayer(x, z, yaw),
+    revivePlayer: (x, z, yaw) => {
+      hideGameOver();
+      respawnPlayer();
+      _teleportPlayer(x, z, yaw);
+    },
+    setPositionConstraint: (fn) => { if (playerControls) playerControls.positionConstraint = fn; },
+    setTimeOfDay: (mode) => {
+      lastAutoMode = mode;
+      applyPresetForMode(mode);
+      applyDisplaySettings();
+      if (mode === 'day') clearRoadLightPool();
+    },
+    // Big text over the world (the stage win banner's look)
+    showBanner: (title, sub, ms = 2600) => {
+      _psWinTitle.textContent = title;
+      _psWinSub.textContent = sub || '';
+      _psWinTitle.style.animation = 'none';
+      _psWinSub.style.animation = 'none';
+      _psWinOverlay.classList.add('ps-win-banner');
+      _psWinOverlay.classList.remove('hidden');
+      void _psWinOverlay.offsetWidth;
+      _psWinTitle.style.animation = '';
+      _psWinSub.style.animation = '';
+      clearTimeout(_psWinHideTimer);
+      _psWinHideTimer = setTimeout(() => _psWinOverlay.classList.add('hidden'), ms);
+    },
+    // Someone who fights the player: a stage swordsman (EnemyPlayer) in their character
+    spawnFighter: ({ x, z, yaw, url, hearts, swingChance }) => {
+      const groundY = getTerrainHeight(x, z);
+      const enemy = _spawnHordeEnemy({
+        position: new THREE.Vector3(x, Number.isFinite(groundY) ? groundY : playerModel.position.y, z),
+        hearts, characterUrl: url, swingChance, swordDamage: 1, yaw,
+      });
+      enemy._town = true;
+      enemy._coinDropped = true; // (no stage kill count / XP; the town drops their coins)
+      return enemy;
+    },
+    removeFighter: (enemy) => _tutorialRemoveEnemy(enemy),
+    spawnBlood: (pos, groundY) => spawnBloodBurst(scene, pos, { groundY, intensity: 0.8 }),
+    playSfx: (kind) => { // (no coin sound: the coin pop-up shows)
+      if (kind === 'hit') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Impact Hit 3.ogg', 0.6, { cooldownKey: 'psw-hit', cooldownMs: 200 });
+      else if (kind === 'chop') audioManager?.playSFX('SFX/Attacks/Sword Attacks Hits and Blocks/Sword Parry 2.ogg', 0.18, { cooldownKey: 'town-chop', cooldownMs: 400 });
+    },
+    dropCoins: (pos, n) => {
+      for (let i = 0; i < n; i++) {
+        spawnCoinPickup(pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, 0, (Math.random() - 0.5) * 1.2)));
+      }
+    },
+    getCoins: () => appState.getCoins(),
+    addCoins: (delta) => appState.addCoins(delta),
+    profileKey: () => profileNameKey,
+    onLobby: () => { void appState.returnToLobby(); },
+  });
+  window.town = town; // (dev console: town.debug())
+  const startTownMode = () => {
+    _resetForMenu();
+    town.enter();
+  };
+
   let _modeStartToken = 0;
   const _startMode = (gameMode) => {
     if (gameMode === 'showdown') {
@@ -7969,13 +8076,15 @@ async function initCore(runtimeContext) {
       startMultiplayerMode();
     } else if (gameMode === 'roam') {
       startDevRoamMode();
+    } else if (gameMode === 'town') {
+      startTownMode();
     } else {
       startTutorialMode();
     }
   };
 
   // Mode picked on the start screen (first time, after the tutorial, leaving the lobby):
-  // Tutorial, Showdown, Classic or Multiplayer. Only Multiplayer runs peer multiplayer.
+  // Tutorial, Showdown, Classic, Town or Multiplayer. Only Multiplayer runs peer multiplayer.
   // A pick made while the game was still loading runs as soon as this is set.
   arcadeOverlay.setModeHandler((gameMode) => {
     if (_phoneSwordQrDeferred) {
@@ -7988,6 +8097,7 @@ async function initCore(runtimeContext) {
     }
     if (gameMode !== 'classic') _setClassicMode(false);
     devRoam.exit();
+    town.exit();
     // Each mode's map first (Classic: map.glb, the rest: the island town); a new map puts
     // the player at its spawn. A newer pick made while a map loads wins.
     const token = ++_modeStartToken;
@@ -8532,6 +8642,15 @@ async function initCore(runtimeContext) {
         !_e.isDead && _e.group &&
         playerModel.position.distanceTo(_e.group.position) < _lungeProximityDist
       ) || _pvpTargets.some(_o => playerModel.position.distanceTo(_o.position) < _lungeProximityDist);
+      // Town: a swing through a townsperson (same speed rule as hitting an enemy)
+      if (!_wandOut && !playerDead && town?.isActive() && !_blockingNow && !_blockToggleSettling && _psw.prevTipWorld
+        && _tipWorld.distanceTo(_psw.prevTipWorld) > (window.phoneSwordSwingCfg?.minSweepDist ?? 0.015)
+        && (window._pswDebugSpeed ?? 0) >= (window.phoneSwordSwingCfg?.minSweepSpeed ?? 2000)) {
+        const _townSwingDir = _psw.tipHistory.length
+          ? new THREE.Vector3().subVectors(_tipWorld, _psw.tipHistory[0].pos)
+          : new THREE.Vector3().subVectors(_tipWorld, _psw.prevTipWorld);
+        if (town.trySwordHit(_tipWorld, _townSwingDir)) _swingHitOccurred = true;
+      }
       // Hidden stage chest: a sword swipe through it opens it (a random prize)
       if (!_wandOut && !playerDead && stageChests.trySwordHit(_playerBladePoints, _playerMovingFast)) {
         _swingHitOccurred = true;
@@ -8978,7 +9097,7 @@ async function initCore(runtimeContext) {
           // Remove from array once the Three.js group has been removed from scene
           if (!_he.group.parent) {
             hordeEnemies.splice(_hi, 1);
-            if (_he._tutorial) continue; // tutorial kills don't count
+            if (_he._tutorial || _he._town) continue; // tutorial / town kills don't count
             if (_classicMode) {
               _classicStats.kills += 1;
               _classicSaveStats();
@@ -9272,6 +9391,8 @@ async function initCore(runtimeContext) {
     for (const _se of _psSparedEnemies) _se.update(frameDelta, playerModel, playerControls, false, false, true);
     // Village (between Showdown stages): walks the player around and has the last word on the camera
     village?.update(frameDelta);
+    // Town mode: the townsfolk, the clock, the law
+    town?.update(frameDelta);
     // Ships on the sea bob on the swell
     _activeMap?.animate?.(performance.now() / 1000);
     // Showdown death: the carriers + the fixed camera
