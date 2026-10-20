@@ -5,7 +5,7 @@ import { spawnBloodBurst, updateBloodEffects, setBloodEnabled } from "../combat/
 import { updateExplosionEffects } from "../combat/explosionEffect.js";
 import { PlayerCharacter } from "../characters/PlayerCharacter.js";
 import { updateRemotePlayerRig, setPlayerCharacterUrl } from "../models/playerModel.js";
-import { glbCharacterConfig, isMiiCharacterUrl, characterHold, preloadCharacterModel, isCharacterModelSettled } from "../models/glbCharacterModel.js";
+import { glbCharacterConfig, characterHold, preloadCharacterModel, isCharacterModelSettled } from "../models/glbCharacterModel.js";
 import { createSwordModelInstance } from "../items/swordModel.js";
 import { getTerrainHeight, registerTerrainHeightResolver, setTerrainFloor } from '../environment/terrainHeight.js';
 import { registerMapMeshes } from '../environment/mapCollision.js';
@@ -3898,7 +3898,8 @@ async function initCore(runtimeContext) {
   let _classicCountdown = false;        // "Ready" / "Go!" up: stage built, nothing moves yet
   const CLASSIC_HEARTS = 3;
   const CLASSIC_ENEMY_SWORD_DAMAGE = 1; // one heart per hit
-  const CLASSIC_MII_URLS = Object.values(MATCH_CHARACTERS).map((c) => c.url).filter(isMiiCharacterUrl);
+  // (Miis are Classic's only — not in MATCH_CHARACTERS, so no other mode has them)
+  const CLASSIC_MII_URLS = [glbCharacterConfig.mii1Url];
   const _classicMiiUrl = () => (CLASSIC_MII_URLS.length
     ? CLASSIC_MII_URLS[Math.floor(Math.random() * CLASSIC_MII_URLS.length)]
     : glbCharacterConfig.mii1Url);
@@ -3962,7 +3963,8 @@ async function initCore(runtimeContext) {
   const PS_FIXED_BOSSES = { 1: 'frog', [FIRST_WAND_BOSS_STAGE]: 'wizard' }; // stage → boss character
   // The story's boss for each stage (where each character lives — CHARACTER_STORIES in
   // stageBoss.js): used while still locked (else, with others still locked, a random locked one)
-  const PS_STORY_BOSSES = { 2: 'pumpkin', 3: 'gemhorn', 4: 'mii1', 5: 'tree', 7: 'antler', 8: 'antler' };
+  // — or always when an earlier stage has that character too (the frog fisher at 4, Wren at 8)
+  const PS_STORY_BOSSES = { 2: 'pumpkin', 3: 'gemhorn', 4: 'frog', 5: 'tree', 7: 'antler', 8: 'antler' };
   const PS_WAND_ENEMY_CHARACTER = 'wizard'; // wand casters are always wizards
   const PS_BOSS_HEARTS = 3;          // stage 1 boss; +1 every PS_BOSS_HEARTS_EVERY stages
   const PS_BOSS_HEARTS_EVERY = 3;
@@ -4005,7 +4007,9 @@ async function initCore(runtimeContext) {
     const fightable = Object.keys(MATCH_CHARACTERS).filter((k) => !MATCH_CHARACTERS[k].story);
     const locked = fightable.filter((k) => !_psChars.unlocked.includes(k));
     const story = PS_STORY_BOSSES[stage];
-    if (story && (locked.includes(story) || !locked.length)) return { key: story, unlocks: locked.includes(story), stage };
+    const repeat = [...Object.entries(PS_FIXED_BOSSES), ...Object.entries(PS_STORY_BOSSES)]
+      .some(([s, k]) => Number(s) < stage && k === story);
+    if (story && (repeat || locked.includes(story) || !locked.length)) return { key: story, unlocks: locked.includes(story), stage };
     const lockedFree = locked.filter((k) => !reserved.includes(k));
     const pool = lockedFree.length ? lockedFree : locked.length ? locked : fightable;
     const key = pool[Math.floor(Math.random() * pool.length)];
@@ -8144,6 +8148,13 @@ async function initCore(runtimeContext) {
 
   // ── Town mode (start screen → Town): the town of houses as a living place (src/town/townMode.js) ──
   const _townMapObjectBox = new THREE.Box3();
+  // A town fighter in a standoff (bandits at their camp): stands its ground facing the player,
+  // sword drawn, and doesn't attack (nor use its gear) until let go
+  const _townSetFighterPassive = (enemy, on) => {
+    enemy._townPassive = on;
+    enemy.script = on ? { mode: 'passive' } : null;
+    enemy.stationary = on;
+  };
   town = createTownMode({
     scene,
     camera,
@@ -8207,7 +8218,8 @@ async function initCore(runtimeContext) {
     // Someone who fights the player: a stage swordsman (EnemyPlayer) in their character; with
     // `gear` ({ shield, gun, … }) it fights like a stage boss with it (createBossFighter, no
     // health bar across the top / red glow)
-    spawnFighter: ({ x, z, yaw, url, hearts, swingChance, gear = null, name = '' }) => {
+    // (passive: a standoff — sword drawn, facing the player, no attacks until setFighterPassive(e, false))
+    spawnFighter: ({ x, z, yaw, url, hearts, swingChance, gear = null, name = '', passive = false }) => {
       const groundY = getTerrainHeight(x, z);
       const enemy = _spawnHordeEnemy({
         position: new THREE.Vector3(x, Number.isFinite(groundY) ? groundY : playerModel.position.y, z),
@@ -8218,10 +8230,12 @@ async function initCore(runtimeContext) {
       if (gear && Object.values(gear).some(Boolean)) {
         const fighter = createBossFighter({ ..._bossFighterCtx(enemy), name, gear, hud: false, glow: false });
         enemy._townGear = fighter;
-        enemy.onAfterUpdate = () => fighter.update();
+        enemy.onAfterUpdate = () => { if (!enemy._townPassive) fighter.update(); };
       }
+      if (passive) _townSetFighterPassive(enemy, true);
       return enemy;
     },
+    setFighterPassive: (enemy, on) => _townSetFighterPassive(enemy, on),
     removeFighter: (enemy) => {
       enemy._townGear?.dispose();
       enemy._townGear = null;

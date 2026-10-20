@@ -29,8 +29,9 @@
 // bail, a bribe, picking the lock (townLockpick.js — a jailbreak brings the guards back) or
 // sleeping it off. Bandits live at a camp far out of town (BANDIT_ROLES, CAMP_DIST), raid
 // fields and mug people at night; they leave the player be unless attacked — except at their
-// camp: a warning, a last warning, then (armed) a fight that only chases the player off their
-// ground (CAMP_CHASE_DIST) or (unarmed) a robbery. The sheriff pays bounties on them.
+// camp: a warning, then up close swords drawn (a standoff: they don't attack yet) and a
+// countdown, then (armed) a fight that only chases the player off their ground
+// (CAMP_CHASE_DIST) or (unarmed) a robbery. The sheriff pays bounties on them.
 //
 // Missions (townJobs.js): townsfolk give out jobs — a ❗ over whoever has one; talk to them to
 // take it, and back to them (❓) for the reward once it's done. The sheriff: bounties, guarding
@@ -58,7 +59,7 @@
 //   confiscate(), magicDamage { fire, ice }, getHealth() → { health, max }, heal(n)
 
 import * as THREE from 'three';
-import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
+import { createGLBCharacterInstance, glbCharacterConfig, isMiiCharacterUrl } from '../models/glbCharacterModel.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import { makeTextSprite, makeCampfire, updateCampfire, MARKET_STALL_MERCHANT_Z } from '../village/villageMode.js';
 import { createTownNav } from './townNav.js';
@@ -72,7 +73,7 @@ import {
   talkLine, giftLine, chatLines, shout, relationOf, fillLine,
   SHOUT_HURT, SHOUT_HELP, SHOUT_MURDER, SHOUT_THIEF, SHOUT_FIGHT, SHOUT_LAW, SHOUT_EAT_BUY,
   SHOUT_RALLY, SHOUT_VENDETTA, SHOUT_STAY_BACK, SHOUT_MUG, SHOUT_ARREST, SHOUT_BANDIT, SHOUT_THANKS, FOLLOW_LINES,
-  SHOUT_CAMP_WARN, SHOUT_CAMP_LAST, SHOUT_CAMP_ROB, SHOUT_CAMP_SPARE, SHOUT_CAMP_LEAVE,
+  SHOUT_CAMP_WARN, SHOUT_CAMP_DRAW_ARMED, SHOUT_CAMP_DRAW_UNARMED, SHOUT_CAMP_COUNT, SHOUT_CAMP_LAST, SHOUT_CAMP_ROB, SHOUT_CAMP_SPARE, SHOUT_CAMP_LEAVE,
 } from './townPeople.js';
 
 // ── Layout ──
@@ -170,10 +171,11 @@ const BRIBE_ODDS = 0.5;              // when no officer near likes the player
 const LOCK_SLIP_S = 10;              // s added to the sentence by a slipped lockpick
 const WAKE_HOUR = 7;                 // sleeping it off: out at this hour
 const CAMP_DIST = [80, 120];         // m from the middle of town to the bandit camp
-const CAMP_WARN_DIST = 22;           // m from the camp: the gang warns the player off…
-const CAMP_ATTACK_DIST = 12;         // …and inside this, after a last warning…
-const CAMP_GRACE_S = 4;              // …and this long, fights (armed) or robs them (unarmed)
-const CAMP_DEFENDERS = 3;            // bandits who fight at once
+const CAMP_WARN_DIST = 30;           // m from the camp: the gang warns the player off…
+const CAMP_ATTACK_DIST = 15;         // …inside this, draws swords (a standoff, no attacks yet)…
+const CAMP_GRACE_S = 30;             // …and after this long there, fights (armed) or robs them (unarmed)
+const CAMP_REMIND_S = 7;             // s between the countdown's reminders
+const CAMP_DEFENDERS = 3;            // bandits who draw / fight at once
 const CAMP_ROB = 12;                 // coins taken off an unarmed trespasser
 const CAMP_CHASE_DIST = 34;          // m from the camp: the gang gives up the chase
 const BANDIT_RETURN_S = [180, 300];  // s until a beaten bandit's place in the gang is filled
@@ -187,6 +189,7 @@ const JOB_REFRESH_S = 120;           // s between new jobs being handed out
 const ACT_DIST = 2.4;                // m — a job's 📦 / 💰 near its townsperson
 const KID_FOUND_DIST = 2.5;          // m
 const KID_HOME_DIST = 3;             // m from their door to count as home
+const KID_WITH_PLAYER_DIST = 10;     // m — and the player with them (walked home, not gone home alone)
 const RAID_HOUR = 22;                // a guarded field is raided at this hour
 
 const SAVE_EVERY_S = 20;
@@ -251,7 +254,7 @@ export function createTownMode(ctx) {
   let chainsDone = new Set();
   let jobsAt = 0;             // next time new jobs go out
   const markers = new Map();  // job id → 📍 / ❗ / ❓ sprite
-  const campWatch = { near: false, warnedAt: 0, closeSince: 0, robbed: false }; // the player at the bandit camp
+  const campWatch = { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false, tickAt: 0 }; // the player at the bandit camp
   let strongboxHeld = false;  // (chain: the sheriff's strongbox)
   let lastItems = null;       // the town gear, as it was when the player last left
 
@@ -264,6 +267,7 @@ export function createTownMode(ctx) {
   top.append(topPlace, topSep, topClock);
   const stars = el('div', 'town-stars hidden');
   const jailChip = el('div', 'town-jail ui-panel hidden');
+  const campChip = el('div', 'town-jail town-camp ui-panel hidden');
   const lobbyBtn = el('button', 'ui-btn ui-btn-secondary town-lobby', '⬅ Lobby');
   lobbyBtn.type = 'button';
   lobbyBtn.addEventListener('click', () => { if (active) ctx.onLobby(); });
@@ -282,7 +286,7 @@ export function createTownMode(ctx) {
     goodEls[g] = b;
     goodsEl.append(b);
   }
-  hud.append(top, stars, jailChip, lobbyBtn, feed, goodsEl, actsEl);
+  hud.append(top, stars, jailChip, campChip, lobbyBtn, feed, goodsEl, actsEl);
   document.body.append(hud, fade);
   const renderGoods = () => {
     for (const g of GOOD_IDS) goodEls[g].textContent = `${GOODS[g].emoji} ${goods[g]}`;
@@ -933,17 +937,19 @@ export function createTownMode(ctx) {
   };
 
   // ── Fighting (a townsperson swapped for an EnemyPlayer) ──
-  const promote = (n) => {
+  // (standoff: sword drawn, facing the player, not attacking until ctx.setFighterPassive(e, false))
+  const promote = (n, { standoff = false } = {}) => {
     if (n.fighter || !n.alive) return;
     releaseBody(n);
     n.inside = false;
     const e = ctx.spawnFighter({
       x: n.x, z: n.z, yaw: n.yaw, url: n.url, hearts: Math.max(1, n.hp),
       swingChance: n.def.law || n.def.outlaw ? 0.35 : 0.25,
-      gear: fighterGear(n), name: `${n.def.emoji} ${n.name}`,
+      gear: fighterGear(n), name: `${n.def.emoji} ${n.name}`, passive: standoff,
     });
     if (!e) return;
     n.fighter = e;
+    n.campStandoff = standoff;
     n.hostile = true;
     n.task = { type: 'fight', t: 0, phase: 'do' };
     n.fightSince = simT;
@@ -970,6 +976,8 @@ export function createTownMode(ctx) {
   };
   const onFighterHurt = (n, killed) => {
     n.lastHurtAt = simT;
+    // (a bandit hit in the standoff: the whole gang fights)
+    if (n.campStandoff) campFightAll();
     // (a follower's blow is theirs, not the player's — they only take on outlaws and townsfolk
     // already fighting the player)
     const byPlayer = !n.followerHit;
@@ -1345,60 +1353,119 @@ export function createTownMode(ctx) {
       && dist2(n.x, n.z, P.camp.x, P.camp.z) < CAMP_WARN_DIST);
   };
   const nearestOf = (list) => list.slice().sort((a, b) => distToPlayer(a) - distToPlayer(b))[0] ?? null;
+  const standoffGang = () => npcs.filter((n) => n.alive && n.fighter && n.campStandoff);
+  const sheatheAll = () => {
+    for (const n of standoffGang()) { n.campStandoff = false; demote(n); }
+  };
+  // The standoff's over: everyone drawn fights, and the rest at the camp join in
+  const campFightAll = () => {
+    const P = layout.places;
+    campWatch.closeT = 0;
+    campChip.classList.add('hidden');
+    const standing = standoffGang();
+    for (const n of standing) {
+      n.campStandoff = false;
+      n.campFight = true;
+      ctx.setFighterPassive(n.fighter, false);
+    }
+    const more = campGang().filter((n) => dist2(n.x, n.z, P.camp.x, P.camp.z) < CAMP_WARN_DIST)
+      .sort((a, b) => distToPlayer(a) - distToPlayer(b)).slice(0, Math.max(1, CAMP_DEFENDERS + 1 - standing.length));
+    for (const n of more) {
+      say(n, pickOf(SHOUT_BANDIT), { big: true });
+      n.campFight = true;
+      promote(n);
+    }
+    feedLine('⚔️ The bandits attack!');
+  };
   const updateCampWatch = () => {
     const P = layout.places;
     const p = playerPos();
     const d = dist2(p.x, p.z, P.camp.x, P.camp.z);
-    if (d > CAMP_WARN_DIST + 6) { campWatch.near = false; campWatch.closeSince = 0; campWatch.robbed = false; return; }
-    if (sequence || jail || ctx.isPlayerDead() || npcs.some((n) => n.fighter && n.campFight)) return;
+    const dt = Math.min(1, simT - (campWatch.tickAt || simT));
+    campWatch.tickAt = simT;
+    const hideChip = () => campChip.classList.add('hidden');
+    if (d > CAMP_WARN_DIST + 6) {
+      if (campWatch.drawn) sheatheAll();
+      Object.assign(campWatch, { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false });
+      hideChip();
+      return;
+    }
+    if (sequence || jail || ctx.isPlayerDead() || npcs.some((n) => n.fighter && n.campFight)) { hideChip(); return; }
     const gang = campGang();
-    if (!gang.length) return;
+    const standing = standoffGang();
+    if (!gang.length && !standing.length) { hideChip(); return; }
+    // (the one who talks: a bandit not holding a sword — a fighter has no speech bubble)
     const lookout = nearestOf(gang);
     // (a bubble, and the feed: the warning mustn't be missed)
-    const warn = (n, lines) => {
-      const line = pickOf(lines);
-      say(n, line, { big: true });
-      feedLine(`💀 ${firstName(n.name)}: “${line}”`);
+    const warn = (lines, vars = {}) => {
+      const line = fillLine(pickOf(lines), vars);
+      if (lookout) say(lookout, line, { big: true });
+      feedLine(`💀 ${lookout ? firstName(lookout.name) : 'Bandits'}: “${line}”`);
     };
     const face = () => {
       for (const n of gang) if (n.task?.type === 'camp') { n.task.face = { x: p.x, z: p.z }; n.task.to = { x: n.x, z: n.z }; n.path = null; }
     };
-    if (d > CAMP_WARN_DIST) return;
+    if (d > CAMP_WARN_DIST) { hideChip(); return; }
+    face();
     if (!campWatch.near) {
       campWatch.near = true;
-      campWatch.warnedAt = simT;
-      warn(lookout, SHOUT_CAMP_WARN);
-      face();
+      warn(SHOUT_CAMP_WARN);
     }
-    if (d > CAMP_ATTACK_DIST) { campWatch.closeSince = 0; return; }
-    if (!campWatch.closeSince) {
-      if (simT - campWatch.warnedAt < 2) return; // (a moment between the two warnings)
-      campWatch.closeSince = simT;
-      warn(lookout, SHOUT_CAMP_LAST);
-      face();
+    const armed = ctx.isPlayerArmed();
+    // Robbed already and still unarmed: they've had what they wanted
+    const threat = armed || !campWatch.robbed;
+    if (d > CAMP_ATTACK_DIST || !threat) {
+      // (backing off buys time back)
+      campWatch.closeT = Math.max(0, campWatch.closeT - dt);
+      if (campWatch.closeT > 0 && threat) showCampChip(armed);
+      else hideChip();
       return;
     }
-    if (simT - campWatch.closeSince < CAMP_GRACE_S) return;
-    if (ctx.isPlayerArmed()) {
-      campWatch.closeSince = 0;
-      for (const n of gang.sort((a, b) => distToPlayer(a) - distToPlayer(b)).slice(0, CAMP_DEFENDERS)) {
-        say(n, pickOf(SHOUT_BANDIT));
-        n.campFight = true;
-        promote(n);
+    // Up close: swords out (a standoff — no attacks yet) and what happens if they stay
+    if (!campWatch.drawn) {
+      campWatch.drawn = true;
+      campWatch.remindAt = simT + CAMP_REMIND_S;
+      const drawers = gang.filter((n) => n !== lookout).sort((a, b) => distToPlayer(a) - distToPlayer(b)).slice(0, CAMP_DEFENDERS);
+      for (const n of drawers) promote(n, { standoff: true });
+      warn(armed ? SHOUT_CAMP_DRAW_ARMED : SHOUT_CAMP_DRAW_UNARMED);
+      if (drawers.length) feedLine('🗡️ The bandits draw their swords.');
+    }
+    campWatch.closeT += dt;
+    const left = Math.max(0, Math.ceil(CAMP_GRACE_S - campWatch.closeT));
+    showCampChip(armed);
+    if (left > 0) {
+      if (simT >= campWatch.remindAt) {
+        campWatch.remindAt = simT + CAMP_REMIND_S;
+        if (left <= CAMP_REMIND_S) warn(SHOUT_CAMP_LAST);
+        else warn(SHOUT_CAMP_COUNT, { s: left });
       }
-    } else if (!campWatch.robbed) {
+      return;
+    }
+    if (armed) {
+      campFightAll();
+    } else {
       campWatch.robbed = true;
+      campWatch.closeT = 0;
+      hideChip();
       const took = Math.min(CAMP_ROB, ctx.getCoins());
       if (took > 0) {
         ctx.addCoins(-took);
-        lookout.money += took;
+        (lookout ?? standing[0]).money += took;
         ctx.playSfx('coin');
-        warn(lookout, SHOUT_CAMP_ROB);
+        warn(SHOUT_CAMP_ROB);
         feedLine(`💰 The bandits took ${took} 🪙 off you.`);
       } else {
-        warn(lookout, SHOUT_CAMP_SPARE);
+        warn(SHOUT_CAMP_SPARE);
       }
     }
+  };
+  // The countdown up top: what they'll do and how long the player has
+  const showCampChip = (armed) => {
+    const left = Math.max(0, Math.ceil(CAMP_GRACE_S - campWatch.closeT));
+    campChip.textContent = armed
+      ? `⚔️ Bandit camp — leave or they fight · ${left} s`
+      : `💰 Bandit camp — leave or they rob you · ${left} s`;
+    campChip.classList.remove('hidden');
   };
   // A bandit's day: loiter at the camp; at night raid a field or rob someone in town
   const decideBandit = (n, h) => {
@@ -1473,8 +1540,9 @@ export function createTownMode(ctx) {
       case 'follow': {
         const p = playerPos();
         if (law.stars >= 2 && !n.escort) { dismiss(n, FOLLOW_LINES.wanted); n.attitude -= 0.2; return true; }
-        // Help: the nearest hostile fighter (not the law) near the player (not a kid being walked home)
-        const foe = n.def.unhurt ? null : npcs.filter((o) => o.fighter && !o.def.law && !o.fighter.isDead
+        // Help: the nearest hostile fighter (not the law, nor a bandit only standing its ground) near the
+        // player (not a kid being walked home)
+        const foe = n.def.unhurt ? null : npcs.filter((o) => o.fighter && !o.def.law && !o.campStandoff && !o.fighter.isDead
           && dist2(o.x, o.z, p.x, p.z) < FOLLOW_HELP_DIST)
           .sort((a, b) => dist2(a.x, a.z, n.x, n.z) - dist2(b.x, b.z, n.x, n.z))[0];
         if (foe) {
@@ -2139,6 +2207,8 @@ export function createTownMode(ctx) {
       const d = distToPlayer(n);
       if (n.def.law) {
         if (d > DISENGAGE_DIST) demote(n, () => respond(n));
+      } else if (n.def.outlaw && n.campStandoff) {
+        // (swords drawn at the camp: the camp watch decides — updateCampWatch)
       } else if (n.def.outlaw) {
         // (bandits give up the chase and go back to the camp — defending it, as soon as the
         // player is off their ground)
@@ -2745,13 +2815,22 @@ export function createTownMode(ctx) {
           kid.following = true;
           setTask(kid, { type: 'follow', dur: Infinity });
           say(kid, 'You found me! Take me home?', { big: true });
-        } else if (d.found && dist2(kid.x, kid.z, kid.home.x, kid.home.z) < KID_HOME_DIST) {
+        } else if (d.found && dist2(kid.x, kid.z, kid.home.x, kid.home.z) < KID_HOME_DIST
+          && distToPlayer(kid) < KID_WITH_PLAYER_DIST) {
+          kid.inside = false;
           kid.escort = false;
           kid.following = false;
           kid.task = null;
           for (const f of family(kid)) f.attitude = Math.min(1, f.attitude + 0.5);
           say(kid, 'Home! Thank you!', { big: true });
           markDone(j, `🏠 ${firstName(kid.name)} is home`);
+        } else if (d.found && !kid.following && kid.fear <= 0 && kid.jailedUntil <= simT) {
+          // (walked home with the player, not on their own: whatever pulled them away — a scare,
+          // the evening fire, bedtime — they come back to the player)
+          if (kid.inside) { kid.inside = false; kid.x = kid.home.x; kid.z = kid.home.z; }
+          kid.escort = true;
+          kid.following = true;
+          setTask(kid, { type: 'follow', dur: Infinity });
         }
       } else if (j.kind === 'fetchStrongbox' && strongboxHeld) {
         completeJob(j);
@@ -2833,6 +2912,7 @@ export function createTownMode(ctx) {
   // (chain: the sheriff's strongbox — the gang wakes up when it's taken)
   const takeStrongbox = () => {
     strongboxHeld = true;
+    if (standoffGang().length) campFightAll();
     layout.props.strongbox.visible = false;
     feedLine('📦 You have the strongbox!');
     const P = layout.places;
@@ -3123,7 +3203,8 @@ export function createTownMode(ctx) {
       clock.minutes = state.minutes ?? START_MINUTES;
       for (const p of state.people) {
         if (!ROLES[p.role]) continue;
-        npcs.push(makeNpc(p));
+        // (Miis are Classic's only: an old save's Mii townsperson gets another body)
+        npcs.push(makeNpc(isMiiCharacterUrl(p.url) ? { ...p, url: characterForRole(p.role) } : p));
         nextId = Math.max(nextId, (p.id ?? 0) + 1);
       }
       for (const role of state.pending ?? []) arrivals.push({ role, at: simT + rand(...NEWCOMER_DELAY_S) });
@@ -3215,6 +3296,8 @@ export function createTownMode(ctx) {
     npcs = [];
     if (jail) { jail = null; ctx.setPositionConstraint(null); }
     jailChip.classList.add('hidden');
+    campChip.classList.add('hidden');
+    Object.assign(campWatch, { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false, tickAt: 0 });
     law.stars = 0;
     law.peak = 0;
     talking = null;

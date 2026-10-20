@@ -40,7 +40,6 @@ export const FOUNDING_ROLES = [
 const CIVILIAN_URLS = [
   glbCharacterConfig.villagerUrl,
   glbCharacterConfig.pumpkinUrl,
-  glbCharacterConfig.mii1Url,
   glbCharacterConfig.treeCreatureUrl,
   glbCharacterConfig.frogManUrl,
   glbCharacterConfig.wizardUrl,
@@ -165,8 +164,12 @@ export const SHOUT_ARREST = ['You\'re under arrest!', 'Come quietly!', 'That\'s 
 export const SHOUT_BANDIT = ['You were warned!', 'Get \'em!', 'Cut them down!'];
 // The gang at its camp: a warning, a last warning, robbing someone with no weapon, and seeing
 // them off
-export const SHOUT_CAMP_WARN = ['Oi! This is our camp. Get lost.', 'Turn around, stranger.', 'Nothing here for you. Keep walking.'];
-export const SHOUT_CAMP_LAST = ['One more step and we cut you down!', 'Last warning!', 'Are you deaf? Get out of here!'];
+export const SHOUT_CAMP_WARN = ['Oi! This is our camp. Turn around.', 'Bandit ground, stranger. Keep walking.', 'Nothing here for you. Go back the way you came.'];
+// (swords out, up close: what happens if they stay — armed: a fight, unarmed: a robbery)
+export const SHOUT_CAMP_DRAW_ARMED = ['Swords out, lads! You walk into our camp with a blade, stranger? Leave now or we fight.', 'This is our camp. Walk away — or we cut you down.'];
+export const SHOUT_CAMP_DRAW_UNARMED = ['This is our camp. Stay and we empty your pockets. Walk away!', 'No blade? Then leave now — or leave lighter.'];
+export const SHOUT_CAMP_COUNT = ['{s} seconds. Walk away.', 'Still here? {s} seconds.', 'I\'m counting… {s}.'];
+export const SHOUT_CAMP_LAST = ['Last warning!', 'Are you deaf? Get out of here!', 'One more moment and that\'s it!'];
 export const SHOUT_CAMP_ROB = ['No blade? Then your purse. Now get lost!', 'Empty hands, full pockets. We\'ll take those.'];
 export const SHOUT_CAMP_SPARE = ['Not even worth robbing. Go on, get out.', 'Nothing on you? Then get lost.'];
 export const SHOUT_CAMP_LEAVE = ['And stay out!', 'Don\'t come back!', 'Run, then!'];

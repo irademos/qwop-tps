@@ -4,8 +4,8 @@
 // attacks and a box plays the conversation out a line at a time, like the villager's in the
 // village (the same .village-talk look). The first ones only growl; stage by stage they find
 // their words and tell the player what Pemberton really is — each "monster" is someone he
-// took something from: the frog man's fen, the pumpkin's patch, the gemhorn's gems, the Mii's
-// boat, the tree creature's wood, the wizard's herb gardens, the antler smith's forge (see
+// took something from: the frog man's fen, the pumpkin's patch, the gemhorn's gems, the frog
+// fisher's boat, the tree creature's wood, the wizard's herb gardens, the antler smith's forge (see
 // VILLAGER_QUESTS in src/village/villageMode.js, Pemberton's side of the story). The stage before Pemberton's guards (SPARED_STAGE) has convinced the player:
 // that one is spared — no fight, it joins them. After the talk the boss grows a little,
 // glows red and fights with a health bar across the top of the screen (createStageBoss in
@@ -62,16 +62,6 @@ export const CHARACTER_STORIES = {
     ],
     tell: [
       ['them', 'I’m Flint. Pemberton pried the gems out of my horn and sold them.'],
-    ],
-  },
-  mii1: {
-    name: 'Pip',
-    growl: [
-      ['action', 'A torn fishing net is still tangled round its arm.'],
-      ['them', 'My… BOAT… grrr…'],
-    ],
-    tell: [
-      ['them', 'I’m Pip. Pemberton took my fishing boat, and the whole harbour with it.'],
     ],
   },
   tree: {
@@ -137,7 +127,7 @@ const STORY_BOSSES = [
       ['them', 'GRRAAH!'],
     ],
     fight: '⚔️ Fight' },
-  { char: 'mii1', // Saltmere docks: the boat
+  { char: 'frog', // Saltmere docks: the boat (a frog fisher — not the fen's Fenn)
     lines: [
       ['action', 'It stands on the pier, a torn fishing net still round its arm.'],
       ['them', 'My… boat… you… took… my… BOAT…'],
@@ -460,7 +450,7 @@ export const ROAM_QUESTS = [
       ['them', 'Finders keepers.'],
     ],
     done: 'Flint’s gems are home!' },
-  { stage: 4, char: 'mii1', name: 'Pip', title: 'Take back the boat',
+  { stage: 4, char: 'frog', name: 'Pip', title: 'Take back the boat',
     lines: [
       ['them', 'Pemberton’s painted his name on my boat, {name}. My boat! It’s moored past Saltmere with his men all along the shore.'],
       ['you', 'Let’s go and scrape it off.'],
