@@ -1817,7 +1817,14 @@ body.settings-open #inventory-button {
   order: 1;
 }
 
+/* Town: its own row under Showdown */
+.arcade-mode-select [data-arcade-town] {
+  grid-column: 1 / -1;
+  order: -1;
+}
+
 .arcade-mode-select [data-arcade-classic],
+.arcade-mode-select [data-arcade-town],
 .arcade-mode-select [data-arcade-multiplayer] {
   background: var(--surface-raised);
   border-color: var(--border-strong);
@@ -1826,6 +1833,7 @@ body.settings-open #inventory-button {
 }
 
 .arcade-mode-select [data-arcade-classic]:hover,
+.arcade-mode-select [data-arcade-town]:hover,
 .arcade-mode-select [data-arcade-multiplayer]:hover {
   background: var(--surface-hover);
   box-shadow: none;
@@ -4125,3 +4133,137 @@ body.mobile-block-bar .classic-combo {
     animation: none;
   }
 }
+
+/* ── Town mode (src/town/townMode.js) ── */
+.town-hud {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  pointer-events: none;   /* taps go through to the 3D view; the buttons opt back in */
+  font-family: var(--font-ui);
+  color: var(--text);
+}
+.town-hud.hidden,
+.town-hud .hidden { display: none !important; }
+.town-hud button { pointer-events: auto; }
+.town-top {
+  position: absolute;
+  top: calc(14px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--surface-hud);
+  backdrop-filter: none;
+}
+.town-top-sep { color: var(--text-dim); }
+.town-stars {
+  position: absolute;
+  top: calc(54px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-display);
+  font-size: 30px;
+  letter-spacing: 4px;
+  color: var(--accent-hi);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+}
+/* Unseen: the stars blink while the guards search */
+.town-stars:not(.town-stars-hunted) { animation: town-stars-blink 0.9s steps(2, start) infinite; }
+.town-stars-hunted { color: var(--danger); }
+@keyframes town-stars-blink { to { opacity: 0.35; } }
+.town-jail {
+  position: absolute;
+  top: calc(96px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: var(--surface-hud);
+  backdrop-filter: none;
+}
+.town-lobby {
+  position: absolute;
+  top: calc(10px + env(safe-area-inset-top, 0px));
+  left: calc(12px + env(safe-area-inset-left, 0px));
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 700;
+  background: var(--surface-strong);
+  border-color: var(--border-strong);
+}
+.town-hud .town-lobby:hover,
+.town-hud .town-lobby:active { background: var(--surface-strong); transform: none; }
+/* What's happening in town: newest on top, under ⬅ Lobby and the health bar */
+.town-feed {
+  position: absolute;
+  left: calc(12px + env(safe-area-inset-left, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(360px, calc(100% - 24px));
+}
+.town-feed-line {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  background: var(--surface-hud);
+  border: 1px solid var(--border);
+  transition: opacity 0.8s ease;
+  animation: village-act-in 0.2s var(--ease);
+}
+.town-feed-line.town-feed-out { opacity: 0; }
+/* Talk / give / give up / bail: bottom centre, between the joystick and the jump button */
+.town-acts {
+  position: absolute;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+body.mobile-block-bar .town-acts { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+.town-act {
+  min-height: 48px;
+  padding: 0 20px;
+  font-size: 16px;
+  font-weight: 800;
+  animation: village-act-in 0.2s var(--ease);
+}
+@media (max-width: 520px) {
+  .town-top { left: calc(50% + 34px); gap: 6px; padding: 6px 10px; font-size: 13px; }
+  .town-act { min-height: 44px; padding: 0 12px; font-size: 14px; }
+}
+/* Busted / knocked out: black between the fight and the cell */
+.town-fade {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+  background: #05060a;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+}
+.town-fade.town-fade-on { opacity: 1; pointer-events: auto; }
+/* ⬅ Lobby sits top left: the name / level badge and XP bar give way, health moves under it */
+body.town-mode #player-info,
+body.town-mode #xp-bar,
+body.town-mode #shield-health-display { display: none !important; }
+body.town-mode #health-display { top: calc(64px + env(safe-area-inset-top, 0px)); }
+body.town-mode .town-feed { top: calc(104px + env(safe-area-inset-top, 0px)); }
+/* Sword only in town: no bomb / bubble / other weapons, no mana */
+body.town-mode #ps-bubble-btn,
+body.town-mode #ps-bomb-btn,
+body.town-mode .ps-weapon-btn,
+body.town-mode #mana-bar { display: none !important; }

@@ -324,7 +324,7 @@ function loadProp(url, stylize = {}) {
 }
 
 // Rounded-rect text / emoji sprite. `height` = world height (m).
-function makeTextSprite(text, { height = 0.24, font = 600, size = 64, bg = 'rgba(14, 17, 27, 0.78)', border = 'rgba(244, 196, 84, 0.85)', color = '#fff', pad = 28 } = {}) {
+export function makeTextSprite(text, { height = 0.24, font = 600, size = 64, bg = 'rgba(14, 17, 27, 0.78)', border = 'rgba(244, 196, 84, 0.85)', color = '#fff', pad = 28 } = {}) {
   const canvas = document.createElement('canvas');
   const g = canvas.getContext('2d');
   const fontCss = `${font} ${size}px Outfit, Inter, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
@@ -373,6 +373,17 @@ function alignStallModel(model) {
   const group = new THREE.Group();
   group.add(model);
   return group;
+}
+
+// Town mode's market (src/town/townMode.js): the village's stall, front = +Z; the merchant
+// stands MARKET_STALL_MERCHANT_Z behind it
+export const MARKET_STALL_MERCHANT_Z = MERCHANT_OFFSET.z * VILLAGE_PROP_SCALE;
+export async function loadMarketStall() {
+  const gltf = await loadProp(MARKET_STALL_MODEL);
+  const stall = alignStallModel(markShared(gltf.scene.clone(true)));
+  stall.scale.setScalar(MARKET_STALL_SIZE * VILLAGE_PROP_SCALE);
+  stall.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return stall;
 }
 
 function markShared(root) {
@@ -492,7 +503,7 @@ function makeGlowTexture() {
 // ground glow (no light: adding one would recompile every material). Animated by updateCampfire.
 const FLAME_COUNT = 12;
 const EMBER_COUNT = 6;
-function makeCampfire() {
+export function makeCampfire() {
   const g = new THREE.Group();
   const logMat = new THREE.MeshStandardMaterial({ color: 0x6b4423, emissive: 0x3a1404, emissiveIntensity: 0.6, roughness: 1, metalness: 0 });
   const logGeo = new THREE.BoxGeometry(0.5, 0.075, 0.075);
@@ -545,7 +556,7 @@ function makeCampfire() {
 }
 const _flameHot = new THREE.Color(1, 0.85, 0.45);
 const _flameCool = new THREE.Color(1, 0.28, 0.05);
-function updateCampfire(fire, t) {
+export function updateCampfire(fire, t) {
   for (const f of fire.flames) {
     const age = (t * f.speed + f.phase) % 1;
     const sp = f.sprite;
