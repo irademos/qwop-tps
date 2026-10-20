@@ -1,13 +1,13 @@
-// Town mode: the market stall's panel — buy / sell goods at the market's prices, buy gear.
-// Pure DOM; townMode.js builds the model and handles the clicks.
+// Town mode: the market's sell panel — sell goods to the merchant at the market's prices.
+// (Buying is done on the stalls' counters — townStalls.js.) Pure DOM; townMode.js builds the
+// model and handles the clicks.
 //
 // open(model) / render(model) / close() / isOpen()
 // model: {
 //   title, coins, cash (the merchant's money), note,
-//   goods: [{ id, emoji, label, stock, have, buy, sell, canBuy, canSell }],
-//   gear:  [{ id, emoji, label, price, desc, owned, canBuy, note }],
+//   goods: [{ id, emoji, label, stock, have, sell, canSell }],
 // }
-// handlers: onBuyGood(id), onSellGood(id), onBuyGear(id), onClose()
+// handlers: onSellGood(id), onClose()
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -40,7 +40,7 @@ export function createMarketPanel(parent, handlers) {
     head.append(close);
     const purse = el('div', 'town-market-purse', `🪙 ${model.coins} · the merchant has 🪙 ${model.cash}`);
 
-    const goodsTitle = el('div', 'town-market-subtitle', 'Goods');
+    const goodsTitle = el('div', 'town-market-subtitle', 'Your goods');
     const goods = el('div', 'town-market-list');
     for (const g of model.goods) {
       const row = el('div', 'town-market-row');
@@ -49,30 +49,13 @@ export function createMarketPanel(parent, handlers) {
       const info = el('div', 'town-market-info', `${g.stock} in stock · you have ${g.have}`);
       const left = el('div', 'town-market-left');
       left.append(name, info);
-      row.append(
-        left,
-        button(`Buy ${g.buy}🪙`, true, g.canBuy, () => handlers.onBuyGood(g.id)),
-        button(`Sell ${g.sell}🪙`, false, g.canSell, () => handlers.onSellGood(g.id)),
-      );
+      row.append(left, button(`Sell ${g.sell}🪙`, true, g.canSell, () => handlers.onSellGood(g.id)));
       goods.append(row);
-    }
-
-    const gearTitle = el('div', 'town-market-subtitle', 'Gear');
-    const gear = el('div', 'town-market-list');
-    for (const item of model.gear) {
-      const row = el('div', 'town-market-row');
-      const name = el('div', 'town-market-name');
-      name.append(el('span', 'town-market-emoji', item.emoji), el('span', null, item.label));
-      const left = el('div', 'town-market-left');
-      left.append(name);
-      if (item.note || item.desc) left.append(el('div', 'town-market-info', item.note || item.desc));
-      row.append(left, button(item.owned ? 'Owned' : `${item.price}🪙`, true, item.canBuy, () => handlers.onBuyGear(item.id)));
-      gear.append(row);
     }
 
     const parts = [head, purse];
     if (model.note) parts.push(el('div', 'town-market-note', model.note));
-    parts.push(goodsTitle, goods, gearTitle, gear);
+    parts.push(goodsTitle, goods);
     panel.replaceChildren(...parts);
   };
 

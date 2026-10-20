@@ -8147,7 +8147,10 @@ async function initCore(runtimeContext) {
   town = createTownMode({
     scene,
     camera,
+    domElement: renderer.domElement,
     getPlayerPosition: () => playerModel.position,
+    // (the market's shop camera frames a counter from where the player stands)
+    setPlayerHidden: (hidden) => { playerModel.visible = !hidden; },
     getPlayerName: () => playerName || 'friend',
     isPlayerDead: () => playerDead,
     getGroundY: (x, z) => getTerrainHeight(x, z),

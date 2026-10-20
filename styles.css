@@ -4293,7 +4293,7 @@ body.town-mode .town-feed { top: calc(128px + env(safe-area-inset-top, 0px)); }
 }
 .town-good:disabled { cursor: default; color: var(--text); opacity: 1; }
 .town-good:not(:disabled):hover { background: var(--surface-hover); }
-/* The market stall: goods to buy / sell at the going price, gear to buy */
+/* The market's sell panel: goods sold to the merchant at the going price */
 .town-market {
   position: absolute;
   left: 50%;
@@ -4329,4 +4329,9 @@ body.town-mode .town-feed { top: calc(128px + env(safe-area-inset-top, 0px)); }
 /* (the panel covers the bottom of the screen: the touch controls step aside meanwhile) */
 body.town-market-open #joystick-container,
 body.town-market-open #jump-button,
-body.town-market-open #action-buttons { visibility: hidden; }
+body.town-market-open #action-buttons,
+body.town-shop-open #joystick-container,
+body.town-shop-open #jump-button,
+body.town-shop-open #action-buttons { visibility: hidden; }
+/* At a market stall's counter (townStalls.js): the village's buy card over the picked thing */
+.town-hud .town-card { z-index: 1; }

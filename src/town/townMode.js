@@ -9,17 +9,20 @@
 // Economy (townEconomy.js): woodcutters, farmers and fishers bring wood, veg and fish to the
 // market and are paid by the merchant; everyone buys their food (and firewood) there; prices
 // follow the stock. The player gathers too — chops trees with the sword, fishes from the shore,
-// picks veg (stealing, if anyone sees) — and trades at the stall (townMarketPanel.js), where the
-// gear is sold as well: in Town the player owns only what they bought here, starting with
-// nothing at all (ctx.startLoadout — the real inventory waits outside), and the guards take it
-// all on an arrest.
+// picks veg (stealing, if anyone sees) — and trades at the market: two stalls side by side
+// (townStalls.js), shopped like the Showdown village's — the goods stall (wood / fish / veg,
+// the merchant behind it) and the weapon stall (the gear + a mystery chest); selling goods is
+// the market panel (townMarketPanel.js). In Town the player owns only what they bought here,
+// starting with nothing at all (ctx.startLoadout — the real inventory waits outside), and the
+// guards take it all on an arrest.
 //
 // Bodies are a level of detail: only the nearest TOWN_MAX_BODIES townsfolk get a GLB character
 // (pooled per model); the rest walk the same paths as data. Someone fighting the player is
 // swapped for an EnemyPlayer (ctx.spawnFighter — the stage fighting code) and back.
 //
 // Game access goes through `ctx` (built in bootstrapGameApp.js):
-//   scene, camera, getPlayerPosition() → Vector3, getPlayerName(), isPlayerDead()
+//   scene, camera, domElement, getPlayerPosition() → Vector3, setPlayerHidden(hidden),
+//   getPlayerName(), isPlayerDead()
 //   getGroundY(x, z), isOverWater(x, z), pathAt(x, z) → 'road' | 'trail' | null
 //   getMapObjects(bounds) → [{ file, x, z, radius }]
 //   teleport(x, z, yaw), revivePlayer(x, z, yaw), setPositionConstraint(fn | null)
@@ -33,10 +36,11 @@
 import * as THREE from 'three';
 import { createGLBCharacterInstance, glbCharacterConfig } from '../models/glbCharacterModel.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
-import { makeTextSprite, makeCampfire, updateCampfire, loadMarketStall, MARKET_STALL_MERCHANT_Z } from '../village/villageMode.js';
+import { makeTextSprite, makeCampfire, updateCampfire, MARKET_STALL_MERCHANT_Z } from '../village/villageMode.js';
 import { createTownNav } from './townNav.js';
 import { GOODS, GOOD_IDS, FOOD_IDS, SHOP_GEAR, createMarket } from './townEconomy.js';
 import { createMarketPanel } from './townMarketPanel.js';
+import { createTownStalls } from './townStalls.js';
 import {
   TOWN_NAME, ROLES, FOUNDING_ROLES, characterForRole, randomName, firstName,
   talkLine, giftLine, chatLines, shout,
@@ -96,7 +100,9 @@ const PRODUCE = { woodcutter: ['wood', 2, 3], farmer: ['crops', 2, 4], fisher: [
 const MERCHANT_START_CASH = 60;      // coins the merchant starts out with
 const FIREWOOD_CHANCE = 0.35;        // a townsperson buying food takes some firewood home too
 const MARKET_HOURS = [7, 20];
-const TRADE_DIST = 3.4;              // m from the stall for 🛒 Trade
+const TRADE_DIST = 3.4;              // m from a stall for its buttons (🧺 Goods / 💰 Sell, ⚔️ Weapons)
+const STALL_GAP = 2.2;               // m between the goods stall and the weapon stall
+const CHEST_PRICE = 30;              // the weapon stall's mystery chest
 const CHOP_HITS = 3;                 // sword hits on a tree per 🪵
 const TREE_WOOD = 3;                 // 🪵 a tree gives before it needs to grow back…
 const TREE_REGROW_S = 40;            // …one per this many seconds
@@ -200,9 +206,7 @@ export function createTownMode(ctx) {
     for (const g of GOOD_IDS) goodEls[g].textContent = `${GOODS[g].emoji} ${goods[g]}`;
   };
   const marketPanel = createMarketPanel(hud, {
-    onBuyGood: (g) => buyGood(g),
     onSellGood: (g) => sellGood(g),
-    onBuyGear: (id) => buyGear(id),
     onClose: () => closeMarket(),
   });
 
@@ -330,6 +334,15 @@ export function createTownMode(ctx) {
     const stallYaw = Math.atan2(fire.x - market.x, fire.z - market.z);
     const fwd = { x: Math.sin(stallYaw), z: Math.cos(stallYaw) };
     const merchantSpot = { x: market.x + fwd.x * MARKET_STALL_MERCHANT_Z, z: market.z + fwd.z * MARKET_STALL_MERCHANT_Z };
+    // The weapon stall stands beside the goods stall (the side with more room), its chest
+    // on the far side of it
+    const stallSide = { x: fwd.z, z: -fwd.x }; // (the customer's right)
+    const gearRoom = (sign) => {
+      const i = nav.indexAt(market.x + stallSide.x * sign * (STALL_GAP + 0.8), market.z + stallSide.z * sign * (STALL_GAP + 0.8));
+      return i >= 0 && nav.walkableIndex(i) ? nav.clearanceAt(i) : -1;
+    };
+    const gearSign = gearRoom(-1) > gearRoom(1) ? -1 : 1;
+    const gearStall = { x: market.x + stallSide.x * gearSign * STALL_GAP, z: market.z + stallSide.z * gearSign * STALL_GAP };
     const customerSpot = { x: market.x + fwd.x * 1.4, z: market.z + fwd.z * 1.4 };
     let roadDir = null;
     {
@@ -344,6 +357,8 @@ export function createTownMode(ctx) {
     const officeSpot = { x: jailPos.x + jailFwd.x * 2.2 + jailFwd.z * 1.2, z: jailPos.z + jailFwd.z * 2.2 - jailFwd.x * 1.2 };
 
     nav.block(market.x + fwd.x * 0.2, market.z + fwd.z * 0.2, 0.9);
+    nav.block(gearStall.x + fwd.x * 0.2, gearStall.z + fwd.z * 0.2, 0.9);
+    nav.block(gearStall.x + stallSide.x * gearSign * 1.45, gearStall.z + stallSide.z * gearSign * 1.45, 0.45);
     nav.block(fire.x, fire.z, 0.9);
     nav.block(jailPos.x, jailPos.z, 1.7);
     nav.refresh();
@@ -401,7 +416,7 @@ export function createTownMode(ctx) {
     const entrance = entranceCell >= 0 ? cellPos(entranceCell) : { ...NAV_START };
 
     const places = {
-      center: C, market, merchantSpot, customerSpot, stallYaw, fire, jail: jailPos, jailYaw, officeSpot,
+      center: C, market, gearStall, gearSign, merchantSpot, customerSpot, stallYaw, fire, jail: jailPos, jailYaw, officeSpot,
       homes, treeSpots, fields, shore, patrol, entrance,
       // the player arrives between the market and the fire
       spawn: { x: (market.x + fire.x) / 2 + fwd.z * 2.2, z: (market.z + fire.z) / 2 - fwd.x * 2.2 },
@@ -411,22 +426,20 @@ export function createTownMode(ctx) {
     return { nav, places, trees: choppable, props: buildProps(places) };
   };
 
-  // ── Props: market stall, campfire, jail cell, fields ──
+  // ── Props: market stalls, campfire, jail cell, fields ──
   const groundAt = (x, z, fallback = 0) => {
     const y = ctx.getGroundY(x, z);
     return Number.isFinite(y) ? y : fallback;
   };
   const buildProps = (places) => {
     const group = new THREE.Group();
-    // Market stall (async GLB)
-    const stallRoot = new THREE.Group();
-    stallRoot.position.set(places.market.x, groundAt(places.market.x, places.market.z) - 0.005, places.market.z);
-    stallRoot.rotation.y = places.stallYaw;
-    group.add(stallRoot);
-    loadMarketStall().then((stall) => stallRoot.add(stall)).catch((e) => console.warn('[Town] stall failed to load:', e));
-    const marketSign = makeTextSprite('🧺 Market', { height: 0.3 });
-    marketSign.position.set(0, 2.2, 0);
-    stallRoot.add(marketSign);
+    // Market stalls (townStalls.js; async GLBs)
+    for (const [key, at, label] of [['goods', places.market, '🧺 Goods'], ['gear', places.gearStall, '⚔️ Weapons']]) {
+      stalls.build(group, {
+        key, label, x: at.x, y: groundAt(at.x, at.z) - 0.005, z: at.z, yaw: places.stallYaw,
+        chestSign: places.gearSign, keeper: key === 'gear', groundAt: (x, z) => groundAt(x, z),
+      });
+    }
     // Campfire
     const fire = makeCampfire();
     fire.group.position.set(places.fire.x, groundAt(places.fire.x, places.fire.z), places.fire.z);
@@ -738,8 +751,12 @@ export function createTownMode(ctx) {
     if (!n.dying) b.character.setMoving(n.moving);
     b.character.animate(dt);
     b.character.stepFluff(dt);
-    // (not right in front of the camera, where they'd fill the screen)
-    const nearCamera = ctx.camera.position.distanceTo(b.container.position) < CAMERA_CLEAR_DIST;
+    // (not right in front of the camera, where they'd fill the screen; at a market counter
+    // nobody stands between the shop camera and the counter)
+    const shop = stalls.view();
+    const inFront = !!shop && shop.camera.distanceTo(b.container.position) < shop.camera.distanceTo(shop.stall) - 0.3;
+    const nearCamera = inFront || ctx.camera.position.distanceTo(b.container.position) < CAMERA_CLEAR_DIST;
+    b.container.visible = !inFront;
     b.label.visible = !n.dying && !nearCamera && distToPlayer(n) < LABEL_DIST;
     if (n.bubble && simT > n.bubble.until) clearBubble(n);
     if (n.bubble) n.bubble.sprite.visible = !nearCamera;
@@ -1239,12 +1256,27 @@ export function createTownMode(ctx) {
     }
   };
 
-  // The stall's panel
-  const nearStall = () => {
+  // ── The market: the goods stall + the weapon stall (townStalls.js), the sell panel ──
+  const stallPos = (key) => (key === 'gear' ? layout.places.gearStall : layout.places.market);
+  const nearStallKey = (key) => {
     const p = playerPos();
-    const P = layout.places;
-    return dist2(p.x, p.z, P.market.x, P.market.z) < TRADE_DIST;
+    const at = stallPos(key);
+    return dist2(p.x, p.z, at.x, at.z) < TRADE_DIST;
   };
+  // The stall the player is at (the nearer one), or null
+  const nearestStall = () => {
+    const p = playerPos();
+    const d = (key) => dist2(p.x, p.z, stallPos(key).x, stallPos(key).z);
+    const key = d('gear') < d('goods') ? 'gear' : 'goods';
+    return d(key) < TRADE_DIST ? key : null;
+  };
+  const nearStall = () => nearStallKey('goods');
+  // The weapon stall keeps the market's hours (its keeper isn't one of the townsfolk)
+  const gearOpen = () => inHours(hour(), MARKET_HOURS);
+  const stallOpen = (key) => (key === 'gear' ? gearOpen() : marketOpen());
+  const calmNow = () => !npcs.some((n) => n.fighter && distToPlayer(n) < 8);
+  const canShop = (key) => active && ready && !!key && !sequence && !jail && !fishing && !ctx.isPlayerDead()
+    && !marketPanel.isOpen() && calmNow() && stallOpen(key);
   const gearOwned = (id, items) => {
     if (!items) return false;
     if (id === 'sword') return items.sword;
@@ -1254,48 +1286,102 @@ export function createTownMode(ctx) {
     if (id === 'mana') return items.mana >= ctx.maxMana;
     return false;
   };
+  const gearHave = (id, items) => {
+    if (!items) return '';
+    if (id === 'sword' || id === 'gun' || id === 'wand') return items[id] ? 'You have one' : '';
+    if (id === 'shield') return items.shield > 0 ? `Shield ${items.shield} / ${ctx.shieldMax}` : '';
+    if (id === 'ammo') return items.gun ? `You have ${items.ammo}` : '';
+    if (id === 'bomb') return `You have ${items.bombs}`;
+    if (id === 'bubble') return `You have ${items.bubbles}`;
+    if (id === 'mana') return items.wand ? `Mana ${items.mana} / ${ctx.maxMana}` : '';
+    return '';
+  };
+  // The buy card's contents for a thing on a counter
+  const stallItemState = (key, id) => {
+    if (key === 'goods') {
+      const g = GOODS[id];
+      const merchant = workingMerchant();
+      return {
+        name: `${g.emoji} ${g.label}`,
+        desc: `${market.stock[id]} in stock${g.food ? ` · eat it for +${g.heal} ❤️` : ''}`,
+        owned: `You have ${goods[id]}`,
+        price: market.price(id),
+        blocked: !merchant ? 'The merchant isn’t here' : market.stock[id] <= 0 ? 'Sold out' : null,
+      };
+    }
+    if (id === 'chest') {
+      return {
+        name: '🎁 Mystery Chest', desc: 'A random prize — coins, bombs, a shield, goods… maybe even a gun!',
+        price: CHEST_PRICE, verb: 'Open', blocked: gearOpen() ? null : 'Closed',
+      };
+    }
+    const item = SHOP_GEAR.find((x) => x.id === id);
+    const items = ctx.getItems();
+    const missing = item.needs && !items?.[item.needs];
+    return {
+      name: `${item.emoji} ${item.label}`,
+      desc: item.desc || '',
+      owned: gearHave(id, items),
+      price: item.price,
+      blocked: !gearOpen() ? 'Closed'
+        : gearOwned(id, items) ? (id === 'mana' ? 'Mana is full' : id === 'shield' ? 'Shield is full' : 'Owned')
+        : missing ? `Needs a ${SHOP_GEAR.find((x) => x.id === item.needs)?.label}` : null,
+    };
+  };
+  const stalls = createTownStalls({
+    camera: ctx.camera,
+    domElement: ctx.domElement,
+    parent: hud,
+    getCoins: () => ctx.getCoins(),
+    getState: stallItemState,
+    buy: (key, id) => {
+      if (!canShop(key) || stallItemState(key, id).blocked) return null;
+      if (key === 'goods') return { ok: buyGood(id) };
+      if (id === 'chest') return openChest();
+      return { ok: buyGear(id) };
+    },
+    getPlayerPosition: () => ctx.getPlayerPosition(),
+    setPlayerHidden: (hidden) => ctx.setPlayerHidden?.(hidden),
+    canShop: (key) => canShop(key),
+    canTap: (key) => canShop(key) && nearStallKey(key),
+  });
+  const focusStall = (key) => {
+    fishing = null;
+    stalls.focus(key);
+    actsAt = 0;
+  };
+  // Selling goods: the market panel
   const marketModel = () => {
     const merchant = workingMerchant();
-    const coins = ctx.getCoins();
-    const items = ctx.getItems();
     const cash = Math.floor(merchant?.money ?? 0);
     return {
-      title: `🧺 Market · ${merchant ? firstName(merchant.name) : 'closed'}`,
-      coins,
+      title: `💰 Sell · ${merchant ? firstName(merchant.name) : 'closed'}`,
+      coins: ctx.getCoins(),
       cash,
       note: !merchant ? 'The merchant isn\'t here.' : null,
       goods: GOOD_IDS.map((g) => ({
         id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, stock: market.stock[g], have: goods[g],
-        buy: market.price(g), sell: market.sellPrice(g),
-        canBuy: !!merchant && market.stock[g] > 0 && coins >= market.price(g),
+        sell: market.sellPrice(g),
         canSell: !!merchant && goods[g] > 0 && cash >= market.sellPrice(g),
       })),
-      gear: SHOP_GEAR.map((item) => {
-        const owned = gearOwned(item.id, items);
-        const missing = item.needs && !items?.[item.needs];
-        return {
-          ...item,
-          owned,
-          canBuy: !!merchant && !owned && !missing && coins >= item.price,
-          note: missing ? `Needs a ${SHOP_GEAR.find((x) => x.id === item.needs)?.label}` : null,
-        };
-      }),
     };
   };
   const openMarket = () => {
     if (!marketOpen()) { feedLine('🧺 The market\'s closed.'); return; }
     fishing = null;
+    stalls.unfocus();
     marketPanel.open(marketModel());
   };
   const closeMarket = () => marketPanel.close();
   const buyGood = (g) => {
     const merchant = workingMerchant();
     const price = market.price(g);
-    if (!merchant || ctx.getCoins() < price || !market.take(g)) return;
+    if (!merchant || ctx.getCoins() < price || !market.take(g)) return false;
     ctx.addCoins(-price);
     merchant.money += price;
     gain(g);
     noteStock();
+    return true;
   };
   const sellGood = (g) => {
     const merchant = workingMerchant();
@@ -1309,14 +1395,36 @@ export function createTownMode(ctx) {
     noteStock();
   };
   const buyGear = (id) => {
-    const merchant = workingMerchant();
     const item = SHOP_GEAR.find((x) => x.id === id);
-    if (!merchant || !item || ctx.getCoins() < item.price) return;
-    if (!ctx.grantItem(item.kind, item.n ?? 1)) return;
+    if (!item || ctx.getCoins() < item.price) return false;
+    if (!ctx.grantItem(item.kind, item.n ?? 1)) return false;
     ctx.addCoins(-item.price);
-    merchant.money += item.price;
     feedLine(`${item.emoji} Bought: ${item.label}`);
-    if (marketPanel.isOpen()) marketPanel.render(marketModel());
+    return true;
+  };
+  // The weapon stall's mystery chest: one weighted random prize (what can't be used is left out)
+  const openChest = () => {
+    if (ctx.getCoins() < CHEST_PRICE) return { ok: false };
+    const items = ctx.getItems() ?? {};
+    const good = pickOf(GOOD_IDS);
+    const prizes = [
+      { w: 24, emoji: '🪙', give: () => { const n = 10 + 5 * Math.floor(Math.random() * 7); ctx.addCoins(n); return `${n} coins`; } },
+      { w: 16, emoji: '💣', give: () => (ctx.grantItem('bomb', 2) ? '2 bombs' : null) },
+      { w: 12, emoji: '🫧', give: () => (ctx.grantItem('bubble', 1) ? 'a bubble' : null) },
+      { w: 14, emoji: GOODS[good].emoji, give: () => { gain(good, 3); return `3 ${GOODS[good].label.toLowerCase()}`; } },
+      { w: items.shield >= ctx.shieldMax ? 0 : 10, emoji: '🛡️', give: () => (ctx.grantItem('shield') ? 'a shield' : null) },
+      { w: items.gun ? 10 : 0, emoji: '🔶', give: () => (ctx.grantItem('ammo', 6) ? '6 bullets' : null) },
+      { w: items.gun ? 0 : 4, emoji: '🔫', give: () => (ctx.grantItem('gun') ? 'a gun!' : null) },
+      { w: items.sword ? 0 : 6, emoji: '🗡️', give: () => (ctx.grantItem('sword') ? 'a sword!' : null) },
+      { w: 3, emoji: '💰', give: () => { ctx.addCoins(100); return 'the jackpot — 100 coins!'; } },
+    ].filter((p) => p.w > 0);
+    let r = Math.random() * prizes.reduce((sum, p) => sum + p.w, 0);
+    const prize = prizes.find((p) => (r -= p.w) < 0) || prizes[0];
+    ctx.addCoins(-CHEST_PRICE);
+    const text = prize.give();
+    if (!text) { ctx.addCoins(CHEST_PRICE); return { ok: false }; }
+    feedLine(`🎁 Mystery Chest: ${text}`);
+    return { ok: true, emoji: prize.emoji };
   };
 
   // Other weapons than the sword (bullets, bombs, magic) hit the townsfolk drawn nearby
@@ -1666,6 +1774,14 @@ export function createTownMode(ctx) {
       out.push({ key: 'close', label: '✖ Close market', onClick: closeMarket });
       return out;
     }
+    if (stalls.focused()) {
+      // At a counter: buy what's picked, the next thing, back
+      const buy = stalls.buyLabel();
+      if (buy) out.push({ key: 'buy', label: buy, onClick: () => { stalls.buySelected(); actsAt = 0; } });
+      out.push({ key: 'next', label: '› Next', onClick: () => { stalls.step(1); actsAt = 0; } });
+      out.push({ key: 'back', label: '⬅ Back', onClick: () => { stalls.unfocus(); actsAt = 0; } });
+      return out;
+    }
     if (jail) {
       out.push({ key: 'bail', label: `🔓 Pay bail (${BAIL} 🪙)`, onClick: payBail });
       return out;
@@ -1681,8 +1797,13 @@ export function createTownMode(ctx) {
       out.push({ key: 'fishing', label: '🎣 Fishing… (reel in)', onClick: () => { fishing = null; } });
       return out;
     }
-    const calm = !npcs.some((n) => n.fighter && distToPlayer(n) < 8);
-    if (calm && nearStall() && marketOpen()) out.push({ key: 'trade', label: '🛒 Trade', onClick: openMarket });
+    const calm = calmNow();
+    const stall = calm ? nearestStall() : null;
+    if (stall === 'gear' && gearOpen()) out.push({ key: 'gear', label: '⚔️ Weapons', onClick: () => focusStall('gear') });
+    if (stall === 'goods' && marketOpen()) {
+      out.push({ key: 'goods', label: '🧺 Goods', onClick: () => focusStall('goods') });
+      out.push({ key: 'sell', label: '💰 Sell', onClick: openMarket });
+    }
     const n = nearestTalkable();
     if (n) {
       out.push({ key: `talk:${n.id}`, label: `💬 ${firstName(n.name)}`, onClick: () => talkTo(n) });
@@ -1720,6 +1841,7 @@ export function createTownMode(ctx) {
     if (e.target?.closest?.('input, textarea, select')) return;
     if (document.body.classList.contains('settings-open')) return;
     if (e.key === 'Escape' && marketPanel.isOpen()) { closeMarket(); e.preventDefault(); return; }
+    if (e.key === 'Escape' && stalls.focused()) { stalls.unfocus(); e.preventDefault(); return; }
     if (e.key === 'e' || e.key === 'E' || (e.key === 'Enter' && !e.target?.closest?.('button'))) {
       if (interact()) e.preventDefault();
     }
@@ -1789,6 +1911,7 @@ export function createTownMode(ctx) {
     hud.classList.remove('hidden');
     renderStars();
     window.addEventListener('keydown', onKey);
+    stalls.setActive(true);
     // (built on the next frame: the first nav grid samples a few thousand ground heights)
     setTimeout(() => {
       if (!active || token !== enterToken) return;
@@ -1812,6 +1935,7 @@ export function createTownMode(ctx) {
     save();
     lastItems = ctx.endLoadout() ?? lastItems;
     closeMarket();
+    stalls.setActive(false);
     fishing = null;
     active = false;
     ready = false;
@@ -1869,6 +1993,10 @@ export function createTownMode(ctx) {
     for (const n of npcs) if (n.body && !n.dying) syncBody(n, dt);
     if (simT > actsAt) { actsAt = simT + 0.15; refreshActs(); }
     if (simT > saveAt) { saveAt = simT + SAVE_EVERY_S; save(); }
+    // (the weapon stall's keeper is there in the market's hours)
+    stalls.setKeeperVisible('gear', gearOpen());
+    // (last: the shop camera takes over from the player controls' pose this frame)
+    stalls.update(dt, simT);
   };
 
   // The player's sword swing reached `tip` (world), moving along swingDir: hits the
@@ -1911,6 +2039,6 @@ export function createTownMode(ctx) {
     // The phone's Block bar label while there's something to do (undefined: it stays Block)
     interactLabel: () => (active && acts.length ? acts[0].label : undefined),
     // (dev console)
-    debug: () => ({ npcs, layout, law, clock, arrivals, market, goods, ctx }),
+    debug: () => ({ npcs, layout, law, clock, arrivals, market, goods, stalls, ctx }),
   };
 }

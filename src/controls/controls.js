@@ -36,15 +36,23 @@ const MAX_WALKABLE_SLOPE_DEGREES = 42;
 const LEDGE_FALL_MIN_DROP = 0.6;
 // Moved further than this (m) since the last frame → a teleport, snap to the ground
 const LEDGE_FALL_MAX_STEP = 1.5;
-// Wall climbing: walking (joystick / W) into ground that rises more than minRise within
-// probeDist ahead starts a climb instead of popping onto it. While climbing, forward input
-// raises the player at speed m/s until they are level with the top (then they step onto it),
-// sideways input is ignored and pulling back jumps off (onClimbJumpOff hook, bootstrapGameApp.js).
+// Wall climbing: walking head on (forward — the way the player faces — within headOnDot) into a
+// wall (ground that rises more than minRise within probeDist ahead, and to either side of
+// that, sideProbeAngle off: the wall faces the player) starts a climb instead of popping onto
+// it; the Showdown auto-walk climbs whatever it walks into. Walking into a wall any other way
+// (backwards, sideways, along it) doesn't climb: the player stops at it / slides along it.
+// While climbing every stick direction does something: forward or sideways (within
+// upMaxAngleDeg of the wall) climbs at speed m/s until level with the top (then they step onto
+// it), pulling back jumps off (onClimbJumpOff hook, bootstrapGameApp.js).
 export const CLIMB_CONFIG = {
   probeDist: 0.4,       // m ahead of the player where the wall height is sampled
   minRise: 0.9,         // m higher than the feet at probeDist → a wall to climb
-  speed: 1.6,           // m/s climbing speed at full forward input
-  inputThreshold: 0.3,  // forward / back share of the input that counts
+  headOnDot: 0.8,       // walking direction · facing direction needed to start a climb (~37°)
+  sideProbeAngle: 0.5,  // rad — the wall must be there this far to either side too (head on to it)
+  speed: 1.6,           // m/s climbing speed at full input
+  inputThreshold: 0.15, // stick share that counts while climbing
+  upMaxAngleDeg: 100,   // input within this of the wall direction climbs; the rest jumps off
+  wallLead: 0.15,       // m ahead of a step where a wall stops walking (not climbing)
   topStep: 0.15,        // extra m past the probe point the player steps onto at the top
   jumpOffSpeed: 3,      // m/s backward drift while falling after jumping off
   maxAnchorDrift: 0.3   // m — moved off the wall by something else (knockback, teleport) → stop climbing
@@ -330,7 +338,11 @@ export class PlayerControls {
       mode: 'static',
       position: { left: '50%', top: '50%' },
       color: 'rgba(255, 255, 255, 0.5)',
-      size: 100
+      size: 100,
+      // Re-read the stick's centre on every move: it moves with the layout (no Block bar in
+      // Town → it drops to the bottom; hidden / shown at village stations…), and nipplejs
+      // otherwise keeps the centre from when it was made (or the last window resize)
+      dynamicPage: true
     });
 
     this.joystick.on('move', (evt, data) => {
@@ -1036,8 +1048,36 @@ export class PlayerControls {
     this._climb = null;
   }
 
+  // Ground ahead of the feet that rises more than CLIMB_CONFIG.minRise: a wall
+  _isWallAt(x, z) {
+    const y = this._groundHeightAt(x, z);
+    return Number.isFinite(y) && y - this.playerY > CLIMB_CONFIG.minRise;
+  }
+
+  // A walking step that isn't a climb: stops at a wall (sliding along it on the free axis)
+  // instead of popping on top of it
+  _walkStep(stepX, stepZ) {
+    const len = Math.hypot(stepX, stepZ);
+    if (len < 1e-6) return;
+    if (!window.phoneSwordAirborne) {
+      const lead = CLIMB_CONFIG.wallLead;
+      const blocked = (dx, dz) => {
+        const l = Math.hypot(dx, dz);
+        return l > 1e-6 && this._isWallAt(this.playerX + dx + (dx / l) * lead, this.playerZ + dz + (dz / l) * lead);
+      };
+      if (blocked(stepX, stepZ)) {
+        if (!blocked(stepX, 0)) stepZ = 0;
+        else if (!blocked(0, stepZ)) stepX = 0;
+        else return;
+      }
+    }
+    this.playerX += stepX;
+    this.playerZ += stepZ;
+  }
+
   // Wall climbing (CLIMB_CONFIG). Returns true when it owns this frame's movement.
-  _updateClimb(movement, deltaSeconds) {
+  // autoWalk: the input includes the auto-walk (it climbs whatever it walks into).
+  _updateClimb(movement, deltaSeconds, autoWalk = false) {
     const cfg = CLIMB_CONFIG;
     let climb = this._climb;
     if (climb && (window.phoneSwordAirborne ||
@@ -1050,19 +1090,36 @@ export class PlayerControls {
       if (window.phoneSwordAirborne || movement.lengthSq() < 1e-6) return false;
       const dirX = movement.x / movement.length();
       const dirZ = movement.z / movement.length();
+      if (!autoWalk) {
+        // Head on only: walking the way the player faces (not backwards / sideways)…
+        if (dirX * Math.sin(this.yaw) + dirZ * Math.cos(this.yaw) < cfg.headOnDot) return false;
+      }
       const aheadY = this._groundHeightAt(this.playerX + dirX * cfg.probeDist, this.playerZ + dirZ * cfg.probeDist);
       if (!Number.isFinite(aheadY) || aheadY - this.playerY <= cfg.minRise) return false;
+      if (!autoWalk) {
+        // …and square on to the wall (not glancing along it)
+        const a = cfg.sideProbeAngle;
+        const ca = Math.cos(a);
+        const sa = Math.sin(a);
+        for (const s of [1, -1]) {
+          const px = dirX * ca - dirZ * sa * s;
+          const pz = dirZ * ca + dirX * sa * s;
+          if (!this._isWallAt(this.playerX + px * cfg.probeDist, this.playerZ + pz * cfg.probeDist)) return false;
+        }
+      }
       this._climb = climb = { x: this.playerX, z: this.playerZ, dirX, dirZ, topY: aheadY };
       this._climbFall = null;
     }
 
-    // Only the input along the wall direction counts (no sideways climbing)
+    // Every stick direction does something: toward the wall or sideways climbs, away jumps off
+    const mag = Math.min(1, movement.length());
     const along = movement.x * climb.dirX + movement.z * climb.dirZ;
+    const upMin = Math.cos(THREE.MathUtils.degToRad(cfg.upMaxAngleDeg)) * mag;
     this.playerX = climb.x;
     this.playerZ = climb.z;
-    if (along > cfg.inputThreshold) {
-      this.playerY += cfg.speed * along * deltaSeconds;
-      this.climbPhase = (this.climbPhase || 0) + along * deltaSeconds;
+    if (mag > cfg.inputThreshold && along >= upMin) {
+      this.playerY += cfg.speed * mag * deltaSeconds;
+      this.climbPhase = (this.climbPhase || 0) + mag * deltaSeconds;
       if (this.playerY >= climb.topY) {
         const topX = climb.x + climb.dirX * (cfg.probeDist + cfg.topStep);
         const topZ = climb.z + climb.dirZ * (cfg.probeDist + cfg.topStep);
@@ -1077,7 +1134,7 @@ export class PlayerControls {
           if (Number.isFinite(topY)) this.playerY = Math.max(this.playerY, topY);
         }
       }
-    } else if (along < -cfg.inputThreshold) {
+    } else if (mag > cfg.inputThreshold) {
       // Jump off backward (falls with the game's jump gravity, no climbing back down)
       this._climb = null;
       this._climbFall = { x: -climb.dirX * cfg.jumpOffSpeed, z: -climb.dirZ * cfg.jumpOffSpeed };
@@ -1183,14 +1240,12 @@ export class PlayerControls {
         }
       }
 
-      const climbHandled = !roll && this._updateClimb(climbInput, deltaSeconds);
+      const climbHandled = !roll && this._updateClimb(climbInput, deltaSeconds, autoLen > 1e-6);
       if (!climbHandled) {
-        this.playerX += movement.x * speed * deltaSeconds;
-        this.playerZ += movement.z * speed * deltaSeconds;
-        if (autoLen > 1e-6) {
-          this.playerX += autoMove.x;
-          this.playerZ += autoMove.z;
-        }
+        this._walkStep(
+          movement.x * speed * deltaSeconds + (autoLen > 1e-6 ? autoMove.x : 0),
+          movement.z * speed * deltaSeconds + (autoLen > 1e-6 ? autoMove.z : 0)
+        );
       }
       // (a hook that keeps the player inside an area — the pirate ship's deck on a voyage)
       if (typeof this.positionConstraint === 'function') this.positionConstraint(this);
