@@ -61,8 +61,8 @@ const MANA_POTION_OFFSET = new THREE.Vector3(-0.15, 100.0, 0.05);
 // here in x / z. The counter items / potions / COUNTER_SURFACE_Y were placed against that, so
 // a re-exported GLB with a different origin is moved back onto it (alignStallModel)
 const MARKET_STALL_ALIGN = { bottom: -0.97, x: -7.52, z: 1.56 };
-const STALL_UNIT = MARKET_STALL_SIZE * VILLAGE_PROP_SCALE; // metres per stall unit
-const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall units, measured) — items stand on it
+export const STALL_UNIT = MARKET_STALL_SIZE * VILLAGE_PROP_SCALE; // metres per stall unit
+export const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall units, measured) — items stand on it
 const MERCHANT_CHARACTER_URL = glbCharacterConfig.wizardUrl;
 const VILLAGER_CHARACTER_URL = glbCharacterConfig.villagerUrl;
 
@@ -386,6 +386,23 @@ export async function loadMarketStall() {
   return stall;
 }
 
+// Town mode's weapon stall (src/town/townStalls.js): the mana potion as a child of
+// loadMarketStall()'s stall (stall units), and the mystery chest (metres)
+export async function loadStallManaPotion() {
+  const gltf = await loadProp(MANA_POTION_MODEL, { materials: false });
+  const potion = markShared(gltf.scene.clone(true));
+  potion.scale.setScalar(MANA_POTION_SCALE);
+  potion.position.copy(MANA_POTION_OFFSET);
+  return potion;
+}
+export async function loadTreasureChest() {
+  const gltf = await loadProp(TREASURE_CHEST_MODEL);
+  const chest = markShared(gltf.scene.clone(true));
+  chest.scale.setScalar(TREASURE_CHEST_SCALE * VILLAGE_PROP_SCALE);
+  chest.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+  return chest;
+}
+
 function markShared(root) {
   root.traverse((o) => {
     o.userData.sharedAsset = true;
@@ -468,6 +485,71 @@ export function buildItemMesh(kind) {
     const geo = new THREE.ExtrudeGeometry(s, { depth: 0.05, bevelEnabled: true, bevelSize: 0.012, bevelThickness: 0.012, bevelSegments: 3 });
     geo.center();
     g.add(new THREE.Mesh(geo, std(0xe0233a, { emissive: 0x5a0010, emissiveIntensity: 0.6, roughness: 0.35 })));
+  } else if (kind === 'sword') {
+    // Hanging point down (the stall hangs it by the pommel)
+    const steel = std(0xc9ced6, { metalness: 0.6, roughness: 0.3 });
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.36, 0.01), steel);
+    blade.position.y = -0.22;
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.025, 0.05, 4), steel);
+    tip.rotation.z = Math.PI;
+    tip.scale.z = 0.3;
+    tip.position.y = -0.425;
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.02, 0.025), std(0x8a6a2a, { metalness: 0.5, roughness: 0.4 }));
+    guard.position.y = -0.03;
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.08, 8), std(0x5a3a20));
+    grip.position.y = 0.02;
+    const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), std(0x8a6a2a, { metalness: 0.5, roughness: 0.4 }));
+    pommel.position.y = 0.07;
+    g.add(blade, tip, guard, grip, pommel);
+  } else if (kind === 'wood') {
+    // A little stack of logs
+    const bark = std(0x6b4a2b, { roughness: 1 });
+    const cut = std(0xd9b27c, { roughness: 1 });
+    const logGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.26, 10);
+    [[-0.04, 0.035], [0.04, 0.035], [0, 0.098]].forEach(([x, y]) => {
+      const log = new THREE.Mesh(logGeo, [bark, cut, cut]);
+      log.rotation.x = Math.PI / 2;
+      log.position.set(x, y, 0);
+      g.add(log);
+    });
+    g.rotation.y = 0.3;
+  } else if (kind === 'fish') {
+    const scale = std(0x7f9bb0, { metalness: 0.3, roughness: 0.4 });
+    const fin = std(0x5d7486, { roughness: 0.6 });
+    [[0, 0.03, -0.035, 0.2], [0.02, 0.07, 0.035, -0.25]].forEach(([x, y, z, yaw]) => {
+      const fish = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.06, 14, 10), scale);
+      body.scale.set(1.8, 0.6, 0.5);
+      const tail = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.06, 4), fin);
+      tail.rotation.z = -Math.PI / 2;
+      tail.scale.z = 0.25;
+      tail.position.x = -0.13;
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.008, 6, 4), std(0x111111));
+      eye.position.set(0.075, 0.01, 0.026);
+      fish.add(body, tail, eye);
+      fish.position.set(x, y, z);
+      fish.rotation.y = yaw;
+      g.add(fish);
+    });
+  } else if (kind === 'veg') {
+    // Carrots and a cabbage
+    const orange = std(0xe2782a, { roughness: 0.7 });
+    const leaf = std(0x4f9a35, { roughness: 0.9 });
+    [[-0.05, -0.02, 0.3], [0, 0.03, -0.2], [0.05, -0.03, 0.1]].forEach(([x, z, yaw]) => {
+      const carrot = new THREE.Group();
+      const root = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.16, 8), orange);
+      root.rotation.z = Math.PI / 2;
+      const top = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.07, 5), leaf);
+      top.rotation.z = -Math.PI / 2;
+      top.position.x = -0.11;
+      carrot.add(root, top);
+      carrot.position.set(x, 0.022, z);
+      carrot.rotation.y = yaw;
+      g.add(carrot);
+    });
+    const cabbage = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), std(0x8cc152, { roughness: 0.9 }));
+    cabbage.position.set(-0.1, 0.05, 0.06);
+    g.add(cabbage);
   }
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return g;

@@ -18,7 +18,7 @@ const PRICE_MAX = 1.7;     // price multiple when sold out…
 const PRICE_MIN = 0.5;     // …and at twice the target stock (or more)
 const SELL_SHARE = 0.6;    // what the merchant pays, as a share of the price
 
-// The town's general store also sells gear. kind = what ctx.grantItem gets; needs = a
+// The weapon stall's gear (townStalls.js). kind = what ctx.grantItem gets; needs = a
 // weapon that must be owned first
 export const SHOP_GEAR = [
   { id: 'sword',  kind: 'sword',  label: 'Sword',      emoji: '🗡️', price: 30,  desc: 'Swing it with the phone. Chops trees too.' },
