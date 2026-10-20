@@ -218,6 +218,9 @@
     #btn-jump   { background: rgba(99, 102, 241, 0.4); border-color: rgba(165, 180, 252, 0.6); }
     #btn-wand   { background: rgba(124, 58, 237, 0.45); border-color: rgba(216, 180, 254, 0.6); display: none; }
     #btn-wand.owned { display: block; }
+    /* Town: 🗡 Sword ↔ ✋ Hands (put everything away) */
+    #btn-sword { display: none; }
+    #btn-sword.shown { display: block; }
     /* Block with a slot on either side */
     #block-row {
       width: min(100%, 380px);
@@ -363,6 +366,8 @@
   <button class="ctl-btn" id="btn-recalib" data-action="recalibrate">⟲ Recalibrate</button>
   <div id="controller">
     <div id="action-grid">
+      <button class="ctl-btn row-btn" id="btn-sword" data-action="sword">🗡️
+Sword</button>
       <button class="ctl-btn row-btn" id="btn-gun" data-action="gun">🔫
 Gun</button>
       <button class="ctl-btn row-btn" id="btn-shield" data-action="shield">🛡
@@ -546,16 +551,17 @@ Wand</button>
     const btnGun = document.getElementById('btn-gun');
     const btnShield = document.getElementById('btn-shield');
     const btnWand = document.getElementById('btn-wand');
+    const btnSword = document.getElementById('btn-sword');
     // The button row above Block holds up to ACTION_ROW_MAX of the buttons shown; any more go
     // in the slots beside Block (left, then right)
     const ACTION_ROW_MAX = 5;
     const actionRow = document.getElementById('action-grid');
     const blockSides = [document.getElementById('block-side-left'), document.getElementById('block-side-right')];
-    const rowButtons = [btnGun, btnShield, btnWand, btnBomb, btnBubble];
+    const rowButtons = [btnSword, btnGun, btnShield, btnWand, btnBomb, btnBubble];
     function layoutRowButtons() {
       let n = 0;
       rowButtons.forEach((b) => {
-        const shown = b !== btnWand || b.classList.contains('owned');
+        const shown = b === btnWand ? b.classList.contains('owned') : b === btnSword ? b.classList.contains('shown') : true;
         const parent = !shown || n < ACTION_ROW_MAX ? actionRow : blockSides[n - ACTION_ROW_MAX] ?? actionRow;
         if (shown) n += 1;
         parent.appendChild(b); // (re-appended in order, so the order holds)
@@ -568,22 +574,29 @@ Wand</button>
       btnBubble.textContent = `🫧\n${st.bubbles ?? 0}`;
       btnBubble.disabled = !(st.bubbles > 0) && !st.bubbleActive;
       btnBubble.classList.toggle('active', !!st.bubbleActive);
-      // Equip buttons: each toggles its weapon ↔ the sword
+      // Equip buttons: each toggles its weapon ↔ the sword (Town without a sword: ↔ empty hands)
+      const back = st.hasSword === false ? '✋\nHands' : '🗡️\nSword';
       btnGun.disabled = !st.hasGun;
       btnShield.disabled = !st.hasShield;
       btnGun.classList.toggle('equipped', st.equipped === 'pistol');
       btnShield.classList.toggle('equipped', st.equipped === 'shield');
-      btnGun.textContent = st.equipped === 'pistol' ? '🗡️\nSword' : '🔫\nGun';
-      btnShield.textContent = st.equipped === 'shield' ? '🗡️\nSword' : '🛡\nShield';
+      btnGun.textContent = st.equipped === 'pistol' ? back : '🔫\nGun';
+      btnShield.textContent = st.equipped === 'shield' ? back : '🛡\nShield';
       // Magic wand (once owned / picked up): swaps with the sword; shows the mana left
       btnWand.classList.toggle('owned', !!st.hasWand);
       btnWand.classList.toggle('equipped', st.equipped === 'magic_wand');
-      btnWand.textContent = st.equipped === 'magic_wand' ? `🗡️ Sword\n🔮${st.mana ?? 0}` : `🪄 Wand\n🔮${st.mana ?? 0}`;
+      btnWand.textContent = st.equipped === 'magic_wand' ? `${back.replace('\n', ' ')}\n🔮${st.mana ?? 0}` : `🪄 Wand\n🔮${st.mana ?? 0}`;
+      // Town: 🗡 Sword out / ✋ Hands (nothing in hand)
+      btnSword.classList.toggle('shown', !!st.canUnequip);
+      const unarmed = st.equipped === 'none';
+      btnSword.textContent = unarmed ? '🗡️\nSword' : '✋\nHands';
+      btnSword.disabled = unarmed && st.hasSword === false;
       layoutRowButtons();
       // The bar: Interact (village / talk / calibration popup), Fire (gun), Sword (shield),
       // Shield (wand, when a shield is owned), else Block
       interactLabel = st.interactMode ? (st.interact || null) : null;
-      const nextMode = st.interactMode ? 'interact'
+      // (nothing in hand: the bar is only for interacting)
+      const nextMode = st.interactMode || st.equipped === 'none' ? 'interact'
         : st.blockOnly ? 'block'
         : st.equipped === 'pistol' ? 'fire'
         : st.equipped === 'shield' ? (st.wandShieldHeld ? 'shield' : 'sword')
