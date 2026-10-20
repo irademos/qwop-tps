@@ -8263,6 +8263,8 @@ async function initCore(runtimeContext) {
     startLoadout: (items) => startTownLoadout(items),
     endLoadout: () => endTownLoadout(),
     getItems: () => (_townLoadout ? _townItems() : null),
+    // Something in hand (the bandits at their camp rob an unarmed trespasser instead of fighting)
+    isPlayerArmed: () => !!_heldWeaponId(),
     grantItem: (kind, n) => grantTownItem(kind, n),
     // Arrested: the guards take every weapon
     confiscate: () => {

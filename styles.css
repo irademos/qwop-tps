@@ -4295,7 +4295,6 @@ body.town-mode .town-feed { top: calc(128px + env(safe-area-inset-top, 0px)); }
 .town-good:not(:disabled):hover { background: var(--surface-hover); }
 /* The market's sell panel: goods sold to the merchant at the going price */
 .town-market,
-.town-board,
 .town-lockpick {
   position: absolute;
   left: 50%;
@@ -4338,12 +4337,10 @@ body.town-shop-open #action-buttons { visibility: hidden; }
 /* At a market stall's counter (townStalls.js): the village's buy card over the picked thing */
 .town-hud .town-card { z-index: 1; }
 
-/* Job boards (src/town/townJobs.js): posted jobs + your jobs */
-.town-board-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
-.town-board-title { font-weight: 800; font-size: 15px; }
-.town-board-desc { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
-.town-board-reward { font-size: 12px; font-weight: 700; color: var(--accent-hi); margin-top: 3px; }
-.town-board-btn { min-height: 36px; padding: 0 12px; font-size: 13px; font-weight: 800; white-space: nowrap; }
+/* A townsperson's job talk (src/town/townJobs.js createJobTalk): the village's talk box */
+.town-hud .town-talk { pointer-events: auto; cursor: default; z-index: 2; }
+.town-hud .town-talk.hidden { display: none; }
+.town-talk-reward { margin-top: 6px; font-size: 13px; font-weight: 700; color: var(--accent-hi); }
 /* The quest tracker: the jobs on, top right under the goods */
 .town-quests {
   position: absolute;

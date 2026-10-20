@@ -162,7 +162,14 @@ export const SHOUT_VENDETTA = ['You killed my {rel}!', 'For my {rel}!', 'Murdere
 export const SHOUT_STAY_BACK = ['Stay back!', 'Don\'t come near me.', 'I\'m watching you…'];
 export const SHOUT_MUG = ['Your purse. Now.', 'Hand it over!', 'Coins or else.'];
 export const SHOUT_ARREST = ['You\'re under arrest!', 'Come quietly!', 'That\'s enough!'];
-export const SHOUT_BANDIT = ['Fresh meat!', 'Get \'em!', 'Nobody leaves!'];
+export const SHOUT_BANDIT = ['You were warned!', 'Get \'em!', 'Cut them down!'];
+// The gang at its camp: a warning, a last warning, robbing someone with no weapon, and seeing
+// them off
+export const SHOUT_CAMP_WARN = ['Oi! This is our camp. Get lost.', 'Turn around, stranger.', 'Nothing here for you. Keep walking.'];
+export const SHOUT_CAMP_LAST = ['One more step and we cut you down!', 'Last warning!', 'Are you deaf? Get out of here!'];
+export const SHOUT_CAMP_ROB = ['No blade? Then your purse. Now get lost!', 'Empty hands, full pockets. We\'ll take those.'];
+export const SHOUT_CAMP_SPARE = ['Not even worth robbing. Go on, get out.', 'Nothing on you? Then get lost.'];
+export const SHOUT_CAMP_LEAVE = ['And stay out!', 'Don\'t come back!', 'Run, then!'];
 export const SHOUT_THANKS = ['Thank you, {name}!', 'You saved me!', 'My hero!'];
 export const FOLLOW_LINES = {
   join: ['Lead the way, {name}!', 'Right behind you.', 'Let\'s go!'],
