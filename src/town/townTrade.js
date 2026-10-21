@@ -112,11 +112,12 @@ export function installTownTrade(T, ctx) {
   const nearestStall = () => (nearStallKey('gear') ? 'gear' : nearStallKey('goods') ? 'goods' : null);
   const nearStall = () => nearStallKey('goods');
   // The door outside the player's at (its room's key), or null
+  // (dist: m, or per room — (room) => m)
   const nearDoor = (dist = DOOR_DIST) => {
     if (playerRoom()) return null;
     const p = T.playerPos();
     for (const [key, r] of Object.entries(T.layout.places.rooms)) {
-      if (dist2(p.x, p.z, r.door.x, r.door.z) < dist) return key;
+      if (dist2(p.x, p.z, r.door.x, r.door.z) < (typeof dist === 'function' ? dist(r) : dist)) return key;
     }
     return null;
   };
@@ -167,14 +168,16 @@ export function installTownTrade(T, ctx) {
     T.doorLast = null;
     T.actsAt = 0;
   };
+  const enterDistOf = (r) => r.enterDist ?? DOOR_ENTER_DIST;
   // Outside: walking into a house's door (close to it, heading for the house) goes in — no button
   const walkInDoor = () => {
     const p = T.playerPos();
     const last = T.doorLast;
     T.doorLast = { x: p.x, z: p.z };
     if (T.doorRearm) {
-      const d = T.layout.places.rooms[T.doorRearm].door;
-      if (dist2(p.x, p.z, d.x, d.z) < DOOR_DIST) return;
+      const r = T.layout.places.rooms[T.doorRearm];
+      // (past where walking in starts, so coming out doesn't go straight back in)
+      if (dist2(p.x, p.z, r.door.x, r.door.z) < Math.max(DOOR_DIST, enterDistOf(r) + 0.2)) return;
       T.doorRearm = null;
     }
     if (!last) return;
@@ -182,7 +185,7 @@ export function installTownTrade(T, ctx) {
     const mz = p.z - last.z;
     const step = Math.hypot(mx, mz);
     if (step < 0.005 || step > 1) return; // (standing still, or a teleport)
-    const key = nearDoor(DOOR_ENTER_DIST);
+    const key = nearDoor(enterDistOf);
     if (!key || !canEnterRoom()) return;
     // (in = toward the house: against the way out)
     const yaw = T.layout.places.rooms[key].exitYaw;
