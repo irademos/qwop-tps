@@ -27,9 +27,13 @@ export function installTownActs(T, ctx) {
       n.task.t = 0;
     }
     T.talking = { npc: n };
+    // (the first day: whoever's showing the player around — townIntro.js)
+    if (T.introTalk(n)) return;
     const job = T.jobOf(n);
     if (job && n.attitude >= GRUDGE_ATTITUDE && !(job.shady && n.attitude <= -0.2)) { T.openJobTalk(n, job); return; }
-    T.say(n, talkLine(n, { playerName: ctx.getPlayerName(), taskType, market: marketTalk() }), { big: true });
+    // Something they remember the player did, now and then (townMemory.js)
+    const memory = T.memoryLine(n);
+    T.say(n, memory ?? talkLine(n, { playerName: ctx.getPlayerName(), taskType, market: marketTalk() }), { big: true });
     if (T.simT - n.talkBonusAt > 60) {
       n.talkBonusAt = T.simT;
       n.attitude = Math.min(1, n.attitude + 0.04);
@@ -42,6 +46,7 @@ export function installTownActs(T, ctx) {
     ctx.playSfx('coin');
     T.npcMoney(n, GIFT_COINS);
     n.attitude = Math.min(1, n.attitude + 0.25);
+    T.remember(n, 'gift');
     if (n.task?.type === 'talk') n.task.t = 0;
     T.say(n, giftLine(n, ctx.getPlayerName()), { big: true });
     if (n.attitude >= FRIEND_ATTITUDE && !n.friendNoted) {
@@ -122,6 +127,10 @@ export function installTownActs(T, ctx) {
       out.push({ key: 'fishing', label: '🎣 Fishing… (reel in)', onClick: () => { T.fishing = null; } });
       return out;
     }
+    if (T.cooking) {
+      out.push(...T.cookActs());
+      return out;
+    }
     const calm = T.calmNow();
     // (the strongbox can be snatched mid-fight: the gang guards it)
     if (!T.strongboxHeld && T.layout.props.strongbox.visible && T.activeJobs().some((j) => j.kind === 'fetchStrongbox')) {
@@ -145,8 +154,9 @@ export function installTownActs(T, ctx) {
     if (n) {
       // (❗ a job to give, ❓ a reward waiting — as the marker over them)
       const j = T.jobOf(n);
-      const icon = j && !j.shady && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : '💬';
-      out.push({ key: `talk:${n.id}`, label: `${icon} ${firstName(n.name)}`, onClick: () => talkTo(n) });
+      const icon = T.isIntroGuide(n) ? '❗' : j && !j.shady && j.status !== 'active' ? (j.status === 'done' ? '❓' : '❗') : '💬';
+      // (and how they feel about the player — townMemory.js)
+      out.push({ key: `talk:${n.id}`, label: `${icon} ${firstName(n.name)} ${T.moodOf(n.attitude).emoji}`, onClick: () => talkTo(n) });
       if (T.talking?.npc === n) {
         if (n.following) out.push({ key: `dismiss:${n.id}`, label: '👋 Go home', onClick: () => T.dismiss(n) });
         else if (T.canRecruit(n)) out.push({ key: `join:${n.id}`, label: '🤝 Join me', onClick: () => T.recruit(n) });
@@ -154,6 +164,7 @@ export function installTownActs(T, ctx) {
       }
     }
     if (calm) {
+      out.push(...T.cookActs());
       if (T.ripeCropNear()) out.push({ key: 'pick', label: '🌾 Pick veg', onClick: T.pickCrop });
       if (T.nearWater()) out.push({ key: 'fish', label: '🎣 Fish', onClick: T.startFishing });
       const food = T.hurtFood();

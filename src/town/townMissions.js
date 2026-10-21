@@ -2,7 +2,7 @@
 // (❗ / 📍 / ❓) and the job talk.
 
 import { CHAINS, MAX_ACTIVE_JOBS, OPEN_JOBS } from './townJobs.js';
-import { GOODS, GOOD_IDS } from './townEconomy.js';
+import { GOODS, RAW_IDS } from './townEconomy.js';
 import { characterForRole, firstName, randomName } from './townPeople.js';
 import { makeTextSprite } from '../village/villageMode.js';
 import {
@@ -102,7 +102,7 @@ export function installTownMissions(T, ctx) {
   const townJob = () => {
     if (Math.random() < 0.7) {
       // A delivery: what the market is short of, for someone who needs it
-      const g = T.market.scarcest() ?? pickOf(GOOD_IDS);
+      const g = T.market.scarcest() ?? pickOf(RAW_IDS);
       const giver = pickOf(townsfolkFor((n) => !T.jobs.some((j) => j.giverId === n.id)));
       if (!giver) return null;
       const n = g === 'wood' ? 3 + Math.floor(Math.random() * 4) : 2 + Math.floor(Math.random() * 3);
@@ -155,6 +155,7 @@ export function installTownMissions(T, ctx) {
     }
     if (giver) T.say(giver, j.shady ? 'Good. Quietly, now.' : 'Thank you! Come back when it\'s done.', { big: true });
     T.feedLine(`📋 Job taken: ${j.title}`);
+    T.introNote('job');
   };
   const dropJob = (j) => {
     T.jobs = T.jobs.filter((x) => x !== j);
@@ -184,11 +185,29 @@ export function installTownMissions(T, ctx) {
     T.feedLine(`✔ ${text ?? j.title} — see ${firstName(giver.name)} for your reward.`);
     T.save();
   };
+  // What a job was, as the giver remembers it
+  const helpedText = (j) => {
+    const d = j.data;
+    switch (j.kind) {
+      case 'deliver': return `bringing me ${d.n} ${GOODS[d.good].emoji}`;
+      case 'guardField': return 'saving my field from the raiders';
+      case 'bounty': return 'dealing with that bandit';
+      case 'killBandits': return 'taking on the bandits';
+      case 'debt': return 'getting my money back';
+      case 'returnTo': return 'bringing back the strongbox';
+      default: return 'that job';
+    }
+  };
   const completeJob = (j, { coins = j.reward.coins, text = null } = {}) => {
     T.jobs = T.jobs.filter((x) => x !== j);
     const giver = npcById(j.giverId);
     if (coins > 0) ctx.addCoins(coins);
     if (giver && j.reward.attitude) giver.attitude = Math.min(1, giver.attitude + j.reward.attitude);
+    // (they'll remember it — townMemory.js)
+    if (giver && coins > 0) {
+      if (j.kind === 'findKid') T.remember(giver, 'kidHome', { who: npcById(j.data.kidId) ? firstName(npcById(j.data.kidId).name) : 'my little one' });
+      else T.remember(giver, 'helped', { what: helpedText(j) });
+    }
     if (j.reward.item) ctx.grantItem(j.reward.item);
     if (j.reward.town) for (const n of T.npcs) if (n.alive && !n.def.outlaw) n.attitude = Math.min(1, n.attitude + j.reward.town);
     if (giver?.body && !T.jobTalk.isOpen()) T.say(giver, 'Thank you!', { big: true });
@@ -290,12 +309,14 @@ export function installTownMissions(T, ctx) {
     j.data.collected = paid;
     j.reward = { ...j.reward, coins: Math.round(paid * 0.4) };
     debtor.attitude = Math.max(-1, debtor.attitude - 0.3);
+    T.remember(debtor, 'collected');
     T.say(debtor, paid < j.data.amount ? 'That\'s all I have…' : 'Fine. Take it.', { big: true });
     markDone(j, `💰 Collected ${paid} for ${creditor ? firstName(creditor.name) : 'nobody'}`);
   };
   const forgiveDebt = (j, debtor) => {
     const creditor = npcById(j.data.creditorId);
     debtor.attitude = Math.min(1, debtor.attitude + 0.4);
+    T.remember(debtor, 'forgave');
     if (creditor) creditor.attitude = Math.max(-1, creditor.attitude - 0.2);
     T.say(debtor, 'Bless you! I won\'t forget it.', { big: true });
     completeJob(j, { coins: 0, text: `🤲 You let ${firstName(debtor.name)}'s debt go.` });
@@ -362,7 +383,9 @@ export function installTownMissions(T, ctx) {
         completeJob(j);
       }
     }
-    T.tracker.render(takenJobs().map((j) => ({ title: j.title, progress: jobProgress(j), icon: j.status === 'done' ? '❓' : '📍' })));
+    // (the first day's goal on top — townIntro.js)
+    const intro = T.introEntry();
+    T.tracker.render([...(intro ? [intro] : []), ...takenJobs().map((j) => ({ title: j.title, progress: jobProgress(j), icon: j.status === 'done' ? '❓' : '📍' }))]);
   };
   const jobProgress = (j) => {
     const d = j.data;
@@ -411,10 +434,11 @@ export function installTownMissions(T, ctx) {
   };
   const updateMarkers = () => {
     const live = new Set();
-    for (const j of T.jobs) {
-      const t = markerFor(j);
+    const marks = T.jobs.map((j) => [j.id, markerFor(j)]);
+    marks.push(['intro', T.introTarget()]);
+    for (const [id, t] of marks) {
       if (!t) continue;
-      const key = `${j.id}:${t.icon}`;
+      const key = `${id}:${t.icon}`;
       live.add(key);
       let m = T.markers.get(key);
       if (!m) {

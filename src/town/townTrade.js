@@ -2,7 +2,7 @@
 // stalls (townStalls.js), the sell panel — townsfolk buying food and delivering goods, and the
 // stand-ins bullets / bombs / spells hit townsfolk through.
 
-import { FOOD_IDS, GOODS, GOOD_IDS, SHOP_GEAR } from './townEconomy.js';
+import { FOOD_IDS, GOODS, GOOD_IDS, RAW_IDS, SHOP_GEAR } from './townEconomy.js';
 import { SHOUT_EAT_BUY, firstName, shout } from './townPeople.js';
 import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
@@ -80,6 +80,8 @@ export function installTownTrade(T, ctx) {
     crop.mesh.visible = false;
     gain('crops');
     T.feedLine(`🥕 +1 Veg (${T.goods.crops})`);
+    // (helping the farmer with the harvest on the first day: allowed — townIntro.js)
+    if (T.introAllowsPick(field)) { T.introNote('pick'); return; }
     const owner = T.npcs.find((n) => n.alive && n.role === 'farmer' && n.work === field) ?? null;
     T.crime('theft', owner);
   };
@@ -113,6 +115,7 @@ export function installTownTrade(T, ctx) {
     if (Math.random() < FISH_CHANCE) {
       gain('fish');
       T.feedLine(`🐟 Caught a fish! (${T.goods.fish})`);
+      T.introNote('fish');
     } else {
       T.feedLine('🐟 It got away…');
     }
@@ -240,7 +243,8 @@ export function installTownTrade(T, ctx) {
       note: !merchant ? 'The merchant isn\'t here.'
         : merchantShunsPlayer() ? `${firstName(merchant.name)} won't trade with you.`
         : merchant.attitude >= FRIEND_ATTITUDE ? `${firstName(merchant.name)} gives you a friend's price.` : null,
-      goods: GOOD_IDS.map((g) => ({
+      // (cooked food: only once the player has some to sell)
+      goods: GOOD_IDS.filter((g) => !GOODS[g].cooked || T.goods[g] > 0).map((g) => ({
         id: g, emoji: GOODS[g].emoji, label: GOODS[g].label, stock: T.market.stock[g], have: T.goods[g],
         sell: playerSellPrice(g),
         canSell: !!merchant && !merchantShunsPlayer() && T.goods[g] > 0 && cash >= playerSellPrice(g),
@@ -288,6 +292,8 @@ export function installTownTrade(T, ctx) {
     if (T.netMode === 'client') T.net.send(T.net.hostId(), { w: 1, op: 'trade', g, d: 1, cash: -price });
     ctx.addCoins(price);
     noteStock();
+    T.remember(merchant, 'customer');
+    T.introNote('sell');
   };
   const buyGear = (id) => {
     const item = SHOP_GEAR.find((x) => x.id === id);
@@ -301,7 +307,7 @@ export function installTownTrade(T, ctx) {
   const openChest = () => {
     if (ctx.getCoins() < CHEST_PRICE) return { ok: false };
     const items = ctx.getItems() ?? {};
-    const good = pickOf(GOOD_IDS);
+    const good = pickOf(RAW_IDS);
     const prizes = [
       { w: 24, emoji: '🪙', give: () => { const n = 10 + 5 * Math.floor(Math.random() * 7); ctx.addCoins(n); return `${n} coins`; } },
       { w: 16, emoji: '💣', give: () => (ctx.grantItem('bomb', 2) ? '2 bombs' : null) },
@@ -366,7 +372,7 @@ export function installTownTrade(T, ctx) {
     && T.isWorking(m)) ?? null;
   // (feed: a good running out / coming back)
   const noteStock = () => {
-    for (const g of GOOD_IDS) {
+    for (const g of RAW_IDS) {
       if (T.market.stock[g] <= 0 && !T.soldOut.has(g)) {
         T.soldOut.add(g);
         T.feedLine(`📉 The market's out of ${GOODS[g].label.toLowerCase()}! ${GOODS[g].emoji} ${T.market.price(g)}🪙 now`);

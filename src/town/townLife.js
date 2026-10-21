@@ -63,8 +63,10 @@ export function installTownLife(T, ctx) {
     nd.hunger = Math.min(1, nd.hunger + NEEDS.hungerRate * dt);
     nd.social = Math.min(1, nd.social + NEEDS.socialRate * dt);
     if (n.fear > 0) n.fear = Math.max(0, n.fear - dt);
-    // Grudges and fondness fade (fondness slower)
-    n.attitude -= n.attitude * ATTITUDE_FADE * dt * (n.attitude > 0 ? 0.5 : 1);
+    // Grudges and fondness fade (fondness slower) — back to what their memories of the player
+    // hold it at (townMemory.js)
+    const fromBias = n.attitude - (n.memBias || 0);
+    n.attitude -= fromBias * ATTITUDE_FADE * dt * (fromBias > 0 ? 0.5 : 1);
     if (T.simT > (n.reactAt ?? 0)) {
       n.reactAt = T.simT + 0.5;
       T.reactToPlayer(n);

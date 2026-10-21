@@ -60,6 +60,7 @@ export function installTownLaw(T, ctx) {
     n.followerHit = false;
     n.remoteBy = null;
     if (byPlayer) n.attitude = Math.max(-1, n.attitude - 0.3);
+    if (byPlayer && !killed && !T.isOutlaw(n)) T.remember(n, 'hurt');
     if (killed) {
       n.hp = 0;
       ctx.releaseFighterGear(n.fighter);
@@ -90,6 +91,7 @@ export function installTownLaw(T, ctx) {
     n.hp -= amount;
     n.attitude = Math.max(-1, n.attitude - 0.6);
     const outlaw = T.isOutlaw(n);
+    if (!outlaw) T.remember(n, 'hurt');
     const gy = T.groundY(n);
     ctx.spawnBlood(_v.set(n.x, gy + 0.55 * heightScale(n.url), n.z), gy);
     ctx.playSfx('hit');
@@ -145,6 +147,7 @@ export function installTownLaw(T, ctx) {
     if (byPlayer && !T.isOutlaw(n)) {
       for (const k of T.family(n)) {
         k.attitude = -1;
+        T.remember(k, 'killedKin', { who: firstName(n.name), rel: relationOf(n.role) });
         if (!k.def.unhurt) { k.vendetta = true; k.vendettaFor = relationOf(n.role); }
       }
     }
@@ -202,6 +205,9 @@ export function installTownLaw(T, ctx) {
     T.law.lastKnown.copy(p);
     for (const w of witnesses) {
       w.attitude = Math.max(-1, w.attitude - (kind === 'murder' ? 0.6 : kind === 'theft' ? 0.2 : 0.3));
+      // (what they saw — townMemory.js; the victim of an assault remembers it from hurt)
+      if (kind === 'murder' && w !== victim) T.remember(w, 'sawMurder', { who: victim ? firstName(victim.name) : 'them' });
+      else if (kind === 'theft' && w === victim) T.remember(w, 'stole');
       if (w === victim || w.fighter || w.def.law) continue;
       if (kind === 'theft') { T.say(w, shout(SHOUT_THIEF)); continue; }
       flee(w);
@@ -349,6 +355,8 @@ export function installTownLaw(T, ctx) {
     const P = T.layout.places;
     T.jail = { left: JAIL_S };
     T.layout.props.door.rotation.y = 0;
+    const sheriff = T.npcs.find((n) => n.alive && n.role === 'sheriff');
+    if (sheriff) T.remember(sheriff, 'jailed');
     ctx.setPositionConstraint((controls) => {
       const dx = controls.playerX - P.jail.x;
       const dz = controls.playerZ - P.jail.z;

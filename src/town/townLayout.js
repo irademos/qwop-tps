@@ -203,6 +203,10 @@ export function installTownLayout(T, ctx) {
     const fire = makeCampfire();
     fire.group.position.set(places.fire.x, groundAt(places.fire.x, places.fire.z), places.fire.z);
     group.add(fire.group);
+    // …with a cooking pot over it (townCooking.js)
+    const cookPot = T.makeCookPot();
+    cookPot.position.copy(fire.group.position);
+    group.add(cookPot);
     // Jail: an iron cage with a door that swings open
     const jailRoot = new THREE.Group();
     jailRoot.position.set(places.jail.x, groundAt(places.jail.x, places.jail.z), places.jail.z);
@@ -282,7 +286,7 @@ export function installTownLayout(T, ctx) {
     const campSign = makeTextSprite('💀 Bandit camp', { height: 0.28 });
     campSign.position.set(places.camp.x, groundAt(places.camp.x, places.camp.z) + 2.3, places.camp.z);
     group.add(campSign);
-    return { group, fire, door, campFire, strongbox };
+    return { group, fire, door, campFire, strongbox, cookPot };
   };
 
   Object.assign(T, {

@@ -14,7 +14,7 @@ import {
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
 export function installTownFolk(T, ctx) {
   // ── Townsfolk ──
-  const makeNpc = ({ id, name, role, url, home, money = role === 'merchant' ? MERCHANT_START_CASH : rand(4, 14), attitude = 0, carry = null, vendetta = false, following = false }) => {
+  const makeNpc = ({ id, name, role, url, home, money = role === 'merchant' ? MERCHANT_START_CASH : rand(4, 14), attitude = 0, carry = null, vendetta = false, following = false, mem = null }) => {
     const def = ROLES[role] ?? ROLES.townsfolk;
     const { homes } = T.layout.places;
     // (bandits live at the camp: home index -1)
@@ -40,6 +40,8 @@ export function installTownFolk(T, ctx) {
       // in the cell until (sim time), the next blow in a brawl, last stepped aside
       vendetta, following, outlawUntil: 0, jailedUntil: 0, nextBlowAt: 0, avoidAt: 0,
       loot: 0, lost: false,
+      // what they remember the player did (townMemory.js) and what it holds their attitude at
+      mem: Array.isArray(mem) ? mem : [], memBias: 0,
     };
   };
   // Work spots handed out per role (two woodcutters don't share a tree)

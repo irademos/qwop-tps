@@ -96,6 +96,9 @@ import { installTownLife } from './townLife.js';
 import { installTownMissions } from './townMissions.js';
 import { installTownActs } from './townActs.js';
 import { installTownWire } from './townWire.js';
+import { installTownCooking } from './townCooking.js';
+import { installTownMemory } from './townMemory.js';
+import { installTownIntro } from './townIntro.js';
 
 // Guests (and the session before a profile loads) keep the town in memory
 let _memoryState = null;
@@ -129,9 +132,11 @@ export function createTownMode(ctx) {
   T.acts = [];
   const pool = new Map();     // url → [{ container, character }]
   T.market = createMarket();   // the stall's stock (replaced by the saved one on enter)
-  const goods = { wood: 0, fish: 0, crops: 0 }; // what the player carries
+  const goods = Object.fromEntries(GOOD_IDS.map((g) => [g, 0])); // what the player carries
   const soldOut = new Set();  // goods the market has run out of (for the feed)
   T.fishing = null;           // { left, x, z } while the player's line is out
+  T.cooking = null;           // { recipe, left, x, z } while something's on the fire (townCooking.js)
+  T.intro = null;             // the first day's goals (townIntro.js), null once done
   T.jobs = [];                // posted + taken jobs (townJobs.js)
   T.nextJobId = 1;
   T.chainsDone = new Set();
@@ -185,7 +190,11 @@ export function createTownMode(ctx) {
   hud.append(top, stars, jailChip, campChip, lobbyBtn, feed, goodsEl, actsEl);
   document.body.append(hud, fade);
   const renderGoods = () => {
-    for (const g of GOOD_IDS) goodEls[g].textContent = `${GOODS[g].emoji} ${goods[g]}`;
+    for (const g of GOOD_IDS) {
+      goodEls[g].textContent = `${GOODS[g].emoji} ${goods[g]}`;
+      // (cooked food only once there's some)
+      goodEls[g].classList.toggle('hidden', !!GOODS[g].cooked && goods[g] <= 0);
+    }
   };
   const marketPanel = createMarketPanel(hud, {
     onSellGood: (g) => T.sellGood(g),
@@ -228,7 +237,9 @@ export function createTownMode(ctx) {
       money: Math.round(n.money), attitude: Math.round(n.attitude * 100) / 100,
       carry: { ...n.carry },
       vendetta: !!n.vendetta, following: !!n.following,
+      mem: n.mem?.length ? n.mem : undefined,
     })),
+    intro: T.introSnapshot(),
     jobs: T.jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
     nextJobId: T.nextJobId,
     chainsDone: [...T.chainsDone],
@@ -264,6 +275,8 @@ export function createTownMode(ctx) {
     att: Object.fromEntries(T.npcs.filter((n) => n.alive && Math.abs(n.attitude) > 0.01).map((n) => [n.id, Math.round(n.attitude * 100) / 100])),
     vend: Object.fromEntries(T.npcs.filter((n) => n.alive && n.vendetta).map((n) => [n.id, n.vendettaFor || 'friend'])),
     follow: T.npcs.filter((n) => n.alive && n.following && !n.escort).map((n) => n.id),
+    mem: Object.fromEntries(T.npcs.filter((n) => n.alive && n.mem?.length).map((n) => [n.id, n.mem])),
+    intro: T.introSnapshot(),
     jobs: T.jobs.map((j) => ({ ...j, data: { ...j.data, raiders: undefined } })),
     nextJobId: T.nextJobId,
     chainsDone: [...T.chainsDone],
@@ -291,6 +304,7 @@ export function createTownMode(ctx) {
       const v = own?.vend?.[n.id];
       n.vendetta = !!v;
       n.vendettaFor = v || undefined;
+      n.mem = Array.isArray(own?.mem?.[n.id]) ? own.mem[n.id] : [];
     }
     for (const id of own?.follow ?? []) {
       const n = T.npcById(id);
@@ -350,6 +364,8 @@ export function createTownMode(ctx) {
         if (T.distToPlayer(n) < 40) feedLine(`💀 ${n.name} joined the bandits.`);
         continue;
       }
+      // (they've heard what the town thinks of the player)
+      n.attitude = T.reputation() * 0.4;
       const E = T.layout.places.entrance;
       n.x = E.x;
       n.z = E.z;
@@ -424,7 +440,10 @@ export function createTownMode(ctx) {
     if (T.isHost()) T.ensureGang();
     T.assignWork();
     if (T.mp()) applyOwn(own);
+    for (const n of T.npcs) n.memBias = T.memBiasOf(n);
     T.restoreJobs(own);
+    // (no save of the player's own yet: the first day starts — a save's null: it's done)
+    T.startIntro(own ? own.intro : undefined);
     // Start mid-day: everyone already at whatever they'd be doing
     T.isNight = null;
     applyTime();
@@ -501,6 +520,8 @@ export function createTownMode(ctx) {
     tracker.render([]);
     T.stalls.setActive(false);
     T.fishing = null;
+    T.cooking = null;
+    T.resetMemoryHud();
     T.active = false;
     T.ready = false;
     T.enterToken += 1;
@@ -565,16 +586,17 @@ export function createTownMode(ctx) {
     for (const n of T.npcs) T.updateNpc(n, dt);
     T.npcs = T.npcs.filter((n) => n.alive || n.dying);
     T.updateFishing(dt);
+    T.updateCooking(dt);
     if (T.simT > T.growAt) { T.growAt = T.simT + 1; T.updateRegrowth(); }
     // (the market panel shuts when the merchant leaves the stall or the player walks off)
     if (marketPanel.isOpen() && (!T.marketOpen() || !T.nearStall())) T.closeMarket();
     for (const g of T.gossip) if (T.simT - g.at > 240) g.fresh = false;
     if (T.isHost()) updateArrivals();
-    if (T.simT > law.tickAt) { law.tickAt = T.simT + 0.5; T.updateLaw(); T.updateCampWatch(); T.updateJobs(); }
+    if (T.simT > law.tickAt) { law.tickAt = T.simT + 0.5; T.updateLaw(); T.updateCampWatch(); T.updateIntro(); T.updateJobs(); T.updateReputation(); }
     T.updateMarkers();
     if (T.simT > T.lodAt) { T.lodAt = T.simT + 0.4; T.updateLod(); }
     for (const n of T.npcs) if (n.body && !n.dying) T.syncBody(n, dt);
-    if (T.simT > T.actsAt) { T.actsAt = T.simT + 0.15; T.refreshActs(); }
+    if (T.simT > T.actsAt) { T.actsAt = T.simT + 0.15; T.refreshActs(); T.updateRelation(); }
     if (T.simT > T.saveAt) { T.saveAt = T.simT + SAVE_EVERY_S; save(); }
     // (the weapon stall's keeper is there in the market's hours)
     T.stalls.setKeeperVisible('gear', T.gearOpen());
@@ -617,7 +639,7 @@ export function createTownMode(ctx) {
   Object.assign(T, {
     actsEl, advanceClock, campChip, campWatch, clock, fade, feedLine, goods, hour, hud, jailChip,
     jobTalk, law, loadPersonal, lockpick, markers, marketPanel, net, netT, pool, renderGoods,
-    renderStars, root, save, soldOut, spawnTown, topPlace, tracker, usedNames, worldSnapshot,
+    renderStars, root, save, soldOut, spawnTown, top, topPlace, tracker, usedNames, worldSnapshot,
   });
   installTownLayout(T, ctx);
   installTownFolk(T, ctx);
@@ -629,6 +651,9 @@ export function createTownMode(ctx) {
   installTownMissions(T, ctx);
   installTownActs(T, ctx);
   installTownWire(T, ctx);
+  installTownCooking(T, ctx);
+  installTownMemory(T, ctx);
+  installTownIntro(T, ctx);
 
 
   return {
@@ -661,6 +686,6 @@ export function createTownMode(ctx) {
     // The phone's Block bar label while there's something to do (undefined: it stays Block)
     interactLabel: () => (T.active && T.acts.length ? T.acts[0].label : undefined),
     // (dev console)
-    debug: () => ({ netMode: T.netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs: T.npcs, layout: T.layout, law, clock, arrivals: T.arrivals, market: T.market, goods, stalls: T.stalls, ctx, jobs: T.jobs, chainsDone: T.chainsDone, simT: () => T.simT, stallItemState: T.stallItemState, kill: (n) => T.die(n, { byPlayer: true }) }),
+    debug: () => ({ T, netMode: T.netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs: T.npcs, layout: T.layout, law, clock, arrivals: T.arrivals, market: T.market, goods, stalls: T.stalls, ctx, jobs: T.jobs, chainsDone: T.chainsDone, simT: () => T.simT, stallItemState: T.stallItemState, kill: (n) => T.die(n, { byPlayer: true }) }),
   };
 }

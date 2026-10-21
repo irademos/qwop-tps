@@ -38,7 +38,10 @@ export function installTownReactions(T, ctx) {
     for (const w of T.npcs) {
       if (!w.alive || w === victim || w.def.outlaw || dist2(w.x, w.z, p.x, p.z) > WITNESS_DIST) continue;
       w.attitude = Math.min(1, w.attitude + 0.12);
-      if (victim.mugVictim === w && Math.random() < 0.7) T.say(w, fillLine(pickOf(SHOUT_THANKS), { name: ctx.getPlayerName() }));
+      if (victim.mugVictim === w) {
+        T.remember(w, 'saved', { who: firstName(victim.name) });
+        if (Math.random() < 0.7) T.say(w, fillLine(pickOf(SHOUT_THANKS), { name: ctx.getPlayerName() }));
+      }
     }
   };
   // A townsperson the player hurt: their family and the brave nearby step in
