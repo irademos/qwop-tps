@@ -72,9 +72,10 @@ export function installTownLayout(T, ctx) {
       const hz = (max.z - min.z) / 2;
       const axisX = spec.side.endsWith('x');
       const sign = spec.side[0] === '-' ? -1 : 1;
+      const inset = 1 - (spec.inset ?? 0);
       const wall = axisX
-        ? new THREE.Vector3(mx + sign * hx, 0, mz + spec.at * hz)
-        : new THREE.Vector3(mx + spec.at * hx, 0, mz + sign * hz);
+        ? new THREE.Vector3(mx + sign * hx * inset, 0, mz + spec.at * hz)
+        : new THREE.Vector3(mx + spec.at * hx, 0, mz + sign * hz * inset);
       const normal = axisX ? new THREE.Vector3(sign, 0, 0) : new THREE.Vector3(0, 0, sign);
       wall.applyMatrix4(b.matrix);
       normal.transformDirection(b.matrix).setY(0).normalize();

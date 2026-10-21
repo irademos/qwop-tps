@@ -15,16 +15,18 @@ export const NAV_START = { x: -24.9, z: -31.5 };
 export const BUILDING_RE = /house|building|cabin/i;
 export const TREE_RE = /tree/i;
 // Where each house model's front door is (its own frame — the GLB's axes): the wall it's in
-// ('+x' / '-x' / '+z' / '-z') and how far along that wall from its middle (-1 … 1 of the
-// half width: x along a ±z wall, z along a ±x wall). The shops are entered there.
+// ('+x' / '-x' / '+z' / '-z'), how far along that wall from its middle (`at`, -1 … 1 of the
+// half width: x along a ±z wall, z along a ±x wall) and how far the door sits in from the
+// model's bounds on that side (`inset`, of the half depth: steps, a porch, overhangs stick out
+// past it — measured by a ray at door height). The shops are entered there.
 export const HOUSE_DOORS = {
-  'medieval_building_002.glb': { side: '-x', at: 0.35 },
-  'medieval_building_004.glb': { side: '+z', at: 0.45 },
-  'medieval_building_005.glb': { side: '+x', at: 0.36 },
-  'fantasy_house.glb': { side: '+z', at: 0.3 },
-  'fantasy_house (1).glb': { side: '+z', at: 0 },
+  'medieval_building_002.glb': { side: '-x', at: 0.35, inset: 0.65 },
+  'medieval_building_004.glb': { side: '+z', at: 0.45, inset: 0.38 },
+  'medieval_building_005.glb': { side: '+x', at: 0.36, inset: 0.55 },
+  'fantasy_house.glb': { side: '+z', at: 0.3, inset: 0.63 },
+  'fantasy_house (1).glb': { side: '+z', at: 0, inset: 0.48 },
 };
-export const HOUSE_DOOR_OUT = 0.45;         // m out from the wall: the door spot outside
+export const HOUSE_DOOR_OUT = 0.45;         // m out from the door: the door spot outside (on the top step)
 export const TREE_TRUNK_RADIUS = 0.6;
 // ── Clock ── (an hour = 20 s, a day = 8 min)
 export const MINUTES_PER_SEC = 3;
