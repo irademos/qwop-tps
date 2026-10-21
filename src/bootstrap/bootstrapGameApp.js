@@ -8331,6 +8331,10 @@ async function initCore(runtimeContext) {
     isPlayerDead: () => playerDead,
     getGroundY: (x, z) => getTerrainHeight(x, z),
     isOverWater: (x, z) => _isOverWater(x, z),
+    // The water's surface height there (null on dry ground) — the fishing bobber floats on it
+    getWaterY: (x, z) => _activeMap?.water?.(x, z) ?? null,
+    // The player's model (the fishing rod is held by it)
+    getPlayerModel: () => playerModel,
     pathAt: (x, z) => _activeMap?.paths?.(x, z) ?? null,
     // The active map's placed objects (houses, trees…) with their centres inside `b`
     getMapObjects: (b) => {
@@ -8444,6 +8448,8 @@ async function initCore(runtimeContext) {
     getItems: () => (_townLoadout ? _townItems() : null),
     // Something in hand (the bandits at their camp rob an unarmed trespasser instead of fighting)
     isPlayerArmed: () => !!_heldWeaponId(),
+    // Empty hands (the fishing rod needs both)
+    putWeaponsAway: () => _putWeaponsAway(),
     grantItem: (kind, n) => grantTownItem(kind, n),
     // Arrested: the guards take every weapon
     confiscate: () => {

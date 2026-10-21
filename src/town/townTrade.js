@@ -6,9 +6,10 @@ import { FOOD_IDS, GOODS, GOOD_IDS, RAW_IDS, SHOP_GEAR } from './townEconomy.js'
 import { SHOUT_EAT_BUY, firstName, shout } from './townPeople.js';
 import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
+import { createFishingRig } from '../items/fishingRod.js';
 import {
-  CHEST_PRICE, CHOP_HITS, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FISH_CANCEL_DIST,
-  FISH_CHANCE, FISH_S, FISH_WATER_CELLS, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
+  CHEST_PRICE, CHOP_HITS, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FISH_BITE_S, FISH_CANCEL_DIST,
+  FISH_CAST_DIST, FISH_CAST_REACH, FISH_CHANCE, FISH_S, FISH_WATER_CELLS, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
   MARKET_HOURS, NAV_CELL, PICK_DIST, PRODUCE, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
   heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
@@ -96,23 +97,72 @@ export function installTownTrade(T, ctx) {
     }
     return false;
   };
+  // Where the bobber lands: the water spot nearest FISH_CAST_DIST m in front of the player
+  const _fwd = new THREE.Vector3();
+  const castTarget = () => {
+    const p = T.playerPos();
+    const nav = T.layout.nav;
+    ctx.getPlayerModel()?.getWorldDirection(_fwd);
+    const aimX = p.x + _fwd.x * FISH_CAST_DIST;
+    const aimZ = p.z + _fwd.z * FISH_CAST_DIST;
+    let best = null;
+    let bestD = Infinity;
+    const r = FISH_CAST_REACH;
+    for (let dz = -r; dz <= r; dz += NAV_CELL / 2) {
+      for (let dx = -r; dx <= r; dx += NAV_CELL / 2) {
+        const x = p.x + dx;
+        const z = p.z + dz;
+        if (dx * dx + dz * dz < 1.5 * 1.5 || !nav.isWater(nav.indexAt(x, z))) continue;
+        const d = dist2(x, z, aimX, aimZ);
+        if (d < bestD) { bestD = d; best = { x, z }; }
+      }
+    }
+    if (!best) return null;
+    const y = ctx.getWaterY(best.x, best.z) ?? ctx.getGroundY(best.x, best.z);
+    return new THREE.Vector3(best.x, y, best.z);
+  };
+  // The rod, line and bobber (fishingRod.js) — made the first time the player fishes
+  let rig = null;
+  const fishingRig = () => (rig ??= createFishingRig(ctx.scene));
   const startFishing = () => {
     if (T.fishing) return;
     const p = T.playerPos();
-    T.fishing = { left: rand(...FISH_S), x: p.x, z: p.z };
+    const at = castTarget();
+    const left = rand(...FISH_S);
+    // (decided now, so the bobber can show a real bite — or only a nibble — before the end)
+    T.fishing = { left, total: left, x: p.x, z: p.z, catch: Math.random() < FISH_CHANCE };
+    ctx.putWeaponsAway();
+    if (at) fishingRig().start(ctx.getPlayerModel(), at);
     T.feedLine('🎣 Line\'s in the water…');
   };
+  // Put away at once (leaving Town, arrests): no reeling in
+  const stopFishingRig = () => rig?.stop();
   const updateFishing = (dt) => {
-    if (!T.fishing) return;
-    const p = T.playerPos();
-    if (dist2(p.x, p.z, T.fishing.x, T.fishing.z) > FISH_CANCEL_DIST || ctx.isPlayerDead()) {
-      T.fishing = null;
-      return;
+    // Ended elsewhere (🎣 reel in, an arrest, a fight): reel in empty, or just put it away
+    if (!T.fishing && rig?.isBusy()) {
+      if (ctx.isPlayerDead() || T.jail || T.sequence) rig.stop();
+      else rig.reel(false);
     }
-    T.fishing.left -= dt;
-    if (T.fishing.left > 0) return;
+    const f = T.fishing;
+    let bite = 0;
+    if (f) {
+      const p = T.playerPos();
+      if (dist2(p.x, p.z, f.x, f.z) > FISH_CANCEL_DIST || ctx.isPlayerDead() || ctx.isPlayerArmed()) {
+        T.fishing = null;
+        rig?.reel(false);
+        rig?.update(dt);
+        return;
+      }
+      f.left -= dt;
+      // The last FISH_BITE_S: a fish on the line tugs harder and harder; one that gets away nibbles
+      const into = FISH_BITE_S - f.left;
+      if (into > 0) bite = f.catch ? Math.min(1, 0.3 + into / FISH_BITE_S) : (into < FISH_BITE_S * 0.4 ? 0.35 : 0);
+    }
+    rig?.update(dt, { bite });
+    if (!f || f.left > 0) return;
     T.fishing = null;
-    if (Math.random() < FISH_CHANCE) {
+    rig?.reel(f.catch);
+    if (f.catch) {
       gain('fish');
       T.feedLine(`🐟 Caught a fish! (${T.goods.fish})`);
       T.introNote('fish');
@@ -435,7 +485,7 @@ export function installTownTrade(T, ctx) {
   Object.assign(T, {
     buyFood, calmNow, closeMarket, deliverGoods, eat, focusStall, gearOpen, getMagicTargets,
     getWeaponTargets, hurtFood, marketOpen, nearStall, nearWater, nearestStall, noteStock,
-    openMarket, pickCrop, ripeCropNear, sellGood, stallItemState, stalls, startFishing, tryChop,
+    openMarket, pickCrop, ripeCropNear, sellGood, stallItemState, stalls, startFishing, stopFishingRig, tryChop,
     updateFishing, updateRegrowth, workingMerchant,
   });
 }

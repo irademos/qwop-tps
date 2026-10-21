@@ -523,6 +523,7 @@ export function createTownMode(ctx) {
     tracker.render([]);
     T.stalls.setActive(false);
     T.fishing = null;
+    T.stopFishingRig();
     T.cooking = null;
     T.resetMemoryHud();
     T.active = false;
