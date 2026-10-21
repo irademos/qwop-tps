@@ -12,8 +12,8 @@
 // Transport: the PeerJS Multiplayer in room `town-<roomId>`; everyone is connected to everyone
 // (sendTo). Its host (the oldest peer in the room) runs the townsfolk — townMode.js has the
 // world protocol (messages with `w: 1`, handed to ctx.onWorldMessage). This module also does the
-// players themselves: each sends `pl` (name, character, wanted stars, sword pose) a few times a
-// second; their swords are drawn on their models and are hit targets for the local sword (PvP:
+// players themselves: each sends `pl` (name, character, wanted stars, weapon, sword pose) a few
+// times a second; their sword / wand / gun / shield are drawn on their models and are hit targets for the local sword (PvP:
 // the attacker detects the hit — `pvp` — the victim applies it); `bounty` pays whoever brought
 // a wanted player down.
 
@@ -95,7 +95,8 @@ export const loadTownRoomState = async (roomId) => {
 export const saveTownRoomState = (roomId, state) => set(ref(db, `townRoomState/${roomId}`), state).catch(() => {});
 
 // ctx: getMultiplayer(), startMultiplayer(roomId), stopMultiplayer(), profileKey(), memberKey(), getPlayerName(),
-//   scene, getRemoteModel(id), setRemoteCharacter(id, url), createSwordMesh(url),
+//   scene, getRemoteModel(id), setRemoteCharacter(id, url), createSwordMesh(url), createWandMesh(),
+//   getLocalWeapon() → 'sword' | 'gun' | 'shield' | 'wand' | null, getWeaponGear() (matchCtx's),
 //   getLocalSwordState(), getLocalCharacterUrl(), getStars(), applyPvpHit(dmg, dir, fromId),
 //   onSwingBlocked(), onAttackPlayer(info), onBounty(fromName, coins), onWorldMessage(from, data)
 export function createTownNet(ctx) {
@@ -176,7 +177,7 @@ export function createTownNet(ctx) {
   const dropPlayer = (pid) => {
     const p = players.get(pid);
     if (!p) return;
-    p.sword?.parent?.remove(p.sword);
+    for (const m of [p.sword, p.wand, p.gunMesh, p.shieldMesh]) m?.parent?.remove(m);
     players.delete(pid);
   };
 
@@ -202,6 +203,7 @@ export function createTownNet(ctx) {
         } else p.swordTarget.has = false;
         if (isVec(data.h, 3)) p.hand.fromArray(data.h);
         p.blocking = !!data.b;
+        p.weapon = ['sword', 'gun', 'shield', 'wand'].includes(data.w) ? data.w : null;
         return;
       }
       case 'pvp':
@@ -234,28 +236,67 @@ export function createTownNet(ctx) {
       const st = ctx.getLocalSwordState() || {};
       broadcast({
         op: 'pl', n: ctx.getPlayerName(), c: ctx.getLocalCharacterUrl(), st: ctx.getStars(),
-        s: st.sword ?? null, h: st.hand ?? null, b: st.blocking ? 1 : 0,
+        s: st.sword ?? null, h: st.hand ?? null, b: st.blocking ? 1 : 0, w: ctx.getLocalWeapon(),
       });
     }
     for (const p of players.values()) {
       const model = ctx.getRemoteModel(p.id);
       if (!model) continue;
-      // (hands on the sword only while they hold it — otherwise their arms hang / walk as on their screen)
-      model.userData.remoteArmed = p.swordTarget.has;
-      model.userData.remoteHandTarget = p.hand;
+      // Gun / shield: on their weapon hand, both hands on its grip (as they hold it)
+      if (p.gearModel !== model && (p.weapon === 'gun' || p.weapon === 'shield')) attachGear(p, model);
+      const held = p.gearModel === model ? p.weapon : null;
+      if (p.gunMesh) p.gunMesh.visible = held === 'gun';
+      if (p.shieldMesh) p.shieldMesh.visible = held === 'shield';
+      const grip = held === 'gun' ? p.gripGun : held === 'shield' ? p.gripShield : null;
+      // (hands on a weapon only while they hold one — otherwise their arms hang / walk as on their screen)
+      model.userData.remoteArmed = !!grip || p.swordTarget.has;
+      model.userData.remoteHandTarget = grip ?? p.hand;
+      // Sword (or the wand, held the same way) where their game says it is
+      const wand = p.weapon === 'wand';
       if (!p.sword) {
         p.sword = ctx.createSwordMesh(p.url);
         if (p.sword) ctx.scene.add(p.sword);
       }
-      if (!p.sword) continue;
-      p.sword.visible = model.visible && p.swordTarget.has;
-      if (p.sword.visible) {
-        p.sword.position.copy(p.swordTarget.pos);
+      if (wand && !p.wand) {
+        p.wand = ctx.createWandMesh();
+        if (p.wand) ctx.scene.add(p.wand);
+      }
+      const show = model.visible && p.swordTarget.has;
+      if (p.sword) p.sword.visible = show && !(wand && p.wand);
+      if (p.wand) p.wand.visible = show && wand;
+      const blade = p.wand?.visible ? p.wand : p.sword?.visible ? p.sword : null;
+      p.blade = blade;
+      if (blade) {
+        blade.position.copy(p.swordTarget.pos);
         model.updateMatrixWorld();
-        model.localToWorld(p.sword.position);
-        p.sword.quaternion.copy(model.quaternion).multiply(p.swordTarget.quat);
+        model.localToWorld(blade.position);
+        blade.quaternion.copy(model.quaternion).multiply(p.swordTarget.quat);
       }
     }
+  };
+  // The gun and shield models on another player's model (the battles' way — ctx.getWeaponGear)
+  const attachGear = (p, model) => {
+    const gear = ctx.getWeaponGear();
+    if (!gear) return; // (models still loading: next frame)
+    p.gunMesh?.parent?.remove(p.gunMesh);
+    p.shieldMesh?.parent?.remove(p.shieldMesh);
+    // (the floating hand the player's own weapon goes on — labels are mirrored)
+    const hand = model.children.find((child) => child.userData?.proceduralHand === 'left');
+    const place = (kind) => {
+      const g = gear[kind];
+      const mesh = g.createMesh();
+      mesh.position.copy(g.offset);
+      if (!hand) mesh.position.add(g.grip);
+      mesh.quaternion.copy(g.quaternion);
+      mesh.visible = false;
+      (hand || model).add(mesh);
+      return mesh;
+    };
+    p.gripGun = gear.gun.grip.clone();
+    p.gripShield = gear.shield.grip.clone();
+    p.gunMesh = place('gun');
+    p.shieldMesh = place('shield');
+    p.gearModel = model;
   };
 
   // Everyone the local sword can hit (the duel opponent's shape — see _getPvpTargets)
@@ -268,10 +309,11 @@ export function createTownNet(ctx) {
       c.position.copy(model.position);
       c.center.copy(model.position);
       c.center.y += 0.8;
-      c.hasBlade = !!p.sword?.visible;
+      const blade = p.blade;
+      c.hasBlade = !!blade?.visible;
       if (c.hasBlade) {
-        bladeOffsets.forEach((o, i) => c.bladePoints[i].copy(o).applyQuaternion(p.sword.quaternion).add(p.sword.position));
-        c.bladeDir.set(0, 0, 1).applyQuaternion(p.sword.quaternion);
+        bladeOffsets.forEach((o, i) => c.bladePoints[i].copy(o).applyQuaternion(blade.quaternion).add(blade.position));
+        c.bladeDir.set(0, 0, 1).applyQuaternion(blade.quaternion);
       }
       c.blocking = p.blocking;
       out.push(c);
