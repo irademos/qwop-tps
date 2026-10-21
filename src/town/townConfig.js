@@ -20,6 +20,10 @@ export const MINUTES_PER_SEC = 3;
 export const START_MINUTES = 8 * 60;
 export const NIGHT_FROM_H = 21;
 export const NIGHT_TO_H = 5.5;
+// At night the player takes a lantern out (bootstrapGameApp.js) once this far from the nearest
+// house (m, past its edge), and puts it away again back within LANTERN_PUT_AWAY_DIST
+export const LANTERN_DIST = 12;
+export const LANTERN_PUT_AWAY_DIST = 9;
 // ── People ──
 export const TOWN_MAX_BODIES = 12;   // townsfolk drawn at once (the nearest)
 export const BODY_DIST = 42;                // m — drawn within this…

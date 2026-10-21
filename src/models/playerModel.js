@@ -48,6 +48,10 @@ function updateGLBCharacter(rig, dt, isMoving) {
   character.stepFluff(dt);
 }
 
+// Town lantern (userData.lanternHeld, bootstrapGameApp.js): the game 'right' hand (the
+// anatomical left arm) carries it low at the side; whatever else is held is one-handed
+const LANTERN_HAND = Object.freeze({ x: 0.3, y: 0.52, z: 0.18 });
+
 const CLIMB_HAND_CYCLES_PER_M = 1.2; // hand-over-hand cycles per m of wall climbed
 
 export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds, options = {}) {
@@ -67,14 +71,19 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
     const gyroQ = playerGroup.userData.gyroArmQuat;
     const gyroLive = !!gyroQ && performance.now() - (playerGroup.userData.gyroArmTime || 0) < GYRO_ARM_MAX_AGE_MS;
     const armed = !!playerGroup.userData.foamSwordMode;
+    const lantern = !!playerGroup.userData.lanternHeld;
     rig.glbCharacter?.setArmIKHands(armed || options.climbing
       ? { left: true, right: true }
-      : { left: gyroLive, right: false });
+      : { left: gyroLive, right: lantern });
+    if (lantern) {
+      _fsHandTarget.set(LANTERN_HAND.x, LANTERN_HAND.y, LANTERN_HAND.z).multiplyScalar(grip);
+      rig.floatingHands.right.position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
+    }
     if (armed) {
       playerGroup.userData.foamSwordMode = false; // consume the flag
       const fst = playerGroup.userData.foamSwordHandTarget;
       if (fst) {
-        for (const side of ['left', 'right']) {
+        for (const side of lantern ? ['left'] : ['left', 'right']) {
           // Right tracking slot (support hand) sits slightly lower on the handle
           const yOff = side === 'right' ? -0.08 : 0;
           _fsHandTarget.set(fst.x, fst.y + yOff, fst.z).multiplyScalar(grip);
@@ -90,7 +99,7 @@ export function updateProceduralPlayerRig(playerGroup, keysPressed, deltaSeconds
       ).multiplyScalar(grip);
       rig.floatingHands.left.position.lerp(_fsHandTarget, 1 - Math.exp(-18 * dt));
     } else {
-      for (const side of ['left', 'right']) {
+      for (const side of lantern ? ['left'] : ['left', 'right']) {
         const floatingHand = rig.floatingHands[side];
         let targetPos = _defaultHandPos.set(side === 'left' ? -0.5 : 0.5, 0.82, 0.25);
         const depthOverride = playerGroup.userData.handDepthOverride?.[side];
