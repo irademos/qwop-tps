@@ -65,20 +65,31 @@ export const CHAINS = [
   },
 ];
 
-// ── The job talk: a townsperson offering a job / taking it back done (bottom centre, the
-// Showdown village's talk box) ──
-// open({ who, sub, text, choices: [{ label, primary, onClick }] }) / close() / isOpen() /
-// pressFirst() (E / Enter / the phone's interact)
-export function createJobTalk(parent) {
+// ── The talk box: every conversation with a townsperson — small talk, a job offered / taken
+// back done, the first day's goals (bottom centre, the Showdown village's talk box) ──
+// open({ who, sub, text, reward, choices: [{ label, primary, onClick }] }) / close() /
+// isOpen() / pressFirst() (E / Enter / the phone's interact). top(): a node above the text (the
+// mood row). onEnd: the talk's over — closed, or a choice picked that didn't open another line.
+export function createJobTalk(parent, { onEnd, top } = {}) {
   let model = null;
   const box = el('div', 'village-talk town-talk ui-panel hidden');
   box.addEventListener('pointerdown', (e) => e.stopPropagation());
   parent.append(box);
-  const close = () => {
-    if (!model) return;
+  const hide = () => {
     model = null;
     box.classList.add('hidden');
     document.body.classList.remove('town-market-open');
+  };
+  const close = () => {
+    if (!model) return;
+    hide();
+    onEnd?.();
+  };
+  // (a choice may open the next line; the talk only ends if it didn't)
+  const choose = (c) => {
+    hide();
+    c?.onClick?.();
+    if (!model) onEnd?.();
   };
   const open = (m) => {
     model = m;
@@ -90,13 +101,14 @@ export function createJobTalk(parent) {
       b.type = 'button';
       b.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (model !== m) return;
-        close();
-        c.onClick?.();
+        if (model === m) choose(c);
       });
       choices.append(b);
     }
-    const parts = [head, el('div', 'village-talk-text', m.text)];
+    const parts = [head];
+    const row = top?.();
+    if (row) parts.push(row);
+    parts.push(el('div', 'village-talk-text', m.text));
     if (m.reward) parts.push(el('div', 'town-talk-reward', m.reward));
     parts.push(choices);
     box.replaceChildren(...parts);
@@ -109,9 +121,7 @@ export function createJobTalk(parent) {
     isOpen: () => !!model,
     pressFirst: () => {
       if (!model) return false;
-      const c = model.choices[0];
-      close();
-      c?.onClick?.();
+      choose(model.choices[0]);
       return true;
     },
   };
