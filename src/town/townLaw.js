@@ -13,7 +13,8 @@ export function installTownLaw(T, ctx) {
   // ── Fighting (a townsperson swapped for an EnemyPlayer) ──
   // (standoff: sword drawn, facing the player, not attacking until ctx.setFighterPassive(e, false))
   const promote = (n, { standoff = false } = {}) => {
-    if (n.fighter || !n.alive || !T.take(n)) return;
+    // (no fighting in the shops: they're rooms off the island — townStalls.js)
+    if (n.fighter || !n.alive || T.stalls.shopAt(n.x, n.z) || !T.take(n)) return;
     T.releaseBody(n);
     n.inside = false;
     const e = ctx.spawnFighter({

@@ -78,7 +78,7 @@ export function installTownLife(T, ctx) {
       n.knock.left -= dt;
       const nx = n.x + n.knock.vx * dt;
       const nz = n.z + n.knock.vz * dt;
-      if (T.layout.nav.isWalkable(nx, nz)) { n.x = nx; n.z = nz; }
+      if (T.walkable(nx, nz)) { n.x = nx; n.z = nz; }
     }
 
     if (!n.task) T.decide(n);
@@ -216,7 +216,7 @@ export function installTownLife(T, ctx) {
     if (d >= PLAYER_PUSH_DIST || d < 1e-4) return;
     const nx = p.x + (dx / d) * PLAYER_PUSH_DIST;
     const nz = p.z + (dz / d) * PLAYER_PUSH_DIST;
-    if (T.layout.nav.isWalkable(nx, nz)) { n.x = nx; n.z = nz; }
+    if (T.walkable(nx, nz)) { n.x = nx; n.z = nz; }
   };
 
   Object.assign(T, {

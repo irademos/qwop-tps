@@ -89,6 +89,7 @@ const TASK_LINES = {
   eat: ['Off to the market, I\'m starving.', 'Smells like fresh bread!', 'Just grabbing a bite.'],
   social: ['Nothing like a warm fire.', 'Pull up a log, friend.', 'Heard any good stories lately?'],
   sleep: ['Yawn… off to bed.', 'Long day. Goodnight.'],
+  browse: ['Just looking, thanks.', 'Fine blade, that one. Pricey, though.', 'A fishing rod… now there\'s an idea.'],
   wander: ['Lovely day for a stroll.', 'Just stretching my legs.', 'Have you seen the ship off the coast?'],
   kid: ['Tag! You\'re it!', 'I\'m gonna be a guard when I grow up!', 'Mum says I can\'t talk to strangers.'],
   drifter: ['Got a coin to spare?', 'The fire\'s the only friend I need.', 'Hic. Lovely evening.'],

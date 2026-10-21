@@ -43,7 +43,7 @@ const STEPS = [
   },
   {
     id: 'sell', guide: 'merchant', noTalk: true, title: 'Sell at the market', goal: 'sell', n: 1, coins: 3, at: 'market',
-    progress: 'Sell something at the goods stall (💰 Sell)',
+    progress: 'Sell something at the goods shop (💰 Sell)',
     done: 'Pleasure doing business! The less I have of something, the more I pay for it.',
   },
   {
@@ -211,7 +211,8 @@ export function installTownIntro(T, ctx) {
     if (s.at === 'guideWork' && g?.work) return { icon: '📍', x: g.work.x, z: g.work.z, h: 1.5 };
     if (s.at === 'fire') return { icon: '📍', ...P.fire, h: 1.9 };
     if (s.at === 'fishSpot' && P.fishSpot) return { icon: '📍', x: P.fishSpot.x, z: P.fishSpot.z, h: 1.5 };
-    if (s.at === 'market') return { icon: '📍', ...P.market, h: 2.6 };
+    // (the goods shop's counter — over its door while the player's outside)
+    if (s.at === 'market') return { icon: '📍', ...T.stalls.spot('goods', 'counter'), h: 1.6 };
     return null;
   };
   // The tracker's first line

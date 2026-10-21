@@ -24,7 +24,7 @@ export function createTownNav({ bounds, cell, start, getGroundY, isOverWater, pa
   const water = new Uint8Array(n);
   const cost = new Float32Array(n);
   const kind = new Uint8Array(n);      // 0 grass, 1 trail, 2 road
-  const blocked = new Uint8Array(n);   // props placed by the town (stall, jail…)
+  const blocked = new Uint8Array(n);   // props placed by the town (campfire, jail…)
 
   const cx = (i) => bounds.minX + ((i % cols) + 0.5) * cell;
   const cz = (i) => bounds.minZ + (Math.floor(i / cols) + 0.5) * cell;

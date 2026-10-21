@@ -46,6 +46,7 @@ const MARKET_STALL_MODEL = '/assets/props/market_stall.glb';
 const LIFE_POTION_MODEL = '/assets/props/life_potion.glb';
 const MANA_POTION_MODEL = '/assets/props/mana_potion.glb';
 const TREASURE_CHEST_MODEL = '/assets/props/treasure_chest.glb';
+const SHOP_INTERIOR_MODEL = '/assets/props/shop.glb';
 // The stall / potion / chest numbers come from a game with ~1.8 m characters; ours are
 // 1 m tall, so the whole set is shrunk by this
 const VILLAGE_PROP_SCALE = 0.55;
@@ -62,7 +63,7 @@ const MANA_POTION_OFFSET = new THREE.Vector3(-0.15, 100.0, 0.05);
 // a re-exported GLB with a different origin is moved back onto it (alignStallModel)
 const MARKET_STALL_ALIGN = { bottom: -0.97, x: -7.52, z: 1.56 };
 export const STALL_UNIT = MARKET_STALL_SIZE * VILLAGE_PROP_SCALE; // metres per stall unit
-export const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall units, measured) — items stand on it
+const COUNTER_SURFACE_Y = 92;      // the counter's actual top surface (stall units, measured) — items stand on it
 const MERCHANT_CHARACTER_URL = glbCharacterConfig.wizardUrl;
 const VILLAGER_CHARACTER_URL = glbCharacterConfig.villagerUrl;
 
@@ -375,19 +376,8 @@ function alignStallModel(model) {
   return group;
 }
 
-// Town mode's market (src/town/townMode.js): the village's stall, front = +Z; the merchant
-// stands MARKET_STALL_MERCHANT_Z behind it
-export const MARKET_STALL_MERCHANT_Z = MERCHANT_OFFSET.z * VILLAGE_PROP_SCALE;
-export async function loadMarketStall() {
-  const gltf = await loadProp(MARKET_STALL_MODEL);
-  const stall = alignStallModel(markShared(gltf.scene.clone(true)));
-  stall.scale.setScalar(MARKET_STALL_SIZE * VILLAGE_PROP_SCALE);
-  stall.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-  return stall;
-}
-
-// Town mode's weapon stall (src/town/townStalls.js): the mana potion as a child of
-// loadMarketStall()'s stall (stall units), and the mystery chest (metres)
+// Town mode's weapon shop (src/town/townStalls.js): the mana potion (stall units — townStalls
+// scales it to metres) and the mystery chest (metres)
 export async function loadStallManaPotion() {
   const gltf = await loadProp(MANA_POTION_MODEL, { materials: false });
   const potion = markShared(gltf.scene.clone(true));
@@ -401,6 +391,15 @@ export async function loadTreasureChest() {
   chest.scale.setScalar(TREASURE_CHEST_SCALE * VILLAGE_PROP_SCALE);
   chest.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return chest;
+}
+
+// Town mode's shops (src/town/townStalls.js): the room — walls on three sides, the open front
+// = +Z, three counters — in its own units (metres), floor at its bottom; townStalls scales it
+export async function loadShopInterior() {
+  const gltf = await loadProp(SHOP_INTERIOR_MODEL);
+  const room = markShared(gltf.scene.clone(true));
+  room.traverse((o) => { if (o.isMesh) o.receiveShadow = true; });
+  return room;
 }
 
 function markShared(root) {

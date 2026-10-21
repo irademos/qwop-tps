@@ -249,7 +249,10 @@ export function installTownReactions(T, ctx) {
         }
         // Keep up: a spot behind the player
         const d = dist2(n.x, n.z, p.x, p.z);
-        if (d > FOLLOW_GAP + 1) {
+        if (T.stalls.shopAt(n.x, n.z) !== T.stalls.shopAt(p.x, p.z)) {
+          // (the player's gone in / out of a shop: after them, through the door)
+          chase(n, p.x, p.z, dt, false);
+        } else if (d > FOLLOW_GAP + 1) {
           const k = (d - FOLLOW_GAP) / d;
           chase(n, n.x + (p.x - n.x) * k, n.z + (p.z - n.z) * k, dt, d > 6);
         } else {

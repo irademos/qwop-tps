@@ -9,15 +9,16 @@
 // Economy (townEconomy.js): woodcutters, farmers and fishers bring wood, veg and fish to the
 // market and are paid by the merchant; everyone buys their food (and firewood) there; prices
 // follow the stock. The player gathers too — chops trees with the sword, fishes at the fishing
-// spot with a rod bought at the weapon stall (townFishing.js), picks veg (stealing, if anyone sees) — and trades at the market: two stalls side by side
-// (townStalls.js), shopped like the Showdown village's — the goods stall (wood / fish / veg,
-// the merchant behind it) and the weapon stall (the gear + a mystery chest); selling goods is
-// the market panel (townMarketPanel.js). In Town the player owns only what they bought here,
+// spot with a rod bought at the weapon shop (townFishing.js), picks veg (stealing, if anyone sees) — and trades at the market: two of the
+// houses are shops (townStalls.js) — 🚪 Enter at the door puts the player in the shop's room,
+// shopped like the Showdown village's — the goods shop (wood / fish / veg, the merchant behind
+// the counter) and the weapon shop (the gear + a mystery chest); townsfolk walk in and out of
+// them too; selling goods is the market panel (townMarketPanel.js). In Town the player owns only what they bought here,
 // starting with nothing at all (ctx.startLoadout — the real inventory waits outside), and the
 // guards take it all on an arrest.
 //
 // Reactions: how townsfolk feel about the player (attitude) fades over time and shows — friends
-// get a discount at the goods stall, a grudge means no trade and stepping aside; a hurt
+// get a discount at the goods shop, a grudge means no trade and stepping aside; a hurt
 // townsperson's family and the brave nearby come to help, and the family of the dead hold a
 // vendetta (they attack on sight). Townsfolk fight each other too: drifters mug people at
 // night, bandits raid; whoever's seen doing it is an outlaw for a while (hurting an outlaw is no
@@ -120,6 +121,7 @@ export function createTownMode(ctx) {
   T.isNight = null;
   const law = { stars: 0, peak: 0, lastSeenAt: 0, lastKnown: new THREE.Vector3(), seen: false, tickAt: 0 };
   T.jail = null;              // { left } while the player is in the cell
+  T.inShop = null;            // the shop the player's in ('goods' | 'gear', townStalls.js)
   T.sequence = null;          // busted / knocked out in progress (timeout token)
   T.gossip = [];              // [{ kind, who, by, at, fresh }]
   T.arrivals = [];            // [{ role, at }]
@@ -132,7 +134,7 @@ export function createTownMode(ctx) {
   T.actsKey = '';
   T.acts = [];
   const pool = new Map();     // url → [{ container, character }]
-  T.market = createMarket();   // the stall's stock (replaced by the saved one on enter)
+  T.market = createMarket();   // the goods shop's stock (replaced by the saved one on enter)
   const goods = Object.fromEntries(GOOD_IDS.map((g) => [g, 0])); // what the player carries
   const soldOut = new Set();  // goods the market has run out of (for the feed)
   T.fishing = null;           // while the player's line is out (townFishing.js)
@@ -394,6 +396,7 @@ export function createTownMode(ctx) {
     if (night !== T.isNight) {
       T.isNight = night;
       ctx.setTimeOfDay(night ? 'night' : 'day');
+      T.stalls.setNight(night);
     }
     topClock.textContent = clockText();
   };
@@ -538,7 +541,13 @@ export function createTownMode(ctx) {
       T.releaseBody(n);
     }
     T.npcs = [];
-    if (T.jail) { T.jail = null; ctx.setPositionConstraint(null); }
+    if (T.jail || T.inShop) { T.jail = null; ctx.setPositionConstraint(null); }
+    // (out of a shop's room first: it's off the island)
+    if (T.inShop) {
+      const s = T.layout.places.shops[T.inShop];
+      ctx.teleport(s.door.x, s.door.z, s.exitYaw);
+    }
+    T.inShop = null;
     jailChip.classList.add('hidden');
     campChip.classList.add('hidden');
     Object.assign(campWatch, { near: false, drawn: false, closeT: 0, remindAt: 0, robbed: false, tickAt: 0 });
@@ -589,12 +598,13 @@ export function createTownMode(ctx) {
     const occupied = T.jail || T.npcs.some((n) => n.alive && n.jailedUntil > T.simT);
     door.rotation.y = angleLerp(door.rotation.y, occupied ? 0 : -1.9, 1 - Math.exp(-4 * dt));
 
+    T.updateShop();
     for (const n of T.npcs) T.updateNpc(n, dt);
     T.npcs = T.npcs.filter((n) => n.alive || n.dying);
     T.updateFishing(dt);
     T.updateCooking(dt);
     if (T.simT > T.growAt) { T.growAt = T.simT + 1; T.updateRegrowth(); }
-    // (the market panel shuts when the merchant leaves the stall or the player walks off)
+    // (the market panel shuts when the merchant leaves the counter or the player walks off)
     if (marketPanel.isOpen() && (!T.marketOpen() || !T.nearStall())) T.closeMarket();
     for (const g of T.gossip) if (T.simT - g.at > 240) g.fresh = false;
     if (T.isHost()) updateArrivals();
@@ -604,7 +614,7 @@ export function createTownMode(ctx) {
     for (const n of T.npcs) if (n.body && !n.dying) T.syncBody(n, dt);
     if (T.simT > T.actsAt) { T.actsAt = T.simT + 0.15; T.refreshActs(); }
     if (T.simT > T.saveAt) { T.saveAt = T.simT + SAVE_EVERY_S; save(); }
-    // (the weapon stall's keeper is there in the market's hours)
+    // (the weapon shop's keeper is there in the market's hours)
     T.stalls.setKeeperVisible('gear', T.gearOpen());
     // (last: the shop camera takes over from the player controls' pose this frame)
     T.stalls.update(dt, T.simT);
@@ -614,9 +624,9 @@ export function createTownMode(ctx) {
   // townsperson it passes through (those fighting are EnemyPlayers — the stage code hits
   // them), or chops the tree it's in
   const trySwordHit = (tip, swingDir) => {
-    if (!T.active || !T.ready || T.sequence) return false;
+    if (!T.active || !T.ready || T.sequence || T.inShop) return false;
     for (const n of T.npcs) {
-      if (!n.alive || !n.body || n.fighter || n.inside || n.dying) continue;
+      if (!n.alive || !n.body || n.fighter || n.inside || n.dying || T.stalls.shopAt(n.x, n.z)) continue;
       if (T.simT - n.lastHitAt < 0.7) continue;
       const cy = T.groundY(n) + 0.55 * heightScale(n.url);
       if (Math.hypot(tip.x - n.x, tip.y - cy, tip.z - n.z) > 0.7) continue;

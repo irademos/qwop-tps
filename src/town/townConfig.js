@@ -58,16 +58,24 @@ export const PRODUCE = { woodcutter: ['wood', 2, 3], farmer: ['crops', 2, 4], fi
 export const MERCHANT_START_CASH = 60;      // coins the merchant starts out with
 export const FIREWOOD_CHANCE = 0.35;        // a townsperson buying food takes some firewood home too
 export const MARKET_HOURS = [7, 20];
-export const TRADE_DIST = 3.4;              // m from a stall for its buttons (🧺 Goods / 💰 Sell, ⚔️ Weapons)
-export const STALL_GAP = 2.2;               // m between the goods stall and the weapon stall
-export const CHEST_PRICE = 30;              // the weapon stall's mystery chest
+export const TRADE_DIST = 3.4;              // m from a shop's back counter for its buttons (🧺 Goods / 💰 Sell, ⚔️ Weapons)
+// The shops (townStalls.js): two of the town's houses are the goods shop and the weapon shop;
+// 🚪 Enter at the door puts the player inside — a room (shop.glb) far off the island, out of
+// sight, where every shop's floor is its own ground (world m: the middle of its floor)
+export const SHOP_INTERIORS = {
+  goods: { x: -250, y: 30, z: -45 },
+  gear: { x: -250, y: 30, z: -20 },
+};
+export const SHOP_DOOR_DIST = 2.6;          // m from a shop's door outside for 🚪 Enter
+export const SHOP_BROWSE_CHANCE = 0.12;     // a townsperson's decision: a look round the weapon shop
+export const CHEST_PRICE = 30;              // the weapon shop's mystery chest
 export const CHOP_HITS = 3;                 // sword hits on a tree per 🪵
 export const TREE_WOOD = 3;                 // 🪵 a tree gives before it needs to grow back…
 export const TREE_REGROW_S = 40;            // …one per this many seconds
 export const CHOP_REACH = 0.85;             // m from the sword tip to the trunk
 export const CROP_REGROW_S = 70;            // s until a picked crop is back
 export const PICK_DIST = 1.6;               // m — 🌾 Pick near a ripe crop
-// Fishing (townFishing.js): the rod is bought at the weapon stall and held like the sword; swing
+// Fishing (townFishing.js): the rod is bought at the weapon shop and held like the sword; swing
 // it forward to cast, wait for a bite, pull it back to hook the fish, then wear it out — pull
 // when it tires, ease off while it runs — and crank the reel to bring it in
 export const FISH_SPOT_RADIUS = 6;          // m — fish from this close to the fishing spot (one for now)
@@ -103,7 +111,7 @@ export const FISH_CANCEL_DIST = 1.2;        // m — walking off reels in
 // ── Reactions ──
 export const ATTITUDE_FADE = 0.004;         // per second, toward 0 (fondness fades at half the rate)
 export const GRUDGE_ATTITUDE = -0.5;        // won't trade with the player, steps aside from them
-export const FRIEND_DISCOUNT = 0.15;        // friends pay this much less at the goods stall (and get more)
+export const FRIEND_DISCOUNT = 0.15;        // friends pay this much less at the goods shop (and get more)
 export const AVOID_DIST = 4.5;              // m
 export const RALLY_DIST = 15;               // m — the brave this close (family: further) come to help
 export const RALLY_MAX = 2;
