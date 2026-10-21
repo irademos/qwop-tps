@@ -130,7 +130,9 @@ export function installTownTrade(T, ctx) {
     T.stopFishingRig?.();
     ctx.putWeaponsAway?.();
     const d = T.stalls.doorInside(key);
-    ctx.teleport(d.x, d.z, Math.PI); // (facing in: the back counter)
+    // (turned the way the player faced the door: in the room, π faces in — the back counter;
+    // outside, exitYaw + π)
+    ctx.teleportTurned(d.x, d.z, -T.layout.places.shops[key].exitYaw);
     ctx.setPositionConstraint(T.stalls.constrainPlayer);
     T.inShop = key;
     T.stalls.setInside(key);
@@ -146,7 +148,8 @@ export function installTownTrade(T, ctx) {
     ctx.setPositionConstraint(null);
     T.inShop = null;
     T.stalls.setInside(null);
-    ctx.teleport(s.door.x, s.door.z, s.exitYaw);
+    // (facing out of the room the way the player faced its doorway)
+    ctx.teleportTurned(s.door.x, s.door.z, s.exitYaw);
     // (not straight back in: the door walks in again once the player has stepped away from it)
     T.doorRearm = key;
     T.doorLast = null;

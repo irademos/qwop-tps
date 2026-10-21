@@ -8439,6 +8439,14 @@ async function initCore(runtimeContext) {
       return out;
     },
     teleport: (x, z, yaw) => _teleportPlayer(x, z, yaw),
+    // (moved and turned by dYaw — camera and body alike: through a shop door, keeping the way
+    // the player faced relative to it)
+    teleportTurned: (x, z, dYaw) => {
+      _teleportPlayer(x, z);
+      playerControls.yaw += dYaw;
+      playerModel.rotation.y += dYaw;
+      _duelCamLastYaw = playerControls.yaw;
+    },
     revivePlayer: (x, z, yaw) => {
       hideGameOver();
       respawnPlayer();
