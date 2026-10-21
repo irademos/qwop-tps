@@ -70,6 +70,9 @@ export const PICK_DIST = 1.6;               // m — 🌾 Pick near a ripe crop
 export const FISH_WATER_CELLS = 2;          // 🎣 Fish within this many nav cells of the water
 export const FISH_S = [3, 6];               // s per cast
 export const FISH_CHANCE = 0.6;
+export const FISH_CAST_DIST = 4;            // m — the bobber lands on the water nearest this far in front
+export const FISH_CAST_REACH = 6;           // m — no farther than this
+export const FISH_BITE_S = 1.2;             // s — the bobber shows the bite this long before the catch
 export const FISH_CANCEL_DIST = 0.8;        // m — walking off cancels the cast
 
 // ── Reactions ──
