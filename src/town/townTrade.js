@@ -1,14 +1,16 @@
-// Town: the player's goods and gathering (chop, pick, eat — fishing is townFishing.js), the market — the goods and weapon
-// shops (townStalls.js: entering / leaving them, their counters), the sell panel — townsfolk
-// buying food and delivering goods, and the stand-ins bullets / bombs / spells hit townsfolk through.
+// Town: the player's goods and gathering (chop, pick, eat — fishing is townFishing.js), going in
+// and out of the houses (townRooms.js: the shops and the homes), the market — the goods and
+// weapon shops' counters (townStalls.js), the sell panel — townsfolk buying food and delivering
+// goods, and the stand-ins bullets / bombs / spells hit townsfolk through.
 
 import { FOOD_IDS, GOODS, GOOD_IDS, RAW_IDS, SHOP_GEAR } from './townEconomy.js';
 import { SHOUT_EAT_BUY, firstName, shout } from './townPeople.js';
 import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
+import { createTownRooms } from './townRooms.js';
 import {
   CHEST_PRICE, CHOP_HITS, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
-  MARKET_HOURS, PICK_DIST, PRODUCE, SHOP_DOOR_DIST, SHOP_DOOR_ENTER_DIST, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
+  DOOR_DIST, DOOR_ENTER_DIST, MARKET_HOURS, PICK_DIST, PRODUCE, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
   heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
 
@@ -99,70 +101,80 @@ export function installTownTrade(T, ctx) {
     }
   };
 
-  // ── The market: the goods shop + the weapon shop (townStalls.js — rooms off the island,
-  // entered through two of the town's houses), the sell panel ──
-  // The shop the player's in (null: out in town)
-  const playerShop = () => { const p = T.playerPos(); return T.stalls.shopAt(p.x, p.z); };
+  // ── The houses' rooms (townRooms.js — under the map, entered through the houses' doors):
+  // the two shops and the homes ──
+  const rooms = createTownRooms({ camera: ctx.camera, getPlayerPosition: () => ctx.getPlayerPosition() });
+  // The room the player's in (null: out in town)
+  const playerRoom = () => { const p = T.playerPos(); return rooms.roomAt(p.x, p.z); };
   // At that shop's back counter (its buttons, the sell panel)
   const nearStallKey = (key) => { const p = T.playerPos(); return T.stalls.atCounter(key, p.x, p.z, TRADE_DIST); };
   // The shop whose back counter the player's at, or null
   const nearestStall = () => (nearStallKey('gear') ? 'gear' : nearStallKey('goods') ? 'goods' : null);
   const nearStall = () => nearStallKey('goods');
-  // The shop door outside the player's at, or null
-  const nearShopDoor = (dist = SHOP_DOOR_DIST) => {
-    if (playerShop()) return null;
+  // The door outside the player's at (its room's key), or null
+  const nearDoor = (dist = DOOR_DIST) => {
+    if (playerRoom()) return null;
     const p = T.playerPos();
-    for (const [key, s] of Object.entries(T.layout.places.shops)) {
-      if (dist2(p.x, p.z, s.door.x, s.door.z) < dist) return key;
+    for (const [key, r] of Object.entries(T.layout.places.rooms)) {
+      if (dist2(p.x, p.z, r.door.x, r.door.z) < dist) return key;
     }
     return null;
   };
-  const canEnterShop = () => T.active && T.ready && !T.sequence && !T.jail && !ctx.isPlayerDead() && calmNow()
+  const canEnterRoom = () => T.active && T.ready && !T.sequence && !T.jail && !ctx.isPlayerDead() && calmNow()
     && T.law.stars <= 0;
-  // In through the door (weapons away: no fighting in the shops); out again by walking back
-  // through it or 🚪 Leave
-  const enterShop = (key) => {
-    if (!canEnterShop()) {
+  // Whose home it is (for the feed)
+  const homeLine = (key) => {
+    const home = T.layout.places.rooms[key].home;
+    const names = T.npcs.filter((n) => n.alive && n.homeIndex === home && !n.def.outlaw).map((n) => firstName(n.name));
+    if (!names.length) return '🏠 An empty house — nobody lives here yet.';
+    const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+    return `🏠 ${who}'s home.`;
+  };
+  // In through the door (weapons away: no fighting indoors); out again by walking back through
+  // it or 🚪 Leave
+  const enterRoom = (key) => {
+    if (!canEnterRoom()) {
       if (T.law.stars > 0) T.feedLine('🚪 Not with the guards after you!');
       return;
     }
     T.fishing = null;
     T.stopFishingRig?.();
     ctx.putWeaponsAway?.();
-    const d = T.stalls.doorInside(key);
-    // (turned the way the player faced the door: in the room, π faces in — the back counter;
+    const d = rooms.doorInside(key);
+    // (turned the way the player faced the door: in the room, π faces in — the back wall;
     // outside, exitYaw + π)
-    ctx.teleportTurned(d.x, d.z, -T.layout.places.shops[key].exitYaw);
-    ctx.setPositionConstraint(T.stalls.constrainPlayer);
-    T.inShop = key;
-    T.stalls.setInside(key);
+    ctx.teleportTurned(d.x, d.z, -T.layout.places.rooms[key].exitYaw);
+    ctx.setPositionConstraint(rooms.constrainPlayer);
+    T.inRoom = key;
+    rooms.setInside(key);
     T.actsAt = 0;
-    if (!stallOpen(key)) T.feedLine(key === 'gear' ? '⚔️ The weapon shop\'s shut — back in the morning.' : '🧺 The merchant\'s not in.');
+    if (T.layout.places.rooms[key].kind === 'home') T.feedLine(homeLine(key));
+    else if (!stallOpen(key)) T.feedLine(key === 'gear' ? '⚔️ The weapon shop\'s shut — back in the morning.' : '🧺 The merchant\'s not in.');
   };
-  const leaveShop = () => {
-    const key = T.inShop ?? playerShop();
+  const leaveRoom = () => {
+    const key = T.inRoom ?? playerRoom();
     if (!key) return;
     stalls.unfocus();
     closeMarket();
-    const s = T.layout.places.shops[key];
+    const r = T.layout.places.rooms[key];
     ctx.setPositionConstraint(null);
-    T.inShop = null;
-    T.stalls.setInside(null);
+    T.inRoom = null;
+    rooms.setInside(null);
     // (facing out of the room the way the player faced its doorway)
-    ctx.teleportTurned(s.door.x, s.door.z, s.exitYaw);
+    ctx.teleportTurned(r.door.x, r.door.z, r.exitYaw);
     // (not straight back in: the door walks in again once the player has stepped away from it)
     T.doorRearm = key;
     T.doorLast = null;
     T.actsAt = 0;
   };
-  // Outside: walking into a shop's door (close to it, heading for the house) goes in — no button
+  // Outside: walking into a house's door (close to it, heading for the house) goes in — no button
   const walkInDoor = () => {
     const p = T.playerPos();
     const last = T.doorLast;
     T.doorLast = { x: p.x, z: p.z };
     if (T.doorRearm) {
-      const d = T.layout.places.shops[T.doorRearm].door;
-      if (dist2(p.x, p.z, d.x, d.z) < SHOP_DOOR_DIST) return;
+      const d = T.layout.places.rooms[T.doorRearm].door;
+      if (dist2(p.x, p.z, d.x, d.z) < DOOR_DIST) return;
       T.doorRearm = null;
     }
     if (!last) return;
@@ -170,29 +182,29 @@ export function installTownTrade(T, ctx) {
     const mz = p.z - last.z;
     const step = Math.hypot(mx, mz);
     if (step < 0.005 || step > 1) return; // (standing still, or a teleport)
-    const key = nearShopDoor(SHOP_DOOR_ENTER_DIST);
-    if (!key || !canEnterShop()) return;
+    const key = nearDoor(DOOR_ENTER_DIST);
+    if (!key || !canEnterRoom()) return;
     // (in = toward the house: against the way out)
-    const yaw = T.layout.places.shops[key].exitYaw;
-    if ((mx * -Math.sin(yaw) + mz * -Math.cos(yaw)) / step > 0.4) enterShop(key);
+    const yaw = T.layout.places.rooms[key].exitYaw;
+    if ((mx * -Math.sin(yaw) + mz * -Math.cos(yaw)) / step > 0.4) enterRoom(key);
   };
-  // Each frame: out through the doorway; or moved out of the shop some other way (knocked
+  // Each frame: out through the doorway; or moved out of the room some other way (knocked
   // out, arrested…) — its constraint and light go
-  const updateShop = () => {
-    if (!T.inShop && !T.jail && !T.sequence) walkInDoor();
+  const updateRooms = () => {
+    if (!T.inRoom && !T.jail && !T.sequence) walkInDoor();
     const p = T.playerPos();
-    const at = T.stalls.shopAt(p.x, p.z);
-    if (T.inShop && at === T.inShop && T.stalls.leftThroughDoor(p.x, p.z)) { leaveShop(); return; }
-    if (T.inShop && at !== T.inShop) {
+    const at = rooms.roomAt(p.x, p.z);
+    if (T.inRoom && at === T.inRoom && rooms.leftThroughDoor(p.x, p.z)) { leaveRoom(); return; }
+    if (T.inRoom && at !== T.inRoom) {
       if (!T.jail) ctx.setPositionConstraint(null);
-      T.inShop = null;
-      T.stalls.setInside(null);
+      T.inRoom = null;
+      rooms.setInside(null);
     }
-    // (in a shop without coming through its door — a save, a teleport: kept on its floor)
-    if (!T.inShop && at && !T.jail) {
-      T.inShop = at;
-      ctx.setPositionConstraint(T.stalls.constrainPlayer);
-      T.stalls.setInside(at);
+    // (in a room without coming through its door — a save, a teleport: kept on its floor)
+    if (!T.inRoom && at && !T.jail) {
+      T.inRoom = at;
+      ctx.setPositionConstraint(rooms.constrainPlayer);
+      rooms.setInside(at);
     }
   };
   // The weapon shop keeps the market's hours (its keeper isn't one of the townsfolk)
@@ -257,6 +269,7 @@ export function installTownTrade(T, ctx) {
     };
   };
   const stalls = createTownStalls({
+    rooms,
     camera: ctx.camera,
     domElement: ctx.domElement,
     parent: T.hud,
@@ -271,7 +284,7 @@ export function installTownTrade(T, ctx) {
     getPlayerPosition: () => ctx.getPlayerPosition(),
     setPlayerHidden: (hidden) => ctx.setPlayerHidden?.(hidden),
     canShop: (key) => canShop(key),
-    canTap: (key) => canShop(key) && playerShop() === key,
+    canTap: (key) => canShop(key) && playerRoom() === key,
   });
   const focusStall = (key) => {
     T.fishing = null;
@@ -376,9 +389,9 @@ export function installTownTrade(T, ctx) {
 
   // Other weapons than the sword (bullets, bombs, magic) hit the townsfolk drawn nearby
   // through stand-ins shaped like stage enemies (projectiles.js / blastEnemiesAt)
-  // (nobody in the shops: no fighting in there)
+  // (nobody indoors: no fighting in there)
   const weaponTargetsFor = () => T.npcs.filter((n) => n.alive && n.body && !n.fighter && !n.inside && !n.dying
-    && !stalls.shopAt(n.x, n.z));
+    && !rooms.roomAt(n.x, n.z));
   const fromPlayer = (n) => {
     const p = T.playerPos();
     const d = Math.hypot(n.x - p.x, n.z - p.z) || 1;
@@ -481,9 +494,9 @@ export function installTownTrade(T, ctx) {
   };
 
   Object.assign(T, {
-    buyFood, calmNow, closeMarket, deliverGoods, eat, enterShop, focusStall, gain, gearOpen, getMagicTargets,
-    getWeaponTargets, hurtFood, leaveShop, marketOpen, nearShopDoor, nearStall, nearestStall, noteStock,
-    openMarket, pickCrop, playerShop, ripeCropNear, sellGood, stallItemState, stalls, stallOpen, tryChop,
-    updateRegrowth, updateShop, workingMerchant,
+    buyFood, calmNow, closeMarket, deliverGoods, eat, enterRoom, focusStall, gain, gearOpen, getMagicTargets,
+    getWeaponTargets, hurtFood, leaveRoom, marketOpen, nearDoor, nearStall, nearestStall, noteStock,
+    openMarket, pickCrop, playerRoom, ripeCropNear, rooms, sellGood, stallItemState, stalls, stallOpen, tryChop,
+    updateRegrowth, updateRooms, workingMerchant,
   });
 }

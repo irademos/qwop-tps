@@ -95,8 +95,8 @@ export function installTownLife(T, ctx) {
         : t.t > 20 && n.fear <= 0;
       if (done) {
         n.inside = false;
-        n.x = n.home.x;
-        n.z = n.home.z;
+        // (up and out of their room on foot — a house without one: out of its door)
+        if (!T.rooms.roomAt(n.x, n.z)) { n.x = n.home.x; n.z = n.home.z; }
         T.decide(n);
       }
       return;

@@ -178,12 +178,12 @@ export function installTownActs(T, ctx) {
       const sb = T.layout.places.strongbox;
       if (dist2(p.x, p.z, sb.x, sb.z) < 2) out.push({ key: 'strongbox', label: '📦 Take the strongbox', onClick: T.takeStrongbox });
     }
-    // The shops (walked into through the door — updateShop): inside, 🚪 Leave by the doorway
-    // and the back counter's buttons
-    if (T.inShop) {
+    // The houses (walked into through the door — updateRooms): inside, 🚪 Leave by the doorway;
+    // the shops' back counter buttons
+    if (T.inRoom) {
       const p = T.playerPos();
-      const d = T.stalls.doorInside(T.inShop);
-      if (dist2(p.x, p.z, d.x, d.z) < 1.8) out.push({ key: 'leave', label: '🚪 Leave', onClick: T.leaveShop });
+      const d = T.rooms.doorInside(T.inRoom);
+      if (dist2(p.x, p.z, d.x, d.z) < 1.8) out.push({ key: 'leave', label: '🚪 Leave', onClick: T.leaveRoom });
     }
     const stall = calm ? T.nearestStall() : null;
     if (stall === 'gear' && T.gearOpen()) out.push({ key: 'gear', label: '⚔️ Weapons', onClick: () => T.focusStall('gear') });
