@@ -1,6 +1,6 @@
 // Town: the player's goods and gathering (chop, pick, eat — fishing is townFishing.js), the market — the goods and weapon
-// stalls (townStalls.js), the sell panel — townsfolk buying food and delivering goods, and the
-// stand-ins bullets / bombs / spells hit townsfolk through.
+// shops (townStalls.js: entering / leaving them, their counters), the sell panel — townsfolk
+// buying food and delivering goods, and the stand-ins bullets / bombs / spells hit townsfolk through.
 
 import { FOOD_IDS, GOODS, GOOD_IDS, RAW_IDS, SHOP_GEAR } from './townEconomy.js';
 import { SHOUT_EAT_BUY, firstName, shout } from './townPeople.js';
@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { createTownStalls } from './townStalls.js';
 import {
   CHEST_PRICE, CHOP_HITS, CHOP_REACH, CROP_REGROW_S, FIREWOOD_CHANCE, FRIEND_ATTITUDE, FRIEND_DISCOUNT, GRUDGE_ATTITUDE,
-  MARKET_HOURS, PICK_DIST, PRODUCE, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
+  MARKET_HOURS, PICK_DIST, PRODUCE, SHOP_DOOR_DIST, TRADE_DIST, TREE_REGROW_S, TREE_WOOD, dist2,
   heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
 
@@ -99,22 +99,75 @@ export function installTownTrade(T, ctx) {
     }
   };
 
-  // ── The market: the goods stall + the weapon stall (townStalls.js), the sell panel ──
-  const stallPos = (key) => (key === 'gear' ? T.layout.places.gearStall : T.layout.places.market);
-  const nearStallKey = (key) => {
-    const p = T.playerPos();
-    const at = stallPos(key);
-    return dist2(p.x, p.z, at.x, at.z) < TRADE_DIST;
-  };
-  // The stall the player is at (the nearer one), or null
-  const nearestStall = () => {
-    const p = T.playerPos();
-    const d = (key) => dist2(p.x, p.z, stallPos(key).x, stallPos(key).z);
-    const key = d('gear') < d('goods') ? 'gear' : 'goods';
-    return d(key) < TRADE_DIST ? key : null;
-  };
+  // ── The market: the goods shop + the weapon shop (townStalls.js — rooms off the island,
+  // entered through two of the town's houses), the sell panel ──
+  // The shop the player's in (null: out in town)
+  const playerShop = () => { const p = T.playerPos(); return T.stalls.shopAt(p.x, p.z); };
+  // At that shop's back counter (its buttons, the sell panel)
+  const nearStallKey = (key) => { const p = T.playerPos(); return T.stalls.atCounter(key, p.x, p.z, TRADE_DIST); };
+  // The shop whose back counter the player's at, or null
+  const nearestStall = () => (nearStallKey('gear') ? 'gear' : nearStallKey('goods') ? 'goods' : null);
   const nearStall = () => nearStallKey('goods');
-  // The weapon stall keeps the market's hours (its keeper isn't one of the townsfolk)
+  // The shop door outside the player's at, or null
+  const nearShopDoor = () => {
+    if (playerShop()) return null;
+    const p = T.playerPos();
+    for (const [key, s] of Object.entries(T.layout.places.shops)) {
+      if (dist2(p.x, p.z, s.door.x, s.door.z) < SHOP_DOOR_DIST) return key;
+    }
+    return null;
+  };
+  const canEnterShop = () => T.active && T.ready && !T.sequence && !T.jail && !ctx.isPlayerDead() && calmNow()
+    && T.law.stars <= 0;
+  // In through the door (weapons away: no fighting in the shops); out again by walking back
+  // through it or 🚪 Leave
+  const enterShop = (key) => {
+    if (!canEnterShop()) {
+      if (T.law.stars > 0) T.feedLine('🚪 Not with the guards after you!');
+      return;
+    }
+    T.fishing = null;
+    T.stopFishingRig?.();
+    ctx.putWeaponsAway?.();
+    const d = T.stalls.doorInside(key);
+    ctx.teleport(d.x, d.z, Math.PI); // (facing in: the back counter)
+    ctx.setPositionConstraint(T.stalls.constrainPlayer);
+    T.inShop = key;
+    T.stalls.setInside(key);
+    T.actsAt = 0;
+    if (!stallOpen(key)) T.feedLine(key === 'gear' ? '⚔️ The weapon shop\'s shut — back in the morning.' : '🧺 The merchant\'s not in.');
+  };
+  const leaveShop = () => {
+    const key = T.inShop ?? playerShop();
+    if (!key) return;
+    stalls.unfocus();
+    closeMarket();
+    const s = T.layout.places.shops[key];
+    ctx.setPositionConstraint(null);
+    T.inShop = null;
+    T.stalls.setInside(null);
+    ctx.teleport(s.door.x, s.door.z, s.exitYaw);
+    T.actsAt = 0;
+  };
+  // Each frame: out through the doorway; or moved out of the shop some other way (knocked
+  // out, arrested…) — its constraint and light go
+  const updateShop = () => {
+    const p = T.playerPos();
+    const at = T.stalls.shopAt(p.x, p.z);
+    if (T.inShop && at === T.inShop && T.stalls.leftThroughDoor(p.x, p.z)) { leaveShop(); return; }
+    if (T.inShop && at !== T.inShop) {
+      if (!T.jail) ctx.setPositionConstraint(null);
+      T.inShop = null;
+      T.stalls.setInside(null);
+    }
+    // (in a shop without coming through its door — a save, a teleport: kept on its floor)
+    if (!T.inShop && at && !T.jail) {
+      T.inShop = at;
+      ctx.setPositionConstraint(T.stalls.constrainPlayer);
+      T.stalls.setInside(at);
+    }
+  };
+  // The weapon shop keeps the market's hours (its keeper isn't one of the townsfolk)
   const gearOpen = () => inHours(T.hour(), MARKET_HOURS);
   const stallOpen = (key) => (key === 'gear' ? gearOpen() : marketOpen());
   const calmNow = () => !T.npcs.some((n) => n.fighter && T.distToPlayer(n) < 8);
@@ -190,7 +243,7 @@ export function installTownTrade(T, ctx) {
     getPlayerPosition: () => ctx.getPlayerPosition(),
     setPlayerHidden: (hidden) => ctx.setPlayerHidden?.(hidden),
     canShop: (key) => canShop(key),
-    canTap: (key) => canShop(key) && nearStallKey(key),
+    canTap: (key) => canShop(key) && playerShop() === key,
   });
   const focusStall = (key) => {
     T.fishing = null;
@@ -268,7 +321,7 @@ export function installTownTrade(T, ctx) {
     T.feedLine(`${item.emoji} Bought: ${item.label}`);
     return true;
   };
-  // The weapon stall's mystery chest: one weighted random prize (what can't be used is left out)
+  // The weapon shop's mystery chest: one weighted random prize (what can't be used is left out)
   const openChest = () => {
     if (ctx.getCoins() < CHEST_PRICE) return { ok: false };
     const items = ctx.getItems() ?? {};
@@ -295,7 +348,9 @@ export function installTownTrade(T, ctx) {
 
   // Other weapons than the sword (bullets, bombs, magic) hit the townsfolk drawn nearby
   // through stand-ins shaped like stage enemies (projectiles.js / blastEnemiesAt)
-  const weaponTargetsFor = () => T.npcs.filter((n) => n.alive && n.body && !n.fighter && !n.inside && !n.dying);
+  // (nobody in the shops: no fighting in there)
+  const weaponTargetsFor = () => T.npcs.filter((n) => n.alive && n.body && !n.fighter && !n.inside && !n.dying
+    && !stalls.shopAt(n.x, n.z));
   const fromPlayer = (n) => {
     const p = T.playerPos();
     const d = Math.hypot(n.x - p.x, n.z - p.z) || 1;
@@ -330,9 +385,9 @@ export function installTownTrade(T, ctx) {
       if (n.alive && !n.fighter) T.hurt(n, fromPlayer(n), b.element === 'fire' ? ctx.magicDamage.fire : ctx.magicDamage.ice);
     },
   })) : []);
-  // ── The market (townEconomy.js): the merchant at the stall buys and sells ──
+  // ── The market (townEconomy.js): the merchant behind the goods shop's counter buys and sells ──
   const marketOpen = () => inHours(T.hour(), MARKET_HOURS) && !!workingMerchant();
-  // The merchant, if they're at the stall now
+  // The merchant, if they're at the counter now
   const workingMerchant = () => T.npcs.find((m) => m.alive && !m.fighter && m.role === 'merchant'
     && T.isWorking(m)) ?? null;
   // (feed: a good running out / coming back)
@@ -398,9 +453,9 @@ export function installTownTrade(T, ctx) {
   };
 
   Object.assign(T, {
-    buyFood, calmNow, closeMarket, deliverGoods, eat, focusStall, gain, gearOpen, getMagicTargets,
-    getWeaponTargets, hurtFood, marketOpen, nearStall, nearestStall, noteStock,
-    openMarket, pickCrop, ripeCropNear, sellGood, stallItemState, stalls, tryChop,
-    updateRegrowth, workingMerchant,
+    buyFood, calmNow, closeMarket, deliverGoods, eat, enterShop, focusStall, gain, gearOpen, getMagicTargets,
+    getWeaponTargets, hurtFood, leaveShop, marketOpen, nearShopDoor, nearStall, nearestStall, noteStock,
+    openMarket, pickCrop, playerShop, ripeCropNear, sellGood, stallItemState, stalls, stallOpen, tryChop,
+    updateRegrowth, updateShop, workingMerchant,
   });
 }

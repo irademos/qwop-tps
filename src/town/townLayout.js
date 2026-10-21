@@ -1,11 +1,12 @@
 // Town: the layout, built once from the map — the walkability grid (townNav.js), homes, the
-// market, the campfire, the jail, fields, work spots, the patrol loop, the bandit camp — and its props.
+// shops (two of the houses), the campfire, the jail, fields, work spots, the patrol loop, the
+// bandit camp — and its props.
 
-import { MARKET_STALL_MERCHANT_Z, makeCampfire, makeTextSprite } from '../village/villageMode.js';
+import { makeCampfire, makeTextSprite } from '../village/villageMode.js';
 import * as THREE from 'three';
 import { createTownNav } from './townNav.js';
 import {
-  BUILDING_RE, CAMP_DIST, NAV_BOUNDS, NAV_CELL, NAV_START, STALL_GAP, TOWN_BOUNDS, TREE_RE,
+  BUILDING_RE, CAMP_DIST, NAV_BOUNDS, NAV_CELL, NAV_START, TOWN_BOUNDS, TREE_RE,
   TREE_TRUNK_RADIUS, TREE_WOOD, dist2,
 } from './townConfig.js';
 
@@ -55,15 +56,45 @@ export function installTownLayout(T, ctx) {
       return false;
     };
 
-    // Market: the most open spot off the road among the houses; the campfire a little way off;
-    // the jail by a road further out
+    // The shops: the two houses nearest the middle with an open spot by them (their door — the
+    // side facing the middle of town) are the goods shop and the weapon shop (nobody lives there);
+    // the campfire a little way off the goods shop; the jail by a road further out
     const offRoad = (i) => nav.kindAt(i) !== 2;
-    const marketCell = best(nav.cellsWhere((i) => offRoad(i) && dC(i) < 18 && nav.clearanceAt(i) >= 2.5),
-      (i) => nav.clearanceAt(i) * 2 - dC(i) * 0.2);
-    const market = marketCell >= 0 ? cellPos(marketCell) : { ...NAV_START };
+    const doorOf = (b) => {
+      const reach = b.radius + 2.5;
+      const cells = nav.cellsWhere((i) => nav.clearanceAt(i) >= 1.25
+        && dist2(nav.cellX(i), nav.cellZ(i), b.x, b.z) < reach);
+      const i = best(cells, (j) => -dist2(nav.cellX(j), nav.cellZ(j), b.x, b.z) - dC(j) * 0.35);
+      return i >= 0 ? cellPos(i) : null;
+    };
+    const shopHouses = [];
+    for (const b of [...buildings].sort((a, b2) => dist2(a.x, a.z, C.x, C.z) - dist2(b2.x, b2.z, C.x, C.z))) {
+      if (shopHouses.length >= 2 || buildings.length - shopHouses.length <= 1) break;
+      if (shopHouses.some((h) => dist2(h.building.x, h.building.z, b.x, b.z) < 6)) continue;
+      const door = doorOf(b);
+      if (door) shopHouses.push({ building: b, door });
+    }
+    // (no houses to spare: the doors stand on the most open spots off the road)
+    while (shopHouses.length < 2) {
+      const taken = shopHouses.map((h) => h.door);
+      const cell = best(nav.cellsWhere((i) => offRoad(i) && dC(i) < 18 && nav.clearanceAt(i) >= 2.5
+        && taken.every((t) => dist2(nav.cellX(i), nav.cellZ(i), t.x, t.z) > 6)), (i) => nav.clearanceAt(i) * 2 - dC(i) * 0.2);
+      const door = cell >= 0 ? cellPos(cell) : { x: NAV_START.x + shopHouses.length * 6, z: NAV_START.z };
+      shopHouses.push({ building: null, door });
+    }
+    const shops = {};
+    ['goods', 'gear'].forEach((key, k) => {
+      const { building, door } = shopHouses[k];
+      // (walking out: away from the house)
+      const from = building ?? C;
+      const exitYaw = dist2(door.x, door.z, from.x, from.z) > 0.1 ? Math.atan2(door.x - from.x, door.z - from.z) : 0;
+      shops[key] = { key, building, door, exitYaw };
+    });
+    const market = shops.goods.door;
     const fireCell = best(nav.cellsWhere((i) => {
       const d = dist2(nav.cellX(i), nav.cellZ(i), market.x, market.z);
-      return offRoad(i) && d > 6 && d < 13 && nav.clearanceAt(i) >= 2.5;
+      return offRoad(i) && d > 6 && d < 13 && nav.clearanceAt(i) >= 2.5
+        && dist2(nav.cellX(i), nav.cellZ(i), shops.gear.door.x, shops.gear.door.z) > 4;
     }), (i) => nav.clearanceAt(i) - dC(i) * 0.1);
     const fire = fireCell >= 0 ? cellPos(fireCell) : { x: market.x + 6, z: market.z };
     const jailCell = best(nav.cellsWhere((i) => {
@@ -74,20 +105,10 @@ export function installTownLayout(T, ctx) {
     }), (i) => nav.clearanceAt(i) - dC(i) * 0.05);
     const jailPos = jailCell >= 0 ? cellPos(jailCell) : { x: market.x - 10, z: market.z };
 
-    // The stall faces the campfire; the jail's door faces the nearest road
-    const stallYaw = Math.atan2(fire.x - market.x, fire.z - market.z);
-    const fwd = { x: Math.sin(stallYaw), z: Math.cos(stallYaw) };
-    const merchantSpot = { x: market.x + fwd.x * MARKET_STALL_MERCHANT_Z, z: market.z + fwd.z * MARKET_STALL_MERCHANT_Z };
-    // The weapon stall stands beside the goods stall (the side with more room), its chest
-    // on the far side of it
-    const stallSide = { x: fwd.z, z: -fwd.x }; // (the customer's right)
-    const gearRoom = (sign) => {
-      const i = nav.indexAt(market.x + stallSide.x * sign * (STALL_GAP + 0.8), market.z + stallSide.z * sign * (STALL_GAP + 0.8));
-      return i >= 0 && nav.walkableIndex(i) ? nav.clearanceAt(i) : -1;
-    };
-    const gearSign = gearRoom(-1) > gearRoom(1) ? -1 : 1;
-    const gearStall = { x: market.x + stallSide.x * gearSign * STALL_GAP, z: market.z + stallSide.z * gearSign * STALL_GAP };
-    const customerSpot = { x: market.x + fwd.x * 1.4, z: market.z + fwd.z * 1.4 };
+    // Inside the goods shop: the merchant behind the back counter, customers in front of it
+    const merchantSpot = T.stalls.spot('goods', 'merchant');
+    const customerSpot = T.stalls.spot('goods', 'customer');
+    // The jail's door faces the nearest road
     let roadDir = null;
     {
       let bd = Infinity;
@@ -100,16 +121,14 @@ export function installTownLayout(T, ctx) {
     const jailFwd = { x: Math.sin(jailYaw), z: Math.cos(jailYaw) };
     const officeSpot = { x: jailPos.x + jailFwd.x * 2.2 + jailFwd.z * 1.2, z: jailPos.z + jailFwd.z * 2.2 - jailFwd.x * 1.2 };
 
-    nav.block(market.x + fwd.x * 0.2, market.z + fwd.z * 0.2, 0.9);
-    nav.block(gearStall.x + fwd.x * 0.2, gearStall.z + fwd.z * 0.2, 0.9);
-    nav.block(gearStall.x + stallSide.x * gearSign * 1.45, gearStall.z + stallSide.z * gearSign * 1.45, 0.45);
     nav.block(fire.x, fire.z, 0.9);
     nav.block(jailPos.x, jailPos.z, 1.7);
     nav.refresh();
 
-    // Homes: a walkable spot by each house
+    // Homes: a walkable spot by each house (not the shops)
     const homes = [];
     for (const b of buildings) {
+      if (shopHouses.some((h) => h.building === b)) continue;
       const i = nav.nearestWalkable(b.x, b.z);
       if (i < 0) continue;
       const d = dist2(nav.cellX(i), nav.cellZ(i), b.x, b.z);
@@ -177,29 +196,38 @@ export function installTownLayout(T, ctx) {
     // The fishing spot (one for now): the shore spot nearest the middle — the first fisher's too
     const fishSpot = shore[0] ?? null;
     const places = {
-      center: C, market, gearStall, gearSign, merchantSpot, customerSpot, stallYaw, fire, jail: jailPos, jailYaw, officeSpot,
+      center: C, market, shops, merchantSpot, customerSpot, fire, jail: jailPos, jailYaw, officeSpot,
       homes, treeSpots, fields, shore, fishSpot, patrol, entrance, camp, campFire, strongbox,
-      // the player arrives between the market and the fire
-      spawn: { x: (market.x + fire.x) / 2 + fwd.z * 2.2, z: (market.z + fire.z) / 2 - fwd.x * 2.2 },
+      // the player arrives between the goods shop and the fire
+      spawn: (() => {
+        const i = nav.nearestWalkable((market.x + fire.x) / 2, (market.z + fire.z) / 2);
+        return i >= 0 ? cellPos(i) : { ...fire };
+      })(),
     };
     // Every tree in town can be chopped (wood: what it has left; it grows back)
     const choppable = trees.map((t) => ({ x: t.x, z: t.z, wood: TREE_WOOD, hits: 0, growAt: 0, hitAt: -1 }));
     return { nav, places, trees: choppable, props: buildProps(places) };
   };
 
-  // ── Props: market stalls, campfire, jail cell, fields ──
+  // ── Props: the shops, campfire, jail cell, fields ──
   const groundAt = (x, z, fallback = 0) => {
     const y = ctx.getGroundY(x, z);
     return Number.isFinite(y) ? y : fallback;
   };
   const buildProps = (places) => {
     const group = new THREE.Group();
-    // Market stalls (townStalls.js; async GLBs)
-    for (const [key, at, label] of [['goods', places.market, '🧺 Goods'], ['gear', places.gearStall, '⚔️ Weapons']]) {
-      T.stalls.build(group, {
-        key, label, x: at.x, y: groundAt(at.x, at.z) - 0.005, z: at.z, yaw: places.stallYaw,
-        chestSign: places.gearSign, keeper: key === 'gear', groundAt: (x, z) => groundAt(x, z),
-      });
+    // The shops (townStalls.js; async GLBs): the rooms, far off the island; over each shop's
+    // door outside, its sign
+    for (const [key, label, sign] of [['goods', '🧺 Goods', '🧺 Goods Shop'], ['gear', '⚔️ Weapons', '⚔️ Weapon Shop']]) {
+      T.stalls.build(group, { key, label, keeper: key === 'gear' });
+      const { door, building } = places.shops[key];
+      // (a little out from the door, away from the house)
+      const len = building ? Math.max(0.1, dist2(door.x, door.z, building.x, building.z)) : 1;
+      const dx = building ? (door.x - building.x) / len : 0;
+      const dz = building ? (door.z - building.z) / len : 0;
+      const signSprite = makeTextSprite(sign, { height: 0.34 });
+      signSprite.position.set(door.x + dx * 0.4, groundAt(door.x, door.z) + 2.5, door.z + dz * 0.4);
+      group.add(signSprite);
     }
     // Campfire
     const fire = makeCampfire();

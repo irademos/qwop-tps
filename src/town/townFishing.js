@@ -1,4 +1,4 @@
-// Town: fishing. The rod is bought at the weapon stall (SHOP_GEAR 'rod') and held like the
+// Town: fishing. The rod is bought at the weapon shop (SHOP_GEAR 'rod') and held like the
 // sword — it is the sword weapon in rod form, swung with the phone's gyro (bootstrapGameApp.js).
 // At the fishing spot (one for now — the shore spot nearest the middle, `places.fishSpot`):
 //   • cast: swing the rod forward — the harder, the farther the bobber flies (FISH_CAST_*)
@@ -410,7 +410,7 @@ export function installTownFishing(T, ctx) {
     }
     if (!calm || !atSpot()) return out;
     if (!ctx.ownsRod()) {
-      out.push({ key: 'fishrod', label: '🎣 Need a rod', onClick: () => say('🎣 Fishing rods are sold at the ⚔️ Weapons stall at the market.') });
+      out.push({ key: 'fishrod', label: '🎣 Need a rod', onClick: () => say('🎣 Fishing rods are sold at the ⚔️ Weapon Shop.') });
     } else if (!ctx.isRodEquipped()) {
       out.push({ key: 'fishrod', label: '🎣 Fish', onClick: () => { ctx.equipRod(); say(ctx.hasGyro() ? '🎣 Swing the rod forward to cast.' : '🎣 Rod out — Cast when you\'re ready.'); } });
     } else if (!ctx.hasGyro()) {

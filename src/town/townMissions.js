@@ -449,7 +449,10 @@ export function installTownMissions(T, ctx) {
         T.root.add(m);
         T.markers.set(key, m);
       }
-      m.position.set(t.x, T.groundAt(t.x, t.z) + t.h + Math.sin(T.simT * 3) * 0.08, t.z);
+      // (someone in a shop the player isn't in: over its door outside)
+      const shop = T.stalls.shopAt(t.x, t.z);
+      const at = shop && shop !== T.inShop ? { ...T.layout.places.shops[shop].door, h: 2.95 } : t;
+      m.position.set(at.x, T.groundAt(at.x, at.z) + at.h + Math.sin(T.simT * 3) * 0.08, at.z);
     }
     for (const [key, m] of T.markers) {
       if (live.has(key)) continue;

@@ -8,7 +8,7 @@ import { makeTextSprite } from '../village/villageMode.js';
 import { raycastMapSegment } from '../environment/mapCollision.js';
 import {
   BODY_DIST, BODY_RELEASE_DIST, BUBBLE_S, CAMERA_CLEAR_DIST, LABEL_DIST, MERCHANT_START_CASH,
-  MUG_CHANCE, TOWN_MAX_BODIES, _v, _v2, angleLerp, dist2, heightScale, inHours, pickOf, rand,
+  MUG_CHANCE, SHOP_BROWSE_CHANCE, TOWN_MAX_BODIES, _v, _v2, angleLerp, dist2, heightScale, inHours, pickOf, rand,
 } from './townConfig.js';
 
 // T: the town's shared state + functions (createTownMode in townMode.js); ctx: the game
@@ -91,7 +91,7 @@ export function installTownFolk(T, ctx) {
     n.net = { x: n.x, z: n.z, yaw: n.yaw };
     T.net.send(T.net.hostId(), { w: 1, op: 'rel', id: n.id, st: T.dynOf(n) });
   };
-  // At their work (the merchant at the stall): from the task, or the host's word
+  // At their work (the merchant behind the counter): from the task, or the host's word
   const isWorking = (n) => (mine(n) ? n.task?.type === 'work' && n.task.phase === 'do' : !!n.netWorking);
   // A townsperson's money changes (gifts, debts, bribes): the host keeps the books
   const npcMoney = (n, delta) => {
@@ -108,11 +108,40 @@ export function installTownFolk(T, ctx) {
   };
 
   // ── Paths / tasks ──
+  // Through a shop's door: walking up to it outside, then stepping in (a jump to the room, far
+  // off the island — townStalls.js) and on inside; and back out the same way
   const planPath = (n, x, z) => {
-    const path = T.layout.nav.findPath(n.x, n.z, x, z) ?? [];
-    // The last few metres straight onto the spot (behind the stall, by a tree…)
-    const last = path[path.length - 1] ?? { x: n.x, z: n.z };
-    if (dist2(last.x, last.z, x, z) > 0.05 && dist2(last.x, last.z, x, z) < 2.6) path.push({ x, z });
+    const st = T.stalls;
+    const P = T.layout.places;
+    const from = st.shopAt(n.x, n.z);
+    const to = st.shopAt(x, z);
+    if (from && from === to) {
+      n.path = st.roomPath(from, n.x, n.z, x, z);
+      n.pathI = 0;
+      return;
+    }
+    const path = [];
+    let sx = n.x;
+    let sz = n.z;
+    if (from) {
+      const inDoor = st.doorInside(from);
+      path.push(...st.roomPath(from, n.x, n.z, inDoor.x, inDoor.z));
+      const out = P.shops[from].door;
+      path.push({ x: out.x, z: out.z, jump: true });
+      sx = out.x;
+      sz = out.z;
+    }
+    const ex = to ? P.shops[to].door : { x, z };
+    const leg = T.layout.nav.findPath(sx, sz, ex.x, ex.z) ?? [];
+    // The last few metres straight onto the spot (by a tree, the door…)
+    const last = leg[leg.length - 1] ?? { x: sx, z: sz };
+    if (dist2(last.x, last.z, ex.x, ex.z) > 0.05 && dist2(last.x, last.z, ex.x, ex.z) < 2.6) leg.push({ x: ex.x, z: ex.z });
+    path.push(...leg);
+    if (to) {
+      const inDoor = st.doorInside(to);
+      path.push({ x: inDoor.x, z: inDoor.z, jump: true });
+      path.push(...st.roomPath(to, inDoor.x, inDoor.z, x, z));
+    }
     n.path = path;
     n.pathI = 0;
   };
@@ -128,6 +157,7 @@ export function installTownFolk(T, ctx) {
     let left = speed * dt;
     while (left > 0 && n.pathI < p.length) {
       const wp = p[n.pathI];
+      if (wp.jump) { n.x = wp.x; n.z = wp.z; n.pathI += 1; continue; }
       const dx = wp.x - n.x;
       const dz = wp.z - n.z;
       const d = Math.hypot(dx, dz);
@@ -143,6 +173,8 @@ export function installTownFolk(T, ctx) {
     if (n.pathI >= p.length) { n.moving = false; return true; }
     return false;
   };
+  // Ground a townsperson can stand on: the town's walkable grid, or a shop's floor
+  const walkable = (x, z) => T.layout.nav.isWalkable(x, z) || T.stalls.isFree(x, z);
   const faceToward = (n, x, z, dt) => {
     if (dist2(n.x, n.z, x, z) < 0.05) return;
     n.yaw = angleLerp(n.yaw, Math.atan2(x - n.x, z - n.z), 1 - Math.exp(-8 * dt));
@@ -154,6 +186,8 @@ export function installTownFolk(T, ctx) {
     return { x: fire.x + Math.sin(a) * 1.7, z: fire.z + Math.cos(a) * 1.7 };
   };
   const randomNear = (x, z, r) => {
+    const shop = T.stalls.shopAt(x, z);
+    if (shop) return T.stalls.spotNear(shop, x, z, r);
     for (let k = 0; k < 12; k++) {
       const a = Math.random() * Math.PI * 2;
       const d = Math.random() * r;
@@ -213,6 +247,8 @@ export function installTownFolk(T, ctx) {
       const sleepy = def.nightOwl ? (h >= 3 && h < 11) : night;
       options.push(['sleep', sleepy ? 1.25 : n.needs.energy < 0.18 ? 0.9 : 0]);
       options.push(['wander', 0.22]);
+      // (a look round the weapon shop)
+      if (T.gearOpen() && !night && Math.random() < SHOP_BROWSE_CHANCE) options.push(['browse', 0.3]);
     }
     let bestType = 'wander';
     let bestScore = -Infinity;
@@ -237,9 +273,14 @@ export function installTownFolk(T, ctx) {
       } else if (n.work) setTask(n, { type, to: n.work, dur: rand(45, 90), face: n.work.face, anim: w === 'tree' ? 'chop' : null });
       else setTask(n, { type: 'wander', to: randomNear(n.x, n.z, 14), dur: rand(2, 6) });
     } else if (type === 'deliver') {
-      setTask(n, { type, to: randomNear(P.customerSpot.x, P.customerSpot.z, 1.5), dur: 3, face: P.market });
+      setTask(n, { type, to: randomNear(P.customerSpot.x, P.customerSpot.z, 1.2), dur: 3, face: P.merchantSpot });
     } else if (type === 'eat') {
-      setTask(n, { type, to: randomNear(P.customerSpot.x, P.customerSpot.z, 1.5), dur: 4, face: P.market });
+      setTask(n, { type, to: randomNear(P.customerSpot.x, P.customerSpot.z, 1.2), dur: 4, face: P.merchantSpot });
+    } else if (type === 'browse') {
+      // (somewhere in the weapon shop, looking at the counters)
+      const c = T.stalls.spot('gear', 'counter');
+      const to = randomNear(c.x, c.z + 1.6, 1.8);
+      setTask(n, { type, to, dur: rand(6, 14), face: { x: to.x + (to.x < c.x ? -3 : 3), z: to.z } });
     } else if (type === 'social') {
       const seat = fireSlot(n);
       setTask(n, { type, to: seat, dur: rand(25, 45), face: P.fire });
@@ -336,7 +377,8 @@ export function installTownFolk(T, ctx) {
     // (not right in front of the camera, where they'd fill the screen; at a market counter
     // nobody stands between the shop camera and the counter)
     const shop = T.stalls.view();
-    const inFront = !!shop && shop.camera.distanceTo(b.container.position) < shop.camera.distanceTo(shop.stall) - 0.3;
+    const chest = _v.copy(b.container.position).setY(b.container.position.y + 0.6);
+    const inFront = !!shop && shop.camera.distanceTo(chest) < shop.camera.distanceTo(shop.stall) - 0.3;
     const nearCamera = inFront || ctx.camera.position.distanceTo(b.container.position) < CAMERA_CLEAR_DIST;
     b.container.visible = !inFront;
     b.label.visible = !n.dying && !nearCamera && distToPlayer(n) < LABEL_DIST;
@@ -361,6 +403,6 @@ export function installTownFolk(T, ctx) {
   Object.assign(T, {
     assignWork, clearBubble, decide, distToPlayer, faceToward, groundY, isHost, isWorking,
     makeNpc, mine, mp, myId, npcMoney, planPath, playerPos, randomNear, releaseBody, say, sees,
-    setTask, startTask, stepPath, syncBody, take, updateLod,
+    setTask, startTask, stepPath, syncBody, take, updateLod, walkable,
   });
 }
