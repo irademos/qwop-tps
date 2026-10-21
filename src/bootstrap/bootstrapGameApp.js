@@ -161,13 +161,18 @@ const ROAD_LIGHT_GRID_SPACING_METERS = 40;
 const ROAD_LIGHT_SHIFT_DISTANCE_METERS = ROAD_LIGHT_GRID_SPACING_METERS * 1.25;
 const ROAD_LIGHT_REPOSITION_INTERVAL_MS = 7000;
 const ROAD_LIGHT_MODEL_URL = '/assets/props/road_light.glb';
+// road_light.glb is 1 unit tall; the island mappack places it at ×1.307 and the map is ×1.4
+// (MAPS.islandTown.scale) — the night lights match those (≈ 1.83 m)
+const ROAD_LIGHT_SCALE = 1.307 * 1.4;
 const ROAD_LIGHT_POINT_LIGHT_CONFIG = Object.freeze({
   color: 0xfff1c1,
   intensity: 2.6,
   distance: 40,
   decay: 0.5,
-  yOffset: 3.4
+  yOffset: 0.95 // model units: just above the lamp head (its glass is at ≈ 0.77)
 });
+// The lamp's glass glows: texels this yellow-bright become an emissive map
+const ROAD_LIGHT_GLOW = Object.freeze({ color: 0xfff4dc, intensity: 2.2, minR: 190, minG: 160, maxBlueRatio: 0.8 });
 
 const PERF = {
   throttlePickups: true
@@ -6166,7 +6171,8 @@ async function initCore(runtimeContext) {
     if (_isSwordCalibPromptOpen()) return '✅ Okay';
     if (bossTalk.isOpen()) return bossTalk.interactLabel();
     if (village?.isOpen()) return village.interactLabel();
-    if (town?.isActive()) return town.interactLabel(); // (undefined when there's nothing to do: Block stays Block)
+    // Town: only with empty hands (✋ Hands) — holding a weapon, the bar stays Block / Fire…
+    if (town?.isActive()) return _heldWeaponId() ? undefined : town.interactLabel(); // (undefined when there's nothing to do: Block stays Block)
     return undefined;
   };
   const _phoneControllerStatus = () => {
@@ -7162,6 +7168,43 @@ async function initCore(runtimeContext) {
     });
   };
 
+  // Light up the lamp's glass (otherwise it's as dark as the rest at night): an emissive map
+  // with only the yellow glass texels of its base colour texture, near white
+  const _addRoadLightGlow = (root) => {
+    root?.traverse((obj) => {
+      const mat = obj.isMesh ? obj.material : null;
+      const image = mat?.map?.image;
+      if (!mat || !image || !('emissive' in mat)) return;
+      try {
+        const w = image.width;
+        const h = image.height;
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const g = canvas.getContext('2d');
+        g.drawImage(image, 0, 0, w, h);
+        const px = g.getImageData(0, 0, w, h);
+        const d = px.data;
+        const { minR, minG, maxBlueRatio } = ROAD_LIGHT_GLOW;
+        for (let i = 0; i < d.length; i += 4) {
+          const glass = d[i] >= minR && d[i + 1] >= minG && d[i + 2] <= d[i] * maxBlueRatio;
+          const v = glass ? 255 : 0;
+          d[i] = v; d[i + 1] = v; d[i + 2] = v; d[i + 3] = 255;
+        }
+        g.putImageData(px, 0, 0);
+        const emissiveMap = new THREE.CanvasTexture(canvas);
+        emissiveMap.flipY = mat.map.flipY;
+        emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        mat.emissiveMap = emissiveMap;
+        mat.emissive = new THREE.Color(ROAD_LIGHT_GLOW.color);
+        mat.emissiveIntensity = ROAD_LIGHT_GLOW.intensity;
+        mat.needsUpdate = true;
+      } catch (error) {
+        console.warn('Road light glow skipped.', error);
+      }
+    });
+  };
+
   const ensureRoadLightTemplate = async () => {
     if (roadLightTemplate) return roadLightTemplate;
     if (!roadLightTemplatePromise) {
@@ -7169,6 +7212,7 @@ async function initCore(runtimeContext) {
         .then((gltf) => {
           roadLightTemplate = gltf?.scene || null;
           stylizeObject(roadLightTemplate, { materials: false });
+          _addRoadLightGlow(roadLightTemplate);
           return roadLightTemplate;
         })
         .catch((error) => {
@@ -7235,7 +7279,7 @@ async function initCore(runtimeContext) {
         let roadLight = roadLightPool[poolIndex];
         if (!roadLight) {
           const model = template.clone(true);
-          model.scale.setScalar(1);
+          model.scale.setScalar(ROAD_LIGHT_SCALE);
           const lampLight = new THREE.PointLight(
             ROAD_LIGHT_POINT_LIGHT_CONFIG.color,
             ROAD_LIGHT_POINT_LIGHT_CONFIG.intensity,
