@@ -131,8 +131,11 @@ export function updateRemotePlayerRig(playerGroup, deltaSeconds) {
   if (!rig.lastRemotePos) rig.lastRemotePos = pos.clone();
   const speed = dt > 0 ? Math.hypot(pos.x - rig.lastRemotePos.x, pos.z - rig.lastRemotePos.z) / dt : 0;
   rig.lastRemotePos.copy(pos);
-  // Duel opponent: both hands grip the sword where the other player's game says it is
-  const handTarget = playerGroup.userData.remoteHandTarget;
+  // Duel opponent: both hands grip the sword where the other player's game says it is.
+  // Empty-handed (Town: `remoteArmed` false — no sword in their hand) the clip moves the arms.
+  const armed = playerGroup.userData.remoteArmed !== false;
+  rig.glbCharacter?.setArmIKHands(armed ? { left: true, right: true } : { left: false, right: false });
+  const handTarget = armed ? playerGroup.userData.remoteHandTarget : null;
   if (handTarget && rig.floatingHands) {
     for (const side of ['left', 'right']) {
       const yOff = side === 'right' ? -0.08 : 0;

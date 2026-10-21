@@ -58,6 +58,7 @@ import { createVillage, PEMBERTON_STAGE, villagerQuestReward, villagePlace, fill
 import { stageRoute, createPolyline } from '../map/stageRoutes.js';
 import { createDevRoam } from '../dev/devRoam.js';
 import { createTownMode } from '../town/townMode.js';
+import { createTownNet } from '../town/townNet.js';
 import { createPembertonBoss, createStageBoss, createBossFighter, PEMBERTON_HEARTS, PEMBERTON_SWING_CHANCE } from '../characters/pembertonBoss.js';
 import { createBossTalk, stageBossTalk, stageBossGear, stageBossGearIcons, SPARED_STAGE, FIRST_WAND_BOSS_STAGE, ROAM_QUESTS, roamQuestReward } from '../characters/stageBoss.js';
 
@@ -746,6 +747,7 @@ async function initCore(runtimeContext) {
   let matchMode = null; // Multiplayer mode: Team Battle / Free For All (created further down)
   let devRoam = null; // Dev: Free Roam (Settings → Dev; created further down)
   let town = null; // Town mode (src/town/townMode.js; created further down)
+  let townNet = null; // Town's shared room (src/town/townNet.js; created with the town)
   // Multiplayer battle (Team Battle / Free For All): everyone starts with the sword and finds
   // the rest on the arena's pickups; the real inventory / stats are set aside meanwhile and
   // put back afterwards (matchCtx.startMatchLoadout / endMatchLoadout) — null outside one
@@ -1129,6 +1131,7 @@ async function initCore(runtimeContext) {
   // Game traffic only goes to the current duel opponent or the other battle players
   // (the lobby needs none)
   const _netRecipients = () => {
+    if (townNet?.isOn()) return townNet.peerIds();
     if (matchMode?.isInMatch()) return matchMode.getPeerIds();
     const opponentId = duelMode?.getOpponentId();
     return opponentId ? [opponentId] : [];
@@ -1561,7 +1564,8 @@ async function initCore(runtimeContext) {
         return;
       }
       // Only the duel opponent / battle players are shown (lobby peers stay off the map)
-      if (!duelMode?.acceptsPresenceFrom(remoteId) && !matchMode?.acceptsPresenceFrom(remoteId)) {
+      if (!duelMode?.acceptsPresenceFrom(remoteId) && !matchMode?.acceptsPresenceFrom(remoteId)
+        && !townNet?.acceptsPresenceFrom(remoteId)) {
         return;
       }
       const now = performance.now();
@@ -1587,14 +1591,15 @@ async function initCore(runtimeContext) {
       }
 
       if (!otherPlayers[remoteId]) {
-        _spawnRemotePlayer(remoteId, data.name, matchMode?.getCharacterUrl(remoteId));
+        _spawnRemotePlayer(remoteId, data.name, matchMode?.getCharacterUrl(remoteId) ?? townNet?.getCharacterUrl(remoteId));
       }
 
       const player = otherPlayers[remoteId];
       player.name = data.name;
       syncPresenceRemoteEquipment(remoteId, data);
       if (player.nameLabel) {
-        player.nameLabel.innerText = data.name;
+        // (Town: a wanted player's stars after the name)
+        player.nameLabel.innerText = data.name + (townNet?.nameSuffix(remoteId) ?? '');
       }
 
       let targetX = Number.isFinite(data.x) ? data.x : null;
@@ -1646,6 +1651,11 @@ async function initCore(runtimeContext) {
       return;
     }
 
+    if (data.type === 'town') {
+      townNet?.handleMessage(peerId, data);
+      return;
+    }
+
     if (data.type === 'match') {
       matchMode?.handleMessage(peerId, data);
       return;
@@ -1654,14 +1664,20 @@ async function initCore(runtimeContext) {
     if (data.type === 'projectile') {
       // Battle: another fighter's bullet (their game deals its damage)
       const fromMatch = !!matchMode?.isInMatch() && matchMode.acceptsPresenceFrom(peerId);
-      if (!duelMode?.acceptsPresenceFrom(peerId) && !fromMatch) return;
+      const fromTown = !!townNet?.acceptsPresenceFrom(peerId);
+      if (!duelMode?.acceptsPresenceFrom(peerId) && !fromMatch && !fromTown) return;
       if (!isProjectileMessage(data)) {
         logInvalidPayload('projectile', data);
         return;
       }
       const position = new THREE.Vector3(...data.position);
       const direction = new THREE.Vector3(...data.direction);
-      if (fromMatch) spawnPistolBullet(position, direction, peerId);
+      if (fromTown) {
+        // (Town: drawn here only — the shooter's game deals the damage)
+        spawnPistolBullet(position, direction, peerId);
+        const shot = projectiles[projectiles.length - 1];
+        if (shot) shot.userData.remoteShot = true;
+      } else if (fromMatch) spawnPistolBullet(position, direction, peerId);
       else spawnProjectileWithPerfFlags(scene, projectiles, position, direction, data.id);
     }
   }
@@ -1673,11 +1689,15 @@ async function initCore(runtimeContext) {
     }
   }
 
-  // Peer multiplayer only runs in Multiplayer mode (lobby + duels); Showdown and the
-  // tutorial are single player. startMultiplayer/stopMultiplayer are driven by duelMode.
-  const startMultiplayer = () => {
-    if (multiplayer) return multiplayer;
-    multiplayer = new Multiplayer(playerName, handleIncomingData, { roomId: LOBBY_ROOM_ID });
+  // Peer multiplayer only runs in Multiplayer mode (lobby + duels) and a shared Town (its room,
+  // `town-<roomId>` — townNet.js); Showdown and the tutorial are single player.
+  // startMultiplayer/stopMultiplayer are driven by duelMode and townNet.
+  const startMultiplayer = (roomId = LOBBY_ROOM_ID) => {
+    if (multiplayer) {
+      if (multiplayer.getRoomId() !== roomId) void multiplayer.joinRoom(roomId);
+      return multiplayer;
+    }
+    multiplayer = new Multiplayer(playerName, handleIncomingData, { roomId });
     window.multiplayer = multiplayer;
     if (playerControls) playerControls.multiplayer = multiplayer;
     multiplayer.getNetRuntimeStats = () => ({ ...window.netRuntimeStats });
@@ -1991,7 +2011,11 @@ async function initCore(runtimeContext) {
   function _syncPhysicsGround() {
     _physicsGroundRb?.setTranslation({ x: 0, y: (_activeMap?.floor ?? 0) - 1, z: 0 }, true);
   }
-  await _setActiveMap(DEFAULT_MAP);
+  // The default map loads alongside the rest of the boot (weapons, physics, the settings panel)
+  // and is awaited once the ⚙️ button is up (see `settings-ready`), so the settings button
+  // doesn't wait on the mappack. Until then the spawn centre is set and the ground is the floor.
+  setSpawnCenter(MAPS[DEFAULT_MAP].spawn);
+  const _defaultMapReady = _setActiveMap(DEFAULT_MAP);
 
   const camera = new THREE.PerspectiveCamera(100, window.innerWidth / window.innerHeight, 0.1, 1000);
 
@@ -3655,6 +3679,7 @@ async function initCore(runtimeContext) {
   // battle's enemies (each { id, position, center, bladePoints, bladeDir, hasBlade, blocking,
   // blocksSwing?, ownBlood?, onHit(dmg, dir), onBlocked() })
   const _getPvpTargets = () => {
+    if (townNet?.isOn() && town?.isActive()) return townNet.getPvpTargets();
     if (matchMode?.isFighting()) return matchMode.getEnemyCombatants();
     const opp = duelMode?.getOpponentCombat();
     return opp ? [opp] : _noPvpTargets;
@@ -4146,6 +4171,19 @@ async function initCore(runtimeContext) {
   const _magicTargets = (blast) => {
     // Multiplayer battle blasts (anyone's): matchMode decides who they can hit
     if (blast.side === 'match') return matchMode?.getMagicTargets(blast) ?? [];
+    // Another Town player's spell: it can only hit us here (their game shows it hitting nothing)
+    if (blast.side === 'town') {
+      if (playerDead || !town?.isActive()) return [];
+      _playerBlastTarget.center.copy(playerModel.position).setY(playerModel.position.y + 0.5);
+      return [{
+        ..._playerBlastTarget,
+        onHit: (b) => {
+          town.onPvpHurt(b.caster);
+          townNet?.sendHurt(b.caster, town.getStars());
+          _playerBlastTarget.onHit(b);
+        },
+      }];
+    }
     if (blast.side === 'enemy') {
       if (playerDead || _attacksHeld()) return [];
       _playerBlastTarget.center.copy(playerModel.position).setY(playerModel.position.y + 0.5);
@@ -4211,6 +4249,7 @@ async function initCore(runtimeContext) {
       ignoreMap: !!showdownTutorial?.isActive(),
     });
     if (inMatch) matchMode.onLocalCast({ origin, forward, line: blast.line, element: blast.element });
+    else if (townNet?.isOn() && town?.isActive()) townNet.sendMagic({ origin, forward, line: blast.line, element: blast.element });
     _wandGlow.level = 1;
     _wandGlow.color.set(MAGIC_ELEMENTS[blast.element].glow);
     _playerCasts += 1;
@@ -4374,6 +4413,8 @@ async function initCore(runtimeContext) {
     const groundY = getTerrainHeight(target.x, target.z);
     if (Number.isFinite(groundY)) target.y = groundY;
     if (_matchLoadout && matchMode?.throwLocalBomb(_playerBombPalm.clone(), target)) return;
+    // (Town: the other players see it — and their games check it against them)
+    if (townNet?.isOn() && town?.isActive()) townNet.sendBomb(_playerBombPalm, target);
     playerBombs.throw(_playerBombPalm, target);
   };
   const finishPlayerBombThrow = () => {
@@ -6949,6 +6990,17 @@ async function initCore(runtimeContext) {
   });
   // The gear stays hidden until the panel exists (the start screen shows it once the game loads)
   document.body.classList.add('settings-ready');
+  // Now the map (started early in initCore) — then put the player on its ground at the spawn
+  await _defaultMapReady;
+  {
+    const spawn = getSpawnPosition();
+    playerModel.position.set(spawn.x, spawn.y, spawn.z);
+    playerControls.playerX = spawn.x;
+    playerControls.playerY = spawn.y;
+    playerControls.playerZ = spawn.z;
+    playerControls.lastPosition?.set(spawn.x, spawn.y, spawn.z);
+    playerControls.body?.setTranslation({ x: spawn.x, y: spawn.y + 0.6, z: spawn.z }, true);
+  }
   const settingsOverlay = document.getElementById('settings-overlay');
   const merchantOverlay = document.getElementById('merchant-overlay');
   const isOverlayVisible = (overlay) => overlay?.getAttribute('aria-hidden') === 'false';
@@ -7581,8 +7633,9 @@ async function initCore(runtimeContext) {
     recordMultiplayerResult: _recordMultiplayerResult,
     openLeaderboard: () => openLeaderboard('mpWins'),
     getMultiplayer: () => multiplayer,
-    startMultiplayer,
-    stopMultiplayer,
+    startMultiplayer: () => startMultiplayer(),
+    // (not while a shared Town holds the connection — duelMode stops it a moment after leaving)
+    stopMultiplayer: () => { if (!townNet?.isOn()) stopMultiplayer(); },
     getPlayerName: () => playerName,
     // A sword for another fighter: the Wii sword (with ball hands) for Mii characters
     createSwordMesh: (characterUrl = null) => {
@@ -8155,7 +8208,59 @@ async function initCore(runtimeContext) {
     enemy.script = on ? { mode: 'passive' } : null;
     enemy.stationary = on;
   };
+  // Town's shared room: assignment, the connection, the other players (src/town/townNet.js)
+  const TOWN_PVP_BOMB_DAMAGE = 2; // (a battle's BOMB_DAMAGE)
+  townNet = createTownNet({
+    scene,
+    getMultiplayer: () => multiplayer,
+    startMultiplayer: (roomId) => startMultiplayer(roomId),
+    stopMultiplayer: () => stopMultiplayer(),
+    profileKey: () => profileNameKey,
+    // (a guest holds a town place by this device)
+    memberKey: () => profileNameKey || `guest_${_guestDeviceId().replace(/[^a-z0-9-]/gi, '')}`,
+    getPlayerName: () => playerName || 'Player',
+    getRemoteModel: (id) => otherPlayers[id]?.model || null,
+    setRemoteCharacter: (id, url) => setPlayerCharacterUrl(otherPlayers[id]?.model, url),
+    createSwordMesh: duelCtx.createSwordMesh,
+    createWandMesh: () => matchCtx.createWandMesh(),
+    getLocalWeapon: () => matchCtx.getLocalWeapon(),
+    getWeaponGear: () => matchCtx.getWeaponGear(),
+    getLocalSwordState: duelCtx.getLocalSwordState,
+    getLocalPosition: () => playerModel.position,
+    // Another player's bomb: its blast can only hurt us here (BOMB_DAMAGE as in battles)
+    launchRemoteBomb: (origin, target, fromId) => {
+      playerBombs.throw(origin, target, {
+        keepHeld: true,
+        getBlastTargets: () => (playerDead || !town?.isActive() ? [] : [{
+          group: playerModel,
+          isDead: false,
+          applyDamage: () => false,
+          applyBlastKnockback: ({ direction }) => {
+            const src = playerModel.position.clone().sub(direction);
+            town.onPvpHurt(fromId);
+            townNet.sendHurt(fromId, town.getStars());
+            duelCtx.applyHit(TOWN_PVP_BOMB_DAMAGE, [direction.x, direction.z], { kind: 'bomb', src: [src.x, src.z] });
+          },
+        }]),
+      });
+    },
+    spawnRemoteMagic: ({ origin, forward, line, element, caster }) => {
+      magicBlasts.spawn({ origin, forward, line, element, side: 'town', caster, speed: PLAYER_BLAST_SPEED_MPS, length: PLAYER_BLAST_LENGTH });
+    },
+    getLocalCharacterUrl: () => playerModel.userData.qwopRig?.characterUrl ?? null,
+    getStars: () => town?.getStars() ?? 0,
+    applyPvpHit: (dmg, dir, fromId, ranged) => {
+      if (!town?.isActive() || playerDead) return;
+      town.onPvpHurt(fromId);
+      duelCtx.applyHit(dmg, dir, ranged);
+    },
+    onSwingBlocked: () => duelCtx.onSwingBlocked(),
+    onAttackPlayer: (info) => town?.onAttackPlayer(info),
+    onBounty: (name, coins) => town?.onBounty(name, coins),
+    onWorldMessage: (from, data) => town?.handleNet(from, data),
+  });
   town = createTownMode({
+    net: townNet,
     scene,
     camera,
     domElement: renderer.domElement,
@@ -9524,6 +9629,7 @@ async function initCore(runtimeContext) {
     duelMode?.update();
     devRoam?.update();
     matchMode?.update(frameDelta);
+    townNet?.update();
     if (multiplayer && _netRecipients().length && now - lastPresenceSend >= presenceSendIntervalMs) {
       const payload = {
         type: "presence",
@@ -9620,7 +9726,8 @@ async function initCore(runtimeContext) {
       multiplayer,
       // (Town: the townsfolk near the player too)
       hordeEnemies: town?.isActive() ? [...hordeEnemies, ...town.getWeaponTargets()] : hordeEnemies,
-      pvpTargets: matchMode?.getShotTargets() ?? null,
+      pvpTargets: matchMode?.getShotTargets() ?? (townNet?.isOn() && town?.isActive() ? townNet.getShotTargets() : null),
+      pvpAlsoEnemies: !!(townNet?.isOn() && town?.isActive()),
       localTarget: _attacksHeld() ? null : _pembertonShotTarget
     });
     // A stage boss's talk box; spared bosses stand there facing the player

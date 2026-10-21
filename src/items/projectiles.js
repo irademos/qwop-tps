@@ -110,6 +110,7 @@ export function updateProjectiles({
   multiplayer,
   hordeEnemies,
   pvpTargets = null,
+  pvpAlsoEnemies = false, // (Town: a shot that misses the players can still hit the townsfolk)
   localTarget = null   // { position, onHit(dir, from) } — what hostile shots can hit
 }) {
   const localId = multiplayer?.getId?.() ?? 'local'; // 'local' = single player (see PlayerControls)
@@ -208,13 +209,15 @@ export function updateProjectiles({
         }
       }
       if (removed) continue;
-      if (wallHit) stopAtWall();
-      else (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
-      continue;
+      if (!pvpAlsoEnemies) {
+        if (wallHit) stopAtWall();
+        else (proj.userData.prevPos ??= new THREE.Vector3()).copy(proj.position);
+        continue;
+      }
     }
 
-    // PvP: other players
-    for (const [id, { model }] of Object.entries(otherPlayers)) {
+    // PvP: other players (legacy — not when the targets above are the players)
+    if (!pvpAlsoEnemies) for (const [id, { model }] of Object.entries(otherPlayers)) {
       if (proj.userData.shooterId && proj.userData.shooterId === id) continue;
       if (!leftShooter || wallHit) continue;
       const playerBox = getObjectBox(model);
@@ -251,6 +254,8 @@ export function updateProjectiles({
         const enemyBox = getObjectBox(enemy.group);
         if (!enemyBox) continue;
         if ((!wallHit && projBox.intersectsBox(enemyBox)) || sweptHitsEnemy(prevPos, segEnd, enemy)) {
+          // (another player's shot, drawn here: their game deals its damage)
+          if (proj.userData.remoteShot) { removeProjectile(i); removed = true; break; }
           const damage = getDamage(proj);
           const dir = vel.clone().normalize();
           const killed = enemy.applyDamage(Math.max(1, Math.round(damage)));
