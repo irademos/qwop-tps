@@ -8193,6 +8193,8 @@ async function initCore(runtimeContext) {
     startMultiplayer: (roomId) => startMultiplayer(roomId),
     stopMultiplayer: () => stopMultiplayer(),
     profileKey: () => profileNameKey,
+    // (a guest holds a town place by this device)
+    memberKey: () => profileNameKey || `guest_${_guestDeviceId().replace(/[^a-z0-9-]/gi, '')}`,
     getPlayerName: () => playerName || 'Player',
     getRemoteModel: (id) => otherPlayers[id]?.model || null,
     setRemoteCharacter: (id, url) => setPlayerCharacterUrl(otherPlayers[id]?.model, url),

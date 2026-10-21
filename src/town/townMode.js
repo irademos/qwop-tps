@@ -3701,12 +3701,17 @@ export function createTownMode(ctx) {
   const tickJoin = () => {
     const now = performance.now();
     if (netFailed || now > joinUntil) {
+      const why = net.lastError() ?? (net.isOn() ? 'no answer from the town\'s other players' : 'timed out');
+      console.warn(`[Town] playing alone: ${why}`);
       net.stop();
       netMode = 'off';
       spawnTown();
-      feedLine(`Welcome to ${TOWN_NAME}! (No shared town right now — this one's yours.)`);
+      topPlace.textContent = `🏘️ ${TOWN_NAME} · 📴 just you`;
+      feedLine(`📴 No shared town (${why}) — this one's just yours.`);
       return;
     }
+    // (the room's lookup failed: no need to wait out the timeout)
+    if (!net.isOn() && net.lastError()) { joinUntil = 0; return; }
     if (!net.isOn() || !net.ready()) return;
     if (net.isHost()) {
       if (netLoading) return;
@@ -4086,6 +4091,6 @@ export function createTownMode(ctx) {
     // The phone's Block bar label while there's something to do (undefined: it stays Block)
     interactLabel: () => (active && acts.length ? acts[0].label : undefined),
     // (dev console)
-    debug: () => ({ netMode, npcs, layout, law, clock, arrivals, market, goods, stalls, ctx, jobs, chainsDone, simT: () => simT, stallItemState, kill: (n) => die(n, { byPlayer: true }) }),
+    debug: () => ({ netMode, room: net?.roomId(), host: net?.hostId(), peers: net?.peerIds(), npcs, layout, law, clock, arrivals, market, goods, stalls, ctx, jobs, chainsDone, simT: () => simT, stallItemState, kill: (n) => die(n, { byPlayer: true }) }),
   };
 }

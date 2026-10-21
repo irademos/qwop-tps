@@ -1,9 +1,10 @@
 // Town mode in Multiplayer: a shared town per room of up to TOWN_ROOM_MAX players.
 //
-// Rooms (Firebase): the first time a signed-in player starts Town they join the oldest room with
-// a free place (or a new one) and it's their town from then on (`townHome/<key>`). A member who
-// hasn't been back for MEMBER_STALE_MS loses their place (pruned whenever a room is looked at),
-// so new players can move in. Guests visit the first room with a free place and aren't counted.
+// Rooms (Firebase): the first time a player starts Town they join the oldest room with a free
+// place (or a new one) and it's their town from then on (`townHome/<key>`; guests by a device
+// key). A member who hasn't been back for MEMBER_STALE_MS loses their place (pruned whenever a
+// room is looked at), so new players can move in.
+//   townRoomSeq                     = the newest room's number (rooms are r1, r2…)
 //   townRoomMembers/<roomId>/<key> = { name, seen }
 //   townRoomState/<roomId>          = the town's world (townMode.js worldSnapshot), written by the host
 //   townHome/<key>                  = roomId
@@ -17,7 +18,7 @@
 // a wanted player down.
 
 import * as THREE from 'three';
-import { ref, get, set, update, runTransaction, push } from 'firebase/database';
+import { ref, get, set, update, remove, runTransaction } from 'firebase/database';
 import { db } from '../core/firebase-init.js';
 
 export const TOWN_ROOM_MAX = 15;
@@ -32,46 +33,45 @@ const isVec = (v, n) => Array.isArray(v) && v.length === n && v.every(Number.isF
 const round3 = (v) => Math.round(v * 1000) / 1000;
 const live = (m, now) => m && now - (m.seen || 0) <= MEMBER_STALE_MS;
 
-// The player's town room (null key: a guest — visits, isn't counted, nothing written)
+// Rooms in age order: r1, r2… (`townRoomSeq` = the newest); rooms from before that (push keys) first
+const roomOrder = (a, b) => {
+  const na = /^r\d+$/.test(a) ? Number(a.slice(1)) : -1;
+  const nb = /^r\d+$/.test(b) ? Number(b.slice(1)) : -1;
+  return na !== nb ? na - nb : (a < b ? -1 : a > b ? 1 : 0);
+};
+
+// The player's town room. key: the profile key, or a guest's device key (a guest holds a place
+// like anyone — it lapses after MEMBER_STALE_MS too). A new room is only made when every room is
+// full, through a transaction on the counter, so players starting at once land in the same one.
+// Someone alone in their room while an older room has people and a free place moves in there.
 export async function findTownRoom(key, name) {
   const now = Date.now();
-  if (key) {
-    const home = (await get(ref(db, `townHome/${key}`))).val();
-    if (typeof home === 'string' && home) {
-      const me = (await get(ref(db, `townRoomMembers/${home}/${key}`))).val();
-      if (live(me, now)) {
-        await update(ref(db, `townRoomMembers/${home}/${key}`), { seen: now, name: name || '' });
-        return home;
-      }
-    }
-  }
   const all = (await get(ref(db, 'townRoomMembers'))).val() || {};
-  // (push keys sort oldest first)
-  for (const roomId of Object.keys(all).sort()) {
-    const members = all[roomId] || {};
-    const count = Object.values(members).filter((m) => live(m, now)).length;
-    if (count >= TOWN_ROOM_MAX) continue;
-    if (!key) return roomId;
+  const count = (roomId) => Object.values(all[roomId] || {}).filter((m) => live(m, now)).length;
+  const rooms = Object.keys(all).sort(roomOrder);
+  const home = (await get(ref(db, `townHome/${key}`))).val();
+  if (typeof home === 'string' && live(all[home]?.[key], now)) {
+    const older = count(home) === 1
+      ? rooms.find((r) => roomOrder(r, home) < 0 && count(r) > 0 && count(r) < TOWN_ROOM_MAX)
+      : null;
+    if (older && await joinRoom(older, key, name)) {
+      await remove(ref(db, `townRoomMembers/${home}/${key}`)).catch(() => {});
+      return older;
+    }
+    await update(ref(db, `townRoomMembers/${home}/${key}`), { seen: now, name: name || '' });
+    return home;
+  }
+  for (const roomId of rooms) {
+    if (count(roomId) >= TOWN_ROOM_MAX) continue;
     if (await joinRoom(roomId, key, name)) return roomId;
   }
-  const roomId = push(ref(db, 'townRoomMembers')).key;
-  if (key) await joinRoom(roomId, key, name);
-  return roomId;
-}
-
-// A place in the room (members away too long are dropped on the way); false when it's full
-async function joinRoom(roomId, key, name) {
-  const now = Date.now();
-  const res = await runTransaction(ref(db, `townRoomMembers/${roomId}`), (cur) => {
-    const next = {};
-    for (const [k, m] of Object.entries(cur || {})) if (live(m, now)) next[k] = m;
-    if (!next[key] && Object.keys(next).length >= TOWN_ROOM_MAX) return undefined; // full: abort
-    next[key] = { name: name || '', seen: now };
-    return next;
-  });
-  if (!res.committed) return false;
-  await set(ref(db, `townHome/${key}`), roomId);
-  return true;
+  // Every room full (or none yet): the newest one, made if need be
+  for (let tries = 0; tries < 5; tries++) {
+    const seq = Number((await get(ref(db, 'townRoomSeq'))).val()) || 0;
+    if (seq > 0 && await joinRoom(`r${seq}`, key, name)) return `r${seq}`;
+    await runTransaction(ref(db, 'townRoomSeq'), (cur) => ((Number(cur) || 0) === seq ? seq + 1 : undefined));
+  }
+  throw new Error('no town room could be joined');
 }
 
 export const loadTownRoomState = async (roomId) => {
@@ -79,7 +79,7 @@ export const loadTownRoomState = async (roomId) => {
 };
 export const saveTownRoomState = (roomId, state) => set(ref(db, `townRoomState/${roomId}`), state).catch(() => {});
 
-// ctx: getMultiplayer(), startMultiplayer(roomId), stopMultiplayer(), profileKey(), getPlayerName(),
+// ctx: getMultiplayer(), startMultiplayer(roomId), stopMultiplayer(), profileKey(), memberKey(), getPlayerName(),
 //   scene, getRemoteModel(id), setRemoteCharacter(id, url), createSwordMesh(url),
 //   getLocalSwordState(), getLocalCharacterUrl(), getStars(), applyPvpHit(dmg, dir, fromId),
 //   onSwingBlocked(), onAttackPlayer(info), onBounty(fromName, coins), onWorldMessage(from, data)
@@ -89,6 +89,7 @@ export function createTownNet(ctx) {
   let startToken = 0;
   let plSentAt = 0;
   let hostSeen = { id: null, since: 0 };
+  let lastError = null;       // why there's no shared town (shown in the town's HUD)
   const players = new Map(); // peer id → { name, url, stars, swordTarget, hand, blocking, sword, lastAt, combat }
 
   const mp = () => (on ? ctx.getMultiplayer() : null);
@@ -105,14 +106,18 @@ export function createTownNet(ctx) {
   const start = async () => {
     const token = ++startToken;
     try {
-      roomId = await withTimeout(findTownRoom(ctx.profileKey(), ctx.getPlayerName()), FIND_TIMEOUT_MS);
+      lastError = null;
+      roomId = await withTimeout(findTownRoom(ctx.memberKey(), ctx.getPlayerName()), FIND_TIMEOUT_MS);
     } catch (e) {
-      console.warn('[Town] no shared town (offline?):', e);
+      lastError = /permission/i.test(e?.message || '') ? 'Firebase permission denied for the town rooms'
+        : /timeout/i.test(e?.message || '') ? 'the room server didn\'t answer' : (e?.message || 'unknown error');
+      console.warn('[Town] no shared town:', e);
       return false;
     }
     if (token !== startToken || !roomId) return false;
     on = true;
     hostSeen = { id: null, since: 0 };
+    console.info(`[Town] room ${roomId}`);
     ctx.startMultiplayer(`town-${roomId}`);
     return true;
   };
@@ -271,6 +276,7 @@ export function createTownNet(ctx) {
     ready: () => !!(on && id() && hostSeen.id && Date.now() - hostSeen.since >= SETTLE_MS),
     peerIds,
     roomId: () => roomId,
+    lastError: () => lastError,
     canSave: () => !!ctx.profileKey(),
     send,
     broadcast,
